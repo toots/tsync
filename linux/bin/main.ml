@@ -254,6 +254,33 @@ let purge_cmd =
     (Cmd.info "purge" ~doc:"Delete all versions from trash")
     Term.(const run $ path_arg)
 
+(* ── tsync auto-evict ────────────────────────────────────────────────────── *)
+
+let auto_evict_cmd =
+  let state_arg =
+    Arg.(
+      value
+      & pos 0 (some string) None
+      & info [] ~docv:"on|off|status"
+          ~doc:"Enable, disable, or query auto-evict after upload")
+  in
+  let run state =
+    match state with
+      | None | Some "status" -> (
+          let resp = Ipc.send "AUTO_EVICT status" in
+          match resp with
+            | "on" | "off" -> Printf.printf "auto-evict: %s\n" resp
+            | _ -> Printf.eprintf "Error: %s\n" resp)
+      | Some ("on" | "off" as s) ->
+          let resp = Ipc.send ("AUTO_EVICT " ^ s) in
+          if resp = "OK" then Printf.printf "auto-evict: %s\n" s
+          else Printf.eprintf "Error: %s\n" resp
+      | Some other -> Printf.eprintf "Expected on|off|status, got: %s\n" other
+  in
+  Cmd.v
+    (Cmd.info "auto-evict" ~doc:"Enable or disable auto-evict after upload")
+    Term.(const run $ state_arg)
+
 (* ── Main ────────────────────────────────────────────────────────────────── *)
 
 let () =
@@ -271,6 +298,7 @@ let () =
         ls_cmd;
         history_cmd;
         purge_cmd;
+        auto_evict_cmd;
       ]
   in
   exit (Cmd.eval cmd)

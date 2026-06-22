@@ -1,10 +1,11 @@
-let socket_path () =
-  let share =
-    match Sys.getenv_opt "XDG_DATA_HOME" with
-      | Some d -> d
-      | None -> Filename.concat (Sys.getenv "HOME") ".local/share"
-  in
-  Filename.concat share "tsync/tsync.sock"
+let data_dir () =
+  match Sys.getenv_opt "XDG_DATA_HOME" with
+    | Some d -> Filename.concat d "tsync"
+    | None -> Filename.concat (Sys.getenv "HOME") ".local/share/tsync"
+
+let socket_path () = Filename.concat (data_dir ()) "tsync.sock"
+
+let auto_evict_path () = Filename.concat (data_dir ()) "auto-evict"
 
 (* ── Client ──────────────────────────────────────────────────────────────── *)
 

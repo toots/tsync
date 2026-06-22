@@ -104,6 +104,10 @@ let ensure_cached ctx key =
     S3_store.download ctx.store ~key ~dst_path:dst
   end
 
+(* ── Auto-evict ──────────────────────────────────────────────────────────── *)
+
+let auto_evict = ref (Sys.file_exists (Ipc.auto_evict_path ()))
+
 (* ── Dirty tracking for write→release ────────────────────────────────────── *)
 
 let dirty : (string, bool) Hashtbl.t = Hashtbl.create 64
@@ -241,10 +245,17 @@ let make_operations ctx =
         if writing then begin
           Log.debug "release %s: uploading" path;
           let lp = local_path ctx key in
-          (try S3_store.upload ctx.store ~key ~src_path:lp
-           with exn -> Log.err "upload %s: %s" key (Printexc.to_string exn));
+          let uploaded =
+            try S3_store.upload ctx.store ~key ~src_path:lp; true
+            with exn ->
+              Log.err "upload %s: %s" key (Printexc.to_string exn);
+              false
+          in
           cache_invalidate key;
-          clear_dirty key
+          clear_dirty key;
+          if uploaded && !auto_evict then
+            Cache.evict ~domain_name:ctx.domain_name
+              ~domain_prefix:ctx.domain_prefix key
         end);
     unlink =
       (fun path ->
@@ -355,6 +366,21 @@ let ipc_handler ctx line =
             ()
         in
         "STOP"
+    | "AUTO_EVICT" -> (
+        match arg with
+          | "on" ->
+              auto_evict := true;
+              (try close_out (open_out (Ipc.auto_evict_path ()))
+               with _ -> ());
+              "OK"
+          | "off" ->
+              auto_evict := false;
+              (try Unix.unlink (Ipc.auto_evict_path ())
+               with Unix.Unix_error (Unix.ENOENT, _, _) -> ());
+              "OK"
+          | "status" ->
+              if !auto_evict then "on" else "off"
+          | _ -> "ERROR expected on|off|status")
     | "WAIT" ->
         let key = key_of_path arg in
         if is_cached ctx key then "OK" else "ERROR not cached"
