@@ -1,0 +1,15 @@
+(library
+ (name tsync_lib)
+ (libraries
+  yojson
+  digestif
+  digestif.c
+  fuse3
+  unix
+  threads.posix
+  str
+  aws-s3-lwt
+  lwt
+  lwt.unix
+  lwt_ssl
+  syslog))

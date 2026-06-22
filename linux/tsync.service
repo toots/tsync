@@ -1,0 +1,13 @@
+[Unit]
+Description=tsync S3 FUSE filesystem
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+ExecStart=%h/.local/bin/tsync start
+ExecStop=%h/.local/bin/tsync stop
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target

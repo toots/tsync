@@ -1,0 +1,18 @@
+(lang dune 3.23)
+(name tsync)
+(generate_opam_files true)
+(package
+ (name tsync)
+ (synopsis "S3-backed FUSE filesystem sync tool")
+ (depends
+  (ocaml (>= 4.14.0))
+  dune
+  yojson
+  digestif
+  fuse3
+  aws-s3-lwt
+  lwt
+  lwt_ppx
+  lwt_ssl
+  syslog
+  cmdliner))
