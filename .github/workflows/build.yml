@@ -1,0 +1,19 @@
+name: build
+
+on: [push, pull_request]
+
+jobs:
+  linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker build -f linux/docker/Dockerfile linux
+
+  macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: brew install xcodegen
+      - run: xcodegen generate
+        working-directory: macos
+      - run: xcodebuild -project macos/tsync.xcodeproj -scheme TsyncApp -configuration Debug CODE_SIGN_IDENTITY="" CODE_SIGNING_REQUIRED=NO
