@@ -31,9 +31,12 @@ let load_store ?domain_name () =
   let domain_prefix = Config.domain_prefix cfg domain_name in
   let chunk_prefix = Config.chunk_prefix cfg in
   let trash_prefix = Config.trash_prefix cfg domain_name in
+  let journal_prefix = Config.journal_prefix cfg domain_name in
+  let version_key = Config.version_key cfg domain_name in
   let store =
     S3_store.make ~client ~domain_name ~domain_prefix ~chunk_prefix
-      ~trash_prefix ~versioning:cfg.Config.versioning
+      ~trash_prefix ~versioning:cfg.Config.versioning ~journal_prefix
+      ~version_key
   in
   (cfg, domain_name, store)
 
@@ -281,6 +284,99 @@ let auto_evict_cmd =
     (Cmd.info "auto-evict" ~doc:"Enable or disable auto-evict after upload")
     Term.(const run $ state_arg)
 
+(* ── tsync sync ──────────────────────────────────────────────────────────── *)
+
+let sync_cmd =
+  let domain_arg =
+    Arg.(
+      value
+      & opt (some string) None
+      & info ["domain"] ~docv:"NAME"
+          ~doc:"Domain name (default: first configured)")
+  in
+  let run domain =
+    let _cfg, domain_name, store = load_store ?domain_name:domain () in
+    S3_store.recover_pending_ops store;
+    let last_sync_file =
+      Filename.concat (Journal.share_dir ()) ("last-sync-" ^ domain_name)
+    in
+    let last_sync_key =
+      if Sys.file_exists last_sync_file then (
+        let ic = open_in last_sync_file in
+        let s = input_line ic in
+        close_in ic;
+        String.trim s)
+      else ""
+    in
+    let all_keys = S3_store.list_journal_keys store () in
+    let need_full_resync =
+      if last_sync_key = "" then true
+      else
+        match all_keys with
+          | [] -> false
+          | (oldest_key, _) :: _ ->
+              Journal.timestamp_ms_of_filename oldest_key
+              > Journal.timestamp_ms_of_filename last_sync_key
+    in
+    if need_full_resync then begin
+      (try
+         let resp = Ipc.send "FULL_RESYNC" in
+         if resp <> "OK" then
+           Printf.eprintf "Warning: FULL_RESYNC response: %s\n" resp
+       with _ -> ());
+      let new_key = S3_store.journal_prefix store ^ Journal.entry_key () in
+      let oc = open_out last_sync_file in
+      output_string oc new_key;
+      close_out oc;
+      Printf.printf "full resync\n"
+    end else begin
+      let my_uuid = Journal.client_uuid () in
+      let recent_foreign =
+        all_keys
+        |> List.filter (fun (k, _) -> k > last_sync_key)
+        |> List.filter (fun (_, uuid) -> uuid <> my_uuid)
+      in
+      let touched = Hashtbl.create 16 in
+      List.iter
+        (fun (ek, _) ->
+          match S3_store.get_journal_entry store ek with
+            | None -> ()
+            | Some ops ->
+                List.iter
+                  (fun op ->
+                    match op with
+                      | `Put (k, _) | `Delete k | `Mkdir k | `Rmdir k ->
+                          Hashtbl.replace touched k ()
+                      | `Rename (k, src, _) ->
+                          Hashtbl.replace touched k ();
+                          Hashtbl.replace touched src ())
+                  ops)
+        recent_foreign;
+      let touched_keys = Hashtbl.fold (fun k () acc -> k :: acc) touched [] in
+      List.iter
+        (fun rel_key ->
+          (* prepend "/" so ipc_handler's fuse_to_key strips it correctly *)
+          let resp = Ipc.send ("EVICT /" ^ rel_key) in
+          if resp <> "OK" then
+            Printf.eprintf "Warning: evict %s: %s\n" rel_key resp)
+        touched_keys;
+      (match all_keys with
+        | [] -> ()
+        | _ ->
+            let last_key, _ = List.nth all_keys (List.length all_keys - 1) in
+            (* store full S3 key for cross-platform compatibility *)
+            let oc = open_out last_sync_file in
+            let store_val = S3_store.journal_prefix store ^ last_key in
+            output_string oc store_val;
+            close_out oc);
+      let n = List.length touched_keys in
+      Printf.printf "%d change%s\n" n (if n = 1 then "" else "s")
+    end
+  in
+  Cmd.v
+    (Cmd.info "sync" ~doc:"Sync local cache with remote journal changes")
+    Term.(const run $ domain_arg)
+
 (* ── Main ────────────────────────────────────────────────────────────────── *)
 
 let () =
@@ -291,6 +387,7 @@ let () =
         start_cmd;
         stop_cmd;
         status_cmd;
+        sync_cmd;
         evict_cmd;
         restore_cmd;
         pull_cmd;

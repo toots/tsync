@@ -93,3 +93,17 @@ let trash_prefix cfg domain_name =
     if String.length p > 0 && p.[String.length p - 1] = '/' then p else p ^ "/"
   in
   p ^ ".trash/" ^ domain_name ^ "/"
+
+let journal_prefix cfg domain_name =
+  let p = cfg.prefix in
+  let p =
+    if String.length p > 0 && p.[String.length p - 1] = '/' then p else p ^ "/"
+  in
+  p ^ ".journal/" ^ domain_name ^ "/"
+
+let version_key cfg domain_name =
+  let p = cfg.prefix in
+  let p =
+    if String.length p > 0 && p.[String.length p - 1] = '/' then p else p ^ "/"
+  in
+  p ^ ".version/" ^ domain_name

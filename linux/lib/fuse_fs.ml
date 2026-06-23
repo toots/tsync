@@ -28,6 +28,13 @@ let key_to_fuse ctx key =
     "/" ^ String.sub key dp_len (String.length key - dp_len)
   else key
 
+(* "prefix/domain/file.txt" → "file.txt" (domain-relative, for journal) *)
+let rel_key ctx full_key =
+  let dp_len = String.length ctx.domain_prefix in
+  if String.length full_key > dp_len then
+    String.sub full_key dp_len (String.length full_key - dp_len)
+  else full_key
+
 (* ── Metadata cache ──────────────────────────────────────────────────────── *)
 
 let meta_cache : (string, Unix.LargeFile.stats) Hashtbl.t = Hashtbl.create 256
@@ -128,6 +135,32 @@ let clear_dirty key =
   Mutex.lock dirty_mutex;
   Hashtbl.remove dirty key;
   Mutex.unlock dirty_mutex
+
+(* ── Journal WAL helpers ─────────────────────────────────────────────────── *)
+
+let fire_journal ctx ~entry_key ops =
+  ignore
+    (Thread.create
+       (fun () ->
+         (try S3_store.write_journal ~entry_key ops ctx.store
+          with exn ->
+            Log.err "write_journal: %s" (Printexc.to_string exn));
+         Journal.delete_local_pending ~entry_key)
+       ())
+
+(* ── Cache walk (for FULL_RESYNC) ────────────────────────────────────────── *)
+
+let walk_cache_dir ctx f =
+  let root = Cache.cache_root ctx.domain_name in
+  let rec walk dir =
+    if Sys.file_exists dir then
+      Array.iter
+        (fun name ->
+          let path = Filename.concat dir name in
+          if Sys.is_directory path then walk path else f path)
+        (try Sys.readdir dir with _ -> [||])
+  in
+  walk root
 
 (* ── FUSE operations ─────────────────────────────────────────────────────── *)
 
@@ -245,6 +278,13 @@ let make_operations ctx =
         if writing then begin
           Log.debug "release %s: uploading" path;
           let lp = local_path ctx key in
+          let ek = Journal.entry_key () in
+          let size =
+            try (Unix.LargeFile.stat lp).Unix.LargeFile.st_size
+            with _ -> 0L
+          in
+          let ops = [ `Put (rel_key ctx key, size) ] in
+          Journal.write_local_pending ~entry_key:ek ops;
           let uploaded =
             try S3_store.upload ctx.store ~key ~src_path:lp; true
             with exn ->
@@ -253,46 +293,79 @@ let make_operations ctx =
           in
           cache_invalidate key;
           clear_dirty key;
-          if uploaded && !auto_evict then
-            Cache.evict ~domain_name:ctx.domain_name
-              ~domain_prefix:ctx.domain_prefix key
+          if uploaded then begin
+            fire_journal ctx ~entry_key:ek ops;
+            if !auto_evict then
+              Cache.evict ~domain_name:ctx.domain_name
+                ~domain_prefix:ctx.domain_prefix key
+          end else Journal.delete_local_pending ~entry_key:ek
         end);
     unlink =
       (fun path ->
         let key = fuse_to_key ctx path in
+        let ek = Journal.entry_key () in
+        let ops = [ `Delete (rel_key ctx key) ] in
+        Journal.write_local_pending ~entry_key:ek ops;
         Cache.evict ~domain_name:ctx.domain_name
           ~domain_prefix:ctx.domain_prefix key;
         cache_invalidate key;
-        S3_store.delete_file ctx.store ~key);
+        S3_store.delete_file ctx.store ~key;
+        fire_journal ctx ~entry_key:ek ops);
     mkdir =
       (fun path _mode ->
         let key = fuse_to_dir_prefix ctx path in
-        S3_store.create_directory ctx.store ~key);
+        let ek = Journal.entry_key () in
+        let ops = [ `Mkdir (rel_key ctx key) ] in
+        Journal.write_local_pending ~entry_key:ek ops;
+        S3_store.create_directory ctx.store ~key;
+        fire_journal ctx ~entry_key:ek ops);
     rmdir =
       (fun path ->
         let prefix = fuse_to_dir_prefix ctx path in
-        S3_store.delete_dir ctx.store ~prefix);
+        let ek = Journal.entry_key () in
+        let ops = [ `Rmdir (rel_key ctx prefix) ] in
+        Journal.write_local_pending ~entry_key:ek ops;
+        S3_store.delete_dir ctx.store ~prefix;
+        fire_journal ctx ~entry_key:ek ops);
     rename =
       (fun src dst ->
         let src_key = fuse_to_key ctx src in
         let dst_key = fuse_to_key ctx dst in
         cache_invalidate src_key;
         cache_invalidate dst_key;
-        (* Detect directory by checking for trailing-slash marker *)
         let src_dir = src_key ^ "/" in
-        match S3_store.head_opt ctx.store ~key:src_dir with
+        let ek = Journal.entry_key () in
+        (match S3_store.head_opt ctx.store ~key:src_dir with
           | Some _ ->
+              let ops =
+                [ `Rename (rel_key ctx dst_key, rel_key ctx src_key, None) ]
+              in
+              Journal.write_local_pending ~entry_key:ek ops;
               S3_store.rename_directory ctx.store ~src_prefix:src_dir
-                ~dst_prefix:(dst_key ^ "/")
+                ~dst_prefix:(dst_key ^ "/");
+              fire_journal ctx ~entry_key:ek ops
           | None ->
-              (* Also move cached file if present *)
+              let size =
+                if is_cached ctx src_key then
+                  (try
+                     Some
+                       (Unix.LargeFile.stat (local_path ctx src_key))
+                         .Unix.LargeFile.st_size
+                   with _ -> None)
+                else None
+              in
+              let ops =
+                [ `Rename (rel_key ctx dst_key, rel_key ctx src_key, size) ]
+              in
+              Journal.write_local_pending ~entry_key:ek ops;
               if is_cached ctx src_key then begin
                 let src_lp = local_path ctx src_key in
                 let dst_lp = local_path ctx dst_key in
                 Cache.ensure_parent_dir dst_lp;
                 Unix.rename src_lp dst_lp
               end;
-              S3_store.rename_file ctx.store ~src_key ~dst_key);
+              S3_store.rename_file ctx.store ~src_key ~dst_key;
+              fire_journal ctx ~entry_key:ek ops));
     truncate =
       (fun path size ->
         let key = fuse_to_key ctx path in
@@ -384,12 +457,39 @@ let ipc_handler ctx line =
     | "WAIT" ->
         let key = key_of_path arg in
         if is_cached ctx key then "OK" else "ERROR not cached"
+    | "FULL_RESYNC" ->
+        Mutex.lock meta_mutex;
+        Hashtbl.clear meta_cache;
+        Mutex.unlock meta_mutex;
+        walk_cache_dir ctx (fun path -> try Unix.unlink path with _ -> ());
+        "OK"
     | _ -> "ERROR unknown command"
 
 (* ── Main mount ─────────────────────────────────────────────────────────── *)
 
 let mount ctx argv =
   let _ipc_thread = Thread.create (fun () -> Ipc.serve (ipc_handler ctx)) () in
+  (* ponytail: no self-resync filter; add if spurious eviction from own writes is observed *)
+  let _version_poller =
+    Thread.create
+      (fun () ->
+        let known = ref None in
+        while true do
+          Unix.sleepf 1.0;
+          (try
+             let version = S3_store.fetch_version ctx.store in
+             if !known <> None && version <> !known then begin
+               Mutex.lock meta_mutex;
+               Hashtbl.clear meta_cache;
+               Mutex.unlock meta_mutex;
+               walk_cache_dir ctx (fun path ->
+                   try Unix.unlink path with _ -> ())
+             end;
+             known := version
+           with _ -> ())
+        done)
+      ()
+  in
   Fuse.Fuse_compat.main ~loop_mode:Fuse.Single_threaded argv
     (make_operations ctx)
 

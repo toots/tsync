@@ -21,38 +21,10 @@ S3-backed FUSE filesystem. Files are mounted at `~/tsync/<domain>/` and backed b
 
 ## Setup
 
-### 1. Install dependencies
-
 ```bash
-opam pin add -ny fuse3 git+https://github.com/toots/ocamlfuse.git
-opam pin add -ny aws-s3-lwt git+https://github.com/toots/aws-s3.git
-opam install --deps-only .
-```
-
-### 2. Build
-
-```bash
-dune build
-```
-
-The binary is at `_build/default/bin/main.exe`. Add it to `$PATH` as `tsync` or install with `opam install .`.
-
-### 3. Configure
-
-Run the interactive setup script — it writes config to `~/.config/tsync/config.json`:
-
-```bash
-./configure.sh
-```
-
-### 4. Install binary and systemd unit
-
-```bash
-opam install .
-mkdir -p ~/.config/systemd/user
-cp tsync.service ~/.config/systemd/user/
-systemctl --user daemon-reload
-systemctl --user enable --now tsync
+make install-deps   # pin and install OCaml dependencies
+make configure      # interactive config → ~/.config/tsync/config.json
+make install        # build, install binary, enable systemd unit
 ```
 
 `tsync start` runs in the foreground — systemd manages the lifecycle (start, stop, restart on failure). Logs go to the journal:

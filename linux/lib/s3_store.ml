@@ -5,11 +5,22 @@ type t = {
   chunk_prefix : string;
   trash_prefix : string;
   versioning : bool;
+  journal_prefix : string;
+  version_key : string;
 }
 
 let make ~client ~domain_name ~domain_prefix ~chunk_prefix ~trash_prefix
-    ~versioning =
-  { client; domain_name; domain_prefix; chunk_prefix; trash_prefix; versioning }
+    ~versioning ~journal_prefix ~version_key =
+  {
+    client;
+    domain_name;
+    domain_prefix;
+    chunk_prefix;
+    trash_prefix;
+    versioning;
+    journal_prefix;
+    version_key;
+  }
 
 let upload t ~key ~src_path =
   S3_client.put_chunked t.client ~key ~src_path ~chunk_prefix:t.chunk_prefix
@@ -60,3 +71,121 @@ let list_directory t ~prefix = S3_client.list_directory t.client ~prefix ()
 let head_opt t ~key = S3_client.head_opt t.client ~key ()
 let domain_name t = t.domain_name
 let domain_prefix t = t.domain_prefix
+let journal_prefix t = t.journal_prefix
+
+(* ── Journal ─────────────────────────────────────────────────────────────── *)
+
+let write_journal ?entry_key ops t =
+  let ek = match entry_key with Some k -> k | None -> Journal.entry_key () in
+  let key = t.journal_prefix ^ ek in
+  S3_client.put t.client ~content_type:"application/x-ndjson" ~key
+    ~data:(Journal.encode ops) ();
+  S3_client.put t.client ~key:t.version_key ~data:ek ()
+
+let fetch_version t =
+  match S3_client.head_opt t.client ~key:t.version_key () with
+    | None -> None
+    | Some _ ->
+        Some (String.trim (S3_client.get t.client ~key:t.version_key ()))
+
+(* Returns (entry_key_basename, client_uuid) list, optionally filtered by start_after.
+   start_after may be a bare basename or a full S3 key (Filename.basename is applied). *)
+let list_journal_keys ?start_after t () =
+  let all = S3_client.list_all t.client ~prefix:t.journal_prefix () in
+  let prefix_len = String.length t.journal_prefix in
+  let sa_base = Option.map Filename.basename start_after in
+  List.filter_map
+    (fun (e : S3_client.file_entry) ->
+      let basename =
+        if String.length e.key > prefix_len then
+          String.sub e.key prefix_len (String.length e.key - prefix_len)
+        else e.key
+      in
+      match sa_base with
+        | Some sa when basename <= sa -> None
+        | _ -> (
+            try
+              ignore (Journal.timestamp_ms_of_filename basename);
+              Some (basename, Journal.client_uuid_of_filename basename)
+            with _ -> None))
+    all
+
+let get_journal_entry t entry_key =
+  let key = t.journal_prefix ^ entry_key in
+  try Some (Journal.decode (S3_client.get t.client ~key ()))
+  with _ -> None
+
+(* Replay locally-pending WAL entries that didn't make it to S3 before crash *)
+let recover_pending_ops t =
+  let my_uuid = Journal.client_uuid () in
+  List.iter
+    (fun (entry_key, ops) ->
+      let remote_key = t.journal_prefix ^ entry_key in
+      if S3_client.head_opt t.client ~key:remote_key () <> None then
+        (* already made it to S3 before crash *)
+        Journal.delete_local_pending ~entry_key
+      else begin
+        let newer_keys = list_journal_keys ~start_after:entry_key t () in
+        let remotely_modified = Hashtbl.create 16 in
+        List.iter
+          (fun (ek, uuid) ->
+            if uuid <> my_uuid then
+              match get_journal_entry t ek with
+                | None -> ()
+                | Some remote_ops ->
+                    List.iter
+                      (fun op ->
+                        match op with
+                          | `Put (k, _) | `Delete k | `Mkdir k | `Rmdir k ->
+                              Hashtbl.replace remotely_modified k ()
+                          | `Rename (k, src, _) ->
+                              Hashtbl.replace remotely_modified k ();
+                              Hashtbl.replace remotely_modified src ())
+                      remote_ops)
+          newer_keys;
+        let replayed =
+          List.filter
+            (fun op ->
+              let k =
+                match op with
+                  | `Put (k, _) | `Delete k | `Mkdir k | `Rmdir k -> k
+                  | `Rename (k, _, _) -> k
+              in
+              not (Hashtbl.mem remotely_modified k))
+            ops
+        in
+        List.iter
+          (fun op ->
+            try
+              match op with
+                | `Put (rel_key, _) ->
+                    let full_key = t.domain_prefix ^ rel_key in
+                    let cache_path =
+                      Cache.cache_path ~domain_name:t.domain_name
+                        ~domain_prefix:t.domain_prefix full_key
+                    in
+                    if Sys.file_exists cache_path then
+                      upload t ~key:full_key ~src_path:cache_path
+                | `Delete rel_key ->
+                    delete_file t ~key:(t.domain_prefix ^ rel_key)
+                | `Mkdir rel_key ->
+                    create_directory t ~key:(t.domain_prefix ^ rel_key)
+                | `Rmdir rel_key ->
+                    delete_dir t ~prefix:(t.domain_prefix ^ rel_key)
+                | `Rename (dst_rel, src_rel, _) ->
+                    let src_key = t.domain_prefix ^ src_rel in
+                    let dst_key = t.domain_prefix ^ dst_rel in
+                    (match
+                       S3_client.head_opt t.client ~key:(src_key ^ "/") ()
+                     with
+                      | Some _ ->
+                          rename_directory t ~src_prefix:(src_key ^ "/")
+                            ~dst_prefix:(dst_key ^ "/")
+                      | None -> rename_file t ~src_key ~dst_key)
+            with exn ->
+              Log.err "recover_pending_ops: %s" (Printexc.to_string exn))
+          replayed;
+        if replayed <> [] then write_journal ~entry_key replayed t;
+        Journal.delete_local_pending ~entry_key
+      end)
+    (Journal.local_pending_entries ~uuid:my_uuid)
