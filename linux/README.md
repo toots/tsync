@@ -86,6 +86,8 @@ tsync ls      [path]           # list files with local/cloud status
 
 tsync history <path>           # list versioned copies in .trash/
 tsync purge   <path>           # delete all versions for a file from .trash/
+
+tsync auto-evict [on|off|status]  # enable/disable auto-evict after upload (persists across restarts)
 ```
 
 ## Versioning
