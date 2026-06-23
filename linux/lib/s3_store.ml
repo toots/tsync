@@ -69,6 +69,17 @@ let rename_directory t ~src_prefix ~dst_prefix =
 
 let list_directory t ~prefix = S3_client.list_directory t.client ~prefix ()
 let head_opt t ~key = S3_client.head_opt t.client ~key ()
+
+(* Like head_opt but returns the real file size for chunked manifests *)
+let stat_file t ~key =
+  match S3_client.head_opt t.client ~key () with
+    | None -> None
+    | Some c when c.S3_client.content_type = Some Chunk_manifest.content_type ->
+        (try
+           let m = Chunk_manifest.of_string (S3_client.get t.client ~key ()) in
+           Some { c with S3_client.size = Int64.to_int m.size }
+         with _ -> Some c)
+    | Some c -> Some c
 let domain_name t = t.domain_name
 let domain_prefix t = t.domain_prefix
 let journal_prefix t = t.journal_prefix

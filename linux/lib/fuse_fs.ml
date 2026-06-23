@@ -180,8 +180,8 @@ let make_operations ctx =
                 if is_cached ctx key then
                   Unix.LargeFile.stat (local_path ctx key)
                 else begin
-                  (* HEAD on S3 as file, then as directory *)
-                    match S3_store.head_opt ctx.store ~key with
+                  (* HEAD on S3 as file, then as directory; stat_file resolves manifest size *)
+                    match S3_store.stat_file ctx.store ~key with
                     | Some c ->
                         let st = stat_of_entry c in
                         cache_put key st;
@@ -291,7 +291,8 @@ let make_operations ctx =
               Log.err "upload %s: %s" key (Printexc.to_string exn);
               false
           in
-          cache_invalidate key;
+          (* cache correct size so getattr doesn't fall back to manifest HEAD *)
+          cache_put key (file_stat (Int64.to_int size) (Unix.gettimeofday ()));
           clear_dirty key;
           if uploaded then begin
             fire_journal ctx ~entry_key:ek ops;
