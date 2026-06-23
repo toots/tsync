@@ -20,7 +20,7 @@ install-deps:
 	opam pin add -ny aws-s3-lwt git+https://github.com/toots/aws-s3.git
 	opam install --deps-only .
 
-install: build
+install:
 	opam install .
 	mkdir -p ~/.local/bin
 	ln -sf "$$(opam var bin)/tsync" ~/.local/bin/tsync
