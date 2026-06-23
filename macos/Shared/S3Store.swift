@@ -19,6 +19,8 @@ public struct S3Store: Sendable {
 
     public var domainPrefix: String { config.domainPrefix(domainName) }
     public var chunkPrefix: String { config.chunkPrefix() }
+    public var journalPrefix: String { config.journalPrefix(domainName) }
+    public var versionKey: String { config.versionKey(domainName) }
 
     public func key(for relativePath: String) -> String { domainPrefix + relativePath }
 
@@ -85,6 +87,129 @@ public struct S3Store: Sendable {
             }
             try await client.delete(key: key)
         }
+    }
+
+    // MARK: Journal
+
+    /// Writes a journal entry and bumps the version file. Fire-and-forget — logs errors, never throws.
+    /// Pass a pre-generated entryKey when the key was recorded locally before the S3 op.
+    public func writeJournal(ops: [JournalOp], entryKey: String? = nil) async {
+        let filename = entryKey ?? Journal.entryKey()
+        let key = journalPrefix + filename
+        let data = Journal.encode(ops)
+        do {
+            try await client.putData(key: key, data: data, contentType: "application/x-ndjson")
+            try await client.putData(key: versionKey, data: Data(filename.utf8), contentType: "text/plain")
+        } catch {
+            log.error("writeJournal: \(error, privacy: .public)")
+        }
+    }
+
+    /// Returns the current version string (latest journal entry filename), or nil if none yet.
+    public func fetchVersion() async throws -> String? {
+        guard let data = try? await client.getData(key: versionKey) else { return nil }
+        return String(data: data, encoding: .utf8)
+    }
+
+    /// Replays any journal entries that were written locally but not yet committed to S3
+    /// (i.e. the extension crashed between writing the local pending file and completing
+    /// the S3 operation). Skips ops where a foreign client made a newer change to the
+    /// same key. Call at the start of `tsync sync`.
+    public func recoverPendingOps(mountURL: URL) async throws {
+        let myUUID = Journal.clientUUID()
+        let pending = Journal.localPendingEntries(forUUID: myUUID)
+        guard !pending.isEmpty else { return }
+
+        let remoteKeyFilenames = Set(
+            try await client.listKeys(prefix: journalPrefix)
+                .map { $0.components(separatedBy: "/").last ?? $0 }
+        )
+
+        for (entryKey, ops) in pending {
+            // Crashed after S3 write, before local delete — just clean up.
+            if remoteKeyFilenames.contains(entryKey) {
+                Journal.deleteLocalPending(entryKey: entryKey)
+                continue
+            }
+
+            // Collect keys touched by foreign entries newer than this pending entry.
+            let entryMs = Journal.timestampMs(fromFilename: entryKey)
+            let hasNewerForeign = remoteKeyFilenames.contains {
+                Journal.timestampMs(fromFilename: $0) > entryMs &&
+                Journal.clientUUID(fromFilename: $0) != myUUID
+            }
+            var remotelyModifiedKeys = Set<String>()
+            if hasNewerForeign {
+                let foreignEntries = try await listJournal(startAfter: journalPrefix + entryKey)
+                    .filter { $0.clientUUID != myUUID }
+                for entry in foreignEntries {
+                    for op in entry.ops {
+                        remotelyModifiedKeys.insert(op.key)
+                        if let src = op.src { remotelyModifiedKeys.insert(src) }
+                    }
+                }
+            }
+
+            var replayed: [JournalOp] = []
+            for op in ops where !remotelyModifiedKeys.contains(op.key) {
+                do {
+                    switch op.op {
+                    case "put":
+                        let localFile = mountURL.appendingPathComponent(op.key)
+                        guard FileManager.default.fileExists(atPath: localFile.path) else { continue }
+                        try await upload(key: key(for: op.key), from: localFile)
+                        replayed.append(op)
+                    case "delete":
+                        try await delete(key: key(for: op.key))
+                        replayed.append(op)
+                    case "mkdir":
+                        try await createDirectory(key: key(for: op.key))
+                        replayed.append(op)
+                    case "rmdir":
+                        try await delete(key: directoryKey(key(for: op.key)))
+                        replayed.append(op)
+                    case "rename":
+                        if let src = op.src {
+                            let srcKey = key(for: src)
+                            let dstKey = key(for: op.key)
+                            if isDirectoryKey(src) {
+                                try await renameDirectory(from: directoryKey(srcKey), to: directoryKey(dstKey))
+                            } else {
+                                try await copy(from: srcKey, to: dstKey)
+                                try await delete(key: srcKey)
+                            }
+                            replayed.append(op)
+                        }
+                    default: break
+                    }
+                } catch {
+                    log.error("recovery: failed to replay \(op.op, privacy: .public) \(op.key, privacy: .public): \(error, privacy: .public)")
+                }
+            }
+
+            if !replayed.isEmpty {
+                await writeJournal(ops: replayed, entryKey: entryKey)
+                log.info("recovery: replayed \(replayed.count, privacy: .public) op(s) from \(entryKey, privacy: .public)")
+            }
+            Journal.deleteLocalPending(entryKey: entryKey)
+        }
+    }
+
+    /// Lists journal entries after startAfter (nil = from the beginning).
+    public func listJournal(startAfter: String?) async throws -> [JournalEntry] {
+        let keys = try await client.listKeys(prefix: journalPrefix, startAfter: startAfter)
+        var entries: [JournalEntry] = []
+        for key in keys {
+            guard let data = try? await client.getData(key: key) else { continue }
+            let filename = key.components(separatedBy: "/").last ?? key
+            entries.append(JournalEntry(
+                s3Key: key,
+                clientUUID: Journal.clientUUID(fromFilename: filename),
+                timestampMs: Journal.timestampMs(fromFilename: filename),
+                ops: Journal.decode(data)
+            ))
+        }
+        return entries
     }
 
     public func copy(from fromKey: String, to toKey: String) async throws {

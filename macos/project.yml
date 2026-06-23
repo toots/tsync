@@ -79,6 +79,21 @@ targets:
       - package: swift-argument-parser
         product: ArgumentParser
 
+  TsyncTests:
+    type: bundle.unit-test
+    platform: macOS
+    deploymentTarget: "13.0"
+    sources:
+      - path: Shared
+      - path: Tests
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.toots.tsync.tests
+        GENERATE_INFOPLIST_FILE: YES
+    dependencies:
+      - package: soto
+        product: SotoS3
+
 schemes:
   TsyncApp:
     build:
@@ -92,3 +107,10 @@ schemes:
         tsync: all
     run:
       config: Debug
+  TsyncTests:
+    build:
+      targets:
+        TsyncTests: [test]
+    test:
+      targets:
+        - TsyncTests

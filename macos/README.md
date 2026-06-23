@@ -6,7 +6,7 @@ S3-backed file sync for macOS using the [FileProvider](https://developer.apple.c
 
 | Component | Role |
 |---|---|
-| `TsyncApp` | Host app; runs as a background LaunchAgent; registers FileProvider domains |
+| `TsyncApp` | Host app; runs as a background LaunchAgent; registers FileProvider domains; polls `.version/<domain>` and signals FileProvider on remote changes |
 | `TsyncFileProvider` | NSFileProviderReplicatedExtension; maps S3 objects to filesystem items |
 | `tsync` (CLI) | Manages domains, eviction, restore, versioning history |
 | `Shared/` | Config, S3 client, Keychain credentials, versioning logic |
@@ -69,6 +69,17 @@ Open Finder — `~/Library/CloudStorage/TsyncApp-MusicProduction/` appears. Drop
 
 For subsequent deploys after code changes, run `./deploy.sh` again.
 
+## Build targets
+
+```
+make generate       # regenerate tsync.xcodeproj from project.yml
+make build          # build TsyncApp + tsync CLI (Release)
+make test           # run Journal unit tests
+make deploy         # build, install to /Applications, restart daemon
+make configure      # interactive S3 / credentials setup
+make test-lifecycle # build, install, start daemon, run integration tests against a real S3 bucket
+```
+
 ## CLI Reference
 
 ```
@@ -83,9 +94,21 @@ tsync pull    [path] --force  # re-download all files, even those already local
 tsync wait    <path>          # block until file is fully local (useful in scripts)
 tsync ls      [path]          # list files with upload (uploaded/uploading/pending) and download (local/cloud) status
 
+tsync sync    [--domain <name>]   # apply remote changes locally; also recovers from crashes
+
 tsync history <path>   # list versioned copies in .trash/
 tsync purge   <path>   # delete all versions for a file from .trash/
 ```
+
+## Automatic sync
+
+`TsyncApp` polls `<prefix>/.version/<domain>` once per second. When the value changes (a remote client wrote a new file), it calls `NSFileProviderManager.signalEnumerator(for: .workingSet)` on all domains, causing the FileProvider extension to re-enumerate from S3 and apply the changes transparently.
+
+Run `tsync sync` manually to apply incremental changes with eviction of stale local content and crash recovery (see below).
+
+## Crash recovery
+
+Before each S3 mutation, the extension writes a pending journal entry to `~/Library/Group Containers/group.com.toots.tsync/journal-pending/`. On successful completion the entry is deleted. Entries that survive a crash are replayed by `tsync sync`: operations not remotely modified by another client since the crash are re-executed and the local pending file is cleaned up.
 
 ## Versioning
 

@@ -76,6 +76,12 @@ final class IPCServer: @unchecked Sendable {
                 case "restore":
                     try await restore(path: request.path)
                     response = IPCResponse(ok: true)
+                case "fullResync":
+                    try await fullResync()
+                    response = IPCResponse(ok: true)
+                case "signalDirectory":
+                    try await signalDirectory(path: request.path)
+                    response = IPCResponse(ok: true)
                 default:
                     response = IPCResponse(ok: false, error: "unknown action: \(request.action)")
                 }
@@ -95,6 +101,27 @@ final class IPCServer: @unchecked Sendable {
     }
 
     // MARK: - FileProvider operations
+
+    private func fullResync() async throws {
+        let domains = try await NSFileProviderManager.domains()
+        for domain in domains {
+            guard let manager = NSFileProviderManager(for: domain) else { continue }
+            try await withCheckedThrowingContinuation { (cont: CheckedContinuation<Void, Error>) in
+                manager.signalEnumerator(for: .workingSet) { error in
+                    if let error { cont.resume(throwing: error) } else { cont.resume() }
+                }
+            }
+        }
+    }
+
+    private func signalDirectory(path: String) async throws {
+        let (itemId, manager) = try await fpManager(for: URL(filePath: path))
+        try await withCheckedThrowingContinuation { (cont: CheckedContinuation<Void, Error>) in
+            manager.signalEnumerator(for: itemId) { error in
+                if let error { cont.resume(throwing: error) } else { cont.resume() }
+            }
+        }
+    }
 
     private func evict(path: String) async throws {
         let (itemId, manager) = try await fpManager(for: URL(filePath: path))

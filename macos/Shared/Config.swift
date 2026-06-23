@@ -47,6 +47,16 @@ public struct Config: Codable, Sendable {
         prefix.hasSuffix("/") ? "\(prefix).trash/\(domainName)/" : "\(prefix)/.trash/\(domainName)/"
     }
 
+    /// S3 journal prefix for a domain
+    public func journalPrefix(_ domainName: String) -> String {
+        prefix.hasSuffix("/") ? "\(prefix).journal/\(domainName)/" : "\(prefix)/.journal/\(domainName)/"
+    }
+
+    /// S3 key for the domain version file (bumped on every mutation)
+    public func versionKey(_ domainName: String) -> String {
+        prefix.hasSuffix("/") ? "\(prefix).version/\(domainName)" : "\(prefix)/.version/\(domainName)"
+    }
+
     public init(bucket: String, prefix: String, awsRegion: String, versioning: Bool, domains: [DomainConfig]) {
         self.bucket = bucket
         self.prefix = prefix

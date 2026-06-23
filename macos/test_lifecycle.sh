@@ -1,7 +1,35 @@
 #!/usr/bin/env bash
 # Lifecycle test for tsync: creation, edit, rename, evict, restore, delete
 # Covers: root file, empty directory structure, file in subdirectory
+#
+# Usage: ./test_lifecycle.sh [--skip-build] [CASE_NUM...]
+#   --skip-build   skip xcodebuild + install step
+#   CASE_NUM       run only these cases (e.g. 1 3 6); omit to run all
+#
+# Examples:
+#   ./test_lifecycle.sh              # build + run all cases
+#   ./test_lifecycle.sh 1 3          # build + run cases 1 and 3
+#   ./test_lifecycle.sh --skip-build 6 7   # skip build, run cases 6 and 7
 set -euo pipefail
+
+# ── Argument parsing ──────────────────────────────────────────────────────────
+SKIP_BUILD=0
+CASES=()
+for arg in "$@"; do
+    case "$arg" in
+        --skip-build) SKIP_BUILD=1 ;;
+        [0-9]*) CASES+=("$arg") ;;
+        *) echo "unknown argument: $arg"; exit 1 ;;
+    esac
+done
+
+# Returns 0 (true) if the given case number should run.
+run_case() {
+    [[ ${#CASES[@]} -eq 0 ]] && return 0
+    local n="$1"
+    for c in "${CASES[@]}"; do [[ "$c" == "$n" ]] && return 0; done
+    return 1
+}
 
 # ── Config (read from group container, no hardcoded secrets) ──────────────────
 CONFIG_JSON="$HOME/Library/Group Containers/group.com.toots.tsync/config.json"
@@ -34,46 +62,51 @@ echo
 
 # ── Build and restart ─────────────────────────────────────────────────────────
 PROJ="$(cd "$(dirname "$0")" && pwd)/tsync.xcodeproj"
-build_log=$(mktemp)
 
-echo "Building tsync CLI..."
-xcodebuild -project "$PROJ" -scheme tsync -configuration Release \
-    -derivedDataPath "$DERIVED_DATA" -jobs 12 \
-    CODE_SIGN_STYLE=Automatic -allowProvisioningUpdates >"$build_log" 2>&1 \
-    || { cat "$build_log"; rm -f "$build_log"; exit 1; }
+if [[ $SKIP_BUILD -eq 0 ]]; then
+    build_log=$(mktemp)
 
-echo "Building TsyncApp..."
-xcodebuild -project "$PROJ" -scheme TsyncApp -configuration Release \
-    -destination 'platform=macOS' -derivedDataPath "$DERIVED_DATA" -jobs 12 \
-    CODE_SIGN_STYLE=Automatic -allowProvisioningUpdates >"$build_log" 2>&1 \
-    || { cat "$build_log"; rm -f "$build_log"; exit 1; }
+    echo "Building tsync CLI..."
+    xcodebuild -project "$PROJ" -scheme tsync -configuration Release \
+        -derivedDataPath "$DERIVED_DATA" -jobs 12 \
+        CODE_SIGN_STYLE=Automatic -allowProvisioningUpdates >"$build_log" 2>&1 \
+        || { cat "$build_log"; rm -f "$build_log"; exit 1; }
 
-rm -f "$build_log"
+    echo "Building TsyncApp..."
+    xcodebuild -project "$PROJ" -scheme TsyncApp -configuration Release \
+        -destination 'platform=macOS' -derivedDataPath "$DERIVED_DATA" -jobs 12 \
+        CODE_SIGN_STYLE=Automatic -allowProvisioningUpdates >"$build_log" 2>&1 \
+        || { cat "$build_log"; rm -f "$build_log"; exit 1; }
 
-echo "Installing and restarting TsyncApp..."
-BUILT_APP="$DERIVED_DATA/Build/Products/Release/TsyncApp.app"
-BUILT_BIN="$BUILT_APP/Contents/MacOS/TsyncApp"
-BUILT_APPEX="$BUILT_APP/Contents/PlugIns/TsyncFileProvider.appex"
-launchctl unload "$PLIST" 2>/dev/null || true
-pkill -f TsyncFileProvider 2>/dev/null || true
-pkill -f TsyncApp 2>/dev/null || true
-sleep 2
-# Install into /Applications so macOS FileProvider daemon picks up the new extension
-rm -rf /Applications/TsyncApp.app
-cp -R "$BUILT_APP" /Applications/
-# Restore LaunchAgent to the canonical /Applications path
-/usr/libexec/PlistBuddy -c "Set :ProgramArguments:0 /Applications/TsyncApp.app/Contents/MacOS/TsyncApp" "$PLIST"
-launchctl load -w "$PLIST"
-# Wait until the IPC socket appears (TsyncApp running) before proceeding
-echo -n "Waiting for TsyncApp IPC..."
-IPC_SOCK="$HOME/Library/Group Containers/group.com.toots.tsync/tsync.sock"
-deadline=$(( $(date +%s) + 30 ))
-until [[ -S "$IPC_SOCK" ]]; do
-    [[ $(date +%s) -lt $deadline ]] || { echo " timeout"; exit 1; }
-    sleep 1; echo -n "."
-done
-echo " ready"
-sleep 2  # give the extension time to finish loading after IPC is up
+    rm -f "$build_log"
+
+    echo "Installing and restarting TsyncApp..."
+    BUILT_APP="$DERIVED_DATA/Build/Products/Release/TsyncApp.app"
+    BUILT_BIN="$BUILT_APP/Contents/MacOS/TsyncApp"
+    BUILT_APPEX="$BUILT_APP/Contents/PlugIns/TsyncFileProvider.appex"
+    launchctl unload "$PLIST" 2>/dev/null || true
+    pkill -f TsyncFileProvider 2>/dev/null || true
+    pkill -f TsyncApp 2>/dev/null || true
+    sleep 2
+    # Install into /Applications so macOS FileProvider daemon picks up the new extension
+    rm -rf /Applications/TsyncApp.app
+    cp -R "$BUILT_APP" /Applications/
+    # Restore LaunchAgent to the canonical /Applications path
+    /usr/libexec/PlistBuddy -c "Set :ProgramArguments:0 /Applications/TsyncApp.app/Contents/MacOS/TsyncApp" "$PLIST"
+    launchctl load -w "$PLIST"
+    # Wait until the IPC socket appears (TsyncApp running) before proceeding
+    echo -n "Waiting for TsyncApp IPC..."
+    IPC_SOCK="$HOME/Library/Group Containers/group.com.toots.tsync/tsync.sock"
+    deadline=$(( $(date +%s) + 30 ))
+    until [[ -S "$IPC_SOCK" ]]; do
+        [[ $(date +%s) -lt $deadline ]] || { echo " timeout"; exit 1; }
+        sleep 1; echo -n "."
+    done
+    echo " ready"
+    sleep 2  # give the extension time to finish loading after IPC is up
+else
+    echo "Skipping build (--skip-build)"
+fi
 echo
 
 # ── Colours ───────────────────────────────────────────────────────────────────
@@ -125,6 +158,11 @@ wait_downloaded() {
 }
 
 # ── Cleanup on exit ───────────────────────────────────────────────────────────
+JOURNAL_PREFIX="$PREFIX/.journal/$DOMAIN"
+GROUP_CONTAINER="$HOME/Library/Group Containers/group.com.toots.tsync"
+LAST_SYNC_FILE="$GROUP_CONTAINER/last-sync-$DOMAIN"
+INJECTED_ENTRY=""   # set later; used in cleanup
+
 cleanup() {
     info "cleaning up..."
     rm -f  "$MOUNT/${TS}_root.txt"        2>/dev/null || true
@@ -136,12 +174,19 @@ cleanup() {
     rm -f  "$MOUNT/${TS}_large_b.bin"     2>/dev/null || true
     rm -rf "$MOUNT/${TS}_largedir"        2>/dev/null || true
     rm -f  /tmp/${TS}_large.bin           2>/dev/null || true
+    rm -f  "$MOUNT/${TS}_jtest.txt"       2>/dev/null || true
+    rm -f  "$MOUNT/${TS}_jtest_b.txt"     2>/dev/null || true
+    rm -rf "$MOUNT/${TS}_jdir"            2>/dev/null || true
+    rm -f  "$MOUNT/${TS}_sync.txt"        2>/dev/null || true
+    [[ -n "$INJECTED_ENTRY" ]] && \
+        aws s3 rm "s3://$BUCKET/$INJECTED_ENTRY" --region "$REGION" 2>/dev/null || true
 }
 trap cleanup EXIT
 
 # ══════════════════════════════════════════════════════════════════════════════
 # CASE 1: Root file
 # ══════════════════════════════════════════════════════════════════════════════
+if run_case 1; then
 section "CASE 1: Root file"
 ROOT_FILE="$MOUNT/${TS}_root.txt"
 ROOT_KEY="$S3_PREFIX/${TS}_root.txt"
@@ -207,9 +252,12 @@ rm "$EVICT_TARGET"
     || wait_s3_gone "$ROOT_KEY"
 pass "delete: S3 object removed"
 
+fi # run_case 1
+
 # ══════════════════════════════════════════════════════════════════════════════
 # CASE 2: Empty directory structure (A/B/C all empty)
 # ══════════════════════════════════════════════════════════════════════════════
+if run_case 2; then
 section "CASE 2: Empty directory structure"
 EMPTYDIR="$MOUNT/${TS}_emptydir"
 EMPTYDIR_KEY="$S3_PREFIX/${TS}_emptydir/"
@@ -261,9 +309,12 @@ wait_s3_gone "$S3_PREFIX/${TS}_emptydir_b/B/" && pass "delete: nested B marker r
 wait_s3_gone "$S3_PREFIX/${TS}_emptydir_b/C/" && pass "delete: nested C marker removed"
 wait_s3_gone "$EMPTYDIR_KEY_B" && pass "delete: top-level directory marker removed"
 
+fi # run_case 2
+
 # ══════════════════════════════════════════════════════════════════════════════
 # CASE 3: File in subdirectory
 # ══════════════════════════════════════════════════════════════════════════════
+if run_case 3; then
 section "CASE 3: File in subdirectory"
 SUBDIR="$MOUNT/${TS}_subdir"
 SUBFILE="$SUBDIR/file.txt"
@@ -329,9 +380,12 @@ info "delete dir"
 rmdir "$SUBDIR"
 wait_s3_gone "$S3_PREFIX/${TS}_subdir/" && pass "delete dir: S3 marker removed"
 
+fi # run_case 3
+
 # ══════════════════════════════════════════════════════════════════════════════
 # CASE 4: Large file at root (> 8 MB → chunked manifest path)
 # ══════════════════════════════════════════════════════════════════════════════
+if run_case 4; then
 section "CASE 4: Large file at root (chunked upload)"
 LARGE_FILE="$MOUNT/${TS}_large.bin"
 LARGE_KEY="$S3_PREFIX/${TS}_large.bin"
@@ -396,10 +450,16 @@ rm "$EVICT_TARGET"
     || wait_s3_gone "$LARGE_KEY" "$UPLOAD_TIMEOUT"
 pass "delete: S3 manifest removed"
 
+fi # run_case 4
+
 # ══════════════════════════════════════════════════════════════════════════════
 # CASE 5: Large file in subdirectory (chunked)
 # ══════════════════════════════════════════════════════════════════════════════
+if run_case 5; then
 section "CASE 5: Large file in subdirectory (chunked upload)"
+# Generate temp file if case 4 was skipped
+LARGE_TMP="${LARGE_TMP:-/tmp/${TS}_large.bin}"
+[[ -f "$LARGE_TMP" ]] || { info "generating 20 MB test file"; dd if=/dev/urandom of="$LARGE_TMP" bs=1m count=20 2>/dev/null; }
 LARGEDIR="$MOUNT/${TS}_largedir"
 LARGEDIR_KEY="$S3_PREFIX/${TS}_largedir/"
 LARGE_SUBFILE="$LARGEDIR/${TS}_large.bin"
@@ -465,6 +525,210 @@ pass "delete file: S3 manifest removed"
 info "delete dir"
 rmdir "$LARGEDIR"
 wait_s3_gone "$LARGEDIR_KEY" && pass "delete dir: S3 marker removed"
+
+fi # run_case 5
+
+# ══════════════════════════════════════════════════════════════════════════════
+# CASE 6: Change journal — verify entries written to S3 on every mutation
+# ══════════════════════════════════════════════════════════════════════════════
+if run_case 6; then
+section "CASE 6: Change journal"
+
+# Returns the lexicographically latest S3 key under JOURNAL_PREFIX, or empty.
+latest_journal_key() {
+    aws s3api list-objects-v2 \
+        --bucket "$BUCKET" --prefix "$JOURNAL_PREFIX/" \
+        --region "$REGION" \
+        --query 'sort_by(Contents[?Key!=`null`], &Key)[-1].Key' \
+        --output text 2>/dev/null \
+    | grep -v '^None$' || true
+}
+
+# Waits until a journal key newer than $1 appears (or any key if $1 is empty).
+wait_journal_after() {
+    local marker="$1" timeout="${2:-$UPLOAD_TIMEOUT}"
+    local deadline=$(( $(date +%s) + timeout ))
+    while true; do
+        local latest
+        latest=$(latest_journal_key)
+        if [[ -n "$latest" ]] && { [[ -z "$marker" ]] || [[ "$latest" > "$marker" ]]; }; then
+            echo "$latest"; return 0
+        fi
+        [[ $(date +%s) -lt $deadline ]] || return 1
+        sleep 1
+    done
+}
+
+# Reads and prints an S3 journal entry's body.
+read_journal_entry() {
+    aws s3 cp "s3://$BUCKET/$1" - --region "$REGION" 2>/dev/null
+}
+
+JFILE="$MOUNT/${TS}_jtest.txt"
+JKEY="$S3_PREFIX/${TS}_jtest.txt"
+JFILE_B="$MOUNT/${TS}_jtest_b.txt"
+JKEY_B="$S3_PREFIX/${TS}_jtest_b.txt"
+JDIR="$MOUNT/${TS}_jdir"
+JDIR_KEY="$S3_PREFIX/${TS}_jdir/"
+
+info "create → expect 'put' journal entry"
+marker=$(latest_journal_key)
+echo "journal test" > "$JFILE"
+wait_s3_appear "$JKEY"
+if entry_key=$(wait_journal_after "$marker"); then
+    body=$(read_journal_entry "$entry_key")
+    if echo "$body" | grep -q '"op":"put"' && echo "$body" | grep -q "${TS}_jtest.txt"; then
+        pass "journal: put entry written on create"
+    else
+        fail "journal: put entry wrong content (got: $body)"
+    fi
+else
+    fail "journal: no entry after create (timeout)"
+fi
+
+info "rename → expect 'rename' journal entry"
+marker=$(latest_journal_key)
+mv "$JFILE" "$JFILE_B"
+wait_s3_appear "$JKEY_B"
+if entry_key=$(wait_journal_after "$marker"); then
+    body=$(read_journal_entry "$entry_key")
+    if echo "$body" | grep -q '"op":"rename"' \
+        && echo "$body" | grep -q '"src"' \
+        && echo "$body" | grep -q "${TS}_jtest"; then
+        pass "journal: rename entry written with src and key"
+    else
+        fail "journal: rename entry wrong content (got: $body)"
+    fi
+else
+    fail "journal: no entry after rename (timeout)"
+fi
+
+info "delete → expect 'delete' journal entry"
+marker=$(latest_journal_key)
+rm "$JFILE_B"
+wait_s3_gone "$JKEY_B"
+if entry_key=$(wait_journal_after "$marker"); then
+    body=$(read_journal_entry "$entry_key")
+    if echo "$body" | grep -q '"op":"delete"'; then
+        pass "journal: delete entry written"
+    else
+        fail "journal: delete entry wrong content (got: $body)"
+    fi
+else
+    fail "journal: no entry after delete (timeout)"
+fi
+
+info "mkdir → expect 'mkdir' journal entry"
+marker=$(latest_journal_key)
+mkdir "$JDIR"
+wait_s3_appear "$JDIR_KEY"
+if entry_key=$(wait_journal_after "$marker"); then
+    body=$(read_journal_entry "$entry_key")
+    if echo "$body" | grep -q '"op":"mkdir"'; then
+        pass "journal: mkdir entry written"
+    else
+        fail "journal: mkdir entry wrong content (got: $body)"
+    fi
+else
+    fail "journal: no entry after mkdir (timeout)"
+fi
+
+info "rmdir → expect 'rmdir' journal entry"
+marker=$(latest_journal_key)
+rmdir "$JDIR"
+wait_s3_gone "$JDIR_KEY"
+if entry_key=$(wait_journal_after "$marker"); then
+    body=$(read_journal_entry "$entry_key")
+    if echo "$body" | grep -q '"op":"rmdir"'; then
+        pass "journal: rmdir entry written"
+    else
+        fail "journal: rmdir entry wrong content (got: $body)"
+    fi
+else
+    fail "journal: no entry after rmdir (timeout)"
+fi
+
+fi # run_case 6
+
+# ══════════════════════════════════════════════════════════════════════════════
+# CASE 7: tsync sync
+# ══════════════════════════════════════════════════════════════════════════════
+if run_case 7; then
+section "CASE 7: tsync sync"
+
+SFILE="$MOUNT/${TS}_sync.txt"
+SKEY="$S3_PREFIX/${TS}_sync.txt"
+
+# Helper: check if a file shows as "cloud" (evicted) in tsync ls output.
+is_cloud() {
+    "$TSYNC_BIN" ls "$MOUNT" 2>/dev/null | grep "$(basename "$1")" | grep -q "cloud"
+}
+
+info "create and restore file so it is locally available"
+echo "sync test" > "$SFILE"
+wait_s3_appear "$SKEY"
+"$TSYNC_BIN" restore "$SFILE"
+wait_downloaded "$SFILE"
+is_cloud "$SFILE" \
+    && fail "sync setup: file should be local after restore" \
+    || pass "sync setup: file is local after restore"
+
+info "seed last-sync with current timestamp so incremental path is taken"
+# Use a timestamp that's after any existing journal entry but before the injected one.
+# oldest_ms <= last_sync_ms means incremental; we'll set last-sync to now.
+NOW_MS=$(( $(date +%s) * 1000 ))
+echo "$JOURNAL_PREFIX/$(printf '%013d' "$NOW_MS")-self-init" > "$LAST_SYNC_FILE"
+
+info "inject foreign journal entry referencing the file (timestamp after last-sync)"
+sleep 1   # ensure injected timestamp > last-sync timestamp
+FOREIGN_UUID="00000000-0000-0000-0000-000000000001"
+ENTRY_MS=$(( $(date +%s) * 1000 ))
+ENTRY_FILENAME="$(printf '%013d' "$ENTRY_MS")-$FOREIGN_UUID"
+INJECTED_ENTRY="$JOURNAL_PREFIX/$ENTRY_FILENAME"
+printf '{"op":"put","key":"%s","size":9}\n' "${TS}_sync.txt" \
+    | aws s3 cp - "s3://$BUCKET/$INJECTED_ENTRY" \
+        --region "$REGION" --content-type "application/x-ndjson"
+pass "sync: foreign journal entry injected"
+
+info "tsync sync — incremental, should evict file via foreign entry"
+"$TSYNC_BIN" sync
+is_cloud "$SFILE" \
+    && pass "sync: file evicted by foreign journal entry" \
+    || fail "sync: file still local after sync (eviction not triggered)"
+
+info "last-sync state file updated"
+[[ -f "$LAST_SYNC_FILE" ]] \
+    && pass "sync: last-sync file exists" \
+    || fail "sync: last-sync file missing"
+stored_key=$(cat "$LAST_SYNC_FILE")
+[[ "$stored_key" == *"$ENTRY_FILENAME"* || "$stored_key" > "$JOURNAL_PREFIX/$(printf '%013d' "$NOW_MS")" ]] \
+    && pass "sync: last-sync advanced past injected entry" \
+    || fail "sync: last-sync not advanced (got: $stored_key)"
+
+info "restore file, then sync again — own UUID not evicted"
+"$TSYNC_BIN" restore "$SFILE"
+wait_downloaded "$SFILE"
+# Write own file (extension writes journal entry with our UUID)
+echo "updated" > "$SFILE"
+wait_s3_appear "$SKEY"
+"$TSYNC_BIN" sync
+is_cloud "$SFILE" \
+    && fail "sync: own-UUID entry incorrectly evicted file" \
+    || pass "sync: own-UUID entry filtered (file stays local)"
+
+info "simulate journal gap → full resync"
+echo "$JOURNAL_PREFIX/0000000000001-fake" > "$LAST_SYNC_FILE"
+"$TSYNC_BIN" sync
+new_stored=$(cat "$LAST_SYNC_FILE" 2>/dev/null || true)
+new_filename="${new_stored##*/}"
+new_ms="${new_filename:0:13}"
+now_ms=$(( $(date +%s) * 1000 ))
+diff=$(( now_ms - new_ms ))
+[[ "$diff" -lt 120000 ]] \
+    && pass "sync: full resync updated last-sync to recent timestamp" \
+    || fail "sync: full resync last-sync not recent (diff: ${diff}ms, key: $new_stored)"
+
+fi # run_case 7
 
 # ══════════════════════════════════════════════════════════════════════════════
 # Summary

@@ -102,7 +102,15 @@ final class TsyncExtension: NSObject, NSFileProviderReplicatedExtension, @unchec
 
                 if isDirectory {
                     let dirKey = store.directoryKey(key)
+                    let relKey = store.relativePath(of: dirKey)
+                    let journalKey = Journal.entryKey()
+                    let ops = [JournalOp(op: "mkdir", key: relKey)]
+                    Journal.writeLocalPending(ops: ops, entryKey: journalKey)
                     try await store.createDirectory(key: key)
+                    Task {
+                        await store.writeJournal(ops: ops, entryKey: journalKey)
+                        Journal.deleteLocalPending(entryKey: journalKey)
+                    }
                     let item = TsyncItem(
                         identifier: NSFileProviderItemIdentifier(dirKey),
                         parent: itemTemplate.parentItemIdentifier,
@@ -112,10 +120,18 @@ final class TsyncExtension: NSObject, NSFileProviderReplicatedExtension, @unchec
                     progress.completedUnitCount = 100
                     completionHandler(item, [], false, nil)
                 } else {
+                    let relKey = store.relativePath(of: key)
+                    let journalKey = Journal.entryKey()
+                    Journal.writeLocalPending(ops: [JournalOp(op: "put", key: relKey)], entryKey: journalKey)
                     if let contentURL = url {
                         try await store.upload(key: key, from: contentURL)
                     }
                     let (size, modified, etag) = try await store.head(key: key)
+                    let ops = [JournalOp(op: "put", key: relKey, size: size)]
+                    Task {
+                        await store.writeJournal(ops: ops, entryKey: journalKey)
+                        Journal.deleteLocalPending(entryKey: journalKey)
+                    }
                     let item = TsyncItem(
                         identifier: NSFileProviderItemIdentifier(key),
                         parent: itemTemplate.parentItemIdentifier,
@@ -158,7 +174,14 @@ final class TsyncExtension: NSObject, NSFileProviderReplicatedExtension, @unchec
                     if isRename && oldKey != newKey {
                         let oldDirKey = store.directoryKey(oldKey)
                         let newDirKey = store.directoryKey(newKey)
+                        let ops = [JournalOp(op: "rename", key: store.relativePath(of: newDirKey), src: store.relativePath(of: oldDirKey))]
+                        let journalKey = Journal.entryKey()
+                        Journal.writeLocalPending(ops: ops, entryKey: journalKey)
                         try await store.renameDirectory(from: oldDirKey, to: newDirKey)
+                        Task {
+                            await store.writeJournal(ops: ops, entryKey: journalKey)
+                            Journal.deleteLocalPending(entryKey: journalKey)
+                        }
                     }
                     progress.completedUnitCount = 100
                     completionHandler(TsyncItem(
@@ -170,18 +193,38 @@ final class TsyncExtension: NSObject, NSFileProviderReplicatedExtension, @unchec
                     return
                 }
 
+                let journalKey = Journal.entryKey()
                 if isRename && oldKey != newKey {
                     if let contentURL = newContents, changedFields.contains(.contents) {
+                        let ops = [JournalOp(op: "rename", key: store.relativePath(of: newKey), src: store.relativePath(of: oldKey))]
+                        Journal.writeLocalPending(ops: ops, entryKey: journalKey)
                         try await store.upload(key: newKey, from: contentURL)
                     } else {
+                        let ops = [JournalOp(op: "rename", key: store.relativePath(of: newKey), src: store.relativePath(of: oldKey))]
+                        Journal.writeLocalPending(ops: ops, entryKey: journalKey)
                         try await store.copy(from: oldKey, to: newKey)
                     }
                     try await store.delete(key: oldKey)
                 } else if let contentURL = newContents, changedFields.contains(.contents) {
+                    let ops = [JournalOp(op: "put", key: store.relativePath(of: newKey))]
+                    Journal.writeLocalPending(ops: ops, entryKey: journalKey)
                     try await store.upload(key: newKey, from: contentURL)
                 }
 
                 let (size, modified, etag) = try await store.head(key: newKey)
+                if isRename && oldKey != newKey {
+                    let ops = [JournalOp(op: "rename", key: store.relativePath(of: newKey), src: store.relativePath(of: oldKey), size: size)]
+                    Task {
+                        await store.writeJournal(ops: ops, entryKey: journalKey)
+                        Journal.deleteLocalPending(entryKey: journalKey)
+                    }
+                } else if changedFields.contains(.contents) {
+                    let ops = [JournalOp(op: "put", key: store.relativePath(of: newKey), size: size)]
+                    Task {
+                        await store.writeJournal(ops: ops, entryKey: journalKey)
+                        Journal.deleteLocalPending(entryKey: journalKey)
+                    }
+                }
                 let updatedItem = TsyncItem(
                     identifier: NSFileProviderItemIdentifier(newKey),
                     parent: item.parentItemIdentifier,
@@ -213,8 +256,17 @@ final class TsyncExtension: NSObject, NSFileProviderReplicatedExtension, @unchec
         Task {
             do {
                 let store = try await setup()
-                log.info("deleteItem: key=\(identifier.rawValue, privacy: .public)")
-                try await store.delete(key: identifier.rawValue)
+                let key = identifier.rawValue
+                log.info("deleteItem: key=\(key, privacy: .public)")
+                let opName = store.isDirectoryKey(key) ? "rmdir" : "delete"
+                let ops = [JournalOp(op: opName, key: store.relativePath(of: key))]
+                let journalKey = Journal.entryKey()
+                Journal.writeLocalPending(ops: ops, entryKey: journalKey)
+                try await store.delete(key: key)
+                Task {
+                    await store.writeJournal(ops: ops, entryKey: journalKey)
+                    Journal.deleteLocalPending(entryKey: journalKey)
+                }
                 progress.completedUnitCount = 1
                 completionHandler(nil)
             } catch {

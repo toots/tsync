@@ -9,7 +9,7 @@ struct Tsync: AsyncParsableCommand {
         subcommands: [
             InitCommand.self, Start.self, Stop.self, Status.self,
             Evict.self, Restore.self, Pull.self, Ls.self,
-            History.self, Purge.self, Wait.self,
+            History.self, Purge.self, Wait.self, Sync.self,
         ]
     )
 }
@@ -257,6 +257,101 @@ struct Purge: AsyncParsableCommand {
         let entries = try await Versioning.history(for: s3Key, store: store)
         for e in entries { try await store.client.delete(key: e.key); print("Deleted \(e.key)") }
         print("Purged \(entries.count) version(s).")
+    }
+}
+
+// MARK: - tsync sync
+
+struct Sync: AsyncParsableCommand {
+    static let configuration = CommandConfiguration(abstract: "Apply remote changes to local cache")
+
+    @Option(name: .long, help: "Domain name (default: first configured)") var domain: String?
+
+    func run() async throws {
+        let config = try Config.load()
+        guard let domainName = domain ?? config.domains.first?.name else {
+            throw ValidationError("No domains configured.")
+        }
+        let credentials = try KeychainCredentials.load()
+        let client = S3Client(bucket: config.bucket, region: config.awsRegion, credentials: credentials)
+        let store = S3Store(client: client, config: config, domainName: domainName)
+        defer { try? store.client.shutdown() }
+
+        let lastSyncURL = Config.groupContainerURL.appendingPathComponent("last-sync-\(domainName)")
+        let lastSyncKey = (try? String(contentsOf: lastSyncURL, encoding: .utf8)
+            .trimmingCharacters(in: .whitespacesAndNewlines)) ?? ""
+
+        try await store.recoverPendingOps(mountURL: cloudStorageURL(domainName: domainName))
+
+        var doFullResync = lastSyncKey.isEmpty
+        if !doFullResync {
+            let oldest = try await client.listKeys(prefix: store.journalPrefix, maxKeys: 1)
+            if let oldestKey = oldest.first {
+                let oldestMs = Journal.timestampMs(fromFilename: oldestKey.components(separatedBy: "/").last ?? oldestKey)
+                let lastMs = Journal.timestampMs(fromFilename: lastSyncKey.components(separatedBy: "/").last ?? lastSyncKey)
+                if oldestMs > lastMs { doFullResync = true }
+            }
+        }
+
+        if doFullResync {
+            let resp = try IPC.send(IPCRequest(action: "fullResync"))
+            if let err = resp.error { throw ValidationError(err) }
+            let newKey = store.journalPrefix + Journal.entryKey()
+            try newKey.write(to: lastSyncURL, atomically: true, encoding: .utf8)
+            print("Full resync triggered.")
+        } else {
+            let entries = try await store.listJournal(startAfter: lastSyncKey.isEmpty ? nil : lastSyncKey)
+            let myUUID = Journal.clientUUID()
+            let foreign = entries.filter { $0.clientUUID != myUUID }
+
+            var uniqueKeys = Set<String>()
+            var parentDirsToSignal = Set<String>()
+            let mountURL = cloudStorageURL(domainName: domainName)
+            for entry in foreign {
+                for op in entry.ops {
+                    uniqueKeys.insert(op.key)
+                    if let src = op.src { uniqueKeys.insert(src) }
+                    // Structural ops need the parent directory re-enumerated so the
+                    // platform removes stale entries and discovers new ones.
+                    if ["delete", "rename", "rmdir", "mkdir"].contains(op.op) {
+                        parentDirsToSignal.insert(
+                            mountURL.appendingPathComponent(op.key)
+                                .deletingLastPathComponent().path
+                        )
+                        if let src = op.src {
+                            parentDirsToSignal.insert(
+                                mountURL.appendingPathComponent(src)
+                                    .deletingLastPathComponent().path
+                            )
+                        }
+                    }
+                }
+            }
+
+            var evicted = 0
+            for relKey in uniqueKeys {
+                let path = mountURL.appendingPathComponent(relKey).path
+                let resp = try IPC.send(IPCRequest(action: "evict", path: path))
+                if resp.ok { evicted += 1 }
+            }
+
+            // Signal each affected parent directory; fall back to full working-set
+            // signal if any directory lookup fails (e.g. the dir was itself deleted).
+            var signalFailed = false
+            for dirPath in parentDirsToSignal {
+                let resp = try IPC.send(IPCRequest(action: "signalDirectory", path: dirPath))
+                if !resp.ok { signalFailed = true; break }
+            }
+            if signalFailed {
+                let resp = try IPC.send(IPCRequest(action: "fullResync"))
+                if let err = resp.error { print("Warning: re-enumeration signal failed: \(err)") }
+            }
+
+            if let last = entries.last {
+                try last.s3Key.write(to: lastSyncURL, atomically: true, encoding: .utf8)
+            }
+            print("Applied \(evicted) eviction(s) from \(foreign.count) remote change(s).")
+        }
     }
 }
 

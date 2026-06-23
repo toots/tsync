@@ -228,6 +228,42 @@ public struct S3Client: Sendable {
         }
     }
 
+    /// PUT raw data with a given content type.
+    public func putData(key: String, data: Data, contentType: String) async throws {
+        _ = try await s3.putObject(.init(
+            body: AWSHTTPBody(bytes: data), bucket: bucket, contentType: contentType, key: key
+        ))
+    }
+
+    /// GET object body as Data (for small objects like journal entries).
+    public func getData(key: String) async throws -> Data {
+        let output = try await s3.getObject(.init(bucket: bucket, key: key))
+        let buffer = try await output.body.collect(upTo: 64 * 1024 * 1024)
+        return Data(buffer.readableBytesView)
+    }
+
+    /// List object keys under prefix, with optional startAfter and maxKeys. Paginates fully unless maxKeys is set.
+    public func listKeys(prefix: String, startAfter: String? = nil, maxKeys: Int? = nil) async throws -> [String] {
+        var keys: [String] = []
+        var token: String? = nil
+        var firstPage = true
+
+        repeat {
+            let out = try await s3.listObjectsV2(.init(
+                bucket: bucket,
+                continuationToken: token,
+                maxKeys: maxKeys,
+                prefix: prefix,
+                startAfter: firstPage ? startAfter : nil
+            ))
+            firstPage = false
+            keys += (out.contents ?? []).compactMap(\.key)
+            token = (maxKeys == nil && out.isTruncated == true) ? out.nextContinuationToken : nil
+        } while token != nil
+
+        return keys
+    }
+
     /// List objects with size/date metadata (recursive, no delimiter).
     public func listWithMetadata(prefix: String) async throws -> [(key: String, size: Int64, modified: Date?, etag: String?)] {
         var results: [(key: String, size: Int64, modified: Date?, etag: String?)] = []
