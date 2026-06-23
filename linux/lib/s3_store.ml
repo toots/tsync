@@ -78,9 +78,9 @@ let journal_prefix t = t.journal_prefix
 let write_journal ?entry_key ops t =
   let ek = match entry_key with Some k -> k | None -> Journal.entry_key () in
   let key = t.journal_prefix ^ ek in
+  S3_client.put t.client ~key:t.version_key ~data:ek ();
   S3_client.put t.client ~content_type:"application/x-ndjson" ~key
-    ~data:(Journal.encode ops) ();
-  S3_client.put t.client ~key:t.version_key ~data:ek ()
+    ~data:(Journal.encode ops) ()
 
 let fetch_version t =
   match S3_client.head_opt t.client ~key:t.version_key () with

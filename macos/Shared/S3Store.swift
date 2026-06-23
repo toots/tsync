@@ -98,8 +98,8 @@ public struct S3Store: Sendable {
         let key = journalPrefix + filename
         let data = Journal.encode(ops)
         do {
-            try await client.putData(key: key, data: data, contentType: "application/x-ndjson")
             try await client.putData(key: versionKey, data: Data(filename.utf8), contentType: "text/plain")
+            try await client.putData(key: key, data: data, contentType: "application/x-ndjson")
         } catch {
             log.error("writeJournal: \(error, privacy: .public)")
         }
