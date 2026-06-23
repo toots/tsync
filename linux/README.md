@@ -24,7 +24,6 @@ S3-backed FUSE filesystem. Files are mounted at `~/tsync/<domain>/` and backed b
 ### 1. Install dependencies
 
 ```bash
-sudo apt-get install libfuse3-dev fuse libgmp-dev libssl-dev pkg-config
 opam pin add -ny fuse3 git+https://github.com/toots/ocamlfuse.git
 opam pin add -ny aws-s3-lwt git+https://github.com/toots/aws-s3.git
 opam install --deps-only .
@@ -49,7 +48,7 @@ Run the interactive setup script — it writes config to `~/.config/tsync/config
 ### 4. Install binary and systemd unit
 
 ```bash
-dune install                                    # installs tsync to ~/.local/bin/
+opam install .
 mkdir -p ~/.config/systemd/user
 cp tsync.service ~/.config/systemd/user/
 systemctl --user daemon-reload
