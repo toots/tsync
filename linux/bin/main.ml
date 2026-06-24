@@ -64,6 +64,8 @@ let start_cmd =
         | None -> default_mount_point cfg domain_name
     in
     mkdir_p mount_point;
+    (* Clean up any stale FUSE mount left by a previous crash *)
+    ignore (Sys.command (Printf.sprintf "fusermount3 -u %s 2>/dev/null" (Filename.quote mount_point)));
     Log.init ();
     let ctx =
       Fuse_fs.
