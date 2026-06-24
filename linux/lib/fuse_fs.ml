@@ -151,13 +151,35 @@ let guard op path f =
 
 (* ── Journal WAL helpers ─────────────────────────────────────────────────── *)
 
+(* Latest journal entry key waiting to be published via version bump.
+   The flusher thread drains this every 2 seconds. *)
+let pending_version_key : string option ref = ref None
+let pending_version_mutex = Mutex.create ()
+
+let set_pending_version ek =
+  Mutex.lock pending_version_mutex;
+  (* Keep the lexicographically larger key (later timestamp wins) *)
+  (match !pending_version_key with
+    | Some prev when prev >= ek -> ()
+    | _ -> pending_version_key := Some ek);
+  Mutex.unlock pending_version_mutex
+
+let drain_pending_version () =
+  Mutex.lock pending_version_mutex;
+  let v = !pending_version_key in
+  pending_version_key := None;
+  Mutex.unlock pending_version_mutex;
+  v
+
 let fire_journal ctx ~entry_key ops =
   ignore
     (Thread.create
        (fun () ->
-         (try S3_store.write_journal ~entry_key ops ctx.store
+         (try
+            ignore (S3_store.write_journal_entry ~entry_key ops ctx.store);
+            set_pending_version entry_key
           with exn ->
-            Log.err "write_journal: %s" (Printexc.to_string exn));
+            Log.err "write_journal_entry: %s" (Printexc.to_string exn));
          Journal.delete_local_pending ~entry_key)
        ())
 
@@ -496,6 +518,20 @@ let ipc_handler ctx line =
 
 let mount ctx argv =
   let _ipc_thread = Thread.create (fun () -> Ipc.serve (ipc_handler ctx)) () in
+  let _version_flusher =
+    Thread.create
+      (fun () ->
+        while true do
+          Unix.sleepf 2.0;
+          (match drain_pending_version () with
+            | None -> ()
+            | Some ek -> (
+                try S3_store.bump_version ctx.store ek
+                with exn ->
+                  Log.err "bump_version: %s" (Printexc.to_string exn)))
+        done)
+      ()
+  in
   (* ponytail: no self-resync filter; add if spurious eviction from own writes is observed *)
   let _version_poller =
     Thread.create
