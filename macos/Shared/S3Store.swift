@@ -49,7 +49,12 @@ public struct S3Store: Sendable {
     }
 
     public func head(key: String) async throws -> (size: Int64, modified: Date?, etag: String?) {
-        try await client.head(key: key)
+        let (size, modified, etag, contentType) = try await client.head(key: key)
+        guard contentType == ChunkManifest.contentType,
+              let data = try? await client.getData(key: key),
+              let manifest = try? JSONDecoder().decode(ChunkManifest.self, from: data)
+        else { return (size, modified, etag) }
+        return (manifest.size, modified, etag)
     }
 
     public func createDirectory(key: String) async throws {

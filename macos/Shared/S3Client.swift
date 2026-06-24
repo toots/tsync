@@ -87,9 +87,9 @@ public struct S3Client: Sendable {
         _ = try await s3.copyObject(.init(bucket: bucket, copySource: source, key: toKey))
     }
 
-    public func head(key: String) async throws -> (size: Int64, modified: Date?, etag: String?) {
+    public func head(key: String) async throws -> (size: Int64, modified: Date?, etag: String?, contentType: String?) {
         let out = try await s3.headObject(.init(bucket: bucket, key: key))
-        return (out.contentLength ?? 0, out.lastModified, out.eTag)
+        return (out.contentLength ?? 0, out.lastModified, out.eTag, out.contentType)
     }
 
     /// Returns (commonPrefixes, objectKeys). Handles ListObjectsV2 pagination automatically.
