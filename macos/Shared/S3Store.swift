@@ -96,18 +96,32 @@ public struct S3Store: Sendable {
 
     // MARK: Journal
 
-    /// Writes a journal entry and bumps the version file. Fire-and-forget — logs errors, never throws.
-    /// Pass a pre-generated entryKey when the key was recorded locally before the S3 op.
-    public func writeJournal(ops: [JournalOp], entryKey: String? = nil) async {
-        let filename = entryKey ?? Journal.entryKey()
-        let key = journalPrefix + filename
+    /// Writes a journal entry to S3. Fire-and-forget — logs errors, never throws.
+    /// Does NOT update the version key; call bumpVersion separately (or use writeJournal for crash recovery).
+    public func writeJournalEntry(ops: [JournalOp], entryKey: String) async {
+        let key = journalPrefix + entryKey
         let data = Journal.encode(ops)
         do {
-            try await client.putData(key: versionKey, data: Data(filename.utf8), contentType: "text/plain")
             try await client.putData(key: key, data: data, contentType: "application/x-ndjson")
         } catch {
-            log.error("writeJournal: \(error, privacy: .public)")
+            log.error("writeJournalEntry: \(error, privacy: .public)")
         }
+    }
+
+    /// Updates the version key to point to a given journal entry key. Fire-and-forget.
+    public func bumpVersion(entryKey: String) async {
+        do {
+            try await client.putData(key: versionKey, data: Data(entryKey.utf8), contentType: "text/plain")
+        } catch {
+            log.error("bumpVersion: \(error, privacy: .public)")
+        }
+    }
+
+    /// Writes journal entry then bumps the version key. Used for crash recovery only.
+    public func writeJournal(ops: [JournalOp], entryKey: String? = nil) async {
+        let filename = entryKey ?? Journal.entryKey()
+        await writeJournalEntry(ops: ops, entryKey: filename)
+        await bumpVersion(entryKey: filename)
     }
 
     /// Returns the current version string (latest journal entry filename), or nil if none yet.

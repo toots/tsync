@@ -4,6 +4,22 @@ import OSLog
 
 private let log = Logger(subsystem: "com.toots.tsync", category: "Extension")
 
+// Batches version key updates: collects the latest pending journal entry key and
+// flushes it to S3 once every 2 seconds instead of on every mutation.
+private actor VersionFlusher {
+    private var pending: String? = nil
+
+    func update(_ key: String) {
+        if let current = pending, current >= key { return }
+        pending = key
+    }
+
+    func drain() -> String? {
+        defer { pending = nil }
+        return pending
+    }
+}
+
 final class TsyncExtension: NSObject, NSFileProviderReplicatedExtension, @unchecked Sendable {
     let domain: NSFileProviderDomain
 
@@ -14,6 +30,8 @@ final class TsyncExtension: NSObject, NSFileProviderReplicatedExtension, @unchec
 
     // Lazy-initialized via setupTask; every method awaits this before using the store.
     private let setupTask: Task<S3Store, Error>
+    private let versionFlusher = VersionFlusher()
+    private var flusherTask: Task<Void, Never>?
 
     required init(domain: NSFileProviderDomain) {
         log.info("init: domain=\(domain.identifier.rawValue, privacy: .public) version=1")
@@ -31,10 +49,21 @@ final class TsyncExtension: NSObject, NSFileProviderReplicatedExtension, @unchec
             }
         }
         super.init()
+        flusherTask = Task { [self] in
+            guard let store = try? await self.setupTask.value else { return }
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: 2_000_000_000)
+                if let key = await versionFlusher.drain() {
+                    await store.bumpVersion(entryKey: key)
+                }
+            }
+        }
     }
 
     func invalidate() {
         log.info("invalidate: domain=\(self.domain.identifier.rawValue, privacy: .public)")
+        flusherTask?.cancel()
+        flusherTask = nil
         setupTask.cancel()
         Task { try? (await setup()).client.shutdown() }
     }
@@ -108,7 +137,8 @@ final class TsyncExtension: NSObject, NSFileProviderReplicatedExtension, @unchec
                     Journal.writeLocalPending(ops: ops, entryKey: journalKey)
                     try await store.createDirectory(key: key)
                     Task {
-                        await store.writeJournal(ops: ops, entryKey: journalKey)
+                        await store.writeJournalEntry(ops: ops, entryKey: journalKey)
+                        await versionFlusher.update(journalKey)
                         Journal.deleteLocalPending(entryKey: journalKey)
                     }
                     let item = TsyncItem(
@@ -129,7 +159,8 @@ final class TsyncExtension: NSObject, NSFileProviderReplicatedExtension, @unchec
                     let (size, modified, etag) = try await store.head(key: key)
                     let ops = [JournalOp(op: "put", key: relKey, size: size)]
                     Task {
-                        await store.writeJournal(ops: ops, entryKey: journalKey)
+                        await store.writeJournalEntry(ops: ops, entryKey: journalKey)
+                        await versionFlusher.update(journalKey)
                         Journal.deleteLocalPending(entryKey: journalKey)
                     }
                     let item = TsyncItem(
@@ -179,7 +210,8 @@ final class TsyncExtension: NSObject, NSFileProviderReplicatedExtension, @unchec
                         Journal.writeLocalPending(ops: ops, entryKey: journalKey)
                         try await store.renameDirectory(from: oldDirKey, to: newDirKey)
                         Task {
-                            await store.writeJournal(ops: ops, entryKey: journalKey)
+                            await store.writeJournalEntry(ops: ops, entryKey: journalKey)
+                            await versionFlusher.update(journalKey)
                             Journal.deleteLocalPending(entryKey: journalKey)
                         }
                     }
@@ -215,13 +247,15 @@ final class TsyncExtension: NSObject, NSFileProviderReplicatedExtension, @unchec
                 if isRename && oldKey != newKey {
                     let ops = [JournalOp(op: "rename", key: store.relativePath(of: newKey), src: store.relativePath(of: oldKey), size: size)]
                     Task {
-                        await store.writeJournal(ops: ops, entryKey: journalKey)
+                        await store.writeJournalEntry(ops: ops, entryKey: journalKey)
+                        await versionFlusher.update(journalKey)
                         Journal.deleteLocalPending(entryKey: journalKey)
                     }
                 } else if changedFields.contains(.contents) {
                     let ops = [JournalOp(op: "put", key: store.relativePath(of: newKey), size: size)]
                     Task {
-                        await store.writeJournal(ops: ops, entryKey: journalKey)
+                        await store.writeJournalEntry(ops: ops, entryKey: journalKey)
+                        await versionFlusher.update(journalKey)
                         Journal.deleteLocalPending(entryKey: journalKey)
                     }
                 }
@@ -264,7 +298,8 @@ final class TsyncExtension: NSObject, NSFileProviderReplicatedExtension, @unchec
                 Journal.writeLocalPending(ops: ops, entryKey: journalKey)
                 try await store.delete(key: key)
                 Task {
-                    await store.writeJournal(ops: ops, entryKey: journalKey)
+                    await store.writeJournalEntry(ops: ops, entryKey: journalKey)
+                    await versionFlusher.update(journalKey)
                     Journal.deleteLocalPending(entryKey: journalKey)
                 }
                 progress.completedUnitCount = 1

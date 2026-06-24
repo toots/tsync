@@ -18,7 +18,7 @@ Both platforms share the same S3 key layout, chunk format, and config schema —
 <prefix>/.chunks/<sha256hex>-<md5hex>           # content-addressable chunks
 <prefix>/.trash/<domain>/<path>/<timestamp>     # versioned deletes
 <prefix>/.journal/<domain>/<13-digit-ms>-<uuid> # change journal entries
-<prefix>/.version/<domain>                      # latest journal entry key; bumped on every mutation
+<prefix>/.version/<domain>                      # latest journal entry key; bumped every ~2 s
 ```
 
 ## Chunked uploads
@@ -31,11 +31,15 @@ Every mutation is recorded in a shared S3 change journal. This enables crash rec
 
 Journal keys (`<prefix>/.journal/<domain>/<13-digit-ms>-<uuid>`) are lexicographically sortable by time; `start_after=<last-sync-key>` in ListObjectsV2 gives "changes since last sync" without any additional index. A 60-day S3 lifecycle rule on `<prefix>/.journal/` keeps the journal from growing unbounded.
 
-The `.version/<domain>` file holds the latest journal entry key and is updated atomically with each journal write. Clients poll it (e.g. once per second) to detect remote changes without scanning the full journal.
+The `.version/<domain>` file holds the latest journal entry key. Clients poll it to detect remote changes without scanning the full journal.
+
+### Batched version updates
+
+Journal entries are written to S3 immediately on each mutation. The version key is updated separately by a background flusher that runs every 2 seconds: it writes the version key once, pointing to whichever journal entry key arrived latest in that window. A burst of 50 uploads in 2 seconds produces 50 journal entries but only 1 version key write, reducing S3 write traffic and the rate at which other clients are woken up.
 
 ### Automatic sync
 
-Each client runs a background poller that fetches `.version/<domain>` once per second. When the value changes, the client knows a remote mutation has occurred and triggers a sync to bring its local filesystem up to date. The poller itself is lightweight — a single small GET per second per domain, with no journal reads unless a change is detected.
+Each client runs a background poller that fetches `.version/<domain>` once per second. When the value changes, the client triggers a sync to bring its local filesystem up to date. Because the version key is batched, polling is both cheap (one small GET per second) and low-noise — at most one resync trigger per 2-second batch regardless of how many files changed.
 
 ### Entry format (NDJSON)
 

@@ -99,12 +99,11 @@ let write_journal_entry ?entry_key ops t =
 let bump_version t entry_key =
   S3_client.put t.client ~key:t.version_key ~data:entry_key ()
 
-(* Write version key first (crash-safe: spurious resync preferred over missed one),
-   then journal entry. Used for crash recovery only, not the hot path. *)
+(* Write journal entry then bump version. Used for crash recovery only, not the hot path. *)
 let write_journal ?entry_key ops t =
   let ek = match entry_key with Some k -> k | None -> Journal.entry_key () in
-  bump_version t ek;
-  ignore (write_journal_entry ~entry_key:ek ops t)
+  ignore (write_journal_entry ~entry_key:ek ops t);
+  bump_version t ek
 
 let fetch_version t =
   match S3_client.head_opt t.client ~key:t.version_key () with
