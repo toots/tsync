@@ -4,6 +4,11 @@
 (package
  (name tsync)
  (synopsis "S3-backed FUSE filesystem sync tool")
+ (maintainers "Romain Beauxis <toots@rastageeks.org>")
+ (authors "Romain Beauxis <toots@rastageeks.org>")
+ (homepage "https://github.com/toots/tsync")
+ (bug_reports "https://github.com/toots/tsync/issues")
+ (license MIT)
  (depends
   (ocaml (>= 4.14.0))
   dune
