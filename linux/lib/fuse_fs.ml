@@ -266,50 +266,53 @@ let make_operations ctx =
         mark_dirty key);
     fopen =
       (fun path flags ->
-        let key = fuse_to_key ctx path in
-        let creating = List.mem Unix.O_CREAT flags in
-        if creating && not (is_cached ctx key) then begin
-          (* New file: create empty local placeholder *)
-          let lp = local_path ctx key in
-          Cache.ensure_parent_dir lp;
-          close_out (open_out_bin lp)
-        end
-        else if not (is_cached ctx key) then ensure_cached ctx key;
-        None);
+        guard "fopen" path (fun () ->
+          let key = fuse_to_key ctx path in
+          let creating = List.mem Unix.O_CREAT flags in
+          if creating && not (is_cached ctx key) then begin
+            (* New file: create empty local placeholder *)
+            let lp = local_path ctx key in
+            Cache.ensure_parent_dir lp;
+            close_out (open_out_bin lp)
+          end
+          else if not (is_cached ctx key) then ensure_cached ctx key;
+          None));
     read =
       (fun path buf offset _size ->
-        let key = fuse_to_key ctx path in
-        ensure_cached ctx key;
-        let lp = local_path ctx key in
-        let size = Bigarray.Array1.dim buf in
-        let tmp = Bytes.create size in
-        let fd = Unix.openfile lp [Unix.O_RDONLY] 0 in
-        ignore (Unix.lseek fd (Int64.to_int offset) Unix.SEEK_SET);
-        let n = Unix.read fd tmp 0 size in
-        Unix.close fd;
-        for i = 0 to n - 1 do
-          buf.{i} <- Bytes.get tmp i
-        done;
-        n);
+        guard "read" path (fun () ->
+          let key = fuse_to_key ctx path in
+          ensure_cached ctx key;
+          let lp = local_path ctx key in
+          let size = Bigarray.Array1.dim buf in
+          let tmp = Bytes.create size in
+          let fd = Unix.openfile lp [Unix.O_RDONLY] 0 in
+          ignore (Unix.lseek fd (Int64.to_int offset) Unix.SEEK_SET);
+          let n = Unix.read fd tmp 0 size in
+          Unix.close fd;
+          for i = 0 to n - 1 do
+            buf.{i} <- Bytes.get tmp i
+          done;
+          n));
     write =
       (fun path buf offset _size ->
-        let key = fuse_to_key ctx path in
-        let lp = local_path ctx key in
-        Cache.ensure_parent_dir lp;
-        let size = Bigarray.Array1.dim buf in
-        let tmp = Bytes.create size in
-        for i = 0 to size - 1 do
-          Bytes.set tmp i buf.{i}
-        done;
-        let fd = Unix.openfile lp [Unix.O_WRONLY; Unix.O_CREAT] 0o644 in
-        ignore (Unix.lseek fd (Int64.to_int offset) Unix.SEEK_SET);
-        let written = ref 0 in
-        while !written < size do
-          written := !written + Unix.write fd tmp !written (size - !written)
-        done;
-        Unix.close fd;
-        mark_dirty key;
-        size);
+        guard "write" path (fun () ->
+          let key = fuse_to_key ctx path in
+          let lp = local_path ctx key in
+          Cache.ensure_parent_dir lp;
+          let size = Bigarray.Array1.dim buf in
+          let tmp = Bytes.create size in
+          for i = 0 to size - 1 do
+            Bytes.set tmp i buf.{i}
+          done;
+          let fd = Unix.openfile lp [Unix.O_WRONLY; Unix.O_CREAT] 0o644 in
+          ignore (Unix.lseek fd (Int64.to_int offset) Unix.SEEK_SET);
+          let written = ref 0 in
+          while !written < size do
+            written := !written + Unix.write fd tmp !written (size - !written)
+          done;
+          Unix.close fd;
+          mark_dirty key;
+          size));
     release =
       (fun path flags _fd ->
         guard "release" path (fun () ->
@@ -414,15 +417,16 @@ let make_operations ctx =
                 fire_journal ctx ~entry_key:ek ops));
     truncate =
       (fun path size ->
-        let key = fuse_to_key ctx path in
-        (* Must have local file to truncate *)
-        if not (is_cached ctx key) then ensure_cached ctx key;
-        let lp = local_path ctx key in
-        let fd = Unix.openfile lp [Unix.O_WRONLY] 0o644 in
-        Unix.ftruncate fd (Int64.to_int size);
-        Unix.close fd;
-        cache_invalidate key;
-        mark_dirty key);
+        guard "truncate" path (fun () ->
+          let key = fuse_to_key ctx path in
+          (* Must have local file to truncate *)
+          if not (is_cached ctx key) then ensure_cached ctx key;
+          let lp = local_path ctx key in
+          let fd = Unix.openfile lp [Unix.O_WRONLY] 0o644 in
+          Unix.ftruncate fd (Int64.to_int size);
+          Unix.close fd;
+          cache_invalidate key;
+          mark_dirty key));
     statfs =
       (fun _path ->
         Fuse.Unix_util.
