@@ -27,7 +27,8 @@ install:
 	mkdir -p ~/.config/systemd/user
 	cp tsync.service ~/.config/systemd/user/
 	systemctl --user daemon-reload
-	systemctl --user enable --now tsync
+	systemctl --user enable tsync
+	systemctl --user restart tsync
 
 test-lifecycle:
 	./test_lifecycle.sh \

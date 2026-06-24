@@ -4,7 +4,7 @@ MAKE_JOBS = $(patsubst -j%,%,$(filter -j%,$(MAKEFLAGS)))
 JOBS      = $(if $(MAKE_JOBS),$(MAKE_JOBS),12)
 XFLAGS    = -project $(PROJ) -jobs $(JOBS) CODE_SIGN_STYLE=Automatic -allowProvisioningUpdates
 
-.PHONY: all generate build build-app build-cli test deploy configure test-lifecycle clean
+.PHONY: all generate build build-app build-cli test deploy install configure test-lifecycle clean
 
 all: build
 
@@ -28,6 +28,8 @@ test:
 ## Build, install to /Applications, and restart the daemon
 deploy:
 	./deploy.sh
+
+install: deploy
 
 ## Interactive first-time setup (bucket, credentials, config.json)
 configure:
