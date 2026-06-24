@@ -151,9 +151,9 @@ let guard op path f =
 
 (* ── Journal WAL helpers ─────────────────────────────────────────────────── *)
 
-(* Latest journal entry key waiting to be published via version bump.
-   The flusher thread drains this every 2 seconds. *)
+(* Latest journal entry key and keys pending eviction — both drained by the 2s flusher. *)
 let pending_version_key : string option ref = ref None
+let pending_evictions : string Queue.t = Queue.create ()
 let pending_version_mutex = Mutex.create ()
 
 let set_pending_version ek =
@@ -164,12 +164,19 @@ let set_pending_version ek =
     | _ -> pending_version_key := Some ek);
   Mutex.unlock pending_version_mutex
 
-let drain_pending_version () =
+let queue_eviction key =
+  Mutex.lock pending_version_mutex;
+  Queue.push key pending_evictions;
+  Mutex.unlock pending_version_mutex
+
+let drain_pending () =
   Mutex.lock pending_version_mutex;
   let v = !pending_version_key in
   pending_version_key := None;
+  let evictions = Queue.fold (fun acc k -> k :: acc) [] pending_evictions in
+  Queue.clear pending_evictions;
   Mutex.unlock pending_version_mutex;
-  v
+  (v, evictions)
 
 let fire_journal ctx ~entry_key ops =
   ignore
@@ -332,9 +339,7 @@ let make_operations ctx =
             clear_dirty key;
             if uploaded then begin
               fire_journal ctx ~entry_key:ek ops;
-              if !auto_evict then
-                Cache.evict ~domain_name:ctx.domain_name
-                  ~domain_prefix:ctx.domain_prefix key
+              if !auto_evict then queue_eviction key
             end else Journal.delete_local_pending ~entry_key:ek
           end));
     unlink =
@@ -523,12 +528,18 @@ let mount ctx argv =
       (fun () ->
         while true do
           Unix.sleepf 2.0;
-          (match drain_pending_version () with
+          let version_key, evictions = drain_pending () in
+          (match version_key with
             | None -> ()
             | Some ek -> (
                 try S3_store.bump_version ctx.store ek
                 with exn ->
-                  Log.err "bump_version: %s" (Printexc.to_string exn)))
+                  Log.err "bump_version: %s" (Printexc.to_string exn)));
+          List.iter
+            (fun key ->
+              Cache.evict ~domain_name:ctx.domain_name
+                ~domain_prefix:ctx.domain_prefix key)
+            evictions
         done)
       ()
   in
