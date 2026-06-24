@@ -2,11 +2,11 @@ import Foundation
 
 public struct ChunkEntry: Codable, Sendable {
     public let index: Int
-    public let sha256: String
-    public let md5: String
+    public let h1: String
+    public let h2: String
     public let size: Int
 
-    public var chunkKey: String { sha256 + "-" + md5 }
+    public var chunkKey: String { h1 + "-" + h2 }
 }
 
 public struct ChunkManifest: Codable, Sendable {

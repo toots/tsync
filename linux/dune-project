@@ -8,7 +8,6 @@
   (ocaml (>= 4.14.0))
   dune
   yojson
-  digestif
   fuse3
   aws-s3-lwt
   lwt

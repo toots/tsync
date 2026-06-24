@@ -167,11 +167,6 @@ let list_directory t ~prefix () =
   let subdirs = Hashtbl.fold (fun k () acc -> k :: acc) dirs [] in
   (List.rev !files, List.sort String.compare subdirs)
 
-(* ── Hashing ─────────────────────────────────────────────────────────────── *)
-
-let sha256_hex data = Digestif.SHA256.(digest_string data |> to_hex)
-let md5_hex data = Digestif.MD5.(digest_string data |> to_hex)
-
 (* ── File I/O helpers ────────────────────────────────────────────────────── *)
 
 let read_file path =
@@ -213,8 +208,8 @@ let put_chunked t ~key ~src_path ~chunk_prefix =
           Chunk_manifest.
             {
               index = i;
-              sha256 = sha256_hex data;
-              md5 = md5_hex data;
+              h1 = Xxhash.hash_hex data 0;
+              h2 = Xxhash.hash_hex data 1;
               size = len;
             })
     in

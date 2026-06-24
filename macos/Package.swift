@@ -13,10 +13,17 @@ let package = Package(
         .package(url: "https://github.com/apple/swift-argument-parser", from: "1.3.0"),
     ],
     targets: [
+        .systemLibrary(
+            name: "CXXHash",
+            path: "CXXHash",
+            pkgConfig: "libxxhash",
+            providers: [.brew(["xxhash"])]
+        ),
         .target(
             name: "TsyncShared",
             dependencies: [
                 .product(name: "SotoS3", package: "soto"),
+                "CXXHash",
             ],
             path: "Shared"
         ),

@@ -1,9 +1,9 @@
 (library
  (name tsync_lib)
+ (foreign_stubs (language c) (names xxhash_stubs))
+ (c_library_flags (-lxxhash))
  (libraries
   yojson
-  digestif
-  digestif.c
   fuse3
   unix
   threads.posix

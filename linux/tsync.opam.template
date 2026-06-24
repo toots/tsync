@@ -1,0 +1,4 @@
+depexts: [
+  ["libxxhash-dev"] {os-family = "debian"}
+  ["xxhash-devel"] {os-distribution = "fedora"}
+]

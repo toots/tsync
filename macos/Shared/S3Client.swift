@@ -1,5 +1,4 @@
 import AsyncHTTPClient
-import CryptoKit
 import Foundation
 import NIOCore
 import OSLog
@@ -9,14 +8,6 @@ private let log = os.Logger(subsystem: "com.toots.tsync", category: "S3Client")
 private let chunkSize = 8 * 1024 * 1024
 private let chunkThreshold = 8 * 1024 * 1024
 
-private extension SHA256.Digest {
-    var hexString: String { map { String(format: "%02x", $0) }.joined() }
-    var base64String: String { Data(self).base64EncodedString() }
-}
-
-private extension Insecure.MD5.Digest {
-    var hexString: String { map { String(format: "%02x", $0) }.joined() }
-}
 
 public struct S3Client: Sendable {
     private let s3: S3
@@ -122,7 +113,7 @@ public struct S3Client: Sendable {
             return
         }
 
-        // First pass: compute SHA-256 of each chunk (no bytes retained)
+        // First pass: compute xxhash of each chunk (no bytes retained)
         var entries: [ChunkEntry] = []
         do {
             let fh = try FileHandle(forReadingFrom: fileURL)
@@ -130,9 +121,7 @@ public struct S3Client: Sendable {
             var index = 0
             while true {
                 guard let data = try fh.read(upToCount: chunkSize), !data.isEmpty else { break }
-                let sha256 = SHA256.hash(data: data)
-                let md5 = Insecure.MD5.hash(data: data)
-                entries.append(ChunkEntry(index: index, sha256: sha256.hexString, md5: md5.hexString, size: data.count))
+                entries.append(ChunkEntry(index: index, h1: Xxhash.hashHex(data, seed: 0), h2: Xxhash.hashHex(data, seed: 1), size: data.count))
                 index += 1
             }
         }
@@ -142,31 +131,29 @@ public struct S3Client: Sendable {
             for entry in entries {
                 group.addTask {
                     let exists = await self.chunkExists(key: chunkPrefix + entry.chunkKey)
-                    return (entry.sha256, !exists)
+                    return (entry.h1, !exists)
                 }
             }
             var missing = Set<String>()
-            for try await (sha256, isMissing) in group {
-                if isMissing { missing.insert(sha256) }
+            for try await (h1, isMissing) in group {
+                if isMissing { missing.insert(h1) }
             }
             return missing
         }
 
         // Second pass: upload missing chunks in parallel (each task opens its own FileHandle)
-        let missingEntries = entries.filter { missingSet.contains($0.sha256) }
+        let missingEntries = entries.filter { missingSet.contains($0.h1) }
         log.info("upload \(key): \(entries.count) chunks, \(missingEntries.count) to upload")
         try await withBoundedConcurrency(missingEntries, maxConcurrent: 8) { entry in
             let fh = try FileHandle(forReadingFrom: fileURL)
             defer { try? fh.close() }
             try fh.seek(toOffset: UInt64(entry.index) * UInt64(chunkSize))
             guard let data = try fh.read(upToCount: chunkSize), !data.isEmpty else { return }
-            let digest = SHA256.hash(data: data)
             let chunkKey = chunkPrefix + entry.chunkKey
             log.debug("uploading chunk \(entry.index)/\(entries.count) key=\(chunkKey, privacy: .public)")
             _ = try await self.s3.putObject(.init(
                 body: AWSHTTPBody(bytes: data),
                 bucket: self.bucket,
-                checksumSHA256: digest.base64String,
                 key: chunkKey
             ))
         }
@@ -205,7 +192,7 @@ public struct S3Client: Sendable {
                 guard !chunkData.isEmpty else {
                     throw ChunkIntegrityError(index: chunk.index)
                 }
-                guard SHA256.hash(data: chunkData).hexString == chunk.sha256 else {
+                guard Xxhash.hashHex(chunkData, seed: 0) == chunk.h1 else {
                     throw ChunkIntegrityError(index: chunk.index)
                 }
                 let fh = try FileHandle(forWritingTo: fileURL)
