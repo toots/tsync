@@ -1,4 +1,5 @@
 import AsyncHTTPClient
+import CryptoKit
 import Foundation
 import NIOCore
 import OSLog
@@ -8,6 +9,10 @@ private let log = os.Logger(subsystem: "com.toots.tsync", category: "S3Client")
 private let chunkSize = 8 * 1024 * 1024
 private let chunkThreshold = 8 * 1024 * 1024
 
+
+private extension SHA256.Digest {
+    var base64String: String { Data(self).base64EncodedString() }
+}
 
 public struct S3Client: Sendable {
     private let s3: S3
@@ -149,11 +154,13 @@ public struct S3Client: Sendable {
             defer { try? fh.close() }
             try fh.seek(toOffset: UInt64(entry.index) * UInt64(chunkSize))
             guard let data = try fh.read(upToCount: chunkSize), !data.isEmpty else { return }
+            let digest = SHA256.hash(data: data)
             let chunkKey = chunkPrefix + entry.chunkKey
             log.debug("uploading chunk \(entry.index)/\(entries.count) key=\(chunkKey, privacy: .public)")
             _ = try await self.s3.putObject(.init(
                 body: AWSHTTPBody(bytes: data),
                 bucket: self.bucket,
+                checksumSHA256: digest.base64String,
                 key: chunkKey
             ))
         }
