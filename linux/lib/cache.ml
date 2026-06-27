@@ -33,7 +33,14 @@ let is_cached ~domain_name ~domain_prefix key =
   Sys.file_exists path
 
 let manifest_path ~domain_name ~domain_prefix key =
-  cache_path ~domain_name ~domain_prefix key ^ ".manifest"
+  let relative =
+    let pfx = String.length domain_prefix in
+    if String.length key > pfx
+       && String.sub key 0 pfx = domain_prefix
+    then String.sub key pfx (String.length key - pfx)
+    else key
+  in
+  Filename.concat (Filename.concat (cache_root domain_name) ".manifest") relative
 
 let write_manifest ~domain_name ~domain_prefix key content =
   let path = manifest_path ~domain_name ~domain_prefix key in
