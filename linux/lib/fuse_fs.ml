@@ -215,8 +215,17 @@ let make_operations ctx =
                 if is_cached ctx key then
                   Unix.LargeFile.stat (local_path ctx key)
                 else begin
+                  match Cache.read_manifest ~domain_name:ctx.domain_name
+                          ~domain_prefix:ctx.domain_prefix key
+                  with
+                  | Some (manifest_str, mtime) ->
+                      let m = Chunk_manifest.of_string manifest_str in
+                      let st = file_stat (Int64.to_int m.size) mtime in
+                      cache_put key st;
+                      st
+                  | None ->
                   (* HEAD on S3 as file, then as directory; stat_file resolves manifest size *)
-                    match S3_store.stat_file ctx.store ~key with
+                  match S3_store.stat_file ctx.store ~key with
                     | Some c ->
                         let st = stat_of_entry c in
                         cache_put key st;
@@ -257,6 +266,8 @@ let make_operations ctx =
          with exn ->
            Log.err "mknod open %s: %s" lp (Printexc.to_string exn);
            raise (Unix.Unix_error (Unix.EIO, "mknod", path)));
+        Cache.delete_manifest ~domain_name:ctx.domain_name
+          ~domain_prefix:ctx.domain_prefix key;
         mark_dirty key);
     fopen =
       (fun path flags ->
@@ -267,7 +278,9 @@ let make_operations ctx =
             (* New file: create empty local placeholder *)
             let lp = local_path ctx key in
             Cache.ensure_parent_dir lp;
-            close_out (open_out_bin lp)
+            close_out (open_out_bin lp);
+            Cache.delete_manifest ~domain_name:ctx.domain_name
+              ~domain_prefix:ctx.domain_prefix key
           end
           else if not (is_cached ctx key) then ensure_cached ctx key;
           None));
@@ -325,16 +338,22 @@ let make_operations ctx =
             in
             let ops = [ `Put (rel_key ctx key, size) ] in
             Journal.write_local_pending ~entry_key:ek ops;
-            let uploaded =
-              try S3_store.upload ctx.store ~key ~src_path:lp; true
+            let manifest_opt =
+              try Some (S3_store.upload ctx.store ~key ~src_path:lp)
               with exn ->
                 Log.err "upload %s: %s" key (Printexc.to_string exn);
-                false
+                None
             in
-            (* cache correct size so getattr doesn't fall back to manifest HEAD *)
-            cache_put key (file_stat (Int64.to_int size) (Unix.gettimeofday ()));
+            let mtime = Unix.gettimeofday () in
+            cache_put key (file_stat (Int64.to_int size) mtime);
             clear_dirty key;
-            if uploaded then begin
+            (match manifest_opt with
+              | Some (Some manifest) ->
+                  Cache.write_manifest ~domain_name:ctx.domain_name
+                    ~domain_prefix:ctx.domain_prefix key
+                    (Chunk_manifest.to_string manifest)
+              | _ -> ());
+            if manifest_opt <> None then begin
               fire_journal ctx ~entry_key:ek ops;
               if !auto_evict then
                 Cache.evict ~domain_name:ctx.domain_name
@@ -349,6 +368,8 @@ let make_operations ctx =
           let ops = [ `Delete (rel_key ctx key) ] in
           Journal.write_local_pending ~entry_key:ek ops;
           Cache.evict ~domain_name:ctx.domain_name
+            ~domain_prefix:ctx.domain_prefix key;
+          Cache.delete_manifest ~domain_name:ctx.domain_name
             ~domain_prefix:ctx.domain_prefix key;
           cache_invalidate key;
           S3_store.delete_file ctx.store ~key;
@@ -409,6 +430,14 @@ let make_operations ctx =
                   Cache.ensure_parent_dir dst_lp;
                   Unix.rename src_lp dst_lp
                 end;
+                (let src_mp = Cache.manifest_path ~domain_name:ctx.domain_name
+                               ~domain_prefix:ctx.domain_prefix src_key in
+                 if Sys.file_exists src_mp then begin
+                   let dst_mp = Cache.manifest_path ~domain_name:ctx.domain_name
+                                  ~domain_prefix:ctx.domain_prefix dst_key in
+                   Cache.ensure_parent_dir dst_mp;
+                   Unix.rename src_mp dst_mp
+                 end);
                 S3_store.rename_file ctx.store ~src_key ~dst_key;
                 fire_journal ctx ~entry_key:ek ops));
     truncate =
