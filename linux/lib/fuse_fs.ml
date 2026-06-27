@@ -441,12 +441,13 @@ let make_operations ctx =
           });
     utime =
       (fun path atime mtime ->
-        let key = fuse_to_key ctx path in
-        match cache_get key with
-          | None -> ()
-          | Some st ->
-              cache_put key
-                Unix.LargeFile.{ st with st_atime = atime; st_mtime = mtime });
+        guard "utime" path (fun () ->
+          let key = fuse_to_key ctx path in
+          match cache_get key with
+            | None -> ()
+            | Some st ->
+                cache_put key
+                  Unix.LargeFile.{ st with st_atime = atime; st_mtime = mtime }));
     init = (fun () -> ());
   }
 
