@@ -240,6 +240,7 @@ let make_operations ctx =
         end);
     readdir =
       (fun path _offset ->
+        (* ponytail: always live from S3; add a short-TTL directory listing cache when list latency matters *)
         let prefix = fuse_to_dir_prefix ctx path in
         let files, subdirs = S3_store.list_directory ctx.store ~prefix in
         List.iter
