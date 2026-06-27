@@ -20,6 +20,14 @@ let cache_path ~domain_name ~domain_prefix key =
   in
   Filename.concat (cache_root domain_name) relative
 
+let rec mkdir_p path =
+  if not (Sys.file_exists path) then begin
+    mkdir_p (Filename.dirname path);
+    try Unix.mkdir path 0o755 with Unix.Unix_error (Unix.EEXIST, _, _) -> ()
+  end
+
+let ensure_parent_dir path = mkdir_p (Filename.dirname path)
+
 let is_cached ~domain_name ~domain_prefix key =
   let path = cache_path ~domain_name ~domain_prefix key in
   Sys.file_exists path
@@ -55,11 +63,3 @@ let evict ~domain_name ~domain_prefix key =
   let path = cache_path ~domain_name ~domain_prefix key in
   (try Unix.unlink path with Unix.Unix_error _ -> ())
   (* manifest sidecar is kept intentionally *)
-
-let rec mkdir_p path =
-  if not (Sys.file_exists path) then begin
-    mkdir_p (Filename.dirname path);
-    try Unix.mkdir path 0o755 with Unix.Unix_error (Unix.EEXIST, _, _) -> ()
-  end
-
-let ensure_parent_dir path = mkdir_p (Filename.dirname path)

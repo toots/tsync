@@ -188,7 +188,7 @@ let recover_pending_ops t =
                         ~domain_prefix:t.domain_prefix full_key
                     in
                     if Sys.file_exists cache_path then
-                      upload t ~key:full_key ~src_path:cache_path
+                      ignore (upload t ~key:full_key ~src_path:cache_path)
                 | `Delete rel_key ->
                     delete_file t ~key:(t.domain_prefix ^ rel_key)
                 | `Mkdir rel_key ->
