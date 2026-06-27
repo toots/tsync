@@ -1,5 +1,5 @@
 type context = {
-  store : S3_store.t;
+  store : File_store.t;
   domain_name : string;
   domain_prefix : string;
   mount_point : string;
@@ -95,22 +95,6 @@ let file_stat size mtime =
 
 let stat_of_entry (e : S3_client.file_entry) = file_stat e.size e.last_modified
 
-(* ── Cache helpers ───────────────────────────────────────────────────────── *)
-
-let is_cached ctx key =
-  Cache.is_cached ~domain_name:ctx.domain_name ~domain_prefix:ctx.domain_prefix
-    key
-
-let local_path ctx key =
-  Cache.cache_path ~domain_name:ctx.domain_name ~domain_prefix:ctx.domain_prefix
-    key
-
-let ensure_cached ctx key =
-  if not (is_cached ctx key) then begin
-    let dst = local_path ctx key in
-    S3_store.download ctx.store ~key ~dst_path:dst
-  end
-
 (* ── Auto-evict ──────────────────────────────────────────────────────────── *)
 
 let auto_evict = ref (Sys.file_exists (Ipc.auto_evict_path ()))
@@ -176,7 +160,7 @@ let fire_journal ctx ~entry_key ops =
     (Thread.create
        (fun () ->
          (try
-            ignore (S3_store.write_journal_entry ~entry_key ops ctx.store);
+            ignore (File_store.write_journal_entry ~entry_key ops ctx.store);
             set_pending_version entry_key
           with exn ->
             Log.err "write_journal_entry: %s" (Printexc.to_string exn));
@@ -186,7 +170,7 @@ let fire_journal ctx ~entry_key ops =
 (* ── Cache walk (for FULL_RESYNC) ────────────────────────────────────────── *)
 
 let walk_cache_dir ctx f =
-  let root = Cache.cache_root ctx.domain_name in
+  let root = File_store.cache_root ctx.store in
   let rec walk dir =
     if Sys.file_exists dir then
       Array.iter
@@ -212,27 +196,24 @@ let make_operations ctx =
             | Some st -> st
             | None ->
                 (* Check local cache first (already downloaded) *)
-                if is_cached ctx key then
-                  Unix.LargeFile.stat (local_path ctx key)
+                if File_store.is_cached ctx.store key then
+                  Unix.LargeFile.stat (File_store.local_path ctx.store key)
                 else begin
-                  match Cache.read_manifest ~domain_name:ctx.domain_name
-                          ~domain_prefix:ctx.domain_prefix key
-                  with
-                  | Some (manifest_str, mtime) ->
-                      let m = Chunk_manifest.of_string manifest_str in
+                  match File_store.read_manifest ctx.store key with
+                  | Some (m, mtime) ->
                       let st = file_stat (Int64.to_int m.size) mtime in
                       cache_put key st;
                       st
                   | None ->
                   (* HEAD on S3 as file, then as directory; stat_file resolves manifest size *)
-                  match S3_store.stat_file ctx.store ~key with
+                  match File_store.stat_file ctx.store ~key with
                     | Some c ->
                         let st = stat_of_entry c in
                         cache_put key st;
                         st
                     | None -> (
                         let dir_key = key ^ "/" in
-                        match S3_store.head_opt ctx.store ~key:dir_key with
+                        match File_store.head_opt ctx.store ~key:dir_key with
                           | Some _ -> dir_stat ()
                           | None ->
                               raise
@@ -244,7 +225,7 @@ let make_operations ctx =
       (fun path _offset ->
         (* ponytail: always live from S3; add a short-TTL directory listing cache when list latency matters *)
         let prefix = fuse_to_dir_prefix ctx path in
-        let files, subdirs = S3_store.list_directory ctx.store ~prefix in
+        let files, subdirs = File_store.list_directory ctx.store ~prefix in
         List.iter
           (fun (e : S3_client.file_entry) -> cache_put e.key (stat_of_entry e))
           files;
@@ -257,8 +238,8 @@ let make_operations ctx =
     mknod =
       (fun path _mode ->
         let key = fuse_to_key ctx path in
-        let lp = local_path ctx key in
-        (try Cache.ensure_parent_dir lp
+        let lp = File_store.local_path ctx.store key in
+        (try File_store.ensure_parent_dir lp
          with exn ->
            Log.err "mknod ensure_parent_dir %s: %s" lp (Printexc.to_string exn);
            raise (Unix.Unix_error (Unix.EIO, "mknod", path)));
@@ -266,30 +247,28 @@ let make_operations ctx =
          with exn ->
            Log.err "mknod open %s: %s" lp (Printexc.to_string exn);
            raise (Unix.Unix_error (Unix.EIO, "mknod", path)));
-        Cache.delete_manifest ~domain_name:ctx.domain_name
-          ~domain_prefix:ctx.domain_prefix key;
+        File_store.delete_manifest ctx.store key;
         mark_dirty key);
     fopen =
       (fun path flags ->
         guard "fopen" path (fun () ->
           let key = fuse_to_key ctx path in
           let creating = List.mem Unix.O_CREAT flags in
-          if creating && not (is_cached ctx key) then begin
+          if creating && not (File_store.is_cached ctx.store key) then begin
             (* New file: create empty local placeholder *)
-            let lp = local_path ctx key in
-            Cache.ensure_parent_dir lp;
+            let lp = File_store.local_path ctx.store key in
+            File_store.ensure_parent_dir lp;
             close_out (open_out_bin lp);
-            Cache.delete_manifest ~domain_name:ctx.domain_name
-              ~domain_prefix:ctx.domain_prefix key
+            File_store.delete_manifest ctx.store key
           end
-          else if not (is_cached ctx key) then ensure_cached ctx key;
+          else if not (File_store.is_cached ctx.store key) then File_store.ensure_cached ctx.store key;
           None));
     read =
       (fun path buf offset _size ->
         guard "read" path (fun () ->
           let key = fuse_to_key ctx path in
-          ensure_cached ctx key;
-          let lp = local_path ctx key in
+          File_store.ensure_cached ctx.store key;
+          let lp = File_store.local_path ctx.store key in
           let size = Bigarray.Array1.dim buf in
           let tmp = Bytes.create size in
           let fd = Unix.openfile lp [Unix.O_RDONLY] 0 in
@@ -304,8 +283,8 @@ let make_operations ctx =
       (fun path buf offset _size ->
         guard "write" path (fun () ->
           let key = fuse_to_key ctx path in
-          let lp = local_path ctx key in
-          Cache.ensure_parent_dir lp;
+          let lp = File_store.local_path ctx.store key in
+          File_store.ensure_parent_dir lp;
           let size = Bigarray.Array1.dim buf in
           let tmp = Bytes.create size in
           for i = 0 to size - 1 do
@@ -330,7 +309,7 @@ let make_operations ctx =
           in
           if writing then begin
             Log.debug "release %s: uploading" path;
-            let lp = local_path ctx key in
+            let lp = File_store.local_path ctx.store key in
             let ek = Journal.entry_key () in
             let size =
               try (Unix.LargeFile.stat lp).Unix.LargeFile.st_size
@@ -338,26 +317,18 @@ let make_operations ctx =
             in
             let ops = [ `Put (rel_key ctx key, size) ] in
             Journal.write_local_pending ~entry_key:ek ops;
-            let manifest_opt =
-              try Some (S3_store.upload ctx.store ~key ~src_path:lp)
+            let uploaded =
+              try File_store.upload ctx.store ~key ~src_path:lp; true
               with exn ->
                 Log.err "upload %s: %s" key (Printexc.to_string exn);
-                None
+                false
             in
             let mtime = Unix.gettimeofday () in
             cache_put key (file_stat (Int64.to_int size) mtime);
             clear_dirty key;
-            (match manifest_opt with
-              | Some (Some manifest) ->
-                  Cache.write_manifest ~domain_name:ctx.domain_name
-                    ~domain_prefix:ctx.domain_prefix key
-                    (Chunk_manifest.to_string manifest)
-              | _ -> ());
-            if manifest_opt <> None then begin
+            if uploaded then begin
               fire_journal ctx ~entry_key:ek ops;
-              if !auto_evict then
-                Cache.evict ~domain_name:ctx.domain_name
-                  ~domain_prefix:ctx.domain_prefix key
+              if !auto_evict then File_store.evict ctx.store key
             end else Journal.delete_local_pending ~entry_key:ek
           end));
     unlink =
@@ -367,12 +338,10 @@ let make_operations ctx =
           let ek = Journal.entry_key () in
           let ops = [ `Delete (rel_key ctx key) ] in
           Journal.write_local_pending ~entry_key:ek ops;
-          Cache.evict ~domain_name:ctx.domain_name
-            ~domain_prefix:ctx.domain_prefix key;
-          Cache.delete_manifest ~domain_name:ctx.domain_name
-            ~domain_prefix:ctx.domain_prefix key;
+          File_store.evict ctx.store key;
+          File_store.delete_manifest ctx.store key;
           cache_invalidate key;
-          S3_store.delete_file ctx.store ~key;
+          File_store.delete_file ctx.store ~key;
           fire_journal ctx ~entry_key:ek ops));
     mkdir =
       (fun path _mode ->
@@ -381,7 +350,7 @@ let make_operations ctx =
           let ek = Journal.entry_key () in
           let ops = [ `Mkdir (rel_key ctx key) ] in
           Journal.write_local_pending ~entry_key:ek ops;
-          S3_store.create_directory ctx.store ~key;
+          File_store.create_directory ctx.store ~key;
           fire_journal ctx ~entry_key:ek ops));
     rmdir =
       (fun path ->
@@ -390,7 +359,7 @@ let make_operations ctx =
           let ek = Journal.entry_key () in
           let ops = [ `Rmdir (rel_key ctx prefix) ] in
           Journal.write_local_pending ~entry_key:ek ops;
-          S3_store.delete_dir ctx.store ~prefix;
+          File_store.delete_dir ctx.store ~prefix;
           fire_journal ctx ~entry_key:ek ops));
     rename =
       (fun src dst ->
@@ -401,21 +370,21 @@ let make_operations ctx =
           cache_invalidate dst_key;
           let src_dir = src_key ^ "/" in
           let ek = Journal.entry_key () in
-          match S3_store.head_opt ctx.store ~key:src_dir with
+          match File_store.head_opt ctx.store ~key:src_dir with
             | Some _ ->
                 let ops =
                   [ `Rename (rel_key ctx dst_key, rel_key ctx src_key, None) ]
                 in
                 Journal.write_local_pending ~entry_key:ek ops;
-                S3_store.rename_directory ctx.store ~src_prefix:src_dir
+                File_store.rename_directory ctx.store ~src_prefix:src_dir
                   ~dst_prefix:(dst_key ^ "/");
                 fire_journal ctx ~entry_key:ek ops
             | None ->
                 let size =
-                  if is_cached ctx src_key then
+                  if File_store.is_cached ctx.store src_key then
                     (try
                        Some
-                         (Unix.LargeFile.stat (local_path ctx src_key))
+                         (Unix.LargeFile.stat (File_store.local_path ctx.store src_key))
                            .Unix.LargeFile.st_size
                      with _ -> None)
                   else None
@@ -424,29 +393,22 @@ let make_operations ctx =
                   [ `Rename (rel_key ctx dst_key, rel_key ctx src_key, size) ]
                 in
                 Journal.write_local_pending ~entry_key:ek ops;
-                if is_cached ctx src_key then begin
-                  let src_lp = local_path ctx src_key in
-                  let dst_lp = local_path ctx dst_key in
-                  Cache.ensure_parent_dir dst_lp;
+                if File_store.is_cached ctx.store src_key then begin
+                  let src_lp = File_store.local_path ctx.store src_key in
+                  let dst_lp = File_store.local_path ctx.store dst_key in
+                  File_store.ensure_parent_dir dst_lp;
                   Unix.rename src_lp dst_lp
                 end;
-                (let src_mp = Cache.manifest_path ~domain_name:ctx.domain_name
-                               ~domain_prefix:ctx.domain_prefix src_key in
-                 if Sys.file_exists src_mp then begin
-                   let dst_mp = Cache.manifest_path ~domain_name:ctx.domain_name
-                                  ~domain_prefix:ctx.domain_prefix dst_key in
-                   Cache.ensure_parent_dir dst_mp;
-                   Unix.rename src_mp dst_mp
-                 end);
-                S3_store.rename_file ctx.store ~src_key ~dst_key;
+                File_store.rename_manifest ctx.store ~src_key ~dst_key;
+                File_store.rename_file ctx.store ~src_key ~dst_key;
                 fire_journal ctx ~entry_key:ek ops));
     truncate =
       (fun path size ->
         guard "truncate" path (fun () ->
           let key = fuse_to_key ctx path in
           (* Must have local file to truncate *)
-          if not (is_cached ctx key) then ensure_cached ctx key;
-          let lp = local_path ctx key in
+          if not (File_store.is_cached ctx.store key) then File_store.ensure_cached ctx.store key;
+          let lp = File_store.local_path ctx.store key in
           let fd = Unix.openfile lp [Unix.O_WRONLY] 0o644 in
           Unix.ftruncate fd (Int64.to_int size);
           Unix.close fd;
@@ -499,14 +461,13 @@ let ipc_handler ctx line =
   match cmd with
     | "EVICT" ->
         let key = key_of_path arg in
-        Cache.evict ~domain_name:ctx.domain_name
-          ~domain_prefix:ctx.domain_prefix key;
+        File_store.evict ctx.store key;
         cache_invalidate key;
         "OK"
     | "RESTORE" -> (
         let key = key_of_path arg in
         try
-          ensure_cached ctx key;
+          File_store.ensure_cached ctx.store key;
           "OK"
         with exn -> "ERROR " ^ Printexc.to_string exn)
     | "STATUS" ->
@@ -540,7 +501,7 @@ let ipc_handler ctx line =
           | _ -> "ERROR expected on|off|status")
     | "WAIT" ->
         let key = key_of_path arg in
-        if is_cached ctx key then "OK" else "ERROR not cached"
+        if File_store.is_cached ctx.store key then "OK" else "ERROR not cached"
     | "FULL_RESYNC" ->
         Mutex.lock meta_mutex;
         Hashtbl.clear meta_cache;
@@ -561,7 +522,7 @@ let mount ctx argv =
           (match drain_pending_version () with
             | None -> ()
             | Some ek -> (
-                try S3_store.bump_version ctx.store ek
+                try File_store.bump_version ctx.store ek
                 with exn ->
                   Log.err "bump_version: %s" (Printexc.to_string exn)))
         done)
@@ -575,7 +536,7 @@ let mount ctx argv =
         while true do
           Unix.sleepf 1.0;
           (try
-             let version = S3_store.fetch_version ctx.store in
+             let version = File_store.fetch_version ctx.store in
              if !known <> None && version <> !known then begin
                Mutex.lock meta_mutex;
                Hashtbl.clear meta_cache;

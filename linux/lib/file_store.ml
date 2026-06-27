@@ -22,12 +22,73 @@ let make ~client ~domain_name ~domain_prefix ~chunk_prefix ~trash_prefix
     version_key;
   }
 
+(* ── Local cache helpers ──────────────────────────────────────────────────── *)
+
+let is_cached t key =
+  Cache.is_cached ~domain_name:t.domain_name ~domain_prefix:t.domain_prefix key
+
+let local_path t key =
+  Cache.cache_path ~domain_name:t.domain_name ~domain_prefix:t.domain_prefix key
+
+let cache_root t = Cache.cache_root t.domain_name
+let ensure_parent_dir = Cache.ensure_parent_dir
+
+let read_manifest t key =
+  match
+    Cache.read_manifest ~domain_name:t.domain_name ~domain_prefix:t.domain_prefix
+      key
+  with
+    | None -> None
+    | Some (s, mtime) -> Some (Chunk_manifest.of_string s, mtime)
+
+let delete_manifest t key =
+  Cache.delete_manifest ~domain_name:t.domain_name ~domain_prefix:t.domain_prefix
+    key
+
+let evict t key =
+  Cache.evict ~domain_name:t.domain_name ~domain_prefix:t.domain_prefix key
+
+let rename_manifest t ~src_key ~dst_key =
+  let src_mp =
+    Cache.manifest_path ~domain_name:t.domain_name ~domain_prefix:t.domain_prefix
+      src_key
+  in
+  if Sys.file_exists src_mp then begin
+    let dst_mp =
+      Cache.manifest_path ~domain_name:t.domain_name
+        ~domain_prefix:t.domain_prefix dst_key
+    in
+    Cache.ensure_parent_dir dst_mp;
+    Unix.rename src_mp dst_mp
+  end
+
+(* ── S3 operations ───────────────────────────────────────────────────────── *)
+
 let upload t ~key ~src_path =
-  S3_client.put_chunked t.client ~key ~src_path ~chunk_prefix:t.chunk_prefix
+  let manifest_opt =
+    S3_client.put_chunked t.client ~key ~src_path ~chunk_prefix:t.chunk_prefix
+  in
+  Option.iter
+    (fun manifest ->
+      Cache.write_manifest ~domain_name:t.domain_name
+        ~domain_prefix:t.domain_prefix key
+        (Chunk_manifest.to_string manifest))
+    manifest_opt
 
 let download t ~key ~dst_path =
   Cache.ensure_parent_dir dst_path;
-  S3_client.get_chunked t.client ~key ~dst_path ~chunk_prefix:t.chunk_prefix
+  let manifest_opt =
+    S3_client.get_chunked t.client ~key ~dst_path ~chunk_prefix:t.chunk_prefix
+  in
+  Option.iter
+    (fun manifest ->
+      Cache.write_manifest ~domain_name:t.domain_name
+        ~domain_prefix:t.domain_prefix key
+        (Chunk_manifest.to_string manifest))
+    manifest_opt
+
+let ensure_cached t key =
+  if not (is_cached t key) then download t ~key ~dst_path:(local_path t key)
 
 let delete_file t ~key =
   if t.versioning then begin
@@ -37,7 +98,8 @@ let delete_file t ~key =
     in
     S3_client.copy t.client ~src_key:key ~dst_key:trash_key ()
   end;
-  S3_client.delete t.client ~key ()
+  S3_client.delete t.client ~key ();
+  delete_manifest t key
 
 (* Delete a directory recursively without versioning (directory markers are not trashed) *)
 let delete_dir t ~prefix =
@@ -80,6 +142,7 @@ let stat_file t ~key =
            Some { c with S3_client.size = Int64.to_int m.size }
          with _ -> Some c)
     | Some c -> Some c
+
 let domain_name t = t.domain_name
 let domain_prefix t = t.domain_prefix
 let journal_prefix t = t.journal_prefix
@@ -188,7 +251,7 @@ let recover_pending_ops t =
                         ~domain_prefix:t.domain_prefix full_key
                     in
                     if Sys.file_exists cache_path then
-                      ignore (upload t ~key:full_key ~src_path:cache_path)
+                      upload t ~key:full_key ~src_path:cache_path
                 | `Delete rel_key ->
                     delete_file t ~key:(t.domain_prefix ^ rel_key)
                 | `Mkdir rel_key ->

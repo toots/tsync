@@ -265,9 +265,11 @@ let get_chunked t ~key ~dst_path ~chunk_prefix =
                 !written + Unix.write_substring fd data !written (len - !written)
             done)
           manifest.chunks;
-        Unix.close fd
+        Unix.close fd;
+        Some manifest
     | _ ->
         let body = get t ~key () in
         let oc = open_out_bin dst_path in
         output_string oc body;
-        close_out oc
+        close_out oc;
+        None

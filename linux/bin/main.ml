@@ -34,7 +34,7 @@ let load_store ?domain_name () =
   let journal_prefix = Config.journal_prefix cfg domain_name in
   let version_key = Config.version_key cfg domain_name in
   let store =
-    S3_store.make ~client ~domain_name ~domain_prefix ~chunk_prefix
+    File_store.make ~client ~domain_name ~domain_prefix ~chunk_prefix
       ~trash_prefix ~versioning:cfg.Config.versioning ~journal_prefix
       ~version_key
   in
@@ -72,7 +72,7 @@ let start_cmd =
         {
           store;
           domain_name;
-          domain_prefix = S3_store.domain_prefix store;
+          domain_prefix = File_store.domain_prefix store;
           mount_point;
         }
     in
@@ -184,10 +184,10 @@ let pull_cmd =
             let home = Sys.getenv "HOME" in
             Filename.concat home ("tsync/" ^ domain_name)
     in
-    let prefix = S3_store.domain_prefix store in
+    let prefix = File_store.domain_prefix store in
     let all =
       S3_client.list_all
-        ( S3_store.domain_prefix store |> fun _ ->
+        ( File_store.domain_prefix store |> fun _ ->
           (* ponytail: access client via store internals not exposed — use list_directory *)
           failwith "todo" )
         ~prefix ()
@@ -213,11 +213,11 @@ let ls_cmd =
     in
     let dir = match path with Some p -> p | None -> mount_point in
     let prefix =
-      let dp = S3_store.domain_prefix store in
+      let dp = File_store.domain_prefix store in
       if dir = mount_point then dp else dp ^ Filename.basename dir ^ "/"
     in
-    let files, subdirs = S3_store.list_directory store ~prefix in
-    let domain_prefix = S3_store.domain_prefix store in
+    let files, subdirs = File_store.list_directory store ~prefix in
+    let domain_prefix = File_store.domain_prefix store in
     let dp_len = String.length domain_prefix in
     List.iter
       (fun (e : S3_client.file_entry) ->
@@ -226,7 +226,7 @@ let ls_cmd =
             String.sub e.key dp_len (String.length e.key - dp_len)
           else e.key
         in
-        let cached = Cache.is_cached ~domain_name ~domain_prefix e.key in
+        let cached = File_store.is_cached store e.key in
         Printf.printf "%s  %s  %d bytes\n"
           (if cached then "local" else "cloud")
           name e.size)
@@ -298,7 +298,7 @@ let sync_cmd =
   in
   let run domain =
     let _cfg, domain_name, store = load_store ?domain_name:domain () in
-    S3_store.recover_pending_ops store;
+    File_store.recover_pending_ops store;
     let last_sync_file =
       Filename.concat (Journal.share_dir ()) ("last-sync-" ^ domain_name)
     in
@@ -310,7 +310,7 @@ let sync_cmd =
         String.trim s)
       else ""
     in
-    let all_keys = S3_store.list_journal_keys store () in
+    let all_keys = File_store.list_journal_keys store () in
     let need_full_resync =
       if last_sync_key = "" then true
       else
@@ -326,7 +326,7 @@ let sync_cmd =
          if resp <> "OK" then
            Printf.eprintf "Warning: FULL_RESYNC response: %s\n" resp
        with _ -> ());
-      let new_key = S3_store.journal_prefix store ^ Journal.entry_key () in
+      let new_key = File_store.journal_prefix store ^ Journal.entry_key () in
       let oc = open_out last_sync_file in
       output_string oc new_key;
       close_out oc;
@@ -341,7 +341,7 @@ let sync_cmd =
       let touched = Hashtbl.create 16 in
       List.iter
         (fun (ek, _) ->
-          match S3_store.get_journal_entry store ek with
+          match File_store.get_journal_entry store ek with
             | None -> ()
             | Some ops ->
                 List.iter
@@ -368,7 +368,7 @@ let sync_cmd =
             let last_key, _ = List.nth all_keys (List.length all_keys - 1) in
             (* store full S3 key for cross-platform compatibility *)
             let oc = open_out last_sync_file in
-            let store_val = S3_store.journal_prefix store ^ last_key in
+            let store_val = File_store.journal_prefix store ^ last_key in
             output_string oc store_val;
             close_out oc);
       let n = List.length touched_keys in
