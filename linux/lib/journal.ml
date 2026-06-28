@@ -1,8 +1,10 @@
+type rename_op = { dst : string; src : string; size : int64 option; is_dir : bool }
+
 type op =
   [ `Delete of string
   | `Mkdir of string
   | `Put of string * int64
-  | `Rename of string * string * int64 option
+  | `Rename of rename_op
   | `Rmdir of string ]
 
 let share_dir () =
@@ -64,12 +66,13 @@ let encode ops =
     | `Delete key -> `Assoc [ ("op", `String "delete"); ("key", `String key) ]
     | `Mkdir key -> `Assoc [ ("op", `String "mkdir"); ("key", `String key) ]
     | `Rmdir key -> `Assoc [ ("op", `String "rmdir"); ("key", `String key) ]
-    | `Rename (key, src, size) ->
+    | `Rename { dst; src; size; is_dir } ->
         let fields =
           [
             ("op", `String "rename");
-            ("key", `String key);
+            ("key", `String dst);
             ("src", `String src);
+            ("is_dir", `Bool is_dir);
           ]
           @ (match size with
               | None -> []
@@ -104,7 +107,12 @@ let decode s =
                       | `Int n -> Some (Int64.of_int n)
                       | _ -> None
                   in
-                  `Rename (key, src, size)
+                  let is_dir =
+                    match j |> member "is_dir" with
+                      | `Bool b -> b
+                      | _ -> false
+                  in
+                  `Rename { dst = key; src; size; is_dir }
               | s -> failwith ("unknown op: " ^ s)
           in
           Some op

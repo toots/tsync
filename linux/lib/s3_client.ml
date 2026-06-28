@@ -2,6 +2,7 @@ open Lwt.Infix
 module S3 = Aws_s3_lwt.S3
 
 exception S3_error of string
+exception Cancelled
 
 type file_entry = {
   key : string;
@@ -191,7 +192,7 @@ let read_chunk path offset len =
 
 (* ── Chunked upload ──────────────────────────────────────────────────────── *)
 
-let put_chunked t ~key ~src_path ~chunk_prefix =
+let put_chunked t ~key ~src_path ?(cancel = Atomic.make false) ~chunk_prefix () =
   let file_size = (Unix.stat src_path).Unix.st_size in
   if file_size <= Chunk_manifest.chunk_size then begin
     put t ~content_type:"application/octet-stream" ~key
@@ -216,6 +217,7 @@ let put_chunked t ~key ~src_path ~chunk_prefix =
     in
     List.iter
       (fun (e : Chunk_manifest.chunk_entry) ->
+        if Atomic.get cancel then raise Cancelled;
         let ck = chunk_prefix ^ Chunk_manifest.chunk_key e in
         if head_opt t ~key:ck () = None then begin
           let data =

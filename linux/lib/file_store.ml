@@ -64,9 +64,9 @@ let rename_manifest t ~src_key ~dst_key =
 
 (* ── S3 operations ───────────────────────────────────────────────────────── *)
 
-let upload t ~key ~src_path =
+let upload t ~key ~src_path ?(cancel = Atomic.make false) () =
   let manifest_opt =
-    S3_client.put_chunked t.client ~key ~src_path ~chunk_prefix:t.chunk_prefix
+    S3_client.put_chunked t.client ~key ~src_path ~cancel ~chunk_prefix:t.chunk_prefix ()
   in
   Option.iter
     (fun manifest ->
@@ -224,8 +224,8 @@ let recover_pending_ops t =
                         match op with
                           | `Put (k, _) | `Delete k | `Mkdir k | `Rmdir k ->
                               Hashtbl.replace remotely_modified k ()
-                          | `Rename (k, src, _) ->
-                              Hashtbl.replace remotely_modified k ();
+                          | `Rename { Journal.dst; src; _ } ->
+                              Hashtbl.replace remotely_modified dst ();
                               Hashtbl.replace remotely_modified src ())
                       remote_ops)
           newer_keys;
@@ -235,7 +235,7 @@ let recover_pending_ops t =
               let k =
                 match op with
                   | `Put (k, _) | `Delete k | `Mkdir k | `Rmdir k -> k
-                  | `Rename (k, _, _) -> k
+                  | `Rename { Journal.dst = k; _ } -> k
               in
               not (Hashtbl.mem remotely_modified k))
             ops
@@ -251,23 +251,20 @@ let recover_pending_ops t =
                         ~domain_prefix:t.domain_prefix full_key
                     in
                     if Sys.file_exists cache_path then
-                      upload t ~key:full_key ~src_path:cache_path
+                      upload t ~key:full_key ~src_path:cache_path ()
                 | `Delete rel_key ->
                     delete_file t ~key:(t.domain_prefix ^ rel_key)
                 | `Mkdir rel_key ->
                     create_directory t ~key:(t.domain_prefix ^ rel_key)
                 | `Rmdir rel_key ->
                     delete_dir t ~prefix:(t.domain_prefix ^ rel_key)
-                | `Rename (dst_rel, src_rel, _) ->
+                | `Rename { Journal.dst = dst_rel; src = src_rel; is_dir; _ } ->
                     let src_key = t.domain_prefix ^ src_rel in
                     let dst_key = t.domain_prefix ^ dst_rel in
-                    (match
-                       S3_client.head_opt t.client ~key:(src_key ^ "/") ()
-                     with
-                      | Some _ ->
-                          rename_directory t ~src_prefix:(src_key ^ "/")
-                            ~dst_prefix:(dst_key ^ "/")
-                      | None -> rename_file t ~src_key ~dst_key)
+                    if is_dir then
+                      rename_directory t ~src_prefix:(src_key ^ "/")
+                        ~dst_prefix:(dst_key ^ "/")
+                    else rename_file t ~src_key ~dst_key
             with exn ->
               Log.err "recover_pending_ops: %s" (Printexc.to_string exn))
           replayed;

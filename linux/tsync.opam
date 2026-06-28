@@ -7,7 +7,7 @@ license: "MIT"
 homepage: "https://github.com/toots/tsync"
 bug-reports: "https://github.com/toots/tsync/issues"
 depends: [
-  "ocaml" {>= "4.14.0"}
+  "ocaml" {>= "5.5.0"}
   "dune" {>= "3.23"}
   "yojson"
   "fuse3"

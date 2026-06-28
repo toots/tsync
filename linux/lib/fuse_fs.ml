@@ -3,6 +3,7 @@ type context = {
   domain_name : string;
   domain_prefix : string;
   mount_point : string;
+  sync_queue : Sync_queue.t;
 }
 
 (* ── Path helpers ────────────────────────────────────────────────────────── *)
@@ -155,18 +156,6 @@ let drain_pending_version () =
   Mutex.unlock pending_version_mutex;
   v
 
-let fire_journal ctx ~entry_key ops =
-  ignore
-    (Thread.create
-       (fun () ->
-         (try
-            ignore (File_store.write_journal_entry ~entry_key ops ctx.store);
-            set_pending_version entry_key
-          with exn ->
-            Log.err "write_journal_entry: %s" (Printexc.to_string exn));
-         Journal.delete_local_pending ~entry_key)
-       ())
-
 (* ── Cache walk (for FULL_RESYNC) ────────────────────────────────────────── *)
 
 let walk_cache_dir ctx f =
@@ -214,7 +203,10 @@ let make_operations ctx =
                     | None -> (
                         let dir_key = key ^ "/" in
                         match File_store.head_opt ctx.store ~key:dir_key with
-                          | Some _ -> dir_stat ()
+                          | Some _ ->
+                              let st = dir_stat () in
+                              cache_put key st;
+                              st
                           | None ->
                               raise
                                 (Unix.Unix_error (Unix.ENOENT, "getattr", path))
@@ -229,6 +221,10 @@ let make_operations ctx =
         List.iter
           (fun (e : S3_client.file_entry) -> cache_put e.key (stat_of_entry e))
           files;
+        List.iter
+          (fun subdir_name ->
+            cache_put (prefix ^ subdir_name) (dir_stat ()))
+          subdirs;
         let file_names =
           List.map
             (fun (e : S3_client.file_entry) -> Filename.basename e.key)
@@ -308,7 +304,7 @@ let make_operations ctx =
             || List.mem Unix.O_RDWR flags || is_dirty key
           in
           if writing then begin
-            Log.debug "release %s: uploading" path;
+            Log.debug "release %s: queued for upload" path;
             let lp = File_store.local_path ctx.store key in
             let ek = Journal.entry_key () in
             let size =
@@ -317,91 +313,96 @@ let make_operations ctx =
             in
             let ops = [ `Put (rel_key ctx key, size) ] in
             Journal.write_local_pending ~entry_key:ek ops;
-            let uploaded =
-              try File_store.upload ctx.store ~key ~src_path:lp; true
-              with exn ->
-                Log.err "upload %s: %s" key (Printexc.to_string exn);
-                false
-            in
-            let mtime = Unix.gettimeofday () in
-            cache_put key (file_stat (Int64.to_int size) mtime);
+            cache_put key (file_stat (Int64.to_int size) (Unix.gettimeofday ()));
             clear_dirty key;
-            if uploaded then begin
-              fire_journal ctx ~entry_key:ek ops;
-              if !auto_evict then File_store.evict ctx.store key
-            end else Journal.delete_local_pending ~entry_key:ek
+            Sync_queue.post ctx.sync_queue
+              (Sync_queue.Put { key; src_path = lp; entry_key = ek; ops })
           end));
     unlink =
       (fun path ->
         guard "unlink" path (fun () ->
           let key = fuse_to_key ctx path in
+          cache_invalidate key;
           let ek = Journal.entry_key () in
           let ops = [ `Delete (rel_key ctx key) ] in
-          Journal.write_local_pending ~entry_key:ek ops;
+          (* post runs cancel_put before S3 delete; evict only after so that
+             the upload sees cancel=true before its local file disappears *)
+          Sync_queue.post ctx.sync_queue
+            (Sync_queue.Delete { key; entry_key = ek; ops });
           File_store.evict ctx.store key;
-          File_store.delete_manifest ctx.store key;
-          cache_invalidate key;
-          File_store.delete_file ctx.store ~key;
-          fire_journal ctx ~entry_key:ek ops));
+          File_store.delete_manifest ctx.store key));
     mkdir =
       (fun path _mode ->
         guard "mkdir" path (fun () ->
           let key = fuse_to_dir_prefix ctx path in
+          cache_put (fuse_to_key ctx path) (dir_stat ());
           let ek = Journal.entry_key () in
           let ops = [ `Mkdir (rel_key ctx key) ] in
-          Journal.write_local_pending ~entry_key:ek ops;
-          File_store.create_directory ctx.store ~key;
-          fire_journal ctx ~entry_key:ek ops));
+          Sync_queue.post ctx.sync_queue
+            (Sync_queue.Mkdir { key; entry_key = ek; ops })));
     rmdir =
       (fun path ->
         guard "rmdir" path (fun () ->
           let prefix = fuse_to_dir_prefix ctx path in
           let ek = Journal.entry_key () in
           let ops = [ `Rmdir (rel_key ctx prefix) ] in
-          Journal.write_local_pending ~entry_key:ek ops;
-          File_store.delete_dir ctx.store ~prefix;
-          fire_journal ctx ~entry_key:ek ops));
+          Sync_queue.post ctx.sync_queue
+            (Sync_queue.Rmdir { key = prefix; entry_key = ek; ops })));
     rename =
       (fun src dst ->
         guard "rename" src (fun () ->
           let src_key = fuse_to_key ctx src in
           let dst_key = fuse_to_key ctx dst in
+          let src_is_dir =
+            match cache_get src_key with
+              | Some { Unix.LargeFile.st_kind = Unix.S_DIR; _ } -> true
+              | _ -> false
+          in
           cache_invalidate src_key;
           cache_invalidate dst_key;
-          let src_dir = src_key ^ "/" in
           let ek = Journal.entry_key () in
-          match File_store.head_opt ctx.store ~key:src_dir with
-            | Some _ ->
-                let ops =
-                  [ `Rename (rel_key ctx dst_key, rel_key ctx src_key, None) ]
-                in
-                Journal.write_local_pending ~entry_key:ek ops;
-                File_store.rename_directory ctx.store ~src_prefix:src_dir
-                  ~dst_prefix:(dst_key ^ "/");
-                fire_journal ctx ~entry_key:ek ops
-            | None ->
-                let size =
-                  if File_store.is_cached ctx.store src_key then
-                    (try
-                       Some
-                         (Unix.LargeFile.stat (File_store.local_path ctx.store src_key))
-                           .Unix.LargeFile.st_size
-                     with _ -> None)
-                  else None
-                in
-                let ops =
-                  [ `Rename (rel_key ctx dst_key, rel_key ctx src_key, size) ]
-                in
-                Journal.write_local_pending ~entry_key:ek ops;
-                if File_store.is_cached ctx.store src_key then begin
-                  let src_lp = File_store.local_path ctx.store src_key in
-                  let dst_lp = File_store.local_path ctx.store dst_key in
-                  File_store.ensure_parent_dir dst_lp;
-                  Unix.rename src_lp dst_lp
-                end;
-                File_store.rename_manifest ctx.store ~src_key ~dst_key;
-                File_store.rename_file ctx.store ~src_key ~dst_key;
-                fire_journal ctx ~entry_key:ek ops));
+          if src_is_dir then begin
+            let ops =
+              [ `Rename Journal.{ dst = rel_key ctx (dst_key ^ "/");
+                                  src = rel_key ctx (src_key ^ "/");
+                                  size = None; is_dir = true } ]
+            in
+            Sync_queue.post ctx.sync_queue
+              (Sync_queue.Rename
+                 { src_key = src_key ^ "/"; dst_key = dst_key ^ "/";
+                   src_is_dir = true; dst_local_path = "";
+                   entry_key = ek; put_ops = ops; rename_ops = ops })
+          end
+          else begin
+            let dst_lp = File_store.local_path ctx.store dst_key in
+            let size =
+              if File_store.is_cached ctx.store src_key then
+                (try
+                   Some
+                     (Unix.LargeFile.stat
+                        (File_store.local_path ctx.store src_key))
+                       .Unix.LargeFile.st_size
+                 with _ -> None)
+              else None
+            in
+            if File_store.is_cached ctx.store src_key then begin
+              let src_lp = File_store.local_path ctx.store src_key in
+              File_store.ensure_parent_dir dst_lp;
+              Unix.rename src_lp dst_lp
+            end;
+            File_store.rename_manifest ctx.store ~src_key ~dst_key;
+            Sync_queue.post ctx.sync_queue
+              (Sync_queue.Rename
+                 { src_key; dst_key; src_is_dir = false;
+                   dst_local_path = dst_lp; entry_key = ek;
+                   put_ops =
+                     [ `Put (rel_key ctx dst_key,
+                             Option.value ~default:0L size) ];
+                   rename_ops =
+                     [ `Rename Journal.{ dst = rel_key ctx dst_key;
+                                        src = rel_key ctx src_key;
+                                        size; is_dir = false } ] })
+          end));
     truncate =
       (fun path size ->
         guard "truncate" path (fun () ->
@@ -460,9 +461,7 @@ let ipc_handler ctx line =
   in
   match cmd with
     | "EVICT" ->
-        let key = key_of_path arg in
-        File_store.evict ctx.store key;
-        cache_invalidate key;
+        Sync_queue.post ctx.sync_queue (Sync_queue.Evict { key = key_of_path arg });
         "OK"
     | "RESTORE" -> (
         let key = key_of_path arg in
@@ -528,22 +527,54 @@ let mount ctx argv =
         done)
       ()
   in
-  (* ponytail: no self-resync filter; add if spurious eviction from own writes is observed *)
   let _version_poller =
     Thread.create
       (fun () ->
+        let my_uuid = Journal.client_uuid () in
         let known = ref None in
         while true do
           Unix.sleepf 1.0;
           (try
              let version = File_store.fetch_version ctx.store in
-             if !known <> None && version <> !known then begin
-               Mutex.lock meta_mutex;
-               Hashtbl.clear meta_cache;
-               Mutex.unlock meta_mutex;
-               walk_cache_dir ctx (fun path ->
-                   try Unix.unlink path with _ -> ())
-             end;
+             (match !known, version with
+               | Some k, Some v when v <> k ->
+                   let foreign =
+                     File_store.list_journal_keys ~start_after:k ctx.store ()
+                     |> List.filter (fun (_, uuid) -> uuid <> my_uuid)
+                   in
+                   (match foreign with
+                     | [] ->
+                         (* No foreign entries found; journal may be pruned. *)
+                         Mutex.lock meta_mutex;
+                         Hashtbl.clear meta_cache;
+                         Mutex.unlock meta_mutex;
+                         walk_cache_dir ctx (fun path ->
+                             try Unix.unlink path with _ -> ())
+                     | _ ->
+                         let changed_keys =
+                           List.concat_map
+                             (fun (ek, _) ->
+                               match File_store.get_journal_entry ctx.store ek with
+                                 | None -> []
+                                 | Some ops ->
+                                     List.concat_map
+                                       (fun op ->
+                                         match op with
+                                           | `Put (k, _) | `Delete k
+                                           | `Mkdir k | `Rmdir k ->
+                                               [ ctx.domain_prefix ^ k ]
+                                           | `Rename { Journal.dst; src; _ } ->
+                                               [ ctx.domain_prefix ^ dst;
+                                                 ctx.domain_prefix ^ src ])
+                                       ops)
+                             foreign
+                         in
+                         List.iter
+                           (fun key ->
+                             Sync_queue.post ctx.sync_queue
+                               (Sync_queue.Evict { key }))
+                           changed_keys)
+               | _ -> ());
              known := version
            with _ -> ())
         done)

@@ -10,7 +10,7 @@
  (bug_reports "https://github.com/toots/tsync/issues")
  (license MIT)
  (depends
-  (ocaml (>= 4.14.0))
+  (ocaml (>= 5.5.0))
   dune
   yojson
   fuse3

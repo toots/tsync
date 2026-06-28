@@ -1,8 +1,10 @@
+type rename_op = { dst : string; src : string; size : int64 option; is_dir : bool }
+
 type op =
   [ `Delete of string
   | `Mkdir of string
   | `Put of string * int64
-  | `Rename of string * string * int64 option
+  | `Rename of rename_op
   | `Rmdir of string ]
 
 val share_dir : unit -> string

@@ -67,6 +67,11 @@ let start_cmd =
     (* Clean up any stale FUSE mount left by a previous crash *)
     ignore (Sys.command (Printf.sprintf "fusermount3 -u %s 2>/dev/null" (Filename.quote mount_point)));
     Log.init ();
+    let sync_queue =
+      Sync_queue.make ~store ~auto_evict:Fuse_fs.auto_evict
+        ~on_version:(fun ~entry_key -> Fuse_fs.set_pending_version entry_key)
+        ~on_evict:(fun ~key -> Fuse_fs.cache_invalidate key)
+    in
     let ctx =
       Fuse_fs.
         {
@@ -74,9 +79,11 @@ let start_cmd =
           domain_name;
           domain_prefix = File_store.domain_prefix store;
           mount_point;
+          sync_queue;
         }
     in
-    Fuse_fs.mount ctx [| "tsync"; mount_point |]
+    Fuse_fs.mount ctx [| "tsync"; mount_point |];
+    Sync_queue.drain sync_queue
   in
   Cmd.v
     (Cmd.info "start" ~doc:"Mount the filesystem (run via systemd unit)")
@@ -349,8 +356,8 @@ let sync_cmd =
                     match op with
                       | `Put (k, _) | `Delete k | `Mkdir k | `Rmdir k ->
                           Hashtbl.replace touched k ()
-                      | `Rename (k, src, _) ->
-                          Hashtbl.replace touched k ();
+                      | `Rename { Journal.dst; src; _ } ->
+                          Hashtbl.replace touched dst ();
                           Hashtbl.replace touched src ())
                   ops)
         recent_foreign;
