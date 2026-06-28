@@ -8,6 +8,7 @@ ExecStart=%h/.local/bin/tsync start
 ExecStop=%h/.local/bin/tsync stop
 Restart=on-failure
 RestartSec=5
+LimitNOFILE=65536
 
 [Install]
 WantedBy=default.target
