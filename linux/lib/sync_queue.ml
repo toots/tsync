@@ -133,8 +133,12 @@ let exec_put t slot { key; src_path; entry_key; ops } =
       t.on_version ~entry_key;
     end
   with
-  | S3_client.Cancelled
-  | Unix.Unix_error (Unix.ENOENT, _, _) when Atomic.get slot.cancel ->
+  | S3_client.Cancelled ->
+      Journal.delete_local_pending ~entry_key
+  | Unix.Unix_error (Unix.ENOENT, _, _) ->
+      (* File was renamed or unlinked before cancel flag was observed by
+         the worker; the corresponding rename/delete handler already took
+         care of S3 — just clean up the journal entry. *)
       Journal.delete_local_pending ~entry_key
   | exn ->
       Log.err "sync_queue put %s: %s" key (Printexc.to_string exn)

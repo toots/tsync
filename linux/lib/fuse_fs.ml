@@ -277,7 +277,9 @@ let make_operations ctx =
             File_store.delete_manifest ctx.store key
           end
           else if truncating then begin
-            (* Overwrite existing cached file: truncate to 0 so no residual bytes remain *)
+            (* Cancel any in-flight upload BEFORE truncating so the worker
+               does not read a zero-byte file and upload corrupt data. *)
+            ignore (Sync_queue.cancel_put ctx.sync_queue key);
             let lp = File_store.local_path ctx.store key in
             let fd = Unix.openfile lp [Unix.O_WRONLY; Unix.O_TRUNC] 0o644 in
             Unix.close fd;

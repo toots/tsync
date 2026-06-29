@@ -229,6 +229,7 @@ let put_chunked t ~key ~src_path ?(cancel = Atomic.make false) ~chunk_prefix () 
           put t ~content_type:"application/octet-stream" ~key:ck ~data ()
         end)
       entries;
+    if Atomic.get cancel then raise Cancelled;
     let manifest =
       Chunk_manifest.
         {
