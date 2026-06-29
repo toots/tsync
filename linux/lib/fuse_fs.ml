@@ -100,6 +100,15 @@ let stat_of_entry (e : S3_client.file_entry) = file_stat e.size e.last_modified
 
 let auto_evict = ref (Sys.file_exists (Ipc.auto_evict_path ()))
 
+(* The FUSE kernel creates .fuse_hidden* files to preserve open file
+   descriptors when the kernel renames a file that has open FDs (open-while-unlink).
+   These are kernel-internal; we must not mirror them to S3. *)
+let is_fuse_hidden path =
+  let basename = Filename.basename path in
+  let prefix = ".fuse_hidden" in
+  String.length basename >= String.length prefix
+  && String.sub basename 0 (String.length prefix) = prefix
+
 (* ── Dirty tracking for write→release ────────────────────────────────────── *)
 
 let dirty : (string, bool) Hashtbl.t = Hashtbl.create 64
@@ -250,14 +259,25 @@ let make_operations ctx =
         guard "fopen" path (fun () ->
           let key = fuse_to_key ctx path in
           let creating = List.mem Unix.O_CREAT flags in
-          if creating && not (File_store.is_cached ctx.store key) then begin
-            (* New file: create empty local placeholder *)
+          let truncating = List.mem Unix.O_TRUNC flags in
+          if (creating || truncating) && not (File_store.is_cached ctx.store key) then begin
+            (* New or overwrite: create empty local placeholder without downloading *)
             let lp = File_store.local_path ctx.store key in
             File_store.ensure_parent_dir lp;
             close_out (open_out_bin lp);
             File_store.delete_manifest ctx.store key
           end
-          else if not (File_store.is_cached ctx.store key) then File_store.ensure_cached ctx.store key;
+          else if truncating then begin
+            (* Overwrite existing cached file: truncate to 0 so no residual bytes remain *)
+            let lp = File_store.local_path ctx.store key in
+            let fd = Unix.openfile lp [Unix.O_WRONLY; Unix.O_TRUNC] 0o644 in
+            Unix.close fd;
+            File_store.delete_manifest ctx.store key;
+            cache_invalidate key;
+            mark_dirty key
+          end
+          else if not (File_store.is_cached ctx.store key) then
+            File_store.ensure_cached ctx.store key;
           None));
     read =
       (fun path buf offset _size ->
@@ -303,34 +323,41 @@ let make_operations ctx =
             List.mem Unix.O_WRONLY flags
             || List.mem Unix.O_RDWR flags || is_dirty key
           in
-          if writing then begin
+          if writing && not (is_fuse_hidden path) then begin
             Log.debug "release %s: queued for upload" path;
             let lp = File_store.local_path ctx.store key in
             let ek = Journal.entry_key () in
-            let size =
-              try (Unix.LargeFile.stat lp).Unix.LargeFile.st_size
-              with _ -> 0L
-            in
-            let ops = [ `Put (rel_key ctx key, size) ] in
-            Journal.write_local_pending ~entry_key:ek ops;
-            cache_put key (file_stat (Int64.to_int size) (Unix.gettimeofday ()));
-            clear_dirty key;
-            Sync_queue.post ctx.sync_queue
-              (Sync_queue.Put { key; src_path = lp; entry_key = ek; ops })
+            (match (try Some (Unix.LargeFile.stat lp) with _ -> None) with
+            | None ->
+                Log.err "release %s: local file missing, skipping upload" path;
+                clear_dirty key
+            | Some { Unix.LargeFile.st_size = size; _ } ->
+                let ops = [ `Put (rel_key ctx key, size) ] in
+                Journal.write_local_pending ~entry_key:ek ops;
+                cache_put key (file_stat (Int64.to_int size) (Unix.gettimeofday ()));
+                clear_dirty key;
+                Sync_queue.post ctx.sync_queue
+                  (Sync_queue.Put { key; src_path = lp; entry_key = ek; ops }))
           end));
     unlink =
       (fun path ->
         guard "unlink" path (fun () ->
           let key = fuse_to_key ctx path in
           cache_invalidate key;
-          let ek = Journal.entry_key () in
-          let ops = [ `Delete (rel_key ctx key) ] in
-          (* post runs cancel_put before S3 delete; evict only after so that
-             the upload sees cancel=true before its local file disappears *)
-          Sync_queue.post ctx.sync_queue
-            (Sync_queue.Delete { key; entry_key = ek; ops });
-          File_store.evict ctx.store key;
-          File_store.delete_manifest ctx.store key));
+          if is_fuse_hidden path then begin
+            (* FUSE kernel internal file: just evict locally, no S3 operation *)
+            File_store.evict ctx.store key;
+            File_store.delete_manifest ctx.store key
+          end else begin
+            let ek = Journal.entry_key () in
+            let ops = [ `Delete (rel_key ctx key) ] in
+            (* post runs cancel_put before S3 delete; evict only after so that
+               the upload sees cancel=true before its local file disappears *)
+            Sync_queue.post ctx.sync_queue
+              (Sync_queue.Delete { key; entry_key = ek; ops });
+            File_store.evict ctx.store key;
+            File_store.delete_manifest ctx.store key
+          end));
     mkdir =
       (fun path _mode ->
         guard "mkdir" path (fun () ->
@@ -360,6 +387,17 @@ let make_operations ctx =
           in
           cache_invalidate src_key;
           cache_invalidate dst_key;
+          if is_fuse_hidden dst then begin
+            (* FUSE kernel internal: rename to preserve open FDs during unlink.
+               Leave any in-flight Put for src running; just move the local file. *)
+            if File_store.is_cached ctx.store src_key then begin
+              let src_lp = File_store.local_path ctx.store src_key in
+              let dst_lp = File_store.local_path ctx.store dst_key in
+              File_store.ensure_parent_dir dst_lp;
+              Unix.rename src_lp dst_lp
+            end;
+            File_store.rename_manifest ctx.store ~src_key ~dst_key
+          end else
           let ek = Journal.entry_key () in
           if src_is_dir then begin
             let ops =
