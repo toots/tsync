@@ -88,7 +88,10 @@ let download t ~key ~dst_path =
     manifest_opt
 
 let ensure_cached t key =
-  if not (is_cached t key) then download t ~key ~dst_path:(local_path t key)
+  if not (is_cached t key) then begin
+    Log.debug "ensure_cached %s: not local, downloading from S3" key;
+    download t ~key ~dst_path:(local_path t key)
+  end
 
 let delete_file t ~key =
   if t.versioning then begin

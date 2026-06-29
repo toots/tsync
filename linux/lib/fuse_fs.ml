@@ -298,6 +298,10 @@ let make_operations ctx =
             Log.err "read %s: not in local cache, downloading from S3 (offset=%Ld)" path offset;
           File_store.ensure_cached ctx.store key;
           let lp = File_store.local_path ctx.store key in
+          if offset = 0L then
+            Log.debug "read %s: offset=0, local_size=%Ld" path
+              (try (Unix.LargeFile.stat lp).Unix.LargeFile.st_size
+               with _ -> -1L);
           let size = Bigarray.Array1.dim buf in
           let tmp = Bytes.create size in
           let fd = Unix.openfile lp [Unix.O_RDONLY] 0 in
@@ -459,6 +463,9 @@ let make_operations ctx =
       (fun path size ->
         guard "truncate" path (fun () ->
           let key = fuse_to_key ctx path in
+          Log.debug "truncate %s size=%Ld" path size;
+          if not (is_fuse_hidden path) then
+            ignore (Sync_queue.cancel_put ctx.sync_queue key);
           (* Must have local file to truncate *)
           if not (File_store.is_cached ctx.store key) then File_store.ensure_cached ctx.store key;
           let lp = File_store.local_path ctx.store key in
