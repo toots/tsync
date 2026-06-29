@@ -597,18 +597,24 @@ let mount ctx argv =
              let version = File_store.fetch_version ctx.store in
              (match !known, version with
                | Some k, Some v when v <> k ->
-                   let foreign =
+                   let all_entries =
                      File_store.list_journal_keys ~start_after:k ctx.store ()
-                     |> List.filter (fun (_, uuid) -> uuid <> my_uuid)
+                   in
+                   let foreign =
+                     List.filter (fun (_, uuid) -> uuid <> my_uuid) all_entries
                    in
                    (match foreign with
-                     | [] ->
-                         (* No foreign entries found; journal may be pruned. *)
+                     | [] when all_entries = [] ->
+                         (* Truly no entries since k: journal may be pruned.
+                            Full wipe as a conservative fallback. *)
                          Mutex.lock meta_mutex;
                          Hashtbl.clear meta_cache;
                          Mutex.unlock meta_mutex;
                          walk_cache_dir ctx (fun path ->
                              try Unix.unlink path with _ -> ())
+                     | [] ->
+                         (* All entries since k are our own: nothing to do. *)
+                         ()
                      | _ ->
                          let changed_keys =
                            List.concat_map
