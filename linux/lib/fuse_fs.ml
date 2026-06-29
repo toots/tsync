@@ -181,18 +181,26 @@ let walk_cache_dir ctx f =
 (* ── FUSE operations ─────────────────────────────────────────────────────── *)
 
 let make_operations ctx =
-  let open Fuse.Fuse_compat in
+  let open Fuse in
+  let entry_of_name name =
+    {
+      entry_name = name;
+      entry_stats = None;
+      entry_offset = None;
+      entry_flags = { fill_dir_plus = false };
+    }
+  in
   {
     default_operations with
+    init = (fun () -> ());
     getattr =
-      (fun path ->
+      (fun path _fi ->
         if path = "/" then dir_stat ()
         else begin
           let key = fuse_to_key ctx path in
           match cache_get key with
             | Some st -> st
             | None ->
-                (* Check local cache first (already downloaded) *)
                 if File_store.is_cached ctx.store key then
                   Unix.LargeFile.stat (File_store.local_path ctx.store key)
                 else begin
@@ -224,7 +232,7 @@ let make_operations ctx =
                 end
         end);
     readdir =
-      (fun path _offset ->
+      (fun path _offset _fi _flags ->
         (* ponytail: always live from S3; add a short-TTL directory listing cache when list latency matters *)
         let prefix = fuse_to_dir_prefix ctx path in
         let files, subdirs = File_store.list_directory ctx.store ~prefix in
@@ -239,7 +247,7 @@ let make_operations ctx =
             (fun (e : S3_client.file_entry) -> Filename.basename e.key)
             files
         in
-        ("." :: ".." :: file_names) @ subdirs);
+        List.map entry_of_name (("." :: ".." :: file_names) @ subdirs));
     mknod =
       (fun path _mode ->
         let key = fuse_to_key ctx path in
@@ -255,9 +263,10 @@ let make_operations ctx =
         File_store.delete_manifest ctx.store key;
         mark_dirty key);
     fopen =
-      (fun path flags ->
+      (fun path fi ->
         guard "fopen" path (fun () ->
             let key = fuse_to_key ctx path in
+            let flags = fi.fi_flags in
             let creating = List.mem Unix.O_CREAT flags in
             let truncating = List.mem Unix.O_TRUNC flags in
             let rdonly = flags = [Unix.O_RDONLY] in
@@ -272,15 +281,12 @@ let make_operations ctx =
               (creating || truncating)
               && not (File_store.is_cached ctx.store key)
             then begin
-              (* New or overwrite: create empty local placeholder without downloading *)
               let lp = File_store.local_path ctx.store key in
               File_store.ensure_parent_dir lp;
               close_out (open_out_bin lp);
               File_store.delete_manifest ctx.store key
             end
             else if truncating then begin
-              (* Cancel any in-flight upload BEFORE truncating so the worker
-               does not read a zero-byte file and upload corrupt data. *)
               ignore (Sync_queue.cancel_put ctx.sync_queue key);
               let lp = File_store.local_path ctx.store key in
               let fd = Unix.openfile lp [Unix.O_WRONLY; Unix.O_TRUNC] 0o644 in
@@ -291,9 +297,13 @@ let make_operations ctx =
             end
             else if not (File_store.is_cached ctx.store key) then
               File_store.ensure_cached ctx.store key;
-            None));
+            (* direct_io bypasses the kernel page cache so reads always go
+               through our handler; without it stale cached pages are served
+               after a rewrite because non-writeback FUSE writes don't update
+               the kernel page cache. *)
+            { default_file_info_update with fi_update_direct_io = true }));
     read =
-      (fun path buf offset _size ->
+      (fun path buf offset _fi ->
         guard "read" path (fun () ->
             let key = fuse_to_key ctx path in
             if not (File_store.is_cached ctx.store key) then
@@ -302,16 +312,10 @@ let make_operations ctx =
                 path offset;
             File_store.ensure_cached ctx.store key;
             let lp = File_store.local_path ctx.store key in
-            if offset = 0L then begin
-              let local_size =
-                try (Unix.LargeFile.stat lp).Unix.LargeFile.st_size
-                with _ -> -1L
-              in
-              Log.debug "read %s: offset=0, local_size=%Ld" path local_size;
-              if Int64.compare local_size 1_000_000L > 0 then
-                Log.debug "read %s: file_md5_at_read=%s" path
-                  (try Digest.to_hex (Digest.file lp) with _ -> "error")
-            end;
+            if offset = 0L then
+              Log.debug "read %s: offset=0, local_size=%Ld" path
+                (try (Unix.LargeFile.stat lp).Unix.LargeFile.st_size
+                 with _ -> -1L);
             let size = Bigarray.Array1.dim buf in
             let tmp = Bytes.create size in
             let fd = Unix.openfile lp [Unix.O_RDONLY] 0 in
@@ -323,7 +327,7 @@ let make_operations ctx =
             done;
             n));
     write =
-      (fun path buf offset _size ->
+      (fun path buf offset _fi ->
         guard "write" path (fun () ->
             let key = fuse_to_key ctx path in
             let lp = File_store.local_path ctx.store key in
@@ -333,7 +337,6 @@ let make_operations ctx =
             for i = 0 to size - 1 do
               Bytes.set tmp i buf.{i}
             done;
-            Log.debug "write %s: offset=%Ld size=%d" path offset size;
             let fd = Unix.openfile lp [Unix.O_WRONLY; Unix.O_CREAT] 0o644 in
             ignore (Unix.lseek fd (Int64.to_int offset) Unix.SEEK_SET);
             let written = ref 0 in
@@ -344,12 +347,12 @@ let make_operations ctx =
             mark_dirty key;
             size));
     release =
-      (fun path flags _fd ->
+      (fun path fi ->
         guard "release" path (fun () ->
             let key = fuse_to_key ctx path in
             let writing =
-              List.mem Unix.O_WRONLY flags
-              || List.mem Unix.O_RDWR flags || is_dirty key
+              List.mem Unix.O_WRONLY fi.fi_flags
+              || List.mem Unix.O_RDWR fi.fi_flags || is_dirty key
             in
             if writing && not (is_fuse_hidden path) then begin
               Log.debug "release %s: queued for upload" path;
@@ -377,15 +380,12 @@ let make_operations ctx =
             let key = fuse_to_key ctx path in
             cache_invalidate key;
             if is_fuse_hidden path then begin
-              (* FUSE kernel internal file: just evict locally, no S3 operation *)
               File_store.evict ctx.store key;
               File_store.delete_manifest ctx.store key
             end
             else begin
               let ek = Journal.entry_key () in
               let ops = [`Delete (rel_key ctx key)] in
-              (* post runs cancel_put before S3 delete; evict only after so that
-               the upload sees cancel=true before its local file disappears *)
               Sync_queue.post ctx.sync_queue
                 (Sync_queue.Delete { key; entry_key = ek; ops });
               File_store.evict ctx.store key;
@@ -409,7 +409,7 @@ let make_operations ctx =
             Sync_queue.post ctx.sync_queue
               (Sync_queue.Rmdir { key = prefix; entry_key = ek; ops })));
     rename =
-      (fun src dst ->
+      (fun src dst _flags ->
         guard "rename" src (fun () ->
             let src_key = fuse_to_key ctx src in
             let dst_key = fuse_to_key ctx dst in
@@ -421,8 +421,6 @@ let make_operations ctx =
             cache_invalidate src_key;
             cache_invalidate dst_key;
             if is_fuse_hidden dst then begin
-              (* FUSE kernel internal: rename to preserve open FDs during unlink.
-               Leave any in-flight Put for src running; just move the local file. *)
               if File_store.is_cached ctx.store src_key then begin
                 let src_lp = File_store.local_path ctx.store src_key in
                 let dst_lp = File_store.local_path ctx.store dst_key in
@@ -503,13 +501,12 @@ let make_operations ctx =
                      })
               end)));
     truncate =
-      (fun path size ->
+      (fun path size _fi ->
         guard "truncate" path (fun () ->
             let key = fuse_to_key ctx path in
             Log.debug "truncate %s size=%Ld" path size;
             if not (is_fuse_hidden path) then
               ignore (Sync_queue.cancel_put ctx.sync_queue key);
-            (* Must have local file to truncate *)
             if not (File_store.is_cached ctx.store key) then
               File_store.ensure_cached ctx.store key;
             let lp = File_store.local_path ctx.store key in
@@ -534,17 +531,26 @@ let make_operations ctx =
             f_flag = 0L;
             f_namemax = 255L;
           });
-    utime =
-      (fun path atime mtime ->
+    utimens =
+      (fun path atime mtime _fi ->
         guard "utime" path (fun () ->
+            let to_float = function
+              | Fuse.Time { tv_sec; tv_nsec } ->
+                  Int64.to_float tv_sec +. (float tv_nsec /. 1_000_000_000.0)
+              | Fuse.Now -> Unix.gettimeofday ()
+              | Fuse.Omit ->
+                  raise (Unix.Unix_error (Unix.EINVAL, "utime", path))
+            in
             let key = fuse_to_key ctx path in
             match cache_get key with
               | None -> ()
               | Some st ->
                   cache_put key
                     Unix.LargeFile.
-                      { st with st_atime = atime; st_mtime = mtime }));
-    init = (fun () -> ());
+                      { st with
+                        st_atime = to_float atime;
+                        st_mtime = to_float mtime
+                      }));
   }
 
 (* ── IPC handler ─────────────────────────────────────────────────────────── *)
@@ -695,7 +701,7 @@ let mount ctx argv =
         done)
       ()
   in
-  Fuse.Fuse_compat.main ~loop_mode:Fuse.Single_threaded argv
+  Fuse.main ~loop_mode:Fuse.Single_threaded argv
     (make_operations ctx)
 
 (* Resolve a FUSE-relative path from CLI to the key it maps to *)
