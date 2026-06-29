@@ -40,7 +40,10 @@ let manifest_path ~domain_name ~domain_prefix key =
     then String.sub key pfx (String.length key - pfx)
     else key
   in
-  Filename.concat (Filename.concat (cache_root domain_name) ".manifest") relative
+  Filename.concat
+    (Filename.concat (Filename.dirname (cache_root domain_name))
+       (".manifest/" ^ domain_name))
+    relative
 
 let write_manifest ~domain_name ~domain_prefix key content =
   let path = manifest_path ~domain_name ~domain_prefix key in
