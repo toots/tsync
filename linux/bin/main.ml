@@ -65,7 +65,10 @@ let start_cmd =
     in
     mkdir_p mount_point;
     (* Clean up any stale FUSE mount left by a previous crash *)
-    ignore (Sys.command (Printf.sprintf "fusermount3 -u %s 2>/dev/null" (Filename.quote mount_point)));
+    ignore
+      (Sys.command
+         (Printf.sprintf "fusermount3 -u %s 2>/dev/null"
+            (Filename.quote mount_point)));
     Log.init ();
     let sync_queue =
       Sync_queue.make ~store ~auto_evict:Fuse_fs.auto_evict
@@ -283,7 +286,7 @@ let auto_evict_cmd =
           match resp with
             | "on" | "off" -> Printf.printf "auto-evict: %s\n" resp
             | _ -> Printf.eprintf "Error: %s\n" resp)
-      | Some ("on" | "off" as s) ->
+      | Some (("on" | "off") as s) ->
           let resp = Ipc.send ("AUTO_EVICT " ^ s) in
           if resp = "OK" then Printf.printf "auto-evict: %s\n" s
           else Printf.eprintf "Error: %s\n" resp
@@ -320,12 +323,12 @@ let sync_cmd =
     let all_keys = File_store.list_journal_keys store () in
     let need_full_resync =
       if last_sync_key = "" then true
-      else
+      else (
         match all_keys with
           | [] -> false
           | (oldest_key, _) :: _ ->
               Journal.timestamp_ms_of_filename oldest_key
-              > Journal.timestamp_ms_of_filename last_sync_key
+              > Journal.timestamp_ms_of_filename last_sync_key)
     in
     if need_full_resync then begin
       (try
@@ -338,7 +341,8 @@ let sync_cmd =
       output_string oc new_key;
       close_out oc;
       Printf.printf "full resync\n"
-    end else begin
+    end
+    else begin
       let my_uuid = Journal.client_uuid () in
       let recent_foreign =
         all_keys

@@ -35,23 +35,23 @@ let ensure_parent_dir = Cache.ensure_parent_dir
 
 let read_manifest t key =
   match
-    Cache.read_manifest ~domain_name:t.domain_name ~domain_prefix:t.domain_prefix
-      key
+    Cache.read_manifest ~domain_name:t.domain_name
+      ~domain_prefix:t.domain_prefix key
   with
     | None -> None
     | Some (s, mtime) -> Some (Chunk_manifest.of_string s, mtime)
 
 let delete_manifest t key =
-  Cache.delete_manifest ~domain_name:t.domain_name ~domain_prefix:t.domain_prefix
-    key
+  Cache.delete_manifest ~domain_name:t.domain_name
+    ~domain_prefix:t.domain_prefix key
 
 let evict t key =
   Cache.evict ~domain_name:t.domain_name ~domain_prefix:t.domain_prefix key
 
 let rename_manifest t ~src_key ~dst_key =
   let src_mp =
-    Cache.manifest_path ~domain_name:t.domain_name ~domain_prefix:t.domain_prefix
-      src_key
+    Cache.manifest_path ~domain_name:t.domain_name
+      ~domain_prefix:t.domain_prefix src_key
   in
   if Sys.file_exists src_mp then begin
     let dst_mp =
@@ -66,7 +66,8 @@ let rename_manifest t ~src_key ~dst_key =
 
 let upload t ~key ~src_path ?(cancel = Atomic.make false) () =
   let manifest_opt =
-    S3_client.put_chunked t.client ~key ~src_path ~cancel ~chunk_prefix:t.chunk_prefix ()
+    S3_client.put_chunked t.client ~key ~src_path ~cancel
+      ~chunk_prefix:t.chunk_prefix ()
   in
   Option.iter
     (fun manifest ->
@@ -96,13 +97,13 @@ let ensure_cached t key =
 let delete_file t ~key =
   if t.versioning then begin
     match S3_client.head_opt t.client ~key () with
-    | None -> ()
-    | Some _ ->
-        let trash_key =
-          Versioning.trash_key ~s3_key:key ~domain_prefix:t.domain_prefix
-            ~trash_prefix:t.trash_prefix
-        in
-        S3_client.copy t.client ~src_key:key ~dst_key:trash_key ()
+      | None -> ()
+      | Some _ ->
+          let trash_key =
+            Versioning.trash_key ~s3_key:key ~domain_prefix:t.domain_prefix
+              ~trash_prefix:t.trash_prefix
+          in
+          S3_client.copy t.client ~src_key:key ~dst_key:trash_key ()
   end;
   S3_client.delete t.client ~key ();
   delete_manifest t key
@@ -142,11 +143,12 @@ let head_opt t ~key = S3_client.head_opt t.client ~key ()
 let stat_file t ~key =
   match S3_client.head_opt t.client ~key () with
     | None -> None
-    | Some c when c.S3_client.content_type = Some Chunk_manifest.content_type ->
-        (try
-           let m = Chunk_manifest.of_string (S3_client.get t.client ~key ()) in
-           Some { c with S3_client.size = Int64.to_int m.size }
-         with _ -> Some c)
+    | Some c when c.S3_client.content_type = Some Chunk_manifest.content_type
+      -> (
+        try
+          let m = Chunk_manifest.of_string (S3_client.get t.client ~key ()) in
+          Some { c with S3_client.size = Int64.to_int m.size }
+        with _ -> Some c)
     | Some c -> Some c
 
 let domain_name t = t.domain_name
@@ -204,8 +206,7 @@ let list_journal_keys ?start_after t () =
 
 let get_journal_entry t entry_key =
   let key = t.journal_prefix ^ entry_key in
-  try Some (Journal.decode (S3_client.get t.client ~key ()))
-  with _ -> None
+  try Some (Journal.decode (S3_client.get t.client ~key ())) with _ -> None
 
 (* Replay locally-pending WAL entries that didn't make it to S3 before crash *)
 let recover_pending_ops t =
@@ -221,7 +222,7 @@ let recover_pending_ops t =
         let remotely_modified = Hashtbl.create 16 in
         List.iter
           (fun (ek, uuid) ->
-            if uuid <> my_uuid then
+            if uuid <> my_uuid then (
               match get_journal_entry t ek with
                 | None -> ()
                 | Some remote_ops ->
@@ -233,7 +234,7 @@ let recover_pending_ops t =
                           | `Rename { Journal.dst; src; _ } ->
                               Hashtbl.replace remotely_modified dst ();
                               Hashtbl.replace remotely_modified src ())
-                      remote_ops)
+                      remote_ops))
           newer_keys;
         let replayed =
           List.filter

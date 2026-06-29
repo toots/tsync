@@ -4,7 +4,6 @@ let data_dir () =
     | None -> Filename.concat (Sys.getenv "HOME") ".local/share/tsync"
 
 let socket_path () = Filename.concat (data_dir ()) "tsync.sock"
-
 let auto_evict_path () = Filename.concat (data_dir ()) "auto-evict"
 
 (* ── Client ──────────────────────────────────────────────────────────────── *)

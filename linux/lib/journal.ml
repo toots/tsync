@@ -1,4 +1,9 @@
-type rename_op = { dst : string; src : string; size : int64 option; is_dir : bool }
+type rename_op = {
+  dst : string;
+  src : string;
+  size : int64 option;
+  is_dir : bool;
+}
 
 type op =
   [ `Delete of string
@@ -21,7 +26,7 @@ let client_uuid () =
     String.trim s)
   else (
     let buf = Bytes.create 16 in
-    let fd = Unix.openfile "/dev/urandom" [ Unix.O_RDONLY ] 0 in
+    let fd = Unix.openfile "/dev/urandom" [Unix.O_RDONLY] 0 in
     ignore (Unix.read fd buf 0 16);
     Unix.close fd;
     let hex = Buffer.create 32 in
@@ -63,9 +68,9 @@ let encode ops =
             ("key", `String key);
             ("size", `Int (Int64.to_int size));
           ]
-    | `Delete key -> `Assoc [ ("op", `String "delete"); ("key", `String key) ]
-    | `Mkdir key -> `Assoc [ ("op", `String "mkdir"); ("key", `String key) ]
-    | `Rmdir key -> `Assoc [ ("op", `String "rmdir"); ("key", `String key) ]
+    | `Delete key -> `Assoc [("op", `String "delete"); ("key", `String key)]
+    | `Mkdir key -> `Assoc [("op", `String "mkdir"); ("key", `String key)]
+    | `Rmdir key -> `Assoc [("op", `String "rmdir"); ("key", `String key)]
     | `Rename { dst; src; size; is_dir } ->
         let fields =
           [
@@ -74,13 +79,15 @@ let encode ops =
             ("src", `String src);
             ("is_dir", `Bool is_dir);
           ]
-          @ (match size with
-              | None -> []
-              | Some s -> [ ("size", `Int (Int64.to_int s)) ])
+          @
+            match size with
+            | None -> []
+            | Some s -> [("size", `Int (Int64.to_int s))]
         in
         `Assoc fields
   in
-  String.concat "\n" (List.map (fun op -> Yojson.Basic.to_string (encode_one op)) ops)
+  String.concat "\n"
+    (List.map (fun op -> Yojson.Basic.to_string (encode_one op)) ops)
   ^ "\n"
 
 let decode s =
@@ -88,15 +95,14 @@ let decode s =
     (fun line ->
       let line = String.trim line in
       if line = "" then None
-      else
+      else (
         try
           let open Yojson.Basic.Util in
           let j = Yojson.Basic.from_string line in
           let key = j |> member "key" |> to_string in
           let op =
             match j |> member "op" |> to_string with
-              | "put" ->
-                  `Put (key, j |> member "size" |> to_int |> Int64.of_int)
+              | "put" -> `Put (key, j |> member "size" |> to_int |> Int64.of_int)
               | "delete" -> `Delete key
               | "mkdir" -> `Mkdir key
               | "rmdir" -> `Rmdir key
@@ -108,15 +114,13 @@ let decode s =
                       | _ -> None
                   in
                   let is_dir =
-                    match j |> member "is_dir" with
-                      | `Bool b -> b
-                      | _ -> false
+                    match j |> member "is_dir" with `Bool b -> b | _ -> false
                   in
                   `Rename { dst = key; src; size; is_dir }
               | s -> failwith ("unknown op: " ^ s)
           in
           Some op
-        with _ -> None)
+        with _ -> None))
     (String.split_on_char '\n' s)
 
 let pending_dir () = Filename.concat (share_dir ()) "journal-pending"
@@ -138,15 +142,15 @@ let local_pending_entries ~uuid =
   else
     Sys.readdir dir |> Array.to_list
     |> List.filter (fun name ->
-           try client_uuid_of_filename name = uuid with _ -> false)
+        try client_uuid_of_filename name = uuid with _ -> false)
     |> List.sort String.compare
     |> List.filter_map (fun name ->
-           let path = Filename.concat dir name in
-           try
-             let ic = open_in path in
-             let n = in_channel_length ic in
-             let s = Bytes.create n in
-             really_input ic s 0 n;
-             close_in ic;
-             Some (name, decode (Bytes.to_string s))
-           with _ -> None)
+        let path = Filename.concat dir name in
+        try
+          let ic = open_in path in
+          let n = in_channel_length ic in
+          let s = Bytes.create n in
+          really_input ic s 0 n;
+          close_in ic;
+          Some (name, decode (Bytes.to_string s))
+        with _ -> None)

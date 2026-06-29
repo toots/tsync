@@ -35,13 +35,13 @@ let is_cached ~domain_name ~domain_prefix key =
 let manifest_path ~domain_name ~domain_prefix key =
   let relative =
     let pfx = String.length domain_prefix in
-    if String.length key > pfx
-       && String.sub key 0 pfx = domain_prefix
-    then String.sub key pfx (String.length key - pfx)
+    if String.length key > pfx && String.sub key 0 pfx = domain_prefix then
+      String.sub key pfx (String.length key - pfx)
     else key
   in
   Filename.concat
-    (Filename.concat (Filename.dirname (cache_root domain_name))
+    (Filename.concat
+       (Filename.dirname (cache_root domain_name))
        (".manifest/" ^ domain_name))
     relative
 
@@ -54,22 +54,22 @@ let write_manifest ~domain_name ~domain_prefix key content =
 
 let read_manifest ~domain_name ~domain_prefix key =
   let path = manifest_path ~domain_name ~domain_prefix key in
-  if Sys.file_exists path then
-    (try
-       let ic = open_in path in
-       let n = in_channel_length ic in
-       let s = Bytes.create n in
-       really_input ic s 0 n;
-       close_in ic;
-       Some (Bytes.to_string s, (Unix.stat path).Unix.st_mtime)
-     with _ -> None)
+  if Sys.file_exists path then (
+    try
+      let ic = open_in path in
+      let n = in_channel_length ic in
+      let s = Bytes.create n in
+      really_input ic s 0 n;
+      close_in ic;
+      Some (Bytes.to_string s, (Unix.stat path).Unix.st_mtime)
+    with _ -> None)
   else None
 
 let delete_manifest ~domain_name ~domain_prefix key =
   let path = manifest_path ~domain_name ~domain_prefix key in
-  (try Unix.unlink path with Unix.Unix_error _ -> ())
+  try Unix.unlink path with Unix.Unix_error _ -> ()
 
 let evict ~domain_name ~domain_prefix key =
   let path = cache_path ~domain_name ~domain_prefix key in
-  (try Unix.unlink path with Unix.Unix_error _ -> ())
-  (* manifest sidecar is kept intentionally *)
+  try Unix.unlink path with Unix.Unix_error _ -> ()
+(* manifest sidecar is kept intentionally *)
