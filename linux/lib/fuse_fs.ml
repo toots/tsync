@@ -558,6 +558,12 @@ let make_operations ctx =
 let ipc_handler ctx line =
   let cmd, arg = Ipc.split_cmd (String.trim line) in
   let key_of_path path =
+    (* Expand ~/  *)
+    let path =
+      if String.length path >= 2 && path.[0] = '~' && path.[1] = '/' then
+        Sys.getenv "HOME" ^ String.sub path 1 (String.length path - 1)
+      else path
+    in
     (* Accept both absolute mount paths and FUSE-relative paths *)
     if
       String.length path > String.length ctx.mount_point
