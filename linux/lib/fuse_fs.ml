@@ -571,8 +571,26 @@ let ipc_handler ctx line =
   in
   match cmd with
     | "EVICT" ->
-        Sync_queue.post ctx.sync_queue
-          (Sync_queue.Evict { key = key_of_path arg });
+        let key = key_of_path arg in
+        let lp = File_store.local_path ctx.store key in
+        if Sys.file_exists lp && Sys.is_directory lp then begin
+          let root = File_store.cache_root ctx.store in
+          let rec walk dir =
+            Array.iter
+              (fun name ->
+                let p = Filename.concat dir name in
+                if Sys.is_directory p then walk p
+                else begin
+                  let rel = String.sub p (String.length root + 1)
+                              (String.length p - String.length root - 1) in
+                  Sync_queue.post ctx.sync_queue
+                    (Sync_queue.Evict { key = ctx.domain_prefix ^ rel })
+                end)
+              (try Sys.readdir dir with _ -> [||])
+          in
+          walk lp
+        end else
+          Sync_queue.post ctx.sync_queue (Sync_queue.Evict { key });
         "OK"
     | "RESTORE" -> (
         let key = key_of_path arg in
