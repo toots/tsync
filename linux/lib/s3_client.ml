@@ -90,7 +90,9 @@ let delete t ~key () =
   lwt_run (fun () ->
       S3.delete ~credentials:t.credentials ~endpoint:t.endpoint ~bucket:t.bucket
         ~key ()
-      >|= unwrap "delete")
+      >|= function
+      | Ok _ | Error S3.Not_found -> ()
+      | Error e -> raise (s3_eio (string_of_error e)))
 
 let delete_multi t keys =
   let open S3.Delete_multi in

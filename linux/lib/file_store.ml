@@ -92,11 +92,14 @@ let ensure_cached t key =
 
 let delete_file t ~key =
   if t.versioning then begin
-    let trash_key =
-      Versioning.trash_key ~s3_key:key ~domain_prefix:t.domain_prefix
-        ~trash_prefix:t.trash_prefix
-    in
-    S3_client.copy t.client ~src_key:key ~dst_key:trash_key ()
+    match S3_client.head_opt t.client ~key () with
+    | None -> ()
+    | Some _ ->
+        let trash_key =
+          Versioning.trash_key ~s3_key:key ~domain_prefix:t.domain_prefix
+            ~trash_prefix:t.trash_prefix
+        in
+        S3_client.copy t.client ~src_key:key ~dst_key:trash_key ()
   end;
   S3_client.delete t.client ~key ();
   delete_manifest t key
