@@ -302,10 +302,16 @@ let make_operations ctx =
                 path offset;
             File_store.ensure_cached ctx.store key;
             let lp = File_store.local_path ctx.store key in
-            if offset = 0L then
-              Log.debug "read %s: offset=0, local_size=%Ld" path
-                (try (Unix.LargeFile.stat lp).Unix.LargeFile.st_size
-                 with _ -> -1L);
+            if offset = 0L then begin
+              let local_size =
+                try (Unix.LargeFile.stat lp).Unix.LargeFile.st_size
+                with _ -> -1L
+              in
+              Log.debug "read %s: offset=0, local_size=%Ld" path local_size;
+              if Int64.compare local_size 1_000_000L > 0 then
+                Log.debug "read %s: file_md5_at_read=%s" path
+                  (try Digest.to_hex (Digest.file lp) with _ -> "error")
+            end;
             let size = Bigarray.Array1.dim buf in
             let tmp = Bytes.create size in
             let fd = Unix.openfile lp [Unix.O_RDONLY] 0 in
@@ -356,9 +362,6 @@ let make_operations ctx =
                     clear_dirty key
                 | Some { Unix.LargeFile.st_size = size; _ } ->
                     Log.debug "release %s: size=%Ld" path size;
-                    if Int64.compare size 1_000_000L > 0 then
-                      Log.debug "release %s: local_md5=%s" path
-                        (Digest.to_hex (Digest.file lp));
                     let ops = [`Put (rel_key ctx key, size)] in
                     Journal.write_local_pending ~entry_key:ek ops;
                     cache_put key
