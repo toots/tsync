@@ -327,6 +327,7 @@ let make_operations ctx =
             for i = 0 to size - 1 do
               Bytes.set tmp i buf.{i}
             done;
+            Log.debug "write %s: offset=%Ld size=%d" path offset size;
             let fd = Unix.openfile lp [Unix.O_WRONLY; Unix.O_CREAT] 0o644 in
             ignore (Unix.lseek fd (Int64.to_int offset) Unix.SEEK_SET);
             let written = ref 0 in
@@ -355,6 +356,9 @@ let make_operations ctx =
                     clear_dirty key
                 | Some { Unix.LargeFile.st_size = size; _ } ->
                     Log.debug "release %s: size=%Ld" path size;
+                    if Int64.compare size 1_000_000L > 0 then
+                      Log.debug "release %s: local_md5=%s" path
+                        (Digest.to_hex (Digest.file lp));
                     let ops = [`Put (rel_key ctx key, size)] in
                     Journal.write_local_pending ~entry_key:ek ops;
                     cache_put key
