@@ -29,7 +29,6 @@ type slot = {
 
 type t = {
   store : File_store.t;
-  auto_evict : bool ref;
   slots : (string, slot) Hashtbl.t;
   slots_mtx : Mutex.t;
   queue : put_data Queue.t;
@@ -132,7 +131,6 @@ let exec_put t slot { key; src_path; entry_key; ops } =
       Journal.delete_local_pending ~entry_key;
       ignore (File_store.write_journal_entry ~entry_key ops t.store);
       t.on_version ~entry_key;
-      if !(t.auto_evict) then File_store.evict t.store key
     end
   with
   | S3_client.Cancelled
@@ -170,11 +168,10 @@ let worker_loop t =
     end
   done
 
-let make ~store ~auto_evict ~on_version ~on_evict =
+let make ~store ~auto_evict:_ ~on_version ~on_evict =
   let t =
     {
       store;
-      auto_evict;
       slots = Hashtbl.create 64;
       slots_mtx = Mutex.create ();
       queue = Queue.create ();
@@ -229,12 +226,14 @@ let post t event =
              entry_key; put_ops; rename_ops } ->
       let src_was_uploading = cancel_put t src_key in
       ignore (cancel_put t dst_key);
-      if src_was_uploading then begin
-        (* src content may not be on S3 yet; upload directly to dst *)
+      if src_was_uploading && Sys.file_exists dst_local_path then begin
+        (* src upload was in flight and local file is at dst; upload from there *)
         let pd = { key = dst_key; src_path = dst_local_path;
                    entry_key; ops = put_ops }
         in
         Journal.write_local_pending ~entry_key put_ops;
         post_put t pd
       end else
+        (* src was not uploading, or local file is gone (auto-evict race):
+           src is already on S3, so rename it there *)
         exec_rename t ~src_key ~dst_key ~src_is_dir entry_key rename_ops
