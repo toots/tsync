@@ -119,6 +119,8 @@ let exec_rename t ~src_key ~dst_key ~src_is_dir entry_key ops =
 (* ── Async Put execution ─────────────────────────────────────────────────── *)
 
 let exec_put t slot { key; src_path; entry_key; ops } =
+  if Atomic.get slot.cancel then Journal.delete_local_pending ~entry_key
+  else
   try
     File_store.upload t.store ~key ~src_path ~cancel:slot.cancel ();
     (* A single-part upload has no inter-chunk cancel point so may complete
