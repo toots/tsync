@@ -196,6 +196,7 @@ let read_chunk path offset len =
 
 let put_chunked t ~key ~src_path ?(cancel = Atomic.make false) ~chunk_prefix () =
   let file_size = (Unix.stat src_path).Unix.st_size in
+  Log.debug "put_chunked %s: file_size=%d" key file_size;
   if file_size <= Chunk_manifest.chunk_size then begin
     put t ~content_type:"application/octet-stream" ~key
       ~data:(read_file src_path) ();

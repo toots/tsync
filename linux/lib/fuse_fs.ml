@@ -260,6 +260,15 @@ let make_operations ctx =
           let key = fuse_to_key ctx path in
           let creating = List.mem Unix.O_CREAT flags in
           let truncating = List.mem Unix.O_TRUNC flags in
+          let rdonly = flags = [Unix.O_RDONLY] in
+          Log.debug "fopen %s flags=%s cached=%b"
+            path
+            (if creating && truncating then "CREAT|TRUNC"
+             else if creating then "CREAT"
+             else if truncating then "TRUNC"
+             else if rdonly then "RDONLY"
+             else "OTHER")
+            (File_store.is_cached ctx.store key);
           if (creating || truncating) && not (File_store.is_cached ctx.store key) then begin
             (* New or overwrite: create empty local placeholder without downloading *)
             let lp = File_store.local_path ctx.store key in
@@ -283,6 +292,8 @@ let make_operations ctx =
       (fun path buf offset _size ->
         guard "read" path (fun () ->
           let key = fuse_to_key ctx path in
+          if not (File_store.is_cached ctx.store key) then
+            Log.err "read %s: not in local cache, downloading from S3 (offset=%Ld)" path offset;
           File_store.ensure_cached ctx.store key;
           let lp = File_store.local_path ctx.store key in
           let size = Bigarray.Array1.dim buf in
@@ -332,6 +343,7 @@ let make_operations ctx =
                 Log.err "release %s: local file missing, skipping upload" path;
                 clear_dirty key
             | Some { Unix.LargeFile.st_size = size; _ } ->
+                Log.debug "release %s: size=%Ld" path size;
                 let ops = [ `Put (rel_key ctx key, size) ] in
                 Journal.write_local_pending ~entry_key:ek ops;
                 cache_put key (file_stat (Int64.to_int size) (Unix.gettimeofday ()));
