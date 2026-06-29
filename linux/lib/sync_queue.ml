@@ -219,6 +219,7 @@ let post t event =
     | Evict { key } -> (
         ignore (cancel_put t key);
         try
+          Log.info "evict %s" key;
           File_store.evict t.store key;
           t.on_evict ~key
         with exn ->

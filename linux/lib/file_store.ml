@@ -137,6 +137,7 @@ let rename_directory t ~src_prefix ~dst_prefix =
   S3_client.delete_multi t.client (List.map (fun e -> e.S3_client.key) all)
 
 let list_directory t ~prefix = S3_client.list_directory t.client ~prefix ()
+let list_all_files t ~prefix = S3_client.list_all t.client ~prefix ()
 let head_opt t ~key = S3_client.head_opt t.client ~key ()
 
 (* Like head_opt but returns the real file size for chunked manifests *)

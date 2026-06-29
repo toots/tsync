@@ -600,10 +600,30 @@ let ipc_handler ctx line =
         "OK"
     | "RESTORE" -> (
         let key = key_of_path arg in
-        try
-          File_store.ensure_cached ctx.store key;
+        let lp = File_store.local_path ctx.store key in
+        let is_dir =
+          (String.length key > 0 && key.[String.length key - 1] = '/')
+          || (Sys.file_exists lp && Sys.is_directory lp)
+        in
+        if is_dir then begin
+          let prefix =
+            if String.length key > 0 && key.[String.length key - 1] = '/'
+            then key
+            else key ^ "/"
+          in
+          let files = File_store.list_all_files ctx.store ~prefix in
+          List.iter
+            (fun (e : S3_client.file_entry) ->
+              try File_store.ensure_cached ctx.store e.key
+              with exn ->
+                Log.err "restore %s: %s" e.key (Printexc.to_string exn))
+            files;
           "OK"
-        with exn -> "ERROR " ^ Printexc.to_string exn)
+        end else
+          try
+            File_store.ensure_cached ctx.store key;
+            "OK"
+          with exn -> "ERROR " ^ Printexc.to_string exn)
     | "STATUS" ->
         Printf.sprintf {|STATUS {"mount":"%s","domain":"%s","running":true}|}
           ctx.mount_point ctx.domain_name

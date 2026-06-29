@@ -119,30 +119,36 @@ let status_cmd =
 
 let evict_cmd =
   let path_arg =
-    Arg.(required & pos 0 (some string) None & info [] ~docv:"PATH")
+    Arg.(non_empty & pos_all string [] & info [] ~docv:"PATH")
   in
-  let run path =
-    let resp = Ipc.send ("EVICT " ^ path) in
-    if resp = "OK" then Printf.printf "Evicted: %s\n" path
-    else Printf.eprintf "Error: %s\n" resp
+  let run paths =
+    List.iter
+      (fun path ->
+        let resp = Ipc.send ("EVICT " ^ path) in
+        if resp = "OK" then Printf.printf "Evicted: %s\n" path
+        else Printf.eprintf "Error: %s\n" resp)
+      paths
   in
   Cmd.v
-    (Cmd.info "evict" ~doc:"Evict a file from local cache")
+    (Cmd.info "evict" ~doc:"Evict files or directories from local cache")
     Term.(const run $ path_arg)
 
 (* ── tsync restore ───────────────────────────────────────────────────────── *)
 
 let restore_cmd =
   let path_arg =
-    Arg.(required & pos 0 (some string) None & info [] ~docv:"PATH")
+    Arg.(non_empty & pos_all string [] & info [] ~docv:"PATH")
   in
-  let run path =
-    let resp = Ipc.send ("RESTORE " ^ path) in
-    if resp = "OK" then Printf.printf "Restore requested: %s\n" path
-    else Printf.eprintf "Error: %s\n" resp
+  let run paths =
+    List.iter
+      (fun path ->
+        let resp = Ipc.send ("RESTORE " ^ path) in
+        if resp = "OK" then Printf.printf "Restored: %s\n" path
+        else Printf.eprintf "Error: %s\n" resp)
+      paths
   in
   Cmd.v
-    (Cmd.info "restore" ~doc:"Download an evicted file")
+    (Cmd.info "restore" ~doc:"Download evicted files or directories")
     Term.(const run $ path_arg)
 
 (* ── tsync wait ──────────────────────────────────────────────────────────── *)

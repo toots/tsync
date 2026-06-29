@@ -50,6 +50,8 @@ val rename_directory : t -> src_prefix:string -> dst_prefix:string -> unit
 val list_directory :
   t -> prefix:string -> S3_client.file_entry list * string list
 
+val list_all_files : t -> prefix:string -> S3_client.file_entry list
+
 val head_opt : t -> key:string -> S3_client.file_entry option
 
 (** Like [head_opt] but resolves the true file size for chunked manifest
