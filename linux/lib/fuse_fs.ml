@@ -100,6 +100,53 @@ let stat_of_entry (e : S3_client.file_entry) = file_stat e.size e.last_modified
 
 let auto_evict = ref (Sys.file_exists (Ipc.auto_evict_path ()))
 
+(* ── Open handle tracking + deferred eviction ────────────────────────────── *)
+
+let open_count : (string, int) Hashtbl.t = Hashtbl.create 64
+let open_count_mutex = Mutex.create ()
+let pending_evict : (string, unit) Hashtbl.t = Hashtbl.create 16
+let pending_evict_mutex = Mutex.create ()
+
+let open_count_incr key =
+  Mutex.lock open_count_mutex;
+  let n = Option.value ~default:0 (Hashtbl.find_opt open_count key) in
+  Hashtbl.replace open_count key (n + 1);
+  Mutex.unlock open_count_mutex
+
+(* Returns the new count after decrement. *)
+let open_count_decr key =
+  Mutex.lock open_count_mutex;
+  let n = Option.value ~default:0 (Hashtbl.find_opt open_count key) in
+  let n' = max 0 (n - 1) in
+  if n' = 0 then Hashtbl.remove open_count key
+  else Hashtbl.replace open_count key n';
+  Mutex.unlock open_count_mutex;
+  n'
+
+let do_evict ctx key =
+  File_store.evict ctx.store key;
+  cache_invalidate key
+
+let evict_if_pending ctx key =
+  Mutex.lock pending_evict_mutex;
+  let was_pending = Hashtbl.mem pending_evict key in
+  Hashtbl.remove pending_evict key;
+  Mutex.unlock pending_evict_mutex;
+  if was_pending then do_evict ctx key
+
+(* Called by the sync_queue on_evict callback after a successful upload.
+   Evicts immediately if no handles are open, otherwise defers to the last release. *)
+let deferred_evict ctx ~key =
+  Mutex.lock open_count_mutex;
+  let count = Option.value ~default:0 (Hashtbl.find_opt open_count key) in
+  Mutex.unlock open_count_mutex;
+  if count = 0 then do_evict ctx key
+  else begin
+    Mutex.lock pending_evict_mutex;
+    Hashtbl.replace pending_evict key ();
+    Mutex.unlock pending_evict_mutex
+  end
+
 (* The FUSE kernel creates .fuse_hidden* files to preserve open file
    descriptors when the kernel renames a file that has open FDs (open-while-unlink).
    These are kernel-internal; we must not mirror them to S3. *)
@@ -297,6 +344,7 @@ let make_operations ctx =
             end
             else if not (File_store.is_cached ctx.store key) then
               File_store.ensure_cached ctx.store key;
+            open_count_incr key;
             (* direct_io bypasses the kernel page cache so reads always go
                through our handler; without it stale cached pages are served
                after a rewrite because non-writeback FUSE writes don't update
@@ -373,7 +421,8 @@ let make_operations ctx =
                     Sync_queue.post ctx.sync_queue
                       (Sync_queue.Put
                          { key; src_path = lp; entry_key = ek; ops })
-            end));
+            end;
+            if open_count_decr key = 0 then evict_if_pending ctx key));
     unlink =
       (fun path ->
         guard "unlink" path (fun () ->

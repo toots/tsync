@@ -129,11 +129,8 @@ let exec_put t slot { key; src_path; entry_key; ops } =
         Journal.delete_local_pending ~entry_key;
         ignore (File_store.write_journal_entry ~entry_key ops t.store);
         t.on_version ~entry_key;
-        if !(t.auto_evict) then begin
-          Log.info "auto-evict %s" key;
-          File_store.evict t.store key;
+        if !(t.auto_evict) then
           t.on_evict ~key
-        end
       end
     with
       | S3_client.Cancelled -> Journal.delete_local_pending ~entry_key

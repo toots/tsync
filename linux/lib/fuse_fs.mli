@@ -19,6 +19,11 @@ val set_pending_version : string -> unit
     to re-stat from the local file or S3. *)
 val cache_invalidate : string -> unit
 
+(** Evict [key] from local cache if no file handles are currently open for it,
+    otherwise defer the eviction to when the last handle is released. Called by
+    the sync_queue [on_evict] callback after a successful upload. *)
+val deferred_evict : context -> key:string -> unit
+
 (** Mount the FUSE filesystem described by [ctx] and block until unmounted.
     Starts background threads for IPC, journal version flushing, and remote
     change polling before entering the FUSE event loop. *)

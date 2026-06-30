@@ -70,10 +70,11 @@ let start_cmd =
          (Printf.sprintf "fusermount3 -u %s 2>/dev/null"
             (Filename.quote mount_point)));
     Log.init ();
+    let on_evict = ref (fun ~key:_ -> ()) in
     let sync_queue =
       Sync_queue.make ~store ~auto_evict:Fuse_fs.auto_evict
         ~on_version:(fun ~entry_key -> Fuse_fs.set_pending_version entry_key)
-        ~on_evict:(fun ~key -> Fuse_fs.cache_invalidate key)
+        ~on_evict:(fun ~key -> !on_evict ~key)
     in
     let ctx =
       Fuse_fs.
@@ -85,6 +86,7 @@ let start_cmd =
           sync_queue;
         }
     in
+    on_evict := Fuse_fs.deferred_evict ctx;
     Fuse_fs.mount ctx [| "tsync"; mount_point |];
     Sync_queue.drain sync_queue
   in
