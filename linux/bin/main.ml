@@ -151,36 +151,6 @@ let restore_cmd =
     (Cmd.info "restore" ~doc:"Download evicted files or directories")
     Term.(const run $ path_arg)
 
-(* ── tsync wait ──────────────────────────────────────────────────────────── *)
-
-let wait_cmd =
-  let path_arg =
-    Arg.(required & pos 0 (some string) None & info [] ~docv:"PATH")
-  in
-  let timeout_arg =
-    Arg.(
-      value & opt float 60.0
-      & info ["timeout"] ~docv:"SECONDS" ~doc:"Timeout in seconds (default 60)")
-  in
-  let run path timeout =
-    let deadline = Unix.gettimeofday () +. timeout in
-    let rec poll () =
-      let resp = Ipc.send ("WAIT " ^ path) in
-      if resp = "OK" then (
-        Printf.printf "Ready: %s\n" path;
-        exit 0)
-      else if Unix.gettimeofday () >= deadline then (
-        Printf.eprintf "Timeout waiting for %s\n" path;
-        exit 1)
-      else (
-        Unix.sleepf 0.5;
-        poll ())
-    in
-    poll ()
-  in
-  Cmd.v
-    (Cmd.info "wait" ~doc:"Wait until a file is cached locally")
-    Term.(const run $ path_arg $ timeout_arg)
 
 (* ── tsync pull ──────────────────────────────────────────────────────────── *)
 
@@ -410,7 +380,6 @@ let () =
         evict_cmd;
         restore_cmd;
         pull_cmd;
-        wait_cmd;
         ls_cmd;
         history_cmd;
         purge_cmd;

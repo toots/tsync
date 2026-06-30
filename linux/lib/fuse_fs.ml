@@ -651,9 +651,6 @@ let ipc_handler ctx line =
               "OK"
           | "status" -> if !auto_evict then "on" else "off"
           | _ -> "ERROR expected on|off|status")
-    | "WAIT" ->
-        let key = key_of_path arg in
-        if File_store.is_cached ctx.store key then "OK" else "ERROR not cached"
     | "FULL_RESYNC" ->
         Mutex.lock meta_mutex;
         Hashtbl.clear meta_cache;
