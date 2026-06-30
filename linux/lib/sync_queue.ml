@@ -34,6 +34,7 @@ type t = {
   queue : put_data Queue.t;
   queue_mtx : Mutex.t;
   queue_cond : Condition.t;
+  auto_evict : bool ref;
   on_version : entry_key:string -> unit;
   on_evict : key:string -> unit;
   stop : bool Atomic.t;
@@ -127,7 +128,12 @@ let exec_put t slot { key; src_path; entry_key; ops } =
       else begin
         Journal.delete_local_pending ~entry_key;
         ignore (File_store.write_journal_entry ~entry_key ops t.store);
-        t.on_version ~entry_key
+        t.on_version ~entry_key;
+        if !(t.auto_evict) then begin
+          Log.info "auto-evict %s" key;
+          File_store.evict t.store key;
+          t.on_evict ~key
+        end
       end
     with
       | S3_client.Cancelled -> Journal.delete_local_pending ~entry_key
@@ -168,7 +174,7 @@ let worker_loop t =
     end
   done
 
-let make ~store ~auto_evict:_ ~on_version ~on_evict =
+let make ~store ~auto_evict ~on_version ~on_evict =
   let t =
     {
       store;
@@ -177,6 +183,7 @@ let make ~store ~auto_evict:_ ~on_version ~on_evict =
       queue = Queue.create ();
       queue_mtx = Mutex.create ();
       queue_cond = Condition.create ();
+      auto_evict;
       on_version;
       on_evict;
       stop = Atomic.make false;
