@@ -1,7 +1,11 @@
 open Cmdliner
-open Tsync_lib
 
 (* ── Helpers ─────────────────────────────────────────────────────────────── *)
+
+let () =
+  if not Runtime.implemented then (
+    Printf.eprintf "No backend available at compiled-timne!\n%!";
+    exit 1)
 
 let rec mkdir_p path =
   if not (Sys.file_exists path) then begin
@@ -68,36 +72,26 @@ let start_cmd =
         | None -> default_mount_point cfg conf.Conf.domain_name
     in
     mkdir_p mount_point;
-    (* Clean up any stale FUSE mount left by a previous crash *)
-    ignore
-      (Sys.command
-         (Printf.sprintf "fusermount3 -u %s 2>/dev/null"
-            (Filename.quote mount_point)));
+    Runtime.pre_start ~mount_point;
     Log.init ();
     let files_ref : File.store option ref = ref None in
     let get_file key = File.make ~store:(Option.get !files_ref) ~key in
     let sync_queue =
       Sync_queue.make ~store
         ~upload:(fun ~key ~cancel -> File.upload ~cancel (get_file key))
-        ~on_version:(fun ~entry_key -> Fuse_fs.set_pending_version entry_key)
+        ~on_version:(fun ~entry_key -> Runtime.set_pending_version entry_key)
         ~on_upload_done:(fun ~key -> File.on_upload_done (get_file key))
     in
     let files =
       File.make_store ~conf ~file_store:store ~sync_queue
-        ~auto_evict:Fuse_fs.auto_evict
+        ~auto_evict:Runtime.auto_evict
     in
     files_ref := Some files;
     let ctx =
-      Context.
-        {
-          store;
-          files;
-          domain_name = conf.Conf.domain_name;
-          domain_prefix = conf.Conf.domain_prefix;
-          mount_point;
-        }
+      Runtime.make_context ~store ~files ~domain_name:conf.Conf.domain_name
+        ~domain_prefix:conf.Conf.domain_prefix ~mount_point
     in
-    Fuse_fs.mount ctx [| "tsync"; mount_point |];
+    Runtime.mount ctx [| "tsync"; mount_point |];
     Sync_queue.drain sync_queue
   in
   Cmd.v
@@ -219,7 +213,10 @@ let ls_cmd =
             String.sub e.key dp_len (String.length e.key - dp_len)
           else e.key
         in
-        let cached = File_store.is_cached store e.key in
+        let cached =
+          Local.is_cached ~domain_name:conf.Conf.domain_name
+            ~domain_prefix:conf.Conf.domain_prefix e.key
+        in
         Printf.printf "%s  %s  %d bytes\n"
           (if cached then "local" else "cloud")
           name e.size)
@@ -466,7 +463,7 @@ let sync_cmd =
 let () =
   let cmd =
     Cmd.group
-      (Cmd.info "tsync" ~doc:"S3-backed FUSE filesystem sync")
+      (Cmd.info "tsync" ~doc:"S3-backed filesystem sync")
       [
         start_cmd;
         stop_cmd;

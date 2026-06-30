@@ -1,4 +1,0 @@
-(executable
- (name main)
- (public_name tsync)
- (libraries tsync_core tsync_file tsync_fuse cmdliner threads.posix))

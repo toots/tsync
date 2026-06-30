@@ -17,3 +17,5 @@ xcuserdata/
 
 # macOS
 .DS_Store
+
+_build/

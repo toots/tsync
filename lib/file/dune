@@ -1,5 +1,6 @@
 (library
  (name tsync_file)
+ (wrapped false)
  (libraries
   tsync_conf
   tsync_log
