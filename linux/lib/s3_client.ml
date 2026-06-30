@@ -198,14 +198,10 @@ let put_chunked t ~key ~src_path ?(cancel = Atomic.make false) ~chunk_prefix ()
     =
   let file_size = (Unix.stat src_path).Unix.st_size in
   Log.debug "put_chunked %s: file_size=%d" key file_size;
-  if file_size <= Chunk_manifest.chunk_size then begin
-    put t ~content_type:"application/octet-stream" ~key
-      ~data:(read_file src_path) ();
-    None
-  end
-  else begin
+  begin
     let num_chunks =
-      (file_size + Chunk_manifest.chunk_size - 1) / Chunk_manifest.chunk_size
+      max 1
+        ((file_size + Chunk_manifest.chunk_size - 1) / Chunk_manifest.chunk_size)
     in
     let entries =
       List.init num_chunks (fun i ->
@@ -244,7 +240,7 @@ let put_chunked t ~key ~src_path ?(cancel = Atomic.make false) ~chunk_prefix ()
     put t ~content_type:Chunk_manifest.content_type ~key
       ~data:(Chunk_manifest.to_string manifest)
       ();
-    Some manifest
+    manifest
   end
 
 (* ── Chunked download ────────────────────────────────────────────────────── *)

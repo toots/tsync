@@ -54,7 +54,7 @@ val put_chunked :
   ?cancel:bool Atomic.t ->
   chunk_prefix:string ->
   unit ->
-  Chunk_manifest.t option
+  Chunk_manifest.t
 
 (** Download [key] to [dst_path], reassembling chunks if the object is a
     manifest. Returns [Some manifest] when chunked, [None] otherwise. *)

@@ -65,16 +65,12 @@ let rename_manifest t ~src_key ~dst_key =
 (* ── S3 operations ───────────────────────────────────────────────────────── *)
 
 let upload t ~key ~src_path ?(cancel = Atomic.make false) () =
-  let manifest_opt =
+  let manifest =
     S3_client.put_chunked t.client ~key ~src_path ~cancel
       ~chunk_prefix:t.chunk_prefix ()
   in
-  Option.iter
-    (fun manifest ->
-      Cache.write_manifest ~domain_name:t.domain_name
-        ~domain_prefix:t.domain_prefix key
-        (Chunk_manifest.to_string manifest))
-    manifest_opt
+  Cache.write_manifest ~domain_name:t.domain_name ~domain_prefix:t.domain_prefix
+    key (Chunk_manifest.to_string manifest)
 
 let download t ~key ~dst_path =
   Cache.ensure_parent_dir dst_path;
