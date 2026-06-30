@@ -1,15 +1,7 @@
-let tsync_root () =
-  let xdg =
-    match Sys.getenv_opt "XDG_CACHE_HOME" with
-      | Some d -> d
-      | None -> Filename.concat (Sys.getenv "HOME") ".cache"
-  in
-  Filename.concat xdg "tsync"
+let data_dir ~cache_root domain_name = Filename.concat cache_root domain_name
 
-let cache_root domain_name = Filename.concat (tsync_root ()) domain_name
-
-let manifest_root domain_name =
-  Filename.concat (tsync_root ()) (".manifest/" ^ domain_name)
+let manifest_dir ~cache_root domain_name =
+  Filename.concat cache_root (".manifest/" ^ domain_name)
 
 let strip_prefix ~domain_prefix key =
   let pfx = String.length domain_prefix in
@@ -17,8 +9,9 @@ let strip_prefix ~domain_prefix key =
     String.sub key pfx (String.length key - pfx)
   else key
 
-let cache_path ~domain_name ~domain_prefix key =
-  Filename.concat (cache_root domain_name) (strip_prefix ~domain_prefix key)
+let cache_path ~cache_root ~domain_name ~domain_prefix key =
+  Filename.concat (data_dir ~cache_root domain_name)
+    (strip_prefix ~domain_prefix key)
 
 let rec mkdir_p path =
   if not (Sys.file_exists path) then begin
@@ -28,13 +21,14 @@ let rec mkdir_p path =
 
 let ensure_parent_dir path = mkdir_p (Filename.dirname path)
 
-let manifest_path ~domain_name ~domain_prefix key =
-  Filename.concat (manifest_root domain_name) (strip_prefix ~domain_prefix key)
+let manifest_path ~cache_root ~domain_name ~domain_prefix key =
+  Filename.concat (manifest_dir ~cache_root domain_name)
+    (strip_prefix ~domain_prefix key)
 
-let create_dir ~domain_name ~domain_prefix key =
-  mkdir_p (manifest_path ~domain_name ~domain_prefix key)
+let create_dir ~cache_root ~domain_name ~domain_prefix key =
+  mkdir_p (manifest_path ~cache_root ~domain_name ~domain_prefix key)
 
-let delete_dir ~domain_name ~domain_prefix key =
+let delete_dir ~cache_root ~domain_name ~domain_prefix key =
   let rec rm_rf path =
     if Sys.file_exists path then
       if Sys.is_directory path then begin
@@ -45,19 +39,19 @@ let delete_dir ~domain_name ~domain_prefix key =
       end
       else (try Unix.unlink path with Unix.Unix_error _ -> ())
   in
-  rm_rf (manifest_path ~domain_name ~domain_prefix key)
+  rm_rf (manifest_path ~cache_root ~domain_name ~domain_prefix key)
 
-let list_dir ~domain_name ~domain_prefix key =
-  let path = manifest_path ~domain_name ~domain_prefix key in
+let list_dir ~cache_root ~domain_name ~domain_prefix key =
+  let path = manifest_path ~cache_root ~domain_name ~domain_prefix key in
   if Sys.file_exists path && Sys.is_directory path then
     Array.to_list (Sys.readdir path)
   else []
 
-let is_cached ~domain_name ~domain_prefix key =
-  Sys.file_exists (cache_path ~domain_name ~domain_prefix key)
+let is_cached ~cache_root ~domain_name ~domain_prefix key =
+  Sys.file_exists (cache_path ~cache_root ~domain_name ~domain_prefix key)
 
-let read_manifest ~domain_name ~domain_prefix key =
-  let path = manifest_path ~domain_name ~domain_prefix key in
+let read_manifest ~cache_root ~domain_name ~domain_prefix key =
+  let path = manifest_path ~cache_root ~domain_name ~domain_prefix key in
   if Sys.file_exists path then (
     try
       let ic = open_in path in
@@ -69,14 +63,14 @@ let read_manifest ~domain_name ~domain_prefix key =
     with _ -> None)
   else None
 
-let delete_manifest ~domain_name ~domain_prefix key =
-  let path = manifest_path ~domain_name ~domain_prefix key in
+let delete_manifest ~cache_root ~domain_name ~domain_prefix key =
+  let path = manifest_path ~cache_root ~domain_name ~domain_prefix key in
   try Unix.unlink path with Unix.Unix_error _ -> ()
 
-let rename_manifest ~domain_name ~domain_prefix ~src_key ~dst_key =
-  let src = manifest_path ~domain_name ~domain_prefix src_key in
+let rename_manifest ~cache_root ~domain_name ~domain_prefix ~src_key ~dst_key =
+  let src = manifest_path ~cache_root ~domain_name ~domain_prefix src_key in
   if Sys.file_exists src then begin
-    let dst = manifest_path ~domain_name ~domain_prefix dst_key in
+    let dst = manifest_path ~cache_root ~domain_name ~domain_prefix dst_key in
     ensure_parent_dir dst;
     Unix.rename src dst
   end
@@ -91,11 +85,11 @@ let rec clean_tmp_manifests dir =
           try Unix.unlink path with Unix.Unix_error _ -> ()))
       (Sys.readdir dir)
 
-let init ~domain_name =
-  let root = manifest_root domain_name in
+let init ~cache_root ~domain_name =
+  let root = manifest_dir ~cache_root domain_name in
   mkdir_p root;
   clean_tmp_manifests root
 
-let evict ~domain_name ~domain_prefix key =
-  let path = cache_path ~domain_name ~domain_prefix key in
+let evict ~cache_root ~domain_name ~domain_prefix key =
+  let path = cache_path ~cache_root ~domain_name ~domain_prefix key in
   try Unix.unlink path with Unix.Unix_error _ -> ()

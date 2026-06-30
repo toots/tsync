@@ -10,6 +10,9 @@ let client t = t.client
 let chunk_prefix t = t.chunk_prefix
 let trash_prefix t = t.trash_prefix
 let versioning t = t.versioning
+let cache_root t = t.cache_root
+let socket_path t = t.socket_path
+let notify_path t = t.notify_path
 
 (* ── Directory operations ─────────────────────────────────────────────────── *)
 

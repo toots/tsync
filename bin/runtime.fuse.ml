@@ -1,5 +1,19 @@
 let implemented = true
 
+let default_paths () =
+  let cache_base =
+    match Sys.getenv_opt "XDG_CACHE_HOME" with
+      | Some d -> d
+      | None -> Filename.concat (Sys.getenv "HOME") ".cache"
+  in
+  let data_base =
+    match Sys.getenv_opt "XDG_DATA_HOME" with
+      | Some d -> d
+      | None -> Filename.concat (Sys.getenv "HOME") ".local/share"
+  in
+  ( Filename.concat cache_base "tsync",
+    Filename.concat data_base "tsync/tsync.sock" )
+
 let pre_start ~mount_point =
   ignore
     (Sys.command

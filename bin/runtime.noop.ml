@@ -1,4 +1,5 @@
 let implemented = false
+let default_paths () = failwith "no runtime available"
 let pre_start ~mount_point:_ = ()
 let auto_evict = ref false
 let set_pending_version _ = ()

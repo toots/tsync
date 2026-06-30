@@ -127,30 +127,29 @@ let make_operations ctx =
 
 (* ── IPC handler ─────────────────────────────────────────────────────────── *)
 
-let ipc_handler ctx line =
-  let cmd, arg = Ipc.split_cmd (String.trim line) in
-  let key_of_path path =
-    let path =
-      if String.length path >= 2 && path.[0] = '~' && path.[1] = '/' then
-        Sys.getenv "HOME" ^ String.sub path 1 (String.length path - 1)
-      else path
-    in
-    if
-      String.length path > String.length ctx.Context.mount_point
-      && String.sub path 0 (String.length ctx.mount_point) = ctx.mount_point
-    then
-      Context.fuse_to_key ctx
-        (String.sub path
-           (String.length ctx.mount_point)
-           (String.length path - String.length ctx.mount_point))
-    else Context.fuse_to_key ctx path
+let key_of_path ctx path =
+  let path =
+    if String.length path >= 2 && path.[0] = '~' && path.[1] = '/' then
+      Sys.getenv "HOME" ^ String.sub path 1 (String.length path - 1)
+    else path
   in
-  match cmd with
-    | "EVICT" ->
-        let key = key_of_path arg in
+  if
+    String.length path > String.length ctx.Context.mount_point
+    && String.sub path 0 (String.length ctx.mount_point) = ctx.mount_point
+  then
+    Context.fuse_to_key ctx
+      (String.sub path
+         (String.length ctx.mount_point)
+         (String.length path - String.length ctx.mount_point))
+  else Context.fuse_to_key ctx path
+
+let ipc_handler ctx line =
+  match Ipc.parse_command line with
+    | Evict arg ->
+        let key = key_of_path ctx arg in
         let lp = File.local_path (File.make ~store:ctx.files ~key) in
         if Sys.file_exists lp && Sys.is_directory lp then begin
-          let root = Local.cache_root ctx.domain_name in
+          let cache_root = File_store.cache_root ctx.store in
           let rec walk dir =
             Array.iter
               (fun name ->
@@ -159,8 +158,8 @@ let ipc_handler ctx line =
                 else begin
                   let rel =
                     String.sub p
-                      (String.length root + 1)
-                      (String.length p - String.length root - 1)
+                      (String.length cache_root + 1)
+                      (String.length p - String.length cache_root - 1)
                   in
                   File.request_evict
                     (File.make ~store:ctx.files ~key:(ctx.domain_prefix ^ rel))
@@ -171,8 +170,8 @@ let ipc_handler ctx line =
         end
         else File.request_evict (File.make ~store:ctx.files ~key);
         "OK"
-    | "RESTORE" ->
-        let key = key_of_path arg in
+    | Restore arg ->
+        let key = key_of_path ctx arg in
         let lp = File.local_path (File.make ~store:ctx.files ~key) in
         let is_dir =
           (String.length key > 0 && key.[String.length key - 1] = '/')
@@ -198,10 +197,10 @@ let ipc_handler ctx line =
             File.ensure_cached (File.make ~store:ctx.files ~key);
             "OK"
           with exn -> "ERROR " ^ Printexc.to_string exn)
-    | "STATUS" ->
+    | Status ->
         Printf.sprintf {|STATUS {"mount":"%s","domain":"%s","running":true}|}
           ctx.mount_point ctx.domain_name
-    | "STOP" ->
+    | Stop ->
         let _ =
           Thread.create
             (fun () ->
@@ -212,7 +211,7 @@ let ipc_handler ctx line =
             ()
         in
         "STOP"
-    | "AUTO_EVICT" -> (
+    | Auto_evict arg -> (
         match arg with
           | "on" ->
               auto_evict := true;
@@ -225,8 +224,8 @@ let ipc_handler ctx line =
               "OK"
           | "status" -> if !auto_evict then "on" else "off"
           | _ -> "ERROR expected on|off|status")
-    | "FULL_RESYNC" ->
-        let root = Local.cache_root ctx.Context.domain_name in
+    | Full_resync ->
+        let cache_root = File_store.cache_root ctx.store in
         let rec walk dir =
           if Sys.file_exists dir then
             Array.iter
@@ -236,14 +235,14 @@ let ipc_handler ctx line =
                 else (try Unix.unlink p with _ -> ()))
               (try Sys.readdir dir with _ -> [||])
         in
-        walk root;
+        walk cache_root;
         "OK"
-    | _ -> "ERROR unknown command"
+    | exception Failure msg -> msg
 
 (* ── Main mount ─────────────────────────────────────────────────────────── *)
 
 let mount ctx argv =
-  let _ipc_thread = Thread.create (fun () -> Ipc.serve (ipc_handler ctx)) () in
+  let _ipc_thread = Thread.create (fun () -> Ipc.serve ~path:(File_store.socket_path ctx.store) (ipc_handler ctx)) () in
   let _version_flusher =
     Thread.create
       (fun () ->

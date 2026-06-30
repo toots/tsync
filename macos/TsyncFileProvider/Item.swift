@@ -10,7 +10,7 @@ final class TsyncItem: NSObject, NSFileProviderItem {
     let contentModificationDate: Date?
     let capabilities: NSFileProviderItemCapabilities
     let itemVersion: NSFileProviderItemVersion
-    var isUploaded: Bool { true }
+    let isUploaded: Bool
     let isDownloaded: Bool
     var contentPolicy: NSFileProviderContentPolicy { .downloadLazily }
 
@@ -22,7 +22,8 @@ final class TsyncItem: NSObject, NSFileProviderItem {
         size: Int64? = nil,
         modificationDate: Date? = nil,
         etag: String? = nil,
-        isDownloaded: Bool = false
+        isDownloaded: Bool = false,
+        isUploaded: Bool = true
     ) {
         self.itemIdentifier = identifier
         self.parentItemIdentifier = parent
@@ -38,6 +39,7 @@ final class TsyncItem: NSObject, NSFileProviderItem {
         let versionData = (etag ?? "").data(using: .utf8) ?? Data()
         self.itemVersion = NSFileProviderItemVersion(contentVersion: versionData, metadataVersion: versionData)
         self.isDownloaded = isDownloaded
+        self.isUploaded = isUploaded
     }
 
     /// Synthetic root container item.

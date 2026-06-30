@@ -8,6 +8,9 @@ val client : t -> S3_client.t
 val chunk_prefix : t -> string
 val trash_prefix : t -> string
 val versioning : t -> bool
+val cache_root : t -> string
+val socket_path : t -> string
+val notify_path : t -> string
 
 (** {2 Directory operations} *)
 

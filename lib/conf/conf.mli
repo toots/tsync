@@ -7,4 +7,7 @@ type t = {
   versioning : bool;
   journal_prefix : string;
   version_key : string;
+  cache_root : string;
+  socket_path : string;
+  notify_path : string;
 }

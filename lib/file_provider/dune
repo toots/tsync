@@ -3,4 +3,4 @@
  (wrapped false)
  (enabled_if
   (= %{system} macosx))
- (libraries tsync_core tsync_file tsync_queue unix threads.posix))
+ (libraries tsync_core tsync_file tsync_queue yojson unix threads.posix))

@@ -32,6 +32,8 @@ let load_store ?domain_name () =
       ~access_key_id:cfg.Config.access_key_id
       ~secret_access_key:cfg.Config.secret_access_key
   in
+  let cache_root, socket_path = Runtime.default_paths () in
+  let notify_path = Filename.concat (Filename.dirname socket_path) "notify.sock" in
   let conf =
     Conf.
       {
@@ -43,6 +45,9 @@ let load_store ?domain_name () =
         journal_prefix = Config.journal_prefix cfg domain_name;
         version_key = Config.version_key cfg domain_name;
         versioning = cfg.Config.versioning;
+        cache_root;
+        socket_path;
+        notify_path;
       }
   in
   let store = File_store.make conf in
@@ -80,7 +85,9 @@ let start_cmd =
       Sync_queue.make ~store
         ~upload:(fun ~key ~cancel -> File.upload ~cancel (get_file key))
         ~on_version:(fun ~entry_key -> Runtime.set_pending_version entry_key)
-        ~on_upload_done:(fun ~key -> File.on_upload_done (get_file key))
+        ~on_upload_done:(fun ~key ->
+          File.on_upload_done (get_file key);
+          Ipc.notify_uploaded ~path:conf.Conf.notify_path key)
     in
     let files =
       File.make_store ~conf ~file_store:store ~sync_queue
@@ -214,7 +221,8 @@ let ls_cmd =
           else e.key
         in
         let cached =
-          Local.is_cached ~domain_name:conf.Conf.domain_name
+          Local.is_cached ~cache_root:conf.Conf.cache_root
+            ~domain_name:conf.Conf.domain_name
             ~domain_prefix:conf.Conf.domain_prefix e.key
         in
         Printf.printf "%s  %s  %d bytes\n"

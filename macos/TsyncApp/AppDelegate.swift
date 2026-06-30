@@ -13,58 +13,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         app.run()
     }
 
-    private let ipcServer = IPCServer()
-    private var pollerTask: Task<Void, Never>?
-
     func applicationDidFinishLaunching(_ notification: Notification) {
         Task { await registerDomains() }
-        ipcServer.start()
-        pollerTask = Task { await runVersionPoller() }
-    }
-
-    func applicationWillTerminate(_ notification: Notification) {
-        pollerTask?.cancel()
-        ipcServer.stop()
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
         false
-    }
-
-    private func runVersionPoller() async {
-        guard let config = try? Config.load(),
-              let credentials = try? KeychainCredentials.load() else {
-            log.warning("poller: config/credentials unavailable, skipping")
-            return
-        }
-        let client = S3Client(bucket: config.bucket, region: config.awsRegion, credentials: credentials)
-        let stores = config.domains.map { S3Store(client: client, config: config, domainName: $0.name) }
-        var knownVersions = [String?](repeating: nil, count: stores.count)
-
-        while !Task.isCancelled {
-            try? await Task.sleep(nanoseconds: 1_000_000_000)
-            var changed = false
-            for (i, store) in stores.enumerated() {
-                let version = try? await store.fetchVersion()
-                if knownVersions[i] != nil && version != knownVersions[i] {
-                    changed = true
-                    log.info("poller: version changed for \(store.domainName, privacy: .public)")
-                }
-                knownVersions[i] = version
-            }
-            if changed { await signalAllDomains() }
-        }
-        try? client.shutdown()
-    }
-
-    private func signalAllDomains() async {
-        guard let domains = try? await NSFileProviderManager.domains() else { return }
-        for domain in domains {
-            guard let manager = NSFileProviderManager(for: domain) else { continue }
-            manager.signalEnumerator(for: .workingSet) { error in
-                if let error { log.error("poller: signal failed: \(error, privacy: .public)") }
-            }
-        }
     }
 
     private func registerDomains() async {

@@ -36,8 +36,41 @@ let split_cmd line =
         ( String.sub line 0 i,
           String.sub line (i + 1) (String.length line - i - 1) )
 
-let serve handler =
-  let path = socket_path () in
+type command =
+  | Stop
+  | Status
+  | Evict of string
+  | Restore of string
+  | Auto_evict of string
+  | Full_resync
+
+let parse_command line =
+  let cmd, arg = split_cmd (String.trim line) in
+  match cmd with
+    | "STOP" -> Stop
+    | "STATUS" -> Status
+    | "EVICT" -> Evict arg
+    | "RESTORE" -> Restore arg
+    | "AUTO_EVICT" -> Auto_evict arg
+    | "FULL_RESYNC" -> Full_resync
+    | c -> failwith ("ERROR unknown command: " ^ c)
+
+let notify ~path msg =
+  (try
+     let fd = Unix.socket Unix.PF_UNIX Unix.SOCK_STREAM 0 in
+     (try
+        Unix.connect fd (Unix.ADDR_UNIX path);
+        let oc = Unix.out_channel_of_descr fd in
+        output_string oc (msg ^ "\n");
+        flush oc
+      with _ -> ());
+     Unix.close fd
+   with _ -> ())
+
+let notify_evict ~path key = notify ~path ("EVICT " ^ key)
+let notify_uploaded ~path key = notify ~path ("UPLOADED " ^ key)
+
+let serve ~path handler =
   let dir = Filename.dirname path in
   mkdir_p dir;
   (try Unix.unlink path with Unix.Unix_error (Unix.ENOENT, _, _) -> ());

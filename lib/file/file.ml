@@ -5,6 +5,8 @@ type store = {
   chunk_prefix : string;
   trash_prefix : string;
   versioning : bool;
+  cache_root : string;
+  socket_path : string;
   file_store : File_store.t;
   sync_queue : Sync_queue.t;
   auto_evict : bool ref;
@@ -20,7 +22,7 @@ type store = {
 }
 
 let make_store ~(conf : Conf.t) ~file_store ~sync_queue ~auto_evict =
-  Local.init ~domain_name:conf.domain_name;
+  Local.init ~cache_root:conf.cache_root ~domain_name:conf.domain_name;
   {
     client = conf.client;
     domain_name = conf.domain_name;
@@ -28,6 +30,8 @@ let make_store ~(conf : Conf.t) ~file_store ~sync_queue ~auto_evict =
     chunk_prefix = conf.chunk_prefix;
     trash_prefix = conf.trash_prefix;
     versioning = conf.versioning;
+    cache_root = conf.cache_root;
+    socket_path = conf.socket_path;
     file_store;
     sync_queue;
     auto_evict;
@@ -57,11 +61,11 @@ let rel_key { store; key } =
 (* ── Local cache ─────────────────────────────────────────────────────────── *)
 
 let is_cached { store; key } =
-  Local.is_cached ~domain_name:store.domain_name
+  Local.is_cached ~cache_root:store.cache_root ~domain_name:store.domain_name
     ~domain_prefix:store.domain_prefix key
 
 let local_path { store; key } =
-  Local.cache_path ~domain_name:store.domain_name
+  Local.cache_path ~cache_root:store.cache_root ~domain_name:store.domain_name
     ~domain_prefix:store.domain_prefix key
 
 let ensure_parent_dir f = Local.ensure_parent_dir (local_path f)
@@ -70,7 +74,7 @@ let ensure_parent_dir f = Local.ensure_parent_dir (local_path f)
 
 let read_manifest { store; key } : Manifest.state option =
   match
-    Local.read_manifest ~domain_name:store.domain_name
+    Local.read_manifest ~cache_root:store.cache_root ~domain_name:store.domain_name
       ~domain_prefix:store.domain_prefix key
   with
     | None -> None
@@ -78,7 +82,7 @@ let read_manifest { store; key } : Manifest.state option =
 
 let write_manifest { store; key } (state : Manifest.state) =
   let path =
-    Local.manifest_path ~domain_name:store.domain_name
+    Local.manifest_path ~cache_root:store.cache_root ~domain_name:store.domain_name
       ~domain_prefix:store.domain_prefix key
   in
   Local.ensure_parent_dir path;
@@ -89,7 +93,7 @@ let write_manifest { store; key } (state : Manifest.state) =
   Unix.rename tmp path
 
 let delete_manifest { store; key } =
-  Local.delete_manifest ~domain_name:store.domain_name
+  Local.delete_manifest ~cache_root:store.cache_root ~domain_name:store.domain_name
     ~domain_prefix:store.domain_prefix key
 
 (* ── Upload / download ───────────────────────────────────────────────────── *)
@@ -169,7 +173,7 @@ let dir_stat () =
     }
 
 let manifest_path f =
-  Local.manifest_path ~domain_name:f.store.domain_name
+  Local.manifest_path ~cache_root:f.store.cache_root ~domain_name:f.store.domain_name
     ~domain_prefix:f.store.domain_prefix f.key
 
 let stat f =
@@ -188,7 +192,7 @@ let stat f =
       | None -> None)
 
 let list_dir f =
-  Local.list_dir ~domain_name:f.store.domain_name
+  Local.list_dir ~cache_root:f.store.cache_root ~domain_name:f.store.domain_name
     ~domain_prefix:f.store.domain_prefix f.key
 
 (* ── Xattrs ──────────────────────────────────────────────────────────────── *)
@@ -231,7 +235,7 @@ let mark_dirty f =
 (* ── Local eviction ──────────────────────────────────────────────────────── *)
 
 let evict { store; key } =
-  Local.evict ~domain_name:store.domain_name ~domain_prefix:store.domain_prefix
+  Local.evict ~cache_root:store.cache_root ~domain_name:store.domain_name ~domain_prefix:store.domain_prefix
     key
 
 let clear_local f =
@@ -271,7 +275,7 @@ let truncate f size =
 
 let rename_local ~src ~dst =
   if is_cached src then Unix.rename (local_path src) (local_path dst);
-  Local.rename_manifest ~domain_name:src.store.domain_name
+  Local.rename_manifest ~cache_root:src.store.cache_root ~domain_name:src.store.domain_name
     ~domain_prefix:src.store.domain_prefix ~src_key:src.key ~dst_key:dst.key
 
 (* ── Synchronous S3 operations ───────────────────────────────────────────── *)
@@ -315,14 +319,14 @@ let delete f =
   with_journal f [`Delete (rel_key f)] (fun () -> apply_delete f)
 
 let mkdir f =
-  Local.create_dir ~domain_name:f.store.domain_name
+  Local.create_dir ~cache_root:f.store.cache_root ~domain_name:f.store.domain_name
     ~domain_prefix:f.store.domain_prefix f.key;
   with_journal f
     [`Mkdir (rel_key f)]
     (fun () -> File_store.create_directory f.store.file_store ~key:f.key)
 
 let rmdir f =
-  Local.delete_dir ~domain_name:f.store.domain_name
+  Local.delete_dir ~cache_root:f.store.cache_root ~domain_name:f.store.domain_name
     ~domain_prefix:f.store.domain_prefix f.key;
   with_journal f
     [`Rmdir (rel_key f)]

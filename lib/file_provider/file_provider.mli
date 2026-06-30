@@ -1,11 +1,7 @@
-val implemented : bool
+type context
+
 val auto_evict : bool ref
 val set_pending_version : string -> unit
-val pre_start : mount_point:string -> unit
-val default_paths : unit -> string * string
-(** Returns [(cache_root, socket_path)] appropriate for this runtime. *)
-
-type context
 
 val make_context :
   store:File_store.t ->
