@@ -1,0 +1,4 @@
+(library
+ (name tsync_s3_client)
+ (wrapped false)
+ (libraries aws-s3-lwt tsync_log lwt lwt.unix lwt_ssl))

@@ -1,0 +1,11 @@
+(library
+ (name tsync_file)
+ (libraries
+  tsync_conf
+  tsync_log
+  tsync_s3_client
+  tsync_xxhash
+  tsync_queue
+  tsync_local_io
+  unix
+  threads.posix))

@@ -1,0 +1,4 @@
+(library
+ (name tsync_queue)
+ (wrapped false)
+ (libraries tsync_conf tsync_s3_client tsync_xxhash))

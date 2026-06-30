@@ -45,13 +45,6 @@ let manifest_path ~domain_name ~domain_prefix key =
        (".manifest/" ^ domain_name))
     relative
 
-let write_manifest ~domain_name ~domain_prefix key content =
-  let path = manifest_path ~domain_name ~domain_prefix key in
-  ensure_parent_dir path;
-  let oc = open_out path in
-  output_string oc content;
-  close_out oc
-
 let read_manifest ~domain_name ~domain_prefix key =
   let path = manifest_path ~domain_name ~domain_prefix key in
   if Sys.file_exists path then (

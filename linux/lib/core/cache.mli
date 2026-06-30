@@ -19,10 +19,6 @@ val is_cached : domain_name:string -> domain_prefix:string -> string -> bool
 val manifest_path :
   domain_name:string -> domain_prefix:string -> string -> string
 
-(** Persist a chunk manifest string to the sidecar path for the given key. *)
-val write_manifest :
-  domain_name:string -> domain_prefix:string -> string -> string -> unit
-
 (** Read the chunk manifest sidecar for [key]. Returns [Some (json, mtime)]
     where [mtime] is the sidecar file's modification time, or [None] if absent.
 *)

@@ -1,0 +1,7 @@
+(library
+ (name tsync_xxhash)
+ (wrapped false)
+ (foreign_stubs
+  (language c)
+  (names xxhash_stubs))
+ (c_library_flags (-lxxhash)))

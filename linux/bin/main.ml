@@ -28,17 +28,21 @@ let load_store ?domain_name () =
       ~access_key_id:cfg.Config.access_key_id
       ~secret_access_key:cfg.Config.secret_access_key
   in
-  let domain_prefix = Config.domain_prefix cfg domain_name in
-  let chunk_prefix = Config.chunk_prefix cfg in
-  let trash_prefix = Config.trash_prefix cfg domain_name in
-  let journal_prefix = Config.journal_prefix cfg domain_name in
-  let version_key = Config.version_key cfg domain_name in
-  let store =
-    File_store.make ~client ~domain_name ~domain_prefix ~chunk_prefix
-      ~trash_prefix ~versioning:cfg.Config.versioning ~journal_prefix
-      ~version_key
+  let conf =
+    Conf.
+      {
+        client;
+        domain_name;
+        domain_prefix = Config.domain_prefix cfg domain_name;
+        chunk_prefix = Config.chunk_prefix cfg;
+        trash_prefix = Config.trash_prefix cfg domain_name;
+        journal_prefix = Config.journal_prefix cfg domain_name;
+        version_key = Config.version_key cfg domain_name;
+        versioning = cfg.Config.versioning;
+      }
   in
-  (cfg, domain_name, store)
+  let store = File_store.make conf in
+  (cfg, conf, store)
 
 (* ── tsync start ─────────────────────────────────────────────────────────── *)
 
@@ -57,11 +61,11 @@ let start_cmd =
           ~doc:"Domain name (default: first configured)")
   in
   let run mount domain =
-    let cfg, domain_name, store = load_store ?domain_name:domain () in
+    let cfg, conf, store = load_store ?domain_name:domain () in
     let mount_point =
       match mount with
         | Some p -> p
-        | None -> default_mount_point cfg domain_name
+        | None -> default_mount_point cfg conf.Conf.domain_name
     in
     mkdir_p mount_point;
     (* Clean up any stale FUSE mount left by a previous crash *)
@@ -70,23 +74,29 @@ let start_cmd =
          (Printf.sprintf "fusermount3 -u %s 2>/dev/null"
             (Filename.quote mount_point)));
     Log.init ();
-    let on_evict = ref (fun ~key:_ -> ()) in
+    let files_ref : File.store option ref = ref None in
+    let get_file key = File.make ~store:(Option.get !files_ref) ~key in
     let sync_queue =
-      Sync_queue.make ~store ~auto_evict:Fuse_fs.auto_evict
+      Sync_queue.make ~store
+        ~upload:(fun ~key ~cancel -> File.upload ~cancel (get_file key))
         ~on_version:(fun ~entry_key -> Fuse_fs.set_pending_version entry_key)
-        ~on_evict:(fun ~key -> !on_evict ~key)
+        ~on_upload_done:(fun ~key -> File.on_upload_done (get_file key))
     in
+    let files =
+      File.make_store ~conf ~file_store:store ~sync_queue
+        ~auto_evict:Fuse_fs.auto_evict
+    in
+    files_ref := Some files;
     let ctx =
-      Fuse_fs.
+      Context.
         {
           store;
-          domain_name;
-          domain_prefix = File_store.domain_prefix store;
+          files;
+          domain_name = conf.Conf.domain_name;
+          domain_prefix = conf.Conf.domain_prefix;
           mount_point;
-          sync_queue;
         }
     in
-    on_evict := Fuse_fs.deferred_evict ctx;
     Fuse_fs.mount ctx [| "tsync"; mount_point |];
     Sync_queue.drain sync_queue
   in
@@ -120,9 +130,7 @@ let status_cmd =
 (* ── tsync evict ─────────────────────────────────────────────────────────── *)
 
 let evict_cmd =
-  let path_arg =
-    Arg.(non_empty & pos_all string [] & info [] ~docv:"PATH")
-  in
+  let path_arg = Arg.(non_empty & pos_all string [] & info [] ~docv:"PATH") in
   let run paths =
     List.iter
       (fun path ->
@@ -138,9 +146,7 @@ let evict_cmd =
 (* ── tsync restore ───────────────────────────────────────────────────────── *)
 
 let restore_cmd =
-  let path_arg =
-    Arg.(non_empty & pos_all string [] & info [] ~docv:"PATH")
-  in
+  let path_arg = Arg.(non_empty & pos_all string [] & info [] ~docv:"PATH") in
   let run paths =
     List.iter
       (fun path ->
@@ -153,7 +159,6 @@ let restore_cmd =
     (Cmd.info "restore" ~doc:"Download evicted files or directories")
     Term.(const run $ path_arg)
 
-
 (* ── tsync pull ──────────────────────────────────────────────────────────── *)
 
 let pull_cmd =
@@ -164,15 +169,15 @@ let pull_cmd =
     Arg.(value & flag & info ["force"] ~doc:"Restore even if already cached")
   in
   let run path force =
-    let _cfg, domain_name, store = load_store () in
+    let _cfg, conf, store = load_store () in
     let mount_point =
       match path with
         | Some p -> p
         | None ->
             let home = Sys.getenv "HOME" in
-            Filename.concat home ("tsync/" ^ domain_name)
+            Filename.concat home ("tsync/" ^ conf.Conf.domain_name)
     in
-    let prefix = File_store.domain_prefix store in
+    let prefix = conf.Conf.domain_prefix in
     let all =
       S3_client.list_all
         ( File_store.domain_prefix store |> fun _ ->
@@ -194,18 +199,18 @@ let ls_cmd =
     Arg.(value & pos 0 (some string) None & info [] ~docv:"PATH")
   in
   let run path =
-    let _cfg, domain_name, store = load_store () in
+    let _cfg, conf, store = load_store () in
     let mount_point =
       let home = Sys.getenv "HOME" in
-      Filename.concat home ("tsync/" ^ domain_name)
+      Filename.concat home ("tsync/" ^ conf.Conf.domain_name)
     in
     let dir = match path with Some p -> p | None -> mount_point in
     let prefix =
-      let dp = File_store.domain_prefix store in
+      let dp = conf.Conf.domain_prefix in
       if dir = mount_point then dp else dp ^ Filename.basename dir ^ "/"
     in
     let files, subdirs = File_store.list_directory store ~prefix in
-    let domain_prefix = File_store.domain_prefix store in
+    let domain_prefix = conf.Conf.domain_prefix in
     let dp_len = String.length domain_prefix in
     List.iter
       (fun (e : S3_client.file_entry) ->
@@ -284,11 +289,99 @@ let sync_cmd =
       & info ["domain"] ~docv:"NAME"
           ~doc:"Domain name (default: first configured)")
   in
+  let recover_pending_ops store files =
+    let my_uuid = Journal.client_uuid () in
+    List.iter
+      (fun (entry_key, ops) ->
+        let remote_key = File_store.journal_prefix store ^ entry_key in
+        if File_store.head_opt store ~key:remote_key <> None then
+          Journal.delete_local_pending ~entry_key
+        else begin
+          let newer_keys =
+            File_store.list_journal_keys ~start_after:entry_key store ()
+          in
+          let remotely_modified = Hashtbl.create 16 in
+          List.iter
+            (fun (ek, uuid) ->
+              if uuid <> my_uuid then (
+                match File_store.get_journal_entry store ek with
+                  | None -> ()
+                  | Some remote_ops ->
+                      List.iter
+                        (fun op ->
+                          match op with
+                            | `Put (k, _) | `Delete k | `Mkdir k | `Rmdir k ->
+                                Hashtbl.replace remotely_modified k ()
+                            | `Rename { Journal.dst; src; _ } ->
+                                Hashtbl.replace remotely_modified dst ();
+                                Hashtbl.replace remotely_modified src ())
+                        remote_ops))
+            newer_keys;
+          let domain_prefix = File_store.domain_prefix store in
+          let replayed =
+            List.filter
+              (fun op ->
+                let k =
+                  match op with
+                    | `Put (k, _) | `Delete k | `Mkdir k | `Rmdir k -> k
+                    | `Rename { Journal.dst = k; _ } -> k
+                in
+                not (Hashtbl.mem remotely_modified k))
+              ops
+          in
+          List.iter
+            (fun op ->
+              try
+                match op with
+                  | `Put (rel_key, _) ->
+                      let full_key = domain_prefix ^ rel_key in
+                      let f = File.make ~store:files ~key:full_key in
+                      if File.is_cached f then File.upload f
+                  | `Delete rel_key ->
+                      File.apply_delete
+                        (File.make ~store:files ~key:(domain_prefix ^ rel_key))
+                  | `Mkdir rel_key ->
+                      File_store.create_directory store
+                        ~key:(domain_prefix ^ rel_key)
+                  | `Rmdir rel_key ->
+                      File_store.delete_dir store
+                        ~prefix:(domain_prefix ^ rel_key)
+                  | `Rename { Journal.dst = dst_rel; src = src_rel; is_dir; _ }
+                    ->
+                      let src_key = domain_prefix ^ src_rel in
+                      let dst_key = domain_prefix ^ dst_rel in
+                      if is_dir then
+                        File_store.rename_directory store
+                          ~src_prefix:(src_key ^ "/") ~dst_prefix:(dst_key ^ "/")
+                      else File_store.rename_file store ~src_key ~dst_key
+              with exn ->
+                Log.err "recover_pending_ops: %s" (Printexc.to_string exn))
+            replayed;
+          if replayed <> [] then begin
+            ignore (File_store.write_journal_entry ~entry_key replayed store);
+            File_store.bump_version store entry_key
+          end;
+          Journal.delete_local_pending ~entry_key
+        end)
+      (Journal.local_pending_entries ~uuid:my_uuid)
+  in
   let run domain =
-    let _cfg, domain_name, store = load_store ?domain_name:domain () in
-    File_store.recover_pending_ops store;
+    let _cfg, conf, store = load_store ?domain_name:domain () in
+    let sync_queue =
+      Sync_queue.make ~store
+        ~upload:(fun ~key:_ ~cancel:_ -> ())
+        ~on_version:(fun ~entry_key:_ -> ())
+        ~on_upload_done:(fun ~key:_ -> ())
+    in
+    let files =
+      File.make_store ~conf ~file_store:store ~sync_queue
+        ~auto_evict:(ref false)
+    in
+    recover_pending_ops store files;
+    Sync_queue.drain sync_queue;
     let last_sync_file =
-      Filename.concat (Journal.share_dir ()) ("last-sync-" ^ domain_name)
+      Filename.concat (Journal.share_dir ())
+        ("last-sync-" ^ conf.Conf.domain_name)
     in
     let last_sync_key =
       if Sys.file_exists last_sync_file then (

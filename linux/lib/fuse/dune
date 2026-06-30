@@ -1,0 +1,3 @@
+(library
+ (name tsync_fuse)
+ (libraries tsync_core tsync_file tsync_local_io fuse3))

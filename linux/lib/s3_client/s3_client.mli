@@ -41,26 +41,3 @@ val list_all : t -> prefix:string -> unit -> file_entry list
     [(files, subdirectory_names)] where [subdirectory_names] are the immediate
     child directory components (without the trailing slash). *)
 val list_directory : t -> prefix:string -> unit -> file_entry list * string list
-
-(** Upload a file, splitting it into chunks when it exceeds
-    [Chunk_manifest.chunk_size]. Each chunk is content-addressed (skip upload if
-    already present on S3). The manifest object is written to [key] when
-    chunked. Raises [Cancelled] if [cancel] is set to [true] mid-upload. Returns
-    [Some manifest] when chunked, [None] for single-part uploads. *)
-val put_chunked :
-  t ->
-  key:string ->
-  src_path:string ->
-  ?cancel:bool Atomic.t ->
-  chunk_prefix:string ->
-  unit ->
-  Chunk_manifest.t
-
-(** Download [key] to [dst_path], reassembling chunks if the object is a
-    manifest. Returns [Some manifest] when chunked, [None] otherwise. *)
-val get_chunked :
-  t ->
-  key:string ->
-  dst_path:string ->
-  chunk_prefix:string ->
-  Chunk_manifest.t option
