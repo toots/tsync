@@ -17,7 +17,7 @@ depends: [
   "cmdliner"
   "odoc" {with-doc}
 ]
-depopts: ["tsync-s3" "fuse3"]
+depopts: ["tsync-s3" "tsync-fuse"]
 build: [
   ["dune" "subst"] {dev}
   [
