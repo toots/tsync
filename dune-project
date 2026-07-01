@@ -15,12 +15,9 @@
   (ocaml (>= 5.5.0))
   dune
   yojson
-  syslog
-  lwt
-  lwt_ppx
-  lwt_ssl
   cmdliner)
  (depopts
+   syslog
   tsync-s3
   tsync-fuse))
 
