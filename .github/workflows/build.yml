@@ -25,10 +25,12 @@ jobs:
           ocaml-compiler: "5.5"
       - name: Pin packages
         run: |
-          opam pin add -ny aws-s3-lwt git+https://github.com/toots/aws-s3.git
+          opam pin add -ny git+https://github.com/toots/aws-s3.git
           opam pin -ny .
       - name: Install dependencies
-        run: brew install xcodegen xxhash
+        run: |
+          brew install xcodegen xxhash
+          echo "CPATH=$(brew --prefix xxhash)/include:$CPATH" >> $GITHUB_ENV
       - name: Install OCaml dependencies
         run: opam install --deps-only -y tsync tsync-s3
       - name: Build OCaml daemon
