@@ -219,13 +219,13 @@ module Make (C : Conf.S) = struct
     else cli_handler line
 
   let mount _mount_point =
-    F.auto_evict := true;
     Sq.start
       ~upload:(fun ~key ~cancel -> F.upload ~cancel key)
       ~on_version:(fun ~entry_key:_ -> ())
       ~on_upload_done:(fun ~key ->
         F.on_upload_done key;
-        Ipc.notify_uploaded ~path:C.notify_path key);
+        Ipc.notify_uploaded ~path:C.notify_path key;
+        if !F.auto_evict then Ipc.notify_evict ~path:C.notify_path key);
     Ipc.serve ~path:C.socket_path dispatch_handler;
     Sq.drain ()
 end
