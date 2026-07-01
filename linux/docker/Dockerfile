@@ -9,7 +9,7 @@ RUN apt-get update && apt-get install -y \
 
 WORKDIR /src
 
-COPY tsync.opam .
+COPY opam/ .
 
 # Init opam with no default switch (--bare), then create a local switch.
 # opam reads tsync.opam's OCaml constraint (>= 5.5.0) to select the compiler.
