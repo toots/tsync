@@ -27,12 +27,12 @@ jobs:
         run: |
           opam pin add -ny aws-s3-lwt git+https://github.com/toots/aws-s3.git
           opam pin -ny .
+      - name: Install dependencies
+        run: brew install xcodegen xxhash
       - name: Install OCaml dependencies
         run: opam install --deps-only -y tsync tsync-s3
       - name: Build OCaml daemon
         run: opam exec -- dune build
-      - name: Install xcodegen
-        run: brew install xcodegen
       - name: Build macOS app
         run: make generate && xcodebuild -project tsync.xcodeproj -scheme TsyncApp -configuration Debug CODE_SIGN_IDENTITY="" CODE_SIGNING_REQUIRED=NO
         working-directory: macos
