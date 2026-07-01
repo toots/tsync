@@ -35,12 +35,6 @@ module type S = sig
   val mkdir : t -> unit
   val rmdir : t -> unit
   val rename : src:t -> dst:t -> unit
-  val open_file : t -> unit
-  val close_file : t -> unit
-  val deferred_evict : t -> unit
-  val on_upload_done : t -> unit
-  val request_evict : t -> unit
-  val auto_evict : bool ref
 end
 
 module Make (C : Conf.S) (Sq : Sync_queue.S) : S

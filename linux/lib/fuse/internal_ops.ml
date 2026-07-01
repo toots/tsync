@@ -1,5 +1,5 @@
 module Make (F : File.S) = struct
-  let make ~fuse_to_key : Path_ops.t =
+  let make ~fuse_to_key ~open_file ~close_file : Path_ops.t =
     let file path = fuse_to_key path in
     {
       mknod =
@@ -34,14 +34,14 @@ module Make (F : File.S) = struct
             match (creating, F.read_manifest f) with
               | true, None -> F.create f
               | _ -> F.ensure_cached f);
-          F.open_file f;
+          open_file f;
           Fuse.{ default_file_info_update with fi_update_direct_io = true });
       read =
         (fun path buf offset _fi ->
           if offset = 0L then Log.debug "read %s: offset=0" path;
           F.read (file path) buf ~offset);
       write = (fun path buf offset _fi -> F.write (file path) buf ~offset);
-      release = (fun path _fi -> F.close_file (file path));
+      release = (fun path _fi -> close_file (file path));
       unlink = (fun path -> F.delete (file path));
       rename = (fun src dst _flags -> F.rename ~src:(file src) ~dst:(file dst));
       truncate = (fun path size _fi -> F.truncate (file path) size);

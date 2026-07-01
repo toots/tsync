@@ -5,6 +5,52 @@ module Make (C : Conf.S) = struct
   module H = Hidden_ops.Make (F)
   module I = Internal_ops.Make (F)
 
+  (* ── Full-file storage policy ─────────────────────────────────────────────
+     Files persist in the local cache. Eviction is deferred while a file has
+     open handles; a dirty file is queued for upload on last close. *)
+
+  let open_count : (string, int) Hashtbl.t = Hashtbl.create 64
+  let open_count_mutex = Mutex.create ()
+  let pending_evict : (string, unit) Hashtbl.t = Hashtbl.create 16
+  let pending_evict_mutex = Mutex.create ()
+
+  let open_file key =
+    Mutex.lock open_count_mutex;
+    let n = Option.value ~default:0 (Hashtbl.find_opt open_count key) in
+    Hashtbl.replace open_count key (n + 1);
+    Mutex.unlock open_count_mutex
+
+  let close_file key =
+    Mutex.lock open_count_mutex;
+    let n = Option.value ~default:0 (Hashtbl.find_opt open_count key) in
+    let n' = max 0 (n - 1) in
+    if n' = 0 then Hashtbl.remove open_count key
+    else Hashtbl.replace open_count key n';
+    Mutex.unlock open_count_mutex;
+    if n' = 0 then
+      if F.is_dirty key then begin
+        F.clear_dirty key;
+        F.queue_put key
+      end
+      else begin
+        Mutex.lock pending_evict_mutex;
+        let was_pending = Hashtbl.mem pending_evict key in
+        Hashtbl.remove pending_evict key;
+        Mutex.unlock pending_evict_mutex;
+        if was_pending then F.evict key
+      end
+
+  let request_evict key =
+    Mutex.lock open_count_mutex;
+    let count = Option.value ~default:0 (Hashtbl.find_opt open_count key) in
+    Mutex.unlock open_count_mutex;
+    if count = 0 then F.evict key
+    else begin
+      Mutex.lock pending_evict_mutex;
+      Hashtbl.replace pending_evict key ();
+      Mutex.unlock pending_evict_mutex
+    end
+
   (* ── Path helpers ─────────────────────────────────────────────────────── *)
 
   let fuse_to_key path =
@@ -91,13 +137,13 @@ module Make (C : Conf.S) = struct
                         (String.length C.cache_root + 1)
                         (String.length p - String.length C.cache_root - 1)
                     in
-                    F.request_evict (C.domain_prefix ^ rel)
+                    request_evict (C.domain_prefix ^ rel)
                   end)
                 (try Sys.readdir dir with _ -> [||])
             in
             walk lp
           end
-          else F.request_evict key;
+          else request_evict key;
           "OK"
       | Restore arg ->
           let key = key_of_path mount_point arg in
@@ -139,21 +185,7 @@ module Make (C : Conf.S) = struct
               ()
           in
           "STOP"
-      | Auto_evict arg -> (
-          match arg with
-            | "on" ->
-                let p = Filename.concat C.data_dir "auto-evict" in
-                F.auto_evict := true;
-                (try close_out (open_out p) with _ -> ());
-                "OK"
-            | "off" ->
-                let p = Filename.concat C.data_dir "auto-evict" in
-                F.auto_evict := false;
-                (try Unix.unlink p
-                 with Unix.Unix_error (Unix.ENOENT, _, _) -> ());
-                "OK"
-            | "status" -> if !F.auto_evict then "on" else "off"
-            | _ -> "ERROR expected on|off|status")
+      | Auto_evict arg -> Ipc.handle_auto_evict ~data_dir:C.data_dir arg
       | Full_resync ->
           let rec walk dir =
             if Sys.file_exists dir then
@@ -173,7 +205,7 @@ module Make (C : Conf.S) = struct
   let make_operations mount_point =
     let open Fuse in
     let hidden = H.make ~fuse_to_key in
-    let real = I.make ~fuse_to_key in
+    let real = I.make ~fuse_to_key ~open_file ~close_file in
     let dispatch path = if is_fuse_hidden path then hidden else real in
     let entry_of_name name =
       {
@@ -258,14 +290,13 @@ module Make (C : Conf.S) = struct
   (* ── Main mount ───────────────────────────────────────────────────────── *)
 
   let mount mount_point =
-    F.auto_evict := Sys.file_exists (Filename.concat C.data_dir "auto-evict");
-    Log.debug "auto-evict: %b" !F.auto_evict;
+    Log.debug "auto-evict: %b" (Ipc.auto_evict_enabled ~data_dir:C.data_dir);
     Log.debug "starting sync queue workers";
     Sq.start
       ~upload:(fun ~key ~cancel -> F.upload ~cancel key)
       ~on_version:(fun ~entry_key -> set_pending_version entry_key)
       ~on_upload_done:(fun ~key ->
-        F.on_upload_done key;
+        if Ipc.auto_evict_enabled ~data_dir:C.data_dir then request_evict key;
         Ipc.notify_uploaded ~path:C.notify_path key);
     Log.debug "starting IPC server at %s" C.socket_path;
     let _ipc_thread =

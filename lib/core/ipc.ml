@@ -46,6 +46,25 @@ let parse_command line =
     | "FULL_RESYNC" -> Full_resync
     | c -> failwith ("ERROR unknown command: " ^ c)
 
+(* ── Auto-evict user feature ─────────────────────────────────────────────── *)
+
+(* Persisted as a marker file in the daemon data directory. How eviction is
+   performed after upload is up to each runtime. *)
+
+let auto_evict_marker ~data_dir = Filename.concat data_dir "auto-evict"
+let auto_evict_enabled ~data_dir = Sys.file_exists (auto_evict_marker ~data_dir)
+
+let handle_auto_evict ~data_dir = function
+  | "on" ->
+      (try close_out (open_out (auto_evict_marker ~data_dir)) with _ -> ());
+      "OK"
+  | "off" ->
+      (try Unix.unlink (auto_evict_marker ~data_dir)
+       with Unix.Unix_error (Unix.ENOENT, _, _) -> ());
+      "OK"
+  | "status" -> if auto_evict_enabled ~data_dir then "on" else "off"
+  | _ -> "ERROR expected on|off|status"
+
 let notify ~path msg =
   try
     let fd = Unix.socket Unix.PF_UNIX Unix.SOCK_STREAM 0 in
@@ -59,6 +78,7 @@ let notify ~path msg =
   with _ -> ()
 
 let notify_evict ~path key = notify ~path ("EVICT " ^ key)
+let notify_restore ~path key = notify ~path ("RESTORE " ^ key)
 let notify_uploaded ~path key = notify ~path ("UPLOADED " ^ key)
 
 let serve ~path handler =

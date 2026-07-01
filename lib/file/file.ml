@@ -35,12 +35,6 @@ module type S = sig
   val mkdir : t -> unit
   val rmdir : t -> unit
   val rename : src:t -> dst:t -> unit
-  val open_file : t -> unit
-  val close_file : t -> unit
-  val deferred_evict : t -> unit
-  val on_upload_done : t -> unit
-  val request_evict : t -> unit
-  val auto_evict : bool ref
 end
 
 module Make (C : Conf.S) (Sq : Sync_queue.S) : S = struct
@@ -50,11 +44,6 @@ module Make (C : Conf.S) (Sq : Sync_queue.S) : S = struct
 
   type t = string
 
-  let auto_evict : bool ref = ref false
-  let open_count : (string, int) Hashtbl.t = Hashtbl.create 64
-  let open_count_mutex = Mutex.create ()
-  let pending_evict : (string, unit) Hashtbl.t = Hashtbl.create 16
-  let pending_evict_mutex = Mutex.create ()
   let dirty_keys : (string, unit) Hashtbl.t = Hashtbl.create 16
   let dirty_mutex = Mutex.create ()
   let downloading : (string, unit) Hashtbl.t = Hashtbl.create 8
@@ -354,48 +343,4 @@ module Make (C : Conf.S) (Sq : Sync_queue.S) : S = struct
           if is_dir then Fs.rename_directory ~src_prefix:src ~dst_prefix:dst
           else Fs.rename_file ~src_key:src ~dst_key:dst)
     end
-
-  (* ── Open handle tracking and deferred eviction ────────────────────────── *)
-
-  let do_evict key = evict key
-
-  let open_file key =
-    Mutex.lock open_count_mutex;
-    let n = Option.value ~default:0 (Hashtbl.find_opt open_count key) in
-    Hashtbl.replace open_count key (n + 1);
-    Mutex.unlock open_count_mutex
-
-  let close_file key =
-    Mutex.lock open_count_mutex;
-    let n = Option.value ~default:0 (Hashtbl.find_opt open_count key) in
-    let n' = max 0 (n - 1) in
-    if n' = 0 then Hashtbl.remove open_count key
-    else Hashtbl.replace open_count key n';
-    Mutex.unlock open_count_mutex;
-    if n' = 0 then
-      if is_dirty key then begin
-        clear_dirty key;
-        queue_put key
-      end
-      else begin
-        Mutex.lock pending_evict_mutex;
-        let was_pending = Hashtbl.mem pending_evict key in
-        Hashtbl.remove pending_evict key;
-        Mutex.unlock pending_evict_mutex;
-        if was_pending then do_evict key
-      end
-
-  let deferred_evict key =
-    Mutex.lock open_count_mutex;
-    let count = Option.value ~default:0 (Hashtbl.find_opt open_count key) in
-    Mutex.unlock open_count_mutex;
-    if count = 0 then do_evict key
-    else begin
-      Mutex.lock pending_evict_mutex;
-      Hashtbl.replace pending_evict key ();
-      Mutex.unlock pending_evict_mutex
-    end
-
-  let on_upload_done key = if !auto_evict then deferred_evict key
-  let request_evict key = deferred_evict key
 end

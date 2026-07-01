@@ -14,7 +14,7 @@ let default_paths () =
   in
   let data_dir = Filename.concat app_group "tsync" in
   {
-    cache_root = Filename.concat home "Library/Caches/tsync";
+    cache_root = Filename.concat data_dir "cache";
     socket_path = Filename.concat data_dir "tsync.sock";
     data_dir;
     config_path = Filename.concat app_group "config.json";

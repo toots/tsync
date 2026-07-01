@@ -17,7 +17,14 @@ type command =
 *)
 val parse_command : string -> command
 
+(** Auto-evict user feature, persisted as a marker file in the daemon data
+    directory. [handle_auto_evict] handles the [auto-evict on|off|status] CLI
+    command and returns the IPC response string. *)
+val auto_evict_enabled : data_dir:string -> bool
+
+val handle_auto_evict : data_dir:string -> string -> string
 val notify_evict : path:string -> string -> unit
+val notify_restore : path:string -> string -> unit
 val notify_uploaded : path:string -> string -> unit
 
 (** Start the IPC server loop, calling [handler] for each incoming line. Stops

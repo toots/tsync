@@ -190,25 +190,12 @@ module Make (C : Conf.S) = struct
       | Status ->
           Printf.sprintf {|STATUS {"domain":"%s","running":true}|} C.domain_name
       | Evict arg ->
-          let key = path_to_key arg in
-          F.evict key;
-          Ipc.notify_evict ~path:C.notify_path key;
+          Ipc.notify_evict ~path:C.notify_path (path_to_key arg);
           "OK"
-      | Restore arg -> (
-          let key = path_to_key arg in
-          try
-            F.ensure_cached key;
-            "OK"
-          with exn -> "ERROR " ^ Printexc.to_string exn)
-      | Auto_evict arg -> (
-          match arg with
-            | "on" ->
-                F.auto_evict := true;
-                "OK"
-            | "off" ->
-                F.auto_evict := false;
-                "OK"
-            | _ -> if !F.auto_evict then "on" else "off")
+      | Restore arg ->
+          Ipc.notify_restore ~path:C.notify_path (path_to_key arg);
+          "OK"
+      | Auto_evict arg -> Ipc.handle_auto_evict ~data_dir:C.data_dir arg
       | Full_resync ->
           (* ponytail: signal FileProvider extension to re-enumerate *)
           "OK"
@@ -223,9 +210,11 @@ module Make (C : Conf.S) = struct
       ~upload:(fun ~key ~cancel -> F.upload ~cancel key)
       ~on_version:(fun ~entry_key:_ -> ())
       ~on_upload_done:(fun ~key ->
-        F.on_upload_done key;
+        (* The daemon copy only exists to stage the upload; drop it now. *)
+        F.evict key;
         Ipc.notify_uploaded ~path:C.notify_path key;
-        if !F.auto_evict then Ipc.notify_evict ~path:C.notify_path key);
+        if Ipc.auto_evict_enabled ~data_dir:C.data_dir then
+          Ipc.notify_evict ~path:C.notify_path key);
     Ipc.serve ~path:C.socket_path dispatch_handler;
     Sq.drain ()
 end

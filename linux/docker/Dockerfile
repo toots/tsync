@@ -4,7 +4,7 @@ ENV OPAMROOTISOK=1
 
 RUN apt-get update && apt-get install -y \
     opam git libfuse3-dev fuse awscli pkg-config \
-    libgmp-dev libssl-dev jq curl unzip libxxhash-dev \
+    libpcre3-dev libgmp-dev libssl-dev jq curl unzip libxxhash-dev \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /src

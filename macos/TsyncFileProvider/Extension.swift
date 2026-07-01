@@ -54,6 +54,14 @@ private final class NotifyListener: @unchecked Sendable {
         if line.hasPrefix("EVICT ") {
             let key = String(line.dropFirst(6))
             manager.evictItem(identifier: NSFileProviderItemIdentifier(key)) { _ in }
+        } else if line.hasPrefix("RESTORE ") {
+            let key = String(line.dropFirst(8))
+            manager.getUserVisibleURL(for: NSFileProviderItemIdentifier(key)) { url, _ in
+                guard let url else { return }
+                // A coordinated read forces fileproviderd to materialize the item.
+                var error: NSError?
+                NSFileCoordinator().coordinate(readingItemAt: url, options: [], error: &error) { _ in }
+            }
         } else if line.hasPrefix("UPLOADED ") {
             let key = String(line.dropFirst(9))
             manager.signalEnumerator(for: NSFileProviderItemIdentifier(key)) { _ in }
@@ -116,9 +124,15 @@ final class TsyncExtension: NSObject, NSFileProviderReplicatedExtension, @unchec
                 let resp = try await IPC.ensureCached(key: key)
                 guard let localPath = resp.localPath else { throw IPC.IPCError.badResponse }
                 let item = try await resolveItem(itemIdentifier, isDownloaded: true)
-                progress.completedUnitCount = 100
-                completionHandler(URL(fileURLWithPath: localPath), item, nil)
+                // Hand the system its own copy from the sanctioned temp dir, so
+                // evicting the daemon's cache can't race the system's claim of the file.
+                let tmpDir = try NSFileProviderManager(for: domain)?.temporaryDirectoryURL()
+                    ?? FileManager.default.temporaryDirectory
+                let tmpURL = tmpDir.appendingPathComponent(UUID().uuidString)
+                try FileManager.default.copyItem(at: URL(fileURLWithPath: localPath), to: tmpURL)
                 try? await IPC.evictItem(key: key)
+                progress.completedUnitCount = 100
+                completionHandler(tmpURL, item, nil)
             } catch {
                 log.error("fetchContents error: \(key, privacy: .public): \(error, privacy: .public)")
                 completionHandler(nil, nil, error)
