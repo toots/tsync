@@ -4,7 +4,7 @@ MAKE_JOBS = $(patsubst -j%,%,$(filter -j%,$(MAKEFLAGS)))
 JOBS      = $(if $(MAKE_JOBS),$(MAKE_JOBS),12)
 XFLAGS    = -project $(PROJ) -jobs $(JOBS) CODE_SIGN_STYLE=Automatic -allowProvisioningUpdates
 
-.PHONY: all generate build deploy deploy-daemon install configure clean
+.PHONY: all generate build deploy deploy-daemon install clean
 
 all: build
 
@@ -25,10 +25,6 @@ deploy-daemon:
 	./deploy-daemon.sh
 
 install: deploy deploy-daemon
-
-## Interactive first-time setup (bucket, credentials, config.json)
-configure:
-	./configure.sh
 
 clean:
 	xcodebuild $(XFLAGS) -scheme TsyncApp clean

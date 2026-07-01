@@ -524,6 +524,22 @@ let configure_cmd =
     (Cmd.info "configure" ~doc:"Interactive configuration setup")
     Term.(const run $ const ())
 
+(* ── tsync paths ─────────────────────────────────────────────────────────── *)
+
+let paths_cmd =
+  let run () =
+    let p = runtime_paths in
+    Printf.printf "config:  %s\n" p.Runtime.config_path;
+    Printf.printf "cache:   %s\n" p.Runtime.cache_root;
+    Printf.printf "data:    %s\n" p.Runtime.data_dir;
+    Printf.printf "socket:  %s\n" p.Runtime.socket_path;
+    Printf.printf "notify:  %s\n"
+      (Filename.concat p.Runtime.data_dir "notify.sock")
+  in
+  Cmd.v
+    (Cmd.info "paths" ~doc:"Show all filesystem paths used by this binary")
+    Term.(const run $ const ())
+
 (* ── tsync build-config ──────────────────────────────────────────────────── *)
 
 let build_config_cmd =
@@ -544,6 +560,7 @@ let () =
       [
         build_config_cmd;
         configure_cmd;
+        paths_cmd;
         start_cmd;
         stop_cmd;
         status_cmd;
