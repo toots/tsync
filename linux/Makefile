@@ -18,16 +18,17 @@ configure:
 install-deps:
 	opam pin add -ny fuse3 git+https://github.com/toots/ocamlfuse.git
 	opam pin add -ny aws-s3-lwt git+https://github.com/toots/aws-s3.git
-	opam install --deps-only .
+	opam install --deps-only -y ..
 
 install:
-	opam install .
+	opam install ..
 	mkdir -p ~/.local/bin
 	ln -sf "$$(opam var bin)/tsync" ~/.local/bin/tsync
 	mkdir -p ~/.config/systemd/user
 	cp tsync.service ~/.config/systemd/user/
 	systemctl --user daemon-reload
 	systemctl --user enable tsync
+	-fusermount3 -uz ~/tsync/* 2>/dev/null
 	systemctl --user restart tsync
 
 test-lifecycle:
