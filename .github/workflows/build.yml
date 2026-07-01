@@ -7,7 +7,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - run: docker build -f linux/docker/Dockerfile linux
+      - run: cd linux/docker && docker compose build
 
   macos:
     runs-on: macos-latest
