@@ -3,9 +3,8 @@
  (modules log)
  (wrapped false)
  (libraries
-  unix
   (select
    log.ml
    from
    (syslog -> log_syslog.ml)
-   (-> log_printf.ml))))
+   (unix -> log_printf.ml))))
