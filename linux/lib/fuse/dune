@@ -1,0 +1,11 @@
+(library
+ (name tsync_fuse)
+ (optional)
+ (wrapped false)
+ (libraries
+  tsync_conf
+  tsync_queue
+  tsync_core
+  tsync_file
+  tsync_local_io
+  fuse3))

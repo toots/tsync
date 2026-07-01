@@ -30,14 +30,4 @@ echo "Starting..."
 pluginkit -a /Applications/TsyncApp.app/Contents/PlugIns/TsyncFileProvider.appex
 launchctl load -w "$PLIST"
 
-echo -n "Waiting for TsyncApp..."
-IPC_SOCK="$HOME/Library/Group Containers/group.com.toots.tsync/tsync.sock"
-deadline=$(( $(date +%s) + 30 ))
-until [[ -S "$IPC_SOCK" ]]; do
-    [[ $(date +%s) -lt $deadline ]] || { echo " timeout"; exit 1; }
-    sleep 1; echo -n "."
-done
-echo " ready"
-sleep 2
-
 echo "Done."

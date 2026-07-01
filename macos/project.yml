@@ -14,14 +14,6 @@ settings:
     DEVELOPMENT_TEAM: PSE2VP6582
     CODE_SIGN_STYLE: Automatic
 
-packages:
-  soto:
-    url: https://github.com/soto-project/soto
-    from: "7.0.0"
-  swift-argument-parser:
-    url: https://github.com/apple/swift-argument-parser
-    from: "1.3.0"
-
 targets:
   TsyncApp:
     type: application
@@ -37,8 +29,6 @@ targets:
         INFOPLIST_FILE: TsyncApp/Info.plist
         LD_RUNPATH_SEARCH_PATHS: "$(inherited) @executable_path/../Frameworks @executable_path/../../Frameworks"
     dependencies:
-      - package: soto
-        product: SotoS3
       - target: TsyncFileProvider
         embed: true
 
@@ -57,42 +47,6 @@ targets:
         LD_RUNPATH_SEARCH_PATHS: "$(inherited) @executable_path/../Frameworks @executable_path/../../Frameworks"
         ENABLE_HARDENED_RUNTIME: YES
         ENABLE_PREVIEWS: NO
-    dependencies:
-      - package: soto
-        product: SotoS3
-
-  tsync:
-    type: application
-    platform: macOS
-    deploymentTarget: "13.0"
-    sources:
-      - path: Shared
-      - path: tsync
-    settings:
-      base:
-        PRODUCT_BUNDLE_IDENTIFIER: com.toots.tsync.cli
-        CODE_SIGN_ENTITLEMENTS: tsync/tsync.entitlements
-        INFOPLIST_FILE: tsync/Info.plist
-    dependencies:
-      - package: soto
-        product: SotoS3
-      - package: swift-argument-parser
-        product: ArgumentParser
-
-  TsyncTests:
-    type: bundle.unit-test
-    platform: macOS
-    deploymentTarget: "13.0"
-    sources:
-      - path: Shared
-      - path: Tests
-    settings:
-      base:
-        PRODUCT_BUNDLE_IDENTIFIER: com.toots.tsync.tests
-        GENERATE_INFOPLIST_FILE: YES
-    dependencies:
-      - package: soto
-        product: SotoS3
 
 schemes:
   TsyncApp:
@@ -101,16 +55,3 @@ schemes:
         TsyncApp: all
     run:
       config: Debug
-  tsync:
-    build:
-      targets:
-        tsync: all
-    run:
-      config: Debug
-  TsyncTests:
-    build:
-      targets:
-        TsyncTests: [test]
-    test:
-      targets:
-        - TsyncTests

@@ -1,4 +1,0 @@
-module CXXHash [system] {
-    header "xxhash.h"
-    export *
-}

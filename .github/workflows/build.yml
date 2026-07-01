@@ -1,19 +1,41 @@
 name: build
 
-on: [push, pull_request]
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   linux:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - run: docker build -f linux/docker/Dockerfile linux
+      - run: cd linux/docker && docker compose build
 
   macos:
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
-      - run: brew install xcodegen
-      - run: xcodegen generate
+      - uses: ocaml/setup-ocaml@v3
+        with:
+          ocaml-compiler: "5.5"
+      - name: Pin packages
+        run: |
+          opam pin add -ny git+https://github.com/toots/aws-s3.git
+          opam pin -ny .
+      - name: Install dependencies
+        run: |
+          brew install xcodegen xxhash
+          echo "CPATH=$(brew --prefix xxhash)/include:$CPATH" >> $GITHUB_ENV
+          echo "LIBRARY_PATH=$(brew --prefix xxhash)/lib:$LIBRARY_PATH" >> $GITHUB_ENV
+      - name: Install OCaml dependencies
+        run: opam install --deps-only -y tsync tsync-s3
+      - name: Build OCaml daemon
+        run: opam exec -- dune build
+      - name: Build macOS app
+        run: make generate && xcodebuild -project tsync.xcodeproj -scheme TsyncApp -configuration Debug CODE_SIGN_IDENTITY="" CODE_SIGNING_REQUIRED=NO
         working-directory: macos
-      - run: xcodebuild -project macos/tsync.xcodeproj -scheme TsyncApp -configuration Debug CODE_SIGN_IDENTITY="" CODE_SIGNING_REQUIRED=NO

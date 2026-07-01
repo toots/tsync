@@ -1,0 +1,13 @@
+(library
+ (name tsync_file_provider)
+ (wrapped false)
+ (enabled_if
+  (= %{system} macosx))
+ (libraries
+  tsync_conf
+  tsync_core
+  tsync_file
+  tsync_queue
+  yojson
+  unix
+  threads.posix))

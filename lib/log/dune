@@ -1,0 +1,10 @@
+(library
+ (name tsync_log)
+ (modules log)
+ (wrapped false)
+ (libraries
+  (select
+   log.ml
+   from
+   (syslog -> log_syslog.ml)
+   (unix -> log_printf.ml))))

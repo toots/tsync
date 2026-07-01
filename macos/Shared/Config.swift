@@ -2,13 +2,10 @@ import Foundation
 
 public struct DomainConfig: Codable, Sendable {
     public let name: String
-    public init(name: String) { self.name = name }
+    public let prefix: String
 }
 
 public struct Config: Codable, Sendable {
-    public let bucket: String
-    public let prefix: String
-    public let awsRegion: String
     public let versioning: Bool
     public let domains: [DomainConfig]
 
@@ -26,42 +23,9 @@ public struct Config: Codable, Sendable {
         return try JSONDecoder().decode(Config.self, from: data)
     }
 
-    public func save() throws {
-        let url = Self.groupContainerURL.appendingPathComponent("config.json")
-        let data = try JSONEncoder().encode(self)
-        try data.write(to: url)
-    }
-
-    /// Full S3 key prefix for a domain, e.g. "tsync/Music Production/"
+    /// Full S3 key prefix for a domain, e.g. "tsync/music-production/"
     public func domainPrefix(_ domainName: String) -> String {
-        prefix.hasSuffix("/") ? "\(prefix)\(domainName)/" : "\(prefix)/\(domainName)/"
-    }
-
-    /// S3 prefix for shared content-addressable chunks
-    public func chunkPrefix() -> String {
-        prefix.hasSuffix("/") ? "\(prefix).chunks/" : "\(prefix)/.chunks/"
-    }
-
-    /// S3 trash prefix for a domain
-    public func trashPrefix(_ domainName: String) -> String {
-        prefix.hasSuffix("/") ? "\(prefix).trash/\(domainName)/" : "\(prefix)/.trash/\(domainName)/"
-    }
-
-    /// S3 journal prefix for a domain
-    public func journalPrefix(_ domainName: String) -> String {
-        prefix.hasSuffix("/") ? "\(prefix).journal/\(domainName)/" : "\(prefix)/.journal/\(domainName)/"
-    }
-
-    /// S3 key for the domain version file (bumped on every mutation)
-    public func versionKey(_ domainName: String) -> String {
-        prefix.hasSuffix("/") ? "\(prefix).version/\(domainName)" : "\(prefix)/.version/\(domainName)"
-    }
-
-    public init(bucket: String, prefix: String, awsRegion: String, versioning: Bool, domains: [DomainConfig]) {
-        self.bucket = bucket
-        self.prefix = prefix
-        self.awsRegion = awsRegion
-        self.versioning = versioning
-        self.domains = domains
+        let p = domains.first(where: { $0.name == domainName })?.prefix ?? ""
+        return p.hasSuffix("/") ? "\(p)\(domainName)/" : "\(p)/\(domainName)/"
     }
 }

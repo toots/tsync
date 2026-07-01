@@ -1,0 +1,4 @@
+(library
+ (name tsync_conf)
+ (wrapped false)
+ (libraries tsync_backend))

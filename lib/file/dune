@@ -1,0 +1,12 @@
+(library
+ (name tsync_file)
+ (wrapped false)
+ (libraries
+  tsync_conf
+  tsync_log
+  tsync_backend
+  tsync_xxhash
+  tsync_queue
+  tsync_local_io
+  unix
+  threads.posix))

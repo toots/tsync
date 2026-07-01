@@ -1,5 +1,5 @@
 [Unit]
-Description=tsync S3 FUSE filesystem
+Description=tsync FUSE filesystem
 After=network-online.target
 Wants=network-online.target
 
