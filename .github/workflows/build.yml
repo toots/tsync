@@ -13,7 +13,17 @@ jobs:
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
-      - run: brew install xcodegen
-      - run: xcodegen generate
+      - uses: ocaml/setup-ocaml@v3
+        with:
+          ocaml-compiler: "5.5"
+      - name: Pin custom opam packages
+        run: opam pin add -ny aws-s3-lwt git+https://github.com/toots/aws-s3.git
+      - name: Install OCaml dependencies
+        run: opam install --deps-only -y .
+      - name: Build OCaml daemon
+        run: opam exec -- dune build
+      - name: Install xcodegen
+        run: brew install xcodegen
+      - name: Build macOS app
+        run: make generate && xcodebuild -project tsync.xcodeproj -scheme TsyncApp -configuration Debug CODE_SIGN_IDENTITY="" CODE_SIGNING_REQUIRED=NO
         working-directory: macos
-      - run: xcodebuild -project macos/tsync.xcodeproj -scheme TsyncApp -configuration Debug CODE_SIGN_IDENTITY="" CODE_SIGNING_REQUIRED=NO
