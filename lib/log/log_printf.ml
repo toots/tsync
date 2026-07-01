@@ -1,3 +1,4 @@
+let implementation = "printf"
 let init () = ()
 
 let log _level fmt =

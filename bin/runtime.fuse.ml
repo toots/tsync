@@ -5,7 +5,7 @@ type paths = {
   config_path : string;
 }
 
-let implemented = true
+let implementation = Some "fuse"
 
 let default_paths () =
   let home = Sys.getenv "HOME" in

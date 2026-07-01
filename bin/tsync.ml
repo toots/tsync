@@ -2,10 +2,12 @@ open Cmdliner
 
 (* ── Helpers ─────────────────────────────────────────────────────────────── *)
 
-let () =
-  if not Runtime.implemented then (
-    Printf.eprintf "No backend available at compile-time!\n%!";
-    exit 1)
+let runtime_implementation =
+  match Runtime.implementation with
+    | Some s -> s
+    | None ->
+        Printf.eprintf "No runtime implementation available at compile-time!\n%!";
+        exit 1
 
 let rec mkdir_p path =
   if not (Sys.file_exists path) then begin
@@ -517,6 +519,17 @@ let configure_cmd =
     (Cmd.info "configure" ~doc:"Interactive configuration setup")
     Term.(const run $ const ())
 
+(* ── tsync build-config ──────────────────────────────────────────────────── *)
+
+let build_config_cmd =
+  let run () =
+    Printf.printf "runtime: %s\ns3 backend: %b\nlog: %s\n"
+      runtime_implementation S3_link.s3_backend_enabled Log.implementation
+  in
+  Cmd.v
+    (Cmd.info "build-config" ~doc:"Show optional features compiled into this binary")
+    Term.(const run $ const ())
+
 (* ── Main ────────────────────────────────────────────────────────────────── *)
 
 let () =
@@ -524,6 +537,7 @@ let () =
     Cmd.group
       (Cmd.info "tsync" ~doc:"S3-backed filesystem sync")
       [
+        build_config_cmd;
         configure_cmd;
         start_cmd;
         stop_cmd;

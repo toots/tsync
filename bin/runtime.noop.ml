@@ -5,7 +5,7 @@ type paths = {
   config_path : string;
 }
 
-let implemented = false
+let implementation = None
 let default_paths () = failwith "no runtime available"
 let pre_start ~mount_point:_ = ()
 

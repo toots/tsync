@@ -1,3 +1,4 @@
+val implementation : string
 val init : unit -> unit
 val debug : ('a, unit, string, unit) format4 -> 'a
 val info : ('a, unit, string, unit) format4 -> 'a

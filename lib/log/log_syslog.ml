@@ -1,3 +1,4 @@
+let implementation = "syslog"
 let logger : Syslog.t option ref = ref None
 
 let init () =
