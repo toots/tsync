@@ -56,6 +56,8 @@ let start_cmd =
       & info ["domain"] ~docv:"NAME" ~doc:"Domain name (default: from config)")
   in
   let run mount domain =
+    Log.init ();
+    Log.debug "loading config from %s" runtime_paths.Runtime.config_path;
     let cfg = Conf_parsing.load runtime_paths.Runtime.config_path in
     let (module C : Conf.S) = make_conf ?domain cfg in
     let mount_point =
@@ -63,9 +65,12 @@ let start_cmd =
         | Some p -> p
         | None -> Filename.concat (Sys.getenv "HOME") ("tsync/" ^ C.domain_name)
     in
+    Log.debug "domain: %s, mount point: %s" C.domain_name mount_point;
+    Log.debug "cache root: %s" C.cache_root;
     mkdir_p mount_point;
+    Log.debug "unmounting any stale FUSE mount";
     Runtime.pre_start ~mount_point;
-    Log.init ();
+    Log.debug "initializing runtime";
     let module R = Runtime.Make (C) in
     R.mount mount_point
   in
@@ -535,7 +540,7 @@ let build_config_cmd =
 let () =
   let cmd =
     Cmd.group
-      (Cmd.info "tsync" ~doc:"S3-backed filesystem sync")
+      (Cmd.info "tsync" ~doc:"Cloud-backed filesystem sync")
       [
         build_config_cmd;
         configure_cmd;

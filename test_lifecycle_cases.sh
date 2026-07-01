@@ -22,12 +22,12 @@ ROOT_KEY_B="$S3_PREFIX/${TS}_root_b.txt"
 
 info "create"
 echo "hello tsync" > "$ROOT_FILE"
-wait_s3_appear "$ROOT_KEY" && pass "create: S3 object appeared"
+wait_s3_appear "$ROOT_KEY" && pass "create: backend object appeared"
 
 info "edit"
 echo "hello again" >> "$ROOT_FILE"
 sleep 2
-wait_s3_appear "$ROOT_KEY" && pass "edit: S3 object still present after edit"
+wait_s3_appear "$ROOT_KEY" && pass "edit: backend object still present after edit"
 [[ $(wc -c < "$ROOT_FILE") -gt 12 ]] && pass "edit: local file content updated" \
     || fail "edit: local file content unchanged"
 
@@ -35,12 +35,12 @@ info "rename"
 mv "$ROOT_FILE" "$ROOT_FILE_B"
 sleep 3
 if s3_exists "$ROOT_KEY_B"; then
-    pass "rename: new S3 key appeared"
+    pass "rename: new backend key appeared"
     s3_exists "$ROOT_KEY" \
-        && fail "rename: old S3 key still present" \
-        || pass "rename: old S3 key removed"
+        && fail "rename: old backend key still present" \
+        || pass "rename: old backend key removed"
 else
-    fail "rename: new S3 key did not appear"
+    fail "rename: new backend key did not appear"
 fi
 
 EVICT_TARGET="$ROOT_FILE_B"
@@ -62,7 +62,7 @@ info "delete"
 rm "$EVICT_TARGET"
 [[ "$EVICT_TARGET" == "$ROOT_FILE_B" ]] && wait_s3_gone "$ROOT_KEY_B" \
     || wait_s3_gone "$ROOT_KEY"
-pass "delete: S3 object removed"
+pass "delete: backend object removed"
 fi # run_case 1
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -77,7 +77,7 @@ EMPTYDIR_KEY_B="$S3_PREFIX/${TS}_emptydir_b/"
 
 info "create (single empty dir)"
 mkdir "$EMPTYDIR"
-wait_s3_appear "$EMPTYDIR_KEY" && pass "create: S3 zero-byte marker appeared"
+wait_s3_appear "$EMPTYDIR_KEY" && pass "create: backend zero-byte marker appeared"
 
 info "create (nested: A/B, A/C)"
 mkdir "$EMPTYDIR/B"
@@ -127,29 +127,29 @@ SUBFILE_KEY_B="$S3_PREFIX/${TS}_subdir/file_b.txt"
 
 info "create dir"
 mkdir "$SUBDIR"
-wait_s3_appear "$S3_PREFIX/${TS}_subdir/" && pass "create dir: S3 marker appeared"
+wait_s3_appear "$S3_PREFIX/${TS}_subdir/" && pass "create dir: backend marker appeared"
 
 info "create file"
 echo "subdir content" > "$SUBFILE"
-wait_s3_appear "$SUBFILE_KEY" && pass "create file: S3 object appeared"
+wait_s3_appear "$SUBFILE_KEY" && pass "create file: backend object appeared"
 
 info "edit"
 echo "more content" >> "$SUBFILE"
 sleep 2
 [[ $(wc -c < "$SUBFILE") -gt 15 ]] && pass "edit: local file content updated" \
     || fail "edit: local file content unchanged"
-wait_s3_appear "$SUBFILE_KEY" && pass "edit: S3 object still present after edit"
+wait_s3_appear "$SUBFILE_KEY" && pass "edit: backend object still present after edit"
 
 info "rename file"
 mv "$SUBFILE" "$SUBFILE_B"
 sleep 3
 if s3_exists "$SUBFILE_KEY_B"; then
-    pass "rename: new S3 key appeared"
+    pass "rename: new backend key appeared"
     s3_exists "$SUBFILE_KEY" \
-        && fail "rename: old S3 key still present" \
-        || pass "rename: old S3 key removed"
+        && fail "rename: old backend key still present" \
+        || pass "rename: old backend key removed"
 else
-    fail "rename: new S3 key did not appear"
+    fail "rename: new backend key did not appear"
 fi
 
 EVICT_TARGET="${SUBFILE_B}"
@@ -171,11 +171,11 @@ info "delete file"
 rm "$EVICT_TARGET"
 [[ "$EVICT_TARGET" == "$SUBFILE_B" ]] && wait_s3_gone "$SUBFILE_KEY_B" \
     || wait_s3_gone "$SUBFILE_KEY"
-pass "delete file: S3 object removed"
+pass "delete file: backend object removed"
 
 info "delete dir"
 rmdir "$SUBDIR"
-wait_s3_gone "$S3_PREFIX/${TS}_subdir/" && pass "delete dir: S3 marker removed"
+wait_s3_gone "$S3_PREFIX/${TS}_subdir/" && pass "delete dir: backend marker removed"
 fi # run_case 3
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -194,7 +194,7 @@ dd if=/dev/urandom of="$LARGE_TMP" bs=1048576 count=20 2>/dev/null
 cp "$LARGE_TMP" "$LARGE_FILE"
 
 info "create (upload)"
-wait_s3_appear "$LARGE_KEY" "$LARGE_UPLOAD_TIMEOUT" && pass "create: S3 manifest appeared"
+wait_s3_appear "$LARGE_KEY" "$LARGE_UPLOAD_TIMEOUT" && pass "create: backend manifest appeared"
 ct=$(s3_content_type "$LARGE_KEY")
 [[ "$ct" == "application/x-tsync-manifest+json" ]] \
     && pass "create: content-type is manifest (chunked path confirmed)" \
@@ -203,16 +203,16 @@ ct=$(s3_content_type "$LARGE_KEY")
 info "edit (append 4 MB)"
 dd if=/dev/urandom bs=1048576 count=4 2>/dev/null >> "$LARGE_FILE"
 sleep 3
-wait_s3_appear "$LARGE_KEY" "$LARGE_UPLOAD_TIMEOUT" && pass "edit: S3 manifest still present"
+wait_s3_appear "$LARGE_KEY" "$LARGE_UPLOAD_TIMEOUT" && pass "edit: backend manifest still present"
 [[ $(wc -c < "$LARGE_FILE") -gt $(( 20 * 1024 * 1024 )) ]] \
     && pass "edit: local file grew" || fail "edit: local file did not grow"
 
 info "rename"
 mv "$LARGE_FILE" "$LARGE_FILE_B"
 wait_s3_appear "$LARGE_KEY_B" "$LARGE_UPLOAD_TIMEOUT" \
-    && pass "rename: new S3 key appeared" || fail "rename: new S3 key did not appear"
+    && pass "rename: new backend key appeared" || fail "rename: new backend key did not appear"
 wait_s3_gone "$LARGE_KEY" "$LARGE_UPLOAD_TIMEOUT" \
-    && pass "rename: old S3 key removed" || fail "rename: old S3 key still present"
+    && pass "rename: old backend key removed" || fail "rename: old backend key still present"
 
 EVICT_TARGET="$LARGE_FILE_B"
 [[ -f "$EVICT_TARGET" ]] || EVICT_TARGET="$LARGE_FILE"
@@ -234,7 +234,7 @@ info "delete"
 rm "$EVICT_TARGET"
 [[ "$EVICT_TARGET" == "$LARGE_FILE_B" ]] && wait_s3_gone "$LARGE_KEY_B" \
     || wait_s3_gone "$LARGE_KEY"
-pass "delete: S3 manifest removed"
+pass "delete: backend manifest removed"
 fi # run_case 4
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -253,11 +253,11 @@ LARGE_SUBKEY_B="$S3_PREFIX/${TS}_largedir/${TS}_large_b.bin"
 
 info "create dir"
 mkdir "$LARGEDIR"
-wait_s3_appear "$LARGEDIR_KEY" && pass "create dir: S3 marker appeared"
+wait_s3_appear "$LARGEDIR_KEY" && pass "create dir: backend marker appeared"
 
 info "create large file in subdir"
 cp "$LARGE_TMP" "$LARGE_SUBFILE"
-wait_s3_appear "$LARGE_SUBKEY" "$LARGE_UPLOAD_TIMEOUT" && pass "create: S3 manifest appeared"
+wait_s3_appear "$LARGE_SUBKEY" "$LARGE_UPLOAD_TIMEOUT" && pass "create: backend manifest appeared"
 ct=$(s3_content_type "$LARGE_SUBKEY")
 [[ "$ct" == "application/x-tsync-manifest+json" ]] \
     && pass "create: content-type is manifest" || fail "create: unexpected content-type '$ct'"
@@ -265,14 +265,14 @@ ct=$(s3_content_type "$LARGE_SUBKEY")
 info "edit"
 dd if=/dev/urandom bs=1048576 count=4 2>/dev/null >> "$LARGE_SUBFILE"
 sleep 3
-wait_s3_appear "$LARGE_SUBKEY" "$LARGE_UPLOAD_TIMEOUT" && pass "edit: S3 manifest present"
+wait_s3_appear "$LARGE_SUBKEY" "$LARGE_UPLOAD_TIMEOUT" && pass "edit: backend manifest present"
 
 info "rename"
 mv "$LARGE_SUBFILE" "$LARGE_SUBFILE_B"
 wait_s3_appear "$LARGE_SUBKEY_B" "$LARGE_UPLOAD_TIMEOUT" \
-    && pass "rename: new S3 key appeared" || fail "rename: new S3 key did not appear"
+    && pass "rename: new backend key appeared" || fail "rename: new backend key did not appear"
 wait_s3_gone "$LARGE_SUBKEY" "$LARGE_UPLOAD_TIMEOUT" \
-    && pass "rename: old S3 key removed" || fail "rename: old S3 key still present"
+    && pass "rename: old backend key removed" || fail "rename: old backend key still present"
 
 EVICT_TARGET="$LARGE_SUBFILE_B"
 [[ -f "$EVICT_TARGET" ]] || EVICT_TARGET="$LARGE_SUBFILE"
@@ -294,15 +294,15 @@ info "delete file"
 rm "$EVICT_TARGET"
 [[ "$EVICT_TARGET" == "$LARGE_SUBFILE_B" ]] && wait_s3_gone "$LARGE_SUBKEY_B" \
     || wait_s3_gone "$LARGE_SUBKEY"
-pass "delete file: S3 manifest removed"
+pass "delete file: backend manifest removed"
 
 info "delete dir"
 rmdir "$LARGEDIR"
-wait_s3_gone "$LARGEDIR_KEY" && pass "delete dir: S3 marker removed"
+wait_s3_gone "$LARGEDIR_KEY" && pass "delete dir: backend marker removed"
 fi # run_case 5
 
 # ══════════════════════════════════════════════════════════════════════════════
-# CASE 6: Change journal — verify entries written to S3 on every mutation
+# CASE 6: Change journal — verify entries written to backend on every mutation
 # ══════════════════════════════════════════════════════════════════════════════
 if run_case 6; then
 section "CASE 6: Change journal"

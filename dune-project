@@ -10,7 +10,7 @@
 
 (package
  (name tsync)
- (synopsis "S3-backed FUSE filesystem sync tool")
+ (synopsis "Cloud-backed filesystem sync tool")
  (depends
   (ocaml (>= 5.5.0))
   dune

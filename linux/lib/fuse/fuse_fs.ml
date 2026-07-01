@@ -20,7 +20,7 @@ module Make (C : Conf.S) = struct
     else key ^ "/"
 
   (* ── The FUSE kernel creates .fuse_hidden* files when renaming a file that
-     has open file descriptors. These are kernel-internal; never mirror to S3. *)
+     has open file descriptors. These are kernel-internal; never mirror to backend. *)
   let is_fuse_hidden path =
     let basename = Filename.basename path in
     let prefix = ".fuse_hidden" in
@@ -259,17 +259,21 @@ module Make (C : Conf.S) = struct
 
   let mount mount_point =
     F.auto_evict := Sys.file_exists (Filename.concat C.data_dir "auto-evict");
+    Log.debug "auto-evict: %b" !F.auto_evict;
+    Log.debug "starting sync queue workers";
     Sq.start
       ~upload:(fun ~key ~cancel -> F.upload ~cancel key)
       ~on_version:(fun ~entry_key -> set_pending_version entry_key)
       ~on_upload_done:(fun ~key ->
         F.on_upload_done key;
         Ipc.notify_uploaded ~path:C.notify_path key);
+    Log.debug "starting IPC server at %s" C.socket_path;
     let _ipc_thread =
       Thread.create
         (fun () -> Ipc.serve ~path:C.socket_path (ipc_handler mount_point))
         ()
     in
+    Log.debug "starting version flusher";
     let _version_flusher =
       Thread.create
         (fun () ->
@@ -284,7 +288,9 @@ module Make (C : Conf.S) = struct
           done)
         ()
     in
+    Log.info "mounting FUSE at %s" mount_point;
     Fuse.main ~loop_mode:Fuse.Single_threaded [| "tsync"; mount_point |]
       (make_operations mount_point);
+    Log.debug "FUSE loop exited, draining upload queue";
     Sq.drain ()
 end

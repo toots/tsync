@@ -23,7 +23,7 @@ if [[ -z "${TSYNC_CONFIG_JSON:-}" ]]; then
   else
     echo "No config.json found. Enter config values interactively."
     read -rp "  AWS bucket:     " BUCKET
-    read -rp "  S3 prefix:      " PREFIX
+    read -rp "  Backend prefix:  " PREFIX
     read -rp "  AWS region:     " REGION
     read -rp "  Domain name:    " DOMAIN
     read -rp "  Versioning (true/false): " VERSIONING

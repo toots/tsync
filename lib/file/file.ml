@@ -255,7 +255,7 @@ module Make (C : Conf.S) (Sq : Sync_queue.S) : S = struct
 
   let read key (buf : buffer) ~offset =
     if not (is_cached key) then
-      Log.debug "read %s: not in local cache, fetching from S3" key;
+      Log.debug "read %s: not in local cache, fetching from backend" key;
     ensure_cached key;
     Local_io.read (local_path key) buf ~offset
 
@@ -279,7 +279,7 @@ module Make (C : Conf.S) (Sq : Sync_queue.S) : S = struct
     Local.rename_manifest ~cache_root:C.cache_root ~domain_name:C.domain_name
       ~domain_prefix:C.domain_prefix ~src_key:src ~dst_key:dst
 
-  (* ── Synchronous S3 operations ─────────────────────────────────────────── *)
+  (* ── Synchronous backend operations ────────────────────────────────────── *)
 
   let with_journal key ops s3_op =
     let ek = J.entry_key () in
