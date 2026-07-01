@@ -1,15 +1,10 @@
-type file_entry = {
-  key : string;
-  size : int;
-  last_modified : float;
-  content_type : string option;
-}
+type file_entry = { key : string; size : int; last_modified : float }
 
 exception Backend_error of string
 exception Cancelled
 
 module type S = sig
-  val put : ?content_type:string -> key:string -> data:string -> unit -> unit
+  val put : key:string -> data:string -> unit -> unit
   val get : key:string -> unit -> string
   val head_opt : key:string -> unit -> file_entry option
   val delete : key:string -> unit -> unit

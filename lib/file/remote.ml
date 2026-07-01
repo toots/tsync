@@ -18,10 +18,8 @@ module Make (C : Conf.S) = struct
       | [] -> failwith "no backends configured"
       | b :: _ -> b
 
-  let put_all ?content_type ~key ~data () =
-    List.iter
-      (fun (module B : Backend.S) -> B.put ?content_type ~key ~data ())
-      C.backends
+  let put_all ~key ~data () =
+    List.iter (fun (module B : Backend.S) -> B.put ~key ~data ()) C.backends
 
   let upload ~key ~src_path ~mtime ?(cancel = Atomic.make false) () =
     let stat = Unix.stat src_path in
@@ -52,7 +50,7 @@ module Make (C : Conf.S) = struct
           let data =
             read_chunk src_path (e.index * Manifest.chunk_size) e.size
           in
-          put_all ~content_type:"application/octet-stream" ~key:ck ~data ()
+          put_all ~key:ck ~data ()
         end)
       entries;
     if Atomic.get cancel then raise Cancelled;
@@ -60,46 +58,40 @@ module Make (C : Conf.S) = struct
       Manifest.make ~size:(Int64.of_int file_size)
         ~chunk_size:Manifest.chunk_size ~chunks:entries ~mtime
     in
-    put_all ~content_type:Manifest.content_type ~key
-      ~data:(Manifest.to_string state) ();
+    put_all ~key ~data:(Manifest.to_string state) ();
     state
+
+  let assemble_chunks ~(manifest : Manifest.t) ~dst_path primary =
+    let (module Primary : Backend.S) = primary in
+    let fd =
+      Unix.openfile dst_path [Unix.O_WRONLY; Unix.O_CREAT; Unix.O_TRUNC] 0o644
+    in
+    Unix.ftruncate fd (Int64.to_int manifest.Manifest.size);
+    List.iter
+      (fun (chunk : Manifest.chunk_entry) ->
+        let ck = C.chunk_prefix ^ Manifest.chunk_key chunk in
+        let data = Primary.get ~key:ck () in
+        ignore
+          (Unix.lseek fd
+             (chunk.index * manifest.Manifest.chunk_size)
+             Unix.SEEK_SET);
+        let written = ref 0 and len = String.length data in
+        while !written < len do
+          written :=
+            !written + Unix.write_substring fd data !written (len - !written)
+        done)
+      manifest.Manifest.chunks;
+    Unix.close fd
 
   let download ~key ~dst_path =
     let (module Primary : Backend.S) = primary () in
     match Primary.head_opt ~key () with
       | None -> raise (Backend.Backend_error ("not found: " ^ key))
-      | Some c when c.Backend.content_type = Some Manifest.content_type -> (
+      | Some _ -> (
           let body = Primary.get ~key () in
           match Manifest.of_string body with
             | `Dirty -> None
             | `Clean manifest as state ->
-                let fd =
-                  Unix.openfile dst_path
-                    [Unix.O_WRONLY; Unix.O_CREAT; Unix.O_TRUNC]
-                    0o644
-                in
-                Unix.ftruncate fd (Int64.to_int manifest.Manifest.size);
-                List.iter
-                  (fun (chunk : Manifest.chunk_entry) ->
-                    let ck = C.chunk_prefix ^ Manifest.chunk_key chunk in
-                    let data = Primary.get ~key:ck () in
-                    ignore
-                      (Unix.lseek fd
-                         (chunk.index * manifest.Manifest.chunk_size)
-                         Unix.SEEK_SET);
-                    let written = ref 0 and len = String.length data in
-                    while !written < len do
-                      written :=
-                        !written
-                        + Unix.write_substring fd data !written (len - !written)
-                    done)
-                  manifest.Manifest.chunks;
-                Unix.close fd;
+                assemble_chunks ~manifest ~dst_path (module Primary);
                 Some state)
-      | _ ->
-          let body = Primary.get ~key () in
-          let oc = open_out_bin dst_path in
-          output_string oc body;
-          close_out oc;
-          None
 end

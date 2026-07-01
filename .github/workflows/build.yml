@@ -24,9 +24,7 @@ jobs:
         with:
           ocaml-compiler: "5.5"
       - name: Pin packages
-        run: |
-          opam pin add -ny git+https://github.com/toots/aws-s3.git
-          opam pin -ny .
+        run: opam pin -ny .
       - name: Install dependencies
         run: |
           brew install xcodegen xxhash

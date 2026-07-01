@@ -19,8 +19,7 @@ RUN opam init --bare --disable-sandboxing -y && \
 # Make all subsequent RUN commands use this local switch
 ENV OPAMSWITCH=/src
 
-RUN opam pin add -ny git+https://github.com/toots/aws-s3.git && \
-    opam pin add -ny git+https://github.com/toots/ocamlfuse.git && \
+RUN opam pin add -ny git+https://github.com/toots/ocamlfuse.git && \
     opam install --deps-only -y . && \
     opam clean -a -c -s
 

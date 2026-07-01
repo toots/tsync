@@ -1,4 +1,3 @@
-let content_type = "application/x-tsync-manifest+json"
 let chunk_size = 8 * 1024 * 1024
 
 type chunk_entry = { index : int; h1 : string; h2 : string; size : int }

@@ -1,4 +1,3 @@
-val content_type : string
 val chunk_size : int
 
 type chunk_entry = { index : int; h1 : string; h2 : string; size : int }

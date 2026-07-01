@@ -17,7 +17,6 @@ configure:
 
 install-deps:
 	opam pin add -ny fuse3 git+https://github.com/toots/ocamlfuse.git
-	opam pin add -ny aws-s3-lwt git+https://github.com/toots/aws-s3.git
 	opam install --deps-only -y ..
 
 install:

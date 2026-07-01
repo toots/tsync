@@ -6,10 +6,8 @@ module Make (C : Conf.S) = struct
       | [] -> failwith "no backends configured"
       | b :: _ -> b
 
-  let put_all ?content_type ~key ~data () =
-    List.iter
-      (fun (module B : Backend.S) -> B.put ?content_type ~key ~data ())
-      C.backends
+  let put_all ~key ~data () =
+    List.iter (fun (module B : Backend.S) -> B.put ~key ~data ()) C.backends
 
   let delete_dir ~prefix =
     let (module Primary : Backend.S) = primary () in
@@ -18,8 +16,7 @@ module Make (C : Conf.S) = struct
     in
     List.iter (fun (module B : Backend.S) -> B.delete_multi keys) C.backends
 
-  let create_directory ~key =
-    put_all ~content_type:"application/x-directory" ~key ~data:"" ()
+  let create_directory ~key = put_all ~key ~data:"" ()
 
   let rename_file ~src_key ~dst_key =
     List.iter
@@ -58,8 +55,7 @@ module Make (C : Conf.S) = struct
   let write_journal_entry ?entry_key ops =
     let ek = match entry_key with Some k -> k | None -> J.entry_key () in
     let key = C.journal_prefix ^ ek in
-    put_all ~content_type:"application/x-ndjson" ~key ~data:(Journal.encode ops)
-      ();
+    put_all ~key ~data:(Journal.encode ops) ();
     ek
 
   let bump_version entry_key = put_all ~key:C.version_key ~data:entry_key ()

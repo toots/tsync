@@ -25,7 +25,7 @@ let read_file path =
 let make ~root : (module Backend.S) =
   let resolve key = if key = "" then root else Filename.concat root key in
   (module struct
-    let put ?content_type:_ ~key ~data () = write_file (resolve key) data
+    let put ~key ~data () = write_file (resolve key) data
 
     let get ~key () =
       try read_file (resolve key)
@@ -36,14 +36,7 @@ let make ~root : (module Backend.S) =
       let path = resolve key in
       match Unix.stat path with
         | { Unix.st_size; st_mtime; _ } ->
-            Some
-              Backend.
-                {
-                  key;
-                  size = st_size;
-                  last_modified = st_mtime;
-                  content_type = None;
-                }
+            Some Backend.{ key; size = st_size; last_modified = st_mtime }
         | exception Unix.Unix_error (Unix.ENOENT, _, _) -> None
 
     let delete ~key () =
@@ -76,7 +69,6 @@ let make ~root : (module Backend.S) =
                                  key = full_key;
                                  size = st.Unix.st_size;
                                  last_modified = st.Unix.st_mtime;
-                                 content_type = None;
                                }
                              :: !entries
                        | Unix.S_DIR -> walk full_path (full_key ^ "/")
@@ -95,7 +87,6 @@ let make ~root : (module Backend.S) =
                           key = prefix;
                           size = st_size;
                           last_modified = st_mtime;
-                          content_type = None;
                         }
                       :: !entries
                 | exception _ -> ())

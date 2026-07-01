@@ -47,18 +47,13 @@ let unwrap op = function
 
 let entry_of c =
   Backend.
-    {
-      key = c.S3.key;
-      size = c.S3.size;
-      last_modified = c.S3.last_modified;
-      content_type = c.S3.content_type;
-    }
+    { key = c.S3.key; size = c.S3.size; last_modified = c.S3.last_modified }
 
-let put t ?content_type ~key ~data () =
+let put t ~key ~data () =
   ignore
     (lwt_run (fun () ->
-         S3.put ~credentials:t.credentials ~endpoint:t.endpoint ?content_type
-           ~bucket:t.bucket ~key ~data ()
+         S3.put ~credentials:t.credentials ~endpoint:t.endpoint ~bucket:t.bucket
+           ~key ~data ()
          >|= unwrap "put"))
 
 let get t ~key () =
@@ -107,12 +102,7 @@ let delete_multi t keys =
 
 let copy t ~src_key ~dst_key () =
   let data = get t ~key:src_key () in
-  let content_type =
-    match head_opt t ~key:src_key () with
-      | Some c -> c.Backend.content_type
-      | None -> None
-  in
-  put t ?content_type ~key:dst_key ~data ()
+  put t ~key:dst_key ~data ()
 
 let list_all t ~prefix () =
   let rec collect acc cont =
@@ -157,7 +147,7 @@ let make ~bucket ~region ~access_key_id ~secret_access_key : (module Backend.S)
     =
   let t = make_t ~bucket ~region ~access_key_id ~secret_access_key in
   (module struct
-    let put ?content_type ~key ~data () = put t ?content_type ~key ~data ()
+    let put ~key ~data () = put t ~key ~data ()
     let get ~key () = get t ~key ()
     let head_opt ~key () = head_opt t ~key ()
     let delete ~key () = delete t ~key ()
