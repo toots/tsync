@@ -5,7 +5,7 @@ let manifest_dir ~cache_root domain_name =
 
 let strip_prefix ~domain_prefix key =
   let pfx = String.length domain_prefix in
-  if String.length key > pfx && String.sub key 0 pfx = domain_prefix then
+  if String.length key >= pfx && String.sub key 0 pfx = domain_prefix then
     String.sub key pfx (String.length key - pfx)
   else key
 
