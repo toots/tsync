@@ -7,7 +7,6 @@ authors: ["Romain Beauxis <toots@rastageeks.org>"]
 license: "MIT"
 homepage: "https://github.com/toots/tsync"
 bug-reports: "https://github.com/toots/tsync/issues"
-available: os = "linux"
 depends: [
   "dune" {>= "3.23"}
   "fuse3"
@@ -28,3 +27,4 @@ build: [
   ]
 ]
 x-maintenance-intent: ["(latest)"]
+available: os = "linux"
