@@ -261,7 +261,7 @@ module Make (C : Conf.S) = struct
     F.auto_evict := Sys.file_exists (Filename.concat C.data_dir "auto-evict");
     Sq.start
       ~upload:(fun ~key ~cancel -> F.upload ~cancel key)
-      ~on_version:set_pending_version
+      ~on_version:(fun ~entry_key -> set_pending_version entry_key)
       ~on_upload_done:(fun ~key ->
         F.on_upload_done key;
         Ipc.notify_uploaded ~path:C.notify_path key);
