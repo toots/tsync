@@ -35,7 +35,7 @@ let default_paths () =
 let pre_start ~mount_point =
   ignore
     (Sys.command
-       (Printf.sprintf "fusermount3 -u %s 2>/dev/null"
+       (Printf.sprintf "fusermount3 -uz %s 2>/dev/null"
           (Filename.quote mount_point)))
 
 module Make (C : Conf.S) = Fuse_fs.Make (C)
