@@ -25,5 +25,5 @@ jobs:
       - name: Install xcodegen
         run: brew install xcodegen
       - name: Build macOS app
-        run: make generate build
+        run: make generate && xcodebuild -project tsync.xcodeproj -scheme TsyncApp -configuration Debug CODE_SIGN_IDENTITY="" CODE_SIGNING_REQUIRED=NO
         working-directory: macos
