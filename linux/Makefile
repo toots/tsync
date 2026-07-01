@@ -28,7 +28,6 @@ install:
 	cp tsync.service ~/.config/systemd/user/
 	systemctl --user daemon-reload
 	systemctl --user enable tsync
-	-fusermount3 -uz ~/tsync/* 2>/dev/null
 	systemctl --user restart tsync
 
 test-lifecycle:
