@@ -176,7 +176,7 @@ let ls_cmd =
           else e.key
         in
         let cached =
-          Local.is_cached ~cache_root:C.cache_root ~domain_name:C.domain_name
+          Runtime.is_local ~cache_root:C.cache_root ~domain_name:C.domain_name
             ~domain_prefix:C.domain_prefix e.key
         in
         Printf.printf "%s  %s  %d bytes\n"

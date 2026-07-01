@@ -10,6 +10,13 @@ type paths = {
 val default_paths : unit -> paths
 val pre_start : mount_point:string -> unit
 
+val is_local :
+  cache_root:string ->
+  domain_name:string ->
+  domain_prefix:string ->
+  string ->
+  bool
+
 module Make (C : Conf.S) : sig
   val mount : string -> unit
 end

@@ -1,3 +1,5 @@
+external is_dataless : string -> bool = "caml_is_dataless"
+
 module Make (C : Conf.S) = struct
   module Sq = Sync_queue.Make (C)
   module F = File.Make (C) (Sq)

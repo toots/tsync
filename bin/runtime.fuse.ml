@@ -38,4 +38,6 @@ let pre_start ~mount_point =
        (Printf.sprintf "fusermount3 -uz %s 2>/dev/null"
           (Filename.quote mount_point)))
 
+let is_local = Local.is_cached
+
 module Make (C : Conf.S) = Fuse_fs.Make (C)
