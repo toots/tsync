@@ -140,9 +140,10 @@ final class TsyncExtension: NSObject, NSFileProviderReplicatedExtension, @unchec
                 let isDirectory = itemTemplate.contentType == .folder
 
                 if isDirectory {
-                    _ = try await IPC.mkdir(key: key)
+                    let dirKey = key + "/"
+                    _ = try await IPC.mkdir(key: dirKey)
                     let item = TsyncItem(
-                        identifier: NSFileProviderItemIdentifier(key + "/"),
+                        identifier: NSFileProviderItemIdentifier(dirKey),
                         parent: itemTemplate.parentItemIdentifier,
                         filename: itemTemplate.filename, isDirectory: true)
                     completionHandler(item, [], false, nil)
@@ -186,10 +187,10 @@ final class TsyncExtension: NSObject, NSFileProviderReplicatedExtension, @unchec
                 let isDirectory = item.contentType == .folder
 
                 if isDirectory {
-                    if isRename && oldKey != newKey {
+                    let dirKey = newKey + "/"
+                    if isRename && oldKey != dirKey {
                         _ = try await IPC.renameItem(src: oldKey, dst: newKey)
                     }
-                    let dirKey = newKey.hasSuffix("/") ? newKey : newKey + "/"
                     completionHandler(TsyncItem(
                         identifier: NSFileProviderItemIdentifier(dirKey),
                         parent: item.parentItemIdentifier,

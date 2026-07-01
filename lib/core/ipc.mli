@@ -1,11 +1,5 @@
-(** Path to the Unix-domain socket used for daemon IPC. *)
-val socket_path : unit -> string
-
-(** Path to the sentinel file whose presence enables auto-evict mode. *)
-val auto_evict_path : unit -> string
-
 (** Send a single-line command to the running daemon and return its response. *)
-val send : string -> string
+val send : socket_path:string -> string -> string
 
 (** Split ["CMD rest of line"] into [("CMD", "rest of line")] on the first
     space. *)

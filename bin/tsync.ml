@@ -4,7 +4,7 @@ open Cmdliner
 
 let () =
   if not Runtime.implemented then (
-    Printf.eprintf "No backend available at compiled-timne!\n%!";
+    Printf.eprintf "No backend available at compile-time!\n%!";
     exit 1)
 
 let rec mkdir_p path =
@@ -13,45 +13,34 @@ let rec mkdir_p path =
     try Unix.mkdir path 0o755 with Unix.Unix_error (Unix.EEXIST, _, _) -> ()
   end
 
-let default_mount_point cfg domain_name =
-  ignore cfg;
-  Filename.concat (Sys.getenv "HOME") ("tsync/" ^ domain_name)
+let runtime_paths = Runtime.default_paths ()
 
-let load_store ?domain_name () =
-  let cfg = Config.load () in
+let make_conf ?domain cfg : (module Conf.S) =
   let domain_name =
-    match domain_name with
-      | Some n -> n
-      | None -> (
-          match cfg.Config.domains with
-            | [] -> failwith "No domains configured"
-            | d :: _ -> d.Config.name)
+    match domain with Some d -> d | None -> cfg.Conf_parsing.domain_name
   in
-  let client =
-    S3_client.make ~bucket:cfg.Config.bucket ~region:cfg.Config.aws_region
-      ~access_key_id:cfg.Config.access_key_id
-      ~secret_access_key:cfg.Config.secret_access_key
-  in
-  let cache_root, socket_path = Runtime.default_paths () in
-  let notify_path = Filename.concat (Filename.dirname socket_path) "notify.sock" in
-  let conf =
-    Conf.
-      {
-        client;
-        domain_name;
-        domain_prefix = Config.domain_prefix cfg domain_name;
-        chunk_prefix = Config.chunk_prefix cfg;
-        trash_prefix = Config.trash_prefix cfg domain_name;
-        journal_prefix = Config.journal_prefix cfg domain_name;
-        version_key = Config.version_key cfg domain_name;
-        versioning = cfg.Config.versioning;
-        cache_root;
-        socket_path;
-        notify_path;
-      }
-  in
-  let store = File_store.make conf in
-  (cfg, conf, store)
+  (module struct
+    let bucket = cfg.Conf_parsing.bucket
+    let prefix = cfg.Conf_parsing.prefix
+    let aws_region = cfg.Conf_parsing.aws_region
+    let versioning = cfg.Conf_parsing.versioning
+    let access_key_id = cfg.Conf_parsing.access_key_id
+    let secret_access_key = cfg.Conf_parsing.secret_access_key
+    let domain_name = domain_name
+    let domain_prefix = Conf_parsing.domain_prefix cfg domain_name
+    let chunk_prefix = Conf_parsing.chunk_prefix cfg
+    let trash_prefix = Conf_parsing.trash_prefix cfg domain_name
+    let journal_prefix = Conf_parsing.journal_prefix cfg domain_name
+    let version_key = Conf_parsing.version_key cfg domain_name
+    let client =
+      S3_client.make ~bucket ~region:aws_region ~access_key_id
+        ~secret_access_key
+    let cache_root = runtime_paths.Runtime.cache_root
+    let data_dir = runtime_paths.Runtime.data_dir
+    let socket_path = runtime_paths.Runtime.socket_path
+    let notify_path =
+      Filename.concat runtime_paths.Runtime.data_dir "notify.sock"
+  end : Conf.S)
 
 (* ── tsync start ─────────────────────────────────────────────────────────── *)
 
@@ -66,40 +55,22 @@ let start_cmd =
     Arg.(
       value
       & opt (some string) None
-      & info ["domain"] ~docv:"NAME"
-          ~doc:"Domain name (default: first configured)")
+      & info ["domain"] ~docv:"NAME" ~doc:"Domain name (default: from config)")
   in
   let run mount domain =
-    let cfg, conf, store = load_store ?domain_name:domain () in
+    let cfg = Conf_parsing.load runtime_paths.Runtime.config_path in
+    let (module C : Conf.S) = make_conf ?domain cfg in
     let mount_point =
       match mount with
         | Some p -> p
-        | None -> default_mount_point cfg conf.Conf.domain_name
+        | None ->
+            Filename.concat (Sys.getenv "HOME") ("tsync/" ^ C.domain_name)
     in
     mkdir_p mount_point;
     Runtime.pre_start ~mount_point;
     Log.init ();
-    let files_ref : File.store option ref = ref None in
-    let get_file key = File.make ~store:(Option.get !files_ref) ~key in
-    let sync_queue =
-      Sync_queue.make ~store
-        ~upload:(fun ~key ~cancel -> File.upload ~cancel (get_file key))
-        ~on_version:(fun ~entry_key -> Runtime.set_pending_version entry_key)
-        ~on_upload_done:(fun ~key ->
-          File.on_upload_done (get_file key);
-          Ipc.notify_uploaded ~path:conf.Conf.notify_path key)
-    in
-    let files =
-      File.make_store ~conf ~file_store:store ~sync_queue
-        ~auto_evict:Runtime.auto_evict
-    in
-    files_ref := Some files;
-    let ctx =
-      Runtime.make_context ~store ~files ~domain_name:conf.Conf.domain_name
-        ~domain_prefix:conf.Conf.domain_prefix ~mount_point
-    in
-    Runtime.mount ctx [| "tsync"; mount_point |];
-    Sync_queue.drain sync_queue
+    let module R = Runtime.Make(C) in
+    R.mount mount_point
   in
   Cmd.v
     (Cmd.info "start" ~doc:"Mount the filesystem (run via systemd unit)")
@@ -109,7 +80,9 @@ let start_cmd =
 
 let stop_cmd =
   let run () =
-    let resp = Ipc.send "STOP" in
+    let resp =
+      Ipc.send ~socket_path:runtime_paths.Runtime.socket_path "STOP"
+    in
     if resp = "OK" || resp = "STOP" then print_endline "Stopped."
     else Printf.eprintf "Error: %s\n" resp
   in
@@ -121,7 +94,9 @@ let stop_cmd =
 
 let status_cmd =
   let run () =
-    try print_endline (Ipc.send "STATUS")
+    try
+      print_endline
+        (Ipc.send ~socket_path:runtime_paths.Runtime.socket_path "STATUS")
     with _ -> print_endline "Daemon not running"
   in
   Cmd.v
@@ -135,7 +110,10 @@ let evict_cmd =
   let run paths =
     List.iter
       (fun path ->
-        let resp = Ipc.send ("EVICT " ^ path) in
+        let resp =
+          Ipc.send ~socket_path:runtime_paths.Runtime.socket_path
+            ("EVICT " ^ path)
+        in
         if resp = "OK" then Printf.printf "Evicted: %s\n" path
         else Printf.eprintf "Error: %s\n" resp)
       paths
@@ -151,7 +129,10 @@ let restore_cmd =
   let run paths =
     List.iter
       (fun path ->
-        let resp = Ipc.send ("RESTORE " ^ path) in
+        let resp =
+          Ipc.send ~socket_path:runtime_paths.Runtime.socket_path
+            ("RESTORE " ^ path)
+        in
         if resp = "OK" then Printf.printf "Restored: %s\n" path
         else Printf.eprintf "Error: %s\n" resp)
       paths
@@ -169,26 +150,7 @@ let pull_cmd =
   let force_arg =
     Arg.(value & flag & info ["force"] ~doc:"Restore even if already cached")
   in
-  let run path force =
-    let _cfg, conf, store = load_store () in
-    let mount_point =
-      match path with
-        | Some p -> p
-        | None ->
-            let home = Sys.getenv "HOME" in
-            Filename.concat home ("tsync/" ^ conf.Conf.domain_name)
-    in
-    let prefix = conf.Conf.domain_prefix in
-    let all =
-      S3_client.list_all
-        ( File_store.domain_prefix store |> fun _ ->
-          (* ponytail: access client via store internals not exposed — use list_directory *)
-          failwith "todo" )
-        ~prefix ()
-    in
-    ignore (mount_point, force, all);
-    Printf.eprintf "pull: not yet implemented\n"
-  in
+  let run _path _force = Printf.eprintf "pull: not yet implemented\n" in
   Cmd.v
     (Cmd.info "pull" ~doc:"Download all evicted files")
     Term.(const run $ path_arg $ force_arg)
@@ -200,19 +162,19 @@ let ls_cmd =
     Arg.(value & pos 0 (some string) None & info [] ~docv:"PATH")
   in
   let run path =
-    let _cfg, conf, store = load_store () in
+    let cfg = Conf_parsing.load runtime_paths.Runtime.config_path in
+    let (module C : Conf.S) = make_conf cfg in
+    let module Fs = File_store.Make(C) in
     let mount_point =
-      let home = Sys.getenv "HOME" in
-      Filename.concat home ("tsync/" ^ conf.Conf.domain_name)
+      Filename.concat (Sys.getenv "HOME") ("tsync/" ^ C.domain_name)
     in
     let dir = match path with Some p -> p | None -> mount_point in
     let prefix =
-      let dp = conf.Conf.domain_prefix in
+      let dp = C.domain_prefix in
       if dir = mount_point then dp else dp ^ Filename.basename dir ^ "/"
     in
-    let files, subdirs = File_store.list_directory store ~prefix in
-    let domain_prefix = conf.Conf.domain_prefix in
-    let dp_len = String.length domain_prefix in
+    let files, subdirs = Fs.list_directory ~prefix in
+    let dp_len = String.length C.domain_prefix in
     List.iter
       (fun (e : S3_client.file_entry) ->
         let name =
@@ -221,9 +183,8 @@ let ls_cmd =
           else e.key
         in
         let cached =
-          Local.is_cached ~cache_root:conf.Conf.cache_root
-            ~domain_name:conf.Conf.domain_name
-            ~domain_prefix:conf.Conf.domain_prefix e.key
+          Local.is_cached ~cache_root:C.cache_root
+            ~domain_name:C.domain_name ~domain_prefix:C.domain_prefix e.key
         in
         Printf.printf "%s  %s  %d bytes\n"
           (if cached then "local" else "cloud")
@@ -270,15 +231,22 @@ let auto_evict_cmd =
   let run state =
     match state with
       | None | Some "status" -> (
-          let resp = Ipc.send "AUTO_EVICT status" in
+          let resp =
+            Ipc.send ~socket_path:runtime_paths.Runtime.socket_path
+              "AUTO_EVICT status"
+          in
           match resp with
             | "on" | "off" -> Printf.printf "auto-evict: %s\n" resp
             | _ -> Printf.eprintf "Error: %s\n" resp)
       | Some (("on" | "off") as s) ->
-          let resp = Ipc.send ("AUTO_EVICT " ^ s) in
+          let resp =
+            Ipc.send ~socket_path:runtime_paths.Runtime.socket_path
+              ("AUTO_EVICT " ^ s)
+          in
           if resp = "OK" then Printf.printf "auto-evict: %s\n" s
           else Printf.eprintf "Error: %s\n" resp
-      | Some other -> Printf.eprintf "Expected on|off|status, got: %s\n" other
+      | Some other ->
+          Printf.eprintf "Expected on|off|status, got: %s\n" other
   in
   Cmd.v
     (Cmd.info "auto-evict" ~doc:"Enable or disable auto-evict after upload")
@@ -291,102 +259,97 @@ let sync_cmd =
     Arg.(
       value
       & opt (some string) None
-      & info ["domain"] ~docv:"NAME"
-          ~doc:"Domain name (default: first configured)")
-  in
-  let recover_pending_ops store files =
-    let my_uuid = Journal.client_uuid () in
-    List.iter
-      (fun (entry_key, ops) ->
-        let remote_key = File_store.journal_prefix store ^ entry_key in
-        if File_store.head_opt store ~key:remote_key <> None then
-          Journal.delete_local_pending ~entry_key
-        else begin
-          let newer_keys =
-            File_store.list_journal_keys ~start_after:entry_key store ()
-          in
-          let remotely_modified = Hashtbl.create 16 in
-          List.iter
-            (fun (ek, uuid) ->
-              if uuid <> my_uuid then (
-                match File_store.get_journal_entry store ek with
-                  | None -> ()
-                  | Some remote_ops ->
-                      List.iter
-                        (fun op ->
-                          match op with
-                            | `Put (k, _) | `Delete k | `Mkdir k | `Rmdir k ->
-                                Hashtbl.replace remotely_modified k ()
-                            | `Rename { Journal.dst; src; _ } ->
-                                Hashtbl.replace remotely_modified dst ();
-                                Hashtbl.replace remotely_modified src ())
-                        remote_ops))
-            newer_keys;
-          let domain_prefix = File_store.domain_prefix store in
-          let replayed =
-            List.filter
-              (fun op ->
-                let k =
-                  match op with
-                    | `Put (k, _) | `Delete k | `Mkdir k | `Rmdir k -> k
-                    | `Rename { Journal.dst = k; _ } -> k
-                in
-                not (Hashtbl.mem remotely_modified k))
-              ops
-          in
-          List.iter
-            (fun op ->
-              try
-                match op with
-                  | `Put (rel_key, _) ->
-                      let full_key = domain_prefix ^ rel_key in
-                      let f = File.make ~store:files ~key:full_key in
-                      if File.is_cached f then File.upload f
-                  | `Delete rel_key ->
-                      File.apply_delete
-                        (File.make ~store:files ~key:(domain_prefix ^ rel_key))
-                  | `Mkdir rel_key ->
-                      File_store.create_directory store
-                        ~key:(domain_prefix ^ rel_key)
-                  | `Rmdir rel_key ->
-                      File_store.delete_dir store
-                        ~prefix:(domain_prefix ^ rel_key)
-                  | `Rename { Journal.dst = dst_rel; src = src_rel; is_dir; _ }
-                    ->
-                      let src_key = domain_prefix ^ src_rel in
-                      let dst_key = domain_prefix ^ dst_rel in
-                      if is_dir then
-                        File_store.rename_directory store
-                          ~src_prefix:(src_key ^ "/") ~dst_prefix:(dst_key ^ "/")
-                      else File_store.rename_file store ~src_key ~dst_key
-              with exn ->
-                Log.err "recover_pending_ops: %s" (Printexc.to_string exn))
-            replayed;
-          if replayed <> [] then begin
-            ignore (File_store.write_journal_entry ~entry_key replayed store);
-            File_store.bump_version store entry_key
-          end;
-          Journal.delete_local_pending ~entry_key
-        end)
-      (Journal.local_pending_entries ~uuid:my_uuid)
+      & info ["domain"] ~docv:"NAME" ~doc:"Domain name (default: from config)")
   in
   let run domain =
-    let _cfg, conf, store = load_store ?domain_name:domain () in
-    let sync_queue =
-      Sync_queue.make ~store
-        ~upload:(fun ~key:_ ~cancel:_ -> ())
-        ~on_version:(fun ~entry_key:_ -> ())
-        ~on_upload_done:(fun ~key:_ -> ())
+    let cfg = Conf_parsing.load runtime_paths.Runtime.config_path in
+    let (module C : Conf.S) = make_conf ?domain cfg in
+    let module J = Journal.Make(C) in
+    let module Fs = File_store.Make(C) in
+    let module Sq = Sync_queue.Make(C) in
+    let module F = File.Make(C)(Sq) in
+    Sq.start
+      ~upload:(fun ~key ~cancel -> F.upload ~cancel key)
+      ~on_version:(fun ~entry_key:_ -> ())
+      ~on_upload_done:(fun ~key:_ -> ());
+    let my_uuid = J.client_uuid () in
+    let recover_pending_ops () =
+      List.iter
+        (fun (entry_key, ops) ->
+          let remote_key = C.journal_prefix ^ entry_key in
+          if Fs.head_opt ~key:remote_key <> None then
+            J.delete_local_pending ~entry_key
+          else begin
+            let newer_keys = Fs.list_journal_keys ~start_after:entry_key () in
+            let remotely_modified = Hashtbl.create 16 in
+            List.iter
+              (fun (ek, uuid) ->
+                if uuid <> my_uuid then (
+                  match Fs.get_journal_entry ek with
+                    | None -> ()
+                    | Some remote_ops ->
+                        List.iter
+                          (fun op ->
+                            match op with
+                              | `Put (k, _)
+                              | `Delete k
+                              | `Mkdir k
+                              | `Rmdir k ->
+                                  Hashtbl.replace remotely_modified k ()
+                              | `Rename { Journal.dst; src; _ } ->
+                                  Hashtbl.replace remotely_modified dst ();
+                                  Hashtbl.replace remotely_modified src ())
+                          remote_ops))
+              newer_keys;
+            let replayed =
+              List.filter
+                (fun op ->
+                  let k =
+                    match op with
+                      | `Put (k, _) | `Delete k | `Mkdir k | `Rmdir k -> k
+                      | `Rename { Journal.dst = k; _ } -> k
+                  in
+                  not (Hashtbl.mem remotely_modified k))
+                ops
+            in
+            List.iter
+              (fun op ->
+                try
+                  match op with
+                    | `Put (rel_key, _) ->
+                        let key = C.domain_prefix ^ rel_key in
+                        if F.is_cached key then F.upload key
+                    | `Delete rel_key ->
+                        F.apply_delete (C.domain_prefix ^ rel_key)
+                    | `Mkdir rel_key ->
+                        Fs.create_directory ~key:(C.domain_prefix ^ rel_key)
+                    | `Rmdir rel_key ->
+                        Fs.delete_dir ~prefix:(C.domain_prefix ^ rel_key)
+                    | `Rename
+                        { Journal.dst = dst_rel; src = src_rel; is_dir; _ } ->
+                        let src_key = C.domain_prefix ^ src_rel in
+                        let dst_key = C.domain_prefix ^ dst_rel in
+                        if is_dir then
+                          Fs.rename_directory
+                            ~src_prefix:(src_key ^ "/")
+                            ~dst_prefix:(dst_key ^ "/")
+                        else Fs.rename_file ~src_key ~dst_key
+                with exn ->
+                  Log.err "recover_pending_ops: %s" (Printexc.to_string exn))
+              replayed;
+            if replayed <> [] then begin
+              ignore (Fs.write_journal_entry ~entry_key replayed);
+              Fs.bump_version entry_key
+            end;
+            J.delete_local_pending ~entry_key
+          end)
+        (J.local_pending_entries ~uuid:my_uuid)
     in
-    let files =
-      File.make_store ~conf ~file_store:store ~sync_queue
-        ~auto_evict:(ref false)
-    in
-    recover_pending_ops store files;
-    Sync_queue.drain sync_queue;
+    recover_pending_ops ();
+    Sq.drain ();
+    let share_dir = C.data_dir in
     let last_sync_file =
-      Filename.concat (Journal.share_dir ())
-        ("last-sync-" ^ conf.Conf.domain_name)
+      Filename.concat share_dir ("last-sync-" ^ C.domain_name)
     in
     let last_sync_key =
       if Sys.file_exists last_sync_file then (
@@ -396,7 +359,7 @@ let sync_cmd =
         String.trim s)
       else ""
     in
-    let all_keys = File_store.list_journal_keys store () in
+    let all_keys = Fs.list_journal_keys () in
     let need_full_resync =
       if last_sync_key = "" then true
       else (
@@ -408,27 +371,27 @@ let sync_cmd =
     in
     if need_full_resync then begin
       (try
-         let resp = Ipc.send "FULL_RESYNC" in
+         let resp = Ipc.send ~socket_path:C.socket_path "FULL_RESYNC" in
          if resp <> "OK" then
            Printf.eprintf "Warning: FULL_RESYNC response: %s\n" resp
        with _ -> ());
-      let new_key = File_store.journal_prefix store ^ Journal.entry_key () in
+      let new_key = C.journal_prefix ^ J.entry_key () in
       let oc = open_out last_sync_file in
       output_string oc new_key;
       close_out oc;
       Printf.printf "full resync\n"
     end
     else begin
-      let my_uuid = Journal.client_uuid () in
+      let last_sync_basename = Filename.basename last_sync_key in
       let recent_foreign =
         all_keys
-        |> List.filter (fun (k, _) -> k > last_sync_key)
+        |> List.filter (fun (k, _) -> k > last_sync_basename)
         |> List.filter (fun (_, uuid) -> uuid <> my_uuid)
       in
       let touched = Hashtbl.create 16 in
       List.iter
         (fun (ek, _) ->
-          match File_store.get_journal_entry store ek with
+          match Fs.get_journal_entry ek with
             | None -> ()
             | Some ops ->
                 List.iter
@@ -441,11 +404,14 @@ let sync_cmd =
                           Hashtbl.replace touched src ())
                   ops)
         recent_foreign;
-      let touched_keys = Hashtbl.fold (fun k () acc -> k :: acc) touched [] in
+      let touched_keys =
+        Hashtbl.fold (fun k () acc -> k :: acc) touched []
+      in
       List.iter
         (fun rel_key ->
-          (* prepend "/" so ipc_handler's fuse_to_key strips it correctly *)
-          let resp = Ipc.send ("EVICT /" ^ rel_key) in
+          let resp =
+            Ipc.send ~socket_path:C.socket_path ("EVICT /" ^ rel_key)
+          in
           if resp <> "OK" then
             Printf.eprintf "Warning: evict %s: %s\n" rel_key resp)
         touched_keys;
@@ -453,9 +419,8 @@ let sync_cmd =
         | [] -> ()
         | _ ->
             let last_key, _ = List.nth all_keys (List.length all_keys - 1) in
-            (* store full S3 key for cross-platform compatibility *)
             let oc = open_out last_sync_file in
-            let store_val = File_store.journal_prefix store ^ last_key in
+            let store_val = C.journal_prefix ^ last_key in
             output_string oc store_val;
             close_out oc);
       let n = List.length touched_keys in

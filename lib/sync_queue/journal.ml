@@ -12,13 +12,8 @@ type op =
   | `Rename of rename_op
   | `Rmdir of string ]
 
-let share_dir () =
-  match Sys.getenv_opt "XDG_DATA_HOME" with
-    | Some d -> Filename.concat d "tsync"
-    | None -> Filename.concat (Sys.getenv "HOME") ".local/share/tsync"
-
-let client_uuid () =
-  let uuid_file = Filename.concat (share_dir ()) "client-uuid" in
+let get_client_uuid ~share_dir =
+  let uuid_file = Filename.concat share_dir "client-uuid" in
   if Sys.file_exists uuid_file then (
     let ic = open_in uuid_file in
     let s = input_line ic in
@@ -35,8 +30,7 @@ let client_uuid () =
         (Printf.sprintf "%02x" (Char.code (Bytes.get buf i)))
     done;
     let uuid = Buffer.contents hex in
-    let dir = share_dir () in
-    (try Unix.mkdir dir 0o700 with Unix.Unix_error (Unix.EEXIST, _, _) -> ());
+    (try Unix.mkdir share_dir 0o700 with Unix.Unix_error (Unix.EEXIST, _, _) -> ());
     let oc = open_out uuid_file in
     output_string oc uuid;
     close_out oc;
@@ -44,11 +38,10 @@ let client_uuid () =
 
 (* %013Ld: 13-digit zero-padded int64; current ms timestamps are 13 digits,
    ensuring lexicographic order matches chronological order *)
-let entry_key () =
+let make_entry_key ~share_dir () =
   let ms = Int64.of_float (Unix.gettimeofday () *. 1000.) in
-  Printf.sprintf "%013Ld-%s" ms (client_uuid ())
+  Printf.sprintf "%013Ld-%s" ms (get_client_uuid ~share_dir)
 
-(* Accept either a bare entry key ("0001750000000000-uuid") or a full S3 key *)
 let timestamp_ms_of_filename s =
   let s = Filename.basename s in
   let i = String.index s '-' in
@@ -123,21 +116,21 @@ let decode s =
         with _ -> None))
     (String.split_on_char '\n' s)
 
-let pending_dir () = Filename.concat (share_dir ()) "journal-pending"
+let pending_dir ~share_dir = Filename.concat share_dir "journal-pending"
 
-let write_local_pending ~entry_key ops =
-  let dir = pending_dir () in
+let write_local_pending ~share_dir ~entry_key ops =
+  let dir = pending_dir ~share_dir in
   (try Unix.mkdir dir 0o700 with Unix.Unix_error (Unix.EEXIST, _, _) -> ());
   let oc = open_out (Filename.concat dir entry_key) in
   output_string oc (encode ops);
   close_out oc
 
-let delete_local_pending ~entry_key =
-  try Unix.unlink (Filename.concat (pending_dir ()) entry_key)
+let delete_local_pending ~share_dir ~entry_key =
+  try Unix.unlink (Filename.concat (pending_dir ~share_dir) entry_key)
   with Unix.Unix_error (Unix.ENOENT, _, _) -> ()
 
-let local_pending_entries ~uuid =
-  let dir = pending_dir () in
+let local_pending_entries ~share_dir ~uuid =
+  let dir = pending_dir ~share_dir in
   if not (Sys.file_exists dir) then []
   else
     Sys.readdir dir |> Array.to_list
@@ -154,3 +147,12 @@ let local_pending_entries ~uuid =
           close_in ic;
           Some (name, decode (Bytes.to_string s))
         with _ -> None)
+
+module Make(C : Conf.S) = struct
+  let share_dir = C.data_dir
+  let client_uuid () = get_client_uuid ~share_dir
+  let entry_key () = make_entry_key ~share_dir ()
+  let write_local_pending ~entry_key:ek ops = write_local_pending ~share_dir ~entry_key:ek ops
+  let delete_local_pending ~entry_key:ek = delete_local_pending ~share_dir ~entry_key:ek
+  let local_pending_entries ~uuid = local_pending_entries ~share_dir ~uuid
+end

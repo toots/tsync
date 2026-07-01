@@ -1,13 +1,19 @@
-type t = {
-  client : S3_client.t;
-  domain_name : string;
-  domain_prefix : string;
-  chunk_prefix : string;
-  trash_prefix : string;
-  versioning : bool;
-  journal_prefix : string;
-  version_key : string;
-  cache_root : string;
-  socket_path : string;
-  notify_path : string;
-}
+module type S = sig
+  val bucket : string
+  val prefix : string
+  val aws_region : string
+  val versioning : bool
+  val access_key_id : string
+  val secret_access_key : string
+  val domain_name : string
+  val domain_prefix : string
+  val chunk_prefix : string
+  val trash_prefix : string
+  val journal_prefix : string
+  val version_key : string
+  val client : S3_client.t
+  val cache_root : string
+  val data_dir : string
+  val socket_path : string
+  val notify_path : string
+end

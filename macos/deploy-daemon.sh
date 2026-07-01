@@ -11,8 +11,16 @@ echo "Building OCaml daemon..."
 
 echo "Installing binary..."
 mkdir -p "$(dirname "$BIN")"
+rm -f "$BIN"
 cp "$REPO/_build/default/bin/tsync.exe" "$BIN"
 chmod +x "$BIN"
+
+echo "Linking config..."
+GROUP_CONFIG="$HOME/Library/Group Containers/group.com.toots.tsync/config.json"
+XDG_CONFIG="$HOME/.config/tsync/config.json"
+mkdir -p "$(dirname "$XDG_CONFIG")"
+[[ -L "$XDG_CONFIG" ]] && rm -f "$XDG_CONFIG"
+[[ ! -f "$XDG_CONFIG" ]] && ln -sf "$GROUP_CONFIG" "$XDG_CONFIG"
 
 echo "Installing launchd plist..."
 mkdir -p "$(dirname "$PLIST_DST")"

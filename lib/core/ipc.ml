@@ -1,17 +1,8 @@
-let data_dir () =
-  match Sys.getenv_opt "XDG_DATA_HOME" with
-    | Some d -> Filename.concat d "tsync"
-    | None -> Filename.concat (Sys.getenv "HOME") ".local/share/tsync"
-
-let socket_path () = Filename.concat (data_dir ()) "tsync.sock"
-let auto_evict_path () = Filename.concat (data_dir ()) "auto-evict"
-
 (* ── Client ──────────────────────────────────────────────────────────────── *)
 
-let send cmd =
-  let path = socket_path () in
+let send ~socket_path cmd =
   let fd = Unix.socket Unix.PF_UNIX Unix.SOCK_STREAM 0 in
-  Unix.connect fd (Unix.ADDR_UNIX path);
+  Unix.connect fd (Unix.ADDR_UNIX socket_path);
   let ic = Unix.in_channel_of_descr fd in
   let oc = Unix.out_channel_of_descr fd in
   output_string oc (cmd ^ "\n");

@@ -429,7 +429,7 @@ SFILE="$MOUNT/${TS}_sync.txt"
 SKEY="$S3_PREFIX/${TS}_sync.txt"
 
 is_cloud() {
-    "$TSYNC_BIN" ls "$MOUNT" 2>/dev/null | grep "$(basename "$1")" | grep -q "cloud"
+    "$TSYNC_BIN" ls 2>/dev/null | grep "$(basename "$1")" | grep -q "cloud"
 }
 
 info "create and restore file so it is locally available"

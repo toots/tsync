@@ -26,12 +26,6 @@ public struct Config: Codable, Sendable {
         return try JSONDecoder().decode(Config.self, from: data)
     }
 
-    public func save() throws {
-        let url = Self.groupContainerURL.appendingPathComponent("config.json")
-        let data = try JSONEncoder().encode(self)
-        try data.write(to: url)
-    }
-
     /// Full S3 key prefix for a domain, e.g. "tsync/Music Production/"
     public func domainPrefix(_ domainName: String) -> String {
         prefix.hasSuffix("/") ? "\(prefix)\(domainName)/" : "\(prefix)/\(domainName)/"

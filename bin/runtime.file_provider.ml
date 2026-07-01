@@ -1,16 +1,25 @@
+type paths = {
+  cache_root : string;
+  socket_path : string;
+  data_dir : string;
+  config_path : string;
+}
+
 let implemented = true
-let auto_evict = File_provider.auto_evict
-let set_pending_version = File_provider.set_pending_version
 
 let default_paths () =
+  let home = Sys.getenv "HOME" in
   let app_group =
-    Filename.concat (Sys.getenv "HOME")
-      "Library/Group Containers/group.com.toots.tsync"
+    Filename.concat home "Library/Group Containers/group.com.toots.tsync"
   in
-  ( Filename.concat app_group "tsync",
-    Filename.concat app_group "tsync/tsync.sock" )
+  let data_dir = Filename.concat app_group "tsync" in
+  {
+    cache_root = Filename.concat home "Library/Caches/tsync";
+    socket_path = Filename.concat data_dir "tsync.sock";
+    data_dir;
+    config_path = Filename.concat app_group "config.json";
+  }
 
 let pre_start ~mount_point:_ = ()
-type context = File_provider.context
-let make_context = File_provider.make_context
-let mount = File_provider.mount
+
+module Make(C : Conf.S) = File_provider.Make(C)
