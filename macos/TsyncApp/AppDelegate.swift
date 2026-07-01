@@ -29,7 +29,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let domainNames: [String]
         if let data = try? Data(contentsOf: configURL),
            let config = try? JSONDecoder().decode(Config.self, from: data) {
-            domainNames = config.domains.map(\.name)
+            domainNames = config.domains
         } else {
             log.warning("config not found, using default domain")
             domainNames = ["Music Production"]

@@ -10,6 +10,6 @@ type paths = {
 val default_paths : unit -> paths
 val pre_start : mount_point:string -> unit
 
-module Make(C : Conf.S) : sig
+module Make (C : Conf.S) : sig
   val mount : string -> unit
 end

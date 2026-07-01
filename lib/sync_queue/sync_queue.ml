@@ -17,9 +17,9 @@ module type S = sig
   val drain : unit -> unit
 end
 
-module Make(C : Conf.S) : S = struct
-  module Fs = File_store.Make(C)
-  module J = Journal.Make(C)
+module Make (C : Conf.S) : S = struct
+  module Fs = File_store.Make (C)
+  module J = Journal.Make (C)
 
   type put_data = {
     key : string;
@@ -41,12 +41,14 @@ module Make(C : Conf.S) : S = struct
   let queue_cond = Condition.create ()
   let stop = Atomic.make false
   let workers : unit Domain.t list ref = ref []
+
   let upload_fn : (key:string -> cancel:bool Atomic.t -> unit) ref =
     ref (fun ~key:_ ~cancel:_ -> ())
+
   let on_version_fn : (entry_key:string -> unit) ref =
     ref (fun ~entry_key:_ -> ())
-  let on_upload_done_fn : (key:string -> unit) ref =
-    ref (fun ~key:_ -> ())
+
+  let on_upload_done_fn : (key:string -> unit) ref = ref (fun ~key:_ -> ())
 
   let enqueue pd =
     Mutex.lock queue_mtx;
@@ -88,8 +90,7 @@ module Make(C : Conf.S) : S = struct
     else (
       try
         !upload_fn ~key ~cancel:slot.cancel;
-        if Atomic.get slot.cancel then
-          J.delete_local_pending ~entry_key
+        if Atomic.get slot.cancel then J.delete_local_pending ~entry_key
         else begin
           J.delete_local_pending ~entry_key;
           ignore (Fs.write_journal_entry ~entry_key ops);
@@ -97,8 +98,7 @@ module Make(C : Conf.S) : S = struct
           !on_upload_done_fn ~key
         end
       with
-        | S3_client.Cancelled ->
-            J.delete_local_pending ~entry_key
+        | Backend.Cancelled -> J.delete_local_pending ~entry_key
         | Unix.Unix_error (Unix.ENOENT, _, _) ->
             J.delete_local_pending ~entry_key
         | exn -> Log.err "sync_queue put %s: %s" key (Printexc.to_string exn))

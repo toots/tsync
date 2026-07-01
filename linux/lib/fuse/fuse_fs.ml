@@ -1,9 +1,9 @@
-module Make(C : Conf.S) = struct
-  module Sq = Sync_queue.Make(C)
-  module F = File.Make(C)(Sq)
-  module Fs = File_store.Make(C)
-  module H = Hidden_ops.Make(F)
-  module I = Internal_ops.Make(F)
+module Make (C : Conf.S) = struct
+  module Sq = Sync_queue.Make (C)
+  module F = File.Make (C) (Sq)
+  module Fs = File_store.Make (C)
+  module H = Hidden_ops.Make (F)
+  module I = Internal_ops.Make (F)
 
   (* ── Path helpers ─────────────────────────────────────────────────────── *)
 
@@ -108,13 +108,13 @@ module Make(C : Conf.S) = struct
           in
           if is_dir then begin
             let prefix =
-              if String.length key > 0 && key.[String.length key - 1] = '/'
-              then key
+              if String.length key > 0 && key.[String.length key - 1] = '/' then
+                key
               else key ^ "/"
             in
             let files = Fs.list_all_files ~prefix in
             List.iter
-              (fun (e : S3_client.file_entry) ->
+              (fun (e : Backend.file_entry) ->
                 try F.ensure_cached e.key
                 with exn ->
                   Log.err "restore %s: %s" e.key (Printexc.to_string exn))
@@ -135,8 +135,7 @@ module Make(C : Conf.S) = struct
               (fun () ->
                 Unix.sleepf 0.1;
                 ignore
-                  (Sys.command
-                     (Printf.sprintf "fusermount3 -u %s" mount_point)))
+                  (Sys.command (Printf.sprintf "fusermount3 -u %s" mount_point)))
               ()
           in
           "STOP"
@@ -153,7 +152,7 @@ module Make(C : Conf.S) = struct
                 (try Unix.unlink p
                  with Unix.Unix_error (Unix.ENOENT, _, _) -> ());
                 "OK"
-            | "status" -> if !(F.auto_evict) then "on" else "off"
+            | "status" -> if !F.auto_evict then "on" else "off"
             | _ -> "ERROR expected on|off|status")
       | Full_resync ->
           let rec walk dir =
@@ -215,7 +214,8 @@ module Make(C : Conf.S) = struct
         (fun path fi ->
           guard "release" path (fun () -> (dispatch path).release path fi));
       unlink =
-        (fun path -> guard "unlink" path (fun () -> (dispatch path).unlink path));
+        (fun path ->
+          guard "unlink" path (fun () -> (dispatch path).unlink path));
       mkdir =
         (fun path _mode ->
           guard "mkdir" path (fun () ->
@@ -258,8 +258,7 @@ module Make(C : Conf.S) = struct
   (* ── Main mount ───────────────────────────────────────────────────────── *)
 
   let mount mount_point =
-    F.auto_evict :=
-      Sys.file_exists (Filename.concat C.data_dir "auto-evict");
+    F.auto_evict := Sys.file_exists (Filename.concat C.data_dir "auto-evict");
     Sq.start
       ~upload:(fun ~key ~cancel -> F.upload ~cancel key)
       ~on_version:set_pending_version
@@ -268,8 +267,7 @@ module Make(C : Conf.S) = struct
         Ipc.notify_uploaded ~path:C.notify_path key);
     let _ipc_thread =
       Thread.create
-        (fun () ->
-          Ipc.serve ~path:C.socket_path (ipc_handler mount_point))
+        (fun () -> Ipc.serve ~path:C.socket_path (ipc_handler mount_point))
         ()
     in
     let _version_flusher =
@@ -286,8 +284,7 @@ module Make(C : Conf.S) = struct
           done)
         ()
     in
-    Fuse.main ~loop_mode:Fuse.Single_threaded
-      [| "tsync"; mount_point |]
+    Fuse.main ~loop_mode:Fuse.Single_threaded [| "tsync"; mount_point |]
       (make_operations mount_point);
     Sq.drain ()
 end

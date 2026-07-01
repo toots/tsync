@@ -1,5 +1,4 @@
 (library
  (name tsync_conf)
  (wrapped false)
- (modules_without_implementation conf)
- (libraries tsync_s3_client))
+ (libraries tsync_backend))

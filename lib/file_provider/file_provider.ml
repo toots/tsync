@@ -1,7 +1,7 @@
-module Make(C : Conf.S) = struct
-  module Sq = Sync_queue.Make(C)
-  module F = File.Make(C)(Sq)
-  module Fs = File_store.Make(C)
+module Make (C : Conf.S) = struct
+  module Sq = Sync_queue.Make (C)
+  module F = File.Make (C) (Sq)
+  module Fs = File_store.Make (C)
 
   (* ── Key helpers ──────────────────────────────────────────────────────── *)
 
@@ -13,18 +13,18 @@ module Make(C : Conf.S) = struct
     in
     let strip_prefix prefix s =
       let n = String.length prefix in
-      if String.length s >= n && String.sub s 0 n = prefix then
+      if String.length s >= n && String.sub s 0 n = prefix then (
         let rest = String.sub s n (String.length s - n) in
         Some
           (if String.length rest > 0 && rest.[0] = '/' then
              String.sub rest 1 (String.length rest - 1)
-           else rest)
+           else rest))
       else None
     in
     let rel =
       match strip_prefix C.data_dir path with
         | Some r -> r
-        | None ->
+        | None -> (
             let cloud_root =
               Filename.concat (Sys.getenv "HOME") "Library/CloudStorage"
             in
@@ -33,11 +33,10 @@ module Make(C : Conf.S) = struct
                Array.iter
                  (fun d ->
                    if !found = None then
-                     found :=
-                       strip_prefix (Filename.concat cloud_root d) path)
+                     found := strip_prefix (Filename.concat cloud_root d) path)
                  (Sys.readdir cloud_root)
              with _ -> ());
-            (match !found with
+            match !found with
               | Some r -> r
               | None ->
                   if path = "/" then ""
@@ -53,18 +52,13 @@ module Make(C : Conf.S) = struct
     Yojson.Safe.to_string (`Assoc (("ok", `Bool true) :: fields))
 
   let error_json msg =
-    Yojson.Safe.to_string
-      (`Assoc [("ok", `Bool false); ("error", `String msg)])
+    Yojson.Safe.to_string (`Assoc [("ok", `Bool false); ("error", `String msg)])
 
   let get_str obj key =
-    match List.assoc_opt key obj with
-      | Some (`String s) -> s
-      | _ -> ""
+    match List.assoc_opt key obj with Some (`String s) -> s | _ -> ""
 
   let file_etag key =
-    match F.read_manifest key with
-      | Some (`Clean m) -> m.Manifest.h1
-      | _ -> ""
+    match F.read_manifest key with Some (`Clean m) -> m.Manifest.h1 | _ -> ""
 
   (* ── JSON handlers ────────────────────────────────────────────────────── *)
 
@@ -72,9 +66,7 @@ module Make(C : Conf.S) = struct
     match F.stat key with
       | Some st ->
           let is_dirty =
-            match F.read_manifest key with
-              | Some `Dirty -> true
-              | _ -> false
+            match F.read_manifest key with Some `Dirty -> true | _ -> false
           in
           ok_json
             [
@@ -86,7 +78,7 @@ module Make(C : Conf.S) = struct
       | None -> (
           match Fs.head_opt ~key with
             | None -> error_json "not found"
-            | Some (e : S3_client.file_entry) ->
+            | Some (e : Backend.file_entry) ->
                 ok_json
                   [
                     ("size", `Int e.size);
@@ -95,7 +87,7 @@ module Make(C : Conf.S) = struct
                     ("isUploaded", `Bool true);
                   ])
 
-  let file_entry_json (e : S3_client.file_entry) =
+  let file_entry_json (e : Backend.file_entry) =
     `Assoc
       [
         ("key", `String e.key);
@@ -113,11 +105,11 @@ module Make(C : Conf.S) = struct
 
   let handle_list_all prefix =
     let files = Fs.list_all_files ~prefix in
-    ok_json ["files", `List (List.map file_entry_json files)]
+    ok_json [("files", `List (List.map file_entry_json files))]
 
   let handle_ensure_cached key =
     F.ensure_cached key;
-    ok_json ["localPath", `String (F.local_path key)]
+    ok_json [("localPath", `String (F.local_path key))]
 
   let handle_create key =
     F.create key;
@@ -129,7 +121,9 @@ module Make(C : Conf.S) = struct
     Unix.rename staging_path (F.local_path key);
     F.mark_dirty key;
     F.queue_put key;
-    match (try Some (Unix.LargeFile.stat (F.local_path key)) with _ -> None) with
+    match
+      try Some (Unix.LargeFile.stat (F.local_path key)) with _ -> None
+    with
       | Some st ->
           ok_json
             [
@@ -152,7 +146,9 @@ module Make(C : Conf.S) = struct
     else k
 
   let handle_rename src_key dst_key =
-    F.rename ~src:(strip_trailing_slash src_key) ~dst:(strip_trailing_slash dst_key);
+    F.rename
+      ~src:(strip_trailing_slash src_key)
+      ~dst:(strip_trailing_slash dst_key);
     ok_json []
 
   let handle_mkdir key =
@@ -166,24 +162,24 @@ module Make(C : Conf.S) = struct
   let json_handler line =
     match Yojson.Safe.from_string line with
       | exception _ -> error_json "invalid JSON"
-      | `Assoc obj ->
+      | `Assoc obj -> (
           let action = get_str obj "action" in
           let path = get_str obj "path" in
-          (try
-             match action with
-               | "stat" -> handle_stat path
-               | "list_dir" -> handle_list_dir path
-               | "list_all" -> handle_list_all path
-               | "ensure_cached" -> handle_ensure_cached path
-               | "create" -> handle_create path
-               | "write" -> handle_write path (get_str obj "staging")
-               | "evict" -> handle_evict path
-               | "delete" -> handle_delete path
-               | "rename" -> handle_rename (get_str obj "src") path
-               | "mkdir" -> handle_mkdir path
-               | "rmdir" -> handle_rmdir path
-               | _ -> error_json ("unknown action: " ^ action)
-           with exn -> error_json (Printexc.to_string exn))
+          try
+            match action with
+              | "stat" -> handle_stat path
+              | "list_dir" -> handle_list_dir path
+              | "list_all" -> handle_list_all path
+              | "ensure_cached" -> handle_ensure_cached path
+              | "create" -> handle_create path
+              | "write" -> handle_write path (get_str obj "staging")
+              | "evict" -> handle_evict path
+              | "delete" -> handle_delete path
+              | "rename" -> handle_rename (get_str obj "src") path
+              | "mkdir" -> handle_mkdir path
+              | "rmdir" -> handle_rmdir path
+              | _ -> error_json ("unknown action: " ^ action)
+          with exn -> error_json (Printexc.to_string exn))
       | _ -> error_json "expected JSON object"
 
   (* ── CLI IPC handler ──────────────────────────────────────────────────── *)
@@ -198,12 +194,12 @@ module Make(C : Conf.S) = struct
           F.evict key;
           Ipc.notify_evict ~path:C.notify_path key;
           "OK"
-      | Restore arg ->
+      | Restore arg -> (
           let key = path_to_key arg in
-          (try
-             F.ensure_cached key;
-             "OK"
-           with exn -> "ERROR " ^ Printexc.to_string exn)
+          try
+            F.ensure_cached key;
+            "OK"
+          with exn -> "ERROR " ^ Printexc.to_string exn)
       | Auto_evict arg -> (
           match arg with
             | "on" ->
@@ -212,7 +208,7 @@ module Make(C : Conf.S) = struct
             | "off" ->
                 F.auto_evict := false;
                 "OK"
-            | _ -> if !(F.auto_evict) then "on" else "off")
+            | _ -> if !F.auto_evict then "on" else "off")
       | Full_resync ->
           (* ponytail: signal FileProvider extension to re-enumerate *)
           "OK"

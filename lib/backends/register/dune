@@ -1,0 +1,3 @@
+(library
+ (name tsync_backend_register)
+ (wrapped false))

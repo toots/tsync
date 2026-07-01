@@ -43,9 +43,10 @@ module type S = sig
   val auto_evict : bool ref
 end
 
-module Make(C : Conf.S)(Sq : Sync_queue.S) : S = struct
-  module J = Journal.Make(C)
-  module Fs = File_store.Make(C)
+module Make (C : Conf.S) (Sq : Sync_queue.S) : S = struct
+  module J = Journal.Make (C)
+  module Fs = File_store.Make (C)
+  module R = Remote.Make (C)
 
   type t = string
 
@@ -59,7 +60,6 @@ module Make(C : Conf.S)(Sq : Sync_queue.S) : S = struct
   let downloading : (string, unit) Hashtbl.t = Hashtbl.create 8
   let downloading_mutex = Mutex.create ()
   let downloading_cond = Condition.create ()
-
   let () = Local.init ~cache_root:C.cache_root ~domain_name:C.domain_name
 
   (* ── Path helpers ──────────────────────────────────────────────────────── *)
@@ -111,19 +111,13 @@ module Make(C : Conf.S)(Sq : Sync_queue.S) : S = struct
   let upload ?cancel key =
     let lp = local_path key in
     let mtime = (Unix.stat lp).Unix.st_mtime in
-    let state =
-      Remote.upload C.client ~key ~src_path:lp ~mtime ?cancel
-        ~chunk_prefix:C.chunk_prefix ()
-    in
+    let state = R.upload ~key ~src_path:lp ~mtime ?cancel () in
     write_manifest key state
 
   let download key =
     let lp = local_path key in
     Local.ensure_parent_dir lp;
-    match
-      Remote.download C.client ~key ~dst_path:lp
-        ~chunk_prefix:C.chunk_prefix
-    with
+    match R.download ~key ~dst_path:lp with
       | None -> ()
       | Some state -> write_manifest key state
 
@@ -136,7 +130,8 @@ module Make(C : Conf.S)(Sq : Sync_queue.S) : S = struct
     else begin
       Hashtbl.add downloading key ();
       Mutex.unlock downloading_mutex;
-      Fun.protect ~finally:(fun () ->
+      Fun.protect
+        ~finally:(fun () ->
           Mutex.lock downloading_mutex;
           Hashtbl.remove downloading key;
           Condition.broadcast downloading_cond;
@@ -300,9 +295,11 @@ module Make(C : Conf.S)(Sq : Sync_queue.S) : S = struct
         Versioning.trash_key ~s3_key:key ~domain_prefix:C.domain_prefix
           ~trash_prefix:C.trash_prefix
       in
-      S3_client.copy C.client ~src_key:key ~dst_key:trash_key ()
+      List.iter
+        (fun (module B : Backend.S) -> B.copy ~src_key:key ~dst_key:trash_key ())
+        C.backends
     end;
-    S3_client.delete C.client ~key ();
+    List.iter (fun (module B : Backend.S) -> B.delete ~key ()) C.backends;
     clear_local key
 
   (* ── Async upload queue ────────────────────────────────────────────────── *)
@@ -324,9 +321,7 @@ module Make(C : Conf.S)(Sq : Sync_queue.S) : S = struct
   let mkdir key =
     Local.create_dir ~cache_root:C.cache_root ~domain_name:C.domain_name
       ~domain_prefix:C.domain_prefix key;
-    with_journal key
-      [`Mkdir (rel_key key)]
-      (fun () -> Fs.create_directory ~key)
+    with_journal key [`Mkdir (rel_key key)] (fun () -> Fs.create_directory ~key)
 
   let rmdir key =
     Local.delete_dir ~cache_root:C.cache_root ~domain_name:C.domain_name
@@ -355,10 +350,8 @@ module Make(C : Conf.S)(Sq : Sync_queue.S) : S = struct
         `Rename Journal.{ dst = rel_key dst; src = rel_key src; size; is_dir }
       in
       with_journal dst [rename_op] (fun () ->
-          if is_dir then
-            Fs.rename_directory ~src_prefix:src ~dst_prefix:dst
-          else
-            Fs.rename_file ~src_key:src ~dst_key:dst)
+          if is_dir then Fs.rename_directory ~src_prefix:src ~dst_prefix:dst
+          else Fs.rename_file ~src_key:src ~dst_key:dst)
     end
 
   (* ── Open handle tracking and deferred eviction ────────────────────────── *)
@@ -393,9 +386,7 @@ module Make(C : Conf.S)(Sq : Sync_queue.S) : S = struct
 
   let deferred_evict key =
     Mutex.lock open_count_mutex;
-    let count =
-      Option.value ~default:0 (Hashtbl.find_opt open_count key)
-    in
+    let count = Option.value ~default:0 (Hashtbl.find_opt open_count key) in
     Mutex.unlock open_count_mutex;
     if count = 0 then do_evict key
     else begin

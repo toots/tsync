@@ -38,4 +38,4 @@ let pre_start ~mount_point =
        (Printf.sprintf "fusermount3 -u %s 2>/dev/null"
           (Filename.quote mount_point)))
 
-module Make(C : Conf.S) = Fuse_fs.Make(C)
+module Make (C : Conf.S) = Fuse_fs.Make (C)

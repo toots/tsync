@@ -33,7 +33,7 @@ fi
 BUCKET=$(_cfg '.bucket')
 REGION=$(_cfg '.awsRegion')
 PREFIX=$(_cfg '.prefix')
-DOMAIN=$(_cfg '.domains[0].name')
+DOMAIN=$(_cfg '.domains[0]')
 S3_PREFIX="$PREFIX/$DOMAIN"
 MOUNT="$HOME/tsync/$DOMAIN"
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"

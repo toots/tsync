@@ -17,4 +17,4 @@ module type S = sig
   val drain : unit -> unit
 end
 
-module Make(C : Conf.S) : S
+module Make (C : Conf.S) : S

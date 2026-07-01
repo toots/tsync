@@ -30,7 +30,8 @@ let get_client_uuid ~share_dir =
         (Printf.sprintf "%02x" (Char.code (Bytes.get buf i)))
     done;
     let uuid = Buffer.contents hex in
-    (try Unix.mkdir share_dir 0o700 with Unix.Unix_error (Unix.EEXIST, _, _) -> ());
+    (try Unix.mkdir share_dir 0o700
+     with Unix.Unix_error (Unix.EEXIST, _, _) -> ());
     let oc = open_out uuid_file in
     output_string oc uuid;
     close_out oc;
@@ -148,11 +149,16 @@ let local_pending_entries ~share_dir ~uuid =
           Some (name, decode (Bytes.to_string s))
         with _ -> None)
 
-module Make(C : Conf.S) = struct
+module Make (C : Conf.S) = struct
   let share_dir = C.data_dir
   let client_uuid () = get_client_uuid ~share_dir
   let entry_key () = make_entry_key ~share_dir ()
-  let write_local_pending ~entry_key:ek ops = write_local_pending ~share_dir ~entry_key:ek ops
-  let delete_local_pending ~entry_key:ek = delete_local_pending ~share_dir ~entry_key:ek
+
+  let write_local_pending ~entry_key:ek ops =
+    write_local_pending ~share_dir ~entry_key:ek ops
+
+  let delete_local_pending ~entry_key:ek =
+    delete_local_pending ~share_dir ~entry_key:ek
+
   let local_pending_entries ~uuid = local_pending_entries ~share_dir ~uuid
 end

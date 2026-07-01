@@ -9,6 +9,6 @@ let implemented = false
 let default_paths () = failwith "no runtime available"
 let pre_start ~mount_point:_ = ()
 
-module Make(C : Conf.S) = struct
+module Make (C : Conf.S) = struct
   let mount _ = failwith "no runtime available"
 end

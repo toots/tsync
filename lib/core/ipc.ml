@@ -47,16 +47,16 @@ let parse_command line =
     | c -> failwith ("ERROR unknown command: " ^ c)
 
 let notify ~path msg =
-  (try
-     let fd = Unix.socket Unix.PF_UNIX Unix.SOCK_STREAM 0 in
-     (try
-        Unix.connect fd (Unix.ADDR_UNIX path);
-        let oc = Unix.out_channel_of_descr fd in
-        output_string oc (msg ^ "\n");
-        flush oc
-      with _ -> ());
-     Unix.close fd
-   with _ -> ())
+  try
+    let fd = Unix.socket Unix.PF_UNIX Unix.SOCK_STREAM 0 in
+    (try
+       Unix.connect fd (Unix.ADDR_UNIX path);
+       let oc = Unix.out_channel_of_descr fd in
+       output_string oc (msg ^ "\n");
+       flush oc
+     with _ -> ());
+    Unix.close fd
+  with _ -> ()
 
 let notify_evict ~path key = notify ~path ("EVICT " ^ key)
 let notify_uploaded ~path key = notify ~path ("UPLOADED " ^ key)

@@ -1,4 +1,9 @@
-type rename_op = { dst : string; src : string; size : int64 option; is_dir : bool }
+type rename_op = {
+  dst : string;
+  src : string;
+  size : int64 option;
+  is_dir : bool;
+}
 
 type op =
   [ `Delete of string
@@ -12,7 +17,7 @@ val client_uuid_of_filename : string -> string
 val encode : op list -> string
 val decode : string -> op list
 
-module Make(C : Conf.S) : sig
+module Make (C : Conf.S) : sig
   val client_uuid : unit -> string
   val entry_key : unit -> string
   val write_local_pending : entry_key:string -> op list -> unit

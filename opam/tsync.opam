@@ -10,15 +10,14 @@ depends: [
   "ocaml" {>= "5.5.0"}
   "dune" {>= "3.23"}
   "yojson"
-  "fuse3"
-  "aws-s3-lwt"
+  "syslog"
   "lwt"
   "lwt_ppx"
   "lwt_ssl"
-  "syslog"
   "cmdliner"
   "odoc" {with-doc}
 ]
+depopts: ["tsync-s3" "fuse3"]
 build: [
   ["dune" "subst"] {dev}
   [

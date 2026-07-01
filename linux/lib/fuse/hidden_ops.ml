@@ -1,4 +1,4 @@
-module Make(F : File.S) = struct
+module Make (F : File.S) = struct
   let make ~fuse_to_key : Path_ops.t =
     let local_path path = F.local_path (fuse_to_key path) in
     {
@@ -12,7 +12,8 @@ module Make(F : File.S) = struct
       read =
         (fun path buf offset _fi -> Local_io.read (local_path path) buf ~offset);
       write =
-        (fun path buf offset _fi -> Local_io.write (local_path path) buf ~offset);
+        (fun path buf offset _fi ->
+          Local_io.write (local_path path) buf ~offset);
       release = (fun _path _fi -> ());
       unlink =
         (fun path ->

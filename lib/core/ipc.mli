@@ -13,7 +13,8 @@ type command =
   | Auto_evict of string
   | Full_resync
 
-(** Parse a CLI text line into a command. Raises [Failure] on unknown commands. *)
+(** Parse a CLI text line into a command. Raises [Failure] on unknown commands.
+*)
 val parse_command : string -> command
 
 val notify_evict : path:string -> string -> unit

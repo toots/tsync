@@ -1,0 +1,11 @@
+(library
+ (name tsync_backend)
+ (wrapped false)
+ (libraries
+  tsync_backend_register
+  tsync_local_backend
+  (select
+   s3_link.ml
+   from
+   (tsync_s3_backend -> s3_link.enabled.ml)
+   (-> s3_link.disabled.ml))))

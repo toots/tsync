@@ -43,4 +43,4 @@ module type S = sig
   val auto_evict : bool ref
 end
 
-module Make(C : Conf.S)(Sq : Sync_queue.S) : S
+module Make (C : Conf.S) (Sq : Sync_queue.S) : S

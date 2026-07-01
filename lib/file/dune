@@ -4,7 +4,7 @@
  (libraries
   tsync_conf
   tsync_log
-  tsync_s3_client
+  tsync_backend
   tsync_xxhash
   tsync_queue
   tsync_local_io

@@ -2,15 +2,17 @@
  (name tsync)
  (modules tsync)
  (public_name tsync)
+ (package tsync)
  (libraries
   tsync_core
   tsync_conf
+  tsync_backend
   tsync_queue
   tsync_file
-  tsync_s3_client
   tsync_log
   tsync_runtime
   cmdliner
+  yojson
   threads.posix
   unix))
 

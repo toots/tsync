@@ -26,19 +26,81 @@ Both platforms share the same S3 layout, chunk format, journal format, and confi
 
 ### Config
 
-Config path and runtime paths are platform-specific — see each platform's **Paths** section below. The `TSYNC_CONFIG_JSON` environment variable overrides file loading entirely on any platform.
+Config path is platform-specific — see each platform's **Paths** section below. Run `tsync configure` for interactive setup. The `TSYNC_CONFIG_JSON` environment variable overrides file loading entirely.
 
 ```json
 {
-  "bucket": "my-bucket",
-  "prefix": "tsync/Music Production",
-  "awsRegion": "us-west-1",
   "versioning": true,
-  "accessKeyId": "...",
-  "secretAccessKey": "...",
-  "domainName": "Music Production"
+  "domains": [
+    {
+      "name": "media",
+      "prefix": "tsync",
+      "backends": [
+        {
+          "type": "s3",
+          "bucket": "my-bucket",
+          "region": "us-east-1",
+          "accessKeyId": "AKIA...",
+          "secretAccessKey": "..."
+        },
+        {
+          "type": "local",
+          "path": "/mnt/backup/tsync"
+        }
+      ]
+    },
+    {
+      "name": "photos",
+      "prefix": "tsync",
+      "backends": [
+        {
+          "type": "s3",
+          "bucket": "my-bucket",
+          "region": "us-east-1",
+          "accessKeyId": "AKIA...",
+          "secretAccessKey": "..."
+        }
+      ]
+    }
+  ]
 }
 ```
+
+**Top-level fields:**
+
+| Field | Type | Description |
+|---|---|---|
+| `versioning` | bool | Copy deleted files to `.trash/` before removing |
+| `domains` | domain[] | One or more domain objects |
+
+**Domain fields:**
+
+| Field | Type | Description |
+|---|---|---|
+| `name` | string | Domain name — used as the mount directory name and S3 namespace segment |
+| `prefix` | string | Key prefix shared by all backends for this domain (no leading/trailing slash) |
+| `backends` | backend[] | One or more backends; writes fan out to all, reads use the first |
+
+**Backend fields (`type: "s3"`):**
+
+| Field | Type | Description |
+|---|---|---|
+| `type` | `"s3"` | Backend type |
+| `bucket` | string | S3 bucket name |
+| `region` | string | AWS region (e.g. `us-east-1`) |
+| `accessKeyId` | string | AWS access key ID |
+| `secretAccessKey` | string | AWS secret access key |
+
+**Backend fields (`type: "local"`):**
+
+| Field | Type | Description |
+|---|---|---|
+| `type` | `"local"` | Backend type |
+| `path` | string | Root directory for this backend; keys are stored as paths under this root |
+
+Each domain is an independent namespace: `<prefix>/<domain>/`. When the config has exactly one domain, `--domain` can be omitted from CLI commands; with multiple domains it is required.
+
+When a domain has multiple backends, all writes (uploads, deletes, copies) fan out to every backend. Reads use the first backend (primary). This supports mirroring a domain to e.g. S3 and a local NAS simultaneously.
 
 ### Chunked uploads
 
@@ -136,6 +198,8 @@ The same `tsync` binary is used on both platforms. `bin/tsync.ml` reads runtime 
 | `runtime.noop.ml` | Neither (build-time stub) |
 
 ```
+tsync configure
+
 tsync start   [--mount <path>] [--domain <name>]
 tsync stop
 tsync status
@@ -149,6 +213,8 @@ tsync auto-evict [on|off|status]
 tsync history <path>
 tsync purge   <path>
 ```
+
+`tsync configure` writes the config file interactively. It prompts for versioning, then loops over domains (name, prefix, backends) — each domain supports multiple backends. On macOS it writes to the group container so both the daemon and extension can read it; on Linux it writes to the XDG config dir with mode `0600`.
 
 ### IPC protocol
 
@@ -198,7 +264,7 @@ The Linux backend mounts a FUSE filesystem at `~/tsync/<domain>/` using `ocamlfu
 
 ```
 tsync start
-  ├── Ipc.serve          Unix socket at ~/.local/share/tsync/tsync/tsync.sock
+  ├── Ipc.serve          Unix socket at ~/.local/share/tsync/tsync.sock
   ├── version_flusher    Thread: drains pending_version_key → S3 every ~2 s
   └── Fuse_fs.mount      ocamlfuse main loop (single-threaded)
        └── FUSE ops → File.* → Sync_queue → S3
@@ -341,7 +407,7 @@ OCaml daemon (tsync start, LaunchAgent via deploy-daemon.sh)
 
 The group container (`~/Library/Group Containers/group.com.toots.tsync/`) is the only location accessible to both the sandboxed extension and the daemon. Both read config from there; the extension routes all S3 operations through the daemon and never needs `accessKeyId`/`secretAccessKey` directly.
 
-The extension only needs the non-credential fields (`bucket`, `prefix`, `awsRegion`, `versioning`, `domainName`) — all S3 operations go through the daemon, which reads the full config including credentials.
+The extension only needs the non-credential fields (`bucket`, `prefix`, `awsRegion`, `versioning`, `domains`) — all S3 operations go through the daemon, which reads the full config including credentials.
 
 ### `isUploaded` and upload state
 
@@ -373,7 +439,7 @@ cd macos
 ./test_lifecycle.sh 1 3          # run only cases 1 and 3
 ```
 
-Reads config from the group container. Requires `XDG_DATA_HOME` (set automatically by the script) to align CLI commands with the running daemon.
+Reads config from the group container.
 
 ---
 

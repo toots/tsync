@@ -35,14 +35,10 @@ GROUP_CONTAINER="$HOME/Library/Group Containers/group.com.toots.tsync"
 CONFIG_JSON="$GROUP_CONTAINER/config.json"
 [[ -f "$CONFIG_JSON" ]] || { echo "config not found: $CONFIG_JSON"; exit 1; }
 
-# Align Ipc.socket_path() and Journal.share_dir() with the group container so
-# CLI subcommands (evict, restore, sync, stop) reach the running daemon.
-export XDG_DATA_HOME="$GROUP_CONTAINER"
-
 BUCKET=$(jq -r '.bucket' "$CONFIG_JSON")
 REGION=$(jq -r '.awsRegion' "$CONFIG_JSON")
 PREFIX=$(jq -r '.prefix' "$CONFIG_JSON")
-DOMAIN=$(jq -r '.domains[0].name' "$CONFIG_JSON")
+DOMAIN=$(jq -r '.domains[0]' "$CONFIG_JSON")
 S3_PREFIX="$PREFIX/$DOMAIN"
 DOMAIN_SLUG="${DOMAIN// /}"
 MOUNT=$(find "$HOME/Library/CloudStorage" -maxdepth 1 -name "*-${DOMAIN_SLUG}" -type d 2>/dev/null | head -1)

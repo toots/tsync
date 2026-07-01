@@ -10,7 +10,8 @@ let strip_prefix ~domain_prefix key =
   else key
 
 let cache_path ~cache_root ~domain_name ~domain_prefix key =
-  Filename.concat (data_dir ~cache_root domain_name)
+  Filename.concat
+    (data_dir ~cache_root domain_name)
     (strip_prefix ~domain_prefix key)
 
 let rec mkdir_p path =
@@ -22,7 +23,8 @@ let rec mkdir_p path =
 let ensure_parent_dir path = mkdir_p (Filename.dirname path)
 
 let manifest_path ~cache_root ~domain_name ~domain_prefix key =
-  Filename.concat (manifest_dir ~cache_root domain_name)
+  Filename.concat
+    (manifest_dir ~cache_root domain_name)
     (strip_prefix ~domain_prefix key)
 
 let create_dir ~cache_root ~domain_name ~domain_prefix key =

@@ -1,19 +1,29 @@
-type t = {
-  bucket : string;
+type backend_config = {
+  backend_type : string;
+  fields : (string * string) list;
+}
+
+type domain = {
+  name : string;
   prefix : string;
-  aws_region : string;
+  backends : backend_config list;
+}
+
+type t = {
   versioning : bool;
-  access_key_id : string;
-  secret_access_key : string;
-  domain_name : string;
+  domains : domain list;
 }
 
 (** Load configuration from [path], or from the JSON string in
     [$TSYNC_CONFIG_JSON] if set (overrides [path]). *)
 val load : string -> t
 
-val domain_prefix : t -> string -> string
-val chunk_prefix : t -> string
-val trash_prefix : t -> string -> string
-val journal_prefix : t -> string -> string
-val version_key : t -> string -> string
+(** Return the domain matching [domain], or the unique domain when omitted.
+    Raises [Failure] when multiple domains are configured and none is named. *)
+val pick_domain : ?domain:string -> t -> domain
+
+val domain_prefix : domain -> string
+val chunk_prefix : domain -> string
+val trash_prefix : domain -> string
+val journal_prefix : domain -> string
+val version_key : domain -> string

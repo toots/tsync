@@ -1,16 +1,11 @@
 import Foundation
 
-public struct DomainConfig: Codable, Sendable {
-    public let name: String
-    public init(name: String) { self.name = name }
-}
-
 public struct Config: Codable, Sendable {
     public let bucket: String
     public let prefix: String
     public let awsRegion: String
     public let versioning: Bool
-    public let domains: [DomainConfig]
+    public let domains: [String]
 
     public static let groupID = "group.com.toots.tsync"
 
@@ -51,7 +46,7 @@ public struct Config: Codable, Sendable {
         prefix.hasSuffix("/") ? "\(prefix).version/\(domainName)" : "\(prefix)/.version/\(domainName)"
     }
 
-    public init(bucket: String, prefix: String, awsRegion: String, versioning: Bool, domains: [DomainConfig]) {
+    public init(bucket: String, prefix: String, awsRegion: String, versioning: Bool, domains: [String]) {
         self.bucket = bucket
         self.prefix = prefix
         self.awsRegion = awsRegion

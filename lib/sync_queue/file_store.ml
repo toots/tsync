@@ -1,57 +1,82 @@
-module Make(C : Conf.S) = struct
-  module J = Journal.Make(C)
+module Make (C : Conf.S) = struct
+  module J = Journal.Make (C)
+
+  let primary () =
+    match C.backends with
+      | [] -> failwith "no backends configured"
+      | b :: _ -> b
+
+  let put_all ?content_type ~key ~data () =
+    List.iter
+      (fun (module B : Backend.S) -> B.put ?content_type ~key ~data ())
+      C.backends
 
   let delete_dir ~prefix =
-    let all = S3_client.list_all C.client ~prefix () in
-    S3_client.delete_multi C.client (List.map (fun e -> e.S3_client.key) all)
+    let (module Primary : Backend.S) = primary () in
+    let keys = List.map (fun e -> e.Backend.key) (Primary.list_all ~prefix ()) in
+    List.iter (fun (module B : Backend.S) -> B.delete_multi keys) C.backends
 
   let create_directory ~key =
-    S3_client.put C.client ~content_type:"application/x-directory" ~key ~data:"" ()
+    put_all ~content_type:"application/x-directory" ~key ~data:"" ()
 
   let rename_file ~src_key ~dst_key =
-    S3_client.copy C.client ~src_key ~dst_key ();
-    S3_client.delete C.client ~key:src_key ()
+    List.iter
+      (fun (module B : Backend.S) ->
+        B.copy ~src_key ~dst_key ();
+        B.delete ~key:src_key ())
+      C.backends
 
   let rename_directory ~src_prefix ~dst_prefix =
-    let all = S3_client.list_all C.client ~prefix:src_prefix () in
+    let (module Primary : Backend.S) = primary () in
+    let all = Primary.list_all ~prefix:src_prefix () in
     let src_len = String.length src_prefix in
     List.iter
-      (fun e ->
+      (fun (e : Backend.file_entry) ->
         let suffix =
-          String.sub e.S3_client.key src_len
-            (String.length e.S3_client.key - src_len)
+          String.sub e.key src_len (String.length e.key - src_len)
         in
-        S3_client.copy C.client ~src_key:e.S3_client.key
-          ~dst_key:(dst_prefix ^ suffix) ())
+        let dst_key = dst_prefix ^ suffix in
+        List.iter
+          (fun (module B : Backend.S) -> B.copy ~src_key:e.key ~dst_key ())
+          C.backends)
       all;
-    S3_client.delete_multi C.client (List.map (fun e -> e.S3_client.key) all)
+    let keys = List.map (fun e -> e.Backend.key) all in
+    List.iter (fun (module B : Backend.S) -> B.delete_multi keys) C.backends
 
-  let list_directory ~prefix = S3_client.list_directory C.client ~prefix ()
-  let list_all_files ~prefix = S3_client.list_all C.client ~prefix ()
-  let head_opt ~key = S3_client.head_opt C.client ~key ()
+  let list_directory ~prefix =
+    let (module Primary : Backend.S) = primary () in
+    Primary.list_directory ~prefix ()
+
+  let list_all_files ~prefix =
+    let (module Primary : Backend.S) = primary () in
+    Primary.list_all ~prefix ()
+
+  let head_opt ~key =
+    let (module Primary : Backend.S) = primary () in
+    Primary.head_opt ~key ()
 
   let write_journal_entry ?entry_key ops =
     let ek = match entry_key with Some k -> k | None -> J.entry_key () in
     let key = C.journal_prefix ^ ek in
-    S3_client.put C.client ~content_type:"application/x-ndjson" ~key
-      ~data:(Journal.encode ops) ();
+    put_all ~content_type:"application/x-ndjson" ~key ~data:(Journal.encode ops) ();
     ek
 
   let bump_version entry_key =
-    S3_client.put C.client ~key:C.version_key ~data:entry_key ()
+    put_all ~key:C.version_key ~data:entry_key ()
 
   let fetch_version () =
-    match S3_client.head_opt C.client ~key:C.version_key () with
+    let (module Primary : Backend.S) = primary () in
+    match Primary.head_opt ~key:C.version_key () with
       | None -> None
-      | Some _ ->
-          Some (String.trim (S3_client.get C.client ~key:C.version_key ()))
+      | Some _ -> Some (String.trim (Primary.get ~key:C.version_key ()))
 
   let list_journal_keys ?start_after () =
-    let all = S3_client.list_all C.client ~prefix:C.journal_prefix () in
+    let (module Primary : Backend.S) = primary () in
+    let all = Primary.list_all ~prefix:C.journal_prefix () in
     let prefix_len = String.length C.journal_prefix in
     let sa_base = Option.map Filename.basename start_after in
     List.filter_map
-      (fun (e : S3_client.file_entry) ->
+      (fun (e : Backend.file_entry) ->
         let basename =
           if String.length e.key > prefix_len then
             String.sub e.key prefix_len (String.length e.key - prefix_len)
@@ -67,6 +92,7 @@ module Make(C : Conf.S) = struct
       all
 
   let get_journal_entry entry_key =
+    let (module Primary : Backend.S) = primary () in
     let key = C.journal_prefix ^ entry_key in
-    try Some (Journal.decode (S3_client.get C.client ~key ())) with _ -> None
+    try Some (Journal.decode (Primary.get ~key ())) with _ -> None
 end

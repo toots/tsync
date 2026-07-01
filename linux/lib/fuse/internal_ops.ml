@@ -1,4 +1,4 @@
-module Make(F : File.S) = struct
+module Make (F : File.S) = struct
   let make ~fuse_to_key : Path_ops.t =
     let file path = fuse_to_key path in
     {
@@ -25,9 +25,7 @@ module Make(F : File.S) = struct
           else if truncating then begin
             ignore (F.cancel_upload f);
             let fd =
-              Unix.openfile (F.local_path f)
-                [Unix.O_WRONLY; Unix.O_TRUNC]
-                0o644
+              Unix.openfile (F.local_path f) [Unix.O_WRONLY; Unix.O_TRUNC] 0o644
             in
             Unix.close fd;
             F.mark_dirty f
@@ -45,9 +43,7 @@ module Make(F : File.S) = struct
       write = (fun path buf offset _fi -> F.write (file path) buf ~offset);
       release = (fun path _fi -> F.close_file (file path));
       unlink = (fun path -> F.delete (file path));
-      rename =
-        (fun src dst _flags ->
-          F.rename ~src:(file src) ~dst:(file dst));
+      rename = (fun src dst _flags -> F.rename ~src:(file src) ~dst:(file dst));
       truncate = (fun path size _fi -> F.truncate (file path) size);
     }
 end

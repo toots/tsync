@@ -22,4 +22,4 @@ let default_paths () =
 
 let pre_start ~mount_point:_ = ()
 
-module Make(C : Conf.S) = File_provider.Make(C)
+module Make (C : Conf.S) = File_provider.Make (C)
