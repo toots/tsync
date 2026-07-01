@@ -22,7 +22,6 @@ end
 type factory = (string -> string option) -> (module S)
 
 let registry : (string, factory) Hashtbl.t = Hashtbl.create 4
-
 let register name (f : factory) = Hashtbl.replace registry name f
 
 let make ~backend_type ~get_field =

@@ -1,18 +1,6 @@
-type backend_config = {
-  backend_type : string;
-  fields : (string * string) list;
-}
-
-type domain = {
-  name : string;
-  prefix : string;
-  backends : backend_config list;
-}
-
-type t = {
-  versioning : bool;
-  domains : domain list;
-}
+type backend_config = { backend_type : string; fields : (string * string) list }
+type domain = { name : string; prefix : string; backends : backend_config list }
+type t = { versioning : bool; domains : domain list }
 
 let parse_backend json =
   let open Yojson.Basic.Util in
@@ -20,9 +8,8 @@ let parse_backend json =
   let fields =
     to_assoc json
     |> List.filter_map (fun (k, v) ->
-           if k = "type" then None
-           else
-             match v with `String s -> Some (k, s) | _ -> None)
+        if k = "type" then None
+        else (match v with `String s -> Some (k, s) | _ -> None))
   in
   { backend_type; fields }
 
@@ -56,13 +43,12 @@ let pick_domain ?domain cfg =
         match cfg.domains with
           | [d] -> d
           | [] -> failwith "no domains configured"
-          | _ -> failwith "multiple domains configured — use --domain to select")
+          | _ -> failwith "multiple domains configured — use --domain to select"
+        )
 
 let prefix_slash d =
   let p = d.prefix in
-  if p = "" then ""
-  else if p.[String.length p - 1] = '/' then p
-  else p ^ "/"
+  if p = "" then "" else if p.[String.length p - 1] = '/' then p else p ^ "/"
 
 let domain_prefix d = prefix_slash d ^ d.name ^ "/"
 let chunk_prefix d = prefix_slash d ^ ".chunks/"

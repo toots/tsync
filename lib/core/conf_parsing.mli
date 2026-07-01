@@ -1,18 +1,6 @@
-type backend_config = {
-  backend_type : string;
-  fields : (string * string) list;
-}
-
-type domain = {
-  name : string;
-  prefix : string;
-  backends : backend_config list;
-}
-
-type t = {
-  versioning : bool;
-  domains : domain list;
-}
+type backend_config = { backend_type : string; fields : (string * string) list }
+type domain = { name : string; prefix : string; backends : backend_config list }
+type t = { versioning : bool; domains : domain list }
 
 (** Load configuration from [path], or from the JSON string in
     [$TSYNC_CONFIG_JSON] if set (overrides [path]). *)

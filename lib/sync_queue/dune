@@ -1,4 +1,11 @@
 (library
  (name tsync_queue)
  (wrapped false)
- (libraries tsync_conf tsync_backend tsync_log tsync_xxhash yojson unix threads.posix))
+ (libraries
+  tsync_conf
+  tsync_backend
+  tsync_log
+  tsync_xxhash
+  yojson
+  unix
+  threads.posix))

@@ -296,7 +296,8 @@ module Make (C : Conf.S) (Sq : Sync_queue.S) : S = struct
           ~trash_prefix:C.trash_prefix
       in
       List.iter
-        (fun (module B : Backend.S) -> B.copy ~src_key:key ~dst_key:trash_key ())
+        (fun (module B : Backend.S) ->
+          B.copy ~src_key:key ~dst_key:trash_key ())
         C.backends
     end;
     List.iter (fun (module B : Backend.S) -> B.delete ~key ()) C.backends;

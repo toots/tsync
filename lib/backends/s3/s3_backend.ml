@@ -81,8 +81,8 @@ let head_opt t ~key () =
 
 let delete t ~key () =
   lwt_run (fun () ->
-      S3.delete ~credentials:t.credentials ~endpoint:t.endpoint
-        ~bucket:t.bucket ~key ()
+      S3.delete ~credentials:t.credentials ~endpoint:t.endpoint ~bucket:t.bucket
+        ~key ()
       >|= function
       | Ok _ | Error S3.Not_found -> ()
       | Error e -> raise (s3_eio (string_of_error e)))
@@ -98,8 +98,8 @@ let delete_multi t keys =
         let objects = List.map (fun key -> { key; version_id = None }) here in
         ignore
           (lwt_run (fun () ->
-               S3.delete_multi ~credentials:t.credentials
-                 ~endpoint:t.endpoint ~bucket:t.bucket ~objects ()
+               S3.delete_multi ~credentials:t.credentials ~endpoint:t.endpoint
+                 ~bucket:t.bucket ~objects ()
                >|= unwrap "delete_multi"));
         go rest
   in
@@ -153,7 +153,8 @@ let list_directory t ~prefix () =
   let subdirs = Hashtbl.fold (fun k () acc -> k :: acc) dirs [] in
   (List.rev !files, List.sort String.compare subdirs)
 
-let make ~bucket ~region ~access_key_id ~secret_access_key : (module Backend.S) =
+let make ~bucket ~region ~access_key_id ~secret_access_key : (module Backend.S)
+    =
   let t = make_t ~bucket ~region ~access_key_id ~secret_access_key in
   (module struct
     let put ?content_type ~key ~data () = put t ?content_type ~key ~data ()

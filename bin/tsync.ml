@@ -16,8 +16,8 @@ let rec mkdir_p path =
 let runtime_paths = Runtime.default_paths ()
 
 let make_backend (bc : Conf_parsing.backend_config) =
-  Backend.make ~backend_type:bc.backend_type
-    ~get_field:(fun k -> List.assoc_opt k bc.fields)
+  Backend.make ~backend_type:bc.backend_type ~get_field:(fun k ->
+      List.assoc_opt k bc.fields)
 
 let make_conf ?domain cfg : (module Conf.S) =
   let d = Conf_parsing.pick_domain ?domain cfg in
@@ -503,11 +503,7 @@ let configure_cmd =
     let config_path = runtime_paths.Runtime.config_path in
     mkdir_p (Filename.dirname config_path);
     let json =
-      `Assoc
-        [
-          ("versioning", `Bool versioning);
-          ("domains", `List !domains);
-        ]
+      `Assoc [("versioning", `Bool versioning); ("domains", `List !domains)]
     in
     let oc = open_out config_path in
     output_string oc (Yojson.Basic.pretty_to_string json);

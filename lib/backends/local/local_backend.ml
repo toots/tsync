@@ -1,8 +1,7 @@
 let rec mkdir_p path =
   if not (Sys.file_exists path) then begin
     mkdir_p (Filename.dirname path);
-    try Unix.mkdir path 0o755
-    with Unix.Unix_error (Unix.EEXIST, _, _) -> ()
+    try Unix.mkdir path 0o755 with Unix.Unix_error (Unix.EEXIST, _, _) -> ()
   end
 
 let ensure_parent path = mkdir_p (Filename.dirname path)
@@ -24,9 +23,7 @@ let read_file path =
   Bytes.to_string s
 
 let make ~root : (module Backend.S) =
-  let resolve key =
-    if key = "" then root else Filename.concat root key
-  in
+  let resolve key = if key = "" then root else Filename.concat root key in
   (module struct
     let put ?content_type:_ ~key ~data () = write_file (resolve key) data
 
@@ -50,8 +47,8 @@ let make ~root : (module Backend.S) =
         | exception Unix.Unix_error (Unix.ENOENT, _, _) -> None
 
     let delete ~key () =
-      (try Unix.unlink (resolve key)
-       with Unix.Unix_error (Unix.ENOENT, _, _) -> ())
+      try Unix.unlink (resolve key)
+      with Unix.Unix_error (Unix.ENOENT, _, _) -> ()
 
     let delete_multi keys = List.iter (fun key -> delete ~key ()) keys
 
@@ -89,8 +86,8 @@ let make ~root : (module Backend.S) =
                with End_of_file -> ());
               Unix.closedir dir
           | exception Unix.Unix_error (Unix.ENOENT, _, _) -> ()
-          | exception Unix.Unix_error (Unix.ENOTDIR, _, _) ->
-              (match Unix.stat base with
+          | exception Unix.Unix_error (Unix.ENOTDIR, _, _) -> (
+              match Unix.stat base with
                 | { Unix.st_size; st_mtime; _ } ->
                     entries :=
                       Backend.

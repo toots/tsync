@@ -3,14 +3,14 @@ exception Cancelled = Backend.Cancelled
 let read_chunk path offset len =
   let fd = Unix.openfile path [Unix.O_RDONLY] 0 in
   let buf = Bytes.create len in
-  (try
-     ignore (Unix.lseek fd offset Unix.SEEK_SET);
-     let n = Unix.read fd buf 0 len in
-     Unix.close fd;
-     Bytes.sub_string buf 0 n
-   with exn ->
-     Unix.close fd;
-     raise exn)
+  try
+    ignore (Unix.lseek fd offset Unix.SEEK_SET);
+    let n = Unix.read fd buf 0 len in
+    Unix.close fd;
+    Bytes.sub_string buf 0 n
+  with exn ->
+    Unix.close fd;
+    raise exn
 
 module Make (C : Conf.S) = struct
   let primary () =
@@ -91,8 +91,7 @@ module Make (C : Conf.S) = struct
                     while !written < len do
                       written :=
                         !written
-                        + Unix.write_substring fd data !written
-                            (len - !written)
+                        + Unix.write_substring fd data !written (len - !written)
                     done)
                   manifest.Manifest.chunks;
                 Unix.close fd;

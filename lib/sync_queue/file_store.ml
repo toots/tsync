@@ -13,7 +13,9 @@ module Make (C : Conf.S) = struct
 
   let delete_dir ~prefix =
     let (module Primary : Backend.S) = primary () in
-    let keys = List.map (fun e -> e.Backend.key) (Primary.list_all ~prefix ()) in
+    let keys =
+      List.map (fun e -> e.Backend.key) (Primary.list_all ~prefix ())
+    in
     List.iter (fun (module B : Backend.S) -> B.delete_multi keys) C.backends
 
   let create_directory ~key =
@@ -32,9 +34,7 @@ module Make (C : Conf.S) = struct
     let src_len = String.length src_prefix in
     List.iter
       (fun (e : Backend.file_entry) ->
-        let suffix =
-          String.sub e.key src_len (String.length e.key - src_len)
-        in
+        let suffix = String.sub e.key src_len (String.length e.key - src_len) in
         let dst_key = dst_prefix ^ suffix in
         List.iter
           (fun (module B : Backend.S) -> B.copy ~src_key:e.key ~dst_key ())
@@ -58,11 +58,11 @@ module Make (C : Conf.S) = struct
   let write_journal_entry ?entry_key ops =
     let ek = match entry_key with Some k -> k | None -> J.entry_key () in
     let key = C.journal_prefix ^ ek in
-    put_all ~content_type:"application/x-ndjson" ~key ~data:(Journal.encode ops) ();
+    put_all ~content_type:"application/x-ndjson" ~key ~data:(Journal.encode ops)
+      ();
     ek
 
-  let bump_version entry_key =
-    put_all ~key:C.version_key ~data:entry_key ()
+  let bump_version entry_key = put_all ~key:C.version_key ~data:entry_key ()
 
   let fetch_version () =
     let (module Primary : Backend.S) = primary () in
