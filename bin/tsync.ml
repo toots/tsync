@@ -6,7 +6,8 @@ let runtime_implementation =
   match Runtime.implementation with
     | Some s -> s
     | None ->
-        Printf.eprintf "No runtime implementation available at compile-time!\n%!";
+        Printf.eprintf
+          "No runtime implementation available at compile-time!\n%!";
         exit 1
 
 let rec mkdir_p path =
@@ -548,7 +549,8 @@ let build_config_cmd =
       runtime_implementation S3_link.s3_backend_enabled Log.implementation
   in
   Cmd.v
-    (Cmd.info "build-config" ~doc:"Show optional features compiled into this binary")
+    (Cmd.info "build-config"
+       ~doc:"Show optional features compiled into this binary")
     Term.(const run $ const ())
 
 (* ── Main ────────────────────────────────────────────────────────────────── *)

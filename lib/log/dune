@@ -3,6 +3,7 @@
  (modules log)
  (wrapped false)
  (libraries
+  unix
   (select
    log.ml
    from

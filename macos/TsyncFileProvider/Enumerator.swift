@@ -64,8 +64,7 @@ final class TsyncEnumerator: NSObject, NSFileProviderEnumerator, @unchecked Send
     }
 
     func enumerateChanges(for observer: any NSFileProviderChangeObserver, from anchor: NSFileProviderSyncAnchor) {
-        // Expire anchor on every restart — force full re-enumeration for consistency.
-        observer.finishEnumeratingWithError(NSFileProviderError(.syncAnchorExpired))
+        observer.finishEnumeratingChanges(upTo: anchor, moreComing: false)
     }
 
     func currentSyncAnchor(completionHandler: @escaping (NSFileProviderSyncAnchor?) -> Void) {

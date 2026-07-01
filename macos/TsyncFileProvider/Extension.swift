@@ -110,8 +110,9 @@ final class TsyncExtension: NSObject, NSFileProviderReplicatedExtension, @unchec
     ) -> Progress {
         let progress = Progress(totalUnitCount: 100)
         Task {
+            let key = itemIdentifier.rawValue
+            log.info("fetchContents: \(key, privacy: .public)")
             do {
-                let key = itemIdentifier.rawValue
                 let resp = try await IPC.ensureCached(key: key)
                 guard let localPath = resp.localPath else { throw IPC.IPCError.badResponse }
                 let item = try await resolveItem(itemIdentifier, isDownloaded: true)
@@ -119,6 +120,7 @@ final class TsyncExtension: NSObject, NSFileProviderReplicatedExtension, @unchec
                 completionHandler(URL(fileURLWithPath: localPath), item, nil)
                 try? await IPC.evictItem(key: key)
             } catch {
+                log.error("fetchContents error: \(key, privacy: .public): \(error, privacy: .public)")
                 completionHandler(nil, nil, error)
             }
         }
