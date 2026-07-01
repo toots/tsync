@@ -132,10 +132,6 @@ module Make (C : Conf.S) = struct
             ]
       | None -> ok_json []
 
-  let handle_evict key =
-    F.evict key;
-    ok_json []
-
   let handle_delete key =
     F.delete key;
     ok_json []
@@ -173,7 +169,6 @@ module Make (C : Conf.S) = struct
               | "ensure_cached" -> handle_ensure_cached path
               | "create" -> handle_create path
               | "write" -> handle_write path (get_str obj "staging")
-              | "evict" -> handle_evict path
               | "delete" -> handle_delete path
               | "rename" -> handle_rename (get_str obj "src") path
               | "mkdir" -> handle_mkdir path

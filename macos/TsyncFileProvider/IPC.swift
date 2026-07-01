@@ -141,10 +141,6 @@ public enum IPC {
         try await sendAsync(IPCRequest(action: "write", path: key, staging: staging.path))
     }
 
-    public static func evictItem(key: String) async throws -> IPCResponse {
-        try await sendAsync(IPCRequest(action: "evict", path: key))
-    }
-
     public static func deleteItem(key: String) async throws -> IPCResponse {
         try await sendAsync(IPCRequest(action: "delete", path: key))
     }

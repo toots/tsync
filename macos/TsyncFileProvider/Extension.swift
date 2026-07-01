@@ -124,15 +124,8 @@ final class TsyncExtension: NSObject, NSFileProviderReplicatedExtension, @unchec
                 let resp = try await IPC.ensureCached(key: key)
                 guard let localPath = resp.localPath else { throw IPC.IPCError.badResponse }
                 let item = try await resolveItem(itemIdentifier, isDownloaded: true)
-                // Hand the system its own copy from the sanctioned temp dir, so
-                // evicting the daemon's cache can't race the system's claim of the file.
-                let tmpDir = try NSFileProviderManager(for: domain)?.temporaryDirectoryURL()
-                    ?? FileManager.default.temporaryDirectory
-                let tmpURL = tmpDir.appendingPathComponent(UUID().uuidString)
-                try FileManager.default.copyItem(at: URL(fileURLWithPath: localPath), to: tmpURL)
-                try? await IPC.evictItem(key: key)
                 progress.completedUnitCount = 100
-                completionHandler(tmpURL, item, nil)
+                completionHandler(URL(fileURLWithPath: localPath), item, nil)
             } catch {
                 log.error("fetchContents error: \(key, privacy: .public): \(error, privacy: .public)")
                 completionHandler(nil, nil, error)
