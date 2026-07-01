@@ -5,7 +5,7 @@ type paths = {
   config_path : string;
 }
 
-let implementation = Some "file_provider"
+let implementation = "file_provider"
 
 let default_paths () =
   let home = Sys.getenv "HOME" in

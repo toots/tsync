@@ -28,5 +28,4 @@
    runtime.ml
    from
    (tsync_fuse -> runtime.fuse.ml)
-   (tsync_file_provider -> runtime.file_provider.ml)
-   (-> runtime.noop.ml))))
+   (tsync_file_provider -> runtime.file_provider.ml))))

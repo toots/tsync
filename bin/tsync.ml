@@ -2,14 +2,6 @@ open Cmdliner
 
 (* ── Helpers ─────────────────────────────────────────────────────────────── *)
 
-let runtime_implementation =
-  match Runtime.implementation with
-    | Some s -> s
-    | None ->
-        Printf.eprintf
-          "No runtime implementation available at compile-time!\n%!";
-        exit 1
-
 let rec mkdir_p path =
   if not (Sys.file_exists path) then begin
     mkdir_p (Filename.dirname path);
@@ -546,7 +538,7 @@ let paths_cmd =
 let build_config_cmd =
   let run () =
     Printf.printf "runtime: %s\ns3 backend: %b\nlog: %s\n"
-      runtime_implementation S3_link.s3_backend_enabled Log.implementation
+      Runtime.implementation S3_link.s3_backend_enabled Log.implementation
   in
   Cmd.v
     (Cmd.info "build-config"
