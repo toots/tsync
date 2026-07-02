@@ -1,9 +1,3 @@
-(* Declarative end-to-end scenarios: each one drives a fresh daemon instance
-   (local backend, real Unix socket) through the JSON IPC protocol, then dumps
-   a snapshot of the resulting state (visible tree, contents, backend objects)
-   to stdout. dune diffs the output against test_scenarios.expected; refresh
-   the snapshots with: dune test --auto-promote *)
-
 type step =
   | Write of { path : string; content : string }
   | Mkdir of string
@@ -13,77 +7,8 @@ type step =
   | Evict of string
   | Restore of string
   | Drain
-      (** Wait for queued uploads to finish. Also guarantees the next journal
-          entry lands in a later millisecond, keeping snapshots deterministic
-          (entry keys are ms-timestamped and collide within the same ms). *)
 
 type scenario = { name : string; steps : step list }
-
-(* ── Scenarios ────────────────────────────────────────────────────────────── *)
-
-let scenarios =
-  [
-    {
-      name = "create";
-      steps = [Write { path = "a.txt"; content = "hello tsync" }; Drain];
-    };
-    {
-      name = "copy";
-      steps =
-        [
-          Write { path = "a.txt"; content = "same content" };
-          Drain;
-          Write { path = "b.txt"; content = "same content" };
-          Drain;
-        ];
-    };
-    {
-      name = "rename";
-      steps =
-        [
-          Write { path = "a.txt"; content = "renamed content" };
-          Drain;
-          Rename { src = "a.txt"; dst = "b.txt" };
-          Drain;
-        ];
-    };
-    {
-      name = "delete";
-      steps =
-        [
-          Write { path = "a.txt"; content = "doomed" };
-          Drain;
-          Delete "a.txt";
-          Drain;
-        ];
-    };
-    {
-      name = "evict";
-      steps =
-        [Write { path = "a.txt"; content = "evicted" }; Drain; Evict "a.txt"];
-    };
-    {
-      name = "restore";
-      steps =
-        [
-          Write { path = "a.txt"; content = "round trip" };
-          Drain;
-          Evict "a.txt";
-          Restore "a.txt";
-        ];
-    };
-    {
-      name = "mkdir";
-      steps =
-        [
-          Mkdir "sub";
-          Drain;
-          Write { path = "sub/a.txt"; content = "nested" };
-          Drain;
-        ];
-    };
-    { name = "rmdir"; steps = [Mkdir "sub"; Drain; Rmdir "sub"; Drain] };
-  ]
 
 (* ── Helpers ──────────────────────────────────────────────────────────────── *)
 
@@ -186,9 +111,7 @@ let run_scenario { name; steps } =
   done;
   let request fields =
     let line = Yojson.Safe.to_string (`Assoc fields) in
-    match
-      Yojson.Safe.from_string (Ipc.send ~socket_path:C.socket_path line)
-    with
+    match Yojson.Safe.from_string (Ipc.send ~socket_path:C.socket_path line) with
       | `Assoc obj -> obj
       | _ -> failwith "malformed IPC response"
   in
@@ -264,8 +187,7 @@ let run_scenario { name; steps } =
           let size =
             match List.assoc_opt "size" st with Some (`Int n) -> n | _ -> -1
           in
-          Printf.printf "  f %s size=%d cached=%b uploaded=%b etag=%s\n" rel
-            size
+          Printf.printf "  f %s size=%d cached=%b uploaded=%b etag=%s\n" rel size
             (F.is_cached (key rel))
             uploaded etag;
           files := rel :: !files)
@@ -359,4 +281,4 @@ let run_scenario { name; steps } =
   rm_rf root;
   print_newline ()
 
-let () = List.iter run_scenario scenarios
+let run scenarios = List.iter run_scenario scenarios

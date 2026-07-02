@@ -171,7 +171,8 @@ All library modules are parameterised by a `Conf.S` module (a first-class module
 | Module | Role |
 |---|---|
 | `core/conf_parsing.ml` | Config loading from file or `TSYNC_CONFIG_JSON` env; prefix derivation helpers |
-| `core/ipc.ml` | Unix socket IPC — server loop, CLI text protocol, `command` type |
+| `core/ipc.ml` | Unix socket IPC transport — client `send`, server loop, notify channel, auto-evict marker |
+| `ipc_handler/ipc_handler.ml` | `Ipc_handler.Make(C)(F)` — the shared JSON request dispatcher used by both runtimes; runtime differences captured in a `hooks` record |
 | `conf/conf.mli` | `module type S` — the functor parameter type used by all library modules |
 | `backends/` | Pluggable storage backends (S3 via `aws-s3` + Lwt, local filesystem); self-registration pattern |
 | `xxhash/xxhash.ml` | xxHash3-64 C bindings (dual-seed for chunk fingerprinting) |
@@ -185,7 +186,7 @@ All library modules are parameterised by a `Conf.S` module (a first-class module
 | `sync_queue/journal.ml` | `Journal.Make(C)` — journal entry read/write; local pending-entry tracking for crash recovery |
 | `sync_queue/file_store.ml` | `File_store.Make(C)` — backend operations with journal bookkeeping; directory list/rename/delete |
 | `sync_queue/sync_queue.ml` | `Sync_queue.Make(C)` — async upload queue backed by OCaml `Domain` workers |
-| `file_provider/file_provider.ml` | `File_provider.Make(C)` — macOS FileProvider IPC server (JSON + CLI dual-dispatch) |
+| `file_provider/file_provider.ml` | `File_provider.Make(C)` — macOS FileProvider runtime: serves the shared IPC handler with FileProvider-specific hooks |
 
 ### CLI binary (`bin/tsync.ml`)
 
@@ -218,20 +219,11 @@ tsync purge   <path>
 
 ### IPC protocol
 
-All daemon communication goes through a Unix socket. The socket path is runtime-specific (see platform sections below). Lines starting with `{` are dispatched as JSON (FileProvider protocol); all other lines use the CLI text protocol.
+All daemon communication goes through a Unix socket. The socket path is runtime-specific (see platform sections below). Both runtimes serve the **same** JSON protocol via the shared `Ipc_handler` module — one JSON object per request line, one JSON object per response line.
 
-**CLI text protocol** (both platforms):
+Runtime-specific behavior (how eviction happens, whether restore materializes locally or notifies the extension, what `status` reports) is supplied through a `hooks` record passed to the handler. The file-operation actions (`stat`, `list_dir`, …) are identical on both platforms; the daemon actions (`evict`, `restore`, `full_resync`, `status`, `stop`) run the runtime's hooks.
 
-```
-STOP
-STATUS
-EVICT <path>
-RESTORE <path>
-AUTO_EVICT on|off|status
-FULL_RESYNC
-```
-
-**JSON protocol** (macOS FileProvider only):
+**Requests:**
 
 ```json
 {"action":"stat","path":"<key>"}
@@ -240,19 +232,47 @@ FULL_RESYNC
 {"action":"ensure_cached","path":"<key>"}
 {"action":"create","path":"<key>"}
 {"action":"write","path":"<key>","staging":"<local_path>"}
-{"action":"evict","path":"<key>"}
 {"action":"delete","path":"<key>"}
-{"action":"rename","path":"<dst_s3key>","src":"<src_s3key>"}
-{"action":"mkdir","path":"<s3key_with_slash>"}
-{"action":"rmdir","path":"<s3key_with_slash>"}
+{"action":"rename","path":"<dst_key>","src":"<src_key>"}
+{"action":"mkdir","path":"<key_with_slash>"}
+{"action":"rmdir","path":"<key_with_slash>"}
+{"action":"evict","path":"<path>"}
+{"action":"restore","path":"<path>"}
+{"action":"auto_evict","arg":"on|off|status"}
+{"action":"full_resync"}
+{"action":"status"}
+{"action":"stop"}
 ```
+
+For `evict`/`restore` the `path` is a filesystem path (from the CLI) that the runtime's `path_to_key` hook maps to a storage key; the file-operation actions take domain-prefixed keys directly.
+
+**Responses:** `{"ok":true, ...}` with action-specific fields (e.g. `size`, `mtime`, `etag`, `isUploaded`, `localPath`, `dirs`, `files`), or `{"ok":false,"error":"<message>"}` on failure.
 
 **Reverse notify channel** (`notify.sock`, daemon → extension, macOS only):
 
 ```
 EVICT <key>
+RESTORE <key>
 UPLOADED <key>
 ```
+
+### Tests
+
+Tests are platform-agnostic snapshot tests that run under `dune test`. Each scenario spins up a fresh daemon instance against a temporary `local` backend and real Unix socket, replays a sequence of file operations over the JSON IPC protocol, then dumps a snapshot of the resulting state — the visible tree (name, size, cache/upload status, etag), file contents, and every backend object (chunks, manifests, journal entries, version pointer). dune diffs that snapshot against a checked-in `.expected` file.
+
+```bash
+dune test                    # run all suites, fail on any snapshot diff
+dune test --auto-promote     # accept current output as the new snapshots
+```
+
+The harness and the scenarios are separate so suites are cheap to add:
+
+| Path | Role |
+|---|---|
+| `tests/runner/` | `tsync_test_runner` library — the harness: temp environment setup, IPC driver, deterministic snapshot dumper. Exposes `step`, `scenario`, and `run` |
+| `tests/base/` | `base.ml` — one representative scenario per file operation (create, copy, rename, delete, evict, restore, mkdir, rmdir); `base.expected` snapshot |
+
+A scenario is declarative data — a `name` and a list of `step`s (`Write`, `Mkdir`, `Rmdir`, `Rename`, `Delete`, `Evict`, `Restore`, `Drain`). To add a suite, create a sibling directory under `tests/` with a scenario file that does `open Test_runner`, its own `.expected` snapshot, and the three dune stanzas from `tests/base/dune` (executable, `with-stdout-to` output rule, `runtest` diff rule). Crash-recovery and concurrent-write suites are the intended next additions.
 
 ---
 
@@ -274,7 +294,7 @@ tsync start
 
 | File | Role |
 |---|---|
-| `fuse_fs.ml` | `Fuse_fs.Make(C)` — FUSE operation handlers; IPC handler; version flusher thread; instantiates `Sync_queue`, `File`, `File_store` |
+| `fuse_fs.ml` | `Fuse_fs.Make(C)` — FUSE operation handlers; serves the shared `Ipc_handler` with FUSE-specific hooks; version flusher thread; instantiates `Sync_queue`, `File`, `File_store` |
 | `path_ops.ml` | FUSE path operation record type |
 | `internal_ops.ml` | `Internal_ops.Make(F)` — mutation handlers (create, write, unlink, mkdir, rmdir, rename) |
 | `hidden_ops.ml` | `Hidden_ops.Make(F)` — `.fuse_hidden*` file handlers (local-only, never mirror to backend) |
@@ -309,16 +329,6 @@ After a successful upload, the daemon optionally evicts the local copy. Controll
 
 The daemon runs as a user systemd service. Logs via syslog (viewable with `journalctl --user -u tsync -f`).
 
-### Lifecycle test
-
-```bash
-cd linux
-./test_lifecycle.sh              # build + run all cases against a configured backend
-./test_lifecycle.sh --skip-build 1 3   # skip build, run cases 1 and 3
-```
-
-Reads config from `$XDG_CONFIG_HOME/tsync/config.json` or `TSYNC_CONFIG_JSON`. Sets up AWS credentials from config if not already present in `~/.aws/`.
-
 ---
 
 ## Part 3 — macOS FileProvider
@@ -334,14 +344,14 @@ TsyncApp (LaunchAgent)
 
 TsyncFileProvider (extension, sandboxed)
   ├── TsyncExtension          NSFileProviderReplicatedExtension
-  │    ├── fetchContents      download: ensure_cached → local path → evict after hand-off
+  │    ├── fetchContents      download: ensure_cached → hand daemon's local path to the OS
   │    ├── createItem         file: write+upload; dir: mkdir
   │    ├── modifyItem         rename / content update / metadata-only
   │    └── deleteItem         unlink / rmdir
   ├── TsyncEnumerator         NSFileProviderEnumerator
   │    ├── enumerateItems     list_dir (per-directory) / list_all (working set)
   │    └── enumerateChanges   anchor-expired → full re-enumeration
-  └── NotifyListener          listens on notify.sock; receives EVICT / UPLOADED from daemon
+  └── NotifyListener          listens on notify.sock; receives EVICT / RESTORE / UPLOADED from daemon
 
 OCaml daemon (tsync start, LaunchAgent via deploy-daemon.sh)
   ├── Ipc.serve               Unix socket — JSON + CLI dispatch
@@ -366,15 +376,14 @@ OCaml daemon (tsync start, LaunchAgent via deploy-daemon.sh)
 1. FileProvider calls `fetchContents` on the extension.
 2. Extension calls `IPC.ensureCached(key:)` (JSON IPC).
 3. Daemon downloads from the backend into its local cache; returns local path.
-4. Extension passes the URL to FileProvider's completion handler.
-5. FileProvider copies the content to its own storage; extension calls `IPC.evictItem` (fire-and-forget) to free the daemon's cache copy.
+4. Extension passes the URL to FileProvider's completion handler, which copies the content to its own storage.
+5. The daemon's staged copy is dropped by `on_upload_done` (uploads) or an explicit evict; the daemon cache is only ever a transient staging area on macOS.
 
 **Eviction (OS or user evicts a file):**
 
-1. FileProvider calls `NSFileProviderManager.evictItem` (OS-driven) or extension calls it (after upload).
-2. Extension also sends `EVICT <key>` via `Ipc.send` to the daemon CLI protocol.
-3. Daemon calls `File.evict` to remove its local cache copy.
-4. Daemon sends `EVICT <key>` to `notify.sock`, closing the loop.
+1. FileProvider calls `NSFileProviderManager.evictItem` (OS-driven).
+2. `tsync evict <path>` from the CLI sends an `evict` JSON request; the FileProvider runtime's hook forwards `EVICT <key>` over `notify.sock`.
+3. `NotifyListener` receives it and calls `NSFileProviderManager.evictItem`, closing the loop.
 
 ### Source layout
 
@@ -382,7 +391,7 @@ OCaml daemon (tsync start, LaunchAgent via deploy-daemon.sh)
 
 | File | Role |
 |---|---|
-| `file_provider.ml` | IPC server; JSON action handlers; CLI command handlers; `path_to_key` with CloudStorage path stripping |
+| `file_provider.ml` | Serves the shared `Ipc_handler` with FileProvider hooks (evict/restore forward over `notify.sock`); `path_to_key` with CloudStorage path stripping |
 
 **Swift (`macos/`):**
 
@@ -429,17 +438,6 @@ make -C macos generate   # regenerate tsync.xcodeproj from project.yml
 make -C macos build      # xcodebuild TsyncApp (Release)
 make -C macos deploy     # build + install TsyncApp to /Applications + reload LaunchAgent
 ```
-
-### Lifecycle test
-
-```bash
-cd macos
-./test_lifecycle.sh              # deploy daemon + build app + run all cases
-./test_lifecycle.sh --skip-build # skip build, run all cases against running daemon
-./test_lifecycle.sh 1 3          # run only cases 1 and 3
-```
-
-Reads config from the group container.
 
 ---
 
