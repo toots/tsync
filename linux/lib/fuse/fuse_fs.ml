@@ -72,21 +72,21 @@ module Make (C : Conf.S) = struct
 
   (* ── Journal WAL helpers ──────────────────────────────────────────────── *)
 
-  let pending_version_key : string option ref = ref None
-  let pending_version_mutex = Mutex.create ()
+  let pending_cursor : string option ref = ref None
+  let pending_cursor_mutex = Mutex.create ()
 
-  let set_pending_version ek =
-    Mutex.lock pending_version_mutex;
-    (match !pending_version_key with
+  let set_pending_cursor ek =
+    Mutex.lock pending_cursor_mutex;
+    (match !pending_cursor with
       | Some prev when prev >= ek -> ()
-      | _ -> pending_version_key := Some ek);
-    Mutex.unlock pending_version_mutex
+      | _ -> pending_cursor := Some ek);
+    Mutex.unlock pending_cursor_mutex
 
-  let drain_pending_version () =
-    Mutex.lock pending_version_mutex;
-    let v = !pending_version_key in
-    pending_version_key := None;
-    Mutex.unlock pending_version_mutex;
+  let drain_pending_cursor () =
+    Mutex.lock pending_cursor_mutex;
+    let v = !pending_cursor in
+    pending_cursor := None;
+    Mutex.unlock pending_cursor_mutex;
     v
 
   (* ── IPC ──────────────────────────────────────────────────────────────── *)
@@ -167,6 +167,7 @@ module Make (C : Conf.S) = struct
         path_to_key = key_of_path mount_point;
         request_evict = evict_key;
         restore = restore_key;
+        changed = (fun _ -> ());
         full_resync;
         status_fields = (fun () -> [("mount", `String mount_point)]);
         on_stop =
@@ -275,7 +276,7 @@ module Make (C : Conf.S) = struct
     Log.debug "starting sync queue workers";
     Sq.start
       ~upload:(fun ~key ~cancel -> F.upload ~cancel key)
-      ~on_version:(fun ~entry_key -> set_pending_version entry_key)
+      ~on_cursor:(fun ~entry_key -> set_pending_cursor entry_key)
       ~on_upload_done:(fun ~key ->
         if Ipc.auto_evict_enabled ~data_dir:C.data_dir then request_evict key;
         Ipc.notify_uploaded ~path:C.notify_path key);
@@ -285,18 +286,18 @@ module Make (C : Conf.S) = struct
          (fun () ->
            Ipc.serve ~path:C.socket_path (Ih.handler (ipc_hooks mount_point)))
          ());
-    Log.debug "starting version flusher";
+    Log.debug "starting cursor flusher";
     ignore
       (Thread.create
          (fun () ->
            while true do
              Unix.sleepf 2.0;
-             match drain_pending_version () with
+             match drain_pending_cursor () with
                | None -> ()
                | Some ek -> (
-                   try Fs.bump_version ek
+                   try Fs.bump_cursor ek
                    with exn ->
-                     Log.err "bump_version: %s" (Printexc.to_string exn))
+                     Log.err "bump_cursor: %s" (Printexc.to_string exn))
            done)
          ());
     Log.debug "starting sync poller";

@@ -12,6 +12,6 @@ val pick_domain : ?domain:string -> t -> domain
 
 val domain_prefix : domain -> string
 val chunk_prefix : domain -> string
-val trash_prefix : domain -> string
+val versions_prefix : domain -> string
 val journal_prefix : domain -> string
-val version_key : domain -> string
+val cursor_key : domain -> string

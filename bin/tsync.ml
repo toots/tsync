@@ -43,9 +43,9 @@ let make_conf ?domain cfg : (module Conf.S) =
     let domain_name = d.Conf_parsing.name
     let domain_prefix = Conf_parsing.domain_prefix d
     let chunk_prefix = Conf_parsing.chunk_prefix d
-    let trash_prefix = Conf_parsing.trash_prefix d
+    let versions_prefix = Conf_parsing.versions_prefix d
     let journal_prefix = Conf_parsing.journal_prefix d
-    let version_key = Conf_parsing.version_key d
+    let cursor_key = Conf_parsing.cursor_key d
     let backends = List.map make_backend d.Conf_parsing.backends
     let cache_root = runtime_paths.Runtime.cache_root
     let data_dir = runtime_paths.Runtime.data_dir
@@ -170,7 +170,12 @@ let ls_cmd =
   let path_arg =
     Arg.(value & pos 0 (some string) None & info [] ~docv:"PATH")
   in
-  let run path =
+  let deleted_arg =
+    Arg.(
+      value & flag
+      & info ["deleted"; "d"] ~doc:"Also list deleted files in the directory")
+  in
+  let run path show_deleted =
     let cfg = Conf_parsing.load runtime_paths.Runtime.config_path in
     let (module C : Conf.S) = make_conf cfg in
     let module Fs = File_store.Make (C) in
@@ -199,22 +204,129 @@ let ls_cmd =
           (if cached then "local" else "cloud")
           name e.size)
       files;
-    List.iter (fun d -> Printf.printf "dir    %s/\n" d) subdirs
+    List.iter (fun d -> Printf.printf "dir    %s/\n" d) subdirs;
+    if show_deleted then begin
+      (* Versioned paths in this directory with no live manifest. *)
+      let (module B : Backend.S) = List.hd C.backends in
+      let reldir = String.sub prefix dp_len (String.length prefix - dp_len) in
+      let seen = Hashtbl.create 16 in
+      B.list_all ~prefix:(C.versions_prefix ^ reldir) ()
+      |> List.iter (fun (e : Backend.file_entry) ->
+             match Versioning.parse ~versions_prefix:C.versions_prefix e.key with
+               | Some (rel, _) when not (Hashtbl.mem seen rel) ->
+                   Hashtbl.add seen rel ();
+                   let child =
+                     String.sub rel (String.length reldir)
+                       (String.length rel - String.length reldir)
+                   in
+                   if
+                     (not (String.contains child '/'))
+                     && B.head_opt ~key:(C.domain_prefix ^ rel) () = None
+                   then Printf.printf "deleted  %s\n" child
+               | _ -> ())
+    end
   in
   Cmd.v
     (Cmd.info "ls" ~doc:"List files with cache status")
+    Term.(const run $ path_arg $ deleted_arg)
+
+(* ── tsync versions ──────────────────────────────────────────────────────── *)
+
+let human_ts ts_ns =
+  let secs = Int64.to_float (Int64.div ts_ns 1_000_000_000L) in
+  let tm = Unix.localtime secs in
+  Printf.sprintf "%04d-%02d-%02d %02d:%02d:%02d" (tm.Unix.tm_year + 1900)
+    (tm.Unix.tm_mon + 1) tm.Unix.tm_mday tm.Unix.tm_hour tm.Unix.tm_min
+    tm.Unix.tm_sec
+
+let versions_cmd =
+  let path_arg =
+    Arg.(value & pos 0 (some string) None & info [] ~docv:"PATH")
+  in
+  let run path =
+    let cfg = Conf_parsing.load runtime_paths.Runtime.config_path in
+    let (module C : Conf.S) = make_conf cfg in
+    let (module B : Backend.S) = List.hd C.backends in
+    let parse = Versioning.parse ~versions_prefix:C.versions_prefix in
+    match path with
+      | Some rel ->
+          let versions =
+            B.list_all ~prefix:(C.versions_prefix ^ rel ^ "/") ()
+            |> List.filter_map (fun (e : Backend.file_entry) ->
+                   match parse e.key with
+                     | Some (_, ts) -> Some (Int64.of_string ts, e.size)
+                     | None -> None)
+            |> List.sort (fun (a, _) (b, _) -> Int64.compare b a)
+          in
+          if versions = [] then Printf.printf "No versions for %s\n" rel
+          else
+            List.iter
+              (fun (ts, size) ->
+                Printf.printf "%Ld  %s  %d bytes\n" ts (human_ts ts) size)
+              versions
+      | None ->
+          (* Group every version by path; a path with no live manifest is a
+             deleted file. *)
+          let latest = Hashtbl.create 64 and count = Hashtbl.create 64 in
+          B.list_all ~prefix:C.versions_prefix ()
+          |> List.iter (fun (e : Backend.file_entry) ->
+                 match parse e.key with
+                   | Some (rel, ts) ->
+                       let ts = Int64.of_string ts in
+                       let best =
+                         Option.value ~default:0L (Hashtbl.find_opt latest rel)
+                       in
+                       if Int64.compare ts best > 0 then
+                         Hashtbl.replace latest rel ts;
+                       Hashtbl.replace count rel
+                         (1 + Option.value ~default:0 (Hashtbl.find_opt count rel))
+                   | None -> ());
+          let deleted =
+            Hashtbl.fold
+              (fun rel ts acc ->
+                if B.head_opt ~key:(C.domain_prefix ^ rel) () = None then
+                  (rel, ts, Option.value ~default:1 (Hashtbl.find_opt count rel))
+                  :: acc
+                else acc)
+              latest []
+            |> List.sort compare
+          in
+          if deleted = [] then print_endline "No deleted files"
+          else
+            List.iter
+              (fun (rel, ts, n) ->
+                Printf.printf "%s  (deleted %s, %d version%s)\n" rel (human_ts ts)
+                  n
+                  (if n = 1 then "" else "s"))
+              deleted
+  in
+  Cmd.v
+    (Cmd.info "versions"
+       ~doc:"List a file's versions, or all deleted files when no PATH is given")
     Term.(const run $ path_arg)
 
-(* ── tsync history ───────────────────────────────────────────────────────── *)
+(* ── tsync revert ────────────────────────────────────────────────────────── *)
 
-let history_cmd =
+let revert_cmd =
   let path_arg =
     Arg.(required & pos 0 (some string) None & info [] ~docv:"PATH")
   in
-  let run _path = Printf.eprintf "history: not yet implemented\n" in
+  let version_arg =
+    Arg.(
+      value
+      & opt (some string) None
+      & info ["version"] ~docv:"TS"
+          ~doc:"Version timestamp to restore (default: most recent)")
+  in
+  let run path version =
+    match ipc_action ~path ?arg:version "revert" with
+      | _ -> Printf.printf "Reverted: %s\n" path
+      | exception Failure msg -> Printf.eprintf "Error: %s\n" msg
+  in
   Cmd.v
-    (Cmd.info "history" ~doc:"Show version history for a file")
-    Term.(const run $ path_arg)
+    (Cmd.info "revert"
+       ~doc:"Restore a previous version of a file (metadata only, no download)")
+    Term.(const run $ path_arg $ version_arg)
 
 (* ── tsync purge ─────────────────────────────────────────────────────────── *)
 
@@ -274,7 +386,7 @@ let sync_cmd =
     let module F = File.Make (C) (Sq) in
     Sq.start
       ~upload:(fun ~key ~cancel -> F.upload ~cancel key)
-      ~on_version:(fun ~entry_key:_ -> ())
+      ~on_cursor:(fun ~entry_key:_ -> ())
       ~on_upload_done:(fun ~key:_ -> ());
     let my_uuid = J.client_uuid () in
     let recover_pending_ops () =
@@ -339,7 +451,7 @@ let sync_cmd =
               replayed;
             if replayed <> [] then begin
               ignore (Fs.write_journal_entry ~entry_key replayed);
-              Fs.bump_version entry_key
+              Fs.bump_cursor entry_key
             end;
             J.delete_local_pending ~entry_key
           end)
@@ -484,7 +596,7 @@ let configure_cmd =
     in
     Printf.printf "tsync configuration\n-------------------\n";
     let client_name = prompt "Client name" (Some (Unix.gethostname ())) in
-    let versioning = prompt_bool "Enable versioning (trash on delete)?" in
+    let versioning = prompt_bool "Enable versioning (keep version history)?" in
     let domains = ref [] in
     let continue_ = ref true in
     while !continue_ do
@@ -560,7 +672,8 @@ let () =
         restore_cmd;
         pull_cmd;
         ls_cmd;
-        history_cmd;
+        versions_cmd;
+        revert_cmd;
         purge_cmd;
         auto_evict_cmd;
       ]

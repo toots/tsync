@@ -59,7 +59,7 @@ module Make (C : Conf.S) (F : File.S) = struct
            while true do
              Unix.sleepf 2.0;
              try
-               match Fs.fetch_version () with
+               match Fs.fetch_cursor () with
                  | None -> ()
                  | Some v when v = !last_version -> ()
                  | Some v ->

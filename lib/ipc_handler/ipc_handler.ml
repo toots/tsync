@@ -5,6 +5,7 @@ module Make (C : Conf.S) (F : File.S) = struct
     path_to_key : string -> string;
     request_evict : string -> unit;
     restore : string -> unit;
+    changed : string -> unit;
     full_resync : unit -> unit;
     status_fields : unit -> (string * Yojson.Safe.t) list;
     on_stop : unit -> unit;
@@ -119,6 +120,12 @@ module Make (C : Conf.S) (F : File.S) = struct
     F.rmdir key;
     ok_json []
 
+  let handle_revert hooks key version =
+    let version = if version = "" then None else Some version in
+    F.revert ?version key;
+    hooks.changed key;
+    ok_json []
+
   (* ── Dispatch ─────────────────────────────────────────────────────────── *)
 
   let handler hooks line =
@@ -146,6 +153,10 @@ module Make (C : Conf.S) (F : File.S) = struct
                 | "restore" ->
                     hooks.restore (hooks.path_to_key path);
                     ok_json []
+                | "revert" ->
+                    handle_revert hooks
+                      (hooks.path_to_key path)
+                      (get_str obj "arg")
                 | "auto_evict" ->
                     let result =
                       Ipc.handle_auto_evict ~data_dir:C.data_dir

@@ -32,9 +32,9 @@
 --- pending B
 --- backend
   chunk 9555e8555c62dcfd-74b07ed397a89e92 size=5
+  cursor = <entry-2>
   journal <entry-1> = put foo.txt 5
   journal <entry-2> = delete foo.txt
-  version = <entry-2>
   dir tsync/test/
 
 === foreign_overwrite
@@ -82,9 +82,9 @@
 --- pending B
 --- backend
   chunk 7ca14c1744b7cedc-339b870e9f742377 size=15
+  cursor = <entry-2>
   journal <entry-1> = put foo.txt 15
   journal <entry-2> = rename foo.txt -> bar.txt 15
-  version = <entry-2>
   file bar.txt = manifest size=15 chunks=1
 
 === foreign_rename_chain
@@ -108,10 +108,10 @@
 --- pending B
 --- backend
   chunk e93e5e881ded4f7c-90a3b89755564bde size=7
+  cursor = <entry-3>
   journal <entry-1> = put foo.txt 7
   journal <entry-2> = rename foo.txt -> bar.txt 7
   journal <entry-3> = rename bar.txt -> baz.txt 7
-  version = <entry-3>
   file baz.txt = manifest size=7 chunks=1
 
 === foreign_mkdir
@@ -134,9 +134,9 @@
 --- pending B
 --- backend
   chunk fa87ee5fc199e332-c7156c4359a54f81 size=6
+  cursor = <entry-1>
   journal <entry-1> = mkdir sub/
   journal <entry-2> = put sub/a.txt 6
-  version = <entry-1>
   file sub/a.txt = manifest size=6 chunks=1
 
 === foreign_rmdir
@@ -158,11 +158,11 @@
 --- pending B
 --- backend
   chunk fa87ee5fc199e332-c7156c4359a54f81 size=6
+  cursor = <entry-4>
   journal <entry-1> = mkdir sub/
   journal <entry-2> = put sub/a.txt 6
   journal <entry-3> = delete sub/a.txt
   journal <entry-4> = rmdir sub/
-  version = <entry-4>
   dir tsync/test/
 
 === concurrent_create
@@ -259,10 +259,10 @@
 --- pending B
 --- backend
   chunk 7927fec27038e81c-3a112440cfdf156a size=15
+  cursor = <entry-3>
   journal <entry-1> = put foo.txt 15
   journal <entry-2> = delete foo.txt
   journal <entry-3> = put baz (conflicted copy from Client B).txt 15
-  version = <entry-3>
   file baz (conflicted copy from Client B).txt = manifest size=15 chunks=1
 
 === rename_rename_race
@@ -290,10 +290,10 @@
 --- pending B
 --- backend
   chunk 63867f7d13d542db-2d81578912f1ac43 size=16
+  cursor = <entry-3>
   journal <entry-1> = put foo.txt 16
   journal <entry-2> = rename foo.txt -> bar.txt 16
   journal <entry-3> = put baz (conflicted copy from Client B).txt 16
-  version = <entry-3>
   file bar.txt = manifest size=16 chunks=1
   file baz (conflicted copy from Client B).txt = manifest size=16 chunks=1
 

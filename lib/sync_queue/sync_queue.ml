@@ -11,7 +11,7 @@ module type S = sig
 
   val start :
     upload:(key:string -> cancel:bool Atomic.t -> unit) ->
-    on_version:(entry_key:string -> unit) ->
+    on_cursor:(entry_key:string -> unit) ->
     on_upload_done:(key:string -> unit) ->
     unit
 
@@ -46,7 +46,7 @@ module Make (C : Conf.S) : S = struct
   let upload_fn : (key:string -> cancel:bool Atomic.t -> unit) ref =
     ref (fun ~key:_ ~cancel:_ -> ())
 
-  let on_version_fn : (entry_key:string -> unit) ref =
+  let on_cursor_fn : (entry_key:string -> unit) ref =
     ref (fun ~entry_key:_ -> ())
 
   let on_upload_done_fn : (key:string -> unit) ref = ref (fun ~key:_ -> ())
@@ -104,7 +104,7 @@ module Make (C : Conf.S) : S = struct
         else begin
           J.delete_local_pending ~entry_key;
           ignore (Fs.write_journal_entry ~entry_key ops);
-          !on_version_fn ~entry_key;
+          !on_cursor_fn ~entry_key;
           !on_upload_done_fn ~key
         end
       with
@@ -143,9 +143,9 @@ module Make (C : Conf.S) : S = struct
       end
     done
 
-  let start ~upload ~on_version ~on_upload_done =
+  let start ~upload ~on_cursor ~on_upload_done =
     upload_fn := upload;
-    on_version_fn := on_version;
+    on_cursor_fn := on_cursor;
     on_upload_done_fn := on_upload_done;
     workers := List.init 4 (fun _ -> Domain.spawn (fun () -> worker_loop ()))
 

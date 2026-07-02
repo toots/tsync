@@ -58,6 +58,9 @@ module Make (C : Conf.S) = struct
       Manifest.make ~size:(Int64.of_int file_size)
         ~chunk_size:Manifest.chunk_size ~chunks:entries ~mtime
     in
+    if C.versioning then
+      Versioning.save ~backends:C.backends ~domain_prefix:C.domain_prefix
+        ~versions_prefix:C.versions_prefix ~key;
     put_all ~key ~data:(Manifest.to_string state) ();
     state
 

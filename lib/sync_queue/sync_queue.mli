@@ -13,7 +13,7 @@ module type S = sig
 
   val start :
     upload:(key:string -> cancel:bool Atomic.t -> unit) ->
-    on_version:(entry_key:string -> unit) ->
+    on_cursor:(entry_key:string -> unit) ->
     on_upload_done:(key:string -> unit) ->
     unit
 

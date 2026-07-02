@@ -1,13 +1,42 @@
-let trash_key ~s3_key ~domain_prefix ~trash_prefix =
-  let relative =
-    if
-      String.length s3_key > String.length domain_prefix
-      && String.sub s3_key 0 (String.length domain_prefix) = domain_prefix
-    then
-      String.sub s3_key
-        (String.length domain_prefix)
-        (String.length s3_key - String.length domain_prefix)
-    else s3_key
-  in
-  let ts = Int64.of_float (Unix.gettimeofday ()) in
-  Printf.sprintf "%s%s/%Ld" trash_prefix relative ts
+let strip_prefix ~prefix s =
+  if
+    String.length s > String.length prefix
+    && String.sub s 0 (String.length prefix) = prefix
+  then String.sub s (String.length prefix) (String.length s - String.length prefix)
+  else s
+
+let version_dir ~s3_key ~domain_prefix ~versions_prefix =
+  versions_prefix ^ strip_prefix ~prefix:domain_prefix s3_key ^ "/"
+
+let version_key ~s3_key ~domain_prefix ~versions_prefix =
+  let ts = Int64.of_float (Unix.gettimeofday () *. 1e9) in
+  Printf.sprintf "%s%Ld"
+    (version_dir ~s3_key ~domain_prefix ~versions_prefix)
+    ts
+
+let parse ~versions_prefix key =
+  let n = String.length versions_prefix in
+  if String.length key <= n || String.sub key 0 n <> versions_prefix then None
+  else
+    let rest = String.sub key n (String.length key - n) in
+    match String.rindex_opt rest '/' with
+      | Some i ->
+          Some
+            ( String.sub rest 0 i,
+              String.sub rest (i + 1) (String.length rest - i - 1) )
+      | None -> None
+
+let save ~backends ~domain_prefix ~versions_prefix ~key =
+  match backends with
+    | [] -> ()
+    | (module B : Backend.S) :: _ -> (
+        match B.head_opt ~key () with
+          | None -> ()
+          | Some _ ->
+              let dst_key =
+                version_key ~s3_key:key ~domain_prefix ~versions_prefix
+              in
+              List.iter
+                (fun (module B : Backend.S) ->
+                  B.copy ~src_key:key ~dst_key ())
+                backends)

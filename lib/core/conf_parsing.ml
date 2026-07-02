@@ -56,6 +56,6 @@ let prefix_slash d =
 
 let domain_prefix d = prefix_slash d ^ d.name ^ "/"
 let chunk_prefix d = prefix_slash d ^ ".chunks/"
-let trash_prefix d = prefix_slash d ^ ".trash/" ^ d.name ^ "/"
+let versions_prefix d = prefix_slash d ^ ".versions/" ^ d.name ^ "/"
 let journal_prefix d = prefix_slash d ^ ".journal/" ^ d.name ^ "/"
-let version_key d = prefix_slash d ^ ".version/" ^ d.name
+let cursor_key d = prefix_slash d ^ ".cursor/" ^ d.name
