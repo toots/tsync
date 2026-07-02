@@ -54,6 +54,7 @@
   write foo.txt "deleted content"
   drain
   delete foo.txt
+  drain
   revert foo.txt @latest
 --- tree
   f foo.txt size=15 cached=false uploaded=true etag=eadad83fb0989511
