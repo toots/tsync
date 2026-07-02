@@ -339,6 +339,53 @@ let purge_cmd =
     (Cmd.info "purge" ~doc:"Delete all versions from trash")
     Term.(const run $ path_arg)
 
+(* ── tsync expire ────────────────────────────────────────────────────────── *)
+
+let expire_cmd =
+  let date_arg =
+    Arg.(
+      required
+      & pos 0 (some string) None
+      & info [] ~docv:"DATE"
+          ~doc:"Cutoff date YYYY-MM-DD; versions older than this are removed")
+  in
+  let parse_date s =
+    try
+      Scanf.sscanf s "%d-%d-%d" (fun year mon day ->
+          fst
+            (Unix.mktime
+               {
+                 Unix.tm_year = year - 1900;
+                 tm_mon = mon - 1;
+                 tm_mday = day;
+                 tm_hour = 0;
+                 tm_min = 0;
+                 tm_sec = 0;
+                 tm_wday = 0;
+                 tm_yday = 0;
+                 tm_isdst = false;
+               }))
+    with _ -> failwith ("invalid date (expected YYYY-MM-DD): " ^ s)
+  in
+  let run date =
+    match
+      let cutoff = parse_date date in
+      let cfg = Conf_parsing.load runtime_paths.Runtime.config_path in
+      let (module C : Conf.S) = make_conf cfg in
+      let module E = Expire.Make (C) in
+      E.expire ~cutoff ()
+    with
+      | s ->
+          Printf.printf "Removed %d version(s), %d chunk(s); kept %d chunk(s)\n"
+            s.Expire.versions_deleted s.chunks_deleted s.chunks_kept
+      | exception Failure msg -> Printf.eprintf "Error: %s\n" msg
+  in
+  Cmd.v
+    (Cmd.info "expire"
+       ~doc:
+         "Remove versions older than DATE, then garbage-collect unused chunks")
+    Term.(const run $ date_arg)
+
 (* ── tsync auto-evict ────────────────────────────────────────────────────── *)
 
 let auto_evict_cmd =
@@ -675,6 +722,7 @@ let () =
         versions_cmd;
         revert_cmd;
         purge_cmd;
+        expire_cmd;
         auto_evict_cmd;
       ]
   in

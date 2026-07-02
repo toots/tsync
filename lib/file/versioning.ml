@@ -20,11 +20,11 @@ let parse ~versions_prefix key =
   else
     let rest = String.sub key n (String.length key - n) in
     match String.rindex_opt rest '/' with
-      | Some i ->
+      | Some i when i < String.length rest - 1 ->
           Some
             ( String.sub rest 0 i,
               String.sub rest (i + 1) (String.length rest - i - 1) )
-      | None -> None
+      | _ -> None
 
 let save ~backends ~domain_prefix ~versions_prefix ~key =
   match backends with

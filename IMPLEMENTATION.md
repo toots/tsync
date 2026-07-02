@@ -181,11 +181,17 @@ Brings the local filesystem in sync with the backend on demand (same journal-cur
 
 ### Versioning
 
-When `versioning = true`, every change that overwrites or removes a file's manifest first copies the current manifest to `<prefix>/.versions/<domain>/<path>/<timestamp-ns>`. A version is only the small manifest JSON — the data chunks it references live in `.chunks/` and are never garbage-collected, so a version is cheap to save and can be restored without transferring any content. There are three save sites: `Remote.upload` (before writing the new manifest, so a modify keeps the old one), `File.apply_delete`, and `File.rename` (versions the source path). History is unbounded — there is no cap or pruning yet.
+When `versioning = true`, every change that overwrites or removes a file's manifest first copies the current manifest to `<prefix>/.versions/<domain>/<path>/<timestamp-ns>`. A version is only the small manifest JSON — the data chunks it references live in `.chunks/` and are shared across every file and version, so a version is cheap to save and can be restored without transferring any content. There are three save sites: `Remote.upload` (before writing the new manifest, so a modify keeps the old one), `File.apply_delete`, and `File.rename` (versions the source path). History grows until it is trimmed with `tsync expire`.
 
 `File.revert ?version key` restores a version: it copies the versioned manifest back to the live key on every backend, writes a journal `put` entry (so other clients converge), refreshes the local `.manifest` sidecar, and **evicts** any cached data. The restored file is therefore dataless — its bytes are fetched lazily on next open, exactly like any other evicted file. With no `version` it picks the most recent timestamp.
 
 The CLI exposes this as `tsync versions [PATH]` (a file's history, or every deleted file when PATH is omitted — a deleted file is one with versions but no live manifest) and `tsync revert PATH [--version TS]`. Listing reads the backend directly; `revert` goes through the daemon (`revert` IPC action) so the sidecar is refreshed and, on macOS, the FileProvider extension is signalled via `CHANGED`.
+
+### Expiry and chunk GC
+
+`Expire.Make(C).expire ~cutoff ()` trims history and reclaims storage in a mark-and-sweep over the primary backend, with deletions fanned out to every backend (batched via `delete_multi`). **The cutoff (seconds since the epoch) bounds versions only.** (1) List `.versions/<domain>/` once and partition by the `<timestamp-ns>` suffix into expired (older than the cutoff) and surviving; delete the expired keys, plus the now-empty version directory of any path with no surviving version (a no-op on S3, which has no directory objects, but it prunes the emptied directory on a filesystem backend). (2) Mark every chunk referenced by a live manifest (`.chunks/` keys read from `<domain>/…`) or a surviving version. (3) Sweep: delete every `.chunks/` object whose key is not marked — regardless of age or cutoff. There is no chunk refcount index; step 2 reads each surviving manifest, which is fine for a manual admin command. Mark-and-sweep races with a concurrent upload (which writes chunks before its manifest), so `expire` is meant to run while clients are idle.
+
+The CLI exposes this as `tsync expire DATE` (`YYYY-MM-DD`, parsed to local midnight). It prints the number of versions and chunks removed and chunks kept.
 
 ### Shared OCaml libraries (`lib/`)
 
@@ -207,6 +213,7 @@ All library modules are parameterised by a `Conf.S` module (a first-class module
 | `file/local.ml` | Local cache paths; create/evict/rename local cache entries |
 | `file/remote.ml` | Chunked upload and download against the backend |
 | `file/versioning.ml` | Version key construction + `save` (copy live manifest to a timestamped version) |
+| `file/expire.ml` | `Expire.Make(C).expire` — delete versions older than a cutoff, then GC unreferenced chunks |
 | `file/file.ml` | `File.Make(C)(Sq)` — central file abstraction: stat, read, write, upload, download, evict, delete, rename, mkdir; dirty/open tracking; `apply_foreign_ops` and conflict-copy publishing |
 | `file/sync_poller.ml` | `Sync_poller.Make(C)(F)` — background version-key poller applying foreign journal entries; `sync_once` for on-demand sync |
 | `sync_queue/journal.ml` | `Journal.Make(C)` — journal entry read/write; local pending-entry tracking for crash recovery |
@@ -238,6 +245,7 @@ tsync sync    [--domain <name>]
 
 tsync versions [path]
 tsync revert   <path> [--version <ts>]
+tsync expire   <date>
 
 tsync auto-evict [on|off|status]
 tsync purge   <path>
@@ -305,6 +313,7 @@ The harness and the scenarios are separate so suites are cheap to add:
 | `tests/base/` | `base.ml` — one representative scenario per file operation (create, copy, rename, delete, evict, restore, mkdir, rmdir); `base.expected` snapshot |
 | `tests/sync/` | `sync.ml` — cross-client sync and race scenarios; `sync.expected` snapshot |
 | `tests/versioning/` | `versioning.ml` — modify/rename/delete keep versions, and `revert` restores one dataless (run with `~versioning:true`); `versioning.expected` snapshot |
+| `tests/expire/` | `expire.ml` — `expire` drops versions older than a cutoff (including a mid-scenario `Mark` boundary) and GCs unreferenced chunks while keeping live/surviving ones; `expire.expected` snapshot |
 
 A scenario is declarative data — a `name` and a list of `step`s (`Write`, `Mkdir`, `Rmdir`, `Rename`, `Delete`, `Evict`, `Restore`, `Open`, `Close`, `Drain`, `Sync`). To add a suite, create a sibling directory under `tests/` with a scenario file that does `open Test_runner`, its own `.expected` snapshot, and the three dune stanzas from `tests/base/dune` (executable, `with-stdout-to` output rule, `runtest` diff rule).
 
@@ -481,7 +490,7 @@ make -C macos deploy     # build + install TsyncApp to /Applications + reload La
 
 ## Known limitations
 
-**No chunk GC.** Chunks accumulate in `<prefix>/.chunks/` indefinitely. A future `tsync gc` would collect unreferenced chunks by scanning all manifests.
+**Chunk GC is manual.** Chunks accumulate in `<prefix>/.chunks/` until `tsync expire <date>` collects the unreferenced ones (see [Expiry and chunk GC](#expiry-and-chunk-gc)). There is no automatic or scheduled collection, and — since the sweep marks by scanning every manifest — `expire` should run while clients are idle.
 
 **Concurrent writes are last-writer-wins.** Cross-client changes are reconciled through the journal (see [Cross-client sync](#cross-client-sync)): concurrent renames and delete-vs-rename races produce conflict-marked copies, and no data is lost. But two clients writing the *same* file concurrently still resolve by last manifest write; the slower writer's content is superseded rather than preserved as a conflict copy. A stronger guarantee would need S3 conditional PUT (`If-None-Match`) with a retry loop. There is also a small window where a foreign rename whose journal entry is not yet visible resolves as a plain conflict copy rather than adopting the peer's chosen name.
 

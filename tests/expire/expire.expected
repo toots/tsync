@@ -1,0 +1,74 @@
+=== expire all: old version's chunk collected, live chunk kept
+  write foo.txt "one"
+  drain
+  write foo.txt "two two"
+  drain
+  expire all
+  expire all -> 1 version(s), 1 chunk(s) removed, 1 kept
+--- tree
+  f foo.txt size=7 cached=true uploaded=true etag=75364433c1f9ff65
+--- content
+  foo.txt = "two two"
+--- backend
+  chunk 3ab8997bc73098ac-74d584d55f333769 size=7
+  journal <entry-1> = put foo.txt 3
+  journal <entry-2> = put foo.txt 7
+  file foo.txt = manifest size=7 chunks=1
+
+=== expire all: deleted file fully reclaimed
+  write foo.txt "gone soon"
+  drain
+  delete foo.txt
+  expire all
+  expire all -> 1 version(s), 1 chunk(s) removed, 0 kept
+--- tree
+--- content
+--- backend
+  cursor = <entry-2>
+  journal <entry-1> = put foo.txt 9
+  journal <entry-2> = delete foo.txt
+  dir tsync/test/
+
+=== expire at a cutoff: older version dropped, newer kept
+  write foo.txt "one"
+  drain
+  write foo.txt "two two"
+  drain
+  mark
+  drain
+  write foo.txt "three three three"
+  drain
+  expire mark
+  expire mark -> 1 version(s), 1 chunk(s) removed, 2 kept
+--- tree
+  f foo.txt size=17 cached=true uploaded=true etag=bc9c9f6403fc0d62
+--- content
+  foo.txt = "three three three"
+--- backend
+  chunk 3ab8997bc73098ac-74d584d55f333769 size=7
+  chunk faf60158c5948cd2-60f690e9588d51bd size=17
+  journal <entry-1> = put foo.txt 3
+  journal <entry-2> = put foo.txt 7
+  journal <entry-3> = put foo.txt 17
+  version foo.txt#1 = manifest size=7 chunks=1
+  file foo.txt = manifest size=17 chunks=1
+
+=== expire none: nothing removed
+  write foo.txt "one"
+  drain
+  write foo.txt "two two"
+  drain
+  expire none
+  expire none -> 0 version(s), 0 chunk(s) removed, 2 kept
+--- tree
+  f foo.txt size=7 cached=true uploaded=true etag=75364433c1f9ff65
+--- content
+  foo.txt = "two two"
+--- backend
+  chunk 3ab8997bc73098ac-74d584d55f333769 size=7
+  chunk 911faba7321fe1a0-a3cf92cbf55153da size=3
+  journal <entry-1> = put foo.txt 3
+  journal <entry-2> = put foo.txt 7
+  version foo.txt#1 = manifest size=3 chunks=1
+  file foo.txt = manifest size=7 chunks=1
+

@@ -9,6 +9,9 @@ type step =
   | RevertVersion of { path : string; version : string option }
   | Open of string
   | Close of string
+  | Mark  (** record the current time, as an [Expire "mark"] cutoff *)
+  | Expire of string
+      (** cutoff selector: "all" (now), "none" (epoch), or "mark" *)
   | Drain
   | Sync
 
@@ -63,6 +66,8 @@ let render_step = function
         (match version with Some v -> " @" ^ v | None -> " @latest")
   | Open p -> "open " ^ p
   | Close p -> "close " ^ p
+  | Mark -> "mark"
+  | Expire s -> "expire " ^ s
   | Drain -> "drain"
   | Sync -> "sync"
 
@@ -116,6 +121,7 @@ let setup_client (module C : Conf.S) root staging_prefix =
     Thread.yield ()
   done;
   let staging_seq = ref 0 in
+  let mark_time = ref 0. in
   let request fields =
     let line = Yojson.Safe.to_string (`Assoc fields) in
     match
@@ -157,6 +163,19 @@ let setup_client (module C : Conf.S) root staging_prefix =
         must (action ?arg:version "revert" ("/" ^ path))
     | Open p -> F.mark_open (key p)
     | Close p -> ignore (F.mark_closed (key p))
+    | Mark -> mark_time := Unix.gettimeofday ()
+    | Expire selector ->
+        let module E = Expire.Make (C) in
+        let cutoff =
+          match selector with
+            | "all" -> Unix.gettimeofday ()
+            | "none" -> 0.
+            | "mark" -> !mark_time
+            | _ -> failwith ("unknown expire selector: " ^ selector)
+        in
+        let s = E.expire ~cutoff () in
+        Printf.printf "  expire %s -> %d version(s), %d chunk(s) removed, %d kept\n"
+          selector s.Expire.versions_deleted s.chunks_deleted s.chunks_kept
     | Drain ->
         while not (Sq.idle ()) do
           Thread.yield ()
@@ -284,9 +303,16 @@ let dump_backend_at ~backend_root ~domain_prefix ~chunk_prefix ~journal_prefix
     in
     index 0 journal_names
   in
+  let is_marker k = String.length k > 0 && k.[String.length k - 1] = '/' in
   List.iter
     (fun (e : Backend.file_entry) ->
-      if starts_with chunk_prefix e.key then
+      (* Internal prefixes have no meaningful directories; ignore the empty-dir
+         markers the local backend surfaces where S3 would list nothing. *)
+      if
+        is_marker e.key
+        && (starts_with chunk_prefix e.key || starts_with versions_prefix e.key)
+      then ()
+      else if starts_with chunk_prefix e.key then
         Printf.printf "  chunk %s size=%d\n"
           (String.sub e.key
              (String.length chunk_prefix)

@@ -44,6 +44,7 @@ let scenarios : scenario list =
           Write { path = "foo.txt"; content = "deleted content" };
           Drain;
           Delete "foo.txt";
+          Drain;
           RevertVersion { path = "foo.txt"; version = None };
         ];
     };

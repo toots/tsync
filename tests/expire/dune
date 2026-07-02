@@ -1,0 +1,13 @@
+(executable
+ (name expire)
+ (libraries tsync_test_runner))
+
+(rule
+ (with-stdout-to
+  expire.output
+  (run ./expire.exe)))
+
+(rule
+ (alias runtest)
+ (action
+  (diff expire.expected expire.output)))

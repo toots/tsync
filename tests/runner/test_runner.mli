@@ -20,6 +20,11 @@ type step =
   | Close of string
       (** Track the file as open/closed, the way the FUSE layer does around user
           file handles. Foreign ops must never touch an open file. *)
+  | Mark  (** Record the current time, usable later as an [Expire "mark"] cutoff. *)
+  | Expire of string
+      (** Run [Expire.expire]: prune versions older than a cutoff, then GC unused
+          chunks. Selector is ["all"] (now), ["none"] (epoch), or ["mark"] (the
+          time captured by the last [Mark] step — to expire across a boundary). *)
   | Drain
       (** Wait for queued uploads to finish. Also guarantees the next journal
           entry lands in a later millisecond, keeping snapshots deterministic
