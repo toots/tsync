@@ -7,6 +7,7 @@ module type S = sig
     unit
 
   val cancel_put : string -> bool
+  val idle : unit -> bool
 
   val start :
     upload:(key:string -> cancel:bool Atomic.t -> unit) ->
@@ -84,6 +85,15 @@ module Make (C : Conf.S) : S = struct
     in
     Mutex.unlock slots_mtx;
     was_uploading
+
+  let idle () =
+    Mutex.lock queue_mtx;
+    let queue_empty = Queue.is_empty queue in
+    Mutex.unlock queue_mtx;
+    Mutex.lock slots_mtx;
+    let slots_empty = Hashtbl.length slots = 0 in
+    Mutex.unlock slots_mtx;
+    queue_empty && slots_empty
 
   let exec_put slot ({ key; entry_key; ops; _ } : put_data) =
     if Atomic.get slot.cancel then J.delete_local_pending ~entry_key

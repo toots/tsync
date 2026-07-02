@@ -1,0 +1,23 @@
+(executable
+ (name test_scenarios)
+ (libraries
+  tsync_conf
+  tsync_backend
+  tsync_local_backend
+  tsync_core
+  tsync_file
+  tsync_queue
+  tsync_ipc_handler
+  yojson
+  unix
+  threads.posix))
+
+(rule
+ (with-stdout-to
+  test_scenarios.output
+  (run ./test_scenarios.exe)))
+
+(rule
+ (alias runtest)
+ (action
+  (diff test_scenarios.expected test_scenarios.output)))
