@@ -1,7 +1,4 @@
-.PHONY: build test deploy configure install-deps install test-lifecycle
-
-CASES      ?=
-SKIP_BUILD ?=
+.PHONY: build test deploy configure install-deps install
 
 build:
 	dune build
@@ -29,7 +26,3 @@ install:
 	systemctl --user enable tsync
 	systemctl --user restart tsync
 
-test-lifecycle:
-	./test_lifecycle.sh \
-	  $(if $(SKIP_BUILD),--skip-build) \
-	  $(CASES)

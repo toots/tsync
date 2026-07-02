@@ -4,6 +4,7 @@ module Make (C : Conf.S) = struct
   module Fs = File_store.Make (C)
   module H = Hidden_ops.Make (F)
   module I = Internal_ops.Make (F)
+  module Ih = Ipc_handler.Make (C) (F)
 
   (* ── Full-file storage policy ─────────────────────────────────────────────
      Files persist in the local cache. Eviction is deferred while a file has
@@ -120,85 +121,79 @@ module Make (C : Conf.S) = struct
            (String.length path - String.length mount_point))
     else fuse_to_key path
 
-  let ipc_handler mount_point line =
-    match Ipc.parse_command line with
-      | Evict arg ->
-          let key = key_of_path mount_point arg in
-          let lp = F.local_path key in
-          if Sys.file_exists lp && Sys.is_directory lp then begin
-            let rec walk dir =
-              Array.iter
-                (fun name ->
-                  let p = Filename.concat dir name in
-                  if Sys.is_directory p then walk p
-                  else begin
-                    let rel =
-                      String.sub p
-                        (String.length C.cache_root + 1)
-                        (String.length p - String.length C.cache_root - 1)
-                    in
-                    request_evict (C.domain_prefix ^ rel)
-                  end)
-                (try Sys.readdir dir with _ -> [||])
-            in
-            walk lp
-          end
-          else request_evict key;
-          "OK"
-      | Restore arg ->
-          let key = key_of_path mount_point arg in
-          let lp = F.local_path key in
-          let is_dir =
-            (String.length key > 0 && key.[String.length key - 1] = '/')
-            || (Sys.file_exists lp && Sys.is_directory lp)
-          in
-          if is_dir then begin
-            let prefix =
-              if String.length key > 0 && key.[String.length key - 1] = '/' then
-                key
-              else key ^ "/"
-            in
-            let files = Fs.list_all_files ~prefix in
-            List.iter
-              (fun (e : Backend.file_entry) ->
-                try F.ensure_cached e.key
-                with exn ->
-                  Log.err "restore %s: %s" e.key (Printexc.to_string exn))
-              files;
-            "OK"
-          end
-          else (
-            try
-              F.ensure_cached key;
-              "OK"
-            with exn -> "ERROR " ^ Printexc.to_string exn)
-      | Status ->
-          Printf.sprintf {|STATUS {"mount":"%s","domain":"%s","running":true}|}
-            mount_point C.domain_name
-      | Stop ->
-          let _ =
-            Thread.create
-              (fun () ->
-                Unix.sleepf 0.1;
-                ignore
-                  (Sys.command (Printf.sprintf "fusermount3 -u %s" mount_point)))
-              ()
-          in
-          "STOP"
-      | Auto_evict arg -> Ipc.handle_auto_evict ~data_dir:C.data_dir arg
-      | Full_resync ->
-          let rec walk dir =
-            if Sys.file_exists dir then
-              Array.iter
-                (fun name ->
-                  let p = Filename.concat dir name in
-                  if Sys.is_directory p then walk p
-                  else (try Unix.unlink p with _ -> ()))
-                (try Sys.readdir dir with _ -> [||])
-          in
-          walk C.cache_root;
-          "OK"
-      | exception Failure msg -> msg
+  let evict_key key =
+    let lp = F.local_path key in
+    if Sys.file_exists lp && Sys.is_directory lp then begin
+      let rec walk dir =
+        Array.iter
+          (fun name ->
+            let p = Filename.concat dir name in
+            if Sys.is_directory p then walk p
+            else begin
+              let rel =
+                String.sub p
+                  (String.length C.cache_root + 1)
+                  (String.length p - String.length C.cache_root - 1)
+              in
+              request_evict (C.domain_prefix ^ rel)
+            end)
+          (try Sys.readdir dir with _ -> [||])
+      in
+      walk lp
+    end
+    else request_evict key
+
+  let restore_key key =
+    let lp = F.local_path key in
+    let is_dir =
+      (String.length key > 0 && key.[String.length key - 1] = '/')
+      || (Sys.file_exists lp && Sys.is_directory lp)
+    in
+    if is_dir then begin
+      let prefix =
+        if String.length key > 0 && key.[String.length key - 1] = '/' then key
+        else key ^ "/"
+      in
+      let files = Fs.list_all_files ~prefix in
+      List.iter
+        (fun (e : Backend.file_entry) ->
+          try F.ensure_cached e.key
+          with exn -> Log.err "restore %s: %s" e.key (Printexc.to_string exn))
+        files
+    end
+    else F.ensure_cached key
+
+  let full_resync () =
+    let rec walk dir =
+      if Sys.file_exists dir then
+        Array.iter
+          (fun name ->
+            let p = Filename.concat dir name in
+            if Sys.is_directory p then walk p
+            else (try Unix.unlink p with _ -> ()))
+          (try Sys.readdir dir with _ -> [||])
+    in
+    walk C.cache_root
+
+  let ipc_hooks mount_point =
+    Ih.
+      {
+        path_to_key = key_of_path mount_point;
+        request_evict = evict_key;
+        restore = restore_key;
+        full_resync;
+        status_fields = (fun () -> [("mount", `String mount_point)]);
+        on_stop =
+          (fun () ->
+            ignore
+              (Thread.create
+                 (fun () ->
+                   Unix.sleepf 0.1;
+                   ignore
+                     (Sys.command
+                        (Printf.sprintf "fusermount3 -u %s" mount_point)))
+                 ()));
+      }
 
   (* ── FUSE operations ──────────────────────────────────────────────────── *)
 
@@ -301,7 +296,8 @@ module Make (C : Conf.S) = struct
     Log.debug "starting IPC server at %s" C.socket_path;
     let _ipc_thread =
       Thread.create
-        (fun () -> Ipc.serve ~path:C.socket_path (ipc_handler mount_point))
+        (fun () ->
+          Ipc.serve ~path:C.socket_path (Ih.handler (ipc_hooks mount_point)))
         ()
     in
     Log.debug "starting version flusher";

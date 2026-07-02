@@ -1,0 +1,117 @@
+=== create
+  write a.txt "hello tsync"
+  drain
+--- tree
+  f a.txt size=11 cached=true uploaded=true etag=7ef0ef67b1849023
+--- content
+  a.txt = "hello tsync"
+--- backend
+  chunk cba685e06d3e500f-293331628d03f29b size=11
+  journal <entry-1> = put a.txt 11
+  file a.txt = manifest size=11 chunks=1
+
+=== copy
+  write a.txt "same content"
+  drain
+  write b.txt "same content"
+  drain
+--- tree
+  f a.txt size=12 cached=true uploaded=true etag=697517f331217cf1
+  f b.txt size=12 cached=true uploaded=true etag=697517f331217cf1
+--- content
+  a.txt = "same content"
+  b.txt = "same content"
+--- backend
+  chunk 70c096db7a2b03dc-ebb5c33424e783da size=12
+  journal <entry-1> = put a.txt 12
+  journal <entry-2> = put b.txt 12
+  file a.txt = manifest size=12 chunks=1
+  file b.txt = manifest size=12 chunks=1
+
+=== rename
+  write a.txt "renamed content"
+  drain
+  rename a.txt -> b.txt
+  drain
+--- tree
+  f b.txt size=15 cached=true uploaded=true etag=0a27e26deaa484f1
+--- content
+  b.txt = "renamed content"
+--- backend
+  chunk 7ca14c1744b7cedc-339b870e9f742377 size=15
+  journal <entry-1> = put a.txt 15
+  journal <entry-2> = rename a.txt -> b.txt 15
+  version = <entry-2>
+  file b.txt = manifest size=15 chunks=1
+
+=== delete
+  write a.txt "doomed"
+  drain
+  delete a.txt
+  drain
+--- tree
+--- content
+--- backend
+  chunk 09e48a430f6114e8-93dcbb988c78a9c2 size=6
+  journal <entry-1> = put a.txt 6
+  journal <entry-2> = delete a.txt
+  version = <entry-2>
+  dir tsync/test/
+
+=== evict
+  write a.txt "evicted"
+  drain
+  evict a.txt
+--- tree
+  f a.txt size=7 cached=false uploaded=true etag=ae505c96885c6213
+--- content
+  a.txt = "evicted"
+--- backend
+  chunk b25629393d3da6f1-b6252d5b8a6e08d1 size=7
+  journal <entry-1> = put a.txt 7
+  file a.txt = manifest size=7 chunks=1
+
+=== restore
+  write a.txt "round trip"
+  drain
+  evict a.txt
+  restore a.txt
+--- tree
+  f a.txt size=10 cached=true uploaded=true etag=89027f78e857e511
+--- content
+  a.txt = "round trip"
+--- backend
+  chunk 6bee7502b94912b4-8513b792d20a75a2 size=10
+  journal <entry-1> = put a.txt 10
+  file a.txt = manifest size=10 chunks=1
+
+=== mkdir
+  mkdir sub
+  drain
+  write sub/a.txt "nested"
+  drain
+--- tree
+  d sub/
+  f sub/a.txt size=6 cached=true uploaded=true etag=872c93b4f32e2aaa
+--- content
+  sub/a.txt = "nested"
+--- backend
+  chunk fa87ee5fc199e332-c7156c4359a54f81 size=6
+  journal <entry-1> = mkdir sub/
+  journal <entry-2> = put sub/a.txt 6
+  version = <entry-1>
+  file sub/a.txt = manifest size=6 chunks=1
+
+=== rmdir
+  mkdir sub
+  drain
+  rmdir sub
+  drain
+--- tree
+--- content
+--- backend
+  journal <entry-1> = mkdir sub/
+  journal <entry-2> = rmdir sub/
+  version = <entry-2>
+  dir tsync/test/
+

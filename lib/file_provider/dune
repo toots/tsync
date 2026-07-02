@@ -11,6 +11,7 @@
   tsync_core
   tsync_file
   tsync_queue
+  tsync_ipc_handler
   yojson
   unix
   threads.posix))

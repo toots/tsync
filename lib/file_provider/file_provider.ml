@@ -3,7 +3,7 @@ external is_dataless : string -> bool = "caml_is_dataless"
 module Make (C : Conf.S) = struct
   module Sq = Sync_queue.Make (C)
   module F = File.Make (C) (Sq)
-  module Fs = File_store.Make (C)
+  module H = Ipc_handler.Make (C) (F)
 
   (* ── Key helpers ──────────────────────────────────────────────────────── *)
 
@@ -48,159 +48,20 @@ module Make (C : Conf.S) = struct
     in
     C.domain_prefix ^ rel
 
-  (* ── JSON helpers ─────────────────────────────────────────────────────── *)
+  (* ── IPC hooks ────────────────────────────────────────────────────────── *)
 
-  let ok_json fields =
-    Yojson.Safe.to_string (`Assoc (("ok", `Bool true) :: fields))
-
-  let error_json msg =
-    Yojson.Safe.to_string (`Assoc [("ok", `Bool false); ("error", `String msg)])
-
-  let get_str obj key =
-    match List.assoc_opt key obj with Some (`String s) -> s | _ -> ""
-
-  let file_etag key =
-    match F.read_manifest key with Some (`Clean m) -> m.Manifest.h1 | _ -> ""
-
-  (* ── JSON handlers ────────────────────────────────────────────────────── *)
-
-  let handle_stat key =
-    match F.stat key with
-      | Some st ->
-          let is_dirty =
-            match F.read_manifest key with Some `Dirty -> true | _ -> false
-          in
-          ok_json
-            [
-              ("size", `Int (Int64.to_int st.Unix.LargeFile.st_size));
-              ("mtime", `Float st.Unix.LargeFile.st_mtime);
-              ("etag", `String (file_etag key));
-              ("isUploaded", `Bool (not is_dirty));
-            ]
-      | None -> (
-          match Fs.head_opt ~key with
-            | None -> error_json "not found"
-            | Some (e : Backend.file_entry) ->
-                ok_json
-                  [
-                    ("size", `Int e.size);
-                    ("mtime", `Float e.last_modified);
-                    ("etag", `Null);
-                    ("isUploaded", `Bool true);
-                  ])
-
-  let file_entry_json (e : Backend.file_entry) =
-    `Assoc
-      [
-        ("key", `String e.key);
-        ("size", `Int e.size);
-        ("mtime", `Float e.last_modified);
-      ]
-
-  let handle_list_dir prefix =
-    let files, dirs = Fs.list_directory ~prefix in
-    ok_json
-      [
-        ("dirs", `List (List.map (fun d -> `String d) dirs));
-        ("files", `List (List.map file_entry_json files));
-      ]
-
-  let handle_list_all prefix =
-    let files = Fs.list_all_files ~prefix in
-    ok_json [("files", `List (List.map file_entry_json files))]
-
-  let handle_ensure_cached key =
-    F.ensure_cached key;
-    ok_json [("localPath", `String (F.local_path key))]
-
-  let handle_create key =
-    F.create key;
-    ok_json []
-
-  let handle_write key staging_path =
-    ignore (F.cancel_upload key);
-    F.ensure_parent_dir key;
-    Unix.rename staging_path (F.local_path key);
-    F.mark_dirty key;
-    F.queue_put key;
-    match
-      try Some (Unix.LargeFile.stat (F.local_path key)) with _ -> None
-    with
-      | Some st ->
-          ok_json
-            [
-              ("size", `Int (Int64.to_int st.Unix.LargeFile.st_size));
-              ("mtime", `Float st.Unix.LargeFile.st_mtime);
-            ]
-      | None -> ok_json []
-
-  let handle_delete key =
-    F.delete key;
-    ok_json []
-
-  let strip_trailing_slash k =
-    if String.length k > 0 && k.[String.length k - 1] = '/' then
-      String.sub k 0 (String.length k - 1)
-    else k
-
-  let handle_rename src_key dst_key =
-    F.rename
-      ~src:(strip_trailing_slash src_key)
-      ~dst:(strip_trailing_slash dst_key);
-    ok_json []
-
-  let handle_mkdir key =
-    F.mkdir key;
-    ok_json []
-
-  let handle_rmdir key =
-    F.rmdir key;
-    ok_json []
-
-  let json_handler line =
-    match Yojson.Safe.from_string line with
-      | exception _ -> error_json "invalid JSON"
-      | `Assoc obj -> (
-          let action = get_str obj "action" in
-          let path = get_str obj "path" in
-          try
-            match action with
-              | "stat" -> handle_stat path
-              | "list_dir" -> handle_list_dir path
-              | "list_all" -> handle_list_all path
-              | "ensure_cached" -> handle_ensure_cached path
-              | "create" -> handle_create path
-              | "write" -> handle_write path (get_str obj "staging")
-              | "delete" -> handle_delete path
-              | "rename" -> handle_rename (get_str obj "src") path
-              | "mkdir" -> handle_mkdir path
-              | "rmdir" -> handle_rmdir path
-              | _ -> error_json ("unknown action: " ^ action)
-          with exn -> error_json (Printexc.to_string exn))
-      | _ -> error_json "expected JSON object"
-
-  (* ── CLI IPC handler ──────────────────────────────────────────────────── *)
-
-  let cli_handler line =
-    match Ipc.parse_command line with
-      | Stop -> "STOP"
-      | Status ->
-          Printf.sprintf {|STATUS {"domain":"%s","running":true}|} C.domain_name
-      | Evict arg ->
-          Ipc.notify_evict ~path:C.notify_path (path_to_key arg);
-          "OK"
-      | Restore arg ->
-          Ipc.notify_restore ~path:C.notify_path (path_to_key arg);
-          "OK"
-      | Auto_evict arg -> Ipc.handle_auto_evict ~data_dir:C.data_dir arg
-      | Full_resync ->
-          (* ponytail: signal FileProvider extension to re-enumerate *)
-          "OK"
-      | exception Failure msg -> msg
-
-  let dispatch_handler line =
-    if String.length line > 0 && line.[0] = '{' then json_handler line
-    else cli_handler line
+  (* Eviction and restore are performed by the FileProvider extension; the
+     daemon just forwards the request over the notify socket. *)
+  let hooks =
+    H.
+      {
+        path_to_key;
+        request_evict = (fun key -> Ipc.notify_evict ~path:C.notify_path key);
+        restore = (fun key -> Ipc.notify_restore ~path:C.notify_path key);
+        full_resync = (fun () -> ());
+        status_fields = (fun () -> []);
+        on_stop = (fun () -> ());
+      }
 
   let mount _mount_point =
     Sq.start
@@ -212,6 +73,6 @@ module Make (C : Conf.S) = struct
         Ipc.notify_uploaded ~path:C.notify_path key;
         if Ipc.auto_evict_enabled ~data_dir:C.data_dir then
           Ipc.notify_evict ~path:C.notify_path key);
-    Ipc.serve ~path:C.socket_path dispatch_handler;
+    Ipc.serve ~path:C.socket_path (H.handler hooks);
     Sq.drain ()
 end
