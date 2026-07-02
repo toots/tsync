@@ -607,16 +607,20 @@ let configure_cmd =
         | _ ->
             let bucket = prompt "  S3 bucket" None in
             let region = prompt "  AWS region" (Some "us-east-1") in
+            let endpoint = prompt "  Custom endpoint (blank for AWS)" None in
             let access_key_id = prompt "  AWS Access Key ID" None in
             let secret_access_key = read_password "  AWS Secret Access Key" in
             `Assoc
-              [
-                ("type", `String "s3");
-                ("bucket", `String bucket);
-                ("region", `String region);
-                ("accessKeyId", `String access_key_id);
-                ("secretAccessKey", `String secret_access_key);
-              ]
+              ([
+                 ("type", `String "s3");
+                 ("bucket", `String bucket);
+                 ("region", `String region);
+               ]
+              @ (if endpoint = "" then [] else [("endpoint", `String endpoint)])
+              @ [
+                  ("accessKeyId", `String access_key_id);
+                  ("secretAccessKey", `String secret_access_key);
+                ])
     in
     let prompt_backends () =
       let backends = ref [] in
@@ -642,6 +646,16 @@ let configure_cmd =
         ]
     in
     Printf.printf "tsync configuration\n-------------------\n";
+    let config_path = runtime_paths.Runtime.config_path in
+    if
+      Sys.file_exists config_path
+      && not
+           (prompt_bool
+              (Printf.sprintf "Config already exists at %s. Overwrite?"
+                 config_path))
+    then (
+      Printf.printf "Aborted; existing config left untouched.\n";
+      exit 0);
     let client_name = prompt "Client name" (Some (Unix.gethostname ())) in
     let versioning = prompt_bool "Enable versioning (keep version history)?" in
     let domains = ref [] in
@@ -651,7 +665,6 @@ let configure_cmd =
       domains := !domains @ [prompt_domain ()];
       continue_ := prompt_bool "Add another domain?"
     done;
-    let config_path = runtime_paths.Runtime.config_path in
     mkdir_p (Filename.dirname config_path);
     let json =
       `Assoc

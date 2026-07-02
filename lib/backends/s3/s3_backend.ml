@@ -9,15 +9,17 @@ type t = {
   endpoint : Aws_s3.Region.endpoint;
 }
 
-let make_t ~bucket ~region ~access_key_id ~secret_access_key =
+let make_t ?endpoint ~bucket ~region ~access_key_id ~secret_access_key () =
   let credentials =
     Aws_s3.Credentials.make ~access_key:access_key_id
       ~secret_key:secret_access_key ()
   in
-  let endpoint =
-    Aws_s3.Region.endpoint ~inet:`V4 ~scheme:`Https
-      (Aws_s3.Region.of_string region)
+  let region =
+    match endpoint with
+      | Some host -> Aws_s3.Region.vendor ~region_name:region ~host ()
+      | None -> Aws_s3.Region.of_string region
   in
+  let endpoint = Aws_s3.Region.endpoint ~inet:`V4 ~scheme:`Https region in
   { bucket; credentials; endpoint }
 
 let string_of_error = function
@@ -143,9 +145,9 @@ let list_directory t ~prefix () =
   let subdirs = Hashtbl.fold (fun k () acc -> k :: acc) dirs [] in
   (List.rev !files, List.sort String.compare subdirs)
 
-let make ~bucket ~region ~access_key_id ~secret_access_key : (module Backend.S)
-    =
-  let t = make_t ~bucket ~region ~access_key_id ~secret_access_key in
+let make ?endpoint ~bucket ~region ~access_key_id ~secret_access_key () :
+    (module Backend.S) =
+  let t = make_t ?endpoint ~bucket ~region ~access_key_id ~secret_access_key () in
   (module struct
     let put ~key ~data () = put t ~key ~data ()
     let get ~key () = get t ~key ()
@@ -164,6 +166,6 @@ let () =
       | None -> failwith ("s3 backend: missing field: " ^ key)
   in
   Backend.register "s3" (fun get ->
-      make ~bucket:(req get "bucket") ~region:(req get "region")
-        ~access_key_id:(req get "accessKeyId")
-        ~secret_access_key:(req get "secretAccessKey"))
+      make ?endpoint:(get "endpoint") ~bucket:(req get "bucket")
+        ~region:(req get "region") ~access_key_id:(req get "accessKeyId")
+        ~secret_access_key:(req get "secretAccessKey") ())
