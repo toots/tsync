@@ -66,22 +66,38 @@ module Make (C : Conf.S) = struct
     let fd =
       Unix.openfile dst_path [Unix.O_WRONLY; Unix.O_CREAT; Unix.O_TRUNC] 0o644
     in
-    Unix.ftruncate fd (Int64.to_int manifest.Manifest.size);
-    List.iter
-      (fun (chunk : Manifest.chunk_entry) ->
-        let ck = C.chunk_prefix ^ Manifest.chunk_key chunk in
-        let data = Primary.get ~key:ck () in
-        ignore
-          (Unix.lseek fd
-             (chunk.index * manifest.Manifest.chunk_size)
-             Unix.SEEK_SET);
-        let written = ref 0 and len = String.length data in
-        while !written < len do
-          written :=
-            !written + Unix.write_substring fd data !written (len - !written)
-        done)
-      manifest.Manifest.chunks;
-    Unix.close fd
+    Fun.protect
+      ~finally:(fun () -> Unix.close fd)
+      (fun () ->
+        Unix.ftruncate fd (Int64.to_int manifest.Manifest.size);
+        List.iter
+          (fun (chunk : Manifest.chunk_entry) ->
+            let ck = C.chunk_prefix ^ Manifest.chunk_key chunk in
+            let data = Primary.get ~key:ck () in
+            ignore
+              (Unix.lseek fd
+                 (chunk.index * manifest.Manifest.chunk_size)
+                 Unix.SEEK_SET);
+            let written = ref 0 and len = String.length data in
+            while !written < len do
+              written :=
+                !written + Unix.write_substring fd data !written (len - !written)
+            done)
+          manifest.Manifest.chunks)
+
+  let download_chunks ~dst_path manifest =
+    assemble_chunks ~manifest ~dst_path (primary ())
+
+  let fetch_manifest ~key () =
+    let (module Primary : Backend.S) = primary () in
+    match Primary.head_opt ~key () with
+      | None -> None
+      | Some _ -> (
+          try
+            match Manifest.of_string (Primary.get ~key ()) with
+              | `Dirty -> None
+              | `Clean _ as state -> Some state
+          with _ -> None)
 
   let download ~key ~dst_path =
     let (module Primary : Backend.S) = primary () in

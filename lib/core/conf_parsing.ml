@@ -1,6 +1,6 @@
 type backend_config = { backend_type : string; fields : (string * string) list }
 type domain = { name : string; prefix : string; backends : backend_config list }
-type t = { versioning : bool; domains : domain list }
+type t = { versioning : bool; name : string; domains : domain list }
 
 let parse_backend json =
   let open Yojson.Basic.Util in
@@ -30,13 +30,17 @@ let load path =
   let open Yojson.Basic.Util in
   {
     versioning = json |> member "versioning" |> to_bool;
+    name =
+      (match json |> member "name" with
+        | `String s -> s
+        | _ -> Unix.gethostname ());
     domains = json |> member "domains" |> to_list |> List.map parse_domain;
   }
 
 let pick_domain ?domain cfg =
   match domain with
     | Some name -> (
-        match List.find_opt (fun d -> d.name = name) cfg.domains with
+        match List.find_opt (fun (d : domain) -> d.name = name) cfg.domains with
           | Some d -> d
           | None -> failwith ("domain not found: " ^ name))
     | None -> (

@@ -1,5 +1,6 @@
 module type S = sig
   val versioning : bool
+  val client_name : string
   val domain_name : string
   val domain_prefix : string
   val chunk_prefix : string

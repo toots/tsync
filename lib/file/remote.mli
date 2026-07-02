@@ -9,6 +9,15 @@ module Make (C : Conf.S) : sig
     unit ->
     Manifest.state
 
+  (** Download chunks described by [manifest] to [dst_path], without fetching
+      the manifest key itself. Used when the manifest is already known locally
+      (evicted files, conflict copies). *)
+  val download_chunks : dst_path:string -> Manifest.t -> unit
+
+  (** Fetch only the manifest for [key] from the primary backend. Returns [None]
+      if the key does not exist or is not a manifest. *)
+  val fetch_manifest : key:string -> unit -> Manifest.state option
+
   (** Download [key] to [dst_path] from the primary backend. Returns
       [Some state] if the object is a chunked manifest, [None] for plain
       objects. *)

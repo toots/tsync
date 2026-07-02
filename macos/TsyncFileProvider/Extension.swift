@@ -65,6 +65,10 @@ private final class NotifyListener: @unchecked Sendable {
         } else if line.hasPrefix("UPLOADED ") {
             let key = String(line.dropFirst(9))
             manager.signalEnumerator(for: NSFileProviderItemIdentifier(key)) { _ in }
+        } else if line.hasPrefix("CHANGED ") {
+            let key = String(line.dropFirst(8))
+            manager.evictItem(identifier: NSFileProviderItemIdentifier(key)) { _ in }
+            manager.signalEnumerator(for: NSFileProviderItemIdentifier(key)) { _ in }
         }
     }
 }

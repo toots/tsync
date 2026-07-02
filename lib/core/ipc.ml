@@ -42,6 +42,7 @@ let notify ~path msg =
 let notify_evict ~path key = notify ~path ("EVICT " ^ key)
 let notify_restore ~path key = notify ~path ("RESTORE " ^ key)
 let notify_uploaded ~path key = notify ~path ("UPLOADED " ^ key)
+let notify_changed ~path key = notify ~path ("CHANGED " ^ key)
 
 (* ── Server ──────────────────────────────────────────────────────────────── *)
 
