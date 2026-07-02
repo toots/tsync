@@ -1,0 +1,95 @@
+=== modify keeps prior versions
+  write foo.txt "one"
+  drain
+  write foo.txt "two two"
+  drain
+  write foo.txt "three three three"
+  drain
+--- tree
+  f foo.txt size=17 cached=true uploaded=true etag=bc9c9f6403fc0d62
+--- content
+  foo.txt = "three three three"
+--- backend
+  chunk 3ab8997bc73098ac-74d584d55f333769 size=7
+  chunk 911faba7321fe1a0-a3cf92cbf55153da size=3
+  chunk faf60158c5948cd2-60f690e9588d51bd size=17
+  journal <entry-1> = put foo.txt 3
+  journal <entry-2> = put foo.txt 7
+  journal <entry-3> = put foo.txt 17
+  version foo.txt#1 = manifest size=3 chunks=1
+  version foo.txt#2 = manifest size=7 chunks=1
+  file foo.txt = manifest size=17 chunks=1
+
+=== delete keeps a version
+  write foo.txt "keep me"
+  drain
+  delete foo.txt
+--- tree
+--- content
+--- backend
+  chunk dc76ef754c26c4ab-5c6cdb2d755385e1 size=7
+  cursor = <entry-2>
+  journal <entry-1> = put foo.txt 7
+  journal <entry-2> = delete foo.txt
+  version foo.txt#1 = manifest size=7 chunks=1
+  dir tsync/test/
+
+=== rename versions the old path
+  write a.txt "content a"
+  drain
+  rename a.txt -> b.txt
+--- tree
+  f b.txt size=9 cached=true uploaded=true etag=6a7651577e6ba91a
+--- content
+  b.txt = "content a"
+--- backend
+  chunk 3080b92b20375f8a-2fce59f09ae2e917 size=9
+  cursor = <entry-2>
+  journal <entry-1> = put a.txt 9
+  journal <entry-2> = rename a.txt -> b.txt 9
+  version a.txt#1 = manifest size=9 chunks=1
+  file b.txt = manifest size=9 chunks=1
+
+=== revert a deleted file (dataless)
+  write foo.txt "deleted content"
+  drain
+  delete foo.txt
+  revert foo.txt @latest
+--- tree
+  f foo.txt size=15 cached=false uploaded=true etag=eadad83fb0989511
+--- content
+  foo.txt = "deleted content"
+--- backend
+  chunk d1a9d4d84e18e087-2a474494f098b599 size=15
+  cursor = <entry-3>
+  journal <entry-1> = put foo.txt 15
+  journal <entry-2> = delete foo.txt
+  journal <entry-3> = put foo.txt 15
+  version foo.txt#1 = manifest size=15 chunks=1
+  file foo.txt = manifest size=15 chunks=1
+
+=== revert a modified file to its previous version
+  write foo.txt "one"
+  drain
+  write foo.txt "two"
+  drain
+  write foo.txt "three"
+  drain
+  revert foo.txt @latest
+--- tree
+  f foo.txt size=3 cached=false uploaded=true etag=1b5557ec85b5c129
+--- content
+  foo.txt = "two"
+--- backend
+  chunk 6c0560bdcb29998b-8f653076428650aa size=3
+  chunk 911faba7321fe1a0-a3cf92cbf55153da size=3
+  chunk c11df15eb3a3e385-9d1a85bb2a6f4534 size=5
+  cursor = <entry-4>
+  journal <entry-1> = put foo.txt 3
+  journal <entry-2> = put foo.txt 3
+  journal <entry-3> = put foo.txt 5
+  journal <entry-4> = put foo.txt 3
+  version foo.txt#1 = manifest size=3 chunks=1
+  version foo.txt#2 = manifest size=3 chunks=1
+  file foo.txt = manifest size=3 chunks=1
+

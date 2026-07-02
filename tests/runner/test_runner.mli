@@ -13,6 +13,9 @@ type step =
   | Delete of string
   | Evict of string
   | Restore of string
+  | RevertVersion of { path : string; version : string option }
+      (** Restore a saved version to the live location. [version] selects a
+          timestamp; [None] restores the most recent. Content is not fetched. *)
   | Open of string
   | Close of string
       (** Track the file as open/closed, the way the FUSE layer does around user
@@ -30,11 +33,14 @@ type scenario = { name : string; steps : step list }
 type two_client_step = A of step | B of step
 type two_client_scenario = { name : string; steps : two_client_step list }
 
-(** Run each scenario in order, printing its snapshot to stdout. *)
-val run : scenario list -> unit
+(** Run each scenario in order, printing its snapshot to stdout. Set
+    [versioning] to enable version history (modify/rename/delete save a version).
+*)
+val run : ?versioning:bool -> scenario list -> unit
 
 (** Run scenarios with two full client instances (separate cache, data dir,
     journal identity) sharing the same backend. Each step is tagged with the
     client it runs on; the final snapshot shows both clients' views followed by
     the shared backend state. *)
-val run_two_client_scenarios : two_client_scenario list -> unit
+val run_two_client_scenarios :
+  ?versioning:bool -> two_client_scenario list -> unit

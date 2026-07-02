@@ -19,9 +19,9 @@ Both platforms share the same storage layout, chunk format, journal format, and 
 <prefix>/<domain>/<path>                          # file — raw bytes (≤ 8 MB) or manifest JSON (> 8 MB)
 <prefix>/<domain>/<dir>/                          # directory marker — zero-byte object
 <prefix>/.chunks/<h1>-<h2>                        # content-addressable chunk
-<prefix>/.trash/<domain>/<path>/<timestamp-ms>    # versioned delete copy
+<prefix>/.versions/<domain>/<path>/<timestamp-ns> # saved manifest version (modify/rename/delete)
 <prefix>/.journal/<domain>/<13-digit-ms>-<uuid>   # change journal entry
-<prefix>/.version/<domain>                        # latest journal entry key; bumped every ~2 s
+<prefix>/.cursor/<domain>                         # latest journal entry key; bumped every ~2 s
 ```
 
 ### Config
@@ -71,7 +71,7 @@ Config path is platform-specific — see each platform's **Paths** section below
 
 | Field | Type | Description |
 |---|---|---|
-| `versioning` | bool | Copy deleted files to `.trash/` before removing |
+| `versioning` | bool | Save a manifest version under `.versions/` on every modify/rename/delete |
 | `name` | string | Human-readable client name, used to label conflict copies (e.g. `"report (conflicted copy from Romain's MacBook Pro).txt"`). Defaults to the hostname |
 | `domains` | domain[] | One or more domain objects |
 
@@ -146,15 +146,15 @@ Journal keys are lexicographically sortable by time. `start_after=<last-sync-key
 
 `key` and `src` are domain-relative (no backend prefix, no leading `/`). Unknown `op` values are silently skipped for forward compatibility.
 
-### Version flusher
+### Cursor flusher
 
-Journal entries are written to the backend immediately on each mutation. The `.version/<domain>` key is updated separately by a background flusher that runs every ~2 seconds: it writes the version key once per window, pointing to the latest journal entry. A burst of 50 uploads in 2 seconds produces 50 journal entries but only 1 version write.
+Journal entries are written to the backend immediately on each mutation. The `.cursor/<domain>` key is updated separately by a background flusher that runs every ~2 seconds: it writes the cursor once per window, pointing to the latest journal entry. A burst of 50 uploads in 2 seconds produces 50 journal entries but only 1 cursor write.
 
 ### Cross-client sync
 
 Multiple clients can mount the same domain concurrently. Each client applies the others' changes through the journal:
 
-- **Sync poller** (`lib/file/sync_poller.ml`, started by both runtimes): a background thread polls `.version/<domain>` every ~2 s. When the version key changes, it lists journal entries after the last-sync cursor, filters out entries carrying its own `client_uuid`, and applies each foreign entry via `File.apply_foreign_ops`. The cursor (`last-sync-<domain>` in the data dir) then advances to the newest entry.
+- **Sync poller** (`lib/file/sync_poller.ml`, started by both runtimes): a background thread polls `.cursor/<domain>` every ~2 s. When the cursor changes, it lists journal entries after the last-sync marker, filters out entries carrying its own `client_uuid`, and applies each foreign entry via `File.apply_foreign_ops`. The local marker (`last-sync-<domain>` in the data dir) then advances to the newest entry.
 - **`File.apply_foreign_ops`** translates a foreign journal entry into local state:
   - `put` — fetch the remote manifest, update the local `.manifest` sidecar, evict any stale cached data (next read downloads the new content).
   - `delete` — remove local cache and sidecar.
@@ -181,7 +181,11 @@ Brings the local filesystem in sync with the backend on demand (same journal-cur
 
 ### Versioning
 
-When `versioning = true`, deleting a file first copies it to `<prefix>/.trash/<domain>/<path>/<timestamp-ms>`. Trash objects can be listed and restored via the AWS CLI or `tsync history`/`tsync purge`.
+When `versioning = true`, every change that overwrites or removes a file's manifest first copies the current manifest to `<prefix>/.versions/<domain>/<path>/<timestamp-ns>`. A version is only the small manifest JSON — the data chunks it references live in `.chunks/` and are never garbage-collected, so a version is cheap to save and can be restored without transferring any content. There are three save sites: `Remote.upload` (before writing the new manifest, so a modify keeps the old one), `File.apply_delete`, and `File.rename` (versions the source path). History is unbounded — there is no cap or pruning yet.
+
+`File.revert ?version key` restores a version: it copies the versioned manifest back to the live key on every backend, writes a journal `put` entry (so other clients converge), refreshes the local `.manifest` sidecar, and **evicts** any cached data. The restored file is therefore dataless — its bytes are fetched lazily on next open, exactly like any other evicted file. With no `version` it picks the most recent timestamp.
+
+The CLI exposes this as `tsync versions [PATH]` (a file's history, or every deleted file when PATH is omitted — a deleted file is one with versions but no live manifest) and `tsync revert PATH [--version TS]`. Listing reads the backend directly; `revert` goes through the daemon (`revert` IPC action) so the sidecar is refreshed and, on macOS, the FileProvider extension is signalled via `CHANGED`.
 
 ### Shared OCaml libraries (`lib/`)
 
@@ -202,7 +206,7 @@ All library modules are parameterised by a `Conf.S` module (a first-class module
 | `file/manifest.ml` | Manifest JSON serialization/deserialization; chunk key derivation |
 | `file/local.ml` | Local cache paths; create/evict/rename local cache entries |
 | `file/remote.ml` | Chunked upload and download against the backend |
-| `file/versioning.ml` | Copy-to-trash before delete |
+| `file/versioning.ml` | Version key construction + `save` (copy live manifest to a timestamped version) |
 | `file/file.ml` | `File.Make(C)(Sq)` — central file abstraction: stat, read, write, upload, download, evict, delete, rename, mkdir; dirty/open tracking; `apply_foreign_ops` and conflict-copy publishing |
 | `file/sync_poller.ml` | `Sync_poller.Make(C)(F)` — background version-key poller applying foreign journal entries; `sync_once` for on-demand sync |
 | `sync_queue/journal.ml` | `Journal.Make(C)` — journal entry read/write; local pending-entry tracking for crash recovery |
@@ -229,11 +233,13 @@ tsync status
 
 tsync evict   <path>
 tsync restore <path>
-tsync ls      [path]
+tsync ls      [path] [--deleted]
 tsync sync    [--domain <name>]
 
+tsync versions [path]
+tsync revert   <path> [--version <ts>]
+
 tsync auto-evict [on|off|status]
-tsync history <path>
 tsync purge   <path>
 ```
 
@@ -243,7 +249,7 @@ tsync purge   <path>
 
 All daemon communication goes through a Unix socket. The socket path is runtime-specific (see platform sections below). Both runtimes serve the **same** JSON protocol via the shared `Ipc_handler` module — one JSON object per request line, one JSON object per response line.
 
-Runtime-specific behavior (how eviction happens, whether restore materializes locally or notifies the extension, what `status` reports) is supplied through a `hooks` record passed to the handler. The file-operation actions (`stat`, `list_dir`, …) are identical on both platforms; the daemon actions (`evict`, `restore`, `full_resync`, `status`, `stop`) run the runtime's hooks.
+Runtime-specific behavior (how eviction happens, whether restore materializes locally or notifies the extension, what `status` reports) is supplied through a `hooks` record passed to the handler. The file-operation actions (`stat`, `list_dir`, …) are identical on both platforms; the daemon actions (`evict`, `restore`, `revert`, `full_resync`, `status`, `stop`) run the runtime's hooks. `revert` runs `File.revert` in the shared core, then calls the runtime's `changed` hook (a no-op on FUSE, `CHANGED <key>` over `notify.sock` on macOS).
 
 **Requests:**
 
@@ -260,6 +266,7 @@ Runtime-specific behavior (how eviction happens, whether restore materializes lo
 {"action":"rmdir","path":"<key_with_slash>"}
 {"action":"evict","path":"<path>"}
 {"action":"restore","path":"<path>"}
+{"action":"revert","path":"<path>","arg":"<timestamp|>"}
 {"action":"auto_evict","arg":"on|off|status"}
 {"action":"full_resync"}
 {"action":"status"}
@@ -297,6 +304,7 @@ The harness and the scenarios are separate so suites are cheap to add:
 | `tests/runner/` | `tsync_test_runner` library — the harness: temp environment setup, IPC driver, deterministic snapshot dumper. Exposes `step`, `scenario`, `run`, and the two-client variants |
 | `tests/base/` | `base.ml` — one representative scenario per file operation (create, copy, rename, delete, evict, restore, mkdir, rmdir); `base.expected` snapshot |
 | `tests/sync/` | `sync.ml` — cross-client sync and race scenarios; `sync.expected` snapshot |
+| `tests/versioning/` | `versioning.ml` — modify/rename/delete keep versions, and `revert` restores one dataless (run with `~versioning:true`); `versioning.expected` snapshot |
 
 A scenario is declarative data — a `name` and a list of `step`s (`Write`, `Mkdir`, `Rmdir`, `Rename`, `Delete`, `Evict`, `Restore`, `Open`, `Close`, `Drain`, `Sync`). To add a suite, create a sibling directory under `tests/` with a scenario file that does `open Test_runner`, its own `.expected` snapshot, and the three dune stanzas from `tests/base/dune` (executable, `with-stdout-to` output rule, `runtest` diff rule).
 
@@ -313,8 +321,8 @@ The Linux backend mounts a FUSE filesystem at `~/tsync/<domain>/` using `ocamlfu
 ```
 tsync start
   ├── Ipc.serve          Unix socket at ~/.local/share/tsync/tsync.sock
-  ├── version_flusher    Thread: drains pending_version_key → backend every ~2 s
-  ├── sync_poller        Thread: watches .version key, applies foreign journal entries
+  ├── cursor_flusher     Thread: drains pending_cursor → backend every ~2 s
+  ├── sync_poller        Thread: watches .cursor key, applies foreign journal entries
   └── Fuse_fs.mount      ocamlfuse main loop (single-threaded)
        └── FUSE ops → File.* → Sync_queue → backend
 ```
@@ -323,7 +331,7 @@ tsync start
 
 | File | Role |
 |---|---|
-| `fuse_fs.ml` | `Fuse_fs.Make(C)` — FUSE operation handlers; serves the shared `Ipc_handler` with FUSE-specific hooks; version flusher thread; instantiates `Sync_queue`, `File`, `File_store` |
+| `fuse_fs.ml` | `Fuse_fs.Make(C)` — FUSE operation handlers; serves the shared `Ipc_handler` with FUSE-specific hooks; cursor flusher thread; instantiates `Sync_queue`, `File`, `File_store` |
 | `path_ops.ml` | FUSE path operation record type |
 | `internal_ops.ml` | `Internal_ops.Make(F)` — mutation handlers (create, write, unlink, mkdir, rmdir, rename) |
 | `hidden_ops.ml` | `Hidden_ops.Make(F)` — `.fuse_hidden*` file handlers (local-only, never mirror to backend) |
@@ -421,7 +429,7 @@ OCaml daemon (tsync start, LaunchAgent via deploy-daemon.sh)
 
 | File | Role |
 |---|---|
-| `file_provider.ml` | Serves the shared `Ipc_handler` with FileProvider hooks (evict/restore forward over `notify.sock`); `path_to_key` with CloudStorage path stripping |
+| `file_provider.ml` | Serves the shared `Ipc_handler` with FileProvider hooks (evict/restore/changed forward over `notify.sock`); `path_to_key` with CloudStorage path stripping |
 
 **Swift (`macos/`):**
 

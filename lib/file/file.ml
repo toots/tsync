@@ -38,6 +38,13 @@ module type S = sig
   val mkdir : t -> unit
   val rmdir : t -> unit
   val rename : src:t -> dst:t -> unit
+
+  (** Restore a saved version of [key] to the live location. With [version] the
+      given timestamp is restored, otherwise the most recent one. Only the small
+      manifest is copied back; content stays evicted (dataless) and is fetched
+      lazily on next open. *)
+  val revert : ?version:string -> t -> unit
+
   val apply_foreign_ops : Journal.op list -> unit
 end
 
@@ -315,20 +322,16 @@ module Make (C : Conf.S) (Sq : Sync_queue.S) : S = struct
        J.delete_local_pending ~entry_key:ek;
        raise exn);
     ignore (Fs.write_journal_entry ~entry_key:ek ops);
-    Fs.bump_version ek;
+    Fs.bump_cursor ek;
     J.delete_local_pending ~entry_key:ek
 
+  let save_version key =
+    if C.versioning then
+      Versioning.save ~backends:C.backends ~domain_prefix:C.domain_prefix
+        ~versions_prefix:C.versions_prefix ~key
+
   let apply_delete key =
-    if C.versioning then begin
-      let trash_key =
-        Versioning.trash_key ~s3_key:key ~domain_prefix:C.domain_prefix
-          ~trash_prefix:C.trash_prefix
-      in
-      List.iter
-        (fun (module B : Backend.S) ->
-          B.copy ~src_key:key ~dst_key:trash_key ())
-        C.backends
-    end;
+    save_version key;
     List.iter (fun (module B : Backend.S) -> B.delete ~key ()) C.backends;
     clear_local key
 
@@ -373,7 +376,7 @@ module Make (C : Conf.S) (Sq : Sync_queue.S) : S = struct
           let ek =
             Fs.write_journal_entry [`Put (rel_key key, m.Manifest.size)]
           in
-          Fs.bump_version ek
+          Fs.bump_cursor ek
 
   let conflict_name rel =
     let base = Filename.basename rel in
@@ -405,6 +408,7 @@ module Make (C : Conf.S) (Sq : Sync_queue.S) : S = struct
     rename_local ~src ~dst;
     if src_was_uploading && is_cached dst then queue_put dst
     else begin
+      if not is_dir then save_version src;
       let rename_op =
         `Rename Journal.{ dst = rel_key dst; src = rel_key src; size; is_dir }
       in
@@ -426,6 +430,54 @@ module Make (C : Conf.S) (Sq : Sync_queue.S) : S = struct
               queue_put conflict
           | _ -> raise exn)
     end
+
+  (* ── Versioning restore ────────────────────────────────────────────────── *)
+
+  let latest_version primary dir =
+    let (module B : Backend.S) = primary in
+    List.fold_left
+      (fun acc (e : Backend.file_entry) ->
+        match Versioning.parse ~versions_prefix:C.versions_prefix e.key with
+          | None -> acc
+          | Some (_, ts) -> (
+              let n = Int64.of_string ts in
+              match acc with
+                | Some (_, best) when Int64.compare best n >= 0 -> acc
+                | _ -> Some (e.key, n)))
+      None
+      (B.list_all ~prefix:dir ())
+
+  let revert ?version key =
+    let (module B : Backend.S) =
+      match C.backends with b :: _ -> b | [] -> failwith "no backends configured"
+    in
+    let dir =
+      Versioning.version_dir ~s3_key:key ~domain_prefix:C.domain_prefix
+        ~versions_prefix:C.versions_prefix
+    in
+    let src_key =
+      match version with
+        | Some ts -> dir ^ ts
+        | None -> (
+            match latest_version (module B) dir with
+              | Some (k, _) -> k
+              | None -> failwith ("no versions for " ^ rel_key key))
+    in
+    let data = B.get ~key:src_key () in
+    match Manifest.of_string data with
+      | `Dirty -> failwith "cannot restore a dirty version"
+      | `Clean m ->
+          ignore (cancel_upload key);
+          List.iter
+            (fun (module B : Backend.S) -> B.put ~key ~data ())
+            C.backends;
+          write_manifest key (`Clean m);
+          (* Dataless: keep the manifest sidecar, drop any cached content so the
+             restored bytes are fetched lazily on next open. *)
+          evict key;
+          clear_dirty key;
+          let ek = Fs.write_journal_entry [`Put (rel_key key, m.Manifest.size)] in
+          Fs.bump_cursor ek
 
   (* ── Foreign op application (sync) ────────────────────────────────────── *)
 

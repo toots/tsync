@@ -38,6 +38,7 @@ module type S = sig
   val mkdir : t -> unit
   val rmdir : t -> unit
   val rename : src:t -> dst:t -> unit
+  val revert : ?version:string -> t -> unit
   val apply_foreign_ops : Journal.op list -> unit
 end
 

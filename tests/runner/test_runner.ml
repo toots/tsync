@@ -6,6 +6,7 @@ type step =
   | Delete of string
   | Evict of string
   | Restore of string
+  | RevertVersion of { path : string; version : string option }
   | Open of string
   | Close of string
   | Drain
@@ -57,6 +58,9 @@ let render_step = function
   | Delete p -> "delete " ^ p
   | Evict p -> "evict " ^ p
   | Restore p -> "restore " ^ p
+  | RevertVersion { path; version } ->
+      Printf.sprintf "revert %s%s" path
+        (match version with Some v -> " @" ^ v | None -> " @latest")
   | Open p -> "open " ^ p
   | Close p -> "close " ^ p
   | Drain -> "drain"
@@ -95,6 +99,7 @@ let setup_client (module C : Conf.S) root staging_prefix =
         path_to_key = (fun p -> key (strip_root p));
         request_evict = F.evict;
         restore = F.ensure_cached;
+        changed = (fun _ -> ());
         full_resync = (fun () -> ());
         status_fields = (fun () -> []);
         on_stop = (fun () -> ());
@@ -102,7 +107,7 @@ let setup_client (module C : Conf.S) root staging_prefix =
   in
   Sq.start
     ~upload:(fun ~key ~cancel -> F.upload ~cancel key)
-    ~on_version:(fun ~entry_key:_ -> ())
+    ~on_cursor:(fun ~entry_key:_ -> ())
     ~on_upload_done:(fun ~key:_ -> ());
   let server =
     Thread.create (fun () -> Ipc.serve ~path:C.socket_path (H.handler hooks)) ()
@@ -123,10 +128,11 @@ let setup_client (module C : Conf.S) root staging_prefix =
   let response_error obj =
     match List.assoc_opt "error" obj with Some (`String s) -> s | _ -> "?"
   in
-  let action ?src ?staging act path =
+  let action ?src ?staging ?arg act path =
     request
       ([("action", `String act); ("path", `String path)]
       @ (match src with Some s -> [("src", `String s)] | None -> [])
+      @ (match arg with Some s -> [("arg", `String s)] | None -> [])
       @ match staging with Some s -> [("staging", `String s)] | None -> [])
   in
   let must obj =
@@ -147,6 +153,8 @@ let setup_client (module C : Conf.S) root staging_prefix =
     | Delete p -> must (action "delete" (key p))
     | Evict p -> must (action "evict" ("/" ^ p))
     | Restore p -> must (action "restore" ("/" ^ p))
+    | RevertVersion { path; version } ->
+        must (action ?arg:version "revert" ("/" ^ path))
     | Open p -> F.mark_open (key p)
     | Close p -> ignore (F.mark_closed (key p))
     | Drain ->
@@ -235,7 +243,7 @@ let setup_client (module C : Conf.S) root staging_prefix =
 (* ── Backend snapshot (shared between single- and two-client runners) ─────── *)
 
 let dump_backend_at ~backend_root ~domain_prefix ~chunk_prefix ~journal_prefix
-    ~version_key =
+    ~versions_prefix ~cursor_key =
   let (module B : Backend.S) = Local_backend.make ~root:backend_root in
   let rel_key k =
     let pfx = String.length domain_prefix in
@@ -243,6 +251,23 @@ let dump_backend_at ~backend_root ~domain_prefix ~chunk_prefix ~journal_prefix
     else k
   in
   let entries = B.list_all ~prefix:"" () in
+  (* Alias non-deterministic nanosecond version timestamps as stable per-file
+     indices (<rel>#1, <rel>#2, …) ordered oldest-first. *)
+  let version_alias = Hashtbl.create 16 in
+  let version_entries =
+    List.filter_map
+      (fun (e : Backend.file_entry) ->
+        match Versioning.parse ~versions_prefix e.key with
+          | Some (rel, ts) -> Some (rel, Int64.of_string ts, e.key)
+          | None -> None)
+      entries
+  in
+  List.iter
+    (fun rel ->
+      List.filter (fun (r, _, _) -> r = rel) version_entries
+      |> List.sort (fun (_, a, _) (_, b, _) -> Int64.compare a b)
+      |> List.iteri (fun i (_, _, k) -> Hashtbl.replace version_alias k (i + 1)))
+    (List.sort_uniq compare (List.map (fun (r, _, _) -> r) version_entries));
   let journal_names =
     List.filter_map
       (fun (e : Backend.file_entry) ->
@@ -273,9 +298,25 @@ let dump_backend_at ~backend_root ~domain_prefix ~chunk_prefix ~journal_prefix
           (entry_alias (Filename.basename e.key))
           (String.concat "; " (List.map render_op ops))
       end
-      else if e.key = version_key then
-        Printf.printf "  version = %s\n"
+      else if e.key = cursor_key then
+        Printf.printf "  cursor = %s\n"
           (entry_alias (String.trim (B.get ~key:e.key ())))
+      else if starts_with versions_prefix e.key then (
+        match Versioning.parse ~versions_prefix e.key with
+          | Some (rel, _) ->
+              let n =
+                Option.value ~default:0 (Hashtbl.find_opt version_alias e.key)
+              in
+              let desc =
+                match Manifest.of_string (B.get ~key:e.key ()) with
+                  | `Clean m ->
+                      Printf.sprintf "manifest size=%Ld chunks=%d" m.Manifest.size
+                        (List.length m.Manifest.chunks)
+                  | `Dirty -> "dirty"
+                  | exception _ -> "raw"
+              in
+              Printf.printf "  version %s#%d = %s\n" rel n desc
+          | None -> Printf.printf "  other %s size=%d\n" e.key e.size)
       else if starts_with domain_prefix e.key then begin
         let rel = rel_key e.key in
         if String.length e.key > 0 && e.key.[String.length e.key - 1] = '/' then
@@ -295,20 +336,20 @@ let dump_backend_at ~backend_root ~domain_prefix ~chunk_prefix ~journal_prefix
 
 (* ── Scenario runners ─────────────────────────────────────────────────────── *)
 
-let run_scenario ({ name; steps } : scenario) =
+let run_scenario ?(versioning = false) ({ name; steps } : scenario) =
   Printf.printf "=== %s\n" name;
   List.iter (fun s -> Printf.printf "  %s\n" (render_step s)) steps;
   let root = Filename.temp_dir "tsync-test" "" in
   let backend_root = Filename.concat root "backend" in
   let module C = struct
-    let versioning = false
+    let versioning = versioning
     let client_name = "Test Client"
     let domain_name = "test"
     let domain_prefix = "tsync/test/"
     let chunk_prefix = "tsync/.chunks/"
-    let trash_prefix = "tsync/.trash/test/"
+    let versions_prefix = "tsync/.versions/test/"
     let journal_prefix = "tsync/.journal/test/"
-    let version_key = "tsync/.version/test"
+    let cursor_key = "tsync/.cursor/test"
     let backends = [Local_backend.make ~root:backend_root]
     let cache_root = Filename.concat root "cache"
     let data_dir = Filename.concat root "data"
@@ -326,13 +367,14 @@ let run_scenario ({ name; steps } : scenario) =
      print_endline "--- backend";
      dump_backend_at ~backend_root ~domain_prefix:C.domain_prefix
        ~chunk_prefix:C.chunk_prefix ~journal_prefix:C.journal_prefix
-       ~version_key:C.version_key
+       ~versions_prefix:C.versions_prefix ~cursor_key:C.cursor_key
    with exn -> Printf.printf "  ERROR %s\n" (Printexc.to_string exn));
   client.stop ();
   rm_rf root;
   print_newline ()
 
-let run_two_client_scenario ({ name; steps } : two_client_scenario) =
+let run_two_client_scenario ?(versioning = false)
+    ({ name; steps } : two_client_scenario) =
   Printf.printf "=== %s\n" name;
   List.iter
     (fun s ->
@@ -344,14 +386,14 @@ let run_two_client_scenario ({ name; steps } : two_client_scenario) =
   let backend_root = Filename.concat root "backend" in
   let shared_backends = [Local_backend.make ~root:backend_root] in
   let module Ca = struct
-    let versioning = false
+    let versioning = versioning
     let client_name = "Client A"
     let domain_name = "test"
     let domain_prefix = "tsync/test/"
     let chunk_prefix = "tsync/.chunks/"
-    let trash_prefix = "tsync/.trash/test/"
+    let versions_prefix = "tsync/.versions/test/"
     let journal_prefix = "tsync/.journal/test/"
-    let version_key = "tsync/.version/test"
+    let cursor_key = "tsync/.cursor/test"
     let backends = shared_backends
     let cache_root = Filename.concat root "cache-a"
     let data_dir = Filename.concat root "data-a"
@@ -359,14 +401,14 @@ let run_two_client_scenario ({ name; steps } : two_client_scenario) =
     let notify_path = Filename.concat root "notify-a.sock"
   end in
   let module Cb = struct
-    let versioning = false
+    let versioning = versioning
     let client_name = "Client B"
     let domain_name = "test"
     let domain_prefix = "tsync/test/"
     let chunk_prefix = "tsync/.chunks/"
-    let trash_prefix = "tsync/.trash/test/"
+    let versions_prefix = "tsync/.versions/test/"
     let journal_prefix = "tsync/.journal/test/"
-    let version_key = "tsync/.version/test"
+    let cursor_key = "tsync/.cursor/test"
     let backends = shared_backends
     let cache_root = Filename.concat root "cache-b"
     let data_dir = Filename.concat root "data-b"
@@ -398,14 +440,15 @@ let run_two_client_scenario ({ name; steps } : two_client_scenario) =
      print_endline "--- backend";
      dump_backend_at ~backend_root ~domain_prefix:Cb.domain_prefix
        ~chunk_prefix:Cb.chunk_prefix ~journal_prefix:Cb.journal_prefix
-       ~version_key:Cb.version_key
+       ~versions_prefix:Cb.versions_prefix ~cursor_key:Cb.cursor_key
    with exn -> Printf.printf "  ERROR %s\n" (Printexc.to_string exn));
   client_a.stop ();
   client_b.stop ();
   rm_rf root;
   print_newline ()
 
-let run scenarios = List.iter run_scenario scenarios
+let run ?versioning scenarios =
+  List.iter (run_scenario ?versioning) scenarios
 
-let run_two_client_scenarios scenarios =
-  List.iter run_two_client_scenario scenarios
+let run_two_client_scenarios ?versioning scenarios =
+  List.iter (run_two_client_scenario ?versioning) scenarios

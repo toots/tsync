@@ -39,9 +39,9 @@
   b.txt = "renamed content"
 --- backend
   chunk 7ca14c1744b7cedc-339b870e9f742377 size=15
+  cursor = <entry-2>
   journal <entry-1> = put a.txt 15
   journal <entry-2> = rename a.txt -> b.txt 15
-  version = <entry-2>
   file b.txt = manifest size=15 chunks=1
 
 === delete
@@ -53,9 +53,9 @@
 --- content
 --- backend
   chunk 09e48a430f6114e8-93dcbb988c78a9c2 size=6
+  cursor = <entry-2>
   journal <entry-1> = put a.txt 6
   journal <entry-2> = delete a.txt
-  version = <entry-2>
   dir tsync/test/
 
 === evict
@@ -97,9 +97,9 @@
   sub/a.txt = "nested"
 --- backend
   chunk fa87ee5fc199e332-c7156c4359a54f81 size=6
+  cursor = <entry-1>
   journal <entry-1> = mkdir sub/
   journal <entry-2> = put sub/a.txt 6
-  version = <entry-1>
   file sub/a.txt = manifest size=6 chunks=1
 
 === rmdir
@@ -110,8 +110,8 @@
 --- tree
 --- content
 --- backend
+  cursor = <entry-2>
   journal <entry-1> = mkdir sub/
   journal <entry-2> = rmdir sub/
-  version = <entry-2>
   dir tsync/test/
 

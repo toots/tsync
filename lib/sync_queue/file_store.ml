@@ -58,13 +58,13 @@ module Make (C : Conf.S) = struct
     put_all ~key ~data:(Journal.encode ops) ();
     ek
 
-  let bump_version entry_key = put_all ~key:C.version_key ~data:entry_key ()
+  let bump_cursor entry_key = put_all ~key:C.cursor_key ~data:entry_key ()
 
-  let fetch_version () =
+  let fetch_cursor () =
     let (module Primary : Backend.S) = primary () in
-    match Primary.head_opt ~key:C.version_key () with
+    match Primary.head_opt ~key:C.cursor_key () with
       | None -> None
-      | Some _ -> Some (String.trim (Primary.get ~key:C.version_key ()))
+      | Some _ -> Some (String.trim (Primary.get ~key:C.cursor_key ()))
 
   let list_journal_keys ?start_after () =
     let (module Primary : Backend.S) = primary () in

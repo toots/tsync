@@ -1,0 +1,13 @@
+(executable
+ (name versioning)
+ (libraries tsync_test_runner))
+
+(rule
+ (with-stdout-to
+  versioning.output
+  (run ./versioning.exe)))
+
+(rule
+ (alias runtest)
+ (action
+  (diff versioning.expected versioning.output)))

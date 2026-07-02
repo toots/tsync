@@ -59,6 +59,7 @@ module Make (C : Conf.S) = struct
         path_to_key;
         request_evict = (fun key -> Ipc.notify_evict ~path:C.notify_path key);
         restore = (fun key -> Ipc.notify_restore ~path:C.notify_path key);
+        changed = (fun key -> Ipc.notify_changed ~path:C.notify_path key);
         full_resync = (fun () -> ());
         status_fields = (fun () -> []);
         on_stop = (fun () -> ());
@@ -67,7 +68,7 @@ module Make (C : Conf.S) = struct
   let mount _mount_point =
     Sq.start
       ~upload:(fun ~key ~cancel -> F.upload ~cancel key)
-      ~on_version:(fun ~entry_key:_ -> ())
+      ~on_cursor:(fun ~entry_key:_ -> ())
       ~on_upload_done:(fun ~key ->
         (* The daemon copy only exists to stage the upload; drop it now. *)
         F.evict key;

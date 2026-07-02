@@ -55,13 +55,28 @@ On macOS, the first time you'll need to approve the extension in **System Settin
 ## Everyday commands
 
 ```bash
-tsync ls [path]           # list files
+tsync ls [path]           # list files (add --deleted to include deleted ones)
 tsync evict   <path>      # drop a file's local copy (stays in the cloud)
 tsync restore <path>      # pull a file back down
+tsync versions [path]     # a file's version history, or all deleted files
+tsync revert  <path>      # bring back a previous version (or an undeleted file)
 tsync sync                # apply changes made from other machines
 tsync status              # show daemon state
 tsync stop                # unmount
 ```
+
+### Versioning
+
+With versioning enabled (`tsync configure`), every time you modify, rename or delete a file, tsync keeps the previous version. Nothing is capped yet — history grows until you prune it manually.
+
+```bash
+tsync versions                              # list every file that's been deleted
+tsync versions notes/todo.txt               # timestamps of each saved version of a file
+tsync revert notes/todo.txt                 # restore the most recent version
+tsync revert notes/todo.txt --version <ts>  # restore a specific one
+```
+
+Because a version is just the file's small manifest (the actual data blocks are shared and never thrown away), `revert` is instant and downloads nothing: the file reappears evicted and only fetches its content the first time you open it.
 
 Run `tsync configure` any time to add folders or change backends. See the [configuration reference](IMPLEMENTATION.md#config) for the full config-file format, including how to set up S3 credentials and multiple backends.
 
