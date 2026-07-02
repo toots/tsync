@@ -24,8 +24,15 @@ let read_file path =
 
 let make ~root : (module Backend.S) =
   let resolve key = if key = "" then root else Filename.concat root key in
+  (* Keys with a trailing slash are directory markers: S3 stores them as
+     zero-byte objects, here they map to actual directories. *)
+  let is_dir_key key =
+    String.length key > 0 && key.[String.length key - 1] = '/'
+  in
   (module struct
-    let put ~key ~data () = write_file (resolve key) data
+    let put ~key ~data () =
+      if is_dir_key key then mkdir_p (resolve key)
+      else write_file (resolve key) data
 
     let get ~key () =
       try read_file (resolve key)
@@ -35,18 +42,36 @@ let make ~root : (module Backend.S) =
     let head_opt ~key () =
       let path = resolve key in
       match Unix.stat path with
+        | { Unix.st_kind = Unix.S_DIR; st_mtime; _ } ->
+            Some Backend.{ key; size = 0; last_modified = st_mtime }
         | { Unix.st_size; st_mtime; _ } ->
             Some Backend.{ key; size = st_size; last_modified = st_mtime }
         | exception Unix.Unix_error (Unix.ENOENT, _, _) -> None
 
+    let rec rm_rf path =
+      match Unix.lstat path with
+        | { Unix.st_kind = Unix.S_DIR; _ } -> (
+            Array.iter
+              (fun name -> rm_rf (Filename.concat path name))
+              (Sys.readdir path);
+            try Unix.rmdir path with Unix.Unix_error _ -> ())
+        | _ -> ( try Unix.unlink path with Unix.Unix_error _ -> ())
+        | exception Unix.Unix_error (Unix.ENOENT, _, _) -> ()
+
     let delete ~key () =
-      try Unix.unlink (resolve key)
-      with Unix.Unix_error (Unix.ENOENT, _, _) -> ()
+      let path = resolve key in
+      match Unix.lstat path with
+        | { Unix.st_kind = Unix.S_DIR; _ } -> rm_rf path
+        | _ -> (
+            try Unix.unlink path
+            with Unix.Unix_error (Unix.ENOENT, _, _) -> ())
+        | exception Unix.Unix_error (Unix.ENOENT, _, _) -> ()
 
     let delete_multi keys = List.iter (fun key -> delete ~key ()) keys
 
     let copy ~src_key ~dst_key () =
-      write_file (resolve dst_key) (read_file (resolve src_key))
+      if is_dir_key src_key then mkdir_p (resolve dst_key)
+      else write_file (resolve dst_key) (read_file (resolve src_key))
 
     let list_all ~prefix () =
       let base = resolve prefix in
@@ -54,10 +79,12 @@ let make ~root : (module Backend.S) =
       let rec walk path key_prefix =
         match Unix.opendir path with
           | dir ->
+              let empty = ref true in
               (try
                  while true do
                    let entry = Unix.readdir dir in
                    if entry <> "." && entry <> ".." then begin
+                     empty := false;
                      let full_path = Filename.concat path entry in
                      let full_key = key_prefix ^ entry in
                      match (Unix.stat full_path).Unix.st_kind with
@@ -76,7 +103,13 @@ let make ~root : (module Backend.S) =
                    end
                  done
                with End_of_file -> ());
-              Unix.closedir dir
+              Unix.closedir dir;
+              (* Surface empty directories as their marker key, matching the
+                 zero-byte marker object S3 lists for created directories. *)
+              if !empty && is_dir_key key_prefix then
+                entries :=
+                  Backend.{ key = key_prefix; size = 0; last_modified = 0. }
+                  :: !entries
           | exception Unix.Unix_error (Unix.ENOENT, _, _) -> ()
           | exception Unix.Unix_error (Unix.ENOTDIR, _, _) -> (
               match Unix.stat base with

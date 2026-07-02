@@ -11,45 +11,7 @@ let send ~socket_path cmd =
   Unix.close fd;
   resp
 
-(* ── Server ──────────────────────────────────────────────────────────────── *)
-
-let rec mkdir_p path =
-  if not (Sys.file_exists path) then begin
-    mkdir_p (Filename.dirname path);
-    try Unix.mkdir path 0o700 with Unix.Unix_error (Unix.EEXIST, _, _) -> ()
-  end
-
-(* Split "CMD rest of line" on first space only *)
-let split_cmd line =
-  match String.index_opt line ' ' with
-    | None -> (line, "")
-    | Some i ->
-        ( String.sub line 0 i,
-          String.sub line (i + 1) (String.length line - i - 1) )
-
-type command =
-  | Stop
-  | Status
-  | Evict of string
-  | Restore of string
-  | Auto_evict of string
-  | Full_resync
-
-let parse_command line =
-  let cmd, arg = split_cmd (String.trim line) in
-  match cmd with
-    | "STOP" -> Stop
-    | "STATUS" -> Status
-    | "EVICT" -> Evict arg
-    | "RESTORE" -> Restore arg
-    | "AUTO_EVICT" -> Auto_evict arg
-    | "FULL_RESYNC" -> Full_resync
-    | c -> failwith ("ERROR unknown command: " ^ c)
-
 (* ── Auto-evict user feature ─────────────────────────────────────────────── *)
-
-(* Persisted as a marker file in the daemon data directory. How eviction is
-   performed after upload is up to each runtime. *)
 
 let auto_evict_marker ~data_dir = Filename.concat data_dir "auto-evict"
 let auto_evict_enabled ~data_dir = Sys.file_exists (auto_evict_marker ~data_dir)
@@ -81,6 +43,14 @@ let notify_evict ~path key = notify ~path ("EVICT " ^ key)
 let notify_restore ~path key = notify ~path ("RESTORE " ^ key)
 let notify_uploaded ~path key = notify ~path ("UPLOADED " ^ key)
 
+(* ── Server ──────────────────────────────────────────────────────────────── *)
+
+let rec mkdir_p path =
+  if not (Sys.file_exists path) then begin
+    mkdir_p (Filename.dirname path);
+    try Unix.mkdir path 0o700 with Unix.Unix_error (Unix.EEXIST, _, _) -> ()
+  end
+
 let serve ~path handler =
   let dir = Filename.dirname path in
   mkdir_p dir;
@@ -95,8 +65,8 @@ let serve ~path handler =
        let ic = Unix.in_channel_of_descr client_fd in
        let oc = Unix.out_channel_of_descr client_fd in
        let line = input_line ic in
-       let resp = handler line in
-       if resp = "STOP" then running := false;
+       let resp, action = handler line in
+       if action = `Stop then running := false;
        output_string oc (resp ^ "\n");
        flush oc
      with _ -> ());

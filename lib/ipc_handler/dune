@@ -1,0 +1,11 @@
+(library
+ (name tsync_ipc_handler)
+ (wrapped false)
+ (libraries
+  tsync_conf
+  tsync_core
+  tsync_file
+  tsync_queue
+  tsync_log
+  yojson
+  unix))

@@ -1,13 +1,10 @@
 (library
- (name tsync_file_provider)
+ (name tsync_test_runner)
  (wrapped false)
- (enabled_if
-  (= %{system} macosx))
- (foreign_stubs
-  (language c)
-  (names platform_stubs))
  (libraries
   tsync_conf
+  tsync_backend
+  tsync_local_backend
   tsync_core
   tsync_file
   tsync_queue

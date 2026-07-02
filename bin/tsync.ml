@@ -10,6 +10,27 @@ let rec mkdir_p path =
 
 let runtime_paths = Runtime.default_paths ()
 
+(* Send a JSON IPC request; return the parsed response fields.
+   Raises Failure with the daemon's error message when ok=false. *)
+let ipc_request ?(socket_path = runtime_paths.Runtime.socket_path) fields =
+  let request = Yojson.Safe.to_string (`Assoc fields) in
+  match Yojson.Safe.from_string (Ipc.send ~socket_path request) with
+    | `Assoc obj when List.assoc_opt "ok" obj = Some (`Bool true) -> obj
+    | `Assoc obj ->
+        let msg =
+          match List.assoc_opt "error" obj with
+            | Some (`String s) -> s
+            | _ -> "unexpected response"
+        in
+        failwith msg
+    | _ -> failwith "unexpected response"
+
+let ipc_action ?socket_path ?path ?arg action =
+  ipc_request ?socket_path
+    ([("action", `String action)]
+    @ (match path with Some p -> [("path", `String p)] | None -> [])
+    @ match arg with Some a -> [("arg", `String a)] | None -> [])
+
 let make_backend (bc : Conf_parsing.backend_config) =
   Backend.make ~backend_type:bc.backend_type ~get_field:(fun k ->
       List.assoc_opt k bc.fields)
@@ -75,9 +96,9 @@ let start_cmd =
 
 let stop_cmd =
   let run () =
-    let resp = Ipc.send ~socket_path:runtime_paths.Runtime.socket_path "STOP" in
-    if resp = "OK" || resp = "STOP" then print_endline "Stopped."
-    else Printf.eprintf "Error: %s\n" resp
+    match ipc_action "stop" with
+      | _ -> print_endline "Stopped."
+      | exception Failure msg -> Printf.eprintf "Error: %s\n" msg
   in
   Cmd.v
     (Cmd.info "stop" ~doc:"Stop the sync daemon")
@@ -88,8 +109,8 @@ let stop_cmd =
 let status_cmd =
   let run () =
     try
-      print_endline
-        (Ipc.send ~socket_path:runtime_paths.Runtime.socket_path "STATUS")
+      let obj = ipc_action "status" in
+      print_endline (Yojson.Safe.to_string (`Assoc obj))
     with _ -> print_endline "Daemon not running"
   in
   Cmd.v
@@ -103,12 +124,9 @@ let evict_cmd =
   let run paths =
     List.iter
       (fun path ->
-        let resp =
-          Ipc.send ~socket_path:runtime_paths.Runtime.socket_path
-            ("EVICT " ^ path)
-        in
-        if resp = "OK" then Printf.printf "Evicted: %s\n" path
-        else Printf.eprintf "Error: %s\n" resp)
+        match ipc_action ~path "evict" with
+          | _ -> Printf.printf "Evicted: %s\n" path
+          | exception Failure msg -> Printf.eprintf "Error: %s\n" msg)
       paths
   in
   Cmd.v
@@ -122,12 +140,9 @@ let restore_cmd =
   let run paths =
     List.iter
       (fun path ->
-        let resp =
-          Ipc.send ~socket_path:runtime_paths.Runtime.socket_path
-            ("RESTORE " ^ path)
-        in
-        if resp = "OK" then Printf.printf "Restored: %s\n" path
-        else Printf.eprintf "Error: %s\n" resp)
+        match ipc_action ~path "restore" with
+          | _ -> Printf.printf "Restored: %s\n" path
+          | exception Failure msg -> Printf.eprintf "Error: %s\n" msg)
       paths
   in
   Cmd.v
@@ -221,23 +236,19 @@ let auto_evict_cmd =
       & info [] ~docv:"on|off|status"
           ~doc:"Enable, disable, or query auto-evict after upload")
   in
+  let auto_evict_result obj =
+    match List.assoc_opt "result" obj with Some (`String s) -> s | _ -> ""
+  in
   let run state =
     match state with
       | None | Some "status" -> (
-          let resp =
-            Ipc.send ~socket_path:runtime_paths.Runtime.socket_path
-              "AUTO_EVICT status"
-          in
-          match resp with
-            | "on" | "off" -> Printf.printf "auto-evict: %s\n" resp
-            | _ -> Printf.eprintf "Error: %s\n" resp)
-      | Some (("on" | "off") as s) ->
-          let resp =
-            Ipc.send ~socket_path:runtime_paths.Runtime.socket_path
-              ("AUTO_EVICT " ^ s)
-          in
-          if resp = "OK" then Printf.printf "auto-evict: %s\n" s
-          else Printf.eprintf "Error: %s\n" resp
+          match ipc_action ~arg:"status" "auto_evict" with
+            | obj -> Printf.printf "auto-evict: %s\n" (auto_evict_result obj)
+            | exception Failure msg -> Printf.eprintf "Error: %s\n" msg)
+      | Some (("on" | "off") as s) -> (
+          match ipc_action ~arg:s "auto_evict" with
+            | _ -> Printf.printf "auto-evict: %s\n" s
+            | exception Failure msg -> Printf.eprintf "Error: %s\n" msg)
       | Some other -> Printf.eprintf "Expected on|off|status, got: %s\n" other
   in
   Cmd.v
@@ -358,11 +369,9 @@ let sync_cmd =
               > Journal.timestamp_ms_of_filename last_sync_key)
     in
     if need_full_resync then begin
-      (try
-         let resp = Ipc.send ~socket_path:C.socket_path "FULL_RESYNC" in
-         if resp <> "OK" then
-           Printf.eprintf "Warning: FULL_RESYNC response: %s\n" resp
-       with _ -> ());
+      (try ignore (ipc_action ~socket_path:C.socket_path "full_resync") with
+        | Failure msg -> Printf.eprintf "Warning: full_resync: %s\n" msg
+        | _ -> ());
       let new_key = C.journal_prefix ^ J.entry_key () in
       let oc = open_out last_sync_file in
       output_string oc new_key;
@@ -395,11 +404,12 @@ let sync_cmd =
       let touched_keys = Hashtbl.fold (fun k () acc -> k :: acc) touched [] in
       List.iter
         (fun rel_key ->
-          let resp =
-            Ipc.send ~socket_path:C.socket_path ("EVICT /" ^ rel_key)
-          in
-          if resp <> "OK" then
-            Printf.eprintf "Warning: evict %s: %s\n" rel_key resp)
+          try
+            ignore
+              (ipc_action ~socket_path:C.socket_path ~path:("/" ^ rel_key)
+                 "evict")
+          with Failure msg ->
+            Printf.eprintf "Warning: evict %s: %s\n" rel_key msg)
         touched_keys;
       (match all_keys with
         | [] -> ()

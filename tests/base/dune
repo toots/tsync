@@ -1,0 +1,13 @@
+(executable
+ (name base)
+ (libraries tsync_test_runner))
+
+(rule
+ (with-stdout-to
+  base.output
+  (run ./base.exe)))
+
+(rule
+ (alias runtest)
+ (action
+  (diff base.expected base.output)))
