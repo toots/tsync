@@ -70,10 +70,10 @@ tsync stop                # unmount
 With versioning enabled (`tsync configure`), every time you modify, rename or delete a file, tsync keeps the previous version. Nothing is capped yet — history grows until you prune it manually.
 
 ```bash
-tsync versions                 # list every file that's been deleted
-tsync versions notes/todo.txt  # timestamps of each saved version of a file
-tsync revert  notes/todo.txt              # restore the most recent version
-tsync revert  notes/todo.txt --version <ts>   # restore a specific one
+tsync versions                              # list every file that's been deleted
+tsync versions notes/todo.txt               # timestamps of each saved version of a file
+tsync revert notes/todo.txt                 # restore the most recent version
+tsync revert notes/todo.txt --version <ts>  # restore a specific one
 ```
 
 Because a version is just the file's small manifest (the actual data blocks are shared and never thrown away), `revert` is instant and downloads nothing: the file reappears evicted and only fetches its content the first time you open it.
