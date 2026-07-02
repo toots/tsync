@@ -55,15 +55,15 @@ On macOS, the first time you'll need to approve the extension in **System Settin
 ## Everyday commands
 
 ```bash
-tsync ls [path]           # list files (add --deleted to include deleted ones)
-tsync evict   <path>      # drop a file's local copy (stays in the cloud)
-tsync restore <path>      # pull a file back down
-tsync versions [path]     # a file's version history, or all deleted files
-tsync revert  <path>      # bring back a previous version (or an undeleted file)
-tsync expire  <date>      # drop versions older than a date, then reclaim unused blocks
-tsync sync                # apply changes made from other machines
-tsync status              # show daemon state
-tsync stop                # unmount
+tsync ls <path>       # list files (add --deleted to include deleted ones)
+tsync evict <path>    # drop a file's local copy (stays in the cloud)
+tsync restore <path>  # pull a file back down
+tsync versions <path> # a file's version history, or all deleted files
+tsync revert <path>   # bring back a previous version (or an undeleted file)
+tsync expire <date>   # drop versions older than a date, then reclaim unused blocks
+tsync sync            # apply changes made from other machines
+tsync status          # show daemon state
+tsync stop            # unmount
 ```
 
 ### Versioning
