@@ -1,8 +1,9 @@
 (** Versioning stores a timestamped copy of a file's manifest under
     [versions_prefix] every time the file is modified, renamed or deleted. Since
-    manifests reference content-addressed chunks that are never garbage
-    collected, a version is a cheap manifest copy and can be restored without
-    transferring any file content. *)
+    manifests reference shared content-addressed chunks, a version is a cheap
+    manifest copy and can be restored without transferring any file content.
+    Chunks are collected only when [Expire] removes the last version referencing
+    them. *)
 
 (** Prefix holding every version of the file currently at [s3_key], i.e.
     [versions_prefix ^ <relative-path> ^ "/"]. *)
