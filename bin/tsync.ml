@@ -212,18 +212,18 @@ let ls_cmd =
       let seen = Hashtbl.create 16 in
       B.list_all ~prefix:(C.versions_prefix ^ reldir) ()
       |> List.iter (fun (e : Backend.file_entry) ->
-             match Versioning.parse ~versions_prefix:C.versions_prefix e.key with
-               | Some (rel, _) when not (Hashtbl.mem seen rel) ->
-                   Hashtbl.add seen rel ();
-                   let child =
-                     String.sub rel (String.length reldir)
-                       (String.length rel - String.length reldir)
-                   in
-                   if
-                     (not (String.contains child '/'))
-                     && B.head_opt ~key:(C.domain_prefix ^ rel) () = None
-                   then Printf.printf "deleted  %s\n" child
-               | _ -> ())
+          match Versioning.parse ~versions_prefix:C.versions_prefix e.key with
+            | Some (rel, _) when not (Hashtbl.mem seen rel) ->
+                Hashtbl.add seen rel ();
+                let child =
+                  String.sub rel (String.length reldir)
+                    (String.length rel - String.length reldir)
+                in
+                if
+                  (not (String.contains child '/'))
+                  && B.head_opt ~key:(C.domain_prefix ^ rel) () = None
+                then Printf.printf "deleted  %s\n" child
+            | _ -> ())
     end
   in
   Cmd.v
@@ -253,9 +253,9 @@ let versions_cmd =
           let versions =
             B.list_all ~prefix:(C.versions_prefix ^ rel ^ "/") ()
             |> List.filter_map (fun (e : Backend.file_entry) ->
-                   match parse e.key with
-                     | Some (_, ts) -> Some (Int64.of_string ts, e.size)
-                     | None -> None)
+                match parse e.key with
+                  | Some (_, ts) -> Some (Int64.of_string ts, e.size)
+                  | None -> None)
             |> List.sort (fun (a, _) (b, _) -> Int64.compare b a)
           in
           if versions = [] then Printf.printf "No versions for %s\n" rel
@@ -270,17 +270,17 @@ let versions_cmd =
           let latest = Hashtbl.create 64 and count = Hashtbl.create 64 in
           B.list_all ~prefix:C.versions_prefix ()
           |> List.iter (fun (e : Backend.file_entry) ->
-                 match parse e.key with
-                   | Some (rel, ts) ->
-                       let ts = Int64.of_string ts in
-                       let best =
-                         Option.value ~default:0L (Hashtbl.find_opt latest rel)
-                       in
-                       if Int64.compare ts best > 0 then
-                         Hashtbl.replace latest rel ts;
-                       Hashtbl.replace count rel
-                         (1 + Option.value ~default:0 (Hashtbl.find_opt count rel))
-                   | None -> ());
+              match parse e.key with
+                | Some (rel, ts) ->
+                    let ts = Int64.of_string ts in
+                    let best =
+                      Option.value ~default:0L (Hashtbl.find_opt latest rel)
+                    in
+                    if Int64.compare ts best > 0 then
+                      Hashtbl.replace latest rel ts;
+                    Hashtbl.replace count rel
+                      (1 + Option.value ~default:0 (Hashtbl.find_opt count rel))
+                | None -> ());
           let deleted =
             Hashtbl.fold
               (fun rel ts acc ->
@@ -295,8 +295,8 @@ let versions_cmd =
           else
             List.iter
               (fun (rel, ts, n) ->
-                Printf.printf "%s  (deleted %s, %d version%s)\n" rel (human_ts ts)
-                  n
+                Printf.printf "%s  (deleted %s, %d version%s)\n" rel
+                  (human_ts ts) n
                   (if n = 1 then "" else "s"))
               deleted
   in

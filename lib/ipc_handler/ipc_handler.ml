@@ -154,8 +154,7 @@ module Make (C : Conf.S) (F : File.S) = struct
                     hooks.restore (hooks.path_to_key path);
                     ok_json []
                 | "revert" ->
-                    handle_revert hooks
-                      (hooks.path_to_key path)
+                    handle_revert hooks (hooks.path_to_key path)
                       (get_str obj "arg")
                 | "auto_evict" ->
                     let result =

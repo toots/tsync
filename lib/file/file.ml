@@ -449,7 +449,9 @@ module Make (C : Conf.S) (Sq : Sync_queue.S) : S = struct
 
   let revert ?version key =
     let (module B : Backend.S) =
-      match C.backends with b :: _ -> b | [] -> failwith "no backends configured"
+      match C.backends with
+        | b :: _ -> b
+        | [] -> failwith "no backends configured"
     in
     let dir =
       Versioning.version_dir ~s3_key:key ~domain_prefix:C.domain_prefix
@@ -476,7 +478,9 @@ module Make (C : Conf.S) (Sq : Sync_queue.S) : S = struct
              restored bytes are fetched lazily on next open. *)
           evict key;
           clear_dirty key;
-          let ek = Fs.write_journal_entry [`Put (rel_key key, m.Manifest.size)] in
+          let ek =
+            Fs.write_journal_entry [`Put (rel_key key, m.Manifest.size)]
+          in
           Fs.bump_cursor ek
 
   (* ── Foreign op application (sync) ────────────────────────────────────── *)

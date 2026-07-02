@@ -147,7 +147,9 @@ let list_directory t ~prefix () =
 
 let make ?endpoint ~bucket ~region ~access_key_id ~secret_access_key () :
     (module Backend.S) =
-  let t = make_t ?endpoint ~bucket ~region ~access_key_id ~secret_access_key () in
+  let t =
+    make_t ?endpoint ~bucket ~region ~access_key_id ~secret_access_key ()
+  in
   (module struct
     let put ~key ~data () = put t ~key ~data ()
     let get ~key () = get t ~key ()
@@ -168,4 +170,5 @@ let () =
   Backend.register "s3" (fun get ->
       make ?endpoint:(get "endpoint") ~bucket:(req get "bucket")
         ~region:(req get "region") ~access_key_id:(req get "accessKeyId")
-        ~secret_access_key:(req get "secretAccessKey") ())
+        ~secret_access_key:(req get "secretAccessKey")
+        ())

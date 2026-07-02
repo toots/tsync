@@ -174,7 +174,8 @@ let setup_client (module C : Conf.S) root staging_prefix =
             | _ -> failwith ("unknown expire selector: " ^ selector)
         in
         let s = E.expire ~cutoff () in
-        Printf.printf "  expire %s -> %d version(s), %d chunk(s) removed, %d kept\n"
+        Printf.printf
+          "  expire %s -> %d version(s), %d chunk(s) removed, %d kept\n"
           selector s.Expire.versions_deleted s.chunks_deleted s.chunks_kept
     | Drain ->
         while not (Sq.idle ()) do
@@ -336,7 +337,8 @@ let dump_backend_at ~backend_root ~domain_prefix ~chunk_prefix ~journal_prefix
               let desc =
                 match Manifest.of_string (B.get ~key:e.key ()) with
                   | `Clean m ->
-                      Printf.sprintf "manifest size=%Ld chunks=%d" m.Manifest.size
+                      Printf.sprintf "manifest size=%Ld chunks=%d"
+                        m.Manifest.size
                         (List.length m.Manifest.chunks)
                   | `Dirty -> "dirty"
                   | exception _ -> "raw"
@@ -473,8 +475,7 @@ let run_two_client_scenario ?(versioning = false)
   rm_rf root;
   print_newline ()
 
-let run ?versioning scenarios =
-  List.iter (run_scenario ?versioning) scenarios
+let run ?versioning scenarios = List.iter (run_scenario ?versioning) scenarios
 
 let run_two_client_scenarios ?versioning scenarios =
   List.iter (run_two_client_scenario ?versioning) scenarios

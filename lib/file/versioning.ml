@@ -2,7 +2,8 @@ let strip_prefix ~prefix s =
   if
     String.length s > String.length prefix
     && String.sub s 0 (String.length prefix) = prefix
-  then String.sub s (String.length prefix) (String.length s - String.length prefix)
+  then
+    String.sub s (String.length prefix) (String.length s - String.length prefix)
   else s
 
 let version_dir ~s3_key ~domain_prefix ~versions_prefix =
@@ -17,14 +18,14 @@ let version_key ~s3_key ~domain_prefix ~versions_prefix =
 let parse ~versions_prefix key =
   let n = String.length versions_prefix in
   if String.length key <= n || String.sub key 0 n <> versions_prefix then None
-  else
+  else (
     let rest = String.sub key n (String.length key - n) in
     match String.rindex_opt rest '/' with
       | Some i when i < String.length rest - 1 ->
           Some
             ( String.sub rest 0 i,
               String.sub rest (i + 1) (String.length rest - i - 1) )
-      | _ -> None
+      | _ -> None)
 
 let save ~backends ~domain_prefix ~versions_prefix ~key =
   match backends with
@@ -37,6 +38,5 @@ let save ~backends ~domain_prefix ~versions_prefix ~key =
                 version_key ~s3_key:key ~domain_prefix ~versions_prefix
               in
               List.iter
-                (fun (module B : Backend.S) ->
-                  B.copy ~src_key:key ~dst_key ())
+                (fun (module B : Backend.S) -> B.copy ~src_key:key ~dst_key ())
                 backends)

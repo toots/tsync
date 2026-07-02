@@ -1,19 +1,16 @@
-type stats = {
-  versions_deleted : int;
-  chunks_deleted : int;
-  chunks_kept : int;
-}
+type stats = { versions_deleted : int; chunks_deleted : int; chunks_kept : int }
 
 module Make (C : Conf.S) = struct
   let primary () =
-    match C.backends with b :: _ -> b | [] -> failwith "no backends configured"
+    match C.backends with
+      | b :: _ -> b
+      | [] -> failwith "no backends configured"
 
   let delete_all keys =
     if keys <> [] then
       List.iter (fun (module B : Backend.S) -> B.delete_multi keys) C.backends
 
-  let is_marker key =
-    String.length key > 0 && key.[String.length key - 1] = '/'
+  let is_marker key = String.length key > 0 && key.[String.length key - 1] = '/'
 
   (* Chunk keys referenced by the manifest stored at [key]. Directory markers
      reference nothing; a dirty manifest is mid-write and has no committed
@@ -21,7 +18,7 @@ module Make (C : Conf.S) = struct
      "references nothing", which would let the sweep delete the file's chunks. *)
   let referenced_chunks (module B : Backend.S) key =
     if is_marker key then []
-    else
+    else (
       match Manifest.of_string (B.get ~key ()) with
         | `Clean m -> List.map Manifest.chunk_key m.Manifest.chunks
         | `Dirty -> []
@@ -29,7 +26,7 @@ module Make (C : Conf.S) = struct
             failwith
               (Printf.sprintf
                  "cannot read manifest %s (%s); aborting before chunk GC" key
-                 (Printexc.to_string e))
+                 (Printexc.to_string e)))
 
   let parse = Versioning.parse ~versions_prefix:C.versions_prefix
 
@@ -77,15 +74,15 @@ module Make (C : Conf.S) = struct
     let unreferenced =
       B.list_all ~prefix:C.chunk_prefix ()
       |> List.filter_map (fun (e : Backend.file_entry) ->
-             let ck =
-               String.sub e.key
-                 (String.length C.chunk_prefix)
-                 (String.length e.key - String.length C.chunk_prefix)
-             in
-             if Hashtbl.mem live ck then (
-               incr kept;
-               None)
-             else Some e.key)
+          let ck =
+            String.sub e.key
+              (String.length C.chunk_prefix)
+              (String.length e.key - String.length C.chunk_prefix)
+          in
+          if Hashtbl.mem live ck then (
+            incr kept;
+            None)
+          else Some e.key)
     in
     delete_all unreferenced;
     {

@@ -20,11 +20,13 @@ type step =
   | Close of string
       (** Track the file as open/closed, the way the FUSE layer does around user
           file handles. Foreign ops must never touch an open file. *)
-  | Mark  (** Record the current time, usable later as an [Expire "mark"] cutoff. *)
+  | Mark
+      (** Record the current time, usable later as an [Expire "mark"] cutoff. *)
   | Expire of string
-      (** Run [Expire.expire]: prune versions older than a cutoff, then GC unused
-          chunks. Selector is ["all"] (now), ["none"] (epoch), or ["mark"] (the
-          time captured by the last [Mark] step — to expire across a boundary). *)
+      (** Run [Expire.expire]: prune versions older than a cutoff, then GC
+          unused chunks. Selector is ["all"] (now), ["none"] (epoch), or
+          ["mark"] (the time captured by the last [Mark] step — to expire across
+          a boundary). *)
   | Drain
       (** Wait for queued uploads to finish. Also guarantees the next journal
           entry lands in a later millisecond, keeping snapshots deterministic
@@ -39,8 +41,8 @@ type two_client_step = A of step | B of step
 type two_client_scenario = { name : string; steps : two_client_step list }
 
 (** Run each scenario in order, printing its snapshot to stdout. Set
-    [versioning] to enable version history (modify/rename/delete save a version).
-*)
+    [versioning] to enable version history (modify/rename/delete save a
+    version). *)
 val run : ?versioning:bool -> scenario list -> unit
 
 (** Run scenarios with two full client instances (separate cache, data dir,
