@@ -1,0 +1,13 @@
+(executable
+ (name sync)
+ (libraries tsync_test_runner))
+
+(rule
+ (with-stdout-to
+  sync.output
+  (run ./sync.exe)))
+
+(rule
+ (alias runtest)
+ (action
+  (diff sync.expected sync.output)))

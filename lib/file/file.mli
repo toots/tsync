@@ -21,6 +21,9 @@ module type S = sig
   val set_dirty : t -> unit
   val clear_dirty : t -> unit
   val mark_dirty : t -> unit
+  val mark_open : t -> unit
+  val mark_closed : t -> int
+  val is_open : t -> bool
   val evict : t -> unit
   val clear_local : t -> unit
   val create : t -> unit
@@ -35,6 +38,7 @@ module type S = sig
   val mkdir : t -> unit
   val rmdir : t -> unit
   val rename : src:t -> dst:t -> unit
+  val apply_foreign_ops : Journal.op list -> unit
 end
 
 module Make (C : Conf.S) (Sq : Sync_queue.S) : S

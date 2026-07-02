@@ -39,6 +39,7 @@ let make_conf ?domain cfg : (module Conf.S) =
   let d = Conf_parsing.pick_domain ?domain cfg in
   (module struct
     let versioning = cfg.Conf_parsing.versioning
+    let client_name = cfg.Conf_parsing.name
     let domain_name = d.Conf_parsing.name
     let domain_prefix = Conf_parsing.domain_prefix d
     let chunk_prefix = Conf_parsing.chunk_prefix d
@@ -385,42 +386,22 @@ let sync_cmd =
         |> List.filter (fun (k, _) -> k > last_sync_basename)
         |> List.filter (fun (_, uuid) -> uuid <> my_uuid)
       in
-      let touched = Hashtbl.create 16 in
       List.iter
         (fun (ek, _) ->
           match Fs.get_journal_entry ek with
             | None -> ()
-            | Some ops ->
-                List.iter
-                  (fun op ->
-                    match op with
-                      | `Put (k, _) | `Delete k | `Mkdir k | `Rmdir k ->
-                          Hashtbl.replace touched k ()
-                      | `Rename { Journal.dst; src; _ } ->
-                          Hashtbl.replace touched dst ();
-                          Hashtbl.replace touched src ())
-                  ops)
+            | Some ops -> F.apply_foreign_ops ops)
         recent_foreign;
-      let touched_keys = Hashtbl.fold (fun k () acc -> k :: acc) touched [] in
-      List.iter
-        (fun rel_key ->
-          try
-            ignore
-              (ipc_action ~socket_path:C.socket_path ~path:("/" ^ rel_key)
-                 "evict")
-          with Failure msg ->
-            Printf.eprintf "Warning: evict %s: %s\n" rel_key msg)
-        touched_keys;
       (match all_keys with
         | [] -> ()
         | _ ->
             let last_key, _ = List.nth all_keys (List.length all_keys - 1) in
             let oc = open_out last_sync_file in
-            let store_val = C.journal_prefix ^ last_key in
-            output_string oc store_val;
+            output_string oc (C.journal_prefix ^ last_key);
             close_out oc);
-      let n = List.length touched_keys in
-      Printf.printf "%d change%s\n" n (if n = 1 then "" else "s")
+      let n = List.length recent_foreign in
+      Printf.printf "%d journal entr%s from other clients\n" n
+        (if n = 1 then "y" else "ies")
     end
   in
   Cmd.v
@@ -502,6 +483,7 @@ let configure_cmd =
         ]
     in
     Printf.printf "tsync configuration\n-------------------\n";
+    let client_name = prompt "Client name" (Some (Unix.gethostname ())) in
     let versioning = prompt_bool "Enable versioning (trash on delete)?" in
     let domains = ref [] in
     let continue_ = ref true in
@@ -513,7 +495,12 @@ let configure_cmd =
     let config_path = runtime_paths.Runtime.config_path in
     mkdir_p (Filename.dirname config_path);
     let json =
-      `Assoc [("versioning", `Bool versioning); ("domains", `List !domains)]
+      `Assoc
+        [
+          ("name", `String client_name);
+          ("versioning", `Bool versioning);
+          ("domains", `List !domains);
+        ]
     in
     let oc = open_out config_path in
     output_string oc (Yojson.Basic.pretty_to_string json);

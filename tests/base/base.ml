@@ -4,7 +4,7 @@
 
 open Test_runner
 
-let scenarios =
+let scenarios : scenario list =
   [
     {
       name = "create";

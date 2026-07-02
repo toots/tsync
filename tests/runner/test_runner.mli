@@ -13,12 +13,28 @@ type step =
   | Delete of string
   | Evict of string
   | Restore of string
+  | Open of string
+  | Close of string
+      (** Track the file as open/closed, the way the FUSE layer does around user
+          file handles. Foreign ops must never touch an open file. *)
   | Drain
       (** Wait for queued uploads to finish. Also guarantees the next journal
           entry lands in a later millisecond, keeping snapshots deterministic
           (entry keys are ms-timestamped and collide within the same ms). *)
+  | Sync
+      (** Call [Sync_poller.sync_once]: read the journal, skip our own entries,
+          apply any foreign entries — the same path the background poller takes.
+      *)
 
 type scenario = { name : string; steps : step list }
+type two_client_step = A of step | B of step
+type two_client_scenario = { name : string; steps : two_client_step list }
 
 (** Run each scenario in order, printing its snapshot to stdout. *)
 val run : scenario list -> unit
+
+(** Run scenarios with two full client instances (separate cache, data dir,
+    journal identity) sharing the same backend. Each step is tagged with the
+    client it runs on; the final snapshot shows both clients' views followed by
+    the shared backend state. *)
+val run_two_client_scenarios : two_client_scenario list -> unit

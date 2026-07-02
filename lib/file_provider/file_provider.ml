@@ -4,6 +4,7 @@ module Make (C : Conf.S) = struct
   module Sq = Sync_queue.Make (C)
   module F = File.Make (C) (Sq)
   module H = Ipc_handler.Make (C) (F)
+  module Sp = Sync_poller.Make (C) (F)
 
   (* ── Key helpers ──────────────────────────────────────────────────────── *)
 
@@ -73,6 +74,7 @@ module Make (C : Conf.S) = struct
         Ipc.notify_uploaded ~path:C.notify_path key;
         if Ipc.auto_evict_enabled ~data_dir:C.data_dir then
           Ipc.notify_evict ~path:C.notify_path key);
+    Sp.start ~on_changed:(Ipc.notify_changed ~path:C.notify_path) ();
     Ipc.serve ~path:C.socket_path (H.handler hooks);
     Sq.drain ()
 end

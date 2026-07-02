@@ -5,30 +5,19 @@ module Make (C : Conf.S) = struct
   module H = Hidden_ops.Make (F)
   module I = Internal_ops.Make (F)
   module Ih = Ipc_handler.Make (C) (F)
+  module Sp = Sync_poller.Make (C) (F)
 
   (* ── Full-file storage policy ─────────────────────────────────────────────
      Files persist in the local cache. Eviction is deferred while a file has
      open handles; a dirty file is queued for upload on last close. *)
 
-  let open_count : (string, int) Hashtbl.t = Hashtbl.create 64
-  let open_count_mutex = Mutex.create ()
   let pending_evict : (string, unit) Hashtbl.t = Hashtbl.create 16
   let pending_evict_mutex = Mutex.create ()
-
-  let open_file key =
-    Mutex.lock open_count_mutex;
-    let n = Option.value ~default:0 (Hashtbl.find_opt open_count key) in
-    Hashtbl.replace open_count key (n + 1);
-    Mutex.unlock open_count_mutex
+  let open_file key = F.mark_open key
 
   let close_file key =
-    Mutex.lock open_count_mutex;
-    let n = Option.value ~default:0 (Hashtbl.find_opt open_count key) in
-    let n' = max 0 (n - 1) in
-    if n' = 0 then Hashtbl.remove open_count key
-    else Hashtbl.replace open_count key n';
-    Mutex.unlock open_count_mutex;
-    if n' = 0 then
+    let remaining = F.mark_closed key in
+    if remaining = 0 then
       if F.is_dirty key then begin
         F.clear_dirty key;
         F.queue_put key
@@ -42,10 +31,7 @@ module Make (C : Conf.S) = struct
       end
 
   let request_evict key =
-    Mutex.lock open_count_mutex;
-    let count = Option.value ~default:0 (Hashtbl.find_opt open_count key) in
-    Mutex.unlock open_count_mutex;
-    if count = 0 then F.evict key
+    if not (F.is_open key) then F.evict key
     else begin
       Mutex.lock pending_evict_mutex;
       Hashtbl.replace pending_evict key ();
@@ -294,27 +280,27 @@ module Make (C : Conf.S) = struct
         if Ipc.auto_evict_enabled ~data_dir:C.data_dir then request_evict key;
         Ipc.notify_uploaded ~path:C.notify_path key);
     Log.debug "starting IPC server at %s" C.socket_path;
-    let _ipc_thread =
-      Thread.create
-        (fun () ->
-          Ipc.serve ~path:C.socket_path (Ih.handler (ipc_hooks mount_point)))
-        ()
-    in
+    ignore
+      (Thread.create
+         (fun () ->
+           Ipc.serve ~path:C.socket_path (Ih.handler (ipc_hooks mount_point)))
+         ());
     Log.debug "starting version flusher";
-    let _version_flusher =
-      Thread.create
-        (fun () ->
-          while true do
-            Unix.sleepf 2.0;
-            match drain_pending_version () with
-              | None -> ()
-              | Some ek -> (
-                  try Fs.bump_version ek
-                  with exn ->
-                    Log.err "bump_version: %s" (Printexc.to_string exn))
-          done)
-        ()
-    in
+    ignore
+      (Thread.create
+         (fun () ->
+           while true do
+             Unix.sleepf 2.0;
+             match drain_pending_version () with
+               | None -> ()
+               | Some ek -> (
+                   try Fs.bump_version ek
+                   with exn ->
+                     Log.err "bump_version: %s" (Printexc.to_string exn))
+           done)
+         ());
+    Log.debug "starting sync poller";
+    Sp.start ();
     Log.info "mounting FUSE at %s" mount_point;
     Fuse.main ~loop_mode:Fuse.Single_threaded [| "tsync"; mount_point |]
       (make_operations mount_point);
