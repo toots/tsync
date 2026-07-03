@@ -48,7 +48,11 @@ module Make (C : Conf.S) = struct
       (fun (module B : Backend.S) -> B.put ~key ~data ())
       C.backends
 
-  let hash_width = max 1 (Domain.recommended_domain_count () - 1)
+  (* How many chunks are read + hashed + uploaded at once for a single file.
+     This is an I/O and memory bound (each in-flight chunk holds an 8 MB
+     buffer), deliberately independent of CPU core count: the hashing itself
+     runs on the domain pool [Hash_pool], which supplies the CPU parallelism. *)
+  let chunk_concurrency = 4
 
   (* Read, hash (in parallel on the domain pool) and upload one chunk if it is
      not already present. Returns its manifest entry. *)
@@ -86,7 +90,7 @@ module Make (C : Conf.S) = struct
           (i, offset, len))
     in
     let* entries =
-      map_bounded hash_width (process_chunk src_path ~cancel) chunks
+      map_bounded chunk_concurrency (process_chunk src_path ~cancel) chunks
     in
     if Atomic.get cancel then raise Cancelled;
     let state =

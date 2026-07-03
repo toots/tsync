@@ -75,6 +75,8 @@ Config path is platform-specific — see each platform's **Paths** section below
 | `versioning` | bool | Save a manifest version under `.versions/` on every modify/rename/delete |
 | `name` | string | Human-readable client name, used to label conflict copies (e.g. `"report (conflicted copy from Romain's MacBook Pro).txt"`). Defaults to the hostname |
 | `tls` | string | Optional. TLS backend for S3 connections: `"native"` (ocaml-tls, default) or `"openssl"`. See [TLS backend](#tls-backend) |
+| `maxUploads` | int | Optional. Max files uploaded concurrently (default 4) |
+| `maxDownloads` | int | Optional. Max files downloaded concurrently (default 8) |
 | `domains` | domain[] | One or more domain objects |
 
 **Domain fields:**

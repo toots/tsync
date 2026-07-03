@@ -24,6 +24,19 @@ module type S = sig
   val mark_open : t -> unit
   val mark_closed : t -> int
   val is_open : t -> bool
+
+  (** In-flight downloads (files currently being fetched). *)
+  val downloading_count : unit -> int
+
+  (** Files with unsaved local changes not yet uploaded. *)
+  val dirty_count : unit -> int
+
+  (** Files with at least one open handle. *)
+  val open_files_count : unit -> int
+
+  (** Downloads completed since the daemon started. *)
+  val downloads_completed_count : unit -> int
+
   val evict : t -> unit Lwt.t
   val clear_local : t -> unit Lwt.t
   val create : t -> unit Lwt.t

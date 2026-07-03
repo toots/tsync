@@ -2,10 +2,18 @@
  (name expire)
  (libraries tsync_test_runner))
 
+(alias
+ (name default)
+ (deps expire.exe))
+
 (rule
- (with-stdout-to
-  expire.output
-  (run ./expire.exe)))
+ (alias runtest)
+ (target expire.output)
+ (action
+  (with-stdout-to
+   expire.output
+   (ignore-stderr
+    (run ./expire.exe)))))
 
 (rule
  (alias runtest)

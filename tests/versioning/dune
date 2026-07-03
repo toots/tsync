@@ -2,10 +2,18 @@
  (name versioning)
  (libraries tsync_test_runner))
 
+(alias
+ (name default)
+ (deps versioning.exe))
+
 (rule
- (with-stdout-to
-  versioning.output
-  (run ./versioning.exe)))
+ (alias runtest)
+ (target versioning.output)
+ (action
+  (with-stdout-to
+   versioning.output
+   (ignore-stderr
+    (run ./versioning.exe)))))
 
 (rule
  (alias runtest)

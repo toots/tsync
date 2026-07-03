@@ -6,6 +6,7 @@ module Make (C : Conf.S) (F : File.S) : sig
     changed : string -> unit;
     full_resync : unit -> unit Lwt.t;
     status_fields : unit -> (string * Yojson.Safe.t) list;
+    stats_fields : unit -> (string * Yojson.Safe.t) list;
     on_stop : unit -> unit;
   }
 

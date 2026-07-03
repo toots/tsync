@@ -186,6 +186,12 @@ module Make (C : Conf.S) = struct
         changed = (fun _ -> ());
         full_resync;
         status_fields = (fun () -> [("mount", `String mount_point)]);
+        stats_fields =
+          (fun () ->
+            [
+              ("pendingUploads", `Int (Sq.pending ()));
+              ("uploadsCompleted", `Int (Sq.completed_count ()));
+            ]);
         on_stop =
           (fun () ->
             do_stop ();

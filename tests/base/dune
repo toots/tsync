@@ -2,10 +2,18 @@
  (name base)
  (libraries tsync_test_runner))
 
+(alias
+ (name default)
+ (deps base.exe))
+
 (rule
- (with-stdout-to
-  base.output
-  (run ./base.exe)))
+ (alias runtest)
+ (target base.output)
+ (action
+  (with-stdout-to
+   base.output
+   (ignore-stderr
+    (run ./base.exe)))))
 
 (rule
  (alias runtest)

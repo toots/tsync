@@ -10,6 +10,8 @@ module type S = sig
 
   val cancel_put : string -> bool
   val idle : unit -> bool
+  val pending : unit -> int
+  val completed_count : unit -> int
 
   val start :
     upload:(key:string -> cancel:bool Atomic.t -> unit Lwt.t) ->
@@ -31,11 +33,7 @@ module Make (C : Conf.S) : S = struct
     ops : Journal.op list;
   }
 
-  type slot = {
-    mutable running : put_data;
-    cancel : bool Atomic.t;
-    mutable pending : put_data option;
-  }
+  type slot = { cancel : bool Atomic.t; mutable pending : put_data option }
 
   (* All queue state is touched only from the Lwt event-loop thread (workers and
      the post/cancel entry points all run there), so no locks are needed. *)
@@ -65,9 +63,8 @@ module Make (C : Conf.S) : S = struct
     Queue.add pd queue;
     Lwt_condition.signal queue_cond ()
 
-  let add_slot key pd =
-    Hashtbl.add slots key
-      { running = pd; cancel = Atomic.make false; pending = None }
+  let add_slot key =
+    Hashtbl.add slots key { cancel = Atomic.make false; pending = None }
 
   let replace_pending slot pd =
     (match slot.pending with
@@ -91,6 +88,12 @@ module Make (C : Conf.S) : S = struct
 
   let idle () = Queue.is_empty queue && Hashtbl.length slots = 0
 
+  (* Metrics: files with an active or queued upload, and uploads finished since
+     start. *)
+  let pending () = Hashtbl.length slots
+  let completed = ref 0
+  let completed_count () = !completed
+
   let exec_put slot ({ key; entry_key; ops; _ } : put_data) =
     if Atomic.get slot.cancel then J.delete_local_pending ~entry_key
     else
@@ -102,6 +105,7 @@ module Make (C : Conf.S) : S = struct
             let* () = J.delete_local_pending ~entry_key in
             let* (_ : string) = Fs.write_journal_entry ~entry_key ops in
             !on_cursor_fn ~entry_key;
+            incr completed;
             !on_upload_done_fn ~key)
         (function
           | Backend.Cancelled -> J.delete_local_pending ~entry_key
@@ -124,7 +128,6 @@ module Make (C : Conf.S) : S = struct
       (match slot.pending with
         | None -> Hashtbl.remove slots pd.key
         | Some next ->
-            slot.running <- next;
             Atomic.set slot.cancel false;
             slot.pending <- None;
             enqueue next);
@@ -135,7 +138,7 @@ module Make (C : Conf.S) : S = struct
     upload_fn := upload;
     on_cursor_fn := on_cursor;
     on_upload_done_fn := on_upload_done;
-    workers := List.init 4 (fun _ -> worker_loop ())
+    workers := List.init (max 1 C.max_uploads) (fun _ -> worker_loop ())
 
   let drain () =
     Atomic.set stop true;
@@ -148,7 +151,7 @@ module Make (C : Conf.S) : S = struct
     let pd = { key; src_path; entry_key; ops } in
     match Hashtbl.find_opt slots key with
       | None ->
-          add_slot key pd;
+          add_slot key;
           enqueue pd
       | Some slot ->
           Atomic.set slot.cancel true;

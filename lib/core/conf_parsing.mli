@@ -10,8 +10,13 @@ type t = {
   versioning : bool;
   name : string;
   tls : string option;  (** conduit TLS backend: "native" | "openssl" *)
+  max_uploads : int;  (** max concurrent file uploads (default 4) *)
+  max_downloads : int;  (** max concurrent file downloads (default 8) *)
   domains : domain list;
 }
+
+val default_max_uploads : int
+val default_max_downloads : int
 
 (** Load configuration from [path], or from the JSON string in
     [$TSYNC_CONFIG_JSON] if set (overrides [path]). *)

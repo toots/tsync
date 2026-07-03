@@ -14,4 +14,10 @@ module type S = sig
   val data_dir : string
   val socket_path : string
   val notify_path : string
+
+  (** Max files uploaded concurrently (upload worker count). *)
+  val max_uploads : int
+
+  (** Max files downloaded concurrently. *)
+  val max_downloads : int
 end

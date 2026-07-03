@@ -10,8 +10,13 @@ type t = {
   versioning : bool;
   name : string;
   tls : string option;
+  max_uploads : int;
+  max_downloads : int;
   domains : domain list;
 }
+
+let default_max_uploads = 4
+let default_max_downloads = 8
 
 let parse_backend json =
   let open Yojson.Basic.Util in
@@ -65,6 +70,14 @@ let load path =
         | `String s -> s
         | _ -> Unix.gethostname ());
     tls = (match json |> member "tls" with `String s -> Some s | _ -> None);
+    max_uploads =
+      (match json |> member "maxUploads" with
+        | `Int n when n > 0 -> n
+        | _ -> default_max_uploads);
+    max_downloads =
+      (match json |> member "maxDownloads" with
+        | `Int n when n > 0 -> n
+        | _ -> default_max_downloads);
     domains = json |> member "domains" |> to_list |> List.map parse_domain;
   }
 

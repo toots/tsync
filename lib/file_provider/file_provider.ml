@@ -68,6 +68,12 @@ module Make (C : Conf.S) = struct
         changed = (fun key -> Ipc.notify_changed ~path:C.notify_path key);
         full_resync = (fun () -> Lwt.return_unit);
         status_fields = (fun () -> []);
+        stats_fields =
+          (fun () ->
+            [
+              ("pendingUploads", `Int (Sq.pending ()));
+              ("uploadsCompleted", `Int (Sq.completed_count ()));
+            ]);
         on_stop = (fun () -> ());
       }
 

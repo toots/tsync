@@ -11,6 +11,12 @@ module type S = sig
   (** [true] when no upload is queued or running. *)
   val idle : unit -> bool
 
+  (** Files with an active or queued upload. *)
+  val pending : unit -> int
+
+  (** Uploads completed since the daemon started. *)
+  val completed_count : unit -> int
+
   val start :
     upload:(key:string -> cancel:bool Atomic.t -> unit Lwt.t) ->
     on_cursor:(entry_key:string -> unit) ->

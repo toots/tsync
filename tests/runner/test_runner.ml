@@ -111,6 +111,7 @@ let setup_client (module C : Conf.S) root staging_prefix =
         changed = (fun _ -> ());
         full_resync = (fun () -> Lwt.return_unit);
         status_fields = (fun () -> []);
+        stats_fields = (fun () -> []);
         on_stop = (fun () -> ());
       }
   in
@@ -401,6 +402,8 @@ let run_scenario ?(versioning = false) ({ name; steps } : scenario) =
     let data_dir = Filename.concat root "data"
     let socket_path = Filename.concat root "tsync.sock"
     let notify_path = Filename.concat root "notify.sock"
+    let max_uploads = 4
+    let max_downloads = 8
   end in
   Lwt_main.run
     (let client = setup_client (module C) root "" in
@@ -451,6 +454,8 @@ let run_two_client_scenario ?(versioning = false)
     let data_dir = Filename.concat root "data-a"
     let socket_path = Filename.concat root "tsync-a.sock"
     let notify_path = Filename.concat root "notify-a.sock"
+    let max_uploads = 4
+    let max_downloads = 8
   end in
   let module Cb = struct
     let versioning = versioning
@@ -466,6 +471,8 @@ let run_two_client_scenario ?(versioning = false)
     let data_dir = Filename.concat root "data-b"
     let socket_path = Filename.concat root "tsync-b.sock"
     let notify_path = Filename.concat root "notify-b.sock"
+    let max_uploads = 4
+    let max_downloads = 8
   end in
   Lwt_main.run
     (let client_a = setup_client (module Ca) root "a" in

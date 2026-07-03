@@ -10,6 +10,7 @@ module Make (C : Conf.S) (F : File.S) = struct
     changed : string -> unit;
     full_resync : unit -> unit Lwt.t;
     status_fields : unit -> (string * Yojson.Safe.t) list;
+    stats_fields : unit -> (string * Yojson.Safe.t) list;
     on_stop : unit -> unit;
   }
 
@@ -185,6 +186,20 @@ module Make (C : Conf.S) (F : File.S) = struct
                            (("domain", `String C.domain_name)
                            :: ("running", `Bool true)
                            :: hooks.status_fields ()))
+                  | "stats" ->
+                      Lwt.return
+                        (ok_json
+                           ([
+                              ( "pendingDownloads",
+                                `Int (F.downloading_count ()) );
+                              ("dirtyFiles", `Int (F.dirty_count ()));
+                              ("openFiles", `Int (F.open_files_count ()));
+                              ( "downloadsCompleted",
+                                `Int (F.downloads_completed_count ()) );
+                              ("maxUploads", `Int C.max_uploads);
+                              ("maxDownloads", `Int C.max_downloads);
+                            ]
+                           @ hooks.stats_fields ()))
                   | "stop" ->
                       hooks.on_stop ();
                       Lwt.return (ok_json [])

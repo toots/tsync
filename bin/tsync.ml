@@ -55,6 +55,8 @@ let make_conf ?domain cfg : (module Conf.S) =
     let cache_root = runtime_paths.Runtime.cache_root
     let data_dir = runtime_paths.Runtime.data_dir
     let socket_path = runtime_paths.Runtime.socket_path
+    let max_uploads = cfg.Conf_parsing.max_uploads
+    let max_downloads = cfg.Conf_parsing.max_downloads
 
     let notify_path =
       Filename.concat runtime_paths.Runtime.data_dir "notify.sock"
@@ -134,6 +136,30 @@ let status_cmd =
   in
   Cmd.v
     (Cmd.info "status" ~doc:"Show daemon status")
+    Term.(const run $ const ())
+
+(* ── tsync stats ─────────────────────────────────────────────────────────── *)
+
+let stats_cmd =
+  let run () =
+    match ipc_action "stats" with
+      | obj ->
+          List.iter
+            (fun (k, v) ->
+              if k <> "ok" then
+                Printf.printf "%-20s %s\n" k
+                  (match v with
+                    | `Int n -> string_of_int n
+                    | `String s -> s
+                    | `Bool b -> string_of_bool b
+                    | other -> Yojson.Safe.to_string other))
+            obj
+      | exception Failure msg -> Printf.eprintf "Error: %s\n" msg
+      | exception _ -> print_endline "Daemon not running"
+  in
+  Cmd.v
+    (Cmd.info "stats"
+       ~doc:"Show transfer metrics (pending/completed uploads and downloads)")
     Term.(const run $ const ())
 
 (* ── tsync evict ─────────────────────────────────────────────────────────── *)
@@ -650,6 +676,11 @@ let configure_cmd =
         | "" -> default
         | _ -> false
     in
+    let prompt_int msg default =
+      match int_of_string_opt (prompt msg (Some (string_of_int default))) with
+        | Some n when n > 0 -> n
+        | _ -> default
+    in
     let read_password msg =
       Printf.printf "%s: %!" msg;
       let old_attr = Unix.tcgetattr Unix.stdin in
@@ -738,6 +769,12 @@ let configure_cmd =
       exit 0);
     let client_name = prompt "Client name" (Some (Unix.gethostname ())) in
     let versioning = prompt_bool "Enable versioning (keep version history)?" in
+    let max_uploads =
+      prompt_int "Max concurrent uploads" Conf_parsing.default_max_uploads
+    in
+    let max_downloads =
+      prompt_int "Max concurrent downloads" Conf_parsing.default_max_downloads
+    in
     let domains = ref [] in
     let continue_ = ref true in
     while !continue_ do
@@ -762,7 +799,12 @@ let configure_cmd =
     mkdir_p (Filename.dirname config_path);
     let json =
       `Assoc
-        ([("name", `String client_name); ("versioning", `Bool versioning)]
+        ([
+           ("name", `String client_name);
+           ("versioning", `Bool versioning);
+           ("maxUploads", `Int max_uploads);
+           ("maxDownloads", `Int max_downloads);
+         ]
         @ tls_field
         @ [("domains", `List !domains)])
     in
@@ -819,6 +861,7 @@ let () =
         start_cmd;
         stop_cmd;
         status_cmd;
+        stats_cmd;
         sync_cmd;
         evict_cmd;
         restore_cmd;

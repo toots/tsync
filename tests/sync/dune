@@ -2,10 +2,18 @@
  (name sync)
  (libraries tsync_test_runner))
 
+(alias
+ (name default)
+ (deps sync.exe))
+
 (rule
- (with-stdout-to
-  sync.output
-  (run ./sync.exe)))
+ (alias runtest)
+ (target sync.output)
+ (action
+  (with-stdout-to
+   sync.output
+   (ignore-stderr
+    (run ./sync.exe)))))
 
 (rule
  (alias runtest)

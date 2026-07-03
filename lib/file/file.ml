@@ -26,6 +26,10 @@ module type S = sig
   val mark_open : t -> unit
   val mark_closed : t -> int
   val is_open : t -> bool
+  val downloading_count : unit -> int
+  val dirty_count : unit -> int
+  val open_files_count : unit -> int
+  val downloads_completed_count : unit -> int
   val evict : t -> unit Lwt.t
   val clear_local : t -> unit Lwt.t
   val create : t -> unit Lwt.t
@@ -68,6 +72,13 @@ module Make (C : Conf.S) (Sq : Sync_queue.S) : S = struct
   let with_meta f = Lwt_mutex.with_lock meta_mutex f
   let dirty_keys : (string, unit) Hashtbl.t = Hashtbl.create 16
   let downloading : (string, unit Lwt.t) Hashtbl.t = Hashtbl.create 8
+
+  (* Bounds concurrent file downloads. The per-key [downloading] table dedups
+     the same key; this pool caps how many distinct downloads run at once. *)
+  let download_pool =
+    Lwt_pool.create (max 1 C.max_downloads) (fun () -> Lwt.return_unit)
+
+  let downloads_completed = ref 0
 
   (* ── Path helpers ──────────────────────────────────────────────────────── *)
 
@@ -161,7 +172,12 @@ module Make (C : Conf.S) (Sq : Sync_queue.S) : S = struct
         | None ->
             let p =
               Lwt.finalize
-                (fun () -> download key)
+                (fun () ->
+                  let* () =
+                    Lwt_pool.use download_pool (fun () -> download key)
+                  in
+                  incr downloads_completed;
+                  Lwt.return_unit)
                 (fun () ->
                   Hashtbl.remove downloading key;
                   Lwt.return_unit)
@@ -264,6 +280,13 @@ module Make (C : Conf.S) (Sq : Sync_queue.S) : S = struct
 
   let is_open key =
     Option.value ~default:0 (Hashtbl.find_opt open_count key) > 0
+
+  (* ── Metrics ───────────────────────────────────────────────────────────── *)
+
+  let downloading_count () = Hashtbl.length downloading
+  let dirty_count () = Hashtbl.length dirty_keys
+  let open_files_count () = Hashtbl.length open_count
+  let downloads_completed_count () = !downloads_completed
 
   (* ── Local eviction ────────────────────────────────────────────────────── *)
 
