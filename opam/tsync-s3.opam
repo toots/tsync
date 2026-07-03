@@ -13,6 +13,7 @@ depends: [
   "lwt"
   "lwt_ppx"
   "lwt_ssl"
+  "tls-lwt"
   "odoc" {with-doc}
 ]
 build: [

@@ -10,6 +10,7 @@ depends: [
   "ocaml" {>= "5.5.0"}
   "dune" {>= "3.23"}
   "yojson"
+  "lwt_domain"
   "cmdliner"
   "odoc" {with-doc}
 ]
