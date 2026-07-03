@@ -4,6 +4,7 @@
  (libraries
   tsync_conf
   tsync_core
+  tsync_metrics
   tsync_file
   tsync_queue
   tsync_log

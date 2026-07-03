@@ -3,6 +3,7 @@
  (wrapped false)
  (libraries
   tsync_conf
+  tsync_metrics
   tsync_log
   tsync_backend
   tsync_xxhash

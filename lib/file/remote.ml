@@ -66,12 +66,15 @@ module Make (C : Conf.S) = struct
             Xxhash.hash_hex_bigarray buf ~length:len 1 ))
         ()
     in
+    Metrics.add_hashed 1;
     let entry = Manifest.{ index; h1; h2; size = len } in
     let ck = C.chunk_prefix ^ Manifest.chunk_key entry in
     let (module Primary : Backend.S) = primary () in
     let* head = Primary.head_opt ~key:ck () in
     let+ () =
-      if head = None then put_all ~key:ck ~data:(Lwt_bytes.to_string buf) ()
+      if head = None then (
+        Metrics.add_uploaded len;
+        put_all ~key:ck ~data:(Lwt_bytes.to_string buf) ())
       else Lwt.return_unit
     in
     entry
@@ -120,6 +123,7 @@ module Make (C : Conf.S) = struct
           (fun (chunk : Manifest.chunk_entry) ->
             let ck = C.chunk_prefix ^ Manifest.chunk_key chunk in
             let* data = Primary.get ~key:ck () in
+            Metrics.add_downloaded (String.length data);
             let* _ =
               Lwt_unix.LargeFile.lseek fd
                 (Int64.of_int (chunk.index * manifest.Manifest.chunk_size))

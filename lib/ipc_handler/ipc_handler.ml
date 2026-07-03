@@ -187,17 +187,23 @@ module Make (C : Conf.S) (F : File.S) = struct
                            :: ("running", `Bool true)
                            :: hooks.status_fields ()))
                   | "stats" ->
+                      let rate f = `Int (int_of_float (f ())) in
                       Lwt.return
                         (ok_json
                            ([
-                              ( "pendingDownloads",
-                                `Int (F.downloading_count ()) );
+                              ("pendingDownloads", `Int (F.downloading_count ()));
                               ("dirtyFiles", `Int (F.dirty_count ()));
                               ("openFiles", `Int (F.open_files_count ()));
                               ( "downloadsCompleted",
                                 `Int (F.downloads_completed_count ()) );
                               ("maxUploads", `Int C.max_uploads);
                               ("maxDownloads", `Int C.max_downloads);
+                              ("bytesUploaded", `Int (Metrics.uploaded ()));
+                              ("bytesDownloaded", `Int (Metrics.downloaded ()));
+                              ("uploadBytesPerSec", rate Metrics.upload_rate);
+                              ("downloadBytesPerSec", rate Metrics.download_rate);
+                              ("chunksHashed", `Int (Metrics.hashed ()));
+                              ("hashesPerSec", rate Metrics.hash_rate);
                             ]
                            @ hooks.stats_fields ()))
                   | "stop" ->
