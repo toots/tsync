@@ -17,7 +17,7 @@ tsync gives you a folder that lives in cloud storage (S3, or a local disk/NAS) b
 
 - **Terabytes of files, gigabytes of disk.** Keep a huge library — photos, audio, video, backups — mounted locally while only caching what you touch.
 - **Your storage, your rules.** Point it at your own S3 bucket or a local drive. No subscription, no vendor lock-in, no one else holding your data.
-- **Mirror to more than one place.** Configure several backends per folder and every write fans out to all of them — e.g. S3 *and* a local NAS at the same time.
+- **Mirror to more than one place.** Configure several backends per folder and every write fans out to all of them — e.g. S3 *and* a local NAS at the same time. Reads come from a primary backend (a local one by default), so a mirrored local copy also makes reads fast.
 - **Use it from several machines.** Multiple computers can mount the same folder; each picks up the others' changes automatically, with sensible handling when two people touch the same file at once.
 - **Efficient by design.** Files are split into content-addressed chunks, so re-uploading a large file only sends the parts that changed, and identical data is stored once.
 

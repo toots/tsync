@@ -46,7 +46,8 @@ Config path is platform-specific — see each platform's **Paths** section below
         },
         {
           "type": "local",
-          "path": "/mnt/backup/tsync"
+          "path": "/mnt/backup/tsync",
+          "main": true
         }
       ]
     },
@@ -94,6 +95,7 @@ Config path is platform-specific — see each platform's **Paths** section below
 | `endpoint` | string | Optional. Custom S3 endpoint host for S3-compatible services (e.g. `s3.us-east-005.backblazeb2.com` for Backblaze B2). Omit for AWS |
 | `accessKeyId` | string | AWS access key ID |
 | `secretAccessKey` | string | AWS secret access key |
+| `main` | bool | Optional. Mark this backend as the primary (read) backend. See [Primary backend selection](#primary-backend-selection) |
 
 **Backend fields (`type: "local"`):**
 
@@ -101,10 +103,21 @@ Config path is platform-specific — see each platform's **Paths** section below
 |---|---|---|
 | `type` | `"local"` | Backend type |
 | `path` | string | Root directory for this backend; keys are stored as paths under this root |
+| `main` | bool | Optional. Mark this backend as the primary (read) backend. See [Primary backend selection](#primary-backend-selection) |
 
 Each domain is an independent namespace: `<prefix>/<domain>/`. When the config has exactly one domain, `--domain` can be omitted from CLI commands; with multiple domains it is required.
 
-When a domain has multiple backends, all writes (uploads, deletes, copies) fan out to every backend. Reads use the first backend (primary). This supports mirroring a domain to e.g. S3 and a local NAS simultaneously.
+When a domain has multiple backends, all writes (uploads, deletes, copies) fan out to every backend. Reads use the **primary** backend. This supports mirroring a domain to e.g. S3 and a local NAS simultaneously.
+
+#### Primary backend selection
+
+Reads are served by a single primary backend, chosen in this order:
+
+1. the first backend with `"main": true`;
+2. otherwise the first `local` backend (local disk is faster and more available than the cloud);
+3. otherwise the first backend listed.
+
+`tsync configure` asks whether each backend should be the primary, defaulting to yes for `local` and no for `s3`. Marking more than one backend `main` simply uses the first; the choice only affects reads, since every write already fans out to all backends.
 
 ### TLS backend
 

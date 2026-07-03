@@ -1,0 +1,3 @@
+(test
+ (name conf_test)
+ (libraries tsync_core))

@@ -7,8 +7,8 @@ val of_string : string -> t option
     ["native"; "openssl"] when both are linked). *)
 val available : unit -> string list
 
-(** Name of the backend conduit will use for the next connection
-    ("native" | "openssl" | "none"). *)
+(** Name of the backend conduit will use for the next connection ("native" |
+    "openssl" | "none"). *)
 val current : unit -> string
 
 (** Select conduit's TLS backend. Raises [Failure] if it is not available. *)

@@ -47,7 +47,11 @@ let make_conf ?domain cfg : (module Conf.S) =
     let versions_prefix = Conf_parsing.versions_prefix d
     let journal_prefix = Conf_parsing.journal_prefix d
     let cursor_key = Conf_parsing.cursor_key d
-    let backends = List.map make_backend d.Conf_parsing.backends
+
+    let backends =
+      List.map make_backend
+        (Conf_parsing.order_backends d.Conf_parsing.backends)
+
     let cache_root = runtime_paths.Runtime.cache_root
     let data_dir = runtime_paths.Runtime.data_dir
     let socket_path = runtime_paths.Runtime.socket_path
@@ -638,10 +642,12 @@ let configure_cmd =
       let line = read_line () in
       if line = "" then Option.value def ~default:"" else line
     in
-    let prompt_bool msg =
-      Printf.printf "%s [y/N]: %!" msg;
+    let prompt_bool ?(default = false) msg =
+      Printf.printf "%s [%s]: %!" msg (if default then "Y/n" else "y/N");
       match String.lowercase_ascii (read_line ()) with
         | "y" | "yes" -> true
+        | "n" | "no" -> false
+        | "" -> default
         | _ -> false
     in
     let read_password msg =
@@ -664,7 +670,15 @@ let configure_cmd =
       match backend_type with
         | "local" ->
             let path = prompt "  Local path" None in
-            `Assoc [("type", `String "local"); ("path", `String path)]
+            let main =
+              prompt_bool ~default:true "  Primary backend (used for reads)?"
+            in
+            `Assoc
+              [
+                ("type", `String "local");
+                ("path", `String path);
+                ("main", `Bool main);
+              ]
         | _ ->
             has_s3 := true;
             let bucket = prompt "  S3 bucket" None in
@@ -672,6 +686,9 @@ let configure_cmd =
             let endpoint = prompt "  Custom endpoint (blank for AWS)" None in
             let access_key_id = prompt "  AWS Access Key ID" None in
             let secret_access_key = read_password "  AWS Secret Access Key" in
+            let main =
+              prompt_bool ~default:false "  Primary backend (used for reads)?"
+            in
             `Assoc
               ([
                  ("type", `String "s3");
@@ -682,6 +699,7 @@ let configure_cmd =
               @ [
                   ("accessKeyId", `String access_key_id);
                   ("secretAccessKey", `String secret_access_key);
+                  ("main", `Bool main);
                 ])
     in
     let prompt_backends () =
@@ -739,8 +757,7 @@ let configure_cmd =
                (String.concat "/" available))
             (Some (List.hd available))
         in
-        if List.mem choice available then [("tls", `String choice)]
-        else [])
+        if List.mem choice available then [("tls", `String choice)] else [])
     in
     mkdir_p (Filename.dirname config_path);
     let json =

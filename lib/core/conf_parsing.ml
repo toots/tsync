@@ -1,4 +1,9 @@
-type backend_config = { backend_type : string; fields : (string * string) list }
+type backend_config = {
+  backend_type : string;
+  fields : (string * string) list;
+  main : bool;
+}
+
 type domain = { name : string; prefix : string; backends : backend_config list }
 
 type t = {
@@ -11,13 +16,32 @@ type t = {
 let parse_backend json =
   let open Yojson.Basic.Util in
   let backend_type = json |> member "type" |> to_string in
+  let main = match json |> member "main" with `Bool b -> b | _ -> false in
   let fields =
     to_assoc json
     |> List.filter_map (fun (k, v) ->
-        if k = "type" then None
+        if k = "type" || k = "main" then None
         else (match v with `String s -> Some (k, s) | _ -> None))
   in
-  { backend_type; fields }
+  { backend_type; fields; main }
+
+(* The primary backend serves reads; writes still fan out to all. Pick the first
+   one explicitly marked [main], else the first local-file backend (local disk
+   is faster and more available than the cloud), else the first configured. *)
+let primary_backend backends =
+  match List.find_opt (fun b -> b.main) backends with
+    | Some _ as b -> b
+    | None -> (
+        match List.find_opt (fun b -> b.backend_type = "local") backends with
+          | Some _ as b -> b
+          | None -> ( match backends with b :: _ -> Some b | [] -> None))
+
+(* Return the backends with the primary moved to the front (others keep their
+   order), so [List.hd] / [b :: _] downstream select the primary. *)
+let order_backends backends =
+  match primary_backend backends with
+    | None -> backends
+    | Some primary -> primary :: List.filter (fun b -> b != primary) backends
 
 let parse_domain json =
   let open Yojson.Basic.Util in
