@@ -150,39 +150,57 @@ let human_bytes n =
   if !i = 0 then Printf.sprintf "%d B" n
   else Printf.sprintf "%.1f %s" !v units.(!i)
 
+let print_stats obj =
+  let i k = match List.assoc_opt k obj with Some (`Int n) -> n | _ -> 0 in
+  let row label value = Printf.printf "  %-13s %s\n" label value in
+  Printf.printf "Uploads\n";
+  row "pending" (string_of_int (i "pendingUploads"));
+  row "completed" (string_of_int (i "uploadsCompleted"));
+  row "limit" (string_of_int (i "maxUploads"));
+  row "transferred" (human_bytes (i "bytesUploaded"));
+  row "rate" (human_bytes (i "uploadBytesPerSec") ^ "/s");
+  Printf.printf "Downloads\n";
+  row "pending" (string_of_int (i "pendingDownloads"));
+  row "completed" (string_of_int (i "downloadsCompleted"));
+  row "limit" (string_of_int (i "maxDownloads"));
+  row "transferred" (human_bytes (i "bytesDownloaded"));
+  row "rate" (human_bytes (i "downloadBytesPerSec") ^ "/s");
+  Printf.printf "Hashing\n";
+  row "chunks" (string_of_int (i "chunksHashed"));
+  row "rate" (Printf.sprintf "%d/s" (i "hashesPerSec"));
+  Printf.printf "Cache\n";
+  row "dirty files" (string_of_int (i "dirtyFiles"));
+  row "open files" (string_of_int (i "openFiles"))
+
 let stats_cmd =
-  let run () =
-    match ipc_action "stats" with
-      | obj ->
-          let i k =
-            match List.assoc_opt k obj with Some (`Int n) -> n | _ -> 0
-          in
-          let row label value = Printf.printf "  %-13s %s\n" label value in
-          Printf.printf "Uploads\n";
-          row "pending" (string_of_int (i "pendingUploads"));
-          row "completed" (string_of_int (i "uploadsCompleted"));
-          row "limit" (string_of_int (i "maxUploads"));
-          row "transferred" (human_bytes (i "bytesUploaded"));
-          row "rate" (human_bytes (i "uploadBytesPerSec") ^ "/s");
-          Printf.printf "Downloads\n";
-          row "pending" (string_of_int (i "pendingDownloads"));
-          row "completed" (string_of_int (i "downloadsCompleted"));
-          row "limit" (string_of_int (i "maxDownloads"));
-          row "transferred" (human_bytes (i "bytesDownloaded"));
-          row "rate" (human_bytes (i "downloadBytesPerSec") ^ "/s");
-          Printf.printf "Hashing\n";
-          row "chunks" (string_of_int (i "chunksHashed"));
-          row "rate" (Printf.sprintf "%d/s" (i "hashesPerSec"));
-          Printf.printf "Cache\n";
-          row "dirty files" (string_of_int (i "dirtyFiles"));
-          row "open files" (string_of_int (i "openFiles"))
-      | exception Failure msg -> Printf.eprintf "Error: %s\n" msg
-      | exception _ -> print_endline "Daemon not running"
+  let watch_arg =
+    Arg.(
+      value
+      & opt (some float) None
+      & info [ "w"; "watch" ] ~docv:"SECONDS"
+          ~doc:"Poll and redraw every $(docv) seconds")
+  in
+  let run watch =
+    let show () =
+      match ipc_action "stats" with
+        | obj -> print_stats obj
+        | exception Failure msg -> Printf.eprintf "Error: %s\n" msg
+        | exception _ -> print_endline "Daemon not running"
+    in
+    match watch with
+      | None -> show ()
+      | Some interval ->
+          while true do
+            print_string "\027[2J\027[H";
+            show ();
+            flush stdout;
+            Unix.sleepf interval
+          done
   in
   Cmd.v
     (Cmd.info "stats"
        ~doc:"Show transfer metrics (pending/completed uploads and downloads)")
-    Term.(const run $ const ())
+    Term.(const run $ watch_arg)
 
 (* ── tsync evict ─────────────────────────────────────────────────────────── *)
 
