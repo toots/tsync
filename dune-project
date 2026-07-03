@@ -27,7 +27,9 @@
  (version 1)
  (allow_empty)
  (synopsis "Virtual package install tsync S3 dependencies")
- (depends aws-s3-lwt lwt lwt_ppx lwt_ssl tls-lwt))
+ (depends aws-s3-lwt lwt lwt_ppx tls-lwt)
+ (depopts lwt_ssl)
+ )
 
 (package
  (name tsync-fuse)

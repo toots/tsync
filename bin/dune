@@ -11,6 +11,7 @@
   tsync_file
   tsync_log
   tsync_runtime
+  tsync_tls
   cmdliner
   yojson
   lwt

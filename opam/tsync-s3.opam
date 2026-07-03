@@ -12,10 +12,10 @@ depends: [
   "aws-s3-lwt"
   "lwt"
   "lwt_ppx"
-  "lwt_ssl"
   "tls-lwt"
   "odoc" {with-doc}
 ]
+depopts: ["lwt_ssl"]
 build: [
   ["dune" "subst"] {dev}
   [

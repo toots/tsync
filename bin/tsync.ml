@@ -36,6 +36,7 @@ let make_backend (bc : Conf_parsing.backend_config) =
       List.assoc_opt k bc.fields)
 
 let make_conf ?domain cfg : (module Conf.S) =
+  Tls_conf.apply cfg.Conf_parsing.tls;
   let d = Conf_parsing.pick_domain ?domain cfg in
   (module struct
     let versioning = cfg.Conf_parsing.versioning
@@ -70,11 +71,22 @@ let start_cmd =
       & opt (some string) None
       & info ["domain"] ~docv:"NAME" ~doc:"Domain name (default: from config)")
   in
-  let run mount domain =
+  let tls_arg =
+    Arg.(
+      value
+      & opt (some string) None
+      & info ["tls"] ~docv:"native|openssl"
+          ~doc:
+            "Override the TLS backend for S3 connections (default: from \
+             config, then conduit's built-in default)")
+  in
+  let run mount domain tls =
     Log.init ();
     Log.debug "loading config from %s" runtime_paths.Runtime.config_path;
     let cfg = Conf_parsing.load runtime_paths.Runtime.config_path in
     let (module C : Conf.S) = make_conf ?domain cfg in
+    (* CLI --tls wins over the config value applied by make_conf. *)
+    if tls <> None then Tls_conf.apply tls;
     let mount_point =
       match mount with
         | Some p -> p
@@ -91,7 +103,7 @@ let start_cmd =
   in
   Cmd.v
     (Cmd.info "start" ~doc:"Mount the filesystem (run via systemd unit)")
-    Term.(const run $ mount_arg $ domain_arg)
+    Term.(const run $ mount_arg $ domain_arg $ tls_arg)
 
 (* ── tsync stop ─────────────────────────────────────────────────────────── *)
 

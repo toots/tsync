@@ -1,6 +1,12 @@
 type backend_config = { backend_type : string; fields : (string * string) list }
 type domain = { name : string; prefix : string; backends : backend_config list }
-type t = { versioning : bool; name : string; domains : domain list }
+
+type t = {
+  versioning : bool;
+  name : string;
+  tls : string option;
+  domains : domain list;
+}
 
 let parse_backend json =
   let open Yojson.Basic.Util in
@@ -34,6 +40,7 @@ let load path =
       (match json |> member "name" with
         | `String s -> s
         | _ -> Unix.gethostname ());
+    tls = (match json |> member "tls" with `String s -> Some s | _ -> None);
     domains = json |> member "domains" |> to_list |> List.map parse_domain;
   }
 
