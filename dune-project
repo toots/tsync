@@ -16,6 +16,8 @@
   dune
   yojson
   lwt_domain
+  lwt
+  lwt_ppx
   cmdliner)
  (depopts
    syslog
@@ -27,7 +29,7 @@
  (version 1)
  (allow_empty)
  (synopsis "Virtual package install tsync S3 dependencies")
- (depends aws-s3-lwt lwt lwt_ppx tls-lwt)
+ (depends aws-s3-lwt tls-lwt)
  (depopts lwt_ssl)
  )
 

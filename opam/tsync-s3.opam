@@ -10,8 +10,6 @@ bug-reports: "https://github.com/toots/tsync/issues"
 depends: [
   "dune" {>= "3.23"}
   "aws-s3-lwt"
-  "lwt"
-  "lwt_ppx"
   "tls-lwt"
   "odoc" {with-doc}
 ]
