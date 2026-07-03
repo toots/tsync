@@ -1,20 +1,10 @@
 open Lwt.Syntax
 
-let rec mkdir_p path =
-  let* exists = Lwt_unix.file_exists path in
-  if exists then Lwt.return_unit
-  else
-    let* () = mkdir_p (Filename.dirname path) in
-    Lwt.catch
-      (fun () -> Lwt_unix.mkdir path 0o755)
-      (function
-        | Unix.Unix_error (Unix.EEXIST, _, _) -> Lwt.return_unit
-        | exn -> Lwt.fail exn)
-
-let ensure_parent path = mkdir_p (Filename.dirname path)
+let mkdir_p = Fs_util.mkdir_p
+let readdir_list = Fs_util.readdir_list
 
 let write_file path data =
-  let* () = ensure_parent path in
+  let* () = Fs_util.ensure_parent path in
   let tmp = path ^ ".tmp" in
   let* () =
     Lwt_io.with_file ~mode:Lwt_io.Output tmp (fun oc -> Lwt_io.write oc data)
@@ -22,10 +12,6 @@ let write_file path data =
   Lwt_unix.rename tmp path
 
 let read_file path = Lwt_io.with_file ~mode:Lwt_io.Input path Lwt_io.read
-
-let readdir_list path =
-  let+ names = Lwt_stream.to_list (Lwt_unix.files_of_directory path) in
-  List.filter (fun name -> name <> "." && name <> "..") names
 
 let make ~root : (module Backend.S) =
   let resolve key = if key = "" then root else Filename.concat root key in
@@ -62,32 +48,7 @@ let make ~root : (module Backend.S) =
           | Unix.Unix_error (Unix.ENOENT, _, _) -> Lwt.return_none
           | exn -> Lwt.fail exn)
 
-    let rec rm_rf path =
-      Lwt.catch
-        (fun () ->
-          let* st = Lwt_unix.lstat path in
-          match st with
-            | { Unix.st_kind = Unix.S_DIR; _ } ->
-                let* names = readdir_list path in
-                let* () =
-                  Lwt_list.iter_s
-                    (fun name -> rm_rf (Filename.concat path name))
-                    names
-                in
-                Lwt.catch
-                  (fun () -> Lwt_unix.rmdir path)
-                  (function
-                    | Unix.Unix_error _ -> Lwt.return_unit | exn -> Lwt.fail exn)
-            | _ ->
-                Lwt.catch
-                  (fun () -> Lwt_unix.unlink path)
-                  (function
-                    | Unix.Unix_error _ -> Lwt.return_unit | exn -> Lwt.fail exn))
-        (function
-          | Unix.Unix_error (Unix.ENOENT, _, _) -> Lwt.return_unit
-          | exn -> Lwt.fail exn)
-
-    let delete ~key () = rm_rf (resolve key)
+    let delete ~key () = Fs_util.rm_rf (resolve key)
     let delete_multi keys = Lwt_list.iter_s (fun key -> delete ~key ()) keys
 
     let copy ~src_key ~dst_key () =

@@ -85,7 +85,7 @@ Config path is platform-specific — see each platform's **Paths** section below
 |---|---|---|
 | `name` | string | Domain name — used as the mount directory name and storage namespace segment |
 | `prefix` | string | Key prefix shared by all backends for this domain (no leading/trailing slash) |
-| `backends` | backend[] | One or more backends; writes fan out to all, reads use the first |
+| `backends` | backend[] | One or more backends; writes fan out to all, reads use the primary (see below) |
 
 **Backend fields (`type: "s3"`):**
 
@@ -134,7 +134,7 @@ If neither is set, conduit's built-in default (native) is used, so B2 works out 
 
 ### Chunked uploads
 
-Every file is stored as one or more 8 MB chunks. Each chunk is stored at `<prefix>/.chunks/<h1>-<h2>` where `h1` and `h2` are the xxHash3-64 of the chunk data computed with seeds 0 and 1 respectively, encoded as 16-character lowercase hex. The primary key holds a JSON manifest (`Content-Type: application/x-tsync-manifest+json`). Files smaller than 8 MB produce a single-chunk manifest. On re-upload, only chunks whose hash changed are uploaded — unchanged chunks are reused. Chunks are shared across all files and versions.
+Every file is stored as one or more 8 MB chunks. Each chunk is stored at `<prefix>/.chunks/<h1>-<h2>` where `h1` and `h2` are the xxHash3-64 of the chunk data computed with seeds 0 and 1 respectively, encoded as 16-character lowercase hex. The primary key holds a JSON manifest. Files smaller than 8 MB produce a single-chunk manifest. On re-upload, only chunks whose hash changed are uploaded — unchanged chunks are reused. Chunks are shared across all files and versions.
 
 Manifest format:
 
@@ -182,7 +182,7 @@ Journal entries are written to the backend immediately on each mutation. The `.c
 
 Multiple clients can mount the same domain concurrently. Each client applies the others' changes through the journal:
 
-- **Sync poller** (`lib/file/sync_poller.ml`, started by both runtimes): a background thread polls `.cursor/<domain>` every ~2 s. When the cursor changes, it lists journal entries after the last-sync marker, filters out entries carrying its own `client_uuid`, and applies each foreign entry via `File.apply_foreign_ops`. The local marker (`last-sync-<domain>` in the data dir) then advances to the newest entry.
+- **Sync poller** (`lib/file/sync_poller.ml`, started by both runtimes): a background Lwt task polls `.cursor/<domain>` every ~2 s. When the cursor changes, it lists journal entries after the last-sync marker, filters out entries carrying its own `client_uuid`, and applies each foreign entry via `File.apply_foreign_ops`. The local marker (`last-sync-<domain>` in the data dir) then advances to the newest entry.
 - **`File.apply_foreign_ops`** translates a foreign journal entry into local state:
   - `put` — fetch the remote manifest, update the local `.manifest` sidecar, evict any stale cached data (next read downloads the new content).
   - `delete` — remove local cache and sidecar.
@@ -234,19 +234,23 @@ All library modules are parameterised by a `Conf.S` module (a first-class module
 | `ipc_handler/ipc_handler.ml` | `Ipc_handler.Make(C)(F)` — the shared JSON request dispatcher used by both runtimes; runtime differences captured in a `hooks` record |
 | `conf/conf.mli` | `module type S` — the functor parameter type used by all library modules |
 | `backends/` | Pluggable storage backends (S3 via `aws-s3` + Lwt, local filesystem); self-registration pattern |
+| `tls/tls_conf.ml` | Runtime selection of conduit's TLS backend (native / OpenSSL) for S3 |
 | `xxhash/xxhash.ml` | xxHash3-64 C bindings (dual-seed for chunk fingerprinting) |
 | `local_io/local_io.ml` | Paged local file read/write |
+| `local_io/fs_util.ml` | Shared Lwt filesystem helpers (`mkdir_p`, `rm_rf`, `readdir_list`, …) |
+| `metrics/metrics.ml` | Transfer and hashing counters (totals + rolling rate) for `tsync stats` |
 | `log/` | Logging backends (printf for development, syslog for production) |
 | `file/manifest.ml` | Manifest JSON serialization/deserialization; chunk key derivation |
 | `file/local.ml` | Local cache paths; create/evict/rename local cache entries |
 | `file/remote.ml` | Chunked upload and download against the backend |
+| `file/hash_pool.ml` | Domainslib pool (via `lwt_domain`) for parallel chunk hashing |
 | `file/versioning.ml` | Version key construction + `save` (copy live manifest to a timestamped version) |
 | `file/expire.ml` | `Expire.Make(C).expire` — delete versions older than a cutoff, then GC unreferenced chunks |
 | `file/file.ml` | `File.Make(C)(Sq)` — central file abstraction: stat, read, write, upload, download, evict, delete, rename, mkdir; dirty/open tracking; `apply_foreign_ops` and conflict-copy publishing |
 | `file/sync_poller.ml` | `Sync_poller.Make(C)(F)` — background version-key poller applying foreign journal entries; `sync_once` for on-demand sync |
 | `sync_queue/journal.ml` | `Journal.Make(C)` — journal entry read/write; local pending-entry tracking for crash recovery |
 | `sync_queue/file_store.ml` | `File_store.Make(C)` — backend operations with journal bookkeeping; directory list/rename/delete |
-| `sync_queue/sync_queue.ml` | `Sync_queue.Make(C)` — async upload queue backed by OCaml `Domain` workers |
+| `sync_queue/sync_queue.ml` | `Sync_queue.Make(C)` — async upload queue with a bounded pool of Lwt worker tasks and per-key coalescing |
 | `file_provider/file_provider.ml` | `File_provider.Make(C)` — macOS FileProvider runtime: serves the shared IPC handler with FileProvider-specific hooks |
 
 ### CLI binary (`bin/tsync.ml`)
@@ -255,16 +259,16 @@ The same `tsync` binary is used on both platforms. `bin/tsync.ml` reads runtime 
 
 | Module | Selected when |
 |---|---|
-| `runtime.fuse.ml` | `fuse3` library present (Linux) |
-| `runtime.file_provider.ml` | macOS group container path available |
-| `runtime.noop.ml` | Neither (build-time stub) |
+| `runtime.fuse.ml` | `tsync_fuse` library present (Linux) |
+| `runtime.file_provider.ml` | `tsync_file_provider` library present (macOS) |
 
 ```
 tsync configure
 
-tsync start   [--mount <path>] [--domain <name>]
+tsync start   [--mount <path>] [--domain <name>] [--tls native|openssl]
 tsync stop
 tsync status
+tsync stats
 
 tsync evict   <path>
 tsync restore <path>
@@ -279,7 +283,7 @@ tsync auto-evict [on|off|status]
 tsync purge   <path>
 ```
 
-`tsync configure` writes the config file interactively. It prompts for versioning, then loops over domains (name, prefix, backends) — each domain supports multiple backends. On macOS it writes to the group container so both the daemon and extension can read it; on Linux it writes to the XDG config dir with mode `0600`.
+`tsync configure` writes the config file interactively. It prompts for versioning, upload/download concurrency, and (when both TLS backends are built and an S3 backend is used) the TLS backend, then loops over domains (name, prefix, backends) — each backend can be marked as the primary. On macOS it writes to the group container so both the daemon and extension can read it; on Linux it writes to the XDG config dir with mode `0600`.
 
 ### IPC protocol
 
@@ -357,18 +361,22 @@ The Linux backend mounts a FUSE filesystem at `~/tsync/<domain>/` using `ocamlfu
 
 ```
 tsync start
-  ├── Ipc.serve          Unix socket at ~/.local/share/tsync/tsync.sock
-  ├── cursor_flusher     Thread: drains pending_cursor → backend every ~2 s
-  ├── sync_poller        Thread: watches .cursor key, applies foreign journal entries
-  └── Fuse_fs.mount      ocamlfuse main loop (single-threaded)
-       └── FUSE ops → File.* → Sync_queue → backend
+  ├── Lwt event loop (dedicated thread) — owns all daemon state and backend I/O
+  │     ├── Ipc.serve       Unix socket at ~/.local/share/tsync/tsync.sock (one Lwt task per client)
+  │     ├── cursor_flusher  Lwt task: drains pending_cursor → backend every ~2 s
+  │     ├── sync_poller     Lwt task: watches .cursor key, applies foreign journal entries
+  │     └── Sync_queue      bounded pool of Lwt upload workers
+  └── Fuse.main (Multi_threaded)
+       └── FUSE ops → Lwt_preemptive.run_in_main → File.* on the loop
 ```
+
+All daemon state and backend I/O live on the single Lwt event loop. FUSE runs multi-threaded; each handler bridges into the loop with `Lwt_preemptive.run_in_main`, so a slow operation blocks only its own kernel thread while the loop keeps serving others (e.g. `tsync status` stays instant during a large restore).
 
 ### Source layout (`linux/lib/fuse/`)
 
 | File | Role |
 |---|---|
-| `fuse_fs.ml` | `Fuse_fs.Make(C)` — FUSE operation handlers; serves the shared `Ipc_handler` with FUSE-specific hooks; cursor flusher thread; instantiates `Sync_queue`, `File`, `File_store` |
+| `fuse_fs.ml` | `Fuse_fs.Make(C)` — FUSE operation handlers bridged to the Lwt loop via `run_in_main`; hosts the Lwt loop (IPC server, cursor flusher, sync poller, upload workers); serves the shared `Ipc_handler` with FUSE-specific hooks |
 | `path_ops.ml` | FUSE path operation record type |
 | `internal_ops.ml` | `Internal_ops.Make(F)` — mutation handlers (create, write, unlink, mkdir, rmdir, rename) |
 | `hidden_ops.ml` | `Hidden_ops.Make(F)` — `.fuse_hidden*` file handlers (local-only, never mirror to backend) |
@@ -392,7 +400,7 @@ Each cached file lives at `<cache_root>/<domain>/<path>`. A `.manifest` sidecar 
 
 - **getattr / readdir**: served from the local manifest cache.
 - **open / read**: triggers `File.ensure_cached` on first access of an evicted file — downloads from backend synchronously.
-- **release** (last close): if the file was written, posts a `Put` event to `Sync_queue`. The upload runs on a Domain worker thread; the FUSE operation returns immediately.
+- **release** (last close): if the file was written, posts a `Put` event to `Sync_queue`. The upload runs asynchronously on a Sync_queue worker; the FUSE operation returns immediately.
 - **unlink / mkdir / rmdir / rename**: synchronous backend operations with journal write-ahead. `rename` handles both file and directory cases by detecting trailing `/` in the key.
 
 ### Auto-evict
@@ -429,7 +437,7 @@ TsyncFileProvider (extension, sandboxed)
 
 OCaml daemon (tsync start, LaunchAgent via deploy-daemon.sh)
   ├── Ipc.serve               Unix socket — JSON + CLI dispatch
-  ├── Sync_queue              Domain workers for async upload
+  ├── Sync_queue              Lwt worker pool for async upload
   ├── sync_poller             applies foreign journal entries → CHANGED → extension evict + signal
   └── on_upload_done          → Ipc.notify_uploaded → notify.sock → extension signalEnumerator
 ```
@@ -526,7 +534,7 @@ make -C macos deploy     # build + install TsyncApp to /Applications + reload La
 
 **Chunks are not encrypted at the application layer.** Enable S3 SSE-S3 or SSE-KMS on the bucket for encryption at rest.
 
-**Linux: single-threaded FUSE.** Runs in `Single_threaded` mode; concurrent filesystem operations queue behind the Lwt event loop. Sufficient for personal use; would need `Multi_threaded` + per-file locking for heavy concurrent access.
+**Linux: single metadata lock.** FUSE runs `Multi_threaded` and bridges to the Lwt loop via `run_in_main`, so reads, downloads, and uploads proceed concurrently. Metadata mutations (delete/mkdir/rmdir/rename/revert) are serialized through one global `Lwt_mutex`; switching to per-key locks would only matter under heavy concurrent metadata churn.
 
 **macOS: extension consent required.** macOS requires one-time user consent in System Settings → General → Login Items & Extensions → File Provider Extensions before the extension activates and the CloudStorage mount appears.
 

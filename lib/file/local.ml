@@ -16,18 +16,8 @@ let cache_path ~cache_root ~domain_name ~domain_prefix key =
     (data_dir ~cache_root domain_name)
     (strip_prefix ~domain_prefix key)
 
-let rec mkdir_p path =
-  let* exists = Lwt_unix.file_exists path in
-  if exists then Lwt.return_unit
-  else
-    let* () = mkdir_p (Filename.dirname path) in
-    Lwt.catch
-      (fun () -> Lwt_unix.mkdir path 0o755)
-      (function
-        | Unix.Unix_error (Unix.EEXIST, _, _) -> Lwt.return_unit
-        | exn -> Lwt.fail exn)
-
-let ensure_parent_dir path = mkdir_p (Filename.dirname path)
+let mkdir_p = Fs_util.mkdir_p
+let ensure_parent_dir = Fs_util.ensure_parent
 
 let manifest_path ~cache_root ~domain_name ~domain_prefix key =
   Filename.concat
@@ -37,37 +27,11 @@ let manifest_path ~cache_root ~domain_name ~domain_prefix key =
 let create_dir ~cache_root ~domain_name ~domain_prefix key =
   mkdir_p (manifest_path ~cache_root ~domain_name ~domain_prefix key)
 
-let readdir_list path =
-  let+ names = Lwt_stream.to_list (Lwt_unix.files_of_directory path) in
-  List.filter (fun name -> name <> "." && name <> "..") names
-
-let is_directory path =
-  Lwt.catch
-    (fun () ->
-      let+ st = Lwt_unix.stat path in
-      st.Unix.st_kind = Unix.S_DIR)
-    (fun _ -> Lwt.return_false)
-
-let rec rm_rf path =
-  let* exists = Lwt_unix.file_exists path in
-  if not exists then Lwt.return_unit
-  else
-    let* is_dir = is_directory path in
-    if is_dir then
-      let* names = readdir_list path in
-      let* () =
-        Lwt_list.iter_s (fun name -> rm_rf (Filename.concat path name)) names
-      in
-      Lwt.catch
-        (fun () -> Lwt_unix.rmdir path)
-        (function Unix.Unix_error _ -> Lwt.return_unit | e -> Lwt.fail e)
-    else
-      Lwt.catch
-        (fun () -> Lwt_unix.unlink path)
-        (function Unix.Unix_error _ -> Lwt.return_unit | e -> Lwt.fail e)
+let readdir_list = Fs_util.readdir_list
+let is_directory = Fs_util.is_directory
 
 let delete_dir ~cache_root ~domain_name ~domain_prefix key =
-  rm_rf (manifest_path ~cache_root ~domain_name ~domain_prefix key)
+  Fs_util.rm_rf (manifest_path ~cache_root ~domain_name ~domain_prefix key)
 
 let list_dir ~cache_root ~domain_name ~domain_prefix key =
   let path = manifest_path ~cache_root ~domain_name ~domain_prefix key in

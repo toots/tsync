@@ -63,6 +63,7 @@ tsync revert <path>   # bring back a previous version (or an undeleted file)
 tsync expire <date>   # drop versions older than a date, then reclaim unused blocks
 tsync sync            # apply changes made from other machines
 tsync status          # show daemon state
+tsync stats           # transfer metrics (pending/completed, bandwidth, hashing)
 tsync stop            # unmount
 ```
 
