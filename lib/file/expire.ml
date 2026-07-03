@@ -1,3 +1,5 @@
+open Lwt.Syntax
+
 type stats = { versions_deleted : int; chunks_deleted : int; chunks_kept : int }
 
 module Make (C : Conf.S) = struct
@@ -7,8 +9,11 @@ module Make (C : Conf.S) = struct
       | [] -> failwith "no backends configured"
 
   let delete_all keys =
-    if keys <> [] then
-      List.iter (fun (module B : Backend.S) -> B.delete_multi keys) C.backends
+    if keys = [] then Lwt.return_unit
+    else
+      Lwt_list.iter_s
+        (fun (module B : Backend.S) -> B.delete_multi keys)
+        C.backends
 
   let is_marker key = String.length key > 0 && key.[String.length key - 1] = '/'
 
@@ -17,16 +22,17 @@ module Make (C : Conf.S) = struct
      chunks. An unexpected parse failure aborts (raises) rather than reporting
      "references nothing", which would let the sweep delete the file's chunks. *)
   let referenced_chunks (module B : Backend.S) key =
-    if is_marker key then []
-    else (
-      match Manifest.of_string (B.get ~key ()) with
+    if is_marker key then Lwt.return []
+    else
+      let+ data = B.get ~key () in
+      match Manifest.of_string data with
         | `Clean m -> List.map Manifest.chunk_key m.Manifest.chunks
         | `Dirty -> []
         | exception e ->
             failwith
               (Printf.sprintf
                  "cannot read manifest %s (%s); aborting before chunk GC" key
-                 (Printexc.to_string e)))
+                 (Printexc.to_string e))
 
   let parse = Versioning.parse ~versions_prefix:C.versions_prefix
 
@@ -34,8 +40,9 @@ module Make (C : Conf.S) = struct
     let (module B : Backend.S) = primary () in
     let cutoff_ns = Int64.of_float (cutoff *. 1e9) in
     (* Phase 1: partition versions by the cutoff (no deletion yet). *)
+    let* versions = B.list_all ~prefix:C.versions_prefix () in
     let expired, surviving =
-      B.list_all ~prefix:C.versions_prefix ()
+      versions
       |> List.fold_left
            (fun (expired, surviving) (e : Backend.file_entry) ->
              match parse e.key with
@@ -52,27 +59,30 @@ module Make (C : Conf.S) = struct
        scan measurably hurts. *)
     let live = Hashtbl.create 4096 in
     let mark key =
-      List.iter
-        (fun ck -> Hashtbl.replace live ck ())
-        (referenced_chunks (module B) key)
+      let+ cks = referenced_chunks (module B) key in
+      List.iter (fun ck -> Hashtbl.replace live ck ()) cks
     in
-    List.iter
-      (fun (e : Backend.file_entry) -> mark e.key)
-      (B.list_all ~prefix:C.domain_prefix ());
-    List.iter (fun (key, _rel) -> mark key) surviving;
+    let* live_files = B.list_all ~prefix:C.domain_prefix () in
+    let* () =
+      Lwt_list.iter_s (fun (e : Backend.file_entry) -> mark e.key) live_files
+    in
+    let* () = Lwt_list.iter_s (fun (key, _rel) -> mark key) surviving in
     (* Phase 3: delete expired versions, then the version directories they
        emptied. On S3 no directory object exists, so those deletes are harmless
        no-ops; on a filesystem backend they prune the now-empty directory. *)
-    delete_all (List.map fst expired);
+    let* () = delete_all (List.map fst expired) in
     let survivor_rels = List.map snd surviving in
-    List.sort_uniq compare (List.map snd expired)
-    |> List.filter (fun rel -> not (List.mem rel survivor_rels))
-    |> List.map (fun rel -> C.versions_prefix ^ rel ^ "/")
-    |> delete_all;
+    let* () =
+      List.sort_uniq compare (List.map snd expired)
+      |> List.filter (fun rel -> not (List.mem rel survivor_rels))
+      |> List.map (fun rel -> C.versions_prefix ^ rel ^ "/")
+      |> delete_all
+    in
     (* Phase 4: sweep every chunk not referenced anywhere, regardless of age. *)
+    let* chunks = B.list_all ~prefix:C.chunk_prefix () in
     let kept = ref 0 in
     let unreferenced =
-      B.list_all ~prefix:C.chunk_prefix ()
+      chunks
       |> List.filter_map (fun (e : Backend.file_entry) ->
           let ck =
             String.sub e.key
@@ -84,7 +94,7 @@ module Make (C : Conf.S) = struct
             None)
           else Some e.key)
     in
-    delete_all unreferenced;
+    let+ () = delete_all unreferenced in
     {
       versions_deleted = List.length expired;
       chunks_deleted = List.length unreferenced;

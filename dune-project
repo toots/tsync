@@ -15,6 +15,9 @@
   (ocaml (>= 5.5.0))
   dune
   yojson
+  lwt_domain
+  lwt
+  lwt_ppx
   cmdliner)
  (depopts
    syslog
@@ -26,7 +29,9 @@
  (version 1)
  (allow_empty)
  (synopsis "Virtual package install tsync S3 dependencies")
- (depends aws-s3-lwt lwt lwt_ppx lwt_ssl))
+ (depends aws-s3-lwt tls-lwt)
+ (depopts lwt_ssl)
+ )
 
 (package
  (name tsync-fuse)

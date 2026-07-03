@@ -1,3 +1,5 @@
+open Lwt.Syntax
+
 let strip_prefix ~prefix s =
   if
     String.length s > String.length prefix
@@ -29,14 +31,15 @@ let parse ~versions_prefix key =
 
 let save ~backends ~domain_prefix ~versions_prefix ~key =
   match backends with
-    | [] -> ()
+    | [] -> Lwt.return_unit
     | (module B : Backend.S) :: _ -> (
-        match B.head_opt ~key () with
-          | None -> ()
+        let* head = B.head_opt ~key () in
+        match head with
+          | None -> Lwt.return_unit
           | Some _ ->
               let dst_key =
                 version_key ~s3_key:key ~domain_prefix ~versions_prefix
               in
-              List.iter
+              Lwt_list.iter_s
                 (fun (module B : Backend.S) -> B.copy ~src_key:key ~dst_key ())
                 backends)

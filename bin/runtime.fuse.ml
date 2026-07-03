@@ -38,6 +38,7 @@ let pre_start ~mount_point =
        (Printf.sprintf "fusermount3 -uz %s 2>/dev/null"
           (Filename.quote mount_point)))
 
-let is_local = Local.is_cached
+let is_local ~cache_root ~domain_name ~domain_prefix key =
+  Sys.file_exists (Local.cache_path ~cache_root ~domain_name ~domain_prefix key)
 
 module Make (C : Conf.S) = Fuse_fs.Make (C)

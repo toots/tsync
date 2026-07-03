@@ -91,6 +91,7 @@ tsync is built for personal and small-scale use, and it's honest about its limit
 - Two machines editing the **exact same file** at the same moment resolve last-writer-wins (concurrent renames and delete/rename races *are* handled — they produce clearly-labeled conflict copies, and nothing is lost).
 - Files download on first open; there's no bulk prefetch yet.
 - Cloud chunks aren't encrypted by tsync itself — turn on your bucket's server-side encryption if you need encryption at rest.
+- S3 connections use a native OCaml TLS stack by default, which works with AWS and S3-compatible services like Backblaze B2. If you need OpenSSL instead, install `lwt_ssl` and select it with `tsync start --tls openssl` or a `"tls": "openssl"` line in your config. See the [TLS backend](IMPLEMENTATION.md#tls-backend) reference.
 
 For the complete list, plus the design and internals, see **[IMPLEMENTATION.md](IMPLEMENTATION.md)**.
 

@@ -1,4 +1,4 @@
-open Lwt.Infix
+open Lwt.Syntax
 module S3 = Aws_s3_lwt.S3
 
 exception Cancelled = Backend.Cancelled
@@ -30,14 +30,6 @@ let string_of_error = function
   | S3.Forbidden -> "forbidden"
   | S3.Not_found -> "not found"
 
-let lwt_mutex = Mutex.create ()
-
-let lwt_run f =
-  Mutex.lock lwt_mutex;
-  Fun.protect
-    ~finally:(fun () -> Mutex.unlock lwt_mutex)
-    (fun () -> Lwt_main.run (f ()))
-
 let s3_eio msg = Unix.Unix_error (Unix.EIO, "s3", msg)
 
 let unwrap op = function
@@ -52,58 +44,61 @@ let entry_of c =
     { key = c.S3.key; size = c.S3.size; last_modified = c.S3.last_modified }
 
 let put t ~key ~data () =
-  ignore
-    (lwt_run (fun () ->
-         S3.put ~credentials:t.credentials ~endpoint:t.endpoint ~bucket:t.bucket
-           ~key ~data ()
-         >|= unwrap "put"))
+  let+ res =
+    S3.put ~credentials:t.credentials ~endpoint:t.endpoint ~bucket:t.bucket ~key
+      ~data ()
+  in
+  ignore (unwrap "put" res)
 
 let get t ~key () =
-  lwt_run (fun () ->
-      S3.get ~credentials:t.credentials ~endpoint:t.endpoint ~bucket:t.bucket
-        ~key ()
-      >|= unwrap "get")
+  let+ res =
+    S3.get ~credentials:t.credentials ~endpoint:t.endpoint ~bucket:t.bucket ~key
+      ()
+  in
+  unwrap "get" res
 
 let head_opt t ~key () =
-  lwt_run (fun () ->
-      S3.head ~credentials:t.credentials ~endpoint:t.endpoint ~bucket:t.bucket
-        ~key ()
-      >|= function
-      | Ok c -> Some (entry_of c)
-      | Error S3.Not_found -> None
-      | Error e ->
-          let msg = string_of_error e in
-          Log.err "s3 head %s: %s" key msg;
-          raise (s3_eio msg))
+  let+ res =
+    S3.head ~credentials:t.credentials ~endpoint:t.endpoint ~bucket:t.bucket
+      ~key ()
+  in
+  match res with
+    | Ok c -> Some (entry_of c)
+    | Error S3.Not_found -> None
+    | Error e ->
+        let msg = string_of_error e in
+        Log.err "s3 head %s: %s" key msg;
+        raise (s3_eio msg)
 
 let delete t ~key () =
-  lwt_run (fun () ->
-      S3.delete ~credentials:t.credentials ~endpoint:t.endpoint ~bucket:t.bucket
-        ~key ()
-      >|= function
-      | Ok _ | Error S3.Not_found -> ()
-      | Error e -> raise (s3_eio (string_of_error e)))
+  let+ res =
+    S3.delete ~credentials:t.credentials ~endpoint:t.endpoint ~bucket:t.bucket
+      ~key ()
+  in
+  match res with
+    | Ok _ | Error S3.Not_found -> ()
+    | Error e -> raise (s3_eio (string_of_error e))
 
 let delete_multi t keys =
   let open S3.Delete_multi in
   let rec go = function
-    | [] -> ()
+    | [] -> Lwt.return_unit
     | batch ->
         let n = min 1000 (List.length batch) in
         let here = List.filteri (fun i _ -> i < n) batch in
         let rest = List.filteri (fun i _ -> i >= n) batch in
         let objects = List.map (fun key -> { key; version_id = None }) here in
-        ignore
-          (lwt_run (fun () ->
-               S3.delete_multi ~credentials:t.credentials ~endpoint:t.endpoint
-                 ~bucket:t.bucket ~objects ()
-               >|= unwrap "delete_multi"));
+        let* res =
+          S3.delete_multi ~credentials:t.credentials ~endpoint:t.endpoint
+            ~bucket:t.bucket ~objects ()
+        in
+        let (_ : S3.Delete_multi.result) = unwrap "delete_multi" res in
         go rest
   in
   go keys
 
 let copy t ~src_key ~dst_key () =
-  let data = get t ~key:src_key () in
+  let* data = get t ~key:src_key () in
   put t ~key:dst_key ~data ()
 
 let list_all t ~prefix () =
@@ -111,23 +106,25 @@ let list_all t ~prefix () =
     match cont with
       | S3.Ls.Done -> Lwt.return acc
       | S3.Ls.More f -> (
-          f () >>= function
-          | Ok (items, next) -> collect (acc @ List.map entry_of items) next
-          | Error e -> Lwt.fail (s3_eio (string_of_error e)))
+          let* res = f () in
+          match res with
+            | Ok (items, next) -> collect (acc @ List.map entry_of items) next
+            | Error e -> Lwt.fail (s3_eio (string_of_error e)))
   in
-  lwt_run (fun () ->
-      S3.ls ~credentials:t.credentials ~endpoint:t.endpoint ~bucket:t.bucket
-        ~prefix ()
-      >>= function
-      | Ok (items, cont) -> collect (List.map entry_of items) cont
-      | Error e ->
-          let msg = string_of_error e in
-          Log.err "s3 ls %s: %s" prefix msg;
-          Lwt.fail (s3_eio msg))
+  let* res =
+    S3.ls ~credentials:t.credentials ~endpoint:t.endpoint ~bucket:t.bucket
+      ~prefix ()
+  in
+  match res with
+    | Ok (items, cont) -> collect (List.map entry_of items) cont
+    | Error e ->
+        let msg = string_of_error e in
+        Log.err "s3 ls %s: %s" prefix msg;
+        Lwt.fail (s3_eio msg)
 
 let list_directory t ~prefix () =
   let prefix_len = String.length prefix in
-  let all = list_all t ~prefix () in
+  let+ all = list_all t ~prefix () in
   let dirs = Hashtbl.create 16 in
   let files = ref [] in
   List.iter

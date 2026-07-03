@@ -1,3 +1,5 @@
+open Lwt.Syntax
+
 module Make (C : Conf.S) = struct
   module Sq = Sync_queue.Make (C)
   module F = File.Make (C) (Sq)
@@ -9,10 +11,14 @@ module Make (C : Conf.S) = struct
 
   (* ── Full-file storage policy ─────────────────────────────────────────────
      Files persist in the local cache. Eviction is deferred while a file has
-     open handles; a dirty file is queued for upload on last close. *)
+     open handles; a dirty file is queued for upload on last close.
+
+     All File operations run on the single Lwt event-loop thread. FUSE runs
+     Multi_threaded; each handler bridges into that loop with
+     [Lwt_preemptive.run_in_main], so a slow operation blocks only its own
+     kernel thread while other operations keep making progress on the loop. *)
 
   let pending_evict : (string, unit) Hashtbl.t = Hashtbl.create 16
-  let pending_evict_mutex = Mutex.create ()
   let open_file key = F.mark_open key
 
   let close_file key =
@@ -23,19 +29,17 @@ module Make (C : Conf.S) = struct
         F.queue_put key
       end
       else begin
-        Mutex.lock pending_evict_mutex;
         let was_pending = Hashtbl.mem pending_evict key in
         Hashtbl.remove pending_evict key;
-        Mutex.unlock pending_evict_mutex;
-        if was_pending then F.evict key
+        if was_pending then F.evict key else Lwt.return_unit
       end
+    else Lwt.return_unit
 
   let request_evict key =
     if not (F.is_open key) then F.evict key
     else begin
-      Mutex.lock pending_evict_mutex;
       Hashtbl.replace pending_evict key ();
-      Mutex.unlock pending_evict_mutex
+      Lwt.return_unit
     end
 
   (* ── Path helpers ─────────────────────────────────────────────────────── *)
@@ -70,24 +74,32 @@ module Make (C : Conf.S) = struct
             (Printexc.to_string exn);
           raise (Unix.Unix_error (Unix.EIO, op, path))
 
+  (* Run an Lwt computation on the event-loop thread and wait for its result.
+     Called from FUSE worker threads (never the loop thread itself). *)
+  let on_loop f = Lwt_preemptive.run_in_main f
+
   (* ── Journal WAL helpers ──────────────────────────────────────────────── *)
 
   let pending_cursor : string option ref = ref None
-  let pending_cursor_mutex = Mutex.create ()
 
   let set_pending_cursor ek =
-    Mutex.lock pending_cursor_mutex;
-    (match !pending_cursor with
+    match !pending_cursor with
       | Some prev when prev >= ek -> ()
-      | _ -> pending_cursor := Some ek);
-    Mutex.unlock pending_cursor_mutex
+      | _ -> pending_cursor := Some ek
 
   let drain_pending_cursor () =
-    Mutex.lock pending_cursor_mutex;
     let v = !pending_cursor in
     pending_cursor := None;
-    Mutex.unlock pending_cursor_mutex;
     v
+
+  (* ── Shutdown coordination ────────────────────────────────────────────── *)
+
+  let stop_t, stop_wake = Lwt.wait ()
+
+  let do_stop () =
+    match Lwt.state stop_t with
+      | Lwt.Sleep -> Lwt.wakeup_later stop_wake ()
+      | _ -> ()
 
   (* ── IPC ──────────────────────────────────────────────────────────────── *)
 
@@ -110,22 +122,22 @@ module Make (C : Conf.S) = struct
   let evict_key key =
     let lp = F.local_path key in
     if Sys.file_exists lp && Sys.is_directory lp then begin
-      let rec walk dir =
-        Array.iter
-          (fun name ->
+      let rec collect dir acc =
+        Array.fold_left
+          (fun acc name ->
             let p = Filename.concat dir name in
-            if Sys.is_directory p then walk p
-            else begin
+            if Sys.is_directory p then collect p acc
+            else (
               let rel =
                 String.sub p
                   (String.length C.cache_root + 1)
                   (String.length p - String.length C.cache_root - 1)
               in
-              request_evict (C.domain_prefix ^ rel)
-            end)
+              (C.domain_prefix ^ rel) :: acc))
+          acc
           (try Sys.readdir dir with _ -> [||])
       in
-      walk lp
+      Lwt_list.iter_s request_evict (collect lp [])
     end
     else request_evict key
 
@@ -140,11 +152,14 @@ module Make (C : Conf.S) = struct
         if String.length key > 0 && key.[String.length key - 1] = '/' then key
         else key ^ "/"
       in
-      let files = Fs.list_all_files ~prefix in
-      List.iter
+      let* files = Fs.list_all_files ~prefix in
+      Lwt_list.iter_s
         (fun (e : Backend.file_entry) ->
-          try F.ensure_cached e.key
-          with exn -> Log.err "restore %s: %s" e.key (Printexc.to_string exn))
+          Lwt.catch
+            (fun () -> F.ensure_cached e.key)
+            (fun exn ->
+              Log.err "restore %s: %s" e.key (Printexc.to_string exn);
+              Lwt.return_unit))
         files
     end
     else F.ensure_cached key
@@ -159,7 +174,8 @@ module Make (C : Conf.S) = struct
             else (try Unix.unlink p with _ -> ()))
           (try Sys.readdir dir with _ -> [||])
     in
-    walk C.cache_root
+    walk C.cache_root;
+    Lwt.return_unit
 
   let ipc_hooks mount_point =
     Ih.
@@ -172,6 +188,7 @@ module Make (C : Conf.S) = struct
         status_fields = (fun () -> [("mount", `String mount_point)]);
         on_stop =
           (fun () ->
+            do_stop ();
             ignore
               (Thread.create
                  (fun () ->
@@ -202,54 +219,62 @@ module Make (C : Conf.S) = struct
       init = (fun () -> ());
       getattr =
         (fun path _fi ->
-          let key = fuse_to_key path in
-          match F.stat key with
-            | Some st -> st
-            | None -> raise (Unix.Unix_error (Unix.ENOENT, "getattr", path)));
+          on_loop (fun () ->
+              let* st = F.stat (fuse_to_key path) in
+              match st with
+                | Some st -> Lwt.return st
+                | None ->
+                    Lwt.fail (Unix.Unix_error (Unix.ENOENT, "getattr", path))));
       readdir =
         (fun path _offset _fi _flags ->
-          let key = fuse_to_dir_prefix path in
-          let entries = F.list_dir key in
-          List.map entry_of_name ("." :: ".." :: entries));
+          on_loop (fun () ->
+              let+ entries = F.list_dir (fuse_to_dir_prefix path) in
+              List.map entry_of_name ("." :: ".." :: entries)));
       mknod =
         (fun path mode ->
-          guard "mknod" path (fun () -> (dispatch path).mknod path mode));
+          guard "mknod" path (fun () ->
+              on_loop (fun () -> (dispatch path).mknod path mode)));
       fopen =
         (fun path fi ->
-          guard "fopen" path (fun () -> (dispatch path).fopen path fi));
+          guard "fopen" path (fun () ->
+              on_loop (fun () -> (dispatch path).fopen path fi)));
       read =
         (fun path buf offset fi ->
-          guard "read" path (fun () -> (dispatch path).read path buf offset fi));
+          guard "read" path (fun () ->
+              on_loop (fun () -> (dispatch path).read path buf offset fi)));
       write =
         (fun path buf offset fi ->
           guard "write" path (fun () ->
-              (dispatch path).write path buf offset fi));
+              on_loop (fun () -> (dispatch path).write path buf offset fi)));
       release =
         (fun path fi ->
-          guard "release" path (fun () -> (dispatch path).release path fi));
+          guard "release" path (fun () ->
+              on_loop (fun () -> (dispatch path).release path fi)));
       unlink =
         (fun path ->
-          guard "unlink" path (fun () -> (dispatch path).unlink path));
+          guard "unlink" path (fun () ->
+              on_loop (fun () -> (dispatch path).unlink path)));
       mkdir =
         (fun path _mode ->
           guard "mkdir" path (fun () ->
-              let key = fuse_to_dir_prefix path in
-              F.mkdir key));
+              on_loop (fun () -> F.mkdir (fuse_to_dir_prefix path))));
       rmdir =
         (fun path ->
           guard "rmdir" path (fun () ->
-              let key = fuse_to_dir_prefix path in
-              F.rmdir key));
+              on_loop (fun () -> F.rmdir (fuse_to_dir_prefix path))));
       rename =
         (fun src dst flags ->
           guard "rename" src (fun () ->
-              let is_hidden = is_fuse_hidden dst in
-              (if is_hidden then hidden else real).rename src dst flags;
-              if is_hidden then real.unlink src));
+              on_loop (fun () ->
+                  let is_hidden = is_fuse_hidden dst in
+                  let* () =
+                    (if is_hidden then hidden else real).rename src dst flags
+                  in
+                  if is_hidden then real.unlink src else Lwt.return_unit)));
       truncate =
         (fun path size fi ->
           guard "truncate" path (fun () ->
-              (dispatch path).truncate path size fi));
+              on_loop (fun () -> (dispatch path).truncate path size fi)));
       statfs =
         (fun _path ->
           Unix_util.
@@ -271,40 +296,82 @@ module Make (C : Conf.S) = struct
 
   (* ── Main mount ───────────────────────────────────────────────────────── *)
 
+  let cursor_flusher () =
+    let rec loop () =
+      let* () = Lwt_unix.sleep 2.0 in
+      let* () =
+        match drain_pending_cursor () with
+          | None -> Lwt.return_unit
+          | Some ek ->
+              Lwt.catch
+                (fun () -> Fs.bump_cursor ek)
+                (fun exn ->
+                  Log.err "bump_cursor: %s" (Printexc.to_string exn);
+                  Lwt.return_unit)
+      in
+      loop ()
+    in
+    loop ()
+
   let mount mount_point =
     Log.debug "auto-evict: %b" (Ipc.auto_evict_enabled ~data_dir:C.data_dir);
-    Log.debug "starting sync queue workers";
-    Sq.start
-      ~upload:(fun ~key ~cancel -> F.upload ~cancel key)
-      ~on_cursor:(fun ~entry_key -> set_pending_cursor entry_key)
-      ~on_upload_done:(fun ~key ->
-        if Ipc.auto_evict_enabled ~data_dir:C.data_dir then request_evict key;
-        Ipc.notify_uploaded ~path:C.notify_path key);
-    Log.debug "starting IPC server at %s" C.socket_path;
-    ignore
-      (Thread.create
-         (fun () ->
-           Ipc.serve ~path:C.socket_path (Ih.handler (ipc_hooks mount_point)))
-         ());
-    Log.debug "starting cursor flusher";
-    ignore
-      (Thread.create
-         (fun () ->
-           while true do
-             Unix.sleepf 2.0;
-             match drain_pending_cursor () with
-               | None -> ()
-               | Some ek -> (
-                   try Fs.bump_cursor ek
-                   with exn ->
-                     Log.err "bump_cursor: %s" (Printexc.to_string exn))
-           done)
-         ());
-    Log.debug "starting sync poller";
-    Sp.start ();
+    let started = Mutex.create () in
+    let started_cond = Condition.create () in
+    let ready = ref false in
+    let signal_ready () =
+      Mutex.lock started;
+      ready := true;
+      Condition.broadcast started_cond;
+      Mutex.unlock started
+    in
+    let wait_ready () =
+      Mutex.lock started;
+      while not !ready do
+        Condition.wait started_cond started
+      done;
+      Mutex.unlock started
+    in
+    let lwt_thread =
+      Thread.create
+        (fun () ->
+          Lwt_main.run
+            (let* () =
+               Local.init ~cache_root:C.cache_root ~domain_name:C.domain_name
+             in
+             Log.debug "starting sync queue workers";
+             Sq.start
+               ~upload:(fun ~key ~cancel -> F.upload ~cancel key)
+               ~on_cursor:(fun ~entry_key -> set_pending_cursor entry_key)
+               ~on_upload_done:(fun ~key ->
+                 let* () =
+                   if Ipc.auto_evict_enabled ~data_dir:C.data_dir then
+                     request_evict key
+                   else Lwt.return_unit
+                 in
+                 Ipc.notify_uploaded ~path:C.notify_path key;
+                 Lwt.return_unit);
+             Log.debug "starting sync poller";
+             Sp.start ();
+             Log.debug "starting cursor flusher";
+             Lwt.async cursor_flusher;
+             Log.debug "starting IPC server at %s" C.socket_path;
+             Lwt.async (fun () ->
+                 Ipc.serve ~path:C.socket_path
+                   (Ih.handler (ipc_hooks mount_point)));
+             signal_ready ();
+             let* () = stop_t in
+             Log.debug "draining upload queue";
+             Sq.drain ()))
+        ()
+    in
+    wait_ready ();
     Log.info "mounting FUSE at %s" mount_point;
-    Fuse.main ~loop_mode:Fuse.Single_threaded [| "tsync"; mount_point |]
+    Fuse.main ~loop_mode:Fuse.Multi_threaded [| "tsync"; mount_point |]
       (make_operations mount_point);
-    Log.debug "FUSE loop exited, draining upload queue";
-    Sq.drain ()
+    Log.debug "FUSE loop exited, stopping services";
+    on_loop (fun () ->
+        do_stop ();
+        Lwt.return_unit);
+    Thread.join lwt_thread;
+    try Unix.unlink C.socket_path with _ -> ()
 end

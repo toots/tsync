@@ -9,4 +9,6 @@
   tsync_queue
   tsync_local_io
   unix
-  threads.posix))
+  lwt
+  lwt.unix
+  lwt_domain))

@@ -9,4 +9,7 @@
   tsync_file
   tsync_local_io
   tsync_ipc_handler
-  fuse3))
+  fuse3
+  lwt
+  lwt.unix
+  threads.posix))

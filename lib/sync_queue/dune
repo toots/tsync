@@ -8,4 +8,5 @@
   tsync_xxhash
   yojson
   unix
-  threads.posix))
+  lwt
+  lwt.unix))

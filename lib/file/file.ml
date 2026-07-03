@@ -1,51 +1,53 @@
+open Lwt.Syntax
+
 type buffer = Local_io.buffer
 
 module type S = sig
   type t = string
 
-  val is_cached : t -> bool
+  val is_cached : t -> bool Lwt.t
   val local_path : t -> string
   val manifest_path : t -> string
-  val ensure_parent_dir : t -> unit
+  val ensure_parent_dir : t -> unit Lwt.t
   val rel_key : t -> string
-  val read_manifest : t -> Manifest.state option
-  val write_manifest : t -> Manifest.state -> unit
-  val delete_manifest : t -> unit
-  val upload : ?cancel:bool Atomic.t -> t -> unit
-  val download : t -> unit
-  val ensure_cached : t -> unit
-  val stat : t -> Unix.LargeFile.stats option
-  val list_dir : t -> string list
-  val xattrs : t -> (string * string) list
+  val read_manifest : t -> Manifest.state option Lwt.t
+  val write_manifest : t -> Manifest.state -> unit Lwt.t
+  val delete_manifest : t -> unit Lwt.t
+  val upload : ?cancel:bool Atomic.t -> t -> unit Lwt.t
+  val download : t -> unit Lwt.t
+  val ensure_cached : t -> unit Lwt.t
+  val stat : t -> Unix.LargeFile.stats option Lwt.t
+  val list_dir : t -> string list Lwt.t
+  val xattrs : t -> (string * string) list Lwt.t
   val is_dirty : t -> bool
   val set_dirty : t -> unit
   val clear_dirty : t -> unit
-  val mark_dirty : t -> unit
+  val mark_dirty : t -> unit Lwt.t
   val mark_open : t -> unit
   val mark_closed : t -> int
   val is_open : t -> bool
-  val evict : t -> unit
-  val clear_local : t -> unit
-  val create : t -> unit
-  val read : t -> buffer -> offset:int64 -> int
-  val write : t -> buffer -> offset:int64 -> int
+  val evict : t -> unit Lwt.t
+  val clear_local : t -> unit Lwt.t
+  val create : t -> unit Lwt.t
+  val read : t -> buffer -> offset:int64 -> int Lwt.t
+  val write : t -> buffer -> offset:int64 -> int Lwt.t
   val cancel_upload : t -> bool
-  val truncate : t -> int64 -> unit
-  val rename_local : src:t -> dst:t -> unit
-  val apply_delete : t -> unit
-  val queue_put : t -> unit
-  val delete : t -> unit
-  val mkdir : t -> unit
-  val rmdir : t -> unit
-  val rename : src:t -> dst:t -> unit
+  val truncate : t -> int64 -> unit Lwt.t
+  val rename_local : src:t -> dst:t -> unit Lwt.t
+  val apply_delete : t -> unit Lwt.t
+  val queue_put : t -> unit Lwt.t
+  val delete : t -> unit Lwt.t
+  val mkdir : t -> unit Lwt.t
+  val rmdir : t -> unit Lwt.t
+  val rename : src:t -> dst:t -> unit Lwt.t
 
   (** Restore a saved version of [key] to the live location. With [version] the
       given timestamp is restored, otherwise the most recent one. Only the small
       manifest is copied back; content stays evicted (dataless) and is fetched
       lazily on next open. *)
-  val revert : ?version:string -> t -> unit
+  val revert : ?version:string -> t -> unit Lwt.t
 
-  val apply_foreign_ops : Journal.op list -> unit
+  val apply_foreign_ops : Journal.op list -> unit Lwt.t
 end
 
 module Make (C : Conf.S) (Sq : Sync_queue.S) : S = struct
@@ -55,12 +57,17 @@ module Make (C : Conf.S) (Sq : Sync_queue.S) : S = struct
 
   type t = string
 
+  (* All File operations run on the single Lwt event-loop thread, so plain
+     hashtables need no locking. Metadata mutations (delete/mkdir/rmdir/rename/
+     revert and foreign-op application) are serialized through [meta_mutex] to
+     preserve the ordering the old single-threaded FUSE loop provided; reads,
+     downloads and uploads stay concurrent.
+     ponytail: one global metadata lock; switch to per-key locks only if
+     unrelated metadata ops measurably contend. *)
+  let meta_mutex = Lwt_mutex.create ()
+  let with_meta f = Lwt_mutex.with_lock meta_mutex f
   let dirty_keys : (string, unit) Hashtbl.t = Hashtbl.create 16
-  let dirty_mutex = Mutex.create ()
-  let downloading : (string, unit) Hashtbl.t = Hashtbl.create 8
-  let downloading_mutex = Mutex.create ()
-  let downloading_cond = Condition.create ()
-  let () = Local.init ~cache_root:C.cache_root ~domain_name:C.domain_name
+  let downloading : (string, unit Lwt.t) Hashtbl.t = Hashtbl.create 8
 
   (* ── Path helpers ──────────────────────────────────────────────────────── *)
 
@@ -83,24 +90,34 @@ module Make (C : Conf.S) (Sq : Sync_queue.S) : S = struct
     Local.manifest_path ~cache_root:C.cache_root ~domain_name:C.domain_name
       ~domain_prefix:C.domain_prefix key
 
+  let stat_opt path =
+    Lwt.catch
+      (fun () ->
+        let+ st = Lwt_unix.LargeFile.stat path in
+        Some st)
+      (fun _ -> Lwt.return_none)
+
   (* ── Manifest ──────────────────────────────────────────────────────────── *)
 
-  let read_manifest key : Manifest.state option =
-    match
+  let read_manifest key : Manifest.state option Lwt.t =
+    let* raw =
       Local.read_manifest ~cache_root:C.cache_root ~domain_name:C.domain_name
         ~domain_prefix:C.domain_prefix key
-    with
-      | None -> None
-      | Some s -> ( try Some (Manifest.of_string s) with _ -> None)
+    in
+    match raw with
+      | None -> Lwt.return_none
+      | Some s -> (
+          try Lwt.return_some (Manifest.of_string s) with _ -> Lwt.return_none)
 
   let write_manifest key (state : Manifest.state) =
     let path = manifest_path key in
-    Local.ensure_parent_dir path;
+    let* () = Local.ensure_parent_dir path in
     let tmp = path ^ ".tmp" in
-    let oc = open_out tmp in
-    output_string oc (Manifest.to_string state);
-    close_out oc;
-    Unix.rename tmp path
+    let* () =
+      Lwt_io.with_file ~mode:Lwt_io.Output tmp (fun oc ->
+          Lwt_io.write oc (Manifest.to_string state))
+    in
+    Lwt_unix.rename tmp path
 
   let delete_manifest key =
     Local.delete_manifest ~cache_root:C.cache_root ~domain_name:C.domain_name
@@ -108,58 +125,49 @@ module Make (C : Conf.S) (Sq : Sync_queue.S) : S = struct
 
   (* ── Dirty tracking ────────────────────────────────────────────────────── *)
 
-  let is_dirty key =
-    Mutex.lock dirty_mutex;
-    let d = Hashtbl.mem dirty_keys key in
-    Mutex.unlock dirty_mutex;
-    d
-
-  let set_dirty key =
-    Mutex.lock dirty_mutex;
-    Hashtbl.replace dirty_keys key ();
-    Mutex.unlock dirty_mutex
-
-  let clear_dirty key =
-    Mutex.lock dirty_mutex;
-    Hashtbl.remove dirty_keys key;
-    Mutex.unlock dirty_mutex
+  let is_dirty key = Hashtbl.mem dirty_keys key
+  let set_dirty key = Hashtbl.replace dirty_keys key ()
+  let clear_dirty key = Hashtbl.remove dirty_keys key
 
   (* ── Upload / download ─────────────────────────────────────────────────── *)
 
   let upload ?cancel key =
     let lp = local_path key in
-    let mtime = (Unix.stat lp).Unix.st_mtime in
-    let state = R.upload ~key ~src_path:lp ~mtime ?cancel () in
-    write_manifest key state;
-    clear_dirty key
+    let* st = Lwt_unix.stat lp in
+    let mtime = st.Unix.st_mtime in
+    let* state = R.upload ~key ~src_path:lp ~mtime ?cancel () in
+    let* () = write_manifest key state in
+    clear_dirty key;
+    Lwt.return_unit
 
   let download key =
     let lp = local_path key in
-    Local.ensure_parent_dir lp;
-    match read_manifest key with
+    let* () = Local.ensure_parent_dir lp in
+    let* manifest = read_manifest key in
+    match manifest with
       | Some (`Clean manifest) -> R.download_chunks ~dst_path:lp manifest
       | _ -> (
-          match R.download ~key ~dst_path:lp with
-            | None -> ()
+          let* res = R.download ~key ~dst_path:lp in
+          match res with
+            | None -> Lwt.return_unit
             | Some state -> write_manifest key state)
 
   let ensure_cached key =
-    Mutex.lock downloading_mutex;
-    while Hashtbl.mem downloading key do
-      Condition.wait downloading_cond downloading_mutex
-    done;
-    if is_cached key then Mutex.unlock downloading_mutex
-    else begin
-      Hashtbl.add downloading key ();
-      Mutex.unlock downloading_mutex;
-      Fun.protect
-        ~finally:(fun () ->
-          Mutex.lock downloading_mutex;
-          Hashtbl.remove downloading key;
-          Condition.broadcast downloading_cond;
-          Mutex.unlock downloading_mutex)
-        (fun () -> download key)
-    end
+    let* cached = is_cached key in
+    if cached then Lwt.return_unit
+    else (
+      match Hashtbl.find_opt downloading key with
+        | Some p -> p
+        | None ->
+            let p =
+              Lwt.finalize
+                (fun () -> download key)
+                (fun () ->
+                  Hashtbl.remove downloading key;
+                  Lwt.return_unit)
+            in
+            Hashtbl.replace downloading key p;
+            p)
 
   (* ── Stat ──────────────────────────────────────────────────────────────── *)
 
@@ -201,18 +209,18 @@ module Make (C : Conf.S) (Sq : Sync_queue.S) : S = struct
 
   let stat key =
     let mp = manifest_path key in
-    if not (Sys.file_exists mp) then None
-    else if Sys.is_directory mp then Some (dir_stat ())
-    else (
-      match read_manifest key with
-        | Some `Dirty -> (
-            match
-              try Some (Unix.LargeFile.stat (local_path key)) with _ -> None
-            with
-              | Some st -> Some st
-              | None -> None)
-        | Some (`Clean m) -> Some (file_stat m.Manifest.size m.Manifest.mtime)
-        | None -> None)
+    let* mst = stat_opt mp in
+    match mst with
+      | None -> Lwt.return_none
+      | Some { Unix.LargeFile.st_kind = Unix.S_DIR; _ } ->
+          Lwt.return_some (dir_stat ())
+      | Some _ -> (
+          let* m = read_manifest key in
+          match m with
+            | Some `Dirty -> stat_opt (local_path key)
+            | Some (`Clean m) ->
+                Lwt.return_some (file_stat m.Manifest.size m.Manifest.mtime)
+            | None -> Lwt.return_none)
 
   let list_dir key =
     Local.list_dir ~cache_root:C.cache_root ~domain_name:C.domain_name
@@ -221,7 +229,8 @@ module Make (C : Conf.S) (Sq : Sync_queue.S) : S = struct
   (* ── Xattrs ────────────────────────────────────────────────────────────── *)
 
   let xattrs key =
-    match read_manifest key with
+    let+ m = read_manifest key in
+    match m with
       | Some (`Clean m) ->
           [
             ("tsync.h1", m.Manifest.h1);
@@ -232,36 +241,29 @@ module Make (C : Conf.S) (Sq : Sync_queue.S) : S = struct
       | _ -> []
 
   let mark_dirty key =
-    if not (is_dirty key) then begin
-      write_manifest key `Dirty;
-      set_dirty key
-    end
+    if is_dirty key then Lwt.return_unit
+    else
+      let* () = write_manifest key `Dirty in
+      set_dirty key;
+      Lwt.return_unit
 
   (* ── Open-handle tracking ──────────────────────────────────────────────── *)
 
   let open_count : (string, int) Hashtbl.t = Hashtbl.create 64
-  let open_count_mutex = Mutex.create ()
 
   let mark_open key =
-    Mutex.lock open_count_mutex;
     let n = Option.value ~default:0 (Hashtbl.find_opt open_count key) in
-    Hashtbl.replace open_count key (n + 1);
-    Mutex.unlock open_count_mutex
+    Hashtbl.replace open_count key (n + 1)
 
   let mark_closed key =
-    Mutex.lock open_count_mutex;
     let n = Option.value ~default:0 (Hashtbl.find_opt open_count key) in
     let n' = max 0 (n - 1) in
     if n' = 0 then Hashtbl.remove open_count key
     else Hashtbl.replace open_count key n';
-    Mutex.unlock open_count_mutex;
     n'
 
   let is_open key =
-    Mutex.lock open_count_mutex;
-    let n = Option.value ~default:0 (Hashtbl.find_opt open_count key) in
-    Mutex.unlock open_count_mutex;
-    n > 0
+    Option.value ~default:0 (Hashtbl.find_opt open_count key) > 0
 
   (* ── Local eviction ────────────────────────────────────────────────────── *)
 
@@ -270,42 +272,54 @@ module Make (C : Conf.S) (Sq : Sync_queue.S) : S = struct
       ~domain_prefix:C.domain_prefix key
 
   let clear_local key =
-    evict key;
-    delete_manifest key;
-    clear_dirty key
+    let* () = evict key in
+    let* () = delete_manifest key in
+    clear_dirty key;
+    Lwt.return_unit
 
   let create key =
-    ensure_parent_dir key;
-    (try close_out (open_out_bin (local_path key))
-     with exn ->
-       Log.err "File.create %s: %s" key (Printexc.to_string exn);
-       raise exn);
-    write_manifest key `Dirty;
-    set_dirty key
+    let* () = ensure_parent_dir key in
+    let* () =
+      Lwt.catch
+        (fun () ->
+          Lwt_io.with_file ~mode:Lwt_io.Output (local_path key) (fun _ ->
+              Lwt.return_unit))
+        (fun exn ->
+          Log.err "File.create %s: %s" key (Printexc.to_string exn);
+          Lwt.fail exn)
+    in
+    let* () = write_manifest key `Dirty in
+    set_dirty key;
+    Lwt.return_unit
 
   let read key (buf : buffer) ~offset =
-    if not (is_cached key) then
+    let* cached = is_cached key in
+    if not cached then
       Log.debug "read %s: not in local cache, fetching from backend" key;
-    ensure_cached key;
+    let* () = ensure_cached key in
     Local_io.read (local_path key) buf ~offset
 
   let write key (buf : buffer) ~offset =
-    mark_dirty key;
+    let* () = mark_dirty key in
     Local_io.write (local_path key) buf ~offset
 
   let cancel_upload key = Sq.cancel_put key
 
   let truncate key size =
     ignore (cancel_upload key);
-    ensure_cached key;
+    let* () = ensure_cached key in
     let lp = local_path key in
-    let fd = Unix.openfile lp [Unix.O_WRONLY] 0o644 in
-    Unix.ftruncate fd (Int64.to_int size);
-    Unix.close fd;
+    let* fd = Lwt_unix.openfile lp [Unix.O_WRONLY] 0o644 in
+    let* () = Lwt_unix.LargeFile.ftruncate fd size in
+    let* () = Lwt_unix.close fd in
     mark_dirty key
 
   let rename_local ~src ~dst =
-    if is_cached src then Unix.rename (local_path src) (local_path dst);
+    let* cached = is_cached src in
+    let* () =
+      if cached then Lwt_unix.rename (local_path src) (local_path dst)
+      else Lwt.return_unit
+    in
     Local.rename_manifest ~cache_root:C.cache_root ~domain_name:C.domain_name
       ~domain_prefix:C.domain_prefix ~src_key:src ~dst_key:dst
 
@@ -313,67 +327,87 @@ module Make (C : Conf.S) (Sq : Sync_queue.S) : S = struct
 
   let with_journal key ops s3_op =
     let ek = J.entry_key () in
-    J.write_local_pending ~entry_key:ek ops;
+    let* () = J.write_local_pending ~entry_key:ek ops in
     (* The pending entry is for crash recovery. A synchronous failure is
        reported to the caller instead; keeping the entry would make
        recover_pending_ops replay a known-failed op at every startup. *)
-    (try s3_op ()
-     with exn ->
-       J.delete_local_pending ~entry_key:ek;
-       raise exn);
-    ignore (Fs.write_journal_entry ~entry_key:ek ops);
-    Fs.bump_cursor ek;
+    let* () =
+      Lwt.catch s3_op (fun exn ->
+          let* () = J.delete_local_pending ~entry_key:ek in
+          Lwt.fail exn)
+    in
+    let* (_ : string) = Fs.write_journal_entry ~entry_key:ek ops in
+    let* () = Fs.bump_cursor ek in
     J.delete_local_pending ~entry_key:ek
 
   let save_version key =
     if C.versioning then
       Versioning.save ~backends:C.backends ~domain_prefix:C.domain_prefix
         ~versions_prefix:C.versions_prefix ~key
+    else Lwt.return_unit
 
   let apply_delete key =
-    save_version key;
-    List.iter (fun (module B : Backend.S) -> B.delete ~key ()) C.backends;
+    let* () = save_version key in
+    let* () =
+      Lwt_list.iter_s
+        (fun (module B : Backend.S) -> B.delete ~key ())
+        C.backends
+    in
     clear_local key
 
   (* ── Async upload queue ────────────────────────────────────────────────── *)
 
   let queue_put key =
     let lp = local_path key in
-    match try Some (Unix.LargeFile.stat lp) with _ -> None with
-      | None -> Log.err "queue_put %s: local file missing, skipping" key
+    let* st = stat_opt lp in
+    match st with
+      | None ->
+          Log.err "queue_put %s: local file missing, skipping" key;
+          Lwt.return_unit
       | Some { Unix.LargeFile.st_size = size; _ } ->
           let ek = J.entry_key () in
           let ops = [`Put (rel_key key, size)] in
-          J.write_local_pending ~entry_key:ek ops;
+          let+ () = J.write_local_pending ~entry_key:ek ops in
           Sq.post ~key ~src_path:lp ~entry_key:ek ~ops
 
   let delete key =
-    ignore (cancel_upload key);
-    with_journal key [`Delete (rel_key key)] (fun () -> apply_delete key)
+    with_meta (fun () ->
+        ignore (cancel_upload key);
+        with_journal key [`Delete (rel_key key)] (fun () -> apply_delete key))
 
   let mkdir key =
-    Local.create_dir ~cache_root:C.cache_root ~domain_name:C.domain_name
-      ~domain_prefix:C.domain_prefix key;
-    with_journal key [`Mkdir (rel_key key)] (fun () -> Fs.create_directory ~key)
+    with_meta (fun () ->
+        let* () =
+          Local.create_dir ~cache_root:C.cache_root ~domain_name:C.domain_name
+            ~domain_prefix:C.domain_prefix key
+        in
+        with_journal key
+          [`Mkdir (rel_key key)]
+          (fun () -> Fs.create_directory ~key))
 
   let rmdir key =
-    Local.delete_dir ~cache_root:C.cache_root ~domain_name:C.domain_name
-      ~domain_prefix:C.domain_prefix key;
-    with_journal key
-      [`Rmdir (rel_key key)]
-      (fun () -> Fs.delete_dir ~prefix:key)
+    with_meta (fun () ->
+        let* () =
+          Local.delete_dir ~cache_root:C.cache_root ~domain_name:C.domain_name
+            ~domain_prefix:C.domain_prefix key
+        in
+        with_journal key
+          [`Rmdir (rel_key key)]
+          (fun () -> Fs.delete_dir ~prefix:key))
 
   (* Publish an already-chunked file under [key]: its chunks are on the
      backend, only the manifest key and a journal entry are missing. *)
   let publish_manifest key (state : Manifest.state) =
     match state with
-      | `Dirty -> ()
+      | `Dirty -> Lwt.return_unit
       | `Clean m ->
-          List.iter
-            (fun (module B : Backend.S) ->
-              B.put ~key ~data:(Manifest.to_string state) ())
-            C.backends;
-          let ek =
+          let* () =
+            Lwt_list.iter_s
+              (fun (module B : Backend.S) ->
+                B.put ~key ~data:(Manifest.to_string state) ())
+              C.backends
+          in
+          let* ek =
             Fs.write_journal_entry [`Put (rel_key key, m.Manifest.size)]
           in
           Fs.bump_cursor ek
@@ -392,49 +426,73 @@ module Make (C : Conf.S) (Sq : Sync_queue.S) : S = struct
     in
     if dir = "." then base else dir ^ "/" ^ base
 
-  let rename ~src ~dst =
+  let rename_body ~src ~dst =
     let mp = manifest_path src in
-    let is_dir = Sys.file_exists mp && Sys.is_directory mp in
+    let* mst = stat_opt mp in
+    let is_dir =
+      match mst with
+        | Some { Unix.LargeFile.st_kind = Unix.S_DIR; _ } -> true
+        | _ -> false
+    in
     let src = if is_dir then src ^ "/" else src in
     let dst = if is_dir then dst ^ "/" else dst in
     let src_was_uploading = cancel_upload src in
     ignore (cancel_upload dst);
-    let size =
-      if (not is_dir) && is_cached src then (
-        try Some (Unix.LargeFile.stat (local_path src)).Unix.LargeFile.st_size
-        with _ -> None)
-      else None
+    let* size =
+      if not is_dir then
+        let* cached = is_cached src in
+        if cached then
+          let+ st = stat_opt (local_path src) in
+          Option.map (fun s -> s.Unix.LargeFile.st_size) st
+        else Lwt.return_none
+      else Lwt.return_none
     in
-    rename_local ~src ~dst;
-    if src_was_uploading && is_cached dst then queue_put dst
-    else begin
-      if not is_dir then save_version src;
+    let* () = rename_local ~src ~dst in
+    let* dst_cached = is_cached dst in
+    if src_was_uploading && dst_cached then queue_put dst
+    else
+      let* () = if not is_dir then save_version src else Lwt.return_unit in
       let rename_op =
         `Rename Journal.{ dst = rel_key dst; src = rel_key src; size; is_dir }
       in
-      try
-        with_journal dst [rename_op] (fun () ->
-            if is_dir then Fs.rename_directory ~src_prefix:src ~dst_prefix:dst
-            else Fs.rename_file ~src_key:src ~dst_key:dst)
-      with exn when (not is_dir) && Option.is_none (Fs.head_opt ~key:src) -> (
-        (* src is gone from the backend: another client renamed or deleted it
-           concurrently. The file already moved locally; publish it as a new,
-           conflict-marked file instead, its chunks are still on the backend. *)
-        let conflict = C.domain_prefix ^ conflict_name (rel_key dst) in
-        match read_manifest dst with
-          | Some (`Clean _ as state) ->
-              rename_local ~src:dst ~dst:conflict;
-              publish_manifest conflict state
-          | Some `Dirty when is_cached dst ->
-              rename_local ~src:dst ~dst:conflict;
-              queue_put conflict
-          | _ -> raise exn)
-    end
+      Lwt.catch
+        (fun () ->
+          with_journal dst [rename_op] (fun () ->
+              if is_dir then Fs.rename_directory ~src_prefix:src ~dst_prefix:dst
+              else Fs.rename_file ~src_key:src ~dst_key:dst))
+        (fun exn ->
+          (* src is gone from the backend: another client renamed or deleted it
+             concurrently. The file already moved locally; publish it as a new,
+             conflict-marked file instead, its chunks are still on the backend. *)
+          let* src_head =
+            if is_dir then Lwt.return_some ()
+            else
+              let+ h = Fs.head_opt ~key:src in
+              Option.map (fun _ -> ()) h
+          in
+          if is_dir || Option.is_some src_head then Lwt.fail exn
+          else (
+            let conflict = C.domain_prefix ^ conflict_name (rel_key dst) in
+            let* m = read_manifest dst in
+            match m with
+              | Some (`Clean _ as state) ->
+                  let* () = rename_local ~src:dst ~dst:conflict in
+                  publish_manifest conflict state
+              | Some `Dirty ->
+                  let* dst_cached = is_cached dst in
+                  if dst_cached then
+                    let* () = rename_local ~src:dst ~dst:conflict in
+                    queue_put conflict
+                  else Lwt.fail exn
+              | _ -> Lwt.fail exn))
+
+  let rename ~src ~dst = with_meta (fun () -> rename_body ~src ~dst)
 
   (* ── Versioning restore ────────────────────────────────────────────────── *)
 
   let latest_version primary dir =
     let (module B : Backend.S) = primary in
+    let+ entries = B.list_all ~prefix:dir () in
     List.fold_left
       (fun acc (e : Backend.file_entry) ->
         match Versioning.parse ~versions_prefix:C.versions_prefix e.key with
@@ -444,10 +502,9 @@ module Make (C : Conf.S) (Sq : Sync_queue.S) : S = struct
               match acc with
                 | Some (_, best) when Int64.compare best n >= 0 -> acc
                 | _ -> Some (e.key, n)))
-      None
-      (B.list_all ~prefix:dir ())
+      None entries
 
-  let revert ?version key =
+  let revert_body ?version key =
     let (module B : Backend.S) =
       match C.backends with
         | b :: _ -> b
@@ -457,83 +514,93 @@ module Make (C : Conf.S) (Sq : Sync_queue.S) : S = struct
       Versioning.version_dir ~s3_key:key ~domain_prefix:C.domain_prefix
         ~versions_prefix:C.versions_prefix
     in
-    let src_key =
+    let* src_key =
       match version with
-        | Some ts -> dir ^ ts
+        | Some ts -> Lwt.return (dir ^ ts)
         | None -> (
-            match latest_version (module B) dir with
-              | Some (k, _) -> k
+            let* latest = latest_version (module B) dir in
+            match latest with
+              | Some (k, _) -> Lwt.return k
               | None -> failwith ("no versions for " ^ rel_key key))
     in
-    let data = B.get ~key:src_key () in
+    let* data = B.get ~key:src_key () in
     match Manifest.of_string data with
       | `Dirty -> failwith "cannot restore a dirty version"
       | `Clean m ->
           ignore (cancel_upload key);
-          List.iter
-            (fun (module B : Backend.S) -> B.put ~key ~data ())
-            C.backends;
-          write_manifest key (`Clean m);
+          let* () =
+            Lwt_list.iter_s
+              (fun (module B : Backend.S) -> B.put ~key ~data ())
+              C.backends
+          in
+          let* () = write_manifest key (`Clean m) in
           (* Dataless: keep the manifest sidecar, drop any cached content so the
              restored bytes are fetched lazily on next open. *)
-          evict key;
+          let* () = evict key in
           clear_dirty key;
-          let ek =
+          let* ek =
             Fs.write_journal_entry [`Put (rel_key key, m.Manifest.size)]
           in
           Fs.bump_cursor ek
 
+  let revert ?version key = with_meta (fun () -> revert_body ?version key)
+
   (* ── Foreign op application (sync) ────────────────────────────────────── *)
 
+  let apply_one op =
+    Lwt.catch
+      (fun () ->
+        match op with
+          | `Put (rel, _) ->
+              let key = C.domain_prefix ^ rel in
+              if (not (is_dirty key)) && not (is_open key) then (
+                ignore (cancel_upload key);
+                let* m = R.fetch_manifest ~key () in
+                match m with
+                  | None -> Lwt.return_unit
+                  | Some state ->
+                      let* () = write_manifest key state in
+                      evict key)
+              else Lwt.return_unit
+          | `Delete rel ->
+              let key = C.domain_prefix ^ rel in
+              if (not (is_dirty key)) && not (is_open key) then (
+                ignore (cancel_upload key);
+                clear_local key)
+              else Lwt.return_unit
+          | `Mkdir rel ->
+              Local.create_dir ~cache_root:C.cache_root
+                ~domain_name:C.domain_name ~domain_prefix:C.domain_prefix
+                (C.domain_prefix ^ rel)
+          | `Rmdir rel ->
+              Local.delete_dir ~cache_root:C.cache_root
+                ~domain_name:C.domain_name ~domain_prefix:C.domain_prefix
+                (C.domain_prefix ^ rel)
+          | `Rename { Journal.src; dst; is_dir = true; _ } ->
+              let src_key = C.domain_prefix ^ src in
+              let dst_key = C.domain_prefix ^ dst in
+              let* exists = Lwt_unix.file_exists (manifest_path src_key) in
+              if exists && (not (is_dirty src_key)) && not (is_open src_key)
+              then rename_local ~src:src_key ~dst:dst_key
+              else Lwt.return_unit
+          | `Rename { Journal.src; dst; is_dir = false; _ } ->
+              let src_key = C.domain_prefix ^ src in
+              let dst_key = C.domain_prefix ^ dst in
+              let* exists = Lwt_unix.file_exists (manifest_path src_key) in
+              if exists && (not (is_dirty src_key)) && not (is_open src_key)
+              then rename_local ~src:src_key ~dst:dst_key
+              else if (not (is_dirty dst_key)) && not (is_open dst_key) then
+                (* No local copy of src (e.g. we renamed it ourselves and
+                   published the result): adopt the remote state of dst. *)
+                let* m = R.fetch_manifest ~key:dst_key () in
+                match m with
+                  | Some (`Clean _ as state) -> write_manifest dst_key state
+                  | _ -> Lwt.return_unit
+              else Lwt.return_unit)
+      (fun exn ->
+        Log.err "apply_foreign_ops: %s" (Printexc.to_string exn);
+        Lwt.return_unit)
+
   let apply_foreign_ops ops =
-    List.iter
-      (fun op ->
-        try
-          match op with
-            | `Put (rel, _) ->
-                let key = C.domain_prefix ^ rel in
-                if (not (is_dirty key)) && not (is_open key) then (
-                  ignore (cancel_upload key);
-                  match R.fetch_manifest ~key () with
-                    | None -> ()
-                    | Some state ->
-                        write_manifest key state;
-                        evict key)
-            | `Delete rel ->
-                let key = C.domain_prefix ^ rel in
-                if (not (is_dirty key)) && not (is_open key) then (
-                  ignore (cancel_upload key);
-                  clear_local key)
-            | `Mkdir rel ->
-                Local.create_dir ~cache_root:C.cache_root
-                  ~domain_name:C.domain_name ~domain_prefix:C.domain_prefix
-                  (C.domain_prefix ^ rel)
-            | `Rmdir rel ->
-                Local.delete_dir ~cache_root:C.cache_root
-                  ~domain_name:C.domain_name ~domain_prefix:C.domain_prefix
-                  (C.domain_prefix ^ rel)
-            | `Rename { Journal.src; dst; is_dir = true; _ } ->
-                let src_key = C.domain_prefix ^ src in
-                let dst_key = C.domain_prefix ^ dst in
-                if
-                  Sys.file_exists (manifest_path src_key)
-                  && (not (is_dirty src_key))
-                  && not (is_open src_key)
-                then rename_local ~src:src_key ~dst:dst_key
-            | `Rename { Journal.src; dst; is_dir = false; _ } ->
-                let src_key = C.domain_prefix ^ src in
-                let dst_key = C.domain_prefix ^ dst in
-                if
-                  Sys.file_exists (manifest_path src_key)
-                  && (not (is_dirty src_key))
-                  && not (is_open src_key)
-                then rename_local ~src:src_key ~dst:dst_key
-                else if (not (is_dirty dst_key)) && not (is_open dst_key) then (
-                  (* No local copy of src (e.g. we renamed it ourselves and
-                     published the result): adopt the remote state of dst. *)
-                    match R.fetch_manifest ~key:dst_key () with
-                    | Some (`Clean _ as state) -> write_manifest dst_key state
-                    | _ -> ())
-        with exn -> Log.err "apply_foreign_ops: %s" (Printexc.to_string exn))
-      ops
+    with_meta (fun () -> Lwt_list.iter_s apply_one ops)
 end

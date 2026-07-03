@@ -1,3 +1,5 @@
+open Lwt.Syntax
+
 let data_dir ~cache_root domain_name = Filename.concat cache_root domain_name
 
 let manifest_dir ~cache_root domain_name =
@@ -15,10 +17,15 @@ let cache_path ~cache_root ~domain_name ~domain_prefix key =
     (strip_prefix ~domain_prefix key)
 
 let rec mkdir_p path =
-  if not (Sys.file_exists path) then begin
-    mkdir_p (Filename.dirname path);
-    try Unix.mkdir path 0o755 with Unix.Unix_error (Unix.EEXIST, _, _) -> ()
-  end
+  let* exists = Lwt_unix.file_exists path in
+  if exists then Lwt.return_unit
+  else
+    let* () = mkdir_p (Filename.dirname path) in
+    Lwt.catch
+      (fun () -> Lwt_unix.mkdir path 0o755)
+      (function
+        | Unix.Unix_error (Unix.EEXIST, _, _) -> Lwt.return_unit
+        | exn -> Lwt.fail exn)
 
 let ensure_parent_dir path = mkdir_p (Filename.dirname path)
 
@@ -30,68 +37,100 @@ let manifest_path ~cache_root ~domain_name ~domain_prefix key =
 let create_dir ~cache_root ~domain_name ~domain_prefix key =
   mkdir_p (manifest_path ~cache_root ~domain_name ~domain_prefix key)
 
+let readdir_list path =
+  let+ names = Lwt_stream.to_list (Lwt_unix.files_of_directory path) in
+  List.filter (fun name -> name <> "." && name <> "..") names
+
+let is_directory path =
+  Lwt.catch
+    (fun () ->
+      let+ st = Lwt_unix.stat path in
+      st.Unix.st_kind = Unix.S_DIR)
+    (fun _ -> Lwt.return_false)
+
+let rec rm_rf path =
+  let* exists = Lwt_unix.file_exists path in
+  if not exists then Lwt.return_unit
+  else
+    let* is_dir = is_directory path in
+    if is_dir then
+      let* names = readdir_list path in
+      let* () =
+        Lwt_list.iter_s (fun name -> rm_rf (Filename.concat path name)) names
+      in
+      Lwt.catch
+        (fun () -> Lwt_unix.rmdir path)
+        (function Unix.Unix_error _ -> Lwt.return_unit | e -> Lwt.fail e)
+    else
+      Lwt.catch
+        (fun () -> Lwt_unix.unlink path)
+        (function Unix.Unix_error _ -> Lwt.return_unit | e -> Lwt.fail e)
+
 let delete_dir ~cache_root ~domain_name ~domain_prefix key =
-  let rec rm_rf path =
-    if Sys.file_exists path then
-      if Sys.is_directory path then begin
-        Array.iter
-          (fun name -> rm_rf (Filename.concat path name))
-          (Sys.readdir path);
-        try Unix.rmdir path with Unix.Unix_error _ -> ()
-      end
-      else (try Unix.unlink path with Unix.Unix_error _ -> ())
-  in
   rm_rf (manifest_path ~cache_root ~domain_name ~domain_prefix key)
 
 let list_dir ~cache_root ~domain_name ~domain_prefix key =
   let path = manifest_path ~cache_root ~domain_name ~domain_prefix key in
-  if Sys.file_exists path && Sys.is_directory path then
-    Array.to_list (Sys.readdir path)
-  else []
+  let* is_dir = is_directory path in
+  if is_dir then readdir_list path else Lwt.return_nil
 
 let is_cached ~cache_root ~domain_name ~domain_prefix key =
-  Sys.file_exists (cache_path ~cache_root ~domain_name ~domain_prefix key)
+  Lwt_unix.file_exists (cache_path ~cache_root ~domain_name ~domain_prefix key)
 
 let read_manifest ~cache_root ~domain_name ~domain_prefix key =
   let path = manifest_path ~cache_root ~domain_name ~domain_prefix key in
-  if Sys.file_exists path then (
-    try
-      let ic = open_in path in
-      let n = in_channel_length ic in
-      let s = Bytes.create n in
-      really_input ic s 0 n;
-      close_in ic;
-      Some (Bytes.to_string s)
-    with _ -> None)
-  else None
+  let* exists = Lwt_unix.file_exists path in
+  if not exists then Lwt.return_none
+  else
+    Lwt.catch
+      (fun () ->
+        let+ s = Lwt_io.with_file ~mode:Lwt_io.Input path Lwt_io.read in
+        Some s)
+      (fun _ -> Lwt.return_none)
 
 let delete_manifest ~cache_root ~domain_name ~domain_prefix key =
   let path = manifest_path ~cache_root ~domain_name ~domain_prefix key in
-  try Unix.unlink path with Unix.Unix_error _ -> ()
+  Lwt.catch
+    (fun () -> Lwt_unix.unlink path)
+    (function Unix.Unix_error _ -> Lwt.return_unit | e -> Lwt.fail e)
 
 let rename_manifest ~cache_root ~domain_name ~domain_prefix ~src_key ~dst_key =
   let src = manifest_path ~cache_root ~domain_name ~domain_prefix src_key in
-  if Sys.file_exists src then begin
+  let* exists = Lwt_unix.file_exists src in
+  if not exists then Lwt.return_unit
+  else (
     let dst = manifest_path ~cache_root ~domain_name ~domain_prefix dst_key in
-    ensure_parent_dir dst;
-    Unix.rename src dst
-  end
+    let* () = ensure_parent_dir dst in
+    Lwt_unix.rename src dst)
 
 let rec clean_tmp_manifests dir =
-  if Sys.file_exists dir && Sys.is_directory dir then
-    Array.iter
-      (fun name ->
-        let path = Filename.concat dir name in
-        if Sys.is_directory path then clean_tmp_manifests path
-        else if Filename.check_suffix name ".tmp" then (
-          try Unix.unlink path with Unix.Unix_error _ -> ()))
-      (Sys.readdir dir)
+  let* exists = Lwt_unix.file_exists dir in
+  if not exists then Lwt.return_unit
+  else
+    let* is_dir = is_directory dir in
+    if not is_dir then Lwt.return_unit
+    else
+      let* names = readdir_list dir in
+      Lwt_list.iter_s
+        (fun name ->
+          let path = Filename.concat dir name in
+          let* is_dir = is_directory path in
+          if is_dir then clean_tmp_manifests path
+          else if Filename.check_suffix name ".tmp" then
+            Lwt.catch
+              (fun () -> Lwt_unix.unlink path)
+              (function
+                | Unix.Unix_error _ -> Lwt.return_unit | e -> Lwt.fail e)
+          else Lwt.return_unit)
+        names
 
 let init ~cache_root ~domain_name =
   let root = manifest_dir ~cache_root domain_name in
-  mkdir_p root;
+  let* () = mkdir_p root in
   clean_tmp_manifests root
 
 let evict ~cache_root ~domain_name ~domain_prefix key =
   let path = cache_path ~cache_root ~domain_name ~domain_prefix key in
-  try Unix.unlink path with Unix.Unix_error _ -> ()
+  Lwt.catch
+    (fun () -> Lwt_unix.unlink path)
+    (function Unix.Unix_error _ -> Lwt.return_unit | e -> Lwt.fail e)
