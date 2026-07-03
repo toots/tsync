@@ -57,25 +57,37 @@ module Make (C : Conf.S) = struct
     H.
       {
         path_to_key;
-        request_evict = (fun key -> Ipc.notify_evict ~path:C.notify_path key);
-        restore = (fun key -> Ipc.notify_restore ~path:C.notify_path key);
+        request_evict =
+          (fun key ->
+            Ipc.notify_evict ~path:C.notify_path key;
+            Lwt.return_unit);
+        restore =
+          (fun key ->
+            Ipc.notify_restore ~path:C.notify_path key;
+            Lwt.return_unit);
         changed = (fun key -> Ipc.notify_changed ~path:C.notify_path key);
-        full_resync = (fun () -> ());
+        full_resync = (fun () -> Lwt.return_unit);
         status_fields = (fun () -> []);
         on_stop = (fun () -> ());
       }
 
   let mount _mount_point =
-    Sq.start
-      ~upload:(fun ~key ~cancel -> F.upload ~cancel key)
-      ~on_cursor:(fun ~entry_key:_ -> ())
-      ~on_upload_done:(fun ~key ->
-        (* The daemon copy only exists to stage the upload; drop it now. *)
-        F.evict key;
-        Ipc.notify_uploaded ~path:C.notify_path key;
-        if Ipc.auto_evict_enabled ~data_dir:C.data_dir then
-          Ipc.notify_evict ~path:C.notify_path key);
-    Sp.start ~on_changed:(Ipc.notify_changed ~path:C.notify_path) ();
-    Ipc.serve ~path:C.socket_path (H.handler hooks);
-    Sq.drain ()
+    Lwt_main.run
+      (let open Lwt.Syntax in
+       let* () =
+         Local.init ~cache_root:C.cache_root ~domain_name:C.domain_name
+       in
+       Sq.start
+         ~upload:(fun ~key ~cancel -> F.upload ~cancel key)
+         ~on_cursor:(fun ~entry_key:_ -> ())
+         ~on_upload_done:(fun ~key ->
+           (* The daemon copy only exists to stage the upload; drop it now. *)
+           let* () = F.evict key in
+           Ipc.notify_uploaded ~path:C.notify_path key;
+           if Ipc.auto_evict_enabled ~data_dir:C.data_dir then
+             Ipc.notify_evict ~path:C.notify_path key;
+           Lwt.return_unit);
+       Sp.start ~on_changed:(Ipc.notify_changed ~path:C.notify_path) ();
+       let* () = Ipc.serve ~path:C.socket_path (H.handler hooks) in
+       Sq.drain ())
 end

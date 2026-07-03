@@ -1,3 +1,5 @@
+open Lwt.Syntax
+
 type step =
   | Write of { path : string; content : string }
   | Mkdir of string
@@ -78,14 +80,16 @@ let starts_with prefix s =
 (* ── Client setup ─────────────────────────────────────────────────────────── *)
 
 type client = {
-  do_step : step -> unit;
-  drain : unit -> unit;
-  stop : unit -> unit;
-  dump_tree : unit -> string list;
-  dump_contents : string list -> unit;
-  dump_pending : unit -> unit;
+  do_step : step -> unit Lwt.t;
+  drain : unit -> unit Lwt.t;
+  stop : unit -> unit Lwt.t;
+  dump_tree : unit -> string list Lwt.t;
+  dump_contents : string list -> unit Lwt.t;
+  dump_pending : unit -> unit Lwt.t;
 }
 
+(* Tests drive the real IPC handler directly (no socket): every daemon service
+   and the handler all run on the one Lwt event loop [run_scenario] spins up. *)
 let setup_client (module C : Conf.S) root staging_prefix =
   let module Sq = Sync_queue.Make (C) in
   let module F = File.Make (C) (Sq) in
@@ -105,7 +109,7 @@ let setup_client (module C : Conf.S) root staging_prefix =
         request_evict = F.evict;
         restore = F.ensure_cached;
         changed = (fun _ -> ());
-        full_resync = (fun () -> ());
+        full_resync = (fun () -> Lwt.return_unit);
         status_fields = (fun () -> []);
         on_stop = (fun () -> ());
       }
@@ -113,21 +117,14 @@ let setup_client (module C : Conf.S) root staging_prefix =
   Sq.start
     ~upload:(fun ~key ~cancel -> F.upload ~cancel key)
     ~on_cursor:(fun ~entry_key:_ -> ())
-    ~on_upload_done:(fun ~key:_ -> ());
-  let server =
-    Thread.create (fun () -> Ipc.serve ~path:C.socket_path (H.handler hooks)) ()
-  in
-  while not (Sys.file_exists C.socket_path) do
-    Thread.yield ()
-  done;
+    ~on_upload_done:(fun ~key:_ -> Lwt.return_unit);
   let staging_seq = ref 0 in
   let mark_time = ref 0. in
   let request fields =
     let line = Yojson.Safe.to_string (`Assoc fields) in
-    match
-      Yojson.Safe.from_string (Ipc.send ~socket_path:C.socket_path line)
-    with
-      | `Assoc obj -> obj
+    let* resp, _ctl = H.handler hooks line in
+    match Yojson.Safe.from_string resp with
+      | `Assoc obj -> Lwt.return obj
       | _ -> failwith "malformed IPC response"
   in
   let response_ok obj = List.assoc_opt "ok" obj = Some (`Bool true) in
@@ -144,6 +141,10 @@ let setup_client (module C : Conf.S) root staging_prefix =
   let must obj =
     if not (response_ok obj) then failwith ("IPC error: " ^ response_error obj)
   in
+  let must_action ?src ?staging ?arg act path =
+    let+ obj = action ?src ?staging ?arg act path in
+    must obj
+  in
   let do_step = function
     | Write { path; content } ->
         incr staging_seq;
@@ -152,18 +153,24 @@ let setup_client (module C : Conf.S) root staging_prefix =
             (Printf.sprintf "staging-%s%d" staging_prefix !staging_seq)
         in
         write_file staging content;
-        must (action ~staging "write" (key path))
-    | Mkdir p -> must (action "mkdir" (key p ^ "/"))
-    | Rmdir p -> must (action "rmdir" (key p ^ "/"))
-    | Rename { src; dst } -> must (action ~src:(key src) "rename" (key dst))
-    | Delete p -> must (action "delete" (key p))
-    | Evict p -> must (action "evict" ("/" ^ p))
-    | Restore p -> must (action "restore" ("/" ^ p))
+        must_action ~staging "write" (key path)
+    | Mkdir p -> must_action "mkdir" (key p ^ "/")
+    | Rmdir p -> must_action "rmdir" (key p ^ "/")
+    | Rename { src; dst } -> must_action ~src:(key src) "rename" (key dst)
+    | Delete p -> must_action "delete" (key p)
+    | Evict p -> must_action "evict" ("/" ^ p)
+    | Restore p -> must_action "restore" ("/" ^ p)
     | RevertVersion { path; version } ->
-        must (action ?arg:version "revert" ("/" ^ path))
-    | Open p -> F.mark_open (key p)
-    | Close p -> ignore (F.mark_closed (key p))
-    | Mark -> mark_time := Unix.gettimeofday ()
+        must_action ?arg:version "revert" ("/" ^ path)
+    | Open p ->
+        F.mark_open (key p);
+        Lwt.return_unit
+    | Close p ->
+        ignore (F.mark_closed (key p));
+        Lwt.return_unit
+    | Mark ->
+        mark_time := Unix.gettimeofday ();
+        Lwt.return_unit
     | Expire selector ->
         let module E = Expire.Make (C) in
         let cutoff =
@@ -173,31 +180,31 @@ let setup_client (module C : Conf.S) root staging_prefix =
             | "mark" -> !mark_time
             | _ -> failwith ("unknown expire selector: " ^ selector)
         in
-        let s = E.expire ~cutoff () in
+        let+ s = E.expire ~cutoff () in
         Printf.printf
           "  expire %s -> %d version(s), %d chunk(s) removed, %d kept\n"
           selector s.Expire.versions_deleted s.chunks_deleted s.chunks_kept
     | Drain ->
-        while not (Sq.idle ()) do
-          Thread.yield ()
-        done;
+        let rec wait () =
+          if Sq.idle () then Lwt.return_unit
+          else
+            let* () = Lwt.pause () in
+            wait ()
+        in
+        let* () = wait () in
         (* Move past the current ms so the next journal entry key is distinct. *)
-        Unix.sleepf 0.002
+        Lwt_unix.sleep 0.002
     | Sync -> Sp.sync_once ()
   in
   let drain () = Sq.drain () in
-  let stop () =
-    ignore (request [("action", `String "stop")]);
-    Thread.join server;
-    Sq.drain ()
-  in
+  let stop () = Lwt.return_unit in
   let get_str obj k =
     match List.assoc_opt k obj with Some (`String s) -> Some s | _ -> None
   in
   let dump_tree () =
     let files = ref [] in
     let rec walk prefix =
-      let obj = action "list_dir" prefix in
+      let* obj = action "list_dir" prefix in
       must obj;
       let dirs =
         match List.assoc_opt "dirs" obj with
@@ -218,45 +225,49 @@ let setup_client (module C : Conf.S) root staging_prefix =
                 l
           | _ -> []
       in
-      List.iter
-        (fun rel ->
-          let st = action "stat" (key rel) in
-          let uploaded = List.assoc_opt "isUploaded" st = Some (`Bool true) in
-          let etag = Option.value ~default:"" (get_str st "etag") in
-          let size =
-            match List.assoc_opt "size" st with Some (`Int n) -> n | _ -> -1
-          in
-          Printf.printf "  f %s size=%d cached=%b uploaded=%b etag=%s\n" rel
-            size
-            (F.is_cached (key rel))
-            uploaded etag;
-          files := rel :: !files)
-        (List.sort compare entries);
-      List.iter
+      let* () =
+        Lwt_list.iter_s
+          (fun rel ->
+            let* st = action "stat" (key rel) in
+            let uploaded = List.assoc_opt "isUploaded" st = Some (`Bool true) in
+            let etag = Option.value ~default:"" (get_str st "etag") in
+            let size =
+              match List.assoc_opt "size" st with Some (`Int n) -> n | _ -> -1
+            in
+            let+ cached = F.is_cached (key rel) in
+            Printf.printf "  f %s size=%d cached=%b uploaded=%b etag=%s\n" rel
+              size cached uploaded etag;
+            files := rel :: !files)
+          (List.sort compare entries)
+      in
+      Lwt_list.iter_s
         (fun d ->
           Printf.printf "  d %s/\n" (F.rel_key (prefix ^ d));
           walk (prefix ^ d ^ "/"))
         (List.sort compare dirs)
     in
-    walk C.domain_prefix;
+    let+ () = walk C.domain_prefix in
     List.rev !files
   in
   let dump_contents files =
-    List.iter
+    Lwt_list.iter_s
       (fun rel ->
-        let obj = action "ensure_cached" (key rel) in
+        let* obj = action "ensure_cached" (key rel) in
         must obj;
         match get_str obj "localPath" with
-          | Some lp -> Printf.printf "  %s = %S\n" rel (read_file lp)
+          | Some lp ->
+              Printf.printf "  %s = %S\n" rel (read_file lp);
+              Lwt.return_unit
           | None -> failwith "no localPath")
       files
   in
   let dump_pending () =
+    let+ pending = J.local_pending_entries ~uuid:(J.client_uuid ()) in
     List.iter
       (fun (_, ops) ->
         Printf.printf "  pending [%s]\n"
           (String.concat "; " (List.map render_op ops)))
-      (J.local_pending_entries ~uuid:(J.client_uuid ()))
+      pending
   in
   { do_step; drain; stop; dump_tree; dump_contents; dump_pending }
 
@@ -270,7 +281,7 @@ let dump_backend_at ~backend_root ~domain_prefix ~chunk_prefix ~journal_prefix
     if String.length k > pfx then String.sub k pfx (String.length k - pfx)
     else k
   in
-  let entries = B.list_all ~prefix:"" () in
+  let* entries = B.list_all ~prefix:"" () in
   (* Alias non-deterministic nanosecond version timestamps as stable per-file
      indices (<rel>#1, <rel>#2, …) ordered oldest-first. *)
   let version_alias = Hashtbl.create 16 in
@@ -305,37 +316,39 @@ let dump_backend_at ~backend_root ~domain_prefix ~chunk_prefix ~journal_prefix
     index 0 journal_names
   in
   let is_marker k = String.length k > 0 && k.[String.length k - 1] = '/' in
-  List.iter
+  Lwt_list.iter_s
     (fun (e : Backend.file_entry) ->
       (* Internal prefixes have no meaningful directories; ignore the empty-dir
          markers the local backend surfaces where S3 would list nothing. *)
       if
         is_marker e.key
         && (starts_with chunk_prefix e.key || starts_with versions_prefix e.key)
-      then ()
-      else if starts_with chunk_prefix e.key then
+      then Lwt.return_unit
+      else if starts_with chunk_prefix e.key then (
         Printf.printf "  chunk %s size=%d\n"
           (String.sub e.key
              (String.length chunk_prefix)
              (String.length e.key - String.length chunk_prefix))
-          e.size
-      else if starts_with journal_prefix e.key then begin
-        let ops = Journal.decode (B.get ~key:e.key ()) in
+          e.size;
+        Lwt.return_unit)
+      else if starts_with journal_prefix e.key then
+        let+ data = B.get ~key:e.key () in
+        let ops = Journal.decode data in
         Printf.printf "  journal %s = %s\n"
           (entry_alias (Filename.basename e.key))
           (String.concat "; " (List.map render_op ops))
-      end
       else if e.key = cursor_key then
-        Printf.printf "  cursor = %s\n"
-          (entry_alias (String.trim (B.get ~key:e.key ())))
+        let+ data = B.get ~key:e.key () in
+        Printf.printf "  cursor = %s\n" (entry_alias (String.trim data))
       else if starts_with versions_prefix e.key then (
         match Versioning.parse ~versions_prefix e.key with
           | Some (rel, _) ->
               let n =
                 Option.value ~default:0 (Hashtbl.find_opt version_alias e.key)
               in
+              let+ data = B.get ~key:e.key () in
               let desc =
-                match Manifest.of_string (B.get ~key:e.key ()) with
+                match Manifest.of_string data with
                   | `Clean m ->
                       Printf.sprintf "manifest size=%Ld chunks=%d"
                         m.Manifest.size
@@ -344,13 +357,17 @@ let dump_backend_at ~backend_root ~domain_prefix ~chunk_prefix ~journal_prefix
                   | exception _ -> "raw"
               in
               Printf.printf "  version %s#%d = %s\n" rel n desc
-          | None -> Printf.printf "  other %s size=%d\n" e.key e.size)
-      else if starts_with domain_prefix e.key then begin
+          | None ->
+              Printf.printf "  other %s size=%d\n" e.key e.size;
+              Lwt.return_unit)
+      else if starts_with domain_prefix e.key then (
         let rel = rel_key e.key in
-        if String.length e.key > 0 && e.key.[String.length e.key - 1] = '/' then
-          Printf.printf "  dir %s\n" rel
-        else (
-          match Manifest.of_string (B.get ~key:e.key ()) with
+        if String.length e.key > 0 && e.key.[String.length e.key - 1] = '/' then (
+          Printf.printf "  dir %s\n" rel;
+          Lwt.return_unit)
+        else
+          let+ data = B.get ~key:e.key () in
+          match Manifest.of_string data with
             | `Clean m ->
                 Printf.printf "  file %s = manifest size=%Ld chunks=%d\n" rel
                   m.Manifest.size
@@ -358,8 +375,9 @@ let dump_backend_at ~backend_root ~domain_prefix ~chunk_prefix ~journal_prefix
             | `Dirty -> Printf.printf "  file %s = dirty\n" rel
             | exception _ ->
                 Printf.printf "  file %s = raw size=%d\n" rel e.size)
-      end
-      else Printf.printf "  other %s size=%d\n" e.key e.size)
+      else (
+        Printf.printf "  other %s size=%d\n" e.key e.size;
+        Lwt.return_unit))
     entries
 
 (* ── Scenario runners ─────────────────────────────────────────────────────── *)
@@ -384,20 +402,26 @@ let run_scenario ?(versioning = false) ({ name; steps } : scenario) =
     let socket_path = Filename.concat root "tsync.sock"
     let notify_path = Filename.concat root "notify.sock"
   end in
-  let client = setup_client (module C) root "" in
-  (try
-     List.iter client.do_step steps;
-     client.drain ();
-     print_endline "--- tree";
-     let files = client.dump_tree () in
-     print_endline "--- content";
-     client.dump_contents files;
-     print_endline "--- backend";
-     dump_backend_at ~backend_root ~domain_prefix:C.domain_prefix
-       ~chunk_prefix:C.chunk_prefix ~journal_prefix:C.journal_prefix
-       ~versions_prefix:C.versions_prefix ~cursor_key:C.cursor_key
-   with exn -> Printf.printf "  ERROR %s\n" (Printexc.to_string exn));
-  client.stop ();
+  Lwt_main.run
+    (let client = setup_client (module C) root "" in
+     let* () =
+       Lwt.catch
+         (fun () ->
+           let* () = Lwt_list.iter_s client.do_step steps in
+           let* () = client.drain () in
+           print_endline "--- tree";
+           let* files = client.dump_tree () in
+           print_endline "--- content";
+           let* () = client.dump_contents files in
+           print_endline "--- backend";
+           dump_backend_at ~backend_root ~domain_prefix:C.domain_prefix
+             ~chunk_prefix:C.chunk_prefix ~journal_prefix:C.journal_prefix
+             ~versions_prefix:C.versions_prefix ~cursor_key:C.cursor_key)
+         (fun exn ->
+           Printf.printf "  ERROR %s\n" (Printexc.to_string exn);
+           Lwt.return_unit)
+     in
+     client.stop ());
   rm_rf root;
   print_newline ()
 
@@ -443,35 +467,41 @@ let run_two_client_scenario ?(versioning = false)
     let socket_path = Filename.concat root "tsync-b.sock"
     let notify_path = Filename.concat root "notify-b.sock"
   end in
-  let client_a = setup_client (module Ca) root "a" in
-  let client_b = setup_client (module Cb) root "b" in
-  let dispatch = function
-    | A s -> client_a.do_step s
-    | B s -> client_b.do_step s
-  in
-  (try
-     List.iter dispatch steps;
-     client_a.drain ();
-     client_b.drain ();
-     print_endline "--- tree A";
-     let files_a = client_a.dump_tree () in
-     print_endline "--- content A";
-     client_a.dump_contents files_a;
-     print_endline "--- pending A";
-     client_a.dump_pending ();
-     print_endline "--- tree B";
-     let files_b = client_b.dump_tree () in
-     print_endline "--- content B";
-     client_b.dump_contents files_b;
-     print_endline "--- pending B";
-     client_b.dump_pending ();
-     print_endline "--- backend";
-     dump_backend_at ~backend_root ~domain_prefix:Cb.domain_prefix
-       ~chunk_prefix:Cb.chunk_prefix ~journal_prefix:Cb.journal_prefix
-       ~versions_prefix:Cb.versions_prefix ~cursor_key:Cb.cursor_key
-   with exn -> Printf.printf "  ERROR %s\n" (Printexc.to_string exn));
-  client_a.stop ();
-  client_b.stop ();
+  Lwt_main.run
+    (let client_a = setup_client (module Ca) root "a" in
+     let client_b = setup_client (module Cb) root "b" in
+     let dispatch = function
+       | A s -> client_a.do_step s
+       | B s -> client_b.do_step s
+     in
+     let* () =
+       Lwt.catch
+         (fun () ->
+           let* () = Lwt_list.iter_s dispatch steps in
+           let* () = client_a.drain () in
+           let* () = client_b.drain () in
+           print_endline "--- tree A";
+           let* files_a = client_a.dump_tree () in
+           print_endline "--- content A";
+           let* () = client_a.dump_contents files_a in
+           print_endline "--- pending A";
+           let* () = client_a.dump_pending () in
+           print_endline "--- tree B";
+           let* files_b = client_b.dump_tree () in
+           print_endline "--- content B";
+           let* () = client_b.dump_contents files_b in
+           print_endline "--- pending B";
+           let* () = client_b.dump_pending () in
+           print_endline "--- backend";
+           dump_backend_at ~backend_root ~domain_prefix:Cb.domain_prefix
+             ~chunk_prefix:Cb.chunk_prefix ~journal_prefix:Cb.journal_prefix
+             ~versions_prefix:Cb.versions_prefix ~cursor_key:Cb.cursor_key)
+         (fun exn ->
+           Printf.printf "  ERROR %s\n" (Printexc.to_string exn);
+           Lwt.return_unit)
+     in
+     let* () = client_a.stop () in
+     client_b.stop ());
   rm_rf root;
   print_newline ()
 

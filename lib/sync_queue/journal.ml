@@ -12,30 +12,48 @@ type op =
   | `Rename of rename_op
   | `Rmdir of string ]
 
+(* ponytail: the client uuid is stable for the process lifetime, so it is read
+   (or generated) once and memoized. Keeping it synchronous avoids threading Lwt
+   through entry_key, which is called on every journal write. *)
+let uuid_cache : (string, string) Hashtbl.t = Hashtbl.create 1
+
 let get_client_uuid ~share_dir =
-  let uuid_file = Filename.concat share_dir "client-uuid" in
-  if Sys.file_exists uuid_file then (
-    let ic = open_in uuid_file in
-    let s = input_line ic in
-    close_in ic;
-    String.trim s)
-  else (
-    let buf = Bytes.create 16 in
-    let fd = Unix.openfile "/dev/urandom" [Unix.O_RDONLY] 0 in
-    ignore (Unix.read fd buf 0 16);
-    Unix.close fd;
-    let hex = Buffer.create 32 in
-    for i = 0 to Bytes.length buf - 1 do
-      Buffer.add_string hex
-        (Printf.sprintf "%02x" (Char.code (Bytes.get buf i)))
-    done;
-    let uuid = Buffer.contents hex in
-    (try Unix.mkdir share_dir 0o700
-     with Unix.Unix_error (Unix.EEXIST, _, _) -> ());
-    let oc = open_out uuid_file in
-    output_string oc uuid;
-    close_out oc;
-    uuid)
+  match Hashtbl.find_opt uuid_cache share_dir with
+    | Some uuid -> uuid
+    | None ->
+        let uuid_file = Filename.concat share_dir "client-uuid" in
+        let uuid =
+          if Sys.file_exists uuid_file then (
+            let ic = open_in uuid_file in
+            let s = input_line ic in
+            close_in ic;
+            String.trim s)
+          else (
+            let buf = Bytes.create 16 in
+            let fd = Unix.openfile "/dev/urandom" [Unix.O_RDONLY] 0 in
+            ignore (Unix.read fd buf 0 16);
+            Unix.close fd;
+            let hex = Buffer.create 32 in
+            for i = 0 to Bytes.length buf - 1 do
+              Buffer.add_string hex
+                (Printf.sprintf "%02x" (Char.code (Bytes.get buf i)))
+            done;
+            let uuid = Buffer.contents hex in
+            let rec mkdir_p path =
+              if not (Sys.file_exists path) then begin
+                mkdir_p (Filename.dirname path);
+                try Unix.mkdir path 0o700
+                with Unix.Unix_error (Unix.EEXIST, _, _) -> ()
+              end
+            in
+            mkdir_p share_dir;
+            let oc = open_out uuid_file in
+            output_string oc uuid;
+            close_out oc;
+            uuid)
+        in
+        Hashtbl.replace uuid_cache share_dir uuid;
+        uuid
 
 (* %013Ld: 13-digit zero-padded int64; current ms timestamps are 13 digits,
    ensuring lexicographic order matches chronological order *)
@@ -120,34 +138,44 @@ let decode s =
 let pending_dir ~share_dir = Filename.concat share_dir "journal-pending"
 
 let write_local_pending ~share_dir ~entry_key ops =
+  let open Lwt.Syntax in
   let dir = pending_dir ~share_dir in
-  (try Unix.mkdir dir 0o700 with Unix.Unix_error (Unix.EEXIST, _, _) -> ());
-  let oc = open_out (Filename.concat dir entry_key) in
-  output_string oc (encode ops);
-  close_out oc
+  let* () =
+    Lwt.catch
+      (fun () -> Lwt_unix.mkdir dir 0o700)
+      (function
+        | Unix.Unix_error (Unix.EEXIST, _, _) -> Lwt.return_unit
+        | e -> Lwt.fail e)
+  in
+  Lwt_io.with_file ~mode:Lwt_io.Output (Filename.concat dir entry_key)
+    (fun oc -> Lwt_io.write oc (encode ops))
 
 let delete_local_pending ~share_dir ~entry_key =
-  try Unix.unlink (Filename.concat (pending_dir ~share_dir) entry_key)
-  with Unix.Unix_error (Unix.ENOENT, _, _) -> ()
+  Lwt.catch
+    (fun () ->
+      Lwt_unix.unlink (Filename.concat (pending_dir ~share_dir) entry_key))
+    (function
+      | Unix.Unix_error (Unix.ENOENT, _, _) -> Lwt.return_unit | e -> Lwt.fail e)
 
 let local_pending_entries ~share_dir ~uuid =
+  let open Lwt.Syntax in
   let dir = pending_dir ~share_dir in
-  if not (Sys.file_exists dir) then []
+  let* exists = Lwt_unix.file_exists dir in
+  if not exists then Lwt.return_nil
   else
-    Sys.readdir dir |> Array.to_list
+    let* names = Lwt_stream.to_list (Lwt_unix.files_of_directory dir) in
+    names
     |> List.filter (fun name ->
-        try client_uuid_of_filename name = uuid with _ -> false)
+        name <> "." && name <> ".."
+        && try client_uuid_of_filename name = uuid with _ -> false)
     |> List.sort String.compare
-    |> List.filter_map (fun name ->
+    |> Lwt_list.filter_map_s (fun name ->
         let path = Filename.concat dir name in
-        try
-          let ic = open_in path in
-          let n = in_channel_length ic in
-          let s = Bytes.create n in
-          really_input ic s 0 n;
-          close_in ic;
-          Some (name, decode (Bytes.to_string s))
-        with _ -> None)
+        Lwt.catch
+          (fun () ->
+            let+ s = Lwt_io.with_file ~mode:Lwt_io.Input path Lwt_io.read in
+            Some (name, decode s))
+          (fun _ -> Lwt.return_none))
 
 module Make (C : Conf.S) = struct
   let share_dir = C.data_dir

@@ -12,12 +12,12 @@ module type S = sig
   val idle : unit -> bool
 
   val start :
-    upload:(key:string -> cancel:bool Atomic.t -> unit) ->
+    upload:(key:string -> cancel:bool Atomic.t -> unit Lwt.t) ->
     on_cursor:(entry_key:string -> unit) ->
-    on_upload_done:(key:string -> unit) ->
+    on_upload_done:(key:string -> unit Lwt.t) ->
     unit
 
-  val drain : unit -> unit
+  val drain : unit -> unit Lwt.t
 end
 
 module Make (C : Conf.S) : S

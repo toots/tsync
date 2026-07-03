@@ -11,4 +11,6 @@
   tsync_ipc_handler
   yojson
   unix
+  lwt
+  lwt.unix
   threads.posix))

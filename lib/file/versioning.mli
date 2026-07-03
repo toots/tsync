@@ -27,4 +27,4 @@ val save :
   domain_prefix:string ->
   versions_prefix:string ->
   key:string ->
-  unit
+  unit Lwt.t

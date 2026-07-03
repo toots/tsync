@@ -15,5 +15,5 @@ module Make (C : Conf.S) : sig
   (** [expire ~cutoff ()] deletes versions older than [cutoff] (seconds since
       the epoch), then deletes every chunk no longer referenced. Reads from the
       primary backend; deletions fan out to all backends. *)
-  val expire : cutoff:float -> unit -> stats
+  val expire : cutoff:float -> unit -> stats Lwt.t
 end

@@ -4,7 +4,7 @@ module Make (C : Conf.S) (F : File.S) : sig
       [F.apply_foreign_ops] on the rest. Useful for testing and for the
       [tsync sync] command; the polling loop calls this on every version bump.
   *)
-  val sync_once : unit -> unit
+  val sync_once : unit -> unit Lwt.t
 
   (** Start the background sync poller thread. Polls the version key every ~2 s
       and applies foreign journal entries via [F.apply_foreign_ops].

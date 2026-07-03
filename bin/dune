@@ -13,6 +13,8 @@
   tsync_runtime
   cmdliner
   yojson
+  lwt
+  lwt.unix
   threads.posix
   unix))
 

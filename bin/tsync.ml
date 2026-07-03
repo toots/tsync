@@ -176,55 +176,64 @@ let ls_cmd =
       & info ["deleted"; "d"] ~doc:"Also list deleted files in the directory")
   in
   let run path show_deleted =
-    let cfg = Conf_parsing.load runtime_paths.Runtime.config_path in
-    let (module C : Conf.S) = make_conf cfg in
-    let module Fs = File_store.Make (C) in
-    let mount_point =
-      Filename.concat (Sys.getenv "HOME") ("tsync/" ^ C.domain_name)
-    in
-    let dir = match path with Some p -> p | None -> mount_point in
-    let prefix =
-      let dp = C.domain_prefix in
-      if dir = mount_point then dp else dp ^ Filename.basename dir ^ "/"
-    in
-    let files, subdirs = Fs.list_directory ~prefix in
-    let dp_len = String.length C.domain_prefix in
-    List.iter
-      (fun (e : Backend.file_entry) ->
-        let name =
-          if String.length e.key > dp_len then
-            String.sub e.key dp_len (String.length e.key - dp_len)
-          else e.key
-        in
-        let cached =
-          Runtime.is_local ~cache_root:C.cache_root ~domain_name:C.domain_name
-            ~domain_prefix:C.domain_prefix e.key
-        in
-        Printf.printf "%s  %s  %d bytes\n"
-          (if cached then "local" else "cloud")
-          name e.size)
-      files;
-    List.iter (fun d -> Printf.printf "dir    %s/\n" d) subdirs;
-    if show_deleted then begin
-      (* Versioned paths in this directory with no live manifest. *)
-      let (module B : Backend.S) = List.hd C.backends in
-      let reldir = String.sub prefix dp_len (String.length prefix - dp_len) in
-      let seen = Hashtbl.create 16 in
-      B.list_all ~prefix:(C.versions_prefix ^ reldir) ()
-      |> List.iter (fun (e : Backend.file_entry) ->
-          match Versioning.parse ~versions_prefix:C.versions_prefix e.key with
-            | Some (rel, _) when not (Hashtbl.mem seen rel) ->
-                Hashtbl.add seen rel ();
-                let child =
-                  String.sub rel (String.length reldir)
-                    (String.length rel - String.length reldir)
-                in
-                if
-                  (not (String.contains child '/'))
-                  && B.head_opt ~key:(C.domain_prefix ^ rel) () = None
-                then Printf.printf "deleted  %s\n" child
-            | _ -> ())
-    end
+    Lwt_main.run
+      (let open Lwt.Syntax in
+       let cfg = Conf_parsing.load runtime_paths.Runtime.config_path in
+       let (module C : Conf.S) = make_conf cfg in
+       let module Fs = File_store.Make (C) in
+       let mount_point =
+         Filename.concat (Sys.getenv "HOME") ("tsync/" ^ C.domain_name)
+       in
+       let dir = match path with Some p -> p | None -> mount_point in
+       let prefix =
+         let dp = C.domain_prefix in
+         if dir = mount_point then dp else dp ^ Filename.basename dir ^ "/"
+       in
+       let* files, subdirs = Fs.list_directory ~prefix in
+       let dp_len = String.length C.domain_prefix in
+       List.iter
+         (fun (e : Backend.file_entry) ->
+           let name =
+             if String.length e.key > dp_len then
+               String.sub e.key dp_len (String.length e.key - dp_len)
+             else e.key
+           in
+           let cached =
+             Runtime.is_local ~cache_root:C.cache_root
+               ~domain_name:C.domain_name ~domain_prefix:C.domain_prefix e.key
+           in
+           Printf.printf "%s  %s  %d bytes\n"
+             (if cached then "local" else "cloud")
+             name e.size)
+         files;
+       List.iter (fun d -> Printf.printf "dir    %s/\n" d) subdirs;
+       if show_deleted then begin
+         (* Versioned paths in this directory with no live manifest. *)
+         let (module B : Backend.S) = List.hd C.backends in
+         let reldir =
+           String.sub prefix dp_len (String.length prefix - dp_len)
+         in
+         let seen = Hashtbl.create 16 in
+         let* entries = B.list_all ~prefix:(C.versions_prefix ^ reldir) () in
+         Lwt_list.iter_s
+           (fun (e : Backend.file_entry) ->
+             match
+               Versioning.parse ~versions_prefix:C.versions_prefix e.key
+             with
+               | Some (rel, _) when not (Hashtbl.mem seen rel) ->
+                   Hashtbl.add seen rel ();
+                   let child =
+                     String.sub rel (String.length reldir)
+                       (String.length rel - String.length reldir)
+                   in
+                   if String.contains child '/' then Lwt.return_unit
+                   else
+                     let+ head = B.head_opt ~key:(C.domain_prefix ^ rel) () in
+                     if head = None then Printf.printf "deleted  %s\n" child
+               | _ -> Lwt.return_unit)
+           entries
+       end
+       else Lwt.return_unit)
   in
   Cmd.v
     (Cmd.info "ls" ~doc:"List files with cache status")
@@ -244,61 +253,75 @@ let versions_cmd =
     Arg.(value & pos 0 (some string) None & info [] ~docv:"PATH")
   in
   let run path =
-    let cfg = Conf_parsing.load runtime_paths.Runtime.config_path in
-    let (module C : Conf.S) = make_conf cfg in
-    let (module B : Backend.S) = List.hd C.backends in
-    let parse = Versioning.parse ~versions_prefix:C.versions_prefix in
-    match path with
-      | Some rel ->
-          let versions =
-            B.list_all ~prefix:(C.versions_prefix ^ rel ^ "/") ()
-            |> List.filter_map (fun (e : Backend.file_entry) ->
-                match parse e.key with
-                  | Some (_, ts) -> Some (Int64.of_string ts, e.size)
-                  | None -> None)
-            |> List.sort (fun (a, _) (b, _) -> Int64.compare b a)
-          in
-          if versions = [] then Printf.printf "No versions for %s\n" rel
-          else
-            List.iter
-              (fun (ts, size) ->
-                Printf.printf "%Ld  %s  %d bytes\n" ts (human_ts ts) size)
-              versions
-      | None ->
-          (* Group every version by path; a path with no live manifest is a
-             deleted file. *)
-          let latest = Hashtbl.create 64 and count = Hashtbl.create 64 in
-          B.list_all ~prefix:C.versions_prefix ()
-          |> List.iter (fun (e : Backend.file_entry) ->
-              match parse e.key with
-                | Some (rel, ts) ->
-                    let ts = Int64.of_string ts in
-                    let best =
-                      Option.value ~default:0L (Hashtbl.find_opt latest rel)
-                    in
-                    if Int64.compare ts best > 0 then
-                      Hashtbl.replace latest rel ts;
-                    Hashtbl.replace count rel
-                      (1 + Option.value ~default:0 (Hashtbl.find_opt count rel))
-                | None -> ());
-          let deleted =
-            Hashtbl.fold
-              (fun rel ts acc ->
-                if B.head_opt ~key:(C.domain_prefix ^ rel) () = None then
-                  (rel, ts, Option.value ~default:1 (Hashtbl.find_opt count rel))
-                  :: acc
-                else acc)
-              latest []
-            |> List.sort compare
-          in
-          if deleted = [] then print_endline "No deleted files"
-          else
-            List.iter
-              (fun (rel, ts, n) ->
-                Printf.printf "%s  (deleted %s, %d version%s)\n" rel
-                  (human_ts ts) n
-                  (if n = 1 then "" else "s"))
-              deleted
+    Lwt_main.run
+      (let open Lwt.Syntax in
+       let cfg = Conf_parsing.load runtime_paths.Runtime.config_path in
+       let (module C : Conf.S) = make_conf cfg in
+       let (module B : Backend.S) = List.hd C.backends in
+       let parse = Versioning.parse ~versions_prefix:C.versions_prefix in
+       match path with
+         | Some rel ->
+             let+ entries =
+               B.list_all ~prefix:(C.versions_prefix ^ rel ^ "/") ()
+             in
+             let versions =
+               entries
+               |> List.filter_map (fun (e : Backend.file_entry) ->
+                   match parse e.key with
+                     | Some (_, ts) -> Some (Int64.of_string ts, e.size)
+                     | None -> None)
+               |> List.sort (fun (a, _) (b, _) -> Int64.compare b a)
+             in
+             if versions = [] then Printf.printf "No versions for %s\n" rel
+             else
+               List.iter
+                 (fun (ts, size) ->
+                   Printf.printf "%Ld  %s  %d bytes\n" ts (human_ts ts) size)
+                 versions
+         | None ->
+             (* Group every version by path; a path with no live manifest is a
+                deleted file. *)
+             let latest = Hashtbl.create 64 and count = Hashtbl.create 64 in
+             let* entries = B.list_all ~prefix:C.versions_prefix () in
+             List.iter
+               (fun (e : Backend.file_entry) ->
+                 match parse e.key with
+                   | Some (rel, ts) ->
+                       let ts = Int64.of_string ts in
+                       let best =
+                         Option.value ~default:0L (Hashtbl.find_opt latest rel)
+                       in
+                       if Int64.compare ts best > 0 then
+                         Hashtbl.replace latest rel ts;
+                       Hashtbl.replace count rel
+                         (1
+                         + Option.value ~default:0 (Hashtbl.find_opt count rel)
+                         )
+                   | None -> ())
+               entries;
+             let* deleted =
+               Hashtbl.fold
+                 (fun rel ts acc ->
+                   let* acc = acc in
+                   let+ head = B.head_opt ~key:(C.domain_prefix ^ rel) () in
+                   if head = None then
+                     ( rel,
+                       ts,
+                       Option.value ~default:1 (Hashtbl.find_opt count rel) )
+                     :: acc
+                   else acc)
+                 latest (Lwt.return [])
+             in
+             let deleted = List.sort compare deleted in
+             if deleted = [] then print_endline "No deleted files"
+             else
+               List.iter
+                 (fun (rel, ts, n) ->
+                   Printf.printf "%s  (deleted %s, %d version%s)\n" rel
+                     (human_ts ts) n
+                     (if n = 1 then "" else "s"))
+                 deleted;
+             Lwt.return_unit)
   in
   Cmd.v
     (Cmd.info "versions"
@@ -369,11 +392,12 @@ let expire_cmd =
   in
   let run date =
     match
-      let cutoff = parse_date date in
-      let cfg = Conf_parsing.load runtime_paths.Runtime.config_path in
-      let (module C : Conf.S) = make_conf cfg in
-      let module E = Expire.Make (C) in
-      E.expire ~cutoff ()
+      Lwt_main.run
+        (let cutoff = parse_date date in
+         let cfg = Conf_parsing.load runtime_paths.Runtime.config_path in
+         let (module C : Conf.S) = make_conf cfg in
+         let module E = Expire.Make (C) in
+         E.expire ~cutoff ())
     with
       | s ->
           Printf.printf "Removed %d version(s), %d chunk(s); kept %d chunk(s)\n"
@@ -425,143 +449,165 @@ let sync_cmd =
       & info ["domain"] ~docv:"NAME" ~doc:"Domain name (default: from config)")
   in
   let run domain =
-    let cfg = Conf_parsing.load runtime_paths.Runtime.config_path in
-    let (module C : Conf.S) = make_conf ?domain cfg in
-    let module J = Journal.Make (C) in
-    let module Fs = File_store.Make (C) in
-    let module Sq = Sync_queue.Make (C) in
-    let module F = File.Make (C) (Sq) in
-    Sq.start
-      ~upload:(fun ~key ~cancel -> F.upload ~cancel key)
-      ~on_cursor:(fun ~entry_key:_ -> ())
-      ~on_upload_done:(fun ~key:_ -> ());
-    let my_uuid = J.client_uuid () in
-    let recover_pending_ops () =
-      List.iter
-        (fun (entry_key, ops) ->
-          let remote_key = C.journal_prefix ^ entry_key in
-          if Fs.head_opt ~key:remote_key <> None then
-            J.delete_local_pending ~entry_key
-          else begin
-            let newer_keys = Fs.list_journal_keys ~start_after:entry_key () in
-            let remotely_modified = Hashtbl.create 16 in
-            List.iter
-              (fun (ek, uuid) ->
-                if uuid <> my_uuid then (
-                  match Fs.get_journal_entry ek with
-                    | None -> ()
-                    | Some remote_ops ->
-                        List.iter
-                          (fun op ->
-                            match op with
-                              | `Put (k, _) | `Delete k | `Mkdir k | `Rmdir k ->
-                                  Hashtbl.replace remotely_modified k ()
-                              | `Rename { Journal.dst; src; _ } ->
-                                  Hashtbl.replace remotely_modified dst ();
-                                  Hashtbl.replace remotely_modified src ())
-                          remote_ops))
-              newer_keys;
-            let replayed =
-              List.filter
-                (fun op ->
-                  let k =
-                    match op with
-                      | `Put (k, _) | `Delete k | `Mkdir k | `Rmdir k -> k
-                      | `Rename { Journal.dst = k; _ } -> k
-                  in
-                  not (Hashtbl.mem remotely_modified k))
-                ops
-            in
-            List.iter
-              (fun op ->
-                try
-                  match op with
-                    | `Put (rel_key, _) ->
-                        let key = C.domain_prefix ^ rel_key in
-                        if F.is_cached key then F.upload key
-                    | `Delete rel_key ->
-                        F.apply_delete (C.domain_prefix ^ rel_key)
-                    | `Mkdir rel_key ->
-                        Fs.create_directory ~key:(C.domain_prefix ^ rel_key)
-                    | `Rmdir rel_key ->
-                        Fs.delete_dir ~prefix:(C.domain_prefix ^ rel_key)
-                    | `Rename
-                        { Journal.dst = dst_rel; src = src_rel; is_dir; _ } ->
-                        let src_key = C.domain_prefix ^ src_rel in
-                        let dst_key = C.domain_prefix ^ dst_rel in
-                        if is_dir then
-                          Fs.rename_directory ~src_prefix:(src_key ^ "/")
-                            ~dst_prefix:(dst_key ^ "/")
-                        else Fs.rename_file ~src_key ~dst_key
-                with exn ->
-                  Log.err "recover_pending_ops: %s" (Printexc.to_string exn))
-              replayed;
-            if replayed <> [] then begin
-              ignore (Fs.write_journal_entry ~entry_key replayed);
-              Fs.bump_cursor entry_key
-            end;
-            J.delete_local_pending ~entry_key
-          end)
-        (J.local_pending_entries ~uuid:my_uuid)
-    in
-    recover_pending_ops ();
-    Sq.drain ();
-    let share_dir = C.data_dir in
-    let last_sync_file =
-      Filename.concat share_dir ("last-sync-" ^ C.domain_name)
-    in
-    let last_sync_key =
-      if Sys.file_exists last_sync_file then (
-        let ic = open_in last_sync_file in
-        let s = input_line ic in
-        close_in ic;
-        String.trim s)
-      else ""
-    in
-    let all_keys = Fs.list_journal_keys () in
-    let need_full_resync =
-      if last_sync_key = "" then true
-      else (
-        match all_keys with
-          | [] -> false
-          | (oldest_key, _) :: _ ->
-              Journal.timestamp_ms_of_filename oldest_key
-              > Journal.timestamp_ms_of_filename last_sync_key)
-    in
-    if need_full_resync then begin
-      (try ignore (ipc_action ~socket_path:C.socket_path "full_resync") with
-        | Failure msg -> Printf.eprintf "Warning: full_resync: %s\n" msg
-        | _ -> ());
-      let new_key = C.journal_prefix ^ J.entry_key () in
-      let oc = open_out last_sync_file in
-      output_string oc new_key;
-      close_out oc;
-      Printf.printf "full resync\n"
-    end
-    else begin
-      let last_sync_basename = Filename.basename last_sync_key in
-      let recent_foreign =
-        all_keys
-        |> List.filter (fun (k, _) -> k > last_sync_basename)
-        |> List.filter (fun (_, uuid) -> uuid <> my_uuid)
-      in
-      List.iter
-        (fun (ek, _) ->
-          match Fs.get_journal_entry ek with
-            | None -> ()
-            | Some ops -> F.apply_foreign_ops ops)
-        recent_foreign;
-      (match all_keys with
-        | [] -> ()
-        | _ ->
-            let last_key, _ = List.nth all_keys (List.length all_keys - 1) in
-            let oc = open_out last_sync_file in
-            output_string oc (C.journal_prefix ^ last_key);
-            close_out oc);
-      let n = List.length recent_foreign in
-      Printf.printf "%d journal entr%s from other clients\n" n
-        (if n = 1 then "y" else "ies")
-    end
+    Lwt_main.run
+      (let open Lwt.Syntax in
+       let cfg = Conf_parsing.load runtime_paths.Runtime.config_path in
+       let (module C : Conf.S) = make_conf ?domain cfg in
+       let module J = Journal.Make (C) in
+       let module Fs = File_store.Make (C) in
+       let module Sq = Sync_queue.Make (C) in
+       let module F = File.Make (C) (Sq) in
+       Sq.start
+         ~upload:(fun ~key ~cancel -> F.upload ~cancel key)
+         ~on_cursor:(fun ~entry_key:_ -> ())
+         ~on_upload_done:(fun ~key:_ -> Lwt.return_unit);
+       let my_uuid = J.client_uuid () in
+       let recover_entry entry_key ops =
+         let remote_key = C.journal_prefix ^ entry_key in
+         let* head = Fs.head_opt ~key:remote_key in
+         if head <> None then J.delete_local_pending ~entry_key
+         else begin
+           let* newer_keys = Fs.list_journal_keys ~start_after:entry_key () in
+           let remotely_modified = Hashtbl.create 16 in
+           let* () =
+             Lwt_list.iter_s
+               (fun (ek, uuid) ->
+                 if uuid <> my_uuid then
+                   let+ e = Fs.get_journal_entry ek in
+                   match e with
+                     | None -> ()
+                     | Some remote_ops ->
+                         List.iter
+                           (fun op ->
+                             match op with
+                               | `Put (k, _) | `Delete k | `Mkdir k | `Rmdir k
+                                 ->
+                                   Hashtbl.replace remotely_modified k ()
+                               | `Rename { Journal.dst; src; _ } ->
+                                   Hashtbl.replace remotely_modified dst ();
+                                   Hashtbl.replace remotely_modified src ())
+                           remote_ops
+                 else Lwt.return_unit)
+               newer_keys
+           in
+           let replayed =
+             List.filter
+               (fun op ->
+                 let k =
+                   match op with
+                     | `Put (k, _) | `Delete k | `Mkdir k | `Rmdir k -> k
+                     | `Rename { Journal.dst = k; _ } -> k
+                 in
+                 not (Hashtbl.mem remotely_modified k))
+               ops
+           in
+           let* () =
+             Lwt_list.iter_s
+               (fun op ->
+                 Lwt.catch
+                   (fun () ->
+                     match op with
+                       | `Put (rel_key, _) ->
+                           let key = C.domain_prefix ^ rel_key in
+                           let* cached = F.is_cached key in
+                           if cached then F.upload key else Lwt.return_unit
+                       | `Delete rel_key ->
+                           F.apply_delete (C.domain_prefix ^ rel_key)
+                       | `Mkdir rel_key ->
+                           Fs.create_directory ~key:(C.domain_prefix ^ rel_key)
+                       | `Rmdir rel_key ->
+                           Fs.delete_dir ~prefix:(C.domain_prefix ^ rel_key)
+                       | `Rename
+                           { Journal.dst = dst_rel; src = src_rel; is_dir; _ }
+                         ->
+                           let src_key = C.domain_prefix ^ src_rel in
+                           let dst_key = C.domain_prefix ^ dst_rel in
+                           if is_dir then
+                             Fs.rename_directory ~src_prefix:(src_key ^ "/")
+                               ~dst_prefix:(dst_key ^ "/")
+                           else Fs.rename_file ~src_key ~dst_key)
+                   (fun exn ->
+                     Log.err "recover_pending_ops: %s" (Printexc.to_string exn);
+                     Lwt.return_unit))
+               replayed
+           in
+           let* () =
+             if replayed <> [] then
+               let* (_ : string) = Fs.write_journal_entry ~entry_key replayed in
+               Fs.bump_cursor entry_key
+             else Lwt.return_unit
+           in
+           J.delete_local_pending ~entry_key
+         end
+       in
+       let* pending = J.local_pending_entries ~uuid:my_uuid in
+       let* () =
+         Lwt_list.iter_s
+           (fun (entry_key, ops) -> recover_entry entry_key ops)
+           pending
+       in
+       let* () = Sq.drain () in
+       let share_dir = C.data_dir in
+       let last_sync_file =
+         Filename.concat share_dir ("last-sync-" ^ C.domain_name)
+       in
+       let last_sync_key =
+         if Sys.file_exists last_sync_file then (
+           let ic = open_in last_sync_file in
+           let s = input_line ic in
+           close_in ic;
+           String.trim s)
+         else ""
+       in
+       let* all_keys = Fs.list_journal_keys () in
+       let need_full_resync =
+         if last_sync_key = "" then true
+         else (
+           match all_keys with
+             | [] -> false
+             | (oldest_key, _) :: _ ->
+                 Journal.timestamp_ms_of_filename oldest_key
+                 > Journal.timestamp_ms_of_filename last_sync_key)
+       in
+       if need_full_resync then begin
+         (try ignore (ipc_action ~socket_path:C.socket_path "full_resync") with
+           | Failure msg -> Printf.eprintf "Warning: full_resync: %s\n" msg
+           | _ -> ());
+         let new_key = C.journal_prefix ^ J.entry_key () in
+         let oc = open_out last_sync_file in
+         output_string oc new_key;
+         close_out oc;
+         Printf.printf "full resync\n";
+         Lwt.return_unit
+       end
+       else begin
+         let last_sync_basename = Filename.basename last_sync_key in
+         let recent_foreign =
+           all_keys
+           |> List.filter (fun (k, _) -> k > last_sync_basename)
+           |> List.filter (fun (_, uuid) -> uuid <> my_uuid)
+         in
+         let* () =
+           Lwt_list.iter_s
+             (fun (ek, _) ->
+               let* e = Fs.get_journal_entry ek in
+               match e with
+                 | None -> Lwt.return_unit
+                 | Some ops -> F.apply_foreign_ops ops)
+             recent_foreign
+         in
+         (match all_keys with
+           | [] -> ()
+           | _ ->
+               let last_key, _ = List.nth all_keys (List.length all_keys - 1) in
+               let oc = open_out last_sync_file in
+               output_string oc (C.journal_prefix ^ last_key);
+               close_out oc);
+         let n = List.length recent_foreign in
+         Printf.printf "%d journal entr%s from other clients\n" n
+           (if n = 1 then "y" else "ies");
+         Lwt.return_unit
+       end)
   in
   Cmd.v
     (Cmd.info "sync" ~doc:"Sync local cache with remote journal changes")

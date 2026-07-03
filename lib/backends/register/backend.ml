@@ -4,14 +4,16 @@ exception Backend_error of string
 exception Cancelled
 
 module type S = sig
-  val put : key:string -> data:string -> unit -> unit
-  val get : key:string -> unit -> string
-  val head_opt : key:string -> unit -> file_entry option
-  val delete : key:string -> unit -> unit
-  val delete_multi : string list -> unit
-  val copy : src_key:string -> dst_key:string -> unit -> unit
-  val list_all : prefix:string -> unit -> file_entry list
-  val list_directory : prefix:string -> unit -> file_entry list * string list
+  val put : key:string -> data:string -> unit -> unit Lwt.t
+  val get : key:string -> unit -> string Lwt.t
+  val head_opt : key:string -> unit -> file_entry option Lwt.t
+  val delete : key:string -> unit -> unit Lwt.t
+  val delete_multi : string list -> unit Lwt.t
+  val copy : src_key:string -> dst_key:string -> unit -> unit Lwt.t
+  val list_all : prefix:string -> unit -> file_entry list Lwt.t
+
+  val list_directory :
+    prefix:string -> unit -> (file_entry list * string list) Lwt.t
 end
 
 type factory = (string -> string option) -> (module S)

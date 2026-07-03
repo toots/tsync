@@ -2,4 +2,4 @@
  (name tsync_local_backend)
  (wrapped false)
  (library_flags (-linkall))
- (libraries tsync_backend_register unix))
+ (libraries tsync_backend_register unix lwt lwt.unix))

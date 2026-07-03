@@ -20,7 +20,7 @@ val decode : string -> op list
 module Make (C : Conf.S) : sig
   val client_uuid : unit -> string
   val entry_key : unit -> string
-  val write_local_pending : entry_key:string -> op list -> unit
-  val delete_local_pending : entry_key:string -> unit
-  val local_pending_entries : uuid:string -> (string * op list) list
+  val write_local_pending : entry_key:string -> op list -> unit Lwt.t
+  val delete_local_pending : entry_key:string -> unit Lwt.t
+  val local_pending_entries : uuid:string -> (string * op list) list Lwt.t
 end

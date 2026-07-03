@@ -8,4 +8,6 @@
   tsync_queue
   tsync_log
   yojson
-  unix))
+  unix
+  lwt
+  lwt.unix))

@@ -1,3 +1,5 @@
+open Lwt.Syntax
+
 module type S = sig
   val post :
     key:string ->
@@ -10,12 +12,12 @@ module type S = sig
   val idle : unit -> bool
 
   val start :
-    upload:(key:string -> cancel:bool Atomic.t -> unit) ->
+    upload:(key:string -> cancel:bool Atomic.t -> unit Lwt.t) ->
     on_cursor:(entry_key:string -> unit) ->
-    on_upload_done:(key:string -> unit) ->
+    on_upload_done:(key:string -> unit Lwt.t) ->
     unit
 
-  val drain : unit -> unit
+  val drain : unit -> unit Lwt.t
 end
 
 module Make (C : Conf.S) : S = struct
@@ -35,27 +37,33 @@ module Make (C : Conf.S) : S = struct
     mutable pending : put_data option;
   }
 
+  (* All queue state is touched only from the Lwt event-loop thread (workers and
+     the post/cancel entry points all run there), so no locks are needed. *)
   let slots : (string, slot) Hashtbl.t = Hashtbl.create 64
-  let slots_mtx = Mutex.create ()
   let queue : put_data Queue.t = Queue.create ()
-  let queue_mtx = Mutex.create ()
-  let queue_cond = Condition.create ()
+  let queue_cond = Lwt_condition.create ()
   let stop = Atomic.make false
-  let workers : unit Domain.t list ref = ref []
+  let workers : unit Lwt.t list ref = ref []
 
-  let upload_fn : (key:string -> cancel:bool Atomic.t -> unit) ref =
-    ref (fun ~key:_ ~cancel:_ -> ())
+  let upload_fn : (key:string -> cancel:bool Atomic.t -> unit Lwt.t) ref =
+    ref (fun ~key:_ ~cancel:_ -> Lwt.return_unit)
 
   let on_cursor_fn : (entry_key:string -> unit) ref =
     ref (fun ~entry_key:_ -> ())
 
-  let on_upload_done_fn : (key:string -> unit) ref = ref (fun ~key:_ -> ())
+  let on_upload_done_fn : (key:string -> unit Lwt.t) ref =
+    ref (fun ~key:_ -> Lwt.return_unit)
+
+  (* Pending-file cleanup is a best-effort disk unlink; fire it off without
+     blocking the synchronous post/cancel entry points.
+     ponytail: fire-and-forget unlink; make post/cancel return Lwt only if a
+     failed unlink ever needs to be surfaced. *)
+  let drop_pending entry_key =
+    Lwt.async (fun () -> J.delete_local_pending ~entry_key)
 
   let enqueue pd =
-    Mutex.lock queue_mtx;
     Queue.add pd queue;
-    Condition.signal queue_cond;
-    Mutex.unlock queue_mtx
+    Lwt_condition.signal queue_cond ()
 
   let add_slot key pd =
     Hashtbl.add slots key
@@ -63,109 +71,86 @@ module Make (C : Conf.S) : S = struct
 
   let replace_pending slot pd =
     (match slot.pending with
-      | Some { entry_key; _ } -> J.delete_local_pending ~entry_key
+      | Some { entry_key; _ } -> drop_pending entry_key
       | None -> ());
     slot.pending <- Some pd
 
   let clear_pending slot =
     (match slot.pending with
-      | Some { entry_key; _ } -> J.delete_local_pending ~entry_key
+      | Some { entry_key; _ } -> drop_pending entry_key
       | None -> ());
     slot.pending <- None
 
   let cancel_put key =
-    Mutex.lock slots_mtx;
-    let was_uploading =
-      match Hashtbl.find_opt slots key with
-        | Some slot ->
-            Atomic.set slot.cancel true;
-            clear_pending slot;
-            true
-        | None -> false
-    in
-    Mutex.unlock slots_mtx;
-    was_uploading
+    match Hashtbl.find_opt slots key with
+      | Some slot ->
+          Atomic.set slot.cancel true;
+          clear_pending slot;
+          true
+      | None -> false
 
-  let idle () =
-    Mutex.lock queue_mtx;
-    let queue_empty = Queue.is_empty queue in
-    Mutex.unlock queue_mtx;
-    Mutex.lock slots_mtx;
-    let slots_empty = Hashtbl.length slots = 0 in
-    Mutex.unlock slots_mtx;
-    queue_empty && slots_empty
+  let idle () = Queue.is_empty queue && Hashtbl.length slots = 0
 
   let exec_put slot ({ key; entry_key; ops; _ } : put_data) =
     if Atomic.get slot.cancel then J.delete_local_pending ~entry_key
-    else (
-      try
-        !upload_fn ~key ~cancel:slot.cancel;
-        if Atomic.get slot.cancel then J.delete_local_pending ~entry_key
-        else begin
-          J.delete_local_pending ~entry_key;
-          ignore (Fs.write_journal_entry ~entry_key ops);
-          !on_cursor_fn ~entry_key;
-          !on_upload_done_fn ~key
-        end
-      with
-        | Backend.Cancelled -> J.delete_local_pending ~entry_key
-        | Unix.Unix_error (Unix.ENOENT, _, _) ->
-            J.delete_local_pending ~entry_key
-        | exn -> Log.err "sync_queue put %s: %s" key (Printexc.to_string exn))
+    else
+      Lwt.catch
+        (fun () ->
+          let* () = !upload_fn ~key ~cancel:slot.cancel in
+          if Atomic.get slot.cancel then J.delete_local_pending ~entry_key
+          else
+            let* () = J.delete_local_pending ~entry_key in
+            let* (_ : string) = Fs.write_journal_entry ~entry_key ops in
+            !on_cursor_fn ~entry_key;
+            !on_upload_done_fn ~key)
+        (function
+          | Backend.Cancelled -> J.delete_local_pending ~entry_key
+          | Unix.Unix_error (Unix.ENOENT, _, _) ->
+              J.delete_local_pending ~entry_key
+          | exn ->
+              Log.err "sync_queue put %s: %s" key (Printexc.to_string exn);
+              Lwt.return_unit)
 
-  let worker_loop () =
-    let keep_running = ref true in
-    while !keep_running do
-      Mutex.lock queue_mtx;
-      while Queue.is_empty queue && not (Atomic.get stop) do
-        Condition.wait queue_cond queue_mtx
-      done;
-      if Queue.is_empty queue then begin
-        Mutex.unlock queue_mtx;
-        keep_running := false
-      end
-      else begin
-        let pd = Queue.pop queue in
-        Mutex.unlock queue_mtx;
-        Mutex.lock slots_mtx;
-        let slot = Hashtbl.find slots pd.key in
-        Mutex.unlock slots_mtx;
-        exec_put slot pd;
-        Mutex.lock slots_mtx;
-        (match slot.pending with
-          | None -> Hashtbl.remove slots pd.key
-          | Some next ->
-              slot.running <- next;
-              Atomic.set slot.cancel false;
-              slot.pending <- None;
-              enqueue next);
-        Mutex.unlock slots_mtx
-      end
-    done
+  let rec worker_loop () =
+    if Queue.is_empty queue then
+      if Atomic.get stop then Lwt.return_unit
+      else
+        let* () = Lwt_condition.wait queue_cond in
+        worker_loop ()
+    else begin
+      let pd = Queue.pop queue in
+      let slot = Hashtbl.find slots pd.key in
+      let* () = exec_put slot pd in
+      (match slot.pending with
+        | None -> Hashtbl.remove slots pd.key
+        | Some next ->
+            slot.running <- next;
+            Atomic.set slot.cancel false;
+            slot.pending <- None;
+            enqueue next);
+      worker_loop ()
+    end
 
   let start ~upload ~on_cursor ~on_upload_done =
     upload_fn := upload;
     on_cursor_fn := on_cursor;
     on_upload_done_fn := on_upload_done;
-    workers := List.init 4 (fun _ -> Domain.spawn (fun () -> worker_loop ()))
+    workers := List.init 4 (fun _ -> worker_loop ())
 
   let drain () =
     Atomic.set stop true;
-    Mutex.lock queue_mtx;
-    Condition.broadcast queue_cond;
-    Mutex.unlock queue_mtx;
-    List.iter Domain.join !workers;
-    workers := []
+    Lwt_condition.broadcast queue_cond ();
+    let* () = Lwt.join !workers in
+    workers := [];
+    Lwt.return_unit
 
   let post ~key ~src_path ~entry_key ~ops =
     let pd = { key; src_path; entry_key; ops } in
-    Mutex.lock slots_mtx;
-    (match Hashtbl.find_opt slots key with
+    match Hashtbl.find_opt slots key with
       | None ->
           add_slot key pd;
           enqueue pd
       | Some slot ->
           Atomic.set slot.cancel true;
-          replace_pending slot pd);
-    Mutex.unlock slots_mtx
+          replace_pending slot pd
 end

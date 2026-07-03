@@ -8,4 +8,7 @@ val notify_changed : path:string -> string -> unit
 
 (** Start the IPC server loop, calling [handler] for each incoming line. Stops
     when the handler returns [("...", `Stop)]. *)
-val serve : path:string -> (string -> string * [ `Continue | `Stop ]) -> unit
+val serve :
+  path:string ->
+  (string -> (string * [ `Continue | `Stop ]) Lwt.t) ->
+  unit Lwt.t

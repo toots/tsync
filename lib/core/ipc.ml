@@ -53,25 +53,31 @@ let rec mkdir_p path =
   end
 
 let serve ~path handler =
+  let open Lwt.Syntax in
   let dir = Filename.dirname path in
   mkdir_p dir;
   (try Unix.unlink path with Unix.Unix_error (Unix.ENOENT, _, _) -> ());
-  let fd = Unix.socket Unix.PF_UNIX Unix.SOCK_STREAM 0 in
-  Unix.bind fd (Unix.ADDR_UNIX path);
-  Unix.listen fd 8;
-  let running = ref true in
-  while !running do
-    let client_fd, _ = Unix.accept fd in
-    (try
-       let ic = Unix.in_channel_of_descr client_fd in
-       let oc = Unix.out_channel_of_descr client_fd in
-       let line = input_line ic in
-       let resp, action = handler line in
-       if action = `Stop then running := false;
-       output_string oc (resp ^ "\n");
-       flush oc
-     with _ -> ());
-    Unix.close client_fd
-  done;
-  Unix.close fd;
-  try Unix.unlink path with _ -> ()
+  let stopped, wake_stop = Lwt.wait () in
+  (* Each connection is served on its own Lwt task, so a slow request (e.g. a
+     large restore) never blocks other clients (e.g. status). *)
+  let handle_client (ic, oc) =
+    Lwt.catch
+      (fun () ->
+        let* line = Lwt_io.read_line ic in
+        let* resp, action = handler line in
+        let* () = Lwt_io.write_line oc resp in
+        let* () = Lwt_io.flush oc in
+        if action = `Stop && Lwt.state stopped = Lwt.Sleep then
+          Lwt.wakeup_later wake_stop ();
+        Lwt.return_unit)
+      (fun _ -> Lwt.return_unit)
+  in
+  let addr = Unix.ADDR_UNIX path in
+  let* server =
+    Lwt_io.establish_server_with_client_address addr (fun _addr channels ->
+        handle_client channels)
+  in
+  let* () = stopped in
+  let* () = Lwt_io.shutdown_server server in
+  (try Unix.unlink path with _ -> ());
+  Lwt.return_unit
