@@ -73,6 +73,7 @@ Config path is platform-specific — see each platform's **Paths** section below
 |---|---|---|
 | `versioning` | bool | Save a manifest version under `.versions/` on every modify/rename/delete |
 | `name` | string | Human-readable client name, used to label conflict copies (e.g. `"report (conflicted copy from Romain's MacBook Pro).txt"`). Defaults to the hostname |
+| `tls` | string | Optional. TLS backend for S3 connections: `"native"` (ocaml-tls, default) or `"openssl"`. See [TLS backend](#tls-backend) |
 | `domains` | domain[] | One or more domain objects |
 
 **Domain fields:**
@@ -89,7 +90,8 @@ Config path is platform-specific — see each platform's **Paths** section below
 |---|---|---|
 | `type` | `"s3"` | Backend type |
 | `bucket` | string | S3 bucket name |
-| `region` | string | AWS region (e.g. `us-east-1`) |
+| `region` | string | AWS region (e.g. `us-east-1`), or the vendor region for an S3-compatible service |
+| `endpoint` | string | Optional. Custom S3 endpoint host for S3-compatible services (e.g. `s3.us-east-005.backblazeb2.com` for Backblaze B2). Omit for AWS |
 | `accessKeyId` | string | AWS access key ID |
 | `secretAccessKey` | string | AWS secret access key |
 
@@ -103,6 +105,17 @@ Config path is platform-specific — see each platform's **Paths** section below
 Each domain is an independent namespace: `<prefix>/<domain>/`. When the config has exactly one domain, `--domain` can be omitted from CLI commands; with multiple domains it is required.
 
 When a domain has multiple backends, all writes (uploads, deletes, copies) fan out to every backend. Reads use the first backend (primary). This supports mirroring a domain to e.g. S3 and a local NAS simultaneously.
+
+### TLS backend
+
+S3 connections go through `conduit`, which can use one of two TLS implementations. tsync makes the **native** backend (`ocaml-tls`, via `tls-lwt`) a mandatory dependency and the default; the **OpenSSL** backend (via `lwt_ssl`) is an optional dependency and is only available when `lwt_ssl` is installed in the switch. Native is preferred because OpenSSL's conduit path has a per-connection error-queue bug that breaks some S3-compatible endpoints — notably Backblaze B2, which fails with `SSL routines::shutdown while in init` on the second connection.
+
+The choice is process-global (one backend per daemon) and can be set two ways, highest priority first:
+
+1. **CLI flag** — `tsync start --tls native|openssl` (overrides the config).
+2. **Config** — the top-level `"tls": "native"|"openssl"` field (applies to every S3 command: `start`, `ls`, `versions`, `expire`, `sync`).
+
+If neither is set, conduit's built-in default (native) is used, so B2 works out of the box. Selecting a backend that isn't compiled in fails immediately, listing what is available.
 
 ### Chunked uploads
 

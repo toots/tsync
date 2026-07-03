@@ -21,6 +21,13 @@ let is_available = function
   | Native -> Conduit_lwt_tls.available
   | Openssl -> Conduit_lwt_unix_ssl.available
 
+(* The backend conduit will actually use for the next connection. *)
+let current () =
+  match !Conduit_lwt_unix.tls_library with
+    | Conduit_lwt_unix.Native -> "native"
+    | Conduit_lwt_unix.OpenSSL -> "openssl"
+    | Conduit_lwt_unix.No_tls -> "none"
+
 (* Backends compiled into this build, preferred first. *)
 let available () =
   List.filter_map

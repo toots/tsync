@@ -87,6 +87,8 @@ let start_cmd =
     let (module C : Conf.S) = make_conf ?domain cfg in
     (* CLI --tls wins over the config value applied by make_conf. *)
     if tls <> None then Tls_conf.apply tls;
+    Log.debug "TLS backend: %s (available: %s)" (Tls_conf.current ())
+      (String.concat ", " (Tls_conf.available ()));
     let mount_point =
       match mount with
         | Some p -> p
@@ -656,6 +658,7 @@ let configure_cmd =
             Unix.tcsetattr Unix.stdin Unix.TCSAFLUSH old_attr;
             raise e
     in
+    let has_s3 = ref false in
     let prompt_backend () =
       let backend_type = prompt "  Backend type (s3/local)" (Some "s3") in
       match backend_type with
@@ -663,6 +666,7 @@ let configure_cmd =
             let path = prompt "  Local path" None in
             `Assoc [("type", `String "local"); ("path", `String path)]
         | _ ->
+            has_s3 := true;
             let bucket = prompt "  S3 bucket" None in
             let region = prompt "  AWS region" (Some "us-east-1") in
             let endpoint = prompt "  Custom endpoint (blank for AWS)" None in
@@ -723,14 +727,27 @@ let configure_cmd =
       domains := !domains @ [prompt_domain ()];
       continue_ := prompt_bool "Add another domain?"
     done;
+    (* Only worth asking when there is an S3 backend and more than one TLS
+       implementation is compiled in; otherwise there is nothing to choose. *)
+    let tls_field =
+      let available = Tls_conf.available () in
+      if (not !has_s3) || List.length available < 2 then []
+      else (
+        let choice =
+          prompt
+            (Printf.sprintf "TLS backend for S3 (%s)"
+               (String.concat "/" available))
+            (Some (List.hd available))
+        in
+        if List.mem choice available then [("tls", `String choice)]
+        else [])
+    in
     mkdir_p (Filename.dirname config_path);
     let json =
       `Assoc
-        [
-          ("name", `String client_name);
-          ("versioning", `Bool versioning);
-          ("domains", `List !domains);
-        ]
+        ([("name", `String client_name); ("versioning", `Bool versioning)]
+        @ tls_field
+        @ [("domains", `List !domains)])
     in
     let oc = open_out config_path in
     output_string oc (Yojson.Basic.pretty_to_string json);
