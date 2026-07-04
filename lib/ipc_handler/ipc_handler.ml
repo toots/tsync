@@ -2,6 +2,7 @@ open Lwt.Syntax
 
 module Make (C : Conf.S) (F : File.S) = struct
   module Fs = File_store.Make (C)
+  module J = Journal.Make (C)
 
   type hooks = {
     path_to_key : string -> string;
@@ -58,25 +59,149 @@ module Make (C : Conf.S) (F : File.S) = struct
                     ("isUploaded", `Bool true);
                   ])
 
+  (* The listed objects are manifests, so their backend size/mtime are the manifest's,
+     not the file's. Read the (local) manifest to report the real logical size/mtime and
+     the content hash (h1) as the etag — the same identity stat returns. Dirty or unknown
+     files have no clean hash: fall back to the backend metadata with an empty etag. *)
   let file_entry_json (e : Backend.file_entry) =
-    `Assoc
-      [
-        ("key", `String e.key);
-        ("size", `Int e.size);
-        ("mtime", `Float e.last_modified);
-      ]
+    let+ m = F.read_manifest e.key in
+    let key = ("key", `String e.key) in
+    match m with
+      | Some (`Clean m) ->
+          `Assoc
+            [
+              key;
+              ("size", `Int (Int64.to_int m.Manifest.size));
+              ("mtime", `Float m.Manifest.mtime);
+              ("etag", `String m.Manifest.h1);
+            ]
+      | _ ->
+          `Assoc
+            [
+              key;
+              ("size", `Int e.size);
+              ("mtime", `Float e.last_modified);
+              ("etag", `String "");
+            ]
 
   let handle_list_dir prefix =
-    let+ files, dirs = Fs.list_directory ~prefix in
+    let* files, dirs = Fs.list_directory ~prefix in
+    let+ files_json = Lwt_list.map_s file_entry_json files in
+    (* Emit directories as full keys ending in "/", the same representation used by
+       list_all and the change journal — one identity per directory everywhere. *)
     ok_json
       [
-        ("dirs", `List (List.map (fun d -> `String d) dirs));
-        ("files", `List (List.map file_entry_json files));
+        ("dirs", `List (List.map (fun d -> `String (prefix ^ d ^ "/")) dirs));
+        ("files", `List files_json);
       ]
 
   let handle_list_all prefix =
-    let+ files = Fs.list_all_files ~prefix in
-    ok_json [("files", `List (List.map file_entry_json files))]
+    let* files = Fs.list_all_files ~prefix in
+    let+ files_json = Lwt_list.map_s file_entry_json files in
+    ok_json [("files", `List files_json)]
+
+  (* ── Change feed (journal delta) ──────────────────────────────────────── *)
+
+  (* Journal keys are relative to the domain prefix; the FileProvider uses full
+     keys as item identifiers, with directories ending in "/". *)
+  let full_key ?(dir = false) rel =
+    let k = C.domain_prefix ^ rel in
+    if dir && not (String.length k > 0 && k.[String.length k - 1] = '/') then
+      k ^ "/"
+    else k
+
+  let op_to_json = function
+    | `Put (key, size) ->
+        `Assoc
+          [
+            ("op", `String "put");
+            ("key", `String (full_key key));
+            ("size", `Int (Int64.to_int size));
+          ]
+    | `Delete key ->
+        `Assoc [("op", `String "delete"); ("key", `String (full_key key))]
+    | `Mkdir key ->
+        `Assoc
+          [("op", `String "mkdir"); ("key", `String (full_key ~dir:true key))]
+    | `Rmdir key ->
+        `Assoc
+          [("op", `String "rmdir"); ("key", `String (full_key ~dir:true key))]
+    | `Rename { Journal.dst; src; is_dir; _ } ->
+        `Assoc
+          [
+            ("op", `String "rename");
+            ("key", `String (full_key ~dir:is_dir dst));
+            ("src", `String (full_key ~dir:is_dir src));
+            ("is_dir", `Bool is_dir);
+          ]
+
+  let newest_key ~init keys =
+    List.fold_left (fun acc (k, _) -> if k > acc then k else acc) init keys
+
+  (* The journal can no longer bridge [anchor]→now, so the caller must re-list
+     everything. This happens when the journal has been pruned past the anchor
+     (oldest surviving entry is newer), was cleaned up entirely while changes are
+     still pending (anchor ≠ cursor but no entries left), or the anchor is
+     unparseable. [keys] is ascending, so head = oldest. *)
+  let cannot_bridge anchor keys =
+    match keys with
+      | [] -> true
+      | (oldest, _) :: _ -> (
+          try
+            Journal.timestamp_ms_of_filename oldest
+            > Journal.timestamp_ms_of_filename anchor
+          with _ -> true)
+
+  let handle_changes_since anchor =
+    let* keys = Fs.list_journal_keys () in
+    let* fetched = Fs.fetch_cursor () in
+    let cursor =
+      match fetched with
+        | Some c -> newest_key ~init:c keys
+        | None -> newest_key ~init:"" keys
+    in
+    (* Up to date — safe to report even if the journal is empty or was pruned. *)
+    if anchor <> "" && anchor = cursor then
+      Lwt.return
+        (ok_json
+           [
+             ("stale", `Bool false);
+             ("cursor", `String cursor);
+             ("ops", `List []);
+           ])
+    else if anchor <> "" && cannot_bridge anchor keys then
+      Lwt.return (ok_json [("stale", `Bool true)])
+    else (
+      let my_uuid = J.client_uuid () in
+      let foreign =
+        keys
+        |> List.filter (fun (k, _) -> anchor = "" || k > anchor)
+        |> List.filter (fun (_, uuid) -> uuid <> my_uuid)
+      in
+      let+ ops_lists =
+        Lwt_list.map_s (fun (ek, _) -> Fs.get_journal_entry ek) foreign
+      in
+      let ops =
+        List.concat_map (function Some o -> o | None -> []) ops_lists
+      in
+      ok_json
+        [
+          ("stale", `Bool false);
+          ("cursor", `String cursor);
+          ("ops", `List (List.map op_to_json ops));
+        ])
+
+  (* The backend cursor key is bumped on a lag, so fold it with the newest journal
+     entry — the same value handle_changes_since reports — so the anchor the caller
+     starts from is never behind what changes_since would hand back. *)
+  let handle_current_cursor () =
+    let* keys = Fs.list_journal_keys () in
+    let+ fetched = Fs.fetch_cursor () in
+    ok_json
+      [
+        ( "cursor",
+          `String (newest_key ~init:(Option.value ~default:"" fetched) keys) );
+      ]
 
   let handle_ensure_cached key =
     let+ () = F.ensure_cached key in
@@ -155,6 +280,8 @@ module Make (C : Conf.S) (F : File.S) = struct
                   | "stat" -> handle_stat path
                   | "list_dir" -> handle_list_dir path
                   | "list_all" -> handle_list_all path
+                  | "changes_since" -> handle_changes_since (get_str obj "arg")
+                  | "cursor" -> handle_current_cursor ()
                   | "ensure_cached" -> handle_ensure_cached path
                   | "create" -> handle_create path
                   | "write" -> handle_write path (get_str obj "staging")

@@ -67,8 +67,10 @@ private final class NotifyListener: @unchecked Sendable {
             manager.signalEnumerator(for: NSFileProviderItemIdentifier(key)) { _ in }
         } else if line.hasPrefix("CHANGED ") {
             let key = String(line.dropFirst(8))
+            // Drop any stale materialized copy, then drive enumerateChanges via the working
+            // set — signaling the specific key can't introduce items the DB has never seen.
             manager.evictItem(identifier: NSFileProviderItemIdentifier(key)) { _ in }
-            manager.signalEnumerator(for: NSFileProviderItemIdentifier(key)) { _ in }
+            manager.signalEnumerator(for: .workingSet) { _ in }
         }
     }
 }
@@ -107,7 +109,7 @@ final class TsyncExtension: NSObject, NSFileProviderReplicatedExtension, @unchec
             do {
                 completionHandler(try await resolveItem(identifier), nil)
             } catch {
-                completionHandler(nil, error)
+                completionHandler(nil, IPC.fileProviderError(error))
             }
             progress.completedUnitCount = 1
         }
@@ -132,7 +134,7 @@ final class TsyncExtension: NSObject, NSFileProviderReplicatedExtension, @unchec
                 completionHandler(URL(fileURLWithPath: localPath), item, nil)
             } catch {
                 log.error("fetchContents error: \(key, privacy: .public): \(error, privacy: .public)")
-                completionHandler(nil, nil, error)
+                completionHandler(nil, nil, IPC.fileProviderError(error))
             }
         }
         return progress
@@ -155,11 +157,7 @@ final class TsyncExtension: NSObject, NSFileProviderReplicatedExtension, @unchec
                 if isDirectory {
                     let dirKey = key + "/"
                     _ = try await IPC.mkdir(key: dirKey)
-                    let item = TsyncItem(
-                        identifier: NSFileProviderItemIdentifier(dirKey),
-                        parent: itemTemplate.parentItemIdentifier,
-                        filename: itemTemplate.filename, isDirectory: true)
-                    completionHandler(item, [], false, nil)
+                    completionHandler(TsyncItem.make(key: dirKey, domainPrefix: domainPrefix), [], false, nil)
                 } else {
                     let staging = try url.map { try stageContent($0) }
                     defer { staging.map { try? FileManager.default.removeItem(at: $0) } }
@@ -169,14 +167,11 @@ final class TsyncExtension: NSObject, NSFileProviderReplicatedExtension, @unchec
                     } else {
                         resp = try await IPC.createFile(key: key)
                     }
-                    completionHandler(makeItem(identifier: NSFileProviderItemIdentifier(key),
-                                               parent: itemTemplate.parentItemIdentifier,
-                                               filename: itemTemplate.filename,
-                                               resp: resp, isDownloaded: url != nil), [], false, nil)
+                    completionHandler(makeItem(key: key, resp: resp, isDownloaded: url != nil), [], false, nil)
                 }
                 progress.completedUnitCount = 100
             } catch {
-                completionHandler(nil, [], false, error)
+                completionHandler(nil, [], false, IPC.fileProviderError(error))
             }
         }
         return progress
@@ -204,10 +199,7 @@ final class TsyncExtension: NSObject, NSFileProviderReplicatedExtension, @unchec
                     if isRename && oldKey != dirKey {
                         _ = try await IPC.renameItem(src: oldKey, dst: newKey)
                     }
-                    completionHandler(TsyncItem(
-                        identifier: NSFileProviderItemIdentifier(dirKey),
-                        parent: item.parentItemIdentifier,
-                        filename: item.filename, isDirectory: true), [], false, nil)
+                    completionHandler(TsyncItem.make(key: dirKey, domainPrefix: domainPrefix), [], false, nil)
                 } else if isRename && oldKey != newKey {
                     let resp: IPCResponse
                     if let contentURL = newContents {
@@ -218,18 +210,12 @@ final class TsyncExtension: NSObject, NSFileProviderReplicatedExtension, @unchec
                     } else {
                         resp = try await IPC.renameItem(src: oldKey, dst: newKey)
                     }
-                    completionHandler(makeItem(
-                        identifier: NSFileProviderItemIdentifier(newKey),
-                        parent: item.parentItemIdentifier,
-                        filename: item.filename, resp: resp, isDownloaded: true), [], false, nil)
+                    completionHandler(makeItem(key: newKey, resp: resp, isDownloaded: true), [], false, nil)
                 } else if let contentURL = newContents, changedFields.contains(.contents) {
                     let staging = try stageContent(contentURL)
                     defer { try? FileManager.default.removeItem(at: staging) }
                     let resp = try await IPC.writeFile(key: newKey, staging: staging)
-                    completionHandler(makeItem(
-                        identifier: NSFileProviderItemIdentifier(newKey),
-                        parent: item.parentItemIdentifier,
-                        filename: item.filename, resp: resp, isDownloaded: true), [], false, nil)
+                    completionHandler(makeItem(key: newKey, resp: resp, isDownloaded: true), [], false, nil)
                 } else {
                     // Metadata-only change (tags, last-used date, etc.) — nothing to sync
                     completionHandler(try await resolveItem(item.itemIdentifier), [], false, nil)
@@ -237,7 +223,7 @@ final class TsyncExtension: NSObject, NSFileProviderReplicatedExtension, @unchec
                 progress.completedUnitCount = 100
             } catch {
                 log.error("modifyItem error: \(error, privacy: .public)")
-                completionHandler(nil, [], false, error)
+                completionHandler(nil, [], false, IPC.fileProviderError(error))
             }
         }
         return progress
@@ -257,7 +243,7 @@ final class TsyncExtension: NSObject, NSFileProviderReplicatedExtension, @unchec
                 _ = try await (key.hasSuffix("/") ? IPC.rmdir(key: key) : IPC.deleteItem(key: key))
                 completionHandler(nil)
             } catch {
-                completionHandler(error)
+                completionHandler(IPC.fileProviderError(error))
             }
             progress.completedUnitCount = 1
         }
@@ -277,44 +263,31 @@ final class TsyncExtension: NSObject, NSFileProviderReplicatedExtension, @unchec
 
     // MARK: - Helpers
 
+    private var domainPrefix: String { config.domainPrefix(domain.displayName) }
+
     private func resolveItem(_ identifier: NSFileProviderItemIdentifier, isDownloaded: Bool = false) async throws -> TsyncItem {
         if identifier == .rootContainer {
             return TsyncItem.rootContainer(displayName: domain.displayName)
         }
         let key = identifier.rawValue
-        let domainPrefix = config.domainPrefix(domain.displayName)
         if key.hasSuffix("/") {
-            let parent = TsyncItem.parentIdentifier(for: String(key.dropLast()), domainPrefix: domainPrefix)
-            return TsyncItem(identifier: identifier, parent: parent,
-                              filename: key.split(separator: "/").last.map(String.init) ?? key,
-                              isDirectory: true)
+            return TsyncItem.make(key: key, domainPrefix: domainPrefix)
         }
-        let resp = try await IPC.stat(key: key)
-        let parent = TsyncItem.parentIdentifier(for: key, domainPrefix: domainPrefix)
-        return makeItem(identifier: identifier, parent: parent,
-                         filename: key.split(separator: "/").last.map(String.init) ?? key,
-                         resp: resp, isDownloaded: isDownloaded)
+        return makeItem(key: key, resp: try await IPC.stat(key: key), isDownloaded: isDownloaded)
     }
 
-    private func makeItem(identifier: NSFileProviderItemIdentifier,
-                           parent: NSFileProviderItemIdentifier,
-                           filename: String, resp: IPCResponse,
-                           isDownloaded: Bool) -> TsyncItem {
-        TsyncItem(identifier: identifier, parent: parent, filename: filename,
-                   isDirectory: false,
-                   size: resp.size,
-                   modificationDate: resp.mtime.map { Date(timeIntervalSince1970: $0) },
-                   etag: resp.etag,
-                   isDownloaded: isDownloaded,
-                   isUploaded: resp.isUploaded ?? true)
+    private func makeItem(key: String, resp: IPCResponse, isDownloaded: Bool) -> TsyncItem {
+        TsyncItem.make(key: key, domainPrefix: domainPrefix,
+                       size: resp.size,
+                       modificationDate: resp.mtime.map { Date(timeIntervalSince1970: $0) },
+                       etag: resp.etag, isDownloaded: isDownloaded,
+                       isUploaded: resp.isUploaded ?? true)
     }
 
     private func s3Key(for item: NSFileProviderItem) -> String {
-        if item.parentItemIdentifier == .rootContainer {
-            return config.domainPrefix(domain.displayName) + item.filename
-        }
-        let parentKey = item.parentItemIdentifier.rawValue
-        return (parentKey.hasSuffix("/") ? parentKey : parentKey + "/") + item.filename
+        // Parent key always ends in "/" (root maps to the domain prefix, dir keys keep their slash).
+        let parentKey = ItemID.key(for: item.parentItemIdentifier, domainPrefix: domainPrefix)
+        return parentKey + item.filename
     }
 
     private func stageContent(_ url: URL) throws -> URL {

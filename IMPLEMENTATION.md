@@ -297,6 +297,8 @@ Runtime-specific behavior (how eviction happens, whether restore materializes lo
 {"action":"stat","path":"<key>"}
 {"action":"list_dir","path":"<prefix>"}
 {"action":"list_all","path":"<prefix>"}
+{"action":"cursor"}
+{"action":"changes_since","arg":"<journal-key|>"}
 {"action":"ensure_cached","path":"<key>"}
 {"action":"create","path":"<key>"}
 {"action":"write","path":"<key>","staging":"<local_path>"}
@@ -317,6 +319,8 @@ For `evict`/`restore` the `path` is a filesystem path (from the CLI) that the ru
 
 **Responses:** `{"ok":true, ...}` with action-specific fields (e.g. `size`, `mtime`, `etag`, `isUploaded`, `localPath`, `dirs`, `files`), or `{"ok":false,"error":"<message>"}` on failure.
 
+**Change feed** (`cursor` / `changes_since`) exposes the change journal as a delta query so the macOS FileProvider can drive `enumerateChanges` from a real sync anchor rather than re-importing. `cursor` returns the current journal cursor (`{"cursor":"<journal-key>"}`); `changes_since` returns the ops committed after a given journal key plus the new cursor (`{"cursor":"<journal-key>","ops":[{"op":"put|delete|mkdir|rmdir|rename","key":"<full-key>", ...}]}`). The query is stateless — it filters journal entries by `key > arg` and drops the caller's own `client_uuid` — so it does **not** touch the sync poller's `last-sync` marker; the OS tracks the extension's anchor independently. Op keys are returned as full storage keys (directories ending in `/`) to match the identifiers the extension uses.
+
 **Reverse notify channel** (`notify.sock`, daemon → extension, macOS only):
 
 ```
@@ -326,7 +330,7 @@ UPLOADED <key>
 CHANGED <key>
 ```
 
-`CHANGED` is sent by the sync poller after applying a foreign journal entry; the extension evicts the item and signals its enumerator so Finder re-fetches it.
+`CHANGED` is sent by the sync poller after applying a foreign journal entry. The extension evicts any materialized copy of that key, then signals the **working set** (not the specific key — signalling an identifier the local DB has never seen cannot introduce it). That drives `enumerateChanges`, which pulls the journal delta via `changes_since` and upserts/removes items by their parent identifier, so newly-discovered remote files appear.
 
 ### Tests
 
@@ -432,13 +436,14 @@ TsyncFileProvider (extension, sandboxed)
   │    └── deleteItem         unlink / rmdir
   ├── TsyncEnumerator         NSFileProviderEnumerator
   │    ├── enumerateItems     list_dir (per-directory) / list_all (working set)
-  │    └── enumerateChanges   anchor-expired → full re-enumeration
+  │    ├── enumerateChanges   changes_since(anchor) → didUpdate/didDeleteItems; anchor = journal cursor
+  │    └── currentSyncAnchor  cursor (current journal key)
   └── NotifyListener          listens on notify.sock; receives EVICT / RESTORE / UPLOADED / CHANGED from daemon
 
 OCaml daemon (tsync start, LaunchAgent via deploy-daemon.sh)
   ├── Ipc.serve               Unix socket — JSON + CLI dispatch
   ├── Sync_queue              Lwt worker pool for async upload
-  ├── sync_poller             applies foreign journal entries → CHANGED → extension evict + signal
+  ├── sync_poller             applies foreign journal entries → CHANGED → extension evict + working-set signal → enumerateChanges
   └── on_upload_done          → Ipc.notify_uploaded → notify.sock → extension signalEnumerator
 ```
 
@@ -484,7 +489,7 @@ OCaml daemon (tsync start, LaunchAgent via deploy-daemon.sh)
 | `TsyncApp/AppDelegate.swift` | Registers `NSFileProviderDomain` for each configured domain |
 | `TsyncFileProvider/IPC.swift` | JSON IPC client to the OCaml daemon; typed wrappers for each action |
 | `TsyncFileProvider/Item.swift` | `NSFileProviderItem` implementation; `isUploaded` reflects daemon manifest state |
-| `TsyncFileProvider/Enumerator.swift` | `NSFileProviderEnumerator`; per-directory `list_dir`, recursive `list_all` for working set |
+| `TsyncFileProvider/Enumerator.swift` | `NSFileProviderEnumerator`; per-directory `list_dir`, recursive `list_all` for working set; `enumerateChanges` replays the journal delta (`changes_since`) with the journal cursor as sync anchor |
 | `TsyncFileProvider/Extension.swift` | `NSFileProviderReplicatedExtension`; `NotifyListener` on `notify.sock` |
 
 ### Paths
@@ -511,7 +516,21 @@ Finder shows a progress indicator while `isUploaded = false`. The `UPLOADED` not
 
 ### Working set
 
-`enumerateWorkingSet` calls `IPC.listAll` (the `list_all` JSON action), which returns a flat list of all files under the domain prefix via `File_store.list_all_files`. This powers Spotlight and Recents across the full directory tree, not just the root.
+`enumerateWorkingSet` calls `IPC.listAll` (the `list_all` JSON action), which returns a flat list of all files under the domain prefix via `File_store.list_all_files`. This powers Spotlight and Recents across the full directory tree, not just the root. Directory-marker keys (ending in `/`) are filtered out here — the working set holds files only, and emitting a marker would collide with the real folder from the container enumeration and surface as a duplicate `<name> 2`.
+
+### Change tracking
+
+The extension implements real change tracking against the journal rather than re-importing:
+
+- **Sync anchor = journal cursor.** `currentSyncAnchor` returns the `cursor` action's value; the anchor bytes are the journal key (`"0"` is the empty-cursor sentinel, since anchors must be non-empty).
+- **`enumerateChanges(from: anchor)`** calls `changes_since(anchor)` and translates the returned ops: `put`/`mkdir`/`rename`-dst → `didUpdate` (rebuilding the item, resolving file metadata via `stat`); `delete`/`rmdir`/`rename`-src → `didDeleteItems`. It finishes at the new cursor. Items carry correct parent identifiers, so additions land in the right folder regardless of which enumerator (a container or the working set) reported them.
+- **Trigger.** The daemon's sync poller applies a foreign entry, then sends `CHANGED`; the extension signals the working set, which makes the OS call `enumerateChanges`. The per-key `signalEnumerator` used previously could refresh a known item but never introduce a newly-discovered one.
+
+Item identifiers are the full storage key, with folders ending in `/` — consistent across container enumeration, `parentIdentifier`, `s3Key`, and the change feed, so each item has exactly one identity.
+
+Item versions (`NSFileProviderItemVersion`) must be non-empty or the OS silently drops the item. `contentVersion` is the file's content hash (`Manifest.h1`, returned as `etag` by `stat` and the listings alike); a dirty file has no clean hash, so it falls back to `size:mtime`. `metadataVersion` is `content:isUploaded`, so a completing upload refreshes the item without forcing a content re-download.
+
+IPC failures are mapped to `NSFileProviderError.serverUnreachable` (`IPC.fileProviderError`) — returning the extension's own error domain makes fileproviderd treat the failure as fatal and cache an empty listing, so a not-yet-ready daemon at startup must surface as a *retryable* error.
 
 ### Deploy
 
@@ -531,6 +550,8 @@ make -C macos deploy     # build + install TsyncApp to /Applications + reload La
 **Concurrent writes are last-writer-wins.** Cross-client changes are reconciled through the journal (see [Cross-client sync](#cross-client-sync)): concurrent renames and delete-vs-rename races produce conflict-marked copies, and no data is lost. But two clients writing the *same* file concurrently still resolve by last manifest write; the slower writer's content is superseded rather than preserved as a conflict copy. A stronger guarantee would need S3 conditional PUT (`If-None-Match`) with a retry loop. There is also a small window where a foreign rename whose journal entry is not yet visible resolves as a plain conflict copy rather than adopting the peer's chosen name.
 
 **No background prefetch.** Files download on first open. `tsync pull` (not yet implemented) would bulk-download evicted files.
+
+**Change tracking only sees journaled changes.** Cross-client propagation (and the macOS `enumerateChanges` feed) is driven by the change journal, so a change made directly in the bucket — outside any tsync client — writes no journal entry and is not picked up incrementally. It surfaces only on a full re-import (re-adding the domain) or `full_resync`. This matches the sync poller's existing model.
 
 **Chunks are not encrypted at the application layer.** Enable S3 SSE-S3 or SSE-KMS on the bucket for encryption at rest.
 
