@@ -26,6 +26,7 @@ jobs:
         run: |
           opam pin -ny .
           opam pin add -ny fuse3 git+https://github.com/toots/ocamlfuse.git
+          opam pin add -ny git+https://github.com/toots/aws-s3.git#tsync
       - name: Install OCaml dependencies
         run: opam install --deps-only -y tsync tsync-s3 tsync-fuse
       - name: Build OCaml daemon
@@ -41,7 +42,9 @@ jobs:
         with:
           ocaml-compiler: "5.5"
       - name: Pin packages
-        run: opam pin -ny .
+        run: |
+          opam pin -ny .
+          opam pin add -ny git+https://github.com/toots/aws-s3.git#tsync
       - name: Install dependencies
         run: |
           brew install xcodegen xxhash
