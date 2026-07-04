@@ -9,24 +9,37 @@ open Lwt.Syntax
    Hysteresis relative to the configured watermark [t]: the guard engages
    while free space is still 10% above the watermark (free < 1.1 x t), so the
    promised minimum is never breached, and disengages once 20% above
-   (free >= 1.2 x t), so it does not flap around a single threshold. *)
+   (free >= 1.2 x t), so it does not flap around a single threshold.
+
+   On release, parked operations resume in small waves rather than all at once:
+   a simultaneous flood makes downstream copiers race (e.g. rclone firing many
+   concurrent same-directory mkdirs), and the staggering also lets eviction keep
+   pace as writes resume. *)
 
 module Make (C : Conf.S) (F : File.S) = struct
   let engage_factor = 1.1
   let release_factor = 1.2
   let tick_seconds = 1.
+
+  (* Parked operations woken per wave, and the pause between waves. *)
+  let resume_batch = 4
+  let resume_pause = 0.2
   let free_fraction () = Disk_space.free_fraction C.cache_root
 
   (* ── Gate ─────────────────────────────────────────────────────────────── *)
 
   let throttled = ref false
-  let gate_opened = Lwt_condition.create ()
 
-  let rec wait () =
+  (* Resolvers of operations parked while throttled, drained in waves on
+     release (see [drain]). *)
+  let waiters : unit Lwt.u Queue.t = Queue.create ()
+
+  let wait () =
     if not !throttled then Lwt.return_unit
-    else
-      let* () = Lwt_condition.wait gate_opened in
-      wait ()
+    else (
+      let p, u = Lwt.wait () in
+      Queue.add u waiters;
+      p)
 
   let engage free =
     if not !throttled then begin
@@ -35,12 +48,28 @@ module Make (C : Conf.S) (F : File.S) = struct
         (100. *. free)
     end
 
+  (* Wake parked operations a wave at a time, pausing between waves so eviction
+     and downstream copiers keep pace. Stops if space runs low again (the
+     monitor re-engages) or once the queue is empty; runs as a single loop, only
+     started on the throttled -> resumed transition. *)
+  let rec drain () =
+    if !throttled || Queue.is_empty waiters then Lwt.return_unit
+    else begin
+      for _ = 1 to resume_batch do
+        match Queue.take_opt waiters with
+          | Some u -> Lwt.wakeup_later u ()
+          | None -> ()
+      done;
+      let* () = Lwt_unix.sleep resume_pause in
+      drain ()
+    end
+
   let release free =
     if !throttled then begin
       throttled := false;
       Log.info "preserve-space: %.1f%% free, resuming downloads and writes"
         (100. *. free);
-      Lwt_condition.broadcast gate_opened ()
+      Lwt.async drain
     end
 
   (* ── Eviction sweep ───────────────────────────────────────────────────── *)
@@ -107,25 +136,25 @@ module Make (C : Conf.S) (F : File.S) = struct
 
   let check () =
     match Ipc.preserve_space_percent ~data_dir:C.data_dir with
-      | None -> Lwt.return (release (free_fraction ()))
+      | None ->
+          release (free_fraction ());
+          Lwt.return_unit
       | Some pct ->
           let watermark = pct /. 100. in
           let free = free_fraction () in
-          if free < engage_factor *. watermark then begin
-            engage free;
-            let* () =
+          let* () =
+            if free < engage_factor *. watermark then begin
+              engage free;
               let* candidates = lru_candidates () in
               evict_until
                 ~release_level:(release_factor *. watermark)
                 candidates
-            in
-            let free = free_fraction () in
-            Lwt.return
-              (if free >= release_factor *. watermark then release free)
-          end
-          else
-            Lwt.return
-              (if free >= release_factor *. watermark then release free)
+            end
+            else Lwt.return_unit
+          in
+          if free_fraction () >= release_factor *. watermark then
+            release (free_fraction ());
+          Lwt.return_unit
 
   let rec monitor () =
     let* () =

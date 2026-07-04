@@ -429,6 +429,8 @@ A monitor loop checks free space once per second (via `statvfs` on the cache roo
 - **Engage** when free space drops below `1.1 × t` (11% for the default): downloads and writes block (a gate awaited in `File.download`/`File.write`; uploads are never gated, since draining the upload queue is what makes files evictable), and clean cached files — uploaded, not dirty, not open — are evicted least-recently-used first.
 - **Disengage** when free space recovers to `1.2 × t` (12% for the default). The gap is hysteresis: acting before the watermark is breached keeps the promise, and the spread prevents flapping around a single threshold.
 
+On release, parked operations are woken in small waves (a handful every ~0.2 s) rather than all at once. Waking the whole backlog simultaneously floods downstream copiers — a burst of resumed rclone transfers firing concurrent `mkdir`s on the same parent directory produces `mkdir … : file exists` errors — and outruns eviction; the staggering paces resumption so eviction keeps up and, if space runs low again mid-drain, the monitor simply re-engages and the remaining waiters stay parked.
+
 If nothing is evictable (everything cached is dirty or open), the gate stays closed and the loop retries each second as uploads complete. Independent of auto-evict. `tsync stats` reports `diskFreePercent` (all platforms), plus `preserveSpacePercent` and `throttled` on FUSE.
 
 ### Systemd
