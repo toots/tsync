@@ -1,7 +1,6 @@
 (library
  (name tsync_xxhash)
  (wrapped false)
- (libraries threads.posix)
  (foreign_stubs
   (language c)
   (names xxhash_stubs))

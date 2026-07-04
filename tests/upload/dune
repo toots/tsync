@@ -1,0 +1,21 @@
+(executable
+ (name upload)
+ (libraries tsync_conf tsync_backend tsync_local_backend tsync_file))
+
+(alias
+ (name default)
+ (deps upload.exe))
+
+(rule
+ (alias runtest)
+ (target upload.output)
+ (action
+  (with-stdout-to
+   upload.output
+   (ignore-stderr
+    (run ./upload.exe)))))
+
+(rule
+ (alias runtest)
+ (action
+  (diff upload.expected upload.output)))

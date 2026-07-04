@@ -1,0 +1,3 @@
+# Collected stats and generated graphs
+*.ndjson
+*.png

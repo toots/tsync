@@ -13,7 +13,7 @@ module type S = sig
   val read_manifest : t -> Manifest.state option Lwt.t
   val write_manifest : t -> Manifest.state -> unit Lwt.t
   val delete_manifest : t -> unit Lwt.t
-  val upload : ?cancel:bool Atomic.t -> t -> unit Lwt.t
+  val upload : ?cancel:bool ref -> t -> unit Lwt.t
   val download : t -> unit Lwt.t
   val ensure_cached : t -> unit Lwt.t
   val stat : t -> Unix.LargeFile.stats option Lwt.t
@@ -391,7 +391,7 @@ module Make (C : Conf.S) (Sq : Sync_queue.S) : S = struct
           let ek = J.entry_key () in
           let ops = [`Put (rel_key key, size)] in
           let+ () = J.write_local_pending ~entry_key:ek ops in
-          Sq.post ~key ~src_path:lp ~entry_key:ek ~ops
+          Sq.post ~key ~entry_key:ek ~ops
 
   let delete key =
     with_meta (fun () ->

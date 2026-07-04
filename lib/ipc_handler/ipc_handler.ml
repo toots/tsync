@@ -331,6 +331,8 @@ module Make (C : Conf.S) (F : File.S) = struct
                               ("downloadBytesPerSec", rate Metrics.download_rate);
                               ("chunksHashed", `Int (Metrics.hashed ()));
                               ("hashesPerSec", rate Metrics.hash_rate);
+                              ("cpuSeconds", `Float (Metrics.cpu_seconds ()));
+                              ("rssBytes", `Int (Metrics.rss_bytes ()));
                             ]
                            @ hooks.stats_fields ()))
                   | "stop" ->

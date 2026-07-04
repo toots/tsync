@@ -136,6 +136,8 @@ If neither is set, conduit's built-in default (native) is used, so B2 works out 
 
 Every file is stored as one or more 8 MB chunks. Each chunk is stored at `<prefix>/.chunks/<h1>-<h2>` where `h1` and `h2` are the xxHash3-64 of the chunk data computed with seeds 0 and 1 respectively, encoded as 16-character lowercase hex. The primary key holds a JSON manifest. Files smaller than 8 MB produce a single-chunk manifest. On re-upload, only chunks whose hash changed are uploaded — unchanged chunks are reused. Chunks are shared across all files and versions.
 
+Hashing happens inline with the upload of each chunk. `remote.ml`'s `upload` stats the file, then processes chunks with bounded concurrency (4 in flight): each chunk is read from disk, hashed (both seeds, on the event loop — XXH3 on 8 MB is sub-millisecond), and uploaded only if its key is absent from the backend. Once every chunk is stored, the collected entries become the manifest, which is written last. The upload is cancellable at chunk granularity: a `bool ref` cancel flag is polled before each chunk and raises `Cancelled` when set — the sync queue's per-key cancel (`Sync_queue.cancel_put`, flipped on a concurrent write) is that same flag. A concurrent in-place truncation surfaces as a short read, which also aborts the upload. Peak memory is one chunk-sized buffer per in-flight chunk. Network transfer is the concurrency bound; there is no separate CPU-bound hashing stage.
+
 Manifest format:
 
 ```json
@@ -242,8 +244,7 @@ All library modules are parameterised by a `Conf.S` module (a first-class module
 | `log/` | Logging backends (printf for development, syslog for production) |
 | `file/manifest.ml` | Manifest JSON serialization/deserialization; chunk key derivation |
 | `file/local.ml` | Local cache paths; create/evict/rename local cache entries |
-| `file/remote.ml` | Chunked upload and download against the backend |
-| `file/hash_pool.ml` | Domainslib pool (via `lwt_domain`) for parallel chunk hashing |
+| `file/remote.ml` | Chunked upload and download against the backend. Upload reads, hashes and stores each chunk with bounded concurrency, then writes the manifest |
 | `file/versioning.ml` | Version key construction + `save` (copy live manifest to a timestamped version) |
 | `file/expire.ml` | `Expire.Make(C).expire` — delete versions older than a cutoff, then GC unreferenced chunks |
 | `file/file.ml` | `File.Make(C)(Sq)` — central file abstraction: stat, read, write, upload, download, evict, delete, rename, mkdir; dirty/open tracking; `apply_foreign_ops` and conflict-copy publishing |
@@ -351,6 +352,8 @@ The harness and the scenarios are separate so suites are cheap to add:
 | `tests/ipc/` | `ipc.ml` — snapshots of the raw `list_dir`/`list_all` and `changes_since`/`cursor` IPC responses (the FileProvider contract); `ipc.expected` snapshot |
 | `tests/versioning/` | `versioning.ml` — modify/rename/delete keep versions, and `revert` restores one dataless (run with `~versioning:true`); `versioning.expected` snapshot |
 | `tests/expire/` | `expire.ml` — `expire` drops versions older than a cutoff (including a mid-scenario `Mark` boundary) and GCs unreferenced chunks while keeping live/surviving ones; `expire.expected` snapshot |
+| `tests/hash/` | `hash.ml` — unit test: the whole-file chunk hasher (`Xxhash.hash_file_chunks`) agrees with the single-string hash per chunk across boundary/partial/empty cases (pins chunk-key stability), and a cancelled state returns `None` |
+| `tests/upload/` | `upload.ml` — end-to-end multi-chunk `Remote.upload` on a local backend: 3-chunk round-trip, dedup, concurrent identical-chunk writes, and a 0-byte file |
 
 A scenario is declarative data — a `name` and a list of `step`s (`Write`, `Mkdir`, `Rmdir`, `Rename`, `Delete`, `Evict`, `Restore`, `Open`, `Close`, `Drain`, `Sync`). To add a suite, create a sibling directory under `tests/` with a scenario file that does `open Test_runner`, its own `.expected` snapshot, and the three dune stanzas from `tests/base/dune` (executable, `with-stdout-to` output rule, `runtest` diff rule).
 

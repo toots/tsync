@@ -16,3 +16,9 @@ val upload_rate : unit -> float
 
 val download_rate : unit -> float
 val hash_rate : unit -> float
+
+(** Cumulative CPU seconds (user + system) used by this process. *)
+val cpu_seconds : unit -> float
+
+(** Current resident set size in bytes. *)
+val rss_bytes : unit -> int

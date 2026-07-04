@@ -1,0 +1,20 @@
+(executable
+ (name hash)
+ (libraries tsync_xxhash))
+
+(alias
+ (name default)
+ (deps hash.exe))
+
+(rule
+ (alias runtest)
+ (target hash.output)
+ (action
+  (with-stdout-to
+   hash.output
+   (run ./hash.exe))))
+
+(rule
+ (alias runtest)
+ (action
+  (diff hash.expected hash.output)))

@@ -7,12 +7,12 @@ license: "MIT"
 homepage: "https://github.com/toots/tsync"
 bug-reports: "https://github.com/toots/tsync/issues"
 depends: [
-  "ocaml" {>= "5.5.0"}
+  "ocaml" {>= "4.14"}
   "dune" {>= "3.23"}
   "yojson"
-  "lwt_domain"
   "lwt"
   "lwt_ppx"
+  "mem_usage"
   "cmdliner"
   "odoc" {with-doc}
 ]

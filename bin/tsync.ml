@@ -152,6 +152,7 @@ let human_bytes n =
 
 let print_stats obj =
   let i k = match List.assoc_opt k obj with Some (`Int n) -> n | _ -> 0 in
+  let f k = match List.assoc_opt k obj with Some (`Float x) -> x | _ -> 0. in
   let row label value = Printf.printf "  %-13s %s\n" label value in
   Printf.printf "Uploads\n";
   row "pending" (string_of_int (i "pendingUploads"));
@@ -170,7 +171,10 @@ let print_stats obj =
   row "rate" (Printf.sprintf "%d/s" (i "hashesPerSec"));
   Printf.printf "Cache\n";
   row "dirty files" (string_of_int (i "dirtyFiles"));
-  row "open files" (string_of_int (i "openFiles"))
+  row "open files" (string_of_int (i "openFiles"));
+  Printf.printf "Process\n";
+  row "cpu" (Printf.sprintf "%.1fs" (f "cpuSeconds"));
+  row "memory" (human_bytes (i "rssBytes"))
 
 let stats_cmd =
   let watch_arg =
@@ -180,9 +184,16 @@ let stats_cmd =
       & info ["w"; "watch"] ~docv:"SECONDS"
           ~doc:"Poll and redraw every $(docv) seconds")
   in
-  let run watch =
+  let json_arg =
+    Arg.(
+      value & flag & info ["json"] ~doc:"Output raw JSON, one object per line")
+  in
+  let run json watch =
     let show () =
       match ipc_action "stats" with
+        | obj when json ->
+            let obj = ("t", `Float (Unix.gettimeofday ())) :: obj in
+            print_endline (Yojson.Safe.to_string (`Assoc obj))
         | obj -> print_stats obj
         | exception Failure msg -> Printf.eprintf "Error: %s\n" msg
         | exception _ -> print_endline "Daemon not running"
@@ -191,7 +202,7 @@ let stats_cmd =
       | None -> show ()
       | Some interval ->
           while true do
-            print_string "\027[2J\027[H";
+            if not json then print_string "\027[2J\027[H";
             show ();
             flush stdout;
             Unix.sleepf interval
@@ -200,7 +211,7 @@ let stats_cmd =
   Cmd.v
     (Cmd.info "stats"
        ~doc:"Show transfer metrics (pending/completed uploads and downloads)")
-    Term.(const run $ watch_arg)
+    Term.(const run $ json_arg $ watch_arg)
 
 (* ── tsync evict ─────────────────────────────────────────────────────────── *)
 

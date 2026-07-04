@@ -12,12 +12,12 @@
  (name tsync)
  (synopsis "Cloud-backed filesystem sync tool")
  (depends
-  (ocaml (>= 5.5.0))
+  (ocaml (>= 4.14))
   dune
   yojson
-  lwt_domain
   lwt
   lwt_ppx
+  mem_usage
   cmdliner)
  (depopts
    syslog

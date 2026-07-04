@@ -1,4 +1,4 @@
 (library
  (name tsync_metrics)
  (wrapped false)
- (libraries unix))
+ (libraries unix mem_usage))

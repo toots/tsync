@@ -1,11 +1,14 @@
 exception Cancelled
 
 module Make (C : Conf.S) : sig
+  (** Upload [src_path] as chunks under [key]: each chunk is read, hashed (chunk
+      key) and uploaded if absent, then the manifest is written. Setting
+      [cancel] aborts at the next chunk boundary with {!Cancelled}. *)
   val upload :
     key:string ->
     src_path:string ->
     mtime:float ->
-    ?cancel:bool Atomic.t ->
+    ?cancel:bool ref ->
     unit ->
     Manifest.state Lwt.t
 

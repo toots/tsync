@@ -2,24 +2,25 @@ open Lwt.Syntax
 
 exception Cancelled = Backend.Cancelled
 
-(* Read [len] bytes at [offset] from [path] into a fresh off-heap buffer, safe to
-   hash with the runtime lock released. *)
-let read_chunk_bigarray path offset len =
-  let buf = Lwt_bytes.create len in
+(* Read [len] bytes at [offset] from [path] into a string; these bytes are both
+   hashed and uploaded. A short read means the file was truncated under us:
+   abort the upload. *)
+let read_chunk_string path offset len =
   let* fd = Lwt_unix.openfile path [Unix.O_RDONLY] 0 in
   Lwt.finalize
     (fun () ->
+      let buf = Bytes.create len in
       let* _ =
         Lwt_unix.LargeFile.lseek fd (Int64.of_int offset) Unix.SEEK_SET
       in
       let rec loop pos =
         if pos >= len then Lwt.return_unit
         else
-          let* n = Lwt_bytes.read fd buf pos (len - pos) in
-          if n = 0 then Lwt.return_unit else loop (pos + n)
+          let* n = Lwt_unix.read fd buf pos (len - pos) in
+          if n = 0 then raise Cancelled else loop (pos + n)
       in
       let+ () = loop 0 in
-      buf)
+      Bytes.unsafe_to_string buf)
     (fun () -> Lwt_unix.close fd)
 
 (* Process [xs] with at most [width] tasks running concurrently, preserving
@@ -48,54 +49,52 @@ module Make (C : Conf.S) = struct
       (fun (module B : Backend.S) -> B.put ~key ~data ())
       C.backends
 
-  (* How many chunks are read + hashed + uploaded at once for a single file.
-     This is an I/O and memory bound (each in-flight chunk holds an 8 MB
-     buffer), deliberately independent of CPU core count: the hashing itself
-     runs on the domain pool [Hash_pool], which supplies the CPU parallelism. *)
-  let chunk_concurrency = 4
+  (* How many chunks are in flight at once for a single file. An I/O and memory
+     bound: each in-flight chunk holds an 8 MB payload copy. *)
+  let upload_concurrency = 4
 
-  (* Read, hash (in parallel on the domain pool) and upload one chunk if it is
-     not already present. Returns its manifest entry. *)
-  let process_chunk src_path ~cancel (index, offset, len) =
-    if Atomic.get cancel then raise Cancelled;
-    let* buf = read_chunk_bigarray src_path offset len in
-    let* h1, h2 =
-      Hash_pool.detach
-        (fun () ->
-          ( Xxhash.hash_hex_bigarray buf ~length:len 0,
-            Xxhash.hash_hex_bigarray buf ~length:len 1 ))
-        ()
+  (* Read, hash and (if not already present) upload chunk [index], returning
+     its manifest entry. *)
+  let upload_chunk src_path ~cancel ~file_size index =
+    if !cancel then raise Cancelled;
+    let offset = index * Manifest.chunk_size in
+    let size = min Manifest.chunk_size (file_size - offset) in
+    let* data = read_chunk_string src_path offset size in
+    let entry =
+      Manifest.
+        {
+          index;
+          h1 = Xxhash.hash_hex data 0;
+          h2 = Xxhash.hash_hex data 1;
+          size;
+        }
     in
     Metrics.add_hashed 1;
-    let entry = Manifest.{ index; h1; h2; size = len } in
     let ck = C.chunk_prefix ^ Manifest.chunk_key entry in
     let (module Primary : Backend.S) = primary () in
     let* head = Primary.head_opt ~key:ck () in
     let+ () =
-      if head = None then (
-        Metrics.add_uploaded len;
-        put_all ~key:ck ~data:(Lwt_bytes.to_string buf) ())
-      else Lwt.return_unit
+      if head <> None then Lwt.return_unit
+      else (
+        Metrics.add_uploaded size;
+        put_all ~key:ck ~data ())
     in
     entry
 
-  let upload ~key ~src_path ~mtime ?(cancel = Atomic.make false) () =
-    let* stat = Lwt_unix.stat src_path in
-    let file_size = stat.Unix.st_size in
+  let upload ~key ~src_path ~mtime ?(cancel = ref false) () =
+    let* st = Lwt_unix.stat src_path in
+    let file_size = st.Unix.st_size in
     Log.debug "upload %s: file_size=%d" key file_size;
     let num_chunks =
-      max 1 ((file_size + Manifest.chunk_size - 1) / Manifest.chunk_size)
-    in
-    let chunks =
-      List.init num_chunks (fun i ->
-          let offset = i * Manifest.chunk_size in
-          let len = min Manifest.chunk_size (file_size - offset) in
-          (i, offset, len))
+      if file_size = 0 then 1
+      else (file_size + Manifest.chunk_size - 1) / Manifest.chunk_size
     in
     let* entries =
-      map_bounded chunk_concurrency (process_chunk src_path ~cancel) chunks
+      map_bounded upload_concurrency
+        (upload_chunk src_path ~cancel ~file_size)
+        (List.init num_chunks Fun.id)
     in
-    if Atomic.get cancel then raise Cancelled;
+    if !cancel then raise Cancelled;
     let state =
       Manifest.make ~size:(Int64.of_int file_size)
         ~chunk_size:Manifest.chunk_size ~chunks:entries ~mtime
