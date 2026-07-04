@@ -136,7 +136,7 @@ If neither is set, conduit's built-in default (native) is used, so B2 works out 
 
 Every file is stored as one or more 8 MB chunks. Each chunk is stored at `<prefix>/.chunks/<h1>-<h2>` where `h1` and `h2` are the xxHash3-64 of the chunk data computed with seeds 0 and 1 respectively, encoded as 16-character lowercase hex. The primary key holds a JSON manifest. Files smaller than 8 MB produce a single-chunk manifest. On re-upload, only chunks whose hash changed are uploaded — unchanged chunks are reused. Chunks are shared across all files and versions.
 
-Hashing is done per file, not per chunk: `remote.ml`'s `upload` memory-maps the source read-only (`Unix.map_file`, so RAM isn't committed for multi-GB files — the OS pages it) and computes every chunk's `h1`/`h2` in a single C call (`Xxhash.hash_chunks_bigarray`) that releases the OCaml runtime lock **once** for the whole loop, dispatched with one `Hash_pool.detach`. Chunk uploads then stream from zero-copy slices of the mapping, bounded independently of hashing. mmap is safe against concurrent writes because those rename-replace the cache file (a new inode) rather than truncating it in place, so the mapping stays valid.
+Hashing is done per file, not per chunk, and is cancellable. `remote.ml`'s `upload` passes an opaque `Xxhash.hash_state` — a C struct holding a copy of the file path and an atomic cancel flag — to `Xxhash.hash_file_chunks`, which, in one `Hash_pool.detach` on a worker domain, opens and memory-maps the file and hashes every chunk (both seeds) with the OCaml runtime lock released for the whole loop. The loop polls the atomic between chunks, so an in-flight hash is interruptible: the sync queue's per-key cancel (`Sync_queue.cancel_put`, flipped on a concurrent write) *is* that same flag, and hashing stops within one chunk, returning `None` so the upload is dropped. Chunk uploads then read their bytes from disk, bounded independently of hashing. The C side `fstat`s the descriptor it opened and maps exactly that size, so a file replaced between open and map cannot produce an out-of-bounds mapping. (Multi-GB files aren't committed to RAM — the OS pages the mapping in on demand.)
 
 Manifest format:
 
@@ -244,7 +244,7 @@ All library modules are parameterised by a `Conf.S` module (a first-class module
 | `log/` | Logging backends (printf for development, syslog for production) |
 | `file/manifest.ml` | Manifest JSON serialization/deserialization; chunk key derivation |
 | `file/local.ml` | Local cache paths; create/evict/rename local cache entries |
-| `file/remote.ml` | Chunked upload and download against the backend. Upload mmaps the source and hashes all chunks in one pass (one runtime-lock release per file) before storing them |
+| `file/remote.ml` | Chunked upload and download against the backend. Upload hashes the whole file in C (open + mmap + hash) via a cancellable `Xxhash.hash_state`, then reads and stores each chunk |
 | `file/hash_pool.ml` | Domainslib pool (via `lwt_domain`) that runs each file's whole-file hash off the event loop, so concurrent uploads hash in parallel |
 | `file/versioning.ml` | Version key construction + `save` (copy live manifest to a timestamped version) |
 | `file/expire.ml` | `Expire.Make(C).expire` — delete versions older than a cutoff, then GC unreferenced chunks |
@@ -353,7 +353,7 @@ The harness and the scenarios are separate so suites are cheap to add:
 | `tests/ipc/` | `ipc.ml` — snapshots of the raw `list_dir`/`list_all` and `changes_since`/`cursor` IPC responses (the FileProvider contract); `ipc.expected` snapshot |
 | `tests/versioning/` | `versioning.ml` — modify/rename/delete keep versions, and `revert` restores one dataless (run with `~versioning:true`); `versioning.expected` snapshot |
 | `tests/expire/` | `expire.ml` — `expire` drops versions older than a cutoff (including a mid-scenario `Mark` boundary) and GCs unreferenced chunks while keeping live/surviving ones; `expire.expected` snapshot |
-| `tests/hash/` | `hash.ml` — unit test: the whole-file chunk hasher (`Xxhash.hash_chunks_bigarray`) agrees with the single-string hash per chunk across boundary/partial/empty cases (pins chunk-key stability) |
+| `tests/hash/` | `hash.ml` — unit test: the whole-file chunk hasher (`Xxhash.hash_file_chunks`) agrees with the single-string hash per chunk across boundary/partial/empty cases (pins chunk-key stability), and a cancelled state returns `None` |
 | `tests/upload/` | `upload.ml` — end-to-end multi-chunk `Remote.upload` on a local backend: 3-chunk round-trip, dedup, concurrent identical-chunk writes, and a 0-byte file |
 
 A scenario is declarative data — a `name` and a list of `step`s (`Write`, `Mkdir`, `Rmdir`, `Rename`, `Delete`, `Evict`, `Restore`, `Open`, `Close`, `Drain`, `Sync`). To add a suite, create a sibling directory under `tests/` with a scenario file that does `open Test_runner`, its own `.expected` snapshot, and the three dune stanzas from `tests/base/dune` (executable, `with-stdout-to` output rule, `runtest` diff rule).
