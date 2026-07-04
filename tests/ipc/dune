@@ -1,0 +1,21 @@
+(executable
+ (name ipc)
+ (libraries tsync_test_runner))
+
+(alias
+ (name default)
+ (deps ipc.exe))
+
+(rule
+ (alias runtest)
+ (target ipc.output)
+ (action
+  (with-stdout-to
+   ipc.output
+   (ignore-stderr
+    (run ./ipc.exe)))))
+
+(rule
+ (alias runtest)
+ (action
+  (diff ipc.expected ipc.output)))

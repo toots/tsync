@@ -38,18 +38,11 @@ final class TsyncEnumerator: NSObject, NSFileProviderEnumerator, @unchecked Send
                 var items: [TsyncItem] = []
 
                 for dir in resp.dirs ?? [] {
-                    items.append(TsyncItem(
-                        identifier: NSFileProviderItemIdentifier(dir),
-                        parent: containerIdentifier,
-                        filename: dir.split(separator: "/").last.map(String.init) ?? dir,
-                        isDirectory: true))
+                    items.append(TsyncItem.make(key: dir, domainPrefix: domainPrefix))
                 }
                 for entry in resp.files ?? [] {
-                    items.append(TsyncItem(
-                        identifier: NSFileProviderItemIdentifier(entry.key),
-                        parent: containerIdentifier,
-                        filename: entry.key.split(separator: "/").last.map(String.init) ?? entry.key,
-                        isDirectory: false,
+                    items.append(TsyncItem.make(
+                        key: entry.key, domainPrefix: domainPrefix,
                         size: entry.size,
                         modificationDate: Date(timeIntervalSince1970: entry.mtime),
                         etag: entry.etag))
@@ -58,31 +51,86 @@ final class TsyncEnumerator: NSObject, NSFileProviderEnumerator, @unchecked Send
                 observer.didEnumerate(items)
                 observer.finishEnumerating(upTo: nil)
             } catch {
-                observer.finishEnumeratingWithError(error)
+                observer.finishEnumeratingWithError(IPC.fileProviderError(error))
             }
         }
     }
 
     func enumerateChanges(for observer: any NSFileProviderChangeObserver, from anchor: NSFileProviderSyncAnchor) {
-        observer.finishEnumeratingChanges(upTo: anchor, moreComing: false)
+        Task {
+            let anchorStr = String(data: anchor.rawValue, encoding: .utf8) ?? ""
+            do {
+                // "0" is the sentinel empty cursor; the daemon wants "" for "from the start".
+                let resp = try await IPC.changesSince(anchor: anchorStr == "0" ? "" : anchorStr)
+                // The journal was pruned past our anchor (or was cleaned up entirely): we
+                // can't produce a complete delta, so tell the OS to drop its cache and
+                // re-run enumerateItems for a full re-list.
+                if resp.stale == true {
+                    observer.finishEnumeratingWithError(NSFileProviderError(.syncAnchorExpired))
+                    return
+                }
+                var updated: [TsyncItem] = []
+                var deleted: [NSFileProviderItemIdentifier] = []
+                for op in resp.ops ?? [] {
+                    switch op.op {
+                    case "delete", "rmdir":
+                        deleted.append(NSFileProviderItemIdentifier(op.key))
+                    case "rename":
+                        if let src = op.src { deleted.append(NSFileProviderItemIdentifier(src)) }
+                        if let item = try? await resolveChangeItem(op.key) { updated.append(item) }
+                    default: // put, mkdir
+                        if let item = try? await resolveChangeItem(op.key) { updated.append(item) }
+                    }
+                }
+                if !deleted.isEmpty { observer.didDeleteItems(withIdentifiers: deleted) }
+                if !updated.isEmpty { observer.didUpdate(updated) }
+                observer.finishEnumeratingChanges(upTo: syncAnchor(resp.cursor ?? anchorStr), moreComing: false)
+            } catch {
+                observer.finishEnumeratingChanges(upTo: anchor, moreComing: false)
+            }
+        }
     }
 
     func currentSyncAnchor(completionHandler: @escaping (NSFileProviderSyncAnchor?) -> Void) {
-        completionHandler(startupAnchor)
+        Task {
+            do {
+                let resp = try await IPC.currentCursor()
+                completionHandler(syncAnchor(resp.cursor ?? ""))
+            } catch {
+                completionHandler(startupAnchor)
+            }
+        }
     }
 
     // MARK: - Private
 
+    /// Sync anchors must carry non-empty data; use "0" as the empty-cursor sentinel.
+    private func syncAnchor(_ cursor: String) -> NSFileProviderSyncAnchor {
+        NSFileProviderSyncAnchor((cursor.isEmpty ? "0" : cursor).data(using: .utf8)!)
+    }
+
+    /// Build the item for a key touched by a journal op (directories end in "/").
+    private func resolveChangeItem(_ key: String) async throws -> TsyncItem {
+        let domainPrefix = config.domainPrefix(domain.displayName)
+        if key.hasSuffix("/") {
+            return TsyncItem.make(key: key, domainPrefix: domainPrefix)
+        }
+        let resp = try await IPC.stat(key: key)
+        return TsyncItem.make(key: key, domainPrefix: domainPrefix,
+                              size: resp.size,
+                              modificationDate: resp.mtime.map { Date(timeIntervalSince1970: $0) },
+                              etag: resp.etag, isUploaded: resp.isUploaded ?? true)
+    }
+
     private func enumerateWorkingSet(observer: any NSFileProviderEnumerationObserver) async throws {
         let domainPrefix = config.domainPrefix(domain.displayName)
         let resp = try await IPC.listAll(prefix: domainPrefix)
-        let items: [TsyncItem] = (resp.files ?? []).map { entry in
-            let parent = TsyncItem.parentIdentifier(for: entry.key, domainPrefix: domainPrefix)
-            return TsyncItem(
-                identifier: NSFileProviderItemIdentifier(entry.key),
-                parent: parent,
-                filename: entry.key.split(separator: "/").last.map(String.init) ?? entry.key,
-                isDirectory: false,
+        // The working set holds files only: skip directory-marker keys, which would collide
+        // with the real folders from the container enumeration.
+        let files = (resp.files ?? []).filter { !$0.key.hasSuffix("/") }
+        let items: [TsyncItem] = files.map { entry in
+            TsyncItem.make(
+                key: entry.key, domainPrefix: domainPrefix,
                 size: entry.size,
                 modificationDate: Date(timeIntervalSince1970: entry.mtime),
                 etag: entry.etag)

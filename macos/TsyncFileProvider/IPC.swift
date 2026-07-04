@@ -1,3 +1,4 @@
+import FileProvider
 import Foundation
 
 public struct IPCRequest: Codable, Sendable {
@@ -5,13 +6,22 @@ public struct IPCRequest: Codable, Sendable {
     public let path: String?
     public let src: String?
     public let staging: String?
+    public let arg: String?
 
-    public init(action: String, path: String? = nil, src: String? = nil, staging: String? = nil) {
+    public init(action: String, path: String? = nil, src: String? = nil,
+                staging: String? = nil, arg: String? = nil) {
         self.action = action
         self.path = path
         self.src = src
         self.staging = staging
+        self.arg = arg
     }
+}
+
+public struct IPCOp: Codable, Sendable {
+    public let op: String
+    public let key: String
+    public let src: String?
 }
 
 public struct IPCFileEntry: Codable, Sendable {
@@ -31,14 +41,18 @@ public struct IPCResponse: Codable, Sendable {
     public let dirs: [String]?
     public let files: [IPCFileEntry]?
     public let isUploaded: Bool?
+    public let cursor: String?
+    public let ops: [IPCOp]?
+    public let stale: Bool?
 
     public init(ok: Bool, error: String? = nil, size: Int64? = nil, mtime: Double? = nil,
                 etag: String? = nil, localPath: String? = nil,
                 dirs: [String]? = nil, files: [IPCFileEntry]? = nil,
-                isUploaded: Bool? = nil) {
+                isUploaded: Bool? = nil, cursor: String? = nil, ops: [IPCOp]? = nil,
+                stale: Bool? = nil) {
         self.ok = ok; self.error = error; self.size = size; self.mtime = mtime
         self.etag = etag; self.localPath = localPath; self.dirs = dirs; self.files = files
-        self.isUploaded = isUploaded
+        self.isUploaded = isUploaded; self.cursor = cursor; self.ops = ops; self.stale = stale
     }
 }
 
@@ -64,6 +78,19 @@ public enum IPC {
     }
 
     // MARK: - Low-level send
+
+    // FileProvider only accepts errors in NSCocoaErrorDomain or NSFileProviderErrorDomain.
+    // Returning our own domain makes fileproviderd treat the failure as fatal and cache an
+    // empty listing forever. Map to serverUnreachable so it retries once the daemon is up.
+    static func fileProviderError(_ error: Error) -> Error {
+        switch error {
+        case IPCError.connectionFailed, IPCError.daemonNotRunning:
+            return NSError(domain: NSFileProviderError.errorDomain,
+                           code: NSFileProviderError.serverUnreachable.rawValue)
+        default:
+            return error
+        }
+    }
 
     /// Synchronous send — for CLI use only.
     public static func send(_ request: IPCRequest) throws -> IPCResponse {
@@ -127,6 +154,14 @@ public enum IPC {
 
     public static func listAll(prefix: String) async throws -> IPCResponse {
         try await sendAsync(IPCRequest(action: "list_all", path: prefix))
+    }
+
+    public static func currentCursor() async throws -> IPCResponse {
+        try await sendAsync(IPCRequest(action: "cursor"))
+    }
+
+    public static func changesSince(anchor: String) async throws -> IPCResponse {
+        try await sendAsync(IPCRequest(action: "changes_since", arg: anchor))
     }
 
     public static func ensureCached(key: String) async throws -> IPCResponse {

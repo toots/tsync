@@ -297,6 +297,8 @@ Runtime-specific behavior (how eviction happens, whether restore materializes lo
 {"action":"stat","path":"<key>"}
 {"action":"list_dir","path":"<prefix>"}
 {"action":"list_all","path":"<prefix>"}
+{"action":"cursor"}
+{"action":"changes_since","arg":"<journal-key|>"}
 {"action":"ensure_cached","path":"<key>"}
 {"action":"create","path":"<key>"}
 {"action":"write","path":"<key>","staging":"<local_path>"}
@@ -315,7 +317,9 @@ Runtime-specific behavior (how eviction happens, whether restore materializes lo
 
 For `evict`/`restore` the `path` is a filesystem path (from the CLI) that the runtime's `path_to_key` hook maps to a storage key; the file-operation actions take domain-prefixed keys directly.
 
-**Responses:** `{"ok":true, ...}` with action-specific fields (e.g. `size`, `mtime`, `etag`, `isUploaded`, `localPath`, `dirs`, `files`), or `{"ok":false,"error":"<message>"}` on failure.
+**Responses:** `{"ok":true, ...}` with action-specific fields (e.g. `size`, `mtime`, `etag`, `isUploaded`, `localPath`, `dirs`, `files`), or `{"ok":false,"error":"<message>"}` on failure. The listed backend objects are manifests, so `list_dir`/`list_all` read each file's manifest to report the **logical** `size`/`mtime` and the content hash (`h1`) as `etag` — the same identity `stat` returns (empty for dirty files). `list_dir` returns directories as full keys ending in `/`, matching `list_all` and the change feed.
+
+**Change feed** (`cursor` / `changes_since`) exposes the change journal as a delta query so the macOS FileProvider can drive `enumerateChanges` from a real sync anchor rather than re-importing. `cursor` returns the current journal cursor (`{"cursor":"<journal-key>"}`); `changes_since` returns the ops committed after a given journal key plus the new cursor (`{"cursor":"<journal-key>","ops":[{"op":"put|delete|mkdir|rmdir|rename","key":"<full-key>", ...}]}`). The query is stateless — it filters journal entries by `key > arg` and drops the caller's own `client_uuid` — so it does **not** touch the sync poller's `last-sync` marker; the OS tracks the extension's anchor independently. Op keys are returned as full storage keys (directories ending in `/`) to match the identifiers the extension uses.
 
 **Reverse notify channel** (`notify.sock`, daemon → extension, macOS only):
 
@@ -326,7 +330,7 @@ UPLOADED <key>
 CHANGED <key>
 ```
 
-`CHANGED` is sent by the sync poller after applying a foreign journal entry; the extension evicts the item and signals its enumerator so Finder re-fetches it.
+`CHANGED` is sent by the sync poller after applying a foreign journal entry. The extension evicts any materialized copy of that key, then signals the **working set** (not the specific key — signalling an identifier the local DB has never seen cannot introduce it). That drives `enumerateChanges`, which pulls the journal delta via `changes_since` and upserts/removes items by their parent identifier, so newly-discovered remote files appear.
 
 ### Tests
 
@@ -344,10 +348,13 @@ The harness and the scenarios are separate so suites are cheap to add:
 | `tests/runner/` | `tsync_test_runner` library — the harness: temp environment setup, IPC driver, deterministic snapshot dumper. Exposes `step`, `scenario`, `run`, and the two-client variants |
 | `tests/base/` | `base.ml` — one representative scenario per file operation (create, copy, rename, delete, evict, restore, mkdir, rmdir); `base.expected` snapshot |
 | `tests/sync/` | `sync.ml` — cross-client sync and race scenarios; `sync.expected` snapshot |
+| `tests/ipc/` | `ipc.ml` — snapshots of the raw `list_dir`/`list_all` and `changes_since`/`cursor` IPC responses (the FileProvider contract); `ipc.expected` snapshot |
 | `tests/versioning/` | `versioning.ml` — modify/rename/delete keep versions, and `revert` restores one dataless (run with `~versioning:true`); `versioning.expected` snapshot |
 | `tests/expire/` | `expire.ml` — `expire` drops versions older than a cutoff (including a mid-scenario `Mark` boundary) and GCs unreferenced chunks while keeping live/surviving ones; `expire.expected` snapshot |
 
 A scenario is declarative data — a `name` and a list of `step`s (`Write`, `Mkdir`, `Rmdir`, `Rename`, `Delete`, `Evict`, `Restore`, `Open`, `Close`, `Drain`, `Sync`). To add a suite, create a sibling directory under `tests/` with a scenario file that does `open Test_runner`, its own `.expected` snapshot, and the three dune stanzas from `tests/base/dune` (executable, `with-stdout-to` output rule, `runtest` diff rule).
+
+**IPC-response snapshots** (`run_ipc` / `run_ipc_changes`) dump the actual JSON the daemon returns rather than a reconstructed tree, so the FileProvider-facing contract is pinned directly: `list_dir` returning directories as full keys and files with logical size + content-hash (`h1`) etags, and `changes_since` producing the working delta, the up-to-date empty response, and the stale flag (pruned-past anchor → full re-list). Only the non-deterministic fields are normalized (wall-clock mtimes, journal-key cursors, filesystem-order arrays); etags and keys are deterministic and asserted verbatim.
 
 **Two-client scenarios** (`run_two_client_scenarios`) instantiate two complete client stacks — separate caches, data dirs, sockets, and journal identities — sharing one backend. Each step is tagged with the client it runs on (`A (Write …)`, `B Sync`), and every operation goes through the same user-facing IPC path a real client uses; nothing is injected or simulated. The snapshot shows both clients' trees and contents, each client's pending journal entries, and the backend state, so convergence (or a deliberate divergence, like an open-file guard) is visible directly. `tests/sync/` covers foreign puts/deletes/renames/overwrites, rename chains, directory propagation, concurrent creates, open-file guards, and the delete-vs-rename and rename-vs-rename races. Crash-recovery suites are the intended next addition.
 
@@ -432,13 +439,14 @@ TsyncFileProvider (extension, sandboxed)
   │    └── deleteItem         unlink / rmdir
   ├── TsyncEnumerator         NSFileProviderEnumerator
   │    ├── enumerateItems     list_dir (per-directory) / list_all (working set)
-  │    └── enumerateChanges   anchor-expired → full re-enumeration
+  │    ├── enumerateChanges   changes_since(anchor) → didUpdate/didDeleteItems; anchor = journal cursor
+  │    └── currentSyncAnchor  cursor (current journal key)
   └── NotifyListener          listens on notify.sock; receives EVICT / RESTORE / UPLOADED / CHANGED from daemon
 
 OCaml daemon (tsync start, LaunchAgent via deploy-daemon.sh)
   ├── Ipc.serve               Unix socket — JSON + CLI dispatch
   ├── Sync_queue              Lwt worker pool for async upload
-  ├── sync_poller             applies foreign journal entries → CHANGED → extension evict + signal
+  ├── sync_poller             applies foreign journal entries → CHANGED → extension evict + working-set signal → enumerateChanges
   └── on_upload_done          → Ipc.notify_uploaded → notify.sock → extension signalEnumerator
 ```
 
@@ -484,7 +492,7 @@ OCaml daemon (tsync start, LaunchAgent via deploy-daemon.sh)
 | `TsyncApp/AppDelegate.swift` | Registers `NSFileProviderDomain` for each configured domain |
 | `TsyncFileProvider/IPC.swift` | JSON IPC client to the OCaml daemon; typed wrappers for each action |
 | `TsyncFileProvider/Item.swift` | `NSFileProviderItem` implementation; `isUploaded` reflects daemon manifest state |
-| `TsyncFileProvider/Enumerator.swift` | `NSFileProviderEnumerator`; per-directory `list_dir`, recursive `list_all` for working set |
+| `TsyncFileProvider/Enumerator.swift` | `NSFileProviderEnumerator`; per-directory `list_dir`, recursive `list_all` for working set; `enumerateChanges` replays the journal delta (`changes_since`) with the journal cursor as sync anchor |
 | `TsyncFileProvider/Extension.swift` | `NSFileProviderReplicatedExtension`; `NotifyListener` on `notify.sock` |
 
 ### Paths
@@ -511,7 +519,21 @@ Finder shows a progress indicator while `isUploaded = false`. The `UPLOADED` not
 
 ### Working set
 
-`enumerateWorkingSet` calls `IPC.listAll` (the `list_all` JSON action), which returns a flat list of all files under the domain prefix via `File_store.list_all_files`. This powers Spotlight and Recents across the full directory tree, not just the root.
+`enumerateWorkingSet` calls `IPC.listAll` (the `list_all` JSON action), which returns a flat list of all files under the domain prefix via `File_store.list_all_files`. This powers Spotlight and Recents across the full directory tree, not just the root. Directory-marker keys (ending in `/`) are filtered out here — the working set holds files only, and emitting a marker would collide with the real folder from the container enumeration and surface as a duplicate `<name> 2`.
+
+### Change tracking
+
+The extension implements real change tracking against the journal rather than re-importing:
+
+- **Sync anchor = journal cursor.** `currentSyncAnchor` returns the `cursor` action's value; the anchor bytes are the journal key (`"0"` is the empty-cursor sentinel, since anchors must be non-empty).
+- **`enumerateChanges(from: anchor)`** calls `changes_since(anchor)` and translates the returned ops: `put`/`mkdir`/`rename`-dst → `didUpdate` (rebuilding the item, resolving file metadata via `stat`); `delete`/`rmdir`/`rename`-src → `didDeleteItems`. It finishes at the new cursor. Items carry correct parent identifiers, so additions land in the right folder regardless of which enumerator (a container or the working set) reported them.
+- **Trigger.** The daemon's sync poller applies a foreign entry, then sends `CHANGED`; the extension signals the working set, which makes the OS call `enumerateChanges`. The per-key `signalEnumerator` used previously could refresh a known item but never introduce a newly-discovered one.
+
+Item identifiers are the full storage key, with folders ending in `/` — consistent across container enumeration, `parentIdentifier`, `s3Key`, and the change feed, so each item has exactly one identity.
+
+Item versions (`NSFileProviderItemVersion`) must be non-empty or the OS silently drops the item. `contentVersion` is the file's content hash (`Manifest.h1`, returned as `etag` by `stat` and the listings alike); a dirty file has no clean hash, so it falls back to `size:mtime`. `metadataVersion` is `content:isUploaded`, so a completing upload refreshes the item without forcing a content re-download.
+
+IPC failures are mapped to `NSFileProviderError.serverUnreachable` (`IPC.fileProviderError`) — returning the extension's own error domain makes fileproviderd treat the failure as fatal and cache an empty listing, so a not-yet-ready daemon at startup must surface as a *retryable* error.
 
 ### Deploy
 
@@ -531,6 +553,8 @@ make -C macos deploy     # build + install TsyncApp to /Applications + reload La
 **Concurrent writes are last-writer-wins.** Cross-client changes are reconciled through the journal (see [Cross-client sync](#cross-client-sync)): concurrent renames and delete-vs-rename races produce conflict-marked copies, and no data is lost. But two clients writing the *same* file concurrently still resolve by last manifest write; the slower writer's content is superseded rather than preserved as a conflict copy. A stronger guarantee would need S3 conditional PUT (`If-None-Match`) with a retry loop. There is also a small window where a foreign rename whose journal entry is not yet visible resolves as a plain conflict copy rather than adopting the peer's chosen name.
 
 **No background prefetch.** Files download on first open. `tsync pull` (not yet implemented) would bulk-download evicted files.
+
+**Change tracking only sees journaled changes.** Cross-client propagation (and the macOS `enumerateChanges` feed) is driven by the change journal, so a change made directly in the bucket — outside any tsync client — writes no journal entry and is not picked up incrementally. It surfaces only on a full re-import (re-adding the domain) or `full_resync`. This matches the sync poller's existing model.
 
 **Chunks are not encrypted at the application layer.** Enable S3 SSE-S3 or SSE-KMS on the bucket for encryption at rest.
 

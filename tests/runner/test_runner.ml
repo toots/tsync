@@ -77,6 +77,42 @@ let starts_with prefix s =
   String.length s >= String.length prefix
   && String.sub s 0 (String.length prefix) = prefix
 
+(* ── IPC response snapshots ───────────────────────────────────────────────── *)
+
+(* Render an IPC response verbatim, stabilising only the non-deterministic parts:
+   wall-clock mtimes, journal-key cursors, and the filesystem-order [files]/[dirs]
+   arrays. etags (content hashes) and keys are deterministic and shown as-is. *)
+let ipc_entry_key = function
+  | `Assoc kvs -> (
+      match List.assoc_opt "key" kvs with Some (`String s) -> s | _ -> "")
+  | _ -> ""
+
+let rec normalize_ipc (j : Yojson.Safe.t) : Yojson.Safe.t =
+  match j with
+    | `Assoc kvs -> `Assoc (List.map normalize_kv kvs)
+    | `List l -> `List (List.map normalize_ipc l)
+    | j -> j
+
+and normalize_kv (k, v) =
+  match (k, v) with
+    | "mtime", `Float f -> (k, `String (if f > 0. then "<mtime>" else "<zero>"))
+    | "cursor", `String s ->
+        (k, `String (if s = "" then "<empty>" else "<cursor>"))
+    | "files", `List l ->
+        let l = List.map normalize_ipc l in
+        ( k,
+          `List
+            (List.stable_sort
+               (fun a b -> compare (ipc_entry_key a) (ipc_entry_key b))
+               l) )
+    | "dirs", `List l ->
+        (k, `List (List.sort compare (List.map normalize_ipc l)))
+    | k, v -> (k, normalize_ipc v)
+
+let print_ipc label obj =
+  Printf.printf "  %s -> %s\n" label
+    (Yojson.Safe.to_string (normalize_ipc (`Assoc obj)))
+
 (* ── Client setup ─────────────────────────────────────────────────────────── *)
 
 type client = {
@@ -86,6 +122,9 @@ type client = {
   dump_tree : unit -> string list Lwt.t;
   dump_contents : string list -> unit Lwt.t;
   dump_pending : unit -> unit Lwt.t;
+  dump_listing : unit -> unit Lwt.t;
+  dump_changes : label:string -> anchor:string -> unit Lwt.t;
+  cursor : unit -> string Lwt.t;
 }
 
 (* Tests drive the real IPC handler directly (no socket): every daemon service
@@ -243,8 +282,9 @@ let setup_client (module C : Conf.S) root staging_prefix =
       in
       Lwt_list.iter_s
         (fun d ->
-          Printf.printf "  d %s/\n" (F.rel_key (prefix ^ d));
-          walk (prefix ^ d ^ "/"))
+          (* [dirs] are full keys ending in "/". *)
+          Printf.printf "  d %s\n" (F.rel_key d);
+          walk d)
         (List.sort compare dirs)
     in
     let+ () = walk C.domain_prefix in
@@ -270,7 +310,48 @@ let setup_client (module C : Conf.S) root staging_prefix =
           (String.concat "; " (List.map render_op ops)))
       pending
   in
-  { do_step; drain; stop; dump_tree; dump_contents; dump_pending }
+  (* Recursive list_dir (per directory) then the flat list_all working-set view —
+     the actual IPC responses, normalized. *)
+  let dump_listing () =
+    let rec walk prefix =
+      let* obj = action "list_dir" prefix in
+      must obj;
+      print_ipc (Printf.sprintf "list_dir %s" prefix) obj;
+      let dirs =
+        match List.assoc_opt "dirs" obj with
+          | Some (`List l) ->
+              List.filter_map (function `String s -> Some s | _ -> None) l
+          | _ -> []
+      in
+      Lwt_list.iter_s walk (List.sort compare dirs)
+    in
+    let* () = walk C.domain_prefix in
+    let* obj = action "list_all" C.domain_prefix in
+    must obj;
+    print_ipc (Printf.sprintf "list_all %s" C.domain_prefix) obj;
+    Lwt.return_unit
+  in
+  let cursor () =
+    let+ obj = action "cursor" "" in
+    Option.value ~default:"" (get_str obj "cursor")
+  in
+  let dump_changes ~label ~anchor =
+    let* obj = action ~arg:anchor "changes_since" "" in
+    must obj;
+    print_ipc (Printf.sprintf "changes_since %s" label) obj;
+    Lwt.return_unit
+  in
+  {
+    do_step;
+    drain;
+    stop;
+    dump_tree;
+    dump_contents;
+    dump_pending;
+    dump_listing;
+    dump_changes;
+    cursor;
+  }
 
 (* ── Backend snapshot (shared between single- and two-client runners) ─────── *)
 
@@ -516,3 +597,115 @@ let run ?versioning scenarios = List.iter (run_scenario ?versioning) scenarios
 
 let run_two_client_scenarios ?versioning scenarios =
   List.iter (run_two_client_scenario ?versioning) scenarios
+
+(* ── IPC snapshot runners ─────────────────────────────────────────────────── *)
+
+let make_conf ?(versioning = false) ~client_name ~backend_root ~cache_root
+    ~data_dir ~socket_path ~notify_path () : (module Conf.S) =
+  (module struct
+    let versioning = versioning
+    let client_name = client_name
+    let domain_name = "test"
+    let domain_prefix = "tsync/test/"
+    let chunk_prefix = "tsync/.chunks/"
+    let versions_prefix = "tsync/.versions/test/"
+    let journal_prefix = "tsync/.journal/test/"
+    let cursor_key = "tsync/.cursor/test"
+    let backends = [Local_backend.make ~root:backend_root]
+    let cache_root = cache_root
+    let data_dir = data_dir
+    let socket_path = socket_path
+    let notify_path = notify_path
+    let max_uploads = 4
+    let max_downloads = 8
+  end)
+
+(* Single client: after draining uploads, snapshot the listing IPC responses
+   (directory keys, logical size, content-hash etag, normalized mtime). *)
+let run_ipc_scenario ?versioning ({ name; steps } : scenario) =
+  Printf.printf "=== %s\n" name;
+  List.iter (fun s -> Printf.printf "  %s\n" (render_step s)) steps;
+  let root = Filename.temp_dir "tsync-ipc" "" in
+  let module C =
+    (val make_conf ?versioning ~client_name:"Test Client"
+           ~backend_root:(Filename.concat root "backend")
+           ~cache_root:(Filename.concat root "cache")
+           ~data_dir:(Filename.concat root "data")
+           ~socket_path:(Filename.concat root "s.sock")
+           ~notify_path:(Filename.concat root "n.sock")
+           ())
+  in
+  Lwt_main.run
+    (let client = setup_client (module C) root "" in
+     let* () =
+       Lwt.catch
+         (fun () ->
+           let* () = Lwt_list.iter_s client.do_step steps in
+           let* () = client.drain () in
+           print_endline "--- listing";
+           client.dump_listing ())
+         (fun exn ->
+           Printf.printf "  ERROR %s\n" (Printexc.to_string exn);
+           Lwt.return_unit)
+     in
+     client.stop ());
+  rm_rf root;
+  print_newline ()
+
+(* Two clients on one backend: A applies the steps, then B's change feed is
+   probed from several anchors — a baseline (working delta), B's current cursor
+   (up to date), and a pruned-past anchor (stale → full re-list). *)
+let run_ipc_changes_scenario ?versioning ({ name; steps } : scenario) =
+  Printf.printf "=== %s\n" name;
+  List.iter (fun s -> Printf.printf "  A: %s\n" (render_step s)) steps;
+  let root = Filename.temp_dir "tsync-ipc2" "" in
+  let backend_root = Filename.concat root "backend" in
+  let module Ca =
+    (val make_conf ?versioning ~client_name:"Client A" ~backend_root
+           ~cache_root:(Filename.concat root "cache-a")
+           ~data_dir:(Filename.concat root "data-a")
+           ~socket_path:(Filename.concat root "a.sock")
+           ~notify_path:(Filename.concat root "na.sock")
+           ())
+  in
+  let module Cb =
+    (val make_conf ?versioning ~client_name:"Client B" ~backend_root
+           ~cache_root:(Filename.concat root "cache-b")
+           ~data_dir:(Filename.concat root "data-b")
+           ~socket_path:(Filename.concat root "b.sock")
+           ~notify_path:(Filename.concat root "nb.sock")
+           ())
+  in
+  Lwt_main.run
+    (let a = setup_client (module Ca) root "a" in
+     let b = setup_client (module Cb) root "b" in
+     let* () =
+       Lwt.catch
+         (fun () ->
+           let* baseline = b.cursor () in
+           let* () = Lwt_list.iter_s a.do_step steps in
+           let* () = a.drain () in
+           print_endline "--- B changes_since (A's ops are foreign to B)";
+           let* () =
+             b.dump_changes ~label:"from baseline (working)" ~anchor:baseline
+           in
+           let* current = b.cursor () in
+           let* () =
+             b.dump_changes ~label:"from current (up to date)" ~anchor:current
+           in
+           b.dump_changes ~label:"from pruned anchor (stale)"
+             ~anchor:"0000000000001-deadbeef")
+         (fun exn ->
+           Printf.printf "  ERROR %s\n" (Printexc.to_string exn);
+           Lwt.return_unit)
+     in
+     let* () = a.stop () in
+     b.stop ());
+  rm_rf root;
+  print_newline ()
+
+let run_ipc ?versioning scenarios =
+  List.iter (run_ipc_scenario ?versioning) scenarios
+
+let run_ipc_changes ?versioning scenarios =
+  List.iter (run_ipc_changes_scenario ?versioning) scenarios

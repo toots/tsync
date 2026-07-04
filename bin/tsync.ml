@@ -177,7 +177,7 @@ let stats_cmd =
     Arg.(
       value
       & opt (some float) None
-      & info [ "w"; "watch" ] ~docv:"SECONDS"
+      & info ["w"; "watch"] ~docv:"SECONDS"
           ~doc:"Poll and redraw every $(docv) seconds")
   in
   let run watch =
