@@ -48,3 +48,12 @@ let hashed () = hashed_c.total
 let upload_rate () = rate uploaded_c
 let download_rate () = rate downloaded_c
 let hash_rate () = rate hashed_c
+
+(* Cumulative CPU seconds used by this process (user + system). The grapher
+   diffs consecutive samples to get CPU%. Cross-platform via stdlib. *)
+let cpu_seconds () =
+  let t = Unix.times () in
+  t.Unix.tms_utime +. t.Unix.tms_stime
+
+(* Current resident set size in bytes. *)
+let rss_bytes () = (Mem_usage.info ()).Mem_usage.process_physical_memory

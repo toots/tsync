@@ -152,6 +152,7 @@ let human_bytes n =
 
 let print_stats obj =
   let i k = match List.assoc_opt k obj with Some (`Int n) -> n | _ -> 0 in
+  let f k = match List.assoc_opt k obj with Some (`Float x) -> x | _ -> 0. in
   let row label value = Printf.printf "  %-13s %s\n" label value in
   Printf.printf "Uploads\n";
   row "pending" (string_of_int (i "pendingUploads"));
@@ -170,7 +171,10 @@ let print_stats obj =
   row "rate" (Printf.sprintf "%d/s" (i "hashesPerSec"));
   Printf.printf "Cache\n";
   row "dirty files" (string_of_int (i "dirtyFiles"));
-  row "open files" (string_of_int (i "openFiles"))
+  row "open files" (string_of_int (i "openFiles"));
+  Printf.printf "Process\n";
+  row "cpu" (Printf.sprintf "%.1fs" (f "cpuSeconds"));
+  row "memory" (human_bytes (i "rssBytes"))
 
 let stats_cmd =
   let watch_arg =

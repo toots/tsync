@@ -26,6 +26,8 @@ SERIES = [
     ("pendingDownloads", "pending down", "Queues"),
     ("dirtyFiles", "dirty", "Queues"),
     ("openFiles", "open", "Queues"),
+    ("cpuPercent", "cpu", "CPU %"),
+    ("rssMB", "rss", "Memory (MB)"),
 ]
 
 samples = []
@@ -43,6 +45,13 @@ if not samples:
 
 t0 = samples[0].get("t", 0)
 xs = [s.get("t", 0) - t0 for s in samples]
+
+# Derive CPU% (cpuSeconds is cumulative) and RSS in MB.
+for i, s in enumerate(samples):
+    s["rssMB"] = s.get("rssBytes", 0) / 1e6
+    dt = xs[i] - xs[i - 1] if i else 0
+    dc = s.get("cpuSeconds", 0) - samples[i - 1].get("cpuSeconds", 0) if i else 0
+    s["cpuPercent"] = 100 * dc / dt if dt > 0 else 0
 
 panels = list(dict.fromkeys(p for _, _, p in SERIES))
 fig, axes = plt.subplots(len(panels), 1, sharex=True, figsize=(10, 3 * len(panels)))

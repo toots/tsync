@@ -1,8 +1,8 @@
+#include <errno.h>
 #include <fcntl.h>
 #include <stdatomic.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sys/mman.h>
 #include <sys/stat.h>
 #include <unistd.h>
 #include <xxhash.h>
@@ -87,11 +87,12 @@ CAMLprim value caml_hash_state_is_cancelled(value v)
     return Val_bool(atomic_load(&Hash_state_val(v)->cancel));
 }
 
-/* Open + mmap the state's file, then hash every chunk (seeds 0 and 1) with the
-   runtime lock released, polling the state's cancel flag between chunks. Returns
-   [Some (file_size, hashes)] where hashes is an int64 array of length
-   2*num_chunks (element 2*i is chunk i's seed-0 hash, 2*i+1 the seed-1 hash), or
-   [None] if the flag was set partway through or the file could not be opened.
+/* Open the state's file and hash every chunk (seeds 0 and 1) with the runtime
+   lock released, reading each chunk with pread into a single reusable buffer and
+   polling the cancel flag between chunks. Returns [Some (file_size, hashes)]
+   where hashes is an int64 array of length 2*num_chunks (element 2*i is chunk
+   i's seed-0 hash, 2*i+1 the seed-1 hash), or [None] if the flag was set, the
+   file could not be opened, or a short read shows it was truncated mid-hash.
    OCaml allocation happens only with the lock held. */
 CAMLprim value caml_hash_file_chunks(value _state, value _chunk_size)
 {
@@ -112,41 +113,50 @@ CAMLprim value caml_hash_file_chunks(value _state, value _chunk_size)
     size_t num_chunks =
         (length == 0) ? 1 : (length + chunk_size - 1) / chunk_size;
 
-    const char *data = NULL;
-    if (length > 0) {
-        data = mmap(NULL, length, PROT_READ, MAP_PRIVATE, fd, 0);
-        if (data == MAP_FAILED) {
-            close(fd);
-            caml_raise_out_of_memory();
-        }
-    }
-    close(fd); /* the mapping stays valid after close */
-
+    char *buf = malloc(chunk_size);
     XXH64_hash_t *scratch = malloc(sizeof(XXH64_hash_t) * 2 * num_chunks);
-    if (scratch == NULL) {
-        if (data)
-            munmap((void *)data, length);
+    if (buf == NULL || scratch == NULL) {
+        free(buf);
+        free(scratch);
+        close(fd);
         caml_raise_out_of_memory();
     }
 
-    int cancelled = 0;
+    int aborted = 0; /* cancelled, I/O error, or the file shrank under us */
     caml_release_runtime_system();
     for (size_t i = 0; i < num_chunks; i++) {
         if (atomic_load(&s->cancel)) {
-            cancelled = 1;
+            aborted = 1;
             break;
         }
         size_t off = i * chunk_size;
-        size_t len = (off + chunk_size <= length) ? chunk_size : (length - off);
-        scratch[2 * i]     = XXH3_64bits_withSeed(data + off, len, 0);
-        scratch[2 * i + 1] = XXH3_64bits_withSeed(data + off, len, 1);
+        size_t want = (off + chunk_size <= length) ? chunk_size : (length - off);
+        size_t got = 0;
+        while (got < want) {
+            ssize_t n = pread(fd, buf + got, want - got, (off_t)(off + got));
+            if (n < 0) {
+                if (errno == EINTR)
+                    continue;
+                aborted = 1;
+                break;
+            }
+            if (n == 0)
+                break; /* unexpected EOF: the file was truncated */
+            got += (size_t)n;
+        }
+        if (aborted || got < want) {
+            aborted = 1;
+            break;
+        }
+        scratch[2 * i]     = XXH3_64bits_withSeed(buf, got, 0);
+        scratch[2 * i + 1] = XXH3_64bits_withSeed(buf, got, 1);
     }
     caml_acquire_runtime_system();
 
-    if (data)
-        munmap((void *)data, length);
+    free(buf);
+    close(fd);
 
-    if (cancelled) {
+    if (aborted) {
         free(scratch);
         CAMLreturn(Val_int(0)); /* None */
     }

@@ -15,12 +15,12 @@ val hash_state_cancel : hash_state -> unit
 val hash_state_reset : hash_state -> unit
 val hash_state_is_cancelled : hash_state -> bool
 
-(** [hash_file_chunks state ~chunk_size] opens and memory-maps the state's file
-    and hashes it in [chunk_size]-byte chunks, returning
-    [Some (file_size, hashes)] with, per chunk, its seed-0 and seed-1 XXH3-64
-    hashes as 16-char lowercase hex. Returns [None] if the state was cancelled
-    partway through or the file could not be opened. The runtime lock is
-    released for the whole hash, and the cancel flag is polled between chunks.
-*)
+(** [hash_file_chunks state ~chunk_size] opens the state's file and reads it in
+    [chunk_size]-byte chunks with [pread] into a single reusable buffer,
+    returning [Some (file_size, hashes)] with, per chunk, its seed-0 and seed-1
+    XXH3-64 hashes as 16-char lowercase hex. Returns [None] if the state was
+    cancelled partway through, the file could not be opened, or it was truncated
+    mid-read. The runtime lock is released for the whole hash, and the cancel
+    flag is polled between chunks. *)
 val hash_file_chunks :
   hash_state -> chunk_size:int -> (int * (string * string) array) option

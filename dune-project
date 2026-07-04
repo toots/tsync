@@ -18,6 +18,7 @@
   lwt_domain
   lwt
   lwt_ppx
+  mem_usage
   cmdliner)
  (depopts
    syslog
