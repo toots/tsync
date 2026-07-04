@@ -27,6 +27,48 @@ let handle_auto_evict ~data_dir = function
   | "status" -> if auto_evict_enabled ~data_dir then "on" else "off"
   | _ -> "ERROR expected on|off|status"
 
+(* ── Preserve-space user feature ─────────────────────────────────────────── *)
+
+let default_preserve_space_percent = 10.
+let preserve_space_file ~data_dir = Filename.concat data_dir "preserve-space"
+
+let preserve_space_percent ~data_dir =
+  match
+    let ic = open_in (preserve_space_file ~data_dir) in
+    Fun.protect ~finally:(fun () -> close_in_noerr ic) (fun () -> input_line ic)
+  with
+    | "off" -> None
+    | s -> (
+        match float_of_string_opt (String.trim s) with
+          | Some pct when pct > 0. && pct < 100. -> Some pct
+          | _ -> Some default_preserve_space_percent)
+    | exception _ -> Some default_preserve_space_percent
+
+let write_preserve_space ~data_dir contents =
+  try
+    let oc = open_out (preserve_space_file ~data_dir) in
+    Fun.protect
+      ~finally:(fun () -> close_out_noerr oc)
+      (fun () -> output_string oc contents)
+  with _ -> ()
+
+let preserve_space_status ~data_dir =
+  match preserve_space_percent ~data_dir with
+    | None -> "off"
+    | Some pct -> Printf.sprintf "%g%%" pct
+
+let handle_preserve_space ~data_dir = function
+  | "status" -> preserve_space_status ~data_dir
+  | "off" ->
+      write_preserve_space ~data_dir "off";
+      "off"
+  | s -> (
+      match float_of_string_opt s with
+        | Some pct when pct > 0. && pct < 100. ->
+            write_preserve_space ~data_dir s;
+            Printf.sprintf "%g%%" pct
+        | _ -> "ERROR expected a percentage in ]0,100[, off or status")
+
 let notify ~path msg =
   try
     let fd = Unix.socket Unix.PF_UNIX Unix.SOCK_STREAM 0 in

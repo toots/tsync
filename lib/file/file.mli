@@ -53,6 +53,10 @@ module type S = sig
   val rename : src:t -> dst:t -> unit Lwt.t
   val revert : ?version:string -> t -> unit Lwt.t
   val apply_foreign_ops : Journal.op list -> unit Lwt.t
+
+  (** Install a gate awaited before every download and every write; a platform
+      layer may use it to block IO while local disk space must be preserved. *)
+  val set_io_gate : (unit -> unit Lwt.t) -> unit
 end
 
 module Make (C : Conf.S) (Sq : Sync_queue.S) : S

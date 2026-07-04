@@ -8,6 +8,7 @@ module Make (C : Conf.S) = struct
   module I = Internal_ops.Make (F)
   module Ih = Ipc_handler.Make (C) (F)
   module Sp = Sync_poller.Make (C) (F)
+  module Dg = Disk_guard.Make (C) (F)
 
   (* ── Full-file storage policy ─────────────────────────────────────────────
      Files persist in the local cache. Eviction is deferred while a file has
@@ -191,7 +192,8 @@ module Make (C : Conf.S) = struct
             [
               ("pendingUploads", `Int (Sq.pending ()));
               ("uploadsCompleted", `Int (Sq.completed_count ()));
-            ]);
+            ]
+            @ Dg.status ());
         on_stop =
           (fun () ->
             do_stop ();
@@ -358,6 +360,9 @@ module Make (C : Conf.S) = struct
                  Lwt.return_unit);
              Log.debug "starting sync poller";
              Sp.start ();
+             Log.debug "starting disk-space guard";
+             F.set_io_gate Dg.wait;
+             Lwt.async Dg.monitor;
              Log.debug "starting cursor flusher";
              Lwt.async cursor_flusher;
              Log.debug "starting IPC server at %s" C.socket_path;

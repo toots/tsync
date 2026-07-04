@@ -172,6 +172,16 @@ let print_stats obj =
   Printf.printf "Cache\n";
   row "dirty files" (string_of_int (i "dirtyFiles"));
   row "open files" (string_of_int (i "openFiles"));
+  Printf.printf "Disk\n";
+  row "free" (Printf.sprintf "%.1f%%" (f "diskFreePercent"));
+  row "preserve"
+    (match List.assoc "preserveSpacePercent" obj with
+      | `Float p -> Printf.sprintf "%g%%" p
+      | _ -> "off");
+  row "throttled"
+    (match List.assoc "throttled" obj with
+      | `Bool b -> string_of_bool b
+      | _ -> "false");
   Printf.printf "Process\n";
   row "cpu" (Printf.sprintf "%.1fs" (f "cpuSeconds"));
   row "memory" (human_bytes (i "rssBytes"))
@@ -532,6 +542,34 @@ let auto_evict_cmd =
   in
   Cmd.v
     (Cmd.info "auto-evict" ~doc:"Enable or disable auto-evict after upload")
+    Term.(const run $ state_arg)
+
+(* ── tsync preserve-space ────────────────────────────────────────────────── *)
+
+let preserve_space_cmd =
+  let state_arg =
+    Arg.(
+      value
+      & pos 0 (some string) None
+      & info [] ~docv:"PERCENT|off|status"
+          ~doc:
+            "Minimum free-space percentage to preserve on the filesystem \
+             holding the local cache (default 10)")
+  in
+  let result obj =
+    match List.assoc_opt "result" obj with Some (`String s) -> s | _ -> ""
+  in
+  let run state =
+    let arg = Option.value ~default:"status" state in
+    match ipc_action ~arg "preserve_space" with
+      | obj -> Printf.printf "preserve-space: %s\n" (result obj)
+      | exception Failure msg -> Printf.eprintf "Error: %s\n" msg
+  in
+  Cmd.v
+    (Cmd.info "preserve-space"
+       ~doc:
+         "Set the minimum free disk space to preserve by throttling and \
+          evicting")
     Term.(const run $ state_arg)
 
 (* ── tsync sync ──────────────────────────────────────────────────────────── *)
@@ -923,6 +961,7 @@ let () =
         purge_cmd;
         expire_cmd;
         auto_evict_cmd;
+        preserve_space_cmd;
       ]
   in
   exit (Cmd.eval cmd)

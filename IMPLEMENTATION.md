@@ -281,6 +281,7 @@ tsync revert   <path> [--version <ts>]
 tsync expire   <date>
 
 tsync auto-evict [on|off|status]
+tsync preserve-space [<percent>|off|status]
 tsync purge   <path>
 ```
 
@@ -311,6 +312,7 @@ Runtime-specific behavior (how eviction happens, whether restore materializes lo
 {"action":"restore","path":"<path>"}
 {"action":"revert","path":"<path>","arg":"<timestamp|>"}
 {"action":"auto_evict","arg":"on|off|status"}
+{"action":"preserve_space","arg":"<percent>|off|status"}
 {"action":"full_resync"}
 {"action":"status"}
 {"action":"stop"}
@@ -401,6 +403,7 @@ All daemon state and backend I/O live on the single Lwt event loop. FUSE runs mu
 | IPC socket | `~/.local/share/tsync/tsync.sock` | (follows data dir) |
 | Notify socket | `~/.local/share/tsync/notify.sock` | (follows data dir) |
 | Auto-evict flag | `~/.local/share/tsync/auto-evict` | (follows data dir) |
+| Preserve-space setting | `~/.local/share/tsync/preserve-space` | (follows data dir) |
 
 The data dir also holds the client UUID, last-sync state, and local pending journal entries for crash recovery.
 
@@ -416,6 +419,17 @@ Each cached file lives at `<cache_root>/<domain>/<path>`. A `.manifest` sidecar 
 ### Auto-evict
 
 After a successful upload, the daemon optionally evicts the local copy. Controlled by `tsync auto-evict on|off`; state persists as the auto-evict flag (see Paths above).
+
+### Preserve-space (FUSE only)
+
+The daemon preserves a minimum percentage of free space on the filesystem holding the cache root. Controlled by `tsync preserve-space <percent>|off`; **defaults to 10%** when never configured. The setting persists as the preserve-space file (see Paths above) and is re-read every second, so changes apply without a restart.
+
+A monitor loop checks free space once per second (via `statvfs` on the cache root). With watermark `t`:
+
+- **Engage** when free space drops below `1.1 × t` (11% for the default): downloads and writes block (a gate awaited in `File.download`/`File.write`; uploads are never gated, since draining the upload queue is what makes files evictable), and clean cached files — uploaded, not dirty, not open — are evicted least-recently-used first.
+- **Disengage** when free space recovers to `1.2 × t` (12% for the default). The gap is hysteresis: acting before the watermark is breached keeps the promise, and the spread prevents flapping around a single threshold.
+
+If nothing is evictable (everything cached is dirty or open), the gate stays closed and the loop retries each second as uploads complete. Independent of auto-evict. `tsync stats` reports `diskFreePercent` (all platforms), plus `preserveSpacePercent` and `throttled` on FUSE.
 
 ### Systemd
 

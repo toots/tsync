@@ -1,0 +1,3 @@
+(test
+ (name preserve_space_test)
+ (libraries tsync_core tsync_disk_space unix))

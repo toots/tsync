@@ -28,6 +28,7 @@ SERIES = [
     ("openFiles", "open", "Queues"),
     ("cpuPercent", "cpu", "CPU %"),
     ("rssMB", "rss", "Memory (MB)"),
+    ("diskFreePercent", "disk free", "Disk free %"),
 ]
 
 samples = []

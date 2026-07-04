@@ -5,6 +5,7 @@
   tsync_conf
   tsync_core
   tsync_metrics
+  tsync_disk_space
   tsync_file
   tsync_queue
   tsync_log

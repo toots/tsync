@@ -9,7 +9,9 @@
   tsync_file
   tsync_local_io
   tsync_ipc_handler
+  tsync_disk_space
   fuse3
+  yojson
   lwt
   lwt.unix
   threads.posix))

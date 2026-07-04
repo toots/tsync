@@ -65,7 +65,12 @@ tsync sync            # apply changes made from other machines
 tsync status          # show daemon state
 tsync stats           # transfer metrics (pending/completed, bandwidth, hashing)
 tsync stop            # unmount
+
+tsync auto-evict on|off        # evict each file automatically once uploaded
+tsync preserve-space <pct>|off # keep at least <pct>% of the disk free (default 10)
 ```
+
+On Linux, `preserve-space` guards the disk holding the cache: when free space approaches the threshold, tsync pauses downloads and writes, evicts the least-recently-used files already safe in the cloud, and resumes once space recovers. It's on by default at 10%; tune it (`tsync preserve-space 20`) or turn it off (`tsync preserve-space off`) at any time.
 
 ### Versioning
 

@@ -1,0 +1,7 @@
+(library
+ (name tsync_disk_space)
+ (wrapped false)
+ (libraries unix)
+ (foreign_stubs
+  (language c)
+  (names disk_space_stubs)))

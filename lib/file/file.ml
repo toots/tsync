@@ -52,6 +52,10 @@ module type S = sig
   val revert : ?version:string -> t -> unit Lwt.t
 
   val apply_foreign_ops : Journal.op list -> unit Lwt.t
+
+  (** Install a gate awaited before every download and every write; a platform
+      layer may use it to block IO while local disk space must be preserved. *)
+  val set_io_gate : (unit -> unit Lwt.t) -> unit
 end
 
 module Make (C : Conf.S) (Sq : Sync_queue.S) : S = struct
@@ -79,6 +83,11 @@ module Make (C : Conf.S) (Sq : Sync_queue.S) : S = struct
     Lwt_pool.create (max 1 C.max_downloads) (fun () -> Lwt.return_unit)
 
   let downloads_completed = ref 0
+
+  (* Awaited before every download and write; a platform layer may install a
+     gate that blocks while local disk space must be preserved. *)
+  let io_gate = ref (fun () -> Lwt.return_unit)
+  let set_io_gate gate = io_gate := gate
 
   (* ── Path helpers ──────────────────────────────────────────────────────── *)
 
@@ -152,6 +161,7 @@ module Make (C : Conf.S) (Sq : Sync_queue.S) : S = struct
     Lwt.return_unit
 
   let download key =
+    let* () = !io_gate () in
     let lp = local_path key in
     let* () = Local.ensure_parent_dir lp in
     let* manifest = read_manifest key in
@@ -323,6 +333,7 @@ module Make (C : Conf.S) (Sq : Sync_queue.S) : S = struct
     Local_io.read (local_path key) buf ~offset
 
   let write key (buf : buffer) ~offset =
+    let* () = !io_gate () in
     let* () = mark_dirty key in
     Local_io.write (local_path key) buf ~offset
 

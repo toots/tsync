@@ -304,6 +304,12 @@ module Make (C : Conf.S) (F : File.S) = struct
                           (get_str obj "arg")
                       in
                       Lwt.return (ok_json [("result", `String result)])
+                  | "preserve_space" ->
+                      let result =
+                        Ipc.handle_preserve_space ~data_dir:C.data_dir
+                          (get_str obj "arg")
+                      in
+                      Lwt.return (ok_json [("result", `String result)])
                   | "full_resync" ->
                       let+ () = hooks.full_resync () in
                       ok_json []
@@ -315,6 +321,11 @@ module Make (C : Conf.S) (F : File.S) = struct
                            :: hooks.status_fields ()))
                   | "stats" ->
                       let rate f = `Int (int_of_float (f ())) in
+                      let disk_free_percent =
+                        match Disk_space.free_fraction C.cache_root with
+                          | free -> `Float (100. *. free)
+                          | exception _ -> `Null
+                      in
                       Lwt.return
                         (ok_json
                            ([
@@ -333,6 +344,7 @@ module Make (C : Conf.S) (F : File.S) = struct
                               ("hashesPerSec", rate Metrics.hash_rate);
                               ("cpuSeconds", `Float (Metrics.cpu_seconds ()));
                               ("rssBytes", `Int (Metrics.rss_bytes ()));
+                              ("diskFreePercent", disk_free_percent);
                             ]
                            @ hooks.stats_fields ()))
                   | "stop" ->
