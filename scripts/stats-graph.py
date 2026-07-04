@@ -19,8 +19,8 @@ OUT = sys.argv[2] if len(sys.argv) > 2 else "stats-graph.png"
 
 # (json key, series label, panel) — panel groups series onto shared subplots.
 SERIES = [
-    ("uploadBytesPerSec", "upload", "Bytes/s"),
-    ("downloadBytesPerSec", "download", "Bytes/s"),
+    ("uploadMBps", "upload", "MB/s"),
+    ("downloadMBps", "download", "MB/s"),
     ("hashesPerSec", "hashes/s", "Rates"),
     ("pendingUploads", "pending up", "Queues"),
     ("pendingDownloads", "pending down", "Queues"),
@@ -49,6 +49,8 @@ xs = [s.get("t", 0) - t0 for s in samples]
 # Derive CPU% (cpuSeconds is cumulative) and RSS in MB.
 for i, s in enumerate(samples):
     s["rssMB"] = s.get("rssBytes", 0) / 1e6
+    s["uploadMBps"] = s.get("uploadBytesPerSec", 0) / 1e6
+    s["downloadMBps"] = s.get("downloadBytesPerSec", 0) / 1e6
     dt = xs[i] - xs[i - 1] if i else 0
     dc = s.get("cpuSeconds", 0) - samples[i - 1].get("cpuSeconds", 0) if i else 0
     s["cpuPercent"] = 100 * dc / dt if dt > 0 else 0
