@@ -136,7 +136,7 @@ If neither is set, conduit's built-in default (native) is used, so B2 works out 
 
 Every file is stored as one or more 8 MB chunks. Each chunk is stored at `<prefix>/.chunks/<h1>-<h2>` where `h1` and `h2` are the xxHash3-64 of the chunk data computed with seeds 0 and 1 respectively, encoded as 16-character lowercase hex. The primary key holds a JSON manifest. Files smaller than 8 MB produce a single-chunk manifest. On re-upload, only chunks whose hash changed are uploaded — unchanged chunks are reused. Chunks are shared across all files and versions.
 
-Hashing is done per file, not per chunk, and is cancellable. `remote.ml`'s `upload` passes an opaque `Xxhash.hash_state` — a C struct holding a copy of the file path and an atomic cancel flag — to `Xxhash.hash_file_chunks`, which, in one `Hash_pool.detach` on a worker domain, opens the file and hashes every chunk (both seeds) with the OCaml runtime lock released for the whole loop, reading each chunk with `pread` into a single reusable buffer. The loop polls the atomic between chunks, so an in-flight hash is interruptible: the sync queue's per-key cancel (`Sync_queue.cancel_put`, flipped on a concurrent write) *is* that same flag, and hashing stops within one chunk, returning `None` so the upload is dropped. A concurrent in-place truncation surfaces as a short read, which also returns `None`. Chunk uploads then read their bytes from disk, bounded independently of hashing. Peak memory is one chunk-sized read buffer per in-flight hash, regardless of file size.
+Hashing happens inline with the upload of each chunk. `remote.ml`'s `upload` stats the file, then processes chunks with bounded concurrency (4 in flight): each chunk is read from disk, hashed (both seeds, on the event loop — XXH3 on 8 MB is sub-millisecond), and uploaded only if its key is absent from the backend. Once every chunk is stored, the collected entries become the manifest, which is written last. The upload is cancellable at chunk granularity: a `bool ref` cancel flag is polled before each chunk and raises `Cancelled` when set — the sync queue's per-key cancel (`Sync_queue.cancel_put`, flipped on a concurrent write) is that same flag. A concurrent in-place truncation surfaces as a short read, which also aborts the upload. Peak memory is one chunk-sized buffer per in-flight chunk. Network transfer is the concurrency bound; there is no separate CPU-bound hashing stage.
 
 Manifest format:
 
@@ -244,8 +244,7 @@ All library modules are parameterised by a `Conf.S` module (a first-class module
 | `log/` | Logging backends (printf for development, syslog for production) |
 | `file/manifest.ml` | Manifest JSON serialization/deserialization; chunk key derivation |
 | `file/local.ml` | Local cache paths; create/evict/rename local cache entries |
-| `file/remote.ml` | Chunked upload and download against the backend. Upload hashes the whole file in C (open + `pread` + hash) via a cancellable `Xxhash.hash_state`, then reads and stores each chunk |
-| `file/hash_pool.ml` | Domainslib pool (via `lwt_domain`) that runs each file's whole-file hash off the event loop, so concurrent uploads hash in parallel |
+| `file/remote.ml` | Chunked upload and download against the backend. Upload reads, hashes and stores each chunk with bounded concurrency, then writes the manifest |
 | `file/versioning.ml` | Version key construction + `save` (copy live manifest to a timestamped version) |
 | `file/expire.ml` | `Expire.Make(C).expire` — delete versions older than a cutoff, then GC unreferenced chunks |
 | `file/file.ml` | `File.Make(C)(Sq)` — central file abstraction: stat, read, write, upload, download, evict, delete, rename, mkdir; dirty/open tracking; `apply_foreign_ops` and conflict-copy publishing |

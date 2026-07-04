@@ -2,9 +2,9 @@ open Lwt.Syntax
 
 exception Cancelled = Backend.Cancelled
 
-(* Read [len] bytes at [offset] from [path] into a string, for uploading a chunk.
-   Hashing reads the file itself (in C, via the hash state); this is the separate
-   read of the bytes to send. *)
+(* Read [len] bytes at [offset] from [path] into a string; these bytes are both
+   hashed and uploaded. A short read means the file was truncated under us:
+   abort the upload. *)
 let read_chunk_string path offset len =
   let* fd = Lwt_unix.openfile path [Unix.O_RDONLY] 0 in
   Lwt.finalize
@@ -17,7 +17,7 @@ let read_chunk_string path offset len =
         if pos >= len then Lwt.return_unit
         else
           let* n = Lwt_unix.read fd buf pos (len - pos) in
-          if n = 0 then Lwt.return_unit else loop (pos + n)
+          if n = 0 then raise Cancelled else loop (pos + n)
       in
       let+ () = loop 0 in
       Bytes.unsafe_to_string buf)
@@ -49,72 +49,64 @@ module Make (C : Conf.S) = struct
       (fun (module B : Backend.S) -> B.put ~key ~data ())
       C.backends
 
-  (* How many chunks are uploaded at once for a single file. An I/O and memory
-     bound (each in-flight chunk holds an 8 MB payload copy), independent of CPU
-     count and of hashing (the whole file is hashed in one pass in [upload]). *)
+  (* How many chunks are in flight at once for a single file. An I/O and memory
+     bound: each in-flight chunk holds an 8 MB payload copy. *)
   let upload_concurrency = 4
 
-  (* Upload one chunk (read from [src_path]) if it is not already present. *)
-  let upload_chunk src_path ~cancel (entry : Manifest.chunk_entry) =
-    if Xxhash.hash_state_is_cancelled cancel then raise Cancelled;
+  (* Read, hash and (if not already present) upload chunk [index], returning
+     its manifest entry. *)
+  let upload_chunk src_path ~cancel ~file_size index =
+    if !cancel then raise Cancelled;
+    let offset = index * Manifest.chunk_size in
+    let size = min Manifest.chunk_size (file_size - offset) in
+    let* data = read_chunk_string src_path offset size in
+    let entry =
+      Manifest.
+        {
+          index;
+          h1 = Xxhash.hash_hex data 0;
+          h2 = Xxhash.hash_hex data 1;
+          size;
+        }
+    in
+    Metrics.add_hashed 1;
     let ck = C.chunk_prefix ^ Manifest.chunk_key entry in
     let (module Primary : Backend.S) = primary () in
     let* head = Primary.head_opt ~key:ck () in
-    if head <> None then Lwt.return_unit
-    else (
-      let offset = entry.Manifest.index * Manifest.chunk_size in
-      let* data = read_chunk_string src_path offset entry.Manifest.size in
-      Metrics.add_uploaded entry.Manifest.size;
-      put_all ~key:ck ~data ())
+    let+ () =
+      if head <> None then Lwt.return_unit
+      else (
+        Metrics.add_uploaded size;
+        put_all ~key:ck ~data ())
+    in
+    entry
 
-  let upload ~key ~src_path ~mtime ?cancel () =
-    let cancel =
-      match cancel with
-        | Some c -> c
-        | None -> Xxhash.hash_state_create src_path
+  let upload ~key ~src_path ~mtime ?(cancel = ref false) () =
+    let* st = Lwt_unix.stat src_path in
+    let file_size = st.Unix.st_size in
+    Log.debug "upload %s: file_size=%d" key file_size;
+    let num_chunks =
+      if file_size = 0 then 1
+      else (file_size + Manifest.chunk_size - 1) / Manifest.chunk_size
     in
-    (* C opens, mmaps and hashes the whole file, polling [cancel] between chunks
-       and releasing the runtime lock for the loop. [None] = cancelled mid-hash
-       (or the file vanished). *)
-    let* hashes =
-      Hash_pool.detach
-        (fun () ->
-          Xxhash.hash_file_chunks cancel ~chunk_size:Manifest.chunk_size)
-        ()
+    let* entries =
+      map_bounded upload_concurrency
+        (upload_chunk src_path ~cancel ~file_size)
+        (List.init num_chunks Fun.id)
     in
-    match hashes with
-      | None -> raise Cancelled
-      | Some (file_size, hashes) ->
-          let num_chunks = Array.length hashes in
-          Log.debug "upload %s: file_size=%d" key file_size;
-          Metrics.add_hashed num_chunks;
-          let entries =
-            List.init num_chunks (fun i ->
-                let h1, h2 = hashes.(i) in
-                let len =
-                  min Manifest.chunk_size (file_size - (i * Manifest.chunk_size))
-                in
-                Manifest.{ index = i; h1; h2; size = len })
-          in
-          let* (_ : unit list) =
-            map_bounded upload_concurrency
-              (upload_chunk src_path ~cancel)
-              entries
-          in
-          if Xxhash.hash_state_is_cancelled cancel then raise Cancelled;
-          let state =
-            Manifest.make ~size:(Int64.of_int file_size)
-              ~chunk_size:Manifest.chunk_size ~chunks:entries ~mtime
-          in
-          let* () =
-            if C.versioning then
-              Versioning.save ~backends:C.backends
-                ~domain_prefix:C.domain_prefix
-                ~versions_prefix:C.versions_prefix ~key
-            else Lwt.return_unit
-          in
-          let+ () = put_all ~key ~data:(Manifest.to_string state) () in
-          state
+    if !cancel then raise Cancelled;
+    let state =
+      Manifest.make ~size:(Int64.of_int file_size)
+        ~chunk_size:Manifest.chunk_size ~chunks:entries ~mtime
+    in
+    let* () =
+      if C.versioning then
+        Versioning.save ~backends:C.backends ~domain_prefix:C.domain_prefix
+          ~versions_prefix:C.versions_prefix ~key
+      else Lwt.return_unit
+    in
+    let+ () = put_all ~key ~data:(Manifest.to_string state) () in
+    state
 
   let assemble_chunks ~(manifest : Manifest.t) ~dst_path primary =
     let (module Primary : Backend.S) = primary in

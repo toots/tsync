@@ -3,17 +3,15 @@ open Lwt.Syntax
 let mkdir_p = Fs_util.mkdir_p
 let readdir_list = Fs_util.readdir_list
 
-(* Per-write temp suffix so concurrent writers of the same key (duplicate chunks
-   in one file, or the same chunk from two uploads) each stage to their own temp
-   and rename it into place independently — atomic, last writer wins. *)
-let tmp_seq = Atomic.make 0
+(* Each write stages to its own temp file (pid + sequence suffix) and renames it
+   into place, so overlapping Lwt writes of the same key — e.g. the same chunk
+   uploaded twice concurrently — never see a partial file; last rename wins. *)
+let tmp_seq = ref 0
 
 let write_file path data =
   let* () = Fs_util.ensure_parent path in
-  let tmp =
-    Printf.sprintf "%s.%d.%d.tmp" path (Unix.getpid ())
-      (Atomic.fetch_and_add tmp_seq 1)
-  in
+  incr tmp_seq;
+  let tmp = Printf.sprintf "%s.%d.%d.tmp" path (Unix.getpid ()) !tmp_seq in
   let* () =
     Lwt_io.with_file ~mode:Lwt_io.Output tmp (fun oc -> Lwt_io.write oc data)
   in
