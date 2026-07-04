@@ -3,9 +3,17 @@ open Lwt.Syntax
 let mkdir_p = Fs_util.mkdir_p
 let readdir_list = Fs_util.readdir_list
 
+(* Unique per-write temp suffix: two concurrent writers of the same key (e.g.
+   duplicate chunks in one file, or the same chunk from two uploads) must not
+   share a temp path, or one renames it away and the other hits ENOENT. *)
+let tmp_seq = Atomic.make 0
+
 let write_file path data =
   let* () = Fs_util.ensure_parent path in
-  let tmp = path ^ ".tmp" in
+  let tmp =
+    Printf.sprintf "%s.%d.%d.tmp" path (Unix.getpid ())
+      (Atomic.fetch_and_add tmp_seq 1)
+  in
   let* () =
     Lwt_io.with_file ~mode:Lwt_io.Output tmp (fun oc -> Lwt_io.write oc data)
   in

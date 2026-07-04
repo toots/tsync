@@ -8,7 +8,10 @@ external hash_with_seed : string -> int -> int64 = "caml_xxh3_64_with_seed"
     lowercase hex string. *)
 val hash_hex : string -> int -> string
 
-(** [hash_hex_bigarray buffer ~length seed] hashes the first [length] bytes of
-    [buffer]. The OCaml runtime lock is released while hashing, so concurrent
-    hashing threads run in parallel. *)
-val hash_hex_bigarray : bigstring -> length:int -> int -> string
+(** [hash_chunks_bigarray buffer ~length ~chunk_size] hashes the first [length]
+    bytes of [buffer] split into [chunk_size]-byte chunks (the last possibly
+    shorter), returning per chunk the seed-0 and seed-1 XXH3-64 hashes as
+    16-character lowercase hex. The OCaml runtime lock is released for the whole
+    loop, so a single call (one detach) hashes an entire file. *)
+val hash_chunks_bigarray :
+  bigstring -> length:int -> chunk_size:int -> (string * string) array

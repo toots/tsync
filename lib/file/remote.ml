@@ -2,25 +2,24 @@ open Lwt.Syntax
 
 exception Cancelled = Backend.Cancelled
 
-(* Read [len] bytes at [offset] from [path] into a fresh off-heap buffer, safe to
-   hash with the runtime lock released. *)
-let read_chunk_bigarray path offset len =
-  let buf = Lwt_bytes.create len in
-  let* fd = Lwt_unix.openfile path [Unix.O_RDONLY] 0 in
-  Lwt.finalize
-    (fun () ->
-      let* _ =
-        Lwt_unix.LargeFile.lseek fd (Int64.of_int offset) Unix.SEEK_SET
-      in
-      let rec loop pos =
-        if pos >= len then Lwt.return_unit
-        else
-          let* n = Lwt_bytes.read fd buf pos (len - pos) in
-          if n = 0 then Lwt.return_unit else loop (pos + n)
-      in
-      let+ () = loop 0 in
-      buf)
-    (fun () -> Lwt_unix.close fd)
+(* Memory-map [src_path] read-only as an off-heap bigarray, so the whole file
+   can be hashed under a single runtime-lock release without committing its size
+   in RAM (the OS pages it in on demand). Safe against concurrent writes: those
+   rename-replace the cache file (new inode), leaving this mapping valid — the
+   file is never truncated in place. An empty file yields an empty buffer. *)
+let map_file_bigarray src_path file_size =
+  if file_size = 0 then Lwt.return (Lwt_bytes.create 0)
+  else
+    let* fd = Lwt_unix.openfile src_path [Unix.O_RDONLY] 0 in
+    Lwt.finalize
+      (fun () ->
+        let ba =
+          Unix.map_file
+            (Lwt_unix.unix_file_descr fd)
+            Bigarray.char Bigarray.c_layout false [| file_size |]
+        in
+        Lwt.return (Bigarray.array1_of_genarray ba))
+      (fun () -> Lwt_unix.close fd)
 
 (* Process [xs] with at most [width] tasks running concurrently, preserving
    order. Bounds peak memory to [width] chunk buffers. *)
@@ -48,36 +47,24 @@ module Make (C : Conf.S) = struct
       (fun (module B : Backend.S) -> B.put ~key ~data ())
       C.backends
 
-  (* How many chunks are read + hashed + uploaded at once for a single file.
-     This is an I/O and memory bound (each in-flight chunk holds an 8 MB
-     buffer), deliberately independent of CPU core count: the hashing itself
-     runs on the domain pool [Hash_pool], which supplies the CPU parallelism. *)
-  let chunk_concurrency = 4
+  (* How many chunks are uploaded at once for a single file. An I/O and memory
+     bound (each in-flight chunk holds an 8 MB payload copy), independent of CPU
+     count. Hashing is no longer per-chunk: the whole file is hashed in one pass
+     (see [upload]), so this bounds only the chunk uploads. *)
+  let upload_concurrency = 4
 
-  (* Read, hash (in parallel on the domain pool) and upload one chunk if it is
-     not already present. Returns its manifest entry. *)
-  let process_chunk src_path ~cancel (index, offset, len) =
+  (* Upload one chunk from the mapped file buffer if it is not already present. *)
+  let upload_chunk buf ~cancel (entry : Manifest.chunk_entry) =
     if Atomic.get cancel then raise Cancelled;
-    let* buf = read_chunk_bigarray src_path offset len in
-    let* h1, h2 =
-      Hash_pool.detach
-        (fun () ->
-          ( Xxhash.hash_hex_bigarray buf ~length:len 0,
-            Xxhash.hash_hex_bigarray buf ~length:len 1 ))
-        ()
-    in
-    Metrics.add_hashed 1;
-    let entry = Manifest.{ index; h1; h2; size = len } in
     let ck = C.chunk_prefix ^ Manifest.chunk_key entry in
     let (module Primary : Backend.S) = primary () in
     let* head = Primary.head_opt ~key:ck () in
-    let+ () =
-      if head = None then (
-        Metrics.add_uploaded len;
-        put_all ~key:ck ~data:(Lwt_bytes.to_string buf) ())
-      else Lwt.return_unit
-    in
-    entry
+    if head <> None then Lwt.return_unit
+    else (
+      let offset = entry.Manifest.index * Manifest.chunk_size in
+      let slice = Bigarray.Array1.sub buf offset entry.Manifest.size in
+      Metrics.add_uploaded entry.Manifest.size;
+      put_all ~key:ck ~data:(Lwt_bytes.to_string slice) ())
 
   let upload ~key ~src_path ~mtime ?(cancel = Atomic.make false) () =
     let* stat = Lwt_unix.stat src_path in
@@ -86,14 +73,28 @@ module Make (C : Conf.S) = struct
     let num_chunks =
       max 1 ((file_size + Manifest.chunk_size - 1) / Manifest.chunk_size)
     in
-    let chunks =
-      List.init num_chunks (fun i ->
-          let offset = i * Manifest.chunk_size in
-          let len = min Manifest.chunk_size (file_size - offset) in
-          (i, offset, len))
+    let* buf = map_file_bigarray src_path file_size in
+    if Atomic.get cancel then raise Cancelled;
+    (* One detach, one runtime-lock release, all chunks (both seeds). *)
+    let* hashes =
+      Hash_pool.detach
+        (fun () ->
+          Xxhash.hash_chunks_bigarray buf ~length:file_size
+            ~chunk_size:Manifest.chunk_size)
+        ()
     in
-    let* entries =
-      map_bounded chunk_concurrency (process_chunk src_path ~cancel) chunks
+    Metrics.add_hashed num_chunks;
+    if Atomic.get cancel then raise Cancelled;
+    let entries =
+      List.init num_chunks (fun i ->
+          let h1, h2 = hashes.(i) in
+          let len =
+            min Manifest.chunk_size (file_size - (i * Manifest.chunk_size))
+          in
+          Manifest.{ index = i; h1; h2; size = len })
+    in
+    let* (_ : unit list) =
+      map_bounded upload_concurrency (upload_chunk buf ~cancel) entries
     in
     if Atomic.get cancel then raise Cancelled;
     let state =
