@@ -11,7 +11,7 @@ module type S = sig
   val read_manifest : t -> Manifest.state option Lwt.t
   val write_manifest : t -> Manifest.state -> unit Lwt.t
   val delete_manifest : t -> unit Lwt.t
-  val upload : ?cancel:bool Atomic.t -> t -> unit Lwt.t
+  val upload : ?cancel:Xxhash.hash_state -> t -> unit Lwt.t
   val download : t -> unit Lwt.t
   val ensure_cached : t -> unit Lwt.t
   val stat : t -> Unix.LargeFile.stats option Lwt.t

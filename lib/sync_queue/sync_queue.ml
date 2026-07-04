@@ -14,7 +14,7 @@ module type S = sig
   val completed_count : unit -> int
 
   val start :
-    upload:(key:string -> cancel:bool Atomic.t -> unit Lwt.t) ->
+    upload:(key:string -> cancel:Xxhash.hash_state -> unit Lwt.t) ->
     on_cursor:(entry_key:string -> unit) ->
     on_upload_done:(key:string -> unit Lwt.t) ->
     unit
@@ -33,7 +33,7 @@ module Make (C : Conf.S) : S = struct
     ops : Journal.op list;
   }
 
-  type slot = { cancel : bool Atomic.t; mutable pending : put_data option }
+  type slot = { cancel : Xxhash.hash_state; mutable pending : put_data option }
 
   (* All queue state is touched only from the Lwt event-loop thread (workers and
      the post/cancel entry points all run there), so no locks are needed. *)
@@ -43,7 +43,7 @@ module Make (C : Conf.S) : S = struct
   let stop = Atomic.make false
   let workers : unit Lwt.t list ref = ref []
 
-  let upload_fn : (key:string -> cancel:bool Atomic.t -> unit Lwt.t) ref =
+  let upload_fn : (key:string -> cancel:Xxhash.hash_state -> unit Lwt.t) ref =
     ref (fun ~key:_ ~cancel:_ -> Lwt.return_unit)
 
   let on_cursor_fn : (entry_key:string -> unit) ref =
@@ -63,8 +63,9 @@ module Make (C : Conf.S) : S = struct
     Queue.add pd queue;
     Lwt_condition.signal queue_cond ()
 
-  let add_slot key =
-    Hashtbl.add slots key { cancel = Atomic.make false; pending = None }
+  let add_slot key src_path =
+    Hashtbl.add slots key
+      { cancel = Xxhash.hash_state_create src_path; pending = None }
 
   let replace_pending slot pd =
     (match slot.pending with
@@ -81,7 +82,7 @@ module Make (C : Conf.S) : S = struct
   let cancel_put key =
     match Hashtbl.find_opt slots key with
       | Some slot ->
-          Atomic.set slot.cancel true;
+          Xxhash.hash_state_cancel slot.cancel;
           clear_pending slot;
           true
       | None -> false
@@ -95,12 +96,14 @@ module Make (C : Conf.S) : S = struct
   let completed_count () = !completed
 
   let exec_put slot ({ key; entry_key; ops; _ } : put_data) =
-    if Atomic.get slot.cancel then J.delete_local_pending ~entry_key
+    if Xxhash.hash_state_is_cancelled slot.cancel then
+      J.delete_local_pending ~entry_key
     else
       Lwt.catch
         (fun () ->
           let* () = !upload_fn ~key ~cancel:slot.cancel in
-          if Atomic.get slot.cancel then J.delete_local_pending ~entry_key
+          if Xxhash.hash_state_is_cancelled slot.cancel then
+            J.delete_local_pending ~entry_key
           else
             let* () = J.delete_local_pending ~entry_key in
             let* (_ : string) = Fs.write_journal_entry ~entry_key ops in
@@ -128,7 +131,7 @@ module Make (C : Conf.S) : S = struct
       (match slot.pending with
         | None -> Hashtbl.remove slots pd.key
         | Some next ->
-            Atomic.set slot.cancel false;
+            Xxhash.hash_state_reset slot.cancel;
             slot.pending <- None;
             enqueue next);
       worker_loop ()
@@ -151,9 +154,9 @@ module Make (C : Conf.S) : S = struct
     let pd = { key; src_path; entry_key; ops } in
     match Hashtbl.find_opt slots key with
       | None ->
-          add_slot key;
+          add_slot key pd.src_path;
           enqueue pd
       | Some slot ->
-          Atomic.set slot.cancel true;
+          Xxhash.hash_state_cancel slot.cancel;
           replace_pending slot pd
 end

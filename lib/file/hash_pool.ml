@@ -1,5 +1,6 @@
-(* Shared Domainslib pool (via lwt_domain) for parallel chunk hashing. The pool
-   is created on first use and lives for the process lifetime.
+(* Shared Domainslib pool (via lwt_domain) for hashing files off the event loop,
+   in parallel across concurrent uploads. The pool is created on first use and
+   lives for the process lifetime.
    ponytail: no teardown — a daemon-lifetime pool; add teardown_pool only if
    pools are ever created per-request. *)
 let pool =

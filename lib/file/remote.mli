@@ -5,7 +5,7 @@ module Make (C : Conf.S) : sig
     key:string ->
     src_path:string ->
     mtime:float ->
-    ?cancel:bool Atomic.t ->
+    ?cancel:Xxhash.hash_state ->
     unit ->
     Manifest.state Lwt.t
 

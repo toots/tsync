@@ -18,7 +18,7 @@ module type S = sig
   val completed_count : unit -> int
 
   val start :
-    upload:(key:string -> cancel:bool Atomic.t -> unit Lwt.t) ->
+    upload:(key:string -> cancel:Xxhash.hash_state -> unit Lwt.t) ->
     on_cursor:(entry_key:string -> unit) ->
     on_upload_done:(key:string -> unit Lwt.t) ->
     unit

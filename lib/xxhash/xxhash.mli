@@ -1,6 +1,3 @@
-type bigstring =
-  (char, Bigarray.int8_unsigned_elt, Bigarray.c_layout) Bigarray.Array1.t
-
 (** Compute the XXH3-64 hash of [data] with the given [seed]. *)
 external hash_with_seed : string -> int -> int64 = "caml_xxh3_64_with_seed"
 
@@ -8,10 +5,22 @@ external hash_with_seed : string -> int -> int64 = "caml_xxh3_64_with_seed"
     lowercase hex string. *)
 val hash_hex : string -> int -> string
 
-(** [hash_chunks_bigarray buffer ~length ~chunk_size] hashes the first [length]
-    bytes of [buffer] split into [chunk_size]-byte chunks (the last possibly
-    shorter), returning per chunk the seed-0 and seed-1 XXH3-64 hashes as
-    16-character lowercase hex. The OCaml runtime lock is released for the whole
-    loop, so a single call (one detach) hashes an entire file. *)
-val hash_chunks_bigarray :
-  bigstring -> length:int -> chunk_size:int -> (string * string) array
+(** Opaque, cancellable file-hashing state, created from a file path (an
+    off-heap copy is kept). The hashing loop polls it, and [hash_state_cancel]
+    stops it as soon as the current chunk finishes. *)
+type hash_state
+
+val hash_state_create : string -> hash_state
+val hash_state_cancel : hash_state -> unit
+val hash_state_reset : hash_state -> unit
+val hash_state_is_cancelled : hash_state -> bool
+
+(** [hash_file_chunks state ~chunk_size] opens and memory-maps the state's file
+    and hashes it in [chunk_size]-byte chunks, returning
+    [Some (file_size, hashes)] with, per chunk, its seed-0 and seed-1 XXH3-64
+    hashes as 16-char lowercase hex. Returns [None] if the state was cancelled
+    partway through or the file could not be opened. The runtime lock is
+    released for the whole hash, and the cancel flag is polled between chunks.
+*)
+val hash_file_chunks :
+  hash_state -> chunk_size:int -> (int * (string * string) array) option

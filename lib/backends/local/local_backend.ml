@@ -3,9 +3,9 @@ open Lwt.Syntax
 let mkdir_p = Fs_util.mkdir_p
 let readdir_list = Fs_util.readdir_list
 
-(* Unique per-write temp suffix: two concurrent writers of the same key (e.g.
-   duplicate chunks in one file, or the same chunk from two uploads) must not
-   share a temp path, or one renames it away and the other hits ENOENT. *)
+(* Per-write temp suffix so concurrent writers of the same key (duplicate chunks
+   in one file, or the same chunk from two uploads) each stage to their own temp
+   and rename it into place independently — atomic, last writer wins. *)
 let tmp_seq = Atomic.make 0
 
 let write_file path data =

@@ -180,9 +180,16 @@ let stats_cmd =
       & info ["w"; "watch"] ~docv:"SECONDS"
           ~doc:"Poll and redraw every $(docv) seconds")
   in
-  let run watch =
+  let json_arg =
+    Arg.(
+      value & flag & info ["json"] ~doc:"Output raw JSON, one object per line")
+  in
+  let run json watch =
     let show () =
       match ipc_action "stats" with
+        | obj when json ->
+            let obj = ("t", `Float (Unix.gettimeofday ())) :: obj in
+            print_endline (Yojson.Safe.to_string (`Assoc obj))
         | obj -> print_stats obj
         | exception Failure msg -> Printf.eprintf "Error: %s\n" msg
         | exception _ -> print_endline "Daemon not running"
@@ -191,7 +198,7 @@ let stats_cmd =
       | None -> show ()
       | Some interval ->
           while true do
-            print_string "\027[2J\027[H";
+            if not json then print_string "\027[2J\027[H";
             show ();
             flush stdout;
             Unix.sleepf interval
@@ -200,7 +207,7 @@ let stats_cmd =
   Cmd.v
     (Cmd.info "stats"
        ~doc:"Show transfer metrics (pending/completed uploads and downloads)")
-    Term.(const run $ watch_arg)
+    Term.(const run $ json_arg $ watch_arg)
 
 (* ── tsync evict ─────────────────────────────────────────────────────────── *)
 
