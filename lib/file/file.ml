@@ -147,6 +147,12 @@ module Make (C : Conf.S) (Sq : Sync_queue.S) : S = struct
     let* st = Lwt_unix.stat lp in
     let mtime = st.Unix.st_mtime in
     let* state = R.upload ~key ~src_path:lp ~mtime ?cancel () in
+    (* Cancelled while finishing (e.g. renamed away mid-upload): the local
+       sidecar under this name has already been moved; writing it back would
+       resurrect a ghost entry. *)
+    (match cancel with
+      | Some c when !c -> raise Backend.Cancelled
+      | _ -> ());
     let* () = write_manifest key state in
     clear_dirty key;
     Lwt.return_unit

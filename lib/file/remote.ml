@@ -146,8 +146,26 @@ module Make (C : Conf.S) = struct
           ~versions_prefix:C.versions_prefix ~key
       else Lwt.return_unit
     in
-    let+ () = put_all ~key ~data:(Manifest.to_string state) () in
-    state
+    let* () = put_all ~key ~data:(Manifest.to_string state) () in
+    (* The upload may have been cancelled while the manifest put was in
+       flight (e.g. the file was renamed away mid-upload). Leaving the
+       manifest published would create a ghost object under a name that no
+       longer exists locally; undo it. Chunks stay: they are content-addressed
+       and referenced by the successor upload. *)
+    if !cancel then (
+      let* () =
+        Lwt.catch
+          (fun () ->
+            Lwt_list.iter_s
+              (fun (module B : Backend.S) -> B.delete ~key ())
+              C.backends)
+          (fun exn ->
+            Log.err "upload %s: cancelled-manifest cleanup failed: %s" key
+              (Printexc.to_string exn);
+            Lwt.return_unit)
+      in
+      raise Cancelled)
+    else Lwt.return state
 
   let assemble_chunks ~(manifest : Manifest.t) ~dst_path primary =
     let (module Primary : Backend.S) = primary in
