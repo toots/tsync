@@ -232,16 +232,18 @@ module Make (C : Conf.S) = struct
             let ck = C.chunk_prefix ^ Manifest.chunk_key chunk in
             let* data = Primary.get ~key:ck () in
             Metrics.add_downloaded (String.length data);
-            let* _ =
-              Lwt_unix.LargeFile.lseek fd
-                (Int64.of_int (chunk.index * manifest.Manifest.chunk_size))
-                Unix.SEEK_SET
-            in
+            (* pwrite instead of lseek+write: one syscall instead of two, and
+               (unlike lseek, which moves the fd's shared file position) safe
+               if this is ever parallelized across chunks later. *)
+            let base = chunk.index * manifest.Manifest.chunk_size in
             let len = String.length data in
             let rec loop pos =
               if pos >= len then Lwt.return_unit
               else
-                let* n = Lwt_unix.write_string fd data pos (len - pos) in
+                let* n =
+                  Lwt_unix.pwrite_string fd data ~file_offset:(base + pos) pos
+                    (len - pos)
+                in
                 loop (pos + n)
             in
             loop 0)

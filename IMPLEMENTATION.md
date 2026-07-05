@@ -75,7 +75,7 @@ Config path is platform-specific — see each platform's **Paths** section below
 | `versioning` | bool | Save a manifest version under `.versions/` on every modify/rename/delete |
 | `name` | string | Human-readable client name, used to label conflict copies (e.g. `"report (conflicted copy from Romain's MacBook Pro).txt"`). Defaults to the hostname |
 | `tls` | string | Optional. TLS backend for S3 connections: `"native"` (ocaml-tls, default) or `"openssl"`. See [TLS backend](#tls-backend) |
-| `maxUploads` | int | Optional. Max files uploaded concurrently (default 4) |
+| `maxUploads` | int | Optional. Max concurrent upload operations (default 4) — bounds both how many files the upload workers process at once and, via the shared chunk buffer pool, how many chunk reads/uploads run concurrently across all of them combined. See [Chunked uploads](#chunked-uploads) |
 | `maxDownloads` | int | Optional. Max files downloaded concurrently (default 8) |
 | `domains` | domain[] | One or more domain objects |
 
@@ -98,6 +98,7 @@ Config path is platform-specific — see each platform's **Paths** section below
 | `accessKeyId` | string | AWS access key ID |
 | `secretAccessKey` | string | AWS secret access key |
 | `main` | bool | Optional. Mark this backend as the primary (read) backend. See [Primary backend selection](#primary-backend-selection) |
+| `unsignedPayload` | bool | Optional. Skip per-chunk SHA256 payload signing (`UNSIGNED-PAYLOAD`), trading the request body's integrity signature for lower CPU use. Safe over TLS, where the transport already authenticates the body. Default `false` |
 
 **Backend fields (`type: "local"`):**
 
@@ -136,7 +137,7 @@ If neither is set, conduit's built-in default (native) is used, so B2 works out 
 
 Every file is stored as one or more 8 MB chunks. Each chunk is stored at `<prefix>/.chunks/<h1>-<h2>` where `h1` and `h2` are the xxHash3-64 of the chunk data computed with seeds 0 and 1 respectively, encoded as 16-character lowercase hex. The primary key holds a JSON manifest. Files smaller than 8 MB produce a single-chunk manifest. On re-upload, only chunks whose hash changed are uploaded — unchanged chunks are reused. Chunks are shared across all files and versions.
 
-Hashing happens inline with the upload of each chunk. `remote.ml`'s `upload` stats the file, then processes chunks with bounded concurrency (4 in flight): each chunk is read from disk, hashed (both seeds, on the event loop — XXH3 on 8 MB is sub-millisecond), and uploaded only if its key is absent from the backend. Once every chunk is stored, the collected entries become the manifest, which is written last. The upload is cancellable at chunk granularity: a `bool ref` cancel flag is polled before each chunk and raises `Cancelled` when set — the sync queue's per-key cancel (`Sync_queue.cancel_put`, flipped on a concurrent write) is that same flag. A concurrent in-place truncation surfaces as a short read, which also aborts the upload. Peak memory is one chunk-sized buffer per in-flight chunk. Network transfer is the concurrency bound; there is no separate CPU-bound hashing stage.
+Hashing happens inline with the upload of each chunk. `remote.ml`'s `upload` opens the file once, stats it, then launches every chunk's task at once via `Lwt_list.map_p` — concurrency is bounded not by batching, but by a shared `Buffer_pool` sized to `maxUploads`: each chunk task blocks on acquiring a pooled buffer until one frees, so real concurrent chunk work is capped at `maxUploads` regardless of how many files are uploading at once. Each chunk is read from the file with a positioned `pread` (no separate `lseek`, and no per-chunk `open`/`close`: one fd is opened per file, shared safely across concurrently-reading chunks), hashed (both seeds, on the event loop — XXH3 on 8 MB is sub-millisecond), and uploaded only if a HEAD check finds its key absent from the backend; a per-session table memoizes chunks already confirmed present or just uploaded, so a repeated chunk (same content in another file, or a retry) skips the HEAD round trip. There's no upfront listing of existing chunks — that would scale with the size of the whole historical chunk store rather than with the upload actually being done. Once every chunk is stored, the collected entries become the manifest, which is written last. The upload is cancellable at chunk granularity: a `bool ref` cancel flag is polled before each chunk and raises `Cancelled` when set — the sync queue's per-key cancel (`Sync_queue.cancel_put`, flipped on a concurrent write) is that same flag. A concurrent in-place truncation surfaces as a short read, which also aborts the upload. Peak memory is `maxUploads` chunk-sized buffers, shared process-wide (not per file), allocated lazily on first use of each pool slot.
 
 Manifest format:
 
@@ -238,13 +239,13 @@ All library modules are parameterised by a `Conf.S` module (a first-class module
 | `backends/` | Pluggable storage backends (S3 via `aws-s3` + Lwt, local filesystem); self-registration pattern |
 | `tls/tls_conf.ml` | Runtime selection of conduit's TLS backend (native / OpenSSL) for S3 |
 | `xxhash/xxhash.ml` | xxHash3-64 C bindings (dual-seed for chunk fingerprinting) |
-| `local_io/local_io.ml` | Paged local file read/write |
+| `local_io/local_io.ml` | Local file read/write: path-based (open/close per call) for occasional callers, and positioned `pread`/`pwrite` for callers holding their own long-lived fd (see FUSE's `Fd_cache`) |
 | `local_io/fs_util.ml` | Shared Lwt filesystem helpers (`mkdir_p`, `rm_rf`, `readdir_list`, …) |
 | `metrics/metrics.ml` | Transfer and hashing counters (totals + rolling rate) for `tsync stats` |
 | `log/` | Logging backends (printf for development, syslog for production) |
 | `file/manifest.ml` | Manifest JSON serialization/deserialization; chunk key derivation |
 | `file/local.ml` | Local cache paths; create/evict/rename local cache entries |
-| `file/remote.ml` | Chunked upload and download against the backend. Upload reads, hashes and stores each chunk with bounded concurrency, then writes the manifest |
+| `file/remote.ml` | Chunked upload and download against the backend. Upload opens the source file once, reads chunks concurrently through a `maxUploads`-sized buffer pool, hashes and stores each, then writes the manifest |
 | `file/versioning.ml` | Version key construction + `save` (copy live manifest to a timestamped version) |
 | `file/expire.ml` | `Expire.Make(C).expire` — delete versions older than a cutoff, then GC unreferenced chunks |
 | `file/file.ml` | `File.Make(C)(Sq)` — central file abstraction: stat, read, write, upload, download, evict, delete, rename, mkdir; dirty/open tracking; `apply_foreign_ops` and conflict-copy publishing |
@@ -390,6 +391,7 @@ All daemon state and backend I/O live on the single Lwt event loop. FUSE runs mu
 | `path_ops.ml` | FUSE path operation record type |
 | `internal_ops.ml` | `Internal_ops.Make(F)` — mutation handlers (create, write, unlink, mkdir, rmdir, rename) |
 | `hidden_ops.ml` | `Hidden_ops.Make(F)` — `.fuse_hidden*` file handlers (local-only, never mirror to backend) |
+| `fd_cache.ml` | `Fd_cache.Make(F)` — one cached fd per open file, refcounted across concurrent opens of the same key, released on last close. Backs `read`/`write` with positioned `pread`/`pwrite` instead of an open/seek/close per FUSE call |
 
 ### Paths
 
@@ -408,9 +410,10 @@ Each cached file lives at `<cache_root>/<domain>/<path>`. A `.manifest` sidecar 
 
 ### FUSE operation flow
 
+- **open**: triggers `File.ensure_cached` on first access of an evicted file — downloads from backend synchronously — then `Fd_cache.acquire` opens (or, if another handle on the same key is already open, reuses) the cache file's fd for the FUSE handle's lifetime.
 - **getattr / readdir**: served from the local manifest cache.
-- **open / read**: triggers `File.ensure_cached` on first access of an evicted file — downloads from backend synchronously.
-- **release** (last close): if the file was written, posts a `Put` event to `Sync_queue`. The upload runs asynchronously on a Sync_queue worker; the FUSE operation returns immediately.
+- **read / write**: go straight to the cached fd via positioned `pread`/`pwrite`, run under `Async_none` (see `local_io.ml`) since the fd is always one of our own recently-touched cache files and essentially always page-cache-resident — this skips Lwt's worker-thread dispatch entirely for what would otherwise be a guaranteed-fast call.
+- **release** (last close): `Fd_cache.release` drops the reference, closing the fd once nothing else holds it open. If the file was written, posts a `Put` event to `Sync_queue`. The upload runs asynchronously on a Sync_queue worker; the FUSE operation returns immediately.
 - **unlink / mkdir / rmdir / rename**: synchronous backend operations with journal write-ahead. `rename` handles both file and directory cases by detecting trailing `/` in the key.
 
 ### Auto-evict

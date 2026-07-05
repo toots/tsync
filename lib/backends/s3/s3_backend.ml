@@ -134,13 +134,17 @@ let copy t ~src_key ~dst_key () =
   put t ~key:dst_key ~data ()
 
 let list_all t ~prefix () =
+  (* Accumulate pages in reverse (prepend, O(1) each) rather than appending
+     each page onto a growing list (O(page count) each, so O(n^2) overall
+     across a large prefix) — this runs unbounded over however many objects
+     share the prefix, e.g. the full chunk store during GC. *)
   let rec collect acc cont =
     match cont with
-      | S3.Ls.Done -> Lwt.return acc
+      | S3.Ls.Done -> Lwt.return (List.concat (List.rev acc))
       | S3.Ls.More f -> (
           let* res = with_retry "ls-cont" f in
           match res with
-            | Ok (items, next) -> collect (acc @ List.map entry_of items) next
+            | Ok (items, next) -> collect (List.map entry_of items :: acc) next
             | Error e -> Lwt.fail (s3_eio (string_of_error e)))
   in
   let* res =
@@ -149,7 +153,7 @@ let list_all t ~prefix () =
           ~prefix ())
   in
   match res with
-    | Ok (items, cont) -> collect (List.map entry_of items) cont
+    | Ok (items, cont) -> collect [List.map entry_of items] cont
     | Error e ->
         let msg = string_of_error e in
         Log.err "s3 ls %s: %s" prefix msg;

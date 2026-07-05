@@ -784,6 +784,10 @@ let configure_cmd =
             let endpoint = prompt "  Custom endpoint (blank for AWS)" None in
             let access_key_id = prompt "  AWS Access Key ID" None in
             let secret_access_key = read_password "  AWS Secret Access Key" in
+            let unsigned_payload =
+              prompt_bool ~default:false
+                "  Skip per-chunk payload signing (lower CPU, safe over TLS)?"
+            in
             let main =
               prompt_bool ~default:false "  Primary backend (used for reads)?"
             in
@@ -797,6 +801,7 @@ let configure_cmd =
               @ [
                   ("accessKeyId", `String access_key_id);
                   ("secretAccessKey", `String secret_access_key);
+                  ("unsignedPayload", `Bool unsigned_payload);
                   ("main", `Bool main);
                 ])
     in
