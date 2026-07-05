@@ -7,7 +7,7 @@ license: "MIT"
 homepage: "https://github.com/toots/tsync"
 bug-reports: "https://github.com/toots/tsync/issues"
 depends: [
-  "ocaml" {>= "4.14"}
+  "ocaml" {>= "5.1"}
   "dune" {>= "3.23"}
   "conf-libev"
   "yojson"
