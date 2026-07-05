@@ -53,6 +53,46 @@ module Make (C : Conf.S) = struct
      bound: each in-flight chunk holds an 8 MB payload copy. *)
   let upload_concurrency = 4
 
+  (* Chunk keys known to exist on the primary backend. Seeded once by listing
+     the chunk prefix, then maintained as we upload. Replaces a HEAD round trip
+     per chunk with a local lookup — half the requests per uploaded chunk, so
+     less exposure to request-rate throttling. Chunks uploaded by other clients
+     mid-session are missed and re-uploaded; chunk puts are idempotent
+     (content-addressed keys), so that is only a little wasted bandwidth. *)
+  let known_chunks : (string, unit) Hashtbl.t = Hashtbl.create 65536
+
+  let seed_known_chunks () =
+    let (module Primary : Backend.S) = primary () in
+    let* entries = Primary.list_all ~prefix:C.chunk_prefix () in
+    let plen = String.length C.chunk_prefix in
+    List.iter
+      (fun (e : Backend.file_entry) ->
+        if String.length e.key > plen then
+          Hashtbl.replace known_chunks
+            (String.sub e.key plen (String.length e.key - plen))
+            ())
+      entries;
+    Log.info "chunk index: %d chunks on backend" (Hashtbl.length known_chunks);
+    Lwt.return_unit
+
+  (* Lazily seed on first use; a listing failure is retried on the next chunk
+     rather than cached forever. *)
+  let known_chunks_seeded = ref None
+
+  let ensure_known_chunks () =
+    match !known_chunks_seeded with
+      | Some t -> t
+      | None ->
+          let t =
+            Lwt.catch seed_known_chunks (fun exn ->
+                Log.err "chunk index listing failed: %s"
+                  (Printexc.to_string exn);
+                known_chunks_seeded := None;
+                Lwt.return_unit)
+          in
+          known_chunks_seeded := Some t;
+          t
+
   (* Read, hash and (if not already present) upload chunk [index], returning
      its manifest entry. *)
   let upload_chunk src_path ~cancel ~file_size index =
@@ -70,14 +110,15 @@ module Make (C : Conf.S) = struct
         }
     in
     Metrics.add_hashed 1;
-    let ck = C.chunk_prefix ^ Manifest.chunk_key entry in
-    let (module Primary : Backend.S) = primary () in
-    let* head = Primary.head_opt ~key:ck () in
+    let* () = ensure_known_chunks () in
+    let ck_rel = Manifest.chunk_key entry in
+    let ck = C.chunk_prefix ^ ck_rel in
     let+ () =
-      if head <> None then Lwt.return_unit
+      if Hashtbl.mem known_chunks ck_rel then Lwt.return_unit
       else (
         Metrics.add_uploaded size;
-        put_all ~key:ck ~data ())
+        let+ () = put_all ~key:ck ~data () in
+        Hashtbl.replace known_chunks ck_rel ())
     in
     entry
 

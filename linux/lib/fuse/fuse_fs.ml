@@ -320,6 +320,11 @@ module Make (C : Conf.S) = struct
     loop ()
 
   let mount mount_point =
+    (* An exception escaping through Lwt.async (e.g. a socket error in a
+       library's background loop) must not take down the daemon or, worse,
+       leave it half-dead. Log and keep serving. *)
+    (Lwt.async_exception_hook :=
+       fun exn -> Log.err "async exception: %s" (Printexc.to_string exn));
     Log.debug "auto-evict: %b" (Ipc.auto_evict_enabled ~data_dir:C.data_dir);
     let started = Mutex.create () in
     let started_cond = Condition.create () in

@@ -7,9 +7,11 @@ type t = {
   bucket : string;
   credentials : Aws_s3.Credentials.t;
   endpoint : Aws_s3.Region.endpoint;
+  unsigned_payload : bool;
 }
 
-let make_t ?endpoint ~bucket ~region ~access_key_id ~secret_access_key () =
+let make_t ?endpoint ?(unsigned_payload = false) ~bucket ~region ~access_key_id
+    ~secret_access_key () =
   let credentials =
     Aws_s3.Credentials.make ~access_key:access_key_id
       ~secret_key:secret_access_key ()
@@ -20,7 +22,7 @@ let make_t ?endpoint ~bucket ~region ~access_key_id ~secret_access_key () =
       | None -> Aws_s3.Region.of_string region
   in
   let endpoint = Aws_s3.Region.endpoint ~inet:`V4 ~scheme:`Https region in
-  { bucket; credentials; endpoint }
+  { bucket; credentials; endpoint; unsigned_payload }
 
 let string_of_error = function
   | S3.Redirect _ -> "redirect"
@@ -31,6 +33,31 @@ let string_of_error = function
   | S3.Not_found -> "not found"
 
 let s3_eio msg = Unix.Unix_error (Unix.EIO, "s3", msg)
+
+(* B2 (and S3 under load) routinely answers 503: the client is expected to back
+   off and retry, not fail the operation. Connection-level failures ([Failed],
+   e.g. a pooled socket the server closed while idle) are equally transient.
+   Exponential backoff with jitter, capped per attempt and in attempt count. *)
+let max_attempts = 8
+
+let is_transient = function
+  | S3.Throttled | S3.Failed _ -> true
+  | S3.Redirect _ | S3.Unknown _ | S3.Forbidden | S3.Not_found -> false
+
+let with_retry op f =
+  let rec go attempt =
+    let* res = f () in
+    match res with
+      | Error e when attempt < max_attempts && is_transient e ->
+          let backoff = Float.min 20. (0.5 *. (2. ** float_of_int (attempt - 1))) in
+          let delay = backoff *. (0.5 +. Random.float 1.0) in
+          Log.warn "s3 %s: %s; retrying (%d/%d) in %.1fs" op (string_of_error e)
+            attempt max_attempts delay;
+          let* () = Lwt_unix.sleep delay in
+          go (attempt + 1)
+      | res -> Lwt.return res
+  in
+  go 1
 
 let unwrap op = function
   | Ok v -> v
@@ -45,22 +72,25 @@ let entry_of c =
 
 let put t ~key ~data () =
   let+ res =
-    S3.put ~credentials:t.credentials ~endpoint:t.endpoint ~bucket:t.bucket ~key
-      ~data ()
+    with_retry "put" (fun () ->
+        S3.put ~credentials:t.credentials ~endpoint:t.endpoint ~bucket:t.bucket
+          ~unsigned_payload:t.unsigned_payload ~key ~data ())
   in
   ignore (unwrap "put" res)
 
 let get t ~key () =
   let+ res =
-    S3.get ~credentials:t.credentials ~endpoint:t.endpoint ~bucket:t.bucket ~key
-      ()
+    with_retry "get" (fun () ->
+        S3.get ~credentials:t.credentials ~endpoint:t.endpoint ~bucket:t.bucket
+          ~key ())
   in
   unwrap "get" res
 
 let head_opt t ~key () =
   let+ res =
-    S3.head ~credentials:t.credentials ~endpoint:t.endpoint ~bucket:t.bucket
-      ~key ()
+    with_retry "head" (fun () ->
+        S3.head ~credentials:t.credentials ~endpoint:t.endpoint ~bucket:t.bucket
+          ~key ())
   in
   match res with
     | Ok c -> Some (entry_of c)
@@ -72,8 +102,9 @@ let head_opt t ~key () =
 
 let delete t ~key () =
   let+ res =
-    S3.delete ~credentials:t.credentials ~endpoint:t.endpoint ~bucket:t.bucket
-      ~key ()
+    with_retry "delete" (fun () ->
+        S3.delete ~credentials:t.credentials ~endpoint:t.endpoint
+          ~bucket:t.bucket ~key ())
   in
   match res with
     | Ok _ | Error S3.Not_found -> ()
@@ -89,8 +120,9 @@ let delete_multi t keys =
         let rest = List.filteri (fun i _ -> i >= n) batch in
         let objects = List.map (fun key -> { key; version_id = None }) here in
         let* res =
-          S3.delete_multi ~credentials:t.credentials ~endpoint:t.endpoint
-            ~bucket:t.bucket ~objects ()
+          with_retry "delete_multi" (fun () ->
+              S3.delete_multi ~credentials:t.credentials ~endpoint:t.endpoint
+                ~bucket:t.bucket ~objects ())
         in
         let (_ : S3.Delete_multi.result) = unwrap "delete_multi" res in
         go rest
@@ -106,14 +138,15 @@ let list_all t ~prefix () =
     match cont with
       | S3.Ls.Done -> Lwt.return acc
       | S3.Ls.More f -> (
-          let* res = f () in
+          let* res = with_retry "ls-cont" f in
           match res with
             | Ok (items, next) -> collect (acc @ List.map entry_of items) next
             | Error e -> Lwt.fail (s3_eio (string_of_error e)))
   in
   let* res =
-    S3.ls ~credentials:t.credentials ~endpoint:t.endpoint ~bucket:t.bucket
-      ~prefix ()
+    with_retry "ls" (fun () ->
+        S3.ls ~credentials:t.credentials ~endpoint:t.endpoint ~bucket:t.bucket
+          ~prefix ())
   in
   match res with
     | Ok (items, cont) -> collect (List.map entry_of items) cont
@@ -142,10 +175,11 @@ let list_directory t ~prefix () =
   let subdirs = Hashtbl.fold (fun k () acc -> k :: acc) dirs [] in
   (List.rev !files, List.sort String.compare subdirs)
 
-let make ?endpoint ~bucket ~region ~access_key_id ~secret_access_key () :
-    (module Backend.S) =
+let make ?endpoint ?unsigned_payload ~bucket ~region ~access_key_id
+    ~secret_access_key () : (module Backend.S) =
   let t =
-    make_t ?endpoint ~bucket ~region ~access_key_id ~secret_access_key ()
+    make_t ?endpoint ?unsigned_payload ~bucket ~region ~access_key_id
+      ~secret_access_key ()
   in
   (module struct
     let put ~key ~data () = put t ~key ~data ()
@@ -165,7 +199,13 @@ let () =
       | None -> failwith ("s3 backend: missing field: " ^ key)
   in
   Backend.register "s3" (fun get ->
-      make ?endpoint:(get "endpoint") ~bucket:(req get "bucket")
-        ~region:(req get "region") ~access_key_id:(req get "accessKeyId")
+      let unsigned_payload =
+        match get "unsignedPayload" with
+          | Some ("true" | "1") -> Some true
+          | Some _ | None -> None
+      in
+      make ?endpoint:(get "endpoint") ?unsigned_payload
+        ~bucket:(req get "bucket") ~region:(req get "region")
+        ~access_key_id:(req get "accessKeyId")
         ~secret_access_key:(req get "secretAccessKey")
         ())

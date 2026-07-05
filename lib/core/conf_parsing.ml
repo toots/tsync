@@ -26,7 +26,11 @@ let parse_backend json =
     to_assoc json
     |> List.filter_map (fun (k, v) ->
         if k = "type" || k = "main" then None
-        else (match v with `String s -> Some (k, s) | _ -> None))
+        else
+          match v with
+            | `String s -> Some (k, s)
+            | `Bool b -> Some (k, string_of_bool b)
+            | _ -> None)
   in
   { backend_type; fields; main }
 
