@@ -9,6 +9,7 @@ bug-reports: "https://github.com/toots/tsync/issues"
 depends: [
   "ocaml" {>= "4.14"}
   "dune" {>= "3.23"}
+  "conf-libev"
   "yojson"
   "lwt"
   "lwt_ppx"

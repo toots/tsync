@@ -14,6 +14,7 @@
  (depends
   (ocaml (>= 4.14))
   dune
+  conf-libev
   yojson
   lwt
   lwt_ppx
