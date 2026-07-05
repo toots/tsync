@@ -1,7 +1,7 @@
 open Lwt.Syntax
 
 module Make (F : File.S) = struct
-  let make ~fuse_to_key ~open_file ~close_file : Path_ops.t =
+  let make ~fuse_to_key ~open_file ~close_file ~fd_for : Path_ops.t =
     let file path = fuse_to_key path in
     {
       mknod =
@@ -44,14 +44,28 @@ module Make (F : File.S) = struct
                 | _ -> F.ensure_cached f
             else Lwt.return_unit
           in
-          open_file f;
+          let* () = open_file f in
           Lwt.return
             Fuse.{ default_file_info_update with fi_update_direct_io = true });
       read =
         (fun path buf offset _fi ->
+          let f = file path in
           if offset = 0L then Log.debug "read %s: offset=0" path;
-          F.read (file path) buf ~offset);
-      write = (fun path buf offset _fi -> F.write (file path) buf ~offset);
+          let* cached = F.is_cached f in
+          if not cached then
+            Log.debug "read %s: not in local cache, fetching from backend"
+              path;
+          let* () = F.ensure_cached f in
+          match fd_for f with
+            | Some fd -> Local_io.pread fd buf ~offset
+            | None -> Local_io.read (F.local_path f) buf ~offset);
+      write =
+        (fun path buf offset _fi ->
+          let f = file path in
+          let* () = F.mark_dirty f in
+          match fd_for f with
+            | Some fd -> Local_io.pwrite fd buf ~offset
+            | None -> Local_io.write (F.local_path f) buf ~offset);
       release = (fun path _fi -> close_file (file path));
       unlink = (fun path -> F.delete (file path));
       rename = (fun src dst _flags -> F.rename ~src:(file src) ~dst:(file dst));
