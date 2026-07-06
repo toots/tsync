@@ -18,7 +18,8 @@ module Make (F : File.S) = struct
           | None ->
               let* fd =
                 Lwt_unix.openfile (F.local_path key)
-                  [Unix.O_RDWR; Unix.O_CREAT] 0o644
+                  [Unix.O_RDWR; Unix.O_CREAT]
+                  0o644
               in
               Hashtbl.replace table key (1, fd);
               Lwt.return_unit)

@@ -12,9 +12,9 @@ type t = {
   tls : string option;  (** conduit TLS backend: "native" | "openssl" *)
   max_uploads : int;
       (** max concurrent upload operations (default 4): bounds both how many
-          files the upload workers process at once and, via the shared
-          chunk buffer pool, how many chunk reads/uploads run concurrently
-          across all of them combined *)
+          files the upload workers process at once and, via the shared chunk
+          buffer pool, how many chunk reads/uploads run concurrently across all
+          of them combined *)
   max_downloads : int;  (** max concurrent file downloads (default 8) *)
   domains : domain list;
 }

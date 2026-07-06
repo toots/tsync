@@ -61,7 +61,8 @@ let prw op fd (buf : buffer) ~offset ~fill ~drain =
 let pread fd buf ~offset =
   prw Lwt_unix.pread fd buf ~offset
     ~fill:(fun _ _ _ -> ())
-    ~drain:(fun tmp buf n -> if n > 0 then Lwt_bytes.blit_from_bytes tmp 0 buf 0 n)
+    ~drain:(fun tmp buf n ->
+      if n > 0 then Lwt_bytes.blit_from_bytes tmp 0 buf 0 n)
 
 let pwrite fd buf ~offset =
   prw Lwt_unix.pwrite fd buf ~offset

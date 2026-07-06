@@ -16,7 +16,9 @@ let read_chunk_into fd offset len buf =
   let rec loop pos =
     if pos >= len then Lwt.return_unit
     else
-      let* n = Lwt_unix.pread fd buf ~file_offset:(offset + pos) pos (len - pos) in
+      let* n =
+        Lwt_unix.pread fd buf ~file_offset:(offset + pos) pos (len - pos)
+      in
       if n = 0 then raise Cancelled else loop (pos + n)
   in
   loop 0
@@ -181,7 +183,8 @@ module Make (C : Conf.S) = struct
              [Buffer_pool.acquire] until a slot is free, so real concurrency
              stays capped at [max_uploads] regardless of how many chunks (or
              how many other files' chunks) are contending for one. *)
-          Lwt_list.map_p (upload_chunk fd ~cancel ~file_size)
+          Lwt_list.map_p
+            (upload_chunk fd ~cancel ~file_size)
             (List.init num_chunks Fun.id))
         (fun () -> Lwt_unix.close fd)
     in
@@ -202,7 +205,7 @@ module Make (C : Conf.S) = struct
        manifest published would create a ghost object under a name that no
        longer exists locally; undo it. Chunks stay: they are content-addressed
        and referenced by the successor upload. *)
-    if !cancel then (
+    if !cancel then
       let* () =
         Lwt.catch
           (fun () ->
@@ -214,7 +217,7 @@ module Make (C : Conf.S) = struct
               (Printexc.to_string exn);
             Lwt.return_unit)
       in
-      raise Cancelled)
+      raise Cancelled
     else Lwt.return state
 
   let assemble_chunks ~(manifest : Manifest.t) ~dst_path primary =

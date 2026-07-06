@@ -53,8 +53,7 @@ module Make (F : File.S) = struct
           if offset = 0L then Log.debug "read %s: offset=0" path;
           let* cached = F.is_cached f in
           if not cached then
-            Log.debug "read %s: not in local cache, fetching from backend"
-              path;
+            Log.debug "read %s: not in local cache, fetching from backend" path;
           let* () = F.ensure_cached f in
           match fd_for f with
             | Some fd -> Local_io.pread fd buf ~offset

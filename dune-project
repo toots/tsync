@@ -13,7 +13,7 @@
  (synopsis "Cloud-backed filesystem sync tool")
  (depends
   (ocaml (>= 5.1))
-  (fuse3 (= :os "linux"))
+  (tsync-fuse (= :os "linux"))
   dune
   conf-libev
   conf-xxhash
@@ -26,8 +26,7 @@
   cmdliner)
  (depopts
    syslog
-  tsync-s3
-  tsync-fuse))
+  tsync-s3))
 
 (package
  (name tsync-s3)

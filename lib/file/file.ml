@@ -150,9 +150,7 @@ module Make (C : Conf.S) (Sq : Sync_queue.S) : S = struct
     (* Cancelled while finishing (e.g. renamed away mid-upload): the local
        sidecar under this name has already been moved; writing it back would
        resurrect a ghost entry. *)
-    (match cancel with
-      | Some c when !c -> raise Backend.Cancelled
-      | _ -> ());
+    (match cancel with Some c when !c -> raise Backend.Cancelled | _ -> ());
     let* () = write_manifest key state in
     clear_dirty key;
     Lwt.return_unit
@@ -500,14 +498,16 @@ module Make (C : Conf.S) (Sq : Sync_queue.S) : S = struct
               Option.map (fun _ -> ()) h
           in
           if is_dir || Option.is_some src_head then Lwt.fail exn
-          else (
+          else
             let* m = read_manifest dst in
             match m with
               | Some (`Clean _ as state) ->
                   (* src was fully uploaded but has since vanished remotely:
                      another client moved or deleted it. Keep both versions by
                      publishing ours under a conflict-marked name. *)
-                  let conflict = C.domain_prefix ^ conflict_name (rel_key dst) in
+                  let conflict =
+                    C.domain_prefix ^ conflict_name (rel_key dst)
+                  in
                   let* () = rename_local ~src:dst ~dst:conflict in
                   publish_manifest conflict state
               | Some `Dirty ->
@@ -518,7 +518,7 @@ module Make (C : Conf.S) (Sq : Sync_queue.S) : S = struct
                      accesses (e.g. rclone stat'ing its renamed .partial). *)
                   let* dst_cached = is_cached dst in
                   if dst_cached then queue_put dst else Lwt.fail exn
-              | _ -> Lwt.fail exn))
+              | _ -> Lwt.fail exn)
 
   let rename ~src ~dst = with_meta (fun () -> rename_body ~src ~dst)
 

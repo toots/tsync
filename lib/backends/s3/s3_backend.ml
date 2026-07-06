@@ -49,7 +49,9 @@ let with_retry op f =
     let* res = f () in
     match res with
       | Error e when attempt < max_attempts && is_transient e ->
-          let backoff = Float.min 20. (0.5 *. (2. ** float_of_int (attempt - 1))) in
+          let backoff =
+            Float.min 20. (0.5 *. (2. ** float_of_int (attempt - 1)))
+          in
           let delay = backoff *. (0.5 +. Random.float 1.0) in
           Log.warn "s3 %s: %s; retrying (%d/%d) in %.1fs" op (string_of_error e)
             attempt max_attempts delay;
