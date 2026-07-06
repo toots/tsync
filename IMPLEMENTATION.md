@@ -74,7 +74,7 @@ Config path is platform-specific — see each platform's **Paths** section below
 |---|---|---|
 | `versioning` | bool | Save a manifest version under `.versions/` on every modify/rename/delete |
 | `name` | string | Human-readable client name, used to label conflict copies (e.g. `"report (conflicted copy from Romain's MacBook Pro).txt"`). Defaults to the hostname |
-| `tls` | string | Optional. TLS backend for S3 connections: `"native"` (ocaml-tls, default) or `"openssl"`. See [TLS backend](#tls-backend) |
+| `tls` | string | Optional. TLS backend for S3 connections: `"openssl"` (faster, default when available) or `"native"` (ocaml-tls fallback). See [TLS backend](#tls-backend) |
 | `maxUploads` | int | Optional. Max concurrent upload operations (default 4) — bounds both how many files the upload workers process at once and, via the shared chunk buffer pool, how many chunk reads/uploads run concurrently across all of them combined. See [Chunked uploads](#chunked-uploads) |
 | `maxDownloads` | int | Optional. Max files downloaded concurrently (default 8) |
 | `domains` | domain[] | One or more domain objects |
@@ -124,14 +124,14 @@ Reads are served by a single primary backend, chosen in this order:
 
 ### TLS backend
 
-S3 connections go through `conduit`, which can use one of two TLS implementations. tsync makes the **native** backend (`ocaml-tls`, via `tls-lwt`) a mandatory dependency and the default; the **OpenSSL** backend (via `lwt_ssl`) is an optional dependency and is only available when `lwt_ssl` is installed in the switch. Native is preferred because OpenSSL's conduit path has a per-connection error-queue bug that breaks some S3-compatible endpoints — notably Backblaze B2, which fails with `SSL routines::shutdown while in init` on the second connection.
+S3 connections go through `conduit`, which can use one of two TLS implementations. tsync makes the **native** backend (`ocaml-tls`, via `tls-lwt`) a mandatory dependency; the **OpenSSL** backend (via `lwt_ssl`) is an optional dependency and is only available when `lwt_ssl` is installed in the switch. **OpenSSL is much faster in general and is used by default whenever it is compiled in.** The **native** backend is a robust fallback: it can solve connection problems that OpenSSL's conduit path causes on some S3-compatible endpoints, where a per-connection error-queue bug breaks the transfer — notably Backblaze B2, which fails with `SSL routines::shutdown while in init` on the second connection. Switch to native with `--tls native` if you hit such an endpoint.
 
 The choice is process-global (one backend per daemon) and can be set two ways, highest priority first:
 
 1. **CLI flag** — `tsync start --tls native|openssl` (overrides the config).
 2. **Config** — the top-level `"tls": "native"|"openssl"` field (applies to every S3 command: `start`, `ls`, `versions`, `expire`, `sync`).
 
-If neither is set, conduit's built-in default (native) is used, so B2 works out of the box. Selecting a backend that isn't compiled in fails immediately, listing what is available.
+If neither is set, the preferred available backend is used: OpenSSL when it is compiled in (for performance), otherwise native. Selecting a backend that isn't compiled in fails immediately, listing what is available.
 
 ### Chunked uploads
 

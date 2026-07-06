@@ -1,11 +1,12 @@
 (* Runtime selection of conduit's TLS backend for the S3 client.
 
    conduit-lwt-unix picks a backend once at startup (its [tls_library] ref).
-   [Native] (ocaml-tls, via tls-lwt) is a mandatory dependency and the default;
-   [OpenSSL] (via lwt_ssl) is optional and only available when lwt_ssl happens
-   to be installed in the switch. The OpenSSL backend has a per-connection
-   error-queue bug that breaks some S3-compatible endpoints (Backblaze B2), so
-   Native is preferred; OpenSSL stays selectable for legacy compatibility. *)
+   [Native] (ocaml-tls, via tls-lwt) is a mandatory dependency; [OpenSSL] (via
+   lwt_ssl) is optional and only available when lwt_ssl is installed in the
+   switch. OpenSSL is much faster in general and is preferred by default when
+   it is available; Native is a robust fallback that avoids OpenSSL's
+   per-connection error-queue bug affecting some S3-compatible endpoints
+   (Backblaze B2), so it stays selectable for those situations. *)
 
 type t = Native | Openssl
 
@@ -28,11 +29,12 @@ let current () =
     | Conduit_lwt_unix.OpenSSL -> "openssl"
     | Conduit_lwt_unix.No_tls -> "none"
 
-(* Backends compiled into this build, preferred first. *)
+(* Backends compiled into this build, preferred first. OpenSSL is faster in
+   general, so it leads when available; Native is the fallback. *)
 let available () =
   List.filter_map
     (fun b -> if is_available b then Some (to_string b) else None)
-    [Native; Openssl]
+    [Openssl; Native]
 
 let set backend =
   if not (is_available backend) then
@@ -46,9 +48,14 @@ let set backend =
       | Openssl -> Conduit_lwt_unix.OpenSSL
 
 (* Apply a selection by name, raising [Failure] on an unknown or unavailable
-   choice. [None] leaves conduit's compiled-in default in place. *)
+   choice. [None] selects the preferred available backend (OpenSSL when it is
+   compiled in, else Native). *)
 let apply = function
-  | None -> ()
+  | None -> (
+      match available () with
+        | name :: _ -> (
+            match of_string name with Some b -> set b | None -> ())
+        | [] -> ())
   | Some name -> (
       match of_string name with
         | Some backend -> set backend

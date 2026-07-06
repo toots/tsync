@@ -83,8 +83,11 @@ let start_cmd =
       & opt (some string) None
       & info ["tls"] ~docv:"native|openssl"
           ~doc:
-            "Override the TLS backend for S3 connections (default: from \
-             config, then conduit's built-in default)")
+            "Override the TLS backend for S3 connections. OpenSSL is much \
+             faster and is used by default when available; native tls is a \
+             fallback that resolves connection issues with some endpoints \
+             (e.g. Backblaze B2). Default: from config, then the preferred \
+             available backend.")
   in
   let run mount domain tls =
     Log.init ();
