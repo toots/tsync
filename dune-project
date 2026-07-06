@@ -13,12 +13,16 @@
  (synopsis "Cloud-backed filesystem sync tool")
  (depends
   (ocaml (>= 5.1))
+  (fuse3 (= :os "linux"))
   dune
   conf-libev
+  conf-xxhash
+  conduit-lwt-unix
   yojson
   lwt
   lwt_ppx
   mem_usage
+  tls
   cmdliner)
  (depopts
    syslog
