@@ -5,6 +5,7 @@ module Make (C : Conf.S) = struct
   module F = File.Make (C) (Sq)
   module Fs = File_store.Make (C)
   module H = Hidden_ops.Make (F)
+  module Fd = Fd_cache.Make (F)
   module I = Internal_ops.Make (F)
   module Ih = Ipc_handler.Make (C) (F)
   module Sp = Sync_poller.Make (C) (F)
@@ -19,10 +20,14 @@ module Make (C : Conf.S) = struct
      kernel thread while other operations keep making progress on the loop. *)
 
   let pending_evict : (string, unit) Hashtbl.t = Hashtbl.create 16
-  let open_file key = F.mark_open key
+
+  let open_file key =
+    F.mark_open key;
+    Fd.acquire key
 
   let close_file key =
     let remaining = F.mark_closed key in
+    let* () = Fd.release key in
     if remaining = 0 then
       if F.is_dirty key then begin
         F.clear_dirty key;
@@ -210,7 +215,7 @@ module Make (C : Conf.S) = struct
   let make_operations mount_point =
     let open Fuse in
     let hidden = H.make ~fuse_to_key in
-    let real = I.make ~fuse_to_key ~open_file ~close_file in
+    let real = I.make ~fuse_to_key ~open_file ~close_file ~fd_for:Fd.find in
     let dispatch path = if is_fuse_hidden path then hidden else real in
     let entry_of_name name =
       {
@@ -320,6 +325,11 @@ module Make (C : Conf.S) = struct
     loop ()
 
   let mount mount_point =
+    (* An exception escaping through Lwt.async (e.g. a socket error in a
+       library's background loop) must not take down the daemon or, worse,
+       leave it half-dead. Log and keep serving. *)
+    (Lwt.async_exception_hook :=
+       fun exn -> Log.err "async exception: %s" (Printexc.to_string exn));
     Log.debug "auto-evict: %b" (Ipc.auto_evict_enabled ~data_dir:C.data_dir);
     let started = Mutex.create () in
     let started_cond = Condition.create () in

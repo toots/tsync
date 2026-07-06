@@ -12,8 +12,9 @@
  (name tsync)
  (synopsis "Cloud-backed filesystem sync tool")
  (depends
-  (ocaml (>= 4.14))
+  (ocaml (>= 5.1))
   dune
+  conf-libev
   yojson
   lwt
   lwt_ppx

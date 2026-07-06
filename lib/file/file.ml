@@ -147,6 +147,12 @@ module Make (C : Conf.S) (Sq : Sync_queue.S) : S = struct
     let* st = Lwt_unix.stat lp in
     let mtime = st.Unix.st_mtime in
     let* state = R.upload ~key ~src_path:lp ~mtime ?cancel () in
+    (* Cancelled while finishing (e.g. renamed away mid-upload): the local
+       sidecar under this name has already been moved; writing it back would
+       resurrect a ghost entry. *)
+    (match cancel with
+      | Some c when !c -> raise Backend.Cancelled
+      | _ -> ());
     let* () = write_manifest key state in
     clear_dirty key;
     Lwt.return_unit
@@ -495,18 +501,23 @@ module Make (C : Conf.S) (Sq : Sync_queue.S) : S = struct
           in
           if is_dir || Option.is_some src_head then Lwt.fail exn
           else (
-            let conflict = C.domain_prefix ^ conflict_name (rel_key dst) in
             let* m = read_manifest dst in
             match m with
               | Some (`Clean _ as state) ->
+                  (* src was fully uploaded but has since vanished remotely:
+                     another client moved or deleted it. Keep both versions by
+                     publishing ours under a conflict-marked name. *)
+                  let conflict = C.domain_prefix ^ conflict_name (rel_key dst) in
                   let* () = rename_local ~src:dst ~dst:conflict in
                   publish_manifest conflict state
               | Some `Dirty ->
+                  (* src never made it to the backend (upload still pending or
+                     failed): this is just a rename before first upload, not a
+                     conflict. Upload the file under its new name — renaming it
+                     to a conflict name here breaks the writer's own follow-up
+                     accesses (e.g. rclone stat'ing its renamed .partial). *)
                   let* dst_cached = is_cached dst in
-                  if dst_cached then
-                    let* () = rename_local ~src:dst ~dst:conflict in
-                    queue_put conflict
-                  else Lwt.fail exn
+                  if dst_cached then queue_put dst else Lwt.fail exn
               | _ -> Lwt.fail exn))
 
   let rename ~src ~dst = with_meta (fun () -> rename_body ~src ~dst)

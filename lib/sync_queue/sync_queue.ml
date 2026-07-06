@@ -23,8 +23,13 @@ module Make (C : Conf.S) : S = struct
   type put_data = { key : string; entry_key : string; ops : Journal.op list }
 
   (* [cancel] is polled by the upload between chunks; setting it aborts the
-     in-flight upload at the next chunk boundary. *)
-  type slot = { cancel : bool ref; mutable pending : put_data option }
+     in-flight upload at the next chunk boundary. [failures] counts consecutive
+     failed attempts, driving the requeue backoff. *)
+  type slot = {
+    cancel : bool ref;
+    mutable pending : put_data option;
+    mutable failures : int;
+  }
 
   (* All queue state is touched only from the Lwt event-loop thread (workers and
      the post/cancel entry points all run there), so no locks are needed. *)
@@ -55,7 +60,7 @@ module Make (C : Conf.S) : S = struct
     Lwt_condition.signal queue_cond ()
 
   let add_slot key =
-    Hashtbl.add slots key { cancel = ref false; pending = None }
+    Hashtbl.add slots key { cancel = ref false; pending = None; failures = 0 }
 
   let replace_pending slot pd =
     (match slot.pending with
@@ -85,26 +90,45 @@ module Make (C : Conf.S) : S = struct
   let completed = ref 0
   let completed_count () = !completed
 
+  (* Returns [true] if the put failed transiently and should be requeued. *)
   let exec_put slot ({ key; entry_key; ops } : put_data) =
-    if !(slot.cancel) then J.delete_local_pending ~entry_key
+    if !(slot.cancel) then
+      let+ () = J.delete_local_pending ~entry_key in
+      false
     else
       Lwt.catch
         (fun () ->
           let* () = !upload_fn ~key ~cancel:slot.cancel in
-          if !(slot.cancel) then J.delete_local_pending ~entry_key
+          if !(slot.cancel) then
+            let+ () = J.delete_local_pending ~entry_key in
+            false
           else
             let* () = J.delete_local_pending ~entry_key in
             let* (_ : string) = Fs.write_journal_entry ~entry_key ops in
             !on_cursor_fn ~entry_key;
             incr completed;
-            !on_upload_done_fn ~key)
+            slot.failures <- 0;
+            let+ () = !on_upload_done_fn ~key in
+            false)
         (function
-          | Backend.Cancelled -> J.delete_local_pending ~entry_key
+          | Backend.Cancelled ->
+              let+ () = J.delete_local_pending ~entry_key in
+              false
           | Unix.Unix_error (Unix.ENOENT, _, _) ->
-              J.delete_local_pending ~entry_key
+              let+ () = J.delete_local_pending ~entry_key in
+              false
           | exn ->
-              Log.err "sync_queue put %s: %s" key (Printexc.to_string exn);
-              Lwt.return_unit)
+              (* A failed upload is never dropped: the file would sit dirty in
+                 the cache forever (auto-evict only runs after a successful
+                 upload). Hold this worker back briefly, then requeue. *)
+              slot.failures <- slot.failures + 1;
+              let delay =
+                Float.min 300. (10. *. (2. ** float_of_int (slot.failures - 1)))
+              in
+              Log.err "sync_queue put %s: %s; requeue %d in %.0fs" key
+                (Printexc.to_string exn) slot.failures delay;
+              let+ () = Lwt_unix.sleep delay in
+              true)
 
   let rec worker_loop () =
     if Queue.is_empty queue then
@@ -115,13 +139,14 @@ module Make (C : Conf.S) : S = struct
     else begin
       let pd = Queue.pop queue in
       let slot = Hashtbl.find slots pd.key in
-      let* () = exec_put slot pd in
-      (match slot.pending with
-        | None -> Hashtbl.remove slots pd.key
-        | Some next ->
+      let* retry = exec_put slot pd in
+      (match (slot.pending, retry && not !stop) with
+        | Some next, _ ->
             slot.cancel := false;
             slot.pending <- None;
-            enqueue next);
+            enqueue next
+        | None, true -> enqueue pd
+        | None, false -> Hashtbl.remove slots pd.key);
       worker_loop ()
     end
 

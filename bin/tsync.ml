@@ -91,6 +91,22 @@ let start_cmd =
     Log.debug "loading config from %s" runtime_paths.Runtime.config_path;
     let cfg = Conf_parsing.load runtime_paths.Runtime.config_path in
     let (module C : Conf.S) = make_conf ?domain cfg in
+    (* Lwt_unix defaults to a pool of up to 1000 OS threads for dispatching
+       blocking syscalls (file I/O has no non-blocking mode). Under bursty
+       concurrent chunk reads and FUSE cache I/O that default lets the pool
+       grow far past what this workload needs, and each idle worker thread
+       wakes periodically on its own timer regardless of whether there's
+       work — pure overhead. max_uploads and max_downloads are already the
+       real, single ceilings on concurrent upload and download operations
+       (see the [Buffer_pool] and [download_pool] comments), so their sum
+       plus headroom for FUSE-driven cache I/O is the right size for this
+       pool. Clamp it too: an unusually large config value (maxDownloads has
+       been seen set to 1000, versus a default of 8) shouldn't reopen the
+       unbounded-pool problem this is meant to close — staying under the
+       clamp means bursts never hit the ceiling and fall back to synchronous
+       execution, which would stall the whole event loop; 256 comfortably
+       covers realistic concurrency for this workload. *)
+    Lwt_unix.set_pool_size (min 256 (C.max_uploads + C.max_downloads + 32));
     (* CLI --tls wins over the config value applied by make_conf. *)
     if tls <> None then Tls_conf.apply tls;
     Log.debug "TLS backend: %s (available: %s)" (Tls_conf.current ())
@@ -768,6 +784,10 @@ let configure_cmd =
             let endpoint = prompt "  Custom endpoint (blank for AWS)" None in
             let access_key_id = prompt "  AWS Access Key ID" None in
             let secret_access_key = read_password "  AWS Secret Access Key" in
+            let unsigned_payload =
+              prompt_bool ~default:false
+                "  Skip per-chunk payload signing (lower CPU, safe over TLS)?"
+            in
             let main =
               prompt_bool ~default:false "  Primary backend (used for reads)?"
             in
@@ -781,6 +801,7 @@ let configure_cmd =
               @ [
                   ("accessKeyId", `String access_key_id);
                   ("secretAccessKey", `String secret_access_key);
+                  ("unsignedPayload", `Bool unsigned_payload);
                   ("main", `Bool main);
                 ])
     in
