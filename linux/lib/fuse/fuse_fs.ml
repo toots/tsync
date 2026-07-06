@@ -303,6 +303,22 @@ module Make (C : Conf.S) = struct
               f_namemax = 255L;
             });
       utimens = (fun _path _atime _mtime _fi -> ());
+      (* Object storage has no meaningful POSIX mode/owner — getattr synthesizes
+         them and they aren't persisted. Accept and ignore rather than returning
+         ENOSYS: rsync's do_mkstemp() fchmod()s the temp file, so an
+         unimplemented chmod surfaces as a spurious "mkstemp failed". *)
+      chmod = (fun _path _mode _fi -> ());
+      chown = (fun _path _uid _gid _fi -> ());
+      (* Writes go straight to the fd via direct_io + pwrite, so there is
+         nothing buffered per-fd for flush to push. *)
+      flush = (fun _path _fi -> ());
+      fsync =
+        (fun path _datasync _fi ->
+          guard "fsync" path (fun () ->
+              on_loop (fun () ->
+                  match Fd.find (fuse_to_key path) with
+                    | Some fd -> Lwt_unix.fsync fd
+                    | None -> Lwt.return_unit)));
     }
 
   (* ── Main mount ───────────────────────────────────────────────────────── *)
