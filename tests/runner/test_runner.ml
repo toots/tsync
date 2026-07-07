@@ -24,6 +24,8 @@ type step =
   | Recheck
   | OnSecondary of step
   | ResyncRemote
+  | ImportDir of (string * string) list
+  | ExportDir
 
 type scenario = { name : string; steps : step list }
 type two_client_step = A of step | B of step
@@ -92,6 +94,11 @@ let rec render_step = function
   | Recheck -> "recheck"
   | OnSecondary s -> "on-secondary " ^ render_step s
   | ResyncRemote -> "resync-remote"
+  | ImportDir entries ->
+      Printf.sprintf "import-dir %s"
+        (String.concat " "
+           (List.map (fun (p, c) -> Printf.sprintf "%s=%S" p c) entries))
+  | ExportDir -> "export-dir"
 
 let starts_with prefix s =
   String.length s >= String.length prefix
@@ -284,6 +291,74 @@ let setup_client (module C : Conf.S) root staging_prefix =
         match C.backends with
           | _ :: dst :: _ -> damage dst s
           | _ -> failwith "OnSecondary: no secondary backend configured")
+    | ImportDir entries ->
+        incr staging_seq;
+        let src =
+          Filename.concat root
+            (Printf.sprintf "import-%s%d" staging_prefix !staging_seq)
+        in
+        List.iter
+          (fun (rel, content) ->
+            let path = Filename.concat src rel in
+            let rec mkdir_p d =
+              if not (Sys.file_exists d) then begin
+                mkdir_p (Filename.dirname d);
+                Unix.mkdir d 0o755
+              end
+            in
+            mkdir_p (Filename.dirname path);
+            write_file path content)
+          entries;
+        let module I = Import.Make (C) in
+        let+ summary =
+          I.run ~src
+            ~on_file:(fun ~rel status ->
+              match status with
+                | Import.Imported size ->
+                    Printf.printf "  imported %s (%Ld bytes)\n" rel size
+                | Import.Skipped_exists ->
+                    Printf.printf "  skip %s (exists)\n" rel)
+            ()
+        in
+        Printf.printf "  import: %d imported, %d skipped\n"
+          summary.Import.imported summary.Import.skipped
+    | ExportDir ->
+        incr staging_seq;
+        let dst =
+          Filename.concat root
+            (Printf.sprintf "export-%s%d" staging_prefix !staging_seq)
+        in
+        let module E = Export.Make (C) in
+        let* summary =
+          E.run ~dst
+            ~on_file:(fun ~rel status ->
+              let desc =
+                match status with
+                  | Export.Exported Export.Local_cache -> "local cache"
+                  | Export.Exported Export.Remote_chunks -> "remote"
+                  | Export.Missing_data -> "MISSING"
+              in
+              Printf.printf "  export %s (%s)\n" rel desc)
+            ()
+        in
+        Printf.printf "  export: %d exported, %d missing\n"
+          summary.Export.exported summary.Export.missing;
+        (* Dump the exported tree so snapshots pin the actual bytes written. *)
+        let rec dump rel =
+          let dir = if rel = "" then dst else Filename.concat dst rel in
+          let* names = Fs_util.readdir_list dir in
+          Lwt_list.iter_s
+            (fun name ->
+              let r = if rel = "" then name else rel ^ "/" ^ name in
+              let* is_dir = Fs_util.is_directory (Filename.concat dst r) in
+              if is_dir then dump r
+              else (
+                Printf.printf "  exported-file %s = %S\n" r
+                  (read_file (Filename.concat dst r));
+                Lwt.return_unit))
+            (List.sort compare names)
+        in
+        dump ""
     | ResyncRemote ->
         let module M = Mirror.Make (C) in
         let+ dests = M.resync () in

@@ -1,0 +1,21 @@
+(executable
+ (name import_export)
+ (libraries tsync_test_runner))
+
+(alias
+ (name default)
+ (deps import_export.exe))
+
+(rule
+ (alias runtest)
+ (target import_export.output)
+ (action
+  (with-stdout-to
+   import_export.output
+   (ignore-stderr
+    (run ./import_export.exe)))))
+
+(rule
+ (alias runtest)
+ (action
+  (diff import_export.expected import_export.output)))

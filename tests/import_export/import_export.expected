@@ -1,0 +1,150 @@
+=== import into empty domain
+  import-dir a.txt="alpha" sub/b.txt="bravo" sub/deep/c.txt="charlie"
+  imported a.txt (5 bytes)
+  imported sub/b.txt (5 bytes)
+  imported sub/deep/c.txt (7 bytes)
+  import: 3 imported, 0 skipped
+--- tree
+  f a.txt size=5 cached=true uploaded=true etag=50f034ad0ad3b7ac
+  d sub/
+  f sub/b.txt size=5 cached=true uploaded=true etag=6d4e870ea6d5a0c8
+  d sub/deep/
+  f sub/deep/c.txt size=7 cached=true uploaded=true etag=58c3d9a8175b4c35
+--- content
+  a.txt = "alpha"
+  sub/b.txt = "bravo"
+  sub/deep/c.txt = "charlie"
+--- backend
+  chunk ac6cab7d3e498b68-bf95bad7826ecbe9 size=5
+  chunk be6903b5f625ab5a-512a03e79074e07a size=5
+  chunk cfcb9dbba6d68599-4ef4c57cebfa8616 size=7
+  cursor = <entry-1>
+  journal <entry-1> = mkdir sub/; mkdir sub/deep/; put a.txt 5; put sub/b.txt 5; put sub/deep/c.txt 7
+  file a.txt = manifest size=5 chunks=1 h1=50f034ad0ad3b7ac h2=e6aafc9bc48c5700
+    chunk#0 be6903b5f625ab5a-512a03e79074e07a size=5
+  file sub/b.txt = manifest size=5 chunks=1 h1=6d4e870ea6d5a0c8 h2=9de1be5b950cc109
+    chunk#0 ac6cab7d3e498b68-bf95bad7826ecbe9 size=5
+  file sub/deep/c.txt = manifest size=7 chunks=1 h1=58c3d9a8175b4c35 h2=39dd9d49ed5b2108
+    chunk#0 cfcb9dbba6d68599-4ef4c57cebfa8616 size=7
+
+=== import skips existing key
+  write file.bin "original"
+  drain
+  import-dir file.bin="imported" new.txt="fresh"
+  skip file.bin (exists)
+  imported new.txt (5 bytes)
+  import: 1 imported, 1 skipped
+--- tree
+  f file.bin size=8 cached=true uploaded=true etag=cd91a7781fe56f7d
+  f new.txt size=5 cached=true uploaded=true etag=612b0b2072a60ff7
+--- content
+  file.bin = "original"
+  new.txt = "fresh"
+--- backend
+  chunk 9fa90f519f2da9f9-94bf00ae3c05c2e6 size=8
+  chunk dac7aa6c458a90ae-15546fbd57e96442 size=5
+  cursor = <entry-2>
+  journal <entry-1> = put file.bin 8
+  journal <entry-2> = put new.txt 5
+  file file.bin = manifest size=8 chunks=1 h1=cd91a7781fe56f7d h2=c960bea71e7511c5
+    chunk#0 9fa90f519f2da9f9-94bf00ae3c05c2e6 size=8
+  file new.txt = manifest size=5 chunks=1 h1=612b0b2072a60ff7 h2=522e96234cdbe735
+    chunk#0 dac7aa6c458a90ae-15546fbd57e96442 size=5
+
+=== import dedups identical content
+  write file.bin "same bytes"
+  drain
+  import-dir copy.bin="same bytes"
+  imported copy.bin (10 bytes)
+  import: 1 imported, 0 skipped
+--- tree
+  f copy.bin size=10 cached=true uploaded=true etag=bb52b673b2fffd64
+  f file.bin size=10 cached=true uploaded=true etag=bb52b673b2fffd64
+--- content
+  copy.bin = "same bytes"
+  file.bin = "same bytes"
+--- backend
+  chunk e80520ee54b9ac96-fa84f18dfc8df732 size=10
+  cursor = <entry-2>
+  journal <entry-1> = put file.bin 10
+  journal <entry-2> = put copy.bin 10
+  file copy.bin = manifest size=10 chunks=1 h1=bb52b673b2fffd64 h2=d00f67d34cdaf16b
+    chunk#0 e80520ee54b9ac96-fa84f18dfc8df732 size=10
+  file file.bin = manifest size=10 chunks=1 h1=bb52b673b2fffd64 h2=d00f67d34cdaf16b
+    chunk#0 e80520ee54b9ac96-fa84f18dfc8df732 size=10
+
+=== export cached and evicted
+  write cached.bin "kept locally"
+  drain
+  write evicted.bin "remote only"
+  drain
+  evict evicted.bin
+  export-dir
+  export cached.bin (local cache)
+  export evicted.bin (remote)
+  export: 2 exported, 0 missing
+  exported-file cached.bin = "kept locally"
+  exported-file evicted.bin = "remote only"
+--- tree
+  f cached.bin size=12 cached=true uploaded=true etag=842fb9c45ecfcc79
+  f evicted.bin size=11 cached=false uploaded=true etag=991b40e8c4f21088
+--- content
+  cached.bin = "kept locally"
+  evicted.bin = "remote only"
+--- backend
+  chunk 3e43a8f49a428d13-fe0ef22b3a6614b2 size=12
+  chunk cbfce414fed46927-30ae70c4d0cb32ce size=11
+  journal <entry-1> = put cached.bin 12
+  journal <entry-2> = put evicted.bin 11
+  file cached.bin = manifest size=12 chunks=1 h1=842fb9c45ecfcc79 h2=a07b711394c9ba4d
+    chunk#0 3e43a8f49a428d13-fe0ef22b3a6614b2 size=12
+  file evicted.bin = manifest size=11 chunks=1 h1=991b40e8c4f21088 h2=ac6d83c77a86c3d9
+    chunk#0 cbfce414fed46927-30ae70c4d0cb32ce size=11
+
+=== export dirty file
+  write file.bin "uploaded"
+  drain
+  dirty-write file.bin "modified locally"
+  export-dir
+  export file.bin (local cache)
+  export: 1 exported, 0 missing
+  exported-file file.bin = "modified locally"
+--- tree
+  f file.bin size=16 cached=true uploaded=false etag=
+--- content
+  file.bin = "modified locally"
+--- backend
+  chunk 3ec7a63f2d48ce00-16e5e4870c3ecb65 size=8
+  journal <entry-1> = put file.bin 8
+  file file.bin = manifest size=8 chunks=1 h1=9394b91bd1d2b48c h2=9185a491805e47a4
+    chunk#0 3ec7a63f2d48ce00-16e5e4870c3ecb65 size=8
+
+=== import then export round trip
+  import-dir a.txt="alpha" sub/b.txt="bravo"
+  drain
+  export-dir
+  imported a.txt (5 bytes)
+  imported sub/b.txt (5 bytes)
+  import: 2 imported, 0 skipped
+  export a.txt (local cache)
+  export sub/b.txt (local cache)
+  export: 2 exported, 0 missing
+  exported-file a.txt = "alpha"
+  exported-file sub/b.txt = "bravo"
+--- tree
+  f a.txt size=5 cached=true uploaded=true etag=50f034ad0ad3b7ac
+  d sub/
+  f sub/b.txt size=5 cached=true uploaded=true etag=6d4e870ea6d5a0c8
+--- content
+  a.txt = "alpha"
+  sub/b.txt = "bravo"
+--- backend
+  chunk ac6cab7d3e498b68-bf95bad7826ecbe9 size=5
+  chunk be6903b5f625ab5a-512a03e79074e07a size=5
+  cursor = <entry-1>
+  journal <entry-1> = mkdir sub/; put a.txt 5; put sub/b.txt 5
+  file a.txt = manifest size=5 chunks=1 h1=50f034ad0ad3b7ac h2=e6aafc9bc48c5700
+    chunk#0 be6903b5f625ab5a-512a03e79074e07a size=5
+  file sub/b.txt = manifest size=5 chunks=1 h1=6d4e870ea6d5a0c8 h2=9de1be5b950cc109
+    chunk#0 ac6cab7d3e498b68-bf95bad7826ecbe9 size=5
+

@@ -60,6 +60,12 @@ type step =
           the copied keys plus a per-destination summary (bytes omitted:
           manifest objects embed mtimes, so their sizes are not deterministic).
       *)
+  | ImportDir of (string * string) list
+      (** Create a temp source folder with these (relative path, content) files,
+          run [Import.run] on it, and print per-file status lines. *)
+  | ExportDir
+      (** Run [Export.run] into a fresh temp folder, print per-file status
+          lines, then dump the exported tree's contents. *)
 
 type scenario = { name : string; steps : step list }
 type two_client_step = A of step | B of step

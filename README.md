@@ -64,6 +64,8 @@ tsync expire <date>   # drop versions older than a date, then reclaim unused blo
 tsync sync            # apply changes made from other machines
 tsync recheck         # verify the remote against the local cache, repair what's possible
 tsync resync-remote   # copy missing/damaged objects from one backend to the others
+tsync import <dir>    # seed the domain from an existing folder (uploads, no data copied)
+tsync export <dir>    # write every file of the domain to a plain folder
 tsync status          # show daemon state
 tsync stats           # transfer metrics (pending/completed, bandwidth, hashing)
 tsync stop            # unmount

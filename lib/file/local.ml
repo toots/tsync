@@ -38,6 +38,25 @@ let list_dir ~cache_root ~domain_name ~domain_prefix key =
   let* is_dir = is_directory path in
   if is_dir then readdir_list path else Lwt.return_nil
 
+(* All manifest sidecars under the domain's manifest tree, as domain-relative
+   paths (unsorted). Empty when the tree does not exist. *)
+let walk_manifests ~cache_root ~domain_name () =
+  let root = manifest_dir ~cache_root domain_name in
+  let rec walk rel acc =
+    let dir = if rel = "" then root else Filename.concat root rel in
+    let* names = readdir_list dir in
+    Lwt_list.fold_left_s
+      (fun acc name ->
+        let r = if rel = "" then name else rel ^ "/" ^ name in
+        let* is_dir = is_directory (Filename.concat root r) in
+        if is_dir then walk r acc
+        else if Filename.check_suffix name ".tmp" then Lwt.return acc
+        else Lwt.return (r :: acc))
+      acc names
+  in
+  let* root_ok = is_directory root in
+  if root_ok then walk "" [] else Lwt.return_nil
+
 let is_cached ~cache_root ~domain_name ~domain_prefix key =
   Lwt_unix.file_exists (cache_path ~cache_root ~domain_name ~domain_prefix key)
 

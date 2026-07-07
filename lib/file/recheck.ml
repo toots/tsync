@@ -36,22 +36,6 @@ module Make (C : Conf.S) = struct
 
   let manifest_root = Local.manifest_dir ~cache_root:C.cache_root C.domain_name
 
-  (* Collect every sidecar under the manifest tree; each relative path is a
-     file key. *)
-  let rec walk rel acc =
-    let dir =
-      if rel = "" then manifest_root else Filename.concat manifest_root rel
-    in
-    let* names = Fs_util.readdir_list dir in
-    Lwt_list.fold_left_s
-      (fun acc name ->
-        let r = if rel = "" then name else rel ^ "/" ^ name in
-        let* is_dir = Fs_util.is_directory (Filename.concat manifest_root r) in
-        if is_dir then walk r acc
-        else if Filename.check_suffix name ".tmp" then Lwt.return acc
-        else Lwt.return (r :: acc))
-      acc names
-
   let recheck_file rel =
     let key = C.domain_prefix ^ rel in
     let* raw =
@@ -97,7 +81,10 @@ module Make (C : Conf.S) = struct
     let* root_ok = Fs_util.is_directory manifest_root in
     if not root_ok then Lwt.return_none
     else
-      let* rels = walk "" [] in
+      let* rels =
+        Local.walk_manifests ~cache_root:C.cache_root ~domain_name:C.domain_name
+          ()
+      in
       let rels = List.sort compare rels in
       let summary =
         ref { checked = 0; repaired = 0; unrepairable = 0; skipped = 0 }
