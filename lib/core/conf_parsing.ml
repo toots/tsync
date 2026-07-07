@@ -1,5 +1,6 @@
 type backend_config = {
   backend_type : string;
+  name : string;
   fields : (string * string) list;
   main : bool;
 }
@@ -21,18 +22,26 @@ let default_max_downloads = 8
 let parse_backend json =
   let open Yojson.Basic.Util in
   let backend_type = json |> member "type" |> to_string in
+  let name =
+    match json |> member "name" with
+      | `String s -> s
+      | _ ->
+          failwith
+            ("backend config missing required \"name\" field (type: "
+           ^ backend_type ^ ")")
+  in
   let main = match json |> member "main" with `Bool b -> b | _ -> false in
   let fields =
     to_assoc json
     |> List.filter_map (fun (k, v) ->
-        if k = "type" || k = "main" then None
+        if k = "type" || k = "main" || k = "name" then None
         else (
           match v with
             | `String s -> Some (k, s)
             | `Bool b -> Some (k, string_of_bool b)
             | _ -> None))
   in
-  { backend_type; fields; main }
+  { backend_type; name; fields; main }
 
 (* The primary backend serves reads; writes still fan out to all. Pick the first
    one explicitly marked [main], else the first local-file backend (local disk

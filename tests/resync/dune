@@ -1,0 +1,21 @@
+(executable
+ (name resync)
+ (libraries tsync_test_runner))
+
+(alias
+ (name default)
+ (deps resync.exe))
+
+(rule
+ (alias runtest)
+ (target resync.output)
+ (action
+  (with-stdout-to
+   resync.output
+   (ignore-stderr
+    (run ./resync.exe)))))
+
+(rule
+ (alias runtest)
+ (action
+  (diff resync.expected resync.output)))

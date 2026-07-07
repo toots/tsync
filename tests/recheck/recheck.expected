@@ -175,8 +175,10 @@
 
 === recheck mixed tree
   write ok.bin "fine"
+  drain
   mkdir sub
   write sub/nested.bin "nested"
+  drain
   write broken.bin "damaged"
   drain
   evict broken.bin

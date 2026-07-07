@@ -777,6 +777,97 @@ let recheck_cmd =
           repairing what can be repaired")
     Term.(const run $ domain_arg)
 
+(* ── tsync resync-remote ─────────────────────────────────────────────────── *)
+
+let resync_remote_cmd =
+  let domain_arg =
+    Arg.(
+      value
+      & opt (some string) None
+      & info ["domain"] ~docv:"NAME" ~doc:"Domain name (default: from config)")
+  in
+  let source_arg =
+    Arg.(
+      value
+      & opt (some string) None
+      & info ["source"] ~docv:"NAME"
+          ~doc:
+            "Backend to copy from, by its configured name. Default: the \
+             primary backend.")
+  in
+  let run domain source =
+    let code =
+      Lwt_main.run
+        (let open Lwt.Syntax in
+         let cfg = Conf_parsing.load runtime_paths.Runtime.config_path in
+         let d = Conf_parsing.pick_domain ?domain cfg in
+         (* Same ordering make_conf applies, so positions line up with
+            C.backends. *)
+         let labels =
+           List.map
+             (fun (b : Conf_parsing.backend_config) -> b.Conf_parsing.name)
+             (Conf_parsing.order_backends d.Conf_parsing.backends)
+         in
+         let (module C : Conf.S) = make_conf ?domain cfg in
+         let label i = List.nth labels i in
+         let source_index =
+           match source with
+             | None -> Ok 0
+             | Some name -> (
+                 match
+                   List.concat
+                     (List.mapi
+                        (fun i l -> if l = name then [i] else [])
+                        labels)
+                 with
+                   | [i] -> Ok i
+                   | [] ->
+                       Error
+                         (Printf.sprintf "no backend named %s (available: %s)"
+                            name
+                            (String.concat ", " labels))
+                   | _ ->
+                       Error
+                         (Printf.sprintf
+                            "backend name %s is ambiguous; set distinct \
+                             \"name\" fields in the config"
+                            name))
+         in
+         match source_index with
+           | Error msg ->
+               Printf.eprintf "%s\n" msg;
+               Lwt.return 1
+           | Ok _ when List.length C.backends < 2 ->
+               Printf.eprintf
+                 "resync-remote requires at least two configured backends \
+                  (domain %s has %d)\n"
+                 C.domain_name (List.length C.backends);
+               Lwt.return 1
+           | Ok source ->
+               let module M = Mirror.Make (C) in
+               let+ dests = M.resync ~source () in
+               List.iter
+                 (fun (dst : Mirror.dest_stats) ->
+                   List.iter (Printf.printf "copied %s\n") dst.Mirror.copied;
+                   Printf.printf
+                     "%s -> %s: %d object%s checked, %d copied (%d bytes)\n"
+                     (label source) (label dst.Mirror.index) dst.Mirror.checked
+                     (if dst.Mirror.checked = 1 then "" else "s")
+                     (List.length dst.Mirror.copied)
+                     dst.Mirror.copied_bytes)
+                 dests;
+               0)
+    in
+    if code <> 0 then exit code
+  in
+  Cmd.v
+    (Cmd.info "resync-remote"
+       ~doc:
+         "Sync one remote backend from another: copy every object of the \
+          domain (manifests, chunks, journal, versions) that is missing or \
+          size-mismatched on the other configured backends")
+    Term.(const run $ domain_arg $ source_arg)
+
 (* ── tsync configure ────────────────────────────────────────────────────── *)
 
 let configure_cmd =
@@ -818,6 +909,8 @@ let configure_cmd =
     let has_s3 = ref false in
     let prompt_backend () =
       let backend_type = prompt "  Backend type (s3/local)" (Some "s3") in
+      let name = prompt "  Backend name" (Some backend_type) in
+      let name_field = [("name", `String name)] in
       match backend_type with
         | "local" ->
             let path = prompt "  Local path" None in
@@ -825,11 +918,12 @@ let configure_cmd =
               prompt_bool ~default:true "  Primary backend (used for reads)?"
             in
             `Assoc
-              [
-                ("type", `String "local");
-                ("path", `String path);
-                ("main", `Bool main);
-              ]
+              (name_field
+              @ [
+                  ("type", `String "local");
+                  ("path", `String path);
+                  ("main", `Bool main);
+                ])
         | _ ->
             has_s3 := true;
             let bucket = prompt "  S3 bucket" None in
@@ -845,11 +939,12 @@ let configure_cmd =
               prompt_bool ~default:false "  Primary backend (used for reads)?"
             in
             `Assoc
-              ([
-                 ("type", `String "s3");
-                 ("bucket", `String bucket);
-                 ("region", `String region);
-               ]
+              (name_field
+              @ [
+                  ("type", `String "s3");
+                  ("bucket", `String bucket);
+                  ("region", `String region);
+                ]
               @ (if endpoint = "" then [] else [("endpoint", `String endpoint)])
               @ [
                   ("accessKeyId", `String access_key_id);
@@ -989,6 +1084,7 @@ let () =
         stats_cmd;
         sync_cmd;
         recheck_cmd;
+        resync_remote_cmd;
         evict_cmd;
         restore_cmd;
         pull_cmd;

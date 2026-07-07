@@ -52,6 +52,14 @@ type step =
   | Recheck
       (** Run [Recheck.run] over the whole domain and print each file's status
           line plus a summary. *)
+  | OnSecondary of step
+      (** Apply a backend-damage step (delete/corrupt chunk, delete manifest) to
+          the secondary backend instead of the primary. *)
+  | ResyncRemote
+      (** Run [Mirror.resync] from the primary to the other backends and print
+          the copied keys plus a per-destination summary (bytes omitted:
+          manifest objects embed mtimes, so their sizes are not deterministic).
+      *)
 
 type scenario = { name : string; steps : step list }
 type two_client_step = A of step | B of step

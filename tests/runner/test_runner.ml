@@ -22,6 +22,8 @@ type step =
   | DirtyWrite of { path : string; content : string }
   | ModifyCache of { path : string; content : string }
   | Recheck
+  | OnSecondary of step
+  | ResyncRemote
 
 type scenario = { name : string; steps : step list }
 type two_client_step = A of step | B of step
@@ -61,7 +63,7 @@ let render_op = function
         (if is_dir then " dir" else "")
         (match size with Some s -> Printf.sprintf " %Ld" s | None -> "")
 
-let render_step = function
+let rec render_step = function
   | Write { path; content } -> Printf.sprintf "write %s %S" path content
   | Mkdir p -> "mkdir " ^ p
   | Rmdir p -> "rmdir " ^ p
@@ -88,6 +90,8 @@ let render_step = function
   | ModifyCache { path; content } ->
       Printf.sprintf "modify-cache %s %S" path content
   | Recheck -> "recheck"
+  | OnSecondary s -> "on-secondary " ^ render_step s
+  | ResyncRemote -> "resync-remote"
 
 let starts_with prefix s =
   String.length s >= String.length prefix
@@ -213,7 +217,16 @@ let setup_client (module C : Conf.S) root staging_prefix =
             ^ Manifest.chunk_key (List.nth m.Manifest.chunks index))
       | _ -> failwith ("no clean sidecar for " ^ path)
   in
-  let (module B : Backend.S) = List.hd C.backends in
+  let damage (module B : Backend.S) = function
+    | DeleteRemoteChunk { path; index } ->
+        let* ck = remote_chunk_key path index in
+        B.delete ~key:ck ()
+    | CorruptRemoteChunk { path; index } ->
+        let* ck = remote_chunk_key path index in
+        B.put ~key:ck ~data:"garbage" ()
+    | DeleteRemoteManifest p -> B.delete ~key:(key p) ()
+    | s -> failwith ("not a backend-damage step: " ^ render_step s)
+  in
   let do_step = function
     | Write { path; content } ->
         incr staging_seq;
@@ -264,13 +277,25 @@ let setup_client (module C : Conf.S) root staging_prefix =
         (* Move past the current ms so the next journal entry key is distinct. *)
         Lwt_unix.sleep 0.002
     | Sync -> Sp.sync_once ()
-    | DeleteRemoteChunk { path; index } ->
-        let* ck = remote_chunk_key path index in
-        B.delete ~key:ck ()
-    | CorruptRemoteChunk { path; index } ->
-        let* ck = remote_chunk_key path index in
-        B.put ~key:ck ~data:"garbage" ()
-    | DeleteRemoteManifest p -> B.delete ~key:(key p) ()
+    | (DeleteRemoteChunk _ | CorruptRemoteChunk _ | DeleteRemoteManifest _) as s
+      ->
+        damage (List.hd C.backends) s
+    | OnSecondary s -> (
+        match C.backends with
+          | _ :: dst :: _ -> damage dst s
+          | _ -> failwith "OnSecondary: no secondary backend configured")
+    | ResyncRemote ->
+        let module M = Mirror.Make (C) in
+        let+ dests = M.resync () in
+        List.iter
+          (fun (d : Mirror.dest_stats) ->
+            List.iter (Printf.printf "  copied %s\n") d.Mirror.copied;
+            (* Bytes are omitted: manifest objects embed mtimes, so their
+               sizes are not deterministic. *)
+            Printf.printf "  resync backend #%d: %d checked, %d copied\n"
+              (d.Mirror.index + 1) d.Mirror.checked
+              (List.length d.Mirror.copied))
+          dests
     | DirtyWrite { path; content } ->
         (* A write that has not been uploaded yet, the way the FUSE layer
            leaves a file between write and close: local data plus a Dirty
@@ -541,6 +566,15 @@ let run_scenario ?(versioning = false) ({ name; steps } : scenario) =
   List.iter (fun s -> Printf.printf "  %s\n" (render_step s)) steps;
   let root = Filename.temp_dir "tsync-test" "" in
   let backend_root = Filename.concat root "backend" in
+  let backend2_root = Filename.concat root "backend2" in
+  (* The secondary backend exists in every scenario (writes fan out to all
+     backends, as in the daemon); its state is only dumped for scenarios that
+     actually exercise it. *)
+  let uses_secondary =
+    List.exists
+      (function OnSecondary _ | ResyncRemote -> true | _ -> false)
+      steps
+  in
   let module C = struct
     let versioning = versioning
     let client_name = "Test Client"
@@ -550,7 +584,13 @@ let run_scenario ?(versioning = false) ({ name; steps } : scenario) =
     let versions_prefix = "tsync/.versions/test/"
     let journal_prefix = "tsync/.journal/test/"
     let cursor_key = "tsync/.cursor/test"
-    let backends = [Local_backend.make ~root:backend_root]
+
+    let backends =
+      [
+        Local_backend.make ~root:backend_root;
+        Local_backend.make ~root:backend2_root;
+      ]
+
     let cache_root = Filename.concat root "cache"
     let data_dir = Filename.concat root "data"
     let socket_path = Filename.concat root "tsync.sock"
@@ -580,6 +620,15 @@ let run_scenario ?(versioning = false) ({ name; steps } : scenario) =
        dump_backend_at ~backend_root ~domain_prefix:C.domain_prefix
          ~chunk_prefix:C.chunk_prefix ~journal_prefix:C.journal_prefix
          ~versions_prefix:C.versions_prefix ~cursor_key:C.cursor_key
+     in
+     let* () =
+       if uses_secondary then (
+         print_endline "--- backend 2";
+         dump_backend_at ~backend_root:backend2_root
+           ~domain_prefix:C.domain_prefix ~chunk_prefix:C.chunk_prefix
+           ~journal_prefix:C.journal_prefix ~versions_prefix:C.versions_prefix
+           ~cursor_key:C.cursor_key)
+       else Lwt.return_unit
      in
      client.stop ());
   rm_rf root;

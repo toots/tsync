@@ -39,6 +39,7 @@ Config path is platform-specific — see each platform's **Paths** section below
       "backends": [
         {
           "type": "s3",
+          "name": "aws",
           "bucket": "my-bucket",
           "region": "us-east-1",
           "accessKeyId": "AKIA...",
@@ -46,6 +47,7 @@ Config path is platform-specific — see each platform's **Paths** section below
         },
         {
           "type": "local",
+          "name": "nas",
           "path": "/mnt/backup/tsync",
           "main": true
         }
@@ -57,6 +59,7 @@ Config path is platform-specific — see each platform's **Paths** section below
       "backends": [
         {
           "type": "s3",
+          "name": "aws",
           "bucket": "my-bucket",
           "region": "us-east-1",
           "accessKeyId": "AKIA...",
@@ -92,6 +95,7 @@ Config path is platform-specific — see each platform's **Paths** section below
 | Field | Type | Description |
 |---|---|---|
 | `type` | `"s3"` | Backend type |
+| `name` | string | Required. Backend name, unique within the domain — selects backends on the CLI (e.g. `resync-remote --source`) |
 | `bucket` | string | S3 bucket name |
 | `region` | string | AWS region (e.g. `us-east-1`), or the vendor region for an S3-compatible service |
 | `endpoint` | string | Optional. Custom S3 endpoint host for S3-compatible services (e.g. `s3.us-east-005.backblazeb2.com` for Backblaze B2). Omit for AWS |
@@ -105,6 +109,7 @@ Config path is platform-specific — see each platform's **Paths** section below
 | Field | Type | Description |
 |---|---|---|
 | `type` | `"local"` | Backend type |
+| `name` | string | Required. Backend name, unique within the domain — selects backends on the CLI (e.g. `resync-remote --source`) |
 | `path` | string | Root directory for this backend; keys are stored as paths under this root |
 | `main` | bool | Optional. Mark this backend as the primary (read) backend. See [Primary backend selection](#primary-backend-selection) |
 
@@ -212,6 +217,21 @@ A **full resync** invokes the daemon's `full_resync` IPC action, then advances `
 
 `last_sync_key` is stored as a full backend key (`<prefix>/.journal/<domain>/<filename>`). Only the filename part is used for comparisons with the relative keys returned by `list_journal_keys`.
 
+### `tsync recheck` — verify/repair remote state from the local cache
+
+`Recheck.Make(C).run` walks every `.manifest` sidecar in the local cache (sorted) and verifies the remote state file by file, repairing what it can. Files with a `Dirty` sidecar (upload pending) are skipped. Two paths, both in `Remote`:
+
+- **Cached file** (`recheck_cached`): the local data is re-hashed chunk by chunk (the local file is the source of truth, so a file modified behind the daemon's back is detected). Each chunk is verified on the primary backend with a HEAD — existence *and* size, since chunk keys are content-addressed a size mismatch means a corrupt object — and re-uploaded (overwritten) from local data when wrong. The remote manifest is then compared on `h1`/`h2`/`size` and republished when missing, dirty or different. When the re-hash disagrees with the sidecar, the sidecar is rewritten (`local_stale`).
+- **Evicted file** (`recheck_evicted`): chunks are HEAD+size-verified from the sidecar manifest; without local data a bad chunk is **unrepairable** and reported. A missing/bad remote manifest is republished from the sidecar, but only when every chunk checks out — never over missing chunks.
+
+Chunk checks run concurrently (bounded by `maxUploads`, reusing the upload buffer pool for the cached path); files are sequential. Repairs write to every backend (`put_all`), verification reads the primary only — the same split uploads use. No journal entries are written: content and keys are unchanged, other clients need no notification. The CLI prints one line per file (`ok` / `FIXED …` / `BAD …` / `SKIP …`) plus a summary, and exits non-zero when anything was unrepairable.
+
+### `tsync resync-remote` — sync one backend from another
+
+`Mirror.Make(C).resync ?source ()` brings every other configured backend up to date with the source backend (default: the primary; `--source NAME` selects another by its configured name). It lists everything the daemon writes — `<prefix>/<domain>/` (manifests, directory markers), `.chunks/`, `.journal/<domain>/`, `.versions/<domain>/` and the cursor key — and copies each object that is missing on a destination or has a different size there. The chunk store is shared across domains on the same bucket; mirroring all of it is deliberate (chunks are content-addressed, extra copies only help other domains).
+
+It is **additive only**: objects deleted on the source are not deleted on the destinations. Deletes normally fan out to all backends; resync exists for a backend that was down, drifted, or was added to the config later. Copies run concurrently, bounded by `maxUploads`. The CLI prints each copied key and a per-destination summary (`aws -> nas: 12 objects checked, 3 copied (25165824 bytes)`).
+
 ### Versioning
 
 When `versioning = true`, every change that overwrites or removes a file's manifest first copies the current manifest to `<prefix>/.versions/<domain>/<path>/<timestamp-ns>`. A version is only the small manifest JSON — the data chunks it references live in `.chunks/` and are shared across every file and version, so a version is cheap to save and can be restored without transferring any content. There are three save sites: `Remote.upload` (before writing the new manifest, so a modify keeps the old one), `File.apply_delete`, and `File.rename` (versions the source path). History grows until it is trimmed with `tsync expire`.
@@ -278,6 +298,8 @@ tsync evict   <path>
 tsync restore <path>
 tsync ls      [path] [--deleted]
 tsync sync    [--domain <name>] [--full]
+tsync recheck [--domain <name>]
+tsync resync-remote [--domain <name>] [--source <backend-name>]
 
 tsync versions [path]
 tsync revert   <path> [--version <ts>]
@@ -287,7 +309,7 @@ tsync auto-evict [on|off|status]
 tsync purge   <path>
 ```
 
-`tsync configure` writes the config file interactively. It prompts for versioning, upload/download concurrency, and (when both TLS backends are built and an S3 backend is used) the TLS backend, then loops over domains (name, prefix, backends) — each backend can be marked as the primary. On macOS it writes to the group container so both the daemon and extension can read it; on Linux it writes to the XDG config dir with mode `0600`.
+`tsync configure` writes the config file interactively. It prompts for versioning, upload/download concurrency, and (when both TLS backends are built and an S3 backend is used) the TLS backend, then loops over domains (name, prefix, backends) — each backend gets a name (required, defaults to its type) and can be marked as the primary. On macOS it writes to the group container so both the daemon and extension can read it; on Linux it writes to the XDG config dir with mode `0600`.
 
 ### IPC protocol
 
@@ -358,10 +380,12 @@ The harness and the scenarios are separate so suites are cheap to add:
 | `tests/ipc/` | `ipc.ml` — snapshots of the raw `list_dir`/`list_all` and `changes_since`/`cursor` IPC responses (the FileProvider contract); `ipc.expected` snapshot |
 | `tests/versioning/` | `versioning.ml` — modify/rename/delete keep versions, and `revert` restores one dataless (run with `~versioning:true`); `versioning.expected` snapshot |
 | `tests/expire/` | `expire.ml` — `expire` drops versions older than a cutoff (including a mid-scenario `Mark` boundary) and GCs unreferenced chunks while keeping live/surviving ones; `expire.expected` snapshot |
+| `tests/recheck/` | `recheck.ml` — `tsync recheck` scenarios: backend damage injected behind the daemon's back (missing/corrupt chunk, missing manifest, stale local data, dirty skip, evicted files), then `Recheck` prints per-file status lines and the snapshot shows the repaired (or unrepairable) bucket state |
+| `tests/resync/` | `resync.ml` — `tsync resync-remote` scenarios: damage injected on the secondary backend (`OnSecondary …`), then `ResyncRemote` copies missing/size-mismatched objects from the primary; snapshots show both buckets |
 | `tests/hash/` | `hash.ml` — unit test: the whole-file chunk hasher (`Xxhash.hash_file_chunks`) agrees with the single-string hash per chunk across boundary/partial/empty cases (pins chunk-key stability), and a cancelled state returns `None` |
 | `tests/upload/` | `upload.ml` — end-to-end multi-chunk `Remote.upload` on a local backend: 3-chunk round-trip, dedup, concurrent identical-chunk writes, and a 0-byte file |
 
-A scenario is declarative data — a `name` and a list of `step`s (`Write`, `Mkdir`, `Rmdir`, `Rename`, `Delete`, `Evict`, `Restore`, `Open`, `Close`, `Drain`, `Sync`). To add a suite, create a sibling directory under `tests/` with a scenario file that does `open Test_runner`, its own `.expected` snapshot, and the three dune stanzas from `tests/base/dune` (executable, `with-stdout-to` output rule, `runtest` diff rule).
+A scenario is declarative data — a `name` and a list of `step`s (`Write`, `Mkdir`, `Rmdir`, `Rename`, `Delete`, `Evict`, `Restore`, `Open`, `Close`, `Drain`, `Sync`, plus backend-damage and repair steps: `DeleteRemoteChunk`, `CorruptRemoteChunk`, `DeleteRemoteManifest`, `DirtyWrite`, `ModifyCache`, `Recheck`, `OnSecondary`, `ResyncRemote`). Every scenario runs with two local backends (writes fan out to both, as in a mirrored config); the secondary's bucket is dumped only for scenarios that use it. To add a suite, create a sibling directory under `tests/` with a scenario file that does `open Test_runner`, its own `.expected` snapshot, and the three dune stanzas from `tests/base/dune` (executable, `with-stdout-to` output rule, `runtest` diff rule).
 
 **IPC-response snapshots** (`run_ipc` / `run_ipc_changes`) dump the actual JSON the daemon returns rather than a reconstructed tree, so the FileProvider-facing contract is pinned directly: `list_dir` returning directories as full keys and files with logical size + content-hash (`h1`) etags, and `changes_since` producing the working delta, the up-to-date empty response, and the stale flag (pruned-past anchor → full re-list). Only the non-deterministic fields are normalized (wall-clock mtimes, journal-key cursors, filesystem-order arrays); etags and keys are deterministic and asserted verbatim.
 

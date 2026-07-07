@@ -115,8 +115,10 @@ let () =
         steps =
           [
             Write { path = "ok.bin"; content = "fine" };
+            Drain;
             Mkdir "sub";
             Write { path = "sub/nested.bin"; content = "nested" };
+            Drain;
             Write { path = "broken.bin"; content = "damaged" };
             Drain;
             Evict "broken.bin";
