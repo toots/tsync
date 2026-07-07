@@ -252,6 +252,22 @@ module Make (C : Conf.S) (Sq : Sync_queue.S) : S = struct
                 Lwt.return_some (file_stat m.Manifest.size m.Manifest.mtime)
             | None -> Lwt.return_none)
 
+  let stat key =
+    let* st = stat key in
+    match st with
+      | Some _ -> Lwt.return st
+      | None -> (
+          (* No local sidecar (never cached, or after a full resync): the file's
+             manifest still lives on the backend. Resolve it so getattr/stat report
+             the real logical size instead of ENOENT. ponytail: one HEAD+GET per cold
+             stat; add a sidecar-on-stat cache if cold `ls -l` over a big directory
+             gets slow. *)
+          let+ m = R.fetch_manifest ~key () in
+          match m with
+            | Some (`Clean m) ->
+                Some (file_stat m.Manifest.size m.Manifest.mtime)
+            | _ -> None)
+
   let list_dir key =
     Local.list_dir ~cache_root:C.cache_root ~domain_name:C.domain_name
       ~domain_prefix:C.domain_prefix key

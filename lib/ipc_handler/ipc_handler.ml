@@ -29,7 +29,7 @@ module Make (C : Conf.S) (F : File.S) = struct
   (* ── File operation handlers ──────────────────────────────────────────── *)
 
   let file_etag key =
-    let+ m = F.read_manifest key in
+    let+ m = F.resolved_manifest key in
     match m with Some (`Clean m) -> m.Manifest.h1 | _ -> ""
 
   let handle_stat key =
@@ -46,20 +46,9 @@ module Make (C : Conf.S) (F : File.S) = struct
               ("etag", `String etag);
               ("isUploaded", `Bool (not is_dirty));
             ]
-      | None -> (
-          (* No local sidecar: resolve the backend manifest so we report the file's
-             logical size/mtime, not the manifest object's byte size. *)
-          let+ m = F.resolved_manifest key in
-          match m with
-            | Some (`Clean m) ->
-                ok_json
-                  [
-                    ("size", `Int (Int64.to_int m.Manifest.size));
-                    ("mtime", `Float m.Manifest.mtime);
-                    ("etag", `String m.Manifest.h1);
-                    ("isUploaded", `Bool true);
-                  ]
-            | _ -> error_json "not found")
+      (* F.stat already resolves a backend-only file's manifest, so a None here means
+         the key exists nowhere. *)
+      | None -> Lwt.return (error_json "not found")
 
   (* The listed objects are manifests, so their backend size/mtime are the manifest's,
      not the file's. Resolve the manifest (local sidecar, else fetched from the backend)

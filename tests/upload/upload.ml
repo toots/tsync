@@ -80,6 +80,15 @@ let () =
      assert (m.Manifest.size = Int64.of_int size);
      let* () = round_trip (C.domain_prefix ^ "big.bin") src data in
 
+     (* Backend-only resolution: fetching the manifest of a file with no local
+        sidecar yields the logical size, not the manifest object's own byte size.
+        This is what stat/list_dir fall back to for a never-cached file — the bug
+        that made evicted movies list at a few KB. *)
+     let* rm = R.fetch_manifest ~key:(C.domain_prefix ^ "big.bin") () in
+     (match rm with
+       | Some (`Clean m) -> assert (m.Manifest.size = Int64.of_int size)
+       | _ -> assert false);
+
      (* Dedup: identical content under a new key adds no chunk objects. *)
      let* before = count_chunks () in
      let copy = Filename.concat root "copy.bin" in
