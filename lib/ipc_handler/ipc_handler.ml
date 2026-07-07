@@ -47,24 +47,27 @@ module Make (C : Conf.S) (F : File.S) = struct
               ("isUploaded", `Bool (not is_dirty));
             ]
       | None -> (
-          let+ head = Fs.head_opt ~key in
-          match head with
-            | None -> error_json "not found"
-            | Some (e : Backend.file_entry) ->
+          (* No local sidecar: resolve the backend manifest so we report the file's
+             logical size/mtime, not the manifest object's byte size. *)
+          let+ m = F.resolved_manifest key in
+          match m with
+            | Some (`Clean m) ->
                 ok_json
                   [
-                    ("size", `Int e.size);
-                    ("mtime", `Float e.last_modified);
-                    ("etag", `Null);
+                    ("size", `Int (Int64.to_int m.Manifest.size));
+                    ("mtime", `Float m.Manifest.mtime);
+                    ("etag", `String m.Manifest.h1);
                     ("isUploaded", `Bool true);
-                  ])
+                  ]
+            | _ -> error_json "not found")
 
   (* The listed objects are manifests, so their backend size/mtime are the manifest's,
-     not the file's. Read the (local) manifest to report the real logical size/mtime and
-     the content hash (h1) as the etag — the same identity stat returns. Dirty or unknown
-     files have no clean hash: fall back to the backend metadata with an empty etag. *)
+     not the file's. Resolve the manifest (local sidecar, else fetched from the backend)
+     to report the real logical size/mtime and the content hash (h1) as the etag — the
+     same identity stat returns. Dirty or unknown files have no clean hash: fall back to
+     the backend metadata with an empty etag. *)
   let file_entry_json (e : Backend.file_entry) =
-    let+ m = F.read_manifest e.key in
+    let+ m = F.resolved_manifest e.key in
     let key = ("key", `String e.key) in
     match m with
       | Some (`Clean m) ->

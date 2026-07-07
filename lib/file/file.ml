@@ -11,6 +11,7 @@ module type S = sig
   val ensure_parent_dir : t -> unit Lwt.t
   val rel_key : t -> string
   val read_manifest : t -> Manifest.state option Lwt.t
+  val resolved_manifest : t -> Manifest.state option Lwt.t
   val write_manifest : t -> Manifest.state -> unit Lwt.t
   val delete_manifest : t -> unit Lwt.t
   val upload : ?cancel:bool ref -> t -> unit Lwt.t
@@ -119,6 +120,15 @@ module Make (C : Conf.S) (Sq : Sync_queue.S) : S = struct
       | None -> Lwt.return_none
       | Some s -> (
           try Lwt.return_some (Manifest.of_string s) with _ -> Lwt.return_none)
+
+  (* Prefer the local sidecar (cheap, and the only place a Dirty in-progress state
+     lives); for a backend-only file with no sidecar, fetch and parse the manifest so
+     callers get the real logical size/mtime rather than the manifest object's own
+     byte size. ponytail: one HEAD+GET per uncached file; add a metadata cache if a
+     cold full-directory enumeration gets slow. *)
+  let resolved_manifest key : Manifest.state option Lwt.t =
+    let* m = read_manifest key in
+    match m with Some _ -> Lwt.return m | None -> R.fetch_manifest ~key ()
 
   let write_manifest key (state : Manifest.state) =
     let path = manifest_path key in

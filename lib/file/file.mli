@@ -9,6 +9,13 @@ module type S = sig
   val ensure_parent_dir : t -> unit Lwt.t
   val rel_key : t -> string
   val read_manifest : t -> Manifest.state option Lwt.t
+
+  (** Like {!read_manifest}, but falls back to fetching and parsing the backend
+      manifest when there is no local sidecar, so a backend-only file resolves
+      to its real logical size/mtime instead of the manifest object's byte size.
+  *)
+  val resolved_manifest : t -> Manifest.state option Lwt.t
+
   val write_manifest : t -> Manifest.state -> unit Lwt.t
   val delete_manifest : t -> unit Lwt.t
   val upload : ?cancel:bool ref -> t -> unit Lwt.t
