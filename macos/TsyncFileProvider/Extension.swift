@@ -71,6 +71,10 @@ private final class NotifyListener: @unchecked Sendable {
             // set — signaling the specific key can't introduce items the DB has never seen.
             manager.evictItem(identifier: NSFileProviderItemIdentifier(key)) { _ in }
             manager.signalEnumerator(for: .workingSet) { _ in }
+        } else if line == "RESYNC" {
+            // Force fileproviderd to re-scan the whole tree, picking up changes
+            // made directly in the bucket (which write no journal entry).
+            manager.reimportItems(below: .rootContainer) { _ in }
         }
     }
 }

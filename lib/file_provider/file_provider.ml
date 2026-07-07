@@ -66,7 +66,10 @@ module Make (C : Conf.S) = struct
             Ipc.notify_restore ~path:C.notify_path key;
             Lwt.return_unit);
         changed = (fun key -> Ipc.notify_changed ~path:C.notify_path key);
-        full_resync = (fun () -> Lwt.return_unit);
+        full_resync =
+          (fun () ->
+            Ipc.notify_resync ~path:C.notify_path;
+            Lwt.return_unit);
         status_fields = (fun () -> []);
         stats_fields =
           (fun () ->

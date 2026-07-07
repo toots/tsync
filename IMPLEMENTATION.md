@@ -204,9 +204,11 @@ Multiple clients can mount the same domain concurrently. Each client applies the
 
 Brings the local filesystem in sync with the backend on demand (same journal-cursor logic as the poller, usable when no daemon is running). Also used for crash recovery.
 
-1. Read `last_sync_key` from local state file. Empty → full resync.
+1. `--full` given, or `last_sync_key` empty → full resync.
 2. If `oldest_journal_timestamp > last_sync_timestamp` → **full resync** (journal gap; changes were missed).
 3. Otherwise → **incremental**: list journal entries after `last_sync_key`, filter out own `client_uuid`, apply each foreign entry via `File.apply_foreign_ops`.
+
+A **full resync** invokes the daemon's `full_resync` IPC action, then advances `last_sync_key` to the current cursor. On FUSE the hook wipes the local cache tree (next `getattr`/`readdir` re-pulls live from the backend); on macOS it sends `RESYNC` over `notify.sock` so the extension calls `reimportItems`. `tsync sync --full` forces this on demand — the only way to pick up out-of-band bucket changes (see [Known limitations](#known-limitations)).
 
 `last_sync_key` is stored as a full backend key (`<prefix>/.journal/<domain>/<filename>`). Only the filename part is used for comparisons with the relative keys returned by `list_journal_keys`.
 
@@ -275,7 +277,7 @@ tsync stats
 tsync evict   <path>
 tsync restore <path>
 tsync ls      [path] [--deleted]
-tsync sync    [--domain <name>]
+tsync sync    [--domain <name>] [--full]
 
 tsync versions [path]
 tsync revert   <path> [--version <ts>]
@@ -330,7 +332,10 @@ EVICT <key>
 RESTORE <key>
 UPLOADED <key>
 CHANGED <key>
+RESYNC
 ```
+
+`RESYNC` (no key) is sent by the daemon's `full_resync` hook. The extension responds with `NSFileProviderManager.reimportItems(below: .rootContainer)`, forcing the OS to re-scan the whole tree — this is how a full re-sync picks up changes made directly in the bucket, which write no journal entry.
 
 `CHANGED` is sent by the sync poller after applying a foreign journal entry. The extension evicts any materialized copy of that key, then signals the **working set** (not the specific key — signalling an identifier the local DB has never seen cannot introduce it). That drives `enumerateChanges`, which pulls the journal delta via `changes_since` and upserts/removes items by their parent identifier, so newly-discovered remote files appear.
 
@@ -560,7 +565,7 @@ make -C macos deploy     # build + install TsyncApp to /Applications + reload La
 
 **No background prefetch.** Files download on first open. `tsync pull` (not yet implemented) would bulk-download evicted files.
 
-**Change tracking only sees journaled changes.** Cross-client propagation (and the macOS `enumerateChanges` feed) is driven by the change journal, so a change made directly in the bucket — outside any tsync client — writes no journal entry and is not picked up incrementally. It surfaces only on a full re-import (re-adding the domain) or `full_resync`. This matches the sync poller's existing model.
+**Change tracking only sees journaled changes.** Cross-client propagation (and the macOS `enumerateChanges` feed) is driven by the change journal, so a change made directly in the bucket — outside any tsync client — writes no journal entry and is not picked up incrementally. It surfaces only on a full re-import (re-adding the domain) or `tsync sync --full`, which invokes `full_resync` — wiping the FUSE cache or driving `reimportItems` on macOS. This matches the sync poller's existing model.
 
 **Chunks are not encrypted at the application layer.** Enable S3 SSE-S3 or SSE-KMS on the bucket for encryption at rest.
 

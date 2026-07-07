@@ -562,7 +562,13 @@ let sync_cmd =
       & opt (some string) None
       & info ["domain"] ~docv:"NAME" ~doc:"Domain name (default: from config)")
   in
-  let run domain =
+  let full_arg =
+    Arg.(
+      value & flag
+      & info ["full"]
+          ~doc:"Force a full re-sync, re-importing all files from the backend")
+  in
+  let run domain full =
     Lwt_main.run
       (let open Lwt.Syntax in
        let cfg = Conf_parsing.load runtime_paths.Runtime.config_path in
@@ -675,7 +681,7 @@ let sync_cmd =
        in
        let* all_keys = Fs.list_journal_keys () in
        let need_full_resync =
-         if last_sync_key = "" then true
+         if full || last_sync_key = "" then true
          else (
            match all_keys with
              | [] -> false
@@ -725,7 +731,7 @@ let sync_cmd =
   in
   Cmd.v
     (Cmd.info "sync" ~doc:"Sync local cache with remote journal changes")
-    Term.(const run $ domain_arg)
+    Term.(const run $ domain_arg $ full_arg)
 
 (* ── tsync configure ────────────────────────────────────────────────────── *)
 
