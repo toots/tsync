@@ -416,7 +416,7 @@ Each cached file lives at `<cache_root>/<domain>/<path>`. A `.manifest` sidecar 
 ### FUSE operation flow
 
 - **open**: triggers `File.ensure_cached` on first access of an evicted file — downloads from backend synchronously — then `Fd_cache.acquire` opens (or, if another handle on the same key is already open, reuses) the cache file's fd for the FUSE handle's lifetime.
-- **getattr / readdir**: served from the local manifest cache.
+- **getattr / readdir**: served from the local manifest cache; `getattr` on a file with no local sidecar (never cached, or just after a full resync) falls back to fetching the backend manifest so it reports the real logical size rather than ENOENT.
 - **read / write**: go straight to the cached fd via positioned `pread`/`pwrite`, run under `Async_none` (see `local_io.ml`) since the fd is always one of our own recently-touched cache files and essentially always page-cache-resident — this skips Lwt's worker-thread dispatch entirely for what would otherwise be a guaranteed-fast call.
 - **release** (last close): `Fd_cache.release` drops the reference, closing the fd once nothing else holds it open. If the file was written, posts a `Put` event to `Sync_queue`. The upload runs asynchronously on a Sync_queue worker; the FUSE operation returns immediately.
 - **unlink / mkdir / rmdir / rename**: synchronous backend operations with journal write-ahead. `rename` handles both file and directory cases by detecting trailing `/` in the key.
