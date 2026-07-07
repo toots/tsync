@@ -1,3 +1,5 @@
+val manifest_dir : cache_root:string -> string -> string
+
 val cache_path :
   cache_root:string ->
   domain_name:string ->
@@ -27,6 +29,14 @@ val read_manifest :
   domain_prefix:string ->
   string ->
   string option Lwt.t
+
+val write_manifest :
+  cache_root:string ->
+  domain_name:string ->
+  domain_prefix:string ->
+  string ->
+  string ->
+  unit Lwt.t
 
 val delete_manifest :
   cache_root:string ->

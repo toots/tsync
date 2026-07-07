@@ -1,0 +1,212 @@
+=== recheck healthy
+  write file.bin "hello world"
+  drain
+  recheck
+  ok    file.bin
+  recheck: 1 checked, 0 repaired, 0 unrepairable, 0 skipped
+--- tree
+  f file.bin size=11 cached=true uploaded=true etag=6e5ce0583b7dc258
+--- content
+  file.bin = "hello world"
+--- backend
+  chunk d447b1ea40e6988b-b7aeb52a10fdaf2d size=11
+  journal <entry-1> = put file.bin 11
+  file file.bin = manifest size=11 chunks=1 h1=6e5ce0583b7dc258 h2=c61b57eba7d06974
+    chunk#0 d447b1ea40e6988b-b7aeb52a10fdaf2d size=11
+
+=== recheck repairs missing chunk
+  write file.bin "hello world"
+  drain
+  delete-remote-chunk file.bin #0
+  recheck
+  recheck
+  FIXED file.bin (1 chunk re-uploaded)
+  recheck: 1 checked, 1 repaired, 0 unrepairable, 0 skipped
+  ok    file.bin
+  recheck: 1 checked, 0 repaired, 0 unrepairable, 0 skipped
+--- tree
+  f file.bin size=11 cached=true uploaded=true etag=6e5ce0583b7dc258
+--- content
+  file.bin = "hello world"
+--- backend
+  chunk d447b1ea40e6988b-b7aeb52a10fdaf2d size=11
+  journal <entry-1> = put file.bin 11
+  file file.bin = manifest size=11 chunks=1 h1=6e5ce0583b7dc258 h2=c61b57eba7d06974
+    chunk#0 d447b1ea40e6988b-b7aeb52a10fdaf2d size=11
+
+=== recheck repairs corrupt chunk
+  write file.bin "hello world"
+  drain
+  corrupt-remote-chunk file.bin #0
+  recheck
+  FIXED file.bin (1 chunk re-uploaded)
+  recheck: 1 checked, 1 repaired, 0 unrepairable, 0 skipped
+--- tree
+  f file.bin size=11 cached=true uploaded=true etag=6e5ce0583b7dc258
+--- content
+  file.bin = "hello world"
+--- backend
+  chunk d447b1ea40e6988b-b7aeb52a10fdaf2d size=11
+  journal <entry-1> = put file.bin 11
+  file file.bin = manifest size=11 chunks=1 h1=6e5ce0583b7dc258 h2=c61b57eba7d06974
+    chunk#0 d447b1ea40e6988b-b7aeb52a10fdaf2d size=11
+
+=== recheck republishes missing manifest
+  write file.bin "hello world"
+  drain
+  delete-remote-manifest file.bin
+  recheck
+  FIXED file.bin (manifest republished)
+  recheck: 1 checked, 1 repaired, 0 unrepairable, 0 skipped
+--- tree
+  f file.bin size=11 cached=true uploaded=true etag=6e5ce0583b7dc258
+--- content
+  file.bin = "hello world"
+--- backend
+  chunk d447b1ea40e6988b-b7aeb52a10fdaf2d size=11
+  journal <entry-1> = put file.bin 11
+  file file.bin = manifest size=11 chunks=1 h1=6e5ce0583b7dc258 h2=c61b57eba7d06974
+    chunk#0 d447b1ea40e6988b-b7aeb52a10fdaf2d size=11
+
+=== recheck repairs stale local file
+  write file.bin "old content"
+  drain
+  modify-cache file.bin "changed content"
+  recheck
+  recheck
+  FIXED file.bin (1 chunk re-uploaded, manifest republished, sidecar updated)
+  recheck: 1 checked, 1 repaired, 0 unrepairable, 0 skipped
+  ok    file.bin
+  recheck: 1 checked, 0 repaired, 0 unrepairable, 0 skipped
+--- tree
+  f file.bin size=15 cached=true uploaded=true etag=6379016f728ffba6
+--- content
+  file.bin = "changed content"
+--- backend
+  chunk bad02738adfbeba0-e2449384da60a0ea size=11
+  chunk ceb38fa463bd5dff-d69c1972e0763d7d size=15
+  journal <entry-1> = put file.bin 11
+  file file.bin = manifest size=15 chunks=1 h1=6379016f728ffba6 h2=02785037762d9335
+    chunk#0 ceb38fa463bd5dff-d69c1972e0763d7d size=15
+
+=== recheck skips dirty file
+  write file.bin "uploaded"
+  drain
+  dirty-write file.bin "not yet uploaded"
+  recheck
+  SKIP  file.bin (dirty, upload pending)
+  recheck: 0 checked, 0 repaired, 0 unrepairable, 1 skipped
+--- tree
+  f file.bin size=16 cached=true uploaded=false etag=
+--- content
+  file.bin = "not yet uploaded"
+--- backend
+  chunk 3ec7a63f2d48ce00-16e5e4870c3ecb65 size=8
+  journal <entry-1> = put file.bin 8
+  file file.bin = manifest size=8 chunks=1 h1=9394b91bd1d2b48c h2=9185a491805e47a4
+    chunk#0 3ec7a63f2d48ce00-16e5e4870c3ecb65 size=8
+
+=== recheck evicted file
+  write file.bin "hello world"
+  drain
+  evict file.bin
+  recheck
+  ok    file.bin
+  recheck: 1 checked, 0 repaired, 0 unrepairable, 0 skipped
+--- tree
+  f file.bin size=11 cached=false uploaded=true etag=6e5ce0583b7dc258
+--- content
+  file.bin = "hello world"
+--- backend
+  chunk d447b1ea40e6988b-b7aeb52a10fdaf2d size=11
+  journal <entry-1> = put file.bin 11
+  file file.bin = manifest size=11 chunks=1 h1=6e5ce0583b7dc258 h2=c61b57eba7d06974
+    chunk#0 d447b1ea40e6988b-b7aeb52a10fdaf2d size=11
+
+=== recheck evicted missing manifest
+  write file.bin "hello world"
+  drain
+  evict file.bin
+  delete-remote-manifest file.bin
+  recheck
+  FIXED file.bin (manifest republished)
+  recheck: 1 checked, 1 repaired, 0 unrepairable, 0 skipped
+--- tree
+  f file.bin size=11 cached=false uploaded=true etag=6e5ce0583b7dc258
+--- content
+  file.bin = "hello world"
+--- backend
+  chunk d447b1ea40e6988b-b7aeb52a10fdaf2d size=11
+  journal <entry-1> = put file.bin 11
+  file file.bin = manifest size=11 chunks=1 h1=6e5ce0583b7dc258 h2=c61b57eba7d06974
+    chunk#0 d447b1ea40e6988b-b7aeb52a10fdaf2d size=11
+
+=== recheck evicted missing chunk
+  write file.bin "hello world"
+  drain
+  evict file.bin
+  delete-remote-chunk file.bin #0
+  recheck
+  BAD   file.bin (1/1 chunks missing)
+  recheck: 1 checked, 0 repaired, 1 unrepairable, 0 skipped
+--- tree
+  f file.bin size=11 cached=false uploaded=true etag=6e5ce0583b7dc258
+--- content
+  file.bin = <unavailable: Backend.Backend_error("local get tsync/.chunks/d447b1ea40e6988b-b7aeb52a10fdaf2d: No such file or directory")>
+--- backend
+  journal <entry-1> = put file.bin 11
+  file file.bin = manifest size=11 chunks=1 h1=6e5ce0583b7dc258 h2=c61b57eba7d06974
+    chunk#0 d447b1ea40e6988b-b7aeb52a10fdaf2d size=11
+
+=== recheck evicted chunk and manifest gone
+  write file.bin "hello world"
+  drain
+  evict file.bin
+  delete-remote-chunk file.bin #0
+  delete-remote-manifest file.bin
+  recheck
+  BAD   file.bin (1/1 chunks missing, manifest wrong)
+  recheck: 1 checked, 0 repaired, 1 unrepairable, 0 skipped
+--- tree
+--- content
+--- backend
+  journal <entry-1> = put file.bin 11
+  dir tsync/test/
+
+=== recheck mixed tree
+  write ok.bin "fine"
+  mkdir sub
+  write sub/nested.bin "nested"
+  write broken.bin "damaged"
+  drain
+  evict broken.bin
+  delete-remote-chunk broken.bin #0
+  recheck
+  BAD   broken.bin (1/1 chunks missing)
+  ok    ok.bin
+  ok    sub/nested.bin
+  recheck: 3 checked, 0 repaired, 1 unrepairable, 0 skipped
+--- tree
+  f broken.bin size=7 cached=false uploaded=true etag=17deda3d39d45e7a
+  f ok.bin size=4 cached=true uploaded=true etag=19e317dcfeb5674a
+  d sub/
+  f sub/nested.bin size=6 cached=true uploaded=true etag=872c93b4f32e2aaa
+--- content
+  broken.bin = <unavailable: Backend.Backend_error("local get tsync/.chunks/5f60fd5c4664e947-8c1c9d7881c6107a: No such file or directory")>
+  ok.bin = "fine"
+  sub/nested.bin = "nested"
+--- backend
+  chunk 002783db772ad77d-0760f49141bb4bb5 size=4
+  chunk fa87ee5fc199e332-c7156c4359a54f81 size=6
+  cursor = <entry-2>
+  journal <entry-1> = put ok.bin 4
+  journal <entry-2> = mkdir sub/
+  journal <entry-3> = put sub/nested.bin 6
+  journal <entry-4> = put broken.bin 7
+  file broken.bin = manifest size=7 chunks=1 h1=17deda3d39d45e7a h2=3d93fd31b04cedba
+    chunk#0 5f60fd5c4664e947-8c1c9d7881c6107a size=7
+  file ok.bin = manifest size=4 chunks=1 h1=19e317dcfeb5674a h2=5e0089443c8f398f
+    chunk#0 002783db772ad77d-0760f49141bb4bb5 size=4
+  file sub/nested.bin = manifest size=6 chunks=1 h1=872c93b4f32e2aaa h2=89f7ae7aa4f590d6
+    chunk#0 fa87ee5fc199e332-c7156c4359a54f81 size=6
+

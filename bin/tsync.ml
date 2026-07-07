@@ -733,6 +733,50 @@ let sync_cmd =
     (Cmd.info "sync" ~doc:"Sync local cache with remote journal changes")
     Term.(const run $ domain_arg $ full_arg)
 
+(* ── tsync recheck ───────────────────────────────────────────────────────── *)
+
+let recheck_cmd =
+  let domain_arg =
+    Arg.(
+      value
+      & opt (some string) None
+      & info ["domain"] ~docv:"NAME" ~doc:"Domain name (default: from config)")
+  in
+  let run domain =
+    let code =
+      Lwt_main.run
+        (let open Lwt.Syntax in
+         let cfg = Conf_parsing.load runtime_paths.Runtime.config_path in
+         let (module C : Conf.S) = make_conf ?domain cfg in
+         let module Rc = Recheck.Make (C) in
+         let* summary =
+           Rc.run
+             ~on_file:(fun ~rel status ->
+               Printf.printf "%s\n%!" (Recheck.describe rel status))
+             ()
+         in
+         match summary with
+           | None ->
+               Printf.eprintf "No local cache for domain %s\n" C.domain_name;
+               Lwt.return 1
+           | Some s ->
+               Printf.printf
+                 "\n\
+                  %d file%s checked: %d repaired, %d unrepairable, %d skipped\n"
+                 s.Recheck.checked
+                 (if s.Recheck.checked = 1 then "" else "s")
+                 s.Recheck.repaired s.Recheck.unrepairable s.Recheck.skipped;
+               Lwt.return (if s.Recheck.unrepairable > 0 then 1 else 0))
+    in
+    if code <> 0 then exit code
+  in
+  Cmd.v
+    (Cmd.info "recheck"
+       ~doc:
+         "Verify all remote chunks and manifests against the local cache, \
+          repairing what can be repaired")
+    Term.(const run $ domain_arg)
+
 (* ── tsync configure ────────────────────────────────────────────────────── *)
 
 let configure_cmd =
@@ -944,6 +988,7 @@ let () =
         status_cmd;
         stats_cmd;
         sync_cmd;
+        recheck_cmd;
         evict_cmd;
         restore_cmd;
         pull_cmd;

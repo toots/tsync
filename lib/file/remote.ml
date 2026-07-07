@@ -2,6 +2,20 @@ open Lwt.Syntax
 
 exception Cancelled = Backend.Cancelled
 
+type recheck_report = {
+  chunks_total : int;
+  chunks_repaired : int;
+  chunks_unrepairable : int;
+  manifest_repaired : bool;
+  manifest_bad : bool;
+  local_stale : bool;
+}
+
+let manifest_matches (a : Manifest.t) (b : Manifest.t) =
+  a.Manifest.h1 = b.Manifest.h1
+  && a.Manifest.h2 = b.Manifest.h2
+  && a.Manifest.size = b.Manifest.size
+
 (* Read [len] bytes at [offset] from [fd] into [buf] (starting at 0). Uses
    positioned reads rather than lseek+read: chunks, including chunks of the
    same file, are read concurrently (see [Buffer_pool] and [max_uploads]),
@@ -221,6 +235,160 @@ module Make (C : Conf.S) = struct
       raise Cancelled
     else Lwt.return state
 
+  let fetch_manifest ~key () =
+    let (module Primary : Backend.S) = primary () in
+    let* head = Primary.head_opt ~key () in
+    match head with
+      | None -> Lwt.return_none
+      | Some _ ->
+          Lwt.catch
+            (fun () ->
+              let+ body = Primary.get ~key () in
+              match Manifest.of_string body with
+                | `Dirty -> None
+                | `Clean _ as state -> Some state)
+            (fun _ -> Lwt.return_none)
+
+  (* ── Recheck: verify remote state against local data / sidecar ─────────── *)
+
+  (* A chunk is correct remotely when it exists on the primary backend and its
+     size matches: chunk keys are content-addressed, so a size mismatch means
+     the remote object is corrupt. *)
+  let chunk_remote_ok (entry : Manifest.chunk_entry) =
+    let (module Primary : Backend.S) = primary () in
+    let+ head =
+      Primary.head_opt ~key:(C.chunk_prefix ^ Manifest.chunk_key entry) ()
+    in
+    match head with
+      | Some h -> h.Backend.size = entry.Manifest.size
+      | None -> false
+
+  (* Read and hash chunk [index] of the local file, verify it remotely, and
+     re-upload it (put overwrites, also fixing a corrupt object) when wrong.
+     Returns the manifest entry and whether a repair was made. *)
+  let recheck_chunk fd ~file_size index =
+    let offset = index * Manifest.chunk_size in
+    let size = min Manifest.chunk_size (file_size - offset) in
+    let* slot, buf = Buffer_pool.acquire chunk_buffers in
+    Lwt.finalize
+      (fun () ->
+        let* () = read_chunk_into fd offset size buf in
+        let data =
+          if size = Bytes.length buf then Bytes.unsafe_to_string buf
+          else Bytes.sub_string buf 0 size
+        in
+        let entry =
+          Manifest.
+            {
+              index;
+              h1 = Xxhash.hash_hex data 0;
+              h2 = Xxhash.hash_hex data 1;
+              size;
+            }
+        in
+        let* ok = chunk_remote_ok entry in
+        let+ () =
+          if ok then Lwt.return_unit
+          else (
+            Log.info "recheck: re-uploading chunk %s" (Manifest.chunk_key entry);
+            put_all ~key:(C.chunk_prefix ^ Manifest.chunk_key entry) ~data ())
+        in
+        (entry, not ok))
+      (fun () -> Buffer_pool.release chunk_buffers slot)
+
+  (* Fetch the remote manifest for [key] and republish [expected] when it is
+     missing, dirty or differs. Returns [true] when a repair was made. *)
+  let recheck_manifest ~key (expected : Manifest.t) =
+    let* remote = fetch_manifest ~key () in
+    let ok =
+      match remote with
+        | Some (`Clean r) -> manifest_matches r expected
+        | _ -> false
+    in
+    if ok then Lwt.return_false
+    else (
+      Log.info "recheck: republishing manifest %s" key;
+      let+ () = put_all ~key ~data:(Manifest.to_string (`Clean expected)) () in
+      true)
+
+  (* Recheck a file whose data is in the local cache: re-hash it chunk by
+     chunk, verify/repair each chunk remotely, then verify/repair the remote
+     manifest. Returns the freshly computed manifest state (the caller
+     refreshes the sidecar) and a report; [local_stale] is set when the
+     re-hash disagrees with [sidecar]. *)
+  let recheck_cached ~key ~src_path ~mtime ~sidecar () =
+    let* st = Lwt_unix.stat src_path in
+    let file_size = st.Unix.st_size in
+    let num_chunks =
+      if file_size = 0 then 1
+      else (file_size + Manifest.chunk_size - 1) / Manifest.chunk_size
+    in
+    let* fd = Lwt_unix.openfile src_path [Unix.O_RDONLY] 0 in
+    let* results =
+      Lwt.finalize
+        (fun () ->
+          Lwt_list.map_p
+            (recheck_chunk fd ~file_size)
+            (List.init num_chunks Fun.id))
+        (fun () -> Lwt_unix.close fd)
+    in
+    let entries = List.map fst results in
+    let state =
+      Manifest.make ~size:(Int64.of_int file_size)
+        ~chunk_size:Manifest.chunk_size ~chunks:entries ~mtime
+    in
+    let expected = match state with `Clean m -> m | `Dirty -> assert false in
+    let+ manifest_repaired = recheck_manifest ~key expected in
+    ( state,
+      {
+        chunks_total = num_chunks;
+        chunks_repaired = List.length (List.filter snd results);
+        chunks_unrepairable = 0;
+        manifest_repaired;
+        manifest_bad = false;
+        local_stale = not (manifest_matches sidecar expected);
+      } )
+
+  (* Bounds concurrent HEADs for evicted-file rechecks, where no buffer slot
+     is held to do it. *)
+  let recheck_head_pool =
+    Lwt_pool.create (max 1 C.max_uploads) (fun () -> Lwt.return_unit)
+
+  (* Recheck an evicted file from its sidecar manifest alone: chunks cannot
+     be repaired without local data, but a missing/bad remote manifest is
+     republished from the sidecar as long as every chunk checks out. *)
+  let recheck_evicted ~key (m : Manifest.t) =
+    let* oks =
+      Lwt_list.map_p
+        (fun entry ->
+          Lwt_pool.use recheck_head_pool (fun () -> chunk_remote_ok entry))
+        m.Manifest.chunks
+    in
+    let chunks_unrepairable =
+      List.length (List.filter (fun ok -> not ok) oks)
+    in
+    let+ manifest_repaired, manifest_bad =
+      if chunks_unrepairable > 0 then
+        let* remote = fetch_manifest ~key () in
+        let ok =
+          match remote with
+            | Some (`Clean r) -> manifest_matches r m
+            | _ -> false
+        in
+        Lwt.return (false, not ok)
+      else
+        let+ repaired = recheck_manifest ~key m in
+        (repaired, false)
+    in
+    {
+      chunks_total = List.length m.Manifest.chunks;
+      chunks_repaired = 0;
+      chunks_unrepairable;
+      manifest_repaired;
+      manifest_bad;
+      local_stale = false;
+    }
+
   let assemble_chunks ~(manifest : Manifest.t) ~dst_path primary =
     let (module Primary : Backend.S) = primary in
     let* fd =
@@ -256,20 +424,6 @@ module Make (C : Conf.S) = struct
 
   let download_chunks ~dst_path manifest =
     assemble_chunks ~manifest ~dst_path (primary ())
-
-  let fetch_manifest ~key () =
-    let (module Primary : Backend.S) = primary () in
-    let* head = Primary.head_opt ~key () in
-    match head with
-      | None -> Lwt.return_none
-      | Some _ ->
-          Lwt.catch
-            (fun () ->
-              let+ body = Primary.get ~key () in
-              match Manifest.of_string body with
-                | `Dirty -> None
-                | `Clean _ as state -> Some state)
-            (fun _ -> Lwt.return_none)
 
   let download ~key ~dst_path =
     let (module Primary : Backend.S) = primary () in

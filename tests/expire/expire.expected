@@ -13,7 +13,8 @@
   chunk 3ab8997bc73098ac-74d584d55f333769 size=7
   journal <entry-1> = put foo.txt 3
   journal <entry-2> = put foo.txt 7
-  file foo.txt = manifest size=7 chunks=1
+  file foo.txt = manifest size=7 chunks=1 h1=75364433c1f9ff65 h2=341701ccf8300200
+    chunk#0 3ab8997bc73098ac-74d584d55f333769 size=7
 
 === expire all: deleted file fully reclaimed
   write foo.txt "gone soon"
@@ -51,7 +52,8 @@
   journal <entry-2> = put foo.txt 7
   journal <entry-3> = put foo.txt 17
   version foo.txt#1 = manifest size=7 chunks=1
-  file foo.txt = manifest size=17 chunks=1
+  file foo.txt = manifest size=17 chunks=1 h1=bc9c9f6403fc0d62 h2=c39d6eca50f37178
+    chunk#0 faf60158c5948cd2-60f690e9588d51bd size=17
 
 === expire none: nothing removed
   write foo.txt "one"
@@ -70,5 +72,6 @@
   journal <entry-1> = put foo.txt 3
   journal <entry-2> = put foo.txt 7
   version foo.txt#1 = manifest size=3 chunks=1
-  file foo.txt = manifest size=7 chunks=1
+  file foo.txt = manifest size=7 chunks=1 h1=75364433c1f9ff65 h2=341701ccf8300200
+    chunk#0 3ab8997bc73098ac-74d584d55f333769 size=7
 

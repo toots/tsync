@@ -52,6 +52,15 @@ let read_manifest ~cache_root ~domain_name ~domain_prefix key =
         Some s)
       (fun _ -> Lwt.return_none)
 
+let write_manifest ~cache_root ~domain_name ~domain_prefix key data =
+  let path = manifest_path ~cache_root ~domain_name ~domain_prefix key in
+  let* () = ensure_parent_dir path in
+  let tmp = path ^ ".tmp" in
+  let* () =
+    Lwt_io.with_file ~mode:Lwt_io.Output tmp (fun oc -> Lwt_io.write oc data)
+  in
+  Lwt_unix.rename tmp path
+
 let delete_manifest ~cache_root ~domain_name ~domain_prefix key =
   let path = manifest_path ~cache_root ~domain_name ~domain_prefix key in
   Lwt.catch

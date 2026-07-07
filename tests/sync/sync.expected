@@ -15,7 +15,8 @@
 --- backend
   chunk 9555e8555c62dcfd-74b07ed397a89e92 size=5
   journal <entry-1> = put foo.txt 5
-  file foo.txt = manifest size=5 chunks=1
+  file foo.txt = manifest size=5 chunks=1 h1=cfc4edca0bdce7a2 h2=c645f4851be93913
+    chunk#0 9555e8555c62dcfd-74b07ed397a89e92 size=5
 
 === foreign_delete
   A: write foo.txt "hello"
@@ -60,7 +61,8 @@
   chunk 9555e8555c62dcfd-74b07ed397a89e92 size=5
   journal <entry-1> = put foo.txt 5
   journal <entry-2> = put foo.txt 13
-  file foo.txt = manifest size=13 chunks=1
+  file foo.txt = manifest size=13 chunks=1 h1=0771bb1994fbe017 h2=9781f25f6794aea0
+    chunk#0 37d0952b447ba6cc-f3cf2ed32de60965 size=13
 
 === foreign_rename
   A: write foo.txt "renamed content"
@@ -85,7 +87,8 @@
   cursor = <entry-2>
   journal <entry-1> = put foo.txt 15
   journal <entry-2> = rename foo.txt -> bar.txt 15
-  file bar.txt = manifest size=15 chunks=1
+  file bar.txt = manifest size=15 chunks=1 h1=0a27e26deaa484f1 h2=89b19582ea651b55
+    chunk#0 7ca14c1744b7cedc-339b870e9f742377 size=15
 
 === foreign_rename_chain
   A: write foo.txt "chained"
@@ -112,7 +115,8 @@
   journal <entry-1> = put foo.txt 7
   journal <entry-2> = rename foo.txt -> bar.txt 7
   journal <entry-3> = rename bar.txt -> baz.txt 7
-  file baz.txt = manifest size=7 chunks=1
+  file baz.txt = manifest size=7 chunks=1 h1=33e1af5e45645866 h2=bfdd1aa441d2beee
+    chunk#0 e93e5e881ded4f7c-90a3b89755564bde size=7
 
 === foreign_mkdir
   A: mkdir sub
@@ -137,7 +141,8 @@
   cursor = <entry-1>
   journal <entry-1> = mkdir sub/
   journal <entry-2> = put sub/a.txt 6
-  file sub/a.txt = manifest size=6 chunks=1
+  file sub/a.txt = manifest size=6 chunks=1 h1=872c93b4f32e2aaa h2=89f7ae7aa4f590d6
+    chunk#0 fa87ee5fc199e332-c7156c4359a54f81 size=6
 
 === foreign_rmdir
   A: mkdir sub
@@ -186,7 +191,8 @@
   chunk 2ddcd7df4a530027-b16926580286588d size=6
   journal <entry-1> = put foo.txt 6
   journal <entry-2> = put foo.txt 13
-  file foo.txt = manifest size=13 chunks=1
+  file foo.txt = manifest size=13 chunks=1 h1=7ac6228998da9812 h2=aae0381ffad677c1
+    chunk#0 09f85c812b60aedb-57817316f91d176e size=13
 
 === open_file_guard
   B: write foo.txt "old content"
@@ -211,7 +217,8 @@
   chunk bad02738adfbeba0-e2449384da60a0ea size=11
   journal <entry-1> = put foo.txt 11
   journal <entry-2> = put foo.txt 24
-  file foo.txt = manifest size=24 chunks=1
+  file foo.txt = manifest size=24 chunks=1 h1=e999e27279332e90 h2=5e01756a9f4b56b8
+    chunk#0 28c76e4dce03a3c4-40c12ae687c32ec4 size=24
 
 === open_file_guard_closed
   B: write foo.txt "old content"
@@ -236,7 +243,8 @@
   chunk bad02738adfbeba0-e2449384da60a0ea size=11
   journal <entry-1> = put foo.txt 11
   journal <entry-2> = put foo.txt 24
-  file foo.txt = manifest size=24 chunks=1
+  file foo.txt = manifest size=24 chunks=1 h1=e999e27279332e90 h2=5e01756a9f4b56b8
+    chunk#0 28c76e4dce03a3c4-40c12ae687c32ec4 size=24
 
 === delete_rename_race
   A: write foo.txt "saved by rename"
@@ -263,7 +271,8 @@
   journal <entry-1> = put foo.txt 15
   journal <entry-2> = delete foo.txt
   journal <entry-3> = put baz (conflicted copy from Client B).txt 15
-  file baz (conflicted copy from Client B).txt = manifest size=15 chunks=1
+  file baz (conflicted copy from Client B).txt = manifest size=15 chunks=1 h1=541a59c4a3a23452 h2=b401365dcc0c214d
+    chunk#0 7927fec27038e81c-3a112440cfdf156a size=15
 
 === rename_rename_race
   A: write foo.txt "conflict content"
@@ -294,6 +303,8 @@
   journal <entry-1> = put foo.txt 16
   journal <entry-2> = rename foo.txt -> bar.txt 16
   journal <entry-3> = put baz (conflicted copy from Client B).txt 16
-  file bar.txt = manifest size=16 chunks=1
-  file baz (conflicted copy from Client B).txt = manifest size=16 chunks=1
+  file bar.txt = manifest size=16 chunks=1 h1=2dfa6ab13721a00f h2=e366d9af38cd0596
+    chunk#0 63867f7d13d542db-2d81578912f1ac43 size=16
+  file baz (conflicted copy from Client B).txt = manifest size=16 chunks=1 h1=2dfa6ab13721a00f h2=e366d9af38cd0596
+    chunk#0 63867f7d13d542db-2d81578912f1ac43 size=16
 
