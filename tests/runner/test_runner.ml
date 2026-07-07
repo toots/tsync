@@ -16,6 +16,14 @@ type step =
       (** cutoff selector: "all" (now), "none" (epoch), or "mark" *)
   | Drain
   | Sync
+  | DeleteRemoteChunk of { path : string; index : int }
+  | CorruptRemoteChunk of { path : string; index : int }
+  | DeleteRemoteManifest of string
+  | DirtyWrite of { path : string; content : string }
+  | ModifyCache of { path : string; content : string }
+  | Recheck
+  | OnSecondary of step
+  | ResyncRemote
 
 type scenario = { name : string; steps : step list }
 type two_client_step = A of step | B of step
@@ -55,7 +63,7 @@ let render_op = function
         (if is_dir then " dir" else "")
         (match size with Some s -> Printf.sprintf " %Ld" s | None -> "")
 
-let render_step = function
+let rec render_step = function
   | Write { path; content } -> Printf.sprintf "write %s %S" path content
   | Mkdir p -> "mkdir " ^ p
   | Rmdir p -> "rmdir " ^ p
@@ -72,6 +80,18 @@ let render_step = function
   | Expire s -> "expire " ^ s
   | Drain -> "drain"
   | Sync -> "sync"
+  | DeleteRemoteChunk { path; index } ->
+      Printf.sprintf "delete-remote-chunk %s #%d" path index
+  | CorruptRemoteChunk { path; index } ->
+      Printf.sprintf "corrupt-remote-chunk %s #%d" path index
+  | DeleteRemoteManifest p -> "delete-remote-manifest " ^ p
+  | DirtyWrite { path; content } ->
+      Printf.sprintf "dirty-write %s %S" path content
+  | ModifyCache { path; content } ->
+      Printf.sprintf "modify-cache %s %S" path content
+  | Recheck -> "recheck"
+  | OnSecondary s -> "on-secondary " ^ render_step s
+  | ResyncRemote -> "resync-remote"
 
 let starts_with prefix s =
   String.length s >= String.length prefix
@@ -185,6 +205,28 @@ let setup_client (module C : Conf.S) root staging_prefix =
     let+ obj = action ?src ?staging ?arg act path in
     must obj
   in
+  (* Backend damage for recheck scenarios: resolve a chunk key from the local
+     sidecar, then delete or overwrite the remote object behind the daemon's
+     back. *)
+  let remote_chunk_key path index =
+    let* m = F.read_manifest (key path) in
+    match m with
+      | Some (`Clean m) ->
+          Lwt.return
+            (C.chunk_prefix
+            ^ Manifest.chunk_key (List.nth m.Manifest.chunks index))
+      | _ -> failwith ("no clean sidecar for " ^ path)
+  in
+  let damage (module B : Backend.S) = function
+    | DeleteRemoteChunk { path; index } ->
+        let* ck = remote_chunk_key path index in
+        B.delete ~key:ck ()
+    | CorruptRemoteChunk { path; index } ->
+        let* ck = remote_chunk_key path index in
+        B.put ~key:ck ~data:"garbage" ()
+    | DeleteRemoteManifest p -> B.delete ~key:(key p) ()
+    | s -> failwith ("not a backend-damage step: " ^ render_step s)
+  in
   let do_step = function
     | Write { path; content } ->
         incr staging_seq;
@@ -235,6 +277,52 @@ let setup_client (module C : Conf.S) root staging_prefix =
         (* Move past the current ms so the next journal entry key is distinct. *)
         Lwt_unix.sleep 0.002
     | Sync -> Sp.sync_once ()
+    | (DeleteRemoteChunk _ | CorruptRemoteChunk _ | DeleteRemoteManifest _) as s
+      ->
+        damage (List.hd C.backends) s
+    | OnSecondary s -> (
+        match C.backends with
+          | _ :: dst :: _ -> damage dst s
+          | _ -> failwith "OnSecondary: no secondary backend configured")
+    | ResyncRemote ->
+        let module M = Mirror.Make (C) in
+        let+ dests = M.resync () in
+        List.iter
+          (fun (d : Mirror.dest_stats) ->
+            List.iter (Printf.printf "  copied %s\n") d.Mirror.copied;
+            (* Bytes are omitted: manifest objects embed mtimes, so their
+               sizes are not deterministic. *)
+            Printf.printf "  resync backend #%d: %d checked, %d copied\n"
+              (d.Mirror.index + 1) d.Mirror.checked
+              (List.length d.Mirror.copied))
+          dests
+    | DirtyWrite { path; content } ->
+        (* A write that has not been uploaded yet, the way the FUSE layer
+           leaves a file between write and close: local data plus a Dirty
+           sidecar. *)
+        write_file (F.local_path (key path)) content;
+        F.mark_dirty (key path)
+    | ModifyCache { path; content } ->
+        (* Local data changed behind the daemon's back: the sidecar still
+           describes the old content. *)
+        write_file (F.local_path (key path)) content;
+        Lwt.return_unit
+    | Recheck ->
+        let module Rc = Recheck.Make (C) in
+        let* summary =
+          Rc.run
+            ~on_file:(fun ~rel status ->
+              Printf.printf "  %s\n" (Recheck.describe rel status))
+            ()
+        in
+        (match summary with
+          | Some s ->
+              Printf.printf
+                "  recheck: %d checked, %d repaired, %d unrepairable, %d skipped\n"
+                s.Recheck.checked s.Recheck.repaired s.Recheck.unrepairable
+                s.Recheck.skipped
+          | None -> Printf.printf "  recheck: no local cache\n");
+        Lwt.return_unit
   in
   let drain () = Sq.drain () in
   let stop () = Lwt.return_unit in
@@ -290,16 +378,18 @@ let setup_client (module C : Conf.S) root staging_prefix =
     let+ () = walk C.domain_prefix in
     List.rev !files
   in
+  (* A failed fetch (e.g. an unrepairable evicted file) is part of the
+     snapshot, not a reason to abort the remaining files' contents. *)
   let dump_contents files =
     Lwt_list.iter_s
       (fun rel ->
-        let* obj = action "ensure_cached" (key rel) in
-        must obj;
-        match get_str obj "localPath" with
-          | Some lp ->
-              Printf.printf "  %s = %S\n" rel (read_file lp);
-              Lwt.return_unit
-          | None -> failwith "no localPath")
+        let+ obj = action "ensure_cached" (key rel) in
+        if not (response_ok obj) then
+          Printf.printf "  %s = <unavailable: %s>\n" rel (response_error obj)
+        else (
+          match get_str obj "localPath" with
+            | Some lp -> Printf.printf "  %s = %S\n" rel (read_file lp)
+            | None -> failwith "no localPath"))
       files
   in
   let dump_pending () =
@@ -451,9 +541,16 @@ let dump_backend_at ~backend_root ~domain_prefix ~chunk_prefix ~journal_prefix
           let+ data = B.get ~key:e.key () in
           match Manifest.of_string data with
             | `Clean m ->
-                Printf.printf "  file %s = manifest size=%Ld chunks=%d\n" rel
+                Printf.printf
+                  "  file %s = manifest size=%Ld chunks=%d h1=%s h2=%s\n" rel
                   m.Manifest.size
                   (List.length m.Manifest.chunks)
+                  m.Manifest.h1 m.Manifest.h2;
+                List.iter
+                  (fun (c : Manifest.chunk_entry) ->
+                    Printf.printf "    chunk#%d %s size=%d\n" c.index
+                      (Manifest.chunk_key c) c.size)
+                  m.Manifest.chunks
             | `Dirty -> Printf.printf "  file %s = dirty\n" rel
             | exception _ ->
                 Printf.printf "  file %s = raw size=%d\n" rel e.size)
@@ -469,6 +566,15 @@ let run_scenario ?(versioning = false) ({ name; steps } : scenario) =
   List.iter (fun s -> Printf.printf "  %s\n" (render_step s)) steps;
   let root = Filename.temp_dir "tsync-test" "" in
   let backend_root = Filename.concat root "backend" in
+  let backend2_root = Filename.concat root "backend2" in
+  (* The secondary backend exists in every scenario (writes fan out to all
+     backends, as in the daemon); its state is only dumped for scenarios that
+     actually exercise it. *)
+  let uses_secondary =
+    List.exists
+      (function OnSecondary _ | ResyncRemote -> true | _ -> false)
+      steps
+  in
   let module C = struct
     let versioning = versioning
     let client_name = "Test Client"
@@ -478,7 +584,13 @@ let run_scenario ?(versioning = false) ({ name; steps } : scenario) =
     let versions_prefix = "tsync/.versions/test/"
     let journal_prefix = "tsync/.journal/test/"
     let cursor_key = "tsync/.cursor/test"
-    let backends = [Local_backend.make ~root:backend_root]
+
+    let backends =
+      [
+        Local_backend.make ~root:backend_root;
+        Local_backend.make ~root:backend2_root;
+      ]
+
     let cache_root = Filename.concat root "cache"
     let data_dir = Filename.concat root "data"
     let socket_path = Filename.concat root "tsync.sock"
@@ -496,14 +608,27 @@ let run_scenario ?(versioning = false) ({ name; steps } : scenario) =
            print_endline "--- tree";
            let* files = client.dump_tree () in
            print_endline "--- content";
-           let* () = client.dump_contents files in
-           print_endline "--- backend";
-           dump_backend_at ~backend_root ~domain_prefix:C.domain_prefix
-             ~chunk_prefix:C.chunk_prefix ~journal_prefix:C.journal_prefix
-             ~versions_prefix:C.versions_prefix ~cursor_key:C.cursor_key)
+           client.dump_contents files)
          (fun exn ->
            Printf.printf "  ERROR %s\n" (Printexc.to_string exn);
            Lwt.return_unit)
+     in
+     (* Outside the catch: the bucket snapshot must appear even when a step or
+        content fetch fails (e.g. rechecking an unrepairable evicted file). *)
+     print_endline "--- backend";
+     let* () =
+       dump_backend_at ~backend_root ~domain_prefix:C.domain_prefix
+         ~chunk_prefix:C.chunk_prefix ~journal_prefix:C.journal_prefix
+         ~versions_prefix:C.versions_prefix ~cursor_key:C.cursor_key
+     in
+     let* () =
+       if uses_secondary then (
+         print_endline "--- backend 2";
+         dump_backend_at ~backend_root:backend2_root
+           ~domain_prefix:C.domain_prefix ~chunk_prefix:C.chunk_prefix
+           ~journal_prefix:C.journal_prefix ~versions_prefix:C.versions_prefix
+           ~cursor_key:C.cursor_key)
+       else Lwt.return_unit
      in
      client.stop ());
   rm_rf root;

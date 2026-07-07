@@ -17,7 +17,7 @@ tsync gives you a folder that lives in cloud storage (S3, or a local disk/NAS) b
 
 - **Terabytes of files, gigabytes of disk.** Keep a huge library — photos, audio, video, backups — mounted locally while only caching what you touch.
 - **Your storage, your rules.** Point it at your own S3 bucket or a local drive. No subscription, no vendor lock-in, no one else holding your data.
-- **Mirror to more than one place.** Configure several backends per folder and every write fans out to all of them — e.g. S3 *and* a local NAS at the same time. Reads come from a primary backend (a local one by default), so a mirrored local copy also makes reads fast.
+- **Mirror to more than one place.** Configure several backends per folder and every write fans out to all of them — e.g. S3 *and* a local NAS at the same time. Reads come from a primary backend (a local one by default), so a mirrored local copy also makes reads fast. If a mirror was down or drifted, `tsync resync-remote` copies whatever it's missing from another backend.
 - **Use it from several machines.** Multiple computers can mount the same folder; each picks up the others' changes automatically, with sensible handling when two people touch the same file at once.
 - **Efficient by design.** Files are split into content-addressed chunks, so re-uploading a large file only sends the parts that changed, and identical data is stored once.
 
@@ -62,6 +62,8 @@ tsync versions <path> # a file's version history, or all deleted files
 tsync revert <path>   # bring back a previous version (or an undeleted file)
 tsync expire <date>   # drop versions older than a date, then reclaim unused blocks
 tsync sync            # apply changes made from other machines
+tsync recheck         # verify the remote against the local cache, repair what's possible
+tsync resync-remote   # copy missing/damaged objects from one backend to the others
 tsync status          # show daemon state
 tsync stats           # transfer metrics (pending/completed, bandwidth, hashing)
 tsync stop            # unmount

@@ -131,14 +131,8 @@ module Make (C : Conf.S) (Sq : Sync_queue.S) : S = struct
     match m with Some _ -> Lwt.return m | None -> R.fetch_manifest ~key ()
 
   let write_manifest key (state : Manifest.state) =
-    let path = manifest_path key in
-    let* () = Local.ensure_parent_dir path in
-    let tmp = path ^ ".tmp" in
-    let* () =
-      Lwt_io.with_file ~mode:Lwt_io.Output tmp (fun oc ->
-          Lwt_io.write oc (Manifest.to_string state))
-    in
-    Lwt_unix.rename tmp path
+    Local.write_manifest ~cache_root:C.cache_root ~domain_name:C.domain_name
+      ~domain_prefix:C.domain_prefix key (Manifest.to_string state)
 
   let delete_manifest key =
     Local.delete_manifest ~cache_root:C.cache_root ~domain_name:C.domain_name

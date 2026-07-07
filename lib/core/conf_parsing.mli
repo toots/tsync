@@ -1,5 +1,7 @@
 type backend_config = {
   backend_type : string;
+  name : string;
+      (** required; selects backends, e.g. [resync-remote --source] *)
   fields : (string * string) list;
   main : bool;  (** explicitly marked as the primary (read) backend *)
 }

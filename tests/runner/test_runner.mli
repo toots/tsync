@@ -35,6 +35,31 @@ type step =
       (** Call [Sync_poller.sync_once]: read the journal, skip our own entries,
           apply any foreign entries — the same path the background poller takes.
       *)
+  | DeleteRemoteChunk of { path : string; index : int }
+      (** Delete chunk [index] of [path]'s manifest from the backend, behind the
+          daemon's back. *)
+  | CorruptRemoteChunk of { path : string; index : int }
+      (** Overwrite chunk [index] of [path]'s manifest on the backend with
+          garbage of the wrong size. *)
+  | DeleteRemoteManifest of string
+      (** Delete the file's manifest object from the backend. *)
+  | DirtyWrite of { path : string; content : string }
+      (** Local write not yet uploaded, the way the FUSE layer leaves a file
+          between write and close: local data plus a [Dirty] sidecar. *)
+  | ModifyCache of { path : string; content : string }
+      (** Change the local cached data behind the daemon's back; the sidecar
+          still describes the old content. *)
+  | Recheck
+      (** Run [Recheck.run] over the whole domain and print each file's status
+          line plus a summary. *)
+  | OnSecondary of step
+      (** Apply a backend-damage step (delete/corrupt chunk, delete manifest) to
+          the secondary backend instead of the primary. *)
+  | ResyncRemote
+      (** Run [Mirror.resync] from the primary to the other backends and print
+          the copied keys plus a per-destination summary (bytes omitted:
+          manifest objects embed mtimes, so their sizes are not deterministic).
+      *)
 
 type scenario = { name : string; steps : step list }
 type two_client_step = A of step | B of step

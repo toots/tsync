@@ -1,0 +1,21 @@
+(executable
+ (name recheck)
+ (libraries tsync_test_runner))
+
+(alias
+ (name default)
+ (deps recheck.exe))
+
+(rule
+ (alias runtest)
+ (target recheck.output)
+ (action
+  (with-stdout-to
+   recheck.output
+   (ignore-stderr
+    (run ./recheck.exe)))))
+
+(rule
+ (alias runtest)
+ (action
+  (diff recheck.expected recheck.output)))
