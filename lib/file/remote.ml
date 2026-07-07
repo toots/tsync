@@ -199,6 +199,7 @@ module Make (C : Conf.S) = struct
           ~versions_prefix:C.versions_prefix ~key
       else Lwt.return_unit
     in
+    Log.info "upload %s: publishing manifest, size=%d" key file_size;
     let* () = put_all ~key ~data:(Manifest.to_string state) () in
     (* The upload may have been cancelled while the manifest put was in
        flight (e.g. the file was renamed away mid-upload). Leaving the

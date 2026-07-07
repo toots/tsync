@@ -454,6 +454,7 @@ module Make (C : Conf.S) (Sq : Sync_queue.S) : S = struct
     match state with
       | `Dirty -> Lwt.return_unit
       | `Clean m ->
+          Log.info "publish_manifest %s: size=%Ld" key m.Manifest.size;
           let* () =
             Lwt_list.iter_s
               (fun (module B : Backend.S) ->
