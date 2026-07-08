@@ -45,7 +45,7 @@ final class TsyncEnumerator: NSObject, NSFileProviderEnumerator, @unchecked Send
                         key: entry.key, domainPrefix: domainPrefix,
                         size: entry.size,
                         modificationDate: Date(timeIntervalSince1970: entry.mtime),
-                        etag: entry.etag))
+                        etag: entry.etag, symlinkTarget: entry.symlinkTarget))
                 }
 
                 observer.didEnumerate(items)
@@ -119,7 +119,8 @@ final class TsyncEnumerator: NSObject, NSFileProviderEnumerator, @unchecked Send
         return TsyncItem.make(key: key, domainPrefix: domainPrefix,
                               size: resp.size,
                               modificationDate: resp.mtime.map { Date(timeIntervalSince1970: $0) },
-                              etag: resp.etag, isUploaded: resp.isUploaded ?? true)
+                              etag: resp.etag, isUploaded: resp.isUploaded ?? true,
+                              symlinkTarget: resp.symlinkTarget)
     }
 
     private func enumerateWorkingSet(observer: any NSFileProviderEnumerationObserver) async throws {
@@ -133,7 +134,7 @@ final class TsyncEnumerator: NSObject, NSFileProviderEnumerator, @unchecked Send
                 key: entry.key, domainPrefix: domainPrefix,
                 size: entry.size,
                 modificationDate: Date(timeIntervalSince1970: entry.mtime),
-                etag: entry.etag)
+                etag: entry.etag, symlinkTarget: entry.symlinkTarget)
         }
         log.info("enumerateWorkingSet: \(items.count, privacy: .public) items")
         observer.didEnumerate(items)

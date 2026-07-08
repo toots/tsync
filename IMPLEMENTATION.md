@@ -36,6 +36,7 @@ Config path is platform-specific — see each platform's **Paths** section below
     {
       "name": "media",
       "prefix": "tsync",
+      "symlinks": "keep",
       "backends": [
         {
           "type": "s3",
@@ -88,6 +89,7 @@ Config path is platform-specific — see each platform's **Paths** section below
 |---|---|---|
 | `name` | string | Domain name — used as the mount directory name and storage namespace segment |
 | `prefix` | string | Key prefix shared by all backends for this domain (no leading/trailing slash) |
+| `symlinks` | string | Required. Symlink policy: `"keep"` — import stores symlinks as symlink objects and they can be created live through the mount; `"follow"` — import dereferences to target content (broken links skipped); `"skip"` — import ignores symlinks. Under `follow`/`skip`, live creation through the mount is rejected with `EPERM` |
 | `backends` | backend[] | One or more backends; writes fan out to all, reads use the primary (see below) |
 
 **Backend fields (`type: "s3"`):**
@@ -164,6 +166,25 @@ Manifest format:
 
 `h1`/`h2` at the manifest level are derived from the full set of chunk hashes (not the file content directly), providing a stable file identity for deduplication.
 
+**Symlink manifest** — when `symlinks: "keep"` is configured, a symlink is stored as a chunkless manifest with a `"symlink"` field holding the link target. No chunk objects are written; `size` is the byte length of the target string (POSIX convention). The manifest is the single source of truth: FUSE `getattr` returns `S_LNK`, `readlink` returns the target, `tsync export` recreates the link, and FileProvider exposes it as a symbolic link item (`symlinkTargetPath` on the item; the enumeration and stat IPC responses carry a `symlinkTarget` field).
+
+Symlinks enter the store two ways: `tsync import` on a tree containing links, and live creation through the mount — `ln -s` on FUSE (the `symlink` operation) or symlink creation in Finder/FileProvider (`createItem` with a `.symbolicLink` template), both of which go through the `symlink` IPC action (`{"action":"symlink","path":<key>,"target":<target>}`) into `File.symlink`. The journal records a plain `put`; the manifest carries the symlink-ness, so no dedicated journal op exists and foreign clients apply it like any other manifest update.
+
+`File.symlink` enforces the policy: under `follow` or `skip` it fails with `EPERM`, keeping the invariant that a non-`keep` domain never contains symlink objects — a link can't slip in through the mount past the import policy.
+
+```json
+{
+  "v": 1,
+  "size": 8,
+  "chunkSize": 8388608,
+  "mtime": 1700000000.0,
+  "chunks": [],
+  "symlink": "real.txt"
+}
+```
+
+(`h1`/`h2` are present in the stored JSON — they are fixed constants derived from hashing an empty chunk list — but carry no semantic meaning for symlinks.)
+
 ### Change journal
 
 Every mutation is recorded as a journal entry in the backend before the mutation is applied (write-ahead). This enables crash recovery and cross-client sync.
@@ -234,7 +255,7 @@ It is **additive only**: objects deleted on the source are not deleted on the de
 
 ### `tsync import` / `tsync export` — folder in, folder out
 
-`Import.Make(C).run ~src` seeds a domain from an existing folder without copying its data. For every file under `src` (recursively, sorted): upload it with the normal chunked path (`Remote.upload` — hashed, deduplicated, manifest published to all backends), write the manifest sidecar in the local cache, and **symlink the source file into the cache data path** — the file reads as cached at zero data cost, and evicting it just removes the link (a later dangling link makes the file read as not cached and it is re-fetched from the backend). Directories are created in the manifest tree and as backend markers. A key already in the domain (local sidecar or remote manifest) is never overwritten — it is reported as skipped. All resulting ops (`mkdir` + `put`) are published as a **single journal entry**, so other clients pick the import up incrementally; batching also avoids the ms-timestamped entry-key collision that per-file entries would risk. The optional `~exclude` parameter takes a list of shell glob patterns (via `tsync_glob`, backed by `path_glob`); an entry is excluded if any pattern matches either its relative path or its basename, so `*.tmp` prunes any such file anywhere in the tree and `node_modules` prunes any directory of that name along with its contents.
+`Import.Make(C).run ~src` seeds a domain from an existing folder. For every file under `src` (recursively, sorted): upload it with the normal chunked path (`Remote.upload` — hashed, deduplicated, manifest published to all backends), then write the manifest sidecar in the local cache. No local data file is created — imported files read as not cached and are fetched from the backend on demand, which avoids assuming the local filesystem supports symlinks (required for some FS-backed backends). Directories are created in the manifest tree and as backend markers. A key already in the domain (local sidecar or remote manifest) is never overwritten — it is reported as skipped. All resulting ops (`mkdir` + `put`) are published as a **single journal entry**, so other clients pick the import up incrementally; batching also avoids the ms-timestamped entry-key collision that per-file entries would risk. The optional `~exclude` parameter takes a list of shell glob patterns (via `tsync_glob`, backed by `path_glob`); an entry is excluded if any pattern matches either its relative path or its basename, so `*.tmp` prunes any such file anywhere in the tree and `node_modules` prunes any directory of that name along with its contents.
 
 `Export.Make(C).run ~dst` writes every file of the domain to a plain folder, reading manifests directly (no daemon needed). The file set is the union of the backend listing and the local sidecar tree (the latter adds local-only files whose upload is still pending). Per file: if the local cache holds the data (including dirty, not-yet-uploaded content) it is copied from there; otherwise the file is recomposed from remote chunks via `Remote.download_chunks` **straight to the destination — the local cache is deliberately not populated**. mtimes are preserved (cache stat, or the manifest's mtime). A dirty sidecar with no local data, or a key that vanished remotely, is reported as `MISSING` and the CLI exits non-zero.
 
@@ -478,6 +499,7 @@ Each cached file lives at `<cache_root>/<domain>/<path>`. A `.manifest` sidecar 
 - **read / write**: go straight to the cached fd via positioned `pread`/`pwrite`, run under `Async_none` (see `local_io.ml`) since the fd is always one of our own recently-touched cache files and essentially always page-cache-resident — this skips Lwt's worker-thread dispatch entirely for what would otherwise be a guaranteed-fast call.
 - **release** (last close): `Fd_cache.release` drops the reference, closing the fd once nothing else holds it open. If the file was written, posts a `Put` event to `Sync_queue`. The upload runs asynchronously on a Sync_queue worker; the FUSE operation returns immediately.
 - **unlink / mkdir / rmdir / rename**: synchronous backend operations with journal write-ahead. `rename` handles both file and directory cases by detecting trailing `/` in the key.
+- **readlink / symlink**: served from the manifest's `symlink` field. `symlink` (`ln -s` on the mount) stores a symlink manifest via `File.symlink`; rejected with `EPERM` unless the domain policy is `keep` (see [Symlinks](#config)).
 
 ### Auto-evict
 
@@ -503,7 +525,7 @@ TsyncApp (LaunchAgent)
 TsyncFileProvider (extension, sandboxed)
   ├── TsyncExtension          NSFileProviderReplicatedExtension
   │    ├── fetchContents      download: ensure_cached → hand daemon's local path to the OS
-  │    ├── createItem         file: write+upload; dir: mkdir
+  │    ├── createItem         file: write+upload; dir: mkdir; symlink: symlink IPC action
   │    ├── modifyItem         rename / content update / metadata-only
   │    └── deleteItem         unlink / rmdir
   ├── TsyncEnumerator         NSFileProviderEnumerator

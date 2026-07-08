@@ -106,4 +106,66 @@ let () =
               };
           ];
       };
+      {
+        name = "keep: symlink to file round-trips through export";
+        steps =
+          [
+            ImportDirSymlinks
+              {
+                files = [("real.txt", "hello")];
+                symlinks = [("link.txt", "real.txt")];
+              };
+            Drain;
+            ExportDir;
+          ];
+      };
+      {
+        name = "keep: broken symlink is stored and exported as-is";
+        steps =
+          [
+            ImportDirSymlinks
+              { files = []; symlinks = [("dangling.txt", "nowhere")] };
+            Drain;
+            ExportDir;
+          ];
+      };
+    ];
+
+  run ~symlink_policy:`Follow
+    [
+      {
+        name = "follow: dereferences file symlink";
+        steps =
+          [
+            ImportDirSymlinks
+              {
+                files = [("real.txt", "hello")];
+                symlinks = [("link.txt", "real.txt")];
+              };
+          ];
+      };
+      {
+        name = "follow: skips broken symlink";
+        steps =
+          [
+            ImportDirSymlinks
+              { files = []; symlinks = [("dangling.txt", "nowhere")] };
+          ];
+      };
+    ];
+
+  run ~symlink_policy:`Skip
+    [
+      {
+        name = "skip: all symlinks counted and skipped";
+        steps =
+          [
+            ImportDirSymlinks
+              {
+                files = [("real.txt", "hello")];
+                symlinks =
+                  [("link.txt", "real.txt"); ("dangling.txt", "nowhere")];
+              };
+          ];
+      };
     ]

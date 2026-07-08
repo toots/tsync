@@ -162,6 +162,17 @@ final class TsyncExtension: NSObject, NSFileProviderReplicatedExtension, @unchec
                     let dirKey = key + "/"
                     _ = try await IPC.mkdir(key: dirKey)
                     completionHandler(TsyncItem.make(key: dirKey, domainPrefix: domainPrefix), [], false, nil)
+                } else if itemTemplate.contentType == .symbolicLink {
+                    guard let target = itemTemplate.symlinkTargetPath ?? nil else {
+                        throw IPC.IPCError.badResponse
+                    }
+                    let resp = try await IPC.symlink(key: key, target: target)
+                    completionHandler(
+                        TsyncItem.make(key: key, domainPrefix: domainPrefix,
+                                       size: resp.size,
+                                       modificationDate: resp.mtime.map { Date(timeIntervalSince1970: $0) },
+                                       etag: resp.etag, symlinkTarget: target),
+                        [], false, nil)
                 } else {
                     let staging = try url.map { try stageContent($0) }
                     defer { staging.map { try? FileManager.default.removeItem(at: $0) } }
@@ -285,7 +296,8 @@ final class TsyncExtension: NSObject, NSFileProviderReplicatedExtension, @unchec
                        size: resp.size,
                        modificationDate: resp.mtime.map { Date(timeIntervalSince1970: $0) },
                        etag: resp.etag, isDownloaded: isDownloaded,
-                       isUploaded: resp.isUploaded ?? true)
+                       isUploaded: resp.isUploaded ?? true,
+                       symlinkTarget: resp.symlinkTarget)
     }
 
     private func s3Key(for item: NSFileProviderItem) -> String {

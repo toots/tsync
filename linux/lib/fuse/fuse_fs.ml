@@ -236,6 +236,19 @@ module Make (C : Conf.S) = struct
                 | Some st -> Lwt.return st
                 | None ->
                     Lwt.fail (Unix.Unix_error (Unix.ENOENT, "getattr", path))));
+      readlink =
+        (fun path ->
+          Lwt_preemptive.run_in_main (fun () ->
+              let key = fuse_to_key path in
+              let* target = F.readlink key in
+              match target with
+                | Some t -> Lwt.return t
+                | None ->
+                    Lwt.fail (Unix.Unix_error (Unix.EINVAL, "readlink", path))));
+      symlink =
+        (fun target path ->
+          guard "symlink" path (fun () ->
+              on_loop (fun () -> F.symlink ~target (fuse_to_key path))));
       readdir =
         (fun path _offset _fi _flags ->
           on_loop (fun () ->

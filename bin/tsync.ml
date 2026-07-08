@@ -57,6 +57,7 @@ let make_conf ?domain cfg : (module Conf.S) =
     let socket_path = runtime_paths.Runtime.socket_path
     let max_uploads = cfg.Conf_parsing.max_uploads
     let max_downloads = cfg.Conf_parsing.max_downloads
+    let symlink_policy = d.Conf_parsing.symlink_policy
 
     let notify_path =
       Filename.concat runtime_paths.Runtime.data_dir "notify.sock"
@@ -905,13 +906,15 @@ let import_cmd =
                | Import.Imported size ->
                    Printf.printf "imported %s (%Ld bytes)\n%!" rel size
                | Import.Skipped_exists ->
-                   Printf.printf "skip     %s (already in domain)\n%!" rel)
+                   Printf.printf "skip     %s (already in domain)\n%!" rel
+               | Import.Skipped_symlink ->
+                   Printf.printf "skip     %s (symlink)\n%!" rel)
            ()
        in
-       Printf.printf "\n%d file%s imported, %d skipped\n"
+       Printf.printf "\n%d file%s imported, %d skipped, %d symlinks skipped\n"
          summary.Import.imported
          (if summary.Import.imported = 1 then "" else "s")
-         summary.Import.skipped)
+         summary.Import.skipped summary.Import.skipped_symlinks)
   in
   Cmd.v
     (Cmd.info "import"
@@ -952,6 +955,8 @@ let export_cmd =
                      Printf.printf "exported %s (local cache)\n%!" rel
                  | Export.Exported Export.Remote_chunks ->
                      Printf.printf "exported %s (remote)\n%!" rel
+                 | Export.Exported Export.Symlink ->
+                     Printf.printf "exported %s (symlink)\n%!" rel
                  | Export.Missing_data ->
                      Printf.printf
                        "MISSING  %s (no local data or remote manifest)\n%!" rel)

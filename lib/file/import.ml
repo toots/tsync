@@ -1,7 +1,7 @@
 open Lwt.Syntax
 
-type status = Imported of int64 | Skipped_exists
-type summary = { imported : int; skipped : int }
+type status = Imported of int64 | Skipped_exists | Skipped_symlink
+type summary = { imported : int; skipped : int; skipped_symlinks : int }
 
 module Make (C : Conf.S) = struct
   module R = Remote.Make (C)
@@ -15,26 +15,41 @@ module Make (C : Conf.S) = struct
       (fun g -> Glob.matches g rel || Glob.matches g (Filename.basename rel))
       globs
 
-  (* All directories and files under [src], as relative paths, sorted.
-     Entries matching [exclude] are pruned; excluded directories are not
-     descended into. *)
+  (* All directories, files, and symlinks under [src], as relative paths,
+     sorted. Entries matching [exclude] are pruned; excluded directories are
+     not descended into. Dir-symlinks are not descended into regardless of
+     policy (the caller handles them). [seen] guards against cycles. *)
   let walk_source ~exclude src =
     let globs = List.map Glob.of_pattern exclude in
+    let seen = Hashtbl.create 16 in
     let rec walk rel acc =
       let dir = if rel = "" then src else Filename.concat src rel in
       let* names = Fs_util.readdir_list dir in
       Lwt_list.fold_left_s
-        (fun (dirs, files) name ->
+        (fun (dirs, files, symlinks) name ->
           let r = if rel = "" then name else rel ^ "/" ^ name in
-          if excluded globs r then Lwt.return (dirs, files)
-          else
-            let* is_dir = Fs_util.is_directory (Filename.concat src r) in
-            if is_dir then walk r (r :: dirs, files)
-            else Lwt.return (dirs, r :: files))
+          if excluded globs r then Lwt.return (dirs, files, symlinks)
+          else (
+            let abs = Filename.concat src r in
+            let* kind = Fs_util.lstat_kind abs in
+            match kind with
+              | `Dir ->
+                  let realp = try Unix.realpath abs with _ -> abs in
+                  if Hashtbl.mem seen realp then
+                    Lwt.return (dirs, files, symlinks)
+                  else (
+                    Hashtbl.replace seen realp ();
+                    walk r (r :: dirs, files, symlinks))
+              | `File -> Lwt.return (dirs, r :: files, symlinks)
+              | `Symlink target ->
+                  Lwt.return (dirs, files, (r, target) :: symlinks)
+              | `Missing -> Lwt.return (dirs, files, symlinks)))
         acc names
     in
-    let+ dirs, files = walk "" ([], []) in
-    (List.sort compare dirs, List.sort compare files)
+    let+ dirs, files, symlinks = walk "" ([], [], []) in
+    ( List.sort compare dirs,
+      List.sort compare files,
+      List.sort (fun (a, _) (b, _) -> compare a b) symlinks )
 
   (* A key already in the domain (local sidecar or remote manifest) is never
      overwritten by an import. *)
@@ -57,39 +72,54 @@ module Make (C : Conf.S) = struct
       let src_path = Filename.concat src_root rel in
       let* st = Lwt_unix.stat src_path in
       let* state = R.upload ~key ~src_path ~mtime:st.Unix.st_mtime () in
-      let* () =
+      let+ () =
         Local.write_manifest ~cache_root:C.cache_root ~domain_name:C.domain_name
           ~domain_prefix:C.domain_prefix key (Manifest.to_string state)
       in
-      (* Symlink the source file into the cache instead of copying: the file
-         reads as cached at zero data cost, and evicting it just removes the
-         link. If the source is later moved, the dangling link makes the file
-         read as not cached and it is re-fetched from the backend. *)
-      let cache_path =
-        Local.cache_path ~cache_root:C.cache_root ~domain_name:C.domain_name
-          ~domain_prefix:C.domain_prefix key
-      in
-      let* () = Local.ensure_parent_dir cache_path in
-      let* () =
-        Lwt.catch
-          (fun () -> Lwt_unix.unlink cache_path)
-          (function Unix.Unix_error _ -> Lwt.return_unit | e -> Lwt.fail e)
-      in
-      let+ () = Lwt_unix.symlink src_path cache_path in
       match state with
         | `Clean m -> Imported m.Manifest.size
         | `Dirty -> assert false)
 
+  (* Write a symlink manifest to all backends and the local sidecar. No cache
+     entry: there is no file data to cache for a symlink. *)
+  let import_symlink ~src_root rel target =
+    let key = C.domain_prefix ^ rel in
+    let* skip = exists key in
+    if skip then Lwt.return Skipped_exists
+    else (
+      let src_path = Filename.concat src_root rel in
+      let* st = Lwt_unix.lstat src_path in
+      let state = Manifest.make_symlink ~target ~mtime:st.Unix.st_mtime in
+      let data = Manifest.to_string state in
+      let* () =
+        Lwt_list.iter_s
+          (fun (module B : Backend.S) -> B.put ~key ~data ())
+          C.backends
+      in
+      let* () =
+        Local.write_manifest ~cache_root:C.cache_root ~domain_name:C.domain_name
+          ~domain_prefix:C.domain_prefix key data
+      in
+      match state with
+        | `Clean m -> Lwt.return (Imported m.Manifest.size)
+        | `Dirty -> assert false)
+
   (* Import every file under [src] into the domain: upload data to all
-     backends, write manifest sidecars (data stays in [src], symlinked into
-     the cache), and publish a single journal entry so other clients pick the
-     files up incrementally. Existing keys are skipped. *)
+     backends, write manifest sidecars (no local cache data — files read as
+     not cached and are fetched from the backend on demand), and publish a
+     single journal entry so other clients pick the files up incrementally.
+     Existing keys are skipped.
+
+     Symlink handling is controlled by [C.symlink_policy]:
+     - [`Keep]   — store as a first-class symlink object
+     - [`Follow] — dereference and upload target content; broken links skipped
+     - [`Skip]   — skip and count, no upload *)
   let run ?(exclude = []) ~src ~on_file () =
     let src =
       if Filename.is_relative src then Filename.concat (Sys.getcwd ()) src
       else src
     in
-    let* dirs, files = walk_source ~exclude src in
+    let* dirs, files, symlinks = walk_source ~exclude src in
     let* () =
       Lwt_list.iter_s
         (fun rel ->
@@ -101,7 +131,7 @@ module Make (C : Conf.S) = struct
           Fs.create_directory ~key)
         dirs
     in
-    let* statuses =
+    let* file_statuses =
       Lwt_list.map_s
         (fun rel ->
           let+ status = import_file ~src_root:src rel in
@@ -109,13 +139,38 @@ module Make (C : Conf.S) = struct
           (rel, status))
         files
     in
+    let* symlink_statuses =
+      Lwt_list.map_s
+        (fun (rel, target) ->
+          let* status =
+            match C.symlink_policy with
+              | `Keep -> import_symlink ~src_root:src rel target
+              | `Follow -> (
+                  let abs_target =
+                    if Filename.is_relative target then
+                      Filename.concat
+                        (Filename.dirname (Filename.concat src rel))
+                        target
+                    else target
+                  in
+                  let* kind = Fs_util.lstat_kind abs_target in
+                  match kind with
+                    | `Missing -> Lwt.return Skipped_symlink
+                    | _ -> import_file ~src_root:src rel)
+              | `Skip -> Lwt.return Skipped_symlink
+          in
+          on_file ~rel status;
+          Lwt.return (rel, status))
+        symlinks
+    in
+    let all_statuses = file_statuses @ symlink_statuses in
     let ops =
       List.map (fun d -> `Mkdir (d ^ "/")) dirs
       @ List.filter_map
           (function
             | rel, Imported size -> Some (`Put (rel, size))
-            | _, Skipped_exists -> None)
-          statuses
+            | _, (Skipped_exists | Skipped_symlink) -> None)
+          all_statuses
     in
     let+ () =
       if ops = [] then Lwt.return_unit
@@ -126,11 +181,18 @@ module Make (C : Conf.S) = struct
     {
       imported =
         List.length
-          (List.filter (function _, Imported _ -> true | _ -> false) statuses);
+          (List.filter
+             (function _, Imported _ -> true | _ -> false)
+             all_statuses);
       skipped =
         List.length
           (List.filter
              (function _, Skipped_exists -> true | _ -> false)
-             statuses);
+             all_statuses);
+      skipped_symlinks =
+        List.length
+          (List.filter
+             (function _, Skipped_symlink -> true | _ -> false)
+             all_statuses);
     }
 end

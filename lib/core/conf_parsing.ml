@@ -5,7 +5,12 @@ type backend_config = {
   main : bool;
 }
 
-type domain = { name : string; prefix : string; backends : backend_config list }
+type domain = {
+  name : string;
+  prefix : string;
+  backends : backend_config list;
+  symlink_policy : [ `Keep | `Follow | `Skip ];
+}
 
 type t = {
   versioning : bool;
@@ -61,12 +66,23 @@ let order_backends backends =
     | None -> backends
     | Some primary -> primary :: List.filter (fun b -> b != primary) backends
 
+let parse_symlink_policy json =
+  let open Yojson.Basic.Util in
+  match json |> member "symlinks" with
+    | `String "keep" -> `Keep
+    | `String "follow" -> `Follow
+    | `String "skip" -> `Skip
+    | `String s -> failwith ("unknown symlinks policy: " ^ s)
+    | `Null -> failwith "domain config missing required \"symlinks\" field"
+    | _ -> failwith "domain \"symlinks\" field must be a string"
+
 let parse_domain json =
   let open Yojson.Basic.Util in
   {
     name = json |> member "name" |> to_string;
     prefix = json |> member "prefix" |> to_string;
     backends = json |> member "backends" |> to_list |> List.map parse_backend;
+    symlink_policy = parse_symlink_policy json;
   }
 
 let load path =

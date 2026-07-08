@@ -3,13 +3,13 @@
   imported a.txt (5 bytes)
   imported sub/b.txt (5 bytes)
   imported sub/deep/c.txt (7 bytes)
-  import: 3 imported, 0 skipped
+  import: 3 imported, 0 skipped, 0 symlinks skipped
 --- tree
-  f a.txt size=5 cached=true uploaded=true etag=50f034ad0ad3b7ac
+  f a.txt size=5 cached=false uploaded=true etag=50f034ad0ad3b7ac
   d sub/
-  f sub/b.txt size=5 cached=true uploaded=true etag=6d4e870ea6d5a0c8
+  f sub/b.txt size=5 cached=false uploaded=true etag=6d4e870ea6d5a0c8
   d sub/deep/
-  f sub/deep/c.txt size=7 cached=true uploaded=true etag=58c3d9a8175b4c35
+  f sub/deep/c.txt size=7 cached=false uploaded=true etag=58c3d9a8175b4c35
 --- content
   a.txt = "alpha"
   sub/b.txt = "bravo"
@@ -33,10 +33,10 @@
   import-dir file.bin="imported" new.txt="fresh"
   skip file.bin (exists)
   imported new.txt (5 bytes)
-  import: 1 imported, 1 skipped
+  import: 1 imported, 1 skipped, 0 symlinks skipped
 --- tree
   f file.bin size=8 cached=true uploaded=true etag=cd91a7781fe56f7d
-  f new.txt size=5 cached=true uploaded=true etag=612b0b2072a60ff7
+  f new.txt size=5 cached=false uploaded=true etag=612b0b2072a60ff7
 --- content
   file.bin = "original"
   new.txt = "fresh"
@@ -56,9 +56,9 @@
   drain
   import-dir copy.bin="same bytes"
   imported copy.bin (10 bytes)
-  import: 1 imported, 0 skipped
+  import: 1 imported, 0 skipped, 0 symlinks skipped
 --- tree
-  f copy.bin size=10 cached=true uploaded=true etag=bb52b673b2fffd64
+  f copy.bin size=10 cached=false uploaded=true etag=bb52b673b2fffd64
   f file.bin size=10 cached=true uploaded=true etag=bb52b673b2fffd64
 --- content
   copy.bin = "same bytes"
@@ -125,16 +125,16 @@
   export-dir
   imported a.txt (5 bytes)
   imported sub/b.txt (5 bytes)
-  import: 2 imported, 0 skipped
-  export a.txt (local cache)
-  export sub/b.txt (local cache)
+  import: 2 imported, 0 skipped, 0 symlinks skipped
+  export a.txt (remote)
+  export sub/b.txt (remote)
   export: 2 exported, 0 missing
   exported-file a.txt = "alpha"
   exported-file sub/b.txt = "bravo"
 --- tree
-  f a.txt size=5 cached=true uploaded=true etag=50f034ad0ad3b7ac
+  f a.txt size=5 cached=false uploaded=true etag=50f034ad0ad3b7ac
   d sub/
-  f sub/b.txt size=5 cached=true uploaded=true etag=6d4e870ea6d5a0c8
+  f sub/b.txt size=5 cached=false uploaded=true etag=6d4e870ea6d5a0c8
 --- content
   a.txt = "alpha"
   sub/b.txt = "bravo"
@@ -152,11 +152,11 @@
   import-dir --exclude *.tmp a.txt="alpha" b.tmp="temp" sub/c.txt="charlie" sub/d.tmp="also temp"
   imported a.txt (5 bytes)
   imported sub/c.txt (7 bytes)
-  import: 2 imported, 0 skipped
+  import: 2 imported, 0 skipped, 0 symlinks skipped
 --- tree
-  f a.txt size=5 cached=true uploaded=true etag=50f034ad0ad3b7ac
+  f a.txt size=5 cached=false uploaded=true etag=50f034ad0ad3b7ac
   d sub/
-  f sub/c.txt size=7 cached=true uploaded=true etag=58c3d9a8175b4c35
+  f sub/c.txt size=7 cached=false uploaded=true etag=58c3d9a8175b4c35
 --- content
   a.txt = "alpha"
   sub/c.txt = "charlie"
@@ -174,11 +174,11 @@
   import-dir --exclude node_modules a.txt="alpha" node_modules/lib.js="big dep" node_modules/deep/pkg.js="nested dep" src/main.ml="code"
   imported a.txt (5 bytes)
   imported src/main.ml (4 bytes)
-  import: 2 imported, 0 skipped
+  import: 2 imported, 0 skipped, 0 symlinks skipped
 --- tree
-  f a.txt size=5 cached=true uploaded=true etag=50f034ad0ad3b7ac
+  f a.txt size=5 cached=false uploaded=true etag=50f034ad0ad3b7ac
   d src/
-  f src/main.ml size=4 cached=true uploaded=true etag=08b91f0f6d4ae1fc
+  f src/main.ml size=4 cached=false uploaded=true etag=08b91f0f6d4ae1fc
 --- content
   a.txt = "alpha"
   src/main.ml = "code"
@@ -191,4 +191,93 @@
     chunk#0 be6903b5f625ab5a-512a03e79074e07a size=5
   file src/main.ml = manifest size=4 chunks=1 h1=08b91f0f6d4ae1fc h2=8ef1df09cbca3ffc
     chunk#0 04939d9a1b2db88e-62fc6ecf665adb77 size=4
+
+=== keep: symlink to file round-trips through export
+  import-dir-symlinks files=[real.txt] symlinks=[link.txt->real.txt]
+  drain
+  export-dir
+  imported real.txt (5 bytes)
+  imported link.txt (8 bytes)
+  import: 2 imported, 0 skipped, 0 symlinks skipped
+  export link.txt (symlink)
+  export real.txt (remote)
+  export: 2 exported, 0 missing
+  exported-symlink link.txt -> real.txt
+  exported-file real.txt = "hello"
+--- tree
+  f link.txt size=8 cached=false uploaded=true etag=2d06800538d394c2
+  f real.txt size=5 cached=false uploaded=true etag=cfc4edca0bdce7a2
+--- content
+  link.txt -> real.txt
+  real.txt = "hello"
+--- backend
+  chunk 9555e8555c62dcfd-74b07ed397a89e92 size=5
+  cursor = <entry-1>
+  journal <entry-1> = put real.txt 5; put link.txt 8
+  symlink link.txt -> real.txt
+  file real.txt = manifest size=5 chunks=1 h1=cfc4edca0bdce7a2 h2=c645f4851be93913
+    chunk#0 9555e8555c62dcfd-74b07ed397a89e92 size=5
+
+=== keep: broken symlink is stored and exported as-is
+  import-dir-symlinks files=[] symlinks=[dangling.txt->nowhere]
+  drain
+  export-dir
+  imported dangling.txt (7 bytes)
+  import: 1 imported, 0 skipped, 0 symlinks skipped
+  export dangling.txt (symlink)
+  export: 1 exported, 0 missing
+  exported-symlink dangling.txt -> nowhere
+--- tree
+  f dangling.txt size=7 cached=false uploaded=true etag=2d06800538d394c2
+--- content
+  dangling.txt -> nowhere
+--- backend
+  cursor = <entry-1>
+  journal <entry-1> = put dangling.txt 7
+  symlink dangling.txt -> nowhere
+
+=== follow: dereferences file symlink
+  import-dir-symlinks files=[real.txt] symlinks=[link.txt->real.txt]
+  imported real.txt (5 bytes)
+  imported link.txt (5 bytes)
+  import: 2 imported, 0 skipped, 0 symlinks skipped
+--- tree
+  f link.txt size=5 cached=false uploaded=true etag=cfc4edca0bdce7a2
+  f real.txt size=5 cached=false uploaded=true etag=cfc4edca0bdce7a2
+--- content
+  link.txt = "hello"
+  real.txt = "hello"
+--- backend
+  chunk 9555e8555c62dcfd-74b07ed397a89e92 size=5
+  cursor = <entry-1>
+  journal <entry-1> = put real.txt 5; put link.txt 5
+  file link.txt = manifest size=5 chunks=1 h1=cfc4edca0bdce7a2 h2=c645f4851be93913
+    chunk#0 9555e8555c62dcfd-74b07ed397a89e92 size=5
+  file real.txt = manifest size=5 chunks=1 h1=cfc4edca0bdce7a2 h2=c645f4851be93913
+    chunk#0 9555e8555c62dcfd-74b07ed397a89e92 size=5
+
+=== follow: skips broken symlink
+  import-dir-symlinks files=[] symlinks=[dangling.txt->nowhere]
+  skip dangling.txt (symlink)
+  import: 0 imported, 0 skipped, 1 symlinks skipped
+--- tree
+--- content
+--- backend
+
+=== skip: all symlinks counted and skipped
+  import-dir-symlinks files=[real.txt] symlinks=[link.txt->real.txt,dangling.txt->nowhere]
+  imported real.txt (5 bytes)
+  skip dangling.txt (symlink)
+  skip link.txt (symlink)
+  import: 1 imported, 0 skipped, 2 symlinks skipped
+--- tree
+  f real.txt size=5 cached=false uploaded=true etag=cfc4edca0bdce7a2
+--- content
+  real.txt = "hello"
+--- backend
+  chunk 9555e8555c62dcfd-74b07ed397a89e92 size=5
+  cursor = <entry-1>
+  journal <entry-1> = put real.txt 5
+  file real.txt = manifest size=5 chunks=1 h1=cfc4edca0bdce7a2 h2=c645f4851be93913
+    chunk#0 9555e8555c62dcfd-74b07ed397a89e92 size=5
 

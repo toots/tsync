@@ -38,14 +38,25 @@ module Make (C : Conf.S) (F : File.S) = struct
       | Some st ->
           let* m = F.read_manifest key in
           let is_dirty = match m with Some `Dirty -> true | _ -> false in
+          let symlink_target =
+            match m with
+              | Some (`Clean { Manifest.symlink = Some t; _ }) -> Some t
+              | _ -> None
+          in
           let+ etag = file_etag key in
-          ok_json
+          let fields =
             [
               ("size", `Int (Int64.to_int st.Unix.LargeFile.st_size));
               ("mtime", `Float st.Unix.LargeFile.st_mtime);
               ("etag", `String etag);
               ("isUploaded", `Bool (not is_dirty));
             ]
+            @
+              match symlink_target with
+              | None -> []
+              | Some t -> [("symlinkTarget", `String t)]
+          in
+          ok_json fields
       (* F.stat already resolves a backend-only file's manifest, so a None here means
          the key exists nowhere. *)
       | None -> Lwt.return (error_json "not found")
@@ -60,13 +71,19 @@ module Make (C : Conf.S) (F : File.S) = struct
     let key = ("key", `String e.key) in
     match m with
       | Some (`Clean m) ->
-          `Assoc
+          let fields =
             [
               key;
               ("size", `Int (Int64.to_int m.Manifest.size));
               ("mtime", `Float m.Manifest.mtime);
               ("etag", `String m.Manifest.h1);
             ]
+            @
+              match m.Manifest.symlink with
+              | None -> []
+              | Some t -> [("symlinkTarget", `String t)]
+          in
+          `Assoc fields
       | _ ->
           `Assoc
             [
@@ -247,6 +264,10 @@ module Make (C : Conf.S) (F : File.S) = struct
     let+ () = F.mkdir key in
     ok_json []
 
+  let handle_symlink key target =
+    let+ () = F.symlink ~target key in
+    ok_json []
+
   let handle_rmdir key =
     let+ () = F.rmdir key in
     ok_json []
@@ -280,6 +301,7 @@ module Make (C : Conf.S) (F : File.S) = struct
                   | "delete" -> handle_delete path
                   | "rename" -> handle_rename (get_str obj "src") path
                   | "mkdir" -> handle_mkdir path
+                  | "symlink" -> handle_symlink path (get_str obj "target")
                   | "rmdir" -> handle_rmdir path
                   | "evict" ->
                       let+ () = hooks.request_evict (hooks.path_to_key path) in

@@ -7,14 +7,16 @@ public struct IPCRequest: Codable, Sendable {
     public let src: String?
     public let staging: String?
     public let arg: String?
+    public let target: String?
 
     public init(action: String, path: String? = nil, src: String? = nil,
-                staging: String? = nil, arg: String? = nil) {
+                staging: String? = nil, arg: String? = nil, target: String? = nil) {
         self.action = action
         self.path = path
         self.src = src
         self.staging = staging
         self.arg = arg
+        self.target = target
     }
 }
 
@@ -29,6 +31,7 @@ public struct IPCFileEntry: Codable, Sendable {
     public let size: Int64
     public let mtime: Double
     public let etag: String?
+    public let symlinkTarget: String?
 }
 
 public struct IPCResponse: Codable, Sendable {
@@ -44,15 +47,17 @@ public struct IPCResponse: Codable, Sendable {
     public let cursor: String?
     public let ops: [IPCOp]?
     public let stale: Bool?
+    public let symlinkTarget: String?
 
     public init(ok: Bool, error: String? = nil, size: Int64? = nil, mtime: Double? = nil,
                 etag: String? = nil, localPath: String? = nil,
                 dirs: [String]? = nil, files: [IPCFileEntry]? = nil,
                 isUploaded: Bool? = nil, cursor: String? = nil, ops: [IPCOp]? = nil,
-                stale: Bool? = nil) {
+                stale: Bool? = nil, symlinkTarget: String? = nil) {
         self.ok = ok; self.error = error; self.size = size; self.mtime = mtime
         self.etag = etag; self.localPath = localPath; self.dirs = dirs; self.files = files
         self.isUploaded = isUploaded; self.cursor = cursor; self.ops = ops; self.stale = stale
+        self.symlinkTarget = symlinkTarget
     }
 }
 
@@ -186,6 +191,10 @@ public enum IPC {
 
     public static func mkdir(key: String) async throws -> IPCResponse {
         try await sendAsync(IPCRequest(action: "mkdir", path: key))
+    }
+
+    public static func symlink(key: String, target: String) async throws -> IPCResponse {
+        try await sendAsync(IPCRequest(action: "symlink", path: key, target: target))
     }
 
     public static func rmdir(key: String) async throws -> IPCResponse {

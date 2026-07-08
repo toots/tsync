@@ -7,6 +7,10 @@
 
 type step =
   | Write of { path : string; content : string }
+  | Symlink of { path : string; target : string }
+      (** Create a symlink at [path] pointing to [target] via the IPC [symlink]
+          action — the same path FUSE and FileProvider symlink creation takes.
+      *)
   | Mkdir of string
   | Rmdir of string
   | Rename of { src : string; dst : string }
@@ -67,6 +71,12 @@ type step =
       entries : (string * string) list;
       exclude : string list;
     }  (** Like [ImportDir] but passes [~exclude] patterns to [Import.run]. *)
+  | ImportDirSymlinks of {
+      files : (string * string) list;
+      symlinks : (string * string) list;
+    }
+      (** Like [ImportDir] but also seeds (rel, target) symlinks in the source
+          tree, exercising the [symlink_policy] configured on the scenario. *)
   | ExportDir
       (** Run [Export.run] into a fresh temp folder, print per-file status
           lines, then dump the exported tree's contents. *)
@@ -78,7 +88,11 @@ type two_client_scenario = { name : string; steps : two_client_step list }
 (** Run each scenario in order, printing its snapshot to stdout. Set
     [versioning] to enable version history (modify/rename/delete save a
     version). *)
-val run : ?versioning:bool -> scenario list -> unit
+val run :
+  ?versioning:bool ->
+  ?symlink_policy:[ `Keep | `Follow | `Skip ] ->
+  scenario list ->
+  unit
 
 (** Run scenarios with two full client instances (separate cache, data dir,
     journal identity) sharing the same backend. Each step is tagged with the

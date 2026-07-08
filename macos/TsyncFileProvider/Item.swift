@@ -12,6 +12,7 @@ final class TsyncItem: NSObject, NSFileProviderItem {
     let itemVersion: NSFileProviderItemVersion
     let isUploaded: Bool
     let isDownloaded: Bool
+    let symlinkTargetPath: String?
     var contentPolicy: NSFileProviderContentPolicy { .downloadLazily }
 
     init(
@@ -23,25 +24,34 @@ final class TsyncItem: NSObject, NSFileProviderItem {
         modificationDate: Date? = nil,
         etag: String? = nil,
         isDownloaded: Bool = false,
-        isUploaded: Bool = true
+        isUploaded: Bool = true,
+        symlinkTarget: String? = nil
     ) {
         self.itemIdentifier = identifier
         self.parentItemIdentifier = parent
         self.filename = filename
+        self.symlinkTargetPath = symlinkTarget
         self.contentType = isDirectory
             ? .folder
+            : symlinkTarget != nil
+            ? .symbolicLink
             : UTType(filenameExtension: (filename as NSString).pathExtension) ?? .data
         self.documentSize = size.map { NSNumber(value: $0) }
         self.contentModificationDate = modificationDate
         self.capabilities = isDirectory
             ? [.allowsReading, .allowsContentEnumerating, .allowsAddingSubItems]
+            : symlinkTarget != nil
+            ? [.allowsReading, .allowsRenaming, .allowsReparenting, .allowsTrashing, .allowsDeleting]
             : [.allowsReading, .allowsWriting, .allowsRenaming, .allowsReparenting, .allowsTrashing, .allowsDeleting, .allowsEvicting]
         // contentVersion is the file's content hash (Manifest.h1). A dirty file has no clean
-        // hash, so fall back to size:mtime there. metadataVersion additionally tracks upload
-        // state, so a completing upload refreshes the item without a content re-download.
-        // Both are non-empty by construction (FileProvider drops empty version data).
-        let content = etag.flatMap { $0.isEmpty ? nil : $0 }
+        // hash, so fall back to size:mtime there. Symlink manifests all share the same fixed
+        // h1 (hash of an empty chunk list), so fold the target in to detect retargeting.
+        // metadataVersion additionally tracks upload state, so a completing upload refreshes
+        // the item without a content re-download. Both are non-empty by construction
+        // (FileProvider drops empty version data).
+        var content = etag.flatMap { $0.isEmpty ? nil : $0 }
             ?? "\(size ?? 0):\(modificationDate?.timeIntervalSince1970 ?? 0)"
+        if let symlinkTarget { content += ":\(symlinkTarget)" }
         let metadata = "\(content):\(isUploaded ? 1 : 0)"
         self.itemVersion = NSFileProviderItemVersion(
             contentVersion: Data(content.utf8),
@@ -95,12 +105,13 @@ extension TsyncItem {
     static func make(key: String, domainPrefix: String,
                      size: Int64? = nil, modificationDate: Date? = nil,
                      etag: String? = nil, isDownloaded: Bool = false,
-                     isUploaded: Bool = true) -> TsyncItem {
+                     isUploaded: Bool = true, symlinkTarget: String? = nil) -> TsyncItem {
         TsyncItem(identifier: ItemID.identifier(forKey: key, domainPrefix: domainPrefix),
                   parent: ItemID.parent(ofKey: key, domainPrefix: domainPrefix),
                   filename: ItemID.filename(ofKey: key),
                   isDirectory: key.hasSuffix("/"),
                   size: size, modificationDate: modificationDate, etag: etag,
-                  isDownloaded: isDownloaded, isUploaded: isUploaded)
+                  isDownloaded: isDownloaded, isUploaded: isUploaded,
+                  symlinkTarget: symlinkTarget)
     }
 }

@@ -2,6 +2,7 @@ open Lwt.Syntax
 
 type step =
   | Write of { path : string; content : string }
+  | Symlink of { path : string; target : string }
   | Mkdir of string
   | Rmdir of string
   | Rename of { src : string; dst : string }
@@ -28,6 +29,10 @@ type step =
   | ImportDirExclude of {
       entries : (string * string) list;
       exclude : string list;
+    }
+  | ImportDirSymlinks of {
+      files : (string * string) list;
+      symlinks : (string * string) list;
     }
   | ExportDir
 
@@ -71,6 +76,7 @@ let render_op = function
 
 let rec render_step = function
   | Write { path; content } -> Printf.sprintf "write %s %S" path content
+  | Symlink { path; target } -> Printf.sprintf "symlink %s -> %s" path target
   | Mkdir p -> "mkdir " ^ p
   | Rmdir p -> "rmdir " ^ p
   | Rename { src; dst } -> Printf.sprintf "rename %s -> %s" src dst
@@ -107,6 +113,11 @@ let rec render_step = function
         (String.concat "," exclude)
         (String.concat " "
            (List.map (fun (p, c) -> Printf.sprintf "%s=%S" p c) entries))
+  | ImportDirSymlinks { files; symlinks } ->
+      Printf.sprintf "import-dir-symlinks files=[%s] symlinks=[%s]"
+        (String.concat "," (List.map fst files))
+        (String.concat ","
+           (List.map (fun (r, t) -> Printf.sprintf "%s->%s" r t) symlinks))
   | ExportDir -> "export-dir"
 
 let starts_with prefix s =
@@ -207,18 +218,19 @@ let setup_client (module C : Conf.S) root staging_prefix =
   let response_error obj =
     match List.assoc_opt "error" obj with Some (`String s) -> s | _ -> "?"
   in
-  let action ?src ?staging ?arg act path =
+  let action ?src ?staging ?arg ?target act path =
     request
       ([("action", `String act); ("path", `String path)]
       @ (match src with Some s -> [("src", `String s)] | None -> [])
       @ (match arg with Some s -> [("arg", `String s)] | None -> [])
+      @ (match target with Some s -> [("target", `String s)] | None -> [])
       @ match staging with Some s -> [("staging", `String s)] | None -> [])
   in
   let must obj =
     if not (response_ok obj) then failwith ("IPC error: " ^ response_error obj)
   in
-  let must_action ?src ?staging ?arg act path =
-    let+ obj = action ?src ?staging ?arg act path in
+  let must_action ?src ?staging ?arg ?target act path =
+    let+ obj = action ?src ?staging ?arg ?target act path in
     must obj
   in
   (* Backend damage for recheck scenarios: resolve a chunk key from the local
@@ -268,11 +280,14 @@ let setup_client (module C : Conf.S) root staging_prefix =
           match status with
             | Import.Imported size ->
                 Printf.printf "  imported %s (%Ld bytes)\n" rel size
-            | Import.Skipped_exists -> Printf.printf "  skip %s (exists)\n" rel)
+            | Import.Skipped_exists -> Printf.printf "  skip %s (exists)\n" rel
+            | Import.Skipped_symlink ->
+                Printf.printf "  skip %s (symlink)\n" rel)
         ()
     in
-    Printf.printf "  import: %d imported, %d skipped\n" summary.Import.imported
-      summary.Import.skipped
+    Printf.printf "  import: %d imported, %d skipped, %d symlinks skipped\n"
+      summary.Import.imported summary.Import.skipped
+      summary.Import.skipped_symlinks
   in
   let do_step = function
     | Write { path; content } ->
@@ -283,6 +298,13 @@ let setup_client (module C : Conf.S) root staging_prefix =
         in
         write_file staging content;
         must_action ~staging "write" (key path)
+    | Symlink { path; target } ->
+        (* Print a rejection instead of failing: symlink creation is expected
+           to be refused when the domain policy is not [`Keep]. *)
+        let+ obj = action ~target "symlink" (key path) in
+        if not (response_ok obj) then
+          Printf.printf "  symlink %s: rejected (%s)\n" path
+            (response_error obj)
     | Mkdir p -> must_action "mkdir" (key p ^ "/")
     | Rmdir p -> must_action "rmdir" (key p ^ "/")
     | Rename { src; dst } -> must_action ~src:(key src) "rename" (key dst)
@@ -333,6 +355,52 @@ let setup_client (module C : Conf.S) root staging_prefix =
           | _ -> failwith "OnSecondary: no secondary backend configured")
     | ImportDir entries -> run_import ~exclude:[] entries
     | ImportDirExclude { entries; exclude } -> run_import ~exclude entries
+    | ImportDirSymlinks { files; symlinks } ->
+        incr staging_seq;
+        let src =
+          Filename.concat root
+            (Printf.sprintf "import-%s%d" staging_prefix !staging_seq)
+        in
+        List.iter
+          (fun (rel, content) ->
+            let path = Filename.concat src rel in
+            let rec mkdir_p d =
+              if not (Sys.file_exists d) then begin
+                mkdir_p (Filename.dirname d);
+                Unix.mkdir d 0o755
+              end
+            in
+            mkdir_p (Filename.dirname path);
+            write_file path content)
+          files;
+        List.iter
+          (fun (rel, target) ->
+            let path = Filename.concat src rel in
+            let rec mkdir_p d =
+              if not (Sys.file_exists d) then begin
+                mkdir_p (Filename.dirname d);
+                Unix.mkdir d 0o755
+              end
+            in
+            mkdir_p (Filename.dirname path);
+            Unix.symlink target path)
+          symlinks;
+        let module I = Import.Make (C) in
+        let+ summary =
+          I.run ~src
+            ~on_file:(fun ~rel status ->
+              match status with
+                | Import.Imported size ->
+                    Printf.printf "  imported %s (%Ld bytes)\n" rel size
+                | Import.Skipped_exists ->
+                    Printf.printf "  skip %s (exists)\n" rel
+                | Import.Skipped_symlink ->
+                    Printf.printf "  skip %s (symlink)\n" rel)
+            ()
+        in
+        Printf.printf "  import: %d imported, %d skipped, %d symlinks skipped\n"
+          summary.Import.imported summary.Import.skipped
+          summary.Import.skipped_symlinks
     | ExportDir ->
         incr staging_seq;
         let dst =
@@ -347,6 +415,7 @@ let setup_client (module C : Conf.S) root staging_prefix =
                 match status with
                   | Export.Exported Export.Local_cache -> "local cache"
                   | Export.Exported Export.Remote_chunks -> "remote"
+                  | Export.Exported Export.Symlink -> "symlink"
                   | Export.Missing_data -> "MISSING"
               in
               Printf.printf "  export %s (%s)\n" rel desc)
@@ -361,12 +430,16 @@ let setup_client (module C : Conf.S) root staging_prefix =
           Lwt_list.iter_s
             (fun name ->
               let r = if rel = "" then name else rel ^ "/" ^ name in
-              let* is_dir = Fs_util.is_directory (Filename.concat dst r) in
-              if is_dir then dump r
-              else (
-                Printf.printf "  exported-file %s = %S\n" r
-                  (read_file (Filename.concat dst r));
-                Lwt.return_unit))
+              let abs = Filename.concat dst r in
+              let* kind = Fs_util.lstat_kind abs in
+              match kind with
+                | `Dir -> dump r
+                | `Symlink target ->
+                    Printf.printf "  exported-symlink %s -> %s\n" r target;
+                    Lwt.return_unit
+                | _ ->
+                    Printf.printf "  exported-file %s = %S\n" r (read_file abs);
+                    Lwt.return_unit)
             (List.sort compare names)
         in
         dump ""
@@ -469,13 +542,20 @@ let setup_client (module C : Conf.S) root staging_prefix =
   let dump_contents files =
     Lwt_list.iter_s
       (fun rel ->
-        let+ obj = action "ensure_cached" (key rel) in
-        if not (response_ok obj) then
-          Printf.printf "  %s = <unavailable: %s>\n" rel (response_error obj)
-        else (
-          match get_str obj "localPath" with
-            | Some lp -> Printf.printf "  %s = %S\n" rel (read_file lp)
-            | None -> failwith "no localPath"))
+        let* st = action "stat" (key rel) in
+        match get_str st "symlinkTarget" with
+          | Some target ->
+              Printf.printf "  %s -> %s\n" rel target;
+              Lwt.return_unit
+          | None ->
+              let+ obj = action "ensure_cached" (key rel) in
+              if not (response_ok obj) then
+                Printf.printf "  %s = <unavailable: %s>\n" rel
+                  (response_error obj)
+              else (
+                match get_str obj "localPath" with
+                  | Some lp -> Printf.printf "  %s = %S\n" rel (read_file lp)
+                  | None -> failwith "no localPath"))
       files
   in
   let dump_pending () =
@@ -626,6 +706,8 @@ let dump_backend_at ~backend_root ~domain_prefix ~chunk_prefix ~journal_prefix
         else
           let+ data = B.get ~key:e.key () in
           match Manifest.of_string data with
+            | `Clean { symlink = Some target; _ } ->
+                Printf.printf "  symlink %s -> %s\n" rel target
             | `Clean m ->
                 Printf.printf
                   "  file %s = manifest size=%Ld chunks=%d h1=%s h2=%s\n" rel
@@ -647,7 +729,8 @@ let dump_backend_at ~backend_root ~domain_prefix ~chunk_prefix ~journal_prefix
 
 (* ── Scenario runners ─────────────────────────────────────────────────────── *)
 
-let run_scenario ?(versioning = false) ({ name; steps } : scenario) =
+let run_scenario ?(versioning = false) ?(symlink_policy = `Keep)
+    ({ name; steps } : scenario) =
   Printf.printf "=== %s\n" name;
   List.iter (fun s -> Printf.printf "  %s\n" (render_step s)) steps;
   let root = Filename.temp_dir "tsync-test" "" in
@@ -683,6 +766,7 @@ let run_scenario ?(versioning = false) ({ name; steps } : scenario) =
     let notify_path = Filename.concat root "notify.sock"
     let max_uploads = 4
     let max_downloads = 8
+    let symlink_policy = symlink_policy
   end in
   Lwt_main.run
     (let client = setup_client (module C) root "" in
@@ -748,6 +832,7 @@ let run_two_client_scenario ?(versioning = false)
     let notify_path = Filename.concat root "notify-a.sock"
     let max_uploads = 4
     let max_downloads = 8
+    let symlink_policy = `Keep
   end in
   let module Cb = struct
     let versioning = versioning
@@ -765,6 +850,7 @@ let run_two_client_scenario ?(versioning = false)
     let notify_path = Filename.concat root "notify-b.sock"
     let max_uploads = 4
     let max_downloads = 8
+    let symlink_policy = `Keep
   end in
   Lwt_main.run
     (let client_a = setup_client (module Ca) root "a" in
@@ -804,7 +890,8 @@ let run_two_client_scenario ?(versioning = false)
   rm_rf root;
   print_newline ()
 
-let run ?versioning scenarios = List.iter (run_scenario ?versioning) scenarios
+let run ?versioning ?symlink_policy scenarios =
+  List.iter (run_scenario ?versioning ?symlink_policy) scenarios
 
 let run_two_client_scenarios ?versioning scenarios =
   List.iter (run_two_client_scenario ?versioning) scenarios
@@ -829,6 +916,7 @@ let make_conf ?(versioning = false) ~client_name ~backend_root ~cache_root
     let notify_path = notify_path
     let max_uploads = 4
     let max_downloads = 8
+    let symlink_policy = `Keep
   end)
 
 (* Single client: after draining uploads, snapshot the listing IPC responses

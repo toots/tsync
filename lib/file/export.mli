@@ -3,7 +3,7 @@
     local cache; evicted files are recomposed from remote chunks straight to the
     destination — the local cache is never populated. *)
 
-type data_source = Local_cache | Remote_chunks
+type data_source = Local_cache | Remote_chunks | Symlink
 type status = Exported of data_source | Missing_data
 type summary = { exported : int; missing : int }
 

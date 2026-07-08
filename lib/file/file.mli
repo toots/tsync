@@ -22,6 +22,11 @@ module type S = sig
   val download : t -> unit Lwt.t
   val ensure_cached : t -> unit Lwt.t
   val stat : t -> Unix.LargeFile.stats option Lwt.t
+
+  (** Return the symlink target for a key whose manifest is a symlink, or [None]
+      if the key is absent or is a regular file. *)
+  val readlink : t -> string option Lwt.t
+
   val list_dir : t -> string list Lwt.t
   val xattrs : t -> (string * string) list Lwt.t
   val is_dirty : t -> bool
@@ -59,6 +64,7 @@ module type S = sig
   val rmdir : t -> unit Lwt.t
   val rename : src:t -> dst:t -> unit Lwt.t
   val revert : ?version:string -> t -> unit Lwt.t
+  val symlink : target:string -> t -> unit Lwt.t
   val apply_foreign_ops : Journal.op list -> unit Lwt.t
 end
 

@@ -12,6 +12,11 @@ val readdir_list : string -> string list Lwt.t
 (** [true] if [path] exists and is a directory (following symlinks). *)
 val is_directory : string -> bool Lwt.t
 
+(** lstat-based classifier. Returns [`Dir], [`File], [`Symlink target], or
+    [`Missing] on any error (dangling link, ENOENT, EACCES, …). *)
+val lstat_kind :
+  string -> [ `Dir | `File | `Symlink of string | `Missing ] Lwt.t
+
 (** Recursively delete [path]; missing paths and unlink/rmdir errors are
     ignored. Symlinks are removed, not followed. *)
 val rm_rf : string -> unit Lwt.t

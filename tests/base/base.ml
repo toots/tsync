@@ -66,6 +66,39 @@ let scenarios : scenario list =
         ];
     };
     { name = "rmdir"; steps = [Mkdir "sub"; Drain; Rmdir "sub"; Drain] };
+    {
+      name = "symlink";
+      steps =
+        [
+          Write { path = "real.txt"; content = "target data" };
+          Drain;
+          Symlink { path = "link.txt"; target = "real.txt" };
+          Drain;
+        ];
+    };
+    {
+      name = "symlink delete";
+      steps =
+        [
+          Symlink { path = "link.txt"; target = "gone.txt" };
+          Drain;
+          Delete "link.txt";
+          Drain;
+        ];
+    };
   ]
 
 let () = run scenarios
+
+(* Live symlink creation is only allowed under the [`Keep] policy (the default
+   above); [`Follow]/[`Skip] domains must never contain symlink objects. *)
+let rejection_scenario name : scenario =
+  { name; steps = [Symlink { path = "link.txt"; target = "real.txt" }] }
+
+let () =
+  run ~symlink_policy:`Follow
+    [rejection_scenario "follow: symlink creation rejected"]
+
+let () =
+  run ~symlink_policy:`Skip
+    [rejection_scenario "skip: symlink creation rejected"]

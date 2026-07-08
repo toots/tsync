@@ -24,6 +24,20 @@ let is_directory path =
       st.Unix.st_kind = Unix.S_DIR)
     (fun _ -> Lwt.return_false)
 
+(** lstat-based kind: [`Dir], [`File], or [`Symlink target]. [`Missing] for any
+    error (dangling link, permission denied, etc.). *)
+let lstat_kind path =
+  Lwt.catch
+    (fun () ->
+      let* st = Lwt_unix.lstat path in
+      match st.Unix.st_kind with
+        | Unix.S_DIR -> Lwt.return `Dir
+        | Unix.S_LNK ->
+            let+ target = Lwt_unix.readlink path in
+            `Symlink target
+        | _ -> Lwt.return `File)
+    (fun _ -> Lwt.return `Missing)
+
 (* Recursively delete [path]; a missing path or unlink/rmdir failure is ignored.
    Uses [lstat] so a symlink is removed rather than followed. *)
 let rec rm_rf path =
