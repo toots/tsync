@@ -44,6 +44,9 @@ let parse_backend json =
           match v with
             | `String s -> Some (k, s)
             | `Bool b -> Some (k, string_of_bool b)
+            (* Array fields (e.g. exec backend "command") pass through as JSON
+               for the backend factory to decode. *)
+            | `List _ -> Some (k, Yojson.Basic.to_string v)
             | _ -> None))
   in
   { backend_type; name; fields; main }

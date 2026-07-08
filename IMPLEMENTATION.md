@@ -115,6 +115,30 @@ Config path is platform-specific — see each platform's **Paths** section below
 | `path` | string | Root directory for this backend; keys are stored as paths under this root |
 | `main` | bool | Optional. Mark this backend as the primary (read) backend. See [Primary backend selection](#primary-backend-selection) |
 
+**Backend fields (`type: "ssh"`):**
+
+Stores blobs on a remote machine over plain OpenSSH — nothing to install on the remote beyond sshd, POSIX sh and GNU coreutils. Each operation runs a short shell snippet on the remote host, with data piped over stdin/stdout. Connection multiplexing (`ControlMaster`/`ControlPersist`) is enabled automatically, so after the first connection each operation is a cheap channel open on the shared connection. Per-host settings (port, identity file, user, ...) belong in `~/.ssh/config`.
+
+| Field | Type | Description |
+|---|---|---|
+| `type` | `"ssh"` | Backend type |
+| `name` | string | Required. Backend name, unique within the domain — selects backends on the CLI (e.g. `resync-remote --source`) |
+| `host` | string | SSH destination, e.g. `"user@linuxbox"` or a `~/.ssh/config` host alias |
+| `path` | string | Root directory on the remote host; keys are stored as paths under this root |
+| `main` | bool | Optional. Mark this backend as the primary (read) backend. See [Primary backend selection](#primary-backend-selection) |
+
+**Backend fields (`type: "exec"`):**
+
+Escape hatch behind the `ssh` type: the same storage-over-a-command backend, but with a fully arbitrary command line. The shell snippet is appended as the final argument, so `"command": ["ssh", "-p", "2222", "-i", "/path/key", "user@host"]` gives SSH with custom options, and `["sh", "-c"]` runs against the local machine.
+
+| Field | Type | Description |
+|---|---|---|
+| `type` | `"exec"` | Backend type |
+| `name` | string | Required. Backend name, unique within the domain — selects backends on the CLI (e.g. `resync-remote --source`) |
+| `command` | string[] | Command and arguments to spawn for each operation; a POSIX-sh snippet is appended as the final argument |
+| `path` | string | Root directory (as seen by the command) for this backend; keys are stored as paths under this root |
+| `main` | bool | Optional. Mark this backend as the primary (read) backend. See [Primary backend selection](#primary-backend-selection) |
+
 Each domain is an independent namespace: `<prefix>/<domain>/`. When the config has exactly one domain, `--domain` can be omitted from CLI commands; with multiple domains it is required.
 
 When a domain has multiple backends, all writes (uploads, deletes, copies) fan out to every backend. Reads use the **primary** backend. This supports mirroring a domain to e.g. S3 and a local NAS simultaneously.

@@ -18,4 +18,15 @@ let () =
   assert (ids [bc "s3" "a"; bc "s3" "b"] = ["a"; "b"]);
   (* single backend is unchanged *)
   assert (ids [bc "s3" "a"] = ["a"]);
+  (* array fields (exec backend "command") pass through as JSON strings *)
+  Unix.putenv "TSYNC_CONFIG_JSON"
+    {|{"versioning": false,
+       "domains": [{"name": "d", "prefix": "p", "symlinks": "keep",
+                    "backends": [{"type": "exec", "name": "e", "path": "/x",
+                                  "command": ["ssh", "box"]}]}]}|};
+  let cfg = Conf_parsing.load "" in
+  let backend =
+    List.hd (List.hd cfg.Conf_parsing.domains).Conf_parsing.backends
+  in
+  assert (List.assoc "command" backend.Conf_parsing.fields = {|["ssh","box"]|});
   print_endline "conf_test ok"

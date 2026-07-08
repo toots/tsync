@@ -1,0 +1,25 @@
+get a.txt: "hello"
+head a.txt: size=5 dir=false
+head missing.txt: none
+head dir/: size=0 dir=true
+get sub/b.txt: "hello"
+get we ird'name.txt: "quoted"
+list_all "":
+  a.txt (5)
+  dir/ (0)
+  sub/b.txt (5)
+  we ird'name.txt (6)
+list_all "sub/":
+  sub/b.txt (5)
+list_directory "":
+  a.txt (5)
+  we ird'name.txt (6)
+  dir dir
+  dir sub
+head a.txt: none
+list_all "":
+  dir/ (0)
+  sub/ (0)
+get missing.txt: Backend_error
+factory get f.txt: "via factory"
+ok

@@ -1018,10 +1018,24 @@ let configure_cmd =
     in
     let has_s3 = ref false in
     let prompt_backend () =
-      let backend_type = prompt "  Backend type (s3/local)" (Some "s3") in
+      let backend_type = prompt "  Backend type (s3/local/ssh)" (Some "s3") in
       let name = prompt "  Backend name" (Some backend_type) in
       let name_field = [("name", `String name)] in
       match backend_type with
+        | "ssh" ->
+            let host = prompt "  SSH host (user@host)" None in
+            let path = prompt "  Remote path" None in
+            let main =
+              prompt_bool ~default:false "  Primary backend (used for reads)?"
+            in
+            `Assoc
+              (name_field
+              @ [
+                  ("type", `String "ssh");
+                  ("host", `String host);
+                  ("path", `String path);
+                  ("main", `Bool main);
+                ])
         | "local" ->
             let path = prompt "  Local path" None in
             let main =
