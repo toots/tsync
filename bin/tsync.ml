@@ -39,7 +39,7 @@ let make_conf ?domain cfg : (module Conf.S) =
   Tls_conf.apply cfg.Conf_parsing.tls;
   let d = Conf_parsing.pick_domain ?domain cfg in
   (module struct
-    let versioning = cfg.Conf_parsing.versioning
+    let versioning = d.Conf_parsing.versioning
     let client_name = cfg.Conf_parsing.name
     let domain_name = d.Conf_parsing.name
     let domain_prefix = Conf_parsing.domain_prefix d
@@ -1092,11 +1092,19 @@ let configure_cmd =
     let prompt_domain () =
       let name = prompt "Domain name" (Some "default") in
       let key_prefix = prompt "Key prefix" (Some "tsync") in
+      let versioning =
+        prompt_bool "Enable versioning (keep version history)?"
+      in
+      let symlinks =
+        prompt "Symlinks policy (keep/drop/follow)" (Some "keep")
+      in
       let backends = prompt_backends () in
       `Assoc
         [
           ("name", `String name);
           ("prefix", `String key_prefix);
+          ("versioning", `Bool versioning);
+          ("symlinks", `String symlinks);
           ("backends", `List backends);
         ]
     in
@@ -1112,7 +1120,6 @@ let configure_cmd =
       Printf.printf "Aborted; existing config left untouched.\n";
       exit 0);
     let client_name = prompt "Client name" (Some (Unix.gethostname ())) in
-    let versioning = prompt_bool "Enable versioning (keep version history)?" in
     let max_uploads =
       prompt_int "Max concurrent uploads" Conf_parsing.default_max_uploads
     in
@@ -1145,7 +1152,6 @@ let configure_cmd =
       `Assoc
         ([
            ("name", `String client_name);
-           ("versioning", `Bool versioning);
            ("maxUploads", `Int max_uploads);
            ("maxDownloads", `Int max_downloads);
          ]
