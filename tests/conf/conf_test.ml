@@ -20,8 +20,7 @@ let () =
   assert (ids [bc "s3" "a"] = ["a"]);
   (* array fields (exec backend "command") pass through as JSON strings *)
   Unix.putenv "TSYNC_CONFIG_JSON"
-    {|{"versioning": false,
-       "domains": [{"name": "d", "prefix": "p", "symlinks": "keep",
+    {|{"domains": [{"name": "d", "prefix": "p", "symlinks": "keep", "versioning": false,
                     "backends": [{"type": "exec", "name": "e", "path": "/x",
                                   "command": ["ssh", "box"]}]}]}|};
   let cfg = Conf_parsing.load "" in
