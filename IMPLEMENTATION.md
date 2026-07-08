@@ -234,7 +234,7 @@ It is **additive only**: objects deleted on the source are not deleted on the de
 
 ### `tsync import` / `tsync export` — folder in, folder out
 
-`Import.Make(C).run ~src` seeds a domain from an existing folder without copying its data. For every file under `src` (recursively, sorted): upload it with the normal chunked path (`Remote.upload` — hashed, deduplicated, manifest published to all backends), write the manifest sidecar in the local cache, and **symlink the source file into the cache data path** — the file reads as cached at zero data cost, and evicting it just removes the link (a later dangling link makes the file read as not cached and it is re-fetched from the backend). Directories are created in the manifest tree and as backend markers. A key already in the domain (local sidecar or remote manifest) is never overwritten — it is reported as skipped. All resulting ops (`mkdir` + `put`) are published as a **single journal entry**, so other clients pick the import up incrementally; batching also avoids the ms-timestamped entry-key collision that per-file entries would risk.
+`Import.Make(C).run ~src` seeds a domain from an existing folder without copying its data. For every file under `src` (recursively, sorted): upload it with the normal chunked path (`Remote.upload` — hashed, deduplicated, manifest published to all backends), write the manifest sidecar in the local cache, and **symlink the source file into the cache data path** — the file reads as cached at zero data cost, and evicting it just removes the link (a later dangling link makes the file read as not cached and it is re-fetched from the backend). Directories are created in the manifest tree and as backend markers. A key already in the domain (local sidecar or remote manifest) is never overwritten — it is reported as skipped. All resulting ops (`mkdir` + `put`) are published as a **single journal entry**, so other clients pick the import up incrementally; batching also avoids the ms-timestamped entry-key collision that per-file entries would risk. The optional `~exclude` parameter takes a list of shell glob patterns (via `tsync_glob`, backed by `path_glob`); an entry is excluded if any pattern matches either its relative path or its basename, so `*.tmp` prunes any such file anywhere in the tree and `node_modules` prunes any directory of that name along with its contents.
 
 `Export.Make(C).run ~dst` writes every file of the domain to a plain folder, reading manifests directly (no daemon needed). The file set is the union of the backend listing and the local sidecar tree (the latter adds local-only files whose upload is still pending). Per file: if the local cache holds the data (including dirty, not-yet-uploaded content) it is copied from there; otherwise the file is recomposed from remote chunks via `Remote.download_chunks` **straight to the destination — the local cache is deliberately not populated**. mtimes are preserved (cache stat, or the manifest's mtime). A dirty sidecar with no local data, or a key that vanished remotely, is reported as `MISSING` and the CLI exits non-zero.
 
@@ -394,7 +394,32 @@ The harness and the scenarios are separate so suites are cheap to add:
 | `tests/hash/` | `hash.ml` — unit test: the whole-file chunk hasher (`Xxhash.hash_file_chunks`) agrees with the single-string hash per chunk across boundary/partial/empty cases (pins chunk-key stability), and a cancelled state returns `None` |
 | `tests/upload/` | `upload.ml` — end-to-end multi-chunk `Remote.upload` on a local backend: 3-chunk round-trip, dedup, concurrent identical-chunk writes, and a 0-byte file |
 
-A scenario is declarative data — a `name` and a list of `step`s (`Write`, `Mkdir`, `Rmdir`, `Rename`, `Delete`, `Evict`, `Restore`, `Open`, `Close`, `Drain`, `Sync`, plus backend-damage and repair steps: `DeleteRemoteChunk`, `CorruptRemoteChunk`, `DeleteRemoteManifest`, `DirtyWrite`, `ModifyCache`, `Recheck`, `OnSecondary`, `ResyncRemote`, `ImportDir`, `ExportDir`). Every scenario runs with two local backends (writes fan out to both, as in a mirrored config); the secondary's bucket is dumped only for scenarios that use it. To add a suite, create a sibling directory under `tests/` with a scenario file that does `open Test_runner`, its own `.expected` snapshot, and the three dune stanzas from `tests/base/dune` (executable, `with-stdout-to` output rule, `runtest` diff rule).
+A scenario is a `name` and a list of `step`s. Every scenario runs with two local backends (writes fan out to both, as in a mirrored config); the secondary's bucket is dumped only for scenarios that use it. To add a suite, create a sibling directory under `tests/` with a scenario file that does `open Test_runner`, its own `.expected` snapshot, and the three dune stanzas from `tests/base/dune` (executable, `with-stdout-to` output rule, `runtest` diff rule).
+
+| Step | Description |
+|------|-------------|
+| `Write` | Write a file through IPC (normal upload path) |
+| `Mkdir` / `Rmdir` | Create / remove a directory |
+| `Rename` | Rename a file or directory |
+| `Delete` | Delete a file |
+| `Evict` | Drop the local cached data, keeping the sidecar |
+| `Restore` | Pull the cached data back down |
+| `Open` / `Close` | Mark a file as open/closed (FUSE open-file guard) |
+| `DirtyWrite` | Write local data without uploading (simulates FUSE write-then-close) |
+| `ModifyCache` | Tamper with cached data behind the daemon's back |
+| `Drain` | Wait for all queued uploads to finish; also advances the ms clock so journal entry keys stay deterministic |
+| `Sync` | Run `Sync_poller.sync_once`: consume foreign journal entries |
+| `Mark` / `Expire` | Record a time boundary, then prune versions older than it |
+| `RevertVersion` | Restore a saved version to the live path |
+| `DeleteRemoteChunk` | Remove a chunk from the primary backend (simulates corruption) |
+| `CorruptRemoteChunk` | Overwrite a chunk with garbage |
+| `DeleteRemoteManifest` | Remove a file's manifest object |
+| `OnSecondary` | Apply a backend-damage step to the secondary backend instead |
+| `Recheck` | Run `Recheck.run` over the whole domain and print per-file status |
+| `ResyncRemote` | Copy missing/damaged objects from primary to other backends |
+| `ImportDir` | Seed the domain from a temp folder (upload, symlink into cache, batch journal entry) |
+| `ImportDirExclude` | Like `ImportDir` but with `--exclude` glob patterns |
+| `ExportDir` | Write the whole domain to a temp folder |
 
 **IPC-response snapshots** (`run_ipc` / `run_ipc_changes`) dump the actual JSON the daemon returns rather than a reconstructed tree, so the FileProvider-facing contract is pinned directly: `list_dir` returning directories as full keys and files with logical size + content-hash (`h1`) etags, and `changes_since` producing the working delta, the up-to-date empty response, and the stale flag (pruned-past anchor → full re-list). Only the non-deterministic fields are normalized (wall-clock mtimes, journal-key cursors, filesystem-order arrays); etags and keys are deterministic and asserted verbatim.
 

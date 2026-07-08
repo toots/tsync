@@ -1,0 +1,4 @@
+(library
+ (name tsync_glob)
+ (wrapped false)
+ (libraries path_glob))

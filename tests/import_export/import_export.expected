@@ -148,3 +148,47 @@
   file sub/b.txt = manifest size=5 chunks=1 h1=6d4e870ea6d5a0c8 h2=9de1be5b950cc109
     chunk#0 ac6cab7d3e498b68-bf95bad7826ecbe9 size=5
 
+=== import with exclude by extension
+  import-dir --exclude *.tmp a.txt="alpha" b.tmp="temp" sub/c.txt="charlie" sub/d.tmp="also temp"
+  imported a.txt (5 bytes)
+  imported sub/c.txt (7 bytes)
+  import: 2 imported, 0 skipped
+--- tree
+  f a.txt size=5 cached=true uploaded=true etag=50f034ad0ad3b7ac
+  d sub/
+  f sub/c.txt size=7 cached=true uploaded=true etag=58c3d9a8175b4c35
+--- content
+  a.txt = "alpha"
+  sub/c.txt = "charlie"
+--- backend
+  chunk be6903b5f625ab5a-512a03e79074e07a size=5
+  chunk cfcb9dbba6d68599-4ef4c57cebfa8616 size=7
+  cursor = <entry-1>
+  journal <entry-1> = mkdir sub/; put a.txt 5; put sub/c.txt 7
+  file a.txt = manifest size=5 chunks=1 h1=50f034ad0ad3b7ac h2=e6aafc9bc48c5700
+    chunk#0 be6903b5f625ab5a-512a03e79074e07a size=5
+  file sub/c.txt = manifest size=7 chunks=1 h1=58c3d9a8175b4c35 h2=39dd9d49ed5b2108
+    chunk#0 cfcb9dbba6d68599-4ef4c57cebfa8616 size=7
+
+=== import with exclude directory
+  import-dir --exclude node_modules a.txt="alpha" node_modules/lib.js="big dep" node_modules/deep/pkg.js="nested dep" src/main.ml="code"
+  imported a.txt (5 bytes)
+  imported src/main.ml (4 bytes)
+  import: 2 imported, 0 skipped
+--- tree
+  f a.txt size=5 cached=true uploaded=true etag=50f034ad0ad3b7ac
+  d src/
+  f src/main.ml size=4 cached=true uploaded=true etag=08b91f0f6d4ae1fc
+--- content
+  a.txt = "alpha"
+  src/main.ml = "code"
+--- backend
+  chunk 04939d9a1b2db88e-62fc6ecf665adb77 size=4
+  chunk be6903b5f625ab5a-512a03e79074e07a size=5
+  cursor = <entry-1>
+  journal <entry-1> = mkdir src/; put a.txt 5; put src/main.ml 4
+  file a.txt = manifest size=5 chunks=1 h1=50f034ad0ad3b7ac h2=e6aafc9bc48c5700
+    chunk#0 be6903b5f625ab5a-512a03e79074e07a size=5
+  file src/main.ml = manifest size=4 chunks=1 h1=08b91f0f6d4ae1fc h2=8ef1df09cbca3ffc
+    chunk#0 04939d9a1b2db88e-62fc6ecf665adb77 size=4
+

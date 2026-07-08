@@ -72,4 +72,38 @@ let () =
             ExportDir;
           ];
       };
+      {
+        name = "import with exclude by extension";
+        steps =
+          [
+            ImportDirExclude
+              {
+                entries =
+                  [
+                    ("a.txt", "alpha");
+                    ("b.tmp", "temp");
+                    ("sub/c.txt", "charlie");
+                    ("sub/d.tmp", "also temp");
+                  ];
+                exclude = ["*.tmp"];
+              };
+          ];
+      };
+      {
+        name = "import with exclude directory";
+        steps =
+          [
+            ImportDirExclude
+              {
+                entries =
+                  [
+                    ("a.txt", "alpha");
+                    ("node_modules/lib.js", "big dep");
+                    ("node_modules/deep/pkg.js", "nested dep");
+                    ("src/main.ml", "code");
+                  ];
+                exclude = ["node_modules"];
+              };
+          ];
+      };
     ]

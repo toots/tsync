@@ -63,6 +63,10 @@ type step =
   | ImportDir of (string * string) list
       (** Create a temp source folder with these (relative path, content) files,
           run [Import.run] on it, and print per-file status lines. *)
+  | ImportDirExclude of {
+      entries : (string * string) list;
+      exclude : string list;
+    }  (** Like [ImportDir] but passes [~exclude] patterns to [Import.run]. *)
   | ExportDir
       (** Run [Export.run] into a fresh temp folder, print per-file status
           lines, then dump the exported tree's contents. *)

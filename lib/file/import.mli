@@ -15,6 +15,7 @@ module Make (C : Conf.S) : sig
       file. Directories are created in the manifest tree and on the backends.
       Existing keys are never overwritten. *)
   val run :
+    ?exclude:string list ->
     src:string ->
     on_file:(rel:string -> status -> unit) ->
     unit ->

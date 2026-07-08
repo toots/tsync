@@ -883,14 +883,23 @@ let import_cmd =
       & pos 0 (some dir) None
       & info [] ~docv:"DIR" ~doc:"Folder whose contents to import")
   in
-  let run domain src =
+  let exclude_arg =
+    Arg.(
+      value & opt_all string []
+      & info ["exclude"] ~docv:"GLOB"
+          ~doc:
+            "Exclude files and directories matching GLOB (shell glob syntax; \
+             matched against each entry's relative path and its basename). May \
+             be repeated.")
+  in
+  let run domain src exclude =
     Lwt_main.run
       (let open Lwt.Syntax in
        let cfg = Conf_parsing.load runtime_paths.Runtime.config_path in
        let (module C : Conf.S) = make_conf ?domain cfg in
        let module I = Import.Make (C) in
        let+ summary =
-         I.run ~src
+         I.run ~exclude ~src
            ~on_file:(fun ~rel status ->
              match status with
                | Import.Imported size ->
@@ -911,7 +920,7 @@ let import_cmd =
           and create manifest sidecars in the local cache. Data is not copied \
           — the cache links to the source files. Keys already in the domain \
           are skipped.")
-    Term.(const run $ domain_arg $ src_arg)
+    Term.(const run $ domain_arg $ src_arg $ exclude_arg)
 
 (* ── tsync export ────────────────────────────────────────────────────────── *)
 

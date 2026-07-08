@@ -25,6 +25,10 @@ type step =
   | OnSecondary of step
   | ResyncRemote
   | ImportDir of (string * string) list
+  | ImportDirExclude of {
+      entries : (string * string) list;
+      exclude : string list;
+    }
   | ExportDir
 
 type scenario = { name : string; steps : step list }
@@ -96,6 +100,11 @@ let rec render_step = function
   | ResyncRemote -> "resync-remote"
   | ImportDir entries ->
       Printf.sprintf "import-dir %s"
+        (String.concat " "
+           (List.map (fun (p, c) -> Printf.sprintf "%s=%S" p c) entries))
+  | ImportDirExclude { entries; exclude } ->
+      Printf.sprintf "import-dir --exclude %s %s"
+        (String.concat "," exclude)
         (String.concat " "
            (List.map (fun (p, c) -> Printf.sprintf "%s=%S" p c) entries))
   | ExportDir -> "export-dir"
@@ -234,6 +243,37 @@ let setup_client (module C : Conf.S) root staging_prefix =
     | DeleteRemoteManifest p -> B.delete ~key:(key p) ()
     | s -> failwith ("not a backend-damage step: " ^ render_step s)
   in
+  let run_import ~exclude entries =
+    incr staging_seq;
+    let src =
+      Filename.concat root
+        (Printf.sprintf "import-%s%d" staging_prefix !staging_seq)
+    in
+    List.iter
+      (fun (rel, content) ->
+        let path = Filename.concat src rel in
+        let rec mkdir_p d =
+          if not (Sys.file_exists d) then begin
+            mkdir_p (Filename.dirname d);
+            Unix.mkdir d 0o755
+          end
+        in
+        mkdir_p (Filename.dirname path);
+        write_file path content)
+      entries;
+    let module I = Import.Make (C) in
+    let+ summary =
+      I.run ~exclude ~src
+        ~on_file:(fun ~rel status ->
+          match status with
+            | Import.Imported size ->
+                Printf.printf "  imported %s (%Ld bytes)\n" rel size
+            | Import.Skipped_exists -> Printf.printf "  skip %s (exists)\n" rel)
+        ()
+    in
+    Printf.printf "  import: %d imported, %d skipped\n" summary.Import.imported
+      summary.Import.skipped
+  in
   let do_step = function
     | Write { path; content } ->
         incr staging_seq;
@@ -291,37 +331,8 @@ let setup_client (module C : Conf.S) root staging_prefix =
         match C.backends with
           | _ :: dst :: _ -> damage dst s
           | _ -> failwith "OnSecondary: no secondary backend configured")
-    | ImportDir entries ->
-        incr staging_seq;
-        let src =
-          Filename.concat root
-            (Printf.sprintf "import-%s%d" staging_prefix !staging_seq)
-        in
-        List.iter
-          (fun (rel, content) ->
-            let path = Filename.concat src rel in
-            let rec mkdir_p d =
-              if not (Sys.file_exists d) then begin
-                mkdir_p (Filename.dirname d);
-                Unix.mkdir d 0o755
-              end
-            in
-            mkdir_p (Filename.dirname path);
-            write_file path content)
-          entries;
-        let module I = Import.Make (C) in
-        let+ summary =
-          I.run ~src
-            ~on_file:(fun ~rel status ->
-              match status with
-                | Import.Imported size ->
-                    Printf.printf "  imported %s (%Ld bytes)\n" rel size
-                | Import.Skipped_exists ->
-                    Printf.printf "  skip %s (exists)\n" rel)
-            ()
-        in
-        Printf.printf "  import: %d imported, %d skipped\n"
-          summary.Import.imported summary.Import.skipped
+    | ImportDir entries -> run_import ~exclude:[] entries
+    | ImportDirExclude { entries; exclude } -> run_import ~exclude entries
     | ExportDir ->
         incr staging_seq;
         let dst =
