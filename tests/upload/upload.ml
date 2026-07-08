@@ -26,6 +26,7 @@ module C = struct
   let notify_path = Filename.concat root "n.sock"
   let max_uploads = 4
   let max_downloads = 8
+  let symlink_policy = `Keep
 end
 
 module R = Remote.Make (C)

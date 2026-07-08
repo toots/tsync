@@ -122,3 +122,50 @@
   journal <entry-2> = rmdir sub/
   dir tsync/test/
 
+=== symlink
+  write real.txt "target data"
+  drain
+  symlink link.txt -> real.txt
+  drain
+--- tree
+  f link.txt size=8 cached=false uploaded=true etag=2d06800538d394c2
+  f real.txt size=11 cached=true uploaded=true etag=31af8fd254d97ac5
+--- content
+  link.txt -> real.txt
+  real.txt = "target data"
+--- backend
+  chunk ea7acaa9e7fcecc5-7ddba95dcebaaa04 size=11
+  cursor = <entry-2>
+  journal <entry-1> = put real.txt 11
+  journal <entry-2> = put link.txt 8
+  symlink link.txt -> real.txt
+  file real.txt = manifest size=11 chunks=1 h1=31af8fd254d97ac5 h2=118de6578f446e8a
+    chunk#0 ea7acaa9e7fcecc5-7ddba95dcebaaa04 size=11
+
+=== symlink delete
+  symlink link.txt -> gone.txt
+  drain
+  delete link.txt
+  drain
+--- tree
+--- content
+--- backend
+  cursor = <entry-2>
+  journal <entry-1> = put link.txt 8
+  journal <entry-2> = delete link.txt
+  dir tsync/test/
+
+=== follow: symlink creation rejected
+  symlink link.txt -> real.txt
+  symlink link.txt: rejected (Unix.Unix_error(Unix.EPERM, "symlink", "tsync/test/link.txt"))
+--- tree
+--- content
+--- backend
+
+=== skip: symlink creation rejected
+  symlink link.txt -> real.txt
+  symlink link.txt: rejected (Unix.Unix_error(Unix.EPERM, "symlink", "tsync/test/link.txt"))
+--- tree
+--- content
+--- backend
+

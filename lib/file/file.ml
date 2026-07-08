@@ -18,6 +18,7 @@ module type S = sig
   val download : t -> unit Lwt.t
   val ensure_cached : t -> unit Lwt.t
   val stat : t -> Unix.LargeFile.stats option Lwt.t
+  val readlink : t -> string option Lwt.t
   val list_dir : t -> string list Lwt.t
   val xattrs : t -> (string * string) list Lwt.t
   val is_dirty : t -> bool
@@ -52,6 +53,7 @@ module type S = sig
       lazily on next open. *)
   val revert : ?version:string -> t -> unit Lwt.t
 
+  val symlink : target:string -> t -> unit Lwt.t
   val apply_foreign_ops : Journal.op list -> unit Lwt.t
 end
 
@@ -213,6 +215,24 @@ module Make (C : Conf.S) (Sq : Sync_queue.S) : S = struct
         st_ctime = mtime;
       }
 
+  let symlink_stat size mtime =
+    let now = Unix.gettimeofday () in
+    Unix.LargeFile.
+      {
+        st_dev = 0;
+        st_ino = 0;
+        st_kind = Unix.S_LNK;
+        st_perm = 0o777;
+        st_nlink = 1;
+        st_uid = Unix.getuid ();
+        st_gid = Unix.getgid ();
+        st_rdev = 0;
+        st_size = size;
+        st_atime = now;
+        st_mtime = mtime;
+        st_ctime = mtime;
+      }
+
   let dir_stat () =
     let now = Unix.gettimeofday () in
     Unix.LargeFile.
@@ -242,6 +262,9 @@ module Make (C : Conf.S) (Sq : Sync_queue.S) : S = struct
           let* m = read_manifest key in
           match m with
             | Some `Dirty -> stat_opt (local_path key)
+            | Some (`Clean { Manifest.symlink = Some target; mtime; _ }) ->
+                let size = Int64.of_int (String.length target) in
+                Lwt.return_some (symlink_stat size mtime)
             | Some (`Clean m) ->
                 Lwt.return_some (file_stat m.Manifest.size m.Manifest.mtime)
             | None -> Lwt.return_none)
@@ -258,8 +281,22 @@ module Make (C : Conf.S) (Sq : Sync_queue.S) : S = struct
              gets slow. *)
           let+ m = R.fetch_manifest ~key () in
           match m with
+            | Some (`Clean { Manifest.symlink = Some target; mtime; _ }) ->
+                let size = Int64.of_int (String.length target) in
+                Some (symlink_stat size mtime)
             | Some (`Clean m) ->
                 Some (file_stat m.Manifest.size m.Manifest.mtime)
+            | _ -> None)
+
+  let readlink key =
+    let* m = read_manifest key in
+    match m with
+      | Some (`Clean { Manifest.symlink = Some _ as target; _ }) ->
+          Lwt.return target
+      | Some _ | None -> (
+          let+ m = R.fetch_manifest ~key () in
+          match m with
+            | Some (`Clean { Manifest.symlink = Some _ as target; _ }) -> target
             | _ -> None)
 
   let list_dir key =
@@ -599,6 +636,33 @@ module Make (C : Conf.S) (Sq : Sync_queue.S) : S = struct
           Fs.bump_cursor ek
 
   let revert ?version key = with_meta (fun () -> revert_body ?version key)
+
+  (* Live symlink creation is only meaningful under the [`Keep] policy: a
+     [`Follow]/[`Skip] domain must never contain symlink objects, and there is
+     no sensible way to "follow" at creation time (the target may be relative,
+     dangling, or outside the mount). *)
+  let symlink ~target key =
+    (match C.symlink_policy with
+      | `Keep -> ()
+      | `Follow | `Skip -> raise (Unix.Unix_error (Unix.EPERM, "symlink", key)));
+    with_meta (fun () ->
+        let state =
+          Manifest.make_symlink ~target ~mtime:(Unix.gettimeofday ())
+        in
+        let data = Manifest.to_string state in
+        let* () =
+          Lwt_list.iter_s
+            (fun (module B : Backend.S) -> B.put ~key ~data ())
+            C.backends
+        in
+        let* () = write_manifest key state in
+        let size =
+          match state with
+            | `Clean m -> m.Manifest.size
+            | `Dirty -> assert false
+        in
+        let* ek = Fs.write_journal_entry [`Put (rel_key key, size)] in
+        Fs.bump_cursor ek)
 
   (* ── Foreign op application (sync) ────────────────────────────────────── *)
 

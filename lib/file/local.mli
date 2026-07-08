@@ -16,6 +16,11 @@ val manifest_path :
 
 val ensure_parent_dir : string -> unit Lwt.t
 
+(** All manifest sidecars under the domain's manifest tree, as domain-relative
+    paths (unsorted). Empty when the tree does not exist. *)
+val walk_manifests :
+  cache_root:string -> domain_name:string -> unit -> string list Lwt.t
+
 val is_cached :
   cache_root:string ->
   domain_name:string ->

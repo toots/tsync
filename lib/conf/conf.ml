@@ -22,4 +22,9 @@ module type S = sig
 
   (** Max files downloaded concurrently. *)
   val max_downloads : int
+
+  (** How [import] treats symbolic links: [`Keep] preserves them as symlink
+      objects, [`Follow] dereferences to the target's content, [`Skip] ignores
+      them. *)
+  val symlink_policy : [ `Keep | `Follow | `Skip ]
 end

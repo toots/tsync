@@ -22,6 +22,7 @@
   lwt
   lwt_ppx
   mem_usage
+  path_glob
   tls
   cmdliner)
  (depopts

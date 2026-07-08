@@ -6,7 +6,12 @@ type backend_config = {
   main : bool;  (** explicitly marked as the primary (read) backend *)
 }
 
-type domain = { name : string; prefix : string; backends : backend_config list }
+type domain = {
+  name : string;
+  prefix : string;
+  backends : backend_config list;
+  symlink_policy : [ `Keep | `Follow | `Skip ];
+}
 
 type t = {
   versioning : bool;

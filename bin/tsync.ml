@@ -57,6 +57,7 @@ let make_conf ?domain cfg : (module Conf.S) =
     let socket_path = runtime_paths.Runtime.socket_path
     let max_uploads = cfg.Conf_parsing.max_uploads
     let max_downloads = cfg.Conf_parsing.max_downloads
+    let symlink_policy = d.Conf_parsing.symlink_policy
 
     let notify_path =
       Filename.concat runtime_paths.Runtime.data_dir "notify.sock"
@@ -868,6 +869,115 @@ let resync_remote_cmd =
           size-mismatched on the other configured backends")
     Term.(const run $ domain_arg $ source_arg)
 
+(* ── tsync import ────────────────────────────────────────────────────────── *)
+
+let import_cmd =
+  let domain_arg =
+    Arg.(
+      value
+      & opt (some string) None
+      & info ["domain"] ~docv:"NAME" ~doc:"Domain name (default: from config)")
+  in
+  let src_arg =
+    Arg.(
+      required
+      & pos 0 (some dir) None
+      & info [] ~docv:"DIR" ~doc:"Folder whose contents to import")
+  in
+  let exclude_arg =
+    Arg.(
+      value & opt_all string []
+      & info ["exclude"] ~docv:"GLOB"
+          ~doc:
+            "Exclude files and directories matching GLOB (shell glob syntax; \
+             matched against each entry's relative path and its basename). May \
+             be repeated.")
+  in
+  let run domain src exclude =
+    Lwt_main.run
+      (let open Lwt.Syntax in
+       let cfg = Conf_parsing.load runtime_paths.Runtime.config_path in
+       let (module C : Conf.S) = make_conf ?domain cfg in
+       let module I = Import.Make (C) in
+       let+ summary =
+         I.run ~exclude ~src
+           ~on_file:(fun ~rel status ->
+             match status with
+               | Import.Imported size ->
+                   Printf.printf "imported %s (%Ld bytes)\n%!" rel size
+               | Import.Skipped_exists ->
+                   Printf.printf "skip     %s (already in domain)\n%!" rel
+               | Import.Skipped_symlink ->
+                   Printf.printf "skip     %s (symlink)\n%!" rel)
+           ()
+       in
+       Printf.printf "\n%d file%s imported, %d skipped, %d symlinks skipped\n"
+         summary.Import.imported
+         (if summary.Import.imported = 1 then "" else "s")
+         summary.Import.skipped summary.Import.skipped_symlinks)
+  in
+  Cmd.v
+    (Cmd.info "import"
+       ~doc:
+         "Import a folder into the domain: upload its files to all backends \
+          and create manifest sidecars in the local cache. Data is not copied \
+          — the cache links to the source files. Keys already in the domain \
+          are skipped.")
+    Term.(const run $ domain_arg $ src_arg $ exclude_arg)
+
+(* ── tsync export ────────────────────────────────────────────────────────── *)
+
+let export_cmd =
+  let domain_arg =
+    Arg.(
+      value
+      & opt (some string) None
+      & info ["domain"] ~docv:"NAME" ~doc:"Domain name (default: from config)")
+  in
+  let dst_arg =
+    Arg.(
+      required
+      & pos 0 (some string) None
+      & info [] ~docv:"DIR" ~doc:"Destination folder (created if needed)")
+  in
+  let run domain dst =
+    let code =
+      Lwt_main.run
+        (let open Lwt.Syntax in
+         let cfg = Conf_parsing.load runtime_paths.Runtime.config_path in
+         let (module C : Conf.S) = make_conf ?domain cfg in
+         let module E = Export.Make (C) in
+         let+ summary =
+           E.run ~dst
+             ~on_file:(fun ~rel status ->
+               match status with
+                 | Export.Exported Export.Local_cache ->
+                     Printf.printf "exported %s (local cache)\n%!" rel
+                 | Export.Exported Export.Remote_chunks ->
+                     Printf.printf "exported %s (remote)\n%!" rel
+                 | Export.Exported Export.Symlink ->
+                     Printf.printf "exported %s (symlink)\n%!" rel
+                 | Export.Missing_data ->
+                     Printf.printf
+                       "MISSING  %s (no local data or remote manifest)\n%!" rel)
+             ()
+         in
+         Printf.printf "\n%d file%s exported, %d missing\n"
+           summary.Export.exported
+           (if summary.Export.exported = 1 then "" else "s")
+           summary.Export.missing;
+         if summary.Export.missing > 0 then 1 else 0)
+    in
+    if code <> 0 then exit code
+  in
+  Cmd.v
+    (Cmd.info "export"
+       ~doc:
+         "Export every file of the domain to a folder. Cached files are copied \
+          locally; evicted files are recomposed from remote chunks without \
+          populating the cache.")
+    Term.(const run $ domain_arg $ dst_arg)
+
 (* ── tsync configure ────────────────────────────────────────────────────── *)
 
 let configure_cmd =
@@ -1085,6 +1195,8 @@ let () =
         sync_cmd;
         recheck_cmd;
         resync_remote_cmd;
+        import_cmd;
+        export_cmd;
         evict_cmd;
         restore_cmd;
         pull_cmd;

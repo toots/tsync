@@ -64,6 +64,9 @@ tsync expire <date>   # drop versions older than a date, then reclaim unused blo
 tsync sync            # apply changes made from other machines
 tsync recheck         # verify the remote against the local cache, repair what's possible
 tsync resync-remote   # copy missing/damaged objects from one backend to the others
+tsync import <dir>    # seed the domain from an existing folder (uploads, no data copied)
+tsync import <dir> --exclude "*.tmp" --exclude node_modules  # skip files/directories by glob
+tsync export <dir>    # write every file of the domain to a plain folder
 tsync status          # show daemon state
 tsync stats           # transfer metrics (pending/completed, bandwidth, hashing)
 tsync stop            # unmount
@@ -86,6 +89,20 @@ Because a version is just the file's small manifest (the actual data blocks are 
 `tsync expire <date>` removes every version older than the cutoff, then deletes any data block no longer referenced by a live file or a surviving version. The date only bounds versions — blocks are collected purely by whether anything still points at them. Run it while your machines are idle, since collecting blocks a client is mid-upload could race the upload.
 
 Run `tsync configure` any time to add folders or change backends. See the [configuration reference](IMPLEMENTATION.md#config) for the full config-file format, including how to set up S3 credentials and multiple backends.
+
+### Symlinks
+
+Each domain has a required `symlinks` config field:
+
+- **`keep`** — symlinks are first-class objects. `tsync import` stores them as-is (broken/dangling links round-trip faithfully), and you can create them directly in the mounted folder (`ln -s` on the FUSE mount, or via Finder/FileProvider on macOS). Once stored, a symlink works transparently everywhere: `readlink` returns the target, `tsync export` recreates it as a real symlink, and it appears as a symlink in Finder.
+- **`follow`** — `tsync import` dereferences symlinks: the target's content is uploaded as a regular file under the link's name; broken links are skipped. Creating a symlink in the mounted folder is rejected.
+- **`skip`** — `tsync import` ignores symlinks (they are counted in the import summary). Creating a symlink in the mounted folder is rejected.
+
+Under `follow` and `skip` the domain never contains symlink objects — creation through the mount fails with a permission error, so a link can't slip in past the import policy.
+
+```json
+{ "name": "media", "prefix": "tsync", "symlinks": "keep", "backends": [...] }
+```
 
 ## Good to know
 

@@ -10,6 +10,7 @@ type t = {
   h1 : string;
   h2 : string;
   mtime : float;
+  symlink : string option;
 }
 
 type state = [ `Dirty | `Clean of t ]
@@ -22,6 +23,9 @@ val make :
   chunks:chunk_entry list ->
   mtime:float ->
   state
+
+(** A chunkless manifest representing a symlink to [target]. *)
+val make_symlink : target:string -> mtime:float -> state
 
 val of_string : string -> state
 val to_string : state -> string
