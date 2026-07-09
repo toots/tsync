@@ -1,7 +1,17 @@
 open Lwt.Syntax
 
-type status = Imported of int64 | Skipped_exists | Skipped_symlink
-type summary = { imported : int; skipped : int; skipped_symlinks : int }
+type status =
+  | Imported of int64
+  | Skipped_exists
+  | Skipped_symlink
+  | Failed of string
+
+type summary = {
+  imported : int;
+  skipped : int;
+  skipped_symlinks : int;
+  failed : int;
+}
 
 module Make (C : Conf.S) = struct
   module R = Remote.Make (C)
@@ -131,10 +141,16 @@ module Make (C : Conf.S) = struct
           Fs.create_directory ~key)
         dirs
     in
+    let guard rel f =
+      Lwt.catch f (fun exn ->
+          let msg = Printexc.to_string exn in
+          Log.err "import %s: %s" rel msg;
+          Lwt.return (Failed msg))
+    in
     let* file_statuses =
       Lwt_list.map_s
         (fun rel ->
-          let+ status = import_file ~src_root:src rel in
+          let+ status = guard rel (fun () -> import_file ~src_root:src rel) in
           on_file ~rel status;
           (rel, status))
         files
@@ -143,21 +159,22 @@ module Make (C : Conf.S) = struct
       Lwt_list.map_s
         (fun (rel, target) ->
           let* status =
-            match C.symlink_policy with
-              | `Keep -> import_symlink ~src_root:src rel target
-              | `Follow -> (
-                  let abs_target =
-                    if Filename.is_relative target then
-                      Filename.concat
-                        (Filename.dirname (Filename.concat src rel))
-                        target
-                    else target
-                  in
-                  let* kind = Fs_util.lstat_kind abs_target in
-                  match kind with
-                    | `Missing -> Lwt.return Skipped_symlink
-                    | _ -> import_file ~src_root:src rel)
-              | `Skip -> Lwt.return Skipped_symlink
+            guard rel (fun () ->
+                match C.symlink_policy with
+                  | `Keep -> import_symlink ~src_root:src rel target
+                  | `Follow -> (
+                      let abs_target =
+                        if Filename.is_relative target then
+                          Filename.concat
+                            (Filename.dirname (Filename.concat src rel))
+                            target
+                        else target
+                      in
+                      let* kind = Fs_util.lstat_kind abs_target in
+                      match kind with
+                        | `Missing -> Lwt.return Skipped_symlink
+                        | _ -> import_file ~src_root:src rel)
+                  | `Skip -> Lwt.return Skipped_symlink)
           in
           on_file ~rel status;
           Lwt.return (rel, status))
@@ -169,7 +186,7 @@ module Make (C : Conf.S) = struct
       @ List.filter_map
           (function
             | rel, Imported size -> Some (`Put (rel, size))
-            | _, (Skipped_exists | Skipped_symlink) -> None)
+            | _, (Skipped_exists | Skipped_symlink | Failed _) -> None)
           all_statuses
     in
     let+ () =
@@ -193,6 +210,11 @@ module Make (C : Conf.S) = struct
         List.length
           (List.filter
              (function _, Skipped_symlink -> true | _ -> false)
+             all_statuses);
+      failed =
+        List.length
+          (List.filter
+             (function _, Failed _ -> true | _ -> false)
              all_statuses);
     }
 end

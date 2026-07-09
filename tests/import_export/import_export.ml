@@ -90,6 +90,19 @@ let () =
           ];
       };
       {
+        name = "import special characters in filenames";
+        steps =
+          [
+            ImportDir
+              [
+                ("colon:file.txt", "colons");
+                ("dir:with:colons/nested.txt", "nested");
+              ];
+            Drain;
+            ExportDir;
+          ];
+      };
+      {
         name = "import with exclude directory";
         steps =
           [

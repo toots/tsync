@@ -14,8 +14,14 @@ type status =
   | Imported of int64  (** uploaded; payload is the logical size *)
   | Skipped_exists  (** key already in the domain (sidecar or remote) *)
   | Skipped_symlink  (** symlink skipped per policy (skip) or broken (follow) *)
+  | Failed of string  (** upload failed; payload is the error message *)
 
-type summary = { imported : int; skipped : int; skipped_symlinks : int }
+type summary = {
+  imported : int;
+  skipped : int;
+  skipped_symlinks : int;
+  failed : int;
+}
 
 module Make (C : Conf.S) : sig
   (** Import every file under [src] (recursively, sorted), calling [on_file] per

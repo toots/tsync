@@ -170,6 +170,35 @@
   file sub/c.txt = manifest size=7 chunks=1 h1=58c3d9a8175b4c35 h2=39dd9d49ed5b2108
     chunk#0 cfcb9dbba6d68599-4ef4c57cebfa8616 size=7
 
+=== import special characters in filenames
+  import-dir colon:file.txt="colons" dir:with:colons/nested.txt="nested"
+  drain
+  export-dir
+  imported colon:file.txt (6 bytes)
+  imported dir:with:colons/nested.txt (6 bytes)
+  import: 2 imported, 0 skipped, 0 symlinks skipped
+  export colon:file.txt (remote)
+  export dir:with:colons/nested.txt (remote)
+  export: 2 exported, 0 missing
+  exported-file colon:file.txt = "colons"
+  exported-file dir:with:colons/nested.txt = "nested"
+--- tree
+  f colon:file.txt size=6 cached=false uploaded=true etag=dfb01b473522fc95
+  d dir:with:colons/
+  f dir:with:colons/nested.txt size=6 cached=false uploaded=true etag=872c93b4f32e2aaa
+--- content
+  colon:file.txt = "colons"
+  dir:with:colons/nested.txt = "nested"
+--- backend
+  chunk db0542846c644ccb-0fb666185e4e7838 size=6
+  chunk fa87ee5fc199e332-c7156c4359a54f81 size=6
+  cursor = <entry-1>
+  journal <entry-1> = mkdir dir:with:colons/; put colon:file.txt 6; put dir:with:colons/nested.txt 6
+  file colon:file.txt = manifest size=6 chunks=1 h1=dfb01b473522fc95 h2=d666129dfb9b0a5a
+    chunk#0 db0542846c644ccb-0fb666185e4e7838 size=6
+  file dir:with:colons/nested.txt = manifest size=6 chunks=1 h1=872c93b4f32e2aaa h2=89f7ae7aa4f590d6
+    chunk#0 fa87ee5fc199e332-c7156c4359a54f81 size=6
+
 === import with exclude directory
   import-dir --exclude node_modules a.txt="alpha" node_modules/lib.js="big dep" node_modules/deep/pkg.js="nested dep" src/main.ml="code"
   imported a.txt (5 bytes)

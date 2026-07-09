@@ -908,13 +908,18 @@ let import_cmd =
                | Import.Skipped_exists ->
                    Printf.printf "skip     %s (already in domain)\n%!" rel
                | Import.Skipped_symlink ->
-                   Printf.printf "skip     %s (symlink)\n%!" rel)
+                   Printf.printf "skip     %s (symlink)\n%!" rel
+               | Import.Failed msg ->
+                   Printf.printf "failed   %s: %s\n%!" rel msg)
            ()
        in
-       Printf.printf "\n%d file%s imported, %d skipped, %d symlinks skipped\n"
+       Printf.printf
+         "\n%d file%s imported, %d skipped, %d symlinks skipped, %d failed\n"
          summary.Import.imported
          (if summary.Import.imported = 1 then "" else "s")
-         summary.Import.skipped summary.Import.skipped_symlinks)
+         summary.Import.skipped summary.Import.skipped_symlinks
+         summary.Import.failed;
+       if summary.Import.failed > 0 then exit 1)
   in
   Cmd.v
     (Cmd.info "import"

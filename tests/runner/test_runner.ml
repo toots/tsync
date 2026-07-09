@@ -282,7 +282,8 @@ let setup_client (module C : Conf.S) root staging_prefix =
                 Printf.printf "  imported %s (%Ld bytes)\n" rel size
             | Import.Skipped_exists -> Printf.printf "  skip %s (exists)\n" rel
             | Import.Skipped_symlink ->
-                Printf.printf "  skip %s (symlink)\n" rel)
+                Printf.printf "  skip %s (symlink)\n" rel
+            | Import.Failed msg -> Printf.printf "  failed %s: %s\n" rel msg)
         ()
     in
     Printf.printf "  import: %d imported, %d skipped, %d symlinks skipped\n"
@@ -395,7 +396,8 @@ let setup_client (module C : Conf.S) root staging_prefix =
                 | Import.Skipped_exists ->
                     Printf.printf "  skip %s (exists)\n" rel
                 | Import.Skipped_symlink ->
-                    Printf.printf "  skip %s (symlink)\n" rel)
+                    Printf.printf "  skip %s (symlink)\n" rel
+                | Import.Failed msg -> Printf.printf "  failed %s: %s\n" rel msg)
             ()
         in
         Printf.printf "  import: %d imported, %d skipped, %d symlinks skipped\n"
