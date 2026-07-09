@@ -47,7 +47,7 @@ jobs:
           opam pin add -ny git+https://github.com/toots/aws-s3.git#tsync
       - name: Install dependencies
         run: |
-          brew install xcodegen xxhash
+          brew install xcodegen xxhash coreutils
           echo "CPATH=$(brew --prefix xxhash)/include:$CPATH" >> $GITHUB_ENV
           echo "LIBRARY_PATH=$(brew --prefix xxhash)/lib:$LIBRARY_PATH" >> $GITHUB_ENV
       - name: Install OCaml dependencies
