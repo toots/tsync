@@ -1,0 +1,5 @@
+(library
+ (name tsync_exec_backend)
+ (wrapped false)
+ (library_flags (-linkall))
+ (libraries tsync_backend_register yojson unix lwt lwt.unix))

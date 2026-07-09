@@ -10,10 +10,10 @@ type domain = {
   prefix : string;
   backends : backend_config list;
   symlink_policy : [ `Keep | `Follow | `Skip ];
+  versioning : bool;
 }
 
 type t = {
-  versioning : bool;
   name : string;
   tls : string option;
   max_uploads : int;
@@ -44,6 +44,9 @@ let parse_backend json =
           match v with
             | `String s -> Some (k, s)
             | `Bool b -> Some (k, string_of_bool b)
+            (* Array fields (e.g. exec backend "command") pass through as JSON
+               for the backend factory to decode. *)
+            | `List _ -> Some (k, Yojson.Basic.to_string v)
             | _ -> None))
   in
   { backend_type; name; fields; main }
@@ -83,6 +86,7 @@ let parse_domain json =
     prefix = json |> member "prefix" |> to_string;
     backends = json |> member "backends" |> to_list |> List.map parse_backend;
     symlink_policy = parse_symlink_policy json;
+    versioning = json |> member "versioning" |> to_bool;
   }
 
 let load path =
@@ -93,7 +97,6 @@ let load path =
   in
   let open Yojson.Basic.Util in
   {
-    versioning = json |> member "versioning" |> to_bool;
     name =
       (match json |> member "name" with
         | `String s -> s

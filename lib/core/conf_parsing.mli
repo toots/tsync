@@ -11,10 +11,10 @@ type domain = {
   prefix : string;
   backends : backend_config list;
   symlink_policy : [ `Keep | `Follow | `Skip ];
+  versioning : bool;
 }
 
 type t = {
-  versioning : bool;
   name : string;
   tls : string option;  (** conduit TLS backend: "native" | "openssl" *)
   max_uploads : int;
