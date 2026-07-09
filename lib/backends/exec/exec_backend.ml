@@ -51,7 +51,9 @@ let make ~command ~root : (module Backend.S) =
       | Unix.WEXITED 0 -> Lwt.return stdout
       | _ -> Lwt.fail (error op key stderr)
   in
-  let resolve key = if key = "" then root else root ^ "/" ^ key in
+  let resolve key =
+    if key = "" then root else root ^ "/" ^ Fs_util.encode_key key
+  in
   (* Keys with a trailing slash are directory markers, as in the local
      backend. *)
   let is_dir_key key =
@@ -161,7 +163,9 @@ let make ~command ~root : (module Backend.S) =
         if path = base then Some ""
         else if String.starts_with ~prefix:(base ^ "/") path then begin
           let skip = String.length base + 1 in
-          Some (String.sub path skip (String.length path - skip))
+          Some
+            (Fs_util.decode_key
+               (String.sub path skip (String.length path - skip)))
         end
         else None
       in

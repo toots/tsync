@@ -299,10 +299,28 @@ let ls_cmd =
        let mount_point =
          Filename.concat (Sys.getenv "HOME") ("tsync/" ^ C.domain_name)
        in
-       let dir = match path with Some p -> p | None -> mount_point in
        let prefix =
          let dp = C.domain_prefix in
-         if dir = mount_point then dp else dp ^ Filename.basename dir ^ "/"
+         match path with
+           | None -> dp
+           | Some p ->
+               (* Accept a domain-relative path ("radarr/dir/") or an absolute
+                  path under the mount point ("/home/…/tsync/domain/radarr/"). *)
+               let rel =
+                 let mp = mount_point ^ "/" in
+                 if
+                   String.length p >= String.length mp
+                   && String.sub p 0 (String.length mp) = mp
+                 then
+                   String.sub p (String.length mp)
+                     (String.length p - String.length mp)
+                 else p
+               in
+               let rel =
+                 if rel = "" || rel.[String.length rel - 1] = '/' then rel
+                 else rel ^ "/"
+               in
+               dp ^ rel
        in
        let* files, subdirs = Fs.list_directory ~prefix in
        let dp_len = String.length C.domain_prefix in
