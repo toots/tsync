@@ -989,6 +989,17 @@ let configure_cmd =
       let line = read_line () in
       if line = "" then Option.value def ~default:"" else line
     in
+    let prompt_required msg =
+      let rec ask () =
+        let v = prompt msg None in
+        if v <> "" then v
+        else begin
+          Printf.printf "  (required — cannot be blank)\n%!";
+          ask ()
+        end
+      in
+      ask ()
+    in
     let prompt_bool ?(default = false) msg =
       Printf.printf "%s [%s]: %!" msg (if default then "Y/n" else "y/N");
       match String.lowercase_ascii (read_line ()) with
@@ -1018,13 +1029,22 @@ let configure_cmd =
     in
     let has_s3 = ref false in
     let prompt_backend () =
-      let backend_type = prompt "  Backend type (s3/local/ssh)" (Some "s3") in
+      let rec ask () =
+        let t = prompt "  Backend type (s3/local/ssh)" (Some "s3") in
+        if List.mem t ["s3"; "local"; "ssh"] then t
+        else begin
+          Printf.printf
+            "  Unknown backend type %S — choose s3, local, or ssh.\n%!" t;
+          ask ()
+        end
+      in
+      let backend_type = ask () in
       let name = prompt "  Backend name" (Some backend_type) in
       let name_field = [("name", `String name)] in
       match backend_type with
         | "ssh" ->
-            let host = prompt "  SSH host (user@host)" None in
-            let path = prompt "  Remote path" None in
+            let host = prompt_required "  SSH host (user@host)" in
+            let path = prompt_required "  Remote path" in
             let main =
               prompt_bool ~default:false "  Primary backend (used for reads)?"
             in
@@ -1037,7 +1057,7 @@ let configure_cmd =
                   ("main", `Bool main);
                 ])
         | "local" ->
-            let path = prompt "  Local path" None in
+            let path = prompt_required "  Local path" in
             let main =
               prompt_bool ~default:true "  Primary backend (used for reads)?"
             in
@@ -1050,11 +1070,21 @@ let configure_cmd =
                 ])
         | _ ->
             has_s3 := true;
-            let bucket = prompt "  S3 bucket" None in
+            let bucket = prompt_required "  S3 bucket" in
             let region = prompt "  AWS region" (Some "us-east-1") in
             let endpoint = prompt "  Custom endpoint (blank for AWS)" None in
-            let access_key_id = prompt "  AWS Access Key ID" None in
-            let secret_access_key = read_password "  AWS Secret Access Key" in
+            let access_key_id = prompt_required "  AWS Access Key ID" in
+            let secret_access_key =
+              let rec ask () =
+                let v = read_password "  AWS Secret Access Key" in
+                if v <> "" then v
+                else begin
+                  Printf.printf "  (required — cannot be blank)\n%!";
+                  ask ()
+                end
+              in
+              ask ()
+            in
             let unsigned_payload =
               prompt_bool ~default:false
                 "  Skip per-chunk payload signing (lower CPU, safe over TLS)?"
@@ -1096,7 +1126,16 @@ let configure_cmd =
         prompt_bool "Enable versioning (keep version history)?"
       in
       let symlinks =
-        prompt "Symlinks policy (keep/drop/follow)" (Some "keep")
+        let rec ask () =
+          let v = prompt "Symlinks policy (keep/follow/skip)" (Some "keep") in
+          if List.mem v ["keep"; "follow"; "skip"] then v
+          else begin
+            Printf.printf
+              "  Unknown policy %S — choose keep, follow, or skip.\n%!" v;
+            ask ()
+          end
+        in
+        ask ()
       in
       let backends = prompt_backends () in
       `Assoc

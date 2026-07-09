@@ -2,7 +2,7 @@
 
 **Your files in the cloud, on demand — without giving up your local filesystem.**
 
-tsync gives you a folder that lives in cloud storage (S3, or a local disk/NAS) but behaves like an ordinary directory. Every file is visible and browsable, but only the files you actually open take up space on your machine. Open a file and it downloads transparently; evict it and it frees local space while staying available. It's the same idea as iCloud Drive or Dropbox Smart Sync — but pointed at *your* storage bucket, with no third-party service in the middle.
+tsync gives you a folder that lives in cloud storage (S3), on a local disk/NAS, or on a remote machine over SSH — but behaves like an ordinary directory. Every file is visible and browsable, but only the files you actually open take up space on your machine. Open a file and it downloads transparently; evict it and it frees local space while staying available. It's the same idea as iCloud Drive or Dropbox Smart Sync — but pointed at *your* storage bucket, with no third-party service in the middle.
 
 ```
 ~/tsync/photos/
@@ -16,7 +16,7 @@ tsync gives you a folder that lives in cloud storage (S3, or a local disk/NAS) b
 ## Why you might want it
 
 - **Terabytes of files, gigabytes of disk.** Keep a huge library — photos, audio, video, backups — mounted locally while only caching what you touch.
-- **Your storage, your rules.** Point it at your own S3 bucket or a local drive. No subscription, no vendor lock-in, no one else holding your data.
+- **Your storage, your rules.** Point it at your own S3 bucket, a local drive, or a remote machine over SSH. No subscription, no vendor lock-in, no one else holding your data.
 - **Mirror to more than one place.** Configure several backends per folder and every write fans out to all of them — e.g. S3 *and* a local NAS at the same time. Reads come from a primary backend (a local one by default), so a mirrored local copy also makes reads fast. If a mirror was down or drifted, `tsync resync-remote` copies whatever it's missing from another backend.
 - **Use it from several machines.** Multiple computers can mount the same folder; each picks up the others' changes automatically, with sensible handling when two people touch the same file at once.
 - **Efficient by design.** Files are split into content-addressed chunks, so re-uploading a large file only sends the parts that changed, and identical data is stored once.
@@ -88,7 +88,7 @@ Because a version is just the file's small manifest (the actual data blocks are 
 
 `tsync expire <date>` removes every version older than the cutoff, then deletes any data block no longer referenced by a live file or a surviving version. The date only bounds versions — blocks are collected purely by whether anything still points at them. Run it while your machines are idle, since collecting blocks a client is mid-upload could race the upload.
 
-Run `tsync configure` any time to add folders or change backends. See the [configuration reference](IMPLEMENTATION.md#config) for the full config-file format, including how to set up S3 credentials and multiple backends.
+Run `tsync configure` any time to add folders or change backends. See the [configuration reference](IMPLEMENTATION.md#config) for the full config-file format, including S3 credentials, SSH backends, and multiple backends per domain.
 
 ### Symlinks
 

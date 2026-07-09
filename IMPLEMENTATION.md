@@ -141,7 +141,7 @@ Escape hatch behind the `ssh` type: the same storage-over-a-command backend, but
 
 Each domain is an independent namespace: `<prefix>/<domain>/`. When the config has exactly one domain, `--domain` can be omitted from CLI commands; with multiple domains it is required.
 
-When a domain has multiple backends, all writes (uploads, deletes, copies) fan out to every backend. Reads use the **primary** backend. This supports mirroring a domain to e.g. S3 and a local NAS simultaneously.
+When a domain has multiple backends, all writes (uploads, deletes, copies) fan out to every backend. Reads use the **primary** backend. This supports mirroring a domain to e.g. S3 and a remote SSH host simultaneously.
 
 #### Primary backend selection
 
@@ -362,7 +362,7 @@ tsync auto-evict [on|off|status]
 tsync purge   <path>
 ```
 
-`tsync configure` writes the config file interactively. It prompts for versioning, upload/download concurrency, and (when both TLS backends are built and an S3 backend is used) the TLS backend, then loops over domains (name, prefix, backends) — each backend gets a name (required, defaults to its type) and can be marked as the primary. On macOS it writes to the group container so both the daemon and extension can read it; on Linux it writes to the XDG config dir with mode `0600`.
+`tsync configure` writes the config file interactively. It prompts for versioning, upload/download concurrency, and (when both TLS backends are built and an S3 backend is used) the TLS backend, then loops over domains (name, prefix, backends). Each backend is one of `s3`, `local`, or `ssh`; each gets a required name (defaults to its type) and can be marked as the primary. On macOS it writes to the group container so both the daemon and extension can read it; on Linux it writes to the XDG config dir with mode `0600`.
 
 ### IPC protocol
 
