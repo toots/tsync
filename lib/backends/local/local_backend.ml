@@ -19,52 +19,9 @@ let write_file path data =
 
 let read_file path = Lwt_io.with_file ~mode:Lwt_io.Input path Lwt_io.read
 
-(* FAT/exFAT reserved characters that cannot appear in a filename component.
-   Keys are stored with these percent-encoded so the local backend works on
-   exFAT and FAT32 as well as POSIX filesystems. *)
-let is_fat_reserved = function
-  | ':' | '*' | '?' | '"' | '<' | '>' | '|' | '\\' -> true
-  | c when Char.code c < 32 -> true
-  | _ -> false
-
-let encode_component s =
-  let buf = Buffer.create (String.length s) in
-  String.iter
-    (fun c ->
-      if is_fat_reserved c then
-        Buffer.add_string buf (Printf.sprintf "%%%02X" (Char.code c))
-      else Buffer.add_char buf c)
-    s;
-  Buffer.contents buf
-
-let decode_component s =
-  let n = String.length s in
-  let buf = Buffer.create n in
-  let i = ref 0 in
-  while !i < n do
-    if s.[!i] = '%' && !i + 2 < n then (
-      let hex = String.sub s (!i + 1) 2 in
-      match int_of_string_opt ("0x" ^ hex) with
-        | Some code ->
-            Buffer.add_char buf (Char.chr code);
-            i := !i + 3
-        | None ->
-            Buffer.add_char buf s.[!i];
-            incr i)
-    else (
-      Buffer.add_char buf s.[!i];
-      incr i)
-  done;
-  Buffer.contents buf
-
-(* Apply f to each slash-delimited component of a key, leaving slashes intact. *)
-let map_components f key =
-  String.split_on_char '/' key |> List.map f |> String.concat "/"
-
 let make ~root : (module Backend.S) =
   let resolve key =
-    if key = "" then root
-    else Filename.concat root (map_components encode_component key)
+    if key = "" then root else Filename.concat root (Fs_util.encode_key key)
   in
   (* Keys with a trailing slash are directory markers: S3 stores them as
      zero-byte objects, here they map to actual directories. *)
@@ -118,7 +75,7 @@ let make ~root : (module Backend.S) =
               Lwt_list.fold_left_s
                 (fun acc entry ->
                   let full_path = Filename.concat path entry in
-                  let full_key = key_prefix ^ decode_component entry in
+                  let full_key = key_prefix ^ Fs_util.decode_component entry in
                   let* st = Lwt_unix.stat full_path in
                   match st.Unix.st_kind with
                     | Unix.S_REG ->

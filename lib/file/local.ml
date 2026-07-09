@@ -14,7 +14,7 @@ let strip_prefix ~domain_prefix key =
 let cache_path ~cache_root ~domain_name ~domain_prefix key =
   Filename.concat
     (data_dir ~cache_root domain_name)
-    (strip_prefix ~domain_prefix key)
+    (Fs_util.encode_key (strip_prefix ~domain_prefix key))
 
 let mkdir_p = Fs_util.mkdir_p
 let ensure_parent_dir = Fs_util.ensure_parent
@@ -22,7 +22,7 @@ let ensure_parent_dir = Fs_util.ensure_parent
 let manifest_path ~cache_root ~domain_name ~domain_prefix key =
   Filename.concat
     (manifest_dir ~cache_root domain_name)
-    (strip_prefix ~domain_prefix key)
+    (Fs_util.encode_key (strip_prefix ~domain_prefix key))
 
 let create_dir ~cache_root ~domain_name ~domain_prefix key =
   mkdir_p (manifest_path ~cache_root ~domain_name ~domain_prefix key)
@@ -51,7 +51,7 @@ let walk_manifests ~cache_root ~domain_name () =
         let* is_dir = is_directory (Filename.concat root r) in
         if is_dir then walk r acc
         else if Filename.check_suffix name ".tmp" then Lwt.return acc
-        else Lwt.return (r :: acc))
+        else Lwt.return (Fs_util.decode_key r :: acc))
       acc names
   in
   let* root_ok = is_directory root in

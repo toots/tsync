@@ -1,5 +1,16 @@
 (** Shared Lwt filesystem helpers for the local cache and local backend. *)
 
+(** Percent-encode FAT/exFAT/NTFS-reserved characters and control characters in
+    each slash-delimited component of a key, leaving "/" intact. Used so paths
+    derived from arbitrary keys are valid on any local filesystem. *)
+val encode_key : string -> string
+
+(** Reverse of [encode_key]: decode [%XX] sequences in each component. *)
+val decode_key : string -> string
+
+(** Decode a single path component (between slashes). *)
+val decode_component : string -> string
+
 (** Create [path] and any missing parents (mode 0o755); tolerant of races. *)
 val mkdir_p : string -> unit Lwt.t
 
