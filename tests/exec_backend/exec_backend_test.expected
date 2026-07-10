@@ -22,4 +22,8 @@ list_all "":
   sub/ (0)
 get missing.txt: Backend_error
 factory get f.txt: "via factory"
+factory get hostile: "encoded"
+factory head hostile: key="dir/img?url=http:%2F%2Fx.com%2Fpic&size=large" size=7
+factory list_all dir/:
+  "dir/img?url=http:%2F%2Fx.com%2Fpic&size=large" (7)
 ok

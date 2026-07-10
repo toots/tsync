@@ -20,9 +20,7 @@ let write_file path data =
 let read_file path = Lwt_io.with_file ~mode:Lwt_io.Input path Lwt_io.read
 
 let make ~root : (module Backend.S) =
-  let resolve key =
-    if key = "" then root else Filename.concat root (Fs_util.encode_key key)
-  in
+  let resolve key = if key = "" then root else Filename.concat root key in
   (* Keys with a trailing slash are directory markers: S3 stores them as
      zero-byte objects, here they map to actual directories. *)
   let is_dir_key key =
@@ -75,7 +73,7 @@ let make ~root : (module Backend.S) =
               Lwt_list.fold_left_s
                 (fun acc entry ->
                   let full_path = Filename.concat path entry in
-                  let full_key = key_prefix ^ Fs_util.decode_component entry in
+                  let full_key = key_prefix ^ entry in
                   let* st = Lwt_unix.stat full_path in
                   match st.Unix.st_kind with
                     | Unix.S_REG ->

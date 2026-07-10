@@ -1,4 +1,4 @@
 (library
  (name tsync_backend_register)
  (wrapped false)
- (libraries lwt))
+ (libraries tsync_local_io lwt))

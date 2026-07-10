@@ -90,15 +90,33 @@ let main () =
         | exn -> Lwt.fail exn)
   in
   (* Registered factories: "exec" decodes the command JSON, "ssh" builds one. *)
+  let command_json =
+    `List (List.map (fun s -> `String s) command) |> Yojson.Basic.to_string
+  in
   let (module E : Backend.S) =
     Backend.make ~backend_type:"exec" ~get_field:(function
-      | "command" -> Some {|["sh","-c"]|}
+      | "command" -> Some command_json
       | "path" -> Some (Filename.concat root "store2")
       | _ -> None)
   in
   let* () = E.put ~key:"f.txt" ~data:"via factory" () in
   let* data = E.get ~key:"f.txt" () in
   Printf.printf "factory get f.txt: %S\n" data;
+  (* Keys with URL metacharacters: encoding applied by Backend.make wrapper. *)
+  let hostile = "dir/img?url=http:%2F%2Fx.com%2Fpic&size=large" in
+  let* () = E.put ~key:hostile ~data:"encoded" () in
+  let* data = E.get ~key:hostile () in
+  Printf.printf "factory get hostile: %S\n" data;
+  let* entry = E.head_opt ~key:hostile () in
+  (match entry with
+    | Some e ->
+        Printf.printf "factory head hostile: key=%S size=%d\n" e.key e.size
+    | None -> print_endline "factory head hostile: none");
+  let* entries = E.list_all ~prefix:"dir/" () in
+  Printf.printf "factory list_all dir/:\n";
+  List.iter
+    (fun (e : Backend.file_entry) -> Printf.printf "  %S (%d)\n" e.key e.size)
+    entries;
   ignore
     (Backend.make ~backend_type:"ssh" ~get_field:(function
       | "host" -> Some "user@nowhere"

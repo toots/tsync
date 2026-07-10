@@ -4,7 +4,7 @@ open Lwt.Syntax
    control characters, so local-backend paths are valid on any filesystem.
    Only individual name components are encoded; "/" is left as a separator. *)
 let is_reserved = function
-  | ':' | '*' | '?' | '"' | '<' | '>' | '|' | '\\' -> true
+  | ':' | '*' | '?' | '"' | '<' | '>' | '|' | '\\' | '&' | '=' | '%' -> true
   | c when Char.code c < 32 -> true
   | _ -> false
 

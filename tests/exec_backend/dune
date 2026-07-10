@@ -1,6 +1,12 @@
 (executable
  (name exec_backend_test)
- (libraries tsync_exec_backend unix lwt lwt.unix))
+ (libraries
+  tsync_exec_backend
+  tsync_backend_register
+  yojson
+  unix
+  lwt
+  lwt.unix))
 
 (alias
  (name default)
