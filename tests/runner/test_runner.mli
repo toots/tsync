@@ -81,6 +81,12 @@ type step =
     }
       (** Like [ImportDir] but also seeds (rel, target) symlinks in the source
           tree, exercising the [symlink_policy] configured on the scenario. *)
+  | ImportDirWithEmptyDirs of {
+      files : (string * string) list;
+      empty_dirs : string list;
+    }
+      (** Like [ImportDir] but also creates empty directories in the source
+          tree, verifying that they are explicitly created on the backend. *)
   | ExportDir
       (** Run [Export.run] into a fresh temp folder, print per-file status
           lines, then dump the exported tree's contents. *)

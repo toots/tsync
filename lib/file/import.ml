@@ -131,7 +131,8 @@ module Make (C : Conf.S) = struct
      - [`Keep]   — store as a first-class symlink object
      - [`Follow] — dereference and upload target content; broken links skipped
      - [`Skip]   — skip and count, no upload *)
-  let run ?(exclude = []) ?(force_rehash = false) ~src ~on_file () =
+  let run ?(exclude = []) ?(force_rehash = false) ?(on_dir = fun ~rel:_ -> ())
+      ~src ~on_file () =
     let src =
       let p =
         if Filename.is_relative src then Filename.concat (Sys.getcwd ()) src
@@ -140,17 +141,6 @@ module Make (C : Conf.S) = struct
       try Unix.realpath p with _ -> p
     in
     let* dirs, files, symlinks = walk_source ~exclude src in
-    let* () =
-      Lwt_list.iter_s
-        (fun rel ->
-          let key = C.domain_prefix ^ rel ^ "/" in
-          let* () =
-            Local.create_dir ~cache_root:C.cache_root ~domain_name:C.domain_name
-              ~domain_prefix:C.domain_prefix key
-          in
-          Fs.create_directory ~key)
-        dirs
-    in
     let guard rel f =
       Lwt.catch f (fun exn ->
           let msg = Printexc.to_string exn in
@@ -194,6 +184,38 @@ module Make (C : Conf.S) = struct
         symlinks
     in
     let all_statuses = file_statuses @ symlink_statuses in
+    (* Dirs that have at least one file/symlink under them are already implied
+       by the file keys on every backend. Only truly empty dirs need an explicit
+       backend entry to be visible. *)
+    let non_empty_dirs =
+      let tbl = Hashtbl.create 16 in
+      let add_ancestors rel =
+        let rec loop r =
+          let p = Filename.dirname r in
+          if p <> "." && p <> "" && p <> "/" then (
+            Hashtbl.replace tbl p ();
+            loop p)
+        in
+        loop rel
+      in
+      List.iter (fun (rel, _) -> add_ancestors rel) all_statuses;
+      tbl
+    in
+    let empty_dirs =
+      List.filter (fun d -> not (Hashtbl.mem non_empty_dirs d)) dirs
+    in
+    let* () =
+      Lwt_list.iter_s
+        (fun rel ->
+          let key = C.domain_prefix ^ rel ^ "/" in
+          let* () =
+            Local.create_dir ~cache_root:C.cache_root ~domain_name:C.domain_name
+              ~domain_prefix:C.domain_prefix key
+          in
+          let* () = Fs.create_directory ~key in
+          Lwt.return (on_dir ~rel))
+        empty_dirs
+    in
     let ops =
       List.map (fun d -> `Mkdir (d ^ "/")) dirs
       @ List.filter_map

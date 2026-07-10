@@ -35,6 +35,10 @@ type step =
       files : (string * string) list;
       symlinks : (string * string) list;
     }
+  | ImportDirWithEmptyDirs of {
+      files : (string * string) list;
+      empty_dirs : string list;
+    }
   | ExportDir
 
 type scenario = { name : string; steps : step list }
@@ -123,6 +127,10 @@ let rec render_step = function
         (String.concat "," (List.map fst files))
         (String.concat ","
            (List.map (fun (r, t) -> Printf.sprintf "%s->%s" r t) symlinks))
+  | ImportDirWithEmptyDirs { files; empty_dirs } ->
+      Printf.sprintf "import-dir-with-empty-dirs files=[%s] empty-dirs=[%s]"
+        (String.concat "," (List.map fst files))
+        (String.concat "," empty_dirs)
   | ExportDir -> "export-dir"
 
 let starts_with prefix s =
@@ -260,27 +268,32 @@ let setup_client (module C : Conf.S) root staging_prefix =
     | DeleteRemoteManifest p -> B.delete ~key:(key p) ()
     | s -> failwith ("not a backend-damage step: " ^ render_step s)
   in
-  let run_import ~force_rehash ~exclude entries =
+  let run_import ?(empty_dirs = []) ~force_rehash ~exclude entries =
     incr staging_seq;
     let src =
       Filename.concat root
         (Printf.sprintf "import-%s%d" staging_prefix !staging_seq)
     in
+    let mkdir_p d =
+      let rec loop d =
+        if not (Sys.file_exists d) then begin
+          loop (Filename.dirname d);
+          Unix.mkdir d 0o755
+        end
+      in
+      loop d
+    in
     List.iter
       (fun (rel, content) ->
         let path = Filename.concat src rel in
-        let rec mkdir_p d =
-          if not (Sys.file_exists d) then begin
-            mkdir_p (Filename.dirname d);
-            Unix.mkdir d 0o755
-          end
-        in
         mkdir_p (Filename.dirname path);
         write_file path content)
       entries;
+    List.iter (fun rel -> mkdir_p (Filename.concat src rel)) empty_dirs;
     let module I = Import.Make (C) in
     let+ summary =
       I.run ~exclude ~force_rehash ~src
+        ~on_dir:(fun ~rel -> Printf.printf "  mkdir %s\n" rel)
         ~on_file:(fun ~rel status ->
           match status with
             | Import.Imported size ->
@@ -364,6 +377,8 @@ let setup_client (module C : Conf.S) root staging_prefix =
         run_import ~force_rehash:true ~exclude:[] entries
     | ImportDirExclude { entries; exclude } ->
         run_import ~force_rehash:false ~exclude entries
+    | ImportDirWithEmptyDirs { files; empty_dirs } ->
+        run_import ~empty_dirs ~force_rehash:false ~exclude:[] files
     | ImportDirSymlinks { files; symlinks } ->
         incr staging_seq;
         let src =
@@ -397,6 +412,7 @@ let setup_client (module C : Conf.S) root staging_prefix =
         let module I = Import.Make (C) in
         let+ summary =
           I.run ~src
+            ~on_dir:(fun ~rel -> Printf.printf "  mkdir %s\n" rel)
             ~on_file:(fun ~rel status ->
               match status with
                 | Import.Imported size ->

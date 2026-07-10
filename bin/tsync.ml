@@ -980,6 +980,7 @@ let import_cmd =
        vprintf "importing from %s into domain %s\n" src C.domain_name;
        let+ summary =
          I.run ~exclude ~force_rehash ~src
+           ~on_dir:(fun ~rel -> Printf.printf "mkdir    %s\n%!" rel)
            ~on_file:(fun ~rel status ->
              match status with
                | Import.Imported size ->

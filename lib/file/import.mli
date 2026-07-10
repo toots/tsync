@@ -32,6 +32,7 @@ module Make (C : Conf.S) : sig
   val run :
     ?exclude:string list ->
     ?force_rehash:bool ->
+    ?on_dir:(rel:string -> unit) ->
     src:string ->
     on_file:(rel:string -> status -> unit) ->
     unit ->

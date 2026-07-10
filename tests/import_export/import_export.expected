@@ -229,6 +229,25 @@
   file file.bin = manifest size=15 chunks=1 h1=4e052c0e120dbf96 h2=8b44a8391c3d2611
     chunk#0 4e052c0e120dbf96-8b44a8391c3d2611 size=15
 
+=== import with non-empty and empty directories
+  import-dir-with-empty-dirs files=[non-empty/file.txt] empty-dirs=[empty-dir]
+  imported non-empty/file.txt (5 bytes)
+  mkdir empty-dir
+  import: 1 imported, 0 skipped, 0 symlinks skipped
+--- tree
+  d empty-dir/
+  d non-empty/
+  f non-empty/file.txt size=5 cached=false uploaded=true etag=9555e8555c62dcfd
+--- content
+  non-empty/file.txt = "hello"
+--- backend
+  chunk 9555e8555c62dcfd-74b07ed397a89e92 size=5
+  cursor = <entry-1>
+  journal <entry-1> = mkdir empty-dir/; mkdir non-empty/; put non-empty/file.txt 5
+  dir empty-dir/
+  file non-empty/file.txt = manifest size=5 chunks=1 h1=9555e8555c62dcfd h2=74b07ed397a89e92
+    chunk#0 9555e8555c62dcfd-74b07ed397a89e92 size=5
+
 === import special characters in filenames
   import-dir colon:file.txt="colons" dir:with:colons/nested.txt="nested"
   drain

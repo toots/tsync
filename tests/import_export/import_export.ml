@@ -115,6 +115,17 @@ let () =
           ];
       };
       {
+        name = "import with non-empty and empty directories";
+        steps =
+          [
+            ImportDirWithEmptyDirs
+              {
+                files = [("non-empty/file.txt", "hello")];
+                empty_dirs = ["empty-dir"];
+              };
+          ];
+      };
+      {
         name = "import special characters in filenames";
         steps =
           [
