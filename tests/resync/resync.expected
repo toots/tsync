@@ -4,18 +4,18 @@
   resync-remote
   resync backend #2: 3 checked, 0 copied
 --- tree
-  f file.bin size=11 cached=true uploaded=true etag=6e5ce0583b7dc258
+  f file.bin size=11 cached=true uploaded=true etag=d447b1ea40e6988b
 --- content
   file.bin = "hello world"
 --- backend
   chunk d447b1ea40e6988b-b7aeb52a10fdaf2d size=11
   journal <entry-1> = put file.bin 11
-  file file.bin = manifest size=11 chunks=1 h1=6e5ce0583b7dc258 h2=c61b57eba7d06974
+  file file.bin = manifest size=11 chunks=1 h1=d447b1ea40e6988b h2=b7aeb52a10fdaf2d
     chunk#0 d447b1ea40e6988b-b7aeb52a10fdaf2d size=11
 --- backend 2
   chunk d447b1ea40e6988b-b7aeb52a10fdaf2d size=11
   journal <entry-1> = put file.bin 11
-  file file.bin = manifest size=11 chunks=1 h1=6e5ce0583b7dc258 h2=c61b57eba7d06974
+  file file.bin = manifest size=11 chunks=1 h1=d447b1ea40e6988b h2=b7aeb52a10fdaf2d
     chunk#0 d447b1ea40e6988b-b7aeb52a10fdaf2d size=11
 
 === resync-remote heals missing chunk on secondary
@@ -28,18 +28,18 @@
   resync backend #2: 3 checked, 1 copied
   resync backend #2: 3 checked, 0 copied
 --- tree
-  f file.bin size=11 cached=true uploaded=true etag=6e5ce0583b7dc258
+  f file.bin size=11 cached=true uploaded=true etag=d447b1ea40e6988b
 --- content
   file.bin = "hello world"
 --- backend
   chunk d447b1ea40e6988b-b7aeb52a10fdaf2d size=11
   journal <entry-1> = put file.bin 11
-  file file.bin = manifest size=11 chunks=1 h1=6e5ce0583b7dc258 h2=c61b57eba7d06974
+  file file.bin = manifest size=11 chunks=1 h1=d447b1ea40e6988b h2=b7aeb52a10fdaf2d
     chunk#0 d447b1ea40e6988b-b7aeb52a10fdaf2d size=11
 --- backend 2
   chunk d447b1ea40e6988b-b7aeb52a10fdaf2d size=11
   journal <entry-1> = put file.bin 11
-  file file.bin = manifest size=11 chunks=1 h1=6e5ce0583b7dc258 h2=c61b57eba7d06974
+  file file.bin = manifest size=11 chunks=1 h1=d447b1ea40e6988b h2=b7aeb52a10fdaf2d
     chunk#0 d447b1ea40e6988b-b7aeb52a10fdaf2d size=11
 
 === resync-remote heals corrupt chunk on secondary
@@ -50,18 +50,18 @@
   copied tsync/.chunks/d447b1ea40e6988b-b7aeb52a10fdaf2d
   resync backend #2: 3 checked, 1 copied
 --- tree
-  f file.bin size=11 cached=true uploaded=true etag=6e5ce0583b7dc258
+  f file.bin size=11 cached=true uploaded=true etag=d447b1ea40e6988b
 --- content
   file.bin = "hello world"
 --- backend
   chunk d447b1ea40e6988b-b7aeb52a10fdaf2d size=11
   journal <entry-1> = put file.bin 11
-  file file.bin = manifest size=11 chunks=1 h1=6e5ce0583b7dc258 h2=c61b57eba7d06974
+  file file.bin = manifest size=11 chunks=1 h1=d447b1ea40e6988b h2=b7aeb52a10fdaf2d
     chunk#0 d447b1ea40e6988b-b7aeb52a10fdaf2d size=11
 --- backend 2
   chunk d447b1ea40e6988b-b7aeb52a10fdaf2d size=11
   journal <entry-1> = put file.bin 11
-  file file.bin = manifest size=11 chunks=1 h1=6e5ce0583b7dc258 h2=c61b57eba7d06974
+  file file.bin = manifest size=11 chunks=1 h1=d447b1ea40e6988b h2=b7aeb52a10fdaf2d
     chunk#0 d447b1ea40e6988b-b7aeb52a10fdaf2d size=11
 
 === resync-remote heals missing manifest on secondary
@@ -72,18 +72,18 @@
   copied tsync/test/file.bin
   resync backend #2: 3 checked, 1 copied
 --- tree
-  f file.bin size=11 cached=true uploaded=true etag=6e5ce0583b7dc258
+  f file.bin size=11 cached=true uploaded=true etag=d447b1ea40e6988b
 --- content
   file.bin = "hello world"
 --- backend
   chunk d447b1ea40e6988b-b7aeb52a10fdaf2d size=11
   journal <entry-1> = put file.bin 11
-  file file.bin = manifest size=11 chunks=1 h1=6e5ce0583b7dc258 h2=c61b57eba7d06974
+  file file.bin = manifest size=11 chunks=1 h1=d447b1ea40e6988b h2=b7aeb52a10fdaf2d
     chunk#0 d447b1ea40e6988b-b7aeb52a10fdaf2d size=11
 --- backend 2
   chunk d447b1ea40e6988b-b7aeb52a10fdaf2d size=11
   journal <entry-1> = put file.bin 11
-  file file.bin = manifest size=11 chunks=1 h1=6e5ce0583b7dc258 h2=c61b57eba7d06974
+  file file.bin = manifest size=11 chunks=1 h1=d447b1ea40e6988b h2=b7aeb52a10fdaf2d
     chunk#0 d447b1ea40e6988b-b7aeb52a10fdaf2d size=11
 
 === resync-remote heals mixed tree on secondary
@@ -99,9 +99,9 @@
   copied tsync/test/sub/nested.bin
   resync backend #2: 8 checked, 2 copied
 --- tree
-  f ok.bin size=4 cached=true uploaded=true etag=19e317dcfeb5674a
+  f ok.bin size=4 cached=true uploaded=true etag=002783db772ad77d
   d sub/
-  f sub/nested.bin size=6 cached=true uploaded=true etag=872c93b4f32e2aaa
+  f sub/nested.bin size=6 cached=true uploaded=true etag=fa87ee5fc199e332
 --- content
   ok.bin = "fine"
   sub/nested.bin = "nested"
@@ -112,9 +112,9 @@
   journal <entry-1> = put ok.bin 4
   journal <entry-2> = mkdir sub/
   journal <entry-3> = put sub/nested.bin 6
-  file ok.bin = manifest size=4 chunks=1 h1=19e317dcfeb5674a h2=5e0089443c8f398f
+  file ok.bin = manifest size=4 chunks=1 h1=002783db772ad77d h2=0760f49141bb4bb5
     chunk#0 002783db772ad77d-0760f49141bb4bb5 size=4
-  file sub/nested.bin = manifest size=6 chunks=1 h1=872c93b4f32e2aaa h2=89f7ae7aa4f590d6
+  file sub/nested.bin = manifest size=6 chunks=1 h1=fa87ee5fc199e332 h2=c7156c4359a54f81
     chunk#0 fa87ee5fc199e332-c7156c4359a54f81 size=6
 --- backend 2
   chunk 002783db772ad77d-0760f49141bb4bb5 size=4
@@ -123,8 +123,8 @@
   journal <entry-1> = put ok.bin 4
   journal <entry-2> = mkdir sub/
   journal <entry-3> = put sub/nested.bin 6
-  file ok.bin = manifest size=4 chunks=1 h1=19e317dcfeb5674a h2=5e0089443c8f398f
+  file ok.bin = manifest size=4 chunks=1 h1=002783db772ad77d h2=0760f49141bb4bb5
     chunk#0 002783db772ad77d-0760f49141bb4bb5 size=4
-  file sub/nested.bin = manifest size=6 chunks=1 h1=872c93b4f32e2aaa h2=89f7ae7aa4f590d6
+  file sub/nested.bin = manifest size=6 chunks=1 h1=fa87ee5fc199e332 h2=c7156c4359a54f81
     chunk#0 fa87ee5fc199e332-c7156c4359a54f81 size=6
 

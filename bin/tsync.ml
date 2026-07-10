@@ -1,5 +1,15 @@
 open Cmdliner
 
+(* ── Verbose output ──────────────────────────────────────────────────────── *)
+
+let verbose = ref false
+
+let vprintf fmt =
+  if !verbose then Printf.printf fmt else Printf.ifprintf stdout fmt
+
+let verbose_arg =
+  Arg.(value & flag & info ["verbose"; "v"] ~doc:"Print detailed progress")
+
 (* ── Helpers ─────────────────────────────────────────────────────────────── *)
 
 let rec mkdir_p path =
@@ -587,7 +597,17 @@ let sync_cmd =
       & info ["full"]
           ~doc:"Force a full re-sync, re-importing all files from the backend")
   in
-  let run domain full =
+  let render_op = function
+    | `Put (k, size) -> Printf.sprintf "put %s (%Ld bytes)" k size
+    | `Delete k -> "delete " ^ k
+    | `Mkdir k -> "mkdir " ^ k
+    | `Rmdir k -> "rmdir " ^ k
+    | `Rename { Journal.src; dst; is_dir; _ } ->
+        Printf.sprintf "rename %s -> %s%s" src dst
+          (if is_dir then " (dir)" else "")
+  in
+  let run domain full v =
+    verbose := v;
     Lwt_main.run
       (let open Lwt.Syntax in
        let cfg = Conf_parsing.load runtime_paths.Runtime.config_path in
@@ -602,9 +622,13 @@ let sync_cmd =
          ~on_upload_done:(fun ~key:_ -> Lwt.return_unit);
        let my_uuid = J.client_uuid () in
        let recover_entry entry_key ops =
+         let short = Filename.basename entry_key in
          let remote_key = C.journal_prefix ^ entry_key in
          let* head = Fs.head_opt ~key:remote_key in
-         if head <> None then J.delete_local_pending ~entry_key
+         if head <> None then begin
+           vprintf "  %s: already published remotely — cleaned up\n" short;
+           J.delete_local_pending ~entry_key
+         end
          else begin
            let* newer_keys = Fs.list_journal_keys ~start_after:entry_key () in
            let remotely_modified = Hashtbl.create 16 in
@@ -640,6 +664,13 @@ let sync_cmd =
                  not (Hashtbl.mem remotely_modified k))
                ops
            in
+           let skipped = List.length ops - List.length replayed in
+           vprintf "  %s: replaying %d/%d op%s%s\n" short (List.length replayed)
+             (List.length ops)
+             (if List.length ops = 1 then "" else "s")
+             (if skipped > 0 then
+                Printf.sprintf " (%d skipped — remotely overridden)" skipped
+              else "");
            let* () =
              Lwt_list.iter_s
                (fun op ->
@@ -680,11 +711,13 @@ let sync_cmd =
          end
        in
        let* pending = J.local_pending_entries ~uuid:my_uuid in
+       vprintf "pending journal entries: %d\n" (List.length pending);
        let* () =
          Lwt_list.iter_s
            (fun (entry_key, ops) -> recover_entry entry_key ops)
            pending
        in
+       vprintf "draining upload queue\n";
        let* () = Sq.drain () in
        let share_dir = C.data_dir in
        let last_sync_file =
@@ -698,7 +731,11 @@ let sync_cmd =
            String.trim s)
          else ""
        in
+       vprintf "last sync bookmark: %s\n"
+         (if last_sync_key = "" then "none (first run)" else last_sync_key);
        let* all_keys = Fs.list_journal_keys () in
+       vprintf "journal: %d entr%s\n" (List.length all_keys)
+         (if List.length all_keys = 1 then "y" else "ies");
        let need_full_resync =
          if full || last_sync_key = "" then true
          else (
@@ -709,7 +746,15 @@ let sync_cmd =
                  > Journal.timestamp_ms_of_filename last_sync_key)
        in
        if need_full_resync then begin
-         (try ignore (ipc_action ~socket_path:C.socket_path "full_resync") with
+         vprintf "full resync: %s\n"
+           (if full then "--full flag"
+            else if last_sync_key = "" then "no bookmark (first run)"
+            else "bookmark older than oldest journal entry");
+         (try
+            vprintf
+              "sending full_resync to daemon (cache will be rebuilt on access)\n";
+            ignore (ipc_action ~socket_path:C.socket_path "full_resync")
+          with
            | Failure msg -> Printf.eprintf "Warning: full_resync: %s\n" msg
            | _ -> ());
          let new_key = C.journal_prefix ^ J.entry_key () in
@@ -732,7 +777,10 @@ let sync_cmd =
                let* e = Fs.get_journal_entry ek in
                match e with
                  | None -> Lwt.return_unit
-                 | Some ops -> F.apply_foreign_ops ops)
+                 | Some ops ->
+                     vprintf "  journal entry %s: %s\n" ek
+                       (String.concat ", " (List.map render_op ops));
+                     F.apply_foreign_ops ops)
              recent_foreign
          in
          (match all_keys with
@@ -750,7 +798,7 @@ let sync_cmd =
   in
   Cmd.v
     (Cmd.info "sync" ~doc:"Sync local cache with remote journal changes")
-    Term.(const run $ domain_arg $ full_arg)
+    Term.(const run $ domain_arg $ full_arg $ verbose_arg)
 
 (* ── tsync recheck ───────────────────────────────────────────────────────── *)
 
@@ -814,7 +862,8 @@ let resync_remote_cmd =
             "Backend to copy from, by its configured name. Default: the \
              primary backend.")
   in
-  let run domain source =
+  let run domain source v =
+    verbose := v;
     let code =
       Lwt_main.run
         (let open Lwt.Syntax in
@@ -863,6 +912,7 @@ let resync_remote_cmd =
                  C.domain_name (List.length C.backends);
                Lwt.return 1
            | Ok source ->
+               vprintf "resyncing from %s...\n" (label source);
                let module M = Mirror.Make (C) in
                let+ dests = M.resync ~source () in
                List.iter
@@ -885,7 +935,7 @@ let resync_remote_cmd =
          "Sync one remote backend from another: copy every object of the \
           domain (manifests, chunks, journal, versions) that is missing or \
           size-mismatched on the other configured backends")
-    Term.(const run $ domain_arg $ source_arg)
+    Term.(const run $ domain_arg $ source_arg $ verbose_arg)
 
 (* ── tsync import ────────────────────────────────────────────────────────── *)
 
@@ -911,12 +961,14 @@ let import_cmd =
              matched against each entry's relative path and its basename). May \
              be repeated.")
   in
-  let run domain src exclude =
+  let run domain src exclude v =
+    verbose := v;
     Lwt_main.run
       (let open Lwt.Syntax in
        let cfg = Conf_parsing.load runtime_paths.Runtime.config_path in
        let (module C : Conf.S) = make_conf ?domain cfg in
        let module I = Import.Make (C) in
+       vprintf "importing from %s into domain %s\n" src C.domain_name;
        let+ summary =
          I.run ~exclude ~src
            ~on_file:(fun ~rel status ->
@@ -946,7 +998,7 @@ let import_cmd =
           and create manifest sidecars in the local cache. Data is not copied \
           — the cache links to the source files. Keys already in the domain \
           are skipped.")
-    Term.(const run $ domain_arg $ src_arg $ exclude_arg)
+    Term.(const run $ domain_arg $ src_arg $ exclude_arg $ verbose_arg)
 
 (* ── tsync export ────────────────────────────────────────────────────────── *)
 
@@ -963,13 +1015,15 @@ let export_cmd =
       & pos 0 (some string) None
       & info [] ~docv:"DIR" ~doc:"Destination folder (created if needed)")
   in
-  let run domain dst =
+  let run domain dst v =
+    verbose := v;
     let code =
       Lwt_main.run
         (let open Lwt.Syntax in
          let cfg = Conf_parsing.load runtime_paths.Runtime.config_path in
          let (module C : Conf.S) = make_conf ?domain cfg in
          let module E = Export.Make (C) in
+         vprintf "exporting domain %s to %s\n" C.domain_name dst;
          let+ summary =
            E.run ~dst
              ~on_file:(fun ~rel status ->
@@ -999,7 +1053,7 @@ let export_cmd =
          "Export every file of the domain to a folder. Cached files are copied \
           locally; evicted files are recomposed from remote chunks without \
           populating the cache.")
-    Term.(const run $ domain_arg $ dst_arg)
+    Term.(const run $ domain_arg $ dst_arg $ verbose_arg)
 
 (* ── tsync configure ────────────────────────────────────────────────────── *)
 

@@ -21,4 +21,21 @@ let () =
     inputs;
   (* XXH3-64 of the empty string is a published reference value. *)
   assert (Xxhash.hash_hex "" 0 = "2d06800538d394c2");
+  (* Streaming API: single update must match one-shot hash_hex. *)
+  List.iter
+    (fun (_, data) ->
+      List.iter
+        (fun seed ->
+          let s = Xxhash.create seed in
+          Xxhash.update s data;
+          assert (Xxhash.digest_hex s = Xxhash.hash_hex data seed))
+        [0; 1])
+    inputs;
+  (* Streaming API: split update must match one-shot hash_hex. *)
+  let mid = String.length "hello world" / 2 in
+  let s = Xxhash.create 0 in
+  Xxhash.update s (String.sub "hello world" 0 mid);
+  Xxhash.update s
+    (String.sub "hello world" mid (String.length "hello world" - mid));
+  assert (Xxhash.digest_hex s = Xxhash.hash_hex "hello world" 0);
   print_endline "ok"

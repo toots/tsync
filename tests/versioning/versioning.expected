@@ -6,7 +6,7 @@
   write foo.txt "three three three"
   drain
 --- tree
-  f foo.txt size=17 cached=true uploaded=true etag=bc9c9f6403fc0d62
+  f foo.txt size=17 cached=true uploaded=true etag=faf60158c5948cd2
 --- content
   foo.txt = "three three three"
 --- backend
@@ -18,7 +18,7 @@
   journal <entry-3> = put foo.txt 17
   version foo.txt#1 = manifest size=3 chunks=1
   version foo.txt#2 = manifest size=7 chunks=1
-  file foo.txt = manifest size=17 chunks=1 h1=bc9c9f6403fc0d62 h2=c39d6eca50f37178
+  file foo.txt = manifest size=17 chunks=1 h1=faf60158c5948cd2 h2=60f690e9588d51bd
     chunk#0 faf60158c5948cd2-60f690e9588d51bd size=17
 
 === delete keeps a version
@@ -40,7 +40,7 @@
   drain
   rename a.txt -> b.txt
 --- tree
-  f b.txt size=9 cached=true uploaded=true etag=6a7651577e6ba91a
+  f b.txt size=9 cached=true uploaded=true etag=3080b92b20375f8a
 --- content
   b.txt = "content a"
 --- backend
@@ -49,7 +49,7 @@
   journal <entry-1> = put a.txt 9
   journal <entry-2> = rename a.txt -> b.txt 9
   version a.txt#1 = manifest size=9 chunks=1
-  file b.txt = manifest size=9 chunks=1 h1=6a7651577e6ba91a h2=0fead0e832a1c77a
+  file b.txt = manifest size=9 chunks=1 h1=3080b92b20375f8a h2=2fce59f09ae2e917
     chunk#0 3080b92b20375f8a-2fce59f09ae2e917 size=9
 
 === revert a deleted file (dataless)
@@ -59,7 +59,7 @@
   drain
   revert foo.txt @latest
 --- tree
-  f foo.txt size=15 cached=false uploaded=true etag=eadad83fb0989511
+  f foo.txt size=15 cached=false uploaded=true etag=d1a9d4d84e18e087
 --- content
   foo.txt = "deleted content"
 --- backend
@@ -69,7 +69,7 @@
   journal <entry-2> = delete foo.txt
   journal <entry-3> = put foo.txt 15
   version foo.txt#1 = manifest size=15 chunks=1
-  file foo.txt = manifest size=15 chunks=1 h1=eadad83fb0989511 h2=0cbf74fe4e34c9e2
+  file foo.txt = manifest size=15 chunks=1 h1=d1a9d4d84e18e087 h2=2a474494f098b599
     chunk#0 d1a9d4d84e18e087-2a474494f098b599 size=15
 
 === revert a modified file to its previous version
@@ -81,7 +81,7 @@
   drain
   revert foo.txt @latest
 --- tree
-  f foo.txt size=3 cached=false uploaded=true etag=1b5557ec85b5c129
+  f foo.txt size=3 cached=false uploaded=true etag=6c0560bdcb29998b
 --- content
   foo.txt = "two"
 --- backend
@@ -95,6 +95,6 @@
   journal <entry-4> = put foo.txt 3
   version foo.txt#1 = manifest size=3 chunks=1
   version foo.txt#2 = manifest size=3 chunks=1
-  file foo.txt = manifest size=3 chunks=1 h1=1b5557ec85b5c129 h2=a31bd801c9801ebc
+  file foo.txt = manifest size=3 chunks=1 h1=6c0560bdcb29998b h2=8f653076428650aa
     chunk#0 6c0560bdcb29998b-8f653076428650aa size=3
 
