@@ -20,6 +20,7 @@ final class TsyncItem: NSObject, NSFileProviderItem {
         parent: NSFileProviderItemIdentifier,
         filename: String,
         isDirectory: Bool,
+        readOnly: Bool = false,
         size: Int64? = nil,
         modificationDate: Date? = nil,
         etag: String? = nil,
@@ -38,7 +39,9 @@ final class TsyncItem: NSObject, NSFileProviderItem {
             : UTType(filenameExtension: (filename as NSString).pathExtension) ?? .data
         self.documentSize = size.map { NSNumber(value: $0) }
         self.contentModificationDate = modificationDate
-        self.capabilities = isDirectory
+        self.capabilities = readOnly
+            ? (isDirectory ? [.allowsReading, .allowsContentEnumerating] : [.allowsReading, .allowsEvicting])
+            : isDirectory
             ? [.allowsReading, .allowsContentEnumerating, .allowsAddingSubItems]
             : symlinkTarget != nil
             ? [.allowsReading, .allowsRenaming, .allowsReparenting, .allowsTrashing, .allowsDeleting]
@@ -61,12 +64,13 @@ final class TsyncItem: NSObject, NSFileProviderItem {
     }
 
     /// Synthetic root container item.
-    static func rootContainer(displayName: String) -> TsyncItem {
+    static func rootContainer(displayName: String, readOnly: Bool = false) -> TsyncItem {
         TsyncItem(
             identifier: .rootContainer,
             parent: .rootContainer,
             filename: displayName,
-            isDirectory: true
+            isDirectory: true,
+            readOnly: readOnly
         )
     }
 }
@@ -103,6 +107,7 @@ extension TsyncItem {
     /// Build an item straight from its storage key — the only supported way to construct a
     /// non-root item. Directory-ness, identifier, parent, and filename all follow from the key.
     static func make(key: String, domainPrefix: String,
+                     readOnly: Bool = false,
                      size: Int64? = nil, modificationDate: Date? = nil,
                      etag: String? = nil, isDownloaded: Bool = false,
                      isUploaded: Bool = true, symlinkTarget: String? = nil) -> TsyncItem {
@@ -110,6 +115,7 @@ extension TsyncItem {
                   parent: ItemID.parent(ofKey: key, domainPrefix: domainPrefix),
                   filename: ItemID.filename(ofKey: key),
                   isDirectory: key.hasSuffix("/"),
+                  readOnly: readOnly,
                   size: size, modificationDate: modificationDate, etag: etag,
                   isDownloaded: isDownloaded, isUploaded: isUploaded,
                   symlinkTarget: symlinkTarget)

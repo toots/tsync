@@ -38,11 +38,12 @@ final class TsyncEnumerator: NSObject, NSFileProviderEnumerator, @unchecked Send
                 var items: [TsyncItem] = []
 
                 for dir in resp.dirs ?? [] {
-                    items.append(TsyncItem.make(key: dir, domainPrefix: domainPrefix))
+                    items.append(TsyncItem.make(key: dir, domainPrefix: domainPrefix, readOnly: isReadOnly))
                 }
                 for entry in resp.files ?? [] {
                     items.append(TsyncItem.make(
                         key: entry.key, domainPrefix: domainPrefix,
+                        readOnly: isReadOnly,
                         size: entry.size,
                         modificationDate: Date(timeIntervalSince1970: entry.mtime),
                         etag: entry.etag, symlinkTarget: entry.symlinkTarget))
@@ -104,6 +105,8 @@ final class TsyncEnumerator: NSObject, NSFileProviderEnumerator, @unchecked Send
 
     // MARK: - Private
 
+    private var isReadOnly: Bool { config.isReadOnly(domain.displayName) }
+
     /// Sync anchors must carry non-empty data; use "0" as the empty-cursor sentinel.
     private func syncAnchor(_ cursor: String) -> NSFileProviderSyncAnchor {
         NSFileProviderSyncAnchor((cursor.isEmpty ? "0" : cursor).data(using: .utf8)!)
@@ -113,10 +116,11 @@ final class TsyncEnumerator: NSObject, NSFileProviderEnumerator, @unchecked Send
     private func resolveChangeItem(_ key: String) async throws -> TsyncItem {
         let domainPrefix = config.domainPrefix(domain.displayName)
         if key.hasSuffix("/") {
-            return TsyncItem.make(key: key, domainPrefix: domainPrefix)
+            return TsyncItem.make(key: key, domainPrefix: domainPrefix, readOnly: isReadOnly)
         }
         let resp = try await IPC.stat(key: key)
         return TsyncItem.make(key: key, domainPrefix: domainPrefix,
+                              readOnly: isReadOnly,
                               size: resp.size,
                               modificationDate: resp.mtime.map { Date(timeIntervalSince1970: $0) },
                               etag: resp.etag, isUploaded: resp.isUploaded ?? true,
@@ -132,6 +136,7 @@ final class TsyncEnumerator: NSObject, NSFileProviderEnumerator, @unchecked Send
         let items: [TsyncItem] = files.map { entry in
             TsyncItem.make(
                 key: entry.key, domainPrefix: domainPrefix,
+                readOnly: isReadOnly,
                 size: entry.size,
                 modificationDate: Date(timeIntervalSince1970: entry.mtime),
                 etag: entry.etag, symlinkTarget: entry.symlinkTarget)

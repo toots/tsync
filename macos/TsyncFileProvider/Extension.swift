@@ -296,17 +296,18 @@ final class TsyncExtension: NSObject, NSFileProviderReplicatedExtension, @unchec
 
     private func resolveItem(_ identifier: NSFileProviderItemIdentifier, isDownloaded: Bool = false) async throws -> TsyncItem {
         if identifier == .rootContainer {
-            return TsyncItem.rootContainer(displayName: domain.displayName)
+            return TsyncItem.rootContainer(displayName: domain.displayName, readOnly: isReadOnly)
         }
         let key = identifier.rawValue
         if key.hasSuffix("/") {
-            return TsyncItem.make(key: key, domainPrefix: domainPrefix)
+            return TsyncItem.make(key: key, domainPrefix: domainPrefix, readOnly: isReadOnly)
         }
         return makeItem(key: key, resp: try await IPC.stat(key: key), isDownloaded: isDownloaded)
     }
 
     private func makeItem(key: String, resp: IPCResponse, isDownloaded: Bool) -> TsyncItem {
         TsyncItem.make(key: key, domainPrefix: domainPrefix,
+                       readOnly: isReadOnly,
                        size: resp.size,
                        modificationDate: resp.mtime.map { Date(timeIntervalSince1970: $0) },
                        etag: resp.etag, isDownloaded: isDownloaded,
