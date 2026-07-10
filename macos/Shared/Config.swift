@@ -3,6 +3,19 @@ import Foundation
 public struct DomainConfig: Codable, Sendable {
     public let name: String
     public let prefix: String
+    public let readOnly: Bool
+
+    enum CodingKeys: String, CodingKey {
+        case name, prefix
+        case readOnly = "readOnly"
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        name = try c.decode(String.self, forKey: .name)
+        prefix = try c.decode(String.self, forKey: .prefix)
+        readOnly = (try? c.decodeIfPresent(Bool.self, forKey: .readOnly)) ?? false
+    }
 }
 
 public struct Config: Codable, Sendable {
@@ -20,6 +33,10 @@ public struct Config: Codable, Sendable {
         let url = groupContainerURL.appendingPathComponent("config.json")
         let data = try Data(contentsOf: url)
         return try JSONDecoder().decode(Config.self, from: data)
+    }
+
+    public func isReadOnly(_ domainName: String) -> Bool {
+        domains.first(where: { $0.name == domainName })?.readOnly ?? false
     }
 
     /// Full S3 key prefix for a domain, e.g. "tsync/music-production/"

@@ -27,4 +27,7 @@ module type S = sig
       objects, [`Follow] dereferences to the target's content, [`Skip] ignores
       them. *)
   val symlink_policy : [ `Keep | `Follow | `Skip ]
+
+  (** When [true], the domain rejects all write operations. *)
+  val read_only : bool
 end

@@ -12,6 +12,7 @@ type domain = {
   backends : backend_config list;
   symlink_policy : [ `Keep | `Follow | `Skip ];
   versioning : bool;
+  read_only : bool;
 }
 
 type t = {

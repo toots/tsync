@@ -125,6 +125,16 @@ Under `follow` and `skip` the domain never contains symlink objects — creation
 { "name": "media", "prefix": "tsync", "symlinks": "keep", "backends": [...] }
 ```
 
+### Read-only domains
+
+Set `"readOnly": true` on a domain to make the mount reject all writes — useful for a machine that should only pull changes, never push them:
+
+```json
+{ "name": "media", "prefix": "tsync", "symlinks": "keep", "readOnly": true, "backends": [...] }
+```
+
+The sync poller still runs and downloads remote changes normally; only local mutations (create, write, delete, rename) are blocked. On Linux the mount returns `EROFS`; on macOS the FileProvider extension returns an error for any write attempt.
+
 ## Good to know
 
 tsync is built for personal and small-scale use, and it's honest about its limits:

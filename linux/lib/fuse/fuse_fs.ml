@@ -212,6 +212,8 @@ module Make (C : Conf.S) = struct
 
   (* ── FUSE operations ──────────────────────────────────────────────────── *)
 
+  let ro op path = raise (Unix.Unix_error (Unix.EROFS, op, path))
+
   let make_operations mount_point =
     let open Fuse in
     let hidden = H.make ~fuse_to_key in
@@ -247,6 +249,7 @@ module Make (C : Conf.S) = struct
                     Lwt.fail (Unix.Unix_error (Unix.EINVAL, "readlink", path))));
       symlink =
         (fun target path ->
+          if C.read_only then ro "symlink" path;
           guard "symlink" path (fun () ->
               on_loop (fun () -> F.symlink ~target (fuse_to_key path))));
       readdir =
@@ -256,6 +259,7 @@ module Make (C : Conf.S) = struct
               List.map entry_of_name ("." :: ".." :: entries)));
       mknod =
         (fun path mode ->
+          if C.read_only then ro "mknod" path;
           guard "mknod" path (fun () ->
               on_loop (fun () -> (dispatch path).mknod path mode)));
       fopen =
@@ -268,6 +272,7 @@ module Make (C : Conf.S) = struct
               on_loop (fun () -> (dispatch path).read path buf offset fi)));
       write =
         (fun path buf offset fi ->
+          if C.read_only then ro "write" path;
           guard "write" path (fun () ->
               on_loop (fun () -> (dispatch path).write path buf offset fi)));
       release =
@@ -276,18 +281,22 @@ module Make (C : Conf.S) = struct
               on_loop (fun () -> (dispatch path).release path fi)));
       unlink =
         (fun path ->
+          if C.read_only then ro "unlink" path;
           guard "unlink" path (fun () ->
               on_loop (fun () -> (dispatch path).unlink path)));
       mkdir =
         (fun path _mode ->
+          if C.read_only then ro "mkdir" path;
           guard "mkdir" path (fun () ->
               on_loop (fun () -> F.mkdir (fuse_to_dir_prefix path))));
       rmdir =
         (fun path ->
+          if C.read_only then ro "rmdir" path;
           guard "rmdir" path (fun () ->
               on_loop (fun () -> F.rmdir (fuse_to_dir_prefix path))));
       rename =
         (fun src dst flags ->
+          if C.read_only then ro "rename" src;
           guard "rename" src (fun () ->
               on_loop (fun () ->
                   let is_hidden = is_fuse_hidden dst in
@@ -297,6 +306,7 @@ module Make (C : Conf.S) = struct
                   if is_hidden then real.unlink src else Lwt.return_unit)));
       truncate =
         (fun path size fi ->
+          if C.read_only then ro "truncate" path;
           guard "truncate" path (fun () ->
               on_loop (fun () -> (dispatch path).truncate path size fi)));
       statfs =

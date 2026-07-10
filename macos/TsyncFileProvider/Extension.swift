@@ -153,6 +153,10 @@ final class TsyncExtension: NSObject, NSFileProviderReplicatedExtension, @unchec
         completionHandler: @escaping (NSFileProviderItem?, NSFileProviderItemFields, Bool, Error?) -> Void
     ) -> Progress {
         let progress = Progress(totalUnitCount: 100)
+        if isReadOnly {
+            completionHandler(nil, [], false, NSError(domain: NSFileProviderErrorDomain, code: NSFileProviderError.notSupported.rawValue))
+            return progress
+        }
         Task {
             do {
                 let key = s3Key(for: itemTemplate)
@@ -202,6 +206,10 @@ final class TsyncExtension: NSObject, NSFileProviderReplicatedExtension, @unchec
         completionHandler: @escaping (NSFileProviderItem?, NSFileProviderItemFields, Bool, Error?) -> Void
     ) -> Progress {
         let progress = Progress(totalUnitCount: 100)
+        if isReadOnly {
+            completionHandler(nil, [], false, NSError(domain: NSFileProviderErrorDomain, code: NSFileProviderError.notSupported.rawValue))
+            return progress
+        }
         Task {
             do {
                 let oldKey = item.itemIdentifier.rawValue
@@ -252,6 +260,10 @@ final class TsyncExtension: NSObject, NSFileProviderReplicatedExtension, @unchec
         completionHandler: @escaping (Error?) -> Void
     ) -> Progress {
         let progress = Progress(totalUnitCount: 1)
+        if isReadOnly {
+            completionHandler(NSError(domain: NSFileProviderErrorDomain, code: NSFileProviderError.notSupported.rawValue))
+            return progress
+        }
         Task {
             do {
                 let key = identifier.rawValue
@@ -279,6 +291,7 @@ final class TsyncExtension: NSObject, NSFileProviderReplicatedExtension, @unchec
     // MARK: - Helpers
 
     private var domainPrefix: String { config.domainPrefix(domain.displayName) }
+    private var isReadOnly: Bool { config.isReadOnly(domain.displayName) }
 
     private func resolveItem(_ identifier: NSFileProviderItemIdentifier, isDownloaded: Bool = false) async throws -> TsyncItem {
         if identifier == .rootContainer {

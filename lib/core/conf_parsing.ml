@@ -11,6 +11,7 @@ type domain = {
   backends : backend_config list;
   symlink_policy : [ `Keep | `Follow | `Skip ];
   versioning : bool;
+  read_only : bool;
 }
 
 type t = {
@@ -87,6 +88,8 @@ let parse_domain json =
     backends = json |> member "backends" |> to_list |> List.map parse_backend;
     symlink_policy = parse_symlink_policy json;
     versioning = json |> member "versioning" |> to_bool;
+    read_only =
+      (match json |> member "readOnly" with `Bool b -> b | _ -> false);
   }
 
 let load path =

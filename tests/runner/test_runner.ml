@@ -741,6 +741,7 @@ let run_scenario ?(versioning = false) ?(symlink_policy = `Keep)
     let max_uploads = 4
     let max_downloads = 8
     let symlink_policy = symlink_policy
+    let read_only = false
   end in
   Lwt_main.run
     (let client = setup_client (module C) root "" in
@@ -807,6 +808,7 @@ let run_two_client_scenario ?(versioning = false)
     let max_uploads = 4
     let max_downloads = 8
     let symlink_policy = `Keep
+    let read_only = false
   end in
   let module Cb = struct
     let versioning = versioning
@@ -825,6 +827,7 @@ let run_two_client_scenario ?(versioning = false)
     let max_uploads = 4
     let max_downloads = 8
     let symlink_policy = `Keep
+    let read_only = false
   end in
   Lwt_main.run
     (let client_a = setup_client (module Ca) root "a" in
@@ -891,6 +894,7 @@ let make_conf ?(versioning = false) ~client_name ~backend_root ~cache_root
     let max_uploads = 4
     let max_downloads = 8
     let symlink_policy = `Keep
+    let read_only = false
   end)
 
 (* Single client: after draining uploads, snapshot the listing IPC responses

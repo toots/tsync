@@ -90,6 +90,7 @@ Config path is platform-specific — see each platform's **Paths** section below
 | `name` | string | Domain name — used as the mount directory name and storage namespace segment |
 | `prefix` | string | Key prefix shared by all backends for this domain (no leading/trailing slash) |
 | `symlinks` | string | Required. Symlink policy: `"keep"` — import stores symlinks as symlink objects and they can be created live through the mount; `"follow"` — import dereferences to target content (broken links skipped); `"skip"` — import ignores symlinks. Under `follow`/`skip`, live creation through the mount is rejected with `EPERM` |
+| `readOnly` | bool | Optional (default `false`). When `true`, all write operations through the mount are rejected — FUSE returns `EROFS`, FileProvider returns `notSupported`. Reads and downloads work normally. Useful for a machine that should only pull changes, never push them |
 | `backends` | backend[] | One or more backends; writes fan out to all, reads use the primary (see below) |
 
 **Backend fields (`type: "s3"`):**

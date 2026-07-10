@@ -27,6 +27,7 @@ module C = struct
   let max_uploads = 4
   let max_downloads = 8
   let symlink_policy = `Keep
+  let read_only = false
 end
 
 module R = Remote.Make (C)

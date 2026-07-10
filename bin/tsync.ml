@@ -68,6 +68,7 @@ let make_conf ?domain cfg : (module Conf.S) =
     let max_uploads = cfg.Conf_parsing.max_uploads
     let max_downloads = cfg.Conf_parsing.max_downloads
     let symlink_policy = d.Conf_parsing.symlink_policy
+    let read_only = d.Conf_parsing.read_only
 
     let notify_path =
       Filename.concat runtime_paths.Runtime.data_dir "notify.sock"
@@ -1202,6 +1203,7 @@ let configure_cmd =
         in
         ask ()
       in
+      let read_only = prompt_bool "Read-only mount (block all local writes)?" in
       let backends = prompt_backends () in
       `Assoc
         [
@@ -1209,6 +1211,7 @@ let configure_cmd =
           ("prefix", `String key_prefix);
           ("versioning", `Bool versioning);
           ("symlinks", `String symlinks);
+          ("readOnly", `Bool read_only);
           ("backends", `List backends);
         ]
     in
@@ -1305,6 +1308,7 @@ let print_conf_cmd =
         Printf.printf "\ndomain: %s\n" d.name;
         Printf.printf "  prefix:     %s\n" d.prefix;
         Printf.printf "  versioning: %b\n" d.versioning;
+        Printf.printf "  read_only:  %b\n" d.read_only;
         Printf.printf "  symlinks:   %s\n" (symlink_str d.symlink_policy);
         List.iter
           (fun (b : Conf_parsing.backend_config) ->
