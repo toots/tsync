@@ -1,11 +1,3 @@
-(* Import/export scenarios. Import seeds a domain from a plain folder: data
-   is uploaded to all backends, the cache gets manifest sidecars plus a
-   symlink to the source data (files read as cached), and one journal entry
-   announces everything. Export writes the whole domain to a folder: cached
-   files are copied locally, evicted ones recomposed from remote chunks
-   without repopulating the cache (visible as cached=false in the tree dump
-   after export). *)
-
 open Test_runner
 
 let () =
@@ -15,12 +7,10 @@ let () =
         name = "import into empty domain";
         steps =
           [
-            ImportDir
-              [
-                ("a.txt", "alpha");
-                ("sub/b.txt", "bravo");
-                ("sub/deep/c.txt", "charlie");
-              ];
+            LocalWrite { path = "a.txt"; content = "alpha" };
+            LocalWrite { path = "sub/b.txt"; content = "bravo" };
+            LocalWrite { path = "sub/deep/c.txt"; content = "charlie" };
+            Import { exclude = []; force_rehash = false };
           ];
       };
       {
@@ -29,7 +19,9 @@ let () =
           [
             Write { path = "file.bin"; content = "original" };
             Drain;
-            ImportDir [("file.bin", "imported"); ("new.txt", "fresh")];
+            LocalWrite { path = "file.bin"; content = "imported" };
+            LocalWrite { path = "new.txt"; content = "fresh" };
+            Import { exclude = []; force_rehash = false };
           ];
       };
       {
@@ -38,7 +30,8 @@ let () =
           [
             Write { path = "file.bin"; content = "same bytes" };
             Drain;
-            ImportDir [("copy.bin", "same bytes")];
+            LocalWrite { path = "copy.bin"; content = "same bytes" };
+            Import { exclude = []; force_rehash = false };
           ];
       };
       {
@@ -67,7 +60,9 @@ let () =
         name = "import then export round trip";
         steps =
           [
-            ImportDir [("a.txt", "alpha"); ("sub/b.txt", "bravo")];
+            LocalWrite { path = "a.txt"; content = "alpha" };
+            LocalWrite { path = "sub/b.txt"; content = "bravo" };
+            Import { exclude = []; force_rehash = false };
             Drain;
             ExportDir;
           ];
@@ -76,64 +71,61 @@ let () =
         name = "import with exclude by extension";
         steps =
           [
-            ImportDirExclude
-              {
-                entries =
-                  [
-                    ("a.txt", "alpha");
-                    ("b.tmp", "temp");
-                    ("sub/c.txt", "charlie");
-                    ("sub/d.tmp", "also temp");
-                  ];
-                exclude = ["*.tmp"];
-              };
+            LocalWrite { path = "a.txt"; content = "alpha" };
+            LocalWrite { path = "b.tmp"; content = "temp" };
+            LocalWrite { path = "sub/c.txt"; content = "charlie" };
+            LocalWrite { path = "sub/d.tmp"; content = "also temp" };
+            Import { exclude = ["*.tmp"]; force_rehash = false };
           ];
       };
       {
         name = "force-rehash republishes unchanged file";
         steps =
           [
-            ImportDir [("file.bin", "hello world")];
-            ImportDirForceRehash [("file.bin", "hello world")];
+            LocalWrite { path = "file.bin"; content = "hello world" };
+            Import { exclude = []; force_rehash = false };
+            LocalWrite { path = "file.bin"; content = "hello world" };
+            Import { exclude = []; force_rehash = true };
           ];
       };
       {
         name = "force-rehash re-uploads missing chunk";
         steps =
           [
-            ImportDir [("file.bin", "hello world")];
+            LocalWrite { path = "file.bin"; content = "hello world" };
+            Import { exclude = []; force_rehash = false };
             DeleteRemoteChunk { path = "file.bin"; index = 0 };
-            ImportDirForceRehash [("file.bin", "hello world")];
+            LocalWrite { path = "file.bin"; content = "hello world" };
+            Import { exclude = []; force_rehash = true };
           ];
       };
       {
         name = "force-rehash picks up changed content";
         steps =
           [
-            ImportDir [("file.bin", "original content")];
-            ImportDirForceRehash [("file.bin", "updated content")];
+            LocalWrite { path = "file.bin"; content = "original content" };
+            Import { exclude = []; force_rehash = false };
+            LocalWrite { path = "file.bin"; content = "updated content" };
+            Import { exclude = []; force_rehash = true };
           ];
       };
       {
         name = "import with non-empty and empty directories";
         steps =
           [
-            ImportDirWithEmptyDirs
-              {
-                files = [("non-empty/file.txt", "hello")];
-                empty_dirs = ["empty-dir"];
-              };
+            LocalWrite { path = "non-empty/file.txt"; content = "hello" };
+            LocalMkdir "empty-dir";
+            Import { exclude = []; force_rehash = false };
           ];
       };
       {
         name = "import special characters in filenames";
         steps =
           [
-            ImportDir
-              [
-                ("colon:file.txt", "colons");
-                ("dir:with:colons/nested.txt", "nested");
-              ];
+            LocalWrite { path = "colon:file.txt"; content = "colons" };
+            LocalWrite
+              { path = "dir:with:colons/nested.txt"; content = "nested" };
+            Import { exclude = []; force_rehash = false };
             Drain;
             ExportDir;
           ];
@@ -142,28 +134,21 @@ let () =
         name = "import with exclude directory";
         steps =
           [
-            ImportDirExclude
-              {
-                entries =
-                  [
-                    ("a.txt", "alpha");
-                    ("node_modules/lib.js", "big dep");
-                    ("node_modules/deep/pkg.js", "nested dep");
-                    ("src/main.ml", "code");
-                  ];
-                exclude = ["node_modules"];
-              };
+            LocalWrite { path = "a.txt"; content = "alpha" };
+            LocalWrite { path = "node_modules/lib.js"; content = "big dep" };
+            LocalWrite
+              { path = "node_modules/deep/pkg.js"; content = "nested dep" };
+            LocalWrite { path = "src/main.ml"; content = "code" };
+            Import { exclude = ["node_modules"]; force_rehash = false };
           ];
       };
       {
         name = "keep: symlink to file round-trips through export";
         steps =
           [
-            ImportDirSymlinks
-              {
-                files = [("real.txt", "hello")];
-                symlinks = [("link.txt", "real.txt")];
-              };
+            LocalWrite { path = "real.txt"; content = "hello" };
+            LocalSymlink { path = "link.txt"; target = "real.txt" };
+            Import { exclude = []; force_rehash = false };
             Drain;
             ExportDir;
           ];
@@ -172,8 +157,8 @@ let () =
         name = "keep: broken symlink is stored and exported as-is";
         steps =
           [
-            ImportDirSymlinks
-              { files = []; symlinks = [("dangling.txt", "nowhere")] };
+            LocalSymlink { path = "dangling.txt"; target = "nowhere" };
+            Import { exclude = []; force_rehash = false };
             Drain;
             ExportDir;
           ];
@@ -186,19 +171,17 @@ let () =
         name = "follow: dereferences file symlink";
         steps =
           [
-            ImportDirSymlinks
-              {
-                files = [("real.txt", "hello")];
-                symlinks = [("link.txt", "real.txt")];
-              };
+            LocalWrite { path = "real.txt"; content = "hello" };
+            LocalSymlink { path = "link.txt"; target = "real.txt" };
+            Import { exclude = []; force_rehash = false };
           ];
       };
       {
         name = "follow: skips broken symlink";
         steps =
           [
-            ImportDirSymlinks
-              { files = []; symlinks = [("dangling.txt", "nowhere")] };
+            LocalSymlink { path = "dangling.txt"; target = "nowhere" };
+            Import { exclude = []; force_rehash = false };
           ];
       };
     ];
@@ -209,12 +192,10 @@ let () =
         name = "skip: all symlinks counted and skipped";
         steps =
           [
-            ImportDirSymlinks
-              {
-                files = [("real.txt", "hello")];
-                symlinks =
-                  [("link.txt", "real.txt"); ("dangling.txt", "nowhere")];
-              };
+            LocalWrite { path = "real.txt"; content = "hello" };
+            LocalSymlink { path = "link.txt"; target = "real.txt" };
+            LocalSymlink { path = "dangling.txt"; target = "nowhere" };
+            Import { exclude = []; force_rehash = false };
           ];
       };
     ]

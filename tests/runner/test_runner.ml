@@ -25,20 +25,10 @@ type step =
   | Recheck
   | OnSecondary of step
   | ResyncRemote
-  | ImportDir of (string * string) list
-  | ImportDirForceRehash of (string * string) list
-  | ImportDirExclude of {
-      entries : (string * string) list;
-      exclude : string list;
-    }
-  | ImportDirSymlinks of {
-      files : (string * string) list;
-      symlinks : (string * string) list;
-    }
-  | ImportDirWithEmptyDirs of {
-      files : (string * string) list;
-      empty_dirs : string list;
-    }
+  | LocalWrite of { path : string; content : string }
+  | LocalMkdir of string
+  | LocalSymlink of { path : string; target : string }
+  | Import of { exclude : string list; force_rehash : bool }
   | ExportDir
 
 type scenario = { name : string; steps : step list }
@@ -109,28 +99,18 @@ let rec render_step = function
   | Recheck -> "recheck"
   | OnSecondary s -> "on-secondary " ^ render_step s
   | ResyncRemote -> "resync-remote"
-  | ImportDir entries ->
-      Printf.sprintf "import-dir %s"
-        (String.concat " "
-           (List.map (fun (p, c) -> Printf.sprintf "%s=%S" p c) entries))
-  | ImportDirForceRehash entries ->
-      Printf.sprintf "import-dir --force-rehash %s"
-        (String.concat " "
-           (List.map (fun (p, c) -> Printf.sprintf "%s=%S" p c) entries))
-  | ImportDirExclude { entries; exclude } ->
-      Printf.sprintf "import-dir --exclude %s %s"
-        (String.concat "," exclude)
-        (String.concat " "
-           (List.map (fun (p, c) -> Printf.sprintf "%s=%S" p c) entries))
-  | ImportDirSymlinks { files; symlinks } ->
-      Printf.sprintf "import-dir-symlinks files=[%s] symlinks=[%s]"
-        (String.concat "," (List.map fst files))
-        (String.concat ","
-           (List.map (fun (r, t) -> Printf.sprintf "%s->%s" r t) symlinks))
-  | ImportDirWithEmptyDirs { files; empty_dirs } ->
-      Printf.sprintf "import-dir-with-empty-dirs files=[%s] empty-dirs=[%s]"
-        (String.concat "," (List.map fst files))
-        (String.concat "," empty_dirs)
+  | LocalWrite { path; content } ->
+      Printf.sprintf "local-write %s %S" path content
+  | LocalMkdir path -> "local-mkdir " ^ path
+  | LocalSymlink { path; target } ->
+      Printf.sprintf "local-symlink %s -> %s" path target
+  | Import { exclude; force_rehash } ->
+      String.concat " "
+        (["import"]
+        @ (if force_rehash then ["--force-rehash"] else [])
+        @
+        if exclude <> [] then ["--exclude " ^ String.concat "," exclude] else []
+        )
   | ExportDir -> "export-dir"
 
 let starts_with prefix s =
@@ -268,45 +248,28 @@ let setup_client (module C : Conf.S) root staging_prefix =
     | DeleteRemoteManifest p -> B.delete ~key:(key p) ()
     | s -> failwith ("not a backend-damage step: " ^ render_step s)
   in
-  let run_import ?(empty_dirs = []) ~force_rehash ~exclude entries =
-    incr staging_seq;
-    let src =
-      Filename.concat root
-        (Printf.sprintf "import-%s%d" staging_prefix !staging_seq)
+  let mkdir_p d =
+    let rec loop d =
+      if not (Sys.file_exists d) then begin
+        loop (Filename.dirname d);
+        Unix.mkdir d 0o755
+      end
     in
-    let mkdir_p d =
-      let rec loop d =
-        if not (Sys.file_exists d) then begin
-          loop (Filename.dirname d);
-          Unix.mkdir d 0o755
-        end
-      in
-      loop d
-    in
-    List.iter
-      (fun (rel, content) ->
-        let path = Filename.concat src rel in
-        mkdir_p (Filename.dirname path);
-        write_file path content)
-      entries;
-    List.iter (fun rel -> mkdir_p (Filename.concat src rel)) empty_dirs;
-    let module I = Import.Make (C) in
-    let+ summary =
-      I.run ~exclude ~force_rehash ~src
-        ~on_dir:(fun ~rel -> Printf.printf "  mkdir %s\n" rel)
-        ~on_file:(fun ~rel status ->
-          match status with
-            | Import.Imported size ->
-                Printf.printf "  imported %s (%Ld bytes)\n" rel size
-            | Import.Skipped_exists -> Printf.printf "  skip %s (exists)\n" rel
-            | Import.Skipped_symlink ->
-                Printf.printf "  skip %s (symlink)\n" rel
-            | Import.Failed msg -> Printf.printf "  failed %s: %s\n" rel msg)
-        ()
-    in
-    Printf.printf "  import: %d imported, %d skipped, %d symlinks skipped\n"
-      summary.Import.imported summary.Import.skipped
-      summary.Import.skipped_symlinks
+    loop d
+  in
+  let local_staging : string option ref = ref None in
+  let get_or_create_staging () =
+    match !local_staging with
+      | Some d -> d
+      | None ->
+          incr staging_seq;
+          let d =
+            Filename.concat root
+              (Printf.sprintf "local-%s%d" staging_prefix !staging_seq)
+          in
+          Unix.mkdir d 0o755;
+          local_staging := Some d;
+          d
   in
   let do_step = function
     | Write { path; content } ->
@@ -372,46 +335,31 @@ let setup_client (module C : Conf.S) root staging_prefix =
         match C.backends with
           | _ :: dst :: _ -> damage dst s
           | _ -> failwith "OnSecondary: no secondary backend configured")
-    | ImportDir entries -> run_import ~force_rehash:false ~exclude:[] entries
-    | ImportDirForceRehash entries ->
-        run_import ~force_rehash:true ~exclude:[] entries
-    | ImportDirExclude { entries; exclude } ->
-        run_import ~force_rehash:false ~exclude entries
-    | ImportDirWithEmptyDirs { files; empty_dirs } ->
-        run_import ~empty_dirs ~force_rehash:false ~exclude:[] files
-    | ImportDirSymlinks { files; symlinks } ->
-        incr staging_seq;
+    | LocalWrite { path; content } ->
+        let staging = get_or_create_staging () in
+        let abs = Filename.concat staging path in
+        mkdir_p (Filename.dirname abs);
+        write_file abs content;
+        Lwt.return_unit
+    | LocalMkdir path ->
+        mkdir_p (Filename.concat (get_or_create_staging ()) path);
+        Lwt.return_unit
+    | LocalSymlink { path; target } ->
+        let staging = get_or_create_staging () in
+        let abs = Filename.concat staging path in
+        mkdir_p (Filename.dirname abs);
+        Unix.symlink target abs;
+        Lwt.return_unit
+    | Import { exclude; force_rehash } ->
         let src =
-          Filename.concat root
-            (Printf.sprintf "import-%s%d" staging_prefix !staging_seq)
+          match !local_staging with
+            | Some d -> d
+            | None -> get_or_create_staging ()
         in
-        List.iter
-          (fun (rel, content) ->
-            let path = Filename.concat src rel in
-            let rec mkdir_p d =
-              if not (Sys.file_exists d) then begin
-                mkdir_p (Filename.dirname d);
-                Unix.mkdir d 0o755
-              end
-            in
-            mkdir_p (Filename.dirname path);
-            write_file path content)
-          files;
-        List.iter
-          (fun (rel, target) ->
-            let path = Filename.concat src rel in
-            let rec mkdir_p d =
-              if not (Sys.file_exists d) then begin
-                mkdir_p (Filename.dirname d);
-                Unix.mkdir d 0o755
-              end
-            in
-            mkdir_p (Filename.dirname path);
-            Unix.symlink target path)
-          symlinks;
+        local_staging := None;
         let module I = Import.Make (C) in
         let+ summary =
-          I.run ~src
+          I.run ~exclude ~force_rehash ~src
             ~on_dir:(fun ~rel -> Printf.printf "  mkdir %s\n" rel)
             ~on_file:(fun ~rel status ->
               match status with

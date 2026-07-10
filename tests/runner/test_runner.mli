@@ -3,7 +3,12 @@
    over the JSON IPC protocol; [run] executes each scenario and prints a
    snapshot of the resulting state to stdout. Scenario files pair with a
    [.expected] snapshot; dune diffs the two under [dune test] and
-   [dune test --auto-promote] refreshes them. *)
+   [dune test --auto-promote] refreshes them.
+
+   Steps should mirror what a real user would do: write a file, create a
+   directory, import a folder from disk. Avoid steps that encode internal
+   implementation details (specific chunk keys, internal state transitions,
+   etc.) — those couple tests to the implementation rather than the behaviour. *)
 
 type step =
   | Write of { path : string; content : string }
@@ -64,29 +69,19 @@ type step =
           the copied keys plus a per-destination summary (bytes omitted:
           manifest objects embed mtimes, so their sizes are not deterministic).
       *)
-  | ImportDir of (string * string) list
-      (** Create a temp source folder with these (relative path, content) files,
-          run [Import.run] on it, and print per-file status lines. *)
-  | ImportDirForceRehash of (string * string) list
-      (** Like [ImportDir] but passes [~force_rehash:true] to [Import.run]:
-          existing keys are not skipped; every file is re-hashed and missing or
-          changed chunks re-uploaded. *)
-  | ImportDirExclude of {
-      entries : (string * string) list;
-      exclude : string list;
-    }  (** Like [ImportDir] but passes [~exclude] patterns to [Import.run]. *)
-  | ImportDirSymlinks of {
-      files : (string * string) list;
-      symlinks : (string * string) list;
-    }
-      (** Like [ImportDir] but also seeds (rel, target) symlinks in the source
-          tree, exercising the [symlink_policy] configured on the scenario. *)
-  | ImportDirWithEmptyDirs of {
-      files : (string * string) list;
-      empty_dirs : string list;
-    }
-      (** Like [ImportDir] but also creates empty directories in the source
-          tree, verifying that they are explicitly created on the backend. *)
+  | LocalWrite of { path : string; content : string }
+      (** Write [content] to [path] in the local staging directory (created on
+          first use, reset after each [Import]). Parent directories are created
+          automatically. *)
+  | LocalMkdir of string
+      (** Create a directory at [path] in the local staging directory. *)
+  | LocalSymlink of { path : string; target : string }
+      (** Create a symlink at [path] pointing to [target] in the local staging
+          directory. *)
+  | Import of { exclude : string list; force_rehash : bool }
+      (** Run [Import.run] on the current local staging directory, then reset it
+          for the next batch. Populate it first with [LocalWrite], [LocalMkdir],
+          and [LocalSymlink]. *)
   | ExportDir
       (** Run [Export.run] into a fresh temp folder, print per-file status
           lines, then dump the exported tree's contents. *)

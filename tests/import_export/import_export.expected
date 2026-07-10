@@ -1,5 +1,8 @@
 === import into empty domain
-  import-dir a.txt="alpha" sub/b.txt="bravo" sub/deep/c.txt="charlie"
+  local-write a.txt "alpha"
+  local-write sub/b.txt "bravo"
+  local-write sub/deep/c.txt "charlie"
+  import
   imported a.txt (5 bytes)
   imported sub/b.txt (5 bytes)
   imported sub/deep/c.txt (7 bytes)
@@ -30,7 +33,9 @@
 === import skips existing key
   write file.bin "original"
   drain
-  import-dir file.bin="imported" new.txt="fresh"
+  local-write file.bin "imported"
+  local-write new.txt "fresh"
+  import
   skip file.bin (exists)
   imported new.txt (5 bytes)
   import: 1 imported, 1 skipped, 0 symlinks skipped
@@ -54,7 +59,8 @@
 === import dedups identical content
   write file.bin "same bytes"
   drain
-  import-dir copy.bin="same bytes"
+  local-write copy.bin "same bytes"
+  import
   imported copy.bin (10 bytes)
   import: 1 imported, 0 skipped, 0 symlinks skipped
 --- tree
@@ -120,7 +126,9 @@
     chunk#0 3ec7a63f2d48ce00-16e5e4870c3ecb65 size=8
 
 === import then export round trip
-  import-dir a.txt="alpha" sub/b.txt="bravo"
+  local-write a.txt "alpha"
+  local-write sub/b.txt "bravo"
+  import
   drain
   export-dir
   imported a.txt (5 bytes)
@@ -149,7 +157,11 @@
     chunk#0 ac6cab7d3e498b68-bf95bad7826ecbe9 size=5
 
 === import with exclude by extension
-  import-dir --exclude *.tmp a.txt="alpha" b.tmp="temp" sub/c.txt="charlie" sub/d.tmp="also temp"
+  local-write a.txt "alpha"
+  local-write b.tmp "temp"
+  local-write sub/c.txt "charlie"
+  local-write sub/d.tmp "also temp"
+  import --exclude *.tmp
   imported a.txt (5 bytes)
   imported sub/c.txt (7 bytes)
   import: 2 imported, 0 skipped, 0 symlinks skipped
@@ -171,8 +183,10 @@
     chunk#0 cfcb9dbba6d68599-4ef4c57cebfa8616 size=7
 
 === force-rehash republishes unchanged file
-  import-dir file.bin="hello world"
-  import-dir --force-rehash file.bin="hello world"
+  local-write file.bin "hello world"
+  import
+  local-write file.bin "hello world"
+  import --force-rehash
   imported file.bin (11 bytes)
   import: 1 imported, 0 skipped, 0 symlinks skipped
   imported file.bin (11 bytes)
@@ -190,9 +204,11 @@
     chunk#0 d447b1ea40e6988b-b7aeb52a10fdaf2d size=11
 
 === force-rehash re-uploads missing chunk
-  import-dir file.bin="hello world"
+  local-write file.bin "hello world"
+  import
   delete-remote-chunk file.bin #0
-  import-dir --force-rehash file.bin="hello world"
+  local-write file.bin "hello world"
+  import --force-rehash
   imported file.bin (11 bytes)
   import: 1 imported, 0 skipped, 0 symlinks skipped
   imported file.bin (11 bytes)
@@ -210,8 +226,10 @@
     chunk#0 d447b1ea40e6988b-b7aeb52a10fdaf2d size=11
 
 === force-rehash picks up changed content
-  import-dir file.bin="original content"
-  import-dir --force-rehash file.bin="updated content"
+  local-write file.bin "original content"
+  import
+  local-write file.bin "updated content"
+  import --force-rehash
   imported file.bin (16 bytes)
   import: 1 imported, 0 skipped, 0 symlinks skipped
   imported file.bin (15 bytes)
@@ -230,7 +248,9 @@
     chunk#0 4e052c0e120dbf96-8b44a8391c3d2611 size=15
 
 === import with non-empty and empty directories
-  import-dir-with-empty-dirs files=[non-empty/file.txt] empty-dirs=[empty-dir]
+  local-write non-empty/file.txt "hello"
+  local-mkdir empty-dir
+  import
   imported non-empty/file.txt (5 bytes)
   mkdir empty-dir
   import: 1 imported, 0 skipped, 0 symlinks skipped
@@ -249,7 +269,9 @@
     chunk#0 9555e8555c62dcfd-74b07ed397a89e92 size=5
 
 === import special characters in filenames
-  import-dir colon:file.txt="colons" dir:with:colons/nested.txt="nested"
+  local-write colon:file.txt "colons"
+  local-write dir:with:colons/nested.txt "nested"
+  import
   drain
   export-dir
   imported colon:file.txt (6 bytes)
@@ -278,7 +300,11 @@
     chunk#0 fa87ee5fc199e332-c7156c4359a54f81 size=6
 
 === import with exclude directory
-  import-dir --exclude node_modules a.txt="alpha" node_modules/lib.js="big dep" node_modules/deep/pkg.js="nested dep" src/main.ml="code"
+  local-write a.txt "alpha"
+  local-write node_modules/lib.js "big dep"
+  local-write node_modules/deep/pkg.js "nested dep"
+  local-write src/main.ml "code"
+  import --exclude node_modules
   imported a.txt (5 bytes)
   imported src/main.ml (4 bytes)
   import: 2 imported, 0 skipped, 0 symlinks skipped
@@ -300,7 +326,9 @@
     chunk#0 04939d9a1b2db88e-62fc6ecf665adb77 size=4
 
 === keep: symlink to file round-trips through export
-  import-dir-symlinks files=[real.txt] symlinks=[link.txt->real.txt]
+  local-write real.txt "hello"
+  local-symlink link.txt -> real.txt
+  import
   drain
   export-dir
   imported real.txt (5 bytes)
@@ -326,7 +354,8 @@
     chunk#0 9555e8555c62dcfd-74b07ed397a89e92 size=5
 
 === keep: broken symlink is stored and exported as-is
-  import-dir-symlinks files=[] symlinks=[dangling.txt->nowhere]
+  local-symlink dangling.txt -> nowhere
+  import
   drain
   export-dir
   imported dangling.txt (7 bytes)
@@ -344,7 +373,9 @@
   symlink dangling.txt -> nowhere
 
 === follow: dereferences file symlink
-  import-dir-symlinks files=[real.txt] symlinks=[link.txt->real.txt]
+  local-write real.txt "hello"
+  local-symlink link.txt -> real.txt
+  import
   imported real.txt (5 bytes)
   imported link.txt (5 bytes)
   import: 2 imported, 0 skipped, 0 symlinks skipped
@@ -364,7 +395,8 @@
     chunk#0 9555e8555c62dcfd-74b07ed397a89e92 size=5
 
 === follow: skips broken symlink
-  import-dir-symlinks files=[] symlinks=[dangling.txt->nowhere]
+  local-symlink dangling.txt -> nowhere
+  import
   skip dangling.txt (symlink)
   import: 0 imported, 0 skipped, 1 symlinks skipped
 --- tree
@@ -372,7 +404,10 @@
 --- backend
 
 === skip: all symlinks counted and skipped
-  import-dir-symlinks files=[real.txt] symlinks=[link.txt->real.txt,dangling.txt->nowhere]
+  local-write real.txt "hello"
+  local-symlink link.txt -> real.txt
+  local-symlink dangling.txt -> nowhere
+  import
   imported real.txt (5 bytes)
   skip dangling.txt (symlink)
   skip link.txt (symlink)
