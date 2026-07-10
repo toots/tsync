@@ -3,8 +3,8 @@
   write a.txt "hello"
   write b.txt "world"
 --- listing
-  list_dir tsync/test/ -> {"ok":true,"dirs":[],"files":[{"key":"tsync/test/a.txt","size":5,"mtime":"<mtime>","etag":"cfc4edca0bdce7a2"},{"key":"tsync/test/b.txt","size":5,"mtime":"<mtime>","etag":"9180bf84fb8e7cab"}]}
-  list_all tsync/test/ -> {"ok":true,"files":[{"key":"tsync/test/a.txt","size":5,"mtime":"<mtime>","etag":"cfc4edca0bdce7a2"},{"key":"tsync/test/b.txt","size":5,"mtime":"<mtime>","etag":"9180bf84fb8e7cab"}]}
+  list_dir tsync/test/ -> {"ok":true,"dirs":[],"files":[{"key":"tsync/test/a.txt","size":5,"mtime":"<mtime>","etag":"9555e8555c62dcfd"},{"key":"tsync/test/b.txt","size":5,"mtime":"<mtime>","etag":"d6476c25083d69be"}]}
+  list_all tsync/test/ -> {"ok":true,"files":[{"key":"tsync/test/a.txt","size":5,"mtime":"<mtime>","etag":"9555e8555c62dcfd"},{"key":"tsync/test/b.txt","size":5,"mtime":"<mtime>","etag":"d6476c25083d69be"}]}
 
 === nested directories keyed as full paths
   mkdir sub
@@ -12,17 +12,17 @@
   write sub/c.txt "nested"
   write top.txt "top"
 --- listing
-  list_dir tsync/test/ -> {"ok":true,"dirs":["tsync/test/sub/"],"files":[{"key":"tsync/test/top.txt","size":3,"mtime":"<mtime>","etag":"a0a8ff66a5d845b0"}]}
-  list_dir tsync/test/sub/ -> {"ok":true,"dirs":[],"files":[{"key":"tsync/test/sub/c.txt","size":6,"mtime":"<mtime>","etag":"872c93b4f32e2aaa"}]}
-  list_all tsync/test/ -> {"ok":true,"files":[{"key":"tsync/test/sub/c.txt","size":6,"mtime":"<mtime>","etag":"872c93b4f32e2aaa"},{"key":"tsync/test/top.txt","size":3,"mtime":"<mtime>","etag":"a0a8ff66a5d845b0"}]}
+  list_dir tsync/test/ -> {"ok":true,"dirs":["tsync/test/sub/"],"files":[{"key":"tsync/test/top.txt","size":3,"mtime":"<mtime>","etag":"78118159b95fa02f"}]}
+  list_dir tsync/test/sub/ -> {"ok":true,"dirs":[],"files":[{"key":"tsync/test/sub/c.txt","size":6,"mtime":"<mtime>","etag":"fa87ee5fc199e332"}]}
+  list_all tsync/test/ -> {"ok":true,"files":[{"key":"tsync/test/sub/c.txt","size":6,"mtime":"<mtime>","etag":"fa87ee5fc199e332"},{"key":"tsync/test/top.txt","size":3,"mtime":"<mtime>","etag":"78118159b95fa02f"}]}
 
 === identical content shares an etag
   write x.txt "same bytes"
   drain
   write y.txt "same bytes"
 --- listing
-  list_dir tsync/test/ -> {"ok":true,"dirs":[],"files":[{"key":"tsync/test/x.txt","size":10,"mtime":"<mtime>","etag":"bb52b673b2fffd64"},{"key":"tsync/test/y.txt","size":10,"mtime":"<mtime>","etag":"bb52b673b2fffd64"}]}
-  list_all tsync/test/ -> {"ok":true,"files":[{"key":"tsync/test/x.txt","size":10,"mtime":"<mtime>","etag":"bb52b673b2fffd64"},{"key":"tsync/test/y.txt","size":10,"mtime":"<mtime>","etag":"bb52b673b2fffd64"}]}
+  list_dir tsync/test/ -> {"ok":true,"dirs":[],"files":[{"key":"tsync/test/x.txt","size":10,"mtime":"<mtime>","etag":"e80520ee54b9ac96"},{"key":"tsync/test/y.txt","size":10,"mtime":"<mtime>","etag":"e80520ee54b9ac96"}]}
+  list_all tsync/test/ -> {"ok":true,"files":[{"key":"tsync/test/x.txt","size":10,"mtime":"<mtime>","etag":"e80520ee54b9ac96"},{"key":"tsync/test/y.txt","size":10,"mtime":"<mtime>","etag":"e80520ee54b9ac96"}]}
 
 ########## CHANGES ##########
 === foreign put

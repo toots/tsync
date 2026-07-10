@@ -26,9 +26,12 @@ type summary = {
 module Make (C : Conf.S) : sig
   (** Import every file under [src] (recursively, sorted), calling [on_file] per
       entry. Directories are created in the manifest tree and on the backends.
-      Existing keys are never overwritten. *)
+      When [force_rehash] is true, existing keys are not skipped: every file is
+      re-hashed, missing or changed chunks are re-uploaded, and the manifest is
+      republished. *)
   val run :
     ?exclude:string list ->
+    ?force_rehash:bool ->
     src:string ->
     on_file:(rel:string -> status -> unit) ->
     unit ->

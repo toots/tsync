@@ -67,6 +67,10 @@ type step =
   | ImportDir of (string * string) list
       (** Create a temp source folder with these (relative path, content) files,
           run [Import.run] on it, and print per-file status lines. *)
+  | ImportDirForceRehash of (string * string) list
+      (** Like [ImportDir] but passes [~force_rehash:true] to [Import.run]:
+          existing keys are not skipped; every file is re-hashed and missing or
+          changed chunks re-uploaded. *)
   | ImportDirExclude of {
       entries : (string * string) list;
       exclude : string list;

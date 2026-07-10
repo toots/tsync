@@ -66,11 +66,14 @@ tsync recheck         # verify the remote against the local cache, repair what's
 tsync resync-remote   # copy missing/damaged objects from one backend to the others
 tsync import <dir>    # seed the domain from an existing folder (uploads, no data copied)
 tsync import <dir> --exclude "*.tmp" --exclude node_modules  # skip files/directories by glob
+tsync import <dir> --force-rehash  # re-hash and re-upload every file (for manifest migration)
 tsync export <dir>    # write every file of the domain to a plain folder
 tsync status          # show daemon state
 tsync stats           # transfer metrics (pending/completed, bandwidth, hashing)
 tsync stop            # unmount
 ```
+
+Pass `--verbose` (or `-v`) to any command to print detailed progress as it runs.
 
 ### Versioning
 

@@ -17,21 +17,14 @@ type state = [ `Dirty | `Clean of t ]
 
 let chunk_key (entry : chunk_entry) = entry.h1 ^ "-" ^ entry.h2
 
-let hash_of_chunks (chunks : chunk_entry list) =
-  let combined =
-    String.concat ""
-      (List.concat_map (fun (c : chunk_entry) -> [c.h1; c.h2]) chunks)
-  in
-  (Xxhash.hash_hex combined 0, Xxhash.hash_hex combined 1)
-
-let make ~size ~chunk_size ~chunks ~mtime =
-  let h1, h2 = hash_of_chunks chunks in
+let make ~h1 ~h2 ~size ~chunk_size ~chunks ~mtime =
   `Clean { v = 1; size; chunk_size; chunks; h1; h2; mtime; symlink = None }
 
 (* A symlink is a chunkless manifest carrying its target. size is the target's
    byte length, POSIX-style. *)
 let make_symlink ~target ~mtime =
-  let h1, h2 = hash_of_chunks [] in
+  let h1 = Xxhash.hash_hex target 0 in
+  let h2 = Xxhash.hash_hex target 1 in
   `Clean
     {
       v = 1;

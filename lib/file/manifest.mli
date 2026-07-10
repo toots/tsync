@@ -18,6 +18,8 @@ type state = [ `Dirty | `Clean of t ]
 val chunk_key : chunk_entry -> string
 
 val make :
+  h1:string ->
+  h2:string ->
   size:int64 ->
   chunk_size:int ->
   chunks:chunk_entry list ->

@@ -74,9 +74,9 @@ module Make (C : Conf.S) = struct
           let+ head = Fs.head_opt ~key in
           Option.is_some head
 
-  let import_file ~src_root rel =
+  let import_file ~force_rehash ~src_root rel =
     let key = C.domain_prefix ^ rel in
-    let* skip = exists key in
+    let* skip = if force_rehash then Lwt.return_false else exists key in
     if skip then Lwt.return Skipped_exists
     else (
       let src_path = Filename.concat src_root rel in
@@ -92,9 +92,9 @@ module Make (C : Conf.S) = struct
 
   (* Write a symlink manifest to all backends and the local sidecar. No cache
      entry: there is no file data to cache for a symlink. *)
-  let import_symlink ~src_root rel target =
+  let import_symlink ~force_rehash ~src_root rel target =
     let key = C.domain_prefix ^ rel in
-    let* skip = exists key in
+    let* skip = if force_rehash then Lwt.return_false else exists key in
     if skip then Lwt.return Skipped_exists
     else (
       let src_path = Filename.concat src_root rel in
@@ -124,7 +124,7 @@ module Make (C : Conf.S) = struct
      - [`Keep]   — store as a first-class symlink object
      - [`Follow] — dereference and upload target content; broken links skipped
      - [`Skip]   — skip and count, no upload *)
-  let run ?(exclude = []) ~src ~on_file () =
+  let run ?(exclude = []) ?(force_rehash = false) ~src ~on_file () =
     let src =
       if Filename.is_relative src then Filename.concat (Sys.getcwd ()) src
       else src
@@ -150,7 +150,9 @@ module Make (C : Conf.S) = struct
     let* file_statuses =
       Lwt_list.map_s
         (fun rel ->
-          let+ status = guard rel (fun () -> import_file ~src_root:src rel) in
+          let+ status =
+            guard rel (fun () -> import_file ~force_rehash ~src_root:src rel)
+          in
           on_file ~rel status;
           (rel, status))
         files
@@ -161,7 +163,8 @@ module Make (C : Conf.S) = struct
           let* status =
             guard rel (fun () ->
                 match C.symlink_policy with
-                  | `Keep -> import_symlink ~src_root:src rel target
+                  | `Keep ->
+                      import_symlink ~force_rehash ~src_root:src rel target
                   | `Follow -> (
                       let abs_target =
                         if Filename.is_relative target then
@@ -173,7 +176,7 @@ module Make (C : Conf.S) = struct
                       let* kind = Fs_util.lstat_kind abs_target in
                       match kind with
                         | `Missing -> Lwt.return Skipped_symlink
-                        | _ -> import_file ~src_root:src rel)
+                        | _ -> import_file ~force_rehash ~src_root:src rel)
                   | `Skip -> Lwt.return Skipped_symlink)
           in
           on_file ~rel status;

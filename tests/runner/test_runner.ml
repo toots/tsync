@@ -26,6 +26,7 @@ type step =
   | OnSecondary of step
   | ResyncRemote
   | ImportDir of (string * string) list
+  | ImportDirForceRehash of (string * string) list
   | ImportDirExclude of {
       entries : (string * string) list;
       exclude : string list;
@@ -106,6 +107,10 @@ let rec render_step = function
   | ResyncRemote -> "resync-remote"
   | ImportDir entries ->
       Printf.sprintf "import-dir %s"
+        (String.concat " "
+           (List.map (fun (p, c) -> Printf.sprintf "%s=%S" p c) entries))
+  | ImportDirForceRehash entries ->
+      Printf.sprintf "import-dir --force-rehash %s"
         (String.concat " "
            (List.map (fun (p, c) -> Printf.sprintf "%s=%S" p c) entries))
   | ImportDirExclude { entries; exclude } ->
@@ -255,7 +260,7 @@ let setup_client (module C : Conf.S) root staging_prefix =
     | DeleteRemoteManifest p -> B.delete ~key:(key p) ()
     | s -> failwith ("not a backend-damage step: " ^ render_step s)
   in
-  let run_import ~exclude entries =
+  let run_import ~force_rehash ~exclude entries =
     incr staging_seq;
     let src =
       Filename.concat root
@@ -275,7 +280,7 @@ let setup_client (module C : Conf.S) root staging_prefix =
       entries;
     let module I = Import.Make (C) in
     let+ summary =
-      I.run ~exclude ~src
+      I.run ~exclude ~force_rehash ~src
         ~on_file:(fun ~rel status ->
           match status with
             | Import.Imported size ->
@@ -354,8 +359,11 @@ let setup_client (module C : Conf.S) root staging_prefix =
         match C.backends with
           | _ :: dst :: _ -> damage dst s
           | _ -> failwith "OnSecondary: no secondary backend configured")
-    | ImportDir entries -> run_import ~exclude:[] entries
-    | ImportDirExclude { entries; exclude } -> run_import ~exclude entries
+    | ImportDir entries -> run_import ~force_rehash:false ~exclude:[] entries
+    | ImportDirForceRehash entries ->
+        run_import ~force_rehash:true ~exclude:[] entries
+    | ImportDirExclude { entries; exclude } ->
+        run_import ~force_rehash:false ~exclude entries
     | ImportDirSymlinks { files; symlinks } ->
         incr staging_seq;
         let src =

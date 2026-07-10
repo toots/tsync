@@ -90,6 +90,31 @@ let () =
           ];
       };
       {
+        name = "force-rehash republishes unchanged file";
+        steps =
+          [
+            ImportDir [("file.bin", "hello world")];
+            ImportDirForceRehash [("file.bin", "hello world")];
+          ];
+      };
+      {
+        name = "force-rehash re-uploads missing chunk";
+        steps =
+          [
+            ImportDir [("file.bin", "hello world")];
+            DeleteRemoteChunk { path = "file.bin"; index = 0 };
+            ImportDirForceRehash [("file.bin", "hello world")];
+          ];
+      };
+      {
+        name = "force-rehash picks up changed content";
+        steps =
+          [
+            ImportDir [("file.bin", "original content")];
+            ImportDirForceRehash [("file.bin", "updated content")];
+          ];
+      };
+      {
         name = "import special characters in filenames";
         steps =
           [

@@ -2,13 +2,13 @@
   write a.txt "hello tsync"
   drain
 --- tree
-  f a.txt size=11 cached=true uploaded=true etag=7ef0ef67b1849023
+  f a.txt size=11 cached=true uploaded=true etag=cba685e06d3e500f
 --- content
   a.txt = "hello tsync"
 --- backend
   chunk cba685e06d3e500f-293331628d03f29b size=11
   journal <entry-1> = put a.txt 11
-  file a.txt = manifest size=11 chunks=1 h1=7ef0ef67b1849023 h2=9a3d939d34edfa28
+  file a.txt = manifest size=11 chunks=1 h1=cba685e06d3e500f h2=293331628d03f29b
     chunk#0 cba685e06d3e500f-293331628d03f29b size=11
 
 === copy
@@ -17,8 +17,8 @@
   write b.txt "same content"
   drain
 --- tree
-  f a.txt size=12 cached=true uploaded=true etag=697517f331217cf1
-  f b.txt size=12 cached=true uploaded=true etag=697517f331217cf1
+  f a.txt size=12 cached=true uploaded=true etag=70c096db7a2b03dc
+  f b.txt size=12 cached=true uploaded=true etag=70c096db7a2b03dc
 --- content
   a.txt = "same content"
   b.txt = "same content"
@@ -26,9 +26,9 @@
   chunk 70c096db7a2b03dc-ebb5c33424e783da size=12
   journal <entry-1> = put a.txt 12
   journal <entry-2> = put b.txt 12
-  file a.txt = manifest size=12 chunks=1 h1=697517f331217cf1 h2=ea0a00310ad694af
+  file a.txt = manifest size=12 chunks=1 h1=70c096db7a2b03dc h2=ebb5c33424e783da
     chunk#0 70c096db7a2b03dc-ebb5c33424e783da size=12
-  file b.txt = manifest size=12 chunks=1 h1=697517f331217cf1 h2=ea0a00310ad694af
+  file b.txt = manifest size=12 chunks=1 h1=70c096db7a2b03dc h2=ebb5c33424e783da
     chunk#0 70c096db7a2b03dc-ebb5c33424e783da size=12
 
 === rename
@@ -37,7 +37,7 @@
   rename a.txt -> b.txt
   drain
 --- tree
-  f b.txt size=15 cached=true uploaded=true etag=0a27e26deaa484f1
+  f b.txt size=15 cached=true uploaded=true etag=7ca14c1744b7cedc
 --- content
   b.txt = "renamed content"
 --- backend
@@ -45,7 +45,7 @@
   cursor = <entry-2>
   journal <entry-1> = put a.txt 15
   journal <entry-2> = rename a.txt -> b.txt 15
-  file b.txt = manifest size=15 chunks=1 h1=0a27e26deaa484f1 h2=89b19582ea651b55
+  file b.txt = manifest size=15 chunks=1 h1=7ca14c1744b7cedc h2=339b870e9f742377
     chunk#0 7ca14c1744b7cedc-339b870e9f742377 size=15
 
 === delete
@@ -67,13 +67,13 @@
   drain
   evict a.txt
 --- tree
-  f a.txt size=7 cached=false uploaded=true etag=ae505c96885c6213
+  f a.txt size=7 cached=false uploaded=true etag=b25629393d3da6f1
 --- content
   a.txt = "evicted"
 --- backend
   chunk b25629393d3da6f1-b6252d5b8a6e08d1 size=7
   journal <entry-1> = put a.txt 7
-  file a.txt = manifest size=7 chunks=1 h1=ae505c96885c6213 h2=226fec45ffb4f047
+  file a.txt = manifest size=7 chunks=1 h1=b25629393d3da6f1 h2=b6252d5b8a6e08d1
     chunk#0 b25629393d3da6f1-b6252d5b8a6e08d1 size=7
 
 === restore
@@ -82,13 +82,13 @@
   evict a.txt
   restore a.txt
 --- tree
-  f a.txt size=10 cached=true uploaded=true etag=89027f78e857e511
+  f a.txt size=10 cached=true uploaded=true etag=6bee7502b94912b4
 --- content
   a.txt = "round trip"
 --- backend
   chunk 6bee7502b94912b4-8513b792d20a75a2 size=10
   journal <entry-1> = put a.txt 10
-  file a.txt = manifest size=10 chunks=1 h1=89027f78e857e511 h2=0143a38fc19f3042
+  file a.txt = manifest size=10 chunks=1 h1=6bee7502b94912b4 h2=8513b792d20a75a2
     chunk#0 6bee7502b94912b4-8513b792d20a75a2 size=10
 
 === mkdir
@@ -98,7 +98,7 @@
   drain
 --- tree
   d sub/
-  f sub/a.txt size=6 cached=true uploaded=true etag=872c93b4f32e2aaa
+  f sub/a.txt size=6 cached=true uploaded=true etag=fa87ee5fc199e332
 --- content
   sub/a.txt = "nested"
 --- backend
@@ -106,7 +106,7 @@
   cursor = <entry-1>
   journal <entry-1> = mkdir sub/
   journal <entry-2> = put sub/a.txt 6
-  file sub/a.txt = manifest size=6 chunks=1 h1=872c93b4f32e2aaa h2=89f7ae7aa4f590d6
+  file sub/a.txt = manifest size=6 chunks=1 h1=fa87ee5fc199e332 h2=c7156c4359a54f81
     chunk#0 fa87ee5fc199e332-c7156c4359a54f81 size=6
 
 === rmdir
@@ -128,8 +128,8 @@
   symlink link.txt -> real.txt
   drain
 --- tree
-  f link.txt size=8 cached=false uploaded=true etag=2d06800538d394c2
-  f real.txt size=11 cached=true uploaded=true etag=31af8fd254d97ac5
+  f link.txt size=8 cached=false uploaded=true etag=32be1ca2d26f5660
+  f real.txt size=11 cached=true uploaded=true etag=ea7acaa9e7fcecc5
 --- content
   link.txt -> real.txt
   real.txt = "target data"
@@ -139,7 +139,7 @@
   journal <entry-1> = put real.txt 11
   journal <entry-2> = put link.txt 8
   symlink link.txt -> real.txt
-  file real.txt = manifest size=11 chunks=1 h1=31af8fd254d97ac5 h2=118de6578f446e8a
+  file real.txt = manifest size=11 chunks=1 h1=ea7acaa9e7fcecc5 h2=7ddba95dcebaaa04
     chunk#0 ea7acaa9e7fcecc5-7ddba95dcebaaa04 size=11
 
 === symlink delete

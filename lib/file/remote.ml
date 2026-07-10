@@ -133,6 +133,28 @@ module Make (C : Conf.S) = struct
     let+ head = Primary.head_opt ~key:ck () in
     Option.is_some head
 
+  (* Hash the full content of [path] sequentially, feeding bytes into each
+     [Xxhash.state] in [states] in order. Used to compute the manifest h1/h2
+     as a true content hash rather than a hash-of-hashes. *)
+  let stream_hash ~path states =
+    let buf = Bytes.create Manifest.chunk_size in
+    let* fd = Lwt_unix.openfile path [Unix.O_RDONLY] 0 in
+    Lwt.finalize
+      (fun () ->
+        let rec loop () =
+          let* n = Lwt_unix.read fd buf 0 Manifest.chunk_size in
+          if n = 0 then Lwt.return_unit
+          else (
+            let data =
+              if n = Bytes.length buf then Bytes.unsafe_to_string buf
+              else Bytes.sub_string buf 0 n
+            in
+            List.iter (fun s -> Xxhash.update s data) states;
+            loop ())
+        in
+        loop ())
+      (fun () -> Lwt_unix.close fd)
+
   (* Read, hash and (if not already present) upload chunk [index], returning
      its manifest entry. *)
   let upload_chunk fd ~cancel ~file_size index =
@@ -203,9 +225,12 @@ module Make (C : Conf.S) = struct
         (fun () -> Lwt_unix.close fd)
     in
     if !cancel then raise Cancelled;
+    let s1 = Xxhash.create 0 and s2 = Xxhash.create 1 in
+    let* () = stream_hash ~path:src_path [s1; s2] in
     let state =
-      Manifest.make ~size:(Int64.of_int file_size)
-        ~chunk_size:Manifest.chunk_size ~chunks:entries ~mtime
+      Manifest.make ~h1:(Xxhash.digest_hex s1) ~h2:(Xxhash.digest_hex s2)
+        ~size:(Int64.of_int file_size) ~chunk_size:Manifest.chunk_size
+        ~chunks:entries ~mtime
     in
     let* () =
       if C.versioning then
@@ -333,9 +358,12 @@ module Make (C : Conf.S) = struct
         (fun () -> Lwt_unix.close fd)
     in
     let entries = List.map fst results in
+    let s1 = Xxhash.create 0 and s2 = Xxhash.create 1 in
+    let* () = stream_hash ~path:src_path [s1; s2] in
     let state =
-      Manifest.make ~size:(Int64.of_int file_size)
-        ~chunk_size:Manifest.chunk_size ~chunks:entries ~mtime
+      Manifest.make ~h1:(Xxhash.digest_hex s1) ~h2:(Xxhash.digest_hex s2)
+        ~size:(Int64.of_int file_size) ~chunk_size:Manifest.chunk_size
+        ~chunks:entries ~mtime
     in
     let expected = match state with `Clean m -> m | `Dirty -> assert false in
     let+ manifest_repaired = recheck_manifest ~key expected in
