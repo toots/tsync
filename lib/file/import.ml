@@ -34,7 +34,14 @@ module Make (C : Conf.S) = struct
     let seen = Hashtbl.create 16 in
     let rec walk rel acc =
       let dir = if rel = "" then src else Filename.concat src rel in
-      let* names = Fs_util.readdir_list dir in
+      let* names =
+        Lwt.catch
+          (fun () -> Fs_util.readdir_list dir)
+          (fun exn ->
+            Log.warn "import: cannot read directory %s: %s" dir
+              (Printexc.to_string exn);
+            Lwt.return [])
+      in
       Lwt_list.fold_left_s
         (fun (dirs, files, symlinks) name ->
           let r = if rel = "" then name else rel ^ "/" ^ name in
@@ -126,8 +133,11 @@ module Make (C : Conf.S) = struct
      - [`Skip]   — skip and count, no upload *)
   let run ?(exclude = []) ?(force_rehash = false) ~src ~on_file () =
     let src =
-      if Filename.is_relative src then Filename.concat (Sys.getcwd ()) src
-      else src
+      let p =
+        if Filename.is_relative src then Filename.concat (Sys.getcwd ()) src
+        else src
+      in
+      try Unix.realpath p with _ -> p
     in
     let* dirs, files, symlinks = walk_source ~exclude src in
     let* () =
