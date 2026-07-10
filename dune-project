@@ -22,8 +22,7 @@
   lwt
   lwt_ppx
   mem_usage
-  path_glob
-  tls
+tls
   cmdliner)
  (depopts
    syslog

@@ -65,7 +65,7 @@ tsync sync            # apply changes made from other machines
 tsync recheck         # verify the remote against the local cache, repair what's possible
 tsync resync-remote   # copy missing/damaged objects from one backend to the others
 tsync import <dir>    # seed the domain from an existing folder (uploads, no data copied)
-tsync import <dir> --exclude "*.tmp" --exclude node_modules  # skip files/directories by glob
+tsync import <dir> --exclude "*.tmp" --exclude node_modules  # skip by glob (see below)
 tsync import <dir> --force-rehash  # re-hash and re-upload every file (for manifest migration)
 tsync export <dir>    # write every file of the domain to a plain folder
 tsync status          # show daemon state
@@ -74,6 +74,24 @@ tsync stop            # unmount
 ```
 
 Pass `--verbose` (or `-v`) to any command to print detailed progress as it runs.
+
+### Glob patterns for `--exclude`
+
+`--exclude` accepts shell-style glob patterns matched against each entry's basename **and** its full relative path, so a bare name like `node_modules` prunes that directory anywhere in the tree.
+
+| Pattern | Matches |
+|---------|---------|
+| `*`     | Any sequence of characters, **not** crossing a directory separator |
+| `**`    | Any sequence of characters, **including** directory separators |
+| `?`     | Any single character, **not** a directory separator |
+| anything else | Itself literally — `+`, `.`, `(`, `)`, spaces, … |
+
+```bash
+tsync import . --exclude 'lost+found'   # directory named literally lost+found
+tsync import . --exclude '*.tmp'        # any .tmp file in any directory
+tsync import . --exclude '**/.git'      # .git directories at any depth
+tsync import . --exclude 'node_modules' # any directory named node_modules
+```
 
 ### Versioning
 
