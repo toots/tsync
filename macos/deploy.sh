@@ -22,12 +22,15 @@ launchctl unload "$PLIST" 2>/dev/null || true
 pkill -f TsyncFileProvider 2>/dev/null || true
 pkill -f TsyncApp 2>/dev/null || true
 sleep 2
+pluginkit -e ignore -i com.toots.tsync.fileprovider 2>/dev/null || true
+pluginkit -r -i com.toots.tsync.fileprovider 2>/dev/null || true
 rm -rf /Applications/TsyncApp.app
 cp -R "$BUILT_APP" /Applications/
 
 echo "Starting..."
 /usr/libexec/PlistBuddy -c "Set :ProgramArguments:0 /Applications/TsyncApp.app/Contents/MacOS/TsyncApp" "$PLIST"
 pluginkit -a /Applications/TsyncApp.app/Contents/PlugIns/TsyncFileProvider.appex
+pluginkit -e use -i com.toots.tsync.fileprovider
 launchctl load -w "$PLIST"
 
 echo "Done."

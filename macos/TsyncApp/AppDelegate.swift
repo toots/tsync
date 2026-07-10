@@ -22,17 +22,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func registerDomains() async {
-        let configURL = FileManager.default
-            .containerURL(forSecurityApplicationGroupIdentifier: "group.com.toots.tsync")?
-            .appendingPathComponent("config.json") ?? URL(fileURLWithPath: "")
-
         let domainNames: [String]
-        if let data = try? Data(contentsOf: configURL),
-           let config = try? JSONDecoder().decode(Config.self, from: data) {
+        if let config = try? Config.load() {
             domainNames = config.domains.map(\.name)
         } else {
-            log.warning("config not found, using default domain")
-            domainNames = ["Music Production"]
+            log.error("config not found or invalid, no domains will be registered")
+            domainNames = []
         }
 
         let existingDomains: [NSFileProviderDomain]
@@ -49,7 +44,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         for domain in existingDomains where !configuredIdentifiers.contains(domain.identifier.rawValue) {
             do {
-                try await NSFileProviderManager.remove(domain)
+                try await NSFileProviderManager.remove(domain, mode: .removeAll)
                 log.info("removed stale domain '\(domain.identifier.rawValue, privacy: .public)'")
             } catch {
                 log.error("remove domain '\(domain.identifier.rawValue, privacy: .public)' failed: \(error, privacy: .public)")

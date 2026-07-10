@@ -6,7 +6,6 @@ public struct DomainConfig: Codable, Sendable {
 }
 
 public struct Config: Codable, Sendable {
-    public let versioning: Bool
     public let domains: [DomainConfig]
 
     public static let groupID = "group.com.toots.tsync"

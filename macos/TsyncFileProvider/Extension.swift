@@ -90,7 +90,7 @@ final class TsyncExtension: NSObject, NSFileProviderReplicatedExtension, @unchec
 
     required init(domain: NSFileProviderDomain) {
         self.domain = domain
-        self.config = (try? Config.load()) ?? Config(versioning: false, domains: [])
+        self.config = (try? Config.load()) ?? Config(domains: [])
         super.init()
         notifyListener = NotifyListener(domain: domain)
         log.info("init: domain=\(domain.identifier.rawValue, privacy: .public)")
