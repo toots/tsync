@@ -198,13 +198,60 @@ let make ?endpoint ?unsigned_payload ~bucket ~region ~access_key_id
     let list_directory ~prefix () = list_directory t ~prefix ()
   end)
 
+let spec =
+  Backend.
+    [
+      {
+        name = "bucket";
+        label = "S3 bucket";
+        typ = `String;
+        default = None;
+        secret = false;
+      };
+      {
+        name = "region";
+        label = "AWS region";
+        typ = `String;
+        default = Some "us-east-1";
+        secret = false;
+      };
+      {
+        name = "endpoint";
+        label = "Custom endpoint (blank for AWS)";
+        typ = `String;
+        default = Some "";
+        secret = false;
+      };
+      {
+        name = "accessKeyId";
+        label = "AWS Access Key ID";
+        typ = `String;
+        default = None;
+        secret = false;
+      };
+      {
+        name = "secretAccessKey";
+        label = "AWS Secret Access Key";
+        typ = `String;
+        default = None;
+        secret = true;
+      };
+      {
+        name = "unsignedPayload";
+        label = "Skip per-chunk payload signing (lower CPU, safe over TLS)?";
+        typ = `Bool;
+        default = Some "false";
+        secret = false;
+      };
+    ]
+
 let () =
   let req get key =
     match get key with
       | Some v -> v
       | None -> failwith ("s3 backend: missing field: " ^ key)
   in
-  Backend.register "s3" (fun get ->
+  Backend.register ~spec "s3" (fun get ->
       let unsigned_payload =
         match get "unsignedPayload" with
           | Some ("true" | "1") -> Some true

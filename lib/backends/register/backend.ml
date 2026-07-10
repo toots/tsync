@@ -17,9 +17,27 @@ module type S = sig
 end
 
 type factory = (string -> string option) -> (module S)
+type field_type = [ `String | `Bool ]
 
-let registry : (string, factory) Hashtbl.t = Hashtbl.create 4
-let register name (f : factory) = Hashtbl.replace registry name f
+type field_spec = {
+  name : string;
+  label : string;
+  typ : field_type;
+  default : string option;
+      (** [None] = required; [Some ""] = optional, omit from JSON if blank;
+          [Some s] = optional with default [s] *)
+  secret : bool;
+}
+
+type entry = { factory : factory; spec : field_spec list }
+
+let registry : (string, entry) Hashtbl.t = Hashtbl.create 4
+
+let register ~spec name (f : factory) =
+  Hashtbl.replace registry name { factory = f; spec }
+
+let spec_for name =
+  Option.map (fun e -> e.spec) (Hashtbl.find_opt registry name)
 
 let with_key_encoding (module B : S) : (module S) =
   (module struct
@@ -56,5 +74,5 @@ let with_key_encoding (module B : S) : (module S) =
 
 let make ~backend_type ~get_field =
   match Hashtbl.find_opt registry backend_type with
-    | Some f -> with_key_encoding (f get_field)
+    | Some { factory; _ } -> with_key_encoding (factory get_field)
     | None -> failwith ("unknown backend type: " ^ backend_type)

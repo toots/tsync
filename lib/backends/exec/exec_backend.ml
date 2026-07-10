@@ -241,15 +241,53 @@ let parse_command raw =
     | _ -> invalid ()
     | exception _ -> invalid ()
 
+let exec_spec =
+  Backend.
+    [
+      {
+        name = "command";
+        label = "Command (JSON array)";
+        typ = `String;
+        default = None;
+        secret = false;
+      };
+      {
+        name = "path";
+        label = "Storage root path";
+        typ = `String;
+        default = None;
+        secret = false;
+      };
+    ]
+
+let ssh_spec =
+  Backend.
+    [
+      {
+        name = "host";
+        label = "SSH host (user@host)";
+        typ = `String;
+        default = None;
+        secret = false;
+      };
+      {
+        name = "path";
+        label = "Remote path";
+        typ = `String;
+        default = None;
+        secret = false;
+      };
+    ]
+
 let () =
-  Backend.register "exec" (fun get ->
+  Backend.register ~spec:exec_spec "exec" (fun get ->
       make
         ~command:(parse_command (req get ~backend:"exec" "command"))
         ~root:(req get ~backend:"exec" "path"));
   (* "ssh" is sugar over "exec": a fixed command with connection multiplexing
      baked in. Per-host tweaks (port, key, ...) belong in ~/.ssh/config; use
      the "exec" type for anything beyond that. *)
-  Backend.register "ssh" (fun get ->
+  Backend.register ~spec:ssh_spec "ssh" (fun get ->
       let command =
         [
           "ssh";

@@ -137,8 +137,20 @@ let make ~root : (module Backend.S) =
       (List.rev !files, List.sort String.compare subdirs)
   end)
 
+let spec =
+  Backend.
+    [
+      {
+        name = "path";
+        label = "Local path";
+        typ = `String;
+        default = None;
+        secret = false;
+      };
+    ]
+
 let () =
-  Backend.register "local" (fun get ->
+  Backend.register ~spec "local" (fun get ->
       let root =
         match get "path" with
           | Some p -> p

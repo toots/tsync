@@ -1128,73 +1128,49 @@ let configure_cmd =
         end
       in
       let backend_type = ask () in
+      if backend_type = "s3" then has_s3 := true;
       let name = prompt "  Backend name" (Some backend_type) in
-      let name_field = [("name", `String name)] in
-      match backend_type with
-        | "ssh" ->
-            let host = prompt_required "  SSH host (user@host)" in
-            let path = prompt_required "  Remote path" in
-            let main =
-              prompt_bool ~default:false "  Primary backend (used for reads)?"
+      let spec = Option.value ~default:[] (Backend.spec_for backend_type) in
+      let fields =
+        List.filter_map
+          (fun (s : Backend.field_spec) ->
+            let value =
+              match s.typ with
+                | `Bool ->
+                    string_of_bool
+                      (prompt_bool ~default:(s.default = Some "true")
+                         ("  " ^ s.label))
+                | `String when s.secret ->
+                    let rec ask () =
+                      let v = read_password ("  " ^ s.label) in
+                      if v <> "" then v
+                      else begin
+                        Printf.printf "  (required — cannot be blank)\n%!";
+                        ask ()
+                      end
+                    in
+                    ask ()
+                | `String -> (
+                    match s.default with
+                      | None -> prompt_required ("  " ^ s.label)
+                      | Some d ->
+                          prompt ("  " ^ s.label)
+                            (if d = "" then None else Some d))
             in
-            `Assoc
-              (name_field
-              @ [
-                  ("type", `String "ssh");
-                  ("host", `String host);
-                  ("path", `String path);
-                  ("main", `Bool main);
-                ])
-        | "local" ->
-            let path = prompt_required "  Local path" in
-            let main =
-              prompt_bool ~default:true "  Primary backend (used for reads)?"
-            in
-            `Assoc
-              (name_field
-              @ [
-                  ("type", `String "local");
-                  ("path", `String path);
-                  ("main", `Bool main);
-                ])
-        | _ ->
-            has_s3 := true;
-            let bucket = prompt_required "  S3 bucket" in
-            let region = prompt "  AWS region" (Some "us-east-1") in
-            let endpoint = prompt "  Custom endpoint (blank for AWS)" None in
-            let access_key_id = prompt_required "  AWS Access Key ID" in
-            let secret_access_key =
-              let rec ask () =
-                let v = read_password "  AWS Secret Access Key" in
-                if v <> "" then v
-                else begin
-                  Printf.printf "  (required — cannot be blank)\n%!";
-                  ask ()
-                end
-              in
-              ask ()
-            in
-            let unsigned_payload =
-              prompt_bool ~default:false
-                "  Skip per-chunk payload signing (lower CPU, safe over TLS)?"
-            in
-            let main =
-              prompt_bool ~default:false "  Primary backend (used for reads)?"
-            in
-            `Assoc
-              (name_field
-              @ [
-                  ("type", `String "s3");
-                  ("bucket", `String bucket);
-                  ("region", `String region);
-                ]
-              @ (if endpoint = "" then [] else [("endpoint", `String endpoint)])
-              @ [
-                  ("accessKeyId", `String access_key_id);
-                  ("secretAccessKey", `String secret_access_key);
-                  ("unsignedPayload", `Bool unsigned_payload);
-                  ("main", `Bool main);
-                ])
+            match (s.typ, s.default, value) with
+              | `String, Some "", "" -> None
+              | `Bool, _, v -> Some (s.name, `Bool (v = "true"))
+              | `String, _, v -> Some (s.name, `String v))
+          spec
+      in
+      let main_default = backend_type = "local" in
+      let main =
+        prompt_bool ~default:main_default "  Primary backend (used for reads)?"
+      in
+      `Assoc
+        ([("name", `String name); ("type", `String backend_type)]
+        @ fields
+        @ [("main", `Bool main)])
     in
     let prompt_backends () =
       let backends = ref [] in
@@ -1298,6 +1274,54 @@ let configure_cmd =
     (Cmd.info "configure" ~doc:"Interactive configuration setup")
     Term.(const run $ const ())
 
+(* ── tsync print-config ──────────────────────────────────────────────────── *)
+
+let print_conf_cmd =
+  let mask (b : Conf_parsing.backend_config) k v =
+    match Backend.spec_for b.backend_type with
+      | None -> v
+      | Some specs -> (
+          match
+            List.find_opt (fun (s : Backend.field_spec) -> s.name = k) specs
+          with
+            | Some { secret = true; _ } -> "***"
+            | _ -> v)
+  in
+  let symlink_str = function
+    | `Keep -> "keep"
+    | `Follow -> "follow"
+    | `Skip -> "skip"
+  in
+  let run () =
+    let cfg = Conf_parsing.load runtime_paths.Runtime.config_path in
+    Printf.printf "name:          %s\n" cfg.Conf_parsing.name;
+    Printf.printf "maxUploads:    %d\n" cfg.Conf_parsing.max_uploads;
+    Printf.printf "maxDownloads:  %d\n" cfg.Conf_parsing.max_downloads;
+    (match cfg.Conf_parsing.tls with
+      | Some t -> Printf.printf "tls:           %s\n" t
+      | None -> ());
+    List.iter
+      (fun (d : Conf_parsing.domain) ->
+        Printf.printf "\ndomain: %s\n" d.name;
+        Printf.printf "  prefix:     %s\n" d.prefix;
+        Printf.printf "  versioning: %b\n" d.versioning;
+        Printf.printf "  symlinks:   %s\n" (symlink_str d.symlink_policy);
+        List.iter
+          (fun (b : Conf_parsing.backend_config) ->
+            Printf.printf "  backend: %s (%s)%s\n" b.name b.backend_type
+              (if b.main then " [primary]" else "");
+            List.iter
+              (fun (k, v) ->
+                Printf.printf "    %-22s %s\n" (k ^ ":") (mask b k v))
+              b.fields)
+          d.backends)
+      cfg.Conf_parsing.domains
+  in
+  Cmd.v
+    (Cmd.info "print-config"
+       ~doc:"Print the current configuration (sensitive values hidden)")
+    Term.(const run $ const ())
+
 (* ── tsync paths ─────────────────────────────────────────────────────────── *)
 
 let paths_cmd =
@@ -1335,6 +1359,7 @@ let () =
       [
         build_config_cmd;
         configure_cmd;
+        print_conf_cmd;
         paths_cmd;
         start_cmd;
         stop_cmd;
