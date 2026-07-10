@@ -188,7 +188,7 @@ Manifest format:
 }
 ```
 
-`h1`/`h2` at the manifest level are derived from the full set of chunk hashes (not the file content directly), providing a stable file identity for deduplication.
+`h1`/`h2` at the manifest level are a **content hash of the whole file**: after all chunks are uploaded, `Remote.upload` opens the file again and reads it sequentially, feeding each block through two streaming XXH3-64 states (seeds 0 and 1). This is a second, sequential read after the parallel chunk pass — cheap because the file is in the OS page cache — and gives a stronger guarantee than a hash-of-hashes: if two different data blocks happen to produce the same chunk `(h1, h2)` pair (a collision), the manifest-level hash still differs. For a single-chunk file the manifest hash equals the chunk hash, since the content hash of the whole file is the hash of that one chunk's bytes.
 
 **Symlink manifest** — when `symlinks: "keep"` is configured, a symlink is stored as a chunkless manifest with a `"symlink"` field holding the link target. No chunk objects are written; `size` is the byte length of the target string (POSIX convention). The manifest is the single source of truth: FUSE `getattr` returns `S_LNK`, `readlink` returns the target, `tsync export` recreates the link, and FileProvider exposes it as a symbolic link item (`symlinkTargetPath` on the item; the enumeration and stat IPC responses carry a `symlinkTarget` field).
 
@@ -207,7 +207,7 @@ Symlinks enter the store two ways: `tsync import` on a tree containing links, an
 }
 ```
 
-(`h1`/`h2` are present in the stored JSON — they are fixed constants derived from hashing an empty chunk list — but carry no semantic meaning for symlinks.)
+(`h1`/`h2` in the stored JSON are the XXH3-64 hashes (seeds 0 and 1) of the target string — consistent with the content-hash semantics for regular files, where the whole-file hash reduces to the chunk hash for a single-chunk file.)
 
 ### Change journal
 
@@ -266,7 +266,7 @@ A **full resync** invokes the daemon's `full_resync` IPC action, then advances `
 
 `Recheck.Make(C).run` walks every `.manifest` sidecar in the local cache (sorted) and verifies the remote state file by file, repairing what it can. Files with a `Dirty` sidecar (upload pending) are skipped. Two paths, both in `Remote`:
 
-- **Cached file** (`recheck_cached`): the local data is re-hashed chunk by chunk (the local file is the source of truth, so a file modified behind the daemon's back is detected). Each chunk is verified on the primary backend with a HEAD — existence *and* size, since chunk keys are content-addressed a size mismatch means a corrupt object — and re-uploaded (overwritten) from local data when wrong. The remote manifest is then compared on `h1`/`h2`/`size` and republished when missing, dirty or different. When the re-hash disagrees with the sidecar, the sidecar is rewritten (`local_stale`).
+- **Cached file** (`recheck_cached`): the local data is re-hashed chunk by chunk (the local file is the source of truth, so a file modified behind the daemon's back is detected). Each chunk is verified on the primary backend with a HEAD — existence *and* size, since chunk keys are content-addressed a size mismatch means a corrupt object — and re-uploaded (overwritten) from local data when wrong. After chunk verification, a second sequential pass over the local file computes the manifest-level content hash (`h1`/`h2`). The remote manifest is then compared on `h1`/`h2`/`size` and republished when missing, dirty or different. When the re-hash disagrees with the sidecar, the sidecar is rewritten (`local_stale`). Manifests written by older versions of tsync (whose `h1`/`h2` were hash-of-hashes rather than content hashes) are detected this way and automatically migrated: the first `recheck` run on a cached file replaces the old values with the correct content hash in both the sidecar and the remote manifest.
 - **Evicted file** (`recheck_evicted`): chunks are HEAD+size-verified from the sidecar manifest; without local data a bad chunk is **unrepairable** and reported. A missing/bad remote manifest is republished from the sidecar, but only when every chunk checks out — never over missing chunks.
 
 Chunk checks run concurrently (bounded by `maxUploads`, reusing the upload buffer pool for the cached path); files are sequential. Repairs write to every backend (`put_all`), verification reads the primary only — the same split uploads use. No journal entries are written: content and keys are unchanged, other clients need no notification. The CLI prints one line per file (`ok` / `FIXED …` / `BAD …` / `SKIP …`) plus a summary, and exits non-zero when anything was unrepairable.
@@ -279,7 +279,7 @@ It is **additive only**: objects deleted on the source are not deleted on the de
 
 ### `tsync import` / `tsync export` — folder in, folder out
 
-`Import.Make(C).run ~src` seeds a domain from an existing folder. For every file under `src` (recursively, sorted): upload it with the normal chunked path (`Remote.upload` — hashed, deduplicated, manifest published to all backends), then write the manifest sidecar in the local cache. No local data file is created — imported files read as not cached and are fetched from the backend on demand, which avoids assuming the local filesystem supports symlinks (required for some FS-backed backends). Directories are created in the manifest tree and as backend markers. A key already in the domain (local sidecar or remote manifest) is never overwritten — it is reported as skipped. All resulting ops (`mkdir` + `put`) are published as a **single journal entry**, so other clients pick the import up incrementally; batching also avoids the ms-timestamped entry-key collision that per-file entries would risk. The optional `~exclude` parameter takes a list of shell glob patterns (via `tsync_glob`, backed by `path_glob`); an entry is excluded if any pattern matches either its relative path or its basename, so `*.tmp` prunes any such file anywhere in the tree and `node_modules` prunes any directory of that name along with its contents.
+`Import.Make(C).run ~src` seeds a domain from an existing folder. For every file under `src` (recursively, sorted): upload it with the normal chunked path (`Remote.upload` — hashed, deduplicated, manifest published to all backends), then write the manifest sidecar in the local cache. No local data file is created — imported files read as not cached and are fetched from the backend on demand, which avoids assuming the local filesystem supports symlinks (required for some FS-backed backends). Directories are created in the manifest tree and as backend markers. A key already in the domain (local sidecar or remote manifest) is never overwritten — it is reported as skipped. All resulting ops (`mkdir` + `put`) are published as a **single journal entry**, so other clients pick the import up incrementally; batching also avoids the ms-timestamped entry-key collision that per-file entries would risk. The optional `~exclude` parameter takes a list of shell glob patterns (via `tsync_glob`, backed by `path_glob`); an entry is excluded if any pattern matches either its relative path or its basename, so `*.tmp` prunes any such file anywhere in the tree and `node_modules` prunes any directory of that name along with its contents. The optional `~force_rehash:true` flag (exposed as `--force-rehash` on the CLI) bypasses the exists check: every file is re-hashed and goes through `Remote.upload` regardless of whether a manifest is already present. Since chunks are content-addressed, only missing or changed chunks are actually uploaded; the manifest is always recomputed (new content hash) and republished. This is the recommended way to migrate a domain seeded with an older version of tsync to content-hash manifests when a full `recheck` is not possible (e.g. imported files that have since been evicted).
 
 `Export.Make(C).run ~dst` writes every file of the domain to a plain folder, reading manifests directly (no daemon needed). The file set is the union of the backend listing and the local sidecar tree (the latter adds local-only files whose upload is still pending). Per file: if the local cache holds the data (including dirty, not-yet-uploaded content) it is copied from there; otherwise the file is recomposed from remote chunks via `Remote.download_chunks` **straight to the destination — the local cache is deliberately not populated**. mtimes are preserved (cache stat, or the manifest's mtime). A dirty sidecar with no local data, or a key that vanished remotely, is reported as `MISSING` and the CLI exits non-zero.
 
@@ -311,7 +311,7 @@ All library modules are parameterised by a `Conf.S` module (a first-class module
 | `conf/conf.mli` | `module type S` — the functor parameter type used by all library modules |
 | `backends/` | Pluggable storage backends (S3 via `aws-s3` + Lwt, local filesystem); self-registration pattern |
 | `tls/tls_conf.ml` | Runtime selection of conduit's TLS backend (native / OpenSSL) for S3 |
-| `xxhash/xxhash.ml` | xxHash3-64 C bindings (dual-seed for chunk fingerprinting) |
+| `xxhash/xxhash.ml` | xxHash3-64 C bindings: one-shot `hash_hex` (dual-seed for chunk keys) and a streaming `state` API (`create`/`update`/`digest_hex`) for the manifest content hash |
 | `local_io/local_io.ml` | Local file read/write: path-based (open/close per call) for occasional callers, and positioned `pread`/`pwrite` for callers holding their own long-lived fd (see FUSE's `Fd_cache`) |
 | `local_io/fs_util.ml` | Shared Lwt filesystem helpers (`mkdir_p`, `rm_rf`, `readdir_list`, …) |
 | `metrics/metrics.ml` | Transfer and hashing counters (totals + rolling rate) for `tsync stats` |
@@ -463,6 +463,7 @@ A scenario is a `name` and a list of `step`s. Every scenario runs with two local
 | `Recheck` | Run `Recheck.run` over the whole domain and print per-file status |
 | `ResyncRemote` | Copy missing/damaged objects from primary to other backends |
 | `ImportDir` | Seed the domain from a temp folder (upload, symlink into cache, batch journal entry) |
+| `ImportDirForceRehash` | Like `ImportDir` but with `--force-rehash`: existing keys are not skipped |
 | `ImportDirExclude` | Like `ImportDir` but with `--exclude` glob patterns |
 | `ExportDir` | Write the whole domain to a temp folder |
 

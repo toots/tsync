@@ -170,6 +170,65 @@
   file sub/c.txt = manifest size=7 chunks=1 h1=cfcb9dbba6d68599 h2=4ef4c57cebfa8616
     chunk#0 cfcb9dbba6d68599-4ef4c57cebfa8616 size=7
 
+=== force-rehash republishes unchanged file
+  import-dir file.bin="hello world"
+  import-dir --force-rehash file.bin="hello world"
+  imported file.bin (11 bytes)
+  import: 1 imported, 0 skipped, 0 symlinks skipped
+  imported file.bin (11 bytes)
+  import: 1 imported, 0 skipped, 0 symlinks skipped
+--- tree
+  f file.bin size=11 cached=false uploaded=true etag=d447b1ea40e6988b
+--- content
+  file.bin = "hello world"
+--- backend
+  chunk d447b1ea40e6988b-b7aeb52a10fdaf2d size=11
+  cursor = <entry-2>
+  journal <entry-1> = put file.bin 11
+  journal <entry-2> = put file.bin 11
+  file file.bin = manifest size=11 chunks=1 h1=d447b1ea40e6988b h2=b7aeb52a10fdaf2d
+    chunk#0 d447b1ea40e6988b-b7aeb52a10fdaf2d size=11
+
+=== force-rehash re-uploads missing chunk
+  import-dir file.bin="hello world"
+  delete-remote-chunk file.bin #0
+  import-dir --force-rehash file.bin="hello world"
+  imported file.bin (11 bytes)
+  import: 1 imported, 0 skipped, 0 symlinks skipped
+  imported file.bin (11 bytes)
+  import: 1 imported, 0 skipped, 0 symlinks skipped
+--- tree
+  f file.bin size=11 cached=false uploaded=true etag=d447b1ea40e6988b
+--- content
+  file.bin = "hello world"
+--- backend
+  chunk d447b1ea40e6988b-b7aeb52a10fdaf2d size=11
+  cursor = <entry-2>
+  journal <entry-1> = put file.bin 11
+  journal <entry-2> = put file.bin 11
+  file file.bin = manifest size=11 chunks=1 h1=d447b1ea40e6988b h2=b7aeb52a10fdaf2d
+    chunk#0 d447b1ea40e6988b-b7aeb52a10fdaf2d size=11
+
+=== force-rehash picks up changed content
+  import-dir file.bin="original content"
+  import-dir --force-rehash file.bin="updated content"
+  imported file.bin (16 bytes)
+  import: 1 imported, 0 skipped, 0 symlinks skipped
+  imported file.bin (15 bytes)
+  import: 1 imported, 0 skipped, 0 symlinks skipped
+--- tree
+  f file.bin size=15 cached=false uploaded=true etag=4e052c0e120dbf96
+--- content
+  file.bin = "updated content"
+--- backend
+  chunk 009220d80d369d0e-726fb76d0508301b size=16
+  chunk 4e052c0e120dbf96-8b44a8391c3d2611 size=15
+  cursor = <entry-2>
+  journal <entry-1> = put file.bin 16
+  journal <entry-2> = put file.bin 15
+  file file.bin = manifest size=15 chunks=1 h1=4e052c0e120dbf96 h2=8b44a8391c3d2611
+    chunk#0 4e052c0e120dbf96-8b44a8391c3d2611 size=15
+
 === import special characters in filenames
   import-dir colon:file.txt="colons" dir:with:colons/nested.txt="nested"
   drain

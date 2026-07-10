@@ -961,7 +961,16 @@ let import_cmd =
              matched against each entry's relative path and its basename). May \
              be repeated.")
   in
-  let run domain src exclude v =
+  let force_rehash_arg =
+    Arg.(
+      value & flag
+      & info ["force-rehash"]
+          ~doc:
+            "Re-hash and re-upload every file even if already present in the \
+             domain. Only changed or missing chunks are actually uploaded; the \
+             manifest is always recomputed and republished.")
+  in
+  let run domain src exclude force_rehash v =
     verbose := v;
     Lwt_main.run
       (let open Lwt.Syntax in
@@ -970,7 +979,7 @@ let import_cmd =
        let module I = Import.Make (C) in
        vprintf "importing from %s into domain %s\n" src C.domain_name;
        let+ summary =
-         I.run ~exclude ~src
+         I.run ~exclude ~force_rehash ~src
            ~on_file:(fun ~rel status ->
              match status with
                | Import.Imported size ->
@@ -998,7 +1007,9 @@ let import_cmd =
           and create manifest sidecars in the local cache. Data is not copied \
           — the cache links to the source files. Keys already in the domain \
           are skipped.")
-    Term.(const run $ domain_arg $ src_arg $ exclude_arg $ verbose_arg)
+    Term.(
+      const run $ domain_arg $ src_arg $ exclude_arg $ force_rehash_arg
+      $ verbose_arg)
 
 (* ── tsync export ────────────────────────────────────────────────────────── *)
 
