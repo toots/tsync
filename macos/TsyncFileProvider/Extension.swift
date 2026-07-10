@@ -1,6 +1,7 @@
 import FileProvider
 import Foundation
 import OSLog
+import Darwin
 
 private let log = Logger(subsystem: "com.toots.tsync", category: "Extension")
 
@@ -154,7 +155,7 @@ final class TsyncExtension: NSObject, NSFileProviderReplicatedExtension, @unchec
     ) -> Progress {
         let progress = Progress(totalUnitCount: 100)
         if isReadOnly {
-            completionHandler(nil, [], false, NSError(domain: NSFileProviderErrorDomain, code: NSFileProviderError.notSupported.rawValue))
+            completionHandler(nil, [], false, NSError(domain: NSPOSIXErrorDomain, code: Int(EROFS)))
             return progress
         }
         Task {
@@ -207,7 +208,7 @@ final class TsyncExtension: NSObject, NSFileProviderReplicatedExtension, @unchec
     ) -> Progress {
         let progress = Progress(totalUnitCount: 100)
         if isReadOnly {
-            completionHandler(nil, [], false, NSError(domain: NSFileProviderErrorDomain, code: NSFileProviderError.notSupported.rawValue))
+            completionHandler(nil, [], false, NSError(domain: NSPOSIXErrorDomain, code: Int(EROFS)))
             return progress
         }
         Task {
@@ -261,7 +262,7 @@ final class TsyncExtension: NSObject, NSFileProviderReplicatedExtension, @unchec
     ) -> Progress {
         let progress = Progress(totalUnitCount: 1)
         if isReadOnly {
-            completionHandler(NSError(domain: NSFileProviderErrorDomain, code: NSFileProviderError.notSupported.rawValue))
+            completionHandler(NSError(domain: NSPOSIXErrorDomain, code: Int(EROFS)))
             return progress
         }
         Task {
