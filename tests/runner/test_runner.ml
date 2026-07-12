@@ -146,7 +146,11 @@ and normalize_kv (k, v) =
                (fun a b -> compare (ipc_entry_key a) (ipc_entry_key b))
                l) )
     | "dirs", `List l ->
-        (k, `List (List.sort compare (List.map normalize_ipc l)))
+        ( k,
+          `List
+            (List.stable_sort
+               (fun a b -> compare (ipc_entry_key a) (ipc_entry_key b))
+               (List.map normalize_ipc l)) )
     | k, v -> (k, normalize_ipc v)
 
 let print_ipc label obj =
@@ -470,7 +474,14 @@ let setup_client (module C : Conf.S) root staging_prefix =
       let dirs =
         match List.assoc_opt "dirs" obj with
           | Some (`List l) ->
-              List.filter_map (function `String s -> Some s | _ -> None) l
+              List.filter_map
+                (function
+                  | `Assoc f -> (
+                      match List.assoc_opt "key" f with
+                        | Some (`String s) -> Some s
+                        | _ -> None)
+                  | _ -> None)
+                l
           | _ -> []
       in
       let entries =
@@ -550,7 +561,14 @@ let setup_client (module C : Conf.S) root staging_prefix =
       let dirs =
         match List.assoc_opt "dirs" obj with
           | Some (`List l) ->
-              List.filter_map (function `String s -> Some s | _ -> None) l
+              List.filter_map
+                (function
+                  | `Assoc f -> (
+                      match List.assoc_opt "key" f with
+                        | Some (`String s) -> Some s
+                        | _ -> None)
+                  | _ -> None)
+                l
           | _ -> []
       in
       Lwt_list.iter_s walk (List.sort compare dirs)
