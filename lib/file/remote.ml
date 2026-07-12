@@ -31,7 +31,7 @@ let read_chunk_into fd offset len buf =
     if pos >= len then Lwt.return_unit
     else
       let* n =
-        Lwt_unix.pread fd buf ~file_offset:(offset + pos) pos (len - pos)
+        Lwt_unix_retry.pread fd buf ~file_offset:(offset + pos) pos (len - pos)
       in
       if n = 0 then raise Cancelled else loop (pos + n)
   in
@@ -138,11 +138,11 @@ module Make (C : Conf.S) = struct
      as a true content hash rather than a hash-of-hashes. *)
   let stream_hash ~path states =
     let buf = Bytes.create Manifest.chunk_size in
-    let* fd = Lwt_unix.openfile path [Unix.O_RDONLY] 0 in
+    let* fd = Lwt_unix_retry.openfile path [Unix.O_RDONLY] 0 in
     Lwt.finalize
       (fun () ->
         let rec loop () =
-          let* n = Lwt_unix.read fd buf 0 Manifest.chunk_size in
+          let* n = Lwt_unix_retry.read fd buf 0 Manifest.chunk_size in
           if n = 0 then Lwt.return_unit
           else (
             let data =
@@ -153,7 +153,7 @@ module Make (C : Conf.S) = struct
             loop ())
         in
         loop ())
-      (fun () -> Lwt_unix.close fd)
+      (fun () -> Lwt_unix_retry.close fd)
 
   (* Read, hash and (if not already present) upload chunk [index], returning
      its manifest entry. *)
@@ -203,14 +203,14 @@ module Make (C : Conf.S) = struct
       (fun () -> Buffer_pool.release chunk_buffers slot)
 
   let upload ~key ~src_path ~mtime ?(cancel = ref false) () =
-    let* st = Lwt_unix.stat src_path in
+    let* st = Lwt_unix_retry.stat src_path in
     let file_size = st.Unix.st_size in
     Log.debug "upload %s: file_size=%d" key file_size;
     let num_chunks =
       if file_size = 0 then 1
       else (file_size + Manifest.chunk_size - 1) / Manifest.chunk_size
     in
-    let* fd = Lwt_unix.openfile src_path [Unix.O_RDONLY] 0 in
+    let* fd = Lwt_unix_retry.openfile src_path [Unix.O_RDONLY] 0 in
     let* entries =
       Lwt.finalize
         (fun () ->
@@ -222,7 +222,7 @@ module Make (C : Conf.S) = struct
           Lwt_list.map_p
             (upload_chunk fd ~cancel ~file_size)
             (List.init num_chunks Fun.id))
-        (fun () -> Lwt_unix.close fd)
+        (fun () -> Lwt_unix_retry.close fd)
     in
     if !cancel then raise Cancelled;
     let s1 = Xxhash.create 0 and s2 = Xxhash.create 1 in
@@ -342,20 +342,20 @@ module Make (C : Conf.S) = struct
      refreshes the sidecar) and a report; [local_stale] is set when the
      re-hash disagrees with [sidecar]. *)
   let recheck_cached ~key ~src_path ~mtime ~sidecar () =
-    let* st = Lwt_unix.stat src_path in
+    let* st = Lwt_unix_retry.stat src_path in
     let file_size = st.Unix.st_size in
     let num_chunks =
       if file_size = 0 then 1
       else (file_size + Manifest.chunk_size - 1) / Manifest.chunk_size
     in
-    let* fd = Lwt_unix.openfile src_path [Unix.O_RDONLY] 0 in
+    let* fd = Lwt_unix_retry.openfile src_path [Unix.O_RDONLY] 0 in
     let* results =
       Lwt.finalize
         (fun () ->
           Lwt_list.map_p
             (recheck_chunk fd ~file_size)
             (List.init num_chunks Fun.id))
-        (fun () -> Lwt_unix.close fd)
+        (fun () -> Lwt_unix_retry.close fd)
     in
     let entries = List.map fst results in
     let s1 = Xxhash.create 0 and s2 = Xxhash.create 1 in
@@ -420,13 +420,15 @@ module Make (C : Conf.S) = struct
   let assemble_chunks ~(manifest : Manifest.t) ~dst_path primary =
     let (module Primary : Backend.S) = primary in
     let* fd =
-      Lwt_unix.openfile dst_path
+      Lwt_unix_retry.openfile dst_path
         [Unix.O_WRONLY; Unix.O_CREAT; Unix.O_TRUNC]
         0o644
     in
     Lwt.finalize
       (fun () ->
-        let* () = Lwt_unix.LargeFile.ftruncate fd manifest.Manifest.size in
+        let* () =
+          Lwt_unix_retry.LargeFile.ftruncate fd manifest.Manifest.size
+        in
         Lwt_list.iter_s
           (fun (chunk : Manifest.chunk_entry) ->
             let ck = C.chunk_prefix ^ Manifest.chunk_key chunk in
@@ -441,14 +443,14 @@ module Make (C : Conf.S) = struct
               if pos >= len then Lwt.return_unit
               else
                 let* n =
-                  Lwt_unix.pwrite_string fd data ~file_offset:(base + pos) pos
-                    (len - pos)
+                  Lwt_unix_retry.pwrite_string fd data ~file_offset:(base + pos)
+                    pos (len - pos)
                 in
                 loop (pos + n)
             in
             loop 0)
           manifest.Manifest.chunks)
-      (fun () -> Lwt_unix.close fd)
+      (fun () -> Lwt_unix_retry.close fd)
 
   let download_chunks ~dst_path manifest =
     assemble_chunks ~manifest ~dst_path (primary ())

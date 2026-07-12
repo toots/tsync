@@ -339,7 +339,7 @@ module Make (C : Conf.S) = struct
           guard "fsync" path (fun () ->
               on_loop (fun () ->
                   match Fd.find (fuse_to_key path) with
-                    | Some fd -> Lwt_unix.fsync fd
+                    | Some fd -> Lwt_unix_retry.fsync fd
                     | None -> Lwt.return_unit)));
     }
 

@@ -61,7 +61,8 @@ tsync restore <path>  # pull a file back down
 tsync versions <path> # a file's version history, or all deleted files
 tsync revert <path>   # bring back a previous version (or an undeleted file)
 tsync expire <date>   # drop versions older than a date, then reclaim unused blocks
-tsync sync            # apply changes made from other machines
+tsync sync            # apply changes from other machines (incremental)
+tsync sync --full     # clear local cache and re-download all manifests from the backend
 tsync recheck         # verify the remote against the local cache, repair what's possible
 tsync resync-remote   # copy missing/damaged objects from one backend to the others
 tsync import <dir>    # seed the domain from an existing folder (uploads, no data copied)

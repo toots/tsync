@@ -13,11 +13,13 @@ let write_file path data =
   incr tmp_seq;
   let tmp = Printf.sprintf "%s.%d.%d.tmp" path (Unix.getpid ()) !tmp_seq in
   let* () =
-    Lwt_io.with_file ~mode:Lwt_io.Output tmp (fun oc -> Lwt_io.write oc data)
+    Lwt_unix_retry.with_file ~mode:Lwt_io.Output tmp (fun oc ->
+        Lwt_io.write oc data)
   in
-  Lwt_unix.rename tmp path
+  Lwt_unix_retry.rename tmp path
 
-let read_file path = Lwt_io.with_file ~mode:Lwt_io.Input path Lwt_io.read
+let read_file path =
+  Lwt_unix_retry.with_file ~mode:Lwt_io.Input path Lwt_io.read
 
 let make ~root : (module Backend.S) =
   let resolve key = if key = "" then root else Filename.concat root key in
@@ -44,7 +46,7 @@ let make ~root : (module Backend.S) =
     let head_opt ~key () =
       Lwt.catch
         (fun () ->
-          let+ st = Lwt_unix.stat (resolve key) in
+          let+ st = Lwt_unix_retry.stat (resolve key) in
           match st with
             | { Unix.st_kind = Unix.S_DIR; st_mtime; _ } ->
                 Some Backend.{ key; size = 0; last_modified = st_mtime }
@@ -74,7 +76,7 @@ let make ~root : (module Backend.S) =
                 (fun acc entry ->
                   let full_path = Filename.concat path entry in
                   let full_key = key_prefix ^ entry in
-                  let* st = Lwt_unix.stat full_path in
+                  let* st = Lwt_unix_retry.stat full_path in
                   match st.Unix.st_kind with
                     | Unix.S_REG ->
                         Lwt.return
@@ -101,7 +103,7 @@ let make ~root : (module Backend.S) =
             | Unix.Unix_error (Unix.ENOTDIR, _, _) ->
                 Lwt.catch
                   (fun () ->
-                    let+ st = Lwt_unix.stat base in
+                    let+ st = Lwt_unix_retry.stat base in
                     [
                       Backend.
                         {

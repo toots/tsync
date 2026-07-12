@@ -657,7 +657,9 @@ let sync_cmd =
     Arg.(
       value & flag
       & info ["full"]
-          ~doc:"Force a full re-sync, re-importing all files from the backend")
+          ~doc:
+            "Force a full resync: clear the local cache and re-download all \
+             manifests from the backend")
   in
   let render_op = function
     | `Put (k, size) -> Printf.sprintf "put %s (%Ld bytes)" k size
@@ -683,12 +685,16 @@ let sync_cmd =
          ~on_cursor:(fun ~entry_key:_ -> ())
          ~on_upload_done:(fun ~key:_ -> Lwt.return_unit);
        let my_uuid = J.client_uuid () in
+       if !verbose then
+         Log.info "syncing domain %s (client %s, uuid %s)" C.domain_name
+           C.client_name my_uuid;
        let recover_entry entry_key ops =
          let short = Filename.basename entry_key in
          let remote_key = C.journal_prefix ^ entry_key in
          let* head = Fs.head_opt ~key:remote_key in
          if head <> None then begin
-           vprintf "  %s: already published remotely — cleaned up\n" short;
+           if !verbose then
+             Log.info "%s: already published remotely, cleaned up" short;
            J.delete_local_pending ~entry_key
          end
          else begin
@@ -727,12 +733,13 @@ let sync_cmd =
                ops
            in
            let skipped = List.length ops - List.length replayed in
-           vprintf "  %s: replaying %d/%d op%s%s\n" short (List.length replayed)
-             (List.length ops)
-             (if List.length ops = 1 then "" else "s")
-             (if skipped > 0 then
-                Printf.sprintf " (%d skipped — remotely overridden)" skipped
-              else "");
+           if !verbose then
+             Log.info "%s: replaying %d/%d op%s%s" short (List.length replayed)
+               (List.length ops)
+               (if List.length ops = 1 then "" else "s")
+               (if skipped > 0 then
+                  Printf.sprintf " (%d skipped — remotely overridden)" skipped
+                else "");
            let* () =
              Lwt_list.iter_s
                (fun op ->
@@ -773,13 +780,15 @@ let sync_cmd =
          end
        in
        let* pending = J.local_pending_entries ~uuid:my_uuid in
-       vprintf "pending journal entries: %d\n" (List.length pending);
+       if !verbose then
+         Log.info "recovering %d pending journal entr%s" (List.length pending)
+           (if List.length pending = 1 then "y" else "ies");
        let* () =
          Lwt_list.iter_s
            (fun (entry_key, ops) -> recover_entry entry_key ops)
            pending
        in
-       vprintf "draining upload queue\n";
+       if !verbose then Log.info "draining upload queue";
        let* () = Sq.drain () in
        let share_dir = C.data_dir in
        let last_sync_file =
@@ -793,11 +802,13 @@ let sync_cmd =
            String.trim s)
          else ""
        in
-       vprintf "last sync bookmark: %s\n"
-         (if last_sync_key = "" then "none (first run)" else last_sync_key);
+       if !verbose then
+         Log.info "last sync bookmark: %s"
+           (if last_sync_key = "" then "none (first run)" else last_sync_key);
        let* all_keys = Fs.list_journal_keys () in
-       vprintf "journal: %d entr%s\n" (List.length all_keys)
-         (if List.length all_keys = 1 then "y" else "ies");
+       if !verbose then
+         Log.info "journal: %d entr%s" (List.length all_keys)
+           (if List.length all_keys = 1 then "y" else "ies");
        let need_full_resync =
          if full || last_sync_key = "" then true
          else (
@@ -808,22 +819,55 @@ let sync_cmd =
                  > Journal.timestamp_ms_of_filename last_sync_key)
        in
        if need_full_resync then begin
-         vprintf "full resync: %s\n"
-           (if full then "--full flag"
-            else if last_sync_key = "" then "no bookmark (first run)"
-            else "bookmark older than oldest journal entry");
+         if !verbose then
+           Log.info "full resync: %s"
+             (if full then "--full flag"
+              else if last_sync_key = "" then "no bookmark (first run)"
+              else "bookmark older than oldest journal entry");
          (try
-            vprintf
-              "sending full_resync to daemon (cache will be rebuilt on access)\n";
+            if !verbose then Log.info "sending full_resync to daemon";
             ignore (ipc_action ~socket_path:C.socket_path "full_resync")
           with
            | Failure msg -> Printf.eprintf "Warning: full_resync: %s\n" msg
            | _ -> ());
+         let* files = Fs.list_all_files ~prefix:C.domain_prefix in
+         let is_marker k =
+           String.length k > 0 && k.[String.length k - 1] = '/'
+         in
+         let file_entries =
+           List.filter
+             (fun (e : Backend.file_entry) -> not (is_marker e.key))
+             files
+         in
+         Log.info "downloading %d manifest%s" (List.length file_entries)
+           (if List.length file_entries = 1 then "" else "s");
+         let pool =
+           Lwt_pool.create C.max_downloads (fun () -> Lwt.return_unit)
+         in
+         let* () =
+           Lwt_list.iter_p
+             (fun (e : Backend.file_entry) ->
+               Lwt_pool.use pool (fun () ->
+                   Lwt.catch
+                     (fun () ->
+                       let* m = F.resolved_manifest e.key in
+                       match m with
+                         | Some state ->
+                             if !verbose then Log.info "manifest %s" e.key;
+                             F.write_manifest e.key state
+                         | None -> Lwt.return_unit)
+                     (fun exn ->
+                       Log.warn "manifest %s: %s" e.key (Printexc.to_string exn);
+                       Lwt.return_unit)))
+             file_entries
+         in
          let new_key = C.journal_prefix ^ J.entry_key () in
          let oc = open_out last_sync_file in
          output_string oc new_key;
          close_out oc;
-         Printf.printf "full resync\n";
+         Printf.printf "full resync: %d manifest%s downloaded\n"
+           (List.length file_entries)
+           (if List.length file_entries = 1 then "" else "s");
          Lwt.return_unit
        end
        else begin
@@ -840,8 +884,9 @@ let sync_cmd =
                match e with
                  | None -> Lwt.return_unit
                  | Some ops ->
-                     vprintf "  journal entry %s: %s\n" ek
-                       (String.concat ", " (List.map render_op ops));
+                     if !verbose then
+                       Log.info "journal entry %s: %s" ek
+                         (String.concat ", " (List.map render_op ops));
                      F.apply_foreign_ops ops)
              recent_foreign
          in
@@ -859,7 +904,13 @@ let sync_cmd =
        end)
   in
   Cmd.v
-    (Cmd.info "sync" ~doc:"Sync local cache with remote journal changes")
+    (Cmd.info "sync"
+       ~doc:
+         "Sync local cache with remote changes. Replays pending local journal \
+          entries, then applies new journal entries from other clients. A full \
+          resync (triggered by --full or when the local bookmark is stale) \
+          clears the cache and re-downloads all manifests. Pass --verbose to \
+          see a step-by-step breakdown.")
     Term.(const run $ domain_arg $ full_arg $ verbose_arg)
 
 (* ── tsync recheck ───────────────────────────────────────────────────────── *)

@@ -7,18 +7,20 @@ type summary = { exported : int; missing : int }
 let is_marker key = String.length key > 0 && key.[String.length key - 1] = '/'
 
 let copy_file ~src ~dst =
-  let* src_fd = Lwt_unix.openfile src [Unix.O_RDONLY] 0 in
+  let* src_fd = Lwt_unix_retry.openfile src [Unix.O_RDONLY] 0 in
   Lwt.finalize
     (fun () ->
       let* dst_fd =
-        Lwt_unix.openfile dst [Unix.O_WRONLY; Unix.O_CREAT; Unix.O_TRUNC] 0o644
+        Lwt_unix_retry.openfile dst
+          [Unix.O_WRONLY; Unix.O_CREAT; Unix.O_TRUNC]
+          0o644
       in
       Lwt.finalize
         (fun () ->
           let buffer = Bytes.create (1 lsl 20) in
           let rec copy () =
             let* bytes_read =
-              Lwt_unix.read src_fd buffer 0 (Bytes.length buffer)
+              Lwt_unix_retry.read src_fd buffer 0 (Bytes.length buffer)
             in
             if bytes_read = 0 then Lwt.return_unit
             else (
@@ -26,15 +28,15 @@ let copy_file ~src ~dst =
                 if pos >= bytes_read then copy ()
                 else
                   let* written =
-                    Lwt_unix.write dst_fd buffer pos (bytes_read - pos)
+                    Lwt_unix_retry.write dst_fd buffer pos (bytes_read - pos)
                   in
                   write_all (pos + written)
               in
               write_all 0)
           in
           copy ())
-        (fun () -> Lwt_unix.close dst_fd))
-    (fun () -> Lwt_unix.close src_fd)
+        (fun () -> Lwt_unix_retry.close dst_fd))
+    (fun () -> Lwt_unix_retry.close src_fd)
 
 module Make (C : Conf.S) = struct
   module R = Remote.Make (C)
@@ -69,11 +71,13 @@ module Make (C : Conf.S) = struct
       Local.cache_path ~cache_root:C.cache_root ~domain_name:C.domain_name
         ~domain_prefix:C.domain_prefix key
     in
-    let* cached = Lwt_unix.file_exists cache_path in
+    let* cached = Lwt_unix_retry.file_exists cache_path in
     if cached then
       let* () = copy_file ~src:cache_path ~dst:dst_path in
-      let* st = Lwt_unix.stat cache_path in
-      let+ () = Lwt_unix.utimes dst_path st.Unix.st_atime st.Unix.st_mtime in
+      let* st = Lwt_unix_retry.stat cache_path in
+      let+ () =
+        Lwt_unix_retry.utimes dst_path st.Unix.st_atime st.Unix.st_mtime
+      in
       Exported Local_cache
     else
       let* manifest = manifest_for key in
@@ -81,11 +85,11 @@ module Make (C : Conf.S) = struct
         | Some (`Clean ({ symlink = Some target; _ } as m)) ->
             let* () =
               Lwt.catch
-                (fun () -> Lwt_unix.unlink dst_path)
+                (fun () -> Lwt_unix_retry.unlink dst_path)
                 (function
                   | Unix.Unix_error _ -> Lwt.return_unit | e -> Lwt.fail e)
             in
-            let+ () = Lwt_unix.symlink target dst_path in
+            let+ () = Lwt_unix_retry.symlink target dst_path in
             ignore m;
             Exported Symlink
         | Some (`Clean m) ->
@@ -93,7 +97,7 @@ module Make (C : Conf.S) = struct
                local cache is deliberately not populated. *)
             let* () = R.download_chunks ~dst_path m in
             let+ () =
-              Lwt_unix.utimes dst_path m.Manifest.mtime m.Manifest.mtime
+              Lwt_unix_retry.utimes dst_path m.Manifest.mtime m.Manifest.mtime
             in
             Exported Remote_chunks
         | Some `Dirty | None ->

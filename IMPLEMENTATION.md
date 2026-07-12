@@ -253,13 +253,21 @@ Multiple clients can mount the same domain concurrently. Each client applies the
 
 ### `tsync sync`
 
-Brings the local filesystem in sync with the backend on demand (same journal-cursor logic as the poller, usable when no daemon is running). Also used for crash recovery.
+Brings the local filesystem in sync with the backend on demand (same journal-cursor logic as the poller, usable when no daemon is running). Also used for crash recovery. Pass `--verbose` for a step-by-step breakdown of each phase.
 
-1. `--full` given, or `last_sync_key` empty → full resync.
-2. If `oldest_journal_timestamp > last_sync_timestamp` → **full resync** (journal gap; changes were missed).
-3. Otherwise → **incremental**: list journal entries after `last_sync_key`, filter out own `client_uuid`, apply each foreign entry via `File.apply_foreign_ops`.
+1. Recover any local pending journal entries left from a crash (replay or clean up).
+2. Drain the upload queue (finish any queued uploads).
+3. `--full` given, or `last_sync_key` empty → **full resync**.
+4. If `oldest_journal_timestamp > last_sync_timestamp` → **full resync** (journal gap; changes were missed).
+5. Otherwise → **incremental**: list journal entries after `last_sync_key`, filter out own `client_uuid`, apply each foreign entry via `File.apply_foreign_ops`.
 
-A **full resync** invokes the daemon's `full_resync` IPC action, then advances `last_sync_key` to the current cursor. On FUSE the hook wipes the local cache tree (next `getattr`/`readdir` re-pulls live from the backend); on macOS it sends `RESYNC` over `notify.sock` so the extension calls `reimportItems`. `tsync sync --full` forces this on demand — the only way to pick up out-of-band bucket changes (see [Known limitations](#known-limitations)).
+A **full resync**:
+
+1. Invokes the daemon's `full_resync` IPC action. On FUSE the hook wipes the local cache tree; on macOS it sends `RESYNC` over `notify.sock` so the extension calls `reimportItems`.
+2. Lists all files under `domain_prefix` from the backend and eagerly fetches each manifest, writing it as a local `.manifest` sidecar. This pre-populates the sidecar cache so that subsequent `getattr`/`readdir` calls are served locally rather than doing a backend round-trip per file. Concurrent manifest fetches are bounded by `maxDownloads`.
+3. Advances `last_sync_key` to the current cursor.
+
+`tsync sync --full` forces a full resync on demand — the only way to pick up out-of-band bucket changes not recorded in the journal (see [Known limitations](#known-limitations)).
 
 `last_sync_key` is stored as a full backend key (`<prefix>/.journal/<domain>/<filename>`). Only the filename part is used for comparisons with the relative keys returned by `list_journal_keys`.
 
@@ -679,7 +687,7 @@ make -C macos deploy     # build + install TsyncApp to /Applications + reload La
 
 **No background prefetch.** Files download on first open. `tsync pull` (not yet implemented) would bulk-download evicted files.
 
-**Change tracking only sees journaled changes.** Cross-client propagation (and the macOS `enumerateChanges` feed) is driven by the change journal, so a change made directly in the bucket — outside any tsync client — writes no journal entry and is not picked up incrementally. It surfaces only on a full re-import (re-adding the domain) or `tsync sync --full`, which invokes `full_resync` — wiping the FUSE cache or driving `reimportItems` on macOS. This matches the sync poller's existing model.
+**Change tracking only sees journaled changes.** Cross-client propagation (and the macOS `enumerateChanges` feed) is driven by the change journal, so a change made directly in the bucket — outside any tsync client — writes no journal entry and is not picked up incrementally. It surfaces only on a full re-import (re-adding the domain) or `tsync sync --full`, which wipes the FUSE cache (or drives `reimportItems` on macOS) and re-downloads all manifests from the backend.
 
 **Chunks are not encrypted at the application layer.** Enable S3 SSE-S3 or SSE-KMS on the bucket for encryption at rest.
 

@@ -142,25 +142,25 @@ let write_local_pending ~share_dir ~entry_key ops =
   let dir = pending_dir ~share_dir in
   let* () =
     Lwt.catch
-      (fun () -> Lwt_unix.mkdir dir 0o700)
+      (fun () -> Lwt_unix_retry.mkdir dir 0o700)
       (function
         | Unix.Unix_error (Unix.EEXIST, _, _) -> Lwt.return_unit
         | e -> Lwt.fail e)
   in
-  Lwt_io.with_file ~mode:Lwt_io.Output (Filename.concat dir entry_key)
+  Lwt_unix_retry.with_file ~mode:Lwt_io.Output (Filename.concat dir entry_key)
     (fun oc -> Lwt_io.write oc (encode ops))
 
 let delete_local_pending ~share_dir ~entry_key =
   Lwt.catch
     (fun () ->
-      Lwt_unix.unlink (Filename.concat (pending_dir ~share_dir) entry_key))
+      Lwt_unix_retry.unlink (Filename.concat (pending_dir ~share_dir) entry_key))
     (function
       | Unix.Unix_error (Unix.ENOENT, _, _) -> Lwt.return_unit | e -> Lwt.fail e)
 
 let local_pending_entries ~share_dir ~uuid =
   let open Lwt.Syntax in
   let dir = pending_dir ~share_dir in
-  let* exists = Lwt_unix.file_exists dir in
+  let* exists = Lwt_unix_retry.file_exists dir in
   if not exists then Lwt.return_nil
   else
     let* names = Lwt_stream.to_list (Lwt_unix.files_of_directory dir) in

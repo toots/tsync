@@ -107,7 +107,7 @@ module Make (C : Conf.S) (Sq : Sync_queue.S) : S = struct
   let stat_opt path =
     Lwt.catch
       (fun () ->
-        let+ st = Lwt_unix.LargeFile.stat path in
+        let+ st = Lwt_unix_retry.LargeFile.stat path in
         Some st)
       (fun _ -> Lwt.return_none)
 
@@ -150,7 +150,7 @@ module Make (C : Conf.S) (Sq : Sync_queue.S) : S = struct
 
   let upload ?cancel key =
     let lp = local_path key in
-    let* st = Lwt_unix.stat lp in
+    let* st = Lwt_unix_retry.stat lp in
     let mtime = st.Unix.st_mtime in
     let* state = R.upload ~key ~src_path:lp ~mtime ?cancel () in
     (* Cancelled while finishing (e.g. renamed away mid-upload): the local
@@ -393,15 +393,15 @@ module Make (C : Conf.S) (Sq : Sync_queue.S) : S = struct
     ignore (cancel_upload key);
     let* () = ensure_cached key in
     let lp = local_path key in
-    let* fd = Lwt_unix.openfile lp [Unix.O_WRONLY] 0o644 in
-    let* () = Lwt_unix.LargeFile.ftruncate fd size in
-    let* () = Lwt_unix.close fd in
+    let* fd = Lwt_unix_retry.openfile lp [Unix.O_WRONLY] 0o644 in
+    let* () = Lwt_unix_retry.LargeFile.ftruncate fd size in
+    let* () = Lwt_unix_retry.close fd in
     mark_dirty key
 
   let rename_local ~src ~dst =
     let* cached = is_cached src in
     let* () =
-      if cached then Lwt_unix.rename (local_path src) (local_path dst)
+      if cached then Lwt_unix_retry.rename (local_path src) (local_path dst)
       else Lwt.return_unit
     in
     Local.rename_manifest ~cache_root:C.cache_root ~domain_name:C.domain_name
@@ -698,14 +698,18 @@ module Make (C : Conf.S) (Sq : Sync_queue.S) : S = struct
           | `Rename { Journal.src; dst; is_dir = true; _ } ->
               let src_key = C.domain_prefix ^ src in
               let dst_key = C.domain_prefix ^ dst in
-              let* exists = Lwt_unix.file_exists (manifest_path src_key) in
+              let* exists =
+                Lwt_unix_retry.file_exists (manifest_path src_key)
+              in
               if exists && (not (is_dirty src_key)) && not (is_open src_key)
               then rename_local ~src:src_key ~dst:dst_key
               else Lwt.return_unit
           | `Rename { Journal.src; dst; is_dir = false; _ } ->
               let src_key = C.domain_prefix ^ src in
               let dst_key = C.domain_prefix ^ dst in
-              let* exists = Lwt_unix.file_exists (manifest_path src_key) in
+              let* exists =
+                Lwt_unix_retry.file_exists (manifest_path src_key)
+              in
               if exists && (not (is_dirty src_key)) && not (is_open src_key)
               then rename_local ~src:src_key ~dst:dst_key
               else if (not (is_dirty dst_key)) && not (is_open dst_key) then

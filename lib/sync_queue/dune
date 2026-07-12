@@ -6,6 +6,7 @@
   tsync_backend
   tsync_log
   tsync_xxhash
+  tsync_lwt_unix
   yojson
   unix
   lwt

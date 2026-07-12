@@ -1,0 +1,4 @@
+(library
+ (name tsync_lwt_unix)
+ (wrapped false)
+ (libraries unix lwt lwt.unix))

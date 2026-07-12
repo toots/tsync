@@ -55,9 +55,9 @@ module Make (C : Conf.S) = struct
             Local.cache_path ~cache_root:C.cache_root ~domain_name:C.domain_name
               ~domain_prefix:C.domain_prefix key
           in
-          let* cached = Lwt_unix.file_exists lp in
+          let* cached = Lwt_unix_retry.file_exists lp in
           if cached then
-            let* st = Lwt_unix.stat lp in
+            let* st = Lwt_unix_retry.stat lp in
             let* manifest_state, report =
               R.recheck_cached ~key ~src_path:lp ~mtime:st.Unix.st_mtime
                 ~sidecar:m ()

@@ -7,10 +7,10 @@ let rw op lp flags buf ~offset =
   let size = Bigarray.Array1.dim buf in
   if size = 0 then Lwt.return 0
   else
-    let* fd = Lwt_unix.openfile lp flags 0o644 in
+    let* fd = Lwt_unix_retry.openfile lp flags 0o644 in
     Lwt.finalize
       (fun () ->
-        let* _ = Lwt_unix.LargeFile.lseek fd offset Unix.SEEK_SET in
+        let* _ = Lwt_unix_retry.LargeFile.lseek fd offset Unix.SEEK_SET in
         let rec loop pos =
           if pos >= size then Lwt.return pos
           else
@@ -18,7 +18,7 @@ let rw op lp flags buf ~offset =
             if n = 0 then Lwt.return pos else loop (pos + n)
         in
         loop 0)
-      (fun () -> Lwt_unix.close fd)
+      (fun () -> Lwt_unix_retry.close fd)
 
 let read lp buf ~offset = rw Lwt_bytes.read lp [Unix.O_RDONLY] buf ~offset
 
@@ -59,12 +59,12 @@ let prw op fd (buf : buffer) ~offset ~fill ~drain =
         Lwt.return n)
 
 let pread fd buf ~offset =
-  prw Lwt_unix.pread fd buf ~offset
+  prw Lwt_unix_retry.pread fd buf ~offset
     ~fill:(fun _ _ _ -> ())
     ~drain:(fun tmp buf n ->
       if n > 0 then Lwt_bytes.blit_from_bytes tmp 0 buf 0 n)
 
 let pwrite fd buf ~offset =
-  prw Lwt_unix.pwrite fd buf ~offset
+  prw Lwt_unix_retry.pwrite fd buf ~offset
     ~fill:(fun tmp buf size -> Lwt_bytes.blit_to_bytes buf 0 tmp 0 size)
     ~drain:(fun _ _ _ -> ())

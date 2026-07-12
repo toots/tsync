@@ -8,6 +8,7 @@
   tsync_file
   tsync_queue
   tsync_log
+  tsync_lwt_unix
   yojson
   unix
   lwt

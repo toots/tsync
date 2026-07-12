@@ -9,6 +9,7 @@
   tsync_file
   tsync_local_io
   tsync_ipc_handler
+  tsync_lwt_unix
   fuse3
   lwt
   lwt.unix

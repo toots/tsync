@@ -58,16 +58,17 @@ let walk_manifests ~cache_root ~domain_name () =
   if root_ok then walk "" [] else Lwt.return_nil
 
 let is_cached ~cache_root ~domain_name ~domain_prefix key =
-  Lwt_unix.file_exists (cache_path ~cache_root ~domain_name ~domain_prefix key)
+  Lwt_unix_retry.file_exists
+    (cache_path ~cache_root ~domain_name ~domain_prefix key)
 
 let read_manifest ~cache_root ~domain_name ~domain_prefix key =
   let path = manifest_path ~cache_root ~domain_name ~domain_prefix key in
-  let* exists = Lwt_unix.file_exists path in
+  let* exists = Lwt_unix_retry.file_exists path in
   if not exists then Lwt.return_none
   else
     Lwt.catch
       (fun () ->
-        let+ s = Lwt_io.with_file ~mode:Lwt_io.Input path Lwt_io.read in
+        let+ s = Lwt_unix_retry.with_file ~mode:Lwt_io.Input path Lwt_io.read in
         Some s)
       (fun _ -> Lwt.return_none)
 
@@ -76,27 +77,28 @@ let write_manifest ~cache_root ~domain_name ~domain_prefix key data =
   let* () = ensure_parent_dir path in
   let tmp = path ^ ".tmp" in
   let* () =
-    Lwt_io.with_file ~mode:Lwt_io.Output tmp (fun oc -> Lwt_io.write oc data)
+    Lwt_unix_retry.with_file ~mode:Lwt_io.Output tmp (fun oc ->
+        Lwt_io.write oc data)
   in
-  Lwt_unix.rename tmp path
+  Lwt_unix_retry.rename tmp path
 
 let delete_manifest ~cache_root ~domain_name ~domain_prefix key =
   let path = manifest_path ~cache_root ~domain_name ~domain_prefix key in
   Lwt.catch
-    (fun () -> Lwt_unix.unlink path)
+    (fun () -> Lwt_unix_retry.unlink path)
     (function Unix.Unix_error _ -> Lwt.return_unit | e -> Lwt.fail e)
 
 let rename_manifest ~cache_root ~domain_name ~domain_prefix ~src_key ~dst_key =
   let src = manifest_path ~cache_root ~domain_name ~domain_prefix src_key in
-  let* exists = Lwt_unix.file_exists src in
+  let* exists = Lwt_unix_retry.file_exists src in
   if not exists then Lwt.return_unit
   else (
     let dst = manifest_path ~cache_root ~domain_name ~domain_prefix dst_key in
     let* () = ensure_parent_dir dst in
-    Lwt_unix.rename src dst)
+    Lwt_unix_retry.rename src dst)
 
 let rec clean_tmp_manifests dir =
-  let* exists = Lwt_unix.file_exists dir in
+  let* exists = Lwt_unix_retry.file_exists dir in
   if not exists then Lwt.return_unit
   else
     let* is_dir = is_directory dir in
@@ -110,7 +112,7 @@ let rec clean_tmp_manifests dir =
           if is_dir then clean_tmp_manifests path
           else if Filename.check_suffix name ".tmp" then
             Lwt.catch
-              (fun () -> Lwt_unix.unlink path)
+              (fun () -> Lwt_unix_retry.unlink path)
               (function
                 | Unix.Unix_error _ -> Lwt.return_unit | e -> Lwt.fail e)
           else Lwt.return_unit)
@@ -124,5 +126,5 @@ let init ~cache_root ~domain_name =
 let evict ~cache_root ~domain_name ~domain_prefix key =
   let path = cache_path ~cache_root ~domain_name ~domain_prefix key in
   Lwt.catch
-    (fun () -> Lwt_unix.unlink path)
+    (fun () -> Lwt_unix_retry.unlink path)
     (function Unix.Unix_error _ -> Lwt.return_unit | e -> Lwt.fail e)

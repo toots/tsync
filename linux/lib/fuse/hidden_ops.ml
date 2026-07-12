@@ -22,22 +22,22 @@ module Make (F : File.S) = struct
       unlink =
         (fun path ->
           Lwt.catch
-            (fun () -> Lwt_unix.unlink (local_path path))
+            (fun () -> Lwt_unix_retry.unlink (local_path path))
             (function
               | Unix.Unix_error (Unix.ENOENT, _, _) -> Lwt.return_unit
               | e -> Lwt.fail e));
       rename =
         (fun src dst _flags ->
           Lwt.catch
-            (fun () -> Lwt_unix.rename (local_path src) (local_path dst))
+            (fun () -> Lwt_unix_retry.rename (local_path src) (local_path dst))
             (function
               | Unix.Unix_error (Unix.ENOENT, _, _) -> Lwt.return_unit
               | e -> Lwt.fail e));
       truncate =
         (fun path size _fi ->
           let lp = local_path path in
-          let* fd = Lwt_unix.openfile lp [Unix.O_WRONLY] 0o644 in
-          let* () = Lwt_unix.LargeFile.ftruncate fd size in
-          Lwt_unix.close fd);
+          let* fd = Lwt_unix_retry.openfile lp [Unix.O_WRONLY] 0o644 in
+          let* () = Lwt_unix_retry.LargeFile.ftruncate fd size in
+          Lwt_unix_retry.close fd);
     }
 end

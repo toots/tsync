@@ -1,4 +1,4 @@
 (library
  (name tsync_local_io)
  (wrapped false)
- (libraries unix lwt lwt.unix))
+ (libraries unix lwt lwt.unix tsync_lwt_unix))

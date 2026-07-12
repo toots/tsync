@@ -17,7 +17,7 @@ module Make (F : File.S) = struct
               Lwt.return_unit
           | None ->
               let* fd =
-                Lwt_unix.openfile (F.local_path key)
+                Lwt_unix_retry.openfile (F.local_path key)
                   [Unix.O_RDWR; Unix.O_CREAT]
                   0o644
               in
@@ -32,7 +32,7 @@ module Make (F : File.S) = struct
               let n' = n - 1 in
               if n' <= 0 then (
                 Hashtbl.remove table key;
-                Lwt_unix.close fd)
+                Lwt_unix_retry.close fd)
               else (
                 Hashtbl.replace table key (n', fd);
                 Lwt.return_unit))

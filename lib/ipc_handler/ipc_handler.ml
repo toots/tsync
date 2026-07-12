@@ -223,13 +223,13 @@ module Make (C : Conf.S) (F : File.S) = struct
   let handle_write key staging_path =
     ignore (F.cancel_upload key);
     let* () = F.ensure_parent_dir key in
-    let* () = Lwt_unix.rename staging_path (F.local_path key) in
+    let* () = Lwt_unix_retry.rename staging_path (F.local_path key) in
     let* () = F.mark_dirty key in
     let* () = F.queue_put key in
     let* st =
       Lwt.catch
         (fun () ->
-          let+ st = Lwt_unix.LargeFile.stat (F.local_path key) in
+          let+ st = Lwt_unix_retry.LargeFile.stat (F.local_path key) in
           Some st)
         (fun _ -> Lwt.return_none)
     in

@@ -10,6 +10,7 @@
   tsync_xxhash
   tsync_queue
   tsync_local_io
+  tsync_lwt_unix
   unix
   lwt
   lwt.unix))

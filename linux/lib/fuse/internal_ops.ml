@@ -30,11 +30,11 @@ module Make (F : File.S) = struct
             else if truncating then begin
               ignore (F.cancel_upload f);
               let* fd =
-                Lwt_unix.openfile (F.local_path f)
+                Lwt_unix_retry.openfile (F.local_path f)
                   [Unix.O_WRONLY; Unix.O_TRUNC]
                   0o644
               in
-              let* () = Lwt_unix.close fd in
+              let* () = Lwt_unix_retry.close fd in
               F.mark_dirty f
             end
             else if not cached then
