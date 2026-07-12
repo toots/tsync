@@ -22,6 +22,9 @@ let default_paths () =
 
 let pre_start ~mount_point:_ = ()
 
+(* All domains share the same socket; the daemon routes by domain prefix. *)
+let domain_socket_path paths _domain_name = paths.socket_path
+
 let is_local ~cache_root:_ ~domain_name ~domain_prefix key =
   let pfx = String.length domain_prefix in
   let rel =
@@ -38,3 +41,7 @@ let is_local ~cache_root:_ ~domain_name ~domain_prefix key =
   Sys.file_exists p && not (File_provider.is_dataless p)
 
 module Make (C : Conf.S) = File_provider.Make (C)
+
+let start ~confs ~mount_fn:_ =
+  let paths = default_paths () in
+  File_provider.start ~confs ~socket_path:paths.socket_path

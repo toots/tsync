@@ -140,7 +140,7 @@ Escape hatch behind the `ssh` type: the same storage-over-a-command backend, but
 | `path` | string | Root directory (as seen by the command) for this backend; keys are stored as paths under this root |
 | `main` | bool | Optional. Mark this backend as the primary (read) backend. See [Primary backend selection](#primary-backend-selection) |
 
-Each domain is an independent namespace: `<prefix>/<domain>/`. When the config has exactly one domain, `--domain` can be omitted from CLI commands; with multiple domains it is required.
+Each domain is an independent namespace: `<prefix>/<domain>/`. When the config has exactly one domain, `--domain` can be omitted from CLI commands. With multiple domains, either pass `--domain <name>` per command or run `tsync set-domain <name>` once to persist a machine-local default (stored in the data dir); `--domain` always overrides it.
 
 When a domain has multiple backends, all writes (uploads, deletes, copies) fan out to every backend. Reads use the **primary** backend. This supports mirroring a domain to e.g. S3 and a remote SSH host simultaneously.
 
@@ -327,7 +327,7 @@ All library modules are parameterised by a `Conf.S` module (a first-class module
 | `sync_queue/journal.ml` | `Journal.Make(C)` — journal entry read/write; local pending-entry tracking for crash recovery |
 | `sync_queue/file_store.ml` | `File_store.Make(C)` — backend operations with journal bookkeeping; directory list/rename/delete |
 | `sync_queue/sync_queue.ml` | `Sync_queue.Make(C)` — async upload queue with a bounded pool of Lwt worker tasks and per-key coalescing |
-| `file_provider/file_provider.ml` | `File_provider.Make(C)` — macOS FileProvider runtime: serves the shared IPC handler with FileProvider-specific hooks |
+| `file_provider/file_provider.ml` | `File_provider.Make(C)` — macOS FileProvider runtime per domain; `File_provider.start` — multi-domain entry point: runs all domain handlers on a single Lwt loop behind one shared IPC socket, routing requests by path prefix or `"domain"` field |
 
 ### CLI binary (`bin/tsync.ml`)
 
@@ -346,18 +346,21 @@ tsync stop
 tsync status
 tsync stats
 
+tsync set-domain <name>   # persist a default domain (stored in data dir)
+tsync set-domain --clear  # remove the persisted default
+
 tsync evict   <path>
 tsync restore <path>
-tsync ls      [path] [--deleted]
+tsync ls      [path] [--deleted] [--domain <name>]
 tsync sync    [--domain <name>] [--full]
 tsync recheck [--domain <name>]
 tsync resync-remote [--domain <name>] [--source <backend-name>]
 tsync import  <dir> [--domain <name>]
 tsync export  <dir> [--domain <name>]
 
-tsync versions [path]
+tsync versions [path] [--domain <name>]
 tsync revert   <path> [--version <ts>]
-tsync expire   <date>
+tsync expire   <date> [--domain <name>]
 
 tsync auto-evict [on|off|status]
 tsync purge   <path>
@@ -377,8 +380,8 @@ Runtime-specific behavior (how eviction happens, whether restore materializes lo
 {"action":"stat","path":"<key>"}
 {"action":"list_dir","path":"<prefix>"}
 {"action":"list_all","path":"<prefix>"}
-{"action":"cursor"}
-{"action":"changes_since","arg":"<journal-key|>"}
+{"action":"cursor","domain":"<domain-name>"}
+{"action":"changes_since","arg":"<journal-key|>","domain":"<domain-name>"}
 {"action":"ensure_cached","path":"<key>"}
 {"action":"create","path":"<key>"}
 {"action":"write","path":"<key>","staging":"<local_path>"}
@@ -399,7 +402,7 @@ For `evict`/`restore` the `path` is a filesystem path (from the CLI) that the ru
 
 **Responses:** `{"ok":true, ...}` with action-specific fields (e.g. `size`, `mtime`, `etag`, `isUploaded`, `localPath`, `dirs`, `files`), or `{"ok":false,"error":"<message>"}` on failure. The listed backend objects are manifests, so `list_dir`/`list_all` read each file's manifest to report the **logical** `size`/`mtime` and the content hash (`h1`) as `etag` — the same identity `stat` returns (empty for dirty files). `list_dir` returns directories as full keys ending in `/`, matching `list_all` and the change feed.
 
-**Change feed** (`cursor` / `changes_since`) exposes the change journal as a delta query so the macOS FileProvider can drive `enumerateChanges` from a real sync anchor rather than re-importing. `cursor` returns the current journal cursor (`{"cursor":"<journal-key>"}`); `changes_since` returns the ops committed after a given journal key plus the new cursor (`{"cursor":"<journal-key>","ops":[{"op":"put|delete|mkdir|rmdir|rename","key":"<full-key>", ...}]}`). The query is stateless — it filters journal entries by `key > arg` and drops the caller's own `client_uuid` — so it does **not** touch the sync poller's `last-sync` marker; the OS tracks the extension's anchor independently. Op keys are returned as full storage keys (directories ending in `/`) to match the identifiers the extension uses.
+**Change feed** (`cursor` / `changes_since`) exposes the change journal as a delta query so the macOS FileProvider can drive `enumerateChanges` from a real sync anchor rather than re-importing. Both actions require a `"domain"` field so the single shared IPC socket can route to the correct domain's journal. `cursor` returns the current journal cursor (`{"cursor":"<journal-key>"}`); `changes_since` returns the ops committed after a given journal key plus the new cursor (`{"cursor":"<journal-key>","ops":[{"op":"put|delete|mkdir|rmdir|rename","key":"<full-key>", ...}]}`). The query is stateless — it filters journal entries by `key > arg` and drops the caller's own `client_uuid` — so it does **not** touch the sync poller's `last-sync` marker; the OS tracks the extension's anchor independently. Op keys are returned as full storage keys (directories ending in `/`) to match the identifiers the extension uses.
 
 **Reverse notify channel** (`notify.sock`, daemon → extension, macOS only):
 
@@ -480,10 +483,12 @@ The Linux backend mounts a FUSE filesystem at `~/tsync/<domain>/` using `ocamlfu
 
 ### Architecture
 
+`tsync start` mounts every configured domain. With a single domain it runs in the calling process; with multiple domains it forks one child process per additional domain (the last domain runs in the parent). Each process manages its own FUSE mount, Lwt event loop, and per-domain IPC socket (`tsync-<domain>.sock`).
+
 ```
-tsync start
+tsync start  (one process per domain)
   ├── Lwt event loop (dedicated thread) — owns all daemon state and backend I/O
-  │     ├── Ipc.serve       Unix socket at ~/.local/share/tsync/tsync.sock (one Lwt task per client)
+  │     ├── Ipc.serve       Unix socket at data_dir/tsync-<domain>.sock
   │     ├── cursor_flusher  Lwt task: drains pending_cursor → backend every ~2 s
   │     ├── sync_poller     Lwt task: watches .cursor key, applies foreign journal entries
   │     └── Sync_queue      bounded pool of Lwt upload workers
@@ -510,11 +515,11 @@ All daemon state and backend I/O live on the single Lwt event loop. FUSE runs mu
 | Config | `~/.config/tsync/config.json` | `$XDG_CONFIG_HOME/tsync/config.json` or `TSYNC_CONFIG_JSON` |
 | Cache root | `~/.cache/tsync/` | `$XDG_CACHE_HOME/tsync/` |
 | Data dir | `~/.local/share/tsync/` | `$XDG_DATA_HOME/tsync/` |
-| IPC socket | `~/.local/share/tsync/tsync.sock` | (follows data dir) |
-| Notify socket | `~/.local/share/tsync/notify.sock` | (follows data dir) |
+| IPC socket | `~/.local/share/tsync/tsync-<domain>.sock` | (follows data dir, one socket per domain) |
 | Auto-evict flag | `~/.local/share/tsync/auto-evict` | (follows data dir) |
+| Default domain | `~/.local/share/tsync/default-domain` | (follows data dir) |
 
-The data dir also holds the client UUID, last-sync state, and local pending journal entries for crash recovery.
+The data dir also holds the client UUID, last-sync state, local pending journal entries for crash recovery, and the optional `default-domain` file written by `tsync set-domain`.
 
 Each cached file lives at `<cache_root>/<domain>/<path>`. A `.manifest` sidecar file (`<cache_root>/<domain>/<path>.manifest`) persists across eviction: `getattr` can return correct size and mtime for evicted files without a backend HEAD request.
 
@@ -548,7 +553,7 @@ TsyncApp (LaunchAgent)
   └── registers NSFileProviderDomain per configured domain
   └── AppDelegate.registerDomains()
 
-TsyncFileProvider (extension, sandboxed)
+TsyncFileProvider (extension, sandboxed — one instance per domain)
   ├── TsyncExtension          NSFileProviderReplicatedExtension
   │    ├── fetchContents      download: ensure_cached → hand daemon's local path to the OS
   │    ├── createItem         file: write+upload; dir: mkdir; symlink: symlink IPC action
@@ -556,16 +561,18 @@ TsyncFileProvider (extension, sandboxed)
   │    └── deleteItem         unlink / rmdir
   ├── TsyncEnumerator         NSFileProviderEnumerator
   │    ├── enumerateItems     list_dir (per-directory) / list_all (working set)
-  │    ├── enumerateChanges   changes_since(anchor) → didUpdate/didDeleteItems; anchor = journal cursor
-  │    └── currentSyncAnchor  cursor (current journal key)
-  └── NotifyListener          listens on notify.sock; receives EVICT / RESTORE / UPLOADED / CHANGED from daemon
+  │    ├── enumerateChanges   changes_since(anchor, domain:) → didUpdate/didDeleteItems; anchor = journal cursor
+  │    └── currentSyncAnchor  cursor(domain:) (current journal key)
+  └── NotifyListener          listens on notify-<domain>.sock (per-domain); receives EVICT / RESTORE / UPLOADED / CHANGED from daemon
 
 OCaml daemon (tsync start, LaunchAgent via deploy-daemon.sh)
-  ├── Ipc.serve               Unix socket — JSON + CLI dispatch
-  ├── Sync_queue              Lwt worker pool for async upload
+  ├── Ipc.serve               single shared Unix socket (tsync.sock); routes by path prefix or domain field
+  ├── Sync_queue              Lwt worker pool for async upload (one per domain)
   ├── sync_poller             applies foreign journal entries → CHANGED → extension evict + working-set signal → enumerateChanges
-  └── on_upload_done          → Ipc.notify_uploaded → notify.sock → extension signalEnumerator
+  └── on_upload_done          → Ipc.notify_uploaded → notify-<domain>.sock → extension signalEnumerator
 ```
+
+With multiple domains the daemon is a single process serving all domains over one shared IPC socket (`tsync.sock`). File operations carry a domain-prefixed key so the router dispatches by path prefix; `cursor` and `changes_since` carry an explicit `"domain"` field. Reverse notifications go to per-domain sockets (`notify-<domain>.sock`) so each extension instance only receives events for its own domain.
 
 ### Data flow
 
@@ -619,8 +626,9 @@ OCaml daemon (tsync start, LaunchAgent via deploy-daemon.sh)
 | Config | `~/Library/Group Containers/group.com.toots.tsync/config.json` |
 | Cache root | `~/Library/Caches/tsync/` |
 | Data dir | `~/Library/Group Containers/group.com.toots.tsync/tsync/` |
-| IPC socket | `~/Library/Group Containers/group.com.toots.tsync/tsync/tsync.sock` |
-| Notify socket | `~/Library/Group Containers/group.com.toots.tsync/tsync/notify.sock` |
+| IPC socket | `~/Library/Group Containers/group.com.toots.tsync/tsync/tsync.sock` (shared across all domains) |
+| Notify socket | `~/Library/Group Containers/group.com.toots.tsync/tsync/notify-<domain>.sock` (one per domain) |
+| Default domain | `~/Library/Group Containers/group.com.toots.tsync/tsync/default-domain` |
 
 The group container (`~/Library/Group Containers/group.com.toots.tsync/`) is the only location accessible to both the sandboxed extension and the daemon. Both read config from there; the extension routes all backend operations through the daemon and never needs credentials directly.
 

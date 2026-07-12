@@ -80,23 +80,79 @@ module Make (C : Conf.S) = struct
         on_stop = (fun () -> ());
       }
 
+  let handler = H.handler hooks
+  let drain = Sq.drain
+
+  let init () =
+    let open Lwt.Syntax in
+    let* () = Local.init ~cache_root:C.cache_root ~domain_name:C.domain_name in
+    Sq.start
+      ~upload:(fun ~key ~cancel -> F.upload ~cancel key)
+      ~on_cursor:(fun ~entry_key:_ -> ())
+      ~on_upload_done:(fun ~key ->
+        (* The daemon copy only exists to stage the upload; drop it now. *)
+        let* () = F.evict key in
+        Ipc.notify_uploaded ~path:C.notify_path key;
+        if Ipc.auto_evict_enabled ~data_dir:C.data_dir then
+          Ipc.notify_evict ~path:C.notify_path key;
+        Lwt.return_unit);
+    Sp.start ~on_changed:(Ipc.notify_changed ~path:C.notify_path) ();
+    Lwt.return_unit
+
   let mount _mount_point =
     Lwt_main.run
       (let open Lwt.Syntax in
-       let* () =
-         Local.init ~cache_root:C.cache_root ~domain_name:C.domain_name
-       in
-       Sq.start
-         ~upload:(fun ~key ~cancel -> F.upload ~cancel key)
-         ~on_cursor:(fun ~entry_key:_ -> ())
-         ~on_upload_done:(fun ~key ->
-           (* The daemon copy only exists to stage the upload; drop it now. *)
-           let* () = F.evict key in
-           Ipc.notify_uploaded ~path:C.notify_path key;
-           if Ipc.auto_evict_enabled ~data_dir:C.data_dir then
-             Ipc.notify_evict ~path:C.notify_path key;
-           Lwt.return_unit);
-       Sp.start ~on_changed:(Ipc.notify_changed ~path:C.notify_path) ();
-       let* () = Ipc.serve ~path:C.socket_path (H.handler hooks) in
-       Sq.drain ())
+       let* () = init () in
+       let* () = Ipc.serve ~path:C.socket_path handler in
+       drain ())
 end
+
+(* ── Multi-domain start ───────────────────────────────────────────────────── *)
+
+let start ~confs ~socket_path =
+  let open Lwt.Syntax in
+  let error_json msg =
+    Yojson.Safe.to_string (`Assoc [("ok", `Bool false); ("error", `String msg)])
+  in
+  Lwt_main.run
+    (let* domain_runtimes =
+       Lwt_list.map_s
+         (fun (module C : Conf.S) ->
+           let module R = Make (C) in
+           let* () = R.init () in
+           Lwt.return (C.domain_prefix, C.domain_name, R.handler, R.drain))
+         confs
+     in
+     let router line =
+       match Yojson.Safe.from_string line with
+         | exception _ -> Lwt.return (error_json "invalid JSON", `Continue)
+         | `Assoc obj ->
+             let get_str k =
+               match List.assoc_opt k obj with Some (`String s) -> s | _ -> ""
+             in
+             let action = get_str "action" in
+             let path = get_str "path" in
+             let domain = get_str "domain" in
+             let handler_opt =
+               match action with
+                 | ("cursor" | "changes_since") when domain <> "" ->
+                     List.find_opt
+                       (fun (_, dn, _, _) -> dn = domain)
+                       domain_runtimes
+                 | _ ->
+                     List.find_opt
+                       (fun (pfx, _, _, _) ->
+                         let n = String.length pfx in
+                         String.length path >= n && String.sub path 0 n = pfx)
+                       domain_runtimes
+             in
+             let _, _, handler, _ =
+               match handler_opt with
+                 | Some h -> h
+                 | None -> List.hd domain_runtimes
+             in
+             handler line
+         | _ -> Lwt.return (error_json "expected JSON object", `Continue)
+     in
+     let* () = Ipc.serve ~path:socket_path router in
+     Lwt_list.iter_s (fun (_, _, _, drain) -> drain ()) domain_runtimes)

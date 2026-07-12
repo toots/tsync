@@ -45,9 +45,26 @@ let make_backend (bc : Conf_parsing.backend_config) =
   Backend.make ~backend_type:bc.backend_type ~get_field:(fun k ->
       List.assoc_opt k bc.fields)
 
-let make_conf ?domain cfg : (module Conf.S) =
+let default_domain_file () =
+  Filename.concat runtime_paths.Runtime.data_dir "default-domain"
+
+let read_default_domain () =
+  match open_in (default_domain_file ()) with
+    | ic ->
+        let s = String.trim (input_line ic) in
+        close_in ic;
+        if s = "" then None else Some s
+    | exception _ -> None
+
+let make_conf ?domain ?socket_path cfg : (module Conf.S) =
   Tls_conf.apply cfg.Conf_parsing.tls;
+  let domain =
+    match domain with Some _ -> domain | None -> read_default_domain ()
+  in
   let d = Conf_parsing.pick_domain ?domain cfg in
+  let socket_path =
+    Option.value socket_path ~default:runtime_paths.Runtime.socket_path
+  in
   (module struct
     let versioning = d.Conf_parsing.versioning
     let client_name = cfg.Conf_parsing.name
@@ -64,14 +81,15 @@ let make_conf ?domain cfg : (module Conf.S) =
 
     let cache_root = runtime_paths.Runtime.cache_root
     let data_dir = runtime_paths.Runtime.data_dir
-    let socket_path = runtime_paths.Runtime.socket_path
+    let socket_path = socket_path
     let max_uploads = cfg.Conf_parsing.max_uploads
     let max_downloads = cfg.Conf_parsing.max_downloads
     let symlink_policy = d.Conf_parsing.symlink_policy
     let read_only = d.Conf_parsing.read_only
 
     let notify_path =
-      Filename.concat runtime_paths.Runtime.data_dir "notify.sock"
+      Filename.concat runtime_paths.Runtime.data_dir
+        ("notify-" ^ d.Conf_parsing.name ^ ".sock")
   end : Conf.S)
 
 (* ── tsync start ─────────────────────────────────────────────────────────── *)
@@ -105,7 +123,33 @@ let start_cmd =
     Log.init ();
     Log.debug "loading config from %s" runtime_paths.Runtime.config_path;
     let cfg = Conf_parsing.load runtime_paths.Runtime.config_path in
-    let (module C : Conf.S) = make_conf ?domain cfg in
+    (* CLI --tls wins over the config value applied by make_conf. *)
+    if tls <> None then Tls_conf.apply tls;
+    Log.debug "TLS backend: %s (available: %s)" (Tls_conf.current ())
+      (String.concat ", " (Tls_conf.available ()));
+    let domains =
+      let name =
+        match domain with Some n -> Some n | None -> read_default_domain ()
+      in
+      match name with
+        | Some name -> [Conf_parsing.pick_domain ~domain:name cfg]
+        | None ->
+            if cfg.Conf_parsing.domains = [] then
+              failwith "no domains configured";
+            cfg.Conf_parsing.domains
+    in
+    let mount_fn domain_name =
+      match (mount, domains) with
+        | Some p, [_] -> p
+        | _ -> Filename.concat (Sys.getenv "HOME") ("tsync/" ^ domain_name)
+    in
+    let confs =
+      List.map
+        (fun (d : Conf_parsing.domain) ->
+          let socket_path = Runtime.domain_socket_path runtime_paths d.name in
+          make_conf ~domain:d.name ~socket_path cfg)
+        domains
+    in
     (* Lwt_unix defaults to a pool of up to 1000 OS threads for dispatching
        blocking syscalls (file I/O has no non-blocking mode). Under bursty
        concurrent chunk reads and FUSE cache I/O that default lets the pool
@@ -121,24 +165,23 @@ let start_cmd =
        clamp means bursts never hit the ceiling and fall back to synchronous
        execution, which would stall the whole event loop; 256 comfortably
        covers realistic concurrency for this workload. *)
-    Lwt_unix.set_pool_size (min 256 (C.max_uploads + C.max_downloads + 32));
-    (* CLI --tls wins over the config value applied by make_conf. *)
-    if tls <> None then Tls_conf.apply tls;
-    Log.debug "TLS backend: %s (available: %s)" (Tls_conf.current ())
-      (String.concat ", " (Tls_conf.available ()));
-    let mount_point =
-      match mount with
-        | Some p -> p
-        | None -> Filename.concat (Sys.getenv "HOME") ("tsync/" ^ C.domain_name)
+    let total_uploads, total_downloads =
+      List.fold_left
+        (fun (u, d) (module C : Conf.S) ->
+          (u + C.max_uploads, d + C.max_downloads))
+        (0, 0) confs
     in
-    Log.debug "domain: %s, mount point: %s" C.domain_name mount_point;
-    Log.debug "cache root: %s" C.cache_root;
-    mkdir_p mount_point;
-    Log.debug "unmounting any stale FUSE mount";
-    Runtime.pre_start ~mount_point;
+    Lwt_unix.set_pool_size (min 256 (total_uploads + total_downloads + 32));
+    List.iter
+      (fun (module C : Conf.S) ->
+        let mp = mount_fn C.domain_name in
+        Log.debug "domain: %s, mount: %s" C.domain_name mp;
+        mkdir_p mp;
+        Runtime.pre_start ~mount_point:mp)
+      confs;
+    Log.debug "cache root: %s" runtime_paths.Runtime.cache_root;
     Log.debug "initializing runtime";
-    let module R = Runtime.Make (C) in
-    R.mount mount_point
+    Runtime.start ~confs ~mount_fn
   in
   Cmd.v
     (Cmd.info "start" ~doc:"Mount the filesystem (run via systemd unit)")
@@ -301,11 +344,17 @@ let ls_cmd =
       value & flag
       & info ["deleted"; "d"] ~doc:"Also list deleted files in the directory")
   in
-  let run path show_deleted =
+  let domain_arg =
+    Arg.(
+      value
+      & opt (some string) None
+      & info ["domain"] ~docv:"NAME" ~doc:"Domain name (default: from config)")
+  in
+  let run path show_deleted domain =
     Lwt_main.run
       (let open Lwt.Syntax in
        let cfg = Conf_parsing.load runtime_paths.Runtime.config_path in
-       let (module C : Conf.S) = make_conf cfg in
+       let (module C : Conf.S) = make_conf ?domain cfg in
        let module Fs = File_store.Make (C) in
        let mount_point =
          Filename.concat (Sys.getenv "HOME") ("tsync/" ^ C.domain_name)
@@ -381,7 +430,7 @@ let ls_cmd =
   in
   Cmd.v
     (Cmd.info "ls" ~doc:"List files with cache status")
-    Term.(const run $ path_arg $ deleted_arg)
+    Term.(const run $ path_arg $ deleted_arg $ domain_arg)
 
 (* ── tsync versions ──────────────────────────────────────────────────────── *)
 
@@ -396,11 +445,17 @@ let versions_cmd =
   let path_arg =
     Arg.(value & pos 0 (some string) None & info [] ~docv:"PATH")
   in
-  let run path =
+  let domain_arg =
+    Arg.(
+      value
+      & opt (some string) None
+      & info ["domain"] ~docv:"NAME" ~doc:"Domain name (default: from config)")
+  in
+  let run path domain =
     Lwt_main.run
       (let open Lwt.Syntax in
        let cfg = Conf_parsing.load runtime_paths.Runtime.config_path in
-       let (module C : Conf.S) = make_conf cfg in
+       let (module C : Conf.S) = make_conf ?domain cfg in
        let (module B : Backend.S) = List.hd C.backends in
        let parse = Versioning.parse ~versions_prefix:C.versions_prefix in
        match path with
@@ -470,7 +525,7 @@ let versions_cmd =
   Cmd.v
     (Cmd.info "versions"
        ~doc:"List a file's versions, or all deleted files when no PATH is given")
-    Term.(const run $ path_arg)
+    Term.(const run $ path_arg $ domain_arg)
 
 (* ── tsync revert ────────────────────────────────────────────────────────── *)
 
@@ -534,12 +589,18 @@ let expire_cmd =
                }))
     with _ -> failwith ("invalid date (expected YYYY-MM-DD): " ^ s)
   in
-  let run date =
+  let domain_arg =
+    Arg.(
+      value
+      & opt (some string) None
+      & info ["domain"] ~docv:"NAME" ~doc:"Domain name (default: from config)")
+  in
+  let run date domain =
     match
       Lwt_main.run
         (let cutoff = parse_date date in
          let cfg = Conf_parsing.load runtime_paths.Runtime.config_path in
-         let (module C : Conf.S) = make_conf cfg in
+         let (module C : Conf.S) = make_conf ?domain cfg in
          let module E = Expire.Make (C) in
          E.expire ~cutoff ())
     with
@@ -552,7 +613,7 @@ let expire_cmd =
     (Cmd.info "expire"
        ~doc:
          "Remove versions older than DATE, then garbage-collect unused chunks")
-    Term.(const run $ date_arg)
+    Term.(const run $ date_arg $ domain_arg)
 
 (* ── tsync auto-evict ────────────────────────────────────────────────────── *)
 
@@ -1342,6 +1403,47 @@ let paths_cmd =
     (Cmd.info "paths" ~doc:"Show all filesystem paths used by this binary")
     Term.(const run $ const ())
 
+(* ── tsync set-domain ────────────────────────────────────────────────────── *)
+
+let set_domain_cmd =
+  let name_arg =
+    Arg.(value & pos 0 (some string) None & info [] ~docv:"NAME")
+  in
+  let clear_arg =
+    Arg.(value & flag & info ["clear"] ~doc:"Clear the default domain")
+  in
+  let run name clear =
+    let file = default_domain_file () in
+    if clear || name = None then begin
+      (try Unix.unlink file with Unix.Unix_error (Unix.ENOENT, _, _) -> ());
+      print_endline "Default domain cleared."
+    end
+    else begin
+      let cfg = Conf_parsing.load runtime_paths.Runtime.config_path in
+      let name = Option.get name in
+      match
+        List.find_opt
+          (fun (d : Conf_parsing.domain) -> d.name = name)
+          cfg.Conf_parsing.domains
+      with
+        | None ->
+            Printf.eprintf "Domain not found: %s\n" name;
+            exit 1
+        | Some _ ->
+            mkdir_p (Filename.dirname file);
+            let oc = open_out file in
+            output_string oc (name ^ "\n");
+            close_out oc;
+            Printf.printf "Default domain set to: %s\n" name
+    end
+  in
+  Cmd.v
+    (Cmd.info "set-domain"
+       ~doc:
+         "Set (or clear) the default domain used when --domain is omitted. \
+          With no arguments, shows the current default.")
+    Term.(const run $ name_arg $ clear_arg)
+
 (* ── tsync build-config ──────────────────────────────────────────────────── *)
 
 let build_config_cmd =
@@ -1365,6 +1467,7 @@ let () =
         configure_cmd;
         print_conf_cmd;
         paths_cmd;
+        set_domain_cmd;
         start_cmd;
         stop_cmd;
         status_cmd;

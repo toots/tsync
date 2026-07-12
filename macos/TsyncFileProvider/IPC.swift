@@ -8,15 +8,18 @@ public struct IPCRequest: Codable, Sendable {
     public let staging: String?
     public let arg: String?
     public let target: String?
+    public let domain: String?
 
     public init(action: String, path: String? = nil, src: String? = nil,
-                staging: String? = nil, arg: String? = nil, target: String? = nil) {
+                staging: String? = nil, arg: String? = nil, target: String? = nil,
+                domain: String? = nil) {
         self.action = action
         self.path = path
         self.src = src
         self.staging = staging
         self.arg = arg
         self.target = target
+        self.domain = domain
     }
 }
 
@@ -161,12 +164,12 @@ public enum IPC {
         try await sendAsync(IPCRequest(action: "list_all", path: prefix))
     }
 
-    public static func currentCursor() async throws -> IPCResponse {
-        try await sendAsync(IPCRequest(action: "cursor"))
+    public static func currentCursor(domain: String) async throws -> IPCResponse {
+        try await sendAsync(IPCRequest(action: "cursor", domain: domain))
     }
 
-    public static func changesSince(anchor: String) async throws -> IPCResponse {
-        try await sendAsync(IPCRequest(action: "changes_since", arg: anchor))
+    public static func changesSince(anchor: String, domain: String) async throws -> IPCResponse {
+        try await sendAsync(IPCRequest(action: "changes_since", arg: anchor, domain: domain))
     }
 
     public static func ensureCached(key: String) async throws -> IPCResponse {

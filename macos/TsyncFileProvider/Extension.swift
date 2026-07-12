@@ -8,10 +8,12 @@ private let log = Logger(subsystem: "com.toots.tsync", category: "Extension")
 private final class NotifyListener: @unchecked Sendable {
     private let domain: NSFileProviderDomain
     private var serverFD: Int32 = -1
-    private let path = Config.groupContainerURL.appendingPathComponent("tsync/notify.sock").path
+    private let path: String
 
     init(domain: NSFileProviderDomain) {
         self.domain = domain
+        self.path = Config.groupContainerURL
+            .appendingPathComponent("tsync/notify-\(domain.displayName).sock").path
         try? FileManager.default.removeItem(atPath: path)
         serverFD = socket(AF_UNIX, SOCK_STREAM, 0)
         guard serverFD >= 0 else { return }

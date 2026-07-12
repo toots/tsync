@@ -75,6 +75,17 @@ tsync stop            # unmount
 
 Pass `--verbose` (or `-v`) to any command to print detailed progress as it runs.
 
+### Multiple domains
+
+When the config defines more than one domain, pass `--domain <name>` to commands that operate on a specific domain (`ls`, `versions`, `expire`, `sync`, `recheck`, `resync-remote`, `import`, `export`). To avoid repeating `--domain` on every invocation, set a default:
+
+```bash
+tsync set-domain "media"   # persist a default domain for the current machine
+tsync set-domain --clear   # remove the default (--domain required again)
+```
+
+The default is stored in the data directory and read by every command that accepts `--domain`. An explicit `--domain` flag always overrides it.
+
 ### Glob patterns for `--exclude`
 
 `--exclude` accepts shell-style glob patterns matched against each entry's basename **and** its full relative path, so a bare name like `node_modules` prunes that directory anywhere in the tree.

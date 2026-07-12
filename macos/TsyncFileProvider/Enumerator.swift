@@ -62,7 +62,8 @@ final class TsyncEnumerator: NSObject, NSFileProviderEnumerator, @unchecked Send
             let anchorStr = String(data: anchor.rawValue, encoding: .utf8) ?? ""
             do {
                 // "0" is the sentinel empty cursor; the daemon wants "" for "from the start".
-                let resp = try await IPC.changesSince(anchor: anchorStr == "0" ? "" : anchorStr)
+                let resp = try await IPC.changesSince(anchor: anchorStr == "0" ? "" : anchorStr,
+                                                      domain: domain.displayName)
                 // The journal was pruned past our anchor (or was cleaned up entirely): we
                 // can't produce a complete delta, so tell the OS to drop its cache and
                 // re-run enumerateItems for a full re-list.
@@ -95,7 +96,7 @@ final class TsyncEnumerator: NSObject, NSFileProviderEnumerator, @unchecked Send
     func currentSyncAnchor(completionHandler: @escaping (NSFileProviderSyncAnchor?) -> Void) {
         Task {
             do {
-                let resp = try await IPC.currentCursor()
+                let resp = try await IPC.currentCursor(domain: domain.displayName)
                 completionHandler(syncAnchor(resp.cursor ?? ""))
             } catch {
                 completionHandler(startupAnchor)

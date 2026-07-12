@@ -9,6 +9,7 @@ type paths = {
 
 val default_paths : unit -> paths
 val pre_start : mount_point:string -> unit
+val domain_socket_path : paths -> string -> string
 
 val is_local :
   cache_root:string ->
@@ -17,6 +18,4 @@ val is_local :
   string ->
   bool
 
-module Make (C : Conf.S) : sig
-  val mount : string -> unit
-end
+val start : confs:(module Conf.S) list -> mount_fn:(string -> string) -> unit
