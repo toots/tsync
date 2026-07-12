@@ -38,6 +38,57 @@ let list_dir ~cache_root ~domain_name ~domain_prefix key =
   let* is_dir = is_directory path in
   if is_dir then readdir_list path else Lwt.return_nil
 
+let list_directory ~cache_root ~domain_name ~domain_prefix ~prefix () =
+  let reldir = strip_prefix ~domain_prefix prefix in
+  let reldir_clean =
+    let n = String.length reldir in
+    if n > 0 && reldir.[n - 1] = '/' then String.sub reldir 0 (n - 1)
+    else reldir
+  in
+  let root = manifest_dir ~cache_root domain_name in
+  let dir =
+    if reldir_clean = "" then root
+    else Filename.concat root (Fs_util.encode_key reldir_clean)
+  in
+  let* dir_exists = is_directory dir in
+  if not dir_exists then Lwt.return ([], [])
+  else
+    let* names = readdir_list dir in
+    Lwt_list.fold_left_s
+      (fun (files, dirs) name ->
+        if Filename.check_suffix name ".tmp" then Lwt.return (files, dirs)
+        else (
+          let path = Filename.concat dir name in
+          let* is_dir = is_directory path in
+          if is_dir then Lwt.return (files, Fs_util.decode_key name :: dirs)
+          else (
+            let key = domain_prefix ^ reldir ^ Fs_util.decode_key name in
+            let+ content =
+              Lwt.catch
+                (fun () ->
+                  let+ s =
+                    Lwt_unix_retry.with_file ~mode:Lwt_io.Input path Lwt_io.read
+                  in
+                  Some s)
+                (fun _ -> Lwt.return_none)
+            in
+            match content with
+              | None -> (files, dirs)
+              | Some s -> (
+                  match Manifest.of_string s with
+                    | `Dirty -> (files, dirs)
+                    | `Clean m ->
+                        let entry =
+                          Backend.
+                            {
+                              key;
+                              size = Int64.to_int m.size;
+                              last_modified = m.mtime;
+                            }
+                        in
+                        (entry :: files, dirs)))))
+      ([], []) names
+
 (* All manifest sidecars under the domain's manifest tree, as domain-relative
    paths (unsorted). Empty when the tree does not exist. *)
 let walk_manifests ~cache_root ~domain_name () =

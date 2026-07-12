@@ -382,7 +382,10 @@ let ls_cmd =
                in
                dp ^ rel
        in
-       let* files, subdirs = Fs.list_directory ~prefix in
+       let* files, subdirs =
+         Local.list_directory ~cache_root:C.cache_root
+           ~domain_name:C.domain_name ~domain_prefix:C.domain_prefix ~prefix ()
+       in
        let dp_len = String.length C.domain_prefix in
        List.iter
          (fun (e : Backend.file_entry) ->

@@ -161,7 +161,7 @@ S3 connections go through `conduit`, which can use one of two TLS implementation
 The choice is process-global (one backend per daemon) and can be set two ways, highest priority first:
 
 1. **CLI flag** — `tsync start --tls native|openssl` (overrides the config).
-2. **Config** — the top-level `"tls": "native"|"openssl"` field (applies to every S3 command: `start`, `ls`, `versions`, `expire`, `sync`).
+2. **Config** — the top-level `"tls": "native"|"openssl"` field (applies to every S3 command: `start`, `versions`, `expire`, `sync`).
 
 If neither is set, the preferred available backend is used: OpenSSL when it is compiled in (for performance), otherwise native. Selecting a backend that isn't compiled in fails immediately, listing what is available.
 
@@ -250,6 +250,10 @@ Multiple clients can mount the same domain concurrently. Each client applies the
 **Crash recovery.** Each mutation writes a local pending journal entry before the backend operation and deletes it after the journal entry is published; on startup, leftover pending entries are replayed. A backend operation that fails synchronously also deletes its pending entry — the error is reported to the caller, so replaying a known-failed op at every startup would be wrong.
 
 **FileProvider integration.** On macOS the poller runs in the daemon, not the sandboxed extension. After applying foreign ops it sends `CHANGED <key>` over `notify.sock`; the extension responds with `evictItem` + `signalEnumerator`, so Finder drops stale content and re-fetches metadata.
+
+### `tsync ls`
+
+Lists the immediate contents of a domain directory. The local manifest tree (`<cache_root>/.manifest/<domain>/`) is the source of truth: `ls` reads file names, sizes, and mtimes entirely from local manifest sidecars — no backend request is made. Each entry is shown as `local` (data file present) or `cloud` (evicted; manifest only). With `--deleted`, it additionally queries the backend for versioned paths with no live manifest.
 
 ### `tsync sync`
 
