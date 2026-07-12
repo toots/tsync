@@ -5,7 +5,8 @@ module Make (C : Conf.S) : sig
   val rename_directory : src_prefix:string -> dst_prefix:string -> unit Lwt.t
 
   val list_directory :
-    prefix:string -> (Backend.file_entry list * string list) Lwt.t
+    prefix:string ->
+    (Backend.file_entry list * (string * float option) list) Lwt.t
 
   val list_all_files : prefix:string -> Backend.file_entry list Lwt.t
   val head_opt : key:string -> Backend.file_entry option Lwt.t

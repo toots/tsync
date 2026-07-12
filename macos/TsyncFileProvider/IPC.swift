@@ -29,6 +29,11 @@ public struct IPCOp: Codable, Sendable {
     public let src: String?
 }
 
+public struct IPCDirEntry: Codable, Sendable {
+    public let key: String
+    public let mtime: Double?
+}
+
 public struct IPCFileEntry: Codable, Sendable {
     public let key: String
     public let size: Int64
@@ -44,7 +49,7 @@ public struct IPCResponse: Codable, Sendable {
     public let mtime: Double?
     public let etag: String?
     public let localPath: String?
-    public let dirs: [String]?
+    public let dirs: [IPCDirEntry]?
     public let files: [IPCFileEntry]?
     public let isUploaded: Bool?
     public let cursor: String?
@@ -54,7 +59,7 @@ public struct IPCResponse: Codable, Sendable {
 
     public init(ok: Bool, error: String? = nil, size: Int64? = nil, mtime: Double? = nil,
                 etag: String? = nil, localPath: String? = nil,
-                dirs: [String]? = nil, files: [IPCFileEntry]? = nil,
+                dirs: [IPCDirEntry]? = nil, files: [IPCFileEntry]? = nil,
                 isUploaded: Bool? = nil, cursor: String? = nil, ops: [IPCOp]? = nil,
                 stale: Bool? = nil, symlinkTarget: String? = nil) {
         self.ok = ok; self.error = error; self.size = size; self.mtime = mtime

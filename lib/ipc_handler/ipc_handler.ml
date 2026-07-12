@@ -100,7 +100,18 @@ module Make (C : Conf.S) (F : File.S) = struct
        list_all and the change journal — one identity per directory everywhere. *)
     ok_json
       [
-        ("dirs", `List (List.map (fun d -> `String (prefix ^ d ^ "/")) dirs));
+        ( "dirs",
+          `List
+            (List.map
+               (fun (d, mtime) ->
+                 let fields = [("key", `String (prefix ^ d ^ "/"))] in
+                 let fields =
+                   match mtime with
+                     | None -> fields
+                     | Some t -> fields @ [("mtime", `Float t)]
+                 in
+                 `Assoc fields)
+               dirs) );
         ("files", `List files_json);
       ]
 

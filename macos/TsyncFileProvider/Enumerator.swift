@@ -38,7 +38,9 @@ final class TsyncEnumerator: NSObject, NSFileProviderEnumerator, @unchecked Send
                 var items: [TsyncItem] = []
 
                 for dir in resp.dirs ?? [] {
-                    items.append(TsyncItem.make(key: dir, domainPrefix: domainPrefix, readOnly: isReadOnly))
+                    items.append(TsyncItem.make(
+                        key: dir.key, domainPrefix: domainPrefix, readOnly: isReadOnly,
+                        modificationDate: dir.mtime.map { Date(timeIntervalSince1970: $0) }))
                 }
                 for entry in resp.files ?? [] {
                     items.append(TsyncItem.make(

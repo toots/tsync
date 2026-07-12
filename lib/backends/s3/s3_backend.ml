@@ -175,11 +175,21 @@ let list_directory t ~prefix () =
         in
         match String.index_opt rest '/' with
           | None -> files := e :: !files
-          | Some i -> Hashtbl.replace dirs (String.sub rest 0 i) ()
+          | Some i -> (
+              let dir_name = String.sub rest 0 i in
+              let mtime =
+                if i = String.length rest - 1 then Some e.last_modified
+                else None
+              in
+              match Hashtbl.find_opt dirs dir_name with
+                | None -> Hashtbl.add dirs dir_name mtime
+                | Some None when mtime <> None ->
+                    Hashtbl.replace dirs dir_name mtime
+                | Some _ -> ())
       end)
     all;
-  let subdirs = Hashtbl.fold (fun k () acc -> k :: acc) dirs [] in
-  (List.rev !files, List.sort String.compare subdirs)
+  let subdirs = Hashtbl.fold (fun k mtime acc -> (k, mtime) :: acc) dirs [] in
+  (List.rev !files, List.sort (fun (a, _) (b, _) -> String.compare a b) subdirs)
 
 let make ?endpoint ?unsigned_payload ~bucket ~region ~access_key_id
     ~secret_access_key () : (module Backend.S) =

@@ -13,7 +13,9 @@ module type S = sig
   val list_all : prefix:string -> unit -> file_entry list Lwt.t
 
   val list_directory :
-    prefix:string -> unit -> (file_entry list * string list) Lwt.t
+    prefix:string ->
+    unit ->
+    (file_entry list * (string * float option) list) Lwt.t
 end
 
 type factory = (string -> string option) -> (module S)
@@ -69,7 +71,7 @@ let with_key_encoding (module B : S) : (module S) =
         B.list_directory ~prefix:(Fs_util.encode_key prefix) ()
       in
       ( List.map (fun e -> { e with key = Fs_util.decode_key e.key }) files,
-        List.map Fs_util.decode_component dirs )
+        List.map (fun (d, mtime) -> (Fs_util.decode_component d, mtime)) dirs )
   end)
 
 let make ~backend_type ~get_field =

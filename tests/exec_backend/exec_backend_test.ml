@@ -72,7 +72,7 @@ let main () =
   let* files, subdirs = B.list_directory ~prefix:"" () in
   print_endline "list_directory \"\":";
   List.iter print_entry files;
-  List.iter (fun d -> Printf.printf "  dir %s\n" d) subdirs;
+  List.iter (fun (d, _) -> Printf.printf "  dir %s\n" d) subdirs;
   let* () = B.delete ~key:"a.txt" () in
   let* _ = head "a.txt" in
   let* () = B.delete_multi ["sub/b.txt"; "we ird'name.txt"] in
