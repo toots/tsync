@@ -43,6 +43,19 @@ let make ~root : (module Backend.S) =
                    ("local get " ^ key ^ ": " ^ Unix.error_message e))
           | exn -> Lwt.fail exn)
 
+    let get_opt ~key () =
+      Lwt.catch
+        (fun () ->
+          let+ data = read_file (resolve key) in
+          Some data)
+        (function
+          | Unix.Unix_error (Unix.ENOENT, _, _) -> Lwt.return_none
+          | Unix.Unix_error (e, _, _) ->
+              Lwt.fail
+                (Backend.Backend_error
+                   ("local get " ^ key ^ ": " ^ Unix.error_message e))
+          | exn -> Lwt.fail exn)
+
     let head_opt ~key () =
       Lwt.catch
         (fun () ->

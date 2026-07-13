@@ -73,12 +73,8 @@ module Make (C : Conf.S) = struct
 
   let fetch_cursor () =
     let (module Primary : Backend.S) = primary () in
-    let* head = Primary.head_opt ~key:C.cursor_key () in
-    match head with
-      | None -> Lwt.return_none
-      | Some _ ->
-          let+ s = Primary.get ~key:C.cursor_key () in
-          Some (String.trim s)
+    let+ body = Primary.get_opt ~key:C.cursor_key () in
+    Option.map String.trim body
 
   let list_journal_keys ?start_after () =
     let (module Primary : Backend.S) = primary () in

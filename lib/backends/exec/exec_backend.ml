@@ -78,6 +78,18 @@ let make ~command ~root : (module Backend.S) =
     let get ~key () =
       run_ok ~op:"get" ~key (Printf.sprintf "cat %s" (q (resolve key)))
 
+    let get_opt ~key () =
+      let path = q (resolve key) in
+      let* status, stdout, stderr =
+        run
+          (Printf.sprintf "test -e %s || exit %d; cat %s" path not_found_exit
+             path)
+      in
+      match status with
+        | Unix.WEXITED n when n = not_found_exit -> Lwt.return_none
+        | Unix.WEXITED 0 -> Lwt.return_some stdout
+        | _ -> Lwt.fail (error "get" key stderr)
+
     let head_opt ~key () =
       let path = q (resolve key) in
       let* status, stdout, stderr =

@@ -138,7 +138,7 @@ final class TsyncExtension: NSObject, NSFileProviderReplicatedExtension, @unchec
                 guard let localPath = resp.localPath else { throw IPC.IPCError.badResponse }
                 let item = try await resolveItem(itemIdentifier, isDownloaded: true)
                 progress.completedUnitCount = 100
-                completionHandler(URL(fileURLWithPath: localPath), item, nil)
+                completionHandler(cloneForSystem(URL(fileURLWithPath: localPath)), item, nil)
             } catch {
                 log.error("fetchContents error: \(key, privacy: .public): \(error, privacy: .public)")
                 completionHandler(nil, nil, IPC.fileProviderError(error))
@@ -321,6 +321,22 @@ final class TsyncExtension: NSObject, NSFileProviderReplicatedExtension, @unchec
         // Parent key always ends in "/" (root maps to the domain prefix, dir keys keep their slash).
         let parentKey = ItemID.key(for: item.parentItemIdentifier, domainPrefix: domainPrefix)
         return parentKey + item.filename
+    }
+
+    /// Hand fileproviderd its own copy instead of the daemon's live cache file: the system
+    /// may move the returned URL, and an EVICT can race the transfer. The provider temp
+    /// directory is on the same volume, so the copy is an APFS clone (no data duplicated).
+    private func cloneForSystem(_ src: URL) -> URL {
+        guard let manager = NSFileProviderManager(for: domain),
+              let tmpDir = try? manager.temporaryDirectoryURL() else { return src }
+        let dst = tmpDir.appendingPathComponent(UUID().uuidString)
+        do {
+            try FileManager.default.copyItem(at: src, to: dst)
+            return dst
+        } catch {
+            log.error("cloneForSystem failed, returning cache path: \(error, privacy: .public)")
+            return src
+        }
     }
 
     private func stageContent(_ url: URL) throws -> URL {

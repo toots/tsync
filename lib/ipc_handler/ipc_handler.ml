@@ -28,45 +28,73 @@ module Make (C : Conf.S) (F : File.S) = struct
 
   (* ── File operation handlers ──────────────────────────────────────────── *)
 
-  let file_etag key =
-    let+ m = F.resolved_manifest key in
-    match m with Some (`Clean m) -> m.Manifest.h1 | _ -> ""
+  let stat_opt path =
+    Lwt.catch
+      (fun () ->
+        let+ st = Lwt_unix_retry.LargeFile.stat path in
+        Some st)
+      (fun _ -> Lwt.return_none)
 
+  (* Resolve the manifest once (local sidecar, else a single backend GET) and
+     derive size, mtime, etag and upload state from it. Going through F.stat
+     plus a separate etag lookup would fetch the same manifest up to twice
+     more per call, and fileproviderd stats items constantly. *)
   let handle_stat key =
-    let* st = F.stat key in
-    match st with
-      | Some st ->
-          let* m = F.read_manifest key in
-          let is_dirty = match m with Some `Dirty -> true | _ -> false in
-          let symlink_target =
-            match m with
-              | Some (`Clean { Manifest.symlink = Some t; _ }) -> Some t
-              | _ -> None
-          in
-          let+ etag = file_etag key in
-          let fields =
-            [
-              ("size", `Int (Int64.to_int st.Unix.LargeFile.st_size));
-              ("mtime", `Float st.Unix.LargeFile.st_mtime);
-              ("etag", `String etag);
-              ("isUploaded", `Bool (not is_dirty));
-            ]
-            @
-              match symlink_target with
-              | None -> []
-              | Some t -> [("symlinkTarget", `String t)]
-          in
-          ok_json fields
-      (* F.stat already resolves a backend-only file's manifest, so a None here means
-         the key exists nowhere. *)
-      | None -> Lwt.return (error_json "not found")
+    let* mst = stat_opt (F.manifest_path key) in
+    match mst with
+      | Some { Unix.LargeFile.st_kind = Unix.S_DIR; _ } ->
+          Lwt.return
+            (ok_json
+               [
+                 ("size", `Int 0);
+                 ("mtime", `Float (Unix.gettimeofday ()));
+                 ("etag", `String "");
+                 ("isUploaded", `Bool true);
+               ])
+      | _ -> (
+          let* m = F.resolved_manifest key in
+          match m with
+            | Some (`Clean m) ->
+                let fields =
+                  [
+                    ("size", `Int (Int64.to_int m.Manifest.size));
+                    ("mtime", `Float m.Manifest.mtime);
+                    ("etag", `String m.Manifest.h1);
+                    ("isUploaded", `Bool true);
+                  ]
+                  @
+                    match m.Manifest.symlink with
+                    | None -> []
+                    | Some t -> [("symlinkTarget", `String t)]
+                in
+                Lwt.return (ok_json fields)
+            | Some `Dirty -> (
+                let* st = stat_opt (F.local_path key) in
+                match st with
+                  | Some st ->
+                      Lwt.return
+                        (ok_json
+                           [
+                             ( "size",
+                               `Int (Int64.to_int st.Unix.LargeFile.st_size) );
+                             ("mtime", `Float st.Unix.LargeFile.st_mtime);
+                             ("etag", `String "");
+                             ("isUploaded", `Bool false);
+                           ])
+                  | None -> Lwt.return (error_json "not found"))
+            | None -> Lwt.return (error_json "not found"))
 
   (* The listed objects are manifests, so their backend size/mtime are the manifest's,
      not the file's. Resolve the manifest (local sidecar, else fetched from the backend)
      to report the real logical size/mtime and the content hash (h1) as the etag — the
      same identity stat returns. Dirty or unknown files have no clean hash: fall back to
      the backend metadata with an empty etag. *)
+  (* Bounds concurrent per-file manifest resolutions during enumeration. *)
+  let resolve_pool =
+    Lwt_pool.create (max 1 C.max_downloads) (fun () -> Lwt.return_unit)
+
   let file_entry_json (e : Backend.file_entry) =
+    Lwt_pool.use resolve_pool @@ fun () ->
     let+ m = F.resolved_manifest e.key in
     let key = ("key", `String e.key) in
     match m with
@@ -95,7 +123,10 @@ module Make (C : Conf.S) (F : File.S) = struct
 
   let handle_list_dir prefix =
     let* files, dirs = Fs.list_directory ~prefix in
-    let+ files_json = Lwt_list.map_s file_entry_json files in
+    (* map_p: uncached entries each cost a backend GET; resolving them
+       sequentially made cold enumeration O(files) round trips end-to-end.
+       [resolve_pool] bounds the fan-out; map_p preserves result order. *)
+    let+ files_json = Lwt_list.map_p file_entry_json files in
     (* Emit directories as full keys ending in "/", the same representation used by
        list_all and the change journal — one identity per directory everywhere. *)
     ok_json
@@ -117,7 +148,7 @@ module Make (C : Conf.S) (F : File.S) = struct
 
   let handle_list_all prefix =
     let* files = Fs.list_all_files ~prefix in
-    let+ files_json = Lwt_list.map_s file_entry_json files in
+    let+ files_json = Lwt_list.map_p file_entry_json files in
     ok_json [("files", `List files_json)]
 
   (* ── Change feed (journal delta) ──────────────────────────────────────── *)

@@ -41,18 +41,24 @@ let of_json json =
   let open Yojson.Basic.Util in
   if try json |> member "dirty" |> to_bool with _ -> false then `Dirty
   else (
+    (* A malformed chunk list must fail the parse: defaulting to [] would make
+       a corrupt manifest read as a clean, chunkless file and download as
+       zero-filled bytes of the stated size. Real files always have >= 1 chunk
+       (even empty ones); only symlink manifests are legitimately chunkless. *)
     let chunks =
-      try
-        json |> member "chunks" |> to_list
-        |> List.map (fun c ->
-            {
-              index = c |> member "index" |> to_int;
-              h1 = c |> member "h1" |> to_string;
-              h2 = c |> member "h2" |> to_string;
-              size = c |> member "size" |> to_int;
-            })
-      with _ -> []
+      json |> member "chunks" |> to_list
+      |> List.map (fun c ->
+          {
+            index = c |> member "index" |> to_int;
+            h1 = c |> member "h1" |> to_string;
+            h2 = c |> member "h2" |> to_string;
+            size = c |> member "size" |> to_int;
+          })
     in
+    let symlink =
+      match json |> member "symlink" with `String s -> Some s | _ -> None
+    in
+    if chunks = [] && symlink = None then failwith "manifest: empty chunk list";
     `Clean
       {
         v = (try json |> member "v" |> to_int with _ -> 1);
@@ -63,10 +69,7 @@ let of_json json =
         h1 = (try json |> member "h1" |> to_string with _ -> "");
         h2 = (try json |> member "h2" |> to_string with _ -> "");
         mtime = json |> member "mtime" |> to_float;
-        symlink =
-          (match json |> member "symlink" with
-            | `String s -> Some s
-            | _ -> None);
+        symlink;
       })
 
 let of_string s = of_json (Yojson.Basic.from_string s)

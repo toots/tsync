@@ -94,10 +94,16 @@ public enum IPC {
 
     // FileProvider only accepts errors in NSCocoaErrorDomain or NSFileProviderErrorDomain.
     // Returning our own domain makes fileproviderd treat the failure as fatal and cache an
-    // empty listing forever. Map to serverUnreachable so it retries once the daemon is up.
+    // empty listing forever, so every IPCError must be mapped: "not found" to noSuchItem,
+    // everything else (connection failures, daemon-side S3 errors — transient from our
+    // perspective) to serverUnreachable so fileproviderd retries. Non-IPC errors (e.g.
+    // CocoaError from staging file operations) are already in an accepted domain.
     static func fileProviderError(_ error: Error) -> Error {
         switch error {
-        case IPCError.connectionFailed, IPCError.daemonNotRunning:
+        case IPCError.remoteError("not found"):
+            return NSError(domain: NSFileProviderError.errorDomain,
+                           code: NSFileProviderError.noSuchItem.rawValue)
+        case is IPCError:
             return NSError(domain: NSFileProviderError.errorDomain,
                            code: NSFileProviderError.serverUnreachable.rawValue)
         default:
