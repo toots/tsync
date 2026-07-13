@@ -88,6 +88,20 @@ let get t ~key () =
   in
   unwrap "get" res
 
+let get_opt t ~key () =
+  let+ res =
+    with_retry "get" (fun () ->
+        S3.get ~credentials:t.credentials ~endpoint:t.endpoint ~bucket:t.bucket
+          ~key ())
+  in
+  match res with
+    | Ok body -> Some body
+    | Error S3.Not_found -> None
+    | Error e ->
+        let msg = string_of_error e in
+        Log.err "s3 get %s: %s" key msg;
+        raise (s3_eio msg)
+
 let head_opt t ~key () =
   let+ res =
     with_retry "head" (fun () ->
@@ -200,6 +214,7 @@ let make ?endpoint ?unsigned_payload ~bucket ~region ~access_key_id
   (module struct
     let put ~key ~data () = put t ~key ~data ()
     let get ~key () = get t ~key ()
+    let get_opt ~key () = get_opt t ~key ()
     let head_opt ~key () = head_opt t ~key ()
     let delete ~key () = delete t ~key ()
     let delete_multi keys = delete_multi t keys

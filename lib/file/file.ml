@@ -383,11 +383,16 @@ module Make (C : Conf.S) (Sq : Sync_queue.S) : S = struct
     let* () = ensure_cached key in
     Local_io.read (local_path key) buf ~offset
 
+  let cancel_upload key = Sq.cancel_put key
+
   let write key (buf : buffer) ~offset =
+    (* An in-flight upload reads the file with pread while we mutate it in
+       place: cancel it, or it publishes a manifest for torn content (and its
+       completion would clear the dirty flag set below). The writer's release
+       re-queues the upload. *)
+    ignore (cancel_upload key);
     let* () = mark_dirty key in
     Local_io.write (local_path key) buf ~offset
-
-  let cancel_upload key = Sq.cancel_put key
 
   let truncate key size =
     ignore (cancel_upload key);
@@ -666,63 +671,55 @@ module Make (C : Conf.S) (Sq : Sync_queue.S) : S = struct
 
   (* ── Foreign op application (sync) ────────────────────────────────────── *)
 
+  (* Failures propagate to the caller: the sync poller must not advance its
+     high-water mark past an entry it could not apply, or the op is lost
+     until a full resync. *)
   let apply_one op =
-    Lwt.catch
-      (fun () ->
-        match op with
-          | `Put (rel, _) ->
-              let key = C.domain_prefix ^ rel in
-              if (not (is_dirty key)) && not (is_open key) then (
-                ignore (cancel_upload key);
-                let* m = R.fetch_manifest ~key () in
-                match m with
-                  | None -> Lwt.return_unit
-                  | Some state ->
-                      let* () = write_manifest key state in
-                      evict key)
-              else Lwt.return_unit
-          | `Delete rel ->
-              let key = C.domain_prefix ^ rel in
-              if (not (is_dirty key)) && not (is_open key) then (
-                ignore (cancel_upload key);
-                clear_local key)
-              else Lwt.return_unit
-          | `Mkdir rel ->
-              Local.create_dir ~cache_root:C.cache_root
-                ~domain_name:C.domain_name ~domain_prefix:C.domain_prefix
-                (C.domain_prefix ^ rel)
-          | `Rmdir rel ->
-              Local.delete_dir ~cache_root:C.cache_root
-                ~domain_name:C.domain_name ~domain_prefix:C.domain_prefix
-                (C.domain_prefix ^ rel)
-          | `Rename { Journal.src; dst; is_dir = true; _ } ->
-              let src_key = C.domain_prefix ^ src in
-              let dst_key = C.domain_prefix ^ dst in
-              let* exists =
-                Lwt_unix_retry.file_exists (manifest_path src_key)
-              in
-              if exists && (not (is_dirty src_key)) && not (is_open src_key)
-              then rename_local ~src:src_key ~dst:dst_key
-              else Lwt.return_unit
-          | `Rename { Journal.src; dst; is_dir = false; _ } ->
-              let src_key = C.domain_prefix ^ src in
-              let dst_key = C.domain_prefix ^ dst in
-              let* exists =
-                Lwt_unix_retry.file_exists (manifest_path src_key)
-              in
-              if exists && (not (is_dirty src_key)) && not (is_open src_key)
-              then rename_local ~src:src_key ~dst:dst_key
-              else if (not (is_dirty dst_key)) && not (is_open dst_key) then
-                (* No local copy of src (e.g. we renamed it ourselves and
+    match op with
+      | `Put (rel, _) ->
+          let key = C.domain_prefix ^ rel in
+          if (not (is_dirty key)) && not (is_open key) then (
+            ignore (cancel_upload key);
+            let* m = R.fetch_manifest ~key () in
+            match m with
+              | None -> Lwt.return_unit
+              | Some state ->
+                  let* () = write_manifest key state in
+                  evict key)
+          else Lwt.return_unit
+      | `Delete rel ->
+          let key = C.domain_prefix ^ rel in
+          if (not (is_dirty key)) && not (is_open key) then (
+            ignore (cancel_upload key);
+            clear_local key)
+          else Lwt.return_unit
+      | `Mkdir rel ->
+          Local.create_dir ~cache_root:C.cache_root ~domain_name:C.domain_name
+            ~domain_prefix:C.domain_prefix (C.domain_prefix ^ rel)
+      | `Rmdir rel ->
+          Local.delete_dir ~cache_root:C.cache_root ~domain_name:C.domain_name
+            ~domain_prefix:C.domain_prefix (C.domain_prefix ^ rel)
+      | `Rename { Journal.src; dst; is_dir = true; _ } ->
+          let src_key = C.domain_prefix ^ src in
+          let dst_key = C.domain_prefix ^ dst in
+          let* exists = Lwt_unix_retry.file_exists (manifest_path src_key) in
+          if exists && (not (is_dirty src_key)) && not (is_open src_key) then
+            rename_local ~src:src_key ~dst:dst_key
+          else Lwt.return_unit
+      | `Rename { Journal.src; dst; is_dir = false; _ } ->
+          let src_key = C.domain_prefix ^ src in
+          let dst_key = C.domain_prefix ^ dst in
+          let* exists = Lwt_unix_retry.file_exists (manifest_path src_key) in
+          if exists && (not (is_dirty src_key)) && not (is_open src_key) then
+            rename_local ~src:src_key ~dst:dst_key
+          else if (not (is_dirty dst_key)) && not (is_open dst_key) then
+            (* No local copy of src (e.g. we renamed it ourselves and
                    published the result): adopt the remote state of dst. *)
-                let* m = R.fetch_manifest ~key:dst_key () in
-                match m with
-                  | Some (`Clean _ as state) -> write_manifest dst_key state
-                  | _ -> Lwt.return_unit
-              else Lwt.return_unit)
-      (fun exn ->
-        Log.err "apply_foreign_ops: %s" (Printexc.to_string exn);
-        Lwt.return_unit)
+            let* m = R.fetch_manifest ~key:dst_key () in
+            match m with
+              | Some (`Clean _ as state) -> write_manifest dst_key state
+              | _ -> Lwt.return_unit
+          else Lwt.return_unit
 
   let apply_foreign_ops ops =
     with_meta (fun () -> Lwt_list.iter_s apply_one ops)

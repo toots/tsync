@@ -18,7 +18,7 @@ let manifest_matches (a : Manifest.t) (b : Manifest.t) =
 
 (* Read [len] bytes at [offset] from [fd] into [buf] (starting at 0). Uses
    positioned reads rather than lseek+read: chunks, including chunks of the
-   same file, are read concurrently (see [Buffer_pool] and [max_uploads]),
+   same file, are read concurrently (see [chunk_buffers] and [max_uploads]),
    and a shared fd's seek position would race across concurrent readers.
    pread has no such shared state, so one fd can be opened per file instead
    of per chunk — each open, seek and close was a separate blocking syscall
@@ -37,70 +37,6 @@ let read_chunk_into fd offset len buf =
   in
   loop 0
 
-(* A small pool of fixed-size buffers reused across chunk reads, shared by
-   every concurrent upload — not one pool per file. Chunks are 8 MB:
-   allocating one fresh per read puts a constant stream of large blocks
-   straight on the OCaml major heap, which under sustained upload traffic
-   shows up as significant GC (mark/sweep) and runtime allocation-tracking
-   overhead. Reusing a bounded set of buffers turns that into a one-time
-   allocation per slot. Buffers are allocated lazily on first use of each
-   slot, not up front: most of the time no upload is in flight at all, and
-   we don't want [count] * chunk_size held idle for that case. Callers must
-   not retain the string handed back after releasing the buffer: it aliases
-   the buffer's backing memory.
-
-   Acquiring from this pool is also what actually bounds concurrent chunk
-   work system-wide: a chunk read blocks here until a slot frees, regardless
-   of which file, or how many files, are contending for one. Sizing the pool
-   to [max_uploads] makes that config value the single, real ceiling on
-   total concurrent upload operations, rather than a per-file worker count
-   with its own separate, hidden multiplier. *)
-module Buffer_pool = struct
-  type t = {
-    size : int;
-    buffers : Bytes.t option array;
-    mutable free : int list;
-    mutex : Lwt_mutex.t;
-    not_empty : unit Lwt_condition.t;
-  }
-
-  let create ~count ~size =
-    {
-      size;
-      buffers = Array.make count None;
-      free = List.init count Fun.id;
-      mutex = Lwt_mutex.create ();
-      not_empty = Lwt_condition.create ();
-    }
-
-  let acquire t =
-    Lwt_mutex.with_lock t.mutex (fun () ->
-        let rec wait () =
-          match t.free with
-            | i :: rest ->
-                t.free <- rest;
-                let buf =
-                  match t.buffers.(i) with
-                    | Some buf -> buf
-                    | None ->
-                        let buf = Bytes.create t.size in
-                        t.buffers.(i) <- Some buf;
-                        buf
-                in
-                Lwt.return (i, buf)
-            | [] ->
-                let* () = Lwt_condition.wait ~mutex:t.mutex t.not_empty in
-                wait ()
-        in
-        wait ())
-
-  let release t i =
-    Lwt_mutex.with_lock t.mutex (fun () ->
-        t.free <- i :: t.free;
-        Lwt_condition.signal t.not_empty ();
-        Lwt.return_unit)
-end
-
 module Make (C : Conf.S) = struct
   let primary () =
     match C.backends with
@@ -112,10 +48,20 @@ module Make (C : Conf.S) = struct
       (fun (module B : Backend.S) -> B.put ~key ~data ())
       C.backends
 
-  (* Sized to [max_uploads]: see the [Buffer_pool] module comment for why
-     that's what bounds real concurrent upload work. *)
+  (* A bounded pool of 8 MB chunk buffers, shared by every concurrent upload.
+     Reusing a fixed set avoids a constant stream of large major-heap
+     allocations (significant GC overhead under sustained upload traffic);
+     Lwt_pool allocates each slot lazily, so nothing is held when no upload
+     is in flight. Callers must not retain the string derived from a buffer
+     past the pool callback: it aliases the buffer's backing memory.
+
+     Acquiring from this pool is also what actually bounds concurrent chunk
+     work system-wide: a chunk read blocks here until a slot frees, whatever
+     file it belongs to, making [max_uploads] the single, real ceiling on
+     concurrent upload operations. *)
   let chunk_buffers =
-    Buffer_pool.create ~count:C.max_uploads ~size:Manifest.chunk_size
+    Lwt_pool.create (max 1 C.max_uploads) (fun () ->
+        Lwt.return (Bytes.create Manifest.chunk_size))
 
   (* Chunk keys known to exist on the primary backend, for this session only.
      A HEAD check decides existence per chunk; once confirmed (either found
@@ -161,9 +107,7 @@ module Make (C : Conf.S) = struct
     if !cancel then raise Cancelled;
     let offset = index * Manifest.chunk_size in
     let size = min Manifest.chunk_size (file_size - offset) in
-    let* slot, buf = Buffer_pool.acquire chunk_buffers in
-    Lwt.finalize
-      (fun () ->
+    Lwt_pool.use chunk_buffers (fun buf ->
         let* () = read_chunk_into fd offset size buf in
         (* Zero-copy in the common (full-chunk) case; the last chunk of a
            file is short and needs its own copy since it can't alias the
@@ -200,7 +144,6 @@ module Make (C : Conf.S) = struct
             Hashtbl.replace known_chunks ck_rel ())
         in
         entry)
-      (fun () -> Buffer_pool.release chunk_buffers slot)
 
   let upload ~key ~src_path ~mtime ?(cancel = ref false) () =
     let* st = Lwt_unix_retry.stat src_path in
@@ -215,8 +158,8 @@ module Make (C : Conf.S) = struct
       Lwt.finalize
         (fun () ->
           (* Launching every chunk's task up front is safe even for files
-             with thousands of chunks: each one immediately blocks on
-             [Buffer_pool.acquire] until a slot is free, so real concurrency
+             with thousands of chunks: each one immediately blocks on the
+             [chunk_buffers] pool until a slot is free, so real concurrency
              stays capped at [max_uploads] regardless of how many chunks (or
              how many other files' chunks) are contending for one. *)
           Lwt_list.map_p
@@ -262,17 +205,16 @@ module Make (C : Conf.S) = struct
 
   let fetch_manifest ~key () =
     let (module Primary : Backend.S) = primary () in
-    let* head = Primary.head_opt ~key () in
-    match head with
-      | None -> Lwt.return_none
-      | Some _ ->
-          Lwt.catch
-            (fun () ->
-              let+ body = Primary.get ~key () in
-              match Manifest.of_string body with
-                | `Dirty -> None
-                | `Clean _ as state -> Some state)
-            (fun _ -> Lwt.return_none)
+    let+ body = Primary.get_opt ~key () in
+    match body with
+      | None -> None
+      | Some body -> (
+          (* A manifest that fails to parse is treated as absent: stat/getattr
+             report ENOENT rather than surfacing garbage metadata. *)
+            match Manifest.of_string body with
+            | `Dirty -> None
+            | `Clean _ as state -> Some state
+            | exception _ -> None)
 
   (* ── Recheck: verify remote state against local data / sidecar ─────────── *)
 
@@ -294,9 +236,7 @@ module Make (C : Conf.S) = struct
   let recheck_chunk fd ~file_size index =
     let offset = index * Manifest.chunk_size in
     let size = min Manifest.chunk_size (file_size - offset) in
-    let* slot, buf = Buffer_pool.acquire chunk_buffers in
-    Lwt.finalize
-      (fun () ->
+    Lwt_pool.use chunk_buffers (fun buf ->
         let* () = read_chunk_into fd offset size buf in
         let data =
           if size = Bytes.length buf then Bytes.unsafe_to_string buf
@@ -319,7 +259,6 @@ module Make (C : Conf.S) = struct
             put_all ~key:(C.chunk_prefix ^ Manifest.chunk_key entry) ~data ())
         in
         (entry, not ok))
-      (fun () -> Buffer_pool.release chunk_buffers slot)
 
   (* Fetch the remote manifest for [key] and republish [expected] when it is
      missing, dirty or differs. Returns [true] when a repair was made. *)
@@ -417,6 +356,13 @@ module Make (C : Conf.S) = struct
       local_stale = false;
     }
 
+  (* Bounds concurrent chunk GETs across all downloads, mirroring how
+     [chunk_buffers] bounds upload work: every chunk of every file contends
+     for the same [max_downloads] slots, so launching all of a file's chunk
+     tasks up front cannot exceed the global ceiling. *)
+  let chunk_download_pool =
+    Lwt_pool.create (max 1 C.max_downloads) (fun () -> Lwt.return_unit)
+
   let assemble_chunks ~(manifest : Manifest.t) ~dst_path primary =
     let (module Primary : Backend.S) = primary in
     let* fd =
@@ -429,26 +375,26 @@ module Make (C : Conf.S) = struct
         let* () =
           Lwt_unix_retry.LargeFile.ftruncate fd manifest.Manifest.size
         in
-        Lwt_list.iter_s
+        Lwt_list.iter_p
           (fun (chunk : Manifest.chunk_entry) ->
-            let ck = C.chunk_prefix ^ Manifest.chunk_key chunk in
-            let* data = Primary.get ~key:ck () in
-            Metrics.add_downloaded (String.length data);
-            (* pwrite instead of lseek+write: one syscall instead of two, and
-               (unlike lseek, which moves the fd's shared file position) safe
-               if this is ever parallelized across chunks later. *)
-            let base = chunk.index * manifest.Manifest.chunk_size in
-            let len = String.length data in
-            let rec loop pos =
-              if pos >= len then Lwt.return_unit
-              else
-                let* n =
-                  Lwt_unix_retry.pwrite_string fd data ~file_offset:(base + pos)
-                    pos (len - pos)
+            Lwt_pool.use chunk_download_pool (fun () ->
+                let ck = C.chunk_prefix ^ Manifest.chunk_key chunk in
+                let* data = Primary.get ~key:ck () in
+                Metrics.add_downloaded (String.length data);
+                (* pwrite: positioned writes have no shared fd offset, so
+                   concurrent chunk writes to the same fd are safe. *)
+                let base = chunk.index * manifest.Manifest.chunk_size in
+                let len = String.length data in
+                let rec loop pos =
+                  if pos >= len then Lwt.return_unit
+                  else
+                    let* n =
+                      Lwt_unix_retry.pwrite_string fd data
+                        ~file_offset:(base + pos) pos (len - pos)
+                    in
+                    loop (pos + n)
                 in
-                loop (pos + n)
-            in
-            loop 0)
+                loop 0))
           manifest.Manifest.chunks)
       (fun () -> Lwt_unix_retry.close fd)
 
@@ -457,11 +403,10 @@ module Make (C : Conf.S) = struct
 
   let download ~key ~dst_path =
     let (module Primary : Backend.S) = primary () in
-    let* head = Primary.head_opt ~key () in
-    match head with
+    let* body = Primary.get_opt ~key () in
+    match body with
       | None -> Lwt.fail (Backend.Backend_error ("not found: " ^ key))
-      | Some _ -> (
-          let* body = Primary.get ~key () in
+      | Some body -> (
           match Manifest.of_string body with
             | `Dirty -> Lwt.return_none
             | `Clean manifest as state ->

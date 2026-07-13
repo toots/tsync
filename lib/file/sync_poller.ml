@@ -30,30 +30,33 @@ module Make (C : Conf.S) (F : File.S) = struct
           C.domain_prefix ^ rel
       | `Rename { Journal.dst; _ } -> C.domain_prefix ^ dst
 
+  (* Apply foreign entries in order, advancing the high-water mark only past
+     entries that applied cleanly. A failure (e.g. a transient backend error
+     fetching a manifest) aborts the pass; the failed entry is retried on the
+     next poll instead of being silently skipped, which would diverge local
+     state until a full resync. *)
   let do_sync ~on_changed ~my_uuid () =
     let last_key = read_last_sync_key () in
     let last_basename =
       if last_key = "" then "" else Filename.basename last_key
     in
     let* all_keys = Fs.list_journal_keys () in
-    let* () =
-      all_keys
-      |> List.filter (fun (k, _) -> last_basename = "" || k > last_basename)
-      |> List.filter (fun (_, uuid) -> uuid <> my_uuid)
-      |> Lwt_list.iter_s (fun (ek, _) ->
-          let* entry = Fs.get_journal_entry ek in
-          match entry with
-            | None -> Lwt.return_unit
-            | Some ops ->
-                let* () = F.apply_foreign_ops ops in
-                List.iter (fun op -> on_changed (op_key op)) ops;
-                Lwt.return_unit)
-    in
-    match List.rev all_keys with
-      | [] -> Lwt.return_unit
-      | (k, _) :: _ ->
-          write_last_sync_key (C.journal_prefix ^ k);
-          Lwt.return_unit
+    all_keys
+    |> List.filter (fun (k, _) -> last_basename = "" || k > last_basename)
+    |> Lwt_list.iter_s (fun (ek, uuid) ->
+        let* () =
+          if uuid = my_uuid then Lwt.return_unit
+          else
+            let* entry = Fs.get_journal_entry ek in
+            match entry with
+              | None -> Lwt.return_unit
+              | Some ops ->
+                  let* () = F.apply_foreign_ops ops in
+                  List.iter (fun op -> on_changed (op_key op)) ops;
+                  Lwt.return_unit
+        in
+        write_last_sync_key (C.journal_prefix ^ ek);
+        Lwt.return_unit)
 
   let sync_once () =
     do_sync ~on_changed:(fun _ -> ()) ~my_uuid:(J.client_uuid ()) ()
@@ -72,8 +75,11 @@ module Make (C : Conf.S) (F : File.S) = struct
                   | None -> Lwt.return_unit
                   | Some v when v = !last_version -> Lwt.return_unit
                   | Some v ->
+                      (* Record the cursor only after a clean pass, so a
+                         failed pass is retried on the next tick. *)
+                      let* () = do_sync ~on_changed ~my_uuid () in
                       last_version := v;
-                      do_sync ~on_changed ~my_uuid ())
+                      Lwt.return_unit)
               (fun exn ->
                 Log.err "sync_poller: %s" (Printexc.to_string exn);
                 Lwt.return_unit)

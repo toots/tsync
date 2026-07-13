@@ -56,9 +56,19 @@ let get_client_uuid ~share_dir =
         uuid
 
 (* %013Ld: 13-digit zero-padded int64; current ms timestamps are 13 digits,
-   ensuring lexicographic order matches chronological order *)
+   ensuring lexicographic order matches chronological order.
+   Entry keys are backend object names: two ops in the same millisecond would
+   collide and the second journal entry would overwrite the first, silently
+   losing the op for other clients. Bump the timestamp to keep keys strictly
+   increasing within this process.
+   ponytail: monotonic per process only; two processes sharing a client uuid
+   (daemon + concurrent import) can still collide within one ms. *)
+let last_ms = ref 0L
+
 let make_entry_key ~share_dir () =
-  let ms = Int64.of_float (Unix.gettimeofday () *. 1000.) in
+  let now = Int64.of_float (Unix.gettimeofday () *. 1000.) in
+  let ms = if now > !last_ms then now else Int64.add !last_ms 1L in
+  last_ms := ms;
   Printf.sprintf "%013Ld-%s" ms (get_client_uuid ~share_dir)
 
 let timestamp_ms_of_filename s =

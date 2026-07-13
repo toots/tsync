@@ -6,6 +6,11 @@ exception Cancelled
 module type S = sig
   val put : key:string -> data:string -> unit -> unit Lwt.t
   val get : key:string -> unit -> string Lwt.t
+
+  (** [None] when the key does not exist; other failures raise. Saves the HEAD
+      round trip of [head_opt] + [get] when the body is wanted anyway. *)
+  val get_opt : key:string -> unit -> string option Lwt.t
+
   val head_opt : key:string -> unit -> file_entry option Lwt.t
   val delete : key:string -> unit -> unit Lwt.t
   val delete_multi : string list -> unit Lwt.t
@@ -45,6 +50,7 @@ let with_key_encoding (module B : S) : (module S) =
   (module struct
     let put ~key ~data () = B.put ~key:(Fs_util.encode_key key) ~data ()
     let get ~key () = B.get ~key:(Fs_util.encode_key key) ()
+    let get_opt ~key () = B.get_opt ~key:(Fs_util.encode_key key) ()
 
     let head_opt ~key () =
       let open Lwt.Syntax in
