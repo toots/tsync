@@ -24,8 +24,14 @@ module Make (C : Conf.S) : sig
 
   (** Download chunks described by [manifest] to [dst_path], without fetching
       the manifest key itself. Used when the manifest is already known locally
-      (evicted files, conflict copies). *)
-  val download_chunks : dst_path:string -> Manifest.t -> unit Lwt.t
+      (evicted files, conflict copies). [key] is used only for progress tracking
+      via {!get_download_progress}. *)
+  val download_chunks :
+    key:string -> dst_path:string -> Manifest.t -> unit Lwt.t
+
+  (** [Some (bytes_done, total_bytes)] while a download for [key] is in flight;
+      [None] otherwise. *)
+  val get_download_progress : string -> (int * int) option
 
   (** Fetch only the manifest for [key] from the primary backend. Returns [None]
       if the key does not exist or is not a manifest. *)

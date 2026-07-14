@@ -95,7 +95,7 @@ module Make (C : Conf.S) = struct
         | Some (`Clean m) ->
             (* Recompose from remote chunks straight to the destination — the
                local cache is deliberately not populated. *)
-            let* () = R.download_chunks ~dst_path m in
+            let* () = R.download_chunks ~key ~dst_path m in
             let+ () =
               Lwt_unix_retry.utimes dst_path m.Manifest.mtime m.Manifest.mtime
             in

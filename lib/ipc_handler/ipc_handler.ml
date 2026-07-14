@@ -391,6 +391,17 @@ module Make (C : Conf.S) (F : File.S) = struct
                               ("rssBytes", `Int (Metrics.rss_bytes ()));
                             ]
                            @ hooks.stats_fields ()))
+                  | "download_progress" ->
+                      Lwt.return
+                        (match F.download_progress path with
+                          | None -> ok_json [("active", `Bool false)]
+                          | Some (done_, total) ->
+                              ok_json
+                                [
+                                  ("active", `Bool true);
+                                  ("bytesDownloaded", `Int done_);
+                                  ("totalBytes", `Int total);
+                                ])
                   | "stop" ->
                       hooks.on_stop ();
                       Lwt.return (ok_json [])

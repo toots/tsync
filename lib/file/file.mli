@@ -49,6 +49,10 @@ module type S = sig
   (** Downloads completed since the daemon started. *)
   val downloads_completed_count : unit -> int
 
+  (** [Some (bytes_done, total_bytes)] while [key] is being downloaded; [None]
+      when idle or already cached. *)
+  val download_progress : t -> (int * int) option
+
   val evict : t -> unit Lwt.t
   val clear_local : t -> unit Lwt.t
   val create : t -> unit Lwt.t

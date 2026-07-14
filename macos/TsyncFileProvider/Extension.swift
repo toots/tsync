@@ -129,17 +129,36 @@ final class TsyncExtension: NSObject, NSFileProviderReplicatedExtension, @unchec
         request: NSFileProviderRequest,
         completionHandler: @escaping (URL?, NSFileProviderItem?, Error?) -> Void
     ) -> Progress {
-        let progress = Progress(totalUnitCount: 100)
+        let progress = Progress(totalUnitCount: -1)
         Task {
             let key = itemIdentifier.rawValue
             log.info("fetchContents: \(key, privacy: .public)")
+            // Poll download progress every 0.5 s while ensureCached is in flight.
+            // The first response that shows active=true also carries totalBytes,
+            // switching the bar from indeterminate to determinate.
+            let poller = Task {
+                var gotTotal = false
+                while !Task.isCancelled {
+                    try? await Task.sleep(nanoseconds: 500_000_000)
+                    guard let resp = try? await IPC.downloadProgress(key: key),
+                          resp.active == true else { continue }
+                    if !gotTotal, let total = resp.totalBytes, total > 0 {
+                        progress.totalUnitCount = total
+                        gotTotal = true
+                    }
+                    if let bytes = resp.bytesDownloaded {
+                        progress.completedUnitCount = bytes
+                    }
+                }
+            }
             do {
                 let resp = try await IPC.ensureCached(key: key)
+                poller.cancel()
                 guard let localPath = resp.localPath else { throw IPC.IPCError.badResponse }
                 let item = try await resolveItem(itemIdentifier, isDownloaded: true)
-                progress.completedUnitCount = 100
                 completionHandler(cloneForSystem(URL(fileURLWithPath: localPath)), item, nil)
             } catch {
+                poller.cancel()
                 log.error("fetchContents error: \(key, privacy: .public): \(error, privacy: .public)")
                 completionHandler(nil, nil, IPC.fileProviderError(error))
             }

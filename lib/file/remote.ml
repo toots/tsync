@@ -363,7 +363,15 @@ module Make (C : Conf.S) = struct
   let chunk_download_pool =
     Lwt_pool.create (max 1 C.max_downloads) (fun () -> Lwt.return_unit)
 
-  let assemble_chunks ~(manifest : Manifest.t) ~dst_path primary =
+  (* Per-key (bytes_done, total_bytes) for in-flight downloads; used by the
+     FileProvider extension to display a progress bar. Absent when no download
+     is active for that key. *)
+  let active_downloads : (string, int * int) Hashtbl.t = Hashtbl.create 8
+  let get_download_progress key = Hashtbl.find_opt active_downloads key
+
+  let assemble_chunks ~key ~(manifest : Manifest.t) ~dst_path primary =
+    let total = Int64.to_int manifest.Manifest.size in
+    Hashtbl.replace active_downloads key (0, total);
     let (module Primary : Backend.S) = primary in
     let* fd =
       Lwt_unix_retry.openfile dst_path
@@ -380,11 +388,16 @@ module Make (C : Conf.S) = struct
             Lwt_pool.use chunk_download_pool (fun () ->
                 let ck = C.chunk_prefix ^ Manifest.chunk_key chunk in
                 let* data = Primary.get ~key:ck () in
-                Metrics.add_downloaded (String.length data);
+                let n = String.length data in
+                Metrics.add_downloaded n;
+                (match Hashtbl.find_opt active_downloads key with
+                  | Some (done_, total) ->
+                      Hashtbl.replace active_downloads key (done_ + n, total)
+                  | None -> ());
                 (* pwrite: positioned writes have no shared fd offset, so
                    concurrent chunk writes to the same fd are safe. *)
                 let base = chunk.index * manifest.Manifest.chunk_size in
-                let len = String.length data in
+                let len = n in
                 let rec loop pos =
                   if pos >= len then Lwt.return_unit
                   else
@@ -396,10 +409,12 @@ module Make (C : Conf.S) = struct
                 in
                 loop 0))
           manifest.Manifest.chunks)
-      (fun () -> Lwt_unix_retry.close fd)
+      (fun () ->
+        Hashtbl.remove active_downloads key;
+        Lwt_unix_retry.close fd)
 
-  let download_chunks ~dst_path manifest =
-    assemble_chunks ~manifest ~dst_path (primary ())
+  let download_chunks ~key ~dst_path manifest =
+    assemble_chunks ~key ~manifest ~dst_path (primary ())
 
   let download ~key ~dst_path =
     let (module Primary : Backend.S) = primary () in
@@ -411,7 +426,7 @@ module Make (C : Conf.S) = struct
             | `Dirty -> Lwt.return_none
             | `Clean manifest as state ->
                 let+ () =
-                  assemble_chunks ~manifest ~dst_path (module Primary)
+                  assemble_chunks ~key ~manifest ~dst_path (module Primary)
                 in
                 Some state)
 end

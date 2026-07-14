@@ -32,6 +32,7 @@ module type S = sig
   val dirty_count : unit -> int
   val open_files_count : unit -> int
   val downloads_completed_count : unit -> int
+  val download_progress : t -> (int * int) option
   val evict : t -> unit Lwt.t
   val clear_local : t -> unit Lwt.t
   val create : t -> unit Lwt.t
@@ -166,7 +167,7 @@ module Make (C : Conf.S) (Sq : Sync_queue.S) : S = struct
     let* () = Local.ensure_parent_dir lp in
     let* manifest = read_manifest key in
     match manifest with
-      | Some (`Clean manifest) -> R.download_chunks ~dst_path:lp manifest
+      | Some (`Clean manifest) -> R.download_chunks ~key ~dst_path:lp manifest
       | _ -> (
           let* res = R.download ~key ~dst_path:lp in
           match res with
@@ -348,6 +349,7 @@ module Make (C : Conf.S) (Sq : Sync_queue.S) : S = struct
   let dirty_count () = Hashtbl.length dirty_keys
   let open_files_count () = Hashtbl.length open_count
   let downloads_completed_count () = !downloads_completed
+  let download_progress key = R.get_download_progress key
 
   (* ── Local eviction ────────────────────────────────────────────────────── *)
 
