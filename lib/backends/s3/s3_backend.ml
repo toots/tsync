@@ -268,6 +268,13 @@ let spec =
         default = Some "false";
         secret = false;
       };
+      {
+        name = "shareUrl";
+        label = "Share Lambda URL (blank if this bucket has no share service)";
+        typ = `String;
+        default = Some "";
+        secret = false;
+      };
     ]
 
 let () =

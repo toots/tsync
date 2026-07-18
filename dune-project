@@ -23,6 +23,7 @@
   lwt_ppx
   mem_usage
 tls
+  base64
   cmdliner)
  (depopts
    syslog

@@ -49,3 +49,12 @@ val chunk_prefix : domain -> string
 val versions_prefix : domain -> string
 val journal_prefix : domain -> string
 val cursor_key : domain -> string
+val shares_prefix : domain -> string
+
+(** A backend's [shareUrl] field, if present and non-empty. *)
+val backend_share_url : backend_config -> string option
+
+(** The first backend (in config order) with a [shareUrl], paired with its URL.
+    This backend both serves the domain's shares and receives share manifests.
+*)
+val domain_share_backend : domain -> (backend_config * string) option

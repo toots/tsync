@@ -69,6 +69,7 @@ tsync import <dir>    # seed the domain from an existing folder (uploads, no dat
 tsync import <dir> --exclude "*.tmp" --exclude node_modules  # skip by glob (see below)
 tsync import <dir> --force-rehash  # re-hash and re-upload every file (for manifest migration)
 tsync export <dir>    # write every file of the domain to a plain folder
+tsync share <path>    # print a public download URL for a file or folder (as a zip)
 tsync status          # show daemon state
 tsync stats           # transfer metrics (pending/completed, bandwidth, hashing)
 tsync stop            # unmount

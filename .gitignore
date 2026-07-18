@@ -18,3 +18,25 @@ xcuserdata/
 
 # macOS
 .DS_Store
+
+# Terraform
+.terraform/
+*.tfstate
+*.tfstate.*
+crash.log
+crash.*.log
+*.tfvars
+*.tfvars.json
+!example.tfvars
+backend.hcl
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+terraform/build/
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+.pytest_cache/
