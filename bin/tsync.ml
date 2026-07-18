@@ -1412,6 +1412,7 @@ let print_conf_cmd =
   in
   let run () =
     let cfg = Conf_parsing.load runtime_paths.Runtime.config_path in
+    let default = read_default_domain () in
     Printf.printf "name:          %s\n" cfg.Conf_parsing.name;
     Printf.printf "maxUploads:    %d\n" cfg.Conf_parsing.max_uploads;
     Printf.printf "maxDownloads:  %d\n" cfg.Conf_parsing.max_downloads;
@@ -1420,7 +1421,8 @@ let print_conf_cmd =
       | None -> ());
     List.iter
       (fun (d : Conf_parsing.domain) ->
-        Printf.printf "\ndomain: %s\n" d.name;
+        Printf.printf "\ndomain: %s%s\n" d.name
+          (if default = Some d.name then " [default]" else "");
         Printf.printf "  prefix:     %s\n" d.prefix;
         Printf.printf "  versioning: %b\n" d.versioning;
         Printf.printf "  read_only:  %b\n" d.read_only;
@@ -1498,6 +1500,20 @@ let set_domain_cmd =
           With no arguments, shows the current default.")
     Term.(const run $ name_arg $ clear_arg)
 
+(* ── tsync default-domain ────────────────────────────────────────────────── *)
+
+let default_domain_cmd =
+  let run () =
+    match read_default_domain () with
+      | Some name -> print_endline name
+      | None ->
+          Printf.eprintf "No default domain set.\n";
+          exit 1
+  in
+  Cmd.v
+    (Cmd.info "default-domain" ~doc:"Print the current default domain")
+    Term.(const run $ const ())
+
 (* ── tsync build-config ──────────────────────────────────────────────────── *)
 
 let build_config_cmd =
@@ -1522,6 +1538,7 @@ let () =
         print_conf_cmd;
         paths_cmd;
         set_domain_cmd;
+        default_domain_cmd;
         start_cmd;
         stop_cmd;
         status_cmd;
