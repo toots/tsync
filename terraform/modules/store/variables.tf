@@ -68,6 +68,12 @@ variable "ephemeral_storage_mb" {
   default = 10240
 }
 
+variable "max_share_bytes" {
+  type        = number
+  default     = 10737418240 # 10 GiB
+  description = "Reject assembling a single file or folder zip larger than this (bytes) with 413. Keep below the /tmp ephemeral size for zips."
+}
+
 variable "lambda_zip" {
   type        = string
   description = "Path to the packaged Lambda handler zip (built once at the root)."

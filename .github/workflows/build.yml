@@ -11,6 +11,18 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  lambda:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Install test dependencies
+        run: pip install boto3 moto pytest
+      - name: Run share Lambda tests
+        run: pytest lambda/test_handler.py
+
   linux:
     runs-on: ubuntu-latest
     steps:

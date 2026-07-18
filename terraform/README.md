@@ -262,7 +262,10 @@ by hand.
 - **Limits**: folder zips build in `/tmp` (10 GB) within the 900 s Lambda timeout;
   single files cap at ~80 GB (10,000 multipart parts).
 
-## Test the handler locally
+## The share Lambda
+
+The Lambda source lives at the repo top level in [`../lambda/`](../lambda/); this
+config packages and deploys it. Test it locally from the repo root:
 
 ```
 python3 -m venv .venv && . .venv/bin/activate

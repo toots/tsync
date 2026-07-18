@@ -154,6 +154,7 @@ resource "aws_lambda_function" "share" {
       BUCKET        = local.bucket_id
       SHARES_PREFIX = var.shares_prefix
       PRESIGN_TTL   = tostring(var.presign_ttl)
+      MAX_BYTES     = tostring(var.max_share_bytes)
     }
   }
 }

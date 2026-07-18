@@ -12,7 +12,7 @@ provider "aws" {
 # Package the shared Lambda handler once; every store reuses the same zip.
 data "archive_file" "handler" {
   type        = "zip"
-  source_file = "${path.module}/lambda/handler.py"
+  source_file = "${path.module}/../lambda/handler.py"
   output_path = "${path.module}/build/lambda.zip"
 }
 
