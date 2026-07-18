@@ -79,7 +79,7 @@ Pass `--verbose` (or `-v`) to any command to print detailed progress as it runs.
 
 ### Multiple domains
 
-When the config defines more than one domain, pass `--domain <name>` to commands that operate on a specific domain (`ls`, `versions`, `expire`, `sync`, `recheck`, `resync-remote`, `import`, `export`). To avoid repeating `--domain` on every invocation, set a default:
+When the config defines more than one domain, pass `--domain <name>` to commands that operate on a specific domain (`ls`, `versions`, `expire`, `sync`, `recheck`, `resync-remote`, `import`, `export`, `share`). To avoid repeating `--domain` on every invocation, set a default:
 
 ```bash
 tsync set-domain "media"   # persist a default domain for the current machine
@@ -147,6 +147,23 @@ Set `"readOnly": true` on a domain to make the mount reject all writes — usefu
 ```
 
 The sync poller still runs and downloads remote changes normally; only local mutations (create, write, delete, rename) are blocked. On Linux the mount returns `EROFS`; on macOS the FileProvider extension returns an error for any write attempt.
+
+### Sharing download links
+
+`tsync share <path>` prints a public URL that downloads a file — or a whole folder as a zip — straight from your bucket, with nothing installed on the other end:
+
+```bash
+tsync share photos/2024/report.pdf        # a single file
+tsync share photos/2024 --expires 30d     # a folder, delivered as a zip; link valid 30 days (default 7d)
+```
+
+Downloads are served by a small AWS Lambda that assembles the file (or zips the folder) on the first fetch and caches the result. To enable sharing, give the domain's S3 backend a `shareUrl` field pointing at that Lambda:
+
+```json
+{ "type": "s3", "bucket": "...", "shareUrl": "https://….lambda-url.us-west-1.on.aws", "main": true }
+```
+
+The Lambda, its bucket, IAM keys and lifecycle are all provisioned by the Terraform config under [`terraform/`](terraform/README.md), and `tsync configure`'s **Sync from Terraform** fills the `shareUrl` (plus bucket and credentials) in for you — no Terraform details are stored in your config. With several S3 backends, the first one carrying a `shareUrl` serves shares. Links carry an unguessable token and expire per `--expires`.
 
 ## Good to know
 

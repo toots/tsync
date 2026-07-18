@@ -1,0 +1,3 @@
+(test
+ (name share_test)
+ (libraries tsync_core))

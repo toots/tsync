@@ -1846,12 +1846,12 @@ let share_cmd =
                  if entries = [] then (
                    Printf.eprintf "not found: %s\n" path;
                    exit 1);
-                 let dp_len = String.length C.domain_prefix in
                  let json_entries =
                    List.map
                      (fun (e : Backend.file_entry) ->
                        let name =
-                         String.sub e.key dp_len (String.length e.key - dp_len)
+                         Share.zip_entry_name ~domain_prefix:C.domain_prefix
+                           ~rel e.key
                        in
                        let is_marker =
                          name <> "" && name.[String.length name - 1] = '/'
