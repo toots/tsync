@@ -138,3 +138,18 @@ let chunk_prefix d = prefix_slash d ^ ".chunks/"
 let versions_prefix d = prefix_slash d ^ ".versions/" ^ d.name ^ "/"
 let journal_prefix d = prefix_slash d ^ ".journal/" ^ d.name ^ "/"
 let cursor_key d = prefix_slash d ^ ".cursor/" ^ d.name
+let shares_prefix d = prefix_slash d ^ ".shares/" ^ d.name ^ "/"
+
+(* A backend's share Lambda URL, if it has a non-empty [shareUrl] field. *)
+let backend_share_url bc =
+  match List.assoc_opt "shareUrl" bc.fields with
+    | Some u when u <> "" -> Some u
+    | _ -> None
+
+(* The first backend (in config order) that carries a [shareUrl], with its URL.
+   This backend both serves the domain's shares and receives the share
+   manifests. *)
+let domain_share_backend d =
+  List.find_map
+    (fun bc -> Option.map (fun u -> (bc, u)) (backend_share_url bc))
+    d.backends

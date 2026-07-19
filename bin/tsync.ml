@@ -1185,212 +1185,716 @@ let export_cmd =
 
 (* ── tsync configure ────────────────────────────────────────────────────── *)
 
+(* Read a JSON value's field, tolerating non-objects and missing keys. *)
+let jfield json key =
+  match json with `Assoc l -> List.assoc_opt key l | _ -> None
+
+let jstr json key =
+  match jfield json key with Some (`String s) -> Some s | _ -> None
+
+let jbool ?(default = false) json key =
+  match jfield json key with Some (`Bool b) -> b | _ -> default
+
+let jint json key =
+  match jfield json key with Some (`Int n) -> Some n | _ -> None
+
+let jlist json key = match jfield json key with Some (`List l) -> l | _ -> []
+
+(* Update key in place (preserving position) or append it. *)
+let assoc_set l key v =
+  if List.mem_assoc key l then
+    List.map (fun (k, v') -> if k = key then (key, v) else (k, v')) l
+  else l @ [(key, v)]
+
+(* One store's fields from `terraform output -json`. *)
+type tf_store = {
+  bucket : string;
+  region : string;
+  function_url : string;
+  access_key_id : string;
+  secret : string option;
+}
+
+let terraform_output dir =
+  let cmd =
+    Printf.sprintf "terraform -chdir=%s output -json 2>/dev/null"
+      (Filename.quote dir)
+  in
+  let ic = Unix.open_process_in cmd in
+  let buf = Buffer.create 4096 in
+  let rec drain () =
+    match input_line ic with
+      | line ->
+          Buffer.add_string buf line;
+          Buffer.add_char buf '\n';
+          drain ()
+      | exception End_of_file -> ()
+  in
+  drain ();
+  match Unix.close_process_in ic with
+    | Unix.WEXITED 0 -> (
+        try Some (Yojson.Basic.from_string (Buffer.contents buf))
+        with _ -> None)
+    | _ -> None
+
+let tf_value root name =
+  jfield (Option.value (jfield root name) ~default:`Null) "value"
+
+(* Store keys present in `terraform output`. *)
+let tf_stores root =
+  match tf_value root "stores" with
+    | Some (`Assoc l) -> List.map fst l
+    | _ -> []
+
+let tf_lookup root store =
+  let value name = tf_value root name in
+  match value "stores" with
+    | Some stores -> (
+        match jfield stores store with
+          | Some s ->
+              let str k = Option.value (jstr s k) ~default:"" in
+              let secret =
+                Option.bind (value "secret_access_keys") (fun m -> jstr m store)
+              in
+              Some
+                {
+                  bucket = str "bucket";
+                  region = str "region";
+                  function_url = str "function_url";
+                  access_key_id = str "access_key_id";
+                  secret;
+                }
+          | None -> None)
+    | None -> None
+
+(* ── Interactive prompt helpers ──────────────────────────────────────────── *)
+
+(* Clear the screen and home the cursor, so menus redraw in place. *)
+let clear_screen () =
+  print_string "\027[H\027[2J";
+  flush stdout
+
+let prompt msg def =
+  (match def with
+    | Some d when d <> "" -> Printf.printf "%s [%s]: %!" msg d
+    | _ -> Printf.printf "%s: %!" msg);
+  let line = read_line () in
+  if line = "" then Option.value def ~default:"" else line
+
+let rec prompt_required msg =
+  let v = prompt msg None in
+  if v <> "" then v
+  else begin
+    Printf.printf "  (required — cannot be blank)\n%!";
+    prompt_required msg
+  end
+
+let prompt_bool ?(default = false) msg =
+  Printf.printf "%s [%s]: %!" msg (if default then "Y/n" else "y/N");
+  match String.lowercase_ascii (read_line ()) with
+    | "y" | "yes" -> true
+    | "n" | "no" -> false
+    | "" -> default
+    | _ -> false
+
+let prompt_int msg default =
+  match int_of_string_opt (prompt msg (Some (string_of_int default))) with
+    | Some n when n > 0 -> n
+    | _ -> default
+
+let read_password msg =
+  Printf.printf "%s: %!" msg;
+  let old_attr = Unix.tcgetattr Unix.stdin in
+  Unix.tcsetattr Unix.stdin Unix.TCSAFLUSH { old_attr with Unix.c_echo = false };
+  match read_line () with
+    | s ->
+        Unix.tcsetattr Unix.stdin Unix.TCSAFLUSH old_attr;
+        print_newline ();
+        s
+    | exception e ->
+        Unix.tcsetattr Unix.stdin Unix.TCSAFLUSH old_attr;
+        raise e
+
+let prompt_symlinks default =
+  let rec ask () =
+    let v = prompt "Symlinks policy (keep/follow/skip)" (Some default) in
+    if List.mem v ["keep"; "follow"; "skip"] then v
+    else begin
+      Printf.printf "  Unknown policy %S — choose keep, follow, or skip.\n%!" v;
+      ask ()
+    end
+  in
+  ask ()
+
+(* ── Backend / domain builders ───────────────────────────────────────────── *)
+
+let prompt_backend () =
+  let rec ask () =
+    let t = prompt "  Backend type (s3/local/ssh)" (Some "s3") in
+    if List.mem t ["s3"; "local"; "ssh"] then t
+    else begin
+      Printf.printf "  Unknown backend type %S — choose s3, local, or ssh.\n%!"
+        t;
+      ask ()
+    end
+  in
+  let backend_type = ask () in
+  let name = prompt "  Backend name" (Some backend_type) in
+  let spec = Option.value ~default:[] (Backend.spec_for backend_type) in
+  let fields =
+    List.filter_map
+      (fun (s : Backend.field_spec) ->
+        let value =
+          match s.typ with
+            | `Bool ->
+                string_of_bool
+                  (prompt_bool ~default:(s.default = Some "true")
+                     ("  " ^ s.label))
+            | `String when s.secret ->
+                let rec ask () =
+                  let v = read_password ("  " ^ s.label) in
+                  if v <> "" then v
+                  else begin
+                    Printf.printf "  (required — cannot be blank)\n%!";
+                    ask ()
+                  end
+                in
+                ask ()
+            | `String -> (
+                match s.default with
+                  | None -> prompt_required ("  " ^ s.label)
+                  | Some d ->
+                      prompt ("  " ^ s.label) (if d = "" then None else Some d))
+        in
+        match (s.typ, s.default, value) with
+          | `String, Some "", "" -> None
+          | `Bool, _, v -> Some (s.name, `Bool (v = "true"))
+          | `String, _, v -> Some (s.name, `String v))
+      spec
+  in
+  let main =
+    prompt_bool ~default:(backend_type = "local")
+      "  Primary backend (used for reads)?"
+  in
+  `Assoc
+    ([("name", `String name); ("type", `String backend_type)]
+    @ fields
+    @ [("main", `Bool main)])
+
+let prompt_backends () =
+  let backends = ref [] in
+  let n = ref 1 in
+  let continue_ = ref true in
+  while !continue_ do
+    Printf.printf "\n  Backend %d\n" !n;
+    backends := !backends @ [prompt_backend ()];
+    incr n;
+    continue_ := prompt_bool "  Add another backend?"
+  done;
+  !backends
+
+(* Set bucket/region/accessKeyId/secretAccessKey on the s3 backend that matches
+   the store key by name, or the sole s3 backend. [None] when the target is
+   ambiguous (multiple s3 backends, none named after the store). *)
+let apply_tf_to_backends backends store (s : tf_store) =
+  let is_s3 b = jstr b "type" = Some "s3" in
+  let target =
+    match
+      List.filter (fun b -> jstr b "name" = Some store && is_s3 b) backends
+    with
+      | [b] -> Some b
+      | _ -> (
+          match List.filter is_s3 backends with [b] -> Some b | _ -> None)
+  in
+  let update = function
+    | `Assoc l ->
+        let l = assoc_set l "bucket" (`String s.bucket) in
+        let l =
+          if s.region = "" then l else assoc_set l "region" (`String s.region)
+        in
+        let l = assoc_set l "accessKeyId" (`String s.access_key_id) in
+        let l =
+          match s.secret with
+            | Some sec -> assoc_set l "secretAccessKey" (`String sec)
+            | None -> l
+        in
+        `Assoc (assoc_set l "shareUrl" (`String s.function_url))
+    | other -> other
+  in
+  Option.map
+    (fun tgt -> List.map (fun b -> if b == tgt then update b else b) backends)
+    target
+
+(* Prompt for a Terraform dir + store key and bake the s3 backend fields + share
+   URL from `terraform output` into the matching backend. Pulls once — nothing
+   about Terraform is persisted in the config. Returns the updated backends, or
+   [None] if it fails. *)
+let sync_from_terraform ~name backends =
+  let dir = prompt "  Terraform directory" (Some "terraform") in
+  let fail msg =
+    Printf.printf "  (%s)\n" msg;
+    None
+  in
+  match terraform_output dir with
+    | None ->
+        fail
+          (Printf.sprintf
+             "could not read terraform output in %s — left unchanged" dir)
+    | Some root -> (
+        (* Default to the sole store, else the domain name (correctable). *)
+        let store_default =
+          match tf_stores root with [only] -> only | _ -> name
+        in
+        let store = prompt "  Terraform store key" (Some store_default) in
+        match tf_lookup root store with
+          | None ->
+              fail
+                (Printf.sprintf "store %S not found in terraform output" store)
+          | Some s -> (
+              match apply_tf_to_backends backends store s with
+                | None ->
+                    fail
+                      (Printf.sprintf
+                         "couldn't pick an s3 backend to update — name one %S"
+                         store)
+                | Some updated ->
+                    Printf.printf
+                      "  Synced bucket=%s region=%s + share URL into backend %S.\n"
+                      s.bucket s.region store;
+                    Some updated))
+
+let backend_summary = function
+  | [] -> "(none)"
+  | bs ->
+      String.concat ", "
+        (List.map (fun b -> Option.value (jstr b "type") ~default:"?") bs)
+
+(* Build or edit one domain. A new domain ([existing = None]) is filled in
+   linearly; an existing one is edited through a per-field menu, so untouched
+   fields keep their current values without re-prompting. *)
+let edit_domain existing =
+  let cur k d =
+    Option.value (Option.bind existing (fun j -> jstr j k)) ~default:d
+  in
+  let curbool k = match existing with Some j -> jbool j k | None -> false in
+  let name = ref (cur "name" "default") in
+  let key_prefix = ref (cur "prefix" "tsync") in
+  let versioning = ref (curbool "versioning") in
+  let symlinks = ref (cur "symlinks" "keep") in
+  let read_only = ref (curbool "readOnly") in
+  let backends =
+    ref (match existing with Some j -> jlist j "backends" | None -> [])
+  in
+  let has_s3 () = List.exists (fun b -> jstr b "type" = Some "s3") !backends in
+  let sync () =
+    match sync_from_terraform ~name:!name !backends with
+      | Some updated -> backends := updated
+      | None -> ()
+  in
+  (match existing with
+    | None ->
+        name := prompt "Domain name" (Some !name);
+        key_prefix := prompt "Key prefix" (Some !key_prefix);
+        versioning :=
+          prompt_bool ~default:!versioning
+            "Enable versioning (keep version history)?";
+        symlinks := prompt_symlinks !symlinks;
+        read_only :=
+          prompt_bool ~default:!read_only
+            "Read-only mount (block all local writes)?";
+        backends := prompt_backends ();
+        if has_s3 () && prompt_bool "Sync s3 backend from Terraform?" then
+          sync ()
+    | Some _ ->
+        let running = ref true in
+        let status = ref "" in
+        while !running do
+          clear_screen ();
+          Printf.printf "Editing domain: %s\n\nFields:\n" !name;
+          Printf.printf "  1. name:        %s\n" !name;
+          Printf.printf "  2. prefix:      %s\n" !key_prefix;
+          Printf.printf "  3. versioning:  %b\n" !versioning;
+          Printf.printf "  4. symlinks:    %s\n" !symlinks;
+          Printf.printf "  5. read-only:   %b\n" !read_only;
+          Printf.printf "  6. backends:    %s\n" (backend_summary !backends);
+          if has_s3 () then Printf.printf "  7. sync from Terraform\n";
+          if !status <> "" then Printf.printf "\n%s\n" !status;
+          Printf.printf "\nEnter a field number to edit, or [d]one:\n> %!";
+          status := "";
+          match String.lowercase_ascii (String.trim (read_line ())) with
+            | "1" -> name := prompt "Domain name" (Some !name)
+            | "2" -> key_prefix := prompt "Key prefix" (Some !key_prefix)
+            | "3" ->
+                versioning :=
+                  prompt_bool ~default:!versioning "Enable versioning?"
+            | "4" -> symlinks := prompt_symlinks !symlinks
+            | "5" ->
+                read_only := prompt_bool ~default:!read_only "Read-only mount?"
+            | "6" -> backends := prompt_backends ()
+            | "7" when has_s3 () -> sync ()
+            | "d" | "" -> running := false
+            | other -> status := Printf.sprintf "(unknown field %S)" other
+        done);
+  `Assoc
+    [
+      ("name", `String !name);
+      ("prefix", `String !key_prefix);
+      ("versioning", `Bool !versioning);
+      ("symlinks", `String !symlinks);
+      ("readOnly", `Bool !read_only);
+      ("backends", `List !backends);
+    ]
+
+(* Serialize globals + domains to [path] with 0600 perms. *)
+let write_config ~path ~client_name ~max_uploads ~max_downloads ~tls ~domains =
+  mkdir_p (Filename.dirname path);
+  let json =
+    `Assoc
+      ([
+         ("name", `String client_name);
+         ("maxUploads", `Int max_uploads);
+         ("maxDownloads", `Int max_downloads);
+       ]
+      @ (match tls with Some t -> [("tls", `String t)] | None -> [])
+      @ [("domains", `List domains)])
+  in
+  let oc = open_out path in
+  output_string oc (Yojson.Basic.pretty_to_string json);
+  output_char oc '\n';
+  close_out oc;
+  Unix.chmod path 0o600
+
 let configure_cmd =
   let run () =
-    let prompt msg def =
-      (match def with
-        | Some d -> Printf.printf "%s [%s]: %!" msg d
-        | None -> Printf.printf "%s: %!" msg);
-      let line = read_line () in
-      if line = "" then Option.value def ~default:"" else line
-    in
-    let prompt_required msg =
-      let rec ask () =
-        let v = prompt msg None in
-        if v <> "" then v
-        else begin
-          Printf.printf "  (required — cannot be blank)\n%!";
-          ask ()
-        end
-      in
-      ask ()
-    in
-    let prompt_bool ?(default = false) msg =
-      Printf.printf "%s [%s]: %!" msg (if default then "Y/n" else "y/N");
-      match String.lowercase_ascii (read_line ()) with
-        | "y" | "yes" -> true
-        | "n" | "no" -> false
-        | "" -> default
-        | _ -> false
-    in
-    let prompt_int msg default =
-      match int_of_string_opt (prompt msg (Some (string_of_int default))) with
-        | Some n when n > 0 -> n
-        | _ -> default
-    in
-    let read_password msg =
-      Printf.printf "%s: %!" msg;
-      let old_attr = Unix.tcgetattr Unix.stdin in
-      Unix.tcsetattr Unix.stdin Unix.TCSAFLUSH
-        { old_attr with Unix.c_echo = false };
-      match read_line () with
-        | s ->
-            Unix.tcsetattr Unix.stdin Unix.TCSAFLUSH old_attr;
-            print_newline ();
-            s
-        | exception e ->
-            Unix.tcsetattr Unix.stdin Unix.TCSAFLUSH old_attr;
-            raise e
-    in
-    let has_s3 = ref false in
-    let prompt_backend () =
-      let rec ask () =
-        let t = prompt "  Backend type (s3/local/ssh)" (Some "s3") in
-        if List.mem t ["s3"; "local"; "ssh"] then t
-        else begin
-          Printf.printf
-            "  Unknown backend type %S — choose s3, local, or ssh.\n%!" t;
-          ask ()
-        end
-      in
-      let backend_type = ask () in
-      if backend_type = "s3" then has_s3 := true;
-      let name = prompt "  Backend name" (Some backend_type) in
-      let spec = Option.value ~default:[] (Backend.spec_for backend_type) in
-      let fields =
-        List.filter_map
-          (fun (s : Backend.field_spec) ->
-            let value =
-              match s.typ with
-                | `Bool ->
-                    string_of_bool
-                      (prompt_bool ~default:(s.default = Some "true")
-                         ("  " ^ s.label))
-                | `String when s.secret ->
-                    let rec ask () =
-                      let v = read_password ("  " ^ s.label) in
-                      if v <> "" then v
-                      else begin
-                        Printf.printf "  (required — cannot be blank)\n%!";
-                        ask ()
-                      end
-                    in
-                    ask ()
-                | `String -> (
-                    match s.default with
-                      | None -> prompt_required ("  " ^ s.label)
-                      | Some d ->
-                          prompt ("  " ^ s.label)
-                            (if d = "" then None else Some d))
-            in
-            match (s.typ, s.default, value) with
-              | `String, Some "", "" -> None
-              | `Bool, _, v -> Some (s.name, `Bool (v = "true"))
-              | `String, _, v -> Some (s.name, `String v))
-          spec
-      in
-      let main_default = backend_type = "local" in
-      let main =
-        prompt_bool ~default:main_default "  Primary backend (used for reads)?"
-      in
-      `Assoc
-        ([("name", `String name); ("type", `String backend_type)]
-        @ fields
-        @ [("main", `Bool main)])
-    in
-    let prompt_backends () =
-      let backends = ref [] in
-      let n = ref 1 in
-      let continue_ = ref true in
-      while !continue_ do
-        Printf.printf "\n  Backend %d\n" !n;
-        backends := !backends @ [prompt_backend ()];
-        incr n;
-        continue_ := prompt_bool "  Add another backend?"
-      done;
-      !backends
-    in
-    let prompt_domain () =
-      let name = prompt "Domain name" (Some "default") in
-      let key_prefix = prompt "Key prefix" (Some "tsync") in
-      let versioning =
-        prompt_bool "Enable versioning (keep version history)?"
-      in
-      let symlinks =
-        let rec ask () =
-          let v = prompt "Symlinks policy (keep/follow/skip)" (Some "keep") in
-          if List.mem v ["keep"; "follow"; "skip"] then v
-          else begin
-            Printf.printf
-              "  Unknown policy %S — choose keep, follow, or skip.\n%!" v;
-            ask ()
-          end
-        in
-        ask ()
-      in
-      let read_only = prompt_bool "Read-only mount (block all local writes)?" in
-      let backends = prompt_backends () in
-      `Assoc
-        [
-          ("name", `String name);
-          ("prefix", `String key_prefix);
-          ("versioning", `Bool versioning);
-          ("symlinks", `String symlinks);
-          ("readOnly", `Bool read_only);
-          ("backends", `List backends);
-        ]
-    in
     Printf.printf "tsync configuration\n-------------------\n";
     let config_path = runtime_paths.Runtime.config_path in
-    if
-      Sys.file_exists config_path
-      && not
-           (prompt_bool
-              (Printf.sprintf "Config already exists at %s. Overwrite?"
-                 config_path))
-    then (
-      Printf.printf "Aborted; existing config left untouched.\n";
-      exit 0);
-    let client_name = prompt "Client name" (Some (Unix.gethostname ())) in
+    let existing_root =
+      if Sys.file_exists config_path then (
+        match Yojson.Basic.from_file config_path with
+          | j -> Some j
+          | exception _ ->
+              Printf.eprintf
+                "Existing config at %s is not valid JSON; refusing to overwrite.\n"
+                config_path;
+              exit 1)
+      else None
+    in
+    let client_name =
+      ref
+        (Option.value
+           (Option.bind existing_root (fun r -> jstr r "name"))
+           ~default:(Unix.gethostname ()))
+    in
     let max_uploads =
-      prompt_int "Max concurrent uploads" Conf_parsing.default_max_uploads
+      ref
+        (Option.value
+           (Option.bind existing_root (fun r -> jint r "maxUploads"))
+           ~default:Conf_parsing.default_max_uploads)
     in
     let max_downloads =
-      prompt_int "Max concurrent downloads" Conf_parsing.default_max_downloads
+      ref
+        (Option.value
+           (Option.bind existing_root (fun r -> jint r "maxDownloads"))
+           ~default:Conf_parsing.default_max_downloads)
     in
-    let domains = ref [] in
-    let continue_ = ref true in
-    while !continue_ do
-      Printf.printf "\nDomain %d\n" (List.length !domains + 1);
-      domains := !domains @ [prompt_domain ()];
-      continue_ := prompt_bool "Add another domain?"
+    let tls = ref (Option.bind existing_root (fun r -> jstr r "tls")) in
+    let domains =
+      ref (match existing_root with Some r -> jlist r "domains" | None -> [])
+    in
+    let edit_globals () =
+      client_name := prompt "Client name" (Some !client_name);
+      max_uploads := prompt_int "Max concurrent uploads" !max_uploads;
+      max_downloads := prompt_int "Max concurrent downloads" !max_downloads
+    in
+    (* A brand-new config: gather globals and the first domain up front. *)
+    if existing_root = None then begin
+      edit_globals ();
+      Printf.printf "\nDomain 1\n";
+      domains := [edit_domain None]
+    end;
+    (* On entry, select the default domain if one is set, else the first. *)
+    let default_domain = read_default_domain () in
+    let selected =
+      ref
+        (match
+           Option.bind default_domain (fun name ->
+               List.find_index (fun d -> jstr d "name" = Some name) !domains)
+         with
+          | Some i -> i
+          | None -> if !domains = [] then -1 else 0)
+    in
+    let list_domains () =
+      if !domains = [] then Printf.printf "  (no domains)\n"
+      else
+        List.iteri
+          (fun i d ->
+            let name = Option.value (jstr d "name") ~default:"?" in
+            let btype =
+              match jlist d "backends" with
+                | b :: _ -> Option.value (jstr b "type") ~default:"?"
+                | [] -> "none"
+            in
+            let dflt =
+              if default_domain = Some name then " [default]" else ""
+            in
+            Printf.printf "%s %d. %s (%s)%s\n"
+              (if i = !selected then ">" else " ")
+              (i + 1) name btype dflt)
+          !domains
+    in
+    let replace_nth i v = List.mapi (fun j x -> if j = i then v else x) in
+    let remove_nth i = List.filteri (fun j _ -> j <> i) in
+    let selected_name () =
+      if !selected >= 0 && !selected < List.length !domains then
+        Option.value (jstr (List.nth !domains !selected) "name") ~default:"?"
+      else "(none)"
+    in
+    let saved = ref false in
+    let running = ref true in
+    let status = ref "" in
+    while !running do
+      clear_screen ();
+      Printf.printf "tsync configuration\n-------------------\n\nDomains:\n";
+      list_domains ();
+      Printf.printf "\nSelected: %s\n" (selected_name ());
+      if !status <> "" then Printf.printf "\n%s\n" !status;
+      Printf.printf
+        "\n\
+         Enter a domain number to select, or an action:\n\
+        \  [a]dd  [e]dit selected  [r]emove selected  [g]lobals  [w]rite  [q]uit\n\
+         > %!";
+      let action = String.lowercase_ascii (String.trim (read_line ())) in
+      let has_sel = !selected >= 0 && !selected < List.length !domains in
+      status := "";
+      match int_of_string_opt action with
+        | Some n ->
+            if n >= 1 && n <= List.length !domains then selected := n - 1
+            else status := Printf.sprintf "(no domain %d)" n
+        | None -> (
+            match action with
+              | "a" ->
+                  domains := !domains @ [edit_domain None];
+                  selected := List.length !domains - 1
+              | "e" ->
+                  if has_sel then
+                    domains :=
+                      replace_nth !selected
+                        (edit_domain (Some (List.nth !domains !selected)))
+                        !domains
+                  else status := "(select a domain first)"
+              | "r" ->
+                  if has_sel then begin
+                    domains := remove_nth !selected !domains;
+                    if !selected >= List.length !domains then
+                      selected := List.length !domains - 1
+                  end
+                  else status := "(select a domain first)"
+              | "g" -> edit_globals ()
+              | "w" ->
+                  if !domains = [] then
+                    status := "(add at least one domain before writing)"
+                  else begin
+                    running := false;
+                    saved := true
+                  end
+              | "q" ->
+                  if prompt_bool "Quit without saving?" then running := false
+              | "" -> ()
+              | other -> status := Printf.sprintf "(unknown action %S)" other)
     done;
-    (* Only worth asking when there is an S3 backend and more than one TLS
-       implementation is compiled in; otherwise there is nothing to choose. *)
-    let tls_field =
+    if not !saved then Printf.printf "Aborted; config left untouched.\n"
+    else begin
+      (* Ask for a TLS backend only when an S3 domain exists, more than one is
+         compiled in, and none is already set. *)
+      let any_s3 =
+        List.exists
+          (fun d ->
+            List.exists
+              (fun b -> jstr b "type" = Some "s3")
+              (jlist d "backends"))
+          !domains
+      in
       let available = Tls_conf.available () in
-      if (not !has_s3) || List.length available < 2 then []
-      else (
+      if !tls = None && any_s3 && List.length available >= 2 then begin
         let choice =
           prompt
             (Printf.sprintf "TLS backend for S3 (%s)"
                (String.concat "/" available))
             (Some (List.hd available))
         in
-        if List.mem choice available then [("tls", `String choice)] else [])
-    in
-    mkdir_p (Filename.dirname config_path);
-    let json =
-      `Assoc
-        ([
-           ("name", `String client_name);
-           ("maxUploads", `Int max_uploads);
-           ("maxDownloads", `Int max_downloads);
-         ]
-        @ tls_field
-        @ [("domains", `List !domains)])
-    in
-    let oc = open_out config_path in
-    output_string oc (Yojson.Basic.pretty_to_string json);
-    output_char oc '\n';
-    close_out oc;
-    Unix.chmod config_path 0o600;
-    Printf.printf "\nConfig written to %s\nRun 'tsync start' to mount.\n"
-      config_path
+        if List.mem choice available then tls := Some choice
+      end;
+      write_config ~path:config_path ~client_name:!client_name
+        ~max_uploads:!max_uploads ~max_downloads:!max_downloads ~tls:!tls
+        ~domains:!domains;
+      Printf.printf "\nConfig written to %s\n" config_path
+    end
   in
   Cmd.v
-    (Cmd.info "configure" ~doc:"Interactive configuration setup")
+    (Cmd.info "configure" ~doc:"Create or edit the configuration (interactive)")
     Term.(const run $ const ())
+
+(* ── tsync share ─────────────────────────────────────────────────────────── *)
+
+(* "<N>d" / "<N>h" -> seconds *)
+let parse_duration s =
+  let n = String.length s in
+  let fail () = failwith ("invalid duration (use <N>d or <N>h): " ^ s) in
+  if n < 2 then fail ()
+  else (
+    match (int_of_string_opt (String.sub s 0 (n - 1)), s.[n - 1]) with
+      | Some k, 'd' when k > 0 -> float_of_int (k * 86400)
+      | Some k, 'h' when k > 0 -> float_of_int (k * 3600)
+      | _ -> fail ())
+
+let random_hex bytes =
+  let b = Bytes.create bytes in
+  let ic = open_in_bin "/dev/urandom" in
+  Fun.protect
+    ~finally:(fun () -> close_in ic)
+    (fun () -> really_input ic b 0 bytes);
+  String.concat ""
+    (List.init bytes (fun i ->
+         Printf.sprintf "%02x" (Char.code (Bytes.get b i))))
+
+let share_cmd =
+  let path_arg =
+    Arg.(required & pos 0 (some string) None & info [] ~docv:"PATH")
+  in
+  let expires_arg =
+    Arg.(
+      value & opt string "7d"
+      & info ["expires"] ~docv:"DUR"
+          ~doc:"Link lifetime as $(b,<N>d) or $(b,<N>h) (default 7d)")
+  in
+  let domain_arg =
+    Arg.(
+      value
+      & opt (some string) None
+      & info ["domain"] ~docv:"NAME" ~doc:"Domain name (default: from config)")
+  in
+  let run path expires domain =
+    let cfg = Conf_parsing.load runtime_paths.Runtime.config_path in
+    let domain =
+      match domain with Some _ -> domain | None -> read_default_domain ()
+    in
+    let d = Conf_parsing.pick_domain ?domain cfg in
+    (* Shares are served by — and written to — the first backend that carries a
+       shareUrl. *)
+    let share_backend, share_url =
+      match Conf_parsing.domain_share_backend d with
+        | Some (bc, url) -> (bc, url)
+        | None ->
+            Printf.eprintf "no backend in domain %s has a shareUrl configured\n"
+              d.Conf_parsing.name;
+            exit 1
+    in
+    let ttl = parse_duration expires in
+    let (module C : Conf.S) = make_conf ?domain cfg in
+    let (module B : Backend.S) = make_backend share_backend in
+    let expires = int_of_float (Unix.time () +. ttl) in
+    let url =
+      Lwt_main.run
+        (let open Lwt.Syntax in
+         (* Resolve PATH to a domain-relative path; accept an absolute path under
+            the mount point too. Empty rel means the whole domain. *)
+         let mount_point =
+           Filename.concat (Sys.getenv "HOME") ("tsync/" ^ C.domain_name)
+         in
+         let rel =
+           let mp = mount_point ^ "/" in
+           if
+             String.length path >= String.length mp
+             && String.sub path 0 (String.length mp) = mp
+           then
+             String.sub path (String.length mp)
+               (String.length path - String.length mp)
+           else path
+         in
+         let rel =
+           if rel <> "" && rel.[String.length rel - 1] = '/' then
+             String.sub rel 0 (String.length rel - 1)
+           else rel
+         in
+         let base_json = [("v", `Int 1); ("expires", `Int expires)] in
+         let* manifest =
+           let* head =
+             if rel = "" then Lwt.return_none
+             else B.head_opt ~key:(C.domain_prefix ^ rel) ()
+           in
+           match head with
+             | Some _ ->
+                 (* Single file. *)
+                 Lwt.return
+                   (`Assoc
+                      (base_json
+                      @ [
+                          ("type", `String "file");
+                          ( "key",
+                            `String (Fs_util.encode_key (C.domain_prefix ^ rel))
+                          );
+                          ( "chunkPrefix",
+                            `String (Fs_util.encode_key C.chunk_prefix) );
+                          ("filename", `String (Filename.basename rel));
+                        ]))
+             | None ->
+                 let dir_prefix =
+                   if rel = "" then C.domain_prefix
+                   else C.domain_prefix ^ rel ^ "/"
+                 in
+                 let* entries = B.list_all ~prefix:dir_prefix () in
+                 if entries = [] then (
+                   Printf.eprintf "not found: %s\n" path;
+                   exit 1);
+                 let json_entries =
+                   List.map
+                     (fun (e : Backend.file_entry) ->
+                       let name =
+                         Share.zip_entry_name ~domain_prefix:C.domain_prefix
+                           ~rel e.key
+                       in
+                       let is_marker =
+                         name <> "" && name.[String.length name - 1] = '/'
+                       in
+                       `Assoc
+                         (("name", `String name)
+                         ::
+                         (if is_marker then []
+                          else [("key", `String (Fs_util.encode_key e.key))])))
+                     entries
+                 in
+                 let base =
+                   if rel = "" then C.domain_name else Filename.basename rel
+                 in
+                 Lwt.return
+                   (`Assoc
+                      (base_json
+                      @ [
+                          ("type", `String "zip");
+                          ( "chunkPrefix",
+                            `String (Fs_util.encode_key C.chunk_prefix) );
+                          ("filename", `String (base ^ ".zip"));
+                          ("entries", `List json_entries);
+                        ]))
+         in
+         let manifest_key = Conf_parsing.shares_prefix d ^ random_hex 16 in
+         let* () =
+           B.put ~key:manifest_key ~data:(Yojson.Basic.to_string manifest) ()
+         in
+         let token =
+           Base64.encode_string ~alphabet:Base64.uri_safe_alphabet ~pad:false
+             (Fs_util.encode_key manifest_key)
+         in
+         Lwt.return (share_url ^ "/" ^ token))
+    in
+    let tm = Unix.localtime (float_of_int expires) in
+    Printf.eprintf "Expires %04d-%02d-%02d %02d:%02d\n" (tm.Unix.tm_year + 1900)
+      (tm.Unix.tm_mon + 1) tm.Unix.tm_mday tm.Unix.tm_hour tm.Unix.tm_min;
+    print_endline url
+  in
+  Cmd.v
+    (Cmd.info "share" ~doc:"Print a shareable download URL for a file or folder")
+    Term.(const run $ path_arg $ expires_arg $ domain_arg)
 
 (* ── tsync print-config ──────────────────────────────────────────────────── *)
 
@@ -1552,6 +2056,7 @@ let () =
         restore_cmd;
         pull_cmd;
         ls_cmd;
+        share_cmd;
         versions_cmd;
         revert_cmd;
         purge_cmd;
