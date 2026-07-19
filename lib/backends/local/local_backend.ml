@@ -78,7 +78,7 @@ let make ~root : (module Backend.S) =
         let* data = read_file (resolve src_key) in
         write_file (resolve dst_key) data
 
-    let list_all ~prefix () =
+    let list_all ?max_keys ~prefix () =
       let base = resolve prefix in
       let rec walk path key_prefix =
         Lwt.catch
@@ -129,7 +129,15 @@ let make ~root : (module Backend.S) =
             | exn -> Lwt.fail exn)
       in
       let+ entries = walk base prefix in
-      List.sort (fun a b -> String.compare a.Backend.key b.Backend.key) entries
+      let entries =
+        List.sort
+          (fun a b -> String.compare a.Backend.key b.Backend.key)
+          entries
+      in
+      match max_keys with
+        | Some n when List.length entries > n ->
+            List.filteri (fun i _ -> i < n) entries
+        | _ -> entries
 
     let list_directory ~prefix () =
       let+ all = list_all ~prefix () in

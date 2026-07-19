@@ -149,24 +149,36 @@ let copy t ~src_key ~dst_key () =
   let* data = get t ~key:src_key () in
   put t ~key:dst_key ~data ()
 
-let list_all t ~prefix () =
+let list_all t ?max_keys ~prefix () =
   (* Accumulate pages in reverse (prepend, O(1) each) rather than appending
      each page onto a growing list (O(page count) each, so O(n^2) overall
      across a large prefix) — this runs unbounded over however many objects
-     share the prefix, e.g. the full chunk store during GC. *)
+     share the prefix, e.g. the full chunk store during GC.
+
+     [max_keys] caps how many entries we return and stops pagination once
+     reached, so a bounded existence check ("does this prefix hold anything?")
+     costs a single small request instead of a full recursive listing. *)
+  let enough acc =
+    match max_keys with
+      | None -> false
+      | Some n -> List.length (List.concat acc) >= n
+  in
   let rec collect acc cont =
-    match cont with
-      | S3.Ls.Done -> Lwt.return (List.concat (List.rev acc))
-      | S3.Ls.More f -> (
-          let* res = with_retry "ls-cont" f in
-          match res with
-            | Ok (items, next) -> collect (List.map entry_of items :: acc) next
-            | Error e -> Lwt.fail (s3_eio (string_of_error e)))
+    if enough acc then Lwt.return (List.concat (List.rev acc))
+    else (
+      match cont with
+        | S3.Ls.Done -> Lwt.return (List.concat (List.rev acc))
+        | S3.Ls.More f -> (
+            let* res = with_retry "ls-cont" (fun () -> f ?max_keys ()) in
+            match res with
+              | Ok (items, next) ->
+                  collect (List.map entry_of items :: acc) next
+              | Error e -> Lwt.fail (s3_eio (string_of_error e))))
   in
   let* res =
     with_retry "ls" (fun () ->
         S3.ls ~credentials:t.credentials ~endpoint:t.endpoint ~bucket:t.bucket
-          ~prefix ())
+          ?max_keys ~prefix ())
   in
   match res with
     | Ok (items, cont) -> collect [List.map entry_of items] cont
@@ -219,7 +231,7 @@ let make ?endpoint ?unsigned_payload ~bucket ~region ~access_key_id
     let delete ~key () = delete t ~key ()
     let delete_multi keys = delete_multi t keys
     let copy ~src_key ~dst_key () = copy t ~src_key ~dst_key ()
-    let list_all ~prefix () = list_all t ~prefix ()
+    let list_all ?max_keys ~prefix () = list_all t ?max_keys ~prefix ()
     let list_directory ~prefix () = list_directory t ~prefix ()
   end)
 

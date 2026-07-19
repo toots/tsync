@@ -4,15 +4,18 @@ Serves shared files/folders from the tsync S3 chunk store. A request path is
 ``/{token}[/sub]`` where ``token`` is the random hex id of a *share manifest*
 (written by ``tsync share``); the full S3 key is ``SHARES_PREFIX + token``. Routes:
 
-- ``/{token}``            folder share -> HTML file browser; file share -> download
-- ``/{token}/download``   assemble the whole artifact (file, or folder as a zip)
-- ``/{token}/f/{index}``  assemble one entry of a folder share; 302 to a presigned
-                          GET (``?json=1`` returns the URL as JSON for inline media
+- ``/{token}``            dir share -> HTML file browser; file share -> download
+- ``/{token}/download``   assemble the whole artifact (file, or dir as a zip)
+- ``/{token}/list?path=`` (dir) one directory level as JSON: subdirs + files+sizes
+- ``/{token}/f?path=``    (dir) assemble one file; 302 to a presigned GET
+                          (``?json=1`` returns the URL as JSON for inline media
                           preview, ``?dl=1`` forces an attachment download)
 
-Assembled artifacts are cached next to / under the manifest and served via a
-short-lived presigned GET (Function URL responses are size-capped, so we never
-stream bodies ourselves).
+A dir share stores only the directory's key prefix; the browser lists one folder
+at a time via ``/list``, so ``tsync share`` and page load stay O(1) regardless of
+how many files the directory holds. Assembled artifacts are cached next to / under
+the manifest and served via a short-lived presigned GET (responses are size-capped,
+so we never stream bodies ourselves).
 
 Size guard: a single file (or per-file preview) and the running total of a folder
 zip are both capped at MAX_BYTES (default 10 GiB) -> 413, so a build can't blow
@@ -21,6 +24,7 @@ path also caps a single file at ~80 GB (10,000 parts). Upgrade path when these
 bite: build on Fargate.
 """
 
+import concurrent.futures
 import html
 import json
 import os
@@ -78,6 +82,55 @@ def object_exists(key):
 
 def chunk_key(chunk_prefix, c):
     return chunk_prefix + c["h1"] + "-" + c["h2"]
+
+
+# ── Key codec (mirrors lib/local_io/fs_util.ml) ─────────────────────────────
+#
+# tsync stores object keys with reserved/control chars percent-encoded per path
+# component (so keys are valid on any local filesystem). The backend wrapper
+# encodes/decodes transparently, but this Lambda talks to raw boto3, so it must
+# do the same: decode encoded keys for display, encode user paths for access.
+
+_RESERVED = set(':*?"<>|\\&=%')
+
+
+def encode_component(s):
+    return "".join(
+        "%%%02X" % ord(c) if (c in _RESERVED or ord(c) < 32) else c for c in s
+    )
+
+
+def encode_key(s):
+    return "/".join(encode_component(p) for p in s.split("/"))
+
+
+def decode_component(s):
+    out = []
+    i, n = 0, len(s)
+    while i < n:
+        if s[i] == "%" and i + 2 < n:
+            try:
+                out.append(chr(int(s[i + 1 : i + 3], 16)))
+                i += 3
+                continue
+            except ValueError:
+                pass
+        out.append(s[i])
+        i += 1
+    return "".join(out)
+
+
+def decode_key(s):
+    return "/".join(decode_component(p) for p in s.split("/"))
+
+
+def safe_rel(path):
+    """A browse-supplied path (decoded, '/'-separated) under the shared dir.
+    Reject anything that could escape the prefix."""
+    parts = [p for p in (path or "").split("/") if p]
+    if any(p in (".", "..") for p in parts):
+        raise ShareError(400, "bad path")
+    return "/".join(parts)
 
 
 def sanitize_filename(name):
@@ -174,20 +227,22 @@ def mtime_tuple(mtime):
         return (1980, 1, 1, 0, 0, 0)
 
 
-def build_zip(entries, chunk_prefix, cache_key):
+def write_zip(entries, chunk_prefix, cache_key):
+    """Stream (name, file_manifest_key | None) pairs into a zip at cache_key.
+    A None key is a directory marker. Missing/dirty files are skipped."""
     tmp = "/tmp/" + os.path.basename(cache_key)
     total = 0
     try:
         with zipfile.ZipFile(tmp, "w", zipfile.ZIP_STORED, allowZip64=True) as zf:
-            for e in entries:
-                name = e["name"]
-                if name.endswith("/"):
-                    zf.writestr(zipfile.ZipInfo(name), b"")
+            for name, key in entries:
+                if key is None:
+                    marker = name if name.endswith("/") else name + "/"
+                    zf.writestr(zipfile.ZipInfo(marker), b"")
                     continue
                 try:
-                    m = get_json(e["key"])
+                    m = get_json(key)
                 except FileNotFoundError:
-                    continue  # deleted since share time
+                    continue  # deleted between listing and build
                 if m.get("dirty"):
                     continue  # transient mid-upload; etag changes once complete
                 total += m.get("size", 0)
@@ -212,14 +267,27 @@ def build_zip(entries, chunk_prefix, cache_key):
             os.unlink(tmp)
 
 
-def build(share, cache_key):
-    chunk_prefix = share["chunkPrefix"]
-    if share["type"] == "file":
-        build_file(share["key"], chunk_prefix, cache_key)
-    elif share["type"] == "zip":
-        build_zip(share["entries"], chunk_prefix, cache_key)
-    else:
-        raise ShareError(400, "unknown share type")
+def iter_dir_entries(dir_prefix, root):
+    """Recursively enumerate a shared directory, yielding (zip_name, key|None).
+    Names are rooted under [root] so unzip creates a single top folder."""
+    paginator = s3.get_paginator("list_objects_v2")
+    for page in paginator.paginate(Bucket=BUCKET, Prefix=dir_prefix):
+        for obj in page.get("Contents", []):
+            enc_rel = obj["Key"][len(dir_prefix):]
+            if enc_rel == "":
+                continue  # the shared dir's own marker
+            rel = decode_key(enc_rel)
+            name = root + "/" + rel
+            yield name, (None if enc_rel.endswith("/") else obj["Key"])
+
+
+def build_dir_zip(share, cache_key):
+    root = share.get("filename", "share")
+    if root.endswith(".zip"):
+        root = root[:-4]
+    write_zip(
+        iter_dir_entries(share["dirPrefix"], root), share["chunkPrefix"], cache_key
+    )
 
 
 # ── Content types ───────────────────────────────────────────────────────────
@@ -320,24 +388,81 @@ def load_share(token):
 
 
 def download_artifact(manifest_key, share):
+    # The whole artifact (a file's bytes, or a directory zipped) is cached at
+    # <manifest>.data and served presigned. For a dir this freezes the zip at
+    # first-download time; fine given the short share TTL.
     cache_key = manifest_key + ".data"
     if not object_exists(cache_key):
-        build(share, cache_key)
+        if share["type"] == "file":
+            build_file(share["key"], share["chunkPrefix"], cache_key)
+        elif share["type"] == "dir":
+            build_dir_zip(share, cache_key)
+        else:
+            raise ShareError(400, "unknown share type")
     return redirect(presign(cache_key, share["filename"], inline=False))
 
 
-def serve_entry(share, index, as_download, want_json):
-    entries = share.get("entries", [])
-    if index < 0 or index >= len(entries):
-        raise ShareError(404, "no such entry")
-    e = entries[index]
-    if e["name"].endswith("/") or "key" not in e:
+def file_size(key):
+    """size (bytes) of a file manifest, or None if missing/mid-upload."""
+    try:
+        m = get_json(key)
+    except FileNotFoundError:
+        return None
+    return None if m.get("dirty") else m.get("size")
+
+
+def list_dir(share, rel):
+    """One directory level under the share: (subdir names, [(name, size)])."""
+    dir_prefix = share["dirPrefix"]
+    prefix = dir_prefix + (encode_key(rel) + "/" if rel else "")
+    dirs, files = [], []
+    paginator = s3.get_paginator("list_objects_v2")
+    for page in paginator.paginate(Bucket=BUCKET, Prefix=prefix, Delimiter="/"):
+        for cp in page.get("CommonPrefixes", []):
+            enc = cp["Prefix"][len(prefix):].rstrip("/")
+            dirs.append(decode_component(enc))
+        for obj in page.get("Contents", []):
+            enc = obj["Key"][len(prefix):]
+            if enc == "":
+                continue  # this dir's own marker
+            files.append((decode_component(enc), obj["Key"]))
+    # ponytail: one manifest read per file in THIS folder to show sizes, run
+    # concurrently. Fine for normal folders; a folder with thousands of direct
+    # children pays thousands of GETs. Ceiling: paginate/omit sizes if it bites.
+    sizes = {}
+    if files:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=16) as ex:
+            sizes = dict(
+                zip(
+                    (k for _, k in files),
+                    ex.map(file_size, (k for _, k in files)),
+                )
+            )
+    return dirs, [(name, sizes.get(key)) for name, key in files]
+
+
+def list_response(share, path):
+    dirs, files = list_dir(share, safe_rel(path))
+    return json_response(
+        {
+            "dirs": sorted(dirs, key=str.lower),
+            "files": [
+                {"name": n, "size": s}
+                for n, s in sorted(files, key=lambda f: f[0].lower())
+            ],
+        }
+    )
+
+
+def serve_file(share, path, as_download, want_json):
+    rel = safe_rel(path)
+    if not rel:
         raise ShareError(400, "not a file")
-    m = file_manifest(e["key"])
+    m = file_manifest(share["dirPrefix"] + encode_key(rel))
     cache_key = SHARES_PREFIX + m["h1"] + "-" + m["h2"] + ".data"
     if not object_exists(cache_key):
         assemble(m, share["chunkPrefix"], cache_key)
-    name = os.path.basename(e["name"].rstrip("/"))
+    name = os.path.basename(rel)
     ctype = mime_type(name)
     url = presign(cache_key, name, content_type=ctype, inline=not as_download)
     if want_json:
@@ -356,17 +481,18 @@ def handler(event, context):
             raise ShareError(400, "missing token")
         manifest_key, share = load_share(token)
         q = event.get("queryStringParameters") or {}
+        is_dir = share.get("type") == "dir"
         if sub == "":
-            if share.get("type") == "zip":
+            if is_dir:
                 return html_response(render_browse(share, token))
             return download_artifact(manifest_key, share)
         if sub == "download":
             return download_artifact(manifest_key, share)
-        if sub == "f":
-            if len(parts) < 3 or not parts[2].isdigit():
-                raise ShareError(400, "bad entry index")
-            return serve_entry(
-                share, int(parts[2]),
+        if is_dir and sub == "list":
+            return list_response(share, q.get("path", ""))
+        if is_dir and sub == "f":
+            return serve_file(
+                share, q.get("path", ""),
                 as_download=q.get("dl") == "1", want_json=q.get("json") == "1",
             )
         raise ShareError(404, "not found")
@@ -375,22 +501,14 @@ def handler(event, context):
 
 
 def render_browse(share, token):
-    entries = share.get("entries", [])
-    data = {
-        "base": "/" + token,
-        "filename": share.get("filename", "share"),
-        "entries": [
-            {"name": e["name"], "i": i, "dir": e["name"].endswith("/")}
-            for i, e in enumerate(entries)
-        ],
-    }
-    # Static OG/description tags for link-preview crawlers, which don't run the
-    # JS that builds the tree. The browser still refines title/tree client-side.
     title = share.get("filename", "share")
     if title.endswith(".zip"):
         title = title[:-4]
-    n = sum(1 for e in entries if not e["name"].endswith("/"))
-    desc = "%d file%s · shared via tsync" % (n, "" if n == 1 else "s")
+    data = {"base": "/" + token, "title": title}
+    # Static OG/description tags for link-preview crawlers, which don't run the
+    # JS that lists the folder. No live listing here (kept O(1)), so the
+    # description is generic.
+    desc = "Shared folder · tsync"
     return (
         BROWSE_HTML
         .replace("__OG_TITLE__", html.escape(title, quote=True))

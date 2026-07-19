@@ -140,7 +140,7 @@ let make ~command ~root : (module Backend.S) =
                 (q (resolve src_key))
                 (q dst) (q dst) (q dst)))
 
-    let list_all ~prefix () =
+    let list_all ?max_keys ~prefix () =
       let base = resolve prefix in
       let base =
         if String.length base > 1 && base.[String.length base - 1] = '/' then
@@ -211,10 +211,16 @@ let make ~command ~root : (module Backend.S) =
               | _ -> None)
           records
       in
+      let entries =
+        List.sort
+          (fun a b -> String.compare a.Backend.key b.Backend.key)
+          entries
+      in
       Lwt.return
-        (List.sort
-           (fun a b -> String.compare a.Backend.key b.Backend.key)
-           entries)
+        (match max_keys with
+          | Some n when List.length entries > n ->
+              List.filteri (fun i _ -> i < n) entries
+          | _ -> entries)
 
     let list_directory ~prefix () =
       let+ all = list_all ~prefix () in

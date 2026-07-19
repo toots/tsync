@@ -15,7 +15,7 @@ module type S = sig
   val delete : key:string -> unit -> unit Lwt.t
   val delete_multi : string list -> unit Lwt.t
   val copy : src_key:string -> dst_key:string -> unit -> unit Lwt.t
-  val list_all : prefix:string -> unit -> file_entry list Lwt.t
+  val list_all : ?max_keys:int -> prefix:string -> unit -> file_entry list Lwt.t
 
   val list_directory :
     prefix:string ->
@@ -66,9 +66,11 @@ let with_key_encoding (module B : S) : (module S) =
         ~dst_key:(Fs_util.encode_key dst_key)
         ()
 
-    let list_all ~prefix () =
+    let list_all ?max_keys ~prefix () =
       let open Lwt.Syntax in
-      let+ entries = B.list_all ~prefix:(Fs_util.encode_key prefix) () in
+      let+ entries =
+        B.list_all ?max_keys ~prefix:(Fs_util.encode_key prefix) ()
+      in
       List.map (fun e -> { e with key = Fs_util.decode_key e.key }) entries
 
     let list_directory ~prefix () =

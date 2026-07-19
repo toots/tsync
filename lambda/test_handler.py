@@ -2,7 +2,7 @@
 
     python3 -m venv .venv && . .venv/bin/activate
     pip install boto3 moto pytest
-    pytest terraform/lambda/test_handler.py
+    pytest lambda/test_handler.py
 """
 
 import importlib
@@ -61,6 +61,13 @@ def share_manifest(s3, sid, doc):
     return sid
 
 
+def dir_share(s3, sid, dir_prefix, filename="folder.zip"):
+    return share_manifest(s3, sid, {
+        "v": 1, "type": "dir", "chunkPrefix": CHUNK_PREFIX,
+        "dirPrefix": dir_prefix, "filename": filename, "expires": 9_999_999_999,
+    })
+
+
 def key_from_url(url):
     from urllib.parse import urlparse, unquote
 
@@ -76,7 +83,7 @@ def fetch_url(s3, url):
 
 def follow(s3, resp):
     """Given a 302, fetch the cached object the presigned URL points at."""
-    assert resp["statusCode"] == 302
+    assert resp["statusCode"] == 302, resp
     key = key_from_url(resp["headers"]["Location"])
     return s3.get_object(Bucket=BUCKET, Key=key)["Body"].read(), key
 
@@ -87,6 +94,9 @@ def s3():
         c = boto3.client("s3", region_name="us-east-1")
         c.create_bucket(Bucket=BUCKET)
         yield c
+
+
+# ── File shares (unchanged model) ────────────────────────────────────────────
 
 
 def test_multi_chunk_file(s3):
@@ -121,33 +131,168 @@ def test_single_chunk_file(s3):
     assert body == b"hello"
 
 
-def test_zip_folder(s3):
+def test_single_file_share_downloads(s3):
+    # A file share's /{token} redirects straight to the download.
     h = load_handler()
-    put_manifest(s3, DOMAIN_PREFIX + "dir/a.txt", [("dddd-3333", b"aaa")])
-    put_manifest(s3, DOMAIN_PREFIX + "dir/link", [], symlink="a.txt")
-    put(s3, DOMAIN_PREFIX + "dir/empty/", b"")  # dir marker
-    # A dirty entry that must be skipped.
-    put(s3, DOMAIN_PREFIX + "dir/wip.txt", json.dumps({"dirty": True}).encode())
-    tok = share_manifest(s3, "a3", {
-        "v": 1, "type": "zip", "chunkPrefix": CHUNK_PREFIX, "filename": "dir.zip",
-        "expires": 9_999_999_999,
-        "entries": [
-            {"name": "a.txt", "key": DOMAIN_PREFIX + "dir/a.txt"},
-            {"name": "link", "key": DOMAIN_PREFIX + "dir/link"},
-            {"name": "empty/"},
-            {"name": "wip.txt", "key": DOMAIN_PREFIX + "dir/wip.txt"},
-        ],
+    put_manifest(s3, DOMAIN_PREFIX + "one.txt", [("kkkk-6666", b"hi")])
+    tok = share_manifest(s3, "a5", {
+        "v": 1, "type": "file", "key": DOMAIN_PREFIX + "one.txt",
+        "chunkPrefix": CHUNK_PREFIX, "filename": "one.txt", "expires": 9_999_999_999,
     })
-    # A folder share's /{token} is the browse page; the zip is at /{token}/download.
+    body, _ = follow(s3, h.handler(event(tok), None))
+    assert body == b"hi"
+
+
+def test_max_bytes_file(s3):
+    h = load_handler(max_bytes=100)
+    put_manifest(s3, DOMAIN_PREFIX + "big.bin", [("llll-7777", b"x" * 500)], size=500)
+    tok = share_manifest(s3, "a6", {
+        "v": 1, "type": "file", "key": DOMAIN_PREFIX + "big.bin",
+        "chunkPrefix": CHUNK_PREFIX, "filename": "big.bin", "expires": 9_999_999_999,
+    })
+    assert h.handler(event(tok, "download"), None)["statusCode"] == 413
+
+
+# ── Directory shares (live model) ────────────────────────────────────────────
+
+
+def _folder_share(s3, sid="af"):
+    put_manifest(s3, DOMAIN_PREFIX + "alb/cover.jpg", [("iiii-4444", b"\xff\xd8imgdata")])
+    put_manifest(s3, DOMAIN_PREFIX + "alb/song.mp3", [("jjjj-5555", b"audiodata")])
+    put_manifest(s3, DOMAIN_PREFIX + "alb/live/track.flac", [("kkkk-1234", b"livedata")])
+    return dir_share(s3, sid, DOMAIN_PREFIX + "alb/", "alb.zip")
+
+
+def test_browse_page(s3):
+    # The page is lazy: it carries the title but not the (unlisted) entries.
+    h = load_handler()
+    tok = _folder_share(s3)
+    resp = h.handler(event(tok), None)
+    assert resp["statusCode"] == 200
+    assert "text/html" in resp["headers"]["Content-Type"]
+    assert "alb" in resp["body"]
+    assert "cover.jpg" not in resp["body"]  # only fetched via /list
+
+
+def test_dir_list_root_and_subdir(s3):
+    h = load_handler()
+    tok = _folder_share(s3)
+    doc = json.loads(h.handler(event(tok, "list", {"path": ""}), None)["body"])
+    assert doc["dirs"] == ["live"]
+    names = [f["name"] for f in doc["files"]]
+    assert names == ["cover.jpg", "song.mp3"]  # sorted
+    sizes = {f["name"]: f["size"] for f in doc["files"]}
+    assert sizes["cover.jpg"] == len(b"\xff\xd8imgdata")
+    assert sizes["song.mp3"] == len(b"audiodata")
+    # Navigate into the subdir.
+    sub = json.loads(h.handler(event(tok, "list", {"path": "live"}), None)["body"])
+    assert sub["dirs"] == []
+    assert [f["name"] for f in sub["files"]] == ["track.flac"]
+
+
+def test_dir_per_file_json_and_redirect(s3):
+    h = load_handler()
+    tok = _folder_share(s3)
+    resp = h.handler(event(tok, "f", {"path": "cover.jpg", "json": "1"}), None)
+    assert resp["statusCode"] == 200
+    doc = json.loads(resp["body"])
+    assert doc["contentType"] == "image/jpeg"
+    assert fetch_url(s3, doc["url"]) == b"\xff\xd8imgdata"
+    cache_key = key_from_url(doc["url"])
+    before = s3.head_object(Bucket=BUCKET, Key=cache_key)["LastModified"]
+    # Redirect form reuses the content-addressed cache.
+    body, key2 = follow(s3, h.handler(event(tok, "f", {"path": "cover.jpg"}), None))
+    assert body == b"\xff\xd8imgdata" and key2 == cache_key
+    after = s3.head_object(Bucket=BUCKET, Key=cache_key)["LastModified"]
+    assert before == after
+    # A nested file resolves through its path.
+    body, _ = follow(s3, h.handler(event(tok, "f", {"path": "live/track.flac"}), None))
+    assert body == b"livedata"
+
+
+def test_dir_missing_file(s3):
+    h = load_handler()
+    tok = _folder_share(s3)
+    assert h.handler(event(tok, "f", {"path": "nope.txt"}), None)["statusCode"] == 404
+
+
+def test_dir_path_traversal_rejected(s3):
+    h = load_handler()
+    tok = _folder_share(s3)
+    assert h.handler(event(tok, "f", {"path": "../secret"}), None)["statusCode"] == 400
+    assert h.handler(event(tok, "list", {"path": "a/../.."}), None)["statusCode"] == 400
+
+
+def test_dir_download_zip(s3):
+    h = load_handler()
+    put_manifest(s3, DOMAIN_PREFIX + "d/a.txt", [("dddd-3333", b"aaa")])
+    put_manifest(s3, DOMAIN_PREFIX + "d/sub/inner.txt", [("eeee-4444", b"in")])
+    put_manifest(s3, DOMAIN_PREFIX + "d/link", [], symlink="a.txt")
+    put(s3, DOMAIN_PREFIX + "d/empty/", b"")  # empty-dir marker
+    put(s3, DOMAIN_PREFIX + "d/wip.txt", json.dumps({"dirty": True}).encode())
+    tok = dir_share(s3, "a3", DOMAIN_PREFIX + "d/", "d.zip")
     body, _ = follow(s3, h.handler(event(tok, "download"), None))
     zf = zipfile.ZipFile(io.BytesIO(body))
     names = set(zf.namelist())
-    assert "a.txt" in names and "empty/" in names and "link" in names
-    assert "wip.txt" not in names  # dirty skipped
-    assert zf.read("a.txt") == b"aaa"
-    assert zf.read("link") == b"a.txt"
-    link_info = zf.getinfo("link")
-    assert (link_info.external_attr >> 16) == 0xA1FF
+    # Entries are rooted under the folder name for a clean unzip.
+    assert "d/a.txt" in names and "d/sub/inner.txt" in names
+    assert "d/link" in names and "d/empty/" in names
+    assert "d/wip.txt" not in names  # dirty skipped
+    assert zf.read("d/a.txt") == b"aaa"
+    assert zf.read("d/link") == b"a.txt"
+    assert (zf.getinfo("d/link").external_attr >> 16) == 0xA1FF
+
+
+def test_dir_download_cached(s3):
+    h = load_handler()
+    tok = _folder_share(s3)
+    _, cache_key = follow(s3, h.handler(event(tok, "download"), None))
+    before = s3.head_object(Bucket=BUCKET, Key=cache_key)["LastModified"]
+    follow(s3, h.handler(event(tok, "download"), None))
+    after = s3.head_object(Bucket=BUCKET, Key=cache_key)["LastModified"]
+    assert before == after
+
+
+def test_max_bytes_zip(s3):
+    h = load_handler(max_bytes=100)
+    put_manifest(s3, DOMAIN_PREFIX + "d2/a", [("mmmm-8888", b"y" * 80)], size=80)
+    put_manifest(s3, DOMAIN_PREFIX + "d2/b", [("nnnn-9999", b"z" * 80)], size=80)
+    tok = dir_share(s3, "a7", DOMAIN_PREFIX + "d2/", "d2.zip")
+    assert h.handler(event(tok, "download"), None)["statusCode"] == 413
+
+
+def test_encoded_key_roundtrip(s3):
+    # A filename with reserved chars is stored under an encoded key; the browse
+    # path is the decoded name, which the handler re-encodes to find it.
+    h = load_handler()
+    name = "a&b = c.txt"
+    enc = h.encode_key(DOMAIN_PREFIX + "enc/" + name)
+    put_manifest(s3, enc, [("qqqq-5678", b"payload")])
+    tok = dir_share(s3, "ae", h.encode_key(DOMAIN_PREFIX + "enc/"), "enc.zip")
+    doc = json.loads(h.handler(event(tok, "list", {"path": ""}), None)["body"])
+    assert [f["name"] for f in doc["files"]] == [name]
+    body, _ = follow(s3, h.handler(event(tok, "f", {"path": name}), None))
+    assert body == b"payload"
+
+
+def test_utf8_disposition_is_ascii(s3):
+    # A name with an NFD accent + '&' must produce an ASCII Content-Disposition
+    # (raw UTF-8 there makes S3 400); the accent goes in RFC 5987 filename*.
+    from urllib.parse import urlparse, parse_qs
+    h = load_handler()
+    name = "Café & Co.mp3"  # NFD e + combining acute
+    enc = h.encode_key(DOMAIN_PREFIX + "u/" + name)
+    put_manifest(s3, enc, [("pppp-0002", b"snd")])
+    tok = dir_share(s3, "a8", h.encode_key(DOMAIN_PREFIX + "u/"), "u.zip")
+    resp = h.handler(event(tok, "f", {"path": name, "json": "1"}), None)
+    assert resp["statusCode"] == 200
+    url = json.loads(resp["body"])["url"]
+    disp = parse_qs(urlparse(url).query)["response-content-disposition"][0]
+    disp.encode("ascii")  # must not raise
+    assert "filename*=UTF-8''" in disp
+
+
+# ── Errors ───────────────────────────────────────────────────────────────────
 
 
 def test_expired(s3):
@@ -157,6 +302,19 @@ def test_expired(s3):
         "chunkPrefix": CHUNK_PREFIX, "filename": "x", "expires": 1,
     })
     assert h.handler(event(tok), None)["statusCode"] == 410
+
+
+def test_expired_on_subroute(s3):
+    h = load_handler()
+    tok = dir_share(s3, "a9", DOMAIN_PREFIX + "gone/", "x.zip")
+    s3.put_object(  # overwrite with an expired manifest
+        Bucket=BUCKET, Key=PREFIX + "a9",
+        Body=json.dumps({
+            "v": 1, "type": "dir", "chunkPrefix": CHUNK_PREFIX,
+            "dirPrefix": DOMAIN_PREFIX + "gone/", "filename": "x.zip", "expires": 1,
+        }).encode(),
+    )
+    assert h.handler(event(tok, "list", {"path": ""}), None)["statusCode"] == 410
 
 
 def test_unknown_id(s3):
@@ -170,118 +328,3 @@ def test_garbage_token(s3):
     # Non-hex tokens can't name a key under the prefix -> bad token.
     assert h.handler(event("secret"), None)["statusCode"] == 400
     assert h.handler({"rawPath": "/@@@@"}, None)["statusCode"] == 400
-
-
-def _folder_share(s3):
-    put_manifest(s3, DOMAIN_PREFIX + "alb/cover.jpg", [("iiii-4444", b"\xff\xd8imgdata")])
-    put_manifest(s3, DOMAIN_PREFIX + "alb/song.mp3", [("jjjj-5555", b"audiodata")])
-    return share_manifest(s3, "af", {
-        "v": 1, "type": "zip", "chunkPrefix": CHUNK_PREFIX, "filename": "alb.zip",
-        "expires": 9_999_999_999,
-        "entries": [
-            {"name": "cover.jpg", "key": DOMAIN_PREFIX + "alb/cover.jpg"},
-            {"name": "song.mp3", "key": DOMAIN_PREFIX + "alb/song.mp3"},
-        ],
-    })
-
-
-def test_browse_page(s3):
-    h = load_handler()
-    tok = _folder_share(s3)
-    resp = h.handler(event(tok), None)
-    assert resp["statusCode"] == 200
-    assert "text/html" in resp["headers"]["Content-Type"]
-    assert "cover.jpg" in resp["body"] and "song.mp3" in resp["body"]
-
-
-def test_single_file_share_downloads(s3):
-    # A file share's /{token} still redirects to the download (unchanged).
-    h = load_handler()
-    put_manifest(s3, DOMAIN_PREFIX + "one.txt", [("kkkk-6666", b"hi")])
-    tok = share_manifest(s3, "a5", {
-        "v": 1, "type": "file", "key": DOMAIN_PREFIX + "one.txt",
-        "chunkPrefix": CHUNK_PREFIX, "filename": "one.txt", "expires": 9_999_999_999,
-    })
-    body, _ = follow(s3, h.handler(event(tok), None))
-    assert body == b"hi"
-
-
-def test_per_file_json_and_redirect(s3):
-    h = load_handler()
-    tok = _folder_share(s3)
-    # JSON form: presigned URL + mime, and the bytes match.
-    resp = h.handler(event(tok, "f/0", {"json": "1"}), None)
-    assert resp["statusCode"] == 200
-    doc = json.loads(resp["body"])
-    assert doc["contentType"] == "image/jpeg"
-    assert fetch_url(s3, doc["url"]) == b"\xff\xd8imgdata"
-    cache_key = key_from_url(doc["url"])
-    before = s3.head_object(Bucket=BUCKET, Key=cache_key)["LastModified"]
-    # Redirect form of the same entry reuses the content-addressed cache.
-    body, key2 = follow(s3, h.handler(event(tok, "f/0"), None))
-    assert body == b"\xff\xd8imgdata" and key2 == cache_key
-    after = s3.head_object(Bucket=BUCKET, Key=cache_key)["LastModified"]
-    assert before == after
-    # Second entry assembles to a different cache object.
-    _, key_mp3 = follow(s3, h.handler(event(tok, "f/1"), None))
-    assert key_mp3 != cache_key
-
-
-def test_per_file_bad_index(s3):
-    h = load_handler()
-    tok = _folder_share(s3)
-    assert h.handler(event(tok, "f/9"), None)["statusCode"] == 404
-
-
-def test_max_bytes_file(s3):
-    h = load_handler(max_bytes=100)
-    put_manifest(s3, DOMAIN_PREFIX + "big.bin", [("llll-7777", b"x" * 500)], size=500)
-    tok = share_manifest(s3, "a6", {
-        "v": 1, "type": "file", "key": DOMAIN_PREFIX + "big.bin",
-        "chunkPrefix": CHUNK_PREFIX, "filename": "big.bin", "expires": 9_999_999_999,
-    })
-    assert h.handler(event(tok, "download"), None)["statusCode"] == 413
-
-
-def test_max_bytes_zip(s3):
-    h = load_handler(max_bytes=100)
-    put_manifest(s3, DOMAIN_PREFIX + "d/a", [("mmmm-8888", b"y" * 80)], size=80)
-    put_manifest(s3, DOMAIN_PREFIX + "d/b", [("nnnn-9999", b"z" * 80)], size=80)
-    tok = share_manifest(s3, "a7", {
-        "v": 1, "type": "zip", "chunkPrefix": CHUNK_PREFIX, "filename": "d.zip",
-        "expires": 9_999_999_999,
-        "entries": [
-            {"name": "a", "key": DOMAIN_PREFIX + "d/a"},
-            {"name": "b", "key": DOMAIN_PREFIX + "d/b"},
-        ],
-    })
-    assert h.handler(event(tok, "download"), None)["statusCode"] == 413
-
-
-def test_utf8_disposition_is_ascii(s3):
-    # A name with an NFD accent + '&' must produce an ASCII Content-Disposition
-    # (raw UTF-8 there makes S3 400); the accent goes in RFC 5987 filename*.
-    from urllib.parse import urlparse, parse_qs
-    h = load_handler()
-    name = "Café & Co.mp3"  # NFD e + combining acute
-    put_manifest(s3, DOMAIN_PREFIX + "x.mp3", [("pppp-0002", b"snd")])
-    tok = share_manifest(s3, "a8", {
-        "v": 1, "type": "zip", "chunkPrefix": CHUNK_PREFIX, "filename": "d.zip",
-        "expires": 9_999_999_999,
-        "entries": [{"name": name, "key": DOMAIN_PREFIX + "x.mp3"}],
-    })
-    resp = h.handler(event(tok, "f/0", {"json": "1"}), None)
-    assert resp["statusCode"] == 200
-    url = json.loads(resp["body"])["url"]
-    disp = parse_qs(urlparse(url).query)["response-content-disposition"][0]
-    disp.encode("ascii")  # must not raise
-    assert "filename*=UTF-8''" in disp
-
-
-def test_expired_on_subroute(s3):
-    h = load_handler()
-    tok = share_manifest(s3, "a9", {
-        "v": 1, "type": "zip", "chunkPrefix": CHUNK_PREFIX, "filename": "x.zip",
-        "expires": 1, "entries": [],
-    })
-    assert h.handler(event(tok, "download"), None)["statusCode"] == 410

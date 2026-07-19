@@ -1899,7 +1899,26 @@ let share_cmd =
       & opt (some string) None
       & info ["domain"] ~docv:"NAME" ~doc:"Domain name (default: from config)")
   in
-  let run path expires domain =
+  let token_arg =
+    Arg.(
+      value
+      & opt (some string) None
+      & info ["token"] ~docv:"HEX"
+          ~doc:
+            "Reuse this share id instead of generating a random one, keeping \
+             an existing link stable. Overwrites any share already at that id. \
+             Must be lowercase hex.")
+  in
+  let run path expires domain token =
+    (match token with
+      | Some t
+        when t = ""
+             || String.exists
+                  (fun c -> not (String.contains "0123456789abcdef" c))
+                  t ->
+          Printf.eprintf "--token must be non-empty lowercase hex\n";
+          exit 1
+      | _ -> ());
     let cfg = Conf_parsing.load runtime_paths.Runtime.config_path in
     let domain =
       match domain with Some _ -> domain | None -> read_default_domain ()
@@ -1968,27 +1987,14 @@ let share_cmd =
                    if rel = "" then C.domain_prefix
                    else C.domain_prefix ^ rel ^ "/"
                  in
-                 let* entries = B.list_all ~prefix:dir_prefix () in
+                 (* Confirm the directory exists (one bounded list), but don't
+                    enumerate it — the manifest stores only the prefix and the
+                    Lambda lists lazily per folder. Keeps `tsync share` O(1)
+                    regardless of how many files the directory holds. *)
+                 let* entries = B.list_all ~prefix:dir_prefix ~max_keys:1 () in
                  if entries = [] then (
                    Printf.eprintf "not found: %s\n" path;
                    exit 1);
-                 let json_entries =
-                   List.map
-                     (fun (e : Backend.file_entry) ->
-                       let name =
-                         Share.zip_entry_name ~domain_prefix:C.domain_prefix
-                           ~rel e.key
-                       in
-                       let is_marker =
-                         name <> "" && name.[String.length name - 1] = '/'
-                       in
-                       `Assoc
-                         (("name", `String name)
-                         ::
-                         (if is_marker then []
-                          else [("key", `String (Fs_util.encode_key e.key))])))
-                     entries
-                 in
                  let base =
                    if rel = "" then C.domain_name else Filename.basename rel
                  in
@@ -1996,16 +2002,17 @@ let share_cmd =
                    (`Assoc
                       (base_json
                       @ [
-                          ("type", `String "zip");
+                          ("type", `String "dir");
                           ( "chunkPrefix",
                             `String (Fs_util.encode_key C.chunk_prefix) );
+                          ("dirPrefix", `String (Fs_util.encode_key dir_prefix));
                           ("filename", `String (base ^ ".zip"));
-                          ("entries", `List json_entries);
                         ]))
          in
-         (* The token is just the manifest's random id; the server rebuilds the
-            key as SHARES_PREFIX + token. Keeps the share URL short. *)
-         let token = random_hex 16 in
+         (* The token is just the manifest's id; the server rebuilds the key as
+            SHARES_PREFIX + token. Keeps the share URL short. Reuse a caller-
+            supplied id (stable links) or generate a random one. *)
+         let token = Option.value token ~default:(random_hex 16) in
          let manifest_key = Conf_parsing.shares_prefix d ^ token in
          let* () =
            B.put ~key:manifest_key ~data:(Yojson.Basic.to_string manifest) ()
@@ -2019,7 +2026,7 @@ let share_cmd =
   in
   Cmd.v
     (Cmd.info "share" ~doc:"Print a shareable download URL for a file or folder")
-    Term.(const run $ path_arg $ expires_arg $ domain_arg)
+    Term.(const run $ path_arg $ expires_arg $ domain_arg $ token_arg)
 
 (* ── tsync print-config ──────────────────────────────────────────────────── *)
 

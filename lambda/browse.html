@@ -102,6 +102,12 @@
         white-space: nowrap;
         cursor: pointer;
       }
+      li .size {
+        color: #888;
+        font-variant-numeric: tabular-nums;
+        font-size: 13px;
+        white-space: nowrap;
+      }
       li a.dl {
         color: #888;
         text-decoration: none;
@@ -206,7 +212,8 @@
       const DATA = __SHARE_DATA__;
       const B = DATA.base;
       document.getElementById("dlall").href = B + "/download";
-      const nameNoZip = DATA.filename.replace(/\.zip$/, "");
+      document.getElementById("title").textContent = DATA.title;
+      document.title = DATA.title + " — tsync share";
 
       // ext -> preview kind, generated from MIME in handler.py.
       const PREVIEW_KINDS = __PREVIEW_KINDS__;
@@ -223,51 +230,25 @@
         text: "📄",
       };
 
-      // Build a folder tree from the flat entry list.
-      const root = { dirs: {}, files: [] };
-      function ensure(node, parts) {
-        for (const p of parts) {
-          node.dirs[p] = node.dirs[p] || { dirs: {}, files: [] };
-          node = node.dirs[p];
+      function humanSize(n) {
+        if (n == null) return "";
+        const u = ["B", "KB", "MB", "GB", "TB", "PB"];
+        let i = 0;
+        while (n >= 1024 && i < u.length - 1) {
+          n /= 1024;
+          i++;
         }
-        return node;
-      }
-      for (const e of DATA.entries) {
-        const parts = e.name.split("/").filter(Boolean);
-        if (e.dir) {
-          ensure(root, parts);
-          continue;
-        }
-        const dir = ensure(root, parts.slice(0, -1));
-        dir.files.push({ name: parts[parts.length - 1], i: e.i });
+        return (i === 0 ? n : n.toFixed(1)) + " " + u[i];
       }
 
-      // The zip roots entries at the shared folder, so the tree has a single wrapping
-      // dir; show its contents directly instead of a folder nested inside itself.
-      let base = root,
-        rootLabel = nameNoZip;
-      {
-        const tops = Object.keys(root.dirs);
-        if (tops.length === 1 && root.files.length === 0) {
-          rootLabel = tops[0];
-          base = root.dirs[tops[0]];
-        }
-      }
-      document.getElementById("title").textContent = rootLabel;
-      document.title = rootLabel + " — tsync share";
-
+      // path = decoded folder segments from the share root. The file listing for
+      // the current folder is fetched lazily from the Lambda, so nothing about
+      // the directory is loaded until it is actually opened.
       let path = [];
-      function nodeAt(p) {
-        let n = base;
-        for (const s of p) {
-          n = n.dirs[s];
-          if (!n) return { dirs: {}, files: [] };
-        }
-        return n;
-      }
+      const fileUrl = (name, q) =>
+        B + "/f?path=" + encodeURIComponent([...path, name].join("/")) + q;
 
-      function render() {
-        const node = nodeAt(path);
+      function renderCrumbs() {
         const cr = document.getElementById("crumbs");
         cr.innerHTML = "";
         const mk = (label, idx) => {
@@ -279,24 +260,35 @@
           };
           return a;
         };
-        cr.appendChild(mk(rootLabel || "root", 0));
+        cr.appendChild(mk(DATA.title || "root", 0));
         path.forEach((seg, k) => {
           cr.append(" / ");
           cr.appendChild(mk(seg, k + 1));
         });
+      }
 
+      async function render() {
+        renderCrumbs();
         const ul = document.getElementById("list");
+        ul.innerHTML = '<div class="empty">Loading…</div>';
+        let data;
+        try {
+          const r = await fetch(
+            B + "/list?path=" + encodeURIComponent(path.join("/")),
+          );
+          if (!r.ok) throw new Error(r.status);
+          data = await r.json();
+        } catch (e) {
+          ul.innerHTML = '<div class="empty">Failed to load (' + e.message + ")</div>";
+          return;
+        }
         ul.innerHTML = "";
-        const dirs = Object.keys(node.dirs).sort((a, b) => a.localeCompare(b));
-        const files = node.files
-          .slice()
-          .sort((a, b) => a.name.localeCompare(b.name));
-        if (!dirs.length && !files.length) {
+        if (!data.dirs.length && !data.files.length) {
           ul.innerHTML = '<div class="empty">Empty folder</div>';
           return;
         }
 
-        for (const d of dirs) {
+        for (const d of data.dirs) {
           const li = document.createElement("li");
           li.innerHTML = '<span class="ico">📁</span>';
           const n = document.createElement("span");
@@ -309,11 +301,9 @@
           li.appendChild(n);
           ul.appendChild(li);
         }
-        for (const f of files) {
+        for (const f of data.files) {
           const k = kind(f.name);
           const li = document.createElement("li");
-          const url = B + "/f/" + f.i + "?dl=1";
-          const a = document.createElement("li");
           const ic = document.createElement("span");
           ic.className = "ico";
           ic.textContent = ICON[k] || "📄";
@@ -323,14 +313,17 @@
           n.onclick = k
             ? () => preview(f, k)
             : () => {
-                location.href = B + "/f/" + f.i + "?dl=1";
+                location.href = fileUrl(f.name, "?dl=1");
               };
+          const sz = document.createElement("span");
+          sz.className = "size";
+          sz.textContent = humanSize(f.size);
           const dl = document.createElement("a");
           dl.className = "dl";
           dl.textContent = "⬇";
           dl.title = "Download";
-          dl.href = B + "/f/" + f.i + "?dl=1";
-          li.append(ic, n, dl);
+          dl.href = fileUrl(f.name, "?dl=1");
+          li.append(ic, n, sz, dl);
           ul.appendChild(li);
         }
       }
@@ -338,11 +331,11 @@
       const pv = document.getElementById("pv");
       async function preview(f, k) {
         document.getElementById("pvt").textContent = f.name;
-        document.getElementById("pvdl").href = B + "/f/" + f.i + "?dl=1";
+        document.getElementById("pvdl").href = fileUrl(f.name, "?dl=1");
         const body = document.getElementById("pvb");
         body.innerHTML = "Loading…";
         if (!pv.open) pv.showModal();
-        const r = await fetch(B + "/f/" + f.i + "?json=1");
+        const r = await fetch(fileUrl(f.name, "?json=1"));
         if (!r.ok) {
           body.textContent = "Preview failed (" + r.status + ")";
           return;
