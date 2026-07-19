@@ -243,10 +243,23 @@
 
       // path = decoded folder segments from the share root. The file listing for
       // the current folder is fetched lazily from the Lambda, so nothing about
-      // the directory is loaded until it is actually opened.
+      // the directory is loaded until it is actually opened. The path lives in
+      // the URL hash so Back/Forward walk the folder history and deep links are
+      // bookmarkable.
       let path = [];
       const fileUrl = (name, q) =>
         B + "/f?path=" + encodeURIComponent([...path, name].join("/")) + q;
+
+      const pathToHash = (p) => "#/" + p.map(encodeURIComponent).join("/");
+      const pathFromHash = () => {
+        const h = location.hash.replace(/^#\/?/, "");
+        return h ? h.split("/").map(decodeURIComponent) : [];
+      };
+      function navigate(p) {
+        const target = pathToHash(p);
+        if (location.hash === target) render();
+        else location.hash = target; // triggers hashchange -> sync()
+      }
 
       function renderCrumbs() {
         const cr = document.getElementById("crumbs");
@@ -254,10 +267,7 @@
         const mk = (label, idx) => {
           const a = document.createElement("a");
           a.textContent = label;
-          a.onclick = () => {
-            path = path.slice(0, idx);
-            render();
-          };
+          a.onclick = () => navigate(path.slice(0, idx));
           return a;
         };
         cr.appendChild(mk(DATA.title || "root", 0));
@@ -294,10 +304,7 @@
           const n = document.createElement("span");
           n.className = "name";
           n.textContent = d;
-          n.onclick = () => {
-            path.push(d);
-            render();
-          };
+          n.onclick = () => navigate([...path, d]);
           li.appendChild(n);
           ul.appendChild(li);
         }
@@ -313,7 +320,7 @@
           n.onclick = k
             ? () => preview(f, k)
             : () => {
-                location.href = fileUrl(f.name, "?dl=1");
+                location.href = fileUrl(f.name, "&dl=1");
               };
           const sz = document.createElement("span");
           sz.className = "size";
@@ -322,7 +329,7 @@
           dl.className = "dl";
           dl.textContent = "⬇";
           dl.title = "Download";
-          dl.href = fileUrl(f.name, "?dl=1");
+          dl.href = fileUrl(f.name, "&dl=1");
           li.append(ic, n, sz, dl);
           ul.appendChild(li);
         }
@@ -331,11 +338,11 @@
       const pv = document.getElementById("pv");
       async function preview(f, k) {
         document.getElementById("pvt").textContent = f.name;
-        document.getElementById("pvdl").href = fileUrl(f.name, "?dl=1");
+        document.getElementById("pvdl").href = fileUrl(f.name, "&dl=1");
         const body = document.getElementById("pvb");
         body.innerHTML = "Loading…";
         if (!pv.open) pv.showModal();
-        const r = await fetch(fileUrl(f.name, "?json=1"));
+        const r = await fetch(fileUrl(f.name, "&json=1"));
         if (!r.ok) {
           body.textContent = "Preview failed (" + r.status + ")";
           return;
@@ -361,7 +368,14 @@
         document.getElementById("pvb").innerHTML = "";
       });
 
-      render();
+      // Drive the current folder from the URL hash: Back/Forward and deep links
+      // just change the hash, which re-renders.
+      function sync() {
+        path = pathFromHash();
+        render();
+      }
+      window.addEventListener("hashchange", sync);
+      sync();
     </script>
   </body>
 </html>
