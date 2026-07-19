@@ -1328,6 +1328,56 @@ let prompt_symlinks default =
 
 (* ── Backend / domain builders ───────────────────────────────────────────── *)
 
+(* Fields a Terraform store fills on an s3 backend. *)
+let store_fields =
+  ["bucket"; "region"; "accessKeyId"; "secretAccessKey"; "shareUrl"]
+
+let apply_store_fields l (s : tf_store) =
+  let l = assoc_set l "bucket" (`String s.bucket) in
+  let l =
+    if s.region = "" then l else assoc_set l "region" (`String s.region)
+  in
+  let l = assoc_set l "accessKeyId" (`String s.access_key_id) in
+  let l =
+    match s.secret with
+      | Some sec -> assoc_set l "secretAccessKey" (`String sec)
+      | None -> l
+  in
+  assoc_set l "shareUrl" (`String s.function_url)
+
+(* Interactively pick a Terraform store (numbered menu of store + bucket) and read
+   its outputs. Pulls once; nothing about Terraform is persisted. [None] on
+   decline/failure. *)
+let terraform_store () =
+  let dir = prompt "  Terraform directory" (Some "terraform") in
+  let fail msg =
+    Printf.printf "  (%s)\n" msg;
+    None
+  in
+  match terraform_output dir with
+    | None -> fail (Printf.sprintf "could not read terraform output in %s" dir)
+    | Some root -> (
+        let entries =
+          List.filter_map
+            (fun k -> Option.map (fun s -> (k, s)) (tf_lookup root k))
+            (tf_stores root)
+        in
+        match entries with
+          | [] -> fail "no stores found in terraform output"
+          | _ -> (
+              Printf.printf "  Terraform stores:\n";
+              List.iteri
+                (fun i (k, (s : tf_store)) ->
+                  Printf.printf "    %d. %-10s %s\n" (i + 1) k s.bucket)
+                entries;
+              let choice = prompt "  Choose a store by number" (Some "1") in
+              match int_of_string_opt (String.trim choice) with
+                | Some n when n >= 1 && n <= List.length entries ->
+                    let k, s = List.nth entries (n - 1) in
+                    Printf.printf "  Pulled store %S (bucket=%s).\n" k s.bucket;
+                    Some s
+                | _ -> fail "invalid choice"))
+
 let prompt_backend () =
   let rec ask () =
     let t = prompt "  Backend type (s3/local/ssh)" (Some "s3") in
@@ -1340,37 +1390,53 @@ let prompt_backend () =
   in
   let backend_type = ask () in
   let name = prompt "  Backend name" (Some backend_type) in
+  (* For s3, offer to pull bucket/keys/share URL from Terraform up front, then
+     only prompt the fields Terraform doesn't provide. *)
+  let synced =
+    if
+      backend_type = "s3"
+      && prompt_bool ~default:true
+           "  Fill bucket/keys/share URL from Terraform?"
+    then terraform_store ()
+    else None
+  in
   let spec = Option.value ~default:[] (Backend.spec_for backend_type) in
   let fields =
     List.filter_map
       (fun (s : Backend.field_spec) ->
-        let value =
-          match s.typ with
-            | `Bool ->
-                string_of_bool
-                  (prompt_bool ~default:(s.default = Some "true")
-                     ("  " ^ s.label))
-            | `String when s.secret ->
-                let rec ask () =
-                  let v = read_password ("  " ^ s.label) in
-                  if v <> "" then v
-                  else begin
-                    Printf.printf "  (required — cannot be blank)\n%!";
-                    ask ()
-                  end
-                in
-                ask ()
-            | `String -> (
-                match s.default with
-                  | None -> prompt_required ("  " ^ s.label)
-                  | Some d ->
-                      prompt ("  " ^ s.label) (if d = "" then None else Some d))
-        in
-        match (s.typ, s.default, value) with
-          | `String, Some "", "" -> None
-          | `Bool, _, v -> Some (s.name, `Bool (v = "true"))
-          | `String, _, v -> Some (s.name, `String v))
+        if synced <> None && List.mem s.name store_fields then None
+        else (
+          let value =
+            match s.typ with
+              | `Bool ->
+                  string_of_bool
+                    (prompt_bool ~default:(s.default = Some "true")
+                       ("  " ^ s.label))
+              | `String when s.secret ->
+                  let rec ask () =
+                    let v = read_password ("  " ^ s.label) in
+                    if v <> "" then v
+                    else begin
+                      Printf.printf "  (required — cannot be blank)\n%!";
+                      ask ()
+                    end
+                  in
+                  ask ()
+              | `String -> (
+                  match s.default with
+                    | None -> prompt_required ("  " ^ s.label)
+                    | Some d ->
+                        prompt ("  " ^ s.label)
+                          (if d = "" then None else Some d))
+          in
+          match (s.typ, s.default, value) with
+            | `String, Some "", "" -> None
+            | `Bool, _, v -> Some (s.name, `Bool (v = "true"))
+            | `String, _, v -> Some (s.name, `String v)))
       spec
+  in
+  let synced_fields =
+    match synced with Some s -> apply_store_fields [] s | None -> []
   in
   let main =
     prompt_bool ~default:(backend_type = "local")
@@ -1378,7 +1444,7 @@ let prompt_backend () =
   in
   `Assoc
     ([("name", `String name); ("type", `String backend_type)]
-    @ fields
+    @ synced_fields @ fields
     @ [("main", `Bool main)])
 
 let prompt_backends () =
@@ -1393,90 +1459,139 @@ let prompt_backends () =
   done;
   !backends
 
-(* Set bucket/region/accessKeyId/secretAccessKey on the s3 backend that matches
-   the store key by name, or the sole s3 backend. [None] when the target is
-   ambiguous (multiple s3 backends, none named after the store). *)
-let apply_tf_to_backends backends store (s : tf_store) =
-  let is_s3 b = jstr b "type" = Some "s3" in
-  let target =
-    match
-      List.filter (fun b -> jstr b "name" = Some store && is_s3 b) backends
-    with
-      | [b] -> Some b
-      | _ -> (
-          match List.filter is_s3 backends with [b] -> Some b | _ -> None)
-  in
-  let update = function
-    | `Assoc l ->
-        let l = assoc_set l "bucket" (`String s.bucket) in
-        let l =
-          if s.region = "" then l else assoc_set l "region" (`String s.region)
+(* Prompt one backend spec field, pre-filled with [current]. [None] omits it
+   (blank optional string, or blank secret keeping no prior value). *)
+let prompt_spec_field (s : Backend.field_spec) ~current =
+  match s.typ with
+    | `Bool ->
+        let default =
+          match current with
+            | Some v -> v = "true"
+            | None -> s.default = Some "true"
         in
-        let l = assoc_set l "accessKeyId" (`String s.access_key_id) in
-        let l =
-          match s.secret with
-            | Some sec -> assoc_set l "secretAccessKey" (`String sec)
-            | None -> l
+        Some (s.name, `Bool (prompt_bool ~default s.label))
+    | `String when s.secret ->
+        let v = read_password (s.label ^ " (blank keeps current)") in
+        if v <> "" then Some (s.name, `String v)
+        else Option.map (fun c -> (s.name, `String c)) current
+    | `String ->
+        let def =
+          match current with
+            | Some c -> Some c
+            | None -> ( match s.default with Some "" -> None | d -> d)
         in
-        `Assoc (assoc_set l "shareUrl" (`String s.function_url))
-    | other -> other
-  in
-  Option.map
-    (fun tgt -> List.map (fun b -> if b == tgt then update b else b) backends)
-    target
+        let v = prompt s.label def in
+        if v = "" && s.default = Some "" then None else Some (s.name, `String v)
 
-(* Prompt for a Terraform dir + store key and bake the s3 backend fields + share
-   URL from `terraform output` into the matching backend. Pulls once — nothing
-   about Terraform is persisted in the config. Returns the updated backends, or
-   [None] if it fails. *)
-let sync_from_terraform ~name backends =
-  let dir = prompt "  Terraform directory" (Some "terraform") in
-  let fail msg =
-    Printf.printf "  (%s)\n" msg;
-    None
+(* Per-field editor for one backend, with a Terraform sync action for s3. *)
+let edit_backend b =
+  let l = ref (match b with `Assoc l -> l | _ -> []) in
+  let get k =
+    match List.assoc_opt k !l with
+      | Some (`String s) -> s
+      | Some (`Bool b) -> string_of_bool b
+      | _ -> ""
   in
-  match terraform_output dir with
-    | None ->
-        fail
-          (Printf.sprintf
-             "could not read terraform output in %s — left unchanged" dir)
-    | Some root -> (
-        (* Default to the sole store, else the domain name (correctable). List
-           the available keys so multi-store setups aren't a guessing game. *)
-        let stores = tf_stores root in
-        (* Auto-fill only a real store: the sole one, or one equal to the domain
-           name. Otherwise leave it blank so the user picks from the list. *)
-        let store_default =
-          match stores with
-            | [only] -> Some only
-            | l when List.mem name l -> Some name
-            | _ -> None
-        in
-        Printf.printf
-          "  A \"store\" is one entry in your terraform.tfvars 'stores' map — it\n\
-          \  provisions one bucket (+ its keys and share Lambda). Enter the \
-           store\n\
-          \  whose bucket should back this domain%s.\n"
-          (match stores with
-            | [] -> ""
-            | l -> " (available: " ^ String.concat ", " l ^ ")");
-        let store = prompt "  Store" store_default in
-        match tf_lookup root store with
-          | None ->
-              fail
-                (Printf.sprintf "store %S not found in terraform output" store)
-          | Some s -> (
-              match apply_tf_to_backends backends store s with
-                | None ->
-                    fail
-                      (Printf.sprintf
-                         "couldn't pick an s3 backend to update — name one %S"
-                         store)
-                | Some updated ->
-                    Printf.printf
-                      "  Synced bucket=%s region=%s + share URL into backend %S.\n"
-                      s.bucket s.region store;
-                    Some updated))
+  let btype = get "type" in
+  let is_s3 = btype = "s3" in
+  let spec = Option.value ~default:[] (Backend.spec_for btype) in
+  let running = ref true in
+  let status = ref "" in
+  while !running do
+    clear_screen ();
+    Printf.printf "Editing backend: %s (%s)\n\nFields:\n" (get "name") btype;
+    Printf.printf "  1. %-16s %s\n" "name:" (get "name");
+    List.iteri
+      (fun i (s : Backend.field_spec) ->
+        let v = get s.name in
+        Printf.printf "  %d. %-16s %s\n" (i + 2) (s.name ^ ":")
+          (if s.secret && v <> "" then "***" else v))
+      spec;
+    let main_n = List.length spec + 2 in
+    Printf.printf "  %d. %-16s %s\n" main_n "primary:" (get "main");
+    if is_s3 then
+      Printf.printf "  [t] sync bucket/keys/share URL from Terraform\n";
+    if !status <> "" then Printf.printf "\n%s\n" !status;
+    Printf.printf "\nEnter a field number to edit%s, or [d]one:\n> %!"
+      (if is_s3 then ", [t] to sync" else "");
+    status := "";
+    let input = String.lowercase_ascii (String.trim (read_line ())) in
+    match input with
+      | "d" | "" -> running := false
+      | "t" when is_s3 -> (
+          match terraform_store () with
+            | Some s -> l := apply_store_fields !l s
+            | None -> ())
+      | "1" ->
+          l :=
+            assoc_set !l "name"
+              (`String (prompt "Backend name" (Some (get "name"))))
+      | _ -> (
+          match int_of_string_opt input with
+            | Some n when n = main_n ->
+                l :=
+                  assoc_set !l "main"
+                    (`Bool
+                       (prompt_bool
+                          ~default:(get "main" = "true")
+                          "Primary backend?"))
+            | Some n when n >= 2 && n <= List.length spec + 1 -> (
+                let s = List.nth spec (n - 2) in
+                match prompt_spec_field s ~current:(Some (get s.name)) with
+                  | Some (k, v) -> l := assoc_set !l k v
+                  | None -> l := List.remove_assoc s.name !l)
+            | _ -> status := Printf.sprintf "(unknown field %S)" input)
+  done;
+  `Assoc !l
+
+(* Backend list menu for a domain: add / edit / remove. *)
+let edit_backends backends =
+  let backends = ref backends in
+  let running = ref true in
+  let status = ref "" in
+  while !running do
+    clear_screen ();
+    Printf.printf "Backends:\n";
+    if !backends = [] then Printf.printf "  (none)\n"
+    else
+      List.iteri
+        (fun i b ->
+          Printf.printf "  %d. %s (%s)%s\n" (i + 1)
+            (Option.value (jstr b "name") ~default:"?")
+            (Option.value (jstr b "type") ~default:"?")
+            (if jbool b "main" then " [primary]" else ""))
+        !backends;
+    if !status <> "" then Printf.printf "\n%s\n" !status;
+    Printf.printf
+      "\nEnter a backend number to edit, [a]dd, [r]emove N, or [d]one:\n> %!";
+    status := "";
+    let parts =
+      List.filter (( <> ) "")
+        (String.split_on_char ' '
+           (String.lowercase_ascii (String.trim (read_line ()))))
+    in
+    let nth_ok i = i >= 1 && i <= List.length !backends in
+    match parts with
+      | [] | ["d"] -> running := false
+      | ["a"] ->
+          Printf.printf "\nNew backend\n";
+          backends := !backends @ [prompt_backend ()]
+      | ["r"; n] -> (
+          match int_of_string_opt n with
+            | Some i when nth_ok i ->
+                backends := List.filteri (fun j _ -> j <> i - 1) !backends
+            | _ -> status := "(need a valid backend number)")
+      | [n] -> (
+          match int_of_string_opt n with
+            | Some i when nth_ok i ->
+                backends :=
+                  List.mapi
+                    (fun j b -> if j = i - 1 then edit_backend b else b)
+                    !backends
+            | _ -> status := Printf.sprintf "(unknown action %S)" n)
+      | _ -> status := "(unknown action)"
+  done;
+  !backends
 
 let backend_summary = function
   | [] -> "(none)"
@@ -1499,12 +1614,6 @@ let edit_domain existing =
   let backends =
     ref (match existing with Some j -> jlist j "backends" | None -> [])
   in
-  let has_s3 () = List.exists (fun b -> jstr b "type" = Some "s3") !backends in
-  let sync () =
-    match sync_from_terraform ~name:!name !backends with
-      | Some updated -> backends := updated
-      | None -> ()
-  in
   (match existing with
     | None ->
         name := prompt "Domain name" (Some !name);
@@ -1515,9 +1624,7 @@ let edit_domain existing =
         read_only :=
           prompt_bool ~default:!read_only
             "Read-only mount (block all local writes)?";
-        backends := prompt_backends ();
-        if has_s3 () && prompt_bool "Sync s3 backend from Terraform?" then
-          sync ()
+        backends := prompt_backends ()
     | Some _ ->
         let running = ref true in
         let status = ref "" in
@@ -1529,7 +1636,6 @@ let edit_domain existing =
           Printf.printf "  3. symlinks:    %s\n" !symlinks;
           Printf.printf "  4. read-only:   %b\n" !read_only;
           Printf.printf "  5. backends:    %s\n" (backend_summary !backends);
-          if has_s3 () then Printf.printf "  6. sync from Terraform\n";
           if !status <> "" then Printf.printf "\n%s\n" !status;
           Printf.printf "\nEnter a field number to edit, or [d]one:\n> %!";
           status := "";
@@ -1541,8 +1647,7 @@ let edit_domain existing =
             | "3" -> symlinks := prompt_symlinks !symlinks
             | "4" ->
                 read_only := prompt_bool ~default:!read_only "Read-only mount?"
-            | "5" -> backends := prompt_backends ()
-            | "6" when has_s3 () -> sync ()
+            | "5" -> backends := edit_backends !backends
             | "d" | "" -> running := false
             | other -> status := Printf.sprintf "(unknown field %S)" other
         done);
