@@ -1441,11 +1441,26 @@ let sync_from_terraform ~name backends =
           (Printf.sprintf
              "could not read terraform output in %s — left unchanged" dir)
     | Some root -> (
-        (* Default to the sole store, else the domain name (correctable). *)
+        (* Default to the sole store, else the domain name (correctable). List
+           the available keys so multi-store setups aren't a guessing game. *)
+        let stores = tf_stores root in
+        (* Auto-fill only a real store: the sole one, or one equal to the domain
+           name. Otherwise leave it blank so the user picks from the list. *)
         let store_default =
-          match tf_stores root with [only] -> only | _ -> name
+          match stores with
+            | [only] -> Some only
+            | l when List.mem name l -> Some name
+            | _ -> None
         in
-        let store = prompt "  Terraform store key" (Some store_default) in
+        Printf.printf
+          "  A \"store\" is one entry in your terraform.tfvars 'stores' map — it\n\
+          \  provisions one bucket (+ its keys and share Lambda). Enter the \
+           store\n\
+          \  whose bucket should back this domain%s.\n"
+          (match stores with
+            | [] -> ""
+            | l -> " (available: " ^ String.concat ", " l ^ ")");
+        let store = prompt "  Store" store_default in
         match tf_lookup root store with
           | None ->
               fail
