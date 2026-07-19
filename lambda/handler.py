@@ -385,7 +385,6 @@ BROWSE_HTML = r"""<!doctype html>
   li .ico { width: 1.4em; text-align: center; }
   li .name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis;
              white-space: nowrap; cursor: pointer; }
-  li .name.plain { cursor: default; }
   li a.dl { color: #888; text-decoration: none; padding: 2px 6px; border-radius: 6px; }
   li a.dl:hover { background: #8883; }
   .empty { color: #888; padding: 24px 8px; }
@@ -487,9 +486,11 @@ function render() {
   for (const f of files) {
     const k = kind(f.name);
     const li = document.createElement("li");
+    const url = B + "/f/" + f.i + "?dl=1";
+    const a = document.createElement("li");
     const ic = document.createElement("span"); ic.className = "ico"; ic.textContent = ICON[k] || "📄";
-    const n = document.createElement("span"); n.className = "name" + (k ? "" : " plain"); n.textContent = f.name;
-    if (k) n.onclick = () => preview(f, k);
+    const n = document.createElement("span"); n.className = "name"; n.textContent = f.name;
+    n.onclick = k ? () => preview(f, k) : () => { location.href = B + "/f/" + f.i + "?dl=1"; };
     const dl = document.createElement("a"); dl.className = "dl"; dl.textContent = "⬇";
     dl.title = "Download"; dl.href = B + "/f/" + f.i + "?dl=1";
     li.append(ic, n, dl); ul.appendChild(li);
