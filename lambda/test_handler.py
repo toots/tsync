@@ -263,6 +263,26 @@ def test_max_bytes_zip(s3):
     assert h.handler(event(tok, "download"), None)["statusCode"] == 413
 
 
+def test_utf8_disposition_is_ascii(s3):
+    # A name with an NFD accent + '&' must produce an ASCII Content-Disposition
+    # (raw UTF-8 there makes S3 400); the accent goes in RFC 5987 filename*.
+    from urllib.parse import urlparse, parse_qs
+    h = load_handler()
+    name = "Café & Co.mp3"  # NFD e + combining acute
+    put_manifest(s3, DOMAIN_PREFIX + "x.mp3", [("pppp-0002", b"snd")])
+    tok = share_manifest(s3, "sl", {
+        "v": 1, "type": "zip", "chunkPrefix": CHUNK_PREFIX, "filename": "d.zip",
+        "expires": 9_999_999_999,
+        "entries": [{"name": name, "key": DOMAIN_PREFIX + "x.mp3"}],
+    })
+    resp = h.handler(event(tok, "f/0", {"json": "1"}), None)
+    assert resp["statusCode"] == 200
+    url = json.loads(resp["body"])["url"]
+    disp = parse_qs(urlparse(url).query)["response-content-disposition"][0]
+    disp.encode("ascii")  # must not raise
+    assert "filename*=UTF-8''" in disp
+
+
 def test_expired_on_subroute(s3):
     h = load_handler()
     tok = share_manifest(s3, "sj", {

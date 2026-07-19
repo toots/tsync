@@ -26,6 +26,7 @@ import json
 import os
 import time
 import zipfile
+from urllib.parse import quote
 
 import boto3
 from botocore.exceptions import ClientError
@@ -87,12 +88,20 @@ def sanitize_filename(name):
     return name.replace('"', "").replace("\\", "").replace("\n", "").replace("\r", "")
 
 
+def content_disposition(inline, filename):
+    # RFC 5987: HTTP headers are ASCII, so non-ASCII names (accents, NFD combining
+    # marks) go in filename* as percent-encoded UTF-8, with an ASCII filename
+    # fallback. Putting raw UTF-8 in filename="..." makes S3 reject the request.
+    disp = "inline" if inline else "attachment"
+    ascii_name = sanitize_filename(filename).encode("ascii", "replace").decode("ascii")
+    return "%s; filename=\"%s\"; filename*=UTF-8''%s" % (disp, ascii_name, quote(filename, safe=""))
+
+
 def presign(cache_key, filename, content_type=None, inline=False):
     params = {
         "Bucket": BUCKET,
         "Key": cache_key,
-        "ResponseContentDisposition": '%s; filename="%s"'
-        % ("inline" if inline else "attachment", sanitize_filename(filename)),
+        "ResponseContentDisposition": content_disposition(inline, filename),
     }
     if content_type:
         params["ResponseContentType"] = content_type
@@ -414,8 +423,6 @@ const DATA = __SHARE_DATA__;
 const B = DATA.base;
 document.getElementById("dlall").href = B + "/download";
 const nameNoZip = DATA.filename.replace(/\.zip$/, "");
-document.getElementById("title").textContent = nameNoZip;
-document.title = nameNoZip + " — tsync share";
 
 const IMG = ["jpg","jpeg","png","gif","webp","svg","bmp","avif"];
 const AUD = ["mp3","flac","wav","ogg","oga","m4a","aac","opus"];
@@ -442,8 +449,18 @@ for (const e of DATA.entries) {
   dir.files.push({ name: parts[parts.length - 1], i: e.i });
 }
 
+// The zip roots entries at the shared folder, so the tree has a single wrapping
+// dir; show its contents directly instead of a folder nested inside itself.
+let base = root, rootLabel = nameNoZip;
+{
+  const tops = Object.keys(root.dirs);
+  if (tops.length === 1 && root.files.length === 0) { rootLabel = tops[0]; base = root.dirs[tops[0]]; }
+}
+document.getElementById("title").textContent = rootLabel;
+document.title = rootLabel + " — tsync share";
+
 let path = [];
-function nodeAt(p) { let n = root; for (const s of p) { n = n.dirs[s]; if (!n) return { dirs: {}, files: [] }; } return n; }
+function nodeAt(p) { let n = base; for (const s of p) { n = n.dirs[s]; if (!n) return { dirs: {}, files: [] }; } return n; }
 
 function render() {
   const node = nodeAt(path);
@@ -451,7 +468,7 @@ function render() {
   cr.innerHTML = "";
   const mk = (label, idx) => { const a = document.createElement("a"); a.textContent = label;
     a.onclick = () => { path = path.slice(0, idx); render(); }; return a; };
-  cr.appendChild(mk(nameNoZip || "root", 0));
+  cr.appendChild(mk(rootLabel || "root", 0));
   path.forEach((seg, k) => { cr.append(" / "); cr.appendChild(mk(seg, k + 1)); });
 
   const ul = document.getElementById("list");
