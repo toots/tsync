@@ -229,20 +229,54 @@ def build(share, cache_key):
 
 # ── Content types ───────────────────────────────────────────────────────────
 
+# Extensions the browser renders as plain text in the preview iframe.
+TEXT_EXT = [
+    "txt", "md", "log", "csv", "tsv", "ini", "conf", "cfg", "toml", "yaml", "yml",
+    "sh", "bash", "zsh", "py", "js", "mjs", "ts", "jsx", "tsx", "css", "c", "h",
+    "cpp", "cc", "hpp", "go", "rs", "rb", "java", "kt", "swift", "php", "pl", "lua",
+    "sql", "r", "m", "diff", "patch",
+]
+
 MIME = {
-    "jpg": "image/jpeg", "jpeg": "image/jpeg", "png": "image/png", "gif": "image/gif",
-    "webp": "image/webp", "svg": "image/svg+xml", "bmp": "image/bmp", "avif": "image/avif",
+    "jpg": "image/jpeg", "jpeg": "image/jpeg", "jfif": "image/jpeg", "png": "image/png",
+    "apng": "image/apng", "gif": "image/gif", "webp": "image/webp", "svg": "image/svg+xml",
+    "bmp": "image/bmp", "avif": "image/avif", "ico": "image/x-icon",
     "mp3": "audio/mpeg", "flac": "audio/flac", "wav": "audio/wav", "ogg": "audio/ogg",
     "oga": "audio/ogg", "m4a": "audio/mp4", "aac": "audio/aac", "opus": "audio/opus",
+    "weba": "audio/webm",
     "mp4": "video/mp4", "m4v": "video/mp4", "webm": "video/webm", "mov": "video/quicktime",
     "mkv": "video/x-matroska", "ogv": "video/ogg",
-    "pdf": "application/pdf", "txt": "text/plain", "md": "text/plain", "json": "application/json",
+    "pdf": "application/pdf",
+    "json": "application/json; charset=utf-8", "xml": "application/xml; charset=utf-8",
+    "html": "text/html; charset=utf-8", "htm": "text/html; charset=utf-8",
+    **{e: "text/plain; charset=utf-8" for e in TEXT_EXT},
 }
 
 
 def mime_type(name):
     ext = name.rsplit(".", 1)[-1].lower() if "." in name else ""
     return MIME.get(ext)
+
+
+def preview_kind(mime):
+    """How browse.html should preview a file with this MIME type."""
+    mime = mime.split(";", 1)[0].strip()
+    if mime.startswith("image/"):
+        return "image"
+    if mime.startswith("audio/"):
+        return "audio"
+    if mime.startswith("video/"):
+        return "video"
+    if mime == "application/pdf":
+        return "pdf"
+    if mime == "text/html":
+        return "html"
+    return "text"  # text/plain, application/json, application/xml
+
+
+# ext -> preview kind, injected into browse.html so the front end has no
+# duplicated extension lists to keep in sync with MIME.
+PREVIEW_KINDS = {ext: preview_kind(m) for ext, m in MIME.items()}
 
 
 # ── Responses ───────────────────────────────────────────────────────────────
@@ -372,4 +406,4 @@ def render_browse(share, token):
 
 
 with open(os.path.join(os.path.dirname(__file__), "browse.html")) as _f:
-    BROWSE_HTML = _f.read()
+    BROWSE_HTML = _f.read().replace("__PREVIEW_KINDS__", json.dumps(PREVIEW_KINDS))

@@ -158,6 +158,12 @@
         max-width: 86vw;
         max-height: 74vh;
       }
+      .pv-body iframe {
+        width: 86vw;
+        height: 80vh;
+        border: 0;
+        background: #fff;
+      }
       .pv-body audio {
         width: min(70vw, 480px);
       }
@@ -202,17 +208,20 @@
       document.getElementById("dlall").href = B + "/download";
       const nameNoZip = DATA.filename.replace(/\.zip$/, "");
 
-      const IMG = ["jpg", "jpeg", "png", "gif", "webp", "svg", "bmp", "avif"];
-      const AUD = ["mp3", "flac", "wav", "ogg", "oga", "m4a", "aac", "opus"];
-      const VID = ["mp4", "m4v", "webm", "mov", "mkv", "ogv"];
+      // ext -> preview kind, generated from MIME in handler.py.
+      const PREVIEW_KINDS = __PREVIEW_KINDS__;
       function kind(name) {
         const e = name.includes(".") ? name.split(".").pop().toLowerCase() : "";
-        if (IMG.includes(e)) return "image";
-        if (AUD.includes(e)) return "audio";
-        if (VID.includes(e)) return "video";
-        return null;
+        return PREVIEW_KINDS[e] || null;
       }
-      const ICON = { image: "🖼", audio: "🎵", video: "🎬" };
+      const ICON = {
+        image: "🖼",
+        audio: "🎵",
+        video: "🎬",
+        pdf: "📕",
+        html: "🌐",
+        text: "📄",
+      };
 
       // Build a folder tree from the flat entry list.
       const root = { dirs: {}, files: [] };
@@ -339,13 +348,17 @@
           return;
         }
         const { url } = await r.json();
-        const el =
-          k === "image"
-            ? new Image()
-            : Object.assign(document.createElement(k), {
-                controls: true,
-                autoplay: k !== "image",
-              });
+        let el;
+        if (k === "image") el = new Image();
+        else if (k === "pdf") el = document.createElement("iframe");
+        else if (k === "html" || k === "text") {
+          el = document.createElement("iframe");
+          el.setAttribute("sandbox", ""); // render markup, block scripts/forms
+        } else
+          el = Object.assign(document.createElement(k), {
+            controls: true,
+            autoplay: true,
+          });
         el.src = url;
         body.innerHTML = "";
         body.appendChild(el);
