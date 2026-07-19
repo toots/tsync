@@ -22,6 +22,7 @@ bite: build on Fargate.
 """
 
 import base64
+import html
 import json
 import os
 import time
@@ -346,15 +347,28 @@ def handler(event, context):
 
 
 def render_browse(share, token):
+    entries = share.get("entries", [])
     data = {
         "base": "/" + token,
         "filename": share.get("filename", "share"),
         "entries": [
             {"name": e["name"], "i": i, "dir": e["name"].endswith("/")}
-            for i, e in enumerate(share.get("entries", []))
+            for i, e in enumerate(entries)
         ],
     }
-    return BROWSE_HTML.replace("__SHARE_DATA__", json.dumps(data))
+    # Static OG/description tags for link-preview crawlers, which don't run the
+    # JS that builds the tree. The browser still refines title/tree client-side.
+    title = share.get("filename", "share")
+    if title.endswith(".zip"):
+        title = title[:-4]
+    n = sum(1 for e in entries if not e["name"].endswith("/"))
+    desc = "%d file%s · shared via tsync" % (n, "" if n == 1 else "s")
+    return (
+        BROWSE_HTML
+        .replace("__OG_TITLE__", html.escape(title, quote=True))
+        .replace("__OG_DESC__", html.escape(desc, quote=True))
+        .replace("__SHARE_DATA__", json.dumps(data))
+    )
 
 
 with open(os.path.join(os.path.dirname(__file__), "browse.html")) as _f:
