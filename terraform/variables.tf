@@ -14,6 +14,7 @@ variable "stores" {
     create_bucket        = optional(bool, true)
     iam_user_name        = optional(string) # default: tsync-client-<key>
     shares_prefix        = string           # "tsync/<domain>/shares/"
+    custom_domain        = optional(string) # vanity share domain; null = raw Lambda URL
     manage_lifecycle     = optional(bool, true)
     cache_expiry_days    = optional(number, 30)
     presign_ttl          = optional(number, 600)

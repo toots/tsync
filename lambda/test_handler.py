@@ -5,7 +5,6 @@
     pytest terraform/lambda/test_handler.py
 """
 
-import base64
 import importlib
 import io
 import json
@@ -17,7 +16,7 @@ import pytest
 from moto import mock_aws
 
 BUCKET = "tsync-test"
-PREFIX = "p/.shares/d/"  # encoded "<prefix>/.shares/<domain>/"
+PREFIX = "p/.shares/"  # == SHARES_PREFIX; share manifest key is PREFIX + token
 CHUNK_PREFIX = "p/.chunks/"
 DOMAIN_PREFIX = "p/d/"
 
@@ -30,10 +29,6 @@ def load_handler(max_bytes=10 * 1024**3):
     import handler
 
     return importlib.reload(handler)
-
-
-def token_for(key):
-    return base64.urlsafe_b64encode(key.encode()).rstrip(b"=").decode()
 
 
 def event(token, sub="", query=None):
@@ -60,9 +55,10 @@ def put_manifest(s3, key, chunks, mtime=1_700_000_000.0, symlink=None, size=None
 
 
 def share_manifest(s3, sid, doc):
+    # sid is a hex token; the manifest lives directly at PREFIX + token.
     key = PREFIX + sid
     put(s3, key, json.dumps(doc).encode())
-    return token_for(key)
+    return sid
 
 
 def key_from_url(url):
@@ -99,7 +95,7 @@ def test_multi_chunk_file(s3):
     part1 = b"B" * 1000
     put_manifest(s3, DOMAIN_PREFIX + "big.bin",
                  [("aaaa-0000", part0), ("bbbb-1111", part1)])
-    tok = share_manifest(s3, "s1", {
+    tok = share_manifest(s3, "a1", {
         "v": 1, "type": "file", "key": DOMAIN_PREFIX + "big.bin",
         "chunkPrefix": CHUNK_PREFIX, "filename": "big.bin",
         "expires": 9_999_999_999,
@@ -116,7 +112,7 @@ def test_multi_chunk_file(s3):
 def test_single_chunk_file(s3):
     h = load_handler()
     put_manifest(s3, DOMAIN_PREFIX + "small.txt", [("cccc-2222", b"hello")])
-    tok = share_manifest(s3, "s2", {
+    tok = share_manifest(s3, "a2", {
         "v": 1, "type": "file", "key": DOMAIN_PREFIX + "small.txt",
         "chunkPrefix": CHUNK_PREFIX, "filename": "small.txt",
         "expires": 9_999_999_999,
@@ -132,7 +128,7 @@ def test_zip_folder(s3):
     put(s3, DOMAIN_PREFIX + "dir/empty/", b"")  # dir marker
     # A dirty entry that must be skipped.
     put(s3, DOMAIN_PREFIX + "dir/wip.txt", json.dumps({"dirty": True}).encode())
-    tok = share_manifest(s3, "s3", {
+    tok = share_manifest(s3, "a3", {
         "v": 1, "type": "zip", "chunkPrefix": CHUNK_PREFIX, "filename": "dir.zip",
         "expires": 9_999_999_999,
         "entries": [
@@ -156,7 +152,7 @@ def test_zip_folder(s3):
 
 def test_expired(s3):
     h = load_handler()
-    tok = share_manifest(s3, "s4", {
+    tok = share_manifest(s3, "a4", {
         "v": 1, "type": "file", "key": DOMAIN_PREFIX + "x",
         "chunkPrefix": CHUNK_PREFIX, "filename": "x", "expires": 1,
     })
@@ -165,22 +161,21 @@ def test_expired(s3):
 
 def test_unknown_id(s3):
     h = load_handler()
-    tok = token_for(PREFIX + "doesnotexist")
-    assert h.handler(event(tok), None)["statusCode"] == 404
+    # Well-formed hex id that was never written -> not found.
+    assert h.handler(event("deadbeef"), None)["statusCode"] == 404
 
 
 def test_garbage_token(s3):
     h = load_handler()
-    # Valid base64 but points outside the shares prefix -> forbidden.
-    assert h.handler(event(token_for("p/d/secret")), None)["statusCode"] == 403
-    # Not decodable -> bad token.
-    assert h.handler({"rawPath": "/@@@@"}, None)["statusCode"] in (400, 403)
+    # Non-hex tokens can't name a key under the prefix -> bad token.
+    assert h.handler(event("secret"), None)["statusCode"] == 400
+    assert h.handler({"rawPath": "/@@@@"}, None)["statusCode"] == 400
 
 
 def _folder_share(s3):
     put_manifest(s3, DOMAIN_PREFIX + "alb/cover.jpg", [("iiii-4444", b"\xff\xd8imgdata")])
     put_manifest(s3, DOMAIN_PREFIX + "alb/song.mp3", [("jjjj-5555", b"audiodata")])
-    return share_manifest(s3, "sf", {
+    return share_manifest(s3, "af", {
         "v": 1, "type": "zip", "chunkPrefix": CHUNK_PREFIX, "filename": "alb.zip",
         "expires": 9_999_999_999,
         "entries": [
@@ -203,7 +198,7 @@ def test_single_file_share_downloads(s3):
     # A file share's /{token} still redirects to the download (unchanged).
     h = load_handler()
     put_manifest(s3, DOMAIN_PREFIX + "one.txt", [("kkkk-6666", b"hi")])
-    tok = share_manifest(s3, "sg", {
+    tok = share_manifest(s3, "a5", {
         "v": 1, "type": "file", "key": DOMAIN_PREFIX + "one.txt",
         "chunkPrefix": CHUNK_PREFIX, "filename": "one.txt", "expires": 9_999_999_999,
     })
@@ -241,7 +236,7 @@ def test_per_file_bad_index(s3):
 def test_max_bytes_file(s3):
     h = load_handler(max_bytes=100)
     put_manifest(s3, DOMAIN_PREFIX + "big.bin", [("llll-7777", b"x" * 500)], size=500)
-    tok = share_manifest(s3, "sh", {
+    tok = share_manifest(s3, "a6", {
         "v": 1, "type": "file", "key": DOMAIN_PREFIX + "big.bin",
         "chunkPrefix": CHUNK_PREFIX, "filename": "big.bin", "expires": 9_999_999_999,
     })
@@ -252,7 +247,7 @@ def test_max_bytes_zip(s3):
     h = load_handler(max_bytes=100)
     put_manifest(s3, DOMAIN_PREFIX + "d/a", [("mmmm-8888", b"y" * 80)], size=80)
     put_manifest(s3, DOMAIN_PREFIX + "d/b", [("nnnn-9999", b"z" * 80)], size=80)
-    tok = share_manifest(s3, "si", {
+    tok = share_manifest(s3, "a7", {
         "v": 1, "type": "zip", "chunkPrefix": CHUNK_PREFIX, "filename": "d.zip",
         "expires": 9_999_999_999,
         "entries": [
@@ -270,7 +265,7 @@ def test_utf8_disposition_is_ascii(s3):
     h = load_handler()
     name = "Café & Co.mp3"  # NFD e + combining acute
     put_manifest(s3, DOMAIN_PREFIX + "x.mp3", [("pppp-0002", b"snd")])
-    tok = share_manifest(s3, "sl", {
+    tok = share_manifest(s3, "a8", {
         "v": 1, "type": "zip", "chunkPrefix": CHUNK_PREFIX, "filename": "d.zip",
         "expires": 9_999_999_999,
         "entries": [{"name": name, "key": DOMAIN_PREFIX + "x.mp3"}],
@@ -285,7 +280,7 @@ def test_utf8_disposition_is_ascii(s3):
 
 def test_expired_on_subroute(s3):
     h = load_handler()
-    tok = share_manifest(s3, "sj", {
+    tok = share_manifest(s3, "a9", {
         "v": 1, "type": "zip", "chunkPrefix": CHUNK_PREFIX, "filename": "x.zip",
         "expires": 1, "entries": [],
     })

@@ -1210,7 +1210,7 @@ let assoc_set l key v =
 type tf_store = {
   bucket : string;
   region : string;
-  function_url : string;
+  share_url : string;
   access_key_id : string;
   secret : string option;
 }
@@ -1260,7 +1260,7 @@ let tf_lookup root store =
                 {
                   bucket = str "bucket";
                   region = str "region";
-                  function_url = str "function_url";
+                  share_url = str "share_url";
                   access_key_id = str "access_key_id";
                   secret;
                 }
@@ -1343,7 +1343,7 @@ let apply_store_fields l (s : tf_store) =
       | Some sec -> assoc_set l "secretAccessKey" (`String sec)
       | None -> l
   in
-  assoc_set l "shareUrl" (`String s.function_url)
+  assoc_set l "shareUrl" (`String s.share_url)
 
 (* Interactively pick a Terraform store (numbered menu of store + bucket) and read
    its outputs. Pulls once; nothing about Terraform is persisted. [None] on
@@ -1992,13 +1992,12 @@ let share_cmd =
                           ("entries", `List json_entries);
                         ]))
          in
-         let manifest_key = Conf_parsing.shares_prefix d ^ random_hex 16 in
+         (* The token is just the manifest's random id; the server rebuilds the
+            key as SHARES_PREFIX + token. Keeps the share URL short. *)
+         let token = random_hex 16 in
+         let manifest_key = Conf_parsing.shares_prefix d ^ token in
          let* () =
            B.put ~key:manifest_key ~data:(Yojson.Basic.to_string manifest) ()
-         in
-         let token =
-           Base64.encode_string ~alphabet:Base64.uri_safe_alphabet ~pad:false
-             (Fs_util.encode_key manifest_key)
          in
          Lwt.return (share_url ^ "/" ^ token))
     in

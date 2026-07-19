@@ -29,6 +29,7 @@ module "store" {
   create_bucket         = each.value.create_bucket
   iam_user_name         = each.value.iam_user_name
   shares_prefix         = each.value.shares_prefix
+  custom_domain         = each.value.custom_domain
   manage_lifecycle      = each.value.manage_lifecycle
   cache_expiry_days     = each.value.cache_expiry_days
   extra_lifecycle_rules = each.value.extra_lifecycle_rules

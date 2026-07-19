@@ -57,6 +57,20 @@ variable "presign_ttl" {
   description = "Lifetime (seconds) of the presigned download URL."
 }
 
+variable "custom_domain" {
+  type        = string
+  default     = null
+  description = <<-EOT
+    Optional vanity domain for share links, e.g. "tsync.example.org". When set,
+    the store also provisions an API Gateway HTTP API + regional ACM cert (DNS
+    validation) fronting the Lambda, and share_url points at it. When null the
+    store just uses the raw Lambda Function URL — no DNS setup needed.
+
+    DNS is not managed here: after apply, add the acm_validation_records CNAME to
+    validate the cert, then CNAME the domain to custom_domain_target. See README.
+  EOT
+}
+
 variable "lambda_memory_mb" {
   type    = number
   default = 2048

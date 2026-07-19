@@ -1,8 +1,8 @@
 """tsync share Lambda.
 
 Serves shared files/folders from the tsync S3 chunk store. A request path is
-``/{token}[/sub]`` where ``token`` is the base64url of a *share manifest* S3 key
-(written by ``tsync share``). Routes:
+``/{token}[/sub]`` where ``token`` is the random hex id of a *share manifest*
+(written by ``tsync share``); the full S3 key is ``SHARES_PREFIX + token``. Routes:
 
 - ``/{token}``            folder share -> HTML file browser; file share -> download
 - ``/{token}/download``   assemble the whole artifact (file, or folder as a zip)
@@ -21,7 +21,6 @@ path also caps a single file at ~80 GB (10,000 parts). Upgrade path when these
 bite: build on Fargate.
 """
 
-import base64
 import html
 import json
 import os
@@ -52,10 +51,6 @@ def too_large():
 
 
 # ── S3 helpers ──────────────────────────────────────────────────────────────
-
-
-def b64url_decode(s):
-    return base64.urlsafe_b64decode(s + "=" * (-len(s) % 4)).decode()
 
 
 def get_bytes(key):
@@ -310,12 +305,11 @@ def html_response(body):
 
 
 def load_share(token):
-    try:
-        manifest_key = b64url_decode(token)
-    except Exception:
+    # The token is the manifest's random hex id; the key lives under our own
+    # prefix, so a hex-only token can never point outside it.
+    if not token or any(c not in "0123456789abcdef" for c in token):
         raise ShareError(400, "bad token")
-    if not manifest_key.startswith(SHARES_PREFIX):
-        raise ShareError(403, "forbidden")
+    manifest_key = SHARES_PREFIX + token
     try:
         share = get_json(manifest_key)
     except FileNotFoundError:

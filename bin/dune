@@ -13,7 +13,6 @@
   tsync_log
   tsync_runtime
   tsync_tls
-  base64
   cmdliner
   yojson
   lwt
