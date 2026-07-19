@@ -192,8 +192,11 @@ def assemble(m, chunk_prefix, cache_key):
         raise too_large()
     upload_id = s3.create_multipart_upload(Bucket=BUCKET, Key=cache_key)["UploadId"]
     try:
-        parts = []
-        for n, c in enumerate(chunks, start=1):
+        # The part copies are independent server-side S3 operations, so run them
+        # concurrently — a large file assembles in seconds instead of thousands
+        # of sequential round-trips. Playback then streams the result via Range.
+        def copy_part(item):
+            n, c = item
             r = s3.upload_part_copy(
                 Bucket=BUCKET,
                 Key=cache_key,
@@ -201,7 +204,11 @@ def assemble(m, chunk_prefix, cache_key):
                 PartNumber=n,
                 CopySource={"Bucket": BUCKET, "Key": chunk_key(chunk_prefix, c)},
             )
-            parts.append({"ETag": r["CopyPartResult"]["ETag"], "PartNumber": n})
+            return {"ETag": r["CopyPartResult"]["ETag"], "PartNumber": n}
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=32) as ex:
+            parts = list(ex.map(copy_part, enumerate(chunks, start=1)))
+        parts.sort(key=lambda p: p["PartNumber"])
         s3.complete_multipart_upload(
             Bucket=BUCKET,
             Key=cache_key,
