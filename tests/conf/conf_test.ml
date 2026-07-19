@@ -20,7 +20,7 @@ let () =
   assert (ids [bc "s3" "a"] = ["a"]);
   (* array fields (exec backend "command") pass through as JSON strings *)
   Unix.putenv "TSYNC_CONFIG_JSON"
-    {|{"domains": [{"name": "d", "prefix": "p", "symlinks": "keep", "versioning": false,
+    {|{"domains": [{"name": "d", "symlinks": "keep", "versioning": false,
                     "backends": [{"type": "exec", "name": "e", "path": "/x",
                                   "command": ["ssh", "box"]}]}]}|};
   let cfg = Conf_parsing.load "" in
@@ -31,7 +31,7 @@ let () =
 
   (* shareUrl: no backend has one -> no share backend *)
   Unix.putenv "TSYNC_CONFIG_JSON"
-    {|{"domains": [{"name": "d", "prefix": "p", "symlinks": "keep", "versioning": false,
+    {|{"domains": [{"name": "d", "symlinks": "keep", "versioning": false,
                     "backends": [{"type": "s3", "name": "s", "main": true}]}]}|};
   assert (
     Conf_parsing.domain_share_backend
@@ -40,7 +40,7 @@ let () =
 
   (* shareUrl: first backend carrying one is picked, with its URL *)
   Unix.putenv "TSYNC_CONFIG_JSON"
-    {|{"domains": [{"name": "d", "prefix": "p", "symlinks": "keep", "versioning": false,
+    {|{"domains": [{"name": "d", "symlinks": "keep", "versioning": false,
                     "backends": [{"type": "s3", "name": "a"},
                                  {"type": "s3", "name": "b", "shareUrl": "https://x.lambda-url"}]}]}|};
   (match

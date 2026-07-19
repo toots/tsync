@@ -67,32 +67,32 @@ stores = {
   # key = short logical name; suffixes IAM/Lambda resource names.
   files = {
     bucket        = "my-tsync-files"
-    shares_prefix = "tsync/.shares/"   # "<domain-prefix>/.shares/", or ".shares/" if the domain has no prefix
+    shares_prefix = "tsync/My Files/shares/"   # tsync/<domain>/shares/
   }
 
   # Another domain, and/or a redundant bucket — just add entries.
   media = {
     bucket        = "my-tsync-media"
-    shares_prefix = "tsync/.shares/"
+    shares_prefix = "tsync/My Media/shares/"
   }
 
   # Point at a pre-existing bucket instead of creating one.
   legacy = {
     bucket        = "already-there"
     create_bucket = false
-    shares_prefix = ".shares/"
+    shares_prefix = "tsync/Legacy/shares/"
   }
 }
 ```
 
-Per-store options (all optional except `bucket`): `create_bucket` (default true),
-`iam_user_name` (default `tsync-client-<key>`), `shares_prefix` (default
-`.shares/`), `manage_lifecycle` (default true), `cache_expiry_days` (default 30),
-`extra_lifecycle_rules` (see below), plus `presign_ttl`, `lambda_memory_mb`,
-`ephemeral_storage_mb`.
+Per-store options (`bucket` and `shares_prefix` required): `create_bucket`
+(default true), `iam_user_name` (default `tsync-client-<key>`), `manage_lifecycle`
+(default true), `cache_expiry_days` (default 30), `extra_lifecycle_rules` (see
+below), plus `presign_ttl`, `lambda_memory_mb`, `ephemeral_storage_mb`.
 
-`shares_prefix` must match the store layout: it's the domain's `prefix` +
-`/.shares/`. It gates what the Lambda serves, scopes its S3 write permission, and
+`shares_prefix` must match the store layout: tsync keeps a domain's shares at
+`tsync/<domain>/shares/`, so set it to exactly that for the domain this store
+serves. It gates what the Lambda serves, scopes its S3 write permission, and
 drives the lifecycle rule.
 
 When `create_bucket = true` the bucket is locked down (public access blocked,
@@ -185,7 +185,7 @@ stores = {
   legacy = {
     bucket        = "already-there"
     create_bucket = false
-    shares_prefix = "tsync/.shares/"
+    shares_prefix = "tsync/Legacy/shares/"
 
     extra_lifecycle_rules = [{
       id              = string          # required, unique rule name
@@ -233,16 +233,16 @@ extra_lifecycle_rules = [
 ```
 
 **Interaction with the shares rule.** A whole-bucket (empty-prefix) rule like the
-Glacier one above *also* matches the `.shares/` cache objects. Usually harmless —
-Glacier IR objects are still downloaded instantly — but two edges are worth
-knowing:
+Glacier one above *also* matches the `shares_prefix` cache objects. Usually
+harmless — Glacier IR objects are still downloaded instantly — but two edges are
+worth knowing:
 
 - Glacier IR bills a 90-day minimum storage duration. Since share caches are
   deleted at `cache_expiry_days` (30 by default), any that got transitioned incur
   an early-deletion charge for the unused ~60 days. Small, but not zero.
 - To keep short-lived shares in Standard, give your transition rule a `prefix` that
-  doesn't cover `.shares/` (as in the scoped example), or raise `cache_expiry_days`
-  past 90.
+  doesn't cover `shares_prefix` (as in the scoped example), or raise
+  `cache_expiry_days` past 90.
 
 Rule ordering doesn't matter to S3 — each rule is evaluated independently. Just
 keep every `id` unique.
@@ -258,7 +258,8 @@ by hand.
 ## Notes
 
 - **Auth**: each Function URL is public. The unguessable manifest id in the URL is
-  the only gate; delete the `.shares/` manifest object to revoke a link.
+  the only gate; delete the share manifest object (under `shares_prefix`) to
+  revoke a link.
 - **Limits**: folder zips build in `/tmp` (10 GB) within the 900 s Lambda timeout;
   single files cap at ~80 GB (10,000 multipart parts).
 

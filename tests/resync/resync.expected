@@ -24,7 +24,7 @@
   on-secondary delete-remote-chunk file.bin #0
   resync-remote
   resync-remote
-  copied tsync/.chunks/d447b1ea40e6988b-b7aeb52a10fdaf2d
+  copied tsync/test/chunks/d447b1ea40e6988b-b7aeb52a10fdaf2d
   resync backend #2: 3 checked, 1 copied
   resync backend #2: 3 checked, 0 copied
 --- tree
@@ -47,7 +47,7 @@
   drain
   on-secondary corrupt-remote-chunk file.bin #0
   resync-remote
-  copied tsync/.chunks/d447b1ea40e6988b-b7aeb52a10fdaf2d
+  copied tsync/test/chunks/d447b1ea40e6988b-b7aeb52a10fdaf2d
   resync backend #2: 3 checked, 1 copied
 --- tree
   f file.bin size=11 cached=true uploaded=true etag=d447b1ea40e6988b
@@ -69,7 +69,7 @@
   drain
   on-secondary delete-remote-manifest file.bin
   resync-remote
-  copied tsync/test/file.bin
+  copied tsync/test/manifests/file.bin
   resync backend #2: 3 checked, 1 copied
 --- tree
   f file.bin size=11 cached=true uploaded=true etag=d447b1ea40e6988b
@@ -95,8 +95,8 @@
   on-secondary delete-remote-chunk ok.bin #0
   on-secondary delete-remote-manifest sub/nested.bin
   resync-remote
-  copied tsync/.chunks/002783db772ad77d-0760f49141bb4bb5
-  copied tsync/test/sub/nested.bin
+  copied tsync/test/chunks/002783db772ad77d-0760f49141bb4bb5
+  copied tsync/test/manifests/sub/nested.bin
   resync backend #2: 8 checked, 2 copied
 --- tree
   f ok.bin size=4 cached=true uploaded=true etag=002783db772ad77d

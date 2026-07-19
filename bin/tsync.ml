@@ -1478,7 +1478,6 @@ let edit_domain existing =
   in
   let curbool k = match existing with Some j -> jbool j k | None -> false in
   let name = ref (cur "name" "default") in
-  let key_prefix = ref (cur "prefix" "tsync") in
   let versioning = ref (curbool "versioning") in
   let symlinks = ref (cur "symlinks" "keep") in
   let read_only = ref (curbool "readOnly") in
@@ -1494,7 +1493,6 @@ let edit_domain existing =
   (match existing with
     | None ->
         name := prompt "Domain name" (Some !name);
-        key_prefix := prompt "Key prefix" (Some !key_prefix);
         versioning :=
           prompt_bool ~default:!versioning
             "Enable versioning (keep version history)?";
@@ -1512,33 +1510,30 @@ let edit_domain existing =
           clear_screen ();
           Printf.printf "Editing domain: %s\n\nFields:\n" !name;
           Printf.printf "  1. name:        %s\n" !name;
-          Printf.printf "  2. prefix:      %s\n" !key_prefix;
-          Printf.printf "  3. versioning:  %b\n" !versioning;
-          Printf.printf "  4. symlinks:    %s\n" !symlinks;
-          Printf.printf "  5. read-only:   %b\n" !read_only;
-          Printf.printf "  6. backends:    %s\n" (backend_summary !backends);
-          if has_s3 () then Printf.printf "  7. sync from Terraform\n";
+          Printf.printf "  2. versioning:  %b\n" !versioning;
+          Printf.printf "  3. symlinks:    %s\n" !symlinks;
+          Printf.printf "  4. read-only:   %b\n" !read_only;
+          Printf.printf "  5. backends:    %s\n" (backend_summary !backends);
+          if has_s3 () then Printf.printf "  6. sync from Terraform\n";
           if !status <> "" then Printf.printf "\n%s\n" !status;
           Printf.printf "\nEnter a field number to edit, or [d]one:\n> %!";
           status := "";
           match String.lowercase_ascii (String.trim (read_line ())) with
             | "1" -> name := prompt "Domain name" (Some !name)
-            | "2" -> key_prefix := prompt "Key prefix" (Some !key_prefix)
-            | "3" ->
+            | "2" ->
                 versioning :=
                   prompt_bool ~default:!versioning "Enable versioning?"
-            | "4" -> symlinks := prompt_symlinks !symlinks
-            | "5" ->
+            | "3" -> symlinks := prompt_symlinks !symlinks
+            | "4" ->
                 read_only := prompt_bool ~default:!read_only "Read-only mount?"
-            | "6" -> backends := prompt_backends ()
-            | "7" when has_s3 () -> sync ()
+            | "5" -> backends := prompt_backends ()
+            | "6" when has_s3 () -> sync ()
             | "d" | "" -> running := false
             | other -> status := Printf.sprintf "(unknown field %S)" other
         done);
   `Assoc
     [
       ("name", `String !name);
-      ("prefix", `String !key_prefix);
       ("versioning", `Bool !versioning);
       ("symlinks", `String !symlinks);
       ("readOnly", `Bool !read_only);
@@ -1927,7 +1922,6 @@ let print_conf_cmd =
       (fun (d : Conf_parsing.domain) ->
         Printf.printf "\ndomain: %s%s\n" d.name
           (if default = Some d.name then " [default]" else "");
-        Printf.printf "  prefix:     %s\n" d.prefix;
         Printf.printf "  versioning: %b\n" d.versioning;
         Printf.printf "  read_only:  %b\n" d.read_only;
         Printf.printf "  symlinks:   %s\n" (symlink_str d.symlink_policy);

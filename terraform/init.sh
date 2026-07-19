@@ -52,13 +52,10 @@ if [ "$write_tfvars" -eq 1 ]; then
   }
   read -rp "Create the store bucket? [Y/n] (n = use a pre-existing bucket): " cb
   case "$cb" in [nN]*) CREATE_BUCKET=false ;; *) CREATE_BUCKET=true ;; esac
-  prompt PREFIX "tsync domain prefix (leave blank if the domain has none)" ""
+  prompt DOMAIN "tsync domain name this store serves" "$STORE"
 
-  if [ -n "$PREFIX" ]; then
-    SHARES_PREFIX="${PREFIX%/}/.shares/"
-  else
-    SHARES_PREFIX=".shares/"
-  fi
+  # tsync keeps a domain's shares at tsync/<domain>/shares/.
+  SHARES_PREFIX="tsync/${DOMAIN}/shares/"
 
   cat >"$TFVARS" <<EOF
 region = "$REGION"
@@ -146,7 +143,8 @@ Done. Next steps:
   terraform plan     # review what will be created/changed
   terraform apply    # provision the store(s)
 
-Then wire each store into its tsync domain config (accessKeyId, bucket, share.url):
+Then set these on the s3 backend in your tsync config (bucket, accessKeyId,
+secretAccessKey, shareUrl):
   terraform output stores
   terraform output -json secret_access_keys | jq -r '.["<store>"]'
 EOF

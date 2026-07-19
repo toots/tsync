@@ -36,7 +36,7 @@
   cursor = <entry-2>
   journal <entry-1> = put foo.txt 5
   journal <entry-2> = delete foo.txt
-  dir tsync/test/
+  dir tsync/test/manifests/
 
 === foreign_overwrite
   A: write foo.txt "hello"
@@ -168,7 +168,7 @@
   journal <entry-2> = put sub/a.txt 6
   journal <entry-3> = delete sub/a.txt
   journal <entry-4> = rmdir sub/
-  dir tsync/test/
+  dir tsync/test/manifests/
 
 === concurrent_create
   A: write foo.txt "from A"

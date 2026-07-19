@@ -60,7 +60,7 @@
   cursor = <entry-2>
   journal <entry-1> = put a.txt 6
   journal <entry-2> = delete a.txt
-  dir tsync/test/
+  dir tsync/test/manifests/
 
 === evict
   write a.txt "evicted"
@@ -120,7 +120,7 @@
   cursor = <entry-2>
   journal <entry-1> = mkdir sub/
   journal <entry-2> = rmdir sub/
-  dir tsync/test/
+  dir tsync/test/manifests/
 
 === symlink
   write real.txt "target data"
@@ -153,18 +153,18 @@
   cursor = <entry-2>
   journal <entry-1> = put link.txt 8
   journal <entry-2> = delete link.txt
-  dir tsync/test/
+  dir tsync/test/manifests/
 
 === follow: symlink creation rejected
   symlink link.txt -> real.txt
-  symlink link.txt: rejected (Unix.Unix_error(Unix.EPERM, "symlink", "tsync/test/link.txt"))
+  symlink link.txt: rejected (Unix.Unix_error(Unix.EPERM, "symlink", "tsync/test/manifests/link.txt"))
 --- tree
 --- content
 --- backend
 
 === skip: symlink creation rejected
   symlink link.txt -> real.txt
-  symlink link.txt: rejected (Unix.Unix_error(Unix.EPERM, "symlink", "tsync/test/link.txt"))
+  symlink link.txt: rejected (Unix.Unix_error(Unix.EPERM, "symlink", "tsync/test/manifests/link.txt"))
 --- tree
 --- content
 --- backend

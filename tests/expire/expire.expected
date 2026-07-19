@@ -28,7 +28,7 @@
   cursor = <entry-2>
   journal <entry-1> = put foo.txt 9
   journal <entry-2> = delete foo.txt
-  dir tsync/test/
+  dir tsync/test/manifests/
 
 === expire at a cutoff: older version dropped, newer kept
   write foo.txt "one"
@@ -51,9 +51,9 @@
   journal <entry-1> = put foo.txt 3
   journal <entry-2> = put foo.txt 7
   journal <entry-3> = put foo.txt 17
-  version foo.txt#1 = manifest size=7 chunks=1
   file foo.txt = manifest size=17 chunks=1 h1=faf60158c5948cd2 h2=60f690e9588d51bd
     chunk#0 faf60158c5948cd2-60f690e9588d51bd size=17
+  version foo.txt#1 = manifest size=7 chunks=1
 
 === expire none: nothing removed
   write foo.txt "one"
@@ -71,7 +71,7 @@
   chunk 911faba7321fe1a0-a3cf92cbf55153da size=3
   journal <entry-1> = put foo.txt 3
   journal <entry-2> = put foo.txt 7
-  version foo.txt#1 = manifest size=3 chunks=1
   file foo.txt = manifest size=7 chunks=1 h1=3ab8997bc73098ac h2=74d584d55f333769
     chunk#0 3ab8997bc73098ac-74d584d55f333769 size=7
+  version foo.txt#1 = manifest size=3 chunks=1
 
