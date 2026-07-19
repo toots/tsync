@@ -1,0 +1,356 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>tsync share</title>
+    <style>
+      :root {
+        color-scheme: light dark;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        min-height: 100vh;
+        display: flex;
+        flex-direction: column;
+        font:
+          15px/1.5 -apple-system,
+          system-ui,
+          Segoe UI,
+          Roboto,
+          sans-serif;
+      }
+      header {
+        padding: 16px 20px;
+        border-bottom: 1px solid #8884;
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        flex-wrap: wrap;
+      }
+      h1 {
+        font-size: 18px;
+        margin: 0;
+        font-weight: 600;
+      }
+      .spacer {
+        flex: 1;
+      }
+      a.btn,
+      button.btn {
+        font: inherit;
+        padding: 7px 14px;
+        border-radius: 8px;
+        border: 1px solid #8886;
+        background: #8881;
+        color: inherit;
+        cursor: pointer;
+        text-decoration: none;
+      }
+      a.btn:hover,
+      button.btn:hover {
+        background: #8883;
+      }
+      main {
+        flex: 1;
+        width: 100%;
+        max-width: 900px;
+        margin: 0 auto;
+        padding: 12px 16px 48px;
+      }
+      .crumbs {
+        padding: 10px 4px;
+        color: #888;
+      }
+      .crumbs a {
+        color: inherit;
+        cursor: pointer;
+        text-decoration: none;
+      }
+      .crumbs a:hover {
+        text-decoration: underline;
+      }
+      ul {
+        list-style: none;
+        margin: 0;
+        padding: 0;
+      }
+      li {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 9px 8px;
+        border-bottom: 1px solid #8882;
+      }
+      li .ico {
+        width: 1.4em;
+        text-align: center;
+      }
+      li .name {
+        flex: 1;
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        cursor: pointer;
+      }
+      li a.dl {
+        color: #888;
+        text-decoration: none;
+        padding: 2px 6px;
+        border-radius: 6px;
+      }
+      li a.dl:hover {
+        background: #8883;
+      }
+      .empty {
+        color: #888;
+        padding: 24px 8px;
+      }
+      footer {
+        padding: 16px 20px;
+        border-top: 1px solid #8884;
+        text-align: center;
+        color: #888;
+        font-size: 13px;
+      }
+      footer a {
+        color: inherit;
+      }
+      dialog {
+        border: none;
+        border-radius: 12px;
+        padding: 0;
+        max-width: 92vw;
+        max-height: 92vh;
+        background: #222;
+        color: #eee;
+      }
+      dialog::backdrop {
+        background: #000a;
+      }
+      .pv-head {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 10px 14px;
+      }
+      .pv-head .t {
+        flex: 1;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .pv-body {
+        padding: 0 14px 14px;
+        text-align: center;
+      }
+      .pv-body img,
+      .pv-body video {
+        max-width: 86vw;
+        max-height: 74vh;
+      }
+      .pv-body audio {
+        width: min(70vw, 480px);
+      }
+      .x {
+        cursor: pointer;
+        border: none;
+        background: none;
+        color: inherit;
+        font-size: 20px;
+      }
+    </style>
+  </head>
+  <body>
+    <header>
+      <h1 id="title">share</h1>
+      <span class="spacer"></span>
+      <a class="btn" id="dlall">Download all (zip)</a>
+    </header>
+    <main>
+      <div class="crumbs" id="crumbs"></div>
+      <ul id="list"></ul>
+    </main>
+    <footer>
+      Shared with
+      <a href="https://github.com/toots/tsync" target="_blank" rel="noopener"
+        >tsync</a
+      >
+    </footer>
+
+    <dialog id="pv">
+      <div class="pv-head">
+        <span class="t" id="pvt"></span>
+        <a class="btn" id="pvdl">Download</a>
+        <button class="x" id="pvx" aria-label="Close">&times;</button>
+      </div>
+      <div class="pv-body" id="pvb"></div>
+    </dialog>
+
+    <script>
+      const DATA = __SHARE_DATA__;
+      const B = DATA.base;
+      document.getElementById("dlall").href = B + "/download";
+      const nameNoZip = DATA.filename.replace(/\.zip$/, "");
+
+      const IMG = ["jpg", "jpeg", "png", "gif", "webp", "svg", "bmp", "avif"];
+      const AUD = ["mp3", "flac", "wav", "ogg", "oga", "m4a", "aac", "opus"];
+      const VID = ["mp4", "m4v", "webm", "mov", "mkv", "ogv"];
+      function kind(name) {
+        const e = name.includes(".") ? name.split(".").pop().toLowerCase() : "";
+        if (IMG.includes(e)) return "image";
+        if (AUD.includes(e)) return "audio";
+        if (VID.includes(e)) return "video";
+        return null;
+      }
+      const ICON = { image: "🖼", audio: "🎵", video: "🎬" };
+
+      // Build a folder tree from the flat entry list.
+      const root = { dirs: {}, files: [] };
+      function ensure(node, parts) {
+        for (const p of parts) {
+          node.dirs[p] = node.dirs[p] || { dirs: {}, files: [] };
+          node = node.dirs[p];
+        }
+        return node;
+      }
+      for (const e of DATA.entries) {
+        const parts = e.name.split("/").filter(Boolean);
+        if (e.dir) {
+          ensure(root, parts);
+          continue;
+        }
+        const dir = ensure(root, parts.slice(0, -1));
+        dir.files.push({ name: parts[parts.length - 1], i: e.i });
+      }
+
+      // The zip roots entries at the shared folder, so the tree has a single wrapping
+      // dir; show its contents directly instead of a folder nested inside itself.
+      let base = root,
+        rootLabel = nameNoZip;
+      {
+        const tops = Object.keys(root.dirs);
+        if (tops.length === 1 && root.files.length === 0) {
+          rootLabel = tops[0];
+          base = root.dirs[tops[0]];
+        }
+      }
+      document.getElementById("title").textContent = rootLabel;
+      document.title = rootLabel + " — tsync share";
+
+      let path = [];
+      function nodeAt(p) {
+        let n = base;
+        for (const s of p) {
+          n = n.dirs[s];
+          if (!n) return { dirs: {}, files: [] };
+        }
+        return n;
+      }
+
+      function render() {
+        const node = nodeAt(path);
+        const cr = document.getElementById("crumbs");
+        cr.innerHTML = "";
+        const mk = (label, idx) => {
+          const a = document.createElement("a");
+          a.textContent = label;
+          a.onclick = () => {
+            path = path.slice(0, idx);
+            render();
+          };
+          return a;
+        };
+        cr.appendChild(mk(rootLabel || "root", 0));
+        path.forEach((seg, k) => {
+          cr.append(" / ");
+          cr.appendChild(mk(seg, k + 1));
+        });
+
+        const ul = document.getElementById("list");
+        ul.innerHTML = "";
+        const dirs = Object.keys(node.dirs).sort((a, b) => a.localeCompare(b));
+        const files = node.files
+          .slice()
+          .sort((a, b) => a.name.localeCompare(b.name));
+        if (!dirs.length && !files.length) {
+          ul.innerHTML = '<div class="empty">Empty folder</div>';
+          return;
+        }
+
+        for (const d of dirs) {
+          const li = document.createElement("li");
+          li.innerHTML = '<span class="ico">📁</span>';
+          const n = document.createElement("span");
+          n.className = "name";
+          n.textContent = d;
+          n.onclick = () => {
+            path.push(d);
+            render();
+          };
+          li.appendChild(n);
+          ul.appendChild(li);
+        }
+        for (const f of files) {
+          const k = kind(f.name);
+          const li = document.createElement("li");
+          const url = B + "/f/" + f.i + "?dl=1";
+          const a = document.createElement("li");
+          const ic = document.createElement("span");
+          ic.className = "ico";
+          ic.textContent = ICON[k] || "📄";
+          const n = document.createElement("span");
+          n.className = "name";
+          n.textContent = f.name;
+          n.onclick = k
+            ? () => preview(f, k)
+            : () => {
+                location.href = B + "/f/" + f.i + "?dl=1";
+              };
+          const dl = document.createElement("a");
+          dl.className = "dl";
+          dl.textContent = "⬇";
+          dl.title = "Download";
+          dl.href = B + "/f/" + f.i + "?dl=1";
+          li.append(ic, n, dl);
+          ul.appendChild(li);
+        }
+      }
+
+      const pv = document.getElementById("pv");
+      async function preview(f, k) {
+        document.getElementById("pvt").textContent = f.name;
+        document.getElementById("pvdl").href = B + "/f/" + f.i + "?dl=1";
+        const body = document.getElementById("pvb");
+        body.innerHTML = "Loading…";
+        if (!pv.open) pv.showModal();
+        const r = await fetch(B + "/f/" + f.i + "?json=1");
+        if (!r.ok) {
+          body.textContent = "Preview failed (" + r.status + ")";
+          return;
+        }
+        const { url } = await r.json();
+        const el =
+          k === "image"
+            ? new Image()
+            : Object.assign(document.createElement(k), {
+                controls: true,
+                autoplay: k !== "image",
+              });
+        el.src = url;
+        body.innerHTML = "";
+        body.appendChild(el);
+      }
+      document.getElementById("pvx").onclick = () => pv.close();
+      pv.addEventListener("close", () => {
+        document.getElementById("pvb").innerHTML = "";
+      });
+
+      render();
+    </script>
+  </body>
+</html>
