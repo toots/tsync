@@ -387,6 +387,18 @@ let ls_cmd =
            ~domain_name:C.domain_name ~domain_prefix:C.domain_prefix ~prefix ()
        in
        let dp_len = String.length C.domain_prefix in
+       (* Folders first, then files, each alphabetized (case-insensitive). *)
+       let by_name a b =
+         String.compare (String.lowercase_ascii a) (String.lowercase_ascii b)
+       in
+       let subdirs = List.sort by_name subdirs in
+       let files =
+         List.sort
+           (fun (a : Backend.file_entry) (b : Backend.file_entry) ->
+             by_name a.key b.key)
+           files
+       in
+       List.iter (fun d -> Printf.printf "dir    %s/\n" d) subdirs;
        List.iter
          (fun (e : Backend.file_entry) ->
            let name =
@@ -402,7 +414,6 @@ let ls_cmd =
              (if cached then "local" else "cloud")
              name e.size)
          files;
-       List.iter (fun d -> Printf.printf "dir    %s/\n" d) subdirs;
        if show_deleted then begin
          (* Versioned paths in this directory with no live manifest. *)
          let (module B : Backend.S) = List.hd C.backends in
