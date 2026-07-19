@@ -22,8 +22,7 @@ variable "iam_user_name" {
 
 variable "shares_prefix" {
   type        = string
-  default     = ".shares/"
-  description = "Key prefix for share manifests + cached artifacts: \"<domain-prefix>/.shares/\" or \".shares/\"."
+  description = "Key prefix for share manifests + cached artifacts. tsync stores them at \"tsync/<domain>/shares/\" — set this to that exact value for the domain served by this store."
 }
 
 variable "manage_lifecycle" {

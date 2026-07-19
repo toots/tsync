@@ -16,10 +16,10 @@
   journal <entry-1> = put foo.txt 3
   journal <entry-2> = put foo.txt 7
   journal <entry-3> = put foo.txt 17
-  version foo.txt#1 = manifest size=3 chunks=1
-  version foo.txt#2 = manifest size=7 chunks=1
   file foo.txt = manifest size=17 chunks=1 h1=faf60158c5948cd2 h2=60f690e9588d51bd
     chunk#0 faf60158c5948cd2-60f690e9588d51bd size=17
+  version foo.txt#1 = manifest size=3 chunks=1
+  version foo.txt#2 = manifest size=7 chunks=1
 
 === delete keeps a version
   write foo.txt "keep me"
@@ -32,8 +32,8 @@
   cursor = <entry-2>
   journal <entry-1> = put foo.txt 7
   journal <entry-2> = delete foo.txt
+  dir tsync/test/manifests/
   version foo.txt#1 = manifest size=7 chunks=1
-  dir tsync/test/
 
 === rename versions the old path
   write a.txt "content a"
@@ -48,9 +48,9 @@
   cursor = <entry-2>
   journal <entry-1> = put a.txt 9
   journal <entry-2> = rename a.txt -> b.txt 9
-  version a.txt#1 = manifest size=9 chunks=1
   file b.txt = manifest size=9 chunks=1 h1=3080b92b20375f8a h2=2fce59f09ae2e917
     chunk#0 3080b92b20375f8a-2fce59f09ae2e917 size=9
+  version a.txt#1 = manifest size=9 chunks=1
 
 === revert a deleted file (dataless)
   write foo.txt "deleted content"
@@ -68,9 +68,9 @@
   journal <entry-1> = put foo.txt 15
   journal <entry-2> = delete foo.txt
   journal <entry-3> = put foo.txt 15
-  version foo.txt#1 = manifest size=15 chunks=1
   file foo.txt = manifest size=15 chunks=1 h1=d1a9d4d84e18e087 h2=2a474494f098b599
     chunk#0 d1a9d4d84e18e087-2a474494f098b599 size=15
+  version foo.txt#1 = manifest size=15 chunks=1
 
 === revert a modified file to its previous version
   write foo.txt "one"
@@ -93,8 +93,8 @@
   journal <entry-2> = put foo.txt 3
   journal <entry-3> = put foo.txt 5
   journal <entry-4> = put foo.txt 3
-  version foo.txt#1 = manifest size=3 chunks=1
-  version foo.txt#2 = manifest size=3 chunks=1
   file foo.txt = manifest size=3 chunks=1 h1=6c0560bdcb29998b h2=8f653076428650aa
     chunk#0 6c0560bdcb29998b-8f653076428650aa size=3
+  version foo.txt#1 = manifest size=3 chunks=1
+  version foo.txt#2 = manifest size=3 chunks=1
 

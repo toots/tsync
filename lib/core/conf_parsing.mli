@@ -8,7 +8,6 @@ type backend_config = {
 
 type domain = {
   name : string;
-  prefix : string;
   backends : backend_config list;
   symlink_policy : [ `Keep | `Follow | `Skip ];
   versioning : bool;

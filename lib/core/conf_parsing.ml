@@ -7,7 +7,6 @@ type backend_config = {
 
 type domain = {
   name : string;
-  prefix : string;
   backends : backend_config list;
   symlink_policy : [ `Keep | `Follow | `Skip ];
   versioning : bool;
@@ -84,7 +83,6 @@ let parse_domain json =
   let open Yojson.Basic.Util in
   {
     name = json |> member "name" |> to_string;
-    prefix = json |> member "prefix" |> to_string;
     backends = json |> member "backends" |> to_list |> List.map parse_backend;
     symlink_policy = parse_symlink_policy json;
     versioning = json |> member "versioning" |> to_bool;
@@ -129,16 +127,17 @@ let pick_domain ?domain cfg =
           | _ -> failwith "multiple domains configured — use --domain to select"
         )
 
-let prefix_slash d =
-  let p = d.prefix in
-  if p = "" then "" else if p.[String.length p - 1] = '/' then p else p ^ "/"
+let root_prefix = "tsync/"
 
-let domain_prefix d = prefix_slash d ^ d.name ^ "/"
-let chunk_prefix d = prefix_slash d ^ ".chunks/"
-let versions_prefix d = prefix_slash d ^ ".versions/" ^ d.name ^ "/"
-let journal_prefix d = prefix_slash d ^ ".journal/" ^ d.name ^ "/"
-let cursor_key d = prefix_slash d ^ ".cursor/" ^ d.name
-let shares_prefix d = prefix_slash d ^ ".shares/" ^ d.name ^ "/"
+(* Everything for a domain lives under one folder so a domain can be dropped with
+   a single prefix delete. Chunks are per-domain (no cross-domain dedup). *)
+let domain_root (d : domain) = root_prefix ^ d.name ^ "/"
+let domain_prefix d = domain_root d ^ "manifests/"
+let chunk_prefix d = domain_root d ^ "chunks/"
+let versions_prefix d = domain_root d ^ "versions/"
+let journal_prefix d = domain_root d ^ "journal/"
+let cursor_key d = domain_root d ^ "cursor"
+let shares_prefix d = domain_root d ^ "shares/"
 
 (* A backend's share Lambda URL, if it has a non-empty [shareUrl] field. *)
 let backend_share_url bc =

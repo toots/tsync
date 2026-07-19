@@ -13,7 +13,7 @@ variable "stores" {
     bucket               = string
     create_bucket        = optional(bool, true)
     iam_user_name        = optional(string) # default: tsync-client-<key>
-    shares_prefix        = optional(string, ".shares/")
+    shares_prefix        = string           # "tsync/<domain>/shares/"
     manage_lifecycle     = optional(bool, true)
     cache_expiry_days    = optional(number, 30)
     presign_ttl          = optional(number, 600)
