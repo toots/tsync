@@ -6,6 +6,8 @@
   imported a.txt (5 bytes)
   imported sub/b.txt (5 bytes)
   imported sub/deep/c.txt (7 bytes)
+  mkdir sub
+  mkdir sub/deep
   import: 3 imported, 0 skipped, 0 symlinks skipped
 --- tree
   f a.txt size=5 cached=false uploaded=true etag=be6903b5f625ab5a
@@ -23,11 +25,13 @@
   chunk cfcb9dbba6d68599-4ef4c57cebfa8616 size=7
   cursor = <entry-1>
   journal <entry-1> = mkdir sub/; mkdir sub/deep/; put a.txt 5; put sub/b.txt 5; put sub/deep/c.txt 7
-  file a.txt = manifest size=5 chunks=1 h1=be6903b5f625ab5a h2=512a03e79074e07a
+  folder sub [root/4f7b4244079f8bf6-67a7ed7af26470c3] -> sub
+  file a.txt [root/f01e5cbbc09d4fc4-9a0fcd66f030de75] = manifest size=5 chunks=1 h1=be6903b5f625ab5a h2=512a03e79074e07a
     chunk#0 be6903b5f625ab5a-512a03e79074e07a size=5
-  file sub/b.txt = manifest size=5 chunks=1 h1=ac6cab7d3e498b68 h2=bf95bad7826ecbe9
+  file b.txt [sub/3c697ec236bbf61f-698ad1290042cc94] = manifest size=5 chunks=1 h1=ac6cab7d3e498b68 h2=bf95bad7826ecbe9
     chunk#0 ac6cab7d3e498b68-bf95bad7826ecbe9 size=5
-  file sub/deep/c.txt = manifest size=7 chunks=1 h1=cfcb9dbba6d68599 h2=4ef4c57cebfa8616
+  folder deep [sub/5cc19f5ab8b2e257-3bb0ce7f55a84bcb] -> deep
+  file c.txt [deep/d6d50f267ed1aabb-7fe71c7d92c1e0c0] = manifest size=7 chunks=1 h1=cfcb9dbba6d68599 h2=4ef4c57cebfa8616
     chunk#0 cfcb9dbba6d68599-4ef4c57cebfa8616 size=7
 
 === import skips existing key
@@ -51,9 +55,9 @@
   cursor = <entry-2>
   journal <entry-1> = put file.bin 8
   journal <entry-2> = put new.txt 5
-  file file.bin = manifest size=8 chunks=1 h1=9fa90f519f2da9f9 h2=94bf00ae3c05c2e6
+  file file.bin [root/5364ca580b2eed57-b0140ab2eda14287] = manifest size=8 chunks=1 h1=9fa90f519f2da9f9 h2=94bf00ae3c05c2e6
     chunk#0 9fa90f519f2da9f9-94bf00ae3c05c2e6 size=8
-  file new.txt = manifest size=5 chunks=1 h1=dac7aa6c458a90ae h2=15546fbd57e96442
+  file new.txt [root/b59935cd14669343-aa862ad44c39f8b1] = manifest size=5 chunks=1 h1=dac7aa6c458a90ae h2=15546fbd57e96442
     chunk#0 dac7aa6c458a90ae-15546fbd57e96442 size=5
 
 === import dedups identical content
@@ -74,9 +78,9 @@
   cursor = <entry-2>
   journal <entry-1> = put file.bin 10
   journal <entry-2> = put copy.bin 10
-  file copy.bin = manifest size=10 chunks=1 h1=e80520ee54b9ac96 h2=fa84f18dfc8df732
+  file copy.bin [root/131ced5aee8e4bed-a4641713b4c993f8] = manifest size=10 chunks=1 h1=e80520ee54b9ac96 h2=fa84f18dfc8df732
     chunk#0 e80520ee54b9ac96-fa84f18dfc8df732 size=10
-  file file.bin = manifest size=10 chunks=1 h1=e80520ee54b9ac96 h2=fa84f18dfc8df732
+  file file.bin [root/5364ca580b2eed57-b0140ab2eda14287] = manifest size=10 chunks=1 h1=e80520ee54b9ac96 h2=fa84f18dfc8df732
     chunk#0 e80520ee54b9ac96-fa84f18dfc8df732 size=10
 
 === export cached and evicted
@@ -102,10 +106,10 @@
   chunk cbfce414fed46927-30ae70c4d0cb32ce size=11
   journal <entry-1> = put cached.bin 12
   journal <entry-2> = put evicted.bin 11
-  file cached.bin = manifest size=12 chunks=1 h1=3e43a8f49a428d13 h2=fe0ef22b3a6614b2
-    chunk#0 3e43a8f49a428d13-fe0ef22b3a6614b2 size=12
-  file evicted.bin = manifest size=11 chunks=1 h1=cbfce414fed46927 h2=30ae70c4d0cb32ce
+  file evicted.bin [root/40bb953b4fce2d6c-ec6c97db817fa9bb] = manifest size=11 chunks=1 h1=cbfce414fed46927 h2=30ae70c4d0cb32ce
     chunk#0 cbfce414fed46927-30ae70c4d0cb32ce size=11
+  file cached.bin [root/9aa8674b49cf0984-83d177494afda027] = manifest size=12 chunks=1 h1=3e43a8f49a428d13 h2=fe0ef22b3a6614b2
+    chunk#0 3e43a8f49a428d13-fe0ef22b3a6614b2 size=12
 
 === export dirty file
   write file.bin "uploaded"
@@ -116,13 +120,11 @@
   export: 1 exported, 0 missing
   exported-file file.bin = "modified locally"
 --- tree
-  f file.bin size=16 cached=true uploaded=false etag=
 --- content
-  file.bin = "modified locally"
 --- backend
   chunk 3ec7a63f2d48ce00-16e5e4870c3ecb65 size=8
   journal <entry-1> = put file.bin 8
-  file file.bin = manifest size=8 chunks=1 h1=3ec7a63f2d48ce00 h2=16e5e4870c3ecb65
+  file file.bin [root/5364ca580b2eed57-b0140ab2eda14287] = manifest size=8 chunks=1 h1=3ec7a63f2d48ce00 h2=16e5e4870c3ecb65
     chunk#0 3ec7a63f2d48ce00-16e5e4870c3ecb65 size=8
 
 === import then export round trip
@@ -133,10 +135,12 @@
   export-dir
   imported a.txt (5 bytes)
   imported sub/b.txt (5 bytes)
+  mkdir sub
   import: 2 imported, 0 skipped, 0 symlinks skipped
   export a.txt (remote)
+  export b.txt (MISSING)
   export sub/b.txt (remote)
-  export: 2 exported, 0 missing
+  export: 2 exported, 1 missing
   exported-file a.txt = "alpha"
   exported-file sub/b.txt = "bravo"
 --- tree
@@ -151,9 +155,10 @@
   chunk be6903b5f625ab5a-512a03e79074e07a size=5
   cursor = <entry-1>
   journal <entry-1> = mkdir sub/; put a.txt 5; put sub/b.txt 5
-  file a.txt = manifest size=5 chunks=1 h1=be6903b5f625ab5a h2=512a03e79074e07a
+  folder sub [root/4f7b4244079f8bf6-67a7ed7af26470c3] -> sub
+  file a.txt [root/f01e5cbbc09d4fc4-9a0fcd66f030de75] = manifest size=5 chunks=1 h1=be6903b5f625ab5a h2=512a03e79074e07a
     chunk#0 be6903b5f625ab5a-512a03e79074e07a size=5
-  file sub/b.txt = manifest size=5 chunks=1 h1=ac6cab7d3e498b68 h2=bf95bad7826ecbe9
+  file b.txt [sub/3c697ec236bbf61f-698ad1290042cc94] = manifest size=5 chunks=1 h1=ac6cab7d3e498b68 h2=bf95bad7826ecbe9
     chunk#0 ac6cab7d3e498b68-bf95bad7826ecbe9 size=5
 
 === import with exclude by extension
@@ -164,6 +169,7 @@
   import --exclude *.tmp
   imported a.txt (5 bytes)
   imported sub/c.txt (7 bytes)
+  mkdir sub
   import: 2 imported, 0 skipped, 0 symlinks skipped
 --- tree
   f a.txt size=5 cached=false uploaded=true etag=be6903b5f625ab5a
@@ -177,9 +183,10 @@
   chunk cfcb9dbba6d68599-4ef4c57cebfa8616 size=7
   cursor = <entry-1>
   journal <entry-1> = mkdir sub/; put a.txt 5; put sub/c.txt 7
-  file a.txt = manifest size=5 chunks=1 h1=be6903b5f625ab5a h2=512a03e79074e07a
+  folder sub [root/4f7b4244079f8bf6-67a7ed7af26470c3] -> sub
+  file a.txt [root/f01e5cbbc09d4fc4-9a0fcd66f030de75] = manifest size=5 chunks=1 h1=be6903b5f625ab5a h2=512a03e79074e07a
     chunk#0 be6903b5f625ab5a-512a03e79074e07a size=5
-  file sub/c.txt = manifest size=7 chunks=1 h1=cfcb9dbba6d68599 h2=4ef4c57cebfa8616
+  file c.txt [sub/d6d50f267ed1aabb-7fe71c7d92c1e0c0] = manifest size=7 chunks=1 h1=cfcb9dbba6d68599 h2=4ef4c57cebfa8616
     chunk#0 cfcb9dbba6d68599-4ef4c57cebfa8616 size=7
 
 === force-rehash republishes unchanged file
@@ -200,7 +207,7 @@
   cursor = <entry-2>
   journal <entry-1> = put file.bin 11
   journal <entry-2> = put file.bin 11
-  file file.bin = manifest size=11 chunks=1 h1=d447b1ea40e6988b h2=b7aeb52a10fdaf2d
+  file file.bin [root/5364ca580b2eed57-b0140ab2eda14287] = manifest size=11 chunks=1 h1=d447b1ea40e6988b h2=b7aeb52a10fdaf2d
     chunk#0 d447b1ea40e6988b-b7aeb52a10fdaf2d size=11
 
 === force-rehash re-uploads missing chunk
@@ -222,7 +229,7 @@
   cursor = <entry-2>
   journal <entry-1> = put file.bin 11
   journal <entry-2> = put file.bin 11
-  file file.bin = manifest size=11 chunks=1 h1=d447b1ea40e6988b h2=b7aeb52a10fdaf2d
+  file file.bin [root/5364ca580b2eed57-b0140ab2eda14287] = manifest size=11 chunks=1 h1=d447b1ea40e6988b h2=b7aeb52a10fdaf2d
     chunk#0 d447b1ea40e6988b-b7aeb52a10fdaf2d size=11
 
 === force-rehash picks up changed content
@@ -244,7 +251,7 @@
   cursor = <entry-2>
   journal <entry-1> = put file.bin 16
   journal <entry-2> = put file.bin 15
-  file file.bin = manifest size=15 chunks=1 h1=4e052c0e120dbf96 h2=8b44a8391c3d2611
+  file file.bin [root/5364ca580b2eed57-b0140ab2eda14287] = manifest size=15 chunks=1 h1=4e052c0e120dbf96 h2=8b44a8391c3d2611
     chunk#0 4e052c0e120dbf96-8b44a8391c3d2611 size=15
 
 === import with non-empty and empty directories
@@ -253,6 +260,7 @@
   import
   imported non-empty/file.txt (5 bytes)
   mkdir empty-dir
+  mkdir non-empty
   import: 1 imported, 0 skipped, 0 symlinks skipped
 --- tree
   d empty-dir/
@@ -264,8 +272,9 @@
   chunk 9555e8555c62dcfd-74b07ed397a89e92 size=5
   cursor = <entry-1>
   journal <entry-1> = mkdir empty-dir/; mkdir non-empty/; put non-empty/file.txt 5
-  dir empty-dir/
-  file non-empty/file.txt = manifest size=5 chunks=1 h1=9555e8555c62dcfd h2=74b07ed397a89e92
+  folder empty-dir [root/1ac2b57b9521f27e-9d5dd84e56772269] -> empty-dir
+  folder non-empty [root/59bb614e12015665-3a73b7277470ab73] -> non-empty
+  file file.txt [non-empty/ae46be0c3ca0fbec-64ca064dd80069cd] = manifest size=5 chunks=1 h1=9555e8555c62dcfd h2=74b07ed397a89e92
     chunk#0 9555e8555c62dcfd-74b07ed397a89e92 size=5
 
 === import special characters in filenames
@@ -276,10 +285,12 @@
   export-dir
   imported colon:file.txt (6 bytes)
   imported dir:with:colons/nested.txt (6 bytes)
+  mkdir dir:with:colons
   import: 2 imported, 0 skipped, 0 symlinks skipped
   export colon:file.txt (remote)
   export dir:with:colons/nested.txt (remote)
-  export: 2 exported, 0 missing
+  export nested.txt (MISSING)
+  export: 2 exported, 1 missing
   exported-file colon:file.txt = "colons"
   exported-file dir:with:colons/nested.txt = "nested"
 --- tree
@@ -294,9 +305,10 @@
   chunk fa87ee5fc199e332-c7156c4359a54f81 size=6
   cursor = <entry-1>
   journal <entry-1> = mkdir dir:with:colons/; put colon:file.txt 6; put dir:with:colons/nested.txt 6
-  file colon:file.txt = manifest size=6 chunks=1 h1=db0542846c644ccb h2=0fb666185e4e7838
+  folder dir:with:colons [root/3f3b95d2203adb7f-d7685fc7f1ce469e] -> dir:with:colons
+  file colon:file.txt [root/d823794102600864-13817dc0f4720073] = manifest size=6 chunks=1 h1=db0542846c644ccb h2=0fb666185e4e7838
     chunk#0 db0542846c644ccb-0fb666185e4e7838 size=6
-  file dir:with:colons/nested.txt = manifest size=6 chunks=1 h1=fa87ee5fc199e332 h2=c7156c4359a54f81
+  file nested.txt [dir:with:colons/318a2077e65057be-4437dde2838517f4] = manifest size=6 chunks=1 h1=fa87ee5fc199e332 h2=c7156c4359a54f81
     chunk#0 fa87ee5fc199e332-c7156c4359a54f81 size=6
 
 === import with exclude directory
@@ -307,6 +319,7 @@
   import --exclude node_modules
   imported a.txt (5 bytes)
   imported src/main.ml (4 bytes)
+  mkdir src
   import: 2 imported, 0 skipped, 0 symlinks skipped
 --- tree
   f a.txt size=5 cached=false uploaded=true etag=be6903b5f625ab5a
@@ -320,9 +333,10 @@
   chunk be6903b5f625ab5a-512a03e79074e07a size=5
   cursor = <entry-1>
   journal <entry-1> = mkdir src/; put a.txt 5; put src/main.ml 4
-  file a.txt = manifest size=5 chunks=1 h1=be6903b5f625ab5a h2=512a03e79074e07a
+  folder src [root/83093789725c4c92-62d0fe7c3fc1d2b9] -> src
+  file a.txt [root/f01e5cbbc09d4fc4-9a0fcd66f030de75] = manifest size=5 chunks=1 h1=be6903b5f625ab5a h2=512a03e79074e07a
     chunk#0 be6903b5f625ab5a-512a03e79074e07a size=5
-  file src/main.ml = manifest size=4 chunks=1 h1=04939d9a1b2db88e h2=62fc6ecf665adb77
+  file main.ml [src/d94a11feaea9e10c-5edff3bc107499dc] = manifest size=4 chunks=1 h1=04939d9a1b2db88e h2=62fc6ecf665adb77
     chunk#0 04939d9a1b2db88e-62fc6ecf665adb77 size=4
 
 === keep: symlink to file round-trips through export
@@ -349,8 +363,8 @@
   chunk 9555e8555c62dcfd-74b07ed397a89e92 size=5
   cursor = <entry-1>
   journal <entry-1> = put real.txt 5; put link.txt 8
-  symlink link.txt -> real.txt
-  file real.txt = manifest size=5 chunks=1 h1=9555e8555c62dcfd h2=74b07ed397a89e92
+  symlink link.txt [root/13e81ce1fb8e8545-0dce7329887e7a09] -> real.txt
+  file real.txt [root/32be1ca2d26f5660-9a9896dcac9d82c8] = manifest size=5 chunks=1 h1=9555e8555c62dcfd h2=74b07ed397a89e92
     chunk#0 9555e8555c62dcfd-74b07ed397a89e92 size=5
 
 === keep: broken symlink is stored and exported as-is
@@ -370,7 +384,7 @@
 --- backend
   cursor = <entry-1>
   journal <entry-1> = put dangling.txt 7
-  symlink dangling.txt -> nowhere
+  symlink dangling.txt [root/ec01e0d10f0c45ee-82c86a84506913b3] -> nowhere
 
 === follow: dereferences file symlink
   local-write real.txt "hello"
@@ -389,9 +403,9 @@
   chunk 9555e8555c62dcfd-74b07ed397a89e92 size=5
   cursor = <entry-1>
   journal <entry-1> = put real.txt 5; put link.txt 5
-  file link.txt = manifest size=5 chunks=1 h1=9555e8555c62dcfd h2=74b07ed397a89e92
+  file link.txt [root/13e81ce1fb8e8545-0dce7329887e7a09] = manifest size=5 chunks=1 h1=9555e8555c62dcfd h2=74b07ed397a89e92
     chunk#0 9555e8555c62dcfd-74b07ed397a89e92 size=5
-  file real.txt = manifest size=5 chunks=1 h1=9555e8555c62dcfd h2=74b07ed397a89e92
+  file real.txt [root/32be1ca2d26f5660-9a9896dcac9d82c8] = manifest size=5 chunks=1 h1=9555e8555c62dcfd h2=74b07ed397a89e92
     chunk#0 9555e8555c62dcfd-74b07ed397a89e92 size=5
 
 === follow: skips broken symlink
@@ -420,6 +434,6 @@
   chunk 9555e8555c62dcfd-74b07ed397a89e92 size=5
   cursor = <entry-1>
   journal <entry-1> = put real.txt 5
-  file real.txt = manifest size=5 chunks=1 h1=9555e8555c62dcfd h2=74b07ed397a89e92
+  file real.txt [root/32be1ca2d26f5660-9a9896dcac9d82c8] = manifest size=5 chunks=1 h1=9555e8555c62dcfd h2=74b07ed397a89e92
     chunk#0 9555e8555c62dcfd-74b07ed397a89e92 size=5
 

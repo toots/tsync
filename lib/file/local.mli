@@ -89,6 +89,14 @@ val list_directory :
   unit ->
   (Backend.file_entry list * string list) Lwt.t
 
+val list_all :
+  cache_root:string ->
+  domain_name:string ->
+  domain_prefix:string ->
+  prefix:string ->
+  unit ->
+  Backend.file_entry list Lwt.t
+
 val evict :
   cache_root:string ->
   domain_name:string ->

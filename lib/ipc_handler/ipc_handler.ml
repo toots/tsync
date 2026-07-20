@@ -122,7 +122,7 @@ module Make (C : Conf.S) (F : File.S) = struct
             ]
 
   let handle_list_dir prefix =
-    let* files, dirs = Fs.list_directory ~prefix in
+    let* files, dirs = F.list_directory ~prefix in
     (* map_p: uncached entries each cost a backend GET; resolving them
        sequentially made cold enumeration O(files) round trips end-to-end.
        [resolve_pool] bounds the fan-out; map_p preserves result order. *)
@@ -147,7 +147,7 @@ module Make (C : Conf.S) (F : File.S) = struct
       ]
 
   let handle_list_all prefix =
-    let* files = Fs.list_all_files ~prefix in
+    let* files = F.list_all_files ~prefix in
     let+ files_json = Lwt_list.map_p file_entry_json files in
     ok_json [("files", `List files_json)]
 

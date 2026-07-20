@@ -20,6 +20,12 @@ module type S = sig
   val stat : t -> Unix.LargeFile.stats option Lwt.t
   val readlink : t -> string option Lwt.t
   val list_dir : t -> string list Lwt.t
+
+  val list_directory :
+    prefix:string ->
+    (Backend.file_entry list * (string * float option) list) Lwt.t
+
+  val list_all_files : prefix:string -> Backend.file_entry list Lwt.t
   val xattrs : t -> (string * string) list Lwt.t
   val is_dirty : t -> bool
   val set_dirty : t -> unit
@@ -90,6 +96,10 @@ module Make (C : Conf.S) (Sq : Sync_queue.S) : S = struct
     let pfx = String.length C.domain_prefix in
     if String.length key > pfx then String.sub key pfx (String.length key - pfx)
     else key
+
+  (* Manifest backend I/O goes through [St], keyed by logical (real-path) keys;
+     the layout scheme maps them to backend keys. *)
+  module St = Store.Make (C) (Layout.Inode.Make (C))
 
   let is_cached key =
     Local.is_cached ~cache_root:C.cache_root ~domain_name:C.domain_name
@@ -304,6 +314,20 @@ module Make (C : Conf.S) (Sq : Sync_queue.S) : S = struct
     Local.list_dir ~cache_root:C.cache_root ~domain_name:C.domain_name
       ~domain_prefix:C.domain_prefix key
 
+  (* readdir is served from the local manifest mirror (the source of truth for
+     names and structure); the backend holds only hashed keys. Directory mtimes
+     are not tracked locally, so they are reported absent. *)
+  let list_directory ~prefix =
+    let+ files, dirs =
+      Local.list_directory ~cache_root:C.cache_root ~domain_name:C.domain_name
+        ~domain_prefix:C.domain_prefix ~prefix ()
+    in
+    (files, List.map (fun d -> (d, (None : float option))) dirs)
+
+  let list_all_files ~prefix =
+    Local.list_all ~cache_root:C.cache_root ~domain_name:C.domain_name
+      ~domain_prefix:C.domain_prefix ~prefix ()
+
   (* ── Xattrs ────────────────────────────────────────────────────────────── *)
 
   let xattrs key =
@@ -432,18 +456,11 @@ module Make (C : Conf.S) (Sq : Sync_queue.S) : S = struct
     J.delete_local_pending ~entry_key:ek
 
   let save_version key =
-    if C.versioning then
-      Versioning.save ~backends:C.backends ~domain_prefix:C.domain_prefix
-        ~versions_prefix:C.versions_prefix ~key
-    else Lwt.return_unit
+    if C.versioning then St.save_version ~key else Lwt.return_unit
 
   let apply_delete key =
     let* () = save_version key in
-    let* () =
-      Lwt_list.iter_s
-        (fun (module B : Backend.S) -> B.delete ~key ())
-        C.backends
-    in
+    let* () = St.delete_manifest ~key in
     clear_local key
 
   (* ── Async upload queue ────────────────────────────────────────────────── *)
@@ -466,6 +483,21 @@ module Make (C : Conf.S) (Sq : Sync_queue.S) : S = struct
         ignore (cancel_upload key);
         with_journal key [`Delete (rel_key key)] (fun () -> apply_delete key))
 
+  (* Backend key of a directory's folder marker (under its parent's namespace).
+     Used to move/remove a marker whose local dir has already moved or is gone. *)
+  let folder_marker_bkey key =
+    let rel =
+      let r = rel_key key in
+      if String.ends_with ~suffix:"/" r then String.sub r 0 (String.length r - 1)
+      else r
+    in
+    let parent = match Filename.dirname rel with "." -> "" | d -> d in
+    let+ pid =
+      Folder_ids.resolve ~cache_root:C.cache_root ~domain_name:C.domain_name
+        parent
+    in
+    C.domain_prefix ^ Folder.child_key ~folder_id:pid (Filename.basename rel)
+
   let mkdir key =
     with_meta (fun () ->
         let* () =
@@ -474,17 +506,40 @@ module Make (C : Conf.S) (Sq : Sync_queue.S) : S = struct
         in
         with_journal key
           [`Mkdir (rel_key key)]
-          (fun () -> Fs.create_directory ~key))
+          (fun () -> St.put_folder_marker ~key))
 
+  (* O(1) delete: detach the folder by moving its parent marker into the trash
+     namespace. The subtree stays intact on the backend (untouched) for undo and
+     is reclaimed by [expire]; the local mirror copy is dropped immediately. *)
   let rmdir key =
     with_meta (fun () ->
-        let* () =
-          Local.delete_dir ~cache_root:C.cache_root ~domain_name:C.domain_name
-            ~domain_prefix:C.domain_prefix key
+        let rel =
+          let r = rel_key key in
+          if String.ends_with ~suffix:"/" r then
+            String.sub r 0 (String.length r - 1)
+          else r
         in
-        with_journal key
-          [`Rmdir (rel_key key)]
-          (fun () -> Fs.delete_dir ~prefix:key))
+        let* old_marker = folder_marker_bkey key in
+        let* fid =
+          Folder_ids.resolve ~cache_root:C.cache_root ~domain_name:C.domain_name
+            rel
+        in
+        let trash_key =
+          C.domain_prefix ^ Folder.trash_id ^ "/" ^ Folder.new_id ()
+        in
+        let marker =
+          Folder.trash_marker_to_string ~name:(Filename.basename rel) ~id:fid
+            ~path:rel
+        in
+        let* () =
+          with_journal key
+            [`Rmdir (rel_key key)]
+            (fun () ->
+              let* () = St.put_raw ~bkey:trash_key ~data:marker in
+              St.delete_raw ~bkey:old_marker)
+        in
+        Local.delete_dir ~cache_root:C.cache_root ~domain_name:C.domain_name
+          ~domain_prefix:C.domain_prefix key)
 
   (* Publish an already-chunked file under [key]: its chunks are on the
      backend, only the manifest key and a journal entry are missing. *)
@@ -493,12 +548,7 @@ module Make (C : Conf.S) (Sq : Sync_queue.S) : S = struct
       | `Dirty -> Lwt.return_unit
       | `Clean m ->
           Log.info "publish_manifest %s: size=%Ld" key m.Manifest.size;
-          let* () =
-            Lwt_list.iter_s
-              (fun (module B : Backend.S) ->
-                B.put ~key ~data:(Manifest.to_string state) ())
-              C.backends
-          in
+          let* () = St.put_manifest ~key ~data:(Manifest.to_string state) in
           let* ek =
             Fs.write_journal_entry [`Put (rel_key key, m.Manifest.size)]
           in
@@ -517,6 +567,20 @@ module Make (C : Conf.S) (Sq : Sync_queue.S) : S = struct
       Printf.sprintf "%s (conflicted copy from %s)%s" name C.client_name ext
     in
     if dir = "." then base else dir ^ "/" ^ base
+
+  (* A file rename moves its manifest object but not its body, so the leaf [name]
+     it records goes stale. Rewrite it (local sidecar + backend) to match the new
+     key. A directory rename leaves every descendant's leaf name unchanged, so
+     nothing else needs fixing. *)
+  let resync_manifest_name key =
+    let name = Filename.basename key in
+    let* m = read_manifest key in
+    match m with
+      | Some (`Clean man) when man.Manifest.name <> name ->
+          let state = `Clean { man with Manifest.name } in
+          let* () = write_manifest key state in
+          St.put_manifest ~key ~data:(Manifest.to_string state)
+      | _ -> Lwt.return_unit
 
   let rename_body ~src ~dst =
     let mp = manifest_path src in
@@ -549,9 +613,20 @@ module Make (C : Conf.S) (Sq : Sync_queue.S) : S = struct
       in
       Lwt.catch
         (fun () ->
-          with_journal dst [rename_op] (fun () ->
-              if is_dir then Fs.rename_directory ~src_prefix:src ~dst_prefix:dst
-              else Fs.rename_file ~src_key:src ~dst_key:dst))
+          let* () =
+            with_journal dst [rename_op] (fun () ->
+                (* A directory's backend keys live under its stable folder id,
+                   which travelled with the local [.tsync-dir] marker during
+                   [rename_local] — so the subtree needs no backend work; only
+                   the parent's folder marker moves. A file's key encodes its
+                   leaf, so it is moved and renamed. *)
+                if is_dir then
+                  let* old_marker = folder_marker_bkey src in
+                  let* () = St.delete_raw ~bkey:old_marker in
+                  St.put_folder_marker ~key:dst
+                else Fs.rename_file ~src_key:src ~dst_key:dst)
+          in
+          if is_dir then Lwt.return_unit else resync_manifest_name dst)
         (fun exn ->
           (* src is gone from the backend: another client renamed or deleted it
              concurrently. The file already moved locally; publish it as a new,
@@ -589,9 +664,9 @@ module Make (C : Conf.S) (Sq : Sync_queue.S) : S = struct
 
   (* ── Versioning restore ────────────────────────────────────────────────── *)
 
-  let latest_version primary dir =
-    let (module B : Backend.S) = primary in
-    let+ entries = B.list_all ~prefix:dir () in
+  (* Newest version among [entries] (each a [versions/…/<ts>] object), by the
+     trailing timestamp component. *)
+  let latest_version entries =
     List.fold_left
       (fun acc (e : Backend.file_entry) ->
         match Versioning.parse ~versions_prefix:C.versions_prefix e.key with
@@ -604,34 +679,23 @@ module Make (C : Conf.S) (Sq : Sync_queue.S) : S = struct
       None entries
 
   let revert_body ?version key =
-    let (module B : Backend.S) =
-      match C.backends with
-        | b :: _ -> b
-        | [] -> failwith "no backends configured"
-    in
-    let dir =
-      Versioning.version_dir ~s3_key:key ~domain_prefix:C.domain_prefix
-        ~versions_prefix:C.versions_prefix
-    in
     let* src_key =
       match version with
-        | Some ts -> Lwt.return (dir ^ ts)
+        | Some ts ->
+            let+ dir = St.version_dir ~key in
+            dir ^ ts
         | None -> (
-            let* latest = latest_version (module B) dir in
-            match latest with
+            let* entries = St.list_versions ~key in
+            match latest_version entries with
               | Some (k, _) -> Lwt.return k
               | None -> failwith ("no versions for " ^ rel_key key))
     in
-    let* data = B.get ~key:src_key () in
+    let* data = St.get_version ~vkey:src_key in
     match Manifest.of_string data with
       | `Dirty -> failwith "cannot restore a dirty version"
       | `Clean m ->
           ignore (cancel_upload key);
-          let* () =
-            Lwt_list.iter_s
-              (fun (module B : Backend.S) -> B.put ~key ~data ())
-              C.backends
-          in
+          let* () = St.put_manifest ~key ~data in
           let* () = write_manifest key (`Clean m) in
           (* Dataless: keep the manifest sidecar, drop any cached content so the
              restored bytes are fetched lazily on next open. *)
@@ -654,14 +718,11 @@ module Make (C : Conf.S) (Sq : Sync_queue.S) : S = struct
       | `Follow | `Skip -> raise (Unix.Unix_error (Unix.EPERM, "symlink", key)));
     with_meta (fun () ->
         let state =
-          Manifest.make_symlink ~target ~mtime:(Unix.gettimeofday ())
+          Manifest.make_symlink ~name:(Filename.basename key) ~target
+            ~mtime:(Unix.gettimeofday ())
         in
         let data = Manifest.to_string state in
-        let* () =
-          Lwt_list.iter_s
-            (fun (module B : Backend.S) -> B.put ~key ~data ())
-            C.backends
-        in
+        let* () = St.put_manifest ~key ~data in
         let* () = write_manifest key state in
         let size =
           match state with

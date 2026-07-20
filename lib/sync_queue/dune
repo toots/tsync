@@ -4,6 +4,7 @@
  (libraries
   tsync_conf
   tsync_backend
+  tsync_local_io
   tsync_log
   tsync_xxhash
   tsync_lwt_unix

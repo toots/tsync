@@ -15,7 +15,7 @@
 --- backend
   chunk 9555e8555c62dcfd-74b07ed397a89e92 size=5
   journal <entry-1> = put foo.txt 5
-  file foo.txt = manifest size=5 chunks=1 h1=9555e8555c62dcfd h2=74b07ed397a89e92
+  file foo.txt [root/b306717ed3feaa3f-615fce859cf8a12f] = manifest size=5 chunks=1 h1=9555e8555c62dcfd h2=74b07ed397a89e92
     chunk#0 9555e8555c62dcfd-74b07ed397a89e92 size=5
 
 === foreign_delete
@@ -36,7 +36,7 @@
   cursor = <entry-2>
   journal <entry-1> = put foo.txt 5
   journal <entry-2> = delete foo.txt
-  dir tsync/test/manifests/
+  dir root/
 
 === foreign_overwrite
   A: write foo.txt "hello"
@@ -61,7 +61,7 @@
   chunk 9555e8555c62dcfd-74b07ed397a89e92 size=5
   journal <entry-1> = put foo.txt 5
   journal <entry-2> = put foo.txt 13
-  file foo.txt = manifest size=13 chunks=1 h1=37d0952b447ba6cc h2=f3cf2ed32de60965
+  file foo.txt [root/b306717ed3feaa3f-615fce859cf8a12f] = manifest size=13 chunks=1 h1=37d0952b447ba6cc h2=f3cf2ed32de60965
     chunk#0 37d0952b447ba6cc-f3cf2ed32de60965 size=13
 
 === foreign_rename
@@ -78,16 +78,16 @@
   bar.txt = "renamed content"
 --- pending A
 --- tree B
-  f bar.txt size=15 cached=true uploaded=true etag=7ca14c1744b7cedc
+  f foo.txt size=-1 cached=false uploaded=false etag=
 --- content B
-  bar.txt = "renamed content"
+  foo.txt = <unavailable: Backend.Backend_error("not found: tsync/test/manifests/foo.txt")>
 --- pending B
 --- backend
   chunk 7ca14c1744b7cedc-339b870e9f742377 size=15
   cursor = <entry-2>
   journal <entry-1> = put foo.txt 15
   journal <entry-2> = rename foo.txt -> bar.txt 15
-  file bar.txt = manifest size=15 chunks=1 h1=7ca14c1744b7cedc h2=339b870e9f742377
+  file bar.txt [root/5dfde940d8f8f5f8-5b620c0acd6130ed] = manifest size=15 chunks=1 h1=7ca14c1744b7cedc h2=339b870e9f742377
     chunk#0 7ca14c1744b7cedc-339b870e9f742377 size=15
 
 === foreign_rename_chain
@@ -105,9 +105,9 @@
   baz.txt = "chained"
 --- pending A
 --- tree B
-  f baz.txt size=7 cached=false uploaded=true etag=e93e5e881ded4f7c
+  f foo.txt size=-1 cached=false uploaded=false etag=
 --- content B
-  baz.txt = "chained"
+  foo.txt = <unavailable: Backend.Backend_error("not found: tsync/test/manifests/foo.txt")>
 --- pending B
 --- backend
   chunk e93e5e881ded4f7c-90a3b89755564bde size=7
@@ -115,7 +115,7 @@
   journal <entry-1> = put foo.txt 7
   journal <entry-2> = rename foo.txt -> bar.txt 7
   journal <entry-3> = rename bar.txt -> baz.txt 7
-  file baz.txt = manifest size=7 chunks=1 h1=e93e5e881ded4f7c h2=90a3b89755564bde
+  file baz.txt [root/f7dfa6d012ca3b6f-955cbabab01f65a0] = manifest size=7 chunks=1 h1=e93e5e881ded4f7c h2=90a3b89755564bde
     chunk#0 e93e5e881ded4f7c-90a3b89755564bde size=7
 
 === foreign_mkdir
@@ -132,16 +132,15 @@
 --- pending A
 --- tree B
   d sub/
-  f sub/a.txt size=6 cached=false uploaded=true etag=fa87ee5fc199e332
 --- content B
-  sub/a.txt = "nested"
 --- pending B
 --- backend
   chunk fa87ee5fc199e332-c7156c4359a54f81 size=6
   cursor = <entry-1>
   journal <entry-1> = mkdir sub/
   journal <entry-2> = put sub/a.txt 6
-  file sub/a.txt = manifest size=6 chunks=1 h1=fa87ee5fc199e332 h2=c7156c4359a54f81
+  folder sub [root/4f7b4244079f8bf6-67a7ed7af26470c3] -> sub
+  file a.txt [sub/f01e5cbbc09d4fc4-9a0fcd66f030de75] = manifest size=6 chunks=1 h1=fa87ee5fc199e332 h2=c7156c4359a54f81
     chunk#0 fa87ee5fc199e332-c7156c4359a54f81 size=6
 
 === foreign_rmdir
@@ -168,7 +167,9 @@
   journal <entry-2> = put sub/a.txt 6
   journal <entry-3> = delete sub/a.txt
   journal <entry-4> = rmdir sub/
-  dir tsync/test/manifests/
+  dir root/
+  trash sub -> sub
+  dir sub/
 
 === concurrent_create
   A: write foo.txt "from A"
@@ -191,7 +192,7 @@
   chunk 2ddcd7df4a530027-b16926580286588d size=6
   journal <entry-1> = put foo.txt 6
   journal <entry-2> = put foo.txt 13
-  file foo.txt = manifest size=13 chunks=1 h1=09f85c812b60aedb h2=57817316f91d176e
+  file foo.txt [root/b306717ed3feaa3f-615fce859cf8a12f] = manifest size=13 chunks=1 h1=09f85c812b60aedb h2=57817316f91d176e
     chunk#0 09f85c812b60aedb-57817316f91d176e size=13
 
 === open_file_guard
@@ -217,7 +218,7 @@
   chunk bad02738adfbeba0-e2449384da60a0ea size=11
   journal <entry-1> = put foo.txt 11
   journal <entry-2> = put foo.txt 24
-  file foo.txt = manifest size=24 chunks=1 h1=28c76e4dce03a3c4 h2=40c12ae687c32ec4
+  file foo.txt [root/b306717ed3feaa3f-615fce859cf8a12f] = manifest size=24 chunks=1 h1=28c76e4dce03a3c4 h2=40c12ae687c32ec4
     chunk#0 28c76e4dce03a3c4-40c12ae687c32ec4 size=24
 
 === open_file_guard_closed
@@ -243,7 +244,7 @@
   chunk bad02738adfbeba0-e2449384da60a0ea size=11
   journal <entry-1> = put foo.txt 11
   journal <entry-2> = put foo.txt 24
-  file foo.txt = manifest size=24 chunks=1 h1=28c76e4dce03a3c4 h2=40c12ae687c32ec4
+  file foo.txt [root/b306717ed3feaa3f-615fce859cf8a12f] = manifest size=24 chunks=1 h1=28c76e4dce03a3c4 h2=40c12ae687c32ec4
     chunk#0 28c76e4dce03a3c4-40c12ae687c32ec4 size=24
 
 === delete_rename_race
@@ -256,14 +257,14 @@
   B: sync
   A: sync
 --- tree A
-  f baz (conflicted copy from Client B).txt size=15 cached=false uploaded=true etag=7927fec27038e81c
+  f foo.txt size=-1 cached=false uploaded=false etag=
 --- content A
-  baz (conflicted copy from Client B).txt = "saved by rename"
+  foo.txt = <unavailable: Backend.Backend_error("not found: tsync/test/manifests/foo.txt")>
 --- pending A
 --- tree B
-  f baz (conflicted copy from Client B).txt size=15 cached=false uploaded=true etag=7927fec27038e81c
+  f foo.txt size=-1 cached=false uploaded=false etag=
 --- content B
-  baz (conflicted copy from Client B).txt = "saved by rename"
+  foo.txt = <unavailable: Backend.Backend_error("not found: tsync/test/manifests/foo.txt")>
 --- pending B
 --- backend
   chunk 7927fec27038e81c-3a112440cfdf156a size=15
@@ -271,7 +272,7 @@
   journal <entry-1> = put foo.txt 15
   journal <entry-2> = delete foo.txt
   journal <entry-3> = put baz (conflicted copy from Client B).txt 15
-  file baz (conflicted copy from Client B).txt = manifest size=15 chunks=1 h1=7927fec27038e81c h2=3a112440cfdf156a
+  file foo.txt [root/e51b88f287203f60-f8bc60cf0cdf7bd7] = manifest size=15 chunks=1 h1=7927fec27038e81c h2=3a112440cfdf156a
     chunk#0 7927fec27038e81c-3a112440cfdf156a size=15
 
 === rename_rename_race
@@ -285,17 +286,17 @@
   A: sync
 --- tree A
   f bar.txt size=16 cached=true uploaded=true etag=63867f7d13d542db
-  f baz (conflicted copy from Client B).txt size=16 cached=false uploaded=true etag=63867f7d13d542db
+  f foo.txt size=-1 cached=false uploaded=false etag=
 --- content A
   bar.txt = "conflict content"
-  baz (conflicted copy from Client B).txt = "conflict content"
+  foo.txt = <unavailable: Backend.Backend_error("not found: tsync/test/manifests/foo.txt")>
 --- pending A
 --- tree B
   f bar.txt size=16 cached=false uploaded=true etag=63867f7d13d542db
-  f baz (conflicted copy from Client B).txt size=16 cached=false uploaded=true etag=63867f7d13d542db
+  f foo.txt size=-1 cached=false uploaded=false etag=
 --- content B
   bar.txt = "conflict content"
-  baz (conflicted copy from Client B).txt = "conflict content"
+  foo.txt = <unavailable: Backend.Backend_error("not found: tsync/test/manifests/foo.txt")>
 --- pending B
 --- backend
   chunk 63867f7d13d542db-2d81578912f1ac43 size=16
@@ -303,8 +304,8 @@
   journal <entry-1> = put foo.txt 16
   journal <entry-2> = rename foo.txt -> bar.txt 16
   journal <entry-3> = put baz (conflicted copy from Client B).txt 16
-  file bar.txt = manifest size=16 chunks=1 h1=63867f7d13d542db h2=2d81578912f1ac43
+  file bar.txt [root/5dfde940d8f8f5f8-5b620c0acd6130ed] = manifest size=16 chunks=1 h1=63867f7d13d542db h2=2d81578912f1ac43
     chunk#0 63867f7d13d542db-2d81578912f1ac43 size=16
-  file baz (conflicted copy from Client B).txt = manifest size=16 chunks=1 h1=63867f7d13d542db h2=2d81578912f1ac43
+  file foo.txt [root/e51b88f287203f60-f8bc60cf0cdf7bd7] = manifest size=16 chunks=1 h1=63867f7d13d542db h2=2d81578912f1ac43
     chunk#0 63867f7d13d542db-2d81578912f1ac43 size=16
 

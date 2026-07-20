@@ -16,6 +16,7 @@ type summary = {
 module Make (C : Conf.S) = struct
   module R = Remote.Make (C)
   module Fs = File_store.Make (C)
+  module St = Store.Make (C) (Layout.Inode.Make (C))
 
   (* [rel] is excluded when any glob matches either the full relative path or
      the basename, so [node_modules] prunes any directory of that name and
@@ -106,13 +107,12 @@ module Make (C : Conf.S) = struct
     else (
       let src_path = Filename.concat src_root rel in
       let* st = Lwt_unix_retry.lstat src_path in
-      let state = Manifest.make_symlink ~target ~mtime:st.Unix.st_mtime in
-      let data = Manifest.to_string state in
-      let* () =
-        Lwt_list.iter_s
-          (fun (module B : Backend.S) -> B.put ~key ~data ())
-          C.backends
+      let state =
+        Manifest.make_symlink ~name:(Filename.basename rel) ~target
+          ~mtime:st.Unix.st_mtime
       in
+      let data = Manifest.to_string state in
+      let* () = St.put_manifest ~key ~data in
       let* () =
         Local.write_manifest ~cache_root:C.cache_root ~domain_name:C.domain_name
           ~domain_prefix:C.domain_prefix key data
@@ -184,26 +184,9 @@ module Make (C : Conf.S) = struct
         symlinks
     in
     let all_statuses = file_statuses @ symlink_statuses in
-    (* Dirs that have at least one file/symlink under them are already implied
-       by the file keys on every backend. Only truly empty dirs need an explicit
-       backend entry to be visible. *)
-    let non_empty_dirs =
-      let tbl = Hashtbl.create 16 in
-      let add_ancestors rel =
-        let rec loop r =
-          let p = Filename.dirname r in
-          if p <> "." && p <> "" && p <> "/" then (
-            Hashtbl.replace tbl p ();
-            loop p)
-        in
-        loop rel
-      in
-      List.iter (fun (rel, _) -> add_ancestors rel) all_statuses;
-      tbl
-    in
-    let empty_dirs =
-      List.filter (fun d -> not (Hashtbl.mem non_empty_dirs d)) dirs
-    in
+    (* Under the inode layout every folder needs its own marker (files no longer
+       encode their path), so write one for every directory. [dirs] is sorted, so
+       parents precede children and id resolution finds them. *)
     let* () =
       Lwt_list.iter_s
         (fun rel ->
@@ -212,9 +195,9 @@ module Make (C : Conf.S) = struct
             Local.create_dir ~cache_root:C.cache_root ~domain_name:C.domain_name
               ~domain_prefix:C.domain_prefix key
           in
-          let* () = Fs.create_directory ~key in
+          let* () = St.put_folder_marker ~key in
           Lwt.return (on_dir ~rel))
-        empty_dirs
+        dirs
     in
     let ops =
       List.map (fun d -> `Mkdir (d ^ "/")) dirs

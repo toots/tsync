@@ -25,20 +25,56 @@ module Make (C : Conf.S) = struct
     if is_marker key then Lwt.return []
     else
       let+ data = B.get ~key () in
-      match Manifest.of_string data with
-        | `Clean m -> List.map Manifest.chunk_key m.Manifest.chunks
-        | `Dirty -> []
-        | exception e ->
-            failwith
-              (Printf.sprintf
-                 "cannot read manifest %s (%s); aborting before chunk GC" key
-                 (Printexc.to_string e))
+      match Folder.marker_of_string data with
+        | Some _ -> [] (* folder / trash marker: references no chunks *)
+        | None -> (
+            match Manifest.of_string data with
+              | `Clean m -> List.map Manifest.chunk_key m.Manifest.chunks
+              | `Dirty -> []
+              | exception e ->
+                  failwith
+                    (Printf.sprintf
+                       "cannot read manifest %s (%s); aborting before chunk GC"
+                       key (Printexc.to_string e)))
 
   let parse = Versioning.parse ~versions_prefix:C.versions_prefix
+
+  (* All object keys under folder [folder_id] (recursively, following folder
+     markers), including the markers themselves — the reclaim set for a trashed
+     subtree. *)
+  let rec collect_namespace (module B : Backend.S) folder_id acc =
+    let* entries = B.list_all ~prefix:(C.domain_prefix ^ folder_id ^ "/") () in
+    Lwt_list.fold_left_s
+      (fun acc (e : Backend.file_entry) ->
+        let* data = B.get ~key:e.key () in
+        match Folder.marker_of_string data with
+          | Some m -> collect_namespace (module B) m.Folder.id (e.key :: acc)
+          | None -> Lwt.return (e.key :: acc))
+      acc entries
 
   let expire ~cutoff () =
     let (module B : Backend.S) = primary () in
     let cutoff_ns = Int64.of_float (cutoff *. 1e9) in
+    (* Phase 0: empty trashed folders past the cutoff. Delete the whole subtree
+       under each expired trash marker (recursively by folder id) so its chunks
+       drop out of the live set marked below. *)
+    let* trash =
+      B.list_all ~prefix:(C.domain_prefix ^ Folder.trash_id ^ "/") ()
+    in
+    let* trash_keys =
+      Lwt_list.fold_left_s
+        (fun acc (e : Backend.file_entry) ->
+          if e.Backend.last_modified >= cutoff then Lwt.return acc
+          else
+            let* data = B.get ~key:e.key () in
+            match Folder.marker_of_string data with
+              | Some m ->
+                  let+ subtree = collect_namespace (module B) m.Folder.id [] in
+                  (e.key :: subtree) @ acc
+              | None -> Lwt.return acc)
+        [] trash
+    in
+    let* () = delete_all trash_keys in
     (* Phase 1: partition versions by the cutoff (no deletion yet). *)
     let* versions = B.list_all ~prefix:C.versions_prefix () in
     let expired, surviving =

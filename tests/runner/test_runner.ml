@@ -180,6 +180,7 @@ let setup_client (module C : Conf.S) root staging_prefix =
   let module Sp = Sync_poller.Make (C) (F) in
   let module J = Journal.Make (C) in
   let key p = C.domain_prefix ^ p in
+  let bkey p = Manifest_key.of_key ~domain_prefix:C.domain_prefix (key p) in
   let strip_root p =
     if String.length p > 0 && p.[0] = '/' then
       String.sub p 1 (String.length p - 1)
@@ -249,7 +250,7 @@ let setup_client (module C : Conf.S) root staging_prefix =
     | CorruptRemoteChunk { path; index } ->
         let* ck = remote_chunk_key path index in
         B.put ~key:ck ~data:"garbage" ()
-    | DeleteRemoteManifest p -> B.delete ~key:(key p) ()
+    | DeleteRemoteManifest p -> B.delete ~key:(bkey p) ()
     | s -> failwith ("not a backend-damage step: " ^ render_step s)
   in
   let mkdir_p d =
@@ -646,6 +647,32 @@ let dump_backend_at ~backend_root ~domain_prefix ~chunk_prefix ~journal_prefix
     index 0 journal_names
   in
   let is_marker k = String.length k > 0 && k.[String.length k - 1] = '/' in
+  (* Random folder ids are non-deterministic; alias each to its folder name
+     (from the marker) so snapshots are stable. *)
+  let id_name = Hashtbl.create 16 in
+  Hashtbl.replace id_name Folder.root_id "root";
+  let* () =
+    Lwt_list.iter_s
+      (fun (e : Backend.file_entry) ->
+        if starts_with domain_prefix e.key && not (is_marker e.key) then
+          let+ data = B.get ~key:e.key () in
+          match Folder.marker_of_string data with
+            | Some m -> Hashtbl.replace id_name m.Folder.id m.Folder.name
+            | None -> ()
+        else Lwt.return_unit)
+      entries
+  in
+  let alias_id id =
+    if id = Folder.trash_id then "trash"
+    else Option.value ~default:id (Hashtbl.find_opt id_name id)
+  in
+  let alias_rel rel =
+    match String.index_opt rel '/' with
+      | Some i ->
+          alias_id (String.sub rel 0 i)
+          ^ String.sub rel i (String.length rel - i)
+      | None -> alias_id rel
+  in
   Lwt_list.iter_s
     (fun (e : Backend.file_entry) ->
       (* Internal prefixes have no meaningful directories; ignore the empty-dir
@@ -677,43 +704,56 @@ let dump_backend_at ~backend_root ~domain_prefix ~chunk_prefix ~journal_prefix
                 Option.value ~default:0 (Hashtbl.find_opt version_alias e.key)
               in
               let+ data = B.get ~key:e.key () in
-              let desc =
+              let name, desc =
                 match Manifest.of_string data with
                   | `Clean m ->
-                      Printf.sprintf "manifest size=%Ld chunks=%d"
-                        m.Manifest.size
-                        (List.length m.Manifest.chunks)
-                  | `Dirty -> "dirty"
-                  | exception _ -> "raw"
+                      ( m.Manifest.name,
+                        Printf.sprintf "manifest size=%Ld chunks=%d"
+                          m.Manifest.size
+                          (List.length m.Manifest.chunks) )
+                  | `Dirty -> (rel, "dirty")
+                  | exception _ -> (rel, "raw")
               in
-              Printf.printf "  version %s#%d = %s\n" rel n desc
+              Printf.printf "  version %s [%s]#%d = %s\n" name (alias_rel rel) n
+                desc
           | None ->
               Printf.printf "  other %s size=%d\n" e.key e.size;
               Lwt.return_unit)
       else if starts_with domain_prefix e.key then (
-        let rel = rel_key e.key in
+        let rel = alias_rel (rel_key e.key) in
         if String.length e.key > 0 && e.key.[String.length e.key - 1] = '/' then (
           Printf.printf "  dir %s\n" rel;
           Lwt.return_unit)
         else
           let+ data = B.get ~key:e.key () in
-          match Manifest.of_string data with
-            | `Clean { symlink = Some target; _ } ->
-                Printf.printf "  symlink %s -> %s\n" rel target
-            | `Clean m ->
-                Printf.printf
-                  "  file %s = manifest size=%Ld chunks=%d h1=%s h2=%s\n" rel
-                  m.Manifest.size
-                  (List.length m.Manifest.chunks)
-                  m.Manifest.h1 m.Manifest.h2;
-                List.iter
-                  (fun (c : Manifest.chunk_entry) ->
-                    Printf.printf "    chunk#%d %s size=%d\n" c.index
-                      (Manifest.chunk_key c) c.size)
-                  m.Manifest.chunks
-            | `Dirty -> Printf.printf "  file %s = dirty\n" rel
-            | exception _ ->
-                Printf.printf "  file %s = raw size=%d\n" rel e.size)
+          match Folder.marker_of_string data with
+            | Some m ->
+                if starts_with (domain_prefix ^ Folder.trash_id ^ "/") e.key
+                then
+                  Printf.printf "  trash %s -> %s\n" m.Folder.name
+                    (alias_id m.Folder.id)
+                else
+                  Printf.printf "  folder %s [%s] -> %s\n" m.Folder.name rel
+                    (alias_id m.Folder.id)
+            | None -> (
+                match Manifest.of_string data with
+                  | `Clean { symlink = Some target; name; _ } ->
+                      Printf.printf "  symlink %s [%s] -> %s\n" name rel target
+                  | `Clean m ->
+                      Printf.printf
+                        "  file %s [%s] = manifest size=%Ld chunks=%d h1=%s \
+                         h2=%s\n"
+                        m.Manifest.name rel m.Manifest.size
+                        (List.length m.Manifest.chunks)
+                        m.Manifest.h1 m.Manifest.h2;
+                      List.iter
+                        (fun (c : Manifest.chunk_entry) ->
+                          Printf.printf "    chunk#%d %s size=%d\n" c.index
+                            (Manifest.chunk_key c) c.size)
+                        m.Manifest.chunks
+                  | `Dirty -> Printf.printf "  file %s = dirty\n" rel
+                  | exception _ ->
+                      Printf.printf "  file %s = raw size=%d\n" rel e.size))
       else (
         Printf.printf "  other %s size=%d\n" e.key e.size;
         Lwt.return_unit))

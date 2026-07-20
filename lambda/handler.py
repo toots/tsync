@@ -84,44 +84,57 @@ def chunk_key(chunk_prefix, c):
     return chunk_prefix + c["h1"] + "-" + c["h2"]
 
 
-# ── Key codec (mirrors lib/local_io/fs_util.ml) ─────────────────────────────
+# ── Inode navigation ────────────────────────────────────────────────────────
 #
-# tsync stores object keys with reserved/control chars percent-encoded per path
-# component (so keys are valid on any local filesystem). The backend wrapper
-# encodes/decodes transparently, but this Lambda talks to raw boto3, so it must
-# do the same: decode encoded keys for display, encode user paths for access.
-
-_RESERVED = set(':*?"<>|\\&=%')
-
-
-def encode_component(s):
-    return "".join(
-        "%%%02X" % ord(c) if (c in _RESERVED or ord(c) < 32) else c for c in s
-    )
+# Folders are identified by a stable id, not their name: a folder's children
+# live flat under manifests/<id>/<hash>, each object being either a file manifest
+# (body has "name", "chunks", "size") or a folder marker (body {dir,name,id}).
+# Names live in the bodies, so the Lambda never hashes — it lists a namespace and
+# reads each child. A dir share stores the folder's namespace prefix (dirPrefix =
+# <...>/manifests/<id>/); resync/tsync never expose the .tsync-trash namespace.
 
 
-def encode_key(s):
-    return "/".join(encode_component(p) for p in s.split("/"))
+def ns_base(dir_prefix):
+    # <...>/manifests/<id>/  ->  <...>/manifests/
+    return dir_prefix.rstrip("/").rsplit("/", 1)[0] + "/"
 
 
-def decode_component(s):
+def child_objects(ns_prefix):
+    """Direct children of a folder namespace as (name, key, is_dir, size).
+    For a subdir, key is its own namespace prefix; for a file, its manifest key.
+    One GET per child to read names/ids/sizes from bodies (folders are small)."""
+    base = ns_base(ns_prefix)
     out = []
-    i, n = 0, len(s)
-    while i < n:
-        if s[i] == "%" and i + 2 < n:
-            try:
-                out.append(chr(int(s[i + 1 : i + 3], 16)))
-                i += 3
+    paginator = s3.get_paginator("list_objects_v2")
+    for page in paginator.paginate(Bucket=BUCKET, Prefix=ns_prefix):
+        for obj in page.get("Contents", []):
+            if obj["Key"] == ns_prefix:
                 continue
-            except ValueError:
-                pass
-        out.append(s[i])
-        i += 1
-    return "".join(out)
+            try:
+                m = json.loads(get_bytes(obj["Key"]))
+            except (FileNotFoundError, ValueError):
+                continue
+            if m.get("dir"):
+                out.append((m.get("name", ""), base + m["id"] + "/", True, None))
+            elif not m.get("dirty"):
+                out.append((m.get("name", ""), obj["Key"], False, m.get("size")))
+    return out
 
 
-def decode_key(s):
-    return "/".join(decode_component(p) for p in s.split("/"))
+def resolve(dir_prefix, rel):
+    """Walk [rel] (decoded, '/'-separated) from the shared folder by matching
+    names. Returns ('dir', namespace_prefix) or ('file', manifest_key), else
+    None."""
+    kind, loc = "dir", dir_prefix
+    for part in [p for p in rel.split("/") if p]:
+        if kind != "dir":
+            return None
+        match = next((c for c in child_objects(loc) if c[0] == part), None)
+        if match is None:
+            return None
+        _, key, is_dir, _ = match
+        kind, loc = ("dir" if is_dir else "file"), key
+    return (kind, loc)
 
 
 def safe_rel(path):
@@ -275,17 +288,19 @@ def write_zip(entries, chunk_prefix, cache_key):
 
 
 def iter_dir_entries(dir_prefix, root):
-    """Recursively enumerate a shared directory, yielding (zip_name, key|None).
-    Names are rooted under [root] so unzip creates a single top folder."""
-    paginator = s3.get_paginator("list_objects_v2")
-    for page in paginator.paginate(Bucket=BUCKET, Prefix=dir_prefix):
-        for obj in page.get("Contents", []):
-            enc_rel = obj["Key"][len(dir_prefix):]
-            if enc_rel == "":
-                continue  # the shared dir's own marker
-            rel = decode_key(enc_rel)
-            name = root + "/" + rel
-            yield name, (None if enc_rel.endswith("/") else obj["Key"])
+    """Recursively enumerate a shared directory by walking the inode tree,
+    yielding (zip_name, file_manifest_key). Names are rooted under [root] so
+    unzip creates a single top folder."""
+
+    def walk(ns, prefix):
+        for name, key, is_dir, _ in child_objects(ns):
+            zip_name = prefix + "/" + name
+            if is_dir:
+                yield from walk(key, zip_name)
+            else:
+                yield zip_name, key
+
+    yield from walk(dir_prefix, root)
 
 
 def build_dir_zip(share, cache_key):
@@ -409,43 +424,23 @@ def download_artifact(manifest_key, share):
     return redirect(presign(cache_key, share["filename"], inline=False))
 
 
-def file_size(key):
-    """size (bytes) of a file manifest, or None if missing/mid-upload."""
-    try:
-        m = get_json(key)
-    except FileNotFoundError:
-        return None
-    return None if m.get("dirty") else m.get("size")
-
-
 def list_dir(share, rel):
-    """One directory level under the share: (subdir names, [(name, size)])."""
-    dir_prefix = share["dirPrefix"]
-    prefix = dir_prefix + (encode_key(rel) + "/" if rel else "")
+    """One directory level under the share: (subdir names, [(name, size)]).
+    ponytail: one GET per child to read names/sizes from bodies — fine for normal
+    folders; a folder with thousands of direct children pays that many GETs."""
+    ns = share["dirPrefix"]
+    if rel:
+        r = resolve(ns, rel)
+        if not r or r[0] != "dir":
+            raise ShareError(404, "not found")
+        ns = r[1]
     dirs, files = [], []
-    paginator = s3.get_paginator("list_objects_v2")
-    for page in paginator.paginate(Bucket=BUCKET, Prefix=prefix, Delimiter="/"):
-        for cp in page.get("CommonPrefixes", []):
-            enc = cp["Prefix"][len(prefix):].rstrip("/")
-            dirs.append(decode_component(enc))
-        for obj in page.get("Contents", []):
-            enc = obj["Key"][len(prefix):]
-            if enc == "":
-                continue  # this dir's own marker
-            files.append((decode_component(enc), obj["Key"]))
-    # ponytail: one manifest read per file in THIS folder to show sizes, run
-    # concurrently. Fine for normal folders; a folder with thousands of direct
-    # children pays thousands of GETs. Ceiling: paginate/omit sizes if it bites.
-    sizes = {}
-    if files:
-        with concurrent.futures.ThreadPoolExecutor(max_workers=16) as ex:
-            sizes = dict(
-                zip(
-                    (k for _, k in files),
-                    ex.map(file_size, (k for _, k in files)),
-                )
-            )
-    return dirs, [(name, sizes.get(key)) for name, key in files]
+    for name, _key, is_dir, size in child_objects(ns):
+        if is_dir:
+            dirs.append(name)
+        else:
+            files.append((name, size))
+    return dirs, files
 
 
 def list_response(share, path):
@@ -465,7 +460,10 @@ def serve_file(share, path, as_download, want_json):
     rel = safe_rel(path)
     if not rel:
         raise ShareError(400, "not a file")
-    m = file_manifest(share["dirPrefix"] + encode_key(rel))
+    r = resolve(share["dirPrefix"], rel)
+    if not r or r[0] != "file":
+        raise ShareError(404, "file not found")
+    m = file_manifest(r[1])
     cache_key = SHARES_PREFIX + m["h1"] + "-" + m["h2"] + ".data"
     if not object_exists(cache_key):
         assemble(m, share["chunkPrefix"], cache_key)

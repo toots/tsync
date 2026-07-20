@@ -4,6 +4,7 @@ type chunk_entry = { index : int; h1 : string; h2 : string; size : int }
 
 type t = {
   v : int;
+  name : string;  (** leaf name; authority for the file's own name *)
   size : int64;
   chunk_size : int;
   chunks : chunk_entry list;
@@ -18,6 +19,7 @@ type state = [ `Dirty | `Clean of t ]
 val chunk_key : chunk_entry -> string
 
 val make :
+  name:string ->
   h1:string ->
   h2:string ->
   size:int64 ->
@@ -27,7 +29,7 @@ val make :
   state
 
 (** A chunkless manifest representing a symlink to [target]. *)
-val make_symlink : target:string -> mtime:float -> state
+val make_symlink : name:string -> target:string -> mtime:float -> state
 
 val of_string : string -> state
 val to_string : state -> string

@@ -43,6 +43,11 @@ module Make (C : Conf.S) = struct
       | [] -> failwith "no backends configured"
       | b :: _ -> b
 
+  (* Manifest reads/writes go through [St], which maps logical keys to backend
+     keys via the layout scheme. [rel_of] is the domain-relative real path
+     recorded in the manifest body. *)
+  module St = Store.Make (C) (Layout.Inode.Make (C))
+
   let put_all ~key ~data () =
     Lwt_list.iter_s
       (fun (module B : Backend.S) -> B.put ~key ~data ())
@@ -171,18 +176,13 @@ module Make (C : Conf.S) = struct
     let s1 = Xxhash.create 0 and s2 = Xxhash.create 1 in
     let* () = stream_hash ~path:src_path [s1; s2] in
     let state =
-      Manifest.make ~h1:(Xxhash.digest_hex s1) ~h2:(Xxhash.digest_hex s2)
-        ~size:(Int64.of_int file_size) ~chunk_size:Manifest.chunk_size
-        ~chunks:entries ~mtime
+      Manifest.make ~name:(Filename.basename key) ~h1:(Xxhash.digest_hex s1)
+        ~h2:(Xxhash.digest_hex s2) ~size:(Int64.of_int file_size)
+        ~chunk_size:Manifest.chunk_size ~chunks:entries ~mtime
     in
-    let* () =
-      if C.versioning then
-        Versioning.save ~backends:C.backends ~domain_prefix:C.domain_prefix
-          ~versions_prefix:C.versions_prefix ~key
-      else Lwt.return_unit
-    in
+    let* () = if C.versioning then St.save_version ~key else Lwt.return_unit in
     Log.info "upload %s: publishing manifest, size=%d" key file_size;
-    let* () = put_all ~key ~data:(Manifest.to_string state) () in
+    let* () = St.put_manifest ~key ~data:(Manifest.to_string state) in
     (* The upload may have been cancelled while the manifest put was in
        flight (e.g. the file was renamed away mid-upload). Leaving the
        manifest published would create a ghost object under a name that no
@@ -191,10 +191,7 @@ module Make (C : Conf.S) = struct
     if !cancel then
       let* () =
         Lwt.catch
-          (fun () ->
-            Lwt_list.iter_s
-              (fun (module B : Backend.S) -> B.delete ~key ())
-              C.backends)
+          (fun () -> St.delete_manifest ~key)
           (fun exn ->
             Log.err "upload %s: cancelled-manifest cleanup failed: %s" key
               (Printexc.to_string exn);
@@ -204,8 +201,7 @@ module Make (C : Conf.S) = struct
     else Lwt.return state
 
   let fetch_manifest ~key () =
-    let (module Primary : Backend.S) = primary () in
-    let+ body = Primary.get_opt ~key () in
+    let+ body = St.get_manifest_opt ~key in
     match body with
       | None -> None
       | Some body -> (
@@ -272,7 +268,9 @@ module Make (C : Conf.S) = struct
     if ok then Lwt.return_false
     else (
       Log.info "recheck: republishing manifest %s" key;
-      let+ () = put_all ~key ~data:(Manifest.to_string (`Clean expected)) () in
+      let+ () =
+        St.put_manifest ~key ~data:(Manifest.to_string (`Clean expected))
+      in
       true)
 
   (* Recheck a file whose data is in the local cache: re-hash it chunk by
@@ -300,9 +298,9 @@ module Make (C : Conf.S) = struct
     let s1 = Xxhash.create 0 and s2 = Xxhash.create 1 in
     let* () = stream_hash ~path:src_path [s1; s2] in
     let state =
-      Manifest.make ~h1:(Xxhash.digest_hex s1) ~h2:(Xxhash.digest_hex s2)
-        ~size:(Int64.of_int file_size) ~chunk_size:Manifest.chunk_size
-        ~chunks:entries ~mtime
+      Manifest.make ~name:(Filename.basename key) ~h1:(Xxhash.digest_hex s1)
+        ~h2:(Xxhash.digest_hex s2) ~size:(Int64.of_int file_size)
+        ~chunk_size:Manifest.chunk_size ~chunks:entries ~mtime
     in
     let expected = match state with `Clean m -> m | `Dirty -> assert false in
     let+ manifest_repaired = recheck_manifest ~key expected in
@@ -418,7 +416,7 @@ module Make (C : Conf.S) = struct
 
   let download ~key ~dst_path =
     let (module Primary : Backend.S) = primary () in
-    let* body = Primary.get_opt ~key () in
+    let* body = St.get_manifest_opt ~key in
     match body with
       | None -> Lwt.fail (Backend.Backend_error ("not found: " ^ key))
       | Some body -> (
