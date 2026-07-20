@@ -90,6 +90,28 @@ let chop_slash s =
   if String.ends_with ~suffix:"/" s then String.sub s 0 (String.length s - 1)
   else s
 
+(* The migration is latency-bound on backend round-trips, so run several per
+   object concurrently. Batches of [parallelism] cap both the in-flight request
+   count and the number of live Lwt promises (a plain [iter_p] over millions of
+   objects would allocate a promise per object up front). *)
+let parallelism = 32
+
+let iter_pooled f xs =
+  let rec take n = function
+    | x :: tl when n > 0 ->
+        let batch, rest = take (n - 1) tl in
+        (x :: batch, rest)
+    | rest -> ([], rest)
+  in
+  let rec loop = function
+    | [] -> Lwt.return_unit
+    | xs ->
+        let batch, rest = take parallelism xs in
+        let* () = Lwt_list.iter_p f batch in
+        loop rest
+  in
+  loop xs
+
 let migrate_backend ~dom_prefix ~ver_prefix ~jour_prefix ~trash_prefix
     ~cursor_key (bc : Conf_parsing.backend_config) =
   let (module B : Backend.S) =
@@ -97,6 +119,8 @@ let migrate_backend ~dom_prefix ~ver_prefix ~jour_prefix ~trash_prefix
         List.assoc_opt k bc.fields)
   in
   let migrated = ref 0 and skipped = ref 0 and failed = ref 0 in
+  let markers = ref 0 and deleted = ref 0 in
+  let log fmt = Printf.printf ("  " ^^ fmt ^^ "\n%!") in
 
   (* Write a folder marker (and its ancestors') under the parent's namespace.
      [marked] dedups within a run; across runs the put simply overwrites. *)
@@ -116,6 +140,8 @@ let migrate_backend ~dom_prefix ~ver_prefix ~jour_prefix ~trash_prefix
         Folder.marker_to_string
           { Folder.name = Filename.basename rel; id = folder_id rel }
       in
+      incr markers;
+      log "folder   %-45s  id=%s" rel (folder_id rel);
       B.put ~key:bkey ~data:marker ())
   in
 
@@ -127,6 +153,7 @@ let migrate_backend ~dom_prefix ~ver_prefix ~jour_prefix ~trash_prefix
     let new_key =
       dom_prefix ^ Folder.child_key ~folder_id:(folder_id (parent rel)) leaf
     in
+    log "file     %-45s  -> %s" rel (strip dom_prefix new_key);
     let* () = B.put ~key:new_key ~data:(migrate_body data leaf) () in
     let* () = B.delete ~key:old_key () in
     incr migrated;
@@ -142,6 +169,7 @@ let migrate_backend ~dom_prefix ~ver_prefix ~jour_prefix ~trash_prefix
           (* old empty-dir marker: becomes a folder marker; drop the old object.
              (Migrated keys never end in "/", so this is unambiguous.) *)
           let rel = decode (chop_slash enc) in
+          log "emptydir %s" rel;
           let* () = ensure_marker rel in
           let* () = B.delete ~key:e.key () in
           incr migrated;
@@ -153,48 +181,56 @@ let migrate_backend ~dom_prefix ~ver_prefix ~jour_prefix ~trash_prefix
                 (* already-migrated marker/manifest, or an empty/garbage body
                    (e.g. trash markers, cleared wholesale below) *)
                 incr skipped;
+                log "skip     %s (already in new layout)" enc;
                 Lwt.return_unit
             | Old -> migrate_manifest ~old_key:e.key ~rel:(decode enc) ~data)
       (fun exn ->
         incr failed;
-        Printf.eprintf "  FAILED %s: %s\n%!" e.key (Printexc.to_string exn);
+        Printf.eprintf "  FAILED   %s: %s\n%!" e.key (Printexc.to_string exn);
         Lwt.return_unit)
   in
 
-  Printf.printf "backend %s: migrating manifests…\n%!" bc.Conf_parsing.name;
+  Printf.printf "\n=== backend %S (type %s) ===\n%!" bc.Conf_parsing.name
+    bc.Conf_parsing.backend_type;
+  Printf.printf "listing manifests under %s …\n%!" dom_prefix;
   let* manifests = B.list_all ~prefix:dom_prefix () in
-  let* () = Lwt_list.iter_s migrate_one manifests in
+  Printf.printf "found %d object(s) under manifests/; migrating (%d-way)…\n%!"
+    (List.length manifests) parallelism;
+  let* () = iter_pooled migrate_one manifests in
 
   (* Clean slate: drop trash, versions, the journal and the cursor. Each delete
      tolerates an already-gone key, so this is safe to re-run. Chunks orphaned by
      dropped versions/trash are reclaimed by the next [expire]. *)
   let delete_under label prefix =
     let* objs = B.list_all ~prefix () in
-    let* () =
-      Lwt_list.iter_s
-        (fun (e : Backend.file_entry) ->
-          Lwt.catch
-            (fun () -> B.delete ~key:e.key ())
-            (fun exn ->
-              incr failed;
-              Printf.eprintf "  FAILED delete %s: %s\n%!" e.key
-                (Printexc.to_string exn);
-              Lwt.return_unit))
-        objs
-    in
-    if objs <> [] then
-      Printf.printf "backend %s: cleared %d %s object(s)\n%!"
-        bc.Conf_parsing.name (List.length objs) label;
-    Lwt.return_unit
+    Printf.printf "clearing %s: %d object(s) under %s\n%!" label
+      (List.length objs) prefix;
+    iter_pooled
+      (fun (e : Backend.file_entry) ->
+        Lwt.catch
+          (fun () ->
+            log "delete   %s" e.key;
+            incr deleted;
+            B.delete ~key:e.key ())
+          (fun exn ->
+            incr failed;
+            Printf.eprintf "  FAILED   delete %s: %s\n%!" e.key
+              (Printexc.to_string exn);
+            Lwt.return_unit))
+      objs
   in
   let* () = delete_under "trash" (dom_prefix ^ trash_prefix) in
-  let* () = delete_under "version" ver_prefix in
+  let* () = delete_under "versions" ver_prefix in
   let* () = delete_under "journal" jour_prefix in
+  Printf.printf "clearing cursor %s\n%!" cursor_key;
   let* () =
     Lwt.catch (fun () -> B.delete ~key:cursor_key ()) (fun _ -> Lwt.return_unit)
   in
-  Printf.printf "backend %s: done — %d migrated, %d skipped, %d failed\n%!"
-    bc.Conf_parsing.name !migrated !skipped !failed;
+  Printf.printf
+    "backend %S: %d migrated, %d folder marker(s), %d skipped, %d cleared, %d \
+     failed\n\
+     %!"
+    bc.Conf_parsing.name !migrated !markers !skipped !deleted !failed;
   Lwt.return !failed
 
 let () =
@@ -211,6 +247,20 @@ let () =
   let jour_prefix = Conf_parsing.journal_prefix d in
   let cursor_key = Conf_parsing.cursor_key d in
   let trash_prefix = Folder.trash_id ^ "/" in
+  Printf.printf
+    "tsync inode migration\n\
+     config:  %s\n\
+     domain:  %s\n\
+     backends: %s\n\
+     target format version: %d\n\
+     manifests prefix: %s\n\
+     (chunks are left untouched; versions/journal/trash/cursor are cleared)\n%!"
+    config d.Conf_parsing.name
+    (String.concat ", "
+       (List.map
+          (fun (bc : Conf_parsing.backend_config) -> bc.Conf_parsing.name)
+          d.Conf_parsing.backends))
+    Manifest.current_version dom_prefix;
   let failed =
     Lwt_main.run
       (Lwt_list.fold_left_s
