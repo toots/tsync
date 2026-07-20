@@ -10,12 +10,12 @@
 --- backend
   chunk d447b1ea40e6988b-b7aeb52a10fdaf2d size=11
   journal <entry-1> = put file.bin 11
-  file file.bin [root/5364ca580b2eed57-b0140ab2eda14287] = manifest size=11 chunks=1 h1=d447b1ea40e6988b h2=b7aeb52a10fdaf2d
+  file file.bin [.tsync-root/5364ca580b2eed57-b0140ab2eda14287] = manifest size=11 chunks=1 h1=d447b1ea40e6988b h2=b7aeb52a10fdaf2d
     chunk#0 d447b1ea40e6988b-b7aeb52a10fdaf2d size=11
 --- backend 2
   chunk d447b1ea40e6988b-b7aeb52a10fdaf2d size=11
   journal <entry-1> = put file.bin 11
-  file file.bin [root/5364ca580b2eed57-b0140ab2eda14287] = manifest size=11 chunks=1 h1=d447b1ea40e6988b h2=b7aeb52a10fdaf2d
+  file file.bin [.tsync-root/5364ca580b2eed57-b0140ab2eda14287] = manifest size=11 chunks=1 h1=d447b1ea40e6988b h2=b7aeb52a10fdaf2d
     chunk#0 d447b1ea40e6988b-b7aeb52a10fdaf2d size=11
 
 === resync-remote heals missing chunk on secondary
@@ -24,7 +24,6 @@
   on-secondary delete-remote-chunk file.bin #0
   resync-remote
   resync-remote
-  copied tsync/test/chunks/d447b1ea40e6988b-b7aeb52a10fdaf2d
   resync backend #2: 3 checked, 1 copied
   resync backend #2: 3 checked, 0 copied
 --- tree
@@ -34,12 +33,12 @@
 --- backend
   chunk d447b1ea40e6988b-b7aeb52a10fdaf2d size=11
   journal <entry-1> = put file.bin 11
-  file file.bin [root/5364ca580b2eed57-b0140ab2eda14287] = manifest size=11 chunks=1 h1=d447b1ea40e6988b h2=b7aeb52a10fdaf2d
+  file file.bin [.tsync-root/5364ca580b2eed57-b0140ab2eda14287] = manifest size=11 chunks=1 h1=d447b1ea40e6988b h2=b7aeb52a10fdaf2d
     chunk#0 d447b1ea40e6988b-b7aeb52a10fdaf2d size=11
 --- backend 2
   chunk d447b1ea40e6988b-b7aeb52a10fdaf2d size=11
   journal <entry-1> = put file.bin 11
-  file file.bin [root/5364ca580b2eed57-b0140ab2eda14287] = manifest size=11 chunks=1 h1=d447b1ea40e6988b h2=b7aeb52a10fdaf2d
+  file file.bin [.tsync-root/5364ca580b2eed57-b0140ab2eda14287] = manifest size=11 chunks=1 h1=d447b1ea40e6988b h2=b7aeb52a10fdaf2d
     chunk#0 d447b1ea40e6988b-b7aeb52a10fdaf2d size=11
 
 === resync-remote heals corrupt chunk on secondary
@@ -47,7 +46,6 @@
   drain
   on-secondary corrupt-remote-chunk file.bin #0
   resync-remote
-  copied tsync/test/chunks/d447b1ea40e6988b-b7aeb52a10fdaf2d
   resync backend #2: 3 checked, 1 copied
 --- tree
   f file.bin size=11 cached=true uploaded=true etag=d447b1ea40e6988b
@@ -56,12 +54,12 @@
 --- backend
   chunk d447b1ea40e6988b-b7aeb52a10fdaf2d size=11
   journal <entry-1> = put file.bin 11
-  file file.bin [root/5364ca580b2eed57-b0140ab2eda14287] = manifest size=11 chunks=1 h1=d447b1ea40e6988b h2=b7aeb52a10fdaf2d
+  file file.bin [.tsync-root/5364ca580b2eed57-b0140ab2eda14287] = manifest size=11 chunks=1 h1=d447b1ea40e6988b h2=b7aeb52a10fdaf2d
     chunk#0 d447b1ea40e6988b-b7aeb52a10fdaf2d size=11
 --- backend 2
   chunk d447b1ea40e6988b-b7aeb52a10fdaf2d size=11
   journal <entry-1> = put file.bin 11
-  file file.bin [root/5364ca580b2eed57-b0140ab2eda14287] = manifest size=11 chunks=1 h1=d447b1ea40e6988b h2=b7aeb52a10fdaf2d
+  file file.bin [.tsync-root/5364ca580b2eed57-b0140ab2eda14287] = manifest size=11 chunks=1 h1=d447b1ea40e6988b h2=b7aeb52a10fdaf2d
     chunk#0 d447b1ea40e6988b-b7aeb52a10fdaf2d size=11
 
 === resync-remote heals missing manifest on secondary
@@ -69,7 +67,7 @@
   drain
   on-secondary delete-remote-manifest file.bin
   resync-remote
-  resync backend #2: 3 checked, 0 copied
+  resync backend #2: 3 checked, 1 copied
 --- tree
   f file.bin size=11 cached=true uploaded=true etag=d447b1ea40e6988b
 --- content
@@ -77,12 +75,12 @@
 --- backend
   chunk d447b1ea40e6988b-b7aeb52a10fdaf2d size=11
   journal <entry-1> = put file.bin 11
-  file file.bin [root/5364ca580b2eed57-b0140ab2eda14287] = manifest size=11 chunks=1 h1=d447b1ea40e6988b h2=b7aeb52a10fdaf2d
+  file file.bin [.tsync-root/5364ca580b2eed57-b0140ab2eda14287] = manifest size=11 chunks=1 h1=d447b1ea40e6988b h2=b7aeb52a10fdaf2d
     chunk#0 d447b1ea40e6988b-b7aeb52a10fdaf2d size=11
 --- backend 2
   chunk d447b1ea40e6988b-b7aeb52a10fdaf2d size=11
   journal <entry-1> = put file.bin 11
-  file file.bin [root/5364ca580b2eed57-b0140ab2eda14287] = manifest size=11 chunks=1 h1=d447b1ea40e6988b h2=b7aeb52a10fdaf2d
+  file file.bin [.tsync-root/5364ca580b2eed57-b0140ab2eda14287] = manifest size=11 chunks=1 h1=d447b1ea40e6988b h2=b7aeb52a10fdaf2d
     chunk#0 d447b1ea40e6988b-b7aeb52a10fdaf2d size=11
 
 === resync-remote heals mixed tree on secondary
@@ -94,8 +92,7 @@
   on-secondary delete-remote-chunk ok.bin #0
   on-secondary delete-remote-manifest sub/nested.bin
   resync-remote
-  copied tsync/test/chunks/002783db772ad77d-0760f49141bb4bb5
-  resync backend #2: 9 checked, 1 copied
+  resync backend #2: 9 checked, 2 copied
 --- tree
   f ok.bin size=4 cached=true uploaded=true etag=002783db772ad77d
   d sub/
@@ -110,10 +107,10 @@
   journal <entry-1> = put ok.bin 4
   journal <entry-2> = mkdir sub/
   journal <entry-3> = put sub/nested.bin 6
-  file ok.bin [root/4675454c5194c6a7-5f00ae60e6d18820] = manifest size=4 chunks=1 h1=002783db772ad77d h2=0760f49141bb4bb5
+  file ok.bin [.tsync-root/4675454c5194c6a7-5f00ae60e6d18820] = manifest size=4 chunks=1 h1=002783db772ad77d h2=0760f49141bb4bb5
     chunk#0 002783db772ad77d-0760f49141bb4bb5 size=4
-  folder sub [root/4f7b4244079f8bf6-67a7ed7af26470c3] -> sub
-  file nested.bin [sub/1427ec502d51cc85-a6b2693498cea2e1] = manifest size=6 chunks=1 h1=fa87ee5fc199e332 h2=c7156c4359a54f81
+  folder sub [.tsync-root/4f7b4244079f8bf6-67a7ed7af26470c3] -> 547c2ad623ddba3f
+  file nested.bin [547c2ad623ddba3f/1427ec502d51cc85-a6b2693498cea2e1] = manifest size=6 chunks=1 h1=fa87ee5fc199e332 h2=c7156c4359a54f81
     chunk#0 fa87ee5fc199e332-c7156c4359a54f81 size=6
 --- backend 2
   chunk 002783db772ad77d-0760f49141bb4bb5 size=4
@@ -122,9 +119,9 @@
   journal <entry-1> = put ok.bin 4
   journal <entry-2> = mkdir sub/
   journal <entry-3> = put sub/nested.bin 6
-  file ok.bin [root/4675454c5194c6a7-5f00ae60e6d18820] = manifest size=4 chunks=1 h1=002783db772ad77d h2=0760f49141bb4bb5
+  file ok.bin [.tsync-root/4675454c5194c6a7-5f00ae60e6d18820] = manifest size=4 chunks=1 h1=002783db772ad77d h2=0760f49141bb4bb5
     chunk#0 002783db772ad77d-0760f49141bb4bb5 size=4
-  folder sub [root/4f7b4244079f8bf6-67a7ed7af26470c3] -> sub
-  file nested.bin [sub/1427ec502d51cc85-a6b2693498cea2e1] = manifest size=6 chunks=1 h1=fa87ee5fc199e332 h2=c7156c4359a54f81
+  folder sub [.tsync-root/4f7b4244079f8bf6-67a7ed7af26470c3] -> 547c2ad623ddba3f
+  file nested.bin [547c2ad623ddba3f/1427ec502d51cc85-a6b2693498cea2e1] = manifest size=6 chunks=1 h1=fa87ee5fc199e332 h2=c7156c4359a54f81
     chunk#0 fa87ee5fc199e332-c7156c4359a54f81 size=6
 

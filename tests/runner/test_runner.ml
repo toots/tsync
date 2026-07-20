@@ -179,8 +179,8 @@ let setup_client (module C : Conf.S) root staging_prefix =
   let module H = Ipc_handler.Make (C) (F) in
   let module Sp = Sync_poller.Make (C) (F) in
   let module J = Journal.Make (C) in
+  let module L = Layout.Inode.Make (C) in
   let key p = C.domain_prefix ^ p in
-  let bkey p = Manifest_key.of_key ~domain_prefix:C.domain_prefix (key p) in
   let strip_root p =
     if String.length p > 0 && p.[0] = '/' then
       String.sub p 1 (String.length p - 1)
@@ -250,7 +250,9 @@ let setup_client (module C : Conf.S) root staging_prefix =
     | CorruptRemoteChunk { path; index } ->
         let* ck = remote_chunk_key path index in
         B.put ~key:ck ~data:"garbage" ()
-    | DeleteRemoteManifest p -> B.delete ~key:(bkey p) ()
+    | DeleteRemoteManifest p ->
+        let* bk = L.manifest_key (key p) in
+        B.delete ~key:bk ()
     | s -> failwith ("not a backend-damage step: " ^ render_step s)
   in
   let mkdir_p d =
@@ -427,9 +429,9 @@ let setup_client (module C : Conf.S) root staging_prefix =
         let+ dests = M.resync () in
         List.iter
           (fun (d : Mirror.dest_stats) ->
-            List.iter (Printf.printf "  copied %s\n") d.Mirror.copied;
-            (* Bytes are omitted: manifest objects embed mtimes, so their
-               sizes are not deterministic. *)
+            (* Only counts: copied keys carry non-deterministic folder ids /
+               version timestamps, and the aliased backend dump already shows the
+               resulting state. Bytes are omitted (manifests embed mtimes). *)
             Printf.printf "  resync backend #%d: %d checked, %d copied\n"
               (d.Mirror.index + 1) d.Mirror.checked
               (List.length d.Mirror.copied))
@@ -647,32 +649,9 @@ let dump_backend_at ~backend_root ~domain_prefix ~chunk_prefix ~journal_prefix
     index 0 journal_names
   in
   let is_marker k = String.length k > 0 && k.[String.length k - 1] = '/' in
-  (* Random folder ids are non-deterministic; alias each to its folder name
-     (from the marker) so snapshots are stable. *)
-  let id_name = Hashtbl.create 16 in
-  Hashtbl.replace id_name Folder.root_id "root";
-  let* () =
-    Lwt_list.iter_s
-      (fun (e : Backend.file_entry) ->
-        if starts_with domain_prefix e.key && not (is_marker e.key) then
-          let+ data = B.get ~key:e.key () in
-          match Folder.marker_of_string data with
-            | Some m -> Hashtbl.replace id_name m.Folder.id m.Folder.name
-            | None -> ()
-        else Lwt.return_unit)
-      entries
-  in
-  let alias_id id =
-    if id = Folder.trash_id then "trash"
-    else Option.value ~default:id (Hashtbl.find_opt id_name id)
-  in
-  let alias_rel rel =
-    match String.index_opt rel '/' with
-      | Some i ->
-          alias_id (String.sub rel 0 i)
-          ^ String.sub rel i (String.length rel - i)
-      | None -> alias_id rel
-  in
+  (* Folder ids are deterministic (the RNG is seeded per scenario), so the dump
+     prints them raw: a reviewer can trace [file <id>/<hash>] back to the
+     [folder … -> <id>] marker that named it. *)
   Lwt_list.iter_s
     (fun (e : Backend.file_entry) ->
       (* Internal prefixes have no meaningful directories; ignore the empty-dir
@@ -714,27 +693,26 @@ let dump_backend_at ~backend_root ~domain_prefix ~chunk_prefix ~journal_prefix
                   | `Dirty -> (rel, "dirty")
                   | exception _ -> (rel, "raw")
               in
-              Printf.printf "  version %s [%s]#%d = %s\n" name (alias_rel rel) n
-                desc
+              Printf.printf "  version %s [%s]#%d = %s\n" name rel n desc
           | None ->
               Printf.printf "  other %s size=%d\n" e.key e.size;
               Lwt.return_unit)
       else if starts_with domain_prefix e.key then (
-        let rel = alias_rel (rel_key e.key) in
-        if String.length e.key > 0 && e.key.[String.length e.key - 1] = '/' then (
-          Printf.printf "  dir %s\n" rel;
-          Lwt.return_unit)
+        let rel = rel_key e.key in
+        if String.length e.key > 0 && e.key.[String.length e.key - 1] = '/' then
+          (* Empty-namespace directories are a local-backend artifact (S3 has no
+             such object); skip them. *)
+          Lwt.return_unit
         else
           let+ data = B.get ~key:e.key () in
           match Folder.marker_of_string data with
             | Some m ->
                 if starts_with (domain_prefix ^ Folder.trash_id ^ "/") e.key
                 then
-                  Printf.printf "  trash %s -> %s\n" m.Folder.name
-                    (alias_id m.Folder.id)
+                  Printf.printf "  trash %s -> %s\n" m.Folder.name m.Folder.id
                 else
                   Printf.printf "  folder %s [%s] -> %s\n" m.Folder.name rel
-                    (alias_id m.Folder.id)
+                    m.Folder.id
             | None -> (
                 match Manifest.of_string data with
                   | `Clean { symlink = Some target; name; _ } ->
@@ -761,8 +739,15 @@ let dump_backend_at ~backend_root ~domain_prefix ~chunk_prefix ~journal_prefix
 
 (* ── Scenario runners ─────────────────────────────────────────────────────── *)
 
+(* Seed the RNG so [Folder.new_id] is deterministic within a scenario: folder ids
+   are then stable across runs, which keeps both the backend-key ordering and the
+   snapshots reproducible (and makes the real ids readable in the dump). Each
+   scenario re-seeds so it stays independent of the ones before it. *)
+let reset_ids () = Random.init 0x7c9c5
+
 let run_scenario ?(versioning = false) ?(symlink_policy = `Keep)
     ({ name; steps } : scenario) =
+  reset_ids ();
   Printf.printf "=== %s\n" name;
   List.iter (fun s -> Printf.printf "  %s\n" (render_step s)) steps;
   let root = Filename.temp_dir "tsync-test" "" in
@@ -839,6 +824,7 @@ let run_scenario ?(versioning = false) ?(symlink_policy = `Keep)
 
 let run_two_client_scenario ?(versioning = false)
     ({ name; steps } : two_client_scenario) =
+  reset_ids ();
   Printf.printf "=== %s\n" name;
   List.iter
     (fun s ->
@@ -958,6 +944,7 @@ let make_conf ?(versioning = false) ~client_name ~backend_root ~cache_root
 (* Single client: after draining uploads, snapshot the listing IPC responses
    (directory keys, logical size, content-hash etag, normalized mtime). *)
 let run_ipc_scenario ?versioning ({ name; steps } : scenario) =
+  reset_ids ();
   Printf.printf "=== %s\n" name;
   List.iter (fun s -> Printf.printf "  %s\n" (render_step s)) steps;
   let root = Filename.temp_dir "tsync-ipc" "" in
@@ -991,6 +978,7 @@ let run_ipc_scenario ?versioning ({ name; steps } : scenario) =
    probed from several anchors — a baseline (working delta), B's current cursor
    (up to date), and a pruned-past anchor (stale → full re-list). *)
 let run_ipc_changes_scenario ?versioning ({ name; steps } : scenario) =
+  reset_ids ();
   Printf.printf "=== %s\n" name;
   List.iter (fun s -> Printf.printf "  A: %s\n" (render_step s)) steps;
   let root = Filename.temp_dir "tsync-ipc2" "" in

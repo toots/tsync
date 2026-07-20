@@ -623,6 +623,11 @@ module Make (C : Conf.S) (Sq : Sync_queue.S) : S = struct
                 if is_dir then
                   let* old_marker = folder_marker_bkey src in
                   let* () = St.delete_raw ~bkey:old_marker in
+                  let* () =
+                    Local.refresh_dir_marker ~cache_root:C.cache_root
+                      ~domain_name:C.domain_name ~domain_prefix:C.domain_prefix
+                      dst
+                  in
                   St.put_folder_marker ~key:dst
                 else Fs.rename_file ~src_key:src ~dst_key:dst)
           in
@@ -734,6 +739,38 @@ module Make (C : Conf.S) (Sq : Sync_queue.S) : S = struct
 
   (* ── Foreign op application (sync) ────────────────────────────────────── *)
 
+  (* A folder created on another client already has a backend marker carrying its
+     id; adopt that id locally so both machines share one namespace for it.
+     Without this, resolving the folder here would mint a *different* id and this
+     client's writes (and reads) would land in a separate namespace. *)
+  let adopt_folder_id rel =
+    let rel =
+      if String.ends_with ~suffix:"/" rel then
+        String.sub rel 0 (String.length rel - 1)
+      else rel
+    in
+    if rel = "" then Lwt.return_unit
+    else (
+      let parent = match Filename.dirname rel with "." -> "" | d -> d in
+      let* pid =
+        Folder_ids.resolve ~cache_root:C.cache_root ~domain_name:C.domain_name
+          parent
+      in
+      let marker_key =
+        C.domain_prefix
+        ^ Folder.child_key ~folder_id:pid (Filename.basename rel)
+      in
+      Lwt.catch
+        (fun () ->
+          let* data = St.get_object ~bkey:marker_key in
+          match Folder.marker_of_string data with
+            | Some m ->
+                Folder_ids.write ~cache_root:C.cache_root
+                  ~domain_name:C.domain_name rel
+                  { Folder.name = Filename.basename rel; id = m.Folder.id }
+            | None -> Lwt.return_unit)
+        (fun _ -> Lwt.return_unit))
+
   (* Failures propagate to the caller: the sync poller must not advance its
      high-water mark past an entry it could not apply, or the op is lost
      until a full resync. *)
@@ -757,8 +794,11 @@ module Make (C : Conf.S) (Sq : Sync_queue.S) : S = struct
             clear_local key)
           else Lwt.return_unit
       | `Mkdir rel ->
-          Local.create_dir ~cache_root:C.cache_root ~domain_name:C.domain_name
-            ~domain_prefix:C.domain_prefix (C.domain_prefix ^ rel)
+          let* () =
+            Local.create_dir ~cache_root:C.cache_root ~domain_name:C.domain_name
+              ~domain_prefix:C.domain_prefix (C.domain_prefix ^ rel)
+          in
+          adopt_folder_id rel
       | `Rmdir rel ->
           Local.delete_dir ~cache_root:C.cache_root ~domain_name:C.domain_name
             ~domain_prefix:C.domain_prefix (C.domain_prefix ^ rel)

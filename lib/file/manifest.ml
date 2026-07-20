@@ -1,5 +1,10 @@
 let chunk_size = 8 * 1024 * 1024
 
+(* Manifest body format version. 2 = inode layout (bodies carry the leaf [name];
+   folder structure lives in markers). Bumped from 1 (real-path-keyed layout) by
+   the one-off migration. Nothing branches on it today; it flags the format. *)
+let current_version = 2
+
 type chunk_entry = { index : int; h1 : string; h2 : string; size : int }
 
 type t = {
@@ -20,7 +25,17 @@ let chunk_key (entry : chunk_entry) = entry.h1 ^ "-" ^ entry.h2
 
 let make ~name ~h1 ~h2 ~size ~chunk_size ~chunks ~mtime =
   `Clean
-    { v = 1; name; size; chunk_size; chunks; h1; h2; mtime; symlink = None }
+    {
+      v = current_version;
+      name;
+      size;
+      chunk_size;
+      chunks;
+      h1;
+      h2;
+      mtime;
+      symlink = None;
+    }
 
 (* A symlink is a chunkless manifest carrying its target. size is the target's
    byte length, POSIX-style. *)
@@ -29,7 +44,7 @@ let make_symlink ~name ~target ~mtime =
   let h2 = Xxhash.hash_hex target 1 in
   `Clean
     {
-      v = 1;
+      v = current_version;
       name;
       size = Int64.of_int (String.length target);
       chunk_size;

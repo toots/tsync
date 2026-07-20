@@ -13,7 +13,7 @@
   chunk 3ab8997bc73098ac-74d584d55f333769 size=7
   journal <entry-1> = put foo.txt 3
   journal <entry-2> = put foo.txt 7
-  file foo.txt [root/b306717ed3feaa3f-615fce859cf8a12f] = manifest size=7 chunks=1 h1=3ab8997bc73098ac h2=74d584d55f333769
+  file foo.txt [.tsync-root/b306717ed3feaa3f-615fce859cf8a12f] = manifest size=7 chunks=1 h1=3ab8997bc73098ac h2=74d584d55f333769
     chunk#0 3ab8997bc73098ac-74d584d55f333769 size=7
 
 === expire all: deleted file fully reclaimed
@@ -28,7 +28,6 @@
   cursor = <entry-2>
   journal <entry-1> = put foo.txt 9
   journal <entry-2> = delete foo.txt
-  dir root/
 
 === expire at a cutoff: older version dropped, newer kept
   write foo.txt "one"
@@ -51,9 +50,26 @@
   journal <entry-1> = put foo.txt 3
   journal <entry-2> = put foo.txt 7
   journal <entry-3> = put foo.txt 17
-  file foo.txt [root/b306717ed3feaa3f-615fce859cf8a12f] = manifest size=17 chunks=1 h1=faf60158c5948cd2 h2=60f690e9588d51bd
+  file foo.txt [.tsync-root/b306717ed3feaa3f-615fce859cf8a12f] = manifest size=17 chunks=1 h1=faf60158c5948cd2 h2=60f690e9588d51bd
     chunk#0 faf60158c5948cd2-60f690e9588d51bd size=17
-  version foo.txt [root/b306717ed3feaa3f-615fce859cf8a12f]#1 = manifest size=7 chunks=1
+  version foo.txt [.tsync-root/b306717ed3feaa3f-615fce859cf8a12f]#1 = manifest size=7 chunks=1
+
+=== expire all: trashed folder reclaimed
+  mkdir d
+  drain
+  write d/a.txt "trash me"
+  drain
+  rmdir d
+  drain
+  expire all
+  expire all -> 0 version(s), 1 chunk(s) removed, 0 kept
+--- tree
+--- content
+--- backend
+  cursor = <entry-3>
+  journal <entry-1> = mkdir d/
+  journal <entry-2> = put d/a.txt 8
+  journal <entry-3> = rmdir d/
 
 === expire none: nothing removed
   write foo.txt "one"
@@ -71,7 +87,7 @@
   chunk 911faba7321fe1a0-a3cf92cbf55153da size=3
   journal <entry-1> = put foo.txt 3
   journal <entry-2> = put foo.txt 7
-  file foo.txt [root/b306717ed3feaa3f-615fce859cf8a12f] = manifest size=7 chunks=1 h1=3ab8997bc73098ac h2=74d584d55f333769
+  file foo.txt [.tsync-root/b306717ed3feaa3f-615fce859cf8a12f] = manifest size=7 chunks=1 h1=3ab8997bc73098ac h2=74d584d55f333769
     chunk#0 3ab8997bc73098ac-74d584d55f333769 size=7
-  version foo.txt [root/b306717ed3feaa3f-615fce859cf8a12f]#1 = manifest size=3 chunks=1
+  version foo.txt [.tsync-root/b306717ed3feaa3f-615fce859cf8a12f]#1 = manifest size=3 chunks=1
 

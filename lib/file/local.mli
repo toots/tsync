@@ -16,6 +16,15 @@ val manifest_path :
 
 val ensure_parent_dir : string -> unit Lwt.t
 
+(** Rewrite a moved directory's escaped-name marker to its current leaf name, so
+    readdir shows the new name (no-op unless the leaf is escaped). *)
+val refresh_dir_marker :
+  cache_root:string ->
+  domain_name:string ->
+  domain_prefix:string ->
+  string ->
+  unit Lwt.t
+
 (** All manifest sidecars under the domain's manifest tree, as domain-relative
     paths (unsorted). Empty when the tree does not exist. *)
 val walk_manifests :

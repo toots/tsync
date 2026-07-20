@@ -55,6 +55,29 @@ let real_dir_name dir_path name =
     read_marker (Filename.concat dir_path Name_escape.dir_marker)
   else Lwt.return name
 
+(* After a directory moves, its escaped on-disk name is a hash of the *new* name
+   while the marker inside still holds the old one — rewrite it so readdir shows
+   the new name. No-op for a name the filesystem can hold verbatim. *)
+let refresh_dir_marker ~cache_root ~domain_name ~domain_prefix key =
+  let rel = chop_trailing_slash (strip_prefix ~domain_prefix key) in
+  let leaf = if rel = "" then "" else Filename.basename rel in
+  if
+    rel = "" || not (Name_escape.is_escaped (Name_escape.encode_component leaf))
+  then Lwt.return_unit
+  else (
+    let dir =
+      Filename.concat
+        (manifest_dir ~cache_root domain_name)
+        (Name_escape.encode_key rel)
+    in
+    let path = Filename.concat dir Name_escape.dir_marker in
+    let tmp = path ^ ".tmp" in
+    let* () =
+      Lwt_unix_retry.with_file ~mode:Lwt_io.Output tmp (fun oc ->
+          Lwt_io.write oc leaf)
+    in
+    Lwt_unix_retry.rename tmp path)
+
 let join_rel rel name = if rel = "" then name else rel ^ "/" ^ name
 
 (* Create the escaped directory chain for real relative path [rel] under [root],

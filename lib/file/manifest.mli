@@ -1,5 +1,8 @@
 val chunk_size : int
 
+(** Current manifest body format version (2 = inode layout). *)
+val current_version : int
+
 type chunk_entry = { index : int; h1 : string; h2 : string; size : int }
 
 type t = {

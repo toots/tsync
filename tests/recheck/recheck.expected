@@ -11,7 +11,7 @@
 --- backend
   chunk d447b1ea40e6988b-b7aeb52a10fdaf2d size=11
   journal <entry-1> = put file.bin 11
-  file file.bin [root/5364ca580b2eed57-b0140ab2eda14287] = manifest size=11 chunks=1 h1=d447b1ea40e6988b h2=b7aeb52a10fdaf2d
+  file file.bin [.tsync-root/5364ca580b2eed57-b0140ab2eda14287] = manifest size=11 chunks=1 h1=d447b1ea40e6988b h2=b7aeb52a10fdaf2d
     chunk#0 d447b1ea40e6988b-b7aeb52a10fdaf2d size=11
 
 === recheck repairs missing chunk
@@ -31,7 +31,7 @@
 --- backend
   chunk d447b1ea40e6988b-b7aeb52a10fdaf2d size=11
   journal <entry-1> = put file.bin 11
-  file file.bin [root/5364ca580b2eed57-b0140ab2eda14287] = manifest size=11 chunks=1 h1=d447b1ea40e6988b h2=b7aeb52a10fdaf2d
+  file file.bin [.tsync-root/5364ca580b2eed57-b0140ab2eda14287] = manifest size=11 chunks=1 h1=d447b1ea40e6988b h2=b7aeb52a10fdaf2d
     chunk#0 d447b1ea40e6988b-b7aeb52a10fdaf2d size=11
 
 === recheck repairs corrupt chunk
@@ -48,7 +48,7 @@
 --- backend
   chunk d447b1ea40e6988b-b7aeb52a10fdaf2d size=11
   journal <entry-1> = put file.bin 11
-  file file.bin [root/5364ca580b2eed57-b0140ab2eda14287] = manifest size=11 chunks=1 h1=d447b1ea40e6988b h2=b7aeb52a10fdaf2d
+  file file.bin [.tsync-root/5364ca580b2eed57-b0140ab2eda14287] = manifest size=11 chunks=1 h1=d447b1ea40e6988b h2=b7aeb52a10fdaf2d
     chunk#0 d447b1ea40e6988b-b7aeb52a10fdaf2d size=11
 
 === recheck republishes missing manifest
@@ -56,8 +56,8 @@
   drain
   delete-remote-manifest file.bin
   recheck
-  ok    file.bin
-  recheck: 1 checked, 0 repaired, 0 unrepairable, 0 skipped
+  FIXED file.bin (manifest republished)
+  recheck: 1 checked, 1 repaired, 0 unrepairable, 0 skipped
 --- tree
   f file.bin size=11 cached=true uploaded=true etag=d447b1ea40e6988b
 --- content
@@ -65,7 +65,7 @@
 --- backend
   chunk d447b1ea40e6988b-b7aeb52a10fdaf2d size=11
   journal <entry-1> = put file.bin 11
-  file file.bin [root/5364ca580b2eed57-b0140ab2eda14287] = manifest size=11 chunks=1 h1=d447b1ea40e6988b h2=b7aeb52a10fdaf2d
+  file file.bin [.tsync-root/5364ca580b2eed57-b0140ab2eda14287] = manifest size=11 chunks=1 h1=d447b1ea40e6988b h2=b7aeb52a10fdaf2d
     chunk#0 d447b1ea40e6988b-b7aeb52a10fdaf2d size=11
 
 === recheck repairs stale local file
@@ -86,7 +86,7 @@
   chunk bad02738adfbeba0-e2449384da60a0ea size=11
   chunk ceb38fa463bd5dff-d69c1972e0763d7d size=15
   journal <entry-1> = put file.bin 11
-  file file.bin [root/5364ca580b2eed57-b0140ab2eda14287] = manifest size=15 chunks=1 h1=ceb38fa463bd5dff h2=d69c1972e0763d7d
+  file file.bin [.tsync-root/5364ca580b2eed57-b0140ab2eda14287] = manifest size=15 chunks=1 h1=ceb38fa463bd5dff h2=d69c1972e0763d7d
     chunk#0 ceb38fa463bd5dff-d69c1972e0763d7d size=15
 
 === recheck skips dirty file
@@ -100,7 +100,7 @@
 --- backend
   chunk 3ec7a63f2d48ce00-16e5e4870c3ecb65 size=8
   journal <entry-1> = put file.bin 8
-  file file.bin [root/5364ca580b2eed57-b0140ab2eda14287] = manifest size=8 chunks=1 h1=3ec7a63f2d48ce00 h2=16e5e4870c3ecb65
+  file file.bin [.tsync-root/5364ca580b2eed57-b0140ab2eda14287] = manifest size=8 chunks=1 h1=3ec7a63f2d48ce00 h2=16e5e4870c3ecb65
     chunk#0 3ec7a63f2d48ce00-16e5e4870c3ecb65 size=8
 
 === recheck evicted file
@@ -117,7 +117,7 @@
 --- backend
   chunk d447b1ea40e6988b-b7aeb52a10fdaf2d size=11
   journal <entry-1> = put file.bin 11
-  file file.bin [root/5364ca580b2eed57-b0140ab2eda14287] = manifest size=11 chunks=1 h1=d447b1ea40e6988b h2=b7aeb52a10fdaf2d
+  file file.bin [.tsync-root/5364ca580b2eed57-b0140ab2eda14287] = manifest size=11 chunks=1 h1=d447b1ea40e6988b h2=b7aeb52a10fdaf2d
     chunk#0 d447b1ea40e6988b-b7aeb52a10fdaf2d size=11
 
 === recheck evicted missing manifest
@@ -126,8 +126,8 @@
   evict file.bin
   delete-remote-manifest file.bin
   recheck
-  ok    file.bin
-  recheck: 1 checked, 0 repaired, 0 unrepairable, 0 skipped
+  FIXED file.bin (manifest republished)
+  recheck: 1 checked, 1 repaired, 0 unrepairable, 0 skipped
 --- tree
   f file.bin size=11 cached=false uploaded=true etag=d447b1ea40e6988b
 --- content
@@ -135,7 +135,7 @@
 --- backend
   chunk d447b1ea40e6988b-b7aeb52a10fdaf2d size=11
   journal <entry-1> = put file.bin 11
-  file file.bin [root/5364ca580b2eed57-b0140ab2eda14287] = manifest size=11 chunks=1 h1=d447b1ea40e6988b h2=b7aeb52a10fdaf2d
+  file file.bin [.tsync-root/5364ca580b2eed57-b0140ab2eda14287] = manifest size=11 chunks=1 h1=d447b1ea40e6988b h2=b7aeb52a10fdaf2d
     chunk#0 d447b1ea40e6988b-b7aeb52a10fdaf2d size=11
 
 === recheck evicted missing chunk
@@ -152,7 +152,7 @@
   file.bin = <unavailable: Backend.Backend_error("local get tsync/test/chunks/d447b1ea40e6988b-b7aeb52a10fdaf2d: No such file or directory")>
 --- backend
   journal <entry-1> = put file.bin 11
-  file file.bin [root/5364ca580b2eed57-b0140ab2eda14287] = manifest size=11 chunks=1 h1=d447b1ea40e6988b h2=b7aeb52a10fdaf2d
+  file file.bin [.tsync-root/5364ca580b2eed57-b0140ab2eda14287] = manifest size=11 chunks=1 h1=d447b1ea40e6988b h2=b7aeb52a10fdaf2d
     chunk#0 d447b1ea40e6988b-b7aeb52a10fdaf2d size=11
 
 === recheck evicted chunk and manifest gone
@@ -162,7 +162,7 @@
   delete-remote-chunk file.bin #0
   delete-remote-manifest file.bin
   recheck
-  BAD   file.bin (1/1 chunks missing)
+  BAD   file.bin (1/1 chunks missing, manifest wrong)
   recheck: 1 checked, 0 repaired, 1 unrepairable, 0 skipped
 --- tree
   f file.bin size=11 cached=false uploaded=true etag=d447b1ea40e6988b
@@ -170,8 +170,6 @@
   file.bin = <unavailable: Backend.Backend_error("local get tsync/test/chunks/d447b1ea40e6988b-b7aeb52a10fdaf2d: No such file or directory")>
 --- backend
   journal <entry-1> = put file.bin 11
-  file file.bin [root/5364ca580b2eed57-b0140ab2eda14287] = manifest size=11 chunks=1 h1=d447b1ea40e6988b h2=b7aeb52a10fdaf2d
-    chunk#0 d447b1ea40e6988b-b7aeb52a10fdaf2d size=11
 
 === recheck mixed tree
   write ok.bin "fine"
@@ -205,11 +203,11 @@
   journal <entry-2> = mkdir sub/
   journal <entry-3> = put sub/nested.bin 6
   journal <entry-4> = put broken.bin 7
-  file broken.bin [root/3d747b3f369b463c-b948ed037aeebc6d] = manifest size=7 chunks=1 h1=5f60fd5c4664e947 h2=8c1c9d7881c6107a
+  file broken.bin [.tsync-root/3d747b3f369b463c-b948ed037aeebc6d] = manifest size=7 chunks=1 h1=5f60fd5c4664e947 h2=8c1c9d7881c6107a
     chunk#0 5f60fd5c4664e947-8c1c9d7881c6107a size=7
-  file ok.bin [root/4675454c5194c6a7-5f00ae60e6d18820] = manifest size=4 chunks=1 h1=002783db772ad77d h2=0760f49141bb4bb5
+  file ok.bin [.tsync-root/4675454c5194c6a7-5f00ae60e6d18820] = manifest size=4 chunks=1 h1=002783db772ad77d h2=0760f49141bb4bb5
     chunk#0 002783db772ad77d-0760f49141bb4bb5 size=4
-  folder sub [root/4f7b4244079f8bf6-67a7ed7af26470c3] -> sub
-  file nested.bin [sub/1427ec502d51cc85-a6b2693498cea2e1] = manifest size=6 chunks=1 h1=fa87ee5fc199e332 h2=c7156c4359a54f81
+  folder sub [.tsync-root/4f7b4244079f8bf6-67a7ed7af26470c3] -> 547c2ad623ddba3f
+  file nested.bin [547c2ad623ddba3f/1427ec502d51cc85-a6b2693498cea2e1] = manifest size=6 chunks=1 h1=fa87ee5fc199e332 h2=c7156c4359a54f81
     chunk#0 fa87ee5fc199e332-c7156c4359a54f81 size=6
 

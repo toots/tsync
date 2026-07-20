@@ -47,6 +47,21 @@ let scenarios : scenario list =
         ];
     };
     {
+      (* A trashed folder past the cutoff is reclaimed: its subtree (kept intact
+         on delete for undo) is deleted and its now-unreferenced chunk collected. *)
+      name = "expire all: trashed folder reclaimed";
+      steps =
+        [
+          Mkdir "d";
+          Drain;
+          Write { path = "d/a.txt"; content = "trash me" };
+          Drain;
+          Rmdir "d";
+          Drain;
+          Expire "all";
+        ];
+    };
+    {
       name = "expire none: nothing removed";
       steps =
         [
