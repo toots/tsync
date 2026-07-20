@@ -6,7 +6,7 @@
    so the manifest mirror has exactly one definition. *)
 
 let manifests_dir ~cache_root domain_name =
-  Filename.concat cache_root ("manifests/" ^ domain_name)
+  Filename.concat cache_root (domain_name ^ "/manifests")
 
 let cached_dir ~cache_root domain_name =
-  Filename.concat cache_root ("cached/" ^ domain_name)
+  Filename.concat cache_root (domain_name ^ "/cached")
