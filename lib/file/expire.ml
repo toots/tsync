@@ -42,15 +42,20 @@ module Make (C : Conf.S) = struct
   (* All object keys under folder [folder_id] (recursively, following folder
      markers), including the markers themselves — the reclaim set for a trashed
      subtree. *)
-  let rec collect_namespace (module B : Backend.S) folder_id acc =
-    let* entries = B.list_all ~prefix:(C.domain_prefix ^ folder_id ^ "/") () in
-    Lwt_list.fold_left_s
-      (fun acc (e : Backend.file_entry) ->
-        let* data = B.get ~key:e.key () in
-        match Folder.marker_of_string data with
-          | Some m -> collect_namespace (module B) m.Folder.id (e.key :: acc)
-          | None -> Lwt.return (e.key :: acc))
-      acc entries
+  let collect_namespace (module B : Backend.S) folder_id acc =
+    let rec walk folder_id acc =
+      let* entries =
+        B.list_all ~prefix:(C.domain_prefix ^ folder_id ^ "/") ()
+      in
+      Lwt_list.fold_left_s
+        (fun acc (e : Backend.file_entry) ->
+          let* data = B.get ~key:e.key () in
+          match Folder.marker_of_string data with
+            | Some m -> walk m.Folder.id (e.key :: acc)
+            | None -> Lwt.return (e.key :: acc))
+        acc entries
+    in
+    walk folder_id acc
 
   let expire ~cutoff () =
     let (module B : Backend.S) = primary () in

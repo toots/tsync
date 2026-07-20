@@ -254,7 +254,8 @@ let () =
      backends: %s\n\
      target format version: %d\n\
      manifests prefix: %s\n\
-     (chunks are left untouched; versions/journal/trash/cursor are cleared)\n%!"
+     (chunks are left untouched; versions/journal/trash/cursor are cleared)\n\
+     %!"
     config d.Conf_parsing.name
     (String.concat ", "
        (List.map

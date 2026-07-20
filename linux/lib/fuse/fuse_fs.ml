@@ -157,7 +157,7 @@ module Make (C : Conf.S) = struct
         if String.length key > 0 && key.[String.length key - 1] = '/' then key
         else key ^ "/"
       in
-      let* files = Fs.list_all_files ~prefix in
+      let* files = F.list_all_files ~prefix in
       Lwt_list.iter_s
         (fun (e : Backend.file_entry) ->
           Lwt.catch
