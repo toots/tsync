@@ -1,5 +1,9 @@
 val manifest_dir : cache_root:string -> string -> string
 
+(** Remove the domain's entire local cache (manifest mirror + downloaded data),
+    for a full resync that rebuilds it from the backend. *)
+val clear : cache_root:string -> domain_name:string -> unit Lwt.t
+
 val cache_path :
   cache_root:string ->
   domain_name:string ->

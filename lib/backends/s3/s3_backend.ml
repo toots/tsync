@@ -35,9 +35,11 @@ let string_of_error = function
 let s3_eio msg = Unix.Unix_error (Unix.EIO, "s3", msg)
 
 (* B2 (and S3 under load) routinely answers 503: the client is expected to back
-   off and retry, not fail the operation. Connection-level failures ([Failed],
-   e.g. a pooled socket the server closed while idle) are equally transient.
-   Exponential backoff with jitter, capped per attempt and in attempt count. *)
+   off and retry, not fail the operation. Connection-level failures are equally
+   transient — whether the client surfaces them as [S3.Failed] or raises them
+   outright (a DNS "Failed to resolve host", a dropped socket, a TLS reset). Both
+   forms are retried with exponential backoff and jitter, capped per attempt and
+   in attempt count; only [Cancelled] is never retried. *)
 let max_attempts = 8
 
 let is_transient = function
@@ -46,18 +48,29 @@ let is_transient = function
 
 let with_retry op f =
   let rec go attempt =
-    let* res = f () in
-    match res with
-      | Error e when attempt < max_attempts && is_transient e ->
-          let backoff =
-            Float.min 20. (0.5 *. (2. ** float_of_int (attempt - 1)))
-          in
-          let delay = backoff *. (0.5 +. Random.float 1.0) in
-          Log.warn "s3 %s: %s; retrying (%d/%d) in %.1fs" op (string_of_error e)
-            attempt max_attempts delay;
-          let* () = Lwt_unix.sleep delay in
-          go (attempt + 1)
-      | res -> Lwt.return res
+    let* outcome =
+      Lwt.catch
+        (fun () ->
+          let+ res = f () in
+          `Ret res)
+        (fun exn -> Lwt.return (`Raised exn))
+    in
+    let retry reason =
+      let backoff = Float.min 20. (0.5 *. (2. ** float_of_int (attempt - 1))) in
+      let delay = backoff *. (0.5 +. Random.float 1.0) in
+      Log.warn "s3 %s: %s; retrying (%d/%d) in %.1fs" op reason attempt
+        max_attempts delay;
+      let* () = Lwt_unix.sleep delay in
+      go (attempt + 1)
+    in
+    match outcome with
+      | `Ret (Error e) when attempt < max_attempts && is_transient e ->
+          retry (string_of_error e)
+      | `Ret res -> Lwt.return res
+      | `Raised Cancelled -> Lwt.fail Cancelled
+      | `Raised exn when attempt < max_attempts ->
+          retry (Printexc.to_string exn)
+      | `Raised exn -> Lwt.fail exn
   in
   go 1
 

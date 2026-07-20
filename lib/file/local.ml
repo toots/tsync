@@ -358,6 +358,12 @@ let init ~cache_root ~domain_name =
   let* () = mkdir_p root in
   clean_tmp_manifests root
 
+(* Remove the domain's whole local cache — both the manifest mirror and the
+   downloaded data. Used by a full resync before rebuilding from the backend. *)
+let clear ~cache_root ~domain_name =
+  let* () = Fs_util.rm_rf (manifest_dir ~cache_root domain_name) in
+  Fs_util.rm_rf (Cache_layout.cached_dir ~cache_root domain_name)
+
 let evict ~cache_root ~domain_name ~domain_prefix key =
   let path = cache_path ~cache_root ~domain_name ~domain_prefix key in
   Lwt.catch
