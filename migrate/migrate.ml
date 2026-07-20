@@ -98,7 +98,8 @@ let chop_slash s =
 let pct_escape s =
   let b = Buffer.create (String.length s) in
   String.iter
-    (fun c -> if c = '%' then Buffer.add_string b "%25" else Buffer.add_char b c)
+    (fun c ->
+      if c = '%' then Buffer.add_string b "%25" else Buffer.add_char b c)
     s;
   Buffer.contents b
 

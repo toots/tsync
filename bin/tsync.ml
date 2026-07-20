@@ -1204,6 +1204,15 @@ let import_cmd =
       & pos 0 (some dir) None
       & info [] ~docv:"DIR" ~doc:"Folder whose contents to import")
   in
+  let only_arg =
+    Arg.(
+      value & opt_all string []
+      & info ["only"] ~docv:"GLOB"
+          ~doc:
+            "Import only files matching GLOB (shell glob syntax; matched \
+             against each entry's relative path and its basename). May be \
+             repeated. --exclude is applied on top of the selected set.")
+  in
   let exclude_arg =
     Arg.(
       value & opt_all string []
@@ -1222,7 +1231,7 @@ let import_cmd =
              domain. Only changed or missing chunks are actually uploaded; the \
              manifest is always recomputed and republished.")
   in
-  let run domain src exclude force_rehash v =
+  let run domain src only exclude force_rehash v =
     verbose := v;
     Lwt_main.run
       (let open Lwt.Syntax in
@@ -1231,7 +1240,7 @@ let import_cmd =
        let module I = Import.Make (C) in
        vprintf "importing from %s into domain %s\n" src C.domain_name;
        let+ summary =
-         I.run ~exclude ~force_rehash ~src
+         I.run ~only ~exclude ~force_rehash ~src
            ~on_dir:(fun ~rel -> Printf.printf "mkdir    %s\n%!" rel)
            ~on_file:(fun ~rel status ->
              match status with
@@ -1261,8 +1270,8 @@ let import_cmd =
           — the cache links to the source files. Keys already in the domain \
           are skipped.")
     Term.(
-      const run $ domain_arg $ src_arg $ exclude_arg $ force_rehash_arg
-      $ verbose_arg)
+      const run $ domain_arg $ src_arg $ only_arg $ exclude_arg
+      $ force_rehash_arg $ verbose_arg)
 
 (* ── tsync export ────────────────────────────────────────────────────────── *)
 

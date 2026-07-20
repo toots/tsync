@@ -78,7 +78,7 @@ type step =
   | LocalSymlink of { path : string; target : string }
       (** Create a symlink at [path] pointing to [target] in the local staging
           directory. *)
-  | Import of { exclude : string list; force_rehash : bool }
+  | Import of { only : string list; exclude : string list; force_rehash : bool }
       (** Run [Import.run] on the current local staging directory, then reset it
           for the next batch. Populate it first with [LocalWrite], [LocalMkdir],
           and [LocalSymlink]. *)

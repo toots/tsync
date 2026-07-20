@@ -309,6 +309,85 @@
   file nested.txt [547c2ad623ddba3f/318a2077e65057be-4437dde2838517f4] = manifest size=6 chunks=1 h1=fa87ee5fc199e332 h2=c7156c4359a54f81
     chunk#0 fa87ee5fc199e332-c7156c4359a54f81 size=6
 
+=== import with only by extension
+  local-write a.txt "alpha"
+  local-write b.tmp "temp"
+  local-write sub/c.txt "charlie"
+  local-write sub/d.tmp "also temp"
+  import --only *.txt
+  imported a.txt (5 bytes)
+  imported sub/c.txt (7 bytes)
+  mkdir sub
+  import: 2 imported, 0 skipped, 0 symlinks skipped
+--- tree
+  f a.txt size=5 cached=false uploaded=true etag=be6903b5f625ab5a
+  d sub/
+  f sub/c.txt size=7 cached=false uploaded=true etag=cfcb9dbba6d68599
+--- content
+  a.txt = "alpha"
+  sub/c.txt = "charlie"
+--- backend
+  chunk be6903b5f625ab5a-512a03e79074e07a size=5
+  chunk cfcb9dbba6d68599-4ef4c57cebfa8616 size=7
+  cursor = <entry-1>
+  journal <entry-1> = mkdir sub/; put a.txt 5; put sub/c.txt 7
+  folder sub [.tsync-root/4f7b4244079f8bf6-67a7ed7af26470c3] -> 547c2ad623ddba3f
+  file a.txt [.tsync-root/f01e5cbbc09d4fc4-9a0fcd66f030de75] = manifest size=5 chunks=1 h1=be6903b5f625ab5a h2=512a03e79074e07a
+    chunk#0 be6903b5f625ab5a-512a03e79074e07a size=5
+  file c.txt [547c2ad623ddba3f/d6d50f267ed1aabb-7fe71c7d92c1e0c0] = manifest size=7 chunks=1 h1=cfcb9dbba6d68599 h2=4ef4c57cebfa8616
+    chunk#0 cfcb9dbba6d68599-4ef4c57cebfa8616 size=7
+
+=== import with only directory imports its contents
+  local-write keep/a.txt "alpha"
+  local-write keep/deep/b.txt "bravo"
+  local-write drop/c.txt "charlie"
+  import --only keep
+  imported keep/a.txt (5 bytes)
+  imported keep/deep/b.txt (5 bytes)
+  mkdir keep
+  mkdir keep/deep
+  import: 2 imported, 0 skipped, 0 symlinks skipped
+--- tree
+  d keep/
+  f keep/a.txt size=5 cached=false uploaded=true etag=be6903b5f625ab5a
+  d keep/deep/
+  f keep/deep/b.txt size=5 cached=false uploaded=true etag=ac6cab7d3e498b68
+--- content
+  keep/a.txt = "alpha"
+  keep/deep/b.txt = "bravo"
+--- backend
+  chunk ac6cab7d3e498b68-bf95bad7826ecbe9 size=5
+  chunk be6903b5f625ab5a-512a03e79074e07a size=5
+  cursor = <entry-1>
+  journal <entry-1> = mkdir keep/; mkdir keep/deep/; put keep/a.txt 5; put keep/deep/b.txt 5
+  folder keep [.tsync-root/5af16eb25f0f29f5-46117405e5f6bd85] -> 547c2ad623ddba3f
+  file b.txt [3171f9431b3d5a67/3c697ec236bbf61f-698ad1290042cc94] = manifest size=5 chunks=1 h1=ac6cab7d3e498b68 h2=bf95bad7826ecbe9
+    chunk#0 ac6cab7d3e498b68-bf95bad7826ecbe9 size=5
+  folder deep [547c2ad623ddba3f/5cc19f5ab8b2e257-3bb0ce7f55a84bcb] -> 3171f9431b3d5a67
+  file a.txt [547c2ad623ddba3f/f01e5cbbc09d4fc4-9a0fcd66f030de75] = manifest size=5 chunks=1 h1=be6903b5f625ab5a h2=512a03e79074e07a
+    chunk#0 be6903b5f625ab5a-512a03e79074e07a size=5
+
+=== import only then exclude on top
+  local-write keep/a.txt "alpha"
+  local-write keep/b.tmp "temp"
+  local-write drop/c.txt "charlie"
+  import --only keep --exclude *.tmp
+  imported keep/a.txt (5 bytes)
+  mkdir keep
+  import: 1 imported, 0 skipped, 0 symlinks skipped
+--- tree
+  d keep/
+  f keep/a.txt size=5 cached=false uploaded=true etag=be6903b5f625ab5a
+--- content
+  keep/a.txt = "alpha"
+--- backend
+  chunk be6903b5f625ab5a-512a03e79074e07a size=5
+  cursor = <entry-1>
+  journal <entry-1> = mkdir keep/; put keep/a.txt 5
+  folder keep [.tsync-root/5af16eb25f0f29f5-46117405e5f6bd85] -> 547c2ad623ddba3f
+  file a.txt [547c2ad623ddba3f/f01e5cbbc09d4fc4-9a0fcd66f030de75] = manifest size=5 chunks=1 h1=be6903b5f625ab5a h2=512a03e79074e07a
+    chunk#0 be6903b5f625ab5a-512a03e79074e07a size=5
+
 === import with exclude directory
   local-write a.txt "alpha"
   local-write node_modules/lib.js "big dep"

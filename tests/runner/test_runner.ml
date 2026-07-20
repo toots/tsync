@@ -28,7 +28,7 @@ type step =
   | LocalWrite of { path : string; content : string }
   | LocalMkdir of string
   | LocalSymlink of { path : string; target : string }
-  | Import of { exclude : string list; force_rehash : bool }
+  | Import of { only : string list; exclude : string list; force_rehash : bool }
   | ExportDir
 
 type scenario = { name : string; steps : step list }
@@ -104,10 +104,11 @@ let rec render_step = function
   | LocalMkdir path -> "local-mkdir " ^ path
   | LocalSymlink { path; target } ->
       Printf.sprintf "local-symlink %s -> %s" path target
-  | Import { exclude; force_rehash } ->
+  | Import { only; exclude; force_rehash } ->
       String.concat " "
         (["import"]
         @ (if force_rehash then ["--force-rehash"] else [])
+        @ (if only <> [] then ["--only " ^ String.concat "," only] else [])
         @
         if exclude <> [] then ["--exclude " ^ String.concat "," exclude] else []
         )
@@ -357,7 +358,7 @@ let setup_client (module C : Conf.S) root staging_prefix =
         mkdir_p (Filename.dirname abs);
         Unix.symlink target abs;
         Lwt.return_unit
-    | Import { exclude; force_rehash } ->
+    | Import { only; exclude; force_rehash } ->
         let src =
           match !local_staging with
             | Some d -> d
@@ -366,7 +367,7 @@ let setup_client (module C : Conf.S) root staging_prefix =
         local_staging := None;
         let module I = Import.Make (C) in
         let+ summary =
-          I.run ~exclude ~force_rehash ~src
+          I.run ~only ~exclude ~force_rehash ~src
             ~on_dir:(fun ~rel -> Printf.printf "  mkdir %s\n" rel)
             ~on_file:(fun ~rel status ->
               match status with

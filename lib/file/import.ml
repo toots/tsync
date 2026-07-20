@@ -131,8 +131,18 @@ module Make (C : Conf.S) = struct
      - [`Keep]   — store as a first-class symlink object
      - [`Follow] — dereference and upload target content; broken links skipped
      - [`Skip]   — skip and count, no upload *)
-  let run ?(exclude = []) ?(force_rehash = false) ?(on_dir = fun ~rel:_ -> ())
-      ~src ~on_file () =
+  (* Ancestor directory rels of [rel], from the root down (e.g. "a/b/c" →
+     ["a"; "a/b"]). Used to keep markers only for dirs that contain a kept
+     entry when [only] filtering is active. *)
+  let ancestors rel =
+    let rec go acc d =
+      if d = "." || d = "/" || d = "" then acc
+      else go (d :: acc) (Filename.dirname d)
+    in
+    go [] (Filename.dirname rel)
+
+  let run ?(only = []) ?(exclude = []) ?(force_rehash = false)
+      ?(on_dir = fun ~rel:_ -> ()) ~src ~on_file () =
     let src =
       let p =
         if Filename.is_relative src then Filename.concat (Sys.getcwd ()) src
@@ -141,6 +151,35 @@ module Make (C : Conf.S) = struct
       try Unix.realpath p with _ -> p
     in
     let* dirs, files, symlinks = walk_source ~exclude src in
+    (* [only] keeps just the matching files/symlinks (empty = keep all);
+       [exclude] was already applied during the walk, so this composes as
+       (all \ exclude) ∩ only. *)
+    let only_globs = List.map Glob.of_pattern only in
+    (* [only foo] selects everything under a matching directory, mirroring how
+       [exclude foo] prunes a whole directory: a path is kept when it or any of
+       its ancestor dirs matches an [only] glob. *)
+    let kept rel =
+      only = [] || excluded only_globs rel
+      || List.exists (excluded only_globs) (ancestors rel)
+    in
+    let files = List.filter kept files in
+    let symlinks = List.filter (fun (rel, _) -> kept rel) symlinks in
+    (* When [only] is active, keep dir markers only for ancestors of kept
+       entries so non-matching branches don't leave empty folders behind. *)
+    let dirs =
+      if only = [] then dirs
+      else (
+        let keep = Hashtbl.create 64 in
+        List.iter
+          (fun rel ->
+            List.iter (fun d -> Hashtbl.replace keep d ()) (ancestors rel))
+          files;
+        List.iter
+          (fun (rel, _) ->
+            List.iter (fun d -> Hashtbl.replace keep d ()) (ancestors rel))
+          symlinks;
+        List.filter (Hashtbl.mem keep) dirs)
+    in
     let guard rel f =
       Lwt.catch f (fun exn ->
           let msg = Printexc.to_string exn in

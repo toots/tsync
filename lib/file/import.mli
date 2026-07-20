@@ -28,8 +28,10 @@ module Make (C : Conf.S) : sig
       entry. Directories are created in the manifest tree and on the backends.
       When [force_rehash] is true, existing keys are not skipped: every file is
       re-hashed, missing or changed chunks are re-uploaded, and the manifest is
-      republished. *)
+      republished. When [only] is non-empty, only entries matching one of its
+      globs are imported; [exclude] is then applied on top of that set. *)
   val run :
+    ?only:string list ->
     ?exclude:string list ->
     ?force_rehash:bool ->
     ?on_dir:(rel:string -> unit) ->

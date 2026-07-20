@@ -66,6 +66,7 @@ tsync sync --full     # clear local cache and re-download all manifests from the
 tsync recheck         # verify the remote against the local cache, repair what's possible
 tsync resync-remote   # copy missing/damaged objects from one backend to the others
 tsync import <dir>    # seed the domain from an existing folder (uploads, no data copied)
+tsync import <dir> --only '*.flac' --only cover.jpg  # import only matching entries (see below)
 tsync import <dir> --exclude "*.tmp" --exclude node_modules  # skip by glob (see below)
 tsync import <dir> --force-rehash  # re-hash and re-upload every file
 tsync export <dir>    # write every file of the domain to a plain folder
@@ -88,9 +89,11 @@ tsync set-domain --clear   # remove the default (--domain required again)
 
 The default is stored in the data directory and read by every command that accepts `--domain`. An explicit `--domain` flag always overrides it.
 
-### Glob patterns for `--exclude`
+### Glob patterns for `--only` and `--exclude`
 
-`--exclude` accepts shell-style glob patterns matched against each entry's basename **and** its full relative path, so a bare name like `node_modules` prunes that directory anywhere in the tree.
+Both `--only` and `--exclude` accept shell-style glob patterns matched against each entry's basename **and** its full relative path, so a bare name like `node_modules` matches that directory anywhere in the tree.
+
+`--only` selects which entries to import: with no `--only`, everything is imported; with one or more, only entries that match (or live under a matching directory) are kept. `--exclude` is then applied on top of that selection. Both may be repeated.
 
 | Pattern | Matches |
 |---------|---------|
@@ -104,6 +107,9 @@ tsync import . --exclude 'lost+found'   # directory named literally lost+found
 tsync import . --exclude '*.tmp'        # any .tmp file in any directory
 tsync import . --exclude '**/.git'      # .git directories at any depth
 tsync import . --exclude 'node_modules' # any directory named node_modules
+tsync import . --only 'Music'           # everything under any Music directory
+tsync import . --only '*.flac'          # only .flac files, anywhere
+tsync import . --only 'Music' --exclude '*.tmp'  # Music tree, minus .tmp files
 ```
 
 ### Versioning
