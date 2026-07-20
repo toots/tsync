@@ -90,6 +90,18 @@ let chop_slash s =
   if String.ends_with ~suffix:"/" s then String.sub s 0 (String.length s - 1)
   else s
 
+(* Escape a literal '%' as "%25". Old keys can contain a literal "%3A" etc. (the
+   retired encoding of ':' and friends), but the S3 client treats any "%XX" as an
+   already-escaped sequence and passes it through, so S3 decodes it and looks up
+   the wrong object. Escaping the '%' makes the client send "%253A", which S3
+   decodes back to the literal "%3A" the object is actually stored under. *)
+let pct_escape s =
+  let b = Buffer.create (String.length s) in
+  String.iter
+    (fun c -> if c = '%' then Buffer.add_string b "%25" else Buffer.add_char b c)
+    s;
+  Buffer.contents b
+
 (* The migration is latency-bound on backend round-trips, so run several per
    object concurrently. Batches of [parallelism] cap both the in-flight request
    count and the number of live Lwt promises (a plain [iter_p] over millions of
@@ -160,10 +172,10 @@ let migrate_backend ~dom_prefix ~ver_prefix ~jour_prefix ~trash_prefix
     Lwt.return_unit
   in
 
-  (* Fetch an object by its listed key, falling back to the percent-decoded key:
-     the old encoding does not always round-trip through the S3 client, so some
-     objects are only reachable under their decoded name. Returns the key that
-     actually worked, so the caller deletes the real object. *)
+  (* Fetch an object by its listed key, falling back to the %-escaped key (see
+     [pct_escape]): objects stored under a literal "%XX" key aren't reachable via
+     the raw listed key. Returns the key that actually worked, so the caller
+     deletes the real object. *)
   let get_object listed_key enc =
     let try_key k =
       Lwt.catch
@@ -176,14 +188,14 @@ let migrate_backend ~dom_prefix ~ver_prefix ~jour_prefix ~trash_prefix
     match d with
       | Some data -> Lwt.return_some (listed_key, data)
       | None ->
-          let decoded = dom_prefix ^ decode enc in
-          if decoded = listed_key then Lwt.return_none
+          let escaped = dom_prefix ^ pct_escape enc in
+          if escaped = listed_key then Lwt.return_none
           else
-            let+ d = try_key decoded in
+            let+ d = try_key escaped in
             (match d with
-              | Some _ -> log "recover  %s (via decoded key)" enc
+              | Some _ -> log "recover  %s (via %%-escaped key)" enc
               | None -> ());
-            Option.map (fun data -> (decoded, data)) d
+            Option.map (fun data -> (escaped, data)) d
   in
 
   let migrate_one (e : Backend.file_entry) =
@@ -197,7 +209,14 @@ let migrate_backend ~dom_prefix ~ver_prefix ~jour_prefix ~trash_prefix
           let rel = decode (chop_slash enc) in
           log "emptydir %s" rel;
           let* () = ensure_marker rel in
+          (* Drop the old object under whichever form it is stored (raw or with a
+             literal '%'); a delete of a missing key is a harmless no-op. *)
           let* () = B.delete ~key:e.key () in
+          let escaped = dom_prefix ^ pct_escape enc in
+          let* () =
+            if escaped <> e.key then B.delete ~key:escaped ()
+            else Lwt.return_unit
+          in
           incr migrated;
           Lwt.return_unit)
         else
@@ -206,7 +225,7 @@ let migrate_backend ~dom_prefix ~ver_prefix ~jour_prefix ~trash_prefix
             | None ->
                 incr failed;
                 Printf.eprintf
-                  "  FAILED   %s: not found (tried encoded and decoded)\n%!"
+                  "  FAILED   %s: not found (tried raw and %%-escaped key)\n%!"
                   e.key;
                 Lwt.return_unit
             | Some (real_key, data) -> (
