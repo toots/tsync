@@ -160,6 +160,32 @@ let migrate_backend ~dom_prefix ~ver_prefix ~jour_prefix ~trash_prefix
     Lwt.return_unit
   in
 
+  (* Fetch an object by its listed key, falling back to the percent-decoded key:
+     the old encoding does not always round-trip through the S3 client, so some
+     objects are only reachable under their decoded name. Returns the key that
+     actually worked, so the caller deletes the real object. *)
+  let get_object listed_key enc =
+    let try_key k =
+      Lwt.catch
+        (fun () ->
+          let+ d = B.get ~key:k () in
+          Some d)
+        (fun _ -> Lwt.return_none)
+    in
+    let* d = try_key listed_key in
+    match d with
+      | Some data -> Lwt.return_some (listed_key, data)
+      | None ->
+          let decoded = dom_prefix ^ decode enc in
+          if decoded = listed_key then Lwt.return_none
+          else
+            let+ d = try_key decoded in
+            (match d with
+              | Some _ -> log "recover  %s (via decoded key)" enc
+              | None -> ());
+            Option.map (fun data -> (decoded, data)) d
+  in
+
   let migrate_one (e : Backend.file_entry) =
     let enc = strip dom_prefix e.key in
     Lwt.catch
@@ -175,15 +201,25 @@ let migrate_backend ~dom_prefix ~ver_prefix ~jour_prefix ~trash_prefix
           incr migrated;
           Lwt.return_unit)
         else
-          let* data = B.get ~key:e.key () in
-          match classify data with
-            | Marker | Migrated | Not_data ->
-                (* already-migrated marker/manifest, or an empty/garbage body
-                   (e.g. trash markers, cleared wholesale below) *)
-                incr skipped;
-                log "skip     %s (already in new layout)" enc;
+          let* got = get_object e.key enc in
+          match got with
+            | None ->
+                incr failed;
+                Printf.eprintf
+                  "  FAILED   %s: not found (tried encoded and decoded)\n%!"
+                  e.key;
                 Lwt.return_unit
-            | Old -> migrate_manifest ~old_key:e.key ~rel:(decode enc) ~data)
+            | Some (real_key, data) -> (
+                match classify data with
+                  | Marker | Migrated | Not_data ->
+                      (* already-migrated marker/manifest, or an empty/garbage
+                         body (e.g. trash markers, cleared wholesale below) *)
+                      incr skipped;
+                      log "skip     %s (already in new layout)" enc;
+                      Lwt.return_unit
+                  | Old ->
+                      migrate_manifest ~old_key:real_key ~rel:(decode enc) ~data
+                ))
       (fun exn ->
         incr failed;
         Printf.eprintf "  FAILED   %s: %s\n%!" e.key (Printexc.to_string exn);

@@ -1,9 +1,11 @@
 open Lwt.Syntax
 
-let data_dir ~cache_root domain_name = Filename.concat cache_root domain_name
+(* Cache layout is defined once in {!Cache_layout}. *)
+let data_dir ~cache_root domain_name =
+  Cache_layout.cached_dir ~cache_root domain_name
 
 let manifest_dir ~cache_root domain_name =
-  Filename.concat cache_root (".manifest/" ^ domain_name)
+  Cache_layout.manifests_dir ~cache_root domain_name
 
 let strip_prefix ~domain_prefix key =
   if String.starts_with ~prefix:domain_prefix key then (

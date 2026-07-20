@@ -11,11 +11,8 @@ open Lwt.Syntax
 
 let marker_name = ".tsync-dir"
 
-let mirror_dir ~cache_root domain_name =
-  Filename.concat cache_root (".manifest/" ^ domain_name)
-
 let dir_of ~cache_root ~domain_name rel =
-  let base = mirror_dir ~cache_root domain_name in
+  let base = Cache_layout.manifests_dir ~cache_root domain_name in
   if rel = "" then base else Filename.concat base (Name_escape.encode_key rel)
 
 let marker_path ~cache_root ~domain_name rel =
