@@ -24,9 +24,7 @@ final class TsyncEnumerator: NSObject, NSFileProviderEnumerator, @unchecked Send
     func enumerateItems(for observer: any NSFileProviderEnumerationObserver, startingAt page: NSFileProviderPage) {
         Task {
             do {
-                let items = containerIdentifier == .workingSet
-                    ? try await workingSetItems()
-                    : try await containerItems()
+                let items = try await containerItems()
                 emitPage(items, from: pageOffset(page), to: observer)
             } catch {
                 observer.finishEnumeratingWithError(IPC.fileProviderError(error))
@@ -36,7 +34,11 @@ final class TsyncEnumerator: NSObject, NSFileProviderEnumerator, @unchecked Send
 
     private func containerItems() async throws -> [TsyncItem] {
         let domainPrefix = config.domainPrefix(domain.displayName)
+        // Enumerate one level at a time: the root and the working set both list the
+        // domain's top level; the OS pulls deeper containers on demand. (Enumerating
+        // the whole tree for the working set hangs on large domains.)
         let prefix = containerIdentifier == .rootContainer
+            || containerIdentifier == .workingSet
             ? domainPrefix
             : containerIdentifier.rawValue
 
@@ -128,24 +130,6 @@ final class TsyncEnumerator: NSObject, NSFileProviderEnumerator, @unchecked Send
                               modificationDate: resp.mtime.map { Date(timeIntervalSince1970: $0) },
                               etag: resp.etag, isUploaded: resp.isUploaded ?? true,
                               symlinkTarget: resp.symlinkTarget)
-    }
-
-    // ponytail: re-fetches the full listing on every page (O(n²) IPC for the working set's
-    // recursive listAll). Fine until domains get huge; add offset/limit to the IPC then.
-    private func workingSetItems() async throws -> [TsyncItem] {
-        let domainPrefix = config.domainPrefix(domain.displayName)
-        let resp = try await IPC.listAll(prefix: domainPrefix)
-        // The working set holds files only: skip directory-marker keys, which would collide
-        // with the real folders from the container enumeration.
-        let files = (resp.files ?? []).filter { !$0.key.hasSuffix("/") }
-        return files.map { entry in
-            TsyncItem.make(
-                key: entry.key, domainPrefix: domainPrefix,
-                readOnly: isReadOnly,
-                size: entry.size,
-                modificationDate: Date(timeIntervalSince1970: entry.mtime),
-                etag: entry.etag, symlinkTarget: entry.symlinkTarget)
-        }
     }
 
     /// FileProvider SIGABRTs the extension (`__FILEPROVIDER_OBSERVER_TOO_MANY_ITEMS__`) if a

@@ -176,10 +176,6 @@ public enum IPC {
         try await sendAsync(IPCRequest(action: "list_dir", path: prefix))
     }
 
-    public static func listAll(prefix: String) async throws -> IPCResponse {
-        try await sendAsync(IPCRequest(action: "list_all", path: prefix))
-    }
-
     public static func currentCursor(domain: String) async throws -> IPCResponse {
         try await sendAsync(IPCRequest(action: "cursor", domain: domain))
     }

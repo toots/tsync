@@ -67,5 +67,34 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 log.error("add domain '\(identifier, privacy: .public)' failed: \(error, privacy: .public)")
             }
         }
+
+        await reimportIfSchemaChanged()
+    }
+
+    /// The extension maps S3 keys to FileProvider items via a fixed key layout
+    /// (currently `tsync/<domain>/manifests/…`). When that mapping changes, the OS
+    /// keeps serving a stale index and never re-asks the extension, so an existing
+    /// domain can be stuck showing wrong or empty contents. Bumping this version
+    /// forces one `reimportItems` per domain to drop the stale index and re-list.
+    private static let itemSchemaVersion = 3
+
+    private func reimportIfSchemaChanged() async {
+        let marker = Config.groupContainerURL
+            .appendingPathComponent("tsync/fileprovider-schema-version")
+        let stored = (try? String(contentsOf: marker, encoding: .utf8))
+            .flatMap { Int($0.trimmingCharacters(in: .whitespacesAndNewlines)) } ?? 0
+        guard stored < Self.itemSchemaVersion else { return }
+
+        let domains = (try? await NSFileProviderManager.domains()) ?? []
+        for domain in domains {
+            guard let manager = NSFileProviderManager(for: domain) else { continue }
+            do {
+                try await manager.reimportItems(below: .rootContainer)
+                log.info("reimported domain '\(domain.identifier.rawValue, privacy: .public)'")
+            } catch {
+                log.error("reimport '\(domain.identifier.rawValue, privacy: .public)' failed: \(error, privacy: .public)")
+            }
+        }
+        try? "\(Self.itemSchemaVersion)".write(to: marker, atomically: true, encoding: .utf8)
     }
 }

@@ -122,12 +122,6 @@ let start_cmd =
       & opt (some string) None
       & info ["mount"] ~docv:"PATH" ~doc:"Mount point (default: ~/tsync/DOMAIN)")
   in
-  let domain_arg =
-    Arg.(
-      value
-      & opt (some string) None
-      & info ["domain"] ~docv:"NAME" ~doc:"Domain name (default: from config)")
-  in
   let tls_arg =
     Arg.(
       value
@@ -140,7 +134,7 @@ let start_cmd =
              (e.g. Backblaze B2). Default: from config, then the preferred \
              available backend.")
   in
-  let run mount domain tls =
+  let run mount tls =
     Log.init ();
     Log.debug "loading config from %s" runtime_paths.Runtime.config_path;
     let cfg = Conf_parsing.load runtime_paths.Runtime.config_path in
@@ -149,15 +143,8 @@ let start_cmd =
     Log.debug "TLS backend: %s (available: %s)" (Tls_conf.current ())
       (String.concat ", " (Tls_conf.available ()));
     let domains =
-      let name =
-        match domain with Some n -> Some n | None -> read_default_domain ()
-      in
-      match name with
-        | Some name -> [Conf_parsing.pick_domain ~domain:name cfg]
-        | None ->
-            if cfg.Conf_parsing.domains = [] then
-              failwith "no domains configured";
-            cfg.Conf_parsing.domains
+      if cfg.Conf_parsing.domains = [] then failwith "no domains configured";
+      cfg.Conf_parsing.domains
     in
     let mount_fn domain_name =
       match (mount, domains) with
@@ -206,7 +193,7 @@ let start_cmd =
   in
   Cmd.v
     (Cmd.info "start" ~doc:"Mount the filesystem (run via systemd unit)")
-    Term.(const run $ mount_arg $ domain_arg $ tls_arg)
+    Term.(const run $ mount_arg $ tls_arg)
 
 (* ── tsync stop ─────────────────────────────────────────────────────────── *)
 
