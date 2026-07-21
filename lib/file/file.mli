@@ -28,6 +28,17 @@ module type S = sig
   val readlink : t -> string option Lwt.t
 
   val list_dir : t -> string list Lwt.t
+
+  (** Directory listing served from the local manifest mirror: files (with real
+      keys derived from each manifest's [path]) and subdirectory names (mtime
+      unavailable locally, hence [None]). *)
+  val list_directory :
+    prefix:string ->
+    (Backend.file_entry list * (string * float option) list) Lwt.t
+
+  (** Recursive file listing under [prefix], served from the local mirror. *)
+  val list_all_files : prefix:string -> Backend.file_entry list Lwt.t
+
   val xattrs : t -> (string * string) list Lwt.t
   val is_dirty : t -> bool
   val set_dirty : t -> unit

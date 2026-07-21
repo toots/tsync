@@ -157,7 +157,7 @@ module Make (C : Conf.S) = struct
         if String.length key > 0 && key.[String.length key - 1] = '/' then key
         else key ^ "/"
       in
-      let* files = Fs.list_all_files ~prefix in
+      let* files = F.list_all_files ~prefix in
       Lwt_list.iter_s
         (fun (e : Backend.file_entry) ->
           Lwt.catch
@@ -169,18 +169,10 @@ module Make (C : Conf.S) = struct
     end
     else F.ensure_cached key
 
-  let full_resync () =
-    let rec walk dir =
-      if Sys.file_exists dir then
-        Array.iter
-          (fun name ->
-            let p = Filename.concat dir name in
-            if Sys.is_directory p then walk p
-            else (try Unix.unlink p with _ -> ()))
-          (try Sys.readdir dir with _ -> [||])
-    in
-    walk C.cache_root;
-    Lwt.return_unit
+  (* The mirror is cleared and rebuilt by the [sync --full] client before it
+     signals us; FUSE re-reads the fresh mirror on the next lookup, so there is
+     nothing destructive to do here. *)
+  let full_resync () = Lwt.return_unit
 
   let ipc_hooks mount_point =
     Ih.

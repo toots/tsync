@@ -28,7 +28,7 @@ type step =
   | LocalWrite of { path : string; content : string }
   | LocalMkdir of string
   | LocalSymlink of { path : string; target : string }
-  | Import of { exclude : string list; force_rehash : bool }
+  | Import of { only : string list; exclude : string list; force_rehash : bool }
   | ExportDir
 
 type scenario = { name : string; steps : step list }
@@ -104,10 +104,11 @@ let rec render_step = function
   | LocalMkdir path -> "local-mkdir " ^ path
   | LocalSymlink { path; target } ->
       Printf.sprintf "local-symlink %s -> %s" path target
-  | Import { exclude; force_rehash } ->
+  | Import { only; exclude; force_rehash } ->
       String.concat " "
         (["import"]
         @ (if force_rehash then ["--force-rehash"] else [])
+        @ (if only <> [] then ["--only " ^ String.concat "," only] else [])
         @
         if exclude <> [] then ["--exclude " ^ String.concat "," exclude] else []
         )
@@ -179,6 +180,7 @@ let setup_client (module C : Conf.S) root staging_prefix =
   let module H = Ipc_handler.Make (C) (F) in
   let module Sp = Sync_poller.Make (C) (F) in
   let module J = Journal.Make (C) in
+  let module L = Layout.Inode.Make (C) in
   let key p = C.domain_prefix ^ p in
   let strip_root p =
     if String.length p > 0 && p.[0] = '/' then
@@ -249,7 +251,9 @@ let setup_client (module C : Conf.S) root staging_prefix =
     | CorruptRemoteChunk { path; index } ->
         let* ck = remote_chunk_key path index in
         B.put ~key:ck ~data:"garbage" ()
-    | DeleteRemoteManifest p -> B.delete ~key:(key p) ()
+    | DeleteRemoteManifest p ->
+        let* bk = L.manifest_key (key p) in
+        B.delete ~key:bk ()
     | s -> failwith ("not a backend-damage step: " ^ render_step s)
   in
   let mkdir_p d =
@@ -354,7 +358,7 @@ let setup_client (module C : Conf.S) root staging_prefix =
         mkdir_p (Filename.dirname abs);
         Unix.symlink target abs;
         Lwt.return_unit
-    | Import { exclude; force_rehash } ->
+    | Import { only; exclude; force_rehash } ->
         let src =
           match !local_staging with
             | Some d -> d
@@ -363,7 +367,7 @@ let setup_client (module C : Conf.S) root staging_prefix =
         local_staging := None;
         let module I = Import.Make (C) in
         let+ summary =
-          I.run ~exclude ~force_rehash ~src
+          I.run ~only ~exclude ~force_rehash ~src
             ~on_dir:(fun ~rel -> Printf.printf "  mkdir %s\n" rel)
             ~on_file:(fun ~rel status ->
               match status with
@@ -426,9 +430,9 @@ let setup_client (module C : Conf.S) root staging_prefix =
         let+ dests = M.resync () in
         List.iter
           (fun (d : Mirror.dest_stats) ->
-            List.iter (Printf.printf "  copied %s\n") d.Mirror.copied;
-            (* Bytes are omitted: manifest objects embed mtimes, so their
-               sizes are not deterministic. *)
+            (* Only counts: copied keys carry non-deterministic folder ids /
+               version timestamps, and the aliased backend dump already shows the
+               resulting state. Bytes are omitted (manifests embed mtimes). *)
             Printf.printf "  resync backend #%d: %d checked, %d copied\n"
               (d.Mirror.index + 1) d.Mirror.checked
               (List.length d.Mirror.copied))
@@ -646,6 +650,9 @@ let dump_backend_at ~backend_root ~domain_prefix ~chunk_prefix ~journal_prefix
     index 0 journal_names
   in
   let is_marker k = String.length k > 0 && k.[String.length k - 1] = '/' in
+  (* Folder ids are deterministic (the RNG is seeded per scenario), so the dump
+     prints them raw: a reviewer can trace [file <id>/<hash>] back to the
+     [folder … -> <id>] marker that named it. *)
   Lwt_list.iter_s
     (fun (e : Backend.file_entry) ->
       (* Internal prefixes have no meaningful directories; ignore the empty-dir
@@ -677,43 +684,55 @@ let dump_backend_at ~backend_root ~domain_prefix ~chunk_prefix ~journal_prefix
                 Option.value ~default:0 (Hashtbl.find_opt version_alias e.key)
               in
               let+ data = B.get ~key:e.key () in
-              let desc =
+              let name, desc =
                 match Manifest.of_string data with
                   | `Clean m ->
-                      Printf.sprintf "manifest size=%Ld chunks=%d"
-                        m.Manifest.size
-                        (List.length m.Manifest.chunks)
-                  | `Dirty -> "dirty"
-                  | exception _ -> "raw"
+                      ( m.Manifest.name,
+                        Printf.sprintf "manifest size=%Ld chunks=%d"
+                          m.Manifest.size
+                          (List.length m.Manifest.chunks) )
+                  | `Dirty -> (rel, "dirty")
+                  | exception _ -> (rel, "raw")
               in
-              Printf.printf "  version %s#%d = %s\n" rel n desc
+              Printf.printf "  version %s [%s]#%d = %s\n" name rel n desc
           | None ->
               Printf.printf "  other %s size=%d\n" e.key e.size;
               Lwt.return_unit)
       else if starts_with domain_prefix e.key then (
         let rel = rel_key e.key in
-        if String.length e.key > 0 && e.key.[String.length e.key - 1] = '/' then (
-          Printf.printf "  dir %s\n" rel;
-          Lwt.return_unit)
+        if String.length e.key > 0 && e.key.[String.length e.key - 1] = '/' then
+          (* Empty-namespace directories are a local-backend artifact (S3 has no
+             such object); skip them. *)
+          Lwt.return_unit
         else
           let+ data = B.get ~key:e.key () in
-          match Manifest.of_string data with
-            | `Clean { symlink = Some target; _ } ->
-                Printf.printf "  symlink %s -> %s\n" rel target
-            | `Clean m ->
-                Printf.printf
-                  "  file %s = manifest size=%Ld chunks=%d h1=%s h2=%s\n" rel
-                  m.Manifest.size
-                  (List.length m.Manifest.chunks)
-                  m.Manifest.h1 m.Manifest.h2;
-                List.iter
-                  (fun (c : Manifest.chunk_entry) ->
-                    Printf.printf "    chunk#%d %s size=%d\n" c.index
-                      (Manifest.chunk_key c) c.size)
-                  m.Manifest.chunks
-            | `Dirty -> Printf.printf "  file %s = dirty\n" rel
-            | exception _ ->
-                Printf.printf "  file %s = raw size=%d\n" rel e.size)
+          match Folder.marker_of_string data with
+            | Some m ->
+                if starts_with (domain_prefix ^ Folder.trash_id ^ "/") e.key
+                then
+                  Printf.printf "  trash %s -> %s\n" m.Folder.name m.Folder.id
+                else
+                  Printf.printf "  folder %s [%s] -> %s\n" m.Folder.name rel
+                    m.Folder.id
+            | None -> (
+                match Manifest.of_string data with
+                  | `Clean { symlink = Some target; name; _ } ->
+                      Printf.printf "  symlink %s [%s] -> %s\n" name rel target
+                  | `Clean m ->
+                      Printf.printf
+                        "  file %s [%s] = manifest size=%Ld chunks=%d h1=%s \
+                         h2=%s\n"
+                        m.Manifest.name rel m.Manifest.size
+                        (List.length m.Manifest.chunks)
+                        m.Manifest.h1 m.Manifest.h2;
+                      List.iter
+                        (fun (c : Manifest.chunk_entry) ->
+                          Printf.printf "    chunk#%d %s size=%d\n" c.index
+                            (Manifest.chunk_key c) c.size)
+                        m.Manifest.chunks
+                  | `Dirty -> Printf.printf "  file %s = dirty\n" rel
+                  | exception _ ->
+                      Printf.printf "  file %s = raw size=%d\n" rel e.size))
       else (
         Printf.printf "  other %s size=%d\n" e.key e.size;
         Lwt.return_unit))
@@ -721,8 +740,15 @@ let dump_backend_at ~backend_root ~domain_prefix ~chunk_prefix ~journal_prefix
 
 (* ── Scenario runners ─────────────────────────────────────────────────────── *)
 
+(* Seed the RNG so [Folder.new_id] is deterministic within a scenario: folder ids
+   are then stable across runs, which keeps both the backend-key ordering and the
+   snapshots reproducible (and makes the real ids readable in the dump). Each
+   scenario re-seeds so it stays independent of the ones before it. *)
+let reset_ids () = Random.init 0x7c9c5
+
 let run_scenario ?(versioning = false) ?(symlink_policy = `Keep)
     ({ name; steps } : scenario) =
+  reset_ids ();
   Printf.printf "=== %s\n" name;
   List.iter (fun s -> Printf.printf "  %s\n" (render_step s)) steps;
   let root = Filename.temp_dir "tsync-test" "" in
@@ -799,6 +825,7 @@ let run_scenario ?(versioning = false) ?(symlink_policy = `Keep)
 
 let run_two_client_scenario ?(versioning = false)
     ({ name; steps } : two_client_scenario) =
+  reset_ids ();
   Printf.printf "=== %s\n" name;
   List.iter
     (fun s ->
@@ -918,6 +945,7 @@ let make_conf ?(versioning = false) ~client_name ~backend_root ~cache_root
 (* Single client: after draining uploads, snapshot the listing IPC responses
    (directory keys, logical size, content-hash etag, normalized mtime). *)
 let run_ipc_scenario ?versioning ({ name; steps } : scenario) =
+  reset_ids ();
   Printf.printf "=== %s\n" name;
   List.iter (fun s -> Printf.printf "  %s\n" (render_step s)) steps;
   let root = Filename.temp_dir "tsync-ipc" "" in
@@ -951,6 +979,7 @@ let run_ipc_scenario ?versioning ({ name; steps } : scenario) =
    probed from several anchors — a baseline (working delta), B's current cursor
    (up to date), and a pruned-past anchor (stale → full re-list). *)
 let run_ipc_changes_scenario ?versioning ({ name; steps } : scenario) =
+  reset_ids ();
   Printf.printf "=== %s\n" name;
   List.iter (fun s -> Printf.printf "  A: %s\n" (render_step s)) steps;
   let root = Filename.temp_dir "tsync-ipc2" "" in

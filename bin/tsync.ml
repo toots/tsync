@@ -12,6 +12,27 @@ let verbose_arg =
 
 (* ── Helpers ─────────────────────────────────────────────────────────────── *)
 
+(* Run [f] over [xs] with at most [parallelism] concurrent operations, in
+   batches so both the in-flight request count and the number of live Lwt
+   promises stay bounded (a plain [iter_p] over a huge list would allocate a
+   promise per element up front). Latency-bound backend work benefits most. *)
+let iter_pooled ?(parallelism = 32) f xs =
+  let open Lwt.Syntax in
+  let rec take n = function
+    | x :: tl when n > 0 ->
+        let batch, rest = take (n - 1) tl in
+        (x :: batch, rest)
+    | rest -> ([], rest)
+  in
+  let rec loop = function
+    | [] -> Lwt.return_unit
+    | xs ->
+        let batch, rest = take parallelism xs in
+        let* () = Lwt_list.iter_p f batch in
+        loop rest
+  in
+  loop xs
+
 let rec mkdir_p path =
   if not (Sys.file_exists path) then begin
     mkdir_p (Filename.dirname path);
@@ -422,25 +443,38 @@ let ls_cmd =
          (* Versioned paths in this directory with no live manifest. *)
          let (module B : Backend.S) = List.hd C.backends in
          let reldir =
-           String.sub prefix dp_len (String.length prefix - dp_len)
+           let r = String.sub prefix dp_len (String.length prefix - dp_len) in
+           if String.ends_with ~suffix:"/" r then
+             String.sub r 0 (String.length r - 1)
+           else r
          in
          let seen = Hashtbl.create 16 in
-         let* entries = B.list_all ~prefix:(C.versions_prefix ^ reldir) () in
+         (* Versions of files in this directory share its folder id. *)
+         let* fid =
+           Folder_ids.resolve ~cache_root:C.cache_root
+             ~domain_name:C.domain_name reldir
+         in
+         let* entries = B.list_all ~prefix:(C.versions_prefix ^ fid ^ "/") () in
          Lwt_list.iter_s
            (fun (e : Backend.file_entry) ->
-             match
-               Versioning.parse ~versions_prefix:C.versions_prefix e.key
-             with
-               | Some (rel, _) when not (Hashtbl.mem seen rel) ->
-                   Hashtbl.add seen rel ();
-                   let child =
-                     String.sub rel (String.length reldir)
-                       (String.length rel - String.length reldir)
-                   in
-                   if String.contains child '/' then Lwt.return_unit
-                   else
-                     let+ head = B.head_opt ~key:(C.domain_prefix ^ rel) () in
-                     if head = None then Printf.printf "deleted  %s\n" child
+             (* Version keys are hashed; the real path is in the version body. *)
+               match
+                 Versioning.parse ~versions_prefix:C.versions_prefix e.key
+               with
+               | Some (hrel, _) when not (Hashtbl.mem seen hrel) -> (
+                   Hashtbl.add seen hrel ();
+                   let* data = B.get ~key:e.key () in
+                   match Manifest.of_string data with
+                     | `Clean m ->
+                         (* [hrel] is the manifest key tail; a missing live
+                            manifest means the file was deleted. The leaf name is
+                            the version body's own name. *)
+                         let+ head =
+                           B.head_opt ~key:(C.domain_prefix ^ hrel) ()
+                         in
+                         if head = None then
+                           Printf.printf "deleted  %s\n" m.Manifest.name
+                     | `Dirty | (exception _) -> Lwt.return_unit)
                | _ -> Lwt.return_unit)
            entries
        end
@@ -474,13 +508,13 @@ let versions_cmd =
       (let open Lwt.Syntax in
        let cfg = Conf_parsing.load runtime_paths.Runtime.config_path in
        let (module C : Conf.S) = make_conf ?domain cfg in
+       let module St = Store.Make (C) (Layout.Inode.Make (C)) in
        let (module B : Backend.S) = List.hd C.backends in
        let parse = Versioning.parse ~versions_prefix:C.versions_prefix in
        match path with
          | Some rel ->
-             let+ entries =
-               B.list_all ~prefix:(C.versions_prefix ^ rel ^ "/") ()
-             in
+             let* dir = St.version_dir ~key:(C.domain_prefix ^ rel) in
+             let+ entries = B.list_all ~prefix:dir () in
              let versions =
                entries
                |> List.filter_map (fun (e : Backend.file_entry) ->
@@ -498,7 +532,11 @@ let versions_cmd =
          | None ->
              (* Group every version by path; a path with no live manifest is a
                 deleted file. *)
-             let latest = Hashtbl.create 64 and count = Hashtbl.create 64 in
+             (* Keyed by hashed rel; [sample] keeps one version key per file so a
+                deleted file's real path can be read from its version body. *)
+             let latest = Hashtbl.create 64
+             and count = Hashtbl.create 64
+             and sample = Hashtbl.create 64 in
              let* entries = B.list_all ~prefix:C.versions_prefix () in
              List.iter
                (fun (e : Backend.file_entry) ->
@@ -510,23 +548,34 @@ let versions_cmd =
                        in
                        if Int64.compare ts best > 0 then
                          Hashtbl.replace latest rel ts;
+                       Hashtbl.replace sample rel e.key;
                        Hashtbl.replace count rel
                          (1
                          + Option.value ~default:0 (Hashtbl.find_opt count rel)
                          )
                    | None -> ())
                entries;
+             let real_path hrel =
+               Lwt.catch
+                 (fun () ->
+                   let+ data = B.get ~key:(Hashtbl.find sample hrel) () in
+                   match Manifest.of_string data with
+                     | `Clean m -> m.Manifest.name (* TODO(inode): leaf only *)
+                     | _ -> hrel)
+                 (fun _ -> Lwt.return hrel)
+             in
              let* deleted =
                Hashtbl.fold
                  (fun rel ts acc ->
                    let* acc = acc in
-                   let+ head = B.head_opt ~key:(C.domain_prefix ^ rel) () in
+                   let* head = B.head_opt ~key:(C.domain_prefix ^ rel) () in
                    if head = None then
-                     ( rel,
+                     let+ path = real_path rel in
+                     ( path,
                        ts,
                        Option.value ~default:1 (Hashtbl.find_opt count rel) )
                      :: acc
-                   else acc)
+                   else Lwt.return acc)
                  latest (Lwt.return [])
              in
              let deleted = List.sort compare deleted in
@@ -578,6 +627,99 @@ let purge_cmd =
   Cmd.v
     (Cmd.info "purge" ~doc:"Delete all versions from trash")
     Term.(const run $ path_arg)
+
+(* ── tsync trash / untrash ───────────────────────────────────────────────── *)
+
+let trash_domain_arg =
+  Arg.(
+    value
+    & opt (some string) None
+    & info ["domain"] ~docv:"NAME" ~doc:"Domain name (default: from config)")
+
+let trash_markers (module B : Backend.S) domain_prefix =
+  B.list_all ~prefix:(domain_prefix ^ Folder.trash_id ^ "/") ()
+
+let trash_cmd =
+  let run domain =
+    Lwt_main.run
+      (let open Lwt.Syntax in
+       let cfg = Conf_parsing.load runtime_paths.Runtime.config_path in
+       let (module C : Conf.S) = make_conf ?domain cfg in
+       let (module B : Backend.S) = List.hd C.backends in
+       let* markers = trash_markers (module B) C.domain_prefix in
+       Lwt_list.iter_s
+         (fun (e : Backend.file_entry) ->
+           let+ data = B.get ~key:e.key () in
+           match Folder.trash_path_of_string data with
+             | Some p -> Printf.printf "%s\n" p
+             | None -> ())
+         markers)
+  in
+  Cmd.v
+    (Cmd.info "trash" ~doc:"List trashed folders")
+    Term.(const run $ trash_domain_arg)
+
+let untrash_cmd =
+  let path_arg =
+    Arg.(required & pos 0 (some string) None & info [] ~docv:"PATH")
+  in
+  let run path domain =
+    Lwt_main.run
+      (let open Lwt.Syntax in
+       let cfg = Conf_parsing.load runtime_paths.Runtime.config_path in
+       let (module C : Conf.S) = make_conf ?domain cfg in
+       let (module B : Backend.S) = List.hd C.backends in
+       let* markers = trash_markers (module B) C.domain_prefix in
+       let* found =
+         Lwt_list.filter_map_s
+           (fun (e : Backend.file_entry) ->
+             let+ data = B.get ~key:e.key () in
+             match
+               (Folder.trash_path_of_string data, Folder.marker_of_string data)
+             with
+               | Some p, Some m when p = path -> Some (e.key, m)
+               | _ -> None)
+           markers
+       in
+       match found with
+         | [] ->
+             Printf.eprintf "not in trash: %s\n" path;
+             Lwt.return_unit
+         | (trash_key, m) :: _ ->
+             (* Re-attach the folder under its original parent's namespace; the
+                subtree is untouched, so this is O(1). Its local mirror copy is
+                rebuilt by a subsequent full sync. *)
+             let par = match Filename.dirname path with "." -> "" | d -> d in
+             let* pid =
+               Folder_ids.resolve ~cache_root:C.cache_root
+                 ~domain_name:C.domain_name par
+             in
+             let new_key =
+               C.domain_prefix
+               ^ Folder.child_key ~folder_id:pid (Filename.basename path)
+             in
+             let marker =
+               Folder.marker_to_string
+                 { Folder.name = m.Folder.name; id = m.Folder.id }
+             in
+             let* () =
+               Lwt_list.iter_s
+                 (fun (module Bk : Backend.S) ->
+                   Bk.put ~key:new_key ~data:marker ())
+                 C.backends
+             in
+             let* () =
+               Lwt_list.iter_s
+                 (fun (module Bk : Backend.S) -> Bk.delete ~key:trash_key ())
+                 C.backends
+             in
+             Printf.printf
+               "restored %s — run 'tsync sync' to rebuild it locally\n" path;
+             Lwt.return_unit)
+  in
+  Cmd.v
+    (Cmd.info "untrash" ~doc:"Restore a trashed folder (see: tsync trash)")
+    Term.(const run $ path_arg $ trash_domain_arg)
 
 (* ── tsync expire ────────────────────────────────────────────────────────── *)
 
@@ -679,6 +821,14 @@ let sync_cmd =
             "Force a full resync: clear the local cache and re-download all \
              manifests from the backend")
   in
+  let parallelism_arg =
+    Arg.(
+      value & opt int 32
+      & info ["parallelism"; "j"] ~docv:"N"
+          ~doc:
+            "Max concurrent backend operations during a full resync (default \
+             32). Lower it if you hit DNS or open-file limits.")
+  in
   let render_op = function
     | `Put (k, size) -> Printf.sprintf "put %s (%Ld bytes)" k size
     | `Delete k -> "delete " ^ k
@@ -688,7 +838,7 @@ let sync_cmd =
         Printf.sprintf "rename %s -> %s%s" src dst
           (if is_dir then " (dir)" else "")
   in
-  let run domain full v =
+  let run domain full parallelism v =
     verbose := v;
     Lwt_main.run
       (let open Lwt.Syntax in
@@ -696,6 +846,7 @@ let sync_cmd =
        let (module C : Conf.S) = make_conf ?domain cfg in
        let module J = Journal.Make (C) in
        let module Fs = File_store.Make (C) in
+       let module St = Store.Make (C) (Layout.Inode.Make (C)) in
        let module Sq = Sync_queue.Make (C) in
        let module F = File.Make (C) (Sq) in
        Sq.start
@@ -706,22 +857,45 @@ let sync_cmd =
        if !verbose then
          Log.info "syncing domain %s (client %s, uuid %s)" C.domain_name
            C.client_name my_uuid;
+
+       (* ── Sync bookmark: the journal key up to which this client is synced ── *)
+       let last_sync_file =
+         Filename.concat C.data_dir ("last-sync-" ^ C.domain_name)
+       in
+       let read_bookmark () =
+         if Sys.file_exists last_sync_file then (
+           let ic = open_in last_sync_file in
+           let s = input_line ic in
+           close_in ic;
+           String.trim s)
+         else ""
+       in
+       let write_bookmark key =
+         let oc = open_out last_sync_file in
+         output_string oc key;
+         close_out oc
+       in
+
+       (* ── Journal sync: recover this client's own pending entries ────────── *)
+       (* A pending entry that never reached the backend is replayed, minus any
+          op another client has since overridden (last-writer-wins). *)
        let recover_entry entry_key ops =
          let short = Filename.basename entry_key in
-         let remote_key = C.journal_prefix ^ entry_key in
-         let* head = Fs.head_opt ~key:remote_key in
+         let* head = Fs.head_opt ~key:(C.journal_prefix ^ entry_key) in
          if head <> None then begin
            if !verbose then
              Log.info "%s: already published remotely, cleaned up" short;
            J.delete_local_pending ~entry_key
          end
          else begin
+           (* Keys another client touched after this entry — those ops lose. *)
            let* newer_keys = Fs.list_journal_keys ~start_after:entry_key () in
            let remotely_modified = Hashtbl.create 16 in
            let* () =
-             Lwt_list.iter_s
+             iter_pooled
                (fun (ek, uuid) ->
-                 if uuid <> my_uuid then
+                 if uuid = my_uuid then Lwt.return_unit
+                 else
                    let+ e = Fs.get_journal_entry ek in
                    match e with
                      | None -> ()
@@ -735,8 +909,7 @@ let sync_cmd =
                                | `Rename { Journal.dst; src; _ } ->
                                    Hashtbl.replace remotely_modified dst ();
                                    Hashtbl.replace remotely_modified src ())
-                           remote_ops
-                 else Lwt.return_unit)
+                           remote_ops)
                newer_keys
            in
            let replayed =
@@ -758,6 +931,7 @@ let sync_cmd =
                (if skipped > 0 then
                   Printf.sprintf " (%d skipped — remotely overridden)" skipped
                 else "");
+           (* Ops keep their journal order (a rename must follow its create). *)
            let* () =
              Lwt_list.iter_s
                (fun op ->
@@ -770,19 +944,12 @@ let sync_cmd =
                            if cached then F.upload key else Lwt.return_unit
                        | `Delete rel_key ->
                            F.apply_delete (C.domain_prefix ^ rel_key)
-                       | `Mkdir rel_key ->
-                           Fs.create_directory ~key:(C.domain_prefix ^ rel_key)
-                       | `Rmdir rel_key ->
-                           Fs.delete_dir ~prefix:(C.domain_prefix ^ rel_key)
-                       | `Rename
-                           { Journal.dst = dst_rel; src = src_rel; is_dir; _ }
-                         ->
-                           let src_key = C.domain_prefix ^ src_rel in
-                           let dst_key = C.domain_prefix ^ dst_rel in
-                           if is_dir then
-                             Fs.rename_directory ~src_prefix:(src_key ^ "/")
-                               ~dst_prefix:(dst_key ^ "/")
-                           else Fs.rename_file ~src_key ~dst_key)
+                       | `Mkdir rel_key -> F.mkdir (C.domain_prefix ^ rel_key)
+                       | `Rmdir rel_key -> F.rmdir (C.domain_prefix ^ rel_key)
+                       | `Rename { Journal.dst = dst_rel; src = src_rel; _ } ->
+                           F.rename
+                             ~src:(C.domain_prefix ^ src_rel)
+                             ~dst:(C.domain_prefix ^ dst_rel))
                    (fun exn ->
                      Log.err "recover_pending_ops: %s" (Printexc.to_string exn);
                      Lwt.return_unit))
@@ -797,104 +964,116 @@ let sync_cmd =
            J.delete_local_pending ~entry_key
          end
        in
-       let* pending = J.local_pending_entries ~uuid:my_uuid in
-       if !verbose then
-         Log.info "recovering %d pending journal entr%s" (List.length pending)
-           (if List.length pending = 1 then "y" else "ies");
-       let* () =
+       let recover_pending () =
+         let* pending = J.local_pending_entries ~uuid:my_uuid in
+         if !verbose then
+           Log.info "recovering %d pending journal entr%s" (List.length pending)
+             (if List.length pending = 1 then "y" else "ies");
+         (* Sequential: entries replay in journal order. *)
          Lwt_list.iter_s
            (fun (entry_key, ops) -> recover_entry entry_key ops)
            pending
        in
-       if !verbose then Log.info "draining upload queue";
-       let* () = Sq.drain () in
-       let share_dir = C.data_dir in
-       let last_sync_file =
-         Filename.concat share_dir ("last-sync-" ^ C.domain_name)
+
+       (* ── Manifest sync (full): rebuild the local mirror from the backend ── *)
+       (* Walk the inode tree from the root: each folder namespace lists its file
+          manifests and folder markers; a marker gives a subfolder's name+id
+          (recorded locally so keys resolve) and the id of its own namespace to
+          recurse into.
+
+          Concurrency is bounded by a single [pool] shared across the whole
+          recursion, so in-flight backend connections and open files stay under
+          [parallelism] no matter how wide or deep the tree — a per-namespace
+          bound would multiply with depth and exhaust DNS / file descriptors. A
+          pool slot only covers a fetch and its immediate local write; recursion
+          runs after the slot is released, so a deep tree cannot deadlock. *)
+       let rebuild_mirror () =
+         let pool =
+           Lwt_pool.create (max 1 parallelism) (fun () -> Lwt.return_unit)
+         in
+         let use f = Lwt_pool.use pool f in
+         let join rel name = if rel = "" then name else rel ^ "/" ^ name in
+         let count = ref 0 and failed = ref 0 in
+         let rec walk folder_id rel =
+           let* entries = use (fun () -> St.list_namespace ~folder_id) in
+           Lwt_list.iter_p
+             (fun (e : Backend.file_entry) ->
+               Lwt.catch
+                 (fun () ->
+                   let* next =
+                     use (fun () ->
+                         let* data = St.get_object ~bkey:e.key in
+                         match Folder.marker_of_string data with
+                           | Some m ->
+                               let child = join rel m.Folder.name in
+                               let+ () =
+                                 Folder_ids.write ~cache_root:C.cache_root
+                                   ~domain_name:C.domain_name child m
+                               in
+                               Some (m.Folder.id, child)
+                           | None -> (
+                               match Manifest.of_string data with
+                                 | `Clean man as state ->
+                                     incr count;
+                                     if !verbose then
+                                       Log.info "manifest %s"
+                                         (join rel man.Manifest.name);
+                                     let+ () =
+                                       F.write_manifest
+                                         (C.domain_prefix
+                                        ^ join rel man.Manifest.name)
+                                         state
+                                     in
+                                     None
+                                 | `Dirty -> Lwt.return_none
+                                 | exception _ -> Lwt.return_none))
+                   in
+                   match next with
+                     | Some (id, child) -> walk id child
+                     | None -> Lwt.return_unit)
+                 (fun exn ->
+                   incr failed;
+                   Log.warn "resync %s: %s" e.key (Printexc.to_string exn);
+                   Lwt.return_unit))
+             entries
+         in
+         let+ () = walk Folder.root_id "" in
+         (!count, !failed)
        in
-       let last_sync_key =
-         if Sys.file_exists last_sync_file then (
-           let ic = open_in last_sync_file in
-           let s = input_line ic in
-           close_in ic;
-           String.trim s)
-         else ""
-       in
-       if !verbose then
-         Log.info "last sync bookmark: %s"
-           (if last_sync_key = "" then "none (first run)" else last_sync_key);
-       let* all_keys = Fs.list_journal_keys () in
-       if !verbose then
-         Log.info "journal: %d entr%s" (List.length all_keys)
-           (if List.length all_keys = 1 then "y" else "ies");
-       let need_full_resync =
-         if full || last_sync_key = "" then true
-         else (
-           match all_keys with
-             | [] -> false
-             | (oldest_key, _) :: _ ->
-                 Journal.timestamp_ms_of_filename oldest_key
-                 > Journal.timestamp_ms_of_filename last_sync_key)
-       in
-       if need_full_resync then begin
-         if !verbose then
-           Log.info "full resync: %s"
-             (if full then "--full flag"
-              else if last_sync_key = "" then "no bookmark (first run)"
-              else "bookmark older than oldest journal entry");
+       let full_resync reason =
+         if !verbose then Log.info "full resync: %s" reason;
+         (* Clear the mirror ourselves, then rebuild it, and only once every
+            manifest is in place notify the daemon so it re-reads the complete,
+            fresh mirror (rather than an empty one mid-rebuild). *)
+         let* () =
+           Local.clear ~cache_root:C.cache_root ~domain_name:C.domain_name
+         in
+         let* n, failed = rebuild_mirror () in
+         write_bookmark (C.journal_prefix ^ J.entry_key ());
          (try
-            if !verbose then Log.info "sending full_resync to daemon";
+            if !verbose then Log.info "notifying daemon of completed resync";
             ignore (ipc_action ~socket_path:C.socket_path "full_resync")
           with
            | Failure msg -> Printf.eprintf "Warning: full_resync: %s\n" msg
            | _ -> ());
-         let* files = Fs.list_all_files ~prefix:C.domain_prefix in
-         let is_marker k =
-           String.length k > 0 && k.[String.length k - 1] = '/'
-         in
-         let file_entries =
-           List.filter
-             (fun (e : Backend.file_entry) -> not (is_marker e.key))
-             files
-         in
-         Log.info "downloading %d manifest%s" (List.length file_entries)
-           (if List.length file_entries = 1 then "" else "s");
-         let pool =
-           Lwt_pool.create C.max_downloads (fun () -> Lwt.return_unit)
-         in
-         let* () =
-           Lwt_list.iter_p
-             (fun (e : Backend.file_entry) ->
-               Lwt_pool.use pool (fun () ->
-                   Lwt.catch
-                     (fun () ->
-                       let* m = F.resolved_manifest e.key in
-                       match m with
-                         | Some state ->
-                             if !verbose then Log.info "manifest %s" e.key;
-                             F.write_manifest e.key state
-                         | None -> Lwt.return_unit)
-                     (fun exn ->
-                       Log.warn "manifest %s: %s" e.key (Printexc.to_string exn);
-                       Lwt.return_unit)))
-             file_entries
-         in
-         let new_key = C.journal_prefix ^ J.entry_key () in
-         let oc = open_out last_sync_file in
-         output_string oc new_key;
-         close_out oc;
-         Printf.printf "full resync: %d manifest%s downloaded\n"
-           (List.length file_entries)
-           (if List.length file_entries = 1 then "" else "s");
+         Printf.printf "full resync: %d manifest%s downloaded%s\n" n
+           (if n = 1 then "" else "s")
+           (if failed > 0 then
+              Printf.sprintf
+                " (%d failed — re-run 'tsync sync --full' to complete)" failed
+            else "");
          Lwt.return_unit
-       end
-       else begin
+       in
+
+       (* ── Journal sync (incremental): apply other clients' recent entries ── *)
+       let incremental ~last_sync_key ~all_keys =
          let last_sync_basename = Filename.basename last_sync_key in
          let recent_foreign =
            all_keys
            |> List.filter (fun (k, _) -> k > last_sync_basename)
            |> List.filter (fun (_, uuid) -> uuid <> my_uuid)
          in
+         (* Sequential: foreign entries apply in journal order. *)
          let* () =
            Lwt_list.iter_s
              (fun (ek, _) ->
@@ -912,14 +1091,39 @@ let sync_cmd =
            | [] -> ()
            | _ ->
                let last_key, _ = List.nth all_keys (List.length all_keys - 1) in
-               let oc = open_out last_sync_file in
-               output_string oc (C.journal_prefix ^ last_key);
-               close_out oc);
+               write_bookmark (C.journal_prefix ^ last_key));
          let n = List.length recent_foreign in
          Printf.printf "%d journal entr%s from other clients\n" n
            (if n = 1 then "y" else "ies");
          Lwt.return_unit
-       end)
+       in
+
+       (* ── Main flow ──────────────────────────────────────────────────────── *)
+       let* () = recover_pending () in
+       if !verbose then Log.info "draining upload queue";
+       let* () = Sq.drain () in
+       let last_sync_key = read_bookmark () in
+       if !verbose then
+         Log.info "last sync bookmark: %s"
+           (if last_sync_key = "" then "none (first run)" else last_sync_key);
+       let* all_keys = Fs.list_journal_keys () in
+       if !verbose then
+         Log.info "journal: %d entr%s" (List.length all_keys)
+           (if List.length all_keys = 1 then "y" else "ies");
+       let resync_reason =
+         if full then Some "--full flag"
+         else if last_sync_key = "" then Some "no bookmark (first run)"
+         else (
+           match all_keys with
+             | (oldest_key, _) :: _
+               when Journal.timestamp_ms_of_filename oldest_key
+                    > Journal.timestamp_ms_of_filename last_sync_key ->
+                 Some "bookmark older than oldest journal entry"
+             | _ -> None)
+       in
+       match resync_reason with
+         | Some reason -> full_resync reason
+         | None -> incremental ~last_sync_key ~all_keys)
   in
   Cmd.v
     (Cmd.info "sync"
@@ -929,7 +1133,7 @@ let sync_cmd =
           resync (triggered by --full or when the local bookmark is stale) \
           clears the cache and re-downloads all manifests. Pass --verbose to \
           see a step-by-step breakdown.")
-    Term.(const run $ domain_arg $ full_arg $ verbose_arg)
+    Term.(const run $ domain_arg $ full_arg $ parallelism_arg $ verbose_arg)
 
 (* ── tsync recheck ───────────────────────────────────────────────────────── *)
 
@@ -1083,6 +1287,15 @@ let import_cmd =
       & pos 0 (some dir) None
       & info [] ~docv:"DIR" ~doc:"Folder whose contents to import")
   in
+  let only_arg =
+    Arg.(
+      value & opt_all string []
+      & info ["only"] ~docv:"GLOB"
+          ~doc:
+            "Import only files matching GLOB (shell glob syntax; matched \
+             against each entry's relative path and its basename). May be \
+             repeated. --exclude is applied on top of the selected set.")
+  in
   let exclude_arg =
     Arg.(
       value & opt_all string []
@@ -1101,7 +1314,7 @@ let import_cmd =
              domain. Only changed or missing chunks are actually uploaded; the \
              manifest is always recomputed and republished.")
   in
-  let run domain src exclude force_rehash v =
+  let run domain src only exclude force_rehash v =
     verbose := v;
     Lwt_main.run
       (let open Lwt.Syntax in
@@ -1110,7 +1323,7 @@ let import_cmd =
        let module I = Import.Make (C) in
        vprintf "importing from %s into domain %s\n" src C.domain_name;
        let+ summary =
-         I.run ~exclude ~force_rehash ~src
+         I.run ~only ~exclude ~force_rehash ~src
            ~on_dir:(fun ~rel -> Printf.printf "mkdir    %s\n%!" rel)
            ~on_file:(fun ~rel status ->
              match status with
@@ -1140,8 +1353,8 @@ let import_cmd =
           — the cache links to the source files. Keys already in the domain \
           are skipped.")
     Term.(
-      const run $ domain_arg $ src_arg $ exclude_arg $ force_rehash_arg
-      $ verbose_arg)
+      const run $ domain_arg $ src_arg $ only_arg $ exclude_arg
+      $ force_rehash_arg $ verbose_arg)
 
 (* ── tsync export ────────────────────────────────────────────────────────── *)
 
@@ -1966,35 +2179,32 @@ let share_cmd =
            else rel
          in
          let base_json = [("v", `Int 1); ("expires", `Int expires)] in
+         let module L = Layout.Inode.Make (C) in
          let* manifest =
+           let* file_key = L.manifest_key (C.domain_prefix ^ rel) in
            let* head =
-             if rel = "" then Lwt.return_none
-             else B.head_opt ~key:(C.domain_prefix ^ rel) ()
+             if rel = "" then Lwt.return_none else B.head_opt ~key:file_key ()
            in
            match head with
              | Some _ ->
-                 (* Single file. *)
+                 (* Single file: the Lambda fetches the manifest by this key. *)
                  Lwt.return
                    (`Assoc
                       (base_json
                       @ [
                           ("type", `String "file");
-                          ( "key",
-                            `String (Fs_util.encode_key (C.domain_prefix ^ rel))
-                          );
-                          ( "chunkPrefix",
-                            `String (Fs_util.encode_key C.chunk_prefix) );
+                          ("key", `String file_key);
+                          ("chunkPrefix", `String C.chunk_prefix);
                           ("filename", `String (Filename.basename rel));
                         ]))
              | None ->
-                 let dir_prefix =
-                   if rel = "" then C.domain_prefix
-                   else C.domain_prefix ^ rel ^ "/"
+                 (* Directory: store the folder's namespace prefix (by id); the
+                    Lambda lists it lazily. Keeps `tsync share` O(1). *)
+                 let* dir_id =
+                   Folder_ids.resolve ~cache_root:C.cache_root
+                     ~domain_name:C.domain_name rel
                  in
-                 (* Confirm the directory exists (one bounded list), but don't
-                    enumerate it — the manifest stores only the prefix and the
-                    Lambda lists lazily per folder. Keeps `tsync share` O(1)
-                    regardless of how many files the directory holds. *)
+                 let dir_prefix = C.domain_prefix ^ dir_id ^ "/" in
                  let* entries = B.list_all ~prefix:dir_prefix ~max_keys:1 () in
                  if entries = [] then (
                    Printf.eprintf "not found: %s\n" path;
@@ -2007,9 +2217,8 @@ let share_cmd =
                       (base_json
                       @ [
                           ("type", `String "dir");
-                          ( "chunkPrefix",
-                            `String (Fs_util.encode_key C.chunk_prefix) );
-                          ("dirPrefix", `String (Fs_util.encode_key dir_prefix));
+                          ("chunkPrefix", `String C.chunk_prefix);
+                          ("dirPrefix", `String dir_prefix);
                           ("filename", `String (base ^ ".zip"));
                         ]))
          in
@@ -2194,6 +2403,8 @@ let () =
         share_cmd;
         versions_cmd;
         revert_cmd;
+        trash_cmd;
+        untrash_cmd;
         purge_cmd;
         expire_cmd;
         auto_evict_cmd;

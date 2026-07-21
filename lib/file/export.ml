@@ -4,8 +4,6 @@ type data_source = Local_cache | Remote_chunks | Symlink
 type status = Exported of data_source | Missing_data
 type summary = { exported : int; missing : int }
 
-let is_marker key = String.length key > 0 && key.[String.length key - 1] = '/'
-
 let copy_file ~src ~dst =
   let* src_fd = Lwt_unix_retry.openfile src [Unix.O_RDONLY] 0 in
   Lwt.finalize
@@ -40,15 +38,7 @@ let copy_file ~src ~dst =
 
 module Make (C : Conf.S) = struct
   module R = Remote.Make (C)
-
-  let primary () =
-    match C.backends with
-      | [] -> failwith "no backends configured"
-      | b :: _ -> b
-
-  let rel_of_key key =
-    let pfx = String.length C.domain_prefix in
-    String.sub key pfx (String.length key - pfx)
+  module St = Store.Make (C) (Layout.Inode.Make (C))
 
   (* Prefer the local sidecar (the only place a Dirty state lives), else the
      remote manifest. *)
@@ -108,30 +98,36 @@ module Make (C : Conf.S) = struct
   (* Export every file of the domain to [dst]. Files are the union of the
      backend listing and the local sidecar tree (which adds local-only files
      whose upload is still pending). *)
-  let run ~dst ~on_file () =
-    let (module B : Backend.S) = primary () in
-    let* entries = B.list_all ~prefix:C.domain_prefix () in
-    let remote_dirs, remote_files =
-      List.partition (fun (e : Backend.file_entry) -> is_marker e.key) entries
+  (* Every backend file's real path, by walking the inode tree from the root:
+     folder markers name subfolders and point at their namespaces. *)
+  let remote_rels () =
+    let join rel name = if rel = "" then name else rel ^ "/" ^ name in
+    let rec walk folder_id rel acc =
+      let* entries = St.list_namespace ~folder_id in
+      Lwt_list.fold_left_s
+        (fun acc (e : Backend.file_entry) ->
+          Lwt.catch
+            (fun () ->
+              let* data = St.get_object ~bkey:e.Backend.key in
+              match Folder.marker_of_string data with
+                | Some m -> walk m.Folder.id (join rel m.Folder.name) acc
+                | None -> (
+                    match Manifest.of_string data with
+                      | `Clean m -> Lwt.return (join rel m.Manifest.name :: acc)
+                      | `Dirty | (exception _) -> Lwt.return acc))
+            (fun _ -> Lwt.return acc))
+        acc entries
     in
+    walk Folder.root_id "" []
+
+  let run ~dst ~on_file () =
+    let* remote_rels = remote_rels () in
     let* local_rels =
       Local.walk_manifests ~cache_root:C.cache_root ~domain_name:C.domain_name
         ()
     in
-    let files =
-      List.sort_uniq compare
-        (List.map
-           (fun (e : Backend.file_entry) -> rel_of_key e.key)
-           remote_files
-        @ local_rels)
-    in
+    let files = List.sort_uniq compare (remote_rels @ local_rels) in
     let* () = Fs_util.mkdir_p dst in
-    let* () =
-      Lwt_list.iter_s
-        (fun (e : Backend.file_entry) ->
-          Fs_util.mkdir_p (Filename.concat dst (rel_of_key e.key)))
-        remote_dirs
-    in
     let+ statuses =
       Lwt_list.map_s
         (fun rel ->

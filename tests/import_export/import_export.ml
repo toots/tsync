@@ -10,7 +10,7 @@ let () =
             LocalWrite { path = "a.txt"; content = "alpha" };
             LocalWrite { path = "sub/b.txt"; content = "bravo" };
             LocalWrite { path = "sub/deep/c.txt"; content = "charlie" };
-            Import { exclude = []; force_rehash = false };
+            Import { only = []; exclude = []; force_rehash = false };
           ];
       };
       {
@@ -21,7 +21,7 @@ let () =
             Drain;
             LocalWrite { path = "file.bin"; content = "imported" };
             LocalWrite { path = "new.txt"; content = "fresh" };
-            Import { exclude = []; force_rehash = false };
+            Import { only = []; exclude = []; force_rehash = false };
           ];
       };
       {
@@ -31,7 +31,7 @@ let () =
             Write { path = "file.bin"; content = "same bytes" };
             Drain;
             LocalWrite { path = "copy.bin"; content = "same bytes" };
-            Import { exclude = []; force_rehash = false };
+            Import { only = []; exclude = []; force_rehash = false };
           ];
       };
       {
@@ -62,7 +62,7 @@ let () =
           [
             LocalWrite { path = "a.txt"; content = "alpha" };
             LocalWrite { path = "sub/b.txt"; content = "bravo" };
-            Import { exclude = []; force_rehash = false };
+            Import { only = []; exclude = []; force_rehash = false };
             Drain;
             ExportDir;
           ];
@@ -75,7 +75,7 @@ let () =
             LocalWrite { path = "b.tmp"; content = "temp" };
             LocalWrite { path = "sub/c.txt"; content = "charlie" };
             LocalWrite { path = "sub/d.tmp"; content = "also temp" };
-            Import { exclude = ["*.tmp"]; force_rehash = false };
+            Import { only = []; exclude = ["*.tmp"]; force_rehash = false };
           ];
       };
       {
@@ -83,9 +83,9 @@ let () =
         steps =
           [
             LocalWrite { path = "file.bin"; content = "hello world" };
-            Import { exclude = []; force_rehash = false };
+            Import { only = []; exclude = []; force_rehash = false };
             LocalWrite { path = "file.bin"; content = "hello world" };
-            Import { exclude = []; force_rehash = true };
+            Import { only = []; exclude = []; force_rehash = true };
           ];
       };
       {
@@ -93,10 +93,10 @@ let () =
         steps =
           [
             LocalWrite { path = "file.bin"; content = "hello world" };
-            Import { exclude = []; force_rehash = false };
+            Import { only = []; exclude = []; force_rehash = false };
             DeleteRemoteChunk { path = "file.bin"; index = 0 };
             LocalWrite { path = "file.bin"; content = "hello world" };
-            Import { exclude = []; force_rehash = true };
+            Import { only = []; exclude = []; force_rehash = true };
           ];
       };
       {
@@ -104,9 +104,9 @@ let () =
         steps =
           [
             LocalWrite { path = "file.bin"; content = "original content" };
-            Import { exclude = []; force_rehash = false };
+            Import { only = []; exclude = []; force_rehash = false };
             LocalWrite { path = "file.bin"; content = "updated content" };
-            Import { exclude = []; force_rehash = true };
+            Import { only = []; exclude = []; force_rehash = true };
           ];
       };
       {
@@ -115,7 +115,7 @@ let () =
           [
             LocalWrite { path = "non-empty/file.txt"; content = "hello" };
             LocalMkdir "empty-dir";
-            Import { exclude = []; force_rehash = false };
+            Import { only = []; exclude = []; force_rehash = false };
           ];
       };
       {
@@ -125,9 +125,41 @@ let () =
             LocalWrite { path = "colon:file.txt"; content = "colons" };
             LocalWrite
               { path = "dir:with:colons/nested.txt"; content = "nested" };
-            Import { exclude = []; force_rehash = false };
+            Import { only = []; exclude = []; force_rehash = false };
             Drain;
             ExportDir;
+          ];
+      };
+      {
+        name = "import with only by extension";
+        steps =
+          [
+            LocalWrite { path = "a.txt"; content = "alpha" };
+            LocalWrite { path = "b.tmp"; content = "temp" };
+            LocalWrite { path = "sub/c.txt"; content = "charlie" };
+            LocalWrite { path = "sub/d.tmp"; content = "also temp" };
+            Import { only = ["*.txt"]; exclude = []; force_rehash = false };
+          ];
+      };
+      {
+        name = "import with only directory imports its contents";
+        steps =
+          [
+            LocalWrite { path = "keep/a.txt"; content = "alpha" };
+            LocalWrite { path = "keep/deep/b.txt"; content = "bravo" };
+            LocalWrite { path = "drop/c.txt"; content = "charlie" };
+            Import { only = ["keep"]; exclude = []; force_rehash = false };
+          ];
+      };
+      {
+        name = "import only then exclude on top";
+        steps =
+          [
+            LocalWrite { path = "keep/a.txt"; content = "alpha" };
+            LocalWrite { path = "keep/b.tmp"; content = "temp" };
+            LocalWrite { path = "drop/c.txt"; content = "charlie" };
+            Import
+              { only = ["keep"]; exclude = ["*.tmp"]; force_rehash = false };
           ];
       };
       {
@@ -139,7 +171,8 @@ let () =
             LocalWrite
               { path = "node_modules/deep/pkg.js"; content = "nested dep" };
             LocalWrite { path = "src/main.ml"; content = "code" };
-            Import { exclude = ["node_modules"]; force_rehash = false };
+            Import
+              { only = []; exclude = ["node_modules"]; force_rehash = false };
           ];
       };
       {
@@ -148,7 +181,7 @@ let () =
           [
             LocalWrite { path = "real.txt"; content = "hello" };
             LocalSymlink { path = "link.txt"; target = "real.txt" };
-            Import { exclude = []; force_rehash = false };
+            Import { only = []; exclude = []; force_rehash = false };
             Drain;
             ExportDir;
           ];
@@ -158,7 +191,7 @@ let () =
         steps =
           [
             LocalSymlink { path = "dangling.txt"; target = "nowhere" };
-            Import { exclude = []; force_rehash = false };
+            Import { only = []; exclude = []; force_rehash = false };
             Drain;
             ExportDir;
           ];
@@ -173,7 +206,7 @@ let () =
           [
             LocalWrite { path = "real.txt"; content = "hello" };
             LocalSymlink { path = "link.txt"; target = "real.txt" };
-            Import { exclude = []; force_rehash = false };
+            Import { only = []; exclude = []; force_rehash = false };
           ];
       };
       {
@@ -181,7 +214,7 @@ let () =
         steps =
           [
             LocalSymlink { path = "dangling.txt"; target = "nowhere" };
-            Import { exclude = []; force_rehash = false };
+            Import { only = []; exclude = []; force_rehash = false };
           ];
       };
     ];
@@ -195,7 +228,7 @@ let () =
             LocalWrite { path = "real.txt"; content = "hello" };
             LocalSymlink { path = "link.txt"; target = "real.txt" };
             LocalSymlink { path = "dangling.txt"; target = "nowhere" };
-            Import { exclude = []; force_rehash = false };
+            Import { only = []; exclude = []; force_rehash = false };
           ];
       };
     ]

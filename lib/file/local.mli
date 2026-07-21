@@ -1,5 +1,9 @@
 val manifest_dir : cache_root:string -> string -> string
 
+(** Remove the domain's entire local cache (manifest mirror + downloaded data),
+    for a full resync that rebuilds it from the backend. *)
+val clear : cache_root:string -> domain_name:string -> unit Lwt.t
+
 val cache_path :
   cache_root:string ->
   domain_name:string ->
@@ -15,6 +19,15 @@ val manifest_path :
   string
 
 val ensure_parent_dir : string -> unit Lwt.t
+
+(** Rewrite a moved directory's escaped-name marker to its current leaf name, so
+    readdir shows the new name (no-op unless the leaf is escaped). *)
+val refresh_dir_marker :
+  cache_root:string ->
+  domain_name:string ->
+  domain_prefix:string ->
+  string ->
+  unit Lwt.t
 
 (** All manifest sidecars under the domain's manifest tree, as domain-relative
     paths (unsorted). Empty when the tree does not exist. *)
@@ -88,6 +101,14 @@ val list_directory :
   prefix:string ->
   unit ->
   (Backend.file_entry list * string list) Lwt.t
+
+val list_all :
+  cache_root:string ->
+  domain_name:string ->
+  domain_prefix:string ->
+  prefix:string ->
+  unit ->
+  Backend.file_entry list Lwt.t
 
 val evict :
   cache_root:string ->

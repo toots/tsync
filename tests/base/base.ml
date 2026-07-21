@@ -67,6 +67,34 @@ let scenarios : scenario list =
     };
     { name = "rmdir"; steps = [Mkdir "sub"; Drain; Rmdir "sub"; Drain] };
     {
+      (* Renaming a non-empty folder is O(1): the file's backend key is under the
+         folder's stable id, so it doesn't move — only the folder marker does. *)
+      name = "rename_dir";
+      steps =
+        [
+          Mkdir "d";
+          Drain;
+          Write { path = "d/a.txt"; content = "in folder" };
+          Drain;
+          Rename { src = "d"; dst = "d2" };
+          Drain;
+        ];
+    };
+    {
+      (* Deleting a non-empty folder moves its marker to trash; the subtree stays
+         on the backend (for undo / expire), and the local copy is dropped. *)
+      name = "rmdir_nonempty";
+      steps =
+        [
+          Mkdir "d";
+          Drain;
+          Write { path = "d/a.txt"; content = "trash me" };
+          Drain;
+          Rmdir "d";
+          Drain;
+        ];
+    };
+    {
       name = "symlink";
       steps =
         [

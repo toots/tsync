@@ -1,9 +1,15 @@
 let chunk_size = 8 * 1024 * 1024
 
+(* Manifest body format version. 2 = inode layout (bodies carry the leaf [name];
+   folder structure lives in markers). Bumped from 1 (real-path-keyed layout) by
+   the one-off migration. Nothing branches on it today; it flags the format. *)
+let current_version = 2
+
 type chunk_entry = { index : int; h1 : string; h2 : string; size : int }
 
 type t = {
   v : int;
+  name : string;  (** leaf name; authority for the file's own name *)
   size : int64;
   chunk_size : int;
   chunks : chunk_entry list;
@@ -17,17 +23,29 @@ type state = [ `Dirty | `Clean of t ]
 
 let chunk_key (entry : chunk_entry) = entry.h1 ^ "-" ^ entry.h2
 
-let make ~h1 ~h2 ~size ~chunk_size ~chunks ~mtime =
-  `Clean { v = 1; size; chunk_size; chunks; h1; h2; mtime; symlink = None }
+let make ~name ~h1 ~h2 ~size ~chunk_size ~chunks ~mtime =
+  `Clean
+    {
+      v = current_version;
+      name;
+      size;
+      chunk_size;
+      chunks;
+      h1;
+      h2;
+      mtime;
+      symlink = None;
+    }
 
 (* A symlink is a chunkless manifest carrying its target. size is the target's
    byte length, POSIX-style. *)
-let make_symlink ~target ~mtime =
+let make_symlink ~name ~target ~mtime =
   let h1 = Xxhash.hash_hex target 0 in
   let h2 = Xxhash.hash_hex target 1 in
   `Clean
     {
-      v = 1;
+      v = current_version;
+      name;
       size = Int64.of_int (String.length target);
       chunk_size;
       chunks = [];
@@ -62,6 +80,7 @@ let of_json json =
     `Clean
       {
         v = (try json |> member "v" |> to_int with _ -> 1);
+        name = json |> member "name" |> to_string;
         size = json |> member "size" |> to_int |> Int64.of_int;
         chunk_size =
           (try json |> member "chunkSize" |> to_int with _ -> chunk_size);
@@ -80,6 +99,7 @@ let to_json = function
       `Assoc
         ([
            ("v", `Int m.v);
+           ("name", `String m.name);
            ("size", `Int (Int64.to_int m.size));
            ("chunkSize", `Int m.chunk_size);
            ("h1", `String m.h1);

@@ -1,32 +1,30 @@
 # tsync
 
-**Your files in the cloud, on demand — without giving up your local filesystem.**
-
-tsync gives you a folder that lives in cloud storage (S3), on a local disk/NAS, or on a remote machine over SSH — but behaves like an ordinary directory. Every file is visible and browsable, but only the files you actually open take up space on your machine. Open a file and it downloads transparently; evict it and it frees local space while staying available. It's the same idea as iCloud Drive or Dropbox Smart Sync — but pointed at *your* storage bucket, with no third-party service in the middle.
+An on-demand sync filesystem backed by storage you control — S3, a local disk/NAS, or a remote host over SSH. Files are listed and browsable, but only the ones you open occupy local disk: opening a file fetches it, evicting it frees the space while keeping it listed. Same model as iCloud Drive / Dropbox Smart Sync, pointed at your own backend rather than a hosted service.
 
 ```
 ~/tsync/photos/
-├── 2019/            ← browsable, costs nothing locally
-│   ├── beach.jpg    ← open it → downloads on the fly
+├── 2019/            ← listed, no local disk used
+│   ├── beach.jpg    ← open → fetched on demand
 │   └── hike.jpg
 └── 2024/
-    └── report.pdf   ← evicted after use → frees space, still listed
+    └── report.pdf   ← evicted → space freed, still listed
 ```
 
-## Why you might want it
+## What it does
 
-- **Terabytes of files, gigabytes of disk.** Keep a huge library — photos, audio, video, backups — mounted locally while only caching what you touch.
-- **Your storage, your rules.** Point it at your own S3 bucket, a local drive, or a remote machine over SSH. No subscription, no vendor lock-in, no one else holding your data.
-- **Mirror to more than one place.** Configure several backends per folder and every write fans out to all of them — e.g. S3 *and* a local NAS at the same time. Reads come from a primary backend (a local one by default), so a mirrored local copy also makes reads fast. If a mirror was down or drifted, `tsync resync-remote` copies whatever it's missing from another backend.
-- **Use it from several machines.** Multiple computers can mount the same folder; each picks up the others' changes automatically, with sensible handling when two people touch the same file at once.
-- **Efficient by design.** Files are split into content-addressed chunks, so re-uploading a large file only sends the parts that changed, and identical data is stored once.
+- **On-demand caching.** Mount a library larger than local disk; only touched files are cached, and eviction reclaims space without losing the file.
+- **Bring your own storage.** S3, a local drive, or a remote machine over SSH — no subscription and no hosted intermediary.
+- **Multiple backends per domain.** Writes fan out to every configured backend (e.g. S3 *and* a local NAS); reads come from a primary (a local one by default). `tsync resync-remote` repairs a backend that was offline or has drifted by copying what it's missing from another.
+- **Multi-machine.** Several machines can mount the same domain and pick up each other's changes through a shared change journal. Concurrent edits resolve last-writer-wins; concurrent renames and delete/rename races produce labeled conflict copies rather than losing data.
+- **Content-addressed chunks.** Files are split into chunks keyed by content hash, so re-uploading a large file only sends the changed chunks and identical data is stored once.
 
-## How it works, briefly
+## How it works
 
-- **Linux** mounts a FUSE filesystem at `~/tsync/<folder>/`.
-- **macOS** uses a File Provider extension, so your folder shows up under `~/Library/CloudStorage/` right alongside iCloud Drive and Dropbox — with native Finder integration and sync-status badges.
+- **Linux:** FUSE mount at `~/tsync/<domain>/`.
+- **macOS:** File Provider extension under `~/Library/CloudStorage/`, with Finder integration and sync-status badges.
 
-Behind the scenes a small background daemon talks to your storage backend, handles uploads/downloads, and keeps multiple machines in sync through a shared change journal. Both platforms share the same on-disk format, so a folder written from Linux reads cleanly on macOS and vice versa.
+A background daemon handles uploads/downloads and keeps machines in sync through the change journal. Both platforms share the same on-disk and backend format, so a domain written from one reads cleanly on the other.
 
 ## Getting started
 
@@ -60,14 +58,17 @@ tsync evict <path>    # drop a file's local copy (stays in the cloud)
 tsync restore <path>  # pull a file back down
 tsync versions <path> # a file's version history, or all deleted files
 tsync revert <path>   # bring back a previous version (or an undeleted file)
+tsync trash           # list deleted folders (folder deletes are recoverable)
+tsync untrash <path>  # restore a deleted folder, then run `tsync sync`
 tsync expire <date>   # drop versions older than a date, then reclaim unused blocks
 tsync sync            # apply changes from other machines (incremental)
 tsync sync --full     # clear local cache and re-download all manifests from the backend
 tsync recheck         # verify the remote against the local cache, repair what's possible
 tsync resync-remote   # copy missing/damaged objects from one backend to the others
 tsync import <dir>    # seed the domain from an existing folder (uploads, no data copied)
+tsync import <dir> --only '*.flac' --only cover.jpg  # import only matching entries (see below)
 tsync import <dir> --exclude "*.tmp" --exclude node_modules  # skip by glob (see below)
-tsync import <dir> --force-rehash  # re-hash and re-upload every file (for manifest migration)
+tsync import <dir> --force-rehash  # re-hash and re-upload every file
 tsync export <dir>    # write every file of the domain to a plain folder
 tsync share <path>    # print a public download URL for a file or folder (as a zip)
 tsync status          # show daemon state
@@ -88,9 +89,11 @@ tsync set-domain --clear   # remove the default (--domain required again)
 
 The default is stored in the data directory and read by every command that accepts `--domain`. An explicit `--domain` flag always overrides it.
 
-### Glob patterns for `--exclude`
+### Glob patterns for `--only` and `--exclude`
 
-`--exclude` accepts shell-style glob patterns matched against each entry's basename **and** its full relative path, so a bare name like `node_modules` prunes that directory anywhere in the tree.
+Both `--only` and `--exclude` accept shell-style glob patterns matched against each entry's basename **and** its full relative path, so a bare name like `node_modules` matches that directory anywhere in the tree.
+
+`--only` selects which entries to import: with no `--only`, everything is imported; with one or more, only entries that match (or live under a matching directory) are kept. `--exclude` is then applied on top of that selection. Both may be repeated.
 
 | Pattern | Matches |
 |---------|---------|
@@ -104,6 +107,9 @@ tsync import . --exclude 'lost+found'   # directory named literally lost+found
 tsync import . --exclude '*.tmp'        # any .tmp file in any directory
 tsync import . --exclude '**/.git'      # .git directories at any depth
 tsync import . --exclude 'node_modules' # any directory named node_modules
+tsync import . --only 'Music'           # everything under any Music directory
+tsync import . --only '*.flac'          # only .flac files, anywhere
+tsync import . --only 'Music' --exclude '*.tmp'  # Music tree, minus .tmp files
 ```
 
 ### Versioning
