@@ -143,6 +143,17 @@ def s3():
 # ── File shares ───────────────────────────────────────────────────────────────
 
 
+def test_missing_chunk_is_clean_error(s3):
+    # A file whose manifest references a chunk that isn't on the backend must
+    # yield a clean 502, not an unhandled 500.
+    h = load_handler()
+    key = put_file(s3, "r", "gone.bin", [("dead-beef", b"data")])
+    s3.delete_object(Bucket=BUCKET, Key=CHUNK_PREFIX + "dead-beef")
+    tok = file_share(s3, "beef", key, "gone.bin")
+    resp = h.handler(event(tok), None)
+    assert resp["statusCode"] == 502, resp
+
+
 def test_multi_chunk_file(s3):
     h = load_handler()
     part0 = b"A" * (8 << 20)  # 8 MiB, satisfies multipart minimum

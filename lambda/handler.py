@@ -29,6 +29,7 @@ import html
 import json
 import os
 import time
+import traceback
 import zipfile
 from urllib.parse import quote
 
@@ -174,16 +175,34 @@ def presign(cache_key, filename, content_type=None, inline=False):
 
 
 def file_manifest(key):
-    """Load a file manifest, rejecting in-progress / symlink manifests."""
+    """Load a file manifest, rejecting folder markers, in-progress uploads and
+    symlinks (and any body without data blocks) with a clean error."""
     try:
         m = get_json(key)
     except FileNotFoundError:
         raise ShareError(404, "file not found")
+    if m.get("dir"):
+        raise ShareError(400, "this share points at a folder, not a file")
     if m.get("dirty"):
         raise ShareError(409, "upload in progress, try again shortly")
     if m.get("symlink") is not None:
         raise ShareError(400, "cannot serve a symlink directly")
+    if "chunks" not in m:
+        raise ShareError(502, "manifest has no data blocks")
     return m
+
+
+def chunk_copy_error(e):
+    """Translate a boto error from copying a chunk into a clean ShareError, or
+    None to let it propagate (surfaced as a logged 500). A file that lists a
+    chunk which is absent — or has aged into cold storage — is a data problem,
+    not a server bug."""
+    code = e.response.get("Error", {}).get("Code", "")
+    if code in ("NoSuchKey", "NoSuchBucket", "404"):
+        return ShareError(502, "a data block of this file is missing on the backend")
+    if code == "InvalidObjectState":
+        return ShareError(503, "file is in cold storage (Glacier); try again later")
+    return None
 
 
 def assemble(m, chunk_prefix, cache_key):
@@ -194,43 +213,52 @@ def assemble(m, chunk_prefix, cache_key):
     if not chunks:
         s3.put_object(Bucket=BUCKET, Key=cache_key, Body=b"")
         return
-    if len(chunks) == 1:
-        s3.copy_object(
-            Bucket=BUCKET,
-            Key=cache_key,
-            CopySource={"Bucket": BUCKET, "Key": chunk_key(chunk_prefix, chunks[0])},
-        )
-        return
     if len(chunks) > 10000:
         raise too_large()
-    upload_id = s3.create_multipart_upload(Bucket=BUCKET, Key=cache_key)["UploadId"]
     try:
-        # The part copies are independent server-side S3 operations, so run them
-        # concurrently — a large file assembles in seconds instead of thousands
-        # of sequential round-trips. Playback then streams the result via Range.
-        def copy_part(item):
-            n, c = item
-            r = s3.upload_part_copy(
+        if len(chunks) == 1:
+            s3.copy_object(
+                Bucket=BUCKET,
+                Key=cache_key,
+                CopySource={
+                    "Bucket": BUCKET, "Key": chunk_key(chunk_prefix, chunks[0])
+                },
+            )
+            return
+        upload_id = s3.create_multipart_upload(Bucket=BUCKET, Key=cache_key)[
+            "UploadId"
+        ]
+        try:
+            # The part copies are independent server-side S3 operations, so run
+            # them concurrently — a large file assembles in seconds instead of
+            # thousands of sequential round-trips. Playback then streams via Range.
+            def copy_part(item):
+                n, c = item
+                r = s3.upload_part_copy(
+                    Bucket=BUCKET,
+                    Key=cache_key,
+                    UploadId=upload_id,
+                    PartNumber=n,
+                    CopySource={"Bucket": BUCKET, "Key": chunk_key(chunk_prefix, c)},
+                )
+                return {"ETag": r["CopyPartResult"]["ETag"], "PartNumber": n}
+
+            with concurrent.futures.ThreadPoolExecutor(max_workers=32) as ex:
+                parts = list(ex.map(copy_part, enumerate(chunks, start=1)))
+            parts.sort(key=lambda p: p["PartNumber"])
+            s3.complete_multipart_upload(
                 Bucket=BUCKET,
                 Key=cache_key,
                 UploadId=upload_id,
-                PartNumber=n,
-                CopySource={"Bucket": BUCKET, "Key": chunk_key(chunk_prefix, c)},
+                MultipartUpload={"Parts": parts},
             )
-            return {"ETag": r["CopyPartResult"]["ETag"], "PartNumber": n}
-
-        with concurrent.futures.ThreadPoolExecutor(max_workers=32) as ex:
-            parts = list(ex.map(copy_part, enumerate(chunks, start=1)))
-        parts.sort(key=lambda p: p["PartNumber"])
-        s3.complete_multipart_upload(
-            Bucket=BUCKET,
-            Key=cache_key,
-            UploadId=upload_id,
-            MultipartUpload={"Parts": parts},
-        )
-    except Exception:
-        s3.abort_multipart_upload(Bucket=BUCKET, Key=cache_key, UploadId=upload_id)
-        raise
+        except Exception:
+            s3.abort_multipart_upload(
+                Bucket=BUCKET, Key=cache_key, UploadId=upload_id
+            )
+            raise
+    except ClientError as e:
+        raise (chunk_copy_error(e) or e)
 
 
 def build_file(file_key, chunk_prefix, cache_key):
@@ -503,6 +531,12 @@ def handler(event, context):
         raise ShareError(404, "not found")
     except ShareError as e:
         return err(e.code, e.msg)
+    except Exception as e:
+        # Anything else is a bug or an unexpected backend state: log the full
+        # traceback to CloudWatch and return a 500 that at least names the cause
+        # rather than a bare "Internal Server Error".
+        traceback.print_exc()
+        return err(500, "internal error (%s)" % type(e).__name__)
 
 
 def render_browse(share, token):

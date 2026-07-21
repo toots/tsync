@@ -24,39 +24,39 @@ final class TsyncEnumerator: NSObject, NSFileProviderEnumerator, @unchecked Send
     func enumerateItems(for observer: any NSFileProviderEnumerationObserver, startingAt page: NSFileProviderPage) {
         Task {
             do {
-                if containerIdentifier == .workingSet {
-                    try await enumerateWorkingSet(observer: observer)
-                    return
-                }
-
-                let domainPrefix = config.domainPrefix(domain.displayName)
-                let prefix = containerIdentifier == .rootContainer
-                    ? domainPrefix
-                    : containerIdentifier.rawValue
-
-                let resp = try await IPC.listDir(prefix: prefix)
-                var items: [TsyncItem] = []
-
-                for dir in resp.dirs ?? [] {
-                    items.append(TsyncItem.make(
-                        key: dir.key, domainPrefix: domainPrefix, readOnly: isReadOnly,
-                        modificationDate: dir.mtime.map { Date(timeIntervalSince1970: $0) }))
-                }
-                for entry in resp.files ?? [] {
-                    items.append(TsyncItem.make(
-                        key: entry.key, domainPrefix: domainPrefix,
-                        readOnly: isReadOnly,
-                        size: entry.size,
-                        modificationDate: Date(timeIntervalSince1970: entry.mtime),
-                        etag: entry.etag, symlinkTarget: entry.symlinkTarget))
-                }
-
-                observer.didEnumerate(items)
-                observer.finishEnumerating(upTo: nil)
+                let items = containerIdentifier == .workingSet
+                    ? try await workingSetItems()
+                    : try await containerItems()
+                emitPage(items, from: pageOffset(page), to: observer)
             } catch {
                 observer.finishEnumeratingWithError(IPC.fileProviderError(error))
             }
         }
+    }
+
+    private func containerItems() async throws -> [TsyncItem] {
+        let domainPrefix = config.domainPrefix(domain.displayName)
+        let prefix = containerIdentifier == .rootContainer
+            ? domainPrefix
+            : containerIdentifier.rawValue
+
+        let resp = try await IPC.listDir(prefix: prefix)
+        var items: [TsyncItem] = []
+
+        for dir in resp.dirs ?? [] {
+            items.append(TsyncItem.make(
+                key: dir.key, domainPrefix: domainPrefix, readOnly: isReadOnly,
+                modificationDate: dir.mtime.map { Date(timeIntervalSince1970: $0) }))
+        }
+        for entry in resp.files ?? [] {
+            items.append(TsyncItem.make(
+                key: entry.key, domainPrefix: domainPrefix,
+                readOnly: isReadOnly,
+                size: entry.size,
+                modificationDate: Date(timeIntervalSince1970: entry.mtime),
+                etag: entry.etag, symlinkTarget: entry.symlinkTarget))
+        }
+        return items
     }
 
     func enumerateChanges(for observer: any NSFileProviderChangeObserver, from anchor: NSFileProviderSyncAnchor) {
@@ -130,13 +130,15 @@ final class TsyncEnumerator: NSObject, NSFileProviderEnumerator, @unchecked Send
                               symlinkTarget: resp.symlinkTarget)
     }
 
-    private func enumerateWorkingSet(observer: any NSFileProviderEnumerationObserver) async throws {
+    // ponytail: re-fetches the full listing on every page (O(n²) IPC for the working set's
+    // recursive listAll). Fine until domains get huge; add offset/limit to the IPC then.
+    private func workingSetItems() async throws -> [TsyncItem] {
         let domainPrefix = config.domainPrefix(domain.displayName)
         let resp = try await IPC.listAll(prefix: domainPrefix)
         // The working set holds files only: skip directory-marker keys, which would collide
         // with the real folders from the container enumeration.
         let files = (resp.files ?? []).filter { !$0.key.hasSuffix("/") }
-        let items: [TsyncItem] = files.map { entry in
+        return files.map { entry in
             TsyncItem.make(
                 key: entry.key, domainPrefix: domainPrefix,
                 readOnly: isReadOnly,
@@ -144,8 +146,30 @@ final class TsyncEnumerator: NSObject, NSFileProviderEnumerator, @unchecked Send
                 modificationDate: Date(timeIntervalSince1970: entry.mtime),
                 etag: entry.etag, symlinkTarget: entry.symlinkTarget)
         }
-        log.info("enumerateWorkingSet: \(items.count, privacy: .public) items")
-        observer.didEnumerate(items)
-        observer.finishEnumerating(upTo: nil)
+    }
+
+    /// FileProvider SIGABRTs the extension (`__FILEPROVIDER_OBSERVER_TOO_MANY_ITEMS__`) if a
+    /// single enumeration reports too many items without paginating, so we hand back one page
+    /// at a time and let the OS re-call us with the next page's offset.
+    private static let pageSize = 1000
+
+    /// A page's rawValue is the byte offset into the listing; initial-page sentinels aren't
+    /// integers and decode to 0 (start from the top). The listing is S3-key sorted, so the
+    /// order is stable across the successive calls that walk the offsets.
+    private func pageOffset(_ page: NSFileProviderPage) -> Int {
+        guard let str = String(data: page.rawValue, encoding: .utf8), let offset = Int(str)
+        else { return 0 }
+        return offset
+    }
+
+    private func emitPage(_ items: [TsyncItem], from offset: Int,
+                          to observer: any NSFileProviderEnumerationObserver) {
+        let end = min(offset + Self.pageSize, items.count)
+        if offset < end { observer.didEnumerate(Array(items[offset..<end])) }
+        if end < items.count {
+            observer.finishEnumerating(upTo: NSFileProviderPage("\(end)".data(using: .utf8)!))
+        } else {
+            observer.finishEnumerating(upTo: nil)
+        }
     }
 }

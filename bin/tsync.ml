@@ -2182,11 +2182,15 @@ let share_cmd =
          let module L = Layout.Inode.Make (C) in
          let* manifest =
            let* file_key = L.manifest_key (C.domain_prefix ^ rel) in
-           let* head =
-             if rel = "" then Lwt.return_none else B.head_opt ~key:file_key ()
+           (* A file manifest and a folder marker occupy the same key within a
+              parent namespace, so classify by the body — otherwise a folder
+              would be shared as a (chunkless) file and the Lambda would choke. *)
+           let* obj =
+             if rel = "" then Lwt.return_none else B.get_opt ~key:file_key ()
            in
-           match head with
-             | Some _ ->
+           let marker = Option.bind obj Folder.marker_of_string in
+           match (obj, marker) with
+             | Some _, None ->
                  (* Single file: the Lambda fetches the manifest by this key. *)
                  Lwt.return
                    (`Assoc
@@ -2197,12 +2201,16 @@ let share_cmd =
                           ("chunkPrefix", `String C.chunk_prefix);
                           ("filename", `String (Filename.basename rel));
                         ]))
-             | None ->
-                 (* Directory: store the folder's namespace prefix (by id); the
-                    Lambda lists it lazily. Keeps `tsync share` O(1). *)
+             | _ ->
+                 (* Directory (a folder marker, or the domain root): store the
+                    folder's namespace prefix (by id); the Lambda lists it lazily.
+                    Keeps `tsync share` O(1). *)
                  let* dir_id =
-                   Folder_ids.resolve ~cache_root:C.cache_root
-                     ~domain_name:C.domain_name rel
+                   match marker with
+                     | Some m -> Lwt.return m.Folder.id
+                     | None ->
+                         Folder_ids.resolve ~cache_root:C.cache_root
+                           ~domain_name:C.domain_name rel
                  in
                  let dir_prefix = C.domain_prefix ^ dir_id ^ "/" in
                  let* entries = B.list_all ~prefix:dir_prefix ~max_keys:1 () in
