@@ -2,18 +2,15 @@ import Foundation
 
 public struct DomainConfig: Codable, Sendable {
     public let name: String
-    public let prefix: String
     public let readOnly: Bool
 
     enum CodingKeys: String, CodingKey {
-        case name, prefix
-        case readOnly = "readOnly"
+        case name, readOnly
     }
 
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         name = try c.decode(String.self, forKey: .name)
-        prefix = try c.decode(String.self, forKey: .prefix)
         readOnly = (try? c.decodeIfPresent(Bool.self, forKey: .readOnly)) ?? false
     }
 }
@@ -39,9 +36,9 @@ public struct Config: Codable, Sendable {
         domains.first(where: { $0.name == domainName })?.readOnly ?? false
     }
 
-    /// Full S3 key prefix for a domain, e.g. "tsync/music-production/"
+    /// Full S3 key prefix for a domain's manifests. Must match the daemon's
+    /// Conf_parsing.domain_prefix (bin/tsync.ml): "tsync/" ^ name ^ "/manifests/".
     public func domainPrefix(_ domainName: String) -> String {
-        let p = domains.first(where: { $0.name == domainName })?.prefix ?? ""
-        return p.hasSuffix("/") ? "\(p)\(domainName)/" : "\(p)/\(domainName)/"
+        "tsync/\(domainName)/manifests/"
     }
 }
