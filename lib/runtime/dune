@@ -1,0 +1,24 @@
+(library
+ (name tsync_linux_runtime)
+ (wrapped false)
+ (libraries tsync_fuse)
+ (optional)
+ (modules linux_runtime))
+
+(library
+ (name tsync_macos_runtime)
+ (wrapped false)
+ (libraries tsync_file_provider)
+ (optional)
+ (modules macos_runtime))
+
+(library
+ (name tsync_runtime)
+ (wrapped false)
+ (modules runtime)
+ (libraries
+  (select
+   runtime.ml
+   from
+   (tsync_linux_runtime -> runtime.linux.ml)
+   (tsync_macos_runtime -> runtime.macos.ml))))
