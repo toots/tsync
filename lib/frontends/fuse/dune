@@ -1,0 +1,6 @@
+(library
+ (name tsync_fuse_frontend)
+ (optional)
+ (wrapped false)
+ (library_flags (-linkall))
+ (libraries tsync_frontend_register tsync_fuse tsync_file tsync_conf unix))

@@ -1,15 +1,15 @@
 (library
  (name tsync_linux_runtime)
  (wrapped false)
- (libraries tsync_fuse)
- (optional)
+ (enabled_if
+  (= %{system} linux))
  (modules linux_runtime))
 
 (library
  (name tsync_macos_runtime)
  (wrapped false)
- (libraries tsync_file_provider)
- (optional)
+ (enabled_if
+  (= %{system} macosx))
  (modules macos_runtime))
 
 (library

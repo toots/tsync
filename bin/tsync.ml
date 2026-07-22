@@ -41,6 +41,9 @@ let rec mkdir_p path =
 
 let runtime_paths = Runtime.default_paths ()
 
+(* Placeholder: pick the first registered frontend. Revisited in the next phase. *)
+module Frontend_impl = (val List.hd (Frontend.registered ()) : Frontend.S)
+
 (* Send a JSON IPC request; return the parsed response fields.
    Raises Failure with the daemon's error message when ok=false. *)
 let ipc_request ?(socket_path = runtime_paths.Runtime.socket_path) fields =
@@ -185,11 +188,11 @@ let start_cmd =
         let mp = mount_fn C.domain_name in
         Log.debug "domain: %s, mount: %s" C.domain_name mp;
         mkdir_p mp;
-        Runtime.pre_start ~mount_point:mp)
+        Frontend_impl.pre_start ~mount_point:mp)
       confs;
     Log.debug "cache root: %s" runtime_paths.Runtime.cache_root;
     Log.debug "initializing runtime";
-    Runtime.start ~confs ~mount_fn
+    Frontend_impl.start ~confs ~mount_fn
   in
   Cmd.v
     (Cmd.info "start" ~doc:"Mount the filesystem (run via systemd unit)")
@@ -418,7 +421,7 @@ let ls_cmd =
              | `Dir _ -> Printf.printf "dir    %s/\n" name
              | `File (e : Backend.file_entry) ->
                  let cached =
-                   Runtime.is_local ~cache_root:C.cache_root
+                   Frontend_impl.is_local ~cache_root:C.cache_root
                      ~domain_name:C.domain_name ~domain_prefix:C.domain_prefix
                      e.key
                  in
@@ -2362,7 +2365,7 @@ let default_domain_cmd =
 let build_config_cmd =
   let run () =
     Printf.printf "runtime: %s\ns3 backend: %b\nlog: %s\n"
-      Runtime.implementation S3_link.s3_backend_enabled Log.implementation
+      Frontend_impl.implementation S3_link.s3_backend_enabled Log.implementation
   in
   Cmd.v
     (Cmd.info "build-config"

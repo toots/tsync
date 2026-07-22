@@ -1,0 +1,15 @@
+(library
+ (name tsync_frontend)
+ (wrapped false)
+ (libraries
+  tsync_frontend_register
+  (select
+   fuse_frontend.ml
+   from
+   (tsync_fuse_frontend -> fuse_frontend.enabled.ml)
+   (-> fuse_frontend.disabled.ml))
+  (select
+   file_provider_frontend.ml
+   from
+   (tsync_file_provider_frontend -> file_provider_frontend.enabled.ml)
+   (-> file_provider_frontend.disabled.ml))))

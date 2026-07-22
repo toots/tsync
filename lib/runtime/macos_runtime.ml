@@ -5,8 +5,6 @@ type paths = {
   config_path : string;
 }
 
-let implementation = "file_provider"
-
 let default_paths () =
   let home = Sys.getenv "HOME" in
   let app_group =
@@ -20,28 +18,5 @@ let default_paths () =
     config_path = Filename.concat app_group "config.json";
   }
 
-let pre_start ~mount_point:_ = ()
-
 (* All domains share the same socket; the daemon routes by domain prefix. *)
 let domain_socket_path paths _domain_name = paths.socket_path
-
-let is_local ~cache_root:_ ~domain_name ~domain_prefix key =
-  let pfx = String.length domain_prefix in
-  let rel =
-    if String.length key > pfx then String.sub key pfx (String.length key - pfx)
-    else key
-  in
-  let normalized =
-    String.concat "-"
-      (String.split_on_char ' ' (String.lowercase_ascii domain_name))
-  in
-  let cloud_root = Filename.concat (Sys.getenv "HOME") "Library/CloudStorage" in
-  let domain_dir = Filename.concat cloud_root ("TsyncApp-" ^ normalized) in
-  let p = Filename.concat domain_dir rel in
-  Sys.file_exists p && not (File_provider.is_dataless p)
-
-module Make (C : Conf.S) = File_provider.Make (C)
-
-let start ~confs ~mount_fn:_ =
-  let paths = default_paths () in
-  File_provider.start ~confs ~socket_path:paths.socket_path
