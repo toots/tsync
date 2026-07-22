@@ -1,15 +1,16 @@
 (library
  (name tsync_frontend)
  (wrapped false)
+ (library_flags (-linkall))
  (libraries
   tsync_frontend_register
   (select
-   fuse_frontend.ml
+   frontend_fuse.ml
    from
-   (tsync_fuse_frontend -> fuse_frontend.enabled.ml)
-   (-> fuse_frontend.disabled.ml))
+   (tsync_fuse_frontend -> frontend_fuse.enabled.ml)
+   (-> frontend_fuse.disabled.ml))
   (select
-   file_provider_frontend.ml
+   frontend_file_provider.ml
    from
-   (tsync_file_provider_frontend -> file_provider_frontend.enabled.ml)
-   (-> file_provider_frontend.disabled.ml))))
+   (tsync_file_provider_frontend -> frontend_file_provider.enabled.ml)
+   (-> frontend_file_provider.disabled.ml))))

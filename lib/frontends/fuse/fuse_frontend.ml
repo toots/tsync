@@ -34,7 +34,7 @@ let start ~confs ~mount_fn =
       try ignore (Unix.waitpid [] pid) with _ -> ())
     child_pids
 
-let () =
+let register () =
   Frontend.register implementation
     (module struct
       let implementation = implementation

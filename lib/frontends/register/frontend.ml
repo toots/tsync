@@ -15,3 +15,4 @@ end
 let registry : (string, (module S)) Hashtbl.t = Hashtbl.create 4
 let register name (m : (module S)) = Hashtbl.replace registry name m
 let registered () = List.of_seq (Hashtbl.to_seq_values registry)
+let names () = List.of_seq (Hashtbl.to_seq_keys registry)

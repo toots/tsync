@@ -41,8 +41,10 @@ let rec mkdir_p path =
 
 let runtime_paths = Runtime.default_paths ()
 
-(* Placeholder: pick the first registered frontend. Revisited in the next phase. *)
-module Frontend_impl = (val List.hd (Frontend.registered ()) : Frontend.S)
+(* Placeholder: use the first registered frontend. Revisited in the next phase.
+   Looked up at call time (not module-init) so frontend registration, which runs
+   as a link-order side effect, has already happened. *)
+let frontend () : (module Frontend.S) = List.hd (Frontend.registered ())
 
 (* Send a JSON IPC request; return the parsed response fields.
    Raises Failure with the daemon's error message when ok=false. *)
@@ -183,16 +185,17 @@ let start_cmd =
         (0, 0) confs
     in
     Lwt_unix.set_pool_size (min 256 (total_uploads + total_downloads + 32));
+    let (module F : Frontend.S) = frontend () in
     List.iter
       (fun (module C : Conf.S) ->
         let mp = mount_fn C.domain_name in
         Log.debug "domain: %s, mount: %s" C.domain_name mp;
         mkdir_p mp;
-        Frontend_impl.pre_start ~mount_point:mp)
+        F.pre_start ~mount_point:mp)
       confs;
     Log.debug "cache root: %s" runtime_paths.Runtime.cache_root;
     Log.debug "initializing runtime";
-    Frontend_impl.start ~confs ~mount_fn
+    F.start ~confs ~mount_fn
   in
   Cmd.v
     (Cmd.info "start" ~doc:"Mount the filesystem (run via systemd unit)")
@@ -420,8 +423,9 @@ let ls_cmd =
            match item with
              | `Dir _ -> Printf.printf "dir    %s/\n" name
              | `File (e : Backend.file_entry) ->
+                 let (module F : Frontend.S) = frontend () in
                  let cached =
-                   Frontend_impl.is_local ~cache_root:C.cache_root
+                   F.is_local ~cache_root:C.cache_root
                      ~domain_name:C.domain_name ~domain_prefix:C.domain_prefix
                      e.key
                  in
@@ -1879,7 +1883,20 @@ let edit_domain existing =
     ]
 
 (* Serialize globals + domains to [path] with 0600 perms. *)
-let write_config ~path ~client_name ~max_uploads ~max_downloads ~tls ~domains =
+(* Toggle each compiled-in frontend on or off, pre-filled from [current]. Returns
+   the enabled frontends as [{"type": name}] JSON objects. *)
+let edit_frontends current =
+  let registered = Frontend.names () in
+  let is_on name = List.exists (fun j -> jstr j "type" = Some name) current in
+  List.filter_map
+    (fun name ->
+      if prompt_bool ~default:(is_on name) ("  Enable frontend " ^ name ^ "?")
+      then Some (`Assoc [("type", `String name)])
+      else None)
+    registered
+
+let write_config ~path ~client_name ~max_uploads ~max_downloads ~tls ~frontends
+    ~domains =
   mkdir_p (Filename.dirname path);
   let json =
     `Assoc
@@ -1889,7 +1906,7 @@ let write_config ~path ~client_name ~max_uploads ~max_downloads ~tls ~domains =
          ("maxDownloads", `Int max_downloads);
        ]
       @ (match tls with Some t -> [("tls", `String t)] | None -> [])
-      @ [("domains", `List domains)])
+      @ [("frontends", `List frontends); ("domains", `List domains)])
   in
   let oc = open_out path in
   output_string oc (Yojson.Basic.pretty_to_string json);
@@ -1931,6 +1948,16 @@ let configure_cmd =
            ~default:Conf_parsing.default_max_downloads)
     in
     let tls = ref (Option.bind existing_root (fun r -> jstr r "tls")) in
+    (* Default a new config to every compiled-in frontend (usually one). *)
+    let frontends =
+      ref
+        (match existing_root with
+          | Some r -> jlist r "frontends"
+          | None ->
+              List.map
+                (fun name -> `Assoc [("type", `String name)])
+                (Frontend.names ()))
+    in
     let domains =
       ref (match existing_root with Some r -> jlist r "domains" | None -> [])
     in
@@ -1994,7 +2021,8 @@ let configure_cmd =
       Printf.printf
         "\n\
          Enter a domain number to select, or an action:\n\
-        \  [a]dd  [e]dit selected  [r]emove selected  [g]lobals  [w]rite  [q]uit\n\
+        \  [a]dd  [e]dit selected  [r]emove selected  [g]lobals  [f]rontends  \
+         [w]rite  [q]uit\n\
          > %!";
       let action = String.lowercase_ascii (String.trim (read_line ())) in
       let has_sel = !selected >= 0 && !selected < List.length !domains in
@@ -2023,9 +2051,12 @@ let configure_cmd =
                   end
                   else status := "(select a domain first)"
               | "g" -> edit_globals ()
+              | "f" -> frontends := edit_frontends !frontends
               | "w" ->
                   if !domains = [] then
                     status := "(add at least one domain before writing)"
+                  else if !frontends = [] then
+                    status := "(enable at least one frontend before writing)"
                   else begin
                     running := false;
                     saved := true
@@ -2059,7 +2090,7 @@ let configure_cmd =
       end;
       write_config ~path:config_path ~client_name:!client_name
         ~max_uploads:!max_uploads ~max_downloads:!max_downloads ~tls:!tls
-        ~domains:!domains;
+        ~frontends:!frontends ~domains:!domains;
       Printf.printf "\nConfig written to %s\n" config_path
     end
   in
@@ -2364,8 +2395,9 @@ let default_domain_cmd =
 
 let build_config_cmd =
   let run () =
-    Printf.printf "runtime: %s\ns3 backend: %b\nlog: %s\n"
-      Frontend_impl.implementation S3_link.s3_backend_enabled Log.implementation
+    let (module F : Frontend.S) = frontend () in
+    Printf.printf "runtime: %s\ns3 backend: %b\nlog: %s\n" F.implementation
+      S3_link.s3_backend_enabled Log.implementation
   in
   Cmd.v
     (Cmd.info "build-config"

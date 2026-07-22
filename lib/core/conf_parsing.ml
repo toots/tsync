@@ -18,6 +18,7 @@ type t = {
   tls : string option;
   max_uploads : int;
   max_downloads : int;
+  frontends : string list;
   domains : domain list;
 }
 
@@ -69,6 +70,10 @@ let order_backends backends =
     | None -> backends
     | Some primary -> primary :: List.filter (fun b -> b != primary) backends
 
+let parse_frontend json =
+  let open Yojson.Basic.Util in
+  json |> member "type" |> to_string
+
 let parse_symlink_policy json =
   let open Yojson.Basic.Util in
   match json |> member "symlinks" with
@@ -111,6 +116,10 @@ let load path =
       (match json |> member "maxDownloads" with
         | `Int n when n > 0 -> n
         | _ -> default_max_downloads);
+    frontends =
+      (match json |> member "frontends" with
+        | `List (_ :: _ as l) -> List.map parse_frontend l
+        | _ -> failwith "config missing required non-empty \"frontends\" array");
     domains = json |> member "domains" |> to_list |> List.map parse_domain;
   }
 

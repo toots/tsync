@@ -20,7 +20,7 @@ let start ~confs ~mount_fn:_ =
   let paths = Runtime.default_paths () in
   File_provider.start ~confs ~socket_path:paths.Runtime.socket_path
 
-let () =
+let register () =
   Frontend.register implementation
     (module struct
       let implementation = implementation

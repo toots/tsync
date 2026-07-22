@@ -23,6 +23,7 @@ type t = {
           buffer pool, how many chunk reads/uploads run concurrently across all
           of them combined *)
   max_downloads : int;  (** max concurrent file downloads (default 8) *)
+  frontends : string list;  (** required; frontend type names, e.g. ["fuse"] *)
   domains : domain list;
 }
 
