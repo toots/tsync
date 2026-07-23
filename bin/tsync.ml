@@ -468,6 +468,9 @@ let ls_cmd =
     Lwt_main.run
       (let open Lwt.Syntax in
        let cfg = Conf_parsing.load runtime_paths.Runtime.config_path in
+       let domain =
+         match domain with Some _ -> domain | None -> read_default_domain ()
+       in
        let (module C : Conf.S) = make_conf ?domain cfg in
        let (module F : Frontend.S) =
          resolve_frontend ?frontend (Conf_parsing.pick_domain ?domain cfg)
