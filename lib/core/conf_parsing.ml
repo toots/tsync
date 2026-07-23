@@ -50,6 +50,7 @@ let parse_backend json =
           match v with
             | `String s -> Some (k, s)
             | `Bool b -> Some (k, string_of_bool b)
+            | `Int n -> Some (k, string_of_int n)
             (* Array fields (e.g. exec backend "command") pass through as JSON
                for the backend factory to decode. *)
             | `List _ -> Some (k, Yojson.Basic.to_string v)
@@ -92,6 +93,7 @@ let parse_frontend json =
                 match v with
                   | `String s -> Some (k, s)
                   | `Bool b -> Some (k, string_of_bool b)
+                  | `Int n -> Some (k, string_of_int n)
                   | `List _ -> Some (k, Yojson.Basic.to_string v)
                   | _ -> None))
         in
@@ -175,17 +177,3 @@ let versions_prefix d = domain_root d ^ "versions/"
 let journal_prefix d = domain_root d ^ "journal/"
 let cursor_key d = domain_root d ^ "cursor"
 let shares_prefix d = domain_root d ^ "shares/"
-
-(* A backend's share Lambda URL, if it has a non-empty [shareUrl] field. *)
-let backend_share_url bc =
-  match List.assoc_opt "shareUrl" bc.fields with
-    | Some u when u <> "" -> Some u
-    | _ -> None
-
-(* The first backend (in config order) that carries a [shareUrl], with its URL.
-   This backend both serves the domain's shares and receives the share
-   manifests. *)
-let domain_share_backend d =
-  List.find_map
-    (fun bc -> Option.map (fun u -> (bc, u)) (backend_share_url bc))
-    d.backends

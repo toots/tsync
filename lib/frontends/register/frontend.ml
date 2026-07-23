@@ -1,6 +1,16 @@
+(* One domain's binding for a frontend: the domain conf, this frontend's own
+   options (from [frontend_config.options]), the domain's backends as
+   [(name, backend_type)] aligned with [C.backends] order (for resolving options
+   that name a backend), and the mount point (fuse uses it; others ignore). *)
+type binding = {
+  conf : (module Conf.S);
+  options : (string * string) list;
+  backend_meta : (string * string) list;
+  mount_point : string;
+}
+
 module type S = sig
   val implementation : string
-  val pre_start : mount_point:string -> unit
 
   val is_local :
     cache_root:string ->
@@ -9,7 +19,8 @@ module type S = sig
     string ->
     bool
 
-  val start : confs:(module Conf.S) list -> mount_fn:(string -> string) -> unit
+  (* Run this frontend for all the domains bound to it. Blocks until shutdown. *)
+  val start : binding list -> unit
 end
 
 let registry : (string, (module S)) Hashtbl.t = Hashtbl.create 4

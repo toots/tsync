@@ -185,11 +185,19 @@ let start_cmd =
         | Some p, [_] -> p
         | _ -> Filename.concat (Sys.getenv "HOME") ("tsync/" ^ domain_name)
     in
-    let confs =
+    (* One conf + binding scaffold per domain; a domain's frontends share its conf. *)
+    let per_domain =
       List.map
         (fun (d : Conf_parsing.domain) ->
           let socket_path = Runtime.domain_socket_path runtime_paths d.name in
-          make_conf ~domain:d.name ~socket_path cfg)
+          let conf = make_conf ~domain:d.name ~socket_path cfg in
+          let backend_meta =
+            List.map
+              (fun (b : Conf_parsing.backend_config) ->
+                (b.Conf_parsing.name, b.Conf_parsing.backend_type))
+              (Conf_parsing.order_backends d.Conf_parsing.backends)
+          in
+          (d, conf, backend_meta, mount_fn d.Conf_parsing.name))
         domains
     in
     (* Lwt_unix defaults to a pool of up to 1000 OS threads for dispatching
@@ -209,39 +217,77 @@ let start_cmd =
        covers realistic concurrency for this workload. *)
     let total_uploads, total_downloads =
       List.fold_left
-        (fun (u, d) (module C : Conf.S) ->
-          (u + C.max_uploads, d + C.max_downloads))
-        (0, 0) confs
+        (fun (u, dn) (_, conf, _, _) ->
+          let module C = (val conf : Conf.S) in
+          (u + C.max_uploads, dn + C.max_downloads))
+        (0, 0) per_domain
     in
     Lwt_unix.set_pool_size (min 256 (total_uploads + total_downloads + 32));
-    (* Each frontend's [start] blocks the process, so today all domains must
-       share one host frontend (their first configured one). Running distinct
-       frontends concurrently arrives with the http frontend. *)
-      (match
-         List.sort_uniq compare
-           (List.map
-              (fun (d : Conf_parsing.domain) ->
-                match frontend_names d with
-                  | f :: _ -> f
-                  | [] -> failwith ("domain " ^ d.name ^ " has no frontends"))
-              domains)
-       with
-      | [] | [_] -> ()
-      | _ ->
-          failwith
-            "domains use different frontends; running multiple frontends \
-             concurrently is not yet supported (coming with the http frontend)");
-    let (module F : Frontend.S) = resolve_frontend (List.hd domains) in
-    List.iter
-      (fun (module C : Conf.S) ->
-        let mp = mount_fn C.domain_name in
-        Log.debug "domain: %s, mount: %s" C.domain_name mp;
-        mkdir_p mp;
-        F.pre_start ~mount_point:mp)
-      confs;
+    (* One [binding] per (domain × frontend), grouped by frontend. Each group runs
+       as its own process (all but the last forked), so distinct frontends — e.g.
+       fuse and http-proxy on the same domain — run concurrently. *)
+    let all_bindings =
+      List.concat_map
+        (fun (d, conf, backend_meta, mount_point) ->
+          List.map
+            (fun (f : Conf_parsing.frontend_config) ->
+              ( f.Conf_parsing.frontend_type,
+                {
+                  Frontend.conf;
+                  options = f.Conf_parsing.options;
+                  backend_meta;
+                  mount_point;
+                } ))
+            d.Conf_parsing.frontends)
+        per_domain
+    in
+    let frontend_order =
+      List.fold_left
+        (fun acc (name, _) -> if List.mem name acc then acc else acc @ [name])
+        [] all_bindings
+    in
+    let groups =
+      List.map
+        (fun name ->
+          ( name,
+            List.filter_map
+              (fun (n, b) -> if n = name then Some b else None)
+              all_bindings ))
+        frontend_order
+    in
+    let run_group (name, bindings) =
+      let (module F : Frontend.S) =
+        match Frontend.find name with
+          | Some m -> m
+          | None ->
+              failwith
+                (Printf.sprintf
+                   "frontend %s is configured but not compiled into this binary"
+                   name)
+      in
+      Log.debug "starting frontend %s (%d domains)" name (List.length bindings);
+      F.start bindings
+    in
     Log.debug "cache root: %s" runtime_paths.Runtime.cache_root;
-    Log.debug "initializing runtime";
-    F.start ~confs ~mount_fn
+    let rec go child_pids = function
+      | [] -> []
+      | [g] ->
+          run_group g;
+          List.rev child_pids
+      | g :: rest ->
+          let pid = Unix.fork () in
+          if pid = 0 then begin
+            run_group g;
+            exit 0
+          end;
+          go (pid :: child_pids) rest
+    in
+    let child_pids = go [] groups in
+    List.iter
+      (fun pid ->
+        (try Unix.kill pid Sys.sigterm with _ -> ());
+        try ignore (Unix.waitpid [] pid) with _ -> ())
+      child_pids
   in
   Cmd.v
     (Cmd.info "start" ~doc:"Mount the filesystem (run via systemd unit)")
@@ -2227,23 +2273,29 @@ let share_cmd =
       match domain with Some _ -> domain | None -> read_default_domain ()
     in
     let d = Conf_parsing.pick_domain ?domain cfg in
-    (* Shares are served by — and written to — the first backend that carries a
-       shareUrl. *)
-    let share_backend, share_url =
-      match Conf_parsing.domain_share_backend d with
-        | Some (bc, url) -> (bc, url)
-        | None ->
-            Printf.eprintf "no backend in domain %s has a shareUrl configured\n"
-              d.Conf_parsing.name;
-            exit 1
-    in
     let ttl = parse_duration expires in
     let (module C : Conf.S) = make_conf ?domain cfg in
-    let (module B : Backend.S) = make_backend share_backend in
     let expires = int_of_float (Unix.time () +. ttl) in
     let url =
       Lwt_main.run
         (let open Lwt.Syntax in
+         (* The share backend is the first of this domain's backends that serves
+            shares (an s3 with a shareUrl, or an http-proxy that reports one). *)
+         let* share_backend, share_url =
+           let rec find = function
+             | [] ->
+                 Printf.eprintf "no backend in domain %s serves shares\n"
+                   d.Conf_parsing.name;
+                 exit 1
+             | (module Bk : Backend.S) :: rest -> (
+                 let* u = Bk.share_url ~prefix:C.domain_prefix () in
+                 match u with
+                   | Some url -> Lwt.return ((module Bk : Backend.S), url)
+                   | None -> find rest)
+           in
+           find C.backends
+         in
+         let (module B : Backend.S) = share_backend in
          (* Resolve PATH to a domain-relative path; accept an absolute path under
             the mount point too. Empty rel means the whole domain. *)
          let mount_point =

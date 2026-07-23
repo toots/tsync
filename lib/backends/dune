@@ -5,6 +5,7 @@
   tsync_backend_register
   tsync_local_backend
   tsync_exec_backend
+  tsync_http_proxy_backend
   (select
    s3_link.ml
    from

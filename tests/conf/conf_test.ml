@@ -30,31 +30,6 @@ let () =
   in
   assert (List.assoc "command" backend.Conf_parsing.fields = {|["ssh","box"]|});
 
-  (* shareUrl: no backend has one -> no share backend *)
-  Unix.putenv "TSYNC_CONFIG_JSON"
-    {|{"domains": [{"name": "d", "symlinks": "keep", "versioning": false,
-                    "frontends": ["fuse"],
-                    "backends": [{"type": "s3", "name": "s", "main": true}]}]}|};
-  assert (
-    Conf_parsing.domain_share_backend
-      (List.hd (Conf_parsing.load "").Conf_parsing.domains)
-    = None);
-
-  (* shareUrl: first backend carrying one is picked, with its URL *)
-  Unix.putenv "TSYNC_CONFIG_JSON"
-    {|{"domains": [{"name": "d", "symlinks": "keep", "versioning": false,
-                    "frontends": ["fuse"],
-                    "backends": [{"type": "s3", "name": "a"},
-                                 {"type": "s3", "name": "b", "shareUrl": "https://x.lambda-url"}]}]}|};
-  (match
-     Conf_parsing.domain_share_backend
-       (List.hd (Conf_parsing.load "").Conf_parsing.domains)
-   with
-    | Some (bc, url) ->
-        assert (bc.Conf_parsing.name = "b");
-        assert (url = "https://x.lambda-url")
-    | None -> assert false);
-
   (* frontends: bare string and object forms both parse; string = {type};
      object keys beyond "type" are kept as option fields *)
   Unix.putenv "TSYNC_CONFIG_JSON"

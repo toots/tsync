@@ -4,6 +4,7 @@
  (library_flags (-linkall))
  (libraries
   tsync_frontend_register
+  tsync_http_proxy_frontend
   (select
    frontend_fuse.ml
    from

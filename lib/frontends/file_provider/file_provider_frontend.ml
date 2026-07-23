@@ -1,5 +1,4 @@
 let implementation = "file_provider"
-let pre_start ~mount_point:_ = ()
 
 let is_local ~cache_root:_ ~domain_name ~domain_prefix key =
   let pfx = String.length domain_prefix in
@@ -16,15 +15,18 @@ let is_local ~cache_root:_ ~domain_name ~domain_prefix key =
   let p = Filename.concat domain_dir rel in
   Sys.file_exists p && not (File_provider.is_dataless p)
 
-let start ~confs ~mount_fn:_ =
+(* All domains share one IPC socket; the daemon routes by domain prefix. *)
+let start bindings =
   let paths = Runtime.default_paths () in
+  let confs =
+    List.map (fun (b : Frontend.binding) -> b.Frontend.conf) bindings
+  in
   File_provider.start ~confs ~socket_path:paths.Runtime.socket_path
 
 let register () =
   Frontend.register implementation
     (module struct
       let implementation = implementation
-      let pre_start = pre_start
       let is_local = is_local
       let start = start
     end : Frontend.S)
