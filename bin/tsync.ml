@@ -1428,10 +1428,23 @@ let resync_remote_cmd =
                  (if manifests_only then "manifests" else "all objects")
                  (label source);
                let module M = Mirror.Make (C) in
-               let+ dests = M.resync ~source ~manifests_only () in
+               let on_scan ~objects =
+                 vprintf "scanned %s: %d object%s to check\n" (label source)
+                   objects
+                   (if objects = 1 then "" else "s")
+               in
+               let on_copy ~index ~key ~bytes =
+                 vprintf "  copied %s (%d bytes) -> %s\n" key bytes
+                   (label index)
+               in
+               let+ dests =
+                 M.resync ~source ~manifests_only ~on_scan ~on_copy ()
+               in
                List.iter
                  (fun (dst : Mirror.dest_stats) ->
-                   List.iter (Printf.printf "copied %s\n") dst.Mirror.copied;
+                   (* Keys are logged live under -v; only dump them otherwise. *)
+                   if not !verbose then
+                     List.iter (Printf.printf "copied %s\n") dst.Mirror.copied;
                    Printf.printf
                      "%s -> %s: %d object%s checked, %d copied (%d bytes)\n"
                      (label source) (label dst.Mirror.index) dst.Mirror.checked

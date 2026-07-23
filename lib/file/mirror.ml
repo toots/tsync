@@ -61,12 +61,16 @@ module Make (C : Conf.S) = struct
         compare a.key b.key)
       entries
 
-  let resync_to src dst ~index entries =
+  let resync_to ?(on_copy = fun ~index:_ ~key:_ ~bytes:_ -> ()) src dst ~index
+      entries =
     let+ results =
       Lwt_list.map_p
         (fun entry ->
           Lwt_pool.use copy_pool (fun () ->
               let+ copied = sync_entry src dst entry in
+              (match copied with
+                | Some bytes -> on_copy ~index ~key:entry.Backend.key ~bytes
+                | None -> ());
               (entry.Backend.key, copied)))
         entries
     in
@@ -92,10 +96,13 @@ module Make (C : Conf.S) = struct
      source are not deleted on the destinations (deletes normally fan out to
      all backends; resync is for backends that were down, drifted or were
      added later). *)
-  let resync ?(source = 0) ?(manifests_only = false) () =
+  let resync ?(source = 0) ?(manifests_only = false)
+      ?(on_scan = fun ~objects:_ -> ()) ?on_copy () =
     let src = List.nth C.backends source in
     let* entries = source_entries ~manifests_only src in
+    on_scan ~objects:(List.length entries);
     List.mapi (fun i b -> (i, b)) C.backends
     |> List.filter (fun (i, _) -> i <> source)
-    |> Lwt_list.map_s (fun (index, dst) -> resync_to src dst ~index entries)
+    |> Lwt_list.map_s (fun (index, dst) ->
+        resync_to ?on_copy src dst ~index entries)
 end
