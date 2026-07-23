@@ -176,6 +176,24 @@ let build_backends (d : Conf_parsing.domain) : (module Backend.S) list =
     ]
   end
 
+(* Ordered backends with the one named [source] moved to the head, so it serves
+   reads (the primary). Fails if no backend has that name. *)
+let order_backends_from source backends =
+  let ordered = Conf_parsing.order_backends backends in
+  match
+    List.partition
+      (fun (b : Conf_parsing.backend_config) -> b.name = source)
+      ordered
+  with
+    | [], _ ->
+        failwith
+          (Printf.sprintf "no backend named %s (available: %s)" source
+             (String.concat ", "
+                (List.map
+                   (fun (b : Conf_parsing.backend_config) -> b.name)
+                   ordered)))
+    | chosen, rest -> chosen @ rest
+
 let default_domain_file () =
   Filename.concat runtime_paths.Runtime.data_dir "default-domain"
 
@@ -188,8 +206,11 @@ let read_default_domain () =
     | exception _ -> None
 
 (* [tier=false] exposes the raw ordered backend list instead of the tiered
-   composite — for commands (resync-remote) that copy between individual backends. *)
-let make_conf ?domain ?socket_path ?(tier = true) cfg : (module Conf.S) =
+   composite — for commands (resync-remote) that copy between individual backends.
+   [source] forces reads to come from the named backend (moved to the head, tiering
+   off) — for commands that pick which backend to read from. *)
+let make_conf ?domain ?socket_path ?(tier = true) ?source cfg : (module Conf.S)
+    =
   Tls_conf.apply cfg.Conf_parsing.tls;
   let domain =
     match domain with Some _ -> domain | None -> read_default_domain ()
@@ -209,10 +230,15 @@ let make_conf ?domain ?socket_path ?(tier = true) cfg : (module Conf.S) =
     let cursor_key = Conf_parsing.cursor_key d
 
     let backends =
-      if tier then build_backends d
-      else
-        List.map make_backend
-          (Conf_parsing.order_backends d.Conf_parsing.backends)
+      match source with
+        | Some name ->
+            List.map make_backend
+              (order_backends_from name d.Conf_parsing.backends)
+        | None ->
+            if tier then build_backends d
+            else
+              List.map make_backend
+                (Conf_parsing.order_backends d.Conf_parsing.backends)
 
     let cache_root = runtime_paths.Runtime.cache_root
     let data_dir = runtime_paths.Runtime.data_dir
@@ -969,6 +995,15 @@ let sync_cmd =
       & opt (some string) None
       & info ["domain"] ~docv:"NAME" ~doc:"Domain name (default: from config)")
   in
+  let source_arg =
+    Arg.(
+      value
+      & opt (some string) None
+      & info ["source"] ~docv:"NAME"
+          ~doc:
+            "Backend to sync from, by its configured name. Default: the \
+             primary backend.")
+  in
   let full_arg =
     Arg.(
       value & flag
@@ -994,12 +1029,12 @@ let sync_cmd =
         Printf.sprintf "rename %s -> %s%s" src dst
           (if is_dir then " (dir)" else "")
   in
-  let run domain full parallelism v =
+  let run domain source full parallelism v =
     set_verbose v;
     Lwt_main.run
       (let open Lwt.Syntax in
        let cfg = Conf_parsing.load runtime_paths.Runtime.config_path in
-       let (module C : Conf.S) = make_conf ?domain cfg in
+       let (module C : Conf.S) = make_conf ?domain ?source cfg in
        let module J = Journal.Make (C) in
        let module Fs = File_store.Make (C) in
        let module St = Store.Make (C) (Layout.Inode.Make (C)) in
@@ -1289,7 +1324,9 @@ let sync_cmd =
           resync (triggered by --full or when the local bookmark is stale) \
           clears the cache and re-downloads all manifests. Pass --verbose to \
           see a step-by-step breakdown.")
-    Term.(const run $ domain_arg $ full_arg $ parallelism_arg $ verbose_arg)
+    Term.(
+      const run $ domain_arg $ source_arg $ full_arg $ parallelism_arg
+      $ verbose_arg)
 
 (* ── tsync recheck ───────────────────────────────────────────────────────── *)
 
