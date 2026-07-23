@@ -3,6 +3,7 @@ type backend_config = {
   name : string;
   fields : (string * string) list;
   main : bool;
+  backfill : bool;
 }
 
 type frontend_config = {
@@ -42,10 +43,13 @@ let parse_backend json =
            ^ backend_type ^ ")")
   in
   let main = match json |> member "main" with `Bool b -> b | _ -> false in
+  let backfill =
+    match json |> member "backfill" with `Bool b -> b | _ -> false
+  in
   let fields =
     to_assoc json
     |> List.filter_map (fun (k, v) ->
-        if k = "type" || k = "main" || k = "name" then None
+        if k = "type" || k = "main" || k = "name" || k = "backfill" then None
         else (
           match v with
             | `String s -> Some (k, s)
@@ -56,7 +60,7 @@ let parse_backend json =
             | `List _ -> Some (k, Yojson.Basic.to_string v)
             | _ -> None))
   in
-  { backend_type; name; fields; main }
+  { backend_type; name; fields; main; backfill }
 
 (* The primary backend serves reads; writes still fan out to all. Pick the first
    one explicitly marked [main], else the first local-file backend (local disk

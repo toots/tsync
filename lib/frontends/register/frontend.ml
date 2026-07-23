@@ -1,11 +1,9 @@
 (* One domain's binding for a frontend: the domain conf, this frontend's own
-   options (from [frontend_config.options]), the domain's backends as
-   [(name, backend_type)] aligned with [C.backends] order (for resolving options
-   that name a backend), and the mount point (fuse uses it; others ignore). *)
+   options (from [frontend_config.options]), and the mount point (fuse uses it;
+   others ignore). *)
 type binding = {
   conf : (module Conf.S);
   options : (string * string) list;
-  backend_meta : (string * string) list;
   mount_point : string;
 }
 

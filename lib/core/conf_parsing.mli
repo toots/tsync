@@ -4,6 +4,10 @@ type backend_config = {
       (** required; selects backends, e.g. [resync-remote --source] *)
   fields : (string * string) list;
   main : bool;  (** explicitly marked as the primary (read) backend *)
+  backfill : bool;
+      (** an incomplete backend to be lazily filled with served chunks; the
+          single non-[backfill] backend is the source of truth
+          (manifests/listings) *)
 }
 
 type frontend_config = {

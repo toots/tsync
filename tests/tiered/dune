@@ -1,0 +1,3 @@
+(test
+ (name tiered_test)
+ (libraries tsync_tiered_backend tsync_local_backend lwt lwt.unix unix))

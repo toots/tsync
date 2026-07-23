@@ -100,6 +100,58 @@ let make_backend (bc : Conf_parsing.backend_config) =
   Backend.make ~backend_type:bc.backend_type ~get_field:(fun k ->
       List.assoc_opt k bc.fields)
 
+(* The domain's ordered backends. When any is flagged [backfill], collapse them into
+   a single tiered composite (first-available chunk reads + lazy backfill; manifests
+   and listings from the one non-backfill source of truth). Otherwise the plain
+   ordered list, as before. *)
+let build_backends (d : Conf_parsing.domain) : (module Backend.S) list =
+  let ordered = Conf_parsing.order_backends d.Conf_parsing.backends in
+  if
+    not
+      (List.exists
+         (fun (b : Conf_parsing.backend_config) -> b.backfill)
+         ordered)
+  then List.map make_backend ordered
+  else begin
+    let subs =
+      List.map
+        (fun (bc : Conf_parsing.backend_config) ->
+          ( bc,
+            {
+              Tiered_backend.name = bc.Conf_parsing.name;
+              backend = make_backend bc;
+            } ))
+        ordered
+    in
+    let read_order = List.map snd subs in
+    let backfills =
+      List.filter_map
+        (fun (bc, s) -> if bc.Conf_parsing.backfill then Some s else None)
+        subs
+    in
+    let source =
+      match List.filter (fun (bc, _) -> not bc.Conf_parsing.backfill) subs with
+        | [(_, s)] -> s.Tiered_backend.backend
+        | [] ->
+            failwith
+              (Printf.sprintf
+                 "domain %s: every backend is \"backfill\"; exactly one must \
+                  be the source of truth"
+                 d.Conf_parsing.name)
+        | _ :: _ :: _ ->
+            failwith
+              (Printf.sprintf
+                 "domain %s: more than one non-\"backfill\" backend; exactly \
+                  one must be the source of truth"
+                 d.Conf_parsing.name)
+    in
+    [
+      Tiered_backend.make
+        ~chunk_prefix:(Conf_parsing.chunk_prefix d)
+        ~source ~read_order ~backfills;
+    ]
+  end
+
 let default_domain_file () =
   Filename.concat runtime_paths.Runtime.data_dir "default-domain"
 
@@ -111,7 +163,9 @@ let read_default_domain () =
         if s = "" then None else Some s
     | exception _ -> None
 
-let make_conf ?domain ?socket_path cfg : (module Conf.S) =
+(* [tier=false] exposes the raw ordered backend list instead of the tiered
+   composite — for commands (resync-remote) that copy between individual backends. *)
+let make_conf ?domain ?socket_path ?(tier = true) cfg : (module Conf.S) =
   Tls_conf.apply cfg.Conf_parsing.tls;
   let domain =
     match domain with Some _ -> domain | None -> read_default_domain ()
@@ -131,8 +185,10 @@ let make_conf ?domain ?socket_path cfg : (module Conf.S) =
     let cursor_key = Conf_parsing.cursor_key d
 
     let backends =
-      List.map make_backend
-        (Conf_parsing.order_backends d.Conf_parsing.backends)
+      if tier then build_backends d
+      else
+        List.map make_backend
+          (Conf_parsing.order_backends d.Conf_parsing.backends)
 
     let cache_root = runtime_paths.Runtime.cache_root
     let data_dir = runtime_paths.Runtime.data_dir
@@ -191,13 +247,7 @@ let start_cmd =
         (fun (d : Conf_parsing.domain) ->
           let socket_path = Runtime.domain_socket_path runtime_paths d.name in
           let conf = make_conf ~domain:d.name ~socket_path cfg in
-          let backend_meta =
-            List.map
-              (fun (b : Conf_parsing.backend_config) ->
-                (b.Conf_parsing.name, b.Conf_parsing.backend_type))
-              (Conf_parsing.order_backends d.Conf_parsing.backends)
-          in
-          (d, conf, backend_meta, mount_fn d.Conf_parsing.name))
+          (d, conf, mount_fn d.Conf_parsing.name))
         domains
     in
     (* Lwt_unix defaults to a pool of up to 1000 OS threads for dispatching
@@ -217,7 +267,7 @@ let start_cmd =
        covers realistic concurrency for this workload. *)
     let total_uploads, total_downloads =
       List.fold_left
-        (fun (u, dn) (_, conf, _, _) ->
+        (fun (u, dn) (_, conf, _) ->
           let module C = (val conf : Conf.S) in
           (u + C.max_uploads, dn + C.max_downloads))
         (0, 0) per_domain
@@ -228,16 +278,12 @@ let start_cmd =
        fuse and http-proxy on the same domain — run concurrently. *)
     let all_bindings =
       List.concat_map
-        (fun (d, conf, backend_meta, mount_point) ->
+        (fun (d, conf, mount_point) ->
           List.map
             (fun (f : Conf_parsing.frontend_config) ->
               ( f.Conf_parsing.frontend_type,
-                {
-                  Frontend.conf;
-                  options = f.Conf_parsing.options;
-                  backend_meta;
-                  mount_point;
-                } ))
+                { Frontend.conf; options = f.Conf_parsing.options; mount_point }
+              ))
             d.Conf_parsing.frontends)
         per_domain
     in
@@ -1332,7 +1378,8 @@ let resync_remote_cmd =
              (fun (b : Conf_parsing.backend_config) -> b.Conf_parsing.name)
              (Conf_parsing.order_backends d.Conf_parsing.backends)
          in
-         let (module C : Conf.S) = make_conf ?domain cfg in
+         (* Raw (untiered) backends so Mirror can copy between each one. *)
+         let (module C : Conf.S) = make_conf ?domain ~tier:false cfg in
          let label i = List.nth labels i in
          let source_index =
            match source with

@@ -44,21 +44,7 @@ type route = {
   read_only : bool;
   primary : (module Backend.S);
   all_backends : (module Backend.S) list;
-  backfills : (module Backend.S) list;
 }
-
-let backfill_names bindings b =
-  match
-    List.find_map
-      (fun k -> inherited bindings b k)
-      ["backfillBackends"; "backfillBackend"]
-  with
-    | None -> []
-    | Some s -> (
-        match try Some (Yojson.Safe.from_string s) with _ -> None with
-          | Some (`List l) ->
-              List.filter_map (function `String x -> Some x | _ -> None) l
-          | _ -> [s])
 
 let make_route bindings (b : Frontend.binding) =
   let module C = (val b.Frontend.conf : Conf.S) in
@@ -68,27 +54,14 @@ let make_route bindings (b : Frontend.binding) =
       | None ->
           failwith ("http-proxy: missing secret for domain " ^ C.domain_name)
   in
-  let backfills =
-    List.map
-      (fun name ->
-        match
-          List.find_index (fun (n, _) -> n = name) b.Frontend.backend_meta
-        with
-          | Some i -> List.nth C.backends i
-          | None ->
-              failwith
-                (Printf.sprintf
-                   "http-proxy: backfillBackend %s not found in domain %s" name
-                   C.domain_name))
-      (backfill_names bindings b)
-  in
+  (* [C.backends] is the (possibly tiered) backend set: [primary] tiers reads/
+     backfill internally, and writes fan out over [all_backends]. *)
   {
     domain_root = "tsync/" ^ C.domain_name ^ "/";
     secret;
     read_only = C.read_only;
     primary = List.hd C.backends;
     all_backends = C.backends;
-    backfills;
   }
 
 (* ── Request handling ───────────────────────────────────────────────────────── *)
@@ -172,21 +145,6 @@ let authed route req body =
           ~signature ~body
     | _ -> false
 
-(* Mirror a served object into every backfill backend that lacks it, in the
-   background so it never delays the response. *)
-let mirror route key data =
-  Lwt.async (fun () ->
-      Lwt.catch
-        (fun () ->
-          Lwt_list.iter_s
-            (fun (module B : Backend.S) ->
-              let* h = B.head_opt ~key () in
-              if h = None then B.put ~key ~data () else Lwt.return_unit)
-            route.backfills)
-        (fun exn ->
-          Log.warn "http-proxy backfill %s: %s" key (Printexc.to_string exn);
-          Lwt.return_unit))
-
 let fanout route f = Lwt_list.iter_s (fun b -> f b) route.all_backends
 
 let exec route op ~body =
@@ -196,9 +154,7 @@ let exec route op ~body =
         let module B = (val route.primary : Backend.S) in
         let* data = B.get_opt ~key () in
         match data with
-          | Some data ->
-              if route.backfills <> [] then mirror route key data;
-              respond data
+          | Some data -> respond data
           | None -> respond ~status:`Not_found "")
     | Head key -> (
         let module B = (val route.primary : Backend.S) in
