@@ -19,13 +19,16 @@ module Make (C : Conf.S) : sig
       ([C.domain_prefix], skipping chunks/journal/versions/cursor) — cheap way
       to complete a backend's structure without hauling chunk data.
 
-      [on_scan] fires once with the number of source objects to examine (after
-      listing, before copying). [on_copy] fires per object actually copied, with
-      the destination position and the bytes written — for live progress. *)
+      [on_list] fires before listing each source namespace ([name] is
+      "manifests"/"chunks"/"journal"/"versions"). [on_scan] fires once with the
+      total number of source objects to examine (after listing, before copying).
+      [on_copy] fires per object actually copied, with the destination position
+      and the bytes written — for live progress. *)
   val resync :
     ?source:int ->
     ?manifests_only:bool ->
     ?on_scan:(objects:int -> unit) ->
+    ?on_list:(name:string -> unit) ->
     ?on_copy:(index:int -> key:string -> bytes:int -> unit) ->
     unit ->
     dest_stats list Lwt.t

@@ -38,14 +38,24 @@ module Make (C : Conf.S) = struct
   (* Everything the daemon writes for this domain. The chunk store is shared
      across domains on the same bucket; mirroring all of it is deliberate
      (chunks are content-addressed, extra copies only help other domains). *)
-  let source_entries ?(manifests_only = false) (module Src : Backend.S) =
+  let source_entries ?(manifests_only = false) ?(on_list = fun ~name:_ -> ())
+      (module Src : Backend.S) =
     let prefixes =
-      if manifests_only then [C.domain_prefix]
+      if manifests_only then [("manifests", C.domain_prefix)]
       else
-        [C.domain_prefix; C.chunk_prefix; C.journal_prefix; C.versions_prefix]
+        [
+          ("manifests", C.domain_prefix);
+          ("chunks", C.chunk_prefix);
+          ("journal", C.journal_prefix);
+          ("versions", C.versions_prefix);
+        ]
     in
     let* per_prefix =
-      Lwt_list.map_s (fun prefix -> Src.list_all ~prefix ()) prefixes
+      Lwt_list.map_s
+        (fun (name, prefix) ->
+          on_list ~name;
+          Src.list_all ~prefix ())
+        prefixes
     in
     let+ cursor =
       if manifests_only then Lwt.return_none
@@ -97,9 +107,10 @@ module Make (C : Conf.S) = struct
      all backends; resync is for backends that were down, drifted or were
      added later). *)
   let resync ?(source = 0) ?(manifests_only = false)
-      ?(on_scan = fun ~objects:_ -> ()) ?on_copy () =
+      ?(on_scan = fun ~objects:_ -> ()) ?(on_list = fun ~name:_ -> ()) ?on_copy
+      () =
     let src = List.nth C.backends source in
-    let* entries = source_entries ~manifests_only src in
+    let* entries = source_entries ~manifests_only ~on_list src in
     on_scan ~objects:(List.length entries);
     List.mapi (fun i b -> (i, b)) C.backends
     |> List.filter (fun (i, _) -> i <> source)

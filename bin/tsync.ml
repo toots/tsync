@@ -4,9 +4,13 @@ open Cmdliner
 
 let verbose = ref false
 
-let vprintf fmt =
-  if !verbose then Printf.kfprintf (fun oc -> flush oc) stdout fmt
-  else Printf.ifprintf stdout fmt
+(* CLI progress goes through Log at info level; --verbose lowers the threshold
+   so those lines appear. Actual command results stay on stdout via Printf. *)
+let set_verbose v =
+  verbose := v;
+  Log.set_min_level (if v then `info else `warn)
+
+let vprintf fmt = Log.info fmt
 
 let verbose_arg =
   Arg.(value & flag & info ["verbose"; "v"] ~doc:"Print detailed progress")
@@ -226,7 +230,7 @@ let start_cmd =
              available backend.")
   in
   let run mount tls =
-    Log.init ();
+    Log.Daemon.init ();
     Log.debug "loading config from %s" runtime_paths.Runtime.config_path;
     let cfg = Conf_parsing.load runtime_paths.Runtime.config_path in
     (* CLI --tls wins over the config value applied by make_conf. *)
@@ -1007,7 +1011,7 @@ let sync_cmd =
           (if is_dir then " (dir)" else "")
   in
   let run domain full parallelism v =
-    verbose := v;
+    set_verbose v;
     Lwt_main.run
       (let open Lwt.Syntax in
        let cfg = Conf_parsing.load runtime_paths.Runtime.config_path in
@@ -1375,7 +1379,7 @@ let resync_remote_cmd =
              without hauling chunk data.")
   in
   let run domain source manifests_only v =
-    verbose := v;
+    set_verbose v;
     let code =
       Lwt_main.run
         (let open Lwt.Syntax in
@@ -1425,10 +1429,11 @@ let resync_remote_cmd =
                  C.domain_name (List.length C.backends);
                Lwt.return 1
            | Ok source ->
-               vprintf "resyncing %s from %s...\n"
+               vprintf "initiating remote sync: copying %s from %s...\n"
                  (if manifests_only then "manifests" else "all objects")
                  (label source);
                let module M = Mirror.Make (C) in
+               let on_list ~name = vprintf "  fetching %s listing...\n" name in
                let on_scan ~objects =
                  vprintf "scanned %s: %d object%s to check\n" (label source)
                    objects
@@ -1439,7 +1444,7 @@ let resync_remote_cmd =
                    (label index)
                in
                let+ dests =
-                 M.resync ~source ~manifests_only ~on_scan ~on_copy ()
+                 M.resync ~source ~manifests_only ~on_scan ~on_list ~on_copy ()
                in
                List.iter
                  (fun (dst : Mirror.dest_stats) ->
@@ -1509,7 +1514,7 @@ let import_cmd =
              manifest is always recomputed and republished.")
   in
   let run domain src only exclude force_rehash v =
-    verbose := v;
+    set_verbose v;
     Lwt_main.run
       (let open Lwt.Syntax in
        let cfg = Conf_parsing.load runtime_paths.Runtime.config_path in
@@ -1566,7 +1571,7 @@ let export_cmd =
       & info [] ~docv:"DIR" ~doc:"Destination folder (created if needed)")
   in
   let run domain dst v =
-    verbose := v;
+    set_verbose v;
     let code =
       Lwt_main.run
         (let open Lwt.Syntax in
@@ -2614,7 +2619,7 @@ let build_config_cmd =
   let run () =
     Printf.printf "frontends: %s\ns3 backend: %b\nlog: %s\n"
       (String.concat ", " (Frontend.names ()))
-      S3_link.s3_backend_enabled Log.implementation
+      S3_link.s3_backend_enabled Log.Daemon.implementation
   in
   Cmd.v
     (Cmd.info "build-config"
