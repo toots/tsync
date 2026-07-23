@@ -22,10 +22,10 @@ module type S = sig
     unit ->
     (file_entry list * (string * float option) list) Lwt.t
 
-  (** The share base URL if this backend serves shares for [prefix]'s domain, else
-      [None]. s3 returns its configured [shareUrl]; http-proxy asks the frontend;
-      others return [None]. [prefix] identifies the domain for backends (like
-      http-proxy) that front several. *)
+  (** The share base URL if this backend serves shares for [prefix]'s domain,
+      else [None]. s3 returns its configured [shareUrl]; http-proxy asks the
+      frontend; others return [None]. [prefix] identifies the domain for
+      backends (like http-proxy) that front several. *)
   val share_url : prefix:string -> unit -> string option Lwt.t
 end
 
