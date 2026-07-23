@@ -5,9 +5,15 @@ type backend_config = {
   main : bool;
 }
 
+type frontend_config = {
+  frontend_type : string;
+  options : (string * string) list;
+}
+
 type domain = {
   name : string;
   backends : backend_config list;
+  frontends : frontend_config list;
   symlink_policy : [ `Keep | `Follow | `Skip ];
   versioning : bool;
   read_only : bool;
@@ -18,7 +24,6 @@ type t = {
   tls : string option;
   max_uploads : int;
   max_downloads : int;
-  frontends : string list;
   domains : domain list;
 }
 
@@ -70,9 +75,30 @@ let order_backends backends =
     | None -> backends
     | Some primary -> primary :: List.filter (fun b -> b != primary) backends
 
+(* A frontend is either a bare type name ["fuse"] or an object
+   [{"type": "fuse", ...options}]; the string form is shorthand for an object
+   with no options. Extra keys are kept as string fields for future options. *)
 let parse_frontend json =
   let open Yojson.Basic.Util in
-  json |> member "type" |> to_string
+  match json with
+    | `String frontend_type -> { frontend_type; options = [] }
+    | `Assoc _ ->
+        let frontend_type = json |> member "type" |> to_string in
+        let options =
+          to_assoc json
+          |> List.filter_map (fun (k, v) ->
+              if k = "type" then None
+              else (
+                match v with
+                  | `String s -> Some (k, s)
+                  | `Bool b -> Some (k, string_of_bool b)
+                  | `List _ -> Some (k, Yojson.Basic.to_string v)
+                  | _ -> None))
+        in
+        { frontend_type; options }
+    | _ ->
+        failwith
+          "frontend must be a type name or an object with a \"type\" field"
 
 let parse_symlink_policy json =
   let open Yojson.Basic.Util in
@@ -89,6 +115,12 @@ let parse_domain json =
   {
     name = json |> member "name" |> to_string;
     backends = json |> member "backends" |> to_list |> List.map parse_backend;
+    frontends =
+      (match json |> member "frontends" with
+        | `List (_ :: _ as l) -> List.map parse_frontend l
+        | _ ->
+            failwith
+              "domain config missing required non-empty \"frontends\" array");
     symlink_policy = parse_symlink_policy json;
     versioning = json |> member "versioning" |> to_bool;
     read_only =
@@ -116,10 +148,6 @@ let load path =
       (match json |> member "maxDownloads" with
         | `Int n when n > 0 -> n
         | _ -> default_max_downloads);
-    frontends =
-      (match json |> member "frontends" with
-        | `List (_ :: _ as l) -> List.map parse_frontend l
-        | _ -> failwith "config missing required non-empty \"frontends\" array");
     domains = json |> member "domains" |> to_list |> List.map parse_domain;
   }
 

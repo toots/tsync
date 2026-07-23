@@ -41,10 +41,39 @@ let rec mkdir_p path =
 
 let runtime_paths = Runtime.default_paths ()
 
-(* Placeholder: use the first registered frontend. Revisited in the next phase.
-   Looked up at call time (not module-init) so frontend registration, which runs
-   as a link-order side effect, has already happened. *)
-let frontend () : (module Frontend.S) = List.hd (Frontend.registered ())
+(* Which frontend serves a domain: the [frontend] override if given (must be one
+   the domain lists), else the domain's first configured frontend. Errors if the
+   name isn't compiled into this binary. Resolved at call time (not module-init)
+   so frontend registration, a link-order side effect, has already happened. *)
+let frontend_names (d : Conf_parsing.domain) =
+  List.map
+    (fun (f : Conf_parsing.frontend_config) -> f.Conf_parsing.frontend_type)
+    d.Conf_parsing.frontends
+
+let resolve_frontend ?frontend (d : Conf_parsing.domain) : (module Frontend.S) =
+  let names = frontend_names d in
+  let name =
+    match frontend with
+      | Some name ->
+          if List.mem name names then name
+          else
+            failwith
+              (Printf.sprintf
+                 "frontend %s not configured for domain %s (configured: %s)"
+                 name d.Conf_parsing.name (String.concat ", " names))
+      | None -> (
+          match names with
+            | n :: _ -> n
+            | [] ->
+                failwith ("domain " ^ d.Conf_parsing.name ^ " has no frontends")
+          )
+  in
+  match Frontend.find name with
+    | Some m -> m
+    | None ->
+        failwith
+          (Printf.sprintf
+             "frontend %s is configured but not compiled into this binary" name)
 
 (* Send a JSON IPC request; return the parsed response fields.
    Raises Failure with the daemon's error message when ok=false. *)
@@ -185,7 +214,24 @@ let start_cmd =
         (0, 0) confs
     in
     Lwt_unix.set_pool_size (min 256 (total_uploads + total_downloads + 32));
-    let (module F : Frontend.S) = frontend () in
+    (* Each frontend's [start] blocks the process, so today all domains must
+       share one host frontend (their first configured one). Running distinct
+       frontends concurrently arrives with the http frontend. *)
+      (match
+         List.sort_uniq compare
+           (List.map
+              (fun (d : Conf_parsing.domain) ->
+                match frontend_names d with
+                  | f :: _ -> f
+                  | [] -> failwith ("domain " ^ d.name ^ " has no frontends"))
+              domains)
+       with
+      | [] | [_] -> ()
+      | _ ->
+          failwith
+            "domains use different frontends; running multiple frontends \
+             concurrently is not yet supported (coming with the http frontend)");
+    let (module F : Frontend.S) = resolve_frontend (List.hd domains) in
     List.iter
       (fun (module C : Conf.S) ->
         let mp = mount_fn C.domain_name in
@@ -364,11 +410,22 @@ let ls_cmd =
       & opt (some string) None
       & info ["domain"] ~docv:"NAME" ~doc:"Domain name (default: from config)")
   in
-  let run path show_deleted domain =
+  let frontend_arg =
+    Arg.(
+      value
+      & opt (some string) None
+      & info ["frontend"] ~docv:"NAME"
+          ~doc:
+            "Frontend to report cache status for (default: the domain's first).")
+  in
+  let run path show_deleted domain frontend =
     Lwt_main.run
       (let open Lwt.Syntax in
        let cfg = Conf_parsing.load runtime_paths.Runtime.config_path in
        let (module C : Conf.S) = make_conf ?domain cfg in
+       let (module F : Frontend.S) =
+         resolve_frontend ?frontend (Conf_parsing.pick_domain ?domain cfg)
+       in
        let module Fs = File_store.Make (C) in
        let mount_point =
          Filename.concat (Sys.getenv "HOME") ("tsync/" ^ C.domain_name)
@@ -423,7 +480,6 @@ let ls_cmd =
            match item with
              | `Dir _ -> Printf.printf "dir    %s/\n" name
              | `File (e : Backend.file_entry) ->
-                 let (module F : Frontend.S) = frontend () in
                  let cached =
                    F.is_local ~cache_root:C.cache_root
                      ~domain_name:C.domain_name ~domain_prefix:C.domain_prefix
@@ -476,7 +532,7 @@ let ls_cmd =
   in
   Cmd.v
     (Cmd.info "ls" ~doc:"List files with cache status")
-    Term.(const run $ path_arg $ deleted_arg $ domain_arg)
+    Term.(const run $ path_arg $ deleted_arg $ domain_arg $ frontend_arg)
 
 (* ── tsync versions ──────────────────────────────────────────────────────── *)
 
@@ -1821,6 +1877,31 @@ let backend_summary = function
       String.concat ", "
         (List.map (fun b -> Option.value (jstr b "type") ~default:"?") bs)
 
+(* A frontend JSON entry is a bare type-name string or an object with a "type"
+   key; both forms are accepted on read. *)
+let frontend_type_of = function `String s -> Some s | j -> jstr j "type"
+
+let frontend_summary = function
+  | [] -> "(none)"
+  | fs ->
+      String.concat ", "
+        (List.map (fun j -> Option.value (frontend_type_of j) ~default:"?") fs)
+
+(* Toggle each compiled-in frontend on or off, pre-filled from [current]. Emits
+   the enabled frontends as bare type-name strings (the config also accepts the
+   [{"type": name, ...options}] object form). *)
+let edit_frontends current =
+  let registered = Frontend.names () in
+  let is_on name =
+    List.exists (fun j -> frontend_type_of j = Some name) current
+  in
+  List.filter_map
+    (fun name ->
+      if prompt_bool ~default:(is_on name) ("  Enable frontend " ^ name ^ "?")
+      then Some (`String name)
+      else None)
+    registered
+
 (* Build or edit one domain. A new domain ([existing = None]) is filled in
    linearly; an existing one is edited through a per-field menu, so untouched
    fields keep their current values without re-prompting. *)
@@ -1836,6 +1917,13 @@ let edit_domain existing =
   let backends =
     ref (match existing with Some j -> jlist j "backends" | None -> [])
   in
+  (* A new domain defaults to every compiled-in frontend (usually one). *)
+  let frontends =
+    ref
+      (match existing with
+        | Some j -> jlist j "frontends"
+        | None -> List.map (fun name -> `String name) (Frontend.names ()))
+  in
   (match existing with
     | None ->
         name := prompt "Domain name" (Some !name);
@@ -1846,7 +1934,8 @@ let edit_domain existing =
         read_only :=
           prompt_bool ~default:!read_only
             "Read-only mount (block all local writes)?";
-        backends := prompt_backends ()
+        backends := prompt_backends ();
+        frontends := edit_frontends !frontends
     | Some _ ->
         let running = ref true in
         let status = ref "" in
@@ -1858,6 +1947,7 @@ let edit_domain existing =
           Printf.printf "  3. symlinks:    %s\n" !symlinks;
           Printf.printf "  4. read-only:   %b\n" !read_only;
           Printf.printf "  5. backends:    %s\n" (backend_summary !backends);
+          Printf.printf "  6. frontends:   %s\n" (frontend_summary !frontends);
           if !status <> "" then Printf.printf "\n%s\n" !status;
           Printf.printf "\nEnter a field number to edit, or [d]one:\n> %!";
           status := "";
@@ -1870,6 +1960,7 @@ let edit_domain existing =
             | "4" ->
                 read_only := prompt_bool ~default:!read_only "Read-only mount?"
             | "5" -> backends := edit_backends !backends
+            | "6" -> frontends := edit_frontends !frontends
             | "d" | "" -> running := false
             | other -> status := Printf.sprintf "(unknown field %S)" other
         done);
@@ -1880,23 +1971,11 @@ let edit_domain existing =
       ("symlinks", `String !symlinks);
       ("readOnly", `Bool !read_only);
       ("backends", `List !backends);
+      ("frontends", `List !frontends);
     ]
 
 (* Serialize globals + domains to [path] with 0600 perms. *)
-(* Toggle each compiled-in frontend on or off, pre-filled from [current]. Returns
-   the enabled frontends as [{"type": name}] JSON objects. *)
-let edit_frontends current =
-  let registered = Frontend.names () in
-  let is_on name = List.exists (fun j -> jstr j "type" = Some name) current in
-  List.filter_map
-    (fun name ->
-      if prompt_bool ~default:(is_on name) ("  Enable frontend " ^ name ^ "?")
-      then Some (`Assoc [("type", `String name)])
-      else None)
-    registered
-
-let write_config ~path ~client_name ~max_uploads ~max_downloads ~tls ~frontends
-    ~domains =
+let write_config ~path ~client_name ~max_uploads ~max_downloads ~tls ~domains =
   mkdir_p (Filename.dirname path);
   let json =
     `Assoc
@@ -1906,7 +1985,7 @@ let write_config ~path ~client_name ~max_uploads ~max_downloads ~tls ~frontends
          ("maxDownloads", `Int max_downloads);
        ]
       @ (match tls with Some t -> [("tls", `String t)] | None -> [])
-      @ [("frontends", `List frontends); ("domains", `List domains)])
+      @ [("domains", `List domains)])
   in
   let oc = open_out path in
   output_string oc (Yojson.Basic.pretty_to_string json);
@@ -1948,16 +2027,6 @@ let configure_cmd =
            ~default:Conf_parsing.default_max_downloads)
     in
     let tls = ref (Option.bind existing_root (fun r -> jstr r "tls")) in
-    (* Default a new config to every compiled-in frontend (usually one). *)
-    let frontends =
-      ref
-        (match existing_root with
-          | Some r -> jlist r "frontends"
-          | None ->
-              List.map
-                (fun name -> `Assoc [("type", `String name)])
-                (Frontend.names ()))
-    in
     let domains =
       ref (match existing_root with Some r -> jlist r "domains" | None -> [])
     in
@@ -2021,8 +2090,7 @@ let configure_cmd =
       Printf.printf
         "\n\
          Enter a domain number to select, or an action:\n\
-        \  [a]dd  [e]dit selected  [r]emove selected  [g]lobals  [f]rontends  \
-         [w]rite  [q]uit\n\
+        \  [a]dd  [e]dit selected  [r]emove selected  [g]lobals  [w]rite  [q]uit\n\
          > %!";
       let action = String.lowercase_ascii (String.trim (read_line ())) in
       let has_sel = !selected >= 0 && !selected < List.length !domains in
@@ -2051,12 +2119,9 @@ let configure_cmd =
                   end
                   else status := "(select a domain first)"
               | "g" -> edit_globals ()
-              | "f" -> frontends := edit_frontends !frontends
               | "w" ->
                   if !domains = [] then
                     status := "(add at least one domain before writing)"
-                  else if !frontends = [] then
-                    status := "(enable at least one frontend before writing)"
                   else begin
                     running := false;
                     saved := true
@@ -2090,7 +2155,7 @@ let configure_cmd =
       end;
       write_config ~path:config_path ~client_name:!client_name
         ~max_uploads:!max_uploads ~max_downloads:!max_downloads ~tls:!tls
-        ~frontends:!frontends ~domains:!domains;
+        ~domains:!domains;
       Printf.printf "\nConfig written to %s\n" config_path
     end
   in
@@ -2304,6 +2369,8 @@ let print_conf_cmd =
         Printf.printf "  versioning: %b\n" d.versioning;
         Printf.printf "  read_only:  %b\n" d.read_only;
         Printf.printf "  symlinks:   %s\n" (symlink_str d.symlink_policy);
+        Printf.printf "  frontends:  %s\n"
+          (String.concat ", " (frontend_names d));
         List.iter
           (fun (b : Conf_parsing.backend_config) ->
             Printf.printf "  backend: %s (%s)%s\n" b.name b.backend_type
@@ -2395,8 +2462,8 @@ let default_domain_cmd =
 
 let build_config_cmd =
   let run () =
-    let (module F : Frontend.S) = frontend () in
-    Printf.printf "runtime: %s\ns3 backend: %b\nlog: %s\n" F.implementation
+    Printf.printf "frontends: %s\ns3 backend: %b\nlog: %s\n"
+      (String.concat ", " (Frontend.names ()))
       S3_link.s3_backend_enabled Log.implementation
   in
   Cmd.v

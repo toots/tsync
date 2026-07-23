@@ -6,9 +6,18 @@ type backend_config = {
   main : bool;  (** explicitly marked as the primary (read) backend *)
 }
 
+type frontend_config = {
+  frontend_type : string;
+  options : (string * string) list;
+      (** future per-frontend options; empty for the bare-string form *)
+}
+
 type domain = {
   name : string;
   backends : backend_config list;
+  frontends : frontend_config list;
+      (** required, non-empty; each entry is a type name ["fuse"] or an object
+          [{"type": "fuse", ...options}] *)
   symlink_policy : [ `Keep | `Follow | `Skip ];
   versioning : bool;
   read_only : bool;
@@ -23,7 +32,6 @@ type t = {
           buffer pool, how many chunk reads/uploads run concurrently across all
           of them combined *)
   max_downloads : int;  (** max concurrent file downloads (default 8) *)
-  frontends : string list;  (** required; frontend type names, e.g. ["fuse"] *)
   domains : domain list;
 }
 

@@ -21,6 +21,7 @@ let () =
   (* array fields (exec backend "command") pass through as JSON strings *)
   Unix.putenv "TSYNC_CONFIG_JSON"
     {|{"domains": [{"name": "d", "symlinks": "keep", "versioning": false,
+                    "frontends": ["fuse"],
                     "backends": [{"type": "exec", "name": "e", "path": "/x",
                                   "command": ["ssh", "box"]}]}]}|};
   let cfg = Conf_parsing.load "" in
@@ -32,6 +33,7 @@ let () =
   (* shareUrl: no backend has one -> no share backend *)
   Unix.putenv "TSYNC_CONFIG_JSON"
     {|{"domains": [{"name": "d", "symlinks": "keep", "versioning": false,
+                    "frontends": ["fuse"],
                     "backends": [{"type": "s3", "name": "s", "main": true}]}]}|};
   assert (
     Conf_parsing.domain_share_backend
@@ -41,6 +43,7 @@ let () =
   (* shareUrl: first backend carrying one is picked, with its URL *)
   Unix.putenv "TSYNC_CONFIG_JSON"
     {|{"domains": [{"name": "d", "symlinks": "keep", "versioning": false,
+                    "frontends": ["fuse"],
                     "backends": [{"type": "s3", "name": "a"},
                                  {"type": "s3", "name": "b", "shareUrl": "https://x.lambda-url"}]}]}|};
   (match
@@ -51,6 +54,23 @@ let () =
         assert (bc.Conf_parsing.name = "b");
         assert (url = "https://x.lambda-url")
     | None -> assert false);
+
+  (* frontends: bare string and object forms both parse; string = {type};
+     object keys beyond "type" are kept as option fields *)
+  Unix.putenv "TSYNC_CONFIG_JSON"
+    {|{"domains": [{"name": "d", "symlinks": "keep", "versioning": false,
+                    "frontends": ["fuse", {"type": "http", "port": "8080"}],
+                    "backends": [{"type": "s3", "name": "s"}]}]}|};
+  (match
+     (List.hd (Conf_parsing.load "").Conf_parsing.domains)
+       .Conf_parsing.frontends
+   with
+    | [a; b] ->
+        assert (
+          a.Conf_parsing.frontend_type = "fuse" && a.Conf_parsing.options = []);
+        assert (b.Conf_parsing.frontend_type = "http");
+        assert (List.assoc "port" b.Conf_parsing.options = "8080")
+    | _ -> assert false);
 
   Unix.putenv "TSYNC_CONFIG_JSON" "";
   print_endline "conf_test ok"
