@@ -297,9 +297,31 @@ let start_cmd =
 
 let stop_cmd =
   let run () =
-    match ipc_action "stop" with
-      | _ -> print_endline "Stopped."
-      | exception Failure msg -> Printf.eprintf "Error: %s\n" msg
+    (* [start] runs every domain (fuse listens on a per-domain socket; file_provider
+       shares one), so stop each domain's socket. Frontends without an IPC socket
+       (http-proxy) aren't reached here — systemd's SIGTERM stops that group. A
+       socket that's absent or unconnectable just means that part isn't running. *)
+    let cfg = Conf_parsing.load runtime_paths.Runtime.config_path in
+    let sockets =
+      List.sort_uniq compare
+        (List.map
+           (fun (d : Conf_parsing.domain) ->
+             Runtime.domain_socket_path runtime_paths d.Conf_parsing.name)
+           cfg.Conf_parsing.domains)
+    in
+    let stopped = ref 0 in
+    List.iter
+      (fun socket_path ->
+        match ipc_action ~socket_path "stop" with
+          | _ -> incr stopped
+          | exception Unix.Unix_error ((Unix.ECONNREFUSED | Unix.ENOENT), _, _)
+            ->
+              ()
+          | exception Failure msg ->
+              Printf.eprintf "Error stopping %s: %s\n" socket_path msg)
+      sockets;
+    if !stopped > 0 then Printf.printf "Stopped %d domain(s).\n" !stopped
+    else print_endline "No IPC-backed frontend running; relying on signal."
   in
   Cmd.v
     (Cmd.info "stop" ~doc:"Stop the sync daemon")
@@ -2529,6 +2551,7 @@ let build_config_cmd =
 (* ── Main ────────────────────────────────────────────────────────────────── *)
 
 let () =
+  Printexc.record_backtrace true;
   let cmd =
     Cmd.group
       (Cmd.info "tsync" ~doc:"Cloud-backed filesystem sync")
