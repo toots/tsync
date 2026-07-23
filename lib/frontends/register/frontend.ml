@@ -38,7 +38,12 @@ let cap_blocking_pool () = Lwt_unix.set_pool_size 256
 
 (* Run [f] on each item, each in its own child process except the last (which
    runs in this process and blocks, since a frontend's [start] blocks). On
-   return, SIGTERM and reap the forked children. *)
+   return, SIGTERM and reap the forked children.
+
+   [Lwt_unix.fork] (not [Unix.fork]): Lwt's notification eventfd is created at
+   module init, so a plain fork leaves parent and child sharing it — the child's
+   worker-completion wakeups then get delivered to the wrong process and its event
+   loop hangs. [Lwt_unix.fork] reinitializes that state in the child. *)
 let run_forked f items =
   let rec go child_pids = function
     | [] -> List.rev child_pids
@@ -46,7 +51,7 @@ let run_forked f items =
         f x;
         List.rev child_pids
     | x :: rest ->
-        let pid = Unix.fork () in
+        let pid = Lwt_unix.fork () in
         if pid = 0 then (
           f x;
           exit 0);
