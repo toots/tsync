@@ -6,10 +6,6 @@ let implementation = "http-proxy"
    view. *)
 let is_local ~cache_root:_ ~domain_name:_ ~domain_prefix:_ _key = false
 
-let starts_with s prefix =
-  String.length s >= String.length prefix
-  && String.sub s 0 (String.length prefix) = prefix
-
 (* ── Option resolution (with inheritance across the shared listener) ─────────── *)
 
 let opt (b : Frontend.binding) name = List.assoc_opt name b.Frontend.options
@@ -88,14 +84,15 @@ let parse_op meth uri body =
       | Error _ -> None
   in
   let q name = Uri.get_query_param uri name in
+  let is_obj p = String.starts_with ~prefix:"/o/" p in
   match (meth, path) with
-    | `GET, p when starts_with p "/o/" -> (
+    | `GET, p when is_obj p -> (
         match obj_key () with Some k -> Get k | None -> Bad)
-    | `HEAD, p when starts_with p "/o/" -> (
+    | `HEAD, p when is_obj p -> (
         match obj_key () with Some k -> Head k | None -> Bad)
-    | `PUT, p when starts_with p "/o/" -> (
+    | `PUT, p when is_obj p -> (
         match obj_key () with Some k -> Put k | None -> Bad)
-    | `DELETE, p when starts_with p "/o/" -> (
+    | `DELETE, p when is_obj p -> (
         match obj_key () with Some k -> Delete k | None -> Bad)
     | `POST, "/delete-multi" -> (
         match try Some (Yojson.Safe.from_string body) with _ -> None with
@@ -231,7 +228,11 @@ let callback routes _conn req body =
   match route_key op with
     | None -> respond ~status:`Bad_request "bad request"
     | Some key -> (
-        match List.find_opt (fun r -> starts_with key r.domain_root) routes with
+        match
+          List.find_opt
+            (fun r -> String.starts_with ~prefix:r.domain_root key)
+            routes
+        with
           | None -> respond ~status:`Not_found "unknown domain"
           | Some route ->
               if not (authed route req body_str) then
@@ -280,7 +281,6 @@ let start bindings =
 let register () =
   Frontend.register implementation
     (module struct
-      let implementation = implementation
       let is_local = is_local
       let start = start
     end : Frontend.S)

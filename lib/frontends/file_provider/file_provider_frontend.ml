@@ -26,7 +26,6 @@ let start bindings =
 let register () =
   Frontend.register implementation
     (module struct
-      let implementation = implementation
       let is_local = is_local
       let start = start
     end : Frontend.S)

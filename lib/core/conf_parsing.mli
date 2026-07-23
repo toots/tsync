@@ -5,9 +5,11 @@ type backend_config = {
   fields : (string * string) list;
   main : bool;  (** explicitly marked as the primary (read) backend *)
   backfill : bool;
-      (** an incomplete backend to be lazily filled with served chunks; the
-          single non-[backfill] backend is the source of truth
-          (manifests/listings) *)
+      (** an incomplete backend to be lazily filled with served chunks; excluded
+          from manifest/listing reads. Mutually exclusive with [read_only] *)
+  read_only : bool;
+      (** an authoritative store used only as a read fallback, never written
+          (excluded from write fan-out). Mutually exclusive with [backfill] *)
 }
 
 type frontend_config = {

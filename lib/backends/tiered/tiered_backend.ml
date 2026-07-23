@@ -1,27 +1,33 @@
 open Lwt.Syntax
 
-(* A composite Backend.S over several sub-backends:
-   - chunk keys: first-available read (main first), then lazily backfill the served
-     bytes into every incomplete backend that lacks them — background, bounded,
-     deduped. Chunks are content-addressed/immutable, so this is always safe.
-   - everything else (manifests, journal, cursor, versions) and all listings: served
-     from the single source-of-truth backend. Manifests are mutable and the engine
-     caches/invalidates them itself, so they must never be read first-available.
-   - writes: fan out to all sub-backends. *)
+(* A composite Backend.S over several sub-backends, each with a role:
+   - main: the writable source of truth.
+   - backfill: a writable but incomplete copy, lazily filled with served chunks.
+   - readOnly: an authoritative store read only as a fallback, never written.
+
+   Routing:
+   - chunk keys: first-available read over the whole read order (main first),
+     falling through on a miss *or* an error; on a hit, lazily backfill the served
+     bytes into every backfill target that lacks them (background, bounded, deduped).
+     Chunks are content-addressed/immutable, so this is always safe.
+   - everything else (manifests, journal, cursor, versions) and all listings: read
+     first-available over the non-backfill backends (main, then readOnly), falling
+     through only on error — a definitive "not found" is trusted. Backfill copies are
+     incomplete, so they are never consulted for these.
+   - writes: fan out to the writable backends (everything except readOnly). *)
 
 type sub = { name : string; backend : (module Backend.S) }
 
-let starts_with s prefix =
-  String.length s >= String.length prefix
-  && String.sub s 0 (String.length prefix) = prefix
-
-(* [read_order]: all sub-backends in read preference (main first).
-   [source]: the single non-backfill backend (source of truth).
+(* [read_order]: all sub-backends in read preference (main first) — chunk reads.
+   [manifest_read]: the non-backfill backends (main, then readOnly) — manifests and
+     listings, with error-triggered fallback.
+   [writes]: the writable backends (all except readOnly) — write fan-out.
    [backfills]: incomplete backends to lazily fill with served chunks. *)
-let make ~chunk_prefix ~(source : (module Backend.S)) ~(read_order : sub list)
-    ~(backfills : sub list) : (module Backend.S) =
-  let is_chunk key = starts_with key chunk_prefix in
-  let all = List.map (fun s -> s.backend) read_order in
+let make ~chunk_prefix ~(read_order : sub list) ~(manifest_read : sub list)
+    ~(writes : (module Backend.S) list) ~(backfills : sub list) :
+    (module Backend.S) =
+  let is_chunk key = String.starts_with ~prefix:chunk_prefix key in
+  let all_read = List.map (fun s -> s.backend) read_order in
   (* Bound concurrent backfill IO so it can't stampede slow storage. *)
   let pool = Lwt_pool.create 8 (fun () -> Lwt.return_unit) in
   (* Keys already ensured present in a given target — avoids repeat HEAD/PUT. *)
@@ -66,23 +72,50 @@ let make ~chunk_prefix ~(source : (module Backend.S)) ~(read_order : sub list)
                       Lwt.return_unit))))
       backfills
   in
-  (* First-available get over the read order; returns the data and which backend
-     served it. *)
+  (* First-available get over the read order; a backend that misses (None) or is
+     unreachable (raises) is skipped. Returns the data and which backend served it. *)
   let read_chunk_opt key =
     let rec go = function
       | [] -> Lwt.return_none
       | (s : sub) :: rest -> (
-          let module B = (val s.backend : Backend.S) in
-          let* d = B.get_opt ~key () in
-          match d with
-            | Some data -> Lwt.return (Some (data, s.name))
-            | None -> go rest)
+          let* outcome =
+            Lwt.catch
+              (fun () ->
+                let module B = (val s.backend : Backend.S) in
+                let+ d = B.get_opt ~key () in
+                `Got d)
+              (fun exn ->
+                Log.warn "tiered chunk read: %s unavailable (%s); trying next"
+                  s.name (Printexc.to_string exn);
+                Lwt.return `Err)
+          in
+          match outcome with
+            | `Got (Some data) -> Lwt.return (Some (data, s.name))
+            | `Got None | `Err -> go rest)
     in
     go read_order
   in
+  (* First-available call over the non-backfill backends: fall through on error,
+     but trust a successful result (including a definitive [None]). *)
+  let manifest_first label f =
+    let rec go = function
+      | [] ->
+          Lwt.fail
+            (Backend.Backend_error ("tiered " ^ label ^ ": no readable backend"))
+      | [(s : sub)] -> f s.backend
+      | (s : sub) :: rest ->
+          Lwt.catch
+            (fun () -> f s.backend)
+            (fun exn ->
+              Log.warn "tiered %s: %s unavailable (%s); trying next" label
+                s.name (Printexc.to_string exn);
+              go rest)
+    in
+    go manifest_read
+  in
   (module struct
     let put ~key ~data () =
-      Lwt_list.iter_s (fun (module B : Backend.S) -> B.put ~key ~data ()) all
+      Lwt_list.iter_s (fun (module B : Backend.S) -> B.put ~key ~data ()) writes
 
     let get_opt ~key () =
       if is_chunk key then
@@ -93,8 +126,8 @@ let make ~chunk_prefix ~(source : (module Backend.S)) ~(read_order : sub list)
               Some data
           | None -> None
       else
-        let module S = (val source : Backend.S) in
-        S.get_opt ~key ()
+        manifest_first "get_opt" (fun (module B : Backend.S) ->
+            B.get_opt ~key ())
 
     let get ~key () =
       if is_chunk key then
@@ -105,42 +138,52 @@ let make ~chunk_prefix ~(source : (module Backend.S)) ~(read_order : sub list)
               Lwt.return data
           | None ->
               Lwt.fail (Backend.Backend_error ("tiered get: not found: " ^ key))
-      else
-        let module S = (val source : Backend.S) in
-        S.get ~key ()
+      else manifest_first "get" (fun (module B : Backend.S) -> B.get ~key ())
 
     let head_opt ~key () =
       if is_chunk key then (
         let rec go = function
           | [] -> Lwt.return_none
           | (s : sub) :: rest -> (
-              let module B = (val s.backend : Backend.S) in
-              let* h = B.head_opt ~key () in
-              match h with Some _ -> Lwt.return h | None -> go rest)
+              let* outcome =
+                Lwt.catch
+                  (fun () ->
+                    let module B = (val s.backend : Backend.S) in
+                    let+ h = B.head_opt ~key () in
+                    `Got h)
+                  (fun exn ->
+                    Log.warn
+                      "tiered chunk head: %s unavailable (%s); trying next"
+                      s.name (Printexc.to_string exn);
+                    Lwt.return `Err)
+              in
+              match outcome with
+                | `Got (Some _ as h) -> Lwt.return h
+                | `Got None | `Err -> go rest)
         in
         go read_order)
       else
-        let module S = (val source : Backend.S) in
-        S.head_opt ~key ()
+        manifest_first "head_opt" (fun (module B : Backend.S) ->
+            B.head_opt ~key ())
 
     let delete ~key () =
-      Lwt_list.iter_s (fun (module B : Backend.S) -> B.delete ~key ()) all
+      Lwt_list.iter_s (fun (module B : Backend.S) -> B.delete ~key ()) writes
 
     let delete_multi keys =
-      Lwt_list.iter_s (fun (module B : Backend.S) -> B.delete_multi keys) all
+      Lwt_list.iter_s (fun (module B : Backend.S) -> B.delete_multi keys) writes
 
     let copy ~src_key ~dst_key () =
       Lwt_list.iter_s
         (fun (module B : Backend.S) -> B.copy ~src_key ~dst_key ())
-        all
+        writes
 
     let list_all ?max_keys ~prefix () =
-      let module S = (val source : Backend.S) in
-      S.list_all ?max_keys ~prefix ()
+      manifest_first "list_all" (fun (module B : Backend.S) ->
+          B.list_all ?max_keys ~prefix ())
 
     let list_directory ~prefix () =
-      let module S = (val source : Backend.S) in
-      S.list_directory ~prefix ()
+      manifest_first "list_directory" (fun (module B : Backend.S) ->
+          B.list_directory ~prefix ())
 
     let share_url ~prefix () =
       let rec go = function
@@ -149,5 +192,5 @@ let make ~chunk_prefix ~(source : (module Backend.S)) ~(read_order : sub list)
             let* u = B.share_url ~prefix () in
             match u with Some _ -> Lwt.return u | None -> go rest)
       in
-      go all
+      go all_read
   end)

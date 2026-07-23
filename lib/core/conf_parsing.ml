@@ -4,6 +4,7 @@ type backend_config = {
   fields : (string * string) list;
   main : bool;
   backfill : bool;
+  read_only : bool;
 }
 
 type frontend_config = {
@@ -46,10 +47,20 @@ let parse_backend json =
   let backfill =
     match json |> member "backfill" with `Bool b -> b | _ -> false
   in
+  let read_only =
+    match json |> member "readOnly" with `Bool b -> b | _ -> false
+  in
+  if backfill && read_only then
+    failwith
+      ("backend " ^ name
+     ^ ": \"backfill\" and \"readOnly\" are mutually exclusive");
   let fields =
     to_assoc json
     |> List.filter_map (fun (k, v) ->
-        if k = "type" || k = "main" || k = "name" || k = "backfill" then None
+        if
+          k = "type" || k = "main" || k = "name" || k = "backfill"
+          || k = "readOnly"
+        then None
         else (
           match v with
             | `String s -> Some (k, s)
@@ -60,7 +71,7 @@ let parse_backend json =
             | `List _ -> Some (k, Yojson.Basic.to_string v)
             | _ -> None))
   in
-  { backend_type; name; fields; main; backfill }
+  { backend_type; name; fields; main; backfill; read_only }
 
 (* The primary backend serves reads; writes still fan out to all. Pick the first
    one explicitly marked [main], else the first local-file backend (local disk

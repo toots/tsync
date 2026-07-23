@@ -105,18 +105,21 @@ let make_backend (bc : Conf_parsing.backend_config) =
   Backend.make ~backend_type:bc.backend_type ~get_field:(fun k ->
       List.assoc_opt k bc.fields)
 
-(* The domain's ordered backends. When any is flagged [backfill], collapse them into
-   a single tiered composite (first-available chunk reads + lazy backfill; manifests
-   and listings from the one non-backfill source of truth). Otherwise the plain
-   ordered list, as before. *)
+(* The domain's ordered backends. When any is flagged [backfill] or [readOnly],
+   collapse them into a single tiered composite; otherwise the plain ordered list.
+
+   Roles: exactly one primary (neither flag) is the writable source of truth;
+   [backfill] backends are writable, lazily-filled chunk copies; [readOnly]
+   backends are authoritative read-only fallbacks. Reads prefer the primary and
+   fall through the rest; writes fan out to everything except [readOnly]. *)
 let build_backends (d : Conf_parsing.domain) : (module Backend.S) list =
   let ordered = Conf_parsing.order_backends d.Conf_parsing.backends in
-  if
-    not
-      (List.exists
-         (fun (b : Conf_parsing.backend_config) -> b.backfill)
-         ordered)
-  then List.map make_backend ordered
+  let tiered =
+    List.exists
+      (fun (b : Conf_parsing.backend_config) -> b.backfill || b.read_only)
+      ordered
+  in
+  if not tiered then List.map make_backend ordered
   else begin
     let subs =
       List.map
@@ -134,26 +137,42 @@ let build_backends (d : Conf_parsing.domain) : (module Backend.S) list =
         (fun (bc, s) -> if bc.Conf_parsing.backfill then Some s else None)
         subs
     in
-    let source =
-      match List.filter (fun (bc, _) -> not bc.Conf_parsing.backfill) subs with
-        | [(_, s)] -> s.Tiered_backend.backend
-        | [] ->
-            failwith
-              (Printf.sprintf
-                 "domain %s: every backend is \"backfill\"; exactly one must \
-                  be the source of truth"
-                 d.Conf_parsing.name)
-        | _ :: _ :: _ ->
-            failwith
-              (Printf.sprintf
-                 "domain %s: more than one non-\"backfill\" backend; exactly \
-                  one must be the source of truth"
-                 d.Conf_parsing.name)
+    (* Manifests/listings come from the authoritative (non-backfill) backends. *)
+    let manifest_read =
+      List.filter_map
+        (fun (bc, s) -> if bc.Conf_parsing.backfill then None else Some s)
+        subs
     in
+    (* Writes go everywhere except read-only backends. *)
+    let writes =
+      List.filter_map
+        (fun ((bc : Conf_parsing.backend_config), s) ->
+          if bc.read_only then None else Some s.Tiered_backend.backend)
+        subs
+    in
+    (match
+       List.filter
+         (fun ((bc : Conf_parsing.backend_config), _) ->
+           (not bc.backfill) && not bc.read_only)
+         subs
+     with
+      | [_] -> ()
+      | [] ->
+          failwith
+            (Printf.sprintf
+               "domain %s: no primary backend; exactly one must be neither \
+                \"backfill\" nor \"readOnly\""
+               d.Conf_parsing.name)
+      | _ :: _ :: _ ->
+          failwith
+            (Printf.sprintf
+               "domain %s: more than one primary backend; exactly one must be \
+                neither \"backfill\" nor \"readOnly\""
+               d.Conf_parsing.name));
     [
       Tiered_backend.make
         ~chunk_prefix:(Conf_parsing.chunk_prefix d)
-        ~source ~read_order ~backfills;
+        ~read_order ~manifest_read ~writes ~backfills;
     ]
   end
 
@@ -320,25 +339,7 @@ let start_cmd =
       F.start bindings
     in
     Log.debug "cache root: %s" runtime_paths.Runtime.cache_root;
-    let rec go child_pids = function
-      | [] -> []
-      | [g] ->
-          run_group g;
-          List.rev child_pids
-      | g :: rest ->
-          let pid = Unix.fork () in
-          if pid = 0 then begin
-            run_group g;
-            exit 0
-          end;
-          go (pid :: child_pids) rest
-    in
-    let child_pids = go [] groups in
-    List.iter
-      (fun pid ->
-        (try Unix.kill pid Sys.sigterm with _ -> ());
-        try ignore (Unix.waitpid [] pid) with _ -> ())
-      child_pids
+    Frontend.run_forked run_group groups
   in
   Cmd.v
     (Cmd.info "start" ~doc:"Mount the filesystem (run via systemd unit)")
@@ -1440,8 +1441,7 @@ let resync_remote_cmd =
                    (if objects = 1 then "" else "s")
                in
                let on_copy ~index ~key ~bytes =
-                 vprintf "  copied %s (%d bytes) -> %s" key bytes
-                   (label index)
+                 vprintf "  copied %s (%d bytes) -> %s" key bytes (label index)
                in
                let+ dests =
                  M.resync ~source ~manifests_only ~on_scan ~on_list ~on_copy ()

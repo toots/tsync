@@ -2,7 +2,14 @@
    else first configured. order_backends moves the primary to the head. *)
 let bc ?(main = false) backend_type id =
   Conf_parsing.
-    { backend_type; name = id; fields = [("id", id)]; main; backfill = false }
+    {
+      backend_type;
+      name = id;
+      fields = [("id", id)];
+      main;
+      backfill = false;
+      read_only = false;
+    }
 
 let ids bs =
   List.map
