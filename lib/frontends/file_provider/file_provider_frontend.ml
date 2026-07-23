@@ -17,6 +17,8 @@ let is_local ~cache_root:_ ~domain_name ~domain_prefix key =
 
 (* All domains share one IPC socket; the daemon routes by domain prefix. *)
 let start bindings =
+  (* Leaf process (post-fork): safe to initialize Lwt now. *)
+  Frontend.cap_blocking_pool ();
   let paths = Runtime.default_paths () in
   let confs =
     List.map (fun (b : Frontend.binding) -> b.Frontend.conf) bindings

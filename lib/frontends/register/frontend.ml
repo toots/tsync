@@ -24,6 +24,18 @@ let register name (m : (module S)) = Hashtbl.replace registry name m
 let find name = Hashtbl.find_opt registry name
 let names () = List.of_seq (Hashtbl.to_seq_keys registry)
 
+(* Cap the Lwt blocking-syscall thread pool for this process. Call it from inside
+   a leaf's own Lwt loop, after all forking is done: the first Lwt_unix touch
+   creates the notification eventfd, and if that happens before a fork the child
+   inherits a shared eventfd and loses its worker-completion wakeups.
+
+   Lwt's default pool (up to 1000 threads) far exceeds this workload — max_uploads
+   and max_downloads already bound real concurrency — but the parallel directory
+   walk fans out one detached [stat] per entry, so keep a generous ceiling rather
+   than the tiny per-domain sum. 256 covers realistic bursts without letting an
+   oversized config (maxDownloads has been seen at 1000) reopen the unbounded pool. *)
+let cap_blocking_pool () = Lwt_unix.set_pool_size 256
+
 (* Run [f] on each item, each in its own child process except the last (which
    runs in this process and blocks, since a frontend's [start] blocks). On
    return, SIGTERM and reap the forked children. *)

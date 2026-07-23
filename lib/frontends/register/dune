@@ -1,4 +1,4 @@
 (library
  (name tsync_frontend_register)
  (wrapped false)
- (libraries tsync_conf unix))
+ (libraries tsync_conf unix lwt.unix))

@@ -18,8 +18,12 @@ let prepare_mount_point mount_point =
   mkdir_p mount_point
 
 let mount_binding (b : Frontend.binding) =
-  prepare_mount_point b.Frontend.mount_point;
+  (* Leaf process (post-fork): safe to initialize Lwt now. *)
+  Frontend.cap_blocking_pool ();
   let module C = (val b.Frontend.conf : Conf.S) in
+  (* Each domain is its own process; tag its log lines with the domain name. *)
+  Log.set_prefix (Printf.sprintf "[%s] " C.domain_name);
+  prepare_mount_point b.Frontend.mount_point;
   let module R = Fuse_fs.Make (C) in
   R.mount b.Frontend.mount_point
 

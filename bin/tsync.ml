@@ -274,29 +274,12 @@ let start_cmd =
           (d, conf, mount_fn d.Conf_parsing.name))
         domains
     in
-    (* Lwt_unix defaults to a pool of up to 1000 OS threads for dispatching
-       blocking syscalls (file I/O has no non-blocking mode). Under bursty
-       concurrent chunk reads and FUSE cache I/O that default lets the pool
-       grow far past what this workload needs, and each idle worker thread
-       wakes periodically on its own timer regardless of whether there's
-       work — pure overhead. max_uploads and max_downloads are already the
-       real, single ceilings on concurrent upload and download operations
-       (see the [Buffer_pool] and [download_pool] comments), so their sum
-       plus headroom for FUSE-driven cache I/O is the right size for this
-       pool. Clamp it too: an unusually large config value (maxDownloads has
-       been seen set to 1000, versus a default of 8) shouldn't reopen the
-       unbounded-pool problem this is meant to close — staying under the
-       clamp means bursts never hit the ceiling and fall back to synchronous
-       execution, which would stall the whole event loop; 256 comfortably
-       covers realistic concurrency for this workload. *)
-    let total_uploads, total_downloads =
-      List.fold_left
-        (fun (u, dn) (_, conf, _) ->
-          let module C = (val conf : Conf.S) in
-          (u + C.max_uploads, dn + C.max_downloads))
-        (0, 0) per_domain
-    in
-    Lwt_unix.set_pool_size (min 256 (total_uploads + total_downloads + 32));
+    (* Do NOT touch Lwt here: any Lwt_unix/Lwt_preemptive call initializes the
+       shared notification eventfd, and this process is about to fork. A forked
+       child would inherit that eventfd and its worker-completion wakeups would be
+       delivered to the wrong process, hanging its event loop. Each leaf caps its
+       own blocking-thread pool from inside its own Lwt loop, after all forking
+       (see [Frontend.cap_blocking_pool]). *)
     (* One [binding] per (domain × frontend), grouped by frontend. Each group runs
        as its own process (all but the last forked), so distinct frontends — e.g.
        fuse and http-proxy on the same domain — run concurrently. *)

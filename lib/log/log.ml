@@ -14,9 +14,14 @@ let use sink = active := sink
 (* Built-in sink: timestamped, colorized lines on stderr. *)
 let printf = Log_printf.log
 
+(* Prepended to every message — set per-process to a domain name so per-domain
+   daemon processes are distinguishable in a shared journal. *)
+let prefix = ref ""
+let set_prefix p = prefix := p
+
 let log level fmt =
   if rank level >= rank !min_level then
-    Printf.ksprintf (fun msg -> !active level msg) fmt
+    Printf.ksprintf (fun msg -> !active level (!prefix ^ msg)) fmt
   else Printf.ifprintf () fmt
 
 let debug fmt = log `debug fmt

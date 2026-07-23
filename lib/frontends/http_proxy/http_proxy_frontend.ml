@@ -248,6 +248,8 @@ let callback routes _conn req body =
 (* ── Listener ───────────────────────────────────────────────────────────────── *)
 
 let start bindings =
+  (* Leaf process (post-fork): safe to initialize Lwt now. *)
+  Frontend.cap_blocking_pool ();
   (Lwt.async_exception_hook :=
      fun exn ->
        Log.err "http-proxy async exception: %s" (Printexc.to_string exn));

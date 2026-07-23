@@ -7,6 +7,10 @@ val set_min_level : level -> unit
     message. Default sink is [printf]. *)
 val use : (level -> string -> unit) -> unit
 
+(** Prepend [s] to every subsequent message. Set per-process (e.g. to a domain
+    name) so per-domain daemon processes are distinguishable in a shared log. *)
+val set_prefix : string -> unit
+
 (** Built-in sink: timestamped, colorized lines on stderr. *)
 val printf : level -> string -> unit
 
