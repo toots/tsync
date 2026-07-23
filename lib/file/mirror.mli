@@ -13,6 +13,11 @@ module Make (C : Conf.S) : sig
   (** Copy from the backend at position [source] in [C.backends] (default 0, the
       primary) to every other configured backend. Additive only: objects deleted
       on the source are not deleted on the destinations. Returns one
-      [dest_stats] per destination, in configuration order. *)
-  val resync : ?source:int -> unit -> dest_stats list Lwt.t
+      [dest_stats] per destination, in configuration order.
+
+      [manifests_only] restricts the copy to the manifests namespace
+      ([C.domain_prefix], skipping chunks/journal/versions/cursor) — cheap way
+      to complete a backend's structure without hauling chunk data. *)
+  val resync :
+    ?source:int -> ?manifests_only:bool -> unit -> dest_stats list Lwt.t
 end

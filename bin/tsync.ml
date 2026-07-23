@@ -1364,7 +1364,16 @@ let resync_remote_cmd =
             "Backend to copy from, by its configured name. Default: the \
              primary backend.")
   in
-  let run domain source v =
+  let manifests_arg =
+    Arg.(
+      value & flag
+      & info ["manifests"]
+          ~doc:
+            "Copy only the manifests namespace (skip chunks, journal, \
+             versions, cursor) — a cheap way to complete a backend's structure \
+             without hauling chunk data.")
+  in
+  let run domain source manifests_only v =
     verbose := v;
     let code =
       Lwt_main.run
@@ -1415,9 +1424,11 @@ let resync_remote_cmd =
                  C.domain_name (List.length C.backends);
                Lwt.return 1
            | Ok source ->
-               vprintf "resyncing from %s...\n" (label source);
+               vprintf "resyncing %s from %s...\n"
+                 (if manifests_only then "manifests" else "all objects")
+                 (label source);
                let module M = Mirror.Make (C) in
-               let+ dests = M.resync ~source () in
+               let+ dests = M.resync ~source ~manifests_only () in
                List.iter
                  (fun (dst : Mirror.dest_stats) ->
                    List.iter (Printf.printf "copied %s\n") dst.Mirror.copied;
@@ -1437,8 +1448,9 @@ let resync_remote_cmd =
        ~doc:
          "Sync one remote backend from another: copy every object of the \
           domain (manifests, chunks, journal, versions) that is missing or \
-          size-mismatched on the other configured backends")
-    Term.(const run $ domain_arg $ source_arg $ verbose_arg)
+          size-mismatched on the other configured backends. Pass --manifests \
+          to copy only the manifests.")
+    Term.(const run $ domain_arg $ source_arg $ manifests_arg $ verbose_arg)
 
 (* ── tsync import ────────────────────────────────────────────────────────── *)
 

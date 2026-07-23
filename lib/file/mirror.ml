@@ -38,13 +38,19 @@ module Make (C : Conf.S) = struct
   (* Everything the daemon writes for this domain. The chunk store is shared
      across domains on the same bucket; mirroring all of it is deliberate
      (chunks are content-addressed, extra copies only help other domains). *)
-  let source_entries (module Src : Backend.S) =
-    let* per_prefix =
-      Lwt_list.map_s
-        (fun prefix -> Src.list_all ~prefix ())
+  let source_entries ?(manifests_only = false) (module Src : Backend.S) =
+    let prefixes =
+      if manifests_only then [C.domain_prefix]
+      else
         [C.domain_prefix; C.chunk_prefix; C.journal_prefix; C.versions_prefix]
     in
-    let+ cursor = Src.head_opt ~key:C.cursor_key () in
+    let* per_prefix =
+      Lwt_list.map_s (fun prefix -> Src.list_all ~prefix ()) prefixes
+    in
+    let+ cursor =
+      if manifests_only then Lwt.return_none
+      else Src.head_opt ~key:C.cursor_key ()
+    in
     let entries =
       List.concat per_prefix @ match cursor with Some e -> [e] | None -> []
     in
@@ -86,9 +92,9 @@ module Make (C : Conf.S) = struct
      source are not deleted on the destinations (deletes normally fan out to
      all backends; resync is for backends that were down, drifted or were
      added later). *)
-  let resync ?(source = 0) () =
+  let resync ?(source = 0) ?(manifests_only = false) () =
     let src = List.nth C.backends source in
-    let* entries = source_entries src in
+    let* entries = source_entries ~manifests_only src in
     List.mapi (fun i b -> (i, b)) C.backends
     |> List.filter (fun (i, _) -> i <> source)
     |> Lwt_list.map_s (fun (index, dst) -> resync_to src dst ~index entries)
