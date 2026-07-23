@@ -1,3 +1,0 @@
-(executable
- (name proxy_client)
- (libraries tsync_http_proxy_backend lwt lwt.unix))
