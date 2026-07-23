@@ -1429,18 +1429,18 @@ let resync_remote_cmd =
                  C.domain_name (List.length C.backends);
                Lwt.return 1
            | Ok source ->
-               vprintf "initiating remote sync: copying %s from %s...\n"
+               vprintf "initiating remote sync: copying %s from %s..."
                  (if manifests_only then "manifests" else "all objects")
                  (label source);
                let module M = Mirror.Make (C) in
-               let on_list ~name = vprintf "  fetching %s listing...\n" name in
+               let on_list ~name = vprintf "  fetching %s listing..." name in
                let on_scan ~objects =
-                 vprintf "scanned %s: %d object%s to check\n" (label source)
+                 vprintf "scanned %s: %d object%s to check" (label source)
                    objects
                    (if objects = 1 then "" else "s")
                in
                let on_copy ~index ~key ~bytes =
-                 vprintf "  copied %s (%d bytes) -> %s\n" key bytes
+                 vprintf "  copied %s (%d bytes) -> %s" key bytes
                    (label index)
                in
                let+ dests =
@@ -1520,7 +1520,7 @@ let import_cmd =
        let cfg = Conf_parsing.load runtime_paths.Runtime.config_path in
        let (module C : Conf.S) = make_conf ?domain cfg in
        let module I = Import.Make (C) in
-       vprintf "importing from %s into domain %s\n" src C.domain_name;
+       vprintf "importing from %s into domain %s" src C.domain_name;
        let+ summary =
          I.run ~only ~exclude ~force_rehash ~src
            ~on_dir:(fun ~rel -> Printf.printf "mkdir    %s\n%!" rel)
@@ -1578,7 +1578,7 @@ let export_cmd =
          let cfg = Conf_parsing.load runtime_paths.Runtime.config_path in
          let (module C : Conf.S) = make_conf ?domain cfg in
          let module E = Export.Make (C) in
-         vprintf "exporting domain %s to %s\n" C.domain_name dst;
+         vprintf "exporting domain %s to %s" C.domain_name dst;
          let+ summary =
            E.run ~dst
              ~on_file:(fun ~rel status ->
