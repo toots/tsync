@@ -5,7 +5,8 @@ open Cmdliner
 let verbose = ref false
 
 let vprintf fmt =
-  if !verbose then Printf.printf fmt else Printf.ifprintf stdout fmt
+  if !verbose then Printf.kfprintf (fun oc -> flush oc) stdout fmt
+  else Printf.ifprintf stdout fmt
 
 let verbose_arg =
   Arg.(value & flag & info ["verbose"; "v"] ~doc:"Print detailed progress")
