@@ -80,32 +80,41 @@ let make ~root : (module Backend.S) =
 
     let list_all ?max_keys ~prefix () =
       let base = resolve prefix in
+      (* Each directory level's entries are stat'd (and subdirs recursed) in
+         parallel, so on high-latency storage the walk costs a few round-trips per
+         level rather than one per entry. Actual I/O concurrency is bounded by the
+         Lwt thread pool. *)
       let rec walk path key_prefix =
         Lwt.catch
           (fun () ->
             let* names = readdir_list path in
-            let+ entries =
-              Lwt_list.fold_left_s
-                (fun acc entry ->
+            let+ nested =
+              Lwt_list.map_p
+                (fun entry ->
                   let full_path = Filename.concat path entry in
                   let full_key = key_prefix ^ entry in
-                  let* st = Lwt_unix_retry.stat full_path in
-                  match st.Unix.st_kind with
-                    | Unix.S_REG ->
-                        Lwt.return
-                          (Backend.
-                             {
-                               key = full_key;
-                               size = st.Unix.st_size;
-                               last_modified = st.Unix.st_mtime;
-                             }
-                          :: acc)
-                    | Unix.S_DIR ->
-                        let+ sub = walk full_path (full_key ^ "/") in
-                        sub @ acc
-                    | _ -> Lwt.return acc)
-                [] names
+                  Lwt.catch
+                    (fun () ->
+                      let* st = Lwt_unix_retry.stat full_path in
+                      match st.Unix.st_kind with
+                        | Unix.S_REG ->
+                            Lwt.return
+                              [
+                                Backend.
+                                  {
+                                    key = full_key;
+                                    size = st.Unix.st_size;
+                                    last_modified = st.Unix.st_mtime;
+                                  };
+                              ]
+                        | Unix.S_DIR -> walk full_path (full_key ^ "/")
+                        | _ -> Lwt.return [])
+                    (function
+                      | Unix.Unix_error (Unix.ENOENT, _, _) -> Lwt.return []
+                      | exn -> Lwt.fail exn))
+                names
             in
+            let entries = List.concat nested in
             (* Surface empty directories as their marker key, matching the
                zero-byte marker object S3 lists for created directories. *)
             if names = [] && is_dir_key key_prefix then
