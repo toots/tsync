@@ -34,8 +34,7 @@ module Make (C : Conf.S) = struct
       | [] ->
           Lwt.fail
             (Share_error
-               (Printf.sprintf "no backend in domain %s serves shares"
-                  C.domain_name))
+               (Printf.sprintf "Sharing is not available for %s." C.domain_name))
       | (module Bk : Backend.S) :: rest -> (
           let* u = Bk.share_url ~prefix:C.domain_prefix () in
           match u with
