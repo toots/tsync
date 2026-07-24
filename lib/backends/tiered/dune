@@ -1,0 +1,4 @@
+(library
+ (name tsync_tiered_backend)
+ (wrapped false)
+ (libraries tsync_backend_register tsync_log lwt lwt.unix))

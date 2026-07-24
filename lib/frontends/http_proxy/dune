@@ -1,0 +1,16 @@
+(library
+ (name tsync_http_proxy_frontend)
+ (wrapped false)
+ (library_flags (-linkall))
+ (libraries
+  tsync_frontend_register
+  tsync_http_proxy
+  tsync_backend_register
+  tsync_conf
+  tsync_log
+  cohttp-lwt-unix
+  conduit-lwt-unix
+  uri
+  yojson
+  lwt
+  lwt.unix))

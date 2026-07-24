@@ -1,7 +1,15 @@
 (* Checks primary-backend selection: explicit [main] wins, else first local,
    else first configured. order_backends moves the primary to the head. *)
 let bc ?(main = false) backend_type id =
-  Conf_parsing.{ backend_type; name = id; fields = [("id", id)]; main }
+  Conf_parsing.
+    {
+      backend_type;
+      name = id;
+      fields = [("id", id)];
+      main;
+      backfill = false;
+      read_only = false;
+    }
 
 let ids bs =
   List.map
@@ -21,6 +29,7 @@ let () =
   (* array fields (exec backend "command") pass through as JSON strings *)
   Unix.putenv "TSYNC_CONFIG_JSON"
     {|{"domains": [{"name": "d", "symlinks": "keep", "versioning": false,
+                    "frontends": ["fuse"],
                     "backends": [{"type": "exec", "name": "e", "path": "/x",
                                   "command": ["ssh", "box"]}]}]}|};
   let cfg = Conf_parsing.load "" in
@@ -29,28 +38,22 @@ let () =
   in
   assert (List.assoc "command" backend.Conf_parsing.fields = {|["ssh","box"]|});
 
-  (* shareUrl: no backend has one -> no share backend *)
+  (* frontends: bare string and object forms both parse; string = {type};
+     object keys beyond "type" are kept as option fields *)
   Unix.putenv "TSYNC_CONFIG_JSON"
     {|{"domains": [{"name": "d", "symlinks": "keep", "versioning": false,
-                    "backends": [{"type": "s3", "name": "s", "main": true}]}]}|};
-  assert (
-    Conf_parsing.domain_share_backend
-      (List.hd (Conf_parsing.load "").Conf_parsing.domains)
-    = None);
-
-  (* shareUrl: first backend carrying one is picked, with its URL *)
-  Unix.putenv "TSYNC_CONFIG_JSON"
-    {|{"domains": [{"name": "d", "symlinks": "keep", "versioning": false,
-                    "backends": [{"type": "s3", "name": "a"},
-                                 {"type": "s3", "name": "b", "shareUrl": "https://x.lambda-url"}]}]}|};
+                    "frontends": ["fuse", {"type": "http", "port": "8080"}],
+                    "backends": [{"type": "s3", "name": "s"}]}]}|};
   (match
-     Conf_parsing.domain_share_backend
-       (List.hd (Conf_parsing.load "").Conf_parsing.domains)
+     (List.hd (Conf_parsing.load "").Conf_parsing.domains)
+       .Conf_parsing.frontends
    with
-    | Some (bc, url) ->
-        assert (bc.Conf_parsing.name = "b");
-        assert (url = "https://x.lambda-url")
-    | None -> assert false);
+    | [a; b] ->
+        assert (
+          a.Conf_parsing.frontend_type = "fuse" && a.Conf_parsing.options = []);
+        assert (b.Conf_parsing.frontend_type = "http");
+        assert (List.assoc "port" b.Conf_parsing.options = "8080")
+    | _ -> assert false);
 
   Unix.putenv "TSYNC_CONFIG_JSON" "";
   print_endline "conf_test ok"

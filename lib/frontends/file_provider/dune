@@ -1,0 +1,10 @@
+(library
+ (name tsync_file_provider_frontend)
+ (optional)
+ (wrapped false)
+ (library_flags (-linkall))
+ (libraries
+  tsync_frontend_register
+  tsync_file_provider
+  tsync_runtime
+  tsync_conf))

@@ -13,18 +13,24 @@ let send ~socket_path cmd =
 
 (* ── Auto-evict user feature ─────────────────────────────────────────────── *)
 
-let auto_evict_marker ~data_dir = Filename.concat data_dir "auto-evict"
-let auto_evict_enabled ~data_dir = Sys.file_exists (auto_evict_marker ~data_dir)
+(* Per-domain: the marker is named after the domain so auto-evict can be toggled
+   independently for each. *)
+let auto_evict_marker ~data_dir ~domain =
+  Filename.concat data_dir ("auto-evict-" ^ domain)
 
-let handle_auto_evict ~data_dir = function
+let auto_evict_enabled ~data_dir ~domain =
+  Sys.file_exists (auto_evict_marker ~data_dir ~domain)
+
+let handle_auto_evict ~data_dir ~domain = function
   | "on" ->
-      (try close_out (open_out (auto_evict_marker ~data_dir)) with _ -> ());
+      (try close_out (open_out (auto_evict_marker ~data_dir ~domain))
+       with _ -> ());
       "OK"
   | "off" ->
-      (try Unix.unlink (auto_evict_marker ~data_dir)
+      (try Unix.unlink (auto_evict_marker ~data_dir ~domain)
        with Unix.Unix_error (Unix.ENOENT, _, _) -> ());
       "OK"
-  | "status" -> if auto_evict_enabled ~data_dir then "on" else "off"
+  | "status" -> if auto_evict_enabled ~data_dir ~domain then "on" else "off"
   | _ -> "ERROR expected on|off|status"
 
 let notify ~path msg =

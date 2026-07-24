@@ -8,10 +8,11 @@ type t = {
   credentials : Aws_s3.Credentials.t;
   endpoint : Aws_s3.Region.endpoint;
   unsigned_payload : bool;
+  share_url : string option;
 }
 
-let make_t ?endpoint ?(unsigned_payload = false) ~bucket ~region ~access_key_id
-    ~secret_access_key () =
+let make_t ?endpoint ?(unsigned_payload = false) ?share_url ~bucket ~region
+    ~access_key_id ~secret_access_key () =
   let credentials =
     Aws_s3.Credentials.make ~access_key:access_key_id
       ~secret_key:secret_access_key ()
@@ -22,7 +23,7 @@ let make_t ?endpoint ?(unsigned_payload = false) ~bucket ~region ~access_key_id
       | None -> Aws_s3.Region.of_string region
   in
   let endpoint = Aws_s3.Region.endpoint ~inet:`V4 ~scheme:`Https region in
-  { bucket; credentials; endpoint; unsigned_payload }
+  { bucket; credentials; endpoint; unsigned_payload; share_url }
 
 let string_of_error = function
   | S3.Redirect _ -> "redirect"
@@ -230,10 +231,10 @@ let list_directory t ~prefix () =
   let subdirs = Hashtbl.fold (fun k mtime acc -> (k, mtime) :: acc) dirs [] in
   (List.rev !files, List.sort (fun (a, _) (b, _) -> String.compare a b) subdirs)
 
-let make ?endpoint ?unsigned_payload ~bucket ~region ~access_key_id
+let make ?endpoint ?unsigned_payload ?share_url ~bucket ~region ~access_key_id
     ~secret_access_key () : (module Backend.S) =
   let t =
-    make_t ?endpoint ?unsigned_payload ~bucket ~region ~access_key_id
+    make_t ?endpoint ?unsigned_payload ?share_url ~bucket ~region ~access_key_id
       ~secret_access_key ()
   in
   (module struct
@@ -246,6 +247,7 @@ let make ?endpoint ?unsigned_payload ~bucket ~region ~access_key_id
     let copy ~src_key ~dst_key () = copy t ~src_key ~dst_key ()
     let list_all ?max_keys ~prefix () = list_all t ?max_keys ~prefix ()
     let list_directory ~prefix () = list_directory t ~prefix ()
+    let share_url ~prefix:_ () = Lwt.return t.share_url
   end)
 
 let spec =
@@ -314,7 +316,10 @@ let () =
           | Some ("true" | "1") -> Some true
           | Some _ | None -> None
       in
-      make ?endpoint:(get "endpoint") ?unsigned_payload
+      let share_url =
+        match get "shareUrl" with Some "" | None -> None | s -> s
+      in
+      make ?endpoint:(get "endpoint") ?unsigned_payload ?share_url
         ~bucket:(req get "bucket") ~region:(req get "region")
         ~access_key_id:(req get "accessKeyId")
         ~secret_access_key:(req get "secretAccessKey")

@@ -1,0 +1,17 @@
+(library
+ (name tsync_frontend)
+ (wrapped false)
+ (library_flags (-linkall))
+ (libraries
+  tsync_frontend_register
+  tsync_http_proxy_frontend
+  (select
+   frontend_fuse.ml
+   from
+   (tsync_fuse_frontend -> frontend_fuse.enabled.ml)
+   (-> frontend_fuse.disabled.ml))
+  (select
+   frontend_file_provider.ml
+   from
+   (tsync_file_provider_frontend -> frontend_file_provider.enabled.ml)
+   (-> frontend_file_provider.disabled.ml))))

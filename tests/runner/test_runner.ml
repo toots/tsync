@@ -8,6 +8,7 @@ type step =
   | Rename of { src : string; dst : string }
   | Delete of string
   | Evict of string
+  | AutoEvict of bool
   | Restore of string
   | RevertVersion of { path : string; version : string option }
   | Open of string
@@ -77,6 +78,7 @@ let rec render_step = function
   | Rename { src; dst } -> Printf.sprintf "rename %s -> %s" src dst
   | Delete p -> "delete " ^ p
   | Evict p -> "evict " ^ p
+  | AutoEvict on -> "auto-evict " ^ if on then "on" else "off"
   | Restore p -> "restore " ^ p
   | RevertVersion { path; version } ->
       Printf.sprintf "revert %s%s" path
@@ -203,7 +205,12 @@ let setup_client (module C : Conf.S) root staging_prefix =
   Sq.start
     ~upload:(fun ~key ~cancel -> F.upload ~cancel key)
     ~on_cursor:(fun ~entry_key:_ -> ())
-    ~on_upload_done:(fun ~key:_ -> Lwt.return_unit);
+    ~on_upload_done:(fun ~key ->
+      (* Mirror the fuse/file_provider daemons: evict on upload when auto-evict
+         is enabled for this domain. *)
+      if Ipc.auto_evict_enabled ~data_dir:C.data_dir ~domain:C.domain_name then
+        F.evict key
+      else Lwt.return_unit);
   let staging_seq = ref 0 in
   let mark_time = ref 0. in
   let request fields =
@@ -300,6 +307,12 @@ let setup_client (module C : Conf.S) root staging_prefix =
     | Rename { src; dst } -> must_action ~src:(key src) "rename" (key dst)
     | Delete p -> must_action "delete" (key p)
     | Evict p -> must_action "evict" ("/" ^ p)
+    | AutoEvict on ->
+        mkdir_p C.data_dir;
+        ignore
+          (Ipc.handle_auto_evict ~data_dir:C.data_dir ~domain:C.domain_name
+             (if on then "on" else "off"));
+        Lwt.return_unit
     | Restore p -> must_action "restore" ("/" ^ p)
     | RevertVersion { path; version } ->
         must_action ?arg:version "revert" ("/" ^ path)

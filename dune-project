@@ -18,6 +18,9 @@
   conf-libev
   conf-xxhash
   conduit-lwt-unix
+  cohttp-lwt-unix
+  digestif
+  eqaf
   yojson
   lwt
   lwt_ppx

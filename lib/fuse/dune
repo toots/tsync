@@ -4,6 +4,7 @@
  (wrapped false)
  (libraries
   tsync_conf
+  tsync_engine
   tsync_queue
   tsync_core
   tsync_file
