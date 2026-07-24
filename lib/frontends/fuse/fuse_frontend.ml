@@ -23,9 +23,16 @@ let mount_binding (b : Frontend.binding) =
   let module C = (val b.Frontend.conf : Conf.S) in
   (* Each domain is its own process; tag its log lines with the domain name. *)
   Log.set_prefix (Printf.sprintf "[%s] " C.domain_name);
+  (* [allowOther] frontend option → FUSE allow_other, so a service running as
+     another user (e.g. a media server) can read the mount. *)
+  let allow_other =
+    match List.assoc_opt "allowOther" b.Frontend.options with
+      | Some ("true" | "1") -> true
+      | _ -> false
+  in
   prepare_mount_point b.Frontend.mount_point;
   let module R = Fuse_fs.Make (C) in
-  R.mount b.Frontend.mount_point
+  R.mount ~allow_other b.Frontend.mount_point
 
 (* Each domain runs FUSE in its own child process (fuse's mount blocks); the last
    one runs in this process. *)

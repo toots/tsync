@@ -350,7 +350,7 @@ module Make (C : Conf.S) = struct
     in
     loop ()
 
-  let mount mount_point =
+  let mount ?(allow_other = false) mount_point =
     (* An exception escaping through Lwt.async (e.g. a socket error in a
        library's background loop) must not take down the daemon or, worse,
        leave it half-dead. Log and keep serving. *)
@@ -404,9 +404,17 @@ module Make (C : Conf.S) = struct
     in
     wait_ready ();
     Log.info "mounting FUSE at %s" mount_point;
+    (* [allow_other] lets other users (e.g. a media server running as its own
+       service account) reach the mount; it also needs [user_allow_other] in
+       /etc/fuse.conf. *)
+    let opts =
+      (if C.read_only then ["ro"] else [])
+      @ if allow_other then ["allow_other"] else []
+    in
     let mount_args =
-      if C.read_only then [| "tsync"; mount_point; "-o"; "ro" |]
-      else [| "tsync"; mount_point |]
+      Array.of_list
+        (["tsync"; mount_point]
+        @ match opts with [] -> [] | _ -> ["-o"; String.concat "," opts])
     in
     Fuse.main ~loop_mode:Fuse.Multi_threaded mount_args
       (make_operations mount_point);
