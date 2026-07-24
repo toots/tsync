@@ -381,7 +381,7 @@ module Make (C : Conf.S) (F : File.S) = struct
                   | "auto_evict" ->
                       let result =
                         Ipc.handle_auto_evict ~data_dir:C.data_dir
-                          (get_str obj "arg")
+                          ~domain:C.domain_name (get_str obj "arg")
                       in
                       Lwt.return (ok_json [("result", `String result)])
                   | "full_resync" ->

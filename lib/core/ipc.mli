@@ -1,6 +1,6 @@
 val send : socket_path:string -> string -> string
-val auto_evict_enabled : data_dir:string -> bool
-val handle_auto_evict : data_dir:string -> string -> string
+val auto_evict_enabled : data_dir:string -> domain:string -> bool
+val handle_auto_evict : data_dir:string -> domain:string -> string -> string
 val notify_evict : path:string -> string -> unit
 val notify_restore : path:string -> string -> unit
 val notify_uploaded : path:string -> string -> unit

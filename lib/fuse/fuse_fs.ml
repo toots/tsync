@@ -356,7 +356,8 @@ module Make (C : Conf.S) = struct
        leave it half-dead. Log and keep serving. *)
     (Lwt.async_exception_hook :=
        fun exn -> Log.err "async exception: %s" (Printexc.to_string exn));
-    Log.debug "auto-evict: %b" (Ipc.auto_evict_enabled ~data_dir:C.data_dir);
+    Log.debug "auto-evict: %b"
+      (Ipc.auto_evict_enabled ~data_dir:C.data_dir ~domain:C.domain_name);
     let started = Mutex.create () in
     let started_cond = Condition.create () in
     let ready = ref false in
@@ -382,8 +383,10 @@ module Make (C : Conf.S) = struct
                  ~on_cursor:(fun ~entry_key -> set_pending_cursor entry_key)
                  ~on_upload_done:(fun ~key ->
                    let* () =
-                     if Ipc.auto_evict_enabled ~data_dir:C.data_dir then
-                       request_evict key
+                     if
+                       Ipc.auto_evict_enabled ~data_dir:C.data_dir
+                         ~domain:C.domain_name
+                     then request_evict key
                      else Lwt.return_unit
                    in
                    Ipc.notify_uploaded ~path:C.notify_path key;

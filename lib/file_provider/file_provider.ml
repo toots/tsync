@@ -113,8 +113,8 @@ module Make (C : Conf.S) = struct
         (* The daemon copy only exists to stage the upload; drop it now. *)
         let* () = F.evict key in
         Ipc.notify_uploaded ~path:C.notify_path key;
-        if Ipc.auto_evict_enabled ~data_dir:C.data_dir then
-          Ipc.notify_evict ~path:C.notify_path key;
+        if Ipc.auto_evict_enabled ~data_dir:C.data_dir ~domain:C.domain_name
+        then Ipc.notify_evict ~path:C.notify_path key;
         Lwt.return_unit)
       ~on_changed:(Ipc.notify_changed ~path:C.notify_path)
       ()

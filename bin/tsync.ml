@@ -95,10 +95,11 @@ let ipc_request ?(socket_path = runtime_paths.Runtime.socket_path) fields =
         failwith msg
     | _ -> failwith "unexpected response"
 
-let ipc_action ?socket_path ?path ?arg action =
+let ipc_action ?socket_path ?path ?arg ?domain action =
   ipc_request ?socket_path
     ([("action", `String action)]
     @ (match path with Some p -> [("path", `String p)] | None -> [])
+    @ (match domain with Some d -> [("domain", `String d)] | None -> [])
     @ match arg with Some a -> [("arg", `String a)] | None -> [])
 
 let make_backend (bc : Conf_parsing.backend_config) =
@@ -967,24 +968,42 @@ let auto_evict_cmd =
       & info [] ~docv:"on|off|status"
           ~doc:"Enable, disable, or query auto-evict after upload")
   in
+  let domain_arg =
+    Arg.(
+      value
+      & opt (some string) None
+      & info ["domain"] ~docv:"NAME" ~doc:"Domain name (default: from config)")
+  in
   let auto_evict_result obj =
     match List.assoc_opt "result" obj with Some (`String s) -> s | _ -> ""
   in
-  let run state =
+  let run domain state =
+    (* Auto-evict is per-domain. On Linux each domain has its own IPC socket; on
+       macOS all share one and the daemon routes by the [domain] field. *)
+    let cfg = Conf_parsing.load runtime_paths.Runtime.config_path in
+    let domain =
+      match domain with Some _ -> domain | None -> read_default_domain ()
+    in
+    let name = (Conf_parsing.pick_domain ?domain cfg).Conf_parsing.name in
+    let socket_path = Runtime.domain_socket_path runtime_paths name in
+    let act arg = ipc_action ~socket_path ~domain:name ~arg "auto_evict" in
     match state with
       | None | Some "status" -> (
-          match ipc_action ~arg:"status" "auto_evict" with
-            | obj -> Printf.printf "auto-evict: %s\n" (auto_evict_result obj)
+          match act "status" with
+            | obj ->
+                Printf.printf "auto-evict [%s]: %s\n" name
+                  (auto_evict_result obj)
             | exception Failure msg -> Printf.eprintf "Error: %s\n" msg)
       | Some (("on" | "off") as s) -> (
-          match ipc_action ~arg:s "auto_evict" with
-            | _ -> Printf.printf "auto-evict: %s\n" s
+          match act s with
+            | _ -> Printf.printf "auto-evict [%s]: %s\n" name s
             | exception Failure msg -> Printf.eprintf "Error: %s\n" msg)
       | Some other -> Printf.eprintf "Expected on|off|status, got: %s\n" other
   in
   Cmd.v
-    (Cmd.info "auto-evict" ~doc:"Enable or disable auto-evict after upload")
-    Term.(const run $ state_arg)
+    (Cmd.info "auto-evict"
+       ~doc:"Enable or disable auto-evict after upload (per domain)")
+    Term.(const run $ domain_arg $ state_arg)
 
 (* ── tsync sync ──────────────────────────────────────────────────────────── *)
 
