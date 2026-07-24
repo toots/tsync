@@ -1,3 +1,4 @@
+import AppKit
 import FileProvider
 import Foundation
 import OSLog
@@ -368,5 +369,39 @@ final class TsyncExtension: NSObject, NSFileProviderReplicatedExtension, @unchec
             try FileManager.default.copyItem(at: url, to: dest)
         }
         return dest
+    }
+}
+
+// MARK: - Finder actions
+
+extension TsyncExtension: NSFileProviderCustomAction {
+    func performAction(
+        identifier actionIdentifier: NSFileProviderExtensionActionIdentifier,
+        onItemsWithIdentifiers itemIdentifiers: [NSFileProviderItemIdentifier],
+        completionHandler: @escaping (Error?) -> Void
+    ) -> Progress {
+        let progress = Progress(totalUnitCount: 1)
+        guard actionIdentifier.rawValue == "com.toots.tsync.copyShareURL",
+              let identifier = itemIdentifiers.first else {
+            completionHandler(nil)
+            progress.completedUnitCount = 1
+            return progress
+        }
+        let key = ItemID.key(for: identifier, domainPrefix: domainPrefix)
+        Task {
+            do {
+                let resp = try await IPC.share(key: key)
+                guard let url = resp.url else { throw IPC.IPCError.badResponse }
+                let pasteboard = NSPasteboard.general
+                pasteboard.clearContents()
+                pasteboard.setString(url, forType: .string)
+                completionHandler(nil)
+            } catch {
+                log.error("copyShareURL failed: \(error, privacy: .public)")
+                completionHandler(IPC.fileProviderError(error))
+            }
+            progress.completedUnitCount = 1
+        }
+        return progress
     }
 }

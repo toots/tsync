@@ -4,11 +4,26 @@ type backend_config = {
       (** required; selects backends, e.g. [resync-remote --source] *)
   fields : (string * string) list;
   main : bool;  (** explicitly marked as the primary (read) backend *)
+  backfill : bool;
+      (** an incomplete backend to be lazily filled with served chunks; excluded
+          from manifest/listing reads. Mutually exclusive with [read_only] *)
+  read_only : bool;
+      (** an authoritative store used only as a read fallback, never written
+          (excluded from write fan-out). Mutually exclusive with [backfill] *)
+}
+
+type frontend_config = {
+  frontend_type : string;
+  options : (string * string) list;
+      (** future per-frontend options; empty for the bare-string form *)
 }
 
 type domain = {
   name : string;
   backends : backend_config list;
+  frontends : frontend_config list;
+      (** required, non-empty; each entry is a type name ["fuse"] or an object
+          [{"type": "fuse", ...options}] *)
   symlink_policy : [ `Keep | `Follow | `Skip ];
   versioning : bool;
   read_only : bool;
@@ -49,11 +64,3 @@ val versions_prefix : domain -> string
 val journal_prefix : domain -> string
 val cursor_key : domain -> string
 val shares_prefix : domain -> string
-
-(** A backend's [shareUrl] field, if present and non-empty. *)
-val backend_share_url : backend_config -> string option
-
-(** The first backend (in config order) with a [shareUrl], paired with its URL.
-    This backend both serves the domain's shares and receives share manifests.
-*)
-val domain_share_backend : domain -> (backend_config * string) option

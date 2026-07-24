@@ -80,32 +80,41 @@ let make ~root : (module Backend.S) =
 
     let list_all ?max_keys ~prefix () =
       let base = resolve prefix in
+      (* Each directory level's entries are stat'd (and subdirs recursed) in
+         parallel, so on high-latency storage the walk costs a few round-trips per
+         level rather than one per entry. Actual I/O concurrency is bounded by the
+         Lwt thread pool. *)
       let rec walk path key_prefix =
         Lwt.catch
           (fun () ->
             let* names = readdir_list path in
-            let+ entries =
-              Lwt_list.fold_left_s
-                (fun acc entry ->
+            let+ nested =
+              Lwt_list.map_p
+                (fun entry ->
                   let full_path = Filename.concat path entry in
                   let full_key = key_prefix ^ entry in
-                  let* st = Lwt_unix_retry.stat full_path in
-                  match st.Unix.st_kind with
-                    | Unix.S_REG ->
-                        Lwt.return
-                          (Backend.
-                             {
-                               key = full_key;
-                               size = st.Unix.st_size;
-                               last_modified = st.Unix.st_mtime;
-                             }
-                          :: acc)
-                    | Unix.S_DIR ->
-                        let+ sub = walk full_path (full_key ^ "/") in
-                        sub @ acc
-                    | _ -> Lwt.return acc)
-                [] names
+                  Lwt.catch
+                    (fun () ->
+                      let* st = Lwt_unix_retry.stat full_path in
+                      match st.Unix.st_kind with
+                        | Unix.S_REG ->
+                            Lwt.return
+                              [
+                                Backend.
+                                  {
+                                    key = full_key;
+                                    size = st.Unix.st_size;
+                                    last_modified = st.Unix.st_mtime;
+                                  };
+                              ]
+                        | Unix.S_DIR -> walk full_path (full_key ^ "/")
+                        | _ -> Lwt.return [])
+                    (function
+                      | Unix.Unix_error (Unix.ENOENT, _, _) -> Lwt.return []
+                      | exn -> Lwt.fail exn))
+                names
             in
+            let entries = List.concat nested in
             (* Surface empty directories as their marker key, matching the
                zero-byte marker object S3 lists for created directories. *)
             if names = [] && is_dir_key key_prefix then
@@ -139,38 +148,55 @@ let make ~root : (module Backend.S) =
             List.filteri (fun i _ -> i < n) entries
         | _ -> entries
 
+    (* One directory level only: a single [readdir] + [stat] per entry, so
+       enumerating a folder costs O(entries in that folder), not O(whole subtree).
+       (S3 needs the recursive [list_all] to synthesize directories; the local FS
+       has real ones.) *)
     let list_directory ~prefix () =
-      let+ all = list_all ~prefix () in
-      let prefix_len = String.length prefix in
-      let dirs = Hashtbl.create 16 in
-      let files = ref [] in
-      List.iter
-        (fun (e : Backend.file_entry) ->
-          if String.length e.key <= prefix_len then ()
-          else begin
-            let rest =
-              String.sub e.key prefix_len (String.length e.key - prefix_len)
-            in
-            match String.index_opt rest '/' with
-              | None -> files := e :: !files
-              | Some i -> (
-                  let dir_name = String.sub rest 0 i in
-                  let mtime =
-                    if i = String.length rest - 1 then Some e.last_modified
-                    else None
-                  in
-                  match Hashtbl.find_opt dirs dir_name with
-                    | None -> Hashtbl.add dirs dir_name mtime
-                    | Some None when mtime <> None ->
-                        Hashtbl.replace dirs dir_name mtime
-                    | Some _ -> ())
-          end)
-        all;
-      let subdirs =
-        Hashtbl.fold (fun k mtime acc -> (k, mtime) :: acc) dirs []
-      in
-      ( List.rev !files,
-        List.sort (fun (a, _) (b, _) -> String.compare a b) subdirs )
+      let base = resolve prefix in
+      Lwt.catch
+        (fun () ->
+          let* names = readdir_list base in
+          (* stat entries in parallel: on slow/networked storage the per-entry
+             latency dominates, so concurrency (bounded by the Lwt thread pool)
+             turns O(entries)·latency into a couple of round-trips. *)
+          let+ entries =
+            Lwt_list.map_p
+              (fun name ->
+                let full_path = Filename.concat base name in
+                Lwt.catch
+                  (fun () ->
+                    let+ st = Lwt_unix_retry.stat full_path in
+                    match st.Unix.st_kind with
+                      | Unix.S_REG ->
+                          `File
+                            Backend.
+                              {
+                                key = prefix ^ name;
+                                size = st.Unix.st_size;
+                                last_modified = st.Unix.st_mtime;
+                              }
+                      | Unix.S_DIR -> `Dir (name, Some st.Unix.st_mtime)
+                      | _ -> `Skip)
+                  (function
+                    (* entry vanished mid-listing (race): skip it *)
+                    | Unix.Unix_error (Unix.ENOENT, _, _) -> Lwt.return `Skip
+                    | exn -> Lwt.fail exn))
+              names
+          in
+          let files =
+            List.filter_map (function `File e -> Some e | _ -> None) entries
+          in
+          let dirs =
+            List.filter_map (function `Dir d -> Some d | _ -> None) entries
+          in
+          (files, List.sort (fun (a, _) (b, _) -> String.compare a b) dirs))
+        (function
+          | Unix.Unix_error ((Unix.ENOENT | Unix.ENOTDIR), _, _) ->
+              Lwt.return ([], [])
+          | exn -> Lwt.fail exn)
+
+    let share_url ~prefix:_ () = Lwt.return_none
   end)
 
 let spec =

@@ -7,11 +7,13 @@
   tsync_core
   tsync_conf
   tsync_backend
+  tsync_tiered_backend
   tsync_local_io
   tsync_queue
   tsync_file
   tsync_log
   tsync_runtime
+  tsync_frontend
   tsync_tls
   cmdliner
   yojson
@@ -19,17 +21,3 @@
   lwt.unix
   threads.posix
   unix))
-
-(library
- (name tsync_runtime)
- (wrapped false)
- (modules runtime)
- (libraries
-  tsync_conf
-  tsync_file
-  tsync_queue
-  (select
-   runtime.ml
-   from
-   (tsync_fuse -> runtime.fuse.ml)
-   (tsync_file_provider -> runtime.file_provider.ml))))

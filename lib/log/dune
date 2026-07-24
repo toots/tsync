@@ -1,10 +1,11 @@
 (library
  (name tsync_log)
- (modules log)
  (wrapped false)
+ (modules log log_printf log_syslog_provider)
  (libraries
+  unix
   (select
-   log.ml
+   log_syslog_provider.ml
    from
-   (syslog -> log_syslog.ml)
-   (unix -> log_printf.ml))))
+   (syslog -> log_syslog_provider.available.ml)
+   (-> log_syslog_provider.stub.ml))))

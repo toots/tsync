@@ -1,14 +1,15 @@
 open Lwt.Syntax
 
 module Make (C : Conf.S) = struct
-  module Sq = Sync_queue.Make (C)
-  module F = File.Make (C) (Sq)
+  module E = Domain_engine.Make (C)
+  module Sq = E.Sq
+  module F = E.F
+  module Ih = E.Ih
+  module Sp = E.Sp
   module Fs = File_store.Make (C)
   module H = Hidden_ops.Make (F)
   module Fd = Fd_cache.Make (F)
   module I = Internal_ops.Make (F)
-  module Ih = Ipc_handler.Make (C) (F)
-  module Sp = Sync_poller.Make (C) (F)
 
   (* ── Full-file storage policy ─────────────────────────────────────────────
      Files persist in the local cache. Eviction is deferred while a file has
@@ -183,12 +184,7 @@ module Make (C : Conf.S) = struct
         changed = (fun _ -> ());
         full_resync;
         status_fields = (fun () -> [("mount", `String mount_point)]);
-        stats_fields =
-          (fun () ->
-            [
-              ("pendingUploads", `Int (Sq.pending ()));
-              ("uploadsCompleted", `Int (Sq.completed_count ()));
-            ]);
+        stats_fields = E.stats_fields;
         on_stop =
           (fun () ->
             do_stop ();
@@ -382,22 +378,18 @@ module Make (C : Conf.S) = struct
         (fun () ->
           Lwt_main.run
             (let* () =
-               Local.init ~cache_root:C.cache_root ~domain_name:C.domain_name
+               E.start
+                 ~on_cursor:(fun ~entry_key -> set_pending_cursor entry_key)
+                 ~on_upload_done:(fun ~key ->
+                   let* () =
+                     if Ipc.auto_evict_enabled ~data_dir:C.data_dir then
+                       request_evict key
+                     else Lwt.return_unit
+                   in
+                   Ipc.notify_uploaded ~path:C.notify_path key;
+                   Lwt.return_unit)
+                 ()
              in
-             Log.debug "starting sync queue workers";
-             Sq.start
-               ~upload:(fun ~key ~cancel -> F.upload ~cancel key)
-               ~on_cursor:(fun ~entry_key -> set_pending_cursor entry_key)
-               ~on_upload_done:(fun ~key ->
-                 let* () =
-                   if Ipc.auto_evict_enabled ~data_dir:C.data_dir then
-                     request_evict key
-                   else Lwt.return_unit
-                 in
-                 Ipc.notify_uploaded ~path:C.notify_path key;
-                 Lwt.return_unit);
-             Log.debug "starting sync poller";
-             Sp.start ();
              Log.debug "starting cursor flusher";
              Lwt.async cursor_flusher;
              Log.debug "starting IPC server at %s" C.socket_path;

@@ -1,0 +1,4 @@
+(test
+ (name share_test)
+ (libraries tsync_queue tsync_conf tsync_backend tsync_local_backend yojson
+   lwt lwt.unix unix))

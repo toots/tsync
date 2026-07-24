@@ -1,0 +1,4 @@
+(library
+ (name tsync_engine)
+ (wrapped false)
+ (libraries tsync_conf tsync_queue tsync_file tsync_ipc_handler lwt))

@@ -4,8 +4,13 @@ open Cmdliner
 
 let verbose = ref false
 
-let vprintf fmt =
-  if !verbose then Printf.printf fmt else Printf.ifprintf stdout fmt
+(* CLI progress goes through Log at info level; --verbose lowers the threshold
+   so those lines appear. Actual command results stay on stdout via Printf. *)
+let set_verbose v =
+  verbose := v;
+  Log.set_min_level (if v then `info else `warn)
+
+let vprintf fmt = Log.info fmt
 
 let verbose_arg =
   Arg.(value & flag & info ["verbose"; "v"] ~doc:"Print detailed progress")
@@ -41,6 +46,40 @@ let rec mkdir_p path =
 
 let runtime_paths = Runtime.default_paths ()
 
+(* Which frontend serves a domain: the [frontend] override if given (must be one
+   the domain lists), else the domain's first configured frontend. Errors if the
+   name isn't compiled into this binary. Resolved at call time (not module-init)
+   so frontend registration, a link-order side effect, has already happened. *)
+let frontend_names (d : Conf_parsing.domain) =
+  List.map
+    (fun (f : Conf_parsing.frontend_config) -> f.Conf_parsing.frontend_type)
+    d.Conf_parsing.frontends
+
+let resolve_frontend ?frontend (d : Conf_parsing.domain) : (module Frontend.S) =
+  let names = frontend_names d in
+  let name =
+    match frontend with
+      | Some name ->
+          if List.mem name names then name
+          else
+            failwith
+              (Printf.sprintf
+                 "frontend %s not configured for domain %s (configured: %s)"
+                 name d.Conf_parsing.name (String.concat ", " names))
+      | None -> (
+          match names with
+            | n :: _ -> n
+            | [] ->
+                failwith ("domain " ^ d.Conf_parsing.name ^ " has no frontends")
+          )
+  in
+  match Frontend.find name with
+    | Some m -> m
+    | None ->
+        failwith
+          (Printf.sprintf
+             "frontend %s is configured but not compiled into this binary" name)
+
 (* Send a JSON IPC request; return the parsed response fields.
    Raises Failure with the daemon's error message when ok=false. *)
 let ipc_request ?(socket_path = runtime_paths.Runtime.socket_path) fields =
@@ -66,6 +105,95 @@ let make_backend (bc : Conf_parsing.backend_config) =
   Backend.make ~backend_type:bc.backend_type ~get_field:(fun k ->
       List.assoc_opt k bc.fields)
 
+(* The domain's ordered backends. When any is flagged [backfill] or [readOnly],
+   collapse them into a single tiered composite; otherwise the plain ordered list.
+
+   Roles: exactly one primary (neither flag) is the writable source of truth;
+   [backfill] backends are writable, lazily-filled chunk copies; [readOnly]
+   backends are authoritative read-only fallbacks. Reads prefer the primary and
+   fall through the rest; writes fan out to everything except [readOnly]. *)
+let build_backends (d : Conf_parsing.domain) : (module Backend.S) list =
+  let ordered = Conf_parsing.order_backends d.Conf_parsing.backends in
+  let tiered =
+    List.exists
+      (fun (b : Conf_parsing.backend_config) -> b.backfill || b.read_only)
+      ordered
+  in
+  if not tiered then List.map make_backend ordered
+  else begin
+    let subs =
+      List.map
+        (fun (bc : Conf_parsing.backend_config) ->
+          ( bc,
+            {
+              Tiered_backend.name = bc.Conf_parsing.name;
+              backend = make_backend bc;
+            } ))
+        ordered
+    in
+    let read_order = List.map snd subs in
+    let backfills =
+      List.filter_map
+        (fun (bc, s) -> if bc.Conf_parsing.backfill then Some s else None)
+        subs
+    in
+    (* Manifests/listings come from the authoritative (non-backfill) backends. *)
+    let manifest_read =
+      List.filter_map
+        (fun (bc, s) -> if bc.Conf_parsing.backfill then None else Some s)
+        subs
+    in
+    (* Writes go everywhere except read-only backends. *)
+    let writes =
+      List.filter_map
+        (fun ((bc : Conf_parsing.backend_config), s) ->
+          if bc.read_only then None else Some s.Tiered_backend.backend)
+        subs
+    in
+    (match
+       List.filter
+         (fun ((bc : Conf_parsing.backend_config), _) ->
+           (not bc.backfill) && not bc.read_only)
+         subs
+     with
+      | [_] -> ()
+      | [] ->
+          failwith
+            (Printf.sprintf
+               "domain %s: no primary backend; exactly one must be neither \
+                \"backfill\" nor \"readOnly\""
+               d.Conf_parsing.name)
+      | _ :: _ :: _ ->
+          failwith
+            (Printf.sprintf
+               "domain %s: more than one primary backend; exactly one must be \
+                neither \"backfill\" nor \"readOnly\""
+               d.Conf_parsing.name));
+    [
+      Tiered_backend.make
+        ~chunk_prefix:(Conf_parsing.chunk_prefix d)
+        ~read_order ~manifest_read ~writes ~backfills;
+    ]
+  end
+
+(* Ordered backends with the one named [source] moved to the head, so it serves
+   reads (the primary). Fails if no backend has that name. *)
+let order_backends_from source backends =
+  let ordered = Conf_parsing.order_backends backends in
+  match
+    List.partition
+      (fun (b : Conf_parsing.backend_config) -> b.name = source)
+      ordered
+  with
+    | [], _ ->
+        failwith
+          (Printf.sprintf "no backend named %s (available: %s)" source
+             (String.concat ", "
+                (List.map
+                   (fun (b : Conf_parsing.backend_config) -> b.name)
+                   ordered)))
+    | chosen, rest -> chosen @ rest
+
 let default_domain_file () =
   Filename.concat runtime_paths.Runtime.data_dir "default-domain"
 
@@ -77,7 +205,12 @@ let read_default_domain () =
         if s = "" then None else Some s
     | exception _ -> None
 
-let make_conf ?domain ?socket_path cfg : (module Conf.S) =
+(* [tier=false] exposes the raw ordered backend list instead of the tiered
+   composite — for commands (resync-remote) that copy between individual backends.
+   [source] forces reads to come from the named backend (moved to the head, tiering
+   off) — for commands that pick which backend to read from. *)
+let make_conf ?domain ?socket_path ?(tier = true) ?source cfg : (module Conf.S)
+    =
   Tls_conf.apply cfg.Conf_parsing.tls;
   let domain =
     match domain with Some _ -> domain | None -> read_default_domain ()
@@ -97,8 +230,15 @@ let make_conf ?domain ?socket_path cfg : (module Conf.S) =
     let cursor_key = Conf_parsing.cursor_key d
 
     let backends =
-      List.map make_backend
-        (Conf_parsing.order_backends d.Conf_parsing.backends)
+      match source with
+        | Some name ->
+            List.map make_backend
+              (order_backends_from name d.Conf_parsing.backends)
+        | None ->
+            if tier then build_backends d
+            else
+              List.map make_backend
+                (Conf_parsing.order_backends d.Conf_parsing.backends)
 
     let cache_root = runtime_paths.Runtime.cache_root
     let data_dir = runtime_paths.Runtime.data_dir
@@ -135,7 +275,7 @@ let start_cmd =
              available backend.")
   in
   let run mount tls =
-    Log.init ();
+    Log.Daemon.init ();
     Log.debug "loading config from %s" runtime_paths.Runtime.config_path;
     let cfg = Conf_parsing.load runtime_paths.Runtime.config_path in
     (* CLI --tls wins over the config value applied by make_conf. *)
@@ -151,45 +291,64 @@ let start_cmd =
         | Some p, [_] -> p
         | _ -> Filename.concat (Sys.getenv "HOME") ("tsync/" ^ domain_name)
     in
-    let confs =
+    (* One conf + binding scaffold per domain; a domain's frontends share its conf. *)
+    let per_domain =
       List.map
         (fun (d : Conf_parsing.domain) ->
           let socket_path = Runtime.domain_socket_path runtime_paths d.name in
-          make_conf ~domain:d.name ~socket_path cfg)
+          let conf = make_conf ~domain:d.name ~socket_path cfg in
+          (d, conf, mount_fn d.Conf_parsing.name))
         domains
     in
-    (* Lwt_unix defaults to a pool of up to 1000 OS threads for dispatching
-       blocking syscalls (file I/O has no non-blocking mode). Under bursty
-       concurrent chunk reads and FUSE cache I/O that default lets the pool
-       grow far past what this workload needs, and each idle worker thread
-       wakes periodically on its own timer regardless of whether there's
-       work — pure overhead. max_uploads and max_downloads are already the
-       real, single ceilings on concurrent upload and download operations
-       (see the [Buffer_pool] and [download_pool] comments), so their sum
-       plus headroom for FUSE-driven cache I/O is the right size for this
-       pool. Clamp it too: an unusually large config value (maxDownloads has
-       been seen set to 1000, versus a default of 8) shouldn't reopen the
-       unbounded-pool problem this is meant to close — staying under the
-       clamp means bursts never hit the ceiling and fall back to synchronous
-       execution, which would stall the whole event loop; 256 comfortably
-       covers realistic concurrency for this workload. *)
-    let total_uploads, total_downloads =
-      List.fold_left
-        (fun (u, d) (module C : Conf.S) ->
-          (u + C.max_uploads, d + C.max_downloads))
-        (0, 0) confs
+    (* Do NOT touch Lwt here: any Lwt_unix/Lwt_preemptive call initializes the
+       shared notification eventfd, and this process is about to fork. A forked
+       child would inherit that eventfd and its worker-completion wakeups would be
+       delivered to the wrong process, hanging its event loop. Each leaf caps its
+       own blocking-thread pool from inside its own Lwt loop, after all forking
+       (see [Frontend.cap_blocking_pool]). *)
+    (* One [binding] per (domain × frontend), grouped by frontend. Each group runs
+       as its own process (all but the last forked), so distinct frontends — e.g.
+       fuse and http-proxy on the same domain — run concurrently. *)
+    let all_bindings =
+      List.concat_map
+        (fun (d, conf, mount_point) ->
+          List.map
+            (fun (f : Conf_parsing.frontend_config) ->
+              ( f.Conf_parsing.frontend_type,
+                { Frontend.conf; options = f.Conf_parsing.options; mount_point }
+              ))
+            d.Conf_parsing.frontends)
+        per_domain
     in
-    Lwt_unix.set_pool_size (min 256 (total_uploads + total_downloads + 32));
-    List.iter
-      (fun (module C : Conf.S) ->
-        let mp = mount_fn C.domain_name in
-        Log.debug "domain: %s, mount: %s" C.domain_name mp;
-        mkdir_p mp;
-        Runtime.pre_start ~mount_point:mp)
-      confs;
+    let frontend_order =
+      List.fold_left
+        (fun acc (name, _) -> if List.mem name acc then acc else acc @ [name])
+        [] all_bindings
+    in
+    let groups =
+      List.map
+        (fun name ->
+          ( name,
+            List.filter_map
+              (fun (n, b) -> if n = name then Some b else None)
+              all_bindings ))
+        frontend_order
+    in
+    let run_group (name, bindings) =
+      let (module F : Frontend.S) =
+        match Frontend.find name with
+          | Some m -> m
+          | None ->
+              failwith
+                (Printf.sprintf
+                   "frontend %s is configured but not compiled into this binary"
+                   name)
+      in
+      Log.debug "starting frontend %s (%d domains)" name (List.length bindings);
+      F.start bindings
+    in
     Log.debug "cache root: %s" runtime_paths.Runtime.cache_root;
-    Log.debug "initializing runtime";
-    Runtime.start ~confs ~mount_fn
+    Frontend.run_forked run_group groups
   in
   Cmd.v
     (Cmd.info "start" ~doc:"Mount the filesystem (run via systemd unit)")
@@ -199,9 +358,31 @@ let start_cmd =
 
 let stop_cmd =
   let run () =
-    match ipc_action "stop" with
-      | _ -> print_endline "Stopped."
-      | exception Failure msg -> Printf.eprintf "Error: %s\n" msg
+    (* [start] runs every domain (fuse listens on a per-domain socket; file_provider
+       shares one), so stop each domain's socket. Frontends without an IPC socket
+       (http-proxy) aren't reached here — systemd's SIGTERM stops that group. A
+       socket that's absent or unconnectable just means that part isn't running. *)
+    let cfg = Conf_parsing.load runtime_paths.Runtime.config_path in
+    let sockets =
+      List.sort_uniq compare
+        (List.map
+           (fun (d : Conf_parsing.domain) ->
+             Runtime.domain_socket_path runtime_paths d.Conf_parsing.name)
+           cfg.Conf_parsing.domains)
+    in
+    let stopped = ref 0 in
+    List.iter
+      (fun socket_path ->
+        match ipc_action ~socket_path "stop" with
+          | _ -> incr stopped
+          | exception Unix.Unix_error ((Unix.ECONNREFUSED | Unix.ENOENT), _, _)
+            ->
+              ()
+          | exception Failure msg ->
+              Printf.eprintf "Error stopping %s: %s\n" socket_path msg)
+      sockets;
+    if !stopped > 0 then Printf.printf "Stopped %d domain(s).\n" !stopped
+    else print_endline "No IPC-backed frontend running; relying on signal."
   in
   Cmd.v
     (Cmd.info "stop" ~doc:"Stop the sync daemon")
@@ -358,11 +539,25 @@ let ls_cmd =
       & opt (some string) None
       & info ["domain"] ~docv:"NAME" ~doc:"Domain name (default: from config)")
   in
-  let run path show_deleted domain =
+  let frontend_arg =
+    Arg.(
+      value
+      & opt (some string) None
+      & info ["frontend"] ~docv:"NAME"
+          ~doc:
+            "Frontend to report cache status for (default: the domain's first).")
+  in
+  let run path show_deleted domain frontend =
     Lwt_main.run
       (let open Lwt.Syntax in
        let cfg = Conf_parsing.load runtime_paths.Runtime.config_path in
+       let domain =
+         match domain with Some _ -> domain | None -> read_default_domain ()
+       in
        let (module C : Conf.S) = make_conf ?domain cfg in
+       let (module F : Frontend.S) =
+         resolve_frontend ?frontend (Conf_parsing.pick_domain ?domain cfg)
+       in
        let module Fs = File_store.Make (C) in
        let mount_point =
          Filename.concat (Sys.getenv "HOME") ("tsync/" ^ C.domain_name)
@@ -418,7 +613,7 @@ let ls_cmd =
              | `Dir _ -> Printf.printf "dir    %s/\n" name
              | `File (e : Backend.file_entry) ->
                  let cached =
-                   Runtime.is_local ~cache_root:C.cache_root
+                   F.is_local ~cache_root:C.cache_root
                      ~domain_name:C.domain_name ~domain_prefix:C.domain_prefix
                      e.key
                  in
@@ -469,7 +664,7 @@ let ls_cmd =
   in
   Cmd.v
     (Cmd.info "ls" ~doc:"List files with cache status")
-    Term.(const run $ path_arg $ deleted_arg $ domain_arg)
+    Term.(const run $ path_arg $ deleted_arg $ domain_arg $ frontend_arg)
 
 (* ── tsync versions ──────────────────────────────────────────────────────── *)
 
@@ -800,6 +995,15 @@ let sync_cmd =
       & opt (some string) None
       & info ["domain"] ~docv:"NAME" ~doc:"Domain name (default: from config)")
   in
+  let source_arg =
+    Arg.(
+      value
+      & opt (some string) None
+      & info ["source"] ~docv:"NAME"
+          ~doc:
+            "Backend to sync from, by its configured name. Default: the \
+             primary backend.")
+  in
   let full_arg =
     Arg.(
       value & flag
@@ -825,12 +1029,12 @@ let sync_cmd =
         Printf.sprintf "rename %s -> %s%s" src dst
           (if is_dir then " (dir)" else "")
   in
-  let run domain full parallelism v =
-    verbose := v;
+  let run domain source full parallelism v =
+    set_verbose v;
     Lwt_main.run
       (let open Lwt.Syntax in
        let cfg = Conf_parsing.load runtime_paths.Runtime.config_path in
-       let (module C : Conf.S) = make_conf ?domain cfg in
+       let (module C : Conf.S) = make_conf ?domain ?source cfg in
        let module J = Journal.Make (C) in
        let module Fs = File_store.Make (C) in
        let module St = Store.Make (C) (Layout.Inode.Make (C)) in
@@ -1120,7 +1324,9 @@ let sync_cmd =
           resync (triggered by --full or when the local bookmark is stale) \
           clears the cache and re-downloads all manifests. Pass --verbose to \
           see a step-by-step breakdown.")
-    Term.(const run $ domain_arg $ full_arg $ parallelism_arg $ verbose_arg)
+    Term.(
+      const run $ domain_arg $ source_arg $ full_arg $ parallelism_arg
+      $ verbose_arg)
 
 (* ── tsync recheck ───────────────────────────────────────────────────────── *)
 
@@ -1184,8 +1390,17 @@ let resync_remote_cmd =
             "Backend to copy from, by its configured name. Default: the \
              primary backend.")
   in
-  let run domain source v =
-    verbose := v;
+  let manifests_arg =
+    Arg.(
+      value & flag
+      & info ["manifests"]
+          ~doc:
+            "Copy only the manifests namespace (skip chunks, journal, \
+             versions, cursor) — a cheap way to complete a backend's structure \
+             without hauling chunk data.")
+  in
+  let run domain source manifests_only v =
+    set_verbose v;
     let code =
       Lwt_main.run
         (let open Lwt.Syntax in
@@ -1198,7 +1413,8 @@ let resync_remote_cmd =
              (fun (b : Conf_parsing.backend_config) -> b.Conf_parsing.name)
              (Conf_parsing.order_backends d.Conf_parsing.backends)
          in
-         let (module C : Conf.S) = make_conf ?domain cfg in
+         (* Raw (untiered) backends so Mirror can copy between each one. *)
+         let (module C : Conf.S) = make_conf ?domain ~tier:false cfg in
          let label i = List.nth labels i in
          let source_index =
            match source with
@@ -1234,12 +1450,27 @@ let resync_remote_cmd =
                  C.domain_name (List.length C.backends);
                Lwt.return 1
            | Ok source ->
-               vprintf "resyncing from %s...\n" (label source);
+               vprintf "initiating remote sync: copying %s from %s..."
+                 (if manifests_only then "manifests" else "all objects")
+                 (label source);
                let module M = Mirror.Make (C) in
-               let+ dests = M.resync ~source () in
+               let on_list ~name = vprintf "  fetching %s listing..." name in
+               let on_scan ~objects =
+                 vprintf "scanned %s: %d object%s to check" (label source)
+                   objects
+                   (if objects = 1 then "" else "s")
+               in
+               let on_copy ~index ~key ~bytes =
+                 vprintf "  copied %s (%d bytes) -> %s" key bytes (label index)
+               in
+               let+ dests =
+                 M.resync ~source ~manifests_only ~on_scan ~on_list ~on_copy ()
+               in
                List.iter
                  (fun (dst : Mirror.dest_stats) ->
-                   List.iter (Printf.printf "copied %s\n") dst.Mirror.copied;
+                   (* Keys are logged live under -v; only dump them otherwise. *)
+                   if not !verbose then
+                     List.iter (Printf.printf "copied %s\n") dst.Mirror.copied;
                    Printf.printf
                      "%s -> %s: %d object%s checked, %d copied (%d bytes)\n"
                      (label source) (label dst.Mirror.index) dst.Mirror.checked
@@ -1256,8 +1487,9 @@ let resync_remote_cmd =
        ~doc:
          "Sync one remote backend from another: copy every object of the \
           domain (manifests, chunks, journal, versions) that is missing or \
-          size-mismatched on the other configured backends")
-    Term.(const run $ domain_arg $ source_arg $ verbose_arg)
+          size-mismatched on the other configured backends. Pass --manifests \
+          to copy only the manifests.")
+    Term.(const run $ domain_arg $ source_arg $ manifests_arg $ verbose_arg)
 
 (* ── tsync import ────────────────────────────────────────────────────────── *)
 
@@ -1302,13 +1534,13 @@ let import_cmd =
              manifest is always recomputed and republished.")
   in
   let run domain src only exclude force_rehash v =
-    verbose := v;
+    set_verbose v;
     Lwt_main.run
       (let open Lwt.Syntax in
        let cfg = Conf_parsing.load runtime_paths.Runtime.config_path in
        let (module C : Conf.S) = make_conf ?domain cfg in
        let module I = Import.Make (C) in
-       vprintf "importing from %s into domain %s\n" src C.domain_name;
+       vprintf "importing from %s into domain %s" src C.domain_name;
        let+ summary =
          I.run ~only ~exclude ~force_rehash ~src
            ~on_dir:(fun ~rel -> Printf.printf "mkdir    %s\n%!" rel)
@@ -1359,14 +1591,14 @@ let export_cmd =
       & info [] ~docv:"DIR" ~doc:"Destination folder (created if needed)")
   in
   let run domain dst v =
-    verbose := v;
+    set_verbose v;
     let code =
       Lwt_main.run
         (let open Lwt.Syntax in
          let cfg = Conf_parsing.load runtime_paths.Runtime.config_path in
          let (module C : Conf.S) = make_conf ?domain cfg in
          let module E = Export.Make (C) in
-         vprintf "exporting domain %s to %s\n" C.domain_name dst;
+         vprintf "exporting domain %s to %s" C.domain_name dst;
          let+ summary =
            E.run ~dst
              ~on_file:(fun ~rel status ->
@@ -1814,6 +2046,31 @@ let backend_summary = function
       String.concat ", "
         (List.map (fun b -> Option.value (jstr b "type") ~default:"?") bs)
 
+(* A frontend JSON entry is a bare type-name string or an object with a "type"
+   key; both forms are accepted on read. *)
+let frontend_type_of = function `String s -> Some s | j -> jstr j "type"
+
+let frontend_summary = function
+  | [] -> "(none)"
+  | fs ->
+      String.concat ", "
+        (List.map (fun j -> Option.value (frontend_type_of j) ~default:"?") fs)
+
+(* Toggle each compiled-in frontend on or off, pre-filled from [current]. Emits
+   the enabled frontends as bare type-name strings (the config also accepts the
+   [{"type": name, ...options}] object form). *)
+let edit_frontends current =
+  let registered = Frontend.names () in
+  let is_on name =
+    List.exists (fun j -> frontend_type_of j = Some name) current
+  in
+  List.filter_map
+    (fun name ->
+      if prompt_bool ~default:(is_on name) ("  Enable frontend " ^ name ^ "?")
+      then Some (`String name)
+      else None)
+    registered
+
 (* Build or edit one domain. A new domain ([existing = None]) is filled in
    linearly; an existing one is edited through a per-field menu, so untouched
    fields keep their current values without re-prompting. *)
@@ -1829,6 +2086,13 @@ let edit_domain existing =
   let backends =
     ref (match existing with Some j -> jlist j "backends" | None -> [])
   in
+  (* A new domain defaults to every compiled-in frontend (usually one). *)
+  let frontends =
+    ref
+      (match existing with
+        | Some j -> jlist j "frontends"
+        | None -> List.map (fun name -> `String name) (Frontend.names ()))
+  in
   (match existing with
     | None ->
         name := prompt "Domain name" (Some !name);
@@ -1839,7 +2103,8 @@ let edit_domain existing =
         read_only :=
           prompt_bool ~default:!read_only
             "Read-only mount (block all local writes)?";
-        backends := prompt_backends ()
+        backends := prompt_backends ();
+        frontends := edit_frontends !frontends
     | Some _ ->
         let running = ref true in
         let status = ref "" in
@@ -1851,6 +2116,7 @@ let edit_domain existing =
           Printf.printf "  3. symlinks:    %s\n" !symlinks;
           Printf.printf "  4. read-only:   %b\n" !read_only;
           Printf.printf "  5. backends:    %s\n" (backend_summary !backends);
+          Printf.printf "  6. frontends:   %s\n" (frontend_summary !frontends);
           if !status <> "" then Printf.printf "\n%s\n" !status;
           Printf.printf "\nEnter a field number to edit, or [d]one:\n> %!";
           status := "";
@@ -1863,6 +2129,7 @@ let edit_domain existing =
             | "4" ->
                 read_only := prompt_bool ~default:!read_only "Read-only mount?"
             | "5" -> backends := edit_backends !backends
+            | "6" -> frontends := edit_frontends !frontends
             | "d" | "" -> running := false
             | other -> status := Printf.sprintf "(unknown field %S)" other
         done);
@@ -1873,6 +2140,7 @@ let edit_domain existing =
       ("symlinks", `String !symlinks);
       ("readOnly", `Bool !read_only);
       ("backends", `List !backends);
+      ("frontends", `List !frontends);
     ]
 
 (* Serialize globals + domains to [path] with 0600 perms. *)
@@ -2077,16 +2345,6 @@ let parse_duration s =
       | Some k, 'h' when k > 0 -> float_of_int (k * 3600)
       | _ -> fail ())
 
-let random_hex bytes =
-  let b = Bytes.create bytes in
-  let ic = open_in_bin "/dev/urandom" in
-  Fun.protect
-    ~finally:(fun () -> close_in ic)
-    (fun () -> really_input ic b 0 bytes);
-  String.concat ""
-    (List.init bytes (fun i ->
-         Printf.sprintf "%02x" (Char.code (Bytes.get b i))))
-
 let share_cmd =
   let path_arg =
     Arg.(required & pos 0 (some string) None & info [] ~docv:"PATH")
@@ -2127,110 +2385,39 @@ let share_cmd =
     let domain =
       match domain with Some _ -> domain | None -> read_default_domain ()
     in
-    let d = Conf_parsing.pick_domain ?domain cfg in
-    (* Shares are served by — and written to — the first backend that carries a
-       shareUrl. *)
-    let share_backend, share_url =
-      match Conf_parsing.domain_share_backend d with
-        | Some (bc, url) -> (bc, url)
-        | None ->
-            Printf.eprintf "no backend in domain %s has a shareUrl configured\n"
-              d.Conf_parsing.name;
-            exit 1
-    in
     let ttl = parse_duration expires in
     let (module C : Conf.S) = make_conf ?domain cfg in
-    let (module B : Backend.S) = make_backend share_backend in
     let expires = int_of_float (Unix.time () +. ttl) in
-    let url =
-      Lwt_main.run
-        (let open Lwt.Syntax in
-         (* Resolve PATH to a domain-relative path; accept an absolute path under
-            the mount point too. Empty rel means the whole domain. *)
-         let mount_point =
-           Filename.concat (Sys.getenv "HOME") ("tsync/" ^ C.domain_name)
-         in
-         let rel =
-           let mp = mount_point ^ "/" in
-           if
-             String.length path >= String.length mp
-             && String.sub path 0 (String.length mp) = mp
-           then
-             String.sub path (String.length mp)
-               (String.length path - String.length mp)
-           else path
-         in
-         let rel =
-           if rel <> "" && rel.[String.length rel - 1] = '/' then
-             String.sub rel 0 (String.length rel - 1)
-           else rel
-         in
-         let base_json = [("v", `Int 1); ("expires", `Int expires)] in
-         let module L = Layout.Inode.Make (C) in
-         let* manifest =
-           let* file_key = L.manifest_key (C.domain_prefix ^ rel) in
-           (* A file manifest and a folder marker occupy the same key within a
-              parent namespace, so classify by the body — otherwise a folder
-              would be shared as a (chunkless) file and the Lambda would choke. *)
-           let* obj =
-             if rel = "" then Lwt.return_none else B.get_opt ~key:file_key ()
-           in
-           let marker = Option.bind obj Folder.marker_of_string in
-           match (obj, marker) with
-             | Some _, None ->
-                 (* Single file: the Lambda fetches the manifest by this key. *)
-                 Lwt.return
-                   (`Assoc
-                      (base_json
-                      @ [
-                          ("type", `String "file");
-                          ("key", `String file_key);
-                          ("chunkPrefix", `String C.chunk_prefix);
-                          ("filename", `String (Filename.basename rel));
-                        ]))
-             | _ ->
-                 (* Directory (a folder marker, or the domain root): store the
-                    folder's namespace prefix (by id); the Lambda lists it lazily.
-                    Keeps `tsync share` O(1). *)
-                 let* dir_id =
-                   match marker with
-                     | Some m -> Lwt.return m.Folder.id
-                     | None ->
-                         Folder_ids.resolve ~cache_root:C.cache_root
-                           ~domain_name:C.domain_name rel
-                 in
-                 let dir_prefix = C.domain_prefix ^ dir_id ^ "/" in
-                 let* entries = B.list_all ~prefix:dir_prefix ~max_keys:1 () in
-                 if entries = [] then (
-                   Printf.eprintf "not found: %s\n" path;
-                   exit 1);
-                 let base =
-                   if rel = "" then C.domain_name else Filename.basename rel
-                 in
-                 Lwt.return
-                   (`Assoc
-                      (base_json
-                      @ [
-                          ("type", `String "dir");
-                          ("chunkPrefix", `String C.chunk_prefix);
-                          ("dirPrefix", `String dir_prefix);
-                          ("filename", `String (base ^ ".zip"));
-                        ]))
-         in
-         (* The token is just the manifest's id; the server rebuilds the key as
-            SHARES_PREFIX + token. Keeps the share URL short. Reuse a caller-
-            supplied id (stable links) or generate a random one. *)
-         let token = Option.value token ~default:(random_hex 16) in
-         let manifest_key = Conf_parsing.shares_prefix d ^ token in
-         let* () =
-           B.put ~key:manifest_key ~data:(Yojson.Basic.to_string manifest) ()
-         in
-         Lwt.return (share_url ^ "/" ^ token))
+    (* Resolve PATH to a domain-relative path; accept an absolute path under the
+       mount point too. Empty rel means the whole domain. *)
+    let mount_point =
+      Filename.concat (Sys.getenv "HOME") ("tsync/" ^ C.domain_name)
     in
-    let tm = Unix.localtime (float_of_int expires) in
-    Printf.eprintf "Expires %04d-%02d-%02d %02d:%02d\n" (tm.Unix.tm_year + 1900)
-      (tm.Unix.tm_mon + 1) tm.Unix.tm_mday tm.Unix.tm_hour tm.Unix.tm_min;
-    print_endline url
+    let rel =
+      let mp = mount_point ^ "/" in
+      if
+        String.length path >= String.length mp
+        && String.sub path 0 (String.length mp) = mp
+      then
+        String.sub path (String.length mp) (String.length path - String.length mp)
+      else path
+    in
+    let rel =
+      if rel <> "" && rel.[String.length rel - 1] = '/' then
+        String.sub rel 0 (String.length rel - 1)
+      else rel
+    in
+    let module S = Share.Make (C) in
+    match Lwt_main.run (S.create ?token ~expires ~rel ()) with
+      | Error msg ->
+          Printf.eprintf "%s\n" msg;
+          exit 1
+      | Ok url ->
+          let tm = Unix.localtime (float_of_int expires) in
+          Printf.eprintf "Expires %04d-%02d-%02d %02d:%02d\n"
+            (tm.Unix.tm_year + 1900) (tm.Unix.tm_mon + 1) tm.Unix.tm_mday
+            tm.Unix.tm_hour tm.Unix.tm_min;
+          print_endline url
   in
   Cmd.v
     (Cmd.info "share" ~doc:"Print a shareable download URL for a file or folder")
@@ -2270,6 +2457,8 @@ let print_conf_cmd =
         Printf.printf "  versioning: %b\n" d.versioning;
         Printf.printf "  read_only:  %b\n" d.read_only;
         Printf.printf "  symlinks:   %s\n" (symlink_str d.symlink_policy);
+        Printf.printf "  frontends:  %s\n"
+          (String.concat ", " (frontend_names d));
         List.iter
           (fun (b : Conf_parsing.backend_config) ->
             Printf.printf "  backend: %s (%s)%s\n" b.name b.backend_type
@@ -2361,8 +2550,9 @@ let default_domain_cmd =
 
 let build_config_cmd =
   let run () =
-    Printf.printf "runtime: %s\ns3 backend: %b\nlog: %s\n"
-      Runtime.implementation S3_link.s3_backend_enabled Log.implementation
+    Printf.printf "frontends: %s\ns3 backend: %b\nlog: %s\n"
+      (String.concat ", " (Frontend.names ()))
+      S3_link.s3_backend_enabled Log.Daemon.implementation
   in
   Cmd.v
     (Cmd.info "build-config"
@@ -2372,6 +2562,7 @@ let build_config_cmd =
 (* ── Main ────────────────────────────────────────────────────────────────── *)
 
 let () =
+  Printexc.record_backtrace true;
   let cmd =
     Cmd.group
       (Cmd.info "tsync" ~doc:"Cloud-backed filesystem sync")

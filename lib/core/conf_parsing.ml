@@ -3,11 +3,19 @@ type backend_config = {
   name : string;
   fields : (string * string) list;
   main : bool;
+  backfill : bool;
+  read_only : bool;
+}
+
+type frontend_config = {
+  frontend_type : string;
+  options : (string * string) list;
 }
 
 type domain = {
   name : string;
   backends : backend_config list;
+  frontends : frontend_config list;
   symlink_policy : [ `Keep | `Follow | `Skip ];
   versioning : bool;
   read_only : bool;
@@ -36,20 +44,34 @@ let parse_backend json =
            ^ backend_type ^ ")")
   in
   let main = match json |> member "main" with `Bool b -> b | _ -> false in
+  let backfill =
+    match json |> member "backfill" with `Bool b -> b | _ -> false
+  in
+  let read_only =
+    match json |> member "readOnly" with `Bool b -> b | _ -> false
+  in
+  if backfill && read_only then
+    failwith
+      ("backend " ^ name
+     ^ ": \"backfill\" and \"readOnly\" are mutually exclusive");
   let fields =
     to_assoc json
     |> List.filter_map (fun (k, v) ->
-        if k = "type" || k = "main" || k = "name" then None
+        if
+          k = "type" || k = "main" || k = "name" || k = "backfill"
+          || k = "readOnly"
+        then None
         else (
           match v with
             | `String s -> Some (k, s)
             | `Bool b -> Some (k, string_of_bool b)
+            | `Int n -> Some (k, string_of_int n)
             (* Array fields (e.g. exec backend "command") pass through as JSON
                for the backend factory to decode. *)
             | `List _ -> Some (k, Yojson.Basic.to_string v)
             | _ -> None))
   in
-  { backend_type; name; fields; main }
+  { backend_type; name; fields; main; backfill; read_only }
 
 (* The primary backend serves reads; writes still fan out to all. Pick the first
    one explicitly marked [main], else the first local-file backend (local disk
@@ -69,6 +91,32 @@ let order_backends backends =
     | None -> backends
     | Some primary -> primary :: List.filter (fun b -> b != primary) backends
 
+(* A frontend is either a bare type name ["fuse"] or an object
+   [{"type": "fuse", ...options}]; the string form is shorthand for an object
+   with no options. Extra keys are kept as string fields for future options. *)
+let parse_frontend json =
+  let open Yojson.Basic.Util in
+  match json with
+    | `String frontend_type -> { frontend_type; options = [] }
+    | `Assoc _ ->
+        let frontend_type = json |> member "type" |> to_string in
+        let options =
+          to_assoc json
+          |> List.filter_map (fun (k, v) ->
+              if k = "type" then None
+              else (
+                match v with
+                  | `String s -> Some (k, s)
+                  | `Bool b -> Some (k, string_of_bool b)
+                  | `Int n -> Some (k, string_of_int n)
+                  | `List _ -> Some (k, Yojson.Basic.to_string v)
+                  | _ -> None))
+        in
+        { frontend_type; options }
+    | _ ->
+        failwith
+          "frontend must be a type name or an object with a \"type\" field"
+
 let parse_symlink_policy json =
   let open Yojson.Basic.Util in
   match json |> member "symlinks" with
@@ -84,6 +132,12 @@ let parse_domain json =
   {
     name = json |> member "name" |> to_string;
     backends = json |> member "backends" |> to_list |> List.map parse_backend;
+    frontends =
+      (match json |> member "frontends" with
+        | `List (_ :: _ as l) -> List.map parse_frontend l
+        | _ ->
+            failwith
+              "domain config missing required non-empty \"frontends\" array");
     symlink_policy = parse_symlink_policy json;
     versioning = json |> member "versioning" |> to_bool;
     read_only =
@@ -138,17 +192,3 @@ let versions_prefix d = domain_root d ^ "versions/"
 let journal_prefix d = domain_root d ^ "journal/"
 let cursor_key d = domain_root d ^ "cursor"
 let shares_prefix d = domain_root d ^ "shares/"
-
-(* A backend's share Lambda URL, if it has a non-empty [shareUrl] field. *)
-let backend_share_url bc =
-  match List.assoc_opt "shareUrl" bc.fields with
-    | Some u when u <> "" -> Some u
-    | _ -> None
-
-(* The first backend (in config order) that carries a [shareUrl], with its URL.
-   This backend both serves the domain's shares and receives the share
-   manifests. *)
-let domain_share_backend d =
-  List.find_map
-    (fun bc -> Option.map (fun u -> (bc, u)) (backend_share_url bc))
-    d.backends

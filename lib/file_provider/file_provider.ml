@@ -1,10 +1,11 @@
 external is_dataless : string -> bool = "caml_is_dataless"
 
 module Make (C : Conf.S) = struct
-  module Sq = Sync_queue.Make (C)
-  module F = File.Make (C) (Sq)
-  module H = Ipc_handler.Make (C) (F)
-  module Sp = Sync_poller.Make (C) (F)
+  module E = Domain_engine.Make (C)
+  module Sq = E.Sq
+  module F = E.F
+  module H = E.Ih
+  module Sp = E.Sp
 
   (* ── Key helpers ──────────────────────────────────────────────────────── *)
 
@@ -97,12 +98,7 @@ module Make (C : Conf.S) = struct
             Ipc.notify_resync ~path:C.notify_path;
             Lwt.return_unit);
         status_fields = (fun () -> []);
-        stats_fields =
-          (fun () ->
-            [
-              ("pendingUploads", `Int (Sq.pending ()));
-              ("uploadsCompleted", `Int (Sq.completed_count ()));
-            ]);
+        stats_fields = E.stats_fields;
         on_stop = (fun () -> ());
       }
 
@@ -111,9 +107,7 @@ module Make (C : Conf.S) = struct
 
   let init () =
     let open Lwt.Syntax in
-    let* () = Local.init ~cache_root:C.cache_root ~domain_name:C.domain_name in
-    Sq.start
-      ~upload:(fun ~key ~cancel -> F.upload ~cancel key)
+    E.start
       ~on_cursor:(fun ~entry_key:_ -> ())
       ~on_upload_done:(fun ~key ->
         (* The daemon copy only exists to stage the upload; drop it now. *)
@@ -121,9 +115,9 @@ module Make (C : Conf.S) = struct
         Ipc.notify_uploaded ~path:C.notify_path key;
         if Ipc.auto_evict_enabled ~data_dir:C.data_dir then
           Ipc.notify_evict ~path:C.notify_path key;
-        Lwt.return_unit);
-    Sp.start ~on_changed:(Ipc.notify_changed ~path:C.notify_path) ();
-    Lwt.return_unit
+        Lwt.return_unit)
+      ~on_changed:(Ipc.notify_changed ~path:C.notify_path)
+      ()
 
   let mount _mount_point =
     Lwt_main.run
