@@ -19,9 +19,33 @@ module type S = sig
   val start : binding list -> unit
 end
 
-let registry : (string, (module S)) Hashtbl.t = Hashtbl.create 4
-let register name (m : (module S)) = Hashtbl.replace registry name m
-let find name = Hashtbl.find_opt registry name
+(* Declares one configurable option, mirroring Backend.field_spec, so `tsync
+   configure` can prompt for a frontend's options generically. *)
+type field_type = [ `String | `Bool | `Int ]
+
+type field_spec = {
+  name : string;
+  label : string;
+  typ : field_type;
+  default : string option;
+      (** [None] = required; [Some ""] = optional, omit when blank; [Some s] =
+          optional with default [s] *)
+  secret : bool;
+}
+
+type entry = { modl : (module S); spec : field_spec list }
+
+let registry : (string, entry) Hashtbl.t = Hashtbl.create 4
+
+let register ?(spec = []) name (m : (module S)) =
+  Hashtbl.replace registry name { modl = m; spec }
+
+let find name = Option.map (fun e -> e.modl) (Hashtbl.find_opt registry name)
+
+let spec_for name =
+  Option.value ~default:[]
+    (Option.map (fun e -> e.spec) (Hashtbl.find_opt registry name))
+
 let names () = List.of_seq (Hashtbl.to_seq_keys registry)
 
 (* Cap the Lwt blocking-syscall thread pool for this process. Call it from inside

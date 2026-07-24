@@ -38,8 +38,20 @@ let mount_binding (b : Frontend.binding) =
    one runs in this process. *)
 let start bindings = Frontend.run_forked mount_binding bindings
 
+let spec =
+  Frontend.
+    [
+      {
+        name = "allowOther";
+        label = "Allow other users to access the mount (media servers, etc.)";
+        typ = `Bool;
+        default = Some "false";
+        secret = false;
+      };
+    ]
+
 let register () =
-  Frontend.register implementation
+  Frontend.register ~spec implementation
     (module struct
       let is_local = is_local
       let start = start

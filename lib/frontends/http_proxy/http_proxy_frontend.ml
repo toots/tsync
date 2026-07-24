@@ -280,8 +280,41 @@ let start bindings =
     (Cohttp_lwt_unix.Server.create ~mode
        (Cohttp_lwt_unix.Server.make ~callback:(callback routes) ()))
 
+let spec =
+  Frontend.
+    [
+      {
+        name = "port";
+        label = "Listen port (default: 443 with TLS, else 80)";
+        typ = `Int;
+        default = Some "";
+        secret = false;
+      };
+      {
+        name = "secret";
+        label = "Shared HMAC secret (clients must match)";
+        typ = `String;
+        default = Some "";
+        secret = true;
+      };
+      {
+        name = "ssl_certificate";
+        label = "TLS certificate path (blank = plain HTTP)";
+        typ = `String;
+        default = Some "";
+        secret = false;
+      };
+      {
+        name = "ssl_certificate_key";
+        label = "TLS private key path";
+        typ = `String;
+        default = Some "";
+        secret = false;
+      };
+    ]
+
 let register () =
-  Frontend.register implementation
+  Frontend.register ~spec implementation
     (module struct
       let is_local = is_local
       let start = start

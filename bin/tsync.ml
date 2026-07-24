@@ -2053,22 +2053,110 @@ let frontend_type_of = function `String s -> Some s | j -> jstr j "type"
 let frontend_summary = function
   | [] -> "(none)"
   | fs ->
+      let opt_str k = function
+        | `String "" -> None
+        | `String _ when k = "secret" -> Some (k ^ "=***")
+        | `String s -> Some (k ^ "=" ^ s)
+        | `Bool b -> Some (k ^ "=" ^ string_of_bool b)
+        | `Int n -> Some (k ^ "=" ^ string_of_int n)
+        | _ -> None
+      in
       String.concat ", "
-        (List.map (fun j -> Option.value (frontend_type_of j) ~default:"?") fs)
+        (List.map
+           (fun j ->
+             let name = Option.value (frontend_type_of j) ~default:"?" in
+             match j with
+               | `Assoc l -> (
+                   match
+                     List.filter_map
+                       (fun (k, v) -> if k = "type" then None else opt_str k v)
+                       l
+                   with
+                     | [] -> name
+                     | opts ->
+                         Printf.sprintf "%s(%s)" name (String.concat "," opts))
+               | _ -> name)
+           fs)
 
-(* Toggle each compiled-in frontend on or off, pre-filled from [current]. Emits
-   the enabled frontends as bare type-name strings (the config also accepts the
-   [{"type": name, ...options}] object form). *)
+(* Value of option [k] in a frontend JSON entry (object form), if present. *)
+let frontend_opt entry k =
+  match entry with
+    | Some (`Assoc l) -> (
+        match List.assoc_opt k l with
+          | Some (`String s) -> Some s
+          | Some (`Bool b) -> Some (string_of_bool b)
+          | Some (`Int n) -> Some (string_of_int n)
+          | _ -> None)
+    | _ -> None
+
+(* Prompt one frontend spec field, pre-filled with [current]. [None] omits it
+   from the emitted options. *)
+let prompt_frontend_field (s : Frontend.field_spec) ~current =
+  match s.typ with
+    | `Bool ->
+        let default =
+          match current with
+            | Some v -> v = "true"
+            | None -> s.default = Some "true"
+        in
+        Some (s.name, `Bool (prompt_bool ~default ("  " ^ s.label)))
+    | `Int ->
+        let def =
+          match current with
+            | Some c -> Some c
+            | None -> ( match s.default with Some "" | None -> None | d -> d)
+        in
+        let rec ask () =
+          let v = prompt ("  " ^ s.label) def in
+          if v = "" then None
+          else (
+            match int_of_string_opt v with
+              | Some n -> Some (s.name, `Int n)
+              | None ->
+                  Printf.printf "  (must be a number)\n%!";
+                  ask ())
+        in
+        ask ()
+    | `String when s.secret ->
+        let suffix = if current <> None then " (blank keeps current)" else "" in
+        let v = read_password ("  " ^ s.label ^ suffix) in
+        if v <> "" then Some (s.name, `String v)
+        else Option.map (fun c -> (s.name, `String c)) current
+    | `String ->
+        let def =
+          match current with
+            | Some c -> Some c
+            | None -> ( match s.default with Some "" -> None | d -> d)
+        in
+        let v = prompt ("  " ^ s.label) def in
+        if v = "" then None else Some (s.name, `String v)
+
+(* Toggle each compiled-in frontend on or off and prompt its declared options,
+   pre-filled from [current]. A frontend with no options set is emitted as a bare
+   type-name string; otherwise as [{"type": name, ...options}]. *)
 let edit_frontends current =
   let registered = Frontend.names () in
-  let is_on name =
-    List.exists (fun j -> frontend_type_of j = Some name) current
+  let current_of name =
+    List.find_opt (fun j -> frontend_type_of j = Some name) current
   in
   List.filter_map
     (fun name ->
-      if prompt_bool ~default:(is_on name) ("  Enable frontend " ^ name ^ "?")
-      then Some (`String name)
-      else None)
+      let existing = current_of name in
+      if
+        not
+          (prompt_bool ~default:(existing <> None)
+             ("  Enable frontend " ^ name ^ "?"))
+      then None
+      else (
+        let opts =
+          List.filter_map
+            (fun (s : Frontend.field_spec) ->
+              prompt_frontend_field s ~current:(frontend_opt existing s.name))
+            (Frontend.spec_for name)
+        in
+        Some
+          (if opts = [] then `String name
+           else `Assoc (("type", `String name) :: opts))))
     registered
 
 (* Build or edit one domain. A new domain ([existing = None]) is filled in
