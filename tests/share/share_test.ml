@@ -7,7 +7,6 @@ let root = "/tmp/tsync-share-test"
 let store_dir = root ^ "/store"
 let cache_dir = root ^ "/cache"
 let data_dir = root ^ "/data"
-
 let share_base = "https://share.example"
 
 (* A local backend that also advertises a share URL (a plain local backend

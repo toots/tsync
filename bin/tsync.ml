@@ -2399,7 +2399,8 @@ let share_cmd =
         String.length path >= String.length mp
         && String.sub path 0 (String.length mp) = mp
       then
-        String.sub path (String.length mp) (String.length path - String.length mp)
+        String.sub path (String.length mp)
+          (String.length path - String.length mp)
       else path
     in
     let rel =

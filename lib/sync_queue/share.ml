@@ -88,7 +88,7 @@ module Make (C : Conf.S) = struct
                 let* entries = B.list_all ~prefix:dir_prefix ~max_keys:1 () in
                 if entries = [] then
                   Lwt.fail (Share_error (Printf.sprintf "not found: %s" rel))
-                else
+                else (
                   let base =
                     if rel = "" then C.domain_name else Filename.basename rel
                   in
@@ -100,7 +100,7 @@ module Make (C : Conf.S) = struct
                            ("chunkPrefix", `String C.chunk_prefix);
                            ("dirPrefix", `String dir_prefix);
                            ("filename", `String (base ^ ".zip"));
-                         ]))
+                         ])))
         in
         (* The token is just the manifest's id; the server rebuilds the key as
            SHARES_PREFIX + token. Keeps the share URL short. Reuse a caller-
@@ -111,7 +111,5 @@ module Make (C : Conf.S) = struct
           B.put ~key:manifest_key ~data:(Yojson.Basic.to_string manifest) ()
         in
         Lwt.return_ok (share_url ^ "/" ^ token))
-      (function
-        | Share_error msg -> Lwt.return_error msg
-        | exn -> Lwt.fail exn)
+      (function Share_error msg -> Lwt.return_error msg | exn -> Lwt.fail exn)
 end
