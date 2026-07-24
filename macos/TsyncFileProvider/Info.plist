@@ -28,6 +28,17 @@
         <true/>
         <key>NSExtensionFileProviderAllowsUserControlledEviction</key>
         <true/>
+        <key>NSExtensionFileProviderActions</key>
+        <array>
+            <dict>
+                <key>NSExtensionFileProviderActionIdentifier</key>
+                <string>com.toots.tsync.copyShareURL</string>
+                <key>NSExtensionFileProviderActionName</key>
+                <string>Copy Share URL</string>
+                <key>NSExtensionFileProviderActionActivationRule</key>
+                <string>TRUEPREDICATE</string>
+            </dict>
+        </array>
         <key>NSExtensionPointIdentifier</key>
         <string>com.apple.fileprovider-nonui</string>
         <key>NSExtensionPrincipalClass</key>

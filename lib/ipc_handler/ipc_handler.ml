@@ -320,6 +320,29 @@ module Make (C : Conf.S) (F : File.S) = struct
     hooks.changed key;
     ok_json []
 
+  module Sh = Share.Make (C)
+
+  (* [key] is an item's full storage key ([C.domain_prefix ^ rel], directories
+     end in "/"); recover the domain-relative path the share core expects. *)
+  let handle_share key =
+    let rel =
+      let p = C.domain_prefix in
+      let n = String.length p in
+      if String.length key >= n && String.sub key 0 n = p then
+        String.sub key n (String.length key - n)
+      else key
+    in
+    let rel =
+      if rel <> "" && rel.[String.length rel - 1] = '/' then
+        String.sub rel 0 (String.length rel - 1)
+      else rel
+    in
+    let expires = int_of_float (Unix.time ()) + (7 * 86400) in
+    let+ result = Sh.create ~expires ~rel () in
+    match result with
+      | Ok url -> ok_json [("url", `String url)]
+      | Error msg -> error_json msg
+
   (* ── Dispatch ─────────────────────────────────────────────────────────── *)
 
   let handler hooks line =
@@ -345,6 +368,7 @@ module Make (C : Conf.S) (F : File.S) = struct
                   | "mkdir" -> handle_mkdir path
                   | "symlink" -> handle_symlink path (get_str obj "target")
                   | "rmdir" -> handle_rmdir path
+                  | "share" -> handle_share path
                   | "evict" ->
                       let+ () = hooks.request_evict (hooks.path_to_key path) in
                       ok_json []

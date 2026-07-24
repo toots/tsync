@@ -2345,16 +2345,6 @@ let parse_duration s =
       | Some k, 'h' when k > 0 -> float_of_int (k * 3600)
       | _ -> fail ())
 
-let random_hex bytes =
-  let b = Bytes.create bytes in
-  let ic = open_in_bin "/dev/urandom" in
-  Fun.protect
-    ~finally:(fun () -> close_in ic)
-    (fun () -> really_input ic b 0 bytes);
-  String.concat ""
-    (List.init bytes (fun i ->
-         Printf.sprintf "%02x" (Char.code (Bytes.get b i))))
-
 let share_cmd =
   let path_arg =
     Arg.(required & pos 0 (some string) None & info [] ~docv:"PATH")
@@ -2395,116 +2385,39 @@ let share_cmd =
     let domain =
       match domain with Some _ -> domain | None -> read_default_domain ()
     in
-    let d = Conf_parsing.pick_domain ?domain cfg in
     let ttl = parse_duration expires in
     let (module C : Conf.S) = make_conf ?domain cfg in
     let expires = int_of_float (Unix.time () +. ttl) in
-    let url =
-      Lwt_main.run
-        (let open Lwt.Syntax in
-         (* The share backend is the first of this domain's backends that serves
-            shares (an s3 with a shareUrl, or an http-proxy that reports one). *)
-         let* share_backend, share_url =
-           let rec find = function
-             | [] ->
-                 Printf.eprintf "no backend in domain %s serves shares\n"
-                   d.Conf_parsing.name;
-                 exit 1
-             | (module Bk : Backend.S) :: rest -> (
-                 let* u = Bk.share_url ~prefix:C.domain_prefix () in
-                 match u with
-                   | Some url -> Lwt.return ((module Bk : Backend.S), url)
-                   | None -> find rest)
-           in
-           find C.backends
-         in
-         let (module B : Backend.S) = share_backend in
-         (* Resolve PATH to a domain-relative path; accept an absolute path under
-            the mount point too. Empty rel means the whole domain. *)
-         let mount_point =
-           Filename.concat (Sys.getenv "HOME") ("tsync/" ^ C.domain_name)
-         in
-         let rel =
-           let mp = mount_point ^ "/" in
-           if
-             String.length path >= String.length mp
-             && String.sub path 0 (String.length mp) = mp
-           then
-             String.sub path (String.length mp)
-               (String.length path - String.length mp)
-           else path
-         in
-         let rel =
-           if rel <> "" && rel.[String.length rel - 1] = '/' then
-             String.sub rel 0 (String.length rel - 1)
-           else rel
-         in
-         let base_json = [("v", `Int 1); ("expires", `Int expires)] in
-         let module L = Layout.Inode.Make (C) in
-         let* manifest =
-           let* file_key = L.manifest_key (C.domain_prefix ^ rel) in
-           (* A file manifest and a folder marker occupy the same key within a
-              parent namespace, so classify by the body — otherwise a folder
-              would be shared as a (chunkless) file and the Lambda would choke. *)
-           let* obj =
-             if rel = "" then Lwt.return_none else B.get_opt ~key:file_key ()
-           in
-           let marker = Option.bind obj Folder.marker_of_string in
-           match (obj, marker) with
-             | Some _, None ->
-                 (* Single file: the Lambda fetches the manifest by this key. *)
-                 Lwt.return
-                   (`Assoc
-                      (base_json
-                      @ [
-                          ("type", `String "file");
-                          ("key", `String file_key);
-                          ("chunkPrefix", `String C.chunk_prefix);
-                          ("filename", `String (Filename.basename rel));
-                        ]))
-             | _ ->
-                 (* Directory (a folder marker, or the domain root): store the
-                    folder's namespace prefix (by id); the Lambda lists it lazily.
-                    Keeps `tsync share` O(1). *)
-                 let* dir_id =
-                   match marker with
-                     | Some m -> Lwt.return m.Folder.id
-                     | None ->
-                         Folder_ids.resolve ~cache_root:C.cache_root
-                           ~domain_name:C.domain_name rel
-                 in
-                 let dir_prefix = C.domain_prefix ^ dir_id ^ "/" in
-                 let* entries = B.list_all ~prefix:dir_prefix ~max_keys:1 () in
-                 if entries = [] then (
-                   Printf.eprintf "not found: %s\n" path;
-                   exit 1);
-                 let base =
-                   if rel = "" then C.domain_name else Filename.basename rel
-                 in
-                 Lwt.return
-                   (`Assoc
-                      (base_json
-                      @ [
-                          ("type", `String "dir");
-                          ("chunkPrefix", `String C.chunk_prefix);
-                          ("dirPrefix", `String dir_prefix);
-                          ("filename", `String (base ^ ".zip"));
-                        ]))
-         in
-         (* The token is just the manifest's id; the server rebuilds the key as
-            SHARES_PREFIX + token. Keeps the share URL short. Reuse a caller-
-            supplied id (stable links) or generate a random one. *)
-         let token = Option.value token ~default:(random_hex 16) in
-         let manifest_key = Conf_parsing.shares_prefix d ^ token in
-         let* () =
-           B.put ~key:manifest_key ~data:(Yojson.Basic.to_string manifest) ()
-         in
-         Lwt.return (share_url ^ "/" ^ token))
+    (* Resolve PATH to a domain-relative path; accept an absolute path under the
+       mount point too. Empty rel means the whole domain. *)
+    let mount_point =
+      Filename.concat (Sys.getenv "HOME") ("tsync/" ^ C.domain_name)
     in
-    let tm = Unix.localtime (float_of_int expires) in
-    Printf.eprintf "Expires %04d-%02d-%02d %02d:%02d\n" (tm.Unix.tm_year + 1900)
-      (tm.Unix.tm_mon + 1) tm.Unix.tm_mday tm.Unix.tm_hour tm.Unix.tm_min;
-    print_endline url
+    let rel =
+      let mp = mount_point ^ "/" in
+      if
+        String.length path >= String.length mp
+        && String.sub path 0 (String.length mp) = mp
+      then
+        String.sub path (String.length mp) (String.length path - String.length mp)
+      else path
+    in
+    let rel =
+      if rel <> "" && rel.[String.length rel - 1] = '/' then
+        String.sub rel 0 (String.length rel - 1)
+      else rel
+    in
+    let module S = Share.Make (C) in
+    match Lwt_main.run (S.create ?token ~expires ~rel ()) with
+      | Error msg ->
+          Printf.eprintf "%s\n" msg;
+          exit 1
+      | Ok url ->
+          let tm = Unix.localtime (float_of_int expires) in
+          Printf.eprintf "Expires %04d-%02d-%02d %02d:%02d\n"
+            (tm.Unix.tm_year + 1900) (tm.Unix.tm_mon + 1) tm.Unix.tm_mday
+            tm.Unix.tm_hour tm.Unix.tm_min;
+          print_endline url
   in
   Cmd.v
     (Cmd.info "share" ~doc:"Print a shareable download URL for a file or folder")

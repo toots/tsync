@@ -59,18 +59,21 @@ public struct IPCResponse: Codable, Sendable {
     public let active: Bool?
     public let bytesDownloaded: Int64?
     public let totalBytes: Int64?
+    public let url: String?
 
     public init(ok: Bool, error: String? = nil, size: Int64? = nil, mtime: Double? = nil,
                 etag: String? = nil, localPath: String? = nil,
                 dirs: [IPCDirEntry]? = nil, files: [IPCFileEntry]? = nil,
                 isUploaded: Bool? = nil, cursor: String? = nil, ops: [IPCOp]? = nil,
                 stale: Bool? = nil, symlinkTarget: String? = nil,
-                active: Bool? = nil, bytesDownloaded: Int64? = nil, totalBytes: Int64? = nil) {
+                active: Bool? = nil, bytesDownloaded: Int64? = nil, totalBytes: Int64? = nil,
+                url: String? = nil) {
         self.ok = ok; self.error = error; self.size = size; self.mtime = mtime
         self.etag = etag; self.localPath = localPath; self.dirs = dirs; self.files = files
         self.isUploaded = isUploaded; self.cursor = cursor; self.ops = ops; self.stale = stale
         self.symlinkTarget = symlinkTarget
         self.active = active; self.bytesDownloaded = bytesDownloaded; self.totalBytes = totalBytes
+        self.url = url
     }
 }
 
@@ -218,5 +221,9 @@ public enum IPC {
 
     public static func downloadProgress(key: String) async throws -> IPCResponse {
         try await sendAsync(IPCRequest(action: "download_progress", path: key))
+    }
+
+    public static func share(key: String) async throws -> IPCResponse {
+        try await sendAsync(IPCRequest(action: "share", path: key))
     }
 }
