@@ -1,0 +1,21 @@
+(executable
+ (name auto_evict)
+ (libraries tsync_core))
+
+(alias
+ (name default)
+ (deps auto_evict.exe))
+
+(rule
+ (alias runtest)
+ (target auto_evict.output)
+ (action
+  (with-stdout-to
+   auto_evict.output
+   (ignore-stderr
+    (run ./auto_evict.exe)))))
+
+(rule
+ (alias runtest)
+ (action
+  (diff auto_evict.expected auto_evict.output)))

@@ -1,0 +1,23 @@
+-- initial --
+[A] enabled = false
+[A] status = off
+-- enable A only --
+[A] on = OK
+[A] enabled = true
+[B] enabled = false
+[A] status = on
+[B] status = off
+-- enable B independently --
+[B] on = OK
+[A] enabled = true
+[B] enabled = true
+-- disable A, B stays on --
+[A] off = OK
+[A] enabled = false
+[B] enabled = true
+-- real names with spaces/apostrophes stay isolated --
+[Jellyfin Media] on = OK
+[Jellyfin Media] enabled = true
+[Romain's Files] enabled = false
+-- invalid state --
+[A] bogus = ERROR expected on|off|status

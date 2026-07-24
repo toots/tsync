@@ -1,0 +1,21 @@
+(executable
+ (name auto_evict_behavior)
+ (libraries tsync_test_runner))
+
+(alias
+ (name default)
+ (deps auto_evict_behavior.exe))
+
+(rule
+ (alias runtest)
+ (target auto_evict_behavior.output)
+ (action
+  (with-stdout-to
+   auto_evict_behavior.output
+   (ignore-stderr
+    (run ./auto_evict_behavior.exe)))))
+
+(rule
+ (alias runtest)
+ (action
+  (diff auto_evict_behavior.expected auto_evict_behavior.output)))
