@@ -2525,6 +2525,15 @@ let print_conf_cmd =
             | Some { secret = true; _ } -> "***"
             | _ -> v)
   in
+  let mask_frontend ftype k v =
+    match
+      List.find_opt
+        (fun (s : Frontend.field_spec) -> s.name = k)
+        (Frontend.spec_for ftype)
+    with
+      | Some { secret = true; _ } -> "***"
+      | _ -> v
+  in
   let symlink_str = function
     | `Keep -> "keep"
     | `Follow -> "follow"
@@ -2546,8 +2555,15 @@ let print_conf_cmd =
         Printf.printf "  versioning: %b\n" d.versioning;
         Printf.printf "  read_only:  %b\n" d.read_only;
         Printf.printf "  symlinks:   %s\n" (symlink_str d.symlink_policy);
-        Printf.printf "  frontends:  %s\n"
-          (String.concat ", " (frontend_names d));
+        List.iter
+          (fun (f : Conf_parsing.frontend_config) ->
+            Printf.printf "  frontend: %s\n" f.frontend_type;
+            List.iter
+              (fun (k, v) ->
+                Printf.printf "    %-22s %s\n" (k ^ ":")
+                  (mask_frontend f.frontend_type k v))
+              f.options)
+          d.frontends;
         List.iter
           (fun (b : Conf_parsing.backend_config) ->
             Printf.printf "  backend: %s (%s)%s\n" b.name b.backend_type
