@@ -31,3 +31,23 @@ output "secret_access_keys" {
   sensitive   = true
   value       = { for k, m in module.store : k => m.secret_access_key }
 }
+
+# ── GCS stores ─────────────────────────────────────────────────────────────
+# Wire each onto the matching tsync gcs backend: bucket / shareUrl.
+output "gcs_stores" {
+  description = "Per-GCS-store bucket and share_url."
+  value = {
+    for k, m in module.store_gcs : k => {
+      bucket    = m.bucket
+      share_url = m.share_url
+    }
+  }
+}
+
+# The gcs backend `serviceAccountKey` (JSON) per store. Read one with:
+#   terraform output -json gcs_service_account_keys | jq -r '.["<store>"]'
+output "gcs_service_account_keys" {
+  description = "Per-GCS-store gcs backend serviceAccountKey (JSON)."
+  sensitive   = true
+  value       = { for k, m in module.store_gcs : k => m.service_account_key }
+}

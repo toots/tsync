@@ -1,12 +1,20 @@
 terraform {
   required_providers {
     aws     = { source = "hashicorp/aws", version = ">= 5.0" }
+    google  = { source = "hashicorp/google", version = ">= 5.0" }
     archive = { source = "hashicorp/archive", version = ">= 2.0" }
   }
 }
 
 provider "aws" {
   region = var.region
+}
+
+# Only used when var.gcs_stores is non-empty; project/region may be null for
+# AWS-only deployments (the provider isn't exercised then).
+provider "google" {
+  project = var.gcp_project
+  region  = var.gcp_region
 }
 
 # Package the shared Lambda handler once; every store reuses the same zip.
@@ -39,4 +47,37 @@ module "store" {
 
   lambda_zip      = data.archive_file.handler.output_path
   lambda_zip_hash = data.archive_file.handler.output_base64sha256
+}
+
+# ── GCS stores ─────────────────────────────────────────────────────────────
+#
+# Same handler zip serves both clouds (STORE env var selects the backend). A
+# single bucket holds the function source for every GCS store.
+resource "google_storage_bucket" "functions_source" {
+  count                       = length(var.gcs_stores) > 0 ? 1 : 0
+  name                        = coalesce(var.gcp_functions_source_bucket, "${var.gcp_project}-tsync-functions-src")
+  location                    = var.gcp_region
+  uniform_bucket_level_access = true
+  force_destroy               = true
+}
+
+module "store_gcs" {
+  source   = "./modules/store-gcs"
+  for_each = var.gcs_stores
+
+  name               = each.key
+  bucket             = each.value.bucket
+  create_bucket      = each.value.create_bucket
+  location           = coalesce(each.value.location, var.gcp_region)
+  shares_prefix      = each.value.shares_prefix
+  manage_lifecycle   = each.value.manage_lifecycle
+  cache_expiry_days  = each.value.cache_expiry_days
+  archive_after_days = each.value.archive_after_days
+  presign_ttl        = each.value.presign_ttl
+  memory_mb          = each.value.memory_mb
+  max_share_bytes    = each.value.max_share_bytes
+
+  source_bucket = google_storage_bucket.functions_source[0].name
+  source_zip    = data.archive_file.handler.output_path
+  source_hash   = data.archive_file.handler.output_base64sha256
 }

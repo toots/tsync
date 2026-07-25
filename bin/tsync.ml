@@ -1848,11 +1848,11 @@ let terraform_store () =
 
 let prompt_backend () =
   let rec ask () =
-    let t = prompt "  Backend type (s3/local/ssh)" (Some "s3") in
-    if List.mem t ["s3"; "local"; "ssh"] then t
+    let t = prompt "  Backend type (s3/gcs/local/ssh)" (Some "s3") in
+    if List.mem t ["s3"; "gcs"; "local"; "ssh"] then t
     else begin
-      Printf.printf "  Unknown backend type %S — choose s3, local, or ssh.\n%!"
-        t;
+      Printf.printf
+        "  Unknown backend type %S — choose s3, gcs, local, or ssh.\n%!" t;
       ask ()
     end
   in

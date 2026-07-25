@@ -1,0 +1,15 @@
+(library
+ (name tsync_gcs_backend)
+ (wrapped false)
+ (library_flags (-linkall))
+ (libraries
+  tsync_backend_register
+  tsync_log
+  cohttp-lwt-unix
+  uri
+  yojson
+  base64
+  x509
+  mirage-crypto-pk
+  lwt
+  lwt.unix))

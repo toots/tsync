@@ -3,6 +3,47 @@ variable "region" {
   description = "AWS region for all stores. For buckets in different regions, see README > Multi-region."
 }
 
+# ── GCS ────────────────────────────────────────────────────────────────────
+
+variable "gcp_project" {
+  type        = string
+  default     = null
+  description = "GCP project id. Required only when gcs_stores is non-empty."
+}
+
+variable "gcp_region" {
+  type        = string
+  default     = null
+  description = "Default GCP region/location for GCS buckets + functions. Required only when gcs_stores is non-empty."
+}
+
+variable "gcp_functions_source_bucket" {
+  type        = string
+  default     = null
+  description = "Bucket to hold the function source zip. Defaults to <project>-tsync-functions-src."
+}
+
+variable "gcs_stores" {
+  description = <<-EOT
+    GCS stores to provision, keyed by a short logical name ([a-z0-9-], suffixes
+    SA/function names). One entry = one bucket + client SA key + share Cloud
+    Function + lifecycle. Uses native OAuth (service-account key), not S3 interop.
+  EOT
+  type = map(object({
+    bucket             = string
+    create_bucket      = optional(bool, true)
+    location           = optional(string) # default: var.gcp_region
+    shares_prefix      = string           # "tsync/<domain>/shares/"
+    manage_lifecycle   = optional(bool, true)
+    cache_expiry_days  = optional(number, 30)
+    archive_after_days = optional(number) # null = no cold-storage transition
+    presign_ttl        = optional(number, 600)
+    memory_mb          = optional(number, 2048)
+    max_share_bytes    = optional(number, 10737418240)
+  }))
+  default = {}
+}
+
 variable "stores" {
   description = <<-EOT
     Stores to provision, keyed by a short logical name ([A-Za-z0-9-_], suffixes
@@ -30,4 +71,5 @@ variable "stores" {
       })), [])
     })), [])
   }))
+  default = {}
 }
