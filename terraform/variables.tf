@@ -15,7 +15,13 @@ variable "gcp_project" {
 variable "gcp_region" {
   type        = string
   default     = null
-  description = "Default GCP region/location for GCS buckets + functions. Required only when gcs_stores is non-empty."
+  description = "Default bucket location for GCS stores — region or multi-region (US, EU). Required only when gcs_stores is non-empty."
+}
+
+variable "gcp_function_region" {
+  type        = string
+  default     = "us-central1"
+  description = "Default region for share Cloud Functions. Must be a specific region (not a multi-region like US), since Cloud Functions/Run are regional."
 }
 
 variable "gcp_functions_source_bucket" {
@@ -33,7 +39,8 @@ variable "gcs_stores" {
   type = map(object({
     bucket             = string
     create_bucket      = optional(bool, true)
-    location           = optional(string) # default: var.gcp_region
+    location           = optional(string) # bucket location; default: var.gcp_region
+    function_region    = optional(string) # default: var.gcp_function_region
     shares_prefix      = string           # "tsync/<domain>/shares/"
     manage_lifecycle   = optional(bool, true)
     cache_expiry_days  = optional(number, 30)

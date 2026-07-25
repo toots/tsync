@@ -16,7 +16,12 @@ variable "create_bucket" {
 
 variable "location" {
   type        = string
-  description = "Bucket + function location (e.g. US, us-central1)."
+  description = "Bucket location — may be a region (us-central1) or multi-region (US, EU)."
+}
+
+variable "function_region" {
+  type        = string
+  description = "Region for the share Cloud Function. Must be a specific region (e.g. us-central1), not a multi-region like US."
 }
 
 variable "shares_prefix" {

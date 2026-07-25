@@ -119,7 +119,7 @@ resource "google_storage_bucket_object" "source" {
 
 resource "google_cloudfunctions2_function" "share" {
   name     = "tsync-share-${var.name}"
-  location = var.location
+  location = var.function_region
 
   build_config {
     runtime     = "python313"

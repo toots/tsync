@@ -71,6 +71,7 @@ module "store_gcs" {
   bucket             = each.value.bucket
   create_bucket      = each.value.create_bucket
   location           = coalesce(each.value.location, var.gcp_region)
+  function_region    = coalesce(each.value.function_region, var.gcp_function_region)
   shares_prefix      = each.value.shares_prefix
   manage_lifecycle   = each.value.manage_lifecycle
   cache_expiry_days  = each.value.cache_expiry_days
