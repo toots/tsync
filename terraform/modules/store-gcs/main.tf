@@ -124,6 +124,11 @@ resource "google_cloudfunctions2_function" "share" {
   build_config {
     runtime     = "python313"
     entry_point = "gcp_handler"
+    # The Python buildpack defaults to main.py; our entry point lives in
+    # handler.py (shared with the AWS Lambda), so point the buildpack at it.
+    environment_variables = {
+      GOOGLE_FUNCTION_SOURCE = "handler.py"
+    }
     source {
       storage_source {
         bucket = var.source_bucket
