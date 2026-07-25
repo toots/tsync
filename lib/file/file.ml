@@ -13,10 +13,23 @@ module type S = sig
   val read_manifest : t -> Manifest.state option Lwt.t
   val resolved_manifest : t -> Manifest.state option Lwt.t
   val write_manifest : t -> Manifest.state -> unit Lwt.t
-  val delete_manifest : t -> unit Lwt.t
   val upload : ?cancel:bool ref -> t -> unit Lwt.t
-  val download : t -> unit Lwt.t
   val ensure_cached : t -> unit Lwt.t
+
+  (** Prepare a not-yet-complete file for reading: demand-page it (sparse file,
+      no download) when it is a real chunked file, else fall back to a whole
+      download. Idempotent. *)
+  val prepare_read : t -> unit Lwt.t
+
+  (** Ensure the bytes in the range [offset, offset+len] are on disk, fetching
+      only the chunks that back them for a partial file. *)
+  val ensure_readable : t -> offset:int64 -> len:int -> unit Lwt.t
+
+  (** Mark the chunks a write at the range [offset, offset+len] touches dirty,
+      fetching a partially-overwritten absent chunk first (read-modify-write).
+  *)
+  val dirty_range : t -> offset:int64 -> len:int -> unit Lwt.t
+
   val stat : t -> Unix.LargeFile.stats option Lwt.t
   val readlink : t -> string option Lwt.t
   val list_dir : t -> string list Lwt.t
@@ -26,27 +39,28 @@ module type S = sig
     (Backend.file_entry list * (string * float option) list) Lwt.t
 
   val list_all_files : prefix:string -> Backend.file_entry list Lwt.t
-  val xattrs : t -> (string * string) list Lwt.t
-  val is_dirty : t -> bool
-  val set_dirty : t -> unit
-  val clear_dirty : t -> unit
   val mark_dirty : t -> unit Lwt.t
   val mark_open : t -> unit
   val mark_closed : t -> int
-  val is_open : t -> bool
+
+  (** Last-handle-close policy: queue a dirty file for upload, drop a file
+      flagged for eviction, else persist. Decrements the open count. *)
+  val release : t -> unit Lwt.t
+
+  (** Evict [key] now if closed, else defer the eviction to its last close. *)
+  val request_evict : t -> unit Lwt.t
+
   val downloading_count : unit -> int
   val dirty_count : unit -> int
   val open_files_count : unit -> int
   val downloads_completed_count : unit -> int
   val download_progress : t -> (int * int) option
   val evict : t -> unit Lwt.t
-  val clear_local : t -> unit Lwt.t
   val create : t -> unit Lwt.t
   val read : t -> buffer -> offset:int64 -> int Lwt.t
   val write : t -> buffer -> offset:int64 -> int Lwt.t
   val cancel_upload : t -> bool
   val truncate : t -> int64 -> unit Lwt.t
-  val rename_local : src:t -> dst:t -> unit Lwt.t
   val apply_delete : t -> unit Lwt.t
   val queue_put : t -> unit Lwt.t
   val delete : t -> unit Lwt.t
@@ -101,7 +115,8 @@ module Make (C : Conf.S) (Sq : Sync_queue.S) : S = struct
      the layout scheme maps them to backend keys. *)
   module St = Store.Make (C) (Layout.Inode.Make (C))
 
-  let is_cached key =
+  (* Raw presence of the local data file, regardless of completeness. *)
+  let data_exists key =
     Local.is_cached ~cache_root:C.cache_root ~domain_name:C.domain_name
       ~domain_prefix:C.domain_prefix key
 
@@ -151,6 +166,10 @@ module Make (C : Conf.S) (Sq : Sync_queue.S) : S = struct
     Local.delete_manifest ~cache_root:C.cache_root ~domain_name:C.domain_name
       ~domain_prefix:C.domain_prefix key
 
+  let residency_complete = function
+    | None -> true
+    | Some a -> Array.for_all (fun s -> s = Manifest.Present) a
+
   (* ── Dirty tracking ────────────────────────────────────────────────────── *)
 
   let is_dirty key = Hashtbl.mem dirty_keys key
@@ -163,12 +182,58 @@ module Make (C : Conf.S) (Sq : Sync_queue.S) : S = struct
     let lp = local_path key in
     let* st = Lwt_unix_retry.stat lp in
     let mtime = st.Unix.st_mtime in
-    let* state = R.upload ~key ~src_path:lp ~mtime ?cancel () in
+    (* An edited existing file carries per-chunk residency: only its dirty chunks
+       are read/hashed/uploaded; the rest reuse their prior entries (their objects
+       are already on the backend, and their bytes may be holes on disk). A
+       brand-new or fully-cached file has no residency and is uploaded whole. *)
+    let* m = read_manifest key in
+    let states =
+      match m with Some (`Clean man) -> man.Manifest.residency | _ -> None
+    in
+    (* Re-upload an edited file at its own chunk size (so reused entries stay
+       aligned); a brand-new file uses the domain's configured size. *)
+    let chunk_size =
+      match m with
+        | Some (`Clean man) -> man.Manifest.chunk_size
+        | _ -> C.chunk_size
+    in
+    let reuse =
+      match (m, states) with
+        | Some (`Clean man), Some states ->
+            let entries = Array.of_list man.Manifest.chunks in
+            fun i ->
+              if
+                i < Array.length states
+                && states.(i) <> Manifest.Dirty
+                && i < Array.length entries
+              then Some entries.(i)
+              else None
+        | _ -> fun _ -> None
+    in
+    let* state =
+      R.upload ~key ~src_path:lp ~mtime ~chunk_size ~reuse ?cancel ()
+    in
     (* Cancelled while finishing (e.g. renamed away mid-upload): the local
        sidecar under this name has already been moved; writing it back would
        resurrect a ghost entry. *)
     (match cancel with Some c when !c -> raise Backend.Cancelled | _ -> ());
-    let* () = write_manifest key state in
+    (* The backend manifest is fully clean; the local sidecar keeps the file's
+       residency — dirty chunks are now Present (uploaded, on disk), absent chunks
+       stay absent (still holes) — collapsing to a plain manifest only once every
+       chunk is present. *)
+    let local_state =
+      match (states, state) with
+        | Some old, `Clean pub ->
+            let states =
+              Array.map
+                (fun s -> if s = Manifest.Dirty then Manifest.Present else s)
+                old
+            in
+            if residency_complete (Some states) then `Clean pub
+            else `Clean { pub with Manifest.residency = Some states }
+        | _ -> state
+    in
+    let* () = write_manifest key local_state in
     clear_dirty key;
     Lwt.return_unit
 
@@ -184,6 +249,258 @@ module Make (C : Conf.S) (Sq : Sync_queue.S) : S = struct
             | None -> Lwt.return_unit
             | Some state -> write_manifest key state)
 
+  (* ── Demand-paged residency ────────────────────────────────────────────────
+     While a file is open, its per-chunk residency lives in this in-memory view
+     and is written through to the sidecar on every change (so it is durable and
+     visible to stat/is_cached/recheck across processes and crashes). The local
+     data file is sparse: [Present]/[Dirty] chunks are real bytes, [Absent] ones
+     are holes. [chunks] holds the real entry for present/absent chunks (an absent
+     chunk is fetched by its entry's chunk key) and a blank placeholder for dirty
+     chunks (their hash is recomputed at upload). *)
+  type view = {
+    mutable size : int64;
+    chunk_size : int;
+    mutable chunks : Manifest.chunk_entry array;
+    mutable states : Manifest.chunk_st array;
+    mutable fetching : unit Lwt.t option array;
+    name : string;
+    mutable mtime : float;
+    base_h1 : string;
+    base_h2 : string;
+    mutable last_read_end : int;
+        (** end offset of the previous read, for read-ahead *)
+  }
+
+  let views : (string, view) Hashtbl.t = Hashtbl.create 64
+  let is_partial key = Hashtbl.mem views key
+  let blank_entry i size = { Manifest.index = i; h1 = ""; h2 = ""; size }
+
+  (* A file is fully cached when every chunk is present locally. While open the
+     in-memory view is authoritative (and cheaper than a sidecar read); otherwise
+     it comes from the sidecar residency. A [`Dirty] sidecar (brand-new file) or
+     a missing sidecar means the local data is complete. *)
+  let is_cached key =
+    match Hashtbl.find_opt views key with
+      | Some v ->
+          Lwt.return (Array.for_all (fun s -> s = Manifest.Present) v.states)
+      | None -> (
+          let* exists = data_exists key in
+          if not exists then Lwt.return_false
+          else
+            let* m = read_manifest key in
+            match m with
+              | Some (`Clean m) ->
+                  Lwt.return (residency_complete m.Manifest.residency)
+              | _ -> Lwt.return_true)
+
+  let num_chunks_for size cs =
+    let s = Int64.to_int size in
+    if s = 0 then 1 else (s + cs - 1) / cs
+
+  let chunk_len v i =
+    max 0 (min v.chunk_size (Int64.to_int v.size - (i * v.chunk_size)))
+
+  (* The sidecar manifest mirroring a view: a plain [`Clean] manifest once every
+     chunk is present (recomputing the whole-file digest), otherwise carrying the
+     residency array. *)
+  let view_state v =
+    if Array.for_all (fun s -> s = Manifest.Present) v.states then (
+      let entries = Array.to_list v.chunks in
+      let h1, h2 = Manifest.digest_of_chunks entries in
+      `Clean
+        {
+          Manifest.v = Manifest.current_version;
+          name = v.name;
+          size = v.size;
+          chunk_size = v.chunk_size;
+          chunks = entries;
+          h1;
+          h2;
+          mtime = v.mtime;
+          symlink = None;
+          residency = None;
+        })
+    else
+      `Clean
+        {
+          Manifest.v = Manifest.current_version;
+          name = v.name;
+          size = v.size;
+          chunk_size = v.chunk_size;
+          chunks = Array.to_list v.chunks;
+          h1 = v.base_h1;
+          h2 = v.base_h2;
+          mtime = v.mtime;
+          symlink = None;
+          residency = Some (Array.copy v.states);
+        }
+
+  (* Persist only while [v] is still the installed view for [key]: a background
+     read-ahead that finishes after the file was closed/evicted (its view dropped
+     or replaced) must not resurrect residency for data that is now gone. *)
+  let persist_view key v =
+    match Hashtbl.find_opt views key with
+      | Some cur when cur == v -> write_manifest key (view_state v)
+      | _ -> Lwt.return_unit
+
+  (* Build (or resume) the in-memory view for [key] from its manifest [man].
+     No local data → all chunks [Absent] + sparse-allocate (sidecar written first
+     so a crash can never leave the holes looking complete). Data present with
+     recorded residency → resume it. Data present, no residency → a fully-cached
+     file now tracked per chunk (all [Present]). *)
+  let load_view key (man : Manifest.t) =
+    let cs = man.Manifest.chunk_size in
+    let n = List.length man.Manifest.chunks in
+    let chunks = Array.make (max 1 n) (blank_entry 0 0) in
+    List.iter
+      (fun (c : Manifest.chunk_entry) ->
+        if c.index < n then chunks.(c.index) <- c)
+      man.Manifest.chunks;
+    let* exists = data_exists key in
+    let resume =
+      match man.Manifest.residency with
+        | Some a -> Array.length a = n
+        | None -> false
+    in
+    let states =
+      if not exists then Array.make n Manifest.Absent
+      else if resume then Array.copy (Option.get man.Manifest.residency)
+      else Array.make n Manifest.Present
+    in
+    let v =
+      {
+        size = man.Manifest.size;
+        chunk_size = cs;
+        chunks;
+        states;
+        fetching = Array.make (max 1 n) None;
+        name = man.Manifest.name;
+        mtime = man.Manifest.mtime;
+        base_h1 = man.Manifest.h1;
+        base_h2 = man.Manifest.h2;
+        last_read_end = -1;
+      }
+    in
+    Hashtbl.replace views key v;
+    (* Resuming a file whose residency still records dirty chunks (e.g. after a
+       crash): re-arm the file-level dirty flag so its next close re-queues the
+       pending upload. *)
+    if Array.exists (fun s -> s = Manifest.Dirty) states then set_dirty key;
+    let* () =
+      if exists then Lwt.return_unit
+      else
+        let* () = ensure_parent_dir key in
+        let* () = persist_view key v in
+        let* fd =
+          Lwt_unix_retry.openfile (local_path key)
+            [Unix.O_WRONLY; Unix.O_CREAT]
+            0o644
+        in
+        let* () = Lwt_unix_retry.LargeFile.ftruncate fd v.size in
+        Lwt_unix_retry.close fd
+    in
+    Lwt.return v
+
+  (* Fetch chunk [i] to disk (once; concurrent readers share the GET), leaving it
+     [Present] in the in-memory view. The sidecar is written by the caller once
+     the whole requested range is in — a chunk fetched but not yet persisted is
+     simply re-fetched after a crash, never read as a hole. *)
+  let fetch_chunk key v i =
+    match v.states.(i) with
+      | Manifest.Present | Manifest.Dirty -> Lwt.return_unit
+      | Manifest.Absent -> (
+          match v.fetching.(i) with
+            | Some t -> t
+            | None ->
+                let t =
+                  Lwt.finalize
+                    (fun () ->
+                      let* () =
+                        R.download_chunk ~dst_path:(local_path key)
+                          ~chunk_size:v.chunk_size ~chunk:v.chunks.(i)
+                      in
+                      v.states.(i) <- Manifest.Present;
+                      Lwt.return_unit)
+                    (fun () ->
+                      v.fetching.(i) <- None;
+                      Lwt.return_unit)
+                in
+                v.fetching.(i) <- Some t;
+                t)
+
+  (* Fetch every [Absent] chunk in [lo, hi], persisting the sidecar once if
+     anything was fetched (re-reads of resident ranges touch neither network nor
+     disk metadata). *)
+  let fetch_span key v lo hi =
+    let fetched = ref false in
+    let rec go i =
+      if i > hi then Lwt.return_unit
+      else
+        let* () =
+          if v.states.(i) = Manifest.Absent then (
+            fetched := true;
+            fetch_chunk key v i)
+          else Lwt.return_unit
+        in
+        go (i + 1)
+    in
+    let* () = go lo in
+    if !fetched then persist_view key v else Lwt.return_unit
+
+  (* Sequential reads read ahead: after serving a read that continues where the
+     last one ended, fetch the next window of chunks in the background so the
+     following reads hit disk. Bounded, best-effort, and off for random access. *)
+  let readahead_bytes = 4 * 1024 * 1024
+  let max_readahead_chunks = 8
+
+  let read_ahead key v ~last =
+    let n = Array.length v.chunks in
+    let window =
+      min max_readahead_chunks (max 1 (readahead_bytes / v.chunk_size))
+    in
+    let hi = min (n - 1) (last + window) in
+    if hi > last then
+      Lwt.async (fun () ->
+          Lwt.catch
+            (fun () -> fetch_span key v (last + 1) hi)
+            (fun _ -> Lwt.return_unit))
+
+  let ensure_range key v ~offset ~len =
+    let n = Array.length v.chunks in
+    if len <= 0 || n = 0 then Lwt.return_unit
+    else (
+      let cs = v.chunk_size in
+      let off = max 0 (Int64.to_int offset) in
+      let first = min (off / cs) (n - 1) in
+      let last = min ((off + len - 1) / cs) (n - 1) in
+      let* () = fetch_span key v first last in
+      if off = v.last_read_end then read_ahead key v ~last;
+      v.last_read_end <- off + len;
+      Lwt.return_unit)
+
+  (* Fetch every outstanding chunk (keeping dirty ones), for whole-file
+     materialization (FileProvider fetch, rename). No-op for a non-partial file. *)
+  let materialize key =
+    let go v =
+      let n = Array.length v.chunks in
+      let* () =
+        Lwt_list.iter_p (fun i -> fetch_chunk key v i) (List.init n Fun.id)
+      in
+      persist_view key v
+    in
+    match Hashtbl.find_opt views key with
+      | Some v -> go v
+      | None -> (
+          let* m = read_manifest key in
+          match m with
+            | Some (`Clean man)
+              when man.Manifest.symlink = None
+                   && man.Manifest.chunks <> []
+                   && man.Manifest.residency <> None ->
+                let* v = load_view key man in
+                go v
+            | _ -> Lwt.return_unit)
+
   let ensure_cached key =
     let* cached = is_cached key in
     if cached then Lwt.return_unit
@@ -195,7 +512,15 @@ module Make (C : Conf.S) (Sq : Sync_queue.S) : S = struct
               Lwt.finalize
                 (fun () ->
                   let* () =
-                    Lwt_pool.use download_pool (fun () -> download key)
+                    Lwt_pool.use download_pool (fun () ->
+                        let* m = read_manifest key in
+                        match m with
+                          | Some (`Clean man)
+                            when man.Manifest.symlink = None
+                                 && man.Manifest.chunks <> []
+                                 && man.Manifest.residency <> None ->
+                              materialize key
+                          | _ -> download key)
                   in
                   incr downloads_completed;
                   Lwt.return_unit)
@@ -205,6 +530,96 @@ module Make (C : Conf.S) (Sq : Sync_queue.S) : S = struct
             in
             Hashtbl.replace downloading key p;
             p)
+
+  (* Prepare a not-yet-complete file for reading: demand-page it (sparse file +
+     residency, no download) when it is a real chunked file, else fall back to a
+     whole download (symlink / malformed). Idempotent. *)
+  let prepare_read key =
+    if is_partial key then Lwt.return_unit
+    else
+      let* cached = is_cached key in
+      if cached then Lwt.return_unit
+      else
+        let* m = resolved_manifest key in
+        match m with
+          | Some (`Clean man)
+            when man.Manifest.symlink = None && man.Manifest.chunks <> [] ->
+              let+ (_ : view) = load_view key man in
+              ()
+          | _ -> ensure_cached key
+
+  let ensure_readable key ~offset ~len =
+    match Hashtbl.find_opt views key with
+      | Some v -> ensure_range key v ~offset ~len
+      | None ->
+          let* cached = is_cached key in
+          if cached then Lwt.return_unit else ensure_cached key
+
+  let mark_dirty key =
+    if is_dirty key then Lwt.return_unit
+    else
+      let* () = write_manifest key `Dirty in
+      set_dirty key;
+      Lwt.return_unit
+
+  let grow_view v n =
+    let old = Array.length v.chunks in
+    if n > old then begin
+      let chunks = Array.make n (blank_entry 0 0) in
+      Array.blit v.chunks 0 chunks 0 old;
+      let states = Array.make n Manifest.Dirty in
+      Array.blit v.states 0 states 0 old;
+      let fetching = Array.make n None in
+      Array.blit v.fetching 0 fetching 0 old;
+      v.chunks <- chunks;
+      v.states <- states;
+      v.fetching <- fetching
+    end
+
+  (* Mark the chunks a write at the range [offset, offset+len] touches [Dirty], fetching a
+     chunk first only when the write partially covers an already-existing absent
+     chunk (read-modify-write). Fully-covered and grown chunks need no fetch —
+     their bytes come from the write (or are sparse zeros). *)
+  let apply_dirty key v ~offset ~len =
+    let cs = v.chunk_size in
+    let off = Int64.to_int offset in
+    let endp = off + len in
+    let orig_n = Array.length v.chunks in
+    let new_size = Int64.of_int (max (Int64.to_int v.size) endp) in
+    if new_size > v.size then v.size <- new_size;
+    grow_view v (num_chunks_for v.size cs);
+    let first = off / cs in
+    let last = (endp - 1) / cs in
+    let rec go i =
+      if i > last then Lwt.return_unit
+      else (
+        let cstart = i * cs in
+        let cend = min ((i + 1) * cs) (Int64.to_int v.size) in
+        let fully = off <= cstart && endp >= cend in
+        let* () =
+          if (not fully) && i < orig_n && v.states.(i) = Manifest.Absent then
+            fetch_chunk key v i
+          else Lwt.return_unit
+        in
+        v.states.(i) <- Manifest.Dirty;
+        v.chunks.(i) <- blank_entry i (chunk_len v i);
+        go (i + 1))
+    in
+    let* () = go first in
+    set_dirty key;
+    persist_view key v
+
+  let dirty_range key ~offset ~len =
+    match Hashtbl.find_opt views key with
+      | Some v -> apply_dirty key v ~offset ~len
+      | None -> (
+          let* m = read_manifest key in
+          match m with
+            | Some (`Clean man)
+              when man.Manifest.symlink = None && man.Manifest.chunks <> [] ->
+                let* v = load_view key man in
+                apply_dirty key v ~offset ~len
+            | _ -> mark_dirty key)
 
   (* ── Stat ──────────────────────────────────────────────────────────────── *)
 
@@ -328,27 +743,6 @@ module Make (C : Conf.S) (Sq : Sync_queue.S) : S = struct
     Local.list_all ~cache_root:C.cache_root ~domain_name:C.domain_name
       ~domain_prefix:C.domain_prefix ~prefix ()
 
-  (* ── Xattrs ────────────────────────────────────────────────────────────── *)
-
-  let xattrs key =
-    let+ m = read_manifest key in
-    match m with
-      | Some (`Clean m) ->
-          [
-            ("tsync.h1", m.Manifest.h1);
-            ("tsync.h2", m.Manifest.h2);
-            ("tsync.size", Int64.to_string m.Manifest.size);
-            ("tsync.chunks", string_of_int (List.length m.Manifest.chunks));
-          ]
-      | _ -> []
-
-  let mark_dirty key =
-    if is_dirty key then Lwt.return_unit
-    else
-      let* () = write_manifest key `Dirty in
-      set_dirty key;
-      Lwt.return_unit
-
   (* ── Open-handle tracking ──────────────────────────────────────────────── *)
 
   let open_count : (string, int) Hashtbl.t = Hashtbl.create 64
@@ -377,7 +771,18 @@ module Make (C : Conf.S) (Sq : Sync_queue.S) : S = struct
 
   (* ── Local eviction ────────────────────────────────────────────────────── *)
 
+  (* Drop the local data (keeping the sidecar) and any in-memory view. A partial
+     sidecar's residency is reset to the plain published form so a reopen starts a
+     fresh demand-page rather than resuming against data that is now gone. *)
   let evict key =
+    Hashtbl.remove views key;
+    let* m = read_manifest key in
+    let* () =
+      match m with
+        | Some (`Clean man) when man.Manifest.residency <> None ->
+            write_manifest key (`Clean { man with Manifest.residency = None })
+        | _ -> Lwt.return_unit
+    in
     Local.evict ~cache_root:C.cache_root ~domain_name:C.domain_name
       ~domain_prefix:C.domain_prefix key
 
@@ -388,6 +793,7 @@ module Make (C : Conf.S) (Sq : Sync_queue.S) : S = struct
     Lwt.return_unit
 
   let create key =
+    Hashtbl.remove views key;
     let* () = ensure_parent_dir key in
     let* () =
       Lwt.catch
@@ -403,10 +809,8 @@ module Make (C : Conf.S) (Sq : Sync_queue.S) : S = struct
     Lwt.return_unit
 
   let read key (buf : buffer) ~offset =
-    let* cached = is_cached key in
-    if not cached then
-      Log.debug "read %s: not in local cache, fetching from backend" key;
-    let* () = ensure_cached key in
+    let* () = prepare_read key in
+    let* () = ensure_readable key ~offset ~len:(Bigarray.Array1.dim buf) in
     Local_io.read (local_path key) buf ~offset
 
   let cancel_upload key = Sq.cancel_put key
@@ -417,20 +821,79 @@ module Make (C : Conf.S) (Sq : Sync_queue.S) : S = struct
        completion would clear the dirty flag set below). The writer's release
        re-queues the upload. *)
     ignore (cancel_upload key);
-    let* () = mark_dirty key in
+    let* () = dirty_range key ~offset ~len:(Bigarray.Array1.dim buf) in
     Local_io.write (local_path key) buf ~offset
+
+  let truncate_view key v new_size =
+    let cs = v.chunk_size in
+    let new_n = num_chunks_for new_size cs in
+    let old_n = Array.length v.chunks in
+    let boundary = new_n - 1 in
+    (* The last chunk's byte length changes, so it becomes dirty and must hold
+       its current bytes first (fetch it when shrinking into an absent chunk). *)
+    let* () =
+      if
+        boundary >= 0 && boundary < old_n
+        && v.states.(boundary) = Manifest.Absent
+      then fetch_chunk key v boundary
+      else Lwt.return_unit
+    in
+    let* fd =
+      Lwt_unix_retry.openfile (local_path key)
+        [Unix.O_WRONLY; Unix.O_CREAT]
+        0o644
+    in
+    let* () = Lwt_unix_retry.LargeFile.ftruncate fd new_size in
+    let* () = Lwt_unix_retry.close fd in
+    let chunks = Array.make (max 1 new_n) (blank_entry 0 0) in
+    let states = Array.make new_n Manifest.Dirty in
+    let fetching = Array.make (max 1 new_n) None in
+    for i = 0 to new_n - 1 do
+      if i < old_n then (
+        chunks.(i) <- v.chunks.(i);
+        states.(i) <- v.states.(i))
+    done;
+    v.chunks <- chunks;
+    v.states <- states;
+    v.fetching <- fetching;
+    v.size <- new_size;
+    (* the boundary (and any grown) chunk's content changed → dirty *)
+    for i = min boundary (old_n - 1) to new_n - 1 do
+      if i >= 0 then (
+        states.(i) <- Manifest.Dirty;
+        chunks.(i) <- blank_entry i (chunk_len v i))
+    done;
+    set_dirty key;
+    persist_view key v
 
   let truncate key size =
     ignore (cancel_upload key);
-    let* () = ensure_cached key in
-    let lp = local_path key in
-    let* fd = Lwt_unix_retry.openfile lp [Unix.O_WRONLY] 0o644 in
-    let* () = Lwt_unix_retry.LargeFile.ftruncate fd size in
-    let* () = Lwt_unix_retry.close fd in
-    mark_dirty key
+    let resize_whole () =
+      let* () = ensure_cached key in
+      let* fd =
+        Lwt_unix_retry.openfile (local_path key)
+          [Unix.O_WRONLY; Unix.O_CREAT]
+          0o644
+      in
+      let* () = Lwt_unix_retry.LargeFile.ftruncate fd size in
+      let* () = Lwt_unix_retry.close fd in
+      mark_dirty key
+    in
+    match Hashtbl.find_opt views key with
+      | Some v -> truncate_view key v size
+      | None -> (
+          let* m = read_manifest key in
+          match m with
+            | Some (`Clean man)
+              when man.Manifest.symlink = None && man.Manifest.chunks <> [] ->
+                let* v = load_view key man in
+                truncate_view key v size
+            | _ -> resize_whole ())
 
   let rename_local ~src ~dst =
-    let* cached = is_cached src in
+    Hashtbl.remove views src;
+    Hashtbl.remove views dst;
+    let* cached = data_exists src in
     let* () =
       if cached then Lwt_unix_retry.rename (local_path src) (local_path dst)
       else Lwt.return_unit
@@ -477,6 +940,33 @@ module Make (C : Conf.S) (Sq : Sync_queue.S) : S = struct
           let ops = [`Put (rel_key key, size)] in
           let+ () = J.write_local_pending ~entry_key:ek ops in
           Sq.post ~key ~entry_key:ek ~ops
+
+  (* ── Close / eviction policy ────────────────────────────────────────────── *)
+
+  (* Eviction requested while a file is open is deferred to its last close. *)
+  let pending_evict : (string, unit) Hashtbl.t = Hashtbl.create 16
+
+  let request_evict key =
+    if is_open key then (
+      Hashtbl.replace pending_evict key ();
+      Lwt.return_unit)
+    else evict key
+
+  (* Last handle closed: a dirty file is queued for upload; a file flagged for
+     eviction is dropped; otherwise it just persists (partial files keep their
+     sidecar residency and resume on the next open). *)
+  let release key =
+    let remaining = mark_closed key in
+    if remaining > 0 then Lwt.return_unit
+    else (
+      Hashtbl.remove views key;
+      if is_dirty key then (
+        clear_dirty key;
+        queue_put key)
+      else (
+        let was_pending = Hashtbl.mem pending_evict key in
+        Hashtbl.remove pending_evict key;
+        if was_pending then evict key else Lwt.return_unit))
 
   let delete key =
     with_meta (fun () ->
@@ -596,7 +1086,7 @@ module Make (C : Conf.S) (Sq : Sync_queue.S) : S = struct
     ignore (cancel_upload dst);
     let* size =
       if not is_dir then
-        let* cached = is_cached src in
+        let* cached = data_exists src in
         if cached then
           let+ st = stat_opt (local_path src) in
           Option.map (fun s -> s.Unix.LargeFile.st_size) st
@@ -604,7 +1094,7 @@ module Make (C : Conf.S) (Sq : Sync_queue.S) : S = struct
       else Lwt.return_none
     in
     let* () = rename_local ~src ~dst in
-    let* dst_cached = is_cached dst in
+    let* dst_cached = data_exists dst in
     if src_was_uploading && dst_cached then queue_put dst
     else
       let* () = if not is_dir then save_version src else Lwt.return_unit in

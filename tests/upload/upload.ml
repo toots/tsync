@@ -27,6 +27,7 @@ module C = struct
   let notify_path = Filename.concat root "n.sock"
   let max_uploads = 4
   let max_downloads = 8
+  let chunk_size = chunk_size
   let symlink_policy = `Keep
   let read_only = false
 end
@@ -60,7 +61,7 @@ let count_chunks () =
        entries)
 
 let upload key path =
-  let+ state = R.upload ~key ~src_path:path ~mtime:0. () in
+  let+ state = R.upload ~key ~src_path:path ~mtime:0. ~chunk_size () in
   match state with `Clean m -> m | `Dirty -> assert false
 
 let () =

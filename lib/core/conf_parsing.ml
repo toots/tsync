@@ -19,6 +19,7 @@ type domain = {
   symlink_policy : [ `Keep | `Follow | `Skip ];
   versioning : bool;
   read_only : bool;
+  chunk_size : int;
 }
 
 type t = {
@@ -31,6 +32,43 @@ type t = {
 
 let default_max_uploads = 4
 let default_max_downloads = 8
+
+(* Per-domain, overridable via "chunkSize". 8 MiB favors sequential throughput
+   and small manifests; lower it for random-access workloads to cut read/write
+   amplification (at the cost of larger manifests and more backend requests). *)
+let default_chunk_size = 8 * 1024 * 1024
+
+(* Human-friendly byte sizes: a bare number is bytes; a K/M/G suffix (with an
+   optional B/iB) is a binary multiple (1K = 1024). *)
+let format_size b =
+  let k = 1024 and m = 1024 * 1024 and g = 1024 * 1024 * 1024 in
+  if b >= g && b mod g = 0 then Printf.sprintf "%dG" (b / g)
+  else if b >= m && b mod m = 0 then Printf.sprintf "%dM" (b / m)
+  else if b >= k && b mod k = 0 then Printf.sprintf "%dK" (b / k)
+  else string_of_int b
+
+let parse_size s =
+  let s = String.trim (String.lowercase_ascii s) in
+  if s = "" then None
+  else (
+    let s =
+      let n = String.length s in
+      if n >= 2 && String.sub s (n - 2) 2 = "ib" then String.sub s 0 (n - 2)
+      else if s.[n - 1] = 'b' then String.sub s 0 (n - 1)
+      else s
+    in
+    if s = "" then None
+    else (
+      let mult, digits =
+        match s.[String.length s - 1] with
+          | 'k' -> (1024, String.sub s 0 (String.length s - 1))
+          | 'm' -> (1024 * 1024, String.sub s 0 (String.length s - 1))
+          | 'g' -> (1024 * 1024 * 1024, String.sub s 0 (String.length s - 1))
+          | _ -> (1, s)
+      in
+      match int_of_string_opt (String.trim digits) with
+        | Some n when n > 0 -> Some (n * mult)
+        | _ -> None))
 
 let parse_backend json =
   let open Yojson.Basic.Util in
@@ -142,6 +180,15 @@ let parse_domain json =
     versioning = json |> member "versioning" |> to_bool;
     read_only =
       (match json |> member "readOnly" with `Bool b -> b | _ -> false);
+    chunk_size =
+      (match json |> member "chunkSize" with
+        | `Int n when n > 0 -> n
+        | `String s -> (
+            match parse_size s with
+              | Some n -> n
+              | None -> failwith ("invalid chunkSize: " ^ s))
+        | `Null -> default_chunk_size
+        | _ -> failwith "domain \"chunkSize\" must be a size string or integer");
   }
 
 let load path =

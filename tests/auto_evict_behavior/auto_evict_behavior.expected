@@ -3,13 +3,13 @@
   write a.txt "hello"
   drain
 --- tree
-  f a.txt size=5 cached=false uploaded=true etag=9555e8555c62dcfd
+  f a.txt size=5 cached=false uploaded=true etag=650e58ac64da6e0a
 --- content
   a.txt = "hello"
 --- backend
   chunk 9555e8555c62dcfd-74b07ed397a89e92 size=5
   journal <entry-1> = put a.txt 5
-  file a.txt [.tsync-root/f01e5cbbc09d4fc4-9a0fcd66f030de75] = manifest size=5 chunks=1 h1=9555e8555c62dcfd h2=74b07ed397a89e92
+  file a.txt [.tsync-root/f01e5cbbc09d4fc4-9a0fcd66f030de75] = manifest size=5 chunks=1 h1=650e58ac64da6e0a h2=2edbeded005becfe
     chunk#0 9555e8555c62dcfd-74b07ed397a89e92 size=5
 
 === auto-evict off: stays resident
@@ -17,13 +17,13 @@
   write b.txt "hello"
   drain
 --- tree
-  f b.txt size=5 cached=true uploaded=true etag=9555e8555c62dcfd
+  f b.txt size=5 cached=true uploaded=true etag=650e58ac64da6e0a
 --- content
   b.txt = "hello"
 --- backend
   chunk 9555e8555c62dcfd-74b07ed397a89e92 size=5
   journal <entry-1> = put b.txt 5
-  file b.txt [.tsync-root/3c697ec236bbf61f-698ad1290042cc94] = manifest size=5 chunks=1 h1=9555e8555c62dcfd h2=74b07ed397a89e92
+  file b.txt [.tsync-root/3c697ec236bbf61f-698ad1290042cc94] = manifest size=5 chunks=1 h1=650e58ac64da6e0a h2=2edbeded005becfe
     chunk#0 9555e8555c62dcfd-74b07ed397a89e92 size=5
 
 === toggle off mid-scenario: only earlier files evicted
@@ -34,8 +34,8 @@
   write y.txt "two"
   drain
 --- tree
-  f x.txt size=3 cached=false uploaded=true etag=911faba7321fe1a0
-  f y.txt size=3 cached=true uploaded=true etag=6c0560bdcb29998b
+  f x.txt size=3 cached=false uploaded=true etag=927288390658e64d
+  f y.txt size=3 cached=true uploaded=true etag=f7cd621f4f189919
 --- content
   x.txt = "one"
   y.txt = "two"
@@ -44,8 +44,8 @@
   chunk 911faba7321fe1a0-a3cf92cbf55153da size=3
   journal <entry-1> = put x.txt 3
   journal <entry-2> = put y.txt 3
-  file y.txt [.tsync-root/5daddc6a7e7b0a59-08cdb864d07705f7] = manifest size=3 chunks=1 h1=6c0560bdcb29998b h2=8f653076428650aa
+  file y.txt [.tsync-root/5daddc6a7e7b0a59-08cdb864d07705f7] = manifest size=3 chunks=1 h1=f7cd621f4f189919 h2=e85ff58d754105ea
     chunk#0 6c0560bdcb29998b-8f653076428650aa size=3
-  file x.txt [.tsync-root/fecd6e94d21b3dc7-d6d12967f4c00d3d] = manifest size=3 chunks=1 h1=911faba7321fe1a0 h2=a3cf92cbf55153da
+  file x.txt [.tsync-root/fecd6e94d21b3dc7-d6d12967f4c00d3d] = manifest size=3 chunks=1 h1=927288390658e64d h2=b8b5ebbd37156bca
     chunk#0 911faba7321fe1a0-a3cf92cbf55153da size=3
 

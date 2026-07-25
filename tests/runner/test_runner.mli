@@ -33,6 +33,20 @@ type step =
   | Close of string
       (** Track the file as open/closed, the way the FUSE layer does around user
           file handles. Foreign ops must never touch an open file. *)
+  | OpenRead of string
+      (** Fault a file in for reading the way FUSE [fopen] does — demand-page it
+          (sparse file + residency, no download) and mark it open. *)
+  | ReadRange of { path : string; offset : int; len : int }
+      (** Read [len] bytes at [offset], fetching only the chunks they need, and
+          print the bytes returned. *)
+  | WriteAt of { path : string; offset : int; content : string }
+      (** Write [content] at [offset] through the demand-paged write path
+          (read-modify-write of a partially-touched chunk, per-chunk dirty). *)
+  | Release of string
+      (** Last-handle close policy (queue upload / evict / persist). *)
+  | ShowResidency of string
+      (** Print the file's per-chunk residency (present/absent/dirty), size and
+          [cached] flag, from its sidecar. *)
   | Mark
       (** Record the current time, usable later as an [Expire "mark"] cutoff. *)
   | Expire of string

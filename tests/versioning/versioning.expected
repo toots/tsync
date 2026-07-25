@@ -6,7 +6,7 @@
   write foo.txt "three three three"
   drain
 --- tree
-  f foo.txt size=17 cached=true uploaded=true etag=faf60158c5948cd2
+  f foo.txt size=17 cached=true uploaded=true etag=bc4fe9e67f44fd6f
 --- content
   foo.txt = "three three three"
 --- backend
@@ -16,7 +16,7 @@
   journal <entry-1> = put foo.txt 3
   journal <entry-2> = put foo.txt 7
   journal <entry-3> = put foo.txt 17
-  file foo.txt [.tsync-root/b306717ed3feaa3f-615fce859cf8a12f] = manifest size=17 chunks=1 h1=faf60158c5948cd2 h2=60f690e9588d51bd
+  file foo.txt [.tsync-root/b306717ed3feaa3f-615fce859cf8a12f] = manifest size=17 chunks=1 h1=bc4fe9e67f44fd6f h2=6fd12d97f02740c8
     chunk#0 faf60158c5948cd2-60f690e9588d51bd size=17
   version foo.txt [.tsync-root/b306717ed3feaa3f-615fce859cf8a12f]#1 = manifest size=3 chunks=1
   version foo.txt [.tsync-root/b306717ed3feaa3f-615fce859cf8a12f]#2 = manifest size=7 chunks=1
@@ -39,7 +39,7 @@
   drain
   rename a.txt -> b.txt
 --- tree
-  f b.txt size=9 cached=true uploaded=true etag=3080b92b20375f8a
+  f b.txt size=9 cached=true uploaded=true etag=26c07bf51c7fd4ad
 --- content
   b.txt = "content a"
 --- backend
@@ -47,7 +47,7 @@
   cursor = <entry-2>
   journal <entry-1> = put a.txt 9
   journal <entry-2> = rename a.txt -> b.txt 9
-  file b.txt [.tsync-root/3c697ec236bbf61f-698ad1290042cc94] = manifest size=9 chunks=1 h1=3080b92b20375f8a h2=2fce59f09ae2e917
+  file b.txt [.tsync-root/3c697ec236bbf61f-698ad1290042cc94] = manifest size=9 chunks=1 h1=26c07bf51c7fd4ad h2=0d1e2a3991578691
     chunk#0 3080b92b20375f8a-2fce59f09ae2e917 size=9
   version a.txt [.tsync-root/f01e5cbbc09d4fc4-9a0fcd66f030de75]#1 = manifest size=9 chunks=1
 
@@ -58,7 +58,7 @@
   drain
   revert foo.txt @latest
 --- tree
-  f foo.txt size=15 cached=false uploaded=true etag=d1a9d4d84e18e087
+  f foo.txt size=15 cached=false uploaded=true etag=25c9d2f7756cf96d
 --- content
   foo.txt = "deleted content"
 --- backend
@@ -67,7 +67,7 @@
   journal <entry-1> = put foo.txt 15
   journal <entry-2> = delete foo.txt
   journal <entry-3> = put foo.txt 15
-  file foo.txt [.tsync-root/b306717ed3feaa3f-615fce859cf8a12f] = manifest size=15 chunks=1 h1=d1a9d4d84e18e087 h2=2a474494f098b599
+  file foo.txt [.tsync-root/b306717ed3feaa3f-615fce859cf8a12f] = manifest size=15 chunks=1 h1=25c9d2f7756cf96d h2=e6dcbfacefd08f4a
     chunk#0 d1a9d4d84e18e087-2a474494f098b599 size=15
   version foo.txt [.tsync-root/b306717ed3feaa3f-615fce859cf8a12f]#1 = manifest size=15 chunks=1
 
@@ -80,7 +80,7 @@
   drain
   revert foo.txt @latest
 --- tree
-  f foo.txt size=3 cached=false uploaded=true etag=6c0560bdcb29998b
+  f foo.txt size=3 cached=false uploaded=true etag=f7cd621f4f189919
 --- content
   foo.txt = "two"
 --- backend
@@ -92,7 +92,7 @@
   journal <entry-2> = put foo.txt 3
   journal <entry-3> = put foo.txt 5
   journal <entry-4> = put foo.txt 3
-  file foo.txt [.tsync-root/b306717ed3feaa3f-615fce859cf8a12f] = manifest size=3 chunks=1 h1=6c0560bdcb29998b h2=8f653076428650aa
+  file foo.txt [.tsync-root/b306717ed3feaa3f-615fce859cf8a12f] = manifest size=3 chunks=1 h1=f7cd621f4f189919 h2=e85ff58d754105ea
     chunk#0 6c0560bdcb29998b-8f653076428650aa size=3
   version foo.txt [.tsync-root/b306717ed3feaa3f-615fce859cf8a12f]#1 = manifest size=3 chunks=1
   version foo.txt [.tsync-root/b306717ed3feaa3f-615fce859cf8a12f]#2 = manifest size=3 chunks=1

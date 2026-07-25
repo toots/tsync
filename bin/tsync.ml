@@ -247,6 +247,7 @@ let make_conf ?domain ?socket_path ?(tier = true) ?source cfg : (module Conf.S)
     let socket_path = socket_path
     let max_uploads = cfg.Conf_parsing.max_uploads
     let max_downloads = cfg.Conf_parsing.max_downloads
+    let chunk_size = d.Conf_parsing.chunk_size
     let symlink_policy = d.Conf_parsing.symlink_policy
     let read_only = d.Conf_parsing.read_only
 
@@ -1806,6 +1807,16 @@ let prompt_symlinks default =
   in
   ask ()
 
+let rec prompt_size msg default =
+  match
+    Conf_parsing.parse_size
+      (prompt msg (Some (Conf_parsing.format_size default)))
+  with
+    | Some n -> n
+    | None ->
+        Printf.printf "  (enter a size like 512K, 8M, or 1G)\n%!";
+        prompt_size msg default
+
 (* ── Backend / domain builders ───────────────────────────────────────────── *)
 
 (* The backend fields a Terraform store fills — so the wizard skips prompting
@@ -2206,6 +2217,16 @@ let edit_domain existing =
   let versioning = ref (curbool "versioning") in
   let symlinks = ref (cur "symlinks" "keep") in
   let read_only = ref (curbool "readOnly") in
+  let chunk_size =
+    ref
+      (match Option.bind existing (fun j -> jfield j "chunkSize") with
+        | Some (`Int n) when n > 0 -> n
+        | Some (`String s) -> (
+            match Conf_parsing.parse_size s with
+              | Some n -> n
+              | None -> Conf_parsing.default_chunk_size)
+        | _ -> Conf_parsing.default_chunk_size)
+  in
   let backends =
     ref (match existing with Some j -> jlist j "backends" | None -> [])
   in
@@ -2226,6 +2247,10 @@ let edit_domain existing =
         read_only :=
           prompt_bool ~default:!read_only
             "Read-only mount (block all local writes)?";
+        chunk_size :=
+          prompt_size
+            "Chunk size (smaller helps random access; larger favors throughput)"
+            !chunk_size;
         backends := prompt_backends ();
         frontends := edit_frontends !frontends
     | Some _ ->
@@ -2238,8 +2263,10 @@ let edit_domain existing =
           Printf.printf "  2. versioning:  %b\n" !versioning;
           Printf.printf "  3. symlinks:    %s\n" !symlinks;
           Printf.printf "  4. read-only:   %b\n" !read_only;
-          Printf.printf "  5. backends:    %s\n" (backend_summary !backends);
-          Printf.printf "  6. frontends:   %s\n" (frontend_summary !frontends);
+          Printf.printf "  5. chunk size:  %s\n"
+            (Conf_parsing.format_size !chunk_size);
+          Printf.printf "  6. backends:    %s\n" (backend_summary !backends);
+          Printf.printf "  7. frontends:   %s\n" (frontend_summary !frontends);
           if !status <> "" then Printf.printf "\n%s\n" !status;
           Printf.printf "\nEnter a field number to edit, or [d]one:\n> %!";
           status := "";
@@ -2251,8 +2278,9 @@ let edit_domain existing =
             | "3" -> symlinks := prompt_symlinks !symlinks
             | "4" ->
                 read_only := prompt_bool ~default:!read_only "Read-only mount?"
-            | "5" -> backends := edit_backends !backends
-            | "6" -> frontends := edit_frontends !frontends
+            | "5" -> chunk_size := prompt_size "Chunk size" !chunk_size
+            | "6" -> backends := edit_backends !backends
+            | "7" -> frontends := edit_frontends !frontends
             | "d" | "" -> running := false
             | other -> status := Printf.sprintf "(unknown field %S)" other
         done);
@@ -2262,6 +2290,7 @@ let edit_domain existing =
       ("versioning", `Bool !versioning);
       ("symlinks", `String !symlinks);
       ("readOnly", `Bool !read_only);
+      ("chunkSize", `String (Conf_parsing.format_size !chunk_size));
       ("backends", `List !backends);
       ("frontends", `List !frontends);
     ]

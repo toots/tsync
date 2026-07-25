@@ -12,12 +12,17 @@ type recheck_report = {
 
 module Make (C : Conf.S) : sig
   (** Upload [src_path] as chunks under [key]: each chunk is read, hashed (chunk
-      key) and uploaded if absent, then the manifest is written. Setting
-      [cancel] aborts at the next chunk boundary with {!Cancelled}. *)
+      key) and uploaded if absent, then the manifest is written. [reuse index]
+      returning [Some e] marks chunk [index] unchanged from a prior manifest —
+      it is neither read nor uploaded and keeps entry [e] (demand-paged edits);
+      the default rehashes every chunk (whole-file upload). Setting [cancel]
+      aborts at the next chunk boundary with {!Cancelled}. *)
   val upload :
     key:string ->
     src_path:string ->
     mtime:float ->
+    chunk_size:int ->
+    ?reuse:(int -> Manifest.chunk_entry option) ->
     ?cancel:bool ref ->
     unit ->
     Manifest.state Lwt.t
@@ -28,6 +33,15 @@ module Make (C : Conf.S) : sig
       via {!get_download_progress}. *)
   val download_chunks :
     key:string -> dst_path:string -> Manifest.t -> unit Lwt.t
+
+  (** Fetch a single [chunk] and write it at its offset
+      ([chunk.index * chunk_size]) in [dst_path], which must already exist sized
+      to the full file. Used for demand-paged reads. *)
+  val download_chunk :
+    dst_path:string ->
+    chunk_size:int ->
+    chunk:Manifest.chunk_entry ->
+    unit Lwt.t
 
   (** [Some (bytes_done, total_bytes)] while a download for [key] is in flight;
       [None] otherwise. *)
