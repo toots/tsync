@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 #
 # Interactive setup: defines your first store in terraform.tfvars, provisions the
-# S3 bucket that holds Terraform state (bootstrap/), and runs `terraform init`
-# against that remote backend.
+# S3 bucket that holds Terraform state (bootstrap-s3/), and runs `terraform init`
+# against that remote backend. This helper is S3-only; for GCS-hosted state see
+# the README (bootstrap-gcs/ + backend-gcs.tf.example).
 #
 # Add more stores — for multiple domains or redundant storage — by adding entries
 # to the `stores` map in terraform.tfvars, then re-apply. Review the plan and
@@ -98,7 +99,7 @@ fi
 # ── Remote state bucket ────────────────────────────────────────────────────
 
 echo
-echo "Terraform state is kept in S3 (see bootstrap/)."
+echo "Terraform state is kept in S3 (see bootstrap-s3/)."
 [ -n "$ACCOUNT" ] && STATE_BUCKET_DEFAULT="tsync-tfstate-${ACCOUNT}-${REGION}" || STATE_BUCKET_DEFAULT=""
 prompt STATE_BUCKET "S3 bucket for Terraform state (globally unique)" "$STATE_BUCKET_DEFAULT"
 [ -n "$STATE_BUCKET" ] || {
@@ -123,12 +124,12 @@ read -rp "Create the state bucket now (skip if it already exists)? [Y/n]: " mkst
 case "$mkstate" in
   [nN]*)
     echo "Skipping. Create it later with:"
-    echo "  terraform -chdir=bootstrap init"
-    echo "  terraform -chdir=bootstrap apply -var state_bucket=$STATE_BUCKET -var region=$REGION"
+    echo "  terraform -chdir=bootstrap-s3 init"
+    echo "  terraform -chdir=bootstrap-s3 apply -var state_bucket=$STATE_BUCKET -var region=$REGION"
     ;;
   *)
-    terraform -chdir=bootstrap init
-    terraform -chdir=bootstrap apply -var state_bucket="$STATE_BUCKET" -var region="$REGION"
+    terraform -chdir=bootstrap-s3 init
+    terraform -chdir=bootstrap-s3 apply -var state_bucket="$STATE_BUCKET" -var region="$REGION"
     ;;
 esac
 
