@@ -1,6 +1,7 @@
 variable "region" {
   type        = string
-  description = "AWS region for all stores. For buckets in different regions, see README > Multi-region."
+  default     = null
+  description = "AWS region for s3 stores. Required only when stores is non-empty (leave unset for a GCS-only deployment). For buckets in different regions, see README > Multi-region."
 }
 
 # ── GCS ────────────────────────────────────────────────────────────────────
