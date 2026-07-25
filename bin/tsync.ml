@@ -2619,6 +2619,8 @@ let print_conf_cmd =
         Printf.printf "  versioning: %b\n" d.versioning;
         Printf.printf "  read_only:  %b\n" d.read_only;
         Printf.printf "  symlinks:   %s\n" (symlink_str d.symlink_policy);
+        Printf.printf "  chunkSize:  %s\n"
+          (Conf_parsing.format_size d.chunk_size);
         List.iter
           (fun (f : Conf_parsing.frontend_config) ->
             Printf.printf "  frontend: %s\n" f.frontend_type;
