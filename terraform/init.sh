@@ -39,8 +39,9 @@ if [ -f "backend-${OTHER}.tf" ]; then
   exit 1
 fi
 
-# Cloud-specific location/identity, and a seed for globally-unique bucket-name
-# defaults (empty seed => no default, so the prompt requires a name).
+# Cloud-specific location/identity. SEED (s3 only) seeds globally-unique
+# bucket-name defaults; on GCS the project id leads the name instead.
+SEED=""
 if [ "$CLOUD" = s3 ]; then
   prompt REGION "AWS region" "us-east-1"
   ACCOUNT=""
@@ -57,7 +58,6 @@ else
     exit 1
   }
   prompt LOCATION "Bucket location (e.g. US, us-central1)" "US"
-  SEED="$PROJECT"
 fi
 
 # ── Store definition ───────────────────────────────────────────────────────
@@ -70,7 +70,11 @@ fi
 
 if [ "$write_tfvars" -eq 1 ]; then
   prompt STORE "Store name (short id, e.g. files or media)" "files"
-  [ -n "$SEED" ] && STORE_BUCKET_DEFAULT="tsync-${STORE}-${SEED}" || STORE_BUCKET_DEFAULT=""
+  if [ "$CLOUD" = s3 ]; then
+    [ -n "$SEED" ] && STORE_BUCKET_DEFAULT="tsync-${STORE}-${SEED}" || STORE_BUCKET_DEFAULT=""
+  else
+    STORE_BUCKET_DEFAULT="${PROJECT}-${STORE}"
+  fi
   prompt BUCKET "Bucket name for this store" "$STORE_BUCKET_DEFAULT"
   [ -n "$BUCKET" ] || {
     echo "bucket is required" >&2
@@ -146,7 +150,11 @@ fi
 
 echo
 echo "Terraform state is kept in the ${CLOUD} state bucket (see bootstrap-${CLOUD}/)."
-[ -n "$SEED" ] && STATE_BUCKET_DEFAULT="tsync-tfstate-${SEED}" || STATE_BUCKET_DEFAULT=""
+if [ "$CLOUD" = s3 ]; then
+  [ -n "$SEED" ] && STATE_BUCKET_DEFAULT="tsync-tfstate-${SEED}" || STATE_BUCKET_DEFAULT=""
+else
+  STATE_BUCKET_DEFAULT="${PROJECT}-tfstate"
+fi
 prompt STATE_BUCKET "Bucket for Terraform state (globally unique)" "$STATE_BUCKET_DEFAULT"
 [ -n "$STATE_BUCKET" ] || {
   echo "state bucket is required" >&2
