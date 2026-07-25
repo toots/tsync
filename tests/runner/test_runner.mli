@@ -21,10 +21,9 @@ type step =
   | Rename of { src : string; dst : string }
   | Delete of string
   | Evict of string
-  | AutoEvict of bool
-      (** Toggle this domain's auto-evict marker. When on, a file is evicted
-          automatically as its upload completes (via [on_upload_done]), so no
-          explicit [Evict] is needed. *)
+  | EnforceCache
+      (** Run one best-effort cache-cap sweep (evict coldest clean files over
+          the [max_cache] cap). *)
   | Restore of string
   | RevertVersion of { path : string; version : string option }
       (** Restore a saved version to the live location. [version] selects a

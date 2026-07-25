@@ -20,6 +20,7 @@ type domain = {
   versioning : bool;
   read_only : bool;
   chunk_size : int;
+  max_cache : int option;
 }
 
 type t = {
@@ -189,6 +190,15 @@ let parse_domain json =
               | None -> failwith ("invalid chunkSize: " ^ s))
         | `Null -> default_chunk_size
         | _ -> failwith "domain \"chunkSize\" must be a size string or integer");
+    max_cache =
+      (match json |> member "maxCache" with
+        | `Int n when n > 0 -> Some n
+        | `String s -> (
+            match parse_size s with
+              | Some n -> Some n
+              | None -> failwith ("invalid maxCache: " ^ s))
+        | `Null -> None
+        | _ -> failwith "domain \"maxCache\" must be a size string or integer");
   }
 
 let load path =

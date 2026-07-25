@@ -8,7 +8,9 @@ type step =
   | Rename of { src : string; dst : string }
   | Delete of string
   | Evict of string
-  | AutoEvict of bool
+  | EnforceCache
+      (** Run one best-effort cache-cap sweep (evict coldest clean files over
+          the [max_cache] cap). *)
   | Restore of string
   | RevertVersion of { path : string; version : string option }
   | Open of string
@@ -92,7 +94,7 @@ let rec render_step = function
   | Rename { src; dst } -> Printf.sprintf "rename %s -> %s" src dst
   | Delete p -> "delete " ^ p
   | Evict p -> "evict " ^ p
-  | AutoEvict on -> "auto-evict " ^ if on then "on" else "off"
+  | EnforceCache -> "enforce-cache"
   | Restore p -> "restore " ^ p
   | RevertVersion { path; version } ->
       Printf.sprintf "revert %s%s" path
@@ -226,12 +228,9 @@ let setup_client (module C : Conf.S) root staging_prefix =
   Sq.start
     ~upload:(fun ~key ~cancel -> F.upload ~cancel key)
     ~on_cursor:(fun ~entry_key:_ -> ())
-    ~on_upload_done:(fun ~key ->
-      (* Mirror the fuse/file_provider daemons: evict on upload when auto-evict
-         is enabled for this domain. *)
-      if Ipc.auto_evict_enabled ~data_dir:C.data_dir ~domain:C.domain_name then
-        F.evict key
-      else Lwt.return_unit);
+    ~on_upload_done:(fun ~key:_ ->
+      (* Mirror the daemons: nudge cache-cap enforcement after each upload. *)
+      F.enforce_cache_cap ());
   let staging_seq = ref 0 in
   let mark_time = ref 0. in
   let request fields =
@@ -328,12 +327,7 @@ let setup_client (module C : Conf.S) root staging_prefix =
     | Rename { src; dst } -> must_action ~src:(key src) "rename" (key dst)
     | Delete p -> must_action "delete" (key p)
     | Evict p -> must_action "evict" ("/" ^ p)
-    | AutoEvict on ->
-        mkdir_p C.data_dir;
-        ignore
-          (Ipc.handle_auto_evict ~data_dir:C.data_dir ~domain:C.domain_name
-             (if on then "on" else "off"));
-        Lwt.return_unit
+    | EnforceCache -> F.enforce_cache_cap ()
     | Restore p -> must_action "restore" ("/" ^ p)
     | RevertVersion { path; version } ->
         must_action ?arg:version "revert" ("/" ^ path)
@@ -871,6 +865,12 @@ let run_scenario ?(versioning = false) ?(symlink_policy = `Keep)
     let max_uploads = 4
     let max_downloads = 8
     let chunk_size = Manifest.chunk_size
+
+    let max_cache =
+      match Sys.getenv_opt "TSYNC_MAX_CACHE" with
+        | Some s -> Conf_parsing.parse_size s
+        | None -> None
+
     let symlink_policy = symlink_policy
     let read_only = false
   end in
@@ -941,6 +941,12 @@ let run_two_client_scenario ?(versioning = false)
     let max_uploads = 4
     let max_downloads = 8
     let chunk_size = Manifest.chunk_size
+
+    let max_cache =
+      match Sys.getenv_opt "TSYNC_MAX_CACHE" with
+        | Some s -> Conf_parsing.parse_size s
+        | None -> None
+
     let symlink_policy = `Keep
     let read_only = false
   end in
@@ -962,6 +968,12 @@ let run_two_client_scenario ?(versioning = false)
     let max_uploads = 4
     let max_downloads = 8
     let chunk_size = Manifest.chunk_size
+
+    let max_cache =
+      match Sys.getenv_opt "TSYNC_MAX_CACHE" with
+        | Some s -> Conf_parsing.parse_size s
+        | None -> None
+
     let symlink_policy = `Keep
     let read_only = false
   end in
@@ -1031,6 +1043,12 @@ let make_conf ?(versioning = false) ~client_name ~backend_root ~cache_root
     let max_uploads = 4
     let max_downloads = 8
     let chunk_size = Manifest.chunk_size
+
+    let max_cache =
+      match Sys.getenv_opt "TSYNC_MAX_CACHE" with
+        | Some s -> Conf_parsing.parse_size s
+        | None -> None
+
     let symlink_policy = `Keep
     let read_only = false
   end)

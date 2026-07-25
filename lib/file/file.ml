@@ -50,6 +50,11 @@ module type S = sig
   (** Evict [key] now if closed, else defer the eviction to its last close. *)
   val request_evict : t -> unit Lwt.t
 
+  (** Best-effort: while local cache usage exceeds [C.max_cache], evict the
+      coldest closed, clean files until back under. No-op when [max_cache] is
+      unset. *)
+  val enforce_cache_cap : unit -> unit Lwt.t
+
   val downloading_count : unit -> int
   val dirty_count : unit -> int
   val open_files_count : unit -> int
@@ -747,7 +752,12 @@ module Make (C : Conf.S) (Sq : Sync_queue.S) : S = struct
 
   let open_count : (string, int) Hashtbl.t = Hashtbl.create 64
 
+  (* Last time each key was opened, the recency signal for cache-cap eviction.
+     In-memory only; after a restart the data file's mtime stands in. *)
+  let last_access : (string, float) Hashtbl.t = Hashtbl.create 64
+
   let mark_open key =
+    Hashtbl.replace last_access key (Unix.gettimeofday ());
     let n = Option.value ~default:0 (Hashtbl.find_opt open_count key) in
     Hashtbl.replace open_count key (n + 1)
 
@@ -776,6 +786,7 @@ module Make (C : Conf.S) (Sq : Sync_queue.S) : S = struct
      fresh demand-page rather than resuming against data that is now gone. *)
   let evict key =
     Hashtbl.remove views key;
+    Hashtbl.remove last_access key;
     let* m = read_manifest key in
     let* () =
       match m with
@@ -785,6 +796,91 @@ module Make (C : Conf.S) (Sq : Sync_queue.S) : S = struct
     in
     Local.evict ~cache_root:C.cache_root ~domain_name:C.domain_name
       ~domain_prefix:C.domain_prefix key
+
+  (* ── Cache-size cap ─────────────────────────────────────────────────────────
+     Best-effort LRU eviction to keep local cache usage under [C.max_cache]. A
+     sweep enumerates cached files (via the manifest mirror), sums the bytes each
+     actually holds on disk, and — while over the cap — evicts the coldest files
+     that are safe to drop (closed, and clean with no dirty chunks; a dirty file's
+     data is unsynced and must never be dropped). ponytail: O(files) per sweep;
+     add incremental accounting if it ever shows up. *)
+
+  (* Bytes chunk [i] of a file of [size]/[chunk_size] holds when present. *)
+  let present_bytes (m : Manifest.t) =
+    match m.Manifest.residency with
+      | None -> Int64.to_int m.Manifest.size
+      | Some states ->
+          let cs = m.Manifest.chunk_size in
+          let total = Int64.to_int m.Manifest.size in
+          let bytes = ref 0 in
+          Array.iteri
+            (fun i st ->
+              if st <> Manifest.Absent then
+                bytes := !bytes + max 0 (min cs (total - (i * cs))))
+            states;
+          !bytes
+
+  let has_dirty_chunks (m : Manifest.t) =
+    match m.Manifest.residency with
+      | Some a -> Array.exists (fun s -> s = Manifest.Dirty) a
+      | None -> false
+
+  let enforce_cache_cap () =
+    match C.max_cache with
+      | None -> Lwt.return_unit
+      | Some cap ->
+          let* rels =
+            Local.walk_manifests ~cache_root:C.cache_root
+              ~domain_name:C.domain_name ()
+          in
+          (* (key, bytes-on-disk, evictable, recency) for every cached file. *)
+          let* items =
+            Lwt_list.filter_map_s
+              (fun rel ->
+                let key = C.domain_prefix ^ rel in
+                let* st = stat_opt (local_path key) in
+                match st with
+                  | None -> Lwt.return_none (* no local data → no space used *)
+                  | Some st ->
+                      let mtime = st.Unix.LargeFile.st_mtime in
+                      let recency =
+                        match Hashtbl.find_opt last_access key with
+                          | Some t -> Float.max t mtime
+                          | None -> mtime
+                      in
+                      let+ m = read_manifest key in
+                      let bytes, evictable =
+                        match m with
+                          | Some (`Clean man) ->
+                              ( present_bytes man,
+                                (not (has_dirty_chunks man))
+                                && not (is_open key) )
+                          | _ ->
+                              (* [`Dirty]/new or unreadable: unsynced, keep. *)
+                              (Int64.to_int st.Unix.LargeFile.st_size, false)
+                      in
+                      Some (key, bytes, evictable, recency))
+              rels
+          in
+          let total =
+            List.fold_left (fun acc (_, b, _, _) -> acc + b) 0 items
+          in
+          if total <= cap then Lwt.return_unit
+          else (
+            (* Evict coldest-first until under the cap or nothing left to drop. *)
+            let candidates =
+              List.filter (fun (_, _, e, _) -> e) items
+              |> List.sort (fun (_, _, _, a) (_, _, _, b) -> compare a b)
+            in
+            let rec go total = function
+              | [] -> Lwt.return_unit
+              | _ when total <= cap -> Lwt.return_unit
+              | (key, bytes, _, _) :: rest ->
+                  Log.debug "cache cap: evicting %s (%d bytes)" key bytes;
+                  let* () = evict key in
+                  go (total - bytes) rest
+            in
+            go total candidates)
 
   let clear_local key =
     let* () = evict key in

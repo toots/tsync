@@ -28,6 +28,8 @@ type domain = {
   versioning : bool;
   read_only : bool;
   chunk_size : int;  (** chunk size (bytes) for newly uploaded files *)
+  max_cache : int option;
+      (** soft cap (bytes) on local cache usage; [None] = unbounded *)
 }
 
 type t = {

@@ -31,6 +31,12 @@ module type S = sig
       backend requests. *)
   val chunk_size : int
 
+  (** Soft cap (bytes) on local cache disk usage for this domain. When set and
+      exceeded, the coldest clean, closed files are evicted (dropping their
+      local data, refetched on demand) until usage is back under the cap.
+      Best-effort; [None] means unbounded. *)
+  val max_cache : int option
+
   (** How [import] treats symbolic links: [`Keep] preserves them as symlink
       objects, [`Follow] dereferences to the target's content, [`Skip] ignores
       them. *)

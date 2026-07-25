@@ -63,6 +63,11 @@ module type S = sig
   (** Evict [key] now if closed, else defer the eviction to its last close. *)
   val request_evict : t -> unit Lwt.t
 
+  (** Best-effort: while local cache usage exceeds [C.max_cache], evict the
+      coldest closed, clean files until back under. No-op when [max_cache] is
+      unset. *)
+  val enforce_cache_cap : unit -> unit Lwt.t
+
   (** In-flight downloads (files currently being fetched). *)
   val downloading_count : unit -> int
 

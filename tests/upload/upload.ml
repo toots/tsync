@@ -28,6 +28,7 @@ module C = struct
   let max_uploads = 4
   let max_downloads = 8
   let chunk_size = chunk_size
+  let max_cache = None
   let symlink_policy = `Keep
   let read_only = false
 end
