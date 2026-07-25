@@ -1262,7 +1262,9 @@ let sync_cmd =
          write_bookmark (C.journal_prefix ^ J.entry_key ());
          (try
             if !verbose then Log.info "notifying daemon of completed resync";
-            ignore (ipc_action ~socket_path:C.socket_path "full_resync")
+            ignore
+              (ipc_action ~socket_path:C.socket_path ~domain:C.domain_name
+                 "full_resync")
           with
            | Failure msg -> Printf.eprintf "Warning: full_resync: %s\n" msg
            | _ -> ());
@@ -2683,6 +2685,52 @@ let build_config_cmd =
        ~doc:"Show optional features compiled into this binary")
     Term.(const run $ const ())
 
+(* ── Frontend-contributed commands ───────────────────────────────────────── *)
+
+(* Each registered frontend surfaces its commands as `tsync <cli_group> <verb>`.
+   The binary owns [--domain] parsing and verifies the frontend is configured
+   for the chosen domain before handing control to the frontend's [run]. Groups
+   only exist for frontends compiled into this binary (a link-time side effect),
+   so e.g. `fileprovider` appears on macOS but not Linux. *)
+let frontend_cmds () =
+  let domain_arg =
+    Arg.(
+      value
+      & opt (some string) None
+      & info ["domain"] ~docv:"NAME" ~doc:"Domain name (default: from config)")
+  in
+  let run name (command : Frontend.command) domain =
+    let cfg = Conf_parsing.load runtime_paths.Runtime.config_path in
+    let domain =
+      match domain with Some _ -> domain | None -> read_default_domain ()
+    in
+    let d = Conf_parsing.pick_domain ?domain cfg in
+    if not (List.mem name (frontend_names d)) then (
+      Printf.eprintf "domain %s has no %s frontend\n" d.Conf_parsing.name name;
+      exit 1);
+    let (module C : Conf.S) = make_conf ?domain cfg in
+    command.Frontend.run (module C)
+  in
+  List.filter_map
+    (fun (name, cli_group, commands) ->
+      match commands with
+        | [] -> None
+        | _ ->
+            let subs =
+              List.map
+                (fun (command : Frontend.command) ->
+                  Cmd.v
+                    (Cmd.info command.Frontend.verb ~doc:command.Frontend.doc)
+                    Term.(const (run name command) $ domain_arg))
+                commands
+            in
+            Some
+              (Cmd.group
+                 (Cmd.info cli_group
+                    ~doc:(Printf.sprintf "%s frontend commands" cli_group))
+                 subs))
+    (Frontend.entries ())
+
 (* ── Main ────────────────────────────────────────────────────────────────── *)
 
 let () =
@@ -2690,34 +2738,35 @@ let () =
   let cmd =
     Cmd.group
       (Cmd.info "tsync" ~doc:"Cloud-backed filesystem sync")
-      [
-        build_config_cmd;
-        configure_cmd;
-        print_conf_cmd;
-        paths_cmd;
-        set_domain_cmd;
-        default_domain_cmd;
-        start_cmd;
-        stop_cmd;
-        status_cmd;
-        stats_cmd;
-        sync_cmd;
-        recheck_cmd;
-        resync_remote_cmd;
-        import_cmd;
-        export_cmd;
-        evict_cmd;
-        restore_cmd;
-        pull_cmd;
-        ls_cmd;
-        share_cmd;
-        versions_cmd;
-        revert_cmd;
-        trash_cmd;
-        untrash_cmd;
-        purge_cmd;
-        expire_cmd;
-        auto_evict_cmd;
-      ]
+      ([
+         build_config_cmd;
+         configure_cmd;
+         print_conf_cmd;
+         paths_cmd;
+         set_domain_cmd;
+         default_domain_cmd;
+         start_cmd;
+         stop_cmd;
+         status_cmd;
+         stats_cmd;
+         sync_cmd;
+         recheck_cmd;
+         resync_remote_cmd;
+         import_cmd;
+         export_cmd;
+         evict_cmd;
+         restore_cmd;
+         pull_cmd;
+         ls_cmd;
+         share_cmd;
+         versions_cmd;
+         revert_cmd;
+         trash_cmd;
+         untrash_cmd;
+         purge_cmd;
+         expire_cmd;
+         auto_evict_cmd;
+       ]
+      @ frontend_cmds ())
   in
   exit (Cmd.eval cmd)

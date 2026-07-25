@@ -33,12 +33,25 @@ type field_spec = {
   secret : bool;
 }
 
-type entry = { modl : (module S); spec : field_spec list }
+(* A CLI subcommand a frontend contributes, surfaced as [tsync <cli_group>
+   <verb>]. Declarative and cmdliner-free (like {!field_spec}): the binary owns
+   argument parsing and resolves [--domain] to a {!Conf.S} — verifying this
+   frontend is configured for it — before calling [run]. *)
+type command = { verb : string; doc : string; run : (module Conf.S) -> unit }
+
+type entry = {
+  modl : (module S);
+  spec : field_spec list;
+  cli_group : string;
+  commands : command list;
+}
 
 let registry : (string, entry) Hashtbl.t = Hashtbl.create 4
 
-let register ?(spec = []) name (m : (module S)) =
-  Hashtbl.replace registry name { modl = m; spec }
+let register ?(spec = []) ?(cli_group = "") ?(commands = []) name
+    (m : (module S)) =
+  let cli_group = if cli_group = "" then name else cli_group in
+  Hashtbl.replace registry name { modl = m; spec; cli_group; commands }
 
 let find name = Option.map (fun e -> e.modl) (Hashtbl.find_opt registry name)
 
@@ -47,6 +60,13 @@ let spec_for name =
     (Option.map (fun e -> e.spec) (Hashtbl.find_opt registry name))
 
 let names () = List.of_seq (Hashtbl.to_seq_keys registry)
+
+(* (frontend name, CLI group, contributed commands) for every registered
+   frontend — the binary turns these into command groups. *)
+let entries () =
+  Hashtbl.fold
+    (fun name e acc -> (name, e.cli_group, e.commands) :: acc)
+    registry []
 
 (* Cap the Lwt blocking-syscall thread pool for this process. Call it from inside
    a leaf's own Lwt loop, after all forking is done: the first Lwt_unix touch

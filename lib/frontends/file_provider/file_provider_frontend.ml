@@ -25,8 +25,39 @@ let start bindings =
   in
   File_provider.start ~confs ~socket_path:paths.Runtime.socket_path
 
+(* Ask the running daemon to have the File Provider drop its cached index and
+   re-enumerate this domain. Reuses the [full_resync] IPC action (routed to the
+   domain's runtime by the [domain] field). *)
+let reimport (module C : Conf.S) =
+  let req =
+    `Assoc
+      [("action", `String "full_resync"); ("domain", `String C.domain_name)]
+  in
+  match
+    Yojson.Safe.from_string
+      (Ipc.send ~socket_path:C.socket_path (Yojson.Safe.to_string req))
+  with
+    | `Assoc o when List.assoc_opt "ok" o = Some (`Bool true) ->
+        Printf.printf "reimport requested for %s\n" C.domain_name
+    | _ ->
+        Printf.eprintf "reimport failed (is the daemon running?)\n";
+        exit 1
+    | exception _ ->
+        Printf.eprintf "reimport failed (is the daemon running?)\n";
+        exit 1
+
 let register () =
-  Frontend.register implementation
+  Frontend.register implementation ~cli_group:"fileprovider"
+    ~commands:
+      [
+        {
+          Frontend.verb = "reimport";
+          doc =
+            "Ask the File Provider to drop its cached index and re-enumerate a \
+             domain.";
+          run = reimport;
+        };
+      ]
     (module struct
       let is_local = is_local
       let start = start

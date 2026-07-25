@@ -76,10 +76,60 @@ private final class NotifyListener: @unchecked Sendable {
             manager.evictItem(identifier: NSFileProviderItemIdentifier(key)) { _ in }
             manager.signalEnumerator(for: .workingSet) { _ in }
         } else if line == "RESYNC" {
-            // Force fileproviderd to re-scan the whole tree, picking up changes
-            // made directly in the bucket (which write no journal entry).
+            // Force a full refresh, picking up changes made directly in the bucket
+            // (which write no journal entry). reimportItems reconciles the listing;
+            // evicting every materialized item drops stale downloaded content so it
+            // re-downloads fresh on next access.
+            evictAllMaterialized(manager)
             manager.reimportItems(below: .rootContainer) { _ in }
+            manager.signalEnumerator(for: .workingSet) { _ in }
         }
+    }
+
+    /// Evict every currently-materialized (downloaded) item so stale content is
+    /// dropped and re-downloaded fresh on next access. The materialized-items
+    /// enumeration is paged and asynchronous; the observer walks the pages and
+    /// evicts as it goes, retaining itself until enumeration finishes.
+    private func evictAllMaterialized(_ manager: NSFileProviderManager) {
+        MaterializedEvictionObserver(manager: manager).start()
+    }
+}
+
+private final class MaterializedEvictionObserver: NSObject, NSFileProviderEnumerationObserver {
+    private let manager: NSFileProviderManager
+    private let enumerator: NSFileProviderEnumerator
+    private var retain: MaterializedEvictionObserver?
+
+    init(manager: NSFileProviderManager) {
+        self.manager = manager
+        self.enumerator = manager.enumeratorForMaterializedItems()
+    }
+
+    func start() {
+        retain = self  // stay alive across the async enumeration
+        enumerator.enumerateItems(for: self,
+                                  startingAt: NSFileProviderPage(NSFileProviderPage.initialPageSortedByName as Data))
+    }
+
+    func didEnumerate(_ items: [NSFileProviderItemProtocol]) {
+        for item in items {
+            manager.evictItem(identifier: item.itemIdentifier) { _ in }
+        }
+    }
+
+    func finishEnumerating(upTo nextPage: NSFileProviderPage?) {
+        if let nextPage {
+            enumerator.enumerateItems(for: self, startingAt: nextPage)
+        } else {
+            finish()
+        }
+    }
+
+    func finishEnumeratingWithError(_ error: Error) { finish() }
+
+    private func finish() {
+        enumerator.invalidate()
+        retain = nil
     }
 }
 
