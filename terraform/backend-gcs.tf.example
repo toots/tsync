@@ -1,0 +1,18 @@
+# Remote state in GCS. To use it, activate this backend (a config may have only
+# one backend block — S3 or GCS, not both):
+#
+#   mv backend-gcs.tf.example backend-gcs.tf
+#
+# then create the bucket (./bootstrap-gcs) and init. The bucket is supplied at
+# init time to keep it out of source:
+#
+#   terraform init -backend-config=backend.hcl
+#
+# The gcs backend locks state on its own (via the object's generation) — no
+# separate lock table needed.
+terraform {
+  backend "gcs" {
+    prefix = "tsync" # state at gs://<bucket>/tsync/default.tfstate
+    # bucket supplied at init time (backend.hcl) to keep it out of source.
+  }
+}

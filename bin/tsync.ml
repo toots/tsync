@@ -1677,10 +1677,8 @@ let assoc_set l key v =
 (* One store's fields from `terraform output -json`. *)
 type tf_store = {
   bucket : string;
-  region : string;
   share_url : string;
-  access_key_id : string;
-  secret : string option;
+  fields : (string * string) list; (* backend-specific fields terraform fills *)
 }
 
 let terraform_output dir =
@@ -1708,30 +1706,41 @@ let terraform_output dir =
 let tf_value root name =
   jfield (Option.value (jfield root name) ~default:`Null) "value"
 
-(* Store keys present in `terraform output`. *)
-let tf_stores root =
-  match tf_value root "stores" with
+(* The stores-map output name differs by cloud; the per-store shape and the
+   credential outputs differ too (see below). *)
+let tf_stores_output = function `S3 -> "stores" | `Gcs -> "gcs_stores"
+
+(* Store keys present in `terraform output` for the given cloud. *)
+let tf_stores root which =
+  match tf_value root (tf_stores_output which) with
     | Some (`Assoc l) -> List.map fst l
     | _ -> []
 
-let tf_lookup root store =
-  let value name = tf_value root name in
-  match value "stores" with
+let tf_lookup root which store =
+  match tf_value root (tf_stores_output which) with
     | Some stores -> (
         match jfield stores store with
           | Some s ->
               let str k = Option.value (jstr s k) ~default:"" in
-              let secret =
-                Option.bind (value "secret_access_keys") (fun m -> jstr m store)
+              (* Secrets live in a separate sensitive output, keyed by store. *)
+              let secret_from out =
+                Option.bind (tf_value root out) (fun m -> jstr m store)
               in
-              Some
-                {
-                  bucket = str "bucket";
-                  region = str "region";
-                  share_url = str "share_url";
-                  access_key_id = str "access_key_id";
-                  secret;
-                }
+              let fields =
+                match which with
+                  | `S3 ->
+                      let region = str "region" in
+                      (if region = "" then [] else [("region", region)])
+                      @ [("accessKeyId", str "access_key_id")]
+                      @ (match secret_from "secret_access_keys" with
+                          | Some k -> [("secretAccessKey", k)]
+                          | None -> [])
+                  | `Gcs -> (
+                      match secret_from "gcs_service_account_keys" with
+                        | Some k -> [("serviceAccountKey", k)]
+                        | None -> [])
+              in
+              Some { bucket = str "bucket"; share_url = str "share_url"; fields }
           | None -> None)
     | None -> None
 
@@ -1796,27 +1805,21 @@ let prompt_symlinks default =
 
 (* ── Backend / domain builders ───────────────────────────────────────────── *)
 
-(* Fields a Terraform store fills on an s3 backend. *)
-let store_fields =
-  ["bucket"; "region"; "accessKeyId"; "secretAccessKey"; "shareUrl"]
+(* The backend fields a Terraform store fills — so the wizard skips prompting
+   for them. Exactly what [apply_store_fields] sets. *)
+let store_fields (s : tf_store) = "bucket" :: "shareUrl" :: List.map fst s.fields
 
 let apply_store_fields l (s : tf_store) =
   let l = assoc_set l "bucket" (`String s.bucket) in
   let l =
-    if s.region = "" then l else assoc_set l "region" (`String s.region)
-  in
-  let l = assoc_set l "accessKeyId" (`String s.access_key_id) in
-  let l =
-    match s.secret with
-      | Some sec -> assoc_set l "secretAccessKey" (`String sec)
-      | None -> l
+    List.fold_left (fun l (k, v) -> assoc_set l k (`String v)) l s.fields
   in
   assoc_set l "shareUrl" (`String s.share_url)
 
 (* Interactively pick a Terraform store (numbered menu of store + bucket) and read
    its outputs. Pulls once; nothing about Terraform is persisted. [None] on
    decline/failure. *)
-let terraform_store () =
+let terraform_store which =
   let dir = prompt "  Terraform directory" (Some "terraform") in
   let fail msg =
     Printf.printf "  (%s)\n" msg;
@@ -1827,8 +1830,8 @@ let terraform_store () =
     | Some root -> (
         let entries =
           List.filter_map
-            (fun k -> Option.map (fun s -> (k, s)) (tf_lookup root k))
-            (tf_stores root)
+            (fun k -> Option.map (fun s -> (k, s)) (tf_lookup root which k))
+            (tf_stores root which)
         in
         match entries with
           | [] -> fail "no stores found in terraform output"
@@ -1848,31 +1851,35 @@ let terraform_store () =
 
 let prompt_backend () =
   let rec ask () =
-    let t = prompt "  Backend type (s3/local/ssh)" (Some "s3") in
-    if List.mem t ["s3"; "local"; "ssh"] then t
+    let t = prompt "  Backend type (s3/gcs/local/ssh)" (Some "s3") in
+    if List.mem t ["s3"; "gcs"; "local"; "ssh"] then t
     else begin
-      Printf.printf "  Unknown backend type %S — choose s3, local, or ssh.\n%!"
-        t;
+      Printf.printf
+        "  Unknown backend type %S — choose s3, gcs, local, or ssh.\n%!" t;
       ask ()
     end
   in
   let backend_type = ask () in
   let name = prompt "  Backend name" (Some backend_type) in
-  (* For s3, offer to pull bucket/keys/share URL from Terraform up front, then
-     only prompt the fields Terraform doesn't provide. *)
-  let synced =
-    if
-      backend_type = "s3"
-      && prompt_bool ~default:true
-           "  Fill bucket/keys/share URL from Terraform?"
-    then terraform_store ()
-    else None
+  (* For s3/gcs, offer to pull bucket/keys/share URL from Terraform up front,
+     then only prompt the fields Terraform doesn't provide. *)
+  let which =
+    match backend_type with "s3" -> Some `S3 | "gcs" -> Some `Gcs | _ -> None
   in
+  let synced =
+    match which with
+      | Some w
+        when prompt_bool ~default:true
+               "  Fill bucket/keys/share URL from Terraform?" ->
+          terraform_store w
+      | _ -> None
+  in
+  let synced_skip = match synced with Some s -> store_fields s | None -> [] in
   let spec = Option.value ~default:[] (Backend.spec_for backend_type) in
   let fields =
     List.filter_map
       (fun (s : Backend.field_spec) ->
-        if synced <> None && List.mem s.name store_fields then None
+        if List.mem s.name synced_skip then None
         else (
           let value =
             match s.typ with
@@ -1961,7 +1968,10 @@ let edit_backend b =
       | _ -> ""
   in
   let btype = get "type" in
-  let is_s3 = btype = "s3" in
+  let which =
+    match btype with "s3" -> Some `S3 | "gcs" -> Some `Gcs | _ -> None
+  in
+  let can_sync = which <> None in
   let spec = Option.value ~default:[] (Backend.spec_for btype) in
   let running = ref true in
   let status = ref "" in
@@ -1977,17 +1987,17 @@ let edit_backend b =
       spec;
     let main_n = List.length spec + 2 in
     Printf.printf "  %d. %-16s %s\n" main_n "primary:" (get "main");
-    if is_s3 then
+    if can_sync then
       Printf.printf "  [t] sync bucket/keys/share URL from Terraform\n";
     if !status <> "" then Printf.printf "\n%s\n" !status;
     Printf.printf "\nEnter a field number to edit%s, or [d]one:\n> %!"
-      (if is_s3 then ", [t] to sync" else "");
+      (if can_sync then ", [t] to sync" else "");
     status := "";
     let input = String.lowercase_ascii (String.trim (read_line ())) in
     match input with
       | "d" | "" -> running := false
-      | "t" when is_s3 -> (
-          match terraform_store () with
+      | "t" when can_sync -> (
+          match terraform_store (Option.get which) with
             | Some s -> l := apply_store_fields !l s
             | None -> ())
       | "1" ->

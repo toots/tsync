@@ -1,6 +1,55 @@
 variable "region" {
   type        = string
-  description = "AWS region for all stores. For buckets in different regions, see README > Multi-region."
+  default     = null
+  description = "AWS region for s3 stores. Required only when stores is non-empty (leave unset for a GCS-only deployment). For buckets in different regions, see README > Multi-region."
+}
+
+# ── GCS ────────────────────────────────────────────────────────────────────
+
+variable "gcp_project" {
+  type        = string
+  default     = null
+  description = "GCP project id. Required only when gcs_stores is non-empty."
+}
+
+variable "gcp_region" {
+  type        = string
+  default     = null
+  description = "Default bucket location for GCS stores — region or multi-region (US, EU). Required only when gcs_stores is non-empty."
+}
+
+variable "gcp_function_region" {
+  type        = string
+  default     = "us-central1"
+  description = "Default region for share Cloud Functions. Must be a specific region (not a multi-region like US), since Cloud Functions/Run are regional."
+}
+
+variable "gcp_functions_source_bucket" {
+  type        = string
+  default     = null
+  description = "Bucket to hold the function source zip. Defaults to <project>-tsync-functions-src."
+}
+
+variable "gcs_stores" {
+  description = <<-EOT
+    GCS stores to provision, keyed by a short logical name ([a-z0-9-], suffixes
+    SA/function names). One entry = one bucket + client SA key + share Cloud
+    Function + lifecycle. Uses native OAuth (service-account key), not S3 interop.
+  EOT
+  type = map(object({
+    bucket             = string
+    create_bucket      = optional(bool, true)
+    location           = optional(string) # bucket location; default: var.gcp_region
+    function_region    = optional(string) # default: var.gcp_function_region
+    shares_prefix      = string           # "tsync/<domain>/shares/"
+    manage_lifecycle   = optional(bool, true)
+    cache_expiry_days  = optional(number, 30)
+    archive_after_days = optional(number) # null = no cold-storage transition
+    presign_ttl        = optional(number, 600)
+    memory_mb          = optional(number, 2048)
+    max_share_bytes    = optional(number, 10737418240)
+  }))
+  default = {}
 }
 
 variable "stores" {
@@ -30,4 +79,5 @@ variable "stores" {
       })), [])
     })), [])
   }))
+  default = {}
 }

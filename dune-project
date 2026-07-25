@@ -27,6 +27,8 @@
   mem_usage
 tls
   base64
+  x509
+  mirage-crypto-pk
   cmdliner)
  (depopts
    syslog

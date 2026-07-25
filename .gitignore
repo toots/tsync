@@ -29,6 +29,10 @@ crash.*.log
 *.tfvars.json
 !example.tfvars
 backend.hcl
+# Only the backend-*.tf.example templates are committed; the activated one
+# (whichever backend you chose) is local.
+backend-s3.tf
+backend-gcs.tf
 override.tf
 override.tf.json
 *_override.tf

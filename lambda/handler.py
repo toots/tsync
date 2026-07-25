@@ -24,31 +24,26 @@ path also caps a single file at ~80 GB (10,000 parts). Upgrade path when these
 bite: build on Fargate.
 """
 
-import concurrent.futures
 import html
 import json
 import os
 import time
 import traceback
 import zipfile
-from urllib.parse import quote
 
-import boto3
-from botocore.exceptions import ClientError
+from share_common import ShareError
 
-BUCKET = os.environ["BUCKET"]
 SHARES_PREFIX = os.environ["SHARES_PREFIX"]  # guard: keys must start with this
-PRESIGN_TTL = int(os.environ.get("PRESIGN_TTL", "600"))
 MAX_BYTES = int(os.environ.get("MAX_BYTES", str(10 * 1024**3)))
-CHUNK_READ = 1024 * 1024
 
-s3 = boto3.client("s3")
+# Pick the storage backend by env; import lazily so one deployment zip runs on
+# either cloud without importing the other's SDK.
+if os.environ.get("STORE", "aws") == "gcs":
+    from store_gcs import Store
+else:
+    from store_aws import Store
 
-
-class ShareError(Exception):
-    def __init__(self, code, msg):
-        self.code = code
-        self.msg = msg
+store = Store()
 
 
 def too_large():
@@ -59,12 +54,7 @@ def too_large():
 
 
 def get_bytes(key):
-    try:
-        return s3.get_object(Bucket=BUCKET, Key=key)["Body"].read()
-    except ClientError as e:
-        if e.response["Error"]["Code"] in ("NoSuchKey", "404", "NoSuchBucket"):
-            raise FileNotFoundError(key)
-        raise
+    return store.get_bytes(key)
 
 
 def get_json(key):
@@ -72,13 +62,7 @@ def get_json(key):
 
 
 def object_exists(key):
-    try:
-        s3.head_object(Bucket=BUCKET, Key=key)
-        return True
-    except ClientError as e:
-        if e.response["Error"]["Code"] in ("404", "NoSuchKey", "NotFound"):
-            return False
-        raise
+    return store.exists(key)
 
 
 def chunk_key(chunk_prefix, c):
@@ -106,19 +90,17 @@ def child_objects(ns_prefix):
     One GET per child to read names/ids/sizes from bodies (folders are small)."""
     base = ns_base(ns_prefix)
     out = []
-    paginator = s3.get_paginator("list_objects_v2")
-    for page in paginator.paginate(Bucket=BUCKET, Prefix=ns_prefix):
-        for obj in page.get("Contents", []):
-            if obj["Key"] == ns_prefix:
-                continue
-            try:
-                m = json.loads(get_bytes(obj["Key"]))
-            except (FileNotFoundError, ValueError):
-                continue
-            if m.get("dir"):
-                out.append((m.get("name", ""), base + m["id"] + "/", True, None))
-            elif not m.get("dirty"):
-                out.append((m.get("name", ""), obj["Key"], False, m.get("size")))
+    for key in store.list_keys(ns_prefix):
+        if key == ns_prefix:
+            continue
+        try:
+            m = json.loads(get_bytes(key))
+        except (FileNotFoundError, ValueError):
+            continue
+        if m.get("dir"):
+            out.append((m.get("name", ""), base + m["id"] + "/", True, None))
+        elif not m.get("dirty"):
+            out.append((m.get("name", ""), key, False, m.get("size")))
     return out
 
 
@@ -147,30 +129,6 @@ def safe_rel(path):
     return "/".join(parts)
 
 
-def sanitize_filename(name):
-    return name.replace('"', "").replace("\\", "").replace("\n", "").replace("\r", "")
-
-
-def content_disposition(inline, filename):
-    # RFC 5987: HTTP headers are ASCII, so non-ASCII names (accents, NFD combining
-    # marks) go in filename* as percent-encoded UTF-8, with an ASCII filename
-    # fallback. Putting raw UTF-8 in filename="..." makes S3 reject the request.
-    disp = "inline" if inline else "attachment"
-    ascii_name = sanitize_filename(filename).encode("ascii", "replace").decode("ascii")
-    return "%s; filename=\"%s\"; filename*=UTF-8''%s" % (disp, ascii_name, quote(filename, safe=""))
-
-
-def presign(cache_key, filename, content_type=None, inline=False):
-    params = {
-        "Bucket": BUCKET,
-        "Key": cache_key,
-        "ResponseContentDisposition": content_disposition(inline, filename),
-    }
-    if content_type:
-        params["ResponseContentType"] = content_type
-    return s3.generate_presigned_url("get_object", Params=params, ExpiresIn=PRESIGN_TTL)
-
-
 # ── Assembly ────────────────────────────────────────────────────────────────
 
 
@@ -192,73 +150,19 @@ def file_manifest(key):
     return m
 
 
-def chunk_copy_error(e):
-    """Translate a boto error from copying a chunk into a clean ShareError, or
-    None to let it propagate (surfaced as a logged 500). A file that lists a
-    chunk which is absent — or has aged into cold storage — is a data problem,
-    not a server bug."""
-    code = e.response.get("Error", {}).get("Code", "")
-    if code in ("NoSuchKey", "NoSuchBucket", "404"):
-        return ShareError(502, "a data block of this file is missing on the backend")
-    if code == "InvalidObjectState":
-        return ShareError(503, "file is in cold storage (Glacier); try again later")
-    return None
-
-
 def assemble(m, chunk_prefix, cache_key):
-    """Write a file's bytes to cache_key by server-side chunk copy (no /tmp)."""
+    """Write a file's bytes to cache_key by server-side chunk assembly (no /tmp).
+    Applies the size / count guards, then hands the ordered chunk keys to the
+    store, which stitches them (S3 multipart-copy / GCS compose)."""
     if m.get("size", 0) > MAX_BYTES:
         raise too_large()
     chunks = sorted(m["chunks"], key=lambda c: c["index"])
     if not chunks:
-        s3.put_object(Bucket=BUCKET, Key=cache_key, Body=b"")
+        store.put_bytes(cache_key, b"")
         return
     if len(chunks) > 10000:
         raise too_large()
-    try:
-        if len(chunks) == 1:
-            s3.copy_object(
-                Bucket=BUCKET,
-                Key=cache_key,
-                CopySource={
-                    "Bucket": BUCKET, "Key": chunk_key(chunk_prefix, chunks[0])
-                },
-            )
-            return
-        upload_id = s3.create_multipart_upload(Bucket=BUCKET, Key=cache_key)[
-            "UploadId"
-        ]
-        try:
-            # The part copies are independent server-side S3 operations, so run
-            # them concurrently — a large file assembles in seconds instead of
-            # thousands of sequential round-trips. Playback then streams via Range.
-            def copy_part(item):
-                n, c = item
-                r = s3.upload_part_copy(
-                    Bucket=BUCKET,
-                    Key=cache_key,
-                    UploadId=upload_id,
-                    PartNumber=n,
-                    CopySource={"Bucket": BUCKET, "Key": chunk_key(chunk_prefix, c)},
-                )
-                return {"ETag": r["CopyPartResult"]["ETag"], "PartNumber": n}
-
-            with concurrent.futures.ThreadPoolExecutor(max_workers=32) as ex:
-                parts = list(ex.map(copy_part, enumerate(chunks, start=1)))
-            parts.sort(key=lambda p: p["PartNumber"])
-            s3.complete_multipart_upload(
-                Bucket=BUCKET,
-                Key=cache_key,
-                UploadId=upload_id,
-                MultipartUpload={"Parts": parts},
-            )
-        except Exception:
-            s3.abort_multipart_upload(
-                Bucket=BUCKET, Key=cache_key, UploadId=upload_id
-            )
-            raise
-    except ClientError as e:
-        raise (chunk_copy_error(e) or e)
+    store.assemble([chunk_key(chunk_prefix, c) for c in chunks], cache_key)
 
 
 def build_file(file_key, chunk_prefix, cache_key):
@@ -304,12 +208,9 @@ def write_zip(entries, chunk_prefix, cache_key):
                 zi.compress_type = zipfile.ZIP_STORED
                 with zf.open(zi, "w") as w:
                     for c in sorted(m["chunks"], key=lambda c: c["index"]):
-                        body = s3.get_object(
-                            Bucket=BUCKET, Key=chunk_key(chunk_prefix, c)
-                        )["Body"]
-                        for buf in iter(lambda: body.read(CHUNK_READ), b""):
+                        for buf in store.read_chunk(chunk_key(chunk_prefix, c)):
                             w.write(buf)
-        s3.upload_file(tmp, BUCKET, cache_key)
+        store.upload_file(tmp, cache_key)
     finally:
         if os.path.exists(tmp):
             os.unlink(tmp)
@@ -449,7 +350,7 @@ def download_artifact(manifest_key, share):
             build_dir_zip(share, cache_key)
         else:
             raise ShareError(400, "unknown share type")
-    return redirect(presign(cache_key, share["filename"], inline=False))
+    return redirect(store.signed_url(cache_key, share["filename"], inline=False))
 
 
 def list_dir(share, rel):
@@ -497,7 +398,7 @@ def serve_file(share, path, as_download, want_json):
         assemble(m, share["chunkPrefix"], cache_key)
     name = os.path.basename(rel)
     ctype = mime_type(name)
-    url = presign(cache_key, name, content_type=ctype, inline=not as_download)
+    url = store.signed_url(cache_key, name, content_type=ctype, inline=not as_download)
     if want_json:
         return json_response(
             {"url": url, "name": name, "contentType": ctype, "size": m.get("size")}
@@ -537,6 +438,16 @@ def handler(event, context):
         # rather than a bare "Internal Server Error".
         traceback.print_exc()
         return err(500, "internal error (%s)" % type(e).__name__)
+
+
+def gcp_handler(request):
+    """Cloud Functions (functions-framework) entry point. Adapts a Flask request
+    to the event dict the core handler consumes, and its response dict back to a
+    Flask (body, status, headers) tuple. The core [handler] stays AWS-shaped so
+    the moto tests exercise it directly."""
+    event = {"rawPath": request.path, "queryStringParameters": dict(request.args)}
+    resp = handler(event, None)
+    return (resp.get("body", ""), resp["statusCode"], resp.get("headers", {}))
 
 
 def render_browse(share, token):

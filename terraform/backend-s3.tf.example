@@ -1,4 +1,9 @@
-# Remote state in S3 (bucket created by ./bootstrap). Bucket + region are supplied
+# Remote state in S3. To use it, activate this backend (a config may have only
+# one backend block — S3 or GCS, not both):
+#
+#   mv backend-s3.tf.example backend-s3.tf
+#
+# then create the bucket (./bootstrap-s3) and init. Bucket + region are supplied
 # at init time to keep them out of source:
 #
 #   terraform init -backend-config=backend.hcl

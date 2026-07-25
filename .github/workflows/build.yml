@@ -11,7 +11,7 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  lambda:
+  lambda-s3:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -20,8 +20,30 @@ jobs:
           python-version: "3.13"
       - name: Install test dependencies
         run: pip install boto3 moto pytest
-      - name: Run share Lambda tests
+      - name: Run share handler tests (S3 store)
         run: pytest lambda/test_handler.py
+
+  lambda-gcs:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Start fake-gcs-server
+        run: |
+          docker run -d --name fake-gcs -p 4443:4443 \
+            fsouza/fake-gcs-server -scheme http -public-host localhost:4443
+          for i in $(seq 1 30); do
+            curl -sf "http://localhost:4443/storage/v1/b?project=test" >/dev/null && break
+            sleep 1
+          done
+      - name: Install test dependencies
+        run: pip install google-cloud-storage pytest
+      - name: Run GCS store tests
+        env:
+          STORAGE_EMULATOR_HOST: http://localhost:4443
+        run: pytest lambda/test_store_gcs.py
 
   linux:
     runs-on: ubuntu-latest
