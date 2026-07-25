@@ -191,4 +191,9 @@ let chunk_prefix d = domain_root d ^ "chunks/"
 let versions_prefix d = domain_root d ^ "versions/"
 let journal_prefix d = domain_root d ^ "journal/"
 let cursor_key d = domain_root d ^ "cursor"
-let shares_prefix d = domain_root d ^ "shares/"
+
+(* Shares are NOT nested per-domain: they live at a single fixed root so the share
+   service's IAM/lifecycle can target one constant prefix. A share manifest is
+   token-addressed and records its own chunk/dir prefixes, so its domain is
+   recoverable from the body — the path needs no domain segment. *)
+let shares_prefix (_ : domain) = root_prefix ^ "shares/"

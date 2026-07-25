@@ -7,6 +7,7 @@ module type S = sig
   val versions_prefix : string
   val journal_prefix : string
   val cursor_key : string
+  val shares_prefix : string
 
   (** Ordered list of backends. First element is primary (used for reads).
       Writes fan out to all elements. *)

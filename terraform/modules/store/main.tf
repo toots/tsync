@@ -1,5 +1,8 @@
 locals {
   iam_user_name = coalesce(var.iam_user_name, "tsync-client-${var.name}")
+  # Fixed, domain-independent shares root (matches Conf_parsing.shares_prefix in
+  # the daemon). Share manifests + cached artifacts live under tsync/shares/.
+  shares_prefix = "tsync/shares/"
 }
 
 # ── Store bucket ───────────────────────────────────────────────────────────
@@ -121,7 +124,7 @@ data "aws_iam_policy_document" "share" {
   # Write only cached artifacts under the shares prefix.
   statement {
     actions   = ["s3:PutObject", "s3:AbortMultipartUpload"]
-    resources = ["${local.bucket_arn}/${var.shares_prefix}*"]
+    resources = ["${local.bucket_arn}/${local.shares_prefix}*"]
   }
   statement {
     actions   = ["s3:ListBucket"]
@@ -151,10 +154,9 @@ resource "aws_lambda_function" "share" {
 
   environment {
     variables = {
-      BUCKET        = local.bucket_id
-      SHARES_PREFIX = var.shares_prefix
-      PRESIGN_TTL   = tostring(var.presign_ttl)
-      MAX_BYTES     = tostring(var.max_share_bytes)
+      BUCKET      = local.bucket_id
+      PRESIGN_TTL = tostring(var.presign_ttl)
+      MAX_BYTES   = tostring(var.max_share_bytes)
     }
   }
 }
@@ -189,7 +191,7 @@ resource "aws_s3_bucket_lifecycle_configuration" "shares" {
     status = "Enabled"
 
     filter {
-      prefix = var.shares_prefix
+      prefix = local.shares_prefix
     }
 
     expiration {

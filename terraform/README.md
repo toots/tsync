@@ -104,10 +104,14 @@ its access settings alone.
 
 ## Custom domain (optional)
 
-By default share links use the raw Lambda Function URL
-(`https://<id>.lambda-url.<region>.on.aws/<token>`). Set `custom_domain` on a
-store to serve them from a vanity host instead
-(`https://tsync.example.org/<token>`):
+By default share links use the raw function URL. Set `custom_domain` on a store to
+serve them from a vanity host instead (`https://tsync.example.org/<token>`); the
+store's `share_url` output then points at the domain. Stores without
+`custom_domain` are unchanged — no extra infrastructure, cert, or DNS needed. DNS
+is not managed here (works with any provider — Route 53, Cloudflare, a registrar);
+you add the records by hand.
+
+### S3
 
 ```hcl
 stores = {
@@ -120,12 +124,8 @@ stores = {
 ```
 
 This provisions an API Gateway HTTP API + a regional ACM cert in front of the
-Lambda; `share_url` in the `stores` output then points at the domain. Stores
-without `custom_domain` are unchanged — no API Gateway, no cert, no DNS needed.
-
-DNS is not managed here, so it works with any provider (Route 53, Cloudflare, a
-registrar). You add two `CNAME` records by hand. Create the cert first so apply
-never hangs waiting on validation:
+Lambda. You add two `CNAME` records by hand. Create the cert first so apply never
+hangs waiting on validation:
 
 ```
 # 1. Create just the ACM cert (adjust the store key).
@@ -146,6 +146,39 @@ On Cloudflare, set both CNAMEs to **DNS only** (grey cloud) — a proxied record
 hides the CNAME and ACM validation / routing won't work.
 
 Then copy the store's `share_url` into your s3 backend's `shareUrl`.
+
+### GCS
+
+```hcl
+gcs_stores = {
+  media = {
+    bucket        = "tsync-media"
+    shares_prefix = "tsync/media/shares/"
+    custom_domain = "share.example.org"
+  }
+}
+```
+
+This provisions an external HTTPS load balancer + a Google-managed cert in front
+of the share Cloud Function. It requires the Compute Engine API
+(`gcloud services enable compute.googleapis.com`), and the load balancer carries an
+hourly cost. Add **one** `A` record:
+
+```
+terraform apply
+terraform output -json gcs_custom_domain_dns   # { "media": { domain, a_record } }
+```
+
+Point `custom_domain` at `a_record` with an `A` record. Unlike ACM, `apply` does
+not block on the cert — the Google-managed cert provisions on its own once DNS
+resolves (~15–60 min). Check status with:
+
+```
+gcloud compute ssl-certificates describe tsync-share-<store>-cert --global
+```
+
+On Cloudflare, set the `A` record to **DNS only** (grey cloud). Then copy the
+store's `share_url` into your gcs backend's `shareUrl`.
 
 ## Remote state
 

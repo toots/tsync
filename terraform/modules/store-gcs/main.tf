@@ -20,7 +20,7 @@ resource "google_storage_bucket" "store" {
     content {
       condition {
         age            = var.cache_expiry_days
-        matches_prefix = [var.shares_prefix]
+        matches_prefix = [local.shares_prefix]
       }
       action { type = "Delete" }
     }
@@ -56,6 +56,9 @@ data "google_storage_bucket" "store" {
 
 locals {
   bucket_name = var.create_bucket ? google_storage_bucket.store[0].name : data.google_storage_bucket.store[0].name
+  # Fixed, domain-independent shares root (matches Conf_parsing.shares_prefix in
+  # the daemon). Share manifests + cached artifacts live under tsync/shares/.
+  shares_prefix = "tsync/shares/"
 }
 
 # ── tsync client credentials ───────────────────────────────────────────────
@@ -99,7 +102,7 @@ resource "google_storage_bucket_iam_member" "share_write" {
   member = "serviceAccount:${google_service_account.share.email}"
   condition {
     title      = "shares-prefix-only"
-    expression = "resource.name.startsWith(\"projects/_/buckets/${local.bucket_name}/objects/${var.shares_prefix}\")"
+    expression = "resource.name.startsWith(\"projects/_/buckets/${local.bucket_name}/objects/${local.shares_prefix}\")"
   }
 }
 
@@ -142,11 +145,10 @@ resource "google_cloudfunctions2_function" "share" {
     timeout_seconds       = var.timeout_seconds
     service_account_email = google_service_account.share.email
     environment_variables = {
-      BUCKET        = local.bucket_name
-      SHARES_PREFIX = var.shares_prefix
-      PRESIGN_TTL   = tostring(var.presign_ttl)
-      MAX_BYTES     = tostring(var.max_share_bytes)
-      STORE         = "gcs"
+      BUCKET      = local.bucket_name
+      PRESIGN_TTL = tostring(var.presign_ttl)
+      MAX_BYTES   = tostring(var.max_share_bytes)
+      STORE       = "gcs"
     }
   }
 }

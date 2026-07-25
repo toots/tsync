@@ -784,6 +784,7 @@ let run_scenario ?(versioning = false) ?(symlink_policy = `Keep)
     let versions_prefix = "tsync/test/versions/"
     let journal_prefix = "tsync/test/journal/"
     let cursor_key = "tsync/test/cursor"
+    let shares_prefix = "tsync/shares/"
 
     let backends =
       [
@@ -858,6 +859,7 @@ let run_two_client_scenario ?(versioning = false)
     let versions_prefix = "tsync/test/versions/"
     let journal_prefix = "tsync/test/journal/"
     let cursor_key = "tsync/test/cursor"
+    let shares_prefix = "tsync/shares/"
     let backends = shared_backends
     let cache_root = Filename.concat root "cache-a"
     let data_dir = Filename.concat root "data-a"
@@ -877,6 +879,7 @@ let run_two_client_scenario ?(versioning = false)
     let versions_prefix = "tsync/test/versions/"
     let journal_prefix = "tsync/test/journal/"
     let cursor_key = "tsync/test/cursor"
+    let shares_prefix = "tsync/shares/"
     let backends = shared_backends
     let cache_root = Filename.concat root "cache-b"
     let data_dir = Filename.concat root "data-b"
@@ -944,6 +947,7 @@ let make_conf ?(versioning = false) ~client_name ~backend_root ~cache_root
     let versions_prefix = "tsync/test/versions/"
     let journal_prefix = "tsync/test/journal/"
     let cursor_key = "tsync/test/cursor"
+    let shares_prefix = "tsync/shares/"
     let backends = [Local_backend.make ~root:backend_root]
     let cache_root = cache_root
     let data_dir = data_dir

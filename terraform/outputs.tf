@@ -51,3 +51,13 @@ output "gcs_service_account_keys" {
   sensitive   = true
   value       = { for k, m in module.store_gcs : k => m.service_account_key }
 }
+
+# A record to add per GCS store with a custom_domain: point the domain at a_record.
+# Only populated for those stores; empty otherwise.
+output "gcs_custom_domain_dns" {
+  description = "Per-GCS-store A record for the custom domain (domain -> load balancer IP)."
+  value = {
+    for k, m in module.store_gcs : k => { domain = m.custom_domain, a_record = m.custom_domain_ip }
+    if m.custom_domain != null
+  }
+}

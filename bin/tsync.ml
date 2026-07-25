@@ -229,6 +229,7 @@ let make_conf ?domain ?socket_path ?(tier = true) ?source cfg : (module Conf.S)
     let versions_prefix = Conf_parsing.versions_prefix d
     let journal_prefix = Conf_parsing.journal_prefix d
     let cursor_key = Conf_parsing.cursor_key d
+    let shares_prefix = Conf_parsing.shares_prefix d
 
     let backends =
       match source with
@@ -1728,19 +1729,21 @@ let tf_lookup root which store =
               in
               let fields =
                 match which with
-                  | `S3 ->
+                  | `S3 -> (
                       let region = str "region" in
                       (if region = "" then [] else [("region", region)])
                       @ [("accessKeyId", str "access_key_id")]
-                      @ (match secret_from "secret_access_keys" with
-                          | Some k -> [("secretAccessKey", k)]
-                          | None -> [])
+                      @
+                        match secret_from "secret_access_keys" with
+                        | Some k -> [("secretAccessKey", k)]
+                        | None -> [])
                   | `Gcs -> (
                       match secret_from "gcs_service_account_keys" with
                         | Some k -> [("serviceAccountKey", k)]
                         | None -> [])
               in
-              Some { bucket = str "bucket"; share_url = str "share_url"; fields }
+              Some
+                { bucket = str "bucket"; share_url = str "share_url"; fields }
           | None -> None)
     | None -> None
 
@@ -1807,7 +1810,8 @@ let prompt_symlinks default =
 
 (* The backend fields a Terraform store fills — so the wizard skips prompting
    for them. Exactly what [apply_store_fields] sets. *)
-let store_fields (s : tf_store) = "bucket" :: "shareUrl" :: List.map fst s.fields
+let store_fields (s : tf_store) =
+  "bucket" :: "shareUrl" :: List.map fst s.fields
 
 let apply_store_fields l (s : tf_store) =
   let l = assoc_set l "bucket" (`String s.bucket) in

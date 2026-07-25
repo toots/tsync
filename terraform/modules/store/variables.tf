@@ -20,11 +20,6 @@ variable "iam_user_name" {
   description = "IAM user for tsync clients. Defaults to tsync-client-<name>."
 }
 
-variable "shares_prefix" {
-  type        = string
-  description = "Key prefix for share manifests + cached artifacts. tsync stores them at \"tsync/<domain>/shares/\" — set this to that exact value for the domain served by this store."
-}
-
 variable "manage_lifecycle" {
   type        = bool
   default     = true

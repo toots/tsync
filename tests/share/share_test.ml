@@ -26,6 +26,7 @@ module C : Conf.S = struct
   let versions_prefix = "tsync/testdom/versions/"
   let journal_prefix = "tsync/testdom/journal/"
   let cursor_key = "tsync/testdom/cursor"
+  let shares_prefix = "tsync/shares/"
   let backends = [(module Shareable : Backend.S)]
   let cache_root = cache_dir
   let data_dir = data_dir
@@ -37,7 +38,7 @@ module C : Conf.S = struct
   let read_only = false
 end
 
-let shares_prefix = "tsync/testdom/shares/"
+let shares_prefix = "tsync/shares/"
 
 module L = Layout.Inode.Make (C)
 module S = Share.Make (C)
