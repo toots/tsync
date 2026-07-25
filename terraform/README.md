@@ -15,8 +15,9 @@ from one `stores` map.
 
 ## Quick start
 
-Interactive setup — defines your first store in `terraform.tfvars`, creates the S3
-bucket that holds Terraform state, and runs `terraform init` against it:
+Interactive setup — asks which cloud (S3 or GCS), defines your first store in
+`terraform.tfvars`, creates the bucket that holds Terraform state, activates the
+matching backend, and runs `terraform init` against it:
 
 ```
 ./init.sh
@@ -24,10 +25,11 @@ terraform apply
 ```
 
 Then wire each store into the matching tsync domain. The easy path is
-`tsync configure`: edit the s3 domain, choose **Sync from Terraform**, and it
-pulls the values from `terraform output` and writes them onto the s3 backend
-(`bucket`, `region`, `accessKeyId`, `secretAccessKey`, and `shareUrl`). Nothing
-Terraform-specific is stored in the config.
+`tsync configure`: edit the s3 or gcs domain, choose **Sync from Terraform**, and
+it pulls the values from `terraform output` and writes them onto the backend — for
+s3 `bucket`/`region`/`accessKeyId`/`secretAccessKey`/`shareUrl`, for gcs
+`bucket`/`serviceAccountKey`/`shareUrl`. Nothing Terraform-specific is stored in
+the config.
 
 To wire it by hand instead, read the outputs:
 
@@ -154,7 +156,8 @@ repo ships both as `backend-*.tf.example`; you activate exactly one. Because the
 state bucket must exist first, a tiny `bootstrap-*` config creates it, keeping its
 own state locally.
 
-Follow the section for your cloud — neither assumes you did the other.
+Follow the section for your cloud — neither assumes you did the other. `init.sh`
+automates whichever one you pick.
 
 ### S3
 
@@ -172,7 +175,6 @@ terraform init -backend-config=backend.hcl
 ```
 
 Locking uses S3 natively (`use_lockfile`, Terraform ≥ 1.10) — no DynamoDB table.
-`init.sh` automates this path.
 
 ### GCS
 

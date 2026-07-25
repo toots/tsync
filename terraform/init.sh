@@ -1,12 +1,11 @@
 #!/usr/bin/env bash
 #
 # Interactive setup: defines your first store in terraform.tfvars, provisions the
-# S3 bucket that holds Terraform state (bootstrap-s3/), and runs `terraform init`
-# against that remote backend. This helper is S3-only; for GCS-hosted state see
-# the README (bootstrap-gcs/ + backend-gcs.tf.example).
+# bucket that holds Terraform state, activates the matching backend, and runs
+# `terraform init`. Works for either cloud — S3 or GCS.
 #
 # Add more stores — for multiple domains or redundant storage — by adding entries
-# to the `stores` map in terraform.tfvars, then re-apply. Review the plan and
+# to the stores map in terraform.tfvars, then re-apply. Review the plan and
 # `terraform apply` yourself after this finishes.
 
 set -euo pipefail
@@ -26,13 +25,39 @@ prompt() { # prompt VAR "question" ["default"]
   printf -v "$__var" '%s' "$ans"
 }
 
-prompt REGION "AWS region" "us-east-1"
+# ── Cloud ──────────────────────────────────────────────────────────────────
 
-# AWS account id seeds globally-unique bucket-name defaults. Empty if the CLI or
-# credentials aren't available — then the bucket prompts have no default.
-ACCOUNT=""
-if command -v aws >/dev/null 2>&1; then
-  ACCOUNT=$(aws sts get-caller-identity --query Account --output text 2>/dev/null || true)
+while :; do
+  prompt CLOUD "Cloud for state + stores (s3/gcs)" "s3"
+  case "$CLOUD" in s3 | gcs) break ;; *) echo "  choose s3 or gcs" ;; esac
+done
+
+# Only one backend block may be active.
+OTHER=$([ "$CLOUD" = s3 ] && echo gcs || echo s3)
+if [ -f "backend-${OTHER}.tf" ]; then
+  echo "backend-${OTHER}.tf is active — remove it before setting up ${CLOUD} state." >&2
+  exit 1
+fi
+
+# Cloud-specific location/identity, and a seed for globally-unique bucket-name
+# defaults (empty seed => no default, so the prompt requires a name).
+if [ "$CLOUD" = s3 ]; then
+  prompt REGION "AWS region" "us-east-1"
+  ACCOUNT=""
+  if command -v aws >/dev/null 2>&1; then
+    ACCOUNT=$(aws sts get-caller-identity --query Account --output text 2>/dev/null || true)
+  fi
+  SEED="${ACCOUNT:+${ACCOUNT}-${REGION}}"
+else
+  DEF_PROJECT=""
+  command -v gcloud >/dev/null 2>&1 && DEF_PROJECT=$(gcloud config get-value project 2>/dev/null || true)
+  prompt PROJECT "GCP project id" "$DEF_PROJECT"
+  [ -n "$PROJECT" ] || {
+    echo "project is required" >&2
+    exit 1
+  }
+  prompt LOCATION "Bucket location (e.g. US, us-central1)" "US"
+  SEED="$PROJECT"
 fi
 
 # ── Store definition ───────────────────────────────────────────────────────
@@ -45,8 +70,8 @@ fi
 
 if [ "$write_tfvars" -eq 1 ]; then
   prompt STORE "Store name (short id, e.g. files or media)" "files"
-  [ -n "$ACCOUNT" ] && STORE_BUCKET_DEFAULT="tsync-${STORE}-${ACCOUNT}-${REGION}" || STORE_BUCKET_DEFAULT=""
-  prompt BUCKET "S3 bucket name for this store" "$STORE_BUCKET_DEFAULT"
+  [ -n "$SEED" ] && STORE_BUCKET_DEFAULT="tsync-${STORE}-${SEED}" || STORE_BUCKET_DEFAULT=""
+  prompt BUCKET "Bucket name for this store" "$STORE_BUCKET_DEFAULT"
   [ -n "$BUCKET" ] || {
     echo "bucket is required" >&2
     exit 1
@@ -58,7 +83,8 @@ if [ "$write_tfvars" -eq 1 ]; then
   # tsync keeps a domain's shares at tsync/<domain>/shares/.
   SHARES_PREFIX="tsync/${DOMAIN}/shares/"
 
-  cat >"$TFVARS" <<EOF
+  if [ "$CLOUD" = s3 ]; then
+    cat >"$TFVARS" <<EOF
 region = "$REGION"
 
 stores = {
@@ -77,9 +103,29 @@ stores = {
   }
 }
 EOF
+  else
+    cat >"$TFVARS" <<EOF
+gcp_project = "$PROJECT"
+gcp_region  = "$LOCATION"
+
+gcs_stores = {
+  $STORE = {
+    bucket        = "$BUCKET"
+    create_bucket = $CREATE_BUCKET
+    shares_prefix = "$SHARES_PREFIX"
+
+    # Opt-in: transition ALL objects to the ARCHIVE (cold) storage class after
+    # this many days.
+    # archive_after_days = 30
+  }
+}
+EOF
+  fi
   echo "Wrote $TFVARS"
 
-  if [ "$CREATE_BUCKET" = false ] && command -v aws >/dev/null 2>&1; then
+  # Warn if a pre-existing S3 bucket already has lifecycle rules apply would
+  # replace. (GCS lifecycle is only managed on buckets this config creates.)
+  if [ "$CLOUD" = s3 ] && [ "$CREATE_BUCKET" = false ] && command -v aws >/dev/null 2>&1; then
     if ! aws s3api head-bucket --bucket "$BUCKET" --region "$REGION" 2>/dev/null; then
       echo "WARNING: cannot access bucket '$BUCKET' (may not exist, or no credentials)." >&2
     else
@@ -99,9 +145,9 @@ fi
 # ── Remote state bucket ────────────────────────────────────────────────────
 
 echo
-echo "Terraform state is kept in S3 (see bootstrap-s3/)."
-[ -n "$ACCOUNT" ] && STATE_BUCKET_DEFAULT="tsync-tfstate-${ACCOUNT}-${REGION}" || STATE_BUCKET_DEFAULT=""
-prompt STATE_BUCKET "S3 bucket for Terraform state (globally unique)" "$STATE_BUCKET_DEFAULT"
+echo "Terraform state is kept in the ${CLOUD} state bucket (see bootstrap-${CLOUD}/)."
+[ -n "$SEED" ] && STATE_BUCKET_DEFAULT="tsync-tfstate-${SEED}" || STATE_BUCKET_DEFAULT=""
+prompt STATE_BUCKET "Bucket for Terraform state (globally unique)" "$STATE_BUCKET_DEFAULT"
 [ -n "$STATE_BUCKET" ] || {
   echo "state bucket is required" >&2
   exit 1
@@ -113,48 +159,68 @@ if [ -f "$BACKEND_HCL" ]; then
   case "$ob" in [yY]*) ;; *) write_backend=0 ;; esac
 fi
 if [ "$write_backend" -eq 1 ]; then
-  cat >"$BACKEND_HCL" <<EOF
+  if [ "$CLOUD" = s3 ]; then
+    cat >"$BACKEND_HCL" <<EOF
 bucket = "$STATE_BUCKET"
 region = "$REGION"
 EOF
+  else
+    cat >"$BACKEND_HCL" <<EOF
+bucket = "$STATE_BUCKET"
+EOF
+  fi
   echo "Wrote $BACKEND_HCL"
+fi
+
+if [ "$CLOUD" = s3 ]; then
+  create_cmd=(terraform -chdir=bootstrap-s3 apply -var state_bucket="$STATE_BUCKET" -var region="$REGION")
+else
+  create_cmd=(terraform -chdir=bootstrap-gcs apply -var project="$PROJECT" -var location="$LOCATION" -var state_bucket="$STATE_BUCKET")
 fi
 
 read -rp "Create the state bucket now (skip if it already exists)? [Y/n]: " mkstate
 case "$mkstate" in
   [nN]*)
     echo "Skipping. Create it later with:"
-    echo "  terraform -chdir=bootstrap-s3 init"
-    echo "  terraform -chdir=bootstrap-s3 apply -var state_bucket=$STATE_BUCKET -var region=$REGION"
+    echo "  terraform -chdir=bootstrap-${CLOUD} init"
+    echo "  ${create_cmd[*]}"
     ;;
   *)
-    terraform -chdir=bootstrap-s3 init
-    terraform -chdir=bootstrap-s3 apply -var state_bucket="$STATE_BUCKET" -var region="$REGION"
+    terraform -chdir="bootstrap-${CLOUD}" init
+    "${create_cmd[@]}"
     ;;
 esac
 
 # ── Init main config against the remote backend ────────────────────────────
 
-# Activate the S3 backend block (shipped as a template; only one backend may be
-# active). Refuse if the GCS backend is active, to avoid two backend blocks.
-if [ -f backend-gcs.tf ]; then
-  echo "backend-gcs.tf is active — this S3 helper won't run alongside it." >&2
-  echo "Remove backend-gcs.tf first, or set up S3 state manually." >&2
-  exit 1
-fi
-[ -f backend-s3.tf ] || cp backend-s3.tf.example backend-s3.tf
+# Activate the chosen backend block (shipped as a template; only one may exist).
+[ -f "backend-${CLOUD}.tf" ] || cp "backend-${CLOUD}.tf.example" "backend-${CLOUD}.tf"
 
 echo
 terraform init -backend-config="$BACKEND_HCL"
 
-cat <<'EOF'
+if [ "$CLOUD" = s3 ]; then
+  cat <<'EOF'
 
 Done. Next steps:
   terraform plan     # review what will be created/changed
   terraform apply    # provision the store(s)
 
-Then set these on the s3 backend in your tsync config (bucket, accessKeyId,
-secretAccessKey, shareUrl):
+Then set these on the s3 backend in your tsync config (or let `tsync configure`
+pull them for you): bucket, accessKeyId, secretAccessKey, shareUrl.
   terraform output stores
   terraform output -json secret_access_keys | jq -r '.["<store>"]'
 EOF
+else
+  cat <<'EOF'
+
+Done. Next steps:
+  terraform plan     # review what will be created/changed
+  terraform apply    # provision the store(s)
+
+Then set these on the gcs backend in your tsync config (or let `tsync configure`
+pull them for you): bucket, serviceAccountKey, shareUrl.
+  terraform output gcs_stores
+  terraform output -json gcs_service_account_keys | jq -r '.["<store>"]'
+EOF
+fi
