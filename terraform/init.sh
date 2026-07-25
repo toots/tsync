@@ -135,6 +135,15 @@ esac
 
 # ── Init main config against the remote backend ────────────────────────────
 
+# Activate the S3 backend block (shipped as a template; only one backend may be
+# active). Refuse if the GCS backend is active, to avoid two backend blocks.
+if [ -f backend-gcs.tf ]; then
+  echo "backend-gcs.tf is active — this S3 helper won't run alongside it." >&2
+  echo "Remove backend-gcs.tf first, or set up S3 state manually." >&2
+  exit 1
+fi
+[ -f backend-s3.tf ] || cp backend-s3.tf.example backend-s3.tf
+
 echo
 terraform init -backend-config="$BACKEND_HCL"
 

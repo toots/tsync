@@ -147,37 +147,37 @@ Then copy the store's `share_url` into your s3 backend's `shareUrl`.
 
 ## Remote state
 
-State lives in a remote bucket. A config may have only **one** backend block, so
-you pick either S3 (the default) or GCS — independent of which *store* backends
-(s3/gcs) you provision. Because the state bucket must exist before Terraform can
-use it, a tiny `bootstrap-*` config creates it first, keeping its own state
-locally.
+State lives in a remote bucket — **either** S3 **or** GCS, whichever cloud you're
+on. The two are independent alternatives (a config may have only one backend
+block); pick one, and it's unrelated to which *store* backends you provision. The
+repo ships both as `backend-*.tf.example`; you activate exactly one. Because the
+state bucket must exist first, a tiny `bootstrap-*` config creates it, keeping its
+own state locally.
 
-### S3 (default)
+Follow the section for your cloud — neither assumes you did the other.
 
-`backend "s3"` lives in `backend-s3.tf`. `init.sh` sets this up for you; the
-manual equivalent, run once:
+### S3
 
 ```
-# 1. Create the state bucket (versioned, encrypted, private).
+# 1. Activate the S3 backend.
+mv backend-s3.tf.example backend-s3.tf
+
+# 2. Create the state bucket (versioned, encrypted, private).
 terraform -chdir=bootstrap-s3 init
 terraform -chdir=bootstrap-s3 apply -var state_bucket=my-tsync-tfstate -var region=us-east-1
 
-# 2. Point the main config at it and initialize.
+# 3. Point the main config at it and initialize.
 cp backend-s3.hcl.example backend.hcl   # then edit bucket/region
 terraform init -backend-config=backend.hcl
 ```
 
 Locking uses S3 natively (`use_lockfile`, Terraform ≥ 1.10) — no DynamoDB table.
+`init.sh` automates this path.
 
 ### GCS
 
-To keep state in GCS instead, switch the backend block (only one may exist), then
-bootstrap the bucket:
-
 ```
-# 1. Switch to the gcs backend.
-rm backend-s3.tf
+# 1. Activate the GCS backend.
 mv backend-gcs.tf.example backend-gcs.tf
 
 # 2. Create the state bucket (versioned, uniform access, private).
@@ -192,9 +192,9 @@ terraform init -backend-config=backend.hcl
 The gcs backend locks state on its own (via the object's generation) — no lock
 table needed.
 
-`backend.hcl` is git-ignored so the values stay local; everything else is
-committed. If you'd rather not use remote state at all, delete the `backend-*.tf`
-file and `terraform init` will use local state.
+`backend.hcl` and the activated `backend-*.tf` are git-ignored so your choice
+stays local; only the `.example` templates are committed. If you'd rather not use
+remote state at all, don't activate either — `terraform init` uses local state.
 
 ## Credentials are in Terraform state
 

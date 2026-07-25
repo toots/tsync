@@ -1,6 +1,10 @@
-# GCS remote state (bucket created by ./bootstrap-gcs). A config may have only
-# ONE backend block, so to use GCS state instead of S3: delete backend-s3.tf,
-# then rename this file to backend-gcs.tf and re-run `terraform init`.
+# Remote state in GCS. To use it, activate this backend (a config may have only
+# one backend block — S3 or GCS, not both):
+#
+#   mv backend-gcs.tf.example backend-gcs.tf
+#
+# then create the bucket (./bootstrap-gcs) and init. The bucket is supplied at
+# init time to keep it out of source:
 #
 #   terraform init -backend-config=backend.hcl
 #
