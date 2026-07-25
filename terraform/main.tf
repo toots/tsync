@@ -7,7 +7,9 @@ terraform {
 }
 
 provider "aws" {
-  region = var.region
+  # Placeholder when unset — a GCS-only deploy configures but never calls the AWS
+  # provider. s3 stores always set var.region, so this fallback is never used.
+  region = coalesce(var.region, "us-east-1")
 }
 
 # Only used when var.gcs_stores is non-empty; project/region may be null for
