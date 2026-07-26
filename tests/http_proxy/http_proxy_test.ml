@@ -122,4 +122,10 @@ let () =
   (* And the same writes are permitted when the route is writable. *)
   assert (status (Http_proxy_frontend.Put key) ~read_only:false = 200);
 
+  (* Sharing keeps working on a read-only domain: a share manifest lives outside
+     the domain root and publishing one changes no content. Revoking likewise. *)
+  let share_key = "tsync/shares/deadbeef" in
+  assert (status (Http_proxy_frontend.Put share_key) ~read_only:true = 200);
+  assert (status (Http_proxy_frontend.Delete share_key) ~read_only:true = 200);
+
   print_endline "http_proxy_test ok"

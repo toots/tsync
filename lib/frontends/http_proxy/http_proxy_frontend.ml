@@ -179,6 +179,12 @@ let fanout route f = Lwt_list.iter_s (fun b -> f b) route.all_backends
 
 let exec route op ~body =
   let reject_ro () = respond ~status:`Forbidden "read-only domain" in
+  (* Share manifests live in their own namespace, outside every domain root, so
+     publishing or revoking a link changes no domain content. Read-only bars
+     modifying the data, not sharing what is already there. *)
+  let writable key =
+    (not route.read_only) || String.starts_with ~prefix:route.shares_prefix key
+  in
   match op with
     | Get key -> (
         let module B = (val route.primary : Backend.S) in
@@ -201,7 +207,7 @@ let exec route op ~body =
                 ""
           | None -> respond ~status:`Not_found "")
     | Put key ->
-        if route.read_only then reject_ro ()
+        if not (writable key) then reject_ro ()
         else
           let* () =
             fanout route (fun (module B : Backend.S) ->
@@ -209,7 +215,7 @@ let exec route op ~body =
           in
           respond ""
     | Delete key ->
-        if route.read_only then reject_ro ()
+        if not (writable key) then reject_ro ()
         else
           let* () =
             fanout route (fun (module B : Backend.S) -> B.delete ~key ())
