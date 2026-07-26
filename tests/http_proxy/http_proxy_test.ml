@@ -94,9 +94,32 @@ let () =
   assert (has_field "url" backend_spec);
   assert (has_field "secret" backend_spec);
   assert (not (has_field "shares" backend_spec));
-  assert (
-    List.exists
-      (fun (s : Frontend.field_spec) -> s.name = "shares")
-      (Frontend.spec_for "http-proxy"));
+  let frontend_spec = Frontend.spec_for "http-proxy" in
+  let has_frontend_field name =
+    List.exists (fun (s : Frontend.field_spec) -> s.name = name) frontend_spec
+  in
+  assert (has_frontend_field "shares");
+  assert (has_frontend_field "readOnly");
+
+  (* A read-only route refuses every mutating op and still answers reads, so a
+     client cannot write through the proxy whatever its own config says. *)
+  let status op ~read_only =
+    let r = { (route "one") with read_only } in
+    let resp, _ = Lwt_main.run (Http_proxy_frontend.exec r op ~body:"x") in
+    Cohttp.Code.code_of_status (Cohttp.Response.status resp)
+  in
+  let key = "tsync/one/manifests/x" in
+  List.iter
+    (fun op -> assert (status op ~read_only:true = 403))
+    [
+      Http_proxy_frontend.Put key;
+      Http_proxy_frontend.Delete key;
+      Http_proxy_frontend.Delete_multi [key];
+      Http_proxy_frontend.Copy (key, key ^ "2");
+    ];
+  (* Reads are unaffected: absent key, not forbidden. *)
+  assert (status (Http_proxy_frontend.Get key) ~read_only:true = 404);
+  (* And the same writes are permitted when the route is writable. *)
+  assert (status (Http_proxy_frontend.Put key) ~read_only:false = 200);
 
   print_endline "http_proxy_test ok"

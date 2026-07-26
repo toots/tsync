@@ -72,11 +72,22 @@ let make_route bindings (b : Frontend.binding) =
               Sh.handle ~token ~sub ~query ~range)
       | _ -> None
   in
+  (* Serve-side write ban, independent of the domain's own [read_only]: it bars
+     proxy clients while leaving this host's local mount writable. A client
+     cannot opt out of it — its own config only decides whether it bothers
+     trying. Additive: a read-only domain is read-only over the proxy too. *)
+  let read_only =
+    C.read_only
+    ||
+      match inherited bindings b "readOnly" with
+      | Some ("true" | "1") -> true
+      | _ -> false
+  in
   {
     domain_root = "tsync/" ^ C.domain_name ^ "/";
     shares_prefix = C.shares_prefix;
     secret;
-    read_only = C.read_only;
+    read_only;
     primary = List.hd C.backends;
     all_backends = C.backends;
     serve_share;
@@ -372,6 +383,13 @@ let spec =
       {
         name = "shares";
         label = "Serve public share links on /s/";
+        typ = `Bool;
+        default = Some "false";
+        secret = false;
+      };
+      {
+        name = "readOnly";
+        label = "Refuse writes from proxy clients (local mount unaffected)";
         typ = `Bool;
         default = Some "false";
         secret = false;
