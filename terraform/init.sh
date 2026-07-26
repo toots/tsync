@@ -82,10 +82,6 @@ if [ "$write_tfvars" -eq 1 ]; then
   }
   read -rp "Create the store bucket? [Y/n] (n = use a pre-existing bucket): " cb
   case "$cb" in [nN]*) CREATE_BUCKET=false ;; *) CREATE_BUCKET=true ;; esac
-  prompt DOMAIN "tsync domain name this store serves" "$STORE"
-
-  # tsync keeps a domain's shares at tsync/<domain>/shares/.
-  SHARES_PREFIX="tsync/${DOMAIN}/shares/"
 
   if [ "$CLOUD" = s3 ]; then
     cat >"$TFVARS" <<EOF
@@ -95,7 +91,6 @@ stores = {
   $STORE = {
     bucket        = "$BUCKET"
     create_bucket = $CREATE_BUCKET
-    shares_prefix = "$SHARES_PREFIX"
 
     # If this is a pre-existing bucket with lifecycle rules, list them here so
     # they are preserved — the module owns the whole lifecycle config and apply
@@ -116,7 +111,6 @@ gcs_stores = {
   $STORE = {
     bucket        = "$BUCKET"
     create_bucket = $CREATE_BUCKET
-    shares_prefix = "$SHARES_PREFIX"
 
     # Opt-in: transition ALL objects to the ARCHIVE (cold) storage class after
     # this many days.

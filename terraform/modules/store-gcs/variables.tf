@@ -24,9 +24,10 @@ variable "function_region" {
   description = "Region for the share Cloud Function. Must be a specific region (e.g. us-central1), not a multi-region like US."
 }
 
-variable "shares_prefix" {
+variable "custom_domain" {
   type        = string
-  description = "Key prefix for share manifests + cached artifacts. tsync stores them at \"tsync/<domain>/shares/\" — set this to that exact value for the domain served by this store."
+  default     = null
+  description = "Vanity domain for share links (e.g. share.example.org). null = raw function URL, no load balancer. See domain.tf."
 }
 
 variable "manage_lifecycle" {

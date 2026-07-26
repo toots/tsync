@@ -18,14 +18,7 @@ let random_hex bytes =
 module Make (C : Conf.S) = struct
   module L = Layout.Inode.Make (C)
 
-  (* [C.domain_prefix] is [domain_root ^ "manifests/"]; shares live alongside at
-     [domain_root ^ "shares/"]. *)
-  let shares_prefix =
-    let suffix = "manifests/" in
-    let n = String.length C.domain_prefix and s = String.length suffix in
-    if n >= s && String.sub C.domain_prefix (n - s) s = suffix then
-      String.sub C.domain_prefix 0 (n - s) ^ "shares/"
-    else C.domain_prefix ^ "shares/"
+  let shares_prefix = C.shares_prefix
 
   (* First backend whose [share_url] serves this domain (an s3 with a shareUrl,
      or an http-proxy that reports one). *)

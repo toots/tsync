@@ -33,7 +33,7 @@ import zipfile
 
 from share_common import ShareError
 
-SHARES_PREFIX = os.environ["SHARES_PREFIX"]  # guard: keys must start with this
+SHARES_PREFIX = os.environ.get("SHARES_PREFIX", "tsync/shares/")  # guard: keys must start with this
 MAX_BYTES = int(os.environ.get("MAX_BYTES", str(10 * 1024**3)))
 
 # Pick the storage backend by env; import lazily so one deployment zip runs on

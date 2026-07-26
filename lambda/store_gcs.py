@@ -20,7 +20,7 @@ COMPOSE_MAX = 32  # GCS caps a single compose at 32 source objects
 class Store:
     def __init__(self):
         self.bucket_name = os.environ["BUCKET"]
-        self.shares_prefix = os.environ["SHARES_PREFIX"]
+        self.shares_prefix = os.environ.get("SHARES_PREFIX", "tsync/shares/")
         self.presign_ttl = int(os.environ.get("PRESIGN_TTL", "600"))
         self.client = storage.Client()
         self.bucket = self.client.bucket(self.bucket_name)

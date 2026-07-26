@@ -19,6 +19,7 @@ module C = struct
   let versions_prefix = "tsync/test/versions/"
   let journal_prefix = "tsync/test/journal/"
   let cursor_key = "tsync/test/cursor"
+  let shares_prefix = "tsync/shares/"
   let backends = [Local_backend.make ~root:backend_root]
   let cache_root = Filename.concat root "cache"
   let data_dir = Filename.concat root "data"

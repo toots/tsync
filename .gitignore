@@ -21,6 +21,9 @@ xcuserdata/
 
 # Terraform
 .terraform/
+# Provider lock: not committed — its h1 hashes are per-platform and churn across
+# contributors' OSes, and each operator provisions their own project/state.
+.terraform.lock.hcl
 *.tfstate
 *.tfstate.*
 crash.log

@@ -41,7 +41,7 @@ variable "gcs_stores" {
     create_bucket      = optional(bool, true)
     location           = optional(string) # bucket location; default: var.gcp_region
     function_region    = optional(string) # default: var.gcp_function_region
-    shares_prefix      = string           # "tsync/<domain>/shares/"
+    custom_domain      = optional(string) # vanity share domain; null = raw function URL
     manage_lifecycle   = optional(bool, true)
     cache_expiry_days  = optional(number, 30)
     archive_after_days = optional(number) # null = no cold-storage transition
@@ -62,7 +62,6 @@ variable "stores" {
     bucket               = string
     create_bucket        = optional(bool, true)
     iam_user_name        = optional(string) # default: tsync-client-<key>
-    shares_prefix        = string           # "tsync/<domain>/shares/"
     custom_domain        = optional(string) # vanity share domain; null = raw Lambda URL
     manage_lifecycle     = optional(bool, true)
     cache_expiry_days    = optional(number, 30)
