@@ -564,9 +564,14 @@ let setup_client (module C : Conf.S) root staging_prefix =
         let* (_ : int) = F.write k (Bigarray.Array1.sub buf 0 len) ~offset:0L in
         Lwt.return_unit
     | CorruptCachedChunk { path; index } ->
+        (* Pull the body in first: there is nothing to corrupt in a store that
+           never held it (a whole-file write leaves none of its chunks local), and
+           a step that quietly did nothing would read as a passing test. *)
+        let* () = F.ensure_cached (key path) in
         let+ p = cached_chunk_path (key path) index in
         write_file p "corrupted chunk body"
     | DeleteCachedChunk { path; index } ->
+        let* () = F.ensure_cached (key path) in
         let* p = cached_chunk_path (key path) index in
         Lwt.catch (fun () -> Lwt_unix_retry.unlink p) (fun _ -> Lwt.return_unit)
     | RecoverStaged -> F.recover_staged ()

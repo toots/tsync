@@ -61,6 +61,23 @@ module Make (C : Conf.S) (F : Fetch) : sig
   val stage_truncate : uuid:string -> len:int -> unit Lwt.t
   val stage_forget : uuid:string -> unit Lwt.t
 
+  (** {2 Whole bodies}
+
+      A frontend that hands back a complete file gets it adopted as one file: no
+      chunk split, and a rename rather than a copy when it is already on this
+      filesystem. *)
+
+  val whole_path : string -> string
+
+  (** Take over [src] as whole body [uuid] (rename, or copy across filesystems).
+  *)
+  val adopt_whole : src:string -> uuid:string -> unit Lwt.t
+
+  val whole_read_into :
+    uuid:string -> Local_io.buffer -> offset:int64 -> int Lwt.t
+
+  val whole_forget : uuid:string -> unit Lwt.t
+
   (** Rename a staged body under the content key its bytes hash to. Idempotent,
       so an interrupted promotion can be replayed. *)
   val promote : uuid:string -> chunk_key:string -> unit Lwt.t

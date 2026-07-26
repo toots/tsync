@@ -166,6 +166,10 @@ type staged = {
   s_mtime : float;
   s_chunk_size : int;
   s_slots : slot array;
+  s_whole : string option;
+      (** A whole file handed over by a frontend, named by this uuid: its bytes
+          are one file, not per-chunk bodies, and [s_slots] is empty. Uploading
+          it needs no chunking pass of our own. *)
   s_published : t option;
 }
 
@@ -202,8 +206,14 @@ let staged_to_string (st : staged) =
           ("size", `Int (Int64.to_int st.s_size));
           ("mtime", `Float st.s_mtime);
           ("chunkSize", `Int st.s_chunk_size);
-          ("slots", `List (Array.to_list (Array.map slot_to_json st.s_slots)));
         ]
+       @ (match st.s_whole with
+         | Some uuid -> [("whole", `String uuid)]
+         | None ->
+             [
+               ( "slots",
+                 `List (Array.to_list (Array.map slot_to_json st.s_slots)) );
+             ])
        @
          match st.s_published with
          | None -> []
@@ -218,13 +228,20 @@ let staged_of_string body =
           match of_json j with `Clean m -> Some m | _ -> None)
       | _ -> None
   in
+  let whole =
+    match json |> member "whole" with `String u -> Some u | _ -> None
+  in
   {
     s_name = json |> member "name" |> to_string;
     s_size = json |> member "size" |> to_int |> Int64.of_int;
     s_mtime = json |> member "mtime" |> to_float;
-    s_chunk_size = json |> member "chunkSize" |> to_int;
+    s_chunk_size =
+      (try json |> member "chunkSize" |> to_int with _ -> chunk_size);
     s_slots =
-      Array.of_list (List.map slot_of_json (json |> member "slots" |> to_list));
+      (match json |> member "slots" with
+        | `List l -> Array.of_list (List.map slot_of_json l)
+        | _ -> [||]);
+    s_whole = whole;
     s_published = published;
   }
 

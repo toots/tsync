@@ -104,10 +104,24 @@ module Make (C : Conf.S) (R : Remote.S) = struct
 
   (* ── Staged reads ─────────────────────────────────────────────────────────── *)
 
-  (* Read a range out of a staged file: each chunk comes from its staged body,
+  (* Read a range out of a staged file: from the whole body a frontend handed
+     over, or else per chunk — from its staged body,
      from the published chunk it still inherits, or from nowhere at all (a hole
      from a grow, which reads as zeros). *)
-  let pread_staged ~id ~(staged : Manifest.staged) ~base buf ~offset =
+  let rec pread_staged ~id ~(staged : Manifest.staged) ~base buf ~offset =
+    match staged.Manifest.s_whole with
+      | Some uuid ->
+          (* One file: the range maps straight onto it, clipped to the size the
+             staged manifest records. *)
+          let want = Bigarray.Array1.dim buf in
+          let avail = Int64.to_int (Int64.sub staged.Manifest.s_size offset) in
+          let total = min want (max 0 avail) in
+          if total <= 0 then Lwt.return 0
+          else
+            Cc.whole_read_into ~uuid (Bigarray.Array1.sub buf 0 total) ~offset
+      | None -> pread_chunked ~id ~staged ~base buf ~offset
+
+  and pread_chunked ~id ~(staged : Manifest.staged) ~base buf ~offset =
     let cs = staged.Manifest.s_chunk_size in
     let want = Bigarray.Array1.dim buf in
     let start = Int64.to_int offset in
@@ -178,10 +192,16 @@ module Make (C : Conf.S) (R : Remote.S) = struct
   (* ── Writes ───────────────────────────────────────────────────────────────── *)
 
   (* The staged manifest a write starts from: the one already there, else one
-     inheriting every chunk of the published manifest, else an empty file. *)
-  let staged_for key =
+     inheriting every chunk of the published manifest, else an empty file. A whole
+     body is split into staged chunks first — chunks are what a partial write can
+     address, and this is the only path that ever needs it (a frontend that hands
+     over whole files never writes byte ranges). *)
+  let rec staged_for key =
     let* st = Mf.read_staged key in
     match st with
+      | Some ({ Manifest.s_whole = Some uuid; _ } as st) ->
+          let* () = split_whole key st uuid in
+          staged_for key
       | Some st -> Lwt.return st
       | None -> (
           let+ published = Mf.read key in
@@ -201,6 +221,7 @@ module Make (C : Conf.S) (R : Remote.S) = struct
                       (Manifest.num_chunks_for m.Manifest.size
                          m.Manifest.chunk_size)
                       Manifest.Inherit;
+                  s_whole = None;
                   s_published = None;
                 }
             | Some `Dirty | None ->
@@ -210,8 +231,37 @@ module Make (C : Conf.S) (R : Remote.S) = struct
                   s_mtime = Unix.gettimeofday ();
                   s_chunk_size = C.chunk_size;
                   s_slots = [||];
+                  s_whole = None;
                   s_published = None;
                 })
+
+  (* Copy a whole body into per-chunk staged bodies, then drop it. *)
+  and split_whole key (st : Manifest.staged) uuid =
+    let cs = C.chunk_size in
+    let total = Int64.to_int st.Manifest.s_size in
+    let n = Manifest.num_chunks_for st.Manifest.s_size cs in
+    let slots = Array.make n Manifest.Zero in
+    let buf = Bigarray.Array1.create Bigarray.char Bigarray.c_layout cs in
+    let rec chunk i =
+      if i >= n then Lwt.return_unit
+      else (
+        let len = min cs (total - (i * cs)) in
+        let slice = Bigarray.Array1.sub buf 0 len in
+        let* (_ : int) =
+          Cc.whole_read_into ~uuid slice ~offset:(Int64.of_int (i * cs))
+        in
+        let body = Manifest.new_uuid () in
+        let* () = Cc.stage_empty ~uuid:body ~len in
+        let* (_ : int) = Cc.stage_write ~uuid:body slice ~chunk_off:0 in
+        slots.(i) <- Manifest.Staged body;
+        chunk (i + 1))
+    in
+    let* () = chunk 0 in
+    let st =
+      { st with Manifest.s_slots = slots; s_chunk_size = cs; s_whole = None }
+    in
+    let* () = Mf.write_staged key st in
+    Cc.whole_forget ~uuid
 
   let grow_slots slots n =
     let old = Array.length slots in
@@ -360,18 +410,24 @@ module Make (C : Conf.S) (R : Remote.S) = struct
     Mf.write_staged key st
 
   (* A brand-new (or O_TRUNC'd) file: no base, no bodies, size zero. *)
+  (* Every body a staged manifest references, unreferenced from here on. *)
+  let discard_bodies (st : Manifest.staged) =
+    let* () =
+      Lwt_list.iter_s
+        (fun slot ->
+          match slot with
+            | Manifest.Staged uuid -> Cc.stage_forget ~uuid
+            | Manifest.Inherit | Manifest.Zero -> Lwt.return_unit)
+        (Array.to_list st.Manifest.s_slots)
+    in
+    match st.Manifest.s_whole with
+      | Some uuid -> Cc.whole_forget ~uuid
+      | None -> Lwt.return_unit
+
   let create key =
     let* st = Mf.read_staged key in
     let* () =
-      match st with
-        | Some st ->
-            Lwt_list.iter_s
-              (fun slot ->
-                match slot with
-                  | Manifest.Staged uuid -> Cc.stage_forget ~uuid
-                  | Manifest.Inherit | Manifest.Zero -> Lwt.return_unit)
-              (Array.to_list st.Manifest.s_slots)
-        | None -> Lwt.return_unit
+      match st with Some st -> discard_bodies st | None -> Lwt.return_unit
     in
     let name =
       Filename.basename
@@ -384,6 +440,7 @@ module Make (C : Conf.S) (R : Remote.S) = struct
         s_mtime = Unix.gettimeofday ();
         s_chunk_size = C.chunk_size;
         s_slots = [||];
+        s_whole = None;
         s_published = None;
       }
 
@@ -434,7 +491,19 @@ module Make (C : Conf.S) (R : Remote.S) = struct
      published *in the staged manifest itself*. That write is the commit point of
      the promotion below: after it, no crash can cost us the upload — recovery
      replays the local moves instead of re-sending bytes. *)
-  let upload_staged ~key ~(staged : Manifest.staged) ?cancel () =
+  let rec upload_staged ~key ~(staged : Manifest.staged) ?cancel () =
+    match staged.Manifest.s_whole with
+      | Some uuid ->
+          (* A whole file needs no per-chunk source: hand the file itself to the
+             ordinary whole-file upload, which reads, hashes and sends it. *)
+          let* state =
+            R.upload ~key ~src_path:(Cc.whole_path uuid)
+              ~mtime:staged.Manifest.s_mtime ~chunk_size:C.chunk_size ?cancel ()
+          in
+          commit key staged state
+      | None -> upload_chunked ~key ~staged ?cancel ()
+
+  and upload_chunked ~key ~(staged : Manifest.staged) ?cancel () =
     let* base = Mf.read key in
     let base = match base with Some (`Clean m) -> Some m | _ -> None in
     let* state =
@@ -444,6 +513,12 @@ module Make (C : Conf.S) (R : Remote.S) = struct
         ~source:(staged_source ~staged ~base)
         ?cancel ()
     in
+    commit key staged state
+
+  (* The commit record: what was published, written into the staged manifest
+     before anything local moves. A crash before this re-uploads (identical bytes,
+     identical manifest); after it, only local moves are left to replay. *)
+  and commit key (staged : Manifest.staged) state =
     match state with
       | `Clean published ->
           let+ () =
@@ -456,7 +531,27 @@ module Make (C : Conf.S) (R : Remote.S) = struct
   (* Finish a committed upload: move each staged body under the content key its
      bytes hashed to, replace the sidecar with what was published, then drop the
      staged manifest. Every step is idempotent, so a crash anywhere replays. *)
-  let promote key (staged : Manifest.staged) (published : Manifest.t) =
+  let rec promote key (staged : Manifest.staged) (published : Manifest.t) =
+    match staged.Manifest.s_whole with
+      | Some uuid ->
+          (* The upload hashed and sent the chunks straight from the whole file, so
+             there is nothing to rename into the chunk store: promotion publishes
+             the sidecar and drops the file, and the store ends up holding none of
+             this file's chunks.
+
+             That is deliberate. The only caller handing over whole files is the
+             FileProvider extension, which keeps its own copy of every file it has
+             materialized — caching the same bytes a second time here would double
+             the disk cost of every edit for nothing. A read that does come our way
+             (a share, an export, a peer) fetches what it needs like any other
+             published file. Splitting the file into chunk bodies instead would
+             cost a full extra copy of it on every single write. *)
+          let* () = Mf.write key (`Clean published) in
+          let* () = Cc.whole_forget ~uuid in
+          Mf.delete_staged key
+      | None -> promote_chunked key staged published
+
+  and promote_chunked key (staged : Manifest.staged) (published : Manifest.t) =
     let entries = entries_of published in
     let* () =
       Lwt_list.iteri_s
@@ -498,24 +593,30 @@ module Make (C : Conf.S) (R : Remote.S) = struct
   let downloads_in_flight = Cc.in_flight
 
   (* Take a whole file handed over by a frontend (the FileProvider extension
-     always gives back a complete file, never a delta) and stage it as [key]'s
-     new content.
-     ponytail: copies the bytes into staged chunks rather than adopting the file
-     in place. Adopting it would need a second staged form carrying a whole-file
-     body; add that if this copy ever shows up in a profile. *)
+     always gives back a complete file, never a delta) as [key]'s new content.
+     The file is adopted where it is — a rename, no copy and no chunking pass —
+     and the upload reads it directly. *)
   let stage_whole key ~src_path =
-    let* () = create key in
-    let buf =
-      Bigarray.Array1.create Bigarray.char Bigarray.c_layout C.chunk_size
+    let* st = Mf.read_staged key in
+    let* () =
+      match st with Some st -> discard_bodies st | None -> Lwt.return_unit
     in
-    let rec go offset =
-      let* n = Local_io.read src_path buf ~offset in
-      if n <= 0 then Lwt.return_unit
-      else
-        let* (_ : int) = write key (Bigarray.Array1.sub buf 0 n) ~offset in
-        go (Int64.add offset (Int64.of_int n))
-    in
-    go 0L
+    let* stat = Lwt_unix_retry.LargeFile.stat src_path in
+    let uuid = Manifest.new_uuid () in
+    (* Bytes first, then the manifest that references them. *)
+    let* () = Cc.adopt_whole ~src:src_path ~uuid in
+    Mf.write_staged key
+      {
+        Manifest.s_name =
+          Filename.basename
+            (Manifest.strip_prefix ~domain_prefix:C.domain_prefix key);
+        s_size = stat.Unix.LargeFile.st_size;
+        s_mtime = stat.Unix.LargeFile.st_mtime;
+        s_chunk_size = C.chunk_size;
+        s_slots = [||];
+        s_whole = Some uuid;
+        s_published = None;
+      }
 
   (* How much of [key] is local: (chunks present, chunks total). Staged bodies
      count as present — they are the newest bytes there are. *)
@@ -537,6 +638,12 @@ module Make (C : Conf.S) (R : Remote.S) = struct
               0 (List.init total Fun.id)
           in
           (present, total)
+      | Some (`Staged (({ Manifest.s_whole = Some _; _ } as st), _)) ->
+          (* One file, every byte of it here. *)
+          let n =
+            Manifest.num_chunks_for st.Manifest.s_size st.Manifest.s_chunk_size
+          in
+          Lwt.return (n, n)
       | Some (`Staged (st, base)) ->
           let inherited =
             match base with Some m -> entries_of m | None -> [||]

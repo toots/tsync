@@ -61,6 +61,10 @@ type staged = {
   s_mtime : float;
   s_chunk_size : int;
   s_slots : slot array;
+  s_whole : string option;
+      (** A whole file handed over by a frontend, named by this uuid: its bytes
+          are one file rather than per-chunk bodies, and [s_slots] is empty. The
+          upload reads it directly, so taking one costs a rename, not a copy. *)
   s_published : t option;
 }
 

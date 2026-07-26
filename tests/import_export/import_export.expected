@@ -44,7 +44,7 @@
   imported new.txt (5 bytes)
   import: 1 imported, 1 skipped, 0 symlinks skipped
 --- tree
-  f file.bin size=8 cached=1/1 uploaded=true etag=1f5100458d5c2287
+  f file.bin size=8 cached=0/1 uploaded=true etag=1f5100458d5c2287
   f new.txt size=5 cached=0/1 uploaded=true etag=c7abf2205b34f9ee
 --- content
   file.bin = "original"
@@ -68,8 +68,8 @@
   imported copy.bin (10 bytes)
   import: 1 imported, 0 skipped, 0 symlinks skipped
 --- tree
-  f copy.bin size=10 cached=1/1 uploaded=true etag=83aa3fc9fadd8e79
-  f file.bin size=10 cached=1/1 uploaded=true etag=83aa3fc9fadd8e79
+  f copy.bin size=10 cached=0/1 uploaded=true etag=83aa3fc9fadd8e79
+  f file.bin size=10 cached=0/1 uploaded=true etag=83aa3fc9fadd8e79
 --- content
   copy.bin = "same bytes"
   file.bin = "same bytes"

@@ -6,7 +6,7 @@
   expire all
   expire all -> 1 version(s), 1 chunk(s) removed, 1 kept
 --- tree
-  f foo.txt size=7 cached=1/1 uploaded=true etag=46316ec1c85082b9
+  f foo.txt size=7 cached=0/1 uploaded=true etag=46316ec1c85082b9
 --- content
   foo.txt = "two two"
 --- backend
@@ -41,7 +41,7 @@
   expire mark
   expire mark -> 1 version(s), 1 chunk(s) removed, 2 kept
 --- tree
-  f foo.txt size=17 cached=1/1 uploaded=true etag=bc4fe9e67f44fd6f
+  f foo.txt size=17 cached=0/1 uploaded=true etag=bc4fe9e67f44fd6f
 --- content
   foo.txt = "three three three"
 --- backend
@@ -79,7 +79,7 @@
   expire none
   expire none -> 0 version(s), 0 chunk(s) removed, 2 kept
 --- tree
-  f foo.txt size=7 cached=1/1 uploaded=true etag=46316ec1c85082b9
+  f foo.txt size=7 cached=0/1 uploaded=true etag=46316ec1c85082b9
 --- content
   foo.txt = "two two"
 --- backend

@@ -234,6 +234,38 @@ module Make (C : Conf.S) (F : Fetch) = struct
       (fun () -> Lwt_unix_retry.unlink (staged_path uuid))
       (function Unix.Unix_error _ -> Lwt.return_unit | exn -> Lwt.fail exn)
 
+  (* ── Whole bodies ─────────────────────────────────────────────────────────
+     A frontend that hands back a complete file (the FileProvider extension always
+     does) gets its file adopted as-is: one file, no chunk split, no copy. *)
+
+  let whole_path uuid =
+    Filename.concat
+      (Cache_layout.staged_whole_dir ~cache_root:C.cache_root C.domain_name)
+      uuid
+
+  (* Take over [src] as the whole body [uuid]. A rename when the two are on one
+     filesystem — the point of this path — and a copy when they are not. *)
+  let adopt_whole ~src ~uuid =
+    let dst = whole_path uuid in
+    let* () = Fs_util.ensure_parent dst in
+    Lwt.catch
+      (fun () -> Lwt_unix_retry.rename src dst)
+      (function
+        | Unix.Unix_error (Unix.EXDEV, _, _) ->
+            let* () = Fs_util.copy_file ~src ~dst in
+            Lwt.catch
+              (fun () -> Lwt_unix_retry.unlink src)
+              (fun _ -> Lwt.return_unit)
+        | exn -> Lwt.fail exn)
+
+  let whole_read_into ~uuid buf ~offset =
+    Local_io.read (whole_path uuid) buf ~offset
+
+  let whole_forget ~uuid =
+    Lwt.catch
+      (fun () -> Lwt_unix_retry.unlink (whole_path uuid))
+      (function Unix.Unix_error _ -> Lwt.return_unit | exn -> Lwt.fail exn)
+
   (* Move a staged body under the content key its bytes hash to. Idempotent: an
      interrupted promotion can be replayed, and a body whose content is already
      cached is simply dropped. *)

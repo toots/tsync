@@ -265,34 +265,29 @@ module Make (C : Conf.S) (F : File.S) = struct
     let+ () = F.create key in
     ok_json []
 
+  (* The extension hands back a complete file. It is taken over where it is — no
+     copy of the bytes and no chunking pass before the upload — and answered from
+     the staged metadata, which is the size and mtime that will be published. *)
   let handle_write key staging_path =
     ignore (F.cancel_upload key);
-    (* The extension hands back a complete file; stage it, queue the upload, and
-       answer from the staged metadata — the size and mtime the caller sees are
-       the ones that will be published. *)
-    let* st =
-      Lwt.catch
-        (fun () ->
-          let+ st = Lwt_unix_retry.LargeFile.stat staging_path in
-          Some st)
-        (fun _ -> Lwt.return_none)
-    in
     let* () = F.write_whole key ~src_path:staging_path in
-    let* () =
-      Lwt.catch
-        (fun () -> Lwt_unix_retry.unlink staging_path)
-        (fun _ -> Lwt.return_unit)
-    in
     let* () = F.queue_put key in
-    match st with
-      | Some st ->
-          Lwt.return
-            (ok_json
-               [
-                 ("size", `Int (Int64.to_int st.Unix.LargeFile.st_size));
-                 ("mtime", `Float st.Unix.LargeFile.st_mtime);
-               ])
-      | None -> Lwt.return (ok_json [])
+    let+ resolved = F.resolve key in
+    match resolved with
+      | Some (`Staged (st, _)) ->
+          ok_json
+            [
+              ("size", `Int (Int64.to_int st.Manifest.s_size));
+              ("mtime", `Float st.Manifest.s_mtime);
+            ]
+      | Some (`Published m) ->
+          (* The upload already finished and promoted. *)
+          ok_json
+            [
+              ("size", `Int (Int64.to_int m.Manifest.size));
+              ("mtime", `Float m.Manifest.mtime);
+            ]
+      | None -> ok_json []
 
   let handle_delete key =
     let+ () = F.delete key in

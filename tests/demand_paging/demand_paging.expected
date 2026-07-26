@@ -149,9 +149,9 @@
   drain
   chunks grow.txt
   read grow.txt [0,24)
-  chunks grow.txt staged size=24 slots=[IZZ] cached=3/3
+  chunks grow.txt staged size=24 slots=[IZZ] cached=2/3
   read grow.txt [8,16) = "\000\000\000\000\000\000\000\000"
-  chunks grow.txt published size=24 chunks=3 cached=1/3
+  chunks grow.txt published size=24 chunks=3 cached=0/3
   read grow.txt [0,24) = "01234567\000\000\000\000\000\000\000\000\000\000\000\000\000\000\000\000"
 --- tree
   f grow.txt size=24 cached=3/3 uploaded=true etag=39f38b43c0917bda

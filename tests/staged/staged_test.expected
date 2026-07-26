@@ -13,4 +13,9 @@ replayed promotion         published size=24 chunks=3         cached=8 "XYCDEFGH
 bytes uploaded by replay: 0
 re-uploaded without the commit record published size=24 chunks=3         cached=9 "XYCDEFGH01234567\000\000\000\000\000\000\000\000"
 bytes uploaded by re-upload: 0
-create (O_TRUNC)           staged size= 0 slots=[]            cached=9 ""
+handed-over file still at its old path: false
+adopted whole file         staged size=26 whole               cached=9 "WHOLE FILE FROM A FRONTEND"
+byte write splits it       staged size=26 slots=[SSSS]        cached=9 "WHOLE -ILE FROM A FRONTEND"
+after sync                 published size=26 chunks=4         cached=13 "WHOLE -ILE FROM A FRONTEND"
+whole file uploaded as-is  published size=14 chunks=2         cached=15 "SECOND HANDOFF"
+create (O_TRUNC)           staged size= 0 slots=[]            cached=15 ""

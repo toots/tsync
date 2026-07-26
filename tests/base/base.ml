@@ -43,7 +43,17 @@ let scenarios : scenario list =
     {
       name = "evict";
       steps =
-        [Write { path = "a.txt"; content = "evicted" }; Drain; Evict "a.txt"];
+        [
+          Write { path = "a.txt"; content = "evicted" };
+          Drain;
+          (* Read it first: a whole-file write leaves nothing in the chunk store,
+             so without this the eviction would have nothing to drop and the
+             snapshot could not tell a working evict from a no-op. *)
+          ReadRange { path = "a.txt"; offset = 0; len = 7 };
+          ShowChunks "a.txt";
+          Evict "a.txt";
+          ShowChunks "a.txt";
+        ];
     };
     {
       name = "restore";
@@ -52,7 +62,9 @@ let scenarios : scenario list =
           Write { path = "a.txt"; content = "round trip" };
           Drain;
           Evict "a.txt";
+          ShowChunks "a.txt";
           Restore "a.txt";
+          ShowChunks "a.txt";
         ];
     };
     {

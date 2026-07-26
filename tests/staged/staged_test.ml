@@ -79,6 +79,8 @@ let show label =
   let* resolved = Mf.resolve key in
   let state =
     match resolved with
+      | Some (`Staged (({ Manifest.s_whole = Some _; _ } as st), _)) ->
+          Printf.sprintf "staged size=%2Ld whole" st.Manifest.s_size
       | Some (`Staged (st, _)) ->
           Printf.sprintf "staged size=%2Ld slots=[%s]" st.Manifest.s_size
             (String.concat ""
@@ -211,6 +213,35 @@ let () =
      let* () = show "re-uploaded without the commit record" in
      Printf.printf "bytes uploaded by re-upload: %d\n"
        (uploaded_after - uploaded_before);
+
+     (* ── Whole-file handoff ───────────────────────────────────────────────────
+        A frontend that gives back a complete file (the FileProvider extension
+        always does) has it adopted where it is: one rename, no copy of the bytes
+        and no chunking pass. Reads come straight out of that file. *)
+     let handed = Filename.concat data_dir "handed.bin" in
+     let oc = open_out_bin handed in
+     output_string oc "WHOLE FILE FROM A FRONTEND";
+     close_out oc;
+     let* () = D.stage_whole key ~src_path:handed in
+     Printf.printf "handed-over file still at its old path: %b\n"
+       (Sys.file_exists handed);
+     let* () = show "adopted whole file" in
+
+     (* A byte write into a whole-staged file splits it into chunks first — the
+        only path that needs it, since a whole-file frontend never writes
+        ranges. *)
+     let* () = write_at 6 "-" in
+     let* () = show "byte write splits it" in
+     let* () = D.sync key () in
+     let* () = show "after sync" in
+
+     (* And the whole file straight to the backend, no split. *)
+     let oc = open_out_bin handed in
+     output_string oc "SECOND HANDOFF";
+     close_out oc;
+     let* () = D.stage_whole key ~src_path:handed in
+     let* () = D.sync key () in
+     let* () = show "whole file uploaded as-is" in
 
      (* And back to nothing. *)
      let* () = D.create key in
