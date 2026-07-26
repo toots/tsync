@@ -146,7 +146,10 @@ let list_directory t ~prefix () =
   if is_ok resp then Http_proxy.Wire.list_dir_of_json body
   else raise (backend_error "list_directory" (code resp) body)
 
-(* Ask the frontend for the share base URL of [prefix]'s domain. *)
+(* Whether shares are exposed is the proxy's own setting, so ask it rather than
+   mirroring it in client config where the two could disagree. The proxy answers
+   yes/no only: it sits behind TLS termination and does not reliably know its own
+   public URL, whereas [base_uri] is exactly the URL this client reaches it on. *)
 let query_share_url t ~prefix =
   let uri =
     Uri.with_query' (Uri.with_path t.base_uri "/share-url") [("prefix", prefix)]
@@ -156,15 +159,21 @@ let query_share_url t ~prefix =
     match Yojson.Safe.from_string body with
       | exception _ -> None
       | j -> (
-          match Yojson.Safe.Util.member "url" j with
-            | `String u -> Some u
+          match
+            (Yojson.Safe.Util.member "url" j, Yojson.Safe.Util.member "self" j)
+          with
+            (* A backing store serves them: absolute URL, use as given. *)
+            | `String url, _ -> Some url
+            (* The proxy serves them itself, off the address we reach it on. *)
+            | _, `Bool true ->
+                Some (Uri.to_string (Uri.with_path t.base_uri "/s"))
             | _ -> None))
   else if code resp = 404 then None
   else raise (backend_error "share_url" (code resp) body)
 
-(* The share URL is fixed for the life of the process; query the frontend once and
-   memoize the promise (so concurrent callers share the single request). *)
-let share_url_op t ~prefix () =
+(* Fixed for the life of the process: query once and memoize the promise, so
+   concurrent callers share the single request. *)
+let share_url t ~prefix () =
   match t.share_url_cache with
     | Some p -> p
     | None ->
@@ -184,7 +193,7 @@ let make ~url ~secret : (module Backend.S) =
     let copy ~src_key ~dst_key () = copy t ~src_key ~dst_key ()
     let list_all ?max_keys ~prefix () = list_all t ?max_keys ~prefix ()
     let list_directory ~prefix () = list_directory t ~prefix ()
-    let share_url ~prefix () = share_url_op t ~prefix ()
+    let share_url ~prefix () = share_url t ~prefix ()
   end)
 
 let spec =

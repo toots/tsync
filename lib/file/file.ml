@@ -83,10 +83,11 @@ module type S = sig
   val apply_foreign_ops : Journal.op list -> unit Lwt.t
 end
 
-module Make (C : Conf.S) (Sq : Sync_queue.S) : S = struct
+module Make_with_layout (C : Conf.S) (Sq : Sync_queue.S) (L : Layout.S) : S =
+struct
   module J = Journal.Make (C)
   module Fs = File_store.Make (C)
-  module R = Remote.Make (C)
+  module R = Remote.Make_with_layout (C) (L)
 
   type t = string
 
@@ -118,7 +119,7 @@ module Make (C : Conf.S) (Sq : Sync_queue.S) : S = struct
 
   (* Manifest backend I/O goes through [St], keyed by logical (real-path) keys;
      the layout scheme maps them to backend keys. *)
-  module St = Store.Make (C) (Layout.Inode.Make (C))
+  module St = Store.Make (C) (L)
 
   (* Raw presence of the local data file, regardless of completeness. *)
   let data_exists key =
@@ -1413,3 +1414,7 @@ module Make (C : Conf.S) (Sq : Sync_queue.S) : S = struct
   let apply_foreign_ops ops =
     with_meta (fun () -> Lwt_list.iter_s apply_one ops)
 end
+
+(* The inode layout is what every path-keyed caller wants. *)
+module Make (C : Conf.S) (Sq : Sync_queue.S) =
+  Make_with_layout (C) (Sq) (Layout.Inode.Make (C))

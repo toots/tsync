@@ -36,11 +36,22 @@ let inherited bindings b name =
 
 type route = {
   domain_root : string;
+  shares_prefix : string;
   secret : string;
   read_only : bool;
   primary : (module Backend.S);
   all_backends : (module Backend.S) list;
+  serve_share : share_handler option;
+      (** [None] when this domain has no shares *)
 }
+
+(* Public share serving, when enabled for the domain. *)
+and share_handler =
+  token:string ->
+  sub:string ->
+  query:(string -> string option) ->
+  range:string option ->
+  (Cohttp.Response.t * Cohttp_lwt.Body.t) Lwt.t
 
 let make_route bindings (b : Frontend.binding) =
   let module C = (val b.Frontend.conf : Conf.S) in
@@ -52,12 +63,23 @@ let make_route bindings (b : Frontend.binding) =
   in
   (* [C.backends] is the (possibly tiered) backend set: [primary] tiers reads/
      backfill internally, and writes fan out over [all_backends]. *)
+  let serve_share =
+    match inherited bindings b "shares" with
+      | Some ("true" | "1") ->
+          let module Sh = Share_server.Make (C) in
+          Some
+            (fun ~token ~sub ~query ~range ->
+              Sh.handle ~token ~sub ~query ~range)
+      | _ -> None
+  in
   {
     domain_root = "tsync/" ^ C.domain_name ^ "/";
+    shares_prefix = C.shares_prefix;
     secret;
     read_only = C.read_only;
     primary = List.hd C.backends;
     all_backends = C.backends;
+    serve_share;
   }
 
 (* ── Request handling ───────────────────────────────────────────────────────── *)
@@ -206,44 +228,94 @@ let exec route op ~body =
         let* result = B.list_directory ~prefix () in
         respond (Http_proxy.Wire.list_dir_to_json result)
     | Share_url prefix ->
-        (* The first of this domain's backends that serves shares. *)
-        let rec find = function
-          | [] -> respond ~status:`Not_found ""
-          | (module B : Backend.S) :: rest -> (
-              let* u = B.share_url ~prefix () in
-              match u with
-                | Some url ->
-                    respond
-                      (Yojson.Safe.to_string (`Assoc [("url", `String url)]))
-                | None -> find rest)
-        in
-        find route.all_backends
+        if route.serve_share <> None then
+          (* We serve them: the client composes the URL from the address it
+             already reaches us on, since TLS termination leaves us without a
+             reliable view of our own public URL. *)
+          respond (Yojson.Safe.to_string (`Assoc [("self", `Bool true)]))
+        else (
+          (* We don't, but a backing store may — an s3 with a configured
+             shareUrl. Pass its absolute URL straight through. *)
+          let rec find = function
+            | [] -> respond ~status:`Not_found ""
+            | (module B : Backend.S) :: rest -> (
+                let* u = B.share_url ~prefix () in
+                match u with
+                  | Some url ->
+                      respond
+                        (Yojson.Safe.to_string (`Assoc [("url", `String url)]))
+                  | None -> find rest)
+          in
+          find route.all_backends)
     | Bad -> respond ~status:`Bad_request "bad request"
+
+(* Share manifests are written outside every domain root ([shares_prefix] is
+   domain-independent), so those keys have no domain to match on: fall back to
+   the route whose secret signed the request.
+   ponytail: the manifest then lands in that domain's store, which is what the
+   share server reads as long as the fronted domains share one bucket. *)
+let route_for routes ~key ~authed =
+  match
+    List.find_opt (fun r -> String.starts_with ~prefix:r.domain_root key) routes
+  with
+    | Some r -> Some r
+    | None
+      when List.exists
+             (fun r -> String.starts_with ~prefix:r.shares_prefix key)
+             routes ->
+        List.find_opt authed routes
+    | None -> None
+
+(* Share links are public URLs handed to recipients who hold no secret, so these
+   requests are served without the HMAC the object API requires. The token is the
+   only credential; {!Share_server.load} confines it to the shares prefix.
+   ponytail: the first share-enabled domain answers — exact for a single-domain
+   listener, and tokens are domain-independent anyway (shares_prefix is global);
+   probe each domain here if one listener ever fronts several share stores. *)
+let share_request routes uri =
+  let path = Uri.path uri in
+  if not (String.starts_with ~prefix:"/s/" path) then None
+  else (
+    match List.find_opt (fun r -> r.serve_share <> None) routes with
+      | None -> None
+      | Some r ->
+          let rest = String.sub path 3 (String.length path - 3) in
+          let token, sub =
+            match String.index_opt rest '/' with
+              | None -> (rest, "")
+              | Some i ->
+                  ( String.sub rest 0 i,
+                    String.sub rest (i + 1) (String.length rest - i - 1) )
+          in
+          Some (Option.get r.serve_share, token, sub))
 
 let callback routes _conn req body =
   let meth = Cohttp.Request.meth req in
   let uri = Cohttp.Request.uri req in
-  let* body_str = Cohttp_lwt.Body.to_string body in
-  let op = parse_op meth uri body_str in
-  match route_key op with
-    | None -> respond ~status:`Bad_request "bad request"
-    | Some key -> (
-        match
-          List.find_opt
-            (fun r -> String.starts_with ~prefix:r.domain_root key)
-            routes
-        with
-          | None -> respond ~status:`Not_found "unknown domain"
-          | Some route ->
-              if not (authed route req body_str) then
-                respond ~status:`Unauthorized "unauthorized"
-              else
-                Lwt.catch
-                  (fun () -> exec route op ~body:body_str)
-                  (fun exn ->
-                    Log.err "http-proxy: %s" (Printexc.to_string exn);
-                    respond ~status:`Internal_server_error
-                      (Printexc.to_string exn)))
+  match share_request routes uri with
+    | Some (handle, token, sub) ->
+        handle ~token ~sub ~query:(Uri.get_query_param uri)
+          ~range:(Cohttp.Header.get (Cohttp.Request.headers req) "range")
+    | None -> (
+        let* body_str = Cohttp_lwt.Body.to_string body in
+        let op = parse_op meth uri body_str in
+        match route_key op with
+          | None -> respond ~status:`Bad_request "bad request"
+          | Some key -> (
+              match
+                route_for routes ~key ~authed:(fun r -> authed r req body_str)
+              with
+                | None -> respond ~status:`Not_found "unknown domain"
+                | Some route ->
+                    if not (authed route req body_str) then
+                      respond ~status:`Unauthorized "unauthorized"
+                    else
+                      Lwt.catch
+                        (fun () -> exec route op ~body:body_str)
+                        (fun exn ->
+                          Log.err "http-proxy: %s" (Printexc.to_string exn);
+                          respond ~status:`Internal_server_error
+                            (Printexc.to_string exn))))
 
 (* ── Listener ───────────────────────────────────────────────────────────────── *)
 
@@ -296,6 +368,13 @@ let spec =
         typ = `String;
         default = Some "";
         secret = true;
+      };
+      {
+        name = "shares";
+        label = "Serve public share links on /s/";
+        typ = `Bool;
+        default = Some "false";
+        secret = false;
       };
       {
         name = "ssl_certificate";

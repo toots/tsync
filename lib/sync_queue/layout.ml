@@ -60,3 +60,12 @@ module Inode = struct
         Some (bkey, Folder.marker_to_string { Folder.name = leaf; id }))
   end
 end
+
+(* Identity scheme: the logical key already *is* the backend key. For callers
+   that hold inode-space keys and no path (share serving walks the folder tree by
+   id), so they can reuse the path-keyed read machinery unchanged. Read-only:
+   there is no folder tree to record. *)
+module Identity : S = struct
+  let manifest_key key = Lwt.return key
+  let folder_marker _ = Lwt.return_none
+end

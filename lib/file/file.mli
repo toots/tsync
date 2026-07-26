@@ -101,4 +101,5 @@ module type S = sig
   val apply_foreign_ops : Journal.op list -> unit Lwt.t
 end
 
+module Make_with_layout (C : Conf.S) (Sq : Sync_queue.S) (L : Layout.S) : S
 module Make (C : Conf.S) (Sq : Sync_queue.S) : S

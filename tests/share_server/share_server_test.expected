@@ -1,0 +1,106 @@
+
+=== file share: whole file
+status: 200
+content-type: text/plain; charset=utf-8
+content-length: 39
+accept-ranges: bytes
+content-disposition: attachment; filename="hello.txt"; filename*=UTF-8''hello.txt
+body: "hello world, this spans several chunks\n"
+
+=== file share: byte range
+status: 206
+content-type: text/plain; charset=utf-8
+content-length: 5
+content-range: bytes 6-10/39
+accept-ranges: bytes
+content-disposition: attachment; filename="hello.txt"; filename*=UTF-8''hello.txt
+body: "world"
+
+=== file share: suffix range
+status: 206
+content-type: text/plain; charset=utf-8
+content-length: 7
+content-range: bytes 32-38/39
+accept-ranges: bytes
+content-disposition: attachment; filename="hello.txt"; filename*=UTF-8''hello.txt
+body: "chunks\n"
+
+=== file share: unsatisfiable range
+status: 416
+content-length: 0
+content-range: bytes */39
+body: ""
+
+=== dir share: root listing
+status: 200
+content-type: application/json
+content-length: 57
+body: "{\"dirs\":[\"sub\"],\"files\":[{\"name\":\"hello.txt\",\"size\":39}]}"
+
+=== dir share: sub listing
+status: 200
+content-type: application/json
+content-length: 52
+body: "{\"dirs\":[],\"files\":[{\"name\":\"inner.txt\",\"size\":20}]}"
+
+=== dir share: file metadata
+status: 200
+content-type: application/json
+content-length: 103
+body: "{\"url\":\"/s/bb/f?path=hello.txt\",\"name\":\"hello.txt\",\"contentType\":\"text/plain; charset=utf-8\",\"size\":39}"
+
+=== dir share: nested file bytes
+status: 200
+content-type: text/plain; charset=utf-8
+content-length: 20
+accept-ranges: bytes
+content-disposition: inline; filename="inner.txt"; filename*=UTF-8''inner.txt
+body: "inner file contents\n"
+
+=== dir share: forced download
+status: 200
+content-type: text/plain; charset=utf-8
+content-length: 39
+accept-ranges: bytes
+content-disposition: attachment; filename="hello.txt"; filename*=UTF-8''hello.txt
+body: "hello world, this spans several chunks\n"
+
+=== bad token
+status: 400
+content-type: text/plain
+content-length: 10
+body: "bad token\n"
+
+=== unknown token
+status: 404
+content-type: text/plain
+content-length: 10
+body: "not found\n"
+
+=== expired token
+status: 410
+content-type: text/plain
+content-length: 13
+body: "link expired\n"
+
+=== path traversal rejected
+status: 400
+content-type: text/plain
+content-length: 9
+body: "bad path\n"
+
+=== missing file
+status: 404
+content-type: text/plain
+content-length: 15
+body: "file not found\n"
+
+=== dir share: folder zip
+status: 200
+content-type: application/zip
+content-disposition: attachment; filename="testdom.zip"; filename*=UTF-8''testdom.zip
+body: 617 bytes
+unzip -t: ok
+member: testdom/hello.txt
+member: testdom/sub/
+member: testdom/sub/inner.txt
