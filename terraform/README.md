@@ -86,9 +86,9 @@ stores = {
 
 Per-store options (`bucket` required): `create_bucket` (default true),
 `iam_user_name` (default `tsync-client-<key>`), `manage_lifecycle` (default true),
-`cache_expiry_days` (default 30), `extra_lifecycle_rules` (see below),
-`custom_domain` (see below), plus `presign_ttl`, `lambda_memory_mb`,
-`ephemeral_storage_mb`.
+`share_expiry_days` (default 30), `archive_after_days` (see below),
+`extra_lifecycle_rules` (see below), `custom_domain` (see below), plus
+`presign_ttl`, `lambda_memory_mb`, `ephemeral_storage_mb`.
 
 Shares live under a single fixed prefix, `tsync/shares/` (domain-independent — a
 share manifest records its own domain in its body). The module hardcodes it to
@@ -246,7 +246,7 @@ second module call (or a second root/workspace). Sketch:
 provider "aws" { alias = "eu", region = "eu-west-1" }
 
 module "store_eu" {
-  source    = "./modules/store"
+  source    = "./modules/store-s3"
   providers = { aws = aws.eu }
   name      = "files-eu"
   bucket    = "my-tsync-files-eu"
@@ -262,10 +262,53 @@ needed.)
 ## Bucket lifecycle
 
 Each store installs one rule that expires everything under `tsync/shares/`
-after `cache_expiry_days` (default 30), so cached artifacts and their manifests
-don't accumulate. Keep `cache_expiry_days` **≥ the longest `tsync share --expires`
+after `share_expiry_days` (default 30), so cached artifacts and their manifests
+don't accumulate. Keep `share_expiry_days` **≥ the longest `tsync share --expires`
 you hand out** — expiring a manifest revokes its link, so a short lifecycle window
 kills links that should still be live.
+
+### Cold storage (`archive_after_days`)
+
+Both `stores` (S3) and `gcs_stores` (GCS) take an opt-in `archive_after_days`,
+`null` (off) by default. When set, it transitions **every** object in the
+bucket — including `tsync/shares/` — to a cold storage class after N days:
+`GLACIER_IR` on S3, `ARCHIVE` on GCS.
+
+```hcl
+stores = {
+  media = {
+    bucket             = "my-tsync-media"
+    archive_after_days = 60
+  }
+}
+
+gcs_stores = {
+  media = {
+    bucket             = "tsync-media"
+    archive_after_days = 60
+  }
+}
+```
+
+Shares are meant to be deleted, not archived — so **keep `archive_after_days`
+strictly greater than `share_expiry_days`**. That ordering is your
+responsibility; the module doesn't enforce it, and the two clouds fail
+differently if you get it backwards:
+
+- **S3** rejects the whole lifecycle config at apply time: it requires a
+  transition's `days` to be strictly less than any expiration on the same
+  object, so `archive_after_days <= share_expiry_days` is a hard error.
+- **GCS** applies Delete over SetStorageClass whenever both match the same
+  object at the same age, so `archive_after_days == share_expiry_days` silently
+  never archives shares (harmless but pointless). Set it *below*
+  `share_expiry_days` and shares really would reach the cold class before
+  deletion — but `ARCHIVE` carries a 365-day minimum storage duration, so
+  anything deleted sooner incurs an early-deletion charge for the unused
+  remainder.
+
+For anything beyond a single flat cutoff on S3 (a different storage class,
+scoping to one prefix, tiering through multiple classes) use
+`extra_lifecycle_rules` instead — see below.
 
 ### Why you have to care about existing rules
 
@@ -345,11 +388,11 @@ harmless — Glacier IR objects are still downloaded instantly — but two edges
 worth knowing:
 
 - Glacier IR bills a 90-day minimum storage duration. Since share caches are
-  deleted at `cache_expiry_days` (30 by default), any that got transitioned incur
+  deleted at `share_expiry_days` (30 by default), any that got transitioned incur
   an early-deletion charge for the unused ~60 days. Small, but not zero.
 - To keep short-lived shares in Standard, give your transition rule a `prefix` that
   doesn't cover `tsync/shares/` (as in the scoped example), or raise
-  `cache_expiry_days` past 90.
+  `share_expiry_days` past 90.
 
 Rule ordering doesn't matter to S3 — each rule is evaluated independently. Just
 keep every `id` unique.

@@ -195,11 +195,32 @@ resource "aws_s3_bucket_lifecycle_configuration" "shares" {
     }
 
     expiration {
-      days = var.cache_expiry_days
+      days = var.share_expiry_days
     }
 
     abort_incomplete_multipart_upload {
       days_after_initiation = 1
+    }
+  }
+
+  # Opt-in cold-storage transition for ALL objects (the "glacier" ask), including
+  # the shares prefix — AWS requires a transition's days be strictly less than any
+  # expiration on the same object, so keep archive_after_days > share_expiry_days
+  # (the operator's responsibility; not enforced here) if shares should never
+  # actually reach GLACIER_IR. Off by default; the operator sets archive_after_days
+  # per store.
+  dynamic "rule" {
+    for_each = var.archive_after_days == null ? [] : [var.archive_after_days]
+    content {
+      id     = "tsync-archive"
+      status = "Enabled"
+
+      filter {}
+
+      transition {
+        days          = rule.value
+        storage_class = "GLACIER_IR"
+      }
     }
   }
 

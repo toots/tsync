@@ -19,7 +19,7 @@ resource "google_storage_bucket" "store" {
     for_each = var.manage_lifecycle ? [1] : []
     content {
       condition {
-        age            = var.cache_expiry_days
+        age            = var.share_expiry_days
         matches_prefix = [local.shares_prefix]
       }
       action { type = "Delete" }
@@ -35,7 +35,10 @@ resource "google_storage_bucket" "store" {
     }
   }
 
-  # Opt-in cold-storage transition for ALL objects (the "glacier" ask). Off by
+  # Opt-in cold-storage transition for ALL objects (the "glacier" ask), including
+  # the shares prefix — GCS applies Delete over SetStorageClass at equal age, so
+  # keep archive_after_days > share_expiry_days (the operator's responsibility;
+  # not enforced here) if shares should never actually reach ARCHIVE. Off by
   # default; the operator sets archive_after_days per store.
   dynamic "lifecycle_rule" {
     for_each = var.archive_after_days == null ? [] : [var.archive_after_days]

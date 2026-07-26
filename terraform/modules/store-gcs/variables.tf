@@ -36,16 +36,16 @@ variable "manage_lifecycle" {
   description = "Manage the bucket lifecycle (shares-prefix expiry). Only applies when create_bucket = true — GCS lifecycle is a property of the bucket, not a separate resource."
 }
 
-variable "cache_expiry_days" {
+variable "share_expiry_days" {
   type        = number
   default     = 30
-  description = "Days before share manifests + cached artifacts are deleted. Keep >= longest `tsync share --expires`."
+  description = "Days before share manifests + cached artifacts are deleted. Keep >= longest `tsync share --expires`, and below archive_after_days if that's set — otherwise share caches could transition to ARCHIVE before they're deleted."
 }
 
 variable "archive_after_days" {
   type        = number
   default     = null
-  description = "When set, transition ALL objects to the ARCHIVE (cold) storage class after this many days. Opt-in per store; left null (off) by default. Only applies when create_bucket = true."
+  description = "When set, transition ALL objects to the ARCHIVE (cold) storage class after this many days. Opt-in per store; left null (off) by default. Only applies when create_bucket = true. Keep above share_expiry_days — shares are deleted, not meant to archive."
 }
 
 variable "presign_ttl" {

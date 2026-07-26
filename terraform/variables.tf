@@ -43,8 +43,8 @@ variable "gcs_stores" {
     function_region    = optional(string) # default: var.gcp_function_region
     custom_domain      = optional(string) # vanity share domain; null = raw function URL
     manage_lifecycle   = optional(bool, true)
-    cache_expiry_days  = optional(number, 30)
-    archive_after_days = optional(number) # null = no cold-storage transition
+    share_expiry_days  = optional(number, 30)
+    archive_after_days = optional(number) # null = no cold-storage transition; keep > share_expiry_days
     presign_ttl        = optional(number, 600)
     memory_mb          = optional(number, 2048)
     max_share_bytes    = optional(number, 10737418240)
@@ -64,7 +64,8 @@ variable "stores" {
     iam_user_name        = optional(string) # default: tsync-client-<key>
     custom_domain        = optional(string) # vanity share domain; null = raw Lambda URL
     manage_lifecycle     = optional(bool, true)
-    cache_expiry_days    = optional(number, 30)
+    share_expiry_days    = optional(number, 30)
+    archive_after_days   = optional(number) # null = no cold-storage transition (GLACIER_IR); keep > share_expiry_days
     presign_ttl          = optional(number, 600)
     lambda_memory_mb     = optional(number, 2048)
     ephemeral_storage_mb = optional(number, 10240)

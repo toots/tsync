@@ -31,7 +31,7 @@ data "archive_file" "handler" {
 # var.stores. Add buckets — for more domains or redundant storage — by adding map
 # entries. All stores live in var.region; see README for multi-region.
 module "store" {
-  source   = "./modules/store"
+  source   = "./modules/store-s3"
   for_each = var.stores
 
   name                  = each.key
@@ -40,7 +40,8 @@ module "store" {
   iam_user_name         = each.value.iam_user_name
   custom_domain         = each.value.custom_domain
   manage_lifecycle      = each.value.manage_lifecycle
-  cache_expiry_days     = each.value.cache_expiry_days
+  share_expiry_days     = each.value.share_expiry_days
+  archive_after_days    = each.value.archive_after_days
   extra_lifecycle_rules = each.value.extra_lifecycle_rules
   presign_ttl           = each.value.presign_ttl
   lambda_memory_mb      = each.value.lambda_memory_mb
@@ -73,7 +74,7 @@ module "store_gcs" {
   function_region    = coalesce(each.value.function_region, var.gcp_function_region)
   custom_domain      = each.value.custom_domain
   manage_lifecycle   = each.value.manage_lifecycle
-  cache_expiry_days  = each.value.cache_expiry_days
+  share_expiry_days  = each.value.share_expiry_days
   archive_after_days = each.value.archive_after_days
   presign_ttl        = each.value.presign_ttl
   memory_mb          = each.value.memory_mb

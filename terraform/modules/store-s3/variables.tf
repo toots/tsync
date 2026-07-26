@@ -26,10 +26,16 @@ variable "manage_lifecycle" {
   description = "Manage the bucket lifecycle config. False = leave it untouched (add your own shares-prefix expiry)."
 }
 
-variable "cache_expiry_days" {
+variable "share_expiry_days" {
   type        = number
   default     = 30
-  description = "Days before share manifests + cached artifacts are deleted. Keep >= longest `tsync share --expires`."
+  description = "Days before share manifests + cached artifacts are deleted. Keep >= longest `tsync share --expires`, and below archive_after_days if that's set — otherwise share caches could transition to GLACIER_IR before they're deleted."
+}
+
+variable "archive_after_days" {
+  type        = number
+  default     = null
+  description = "When set, transition ALL objects to the GLACIER_IR (cold, instant-retrieval) storage class after this many days. Opt-in per store; left null (off) by default. Keep above share_expiry_days — shares are deleted, not meant to archive."
 }
 
 variable "extra_lifecycle_rules" {
