@@ -24,6 +24,19 @@ module type S = sig
   (** Max files downloaded concurrently. *)
   val max_downloads : int
 
+  (** Chunk size (bytes) for newly uploaded files in this domain. Existing files
+      keep the chunk size recorded in their own manifest, so changing this only
+      affects files created afterwards. Smaller chunks cut read/write
+      amplification for random access at the cost of larger manifests and more
+      backend requests. *)
+  val chunk_size : int
+
+  (** Soft cap (bytes) on local cache disk usage for this domain. When set and
+      exceeded, the coldest clean, closed files are evicted (dropping their
+      local data, refetched on demand) until usage is back under the cap.
+      Best-effort; [None] means unbounded. *)
+  val max_cache : int option
+
   (** How [import] treats symbolic links: [`Keep] preserves them as symlink
       objects, [`Follow] dereferences to the target's content, [`Skip] ignores
       them. *)

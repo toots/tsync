@@ -247,6 +247,8 @@ let make_conf ?domain ?socket_path ?(tier = true) ?source cfg : (module Conf.S)
     let socket_path = socket_path
     let max_uploads = cfg.Conf_parsing.max_uploads
     let max_downloads = cfg.Conf_parsing.max_downloads
+    let chunk_size = d.Conf_parsing.chunk_size
+    let max_cache = d.Conf_parsing.max_cache
     let symlink_policy = d.Conf_parsing.symlink_policy
     let read_only = d.Conf_parsing.read_only
 
@@ -958,53 +960,6 @@ let expire_cmd =
        ~doc:
          "Remove versions older than DATE, then garbage-collect unused chunks")
     Term.(const run $ date_arg $ domain_arg)
-
-(* ── tsync auto-evict ────────────────────────────────────────────────────── *)
-
-let auto_evict_cmd =
-  let state_arg =
-    Arg.(
-      value
-      & pos 0 (some string) None
-      & info [] ~docv:"on|off|status"
-          ~doc:"Enable, disable, or query auto-evict after upload")
-  in
-  let domain_arg =
-    Arg.(
-      value
-      & opt (some string) None
-      & info ["domain"] ~docv:"NAME" ~doc:"Domain name (default: from config)")
-  in
-  let auto_evict_result obj =
-    match List.assoc_opt "result" obj with Some (`String s) -> s | _ -> ""
-  in
-  let run domain state =
-    (* Auto-evict is per-domain. On Linux each domain has its own IPC socket; on
-       macOS all share one and the daemon routes by the [domain] field. *)
-    let cfg = Conf_parsing.load runtime_paths.Runtime.config_path in
-    let domain =
-      match domain with Some _ -> domain | None -> read_default_domain ()
-    in
-    let name = (Conf_parsing.pick_domain ?domain cfg).Conf_parsing.name in
-    let socket_path = Runtime.domain_socket_path runtime_paths name in
-    let act arg = ipc_action ~socket_path ~domain:name ~arg "auto_evict" in
-    match state with
-      | None | Some "status" -> (
-          match act "status" with
-            | obj ->
-                Printf.printf "auto-evict [%s]: %s\n" name
-                  (auto_evict_result obj)
-            | exception Failure msg -> Printf.eprintf "Error: %s\n" msg)
-      | Some (("on" | "off") as s) -> (
-          match act s with
-            | _ -> Printf.printf "auto-evict [%s]: %s\n" name s
-            | exception Failure msg -> Printf.eprintf "Error: %s\n" msg)
-      | Some other -> Printf.eprintf "Expected on|off|status, got: %s\n" other
-  in
-  Cmd.v
-    (Cmd.info "auto-evict"
-       ~doc:"Enable or disable auto-evict after upload (per domain)")
-    Term.(const run $ domain_arg $ state_arg)
 
 (* ── tsync sync ──────────────────────────────────────────────────────────── *)
 
@@ -1806,6 +1761,30 @@ let prompt_symlinks default =
   in
   ask ()
 
+let rec prompt_size msg default =
+  match
+    Conf_parsing.parse_size
+      (prompt msg (Some (Conf_parsing.format_size default)))
+  with
+    | Some n -> n
+    | None ->
+        Printf.printf "  (enter a size like 512K, 8M, or 1G)\n%!";
+        prompt_size msg default
+
+(* Like {!prompt_size} but "none" (the default when unset) clears to unlimited. *)
+let rec prompt_size_opt msg default =
+  let def =
+    match default with Some n -> Conf_parsing.format_size n | None -> "none"
+  in
+  match String.lowercase_ascii (String.trim (prompt msg (Some def))) with
+    | "none" | "unlimited" | "0" | "" -> None
+    | v -> (
+        match Conf_parsing.parse_size v with
+          | Some n -> Some n
+          | None ->
+              Printf.printf "  (enter a size like 2G, or \"none\")\n%!";
+              prompt_size_opt msg default)
+
 (* ── Backend / domain builders ───────────────────────────────────────────── *)
 
 (* The backend fields a Terraform store fills — so the wizard skips prompting
@@ -2206,6 +2185,23 @@ let edit_domain existing =
   let versioning = ref (curbool "versioning") in
   let symlinks = ref (cur "symlinks" "keep") in
   let read_only = ref (curbool "readOnly") in
+  let chunk_size =
+    ref
+      (match Option.bind existing (fun j -> jfield j "chunkSize") with
+        | Some (`Int n) when n > 0 -> n
+        | Some (`String s) -> (
+            match Conf_parsing.parse_size s with
+              | Some n -> n
+              | None -> Conf_parsing.default_chunk_size)
+        | _ -> Conf_parsing.default_chunk_size)
+  in
+  let max_cache =
+    ref
+      (match Option.bind existing (fun j -> jfield j "maxCache") with
+        | Some (`Int n) when n > 0 -> Some n
+        | Some (`String s) -> Conf_parsing.parse_size s
+        | _ -> None)
+  in
   let backends =
     ref (match existing with Some j -> jlist j "backends" | None -> [])
   in
@@ -2226,6 +2222,13 @@ let edit_domain existing =
         read_only :=
           prompt_bool ~default:!read_only
             "Read-only mount (block all local writes)?";
+        chunk_size :=
+          prompt_size
+            "Chunk size (smaller helps random access; larger favors throughput)"
+            !chunk_size;
+        max_cache :=
+          prompt_size_opt "Max local cache size (\"none\" = unlimited)"
+            !max_cache;
         backends := prompt_backends ();
         frontends := edit_frontends !frontends
     | Some _ ->
@@ -2238,8 +2241,14 @@ let edit_domain existing =
           Printf.printf "  2. versioning:  %b\n" !versioning;
           Printf.printf "  3. symlinks:    %s\n" !symlinks;
           Printf.printf "  4. read-only:   %b\n" !read_only;
-          Printf.printf "  5. backends:    %s\n" (backend_summary !backends);
-          Printf.printf "  6. frontends:   %s\n" (frontend_summary !frontends);
+          Printf.printf "  5. chunk size:  %s\n"
+            (Conf_parsing.format_size !chunk_size);
+          Printf.printf "  6. max cache:   %s\n"
+            (match !max_cache with
+              | Some n -> Conf_parsing.format_size n
+              | None -> "none");
+          Printf.printf "  7. backends:    %s\n" (backend_summary !backends);
+          Printf.printf "  8. frontends:   %s\n" (frontend_summary !frontends);
           if !status <> "" then Printf.printf "\n%s\n" !status;
           Printf.printf "\nEnter a field number to edit, or [d]one:\n> %!";
           status := "";
@@ -2251,20 +2260,28 @@ let edit_domain existing =
             | "3" -> symlinks := prompt_symlinks !symlinks
             | "4" ->
                 read_only := prompt_bool ~default:!read_only "Read-only mount?"
-            | "5" -> backends := edit_backends !backends
-            | "6" -> frontends := edit_frontends !frontends
+            | "5" -> chunk_size := prompt_size "Chunk size" !chunk_size
+            | "6" ->
+                max_cache :=
+                  prompt_size_opt "Max local cache size (\"none\" = unlimited)"
+                    !max_cache
+            | "7" -> backends := edit_backends !backends
+            | "8" -> frontends := edit_frontends !frontends
             | "d" | "" -> running := false
             | other -> status := Printf.sprintf "(unknown field %S)" other
         done);
   `Assoc
-    [
-      ("name", `String !name);
-      ("versioning", `Bool !versioning);
-      ("symlinks", `String !symlinks);
-      ("readOnly", `Bool !read_only);
-      ("backends", `List !backends);
-      ("frontends", `List !frontends);
-    ]
+    ([
+       ("name", `String !name);
+       ("versioning", `Bool !versioning);
+       ("symlinks", `String !symlinks);
+       ("readOnly", `Bool !read_only);
+       ("chunkSize", `String (Conf_parsing.format_size !chunk_size));
+     ]
+    @ (match !max_cache with
+      | Some n -> [("maxCache", `String (Conf_parsing.format_size n))]
+      | None -> [])
+    @ [("backends", `List !backends); ("frontends", `List !frontends)])
 
 (* Serialize globals + domains to [path] with 0600 perms. *)
 let write_config ~path ~client_name ~max_uploads ~max_downloads ~tls ~domains =
@@ -2590,6 +2607,12 @@ let print_conf_cmd =
         Printf.printf "  versioning: %b\n" d.versioning;
         Printf.printf "  read_only:  %b\n" d.read_only;
         Printf.printf "  symlinks:   %s\n" (symlink_str d.symlink_policy);
+        Printf.printf "  chunkSize:  %s\n"
+          (Conf_parsing.format_size d.chunk_size);
+        Printf.printf "  maxCache:   %s\n"
+          (match d.max_cache with
+            | Some n -> Conf_parsing.format_size n
+            | None -> "none");
         List.iter
           (fun (f : Conf_parsing.frontend_config) ->
             Printf.printf "  frontend: %s\n" f.frontend_type;
@@ -2779,7 +2802,6 @@ let () =
          untrash_cmd;
          purge_cmd;
          expire_cmd;
-         auto_evict_cmd;
        ]
       @ frontend_cmds ())
   in

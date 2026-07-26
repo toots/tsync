@@ -1,0 +1,27 @@
+(executable
+ (name cache_cap)
+ (libraries tsync_test_runner))
+
+(alias
+ (name default)
+ (deps cache_cap.exe))
+
+(rule
+ (alias runtest)
+ (target cache_cap.output)
+ (action
+  (with-stdout-to
+   cache_cap.output
+   (ignore-stderr
+    (setenv
+     TSYNC_CHUNK_SIZE
+     8
+     (setenv
+      TSYNC_MAX_CACHE
+      8
+      (run ./cache_cap.exe)))))))
+
+(rule
+ (alias runtest)
+ (action
+  (diff cache_cap.expected cache_cap.output)))

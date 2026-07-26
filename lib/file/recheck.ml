@@ -50,12 +50,26 @@ module Make (C : Conf.S) = struct
     match state with
       | None -> Lwt.return Unreadable
       | Some `Dirty -> Lwt.return Dirty
+      | Some (`Clean m)
+        when match m.Manifest.residency with
+               | Some a -> Array.exists (fun s -> s = Manifest.Dirty) a
+               | None -> false ->
+          (* A partial file with unpublished (dirty) chunks: its local data has
+             holes and stale chunks — skip rather than re-hash it as-is. *)
+          Lwt.return Dirty
       | Some (`Clean m) ->
           let lp =
             Local.cache_path ~cache_root:C.cache_root ~domain_name:C.domain_name
               ~domain_prefix:C.domain_prefix key
           in
-          let* cached = Lwt_unix_retry.file_exists lp in
+          (* A partial-but-clean file (some chunks absent, none dirty) has holes
+             on disk: verify its chunks against the backend from the entries
+             instead of re-hashing local data. *)
+          let is_partial = m.Manifest.residency <> None in
+          let* cached =
+            if is_partial then Lwt.return_false
+            else Lwt_unix_retry.file_exists lp
+          in
           if cached then
             let* st = Lwt_unix_retry.stat lp in
             let* manifest_state, report =

@@ -3,8 +3,8 @@
   write a.txt "hello"
   write b.txt "world"
 --- listing
-  list_dir tsync/test/manifests/ -> {"ok":true,"dirs":[],"files":[{"key":"tsync/test/manifests/a.txt","size":5,"mtime":"<mtime>","etag":"9555e8555c62dcfd"},{"key":"tsync/test/manifests/b.txt","size":5,"mtime":"<mtime>","etag":"d6476c25083d69be"}]}
-  list_all tsync/test/manifests/ -> {"ok":true,"files":[{"key":"tsync/test/manifests/a.txt","size":5,"mtime":"<mtime>","etag":"9555e8555c62dcfd"},{"key":"tsync/test/manifests/b.txt","size":5,"mtime":"<mtime>","etag":"d6476c25083d69be"}]}
+  list_dir tsync/test/manifests/ -> {"ok":true,"dirs":[],"files":[{"key":"tsync/test/manifests/a.txt","size":5,"mtime":"<mtime>","etag":"650e58ac64da6e0a"},{"key":"tsync/test/manifests/b.txt","size":5,"mtime":"<mtime>","etag":"0c85c7c61d1a6890"}]}
+  list_all tsync/test/manifests/ -> {"ok":true,"files":[{"key":"tsync/test/manifests/a.txt","size":5,"mtime":"<mtime>","etag":"650e58ac64da6e0a"},{"key":"tsync/test/manifests/b.txt","size":5,"mtime":"<mtime>","etag":"0c85c7c61d1a6890"}]}
 
 === nested directories keyed as full paths
   mkdir sub
@@ -12,17 +12,17 @@
   write sub/c.txt "nested"
   write top.txt "top"
 --- listing
-  list_dir tsync/test/manifests/ -> {"ok":true,"dirs":[{"key":"tsync/test/manifests/sub/"}],"files":[{"key":"tsync/test/manifests/top.txt","size":3,"mtime":"<mtime>","etag":"78118159b95fa02f"}]}
-  list_dir tsync/test/manifests/sub/ -> {"ok":true,"dirs":[],"files":[{"key":"tsync/test/manifests/sub/c.txt","size":6,"mtime":"<mtime>","etag":"fa87ee5fc199e332"}]}
-  list_all tsync/test/manifests/ -> {"ok":true,"files":[{"key":"tsync/test/manifests/sub/c.txt","size":6,"mtime":"<mtime>","etag":"fa87ee5fc199e332"},{"key":"tsync/test/manifests/top.txt","size":3,"mtime":"<mtime>","etag":"78118159b95fa02f"}]}
+  list_dir tsync/test/manifests/ -> {"ok":true,"dirs":[{"key":"tsync/test/manifests/sub/"}],"files":[{"key":"tsync/test/manifests/top.txt","size":3,"mtime":"<mtime>","etag":"97bb0a4a6df0d08e"}]}
+  list_dir tsync/test/manifests/sub/ -> {"ok":true,"dirs":[],"files":[{"key":"tsync/test/manifests/sub/c.txt","size":6,"mtime":"<mtime>","etag":"7546f608548f4d0d"}]}
+  list_all tsync/test/manifests/ -> {"ok":true,"files":[{"key":"tsync/test/manifests/sub/c.txt","size":6,"mtime":"<mtime>","etag":"7546f608548f4d0d"},{"key":"tsync/test/manifests/top.txt","size":3,"mtime":"<mtime>","etag":"97bb0a4a6df0d08e"}]}
 
 === identical content shares an etag
   write x.txt "same bytes"
   drain
   write y.txt "same bytes"
 --- listing
-  list_dir tsync/test/manifests/ -> {"ok":true,"dirs":[],"files":[{"key":"tsync/test/manifests/x.txt","size":10,"mtime":"<mtime>","etag":"e80520ee54b9ac96"},{"key":"tsync/test/manifests/y.txt","size":10,"mtime":"<mtime>","etag":"e80520ee54b9ac96"}]}
-  list_all tsync/test/manifests/ -> {"ok":true,"files":[{"key":"tsync/test/manifests/x.txt","size":10,"mtime":"<mtime>","etag":"e80520ee54b9ac96"},{"key":"tsync/test/manifests/y.txt","size":10,"mtime":"<mtime>","etag":"e80520ee54b9ac96"}]}
+  list_dir tsync/test/manifests/ -> {"ok":true,"dirs":[],"files":[{"key":"tsync/test/manifests/x.txt","size":10,"mtime":"<mtime>","etag":"83aa3fc9fadd8e79"},{"key":"tsync/test/manifests/y.txt","size":10,"mtime":"<mtime>","etag":"83aa3fc9fadd8e79"}]}
+  list_all tsync/test/manifests/ -> {"ok":true,"files":[{"key":"tsync/test/manifests/x.txt","size":10,"mtime":"<mtime>","etag":"83aa3fc9fadd8e79"},{"key":"tsync/test/manifests/y.txt","size":10,"mtime":"<mtime>","etag":"83aa3fc9fadd8e79"}]}
 
 ########## CHANGES ##########
 === foreign put

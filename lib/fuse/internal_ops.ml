@@ -41,7 +41,7 @@ module Make (F : File.S) = struct
               let* m = F.read_manifest f in
               match (creating, m) with
                 | true, None -> F.create f
-                | _ -> F.ensure_cached f
+                | _ -> F.prepare_read f
             else Lwt.return_unit
           in
           let* () = open_file f in
@@ -51,17 +51,16 @@ module Make (F : File.S) = struct
         (fun path buf offset _fi ->
           let f = file path in
           if offset = 0L then Log.debug "read %s: offset=0" path;
-          let* cached = F.is_cached f in
-          if not cached then
-            Log.debug "read %s: not in local cache, fetching from backend" path;
-          let* () = F.ensure_cached f in
+          let* () =
+            F.ensure_readable f ~offset ~len:(Bigarray.Array1.dim buf)
+          in
           match fd_for f with
             | Some fd -> Local_io.pread fd buf ~offset
             | None -> Local_io.read (F.local_path f) buf ~offset);
       write =
         (fun path buf offset _fi ->
           let f = file path in
-          let* () = F.mark_dirty f in
+          let* () = F.dirty_range f ~offset ~len:(Bigarray.Array1.dim buf) in
           match fd_for f with
             | Some fd -> Local_io.pwrite fd buf ~offset
             | None -> Local_io.write (F.local_path f) buf ~offset);

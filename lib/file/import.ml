@@ -89,7 +89,10 @@ module Make (C : Conf.S) = struct
     else (
       let src_path = Filename.concat src_root rel in
       let* st = Lwt_unix_retry.stat src_path in
-      let* state = R.upload ~key ~src_path ~mtime:st.Unix.st_mtime () in
+      let* state =
+        R.upload ~key ~src_path ~mtime:st.Unix.st_mtime ~chunk_size:C.chunk_size
+          ()
+      in
       let+ () =
         Local.write_manifest ~cache_root:C.cache_root ~domain_name:C.domain_name
           ~domain_prefix:C.domain_prefix key (Manifest.to_string state)

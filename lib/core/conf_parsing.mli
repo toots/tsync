@@ -27,6 +27,9 @@ type domain = {
   symlink_policy : [ `Keep | `Follow | `Skip ];
   versioning : bool;
   read_only : bool;
+  chunk_size : int;  (** chunk size (bytes) for newly uploaded files *)
+  max_cache : int option;
+      (** soft cap (bytes) on local cache usage; [None] = unbounded *)
 }
 
 type t = {
@@ -43,6 +46,16 @@ type t = {
 
 val default_max_uploads : int
 val default_max_downloads : int
+val default_chunk_size : int
+
+(** Render a byte count as a human-friendly binary size (e.g. [8M], [512K]);
+    exact multiples only, else the raw number. *)
+val format_size : int -> string
+
+(** Parse a human-friendly size ([512K], [8M], [1G], [1048576], with optional
+    [B]/[iB]) into bytes. Binary multiples (1K = 1024). [None] if unparseable.
+*)
+val parse_size : string -> int option
 
 (** Load configuration from [path], or from the JSON string in
     [$TSYNC_CONFIG_JSON] if set (overrides [path]). *)

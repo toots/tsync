@@ -207,7 +207,16 @@ final class TsyncExtension: NSObject, NSFileProviderReplicatedExtension, @unchec
                 poller.cancel()
                 guard let localPath = resp.localPath else { throw IPC.IPCError.badResponse }
                 let item = try await resolveItem(itemIdentifier, isDownloaded: true)
-                completionHandler(cloneForSystem(URL(fileURLWithPath: localPath)), item, nil)
+                // Move the daemon's staging copy into the system's temporary
+                // directory: the OS takes ownership of it, so the daemon holds a
+                // file only while transferring it. If the move fails, drop the
+                // staging file and fail the fetch (the OS retries) rather than
+                // hand back a file that lives in the daemon's private cache.
+                guard let moved = moveForSystem(URL(fileURLWithPath: localPath)) else {
+                    try? FileManager.default.removeItem(atPath: localPath)
+                    throw NSError(domain: NSPOSIXErrorDomain, code: Int(EIO))
+                }
+                completionHandler(moved, item, nil)
             } catch {
                 poller.cancel()
                 log.error("fetchContents error: \(key, privacy: .public): \(error, privacy: .public)")
@@ -396,16 +405,19 @@ final class TsyncExtension: NSObject, NSFileProviderReplicatedExtension, @unchec
     /// Hand fileproviderd its own copy instead of the daemon's live cache file: the system
     /// may move the returned URL, and an EVICT can race the transfer. The provider temp
     /// directory is on the same volume, so the copy is an APFS clone (no data duplicated).
-    private func cloneForSystem(_ src: URL) -> URL {
+    /// Move the daemon's staging file into the system's temporary directory so
+    /// the OS takes ownership of it (the canonical fetchContents handoff — the
+    /// move removes the daemon's copy). Returns nil on failure.
+    private func moveForSystem(_ src: URL) -> URL? {
         guard let manager = NSFileProviderManager(for: domain),
-              let tmpDir = try? manager.temporaryDirectoryURL() else { return src }
+              let tmpDir = try? manager.temporaryDirectoryURL() else { return nil }
         let dst = tmpDir.appendingPathComponent(UUID().uuidString)
         do {
-            try FileManager.default.copyItem(at: src, to: dst)
+            try FileManager.default.moveItem(at: src, to: dst)
             return dst
         } catch {
-            log.error("cloneForSystem failed, returning cache path: \(error, privacy: .public)")
-            return src
+            log.error("moveForSystem failed: \(error, privacy: .public)")
+            return nil
         }
     }
 

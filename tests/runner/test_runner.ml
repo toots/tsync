@@ -8,11 +8,27 @@ type step =
   | Rename of { src : string; dst : string }
   | Delete of string
   | Evict of string
-  | AutoEvict of bool
+  | EnforceCache
+      (** Run one best-effort cache-cap sweep (evict coldest clean files over
+          the [max_cache] cap). *)
   | Restore of string
   | RevertVersion of { path : string; version : string option }
   | Open of string
   | Close of string
+  | OpenRead of string
+      (** Fault a file in for reading the way FUSE [fopen] does — demand-page it
+          (sparse file + residency, no download) and mark it open. *)
+  | ReadRange of { path : string; offset : int; len : int }
+      (** Read [len] bytes at [offset], fetching only the chunks they need, and
+          print the bytes returned. *)
+  | WriteAt of { path : string; offset : int; content : string }
+      (** Write [content] at [offset] through the demand-paged write path
+          (read-modify-write of a partially-touched chunk, per-chunk dirty). *)
+  | Release of string
+      (** Last-handle close policy (queue upload / evict / persist). *)
+  | ShowResidency of string
+      (** Print the file's per-chunk residency (present/absent/dirty), size and
+          [cached] flag, from its sidecar. *)
   | Mark  (** record the current time, as an [Expire "mark"] cutoff *)
   | Expire of string
       (** cutoff selector: "all" (now), "none" (epoch), or "mark" *)
@@ -78,13 +94,20 @@ let rec render_step = function
   | Rename { src; dst } -> Printf.sprintf "rename %s -> %s" src dst
   | Delete p -> "delete " ^ p
   | Evict p -> "evict " ^ p
-  | AutoEvict on -> "auto-evict " ^ if on then "on" else "off"
+  | EnforceCache -> "enforce-cache"
   | Restore p -> "restore " ^ p
   | RevertVersion { path; version } ->
       Printf.sprintf "revert %s%s" path
         (match version with Some v -> " @" ^ v | None -> " @latest")
   | Open p -> "open " ^ p
   | Close p -> "close " ^ p
+  | OpenRead p -> "open-read " ^ p
+  | ReadRange { path; offset; len } ->
+      Printf.sprintf "read %s [%d,%d)" path offset (offset + len)
+  | WriteAt { path; offset; content } ->
+      Printf.sprintf "write-at %s @%d %S" path offset content
+  | Release p -> "release " ^ p
+  | ShowResidency p -> "residency " ^ p
   | Mark -> "mark"
   | Expire s -> "expire " ^ s
   | Drain -> "drain"
@@ -205,12 +228,9 @@ let setup_client (module C : Conf.S) root staging_prefix =
   Sq.start
     ~upload:(fun ~key ~cancel -> F.upload ~cancel key)
     ~on_cursor:(fun ~entry_key:_ -> ())
-    ~on_upload_done:(fun ~key ->
-      (* Mirror the fuse/file_provider daemons: evict on upload when auto-evict
-         is enabled for this domain. *)
-      if Ipc.auto_evict_enabled ~data_dir:C.data_dir ~domain:C.domain_name then
-        F.evict key
-      else Lwt.return_unit);
+    ~on_upload_done:(fun ~key:_ ->
+      (* Mirror the daemons: nudge cache-cap enforcement after each upload. *)
+      F.enforce_cache_cap ());
   let staging_seq = ref 0 in
   let mark_time = ref 0. in
   let request fields =
@@ -307,12 +327,7 @@ let setup_client (module C : Conf.S) root staging_prefix =
     | Rename { src; dst } -> must_action ~src:(key src) "rename" (key dst)
     | Delete p -> must_action "delete" (key p)
     | Evict p -> must_action "evict" ("/" ^ p)
-    | AutoEvict on ->
-        mkdir_p C.data_dir;
-        ignore
-          (Ipc.handle_auto_evict ~data_dir:C.data_dir ~domain:C.domain_name
-             (if on then "on" else "off"));
-        Lwt.return_unit
+    | EnforceCache -> F.enforce_cache_cap ()
     | Restore p -> must_action "restore" ("/" ^ p)
     | RevertVersion { path; version } ->
         must_action ?arg:version "revert" ("/" ^ path)
@@ -321,6 +336,57 @@ let setup_client (module C : Conf.S) root staging_prefix =
         Lwt.return_unit
     | Close p ->
         ignore (F.mark_closed (key p));
+        Lwt.return_unit
+    | OpenRead p ->
+        let* () = F.prepare_read (key p) in
+        F.mark_open (key p);
+        Lwt.return_unit
+    | ReadRange { path; offset; len } ->
+        let buf = Bigarray.Array1.create Bigarray.char Bigarray.c_layout len in
+        let* n = F.read (key path) buf ~offset:(Int64.of_int offset) in
+        let bytes = Bytes.create n in
+        for i = 0 to n - 1 do
+          Bytes.set bytes i (Bigarray.Array1.get buf i)
+        done;
+        Printf.printf "  read %s [%d,%d) = %S\n" path offset (offset + len)
+          (Bytes.to_string bytes);
+        Lwt.return_unit
+    | WriteAt { path; offset; content } ->
+        let len = String.length content in
+        let buf = Bigarray.Array1.create Bigarray.char Bigarray.c_layout len in
+        for i = 0 to len - 1 do
+          Bigarray.Array1.set buf i content.[i]
+        done;
+        let* (_ : int) = F.write (key path) buf ~offset:(Int64.of_int offset) in
+        Lwt.return_unit
+    | Release p -> F.release (key p)
+    | ShowResidency p ->
+        let k = key p in
+        let* cached = F.is_cached k in
+        let* m = F.read_manifest k in
+        let desc =
+          match m with
+            | Some (`Clean man) ->
+                let res =
+                  match man.Manifest.residency with
+                    | None -> "complete"
+                    | Some a ->
+                        "["
+                        ^ String.concat ""
+                            (Array.to_list
+                               (Array.map
+                                  (function
+                                    | Manifest.Present -> "P"
+                                    | Manifest.Absent -> "A"
+                                    | Manifest.Dirty -> "D")
+                                  a))
+                        ^ "]"
+                in
+                Printf.sprintf "size=%Ld chunks=%s" man.Manifest.size res
+            | Some `Dirty -> "dirty (new)"
+            | None -> "no sidecar"
+        in
+        Printf.printf "  residency %s cached=%b %s\n" p cached desc;
         Lwt.return_unit
     | Mark ->
         mark_time := Unix.gettimeofday ();
@@ -798,6 +864,13 @@ let run_scenario ?(versioning = false) ?(symlink_policy = `Keep)
     let notify_path = Filename.concat root "notify.sock"
     let max_uploads = 4
     let max_downloads = 8
+    let chunk_size = Manifest.chunk_size
+
+    let max_cache =
+      match Sys.getenv_opt "TSYNC_MAX_CACHE" with
+        | Some s -> Conf_parsing.parse_size s
+        | None -> None
+
     let symlink_policy = symlink_policy
     let read_only = false
   end in
@@ -867,6 +940,13 @@ let run_two_client_scenario ?(versioning = false)
     let notify_path = Filename.concat root "notify-a.sock"
     let max_uploads = 4
     let max_downloads = 8
+    let chunk_size = Manifest.chunk_size
+
+    let max_cache =
+      match Sys.getenv_opt "TSYNC_MAX_CACHE" with
+        | Some s -> Conf_parsing.parse_size s
+        | None -> None
+
     let symlink_policy = `Keep
     let read_only = false
   end in
@@ -887,6 +967,13 @@ let run_two_client_scenario ?(versioning = false)
     let notify_path = Filename.concat root "notify-b.sock"
     let max_uploads = 4
     let max_downloads = 8
+    let chunk_size = Manifest.chunk_size
+
+    let max_cache =
+      match Sys.getenv_opt "TSYNC_MAX_CACHE" with
+        | Some s -> Conf_parsing.parse_size s
+        | None -> None
+
     let symlink_policy = `Keep
     let read_only = false
   end in
@@ -955,6 +1042,13 @@ let make_conf ?(versioning = false) ~client_name ~backend_root ~cache_root
     let notify_path = notify_path
     let max_uploads = 4
     let max_downloads = 8
+    let chunk_size = Manifest.chunk_size
+
+    let max_cache =
+      match Sys.getenv_opt "TSYNC_MAX_CACHE" with
+        | Some s -> Conf_parsing.parse_size s
+        | None -> None
+
     let symlink_policy = `Keep
     let read_only = false
   end)

@@ -378,12 +378,6 @@ module Make (C : Conf.S) (F : File.S) = struct
                   | "revert" ->
                       handle_revert hooks (hooks.path_to_key path)
                         (get_str obj "arg")
-                  | "auto_evict" ->
-                      let result =
-                        Ipc.handle_auto_evict ~data_dir:C.data_dir
-                          ~domain:C.domain_name (get_str obj "arg")
-                      in
-                      Lwt.return (ok_json [("result", `String result)])
                   | "full_resync" ->
                       let+ () = hooks.full_resync () in
                       ok_json []

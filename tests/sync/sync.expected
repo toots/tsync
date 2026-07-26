@@ -3,19 +3,19 @@
   A: drain
   B: sync
 --- tree A
-  f foo.txt size=5 cached=true uploaded=true etag=9555e8555c62dcfd
+  f foo.txt size=5 cached=true uploaded=true etag=650e58ac64da6e0a
 --- content A
   foo.txt = "hello"
 --- pending A
 --- tree B
-  f foo.txt size=5 cached=false uploaded=true etag=9555e8555c62dcfd
+  f foo.txt size=5 cached=false uploaded=true etag=650e58ac64da6e0a
 --- content B
   foo.txt = "hello"
 --- pending B
 --- backend
   chunk 9555e8555c62dcfd-74b07ed397a89e92 size=5
   journal <entry-1> = put foo.txt 5
-  file foo.txt [.tsync-root/b306717ed3feaa3f-615fce859cf8a12f] = manifest size=5 chunks=1 h1=9555e8555c62dcfd h2=74b07ed397a89e92
+  file foo.txt [.tsync-root/b306717ed3feaa3f-615fce859cf8a12f] = manifest size=5 chunks=1 h1=650e58ac64da6e0a h2=2edbeded005becfe
     chunk#0 9555e8555c62dcfd-74b07ed397a89e92 size=5
 
 === foreign_delete
@@ -46,12 +46,12 @@
   A: drain
   B: sync
 --- tree A
-  f foo.txt size=13 cached=true uploaded=true etag=37d0952b447ba6cc
+  f foo.txt size=13 cached=true uploaded=true etag=e52cfb68e77fc491
 --- content A
   foo.txt = "hello, world!"
 --- pending A
 --- tree B
-  f foo.txt size=13 cached=false uploaded=true etag=37d0952b447ba6cc
+  f foo.txt size=13 cached=false uploaded=true etag=e52cfb68e77fc491
 --- content B
   foo.txt = "hello, world!"
 --- pending B
@@ -60,7 +60,7 @@
   chunk 9555e8555c62dcfd-74b07ed397a89e92 size=5
   journal <entry-1> = put foo.txt 5
   journal <entry-2> = put foo.txt 13
-  file foo.txt [.tsync-root/b306717ed3feaa3f-615fce859cf8a12f] = manifest size=13 chunks=1 h1=37d0952b447ba6cc h2=f3cf2ed32de60965
+  file foo.txt [.tsync-root/b306717ed3feaa3f-615fce859cf8a12f] = manifest size=13 chunks=1 h1=e52cfb68e77fc491 h2=97c24e53f8305a27
     chunk#0 37d0952b447ba6cc-f3cf2ed32de60965 size=13
 
 === foreign_rename
@@ -72,7 +72,7 @@
   A: drain
   B: sync
 --- tree A
-  f bar.txt size=15 cached=true uploaded=true etag=7ca14c1744b7cedc
+  f bar.txt size=15 cached=true uploaded=true etag=095816902097b57a
 --- content A
   bar.txt = "renamed content"
 --- pending A
@@ -86,7 +86,7 @@
   cursor = <entry-2>
   journal <entry-1> = put foo.txt 15
   journal <entry-2> = rename foo.txt -> bar.txt 15
-  file bar.txt [.tsync-root/5dfde940d8f8f5f8-5b620c0acd6130ed] = manifest size=15 chunks=1 h1=7ca14c1744b7cedc h2=339b870e9f742377
+  file bar.txt [.tsync-root/5dfde940d8f8f5f8-5b620c0acd6130ed] = manifest size=15 chunks=1 h1=095816902097b57a h2=6af5636a87362acc
     chunk#0 7ca14c1744b7cedc-339b870e9f742377 size=15
 
 === foreign_rename_chain
@@ -99,7 +99,7 @@
   A: drain
   B: sync
 --- tree A
-  f baz.txt size=7 cached=true uploaded=true etag=e93e5e881ded4f7c
+  f baz.txt size=7 cached=true uploaded=true etag=afd6915852083717
 --- content A
   baz.txt = "chained"
 --- pending A
@@ -114,7 +114,7 @@
   journal <entry-1> = put foo.txt 7
   journal <entry-2> = rename foo.txt -> bar.txt 7
   journal <entry-3> = rename bar.txt -> baz.txt 7
-  file baz.txt [.tsync-root/f7dfa6d012ca3b6f-955cbabab01f65a0] = manifest size=7 chunks=1 h1=e93e5e881ded4f7c h2=90a3b89755564bde
+  file baz.txt [.tsync-root/f7dfa6d012ca3b6f-955cbabab01f65a0] = manifest size=7 chunks=1 h1=afd6915852083717 h2=e1d23a844c387a9b
     chunk#0 e93e5e881ded4f7c-90a3b89755564bde size=7
 
 === foreign_mkdir
@@ -125,13 +125,13 @@
   B: sync
 --- tree A
   d sub/
-  f sub/a.txt size=6 cached=true uploaded=true etag=fa87ee5fc199e332
+  f sub/a.txt size=6 cached=true uploaded=true etag=7546f608548f4d0d
 --- content A
   sub/a.txt = "nested"
 --- pending A
 --- tree B
   d sub/
-  f sub/a.txt size=6 cached=false uploaded=true etag=fa87ee5fc199e332
+  f sub/a.txt size=6 cached=false uploaded=true etag=7546f608548f4d0d
 --- content B
   sub/a.txt = "nested"
 --- pending B
@@ -141,7 +141,7 @@
   journal <entry-1> = mkdir sub/
   journal <entry-2> = put sub/a.txt 6
   folder sub [.tsync-root/4f7b4244079f8bf6-67a7ed7af26470c3] -> 547c2ad623ddba3f
-  file a.txt [547c2ad623ddba3f/f01e5cbbc09d4fc4-9a0fcd66f030de75] = manifest size=6 chunks=1 h1=fa87ee5fc199e332 h2=c7156c4359a54f81
+  file a.txt [547c2ad623ddba3f/f01e5cbbc09d4fc4-9a0fcd66f030de75] = manifest size=6 chunks=1 h1=7546f608548f4d0d h2=aaeab951ddf2968e
     chunk#0 fa87ee5fc199e332-c7156c4359a54f81 size=6
 
 === foreign_rmdir
@@ -177,12 +177,12 @@
   B: drain
   A: sync
 --- tree A
-  f foo.txt size=13 cached=false uploaded=true etag=09f85c812b60aedb
+  f foo.txt size=13 cached=false uploaded=true etag=c5b6c5af6312a541
 --- content A
   foo.txt = "from client B"
 --- pending A
 --- tree B
-  f foo.txt size=13 cached=true uploaded=true etag=09f85c812b60aedb
+  f foo.txt size=13 cached=true uploaded=true etag=c5b6c5af6312a541
 --- content B
   foo.txt = "from client B"
 --- pending B
@@ -191,7 +191,7 @@
   chunk 2ddcd7df4a530027-b16926580286588d size=6
   journal <entry-1> = put foo.txt 6
   journal <entry-2> = put foo.txt 13
-  file foo.txt [.tsync-root/b306717ed3feaa3f-615fce859cf8a12f] = manifest size=13 chunks=1 h1=09f85c812b60aedb h2=57817316f91d176e
+  file foo.txt [.tsync-root/b306717ed3feaa3f-615fce859cf8a12f] = manifest size=13 chunks=1 h1=c5b6c5af6312a541 h2=38e00a1744caa62f
     chunk#0 09f85c812b60aedb-57817316f91d176e size=13
 
 === open_file_guard
@@ -203,12 +203,12 @@
   B: sync
   B: close foo.txt
 --- tree A
-  f foo.txt size=24 cached=true uploaded=true etag=28c76e4dce03a3c4
+  f foo.txt size=24 cached=true uploaded=true etag=3058ab1111417f8b
 --- content A
   foo.txt = "NEW CONTENT, MUCH LONGER"
 --- pending A
 --- tree B
-  f foo.txt size=11 cached=true uploaded=true etag=bad02738adfbeba0
+  f foo.txt size=11 cached=true uploaded=true etag=89112f109b83568f
 --- content B
   foo.txt = "old content"
 --- pending B
@@ -217,7 +217,7 @@
   chunk bad02738adfbeba0-e2449384da60a0ea size=11
   journal <entry-1> = put foo.txt 11
   journal <entry-2> = put foo.txt 24
-  file foo.txt [.tsync-root/b306717ed3feaa3f-615fce859cf8a12f] = manifest size=24 chunks=1 h1=28c76e4dce03a3c4 h2=40c12ae687c32ec4
+  file foo.txt [.tsync-root/b306717ed3feaa3f-615fce859cf8a12f] = manifest size=24 chunks=1 h1=3058ab1111417f8b h2=480cc089205d7329
     chunk#0 28c76e4dce03a3c4-40c12ae687c32ec4 size=24
 
 === open_file_guard_closed
@@ -229,12 +229,12 @@
   B: close foo.txt
   B: sync
 --- tree A
-  f foo.txt size=24 cached=true uploaded=true etag=28c76e4dce03a3c4
+  f foo.txt size=24 cached=true uploaded=true etag=3058ab1111417f8b
 --- content A
   foo.txt = "NEW CONTENT, MUCH LONGER"
 --- pending A
 --- tree B
-  f foo.txt size=24 cached=false uploaded=true etag=28c76e4dce03a3c4
+  f foo.txt size=24 cached=false uploaded=true etag=3058ab1111417f8b
 --- content B
   foo.txt = "NEW CONTENT, MUCH LONGER"
 --- pending B
@@ -243,7 +243,7 @@
   chunk bad02738adfbeba0-e2449384da60a0ea size=11
   journal <entry-1> = put foo.txt 11
   journal <entry-2> = put foo.txt 24
-  file foo.txt [.tsync-root/b306717ed3feaa3f-615fce859cf8a12f] = manifest size=24 chunks=1 h1=28c76e4dce03a3c4 h2=40c12ae687c32ec4
+  file foo.txt [.tsync-root/b306717ed3feaa3f-615fce859cf8a12f] = manifest size=24 chunks=1 h1=3058ab1111417f8b h2=480cc089205d7329
     chunk#0 28c76e4dce03a3c4-40c12ae687c32ec4 size=24
 
 === delete_rename_race
@@ -271,7 +271,7 @@
   journal <entry-1> = put foo.txt 15
   journal <entry-2> = delete foo.txt
   journal <entry-3> = put baz (conflicted copy from Client B).txt 15
-  file foo.txt [.tsync-root/e51b88f287203f60-f8bc60cf0cdf7bd7] = manifest size=15 chunks=1 h1=7927fec27038e81c h2=3a112440cfdf156a
+  file foo.txt [.tsync-root/e51b88f287203f60-f8bc60cf0cdf7bd7] = manifest size=15 chunks=1 h1=9b04768ee1894e33 h2=8e5adcba13d0b05c
     chunk#0 7927fec27038e81c-3a112440cfdf156a size=15
 
 === rename_rename_race
@@ -284,14 +284,14 @@
   B: sync
   A: sync
 --- tree A
-  f bar.txt size=16 cached=true uploaded=true etag=63867f7d13d542db
+  f bar.txt size=16 cached=true uploaded=true etag=1e569fd0dd003545
   f foo.txt size=-1 cached=false uploaded=false etag=
 --- content A
   bar.txt = "conflict content"
   foo.txt = <unavailable: Backend.Backend_error("not found: tsync/test/manifests/foo.txt")>
 --- pending A
 --- tree B
-  f bar.txt size=16 cached=false uploaded=true etag=63867f7d13d542db
+  f bar.txt size=16 cached=false uploaded=true etag=1e569fd0dd003545
   f foo.txt size=-1 cached=false uploaded=false etag=
 --- content B
   bar.txt = "conflict content"
@@ -303,8 +303,8 @@
   journal <entry-1> = put foo.txt 16
   journal <entry-2> = rename foo.txt -> bar.txt 16
   journal <entry-3> = put baz (conflicted copy from Client B).txt 16
-  file bar.txt [.tsync-root/5dfde940d8f8f5f8-5b620c0acd6130ed] = manifest size=16 chunks=1 h1=63867f7d13d542db h2=2d81578912f1ac43
+  file bar.txt [.tsync-root/5dfde940d8f8f5f8-5b620c0acd6130ed] = manifest size=16 chunks=1 h1=1e569fd0dd003545 h2=3854f28a02fadbd7
     chunk#0 63867f7d13d542db-2d81578912f1ac43 size=16
-  file foo.txt [.tsync-root/e51b88f287203f60-f8bc60cf0cdf7bd7] = manifest size=16 chunks=1 h1=63867f7d13d542db h2=2d81578912f1ac43
+  file foo.txt [.tsync-root/e51b88f287203f60-f8bc60cf0cdf7bd7] = manifest size=16 chunks=1 h1=1e569fd0dd003545 h2=3854f28a02fadbd7
     chunk#0 63867f7d13d542db-2d81578912f1ac43 size=16
 

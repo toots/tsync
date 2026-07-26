@@ -20,33 +20,18 @@ module Make (C : Conf.S) = struct
      [Lwt_preemptive.run_in_main], so a slow operation blocks only its own
      kernel thread while other operations keep making progress on the loop. *)
 
-  let pending_evict : (string, unit) Hashtbl.t = Hashtbl.create 16
-
   let open_file key =
     F.mark_open key;
     Fd.acquire key
 
+  (* Close the OS handle first, then let [File] apply its last-close policy
+     (queue-upload / evict / persist). Residency and the close decision all live
+     in [File]; the FUSE layer just brackets the handle. *)
   let close_file key =
-    let remaining = F.mark_closed key in
     let* () = Fd.release key in
-    if remaining = 0 then
-      if F.is_dirty key then begin
-        F.clear_dirty key;
-        F.queue_put key
-      end
-      else begin
-        let was_pending = Hashtbl.mem pending_evict key in
-        Hashtbl.remove pending_evict key;
-        if was_pending then F.evict key else Lwt.return_unit
-      end
-    else Lwt.return_unit
+    F.release key
 
-  let request_evict key =
-    if not (F.is_open key) then F.evict key
-    else begin
-      Hashtbl.replace pending_evict key ();
-      Lwt.return_unit
-    end
+  let request_evict = F.request_evict
 
   (* ── Path helpers ─────────────────────────────────────────────────────── *)
 
@@ -356,8 +341,6 @@ module Make (C : Conf.S) = struct
        leave it half-dead. Log and keep serving. *)
     (Lwt.async_exception_hook :=
        fun exn -> Log.err "async exception: %s" (Printexc.to_string exn));
-    Log.debug "auto-evict: %b"
-      (Ipc.auto_evict_enabled ~data_dir:C.data_dir ~domain:C.domain_name);
     let started = Mutex.create () in
     let started_cond = Condition.create () in
     let ready = ref false in
@@ -382,13 +365,6 @@ module Make (C : Conf.S) = struct
                E.start
                  ~on_cursor:(fun ~entry_key -> set_pending_cursor entry_key)
                  ~on_upload_done:(fun ~key ->
-                   let* () =
-                     if
-                       Ipc.auto_evict_enabled ~data_dir:C.data_dir
-                         ~domain:C.domain_name
-                     then request_evict key
-                     else Lwt.return_unit
-                   in
                    Ipc.notify_uploaded ~path:C.notify_path key;
                    Lwt.return_unit)
                  ()

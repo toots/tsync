@@ -1,0 +1,71 @@
+=== reads fetch only touched chunks; residency is durable
+  write big.txt "0123456789ABCDEFghijklmn"
+  drain
+  evict big.txt
+  open-read big.txt
+  residency big.txt
+  read big.txt [0,8)
+  residency big.txt
+  read big.txt [16,24)
+  residency big.txt
+  release big.txt
+  residency big.txt
+  open-read big.txt
+  residency big.txt
+  read big.txt [8,16)
+  residency big.txt
+  residency big.txt cached=false size=24 chunks=[AAA]
+  read big.txt [0,8) = "01234567"
+  residency big.txt cached=false size=24 chunks=[PAA]
+  read big.txt [16,24) = "ghijklmn"
+  residency big.txt cached=false size=24 chunks=[PAP]
+  residency big.txt cached=false size=24 chunks=[PAP]
+  residency big.txt cached=false size=24 chunks=[PAP]
+  read big.txt [8,16) = "89ABCDEF"
+  residency big.txt cached=true size=24 chunks=complete
+--- tree
+  f big.txt size=24 cached=true uploaded=true etag=1294bbe85c2f380b
+--- content
+  big.txt = "0123456789ABCDEFghijklmn"
+--- backend
+  chunk 1808e40d6723f646-e7bf74a2eb7a5a23 size=8
+  chunk 1ba95805d6ae106a-87537fcfd250fddb size=8
+  chunk b759bff1a75c54a7-53cd28ced10cf0e3 size=8
+  journal <entry-1> = put big.txt 24
+  file big.txt [.tsync-root/04e776271d85dfc0-0127ed186e2930a6] = manifest size=24 chunks=3 h1=1294bbe85c2f380b h2=4db8b5a354576e8e
+    chunk#0 1808e40d6723f646-e7bf74a2eb7a5a23 size=8
+    chunk#1 b759bff1a75c54a7-53cd28ced10cf0e3 size=8
+    chunk#2 1ba95805d6ae106a-87537fcfd250fddb size=8
+
+=== editing one chunk re-uploads only that chunk
+  write edit.txt "aaaaaaaabbbbbbbbcccccccc"
+  drain
+  evict edit.txt
+  open-read edit.txt
+  write-at edit.txt @8 "BBBBBBBB"
+  residency edit.txt
+  release edit.txt
+  drain
+  residency edit.txt
+  read edit.txt [0,24)
+  residency edit.txt
+  residency edit.txt cached=false size=24 chunks=[ADA]
+  residency edit.txt cached=false size=24 chunks=[APA]
+  read edit.txt [0,24) = "aaaaaaaaBBBBBBBBcccccccc"
+  residency edit.txt cached=true size=24 chunks=complete
+--- tree
+  f edit.txt size=24 cached=true uploaded=true etag=5ca9ac5e50d24702
+--- content
+  edit.txt = "aaaaaaaaBBBBBBBBcccccccc"
+--- backend
+  chunk 1cfa5c47cb2f402e-c44f3339ad38b68a size=8
+  chunk 304cf5ff4443b25a-986de89e32d20631 size=8
+  chunk 3968c4418875223b-5d95def42075050c size=8
+  chunk c9dbc05573cd5d9a-1ae64e03afa5a78e size=8
+  journal <entry-1> = put edit.txt 24
+  journal <entry-2> = put edit.txt 24
+  file edit.txt [.tsync-root/997b913b09e424ad-cd66dfb8418deaa0] = manifest size=24 chunks=3 h1=5ca9ac5e50d24702 h2=c80cd9b2db2474a3
+    chunk#0 c9dbc05573cd5d9a-1ae64e03afa5a78e size=8
+    chunk#1 3968c4418875223b-5d95def42075050c size=8
+    chunk#2 1cfa5c47cb2f402e-c44f3339ad38b68a size=8
+
