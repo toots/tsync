@@ -1,6 +1,6 @@
 (executable
  (name tsync)
- (modules tsync)
+ (modules cli configure tsync)
  (public_name tsync)
  (package tsync)
  (libraries
