@@ -33,12 +33,7 @@ let write ~cache_root ~domain_name rel (m : Folder.marker) =
   let dir = dir_of ~cache_root ~domain_name rel in
   let* () = Fs_util.mkdir_p dir in
   let path = Filename.concat dir marker_name in
-  let tmp = path ^ ".tmp" in
-  let* () =
-    Lwt_unix_retry.with_file ~mode:Lwt_io.Output tmp (fun oc ->
-        Lwt_io.write oc (Folder.marker_to_string m))
-  in
-  Lwt_unix_retry.rename tmp path
+  Fs_util.atomic_write path (Folder.marker_to_string m)
 
 (* Folder id of [rel] — the root when empty; minted and persisted when a folder
    has no marker yet. *)

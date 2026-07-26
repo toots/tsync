@@ -15,8 +15,8 @@
 let sentinel = ".tsync-esc-"
 let dir_marker = ".tsync-name"
 
-(* NAME_MAX is 255 bytes on the filesystems we target; leave room for the
-   ".tmp" suffix the atomic-write path appends to a leaf. *)
+(* NAME_MAX is 255 bytes on the filesystems we target; the margin leaves room for
+   any suffix appended to a stored leaf. *)
 let name_max = 250
 let hash c = Xxhash.hash_hex c 0
 let is_escaped name = String.starts_with ~prefix:sentinel name

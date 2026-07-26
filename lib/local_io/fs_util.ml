@@ -13,6 +13,25 @@ let rec mkdir_p path =
 
 let ensure_parent path = mkdir_p (Filename.dirname path)
 
+(* Replace [path] with [data] atomically. The temp gets a name of its own —
+   unique per process and per call — rather than [path ^ ".tmp"]: two writers of
+   the same path (a read-ahead and a foreground read, or a second tsync process)
+   would otherwise share one temp file and the loser's rename would fail ENOENT.
+   The ".tmp" suffix is what the mirror walkers skip and reap. *)
+let temp_seq = ref 0
+
+let atomic_write path data =
+  incr temp_seq;
+  let tmp =
+    Filename.concat (Filename.dirname path)
+      (Printf.sprintf ".tsync-tmp-%d-%d.tmp" (Unix.getpid ()) !temp_seq)
+  in
+  let* () =
+    Lwt_unix_retry.with_file ~mode:Lwt_io.Output tmp (fun oc ->
+        Lwt_io.write oc data)
+  in
+  Lwt_unix_retry.rename tmp path
+
 let readdir_list path =
   (* files_of_directory returns a stream; wrap the whole materialisation so
      a signal interrupting opendir or readdir retries from the start. *)

@@ -34,14 +34,7 @@ let manifest_path ~cache_root ~domain_name ~domain_prefix key =
    its real name; skipped when already present. *)
 let write_marker path name =
   let* exists = Lwt_unix_retry.file_exists path in
-  if exists then Lwt.return_unit
-  else (
-    let tmp = path ^ ".tmp" in
-    let* () =
-      Lwt_unix_retry.with_file ~mode:Lwt_io.Output tmp (fun oc ->
-          Lwt_io.write oc name)
-    in
-    Lwt_unix_retry.rename tmp path)
+  if exists then Lwt.return_unit else Fs_util.atomic_write path name
 
 let read_marker path =
   Lwt.catch
@@ -73,12 +66,7 @@ let refresh_dir_marker ~cache_root ~domain_name ~domain_prefix key =
         (Name_escape.encode_key rel)
     in
     let path = Filename.concat dir Name_escape.dir_marker in
-    let tmp = path ^ ".tmp" in
-    let* () =
-      Lwt_unix_retry.with_file ~mode:Lwt_io.Output tmp (fun oc ->
-          Lwt_io.write oc leaf)
-    in
-    Lwt_unix_retry.rename tmp path)
+    Fs_util.atomic_write path leaf)
 
 let join_rel rel name = if rel = "" then name else rel ^ "/" ^ name
 
@@ -308,12 +296,7 @@ let write_manifest ~cache_root ~domain_name ~domain_prefix key data =
   let* () =
     ensure_manifest_parent ~cache_root ~domain_name ~domain_prefix key
   in
-  let tmp = path ^ ".tmp" in
-  let* () =
-    Lwt_unix_retry.with_file ~mode:Lwt_io.Output tmp (fun oc ->
-        Lwt_io.write oc data)
-  in
-  Lwt_unix_retry.rename tmp path
+  Fs_util.atomic_write path data
 
 let delete_manifest ~cache_root ~domain_name ~domain_prefix key =
   let path = manifest_path ~cache_root ~domain_name ~domain_prefix key in

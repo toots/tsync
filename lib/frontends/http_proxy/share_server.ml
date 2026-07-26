@@ -281,12 +281,21 @@ module Make (C : Conf.S) = struct
 
   (* ── Streaming ─────────────────────────────────────────────────────────── *)
 
+  (* Headers are already on the wire by the time a body stream runs, so a failure
+     here can only truncate the response — cohttp closes the connection and logs
+     nothing of ours. Log it before it disappears. *)
+  let logged what f =
+    Lwt.catch f (fun exn ->
+        Log.err "share: %s stream failed: %s" what (Printexc.to_string exn);
+        Lwt.fail exn)
+
   (* Read [len] bytes from [offset] as a stream, demand-paging each block: only
      the chunks a block covers are fetched. *)
   let byte_stream key ~offset ~len =
     let pos = ref offset and left = ref len in
     let started = ref false in
     Lwt_stream.from (fun () ->
+        logged key @@ fun () ->
         if Int64.compare !left 0L <= 0 then Lwt.return_none
         else
           let* () =
@@ -331,6 +340,7 @@ module Make (C : Conf.S) = struct
     let cur = ref None in
     let done_ = ref false in
     Lwt_stream.from (fun () ->
+        logged "zip" @@ fun () ->
         match !cur with
           | Some m when Int64.compare m.s_pos m.s_size < 0 ->
               let n =

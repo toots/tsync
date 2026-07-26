@@ -6,6 +6,11 @@ val mkdir_p : string -> unit Lwt.t
 (** [mkdir_p] on the parent directory of [path]. *)
 val ensure_parent : string -> unit Lwt.t
 
+(** [atomic_write path data] writes [data] to a uniquely named temp file in
+    [path]'s directory, then renames it over [path]. Safe against concurrent
+    writers of the same path, in this process or another. *)
+val atomic_write : string -> string -> unit Lwt.t
+
 (** Directory entries of [path], excluding ["."] and [".."]. *)
 val readdir_list : string -> string list Lwt.t
 
