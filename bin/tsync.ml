@@ -1787,6 +1787,32 @@ let rec prompt_size_opt msg default =
 
 (* ── Backend / domain builders ───────────────────────────────────────────── *)
 
+(* "backfill" and "readOnly" are mutually exclusive, so prompt them as one role. *)
+let roles = ["source"; "backfill"; "read-only"]
+
+let role_of l =
+  match (List.assoc_opt "backfill" l, List.assoc_opt "readOnly" l) with
+    | Some (`Bool true), _ -> "backfill"
+    | _, Some (`Bool true) -> "read-only"
+    | _ -> "source"
+
+let role_fields = function
+  | "backfill" -> [("backfill", `Bool true)]
+  | "read-only" -> [("readOnly", `Bool true)]
+  | _ -> []
+
+let prompt_role default =
+  let rec ask () =
+    let v = prompt "  Role (source/backfill/read-only)" (Some default) in
+    if List.mem v roles then v
+    else begin
+      Printf.printf
+        "  Unknown role %S — choose source, backfill, or read-only.\n%!" v;
+      ask ()
+    end
+  in
+  ask ()
+
 (* The backend fields a Terraform store fills — so the wizard skips prompting
    for them. Exactly what [apply_store_fields] sets. *)
 let store_fields (s : tf_store) =
@@ -1900,10 +1926,12 @@ let prompt_backend () =
     prompt_bool ~default:(backend_type = "local")
       "  Primary backend (used for reads)?"
   in
+  let role = prompt_role "source" in
   `Assoc
     ([("name", `String name); ("type", `String backend_type)]
     @ synced_fields @ fields
-    @ [("main", `Bool main)])
+    @ [("main", `Bool main)]
+    @ role_fields role)
 
 let prompt_backends () =
   let backends = ref [] in
@@ -1970,6 +1998,7 @@ let edit_backend b =
       spec;
     let main_n = List.length spec + 2 in
     Printf.printf "  %d. %-16s %s\n" main_n "primary:" (get "main");
+    Printf.printf "  %d. %-16s %s\n" (main_n + 1) "role:" (role_of !l);
     if can_sync then
       Printf.printf "  [t] sync bucket/keys/share URL from Terraform\n";
     if !status <> "" then Printf.printf "\n%s\n" !status;
@@ -1996,6 +2025,11 @@ let edit_backend b =
                        (prompt_bool
                           ~default:(get "main" = "true")
                           "Primary backend?"))
+            | Some n when n = main_n + 1 ->
+                let role = prompt_role (role_of !l) in
+                l :=
+                  List.remove_assoc "backfill" (List.remove_assoc "readOnly" !l)
+                  @ role_fields role
             | Some n when n >= 2 && n <= List.length spec + 1 -> (
                 let s = List.nth spec (n - 2) in
                 match prompt_spec_field s ~current:(Some (get s.name)) with
@@ -2017,10 +2051,13 @@ let edit_backends backends =
     else
       List.iteri
         (fun i b ->
-          Printf.printf "  %d. %s (%s)%s\n" (i + 1)
+          Printf.printf "  %d. %s (%s)%s%s\n" (i + 1)
             (Option.value (jstr b "name") ~default:"?")
             (Option.value (jstr b "type") ~default:"?")
-            (if jbool b "main" then " [primary]" else ""))
+            (if jbool b "main" then " [primary]" else "")
+            (if jbool b "backfill" then " [backfill]"
+             else if jbool b "readOnly" then " [read-only]"
+             else ""))
         !backends;
     if !status <> "" then Printf.printf "\n%s\n" !status;
     Printf.printf
