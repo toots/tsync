@@ -37,7 +37,42 @@ let read_chunk_into fd offset len buf =
   in
   loop 0
 
-module Make (C : Conf.S) = struct
+module type S = sig
+  val upload :
+    key:string ->
+    src_path:string ->
+    mtime:float ->
+    chunk_size:int ->
+    ?reuse:(int -> Manifest.chunk_entry option) ->
+    ?cancel:bool ref ->
+    unit ->
+    Manifest.state Lwt.t
+
+  val download_chunks :
+    key:string -> dst_path:string -> Manifest.t -> unit Lwt.t
+
+  val download_chunk :
+    dst_path:string ->
+    chunk_size:int ->
+    chunk:Manifest.chunk_entry ->
+    unit Lwt.t
+
+  val get_download_progress : string -> (int * int) option
+  val fetch_manifest : key:string -> unit -> Manifest.state option Lwt.t
+  val download : key:string -> dst_path:string -> Manifest.state option Lwt.t
+
+  val recheck_cached :
+    key:string ->
+    src_path:string ->
+    mtime:float ->
+    sidecar:Manifest.t ->
+    unit ->
+    (Manifest.state * recheck_report) Lwt.t
+
+  val recheck_evicted : key:string -> Manifest.t -> recheck_report Lwt.t
+end
+
+module Make_with_layout (C : Conf.S) (L : Layout.S) : S = struct
   let primary () =
     match C.backends with
       | [] -> failwith "no backends configured"
@@ -46,7 +81,7 @@ module Make (C : Conf.S) = struct
   (* Manifest reads/writes go through [St], which maps logical keys to backend
      keys via the layout scheme. [rel_of] is the domain-relative real path
      recorded in the manifest body. *)
-  module St = Store.Make (C) (Layout.Inode.Make (C))
+  module St = Store.Make (C) (L)
 
   let put_all ~key ~data () =
     Lwt_list.iter_s
@@ -447,3 +482,6 @@ module Make (C : Conf.S) = struct
                 in
                 Some state)
 end
+
+(* The inode layout is what every path-keyed caller wants. *)
+module Make (C : Conf.S) = Make_with_layout (C) (Layout.Inode.Make (C))

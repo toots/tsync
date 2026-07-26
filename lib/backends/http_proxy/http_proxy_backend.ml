@@ -2,11 +2,7 @@ open Lwt.Syntax
 
 exception Cancelled = Backend.Cancelled
 
-type t = {
-  base_uri : Uri.t;
-  secret : string;
-  mutable share_url_cache : string option Lwt.t option;
-}
+type t = { base_uri : Uri.t; secret : string; shares : bool }
 
 let max_attempts = 8
 
@@ -146,34 +142,15 @@ let list_directory t ~prefix () =
   if is_ok resp then Http_proxy.Wire.list_dir_of_json body
   else raise (backend_error "list_directory" (code resp) body)
 
-(* Ask the frontend for the share base URL of [prefix]'s domain. *)
-let query_share_url t ~prefix =
-  let uri =
-    Uri.with_query' (Uri.with_path t.base_uri "/share-url") [("prefix", prefix)]
-  in
-  let+ resp, body = call_retry t ~meth:`GET "share_url" uri in
-  if is_ok resp then (
-    match Yojson.Safe.from_string body with
-      | exception _ -> None
-      | j -> (
-          match Yojson.Safe.Util.member "url" j with
-            | `String u -> Some u
-            | _ -> None))
-  else if code resp = 404 then None
-  else raise (backend_error "share_url" (code resp) body)
+(* The proxy serves shares off its own listener, so the base URL is just the
+   configured proxy URL — no round trip, and nothing to memoize. *)
+let share_url t ~prefix:_ () =
+  Lwt.return
+    (if t.shares then Some (Uri.to_string (Uri.with_path t.base_uri "/s"))
+     else None)
 
-(* The share URL is fixed for the life of the process; query the frontend once and
-   memoize the promise (so concurrent callers share the single request). *)
-let share_url_op t ~prefix () =
-  match t.share_url_cache with
-    | Some p -> p
-    | None ->
-        let p = query_share_url t ~prefix in
-        t.share_url_cache <- Some p;
-        p
-
-let make ~url ~secret : (module Backend.S) =
-  let t = { base_uri = Uri.of_string url; secret; share_url_cache = None } in
+let make ~url ~secret ~shares : (module Backend.S) =
+  let t = { base_uri = Uri.of_string url; secret; shares } in
   (module struct
     let put ~key ~data () = put t ~key ~data ()
     let get ~key () = get t ~key ()
@@ -184,7 +161,7 @@ let make ~url ~secret : (module Backend.S) =
     let copy ~src_key ~dst_key () = copy t ~src_key ~dst_key ()
     let list_all ?max_keys ~prefix () = list_all t ?max_keys ~prefix ()
     let list_directory ~prefix () = list_directory t ~prefix ()
-    let share_url ~prefix () = share_url_op t ~prefix ()
+    let share_url ~prefix () = share_url t ~prefix ()
   end)
 
 let spec =
@@ -204,6 +181,13 @@ let spec =
         default = None;
         secret = true;
       };
+      {
+        name = "shares";
+        label = "Proxy serves share links";
+        typ = `Bool;
+        default = Some "false";
+        secret = false;
+      };
     ]
 
 let () =
@@ -213,4 +197,9 @@ let () =
       | None -> failwith ("http-proxy backend: missing field: " ^ key)
   in
   Backend.register ~spec "http-proxy" (fun get ->
-      make ~url:(req get "url") ~secret:(req get "secret"))
+      let shares =
+        match get "shares" with
+          | Some ("true" | "1") -> true
+          | Some _ | None -> false
+      in
+      make ~url:(req get "url") ~secret:(req get "secret") ~shares)

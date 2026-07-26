@@ -1,3 +1,7 @@
 (test
  (name http_proxy_test)
- (libraries tsync_http_proxy tsync_backend_register))
+ (libraries
+  tsync_http_proxy
+  tsync_backend_register
+  tsync_local_backend
+  tsync_http_proxy_frontend))

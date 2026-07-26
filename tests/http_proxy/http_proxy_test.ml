@@ -54,4 +54,29 @@ let () =
     Http_proxy.Wire.entries_of_json (Http_proxy.Wire.entries_to_json entries)
     = entries);
 
+  (* Routing: domain keys go to their domain; share manifests (which sit outside
+     every domain root) go to the route whose secret signed the request. *)
+  let route name =
+    {
+      Http_proxy_frontend.domain_root = "tsync/" ^ name ^ "/";
+      shares_prefix = "tsync/shares/";
+      secret = name;
+      read_only = false;
+      primary = Local_backend.make ~root:"/tmp/tsync-route-test";
+      all_backends = [];
+      serve_share = None;
+    }
+  in
+  let routes = [route "one"; route "two"] in
+  let pick key signer =
+    Option.map
+      (fun r -> r.Http_proxy_frontend.secret)
+      (Http_proxy_frontend.route_for routes ~key ~authed:(fun r ->
+           r.Http_proxy_frontend.secret = signer))
+  in
+  assert (pick "tsync/two/manifests/x" "one" = Some "two");
+  assert (pick "tsync/shares/deadbeef" "two" = Some "two");
+  assert (pick "tsync/shares/deadbeef" "nobody" = None);
+  assert (pick "elsewhere/x" "one" = None);
+
   print_endline "http_proxy_test ok"

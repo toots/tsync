@@ -10,7 +10,7 @@ type recheck_report = {
   local_stale : bool;  (** re-hash disagreed with the local sidecar *)
 }
 
-module Make (C : Conf.S) : sig
+module type S = sig
   (** Upload [src_path] as chunks under [key]: each chunk is read, hashed (chunk
       key) and uploaded if absent, then the manifest is written. [reuse index]
       returning [Some e] marks chunk [index] unchanged from a prior manifest —
@@ -75,3 +75,10 @@ module Make (C : Conf.S) : sig
       chunks check out. *)
   val recheck_evicted : key:string -> Manifest.t -> recheck_report Lwt.t
 end
+
+(** Keys are mapped to backend keys through [L]. Callers holding real paths want
+    {!Make}; {!Layout.Identity} serves callers that already hold backend keys.
+*)
+module Make_with_layout (C : Conf.S) (L : Layout.S) : S
+
+module Make (C : Conf.S) : S

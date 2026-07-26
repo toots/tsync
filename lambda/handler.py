@@ -243,28 +243,10 @@ def build_dir_zip(share, cache_key):
 
 # ── Content types ───────────────────────────────────────────────────────────
 
-# Extensions the browser renders as plain text in the preview iframe.
-TEXT_EXT = [
-    "txt", "md", "log", "csv", "tsv", "ini", "conf", "cfg", "toml", "yaml", "yml",
-    "sh", "bash", "zsh", "py", "js", "mjs", "ts", "jsx", "tsx", "css", "c", "h",
-    "cpp", "cc", "hpp", "go", "rs", "rb", "java", "kt", "swift", "php", "pl", "lua",
-    "sql", "r", "m", "diff", "patch",
-]
-
-MIME = {
-    "jpg": "image/jpeg", "jpeg": "image/jpeg", "jfif": "image/jpeg", "png": "image/png",
-    "apng": "image/apng", "gif": "image/gif", "webp": "image/webp", "svg": "image/svg+xml",
-    "bmp": "image/bmp", "avif": "image/avif", "ico": "image/x-icon",
-    "mp3": "audio/mpeg", "flac": "audio/flac", "wav": "audio/wav", "ogg": "audio/ogg",
-    "oga": "audio/ogg", "m4a": "audio/mp4", "aac": "audio/aac", "opus": "audio/opus",
-    "weba": "audio/webm",
-    "mp4": "video/mp4", "m4v": "video/mp4", "webm": "video/webm", "mov": "video/quicktime",
-    "mkv": "video/x-matroska", "ogv": "video/ogg",
-    "pdf": "application/pdf",
-    "json": "application/json; charset=utf-8", "xml": "application/xml; charset=utf-8",
-    "html": "text/html; charset=utf-8", "htm": "text/html; charset=utf-8",
-    **{e: "text/plain; charset=utf-8" for e in TEXT_EXT},
-}
+# Extension -> MIME type. Shared with the OCaml http-proxy share server, which
+# embeds this same file at build time, so the table has one definition.
+with open(os.path.join(os.path.dirname(__file__), "mime.json")) as _f:
+    MIME = json.load(_f)
 
 
 def mime_type(name):

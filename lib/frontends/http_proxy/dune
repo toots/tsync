@@ -2,11 +2,19 @@
  (name tsync_http_proxy_frontend)
  (wrapped false)
  (library_flags (-linkall))
+ (preprocess
+  (pps ppx_blob))
+ (preprocessor_deps
+  %{project_root}/lambda/browse.html
+  %{project_root}/lambda/mime.json)
  (libraries
   tsync_frontend_register
   tsync_http_proxy
   tsync_backend_register
   tsync_conf
+  tsync_file
+  tsync_queue
+  tsync_zip
   tsync_log
   cohttp-lwt-unix
   conduit-lwt-unix
