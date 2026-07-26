@@ -4,12 +4,9 @@
    by the unguessable token plus the shares-prefix confinement in {!load}. They
    are deliberately kept off the signed object API.
 
-   Content is served through {!File} instantiated over {!Layout.Identity}, so a
-   share manifest's backend key is used directly as a file key and reads
-   demand-page through the ordinary local cache: an HTTP range fetches only the
-   chunks it covers, and nothing is ever assembled into the store. That cache is
-   private to share serving and reclaimed by age ({!reap}), not by the mount's
-   path-keyed cache cap. *)
+   Content is served by {!Data} straight out of the domain's chunk cache: an HTTP
+   range fetches only the chunks it covers, nothing is ever assembled, and
+   nothing is written into the local manifest mirror. *)
 
 open Lwt.Syntax
 
@@ -29,7 +26,12 @@ type child = {
 }
 
 (* The member currently being streamed into a zip. *)
-type streaming = { s_key : string; mutable s_pos : int64; s_size : int64 }
+type streaming = {
+  s_key : string;
+  s_manifest : Manifest.t;
+  mutable s_pos : int64;
+  s_size : int64;
+}
 
 exception Error of Cohttp.Code.status_code * string
 
@@ -82,88 +84,34 @@ let preview_kinds_json =
   `Assoc (List.map (fun (e, m) -> (e, `String (preview_kind m))) mime_table)
 
 module Make (C : Conf.S) = struct
-  module Sq = Sync_queue.Make (C)
+  module R = Remote.Make_with_layout (C) (Layout.Identity)
+  module D = Data.Make (C) (R)
 
-  (* Share keys are inode-space, not real paths, so their cache entries must not
-     land in the domain's mirror: the sidecars would read as phantom entries in
-     listings ([tsync ls], readdir), and the mirror-keyed cache cap cannot see
-     them anyway. They get their own subtree, reclaimed by {!reap} below. *)
-  module Cache_conf = struct
-    include C
+  (* Share manifests come from the backend, never from the local mirror: their
+     keys are inode-space, so mirroring them would plant phantom entries in the
+     domain's listings. Content then pages through the domain's ordinary chunk
+     cache — chunk keys are content addresses with nothing path-specific about
+     them, so a shared chunk is the same file on disk as the mount's, governed by
+     the same [maxCache]. Nothing about serving a share is written locally.
 
-    let domain_name = C.domain_name ^ "/shares"
-  end
+     ponytail: manifests are memoized unbounded-but-cleared; a share of a 30k
+     chunk file is a 2.5MB body we should not re-GET per range request. Swap in
+     an LRU if one proxy ever fronts enough distinct shares to matter. *)
+  let manifests : (string, Manifest.t) Hashtbl.t = Hashtbl.create 32
+  let max_memoized_manifests = 256
 
-  (* Never started: shares only ever read. *)
-  module F = File.Make_with_layout (Cache_conf) (Sq) (Layout.Identity)
-
-  (* ── Share cache expiry ────────────────────────────────────────────────────
-     Cached share data is a pure copy of backend content, so dropping it costs
-     only a refetch: everything untouched for [cache_ttl] goes.
-     ponytail: mtime-based, and mtime only advances when a new chunk is paged in,
-     so a hot fully-cached file is dropped at the ttl and fetched again. Track
-     access times here if that refetch ever matters. *)
-
-  let cache_ttl = 3600.
-  let sweep_interval = 600.
-  let cache_dir = Filename.concat C.cache_root Cache_conf.domain_name
-
-  let quiet f =
-    Lwt.catch f (function
-      | Unix.Unix_error _ -> Lwt.return_unit
-      | exn -> Lwt.fail exn)
-
-  (* Delete files last modified before [cutoff], pruning directories left empty.
-     [true] when [path] has no entries left. *)
-  let rec reap ~cutoff path =
-    let* names = Fs_util.readdir_list path in
-    let+ kept =
-      Lwt_list.fold_left_s
-        (fun kept name ->
-          let child = Filename.concat path name in
-          let* is_dir = Fs_util.is_directory child in
-          if is_dir then
-            let* empty = reap ~cutoff child in
-            if empty then
-              let+ () = quiet (fun () -> Lwt_unix.rmdir child) in
-              kept
-            else Lwt.return (kept + 1)
-          else
-            let* mtime =
-              Lwt.catch
-                (fun () ->
-                  let+ st = Lwt_unix.stat child in
-                  Some st.Unix.st_mtime)
-                (fun _ -> Lwt.return_none)
-            in
-            match mtime with
-              | Some m when m < cutoff ->
-                  let+ () = quiet (fun () -> Lwt_unix.unlink child) in
-                  kept
-              | _ -> Lwt.return (kept + 1))
-        0 names
-    in
-    kept = 0
-
-  let start_expiry () =
-    Lwt.async (fun () ->
-        let rec loop () =
-          let* () =
-            Lwt.catch
-              (fun () ->
-                let* exists = Fs_util.is_directory cache_dir in
-                if not exists then Lwt.return_unit
-                else
-                  let+ _ = reap ~cutoff:(Unix.time () -. cache_ttl) cache_dir in
-                  ())
-              (fun exn ->
-                Log.err "share cache sweep: %s" (Printexc.to_string exn);
-                Lwt.return_unit)
-          in
-          let* () = Lwt_unix.sleep sweep_interval in
-          loop ()
-        in
-        loop ())
+  let manifest_of key =
+    match Hashtbl.find_opt manifests key with
+      | Some m -> Lwt.return_some m
+      | None -> (
+          let* state = R.fetch_manifest ~key () in
+          match state with
+            | Some (`Clean m) ->
+                if Hashtbl.length manifests >= max_memoized_manifests then
+                  Hashtbl.reset manifests;
+                Hashtbl.replace manifests key m;
+                Lwt.return_some m
+            | Some `Dirty | None -> Lwt.return_none)
 
   let primary () =
     match C.backends with
@@ -289,30 +237,22 @@ module Make (C : Conf.S) = struct
         Log.err "share: %s stream failed: %s" what (Printexc.to_string exn);
         Lwt.fail exn)
 
-  (* Read [len] bytes from [offset] as a stream, demand-paging each block: only
-     the chunks a block covers are fetched. *)
-  let byte_stream key ~offset ~len =
+  (* Read [len] bytes from [offset] as a stream, one block at a time: each block
+     fetches only the chunks it covers. *)
+  let byte_stream ~manifest key ~offset ~len =
     let pos = ref offset and left = ref len in
-    let started = ref false in
     Lwt_stream.from (fun () ->
         logged key @@ fun () ->
         if Int64.compare !left 0L <= 0 then Lwt.return_none
-        else
-          let* () =
-            if !started then Lwt.return_unit
-            else (
-              started := true;
-              F.prepare_read key)
-          in
+        else (
           let n = Int64.to_int (min (Int64.of_int block_size) !left) in
-          let* () = F.ensure_readable key ~offset:!pos ~len:n in
           let buf = Bigarray.Array1.create Bigarray.char Bigarray.c_layout n in
-          let* got = F.read key buf ~offset:!pos in
+          let* got = D.pread ~id:key ~manifest buf ~offset:!pos in
           if got <= 0 then Lwt.return_none
           else (
             pos := Int64.add !pos (Int64.of_int got);
             left := Int64.sub !left (Int64.of_int got);
-            Lwt.return_some (String.init got (Bigarray.Array1.get buf))))
+            Lwt.return_some (String.init got (Bigarray.Array1.get buf)))))
 
   (* Flatten a shared folder into zip members, depth first. Directories are
      emitted too so empty ones survive the round trip. *)
@@ -347,11 +287,12 @@ module Make (C : Conf.S) = struct
                 Int64.to_int
                   (min (Int64.of_int block_size) (Int64.sub m.s_size m.s_pos))
               in
-              let* () = F.ensure_readable m.s_key ~offset:m.s_pos ~len:n in
               let buf =
                 Bigarray.Array1.create Bigarray.char Bigarray.c_layout n
               in
-              let* got = F.read m.s_key buf ~offset:m.s_pos in
+              let* got =
+                D.pread ~id:m.s_key ~manifest:m.s_manifest buf ~offset:m.s_pos
+              in
               if got <= 0 then (
                 (* Truncated relative to its manifest; close the member here. *)
                 m.s_pos <- m.s_size;
@@ -375,12 +316,27 @@ module Make (C : Conf.S) = struct
                     queue := rest;
                     Lwt.return_some
                       (Zip_stream.add_directory z ~name:path ~mtime:0.)
-                | `File (path, c) :: rest ->
+                | `File (path, c) :: rest -> (
                     queue := rest;
-                    let* () = F.prepare_read c.key in
-                    cur := Some { s_key = c.key; s_pos = 0L; s_size = c.size };
-                    Lwt.return_some
-                      (Zip_stream.start_entry z ~name:path ~mtime:c.mtime ())))
+                    let* manifest = manifest_of c.key in
+                    match manifest with
+                      | None ->
+                          (* Vanished or replaced mid-archive: skip the member
+                             rather than abort the whole download. *)
+                          Log.err "share: no manifest for %s" c.key;
+                          Lwt.return_some ""
+                      | Some manifest ->
+                          cur :=
+                            Some
+                              {
+                                s_key = c.key;
+                                s_manifest = manifest;
+                                s_pos = 0L;
+                                s_size = c.size;
+                              };
+                          Lwt.return_some
+                            (Zip_stream.start_entry z ~name:path ~mtime:c.mtime
+                               ()))))
 
   (* ── Responses ─────────────────────────────────────────────────────────── *)
 
@@ -428,8 +384,7 @@ module Make (C : Conf.S) = struct
                   | _ -> None)
             | _ -> None)
 
-  let serve_bytes ~key ~size ~name ~inline ~range =
-    let* () = F.prepare_read key in
+  let serve_bytes ~manifest ~key ~size ~name ~inline ~range =
     let ctype =
       Option.value (mime_type name) ~default:"application/octet-stream"
     in
@@ -452,7 +407,9 @@ module Make (C : Conf.S) = struct
           in
           Cohttp_lwt_unix.Server.respond ~status:`Partial_content
             ~headers:(Cohttp.Header.of_list headers)
-            ~body:(Cohttp_lwt.Body.of_stream (byte_stream key ~offset:a ~len))
+            ~body:
+              (Cohttp_lwt.Body.of_stream
+                 (byte_stream ~manifest key ~offset:a ~len))
             ()
       | Some _ ->
           Cohttp_lwt_unix.Server.respond_string
@@ -466,23 +423,23 @@ module Make (C : Conf.S) = struct
           Cohttp_lwt_unix.Server.respond ~status:`OK
             ~headers:(Cohttp.Header.of_list headers)
             ~body:
-              (Cohttp_lwt.Body.of_stream (byte_stream key ~offset:0L ~len:size))
+              (Cohttp_lwt.Body.of_stream
+                 (byte_stream ~manifest key ~offset:0L ~len:size))
             ()
 
   (* The file share's own manifest: its real name and size. *)
   let file_target (share : share) =
-    let* m = F.resolved_manifest share.key in
+    let* m = manifest_of share.key in
     match m with
-      | Some (`Clean m) when m.Manifest.symlink = None ->
-          Lwt.return (m.Manifest.name, m.Manifest.size)
-      | Some (`Clean _) -> fail `Bad_request "cannot serve a symlink directly"
-      | Some `Dirty -> fail `Conflict "upload in progress, try again shortly"
+      | Some m when m.Manifest.symlink = None -> Lwt.return m
+      | Some _ -> fail `Bad_request "cannot serve a symlink directly"
       | None -> fail `Not_found "file not found"
 
   let download (share : share) ~range =
     if share.typ = "file" then
-      let* name, size = file_target share in
-      serve_bytes ~key:share.key ~size ~name ~inline:false ~range
+      let* manifest = file_target share in
+      serve_bytes ~manifest ~key:share.key ~size:manifest.Manifest.size
+        ~name:manifest.Manifest.name ~inline:false ~range
     else (
       let root = Filename.remove_extension share.filename in
       let* members = walk share.dir_prefix root in
@@ -540,7 +497,7 @@ module Make (C : Conf.S) = struct
     if parts = [] then fail `Bad_request "not a file";
     let* target = resolve share.dir_prefix parts in
     match target with
-      | Some (`File c) ->
+      | Some (`File c) -> (
           if want_json then
             (* browse.html previews media from this URL; it points back here so
                the bytes still stream through the cache. *)
@@ -560,8 +517,12 @@ module Make (C : Conf.S) = struct
                    ("size", `Intlit (Int64.to_string c.size));
                  ])
           else
-            serve_bytes ~key:c.key ~size:c.size ~name:c.name
-              ~inline:(not as_download) ~range
+            let* manifest = manifest_of c.key in
+            match manifest with
+              | None -> fail `Not_found "file not found"
+              | Some manifest ->
+                  serve_bytes ~manifest ~key:c.key ~size:c.size ~name:c.name
+                    ~inline:(not as_download) ~range)
       | _ -> fail `Not_found "file not found"
 
   let browse (share : share) token =

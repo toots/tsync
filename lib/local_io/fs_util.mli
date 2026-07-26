@@ -11,6 +11,9 @@ val ensure_parent : string -> unit Lwt.t
     writers of the same path, in this process or another. *)
 val atomic_write : string -> string -> unit Lwt.t
 
+(** [copy_file ~src ~dst] copies [src] over [dst], creating or truncating it. *)
+val copy_file : src:string -> dst:string -> unit Lwt.t
+
 (** Directory entries of [path], excluding ["."] and [".."]. *)
 val readdir_list : string -> string list Lwt.t
 
@@ -25,3 +28,9 @@ val lstat_kind :
 (** Recursively delete [path]; missing paths and unlink/rmdir errors are
     ignored. Symlinks are removed, not followed. *)
 val rm_rf : string -> unit Lwt.t
+
+(** [reap_older_than ~cutoff dir] deletes every file under [dir] whose mtime
+    predates [cutoff] and prunes directories left empty, returning [true] when
+    [dir] holds nothing afterwards. Best-effort; a missing [dir] reads as empty.
+*)
+val reap_older_than : cutoff:float -> string -> bool Lwt.t

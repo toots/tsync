@@ -1,7 +1,7 @@
 open Lwt.Syntax
 
 module Make (F : File.S) = struct
-  let make ~fuse_to_key ~open_file ~close_file ~fd_for : Path_ops.t =
+  let make ~fuse_to_key : Path_ops.t =
     let file path = fuse_to_key path in
     {
       mknod =
@@ -17,54 +17,30 @@ module Make (F : File.S) = struct
           let creating = List.mem Unix.O_CREAT flags in
           let truncating = List.mem Unix.O_TRUNC flags in
           let f = file path in
-          let* cached = F.is_cached f in
-          Log.debug "fopen %s flags=%s cached=%b" path
+          Log.debug "fopen %s flags=%s" path
             (if creating && truncating then "CREAT|TRUNC"
              else if creating then "CREAT"
              else if truncating then "TRUNC"
              else if flags = [Unix.O_RDONLY] then "RDONLY"
-             else "OTHER")
-            cached;
+             else "OTHER");
+          (* Nothing to prepare for a read: the first one resolves the file and
+             fetches only the chunks it needs. *)
           let* () =
-            if truncating && not cached then F.create f
-            else if truncating then begin
-              ignore (F.cancel_upload f);
-              let* fd =
-                Lwt_unix_retry.openfile (F.local_path f)
-                  [Unix.O_WRONLY; Unix.O_TRUNC]
-                  0o644
-              in
-              let* () = Lwt_unix_retry.close fd in
-              F.mark_dirty f
-            end
-            else if not cached then
+            if truncating then F.truncate f 0L
+            else if creating then
               let* m = F.read_manifest f in
-              match (creating, m) with
-                | true, None -> F.create f
-                | _ -> F.prepare_read f
+              match m with None -> F.create f | Some _ -> Lwt.return_unit
             else Lwt.return_unit
           in
-          let* () = open_file f in
           Lwt.return
             Fuse.{ default_file_info_update with fi_update_direct_io = true });
       read =
         (fun path buf offset _fi ->
           let f = file path in
           if offset = 0L then Log.debug "read %s: offset=0" path;
-          let* () =
-            F.ensure_readable f ~offset ~len:(Bigarray.Array1.dim buf)
-          in
-          match fd_for f with
-            | Some fd -> Local_io.pread fd buf ~offset
-            | None -> Local_io.read (F.local_path f) buf ~offset);
-      write =
-        (fun path buf offset _fi ->
-          let f = file path in
-          let* () = F.dirty_range f ~offset ~len:(Bigarray.Array1.dim buf) in
-          match fd_for f with
-            | Some fd -> Local_io.pwrite fd buf ~offset
-            | None -> Local_io.write (F.local_path f) buf ~offset);
-      release = (fun path _fi -> close_file (file path));
+          F.read f buf ~offset);
+      write = (fun path buf offset _fi -> F.write (file path) buf ~offset);
+      release = (fun path _fi -> F.close (file path));
       unlink = (fun path -> F.delete (file path));
       rename = (fun src dst _flags -> F.rename ~src:(file src) ~dst:(file dst));
       truncate = (fun path size _fi -> F.truncate (file path) size);

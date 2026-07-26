@@ -1,12 +1,22 @@
 open Lwt.Syntax
 
-module Make (F : File.S) = struct
+(* The FUSE kernel's .fuse_hidden* files: scratch created when a file with open
+   descriptors is renamed. They are kernel-internal and never reach the backend,
+   so they are plain local files under the domain's scratch tree — the one place
+   left that keeps a whole file on disk. *)
+module Make (C : Conf.S) = struct
   let make ~fuse_to_key : Path_ops.t =
-    let local_path path = F.local_path (fuse_to_key path) in
+    let local_path path =
+      Filename.concat
+        (Cache_layout.scratch_dir ~cache_root:C.cache_root C.domain_name)
+        (Name_escape.encode_key
+           (Manifest.strip_prefix ~domain_prefix:C.domain_prefix
+              (fuse_to_key path)))
+    in
     {
       mknod =
         (fun path _mode ->
-          let* () = F.ensure_parent_dir (fuse_to_key path) in
+          let* () = Fs_util.ensure_parent (local_path path) in
           Lwt_io.with_file ~mode:Lwt_io.Output (local_path path) (fun _ ->
               Lwt.return_unit));
       fopen =

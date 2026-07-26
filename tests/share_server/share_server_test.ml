@@ -44,6 +44,7 @@ module C : Conf.S = struct
 end
 
 module R = Remote.Make (C)
+module Mf = Manifest.Make (C)
 module Sh = Share_server.Make (C)
 
 let backend () = List.hd C.backends
@@ -153,7 +154,7 @@ let () =
        (Printf.sprintf "rm -rf %s && mkdir -p %s %s %s" root store_dir cache_dir
           data_dir));
   Lwt_main.run
-    (let* () = Local.init ~cache_root:C.cache_root ~domain_name:C.domain_name in
+    (let* () = Mf.init () in
      let* () = build_fixture () in
 
      (* ── File share ───────────────────────────────────────────────────────── *)
@@ -227,27 +228,20 @@ let () =
         done
       with End_of_file -> close_in ic);
 
-     (* ── Cache expiry ─────────────────────────────────────────────────────── *)
-     (* Everything served above cached under the share subtree, leaving the
-        domain's own mirror untouched, and the whole subtree is reclaimable by
-        age. *)
+     (* ── Local footprint ─────────────────────────────────────────────────── *)
+     (* Serving a share writes nothing into the manifest mirror and assembles
+        nothing: the bytes it fetched are in the domain's chunk cache, which the
+        mount shares. *)
      let rec count dir =
-       Array.fold_left
-         (fun n name ->
-           let p = Filename.concat dir name in
-           if Sys.is_directory p then n + count p else n + 1)
-         0 (Sys.readdir dir)
+       if not (Sys.file_exists dir) then 0
+       else
+         Array.fold_left
+           (fun n name ->
+             let p = Filename.concat dir name in
+             if Sys.is_directory p then n + count p else n + 1)
+           0 (Sys.readdir dir)
      in
-     Printf.printf "\n=== share cache expiry\n";
-     Printf.printf "domain data mirror: %s\n"
-       (if
-          Sys.file_exists
-            (Cache_layout.cached_dir ~cache_root:C.cache_root C.domain_name)
-        then "polluted"
-        else "absent");
-     Printf.printf "cached: %d files\n" (count Sh.cache_dir);
-     let* _ = Sh.reap ~cutoff:0. Sh.cache_dir in
-     Printf.printf "nothing aged: %d files\n" (count Sh.cache_dir);
-     let* empty = Sh.reap ~cutoff:(Unix.time () +. 1.) Sh.cache_dir in
-     Printf.printf "all aged: %d files (empty: %b)\n" (count Sh.cache_dir) empty;
+     Printf.printf "\n=== local footprint\n";
+     Printf.printf "chunk cache: %d chunks\n"
+       (count (Cache_layout.chunks_dir ~cache_root:C.cache_root C.domain_name));
      Lwt.return_unit)

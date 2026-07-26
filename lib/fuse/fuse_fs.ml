@@ -7,8 +7,7 @@ module Make (C : Conf.S) = struct
   module Ih = E.Ih
   module Sp = E.Sp
   module Fs = File_store.Make (C)
-  module H = Hidden_ops.Make (F)
-  module Fd = Fd_cache.Make (F)
+  module H = Hidden_ops.Make (C)
   module I = Internal_ops.Make (F)
 
   (* ── Full-file storage policy ─────────────────────────────────────────────
@@ -19,19 +18,6 @@ module Make (C : Conf.S) = struct
      Multi_threaded; each handler bridges into that loop with
      [Lwt_preemptive.run_in_main], so a slow operation blocks only its own
      kernel thread while other operations keep making progress on the loop. *)
-
-  let open_file key =
-    F.mark_open key;
-    Fd.acquire key
-
-  (* Close the OS handle first, then let [File] apply its last-close policy
-     (queue-upload / evict / persist). Residency and the close decision all live
-     in [File]; the FUSE layer just brackets the handle. *)
-  let close_file key =
-    let* () = Fd.release key in
-    F.release key
-
-  let request_evict = F.request_evict
 
   (* ── Path helpers ─────────────────────────────────────────────────────── *)
 
@@ -110,35 +96,19 @@ module Make (C : Conf.S) = struct
            (String.length path - String.length mount_point))
     else fuse_to_key path
 
-  let evict_key key =
-    let lp = F.local_path key in
-    if Sys.file_exists lp && Sys.is_directory lp then begin
-      let rec collect dir acc =
-        Array.fold_left
-          (fun acc name ->
-            let p = Filename.concat dir name in
-            if Sys.is_directory p then collect p acc
-            else (
-              let rel =
-                String.sub p
-                  (String.length C.cache_root + 1)
-                  (String.length p - String.length C.cache_root - 1)
-              in
-              (C.domain_prefix ^ rel) :: acc))
-          acc
-          (try Sys.readdir dir with _ -> [||])
-      in
-      Lwt_list.iter_s request_evict (collect lp [])
-    end
-    else request_evict key
+  (* Directories exist only in the manifest mirror, so that is what decides
+     whether a key names one. *)
+  let is_dir_key key =
+    (String.length key > 0 && key.[String.length key - 1] = '/')
+    ||
+    let mp = F.manifest_path key in
+    Sys.file_exists mp && Sys.is_directory mp
 
-  let restore_key key =
-    let lp = F.local_path key in
-    let is_dir =
-      (String.length key > 0 && key.[String.length key - 1] = '/')
-      || (Sys.file_exists lp && Sys.is_directory lp)
-    in
-    if is_dir then begin
+  (* Evict and restore both apply to a whole subtree when given a directory. One
+     file's failure must not abort the rest. *)
+  let on_subtree what f key =
+    if not (is_dir_key key) then f key
+    else (
       let prefix =
         if String.length key > 0 && key.[String.length key - 1] = '/' then key
         else key ^ "/"
@@ -147,13 +117,14 @@ module Make (C : Conf.S) = struct
       Lwt_list.iter_s
         (fun (e : Backend.file_entry) ->
           Lwt.catch
-            (fun () -> F.ensure_cached e.key)
+            (fun () -> f e.key)
             (fun exn ->
-              Log.err "restore %s: %s" e.key (Printexc.to_string exn);
+              Log.err "%s %s: %s" what e.key (Printexc.to_string exn);
               Lwt.return_unit))
-        files
-    end
-    else F.ensure_cached key
+        files)
+
+  let evict_key = on_subtree "evict" F.evict
+  let restore_key = on_subtree "restore" F.ensure_cached
 
   (* The mirror is cleared and rebuilt by the [sync --full] client before it
      signals us; FUSE re-reads the fresh mirror on the next lookup, so there is
@@ -164,7 +135,7 @@ module Make (C : Conf.S) = struct
     Ih.
       {
         path_to_key = key_of_path mount_point;
-        request_evict = evict_key;
+        evict = evict_key;
         restore = restore_key;
         changed = (fun _ -> ());
         full_resync;
@@ -188,7 +159,7 @@ module Make (C : Conf.S) = struct
   let make_operations mount_point =
     let open Fuse in
     let hidden = H.make ~fuse_to_key in
-    let real = I.make ~fuse_to_key ~open_file ~close_file ~fd_for:Fd.find in
+    let real = I.make ~fuse_to_key in
     let dispatch path = if is_fuse_hidden path then hidden else real in
     let entry_of_name name =
       {
@@ -234,8 +205,17 @@ module Make (C : Conf.S) = struct
       readdir =
         (fun path _offset _fi _flags ->
           on_loop (fun () ->
-              let+ entries = F.list_dir (fuse_to_dir_prefix path) in
-              List.map entry_of_name ("." :: ".." :: entries)));
+              let+ files, dirs =
+                F.list_directory ~prefix:(fuse_to_dir_prefix path)
+              in
+              let names =
+                List.map
+                  (fun (e : Backend.file_entry) ->
+                    Filename.basename e.Backend.key)
+                  files
+                @ List.map fst dirs
+              in
+              List.map entry_of_name ("." :: ".." :: names)));
       mknod =
         (fun path mode ->
           guard "mknod" path (fun () ->
@@ -304,16 +284,12 @@ module Make (C : Conf.S) = struct
          unimplemented chmod surfaces as a spurious "mkstemp failed". *)
       chmod = (fun _path _mode _fi -> ());
       chown = (fun _path _uid _gid _fi -> ());
-      (* Writes go straight to the fd via direct_io + pwrite, so there is
-         nothing buffered per-fd for flush to push. *)
+      (* Nothing is buffered per-fd: a write lands in a staged chunk body before
+         it returns, and there is no long-lived handle to sync. Both must still
+         succeed rather than report ENOSYS — an app that fsyncs its own file must
+         not see an error. *)
       flush = (fun _path _fi -> ());
-      fsync =
-        (fun path _datasync _fi ->
-          guard "fsync" path (fun () ->
-              on_loop (fun () ->
-                  match Fd.find (fuse_to_key path) with
-                    | Some fd -> Lwt_unix_retry.fsync fd
-                    | None -> Lwt.return_unit)));
+      fsync = (fun _path _datasync _fi -> ());
     }
 
   (* ── Main mount ───────────────────────────────────────────────────────── *)

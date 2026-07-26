@@ -1,7 +1,7 @@
 module Make (C : Conf.S) (F : File.S) : sig
   type hooks = {
     path_to_key : string -> string;
-    request_evict : string -> unit Lwt.t;
+    evict : string -> unit Lwt.t;
     restore : string -> unit Lwt.t;
     changed : string -> unit;
     full_resync : unit -> unit Lwt.t;

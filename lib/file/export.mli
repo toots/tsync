@@ -1,10 +1,9 @@
 (** Export every file of a domain to a plain folder, reading manifests directly
-    (no daemon needed). Cached files (including dirty ones) are copied from the
-    local cache; evicted files are recomposed from remote chunks straight to the
-    destination — the local cache is never populated. *)
+    (no daemon needed). Content is assembled through the ordinary read path, so
+    unsynced local edits, partially cached files and never-cached ones all
+    export alike; the chunks that are missing are fetched on the way. *)
 
-type data_source = Local_cache | Remote_chunks | Symlink
-type status = Exported of data_source | Missing_data
+type status = Exported | Exported_symlink | Missing_data
 type summary = { exported : int; missing : int }
 
 module Make (C : Conf.S) : sig

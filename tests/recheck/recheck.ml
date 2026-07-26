@@ -46,28 +46,28 @@ let () =
           ];
       };
       {
-        name = "recheck repairs stale local file";
+        name = "a corrupt cached chunk is dropped, then re-fetched on read";
         steps =
           [
             Write { path = "file.bin"; content = "old content" };
             Drain;
-            ModifyCache { path = "file.bin"; content = "changed content" };
+            CorruptCachedChunk { path = "file.bin"; index = 0 };
             Recheck;
             Recheck;
           ];
       };
       {
-        name = "recheck skips dirty file";
+        name = "recheck skips a file with unsynced edits";
         steps =
           [
             Write { path = "file.bin"; content = "uploaded" };
             Drain;
-            DirtyWrite { path = "file.bin"; content = "not yet uploaded" };
+            StageWrite { path = "file.bin"; content = "not yet uploaded" };
             Recheck;
           ];
       };
       {
-        name = "recheck evicted file";
+        name = "recheck a file with nothing cached";
         steps =
           [
             Write { path = "file.bin"; content = "hello world" };

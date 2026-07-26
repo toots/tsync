@@ -1,30 +1,23 @@
-=== reads fetch only touched chunks; residency is durable
+=== reads fetch only the chunks they touch
   write big.txt "0123456789ABCDEFghijklmn"
   drain
   evict big.txt
-  open-read big.txt
-  residency big.txt
+  chunks big.txt
   read big.txt [0,8)
-  residency big.txt
+  chunks big.txt
   read big.txt [16,24)
-  residency big.txt
-  release big.txt
-  residency big.txt
-  open-read big.txt
-  residency big.txt
+  chunks big.txt
   read big.txt [8,16)
-  residency big.txt
-  residency big.txt cached=false size=24 chunks=[AAA]
+  chunks big.txt
+  chunks big.txt published size=24 chunks=3 cached=0/3
   read big.txt [0,8) = "01234567"
-  residency big.txt cached=false size=24 chunks=[PAA]
+  chunks big.txt published size=24 chunks=3 cached=1/3
   read big.txt [16,24) = "ghijklmn"
-  residency big.txt cached=false size=24 chunks=[PAP]
-  residency big.txt cached=false size=24 chunks=[PAP]
-  residency big.txt cached=false size=24 chunks=[PAP]
+  chunks big.txt published size=24 chunks=3 cached=2/3
   read big.txt [8,16) = "89ABCDEF"
-  residency big.txt cached=true size=24 chunks=complete
+  chunks big.txt published size=24 chunks=3 cached=3/3
 --- tree
-  f big.txt size=24 cached=true uploaded=true etag=1294bbe85c2f380b
+  f big.txt size=24 cached=3/3 uploaded=true etag=1294bbe85c2f380b
 --- content
   big.txt = "0123456789ABCDEFghijklmn"
 --- backend
@@ -37,24 +30,49 @@
     chunk#1 b759bff1a75c54a7-53cd28ced10cf0e3 size=8
     chunk#2 1ba95805d6ae106a-87537fcfd250fddb size=8
 
+=== a chunk deleted under a reader is fetched again
+  write gone.txt "0123456789ABCDEFghijklmn"
+  drain
+  read gone.txt [0,8)
+  delete-cached-chunk gone.txt #0
+  chunks gone.txt
+  read gone.txt [0,8)
+  chunks gone.txt
+  read gone.txt [0,8) = "01234567"
+  chunks gone.txt published size=24 chunks=3 cached=2/3
+  read gone.txt [0,8) = "01234567"
+  chunks gone.txt published size=24 chunks=3 cached=3/3
+--- tree
+  f gone.txt size=24 cached=3/3 uploaded=true etag=1294bbe85c2f380b
+--- content
+  gone.txt = "0123456789ABCDEFghijklmn"
+--- backend
+  chunk 1808e40d6723f646-e7bf74a2eb7a5a23 size=8
+  chunk 1ba95805d6ae106a-87537fcfd250fddb size=8
+  chunk b759bff1a75c54a7-53cd28ced10cf0e3 size=8
+  journal <entry-1> = put gone.txt 24
+  file gone.txt [.tsync-root/e299f7a82a2f5a0b-1843e38cd17a5a0a] = manifest size=24 chunks=3 h1=1294bbe85c2f380b h2=4db8b5a354576e8e
+    chunk#0 1808e40d6723f646-e7bf74a2eb7a5a23 size=8
+    chunk#1 b759bff1a75c54a7-53cd28ced10cf0e3 size=8
+    chunk#2 1ba95805d6ae106a-87537fcfd250fddb size=8
+
 === editing one chunk re-uploads only that chunk
   write edit.txt "aaaaaaaabbbbbbbbcccccccc"
   drain
   evict edit.txt
-  open-read edit.txt
   write-at edit.txt @8 "BBBBBBBB"
-  residency edit.txt
-  release edit.txt
+  chunks edit.txt
+  close edit.txt
   drain
-  residency edit.txt
+  chunks edit.txt
   read edit.txt [0,24)
-  residency edit.txt
-  residency edit.txt cached=false size=24 chunks=[ADA]
-  residency edit.txt cached=false size=24 chunks=[APA]
+  chunks edit.txt
+  chunks edit.txt staged size=24 slots=[ISI] cached=1/3
+  chunks edit.txt published size=24 chunks=3 cached=1/3
   read edit.txt [0,24) = "aaaaaaaaBBBBBBBBcccccccc"
-  residency edit.txt cached=true size=24 chunks=complete
+  chunks edit.txt published size=24 chunks=3 cached=3/3
 --- tree
-  f edit.txt size=24 cached=true uploaded=true etag=5ca9ac5e50d24702
+  f edit.txt size=24 cached=3/3 uploaded=true etag=5ca9ac5e50d24702
 --- content
   edit.txt = "aaaaaaaaBBBBBBBBcccccccc"
 --- backend
@@ -68,4 +86,84 @@
     chunk#0 c9dbc05573cd5d9a-1ae64e03afa5a78e size=8
     chunk#1 3968c4418875223b-5d95def42075050c size=8
     chunk#2 1cfa5c47cb2f402e-c44f3339ad38b68a size=8
+
+=== a write covering part of a chunk fetches just that chunk
+  write rmw.txt "aaaaaaaabbbbbbbbcccccccc"
+  drain
+  evict rmw.txt
+  write-at rmw.txt @10 "XX"
+  chunks rmw.txt
+  close rmw.txt
+  drain
+  read rmw.txt [8,16)
+  chunks rmw.txt staged size=24 slots=[ISI] cached=1/3
+  read rmw.txt [8,16) = "bbXXbbbb"
+--- tree
+  f rmw.txt size=24 cached=1/3 uploaded=true etag=7529cc4e71b067b3
+--- content
+  rmw.txt = "aaaaaaaabbXXbbbbcccccccc"
+--- backend
+  chunk 1cfa5c47cb2f402e-c44f3339ad38b68a size=8
+  chunk 304cf5ff4443b25a-986de89e32d20631 size=8
+  chunk 4b872e94ec52a1b5-f8a774335d134030 size=8
+  chunk c9dbc05573cd5d9a-1ae64e03afa5a78e size=8
+  journal <entry-1> = put rmw.txt 24
+  journal <entry-2> = put rmw.txt 24
+  file rmw.txt [.tsync-root/2090bb0aa5281561-b8fba79932a13cd7] = manifest size=24 chunks=3 h1=7529cc4e71b067b3 h2=52281318745076ab
+    chunk#0 c9dbc05573cd5d9a-1ae64e03afa5a78e size=8
+    chunk#1 4b872e94ec52a1b5-f8a774335d134030 size=8
+    chunk#2 1cfa5c47cb2f402e-c44f3339ad38b68a size=8
+
+=== shrinking into a chunk that is not local fetches just that chunk
+  write shrink.txt "0123456789ABCDEFghijklmn"
+  drain
+  evict shrink.txt
+  truncate shrink.txt 4
+  chunks shrink.txt
+  close shrink.txt
+  drain
+  read shrink.txt [0,8)
+  chunks shrink.txt staged size=4 slots=[S] cached=1/1
+  read shrink.txt [0,8) = "0123"
+--- tree
+  f shrink.txt size=4 cached=1/1 uploaded=true etag=8469472ff4732415
+--- content
+  shrink.txt = "0123"
+--- backend
+  chunk 1808e40d6723f646-e7bf74a2eb7a5a23 size=8
+  chunk 1ba95805d6ae106a-87537fcfd250fddb size=8
+  chunk 8aa92da18edb594b-09cccba75bfc4a35 size=4
+  chunk b759bff1a75c54a7-53cd28ced10cf0e3 size=8
+  journal <entry-1> = put shrink.txt 24
+  journal <entry-2> = put shrink.txt 4
+  file shrink.txt [.tsync-root/9011a377eaf7e800-34879f7376bb4eff] = manifest size=4 chunks=1 h1=8469472ff4732415 h2=c0fca64ca79f20ce
+    chunk#0 8aa92da18edb594b-09cccba75bfc4a35 size=4
+
+=== growing by truncate writes no bytes and reads as zeros
+  write grow.txt "01234567"
+  drain
+  truncate grow.txt 24
+  chunks grow.txt
+  read grow.txt [8,16)
+  close grow.txt
+  drain
+  chunks grow.txt
+  read grow.txt [0,24)
+  chunks grow.txt staged size=24 slots=[IZZ] cached=3/3
+  read grow.txt [8,16) = "\000\000\000\000\000\000\000\000"
+  chunks grow.txt published size=24 chunks=3 cached=1/3
+  read grow.txt [0,24) = "01234567\000\000\000\000\000\000\000\000\000\000\000\000\000\000\000\000"
+--- tree
+  f grow.txt size=24 cached=3/3 uploaded=true etag=39f38b43c0917bda
+--- content
+  grow.txt = "01234567\000\000\000\000\000\000\000\000\000\000\000\000\000\000\000\000"
+--- backend
+  chunk 1808e40d6723f646-e7bf74a2eb7a5a23 size=8
+  chunk c77b3abb6f87acd9-9e51ad6d2f3e695c size=8
+  journal <entry-1> = put grow.txt 8
+  journal <entry-2> = put grow.txt 24
+  file grow.txt [.tsync-root/4b4935f2bac532c5-7041cc2cafde9c73] = manifest size=24 chunks=3 h1=39f38b43c0917bda h2=2e4f72f3c3346315
+    chunk#0 1808e40d6723f646-e7bf74a2eb7a5a23 size=8
+    chunk#1 c77b3abb6f87acd9-9e51ad6d2f3e695c size=8
+    chunk#2 c77b3abb6f87acd9-9e51ad6d2f3e695c size=8
 

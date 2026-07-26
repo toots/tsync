@@ -181,8 +181,7 @@ let print_stats obj =
   row "chunks" (string_of_int (i "chunksHashed"));
   row "rate" (Printf.sprintf "%d/s" (i "hashesPerSec"));
   Printf.printf "Cache\n";
-  row "dirty files" (string_of_int (i "dirtyFiles"));
-  row "open files" (string_of_int (i "openFiles"));
+  row "unsynced files" (string_of_int (i "stagedFiles"));
   Printf.printf "Process\n";
   row "cpu" (Printf.sprintf "%.1fs" (f "cpuSeconds"));
   row "memory" (human_bytes (i "rssBytes"))
@@ -333,10 +332,8 @@ let ls_cmd =
                in
                dp ^ rel
        in
-       let* files, subdirs =
-         Local.list_directory ~cache_root:C.cache_root
-           ~domain_name:C.domain_name ~domain_prefix:C.domain_prefix ~prefix ()
-       in
+       let module Mf = Manifest.Make (C) in
+       let* files, subdirs = Mf.list_directory ~prefix () in
        let dp_len = String.length C.domain_prefix in
        let file_name (e : Backend.file_entry) =
          if String.length e.key > dp_len then
@@ -849,9 +846,9 @@ let sync_cmd =
                    (fun () ->
                      match op with
                        | `Put (rel_key, _) ->
-                           let key = C.domain_prefix ^ rel_key in
-                           let* cached = F.is_cached key in
-                           if cached then F.upload key else Lwt.return_unit
+                           (* Only a file that still owes an upload has anything
+                              to replay; its staged manifest says so. *)
+                           F.queue_put (C.domain_prefix ^ rel_key)
                        | `Delete rel_key ->
                            F.apply_delete (C.domain_prefix ^ rel_key)
                        | `Mkdir rel_key -> F.mkdir (C.domain_prefix ^ rel_key)
@@ -954,9 +951,11 @@ let sync_cmd =
          if !verbose then Log.info "full resync: %s" reason;
          (* Clear the mirror ourselves, then rebuild it, and only once every
             manifest is in place notify the daemon so it re-reads the complete,
-            fresh mirror (rather than an empty one mid-rebuild). *)
+            fresh mirror (rather than an empty one mid-rebuild). Unsynced edits
+            are kept: nothing else holds those bytes. *)
          let* () =
-           Local.clear ~cache_root:C.cache_root ~domain_name:C.domain_name
+           Cache_layout.clear ~cache_root:C.cache_root
+             ~domain_name:C.domain_name
          in
          let* n, failed = rebuild_mirror () in
          write_bookmark (C.journal_prefix ^ J.entry_key ());
@@ -1082,7 +1081,15 @@ let recheck_cmd =
                  s.Recheck.checked
                  (if s.Recheck.checked = 1 then "" else "s")
                  s.Recheck.repaired s.Recheck.unrepairable s.Recheck.skipped;
-               Lwt.return (if s.Recheck.unrepairable > 0 then 1 else 0))
+               (* The local half: chunk bodies are content-addressed, so a body
+                  that no longer hashes to its own name is corrupt and is dropped
+                  to be fetched again. *)
+               let+ checked, dropped = Rc.verify_chunk_cache () in
+               Printf.printf "%d chunk%s verified, %d dropped as corrupt\n"
+                 checked
+                 (if checked = 1 then "" else "s")
+                 dropped;
+               if s.Recheck.unrepairable > 0 then 1 else 0)
     in
     if code <> 0 then exit code
   in
@@ -1324,11 +1331,8 @@ let export_cmd =
            E.run ~dst
              ~on_file:(fun ~rel status ->
                match status with
-                 | Export.Exported Export.Local_cache ->
-                     Printf.printf "exported %s (local cache)\n%!" rel
-                 | Export.Exported Export.Remote_chunks ->
-                     Printf.printf "exported %s (remote)\n%!" rel
-                 | Export.Exported Export.Symlink ->
+                 | Export.Exported -> Printf.printf "exported %s\n%!" rel
+                 | Export.Exported_symlink ->
                      Printf.printf "exported %s (symlink)\n%!" rel
                  | Export.Missing_data ->
                      Printf.printf

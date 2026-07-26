@@ -32,6 +32,38 @@ let atomic_write path data =
   in
   Lwt_unix_retry.rename tmp path
 
+let copy_file ~src ~dst =
+  let* src_fd = Lwt_unix_retry.openfile src [Unix.O_RDONLY] 0 in
+  Lwt.finalize
+    (fun () ->
+      let* dst_fd =
+        Lwt_unix_retry.openfile dst
+          [Unix.O_WRONLY; Unix.O_CREAT; Unix.O_TRUNC]
+          0o644
+      in
+      Lwt.finalize
+        (fun () ->
+          let buffer = Bytes.create (1 lsl 20) in
+          let rec copy () =
+            let* bytes_read =
+              Lwt_unix_retry.read src_fd buffer 0 (Bytes.length buffer)
+            in
+            if bytes_read = 0 then Lwt.return_unit
+            else (
+              let rec write_all pos =
+                if pos >= bytes_read then copy ()
+                else
+                  let* written =
+                    Lwt_unix_retry.write dst_fd buffer pos (bytes_read - pos)
+                  in
+                  write_all (pos + written)
+              in
+              write_all 0)
+          in
+          copy ())
+        (fun () -> Lwt_unix_retry.close dst_fd))
+    (fun () -> Lwt_unix_retry.close src_fd)
+
 let readdir_list path =
   (* files_of_directory returns a stream; wrap the whole materialisation so
      a signal interrupting opendir or readdir retries from the start. *)
@@ -84,3 +116,45 @@ let rec rm_rf path =
     (function
       | Unix.Unix_error (Unix.ENOENT, _, _) -> Lwt.return_unit
       | exn -> Lwt.fail exn)
+
+let quiet f =
+  Lwt.catch f (function
+    | Unix.Unix_error _ -> Lwt.return_unit
+    | exn -> Lwt.fail exn)
+
+(* Delete files under [dir] last modified before [cutoff] and prune directories
+   left empty; [true] when [dir] holds nothing afterwards. Best-effort: a missing
+   path or a failed unlink is ignored, and a file appearing mid-walk is simply
+   seen by the next sweep. *)
+let rec reap_older_than ~cutoff dir =
+  let* is_dir = is_directory dir in
+  if not is_dir then Lwt.return_true
+  else
+    let* names = readdir_list dir in
+    let+ kept =
+      Lwt_list.fold_left_s
+        (fun kept name ->
+          let child = Filename.concat dir name in
+          let* is_dir = is_directory child in
+          if is_dir then
+            let* empty = reap_older_than ~cutoff child in
+            if empty then
+              let+ () = quiet (fun () -> Lwt_unix_retry.rmdir child) in
+              kept
+            else Lwt.return (kept + 1)
+          else
+            let* mtime =
+              Lwt.catch
+                (fun () ->
+                  let+ st = Lwt_unix_retry.stat child in
+                  Some st.Unix.st_mtime)
+                (fun _ -> Lwt.return_none)
+            in
+            match mtime with
+              | Some m when m < cutoff ->
+                  let+ () = quiet (fun () -> Lwt_unix_retry.unlink child) in
+                  kept
+              | _ -> Lwt.return (kept + 1))
+        0 names
+    in
+    kept = 0

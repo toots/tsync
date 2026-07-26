@@ -67,7 +67,6 @@ let make_route bindings (b : Frontend.binding) =
     match inherited bindings b "shares" with
       | Some ("true" | "1") ->
           let module Sh = Share_server.Make (C) in
-          Sh.start_expiry ();
           Some
             (fun ~token ~sub ~query ~range ->
               Sh.handle ~token ~sub ~query ~range)

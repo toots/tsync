@@ -13,22 +13,21 @@ type step =
           the [max_cache] cap). *)
   | Restore of string
   | RevertVersion of { path : string; version : string option }
-  | Open of string
-  | Close of string
-  | OpenRead of string
-      (** Fault a file in for reading the way FUSE [fopen] does — demand-page it
-          (sparse file + residency, no download) and mark it open. *)
+  | Close of string  (** Handle closed: queue the upload a staged file owes. *)
   | ReadRange of { path : string; offset : int; len : int }
       (** Read [len] bytes at [offset], fetching only the chunks they need, and
           print the bytes returned. *)
   | WriteAt of { path : string; offset : int; content : string }
-      (** Write [content] at [offset] through the demand-paged write path
-          (read-modify-write of a partially-touched chunk, per-chunk dirty). *)
-  | Release of string
-      (** Last-handle close policy (queue upload / evict / persist). *)
-  | ShowResidency of string
-      (** Print the file's per-chunk residency (present/absent/dirty), size and
-          [cached] flag, from its sidecar. *)
+      (** Write [content] at [offset] through the staged write path
+          (read-modify-write of a partially covered chunk). *)
+  | Truncate of { path : string; size : int }
+  | ShowChunks of string
+      (** Print what backs the file — published chunks or staged slots — and how
+          many of its chunks are local. *)
+  | ShowChunkCache
+      (** Print the whole chunk store's size: [chunks=n bytes=b]. *)
+  | ShowNames of string
+      (** Print the raw entry names FUSE readdir serves for a directory. *)
   | Mark  (** record the current time, as an [Expire "mark"] cutoff *)
   | Expire of string
       (** cutoff selector: "all" (now), "none" (epoch), or "mark" *)
@@ -37,9 +36,19 @@ type step =
   | DeleteRemoteChunk of { path : string; index : int }
   | CorruptRemoteChunk of { path : string; index : int }
   | DeleteRemoteManifest of string
-  | DirtyWrite of { path : string; content : string }
-  | ModifyCache of { path : string; content : string }
+  | StageWrite of { path : string; content : string }
+      (** Replace the file's content locally without uploading: unsynced edits,
+          the way a writer leaves a file between write and close. *)
+  | CorruptCachedChunk of { path : string; index : int }
+      (** Overwrite a cached chunk body with garbage, so it no longer hashes to
+          its own name. *)
+  | DeleteCachedChunk of { path : string; index : int }
   | Recheck
+  | RecoverStaged
+      (** Replay every upload the staged tree still owes, as a restart does. *)
+  | ClearCache
+      (** Wipe the local cache the way a full resync does — manifest mirror,
+          chunk store and all — keeping only the staged tree. *)
   | OnSecondary of step
   | ResyncRemote
   | LocalWrite of { path : string; content : string }
@@ -99,15 +108,15 @@ let rec render_step = function
   | RevertVersion { path; version } ->
       Printf.sprintf "revert %s%s" path
         (match version with Some v -> " @" ^ v | None -> " @latest")
-  | Open p -> "open " ^ p
   | Close p -> "close " ^ p
-  | OpenRead p -> "open-read " ^ p
   | ReadRange { path; offset; len } ->
       Printf.sprintf "read %s [%d,%d)" path offset (offset + len)
   | WriteAt { path; offset; content } ->
       Printf.sprintf "write-at %s @%d %S" path offset content
-  | Release p -> "release " ^ p
-  | ShowResidency p -> "residency " ^ p
+  | Truncate { path; size } -> Printf.sprintf "truncate %s %d" path size
+  | ShowChunks p -> "chunks " ^ p
+  | ShowChunkCache -> "chunk-cache"
+  | ShowNames p -> "names " ^ if p = "" then "/" else p
   | Mark -> "mark"
   | Expire s -> "expire " ^ s
   | Drain -> "drain"
@@ -117,11 +126,15 @@ let rec render_step = function
   | CorruptRemoteChunk { path; index } ->
       Printf.sprintf "corrupt-remote-chunk %s #%d" path index
   | DeleteRemoteManifest p -> "delete-remote-manifest " ^ p
-  | DirtyWrite { path; content } ->
-      Printf.sprintf "dirty-write %s %S" path content
-  | ModifyCache { path; content } ->
-      Printf.sprintf "modify-cache %s %S" path content
+  | StageWrite { path; content } ->
+      Printf.sprintf "stage-write %s %S" path content
+  | CorruptCachedChunk { path; index } ->
+      Printf.sprintf "corrupt-cached-chunk %s #%d" path index
+  | DeleteCachedChunk { path; index } ->
+      Printf.sprintf "delete-cached-chunk %s #%d" path index
   | Recheck -> "recheck"
+  | RecoverStaged -> "recover-staged"
+  | ClearCache -> "clear-cache"
   | OnSecondary s -> "on-secondary " ^ render_step s
   | ResyncRemote -> "resync-remote"
   | LocalWrite { path; content } ->
@@ -216,7 +229,7 @@ let setup_client (module C : Conf.S) root staging_prefix =
     H.
       {
         path_to_key = (fun p -> key (strip_root p));
-        request_evict = F.evict;
+        evict = F.evict;
         restore = F.ensure_cached;
         changed = (fun _ -> ());
         full_resync = (fun () -> Lwt.return_unit);
@@ -230,9 +243,28 @@ let setup_client (module C : Conf.S) root staging_prefix =
     ~on_cursor:(fun ~entry_key:_ -> ())
     ~on_upload_done:(fun ~key:_ ->
       (* Mirror the daemons: nudge cache-cap enforcement after each upload. *)
-      F.enforce_cache_cap ());
+      F.enforce_chunk_cap ());
   let staging_seq = ref 0 in
   let mark_time = ref 0. in
+  (* Where the body of a file's chunk [index] lives in the chunk store, for the
+     steps that damage it behind the daemon's back. *)
+  let cached_chunk_path k index =
+    let+ resolved = F.resolve k in
+    let chunk_key =
+      match resolved with
+        | Some (`Published m) -> (
+            match
+              List.find_opt
+                (fun (c : Manifest.chunk_entry) -> c.Manifest.index = index)
+                m.Manifest.chunks
+            with
+              | Some c -> Manifest.chunk_key c
+              | None -> failwith "no such chunk")
+        | _ -> failwith "no published manifest"
+    in
+    Cache_layout.chunk_path ~cache_root:C.cache_root ~domain_name:C.domain_name
+      chunk_key
+  in
   let request fields =
     let line = Yojson.Safe.to_string (`Assoc fields) in
     let* resp, _ctl = H.handler hooks line in
@@ -327,20 +359,11 @@ let setup_client (module C : Conf.S) root staging_prefix =
     | Rename { src; dst } -> must_action ~src:(key src) "rename" (key dst)
     | Delete p -> must_action "delete" (key p)
     | Evict p -> must_action "evict" ("/" ^ p)
-    | EnforceCache -> F.enforce_cache_cap ()
+    | EnforceCache -> F.enforce_chunk_cap ()
     | Restore p -> must_action "restore" ("/" ^ p)
     | RevertVersion { path; version } ->
         must_action ?arg:version "revert" ("/" ^ path)
-    | Open p ->
-        F.mark_open (key p);
-        Lwt.return_unit
-    | Close p ->
-        ignore (F.mark_closed (key p));
-        Lwt.return_unit
-    | OpenRead p ->
-        let* () = F.prepare_read (key p) in
-        F.mark_open (key p);
-        Lwt.return_unit
+    | Close p -> F.close (key p)
     | ReadRange { path; offset; len } ->
         let buf = Bigarray.Array1.create Bigarray.char Bigarray.c_layout len in
         let* n = F.read (key path) buf ~offset:(Int64.of_int offset) in
@@ -359,34 +382,47 @@ let setup_client (module C : Conf.S) root staging_prefix =
         done;
         let* (_ : int) = F.write (key path) buf ~offset:(Int64.of_int offset) in
         Lwt.return_unit
-    | Release p -> F.release (key p)
-    | ShowResidency p ->
-        let k = key p in
-        let* cached = F.is_cached k in
-        let* m = F.read_manifest k in
-        let desc =
-          match m with
-            | Some (`Clean man) ->
-                let res =
-                  match man.Manifest.residency with
-                    | None -> "complete"
-                    | Some a ->
-                        "["
-                        ^ String.concat ""
-                            (Array.to_list
-                               (Array.map
-                                  (function
-                                    | Manifest.Present -> "P"
-                                    | Manifest.Absent -> "A"
-                                    | Manifest.Dirty -> "D")
-                                  a))
-                        ^ "]"
-                in
-                Printf.sprintf "size=%Ld chunks=%s" man.Manifest.size res
-            | Some `Dirty -> "dirty (new)"
-            | None -> "no sidecar"
+    | Truncate { path; size } -> F.truncate (key path) (Int64.of_int size)
+    | ShowNames p ->
+        (* The entry names a readdir serves for this directory. *)
+        let prefix = if p = "" then C.domain_prefix else key p ^ "/" in
+        let+ files, dirs = F.list_directory ~prefix in
+        let names =
+          List.map
+            (fun (e : Backend.file_entry) -> Filename.basename e.Backend.key)
+            files
+          @ List.map (fun (d, _) -> d ^ "/") dirs
         in
-        Printf.printf "  residency %s cached=%b %s\n" p cached desc;
+        Printf.printf "  names %s = [%s]\n"
+          (if p = "" then "/" else p)
+          (String.concat " " (List.sort compare names))
+    | ShowChunkCache ->
+        let+ chunks, bytes = F.chunk_stats () in
+        Printf.printf "  chunk-cache chunks=%d bytes=%d\n" chunks bytes
+    | ShowChunks p ->
+        let k = key p in
+        let* resolved = F.resolve k in
+        let desc =
+          match resolved with
+            | Some (`Staged (st, _)) ->
+                (* S = written locally, I = still inherited from the published
+                   manifest, Z = a hole from a grow (zeros, no disk). *)
+                Printf.sprintf "staged size=%Ld slots=[%s]" st.Manifest.s_size
+                  (String.concat ""
+                     (Array.to_list
+                        (Array.map
+                           (function
+                             | Manifest.Staged _ -> "S"
+                             | Manifest.Inherit -> "I"
+                             | Manifest.Zero -> "Z")
+                           st.Manifest.s_slots)))
+            | Some (`Published m) ->
+                Printf.sprintf "published size=%Ld chunks=%d" m.Manifest.size
+                  (List.length m.Manifest.chunks)
+            | None -> "no manifest"
+        in
+        let* local, total = F.chunk_residency k in
+        Printf.printf "  chunks %s %s cached=%d/%d\n" p desc local total;
         Lwt.return_unit
     | Mark ->
         mark_time := Unix.gettimeofday ();
@@ -474,9 +510,8 @@ let setup_client (module C : Conf.S) root staging_prefix =
             ~on_file:(fun ~rel status ->
               let desc =
                 match status with
-                  | Export.Exported Export.Local_cache -> "local cache"
-                  | Export.Exported Export.Remote_chunks -> "remote"
-                  | Export.Exported Export.Symlink -> "symlink"
+                  | Export.Exported -> "assembled"
+                  | Export.Exported_symlink -> "symlink"
                   | Export.Missing_data -> "MISSING"
               in
               Printf.printf "  export %s (%s)\n" rel desc)
@@ -516,17 +551,27 @@ let setup_client (module C : Conf.S) root staging_prefix =
               (d.Mirror.index + 1) d.Mirror.checked
               (List.length d.Mirror.copied))
           dests
-    | DirtyWrite { path; content } ->
-        (* A write that has not been uploaded yet, the way the FUSE layer
-           leaves a file between write and close: local data plus a Dirty
-           sidecar. *)
-        write_file (F.local_path (key path)) content;
-        F.mark_dirty (key path)
-    | ModifyCache { path; content } ->
-        (* Local data changed behind the daemon's back: the sidecar still
-           describes the old content. *)
-        write_file (F.local_path (key path)) content;
+    | StageWrite { path; content } ->
+        (* Staged edits with no upload queued, the way a writer leaves a file
+           between write and close. *)
+        let k = key path in
+        let* () = F.truncate k 0L in
+        let len = String.length content in
+        let buf =
+          Bigarray.Array1.create Bigarray.char Bigarray.c_layout (max 1 len)
+        in
+        String.iteri (fun i c -> Bigarray.Array1.set buf i c) content;
+        let* (_ : int) = F.write k (Bigarray.Array1.sub buf 0 len) ~offset:0L in
         Lwt.return_unit
+    | CorruptCachedChunk { path; index } ->
+        let+ p = cached_chunk_path (key path) index in
+        write_file p "corrupted chunk body"
+    | DeleteCachedChunk { path; index } ->
+        let* p = cached_chunk_path (key path) index in
+        Lwt.catch (fun () -> Lwt_unix_retry.unlink p) (fun _ -> Lwt.return_unit)
+    | RecoverStaged -> F.recover_staged ()
+    | ClearCache ->
+        Cache_layout.clear ~cache_root:C.cache_root ~domain_name:C.domain_name
     | Recheck ->
         let module Rc = Recheck.Make (C) in
         let* summary =
@@ -542,6 +587,10 @@ let setup_client (module C : Conf.S) root staging_prefix =
                 s.Recheck.checked s.Recheck.repaired s.Recheck.unrepairable
                 s.Recheck.skipped
           | None -> Printf.printf "  recheck: no local cache\n");
+        (* The local half, as the CLI runs it: a body that no longer hashes to its
+           own name is dropped and re-fetched on the next read. *)
+        let* checked, dropped = Rc.verify_chunk_cache () in
+        Printf.printf "  chunk-cache: %d verified, %d dropped\n" checked dropped;
         Lwt.return_unit
   in
   let drain () = Sq.drain () in
@@ -589,9 +638,9 @@ let setup_client (module C : Conf.S) root staging_prefix =
             let size =
               match List.assoc_opt "size" st with Some (`Int n) -> n | _ -> -1
             in
-            let+ cached = F.is_cached (key rel) in
-            Printf.printf "  f %s size=%d cached=%b uploaded=%b etag=%s\n" rel
-              size cached uploaded etag;
+            let+ local, total = F.chunk_residency (key rel) in
+            Printf.printf "  f %s size=%d cached=%d/%d uploaded=%b etag=%s\n"
+              rel size local total uploaded etag;
             files := rel :: !files)
           (List.sort compare entries)
       in
@@ -605,8 +654,31 @@ let setup_client (module C : Conf.S) root staging_prefix =
     let+ () = walk C.domain_prefix in
     List.rev !files
   in
-  (* A failed fetch (e.g. an unrepairable evicted file) is part of the
-     snapshot, not a reason to abort the remaining files' contents. *)
+  (* Whole-file content through the read path itself — the same one FUSE and the
+     frontends use — so a snapshot shows what a reader would actually get. A
+     failed read (e.g. an unrepairable evicted file) is part of the snapshot, not
+     a reason to abort the remaining files' contents. *)
+  let read_whole rel size =
+    let buf =
+      Bigarray.Array1.create Bigarray.char Bigarray.c_layout (max 1 size)
+    in
+    let out = Buffer.create size in
+    let rec go offset =
+      let* n =
+        F.read (key rel)
+          (Bigarray.Array1.sub buf 0 (max 1 (size - offset)))
+          ~offset:(Int64.of_int offset)
+      in
+      if n <= 0 then Lwt.return_unit
+      else (
+        for i = 0 to n - 1 do
+          Buffer.add_char out (Bigarray.Array1.get buf i)
+        done;
+        if offset + n >= size then Lwt.return_unit else go (offset + n))
+    in
+    let+ () = if size <= 0 then Lwt.return_unit else go 0 in
+    Buffer.contents out
+  in
   let dump_contents files =
     Lwt_list.iter_s
       (fun rel ->
@@ -616,14 +688,19 @@ let setup_client (module C : Conf.S) root staging_prefix =
               Printf.printf "  %s -> %s\n" rel target;
               Lwt.return_unit
           | None ->
-              let+ obj = action "ensure_cached" (key rel) in
-              if not (response_ok obj) then
-                Printf.printf "  %s = <unavailable: %s>\n" rel
-                  (response_error obj)
-              else (
-                match get_str obj "localPath" with
-                  | Some lp -> Printf.printf "  %s = %S\n" rel (read_file lp)
-                  | None -> failwith "no localPath"))
+              let size =
+                match List.assoc_opt "size" st with
+                  | Some (`Int n) -> n
+                  | _ -> 0
+              in
+              Lwt.catch
+                (fun () ->
+                  let+ content = read_whole rel size in
+                  Printf.printf "  %s = %S\n" rel content)
+                (fun exn ->
+                  Printf.printf "  %s = <unavailable: %s>\n" rel
+                    (Printexc.to_string exn);
+                  Lwt.return_unit))
       files
   in
   let dump_pending () =

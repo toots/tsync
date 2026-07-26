@@ -6,7 +6,7 @@ module Make (C : Conf.S) (F : File.S) = struct
 
   type hooks = {
     path_to_key : string -> string;
-    request_evict : string -> unit Lwt.t;
+    evict : string -> unit Lwt.t;
     restore : string -> unit Lwt.t;
     changed : string -> unit;
     full_resync : unit -> unit Lwt.t;
@@ -52,37 +52,37 @@ module Make (C : Conf.S) (F : File.S) = struct
                  ("isUploaded", `Bool true);
                ])
       | _ -> (
-          let* m = F.resolved_manifest key in
-          match m with
-            | Some (`Clean m) ->
-                let fields =
-                  [
-                    ("size", `Int (Int64.to_int m.Manifest.size));
-                    ("mtime", `Float m.Manifest.mtime);
-                    ("etag", `String m.Manifest.h1);
-                    ("isUploaded", `Bool true);
-                  ]
-                  @
-                    match m.Manifest.symlink with
-                    | None -> []
-                    | Some t -> [("symlinkTarget", `String t)]
-                in
-                Lwt.return (ok_json fields)
-            | Some `Dirty -> (
-                let* st = stat_opt (F.local_path key) in
-                match st with
-                  | Some st ->
-                      Lwt.return
-                        (ok_json
-                           [
-                             ( "size",
-                               `Int (Int64.to_int st.Unix.LargeFile.st_size) );
-                             ("mtime", `Float st.Unix.LargeFile.st_mtime);
-                             ("etag", `String "");
-                             ("isUploaded", `Bool false);
-                           ])
-                  | None -> Lwt.return (error_json "not found"))
-            | None -> Lwt.return (error_json "not found"))
+          (* Unsynced local edits answer from the staged manifest: it is the
+             authority for size and mtime until the upload publishes. *)
+          let* staged = F.resolve key in
+          match staged with
+            | Some (`Staged (st, _)) ->
+                Lwt.return
+                  (ok_json
+                     [
+                       ("size", `Int (Int64.to_int st.Manifest.s_size));
+                       ("mtime", `Float st.Manifest.s_mtime);
+                       ("etag", `String "");
+                       ("isUploaded", `Bool false);
+                     ])
+            | Some (`Published _) | None -> (
+                let* m = F.resolved_manifest key in
+                match m with
+                  | Some (`Clean m) ->
+                      let fields =
+                        [
+                          ("size", `Int (Int64.to_int m.Manifest.size));
+                          ("mtime", `Float m.Manifest.mtime);
+                          ("etag", `String m.Manifest.h1);
+                          ("isUploaded", `Bool true);
+                        ]
+                        @
+                          match m.Manifest.symlink with
+                          | None -> []
+                          | Some t -> [("symlinkTarget", `String t)]
+                      in
+                      Lwt.return (ok_json fields)
+                  | Some `Dirty | None -> Lwt.return (error_json "not found")))
 
   (* The listed objects are manifests, so their backend size/mtime are the manifest's,
      not the file's. Resolve the manifest (local sidecar, else fetched from the backend)
@@ -254,9 +254,12 @@ module Make (C : Conf.S) (F : File.S) = struct
           `String (newest_key ~init:(Option.value ~default:"" fetched) keys) );
       ]
 
+  (* The caller wants a real file: assemble one into the handoff directory and
+     hand over the path. It is the caller's copy to move or delete — the daemon
+     keeps the content in the chunk store, not as a file. *)
   let handle_ensure_cached key =
-    let+ () = F.ensure_cached key in
-    ok_json [("localPath", `String (F.local_path key))]
+    let+ path = F.handoff key in
+    ok_json [("localPath", `String path)]
 
   let handle_create key =
     let+ () = F.create key in
@@ -264,17 +267,23 @@ module Make (C : Conf.S) (F : File.S) = struct
 
   let handle_write key staging_path =
     ignore (F.cancel_upload key);
-    let* () = F.ensure_parent_dir key in
-    let* () = Lwt_unix_retry.rename staging_path (F.local_path key) in
-    let* () = F.mark_dirty key in
-    let* () = F.queue_put key in
+    (* The extension hands back a complete file; stage it, queue the upload, and
+       answer from the staged metadata — the size and mtime the caller sees are
+       the ones that will be published. *)
     let* st =
       Lwt.catch
         (fun () ->
-          let+ st = Lwt_unix_retry.LargeFile.stat (F.local_path key) in
+          let+ st = Lwt_unix_retry.LargeFile.stat staging_path in
           Some st)
         (fun _ -> Lwt.return_none)
     in
+    let* () = F.write_whole key ~src_path:staging_path in
+    let* () =
+      Lwt.catch
+        (fun () -> Lwt_unix_retry.unlink staging_path)
+        (fun _ -> Lwt.return_unit)
+    in
+    let* () = F.queue_put key in
     match st with
       | Some st ->
           Lwt.return
@@ -370,7 +379,7 @@ module Make (C : Conf.S) (F : File.S) = struct
                   | "rmdir" -> handle_rmdir path
                   | "share" -> handle_share path
                   | "evict" ->
-                      let+ () = hooks.request_evict (hooks.path_to_key path) in
+                      let+ () = hooks.evict (hooks.path_to_key path) in
                       ok_json []
                   | "restore" ->
                       let+ () = hooks.restore (hooks.path_to_key path) in
@@ -389,26 +398,25 @@ module Make (C : Conf.S) (F : File.S) = struct
                            :: hooks.status_fields ()))
                   | "stats" ->
                       let rate f = `Int (int_of_float (f ())) in
-                      Lwt.return
-                        (ok_json
-                           ([
-                              ("pendingDownloads", `Int (F.downloading_count ()));
-                              ("dirtyFiles", `Int (F.dirty_count ()));
-                              ("openFiles", `Int (F.open_files_count ()));
-                              ( "downloadsCompleted",
-                                `Int (F.downloads_completed_count ()) );
-                              ("maxUploads", `Int C.max_uploads);
-                              ("maxDownloads", `Int C.max_downloads);
-                              ("bytesUploaded", `Int (Metrics.uploaded ()));
-                              ("bytesDownloaded", `Int (Metrics.downloaded ()));
-                              ("uploadBytesPerSec", rate Metrics.upload_rate);
-                              ("downloadBytesPerSec", rate Metrics.download_rate);
-                              ("chunksHashed", `Int (Metrics.hashed ()));
-                              ("hashesPerSec", rate Metrics.hash_rate);
-                              ("cpuSeconds", `Float (Metrics.cpu_seconds ()));
-                              ("rssBytes", `Int (Metrics.rss_bytes ()));
-                            ]
-                           @ hooks.stats_fields ()))
+                      let+ staged = F.staged_count () in
+                      ok_json
+                        ([
+                           ("pendingDownloads", `Int (F.downloads_in_flight ()));
+                           ("stagedFiles", `Int staged);
+                           ( "downloadsCompleted",
+                             `Int (F.downloads_completed_count ()) );
+                           ("maxUploads", `Int C.max_uploads);
+                           ("maxDownloads", `Int C.max_downloads);
+                           ("bytesUploaded", `Int (Metrics.uploaded ()));
+                           ("bytesDownloaded", `Int (Metrics.downloaded ()));
+                           ("uploadBytesPerSec", rate Metrics.upload_rate);
+                           ("downloadBytesPerSec", rate Metrics.download_rate);
+                           ("chunksHashed", `Int (Metrics.hashed ()));
+                           ("hashesPerSec", rate Metrics.hash_rate);
+                           ("cpuSeconds", `Float (Metrics.cpu_seconds ()));
+                           ("rssBytes", `Int (Metrics.rss_bytes ()));
+                         ]
+                        @ hooks.stats_fields ())
                   | "download_progress" ->
                       Lwt.return
                         (match F.download_progress path with

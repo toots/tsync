@@ -34,6 +34,7 @@ module C = struct
 end
 
 module R = Remote.Make (C)
+module D = Data.Make (C) (R)
 
 (* Distinct per chunk: adding the chunk index shifts each chunk's byte pattern,
    so the three chunks hash to three different keys. *)
@@ -66,9 +67,11 @@ let upload key path =
   match state with `Clean m -> m | `Dirty -> assert false
 
 let () =
+  (* Round-trip through the read path: the manifest is fetched, every chunk is
+     pulled into the chunk store and the bytes are written back out. *)
   let round_trip key src expected =
     let dst = src ^ ".out" in
-    let* _ = R.download ~key ~dst_path:dst in
+    let* () = D.assemble_to key ~dst_path:dst in
     assert (read_file dst = expected);
     Lwt.return_unit
   in

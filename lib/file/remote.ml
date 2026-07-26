@@ -8,7 +8,6 @@ type recheck_report = {
   chunks_unrepairable : int;
   manifest_repaired : bool;
   manifest_bad : bool;
-  local_stale : bool;
 }
 
 let manifest_matches (a : Manifest.t) (b : Manifest.t) =
@@ -43,33 +42,30 @@ module type S = sig
     src_path:string ->
     mtime:float ->
     chunk_size:int ->
-    ?reuse:(int -> Manifest.chunk_entry option) ->
     ?cancel:bool ref ->
     unit ->
     Manifest.state Lwt.t
 
-  val download_chunks :
-    key:string -> dst_path:string -> Manifest.t -> unit Lwt.t
+  val get_chunk : chunk_key:string -> string Lwt.t
 
-  val download_chunk :
-    dst_path:string ->
-    chunk_size:int ->
-    chunk:Manifest.chunk_entry ->
-    unit Lwt.t
-
-  val get_download_progress : string -> (int * int) option
-  val fetch_manifest : key:string -> unit -> Manifest.state option Lwt.t
-  val download : key:string -> dst_path:string -> Manifest.state option Lwt.t
-
-  val recheck_cached :
+  val upload_chunks :
     key:string ->
-    src_path:string ->
+    name:string ->
+    size:int64 ->
+    chunk_size:int ->
     mtime:float ->
-    sidecar:Manifest.t ->
+    source:(int -> [ `Reuse of Manifest.chunk_entry | `Data of string ] Lwt.t) ->
+    ?cancel:bool ref ->
     unit ->
-    (Manifest.state * recheck_report) Lwt.t
+    Manifest.state Lwt.t
 
-  val recheck_evicted : key:string -> Manifest.t -> recheck_report Lwt.t
+  val fetch_manifest : key:string -> unit -> Manifest.state option Lwt.t
+
+  val recheck_from_manifest :
+    key:string ->
+    local_body:(Manifest.chunk_entry -> string option Lwt.t) ->
+    Manifest.t ->
+    recheck_report Lwt.t
 end
 
 module Make_with_layout (C : Conf.S) (L : Layout.S) : S = struct
@@ -128,60 +124,60 @@ module Make_with_layout (C : Conf.S) (L : Layout.S) : S = struct
     let+ head = Primary.head_opt ~key:ck () in
     Option.is_some head
 
-  (* Read, hash and (if not already present) upload chunk [index], returning
-     its manifest entry. [reuse index] returning [Some e] means the chunk is
-     unchanged from a prior manifest: skip reading and uploading it (its bytes
-     may be a hole on disk) and keep entry [e]. *)
-  let upload_chunk fd ~cancel ~file_size ~chunk_size ~reuse index =
-    if !cancel then raise Cancelled;
-    match reuse index with
-      | Some entry -> Lwt.return entry
-      | None ->
-          let offset = index * chunk_size in
-          let size = min chunk_size (file_size - offset) in
-          with_chunk_buffer ~size (fun buf ->
-              let* () = read_chunk_into fd offset size buf in
-              (* Zero-copy in the common (full-chunk) case; the last chunk of a
-           file is short and needs its own copy since it can't alias the
-           whole pooled buffer. Either way, [data] must not outlive this
-           chunk's use (hash + upload) since the buffer is reused once
-           released below. *)
-              let data =
-                if size = Bytes.length buf then Bytes.unsafe_to_string buf
-                else Bytes.sub_string buf 0 size
-              in
-              let entry =
-                Manifest.
-                  {
-                    index;
-                    h1 = Xxhash.hash_hex data 0;
-                    h2 = Xxhash.hash_hex data 1;
-                    size;
-                  }
-              in
-              Metrics.add_hashed 1;
-              let ck_rel = Manifest.chunk_key entry in
-              let ck = C.chunk_prefix ^ ck_rel in
-              let* known =
-                if Hashtbl.mem known_chunks ck_rel then Lwt.return_true
-                else chunk_exists ck
-              in
-              let+ () =
-                if known then (
-                  Hashtbl.replace known_chunks ck_rel ();
-                  Lwt.return_unit)
-                else (
-                  Metrics.add_uploaded size;
-                  let+ () = put_all ~key:ck ~data () in
-                  Hashtbl.replace known_chunks ck_rel ())
-              in
-              entry)
+  (* Hash [data] as chunk [index] and upload it unless the backend already has
+     that content. [data] is not retained past this call, so a caller may pass a
+     string aliasing a pooled buffer. *)
+  let put_chunk ~index ~data =
+    let size = String.length data in
+    let entry =
+      Manifest.
+        {
+          index;
+          h1 = Xxhash.hash_hex data 0;
+          h2 = Xxhash.hash_hex data 1;
+          size;
+        }
+    in
+    Metrics.add_hashed 1;
+    let ck_rel = Manifest.chunk_key entry in
+    let ck = C.chunk_prefix ^ ck_rel in
+    let* known =
+      if Hashtbl.mem known_chunks ck_rel then Lwt.return_true
+      else chunk_exists ck
+    in
+    let+ () =
+      if known then (
+        Hashtbl.replace known_chunks ck_rel ();
+        Lwt.return_unit)
+      else (
+        Metrics.add_uploaded size;
+        let+ () = put_all ~key:ck ~data () in
+        Hashtbl.replace known_chunks ck_rel ())
+    in
+    entry
 
-  (* [reuse] lets the caller mark chunks unchanged from a prior manifest so only
-     the dirty ones are read/hashed/uploaded (demand-paged edits). The default
-     rehashes everything — the whole-file upload of a brand-new file. *)
-  let upload ~key ~src_path ~mtime ~chunk_size ?(reuse = fun _ -> None)
-      ?(cancel = ref false) () =
+  (* Read, hash and (if not already present) upload chunk [index], returning its
+     manifest entry. *)
+  let upload_chunk fd ~cancel ~file_size ~chunk_size index =
+    if !cancel then raise Cancelled;
+    let offset = index * chunk_size in
+    let size = min chunk_size (file_size - offset) in
+    with_chunk_buffer ~size (fun buf ->
+        let* () = read_chunk_into fd offset size buf in
+        (* Zero-copy in the common (full-chunk) case; the last chunk of a file is
+           short and needs its own copy since it can't alias the whole pooled
+           buffer. Either way, [data] must not outlive this chunk's use (hash +
+           upload) since the buffer is reused once released below. *)
+        let data =
+          if size = Bytes.length buf then Bytes.unsafe_to_string buf
+          else Bytes.sub_string buf 0 size
+        in
+        put_chunk ~index ~data)
+
+  (* Whole-file upload: every chunk is read, hashed and sent unless the backend
+     already holds that content. For a file handed over as one file — import, and
+     the FileProvider's whole-file re-import. *)
+  let upload ~key ~src_path ~mtime ~chunk_size ?(cancel = ref false) () =
     let* st = Lwt_unix_retry.stat src_path in
     let file_size = st.Unix.st_size in
     Log.debug "upload %s: file_size=%d" key file_size;
@@ -198,7 +194,7 @@ module Make_with_layout (C : Conf.S) (L : Layout.S) : S = struct
              stays capped at [max_uploads] regardless of how many chunks (or
              how many other files' chunks) are contending for one. *)
           Lwt_list.map_p
-            (upload_chunk fd ~cancel ~file_size ~chunk_size ~reuse)
+            (upload_chunk fd ~cancel ~file_size ~chunk_size)
             (List.init num_chunks Fun.id))
         (fun () -> Lwt_unix_retry.close fd)
     in
@@ -228,6 +224,50 @@ module Make_with_layout (C : Conf.S) (L : Layout.S) : S = struct
       raise Cancelled
     else Lwt.return state
 
+  (* Publish [entries] as [key]'s manifest: the tail every upload shares. A
+     cancellation that lands while the put is in flight unpublishes it again —
+     leaving it would create a ghost object under a name that may no longer
+     exist locally. Chunks stay: they are content-addressed and the successor
+     upload references them. *)
+  let publish ~key ~name ~size ~chunk_size ~mtime ~cancel entries =
+    if !cancel then raise Cancelled;
+    let h1, h2 = Manifest.digest_of_chunks entries in
+    let state =
+      Manifest.make ~name ~h1 ~h2 ~size ~chunk_size ~chunks:entries ~mtime
+    in
+    let* () = if C.versioning then St.save_version ~key else Lwt.return_unit in
+    Log.info "upload %s: publishing manifest, size=%Ld" key size;
+    let* () = St.put_manifest ~key ~data:(Manifest.to_string state) in
+    if !cancel then
+      let* () =
+        Lwt.catch
+          (fun () -> St.delete_manifest ~key)
+          (fun exn ->
+            Log.err "upload %s: cancelled-manifest cleanup failed: %s" key
+              (Printexc.to_string exn);
+            Lwt.return_unit)
+      in
+      raise Cancelled
+    else Lwt.return state
+
+  (* Upload a file whose bytes the caller supplies per chunk: [source index] is
+     either an entry to keep as-is (an unchanged chunk, never read or sent) or the
+     chunk's bytes. Knowing nothing about where those bytes live keeps staging out
+     of this module. An empty file still gets one (empty) chunk, so every manifest
+     has at least one. *)
+  let upload_chunks ~key ~name ~size ~chunk_size ~mtime ~source
+      ?(cancel = ref false) () =
+    let n = max 1 (Manifest.num_chunks_for size chunk_size) in
+    let one index =
+      if !cancel then raise Cancelled;
+      let* src = source index in
+      match src with
+        | `Reuse entry -> Lwt.return { entry with Manifest.index }
+        | `Data data -> put_chunk ~index ~data
+    in
+    let* entries = Lwt_list.map_p one (List.init n Fun.id) in
+    publish ~key ~name ~size ~chunk_size ~mtime ~cancel entries
+
   let fetch_manifest ~key () =
     let+ body = St.get_manifest_opt ~key in
     match body with
@@ -254,36 +294,6 @@ module Make_with_layout (C : Conf.S) (L : Layout.S) : S = struct
       | Some h -> h.Backend.size = entry.Manifest.size
       | None -> false
 
-  (* Read and hash chunk [index] of the local file, verify it remotely, and
-     re-upload it (put overwrites, also fixing a corrupt object) when wrong.
-     Returns the manifest entry and whether a repair was made. *)
-  let recheck_chunk fd ~file_size ~chunk_size index =
-    let offset = index * chunk_size in
-    let size = min chunk_size (file_size - offset) in
-    with_chunk_buffer ~size (fun buf ->
-        let* () = read_chunk_into fd offset size buf in
-        let data =
-          if size = Bytes.length buf then Bytes.unsafe_to_string buf
-          else Bytes.sub_string buf 0 size
-        in
-        let entry =
-          Manifest.
-            {
-              index;
-              h1 = Xxhash.hash_hex data 0;
-              h2 = Xxhash.hash_hex data 1;
-              size;
-            }
-        in
-        let* ok = chunk_remote_ok entry in
-        let+ () =
-          if ok then Lwt.return_unit
-          else (
-            Log.info "recheck: re-uploading chunk %s" (Manifest.chunk_key entry);
-            put_all ~key:(C.chunk_prefix ^ Manifest.chunk_key entry) ~data ())
-        in
-        (entry, not ok))
-
   (* Fetch the remote manifest for [key] and republish [expected] when it is
      missing, dirty or differs. Returns [true] when a repair was made. *)
   let recheck_manifest ~key (expected : Manifest.t) =
@@ -301,65 +311,40 @@ module Make_with_layout (C : Conf.S) (L : Layout.S) : S = struct
       in
       true)
 
-  (* Recheck a file whose data is in the local cache: re-hash it chunk by
-     chunk, verify/repair each chunk remotely, then verify/repair the remote
-     manifest. Returns the freshly computed manifest state (the caller
-     refreshes the sidecar) and a report; [local_stale] is set when the
-     re-hash disagrees with [sidecar]. *)
-  let recheck_cached ~key ~src_path ~mtime ~sidecar () =
-    (* Re-chunk at the file's own recorded chunk size, not the domain default —
-       they can differ once the domain's [chunk_size] is changed. *)
-    let chunk_size = sidecar.Manifest.chunk_size in
-    let* st = Lwt_unix_retry.stat src_path in
-    let file_size = st.Unix.st_size in
-    let num_chunks =
-      if file_size = 0 then 1 else (file_size + chunk_size - 1) / chunk_size
-    in
-    let* fd = Lwt_unix_retry.openfile src_path [Unix.O_RDONLY] 0 in
-    let* results =
-      Lwt.finalize
-        (fun () ->
-          Lwt_list.map_p
-            (recheck_chunk fd ~file_size ~chunk_size)
-            (List.init num_chunks Fun.id))
-        (fun () -> Lwt_unix_retry.close fd)
-    in
-    let entries = List.map fst results in
-    let h1, h2 = Manifest.digest_of_chunks entries in
-    let state =
-      Manifest.make ~name:(Filename.basename key) ~h1 ~h2
-        ~size:(Int64.of_int file_size) ~chunk_size ~chunks:entries ~mtime
-    in
-    let expected = match state with `Clean m -> m | `Dirty -> assert false in
-    let+ manifest_repaired = recheck_manifest ~key expected in
-    ( state,
-      {
-        chunks_total = num_chunks;
-        chunks_repaired = List.length (List.filter snd results);
-        chunks_unrepairable = 0;
-        manifest_repaired;
-        manifest_bad = false;
-        local_stale = not (manifest_matches sidecar expected);
-      } )
-
-  (* Bounds concurrent HEADs for evicted-file rechecks, where no buffer slot
-     is held to do it. *)
+  (* Bounds concurrent HEADs for manifest-driven rechecks. *)
   let recheck_head_pool =
     Lwt_pool.create (max 1 C.max_uploads) (fun () -> Lwt.return_unit)
 
-  (* Recheck an evicted file from its sidecar manifest alone: chunks cannot
-     be repaired without local data, but a missing/bad remote manifest is
-     republished from the sidecar as long as every chunk checks out. *)
-  let recheck_evicted ~key (m : Manifest.t) =
-    let* oks =
-      Lwt_list.map_p
-        (fun entry ->
-          Lwt_pool.use recheck_head_pool (fun () -> chunk_remote_ok entry))
-        m.Manifest.chunks
+  (* Recheck a file from its manifest: every chunk it names must exist remotely
+     with the right size, and a missing or wrong remote manifest is republished
+     from the sidecar as long as they all do. Local bytes play no part — verifying
+     those is {!Chunk_cache.verify}'s job. *)
+  let recheck_from_manifest ~key ~local_body (m : Manifest.t) =
+    (* A chunk missing or corrupt on the backend can still be restored from the
+       local chunk store: content addressing means a body found under that key is
+       the right bytes by construction. *)
+    let check entry =
+      let* ok =
+        Lwt_pool.use recheck_head_pool (fun () -> chunk_remote_ok entry)
+      in
+      if ok then Lwt.return `Ok
+      else
+        let* body = local_body entry in
+        match body with
+          | None -> Lwt.return `Missing
+          | Some data ->
+              Log.info "recheck: re-uploading chunk %s"
+                (Manifest.chunk_key entry);
+              let+ () =
+                put_all
+                  ~key:(C.chunk_prefix ^ Manifest.chunk_key entry)
+                  ~data ()
+              in
+              `Repaired
     in
-    let chunks_unrepairable =
-      List.length (List.filter (fun ok -> not ok) oks)
-    in
+    let* results = Lwt_list.map_p check m.Manifest.chunks in
+    let count what = List.length (List.filter (fun r -> r = what) results) in
+    let chunks_unrepairable = count `Missing in
     let+ manifest_repaired, manifest_bad =
       if chunks_unrepairable > 0 then
         let* remote = fetch_manifest ~key () in
@@ -375,11 +360,10 @@ module Make_with_layout (C : Conf.S) (L : Layout.S) : S = struct
     in
     {
       chunks_total = List.length m.Manifest.chunks;
-      chunks_repaired = 0;
+      chunks_repaired = count `Repaired;
       chunks_unrepairable;
       manifest_repaired;
       manifest_bad;
-      local_stale = false;
     }
 
   (* Bounds concurrent chunk GETs across all downloads, mirroring how
@@ -389,98 +373,14 @@ module Make_with_layout (C : Conf.S) (L : Layout.S) : S = struct
   let chunk_download_pool =
     Lwt_pool.create (max 1 C.max_downloads) (fun () -> Lwt.return_unit)
 
-  (* Per-key (bytes_done, total_bytes) for in-flight downloads; used by the
-     FileProvider extension to display a progress bar. Absent when no download
-     is active for that key. *)
-  let active_downloads : (string, int * int) Hashtbl.t = Hashtbl.create 8
-  let get_download_progress key = Hashtbl.find_opt active_downloads key
-
-  let assemble_chunks ~key ~(manifest : Manifest.t) ~dst_path primary =
-    let total = Int64.to_int manifest.Manifest.size in
-    Hashtbl.replace active_downloads key (0, total);
-    let (module Primary : Backend.S) = primary in
-    let* fd =
-      Lwt_unix_retry.openfile dst_path
-        [Unix.O_WRONLY; Unix.O_CREAT; Unix.O_TRUNC]
-        0o644
-    in
-    Lwt.finalize
-      (fun () ->
-        let* () =
-          Lwt_unix_retry.LargeFile.ftruncate fd manifest.Manifest.size
-        in
-        Lwt_list.iter_p
-          (fun (chunk : Manifest.chunk_entry) ->
-            Lwt_pool.use chunk_download_pool (fun () ->
-                let ck = C.chunk_prefix ^ Manifest.chunk_key chunk in
-                let* data = Primary.get ~key:ck () in
-                let n = String.length data in
-                Metrics.add_downloaded n;
-                (match Hashtbl.find_opt active_downloads key with
-                  | Some (done_, total) ->
-                      Hashtbl.replace active_downloads key (done_ + n, total)
-                  | None -> ());
-                (* pwrite: positioned writes have no shared fd offset, so
-                   concurrent chunk writes to the same fd are safe. *)
-                let base = chunk.index * manifest.Manifest.chunk_size in
-                let len = n in
-                let rec loop pos =
-                  if pos >= len then Lwt.return_unit
-                  else
-                    let* n =
-                      Lwt_unix_retry.pwrite_string fd data
-                        ~file_offset:(base + pos) pos (len - pos)
-                    in
-                    loop (pos + n)
-                in
-                loop 0))
-          manifest.Manifest.chunks)
-      (fun () ->
-        Hashtbl.remove active_downloads key;
-        Lwt_unix_retry.close fd)
-
-  let download_chunks ~key ~dst_path manifest =
-    assemble_chunks ~key ~manifest ~dst_path (primary ())
-
-  (* Fetch a single [chunk] and write it at its offset in [dst_path], which must
-     already exist sized to the full file. Used for demand-paged reads; bounded
-     by the same pool as full downloads. *)
-  let download_chunk ~dst_path ~chunk_size ~(chunk : Manifest.chunk_entry) =
+  (* Fetch one chunk body by content key. The pool bounds concurrent GETs the
+     same way for a demand-paged read as for a whole-file download. *)
+  let get_chunk ~chunk_key =
     Lwt_pool.use chunk_download_pool (fun () ->
         let (module Primary : Backend.S) = primary () in
-        let ck = C.chunk_prefix ^ Manifest.chunk_key chunk in
-        let* data = Primary.get ~key:ck () in
-        let n = String.length data in
-        Metrics.add_downloaded n;
-        let* fd = Lwt_unix_retry.openfile dst_path [Unix.O_WRONLY] 0o644 in
-        Lwt.finalize
-          (fun () ->
-            let base = chunk.index * chunk_size in
-            let rec loop pos =
-              if pos >= n then Lwt.return_unit
-              else
-                let* w =
-                  Lwt_unix_retry.pwrite_string fd data ~file_offset:(base + pos)
-                    pos (n - pos)
-                in
-                loop (pos + w)
-            in
-            loop 0)
-          (fun () -> Lwt_unix_retry.close fd))
-
-  let download ~key ~dst_path =
-    let (module Primary : Backend.S) = primary () in
-    let* body = St.get_manifest_opt ~key in
-    match body with
-      | None -> Lwt.fail (Backend.Backend_error ("not found: " ^ key))
-      | Some body -> (
-          match Manifest.of_string body with
-            | `Dirty -> Lwt.return_none
-            | `Clean manifest as state ->
-                let+ () =
-                  assemble_chunks ~key ~manifest ~dst_path (module Primary)
-                in
-                Some state)
+        let+ data = Primary.get ~key:(C.chunk_prefix ^ chunk_key) () in
+        Metrics.add_downloaded (String.length data);
+        data)
 end
 
 (* The inode layout is what every path-keyed caller wants. *)

@@ -7,73 +7,58 @@ type recheck_report = {
   chunks_unrepairable : int;  (** missing/bad remotely, no local data *)
   manifest_repaired : bool;  (** remote manifest re-published *)
   manifest_bad : bool;  (** remote manifest wrong but not repairable *)
-  local_stale : bool;  (** re-hash disagreed with the local sidecar *)
 }
 
 module type S = sig
   (** Upload [src_path] as chunks under [key]: each chunk is read, hashed (chunk
-      key) and uploaded if absent, then the manifest is written. [reuse index]
-      returning [Some e] marks chunk [index] unchanged from a prior manifest —
-      it is neither read nor uploaded and keeps entry [e] (demand-paged edits);
-      the default rehashes every chunk (whole-file upload). Setting [cancel]
-      aborts at the next chunk boundary with {!Cancelled}. *)
+      key) and uploaded if absent, then the manifest is written. For a file
+      handed over whole — import, and the FileProvider's re-import. Setting
+      [cancel] aborts at the next chunk boundary with {!Cancelled}. *)
   val upload :
     key:string ->
     src_path:string ->
     mtime:float ->
     chunk_size:int ->
-    ?reuse:(int -> Manifest.chunk_entry option) ->
     ?cancel:bool ref ->
     unit ->
     Manifest.state Lwt.t
 
-  (** Download chunks described by [manifest] to [dst_path], without fetching
-      the manifest key itself. Used when the manifest is already known locally
-      (evicted files, conflict copies). [key] is used only for progress tracking
-      via {!get_download_progress}. *)
-  val download_chunks :
-    key:string -> dst_path:string -> Manifest.t -> unit Lwt.t
+  (** Fetch one chunk body from the primary backend by its content key
+      ([Manifest.chunk_key], without the domain's chunk prefix). *)
+  val get_chunk : chunk_key:string -> string Lwt.t
 
-  (** Fetch a single [chunk] and write it at its offset
-      ([chunk.index * chunk_size]) in [dst_path], which must already exist sized
-      to the full file. Used for demand-paged reads. *)
-  val download_chunk :
-    dst_path:string ->
+  (** Upload a file whose bytes the caller supplies per chunk, then publish its
+      manifest. [source index] is either [`Reuse e] — an unchanged chunk,
+      neither read nor sent, keeping entry [e] — or [`Data bytes]. Knowing
+      nothing about where those bytes come from keeps local staging out of this
+      module. An empty file still yields one empty chunk. [cancel] aborts at the
+      next chunk boundary with {!Cancelled}, unpublishing the manifest if it
+      already went. *)
+  val upload_chunks :
+    key:string ->
+    name:string ->
+    size:int64 ->
     chunk_size:int ->
-    chunk:Manifest.chunk_entry ->
-    unit Lwt.t
-
-  (** [Some (bytes_done, total_bytes)] while a download for [key] is in flight;
-      [None] otherwise. *)
-  val get_download_progress : string -> (int * int) option
+    mtime:float ->
+    source:(int -> [ `Reuse of Manifest.chunk_entry | `Data of string ] Lwt.t) ->
+    ?cancel:bool ref ->
+    unit ->
+    Manifest.state Lwt.t
 
   (** Fetch only the manifest for [key] from the primary backend. Returns [None]
       if the key does not exist or is not a manifest. *)
   val fetch_manifest : key:string -> unit -> Manifest.state option Lwt.t
 
-  (** Download [key] to [dst_path] from the primary backend. Returns
-      [Some state] if the object is a chunked manifest, [None] for plain
-      objects. *)
-  val download : key:string -> dst_path:string -> Manifest.state option Lwt.t
-
-  (** Recheck a file whose data is in the local cache: re-hash [src_path] chunk
-      by chunk, verify each chunk remotely (HEAD + size) and re-upload the wrong
-      ones, then verify/republish the remote manifest. Returns the freshly
-      computed manifest state so the caller can refresh the sidecar;
-      [local_stale] is set when the re-hash disagrees with [sidecar]. *)
-  val recheck_cached :
+  (** Recheck a file from its manifest: verify every chunk it names remotely
+      (HEAD + size), re-uploading the wrong ones from [local_body] when the
+      local chunk store has them, then republish a missing or wrong remote
+      manifest when every chunk checks out. Local integrity is a separate matter
+      — see {!Chunk_cache.verify}. *)
+  val recheck_from_manifest :
     key:string ->
-    src_path:string ->
-    mtime:float ->
-    sidecar:Manifest.t ->
-    unit ->
-    (Manifest.state * recheck_report) Lwt.t
-
-  (** Recheck an evicted file from its sidecar manifest: verify each chunk
-      remotely (HEAD + size). Chunks cannot be repaired without local data; a
-      missing/bad remote manifest is republished from the sidecar when all
-      chunks check out. *)
-  val recheck_evicted : key:string -> Manifest.t -> recheck_report Lwt.t
+    local_body:(Manifest.chunk_entry -> string option Lwt.t) ->
+    Manifest.t ->
+    recheck_report Lwt.t
 end
 
 (** Keys are mapped to backend keys through [L]. Callers holding real paths want

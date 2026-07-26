@@ -10,35 +10,40 @@ module Make (C : Conf.S) = struct
   module F = File.Make (C) (Sq)
   module Ih = Ipc_handler.Make (C) (F)
   module Sp = Sync_poller.Make (C) (F)
+  module Mf = Manifest.Make (C)
 
-  (* Best-effort cache-cap enforcement: nudged after each upload (a fresh write
-     just added data) and swept periodically to catch download-driven growth.
-     Only runs when the domain sets [max_cache]. *)
-  let cache_cap_interval = 60.
+  (* Periodic housekeeping: keep the chunk store under the cap (nudged after each
+     upload too, but downloads grow it as well) and drop handoff copies a frontend
+     never claimed. *)
+  let housekeeping_interval = 60.
 
   let start ?on_changed ~on_cursor ~on_upload_done () =
-    let* () = Local.init ~cache_root:C.cache_root ~domain_name:C.domain_name in
+    let* () = Mf.init () in
     Sq.start
       ~upload:(fun ~key ~cancel -> F.upload ~cancel key)
       ~on_cursor
       ~on_upload_done:(fun ~key ->
         let* () = on_upload_done ~key in
-        F.enforce_cache_cap ());
+        F.enforce_chunk_cap ());
+    (* Anything the staged tree still owes predates this process: queue it before
+       serving, so a file edited before a crash is not left looking unsynced. The
+       queue must be running first — recovery goes through it, for the journal
+       entry and cursor bump an upload owes. *)
+    let* () = F.recover_staged () in
     Sp.start ?on_changed ();
-    (match C.max_cache with
-      | None -> ()
-      | Some _ ->
-          Lwt.async (fun () ->
-              let rec loop () =
-                let* () = Lwt_unix.sleep cache_cap_interval in
-                let* () =
-                  Lwt.catch F.enforce_cache_cap (fun exn ->
-                      Log.err "cache cap sweep: %s" (Printexc.to_string exn);
-                      Lwt.return_unit)
-                in
-                loop ()
-              in
-              loop ()));
+    Lwt.async (fun () ->
+        let sweep what f =
+          Lwt.catch f (fun exn ->
+              Log.err "%s: %s" what (Printexc.to_string exn);
+              Lwt.return_unit)
+        in
+        let rec loop () =
+          let* () = Lwt_unix.sleep housekeeping_interval in
+          let* () = sweep "chunk cap sweep" F.enforce_chunk_cap in
+          let* () = sweep "handoff reap" F.reap_handoff in
+          loop ()
+        in
+        loop ());
     Lwt.return_unit
 
   let drain = Sq.drain

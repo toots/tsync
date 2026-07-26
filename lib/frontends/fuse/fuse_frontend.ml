@@ -1,7 +1,5 @@
 let implementation = "fuse"
-
-let is_local ~cache_root ~domain_name ~domain_prefix key =
-  Sys.file_exists (Local.cache_path ~cache_root ~domain_name ~domain_prefix key)
+let is_local = Manifest.is_local
 
 let rec mkdir_p path =
   if not (Sys.file_exists path) then begin

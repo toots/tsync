@@ -28,24 +28,27 @@ type step =
   | RevertVersion of { path : string; version : string option }
       (** Restore a saved version to the live location. [version] selects a
           timestamp; [None] restores the most recent. Content is not fetched. *)
-  | Open of string
   | Close of string
-      (** Track the file as open/closed, the way the FUSE layer does around user
-          file handles. Foreign ops must never touch an open file. *)
-  | OpenRead of string
-      (** Fault a file in for reading the way FUSE [fopen] does — demand-page it
-          (sparse file + residency, no download) and mark it open. *)
+      (** Handle closed, the way FUSE [release] does: queue the upload a file
+          with staged edits owes, and nothing otherwise. *)
   | ReadRange of { path : string; offset : int; len : int }
       (** Read [len] bytes at [offset], fetching only the chunks they need, and
           print the bytes returned. *)
   | WriteAt of { path : string; offset : int; content : string }
-      (** Write [content] at [offset] through the demand-paged write path
-          (read-modify-write of a partially-touched chunk, per-chunk dirty). *)
-  | Release of string
-      (** Last-handle close policy (queue upload / evict / persist). *)
-  | ShowResidency of string
-      (** Print the file's per-chunk residency (present/absent/dirty), size and
-          [cached] flag, from its sidecar. *)
+      (** Write [content] at [offset] through the staged write path
+          (read-modify-write of a partially covered chunk). *)
+  | Truncate of { path : string; size : int }
+      (** Resize the file, up or down. *)
+  | ShowChunks of string
+      (** Print what backs the file — published chunk count, or staged slots as
+          [S] (written locally) / [I] (still inherited) / [Z] (a hole from a
+          grow) — plus how many of its chunks are in the local chunk store. *)
+  | ShowChunkCache
+      (** Print the whole chunk store's footprint: [chunks=n bytes=b]. *)
+  | ShowNames of string
+      (** Print the entry names a readdir serves for a directory ([""] for the
+          domain root), subdirectories with a trailing slash. A file with only
+          staged edits must appear; internal markers must not. *)
   | Mark
       (** Record the current time, usable later as an [Expire "mark"] cutoff. *)
   | Expire of string
@@ -69,15 +72,24 @@ type step =
           garbage of the wrong size. *)
   | DeleteRemoteManifest of string
       (** Delete the file's manifest object from the backend. *)
-  | DirtyWrite of { path : string; content : string }
-      (** Local write not yet uploaded, the way the FUSE layer leaves a file
-          between write and close: local data plus a [Dirty] sidecar. *)
-  | ModifyCache of { path : string; content : string }
-      (** Change the local cached data behind the daemon's back; the sidecar
-          still describes the old content. *)
+  | StageWrite of { path : string; content : string }
+      (** Replace the file's content locally with no upload queued — unsynced
+          edits, the way a writer leaves a file between write and close. *)
+  | CorruptCachedChunk of { path : string; index : int }
+      (** Overwrite a cached chunk body with garbage behind the daemon's back,
+          so it no longer hashes to its own name. *)
+  | DeleteCachedChunk of { path : string; index : int }
+      (** Delete a cached chunk body behind the daemon's back, as the cache cap
+          may at any moment. *)
   | Recheck
       (** Run [Recheck.run] over the whole domain and print each file's status
-          line plus a summary. *)
+          line plus a summary, then the chunk-store integrity pass. *)
+  | RecoverStaged
+      (** Replay every upload the staged tree still owes, the way a restart does
+          after a crash. *)
+  | ClearCache
+      (** Wipe the local cache the way a full resync does — manifest mirror,
+          chunk store, scratch and handoff — keeping only the staged tree. *)
   | OnSecondary of step
       (** Apply a backend-damage step (delete/corrupt chunk, delete manifest) to
           the secondary backend instead of the primary. *)

@@ -1,0 +1,16 @@
+published                  published size=24 chunks=3         cached=3 "abcdefghijklmnopqrstuvwx"
+write 2B into chunk 1      staged size=24 slots=[ISI]         cached=3 "abcdefghiZZlmnopqrstuvwx"
+overwrite chunk 2 whole    staged size=24 slots=[ISS]         cached=3 "abcdefghiZZlmnopQRSTUVWX"
+append past EOF            staged size=26 slots=[ISSS]        cached=3 "abcdefghiZZlmnopQRSTUVWX!!"
+append across a chunk boundary staged size=34 slots=[ISSSS]       cached=3 "abcdefghiZZlmnopQRSTUVWX!!!!!!!!!!"
+truncate to 10             staged size=10 slots=[IS]          cached=3 "abcdefghiZ"
+grow to 20                 staged size=20 slots=[ISZ]         cached=3 "abcdefghiZ\000\000\000\000\000\000\000\000\000\000"
+edit chunk 0               staged size=24 slots=[SSZ]         cached=3 "ABCDEFGHiZ\000\000\000\000\000\000\000\000\000\000\000\000\000\000"
+after sync                 published size=24 chunks=3         cached=6 "ABCDEFGHiZ\000\000\000\000\000\000\000\000\000\000\000\000\000\000"
+edit 2B of chunk 0         staged size=24 slots=[SII]         cached=6 "XYCDEFGHiZ\000\000\000\000\000\000\000\000\000\000\000\000\000\000"
+chunk objects added by a 1-chunk edit: 1
+replayed promotion         published size=24 chunks=3         cached=8 "XYCDEFGH01234567\000\000\000\000\000\000\000\000"
+bytes uploaded by replay: 0
+re-uploaded without the commit record published size=24 chunks=3         cached=9 "XYCDEFGH01234567\000\000\000\000\000\000\000\000"
+bytes uploaded by re-upload: 0
+create (O_TRUNC)           staged size= 0 slots=[]            cached=9 ""

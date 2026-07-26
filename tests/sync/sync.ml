@@ -135,7 +135,6 @@ let open_file_guard =
       [
         B (Write { path = "foo.txt"; content = "old content" });
         B Drain;
-        B (Open "foo.txt");
         A (Write { path = "foo.txt"; content = "NEW CONTENT, MUCH LONGER" });
         A Drain;
         B Sync;
@@ -153,7 +152,6 @@ let open_file_guard_closed =
       [
         B (Write { path = "foo.txt"; content = "old content" });
         B Drain;
-        B (Open "foo.txt");
         A (Write { path = "foo.txt"; content = "NEW CONTENT, MUCH LONGER" });
         A Drain;
         B (Close "foo.txt");

@@ -52,7 +52,7 @@ let () =
           [
             Write { path = "file.bin"; content = "uploaded" };
             Drain;
-            DirtyWrite { path = "file.bin"; content = "modified locally" };
+            StageWrite { path = "file.bin"; content = "modified locally" };
             ExportDir;
           ];
       };

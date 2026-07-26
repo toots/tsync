@@ -1,0 +1,14 @@
+cold                         present=false gets=0 in_flight=0
+after 2 concurrent ensures   present=true  gets=1 in_flight=0
+cached read                  body="first chunk body" gets=1
+layout                       testdom/chunks/aa/aa11bb22-cc33dd44
+read after eviction          body="first chunk body" gets=2
+forced refetch               present=true  gets=3 in_flight=0
+second key                   body="second"           gets=1
+layout                       testdom/chunks/ee/ee55ff66-0077
+missing chunk                Backend.Backend_error("no such chunk: deadbeef-deadbeef") in_flight=0
+uncapped                     chunks=2 bytes=22 aa11bb22-cc33dd44=true  ee55ff66-0077=true
+cap=none (no-op)             chunks=2 bytes=22 aa11bb22-cc33dd44=true  ee55ff66-0077=true
+cap=20 (drops coldest)       chunks=1 bytes= 6 aa11bb22-cc33dd44=false ee55ff66-0077=true
+refetch after cap            body="first chunk body" gets=4
+cap=0 (drops all)            chunks=0 bytes= 0 aa11bb22-cc33dd44=false ee55ff66-0077=false

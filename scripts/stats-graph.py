@@ -24,8 +24,7 @@ SERIES = [
     ("hashesPerSec", "hashes/s", "Rates"),
     ("pendingUploads", "pending up", "Queues"),
     ("pendingDownloads", "pending down", "Queues"),
-    ("dirtyFiles", "dirty", "Queues"),
-    ("openFiles", "open", "Queues"),
+    ("stagedFiles", "unsynced", "Queues"),
     ("cpuPercent", "cpu", "CPU %"),
     ("rssMB", "rss", "Memory (MB)"),
 ]
