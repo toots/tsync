@@ -55,10 +55,14 @@ let agent_plist label =
     (Filename.concat "Library/LaunchAgents" (label ^ ".plist"))
 
 let sh fmt = Printf.ksprintf (fun cmd -> Sys.command cmd = 0) fmt
-let restart_app () = sh "launchctl kickstart -k \"gui/$(id -u)/%s\"" app_label
+
+let restart_app () =
+  sh "launchctl kickstart -k \"gui/$(id -u)/%s\" 2>/dev/null" app_label
 
 let write_marker ?contents name =
-  let path = Filename.concat (Runtime.default_paths ()).Runtime.data_dir name in
+  let dir = (Runtime.default_paths ()).Runtime.data_dir in
+  ignore (sh "mkdir -p %s" (Filename.quote dir));
+  let path = Filename.concat dir name in
   let oc = open_out_gen [Open_append; Open_creat; Open_wronly] 0o600 path in
   Option.iter (output_string oc) contents;
   close_out oc;
@@ -83,10 +87,6 @@ let reset (module C : Conf.S) =
 let purge (_ : (module Conf.S)) =
   let paths = Runtime.default_paths () in
   let marker = write_marker "fileprovider-purge" in
-  if not (restart_app ()) then (
-    Sys.remove marker;
-    Printf.eprintf "purge failed: could not restart TsyncApp\n";
-    exit 1);
   let rec wait attempts =
     if not (Sys.file_exists marker) then true
     else if attempts = 0 then false
@@ -94,7 +94,13 @@ let purge (_ : (module Conf.S)) =
       Unix.sleepf 0.5;
       wait (attempts - 1))
   in
-  if not (wait 60) then (
+  (* Without the app there is no agent to bounce and no domain left registered
+     (only the app can register one), so a re-run after an interrupted purge
+     falls through to the teardown rather than failing on the missing service. *)
+  if not (restart_app ()) then (
+    Sys.remove marker;
+    print_endline "TsyncApp is not running: skipping domain unregistration")
+  else if not (wait 60) then (
     Printf.eprintf
       "purge failed: TsyncApp did not unregister its domains (see Console for \
        com.toots.tsync)\n";
