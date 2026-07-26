@@ -7,8 +7,9 @@
    Content is served through {!File} instantiated over {!Layout.Identity}, so a
    share manifest's backend key is used directly as a file key and reads
    demand-page through the ordinary local cache: an HTTP range fetches only the
-   chunks it covers, and nothing is ever assembled into the store. Cold data is
-   reclaimed by the existing cache cap like any other cached file. *)
+   chunks it covers, and nothing is ever assembled into the store. That cache is
+   private to share serving and reclaimed by age ({!reap}), not by the mount's
+   path-keyed cache cap. *)
 
 open Lwt.Syntax
 
@@ -83,8 +84,86 @@ let preview_kinds_json =
 module Make (C : Conf.S) = struct
   module Sq = Sync_queue.Make (C)
 
+  (* Share keys are inode-space, not real paths, so their cache entries must not
+     land in the domain's mirror: the sidecars would read as phantom entries in
+     listings ([tsync ls], readdir), and the mirror-keyed cache cap cannot see
+     them anyway. They get their own subtree, reclaimed by {!reap} below. *)
+  module Cache_conf = struct
+    include C
+
+    let domain_name = C.domain_name ^ "/shares"
+  end
+
   (* Never started: shares only ever read. *)
-  module F = File.Make_with_layout (C) (Sq) (Layout.Identity)
+  module F = File.Make_with_layout (Cache_conf) (Sq) (Layout.Identity)
+
+  (* ── Share cache expiry ────────────────────────────────────────────────────
+     Cached share data is a pure copy of backend content, so dropping it costs
+     only a refetch: everything untouched for [cache_ttl] goes.
+     ponytail: mtime-based, and mtime only advances when a new chunk is paged in,
+     so a hot fully-cached file is dropped at the ttl and fetched again. Track
+     access times here if that refetch ever matters. *)
+
+  let cache_ttl = 3600.
+  let sweep_interval = 600.
+  let cache_dir = Filename.concat C.cache_root Cache_conf.domain_name
+
+  let quiet f =
+    Lwt.catch f (function
+      | Unix.Unix_error _ -> Lwt.return_unit
+      | exn -> Lwt.fail exn)
+
+  (* Delete files last modified before [cutoff], pruning directories left empty.
+     [true] when [path] has no entries left. *)
+  let rec reap ~cutoff path =
+    let* names = Fs_util.readdir_list path in
+    let+ kept =
+      Lwt_list.fold_left_s
+        (fun kept name ->
+          let child = Filename.concat path name in
+          let* is_dir = Fs_util.is_directory child in
+          if is_dir then
+            let* empty = reap ~cutoff child in
+            if empty then
+              let+ () = quiet (fun () -> Lwt_unix.rmdir child) in
+              kept
+            else Lwt.return (kept + 1)
+          else
+            let* mtime =
+              Lwt.catch
+                (fun () ->
+                  let+ st = Lwt_unix.stat child in
+                  Some st.Unix.st_mtime)
+                (fun _ -> Lwt.return_none)
+            in
+            match mtime with
+              | Some m when m < cutoff ->
+                  let+ () = quiet (fun () -> Lwt_unix.unlink child) in
+                  kept
+              | _ -> Lwt.return (kept + 1))
+        0 names
+    in
+    kept = 0
+
+  let start_expiry () =
+    Lwt.async (fun () ->
+        let rec loop () =
+          let* () =
+            Lwt.catch
+              (fun () ->
+                let* exists = Fs_util.is_directory cache_dir in
+                if not exists then Lwt.return_unit
+                else
+                  let+ _ = reap ~cutoff:(Unix.time () -. cache_ttl) cache_dir in
+                  ())
+              (fun exn ->
+                Log.err "share cache sweep: %s" (Printexc.to_string exn);
+                Lwt.return_unit)
+          in
+          let* () = Lwt_unix.sleep sweep_interval in
+          loop ()
+        in
+        loop ())
 
   let primary () =
     match C.backends with

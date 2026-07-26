@@ -104,3 +104,9 @@ unzip -t: ok
 member: testdom/hello.txt
 member: testdom/sub/
 member: testdom/sub/inner.txt
+
+=== share cache expiry
+domain data mirror: absent
+cached: 4 files
+nothing aged: 4 files
+all aged: 0 files (empty: true)

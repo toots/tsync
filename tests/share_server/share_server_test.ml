@@ -226,4 +226,28 @@ let () =
           print_endline ("member: " ^ input_line ic)
         done
       with End_of_file -> close_in ic);
+
+     (* ── Cache expiry ─────────────────────────────────────────────────────── *)
+     (* Everything served above cached under the share subtree, leaving the
+        domain's own mirror untouched, and the whole subtree is reclaimable by
+        age. *)
+     let rec count dir =
+       Array.fold_left
+         (fun n name ->
+           let p = Filename.concat dir name in
+           if Sys.is_directory p then n + count p else n + 1)
+         0 (Sys.readdir dir)
+     in
+     Printf.printf "\n=== share cache expiry\n";
+     Printf.printf "domain data mirror: %s\n"
+       (if
+          Sys.file_exists
+            (Cache_layout.cached_dir ~cache_root:C.cache_root C.domain_name)
+        then "polluted"
+        else "absent");
+     Printf.printf "cached: %d files\n" (count Sh.cache_dir);
+     let* _ = Sh.reap ~cutoff:0. Sh.cache_dir in
+     Printf.printf "nothing aged: %d files\n" (count Sh.cache_dir);
+     let* empty = Sh.reap ~cutoff:(Unix.time () +. 1.) Sh.cache_dir in
+     Printf.printf "all aged: %d files (empty: %b)\n" (count Sh.cache_dir) empty;
      Lwt.return_unit)
