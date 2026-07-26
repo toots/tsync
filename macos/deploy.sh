@@ -28,7 +28,25 @@ rm -rf /Applications/TsyncApp.app
 cp -R "$BUILT_APP" /Applications/
 
 echo "Starting..."
-/usr/libexec/PlistBuddy -c "Set :ProgramArguments:0 /Applications/TsyncApp.app/Contents/MacOS/TsyncApp" "$PLIST"
+mkdir -p "$(dirname "$PLIST")"
+cat > "$PLIST" <<EOF
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.toots.tsync</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>/Applications/TsyncApp.app/Contents/MacOS/TsyncApp</string>
+    </array>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+</dict>
+</plist>
+EOF
 pluginkit -a /Applications/TsyncApp.app/Contents/PlugIns/TsyncFileProvider.appex
 pluginkit -e use -i com.toots.tsync.fileprovider
 launchctl load -w "$PLIST"
