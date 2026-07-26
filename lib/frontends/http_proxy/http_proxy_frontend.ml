@@ -93,6 +93,7 @@ type op =
   | Copy of string * string
   | List_all of string * int option
   | List_dir of string
+  | Share_url of string
   | Bad
 
 let parse_op meth uri body =
@@ -131,6 +132,8 @@ let parse_op meth uri body =
               List_all (prefix, Option.bind (q "max_keys") int_of_string_opt)
           | Some "dir", Some prefix -> List_dir prefix
           | _ -> Bad)
+    | `GET, "/share-url" -> (
+        match q "prefix" with Some prefix -> Share_url prefix | None -> Bad)
     | _ -> Bad
 
 (* The domain a request targets is the route whose [domain_root] prefixes the
@@ -140,7 +143,7 @@ let route_key = function
   | Delete_multi (k :: _) -> Some k
   | Delete_multi [] -> None
   | Copy (src, _) -> Some src
-  | List_all (p, _) | List_dir p -> Some p
+  | List_all (p, _) | List_dir p | Share_url p -> Some p
   | Bad -> None
 
 let respond ?(status = `OK) ?(headers = []) body =
@@ -224,6 +227,26 @@ let exec route op ~body =
         let module B = (val route.primary : Backend.S) in
         let* result = B.list_directory ~prefix () in
         respond (Http_proxy.Wire.list_dir_to_json result)
+    | Share_url prefix ->
+        if route.serve_share <> None then
+          (* We serve them: the client composes the URL from the address it
+             already reaches us on, since TLS termination leaves us without a
+             reliable view of our own public URL. *)
+          respond (Yojson.Safe.to_string (`Assoc [("self", `Bool true)]))
+        else (
+          (* We don't, but a backing store may — an s3 with a configured
+             shareUrl. Pass its absolute URL straight through. *)
+          let rec find = function
+            | [] -> respond ~status:`Not_found ""
+            | (module B : Backend.S) :: rest -> (
+                let* u = B.share_url ~prefix () in
+                match u with
+                  | Some url ->
+                      respond
+                        (Yojson.Safe.to_string (`Assoc [("url", `String url)]))
+                  | None -> find rest)
+          in
+          find route.all_backends)
     | Bad -> respond ~status:`Bad_request "bad request"
 
 (* Share manifests are written outside every domain root ([shares_prefix] is

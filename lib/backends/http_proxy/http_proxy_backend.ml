@@ -2,7 +2,11 @@ open Lwt.Syntax
 
 exception Cancelled = Backend.Cancelled
 
-type t = { base_uri : Uri.t; secret : string; shares : bool }
+type t = {
+  base_uri : Uri.t;
+  secret : string;
+  mutable share_url_cache : string option Lwt.t option;
+}
 
 let max_attempts = 8
 
@@ -142,15 +146,43 @@ let list_directory t ~prefix () =
   if is_ok resp then Http_proxy.Wire.list_dir_of_json body
   else raise (backend_error "list_directory" (code resp) body)
 
-(* The proxy serves shares off its own listener, so the base URL is just the
-   configured proxy URL — no round trip, and nothing to memoize. *)
-let share_url t ~prefix:_ () =
-  Lwt.return
-    (if t.shares then Some (Uri.to_string (Uri.with_path t.base_uri "/s"))
-     else None)
+(* Whether shares are exposed is the proxy's own setting, so ask it rather than
+   mirroring it in client config where the two could disagree. The proxy answers
+   yes/no only: it sits behind TLS termination and does not reliably know its own
+   public URL, whereas [base_uri] is exactly the URL this client reaches it on. *)
+let query_share_url t ~prefix =
+  let uri =
+    Uri.with_query' (Uri.with_path t.base_uri "/share-url") [("prefix", prefix)]
+  in
+  let+ resp, body = call_retry t ~meth:`GET "share_url" uri in
+  if is_ok resp then (
+    match Yojson.Safe.from_string body with
+      | exception _ -> None
+      | j -> (
+          match
+            (Yojson.Safe.Util.member "url" j, Yojson.Safe.Util.member "self" j)
+          with
+            (* A backing store serves them: absolute URL, use as given. *)
+            | `String url, _ -> Some url
+            (* The proxy serves them itself, off the address we reach it on. *)
+            | _, `Bool true ->
+                Some (Uri.to_string (Uri.with_path t.base_uri "/s"))
+            | _ -> None))
+  else if code resp = 404 then None
+  else raise (backend_error "share_url" (code resp) body)
 
-let make ~url ~secret ~shares : (module Backend.S) =
-  let t = { base_uri = Uri.of_string url; secret; shares } in
+(* Fixed for the life of the process: query once and memoize the promise, so
+   concurrent callers share the single request. *)
+let share_url t ~prefix () =
+  match t.share_url_cache with
+    | Some p -> p
+    | None ->
+        let p = query_share_url t ~prefix in
+        t.share_url_cache <- Some p;
+        p
+
+let make ~url ~secret : (module Backend.S) =
+  let t = { base_uri = Uri.of_string url; secret; share_url_cache = None } in
   (module struct
     let put ~key ~data () = put t ~key ~data ()
     let get ~key () = get t ~key ()
@@ -181,13 +213,6 @@ let spec =
         default = None;
         secret = true;
       };
-      {
-        name = "shares";
-        label = "Proxy serves share links";
-        typ = `Bool;
-        default = Some "false";
-        secret = false;
-      };
     ]
 
 let () =
@@ -197,9 +222,4 @@ let () =
       | None -> failwith ("http-proxy backend: missing field: " ^ key)
   in
   Backend.register ~spec "http-proxy" (fun get ->
-      let shares =
-        match get "shares" with
-          | Some ("true" | "1") -> true
-          | Some _ | None -> false
-      in
-      make ~url:(req get "url") ~secret:(req get "secret") ~shares)
+      make ~url:(req get "url") ~secret:(req get "secret"))

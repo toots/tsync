@@ -79,4 +79,24 @@ let () =
   assert (pick "tsync/shares/deadbeef" "nobody" = None);
   assert (pick "elsewhere/x" "one" = None);
 
+  (* Specs are what [tsync configure] prompts from, so a field missing here is
+     silently unconfigurable. [shares] is declared on the frontend only: the
+     client asks the proxy over /share-url rather than mirroring the setting,
+     so a second copy in backend config could only drift out of agreement. *)
+  let has_field name specs =
+    List.exists (fun (s : Backend.field_spec) -> s.name = name) specs
+  in
+  let backend_spec =
+    match Backend.spec_for "http-proxy" with
+      | Some s -> s
+      | None -> failwith "http-proxy backend not registered"
+  in
+  assert (has_field "url" backend_spec);
+  assert (has_field "secret" backend_spec);
+  assert (not (has_field "shares" backend_spec));
+  assert (
+    List.exists
+      (fun (s : Frontend.field_spec) -> s.name = "shares")
+      (Frontend.spec_for "http-proxy"));
+
   print_endline "http_proxy_test ok"
