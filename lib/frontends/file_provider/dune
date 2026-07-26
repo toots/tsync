@@ -9,4 +9,5 @@
   tsync_runtime
   tsync_conf
   tsync_core
+  unix
   yojson))
