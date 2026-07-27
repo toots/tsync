@@ -35,16 +35,32 @@ let bodies =
 let gets : (string, int) Hashtbl.t = Hashtbl.create 8
 let count ck = Option.value ~default:0 (Hashtbl.find_opt gets ck)
 
+(* How many GETs are in the fetcher at once, and the high-water mark since the
+   last [watch_overlap]. Counting overlap is what shows whether a group's members
+   are fetched concurrently, and unlike elapsed time it does not depend on how
+   loaded the machine is. *)
+let in_fetch = ref 0
+let peak_in_fetch = ref 0
+let watch_overlap () = peak_in_fetch := !in_fetch
+
 module Fetch = struct
-  (* Deliberately slow: without a yield inside the fetch, a "concurrent" pair
-     would run to completion one after the other and dedup would pass
-     trivially. *)
+  (* Deliberately slow: without a yield inside the fetch, concurrent callers
+     would each run to completion in turn, so dedup would pass trivially and no
+     overlap would be observable. *)
   let get_chunk ~chunk_key =
     Hashtbl.replace gets chunk_key (count chunk_key + 1);
-    let* () = Lwt_unix.sleep 0.05 in
-    match List.assoc_opt chunk_key bodies with
-      | Some b -> Lwt.return b
-      | None -> Lwt.fail (Backend.Backend_error ("no such chunk: " ^ chunk_key))
+    incr in_fetch;
+    if !in_fetch > !peak_in_fetch then peak_in_fetch := !in_fetch;
+    Lwt.finalize
+      (fun () ->
+        let* () = Lwt_unix.sleep 0.05 in
+        match List.assoc_opt chunk_key bodies with
+          | Some b -> Lwt.return b
+          | None ->
+              Lwt.fail (Backend.Backend_error ("no such chunk: " ^ chunk_key)))
+      (fun () ->
+        decr in_fetch;
+        Lwt.return_unit)
 end
 
 module C : Conf.S = struct
@@ -179,13 +195,13 @@ let () =
      (* ── Grouped: three stored chunks, one cache file ─────────────────────── *)
      (* One cache miss costs one GET per member, and lands as a single file. *)
      let* () = show "trio cold" trio in
-     let started = Unix.gettimeofday () in
+     watch_overlap ();
      let* () = show_body "trio member 0" trio 0 in
-     (* Those three GETs run concurrently, each writing its own offset, so the
-        miss costs about one 50 ms sleep. A bound keeps the snapshot off the
-        clock; it sits between the cost of one sleep and of three. *)
-     Printf.printf "%-28s one_get_not_three=%b\n" "trio fetch concurrency"
-       (Unix.gettimeofday () -. started < 0.10);
+     (* All three members are in the fetcher at once, each writing its own offset,
+        so the miss costs about one round trip. Serial fetching would peak at 1. *)
+     Printf.printf "%-28s peak_concurrent_gets=%d of %d\n"
+       "trio fetch concurrency" !peak_in_fetch
+       (Chunk_group.member_count trio);
      Printf.printf "%-28s %s\n" "layout" (rel (path trio));
      Printf.printf "%-28s bytes=%d members=%d\n" "trio body"
        (Chunk_group.bytes trio)

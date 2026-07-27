@@ -8,7 +8,7 @@ second key                   body="second"           gets=1
 layout                       testdom/chunks/3d/3daa2a13ce7216c7-a62bfe2b997ff6a9
 trio cold                    present=false gets=0 in_flight=0
 trio member 0                body="AAAA"             gets=3
-trio fetch concurrency       one_get_not_three=true
+trio fetch concurrency       peak_concurrent_gets=3 of 3
 layout                       testdom/chunks/f2/f2816b06404b734b-effdaa3fc72ceaa1
 trio body                    bytes=10 members=3
 trio member 1 (cached)       body="BBBB"             gets=3
