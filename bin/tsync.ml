@@ -1486,10 +1486,14 @@ let print_conf_cmd =
         Printf.printf "  versioning: %b\n" d.versioning;
         Printf.printf "  read_only:  %b\n" d.read_only;
         Printf.printf "  symlinks:   %s\n" (symlink_str d.symlink_policy);
-        Printf.printf "  chunkSize:  %s\n"
-          (Conf_parsing.format_size d.chunk_size);
-        Printf.printf "  cacheChunk: %s\n"
-          (Conf_parsing.format_size d.cache_chunk_size);
+        let show_size label = function
+          | Some n ->
+              Printf.printf "  %-11s %s\n" (label ^ ":")
+                (Conf_parsing.format_size n)
+          | None -> ()
+        in
+        show_size "chunkSize" d.chunk_size;
+        show_size "cacheChunk" d.cache_chunk_size;
         Printf.printf "  maxCache:   %s\n"
           (match d.max_cache with
             | Some n -> Conf_parsing.format_size n

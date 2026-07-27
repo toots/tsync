@@ -247,8 +247,17 @@ let make_conf ?domain ?socket_path ?(tier = true) ?source cfg : (module Conf.S)
     let socket_path = socket_path
     let max_uploads = cfg.Conf_parsing.max_uploads
     let max_downloads = cfg.Conf_parsing.max_downloads
-    let chunk_size = d.Conf_parsing.chunk_size
-    let cache_chunk_size = d.Conf_parsing.cache_chunk_size
+
+    let chunk_size =
+      Option.value d.Conf_parsing.chunk_size
+        ~default:Conf_parsing.default_chunk_size
+
+    (* Unset means no grouping: one cache chunk per stored chunk, which is what a
+       domain that barely reads through the chunk cache wants anyway (the
+       FileProvider hands over whole files). *)
+    let cache_chunk_size =
+      Option.value d.Conf_parsing.cache_chunk_size ~default:chunk_size
+
     let max_cache = d.Conf_parsing.max_cache
     let symlink_policy = d.Conf_parsing.symlink_policy
     let read_only = d.Conf_parsing.read_only

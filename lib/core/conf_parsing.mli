@@ -27,11 +27,13 @@ type domain = {
   symlink_policy : [ `Keep | `Follow | `Skip ];
   versioning : bool;
   read_only : bool;
-  chunk_size : int;  (** chunk size (bytes) for newly uploaded files *)
-  cache_chunk_size : int;
+  chunk_size : int option;
+      (** chunk size (bytes) for newly uploaded files; [None] when the config
+          does not say, i.e. [default_chunk_size] *)
+  cache_chunk_size : int option;
       (** cache chunk size (bytes): consecutive stored chunks are grouped into
-          local cache files of about this size. Defaults to [chunk_size], i.e.
-          no grouping *)
+          local cache files of about this size. [None] when the config does not
+          say, i.e. [chunk_size] and no grouping *)
   max_cache : int option;
       (** soft cap (bytes) on local cache usage; [None] = unbounded *)
 }

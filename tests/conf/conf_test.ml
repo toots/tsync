@@ -69,18 +69,18 @@ let () =
       extra
   in
   let d = domain (with_sizes {|"chunkSize": "1M", "cacheChunkSize": "64M",|}) in
-  assert (d.Conf_parsing.chunk_size = 1024 * 1024);
-  assert (d.Conf_parsing.cache_chunk_size = 64 * 1024 * 1024);
+  assert (d.Conf_parsing.chunk_size = Some (1024 * 1024));
+  assert (d.Conf_parsing.cache_chunk_size = Some (64 * 1024 * 1024));
   let d = domain (with_sizes {|"cacheChunkSize": 4096,|}) in
-  assert (d.Conf_parsing.cache_chunk_size = 4096);
-  assert (d.Conf_parsing.chunk_size = Conf_parsing.default_chunk_size);
-  (* Omitted, it follows chunkSize: one cache chunk per stored chunk, no
-     grouping. A domain that does not read through the chunk cache (the
-     FileProvider hands over whole files) never has to set it. *)
-  let d = domain (with_sizes {|"chunkSize": "2M",|}) in
-  assert (d.Conf_parsing.cache_chunk_size = d.Conf_parsing.chunk_size);
+  assert (d.Conf_parsing.cache_chunk_size = Some 4096);
+  (* An absent size stays absent rather than being resolved to a default here:
+     that is what lets `tsync print-config` show only what the config says, and
+     what lets a domain that does not care (the FileProvider hands over whole
+     files, so it barely reads through the chunk cache) leave both out. *)
+  assert (d.Conf_parsing.chunk_size = None);
   let d = domain (with_sizes "") in
-  assert (d.Conf_parsing.cache_chunk_size = Conf_parsing.default_chunk_size);
+  assert (d.Conf_parsing.chunk_size = None);
+  assert (d.Conf_parsing.cache_chunk_size = None);
 
   Unix.putenv "TSYNC_CONFIG_JSON" "";
   print_endline "conf_test ok"
