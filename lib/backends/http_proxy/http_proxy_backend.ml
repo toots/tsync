@@ -2,9 +2,35 @@ open Lwt.Syntax
 
 exception Cancelled = Backend.Cancelled
 
+(* Connections are pooled per endpoint rather than established per request. A
+   full resync fetches one object per manifest — tens of thousands — and a
+   one-shot client pays a DNS lookup, a TCP handshake and a TLS handshake for
+   every one of them, which caps throughput at a few dozen objects a second and
+   leaves thousands of sockets in TIME_WAIT. Reuse makes the handshake a
+   per-connection cost instead of a per-request one. *)
+module Connection = Cohttp_lwt.Connection.Make (Cohttp_lwt_unix.Net)
+
+module Cache =
+  Cohttp_lwt.Connection_cache.Make
+    (Connection)
+    (struct
+      let sleep_ns ns = Lwt_unix.sleep (Int64.to_float ns /. 1e9)
+    end)
+
+(* Idle connections are held for a minute: long enough to span the gaps between
+   the bursts a sync or a demand-paged read arrives in, short enough that an
+   idle client is not holding sockets open on the proxy indefinitely. *)
+let keep_idle_ns = 60_000_000_000L
+
+(* Concurrent connections to one endpoint. The caller's own parallelism (the
+   resync pool, the download pool) is what actually bounds work; this only has
+   to be wide enough not to become the narrower limit. *)
+let max_parallel = 32
+
 type t = {
   base_uri : Uri.t;
   secret : string;
+  cache : Cache.t;
   mutable share_url_cache : string option Lwt.t option;
   mutable chunk_size_cache : int option Lwt.t option;
 }
@@ -27,9 +53,7 @@ let call t ~meth ?(body = "") uri =
          ~path:resource ~body)
   in
   let* resp, rbody =
-    Cohttp_lwt_unix.Client.call ~headers
-      ~body:(Cohttp_lwt.Body.of_string body)
-      meth uri
+    Cache.call t.cache ~headers ~body:(Cohttp_lwt.Body.of_string body) meth uri
   in
   let+ s = Cohttp_lwt.Body.to_string rbody in
   (resp, s)
@@ -208,6 +232,7 @@ let make ~url ~secret : (module Backend.S) =
     {
       base_uri = Uri.of_string url;
       secret;
+      cache = Cache.create ~keep:keep_idle_ns ~parallel:max_parallel ();
       share_url_cache = None;
       chunk_size_cache = None;
     }
