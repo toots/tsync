@@ -90,7 +90,7 @@ let read_file path =
 
 let count_chunks () =
   let (module B : Backend.S) = Local_backend.make ~root:backend_root in
-  let+ entries = B.list_all ~prefix:C.chunk_prefix () in
+  let+ entries = B.list_prefix ~prefix:C.chunk_prefix () in
   List.length
     (List.filter
        (fun (e : Backend.file_entry) ->

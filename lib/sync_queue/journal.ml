@@ -29,24 +29,8 @@ let get_client_uuid ~share_dir =
             close_in ic;
             String.trim s)
           else (
-            let buf = Bytes.create 16 in
-            let fd = Unix.openfile "/dev/urandom" [Unix.O_RDONLY] 0 in
-            ignore (Unix.read fd buf 0 16);
-            Unix.close fd;
-            let hex = Buffer.create 32 in
-            for i = 0 to Bytes.length buf - 1 do
-              Buffer.add_string hex
-                (Printf.sprintf "%02x" (Char.code (Bytes.get buf i)))
-            done;
-            let uuid = Buffer.contents hex in
-            let rec mkdir_p path =
-              if not (Sys.file_exists path) then begin
-                mkdir_p (Filename.dirname path);
-                try Unix.mkdir path 0o700
-                with Unix.Unix_error (Unix.EEXIST, _, _) -> ()
-              end
-            in
-            mkdir_p share_dir;
+            let uuid = Id.token 16 in
+            Fs_util.mkdir_p_sync ~perm:0o700 share_dir;
             let oc = open_out uuid_file in
             output_string oc uuid;
             close_out oc;
@@ -151,32 +135,16 @@ let decode s =
 let pending_dir ~share_dir ~domain =
   Filename.concat (Filename.concat share_dir "journal-pending") domain
 
-let rec mkdir_p dir =
-  let open Lwt.Syntax in
-  let* exists = Lwt_unix_retry.file_exists dir in
-  if exists then Lwt.return_unit
-  else
-    let* () = mkdir_p (Filename.dirname dir) in
-    Lwt.catch
-      (fun () -> Lwt_unix_retry.mkdir dir 0o700)
-      (function
-        | Unix.Unix_error (Unix.EEXIST, _, _) -> Lwt.return_unit
-        | e -> Lwt.fail e)
-
 let write_local_pending ~share_dir ~domain ~entry_key ops =
   let open Lwt.Syntax in
   let dir = pending_dir ~share_dir ~domain in
-  let* () = mkdir_p dir in
+  let* () = Fs_util.mkdir_p dir in
   Lwt_unix_retry.with_file ~mode:Lwt_io.Output (Filename.concat dir entry_key)
     (fun oc -> Lwt_io.write oc (encode ops))
 
 let delete_local_pending ~share_dir ~domain ~entry_key =
-  Lwt.catch
-    (fun () ->
-      Lwt_unix_retry.unlink
-        (Filename.concat (pending_dir ~share_dir ~domain) entry_key))
-    (function
-      | Unix.Unix_error (Unix.ENOENT, _, _) -> Lwt.return_unit | e -> Lwt.fail e)
+  Fs_util.unlink_quiet
+    (Filename.concat (pending_dir ~share_dir ~domain) entry_key)
 
 let local_pending_entries ~share_dir ~domain ~uuid =
   let open Lwt.Syntax in
@@ -184,11 +152,10 @@ let local_pending_entries ~share_dir ~domain ~uuid =
   let* exists = Lwt_unix_retry.file_exists dir in
   if not exists then Lwt.return_nil
   else
-    let* names = Lwt_stream.to_list (Lwt_unix.files_of_directory dir) in
+    let* names = Fs_util.readdir_list dir in
     names
     |> List.filter (fun name ->
-        name <> "." && name <> ".."
-        && try client_uuid_of_filename name = uuid with _ -> false)
+        try client_uuid_of_filename name = uuid with _ -> false)
     |> List.sort String.compare
     |> Lwt_list.filter_map_s (fun name ->
         let path = Filename.concat dir name in

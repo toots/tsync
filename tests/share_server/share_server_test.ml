@@ -71,7 +71,7 @@ let hello_body = "hello world, this spans several chunks\n"
 let inner_body = "inner file contents\n"
 
 let build_fixture () =
-  (* Pin the subfolder id: [Folder_ids.resolve] would mint a random one. *)
+  (* Pin the subfolder id: [Folder_ids.ensure_id] would mint a random one. *)
   let* () =
     Folder_ids.write ~cache_root:C.cache_root ~domain_name:C.domain_name "sub"
       { Folder.name = "sub"; id = "subid" }

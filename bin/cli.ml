@@ -38,12 +38,6 @@ let iter_pooled ?(parallelism = 32) f xs =
   in
   loop xs
 
-let rec mkdir_p path =
-  if not (Sys.file_exists path) then begin
-    mkdir_p (Filename.dirname path);
-    try Unix.mkdir path 0o755 with Unix.Unix_error (Unix.EEXIST, _, _) -> ()
-  end
-
 let runtime_paths = Runtime.default_paths ()
 
 (* Which frontend serves a domain: the [frontend] override if given (must be one
@@ -257,3 +251,19 @@ let make_conf ?domain ?socket_path ?(tier = true) ?source cfg : (module Conf.S)
       Filename.concat runtime_paths.Runtime.data_dir
         ("notify-" ^ d.Conf_parsing.name ^ ".sock")
   end : Conf.S)
+
+(* ── Command scaffolding ─────────────────────────────────────────────────────
+   Every domain-scoped command declares the same option and opens by loading the
+   config and building one domain's conf. Declared once here rather than a dozen
+   times over. *)
+
+let domain_arg =
+  Arg.(
+    value
+    & opt (some string) None
+    & info ["domain"] ~docv:"NAME" ~doc:"Domain name (default: from config)")
+
+let load_config () = Conf_parsing.load runtime_paths.Runtime.config_path
+
+let load_conf ?domain ?tier ?source () =
+  make_conf ?domain ?tier ?source (load_config ())

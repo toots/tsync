@@ -12,6 +12,17 @@ module type S = sig
       the parent's namespace) and the marker's JSON body — or [None] for layouts
       with no folder tree. Lets resync reconstruct the directory structure. *)
   val folder_marker : string -> (string * string) option Lwt.t
+
+  (** Just the marker's backend key. Unlike {!folder_marker} this resolves only
+      the parent, never the folder's own id — the caller that moves or removes a
+      marker does so once the local directory has already gone, and resolving an
+      id mints and persists one, recreating it. *)
+  val folder_marker_key : string -> string option Lwt.t
+
+  (** The id naming a directory's own namespace. Callers moving a folder around
+      (rmdir into the trash) need it on its own, without the marker body
+      {!folder_marker} builds. *)
+  val folder_id : string -> string Lwt.t
 end
 
 (* Inode scheme: [manifests/<parent_folder_id>/<hash(leaf)>]. The parent folder
@@ -22,42 +33,50 @@ module Inode = struct
   module Make (C : Conf.S) : S = struct
     open Lwt.Syntax
 
-    let resolve rel =
-      Folder_ids.resolve ~cache_root:C.cache_root ~domain_name:C.domain_name rel
+    (* Minting one when the folder has no marker yet — see {!Folder_ids}. *)
+    let ensure_id rel =
+      Folder_ids.ensure_id ~cache_root:C.cache_root ~domain_name:C.domain_name
+        rel
 
-    (* Logical key -> domain-relative real path. *)
-    let rel_of key =
-      if String.starts_with ~prefix:C.domain_prefix key then (
-        let n = String.length C.domain_prefix in
-        String.sub key n (String.length key - n))
-      else key
+    let rel_of = Key.strip_prefix ~domain_prefix:C.domain_prefix
 
-    let chop_slash s =
-      if String.ends_with ~suffix:"/" s then String.sub s 0 (String.length s - 1)
-      else s
-
-    let parent rel = match Filename.dirname rel with "." -> "" | d -> d
+    (* Backend key of [leaf] within its parent folder's namespace. *)
+    let child_key ~folder_id leaf =
+      C.domain_prefix ^ Folder.child_key ~folder_id leaf
 
     let manifest_key key =
       let rel = rel_of key in
-      if String.ends_with ~suffix:"/" rel then
+      if Key.is_dir rel then
         (* a directory prefix maps to the folder's own namespace *)
-        let+ id = resolve (chop_slash rel) in
+        let+ id = ensure_id (Key.chop_slash rel) in
         C.domain_prefix ^ id ^ "/"
       else
-        let+ pid = resolve (parent rel) in
-        C.domain_prefix
-        ^ Folder.child_key ~folder_id:pid (Filename.basename rel)
+        let+ pid = ensure_id (Key.parent rel) in
+        child_key ~folder_id:pid (Filename.basename rel)
+
+    let folder_id key = ensure_id (Key.chop_slash (rel_of key))
+
+    (* Only the parent is resolved: a caller wanting the marker's key alone must
+       not touch the folder's own id, because resolving one mints and persists
+       it — recreating a local directory that has just been renamed away. *)
+    let folder_marker_key key =
+      let rel = Key.chop_slash (rel_of key) in
+      if rel = "" then Lwt.return_none
+      else
+        let+ pid = ensure_id (Key.parent rel) in
+        Some (child_key ~folder_id:pid (Filename.basename rel))
 
     let folder_marker key =
-      let rel = chop_slash (rel_of key) in
-      if rel = "" then Lwt.return_none
-      else (
-        let leaf = Filename.basename rel in
-        let* pid = resolve (parent rel) in
-        let+ id = resolve rel in
-        let bkey = C.domain_prefix ^ Folder.child_key ~folder_id:pid leaf in
-        Some (bkey, Folder.marker_to_string { Folder.name = leaf; id }))
+      let rel = Key.chop_slash (rel_of key) in
+      let* bkey = folder_marker_key key in
+      match bkey with
+        | None -> Lwt.return_none
+        | Some bkey ->
+            let+ id = ensure_id rel in
+            Some
+              ( bkey,
+                Folder.marker_to_string
+                  { Folder.name = Filename.basename rel; id } )
   end
 end
 
@@ -68,4 +87,8 @@ end
 module Identity : S = struct
   let manifest_key key = Lwt.return key
   let folder_marker _ = Lwt.return_none
+  let folder_marker_key _ = Lwt.return_none
+
+  (* The key already names the namespace; there is no path to resolve. *)
+  let folder_id key = Lwt.return (Filename.basename (Key.chop_slash key))
 end

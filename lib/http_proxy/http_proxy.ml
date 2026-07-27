@@ -68,42 +68,4 @@ module Wire = struct
     match Yojson.Safe.from_string s with
       | `List l -> List.map file_entry_of_json l
       | _ -> failwith "expected a JSON array of entries"
-
-  (* list_directory returns (files, subdirs-with-optional-mtime). *)
-  let list_dir_to_json (files, dirs) =
-    Yojson.Safe.to_string
-      (`Assoc
-         [
-           ("files", `List (List.map file_entry_to_json files));
-           ( "dirs",
-             `List
-               (List.map
-                  (fun (name, mtime) ->
-                    `Assoc
-                      [
-                        ("name", `String name);
-                        ( "mtime",
-                          match mtime with Some t -> `Float t | None -> `Null );
-                      ])
-                  dirs) );
-         ])
-
-  let list_dir_of_json s =
-    let open Yojson.Safe.Util in
-    let json = Yojson.Safe.from_string s in
-    let files =
-      json |> member "files" |> to_list |> List.map file_entry_of_json
-    in
-    let dirs =
-      json |> member "dirs" |> to_list
-      |> List.map (fun d ->
-          let name = d |> member "name" |> to_string in
-          let mtime =
-            match d |> member "mtime" with
-              | `Null -> None
-              | t -> Some (to_number t)
-          in
-          (name, mtime))
-    in
-    (files, dirs)
 end

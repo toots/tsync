@@ -25,7 +25,7 @@ let start_cmd =
   let run mount tls =
     Log.Daemon.init ();
     Log.debug "loading config from %s" runtime_paths.Runtime.config_path;
-    let cfg = Conf_parsing.load runtime_paths.Runtime.config_path in
+    let cfg = load_config () in
     (* CLI --tls wins over the config value applied by make_conf. *)
     if tls <> None then Tls_conf.apply tls;
     Log.debug "TLS backend: %s (available: %s)" (Tls_conf.current ())
@@ -110,7 +110,7 @@ let stop_cmd =
        shares one), so stop each domain's socket. Frontends without an IPC socket
        (http-proxy) aren't reached here — systemd's SIGTERM stops that group. A
        socket that's absent or unconnectable just means that part isn't running. *)
-    let cfg = Conf_parsing.load runtime_paths.Runtime.config_path in
+    let cfg = load_config () in
     let sockets =
       List.sort_uniq compare
         (List.map
@@ -255,20 +255,6 @@ let restore_cmd =
     (Cmd.info "restore" ~doc:"Download evicted files or directories")
     Term.(const run $ path_arg)
 
-(* ── tsync pull ──────────────────────────────────────────────────────────── *)
-
-let pull_cmd =
-  let path_arg =
-    Arg.(value & pos 0 (some string) None & info [] ~docv:"PATH")
-  in
-  let force_arg =
-    Arg.(value & flag & info ["force"] ~doc:"Restore even if already cached")
-  in
-  let run _path _force = Printf.eprintf "pull: not yet implemented\n" in
-  Cmd.v
-    (Cmd.info "pull" ~doc:"Download all evicted files")
-    Term.(const run $ path_arg $ force_arg)
-
 (* ── tsync ls ────────────────────────────────────────────────────────────── *)
 
 let ls_cmd =
@@ -279,12 +265,6 @@ let ls_cmd =
     Arg.(
       value & flag
       & info ["deleted"; "d"] ~doc:"Also list deleted files in the directory")
-  in
-  let domain_arg =
-    Arg.(
-      value
-      & opt (some string) None
-      & info ["domain"] ~docv:"NAME" ~doc:"Domain name (default: from config)")
   in
   let frontend_arg =
     Arg.(
@@ -297,7 +277,7 @@ let ls_cmd =
   let run path show_deleted domain frontend =
     Lwt_main.run
       (let open Lwt.Syntax in
-       let cfg = Conf_parsing.load runtime_paths.Runtime.config_path in
+       let cfg = load_config () in
        let domain =
          match domain with Some _ -> domain | None -> read_default_domain ()
        in
@@ -333,12 +313,10 @@ let ls_cmd =
                dp ^ rel
        in
        let module Mf = Manifest.Make (C) in
-       let* files, subdirs = Mf.list_directory ~prefix () in
-       let dp_len = String.length C.domain_prefix in
+       let module Bk = Backends.Make (C) in
+       let* files, subdirs = Mf.list_children ~prefix () in
        let file_name (e : Backend.file_entry) =
-         if String.length e.key > dp_len then
-           String.sub e.key dp_len (String.length e.key - dp_len)
-         else e.key
+         Key.strip_prefix ~domain_prefix:C.domain_prefix e.key
        in
        (* Directories and files interleaved, alphabetized (case-insensitive). *)
        let items =
@@ -364,20 +342,20 @@ let ls_cmd =
          items;
        if show_deleted then begin
          (* Versioned paths in this directory with no live manifest. *)
-         let (module B : Backend.S) = List.hd C.backends in
+         let (module B : Backend.S) = Bk.primary () in
          let reldir =
-           let r = String.sub prefix dp_len (String.length prefix - dp_len) in
-           if String.ends_with ~suffix:"/" r then
-             String.sub r 0 (String.length r - 1)
-           else r
+           Key.chop_slash
+             (Key.strip_prefix ~domain_prefix:C.domain_prefix prefix)
          in
          let seen = Hashtbl.create 16 in
          (* Versions of files in this directory share its folder id. *)
          let* fid =
-           Folder_ids.resolve ~cache_root:C.cache_root
+           Folder_ids.ensure_id ~cache_root:C.cache_root
              ~domain_name:C.domain_name reldir
          in
-         let* entries = B.list_all ~prefix:(C.versions_prefix ^ fid ^ "/") () in
+         let* entries =
+           B.list_prefix ~prefix:(C.versions_prefix ^ fid ^ "/") ()
+         in
          Lwt_list.iter_s
            (fun (e : Backend.file_entry) ->
              (* Version keys are hashed; the real path is in the version body. *)
@@ -420,24 +398,17 @@ let versions_cmd =
   let path_arg =
     Arg.(value & pos 0 (some string) None & info [] ~docv:"PATH")
   in
-  let domain_arg =
-    Arg.(
-      value
-      & opt (some string) None
-      & info ["domain"] ~docv:"NAME" ~doc:"Domain name (default: from config)")
-  in
   let run path domain =
     Lwt_main.run
       (let open Lwt.Syntax in
-       let cfg = Conf_parsing.load runtime_paths.Runtime.config_path in
-       let (module C : Conf.S) = make_conf ?domain cfg in
+       let (module C : Conf.S) = load_conf ?domain () in
        let module St = Store.Make (C) (Layout.Inode.Make (C)) in
-       let (module B : Backend.S) = List.hd C.backends in
+       let (module B : Backend.S) = St.primary () in
        let parse = Versioning.parse ~versions_prefix:C.versions_prefix in
        match path with
          | Some rel ->
              let* dir = St.version_dir ~key:(C.domain_prefix ^ rel) in
-             let+ entries = B.list_all ~prefix:dir () in
+             let+ entries = B.list_prefix ~prefix:dir () in
              let versions =
                entries
                |> List.filter_map (fun (e : Backend.file_entry) ->
@@ -460,7 +431,7 @@ let versions_cmd =
              let latest = Hashtbl.create 64
              and count = Hashtbl.create 64
              and sample = Hashtbl.create 64 in
-             let* entries = B.list_all ~prefix:C.versions_prefix () in
+             let* entries = B.list_prefix ~prefix:C.versions_prefix () in
              List.iter
                (fun (e : Backend.file_entry) ->
                  match parse e.key with
@@ -553,22 +524,16 @@ let purge_cmd =
 
 (* ── tsync trash / untrash ───────────────────────────────────────────────── *)
 
-let trash_domain_arg =
-  Arg.(
-    value
-    & opt (some string) None
-    & info ["domain"] ~docv:"NAME" ~doc:"Domain name (default: from config)")
-
 let trash_markers (module B : Backend.S) domain_prefix =
-  B.list_all ~prefix:(domain_prefix ^ Folder.trash_id ^ "/") ()
+  B.list_prefix ~prefix:(domain_prefix ^ Folder.trash_id ^ "/") ()
 
 let trash_cmd =
   let run domain =
     Lwt_main.run
       (let open Lwt.Syntax in
-       let cfg = Conf_parsing.load runtime_paths.Runtime.config_path in
-       let (module C : Conf.S) = make_conf ?domain cfg in
-       let (module B : Backend.S) = List.hd C.backends in
+       let (module C : Conf.S) = load_conf ?domain () in
+       let module Bk = Backends.Make (C) in
+       let (module B : Backend.S) = Bk.primary () in
        let* markers = trash_markers (module B) C.domain_prefix in
        Lwt_list.iter_s
          (fun (e : Backend.file_entry) ->
@@ -580,7 +545,7 @@ let trash_cmd =
   in
   Cmd.v
     (Cmd.info "trash" ~doc:"List trashed folders")
-    Term.(const run $ trash_domain_arg)
+    Term.(const run $ domain_arg)
 
 let untrash_cmd =
   let path_arg =
@@ -589,9 +554,10 @@ let untrash_cmd =
   let run path domain =
     Lwt_main.run
       (let open Lwt.Syntax in
-       let cfg = Conf_parsing.load runtime_paths.Runtime.config_path in
-       let (module C : Conf.S) = make_conf ?domain cfg in
-       let (module B : Backend.S) = List.hd C.backends in
+       let (module C : Conf.S) = load_conf ?domain () in
+       let module L = Layout.Inode.Make (C) in
+       let module St = Store.Make (C) (L) in
+       let (module B : Backend.S) = St.primary () in
        let* markers = trash_markers (module B) C.domain_prefix in
        let* found =
          Lwt_list.filter_map_s
@@ -612,37 +578,21 @@ let untrash_cmd =
              (* Re-attach the folder under its original parent's namespace; the
                 subtree is untouched, so this is O(1). Its local mirror copy is
                 rebuilt by a subsequent full sync. *)
-             let par = match Filename.dirname path with "." -> "" | d -> d in
-             let* pid =
-               Folder_ids.resolve ~cache_root:C.cache_root
-                 ~domain_name:C.domain_name par
-             in
-             let new_key =
-               C.domain_prefix
-               ^ Folder.child_key ~folder_id:pid (Filename.basename path)
-             in
+             let* new_key = L.folder_marker_key (C.domain_prefix ^ path) in
+             let new_key = Option.get new_key in
              let marker =
                Folder.marker_to_string
                  { Folder.name = m.Folder.name; id = m.Folder.id }
              in
-             let* () =
-               Lwt_list.iter_s
-                 (fun (module Bk : Backend.S) ->
-                   Bk.put ~key:new_key ~data:marker ())
-                 C.backends
-             in
-             let* () =
-               Lwt_list.iter_s
-                 (fun (module Bk : Backend.S) -> Bk.delete ~key:trash_key ())
-                 C.backends
-             in
+             let* () = St.put_raw ~bkey:new_key ~data:marker in
+             let* () = St.delete_raw ~bkey:trash_key in
              Printf.printf
                "restored %s — run 'tsync sync' to rebuild it locally\n" path;
              Lwt.return_unit)
   in
   Cmd.v
     (Cmd.info "untrash" ~doc:"Restore a trashed folder (see: tsync trash)")
-    Term.(const run $ path_arg $ trash_domain_arg)
+    Term.(const run $ path_arg $ domain_arg)
 
 (* ── tsync expire ────────────────────────────────────────────────────────── *)
 
@@ -672,18 +622,11 @@ let expire_cmd =
                }))
     with _ -> failwith ("invalid date (expected YYYY-MM-DD): " ^ s)
   in
-  let domain_arg =
-    Arg.(
-      value
-      & opt (some string) None
-      & info ["domain"] ~docv:"NAME" ~doc:"Domain name (default: from config)")
-  in
   let run date domain =
     match
       Lwt_main.run
         (let cutoff = parse_date date in
-         let cfg = Conf_parsing.load runtime_paths.Runtime.config_path in
-         let (module C : Conf.S) = make_conf ?domain cfg in
+         let (module C : Conf.S) = load_conf ?domain () in
          let module E = Expire.Make (C) in
          E.expire ~cutoff ())
     with
@@ -701,12 +644,6 @@ let expire_cmd =
 (* ── tsync sync ──────────────────────────────────────────────────────────── *)
 
 let sync_cmd =
-  let domain_arg =
-    Arg.(
-      value
-      & opt (some string) None
-      & info ["domain"] ~docv:"NAME" ~doc:"Domain name (default: from config)")
-  in
   let source_arg =
     Arg.(
       value
@@ -745,8 +682,7 @@ let sync_cmd =
     set_verbose v;
     Lwt_main.run
       (let open Lwt.Syntax in
-       let cfg = Conf_parsing.load runtime_paths.Runtime.config_path in
-       let (module C : Conf.S) = make_conf ?domain ?source cfg in
+       let (module C : Conf.S) = load_conf ?domain ?source () in
        let module J = Journal.Make (C) in
        let module Fs = File_store.Make (C) in
        let module St = Store.Make (C) (Layout.Inode.Make (C)) in
@@ -1047,18 +983,11 @@ let sync_cmd =
 (* ── tsync recheck ───────────────────────────────────────────────────────── *)
 
 let recheck_cmd =
-  let domain_arg =
-    Arg.(
-      value
-      & opt (some string) None
-      & info ["domain"] ~docv:"NAME" ~doc:"Domain name (default: from config)")
-  in
   let run domain =
     let code =
       Lwt_main.run
         (let open Lwt.Syntax in
-         let cfg = Conf_parsing.load runtime_paths.Runtime.config_path in
-         let (module C : Conf.S) = make_conf ?domain cfg in
+         let (module C : Conf.S) = load_conf ?domain () in
          let module Rc = Recheck.Make (C) in
          let* summary =
            Rc.run
@@ -1099,12 +1028,6 @@ let recheck_cmd =
 (* ── tsync resync-remote ─────────────────────────────────────────────────── *)
 
 let resync_remote_cmd =
-  let domain_arg =
-    Arg.(
-      value
-      & opt (some string) None
-      & info ["domain"] ~docv:"NAME" ~doc:"Domain name (default: from config)")
-  in
   let source_arg =
     Arg.(
       value
@@ -1128,7 +1051,7 @@ let resync_remote_cmd =
     let code =
       Lwt_main.run
         (let open Lwt.Syntax in
-         let cfg = Conf_parsing.load runtime_paths.Runtime.config_path in
+         let cfg = load_config () in
          let d = Conf_parsing.pick_domain ?domain cfg in
          (* Same ordering make_conf applies, so positions line up with
             C.backends. *)
@@ -1218,12 +1141,6 @@ let resync_remote_cmd =
 (* ── tsync import ────────────────────────────────────────────────────────── *)
 
 let import_cmd =
-  let domain_arg =
-    Arg.(
-      value
-      & opt (some string) None
-      & info ["domain"] ~docv:"NAME" ~doc:"Domain name (default: from config)")
-  in
   let src_arg =
     Arg.(
       required
@@ -1261,8 +1178,7 @@ let import_cmd =
     set_verbose v;
     Lwt_main.run
       (let open Lwt.Syntax in
-       let cfg = Conf_parsing.load runtime_paths.Runtime.config_path in
-       let (module C : Conf.S) = make_conf ?domain cfg in
+       let (module C : Conf.S) = load_conf ?domain () in
        let module I = Import.Make (C) in
        vprintf "importing from %s into domain %s" src C.domain_name;
        let+ summary =
@@ -1302,12 +1218,6 @@ let import_cmd =
 (* ── tsync export ────────────────────────────────────────────────────────── *)
 
 let export_cmd =
-  let domain_arg =
-    Arg.(
-      value
-      & opt (some string) None
-      & info ["domain"] ~docv:"NAME" ~doc:"Domain name (default: from config)")
-  in
   let dst_arg =
     Arg.(
       required
@@ -1319,8 +1229,7 @@ let export_cmd =
     let code =
       Lwt_main.run
         (let open Lwt.Syntax in
-         let cfg = Conf_parsing.load runtime_paths.Runtime.config_path in
-         let (module C : Conf.S) = make_conf ?domain cfg in
+         let (module C : Conf.S) = load_conf ?domain () in
          let module E = Export.Make (C) in
          vprintf "exporting domain %s to %s" C.domain_name dst;
          let+ summary =
@@ -1374,12 +1283,6 @@ let share_cmd =
       & info ["expires"] ~docv:"DUR"
           ~doc:"Link lifetime as $(b,<N>d) or $(b,<N>h) (default 7d)")
   in
-  let domain_arg =
-    Arg.(
-      value
-      & opt (some string) None
-      & info ["domain"] ~docv:"NAME" ~doc:"Domain name (default: from config)")
-  in
   let token_arg =
     Arg.(
       value
@@ -1400,7 +1303,7 @@ let share_cmd =
           Printf.eprintf "--token must be non-empty lowercase hex\n";
           exit 1
       | _ -> ());
-    let cfg = Conf_parsing.load runtime_paths.Runtime.config_path in
+    let cfg = load_config () in
     let domain =
       match domain with Some _ -> domain | None -> read_default_domain ()
     in
@@ -1471,7 +1374,7 @@ let print_conf_cmd =
     | `Skip -> "skip"
   in
   let run () =
-    let cfg = Conf_parsing.load runtime_paths.Runtime.config_path in
+    let cfg = load_config () in
     let default = read_default_domain () in
     Printf.printf "name:          %s\n" cfg.Conf_parsing.name;
     Printf.printf "maxUploads:    %d\n" cfg.Conf_parsing.max_uploads;
@@ -1555,7 +1458,7 @@ let set_domain_cmd =
       print_endline "Default domain cleared."
     end
     else begin
-      let cfg = Conf_parsing.load runtime_paths.Runtime.config_path in
+      let cfg = load_config () in
       let name = Option.get name in
       match
         List.find_opt
@@ -1566,7 +1469,7 @@ let set_domain_cmd =
             Printf.eprintf "Domain not found: %s\n" name;
             exit 1
         | Some _ ->
-            mkdir_p (Filename.dirname file);
+            Fs_util.mkdir_p_sync (Filename.dirname file);
             let oc = open_out file in
             output_string oc (name ^ "\n");
             close_out oc;
@@ -1615,14 +1518,8 @@ let build_config_cmd =
    only exist for frontends compiled into this binary (a link-time side effect),
    so e.g. `fileprovider` appears on macOS but not Linux. *)
 let frontend_cmds () =
-  let domain_arg =
-    Arg.(
-      value
-      & opt (some string) None
-      & info ["domain"] ~docv:"NAME" ~doc:"Domain name (default: from config)")
-  in
   let run name (command : Frontend.command) domain =
-    let cfg = Conf_parsing.load runtime_paths.Runtime.config_path in
+    let cfg = load_config () in
     let domain =
       match domain with Some _ -> domain | None -> read_default_domain ()
     in
@@ -1678,7 +1575,6 @@ let () =
          export_cmd;
          evict_cmd;
          restore_cmd;
-         pull_cmd;
          ls_cmd;
          share_cmd;
          versions_cmd;

@@ -83,11 +83,15 @@ module type S = sig
   val read_only : bool
 end
 
+(** The domain's effective cache chunk size, config value or built-in default.
+    One spelling, so no caller can pick a different default by accident. *)
+let cache_chunk_size (module C : S) =
+  Option.value C.cache_chunk_size ~default:default_cache_chunk_size
+
 let locality (module C : S) =
   {
     cache_root = C.cache_root;
     domain_name = C.domain_name;
     domain_prefix = C.domain_prefix;
-    cache_chunk_size =
-      Option.value C.cache_chunk_size ~default:default_cache_chunk_size;
+    cache_chunk_size = cache_chunk_size (module C);
   }

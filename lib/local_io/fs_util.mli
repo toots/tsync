@@ -6,6 +6,10 @@ val mkdir_p : string -> unit Lwt.t
 (** [mkdir_p] on the parent directory of [path]. *)
 val ensure_parent : string -> unit Lwt.t
 
+(** {!mkdir_p} for callers running before there is an Lwt loop: process startup,
+    the CLI, the config writer. *)
+val mkdir_p_sync : ?perm:int -> string -> unit
+
 (** [atomic_write path data] writes [data] to a uniquely named temp file in
     [path]'s directory, then renames it over [path]. Safe against concurrent
     writers of the same path, in this process or another. *)
@@ -25,6 +29,15 @@ val readdir_list : string -> string list Lwt.t
 
 (** [true] if [path] exists and is a directory (following symlinks). *)
 val is_directory : string -> bool Lwt.t
+
+(** [stat] as an option: [None] for a path that is absent or cannot be stat'd
+    for any other reason. *)
+val stat_opt : string -> Unix.stats option Lwt.t
+
+val stat_opt_large : string -> Unix.LargeFile.stats option Lwt.t
+
+(** Delete [path], ignoring a missing file or any other [Unix_error]. *)
+val unlink_quiet : string -> unit Lwt.t
 
 (** lstat-based classifier. Returns [`Dir], [`File], [`Symlink target], or
     [`Missing] on any error (dangling link, ENOENT, EACCES, …). *)

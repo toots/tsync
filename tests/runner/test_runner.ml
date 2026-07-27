@@ -1,12 +1,20 @@
 open Lwt.Syntax
 
-(* Cache chunk size for the scenarios: same as the stored chunk size unless a
-   test sets [TSYNC_CACHE_CHUNK_SIZE], so grouping is off by default and a test
-   that wants it opts in. *)
-let cache_chunk_size =
-  match Sys.getenv_opt "TSYNC_CACHE_CHUNK_SIZE" with
-    | Some s -> ( try int_of_string s with _ -> Manifest.chunk_size)
-    | None -> Manifest.chunk_size
+(* Stored chunk size for the scenarios. Forced small via [TSYNC_CHUNK_SIZE] so a
+   test can exercise multi-chunk files without multi-megabyte fixtures; each
+   scenario's conf sets it explicitly, and every manifest records its own, so
+   nothing outside the tests reads this. *)
+let env_int name ~default =
+  match Sys.getenv_opt name with
+    | Some s -> ( try int_of_string s with _ -> default)
+    | None -> default
+
+let chunk_size = env_int "TSYNC_CHUNK_SIZE" ~default:Conf.default_chunk_size
+
+(* Cache chunk size: the same as the stored chunk size unless a test sets
+   [TSYNC_CACHE_CHUNK_SIZE], so grouping is off by default and a test that wants
+   it opts in. *)
+let cache_chunk_size = env_int "TSYNC_CACHE_CHUNK_SIZE" ~default:chunk_size
 
 type step =
   | Write of { path : string; content : string }
@@ -223,6 +231,7 @@ type client = {
 let setup_client (module C : Conf.S) root staging_prefix =
   let module Sq = Sync_queue.Make (C) in
   let module F = File.Make (C) (Sq) in
+  let module Mf = Manifest.Make (C) in
   let module H = Ipc_handler.Make (C) (F) in
   let module Sp = Sync_poller.Make (C) (F) in
   let module J = Journal.Make (C) in
@@ -263,14 +272,7 @@ let setup_client (module C : Conf.S) root staging_prefix =
     let group =
       match resolved with
         | Some (`Published m) -> (
-            let specs = Manifest.specs_by_index m.Manifest.chunks in
-            let per =
-              Chunk_group.per_group ~chunk_size:m.Manifest.chunk_size
-                ~cache_chunk_size:
-                  (Option.value C.cache_chunk_size
-                     ~default:Conf.default_cache_chunk_size)
-            in
-            match Chunk_group.of_specs ~specs ~per index with
+            match Mf.group_at m index with
               | Some g -> g
               | None -> failwith "no such chunk")
         | _ -> failwith "no published manifest"
@@ -399,7 +401,7 @@ let setup_client (module C : Conf.S) root staging_prefix =
     | ShowNames p ->
         (* The entry names a readdir serves for this directory. *)
         let prefix = if p = "" then C.domain_prefix else key p ^ "/" in
-        let+ files, dirs = F.list_directory ~prefix in
+        let+ files, dirs = F.list_children ~prefix in
         let names =
           List.map
             (fun (e : Backend.file_entry) -> Filename.basename e.Backend.key)
@@ -789,7 +791,7 @@ let dump_backend_at ~backend_root ~domain_prefix ~chunk_prefix ~journal_prefix
     if String.length k > pfx then String.sub k pfx (String.length k - pfx)
     else k
   in
-  let* entries = B.list_all ~prefix:"" () in
+  let* entries = B.list_prefix ~prefix:"" () in
   (* Alias non-deterministic nanosecond version timestamps as stable per-file
      indices (<rel>#1, <rel>#2, …) ordered oldest-first. *)
   let version_alias = Hashtbl.create 16 in
@@ -918,7 +920,7 @@ let dump_backend_at ~backend_root ~domain_prefix ~chunk_prefix ~journal_prefix
    are then stable across runs, which keeps both the backend-key ordering and the
    snapshots reproducible (and makes the real ids readable in the dump). Each
    scenario re-seeds so it stays independent of the ones before it. *)
-let reset_ids () = Random.init 0x7c9c5
+let reset_ids () = Id.reseed 0x7c9c5
 
 let run_scenario ?(versioning = false) ?(symlink_policy = `Keep)
     ({ name; steps } : scenario) =
@@ -959,7 +961,7 @@ let run_scenario ?(versioning = false) ?(symlink_policy = `Keep)
     let notify_path = Filename.concat root "notify.sock"
     let max_uploads = 4
     let max_downloads = 8
-    let chunk_size = Some Manifest.chunk_size
+    let chunk_size = Some chunk_size
     let cache_chunk_size = Some cache_chunk_size
 
     let max_cache =
@@ -1036,7 +1038,7 @@ let run_two_client_scenario ?(versioning = false)
     let notify_path = Filename.concat root "notify-a.sock"
     let max_uploads = 4
     let max_downloads = 8
-    let chunk_size = Some Manifest.chunk_size
+    let chunk_size = Some chunk_size
     let cache_chunk_size = Some cache_chunk_size
 
     let max_cache =
@@ -1064,7 +1066,7 @@ let run_two_client_scenario ?(versioning = false)
     let notify_path = Filename.concat root "notify-b.sock"
     let max_uploads = 4
     let max_downloads = 8
-    let chunk_size = Some Manifest.chunk_size
+    let chunk_size = Some chunk_size
     let cache_chunk_size = Some cache_chunk_size
 
     let max_cache =
@@ -1140,7 +1142,7 @@ let make_conf ?(versioning = false) ~client_name ~backend_root ~cache_root
     let notify_path = notify_path
     let max_uploads = 4
     let max_downloads = 8
-    let chunk_size = Some Manifest.chunk_size
+    let chunk_size = Some chunk_size
     let cache_chunk_size = Some cache_chunk_size
 
     let max_cache =

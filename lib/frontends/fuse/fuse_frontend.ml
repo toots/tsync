@@ -1,19 +1,13 @@
 let implementation = "fuse"
 let is_local = Manifest.is_local
 
-let rec mkdir_p path =
-  if not (Sys.file_exists path) then begin
-    mkdir_p (Filename.dirname path);
-    try Unix.mkdir path 0o755 with Unix.Unix_error (Unix.EEXIST, _, _) -> ()
-  end
-
 (* Clear a stale mount left by a previous crash, then (re)create the mount point. *)
 let prepare_mount_point mount_point =
   ignore
     (Sys.command
        (Printf.sprintf "fusermount3 -uz %s 2>/dev/null"
           (Filename.quote mount_point)));
-  mkdir_p mount_point
+  Fs_util.mkdir_p_sync mount_point
 
 let mount_binding (b : Frontend.binding) =
   (* Leaf process (post-fork): safe to initialize Lwt now. *)

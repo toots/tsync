@@ -35,18 +35,6 @@ module Make (C : Conf.S) = struct
   module Mf = Manifest.Make (C)
   module Cc = Chunk_cache.Make (C) (R)
 
-  let cache_chunk_size =
-    Option.value C.cache_chunk_size ~default:Conf.default_cache_chunk_size
-
-  let per_of (m : Manifest.t) =
-    Chunk_group.per_group ~chunk_size:m.Manifest.chunk_size ~cache_chunk_size
-
-  (* Every cache chunk of a published manifest, as {!Chunk_group} sees them. *)
-  let groups_of (m : Manifest.t) =
-    Chunk_group.all
-      ~specs:(Manifest.specs_by_index m.Manifest.chunks)
-      ~per:(per_of m)
-
   (* The local half of a recheck: every member segment of every cache chunk must
      hash to the key it was published under. Manifest-driven, unlike the rest of
      the store's bookkeeping — a cache chunk holds several stored chunks, so its
@@ -67,13 +55,13 @@ module Make (C : Conf.S) = struct
                   else
                     let+ ok = Cc.verify_group ~group in
                     (checked + 1, if ok then dropped else dropped + 1))
-                acc (groups_of m)
+                acc (Mf.groups m)
           | Some `Dirty | None -> Lwt.return acc)
       (0, 0) rels
 
   (* Verification is manifest-driven: every chunk a file names must be intact on
      the backend. Local bytes are checked separately and wholesale by
-     {!Chunk_cache.verify} — content addressing makes that a stronger check than
+     {!Chunk_cache.verify_group} — content addressing makes that a stronger check than
      re-hashing one file's copy, and there is no assembled file to re-hash. *)
   let recheck_file rel =
     let key = C.domain_prefix ^ rel in
@@ -84,11 +72,9 @@ module Make (C : Conf.S) = struct
       match state with
         | None | Some `Dirty -> Lwt.return Unreadable
         | Some (`Clean m) ->
-            let specs = Manifest.specs_by_index m.Manifest.chunks in
-            let per = per_of m in
             let local_body (entry : Manifest.chunk_entry) =
               let index = entry.Manifest.index in
-              match Chunk_group.of_specs ~specs ~per index with
+              match Mf.group_at m index with
                 | Some group -> Cc.member_if_local ~group ~index
                 | None -> Lwt.return_none
             in

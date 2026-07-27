@@ -61,7 +61,7 @@ module type S = sig
       (HEAD + size), re-uploading the wrong ones from [local_body] when the
       local chunk store has them, then republish a missing or wrong remote
       manifest when every chunk checks out. Local integrity is a separate matter
-      — see {!Chunk_cache.verify}. *)
+      — see {!Chunk_cache.verify_group}. *)
   val recheck_from_manifest :
     key:string ->
     local_body:(Manifest.chunk_entry -> string option Lwt.t) ->

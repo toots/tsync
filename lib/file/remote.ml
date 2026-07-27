@@ -72,20 +72,12 @@ module type S = sig
 end
 
 module Make_with_layout (C : Conf.S) (L : Layout.S) : S = struct
-  let primary () =
-    match C.backends with
-      | [] -> failwith "no backends configured"
-      | b :: _ -> b
-
   (* Manifest reads/writes go through [St], which maps logical keys to backend
-     keys via the layout scheme. [rel_of] is the domain-relative real path
-     recorded in the manifest body. *)
+     keys via the layout scheme. *)
   module St = Store.Make (C) (L)
+  module Bk = Backends.Make (C)
 
-  let put_all ~key ~data () =
-    Lwt_list.iter_s
-      (fun (module B : Backend.S) -> B.put ~key ~data ())
-      C.backends
+  let primary = Bk.primary
 
   (* A bounded pool of chunk-sized buffers (this domain's configured chunk
      size), shared by every concurrent upload. Reusing a fixed set avoids a
@@ -186,7 +178,7 @@ module Make_with_layout (C : Conf.S) (L : Layout.S) : S = struct
         Lwt.return_unit)
       else (
         Metrics.add_uploaded size;
-        let+ () = put_all ~key:ck ~data () in
+        let+ () = Bk.put ~key:ck ~data in
         Hashtbl.replace known_chunks ck_rel ())
     in
     entry
@@ -208,56 +200,6 @@ module Make_with_layout (C : Conf.S) (L : Layout.S) : S = struct
           else Bytes.sub_string buf 0 size
         in
         put_chunk ~index ~data)
-
-  (* Whole-file upload: every chunk is read, hashed and sent unless the backend
-     already holds that content. For a file handed over as one file — import, and
-     the FileProvider's whole-file re-import. *)
-  let upload ~key ~src_path ~mtime ~chunk_size ?(cancel = ref false) () =
-    let* st = Lwt_unix_retry.stat src_path in
-    let file_size = st.Unix.st_size in
-    Log.debug "upload %s: file_size=%d" key file_size;
-    let num_chunks =
-      if file_size = 0 then 1 else (file_size + chunk_size - 1) / chunk_size
-    in
-    let* fd = Lwt_unix_retry.openfile src_path [Unix.O_RDONLY] 0 in
-    let* entries =
-      Lwt.finalize
-        (fun () ->
-          (* Launching every chunk's task up front is safe even for files
-             with thousands of chunks: each one immediately blocks on the
-             [chunk_buffers] pool until a slot is free, so real concurrency
-             stays capped at [max_uploads] regardless of how many chunks (or
-             how many other files' chunks) are contending for one. *)
-          Lwt_list.map_p
-            (upload_chunk fd ~cancel ~file_size ~chunk_size)
-            (List.init num_chunks Fun.id))
-        (fun () -> Lwt_unix_retry.close fd)
-    in
-    if !cancel then raise Cancelled;
-    let h1, h2 = Manifest.digest_of_chunks entries in
-    let state =
-      Manifest.make ~name:(Filename.basename key) ~h1 ~h2
-        ~size:(Int64.of_int file_size) ~chunk_size ~chunks:entries ~mtime
-    in
-    let* () = if C.versioning then St.save_version ~key else Lwt.return_unit in
-    Log.info "upload %s: publishing manifest, size=%d" key file_size;
-    let* () = St.put_manifest ~key ~data:(Manifest.to_string state) in
-    (* The upload may have been cancelled while the manifest put was in
-       flight (e.g. the file was renamed away mid-upload). Leaving the
-       manifest published would create a ghost object under a name that no
-       longer exists locally; undo it. Chunks stay: they are content-addressed
-       and referenced by the successor upload. *)
-    if !cancel then
-      let* () =
-        Lwt.catch
-          (fun () -> St.delete_manifest ~key)
-          (fun exn ->
-            Log.err "upload %s: cancelled-manifest cleanup failed: %s" key
-              (Printexc.to_string exn);
-            Lwt.return_unit)
-      in
-      raise Cancelled
-    else Lwt.return state
 
   (* Publish [entries] as [key]'s manifest: the tail every upload shares. A
      cancellation that lands while the put is in flight unpublishes it again —
@@ -284,6 +226,33 @@ module Make_with_layout (C : Conf.S) (L : Layout.S) : S = struct
       in
       raise Cancelled
     else Lwt.return state
+
+  (* Whole-file upload: every chunk is read, hashed and sent unless the backend
+     already holds that content. For a file handed over as one file — import, and
+     the FileProvider's whole-file re-import. *)
+  let upload ~key ~src_path ~mtime ~chunk_size ?(cancel = ref false) () =
+    let* st = Lwt_unix_retry.stat src_path in
+    let file_size = st.Unix.st_size in
+    Log.debug "upload %s: file_size=%d" key file_size;
+    let num_chunks =
+      if file_size = 0 then 1 else (file_size + chunk_size - 1) / chunk_size
+    in
+    let* fd = Lwt_unix_retry.openfile src_path [Unix.O_RDONLY] 0 in
+    let* entries =
+      Lwt.finalize
+        (fun () ->
+          (* Launching every chunk's task up front is safe even for files
+             with thousands of chunks: each one immediately blocks on the
+             [chunk_buffers] pool until a slot is free, so real concurrency
+             stays capped at [max_uploads] regardless of how many chunks (or
+             how many other files' chunks) are contending for one. *)
+          Lwt_list.map_p
+            (upload_chunk fd ~cancel ~file_size ~chunk_size)
+            (List.init num_chunks Fun.id))
+        (fun () -> Lwt_unix_retry.close fd)
+    in
+    publish ~key ~name:(Filename.basename key) ~size:(Int64.of_int file_size)
+      ~chunk_size ~mtime ~cancel entries
 
   (* Upload a file whose bytes the caller supplies per chunk: [source index] is
      either an entry to keep as-is (an unchanged chunk, never read or sent) or the
@@ -353,7 +322,7 @@ module Make_with_layout (C : Conf.S) (L : Layout.S) : S = struct
   (* Recheck a file from its manifest: every chunk it names must exist remotely
      with the right size, and a missing or wrong remote manifest is republished
      from the sidecar as long as they all do. Local bytes play no part — verifying
-     those is {!Chunk_cache.verify}'s job. *)
+     those is {!Chunk_cache.verify_group}'s job. *)
   let recheck_from_manifest ~key ~local_body (m : Manifest.t) =
     (* A chunk missing or corrupt on the backend can still be restored from the
        local chunk store: content addressing means a body found under that key is
@@ -371,9 +340,7 @@ module Make_with_layout (C : Conf.S) (L : Layout.S) : S = struct
               Log.info "recheck: re-uploading chunk %s"
                 (Manifest.chunk_key entry);
               let+ () =
-                put_all
-                  ~key:(C.chunk_prefix ^ Manifest.chunk_key entry)
-                  ~data ()
+                Bk.put ~key:(C.chunk_prefix ^ Manifest.chunk_key entry) ~data
               in
               `Repaired
     in

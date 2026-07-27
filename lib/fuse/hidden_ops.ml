@@ -10,8 +10,7 @@ module Make (C : Conf.S) = struct
       Filename.concat
         (Cache_layout.scratch_dir ~cache_root:C.cache_root C.domain_name)
         (Name_escape.encode_key
-           (Manifest.strip_prefix ~domain_prefix:C.domain_prefix
-              (fuse_to_key path)))
+           (Key.strip_prefix ~domain_prefix:C.domain_prefix (fuse_to_key path)))
     in
     {
       mknod =
@@ -29,13 +28,7 @@ module Make (C : Conf.S) = struct
         (fun path buf offset _fi ->
           Local_io.write (local_path path) buf ~offset);
       release = (fun _path _fi -> Lwt.return_unit);
-      unlink =
-        (fun path ->
-          Lwt.catch
-            (fun () -> Lwt_unix_retry.unlink (local_path path))
-            (function
-              | Unix.Unix_error (Unix.ENOENT, _, _) -> Lwt.return_unit
-              | e -> Lwt.fail e));
+      unlink = (fun path -> Fs_util.unlink_quiet (local_path path));
       rename =
         (fun src dst _flags ->
           Lwt.catch

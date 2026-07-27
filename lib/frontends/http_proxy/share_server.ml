@@ -113,10 +113,10 @@ module Make (C : Conf.S) = struct
                 Lwt.return_some m
             | Some `Dirty | None -> Lwt.return_none)
 
-  let primary () =
-    match C.backends with
-      | b :: _ -> b
-      | [] -> failwith "no backends configured"
+  module Bk = Backends.Make (C)
+  module Tree = Inode_tree.Make (C)
+
+  let primary = Bk.primary
 
   (* ── Share manifest ────────────────────────────────────────────────────── *)
 
@@ -156,50 +156,31 @@ module Make (C : Conf.S) = struct
 
   (* ── Inode navigation ──────────────────────────────────────────────────── *)
 
-  (* Direct children of a folder namespace. Names live in the object bodies, so
-     this reads each child.
-     ponytail: one GET per child — fine for ordinary folders; a folder with
-     thousands of direct children pays that many round trips. *)
+  (* Direct children of a folder namespace, in the shape the browse UI and the
+     zip writer want. A subdirectory's [key] is its own namespace, so [resolve]
+     descends by handing it straight back. *)
   let children ns =
-    let (module B : Backend.S) = primary () in
-    (* <...>/manifests/<id>/ -> <...>/manifests/ *)
-    let base =
-      match String.rindex_opt (String.sub ns 0 (String.length ns - 1)) '/' with
-        | Some i -> String.sub ns 0 (i + 1)
-        | None -> ns
-    in
-    let* entries = B.list_all ~prefix:ns () in
-    Lwt_list.filter_map_s
-      (fun (e : Backend.file_entry) ->
-        if e.Backend.key = ns then Lwt.return_none
-        else
-          let* body = B.get_opt ~key:e.Backend.key () in
-          match body with
-            | None -> Lwt.return_none
-            | Some body -> (
-                match Folder.marker_of_string body with
-                  | Some m ->
-                      Lwt.return_some
-                        {
-                          name = m.Folder.name;
-                          key = base ^ m.Folder.id ^ "/";
-                          is_dir = true;
-                          size = 0L;
-                          mtime = 0.;
-                        }
-                  | None -> (
-                      match Manifest.of_string body with
-                        | `Clean m ->
-                            Lwt.return_some
-                              {
-                                name = m.Manifest.name;
-                                key = e.Backend.key;
-                                is_dir = false;
-                                size = m.Manifest.size;
-                                mtime = m.Manifest.mtime;
-                              }
-                        | `Dirty -> Lwt.return_none
-                        | exception _ -> Lwt.return_none)))
+    let folder_id = Filename.basename (Key.chop_slash ns) in
+    let+ entries = Tree.children ~skip_errors:true ~folder_id () in
+    List.map
+      (fun (e : Inode_tree.entry) ->
+        match e.Inode_tree.body with
+          | Inode_tree.Dir m ->
+              {
+                name = m.Folder.name;
+                key = Tree.namespace_prefix m.Folder.id;
+                is_dir = true;
+                size = 0L;
+                mtime = 0.;
+              }
+          | Inode_tree.File m ->
+              {
+                name = m.Manifest.name;
+                key = e.Inode_tree.bkey;
+                is_dir = false;
+                size = m.Manifest.size;
+                mtime = m.Manifest.mtime;
+              })
       entries
 
   (* A browse-supplied path, rejected if it could escape the shared folder. *)

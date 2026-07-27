@@ -46,7 +46,7 @@ module Make (C : Conf.S) = struct
       in
       Lwt_list.fold_left_s
         (fun (dirs, files, symlinks) name ->
-          let r = if rel = "" then name else rel ^ "/" ^ name in
+          let r = Key.join rel name in
           if excluded globs r then Lwt.return (dirs, files, symlinks)
           else (
             let abs = Filename.concat src r in

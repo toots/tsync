@@ -22,14 +22,7 @@ module Make (C : Conf.S) (R : Remote.S) = struct
      advisory: a lost or stale entry costs at most one un-prefetched read. *)
   let last_read_end : (string, int) Hashtbl.t = Hashtbl.create 64
   let entries_of (m : Manifest.t) = Manifest.entries_by_index m.Manifest.chunks
-  let specs_of (m : Manifest.t) = Manifest.specs_by_index m.Manifest.chunks
-
-  (* Stored chunks per cache chunk, from the file's own chunk size: a file
-     uploaded under a different [chunkSize] still groups correctly. *)
-  let cache_chunk_size =
-    Option.value C.cache_chunk_size ~default:Conf.default_cache_chunk_size
-
-  let per_of ~chunk_size = Chunk_group.per_group ~chunk_size ~cache_chunk_size
+  let cache_chunk_size = Conf.cache_chunk_size (module C)
 
   (* The group holding stored chunk [i], reusing [cached] while [i] stays in the
      same group — a sequential read rebuilds one per boundary crossing, not one
@@ -77,8 +70,8 @@ module Make (C : Conf.S) (R : Remote.S) = struct
     let total = min want (max 0 avail) in
     if total <= 0 || cs <= 0 || manifest.Manifest.chunks = [] then Lwt.return 0
     else (
-      let specs = specs_of manifest in
-      let per = per_of ~chunk_size:cs in
+      let specs = Manifest.specs_by_index manifest.Manifest.chunks in
+      let per = Mf.per manifest in
       let n = Array.length specs in
       let rec go pos done_ cached =
         if done_ >= total then Lwt.return done_
@@ -137,12 +130,7 @@ module Make (C : Conf.S) (R : Remote.S) = struct
     else (
       let slots = staged.Manifest.s_slots in
       let n = Array.length slots in
-      let inherited = match base with Some m -> specs_of m | None -> [||] in
-      let inherited_per =
-        match base with
-          | Some m -> per_of ~chunk_size:m.Manifest.chunk_size
-          | None -> 1
-      in
+
       let rec go pos done_ =
         if done_ >= total then Lwt.return done_
         else (
@@ -170,9 +158,7 @@ module Make (C : Conf.S) (R : Remote.S) = struct
                     Bigarray.Array1.fill slice '\000';
                     Lwt.return take
                 | Manifest.Inherit -> (
-                    match
-                      Chunk_group.of_specs ~specs:inherited ~per:inherited_per i
-                    with
+                    match Mf.group_at_opt base i with
                       | Some group ->
                           Cc.read_into ~group ~index:i slice ~chunk_off
                       | None ->
@@ -184,6 +170,16 @@ module Make (C : Conf.S) (R : Remote.S) = struct
             if got <= 0 then Lwt.return done_ else go (pos + got) (done_ + got)))
       in
       go start 0)
+
+  (* [key]'s published manifest: the local sidecar when there is one — cheap,
+     and the only place a Dirty in-progress state lives — else the backend's,
+     so a file that was never cached still reports its real logical size and
+     mtime rather than the manifest object's own byte size.
+     ponytail: one GET per uncached file; add a metadata cache if a cold
+     full-directory enumeration gets slow. *)
+  let resolved_manifest key =
+    let* m = Mf.read key in
+    match m with Some _ -> Lwt.return m | None -> R.fetch_manifest ~key ()
 
   (* Read [key], whatever state it is in: staged edits, else what was published,
      else the backend's manifest for a file with no local metadata at all. *)
@@ -218,7 +214,7 @@ module Make (C : Conf.S) (R : Remote.S) = struct
           let+ published = Mf.read key in
           let name =
             Filename.basename
-              (Manifest.strip_prefix ~domain_prefix:C.domain_prefix key)
+              (Key.strip_prefix ~domain_prefix:C.domain_prefix key)
           in
           match published with
             | Some (`Clean m) ->
@@ -300,15 +296,7 @@ module Make (C : Conf.S) (R : Remote.S) = struct
       | Manifest.Staged _ -> Lwt.return_unit
       | Manifest.Inherit when not full_cover -> (
           let uuid = Manifest.new_uuid () in
-          let inherited =
-            match base with Some m -> specs_of m | None -> [||]
-          in
-          let per =
-            match base with
-              | Some m -> per_of ~chunk_size:m.Manifest.chunk_size
-              | None -> 1
-          in
-          match Chunk_group.of_specs ~specs:inherited ~per i with
+          match Mf.group_at_opt base i with
             | Some group ->
                 let+ () = Cc.stage_from_chunk ~group ~index:i ~uuid in
                 slots.(i) <- Manifest.Staged uuid
@@ -324,7 +312,10 @@ module Make (C : Conf.S) (R : Remote.S) = struct
      bodies; stage per member and assemble the remainder at promotion time if
      write amplification ever bites. *)
   let stage_group ~base ~(st : Manifest.staged) ~covers i =
-    let per = per_of ~chunk_size:st.Manifest.s_chunk_size in
+    let per =
+      Chunk_group.per_group ~chunk_size:st.Manifest.s_chunk_size
+        ~cache_chunk_size
+    in
     let n = Array.length st.Manifest.s_slots in
     let first = Chunk_group.index_of ~per i * per in
     let last = min (n - 1) (first + per - 1) in
@@ -464,8 +455,7 @@ module Make (C : Conf.S) (R : Remote.S) = struct
       match st with Some st -> discard_bodies st | None -> Lwt.return_unit
     in
     let name =
-      Filename.basename
-        (Manifest.strip_prefix ~domain_prefix:C.domain_prefix key)
+      Filename.basename (Key.strip_prefix ~domain_prefix:C.domain_prefix key)
     in
     let* chunk_size = R.chunk_size () in
     Mf.write_staged key
@@ -588,8 +578,6 @@ module Make (C : Conf.S) (R : Remote.S) = struct
       | None -> promote_chunked key staged published
 
   and promote_chunked key (staged : Manifest.staged) (published : Manifest.t) =
-    let specs = specs_of published in
-    let per = per_of ~chunk_size:published.Manifest.chunk_size in
     let slots = staged.Manifest.s_slots in
     let slot_at i =
       if i < Array.length slots then slots.(i) else Manifest.Zero
@@ -624,7 +612,7 @@ module Make (C : Conf.S) (R : Remote.S) = struct
                   | `Data body -> body
                   | `Reuse _ -> assert false (* [local] ruled this out *))
           else Lwt.return_unit)
-        (Chunk_group.all ~specs ~per)
+        (Mf.groups published)
     in
     let* () =
       Lwt_list.iter_s
@@ -677,7 +665,7 @@ module Make (C : Conf.S) (R : Remote.S) = struct
       {
         Manifest.s_name =
           Filename.basename
-            (Manifest.strip_prefix ~domain_prefix:C.domain_prefix key);
+            (Key.strip_prefix ~domain_prefix:C.domain_prefix key);
         s_size = stat.Unix.LargeFile.st_size;
         s_mtime = stat.Unix.LargeFile.st_mtime;
         s_chunk_size = chunk_size;
@@ -693,16 +681,13 @@ module Make (C : Conf.S) (R : Remote.S) = struct
     match resolved with
       | None -> Lwt.return (0, 0)
       | Some (`Published m) ->
-          let specs = specs_of m in
-          let per = per_of ~chunk_size:m.Manifest.chunk_size in
-          let total = Array.length specs in
+          let total = List.length m.Manifest.chunks in
           let+ present =
             Lwt_list.fold_left_s
               (fun acc group ->
                 let+ here = Cc.exists group in
                 if here then acc + Chunk_group.member_count group else acc)
-              0
-              (Chunk_group.all ~specs ~per)
+              0 (Mf.groups m)
           in
           (present, total)
       | Some (`Staged (({ Manifest.s_whole = Some _; _ } as st), _)) ->
@@ -712,14 +697,6 @@ module Make (C : Conf.S) (R : Remote.S) = struct
           in
           Lwt.return (n, n)
       | Some (`Staged (st, base)) ->
-          let inherited =
-            match base with Some m -> specs_of m | None -> [||]
-          in
-          let per =
-            match base with
-              | Some m -> per_of ~chunk_size:m.Manifest.chunk_size
-              | None -> 1
-          in
           let slots = st.Manifest.s_slots in
           let total = Array.length slots in
           let+ present =
@@ -728,7 +705,7 @@ module Make (C : Conf.S) (R : Remote.S) = struct
                 match slots.(i) with
                   | Manifest.Staged _ | Manifest.Zero -> Lwt.return (acc + 1)
                   | Manifest.Inherit -> (
-                      match Chunk_group.of_specs ~specs:inherited ~per i with
+                      match Mf.group_at_opt base i with
                         | Some group ->
                             let+ here = Cc.exists group in
                             if here then acc + 1 else acc
@@ -774,13 +751,9 @@ module Make (C : Conf.S) (R : Remote.S) = struct
      nothing behind for the read path to resolve. *)
   let ensure_local key =
     let ensure_groups = ensure_groups key in
-    let groups_of (m : Manifest.t) =
-      let specs = specs_of m in
-      Chunk_group.all ~specs ~per:(per_of ~chunk_size:m.Manifest.chunk_size)
-    in
     let* resolved = Mf.resolve key in
     match resolved with
-      | Some (`Published m) -> ensure_groups (groups_of m)
+      | Some (`Published m) -> ensure_groups (Mf.groups m)
       | Some (`Staged (st, base)) -> (
           match base with
             | None -> Lwt.return_unit
@@ -793,13 +766,13 @@ module Make (C : Conf.S) (R : Remote.S) = struct
                   (List.filter
                      (fun g ->
                        List.exists still_inherited (Chunk_group.indices g))
-                     (groups_of m)))
+                     (Mf.groups m)))
       | None -> (
           let* state = R.fetch_manifest ~key () in
           match state with
             | Some (`Clean m) ->
                 let* () = Mf.write key (`Clean m) in
-                ensure_groups (groups_of m)
+                ensure_groups (Mf.groups m)
             | Some `Dirty | None -> Lwt.return_unit)
 
   (* Write [key]'s whole content to [dst_path]: the one way a caller that needs a
@@ -847,10 +820,6 @@ module Make (C : Conf.S) (R : Remote.S) = struct
     let* published = Mf.read key in
     match published with
       | Some (`Clean m) ->
-          let specs = specs_of m in
-          Lwt_list.iter_s
-            (fun group -> Cc.forget ~group)
-            (Chunk_group.all ~specs
-               ~per:(per_of ~chunk_size:m.Manifest.chunk_size))
+          Lwt_list.iter_s (fun group -> Cc.forget ~group) (Mf.groups m)
       | Some `Dirty | None -> Lwt.return_unit
 end

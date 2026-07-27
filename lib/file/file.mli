@@ -38,12 +38,12 @@ module type S = sig
   (** Directory listing served from the local manifest mirror: files (with real
       keys derived from each manifest's [path]) and subdirectory names (mtime
       unavailable locally, hence [None]). *)
-  val list_directory :
+  val list_children :
     prefix:string ->
     (Backend.file_entry list * (string * float option) list) Lwt.t
 
   (** Recursive file listing under [prefix], served from the local mirror. *)
-  val list_all_files : prefix:string -> Backend.file_entry list Lwt.t
+  val list_tree : prefix:string -> Backend.file_entry list Lwt.t
 
   (** A handle closed: queue the file for upload if it has staged edits. Nothing
       else is decided here — the staged manifest, not an open count, records

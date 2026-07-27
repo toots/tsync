@@ -29,8 +29,7 @@ module Down : Backend.S = struct
   let delete ~key:_ () = fail ()
   let delete_multi _ = fail ()
   let copy ~src_key:_ ~dst_key:_ () = fail ()
-  let list_all ?max_keys:_ ~prefix:_ () = fail ()
-  let list_directory ~prefix:_ () = fail ()
+  let list_prefix ?max_keys:_ ~prefix:_ () = fail ()
   let share_url ~prefix:_ () = Lwt.return_none
   let default_chunk_size ~prefix:_ () = Lwt.return_none
 end
@@ -77,7 +76,7 @@ let () =
      assert (Sys.file_exists (source_dir ^ "/tsync/d/chunks/new"));
      assert (Sys.file_exists (cache_dir ^ "/tsync/d/chunks/new"));
      (* listing comes from the source of truth *)
-     let* files, _ = T.list_directory ~prefix:"tsync/d/chunks/" () in
+     let* files = T.list_prefix ~prefix:"tsync/d/chunks/" () in
      let names = List.map (fun (e : Backend.file_entry) -> e.key) files in
      assert (List.mem ckey names);
      (* a missing chunk is None everywhere *)
@@ -99,7 +98,7 @@ let () =
      let* m = R.get ~key:mkey () in
      assert (m = "manifestdata");
      (* listing falls through *)
-     let* files, _ = R.list_directory ~prefix:"tsync/d/chunks/" () in
+     let* files = R.list_prefix ~prefix:"tsync/d/chunks/" () in
      assert (List.exists (fun (e : Backend.file_entry) -> e.key = ckey) files);
      (* a write hits only the (down) primary and fails; the read-only backend is
         never written *)

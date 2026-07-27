@@ -105,7 +105,6 @@ type op =
   | Delete_multi of string list
   | Copy of string * string
   | List_all of string * int option
-  | List_dir of string
   | Share_url of string
   | Chunk_size of string
   | Bad
@@ -144,7 +143,6 @@ let parse_op meth uri body =
         match (q "mode", q "prefix") with
           | Some "all", Some prefix ->
               List_all (prefix, Option.bind (q "max_keys") int_of_string_opt)
-          | Some "dir", Some prefix -> List_dir prefix
           | _ -> Bad)
     | `GET, "/chunk-size" -> (
         match q "prefix" with Some prefix -> Chunk_size prefix | None -> Bad)
@@ -159,7 +157,7 @@ let route_key = function
   | Delete_multi (k :: _) -> Some k
   | Delete_multi [] -> None
   | Copy (src, _) -> Some src
-  | List_all (p, _) | List_dir p | Share_url p | Chunk_size p -> Some p
+  | List_all (p, _) | Share_url p | Chunk_size p -> Some p
   | Bad -> None
 
 let respond ?(status = `OK) ?(headers = []) body =
@@ -243,12 +241,8 @@ let exec route op ~body =
           respond ""
     | List_all (prefix, max_keys) ->
         let module B = (val route.primary : Backend.S) in
-        let* entries = B.list_all ?max_keys ~prefix () in
+        let* entries = B.list_prefix ?max_keys ~prefix () in
         respond (Http_proxy.Wire.entries_to_json entries)
-    | List_dir prefix ->
-        let module B = (val route.primary : Backend.S) in
-        let* result = B.list_directory ~prefix () in
-        respond (Http_proxy.Wire.list_dir_to_json result)
     | Share_url prefix ->
         if route.serve_share <> None then
           (* We serve them: the client composes the URL from the address it

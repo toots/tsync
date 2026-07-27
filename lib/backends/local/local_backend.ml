@@ -78,7 +78,7 @@ let make ~root : (module Backend.S) =
         let* data = read_file (resolve src_key) in
         write_file (resolve dst_key) data
 
-    let list_all ?max_keys ~prefix () =
+    let list_prefix ?max_keys ~prefix () =
       let base = resolve prefix in
       (* Each directory level's entries are stat'd (and subdirs recursed) in
          parallel, so on high-latency storage the walk costs a few round-trips per
@@ -147,54 +147,6 @@ let make ~root : (module Backend.S) =
         | Some n when List.length entries > n ->
             List.filteri (fun i _ -> i < n) entries
         | _ -> entries
-
-    (* One directory level only: a single [readdir] + [stat] per entry, so
-       enumerating a folder costs O(entries in that folder), not O(whole subtree).
-       (S3 needs the recursive [list_all] to synthesize directories; the local FS
-       has real ones.) *)
-    let list_directory ~prefix () =
-      let base = resolve prefix in
-      Lwt.catch
-        (fun () ->
-          let* names = readdir_list base in
-          (* stat entries in parallel: on slow/networked storage the per-entry
-             latency dominates, so concurrency (bounded by the Lwt thread pool)
-             turns O(entries)·latency into a couple of round-trips. *)
-          let+ entries =
-            Lwt_list.map_p
-              (fun name ->
-                let full_path = Filename.concat base name in
-                Lwt.catch
-                  (fun () ->
-                    let+ st = Lwt_unix_retry.stat full_path in
-                    match st.Unix.st_kind with
-                      | Unix.S_REG ->
-                          `File
-                            Backend.
-                              {
-                                key = prefix ^ name;
-                                size = st.Unix.st_size;
-                                last_modified = st.Unix.st_mtime;
-                              }
-                      | Unix.S_DIR -> `Dir (name, Some st.Unix.st_mtime)
-                      | _ -> `Skip)
-                  (function
-                    (* entry vanished mid-listing (race): skip it *)
-                    | Unix.Unix_error (Unix.ENOENT, _, _) -> Lwt.return `Skip
-                    | exn -> Lwt.fail exn))
-              names
-          in
-          let files =
-            List.filter_map (function `File e -> Some e | _ -> None) entries
-          in
-          let dirs =
-            List.filter_map (function `Dir d -> Some d | _ -> None) entries
-          in
-          (files, List.sort (fun (a, _) (b, _) -> String.compare a b) dirs))
-        (function
-          | Unix.Unix_error ((Unix.ENOENT | Unix.ENOTDIR), _, _) ->
-              Lwt.return ([], [])
-          | exn -> Lwt.fail exn)
 
     let share_url ~prefix:_ () = Lwt.return_none
     let default_chunk_size ~prefix:_ () = Lwt.return_none

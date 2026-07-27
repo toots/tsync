@@ -27,11 +27,7 @@ module Make (C : Conf.S) = struct
     in
     C.domain_prefix ^ rel
 
-  let fuse_to_dir_prefix path =
-    let key = fuse_to_key path in
-    if key = C.domain_prefix then key
-    else if String.length key > 0 && key.[String.length key - 1] = '/' then key
-    else key ^ "/"
+  let fuse_to_dir_prefix path = Key.ensure_slash (fuse_to_key path)
 
   (* ── The FUSE kernel creates .fuse_hidden* files when renaming a file that
      has open file descriptors. These are kernel-internal; never mirror to backend. *)
@@ -99,7 +95,7 @@ module Make (C : Conf.S) = struct
   (* Directories exist only in the manifest mirror, so that is what decides
      whether a key names one. *)
   let is_dir_key key =
-    (String.length key > 0 && key.[String.length key - 1] = '/')
+    Key.is_dir key
     ||
     let mp = F.manifest_path key in
     Sys.file_exists mp && Sys.is_directory mp
@@ -109,11 +105,8 @@ module Make (C : Conf.S) = struct
   let on_subtree what f key =
     if not (is_dir_key key) then f key
     else (
-      let prefix =
-        if String.length key > 0 && key.[String.length key - 1] = '/' then key
-        else key ^ "/"
-      in
-      let* files = F.list_all_files ~prefix in
+      let prefix = Key.ensure_slash key in
+      let* files = F.list_tree ~prefix in
       Lwt_list.iter_s
         (fun (e : Backend.file_entry) ->
           Lwt.catch
@@ -206,7 +199,7 @@ module Make (C : Conf.S) = struct
         (fun path _offset _fi _flags ->
           on_loop (fun () ->
               let+ files, dirs =
-                F.list_directory ~prefix:(fuse_to_dir_prefix path)
+                F.list_children ~prefix:(fuse_to_dir_prefix path)
               in
               let names =
                 List.map

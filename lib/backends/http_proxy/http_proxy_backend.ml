@@ -137,16 +137,6 @@ let list_all t ?max_keys ~prefix () =
   if is_ok resp then Http_proxy.Wire.entries_of_json body
   else raise (backend_error "list_all" (code resp) body)
 
-let list_directory t ~prefix () =
-  let uri =
-    Uri.with_query'
-      (Uri.with_path t.base_uri "/list")
-      [("mode", "dir"); ("prefix", prefix)]
-  in
-  let+ resp, body = call_retry t ~meth:`GET "list_directory" uri in
-  if is_ok resp then Http_proxy.Wire.list_dir_of_json body
-  else raise (backend_error "list_directory" (code resp) body)
-
 (* Whether shares are exposed is the proxy's own setting, so ask it rather than
    mirroring it in client config where the two could disagree. The proxy answers
    yes/no only: it sits behind TLS termination and does not reliably know its own
@@ -230,8 +220,7 @@ let make ~url ~secret : (module Backend.S) =
     let delete ~key () = delete t ~key ()
     let delete_multi keys = delete_multi t keys
     let copy ~src_key ~dst_key () = copy t ~src_key ~dst_key ()
-    let list_all ?max_keys ~prefix () = list_all t ?max_keys ~prefix ()
-    let list_directory ~prefix () = list_directory t ~prefix ()
+    let list_prefix ?max_keys ~prefix () = list_all t ?max_keys ~prefix ()
     let share_url ~prefix () = share_url t ~prefix ()
     let default_chunk_size ~prefix () = default_chunk_size t ~prefix ()
   end)

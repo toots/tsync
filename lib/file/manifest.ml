@@ -1,11 +1,3 @@
-(* Chunk size for newly uploaded files. Overridable via [TSYNC_CHUNK_SIZE] so
-   tests can exercise multi-chunk files without multi-megabyte fixtures; each
-   manifest also records its own [chunk_size], so existing files are unaffected. *)
-let chunk_size =
-  match Sys.getenv_opt "TSYNC_CHUNK_SIZE" with
-    | Some s -> ( try int_of_string s with _ -> 8 * 1024 * 1024)
-    | None -> 8 * 1024 * 1024
-
 (* Manifest body format version. 2 = inode layout (bodies carry the leaf [name];
    folder structure lives in markers). Bumped from 1 (real-path-keyed layout) by
    the one-off migration. Nothing branches on it today; it flags the format. *)
@@ -46,6 +38,28 @@ let specs_by_index chunks =
     (Option.map (fun (c : chunk_entry) -> (chunk_key c, c.size)))
     (entries_by_index chunks)
 
+(* ── Grouping ────────────────────────────────────────────────────────────────
+   How a manifest's stored chunks fall into cache chunks. Every caller wanting a
+   {!Chunk_group} starts from a manifest and the domain's cache chunk size, and
+   the derivation — specs by index, chunks per group from the file's *own*
+   chunk size — is the same each time. {!Chunk_group} cannot host this: it sits
+   below this module, not above it. *)
+
+let per ~cache_chunk_size (m : t) =
+  Chunk_group.per_group ~chunk_size:m.chunk_size ~cache_chunk_size
+
+let groups ~cache_chunk_size m =
+  Chunk_group.all ~specs:(specs_by_index m.chunks)
+    ~per:(per ~cache_chunk_size m)
+
+let group_at ~cache_chunk_size m i =
+  Chunk_group.of_specs ~specs:(specs_by_index m.chunks)
+    ~per:(per ~cache_chunk_size m) i
+
+let group_count ~cache_chunk_size m =
+  Chunk_group.count ~specs:(specs_by_index m.chunks)
+    ~per:(per ~cache_chunk_size m)
+
 (* Whole-file digest as a hash over the ordered chunk digests, so a changed
    file's manifest is rebuildable from its chunk entries alone (no need to
    re-read untouched chunk bytes). Seeds 0/1 give the two independent hashes. *)
@@ -83,7 +97,9 @@ let make_symlink ~name ~target ~mtime =
       v = current_version;
       name;
       size = Int64.of_int (String.length target);
-      chunk_size;
+      (* A symlink has no chunks, so its recorded size never groups anything;
+         the domain default keeps the field well-formed. *)
+      chunk_size = Conf.default_chunk_size;
       chunks = [];
       h1;
       h2;
@@ -119,7 +135,8 @@ let of_json json =
         name = json |> member "name" |> to_string;
         size = json |> member "size" |> to_int |> Int64.of_int;
         chunk_size =
-          (try json |> member "chunkSize" |> to_int with _ -> chunk_size);
+          (try json |> member "chunkSize" |> to_int
+           with _ -> Conf.default_chunk_size);
         chunks;
         h1 = (try json |> member "h1" |> to_string with _ -> "");
         h2 = (try json |> member "h2" |> to_string with _ -> "");
@@ -198,10 +215,7 @@ let num_chunks_for size chunk_size =
 let chunk_len ~size ~chunk_size i =
   max 0 (min chunk_size (Int64.to_int size - (i * chunk_size)))
 
-let new_uuid () =
-  Printf.sprintf "%08Lx%08Lx"
-    (Random.int64 0x1_0000_0000L)
-    (Random.int64 0x1_0000_0000L)
+let new_uuid = Id.short
 
 let slot_to_json = function
   | Staged uuid -> `Assoc [("u", `String uuid)]
@@ -253,7 +267,8 @@ let staged_of_string body =
     s_size = json |> member "size" |> to_int |> Int64.of_int;
     s_mtime = json |> member "mtime" |> to_float;
     s_chunk_size =
-      (try json |> member "chunkSize" |> to_int with _ -> chunk_size);
+      (try json |> member "chunkSize" |> to_int
+       with _ -> Conf.default_chunk_size);
     s_slots =
       (match json |> member "slots" with
         | `List l -> Array.of_list (List.map slot_of_json l)
@@ -272,30 +287,18 @@ let staged_of_string body =
 
 open Lwt.Syntax
 
-let strip_prefix ~domain_prefix key =
-  if String.starts_with ~prefix:domain_prefix key then (
-    let pfx = String.length domain_prefix in
-    String.sub key pfx (String.length key - pfx))
-  else key
-
-let chop_trailing_slash s =
-  if String.ends_with ~suffix:"/" s then String.sub s 0 (String.length s - 1)
-  else s
-
-let join_rel rel name = if rel = "" then name else rel ^ "/" ^ name
-
 let dir ~cache_root domain_name =
   Cache_layout.manifests_dir ~cache_root domain_name
 
 let sidecar_path ~cache_root ~domain_name ~domain_prefix key =
   Filename.concat
     (dir ~cache_root domain_name)
-    (Name_escape.encode_key (strip_prefix ~domain_prefix key))
+    (Name_escape.encode_key (Key.strip_prefix ~domain_prefix key))
 
 let staged_sidecar_path ~cache_root ~domain_name ~domain_prefix key =
   Filename.concat
     (Cache_layout.staged_manifests_dir ~cache_root domain_name)
-    (Name_escape.encode_key (strip_prefix ~domain_prefix key))
+    (Name_escape.encode_key (Key.strip_prefix ~domain_prefix key))
 
 (* Synchronous "is every byte of this file local?", for the CLI listing (plain
    non-Lwt code). Unsynced edits are local by definition; otherwise every chunk
@@ -316,18 +319,16 @@ let is_local
     | body -> (
         match of_string body with
           | `Clean m ->
-              let specs = specs_by_index m.chunks in
-              let per =
-                Chunk_group.per_group ~chunk_size:m.chunk_size ~cache_chunk_size
-              in
-              let groups = Chunk_group.all ~specs ~per in
-              List.length groups = Chunk_group.count ~specs ~per
+              let gs = groups ~cache_chunk_size m in
+              (* A manifest with a hole describes fewer groups than it has, and
+                 the missing bytes are not somewhere else on disk. *)
+              List.length gs = group_count ~cache_chunk_size m
               && List.for_all
                    (fun g ->
                      Sys.file_exists
                        (Cache_layout.chunk_path ~cache_root ~domain_name
                           (Chunk_group.key g)))
-                   groups
+                   gs
           | `Dirty -> false
           | exception _ -> false)
     | exception _ -> false
@@ -406,7 +407,7 @@ let fold_files ~start ~rel f acc =
           let* is_dir = Fs_util.is_directory path in
           if is_dir then
             let* real = real_dir_name path name in
-            walk path (join_rel rel real) acc
+            walk path (Key.join rel real) acc
           else
             let+ m = read_clean path in
             match m with Some m -> f acc rel m | None -> acc))
@@ -425,27 +426,34 @@ let rec clean_tmp dir =
         let path = Filename.concat dir name in
         let* is_dir = Fs_util.is_directory path in
         if is_dir then clean_tmp path
-        else if Filename.check_suffix name ".tmp" then
-          Lwt.catch
-            (fun () -> Lwt_unix_retry.unlink path)
-            (function Unix.Unix_error _ -> Lwt.return_unit | e -> Lwt.fail e)
+        else if Filename.check_suffix name ".tmp" then Fs_util.unlink_quiet path
         else Lwt.return_unit)
       names
-
-let quiet_unlink path =
-  Lwt.catch
-    (fun () -> Lwt_unix_retry.unlink path)
-    (function Unix.Unix_error _ -> Lwt.return_unit | e -> Lwt.fail e)
 
 (* The store, per domain: manifests keyed by logical key and nothing else. *)
 module Make (C : Conf.S) = struct
   let root () = dir ~cache_root:C.cache_root C.domain_name
 
+  (* ── Grouping ─────────────────────────────────────────────────────────────
+     The domain's cache chunk size applied once, so no caller carries it. *)
+
+  let cache_chunk_size = Conf.cache_chunk_size (module C)
+  let per = per ~cache_chunk_size
+  let groups = groups ~cache_chunk_size
+  let group_at = group_at ~cache_chunk_size
+
+  (* For the staged path, where the chunks a slot still inherits come from a
+     published manifest that may not exist: no base means nothing to inherit. *)
+  let group_at_opt base i =
+    match base with None -> None | Some m -> group_at m i
+
+  let groups_opt = function None -> [] | Some m -> groups m
+
   let path key =
     sidecar_path ~cache_root:C.cache_root ~domain_name:C.domain_name
       ~domain_prefix:C.domain_prefix key
 
-  let rel_of key = strip_prefix ~domain_prefix:C.domain_prefix key
+  let rel_of = Key.strip_prefix ~domain_prefix:C.domain_prefix
 
   (* Parsed sidecars, each validated against the identity of the file it came
      from. Sidecars are replaced by rename, so a fresh inode (or a changed
@@ -456,16 +464,9 @@ module Make (C : Conf.S) = struct
   let memo : (string, memo_entry) Hashtbl.t = Hashtbl.create 256
   let invalidate key = Hashtbl.remove memo key
 
-  let stat_opt path =
-    Lwt.catch
-      (fun () ->
-        let+ st = Lwt_unix_retry.stat path in
-        Some st)
-      (fun _ -> Lwt.return_none)
-
   let read key =
     let p = path key in
-    let* st = stat_opt p in
+    let* st = Fs_util.stat_opt p in
     match st with
       | None ->
           invalidate key;
@@ -490,7 +491,7 @@ module Make (C : Conf.S) = struct
 
   let ensure_parent key =
     let rel = rel_of key in
-    let reldir = match Filename.dirname rel with "." -> "" | d -> d in
+    let reldir = Key.parent rel in
     ensure_dirs (root ()) reldir
 
   let write key state =
@@ -500,7 +501,7 @@ module Make (C : Conf.S) = struct
 
   let delete key =
     invalidate key;
-    quiet_unlink (path key)
+    Fs_util.unlink_quiet (path key)
 
   let rename ~src_key ~dst_key =
     invalidate src_key;
@@ -520,7 +521,7 @@ module Make (C : Conf.S) = struct
      while the marker inside still holds the old one — rewrite it so readdir
      shows the new name. No-op for a name the filesystem can hold verbatim. *)
   let refresh_dir_marker key =
-    let rel = chop_trailing_slash (rel_of key) in
+    let rel = Key.chop_slash (rel_of key) in
     let leaf = if rel = "" then "" else Filename.basename rel in
     if
       rel = ""
@@ -567,7 +568,7 @@ module Make (C : Conf.S) = struct
     let* () = Fs_util.ensure_parent p in
     Fs_util.atomic_write p (staged_to_string st)
 
-  let delete_staged key = quiet_unlink (staged_path key)
+  let delete_staged key = Fs_util.unlink_quiet (staged_path key)
 
   let rename_staged ~src_key ~dst_key =
     let src = staged_path src_key in
@@ -599,7 +600,7 @@ module Make (C : Conf.S) = struct
               if not deep then Lwt.return acc
               else
                 let* real = real_dir_name path name in
-                walk path (join_rel rel real) acc
+                walk path (Key.join rel real) acc
             else
               let+ body = read_body path in
               match body with
@@ -616,7 +617,7 @@ module Make (C : Conf.S) = struct
   (* Logical keys owing an upload. *)
   let list_staged () =
     fold_staged ~rel_dir:"" ~deep:true
-      (fun acc rel st -> (C.domain_prefix ^ join_rel rel st.s_name) :: acc)
+      (fun acc rel st -> (C.domain_prefix ^ Key.join rel st.s_name) :: acc)
       []
 
   (* Staged files as directory entries. A file created locally has no published
@@ -627,7 +628,7 @@ module Make (C : Conf.S) = struct
       (fun acc rel st ->
         Backend.
           {
-            key = C.domain_prefix ^ join_rel rel st.s_name;
+            key = C.domain_prefix ^ Key.join rel st.s_name;
             size = Int64.to_int st.s_size;
             last_modified = st.s_mtime;
           }
@@ -656,7 +657,7 @@ module Make (C : Conf.S) = struct
     if is_dir then Fs_util.readdir_list dir else Lwt.return_nil
 
   let dir_of_prefix prefix =
-    let rel = chop_trailing_slash (rel_of prefix) in
+    let rel = Key.chop_slash (rel_of prefix) in
     let p =
       if rel = "" then root ()
       else Filename.concat (root ()) (Name_escape.encode_key rel)
@@ -664,7 +665,7 @@ module Make (C : Conf.S) = struct
     (rel, p)
 
   (* Immediate children of [prefix]: file entries plus subdirectory names. *)
-  let list_directory ~prefix () =
+  let list_children ~prefix () =
     let rel, dir = dir_of_prefix prefix in
     let* staged = staged_entries ~rel_dir:rel ~deep:false in
     let child_base =
@@ -700,14 +701,14 @@ module Make (C : Conf.S) = struct
 
   (* Every file entry under [prefix], recursively. Serves the enumeration the
      backend can no longer answer now that its keys are hashed. *)
-  let list_all ~prefix () =
+  let list_tree ~prefix () =
     let rel, start = dir_of_prefix prefix in
     let* published =
       fold_files ~start ~rel
         (fun acc rel m ->
           Backend.
             {
-              key = C.domain_prefix ^ join_rel rel m.name;
+              key = C.domain_prefix ^ Key.join rel m.name;
               size = Int64.to_int m.size;
               last_modified = m.mtime;
             }
@@ -722,12 +723,12 @@ module Make (C : Conf.S) = struct
   let walk () =
     let* published =
       fold_files ~start:(root ()) ~rel:""
-        (fun acc rel m -> join_rel rel m.name :: acc)
+        (fun acc rel m -> Key.join rel m.name :: acc)
         []
     in
     let+ staged =
       fold_staged ~rel_dir:"" ~deep:true
-        (fun acc rel st -> join_rel rel st.s_name :: acc)
+        (fun acc rel st -> Key.join rel st.s_name :: acc)
         []
     in
     List.sort_uniq compare (published @ staged)

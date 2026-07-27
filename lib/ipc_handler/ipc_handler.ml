@@ -28,19 +28,12 @@ module Make (C : Conf.S) (F : File.S) = struct
 
   (* ── File operation handlers ──────────────────────────────────────────── *)
 
-  let stat_opt path =
-    Lwt.catch
-      (fun () ->
-        let+ st = Lwt_unix_retry.LargeFile.stat path in
-        Some st)
-      (fun _ -> Lwt.return_none)
-
   (* Resolve the manifest once (local sidecar, else a single backend GET) and
      derive size, mtime, etag and upload state from it. Going through F.stat
      plus a separate etag lookup would fetch the same manifest up to twice
      more per call, and fileproviderd stats items constantly. *)
   let handle_stat key =
-    let* mst = stat_opt (F.manifest_path key) in
+    let* mst = Fs_util.stat_opt_large (F.manifest_path key) in
     match mst with
       | Some { Unix.LargeFile.st_kind = Unix.S_DIR; _ } ->
           Lwt.return
@@ -122,13 +115,14 @@ module Make (C : Conf.S) (F : File.S) = struct
             ]
 
   let handle_list_dir prefix =
-    let* files, dirs = F.list_directory ~prefix in
+    let* files, dirs = F.list_children ~prefix in
     (* map_p: uncached entries each cost a backend GET; resolving them
        sequentially made cold enumeration O(files) round trips end-to-end.
        [resolve_pool] bounds the fan-out; map_p preserves result order. *)
     let+ files_json = Lwt_list.map_p file_entry_json files in
     (* Emit directories as full keys ending in "/", the same representation used by
-       list_all and the change journal — one identity per directory everywhere. *)
+       the recursive listing and the change journal — one identity per directory
+       everywhere. *)
     ok_json
       [
         ( "dirs",
@@ -147,7 +141,7 @@ module Make (C : Conf.S) (F : File.S) = struct
       ]
 
   let handle_list_all prefix =
-    let* files = F.list_all_files ~prefix in
+    let* files = F.list_tree ~prefix in
     let+ files_json = Lwt_list.map_p file_entry_json files in
     ok_json [("files", `List files_json)]
 
@@ -157,9 +151,7 @@ module Make (C : Conf.S) (F : File.S) = struct
      keys as item identifiers, with directories ending in "/". *)
   let full_key ?(dir = false) rel =
     let k = C.domain_prefix ^ rel in
-    if dir && not (String.length k > 0 && k.[String.length k - 1] = '/') then
-      k ^ "/"
-    else k
+    if dir then Key.ensure_slash k else k
 
   let op_to_json = function
     | `Put (key, size) ->
@@ -293,16 +285,9 @@ module Make (C : Conf.S) (F : File.S) = struct
     let+ () = F.delete key in
     ok_json []
 
-  let strip_trailing_slash k =
-    if String.length k > 0 && k.[String.length k - 1] = '/' then
-      String.sub k 0 (String.length k - 1)
-    else k
-
   let handle_rename src_key dst_key =
     let+ () =
-      F.rename
-        ~src:(strip_trailing_slash src_key)
-        ~dst:(strip_trailing_slash dst_key)
+      F.rename ~src:(Key.chop_slash src_key) ~dst:(Key.chop_slash dst_key)
     in
     ok_json []
 
@@ -330,16 +315,7 @@ module Make (C : Conf.S) (F : File.S) = struct
      end in "/"); recover the domain-relative path the share core expects. *)
   let handle_share key =
     let rel =
-      let p = C.domain_prefix in
-      let n = String.length p in
-      if String.length key >= n && String.sub key 0 n = p then
-        String.sub key n (String.length key - n)
-      else key
-    in
-    let rel =
-      if rel <> "" && rel.[String.length rel - 1] = '/' then
-        String.sub rel 0 (String.length rel - 1)
-      else rel
+      Key.chop_slash (Key.strip_prefix ~domain_prefix:C.domain_prefix key)
     in
     let expires = int_of_float (Unix.time ()) + (7 * 86400) in
     let+ result = Sh.create ~expires ~rel () in
@@ -347,7 +323,10 @@ module Make (C : Conf.S) (F : File.S) = struct
       | Ok url -> ok_json [("url", `String url)]
       | Error msg -> error_json msg
 
-  (* ── Dispatch ─────────────────────────────────────────────────────────── *)
+  (* ── Dispatch ───────────────────────────────────────────────────────────
+     The action strings are a wire contract with the FileProvider extension
+     (see macos/TsyncFileProvider/IPC.swift): rename the handlers freely, never
+     these. *)
 
   let handler hooks line =
     match Yojson.Safe.from_string line with

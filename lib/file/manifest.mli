@@ -1,8 +1,3 @@
-val chunk_size : int
-
-(** Current manifest body format version (2 = inode layout). *)
-val current_version : int
-
 type chunk_entry = { index : int; h1 : string; h2 : string; size : int }
 
 type t = {
@@ -28,6 +23,22 @@ val entries_by_index : chunk_entry list -> chunk_entry option array
 (** The same, reduced to the [(chunk key, size)] pairs {!Chunk_group} needs. *)
 val specs_by_index : chunk_entry list -> (string * int) option array
 
+(** {2 Grouping}
+
+    How a manifest's stored chunks fall into cache chunks. Grouping is derived
+    from the file's {i own} [chunk_size] and the domain's cache chunk size, so a
+    file uploaded under a different setting still groups correctly. {!Make}
+    binds the domain's size for callers inside a functor. *)
+
+val per : cache_chunk_size:int -> t -> int
+val groups : cache_chunk_size:int -> t -> Chunk_group.t list
+val group_at : cache_chunk_size:int -> t -> int -> Chunk_group.t option
+
+(** How many groups the file has, holes included — compare against
+    [List.length (groups m)] to detect a manifest that cannot be fully
+    described. *)
+val group_count : cache_chunk_size:int -> t -> int
+
 (** Whole-file [h1]/[h2] as a hash over the ordered chunk digests, so a changed
     file's manifest is rebuildable from its chunk entries alone. *)
 val digest_of_chunks : chunk_entry list -> string * string
@@ -47,9 +58,6 @@ val make_symlink : name:string -> target:string -> mtime:float -> state
 
 val of_string : string -> state
 val to_string : state -> string
-
-(** [strip_prefix ~domain_prefix key] is [key]'s domain-relative real path. *)
-val strip_prefix : domain_prefix:string -> string -> string
 
 (** Where a chunk of a locally edited file has its bytes. *)
 type slot =
@@ -93,6 +101,20 @@ val is_local : Conf.locality -> string -> bool
     is walked, and the parsed-sidecar cache. Callers name a logical key and
     nothing else — no cache paths, no domain prefixes, no raw bodies. *)
 module Make (C : Conf.S) : sig
+  (** {2 Grouping}
+
+      {!Manifest.per} and friends with the domain's cache chunk size applied. *)
+
+  val per : t -> int
+  val groups : t -> Chunk_group.t list
+  val group_at : t -> int -> Chunk_group.t option
+
+  (** For the staged path, whose inherited chunks come from a published manifest
+      that may not exist: no base means nothing to inherit. *)
+  val group_at_opt : t option -> int -> Chunk_group.t option
+
+  val groups_opt : t option -> Chunk_group.t list
+
   (** On-disk path of [key]'s sidecar. Its inode doubles as the existence and
       directory test: directories exist only in this tree. *)
   val path : string -> string
@@ -103,12 +125,6 @@ module Make (C : Conf.S) : sig
   val write : string -> state -> unit Lwt.t
   val delete : string -> unit Lwt.t
   val rename : src_key:string -> dst_key:string -> unit Lwt.t
-
-  (** Drop [key]'s cached parse. Only an optimisation: {!read} revalidates
-      against the sidecar's inode, size and mtime anyway, so a sidecar written
-      by another process is never served stale. *)
-  val invalidate : string -> unit
-
   val create_dir : string -> unit Lwt.t
   val delete_dir : string -> unit Lwt.t
 
@@ -121,11 +137,11 @@ module Make (C : Conf.S) : sig
       and names are the real ones, not their escaped on-disk spelling; a staged
       file's own size and mtime win, and it is listed even when nothing of it
       has been published. *)
-  val list_directory :
+  val list_children :
     prefix:string -> unit -> (Backend.file_entry list * string list) Lwt.t
 
   (** Every file entry under [prefix], recursively. *)
-  val list_all : prefix:string -> unit -> Backend.file_entry list Lwt.t
+  val list_tree : prefix:string -> unit -> Backend.file_entry list Lwt.t
 
   (** Domain-relative real path of every file the domain holds locally,
       published or only staged (unsorted). *)

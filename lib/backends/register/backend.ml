@@ -15,12 +15,9 @@ module type S = sig
   val delete : key:string -> unit -> unit Lwt.t
   val delete_multi : string list -> unit Lwt.t
   val copy : src_key:string -> dst_key:string -> unit -> unit Lwt.t
-  val list_all : ?max_keys:int -> prefix:string -> unit -> file_entry list Lwt.t
 
-  val list_directory :
-    prefix:string ->
-    unit ->
-    (file_entry list * (string * float option) list) Lwt.t
+  val list_prefix :
+    ?max_keys:int -> prefix:string -> unit -> file_entry list Lwt.t
 
   (** The share base URL if this backend serves shares for [prefix]'s domain,
       else [None]. s3 returns its configured [shareUrl]; http-proxy asks the

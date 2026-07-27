@@ -25,11 +25,11 @@ module type S = sig
   val stat : t -> Unix.LargeFile.stats option Lwt.t
   val readlink : t -> string option Lwt.t
 
-  val list_directory :
+  val list_children :
     prefix:string ->
     (Backend.file_entry list * (string * float option) list) Lwt.t
 
-  val list_all_files : prefix:string -> Backend.file_entry list Lwt.t
+  val list_tree : prefix:string -> Backend.file_entry list Lwt.t
 
   (** Handle closed: queue the file for upload if it has staged edits. *)
   val close : t -> unit Lwt.t
@@ -115,10 +115,7 @@ struct
 
   (* ── Path helpers ──────────────────────────────────────────────────────── *)
 
-  let rel_key key =
-    let pfx = String.length C.domain_prefix in
-    if String.length key > pfx then String.sub key pfx (String.length key - pfx)
-    else key
+  let rel_key = Key.strip_prefix ~domain_prefix:C.domain_prefix
 
   (* Manifest backend I/O goes through [St], keyed by logical (real-path) keys;
      the layout scheme maps them to backend keys. [Mf] is the local mirror. *)
@@ -128,26 +125,10 @@ struct
 
   let manifest_path key = Mf.path key
 
-  let stat_opt path =
-    Lwt.catch
-      (fun () ->
-        let+ st = Lwt_unix_retry.LargeFile.stat path in
-        Some st)
-      (fun _ -> Lwt.return_none)
-
   (* ── Manifest ──────────────────────────────────────────────────────────── *)
 
   let read_manifest key : Manifest.state option Lwt.t = Mf.read key
-
-  (* Prefer the local sidecar (cheap, and the only place a Dirty in-progress state
-     lives); for a backend-only file with no sidecar, fetch and parse the manifest so
-     callers get the real logical size/mtime rather than the manifest object's own
-     byte size. ponytail: one HEAD+GET per uncached file; add a metadata cache if a
-     cold full-directory enumeration gets slow. *)
-  let resolved_manifest key : Manifest.state option Lwt.t =
-    let* m = read_manifest key in
-    match m with Some _ -> Lwt.return m | None -> R.fetch_manifest ~key ()
-
+  let resolved_manifest = D.resolved_manifest
   let write_manifest key (state : Manifest.state) = Mf.write key state
   let delete_manifest key = Mf.delete key
 
@@ -203,65 +184,44 @@ struct
 
   (* ── Stat ──────────────────────────────────────────────────────────────── *)
 
-  let file_stat size mtime =
-    let now = Unix.gettimeofday () in
+  (* Nothing in the domain has a real inode, owner or link count: the manifest
+     carries a size and an mtime and everything else is synthesized, the same way
+     for all three kinds. *)
+  let stat_of ~kind ~perm ~nlink ~size ~mtime =
     Unix.LargeFile.
       {
         st_dev = 0;
         st_ino = 0;
-        st_kind = Unix.S_REG;
-        st_perm = 0o644;
-        st_nlink = 1;
+        st_kind = kind;
+        st_perm = perm;
+        st_nlink = nlink;
         st_uid = Unix.getuid ();
         st_gid = Unix.getgid ();
         st_rdev = 0;
         st_size = size;
-        st_atime = now;
+        st_atime = Unix.gettimeofday ();
         st_mtime = mtime;
         st_ctime = mtime;
       }
 
-  let symlink_stat size mtime =
-    let now = Unix.gettimeofday () in
-    Unix.LargeFile.
-      {
-        st_dev = 0;
-        st_ino = 0;
-        st_kind = Unix.S_LNK;
-        st_perm = 0o777;
-        st_nlink = 1;
-        st_uid = Unix.getuid ();
-        st_gid = Unix.getgid ();
-        st_rdev = 0;
-        st_size = size;
-        st_atime = now;
-        st_mtime = mtime;
-        st_ctime = mtime;
-      }
+  let file_stat size mtime =
+    stat_of ~kind:Unix.S_REG ~perm:0o644 ~nlink:1 ~size ~mtime
+
+  (* A symlink's size is its target's byte length, POSIX-style. *)
+  let symlink_stat target mtime =
+    stat_of ~kind:Unix.S_LNK ~perm:0o777 ~nlink:1
+      ~size:(Int64.of_int (String.length target))
+      ~mtime
 
   let dir_stat () =
-    let now = Unix.gettimeofday () in
-    Unix.LargeFile.
-      {
-        st_dev = 0;
-        st_ino = 0;
-        st_kind = Unix.S_DIR;
-        st_perm = 0o755;
-        st_nlink = 2;
-        st_uid = Unix.getuid ();
-        st_gid = Unix.getgid ();
-        st_rdev = 0;
-        st_size = 0L;
-        st_atime = now;
-        st_mtime = now;
-        st_ctime = now;
-      }
+    stat_of ~kind:Unix.S_DIR ~perm:0o755 ~nlink:2 ~size:0L
+      ~mtime:(Unix.gettimeofday ())
 
   (* Directories exist only in the manifest mirror; files answer from whatever
      describes them — a staged manifest for one created locally and not yet
      uploaded, else the published sidecar. *)
   let stat key =
-    let* mst = stat_opt (manifest_path key) in
+    let* mst = Fs_util.stat_opt_large (manifest_path key) in
     match mst with
       | Some { Unix.LargeFile.st_kind = Unix.S_DIR; _ } ->
           Lwt.return_some (dir_stat ())
@@ -274,8 +234,7 @@ struct
                 Lwt.return_some
                   (file_stat st.Manifest.s_size st.Manifest.s_mtime)
             | Some (`Published { Manifest.symlink = Some target; mtime; _ }) ->
-                let size = Int64.of_int (String.length target) in
-                Lwt.return_some (symlink_stat size mtime)
+                Lwt.return_some (symlink_stat target mtime)
             | Some (`Published m) ->
                 Lwt.return_some (file_stat m.Manifest.size m.Manifest.mtime)
             | None -> Lwt.return_none)
@@ -286,38 +245,30 @@ struct
       | Some _ -> Lwt.return st
       | None -> (
           (* No local sidecar (never cached, or after a full resync): the file's
-             manifest still lives on the backend. Resolve it so getattr/stat report
-             the real logical size instead of ENOENT. ponytail: one HEAD+GET per cold
-             stat; add a sidecar-on-stat cache if cold `ls -l` over a big directory
-             gets slow. *)
-          let+ m = R.fetch_manifest ~key () in
+             manifest still lives on the backend. Resolve it so getattr/stat
+             report the real logical size instead of ENOENT. *)
+          let+ m = resolved_manifest key in
           match m with
             | Some (`Clean { Manifest.symlink = Some target; mtime; _ }) ->
-                let size = Int64.of_int (String.length target) in
-                Some (symlink_stat size mtime)
+                Some (symlink_stat target mtime)
             | Some (`Clean m) ->
                 Some (file_stat m.Manifest.size m.Manifest.mtime)
             | _ -> None)
 
   let readlink key =
-    let* m = read_manifest key in
+    let+ m = resolved_manifest key in
     match m with
-      | Some (`Clean { Manifest.symlink = Some _ as target; _ }) ->
-          Lwt.return target
-      | Some _ | None -> (
-          let+ m = R.fetch_manifest ~key () in
-          match m with
-            | Some (`Clean { Manifest.symlink = Some _ as target; _ }) -> target
-            | _ -> None)
+      | Some (`Clean { Manifest.symlink = Some _ as target; _ }) -> target
+      | _ -> None
 
   (* readdir is served from the local manifest mirror (the source of truth for
      names and structure); the backend holds only hashed keys. Directory mtimes
      are not tracked locally, so they are reported absent. *)
-  let list_directory ~prefix =
-    let+ files, dirs = Mf.list_directory ~prefix () in
+  let list_children ~prefix =
+    let+ files, dirs = Mf.list_children ~prefix () in
     (files, List.map (fun d -> (d, (None : float option))) dirs)
 
-  let list_all_files ~prefix = Mf.list_all ~prefix ()
+  let list_tree ~prefix = Mf.list_tree ~prefix ()
   let enforce_chunk_cap = D.enforce_chunk_cap
   let chunk_stats = D.chunk_stats
   let resolve = Mf.resolve
@@ -445,19 +396,11 @@ struct
         with_journal key [`Delete (rel_key key)] (fun () -> apply_delete key))
 
   (* Backend key of a directory's folder marker (under its parent's namespace).
-     Used to move/remove a marker whose local dir has already moved or is gone. *)
+     Used to move or remove a marker whose local dir has already moved or is
+     gone, so the marker body [L] would build alongside it is not wanted. *)
   let folder_marker_bkey key =
-    let rel =
-      let r = rel_key key in
-      if String.ends_with ~suffix:"/" r then String.sub r 0 (String.length r - 1)
-      else r
-    in
-    let parent = match Filename.dirname rel with "." -> "" | d -> d in
-    let+ pid =
-      Folder_ids.resolve ~cache_root:C.cache_root ~domain_name:C.domain_name
-        parent
-    in
-    C.domain_prefix ^ Folder.child_key ~folder_id:pid (Filename.basename rel)
+    let+ bkey = L.folder_marker_key key in
+    Option.value bkey ~default:C.domain_prefix
 
   let mkdir key =
     with_meta (fun () ->
@@ -471,17 +414,9 @@ struct
      is reclaimed by [expire]; the local mirror copy is dropped immediately. *)
   let rmdir key =
     with_meta (fun () ->
-        let rel =
-          let r = rel_key key in
-          if String.ends_with ~suffix:"/" r then
-            String.sub r 0 (String.length r - 1)
-          else r
-        in
+        let rel = Key.chop_slash (rel_key key) in
         let* old_marker = folder_marker_bkey key in
-        let* fid =
-          Folder_ids.resolve ~cache_root:C.cache_root ~domain_name:C.domain_name
-            rel
-        in
+        let* fid = L.folder_id key in
         let trash_key =
           C.domain_prefix ^ Folder.trash_id ^ "/" ^ Folder.new_id ()
         in
@@ -513,7 +448,7 @@ struct
 
   let conflict_name rel =
     let base = Filename.basename rel in
-    let dir = Filename.dirname rel in
+    let dir = Key.parent rel in
     let name, ext =
       match String.rindex_opt base '.' with
         | None -> (base, "")
@@ -523,7 +458,7 @@ struct
     let base =
       Printf.sprintf "%s (conflicted copy from %s)%s" name C.client_name ext
     in
-    if dir = "." then base else dir ^ "/" ^ base
+    Key.join dir base
 
   (* A file rename moves its manifest object but not its body, so the leaf [name]
      it records goes stale. Rewrite it (local sidecar + backend) to match the new
@@ -541,7 +476,7 @@ struct
 
   let rename_body ~src ~dst =
     let mp = manifest_path src in
-    let* mst = stat_opt mp in
+    let* mst = Fs_util.stat_opt_large mp in
     let is_dir =
       match mst with
         | Some { Unix.LargeFile.st_kind = Unix.S_DIR; _ } -> true
@@ -699,22 +634,10 @@ struct
      Without this, resolving the folder here would mint a *different* id and this
      client's writes (and reads) would land in a separate namespace. *)
   let adopt_folder_id rel =
-    let rel =
-      if String.ends_with ~suffix:"/" rel then
-        String.sub rel 0 (String.length rel - 1)
-      else rel
-    in
+    let rel = Key.chop_slash rel in
     if rel = "" then Lwt.return_unit
-    else (
-      let parent = match Filename.dirname rel with "." -> "" | d -> d in
-      let* pid =
-        Folder_ids.resolve ~cache_root:C.cache_root ~domain_name:C.domain_name
-          parent
-      in
-      let marker_key =
-        C.domain_prefix
-        ^ Folder.child_key ~folder_id:pid (Filename.basename rel)
-      in
+    else
+      let* marker_key = folder_marker_bkey (C.domain_prefix ^ rel) in
       Lwt.catch
         (fun () ->
           let* data = St.get_object ~bkey:marker_key in
@@ -724,7 +647,7 @@ struct
                   ~domain_name:C.domain_name rel
                   { Folder.name = Filename.basename rel; id = m.Folder.id }
             | None -> Lwt.return_unit)
-        (fun _ -> Lwt.return_unit))
+        (fun _ -> Lwt.return_unit)
 
   (* A foreign op must never clobber unsynced local edits. The staged manifest is
      that flag, and unlike the open count it stood in for it survives a restart:

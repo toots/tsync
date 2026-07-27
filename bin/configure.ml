@@ -728,7 +728,7 @@ let edit_domain existing =
 
 (* Serialize globals + domains to [path] with 0600 perms. *)
 let write_config ~path ~client_name ~max_uploads ~max_downloads ~tls ~domains =
-  mkdir_p (Filename.dirname path);
+  Fs_util.mkdir_p_sync (Filename.dirname path);
   let json =
     `Assoc
       ([

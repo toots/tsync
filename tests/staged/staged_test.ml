@@ -248,7 +248,7 @@ let () =
         other: the untouched ones stay [Inherit] and keep their entries. *)
      let backend_chunks () =
        let (module B : Backend.S) = List.hd C.backends in
-       let+ entries = B.list_all ~prefix:C.chunk_prefix () in
+       let+ entries = B.list_prefix ~prefix:C.chunk_prefix () in
        List.length entries
      in
      let* before = backend_chunks () in

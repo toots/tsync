@@ -13,6 +13,14 @@ let rec mkdir_p path =
 
 let ensure_parent path = mkdir_p (Filename.dirname path)
 
+(* The same, for the callers that run before there is an Lwt loop to run in:
+   process startup, the CLI, the config writer. *)
+let rec mkdir_p_sync ?(perm = 0o755) path =
+  if not (Sys.file_exists path) then begin
+    mkdir_p_sync ~perm (Filename.dirname path);
+    try Unix.mkdir path perm with Unix.Unix_error (Unix.EEXIST, _, _) -> ()
+  end
+
 (* Replace [path] with [data] atomically. The temp gets a name of its own —
    unique per process and per call — rather than [path ^ ".tmp"]: two writers of
    the same path (a read-ahead and a foreground read, or a second tsync process)
@@ -96,6 +104,23 @@ let is_directory path =
       st.Unix.st_kind = Unix.S_DIR)
     (fun _ -> Lwt.return_false)
 
+(* [stat] as an option: a path that is absent — or that we cannot stat for any
+   other reason — reads as [None]. Callers use the inode as an existence test,
+   so every failure is the same answer. *)
+let stat_opt path =
+  Lwt.catch
+    (fun () ->
+      let+ st = Lwt_unix_retry.stat path in
+      Some st)
+    (fun _ -> Lwt.return_none)
+
+let stat_opt_large path =
+  Lwt.catch
+    (fun () ->
+      let+ st = Lwt_unix_retry.LargeFile.stat path in
+      Some st)
+    (fun _ -> Lwt.return_none)
+
 (** lstat-based kind: [`Dir], [`File], or [`Symlink target]. [`Missing] for any
     error (dangling link, permission denied, etc.). *)
 let lstat_kind path =
@@ -139,6 +164,11 @@ let quiet f =
   Lwt.catch f (function
     | Unix.Unix_error _ -> Lwt.return_unit
     | exn -> Lwt.fail exn)
+
+(* Deleting something that is already gone — or that we are not allowed to
+   delete — is the outcome the caller wanted either way. Every cache and scratch
+   path in the tree is re-derivable, so no unlink here is worth failing over. *)
+let unlink_quiet path = quiet (fun () -> Lwt_unix_retry.unlink path)
 
 (* Delete files under [dir] last modified before [cutoff] and prune directories
    left empty; [true] when [dir] holds nothing afterwards. Best-effort: a missing

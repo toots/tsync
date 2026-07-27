@@ -145,21 +145,12 @@ module Make (C : Conf.S) (F : Fetch) = struct
               | (path, bytes, _) :: rest ->
                   Log.debug "chunk cache: dropping %s (%d bytes)"
                     (Filename.basename path) bytes;
-                  let* () =
-                    Lwt.catch
-                      (fun () -> Lwt_unix_retry.unlink path)
-                      (function
-                        | Unix.Unix_error _ -> Lwt.return_unit
-                        | exn -> Lwt.fail exn)
-                  in
+                  let* () = Fs_util.unlink_quiet path in
                   go (total - bytes) rest
             in
             go total coldest)
 
-  let forget ~group =
-    Lwt.catch
-      (fun () -> Lwt_unix_retry.unlink (path group))
-      (function Unix.Unix_error _ -> Lwt.return_unit | exn -> Lwt.fail exn)
+  let forget ~group = Fs_util.unlink_quiet (path group)
 
   (* One stored chunk's bytes out of a group already on disk, without fetching:
      for a repair that wants to know whether the local copy can stand in. *)
@@ -264,10 +255,7 @@ module Make (C : Conf.S) (F : Fetch) = struct
       (fun () -> Lwt_unix_retry.LargeFile.ftruncate fd (Int64.of_int len))
       (fun () -> Lwt_unix_retry.close fd)
 
-  let stage_forget ~uuid =
-    Lwt.catch
-      (fun () -> Lwt_unix_retry.unlink (staged_path uuid))
-      (function Unix.Unix_error _ -> Lwt.return_unit | exn -> Lwt.fail exn)
+  let stage_forget ~uuid = Fs_util.unlink_quiet (staged_path uuid)
 
   (* ── Whole bodies ─────────────────────────────────────────────────────────
      A frontend that hands back a complete file (the FileProvider extension always
@@ -288,18 +276,13 @@ module Make (C : Conf.S) (F : Fetch) = struct
       (function
         | Unix.Unix_error (Unix.EXDEV, _, _) ->
             let* () = Fs_util.copy_file ~src ~dst in
-            Lwt.catch
-              (fun () -> Lwt_unix_retry.unlink src)
-              (fun _ -> Lwt.return_unit)
+            Fs_util.unlink_quiet src
         | exn -> Lwt.fail exn)
 
   let whole_read_into ~uuid buf ~offset =
     Local_io.read (whole_path uuid) buf ~offset
 
-  let whole_forget ~uuid =
-    Lwt.catch
-      (fun () -> Lwt_unix_retry.unlink (whole_path uuid))
-      (function Unix.Unix_error _ -> Lwt.return_unit | exn -> Lwt.fail exn)
+  let whole_forget ~uuid = Fs_util.unlink_quiet (whole_path uuid)
 
   (* Fill [buf] from stored chunk [index] of [group], starting [chunk_off] bytes
      into that chunk and fetching the group if it is absent. The cap may delete a

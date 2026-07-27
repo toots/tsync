@@ -5,17 +5,9 @@ type summary = { exported : int; missing : int }
 
 module Make (C : Conf.S) = struct
   module R = Remote.Make (C)
-  module St = Store.Make (C) (Layout.Inode.Make (C))
+  module Tree = Inode_tree.Make (C)
   module Mf = Manifest.Make (C)
   module D = Data.Make (C) (R)
-
-  (* Prefer the local sidecar (the only place a Dirty state lives), else the
-     remote manifest. *)
-  let manifest_for key =
-    let* sidecar = Mf.read key in
-    match sidecar with
-      | Some _ -> Lwt.return sidecar
-      | None -> R.fetch_manifest ~key ()
 
   (* One path for content: assemble through the read path, which covers a file
      with unsynced staged edits, a partially cached one and a never-cached one
@@ -24,15 +16,10 @@ module Make (C : Conf.S) = struct
     let key = C.domain_prefix ^ rel in
     let dst_path = Filename.concat dst rel in
     let* () = Fs_util.ensure_parent dst_path in
-    let* manifest = manifest_for key in
+    let* manifest = D.resolved_manifest key in
     match manifest with
       | Some (`Clean { symlink = Some target; _ }) ->
-          let* () =
-            Lwt.catch
-              (fun () -> Lwt_unix_retry.unlink dst_path)
-              (function
-                | Unix.Unix_error _ -> Lwt.return_unit | e -> Lwt.fail e)
-          in
+          let* () = Fs_util.unlink_quiet dst_path in
           let+ () = Lwt_unix_retry.symlink target dst_path in
           Exported_symlink
       | Some (`Clean _) ->
@@ -50,27 +37,16 @@ module Make (C : Conf.S) = struct
   (* Export every file of the domain to [dst]. Files are the union of the
      backend listing and the local sidecar tree (which adds local-only files
      whose upload is still pending). *)
-  (* Every backend file's real path, by walking the inode tree from the root:
-     folder markers name subfolders and point at their namespaces. *)
+  (* Every backend file's real path, by walking the inode tree from the root.
+     Errors are skipped rather than fatal: one unreadable object should cost its
+     own file, not the whole export. *)
   let remote_rels () =
-    let join rel name = if rel = "" then name else rel ^ "/" ^ name in
-    let rec walk folder_id rel acc =
-      let* entries = St.list_namespace ~folder_id in
-      Lwt_list.fold_left_s
-        (fun acc (e : Backend.file_entry) ->
-          Lwt.catch
-            (fun () ->
-              let* data = St.get_object ~bkey:e.Backend.key in
-              match Folder.marker_of_string data with
-                | Some m -> walk m.Folder.id (join rel m.Folder.name) acc
-                | None -> (
-                    match Manifest.of_string data with
-                      | `Clean m -> Lwt.return (join rel m.Manifest.name :: acc)
-                      | `Dirty | (exception _) -> Lwt.return acc))
-            (fun _ -> Lwt.return acc))
-        acc entries
-    in
-    walk Folder.root_id "" []
+    Tree.fold_tree ~skip_errors:true ~folder_id:Folder.root_id ~rel:""
+      (fun acc rel entry ->
+        match entry.Inode_tree.body with
+          | Inode_tree.File m -> Lwt.return (Key.join rel m.Manifest.name :: acc)
+          | Inode_tree.Dir _ -> Lwt.return acc)
+      []
 
   let run ~dst ~on_file () =
     let* remote_rels = remote_rels () in
