@@ -30,8 +30,8 @@ A walkthrough in order: follow it from the top for a working setup, then read on
 > [!WARNING]
 > **`make install` takes shortcuts to get you running quickly**, and there is no
 > `make uninstall`. Read [`linux/Makefile`](linux/Makefile) or
-> [`macos/Makefile`](macos/Makefile) and the deploy scripts next to them for exactly what it
-> touches. Developer setup for now; a proper install is planned.
+> [`macos/Makefile`](macos/Makefile) — and the `deploy*.sh` scripts the latter calls — for
+> exactly what it touches. Developer setup for now; a proper install is planned.
 
 Needs [opam](https://opam.ocaml.org/) and OCaml ≥ 5.5.
 
@@ -398,16 +398,17 @@ Small for data edited in place (disk images, databases, documents you keep savin
 write-once media you mostly stream.
 
 **`cacheChunkSize`** (default 16 MiB) is how many consecutive chunks share one local cache
-file. It trades disk work against first-touch latency:
+file. It trades disk work against how much is transferred to serve the first byte:
 
 - **Larger** — fewer, bigger files, so less per-file overhead and better disk throughput once
   the data is local.
 - **Smaller** — less to fetch before the first byte can be served.
 
-Reading any byte of a group materializes the whole group, and its chunks are fetched **one at
-a time**: a cold read waits for `cacheChunkSize / chunkSize` sequential round trips before
-returning anything — two at the defaults, sixteen for a 128 MiB cache chunk over 8 MiB
-chunks. Eviction is per cache file too, so a bigger value discards more at once.
+Reading any byte of a group materializes the whole group: the file is sized on disk up front
+and its chunks are fetched concurrently, each writing its own range, so a cold read costs
+about one round trip whatever the value. What a larger value costs is bytes — the whole group
+is transferred to serve the first byte of it — and coarser eviction, since a cache file is
+dropped whole.
 
 Keep it a small multiple of `chunkSize`. Raise it for sequential streaming off a fast link;
 lower it when opening a file promptly matters more than throughput.

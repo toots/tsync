@@ -64,8 +64,8 @@ let register ~spec name (f : factory) =
 let spec_for name =
   Option.map (fun e -> e.spec) (Hashtbl.find_opt registry name)
 
-(* Every registered type name. What is available depends on how the binary was
-   linked (s3 is optional), so a UI offers this rather than a hand-kept list. *)
+(* Every registered type name, for a UI that offers a choice. What is available
+   depends on how the binary was linked, since s3 is optional. *)
 let types () =
   List.sort compare (Hashtbl.fold (fun name _ acc -> name :: acc) registry [])
 

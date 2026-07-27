@@ -179,7 +179,13 @@ let () =
      (* ── Grouped: three stored chunks, one cache file ─────────────────────── *)
      (* One cache miss costs one GET per member, and lands as a single file. *)
      let* () = show "trio cold" trio in
+     let started = Unix.gettimeofday () in
      let* () = show_body "trio member 0" trio 0 in
+     (* Those three GETs run concurrently, each writing its own offset, so the
+        miss costs about one 50 ms sleep. A bound keeps the snapshot off the
+        clock; it sits between the cost of one sleep and of three. *)
+     Printf.printf "%-28s one_get_not_three=%b\n" "trio fetch concurrency"
+       (Unix.gettimeofday () -. started < 0.10);
      Printf.printf "%-28s %s\n" "layout" (rel (path trio));
      Printf.printf "%-28s bytes=%d members=%d\n" "trio body"
        (Chunk_group.bytes trio)

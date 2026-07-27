@@ -257,7 +257,9 @@ let prompt_backend () =
     if List.mem "s3" types then Some "s3" else List.nth_opt types 0
   in
   let rec ask () =
-    let t = prompt ("  Backend type (" ^ String.concat "/" types ^ ")") default in
+    let t =
+      prompt ("  Backend type (" ^ String.concat "/" types ^ ")") default
+    in
     if List.mem t types then t
     else begin
       Printf.printf "  Unknown backend type %S — choose one of: %s.\n%!" t

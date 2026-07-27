@@ -106,12 +106,12 @@ module Make (C : Conf.S) = struct
       | Some n -> ( try Lwt_unix.send_notification n with _ -> ())
       | None -> ()
 
-  (* Released on the Lwt side rather than from a thread: [Lwt_process] reaps the
-     child through the event loop, so nothing is blocked waiting on it, and the
-     process cannot reach [exit] with the unmount still pending because the
-     shutdown sequence awaits it. No shell, so the mount path needs no quoting.
-     The short delay lets the IPC [stop] reply reach its caller before the mount
-     it is talking about disappears. *)
+  (* [Lwt_process] reaps the child through the event loop, so no thread is blocked
+     waiting on it, and the shutdown sequence awaits this promise, so the process
+     cannot reach [exit] with the unmount still pending. It takes an argument
+     array, not a shell line, so the mount path needs no quoting. The short delay
+     lets the IPC [stop] reply reach its caller before the mount it is talking
+     about disappears. *)
   let unmount mount_point =
     if not !unmount_needed then Lwt.return_unit
     else

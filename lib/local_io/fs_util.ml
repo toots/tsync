@@ -33,14 +33,14 @@ let temp_path path =
   Filename.concat (Filename.dirname path)
     (Printf.sprintf ".tsync-tmp-%d-%d.tmp" (Unix.getpid ()) !temp_seq)
 
-(* All or nothing: a [write] that fails part-way — a backend error mid-assembly,
+(* All or nothing: a [fill] that fails part-way — a backend error mid-assembly,
    a full disk — leaves no temp file behind to be counted against the cache or
    swept later. *)
-let write_then_rename path write =
+let with_temp_rename path fill =
   let tmp = temp_path path in
   Lwt.catch
     (fun () ->
-      let* () = Lwt_unix_retry.with_file ~mode:Lwt_io.Output tmp write in
+      let* () = fill tmp in
       Lwt_unix_retry.rename tmp path)
     (fun exn ->
       let* () =
@@ -50,13 +50,51 @@ let write_then_rename path write =
       in
       Lwt.fail exn)
 
+let write_then_rename path write =
+  with_temp_rename path (fun tmp ->
+      Lwt_unix_retry.with_file ~mode:Lwt_io.Output tmp write)
+
 let atomic_write path data =
   write_then_rename path (fun oc -> Lwt_io.write oc data)
 
-(* [atomic_write] for a body assembled from pieces: [write] appends each in
-   turn, so the caller never holds the whole thing in memory. *)
-let atomic_write_seq path write =
-  write_then_rename path (fun oc -> write (Lwt_io.write oc))
+(* [atomic_write] for a body assembled from pieces, each known by position. The
+   file is sized up front, then [put ~offset] writes one range through [pwrite],
+   which carries its own offset and never touches the descriptor's shared
+   position — so pieces may be written concurrently, out of order, on this one
+   descriptor, and the caller never holds the whole body in memory. Still renamed
+   only once [write] returns, so a reader never sees a partial body. *)
+let atomic_write_at path ~size write =
+  with_temp_rename path (fun tmp ->
+      let* fd =
+        Lwt_unix_retry.openfile tmp
+          [Unix.O_WRONLY; Unix.O_CREAT; Unix.O_TRUNC]
+          0o644
+      in
+      Lwt.finalize
+        (fun () ->
+          (* Allocated before any piece is produced, so a full disk fails here,
+             before the bytes are paid for. *)
+          let* () = Lwt_unix_retry.LargeFile.ftruncate fd (Int64.of_int size) in
+          let put ~offset data =
+            let total = String.length data in
+            let rec go written =
+              if written >= total then Lwt.return_unit
+              else
+                let* n =
+                  Lwt_unix_retry.pwrite_string fd data
+                    ~file_offset:(offset + written) written (total - written)
+                in
+                if n = 0 then
+                  Lwt.fail
+                    (Failure
+                       (Printf.sprintf "short write to %s at offset %d" tmp
+                          (offset + written)))
+                else go (written + n)
+            in
+            go 0
+          in
+          write put)
+        (fun () -> Lwt_unix_retry.close fd))
 
 let copy_file ~src ~dst =
   let* src_fd = Lwt_unix_retry.openfile src [Unix.O_RDONLY] 0 in

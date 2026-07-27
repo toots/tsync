@@ -15,11 +15,19 @@ val mkdir_p_sync : ?perm:int -> string -> unit
     writers of the same path, in this process or another. *)
 val atomic_write : string -> string -> unit Lwt.t
 
-(** [atomic_write] for a body assembled from pieces: [atomic_write_seq path f]
-    calls [f append], and each [append] adds to the temp file. Lets a caller
-    build a large body without ever holding it whole in memory. *)
-val atomic_write_seq :
-  string -> ((string -> unit Lwt.t) -> unit Lwt.t) -> unit Lwt.t
+(** [atomic_write] for a body assembled from pieces, each known by position.
+    [atomic_write_at path ~size f] sizes the temp file to [size] up front — so a
+    full disk fails before the pieces are produced — then calls [f put], where
+    [put ~offset data] writes one range. Writes go through [pwrite] and carry
+    their own offset, so pieces may be produced and written concurrently and out
+    of order, and a large body is never held whole in memory. The rename happens
+    only once [f] returns, so a reader never sees a partial body. Every byte of
+    [size] must be covered exactly once. *)
+val atomic_write_at :
+  string ->
+  size:int ->
+  ((offset:int -> string -> unit Lwt.t) -> unit Lwt.t) ->
+  unit Lwt.t
 
 (** [copy_file ~src ~dst] copies [src] over [dst], creating or truncating it. *)
 val copy_file : src:string -> dst:string -> unit Lwt.t

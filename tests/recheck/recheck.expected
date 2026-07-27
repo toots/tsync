@@ -47,7 +47,7 @@
 --- tree
   f file.bin size=11 cached=0/1 uploaded=true etag=d94b4e9626fdc9c1
 --- content
-  file.bin = "garbage"
+  file.bin = <unavailable: Backend.Backend_error("chunk d447b1ea40e6988b-b7aeb52a10fdaf2d: have 7 bytes, manifest says 11")>
 --- backend
   chunk d447b1ea40e6988b-b7aeb52a10fdaf2d size=7
   journal <entry-1> = put file.bin 11

@@ -31,23 +31,43 @@ module Make (C : Conf.S) (F : Fetch) = struct
   let fetching : (string, unit Lwt.t) Hashtbl.t = Hashtbl.create 64
   let in_flight () = Hashtbl.length fetching
 
-  (* Members are fetched one at a time and appended, so the peak resident body is
-     one *stored* chunk however large the cache chunk is.
-     ponytail: serial within a group — the first cold group pays one round trip
-     per member. Parallelism comes from concurrent group fetches (read-ahead,
-     whole-file materialization); give this a bounded window writing at member
-     offsets if first-touch latency ever matters. *)
-  let fetch group =
+  (* Write the group's body from [body i]. The file is sized on disk up front and
+     each member is written at its own offset, so members are produced
+     concurrently and land in whatever order they finish: a cold group costs about
+     one round trip, whatever [cache_chunk_size] is.
+
+     Concurrency is bounded in the producer. [Remote.get_chunk] takes a slot from
+     a pool of [max_downloads] shared by every download in the process, so
+     launching all of a group's members at once stays under that ceiling. Resident
+     bytes follow the same bound, since a body exists only between its producer
+     returning and its write completing.
+
+     Every byte of the file has to be covered exactly once, which
+     {!Fs_util.atomic_write_at} requires and the length check enforces: a member
+     whose length disagrees with the manifest fails the write, so a wrong-length
+     body never reaches a caller as file content. *)
+  let write_group group body =
     let p = path group in
     let* () = Fs_util.ensure_parent p in
     (* Atomic: a reader never sees a half-written group, so presence alone is
        proof of a complete body. *)
-    Fs_util.atomic_write_seq p (fun append ->
-        Lwt_list.iter_s
-          (fun chunk_key ->
-            let* data = F.get_chunk ~chunk_key in
-            append data)
-          (Chunk_group.members group))
+    Fs_util.atomic_write_at p ~size:(Chunk_group.bytes group) (fun put ->
+        Lwt_list.iter_p
+          (fun i ->
+            let* data = body i in
+            let expected = Chunk_group.size group i in
+            if String.length data <> expected then
+              Lwt.fail
+                (Backend.Backend_error
+                   (Printf.sprintf "chunk %s: have %d bytes, manifest says %d"
+                      (Chunk_group.member_key group i)
+                      (String.length data) expected))
+            else put ~offset:(Chunk_group.offset group i) data)
+          (Chunk_group.indices group))
+
+  let fetch group =
+    write_group group (fun i ->
+        F.get_chunk ~chunk_key:(Chunk_group.member_key group i))
 
   (* Put [group]'s body on disk, unless it is already there. Concurrent callers
      await the same fetch; [force] re-fetches a body believed corrupt. *)
@@ -79,16 +99,7 @@ module Make (C : Conf.S) (F : Fetch) = struct
      already under this key is the same bytes. *)
   let put_group ~group ~member =
     let* present = exists group in
-    if present then Lwt.return_unit
-    else (
-      let p = path group in
-      let* () = Fs_util.ensure_parent p in
-      Fs_util.atomic_write_seq p (fun append ->
-          Lwt_list.iter_s
-            (fun i ->
-              let* data = member i in
-              append data)
-            (Chunk_group.indices group)))
+    if present then Lwt.return_unit else write_group group member
 
   (* ── Cache cap ─────────────────────────────────────────────────────────────
      Every chunk here is interchangeable and re-fetchable, so keeping the store
