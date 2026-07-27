@@ -864,7 +864,20 @@ let sync_cmd =
                                          man
                                      in
                                      None
-                                 | exception _ -> Lwt.return_none))
+                                 | exception parse_exn ->
+                                     (* Neither a folder marker nor a body this
+                                        build can read. Counted and logged: a
+                                        store whose manifests all fail to parse
+                                        would otherwise resync "successfully"
+                                        while writing nothing at all. *)
+                                     incr failed;
+                                     Log.warn
+                                       "resync %s: unreadable manifest: %s"
+                                       e.key
+                                       (match parse_exn with
+                                         | Chunk_table.Malformed m -> m
+                                         | ex -> Printexc.to_string ex);
+                                     Lwt.return_none))
                    in
                    match next with
                      | Some (id, child) -> walk id child
