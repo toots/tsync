@@ -28,12 +28,10 @@ A walkthrough in order: follow it from the top for a working setup, then read on
 ## 1. Install
 
 > [!WARNING]
-> **`make install` takes shortcuts to get you running quickly.** It puts the binary in
-> `~/.local/bin`, drops a service unit into `~/.config/systemd/user` (Linux) or
-> `~/Library/LaunchAgents` (macOS) and enables it without asking, and on macOS `rm -rf`s
-> `/Applications/TsyncApp.app`, kills any running copy and installs an unsigned build.
-> `install-deps` pins two dependencies to personal forks. There is no `make uninstall`.
-> Developer setup for now; a proper install is planned.
+> **`make install` takes shortcuts to get you running quickly**, and there is no
+> `make uninstall`. Read [`linux/Makefile`](linux/Makefile) or
+> [`macos/Makefile`](macos/Makefile) and the deploy scripts next to them for exactly what it
+> touches. Developer setup for now; a proper install is planned.
 
 Needs [opam](https://opam.ocaml.org/) and OCaml ≥ 5.5.
 

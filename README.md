@@ -63,9 +63,9 @@ Files are split into content-addressed chunks, so editing one frame of a video u
 ## Install
 
 > [!WARNING]
-> **`make install` takes shortcuts to get you running quickly.** It writes into your home,
-> enables a service without asking, and on macOS replaces `/Applications/TsyncApp.app`.
-> No uninstall. Developer setup for now; a proper install is planned.
+> **`make install` takes shortcuts to get you running quickly**, and there is no
+> `make uninstall`. See the `linux/` and `macos/` makefiles for what it touches. Developer
+> setup for now; a proper install is planned.
 
 Needs [opam](https://opam.ocaml.org/) and OCaml ≥ 5.5.
 
