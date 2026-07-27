@@ -6,4 +6,5 @@
   tsync_local_backend
   tsync_http_proxy_backend
   tsync_frontend_register
-  tsync_frontend))
+  tsync_frontend
+  uri))

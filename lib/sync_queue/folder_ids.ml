@@ -37,7 +37,7 @@ let write ~cache_root ~domain_name rel (m : Folder.marker) =
 
 (* Folder id of [rel] — the root when empty; minted and persisted when a folder
    has no marker yet. *)
-let resolve ~cache_root ~domain_name rel =
+let ensure_id ~cache_root ~domain_name rel =
   if rel = "" then Lwt.return Folder.root_id
   else
     let* existing = read ~cache_root ~domain_name rel in

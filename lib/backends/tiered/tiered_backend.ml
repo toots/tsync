@@ -177,13 +177,9 @@ let make ~chunk_prefix ~(read_order : sub list) ~(manifest_read : sub list)
         (fun (module B : Backend.S) -> B.copy ~src_key ~dst_key ())
         writes
 
-    let list_all ?max_keys ~prefix () =
+    let list_prefix ?max_keys ~prefix () =
       manifest_first "list_all" (fun (module B : Backend.S) ->
-          B.list_all ?max_keys ~prefix ())
-
-    let list_directory ~prefix () =
-      manifest_first "list_directory" (fun (module B : Backend.S) ->
-          B.list_directory ~prefix ())
+          B.list_prefix ?max_keys ~prefix ())
 
     let share_url ~prefix () =
       let rec go = function
@@ -191,6 +187,16 @@ let make ~chunk_prefix ~(read_order : sub list) ~(manifest_read : sub list)
         | (module B : Backend.S) :: rest -> (
             let* u = B.share_url ~prefix () in
             match u with Some _ -> Lwt.return u | None -> go rest)
+      in
+      go all_read
+
+    (* First sub-backend with an opinion, in read preference. *)
+    let default_chunk_size ~prefix () =
+      let rec go = function
+        | [] -> Lwt.return_none
+        | (module B : Backend.S) :: rest -> (
+            let* n = B.default_chunk_size ~prefix () in
+            match n with Some _ -> Lwt.return n | None -> go rest)
       in
       go all_read
   end)

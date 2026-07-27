@@ -1,12 +1,60 @@
 (* Single source of truth for the local cache directory layout, per domain:
-     <cache_root>/manifests/<domain>/…  — manifest mirror (+ .tsync-dir markers)
-     <cache_root>/cached/<domain>/…     — downloaded file data
-   The two trees mirror each other by real path. Both [Local] (manifest sidecars
-   + cached data) and [Folder_ids] (folder markers) derive their paths from here,
-   so the manifest mirror has exactly one definition. *)
+     <cache_root>/<domain>/manifests/<real path>   — published manifest mirror
+                                                     (+ .tsync-dir / .tsync-name markers)
+     <cache_root>/<domain>/scratch/<real path>     — .fuse_hidden* scratch files
+     <cache_root>/<domain>/chunks/<xx>/<key>       — content-addressed cache-chunk store
+                                                     (one file per {!Chunk_group})
+     <cache_root>/<domain>/staged/manifests/<path> — staged manifests (unsynced edits)
+     <cache_root>/<domain>/staged/chunks/<uuid>    — staged chunk bodies
+     <cache_root>/<domain>/staged/whole/<uuid>     — whole files handed back by a frontend
+     <cache_root>/<domain>/handoff/<uuid>          — assembled files handed to a frontend
+   The manifest and scratch trees mirror each other by real path; both [Local]
+   and [Folder_ids] derive their paths from here, so that mirror has exactly one
+   definition. Everything under chunks/ and staged/ is keyed by content or by an
+   opaque id, so it is independent of any path. *)
+
+let domain_dir ~cache_root domain_name = Filename.concat cache_root domain_name
+
+let sub ~cache_root domain_name name =
+  Filename.concat (domain_dir ~cache_root domain_name) name
 
 let manifests_dir ~cache_root domain_name =
-  Filename.concat cache_root (domain_name ^ "/manifests")
+  sub ~cache_root domain_name "manifests"
 
-let cached_dir ~cache_root domain_name =
-  Filename.concat cache_root (domain_name ^ "/cached")
+let scratch_dir ~cache_root domain_name = sub ~cache_root domain_name "scratch"
+let chunks_dir ~cache_root domain_name = sub ~cache_root domain_name "chunks"
+let handoff_dir ~cache_root domain_name = sub ~cache_root domain_name "handoff"
+
+let staged_manifests_dir ~cache_root domain_name =
+  sub ~cache_root domain_name "staged/manifests"
+
+let staged_chunks_dir ~cache_root domain_name =
+  sub ~cache_root domain_name "staged/chunks"
+
+let staged_whole_dir ~cache_root domain_name =
+  sub ~cache_root domain_name "staged/whole"
+
+(* Cache keys are fixed-length hex ("<h1>-<h2>"), so a two-character prefix
+   directory splits the cache 256 ways — enough to keep readdir cheap when a
+   large cache holds hundreds of thousands of entries. *)
+let chunk_fanout = 2
+
+let chunk_path ~cache_root ~domain_name chunk_key =
+  let prefix =
+    if String.length chunk_key >= chunk_fanout then
+      String.sub chunk_key 0 chunk_fanout
+    else "_"
+  in
+  Filename.concat
+    (Filename.concat (chunks_dir ~cache_root domain_name) prefix)
+    chunk_key
+
+(* Remove the domain's local cache — manifest mirror, chunk store, scratch and
+   handoff trees — for a full resync that rebuilds it from the backend. Staged
+   edits are deliberately kept: nothing else holds those bytes. *)
+let clear ~cache_root ~domain_name =
+  let open Lwt.Syntax in
+  let* () = Fs_util.rm_rf (manifests_dir ~cache_root domain_name) in
+  let* () = Fs_util.rm_rf (scratch_dir ~cache_root domain_name) in
+  let* () = Fs_util.rm_rf (handoff_dir ~cache_root domain_name) in
+  Fs_util.rm_rf (chunks_dir ~cache_root domain_name)

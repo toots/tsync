@@ -8,12 +8,8 @@ type binding = {
 }
 
 module type S = sig
-  val is_local :
-    cache_root:string ->
-    domain_name:string ->
-    domain_prefix:string ->
-    string ->
-    bool
+  (* Whether every byte of [key] is on this machine, for `tsync ls`. *)
+  val is_local : Conf.locality -> string -> bool
 
   (* Run this frontend for all the domains bound to it. Blocks until shutdown. *)
   val start : binding list -> unit

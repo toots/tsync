@@ -49,7 +49,7 @@ let main () =
     entry
   in
   let list_all prefix =
-    let+ entries = B.list_all ~prefix () in
+    let+ entries = B.list_prefix ~prefix () in
     Printf.printf "list_all %S:\n" prefix;
     List.iter print_entry entries
   in
@@ -69,10 +69,6 @@ let main () =
   Printf.printf "get we ird'name.txt: %S\n" data;
   let* () = list_all "" in
   let* () = list_all "sub/" in
-  let* files, subdirs = B.list_directory ~prefix:"" () in
-  print_endline "list_directory \"\":";
-  List.iter print_entry files;
-  List.iter (fun (d, _) -> Printf.printf "  dir %s\n" d) subdirs;
   let* () = B.delete ~key:"a.txt" () in
   let* _ = head "a.txt" in
   let* () = B.delete_multi ["sub/b.txt"; "we ird'name.txt"] in
@@ -112,7 +108,7 @@ let main () =
     | Some e ->
         Printf.printf "factory head hostile: key=%S size=%d\n" e.key e.size
     | None -> print_endline "factory head hostile: none");
-  let* entries = E.list_all ~prefix:"dir/" () in
+  let* entries = E.list_prefix ~prefix:"dir/" () in
   Printf.printf "factory list_all dir/:\n";
   List.iter
     (fun (e : Backend.file_entry) -> Printf.printf "  %S (%d)\n" e.key e.size)

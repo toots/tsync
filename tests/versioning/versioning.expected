@@ -6,7 +6,7 @@
   write foo.txt "three three three"
   drain
 --- tree
-  f foo.txt size=17 cached=true uploaded=true etag=bc4fe9e67f44fd6f
+  f foo.txt size=17 cached=0/1 uploaded=true etag=bc4fe9e67f44fd6f
 --- content
   foo.txt = "three three three"
 --- backend
@@ -39,7 +39,7 @@
   drain
   rename a.txt -> b.txt
 --- tree
-  f b.txt size=9 cached=true uploaded=true etag=26c07bf51c7fd4ad
+  f b.txt size=9 cached=0/1 uploaded=true etag=26c07bf51c7fd4ad
 --- content
   b.txt = "content a"
 --- backend
@@ -58,7 +58,7 @@
   drain
   revert foo.txt @latest
 --- tree
-  f foo.txt size=15 cached=false uploaded=true etag=25c9d2f7756cf96d
+  f foo.txt size=15 cached=0/1 uploaded=true etag=25c9d2f7756cf96d
 --- content
   foo.txt = "deleted content"
 --- backend
@@ -80,7 +80,7 @@
   drain
   revert foo.txt @latest
 --- tree
-  f foo.txt size=3 cached=false uploaded=true etag=f7cd621f4f189919
+  f foo.txt size=3 cached=0/1 uploaded=true etag=f7cd621f4f189919
 --- content
   foo.txt = "two"
 --- backend

@@ -4,7 +4,7 @@ let implementation = "http-proxy"
 
 (* The proxy is not a local mount; nothing is "locally cached" from its point of
    view. *)
-let is_local ~cache_root:_ ~domain_name:_ ~domain_prefix:_ _key = false
+let is_local (_ : Conf.locality) _key = false
 
 (* ── Option resolution (with inheritance across the shared listener) ─────────── *)
 
@@ -39,6 +39,7 @@ type route = {
   shares_prefix : string;
   secret : string;
   read_only : bool;
+  chunk_size : int option;  (** what this domain's config says, if anything *)
   primary : (module Backend.S);
   all_backends : (module Backend.S) list;
   serve_share : share_handler option;
@@ -67,7 +68,6 @@ let make_route bindings (b : Frontend.binding) =
     match inherited bindings b "shares" with
       | Some ("true" | "1") ->
           let module Sh = Share_server.Make (C) in
-          Sh.start_expiry ();
           Some
             (fun ~token ~sub ~query ~range ->
               Sh.handle ~token ~sub ~query ~range)
@@ -89,6 +89,7 @@ let make_route bindings (b : Frontend.binding) =
     shares_prefix = C.shares_prefix;
     secret;
     read_only;
+    chunk_size = C.chunk_size;
     primary = List.hd C.backends;
     all_backends = C.backends;
     serve_share;
@@ -104,8 +105,8 @@ type op =
   | Delete_multi of string list
   | Copy of string * string
   | List_all of string * int option
-  | List_dir of string
   | Share_url of string
+  | Chunk_size of string
   | Bad
 
 let parse_op meth uri body =
@@ -142,8 +143,9 @@ let parse_op meth uri body =
         match (q "mode", q "prefix") with
           | Some "all", Some prefix ->
               List_all (prefix, Option.bind (q "max_keys") int_of_string_opt)
-          | Some "dir", Some prefix -> List_dir prefix
           | _ -> Bad)
+    | `GET, "/chunk-size" -> (
+        match q "prefix" with Some prefix -> Chunk_size prefix | None -> Bad)
     | `GET, "/share-url" -> (
         match q "prefix" with Some prefix -> Share_url prefix | None -> Bad)
     | _ -> Bad
@@ -155,7 +157,7 @@ let route_key = function
   | Delete_multi (k :: _) -> Some k
   | Delete_multi [] -> None
   | Copy (src, _) -> Some src
-  | List_all (p, _) | List_dir p | Share_url p -> Some p
+  | List_all (p, _) | Share_url p | Chunk_size p -> Some p
   | Bad -> None
 
 let respond ?(status = `OK) ?(headers = []) body =
@@ -239,12 +241,8 @@ let exec route op ~body =
           respond ""
     | List_all (prefix, max_keys) ->
         let module B = (val route.primary : Backend.S) in
-        let* entries = B.list_all ?max_keys ~prefix () in
+        let* entries = B.list_prefix ?max_keys ~prefix () in
         respond (Http_proxy.Wire.entries_to_json entries)
-    | List_dir prefix ->
-        let module B = (val route.primary : Backend.S) in
-        let* result = B.list_directory ~prefix () in
-        respond (Http_proxy.Wire.list_dir_to_json result)
     | Share_url prefix ->
         if route.serve_share <> None then
           (* We serve them: the client composes the URL from the address it
@@ -265,6 +263,17 @@ let exec route op ~body =
                   | None -> find rest)
           in
           find route.all_backends)
+    | Chunk_size _ -> (
+        (* So a client behind us writes new files at the size this domain already
+           uses, rather than the setting living in both configs. Silence when we
+           have none configured: the client's own default is then the same 8 MiB
+           ours would have been.
+           ponytail: not chained through our own backends, so a proxy fronting a
+           proxy answers only for itself. *)
+          match route.chunk_size with
+          | Some n ->
+              respond (Yojson.Safe.to_string (`Assoc [("chunkSize", `Int n)]))
+          | None -> respond ~status:`Not_found "")
     | Bad -> respond ~status:`Bad_request "bad request"
 
 (* Share manifests are written outside every domain root ([shares_prefix] is

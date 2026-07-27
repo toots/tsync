@@ -19,13 +19,8 @@ let root_id = ".tsync-root"
    [expire] reclaims the subtree past a grace period. *)
 let trash_id = ".tsync-trash"
 
-(* 128-bit random id, minted at mkdir. Xxhash-free: ids are opaque handles. *)
-let () = Random.self_init ()
-
-let new_id () =
-  Printf.sprintf "%08Lx%08Lx"
-    (Random.int64 0x1_0000_0000L)
-    (Random.int64 0x1_0000_0000L)
+(* Random id, minted at mkdir. Xxhash-free: ids are opaque handles. *)
+let new_id = Id.short
 
 (* A child's key component within its parent's namespace: the dual-seed xxHash
    of its leaf name, matching the chunk-key convention. Fixed length and

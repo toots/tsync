@@ -155,29 +155,22 @@ let prompt_symlinks default =
   in
   ask ()
 
-let rec prompt_size msg default =
-  match
-    Conf_parsing.parse_size
-      (prompt msg (Some (Conf_parsing.format_size default)))
-  with
-    | Some n -> n
-    | None ->
-        Printf.printf "  (enter a size like 512K, 8M, or 1G)\n%!";
-        prompt_size msg default
-
-(* Like {!prompt_size} but "none" (the default when unset) clears to unlimited. *)
-let rec prompt_size_opt msg default =
+(* A size, or nothing: [unset] is both the word shown when the field has no
+   value and a word that clears it. Every size in a domain is optional, so an
+   answered prompt is the only thing that ever writes one to the config. *)
+let rec prompt_size_opt ?(unset = "none") msg default =
   let def =
-    match default with Some n -> Conf_parsing.format_size n | None -> "none"
+    match default with Some n -> Conf_parsing.format_size n | None -> unset
   in
   match String.lowercase_ascii (String.trim (prompt msg (Some def))) with
-    | "none" | "unlimited" | "0" | "" -> None
+    | "none" | "unlimited" | "default" | "0" | "" -> None
     | v -> (
         match Conf_parsing.parse_size v with
           | Some n -> Some n
           | None ->
-              Printf.printf "  (enter a size like 2G, or \"none\")\n%!";
-              prompt_size_opt msg default)
+              Printf.printf "  (enter a size like 512K, 8M or 1G, or %S)\n%!"
+                unset;
+              prompt_size_opt ~unset msg default)
 
 (* ── Backend / domain builders ───────────────────────────────────────────── *)
 
@@ -616,16 +609,15 @@ let edit_domain existing =
   let versioning = ref (curbool "versioning") in
   let symlinks = ref (cur "symlinks" "keep") in
   let read_only = ref (curbool "readOnly") in
-  let chunk_size =
+  let size_field name =
     ref
-      (match Option.bind existing (fun j -> jfield j "chunkSize") with
-        | Some (`Int n) when n > 0 -> n
-        | Some (`String s) -> (
-            match Conf_parsing.parse_size s with
-              | Some n -> n
-              | None -> Conf_parsing.default_chunk_size)
-        | _ -> Conf_parsing.default_chunk_size)
+      (match Option.bind existing (fun j -> jfield j name) with
+        | Some (`Int n) when n > 0 -> Some n
+        | Some (`String s) -> Conf_parsing.parse_size s
+        | _ -> None)
   in
+  let chunk_size = size_field "chunkSize" in
+  let cache_chunk_size = size_field "cacheChunkSize" in
   let max_cache =
     ref
       (match Option.bind existing (fun j -> jfield j "maxCache") with
@@ -654,9 +646,14 @@ let edit_domain existing =
           prompt_bool ~default:!read_only
             "Read-only mount (block all local writes)?";
         chunk_size :=
-          prompt_size
+          prompt_size_opt ~unset:"default"
             "Chunk size (smaller helps random access; larger favors throughput)"
             !chunk_size;
+        cache_chunk_size :=
+          prompt_size_opt ~unset:"default"
+            "Cache chunk size (chunks grouped this big on local disk; larger \
+             cuts I/O latency)"
+            !cache_chunk_size;
         max_cache :=
           prompt_size_opt "Max local cache size (\"none\" = unlimited)"
             !max_cache;
@@ -672,14 +669,18 @@ let edit_domain existing =
           Printf.printf "  2. versioning:  %b\n" !versioning;
           Printf.printf "  3. symlinks:    %s\n" !symlinks;
           Printf.printf "  4. read-only:   %b\n" !read_only;
-          Printf.printf "  5. chunk size:  %s\n"
-            (Conf_parsing.format_size !chunk_size);
-          Printf.printf "  6. max cache:   %s\n"
+          let size_str = function
+            | Some n -> Conf_parsing.format_size n
+            | None -> "default"
+          in
+          Printf.printf "  5. chunk size:  %s\n" (size_str !chunk_size);
+          Printf.printf "  6. cache chunk: %s\n" (size_str !cache_chunk_size);
+          Printf.printf "  7. max cache:   %s\n"
             (match !max_cache with
               | Some n -> Conf_parsing.format_size n
               | None -> "none");
-          Printf.printf "  7. backends:    %s\n" (backend_summary !backends);
-          Printf.printf "  8. frontends:   %s\n" (frontend_summary !frontends);
+          Printf.printf "  8. backends:    %s\n" (backend_summary !backends);
+          Printf.printf "  9. frontends:   %s\n" (frontend_summary !frontends);
           if !status <> "" then Printf.printf "\n%s\n" !status;
           Printf.printf "\nEnter a field number to edit, or [d]one:\n> %!";
           status := "";
@@ -691,13 +692,19 @@ let edit_domain existing =
             | "3" -> symlinks := prompt_symlinks !symlinks
             | "4" ->
                 read_only := prompt_bool ~default:!read_only "Read-only mount?"
-            | "5" -> chunk_size := prompt_size "Chunk size" !chunk_size
+            | "5" ->
+                chunk_size :=
+                  prompt_size_opt ~unset:"default" "Chunk size" !chunk_size
             | "6" ->
+                cache_chunk_size :=
+                  prompt_size_opt ~unset:"default" "Cache chunk size"
+                    !cache_chunk_size
+            | "7" ->
                 max_cache :=
                   prompt_size_opt "Max local cache size (\"none\" = unlimited)"
                     !max_cache
-            | "7" -> backends := edit_backends !backends
-            | "8" -> frontends := edit_frontends !frontends
+            | "8" -> backends := edit_backends !backends
+            | "9" -> frontends := edit_frontends !frontends
             | "d" | "" -> running := false
             | other -> status := Printf.sprintf "(unknown field %S)" other
         done);
@@ -707,8 +714,13 @@ let edit_domain existing =
        ("versioning", `Bool !versioning);
        ("symlinks", `String !symlinks);
        ("readOnly", `Bool !read_only);
-       ("chunkSize", `String (Conf_parsing.format_size !chunk_size));
      ]
+    @ (match !chunk_size with
+      | Some n -> [("chunkSize", `String (Conf_parsing.format_size n))]
+      | None -> [])
+    @ (match !cache_chunk_size with
+      | Some n -> [("cacheChunkSize", `String (Conf_parsing.format_size n))]
+      | None -> [])
     @ (match !max_cache with
       | Some n -> [("maxCache", `String (Conf_parsing.format_size n))]
       | None -> [])
@@ -716,7 +728,7 @@ let edit_domain existing =
 
 (* Serialize globals + domains to [path] with 0600 perms. *)
 let write_config ~path ~client_name ~max_uploads ~max_downloads ~tls ~domains =
-  mkdir_p (Filename.dirname path);
+  Fs_util.mkdir_p_sync (Filename.dirname path);
   let json =
     `Assoc
       ([

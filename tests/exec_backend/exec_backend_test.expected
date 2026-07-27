@@ -11,11 +11,6 @@ list_all "":
   we ird'name.txt (6)
 list_all "sub/":
   sub/b.txt (5)
-list_directory "":
-  a.txt (5)
-  we ird'name.txt (6)
-  dir dir
-  dir sub
 head a.txt: none
 list_all "":
   dir/ (0)

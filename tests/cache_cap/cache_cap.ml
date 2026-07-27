@@ -1,22 +1,20 @@
 (* Behavioral snapshot of the cache-size cap (maxCache). Chunk size and the cap
    are both forced to 8 bytes (see dune), so each single-chunk fixture is exactly
-   one "slot": the cap holds one file. Files are uploaded (import leaves no local
-   data), then demand-paged into the cache by reading them; a cap sweep then
-   evicts the coldest clean files until usage is back under the cap, never
-   touching a file with unsynced (dirty) data. *)
+   one "slot": the cap holds one chunk body. The cap needs no bookkeeping — every
+   body is interchangeable and re-fetchable — so a sweep just drops the coldest
+   bodies, and a read that finds one missing fetches it again. Staged bodies live
+   outside the store and are never touched. *)
 
 open Test_runner
 
-(* Cache a file by reading its one chunk, then close it (leaving the data
-   resident with a fresh access time). The trailing [Drain] spaces successive
-   opens out in time so the least-recently-used order is deterministic. *)
-let cache path =
-  [OpenRead path; ReadRange { path; offset = 0; len = 8 }; Release path; Drain]
+(* Pull a file's one chunk into the store. The trailing [Drain] spaces successive
+   reads out in time so the coldest-first order is deterministic. *)
+let cache path = [ReadRange { path; offset = 0; len = 8 }; Drain]
 
 let scenarios : scenario list =
   [
     {
-      name = "coldest clean files evicted down to the cap; hottest kept";
+      name = "the sweep drops the coldest bodies; a re-read fetches them back";
       steps =
         [
           Write { path = "a.txt"; content = "aaaaaaaa" };
@@ -25,38 +23,38 @@ let scenarios : scenario list =
           Drain;
           Write { path = "c.txt"; content = "cccccccc" };
           Drain;
+          Evict "a.txt";
+          Evict "b.txt";
+          Evict "c.txt";
         ]
-        (* Read a, then b, then c — c is the most recently used. *)
+        (* Read a, then b, then c — a is the coldest. *)
         @ cache "a.txt"
         @ cache "b.txt" @ cache "c.txt"
         @ [
-            ShowResidency "a.txt";
-            ShowResidency "b.txt";
-            ShowResidency "c.txt";
+            ShowChunkCache;
             EnforceCache;
-            ShowResidency "a.txt";
-            ShowResidency "b.txt";
-            ShowResidency "c.txt";
+            ShowChunkCache;
+            ShowChunks "a.txt";
+            ShowChunks "b.txt";
+            ShowChunks "c.txt";
+            (* Dropped bodies are not lost data: reading returns the same bytes. *)
+            ReadRange { path = "a.txt"; offset = 0; len = 8 };
+            ShowChunks "a.txt";
           ];
     };
     {
-      name = "clean files evicted to the cap; a dirty (unsynced) file is kept";
+      name = "a staged file's bodies are never dropped";
       steps =
-        [
-          Write { path = "x.txt"; content = "xxxxxxxx" };
-          Drain;
-          Write { path = "y.txt"; content = "yyyyyyyy" };
-          Drain;
-        ]
-        @ cache "x.txt" @ cache "y.txt"
+        [Write { path = "x.txt"; content = "xxxxxxxx" }; Drain; Evict "x.txt"]
+        @ cache "x.txt"
         @ [
-            (* Local edit not yet uploaded: its data is never dropped, so it is
-               neither counted toward the cap nor evicted. *)
-            DirtyWrite { path = "z.txt"; content = "zzzzzzzz" };
+            (* Unsynced edits: the only copy of these bytes, and outside the
+               store the cap sweeps. *)
+            StageWrite { path = "z.txt"; content = "zzzzzzzz" };
             EnforceCache;
-            ShowResidency "x.txt";
-            ShowResidency "y.txt";
-            ShowResidency "z.txt";
+            ShowChunks "x.txt";
+            ShowChunks "z.txt";
+            ReadRange { path = "z.txt"; offset = 0; len = 8 };
           ];
     };
   ]

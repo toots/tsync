@@ -6,7 +6,7 @@ module Make (C : Conf.S) (F : File.S) = struct
 
   type hooks = {
     path_to_key : string -> string;
-    request_evict : string -> unit Lwt.t;
+    evict : string -> unit Lwt.t;
     restore : string -> unit Lwt.t;
     changed : string -> unit;
     full_resync : unit -> unit Lwt.t;
@@ -28,19 +28,12 @@ module Make (C : Conf.S) (F : File.S) = struct
 
   (* ── File operation handlers ──────────────────────────────────────────── *)
 
-  let stat_opt path =
-    Lwt.catch
-      (fun () ->
-        let+ st = Lwt_unix_retry.LargeFile.stat path in
-        Some st)
-      (fun _ -> Lwt.return_none)
-
   (* Resolve the manifest once (local sidecar, else a single backend GET) and
      derive size, mtime, etag and upload state from it. Going through F.stat
      plus a separate etag lookup would fetch the same manifest up to twice
      more per call, and fileproviderd stats items constantly. *)
   let handle_stat key =
-    let* mst = stat_opt (F.manifest_path key) in
+    let* mst = Fs_util.stat_opt_large (F.manifest_path key) in
     match mst with
       | Some { Unix.LargeFile.st_kind = Unix.S_DIR; _ } ->
           Lwt.return
@@ -52,37 +45,37 @@ module Make (C : Conf.S) (F : File.S) = struct
                  ("isUploaded", `Bool true);
                ])
       | _ -> (
-          let* m = F.resolved_manifest key in
-          match m with
-            | Some (`Clean m) ->
-                let fields =
-                  [
-                    ("size", `Int (Int64.to_int m.Manifest.size));
-                    ("mtime", `Float m.Manifest.mtime);
-                    ("etag", `String m.Manifest.h1);
-                    ("isUploaded", `Bool true);
-                  ]
-                  @
-                    match m.Manifest.symlink with
-                    | None -> []
-                    | Some t -> [("symlinkTarget", `String t)]
-                in
-                Lwt.return (ok_json fields)
-            | Some `Dirty -> (
-                let* st = stat_opt (F.local_path key) in
-                match st with
-                  | Some st ->
-                      Lwt.return
-                        (ok_json
-                           [
-                             ( "size",
-                               `Int (Int64.to_int st.Unix.LargeFile.st_size) );
-                             ("mtime", `Float st.Unix.LargeFile.st_mtime);
-                             ("etag", `String "");
-                             ("isUploaded", `Bool false);
-                           ])
-                  | None -> Lwt.return (error_json "not found"))
-            | None -> Lwt.return (error_json "not found"))
+          (* Unsynced local edits answer from the staged manifest: it is the
+             authority for size and mtime until the upload publishes. *)
+          let* staged = F.resolve key in
+          match staged with
+            | Some (`Staged (st, _)) ->
+                Lwt.return
+                  (ok_json
+                     [
+                       ("size", `Int (Int64.to_int st.Manifest.s_size));
+                       ("mtime", `Float st.Manifest.s_mtime);
+                       ("etag", `String "");
+                       ("isUploaded", `Bool false);
+                     ])
+            | Some (`Published _) | None -> (
+                let* m = F.resolved_manifest key in
+                match m with
+                  | Some m ->
+                      let fields =
+                        [
+                          ("size", `Int (Int64.to_int m.Manifest.size));
+                          ("mtime", `Float m.Manifest.mtime);
+                          ("etag", `String m.Manifest.h1);
+                          ("isUploaded", `Bool true);
+                        ]
+                        @
+                          match m.Manifest.symlink with
+                          | None -> []
+                          | Some t -> [("symlinkTarget", `String t)]
+                      in
+                      Lwt.return (ok_json fields)
+                  | None -> Lwt.return (error_json "not found")))
 
   (* The listed objects are manifests, so their backend size/mtime are the manifest's,
      not the file's. Resolve the manifest (local sidecar, else fetched from the backend)
@@ -98,7 +91,7 @@ module Make (C : Conf.S) (F : File.S) = struct
     let+ m = F.resolved_manifest e.key in
     let key = ("key", `String e.key) in
     match m with
-      | Some (`Clean m) ->
+      | Some m ->
           let fields =
             [
               key;
@@ -122,13 +115,14 @@ module Make (C : Conf.S) (F : File.S) = struct
             ]
 
   let handle_list_dir prefix =
-    let* files, dirs = F.list_directory ~prefix in
+    let* files, dirs = F.list_children ~prefix in
     (* map_p: uncached entries each cost a backend GET; resolving them
        sequentially made cold enumeration O(files) round trips end-to-end.
        [resolve_pool] bounds the fan-out; map_p preserves result order. *)
     let+ files_json = Lwt_list.map_p file_entry_json files in
     (* Emit directories as full keys ending in "/", the same representation used by
-       list_all and the change journal — one identity per directory everywhere. *)
+       the recursive listing and the change journal — one identity per directory
+       everywhere. *)
     ok_json
       [
         ( "dirs",
@@ -147,7 +141,7 @@ module Make (C : Conf.S) (F : File.S) = struct
       ]
 
   let handle_list_all prefix =
-    let* files = F.list_all_files ~prefix in
+    let* files = F.list_tree ~prefix in
     let+ files_json = Lwt_list.map_p file_entry_json files in
     ok_json [("files", `List files_json)]
 
@@ -157,9 +151,7 @@ module Make (C : Conf.S) (F : File.S) = struct
      keys as item identifiers, with directories ending in "/". *)
   let full_key ?(dir = false) rel =
     let k = C.domain_prefix ^ rel in
-    if dir && not (String.length k > 0 && k.[String.length k - 1] = '/') then
-      k ^ "/"
-    else k
+    if dir then Key.ensure_slash k else k
 
   let op_to_json = function
     | `Put (key, size) ->
@@ -254,51 +246,48 @@ module Make (C : Conf.S) (F : File.S) = struct
           `String (newest_key ~init:(Option.value ~default:"" fetched) keys) );
       ]
 
+  (* The caller wants a real file: assemble one into the handoff directory and
+     hand over the path. It is the caller's copy to move or delete — the daemon
+     keeps the content in the chunk store, not as a file. *)
   let handle_ensure_cached key =
-    let+ () = F.ensure_cached key in
-    ok_json [("localPath", `String (F.local_path key))]
+    let+ path = F.handoff key in
+    ok_json [("localPath", `String path)]
 
   let handle_create key =
     let+ () = F.create key in
     ok_json []
 
+  (* The extension hands back a complete file. It is taken over where it is — no
+     copy of the bytes and no chunking pass before the upload — and answered from
+     the staged metadata, which is the size and mtime that will be published. *)
   let handle_write key staging_path =
     ignore (F.cancel_upload key);
-    let* () = F.ensure_parent_dir key in
-    let* () = Lwt_unix_retry.rename staging_path (F.local_path key) in
-    let* () = F.mark_dirty key in
+    let* () = F.write_whole key ~src_path:staging_path in
     let* () = F.queue_put key in
-    let* st =
-      Lwt.catch
-        (fun () ->
-          let+ st = Lwt_unix_retry.LargeFile.stat (F.local_path key) in
-          Some st)
-        (fun _ -> Lwt.return_none)
-    in
-    match st with
-      | Some st ->
-          Lwt.return
-            (ok_json
-               [
-                 ("size", `Int (Int64.to_int st.Unix.LargeFile.st_size));
-                 ("mtime", `Float st.Unix.LargeFile.st_mtime);
-               ])
-      | None -> Lwt.return (ok_json [])
+    let+ resolved = F.resolve key in
+    match resolved with
+      | Some (`Staged (st, _)) ->
+          ok_json
+            [
+              ("size", `Int (Int64.to_int st.Manifest.s_size));
+              ("mtime", `Float st.Manifest.s_mtime);
+            ]
+      | Some (`Published m) ->
+          (* The upload already finished and promoted. *)
+          ok_json
+            [
+              ("size", `Int (Int64.to_int m.Manifest.size));
+              ("mtime", `Float m.Manifest.mtime);
+            ]
+      | None -> ok_json []
 
   let handle_delete key =
     let+ () = F.delete key in
     ok_json []
 
-  let strip_trailing_slash k =
-    if String.length k > 0 && k.[String.length k - 1] = '/' then
-      String.sub k 0 (String.length k - 1)
-    else k
-
   let handle_rename src_key dst_key =
     let+ () =
-      F.rename
-        ~src:(strip_trailing_slash src_key)
-        ~dst:(strip_trailing_slash dst_key)
+      F.rename ~src:(Key.chop_slash src_key) ~dst:(Key.chop_slash dst_key)
     in
     ok_json []
 
@@ -326,16 +315,7 @@ module Make (C : Conf.S) (F : File.S) = struct
      end in "/"); recover the domain-relative path the share core expects. *)
   let handle_share key =
     let rel =
-      let p = C.domain_prefix in
-      let n = String.length p in
-      if String.length key >= n && String.sub key 0 n = p then
-        String.sub key n (String.length key - n)
-      else key
-    in
-    let rel =
-      if rel <> "" && rel.[String.length rel - 1] = '/' then
-        String.sub rel 0 (String.length rel - 1)
-      else rel
+      Key.chop_slash (Key.strip_prefix ~domain_prefix:C.domain_prefix key)
     in
     let expires = int_of_float (Unix.time ()) + (7 * 86400) in
     let+ result = Sh.create ~expires ~rel () in
@@ -343,7 +323,10 @@ module Make (C : Conf.S) (F : File.S) = struct
       | Ok url -> ok_json [("url", `String url)]
       | Error msg -> error_json msg
 
-  (* ── Dispatch ─────────────────────────────────────────────────────────── *)
+  (* ── Dispatch ───────────────────────────────────────────────────────────
+     The action strings are a wire contract with the FileProvider extension
+     (see macos/TsyncFileProvider/IPC.swift): rename the handlers freely, never
+     these. *)
 
   let handler hooks line =
     match Yojson.Safe.from_string line with
@@ -370,7 +353,7 @@ module Make (C : Conf.S) (F : File.S) = struct
                   | "rmdir" -> handle_rmdir path
                   | "share" -> handle_share path
                   | "evict" ->
-                      let+ () = hooks.request_evict (hooks.path_to_key path) in
+                      let+ () = hooks.evict (hooks.path_to_key path) in
                       ok_json []
                   | "restore" ->
                       let+ () = hooks.restore (hooks.path_to_key path) in
@@ -389,26 +372,25 @@ module Make (C : Conf.S) (F : File.S) = struct
                            :: hooks.status_fields ()))
                   | "stats" ->
                       let rate f = `Int (int_of_float (f ())) in
-                      Lwt.return
-                        (ok_json
-                           ([
-                              ("pendingDownloads", `Int (F.downloading_count ()));
-                              ("dirtyFiles", `Int (F.dirty_count ()));
-                              ("openFiles", `Int (F.open_files_count ()));
-                              ( "downloadsCompleted",
-                                `Int (F.downloads_completed_count ()) );
-                              ("maxUploads", `Int C.max_uploads);
-                              ("maxDownloads", `Int C.max_downloads);
-                              ("bytesUploaded", `Int (Metrics.uploaded ()));
-                              ("bytesDownloaded", `Int (Metrics.downloaded ()));
-                              ("uploadBytesPerSec", rate Metrics.upload_rate);
-                              ("downloadBytesPerSec", rate Metrics.download_rate);
-                              ("chunksHashed", `Int (Metrics.hashed ()));
-                              ("hashesPerSec", rate Metrics.hash_rate);
-                              ("cpuSeconds", `Float (Metrics.cpu_seconds ()));
-                              ("rssBytes", `Int (Metrics.rss_bytes ()));
-                            ]
-                           @ hooks.stats_fields ()))
+                      let+ staged = F.staged_count () in
+                      ok_json
+                        ([
+                           ("pendingDownloads", `Int (F.downloads_in_flight ()));
+                           ("stagedFiles", `Int staged);
+                           ( "downloadsCompleted",
+                             `Int (F.downloads_completed_count ()) );
+                           ("maxUploads", `Int C.max_uploads);
+                           ("maxDownloads", `Int C.max_downloads);
+                           ("bytesUploaded", `Int (Metrics.uploaded ()));
+                           ("bytesDownloaded", `Int (Metrics.downloaded ()));
+                           ("uploadBytesPerSec", rate Metrics.upload_rate);
+                           ("downloadBytesPerSec", rate Metrics.download_rate);
+                           ("chunksHashed", `Int (Metrics.hashed ()));
+                           ("hashesPerSec", rate Metrics.hash_rate);
+                           ("cpuSeconds", `Float (Metrics.cpu_seconds ()));
+                           ("rssBytes", `Int (Metrics.rss_bytes ()));
+                         ]
+                        @ hooks.stats_fields ())
                   | "download_progress" ->
                       Lwt.return
                         (match F.download_progress path with

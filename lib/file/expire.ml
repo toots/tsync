@@ -3,34 +3,27 @@ open Lwt.Syntax
 type stats = { versions_deleted : int; chunks_deleted : int; chunks_kept : int }
 
 module Make (C : Conf.S) = struct
-  let primary () =
-    match C.backends with
-      | b :: _ -> b
-      | [] -> failwith "no backends configured"
+  module Bk = Backends.Make (C)
+  module Tree = Inode_tree.Make (C)
 
-  let delete_all keys =
-    if keys = [] then Lwt.return_unit
-    else
-      Lwt_list.iter_s
-        (fun (module B : Backend.S) -> B.delete_multi keys)
-        C.backends
-
-  let is_marker key = String.length key > 0 && key.[String.length key - 1] = '/'
+  let primary = Bk.primary
+  let delete_all = Bk.delete_many
 
   (* Chunk keys referenced by the manifest stored at [key]. Directory markers
      reference nothing; a dirty manifest is mid-write and has no committed
      chunks. An unexpected parse failure aborts (raises) rather than reporting
      "references nothing", which would let the sweep delete the file's chunks. *)
   let referenced_chunks (module B : Backend.S) key =
-    if is_marker key then Lwt.return []
+    if Key.is_dir key then Lwt.return []
     else
       let+ data = B.get ~key () in
       match Folder.marker_of_string data with
         | Some _ -> [] (* folder / trash marker: references no chunks *)
         | None -> (
             match Manifest.of_string data with
-              | `Clean m -> List.map Manifest.chunk_key m.Manifest.chunks
-              | `Dirty -> []
+              | m ->
+                  let t = m.Manifest.chunks in
+                  List.init (Chunk_table.count t) (Chunk_table.key t)
               | exception e ->
                   failwith
                     (Printf.sprintf
@@ -41,21 +34,12 @@ module Make (C : Conf.S) = struct
 
   (* All object keys under folder [folder_id] (recursively, following folder
      markers), including the markers themselves — the reclaim set for a trashed
-     subtree. *)
-  let collect_namespace (module B : Backend.S) folder_id acc =
-    let rec walk folder_id acc =
-      let* entries =
-        B.list_all ~prefix:(C.domain_prefix ^ folder_id ^ "/") ()
-      in
-      Lwt_list.fold_left_s
-        (fun acc (e : Backend.file_entry) ->
-          let* data = B.get ~key:e.key () in
-          match Folder.marker_of_string data with
-            | Some m -> walk m.Folder.id (e.key :: acc)
-            | None -> Lwt.return (e.key :: acc))
-        acc entries
-    in
-    walk folder_id acc
+     subtree. Errors propagate: collecting a short list here would leave part of
+     the subtree undeleted while its parent marker goes. *)
+  let collect_namespace folder_id acc =
+    Tree.fold_tree ~folder_id ~rel:""
+      (fun acc _rel entry -> Lwt.return (entry.Inode_tree.bkey :: acc))
+      acc
 
   let expire ~cutoff () =
     let (module B : Backend.S) = primary () in
@@ -64,7 +48,7 @@ module Make (C : Conf.S) = struct
        under each expired trash marker (recursively by folder id) so its chunks
        drop out of the live set marked below. *)
     let* trash =
-      B.list_all ~prefix:(C.domain_prefix ^ Folder.trash_id ^ "/") ()
+      B.list_prefix ~prefix:(C.domain_prefix ^ Folder.trash_id ^ "/") ()
     in
     let* trash_keys =
       Lwt_list.fold_left_s
@@ -74,14 +58,14 @@ module Make (C : Conf.S) = struct
             let* data = B.get ~key:e.key () in
             match Folder.marker_of_string data with
               | Some m ->
-                  let+ subtree = collect_namespace (module B) m.Folder.id [] in
+                  let+ subtree = collect_namespace m.Folder.id [] in
                   (e.key :: subtree) @ acc
               | None -> Lwt.return acc)
         [] trash
     in
     let* () = delete_all trash_keys in
     (* Phase 1: partition versions by the cutoff (no deletion yet). *)
-    let* versions = B.list_all ~prefix:C.versions_prefix () in
+    let* versions = B.list_prefix ~prefix:C.versions_prefix () in
     let expired, surviving =
       versions
       |> List.fold_left
@@ -103,7 +87,7 @@ module Make (C : Conf.S) = struct
       let+ cks = referenced_chunks (module B) key in
       List.iter (fun ck -> Hashtbl.replace live ck ()) cks
     in
-    let* live_files = B.list_all ~prefix:C.domain_prefix () in
+    let* live_files = B.list_prefix ~prefix:C.domain_prefix () in
     let* () =
       Lwt_list.iter_s (fun (e : Backend.file_entry) -> mark e.key) live_files
     in
@@ -120,7 +104,7 @@ module Make (C : Conf.S) = struct
       |> delete_all
     in
     (* Phase 4: sweep every chunk not referenced anywhere, regardless of age. *)
-    let* chunks = B.list_all ~prefix:C.chunk_prefix () in
+    let* chunks = B.list_prefix ~prefix:C.chunk_prefix () in
     let kept = ref 0 in
     let unreferenced =
       chunks

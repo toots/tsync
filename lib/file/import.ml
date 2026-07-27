@@ -17,6 +17,7 @@ module Make (C : Conf.S) = struct
   module R = Remote.Make (C)
   module Fs = File_store.Make (C)
   module St = Store.Make (C) (Layout.Inode.Make (C))
+  module Mf = Manifest.Make (C)
 
   (* [rel] is excluded when any glob matches either the full relative path or
      the basename, so [node_modules] prunes any directory of that name and
@@ -45,7 +46,7 @@ module Make (C : Conf.S) = struct
       in
       Lwt_list.fold_left_s
         (fun (dirs, files, symlinks) name ->
-          let r = if rel = "" then name else rel ^ "/" ^ name in
+          let r = Key.join rel name in
           if excluded globs r then Lwt.return (dirs, files, symlinks)
           else (
             let abs = Filename.concat src r in
@@ -72,10 +73,7 @@ module Make (C : Conf.S) = struct
   (* A key already in the domain (local sidecar or remote manifest) is never
      overwritten by an import. *)
   let exists key =
-    let* sidecar =
-      Local.read_manifest ~cache_root:C.cache_root ~domain_name:C.domain_name
-        ~domain_prefix:C.domain_prefix key
-    in
+    let* sidecar = Mf.read key in
     match sidecar with
       | Some _ -> Lwt.return_true
       | None ->
@@ -89,17 +87,12 @@ module Make (C : Conf.S) = struct
     else (
       let src_path = Filename.concat src_root rel in
       let* st = Lwt_unix_retry.stat src_path in
+      let* chunk_size = R.chunk_size () in
       let* state =
-        R.upload ~key ~src_path ~mtime:st.Unix.st_mtime ~chunk_size:C.chunk_size
-          ()
+        R.upload ~key ~src_path ~mtime:st.Unix.st_mtime ~chunk_size ()
       in
-      let+ () =
-        Local.write_manifest ~cache_root:C.cache_root ~domain_name:C.domain_name
-          ~domain_prefix:C.domain_prefix key (Manifest.to_string state)
-      in
-      match state with
-        | `Clean m -> Imported m.Manifest.size
-        | `Dirty -> assert false)
+      let+ () = Mf.write key state in
+      Imported state.Manifest.size)
 
   (* Write a symlink manifest to all backends and the local sidecar. No cache
      entry: there is no file data to cache for a symlink. *)
@@ -116,13 +109,8 @@ module Make (C : Conf.S) = struct
       in
       let data = Manifest.to_string state in
       let* () = St.put_manifest ~key ~data in
-      let* () =
-        Local.write_manifest ~cache_root:C.cache_root ~domain_name:C.domain_name
-          ~domain_prefix:C.domain_prefix key data
-      in
-      match state with
-        | `Clean m -> Lwt.return (Imported m.Manifest.size)
-        | `Dirty -> assert false)
+      let* () = Mf.write key state in
+      Lwt.return (Imported state.Manifest.size))
 
   (* Import every file under [src] into the domain: upload data to all
      backends, write manifest sidecars (no local cache data — files read as
@@ -233,10 +221,7 @@ module Make (C : Conf.S) = struct
       Lwt_list.iter_s
         (fun rel ->
           let key = C.domain_prefix ^ rel ^ "/" in
-          let* () =
-            Local.create_dir ~cache_root:C.cache_root ~domain_name:C.domain_name
-              ~domain_prefix:C.domain_prefix key
-          in
+          let* () = Mf.create_dir key in
           let* () = St.put_folder_marker ~key in
           Lwt.return (on_dir ~rel))
         dirs

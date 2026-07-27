@@ -1,11 +1,7 @@
 let implementation = "file_provider"
 
-let is_local ~cache_root:_ ~domain_name ~domain_prefix key =
-  let pfx = String.length domain_prefix in
-  let rel =
-    if String.length key > pfx then String.sub key pfx (String.length key - pfx)
-    else key
-  in
+let is_local ({ Conf.domain_name; domain_prefix; _ } : Conf.locality) key =
+  let rel = Key.strip_prefix ~domain_prefix key in
   let normalized =
     String.concat "-"
       (String.split_on_char ' ' (String.lowercase_ascii domain_name))

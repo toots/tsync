@@ -1,42 +1,41 @@
-=== coldest clean files evicted down to the cap; hottest kept
+=== the sweep drops the coldest bodies; a re-read fetches them back
   write a.txt "aaaaaaaa"
   drain
   write b.txt "bbbbbbbb"
   drain
   write c.txt "cccccccc"
   drain
-  open-read a.txt
+  evict a.txt
+  evict b.txt
+  evict c.txt
   read a.txt [0,8)
-  release a.txt
   drain
-  open-read b.txt
   read b.txt [0,8)
-  release b.txt
   drain
-  open-read c.txt
   read c.txt [0,8)
-  release c.txt
   drain
-  residency a.txt
-  residency b.txt
-  residency c.txt
+  chunk-cache
   enforce-cache
-  residency a.txt
-  residency b.txt
-  residency c.txt
+  chunk-cache
+  chunks a.txt
+  chunks b.txt
+  chunks c.txt
+  read a.txt [0,8)
+  chunks a.txt
   read a.txt [0,8) = "aaaaaaaa"
   read b.txt [0,8) = "bbbbbbbb"
   read c.txt [0,8) = "cccccccc"
-  residency a.txt cached=true size=8 chunks=complete
-  residency b.txt cached=true size=8 chunks=complete
-  residency c.txt cached=true size=8 chunks=complete
-  residency a.txt cached=false size=8 chunks=complete
-  residency b.txt cached=false size=8 chunks=complete
-  residency c.txt cached=true size=8 chunks=complete
+  chunk-cache chunks=3 bytes=24
+  chunk-cache chunks=1 bytes=8
+  chunks a.txt published size=8 chunks=1 cached=0/1
+  chunks b.txt published size=8 chunks=1 cached=0/1
+  chunks c.txt published size=8 chunks=1 cached=1/1
+  read a.txt [0,8) = "aaaaaaaa"
+  chunks a.txt published size=8 chunks=1 cached=1/1
 --- tree
-  f a.txt size=8 cached=false uploaded=true etag=205e7be268ad065e
-  f b.txt size=8 cached=false uploaded=true etag=db1d8119cefb55ab
-  f c.txt size=8 cached=true uploaded=true etag=ff0ff71dfd4db29f
+  f a.txt size=8 cached=1/1 uploaded=true etag=205e7be268ad065e
+  f b.txt size=8 cached=0/1 uploaded=true etag=db1d8119cefb55ab
+  f c.txt size=8 cached=1/1 uploaded=true etag=ff0ff71dfd4db29f
 --- content
   a.txt = "aaaaaaaa"
   b.txt = "bbbbbbbb"
@@ -55,42 +54,30 @@
   file a.txt [.tsync-root/f01e5cbbc09d4fc4-9a0fcd66f030de75] = manifest size=8 chunks=1 h1=205e7be268ad065e h2=d54b96d6efd47935
     chunk#0 c9dbc05573cd5d9a-1ae64e03afa5a78e size=8
 
-=== clean files evicted to the cap; a dirty (unsynced) file is kept
+=== a staged file's bodies are never dropped
   write x.txt "xxxxxxxx"
   drain
-  write y.txt "yyyyyyyy"
-  drain
-  open-read x.txt
+  evict x.txt
   read x.txt [0,8)
-  release x.txt
   drain
-  open-read y.txt
-  read y.txt [0,8)
-  release y.txt
-  drain
-  dirty-write z.txt "zzzzzzzz"
+  stage-write z.txt "zzzzzzzz"
   enforce-cache
-  residency x.txt
-  residency y.txt
-  residency z.txt
+  chunks x.txt
+  chunks z.txt
+  read z.txt [0,8)
   read x.txt [0,8) = "xxxxxxxx"
-  read y.txt [0,8) = "yyyyyyyy"
-  residency x.txt cached=false size=8 chunks=complete
-  residency y.txt cached=true size=8 chunks=complete
-  residency z.txt cached=true dirty (new)
+  chunks x.txt published size=8 chunks=1 cached=1/1
+  chunks z.txt staged size=8 slots=[S] cached=1/1
+  read z.txt [0,8) = "zzzzzzzz"
 --- tree
-  f x.txt size=8 cached=false uploaded=true etag=c000da6ed59e60d5
-  f y.txt size=8 cached=true uploaded=true etag=78533c70a0c3b859
+  f x.txt size=8 cached=1/1 uploaded=true etag=c000da6ed59e60d5
+  f z.txt size=8 cached=1/1 uploaded=false etag=
 --- content
   x.txt = "xxxxxxxx"
-  y.txt = "yyyyyyyy"
+  z.txt = "zzzzzzzz"
 --- backend
-  chunk 396ba43a79a6145e-07b3ce3cb3c5512e size=8
   chunk 4267e87c9cb0bc97-3ffc27d07b585304 size=8
   journal <entry-1> = put x.txt 8
-  journal <entry-2> = put y.txt 8
-  file y.txt [.tsync-root/5daddc6a7e7b0a59-08cdb864d07705f7] = manifest size=8 chunks=1 h1=78533c70a0c3b859 h2=53804f54f3cc90ea
-    chunk#0 396ba43a79a6145e-07b3ce3cb3c5512e size=8
   file x.txt [.tsync-root/fecd6e94d21b3dc7-d6d12967f4c00d3d] = manifest size=8 chunks=1 h1=c000da6ed59e60d5 h2=f16a0981a4898b6a
     chunk#0 4267e87c9cb0bc97-3ffc27d07b585304 size=8
 

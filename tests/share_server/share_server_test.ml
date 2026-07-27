@@ -37,13 +37,15 @@ module C : Conf.S = struct
 
   (* Small enough that the fixture spans several chunks, so range reads exercise
      partial fetching rather than pulling one chunk. *)
-  let chunk_size = 16
+  let chunk_size = Some 16
+  let cache_chunk_size = Some 16
   let max_cache = None
   let symlink_policy = `Keep
   let read_only = false
 end
 
 module R = Remote.Make (C)
+module Mf = Manifest.Make (C)
 module Sh = Share_server.Make (C)
 
 let backend () = List.hd C.backends
@@ -60,7 +62,8 @@ let upload rel content =
   let src = Filename.concat data_dir (Filename.basename rel) in
   write_local src content;
   let key = C.domain_prefix ^ rel in
-  let* _ = R.upload ~key ~src_path:src ~mtime ~chunk_size:C.chunk_size () in
+  let* chunk_size = R.chunk_size () in
+  let* _ = R.upload ~key ~src_path:src ~mtime ~chunk_size () in
   let module L = Layout.Inode.Make (C) in
   L.manifest_key key
 
@@ -68,7 +71,7 @@ let hello_body = "hello world, this spans several chunks\n"
 let inner_body = "inner file contents\n"
 
 let build_fixture () =
-  (* Pin the subfolder id: [Folder_ids.resolve] would mint a random one. *)
+  (* Pin the subfolder id: [Folder_ids.ensure_id] would mint a random one. *)
   let* () =
     Folder_ids.write ~cache_root:C.cache_root ~domain_name:C.domain_name "sub"
       { Folder.name = "sub"; id = "subid" }
@@ -153,7 +156,7 @@ let () =
        (Printf.sprintf "rm -rf %s && mkdir -p %s %s %s" root store_dir cache_dir
           data_dir));
   Lwt_main.run
-    (let* () = Local.init ~cache_root:C.cache_root ~domain_name:C.domain_name in
+    (let* () = Mf.init () in
      let* () = build_fixture () in
 
      (* ── File share ───────────────────────────────────────────────────────── *)
@@ -227,27 +230,20 @@ let () =
         done
       with End_of_file -> close_in ic);
 
-     (* ── Cache expiry ─────────────────────────────────────────────────────── *)
-     (* Everything served above cached under the share subtree, leaving the
-        domain's own mirror untouched, and the whole subtree is reclaimable by
-        age. *)
+     (* ── Local footprint ─────────────────────────────────────────────────── *)
+     (* Serving a share writes nothing into the manifest mirror and assembles
+        nothing: the bytes it fetched are in the domain's chunk cache, which the
+        mount shares. *)
      let rec count dir =
-       Array.fold_left
-         (fun n name ->
-           let p = Filename.concat dir name in
-           if Sys.is_directory p then n + count p else n + 1)
-         0 (Sys.readdir dir)
+       if not (Sys.file_exists dir) then 0
+       else
+         Array.fold_left
+           (fun n name ->
+             let p = Filename.concat dir name in
+             if Sys.is_directory p then n + count p else n + 1)
+           0 (Sys.readdir dir)
      in
-     Printf.printf "\n=== share cache expiry\n";
-     Printf.printf "domain data mirror: %s\n"
-       (if
-          Sys.file_exists
-            (Cache_layout.cached_dir ~cache_root:C.cache_root C.domain_name)
-        then "polluted"
-        else "absent");
-     Printf.printf "cached: %d files\n" (count Sh.cache_dir);
-     let* _ = Sh.reap ~cutoff:0. Sh.cache_dir in
-     Printf.printf "nothing aged: %d files\n" (count Sh.cache_dir);
-     let* empty = Sh.reap ~cutoff:(Unix.time () +. 1.) Sh.cache_dir in
-     Printf.printf "all aged: %d files (empty: %b)\n" (count Sh.cache_dir) empty;
+     Printf.printf "\n=== local footprint\n";
+     Printf.printf "chunk cache: %d chunks\n"
+       (count (Cache_layout.chunks_dir ~cache_root:C.cache_root C.domain_name));
      Lwt.return_unit)

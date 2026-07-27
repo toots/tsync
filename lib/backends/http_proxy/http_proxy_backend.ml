@@ -2,10 +2,37 @@ open Lwt.Syntax
 
 exception Cancelled = Backend.Cancelled
 
+(* Connections are pooled per endpoint rather than established per request. A
+   full resync fetches one object per manifest — tens of thousands — and a
+   one-shot client pays a DNS lookup, a TCP handshake and a TLS handshake for
+   every one of them, which caps throughput at a few dozen objects a second and
+   leaves thousands of sockets in TIME_WAIT. Reuse makes the handshake a
+   per-connection cost instead of a per-request one. *)
+module Connection = Cohttp_lwt.Connection.Make (Cohttp_lwt_unix.Net)
+
+module Cache =
+  Cohttp_lwt.Connection_cache.Make
+    (Connection)
+    (struct
+      let sleep_ns ns = Lwt_unix.sleep (Int64.to_float ns /. 1e9)
+    end)
+
+(* Idle connections are held for a minute: long enough to span the gaps between
+   the bursts a sync or a demand-paged read arrives in, short enough that an
+   idle client is not holding sockets open on the proxy indefinitely. *)
+let keep_idle_ns = 60_000_000_000L
+
+(* Concurrent connections to one endpoint. The caller's own parallelism (the
+   resync pool, the download pool) is what actually bounds work; this only has
+   to be wide enough not to become the narrower limit. *)
+let max_parallel = 32
+
 type t = {
   base_uri : Uri.t;
   secret : string;
+  cache : Cache.t;
   mutable share_url_cache : string option Lwt.t option;
+  mutable chunk_size_cache : int option Lwt.t option;
 }
 
 let max_attempts = 8
@@ -26,9 +53,7 @@ let call t ~meth ?(body = "") uri =
          ~path:resource ~body)
   in
   let* resp, rbody =
-    Cohttp_lwt_unix.Client.call ~headers
-      ~body:(Cohttp_lwt.Body.of_string body)
-      meth uri
+    Cache.call t.cache ~headers ~body:(Cohttp_lwt.Body.of_string body) meth uri
   in
   let+ s = Cohttp_lwt.Body.to_string rbody in
   (resp, s)
@@ -136,16 +161,6 @@ let list_all t ?max_keys ~prefix () =
   if is_ok resp then Http_proxy.Wire.entries_of_json body
   else raise (backend_error "list_all" (code resp) body)
 
-let list_directory t ~prefix () =
-  let uri =
-    Uri.with_query'
-      (Uri.with_path t.base_uri "/list")
-      [("mode", "dir"); ("prefix", prefix)]
-  in
-  let+ resp, body = call_retry t ~meth:`GET "list_directory" uri in
-  if is_ok resp then Http_proxy.Wire.list_dir_of_json body
-  else raise (backend_error "list_directory" (code resp) body)
-
 (* Whether shares are exposed is the proxy's own setting, so ask it rather than
    mirroring it in client config where the two could disagree. The proxy answers
    yes/no only: it sits behind TLS termination and does not reliably know its own
@@ -181,8 +196,47 @@ let share_url t ~prefix () =
         t.share_url_cache <- Some p;
         p
 
+(* The serving domain's own [chunkSize], so a client behind the proxy writes new
+   files at the size the domain already uses instead of the two configs having to
+   agree. 404 means the proxy has no opinion. *)
+let query_chunk_size t ~prefix =
+  let uri =
+    Uri.with_query'
+      (Uri.with_path t.base_uri "/chunk-size")
+      [("prefix", prefix)]
+  in
+  let+ resp, body = call_retry t ~meth:`GET "chunk_size" uri in
+  if is_ok resp then (
+    match Yojson.Safe.from_string body with
+      | exception _ -> None
+      | j -> (
+          match Yojson.Safe.Util.member "chunkSize" j with
+            | `Int n when n > 0 -> Some n
+            | _ -> None))
+  else if code resp = 404 then None
+  else raise (backend_error "chunk_size" (code resp) body)
+
+(* Fixed for the life of the process, like {!share_url}: a domain's chunk size
+   changing under a running client would only affect files it creates next, and
+   re-asking per upload would cost a round trip each time. *)
+let default_chunk_size t ~prefix () =
+  match t.chunk_size_cache with
+    | Some p -> p
+    | None ->
+        let p = query_chunk_size t ~prefix in
+        t.chunk_size_cache <- Some p;
+        p
+
 let make ~url ~secret : (module Backend.S) =
-  let t = { base_uri = Uri.of_string url; secret; share_url_cache = None } in
+  let t =
+    {
+      base_uri = Uri.of_string url;
+      secret;
+      cache = Cache.create ~keep:keep_idle_ns ~parallel:max_parallel ();
+      share_url_cache = None;
+      chunk_size_cache = None;
+    }
+  in
   (module struct
     let put ~key ~data () = put t ~key ~data ()
     let get ~key () = get t ~key ()
@@ -191,9 +245,9 @@ let make ~url ~secret : (module Backend.S) =
     let delete ~key () = delete t ~key ()
     let delete_multi keys = delete_multi t keys
     let copy ~src_key ~dst_key () = copy t ~src_key ~dst_key ()
-    let list_all ?max_keys ~prefix () = list_all t ?max_keys ~prefix ()
-    let list_directory ~prefix () = list_directory t ~prefix ()
+    let list_prefix ?max_keys ~prefix () = list_all t ?max_keys ~prefix ()
     let share_url ~prefix () = share_url t ~prefix ()
+    let default_chunk_size ~prefix () = default_chunk_size t ~prefix ()
   end)
 
 let spec =

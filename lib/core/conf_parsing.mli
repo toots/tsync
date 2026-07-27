@@ -27,7 +27,14 @@ type domain = {
   symlink_policy : [ `Keep | `Follow | `Skip ];
   versioning : bool;
   read_only : bool;
-  chunk_size : int;  (** chunk size (bytes) for newly uploaded files *)
+  chunk_size : int option;
+      (** chunk size (bytes) for newly uploaded files. [None] when the config
+          does not say; what that resolves to is {!Conf.S.chunk_size}'s
+          business, not this layer's *)
+  cache_chunk_size : int option;
+      (** cache chunk size (bytes): consecutive stored chunks are grouped into
+          local cache files of about this size. [None] when the config does not
+          say *)
   max_cache : int option;
       (** soft cap (bytes) on local cache usage; [None] = unbounded *)
 }
@@ -46,7 +53,6 @@ type t = {
 
 val default_max_uploads : int
 val default_max_downloads : int
-val default_chunk_size : int
 
 (** Render a byte count as a human-friendly binary size (e.g. [8M], [512K]);
     exact multiples only, else the raw number. *)

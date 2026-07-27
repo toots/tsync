@@ -1,6 +1,6 @@
 open Lwt.Syntax
 
-type status = Unreadable | Dirty | Checked of Remote.recheck_report
+type status = Unreadable | Staged | Checked of Remote.recheck_report
 
 type summary = {
   checked : int;
@@ -11,13 +11,13 @@ type summary = {
 
 let describe rel = function
   | Unreadable -> Printf.sprintf "SKIP  %s (unreadable sidecar)" rel
-  | Dirty -> Printf.sprintf "SKIP  %s (dirty, upload pending)" rel
+  | Staged -> Printf.sprintf "SKIP  %s (unsynced edits)" rel
   | Checked (r : Remote.recheck_report) ->
       if r.chunks_unrepairable > 0 || r.manifest_bad then
         Printf.sprintf "BAD   %s (%d/%d chunks missing%s)" rel
           r.chunks_unrepairable r.chunks_total
           (if r.manifest_bad then ", manifest wrong" else "")
-      else if r.chunks_repaired > 0 || r.manifest_repaired || r.local_stale then (
+      else if r.chunks_repaired > 0 || r.manifest_repaired then (
         let parts =
           (if r.chunks_repaired > 0 then
              [
@@ -25,80 +25,69 @@ let describe rel = function
                  (if r.chunks_repaired = 1 then "" else "s");
              ]
            else [])
-          @ (if r.manifest_repaired then ["manifest republished"] else [])
-          @ if r.local_stale then ["sidecar updated"] else []
+          @ if r.manifest_repaired then ["manifest republished"] else []
         in
         Printf.sprintf "FIXED %s (%s)" rel (String.concat ", " parts))
       else Printf.sprintf "ok    %s" rel
 
 module Make (C : Conf.S) = struct
   module R = Remote.Make (C)
+  module Mf = Manifest.Make (C)
+  module Cc = Chunk_cache.Make (C) (R)
 
-  let manifest_root = Local.manifest_dir ~cache_root:C.cache_root C.domain_name
+  (* The local half of a recheck: every member segment of every cache chunk must
+     hash to the key it was published under. Manifest-driven, unlike the rest of
+     the store's bookkeeping — a cache chunk holds several stored chunks, so its
+     body cannot be checked against its own name and the manifests are what say
+     which keys belong in it. Returns (checked, dropped); a dropped body
+     re-downloads on the next read. *)
+  let verify_chunk_cache () =
+    let* rels = Mf.walk () in
+    Lwt_list.fold_left_s
+      (fun acc rel ->
+        let* state = Mf.read (C.domain_prefix ^ rel) in
+        match state with
+          | Some m ->
+              Lwt_list.fold_left_s
+                (fun (checked, dropped) group ->
+                  let* present = Cc.exists group in
+                  if not present then Lwt.return (checked, dropped)
+                  else
+                    let+ ok = Cc.verify_group ~group in
+                    (checked + 1, if ok then dropped else dropped + 1))
+                acc (Mf.groups m)
+          | None -> Lwt.return acc)
+      (0, 0) rels
 
+  (* Verification is manifest-driven: every chunk a file names must be intact on
+     the backend. Local bytes are checked separately and wholesale by
+     {!Chunk_cache.verify_group} — content addressing makes that a stronger check than
+     re-hashing one file's copy, and there is no assembled file to re-hash. *)
   let recheck_file rel =
     let key = C.domain_prefix ^ rel in
-    let* raw =
-      Local.read_manifest ~cache_root:C.cache_root ~domain_name:C.domain_name
-        ~domain_prefix:C.domain_prefix key
-    in
-    let state =
-      match raw with
-        | None -> None
-        | Some s -> ( try Some (Manifest.of_string s) with _ -> None)
-    in
-    match state with
-      | None -> Lwt.return Unreadable
-      | Some `Dirty -> Lwt.return Dirty
-      | Some (`Clean m)
-        when match m.Manifest.residency with
-               | Some a -> Array.exists (fun s -> s = Manifest.Dirty) a
-               | None -> false ->
-          (* A partial file with unpublished (dirty) chunks: its local data has
-             holes and stale chunks — skip rather than re-hash it as-is. *)
-          Lwt.return Dirty
-      | Some (`Clean m) ->
-          let lp =
-            Local.cache_path ~cache_root:C.cache_root ~domain_name:C.domain_name
-              ~domain_prefix:C.domain_prefix key
-          in
-          (* A partial-but-clean file (some chunks absent, none dirty) has holes
-             on disk: verify its chunks against the backend from the entries
-             instead of re-hashing local data. *)
-          let is_partial = m.Manifest.residency <> None in
-          let* cached =
-            if is_partial then Lwt.return_false
-            else Lwt_unix_retry.file_exists lp
-          in
-          if cached then
-            let* st = Lwt_unix_retry.stat lp in
-            let* manifest_state, report =
-              R.recheck_cached ~key ~src_path:lp ~mtime:st.Unix.st_mtime
-                ~sidecar:m ()
+    let* staged = Mf.staged_exists key in
+    if staged then Lwt.return Staged
+    else
+      let* state = Mf.read key in
+      match state with
+        | None -> Lwt.return Unreadable
+        | Some m ->
+            let local_body index =
+              match Mf.group_at m index with
+                | Some group -> Cc.member_if_local ~group ~index
+                | None -> Lwt.return_none
             in
-            let+ () =
-              if report.Remote.local_stale then
-                Local.write_manifest ~cache_root:C.cache_root
-                  ~domain_name:C.domain_name ~domain_prefix:C.domain_prefix key
-                  (Manifest.to_string manifest_state)
-              else Lwt.return_unit
-            in
-            Checked report
-          else
-            let+ report = R.recheck_evicted ~key m in
+            let+ report = R.recheck_from_manifest ~key ~local_body m in
             Checked report
 
   (* Recheck every file in the domain, sorted, one at a time (chunk checks
      within a file run concurrently). Returns [None] when the domain has no
      local cache. *)
   let run ~on_file () =
-    let* root_ok = Fs_util.is_directory manifest_root in
+    let* root_ok = Mf.mirror_exists () in
     if not root_ok then Lwt.return_none
     else
-      let* rels =
-        Local.walk_manifests ~cache_root:C.cache_root ~domain_name:C.domain_name
-          ()
-      in
+      let* rels = Mf.walk () in
       let rels = List.sort compare rels in
       let summary =
         ref { checked = 0; repaired = 0; unrepairable = 0; skipped = 0 }
@@ -110,15 +99,13 @@ module Make (C : Conf.S) = struct
             let s = !summary in
             (summary :=
                match status with
-                 | Unreadable | Dirty -> { s with skipped = s.skipped + 1 }
+                 | Unreadable | Staged -> { s with skipped = s.skipped + 1 }
                  | Checked r ->
                      let s = { s with checked = s.checked + 1 } in
                      if r.Remote.chunks_unrepairable > 0 || r.manifest_bad then
                        { s with unrepairable = s.unrepairable + 1 }
-                     else if
-                       r.chunks_repaired > 0 || r.manifest_repaired
-                       || r.local_stale
-                     then { s with repaired = s.repaired + 1 }
+                     else if r.chunks_repaired > 0 || r.manifest_repaired then
+                       { s with repaired = s.repaired + 1 }
                      else s);
             on_file ~rel status)
           rels

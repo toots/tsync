@@ -84,7 +84,7 @@ module Make (C : Conf.S) = struct
     H.
       {
         path_to_key;
-        request_evict =
+        evict =
           (fun key ->
             Ipc.notify_evict ~path:C.notify_path key;
             Lwt.return_unit);
@@ -110,8 +110,9 @@ module Make (C : Conf.S) = struct
     E.start
       ~on_cursor:(fun ~entry_key:_ -> ())
       ~on_upload_done:(fun ~key ->
-        (* The daemon copy only exists to stage the upload; drop it now. *)
-        let* () = F.evict key in
+        (* Nothing to drop: the extension keeps the file, and the daemon keeps
+           only the chunks the upload promoted — subject to the cache cap like
+           any other. *)
         Ipc.notify_uploaded ~path:C.notify_path key;
         Lwt.return_unit)
       ~on_changed:(Ipc.notify_changed ~path:C.notify_path)

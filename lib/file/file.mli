@@ -3,36 +3,31 @@ type buffer = Local_io.buffer
 module type S = sig
   type t = string
 
-  val is_cached : t -> bool Lwt.t
-  val local_path : t -> string
   val manifest_path : t -> string
-  val ensure_parent_dir : t -> unit Lwt.t
   val rel_key : t -> string
-  val read_manifest : t -> Manifest.state option Lwt.t
+  val read_manifest : t -> Manifest.t option Lwt.t
 
   (** Like {!read_manifest}, but falls back to fetching and parsing the backend
       manifest when there is no local sidecar, so a backend-only file resolves
       to its real logical size/mtime instead of the manifest object's byte size.
   *)
-  val resolved_manifest : t -> Manifest.state option Lwt.t
+  val resolved_manifest : t -> Manifest.t option Lwt.t
 
-  val write_manifest : t -> Manifest.state -> unit Lwt.t
+  val write_manifest : t -> Manifest.t -> unit Lwt.t
   val upload : ?cancel:bool ref -> t -> unit Lwt.t
+
+  (** Fetch every chunk [t] needs, so later reads are served locally.
+      Idempotent, and deduplicated per key. *)
   val ensure_cached : t -> unit Lwt.t
 
-  (** Prepare a not-yet-complete file for reading: demand-page it (sparse file,
-      no download) when it is a real chunked file, else fall back to a whole
-      download. Idempotent. *)
-  val prepare_read : t -> unit Lwt.t
+  (** Assemble [t] into a fresh file under the domain's handoff directory and
+      return its path — for a frontend that needs a real file and takes it over
+      (the FileProvider extension moves it into place itself). The daemon keeps
+      no other copy: the content lives in the chunk store. *)
+  val handoff : t -> string Lwt.t
 
-  (** Ensure the bytes in the range [offset, offset+len] are on disk, fetching
-      only the chunks that back them for a partial file. *)
-  val ensure_readable : t -> offset:int64 -> len:int -> unit Lwt.t
-
-  (** Mark the chunks a write at the range [offset, offset+len] touches dirty,
-      fetching a partially-overwritten absent chunk first (read-modify-write).
-  *)
-  val dirty_range : t -> offset:int64 -> len:int -> unit Lwt.t
+  (** Drop handoff copies a frontend never claimed. *)
+  val reap_handoff : unit -> unit Lwt.t
 
   val stat : t -> Unix.LargeFile.stats option Lwt.t
 
@@ -40,52 +35,64 @@ module type S = sig
       if the key is absent or is a regular file. *)
   val readlink : t -> string option Lwt.t
 
-  val list_dir : t -> string list Lwt.t
-
   (** Directory listing served from the local manifest mirror: files (with real
       keys derived from each manifest's [path]) and subdirectory names (mtime
       unavailable locally, hence [None]). *)
-  val list_directory :
+  val list_children :
     prefix:string ->
     (Backend.file_entry list * (string * float option) list) Lwt.t
 
   (** Recursive file listing under [prefix], served from the local mirror. *)
-  val list_all_files : prefix:string -> Backend.file_entry list Lwt.t
+  val list_tree : prefix:string -> Backend.file_entry list Lwt.t
 
-  val mark_dirty : t -> unit Lwt.t
-  val mark_open : t -> unit
-  val mark_closed : t -> int
+  (** A handle closed: queue the file for upload if it has staged edits. Nothing
+      else is decided here — the staged manifest, not an open count, records
+      what is owed, and it survives a restart. *)
+  val close : t -> unit Lwt.t
 
-  (** Last-handle-close policy: queue a dirty file for upload, drop a file
-      flagged for eviction, else persist. Decrements the open count. *)
-  val release : t -> unit Lwt.t
+  (** Finish every upload the staged tree still owes — the crash-recovery entry
+      point, run once at startup. *)
+  val recover_staged : unit -> unit Lwt.t
 
-  (** Evict [key] now if closed, else defer the eviction to its last close. *)
-  val request_evict : t -> unit Lwt.t
+  (** Keep the chunk store under [C.max_cache]; never touches staged data. *)
+  val enforce_chunk_cap : unit -> unit Lwt.t
 
-  (** Best-effort: while local cache usage exceeds [C.max_cache], evict the
-      coldest closed, clean files until back under. No-op when [max_cache] is
-      unset. *)
-  val enforce_cache_cap : unit -> unit Lwt.t
+  (** [(chunks, bytes)] held in the chunk store. *)
+  val chunk_stats : unit -> (int * int) Lwt.t
 
-  (** In-flight downloads (files currently being fetched). *)
-  val downloading_count : unit -> int
+  (** [t]'s content: staged edits if any, else what was published. *)
+  val resolve :
+    t ->
+    [ `Staged of Manifest.staged * Manifest.t option | `Published of Manifest.t ]
+    option
+    Lwt.t
 
-  (** Files with unsaved local changes not yet uploaded. *)
-  val dirty_count : unit -> int
+  (** [(chunks present locally, chunks total)] for [t]. *)
+  val chunk_residency : t -> (int * int) Lwt.t
 
-  (** Files with at least one open handle. *)
-  val open_files_count : unit -> int
+  (** Chunk downloads currently in flight. *)
+  val downloads_in_flight : unit -> int
 
-  (** Downloads completed since the daemon started. *)
+  (** Files with unsynced local edits, i.e. owing an upload. *)
+  val staged_count : unit -> int Lwt.t
+
+  (** Whole-file materializations completed since the daemon started. *)
   val downloads_completed_count : unit -> int
 
-  (** [Some (bytes_done, total_bytes)] while [key] is being downloaded; [None]
-      when idle or already cached. *)
+  (** [Some (bytes_done, total_bytes)] while [key] is being pulled in whole;
+      [None] when idle. *)
   val download_progress : t -> (int * int) option
 
+  (** Drop [t]'s cached chunks, keeping its manifest: the file stays listed and
+      re-fetches on demand. Unreference-blind, and staged bodies are untouched.
+  *)
   val evict : t -> unit Lwt.t
+
   val create : t -> unit Lwt.t
+
+  (** Stage a whole file handed over by a frontend as [t]'s new content. *)
+  val write_whole : t -> src_path:string -> unit Lwt.t
+
   val read : t -> buffer -> offset:int64 -> int Lwt.t
   val write : t -> buffer -> offset:int64 -> int Lwt.t
   val cancel_upload : t -> bool

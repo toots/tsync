@@ -7,8 +7,6 @@ type dest_stats = {
   copied_bytes : int;
 }
 
-let is_marker key = String.length key > 0 && key.[String.length key - 1] = '/'
-
 module Make (C : Conf.S) = struct
   (* Bounds concurrent HEAD/copy operations per destination. *)
   let copy_pool =
@@ -23,11 +21,11 @@ module Make (C : Conf.S) = struct
     let* head = Dst.head_opt ~key:entry.key () in
     let up_to_date =
       match head with
-        | Some h -> is_marker entry.key || h.Backend.size = entry.size
+        | Some h -> Key.is_dir entry.key || h.Backend.size = entry.size
         | None -> false
     in
     if up_to_date then Lwt.return_none
-    else if is_marker entry.key then
+    else if Key.is_dir entry.key then
       let+ () = Dst.put ~key:entry.key ~data:"" () in
       Some 0
     else
@@ -54,7 +52,7 @@ module Make (C : Conf.S) = struct
       Lwt_list.map_s
         (fun (name, prefix) ->
           on_list ~name;
-          Src.list_all ~prefix ())
+          Src.list_prefix ~prefix ())
         prefixes
     in
     let+ cursor =

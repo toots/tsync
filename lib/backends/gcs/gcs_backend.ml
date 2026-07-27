@@ -231,37 +231,6 @@ let list_all t ?max_keys ~prefix () =
   in
   collect [] None
 
-(* Group one prefix level into files vs subdirs, identical to the s3 backend. *)
-let list_directory t ~prefix () =
-  let prefix_len = String.length prefix in
-  let+ all = list_all t ~prefix () in
-  let dirs = Hashtbl.create 16 in
-  let files = ref [] in
-  List.iter
-    (fun (e : Backend.file_entry) ->
-      if String.length e.key <= prefix_len then ()
-      else begin
-        let rest =
-          String.sub e.key prefix_len (String.length e.key - prefix_len)
-        in
-        match String.index_opt rest '/' with
-          | None -> files := e :: !files
-          | Some i -> (
-              let dir_name = String.sub rest 0 i in
-              let mtime =
-                if i = String.length rest - 1 then Some e.last_modified
-                else None
-              in
-              match Hashtbl.find_opt dirs dir_name with
-                | None -> Hashtbl.add dirs dir_name mtime
-                | Some None when mtime <> None ->
-                    Hashtbl.replace dirs dir_name mtime
-                | Some _ -> ())
-      end)
-    all;
-  let subdirs = Hashtbl.fold (fun k mtime acc -> (k, mtime) :: acc) dirs [] in
-  (List.rev !files, List.sort (fun (a, _) (b, _) -> String.compare a b) subdirs)
-
 let make ?endpoint ?service_account_key ?share_url ~bucket () :
     (module Backend.S) =
   let base =
@@ -283,9 +252,9 @@ let make ?endpoint ?service_account_key ?share_url ~bucket () :
     let delete ~key () = delete t ~key ()
     let delete_multi keys = delete_multi t keys
     let copy ~src_key ~dst_key () = copy t ~src_key ~dst_key ()
-    let list_all ?max_keys ~prefix () = list_all t ?max_keys ~prefix ()
-    let list_directory ~prefix () = list_directory t ~prefix ()
+    let list_prefix ?max_keys ~prefix () = list_all t ?max_keys ~prefix ()
     let share_url ~prefix:_ () = Lwt.return t.share_url
+    let default_chunk_size ~prefix:_ () = Lwt.return_none
   end)
 
 let spec =

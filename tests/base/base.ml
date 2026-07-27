@@ -43,7 +43,17 @@ let scenarios : scenario list =
     {
       name = "evict";
       steps =
-        [Write { path = "a.txt"; content = "evicted" }; Drain; Evict "a.txt"];
+        [
+          Write { path = "a.txt"; content = "evicted" };
+          Drain;
+          (* Read it first: a whole-file write leaves nothing in the chunk store,
+             so without this the eviction would have nothing to drop and the
+             snapshot could not tell a working evict from a no-op. *)
+          ReadRange { path = "a.txt"; offset = 0; len = 7 };
+          ShowChunks "a.txt";
+          Evict "a.txt";
+          ShowChunks "a.txt";
+        ];
     };
     {
       name = "restore";
@@ -52,7 +62,30 @@ let scenarios : scenario list =
           Write { path = "a.txt"; content = "round trip" };
           Drain;
           Evict "a.txt";
+          ShowChunks "a.txt";
           Restore "a.txt";
+          ShowChunks "a.txt";
+        ];
+    };
+    {
+      (* A full resync wipes the manifest mirror and the chunk store and rebuilds
+         them from the backend. Unsynced edits are the one thing it must not
+         touch: nothing else holds those bytes. *)
+      name = "unsynced edits survive a full resync";
+      steps =
+        [
+          Write { path = "kept.txt"; content = "published" };
+          Drain;
+          StageWrite { path = "kept.txt"; content = "edited, not uploaded" };
+          (* A file with only staged edits has no sidecar yet, and readdir must
+             still list it — it is the user's newest data. *)
+          ShowNames "";
+          ClearCache;
+          ShowNames "";
+          ShowChunks "kept.txt";
+          RecoverStaged;
+          Drain;
+          ShowChunks "kept.txt";
         ];
     };
     {
@@ -63,6 +96,9 @@ let scenarios : scenario list =
           Drain;
           Write { path = "sub/a.txt"; content = "nested" };
           Drain;
+          (* readdir must show the file and nothing else — no internal markers,
+             no escaped on-disk spelling. *)
+          ShowNames "sub";
         ];
     };
     { name = "rmdir"; steps = [Mkdir "sub"; Drain; Rmdir "sub"; Drain] };

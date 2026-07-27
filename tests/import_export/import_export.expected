@@ -10,11 +10,11 @@
   mkdir sub/deep
   import: 3 imported, 0 skipped, 0 symlinks skipped
 --- tree
-  f a.txt size=5 cached=false uploaded=true etag=b52128e828cdaed2
+  f a.txt size=5 cached=0/1 uploaded=true etag=b52128e828cdaed2
   d sub/
-  f sub/b.txt size=5 cached=false uploaded=true etag=e1480ef14771a79c
+  f sub/b.txt size=5 cached=0/1 uploaded=true etag=e1480ef14771a79c
   d sub/deep/
-  f sub/deep/c.txt size=7 cached=false uploaded=true etag=bbc6cdab7bb675ad
+  f sub/deep/c.txt size=7 cached=0/1 uploaded=true etag=bbc6cdab7bb675ad
 --- content
   a.txt = "alpha"
   sub/b.txt = "bravo"
@@ -44,8 +44,8 @@
   imported new.txt (5 bytes)
   import: 1 imported, 1 skipped, 0 symlinks skipped
 --- tree
-  f file.bin size=8 cached=true uploaded=true etag=1f5100458d5c2287
-  f new.txt size=5 cached=false uploaded=true etag=c7abf2205b34f9ee
+  f file.bin size=8 cached=0/1 uploaded=true etag=1f5100458d5c2287
+  f new.txt size=5 cached=0/1 uploaded=true etag=c7abf2205b34f9ee
 --- content
   file.bin = "original"
   new.txt = "fresh"
@@ -68,8 +68,8 @@
   imported copy.bin (10 bytes)
   import: 1 imported, 0 skipped, 0 symlinks skipped
 --- tree
-  f copy.bin size=10 cached=false uploaded=true etag=83aa3fc9fadd8e79
-  f file.bin size=10 cached=true uploaded=true etag=83aa3fc9fadd8e79
+  f copy.bin size=10 cached=0/1 uploaded=true etag=83aa3fc9fadd8e79
+  f file.bin size=10 cached=0/1 uploaded=true etag=83aa3fc9fadd8e79
 --- content
   copy.bin = "same bytes"
   file.bin = "same bytes"
@@ -90,14 +90,14 @@
   drain
   evict evicted.bin
   export-dir
-  export cached.bin (local cache)
-  export evicted.bin (remote)
+  export cached.bin (assembled)
+  export evicted.bin (assembled)
   export: 2 exported, 0 missing
   exported-file cached.bin = "kept locally"
   exported-file evicted.bin = "remote only"
 --- tree
-  f cached.bin size=12 cached=true uploaded=true etag=a9c2c15f2ec95b51
-  f evicted.bin size=11 cached=false uploaded=true etag=a1e40b6869044988
+  f cached.bin size=12 cached=1/1 uploaded=true etag=a9c2c15f2ec95b51
+  f evicted.bin size=11 cached=1/1 uploaded=true etag=a1e40b6869044988
 --- content
   cached.bin = "kept locally"
   evicted.bin = "remote only"
@@ -114,13 +114,15 @@
 === export dirty file
   write file.bin "uploaded"
   drain
-  dirty-write file.bin "modified locally"
+  stage-write file.bin "modified locally"
   export-dir
-  export file.bin (local cache)
+  export file.bin (assembled)
   export: 1 exported, 0 missing
   exported-file file.bin = "modified locally"
 --- tree
+  f file.bin size=16 cached=1/1 uploaded=false etag=
 --- content
+  file.bin = "modified locally"
 --- backend
   chunk 3ec7a63f2d48ce00-16e5e4870c3ecb65 size=8
   journal <entry-1> = put file.bin 8
@@ -137,15 +139,15 @@
   imported sub/b.txt (5 bytes)
   mkdir sub
   import: 2 imported, 0 skipped, 0 symlinks skipped
-  export a.txt (remote)
-  export sub/b.txt (remote)
+  export a.txt (assembled)
+  export sub/b.txt (assembled)
   export: 2 exported, 0 missing
   exported-file a.txt = "alpha"
   exported-file sub/b.txt = "bravo"
 --- tree
-  f a.txt size=5 cached=false uploaded=true etag=b52128e828cdaed2
+  f a.txt size=5 cached=1/1 uploaded=true etag=b52128e828cdaed2
   d sub/
-  f sub/b.txt size=5 cached=false uploaded=true etag=e1480ef14771a79c
+  f sub/b.txt size=5 cached=1/1 uploaded=true etag=e1480ef14771a79c
 --- content
   a.txt = "alpha"
   sub/b.txt = "bravo"
@@ -171,9 +173,9 @@
   mkdir sub
   import: 2 imported, 0 skipped, 0 symlinks skipped
 --- tree
-  f a.txt size=5 cached=false uploaded=true etag=b52128e828cdaed2
+  f a.txt size=5 cached=0/1 uploaded=true etag=b52128e828cdaed2
   d sub/
-  f sub/c.txt size=7 cached=false uploaded=true etag=bbc6cdab7bb675ad
+  f sub/c.txt size=7 cached=0/1 uploaded=true etag=bbc6cdab7bb675ad
 --- content
   a.txt = "alpha"
   sub/c.txt = "charlie"
@@ -198,7 +200,7 @@
   imported file.bin (11 bytes)
   import: 1 imported, 0 skipped, 0 symlinks skipped
 --- tree
-  f file.bin size=11 cached=false uploaded=true etag=d94b4e9626fdc9c1
+  f file.bin size=11 cached=0/1 uploaded=true etag=d94b4e9626fdc9c1
 --- content
   file.bin = "hello world"
 --- backend
@@ -220,7 +222,7 @@
   imported file.bin (11 bytes)
   import: 1 imported, 0 skipped, 0 symlinks skipped
 --- tree
-  f file.bin size=11 cached=false uploaded=true etag=d94b4e9626fdc9c1
+  f file.bin size=11 cached=0/1 uploaded=true etag=d94b4e9626fdc9c1
 --- content
   file.bin = "hello world"
 --- backend
@@ -241,7 +243,7 @@
   imported file.bin (15 bytes)
   import: 1 imported, 0 skipped, 0 symlinks skipped
 --- tree
-  f file.bin size=15 cached=false uploaded=true etag=0fee297f24e04f67
+  f file.bin size=15 cached=0/1 uploaded=true etag=0fee297f24e04f67
 --- content
   file.bin = "updated content"
 --- backend
@@ -264,7 +266,7 @@
 --- tree
   d empty-dir/
   d non-empty/
-  f non-empty/file.txt size=5 cached=false uploaded=true etag=650e58ac64da6e0a
+  f non-empty/file.txt size=5 cached=0/1 uploaded=true etag=650e58ac64da6e0a
 --- content
   non-empty/file.txt = "hello"
 --- backend
@@ -286,15 +288,15 @@
   imported dir:with:colons/nested.txt (6 bytes)
   mkdir dir:with:colons
   import: 2 imported, 0 skipped, 0 symlinks skipped
-  export colon:file.txt (remote)
-  export dir:with:colons/nested.txt (remote)
+  export colon:file.txt (assembled)
+  export dir:with:colons/nested.txt (assembled)
   export: 2 exported, 0 missing
   exported-file colon:file.txt = "colons"
   exported-file dir:with:colons/nested.txt = "nested"
 --- tree
-  f colon:file.txt size=6 cached=false uploaded=true etag=4cf325a5de628a63
+  f colon:file.txt size=6 cached=1/1 uploaded=true etag=4cf325a5de628a63
   d dir:with:colons/
-  f dir:with:colons/nested.txt size=6 cached=false uploaded=true etag=7546f608548f4d0d
+  f dir:with:colons/nested.txt size=6 cached=1/1 uploaded=true etag=7546f608548f4d0d
 --- content
   colon:file.txt = "colons"
   dir:with:colons/nested.txt = "nested"
@@ -320,9 +322,9 @@
   mkdir sub
   import: 2 imported, 0 skipped, 0 symlinks skipped
 --- tree
-  f a.txt size=5 cached=false uploaded=true etag=b52128e828cdaed2
+  f a.txt size=5 cached=0/1 uploaded=true etag=b52128e828cdaed2
   d sub/
-  f sub/c.txt size=7 cached=false uploaded=true etag=bbc6cdab7bb675ad
+  f sub/c.txt size=7 cached=0/1 uploaded=true etag=bbc6cdab7bb675ad
 --- content
   a.txt = "alpha"
   sub/c.txt = "charlie"
@@ -349,9 +351,9 @@
   import: 2 imported, 0 skipped, 0 symlinks skipped
 --- tree
   d keep/
-  f keep/a.txt size=5 cached=false uploaded=true etag=b52128e828cdaed2
+  f keep/a.txt size=5 cached=0/1 uploaded=true etag=b52128e828cdaed2
   d keep/deep/
-  f keep/deep/b.txt size=5 cached=false uploaded=true etag=e1480ef14771a79c
+  f keep/deep/b.txt size=5 cached=0/1 uploaded=true etag=e1480ef14771a79c
 --- content
   keep/a.txt = "alpha"
   keep/deep/b.txt = "bravo"
@@ -377,7 +379,7 @@
   import: 1 imported, 0 skipped, 0 symlinks skipped
 --- tree
   d keep/
-  f keep/a.txt size=5 cached=false uploaded=true etag=b52128e828cdaed2
+  f keep/a.txt size=5 cached=0/1 uploaded=true etag=b52128e828cdaed2
 --- content
   keep/a.txt = "alpha"
 --- backend
@@ -399,9 +401,9 @@
   mkdir src
   import: 2 imported, 0 skipped, 0 symlinks skipped
 --- tree
-  f a.txt size=5 cached=false uploaded=true etag=b52128e828cdaed2
+  f a.txt size=5 cached=0/1 uploaded=true etag=b52128e828cdaed2
   d src/
-  f src/main.ml size=4 cached=false uploaded=true etag=2dbdbf9f5a560e06
+  f src/main.ml size=4 cached=0/1 uploaded=true etag=2dbdbf9f5a560e06
 --- content
   a.txt = "alpha"
   src/main.ml = "code"
@@ -426,13 +428,13 @@
   imported link.txt (8 bytes)
   import: 2 imported, 0 skipped, 0 symlinks skipped
   export link.txt (symlink)
-  export real.txt (remote)
+  export real.txt (assembled)
   export: 2 exported, 0 missing
   exported-symlink link.txt -> real.txt
   exported-file real.txt = "hello"
 --- tree
-  f link.txt size=8 cached=false uploaded=true etag=32be1ca2d26f5660
-  f real.txt size=5 cached=false uploaded=true etag=650e58ac64da6e0a
+  f link.txt size=8 cached=0/0 uploaded=true etag=32be1ca2d26f5660
+  f real.txt size=5 cached=1/1 uploaded=true etag=650e58ac64da6e0a
 --- content
   link.txt -> real.txt
   real.txt = "hello"
@@ -455,7 +457,7 @@
   export: 1 exported, 0 missing
   exported-symlink dangling.txt -> nowhere
 --- tree
-  f dangling.txt size=7 cached=false uploaded=true etag=8e5038ff0d14070b
+  f dangling.txt size=7 cached=0/0 uploaded=true etag=8e5038ff0d14070b
 --- content
   dangling.txt -> nowhere
 --- backend
@@ -471,8 +473,8 @@
   imported link.txt (5 bytes)
   import: 2 imported, 0 skipped, 0 symlinks skipped
 --- tree
-  f link.txt size=5 cached=false uploaded=true etag=650e58ac64da6e0a
-  f real.txt size=5 cached=false uploaded=true etag=650e58ac64da6e0a
+  f link.txt size=5 cached=0/1 uploaded=true etag=650e58ac64da6e0a
+  f real.txt size=5 cached=0/1 uploaded=true etag=650e58ac64da6e0a
 --- content
   link.txt = "hello"
   real.txt = "hello"
@@ -504,7 +506,7 @@
   skip link.txt (symlink)
   import: 1 imported, 0 skipped, 2 symlinks skipped
 --- tree
-  f real.txt size=5 cached=false uploaded=true etag=650e58ac64da6e0a
+  f real.txt size=5 cached=0/1 uploaded=true etag=650e58ac64da6e0a
 --- content
   real.txt = "hello"
 --- backend

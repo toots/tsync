@@ -19,7 +19,8 @@ type domain = {
   symlink_policy : [ `Keep | `Follow | `Skip ];
   versioning : bool;
   read_only : bool;
-  chunk_size : int;
+  chunk_size : int option;
+  cache_chunk_size : int option;
   max_cache : int option;
 }
 
@@ -33,11 +34,6 @@ type t = {
 
 let default_max_uploads = 4
 let default_max_downloads = 8
-
-(* Per-domain, overridable via "chunkSize". 8 MiB favors sequential throughput
-   and small manifests; lower it for random-access workloads to cut read/write
-   amplification (at the cost of larger manifests and more backend requests). *)
-let default_chunk_size = 8 * 1024 * 1024
 
 (* Human-friendly byte sizes: a bare number is bytes; a K/M/G suffix (with an
    optional B/iB) is a binary multiple (1K = 1024). *)
@@ -166,6 +162,23 @@ let parse_symlink_policy json =
     | `Null -> failwith "domain config missing required \"symlinks\" field"
     | _ -> failwith "domain \"symlinks\" field must be a string"
 
+(* A size field: an integer, a size string, or absent. Kept as an option rather
+   than resolved to a default here, so a caller can tell "unset" from "set to
+   what the default happens to be" — [tsync print-config] shows only what the
+   config actually says. *)
+let parse_size_field json name =
+  let open Yojson.Basic.Util in
+  match json |> member name with
+    | `Int n when n > 0 -> Some n
+    | `String s -> (
+        match parse_size s with
+          | Some _ as n -> n
+          | None -> failwith (Printf.sprintf "invalid %s: %s" name s))
+    | `Null -> None
+    | _ ->
+        failwith
+          (Printf.sprintf "domain %S must be a size string or integer" name)
+
 let parse_domain json =
   let open Yojson.Basic.Util in
   {
@@ -181,15 +194,8 @@ let parse_domain json =
     versioning = json |> member "versioning" |> to_bool;
     read_only =
       (match json |> member "readOnly" with `Bool b -> b | _ -> false);
-    chunk_size =
-      (match json |> member "chunkSize" with
-        | `Int n when n > 0 -> n
-        | `String s -> (
-            match parse_size s with
-              | Some n -> n
-              | None -> failwith ("invalid chunkSize: " ^ s))
-        | `Null -> default_chunk_size
-        | _ -> failwith "domain \"chunkSize\" must be a size string or integer");
+    chunk_size = parse_size_field json "chunkSize";
+    cache_chunk_size = parse_size_field json "cacheChunkSize";
     max_cache =
       (match json |> member "maxCache" with
         | `Int n when n > 0 -> Some n

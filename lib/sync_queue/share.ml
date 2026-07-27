@@ -5,16 +5,6 @@ open Lwt.Syntax
    report — the CLI prints and exits, the daemon returns an IPC error. *)
 exception Share_error of string
 
-let random_hex bytes =
-  let b = Bytes.create bytes in
-  let ic = open_in_bin "/dev/urandom" in
-  Fun.protect
-    ~finally:(fun () -> close_in ic)
-    (fun () -> really_input ic b 0 bytes);
-  String.concat ""
-    (List.init bytes (fun i ->
-         Printf.sprintf "%02x" (Char.code (Bytes.get b i))))
-
 module Make (C : Conf.S) = struct
   module L = Layout.Inode.Make (C)
 
@@ -73,11 +63,13 @@ module Make (C : Conf.S) = struct
                   match marker with
                     | Some m -> Lwt.return m.Folder.id
                     | None ->
-                        Folder_ids.resolve ~cache_root:C.cache_root
+                        Folder_ids.ensure_id ~cache_root:C.cache_root
                           ~domain_name:C.domain_name rel
                 in
                 let dir_prefix = C.domain_prefix ^ dir_id ^ "/" in
-                let* entries = B.list_all ~prefix:dir_prefix ~max_keys:1 () in
+                let* entries =
+                  B.list_prefix ~prefix:dir_prefix ~max_keys:1 ()
+                in
                 if entries = [] then
                   Lwt.fail (Share_error (Printf.sprintf "not found: %s" rel))
                 else (
@@ -97,7 +89,7 @@ module Make (C : Conf.S) = struct
         (* The token is just the manifest's id; the server rebuilds the key as
            SHARES_PREFIX + token. Keeps the share URL short. Reuse a caller-
            supplied id (stable links) or generate a random one. *)
-        let token = Option.value token ~default:(random_hex 16) in
+        let token = Option.value token ~default:(Id.token 16) in
         let manifest_key = shares_prefix ^ token in
         let* () =
           B.put ~key:manifest_key ~data:(Yojson.Basic.to_string manifest) ()

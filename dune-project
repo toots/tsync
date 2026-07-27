@@ -26,7 +26,7 @@
   lwt_ppx
   ppx_blob
   mem_usage
-tls
+  tls
   base64
   x509
   mirage-crypto-pk
