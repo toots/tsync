@@ -100,76 +100,59 @@ let make_backend (bc : Conf_parsing.backend_config) =
   Backend.make ~backend_type:bc.backend_type ~get_field:(fun k ->
       List.assoc_opt k bc.fields)
 
-(* The domain's ordered backends. When any is flagged [backfill] or [readOnly],
-   collapse them into a single tiered composite; otherwise the plain ordered list.
+(* The chunk keys a manifest body names, and none for a body that is not a
+   manifest (a folder marker, a trash marker, a share). The only place that has
+   to know both a backend key and the manifest format. *)
+let chunk_keys data =
+  match Chunk_table.of_string data with
+    | t -> List.init (Chunk_table.count t) (Chunk_table.key t)
+    | exception _ -> []
 
-   Roles: exactly one primary (neither flag) is the writable source of truth;
-   [backfill] backends are writable, lazily-filled chunk copies; [readOnly]
-   backends are authoritative read-only fallbacks. Reads prefer the primary and
-   fall through the rest; writes fan out to everything except [readOnly]. *)
+(* The domain's backends composed by role into the single module everything else
+   talks to.
+
+   Two layers, because they answer different questions. {!Fallback_backend} says
+   which backends a read may look at and how far a write fans out: mains and
+   replicas are the source of truth, read-only stores sit behind them.
+   {!Backfill_backend} then wraps that with the targets filled lazily from the
+   write side. A domain with only mains gets the inner layer and nothing else,
+   and one with only read-only stores gets an inner layer with nothing writable
+   in it — which is what makes such a domain readable but not writable. *)
 let build_backends (d : Conf_parsing.domain) : (module Backend.S) list =
-  let ordered = Conf_parsing.order_backends d.Conf_parsing.backends in
-  let tiered =
-    List.exists
-      (fun (b : Conf_parsing.backend_config) -> b.backfill || b.read_only)
-      ordered
+  let of_roles rs =
+    List.filter
+      (fun (b : Conf_parsing.backend_config) -> List.mem b.role rs)
+      (Conf_parsing.order_backends d.Conf_parsing.backends)
   in
-  if not tiered then List.map make_backend ordered
-  else begin
-    let subs =
-      List.map
-        (fun (bc : Conf_parsing.backend_config) ->
-          ( bc,
-            {
-              Tiered_backend.name = bc.Conf_parsing.name;
-              backend = make_backend bc;
-            } ))
-        ordered
-    in
-    let read_order = List.map snd subs in
-    let backfills =
-      List.filter_map
-        (fun (bc, s) -> if bc.Conf_parsing.backfill then Some s else None)
-        subs
-    in
-    (* Manifests/listings come from the authoritative (non-backfill) backends. *)
-    let manifest_read =
-      List.filter_map
-        (fun (bc, s) -> if bc.Conf_parsing.backfill then None else Some s)
-        subs
-    in
-    (* Writes go everywhere except read-only backends. *)
-    let writes =
-      List.filter_map
-        (fun ((bc : Conf_parsing.backend_config), s) ->
-          if bc.read_only then None else Some s.Tiered_backend.backend)
-        subs
-    in
-    (match
-       List.filter
-         (fun ((bc : Conf_parsing.backend_config), _) ->
-           (not bc.backfill) && not bc.read_only)
-         subs
-     with
-      | [_] -> ()
-      | [] ->
-          failwith
-            (Printf.sprintf
-               "domain %s: no primary backend; exactly one must be neither \
-                \"backfill\" nor \"readOnly\""
-               d.Conf_parsing.name)
-      | _ :: _ :: _ ->
-          failwith
-            (Printf.sprintf
-               "domain %s: more than one primary backend; exactly one must be \
-                neither \"backfill\" nor \"readOnly\""
-               d.Conf_parsing.name));
-    [
-      Tiered_backend.make
-        ~chunk_prefix:(Conf_parsing.chunk_prefix d)
-        ~read_order ~manifest_read ~writes ~backfills;
-    ]
-  end
+  (* Role coherence is settled at parse time ({!Conf_parsing.validate_roles}), so
+     [writable] is empty only for a domain that is legitimately read-only. *)
+  let writable = of_roles [`Main; `Replica] in
+  let sub (bc : Conf_parsing.backend_config) =
+    { Fallback_backend.name = bc.name; backend = make_backend bc }
+  in
+  let inner =
+    Fallback_backend.make ~writable:(List.map sub writable)
+      ~fallbacks:(List.map sub (of_roles [`Read_only]))
+  in
+  match of_roles [`Backfill] with
+    | [] -> [inner]
+    | bf ->
+        [
+          Backfill_backend.make
+            ~chunk_prefix:(Conf_parsing.chunk_prefix d)
+            ~chunk_keys
+            ~skip_prefixes:
+              [Conf_parsing.journal_prefix d; Conf_parsing.cursor_key d]
+            ~inners:[inner]
+            ~backfills:
+              (List.map
+                 (fun (bc : Conf_parsing.backend_config) ->
+                   {
+                     Backfill_backend.name = bc.Conf_parsing.name;
+                     backend = make_backend bc;
+                   })
+                 bf);
+        ]
 
 (* Ordered backends with the one named [source] moved to the head, so it serves
    reads (the primary). Fails if no backend has that name. *)
@@ -200,10 +183,11 @@ let read_default_domain () =
         if s = "" then None else Some s
     | exception _ -> None
 
-(* [tier=false] exposes the raw ordered backend list instead of the tiered
-   composite — for commands (resync-remote) that copy between individual backends.
-   [source] forces reads to come from the named backend (moved to the head, tiering
-   off) — for commands that pick which backend to read from. *)
+(* [tier=false] exposes the raw backend list instead of the role composite — for
+   commands (resync-remote) that copy between individual backends, including the
+   ones the composite never reads from.
+   [source] forces reads to come from the named backend (moved to the head, no
+   composite) — for commands that pick which backend to read from. *)
 let make_conf ?domain ?socket_path ?(tier = true) ?source cfg : (module Conf.S)
     =
   Tls_conf.apply cfg.Conf_parsing.tls;
@@ -267,3 +251,14 @@ let load_config () = Conf_parsing.load runtime_paths.Runtime.config_path
 
 let load_conf ?domain ?tier ?source () =
   make_conf ?domain ?tier ?source (load_config ())
+
+(* [Lwt_main.run] for a one-shot command: run the body, then let the backends
+   settle before the process goes away. A command returns as soon as its work is
+   posted and a backfill target is filled in the background, so without this a
+   short-lived command would routinely exit carrying pending copies with it. *)
+let run_lwt p =
+  let open Lwt.Syntax in
+  Lwt_main.run
+    (let* r = p in
+     let+ () = Backend.drain () in
+     r)

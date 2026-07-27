@@ -67,12 +67,67 @@ module Make (C : Conf.S) = struct
 
   (* ── Shutdown coordination ────────────────────────────────────────────── *)
 
+  (* Deliberately unbounded: if the stop sequence wedges, hanging is the correct
+     behaviour. Whatever supervises the process is what notices — it gives up on
+     its own stop timeout, kills us and reports the unit as failed, which someone
+     sees. Giving up on a timer of our own would abandon exactly the pending work
+     a kill does, only quietly and with an exit status saying all was well. The
+     individual steps that wait on something remote carry their own bounds
+     ({!Backfill_backend.drain_all}); a hang here means something is stuck that is
+     not supposed to be. *)
   let stop_t, stop_wake = Lwt.wait ()
 
   let do_stop () =
     match Lwt.state stop_t with
       | Lwt.Sleep -> Lwt.wakeup_later stop_wake ()
       | _ -> ()
+
+  (* [Fuse.main] holds the main thread until the mount is gone, so a stop asked
+     for from the inside has to unmount as well or the process would drain and
+     then sit there. Set only in that case: when the FUSE loop exits on its own
+     (a manual [fusermount -u], or libfuse acting on a signal itself) the mount is
+     already gone and unmounting again would only warn. *)
+  let unmount_needed = ref false
+
+  let request_stop () =
+    unmount_needed := true;
+    do_stop ()
+
+  (* How the main thread asks the Lwt thread to stop once [Fuse.main] has
+     returned. It cannot use [Lwt_preemptive.run_in_main] for this: that blocks
+     until the loop picks the job up, and by then the loop may already have
+     finished — the main thread would then wait forever on a loop that will never
+     run again. A notification is delivered by the engine, is safe to send from
+     any thread, and is a no-op if the loop is already gone. *)
+  let stop_notification = ref None
+
+  let notify_stop_from_main () =
+    match !stop_notification with
+      | Some n -> ( try Lwt_unix.send_notification n with _ -> ())
+      | None -> ()
+
+  (* Released on the Lwt side rather than from a thread: [Lwt_process] reaps the
+     child through the event loop, so nothing is blocked waiting on it, and the
+     process cannot reach [exit] with the unmount still pending because the
+     shutdown sequence awaits it. No shell, so the mount path needs no quoting.
+     The short delay lets the IPC [stop] reply reach its caller before the mount
+     it is talking about disappears. *)
+  let unmount mount_point =
+    if not !unmount_needed then Lwt.return_unit
+    else
+      let* () = Lwt_unix.sleep 0.1 in
+      let+ status =
+        Lwt_process.exec ("", [| "fusermount3"; "-u"; mount_point |])
+      in
+      match status with
+        | Unix.WEXITED 0 -> ()
+        (* A mount that stays up leaves [Fuse.main] blocked for good, so this
+           warning is the only notice anyone gets. *)
+        | Unix.WEXITED n ->
+            Log.warn "fusermount3 -u %s exited %d; it may still be mounted"
+              mount_point n
+        | Unix.WSIGNALED n | Unix.WSTOPPED n ->
+            Log.warn "fusermount3 -u %s killed by signal %d" mount_point n
 
   (* ── IPC ──────────────────────────────────────────────────────────────── *)
 
@@ -134,17 +189,7 @@ module Make (C : Conf.S) = struct
         full_resync;
         status_fields = (fun () -> [("mount", `String mount_point)]);
         stats_fields = E.stats_fields;
-        on_stop =
-          (fun () ->
-            do_stop ();
-            ignore
-              (Thread.create
-                 (fun () ->
-                   Unix.sleepf 0.1;
-                   ignore
-                     (Sys.command
-                        (Printf.sprintf "fusermount3 -u %s" mount_point)))
-                 ()));
+        on_stop = (fun () -> request_stop ());
       }
 
   (* ── FUSE operations ──────────────────────────────────────────────────── *)
@@ -344,10 +389,31 @@ module Make (C : Conf.S) = struct
              Lwt.async (fun () ->
                  Ipc.serve ~path:C.socket_path
                    (Ih.handler (ipc_hooks mount_point)));
+             (* A supervisor is expected to stop this group with [tsync stop], but
+                a plain SIGTERM reaches it too — from the supervisor if that call
+                fails or if it only ever signals, and always from the parent
+                process when this frontend was forked. libfuse
+                installs its own handlers in [Fuse.main] and would override
+                these; that route exits the FUSE loop, which drains below just
+                the same, so whichever handler wins the queue is flushed. This is
+                here for the case where it does not install any, where the
+                default action would kill the process mid-queue. *)
+             List.iter
+               (fun s ->
+                 ignore (Lwt_unix.on_signal s (fun _ -> request_stop ())))
+               [Sys.sigterm; Sys.sigint];
+             (* Set before [signal_ready], so the main thread is guaranteed to
+                see it once it is past [wait_ready]. *)
+             stop_notification := Some (Lwt_unix.make_notification do_stop);
              signal_ready ();
              let* () = stop_t in
-             Log.debug "draining upload queue";
-             Sq.drain ()))
+             (* Concurrently: the unmount is what lets the main thread out of
+                [Fuse.main] so it can join this one, and it must not wait behind
+                the drain. Both are awaited before this thread ends. *)
+             let unmount_t = unmount mount_point in
+             Log.debug "draining upload queue and backends";
+             let* () = E.drain () in
+             unmount_t))
         ()
     in
     wait_ready ();
@@ -367,9 +433,10 @@ module Make (C : Conf.S) = struct
     Fuse.main ~loop_mode:Fuse.Multi_threaded mount_args
       (make_operations mount_point);
     Log.debug "FUSE loop exited, stopping services";
-    on_loop (fun () ->
-        do_stop ();
-        Lwt.return_unit);
+    (* The loop may have exited because something asked us to stop, or on its own
+       (a manual unmount). Either way this is what releases the Lwt side, and it
+       has already happened in the first case. *)
+    notify_stop_from_main ();
     Thread.join lwt_thread;
     try Unix.unlink C.socket_path with _ -> ()
 end

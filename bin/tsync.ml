@@ -99,7 +99,7 @@ let start_cmd =
     Frontend.run_forked run_group groups
   in
   Cmd.v
-    (Cmd.info "start" ~doc:"Mount the filesystem (run via systemd unit)")
+    (Cmd.info "start" ~doc:"Mount the filesystem (run under a service manager)")
     Term.(const run $ mount_arg $ tls_arg)
 
 (* ── tsync stop ─────────────────────────────────────────────────────────── *)
@@ -108,8 +108,9 @@ let stop_cmd =
   let run () =
     (* [start] runs every domain (fuse listens on a per-domain socket; file_provider
        shares one), so stop each domain's socket. Frontends without an IPC socket
-       (http-proxy) aren't reached here — systemd's SIGTERM stops that group. A
-       socket that's absent or unconnectable just means that part isn't running. *)
+       (http-proxy) aren't reached here — a supervisor's SIGTERM stops that group,
+       which it handles gracefully. A socket that's absent or unconnectable just
+       means that part isn't running. *)
     let cfg = load_config () in
     let sockets =
       List.sort_uniq compare
@@ -275,7 +276,7 @@ let ls_cmd =
             "Frontend to report cache status for (default: the domain's first).")
   in
   let run path show_deleted domain frontend =
-    Lwt_main.run
+    run_lwt
       (let open Lwt.Syntax in
        let cfg = load_config () in
        let domain =
@@ -399,7 +400,7 @@ let versions_cmd =
     Arg.(value & pos 0 (some string) None & info [] ~docv:"PATH")
   in
   let run path domain =
-    Lwt_main.run
+    run_lwt
       (let open Lwt.Syntax in
        let (module C : Conf.S) = load_conf ?domain () in
        let module St = Store.Make (C) (Layout.Inode.Make (C)) in
@@ -529,7 +530,7 @@ let trash_markers (module B : Backend.S) domain_prefix =
 
 let trash_cmd =
   let run domain =
-    Lwt_main.run
+    run_lwt
       (let open Lwt.Syntax in
        let (module C : Conf.S) = load_conf ?domain () in
        let module Bk = Backends.Make (C) in
@@ -552,7 +553,7 @@ let untrash_cmd =
     Arg.(required & pos 0 (some string) None & info [] ~docv:"PATH")
   in
   let run path domain =
-    Lwt_main.run
+    run_lwt
       (let open Lwt.Syntax in
        let (module C : Conf.S) = load_conf ?domain () in
        let module L = Layout.Inode.Make (C) in
@@ -624,7 +625,7 @@ let expire_cmd =
   in
   let run date domain =
     match
-      Lwt_main.run
+      run_lwt
         (let cutoff = parse_date date in
          let (module C : Conf.S) = load_conf ?domain () in
          let module E = Expire.Make (C) in
@@ -680,7 +681,7 @@ let sync_cmd =
   in
   let run domain source full parallelism v =
     set_verbose v;
-    Lwt_main.run
+    run_lwt
       (let open Lwt.Syntax in
        let (module C : Conf.S) = load_conf ?domain ?source () in
        let module J = Journal.Make (C) in
@@ -997,7 +998,7 @@ let sync_cmd =
 let recheck_cmd =
   let run domain =
     let code =
-      Lwt_main.run
+      run_lwt
         (let open Lwt.Syntax in
          let (module C : Conf.S) = load_conf ?domain () in
          let module Rc = Recheck.Make (C) in
@@ -1061,7 +1062,7 @@ let resync_remote_cmd =
   let run domain source manifests_only v =
     set_verbose v;
     let code =
-      Lwt_main.run
+      run_lwt
         (let open Lwt.Syntax in
          let cfg = load_config () in
          let d = Conf_parsing.pick_domain ?domain cfg in
@@ -1188,7 +1189,7 @@ let import_cmd =
   in
   let run domain src only exclude force_rehash v =
     set_verbose v;
-    Lwt_main.run
+    run_lwt
       (let open Lwt.Syntax in
        let (module C : Conf.S) = load_conf ?domain () in
        let module I = Import.Make (C) in
@@ -1239,7 +1240,7 @@ let export_cmd =
   let run domain dst v =
     set_verbose v;
     let code =
-      Lwt_main.run
+      run_lwt
         (let open Lwt.Syntax in
          let (module C : Conf.S) = load_conf ?domain () in
          let module E = Export.Make (C) in
@@ -1343,7 +1344,7 @@ let share_cmd =
       else rel
     in
     let module S = Share.Make (C) in
-    match Lwt_main.run (S.create ?token ~expires ~rel ()) with
+    match run_lwt (S.create ?token ~expires ~rel ()) with
       | Error msg ->
           Printf.eprintf "%s\n" msg;
           exit 1
@@ -1424,8 +1425,8 @@ let print_conf_cmd =
           d.frontends;
         List.iter
           (fun (b : Conf_parsing.backend_config) ->
-            Printf.printf "  backend: %s (%s)%s\n" b.name b.backend_type
-              (if b.main then " [primary]" else "");
+            Printf.printf "  backend: %s (%s) [%s]\n" b.name b.backend_type
+              (Conf_parsing.role_name b.role);
             List.iter
               (fun (k, v) ->
                 Printf.printf "    %-22s %s\n" (k ^ ":") (mask b k v))
@@ -1598,4 +1599,16 @@ let () =
        ]
       @ frontend_cmds ())
   in
-  exit (Cmd.eval cmd)
+  (* A rejected config is a message to read and fix, not a stack trace: every
+     [failwith] on the way through [Conf_parsing] is phrased for a user. *)
+    match Cmd.eval ~catch:false cmd with
+    | code -> exit code
+    | exception Failure msg ->
+        prerr_endline ("tsync: " ^ msg);
+        exit 1
+    | exception exn ->
+        (* What cmdliner's own catch would have printed. *)
+        Printf.eprintf "tsync: internal error, uncaught exception:\n%s\n"
+          (Printexc.to_string exn);
+        prerr_string (Printexc.get_backtrace ());
+        exit Cmd.Exit.internal_error

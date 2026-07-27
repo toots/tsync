@@ -1,0 +1,107 @@
+
+=== chunks written through the wrapper, then the manifest naming them
+  put chunk c0
+  put chunk c2
+  put manifest one [c0 c2]
+  drain
+--- target
+  chunk c0
+  chunk c2
+  manifest one
+
+=== the dedup hole: a manifest whose chunks were never written here
+  put chunk c4 straight to main, bypassing the wrapper
+  put manifest copy [c0 c4]
+  drain
+--- target
+  chunk c0
+  chunk c2
+  chunk c4
+  manifest copy
+  manifest one
+
+=== a symlink names no chunks
+  put manifest link -> ../one
+  drain
+--- target
+  chunk c0
+  chunk c2
+  chunk c4
+  manifest copy
+  manifest link
+  manifest one
+
+=== rename: copy then delete, in that order on the target too
+  copy one -> moved
+  delete one
+  drain
+--- target
+  chunk c0
+  chunk c2
+  chunk c4
+  manifest copy
+  manifest link
+  manifest moved
+
+=== copy whose source the target never had
+  put manifest orphan [c6] and chunk c6 straight to main
+  copy orphan -> orphan2
+  drain
+--- target
+  chunk c0
+  chunk c2
+  chunk c4
+  chunk c6
+  manifest copy
+  manifest link
+  manifest moved
+  manifest orphan2
+
+=== sync bookkeeping is not a target's business
+  put journal entry
+  put cursor
+  drain
+  journal on main: true, on target: false
+  cursor on main: true, on target: false
+--- target
+  chunk c0
+  chunk c2
+  chunk c4
+  chunk c6
+  manifest copy
+  manifest link
+  manifest moved
+  manifest orphan2
+
+=== a deleted chunk is pushed again when it is written again
+  delete chunk c0
+  drain
+--- target
+  chunk c2
+  chunk c4
+  chunk c6
+  manifest copy
+  manifest link
+  manifest moved
+  manifest orphan2
+  put chunk c0 again
+  drain
+--- target
+  chunk c0
+  chunk c2
+  chunk c4
+  chunk c6
+  manifest copy
+  manifest link
+  manifest moved
+  manifest orphan2
+
+=== an unreachable target is logged, never fatal
+  put chunk c8, put manifest safe, copy safe -> safe2, delete safe2
+  drain
+  manifest safe on main: true
+  chunk c8 on main: true
+
+=== reads never consult a target
+  get chunk c2 = "bbbb"
+  get_opt an absent chunk = none
