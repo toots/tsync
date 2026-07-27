@@ -27,13 +27,6 @@ let keep_idle_ns = 60_000_000_000L
    to be wide enough not to become the narrower limit. *)
 let max_parallel = 32
 
-(* One request in flight per connection. The cache defaults to pipelining up to
-   100, which needs every hop to handle pipelined requests correctly — and a
-   reverse proxy in front of us is not required to. Keep-alive is what this is
-   for; concurrency comes from having several connections, not from stacking
-   requests onto one. *)
-let requests_per_connection = 1
-
 type t = {
   base_uri : Uri.t;
   secret : string;
@@ -239,9 +232,7 @@ let make ~url ~secret : (module Backend.S) =
     {
       base_uri = Uri.of_string url;
       secret;
-      cache =
-        Cache.create ~keep:keep_idle_ns ~parallel:max_parallel
-          ~depth:requests_per_connection ();
+      cache = Cache.create ~keep:keep_idle_ns ~parallel:max_parallel ();
       share_url_cache = None;
       chunk_size_cache = None;
     }
