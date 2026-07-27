@@ -35,19 +35,6 @@ type t = {
 let default_max_uploads = 4
 let default_max_downloads = 8
 
-(* Per-domain, overridable via "chunkSize". 8 MiB favors sequential throughput
-   and small manifests; lower it for random-access workloads to cut read/write
-   amplification (at the cost of larger manifests and more backend requests). *)
-let default_chunk_size = 8 * 1024 * 1024
-
-(* Per-domain, overridable via "cacheChunkSize". The local cache stores
-   consecutive stored chunks grouped into files of about this size: storage
-   granularity wants to be small (less egress when a file changes), disk
-   granularity wants to be large (fewer opens, less I/O latency), so the two are
-   configured apart. Absent, it follows "chunkSize" and no grouping happens; this
-   is only the value [tsync configure] proposes. *)
-let default_cache_chunk_size = 64 * 1024 * 1024
-
 (* Human-friendly byte sizes: a bare number is bytes; a K/M/G suffix (with an
    optional B/iB) is a binary multiple (1K = 1024). *)
 let format_size b =

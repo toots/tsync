@@ -87,9 +87,9 @@ module Make (C : Conf.S) = struct
     else (
       let src_path = Filename.concat src_root rel in
       let* st = Lwt_unix_retry.stat src_path in
+      let* chunk_size = R.chunk_size () in
       let* state =
-        R.upload ~key ~src_path ~mtime:st.Unix.st_mtime ~chunk_size:C.chunk_size
-          ()
+        R.upload ~key ~src_path ~mtime:st.Unix.st_mtime ~chunk_size ()
       in
       let+ () = Mf.write key state in
       match state with

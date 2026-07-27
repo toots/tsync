@@ -193,4 +193,14 @@ let make ~chunk_prefix ~(read_order : sub list) ~(manifest_read : sub list)
             match u with Some _ -> Lwt.return u | None -> go rest)
       in
       go all_read
+
+    (* First sub-backend with an opinion, in read preference. *)
+    let default_chunk_size ~prefix () =
+      let rec go = function
+        | [] -> Lwt.return_none
+        | (module B : Backend.S) :: rest -> (
+            let* n = B.default_chunk_size ~prefix () in
+            match n with Some _ -> Lwt.return n | None -> go rest)
+      in
+      go all_read
   end)

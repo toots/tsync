@@ -32,6 +32,7 @@ module Down : Backend.S = struct
   let list_all ?max_keys:_ ~prefix:_ () = fail ()
   let list_directory ~prefix:_ () = fail ()
   let share_url ~prefix:_ () = Lwt.return_none
+  let default_chunk_size ~prefix:_ () = Lwt.return_none
 end
 
 let () =

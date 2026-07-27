@@ -266,7 +266,9 @@ let setup_client (module C : Conf.S) root staging_prefix =
             let specs = Manifest.specs_by_index m.Manifest.chunks in
             let per =
               Chunk_group.per_group ~chunk_size:m.Manifest.chunk_size
-                ~cache_chunk_size:C.cache_chunk_size
+                ~cache_chunk_size:
+                  (Option.value C.cache_chunk_size
+                     ~default:Conf.default_cache_chunk_size)
             in
             match Chunk_group.of_specs ~specs ~per index with
               | Some g -> g
@@ -957,8 +959,8 @@ let run_scenario ?(versioning = false) ?(symlink_policy = `Keep)
     let notify_path = Filename.concat root "notify.sock"
     let max_uploads = 4
     let max_downloads = 8
-    let chunk_size = Manifest.chunk_size
-    let cache_chunk_size = cache_chunk_size
+    let chunk_size = Some Manifest.chunk_size
+    let cache_chunk_size = Some cache_chunk_size
 
     let max_cache =
       match Sys.getenv_opt "TSYNC_MAX_CACHE" with
@@ -1034,8 +1036,8 @@ let run_two_client_scenario ?(versioning = false)
     let notify_path = Filename.concat root "notify-a.sock"
     let max_uploads = 4
     let max_downloads = 8
-    let chunk_size = Manifest.chunk_size
-    let cache_chunk_size = cache_chunk_size
+    let chunk_size = Some Manifest.chunk_size
+    let cache_chunk_size = Some cache_chunk_size
 
     let max_cache =
       match Sys.getenv_opt "TSYNC_MAX_CACHE" with
@@ -1062,8 +1064,8 @@ let run_two_client_scenario ?(versioning = false)
     let notify_path = Filename.concat root "notify-b.sock"
     let max_uploads = 4
     let max_downloads = 8
-    let chunk_size = Manifest.chunk_size
-    let cache_chunk_size = cache_chunk_size
+    let chunk_size = Some Manifest.chunk_size
+    let cache_chunk_size = Some cache_chunk_size
 
     let max_cache =
       match Sys.getenv_opt "TSYNC_MAX_CACHE" with
@@ -1138,8 +1140,8 @@ let make_conf ?(versioning = false) ~client_name ~backend_root ~cache_root
     let notify_path = notify_path
     let max_uploads = 4
     let max_downloads = 8
-    let chunk_size = Manifest.chunk_size
-    let cache_chunk_size = cache_chunk_size
+    let chunk_size = Some Manifest.chunk_size
+    let cache_chunk_size = Some cache_chunk_size
 
     let max_cache =
       match Sys.getenv_opt "TSYNC_MAX_CACHE" with

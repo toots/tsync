@@ -26,8 +26,10 @@ module Make (C : Conf.S) (R : Remote.S) = struct
 
   (* Stored chunks per cache chunk, from the file's own chunk size: a file
      uploaded under a different [chunkSize] still groups correctly. *)
-  let per_of ~chunk_size =
-    Chunk_group.per_group ~chunk_size ~cache_chunk_size:C.cache_chunk_size
+  let cache_chunk_size =
+    Option.value C.cache_chunk_size ~default:Conf.default_cache_chunk_size
+
+  let per_of ~chunk_size = Chunk_group.per_group ~chunk_size ~cache_chunk_size
 
   (* The group holding stored chunk [i], reusing [cached] while [i] stays in the
      same group — a sequential read rebuilds one per boundary crossing, not one
@@ -212,6 +214,7 @@ module Make (C : Conf.S) (R : Remote.S) = struct
           staged_for key
       | Some st -> Lwt.return st
       | None -> (
+          let* chunk_size = R.chunk_size () in
           let+ published = Mf.read key in
           let name =
             Filename.basename
@@ -237,7 +240,7 @@ module Make (C : Conf.S) (R : Remote.S) = struct
                   Manifest.s_name = name;
                   s_size = 0L;
                   s_mtime = Unix.gettimeofday ();
-                  s_chunk_size = C.chunk_size;
+                  s_chunk_size = chunk_size;
                   s_slots = [||];
                   s_whole = None;
                   s_published = None;
@@ -245,7 +248,7 @@ module Make (C : Conf.S) (R : Remote.S) = struct
 
   (* Copy a whole body into per-chunk staged bodies, then drop it. *)
   and split_whole key (st : Manifest.staged) uuid =
-    let cs = C.chunk_size in
+    let* cs = R.chunk_size () in
     let total = Int64.to_int st.Manifest.s_size in
     let n = Manifest.num_chunks_for st.Manifest.s_size cs in
     let slots = Array.make n Manifest.Zero in
@@ -464,12 +467,13 @@ module Make (C : Conf.S) (R : Remote.S) = struct
       Filename.basename
         (Manifest.strip_prefix ~domain_prefix:C.domain_prefix key)
     in
+    let* chunk_size = R.chunk_size () in
     Mf.write_staged key
       {
         Manifest.s_name = name;
         s_size = 0L;
         s_mtime = Unix.gettimeofday ();
-        s_chunk_size = C.chunk_size;
+        s_chunk_size = chunk_size;
         s_slots = [||];
         s_whole = None;
         s_published = None;
@@ -527,9 +531,10 @@ module Make (C : Conf.S) (R : Remote.S) = struct
       | Some uuid ->
           (* A whole file needs no per-chunk source: hand the file itself to the
              ordinary whole-file upload, which reads, hashes and sends it. *)
+          let* chunk_size = R.chunk_size () in
           let* state =
             R.upload ~key ~src_path:(Cc.whole_path uuid)
-              ~mtime:staged.Manifest.s_mtime ~chunk_size:C.chunk_size ?cancel ()
+              ~mtime:staged.Manifest.s_mtime ~chunk_size ?cancel ()
           in
           commit key staged state
       | None -> upload_chunked ~key ~staged ?cancel ()
@@ -664,6 +669,7 @@ module Make (C : Conf.S) (R : Remote.S) = struct
       match st with Some st -> discard_bodies st | None -> Lwt.return_unit
     in
     let* stat = Lwt_unix_retry.LargeFile.stat src_path in
+    let* chunk_size = R.chunk_size () in
     let uuid = Manifest.new_uuid () in
     (* Bytes first, then the manifest that references them. *)
     let* () = Cc.adopt_whole ~src:src_path ~uuid in
@@ -674,7 +680,7 @@ module Make (C : Conf.S) (R : Remote.S) = struct
             (Manifest.strip_prefix ~domain_prefix:C.domain_prefix key);
         s_size = stat.Unix.LargeFile.st_size;
         s_mtime = stat.Unix.LargeFile.st_mtime;
-        s_chunk_size = C.chunk_size;
+        s_chunk_size = chunk_size;
         s_slots = [||];
         s_whole = Some uuid;
         s_published = None;
@@ -805,7 +811,7 @@ module Make (C : Conf.S) (R : Remote.S) = struct
     let* () = Fs_util.ensure_parent dst_path in
     let* () = ensure_local key in
     let buf =
-      Bigarray.Array1.create Bigarray.char Bigarray.c_layout C.chunk_size
+      Bigarray.Array1.create Bigarray.char Bigarray.c_layout cache_chunk_size
     in
     let* fd =
       Lwt_unix_retry.openfile dst_path

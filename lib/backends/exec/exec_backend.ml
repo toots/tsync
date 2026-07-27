@@ -256,6 +256,7 @@ let make ~command ~root : (module Backend.S) =
         List.sort (fun (a, _) (b, _) -> String.compare a b) subdirs )
 
     let share_url ~prefix:_ () = Lwt.return_none
+    let default_chunk_size ~prefix:_ () = Lwt.return_none
   end)
 
 let req get ~backend field =

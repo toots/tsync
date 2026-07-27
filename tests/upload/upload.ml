@@ -31,8 +31,8 @@ module C = struct
   let notify_path = Filename.concat root "n.sock"
   let max_uploads = 4
   let max_downloads = 8
-  let chunk_size = chunk_size
-  let cache_chunk_size = cache_chunk_size
+  let chunk_size = Some chunk_size
+  let cache_chunk_size = Some cache_chunk_size
   let max_cache = None
   let symlink_policy = `Keep
   let read_only = false
@@ -40,6 +40,37 @@ end
 
 module R = Remote.Make (C)
 module D = Data.Make (C) (R)
+
+(* ── Chunk size resolution ───────────────────────────────────────────────────
+   New files take the configured size when there is one; otherwise the client
+   asks the primary backend — an http-proxy answers with the serving domain's
+   own, so the setting lives in one config rather than two — and falls back to
+   the built-in default when nothing has an opinion. *)
+
+let opinionated n : (module Backend.S) =
+  (module struct
+    include (val Local_backend.make ~root:backend_root : Backend.S)
+
+    let default_chunk_size ~prefix:_ () = Lwt.return n
+  end)
+
+module Unset (B : sig
+  val answer : int option
+end) =
+struct
+  include C
+
+  let chunk_size = None
+  let backends = [opinionated B.answer]
+end
+
+module From_backend = Remote.Make (Unset (struct
+  let answer = Some 4096
+end))
+
+module No_opinion = Remote.Make (Unset (struct
+  let answer = None
+end))
 
 (* Distinct per chunk: adding the chunk index shifts each chunk's byte pattern,
    so the three chunks hash to three different keys. *)
@@ -126,6 +157,15 @@ let () =
      let* em = upload (C.domain_prefix ^ "empty.bin") empty in
      assert (List.length em.Manifest.chunks = 1);
      let* () = round_trip (C.domain_prefix ^ "empty.bin") empty "" in
+
+     (* Configured wins outright: nothing is asked of the backend. *)
+     let* n = R.chunk_size () in
+     assert (n = chunk_size);
+     (* Unset: the backend's recommendation, then the built-in default. *)
+     let* n = From_backend.chunk_size () in
+     assert (n = 4096);
+     let* n = No_opinion.chunk_size () in
+     assert (n = Conf.default_chunk_size);
 
      print_endline "ok";
      Lwt.return_unit)

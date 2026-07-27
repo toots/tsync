@@ -39,6 +39,7 @@ type route = {
   shares_prefix : string;
   secret : string;
   read_only : bool;
+  chunk_size : int option;  (** what this domain's config says, if anything *)
   primary : (module Backend.S);
   all_backends : (module Backend.S) list;
   serve_share : share_handler option;
@@ -88,6 +89,7 @@ let make_route bindings (b : Frontend.binding) =
     shares_prefix = C.shares_prefix;
     secret;
     read_only;
+    chunk_size = C.chunk_size;
     primary = List.hd C.backends;
     all_backends = C.backends;
     serve_share;
@@ -105,6 +107,7 @@ type op =
   | List_all of string * int option
   | List_dir of string
   | Share_url of string
+  | Chunk_size of string
   | Bad
 
 let parse_op meth uri body =
@@ -143,6 +146,8 @@ let parse_op meth uri body =
               List_all (prefix, Option.bind (q "max_keys") int_of_string_opt)
           | Some "dir", Some prefix -> List_dir prefix
           | _ -> Bad)
+    | `GET, "/chunk-size" -> (
+        match q "prefix" with Some prefix -> Chunk_size prefix | None -> Bad)
     | `GET, "/share-url" -> (
         match q "prefix" with Some prefix -> Share_url prefix | None -> Bad)
     | _ -> Bad
@@ -154,7 +159,7 @@ let route_key = function
   | Delete_multi (k :: _) -> Some k
   | Delete_multi [] -> None
   | Copy (src, _) -> Some src
-  | List_all (p, _) | List_dir p | Share_url p -> Some p
+  | List_all (p, _) | List_dir p | Share_url p | Chunk_size p -> Some p
   | Bad -> None
 
 let respond ?(status = `OK) ?(headers = []) body =
@@ -264,6 +269,17 @@ let exec route op ~body =
                   | None -> find rest)
           in
           find route.all_backends)
+    | Chunk_size _ -> (
+        (* So a client behind us writes new files at the size this domain already
+           uses, rather than the setting living in both configs. Silence when we
+           have none configured: the client's own default is then the same 8 MiB
+           ours would have been.
+           ponytail: not chained through our own backends, so a proxy fronting a
+           proxy answers only for itself. *)
+          match route.chunk_size with
+          | Some n ->
+              respond (Yojson.Safe.to_string (`Assoc [("chunkSize", `Int n)]))
+          | None -> respond ~status:`Not_found "")
     | Bad -> respond ~status:`Bad_request "bad request"
 
 (* Share manifests are written outside every domain root ([shares_prefix] is

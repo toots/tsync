@@ -34,8 +34,8 @@ module C : Conf.S = struct
   let notify_path = ""
   let max_uploads = 1
   let max_downloads = 2
-  let chunk_size = 8
-  let cache_chunk_size = 8
+  let chunk_size = Some 8
+  let cache_chunk_size = Some 8
   let max_cache = None
   let symlink_policy = `Keep
   let read_only = false
@@ -108,7 +108,8 @@ let publish () =
   let oc = open_out_bin src in
   output_string oc body;
   close_out oc;
-  let* state = R.upload ~key ~src_path:src ~mtime ~chunk_size:C.chunk_size () in
+  let* chunk_size = R.chunk_size () in
+  let* state = R.upload ~key ~src_path:src ~mtime ~chunk_size () in
   Mf.write key state
 
 let write_at offset s =
@@ -127,7 +128,7 @@ module CG : Conf.S = struct
   let domain_name = "groupdom"
   let domain_prefix = "tsync/groupdom/manifests/"
   let chunk_prefix = "tsync/groupdom/chunks/"
-  let cache_chunk_size = 24
+  let cache_chunk_size = Some 24
 end
 
 module GR = Remote.Make (CG)
@@ -153,9 +154,8 @@ let gpublish () =
   let oc = open_out_bin src in
   output_string oc body;
   close_out oc;
-  let* state =
-    GR.upload ~key:gkey ~src_path:src ~mtime ~chunk_size:CG.chunk_size ()
-  in
+  let* chunk_size = GR.chunk_size () in
+  let* state = GR.upload ~key:gkey ~src_path:src ~mtime ~chunk_size () in
   Gm.write gkey state
 
 let gwrite_at offset s =

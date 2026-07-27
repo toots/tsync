@@ -37,8 +37,8 @@ module C : Conf.S = struct
 
   (* Small enough that the fixture spans several chunks, so range reads exercise
      partial fetching rather than pulling one chunk. *)
-  let chunk_size = 16
-  let cache_chunk_size = 16
+  let chunk_size = Some 16
+  let cache_chunk_size = Some 16
   let max_cache = None
   let symlink_policy = `Keep
   let read_only = false
@@ -62,7 +62,8 @@ let upload rel content =
   let src = Filename.concat data_dir (Filename.basename rel) in
   write_local src content;
   let key = C.domain_prefix ^ rel in
-  let* _ = R.upload ~key ~src_path:src ~mtime ~chunk_size:C.chunk_size () in
+  let* chunk_size = R.chunk_size () in
+  let* _ = R.upload ~key ~src_path:src ~mtime ~chunk_size () in
   let module L = Layout.Inode.Make (C) in
   L.manifest_key key
 

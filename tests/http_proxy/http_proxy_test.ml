@@ -62,6 +62,7 @@ let () =
       shares_prefix = "tsync/shares/";
       secret = name;
       read_only = false;
+      chunk_size = None;
       primary = Local_backend.make ~root:"/tmp/tsync-route-test";
       all_backends = [];
       serve_share = None;
@@ -74,6 +75,23 @@ let () =
       (Http_proxy_frontend.route_for routes ~key ~authed:(fun r ->
            r.Http_proxy_frontend.secret = signer))
   in
+  (* The chunk-size question is a domain-scoped GET like any other, so it routes
+     by prefix: a client behind the proxy asks the domain it is talking to. *)
+  let chunk_size_op prefix =
+    Http_proxy_frontend.parse_op `GET
+      (Uri.of_string ("/chunk-size?prefix=" ^ prefix))
+      ""
+  in
+  assert (
+    chunk_size_op "tsync/one/" = Http_proxy_frontend.Chunk_size "tsync/one/");
+  assert (
+    Http_proxy_frontend.route_key (chunk_size_op "tsync/one/")
+    = Some "tsync/one/");
+  (* No prefix is a bad request, not a silent answer for some other domain. *)
+  assert (
+    Http_proxy_frontend.parse_op `GET (Uri.of_string "/chunk-size") ""
+    = Http_proxy_frontend.Bad);
+
   assert (pick "tsync/two/manifests/x" "one" = Some "two");
   assert (pick "tsync/shares/deadbeef" "two" = Some "two");
   assert (pick "tsync/shares/deadbeef" "nobody" = None);

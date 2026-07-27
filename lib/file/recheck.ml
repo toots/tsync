@@ -35,13 +35,17 @@ module Make (C : Conf.S) = struct
   module Mf = Manifest.Make (C)
   module Cc = Chunk_cache.Make (C) (R)
 
+  let cache_chunk_size =
+    Option.value C.cache_chunk_size ~default:Conf.default_cache_chunk_size
+
+  let per_of (m : Manifest.t) =
+    Chunk_group.per_group ~chunk_size:m.Manifest.chunk_size ~cache_chunk_size
+
   (* Every cache chunk of a published manifest, as {!Chunk_group} sees them. *)
   let groups_of (m : Manifest.t) =
-    let specs = Manifest.specs_by_index m.Manifest.chunks in
-    Chunk_group.all ~specs
-      ~per:
-        (Chunk_group.per_group ~chunk_size:m.Manifest.chunk_size
-           ~cache_chunk_size:C.cache_chunk_size)
+    Chunk_group.all
+      ~specs:(Manifest.specs_by_index m.Manifest.chunks)
+      ~per:(per_of m)
 
   (* The local half of a recheck: every member segment of every cache chunk must
      hash to the key it was published under. Manifest-driven, unlike the rest of
@@ -81,10 +85,7 @@ module Make (C : Conf.S) = struct
         | None | Some `Dirty -> Lwt.return Unreadable
         | Some (`Clean m) ->
             let specs = Manifest.specs_by_index m.Manifest.chunks in
-            let per =
-              Chunk_group.per_group ~chunk_size:m.Manifest.chunk_size
-                ~cache_chunk_size:C.cache_chunk_size
-            in
+            let per = per_of m in
             let local_body (entry : Manifest.chunk_entry) =
               let index = entry.Manifest.index in
               match Chunk_group.of_specs ~specs ~per index with

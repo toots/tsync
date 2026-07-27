@@ -286,6 +286,7 @@ let make ?endpoint ?service_account_key ?share_url ~bucket () :
     let list_all ?max_keys ~prefix () = list_all t ?max_keys ~prefix ()
     let list_directory ~prefix () = list_directory t ~prefix ()
     let share_url ~prefix:_ () = Lwt.return t.share_url
+    let default_chunk_size ~prefix:_ () = Lwt.return_none
   end)
 
 let spec =

@@ -197,6 +197,7 @@ let make ~root : (module Backend.S) =
           | exn -> Lwt.fail exn)
 
     let share_url ~prefix:_ () = Lwt.return_none
+    let default_chunk_size ~prefix:_ () = Lwt.return_none
   end)
 
 let spec =

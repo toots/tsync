@@ -6,6 +6,7 @@ type t = {
   base_uri : Uri.t;
   secret : string;
   mutable share_url_cache : string option Lwt.t option;
+  mutable chunk_size_cache : int option Lwt.t option;
 }
 
 let max_attempts = 8
@@ -181,8 +182,46 @@ let share_url t ~prefix () =
         t.share_url_cache <- Some p;
         p
 
+(* The serving domain's own [chunkSize], so a client behind the proxy writes new
+   files at the size the domain already uses instead of the two configs having to
+   agree. 404 means the proxy has no opinion. *)
+let query_chunk_size t ~prefix =
+  let uri =
+    Uri.with_query'
+      (Uri.with_path t.base_uri "/chunk-size")
+      [("prefix", prefix)]
+  in
+  let+ resp, body = call_retry t ~meth:`GET "chunk_size" uri in
+  if is_ok resp then (
+    match Yojson.Safe.from_string body with
+      | exception _ -> None
+      | j -> (
+          match Yojson.Safe.Util.member "chunkSize" j with
+            | `Int n when n > 0 -> Some n
+            | _ -> None))
+  else if code resp = 404 then None
+  else raise (backend_error "chunk_size" (code resp) body)
+
+(* Fixed for the life of the process, like {!share_url}: a domain's chunk size
+   changing under a running client would only affect files it creates next, and
+   re-asking per upload would cost a round trip each time. *)
+let default_chunk_size t ~prefix () =
+  match t.chunk_size_cache with
+    | Some p -> p
+    | None ->
+        let p = query_chunk_size t ~prefix in
+        t.chunk_size_cache <- Some p;
+        p
+
 let make ~url ~secret : (module Backend.S) =
-  let t = { base_uri = Uri.of_string url; secret; share_url_cache = None } in
+  let t =
+    {
+      base_uri = Uri.of_string url;
+      secret;
+      share_url_cache = None;
+      chunk_size_cache = None;
+    }
+  in
   (module struct
     let put ~key ~data () = put t ~key ~data ()
     let get ~key () = get t ~key ()
@@ -194,6 +233,7 @@ let make ~url ~secret : (module Backend.S) =
     let list_all ?max_keys ~prefix () = list_all t ?max_keys ~prefix ()
     let list_directory ~prefix () = list_directory t ~prefix ()
     let share_url ~prefix () = share_url t ~prefix ()
+    let default_chunk_size ~prefix () = default_chunk_size t ~prefix ()
   end)
 
 let spec =

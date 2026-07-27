@@ -27,6 +27,13 @@ module type S = sig
       frontend; others return [None]. [prefix] identifies the domain for
       backends (like http-proxy) that front several. *)
   val share_url : prefix:string -> unit -> string option Lwt.t
+
+  (** The chunk size this backend recommends for new files in [prefix]'s domain,
+      or [None] if it has no opinion (which is every store that only holds
+      bytes). An http-proxy answers with the serving domain's own [chunkSize],
+      so a client behind one inherits it instead of mirroring the setting in two
+      configs. Only consulted when the client's own config does not say. *)
+  val default_chunk_size : prefix:string -> unit -> int option Lwt.t
 end
 
 type factory = (string -> string option) -> (module S)

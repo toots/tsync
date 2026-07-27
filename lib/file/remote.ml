@@ -48,6 +48,9 @@ module type S = sig
 
   val get_chunk : chunk_key:string -> string Lwt.t
 
+  (** Chunk size for files this client creates; see the .mli. *)
+  val chunk_size : unit -> int Lwt.t
+
   val upload_chunks :
     key:string ->
     name:string ->
@@ -96,16 +99,48 @@ module Make_with_layout (C : Conf.S) (L : Layout.S) : S = struct
      work system-wide: a chunk read blocks here until a slot frees, whatever
      file it belongs to, making [max_uploads] the single, real ceiling on
      concurrent upload operations. *)
+  (* The pool sizes buffers off the configured value, not the resolved one: it
+     only needs an upper bound that fits the common case, and an oversized chunk
+     already falls through to a one-off allocation below. *)
+  let buffer_size = Option.value C.chunk_size ~default:Conf.default_chunk_size
+
   let chunk_buffers =
     Lwt_pool.create (max 1 C.max_uploads) (fun () ->
-        Lwt.return (Bytes.create C.chunk_size))
+        Lwt.return (Bytes.create buffer_size))
+
+  (* Chunk size for files this client creates: what the config says, else what
+     the primary backend recommends (an http-proxy answers with the serving
+     domain's own, so the setting need not live in two configs), else the
+     built-in default. Asked once and memoized — the answer is fixed for the life
+     of the process, and every caller is on the creation path. *)
+  let resolved_chunk_size = ref None
+
+  let chunk_size () =
+    match !resolved_chunk_size with
+      | Some p -> p
+      | None ->
+          let p =
+            match C.chunk_size with
+              | Some n -> Lwt.return n
+              | None ->
+                  Lwt.catch
+                    (fun () ->
+                      let (module Primary : Backend.S) = primary () in
+                      let+ n =
+                        Primary.default_chunk_size ~prefix:C.domain_prefix ()
+                      in
+                      Option.value n ~default:Conf.default_chunk_size)
+                    (fun _ -> Lwt.return Conf.default_chunk_size)
+          in
+          resolved_chunk_size := Some p;
+          p
 
   (* Read a chunk of [size] bytes into a buffer: from the pool when it fits the
      domain chunk size, else a one-off allocation. The oversized case is only
      hit re-chunking a pre-existing file whose manifest used a larger chunk size
      than the domain now configures. *)
   let with_chunk_buffer ~size f =
-    if size <= C.chunk_size then Lwt_pool.use chunk_buffers f
+    if size <= buffer_size then Lwt_pool.use chunk_buffers f
     else f (Bytes.create size)
 
   (* Chunk keys known to exist on the primary backend, for this session only.
