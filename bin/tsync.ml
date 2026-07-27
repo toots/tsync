@@ -366,7 +366,7 @@ let ls_cmd =
                    Hashtbl.add seen hrel ();
                    let* data = B.get ~key:e.key () in
                    match Manifest.of_string data with
-                     | `Clean m ->
+                     | m ->
                          (* [hrel] is the manifest key tail; a missing live
                             manifest means the file was deleted. The leaf name is
                             the version body's own name. *)
@@ -375,7 +375,7 @@ let ls_cmd =
                          in
                          if head = None then
                            Printf.printf "deleted  %s\n" m.Manifest.name
-                     | `Dirty | (exception _) -> Lwt.return_unit)
+                     | exception _ -> Lwt.return_unit)
                | _ -> Lwt.return_unit)
            entries
        end
@@ -454,8 +454,8 @@ let versions_cmd =
                  (fun () ->
                    let+ data = B.get ~key:(Hashtbl.find sample hrel) () in
                    match Manifest.of_string data with
-                     | `Clean m -> m.Manifest.name (* TODO(inode): leaf only *)
-                     | _ -> hrel)
+                     | m -> m.Manifest.name
+                     | exception _ -> hrel)
                  (fun _ -> Lwt.return hrel)
              in
              let* deleted =
@@ -852,7 +852,7 @@ let sync_cmd =
                                Some (m.Folder.id, child)
                            | None -> (
                                match Manifest.of_string data with
-                                 | `Clean man as state ->
+                                 | man ->
                                      incr count;
                                      if !verbose then
                                        Log.info "manifest %s"
@@ -861,10 +861,9 @@ let sync_cmd =
                                        F.write_manifest
                                          (C.domain_prefix
                                         ^ join rel man.Manifest.name)
-                                         state
+                                         man
                                      in
                                      None
-                                 | `Dirty -> Lwt.return_none
                                  | exception _ -> Lwt.return_none))
                    in
                    match next with

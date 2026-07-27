@@ -5,15 +5,15 @@ module type S = sig
 
   val manifest_path : t -> string
   val rel_key : t -> string
-  val read_manifest : t -> Manifest.state option Lwt.t
+  val read_manifest : t -> Manifest.t option Lwt.t
 
   (** Like {!read_manifest}, but falls back to fetching and parsing the backend
       manifest when there is no local sidecar, so a backend-only file resolves
       to its real logical size/mtime instead of the manifest object's byte size.
   *)
-  val resolved_manifest : t -> Manifest.state option Lwt.t
+  val resolved_manifest : t -> Manifest.t option Lwt.t
 
-  val write_manifest : t -> Manifest.state -> unit Lwt.t
+  val write_manifest : t -> Manifest.t -> unit Lwt.t
   val upload : ?cancel:bool ref -> t -> unit Lwt.t
 
   (** Fetch every chunk [t] needs, so later reads are served locally.

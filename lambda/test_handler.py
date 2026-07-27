@@ -21,6 +21,8 @@ import boto3
 import pytest
 from moto import mock_aws
 
+import manifest
+
 BUCKET = "tsync-test"
 PREFIX = "p/.shares/"  # == SHARES_PREFIX; share manifest key is PREFIX + token
 CHUNK_PREFIX = "p/.chunks/"
@@ -51,28 +53,39 @@ def _slug(name):
     return hashlib.sha1(name.encode()).hexdigest()[:16]
 
 
+CHUNK_SIZE = 8 << 20
+
+
+def _key(h):
+    """Widen a readable stand-in like "dead-beef" to a real 33-byte chunk key:
+    two 16-character halves."""
+    a, b = h.split("-")
+    return a.ljust(16, "0") + "-" + b.ljust(16, "0")
+
+
 def _file_body(name, chunks, mtime=1_700_000_000.0, symlink=None, size=None):
-    m = {"v": 1, "name": name,
-         "size": size if size is not None else sum(len(c[1]) for c in chunks),
-         "chunkSize": 8 << 20, "h1": "f_" + name, "h2": "0", "mtime": mtime,
-         "chunks": []}
-    for idx, (h, data) in enumerate(chunks):
-        m["chunks"].append(
-            {"index": idx, "h1": h.split("-")[0], "h2": h.split("-")[1],
-             "size": len(data)})
     if symlink is not None:
-        m["symlink"] = symlink
-        m["chunks"] = []
-    return m
+        chunks = []
+        size = len(symlink)
+    return manifest.encode(
+        name=name,
+        size=size if size is not None else sum(len(c[1]) for c in chunks),
+        chunk_size=CHUNK_SIZE,
+        mtime=mtime,
+        h1=_slug(name),
+        h2="0" * 16,
+        symlink=symlink,
+        keys=[_key(h) for h, _ in chunks],
+    )
 
 
 def put_file(s3, folder_id, name, chunks, **kw):
     """Write a file's chunks and its manifest under [folder_id]'s namespace.
     Returns the manifest key (for a file share's "key")."""
     for h, data in chunks:
-        put(s3, CHUNK_PREFIX + h, data)
+        put(s3, CHUNK_PREFIX + _key(h), data)
     key = DOMAIN_PREFIX + folder_id + "/" + _slug(name)
-    put(s3, key, json.dumps(_file_body(name, chunks, **kw)).encode())
+    put(s3, key, _file_body(name, chunks, **kw))
     return key
 
 
@@ -148,7 +161,7 @@ def test_missing_chunk_is_clean_error(s3):
     # yield a clean 502, not an unhandled 500.
     h = load_handler()
     key = put_file(s3, "r", "gone.bin", [("dead-beef", b"data")])
-    s3.delete_object(Bucket=BUCKET, Key=CHUNK_PREFIX + "dead-beef")
+    s3.delete_object(Bucket=BUCKET, Key=CHUNK_PREFIX + _key("dead-beef"))
     tok = file_share(s3, "beef", key, "gone.bin")
     resp = h.handler(event(tok), None)
     assert resp["statusCode"] == 502, resp

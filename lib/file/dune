@@ -11,6 +11,7 @@
   tsync_queue
   tsync_local_io
   tsync_lwt_unix
+  base64
   unix
   lwt
   lwt.unix))

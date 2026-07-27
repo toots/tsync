@@ -1,27 +1,27 @@
-type chunk_entry = { index : int; h1 : string; h2 : string; size : int }
-
+(** A published file's metadata. The header fields are lifted out of the body;
+    [chunks] is the body itself ({!Chunk_table}), which for a sidecar is a
+    mapping, so the chunk keys cost no heap until one is asked for. *)
 type t = {
-  v : int;
   name : string;  (** leaf name; authority for the file's own name *)
   size : int64;
   chunk_size : int;
-  chunks : chunk_entry list;
+  chunks : Chunk_table.t;
   h1 : string;
   h2 : string;
   mtime : float;
   symlink : string option;
 }
 
-type state = [ `Dirty | `Clean of t ]
+(** What an upload produces per chunk, on the way to a body. Read paths go
+    through {!Chunk_table} instead. *)
+type chunk_entry = { index : int; h1 : string; h2 : string; size : int }
 
 val chunk_key : chunk_entry -> string
 
-(** Chunk entries by index. Manifests carry them as a list in index order, but
-    the [index] field is authoritative, so a hole reads as [None]. *)
-val entries_by_index : chunk_entry list -> chunk_entry option array
-
-(** The same, reduced to the [(chunk key, size)] pairs {!Chunk_group} needs. *)
-val specs_by_index : chunk_entry list -> (string * int) option array
+(** The reverse, for a chunk kept from a previous upload: its key is all that
+    was held onto. Raises [Invalid_argument] for a key that is not
+    ["<h1>-<h2>"]. *)
+val entry_of_key : index:int -> size:int -> string -> chunk_entry
 
 (** {2 Grouping}
 
@@ -33,10 +33,6 @@ val specs_by_index : chunk_entry list -> (string * int) option array
 val per : cache_chunk_size:int -> t -> int
 val groups : cache_chunk_size:int -> t -> Chunk_group.t list
 val group_at : cache_chunk_size:int -> t -> int -> Chunk_group.t option
-
-(** How many groups the file has, holes included — compare against
-    [List.length (groups m)] to detect a manifest that cannot be fully
-    described. *)
 val group_count : cache_chunk_size:int -> t -> int
 
 (** Whole-file [h1]/[h2] as a hash over the ordered chunk digests, so a changed
@@ -51,13 +47,18 @@ val make :
   chunk_size:int ->
   chunks:chunk_entry list ->
   mtime:float ->
-  state
+  t
 
 (** A chunkless manifest representing a symlink to [target]. *)
-val make_symlink : name:string -> target:string -> mtime:float -> state
+val make_symlink : name:string -> target:string -> mtime:float -> t
 
-val of_string : string -> state
-val to_string : state -> string
+val of_string : string -> t
+
+(** Map a sidecar. Its chunk keys stay in the page cache rather than the heap.
+*)
+val of_file : string -> t
+
+val to_string : t -> string
 
 (** Where a chunk of a locally edited file has its bytes. *)
 type slot =
@@ -120,9 +121,9 @@ module Make (C : Conf.S) : sig
   val path : string -> string
 
   (** [key]'s manifest, parsed and cached. [None] when absent or unparseable. *)
-  val read : string -> state option Lwt.t
+  val read : string -> t option Lwt.t
 
-  val write : string -> state -> unit Lwt.t
+  val write : string -> t -> unit Lwt.t
   val delete : string -> unit Lwt.t
   val rename : src_key:string -> dst_key:string -> unit Lwt.t
   val create_dir : string -> unit Lwt.t

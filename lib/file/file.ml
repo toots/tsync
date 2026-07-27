@@ -7,9 +7,9 @@ module type S = sig
 
   val manifest_path : t -> string
   val rel_key : t -> string
-  val read_manifest : t -> Manifest.state option Lwt.t
-  val resolved_manifest : t -> Manifest.state option Lwt.t
-  val write_manifest : t -> Manifest.state -> unit Lwt.t
+  val read_manifest : t -> Manifest.t option Lwt.t
+  val resolved_manifest : t -> Manifest.t option Lwt.t
+  val write_manifest : t -> Manifest.t -> unit Lwt.t
   val upload : ?cancel:bool ref -> t -> unit Lwt.t
 
   (** Fetch every chunk [t] needs, so later reads are served locally. *)
@@ -127,9 +127,9 @@ struct
 
   (* ── Manifest ──────────────────────────────────────────────────────────── *)
 
-  let read_manifest key : Manifest.state option Lwt.t = Mf.read key
+  let read_manifest key : Manifest.t option Lwt.t = Mf.read key
   let resolved_manifest = D.resolved_manifest
-  let write_manifest key (state : Manifest.state) = Mf.write key state
+  let write_manifest key (state : Manifest.t) = Mf.write key state
   let delete_manifest key = Mf.delete key
 
   (* ── Upload / download ─────────────────────────────────────────────────── *)
@@ -249,16 +249,15 @@ struct
              report the real logical size instead of ENOENT. *)
           let+ m = resolved_manifest key in
           match m with
-            | Some (`Clean { Manifest.symlink = Some target; mtime; _ }) ->
+            | Some { Manifest.symlink = Some target; mtime; _ } ->
                 Some (symlink_stat target mtime)
-            | Some (`Clean m) ->
-                Some (file_stat m.Manifest.size m.Manifest.mtime)
-            | _ -> None)
+            | Some m -> Some (file_stat m.Manifest.size m.Manifest.mtime)
+            | None -> None)
 
   let readlink key =
     let+ m = resolved_manifest key in
     match m with
-      | Some (`Clean { Manifest.symlink = Some _ as target; _ }) -> target
+      | Some { Manifest.symlink = Some _ as target; _ } -> target
       | _ -> None
 
   (* readdir is served from the local manifest mirror (the source of truth for
@@ -435,16 +434,11 @@ struct
 
   (* Publish an already-chunked file under [key]: its chunks are on the
      backend, only the manifest key and a journal entry are missing. *)
-  let publish_manifest key (state : Manifest.state) =
-    match state with
-      | `Dirty -> Lwt.return_unit
-      | `Clean m ->
-          Log.info "publish_manifest %s: size=%Ld" key m.Manifest.size;
-          let* () = St.put_manifest ~key ~data:(Manifest.to_string state) in
-          let* ek =
-            Fs.write_journal_entry [`Put (rel_key key, m.Manifest.size)]
-          in
-          Fs.bump_cursor ek
+  let publish_manifest key (m : Manifest.t) =
+    Log.info "publish_manifest %s: size=%Ld" key m.Manifest.size;
+    let* () = St.put_manifest ~key ~data:(Manifest.to_string m) in
+    let* ek = Fs.write_journal_entry [`Put (rel_key key, m.Manifest.size)] in
+    Fs.bump_cursor ek
 
   let conflict_name rel =
     let base = Filename.basename rel in
@@ -468,10 +462,10 @@ struct
     let name = Filename.basename key in
     let* m = read_manifest key in
     match m with
-      | Some (`Clean man) when man.Manifest.name <> name ->
-          let state = `Clean { man with Manifest.name } in
-          let* () = write_manifest key state in
-          St.put_manifest ~key ~data:(Manifest.to_string state)
+      | Some man when man.Manifest.name <> name ->
+          let renamed = { man with Manifest.name } in
+          let* () = write_manifest key renamed in
+          St.put_manifest ~key ~data:(Manifest.to_string renamed)
       | _ -> Lwt.return_unit
 
   let rename_body ~src ~dst =
@@ -551,7 +545,7 @@ struct
                     C.domain_prefix ^ conflict_name (rel_key dst)
                   in
                   let* () = rename_local ~src:dst ~dst:conflict in
-                  publish_manifest conflict (`Clean m)
+                  publish_manifest conflict m
               | None -> Lwt.fail exn)
 
   let rename ~src ~dst = with_meta (fun () -> rename_body ~src ~dst)
@@ -586,11 +580,10 @@ struct
     in
     let* data = St.get_version ~vkey:src_key in
     match Manifest.of_string data with
-      | `Dirty -> failwith "cannot restore a dirty version"
-      | `Clean m ->
+      | m ->
           ignore (cancel_upload key);
           let* () = St.put_manifest ~key ~data in
-          let* () = write_manifest key (`Clean m) in
+          let* () = write_manifest key m in
           (* The reverted manifest names the old version's chunks; whatever is in
              the chunk store stays (a shared chunk may still be wanted) and the
              missing ones fetch on demand. Staged edits go: reverting is
@@ -619,12 +612,9 @@ struct
         let data = Manifest.to_string state in
         let* () = St.put_manifest ~key ~data in
         let* () = write_manifest key state in
-        let size =
-          match state with
-            | `Clean m -> m.Manifest.size
-            | `Dirty -> assert false
+        let* ek =
+          Fs.write_journal_entry [`Put (rel_key key, state.Manifest.size)]
         in
-        let* ek = Fs.write_journal_entry [`Put (rel_key key, size)] in
         Fs.bump_cursor ek)
 
   (* ── Foreign op application (sync) ────────────────────────────────────── *)
@@ -702,7 +692,7 @@ struct
                    published the result): adopt the remote state of dst. *)
                 let* m = R.fetch_manifest ~key:dst_key () in
                 match m with
-                  | Some (`Clean _ as state) -> write_manifest dst_key state
+                  | Some state -> write_manifest dst_key state
                   | _ -> Lwt.return_unit)
 
   let apply_foreign_ops ops =

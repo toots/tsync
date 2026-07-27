@@ -21,8 +21,9 @@ module Make (C : Conf.S) = struct
         | Some _ -> [] (* folder / trash marker: references no chunks *)
         | None -> (
             match Manifest.of_string data with
-              | `Clean m -> List.map Manifest.chunk_key m.Manifest.chunks
-              | `Dirty -> []
+              | m ->
+                  let t = m.Manifest.chunks in
+                  List.init (Chunk_table.count t) (Chunk_table.key t)
               | exception e ->
                   failwith
                     (Printf.sprintf

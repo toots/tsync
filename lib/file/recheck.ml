@@ -47,7 +47,7 @@ module Make (C : Conf.S) = struct
       (fun acc rel ->
         let* state = Mf.read (C.domain_prefix ^ rel) in
         match state with
-          | Some (`Clean m) ->
+          | Some m ->
               Lwt_list.fold_left_s
                 (fun (checked, dropped) group ->
                   let* present = Cc.exists group in
@@ -56,7 +56,7 @@ module Make (C : Conf.S) = struct
                     let+ ok = Cc.verify_group ~group in
                     (checked + 1, if ok then dropped else dropped + 1))
                 acc (Mf.groups m)
-          | Some `Dirty | None -> Lwt.return acc)
+          | None -> Lwt.return acc)
       (0, 0) rels
 
   (* Verification is manifest-driven: every chunk a file names must be intact on
@@ -70,10 +70,9 @@ module Make (C : Conf.S) = struct
     else
       let* state = Mf.read key in
       match state with
-        | None | Some `Dirty -> Lwt.return Unreadable
-        | Some (`Clean m) ->
-            let local_body (entry : Manifest.chunk_entry) =
-              let index = entry.Manifest.index in
+        | None -> Lwt.return Unreadable
+        | Some m ->
+            let local_body index =
               match Mf.group_at m index with
                 | Some group -> Cc.member_if_local ~group ~index
                 | None -> Lwt.return_none

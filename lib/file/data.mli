@@ -20,7 +20,7 @@ module Make (C : Conf.S) (R : Remote.S) : sig
   (** [key]'s published manifest: the local sidecar when there is one, else the
       backend's — so a file that was never cached still reports its real logical
       size and mtime rather than the manifest object's byte size. *)
-  val resolved_manifest : string -> Manifest.state option Lwt.t
+  val resolved_manifest : string -> Manifest.t option Lwt.t
 
   (** [pread_key key buf ~offset] is {!pread} for a key of this domain,
       resolving it through {!Manifest.Make.resolve}: staged edits, else what was

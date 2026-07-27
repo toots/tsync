@@ -21,20 +21,19 @@ module Make (C : Conf.S) (R : Remote.S) = struct
   (* End offset of the last read per id, the only signal for read-ahead. Purely
      advisory: a lost or stale entry costs at most one un-prefetched read. *)
   let last_read_end : (string, int) Hashtbl.t = Hashtbl.create 64
-  let entries_of (m : Manifest.t) = Manifest.entries_by_index m.Manifest.chunks
   let cache_chunk_size = Conf.cache_chunk_size (module C)
 
   (* The group holding stored chunk [i], reusing [cached] while [i] stays in the
      same group — a sequential read rebuilds one per boundary crossing, not one
      per chunk. Carries the group index so the check is an integer compare. *)
-  let group_at ~specs ~per ~cached i =
+  let group_at ~table ~per ~cached i =
     let gi = Chunk_group.index_of ~per i in
     match cached with
       | Some (j, g) when j = gi -> Some (gi, g)
-      | _ -> Option.map (fun g -> (gi, g)) (Chunk_group.of_specs ~specs ~per i)
+      | _ -> Option.map (fun g -> (gi, g)) (Chunk_group.of_table ~table ~per i)
 
-  let read_ahead ~specs ~per ~chunk_size ~last =
-    let n = Array.length specs in
+  let read_ahead ~table ~per ~chunk_size ~last =
+    let n = Chunk_table.count table in
     let window =
       min max_readahead_groups
         (max 1 (readahead_bytes / max 1 (per * max 1 chunk_size)))
@@ -49,7 +48,7 @@ module Make (C : Conf.S) (R : Remote.S) = struct
                 if i > hi then Lwt.return_unit
                 else
                   let* () =
-                    match Chunk_group.of_specs ~specs ~per i with
+                    match Chunk_group.of_table ~table ~per i with
                       | Some group -> Cc.ensure ~group ()
                       | None -> Lwt.return_unit
                   in
@@ -68,11 +67,11 @@ module Make (C : Conf.S) (R : Remote.S) = struct
     let start = Int64.to_int offset in
     let avail = Int64.to_int (Int64.sub size offset) in
     let total = min want (max 0 avail) in
-    if total <= 0 || cs <= 0 || manifest.Manifest.chunks = [] then Lwt.return 0
+    let table = manifest.Manifest.chunks in
+    let n = Chunk_table.count table in
+    if total <= 0 || cs <= 0 || n = 0 then Lwt.return 0
     else (
-      let specs = Manifest.specs_by_index manifest.Manifest.chunks in
       let per = Mf.per manifest in
-      let n = Array.length specs in
       let rec go pos done_ cached =
         if done_ >= total then Lwt.return done_
         else (
@@ -81,10 +80,8 @@ module Make (C : Conf.S) (R : Remote.S) = struct
           else (
             let chunk_off = pos mod cs in
             let take = min (cs - chunk_off) (total - done_) in
-            match group_at ~specs ~per ~cached i with
+            match group_at ~table ~per ~cached i with
               | None ->
-                  (* A manifest whose chunk list has a hole is corrupt; refusing
-                     is better than serving zeros as if they were content. *)
                   Lwt.fail
                     (Backend.Backend_error
                        (Printf.sprintf "manifest %s: missing chunk %d" id i))
@@ -97,7 +94,7 @@ module Make (C : Conf.S) (R : Remote.S) = struct
       let* got = go start 0 None in
       let last = min (n - 1) ((start + max 0 (got - 1)) / cs) in
       if Hashtbl.find_opt last_read_end id = Some start then
-        read_ahead ~specs ~per ~chunk_size:cs ~last;
+        read_ahead ~table ~per ~chunk_size:cs ~last;
       Hashtbl.replace last_read_end id (start + got);
       Lwt.return got)
 
@@ -192,8 +189,8 @@ module Make (C : Conf.S) (R : Remote.S) = struct
       | None -> (
           let* state = R.fetch_manifest ~key () in
           match state with
-            | Some (`Clean m) -> pread ~id:key ~manifest:m buf ~offset
-            | Some `Dirty | None -> Lwt.return 0)
+            | Some m -> pread ~id:key ~manifest:m buf ~offset
+            | None -> Lwt.return 0)
 
   (* ── Writes ───────────────────────────────────────────────────────────────── *)
 
@@ -217,7 +214,7 @@ module Make (C : Conf.S) (R : Remote.S) = struct
               (Key.strip_prefix ~domain_prefix:C.domain_prefix key)
           in
           match published with
-            | Some (`Clean m) ->
+            | Some m ->
                 {
                   Manifest.s_name = m.Manifest.name;
                   s_size = m.Manifest.size;
@@ -231,7 +228,7 @@ module Make (C : Conf.S) (R : Remote.S) = struct
                   s_whole = None;
                   s_published = None;
                 }
-            | Some `Dirty | None ->
+            | None ->
                 {
                   Manifest.s_name = name;
                   s_size = 0L;
@@ -334,7 +331,7 @@ module Make (C : Conf.S) (R : Remote.S) = struct
     let len = Bigarray.Array1.dim buf in
     let* st = staged_for key in
     let* base = Mf.read key in
-    let base = match base with Some (`Clean m) -> Some m | _ -> None in
+    let base = match base with Some m -> Some m | _ -> None in
     let cs = st.Manifest.s_chunk_size in
     let start = Int64.to_int offset in
     let new_size =
@@ -387,7 +384,7 @@ module Make (C : Conf.S) (R : Remote.S) = struct
   let truncate key size =
     let* st = staged_for key in
     let* base = Mf.read key in
-    let base = match base with Some (`Clean m) -> Some m | _ -> None in
+    let base = match base with Some m -> Some m | _ -> None in
     let cs = st.Manifest.s_chunk_size in
     let n = Manifest.num_chunks_for size cs in
     let old = st.Manifest.s_slots in
@@ -487,14 +484,10 @@ module Make (C : Conf.S) (R : Remote.S) = struct
       match slots.(i) with
         | Manifest.Zero -> Lwt.return (`Data (String.make len '\000'))
         | Manifest.Inherit -> (
-            let inherited =
-              match base with Some m -> entries_of m | None -> [||]
-            in
-            match
-              if i < Array.length inherited then inherited.(i) else None
-            with
-              | Some e -> Lwt.return (`Reuse e)
-              | None ->
+            match base with
+              | Some m when i < Chunk_table.count m.Manifest.chunks ->
+                  Lwt.return (`Reuse (Chunk_table.key m.Manifest.chunks i))
+              | Some _ | None ->
                   Lwt.fail
                     (Backend.Backend_error
                        (Printf.sprintf "staged chunk %d inherits nothing" i)))
@@ -531,7 +524,7 @@ module Make (C : Conf.S) (R : Remote.S) = struct
 
   and upload_chunked ~key ~(staged : Manifest.staged) ?cancel () =
     let* base = Mf.read key in
-    let base = match base with Some (`Clean m) -> Some m | _ -> None in
+    let base = match base with Some m -> Some m | _ -> None in
     let* state =
       R.upload_chunks ~key ~name:staged.Manifest.s_name
         ~size:staged.Manifest.s_size ~chunk_size:staged.Manifest.s_chunk_size
@@ -544,15 +537,11 @@ module Make (C : Conf.S) (R : Remote.S) = struct
   (* The commit record: what was published, written into the staged manifest
      before anything local moves. A crash before this re-uploads (identical bytes,
      identical manifest); after it, only local moves are left to replay. *)
-  and commit key (staged : Manifest.staged) state =
-    match state with
-      | `Clean published ->
-          let+ () =
-            Mf.write_staged key
-              { staged with Manifest.s_published = Some published }
-          in
-          published
-      | `Dirty -> Lwt.fail_with "data: upload published a dirty manifest"
+  and commit key (staged : Manifest.staged) published =
+    let+ () =
+      Mf.write_staged key { staged with Manifest.s_published = Some published }
+    in
+    published
 
   (* Finish a committed upload: move each staged body under the content key its
      bytes hashed to, replace the sidecar with what was published, then drop the
@@ -572,7 +561,7 @@ module Make (C : Conf.S) (R : Remote.S) = struct
              (a share, an export, a peer) fetches what it needs like any other
              published file. Splitting the file into chunk bodies instead would
              cost a full extra copy of it on every single write. *)
-          let* () = Mf.write key (`Clean published) in
+          let* () = Mf.write key published in
           let* () = Cc.whole_forget ~uuid in
           Mf.delete_staged key
       | None -> promote_chunked key staged published
@@ -622,7 +611,7 @@ module Make (C : Conf.S) (R : Remote.S) = struct
             | Manifest.Inherit | Manifest.Zero -> Lwt.return_unit)
         (Array.to_list slots)
     in
-    let* () = Mf.write key (`Clean published) in
+    let* () = Mf.write key published in
     Mf.delete_staged key
 
   (* Upload [key] if it owes one, then promote. A staged manifest that already
@@ -681,7 +670,7 @@ module Make (C : Conf.S) (R : Remote.S) = struct
     match resolved with
       | None -> Lwt.return (0, 0)
       | Some (`Published m) ->
-          let total = List.length m.Manifest.chunks in
+          let total = Chunk_table.count m.Manifest.chunks in
           let+ present =
             Lwt_list.fold_left_s
               (fun acc group ->
@@ -770,10 +759,10 @@ module Make (C : Conf.S) (R : Remote.S) = struct
       | None -> (
           let* state = R.fetch_manifest ~key () in
           match state with
-            | Some (`Clean m) ->
-                let* () = Mf.write key (`Clean m) in
+            | Some m ->
+                let* () = Mf.write key m in
                 ensure_groups (Mf.groups m)
-            | Some `Dirty | None -> Lwt.return_unit)
+            | None -> Lwt.return_unit)
 
   (* Write [key]'s whole content to [dst_path]: the one way a caller that needs a
      real file (export, or the file handed to the FileProvider extension) gets
@@ -819,7 +808,6 @@ module Make (C : Conf.S) (R : Remote.S) = struct
   let forget_chunks key =
     let* published = Mf.read key in
     match published with
-      | Some (`Clean m) ->
-          Lwt_list.iter_s (fun group -> Cc.forget ~group) (Mf.groups m)
-      | Some `Dirty | None -> Lwt.return_unit
+      | Some m -> Lwt_list.iter_s (fun group -> Cc.forget ~group) (Mf.groups m)
+      | None -> Lwt.return_unit
 end

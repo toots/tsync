@@ -35,42 +35,39 @@ let key_of members =
     members;
   Xxhash.digest_hex s1 ^ "-" ^ Xxhash.digest_hex s2
 
-(* The group holding stored chunk [i]. [None] when the manifest has a hole in
-   it: a group is only addressable if every member it names is there. *)
-let of_specs ~specs ~per i =
-  let n = Array.length specs in
+(* The group holding stored chunk [i]; [None] only when [i] is out of range.
+   {!Chunk_table} rejects at decode any body whose length disagrees with the
+   chunk count in its header, so every index below [count] has a key and a group
+   can always be filled. *)
+let of_table ~table ~per i =
+  let n = Chunk_table.count table in
   if per <= 0 || i < 0 || i >= n then None
   else (
     let first = i / per * per in
     let len = min per (n - first) in
-    let members = Array.make len "" and sizes = Array.make len 0 in
-    let rec fill j =
-      if j >= len then Some { key = key_of members; members; sizes; first }
-      else (
-        match specs.(first + j) with
-          | None -> None
-          | Some (key, size) ->
-              members.(j) <- key;
-              sizes.(j) <- size;
-              fill (j + 1))
-    in
-    fill 0)
+    let members = Array.init len (fun j -> Chunk_table.key table (first + j)) in
+    Some
+      {
+        key = key_of members;
+        members;
+        sizes = Array.init len (fun j -> Chunk_table.len table (first + j));
+        first;
+      })
 
-(* Every group of a file, skipping any the manifest cannot describe. *)
-let all ~specs ~per =
-  let n = Array.length specs in
+let all ~table ~per =
+  let n = Chunk_table.count table in
   if per <= 0 then []
   else (
     let rec go i acc =
       if i >= n then List.rev acc
       else
         go (i + per)
-          (match of_specs ~specs ~per i with Some g -> g :: acc | None -> acc)
+          (match of_table ~table ~per i with Some g -> g :: acc | None -> acc)
     in
     go 0 [])
 
-let count ~specs ~per =
-  if per <= 0 then 0 else (Array.length specs + per - 1) / per
+let count ~table ~per =
+  if per <= 0 then 0 else (Chunk_table.count table + per - 1) / per
 
 let index_of ~per i = i / per
 let member_count t = Array.length t.sizes

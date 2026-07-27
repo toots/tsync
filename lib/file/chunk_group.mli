@@ -12,18 +12,16 @@ type t
     [|n * chunk_size - cache_chunk_size|]. A tie takes the larger group. *)
 val per_group : chunk_size:int -> cache_chunk_size:int -> int
 
-(** The group holding stored chunk [i]. [specs] is one [(chunk key, size)] per
-    stored chunk, by index — {!Manifest.specs_by_index}. [None] when the
-    manifest has a hole: a group is addressable only if every member it names is
-    present. *)
-val of_specs : specs:(string * int) option array -> per:int -> int -> t option
+(** The group holding stored chunk [i]; [None] only when [i] is out of range.
+    {!Chunk_table} rejects a body whose length disagrees with its header, so
+    every index below its count has a key and a group can always be filled. *)
+val of_table : table:Chunk_table.t -> per:int -> int -> t option
 
-(** Every group of a file, in order, skipping any the manifest cannot describe.
-*)
-val all : specs:(string * int) option array -> per:int -> t list
+(** Every group of a file, in order. *)
+val all : table:Chunk_table.t -> per:int -> t list
 
-(** How many groups a file of this many stored chunks has, holes included. *)
-val count : specs:(string * int) option array -> per:int -> int
+(** How many groups a file of this many stored chunks has. *)
+val count : table:Chunk_table.t -> per:int -> int
 
 (** Which group stored chunk [i] falls in, for callers that only need to notice
     a boundary crossing. *)

@@ -18,14 +18,14 @@ module Make (C : Conf.S) = struct
     let* () = Fs_util.ensure_parent dst_path in
     let* manifest = D.resolved_manifest key in
     match manifest with
-      | Some (`Clean { symlink = Some target; _ }) ->
+      | Some { symlink = Some target; _ } ->
           let* () = Fs_util.unlink_quiet dst_path in
           let+ () = Lwt_unix_retry.symlink target dst_path in
           Exported_symlink
-      | Some (`Clean _) ->
+      | Some _ ->
           let+ () = D.assemble_to key ~dst_path in
           Exported
-      | Some `Dirty | None ->
+      | None ->
           (* A staged file has no published manifest yet, but its content is
              local and readable. *)
           let* staged = Mf.staged_exists key in

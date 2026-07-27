@@ -94,7 +94,7 @@ let show label =
                      st.Manifest.s_slots)))
       | Some (`Published m) ->
           Printf.sprintf "published size=%2Ld chunks=%d" m.Manifest.size
-            (List.length m.Manifest.chunks)
+            (Chunk_table.count m.Manifest.chunks)
       | None -> "absent"
   in
   let+ content = read_all () in
@@ -181,7 +181,7 @@ let gshow label =
                      st.Manifest.s_slots)))
       | Some (`Published m) ->
           Printf.sprintf "published size=%2Ld chunks=%d" m.Manifest.size
-            (List.length m.Manifest.chunks)
+            (Chunk_table.count m.Manifest.chunks)
       | None -> "absent"
   in
   let size =
@@ -267,7 +267,7 @@ let () =
      let* published = Mf.read key in
      let* () =
        match (staged_before, published) with
-         | Some st, Some (`Clean m) ->
+         | Some st, Some m ->
              Mf.write_staged key { st with Manifest.s_published = Some m }
          | _ -> Lwt.return_unit
      in

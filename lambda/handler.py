@@ -31,6 +31,7 @@ import time
 import traceback
 import zipfile
 
+import manifest
 from share_common import ShareError
 
 SHARES_PREFIX = os.environ.get("SHARES_PREFIX", "tsync/shares/")  # guard: keys must start with this
@@ -65,8 +66,8 @@ def object_exists(key):
     return store.exists(key)
 
 
-def chunk_key(chunk_prefix, c):
-    return chunk_prefix + c["h1"] + "-" + c["h2"]
+def chunk_key(chunk_prefix, key):
+    return chunk_prefix + key
 
 
 # ── Inode navigation ────────────────────────────────────────────────────────
@@ -94,13 +95,25 @@ def child_objects(ns_prefix):
         if key == ns_prefix:
             continue
         try:
-            m = json.loads(get_bytes(key))
-        except (FileNotFoundError, ValueError):
+            body = get_bytes(key)
+        except FileNotFoundError:
+            continue
+        # A file manifest and a folder marker share this namespace and are told
+        # apart by the body: the first is binary and starts with the magic, the
+        # second is JSON.
+        if manifest.is_manifest(body):
+            try:
+                m = manifest.Manifest(body)
+            except manifest.Malformed:
+                continue
+            out.append((m.name, key, False, m.size))
+            continue
+        try:
+            m = json.loads(body)
+        except ValueError:
             continue
         if m.get("dir"):
             out.append((m.get("name", ""), base + m["id"] + "/", True, None))
-        elif not m.get("dirty"):
-            out.append((m.get("name", ""), key, False, m.get("size")))
     return out
 
 
@@ -133,20 +146,20 @@ def safe_rel(path):
 
 
 def file_manifest(key):
-    """Load a file manifest, rejecting folder markers, in-progress uploads and
-    symlinks (and any body without data blocks) with a clean error."""
+    """Load a file manifest, rejecting folder markers and symlinks with a clean
+    error."""
     try:
-        m = get_json(key)
+        body = get_bytes(key)
     except FileNotFoundError:
         raise ShareError(404, "file not found")
-    if m.get("dir"):
+    if not manifest.is_manifest(body):
         raise ShareError(400, "this share points at a folder, not a file")
-    if m.get("dirty"):
-        raise ShareError(409, "upload in progress, try again shortly")
-    if m.get("symlink") is not None:
+    try:
+        m = manifest.Manifest(body)
+    except manifest.Malformed as e:
+        raise ShareError(502, "unreadable manifest: %s" % e)
+    if m.symlink is not None:
         raise ShareError(400, "cannot serve a symlink directly")
-    if "chunks" not in m:
-        raise ShareError(502, "manifest has no data blocks")
     return m
 
 
@@ -154,15 +167,14 @@ def assemble(m, chunk_prefix, cache_key):
     """Write a file's bytes to cache_key by server-side chunk assembly (no /tmp).
     Applies the size / count guards, then hands the ordered chunk keys to the
     store, which stitches them (S3 multipart-copy / GCS compose)."""
-    if m.get("size", 0) > MAX_BYTES:
+    if m.size > MAX_BYTES:
         raise too_large()
-    chunks = sorted(m["chunks"], key=lambda c: c["index"])
-    if not chunks:
+    if m.count == 0:
         store.put_bytes(cache_key, b"")
         return
-    if len(chunks) > 10000:
+    if m.count > 10000:
         raise too_large()
-    store.assemble([chunk_key(chunk_prefix, c) for c in chunks], cache_key)
+    store.assemble([chunk_key(chunk_prefix, k) for k in m.keys()], cache_key)
 
 
 def build_file(file_key, chunk_prefix, cache_key):
@@ -192,23 +204,23 @@ def write_zip(entries, chunk_prefix, cache_key):
                     zf.writestr(zipfile.ZipInfo(marker), b"")
                     continue
                 try:
-                    m = get_json(key)
+                    m = manifest.Manifest(get_bytes(key))
                 except FileNotFoundError:
                     continue  # deleted between listing and build
-                if m.get("dirty"):
-                    continue  # transient mid-upload; etag changes once complete
-                total += m.get("size", 0)
+                except manifest.Malformed:
+                    continue
+                total += m.size
                 if total > MAX_BYTES:
                     raise too_large()
-                zi = zipfile.ZipInfo(name, date_time=mtime_tuple(m.get("mtime", 0)))
-                if m.get("symlink") is not None:
+                zi = zipfile.ZipInfo(name, date_time=mtime_tuple(m.mtime))
+                if m.symlink is not None:
                     zi.external_attr = 0xA1FF << 16  # S_IFLNK | 0777
-                    zf.writestr(zi, m["symlink"].encode())
+                    zf.writestr(zi, m.symlink.encode())
                     continue
                 zi.compress_type = zipfile.ZIP_STORED
                 with zf.open(zi, "w") as w:
-                    for c in sorted(m["chunks"], key=lambda c: c["index"]):
-                        for buf in store.read_chunk(chunk_key(chunk_prefix, c)):
+                    for k in m.keys():
+                        for buf in store.read_chunk(chunk_key(chunk_prefix, k)):
                             w.write(buf)
         store.upload_file(tmp, cache_key)
     finally:
@@ -375,7 +387,7 @@ def serve_file(share, path, as_download, want_json):
     if not r or r[0] != "file":
         raise ShareError(404, "file not found")
     m = file_manifest(r[1])
-    cache_key = SHARES_PREFIX + m["h1"] + "-" + m["h2"] + ".data"
+    cache_key = SHARES_PREFIX + m.h1 + "-" + m.h2 + ".data"
     if not object_exists(cache_key):
         assemble(m, share["chunkPrefix"], cache_key)
     name = os.path.basename(rel)
@@ -383,7 +395,7 @@ def serve_file(share, path, as_download, want_json):
     url = store.signed_url(cache_key, name, content_type=ctype, inline=not as_download)
     if want_json:
         return json_response(
-            {"url": url, "name": name, "contentType": ctype, "size": m.get("size")}
+            {"url": url, "name": name, "contentType": ctype, "size": m.size}
         )
     return redirect(url)
 

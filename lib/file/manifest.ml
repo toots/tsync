@@ -1,64 +1,59 @@
-(* Manifest body format version. 2 = inode layout (bodies carry the leaf [name];
-   folder structure lives in markers). Bumped from 1 (real-path-keyed layout) by
-   the one-off migration. Nothing branches on it today; it flags the format. *)
-let current_version = 2
+(* A published file's metadata: its name, size, mtime and the ordered keys of
+   the chunks holding its bytes.
 
-type chunk_entry = { index : int; h1 : string; h2 : string; size : int }
+   The body itself is {!Chunk_table} — a fixed-layout header followed by a flat
+   run of chunk keys, mapped rather than parsed. The header fields are lifted
+   out into this record so callers keep reading them as fields; the table is
+   authoritative for the chunks and is the only part that stays in the mapping.
+   For a 32 GB file at a 1 MiB chunk size that is 31,230 keys nobody has to
+   materialize to answer "what is this file called?". *)
 
 type t = {
-  v : int;
   name : string;  (** leaf name; authority for the file's own name *)
   size : int64;
   chunk_size : int;
-  chunks : chunk_entry list;
+  chunks : Chunk_table.t;
   h1 : string;
   h2 : string;
   mtime : float;
   symlink : string option;
 }
 
-type state = [ `Dirty | `Clean of t ]
+(* What an upload produces per chunk, on the way to a body. Read paths never
+   see one: they go through the table. *)
+type chunk_entry = { index : int; h1 : string; h2 : string; size : int }
 
 let chunk_key (entry : chunk_entry) = entry.h1 ^ "-" ^ entry.h2
 
-(* Chunk entries by index. Manifests carry them as a list in index order, but
-   the index field is authoritative. *)
-let entries_by_index chunks =
-  let n = List.length chunks in
-  let a = Array.make n None in
-  List.iter
-    (fun (c : chunk_entry) ->
-      if c.index >= 0 && c.index < n then a.(c.index) <- Some c)
-    chunks;
-  a
-
-(* The same, reduced to what grouping needs: key and length per index. *)
-let specs_by_index chunks =
-  Array.map
-    (Option.map (fun (c : chunk_entry) -> (chunk_key c, c.size)))
-    (entries_by_index chunks)
+(* The reverse, for a chunk kept from a previous upload: its key is all that was
+   held onto, and the two digests are its halves. *)
+let entry_of_key ~index ~size key =
+  match String.index_opt key '-' with
+    | Some i ->
+        {
+          index;
+          h1 = String.sub key 0 i;
+          h2 = String.sub key (i + 1) (String.length key - i - 1);
+          size;
+        }
+    | None -> invalid_arg ("Manifest.entry_of_key: " ^ key)
 
 (* ── Grouping ────────────────────────────────────────────────────────────────
-   How a manifest's stored chunks fall into cache chunks. Every caller wanting a
-   {!Chunk_group} starts from a manifest and the domain's cache chunk size, and
-   the derivation — specs by index, chunks per group from the file's *own*
-   chunk size — is the same each time. {!Chunk_group} cannot host this: it sits
-   below this module, not above it. *)
+   How a file's stored chunks fall into cache chunks. Derived from the file's
+   {i own} chunk size, so a file uploaded under a different setting still groups
+   correctly. {!Chunk_group} cannot host this: it sits below this module. *)
 
 let per ~cache_chunk_size (m : t) =
   Chunk_group.per_group ~chunk_size:m.chunk_size ~cache_chunk_size
 
 let groups ~cache_chunk_size m =
-  Chunk_group.all ~specs:(specs_by_index m.chunks)
-    ~per:(per ~cache_chunk_size m)
+  Chunk_group.all ~table:m.chunks ~per:(per ~cache_chunk_size m)
 
 let group_at ~cache_chunk_size m i =
-  Chunk_group.of_specs ~specs:(specs_by_index m.chunks)
-    ~per:(per ~cache_chunk_size m) i
+  Chunk_group.of_table ~table:m.chunks ~per:(per ~cache_chunk_size m) i
 
 let group_count ~cache_chunk_size m =
-  Chunk_group.count ~specs:(specs_by_index m.chunks)
-    ~per:(per ~cache_chunk_size m)
+  Chunk_group.count ~table:m.chunks ~per:(per ~cache_chunk_size m)
 
 (* Whole-file digest as a hash over the ordered chunk digests, so a changed
    file's manifest is rebuildable from its chunk entries alone (no need to
@@ -73,107 +68,47 @@ let digest_of_chunks chunks =
     chunks;
   (Xxhash.digest_hex s1, Xxhash.digest_hex s2)
 
+let of_table chunks =
+  {
+    name = Chunk_table.name chunks;
+    size = Chunk_table.size chunks;
+    chunk_size = Chunk_table.chunk_size chunks;
+    chunks;
+    h1 = Chunk_table.h1 chunks;
+    h2 = Chunk_table.h2 chunks;
+    mtime = Chunk_table.mtime chunks;
+    symlink = Chunk_table.symlink chunks;
+  }
+
+let of_string s = of_table (Chunk_table.of_string s)
+
+(* The local sidecar, mapped: its chunk keys cost no heap and its pages are
+   reclaimable. *)
+let of_file path = of_table (Chunk_table.of_file path)
+
+let to_string (m : t) =
+  Chunk_table.encode ~name:m.name ~size:m.size ~chunk_size:m.chunk_size
+    ~mtime:m.mtime ~h1:m.h1 ~h2:m.h2 ~symlink:m.symlink
+    ~keys:(List.init (Chunk_table.count m.chunks) (Chunk_table.key m.chunks))
+
+(* Encode straight from the entries an upload built, then read the result back:
+   a [t] only ever exists as a decoded body, so there is no way to hold one that
+   would not round-trip. *)
 let make ~name ~h1 ~h2 ~size ~chunk_size ~chunks ~mtime =
-  `Clean
-    {
-      v = current_version;
-      name;
-      size;
-      chunk_size;
-      chunks;
-      h1;
-      h2;
-      mtime;
-      symlink = None;
-    }
+  of_string
+    (Chunk_table.encode ~name ~size ~chunk_size ~mtime ~h1 ~h2 ~symlink:None
+       ~keys:(List.map chunk_key chunks))
 
 (* A symlink is a chunkless manifest carrying its target. size is the target's
    byte length, POSIX-style. *)
 let make_symlink ~name ~target ~mtime =
-  let h1 = Xxhash.hash_hex target 0 in
-  let h2 = Xxhash.hash_hex target 1 in
-  `Clean
-    {
-      v = current_version;
-      name;
-      size = Int64.of_int (String.length target);
-      (* A symlink has no chunks, so its recorded size never groups anything;
-         the domain default keeps the field well-formed. *)
-      chunk_size = Conf.default_chunk_size;
-      chunks = [];
-      h1;
-      h2;
-      mtime;
-      symlink = Some target;
-    }
-
-let of_json json =
-  let open Yojson.Basic.Util in
-  if try json |> member "dirty" |> to_bool with _ -> false then `Dirty
-  else (
-    (* A malformed chunk list must fail the parse: defaulting to [] would make
-       a corrupt manifest read as a clean, chunkless file and download as
-       zero-filled bytes of the stated size. Real files always have >= 1 chunk
-       (even empty ones); only symlink manifests are legitimately chunkless. *)
-    let chunks =
-      json |> member "chunks" |> to_list
-      |> List.map (fun c ->
-          {
-            index = c |> member "index" |> to_int;
-            h1 = c |> member "h1" |> to_string;
-            h2 = c |> member "h2" |> to_string;
-            size = c |> member "size" |> to_int;
-          })
-    in
-    let symlink =
-      match json |> member "symlink" with `String s -> Some s | _ -> None
-    in
-    if chunks = [] && symlink = None then failwith "manifest: empty chunk list";
-    `Clean
-      {
-        v = (try json |> member "v" |> to_int with _ -> 1);
-        name = json |> member "name" |> to_string;
-        size = json |> member "size" |> to_int |> Int64.of_int;
-        chunk_size =
-          (try json |> member "chunkSize" |> to_int
-           with _ -> Conf.default_chunk_size);
-        chunks;
-        h1 = (try json |> member "h1" |> to_string with _ -> "");
-        h2 = (try json |> member "h2" |> to_string with _ -> "");
-        mtime = json |> member "mtime" |> to_float;
-        symlink;
-      })
-
-let of_string s = of_json (Yojson.Basic.from_string s)
-
-let to_json = function
-  | `Dirty -> `Assoc [("dirty", `Bool true)]
-  | `Clean m ->
-      `Assoc
-        ([
-           ("v", `Int m.v);
-           ("name", `String m.name);
-           ("size", `Int (Int64.to_int m.size));
-           ("chunkSize", `Int m.chunk_size);
-           ("h1", `String m.h1);
-           ("h2", `String m.h2);
-           ("mtime", `Float m.mtime);
-           ( "chunks",
-             `List
-               (List.map
-                  (fun c ->
-                    `Assoc
-                      [
-                        ("index", `Int c.index);
-                        ("h1", `String c.h1);
-                        ("h2", `String c.h2);
-                        ("size", `Int c.size);
-                      ])
-                  m.chunks) );
-         ]
-        @ match m.symlink with None -> [] | Some t -> [("symlink", `String t)])
-
-let to_string state = Yojson.Basic.to_string (to_json state)
+  of_string
+    (Chunk_table.encode ~name
+       ~size:(Int64.of_int (String.length target))
+         (* No chunks, so nothing ever groups; the domain default keeps the
+            field well-formed. *)
+       ~chunk_size:Conf.default_chunk_size ~mtime ~h1:(Xxhash.hash_hex target 0)
+       ~h2:(Xxhash.hash_hex target 1) ~symlink:(Some target) ~keys:[])
 
 (* ── Staged manifests ────────────────────────────────────────────────────────
    A file with unsynced local edits has a staged manifest recording, per chunk,
@@ -248,15 +183,20 @@ let staged_to_string (st : staged) =
        @
          match st.s_published with
          | None -> []
-         | Some m -> [("published", to_json (`Clean m))]))
+         (* The published body is binary; base64 carries it inside this JSON
+            without a second file that would have to move atomically with it. *)
+         | Some m ->
+             [("published", `String (Base64.encode_string (to_string m)))]))
 
 let staged_of_string body =
   let open Yojson.Basic.Util in
   let json = Yojson.Basic.from_string body in
   let published =
     match json |> member "published" with
-      | `Assoc _ as j -> (
-          match of_json j with `Clean m -> Some m | _ -> None)
+      | `String b64 -> (
+          match of_string (Base64.decode_exn b64) with
+            | m -> Some m
+            | exception _ -> None)
       | _ -> None
   in
   let whole =
@@ -312,25 +252,15 @@ let is_local
     (staged_sidecar_path ~cache_root ~domain_name ~domain_prefix key)
   ||
     match
-      In_channel.with_open_bin
-        (sidecar_path ~cache_root ~domain_name ~domain_prefix key)
-        In_channel.input_all
+      of_file (sidecar_path ~cache_root ~domain_name ~domain_prefix key)
     with
-    | body -> (
-        match of_string body with
-          | `Clean m ->
-              let gs = groups ~cache_chunk_size m in
-              (* A manifest with a hole describes fewer groups than it has, and
-                 the missing bytes are not somewhere else on disk. *)
-              List.length gs = group_count ~cache_chunk_size m
-              && List.for_all
-                   (fun g ->
-                     Sys.file_exists
-                       (Cache_layout.chunk_path ~cache_root ~domain_name
-                          (Chunk_group.key g)))
-                   gs
-          | `Dirty -> false
-          | exception _ -> false)
+    | m ->
+        List.for_all
+          (fun g ->
+            Sys.file_exists
+              (Cache_layout.chunk_path ~cache_root ~domain_name
+                 (Chunk_group.key g)))
+          (groups ~cache_chunk_size m)
     | exception _ -> false
 
 (* Write [name] into an escaped directory's marker file so readdir can recover
@@ -386,12 +316,12 @@ let read_body path =
       Some s)
     (fun _ -> Lwt.return_none)
 
+(* Mapping rather than reading: a directory listing wants each entry's name,
+   size and mtime, and mapping hands those over without the chunk keys being
+   touched at all. [Unix.openfile] is the only blocking call and no page is read
+   until something asks for one. *)
 let read_clean path =
-  let+ body = read_body path in
-  match body with
-    | Some s -> ( match of_string s with `Clean m -> Some m | `Dirty -> None)
-    | None -> None
-    | exception _ -> None
+  Lwt.return (match of_file path with m -> Some m | exception _ -> None)
 
 (* Fold [f] over every clean manifest under [start], depth first, passing the
    real relative path of each. Directory recursion resolves escaped names through
@@ -459,7 +389,7 @@ module Make (C : Conf.S) = struct
      from. Sidecars are replaced by rename, so a fresh inode (or a changed
      size/mtime) invalidates the entry — including when another tsync process
      wrote it, which no in-process invalidation could catch. *)
-  type memo_entry = { ino : int; size : int; mtime : float; state : state }
+  type memo_entry = { ino : int; size : int; mtime : float; manifest : t }
 
   let memo : (string, memo_entry) Hashtbl.t = Hashtbl.create 256
   let invalidate key = Hashtbl.remove memo key
@@ -477,27 +407,23 @@ module Make (C : Conf.S) = struct
           and mtime = st.Unix.st_mtime in
           match Hashtbl.find_opt memo key with
             | Some e when e.ino = ino && e.size = size && e.mtime = mtime ->
-                Lwt.return_some e.state
+                Lwt.return_some e.manifest
             | _ -> (
-                let* body = read_body p in
-                match body with
-                  | None -> Lwt.return_none
-                  | Some body -> (
-                      match of_string body with
-                        | state ->
-                            Hashtbl.replace memo key { ino; size; mtime; state };
-                            Lwt.return_some state
-                        | exception _ -> Lwt.return_none)))
+                match of_file p with
+                  | manifest ->
+                      Hashtbl.replace memo key { ino; size; mtime; manifest };
+                      Lwt.return_some manifest
+                  | exception _ -> Lwt.return_none))
 
   let ensure_parent key =
     let rel = rel_of key in
     let reldir = Key.parent rel in
     ensure_dirs (root ()) reldir
 
-  let write key state =
+  let write key manifest =
     invalidate key;
     let* () = ensure_parent key in
-    Fs_util.atomic_write (path key) (to_string state)
+    Fs_util.atomic_write (path key) (to_string manifest)
 
   let delete key =
     invalidate key;
@@ -699,8 +625,8 @@ module Make (C : Conf.S) = struct
     in
     (merge_entries files staged, dirs)
 
-  (* Every file entry under [prefix], recursively. Serves the enumeration the
-     backend can no longer answer now that its keys are hashed. *)
+  (* Every file entry under [prefix], recursively. Backend keys are hashed, so
+     the mirror is what can answer this. *)
   let list_tree ~prefix () =
     let rel, start = dir_of_prefix prefix in
     let* published =
@@ -740,14 +666,10 @@ module Make (C : Conf.S) = struct
     match st with
       | Some st ->
           let+ published = read key in
-          Some
-            (`Staged
-               (st, match published with Some (`Clean m) -> Some m | _ -> None))
+          Some (`Staged (st, published))
       | None -> (
           let+ m = read key in
-          match m with
-            | Some (`Clean m) -> Some (`Published m)
-            | Some `Dirty | None -> None)
+          match m with Some m -> Some (`Published m) | None -> None)
 
   let mirror_exists () = Fs_util.is_directory (root ())
 

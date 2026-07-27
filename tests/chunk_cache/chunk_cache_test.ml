@@ -20,10 +20,12 @@ let root = "/tmp/tsync-chunk-cache-test"
 let key_of body =
   Printf.sprintf "%s-%s" (Xxhash.hash_hex body 0) (Xxhash.hash_hex body 1)
 
+(* Keys are a fixed width, so the stand-ins for the two cases that do not care
+   about content still have to be shaped like real ones. *)
 let bodies =
   [
-    ("aa11bb22-cc33dd44", "first chunk body");
-    ("ee55ff66-0077", "second");
+    (key_of "first chunk body", "first chunk body");
+    (key_of "second", "second");
     (* Three chunks of one group; the last is short, as a file's last chunk is. *)
     (key_of "AAAA", "AAAA");
     (key_of "BBBB", "BBBB");
@@ -90,21 +92,32 @@ module Capped0 =
     end)
     (Fetch)
 
-let spec ck = Some (ck, String.length (List.assoc ck bodies))
-let build ~per specs i = Option.get (Chunk_group.of_specs ~specs ~per i)
+(* A manifest body over [keys]. Chunk lengths are derived from the header, so
+   the file size and chunk size are what set them. *)
+let table ~chunk_size ~size keys =
+  Chunk_table.of_string
+    (Chunk_table.encode ~name:"t" ~size:(Int64.of_int size) ~chunk_size
+       ~mtime:0. ~h1:(String.make 16 '0') ~h2:(String.make 16 '0') ~symlink:None
+       ~keys)
+
+let build ~per ~chunk_size ~size keys i =
+  Option.get (Chunk_group.of_table ~table:(table ~chunk_size ~size keys) ~per i)
 
 (* A group of one: what a domain whose cache chunk size equals its stored chunk
    size gets for every chunk. *)
-let solo ck = build ~per:1 [| spec ck |] 0
+let solo ck =
+  let n = String.length (List.assoc ck bodies) in
+  build ~per:1 ~chunk_size:n ~size:n [ck] 0
+
 let g1 = solo (fst (List.nth bodies 0))
 let g2 = solo (fst (List.nth bodies 1))
 let k3 = fst (List.nth bodies 2)
 let k4 = fst (List.nth bodies 3)
 let k5 = fst (List.nth bodies 4)
 
-(* One cache file over three backend chunks. *)
-let trio_specs = [| spec k3; spec k4; spec k5 |]
-let trio = build ~per:3 trio_specs 0
+(* One cache file over three backend chunks: 4 + 4 + 2, the last one short. *)
+let trio_table = table ~chunk_size:4 ~size:10 [k3; k4; k5]
+let trio = Option.get (Chunk_group.of_table ~table:trio_table ~per:3 0)
 
 (* The store's own layout rule; the test never recomputes it. *)
 let path g =
@@ -191,7 +204,7 @@ let () =
 
      (* Grouping is content-addressed like any chunk: the same three chunks in
         another file are the same cache file, already here. *)
-     let same = build ~per:3 [| spec k3; spec k4; spec k5 |] 2 in
+     let same = build ~per:3 ~chunk_size:4 ~size:10 [k3; k4; k5] 2 in
      Printf.printf "%-28s same_key=%b\n" "trio in another file"
        (Chunk_group.key same = Chunk_group.key trio);
 
@@ -199,7 +212,9 @@ let () =
      let* () =
        Lwt.catch
          (fun () ->
-           let missing = build ~per:1 [| Some ("deadbeef-deadbeef", 4) |] 0 in
+           let missing =
+             build ~per:1 ~chunk_size:4 ~size:4 [key_of "never uploaded"] 0
+           in
            let buf = Bigarray.Array1.create Bigarray.char Bigarray.c_layout 4 in
            let+ (_ : int) =
              Cc.read_into ~group:missing ~index:0 buf ~chunk_off:0

@@ -21,7 +21,7 @@ module type S = sig
     chunk_size:int ->
     ?cancel:bool ref ->
     unit ->
-    Manifest.state Lwt.t
+    Manifest.t Lwt.t
 
   (** Fetch one chunk body from the primary backend by its content key
       ([Manifest.chunk_key], without the domain's chunk prefix). *)
@@ -36,26 +36,26 @@ module type S = sig
   val chunk_size : unit -> int Lwt.t
 
   (** Upload a file whose bytes the caller supplies per chunk, then publish its
-      manifest. [source index] is either [`Reuse e] — an unchanged chunk,
-      neither read nor sent, keeping entry [e] — or [`Data bytes]. Knowing
-      nothing about where those bytes come from keeps local staging out of this
-      module. An empty file still yields one empty chunk. [cancel] aborts at the
-      next chunk boundary with {!Cancelled}, unpublishing the manifest if it
-      already went. *)
+      manifest. [source index] is either [`Reuse key] — an unchanged chunk,
+      neither read nor sent, kept under the key it already has — or
+      [`Data bytes]. Knowing nothing about where those bytes come from keeps
+      local staging out of this module. An empty file still yields one empty
+      chunk. [cancel] aborts at the next chunk boundary with {!Cancelled},
+      unpublishing the manifest if it already went. *)
   val upload_chunks :
     key:string ->
     name:string ->
     size:int64 ->
     chunk_size:int ->
     mtime:float ->
-    source:(int -> [ `Reuse of Manifest.chunk_entry | `Data of string ] Lwt.t) ->
+    source:(int -> [ `Reuse of string | `Data of string ] Lwt.t) ->
     ?cancel:bool ref ->
     unit ->
-    Manifest.state Lwt.t
+    Manifest.t Lwt.t
 
   (** Fetch only the manifest for [key] from the primary backend. Returns [None]
       if the key does not exist or is not a manifest. *)
-  val fetch_manifest : key:string -> unit -> Manifest.state option Lwt.t
+  val fetch_manifest : key:string -> unit -> Manifest.t option Lwt.t
 
   (** Recheck a file from its manifest: verify every chunk it names remotely
       (HEAD + size), re-uploading the wrong ones from [local_body] when the
@@ -64,7 +64,7 @@ module type S = sig
       — see {!Chunk_cache.verify_group}. *)
   val recheck_from_manifest :
     key:string ->
-    local_body:(Manifest.chunk_entry -> string option Lwt.t) ->
+    local_body:(int -> string option Lwt.t) ->
     Manifest.t ->
     recheck_report Lwt.t
 end

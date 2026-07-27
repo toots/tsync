@@ -1,0 +1,6 @@
+; Temporary: the v2 -> v3 manifest converter. Delete this directory once every
+; domain has been migrated.
+
+(executable
+ (name migrate)
+ (libraries tsync_file tsync_conf yojson unix))

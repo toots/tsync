@@ -98,9 +98,7 @@ let count_chunks () =
          not (String.length k > 0 && k.[String.length k - 1] = '/'))
        entries)
 
-let upload key path =
-  let+ state = R.upload ~key ~src_path:path ~mtime:0. ~chunk_size () in
-  match state with `Clean m -> m | `Dirty -> assert false
+let upload key path = R.upload ~key ~src_path:path ~mtime:0. ~chunk_size ()
 
 let () =
   (* Round-trip through the read path: the manifest is fetched, every chunk is
@@ -120,7 +118,7 @@ let () =
      let src = Filename.concat root "big.bin" in
      write_file src data;
      let* m = upload (C.domain_prefix ^ "big.bin") src in
-     assert (List.length m.Manifest.chunks = 3);
+     assert (Chunk_table.count m.Manifest.chunks = 3);
      assert (m.Manifest.size = Int64.of_int size);
      let* () = round_trip (C.domain_prefix ^ "big.bin") src data in
 
@@ -130,7 +128,7 @@ let () =
         that made evicted movies list at a few KB. *)
      let* rm = R.fetch_manifest ~key:(C.domain_prefix ^ "big.bin") () in
      (match rm with
-       | Some (`Clean m) -> assert (m.Manifest.size = Int64.of_int size)
+       | Some m -> assert (m.Manifest.size = Int64.of_int size)
        | _ -> assert false);
 
      (* Dedup: identical content under a new key adds no chunk objects. *)
@@ -148,14 +146,14 @@ let () =
      let dsrc = Filename.concat root "dup.bin" in
      write_file dsrc dup;
      let* dm = upload (C.domain_prefix ^ "dup.bin") dsrc in
-     assert (List.length dm.Manifest.chunks = 3);
+     assert (Chunk_table.count dm.Manifest.chunks = 3);
      let* () = round_trip (C.domain_prefix ^ "dup.bin") dsrc dup in
 
      (* 0-byte file: one empty chunk, round-trips to empty. *)
      let empty = Filename.concat root "empty.bin" in
      write_file empty "";
      let* em = upload (C.domain_prefix ^ "empty.bin") empty in
-     assert (List.length em.Manifest.chunks = 1);
+     assert (Chunk_table.count em.Manifest.chunks = 1);
      let* () = round_trip (C.domain_prefix ^ "empty.bin") empty "" in
 
      (* Configured wins outright: nothing is asked of the backend. *)

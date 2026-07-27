@@ -312,10 +312,8 @@ let setup_client (module C : Conf.S) root staging_prefix =
   let remote_chunk_key path index =
     let* m = F.read_manifest (key path) in
     match m with
-      | Some (`Clean m) ->
-          Lwt.return
-            (C.chunk_prefix
-            ^ Manifest.chunk_key (List.nth m.Manifest.chunks index))
+      | Some m ->
+          Lwt.return (C.chunk_prefix ^ Chunk_table.key m.Manifest.chunks index)
       | _ -> failwith ("no clean sidecar for " ^ path)
   in
   let damage (module B : Backend.S) = function
@@ -433,7 +431,7 @@ let setup_client (module C : Conf.S) root staging_prefix =
                            st.Manifest.s_slots)))
             | Some (`Published m) ->
                 Printf.sprintf "published size=%Ld chunks=%d" m.Manifest.size
-                  (List.length m.Manifest.chunks)
+                  (Chunk_table.count m.Manifest.chunks)
             | None -> "no manifest"
         in
         let* local, total = F.chunk_residency k in
@@ -862,12 +860,11 @@ let dump_backend_at ~backend_root ~domain_prefix ~chunk_prefix ~journal_prefix
               let+ data = B.get ~key:e.key () in
               let name, desc =
                 match Manifest.of_string data with
-                  | `Clean m ->
+                  | m ->
                       ( m.Manifest.name,
                         Printf.sprintf "manifest size=%Ld chunks=%d"
                           m.Manifest.size
-                          (List.length m.Manifest.chunks) )
-                  | `Dirty -> (rel, "dirty")
+                          (Chunk_table.count m.Manifest.chunks) )
                   | exception _ -> (rel, "raw")
               in
               Printf.printf "  version %s [%s]#%d = %s\n" name rel n desc
@@ -892,21 +889,20 @@ let dump_backend_at ~backend_root ~domain_prefix ~chunk_prefix ~journal_prefix
                     m.Folder.id
             | None -> (
                 match Manifest.of_string data with
-                  | `Clean { symlink = Some target; name; _ } ->
+                  | { symlink = Some target; name; _ } ->
                       Printf.printf "  symlink %s [%s] -> %s\n" name rel target
-                  | `Clean m ->
+                  | m ->
                       Printf.printf
                         "  file %s [%s] = manifest size=%Ld chunks=%d h1=%s \
                          h2=%s\n"
                         m.Manifest.name rel m.Manifest.size
-                        (List.length m.Manifest.chunks)
+                        (Chunk_table.count m.Manifest.chunks)
                         m.Manifest.h1 m.Manifest.h2;
-                      List.iter
-                        (fun (c : Manifest.chunk_entry) ->
-                          Printf.printf "    chunk#%d %s size=%d\n" c.index
-                            (Manifest.chunk_key c) c.size)
-                        m.Manifest.chunks
-                  | `Dirty -> Printf.printf "  file %s = dirty\n" rel
+                      let table = m.Manifest.chunks in
+                      for i = 0 to Chunk_table.count table - 1 do
+                        Printf.printf "    chunk#%d %s size=%d\n" i
+                          (Chunk_table.key table i) (Chunk_table.len table i)
+                      done
                   | exception _ ->
                       Printf.printf "  file %s = raw size=%d\n" rel e.size))
       else (

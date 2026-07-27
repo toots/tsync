@@ -61,7 +61,7 @@ module Make (C : Conf.S) (F : File.S) = struct
             | Some (`Published _) | None -> (
                 let* m = F.resolved_manifest key in
                 match m with
-                  | Some (`Clean m) ->
+                  | Some m ->
                       let fields =
                         [
                           ("size", `Int (Int64.to_int m.Manifest.size));
@@ -75,7 +75,7 @@ module Make (C : Conf.S) (F : File.S) = struct
                           | Some t -> [("symlinkTarget", `String t)]
                       in
                       Lwt.return (ok_json fields)
-                  | Some `Dirty | None -> Lwt.return (error_json "not found")))
+                  | None -> Lwt.return (error_json "not found")))
 
   (* The listed objects are manifests, so their backend size/mtime are the manifest's,
      not the file's. Resolve the manifest (local sidecar, else fetched from the backend)
@@ -91,7 +91,7 @@ module Make (C : Conf.S) (F : File.S) = struct
     let+ m = F.resolved_manifest e.key in
     let key = ("key", `String e.key) in
     match m with
-      | Some (`Clean m) ->
+      | Some m ->
           let fields =
             [
               key;

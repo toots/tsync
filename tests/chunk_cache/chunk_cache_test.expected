@@ -1,11 +1,11 @@
 cold                         present=false gets=0 in_flight=0
 after 2 concurrent ensures   present=true  gets=1 in_flight=0
 cached read                  body="first chunk body" gets=1
-layout                       testdom/chunks/30/30c5033e52b275d6-96267ba50be9c6ae
+layout                       testdom/chunks/ab/abbd5be7f7f1ea08-164c4bd493e0e119
 read after eviction          body="first chunk body" gets=2
 forced refetch               present=true  gets=3 in_flight=0
 second key                   body="second"           gets=1
-layout                       testdom/chunks/d6/d6aedb63de5dbf3e-54cde82efa4028ee
+layout                       testdom/chunks/3d/3daa2a13ce7216c7-a62bfe2b997ff6a9
 trio cold                    present=false gets=0 in_flight=0
 trio member 0                body="AAAA"             gets=3
 layout                       testdom/chunks/f2/f2816b06404b734b-effdaa3fc72ceaa1
@@ -15,7 +15,7 @@ trio member 2 (cached)       body="CC"               gets=3
 trio offsets                 off0=0 off1=4 off2=8
 trio member 1 at +2          body="BB"
 trio in another file         same_key=true
-missing chunk                Backend.Backend_error("no such chunk: deadbeef-deadbeef") in_flight=0
+missing chunk                Backend.Backend_error("no such chunk: 8f2a5dd2e287e4d1-2661a4d28dde64aa") in_flight=0
 verify intact group          ok=true
 verify corrupt member        ok=false present=false
 uncapped                     chunks=2 bytes=22 first=true  second=true

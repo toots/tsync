@@ -44,7 +44,7 @@ module type S = sig
     chunk_size:int ->
     ?cancel:bool ref ->
     unit ->
-    Manifest.state Lwt.t
+    Manifest.t Lwt.t
 
   val get_chunk : chunk_key:string -> string Lwt.t
 
@@ -57,16 +57,16 @@ module type S = sig
     size:int64 ->
     chunk_size:int ->
     mtime:float ->
-    source:(int -> [ `Reuse of Manifest.chunk_entry | `Data of string ] Lwt.t) ->
+    source:(int -> [ `Reuse of string | `Data of string ] Lwt.t) ->
     ?cancel:bool ref ->
     unit ->
-    Manifest.state Lwt.t
+    Manifest.t Lwt.t
 
-  val fetch_manifest : key:string -> unit -> Manifest.state option Lwt.t
+  val fetch_manifest : key:string -> unit -> Manifest.t option Lwt.t
 
   val recheck_from_manifest :
     key:string ->
-    local_body:(Manifest.chunk_entry -> string option Lwt.t) ->
+    local_body:(int -> string option Lwt.t) ->
     Manifest.t ->
     recheck_report Lwt.t
 end
@@ -255,18 +255,23 @@ module Make_with_layout (C : Conf.S) (L : Layout.S) : S = struct
       ~chunk_size ~mtime ~cancel entries
 
   (* Upload a file whose bytes the caller supplies per chunk: [source index] is
-     either an entry to keep as-is (an unchanged chunk, never read or sent) or the
-     chunk's bytes. Knowing nothing about where those bytes live keeps staging out
-     of this module. An empty file still gets one (empty) chunk, so every manifest
-     has at least one. *)
-  let upload_chunks ~key ~name ~size ~chunk_size ~mtime ~source
+     either the key of a chunk to keep as-is (unchanged, never read or sent) or
+     the chunk's bytes. Knowing nothing about where those bytes live keeps
+     staging out of this module. An empty file still gets one (empty) chunk, so
+     every manifest has at least one. *)
+  let upload_chunks ~key ~name ~size ~chunk_size ~mtime
+      ~(source : int -> [ `Reuse of string | `Data of string ] Lwt.t)
       ?(cancel = ref false) () =
     let n = max 1 (Manifest.num_chunks_for size chunk_size) in
     let one index =
       if !cancel then raise Cancelled;
       let* src = source index in
       match src with
-        | `Reuse entry -> Lwt.return { entry with Manifest.index }
+        | `Reuse chunk_key ->
+            Lwt.return
+              (Manifest.entry_of_key ~index
+                 ~size:(Manifest.chunk_len ~size ~chunk_size index)
+                 chunk_key)
         | `Data data -> put_chunk ~index ~data
     in
     let* entries = Lwt_list.map_p one (List.init n Fun.id) in
@@ -280,8 +285,7 @@ module Make_with_layout (C : Conf.S) (L : Layout.S) : S = struct
           (* A manifest that fails to parse is treated as absent: stat/getattr
              report ENOENT rather than surfacing garbage metadata. *)
             match Manifest.of_string body with
-            | `Dirty -> None
-            | `Clean _ as state -> Some state
+            | m -> Some m
             | exception _ -> None)
 
   (* ── Recheck: verify remote state against local data / sidecar ─────────── *)
@@ -289,30 +293,22 @@ module Make_with_layout (C : Conf.S) (L : Layout.S) : S = struct
   (* A chunk is correct remotely when it exists on the primary backend and its
      size matches: chunk keys are content-addressed, so a size mismatch means
      the remote object is corrupt. *)
-  let chunk_remote_ok (entry : Manifest.chunk_entry) =
+  let chunk_remote_ok ~chunk_key ~size =
     let (module Primary : Backend.S) = primary () in
-    let+ head =
-      Primary.head_opt ~key:(C.chunk_prefix ^ Manifest.chunk_key entry) ()
-    in
-    match head with
-      | Some h -> h.Backend.size = entry.Manifest.size
-      | None -> false
+    let+ head = Primary.head_opt ~key:(C.chunk_prefix ^ chunk_key) () in
+    match head with Some h -> h.Backend.size = size | None -> false
 
   (* Fetch the remote manifest for [key] and republish [expected] when it is
      missing, dirty or differs. Returns [true] when a repair was made. *)
   let recheck_manifest ~key (expected : Manifest.t) =
     let* remote = fetch_manifest ~key () in
     let ok =
-      match remote with
-        | Some (`Clean r) -> manifest_matches r expected
-        | _ -> false
+      match remote with Some r -> manifest_matches r expected | _ -> false
     in
     if ok then Lwt.return_false
     else (
       Log.info "recheck: republishing manifest %s" key;
-      let+ () =
-        St.put_manifest ~key ~data:(Manifest.to_string (`Clean expected))
-      in
+      let+ () = St.put_manifest ~key ~data:(Manifest.to_string expected) in
       true)
 
   (* Bounds concurrent HEADs for manifest-driven rechecks. *)
@@ -327,33 +323,33 @@ module Make_with_layout (C : Conf.S) (L : Layout.S) : S = struct
     (* A chunk missing or corrupt on the backend can still be restored from the
        local chunk store: content addressing means a body found under that key is
        the right bytes by construction. *)
-    let check entry =
+    let table = m.Manifest.chunks in
+    let check index =
+      let chunk_key = Chunk_table.key table index in
       let* ok =
-        Lwt_pool.use recheck_head_pool (fun () -> chunk_remote_ok entry)
+        Lwt_pool.use recheck_head_pool (fun () ->
+            chunk_remote_ok ~chunk_key ~size:(Chunk_table.len table index))
       in
       if ok then Lwt.return `Ok
       else
-        let* body = local_body entry in
+        let* body = local_body index in
         match body with
           | None -> Lwt.return `Missing
           | Some data ->
-              Log.info "recheck: re-uploading chunk %s"
-                (Manifest.chunk_key entry);
-              let+ () =
-                Bk.put ~key:(C.chunk_prefix ^ Manifest.chunk_key entry) ~data
-              in
+              Log.info "recheck: re-uploading chunk %s" chunk_key;
+              let+ () = Bk.put ~key:(C.chunk_prefix ^ chunk_key) ~data in
               `Repaired
     in
-    let* results = Lwt_list.map_p check m.Manifest.chunks in
+    let* results =
+      Lwt_list.map_p check (List.init (Chunk_table.count table) Fun.id)
+    in
     let count what = List.length (List.filter (fun r -> r = what) results) in
     let chunks_unrepairable = count `Missing in
     let+ manifest_repaired, manifest_bad =
       if chunks_unrepairable > 0 then
         let* remote = fetch_manifest ~key () in
         let ok =
-          match remote with
-            | Some (`Clean r) -> manifest_matches r m
-            | _ -> false
+          match remote with Some r -> manifest_matches r m | _ -> false
         in
         Lwt.return (false, not ok)
       else
@@ -361,7 +357,7 @@ module Make_with_layout (C : Conf.S) (L : Layout.S) : S = struct
         (repaired, false)
     in
     {
-      chunks_total = List.length m.Manifest.chunks;
+      chunks_total = Chunk_table.count table;
       chunks_repaired = count `Repaired;
       chunks_unrepairable;
       manifest_repaired;

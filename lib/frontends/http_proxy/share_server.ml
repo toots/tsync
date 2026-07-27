@@ -106,12 +106,12 @@ module Make (C : Conf.S) = struct
       | None -> (
           let* state = R.fetch_manifest ~key () in
           match state with
-            | Some (`Clean m) ->
+            | Some m ->
                 if Hashtbl.length manifests >= max_memoized_manifests then
                   Hashtbl.reset manifests;
                 Hashtbl.replace manifests key m;
                 Lwt.return_some m
-            | Some `Dirty | None -> Lwt.return_none)
+            | None -> Lwt.return_none)
 
   module Bk = Backends.Make (C)
   module Tree = Inode_tree.Make (C)

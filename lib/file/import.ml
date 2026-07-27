@@ -92,9 +92,7 @@ module Make (C : Conf.S) = struct
         R.upload ~key ~src_path ~mtime:st.Unix.st_mtime ~chunk_size ()
       in
       let+ () = Mf.write key state in
-      match state with
-        | `Clean m -> Imported m.Manifest.size
-        | `Dirty -> assert false)
+      Imported state.Manifest.size)
 
   (* Write a symlink manifest to all backends and the local sidecar. No cache
      entry: there is no file data to cache for a symlink. *)
@@ -112,9 +110,7 @@ module Make (C : Conf.S) = struct
       let data = Manifest.to_string state in
       let* () = St.put_manifest ~key ~data in
       let* () = Mf.write key state in
-      match state with
-        | `Clean m -> Lwt.return (Imported m.Manifest.size)
-        | `Dirty -> assert false)
+      Lwt.return (Imported state.Manifest.size))
 
   (* Import every file under [src] into the domain: upload data to all
      backends, write manifest sidecars (no local cache data — files read as

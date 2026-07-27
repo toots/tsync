@@ -27,8 +27,8 @@ module Make (C : Conf.S) = struct
       | Some m -> Some (Dir m)
       | None -> (
           match Manifest.of_string data with
-            | `Clean m -> Some (File m)
-            | `Dirty | (exception _) -> None)
+            | m -> Some (File m)
+            | exception _ -> None)
 
   (* Direct children of a folder namespace, in listing order. An object that is
      neither a marker nor a clean manifest is skipped: it is mid-write, and no
