@@ -1,6 +1,6 @@
 # tsync
 
-**Mount a library bigger than your disk.** tsync gives you an on-demand sync folder backed by storage you already control — S3, Google Cloud Storage, a local disk or NAS, or another machine running tsync. Everything is listed and browsable; only the files you actually open take up local space.
+Mount storage you control as a folder that only downloads what you open. An S3 or GCS bucket, a disk or NAS, or one machine on your network serving all the others.
 
 ```
 ~/tsync/photos/
@@ -11,76 +11,81 @@
     └── report.pdf   ← evicted → space freed, still listed
 ```
 
-Same idea as iCloud Drive or Dropbox Smart Sync, pointed at your own bucket instead of somebody else's service — no subscription, no hosted intermediary, and the on-disk format is plain enough that you can walk it with `aws s3 ls`.
+**It's a folder.** Open files, save them, copy, move, delete, drag things around in Finder — any application works, and there's nothing to learn. A FUSE mount at `~/tsync/<domain>/` on Linux, a File Provider extension at `~/Library/CloudStorage/<domain>/` on macOS.
 
-## Why you might want it
+Only the files you actually open take local space, and evicting one gives the space back without losing it. Same idea as iCloud Drive or Dropbox Smart Sync, pointed at your own storage.
 
-- **Your disk stops being the limit.** A 4 TB photo library on a 256 GB laptop is fine. Open what you need, `tsync evict` it when you're done, and it goes back to costing nothing but a directory entry.
-- **Nothing is re-uploaded twice.** Files are split into content-addressed chunks, so editing one frame of a video sends one chunk, and two copies of the same file are stored once.
-- **Several machines, one folder.** Mount the same domain on your laptop, desktop and NAS; they pick up each other's changes through a shared journal. Concurrent renames and delete/rename races produce clearly-labeled conflict copies instead of losing data.
-- **More than one backend, if you want.** Keep a bucket *and* a NAS copy. Each backend has a role — source of truth, eager replica, lazily-filled copy, or read-only archive — and writes fan out accordingly.
-- **Undo built in.** With versioning on, every modify, rename and delete keeps the previous version. `tsync revert` is instant and downloads nothing.
-- **Share a link without a server.** `tsync share` prints a public URL that serves a file, or a whole folder as a zip, straight from your bucket.
+## Point it at storage
 
-## How it works
-
-- **Linux** — a FUSE mount at `~/tsync/<domain>/`.
-- **macOS** — a File Provider extension under `~/Library/CloudStorage/`, with Finder integration and sync-status badges.
-
-A background daemon handles transfers and keeps machines in sync. Both platforms share the same on-disk and backend format, so a domain written from one reads cleanly on the other.
-
-## Getting started
-
-You'll need [opam](https://opam.ocaml.org/) and OCaml ≥ 5.5.
-
-**Linux:**
-
-```bash
-cd linux
-make install-deps      # dependencies, including the FUSE bindings
-make install           # build, install the binary, set up the user service
-tsync configure        # pick a folder name and a storage backend
-tsync start            # mount it
+```json
+{ "type": "s3", "name": "cloud", "bucket": "my-bucket",
+  "accessKeyId": "…", "secretAccessKey": "…", "role": "main" }
 ```
 
-**macOS:**
+`s3` (including S3-compatible services), `gcs`, or `local` for a disk or mounted NAS.
 
-```bash
-cd macos
-make install           # build the daemon + app, install and load them
-tsync configure
+## Or make one machine the server
+
+Run tsync on the machine that has the storage and let the others mount *through* it. The server holds the credentials, clients need only a shared secret. Same binary, one extra frontend.
+
+On the server, next to the NAS:
+
+```json
+{ "frontends": [{ "type": "http-proxy", "port": 8443, "secret": "…" }],
+  "backends":  [{ "type": "local", "name": "disk",
+                  "path": "/mnt/pool", "role": "main" }] }
 ```
 
-On macOS you'll need to approve the extension once, in **System Settings → General → Login Items & Extensions → File Provider Extensions**. Your folder then shows up in Finder under **Locations → CloudStorage**.
+On every laptop and desktop:
 
-Already have the files somewhere? `tsync import <dir>` seeds a domain from an existing folder without copying the data anywhere first.
-
-## The commands you'll actually use
-
-```bash
-tsync ls <path>        # list files (--deleted includes deleted ones)
-tsync evict <path>…    # drop local copies, keep the files listed
-tsync restore <path>…  # pull files or whole directories back down
-tsync revert <path>    # undo — restore a previous version, or an undeleted file
-tsync share <path>     # print a public download URL
-tsync sync             # apply changes made on other machines
-tsync stats            # transfers in flight, bandwidth, hashing rate
+```json
+{ "frontends": ["fuse"],
+  "backends":  [{ "type": "http-proxy", "name": "nas",
+                  "url": "https://nas.example:8443", "secret": "…",
+                  "role": "main" }] }
 ```
 
-`--verbose` on any command prints progress as it runs. There are another dozen or so
-commands for maintenance, repair and multi-domain setups.
+They all see the same folder, pick up each other's changes, and none can leak a bucket key. The server can hand out public download links itself, so nothing has to live in the cloud.
 
-## Learn more
+## Beyond the filesystem
 
-**[Full documentation →](DOCUMENTATION.md)** — every command, the config file format, backend types and roles, versioning, symlink policies, sharing, and multi-machine setup.
+Some things a folder has no verb for:
+
+```bash
+tsync revert notes/todo.txt   # undo — versions kept on every change
+tsync evict photos/2019       # free the space, keep the files listed
+tsync share photos/2024       # public link to a file, or a folder as a zip
+tsync import ~/Pictures       # seed a domain from files you already have
+```
+
+Files are split into content-addressed chunks, so editing one frame of a video uploads one chunk, and two copies of the same file are stored once. A domain can also have more than one backend — a bucket *and* a NAS copy — each one's role saying whether it gets every write or fills in lazily in the background.
+
+## Install
+
+> [!WARNING]
+> **`make install` takes shortcuts to get you running quickly.** It writes into your home,
+> enables a service without asking, and on macOS replaces `/Applications/TsyncApp.app`.
+> No uninstall. Developer setup for now; a proper install is planned.
+
+Needs [opam](https://opam.ocaml.org/) and OCaml ≥ 5.5.
+
+```bash
+cd linux         # or: cd macos
+make install-deps
+make install     # builds, installs, starts the background service
+tsync configure  # folder name and a storage backend
+make install     # re-run to restart with the new config
+```
+
+Re-run `make install` to pick up a change later; it rebuilds and restarts.
+
+Full walkthrough, from install to multi-machine setups: **[DOCUMENTATION.md](DOCUMENTATION.md)**.
 
 ## Good to know
 
-tsync is built for personal and small-scale use, and it's honest about its limits:
-
-- Two machines editing the **exact same file** at the same moment resolve last-writer-wins. (Concurrent renames and delete/rename races *are* handled properly — they produce labeled conflict copies, and nothing is lost.)
-- Files download on first open; there's no automatic prefetch. Pull things down ahead of time yourself with `tsync restore`, which takes directories.
-- Chunks aren't encrypted by tsync itself — turn on your bucket's server-side encryption if you need encryption at rest.
+- Two machines editing the **same file** at once resolve last-writer-wins. Concurrent renames and delete/rename races are handled — they leave labeled conflict copies, and nothing is lost.
+- No automatic prefetch: files download on first open. `tsync restore` pulls things down ahead of time, directories included.
+- Chunks aren't encrypted by tsync — use your bucket's server-side encryption if you need encryption at rest.
 
 ## License
 
