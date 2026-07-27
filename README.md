@@ -154,6 +154,46 @@ Set `"readOnly": true` on a domain to make the mount reject all writes — usefu
 
 The sync poller still runs and downloads remote changes normally; only local mutations (create, write, delete, rename) are blocked. On Linux the mount returns `EROFS`; on macOS the FileProvider extension returns an error for any write attempt.
 
+This is about the mount, not the storage: a domain whose backends are all `readOnly` (see [backend roles](#backend-roles)) is read-only regardless of this flag.
+
+### Backend roles
+
+Every backend carries a required `role` saying what it is for:
+
+| `role` | Written | Read | What it is for |
+|---|---|---|---|
+| `main` | every write | preferred | The writable source of truth. Several are fine: all get every write, and the first in config order serves reads. |
+| `replica` | every write | when no `main` is reachable | A complete second copy, journal and cursor included. Same traffic as a `main`, but never preferred for reads — so it says "this is a copy" rather than "this is another source of truth". |
+| `backfill` | lazily, in the background | never | A copy that grows to cover what you write, for when seeding the whole dataset is impractical or not worth it — see [when to use `backfill`](#when-to-use-backfill). Writes never block on it and never fail because of it. No journal, no cursor. |
+| `readOnly` | never | when the source of truth misses or is unreachable | An authoritative store worth serving but not worth writing — an old bucket you are migrating off. |
+
+```json
+"backends": [
+  { "type": "s3",    "bucket": "...", "role": "main" },
+  { "type": "local", "path": "/mnt/backup", "role": "backfill" }
+]
+```
+
+A domain is either **writable** — at least one `main`, which every `replica` and `backfill` target is a copy of — or **purely read-only**, served by `readOnly` stores alone:
+
+```json
+"backends": [ { "type": "s3", "bucket": "archive-2019", "role": "readOnly" } ]
+```
+
+Such a domain mounts read-only whether or not you set `"readOnly": true` on it, since no write could land anywhere. The combinations that are rejected at startup, with the reason, are a `replica` or `backfill` with no `main` (a copy of nothing) and a domain with no `main` and no `readOnly` (nothing can answer a read).
+
+Reads never fall back to a `backfill` target, and a `readOnly` store is only consulted once the source of truth has been asked. A miss is only ever reported as "not there" when every backend that could have held the file was actually reachable — if one was not, you get its error instead.
+
+#### When to use `backfill`
+
+`backfill` is for the case where copying the existing data is something you cannot or would rather not do: tens of terabytes already sitting in the source of truth, a slow or metered link to the second store, or an archive tier where insuring everything costs more than the data is worth. You accept a target that starts out empty and covers only what you write from then on.
+
+What that buys you is **partial coverage, never partial files**. Every file the target holds is whole and restorable on its own, because the manifest only lands once every block it references is confirmed present. What is missing is entire files — never half of one, and never a manifest pointing at blocks that were never copied. Coverage only ever grows: the longer it runs, the more of your active data it holds, while cold data that is never touched again is simply never copied.
+
+So it is the wrong tool when you need a guarantee — that is what `replica` is for, and it costs you a full copy of every write. It is the right one when full integrity is not the priority but broadening coverage over time is worth having for free.
+
+If you do decide to close the gap, `tsync resync-remote --source <main-backend-name>` copies everything that predates the target. That is also the repair path after a target has been unreachable for a while — the daemon logs what it dropped.
+
 ### Sharing download links
 
 `tsync share <path>` prints a public URL that downloads a file — or a whole folder as a zip — straight from your bucket, with nothing installed on the other end:
@@ -166,7 +206,7 @@ tsync share photos/2024 --expires 30d     # a folder, delivered as a zip; link v
 Downloads are served by a small AWS Lambda that assembles the file (or zips the folder) on the first fetch and caches the result. To enable sharing, give the domain's S3 backend a `shareUrl` field pointing at that Lambda:
 
 ```json
-{ "type": "s3", "bucket": "...", "shareUrl": "https://….lambda-url.us-west-1.on.aws", "main": true }
+{ "type": "s3", "bucket": "...", "shareUrl": "https://….lambda-url.us-west-1.on.aws", "role": "main" }
 ```
 
 The Lambda, its bucket, IAM keys and lifecycle are all provisioned by the Terraform config under [`terraform/`](terraform/README.md), and `tsync configure`'s **Sync from Terraform** fills the `shareUrl` (plus bucket and credentials) in for you — no Terraform details are stored in your config. With several S3 backends, the first one carrying a `shareUrl` serves shares. Links carry an unguessable token and expire per `--expires`.

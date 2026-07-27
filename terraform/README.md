@@ -49,7 +49,7 @@ and set those fields on the store's s3 backend, including `shareUrl` (the
   "accessKeyId": "...",
   "secretAccessKey": "...",
   "shareUrl": "<share_url from `terraform output stores`>",
-  "main": true
+  "role": "main"
 }
 ```
 

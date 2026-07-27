@@ -46,7 +46,11 @@ module Make (C : Conf.S) = struct
         loop ());
     Lwt.return_unit
 
-  let drain = Sq.drain
+  (* Uploads produce backfill work, so the queue settles first and the backends
+     second. *)
+  let drain () =
+    let* () = Sq.drain () in
+    Backend.drain ()
 
   let stats_fields () =
     [

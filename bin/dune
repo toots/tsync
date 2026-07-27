@@ -7,7 +7,8 @@
   tsync_core
   tsync_conf
   tsync_backend
-  tsync_tiered_backend
+  tsync_fallback_backend
+  tsync_backfill_backend
   tsync_local_io
   tsync_queue
   tsync_file

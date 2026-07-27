@@ -1,15 +1,32 @@
+(** What a backend is for. Required per backend; there is no default.
+
+    - [`Main] — a writable source of truth. Reads prefer the first one in config
+      order; a write fans out over every main and replica.
+    - [`Replica] — a complete second copy: it receives every write, journal and
+      cursor included, and serves reads when no main is reachable. Differs from
+      a second [`Main] only in read preference, which is the point — it names
+      the intent. See {!Fallback_backend}.
+    - [`Backfill] — a converging copy, filled lazily from the write side and
+      never read from. Content only: no journal, no cursor. See
+      {!Backfill_backend}.
+    - [`Read_only] — an authoritative store consulted when the source of truth
+      misses or is unreachable, and never written. See {!Fallback_backend}. *)
+type role = [ `Main | `Replica | `Backfill | `Read_only ]
+
+(** Every role, in the order worth presenting to a user. *)
+val roles : role list
+
+(** The spelling used in the config JSON, e.g. [`Read_only] is ["readOnly"]. *)
+val role_name : role -> string
+
+val role_of_string : string -> role option
+
 type backend_config = {
   backend_type : string;
   name : string;
       (** required; selects backends, e.g. [resync-remote --source] *)
   fields : (string * string) list;
-  main : bool;  (** explicitly marked as the primary (read) backend *)
-  backfill : bool;
-      (** an incomplete backend to be lazily filled with served chunks; excluded
-          from manifest/listing reads. Mutually exclusive with [read_only] *)
-  read_only : bool;
-      (** an authoritative store used only as a read fallback, never written
-          (excluded from write fan-out). Mutually exclusive with [backfill] *)
+  role : role;  (** required: ["main"], ["backfill"] or ["readOnly"] *)
 }
 
 type frontend_config = {
@@ -27,6 +44,9 @@ type domain = {
   symlink_policy : [ `Keep | `Follow | `Skip ];
   versioning : bool;
   read_only : bool;
+      (** the domain's [readOnly] flag, forced on when no backend is writable
+          (every one is [`Read_only]) — such a domain cannot accept a write, so
+          the mount says so up front *)
   chunk_size : int option;
       (** chunk size (bytes) for newly uploaded files. [None] when the config
           does not say; what that resolves to is {!Conf.S.chunk_size}'s
@@ -71,10 +91,10 @@ val load : string -> t
     Raises [Failure] when multiple domains are configured and none is named. *)
 val pick_domain : ?domain:string -> t -> domain
 
-(** [order_backends bs] returns [bs] with the primary backend first (others keep
-    their order). The primary is the first backend marked [main], else the first
-    local-file backend, else the first configured. Reads use the head of the
-    list; writes fan out to all, so ordering only affects read selection. *)
+(** [order_backends bs] returns [bs] in read preference — mains, then replicas,
+    then read-only stores, then backfill targets — each group keeping its config
+    order. Reads use the head of the list, so config order is what selects the
+    read primary. *)
 val order_backends : backend_config list -> backend_config list
 
 val domain_prefix : domain -> string

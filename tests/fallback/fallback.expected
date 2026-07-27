@@ -1,0 +1,45 @@
+
+=== one main, nothing behind it
+  put on-main
+  get on-main = "from-main"
+  get nowhere = none
+
+=== the only main is unreachable
+  get nowhere = error: down
+  head nowhere = error: down
+
+=== main + replica: same content, so a miss is authoritative
+  put both -> on main: true, on replica: true
+  get on-replica (main is reachable and misses) = none
+
+=== main unreachable, replica reachable
+  get on-replica = "from-replica"
+  get nowhere = none
+  put w = error: down
+
+=== main + readOnly archive: different content, so a miss falls through
+  get on-archive = "from-archive"
+  head on-archive = 12 bytes
+  get nowhere = none
+  put fresh -> on main: true, on archive: false
+  delete on-archive -> still on archive: true
+
+=== main unreachable, archive behind it
+  get on-archive = "from-archive"
+  get nowhere = error: down
+
+=== reachable main, unreachable archive behind it
+  get nowhere = error: down
+  get on-main = "from-main"
+
+=== a read-only domain: archives only, nothing writable at all
+  get on-archive = "from-archive"
+  get nowhere = none
+  list manifests/ = tsync/d/manifests/on-archive
+  put nope = error: no writable backend: every backend in this domain is "readOnly"
+  delete on-archive = error: no writable backend: every backend in this domain is "readOnly"
+  on-archive still there: true
+
+=== listings: an empty one is an answer, an unreachable backend is not
+  list nothing/ on main = (empty)
+  list manifests/ with main unreachable = tsync/d/manifests/on-archive

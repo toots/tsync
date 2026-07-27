@@ -1,10 +1,10 @@
+type role = [ `Main | `Replica | `Backfill | `Read_only ]
+
 type backend_config = {
   backend_type : string;
   name : string;
   fields : (string * string) list;
-  main : bool;
-  backfill : bool;
-  read_only : bool;
+  role : role;
 }
 
 type frontend_config = {
@@ -32,6 +32,16 @@ type t = {
   domains : domain list;
 }
 
+(* The role spelling used in JSON, in the order they are worth presenting. *)
+let roles : role list = [`Main; `Replica; `Backfill; `Read_only]
+
+let role_name : role -> string = function
+  | `Main -> "main"
+  | `Replica -> "replica"
+  | `Backfill -> "backfill"
+  | `Read_only -> "readOnly"
+
+let role_of_string s = List.find_opt (fun r -> role_name r = s) roles
 let default_max_uploads = 4
 let default_max_downloads = 8
 
@@ -78,24 +88,30 @@ let parse_backend json =
             ("backend config missing required \"name\" field (type: "
            ^ backend_type ^ ")")
   in
-  let main = match json |> member "main" with `Bool b -> b | _ -> false in
-  let backfill =
-    match json |> member "backfill" with `Bool b -> b | _ -> false
+  let expected =
+    String.concat ", "
+      (List.map (fun r -> Printf.sprintf "%S" (role_name r)) roles)
   in
-  let read_only =
-    match json |> member "readOnly" with `Bool b -> b | _ -> false
+  let role =
+    match json |> member "role" with
+      | `String s -> (
+          match role_of_string s with
+            | Some r -> r
+            | None ->
+                failwith
+                  (Printf.sprintf
+                     "backend %s: unknown role %S (expected one of %s)" name s
+                     expected))
+      | _ ->
+          failwith
+            (Printf.sprintf
+               "backend %s: missing required \"role\" field (one of %s)" name
+               expected)
   in
-  if backfill && read_only then
-    failwith
-      ("backend " ^ name
-     ^ ": \"backfill\" and \"readOnly\" are mutually exclusive");
   let fields =
     to_assoc json
     |> List.filter_map (fun (k, v) ->
-        if
-          k = "type" || k = "main" || k = "name" || k = "backfill"
-          || k = "readOnly"
-        then None
+        if k = "type" || k = "name" || k = "role" then None
         else (
           match v with
             | `String s -> Some (k, s)
@@ -106,25 +122,20 @@ let parse_backend json =
             | `List _ -> Some (k, Yojson.Basic.to_string v)
             | _ -> None))
   in
-  { backend_type; name; fields; main; backfill; read_only }
+  { backend_type; name; fields; role }
 
-(* The primary backend serves reads; writes still fan out to all. Pick the first
-   one explicitly marked [main], else the first local-file backend (local disk
-   is faster and more available than the cloud), else the first configured. *)
-let primary_backend backends =
-  match List.find_opt (fun b -> b.main) backends with
-    | Some _ as b -> b
-    | None -> (
-        match List.find_opt (fun b -> b.backend_type = "local") backends with
-          | Some _ as b -> b
-          | None -> ( match backends with b :: _ -> Some b | [] -> None))
-
-(* Return the backends with the primary moved to the front (others keep their
-   order), so [List.hd] / [b :: _] downstream select the primary. *)
+(* Backends in read preference: mains, then replicas, then the rest — each group
+   keeping its config order. Reads use the head, so config order is what picks
+   the read primary; there is nothing to elect. *)
 let order_backends backends =
-  match primary_backend backends with
-    | None -> backends
-    | Some primary -> primary :: List.filter (fun b -> b != primary) backends
+  let rank b =
+    match b.role with
+      | `Main -> 0
+      | `Replica -> 1
+      | `Read_only -> 2
+      | `Backfill -> 3
+  in
+  List.stable_sort (fun a b -> compare (rank a) (rank b)) backends
 
 (* A frontend is either a bare type name ["fuse"] or an object
    [{"type": "fuse", ...options}]; the string form is shorthand for an object
@@ -179,11 +190,38 @@ let parse_size_field json name =
         failwith
           (Printf.sprintf "domain %S must be a size string or integer" name)
 
+(* A domain is either writable — at least one [main], which every replica and
+   backfill target is a copy of — or purely read-only, served by [readOnly]
+   stores alone. A replica or a backfill target with no main is a copy of
+   nothing, and a domain with no backend able to answer a read is unusable. *)
+let validate_roles name backends =
+  let count r = List.length (List.filter (fun b -> b.role = r) backends) in
+  let fail fmt = failwith (Printf.sprintf ("domain %s: " ^^ fmt) name) in
+  if count `Main = 0 then begin
+    if count `Replica > 0 then
+      fail
+        "a backend has \"role\": \"replica\" but none has \"main\" — a replica \
+         is a copy of a source of truth, so there has to be one";
+    if count `Backfill > 0 then
+      fail
+        "a backend has \"role\": \"backfill\" but none has \"main\" — there is \
+         nothing to fill it from";
+    if count `Read_only = 0 then
+      fail
+        "needs at least one backend with \"role\": \"main\" (writable) or \
+         \"readOnly\" (a read-only domain); nothing here can answer a read"
+  end
+
 let parse_domain json =
   let open Yojson.Basic.Util in
+  let name = json |> member "name" |> to_string in
+  let backends =
+    json |> member "backends" |> to_list |> List.map parse_backend
+  in
+  validate_roles name backends;
   {
-    name = json |> member "name" |> to_string;
-    backends = json |> member "backends" |> to_list |> List.map parse_backend;
+    name;
+    backends;
     frontends =
       (match json |> member "frontends" with
         | `List (_ :: _ as l) -> List.map parse_frontend l
@@ -192,8 +230,12 @@ let parse_domain json =
               "domain config missing required non-empty \"frontends\" array");
     symlink_policy = parse_symlink_policy json;
     versioning = json |> member "versioning" |> to_bool;
+    (* With no writable backend a write cannot possibly land, so the domain is
+       read-only whether or not it says so: better an EROFS at the mount than a
+       backend error per attempt. *)
     read_only =
-      (match json |> member "readOnly" with `Bool b -> b | _ -> false);
+      (match json |> member "readOnly" with `Bool b -> b | _ -> false)
+      || not (List.exists (fun b -> b.role <> `Read_only) backends);
     chunk_size = parse_size_field json "chunkSize";
     cache_chunk_size = parse_size_field json "cacheChunkSize";
     max_cache =

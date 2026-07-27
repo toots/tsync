@@ -62,8 +62,8 @@ let make_route bindings (b : Frontend.binding) =
       | None ->
           failwith ("http-proxy: missing secret for domain " ^ C.domain_name)
   in
-  (* [C.backends] is the (possibly tiered) backend set: [primary] tiers reads/
-     backfill internally, and writes fan out over [all_backends]. *)
+  (* [C.backends] is the role composite: [primary] resolves read fallbacks and
+     backfill targets internally, and writes fan out over [all_backends]. *)
   let serve_share =
     match inherited bindings b "shares" with
       | Some ("true" | "1") ->
@@ -376,8 +376,27 @@ let start bindings =
     (if tls then "https" else "http")
     (List.length routes);
   Lwt_main.run
-    (Cohttp_lwt_unix.Server.create ~mode
-       (Cohttp_lwt_unix.Server.make ~callback:(callback routes) ()))
+    (let open Lwt.Syntax in
+     (* This frontend has no IPC socket, so [tsync stop] never reaches it: a
+        signal is the only way it is ever asked to stop, from the supervisor or
+        from the parent when it was forked. It serves writes on behalf of proxy
+        clients, so exiting on the default action would drop whatever those
+        writes still owe a backfill target. *)
+     let stop, wake = Lwt.wait () in
+     let request_stop () =
+       match Lwt.state stop with
+         | Lwt.Sleep -> Lwt.wakeup_later wake ()
+         | _ -> ()
+     in
+     List.iter
+       (fun s -> ignore (Lwt_unix.on_signal s (fun _ -> request_stop ())))
+       [Sys.sigterm; Sys.sigint];
+     let* () =
+       Cohttp_lwt_unix.Server.create ~stop ~mode
+         (Cohttp_lwt_unix.Server.make ~callback:(callback routes) ())
+     in
+     Log.info "http-proxy stopping, letting backends catch up";
+     Backend.drain ())
 
 let spec =
   Frontend.

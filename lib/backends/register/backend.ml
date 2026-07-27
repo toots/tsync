@@ -34,6 +34,14 @@ module type S = sig
 end
 
 type factory = (string -> string option) -> (module S)
+
+(* A composite backend that finishes work in the background registers here, so a
+   process about to exit can let it settle without knowing which composites are
+   in play. A one-shot command would otherwise take the pending work with it. *)
+let drain_hooks : (unit -> unit Lwt.t) list ref = ref []
+let on_drain f = drain_hooks := f :: !drain_hooks
+let drain () = Lwt_list.iter_p (fun f -> f ()) !drain_hooks
+
 type field_type = [ `String | `Bool ]
 
 type field_spec = {

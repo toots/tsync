@@ -174,27 +174,33 @@ let rec prompt_size_opt ?(unset = "none") msg default =
 
 (* ── Backend / domain builders ───────────────────────────────────────────── *)
 
-(* "backfill" and "readOnly" are mutually exclusive, so prompt them as one role. *)
-let roles = ["source"; "backfill"; "read-only"]
+let role_names = List.map Conf_parsing.role_name Conf_parsing.roles
+
+(* One line each, because the difference between these is the whole point. *)
+let role_help = function
+  | `Main -> "writable source of truth; reads prefer it"
+  | `Replica -> "complete copy: every write, read when no main is reachable"
+  | `Backfill -> "converging copy, filled lazily in the background, never read"
+  | `Read_only -> "authoritative store read as a fallback, never written"
 
 let role_of l =
-  match (List.assoc_opt "backfill" l, List.assoc_opt "readOnly" l) with
-    | Some (`Bool true), _ -> "backfill"
-    | _, Some (`Bool true) -> "read-only"
-    | _ -> "source"
-
-let role_fields = function
-  | "backfill" -> [("backfill", `Bool true)]
-  | "read-only" -> [("readOnly", `Bool true)]
-  | _ -> []
+  match List.assoc_opt "role" l with
+    | Some (`String s) when Conf_parsing.role_of_string s <> None -> s
+    | _ -> "main"
 
 let prompt_role default =
   let rec ask () =
-    let v = prompt "  Role (source/backfill/read-only)" (Some default) in
-    if List.mem v roles then v
+    let v =
+      prompt ("  Role (" ^ String.concat "/" role_names ^ ")") (Some default)
+    in
+    if List.mem v role_names then v
     else begin
-      Printf.printf
-        "  Unknown role %S — choose source, backfill, or read-only.\n%!" v;
+      Printf.printf "  Unknown role %S:\n" v;
+      List.iter
+        (fun r ->
+          Printf.printf "    %-10s %s\n%!" (Conf_parsing.role_name r)
+            (role_help r))
+        Conf_parsing.roles;
       ask ()
     end
   in
@@ -309,16 +315,11 @@ let prompt_backend () =
   let synced_fields =
     match synced with Some s -> apply_store_fields [] s | None -> []
   in
-  let main =
-    prompt_bool ~default:(backend_type = "local")
-      "  Primary backend (used for reads)?"
-  in
-  let role = prompt_role "source" in
+  let role = prompt_role "main" in
   `Assoc
     ([("name", `String name); ("type", `String backend_type)]
     @ synced_fields @ fields
-    @ [("main", `Bool main)]
-    @ role_fields role)
+    @ [("role", `String role)])
 
 let prompt_backends () =
   let backends = ref [] in
@@ -383,9 +384,8 @@ let edit_backend b =
         Printf.printf "  %d. %-16s %s\n" (i + 2) (s.name ^ ":")
           (if s.secret && v <> "" then "***" else v))
       spec;
-    let main_n = List.length spec + 2 in
-    Printf.printf "  %d. %-16s %s\n" main_n "primary:" (get "main");
-    Printf.printf "  %d. %-16s %s\n" (main_n + 1) "role:" (role_of !l);
+    let role_n = List.length spec + 2 in
+    Printf.printf "  %d. %-16s %s\n" role_n "role:" (role_of !l);
     if can_sync then
       Printf.printf "  [t] sync bucket/keys/share URL from Terraform\n";
     if !status <> "" then Printf.printf "\n%s\n" !status;
@@ -405,18 +405,8 @@ let edit_backend b =
               (`String (prompt "Backend name" (Some (get "name"))))
       | _ -> (
           match int_of_string_opt input with
-            | Some n when n = main_n ->
-                l :=
-                  assoc_set !l "main"
-                    (`Bool
-                       (prompt_bool
-                          ~default:(get "main" = "true")
-                          "Primary backend?"))
-            | Some n when n = main_n + 1 ->
-                let role = prompt_role (role_of !l) in
-                l :=
-                  List.remove_assoc "backfill" (List.remove_assoc "readOnly" !l)
-                  @ role_fields role
+            | Some n when n = role_n ->
+                l := assoc_set !l "role" (`String (prompt_role (role_of !l)))
             | Some n when n >= 2 && n <= List.length spec + 1 -> (
                 let s = List.nth spec (n - 2) in
                 match prompt_spec_field s ~current:(Some (get s.name)) with
@@ -438,13 +428,10 @@ let edit_backends backends =
     else
       List.iteri
         (fun i b ->
-          Printf.printf "  %d. %s (%s)%s%s\n" (i + 1)
+          Printf.printf "  %d. %s (%s) [%s]\n" (i + 1)
             (Option.value (jstr b "name") ~default:"?")
             (Option.value (jstr b "type") ~default:"?")
-            (if jbool b "main" then " [primary]" else "")
-            (if jbool b "backfill" then " [backfill]"
-             else if jbool b "readOnly" then " [read-only]"
-             else ""))
+            (role_of (match b with `Assoc l -> l | _ -> [])))
         !backends;
     if !status <> "" then Printf.printf "\n%s\n" !status;
     Printf.printf

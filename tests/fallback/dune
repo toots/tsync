@@ -1,0 +1,21 @@
+(executable
+ (name fallback)
+ (libraries tsync_fallback_backend tsync_local_backend lwt lwt.unix unix))
+
+(alias
+ (name default)
+ (deps fallback.exe))
+
+(rule
+ (alias runtest)
+ (target fallback.output)
+ (action
+  (with-stdout-to
+   fallback.output
+   (ignore-stderr
+    (run ./fallback.exe)))))
+
+(rule
+ (alias runtest)
+ (action
+  (diff fallback.expected fallback.output)))
