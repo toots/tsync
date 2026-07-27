@@ -252,12 +252,16 @@ let terraform_store which =
                 | _ -> fail "invalid choice"))
 
 let prompt_backend () =
+  let types = Backend.types () in
+  let default =
+    if List.mem "s3" types then Some "s3" else List.nth_opt types 0
+  in
   let rec ask () =
-    let t = prompt "  Backend type (s3/gcs/local/ssh)" (Some "s3") in
-    if List.mem t ["s3"; "gcs"; "local"; "ssh"] then t
+    let t = prompt ("  Backend type (" ^ String.concat "/" types ^ ")") default in
+    if List.mem t types then t
     else begin
-      Printf.printf
-        "  Unknown backend type %S — choose s3, gcs, local, or ssh.\n%!" t;
+      Printf.printf "  Unknown backend type %S — choose one of: %s.\n%!" t
+        (String.concat ", " types);
       ask ()
     end
   in

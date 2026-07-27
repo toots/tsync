@@ -4,7 +4,6 @@
  (libraries
   tsync_backend_register
   tsync_local_backend
-  tsync_exec_backend
   tsync_http_proxy_backend
   tsync_gcs_backend
   (select

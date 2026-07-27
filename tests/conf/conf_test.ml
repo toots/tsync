@@ -85,18 +85,23 @@ let () =
       (* "role" is consumed, never passed on as a backend field *)
       assert (List.assoc_opt "role" b.Conf_parsing.fields = None))
     Conf_parsing.roles;
-  (* array fields (exec backend "command") pass through as JSON strings *)
+  (* Backend fields are handed to the factory untouched, whatever their JSON
+     type. An array arrives re-serialized rather than being dropped, so a backend
+     that wants a list gets one and a misplaced field is never silently lost. *)
   Unix.putenv "TSYNC_CONFIG_JSON"
     {|{"domains": [{"name": "d", "symlinks": "keep", "versioning": false,
                     "frontends": ["fuse"],
-                    "backends": [{"type": "exec", "name": "e", "path": "/x",
-                                  "role": "main",
-                                  "command": ["ssh", "box"]}]}]}|};
+                    "backends": [{"type": "local", "name": "l", "path": "/x",
+                                  "role": "main", "count": 3, "flag": true,
+                                  "list": ["a", "b"]}]}]}|};
   let cfg = Conf_parsing.load "" in
   let backend =
     List.hd (List.hd cfg.Conf_parsing.domains).Conf_parsing.backends
   in
-  assert (List.assoc "command" backend.Conf_parsing.fields = {|["ssh","box"]|});
+  let field k = List.assoc k backend.Conf_parsing.fields in
+  assert (field "list" = {|["a","b"]|});
+  assert (field "count" = "3");
+  assert (field "flag" = "true");
 
   (* frontends: bare string and object forms both parse; string = {type};
      object keys beyond "type" are kept as option fields *)

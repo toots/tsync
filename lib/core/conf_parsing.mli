@@ -26,13 +26,15 @@ type backend_config = {
   name : string;
       (** required; selects backends, e.g. [resync-remote --source] *)
   fields : (string * string) list;
-  role : role;  (** required: ["main"], ["backfill"] or ["readOnly"] *)
+  role : role;
+      (** required: ["main"], ["replica"], ["backfill"] or ["readOnly"] *)
 }
 
 type frontend_config = {
   frontend_type : string;
   options : (string * string) list;
-      (** future per-frontend options; empty for the bare-string form *)
+      (** per-frontend options, e.g. http-proxy's [port] and [secret]; empty for
+          the bare-string form. Non-string JSON values arrive stringified *)
 }
 
 type domain = {

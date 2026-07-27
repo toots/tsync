@@ -1,6 +1,6 @@
 # tsync
 
-An on-demand sync filesystem backed by storage you control — S3, a local disk/NAS, or a remote host over SSH. Files are listed and browsable, but only the ones you open occupy local disk: opening a file fetches it, evicting it frees the space while keeping it listed. Same model as iCloud Drive / Dropbox Smart Sync, pointed at your own backend rather than a hosted service.
+**Mount a library bigger than your disk.** tsync gives you an on-demand sync folder backed by storage you already control — S3, Google Cloud Storage, a local disk or NAS, or another machine running tsync. Everything is listed and browsable; only the files you actually open take up local space.
 
 ```
 ~/tsync/photos/
@@ -11,20 +11,23 @@ An on-demand sync filesystem backed by storage you control — S3, a local disk/
     └── report.pdf   ← evicted → space freed, still listed
 ```
 
-## What it does
+Same idea as iCloud Drive or Dropbox Smart Sync, pointed at your own bucket instead of somebody else's service — no subscription, no hosted intermediary, and the on-disk format is plain enough that you can walk it with `aws s3 ls`.
 
-- **On-demand caching.** Mount a library larger than local disk; only touched files are cached, and eviction reclaims space without losing the file.
-- **Bring your own storage.** S3, a local drive, or a remote machine over SSH — no subscription and no hosted intermediary.
-- **Multiple backends per domain.** Writes fan out to every configured backend (e.g. S3 *and* a local NAS); reads come from a primary (a local one by default). `tsync resync-remote` repairs a backend that was offline or has drifted by copying what it's missing from another.
-- **Multi-machine.** Several machines can mount the same domain and pick up each other's changes through a shared change journal. Concurrent edits resolve last-writer-wins; concurrent renames and delete/rename races produce labeled conflict copies rather than losing data.
-- **Content-addressed chunks.** Files are split into chunks keyed by content hash, so re-uploading a large file only sends the changed chunks and identical data is stored once.
+## Why you might want it
+
+- **Your disk stops being the limit.** A 4 TB photo library on a 256 GB laptop is fine. Open what you need, `tsync evict` it when you're done, and it goes back to costing nothing but a directory entry.
+- **Nothing is re-uploaded twice.** Files are split into content-addressed chunks, so editing one frame of a video sends one chunk, and two copies of the same file are stored once.
+- **Several machines, one folder.** Mount the same domain on your laptop, desktop and NAS; they pick up each other's changes through a shared journal. Concurrent renames and delete/rename races produce clearly-labeled conflict copies instead of losing data.
+- **More than one backend, if you want.** Keep a bucket *and* a NAS copy. Each backend has a role — source of truth, eager replica, lazily-filled copy, or read-only archive — and writes fan out accordingly.
+- **Undo built in.** With versioning on, every modify, rename and delete keeps the previous version. `tsync revert` is instant and downloads nothing.
+- **Share a link without a server.** `tsync share` prints a public URL that serves a file, or a whole folder as a zip, straight from your bucket.
 
 ## How it works
 
-- **Linux:** FUSE mount at `~/tsync/<domain>/`.
-- **macOS:** File Provider extension under `~/Library/CloudStorage/`, with Finder integration and sync-status badges.
+- **Linux** — a FUSE mount at `~/tsync/<domain>/`.
+- **macOS** — a File Provider extension under `~/Library/CloudStorage/`, with Finder integration and sync-status badges.
 
-A background daemon handles uploads/downloads and keeps machines in sync through the change journal. Both platforms share the same on-disk and backend format, so a domain written from one reads cleanly on the other.
+A background daemon handles transfers and keeps machines in sync. Both platforms share the same on-disk and backend format, so a domain written from one reads cleanly on the other.
 
 ## Getting started
 
@@ -34,10 +37,10 @@ You'll need [opam](https://opam.ocaml.org/) and OCaml ≥ 5.5.
 
 ```bash
 cd linux
-make install-deps      # install dependencies (includes FUSE bindings)
-make install           # build, install the binary, set up the systemd user service
-tsync configure        # interactive setup: pick a folder name and a storage backend
-tsync start            # mount your folder
+make install-deps      # dependencies, including the FUSE bindings
+make install           # build, install the binary, set up the user service
+tsync configure        # pick a folder name and a storage backend
+tsync start            # mount it
 ```
 
 **macOS:**
@@ -45,180 +48,39 @@ tsync start            # mount your folder
 ```bash
 cd macos
 make install           # build the daemon + app, install and load them
-tsync configure        # interactive setup
+tsync configure
 ```
 
-On macOS, the first time you'll need to approve the extension in **System Settings → General → Login Items & Extensions → File Provider Extensions**. Your folder then appears in Finder under **Locations → CloudStorage**.
+On macOS you'll need to approve the extension once, in **System Settings → General → Login Items & Extensions → File Provider Extensions**. Your folder then shows up in Finder under **Locations → CloudStorage**.
 
-## Everyday commands
+Already have the files somewhere? `tsync import <dir>` seeds a domain from an existing folder without copying the data anywhere first.
+
+## The commands you'll actually use
 
 ```bash
-tsync ls <path>       # list files (add --deleted to include deleted ones)
-tsync evict <path>    # drop a file's local copy (stays in the cloud)
-tsync restore <path>  # pull a file back down
-tsync versions <path> # a file's version history, or all deleted files
-tsync revert <path>   # bring back a previous version (or an undeleted file)
-tsync trash           # list deleted folders (folder deletes are recoverable)
-tsync untrash <path>  # restore a deleted folder, then run `tsync sync`
-tsync expire <date>   # drop versions older than a date, then reclaim unused blocks
-tsync sync            # apply changes from other machines (incremental)
-tsync sync --full     # clear local cache and re-download all manifests from the backend
-tsync recheck         # verify the remote against the local cache, repair what's possible
-tsync resync-remote   # copy missing/damaged objects from one backend to the others
-tsync import <dir>    # seed the domain from an existing folder (uploads, no data copied)
-tsync import <dir> --only '*.flac' --only cover.jpg  # import only matching entries (see below)
-tsync import <dir> --exclude "*.tmp" --exclude node_modules  # skip by glob (see below)
-tsync import <dir> --force-rehash  # re-hash and re-upload every file
-tsync export <dir>    # write every file of the domain to a plain folder
-tsync share <path>    # print a public download URL for a file or folder (as a zip)
-tsync status          # show daemon state
-tsync stats           # transfer metrics (pending/completed, bandwidth, hashing)
-tsync stop            # unmount
+tsync ls <path>        # list files (--deleted includes deleted ones)
+tsync evict <path>…    # drop local copies, keep the files listed
+tsync restore <path>…  # pull files or whole directories back down
+tsync revert <path>    # undo — restore a previous version, or an undeleted file
+tsync share <path>     # print a public download URL
+tsync sync             # apply changes made on other machines
+tsync stats            # transfers in flight, bandwidth, hashing rate
 ```
 
-Pass `--verbose` (or `-v`) to any command to print detailed progress as it runs.
+`--verbose` on any command prints progress as it runs. There are another dozen or so
+commands for maintenance, repair and multi-domain setups.
 
-### Multiple domains
+## Learn more
 
-When the config defines more than one domain, pass `--domain <name>` to commands that operate on a specific domain (`ls`, `versions`, `expire`, `sync`, `recheck`, `resync-remote`, `import`, `export`, `share`). To avoid repeating `--domain` on every invocation, set a default:
-
-```bash
-tsync set-domain "media"   # persist a default domain for the current machine
-tsync set-domain --clear   # remove the default (--domain required again)
-```
-
-The default is stored in the data directory and read by every command that accepts `--domain`. An explicit `--domain` flag always overrides it.
-
-### Glob patterns for `--only` and `--exclude`
-
-Both `--only` and `--exclude` accept shell-style glob patterns matched against each entry's basename **and** its full relative path, so a bare name like `node_modules` matches that directory anywhere in the tree.
-
-`--only` selects which entries to import: with no `--only`, everything is imported; with one or more, only entries that match (or live under a matching directory) are kept. `--exclude` is then applied on top of that selection. Both may be repeated.
-
-| Pattern | Matches |
-|---------|---------|
-| `*`     | Any sequence of characters, **not** crossing a directory separator |
-| `**`    | Any sequence of characters, **including** directory separators |
-| `?`     | Any single character, **not** a directory separator |
-| anything else | Itself literally — `+`, `.`, `(`, `)`, spaces, … |
-
-```bash
-tsync import . --exclude 'lost+found'   # directory named literally lost+found
-tsync import . --exclude '*.tmp'        # any .tmp file in any directory
-tsync import . --exclude '**/.git'      # .git directories at any depth
-tsync import . --exclude 'node_modules' # any directory named node_modules
-tsync import . --only 'Music'           # everything under any Music directory
-tsync import . --only '*.flac'          # only .flac files, anywhere
-tsync import . --only 'Music' --exclude '*.tmp'  # Music tree, minus .tmp files
-```
-
-### Versioning
-
-With versioning enabled (`tsync configure`), every time you modify, rename or delete a file, tsync keeps the previous version. History grows until you trim it with `tsync expire`.
-
-```bash
-tsync versions                              # list every file that's been deleted
-tsync versions notes/todo.txt               # timestamps of each saved version of a file
-tsync revert notes/todo.txt                 # restore the most recent version
-tsync revert notes/todo.txt --version <ts>  # restore a specific one
-tsync expire 2025-01-01                     # drop versions older than a date, GC unused blocks
-```
-
-Because a version is just the file's small manifest (the actual data blocks are shared), `revert` is instant and downloads nothing: the file reappears evicted and only fetches its content the first time you open it.
-
-`tsync expire <date>` removes every version older than the cutoff, then deletes any data block no longer referenced by a live file or a surviving version. The date only bounds versions — blocks are collected purely by whether anything still points at them. Run it while your machines are idle, since collecting blocks a client is mid-upload could race the upload.
-
-Run `tsync configure` any time to add folders or change backends. See the [configuration reference](IMPLEMENTATION.md#config) for the full config-file format, including S3 credentials, SSH backends, and multiple backends per domain.
-
-### Symlinks
-
-Each domain has a required `symlinks` config field:
-
-- **`keep`** — symlinks are first-class objects. `tsync import` stores them as-is (broken/dangling links round-trip faithfully), and you can create them directly in the mounted folder (`ln -s` on the FUSE mount, or via Finder/FileProvider on macOS). Once stored, a symlink works transparently everywhere: `readlink` returns the target, `tsync export` recreates it as a real symlink, and it appears as a symlink in Finder.
-- **`follow`** — `tsync import` dereferences symlinks: the target's content is uploaded as a regular file under the link's name; broken links are skipped. Creating a symlink in the mounted folder is rejected.
-- **`skip`** — `tsync import` ignores symlinks (they are counted in the import summary). Creating a symlink in the mounted folder is rejected.
-
-Under `follow` and `skip` the domain never contains symlink objects — creation through the mount fails with a permission error, so a link can't slip in past the import policy.
-
-```json
-{ "name": "media", "prefix": "tsync", "symlinks": "keep", "backends": [...] }
-```
-
-### Read-only domains
-
-Set `"readOnly": true` on a domain to make the mount reject all writes — useful for a machine that should only pull changes, never push them:
-
-```json
-{ "name": "media", "prefix": "tsync", "symlinks": "keep", "readOnly": true, "backends": [...] }
-```
-
-The sync poller still runs and downloads remote changes normally; only local mutations (create, write, delete, rename) are blocked. On Linux the mount returns `EROFS`; on macOS the FileProvider extension returns an error for any write attempt.
-
-This is about the mount, not the storage: a domain whose backends are all `readOnly` (see [backend roles](#backend-roles)) is read-only regardless of this flag.
-
-### Backend roles
-
-Every backend carries a required `role` saying what it is for:
-
-| `role` | Written | Read | What it is for |
-|---|---|---|---|
-| `main` | every write | preferred | The writable source of truth. Several are fine: all get every write, and the first in config order serves reads. |
-| `replica` | every write | when no `main` is reachable | A complete second copy, journal and cursor included. Same traffic as a `main`, but never preferred for reads — so it says "this is a copy" rather than "this is another source of truth". |
-| `backfill` | lazily, in the background | never | A copy that grows to cover what you write, for when seeding the whole dataset is impractical or not worth it — see [when to use `backfill`](#when-to-use-backfill). Writes never block on it and never fail because of it. No journal, no cursor. |
-| `readOnly` | never | when the source of truth misses or is unreachable | An authoritative store worth serving but not worth writing — an old bucket you are migrating off. |
-
-```json
-"backends": [
-  { "type": "s3",    "bucket": "...", "role": "main" },
-  { "type": "local", "path": "/mnt/backup", "role": "backfill" }
-]
-```
-
-A domain is either **writable** — at least one `main`, which every `replica` and `backfill` target is a copy of — or **purely read-only**, served by `readOnly` stores alone:
-
-```json
-"backends": [ { "type": "s3", "bucket": "archive-2019", "role": "readOnly" } ]
-```
-
-Such a domain mounts read-only whether or not you set `"readOnly": true` on it, since no write could land anywhere. The combinations that are rejected at startup, with the reason, are a `replica` or `backfill` with no `main` (a copy of nothing) and a domain with no `main` and no `readOnly` (nothing can answer a read).
-
-Reads never fall back to a `backfill` target, and a `readOnly` store is only consulted once the source of truth has been asked. A miss is only ever reported as "not there" when every backend that could have held the file was actually reachable — if one was not, you get its error instead.
-
-#### When to use `backfill`
-
-`backfill` is for the case where copying the existing data is something you cannot or would rather not do: tens of terabytes already sitting in the source of truth, a slow or metered link to the second store, or an archive tier where insuring everything costs more than the data is worth. You accept a target that starts out empty and covers only what you write from then on.
-
-What that buys you is **partial coverage, never partial files**. Every file the target holds is whole and restorable on its own, because the manifest only lands once every block it references is confirmed present. What is missing is entire files — never half of one, and never a manifest pointing at blocks that were never copied. Coverage only ever grows: the longer it runs, the more of your active data it holds, while cold data that is never touched again is simply never copied.
-
-So it is the wrong tool when you need a guarantee — that is what `replica` is for, and it costs you a full copy of every write. It is the right one when full integrity is not the priority but broadening coverage over time is worth having for free.
-
-If you do decide to close the gap, `tsync resync-remote --source <main-backend-name>` copies everything that predates the target. That is also the repair path after a target has been unreachable for a while — the daemon logs what it dropped.
-
-### Sharing download links
-
-`tsync share <path>` prints a public URL that downloads a file — or a whole folder as a zip — straight from your bucket, with nothing installed on the other end:
-
-```bash
-tsync share photos/2024/report.pdf        # a single file
-tsync share photos/2024 --expires 30d     # a folder, delivered as a zip; link valid 30 days (default 7d)
-```
-
-Downloads are served by a small AWS Lambda that assembles the file (or zips the folder) on the first fetch and caches the result. To enable sharing, give the domain's S3 backend a `shareUrl` field pointing at that Lambda:
-
-```json
-{ "type": "s3", "bucket": "...", "shareUrl": "https://….lambda-url.us-west-1.on.aws", "role": "main" }
-```
-
-The Lambda, its bucket, IAM keys and lifecycle are all provisioned by the Terraform config under [`terraform/`](terraform/README.md), and `tsync configure`'s **Sync from Terraform** fills the `shareUrl` (plus bucket and credentials) in for you — no Terraform details are stored in your config. With several S3 backends, the first one carrying a `shareUrl` serves shares. Links carry an unguessable token and expire per `--expires`.
+**[Full documentation →](DOCUMENTATION.md)** — every command, the config file format, backend types and roles, versioning, symlink policies, sharing, and multi-machine setup.
 
 ## Good to know
 
 tsync is built for personal and small-scale use, and it's honest about its limits:
 
-- Two machines editing the **exact same file** at the same moment resolve last-writer-wins (concurrent renames and delete/rename races *are* handled — they produce clearly-labeled conflict copies, and nothing is lost).
-- Files download on first open; there's no bulk prefetch yet.
-- Cloud chunks aren't encrypted by tsync itself — turn on your bucket's server-side encryption if you need encryption at rest.
-- S3 connections use OpenSSL by default when it is available (install `lwt_ssl` in your switch), because it is much faster in general. The native OCaml TLS stack is a built-in fallback that can resolve connection issues OpenSSL causes with some endpoints. Force it with `tsync start --tls native` or a `"tls": "native"` line in your config.
+- Two machines editing the **exact same file** at the same moment resolve last-writer-wins. (Concurrent renames and delete/rename races *are* handled properly — they produce labeled conflict copies, and nothing is lost.)
+- Files download on first open; there's no automatic prefetch. Pull things down ahead of time yourself with `tsync restore`, which takes directories.
+- Chunks aren't encrypted by tsync itself — turn on your bucket's server-side encryption if you need encryption at rest.
 
 ## License
 
