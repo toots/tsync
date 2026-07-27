@@ -21,12 +21,12 @@ let usage () =
      every file it looks at; --quiet leaves only the summary and any failures.";
   exit 2
 
-(* What a body in this tree is. Only [`Manifest] is rewritten; the difference
-   between [`Other] and [`Bad] is the difference between "this was never a
-   manifest" and "this was one and could not be converted" — the second leaves a
-   body the daemon cannot read, so it must not pass as a skip. *)
+(* What a body in this tree is. Only [Manifest] is rewritten, and telling it
+   apart matters for the reporting: a body that was never a manifest is a skip,
+   while one that is a manifest and fails to convert is a failure, because
+   leaving it as JSON leaves something the daemon cannot read. *)
 type body_kind =
-  | Marker  (** a folder marker: {dir,name,id} *)
+  | Marker  (** a folder marker: [{dir,name,id}] *)
   | Other  (** a name marker, or anything else sharing the tree *)
   | Manifest  (** a v2 manifest body *)
 
@@ -67,6 +67,13 @@ let parse_v2 body =
        with _ -> Conf.default_chunk_size)
     ~mtime:(json |> member "mtime" |> to_float)
     ~h1:(str "h1") ~h2:(str "h2") ~symlink ~keys
+
+(* Yojson's own [to_string] renders a Type_error with the offending value's
+   internal representation, which is noise in a report meant to be read. *)
+let describe = function
+  | Yojson.Basic.Util.Type_error (msg, _) -> msg
+  | Failure msg -> msg
+  | e -> Printexc.to_string e
 
 let read_file path =
   let ic = open_in_bin path in
@@ -117,31 +124,42 @@ let convert ~dry_run ~quiet c path =
   match read_file path with
     | exception e ->
         c.failed <- c.failed + 1;
-        Printf.eprintf "%s FAIL %s: %s\n%!" (progress c) path
-          (Printexc.to_string e)
+        Printf.eprintf "%s FAIL %s: %s\n%!" (progress c) path (describe e)
     | body when String.length body >= 8 && String.sub body 0 8 = "tsyncm03" ->
         c.already <- c.already + 1;
         if not quiet then say "%s v3   %s\n" (progress c) path
     | body -> (
-        match parse_v2 body with
-          | encoded ->
-              let before = String.length body
-              and after = String.length encoded in
-              c.converted <- c.converted + 1;
-              c.before <- c.before + before;
-              c.after <- c.after + after;
-              (match c.biggest with
-                | Some (b, _, _) when b >= before -> ()
-                | _ -> c.biggest <- Some (before, after, path));
-              if not quiet then
-                say "%s conv %6.1f KB -> %6.1f KB  %s\n" (progress c)
-                  (kb before) (kb after) path;
-              if not dry_run then write_atomic path encoded
-          | exception _ ->
-              (* Not a manifest: a folder marker, a name marker, anything else
-                 sharing the tree. *)
+        match classify body with
+          | Marker ->
               c.skipped <- c.skipped + 1;
-              if not quiet then say "%s skip %s\n" (progress c) path)
+              if not quiet then
+                say "%s skip folder marker   %s\n" (progress c) path
+          | Other ->
+              c.skipped <- c.skipped + 1;
+              if not quiet then
+                say "%s skip not a manifest  %s\n" (progress c) path
+          | Manifest -> (
+              match parse_v2 body with
+                | encoded ->
+                    let before = String.length body
+                    and after = String.length encoded in
+                    c.converted <- c.converted + 1;
+                    c.before <- c.before + before;
+                    c.after <- c.after + after;
+                    (match c.biggest with
+                      | Some (b, _, _) when b >= before -> ()
+                      | _ -> c.biggest <- Some (before, after, path));
+                    if not quiet then
+                      say "%s conv %6.1f KB -> %6.1f KB  %s\n" (progress c)
+                        (kb before) (kb after) path;
+                    if not dry_run then write_atomic path encoded
+                | exception e ->
+                    (* It was a manifest and it did not convert. Left as JSON it
+                       is a body the daemon cannot read, so this is a failure,
+                       not a skip. *)
+                    c.failed <- c.failed + 1;
+                    Printf.eprintf "%s FAIL %s: %s\n%!" (progress c) path
+                      (describe e)))
 
 let rec walk ~dry_run ~quiet c path =
   match Sys.is_directory path with
