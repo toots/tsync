@@ -16,8 +16,9 @@
 
 let usage () =
   prerr_endline
-    "usage: migrate [--dry-run] <directory>...\n\n\
-     Rewrites JSON manifest bodies as chunk-table bodies, in place.";
+    "usage: migrate [--dry-run] [--quiet] <directory>...\n\n\
+     Rewrites JSON manifest bodies as chunk-table bodies, in place. Reports\n\
+     every file it looks at; --quiet leaves only the summary and any failures.";
   exit 2
 
 (* The old body. Chunk entries carried their index and length explicitly; both
@@ -71,62 +72,131 @@ type counts = {
   mutable already : int;
   mutable skipped : int;
   mutable failed : int;
+  mutable seen : int;
   mutable before : int;
   mutable after : int;
+  mutable biggest : (int * int * string) option;  (** before, after, path *)
+  total : int;  (** files found by the counting pass, for the progress column *)
 }
 
-let convert ~dry_run c path =
+let kb n = float_of_int n /. 1024.
+
+(* Buffered output would leave a long run looking hung; flushing every line
+   costs nothing next to reading and rewriting each file. *)
+let say fmt =
+  Printf.ksprintf
+    (fun s ->
+      print_string s;
+      flush stdout)
+    fmt
+
+let progress c =
+  Printf.sprintf "[%*d/%d]"
+    (String.length (string_of_int c.total))
+    c.seen c.total
+
+let convert ~dry_run ~quiet c path =
+  c.seen <- c.seen + 1;
   match read_file path with
     | exception e ->
         c.failed <- c.failed + 1;
-        Printf.eprintf "FAIL  %s: %s\n" path (Printexc.to_string e)
+        Printf.eprintf "%s FAIL %s: %s\n%!" (progress c) path
+          (Printexc.to_string e)
     | body when String.length body >= 8 && String.sub body 0 8 = "tsyncm03" ->
-        c.already <- c.already + 1
+        c.already <- c.already + 1;
+        if not quiet then say "%s v3   %s\n" (progress c) path
     | body -> (
         match parse_v2 body with
           | encoded ->
+              let before = String.length body
+              and after = String.length encoded in
               c.converted <- c.converted + 1;
-              c.before <- c.before + String.length body;
-              c.after <- c.after + String.length encoded;
+              c.before <- c.before + before;
+              c.after <- c.after + after;
+              (match c.biggest with
+                | Some (b, _, _) when b >= before -> ()
+                | _ -> c.biggest <- Some (before, after, path));
+              if not quiet then
+                say "%s conv %6.1f KB -> %6.1f KB  %s\n" (progress c)
+                  (kb before) (kb after) path;
               if not dry_run then write_atomic path encoded
           | exception _ ->
               (* Not a manifest: a folder marker, a name marker, anything else
-               sharing the tree. *)
-              c.skipped <- c.skipped + 1)
+                 sharing the tree. *)
+              c.skipped <- c.skipped + 1;
+              if not quiet then say "%s skip %s\n" (progress c) path)
 
-let rec walk ~dry_run c path =
+let rec walk ~dry_run ~quiet c path =
   match Sys.is_directory path with
     | true ->
+        let names = Sys.readdir path in
+        Array.sort compare names;
         Array.iter
-          (fun n -> walk ~dry_run c (Filename.concat path n))
-          (Sys.readdir path)
-    | false -> convert ~dry_run c path
-    | exception Sys_error msg -> Printf.eprintf "FAIL  %s\n" msg
+          (fun n -> walk ~dry_run ~quiet c (Filename.concat path n))
+          names
+    | false -> convert ~dry_run ~quiet c path
+    | exception Sys_error msg ->
+        c.failed <- c.failed + 1;
+        Printf.eprintf "FAIL %s\n%!" msg
+
+(* Files under [path], so the running output can say how far along it is. Only
+   readdir, no bodies read. *)
+let rec count_files path =
+  match Sys.is_directory path with
+    | true ->
+        Array.fold_left
+          (fun n c -> n + count_files (Filename.concat path c))
+          0 (Sys.readdir path)
+    | false -> 1
+    | exception Sys_error _ -> 0
 
 let () =
   let args = List.tl (Array.to_list Sys.argv) in
   let dry_run = List.mem "--dry-run" args in
+  let quiet = List.mem "--quiet" args in
   let dirs =
     List.filter (fun a -> not (String.starts_with ~prefix:"-" a)) args
   in
   if dirs = [] then usage ();
+  List.iter
+    (fun d ->
+      if not (Sys.file_exists d) then (
+        Printf.eprintf "no such directory: %s\n" d;
+        exit 2))
+    dirs;
+  if dry_run then say "Dry run: nothing will be written.\n";
+  say "Scanning %s ...\n" (String.concat ", " dirs);
+  let total = List.fold_left (fun n d -> n + count_files d) 0 dirs in
+  say "%d files to examine.\n\n" total;
+  let started = Unix.gettimeofday () in
   let c =
     {
       converted = 0;
       already = 0;
       skipped = 0;
       failed = 0;
+      seen = 0;
       before = 0;
       after = 0;
+      biggest = None;
+      total;
     }
   in
-  List.iter (walk ~dry_run c) dirs;
-  Printf.printf "%sconverted %d, already v3 %d, not a manifest %d, failed %d\n"
+  List.iter (walk ~dry_run ~quiet c) dirs;
+  let elapsed = Unix.gettimeofday () -. started in
+  say "\n%s%d converted, %d already v3, %d not a manifest, %d failed  (%.1fs)\n"
     (if dry_run then "[dry run] " else "")
-    c.converted c.already c.skipped c.failed;
-  if c.converted > 0 then
-    Printf.printf "manifest bytes: %.1f MB -> %.1f MB (%.1fx)\n"
+    c.converted c.already c.skipped c.failed elapsed;
+  if c.converted > 0 then (
+    say "manifest bytes: %.1f MB -> %.1f MB, saving %.1f MB (%.1fx smaller)\n"
       (float_of_int c.before /. 1e6)
       (float_of_int c.after /. 1e6)
+      (float_of_int (c.before - c.after) /. 1e6)
       (float_of_int c.before /. float_of_int (max 1 c.after));
-  if c.failed > 0 then exit 1
+    match c.biggest with
+      | Some (b, a, path) ->
+          say "largest:        %.1f KB -> %.1f KB  %s\n" (kb b) (kb a) path
+      | None -> ());
+  if c.failed > 0 then (
+    say "\n%d file(s) failed; nothing was written for those.\n" c.failed;
+    exit 1)
