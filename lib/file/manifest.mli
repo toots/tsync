@@ -21,6 +21,13 @@ type state = [ `Dirty | `Clean of t ]
 
 val chunk_key : chunk_entry -> string
 
+(** Chunk entries by index. Manifests carry them as a list in index order, but
+    the [index] field is authoritative, so a hole reads as [None]. *)
+val entries_by_index : chunk_entry list -> chunk_entry option array
+
+(** The same, reduced to the [(chunk key, size)] pairs {!Chunk_group} needs. *)
+val specs_by_index : chunk_entry list -> (string * int) option array
+
 (** Whole-file [h1]/[h2] as a hash over the ordered chunk digests, so a changed
     file's manifest is rebuildable from its chunk entries alone. *)
 val digest_of_chunks : chunk_entry list -> string * string
@@ -78,14 +85,9 @@ val chunk_len : size:int64 -> chunk_size:int -> int -> int
 val new_uuid : unit -> string
 
 (** Whether every byte of [key] is on this machine: it has unsynced edits, or
-    the chunk store holds every chunk its sidecar names. Synchronous, for the
-    CLI listing; [false] for a partly cached file. *)
-val is_local :
-  cache_root:string ->
-  domain_name:string ->
-  domain_prefix:string ->
-  string ->
-  bool
+    the chunk store holds every cache chunk its sidecar's chunks group into.
+    Synchronous, for the CLI listing; [false] for a partly cached file. *)
+val is_local : Conf.locality -> string -> bool
 
 (** The local manifest mirror for one domain: where manifests live, how the tree
     is walked, and the parsed-sidecar cache. Callers name a logical key and

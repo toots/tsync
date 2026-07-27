@@ -20,17 +20,35 @@ let ensure_parent path = mkdir_p (Filename.dirname path)
    The ".tmp" suffix is what the mirror walkers skip and reap. *)
 let temp_seq = ref 0
 
-let atomic_write path data =
+let temp_path path =
   incr temp_seq;
-  let tmp =
-    Filename.concat (Filename.dirname path)
-      (Printf.sprintf ".tsync-tmp-%d-%d.tmp" (Unix.getpid ()) !temp_seq)
-  in
-  let* () =
-    Lwt_unix_retry.with_file ~mode:Lwt_io.Output tmp (fun oc ->
-        Lwt_io.write oc data)
-  in
-  Lwt_unix_retry.rename tmp path
+  Filename.concat (Filename.dirname path)
+    (Printf.sprintf ".tsync-tmp-%d-%d.tmp" (Unix.getpid ()) !temp_seq)
+
+(* All or nothing: a [write] that fails part-way — a backend error mid-assembly,
+   a full disk — leaves no temp file behind to be counted against the cache or
+   swept later. *)
+let write_then_rename path write =
+  let tmp = temp_path path in
+  Lwt.catch
+    (fun () ->
+      let* () = Lwt_unix_retry.with_file ~mode:Lwt_io.Output tmp write in
+      Lwt_unix_retry.rename tmp path)
+    (fun exn ->
+      let* () =
+        Lwt.catch
+          (fun () -> Lwt_unix_retry.unlink tmp)
+          (fun _ -> Lwt.return_unit)
+      in
+      Lwt.fail exn)
+
+let atomic_write path data =
+  write_then_rename path (fun oc -> Lwt_io.write oc data)
+
+(* [atomic_write] for a body assembled from pieces: [write] appends each in
+   turn, so the caller never holds the whole thing in memory. *)
+let atomic_write_seq path write =
+  write_then_rename path (fun oc -> write (Lwt_io.write oc))
 
 let copy_file ~src ~dst =
   let* src_fd = Lwt_unix_retry.openfile src [Unix.O_RDONLY] 0 in

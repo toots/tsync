@@ -19,3 +19,7 @@ byte write splits it       staged size=26 slots=[SSSS]        cached=9 "WHOLE -I
 after sync                 published size=26 chunks=4         cached=13 "WHOLE -ILE FROM A FRONTEND"
 whole file uploaded as-is  published size=14 chunks=2         cached=15 "SECOND HANDOFF"
 create (O_TRUNC)           staged size= 0 slots=[]            cached=15 ""
+grouped: published         published size=24 chunks=3         cached=1 "abcdefghijklmnopqrstuvwx"
+grouped: write 2B          staged size=24 slots=[SSS]         cached=1 "abcdefghiZZlmnopqrstuvwx"
+grouped: after sync        published size=24 chunks=3         cached=2 "abcdefghiZZlmnopqrstuvwx"
+grouped: cached 3/3 chunks, 2 cache file(s) incl. stale

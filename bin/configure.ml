@@ -626,6 +626,16 @@ let edit_domain existing =
               | None -> Conf_parsing.default_chunk_size)
         | _ -> Conf_parsing.default_chunk_size)
   in
+  let cache_chunk_size =
+    ref
+      (match Option.bind existing (fun j -> jfield j "cacheChunkSize") with
+        | Some (`Int n) when n > 0 -> n
+        | Some (`String s) -> (
+            match Conf_parsing.parse_size s with
+              | Some n -> n
+              | None -> Conf_parsing.default_cache_chunk_size)
+        | _ -> Conf_parsing.default_cache_chunk_size)
+  in
   let max_cache =
     ref
       (match Option.bind existing (fun j -> jfield j "maxCache") with
@@ -657,6 +667,11 @@ let edit_domain existing =
           prompt_size
             "Chunk size (smaller helps random access; larger favors throughput)"
             !chunk_size;
+        cache_chunk_size :=
+          prompt_size
+            "Cache chunk size (chunks are grouped this big on local disk; \
+             larger cuts I/O latency)"
+            !cache_chunk_size;
         max_cache :=
           prompt_size_opt "Max local cache size (\"none\" = unlimited)"
             !max_cache;
@@ -674,12 +689,14 @@ let edit_domain existing =
           Printf.printf "  4. read-only:   %b\n" !read_only;
           Printf.printf "  5. chunk size:  %s\n"
             (Conf_parsing.format_size !chunk_size);
-          Printf.printf "  6. max cache:   %s\n"
+          Printf.printf "  6. cache chunk: %s\n"
+            (Conf_parsing.format_size !cache_chunk_size);
+          Printf.printf "  7. max cache:   %s\n"
             (match !max_cache with
               | Some n -> Conf_parsing.format_size n
               | None -> "none");
-          Printf.printf "  7. backends:    %s\n" (backend_summary !backends);
-          Printf.printf "  8. frontends:   %s\n" (frontend_summary !frontends);
+          Printf.printf "  8. backends:    %s\n" (backend_summary !backends);
+          Printf.printf "  9. frontends:   %s\n" (frontend_summary !frontends);
           if !status <> "" then Printf.printf "\n%s\n" !status;
           Printf.printf "\nEnter a field number to edit, or [d]one:\n> %!";
           status := "";
@@ -693,11 +710,14 @@ let edit_domain existing =
                 read_only := prompt_bool ~default:!read_only "Read-only mount?"
             | "5" -> chunk_size := prompt_size "Chunk size" !chunk_size
             | "6" ->
+                cache_chunk_size :=
+                  prompt_size "Cache chunk size" !cache_chunk_size
+            | "7" ->
                 max_cache :=
                   prompt_size_opt "Max local cache size (\"none\" = unlimited)"
                     !max_cache
-            | "7" -> backends := edit_backends !backends
-            | "8" -> frontends := edit_frontends !frontends
+            | "8" -> backends := edit_backends !backends
+            | "9" -> frontends := edit_frontends !frontends
             | "d" | "" -> running := false
             | other -> status := Printf.sprintf "(unknown field %S)" other
         done);
@@ -708,6 +728,7 @@ let edit_domain existing =
        ("symlinks", `String !symlinks);
        ("readOnly", `Bool !read_only);
        ("chunkSize", `String (Conf_parsing.format_size !chunk_size));
+       ("cacheChunkSize", `String (Conf_parsing.format_size !cache_chunk_size));
      ]
     @ (match !max_cache with
       | Some n -> [("maxCache", `String (Conf_parsing.format_size n))]

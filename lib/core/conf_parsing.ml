@@ -20,6 +20,7 @@ type domain = {
   versioning : bool;
   read_only : bool;
   chunk_size : int;
+  cache_chunk_size : int;
   max_cache : int option;
 }
 
@@ -38,6 +39,14 @@ let default_max_downloads = 8
    and small manifests; lower it for random-access workloads to cut read/write
    amplification (at the cost of larger manifests and more backend requests). *)
 let default_chunk_size = 8 * 1024 * 1024
+
+(* Per-domain, overridable via "cacheChunkSize". The local cache stores
+   consecutive stored chunks grouped into files of about this size: storage
+   granularity wants to be small (less egress when a file changes), disk
+   granularity wants to be large (fewer opens, less I/O latency), so the two are
+   configured apart. Absent, it follows "chunkSize" and no grouping happens; this
+   is only the value [tsync configure] proposes. *)
+let default_cache_chunk_size = 64 * 1024 * 1024
 
 (* Human-friendly byte sizes: a bare number is bytes; a K/M/G suffix (with an
    optional B/iB) is a binary multiple (1K = 1024). *)
@@ -166,8 +175,25 @@ let parse_symlink_policy json =
     | `Null -> failwith "domain config missing required \"symlinks\" field"
     | _ -> failwith "domain \"symlinks\" field must be a string"
 
+(* A size field: an integer, a size string, or absent (then [default]). *)
+let parse_size_field json name ~default =
+  let open Yojson.Basic.Util in
+  match json |> member name with
+    | `Int n when n > 0 -> n
+    | `String s -> (
+        match parse_size s with
+          | Some n -> n
+          | None -> failwith (Printf.sprintf "invalid %s: %s" name s))
+    | `Null -> default
+    | _ ->
+        failwith
+          (Printf.sprintf "domain %S must be a size string or integer" name)
+
 let parse_domain json =
   let open Yojson.Basic.Util in
+  let chunk_size =
+    parse_size_field json "chunkSize" ~default:default_chunk_size
+  in
   {
     name = json |> member "name" |> to_string;
     backends = json |> member "backends" |> to_list |> List.map parse_backend;
@@ -181,15 +207,12 @@ let parse_domain json =
     versioning = json |> member "versioning" |> to_bool;
     read_only =
       (match json |> member "readOnly" with `Bool b -> b | _ -> false);
-    chunk_size =
-      (match json |> member "chunkSize" with
-        | `Int n when n > 0 -> n
-        | `String s -> (
-            match parse_size s with
-              | Some n -> n
-              | None -> failwith ("invalid chunkSize: " ^ s))
-        | `Null -> default_chunk_size
-        | _ -> failwith "domain \"chunkSize\" must be a size string or integer");
+    chunk_size;
+    (* Absent means no grouping: one cache chunk per stored chunk, which is what
+       a domain that barely reads through the chunk cache (the FileProvider hands
+       over whole files) wants anyway. *)
+    cache_chunk_size =
+      parse_size_field json "cacheChunkSize" ~default:chunk_size;
     max_cache =
       (match json |> member "maxCache" with
         | `Int n when n > 0 -> Some n

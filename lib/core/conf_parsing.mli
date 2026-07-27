@@ -28,6 +28,10 @@ type domain = {
   versioning : bool;
   read_only : bool;
   chunk_size : int;  (** chunk size (bytes) for newly uploaded files *)
+  cache_chunk_size : int;
+      (** cache chunk size (bytes): consecutive stored chunks are grouped into
+          local cache files of about this size. Defaults to [chunk_size], i.e.
+          no grouping *)
   max_cache : int option;
       (** soft cap (bytes) on local cache usage; [None] = unbounded *)
 }
@@ -47,6 +51,10 @@ type t = {
 val default_max_uploads : int
 val default_max_downloads : int
 val default_chunk_size : int
+
+(** What [tsync configure] proposes for [cacheChunkSize]. An omitted field falls
+    back to the domain's [chunkSize], not to this. *)
+val default_cache_chunk_size : int
 
 (** Render a byte count as a human-friendly binary size (e.g. [8M], [512K]);
     exact multiples only, else the raw number. *)

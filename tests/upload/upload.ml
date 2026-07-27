@@ -7,6 +7,10 @@
 open Lwt.Syntax
 
 let chunk_size = 8 * 1024 * 1024
+
+(* Two stored chunks per cache chunk, so the upload/dedup paths run against a
+   grouped cache rather than the degenerate one-to-one case. *)
+let cache_chunk_size = 2 * chunk_size
 let root = Filename.temp_dir "tsync-upload" ""
 let backend_root = Filename.concat root "backend"
 
@@ -28,6 +32,7 @@ module C = struct
   let max_uploads = 4
   let max_downloads = 8
   let chunk_size = chunk_size
+  let cache_chunk_size = cache_chunk_size
   let max_cache = None
   let symlink_policy = `Keep
   let read_only = false

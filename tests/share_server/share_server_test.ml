@@ -38,6 +38,7 @@ module C : Conf.S = struct
   (* Small enough that the fixture spans several chunks, so range reads exercise
      partial fetching rather than pulling one chunk. *)
   let chunk_size = 16
+  let cache_chunk_size = 16
   let max_cache = None
   let symlink_policy = `Keep
   let read_only = false

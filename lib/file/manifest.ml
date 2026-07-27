@@ -29,6 +29,23 @@ type state = [ `Dirty | `Clean of t ]
 
 let chunk_key (entry : chunk_entry) = entry.h1 ^ "-" ^ entry.h2
 
+(* Chunk entries by index. Manifests carry them as a list in index order, but
+   the index field is authoritative. *)
+let entries_by_index chunks =
+  let n = List.length chunks in
+  let a = Array.make n None in
+  List.iter
+    (fun (c : chunk_entry) ->
+      if c.index >= 0 && c.index < n then a.(c.index) <- Some c)
+    chunks;
+  a
+
+(* The same, reduced to what grouping needs: key and length per index. *)
+let specs_by_index chunks =
+  Array.map
+    (Option.map (fun (c : chunk_entry) -> (chunk_key c, c.size)))
+    (entries_by_index chunks)
+
 (* Whole-file digest as a hash over the ordered chunk digests, so a changed
    file's manifest is rebuildable from its chunk entries alone (no need to
    re-read untouched chunk bytes). Seeds 0/1 give the two independent hashes. *)
@@ -285,7 +302,9 @@ let staged_sidecar_path ~cache_root ~domain_name ~domain_prefix key =
    the sidecar names must be in the chunk store.
    ponytail: a bool, so a partly cached file reads as remote. Return the chunk
    counts here if `tsync ls` should distinguish "partial n/m". *)
-let is_local ~cache_root ~domain_name ~domain_prefix key =
+let is_local
+    ({ Conf.cache_root; domain_name; domain_prefix; cache_chunk_size } :
+      Conf.locality) key =
   Sys.file_exists
     (staged_sidecar_path ~cache_root ~domain_name ~domain_prefix key)
   ||
@@ -297,12 +316,18 @@ let is_local ~cache_root ~domain_name ~domain_prefix key =
     | body -> (
         match of_string body with
           | `Clean m ->
-              List.for_all
-                (fun c ->
-                  Sys.file_exists
-                    (Cache_layout.chunk_path ~cache_root ~domain_name
-                       (chunk_key c)))
-                m.chunks
+              let specs = specs_by_index m.chunks in
+              let per =
+                Chunk_group.per_group ~chunk_size:m.chunk_size ~cache_chunk_size
+              in
+              let groups = Chunk_group.all ~specs ~per in
+              List.length groups = Chunk_group.count ~specs ~per
+              && List.for_all
+                   (fun g ->
+                     Sys.file_exists
+                       (Cache_layout.chunk_path ~cache_root ~domain_name
+                          (Chunk_group.key g)))
+                   groups
           | `Dirty -> false
           | exception _ -> false)
     | exception _ -> false

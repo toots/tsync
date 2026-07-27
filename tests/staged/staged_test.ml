@@ -35,6 +35,7 @@ module C : Conf.S = struct
   let max_uploads = 1
   let max_downloads = 2
   let chunk_size = 8
+  let cache_chunk_size = 8
   let max_cache = None
   let symlink_policy = `Keep
   let read_only = false
@@ -116,6 +117,88 @@ let write_at offset s =
   String.iteri (fun i c -> Bigarray.Array1.set buf i c) s;
   let+ (_ : int) = D.write key buf ~offset:(Int64.of_int offset) in
   ()
+
+(* ── The same domain with grouped cache chunks ───────────────────────────────
+   Three stored chunks of 8 to one cache chunk of 24. Its own domain so its
+   cache subtree can be counted on its own. *)
+module CG : Conf.S = struct
+  include C
+
+  let domain_name = "groupdom"
+  let domain_prefix = "tsync/groupdom/manifests/"
+  let chunk_prefix = "tsync/groupdom/chunks/"
+  let cache_chunk_size = 24
+end
+
+module GR = Remote.Make (CG)
+module Gm = Manifest.Make (CG)
+module GD = Data.Make (CG) (GR)
+
+let gkey = CG.domain_prefix ^ "file.txt"
+
+let gchunk_count () =
+  let rec count dir =
+    if not (Sys.file_exists dir) then 0
+    else
+      Array.fold_left
+        (fun n name ->
+          let p = Filename.concat dir name in
+          if Sys.is_directory p then n + count p else n + 1)
+        0 (Sys.readdir dir)
+  in
+  count (Cache_layout.chunks_dir ~cache_root:CG.cache_root CG.domain_name)
+
+let gpublish () =
+  let src = Filename.concat data_dir "grouped.txt" in
+  let oc = open_out_bin src in
+  output_string oc body;
+  close_out oc;
+  let* state =
+    GR.upload ~key:gkey ~src_path:src ~mtime ~chunk_size:CG.chunk_size ()
+  in
+  Gm.write gkey state
+
+let gwrite_at offset s =
+  let n = String.length s in
+  let buf = Bigarray.Array1.create Bigarray.char Bigarray.c_layout n in
+  String.iteri (fun i c -> Bigarray.Array1.set buf i c) s;
+  let+ (_ : int) = GD.write gkey buf ~offset:(Int64.of_int offset) in
+  ()
+
+let gshow label =
+  let* resolved = Gm.resolve gkey in
+  let state =
+    match resolved with
+      | Some (`Staged (st, _)) ->
+          Printf.sprintf "staged size=%2Ld slots=[%s]" st.Manifest.s_size
+            (String.concat ""
+               (Array.to_list
+                  (Array.map
+                     (function
+                       | Manifest.Staged _ -> "S"
+                       | Manifest.Inherit -> "I"
+                       | Manifest.Zero -> "Z")
+                     st.Manifest.s_slots)))
+      | Some (`Published m) ->
+          Printf.sprintf "published size=%2Ld chunks=%d" m.Manifest.size
+            (List.length m.Manifest.chunks)
+      | None -> "absent"
+  in
+  let size =
+    match resolved with
+      | Some (`Staged (st, _)) -> Int64.to_int st.Manifest.s_size
+      | Some (`Published m) -> Int64.to_int m.Manifest.size
+      | None -> 0
+  in
+  let+ content =
+    if size = 0 then Lwt.return ""
+    else (
+      let buf = Bigarray.Array1.create Bigarray.char Bigarray.c_layout size in
+      let+ n = GD.pread_key gkey buf ~offset:0L in
+      String.init n (Bigarray.Array1.get buf))
+  in
+  Printf.printf "%-26s %-34s cached=%d %S\n" label state (gchunk_count ())
+    content
 
 let () =
   ignore
@@ -246,4 +329,30 @@ let () =
      (* And back to nothing. *)
      let* () = D.create key in
      let* () = show "create (O_TRUNC)" in
+
+     (* ── Grouped cache chunks ─────────────────────────────────────────────────
+        Same file, same three stored chunks, but a cache chunk size of 24 puts
+        all three in one cache file. Two things change and nothing else does:
+        a write stages the whole group rather than the one chunk it touches, and
+        promotion writes that group out of the staged bodies instead of leaving
+        it to be fetched. *)
+     let* () = Gm.init () in
+     let* () = gpublish () in
+     let* () = gshow "grouped: published" in
+
+     (* One 2-byte write, and every slot of the group is staged: the group's key
+        changed, so its other members cannot be left pointing at the old one. *)
+     let* () = gwrite_at 9 "ZZ" in
+     let* () = gshow "grouped: write 2B" in
+
+     (* Promotion writes the group out of those staged bodies, so the file is
+        wholly cached afterwards without a single fetch — three stored chunks in
+        one cache file. The second file is the pre-edit group: its members
+        changed, so its key did, and it is garbage for the cap to reclaim. *)
+     let* () = GD.sync gkey () in
+     let* () = gshow "grouped: after sync" in
+     let* present, total = GD.chunk_residency gkey in
+     Printf.printf
+       "grouped: cached %d/%d chunks, %d cache file(s) incl. stale\n" present
+       total (gchunk_count ());
      Lwt.return_unit)

@@ -55,5 +55,32 @@ let () =
         assert (List.assoc "port" b.Conf_parsing.options = "8080")
     | _ -> assert false);
 
+  (* sizes: integer and suffixed-string spellings both parse *)
+  let domain json =
+    Unix.putenv "TSYNC_CONFIG_JSON" json;
+    List.hd (Conf_parsing.load "").Conf_parsing.domains
+  in
+  let with_sizes extra =
+    Printf.sprintf
+      {|{"domains": [{"name": "d", "symlinks": "keep", "versioning": false,
+                      %s
+                      "frontends": ["fuse"],
+                      "backends": [{"type": "s3", "name": "s"}]}]}|}
+      extra
+  in
+  let d = domain (with_sizes {|"chunkSize": "1M", "cacheChunkSize": "64M",|}) in
+  assert (d.Conf_parsing.chunk_size = 1024 * 1024);
+  assert (d.Conf_parsing.cache_chunk_size = 64 * 1024 * 1024);
+  let d = domain (with_sizes {|"cacheChunkSize": 4096,|}) in
+  assert (d.Conf_parsing.cache_chunk_size = 4096);
+  assert (d.Conf_parsing.chunk_size = Conf_parsing.default_chunk_size);
+  (* Omitted, it follows chunkSize: one cache chunk per stored chunk, no
+     grouping. A domain that does not read through the chunk cache (the
+     FileProvider hands over whole files) never has to set it. *)
+  let d = domain (with_sizes {|"chunkSize": "2M",|}) in
+  assert (d.Conf_parsing.cache_chunk_size = d.Conf_parsing.chunk_size);
+  let d = domain (with_sizes "") in
+  assert (d.Conf_parsing.cache_chunk_size = Conf_parsing.default_chunk_size);
+
   Unix.putenv "TSYNC_CONFIG_JSON" "";
   print_endline "conf_test ok"

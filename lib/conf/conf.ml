@@ -1,3 +1,15 @@
+(** What it takes to answer "is every byte of this key on this machine?": the
+    cache tree to look in, and the sizes that say which files to look for. Its
+    own record because the callers ({!Manifest.is_local} and every frontend) run
+    outside a functor, in plain non-Lwt CLI code — and because passing the parts
+    one by one meant every new field here touching each of them. *)
+type locality = {
+  cache_root : string;
+  domain_name : string;
+  domain_prefix : string;
+  cache_chunk_size : int;
+}
+
 module type S = sig
   val versioning : bool
   val client_name : string
@@ -31,6 +43,15 @@ module type S = sig
       backend requests. *)
   val chunk_size : int
 
+  (** Cache chunk size (bytes): the local cache stores consecutive stored chunks
+      grouped into files of about this size, the group being the [n] stored
+      chunks whose total is closest to it. Storage granularity wants to be small
+      (less egress when a file changes), disk granularity wants to be large
+      (fewer opens, less I/O latency per read), so the two are set apart. Unlike
+      [chunk_size] this is purely local: it is not recorded in any manifest and
+      changing it only orphans cache files, which the cap reclaims. *)
+  val cache_chunk_size : int
+
   (** Soft cap (bytes) on local cache disk usage for this domain. When set and
       exceeded, the coldest clean, closed files are evicted (dropping their
       local data, refetched on demand) until usage is back under the cap.
@@ -45,3 +66,11 @@ module type S = sig
   (** When [true], the domain rejects all write operations. *)
   val read_only : bool
 end
+
+let locality (module C : S) =
+  {
+    cache_root = C.cache_root;
+    domain_name = C.domain_name;
+    domain_prefix = C.domain_prefix;
+    cache_chunk_size = C.cache_chunk_size;
+  }

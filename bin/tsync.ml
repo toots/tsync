@@ -357,11 +357,7 @@ let ls_cmd =
            match item with
              | `Dir _ -> Printf.printf "dir    %s/\n" name
              | `File (e : Backend.file_entry) ->
-                 let cached =
-                   F.is_local ~cache_root:C.cache_root
-                     ~domain_name:C.domain_name ~domain_prefix:C.domain_prefix
-                     e.key
-                 in
+                 let cached = F.is_local (Conf.locality (module C)) e.key in
                  Printf.printf "%s  %s  %d bytes\n"
                    (if cached then "local" else "cloud")
                    name e.size)
@@ -1492,6 +1488,8 @@ let print_conf_cmd =
         Printf.printf "  symlinks:   %s\n" (symlink_str d.symlink_policy);
         Printf.printf "  chunkSize:  %s\n"
           (Conf_parsing.format_size d.chunk_size);
+        Printf.printf "  cacheChunk: %s\n"
+          (Conf_parsing.format_size d.cache_chunk_size);
         Printf.printf "  maxCache:   %s\n"
           (match d.max_cache with
             | Some n -> Conf_parsing.format_size n

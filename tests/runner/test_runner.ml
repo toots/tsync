@@ -1,5 +1,13 @@
 open Lwt.Syntax
 
+(* Cache chunk size for the scenarios: same as the stored chunk size unless a
+   test sets [TSYNC_CACHE_CHUNK_SIZE], so grouping is off by default and a test
+   that wants it opts in. *)
+let cache_chunk_size =
+  match Sys.getenv_opt "TSYNC_CACHE_CHUNK_SIZE" with
+    | Some s -> ( try int_of_string s with _ -> Manifest.chunk_size)
+    | None -> Manifest.chunk_size
+
 type step =
   | Write of { path : string; content : string }
   | Symlink of { path : string; target : string }
@@ -248,22 +256,25 @@ let setup_client (module C : Conf.S) root staging_prefix =
   let mark_time = ref 0. in
   (* Where the body of a file's chunk [index] lives in the chunk store, for the
      steps that damage it behind the daemon's back. *)
+  (* The cache file backing stored chunk [index] — the whole group it falls in,
+     which is one chunk only when the cache chunk size matches the stored one. *)
   let cached_chunk_path k index =
     let+ resolved = F.resolve k in
-    let chunk_key =
+    let group =
       match resolved with
         | Some (`Published m) -> (
-            match
-              List.find_opt
-                (fun (c : Manifest.chunk_entry) -> c.Manifest.index = index)
-                m.Manifest.chunks
-            with
-              | Some c -> Manifest.chunk_key c
+            let specs = Manifest.specs_by_index m.Manifest.chunks in
+            let per =
+              Chunk_group.per_group ~chunk_size:m.Manifest.chunk_size
+                ~cache_chunk_size:C.cache_chunk_size
+            in
+            match Chunk_group.of_specs ~specs ~per index with
+              | Some g -> g
               | None -> failwith "no such chunk")
         | _ -> failwith "no published manifest"
     in
     Cache_layout.chunk_path ~cache_root:C.cache_root ~domain_name:C.domain_name
-      chunk_key
+      (Chunk_group.key group)
   in
   let request fields =
     let line = Yojson.Safe.to_string (`Assoc fields) in
@@ -947,6 +958,7 @@ let run_scenario ?(versioning = false) ?(symlink_policy = `Keep)
     let max_uploads = 4
     let max_downloads = 8
     let chunk_size = Manifest.chunk_size
+    let cache_chunk_size = cache_chunk_size
 
     let max_cache =
       match Sys.getenv_opt "TSYNC_MAX_CACHE" with
@@ -1023,6 +1035,7 @@ let run_two_client_scenario ?(versioning = false)
     let max_uploads = 4
     let max_downloads = 8
     let chunk_size = Manifest.chunk_size
+    let cache_chunk_size = cache_chunk_size
 
     let max_cache =
       match Sys.getenv_opt "TSYNC_MAX_CACHE" with
@@ -1050,6 +1063,7 @@ let run_two_client_scenario ?(versioning = false)
     let max_uploads = 4
     let max_downloads = 8
     let chunk_size = Manifest.chunk_size
+    let cache_chunk_size = cache_chunk_size
 
     let max_cache =
       match Sys.getenv_opt "TSYNC_MAX_CACHE" with
@@ -1125,6 +1139,7 @@ let make_conf ?(versioning = false) ~client_name ~backend_root ~cache_root
     let max_uploads = 4
     let max_downloads = 8
     let chunk_size = Manifest.chunk_size
+    let cache_chunk_size = cache_chunk_size
 
     let max_cache =
       match Sys.getenv_opt "TSYNC_MAX_CACHE" with

@@ -2,7 +2,8 @@
      <cache_root>/<domain>/manifests/<real path>   — published manifest mirror
                                                      (+ .tsync-dir / .tsync-name markers)
      <cache_root>/<domain>/scratch/<real path>     — .fuse_hidden* scratch files
-     <cache_root>/<domain>/chunks/<xx>/<key>       — content-addressed chunk cache
+     <cache_root>/<domain>/chunks/<xx>/<key>       — content-addressed cache-chunk store
+                                                     (one file per {!Chunk_group})
      <cache_root>/<domain>/staged/manifests/<path> — staged manifests (unsynced edits)
      <cache_root>/<domain>/staged/chunks/<uuid>    — staged chunk bodies
      <cache_root>/<domain>/staged/whole/<uuid>     — whole files handed back by a frontend
@@ -33,9 +34,9 @@ let staged_chunks_dir ~cache_root domain_name =
 let staged_whole_dir ~cache_root domain_name =
   sub ~cache_root domain_name "staged/whole"
 
-(* Chunk keys are fixed-length hex ("<h1>-<h2>"), so a two-character prefix
+(* Cache keys are fixed-length hex ("<h1>-<h2>"), so a two-character prefix
    directory splits the cache 256 ways — enough to keep readdir cheap when a
-   large cache holds hundreds of thousands of chunks. *)
+   large cache holds hundreds of thousands of entries. *)
 let chunk_fanout = 2
 
 let chunk_path ~cache_root ~domain_name chunk_key =

@@ -1,46 +1,59 @@
-(* The local chunk store: bodies of backend chunks, named by their content key.
+(* The local cache-chunk store: bodies of {!Chunk_group}s, named by a content
+   key derived from the stored chunks they hold.
 
-   Nothing here is per-file. A chunk is present iff its file exists, so there is
+   Nothing here is per-file. A group is present iff its file exists, so there is
    no residency to record and no state that can disagree with the disk — and any
-   chunk may be deleted at any moment, because it can always be fetched again.
+   group may be deleted at any moment, because it can always be fetched again.
    Callers must therefore treat a miss as ordinary (see {!read_into}).
 
-   Content addressing also makes the store shared: two files holding the same
-   chunk hit the same file and share one download. *)
+   Content addressing also makes the store shared: two files whose chunks group
+   identically hit the same file and share one download. *)
 
 open Lwt.Syntax
 
-(* What the store needs from the backend layer: one chunk body by content key.
-   Kept to this instead of [Remote.S] so the store has no cycle with it and can
-   be driven by a stub in tests. *)
+(* What the store needs from the backend layer: one stored chunk body by content
+   key. Kept to this instead of [Remote.S] so the store has no cycle with it and
+   can be driven by a stub in tests. Grouping is invisible to the backend: a
+   cache chunk is fetched as its members. *)
 module type Fetch = sig
   val get_chunk : chunk_key:string -> string Lwt.t
 end
 
 module Make (C : Conf.S) (F : Fetch) = struct
-  let path chunk_key =
+  let path group =
     Cache_layout.chunk_path ~cache_root:C.cache_root ~domain_name:C.domain_name
-      chunk_key
+      (Chunk_group.key group)
 
-  let exists chunk_key = Lwt_unix_retry.file_exists (path chunk_key)
+  let exists group = Lwt_unix_retry.file_exists (path group)
 
-  (* Downloads in flight, keyed by content: two readers of the same chunk — in
-     the same file or in different ones — share one GET. *)
+  (* Downloads in flight, keyed by content: two readers of the same group — in
+     the same file or in different ones — share one fetch. *)
   let fetching : (string, unit Lwt.t) Hashtbl.t = Hashtbl.create 64
   let in_flight () = Hashtbl.length fetching
 
-  let fetch chunk_key =
-    let p = path chunk_key in
+  (* Members are fetched one at a time and appended, so the peak resident body is
+     one *stored* chunk however large the cache chunk is.
+     ponytail: serial within a group — the first cold group pays one round trip
+     per member. Parallelism comes from concurrent group fetches (read-ahead,
+     whole-file materialization); give this a bounded window writing at member
+     offsets if first-touch latency ever matters. *)
+  let fetch group =
+    let p = path group in
     let* () = Fs_util.ensure_parent p in
-    let* data = F.get_chunk ~chunk_key in
-    (* Atomic: a reader never sees a half-written chunk, so presence alone is
+    (* Atomic: a reader never sees a half-written group, so presence alone is
        proof of a complete body. *)
-    Fs_util.atomic_write p data
+    Fs_util.atomic_write_seq p (fun append ->
+        Lwt_list.iter_s
+          (fun chunk_key ->
+            let* data = F.get_chunk ~chunk_key in
+            append data)
+          (Chunk_group.members group))
 
-  (* Put [chunk_key]'s body on disk, unless it is already there. Concurrent
-     callers await the same fetch; [force] re-fetches a body believed corrupt. *)
-  let ensure ?(force = false) ~chunk_key () =
-    match Hashtbl.find_opt fetching chunk_key with
+  (* Put [group]'s body on disk, unless it is already there. Concurrent callers
+     await the same fetch; [force] re-fetches a body believed corrupt. *)
+  let ensure ?(force = false) ~group () =
+    let key = Chunk_group.key group in
+    match Hashtbl.find_opt fetching key with
       | Some t -> t
       | None ->
           let t =
@@ -51,15 +64,31 @@ module Make (C : Conf.S) (F : Fetch) = struct
                    every step below yields. *)
                 let* () = Lwt.pause () in
                 let* present =
-                  if force then Lwt.return_false else exists chunk_key
+                  if force then Lwt.return_false else exists group
                 in
-                if present then Lwt.return_unit else fetch chunk_key)
+                if present then Lwt.return_unit else fetch group)
               (fun () ->
-                Hashtbl.remove fetching chunk_key;
+                Hashtbl.remove fetching key;
                 Lwt.return_unit)
           in
-          Hashtbl.replace fetching chunk_key t;
+          Hashtbl.replace fetching key t;
           t
+
+  (* Write a group assembled from bytes the caller already holds — the tail of a
+     promotion, where every member is a local staged body. Idempotent: a body
+     already under this key is the same bytes. *)
+  let put_group ~group ~member =
+    let* present = exists group in
+    if present then Lwt.return_unit
+    else (
+      let p = path group in
+      let* () = Fs_util.ensure_parent p in
+      Fs_util.atomic_write_seq p (fun append ->
+          Lwt_list.iter_s
+            (fun i ->
+              let* data = member i in
+              append data)
+            (Chunk_group.indices group)))
 
   (* ── Cache cap ─────────────────────────────────────────────────────────────
      Every chunk here is interchangeable and re-fetchable, so keeping the store
@@ -127,59 +156,54 @@ module Make (C : Conf.S) (F : Fetch) = struct
             in
             go total coldest)
 
-  (* The body if it is here, without fetching: for a repair that wants to know
-     whether the local copy can stand in, not to read content. *)
-  let body_if_local ~chunk_key =
+  let forget ~group =
     Lwt.catch
-      (fun () ->
-        let+ body =
-          Lwt_io.with_file ~mode:Lwt_io.Input (path chunk_key) Lwt_io.read
-        in
-        Some body)
-      (fun _ -> Lwt.return_none)
-
-  let forget ~chunk_key =
-    Lwt.catch
-      (fun () -> Lwt_unix_retry.unlink (path chunk_key))
+      (fun () -> Lwt_unix_retry.unlink (path group))
       (function Unix.Unix_error _ -> Lwt.return_unit | exn -> Lwt.fail exn)
 
-  (* Integrity pass: a body must hash to its own name. Content addressing makes
-     this the whole check — no manifest, no file, no per-chunk record is involved
-     — and the repair is a deletion, since the bytes come back from the backend on
-     the next read. Returns (checked, dropped). *)
-  let verify () =
-    let* items = Lwt.catch entries (fun _ -> Lwt.return_nil) in
-    Lwt_list.fold_left_s
-      (fun (checked, dropped) (path, _, _) ->
-        let name = Filename.basename path in
-        let* data =
-          Lwt.catch
-            (fun () ->
-              let+ body =
-                Lwt_io.with_file ~mode:Lwt_io.Input path Lwt_io.read
-              in
-              Some body)
-            (fun _ -> Lwt.return_none)
-        in
-        let ok =
-          match data with
-            | None -> false
-            | Some data ->
-                Printf.sprintf "%s-%s" (Xxhash.hash_hex data 0)
-                  (Xxhash.hash_hex data 1)
-                = name
-        in
-        if ok then Lwt.return (checked + 1, dropped)
-        else (
-          Log.info "chunk cache: dropping corrupt %s" name;
-          let+ () =
-            Lwt.catch
-              (fun () -> Lwt_unix_retry.unlink path)
-              (function
-                | Unix.Unix_error _ -> Lwt.return_unit | exn -> Lwt.fail exn)
-          in
-          (checked + 1, dropped + 1)))
-      (0, 0) items
+  (* One stored chunk's bytes out of a group already on disk, without fetching:
+     for a repair that wants to know whether the local copy can stand in. *)
+  let member_if_local ~group ~index =
+    let len = Chunk_group.size group index in
+    Lwt.catch
+      (fun () ->
+        Lwt_io.with_file ~mode:Lwt_io.Input (path group) (fun ic ->
+            let* () =
+              Lwt_io.set_position ic
+                (Int64.of_int (Chunk_group.offset group index))
+            in
+            let+ body = Lwt_io.read ~count:len ic in
+            if String.length body = len then Some body else None))
+      (fun _ -> Lwt.return_none)
+
+  (* Integrity pass over one group: every member segment must hash to the key
+     the manifest published it under. The repair is a deletion — the bytes come
+     back from the backend on the next read. [false] when the group was
+     dropped. *)
+  let verify_group ~group =
+    let* present = exists group in
+    if not present then Lwt.return_true
+    else
+      let* ok =
+        Lwt_list.fold_left_s
+          (fun ok index ->
+            if not ok then Lwt.return_false
+            else
+              let+ body = member_if_local ~group ~index in
+              match body with
+                | None -> false
+                | Some body ->
+                    Printf.sprintf "%s-%s" (Xxhash.hash_hex body 0)
+                      (Xxhash.hash_hex body 1)
+                    = Chunk_group.member_key group index)
+          true
+          (Chunk_group.indices group)
+      in
+      if ok then Lwt.return_true
+      else (
+        Log.info "chunk cache: dropping corrupt %s" (Chunk_group.key group);
+        let+ () = forget ~group in
+        false)
 
   (* ── Staged bodies ────────────────────────────────────────────────────────
      A chunk being written locally cannot live under a content key — its content
@@ -207,13 +231,24 @@ module Make (C : Conf.S) (F : Fetch) = struct
       (fun () -> Lwt_unix_retry.LargeFile.ftruncate fd (Int64.of_int len))
       (fun () -> Lwt_unix_retry.close fd)
 
-  (* A new body holding a published chunk's bytes, for a write that covers only
-     part of it. This copy is the price of immutable content-addressed chunks. *)
-  let stage_from_chunk ~chunk_key ~uuid =
-    let* () = ensure ~chunk_key () in
+  (* A new body holding a published chunk's bytes, for a write that does not
+     replace all of them. This copy is the price of immutable content-addressed
+     chunks. *)
+  let stage_from_chunk ~group ~index ~uuid =
+    let* () = ensure ~group () in
     let p = staged_path uuid in
     let* () = Fs_util.ensure_parent p in
-    Fs_util.copy_file ~src:(path chunk_key) ~dst:p
+    let len = Chunk_group.size group index in
+    let buf = Bigarray.Array1.create Bigarray.char Bigarray.c_layout len in
+    let* n =
+      Local_io.read (path group) buf
+        ~offset:(Int64.of_int (Chunk_group.offset group index))
+    in
+    let* () = stage_empty ~uuid ~len in
+    let+ (_ : int) =
+      Local_io.write p (Bigarray.Array1.sub buf 0 n) ~offset:0L
+    in
+    ()
 
   let stage_write ~uuid buf ~chunk_off =
     Local_io.write (staged_path uuid) buf ~offset:(Int64.of_int chunk_off)
@@ -266,35 +301,20 @@ module Make (C : Conf.S) (F : Fetch) = struct
       (fun () -> Lwt_unix_retry.unlink (whole_path uuid))
       (function Unix.Unix_error _ -> Lwt.return_unit | exn -> Lwt.fail exn)
 
-  (* Move a staged body under the content key its bytes hash to. Idempotent: an
-     interrupted promotion can be replayed, and a body whose content is already
-     cached is simply dropped. *)
-  let promote ~uuid ~chunk_key =
-    let src = staged_path uuid in
-    let* staged = Lwt_unix_retry.file_exists src in
-    if not staged then Lwt.return_unit
-    else (
-      let dst = path chunk_key in
-      let* present = Lwt_unix_retry.file_exists dst in
-      if present then stage_forget ~uuid
-      else
-        let* () = Fs_util.ensure_parent dst in
-        Lwt_unix_retry.rename src dst)
-
-  (* Fill [buf] from [chunk_key]'s body starting [chunk_off] bytes into it,
-     fetching the body if it is absent. The cap may delete a chunk between the
-     fetch and the read, or even mid-read, so a miss or a short read is retried
-     once against a freshly fetched body; a second failure is real and raised. *)
-  let read_into ~chunk_key buf ~chunk_off =
+  (* Fill [buf] from stored chunk [index] of [group], starting [chunk_off] bytes
+     into that chunk and fetching the group if it is absent. The cap may delete a
+     group between the fetch and the read, or even mid-read, so a miss or a short
+     read is retried once against a freshly fetched body; a second failure is
+     real and raised. *)
+  let read_into ~group ~index buf ~chunk_off =
     let want = Bigarray.Array1.dim buf in
-    let attempt () =
-      Local_io.read (path chunk_key) buf ~offset:(Int64.of_int chunk_off)
-    in
+    let offset = Int64.of_int (Chunk_group.offset group index + chunk_off) in
+    let attempt () = Local_io.read (path group) buf ~offset in
     let refetch () =
-      let* () = ensure ~force:true ~chunk_key () in
+      let* () = ensure ~force:true ~group () in
       attempt ()
     in
-    let* () = ensure ~chunk_key () in
+    let* () = ensure ~group () in
     Lwt.catch
       (fun () ->
         let* n = attempt () in

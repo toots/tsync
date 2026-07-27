@@ -11,6 +11,12 @@ val ensure_parent : string -> unit Lwt.t
     writers of the same path, in this process or another. *)
 val atomic_write : string -> string -> unit Lwt.t
 
+(** [atomic_write] for a body assembled from pieces: [atomic_write_seq path f]
+    calls [f append], and each [append] adds to the temp file. Lets a caller
+    build a large body without ever holding it whole in memory. *)
+val atomic_write_seq :
+  string -> ((string -> unit Lwt.t) -> unit Lwt.t) -> unit Lwt.t
+
 (** [copy_file ~src ~dst] copies [src] over [dst], creating or truncating it. *)
 val copy_file : src:string -> dst:string -> unit Lwt.t
 

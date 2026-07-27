@@ -35,6 +35,7 @@ module C : Conf.S = struct
   let max_uploads = 1
   let max_downloads = 1
   let chunk_size = 8 * 1024 * 1024
+  let cache_chunk_size = 8 * 1024 * 1024
   let max_cache = None
   let symlink_policy = `Keep
   let read_only = false

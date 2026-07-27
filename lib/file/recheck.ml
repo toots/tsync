@@ -35,9 +35,37 @@ module Make (C : Conf.S) = struct
   module Mf = Manifest.Make (C)
   module Cc = Chunk_cache.Make (C) (R)
 
-  (* The local half of a recheck: every chunk body must hash to its own name.
-     Returns (checked, dropped); a dropped body re-downloads on the next read. *)
-  let verify_chunk_cache () = Cc.verify ()
+  (* Every cache chunk of a published manifest, as {!Chunk_group} sees them. *)
+  let groups_of (m : Manifest.t) =
+    let specs = Manifest.specs_by_index m.Manifest.chunks in
+    Chunk_group.all ~specs
+      ~per:
+        (Chunk_group.per_group ~chunk_size:m.Manifest.chunk_size
+           ~cache_chunk_size:C.cache_chunk_size)
+
+  (* The local half of a recheck: every member segment of every cache chunk must
+     hash to the key it was published under. Manifest-driven, unlike the rest of
+     the store's bookkeeping — a cache chunk holds several stored chunks, so its
+     body cannot be checked against its own name and the manifests are what say
+     which keys belong in it. Returns (checked, dropped); a dropped body
+     re-downloads on the next read. *)
+  let verify_chunk_cache () =
+    let* rels = Mf.walk () in
+    Lwt_list.fold_left_s
+      (fun acc rel ->
+        let* state = Mf.read (C.domain_prefix ^ rel) in
+        match state with
+          | Some (`Clean m) ->
+              Lwt_list.fold_left_s
+                (fun (checked, dropped) group ->
+                  let* present = Cc.exists group in
+                  if not present then Lwt.return (checked, dropped)
+                  else
+                    let+ ok = Cc.verify_group ~group in
+                    (checked + 1, if ok then dropped else dropped + 1))
+                acc (groups_of m)
+          | Some `Dirty | None -> Lwt.return acc)
+      (0, 0) rels
 
   (* Verification is manifest-driven: every chunk a file names must be intact on
      the backend. Local bytes are checked separately and wholesale by
@@ -52,8 +80,16 @@ module Make (C : Conf.S) = struct
       match state with
         | None | Some `Dirty -> Lwt.return Unreadable
         | Some (`Clean m) ->
+            let specs = Manifest.specs_by_index m.Manifest.chunks in
+            let per =
+              Chunk_group.per_group ~chunk_size:m.Manifest.chunk_size
+                ~cache_chunk_size:C.cache_chunk_size
+            in
             let local_body (entry : Manifest.chunk_entry) =
-              Cc.body_if_local ~chunk_key:(Manifest.chunk_key entry)
+              let index = entry.Manifest.index in
+              match Chunk_group.of_specs ~specs ~per index with
+                | Some group -> Cc.member_if_local ~group ~index
+                | None -> Lwt.return_none
             in
             let+ report = R.recheck_from_manifest ~key ~local_body m in
             Checked report

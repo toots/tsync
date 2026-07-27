@@ -4,7 +4,7 @@ let implementation = "http-proxy"
 
 (* The proxy is not a local mount; nothing is "locally cached" from its point of
    view. *)
-let is_local ~cache_root:_ ~domain_name:_ ~domain_prefix:_ _key = false
+let is_local (_ : Conf.locality) _key = false
 
 (* ── Option resolution (with inheritance across the shared listener) ─────────── *)
 

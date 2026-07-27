@@ -1,6 +1,6 @@
 let implementation = "file_provider"
 
-let is_local ~cache_root:_ ~domain_name ~domain_prefix key =
+let is_local ({ Conf.domain_name; domain_prefix; _ } : Conf.locality) key =
   let pfx = String.length domain_prefix in
   let rel =
     if String.length key > pfx then String.sub key pfx (String.length key - pfx)
