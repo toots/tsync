@@ -21,6 +21,23 @@ let usage () =
      every file it looks at; --quiet leaves only the summary and any failures.";
   exit 2
 
+(* What a body in this tree is. Only [`Manifest] is rewritten; the difference
+   between [`Other] and [`Bad] is the difference between "this was never a
+   manifest" and "this was one and could not be converted" — the second leaves a
+   body the daemon cannot read, so it must not pass as a skip. *)
+type body_kind =
+  | Marker  (** a folder marker: {dir,name,id} *)
+  | Other  (** a name marker, or anything else sharing the tree *)
+  | Manifest  (** a v2 manifest body *)
+
+let classify body =
+  match Yojson.Basic.from_string body with
+    | `Assoc fields ->
+        if List.assoc_opt "dir" fields = Some (`Bool true) then Marker
+        else if List.mem_assoc "chunks" fields then Manifest
+        else Other
+    | _ | (exception _) -> Other
+
 (* The old body. Chunk entries carried their index and length explicitly; both
    are positional or derivable now, so only the digests survive. *)
 let parse_v2 body =
