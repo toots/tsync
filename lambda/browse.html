@@ -173,6 +173,33 @@
       .pv-body audio {
         width: min(70vw, 480px);
       }
+      .ap-bar {
+        display: flex;
+        gap: 8px;
+        justify-content: center;
+        padding: 10px 0;
+      }
+      .ap-list {
+        max-height: 40vh;
+        overflow: auto;
+        text-align: left;
+      }
+      .ap-list li {
+        cursor: pointer;
+        display: block;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .ap-list li:hover {
+        background: #8882;
+      }
+      .ap-list li.on {
+        font-weight: 600;
+      }
+      .ap-list li.on::before {
+        content: "▶ ";
+      }
       .x {
         cursor: pointer;
         border: none;
@@ -186,6 +213,7 @@
     <header>
       <h1 id="title">share</h1>
       <span class="spacer"></span>
+      <button class="btn" id="playall" hidden>▶ Play all</button>
       <a class="btn" id="dlall">Download all (zip)</a>
     </header>
     <main>
@@ -208,6 +236,9 @@
       <div class="pv-body" id="pvb"></div>
     </dialog>
 
+    <script>
+      __PLAYER_JS__
+    </script>
     <script>
       const DATA = __SHARE_DATA__;
       const B = DATA.base;
@@ -293,6 +324,8 @@
           return;
         }
         ul.innerHTML = "";
+        tracks = data.files.filter((f) => kind(f.name) === "audio");
+        document.getElementById("playall").hidden = tracks.length < 2;
         if (!data.dirs.length && !data.files.length) {
           ul.innerHTML = '<div class="empty">Empty folder</div>';
           return;
@@ -335,19 +368,48 @@
         }
       }
 
+      // Audio files of the current folder, in listing order: opening one hands
+      // the whole folder to the player as a playlist.
+      let tracks = [];
+      document.getElementById("playall").onclick = () => openPlayer(tracks[0]);
+
       const pv = document.getElementById("pv");
+
+      async function signedUrl(name) {
+        const r = await fetch(fileUrl(name, "&json=1"));
+        if (!r.ok) throw new Error(r.status);
+        return (await r.json()).url;
+      }
+
+      function openPlayer(f) {
+        const body = document.getElementById("pvb");
+        if (!pv.open) pv.showModal();
+        return AudioPlayer.open({
+          container: body,
+          tracks,
+          start: f,
+          resolveUrl: signedUrl,
+          onTrack: (t) => {
+            document.getElementById("pvt").textContent = t.name;
+            document.getElementById("pvdl").href = fileUrl(t.name, "&dl=1");
+          },
+        });
+      }
+
       async function preview(f, k) {
+        if (k === "audio") return openPlayer(f);
         document.getElementById("pvt").textContent = f.name;
         document.getElementById("pvdl").href = fileUrl(f.name, "&dl=1");
         const body = document.getElementById("pvb");
         body.innerHTML = "Loading…";
         if (!pv.open) pv.showModal();
-        const r = await fetch(fileUrl(f.name, "&json=1"));
-        if (!r.ok) {
-          body.textContent = "Preview failed (" + r.status + ")";
+        let url;
+        try {
+          url = await signedUrl(f.name);
+        } catch (e) {
+          body.textContent = "Preview failed (" + e.message + ")";
           return;
         }
-        const { url } = await r.json();
         let el;
         if (k === "image") el = new Image();
         else if (k === "pdf") el = document.createElement("iframe");
@@ -365,6 +427,7 @@
       }
       document.getElementById("pvx").onclick = () => pv.close();
       pv.addEventListener("close", () => {
+        AudioPlayer.stop();
         document.getElementById("pvb").innerHTML = "";
       });
 

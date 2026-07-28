@@ -6,6 +6,7 @@
   (pps ppx_blob))
  (preprocessor_deps
   %{project_root}/lambda/browse.html
+  %{project_root}/lambda/player.js
   %{project_root}/lambda/mime.json)
  (libraries
   tsync_frontend_register

@@ -461,5 +461,13 @@ def render_browse(share, token):
     )
 
 
-with open(os.path.join(os.path.dirname(__file__), "browse.html")) as _f:
-    BROWSE_HTML = _f.read().replace("__PREVIEW_KINDS__", json.dumps(PREVIEW_KINDS))
+def _asset(name):
+    with open(os.path.join(os.path.dirname(__file__), name)) as f:
+        return f.read()
+
+
+BROWSE_HTML = (
+    _asset("browse.html")
+    .replace("__PREVIEW_KINDS__", json.dumps(PREVIEW_KINDS))
+    .replace("__PLAYER_JS__", _asset("player.js"))
+)
