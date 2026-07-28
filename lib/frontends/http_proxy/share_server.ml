@@ -49,6 +49,7 @@ let block_size = 256 * 1024
    below: both deployments serve the same page. *)
 let mime_json = [%blob "../../../lambda/mime.json"]
 let browse_html = [%blob "../../../lambda/browse.html"]
+let player_js = [%blob "../../../lambda/player.js"]
 
 let mime_table =
   match Yojson.Safe.from_string mime_json with
@@ -541,6 +542,7 @@ module Make (C : Conf.S) = struct
       browse_html |> fun h ->
       replace h "__PREVIEW_KINDS__" (Yojson.Safe.to_string preview_kinds_json)
       |> fun h ->
+      replace h "__PLAYER_JS__" player_js |> fun h ->
       replace h "__OG_TITLE__" (escape title) |> fun h ->
       replace h "__OG_DESC__" (escape "Shared folder · tsync") |> fun h ->
       replace h "__SHARE_DATA__" data
