@@ -7,3 +7,7 @@ type paths = {
 
 val default_paths : unit -> paths
 val domain_socket_path : paths -> string -> string
+
+(** Restart the background service this platform installs, so it re-reads
+    [config_path]. [false] when the service is not installed. *)
+val restart_service : unit -> bool

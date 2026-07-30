@@ -33,3 +33,6 @@ let default_paths () =
 (* Each FUSE domain runs in its own child process, so each needs its own socket. *)
 let domain_socket_path paths domain_name =
   Filename.concat paths.data_dir ("tsync-" ^ domain_name ^ ".sock")
+
+let restart_service () =
+  Sys.command "systemctl --user restart tsync 2>/dev/null" = 0

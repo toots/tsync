@@ -20,3 +20,19 @@ let default_paths () =
 
 (* All domains share the same socket; the daemon routes by domain prefix. *)
 let domain_socket_path paths _domain_name = paths.socket_path
+let app_bundle = "/Applications/TsyncApp.app"
+let daemon_label = "org.feverdreamtv.tsync.daemon"
+let sh fmt = Printf.ksprintf (fun cmd -> Sys.command cmd = 0) fmt
+
+(* Both halves read the config: the daemon at startup, and the app at launch to
+   reconcile File Provider domains. [kickstart] both starts a stopped agent and
+   restarts a running one, which covers the daemon having exited cleanly for
+   want of a config. *)
+let restart_service () =
+  if not (Sys.file_exists app_bundle) then false
+  else begin
+    ignore (sh "pkill -f %s 2>/dev/null" (Filename.quote app_bundle));
+    ignore
+      (sh "launchctl kickstart -k \"gui/$(id -u)/%s\" 2>/dev/null" daemon_label);
+    sh "open -a %s 2>/dev/null" (Filename.quote app_bundle)
+  end

@@ -909,7 +909,8 @@ let cmd =
       write_config ~path:config_path ~client_name:!client_name
         ~max_uploads:!max_uploads ~max_downloads:!max_downloads ~tls:!tls
         ~domains:!domains;
-      Printf.printf "\nConfig written to %s\n" config_path
+      Printf.printf "\nConfig written to %s\n" config_path;
+      print_endline "Run `tsync restart` to apply it."
     end
   in
   Cmd.v

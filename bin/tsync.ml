@@ -25,13 +25,26 @@ let start_cmd =
   let run mount tls =
     Log.Daemon.init ();
     Log.debug "loading config from %s" runtime_paths.Runtime.config_path;
+    (* Nothing to serve yet is not a failure: the service is started by the
+       installer before the user has configured anything. Exiting 0 tells
+       launchd/systemd to leave it alone rather than respawn on a loop. *)
+    if not (Sys.file_exists runtime_paths.Runtime.config_path) then begin
+      Printf.eprintf
+        "No config at %s. Run `tsync configure`, then `tsync restart`.\n"
+        runtime_paths.Runtime.config_path;
+      exit 0
+    end;
     let cfg = load_config () in
     (* CLI --tls wins over the config value applied by make_conf. *)
     if tls <> None then Tls_conf.apply tls;
     Log.debug "TLS backend: %s (available: %s)" (Tls_conf.current ())
       (String.concat ", " (Tls_conf.available ()));
     let domains =
-      if cfg.Conf_parsing.domains = [] then failwith "no domains configured";
+      if cfg.Conf_parsing.domains = [] then begin
+        Printf.eprintf "No domains configured in %s. Run `tsync configure`.\n"
+          runtime_paths.Runtime.config_path;
+        exit 0
+      end;
       cfg.Conf_parsing.domains
     in
     let mount_fn domain_name =
@@ -1438,6 +1451,21 @@ let paths_cmd =
     (Cmd.info "paths" ~doc:"Show all filesystem paths used by this binary")
     Term.(const run $ const ())
 
+(* ── tsync restart ───────────────────────────────────────────────────────── *)
+
+let restart_cmd =
+  let run () =
+    if Runtime.restart_service () then print_endline "Restarted."
+    else begin
+      prerr_endline "Could not restart: the tsync service is not installed.";
+      exit 1
+    end
+  in
+  Cmd.v
+    (Cmd.info "restart"
+       ~doc:"Restart the background service so it re-reads the config")
+    Term.(const run $ const ())
+
 (* ── tsync set-domain ────────────────────────────────────────────────────── *)
 
 let set_domain_cmd =
@@ -1558,6 +1586,7 @@ let () =
          Configure.cmd;
          print_conf_cmd;
          paths_cmd;
+         restart_cmd;
          set_domain_cmd;
          default_domain_cmd;
          start_cmd;

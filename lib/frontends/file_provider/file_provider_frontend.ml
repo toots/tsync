@@ -45,7 +45,6 @@ let reimport (module C : Conf.S) =
 let app_bundle = "/Applications/TsyncApp.app"
 let daemon_label = "org.feverdreamtv.tsync.daemon"
 let cli_symlink = "/usr/local/bin/tsync"
-
 let sh fmt = Printf.ksprintf (fun cmd -> Sys.command cmd = 0) fmt
 
 (* The app is a login item registered through SMAppService, whose launchd label
@@ -119,7 +118,11 @@ let purge (_ : (module Conf.S)) =
   (* [lstat], not [Sys.file_exists]: the app bundle is gone by now, so the
      symlink dangles. The installer creates it as root, so removing it needs
      root too — say so rather than failing silently. *)
-  if (try ignore (Unix.lstat cli_symlink); true with Unix.Unix_error _ -> false)
+  if
+    try
+      ignore (Unix.lstat cli_symlink);
+      true
+    with Unix.Unix_error _ -> false
   then (
     try Sys.remove cli_symlink
     with Sys_error _ ->
