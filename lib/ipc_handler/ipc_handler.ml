@@ -379,11 +379,17 @@ module Make (C : Conf.S) (F : File.S) = struct
                          in the domain's [frontends] with the queues only it knows
                          — which is where a proxy asking us over IPC picks it up.
                          [totals] reaches for the store, so it is asked for
-                         explicitly; it estimates the chunk count from a few
-                         shards unless the caller asked to have it counted. *)
-                      let arg = get_str obj "arg" in
-                      let exact = arg = "totals-exact" in
-                      let totals = exact || arg = "totals" in
+                         explicitly, as a comma-separated set: [exact] counts
+                         every chunk rather than estimating from a sample of
+                         shards, and [reload] recomputes rather than serving what
+                         was counted before. *)
+                      let flags =
+                        String.split_on_char ',' (get_str obj "arg")
+                      in
+                      let has f = List.mem f flags in
+                      let exact = has "exact" in
+                      let reload = has "reload" in
+                      let totals = has "totals" in
                       let* staged = F.staged_count () in
                       let queues =
                         [
@@ -418,7 +424,7 @@ module Make (C : Conf.S) (F : File.S) = struct
                         :: List.remove_assoc "frontend" queues
                       in
                       let+ domain =
-                        Diag.domain_json ~totals ~exact
+                        Diag.domain_json ~totals ~exact ~reload
                           ~frontends:[`Assoc queues]
                           ()
                       in

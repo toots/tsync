@@ -181,7 +181,9 @@ let () =
       socket_path = "/nonexistent/tsync.sock";
       domain_name = "one";
       self_frontend = `Assoc [];
-      diagnose = (fun ~totals:_ ~exact:_ ~frontends:_ -> Lwt.return (`Assoc []));
+      diagnose =
+        (fun ~totals:_ ~exact:_ ~reload:_ ~frontends:_ ->
+          Lwt.return (`Assoc []));
     }
   in
   let routes = [route "one"; route "two"] in
@@ -325,10 +327,10 @@ let () =
     }
   in
   let status_routes = [Http_proxy_frontend.make_route [binding] binding] in
-  let report ?(totals = false) ?(exact = false) () =
+  let report ?(totals = false) ?(exact = false) ?(reload = false) () =
     Lwt_main.run
       (Http_proxy_frontend.status_json ~port:8443 ~tls:true ~totals ~exact
-         status_routes)
+         ~reload status_routes)
   in
   let r = report () in
   List.iter
@@ -388,60 +390,89 @@ let () =
   assert (json_member "queued" backfill = `Int 7);
   assert (json_member "degraded" backfill = `Bool true);
 
-  (* Counting what a store holds is opt-in, and never done while a request waits:
-     the first ask starts a walk in the background and says so, a later one has the
-     numbers. A status endpoint must not block on enumerating a large store. *)
-  assert (json_member "totals" (by_name "disk") = `Null);
-  let disk_totals report =
+  (* What a store holds. Counting one is opt-in and never done while a request
+     waits: the first ask starts a walk in the background and says so, a later
+     one has the numbers. Once counted, the figure is reported by every request
+     until someone asks for a new one. Each state below is a row in the "store
+     totals" snapshot, which is where this is reviewed. *)
+  let totals_for name report =
     match json_member "domains" report with
       | `List [d] -> (
           match json_member "backends" d with
             | `List l ->
                 json_member "totals"
-                  (List.find (fun b -> json_member "name" b = `String "disk") l)
+                  (List.find (fun b -> json_member "name" b = `String name) l)
             | _ -> `Null)
       | _ -> `Null
   in
-  assert (
-    json_member "counting" (disk_totals (report ~totals:true ())) = `Bool true);
-  (* Let the background walk land. Bounded retry rather than a fixed sleep: the
-     walk is over an empty store, so this is one iteration in practice. *)
-  let rec await_counts tries =
-    let t = disk_totals (report ~totals:true ()) in
-    if json_member "chunks" t <> `Null then t
-    else if tries = 0 then failwith "counts never arrived"
+  let disk_totals = totals_for "disk" in
+  (* One row: every field that carries meaning, and [sampledSecondsAgo] reduced
+     to the fact that it is there — its value moves between runs. *)
+  let totals_row label t =
+    if t = `Null then Printf.sprintf "  %-30s (none reported)" label
+    else (
+      let field k =
+        match json_member k t with
+          | `Null -> None
+          | `Int n -> Some (Printf.sprintf "%s=%d" k n)
+          | `Bool b -> Some (Printf.sprintf "%s=%b" k b)
+          | `String s -> Some (Printf.sprintf "%s=%s" k s)
+          | _ -> None
+      in
+      let fields =
+        List.filter_map field
+          [
+            "counting";
+            "manifests";
+            "chunks";
+            "chunkBytes";
+            "chunksFromShards";
+            "refreshing";
+            "error";
+          ]
+        @ if json_member "sampledSecondsAgo" t = `Null then [] else ["aged"]
+      in
+      Printf.sprintf "  %-30s %s" label (String.concat " " fields))
+  in
+  let rows = ref [] in
+  let row label t = rows := !rows @ [totals_row label t] in
+
+  row "not counted, not asked" (disk_totals (report ()));
+  row "asked, nothing counted yet" (disk_totals (report ~totals:true ()));
+  (* Let the background walk land. Bounded retry rather than a fixed sleep. *)
+  let rec await ~ready ~what tries r =
+    let t = disk_totals (r ()) in
+    if ready t then t
+    else if tries = 0 then failwith (what ^ " never arrived")
     else begin
       Lwt_main.run (Lwt_unix.sleep 0.05);
-      await_counts (tries - 1)
+      await ~ready ~what (tries - 1) r
     end
   in
-  let counted = await_counts 40 in
-  assert (json_member "chunks" counted <> `Null);
-  assert (json_member "sampledSecondsAgo" counted <> `Null);
-
-  (* The default is an estimate, and it says so: a caller must be able to tell a
-     sampled figure from a counted one. *)
-  assert (json_member "chunksFromShards" counted <> `Null);
-  assert (json_member "chunks" counted = `Int planted);
-
-  (* [exact] is a separate sample, so asking for it must not be answered out of
-     the estimate's cache — and on this store it must reach the same number by
-     walking every shard. *)
-  let rec await_exact tries =
-    let t = disk_totals (report ~totals:true ~exact:true ()) in
-    if json_member "chunks" t <> `Null then t
-    else if tries = 0 then failwith "exact counts never arrived"
-    else begin
-      Lwt_main.run (Lwt_unix.sleep 0.05);
-      await_exact (tries - 1)
-    end
+  let counted =
+    await ~what:"counts"
+      ~ready:(fun t -> json_member "chunks" t <> `Null)
+      40
+      (fun () -> report ~totals:true ())
   in
-  let exact = await_exact 40 in
-  assert (json_member "chunksFromShards" exact = `Null);
-  assert (json_member "chunks" exact = `Int planted);
+  row "estimate landed" counted;
 
-  (* How the two read is snapshotted below; both samples are warm by here, so
-     neither renders as "counting in the background". *)
+  (* [exact] is a separate sample: until its walk lands, asking for it is
+     answered with the estimate already in hand, hence waiting on the absence of
+     [chunksFromShards] rather than the presence of [chunks]. *)
+  let exact =
+    await ~what:"exact counts"
+      ~ready:(fun t ->
+        json_member "chunksFromShards" t = `Null
+        && json_member "chunks" t <> `Null)
+      40
+      (fun () -> report ~totals:true ~exact:true ())
+  in
+  row "exact landed" exact;
+  row "plain /stats, nothing asked" (disk_totals (report ()));
+  row "recount asked" (disk_totals (report ~totals:true ~reload:true ()));
+  row "store that cannot be read"
+    (totals_for "archive" (report ~totals:true ()));
 
   (* Both representations are snapshotted below, which is where the shape is
      actually reviewed. This one stays an assertion because a snapshot can be
@@ -566,4 +597,7 @@ let () =
   print_string (totals_text ~exact:false);
   print_endline "########## /stats?totals=exact ##########";
   print_string (totals_text ~exact:true);
+  (* Every state a store's totals pass through, in the order they happen. *)
+  print_endline "########## store totals, state by state ##########";
+  List.iter print_endline !rows;
   print_endline "http_proxy_test ok"

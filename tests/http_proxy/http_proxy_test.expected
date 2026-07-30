@@ -249,6 +249,7 @@ Domain statusdom
 Recent warnings and errors (newest first)
   16:13:20 warn  diagnostics: counting archive: Backend.Backend_error("connection refused")
   16:13:20 warn  diagnostics: counting archive: Backend.Backend_error("connection refused")
+  16:13:20 warn  diagnostics: counting archive: Backend.Backend_error("connection refused")
 ########## /stats?totals=exact ##########
 Frontend http-proxy on testhost (this process)
   listener         port 8443, https
@@ -299,4 +300,13 @@ Domain statusdom
 Recent warnings and errors (newest first)
   16:13:20 warn  diagnostics: counting archive: Backend.Backend_error("connection refused")
   16:13:20 warn  diagnostics: counting archive: Backend.Backend_error("connection refused")
+  16:13:20 warn  diagnostics: counting archive: Backend.Backend_error("connection refused")
+########## store totals, state by state ##########
+  not counted, not asked         (none reported)
+  asked, nothing counted yet     counting=true
+  estimate landed                manifests=0 chunks=4096 chunkBytes=20480 chunksFromShards=16 aged
+  exact landed                   manifests=0 chunks=4096 chunkBytes=20480 aged
+  plain /stats, nothing asked    manifests=0 chunks=4096 chunkBytes=20480 chunksFromShards=16 aged
+  recount asked                  manifests=0 chunks=4096 chunkBytes=20480 chunksFromShards=16 refreshing=true aged
+  store that cannot be read      error=Backend.Backend_error("connection refused") aged
 http_proxy_test ok

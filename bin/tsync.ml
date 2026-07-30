@@ -186,12 +186,27 @@ let stats_cmd =
              a sample. Enumerates the whole chunk namespace, so it costs a \
              full listing per backend.")
   in
-  let run json totals exact watch domain =
+  let reload_arg =
+    Arg.(
+      value & flag
+      & info ["reload"]
+          ~doc:
+            "With $(b,--totals), recount instead of reporting what was counted \
+             before. A store is counted once and that figure served from then \
+             on, with its age, until this asks for a new one.")
+  in
+  let run json totals exact reload watch domain =
+    (* The daemon counts a store once and serves that until asked again, so the
+       flags travel as a set rather than a mode. *)
     let arg =
-      match (totals, exact) with
-        | _, true -> Some "totals-exact"
-        | true, false -> Some "totals"
-        | false, false -> None
+      match totals || exact || reload with
+        | false -> None
+        | true ->
+            Some
+              (String.concat ","
+                 (["totals"]
+                 @ (if exact then ["exact"] else [])
+                 @ if reload then ["reload"] else []))
     in
     (* Resolved once: [--watch] must not re-read the config on every tick, and a
        config error should be reported before the screen starts clearing. *)
@@ -221,7 +236,8 @@ let stats_cmd =
          "Report on the running daemon: transfer metrics, config as resolved, \
           cache, journal backlog and each backend's health")
     Term.(
-      const run $ json_arg $ totals_arg $ exact_arg $ watch_arg $ domain_arg)
+      const run $ json_arg $ totals_arg $ exact_arg $ reload_arg $ watch_arg
+      $ domain_arg)
 
 (* ── tsync evict ─────────────────────────────────────────────────────────── *)
 

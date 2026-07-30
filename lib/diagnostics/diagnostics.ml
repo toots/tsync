@@ -185,13 +185,14 @@ module Make (C : Conf.S) = struct
      a bucket, and grows with the domain — so the chunk figure is sampled instead
      (see [count_chunks]), and only [~exact] pays the full price.
 
-     Either way it is never counted while a request waits. A request serves the
-     last sample and says how old it is, kicking off a refresh in the background
-     when that sample has gone stale; the first ever request answers "counting". A
-     figure a few minutes old is worth having, and a status endpoint that blocks
-     for a 100k-object walk is not. *)
-  let totals_max_age = 300.
+     Either way it is never counted while a request waits: a request serves the
+     last sample and says how old it is, and the first ever one answers
+     "counting" while a walk starts behind it. A status endpoint must not block
+     on a 100k-object walk.
 
+     A sample stands until someone asks for it to be recomputed ([~reload]), so
+     walking a store is always something a person chose to do. The age travels
+     with the figure, which is what makes a stale one safe to serve. *)
   type sample = { at : float; counts : Yojson.Safe.t }
 
   let samples : (string, sample) Hashtbl.t = Hashtbl.create 4
@@ -280,25 +281,41 @@ module Make (C : Conf.S) = struct
               Lwt.return_unit))
     end
 
-  let totals_of ~name ~exact backend =
+  (* A figure already counted is reported by every request: it is sitting in
+     memory, so withholding it until asked would cost a walk to learn what is
+     already known. [compute] is what asking buys — a walk when there is nothing
+     yet, or a fresh one under [reload]. Without it and with nothing counted,
+     this store simply reports no totals. *)
+  let totals_of ~name ~exact ~compute ~reload backend =
     let now = Unix.gettimeofday () in
-    let refresh = refresh ~name ~exact in
-    match Hashtbl.find_opt samples (slot ~name ~exact) with
-      | Some s ->
-          if now -. s.at > totals_max_age then refresh backend;
-          let with_age =
-            match s.counts with
-              | `Assoc fields ->
-                  `Assoc
-                    (fields
-                    @ [("sampledSecondsAgo", `Int (int_of_float (now -. s.at)))]
-                    )
-              | other -> other
+    let wanted = slot ~name ~exact in
+    if compute && (reload || not (Hashtbl.mem samples wanted)) then
+      refresh ~name ~exact backend;
+    let served =
+      match Hashtbl.find_opt samples wanted with
+        | Some s -> Some (wanted, s)
+        (* Nothing at the precision asked for, but a figure is a figure — and
+           the "~" on an estimate says which kind reached the page. *)
+        | None ->
+            let other = slot ~name ~exact:(not exact) in
+            Option.map (fun s -> (other, s)) (Hashtbl.find_opt samples other)
+    in
+    match served with
+      (* A walk in flight keeps serving the figure it will replace, so a report
+         never blanks out for the length of one. [refreshing] is how a reader
+         knows a newer one is coming; the age says how old this one is. *)
+      | Some (slot, s) -> (
+          let extra =
+            [("sampledSecondsAgo", `Int (int_of_float (now -. s.at)))]
+            @
+            if Hashtbl.mem counting slot then [("refreshing", `Bool true)]
+            else []
           in
-          with_age
-      | None ->
-          refresh backend;
-          `Assoc [("counting", `Bool true)]
+          match s.counts with
+            | `Assoc fields -> `Assoc (fields @ extra)
+            | other -> other)
+      | None when compute -> `Assoc [("counting", `Bool true)]
+      | None -> `Null
 
   (* Room left where a local store keeps its files. One syscall, so unlike the
      counts above this is always reported. *)
@@ -315,15 +332,18 @@ module Make (C : Conf.S) = struct
                 ] );
           ]
 
-  let member_json ~totals ~exact (m : Backend.member) =
+  let member_json ~totals ~exact ~reload (m : Backend.member) =
     let* probed, cursor = probe m.Backend.backend in
     let+ jrnl = journal ~cursor m.Backend.backend in
-    (* Synchronous: it reads the last sample and, if that is stale, leaves a walk
-       running behind us rather than waiting for one. *)
+    (* Synchronous: it reads the last sample, leaving any walk it started running
+       behind us rather than waiting for one. *)
     let tot =
-      if totals then
-        [("totals", totals_of ~name:m.Backend.name ~exact m.Backend.backend)]
-      else []
+      match
+        totals_of ~name:m.Backend.name ~exact ~compute:totals ~reload
+          m.Backend.backend
+      with
+        | `Null -> []
+        | counts -> [("totals", counts)]
     in
     let backfill =
       match (m.Backend.pending, m.in_flight, m.degraded) with
@@ -430,13 +450,13 @@ module Make (C : Conf.S) = struct
      carries its own cpu and its own transfer figures; a shared listener (the
      http-proxy) contributes only its per-domain settings here and reports itself
      once, at the top. *)
-  let domain_json ?(totals = false) ?(exact = false) ?(extra = [])
-      ?(frontends = []) () =
+  let domain_json ?(totals = false) ?(exact = false) ?(reload = false)
+      ?(extra = []) ?(frontends = []) () =
     let* cache = cache_json ~totals in
     let* pending = local_pending () in
     let+ backends =
       Lwt_list.map_p
-        (member_json ~totals ~exact)
+        (member_json ~totals ~exact ~reload)
         (Backend.members ~domain:C.domain_name)
     in
     `Assoc
