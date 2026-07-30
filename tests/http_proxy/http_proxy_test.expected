@@ -247,9 +247,9 @@ Domain statusdom
     holds            could not count: Backend.Backend_error("connection refused")
 
 Recent warnings and errors (newest first)
-  16:13:20 warn  diagnostics: counting archive: Backend.Backend_error("connection refused")
-  16:13:20 warn  diagnostics: counting archive: Backend.Backend_error("connection refused")
-  16:13:20 warn  diagnostics: counting archive: Backend.Backend_error("connection refused")
+  22:13:20 warn  diagnostics: counting archive: Backend.Backend_error("connection refused")
+  22:13:20 warn  diagnostics: counting archive: Backend.Backend_error("connection refused")
+  22:13:20 warn  diagnostics: counting archive: Backend.Backend_error("connection refused")
 ########## /stats?totals=exact ##########
 Frontend http-proxy on testhost (this process)
   listener         port 8443, https
@@ -298,9 +298,9 @@ Domain statusdom
     holds            could not count: Backend.Backend_error("connection refused")
 
 Recent warnings and errors (newest first)
-  16:13:20 warn  diagnostics: counting archive: Backend.Backend_error("connection refused")
-  16:13:20 warn  diagnostics: counting archive: Backend.Backend_error("connection refused")
-  16:13:20 warn  diagnostics: counting archive: Backend.Backend_error("connection refused")
+  22:13:20 warn  diagnostics: counting archive: Backend.Backend_error("connection refused")
+  22:13:20 warn  diagnostics: counting archive: Backend.Backend_error("connection refused")
+  22:13:20 warn  diagnostics: counting archive: Backend.Backend_error("connection refused")
 ########## store totals, state by state ##########
   not counted, not asked         (none reported)
   asked, nothing counted yet     counting=true

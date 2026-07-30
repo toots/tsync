@@ -4,26 +4,14 @@
 
 let check name cond = if not cond then failwith ("layout: " ^ name)
 
-let ms_of ~y ~m ~d =
-  let t, _ =
-    Unix.mktime
-      {
-        Unix.tm_year = y - 1900;
-        tm_mon = m - 1;
-        tm_mday = d;
-        tm_hour = 12;
-        tm_min = 0;
-        tm_sec = 0;
-        tm_wday = 0;
-        tm_yday = 0;
-        tm_isdst = false;
-      }
-  in
-  (* mktime reads local time; shift back so the entry lands on the intended day
-     in UTC, which is what [Journal.relative_path] formats. *)
-  Int64.of_float ((t -. fst (Unix.mktime (Unix.gmtime 0.))) *. 1000.)
-
-let entry ~y ~m ~d = Printf.sprintf "%013Ld-client" (ms_of ~y ~m ~d)
+(* Fixed instants, in epoch milliseconds, rather than anything derived from a
+   calendar at run time: [Journal.relative_path] shards by UTC, so a test that
+   went through local time would put its entries in a different month depending
+   on where it ran. *)
+let entry ms = Printf.sprintf "%013Ld-client" ms
+let dec_31 = entry 1798718400000L (* 2026-12-31T12:00:00Z *)
+let jan_01 = entry 1798804800000L (* 2027-01-01T12:00:00Z *)
+let feb_01 = entry 1801483200000L (* 2027-02-01T12:00:00Z *)
 
 let () =
   (* Chunks: the key is unchanged and recoverable, which every listing-side
@@ -37,9 +25,7 @@ let () =
   (* Journal: entries are applied in the order a listing sorts them, so the
      sharded path must sort the same way the bare entry keys do — including
      across a month and a year boundary, where the shard changes. *)
-  let dec = entry ~y:2026 ~m:12 ~d:31 in
-  let jan = entry ~y:2027 ~m:1 ~d:1 in
-  let feb = entry ~y:2027 ~m:2 ~d:1 in
+  let dec = dec_31 and jan = jan_01 and feb = feb_01 in
   check "month shard" (Journal.relative_path jan = "2027-01/" ^ jan);
   check "year boundary" (Journal.relative_path dec = "2026-12/" ^ dec);
   check "entry key survives"
