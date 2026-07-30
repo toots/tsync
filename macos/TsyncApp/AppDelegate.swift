@@ -2,7 +2,7 @@ import AppKit
 import FileProvider
 import OSLog
 
-private let log = Logger(subsystem: "com.toots.tsync", category: "AppDelegate")
+private let log = Logger(subsystem: "org.feverdreamtv.tsync", category: "AppDelegate")
 
 private func domainIdentifier(_ name: String) -> String {
     name.lowercased().replacingOccurrences(of: " ", with: "-")
@@ -18,6 +18,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        DaemonAgent.register()
         Task { await registerDomains() }
     }
 
@@ -95,6 +96,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 log.error("purge domain '\(domain.identifier.rawValue, privacy: .public)' failed: \(error, privacy: .public)")
             }
         }
+        await DaemonAgent.unregister()
         try? FileManager.default.removeItem(at: marker)
         return true
     }

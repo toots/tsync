@@ -8,7 +8,7 @@ type paths = {
 let default_paths () =
   let home = Sys.getenv "HOME" in
   let app_group =
-    Filename.concat home "Library/Group Containers/group.com.toots.tsync"
+    Filename.concat home "Library/Group Containers/group.org.feverdreamtv.tsync"
   in
   let data_dir = Filename.concat app_group "tsync" in
   {

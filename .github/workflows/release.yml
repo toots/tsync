@@ -1,0 +1,108 @@
+name: release
+
+# Runs after `test` passes on main, so a red build never reaches the nightly
+# download URL. workflow_dispatch is there to re-cut a release by hand.
+on:
+  workflow_run:
+    workflows: [test]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  macos:
+    if: >-
+      github.event_name == 'workflow_dispatch'
+      || github.event.workflow_run.conclusion == 'success'
+    runs-on: macos-latest
+    permissions:
+      contents: write
+    env:
+      # workflow_run checks out the default branch unless told otherwise.
+      SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+      - uses: ocaml/setup-ocaml@v3
+        with:
+          ocaml-compiler: "5.5"
+      - name: Pin packages
+        run: |
+          opam pin -ny .
+          opam pin add -ny git+https://github.com/toots/aws-s3.git#tsync
+      - name: Install dependencies
+        run: |
+          brew install xcodegen xxhash coreutils dylibbundler
+          echo "CPATH=$(brew --prefix xxhash)/include:$CPATH" >> $GITHUB_ENV
+          echo "LIBRARY_PATH=$(brew --prefix xxhash)/lib:$LIBRARY_PATH" >> $GITHUB_ENV
+      - name: Install OCaml dependencies
+        run: opam install --deps-only -y tsync tsync-s3
+
+      - name: Import signing assets
+        env:
+          CERT_P12: ${{ secrets.MACOS_CERT_P12 }}
+          CERT_PASSWORD: ${{ secrets.MACOS_CERT_PASSWORD }}
+          PROFILE_APP_B64: ${{ secrets.MACOS_PROFILE_APP }}
+          PROFILE_APPEX_B64: ${{ secrets.MACOS_PROFILE_APPEX }}
+          AC_API_KEY_P8: ${{ secrets.AC_API_KEY_P8 }}
+        run: |
+          keychain="$RUNNER_TEMP/build.keychain"
+          password=$(uuidgen)
+          security create-keychain -p "$password" "$keychain"
+          security set-keychain-settings -lut 3600 "$keychain"
+          security unlock-keychain -p "$password" "$keychain"
+          security list-keychains -d user -s "$keychain" $(security list-keychains -d user | tr -d '"')
+
+          echo "$CERT_P12" | base64 -d > "$RUNNER_TEMP/cert.p12"
+          security import "$RUNNER_TEMP/cert.p12" -k "$keychain" -P "$CERT_PASSWORD" \
+            -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple:,codesign: \
+            -s -k "$password" "$keychain" >/dev/null
+
+          echo "$PROFILE_APP_B64" | base64 -d > "$RUNNER_TEMP/app.provisionprofile"
+          echo "$PROFILE_APPEX_B64" | base64 -d > "$RUNNER_TEMP/appex.provisionprofile"
+          echo "$AC_API_KEY_P8" | base64 -d > "$RUNNER_TEMP/ac_key.p8"
+
+          # The .p12 holds both Developer ID certificates: Application signs the
+          # bundle, Installer signs the .pkg. Only the former is a codesigning
+          # identity, so the latter has to be looked up without -p codesigning.
+          app_identity=$(security find-identity -v -p codesigning "$keychain" \
+            | grep "Developer ID Application" | head -1 | sed 's/.*"\(.*\)"/\1/')
+          installer_identity=$(security find-identity -v "$keychain" \
+            | grep "Developer ID Installer" | head -1 | sed 's/.*"\(.*\)"/\1/')
+          test -n "$app_identity" -a -n "$installer_identity"
+          echo "SIGN_IDENTITY=$app_identity" >> $GITHUB_ENV
+          echo "INSTALLER_IDENTITY=$installer_identity" >> $GITHUB_ENV
+
+      - name: Package
+        env:
+          PROFILE_APP: ${{ runner.temp }}/app.provisionprofile
+          PROFILE_APPEX: ${{ runner.temp }}/appex.provisionprofile
+          AC_API_KEY_PATH: ${{ runner.temp }}/ac_key.p8
+          AC_API_KEY_ID: ${{ secrets.AC_API_KEY_ID }}
+          AC_API_ISSUER_ID: ${{ secrets.AC_API_ISSUER_ID }}
+          BUNDLE_VERSION: ${{ github.run_number }}
+          BUNDLE_SHORT_VERSION: 0.0.0
+        run: |
+          make generate
+          opam exec -- ./package.sh
+        working-directory: macos
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: tsync-pkg
+          path: macos/dist/tsync.pkg
+
+      - name: Publish nightly release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release view nightly >/dev/null 2>&1 \
+            || gh release create nightly --prerelease --title nightly --notes ""
+          gh release upload nightly macos/dist/tsync.pkg --clobber
+          gh release edit nightly --notes "Rolling build of main, from $SHA."

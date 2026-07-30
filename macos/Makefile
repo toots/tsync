@@ -2,9 +2,8 @@ PROJ      = tsync.xcodeproj
 # Propagate -jN from make invocation; fall back to 12
 MAKE_JOBS = $(patsubst -j%,%,$(filter -j%,$(MAKEFLAGS)))
 JOBS      = $(if $(MAKE_JOBS),$(MAKE_JOBS),12)
-XFLAGS    = -project $(PROJ) -jobs $(JOBS) CODE_SIGN_STYLE=Automatic -allowProvisioningUpdates
 
-.PHONY: all generate build deploy deploy-daemon install clean
+.PHONY: all generate build package deploy install clean
 
 all: build
 
@@ -12,19 +11,18 @@ all: build
 generate:
 	xcodegen generate
 
-## Build TsyncApp (Release)
+## Build a complete TsyncApp.app: app + extension + embedded OCaml daemon
 build:
-	xcodebuild $(XFLAGS) -scheme TsyncApp -configuration Release -destination 'platform=macOS'
+	JOBS=$(JOBS) ./build.sh
+
+## Build a signed, notarized dist/tsync.dmg (needs Developer ID credentials)
+package:
+	JOBS=$(JOBS) ./package.sh
 
 ## Build and install TsyncApp to /Applications
-deploy:
-	./deploy.sh
-
-## Build and install the OCaml daemon + launchd plist
-deploy-daemon:
-	./deploy-daemon.sh
-
-install: deploy deploy-daemon
+deploy install:
+	JOBS=$(JOBS) ./deploy.sh
 
 clean:
-	xcodebuild $(XFLAGS) -scheme TsyncApp clean
+	xcodebuild -project $(PROJ) -scheme TsyncApp clean
+	rm -rf dist

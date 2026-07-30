@@ -43,17 +43,18 @@ let reimport (module C : Conf.S) =
         exit 1
 
 let app_bundle = "/Applications/TsyncApp.app"
-let app_label = "com.toots.tsync"
-let daemon_label = "com.toots.tsync.daemon"
-
-let agent_plist label =
-  Filename.concat (Sys.getenv "HOME")
-    (Filename.concat "Library/LaunchAgents" (label ^ ".plist"))
+let daemon_label = "org.feverdreamtv.tsync.daemon"
+let cli_symlink = "/usr/local/bin/tsync"
 
 let sh fmt = Printf.ksprintf (fun cmd -> Sys.command cmd = 0) fmt
 
+(* The app is a login item registered through SMAppService, whose launchd label
+   is opaque, so it cannot be kickstarted by name. Killing it and reopening the
+   bundle is equivalent and fails cleanly when the app is not installed. *)
 let restart_app () =
-  sh "launchctl kickstart -k \"gui/$(id -u)/%s\" 2>/dev/null" app_label
+  ignore (sh "pkill -f %s 2>/dev/null" (Filename.quote app_bundle));
+  Unix.sleepf 1.;
+  sh "open -a %s 2>/dev/null" (Filename.quote app_bundle)
 
 let write_marker ?contents name =
   let dir = (Runtime.default_paths ()).Runtime.data_dir in
@@ -99,14 +100,11 @@ let purge (_ : (module Conf.S)) =
   else if not (wait 60) then (
     Printf.eprintf
       "purge failed: TsyncApp did not unregister its domains (see Console for \
-       com.toots.tsync)\n";
+       org.feverdreamtv.tsync)\n";
     exit 1);
-  List.iter
-    (fun label ->
-      ignore (sh "launchctl bootout \"gui/$(id -u)/%s\" 2>/dev/null" label);
-      let plist = agent_plist label in
-      if Sys.file_exists plist then Sys.remove plist)
-    [app_label; daemon_label];
+  (* The app unregisters both SMAppService services while handling the marker;
+     bootout only makes sure the daemon is gone before the bundle is deleted. *)
+  ignore (sh "launchctl bootout \"gui/$(id -u)/%s\" 2>/dev/null" daemon_label);
   if
     not
       (sh "rm -rf %s %s"
@@ -117,7 +115,15 @@ let purge (_ : (module Conf.S)) =
       paths.Runtime.data_dir;
     exit 1);
   Printf.printf "purged: domains, launchd agents, %s, %s\nkept: %s\n" app_bundle
-    paths.Runtime.data_dir paths.Runtime.config_path
+    paths.Runtime.data_dir paths.Runtime.config_path;
+  (* [lstat], not [Sys.file_exists]: the app bundle is gone by now, so the
+     symlink dangles. The installer creates it as root, so removing it needs
+     root too — say so rather than failing silently. *)
+  if (try ignore (Unix.lstat cli_symlink); true with Unix.Unix_error _ -> false)
+  then (
+    try Sys.remove cli_symlink
+    with Sys_error _ ->
+      Printf.printf "remaining: %s\n  sudo rm %s\n" cli_symlink cli_symlink)
 
 let register () =
   Frontend.register implementation ~cli_group:"fileprovider"

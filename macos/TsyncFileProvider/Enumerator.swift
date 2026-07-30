@@ -1,7 +1,7 @@
 import FileProvider
 import OSLog
 
-private let log = Logger(subsystem: "com.toots.tsync", category: "Enumerator")
+private let log = Logger(subsystem: "org.feverdreamtv.tsync", category: "Enumerator")
 
 final class TsyncEnumerator: NSObject, NSFileProviderEnumerator, @unchecked Sendable {
     private let containerIdentifier: NSFileProviderItemIdentifier

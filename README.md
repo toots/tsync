@@ -62,22 +62,45 @@ Files are split into content-addressed chunks, so editing one frame of a video u
 
 ## Install
 
+### macOS
+
+Download [**tsync.pkg**](https://github.com/toots/tsync/releases/download/nightly/tsync.pkg) and open it. It is signed and notarized, installs the app as a login item that runs the background daemon, and puts the `tsync` CLI on your `PATH`. Apple silicon only for now.
+
+```bash
+tsync configure   # folder name and a storage backend
+```
+
+Uninstalling is `tsync fileprovider purge`.
+
+### Linux
+
 > [!WARNING]
 > **`make install` takes shortcuts to get you running quickly**, and there is no
-> `make uninstall`. See the `linux/` and `macos/` makefiles for what it touches. Developer
-> setup for now; a proper install is planned.
+> `make uninstall`. See `linux/Makefile` for what it touches. Developer setup for
+> now; a proper package is planned.
 
 Needs [opam](https://opam.ocaml.org/) and OCaml ≥ 5.5.
 
 ```bash
-cd linux         # or: cd macos
+cd linux
 make install-deps
 make install     # builds, installs, starts the background service
 tsync configure  # folder name and a storage backend
 make install     # re-run to restart with the new config
 ```
 
-Re-run `make install` to pick up a change later; it rebuilds and restarts.
+### Building macOS from source
+
+Needs opam, OCaml ≥ 5.5, and `brew install xcodegen dylibbundler`.
+
+```bash
+cd macos
+make build       # complete TsyncApp.app
+make deploy      # ... installed into /Applications and started
+```
+
+How the bundle is put together, and how to sign, notarize and release it:
+**[macos/RELEASING.md](macos/RELEASING.md)**.
 
 Full walkthrough, from install to multi-machine setups: **[DOCUMENTATION.md](DOCUMENTATION.md)**.
 

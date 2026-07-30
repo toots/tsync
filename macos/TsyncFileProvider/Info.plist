@@ -23,7 +23,7 @@
     <key>NSExtension</key>
     <dict>
         <key>NSExtensionFileProviderDocumentGroup</key>
-        <string>group.com.toots.tsync</string>
+        <string>group.org.feverdreamtv.tsync</string>
         <key>NSExtensionFileProviderSupportsEnumeration</key>
         <true/>
         <key>NSExtensionFileProviderAllowsUserControlledEviction</key>
@@ -32,7 +32,7 @@
         <array>
             <dict>
                 <key>NSExtensionFileProviderActionIdentifier</key>
-                <string>com.toots.tsync.copyShareURL</string>
+                <string>org.feverdreamtv.tsync.copyShareURL</string>
                 <key>NSExtensionFileProviderActionName</key>
                 <string>Copy Share URL</string>
                 <key>NSExtensionFileProviderActionActivationRule</key>

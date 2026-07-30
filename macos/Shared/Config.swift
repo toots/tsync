@@ -18,7 +18,7 @@ public struct DomainConfig: Codable, Sendable {
 public struct Config: Codable, Sendable {
     public let domains: [DomainConfig]
 
-    public static let groupID = "group.com.toots.tsync"
+    public static let groupID = "group.org.feverdreamtv.tsync"
 
     public static var groupContainerURL: URL {
         FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: groupID)

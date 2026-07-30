@@ -4,7 +4,7 @@ import Foundation
 import OSLog
 import Darwin
 
-private let log = Logger(subsystem: "com.toots.tsync", category: "Extension")
+private let log = Logger(subsystem: "org.feverdreamtv.tsync", category: "Extension")
 
 private final class NotifyListener: @unchecked Sendable {
     private let domain: NSFileProviderDomain
@@ -443,7 +443,7 @@ extension TsyncExtension: NSFileProviderCustomAction {
         completionHandler: @escaping (Error?) -> Void
     ) -> Progress {
         let progress = Progress(totalUnitCount: 1)
-        guard actionIdentifier.rawValue == "com.toots.tsync.copyShareURL",
+        guard actionIdentifier.rawValue == "org.feverdreamtv.tsync.copyShareURL",
               let identifier = itemIdentifiers.first else {
             completionHandler(nil)
             progress.completedUnitCount = 1

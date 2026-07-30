@@ -1,6 +1,6 @@
 name: tsync
 options:
-  bundleIdPrefix: com.toots
+  bundleIdPrefix: org.feverdreamtv
   deploymentTarget:
     macOS: "13.0"
   xcodeVersion: "16"
@@ -24,7 +24,7 @@ targets:
       - path: TsyncApp
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: com.toots.tsync
+        PRODUCT_BUNDLE_IDENTIFIER: org.feverdreamtv.tsync
         CODE_SIGN_ENTITLEMENTS: TsyncApp/TsyncApp.entitlements
         INFOPLIST_FILE: TsyncApp/Info.plist
         LD_RUNPATH_SEARCH_PATHS: "$(inherited) @executable_path/../Frameworks @executable_path/../../Frameworks"
@@ -41,7 +41,7 @@ targets:
       - path: TsyncFileProvider
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: com.toots.tsync.fileprovider
+        PRODUCT_BUNDLE_IDENTIFIER: org.feverdreamtv.tsync.fileprovider
         CODE_SIGN_ENTITLEMENTS: TsyncFileProvider/TsyncFileProvider.entitlements
         INFOPLIST_FILE: TsyncFileProvider/Info.plist
         LD_RUNPATH_SEARCH_PATHS: "$(inherited) @executable_path/../Frameworks @executable_path/../../Frameworks"

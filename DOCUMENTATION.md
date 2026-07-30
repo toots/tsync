@@ -27,22 +27,34 @@ A walkthrough in order: follow it from the top for a working setup, then read on
 
 ## 1. Install
 
-> [!WARNING]
-> **`make install` takes shortcuts to get you running quickly**, and there is no
-> `make uninstall`. Read [`linux/Makefile`](linux/Makefile) or
-> [`macos/Makefile`](macos/Makefile) — and the `deploy*.sh` scripts the latter calls — for
-> exactly what it touches. Developer setup for now; a proper install is planned.
+On **macOS**, download [`tsync.pkg`](https://github.com/toots/tsync/releases/download/nightly/tsync.pkg) — signed, notarized, Apple silicon — and open it. It installs `TsyncApp.app`, which registers itself as a login item and runs the `tsync` daemon (shipped inside the bundle at `Contents/MacOS/tsync`) as a bundled launchd agent. The same binary is the CLI, so the installer also symlinks it to `/usr/local/bin/tsync`. Uninstall with `tsync fileprovider purge`.
 
-Needs [opam](https://opam.ocaml.org/) and OCaml ≥ 5.5.
+Approve the extension once in **System Settings → General → Login Items & Extensions → File Provider Extensions**.
+
+To build it yourself instead, you need [opam](https://opam.ocaml.org/), OCaml ≥ 5.5 and `brew install xcodegen dylibbundler`:
 
 ```bash
-cd linux            # or: cd macos
-make install-deps   # Linux only; includes the FUSE bindings
-make install
+cd macos
+make build          # complete TsyncApp.app
+make deploy         # ... installed into /Applications and started
+make package        # signed, notarized dist/tsync.pkg (needs Developer ID credentials)
 ```
 
-On macOS, approve the extension once in **System Settings → General → Login Items &
-Extensions → File Provider Extensions**.
+[`macos/RELEASING.md`](macos/RELEASING.md) covers the bundle layout, the signing
+credentials and the release workflow.
+
+On **Linux**:
+
+> [!WARNING]
+> **`make install` takes shortcuts to get you running quickly**, and there is no
+> `make uninstall`. Read [`linux/Makefile`](linux/Makefile) for exactly what it touches.
+> Developer setup for now; a proper package is planned.
+
+```bash
+cd linux
+make install-deps   # includes the FUSE bindings
+make install
+```
 
 ```bash
 tsync build-config   # which optional features this binary has
@@ -104,15 +116,18 @@ pass through rather than being rejected, so a typo can look like it was set.
 
 ## 3. Mount it
 
-You don't run `tsync start` yourself. On both platforms `make install` sets up a background
-service that does — a systemd user unit on Linux, launchd agents on macOS — and starts it.
-That's part of what the [step 1](#1-install) warning is about.
+You don't run `tsync start` yourself. A background service does — a systemd user unit on
+Linux (set up by `make install`, part of what the [step 1](#1-install) warning is about),
+and on macOS a launchd agent the app registers from inside its own bundle.
 
-So after configuring, re-run the install to restart against the new config. It's also how
-you pick up a code change:
+After configuring, restart the service so it picks up the new config:
 
 ```bash
-make install   # rebuild, reinstall, restart
+# macOS
+launchctl kickstart -k "gui/$UID/org.feverdreamtv.tsync.daemon"
+# Linux: rebuild, reinstall, restart
+make install
+
 tsync status
 ```
 
@@ -608,8 +623,9 @@ tsync fileprovider purge      # remove everything installed on this machine
 ```
 
 `reimport` is for when Finder disagrees with `tsync ls` — it rebuilds the index from the
-domain instead of the cache. `purge` removes the File Provider domains, launchd agents, app
-bundle and cache but keeps `config.json`, so `make install` puts you back.
+domain instead of the cache. `purge` unregisters the File Provider domains and the launchd
+agent, then removes the app bundle and cache; it keeps `config.json`, so reinstalling the
+app puts you back.
 
 Unlike the FUSE mount, the extension hands back whole files rather than deltas, so a large
 file edited in place is re-uploaded in full. Chunk dedup still keeps unchanged blocks off the

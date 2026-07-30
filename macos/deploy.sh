@@ -1,54 +1,34 @@
 #!/usr/bin/env bash
+# Build and install TsyncApp.app into /Applications, then launch it. The app
+# registers itself as a login item and starts the bundled daemon agent.
 set -euo pipefail
 
-REPO="$(cd "$(dirname "$0")" && pwd)"
-PROJ="$REPO/tsync.xcodeproj"
-PLIST="$HOME/Library/LaunchAgents/com.toots.tsync.plist"
+MACOS_DIR="$(cd "$(dirname "$0")" && pwd)"
 
-XCODE_FLAGS=(-project "$PROJ" -scheme TsyncApp -configuration Release
-    -destination 'platform=macOS' CODE_SIGN_STYLE=Automatic -allowProvisioningUpdates)
-BUILT_PRODUCTS=$(xcodebuild "${XCODE_FLAGS[@]}" -showBuildSettings 2>/dev/null \
-    | awk '$1 == "BUILT_PRODUCTS_DIR" {print $3}')
-BUILT_APP="$BUILT_PRODUCTS/TsyncApp.app"
+say() { echo "==> $*" >&2; }
 
-echo "Building..."
-build_log=$(mktemp)
-xcodebuild "${XCODE_FLAGS[@]}" -jobs 12 >"$build_log" 2>&1 \
-    || { cat "$build_log"; rm -f "$build_log"; exit 1; }
-rm -f "$build_log"
+APP=$("$MACOS_DIR/build.sh" | tail -n1)
 
-echo "Installing to /Applications..."
-launchctl unload "$PLIST" 2>/dev/null || true
+say "Stopping"
+for label in org.feverdreamtv.tsync org.feverdreamtv.tsync.daemon; do
+    launchctl bootout "gui/$UID/$label" 2>/dev/null || true
+done
 pkill -f TsyncFileProvider 2>/dev/null || true
 pkill -f TsyncApp 2>/dev/null || true
 sleep 2
-pluginkit -e ignore -i com.toots.tsync.fileprovider 2>/dev/null || true
-pluginkit -r -i com.toots.tsync.fileprovider 2>/dev/null || true
+
+say "Installing to /Applications"
 rm -rf /Applications/TsyncApp.app
-cp -R "$BUILT_APP" /Applications/
+cp -R "$APP" /Applications/
 
-echo "Starting..."
-mkdir -p "$(dirname "$PLIST")"
-cat > "$PLIST" <<EOF
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-    <key>Label</key>
-    <string>com.toots.tsync</string>
-    <key>ProgramArguments</key>
-    <array>
-        <string>/Applications/TsyncApp.app/Contents/MacOS/TsyncApp</string>
-    </array>
-    <key>RunAtLoad</key>
-    <true/>
-    <key>KeepAlive</key>
-    <true/>
-</dict>
-</plist>
-EOF
-pluginkit -a /Applications/TsyncApp.app/Contents/PlugIns/TsyncFileProvider.appex
-pluginkit -e use -i com.toots.tsync.fileprovider
-launchctl load -w "$PLIST"
+say "Starting"
+open /Applications/TsyncApp.app
 
-echo "Done."
+SOCK="$HOME/Library/Group Containers/group.org.feverdreamtv.tsync/tsync/tsync.sock"
+echo -n "==> Waiting for socket" >&2
+deadline=$(( $(date +%s) + 15 ))
+until [[ -S "$SOCK" ]]; do
+    [[ $(date +%s) -lt $deadline ]] || { echo " timeout" >&2; exit 1; }
+    sleep 1; echo -n "." >&2
+done
+echo " ready" >&2

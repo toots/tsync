@@ -1,4 +1,4 @@
-name: build
+name: test
 
 on:
   push:
@@ -91,5 +91,8 @@ jobs:
       - name: Run tests
         run: opam exec -- dune test
       - name: Build macOS app
-        run: make generate && xcodebuild -project tsync.xcodeproj -scheme TsyncApp -configuration Debug CODE_SIGN_IDENTITY="" CODE_SIGNING_REQUIRED=NO
+        run: |
+          brew install dylibbundler
+          make generate
+          opam exec -- ./build.sh
         working-directory: macos

@@ -1,0 +1,19 @@
+#!/bin/bash
+# Runs as root after the app is placed in /Applications.
+set -e
+
+APP=/Applications/TsyncApp.app
+
+# The daemon doubles as the CLI. /usr/local/bin is in the default PATH from
+# /etc/paths but does not exist on a clean install.
+mkdir -p /usr/local/bin
+ln -sf "$APP/Contents/MacOS/tsync" /usr/local/bin/tsync
+
+# Launch in the console user's session: as root the app would register its login
+# item and File Provider domains against the wrong user.
+console_uid=$(stat -f %u /dev/console)
+if [ -n "$console_uid" ] && [ "$console_uid" != "0" ]; then
+    launchctl asuser "$console_uid" open -a "$APP" || true
+fi
+
+exit 0
