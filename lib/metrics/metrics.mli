@@ -1,3 +1,15 @@
+(** A counter keeping both a lifetime total and a rolling per-second rate over a
+    short window. The built-in transfer counters below are these; anything else
+    wanting a throughput figure (the fuse frontend's read/write volume, for one)
+    makes its own rather than reimplementing the ring. Touched only from the Lwt
+    event-loop thread, so no locking. *)
+type counter
+
+val counter : unit -> counter
+val count : counter -> int -> unit
+val total : counter -> int
+val rate : counter -> float
+
 (** Record bytes sent to / received from the backend, and chunks hashed. *)
 val add_uploaded : int -> unit
 

@@ -1252,9 +1252,14 @@ let run_stats_scenario ?versioning ({ name; steps } : scenario) =
              l
        | _ -> print_endline "  no backends reported");
      let mount = mem "mount" domain in
-     Printf.printf "  mount: reachable=%s stagedFiles=%s\n"
+     Printf.printf
+       "  mount: reachable=%s stagedFiles=%s dirtyFiles=%s metaLocked=%s \
+        metaWaiting=%s\n"
        (Yojson.Safe.to_string (mem "reachable" mount))
-       (Yojson.Safe.to_string (mem "stagedFiles" mount));
+       (Yojson.Safe.to_string (mem "stagedFiles" mount))
+       (Yojson.Safe.to_string (mem "dirtyFiles" mount))
+       (Yojson.Safe.to_string (mem "metaLocked" mount))
+       (Yojson.Safe.to_string (mem "metaWaiting" mount));
      (* The report renders for a person without raising on any of it. *)
      Printf.printf "  renders as text: %b\n"
        (String.length (Diagnostics.text json) > 0);

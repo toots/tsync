@@ -79,6 +79,18 @@ module type S = sig
   (** Whole-file materializations completed since the daemon started. *)
   val downloads_completed_count : unit -> int
 
+  (** Files written but not yet published, as this process currently tracks them
+      — the in-memory view of what {!staged_count} finds on disk, and free to
+      read. *)
+  val dirty_count : unit -> int
+
+  (** Whether the metadata lock is held, and whether anything is queued behind
+      it. A mount that has stopped answering while its backend looks fine is
+      usually this: held, with waiters. *)
+  val meta_locked : unit -> bool
+
+  val meta_waiters : unit -> bool
+
   (** [Some (bytes_done, total_bytes)] while [key] is being pulled in whole;
       [None] when idle. *)
   val download_progress : t -> (int * int) option

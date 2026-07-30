@@ -387,10 +387,16 @@ module Make (C : Conf.S) (F : File.S) = struct
                                 ( "pendingDownloads",
                                   `Int (F.downloads_in_flight ()) );
                                 ("stagedFiles", `Int staged);
+                                ("dirtyFiles", `Int (F.dirty_count ()));
                                 ( "downloadsCompleted",
                                   `Int (F.downloads_completed_count ()) );
                                 ("maxUploads", `Int C.max_uploads);
                                 ("maxDownloads", `Int C.max_downloads);
+                                (* A mount gone quiet while its backends answer
+                                   fine is usually this: the metadata lock held,
+                                   with callers queued behind it. *)
+                                ("metaLocked", `Bool (F.meta_locked ()));
+                                ("metaWaiting", `Bool (F.meta_waiters ()));
                               ]
                           @ hooks.stats_fields ())
                       in

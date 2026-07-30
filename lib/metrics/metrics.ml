@@ -36,6 +36,11 @@ let rate c =
   advance c (now_sec ());
   float_of_int (Array.fold_left ( + ) 0 c.buckets) /. float_of_int window
 
+(* The same counter, for anyone outside this module who wants a throughput figure
+   without a second implementation of the ring. *)
+let counter = make
+let count = add
+let total c = c.total
 let uploaded_c = make ()
 let downloaded_c = make ()
 let hashed_c = make ()

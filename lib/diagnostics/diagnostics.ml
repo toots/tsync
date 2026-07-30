@@ -477,18 +477,57 @@ let text json =
       match mem d "mount" with
         | `Null -> ()
         | m ->
-            line 2 "Mount daemon";
-            if bool_of (mem m "reachable") then
+            (* A separate process with its own counters, so its figures are shown
+               under its own heading rather than folded into ours. *)
+            line 2 "Mount daemon%s"
+              (match mem m "frontend" with
+                | `String f -> Printf.sprintf " (%s)" f
+                | _ -> "");
+            if not (bool_of (mem m "reachable")) then
+              row 4 "unreachable" (str ~default:"no answer" (mem m "error"))
+            else begin
+              (match mem m "pid" with
+                | `Null -> ()
+                | pid ->
+                    row 4 "process"
+                      (Printf.sprintf "pid %d, up %s, %.1fs cpu, %s rss"
+                         (int_of pid)
+                         (duration (num (mem m "uptimeSeconds")))
+                         (num (mem m "cpuSeconds"))
+                         (Metrics.human_bytes (int_of (mem m "rssBytes")))));
+              (match mem m "traffic" with
+                | `Null -> ()
+                | t ->
+                    row 4 "uploaded"
+                      (Printf.sprintf "%s (%s/s)"
+                         (Metrics.human_bytes (int_of (mem t "bytesUploaded")))
+                         (Metrics.human_bytes
+                            (int_of (mem t "uploadBytesPerSec"))));
+                    row 4 "downloaded"
+                      (Printf.sprintf "%s (%s/s)"
+                         (Metrics.human_bytes
+                            (int_of (mem t "bytesDownloaded")))
+                         (Metrics.human_bytes
+                            (int_of (mem t "downloadBytesPerSec"))));
+                    row 4 "hashed"
+                      (Printf.sprintf "%d chunks (%d/s)"
+                         (int_of (mem t "chunksHashed"))
+                         (int_of (mem t "hashesPerSec"))));
+              (* Whatever else the frontend reported — queue depths, staged files,
+                 anything a future frontend adds — without this having to know it. *)
               List.iter
                 (fun (k, v) ->
-                  if k <> "reachable" then
-                    row 4 k
-                      (match v with
-                        | `String s -> s
-                        | `Int n -> string_of_int n
-                        | v -> Yojson.Safe.to_string v))
+                  match (k, v) with
+                    | ( ( "reachable" | "frontend" | "pid" | "uptimeSeconds"
+                        | "cpuSeconds" | "rssBytes" | "traffic" ),
+                        _ ) ->
+                        ()
+                    | _, `String s -> row 4 k s
+                    | _, `Int n -> row 4 k (string_of_int n)
+                    | _, `Bool b -> row 4 k (string_of_bool b)
+                    | _, v -> row 4 k (Yojson.Safe.to_string v))
                 (match m with `Assoc f -> f | _ -> [])
-            else row 4 "unreachable" (str ~default:"no answer" (mem m "error")))
+            end)
     domains;
   (match mem json "recentErrors" with
     | `List [] | `Null -> ()

@@ -324,6 +324,63 @@ let () =
   (* Byte counts are raw in the JSON and human-readable only here. *)
   assert (mentions "maxDownloads" = false);
 
+  (* A domain's frontends are separate processes with separate counters, so the
+     bytes a mount moves are invisible to the proxy's own metrics. They are carried
+     over IPC and reported under the mount, attributed to it — a page that showed
+     only its own zero would say "no traffic" about a busy machine. Shaped as the
+     daemon actually answers. *)
+  let with_mount =
+    `Assoc
+      [
+        ( "domains",
+          `List
+            [
+              `Assoc
+                [
+                  ("name", `String "statusdom");
+                  ( "mount",
+                    `Assoc
+                      [
+                        ("reachable", `Bool true);
+                        ("frontend", `String "fuse");
+                        ("mountPoint", `String "/home/u/tsync/statusdom");
+                        ("stagedFiles", `Int 0);
+                        ("pendingUploads", `Int 2);
+                        ("pid", `Int 18103);
+                        ("uptimeSeconds", `Float 3600.);
+                        ("cpuSeconds", `Float 35.5);
+                        ("rssBytes", `Int 57638912);
+                        ( "traffic",
+                          `Assoc
+                            [
+                              ("bytesUploaded", `Int 0);
+                              ("bytesDownloaded", `Int 788029143);
+                              ("uploadBytesPerSec", `Int 0);
+                              ("downloadBytesPerSec", `Int 1048576);
+                              ("chunksHashed", `Int 0);
+                              ("hashesPerSec", `Int 0);
+                            ] );
+                      ] );
+                ];
+            ] );
+      ]
+  in
+  let mount_text = Diagnostics.text with_mount in
+  let mount_mentions s =
+    let re = Str.regexp_string s in
+    try
+      ignore (Str.search_forward re mount_text 0);
+      true
+    with Not_found -> false
+  in
+  assert (mount_mentions "Mount daemon (fuse)");
+  assert (mount_mentions "751.5 MB");
+  (* the movie, in bytes the JSON kept raw *)
+  assert (mount_mentions "pid 18103");
+  (* Fields this renderer knows nothing about still show up. *)
+  assert (mount_mentions "pendingUploads");
+  assert (mount_mentions "mountPoint");
+
   (* Both routes verify the same HMAC as the object API, and neither answers
      without one. *)
   let serve ~json req =

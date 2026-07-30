@@ -39,6 +39,30 @@ module Make (C : Conf.S) = struct
 
   (* ── Exception guard ──────────────────────────────────────────────────── *)
 
+  (* What the kernel has actually asked of this mount. Counted at the FUSE
+     boundary because nothing below it sees these numbers: a read served from the
+     chunk cache never reaches a backend, so {!Metrics} stays at zero while a mount
+     streams gigabytes. Incremented inside [on_loop], i.e. on the event-loop
+     thread, so these are the same plain ints everything else here assumes — never
+     touched from a FUSE worker thread. *)
+  let open_handles = ref 0
+  let files_opened = ref 0
+
+  (* Volume through the mount, with a rolling rate: whether a mount is streaming
+     right now is the question a total cannot answer. *)
+  let read_bytes = Metrics.counter ()
+  let written_bytes = Metrics.counter ()
+
+  let fuse_stats_fields () =
+    [
+      ("openHandles", `Int !open_handles);
+      ("filesOpened", `Int !files_opened);
+      ("bytesRead", `Int (Metrics.total read_bytes));
+      ("bytesWritten", `Int (Metrics.total written_bytes));
+      ("readBytesPerSec", `Int (int_of_float (Metrics.rate read_bytes)));
+      ("writeBytesPerSec", `Int (int_of_float (Metrics.rate written_bytes)));
+    ]
+
   let guard op path f =
     try f () with
       | Unix.Unix_error _ as e -> raise e
@@ -188,7 +212,15 @@ module Make (C : Conf.S) = struct
         changed = (fun _ -> ());
         full_resync;
         status_fields = (fun () -> [("mount", `String mount_point)]);
-        stats_fields = E.stats_fields;
+        (* Say which frontend these numbers belong to: a domain can run several,
+           each in its own process with its own counters, and a report that does
+           not name itself is a report you cannot place. *)
+        stats_fields =
+          (fun () ->
+            ("frontend", `String "fuse")
+            :: ("mountPoint", `String mount_point)
+            :: fuse_stats_fields ()
+            @ E.stats_fields ());
         on_stop = (fun () -> request_stop ());
       }
 
@@ -258,22 +290,39 @@ module Make (C : Conf.S) = struct
         (fun path mode ->
           guard "mknod" path (fun () ->
               on_loop (fun () -> (dispatch path).mknod path mode)));
+      (* The accounting sits inside [on_loop], so it runs on the event-loop thread
+         and only when the operation actually succeeded. *)
       fopen =
         (fun path fi ->
           guard "fopen" path (fun () ->
-              on_loop (fun () -> (dispatch path).fopen path fi)));
+              on_loop (fun () ->
+                  let+ update = (dispatch path).fopen path fi in
+                  incr open_handles;
+                  incr files_opened;
+                  update)));
       read =
         (fun path buf offset fi ->
           guard "read" path (fun () ->
-              on_loop (fun () -> (dispatch path).read path buf offset fi)));
+              on_loop (fun () ->
+                  let+ n = (dispatch path).read path buf offset fi in
+                  Metrics.count read_bytes n;
+                  n)));
       write =
         (fun path buf offset fi ->
           guard "write" path (fun () ->
-              on_loop (fun () -> (dispatch path).write path buf offset fi)));
+              on_loop (fun () ->
+                  let+ n = (dispatch path).write path buf offset fi in
+                  Metrics.count written_bytes n;
+                  n)));
       release =
         (fun path fi ->
           guard "release" path (fun () ->
-              on_loop (fun () -> (dispatch path).release path fi)));
+              on_loop (fun () ->
+                  let+ () = (dispatch path).release path fi in
+                  (* Never below zero: a release without a matching fopen (a
+                     handle inherited across a remount) must not make the gauge
+                     nonsense. *)
+                  if !open_handles > 0 then decr open_handles)));
       unlink =
         (fun path ->
           guard "unlink" path (fun () ->

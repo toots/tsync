@@ -389,9 +389,16 @@ let share_request routes uri =
 
 (* ── Status ─────────────────────────────────────────────────────────────────── *)
 
-(* The mount daemon's own queues, when a daemon serves this domain on this host.
-   Its socket answers with a full report; we keep the part only it can know.
-   Absent is the normal case for a server that does not also mount. *)
+(* The mount daemon serving this domain on this host, when there is one. Absent is
+   the normal case for a server that does not also mount.
+
+   Its queues are only half of what is worth taking: a domain's frontends run as
+   separate processes, so {!Metrics} counts per process and the bytes a mount moves
+   are invisible here. On a host that both mounts and serves, a movie streamed
+   through the mount is *its* traffic, and the proxy reporting only its own would
+   say "no traffic" about a machine that is busy. So its transfer figures and
+   process cost come across too, kept under the domain's [mount] section where they
+   are plainly attributed rather than added to ours. *)
 let fetch_mount ~socket_path =
   let unreachable msg =
     `Assoc [("reachable", `Bool false); ("error", `String msg)]
@@ -404,10 +411,23 @@ let fetch_mount ~socket_path =
       let+ resp = Ipc.send_lwt ~socket_path request in
       let open Yojson.Safe.Util in
       let json = Yojson.Safe.from_string resp in
+      let server = json |> member "server" in
+      let proc = json |> member "process" in
+      let carried =
+        List.filter
+          (fun (_, v) -> v <> `Null)
+          [
+            ("pid", server |> member "pid");
+            ("uptimeSeconds", server |> member "uptimeSeconds");
+            ("cpuSeconds", proc |> member "cpuSeconds");
+            ("rssBytes", proc |> member "rssBytes");
+            ("traffic", json |> member "traffic");
+          ]
+      in
       match json |> member "domains" with
         | `List (d :: _) -> (
             match d |> member "mount" with
-              | `Assoc _ as m -> m
+              | `Assoc fields -> `Assoc (fields @ carried)
               | _ -> unreachable "daemon reported no mount section")
         | _ -> unreachable "daemon reported no domains")
     (fun exn ->
