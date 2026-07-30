@@ -72,7 +72,12 @@ type route = {
   self_frontend : Yojson.Safe.t;
       (** what this listener is for this domain: the settings that differ per
           domain, the shared process figures being reported once at the top *)
-  diagnose : totals:bool -> frontends:Yojson.Safe.t list -> Yojson.Safe.t Lwt.t;
+  diagnose :
+    totals:bool ->
+    exact:bool ->
+    reload:bool ->
+    frontends:Yojson.Safe.t list ->
+    Yojson.Safe.t Lwt.t;
       (** this domain's section of the status report *)
 }
 
@@ -152,7 +157,8 @@ let make_route bindings (b : Frontend.binding) =
           ("options", `Assoc options);
         ];
     diagnose =
-      (fun ~totals ~frontends -> Diag.domain_json ~totals ~frontends ());
+      (fun ~totals ~exact ~reload ~frontends ->
+        Diag.domain_json ~totals ~exact ~reload ~frontends ());
   }
 
 (* ── Request handling ───────────────────────────────────────────────────────── *)
@@ -458,12 +464,13 @@ let fetch_mount ~socket_path =
    honestly be filed under any single domain. Hence one labelled block at the top
    saying which domains it serves, while each domain lists the settings that are
    its own. *)
-let status_json ~port ~tls ~totals routes =
+let status_json ~port ~tls ~totals ~exact ~reload routes =
   let+ domains =
     Lwt_list.map_p
       (fun route ->
         let* mount = fetch_mount ~socket_path:route.socket_path in
-        route.diagnose ~totals ~frontends:[route.self_frontend; mount])
+        route.diagnose ~totals ~exact ~reload
+          ~frontends:[route.self_frontend; mount])
       routes
   in
   `Assoc
@@ -490,10 +497,15 @@ let serve_status ~port ~tls ~json routes req body_str =
   end
   else begin
     bump "stats";
-    let totals =
-      Uri.get_query_param (Cohttp.Request.uri req) "totals" = Some "1"
-    in
-    let* report = status_json ~port ~tls ~totals routes in
+    (* [totals=1] estimates the chunk count from a sample of shards;
+       [totals=exact] counts every one, at the price of a full listing. Either is
+       counted once and served from then on; [reload=1] asks for a new count. *)
+    let param name = Uri.get_query_param (Cohttp.Request.uri req) name in
+    let totals_param = param "totals" in
+    let exact = totals_param = Some "exact" in
+    let totals = exact || totals_param = Some "1" in
+    let reload = totals && param "reload" = Some "1" in
+    let* report = status_json ~port ~tls ~totals ~exact ~reload routes in
     if json then
       respond
         ~headers:[("content-type", "application/json")]

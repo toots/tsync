@@ -2,7 +2,7 @@
      <cache_root>/<domain>/manifests/<real path>   — published manifest mirror
                                                      (+ .tsync-dir / .tsync-name markers)
      <cache_root>/<domain>/scratch/<real path>     — .fuse_hidden* scratch files
-     <cache_root>/<domain>/chunks/<xx>/<key>       — content-addressed cache-chunk store
+     <cache_root>/<domain>/chunks/<xxx>/<key>      — content-addressed cache-chunk store
                                                      (one file per {!Chunk_group})
      <cache_root>/<domain>/staged/manifests/<path> — staged manifests (unsynced edits)
      <cache_root>/<domain>/staged/chunks/<uuid>    — staged chunk bodies
@@ -34,20 +34,12 @@ let staged_chunks_dir ~cache_root domain_name =
 let staged_whole_dir ~cache_root domain_name =
   sub ~cache_root domain_name "staged/whole"
 
-(* Cache keys are fixed-length hex ("<h1>-<h2>"), so a two-character prefix
-   directory splits the cache 256 ways — enough to keep readdir cheap when a
-   large cache holds hundreds of thousands of entries. *)
-let chunk_fanout = 2
-
+(* Sharded by {!Chunk_layout}, the same way the backend chunk store is: both are
+   keyed by the same fixed-length hex, and neither wants one huge directory. *)
 let chunk_path ~cache_root ~domain_name chunk_key =
-  let prefix =
-    if String.length chunk_key >= chunk_fanout then
-      String.sub chunk_key 0 chunk_fanout
-    else "_"
-  in
   Filename.concat
-    (Filename.concat (chunks_dir ~cache_root domain_name) prefix)
-    chunk_key
+    (chunks_dir ~cache_root domain_name)
+    (Chunk_layout.relative_path chunk_key)
 
 (* Remove the domain's local cache — manifest mirror, chunk store, scratch and
    handoff trees — for a full resync that rebuilds it from the backend. Staged

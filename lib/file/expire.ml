@@ -1,9 +1,15 @@
 open Lwt.Syntax
 
-type stats = { versions_deleted : int; chunks_deleted : int; chunks_kept : int }
+type stats = {
+  versions_deleted : int;
+  chunks_deleted : int;
+  chunks_kept : int;
+  journal_deleted : int;
+}
 
 module Make (C : Conf.S) = struct
   module Bk = Backends.Make (C)
+  module Fs = File_store.Make (C)
   module Tree = Inode_tree.Make (C)
 
   let primary = Bk.primary
@@ -109,20 +115,42 @@ module Make (C : Conf.S) = struct
     let unreferenced =
       chunks
       |> List.filter_map (fun (e : Backend.file_entry) ->
-          let ck =
-            String.sub e.key
-              (String.length C.chunk_prefix)
-              (String.length e.key - String.length C.chunk_prefix)
-          in
+          (* The store is sharded ({!Chunk_layout}), so the key is the entry's
+             last path segment, not everything past the prefix. *)
+          let ck = Filename.basename e.key in
           if Hashtbl.mem live ck then (
             incr kept;
             None)
           else Some e.key)
     in
-    let+ () = delete_all unreferenced in
+    let* () = delete_all unreferenced in
+    (* Phase 5: drop journal entries older than the cutoff. The journal only ever
+       grows — one object per write — and nothing else prunes it. Age is the only
+       safe criterion: the cursor says what was published, not what every client
+       has applied, so entries above it are still owed to clients that are
+       behind. A client offline longer than the retention window has to resync
+       anyway, since the versions and trashed files it missed are gone too.
+
+       The entry the cursor names is kept whatever its age: a quiet domain whose
+       last write predates the cutoff would otherwise be left with a cursor
+       pointing at nothing. *)
+    let* cursor = Fs.fetch_cursor () in
+    let cutoff_ms = Int64.of_float (cutoff *. 1000.) in
+    let* journal = B.list_prefix ~prefix:C.journal_prefix () in
+    let stale =
+      journal
+      |> List.filter (fun (e : Backend.file_entry) ->
+          let ek = Filename.basename e.key in
+          match Journal.timestamp_ms_of_filename ek with
+            | ms -> ms < cutoff_ms && Some ek <> cursor
+            | exception _ -> false)
+      |> List.map (fun (e : Backend.file_entry) -> e.key)
+    in
+    let+ () = delete_all stale in
     {
       versions_deleted = List.length expired;
       chunks_deleted = List.length unreferenced;
       chunks_kept = !kept;
+      journal_deleted = List.length stale;
     }
 end

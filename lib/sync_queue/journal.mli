@@ -14,6 +14,13 @@ type op =
 
 val timestamp_ms_of_filename : string -> int64
 val client_uuid_of_filename : string -> string
+
+(** [relative_path entry_key] is ["<YYYY-MM>/<entry_key>"], the entry's path
+    relative to the journal prefix. Both levels sort chronologically, so the
+    lexicographic order readers rely on is unchanged; {!Filename.basename}
+    recovers the entry key from a listing. *)
+val relative_path : string -> string
+
 val encode : op list -> string
 val decode : string -> op list
 

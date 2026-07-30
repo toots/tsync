@@ -1,0 +1,12 @@
+(executable
+ (name layout)
+ (libraries tsync_local_io tsync_queue unix))
+
+(alias
+ (name default)
+ (deps layout.exe))
+
+(rule
+ (alias runtest)
+ (action
+  (run ./layout.exe)))

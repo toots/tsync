@@ -86,6 +86,9 @@
         font-size: 13px;
         opacity: 0.8;
       }
+      label.toggle:has(input:disabled) {
+        opacity: 0.35;
+      }
       pre {
         margin: 0;
         overflow-x: auto;
@@ -112,7 +115,10 @@
       <div class="spacer"></div>
       <div id="controls" hidden>
         <label class="toggle"
-          ><input type="checkbox" id="totals" /> count objects</label
+          ><input type="checkbox" id="totals" /> store totals</label
+        >
+        <label class="toggle"
+          ><input type="checkbox" id="exact" disabled /> exact count</label
         >
       </div>
       <button id="refresh" hidden>Refresh</button>
@@ -280,10 +286,20 @@
       const store = window.sessionStorage;
       let timer = null;
 
-      async function load() {
+      async function load({ reload = false } = {}) {
         const secret = store.getItem("tsync-secret");
         if (!secret) return;
-        const path = $("totals").checked ? "/stats?totals=1" : "/stats";
+        // Totals are estimated from a sample of the chunk store's shards;
+        // "exact" walks all of it. Either is counted once and then reported by
+        // every request, so the poll below costs nothing; only Refresh asks for
+        // a store to be walked again.
+        const totals = !$("totals").checked
+          ? ""
+          : $("exact").checked
+            ? "?totals=exact"
+            : "?totals=1";
+        const path =
+          "/stats" + totals + (totals && reload ? "&reload=1" : "");
         try {
           const { ts, signature } = await sign(secret, "GET", path);
           const resp = await fetch(path, {
@@ -311,7 +327,7 @@
         $("report").hidden = false;
         for (const id of ["refresh", "forget", "controls"])
           $(id).hidden = false;
-        if (!timer) timer = setInterval(load, 5000);
+        if (!timer) timer = setInterval(() => load(), 5000);
       }
 
       function logout(message) {
@@ -337,9 +353,14 @@
         showReport();
         load();
       });
-      $("refresh").addEventListener("click", load);
+      $("refresh").addEventListener("click", () => load({ reload: true }));
       $("forget").addEventListener("click", () => logout(""));
-      $("totals").addEventListener("change", load);
+      // "exact" only means anything alongside "store totals".
+      $("totals").addEventListener("change", () => {
+        $("exact").disabled = !$("totals").checked;
+        load();
+      });
+      $("exact").addEventListener("change", load);
 
       if (store.getItem("tsync-secret")) {
         showReport();

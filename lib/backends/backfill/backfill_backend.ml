@@ -134,7 +134,7 @@ let make ~chunk_prefix ~(chunk_keys : string -> string list) ~skip_prefixes
     List.exists (fun p -> String.starts_with ~prefix:p key) skip_prefixes
   in
   let ensure_chunk t chunk_key =
-    let key = chunk_prefix ^ chunk_key in
+    let key = chunk_prefix ^ Chunk_layout.relative_path chunk_key in
     if Hashtbl.mem t.ensured key then Lwt.return_unit
     else
       let module T = (val t.target : Backend.S) in

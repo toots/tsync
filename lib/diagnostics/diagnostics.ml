@@ -6,8 +6,9 @@
    same shape and the same numbers.
 
    Everything here is either in-process state or a bounded read. The exception is
-   [?totals:true], which enumerates the manifest and chunk namespaces: it is
-   opt-in precisely because its cost grows with the domain. *)
+   [?totals:true], which reaches into the store, and it is opt-in for that
+   reason. Even then the chunk count is estimated from a sample of shards unless
+   [?exact:true] asks for every one to be counted. *)
 
 open Lwt.Syntax
 
@@ -179,74 +180,142 @@ module Make (C : Conf.S) = struct
       (fun exn ->
         Lwt.return (`Assoc [("error", `String (Printexc.to_string exn))]))
 
-  (* What this store actually holds: manifests, chunks, bytes. There is no cheap
-     way to know — it means enumerating two namespaces, which is a stat per file on
-     a [local] store and a paged LIST on a bucket, and grows with the domain.
+  (* What this store actually holds: manifests, chunks, bytes. Reading the whole
+     of either namespace is a stat per file on a [local] store and a paged LIST on
+     a bucket, and grows with the domain — so the chunk figure is sampled instead
+     (see [count_chunks]), and only [~exact] pays the full price.
 
-     So it is never counted while a request waits. A request serves the last
-     sample and says how old it is, kicking off a refresh in the background when
-     that sample has gone stale; the first ever request answers "counting". A
-     figure a few minutes old is worth having, and a status endpoint that blocks
-     for a 100k-object walk is not. *)
-  let totals_max_age = 300.
+     Either way it is never counted while a request waits: a request serves the
+     last sample and says how old it is, and the first ever one answers
+     "counting" while a walk starts behind it. A status endpoint must not block
+     on a 100k-object walk.
 
+     A sample stands until someone asks for it to be recomputed ([~reload]), so
+     walking a store is always something a person chose to do. The age travels
+     with the figure, which is what makes a stale one safe to serve. *)
   type sample = { at : float; counts : Yojson.Safe.t }
 
   let samples : (string, sample) Hashtbl.t = Hashtbl.create 4
   let counting : (string, unit) Hashtbl.t = Hashtbl.create 4
 
-  let count_now ~name (module B : Backend.S) =
+  (* Shards sampled to estimate the chunk store. Keys are uniformly hashed, so a
+     shard's share of the store is its share of the shard space: counting a few
+     and scaling costs a listing per sampled shard instead of one over the whole
+     namespace. The error is sampling error — with 16 of 4096 shards, a million
+     chunks means about 4000 counted and a relative error near 1.5%, which is
+     well inside what "how much does this backend hold" is asking. *)
+  let sampled_shards = 16
+
+  (* An empty directory is listed as its own marker key by the filesystem
+     backends (matching the zero-byte object S3 lists). A shard that has been
+     emptied is not a chunk. *)
+  let chunk_entries entries =
+    List.filter
+      (fun (e : Backend.file_entry) ->
+        let k = e.Backend.key in
+        String.length k > 0 && k.[String.length k - 1] <> '/')
+      entries
+
+  let total_bytes =
+    List.fold_left (fun acc (e : Backend.file_entry) -> acc + e.Backend.size) 0
+
+  let count_chunks ~exact (module B : Backend.S) =
+    if exact then
+      let+ chunks = B.list_prefix ~prefix:C.chunk_prefix () in
+      let chunks = chunk_entries chunks in
+      [
+        ("chunks", `Int (List.length chunks));
+        ("chunkBytes", `Int (total_bytes chunks));
+      ]
+    else (
+      let step = Chunk_layout.shards / sampled_shards in
+      let+ sampled =
+        Lwt_list.map_p
+          (fun i ->
+            let prefix =
+              C.chunk_prefix ^ Chunk_layout.shard_name (i * step) ^ "/"
+            in
+            let+ entries = B.list_prefix ~prefix () in
+            chunk_entries entries)
+          (List.init sampled_shards Fun.id)
+      in
+      let sampled = List.concat sampled in
+      [
+        ("chunks", `Int (List.length sampled * step));
+        ("chunkBytes", `Int (total_bytes sampled * step));
+        ("chunksFromShards", `Int sampled_shards);
+      ])
+
+  let count_now ~name ~exact (module B : Backend.S) =
     Lwt.catch
       (fun () ->
         let* manifests = B.list_prefix ~prefix:C.domain_prefix () in
-        let+ chunks = B.list_prefix ~prefix:C.chunk_prefix () in
-        `Assoc
-          [
-            ("manifests", `Int (List.length manifests));
-            ("chunks", `Int (List.length chunks));
-            ( "chunkBytes",
-              `Int
-                (List.fold_left
-                   (fun acc (e : Backend.file_entry) -> acc + e.size)
-                   0 chunks) );
-          ])
+        (* Manifests are keyed by folder id, not by a hash, so they are not
+           spread evenly over anything samplable: that count stays a full walk.
+           It is also the smaller of the two — one object per file, against one
+           per chunk of every file. *)
+        let+ chunks = count_chunks ~exact (module B) in
+        `Assoc (("manifests", `Int (List.length manifests)) :: chunks))
       (fun exn ->
         Log.warn "diagnostics: counting %s: %s" name (Printexc.to_string exn);
         Lwt.return (`Assoc [("error", `String (Printexc.to_string exn))]))
 
   (* One walk at a time per store: a page refreshing every few seconds must not
      stack walks on top of each other. *)
-  let refresh ~name backend =
-    if not (Hashtbl.mem counting name) then begin
-      Hashtbl.replace counting name ();
+  (* Estimated and exact counts are separate samples: they answer the same
+     question to different precision, and one must not be served in place of the
+     other. *)
+  let slot ~name ~exact = if exact then name ^ " (exact)" else name
+
+  let refresh ~name ~exact backend =
+    let slot = slot ~name ~exact in
+    if not (Hashtbl.mem counting slot) then begin
+      Hashtbl.replace counting slot ();
       Lwt.async (fun () ->
           Lwt.finalize
             (fun () ->
-              let+ counts = count_now ~name backend in
-              Hashtbl.replace samples name { at = Unix.gettimeofday (); counts })
+              let+ counts = count_now ~name ~exact backend in
+              Hashtbl.replace samples slot { at = Unix.gettimeofday (); counts })
             (fun () ->
-              Hashtbl.remove counting name;
+              Hashtbl.remove counting slot;
               Lwt.return_unit))
     end
 
-  let totals_of ~name backend =
+  (* A figure already counted is reported by every request: it is sitting in
+     memory, so withholding it until asked would cost a walk to learn what is
+     already known. [compute] is what asking buys — a walk when there is nothing
+     yet, or a fresh one under [reload]. Without it and with nothing counted,
+     this store simply reports no totals. *)
+  let totals_of ~name ~exact ~compute ~reload backend =
     let now = Unix.gettimeofday () in
-    match Hashtbl.find_opt samples name with
-      | Some s ->
-          if now -. s.at > totals_max_age then refresh ~name backend;
-          let with_age =
-            match s.counts with
-              | `Assoc fields ->
-                  `Assoc
-                    (fields
-                    @ [("sampledSecondsAgo", `Int (int_of_float (now -. s.at)))]
-                    )
-              | other -> other
+    let wanted = slot ~name ~exact in
+    if compute && (reload || not (Hashtbl.mem samples wanted)) then
+      refresh ~name ~exact backend;
+    let served =
+      match Hashtbl.find_opt samples wanted with
+        | Some s -> Some (wanted, s)
+        (* Nothing at the precision asked for, but a figure is a figure — and
+           the "~" on an estimate says which kind reached the page. *)
+        | None ->
+            let other = slot ~name ~exact:(not exact) in
+            Option.map (fun s -> (other, s)) (Hashtbl.find_opt samples other)
+    in
+    match served with
+      (* A walk in flight keeps serving the figure it will replace, so a report
+         never blanks out for the length of one. [refreshing] is how a reader
+         knows a newer one is coming; the age says how old this one is. *)
+      | Some (slot, s) -> (
+          let extra =
+            [("sampledSecondsAgo", `Int (int_of_float (now -. s.at)))]
+            @
+            if Hashtbl.mem counting slot then [("refreshing", `Bool true)]
+            else []
           in
-          with_age
-      | None ->
-          refresh ~name backend;
-          `Assoc [("counting", `Bool true)]
+          match s.counts with
+            | `Assoc fields -> `Assoc (fields @ extra)
+            | other -> other)
+      | None when compute -> `Assoc [("counting", `Bool true)]
+      | None -> `Null
 
   (* Room left where a local store keeps its files. One syscall, so unlike the
      counts above this is always reported. *)
@@ -263,15 +332,18 @@ module Make (C : Conf.S) = struct
                 ] );
           ]
 
-  let member_json ~totals (m : Backend.member) =
+  let member_json ~totals ~exact ~reload (m : Backend.member) =
     let* probed, cursor = probe m.Backend.backend in
     let+ jrnl = journal ~cursor m.Backend.backend in
-    (* Synchronous: it reads the last sample and, if that is stale, leaves a walk
-       running behind us rather than waiting for one. *)
+    (* Synchronous: it reads the last sample, leaving any walk it started running
+       behind us rather than waiting for one. *)
     let tot =
-      if totals then
-        [("totals", totals_of ~name:m.Backend.name m.Backend.backend)]
-      else []
+      match
+        totals_of ~name:m.Backend.name ~exact ~compute:totals ~reload
+          m.Backend.backend
+      with
+        | `Null -> []
+        | counts -> [("totals", counts)]
     in
     let backfill =
       match (m.Backend.pending, m.in_flight, m.degraded) with
@@ -378,11 +450,13 @@ module Make (C : Conf.S) = struct
      carries its own cpu and its own transfer figures; a shared listener (the
      http-proxy) contributes only its per-domain settings here and reports itself
      once, at the top. *)
-  let domain_json ?(totals = false) ?(extra = []) ?(frontends = []) () =
+  let domain_json ?(totals = false) ?(exact = false) ?(reload = false)
+      ?(extra = []) ?(frontends = []) () =
     let* cache = cache_json ~totals in
     let* pending = local_pending () in
     let+ backends =
-      Lwt_list.map_p (member_json ~totals)
+      Lwt_list.map_p
+        (member_json ~totals ~exact ~reload)
         (Backend.members ~domain:C.domain_name)
     in
     `Assoc
@@ -712,10 +786,18 @@ let text json =
                   | `String e, _ -> row 4 "holds" ("could not count: " ^ e)
                   | _, `Bool true -> row 4 "holds" "counting in the background"
                   | _ ->
+                      (* A sampled figure must never read as a counted one, hence
+                         the "~". How it was sampled is in the JSON, for whoever
+                         wants to know. *)
+                      let approx =
+                        if mem t "chunksFromShards" = `Null then "" else "~"
+                      in
                       row 4 "holds"
-                        (Printf.sprintf "%d manifests, %d chunks, %s%s"
+                        (Printf.sprintf "%d manifests, %s%d chunks, %s%s%s"
                            (int_of (mem t "manifests"))
+                           approx
                            (int_of (mem t "chunks"))
+                           approx
                            (Metrics.human_bytes (int_of (mem t "chunkBytes")))
                            (match mem t "sampledSecondsAgo" with
                              | `Null -> ""

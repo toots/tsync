@@ -186,11 +186,41 @@ let stats_cmd =
       value & flag
       & info ["totals"]
           ~doc:
-            "Also count what each backend holds. Enumerates the manifest and \
-             chunk namespaces, so it costs a full listing per backend.")
+            "Also report what each backend holds. The chunk count is estimated \
+             from a sample of the store's shards; the manifest count is a full \
+             listing. See $(b,--exact).")
   in
-  let run json totals watch domain =
-    let arg = if totals then Some "totals" else None in
+  let exact_arg =
+    Arg.(
+      value & flag
+      & info ["exact"]
+          ~doc:
+            "With $(b,--totals), count every chunk instead of estimating from \
+             a sample. Enumerates the whole chunk namespace, so it costs a \
+             full listing per backend.")
+  in
+  let reload_arg =
+    Arg.(
+      value & flag
+      & info ["reload"]
+          ~doc:
+            "With $(b,--totals), recount instead of reporting what was counted \
+             before. A store is counted once and that figure served from then \
+             on, with its age, until this asks for a new one.")
+  in
+  let run json totals exact reload watch domain =
+    (* The daemon counts a store once and serves that until asked again, so the
+       flags travel as a set rather than a mode. *)
+    let arg =
+      match totals || exact || reload with
+        | false -> None
+        | true ->
+            Some
+              (String.concat ","
+                 (["totals"]
+                 @ (if exact then ["exact"] else [])
+                 @ if reload then ["reload"] else []))
+    in
     (* Resolved once: [--watch] must not re-read the config on every tick, and a
        config error should be reported before the screen starts clearing. *)
     let socket_path = domain_socket ?domain () in
@@ -218,7 +248,9 @@ let stats_cmd =
        ~doc:
          "Report on the running daemon: transfer metrics, config as resolved, \
           cache, journal backlog and each backend's health")
-    Term.(const run $ json_arg $ totals_arg $ watch_arg $ domain_arg)
+    Term.(
+      const run $ json_arg $ totals_arg $ exact_arg $ reload_arg $ watch_arg
+      $ domain_arg)
 
 (* ── tsync evict ─────────────────────────────────────────────────────────── *)
 
@@ -628,14 +660,18 @@ let expire_cmd =
          E.expire ~cutoff ())
     with
       | s ->
-          Printf.printf "Removed %d version(s), %d chunk(s); kept %d chunk(s)\n"
-            s.Expire.versions_deleted s.chunks_deleted s.chunks_kept
+          Printf.printf
+            "Removed %d version(s), %d chunk(s), %d journal entr(ies); kept %d \
+             chunk(s)\n"
+            s.Expire.versions_deleted s.chunks_deleted s.journal_deleted
+            s.chunks_kept
       | exception Failure msg -> Printf.eprintf "Error: %s\n" msg
   in
   Cmd.v
     (Cmd.info "expire"
        ~doc:
-         "Remove versions older than DATE, then garbage-collect unused chunks")
+         "Remove versions and journal entries older than DATE, then \
+          garbage-collect unused chunks")
     Term.(const run $ date_arg $ domain_arg)
 
 (* ── tsync sync ──────────────────────────────────────────────────────────── *)

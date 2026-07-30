@@ -65,6 +65,18 @@ let client_uuid_of_filename s =
   let i = String.index s '-' in
   String.sub s (i + 1) (String.length s - i - 1)
 
+(* Where an entry lives, relative to the journal prefix. A month directory keeps
+   the listing bounded — the journal only ever grows, one object per write — and
+   costs the readers nothing: entry names are zero-padded timestamps, so both the
+   shard and the name within it sort chronologically, which is the order every
+   cursor comparison depends on. The entry key itself is unchanged, so cursors
+   and last-sync marks keep naming an entry the same way. *)
+let relative_path entry_key =
+  let ms = timestamp_ms_of_filename entry_key in
+  let tm = Unix.gmtime (Int64.to_float ms /. 1000.) in
+  Printf.sprintf "%04d-%02d/%s" (tm.Unix.tm_year + 1900) (tm.Unix.tm_mon + 1)
+    entry_key
+
 let encode ops =
   let encode_one = function
     | `Put (key, size) ->

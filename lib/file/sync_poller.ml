@@ -38,7 +38,7 @@ module Make (C : Conf.S) (F : File.S) = struct
                   List.iter (fun op -> on_changed (op_key op)) ops;
                   Lwt.return_unit
         in
-        write_last_sync_key (C.journal_prefix ^ ek);
+        write_last_sync_key ek;
         Lwt.return_unit)
 
   let sync_once () =
