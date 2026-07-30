@@ -18,7 +18,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        DaemonAgent.register()
+        LoginItem.register()
         Task { await registerDomains() }
     }
 
@@ -96,7 +96,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 log.error("purge domain '\(domain.identifier.rawValue, privacy: .public)' failed: \(error, privacy: .public)")
             }
         }
-        await DaemonAgent.unregister()
+        await LoginItem.unregister()
         try? FileManager.default.removeItem(at: marker)
         return true
     }

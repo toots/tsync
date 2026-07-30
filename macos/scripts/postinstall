@@ -9,11 +9,16 @@ APP=/Applications/TsyncApp.app
 mkdir -p /usr/local/bin
 ln -sf "$APP/Contents/MacOS/tsync" /usr/local/bin/tsync
 
-# Launch in the console user's session: as root the app would register its login
-# item and File Provider domains against the wrong user.
+# Everything else belongs to the console user, not root: the LaunchAgent, the
+# login item and the File Provider domains are all per-user.
 console_uid=$(stat -f %u /dev/console)
-if [ -n "$console_uid" ] && [ "$console_uid" != "0" ]; then
-    launchctl asuser "$console_uid" open -a "$APP" || true
+console_user=$(stat -f %Su /dev/console)
+if [ -z "$console_uid" ] || [ "$console_uid" = "0" ]; then
+    exit 0
 fi
+
+launchctl asuser "$console_uid" sudo -u "$console_user" \
+    "$APP/Contents/Resources/install-agent.sh" "$APP" || true
+launchctl asuser "$console_uid" sudo -u "$console_user" open -a "$APP" || true
 
 exit 0

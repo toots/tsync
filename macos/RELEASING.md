@@ -17,15 +17,25 @@ TsyncApp.app/Contents
 ├── MacOS/TsyncApp                        the app (a background login item)
 ├── MacOS/tsync                           the OCaml daemon + CLI
 ├── libs/                                 Homebrew dylibs the daemon links
-├── Library/LaunchAgents/                 org.feverdreamtv.tsync.daemon.plist
+├── Resources/install-agent.sh            installs the daemon's LaunchAgent
 └── PlugIns/TsyncFileProvider.appex       the File Provider extension
 ```
 
-The symlink aside, nothing is written outside the bundle. The app registers itself
-as a login item and registers the bundled LaunchAgent through `SMAppService`
-(`TsyncApp/DaemonAgent.swift`), so there is no separate service install step.
+The app registers itself as a login item through `SMAppService`
+(`TsyncApp/LoginItem.swift`). The daemon is a plain LaunchAgent written to
+`~/Library/LaunchAgents` by `install-agent.sh`, which both `scripts/postinstall`
+and `deploy.sh` call.
+
+> A bundled `SMAppService.agent` in `Contents/Library/LaunchAgents` is the
+> modern equivalent and would avoid the second plist, but it does not work here:
+> with the agent correctly placed, sealed into the signature and signed with the
+> app's Team ID, `SMAppService.agent(plistName:)` reports `.notFound` and
+> `register()` fails with `Operation not permitted`, so the daemon never starts.
+> `SMAppService.mainApp` works, which is why the login item still uses it.
+
 Uninstalling is `tsync fileprovider purge`: it unregisters the domains and the
-agent and removes the bundle, cache and symlink, keeping `config.json`.
+login item and removes the bundle, agent plist, cache and symlink, keeping
+`config.json`.
 
 ## Identifiers
 
@@ -38,7 +48,7 @@ agent and removes the bundle, cache and symlink, keeping `config.json`.
 | Team ID | `PSE2VP6582` |
 
 All five have to agree across `project.yml`, both `.entitlements` files,
-`Shared/Config.swift`, `LaunchAgents/*.plist` and `lib/runtime/macos_runtime.ml`.
+`Shared/Config.swift`, `install-agent.sh` and `lib/runtime/macos_runtime.ml`.
 Changing the App Group changes the container path, which orphans any existing
 local cache and config.
 
@@ -65,8 +75,8 @@ make deploy      # the same build, installed into /Applications and started
 2. builds the app and extension with `xcodebuild`, with `CODE_SIGNING_ALLOWED=NO`
    — signing happens at the end, because injecting files afterwards would
    invalidate any earlier signature;
-3. copies the daemon to `Contents/MacOS/tsync` and the LaunchAgent plist to
-   `Contents/Library/LaunchAgents/`;
+3. copies the daemon to `Contents/MacOS/tsync` and `install-agent.sh` to
+   `Contents/Resources/`;
 4. runs `dylibbundler` to copy the daemon's Homebrew dependencies (openssl, gmp,
    pcre2, libev, xxhash) into `Contents/libs` and rewrite their install names to
    `@executable_path/../libs`;

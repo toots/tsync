@@ -27,7 +27,7 @@ A walkthrough in order: follow it from the top for a working setup, then read on
 
 ## 1. Install
 
-On **macOS**, download [`tsync.pkg`](https://github.com/toots/tsync/releases/download/nightly/tsync.pkg) — signed, notarized, Apple silicon — and open it. It installs `TsyncApp.app`, which registers itself as a login item and runs the `tsync` daemon (shipped inside the bundle at `Contents/MacOS/tsync`) as a bundled launchd agent. The same binary is the CLI, so the installer also symlinks it to `/usr/local/bin/tsync`. Uninstall with `tsync fileprovider purge`.
+On **macOS**, download [`tsync.pkg`](https://github.com/toots/tsync/releases/download/nightly/tsync.pkg) — signed, notarized, Apple silicon — and open it. It installs `TsyncApp.app`, registers it as a login item, and starts the `tsync` daemon (shipped inside the bundle at `Contents/MacOS/tsync`) as a launchd agent. The same binary is the CLI, so the installer also symlinks it to `/usr/local/bin/tsync`. Uninstall with `tsync fileprovider purge`.
 
 Approve the extension once in **System Settings → General → Login Items & Extensions → File Provider Extensions**.
 
@@ -118,16 +118,12 @@ pass through rather than being rejected, so a typo can look like it was set.
 
 You don't run `tsync start` yourself. A background service does — a systemd user unit on
 Linux (set up by `make install`, part of what the [step 1](#1-install) warning is about),
-and on macOS a launchd agent the app registers from inside its own bundle.
+and on macOS a launchd agent the installer sets up.
 
 After configuring, restart the service so it picks up the new config:
 
 ```bash
-# macOS
-launchctl kickstart -k "gui/$UID/org.feverdreamtv.tsync.daemon"
-# Linux: rebuild, reinstall, restart
-make install
-
+tsync restart
 tsync status
 ```
 

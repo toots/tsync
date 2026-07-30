@@ -77,9 +77,11 @@ rm -f "$build_log"
 say "Embedding daemon"
 cp "$REPO/_build/default/bin/tsync.exe" "$APP/Contents/MacOS/tsync"
 chmod +x "$APP/Contents/MacOS/tsync"
-mkdir -p "$APP/Contents/Library/LaunchAgents"
-cp "$MACOS_DIR/LaunchAgents/org.feverdreamtv.tsync.daemon.plist" \
-    "$APP/Contents/Library/LaunchAgents/"
+# Shipped in the bundle so the installer's postinstall and deploy.sh share one
+# implementation, and so it can be re-run to repair the agent.
+mkdir -p "$APP/Contents/Resources"
+cp "$MACOS_DIR/install-agent.sh" "$APP/Contents/Resources/install-agent.sh"
+chmod +x "$APP/Contents/Resources/install-agent.sh"
 
 # The daemon links Homebrew dylibs (openssl, gmp, pcre2, libev, xxhash) that are
 # not present on a user's machine. Copy them in and rewrite the install names.

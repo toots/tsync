@@ -22,6 +22,7 @@ rm -rf /Applications/TsyncApp.app
 cp -R "$APP" /Applications/
 
 say "Starting"
+/Applications/TsyncApp.app/Contents/Resources/install-agent.sh
 open /Applications/TsyncApp.app
 
 SOCK="$HOME/Library/Group Containers/group.org.feverdreamtv.tsync/tsync/tsync.sock"

@@ -101,9 +101,14 @@ let purge (_ : (module Conf.S)) =
       "purge failed: TsyncApp did not unregister its domains (see Console for \
        org.feverdreamtv.tsync)\n";
     exit 1);
-  (* The app unregisters both SMAppService services while handling the marker;
-     bootout only makes sure the daemon is gone before the bundle is deleted. *)
+  (* The app unregisters its own login item while handling the marker. The
+     daemon is a plain LaunchAgent, so its plist has to go too. *)
   ignore (sh "launchctl bootout \"gui/$(id -u)/%s\" 2>/dev/null" daemon_label);
+  let agent_plist =
+    Filename.concat (Sys.getenv "HOME")
+      (Filename.concat "Library/LaunchAgents" (daemon_label ^ ".plist"))
+  in
+  if Sys.file_exists agent_plist then Sys.remove agent_plist;
   if
     not
       (sh "rm -rf %s %s"
