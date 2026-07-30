@@ -53,11 +53,13 @@ if [[ -z "${AC_API_KEY_PATH:-}" ]]; then
 fi
 
 say "Notarizing (this takes a few minutes)"
+# --wait blocks indefinitely by default; bound it so a stalled submission fails
+# the build instead of holding a runner.
 xcrun notarytool submit "$PKG" \
     --key "$AC_API_KEY_PATH" \
     --key-id "$AC_API_KEY_ID" \
     --issuer "$AC_API_ISSUER_ID" \
-    --wait
+    --wait --timeout 30m
 
 xcrun stapler staple "$PKG"
 xcrun stapler validate "$PKG"

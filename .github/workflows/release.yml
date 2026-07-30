@@ -19,6 +19,9 @@ jobs:
       github.event_name == 'workflow_dispatch'
       || github.event.workflow_run.conclusion == 'success'
     runs-on: macos-latest
+    # A keychain prompt or a stalled notarization otherwise sits until the
+    # 6-hour job cap, and blocks every queued release behind it.
+    timeout-minutes: 60
     permissions:
       contents: write
     env:
@@ -58,9 +61,11 @@ jobs:
           security unlock-keychain -p "$password" "$keychain"
           security list-keychains -d user -s "$keychain" $(security list-keychains -d user | tr -d '"')
 
+          # -A, not -T codesign: pkgbuild needs the Installer key too, and any
+          # tool missing from the ACL raises a keychain prompt that hangs the
+          # runner forever. This keychain is a throwaway in RUNNER_TEMP.
           echo "$CERT_P12" | base64 -d > "$RUNNER_TEMP/cert.p12"
-          security import "$RUNNER_TEMP/cert.p12" -k "$keychain" -P "$CERT_PASSWORD" \
-            -T /usr/bin/codesign
+          security import "$RUNNER_TEMP/cert.p12" -k "$keychain" -P "$CERT_PASSWORD" -A
           security set-key-partition-list -S apple-tool:,apple:,codesign: \
             -s -k "$password" "$keychain" >/dev/null
 

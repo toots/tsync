@@ -69,10 +69,16 @@ BUILT_PRODUCTS=$(xcodebuild "${XCODE_FLAGS[@]}" -showBuildSettings 2>/dev/null \
     | awk '$1 == "BUILT_PRODUCTS_DIR" {print $3}')
 APP="$BUILT_PRODUCTS/TsyncApp.app"
 
-build_log=$(mktemp)
-xcodebuild "${XCODE_FLAGS[@]}" -jobs "${JOBS:-12}" >"$build_log" 2>&1 \
-    || { cat "$build_log" >&2; rm -f "$build_log"; exit 1; }
-rm -f "$build_log"
+# Quiet locally, streamed on CI: a captured log tells you nothing about a build
+# that never finishes.
+if [[ -n "${CI:-}" ]]; then
+    xcodebuild "${XCODE_FLAGS[@]}" -jobs "${JOBS:-12}"
+else
+    build_log=$(mktemp)
+    xcodebuild "${XCODE_FLAGS[@]}" -jobs "${JOBS:-12}" >"$build_log" 2>&1 \
+        || { cat "$build_log" >&2; rm -f "$build_log"; exit 1; }
+    rm -f "$build_log"
+fi
 
 say "Embedding daemon"
 cp "$REPO/_build/default/bin/tsync.exe" "$APP/Contents/MacOS/tsync"
