@@ -90,9 +90,13 @@ jobs:
         run: opam exec -- dune build
       - name: Run tests
         run: opam exec -- dune test
+      # Compile-only check that the Swift targets still build. Assembling the
+      # bundle — embedding the daemon, dylibbundler, signing, packaging — is
+      # exercised by the release workflow, which has the signing credentials.
       - name: Build macOS app
         run: |
-          brew install dylibbundler
           make generate
-          opam exec -- ./build.sh
+          xcodebuild -project tsync.xcodeproj -scheme TsyncApp \
+            -configuration Debug -destination 'platform=macOS' \
+            CODE_SIGNING_ALLOWED=NO
         working-directory: macos
