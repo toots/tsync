@@ -6,7 +6,7 @@
    interrupted run resumes. The cache's chunk store works too — the placement
    only ever looks at a file's own name.
 
-   Usage: migrate [--journal] <dir> [<dir>...] *)
+   Usage: migrate [--journal] [--verbose] <dir> [<dir>...] *)
 
 (* What a store holds, and where it belongs. *)
 type kind = {
@@ -53,12 +53,20 @@ let moved = ref 0
 let placed = ref 0
 let dropped = ref 0
 let skipped = ref 0
+let verbose = ref false
 let shards : (string, unit) Hashtbl.t = Hashtbl.create 4096
+
+(* Every rename, one line. Buffered: a store with millions of chunks would spend
+   more time on the terminal than on the disk if each line were flushed. *)
+let say fmt = if !verbose then Printf.printf fmt else Printf.ifprintf stdout fmt
 
 let ensure_shard path =
   let dir = Filename.dirname path in
   if not (Hashtbl.mem shards dir) then (
-    (try Unix.mkdir dir 0o755 with Unix.Unix_error (Unix.EEXIST, _, _) -> ());
+    (try
+       Unix.mkdir dir 0o755;
+       say "  mkdir %s\n" dir
+     with Unix.Unix_error (Unix.EEXIST, _, _) -> ());
     Hashtbl.replace shards dir ())
 
 let size path = (Unix.stat path).Unix.st_size
@@ -70,6 +78,7 @@ let move (src, dst) =
        which means one of the two is not what its name says. *)
     if size src = size dst then (
       Unix.unlink src;
+      say "  drop %s (duplicate of %s)\n" src dst;
       incr dropped)
     else (
       Printf.eprintf "size mismatch, left in place: %s\n" src;
@@ -77,6 +86,7 @@ let move (src, dst) =
   else (
     ensure_shard dst;
     Unix.rename src dst;
+    say "  move %s -> %s\n" src dst;
     incr moved;
     if !moved mod 50_000 = 0 then (
       Printf.printf "  %d moved...\n" !moved;
@@ -113,11 +123,15 @@ let scan ~kind ~root dir others =
 
 let rec migrate_dir ~kind ~root dir =
   let others = Hashtbl.create 16 in
+  say "scan %s\n" dir;
   let rec passes () =
     let batch, here, more = scan ~kind ~root dir others in
+    say "  pass: %d to move, %d already placed%s\n" (List.length batch) here
+      (if more then ", more to come" else "");
     List.iter move batch;
     (* Placed files are counted on the final pass only — they are exactly the
-       ones every pass sees, so any earlier count would be a duplicate. *)
+       ones every pass sees, so any earlier count would be a duplicate. Which is
+       also why they get no line of their own: it would repeat every pass. *)
     if more then passes () else placed := !placed + here
   in
   passes ();
@@ -131,7 +145,10 @@ let rec migrate_dir ~kind ~root dir =
         migrate_dir ~kind ~root path;
         (* Emptied by the move — an old shard directory, or one this run created
            and then found nothing for. Fails harmlessly otherwise. *)
-        try Unix.rmdir path with Unix.Unix_error _ -> ())
+        try
+          Unix.rmdir path;
+          say "  rmdir %s\n" path
+        with Unix.Unix_error _ -> ())
       else (
         Printf.eprintf "not a %s, skipped: %s\n" kind.noun path;
         incr skipped))
@@ -140,9 +157,14 @@ let rec migrate_dir ~kind ~root dir =
 let () =
   let args = List.tl (Array.to_list Sys.argv) in
   let kind = if List.mem "--journal" args then journal else chunks in
-  let dirs = List.filter (fun a -> a <> "--journal") args in
+  verbose := List.mem "--verbose" args || List.mem "-v" args;
+  let dirs =
+    List.filter
+      (fun a -> not (List.mem a ["--journal"; "--verbose"; "-v"]))
+      args
+  in
   if dirs = [] then (
-    prerr_endline "usage: migrate [--journal] <dir> [<dir>...]";
+    prerr_endline "usage: migrate [--journal] [--verbose] <dir> [<dir>...]";
     exit 2);
   List.iter
     (fun dir ->
