@@ -51,6 +51,11 @@ let drain () = Lwt_list.iter_p (fun f -> f ()) !drain_hooks
 type member = {
   name : string;
   role : string;  (** main | replica | backfill | readOnly *)
+  backend_type : string;  (** local | s3 | gcs | http-proxy *)
+  config : (string * string) list;
+      (** what this store points at — a bucket, a URL, a path — with secret
+          fields masked. Diagnosing "which store is this?" needs the answer, and
+          a report gets pasted into bug threads. *)
   backend : (module S);
       (** the leaf store, so a reader can probe it directly *)
   pending : (unit -> int) option;  (** backfill: jobs queued for this target *)

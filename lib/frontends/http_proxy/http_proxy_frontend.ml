@@ -68,7 +68,11 @@ type route = {
   serve_share : share_handler option;
       (** [None] when this domain has no shares *)
   socket_path : string;  (** the mount daemon's socket, if one runs here *)
-  diagnose : totals:bool -> mount:Yojson.Safe.t -> Yojson.Safe.t Lwt.t;
+  domain_name : string;
+  self_frontend : Yojson.Safe.t;
+      (** what this listener is for this domain: the settings that differ per
+          domain, the shared process figures being reported once at the top *)
+  diagnose : totals:bool -> frontends:Yojson.Safe.t list -> Yojson.Safe.t Lwt.t;
       (** this domain's section of the status report *)
 }
 
@@ -135,16 +139,20 @@ let make_route bindings (b : Frontend.binding) =
     all_backends = C.backends;
     serve_share;
     socket_path = C.socket_path;
+    domain_name = C.domain_name;
+    self_frontend =
+      `Assoc
+        [
+          ("type", `String implementation);
+          (* The listener itself is reported once, at the top: it is shared. *)
+          ("shared", `Bool true);
+          ("reachable", `Bool true);
+          ("readOnly", `Bool read_only);
+          ("shares", `Bool (serve_share <> None));
+          ("options", `Assoc options);
+        ];
     diagnose =
-      (fun ~totals ~mount ->
-        Diag.domain_json ~totals ~mount
-          ~extra:
-            [
-              ("readOnly", `Bool read_only);
-              ("shares", `Bool (serve_share <> None));
-              ("options", `Assoc options);
-            ]
-          ());
+      (fun ~totals ~frontends -> Diag.domain_json ~totals ~frontends ());
   }
 
 (* ── Request handling ───────────────────────────────────────────────────────── *)
@@ -389,19 +397,24 @@ let share_request routes uri =
 
 (* ── Status ─────────────────────────────────────────────────────────────────── *)
 
-(* The mount daemon serving this domain on this host, when there is one. Absent is
-   the normal case for a server that does not also mount.
+(* The other frontend serving this domain on this host — a mount daemon — when
+   there is one. Absent is the normal case for a server that does not also mount.
 
    Its queues are only half of what is worth taking: a domain's frontends run as
    separate processes, so {!Metrics} counts per process and the bytes a mount moves
    are invisible here. On a host that both mounts and serves, a movie streamed
    through the mount is *its* traffic, and the proxy reporting only its own would
    say "no traffic" about a machine that is busy. So its transfer figures and
-   process cost come across too, kept under the domain's [mount] section where they
-   are plainly attributed rather than added to ours. *)
+   process cost come across too, attributed to it in the domain's [frontends]
+   rather than added to ours. *)
 let fetch_mount ~socket_path =
   let unreachable msg =
-    `Assoc [("reachable", `Bool false); ("error", `String msg)]
+    `Assoc
+      [
+        ("reachable", `Bool false);
+        ("socketPath", `String socket_path);
+        ("error", `String msg);
+      ]
   in
   Lwt.catch
     (fun () ->
@@ -426,9 +439,9 @@ let fetch_mount ~socket_path =
       in
       match json |> member "domains" with
         | `List (d :: _) -> (
-            match d |> member "mount" with
-              | `Assoc fields -> `Assoc (fields @ carried)
-              | _ -> unreachable "daemon reported no mount section")
+            match d |> member "frontends" with
+              | `List (`Assoc fields :: _) -> `Assoc (fields @ carried)
+              | _ -> unreachable "daemon reported no frontend")
         | _ -> unreachable "daemon reported no domains")
     (fun exn ->
       Lwt.return
@@ -437,19 +450,31 @@ let fetch_mount ~socket_path =
              | Lwt_unix.Timeout -> "timed out"
              | exn -> Printexc.to_string exn)))
 
+(* This listener serves every domain configured on it, so its cpu, its bytes and
+   its request counts are one set of numbers covering all of them — they cannot
+   honestly be filed under any single domain. Hence one labelled block at the top
+   saying which domains it serves, while each domain lists the settings that are
+   its own. *)
 let status_json ~port ~tls ~totals routes =
   let+ domains =
     Lwt_list.map_p
       (fun route ->
         let* mount = fetch_mount ~socket_path:route.socket_path in
-        route.diagnose ~totals ~mount)
+        route.diagnose ~totals ~frontends:[route.self_frontend; mount])
       routes
   in
   `Assoc
-    (Diagnostics.process_json
-       ~extra:[("port", `Int port); ("tls", `Bool tls)]
+    (Diagnostics.self_json
+       ~extra:
+         [
+           ("frontend", `String implementation);
+           ("port", `Int port);
+           ("tls", `Bool tls);
+           ("serves", `List (List.map (fun r -> `String r.domain_name) routes));
+           ("requests", counters_json ());
+         ]
        ()
-    @ [("requests", counters_json ()); ("domains", `List domains)])
+    @ [("domains", `List domains)])
 
 (* The report is listener-wide rather than domain-scoped, so any secret that signs
    for this listener authorizes it — there is no key to route on. Text and JSON are

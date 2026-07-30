@@ -171,6 +171,20 @@ let build_backends (d : Conf_parsing.domain) : (module Backend.S) list =
          {
            Backend.name = bc.name;
            role = Conf_parsing.role_name bc.role;
+           backend_type = bc.backend_type;
+           (* Masked by the same rule [tsync print-config] uses, so a report can
+              say which bucket or URL this is without carrying a credential. *)
+           config =
+             List.map
+               (fun (k, v) ->
+                 match
+                   Option.bind
+                     (Backend.spec_for bc.backend_type)
+                     (List.find_opt (fun (s : Backend.field_spec) -> s.name = k))
+                 with
+                   | Some { secret = true; _ } when v <> "" -> (k, "***")
+                   | _ -> (k, v))
+               bc.fields;
            backend;
            pending = stat (fun s -> s.Backfill_backend.queued);
            in_flight = stat (fun s -> s.Backfill_backend.in_flight);

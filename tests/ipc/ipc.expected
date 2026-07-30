@@ -68,6 +68,6 @@
   sections: server process lwt traffic domains
   domain "test": cache=0 journal.localPending=0
   backend "backend" ("main"): reachable=true journal.behind=0
-  mount: reachable=true stagedFiles=0 dirtyFiles=0 metaLocked=false metaWaiting=false
+  frontend "test": reachable=true stagedFiles=0 dirtyFiles=0 metaLocked=false metaWaiting=false
   renders as text: true
 

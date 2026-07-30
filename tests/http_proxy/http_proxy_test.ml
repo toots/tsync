@@ -179,7 +179,9 @@ let () =
       all_backends = [];
       serve_share = None;
       socket_path = "/nonexistent/tsync.sock";
-      diagnose = (fun ~totals:_ ~mount:_ -> Lwt.return (`Assoc []));
+      domain_name = "one";
+      self_frontend = `Assoc [];
+      diagnose = (fun ~totals:_ ~frontends:_ -> Lwt.return (`Assoc []));
     }
   in
   let routes = [route "one"; route "two"] in
@@ -272,6 +274,8 @@ let () =
       {
         Backend.name = "disk";
         role = "main";
+        backend_type = "local";
+        config = [("path", status_root ^ "/store")];
         backend = List.hd C.backends;
         pending = None;
         in_flight = None;
@@ -283,6 +287,10 @@ let () =
       {
         Backend.name = "archive";
         role = "backfill";
+        backend_type = "http-proxy";
+        (* A remote store, so the report has to say where it points — and the
+           secret must not be what it says. *)
+        config = [("url", "https://nas.example:8443"); ("secret", "***")];
         backend = (module Down);
         pending = Some (fun () -> 7);
         in_flight = Some (fun () -> 2);
@@ -308,15 +316,14 @@ let () =
   let r = report () in
   List.iter
     (fun key -> assert (json_member key r <> `Null))
-    [
-      "server";
-      "process";
-      "lwt";
-      "traffic";
-      "requests";
-      "recentErrors";
-      "domains";
-    ];
+    ["server"; "process"; "lwt"; "traffic"; "recentErrors"; "domains"];
+  (* The answering process says which frontend it is and which domains that
+     covers: a shared listener's cpu and counters belong to all of them, so they
+     are reported here and not filed under one domain. *)
+  let server = json_member "server" r in
+  assert (json_member "frontend" server = `String "http-proxy");
+  assert (json_member "serves" server = `List [`String "statusdom"]);
+  assert (json_member "requests" server <> `Null);
   let domain =
     match json_member "domains" r with
       | `List [d] -> d
@@ -326,13 +333,28 @@ let () =
   assert (json_member "clientName" domain = `String "test-client");
   (* Config as this process resolved it, not as a file spells it. *)
   assert (json_member "maxDownloads" domain = `Int 3);
+  (* The listener appears as one of the domain's frontends, carrying the settings
+     that are this domain's — the shared process figures being reported once, at
+     the top. *)
+  let frontends =
+    match json_member "frontends" domain with `List l -> l | _ -> []
+  in
+  let proxy_frontend =
+    List.find (fun f -> json_member "type" f = `String "http-proxy") frontends
+  in
+  assert (json_member "shared" proxy_frontend = `Bool true);
   (* The shared secret must not leave the process, even to an authorized caller:
      a report gets pasted into bug threads. *)
-  let options = json_member "options" domain in
+  let options = json_member "options" proxy_frontend in
   assert (json_member "secret" options = `String "***");
   assert (json_member "port" options = `String "8443");
-  (* Nothing listens on the socket, so the mount is reported absent, not awaited. *)
-  assert (json_member "reachable" (json_member "mount" domain) = `Bool false);
+  (* Nothing listens on the socket, so the other frontend is reported as not
+     answering — named by the socket it was asked on — rather than awaited. *)
+  let mount_frontend =
+    List.find (fun f -> json_member "type" f <> `String "http-proxy") frontends
+  in
+  assert (json_member "reachable" mount_frontend = `Bool false);
+  assert (json_member "socketPath" mount_frontend <> `Null);
   let backends =
     match json_member "backends" domain with `List l -> l | _ -> []
   in
@@ -384,18 +406,23 @@ let () =
      actually reviewed. This one stays an assertion because a snapshot can be
      promoted without being read, and a leaked shared secret must not be able to
      ride in on a promote. *)
-  assert (json_member "secret" (json_member "options" domain) = `String "***");
+  assert (
+    json_member "secret" (json_member "options" proxy_frontend) = `String "***");
+  (* The same rule for a backend that points at a remote server. *)
+  assert (
+    json_member "secret" (json_member "config" (by_name "archive"))
+    = `String "***");
 
   (* A domain's frontends are separate processes with separate counters, so the
      bytes a mount moves are invisible to the proxy's own metrics. They are carried
-     over IPC and reported under the mount, attributed to it — a page that showed
-     only its own zero would say "no traffic" about a busy machine. Shaped as the
-     daemon actually answers. *)
+     over IPC and reported as that frontend's own — a page showing only its own
+     zero would say "no traffic" about a busy machine. Shaped as the daemon
+     actually answers. *)
   let mount_fixture =
     `Assoc
       [
+        ("type", `String "fuse");
         ("reachable", `Bool true);
-        ("frontend", `String "fuse");
         ("mountPoint", `String "/home/u/tsync/statusdom");
         ("stagedFiles", `Int 0);
         ("pendingUploads", `Int 2);
@@ -463,5 +490,24 @@ let () =
   (* The same report on a host that also mounts the domain. *)
   print_endline "########## /stats with a mount daemon ##########";
   print_string
-    (Diagnostics.text (substitute ~values:[("mount", mount_fixture)] stable));
+    (Diagnostics.text
+       (substitute
+          ~values:
+            [
+              ( "frontends",
+                `List
+                  [
+                    `Assoc
+                      [
+                        ("type", `String "http-proxy");
+                        ("shared", `Bool true);
+                        ("reachable", `Bool true);
+                        ("readOnly", `Bool false);
+                        ("shares", `Bool false);
+                        ("options", `Assoc [("port", `String "8443")]);
+                      ];
+                    mount_fixture;
+                  ] );
+            ]
+          stable));
   print_endline "http_proxy_test ok"

@@ -25,9 +25,18 @@ let journal_sample = 1000
 
 (* ── Process-wide sections ──────────────────────────────────────────────── *)
 
-(* [extra] is what the caller knows and this module cannot: the http-proxy's
-   listening port, its request counters. *)
-let process_json ?(extra = []) () =
+(* The frontend answering this request, and everything true of it as a process.
+
+   It sits at the top rather than under a domain because a frontend need not
+   belong to one: an http-proxy listener serves every domain configured on it, so
+   its cpu, its bytes and its request counts cover all of them at once. Which
+   domains those are is [serves], stated rather than implied. A fuse mount is
+   per-domain and appears again in that domain's [frontends], with the figures
+   only it knows.
+
+   [extra] is what the caller knows and this module cannot: the frontend's type,
+   its listening port, its request counters. *)
+let self_json ?(extra = []) () =
   let uptime = Unix.gettimeofday () -. started_at in
   let cpu = Metrics.cpu_seconds () in
   let gc = Metrics.gc_stats () in
@@ -279,7 +288,12 @@ module Make (C : Conf.S) = struct
         | _ -> []
     in
     `Assoc
-      ((("name", `String m.Backend.name) :: ("role", `String m.role) :: probed)
+      (("name", `String m.Backend.name)
+       :: ("type", `String m.backend_type)
+       :: ("role", `String m.role)
+       :: ( "config",
+            `Assoc (List.map (fun (k, v) -> (k, `String v)) m.Backend.config) )
+       :: probed
       @ [("journal", jrnl)]
       @ disk_json m @ backfill @ tot)
 
@@ -359,7 +373,12 @@ module Make (C : Conf.S) = struct
      its serve-side readOnly, whether it serves shares, and its options. [mount]
      is the mount daemon's own queues: supplied directly when this *is* that
      daemon, and fetched over IPC when a proxy is reporting on one. *)
-  let domain_json ?(totals = false) ?(extra = []) ?mount () =
+  (* [frontends] are the frontends serving this domain, each reporting what only
+     it knows. A per-domain frontend (a fuse mount) is a process of its own, so it
+     carries its own cpu and its own transfer figures; a shared listener (the
+     http-proxy) contributes only its per-domain settings here and reports itself
+     once, at the top. *)
+  let domain_json ?(totals = false) ?(extra = []) ?(frontends = []) () =
     let* cache = cache_json ~totals in
     let* pending = local_pending () in
     let+ backends =
@@ -371,9 +390,9 @@ module Make (C : Conf.S) = struct
       @ [
           ("cache", cache);
           ("journal", `Assoc [("localPending", `Int pending)]);
+          ("frontends", `List frontends);
           ("backends", `List backends);
-        ]
-      @ match mount with Some m -> [("mount", m)] | None -> [])
+        ])
 end
 
 (* ── Text rendering ─────────────────────────────────────────────────────── *)
@@ -420,16 +439,29 @@ let text json =
   let proc = mem json "process" in
   let lwt = mem json "lwt" in
   let traffic = mem json "traffic" in
-  line 0 "tsync %s (pid %d), up %s"
-    (str ~default:"?" (mem server "hostname"))
-    (int_of (mem server "pid"))
-    (duration (num (mem server "uptimeSeconds")));
+  (* The process answering, named as the frontend it is. Everything under this
+     heading is its own; a shared listener says so and lists what it serves, so no
+     figure here is mistaken for one domain's. *)
+  line 0 "Frontend %s on %s (this process)"
+    (str ~default:"?" (mem server "frontend"))
+    (str ~default:"?" (mem server "hostname"));
   (match mem server "port" with
     | `Null -> ()
     | p ->
         row 2 "listener"
           (Printf.sprintf "port %d, %s" (int_of p)
              (if bool_of (mem server "tls") then "https" else "http")));
+  (match mem server "serves" with
+    | `List domains when domains <> [] ->
+        row 2 "serving"
+          (Printf.sprintf "%d domain%s: %s" (List.length domains)
+             (if List.length domains = 1 then "" else "s")
+             (String.concat ", " (List.map str domains)))
+    | _ -> ());
+  row 2 "process"
+    (Printf.sprintf "pid %d, up %s"
+       (int_of (mem server "pid"))
+       (duration (num (mem server "uptimeSeconds"))));
   row 2 "cpu"
     (Printf.sprintf "%.1fs (%.1f%% avg)"
        (num (mem proc "cpuSeconds"))
@@ -449,25 +481,34 @@ let text json =
        (int_of (mem lwt "writableFds"))
        (int_of (mem lwt "timers"))
        (int_of (mem lwt "poolSize")));
-  line 0 "";
-  line 0 "Traffic";
-  row 2 "uploaded"
-    (Printf.sprintf "%s (%s/s)"
+  row 2 "traffic"
+    (Printf.sprintf "up %s (%s/s), down %s (%s/s)"
        (Metrics.human_bytes (int_of (mem traffic "bytesUploaded")))
-       (Metrics.human_bytes (int_of (mem traffic "uploadBytesPerSec"))));
-  row 2 "downloaded"
-    (Printf.sprintf "%s (%s/s)"
+       (Metrics.human_bytes (int_of (mem traffic "uploadBytesPerSec")))
        (Metrics.human_bytes (int_of (mem traffic "bytesDownloaded")))
        (Metrics.human_bytes (int_of (mem traffic "downloadBytesPerSec"))));
   row 2 "hashed"
     (Printf.sprintf "%d chunks (%d/s)"
        (int_of (mem traffic "chunksHashed"))
        (int_of (mem traffic "hashesPerSec")));
-  (match mem json "requests" with
+  (match mem server "requests" with
     | `Assoc fields ->
-        line 0 "";
-        line 0 "Requests";
-        List.iter (fun (k, v) -> row 2 k (string_of_int (int_of v))) fields
+        (* Served since start, plus what is in flight right now. *)
+        let in_flight, served =
+          List.partition (fun (k, _) -> k = "inFlight") fields
+        in
+        row 2 "requests"
+          (Printf.sprintf "%s%s"
+             (if served = [] then "none served"
+              else
+                String.concat ", "
+                  (List.map
+                     (fun (k, v) -> Printf.sprintf "%d %s" (int_of v) k)
+                     served))
+             (match in_flight with
+               | [(_, v)] when int_of v > 0 ->
+                   Printf.sprintf " (%d in flight)" (int_of v)
+               | _ -> ""))
     | _ -> ());
   let domains = match mem json "domains" with `List l -> l | _ -> [] in
   List.iter
@@ -489,10 +530,6 @@ let text json =
            (int_of (mem d "maxDownloads")));
       row 2 "cache root" (str (mem d "cacheRoot"));
       row 2 "socket" (str (mem d "socketPath"));
-      (match mem d "options" with
-        | `Assoc opts ->
-            List.iter (fun (k, v) -> row 2 ("option " ^ k) (str v)) opts
-        | _ -> ());
       let cache = mem d "cache" in
       line 2 "Cache";
       row 4 "chunks"
@@ -506,9 +543,125 @@ let text json =
       row 4 "unpublished"
         (Printf.sprintf "%d journal entries"
            (int_of (mem (mem d "journal") "localPending")));
+      (* Every frontend serving this domain, then every backend behind it. A
+         shared listener contributes its per-domain settings here and points at
+         the block above for the figures it cannot attribute to one domain. *)
+      List.iter
+        (fun f ->
+          line 2 "Frontend %s%s"
+            (str ~default:"(unknown)" (mem f "type"))
+            (if bool_of (mem f "shared") then " (shared listener, see above)"
+             else "");
+          if not (bool_of (mem f "reachable")) then
+            row 4 "NOT ANSWERING"
+              (Printf.sprintf "%s%s"
+                 (match mem f "socketPath" with
+                   | `String p -> p ^ ": "
+                   | _ -> "")
+                 (str ~default:"no answer" (mem f "error")))
+          else begin
+            (match mem f "pid" with
+              | `Null -> ()
+              | pid ->
+                  row 4 "process"
+                    (Printf.sprintf "pid %d, up %s, %.1fs cpu, %s rss"
+                       (int_of pid)
+                       (duration (num (mem f "uptimeSeconds")))
+                       (num (mem f "cpuSeconds"))
+                       (Metrics.human_bytes (int_of (mem f "rssBytes")))));
+            (match mem f "traffic" with
+              | `Null -> ()
+              | t ->
+                  row 4 "traffic"
+                    (Printf.sprintf "up %s (%s/s), down %s (%s/s)"
+                       (Metrics.human_bytes (int_of (mem t "bytesUploaded")))
+                       (Metrics.human_bytes
+                          (int_of (mem t "uploadBytesPerSec")))
+                       (Metrics.human_bytes (int_of (mem t "bytesDownloaded")))
+                       (Metrics.human_bytes
+                          (int_of (mem t "downloadBytesPerSec")))));
+            List.iter
+              (fun (label, total_key, rate_key) ->
+                match mem f total_key with
+                  | `Null -> ()
+                  | v ->
+                      row 4 label
+                        (Printf.sprintf "%s (%s/s)"
+                           (Metrics.human_bytes (int_of v))
+                           (Metrics.human_bytes (int_of (mem f rate_key)))))
+              [
+                ("read", "bytesRead", "bytesReadPerSec");
+                ("written", "bytesWritten", "bytesWrittenPerSec");
+              ];
+            (match mem f "openHandles" with
+              | `Null -> ()
+              | v ->
+                  row 4 "handles"
+                    (Printf.sprintf "%d open, %d since start" (int_of v)
+                       (int_of (mem f "filesOpened"))));
+            (match mem f "metaLocked" with
+              | `Null -> ()
+              | locked ->
+                  row 4 "metadata lock"
+                    (if bool_of locked then
+                       if bool_of (mem f "metaWaiting") then
+                         "HELD, callers waiting"
+                       else "held"
+                     else "free"));
+            (* What this listener refuses or serves for this domain, as opposed to
+               what the domain itself is. *)
+            (match mem f "readOnly" with
+              | `Bool true -> row 4 "read-only" "yes, for proxy clients"
+              | _ -> ());
+            (match mem f "shares" with
+              | `Bool b -> row 4 "public shares" (if b then "served" else "off")
+              | _ -> ());
+            (match mem f "options" with
+              | `Assoc opts ->
+                  List.iter (fun (k, v) -> row 4 ("option " ^ k) (str v)) opts
+              | _ -> ());
+            (* Queue depths and anything else a frontend reports that this
+               renderer knows nothing about. *)
+            List.iter
+              (fun (k, v) ->
+                let is_bytes =
+                  let has sub =
+                    let n = String.length sub and len = String.length k in
+                    let rec at i =
+                      i + n <= len && (String.sub k i n = sub || at (i + 1))
+                    in
+                    at 0
+                  in
+                  has "bytes" || has "Bytes"
+                in
+                match (k, v) with
+                  | ( ( "type" | "shared" | "reachable" | "socketPath" | "error"
+                      | "frontend" | "pid" | "uptimeSeconds" | "cpuSeconds"
+                      | "rssBytes" | "traffic" | "bytesRead" | "bytesWritten"
+                      | "bytesReadPerSec" | "bytesWrittenPerSec" | "openHandles"
+                      | "filesOpened" | "metaLocked" | "metaWaiting" | "options"
+                      | "readOnly" | "shares" ),
+                      _ ) ->
+                      ()
+                  | _, `String s -> row 4 k s
+                  | _, `Int n when is_bytes -> row 4 k (Metrics.human_bytes n)
+                  | _, `Int n -> row 4 k (string_of_int n)
+                  | _, `Bool bo -> row 4 k (string_of_bool bo)
+                  | _, v -> row 4 k (Yojson.Safe.to_string v))
+              (match f with `Assoc fields -> fields | _ -> [])
+          end)
+        (match mem d "frontends" with `List l -> l | _ -> []);
       List.iter
         (fun m ->
-          line 2 "Backend %s (%s)" (str (mem m "name")) (str (mem m "role"));
+          line 2 "Backend %s (%s, %s)"
+            (str (mem m "name"))
+            (str (mem m "type"))
+            (str (mem m "role"));
+          (* What this store points at, so "which bucket is this?" has an answer. *)
+            (match mem m "config" with
+            | `Assoc fields when fields <> [] ->
+                List.iter (fun (k, v) -> row 4 k (str v)) fields
+            | _ -> ());
           if bool_of (mem m "reachable") then
             row 4 "reachable"
               (Printf.sprintf "yes (%.0f ms)" (num (mem m "latencyMs")))
@@ -563,101 +716,7 @@ let text json =
                              | age ->
                                  Printf.sprintf ", as of %s ago"
                                    (duration (num age))))))
-        (match mem d "backends" with `List l -> l | _ -> []);
-      match mem d "mount" with
-        | `Null -> ()
-        | m ->
-            (* A separate process with its own counters, so its figures are shown
-               under its own heading rather than folded into ours. *)
-            line 2 "Mount daemon%s"
-              (match mem m "frontend" with
-                | `String f -> Printf.sprintf " (%s)" f
-                | _ -> "");
-            if not (bool_of (mem m "reachable")) then
-              row 4 "unreachable" (str ~default:"no answer" (mem m "error"))
-            else begin
-              (match mem m "pid" with
-                | `Null -> ()
-                | pid ->
-                    row 4 "process"
-                      (Printf.sprintf "pid %d, up %s, %.1fs cpu, %s rss"
-                         (int_of pid)
-                         (duration (num (mem m "uptimeSeconds")))
-                         (num (mem m "cpuSeconds"))
-                         (Metrics.human_bytes (int_of (mem m "rssBytes")))));
-              (match mem m "traffic" with
-                | `Null -> ()
-                | t ->
-                    row 4 "uploaded"
-                      (Printf.sprintf "%s (%s/s)"
-                         (Metrics.human_bytes (int_of (mem t "bytesUploaded")))
-                         (Metrics.human_bytes
-                            (int_of (mem t "uploadBytesPerSec"))));
-                    row 4 "downloaded"
-                      (Printf.sprintf "%s (%s/s)"
-                         (Metrics.human_bytes
-                            (int_of (mem t "bytesDownloaded")))
-                         (Metrics.human_bytes
-                            (int_of (mem t "downloadBytesPerSec"))));
-                    row 4 "hashed"
-                      (Printf.sprintf "%d chunks (%d/s)"
-                         (int_of (mem t "chunksHashed"))
-                         (int_of (mem t "hashesPerSec"))));
-              (* Volume through the frontend itself — what fuse serves out of the
-                 chunk cache never touches a backend, so this is the only place it
-                 shows up. Paired with its rate: whether the mount is busy *now* is
-                 what a total cannot say. *)
-              List.iter
-                (fun (label, total_key, rate_key) ->
-                  match mem m total_key with
-                    | `Null -> ()
-                    | v ->
-                        row 4 label
-                          (Printf.sprintf "%s (%s/s)"
-                             (Metrics.human_bytes (int_of v))
-                             (Metrics.human_bytes (int_of (mem m rate_key)))))
-                [
-                  ("read", "bytesRead", "bytesReadPerSec");
-                  ("written", "bytesWritten", "bytesWrittenPerSec");
-                ];
-              (match mem m "openHandles" with
-                | `Null -> ()
-                | v ->
-                    row 4 "handles"
-                      (Printf.sprintf "%d open, %d since start" (int_of v)
-                         (int_of (mem m "filesOpened"))));
-              (* Whatever else the frontend reported — queue depths, staged files,
-                 anything a future frontend adds — without this having to know it.
-                 A count of bytes is spelled as bytes wherever the name says so, so
-                 a new field does not arrive here as a bare integer. *)
-              List.iter
-                (fun (k, v) ->
-                  let is_bytes =
-                    (* "bytesRead", "rssBytes", "stagedBytes"… *)
-                    let has sub =
-                      let n = String.length sub and len = String.length k in
-                      let rec at i =
-                        i + n <= len && (String.sub k i n = sub || at (i + 1))
-                      in
-                      at 0
-                    in
-                    has "bytes" || has "Bytes"
-                  in
-                  match (k, v) with
-                    | ( ( "reachable" | "frontend" | "pid" | "uptimeSeconds"
-                        | "cpuSeconds" | "rssBytes" | "traffic" | "bytesRead"
-                        | "bytesWritten" | "bytesReadPerSec"
-                        | "bytesWrittenPerSec" | "openHandles" | "filesOpened"
-                          ),
-                        _ ) ->
-                        ()
-                    | _, `String s -> row 4 k s
-                    | _, `Int n when is_bytes -> row 4 k (Metrics.human_bytes n)
-                    | _, `Int n -> row 4 k (string_of_int n)
-                    | _, `Bool b -> row 4 k (string_of_bool b)
-                    | _, v -> row 4 k (Yojson.Safe.to_string v))
-                (match m with `Assoc f -> f | _ -> [])
-            end)
+        (match mem d "backends" with `List l -> l | _ -> []))
     domains;
   (match mem json "recentErrors" with
     | `List [] | `Null -> ()

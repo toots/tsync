@@ -273,10 +273,24 @@ browsers only expose the signing primitive over HTTPS or on `localhost` — over
 another machine the page falls back to a signer built into it, which works but signs in the
 clear like every other request on that connection.
 
-The report says, per domain: the config as the daemon actually resolved it, the local chunk
-cache against `maxCache`, unpublished journal entries, and then per backend its reachability
-with latency, its journal backlog, and for a `backfill` target how far behind it is. It ends
-with the last warnings and errors from every subsystem, which is usually where the answer is.
+The report opens with the process answering it, named as the frontend it is. A listener serves
+every domain configured on it, so its cpu, its bytes and its request counts cover all of them
+at once — it says which domains those are rather than filing the numbers under one.
+
+Then each domain, with the config as the daemon actually resolved it, its local chunk cache
+against `maxCache`, unpublished journal entries, and two lists:
+
+- **Frontends** — everything serving that domain. The listener appears with the settings that
+  are this domain's (`readOnly`, `shares`); a fuse mount is a process of its own, so it
+  reports its own cpu, its own transfer figures, what it has read and written through the
+  mount, open handles, and its queues. A mount that should be there and isn't says so, with
+  the socket it was asked on.
+- **Backends** — every store behind it, by name, type and role, each saying what it points at
+  (bucket, URL or path, secrets masked), whether it answers and how fast, its journal backlog,
+  free space for a `local` store, and for a `backfill` target how far behind it is.
+
+It ends with the last warnings and errors from every subsystem, which is usually where the
+answer is.
 
 For scripts, `/api/v1/stats` is the same data with raw byte counts:
 

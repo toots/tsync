@@ -246,6 +246,8 @@ let setup_client (module C : Conf.S) root staging_prefix =
       {
         Backend.name = "backend";
         role = "main";
+        backend_type = "local";
+        config = [("path", Filename.concat root "backend")];
         backend = List.hd C.backends;
         pending = None;
         in_flight = None;
@@ -268,7 +270,9 @@ let setup_client (module C : Conf.S) root staging_prefix =
         changed = (fun _ -> ());
         full_resync = (fun () -> Lwt.return_unit);
         status_fields = (fun () -> []);
-        stats_fields = (fun () -> []);
+        (* Frontends name themselves in their stats, as fuse and file_provider do,
+           so the report can say whose numbers these are. *)
+        stats_fields = (fun () -> [("frontend", `String "test")]);
         on_stop = (fun () -> ());
       }
   in
@@ -1252,10 +1256,13 @@ let run_stats_scenario ?versioning ({ name; steps } : scenario) =
                  (Yojson.Safe.to_string (mem "behind" (mem "journal" b))))
              l
        | _ -> print_endline "  no backends reported");
-     let mount = mem "mount" domain in
+     let mount =
+       match mem "frontends" domain with `List (f :: _) -> f | _ -> `Null
+     in
      Printf.printf
-       "  mount: reachable=%s stagedFiles=%s dirtyFiles=%s metaLocked=%s \
+       "  frontend %s: reachable=%s stagedFiles=%s dirtyFiles=%s metaLocked=%s \
         metaWaiting=%s\n"
+       (Yojson.Safe.to_string (mem "frontend" mount))
        (Yojson.Safe.to_string (mem "reachable" mount))
        (Yojson.Safe.to_string (mem "stagedFiles" mount))
        (Yojson.Safe.to_string (mem "dirtyFiles" mount))

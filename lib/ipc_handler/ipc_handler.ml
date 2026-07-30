@@ -373,36 +373,49 @@ module Make (C : Conf.S) (F : File.S) = struct
                            :: hooks.status_fields ()))
                   | "stats" ->
                       (* The whole picture, assembled by {!Diagnostics} so a mount
-                         and an http-proxy server answer in one shape. What only
-                         this daemon knows — its queues and staged files — goes in
-                         as the domain's [mount] section, which is where a proxy
-                         asking us over IPC puts our answer too. [totals]
-                         enumerates the store, so it is asked for explicitly. *)
+                         and an http-proxy server answer in one shape. This daemon
+                         is one frontend of one domain, so it reports itself twice
+                         over: once at the top as the process answering, and once
+                         in the domain's [frontends] with the queues only it knows
+                         — which is where a proxy asking us over IPC picks it up.
+                         [totals] enumerates the store, so it is asked for
+                         explicitly. *)
                       let totals = get_str obj "arg" = "totals" in
                       let* staged = F.staged_count () in
-                      let mount =
-                        `Assoc
-                          (("reachable", `Bool true)
-                           :: [
-                                ( "pendingDownloads",
-                                  `Int (F.downloads_in_flight ()) );
-                                ("stagedFiles", `Int staged);
-                                ("dirtyFiles", `Int (F.dirty_count ()));
-                                ( "downloadsCompleted",
-                                  `Int (F.downloads_completed_count ()) );
-                                ("maxUploads", `Int C.max_uploads);
-                                ("maxDownloads", `Int C.max_downloads);
-                                (* A mount gone quiet while its backends answer
-                                   fine is usually this: the metadata lock held,
-                                   with callers queued behind it. *)
-                                ("metaLocked", `Bool (F.meta_locked ()));
-                                ("metaWaiting", `Bool (F.meta_waiters ()));
-                              ]
-                          @ hooks.stats_fields ())
+                      let queues =
+                        [
+                          ("reachable", `Bool true);
+                          ("pendingDownloads", `Int (F.downloads_in_flight ()));
+                          ("stagedFiles", `Int staged);
+                          ("dirtyFiles", `Int (F.dirty_count ()));
+                          ( "downloadsCompleted",
+                            `Int (F.downloads_completed_count ()) );
+                          ("maxUploads", `Int C.max_uploads);
+                          ("maxDownloads", `Int C.max_downloads);
+                          (* A mount gone quiet while its backends answer fine is
+                             usually this: the metadata lock held, with callers
+                             queued behind it. *)
+                          ("metaLocked", `Bool (F.meta_locked ()));
+                          ("metaWaiting", `Bool (F.meta_waiters ()));
+                        ]
+                        @ hooks.stats_fields ()
                       in
-                      let+ domain = Diag.domain_json ~totals ~mount () in
+                      let frontend_type =
+                        match List.assoc_opt "frontend" queues with
+                          | Some (`String t) -> t
+                          | _ -> "unknown"
+                      in
+                      let+ domain =
+                        Diag.domain_json ~totals ~frontends:[`Assoc queues] ()
+                      in
                       ok_json
-                        (Diagnostics.process_json ()
+                        (Diagnostics.self_json
+                           ~extra:
+                             [
+                               ("frontend", `String frontend_type);
+                               ("serves", `List [`String C.domain_name]);
+                             ]
+                           ()
                         @ [("domains", `List [domain])])
                   | "download_progress" ->
                       Lwt.return
