@@ -146,6 +146,11 @@ module Make_with_layout (C : Conf.S) (L : Layout.S) : S = struct
      rare for largely-unique source content. *)
   let known_chunks : (string, unit) Hashtbl.t = Hashtbl.create 4096
 
+  (* The backend key holding chunk [chunk_key]'s bytes. Sharded, so no single
+     directory holds the whole store on a filesystem backend. *)
+  let chunk_backend_key chunk_key =
+    C.chunk_prefix ^ Chunk_layout.relative_path chunk_key
+
   let chunk_exists ck =
     let (module Primary : Backend.S) = primary () in
     let+ head = Primary.head_opt ~key:ck () in
@@ -167,7 +172,7 @@ module Make_with_layout (C : Conf.S) (L : Layout.S) : S = struct
     in
     Metrics.add_hashed 1;
     let ck_rel = Manifest.chunk_key entry in
-    let ck = C.chunk_prefix ^ ck_rel in
+    let ck = chunk_backend_key ck_rel in
     let* known =
       if Hashtbl.mem known_chunks ck_rel then Lwt.return_true
       else chunk_exists ck
@@ -295,7 +300,7 @@ module Make_with_layout (C : Conf.S) (L : Layout.S) : S = struct
      the remote object is corrupt. *)
   let chunk_remote_ok ~chunk_key ~size =
     let (module Primary : Backend.S) = primary () in
-    let+ head = Primary.head_opt ~key:(C.chunk_prefix ^ chunk_key) () in
+    let+ head = Primary.head_opt ~key:(chunk_backend_key chunk_key) () in
     match head with Some h -> h.Backend.size = size | None -> false
 
   (* Fetch the remote manifest for [key] and republish [expected] when it is
@@ -337,7 +342,7 @@ module Make_with_layout (C : Conf.S) (L : Layout.S) : S = struct
           | None -> Lwt.return `Missing
           | Some data ->
               Log.info "recheck: re-uploading chunk %s" chunk_key;
-              let+ () = Bk.put ~key:(C.chunk_prefix ^ chunk_key) ~data in
+              let+ () = Bk.put ~key:(chunk_backend_key chunk_key) ~data in
               `Repaired
     in
     let* results =
@@ -376,7 +381,7 @@ module Make_with_layout (C : Conf.S) (L : Layout.S) : S = struct
   let get_chunk ~chunk_key =
     Lwt_pool.use chunk_download_pool (fun () ->
         let (module Primary : Backend.S) = primary () in
-        let+ data = Primary.get ~key:(C.chunk_prefix ^ chunk_key) () in
+        let+ data = Primary.get ~key:(chunk_backend_key chunk_key) () in
         Metrics.add_downloaded (String.length data);
         data)
 end

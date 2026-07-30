@@ -615,14 +615,18 @@ let expire_cmd =
          E.expire ~cutoff ())
     with
       | s ->
-          Printf.printf "Removed %d version(s), %d chunk(s); kept %d chunk(s)\n"
-            s.Expire.versions_deleted s.chunks_deleted s.chunks_kept
+          Printf.printf
+            "Removed %d version(s), %d chunk(s), %d journal entr(ies); kept %d \
+             chunk(s)\n"
+            s.Expire.versions_deleted s.chunks_deleted s.journal_deleted
+            s.chunks_kept
       | exception Failure msg -> Printf.eprintf "Error: %s\n" msg
   in
   Cmd.v
     (Cmd.info "expire"
        ~doc:
-         "Remove versions older than DATE, then garbage-collect unused chunks")
+         "Remove versions and journal entries older than DATE, then \
+          garbage-collect unused chunks")
     Term.(const run $ date_arg $ domain_arg)
 
 (* ── tsync sync ──────────────────────────────────────────────────────────── *)

@@ -23,7 +23,9 @@ let hex n = Printf.sprintf "%016x" n
 
 (* A chunk key is ["<16 hex>-<16 hex>"]; only distinctness matters here. *)
 let chunk n =
-  let key = chunk_prefix ^ hex n ^ "-" ^ hex (n + 1) in
+  let key =
+    chunk_prefix ^ Chunk_layout.relative_path (hex n ^ "-" ^ hex (n + 1))
+  in
   labels := (key, Printf.sprintf "c%d" n) :: !labels;
   key
 
@@ -45,9 +47,7 @@ let label key =
 (* A manifest body naming [chunks], or a symlink when [symlink] is given (a
    symlink is a chunkless manifest, which the chunk step must tolerate). *)
 let manifest ?symlink ~name chunks =
-  let keys =
-    List.map (fun k -> String.sub k (String.length chunk_prefix) 33) chunks
-  in
+  let keys = List.map Filename.basename chunks in
   Chunk_table.encode ~name
     ~size:(Int64.of_int (List.length keys * 4))
     ~chunk_size:4 ~mtime:0. ~h1:(hex 0) ~h2:(hex 1) ~symlink ~keys

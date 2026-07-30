@@ -66,8 +66,14 @@ def object_exists(key):
     return store.exists(key)
 
 
+# Chunk keys are fixed-length hex; the store shards them by their first
+# CHUNK_FANOUT characters. Must match lib/local_io/chunk_layout.ml.
+CHUNK_FANOUT = 3
+
+
 def chunk_key(chunk_prefix, key):
-    return chunk_prefix + key
+    shard = key[:CHUNK_FANOUT] if len(key) >= CHUNK_FANOUT else "_"
+    return f"{chunk_prefix}{shard}/{key}"
 
 
 # ── Inode navigation ────────────────────────────────────────────────────────

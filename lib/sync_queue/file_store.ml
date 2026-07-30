@@ -11,7 +11,7 @@ module Make (C : Conf.S) = struct
 
   let write_journal_entry ?entry_key ops =
     let ek = match entry_key with Some k -> k | None -> J.entry_key () in
-    let key = C.journal_prefix ^ ek in
+    let key = C.journal_prefix ^ Journal.relative_path ek in
     let+ () = Bk.put ~key ~data:(Journal.encode ops) in
     ek
 
@@ -47,15 +47,13 @@ module Make (C : Conf.S) = struct
   let list_journal_keys ?start_after () =
     let (module Primary : Backend.S) = primary () in
     let+ all = Primary.list_prefix ~prefix:C.journal_prefix () in
-    let prefix_len = String.length C.journal_prefix in
     let sa_base = Option.map Filename.basename start_after in
     List.filter_map
       (fun (e : Backend.file_entry) ->
-        let basename =
-          if String.length e.key > prefix_len then
-            String.sub e.key prefix_len (String.length e.key - prefix_len)
-          else e.key
-        in
+        (* Entries sit in month directories ({!Journal.relative_path}); the entry
+           key is the last segment, and comparing those still orders the journal
+           chronologically. *)
+        let basename = Filename.basename e.key in
         match sa_base with
           | Some sa when basename <= sa -> None
           | _ -> (
@@ -64,10 +62,14 @@ module Make (C : Conf.S) = struct
                 Some (basename, Journal.client_uuid_of_filename basename)
               with _ -> None))
       all
+    (* Callers apply entries in the order returned, and applying two ops out of
+       order diverges local state. Sorted here rather than trusted from the
+       backend: a filesystem backend lists in readdir order, which is arbitrary. *)
+    |> List.sort (fun (a, _) (b, _) -> compare a b)
 
   let get_journal_entry entry_key =
     let (module Primary : Backend.S) = primary () in
-    let key = C.journal_prefix ^ entry_key in
+    let key = C.journal_prefix ^ Journal.relative_path entry_key in
     Lwt.catch
       (fun () ->
         let+ d = Primary.get ~key () in

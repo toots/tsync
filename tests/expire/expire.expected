@@ -4,15 +4,13 @@
   write foo.txt "two two"
   drain
   expire all
-  expire all -> 1 version(s), 1 chunk(s) removed, 1 kept
+  expire all -> 1 version(s), 1 chunk(s) removed, 1 kept, 2 journal entr(ies)
 --- tree
   f foo.txt size=7 cached=0/1 uploaded=true etag=46316ec1c85082b9
 --- content
   foo.txt = "two two"
 --- backend
   chunk 3ab8997bc73098ac-74d584d55f333769 size=7
-  journal <entry-1> = put foo.txt 3
-  journal <entry-2> = put foo.txt 7
   file foo.txt [.tsync-root/b306717ed3feaa3f-615fce859cf8a12f] = manifest size=7 chunks=1 h1=46316ec1c85082b9 h2=8f37316767529460
     chunk#0 3ab8997bc73098ac-74d584d55f333769 size=7
 
@@ -21,13 +19,12 @@
   drain
   delete foo.txt
   expire all
-  expire all -> 1 version(s), 1 chunk(s) removed, 0 kept
+  expire all -> 1 version(s), 1 chunk(s) removed, 0 kept, 1 journal entr(ies)
 --- tree
 --- content
 --- backend
-  cursor = <entry-2>
-  journal <entry-1> = put foo.txt 9
-  journal <entry-2> = delete foo.txt
+  cursor = <entry-1>
+  journal <entry-1> = delete foo.txt
 
 === expire at a cutoff: older version dropped, newer kept
   write foo.txt "one"
@@ -39,7 +36,7 @@
   write foo.txt "three three three"
   drain
   expire mark
-  expire mark -> 1 version(s), 1 chunk(s) removed, 2 kept
+  expire mark -> 1 version(s), 1 chunk(s) removed, 2 kept, 2 journal entr(ies)
 --- tree
   f foo.txt size=17 cached=0/1 uploaded=true etag=bc4fe9e67f44fd6f
 --- content
@@ -47,9 +44,7 @@
 --- backend
   chunk 3ab8997bc73098ac-74d584d55f333769 size=7
   chunk faf60158c5948cd2-60f690e9588d51bd size=17
-  journal <entry-1> = put foo.txt 3
-  journal <entry-2> = put foo.txt 7
-  journal <entry-3> = put foo.txt 17
+  journal <entry-1> = put foo.txt 17
   file foo.txt [.tsync-root/b306717ed3feaa3f-615fce859cf8a12f] = manifest size=17 chunks=1 h1=bc4fe9e67f44fd6f h2=6fd12d97f02740c8
     chunk#0 faf60158c5948cd2-60f690e9588d51bd size=17
   version foo.txt [.tsync-root/b306717ed3feaa3f-615fce859cf8a12f]#1 = manifest size=7 chunks=1
@@ -62,14 +57,12 @@
   rmdir d
   drain
   expire all
-  expire all -> 0 version(s), 1 chunk(s) removed, 0 kept
+  expire all -> 0 version(s), 1 chunk(s) removed, 0 kept, 2 journal entr(ies)
 --- tree
 --- content
 --- backend
-  cursor = <entry-3>
-  journal <entry-1> = mkdir d/
-  journal <entry-2> = put d/a.txt 8
-  journal <entry-3> = rmdir d/
+  cursor = <entry-1>
+  journal <entry-1> = rmdir d/
 
 === expire none: nothing removed
   write foo.txt "one"
@@ -77,7 +70,7 @@
   write foo.txt "two two"
   drain
   expire none
-  expire none -> 0 version(s), 0 chunk(s) removed, 2 kept
+  expire none -> 0 version(s), 0 chunk(s) removed, 2 kept, 0 journal entr(ies)
 --- tree
   f foo.txt size=7 cached=0/1 uploaded=true etag=46316ec1c85082b9
 --- content

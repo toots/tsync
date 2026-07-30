@@ -334,7 +334,10 @@ let setup_client (module C : Conf.S) root staging_prefix =
     let* m = F.read_manifest (key path) in
     match m with
       | Some m ->
-          Lwt.return (C.chunk_prefix ^ Chunk_table.key m.Manifest.chunks index)
+          Lwt.return
+            (C.chunk_prefix
+            ^ Chunk_layout.relative_path
+                (Chunk_table.key m.Manifest.chunks index))
       | _ -> failwith ("no clean sidecar for " ^ path)
   in
   let damage (module B : Backend.S) = function
@@ -472,8 +475,10 @@ let setup_client (module C : Conf.S) root staging_prefix =
         in
         let+ s = E.expire ~cutoff () in
         Printf.printf
-          "  expire %s -> %d version(s), %d chunk(s) removed, %d kept\n"
+          "  expire %s -> %d version(s), %d chunk(s) removed, %d kept, %d \
+           journal entr(ies)\n"
           selector s.Expire.versions_deleted s.chunks_deleted s.chunks_kept
+          s.journal_deleted
     | Drain ->
         let rec wait () =
           if Sq.idle () then Lwt.return_unit
@@ -860,14 +865,14 @@ let dump_backend_at ~backend_root ~domain_prefix ~chunk_prefix ~journal_prefix
          markers the local backend surfaces where S3 would list nothing. *)
       if
         is_marker e.key
-        && (starts_with chunk_prefix e.key || starts_with versions_prefix e.key)
+        && (starts_with chunk_prefix e.key
+           || starts_with versions_prefix e.key
+           || starts_with journal_prefix e.key)
       then Lwt.return_unit
       else if starts_with chunk_prefix e.key then (
-        Printf.printf "  chunk %s size=%d\n"
-          (String.sub e.key
-             (String.length chunk_prefix)
-             (String.length e.key - String.length chunk_prefix))
-          e.size;
+        (* The key, without the shard directory holding it: what a chunk is
+           named matters here, where it lives is {!Chunk_layout}'s business. *)
+        Printf.printf "  chunk %s size=%d\n" (Filename.basename e.key) e.size;
         Lwt.return_unit)
       else if starts_with journal_prefix e.key then
         let+ data = B.get ~key:e.key () in

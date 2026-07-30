@@ -1,0 +1,4 @@
+(executable
+ (name migrate)
+ (modules migrate)
+ (libraries tsync_local_io tsync_queue unix))

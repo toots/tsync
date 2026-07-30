@@ -63,6 +63,12 @@ def _key(h):
     return a.ljust(16, "0") + "-" + b.ljust(16, "0")
 
 
+def _chunk_key(h):
+    """Where the store holds chunk [h] — sharded, as handler.chunk_key builds it."""
+    key = _key(h)
+    return CHUNK_PREFIX + key[:3] + "/" + key
+
+
 def _file_body(name, chunks, mtime=1_700_000_000.0, symlink=None, size=None):
     if symlink is not None:
         chunks = []
@@ -83,7 +89,7 @@ def put_file(s3, folder_id, name, chunks, **kw):
     """Write a file's chunks and its manifest under [folder_id]'s namespace.
     Returns the manifest key (for a file share's "key")."""
     for h, data in chunks:
-        put(s3, CHUNK_PREFIX + _key(h), data)
+        put(s3, _chunk_key(h), data)
     key = DOMAIN_PREFIX + folder_id + "/" + _slug(name)
     put(s3, key, _file_body(name, chunks, **kw))
     return key
@@ -161,7 +167,7 @@ def test_missing_chunk_is_clean_error(s3):
     # yield a clean 502, not an unhandled 500.
     h = load_handler()
     key = put_file(s3, "r", "gone.bin", [("dead-beef", b"data")])
-    s3.delete_object(Bucket=BUCKET, Key=CHUNK_PREFIX + _key("dead-beef"))
+    s3.delete_object(Bucket=BUCKET, Key=_chunk_key("dead-beef"))
     tok = file_share(s3, "beef", key, "gone.bin")
     resp = h.handler(event(tok), None)
     assert resp["statusCode"] == 502, resp
