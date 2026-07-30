@@ -63,3 +63,11 @@
   changes_since from current (up to date) -> {"ok":true,"stale":false,"cursor":"<cursor>","ops":[]}
   changes_since from pruned anchor (stale) -> {"ok":true,"stale":true}
 
+########## STATS ##########
+=== after uploads: cache filled, nothing left unpublished
+  sections: server process lwt traffic domains
+  domain "test": cache=0 journal.localPending=0
+  backend "backend" ("main"): reachable=true journal.behind=0
+  mount: reachable=true stagedFiles=0
+  renders as text: true
+
