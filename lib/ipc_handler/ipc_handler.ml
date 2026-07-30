@@ -405,6 +405,15 @@ module Make (C : Conf.S) (F : File.S) = struct
                           | Some (`String t) -> t
                           | _ -> "unknown"
                       in
+                      (* A frontend entry names itself with [type], the same key a
+                         backend entry uses. The frontends supply it as [frontend]
+                         in their stats fields, so normalise here — once, where the
+                         entry is built — rather than leaving every reader to know
+                         both spellings. *)
+                      let queues =
+                        ("type", `String frontend_type)
+                        :: List.remove_assoc "frontend" queues
+                      in
                       let+ domain =
                         Diag.domain_json ~totals ~frontends:[`Assoc queues] ()
                       in

@@ -416,8 +416,11 @@ let () =
   (* A domain's frontends are separate processes with separate counters, so the
      bytes a mount moves are invisible to the proxy's own metrics. They are carried
      over IPC and reported as that frontend's own — a page showing only its own
-     zero would say "no traffic" about a busy machine. Shaped as the daemon
-     actually answers. *)
+     zero would say "no traffic" about a busy machine.
+
+     Keys are exactly the ones [Ipc_handler] emits: a fixture that says [type]
+     where the daemon says something else proves only that the fixture agrees with
+     the renderer. *)
   let mount_fixture =
     `Assoc
       [

@@ -1262,7 +1262,7 @@ let run_stats_scenario ?versioning ({ name; steps } : scenario) =
      Printf.printf
        "  frontend %s: reachable=%s stagedFiles=%s dirtyFiles=%s metaLocked=%s \
         metaWaiting=%s\n"
-       (Yojson.Safe.to_string (mem "frontend" mount))
+       (Yojson.Safe.to_string (mem "type" mount))
        (Yojson.Safe.to_string (mem "reachable" mount))
        (Yojson.Safe.to_string (mem "stagedFiles" mount))
        (Yojson.Safe.to_string (mem "dirtyFiles" mount))
