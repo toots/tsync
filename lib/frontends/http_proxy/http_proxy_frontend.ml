@@ -6,6 +6,29 @@ let implementation = "http-proxy"
    view. *)
 let is_local (_ : Conf.locality) _key = false
 
+(* The login page for [/stats]. Server-rendered report, so the page only has to
+   sign a request and show what comes back. *)
+let stats_html = [%blob "stats.html"]
+
+(* ── Request counters ───────────────────────────────────────────────────────── *)
+
+(* What this listener has been asked to do, for the status report. ponytail: plain
+   ints touched only from the event-loop thread, so no locking — same reasoning as
+   {!Metrics}. *)
+let counters : (string, int) Hashtbl.t = Hashtbl.create 16
+let in_flight = ref 0
+
+let bump name =
+  Hashtbl.replace counters name
+    (1 + Option.value ~default:0 (Hashtbl.find_opt counters name))
+
+let counters_json () =
+  `Assoc
+    (("inFlight", `Int !in_flight)
+    :: List.map
+         (fun (k, v) -> (k, `Int v))
+         (List.sort compare (List.of_seq (Hashtbl.to_seq counters))))
+
 (* ── Option resolution (with inheritance across the shared listener) ─────────── *)
 
 let opt (b : Frontend.binding) name = List.assoc_opt name b.Frontend.options
@@ -44,6 +67,9 @@ type route = {
   all_backends : (module Backend.S) list;
   serve_share : share_handler option;
       (** [None] when this domain has no shares *)
+  socket_path : string;  (** the mount daemon's socket, if one runs here *)
+  diagnose : totals:bool -> mount:Yojson.Safe.t -> Yojson.Safe.t Lwt.t;
+      (** this domain's section of the status report *)
 }
 
 (* Public share serving, when enabled for the domain. *)
@@ -84,6 +110,21 @@ let make_route bindings (b : Frontend.binding) =
       | Some ("true" | "1") -> true
       | _ -> false
   in
+  (* Options as configured, secrets masked — the same rule [tsync print-config]
+     applies. A diagnosis report gets pasted into bug reports. *)
+  let options =
+    List.map
+      (fun (name, value) ->
+        match
+          List.find_opt
+            (fun (s : Frontend.field_spec) -> s.name = name)
+            (Frontend.spec_for implementation)
+        with
+          | Some { secret = true; _ } when value <> "" -> (name, `String "***")
+          | _ -> (name, `String value))
+      b.Frontend.options
+  in
+  let module Diag = Diagnostics.Make (C) in
   {
     domain_root = "tsync/" ^ C.domain_name ^ "/";
     shares_prefix = C.shares_prefix;
@@ -93,6 +134,17 @@ let make_route bindings (b : Frontend.binding) =
     primary = List.hd C.backends;
     all_backends = C.backends;
     serve_share;
+    socket_path = C.socket_path;
+    diagnose =
+      (fun ~totals ~mount ->
+        Diag.domain_json ~totals ~mount
+          ~extra:
+            [
+              ("readOnly", `Bool read_only);
+              ("shares", `Bool (serve_share <> None));
+              ("options", `Assoc options);
+            ]
+          ());
   }
 
 (* ── Request handling ───────────────────────────────────────────────────────── *)
@@ -150,6 +202,18 @@ let parse_op meth uri body =
         match q "prefix" with Some prefix -> Share_url prefix | None -> Bad)
     | _ -> Bad
 
+let op_name = function
+  | Get _ -> "get"
+  | Head _ -> "head"
+  | Put _ -> "put"
+  | Delete _ -> "delete"
+  | Delete_multi _ -> "deleteMulti"
+  | Copy _ -> "copy"
+  | List_all _ -> "list"
+  | Share_url _ -> "shareUrl"
+  | Chunk_size _ -> "chunkSize"
+  | Bad -> "badRequest"
+
 (* The domain a request targets is the route whose [domain_root] prefixes the
    operation's key/prefix. *)
 let route_key = function
@@ -193,7 +257,13 @@ let exec route op ~body =
         let module B = (val route.primary : Backend.S) in
         let* data = B.get_opt ~key () in
         match data with
-          | Some data -> respond data
+          | Some data ->
+              (* Counted once per request, not once per backend a write fans out
+                 to: this is the volume moved on a client's behalf. Without it the
+                 traffic figures only ever reflect share serving, which is the one
+                 path that goes through {!Remote}. *)
+              Metrics.add_downloaded (String.length data);
+              respond data
           | None -> respond ~status:`Not_found "")
     | Head key -> (
         let module B = (val route.primary : Backend.S) in
@@ -216,6 +286,7 @@ let exec route op ~body =
             fanout route (fun (module B : Backend.S) ->
                 B.put ~key ~data:body ())
           in
+          Metrics.add_uploaded (String.length body);
           respond ""
     | Delete key ->
         if not (writable key) then reject_ro ()
@@ -316,33 +387,129 @@ let share_request routes uri =
           in
           Some (Option.get r.serve_share, token, sub))
 
-let callback routes _conn req body =
+(* ── Status ─────────────────────────────────────────────────────────────────── *)
+
+(* The mount daemon's own queues, when a daemon serves this domain on this host.
+   Its socket answers with a full report; we keep the part only it can know.
+   Absent is the normal case for a server that does not also mount. *)
+let fetch_mount ~socket_path =
+  let unreachable msg =
+    `Assoc [("reachable", `Bool false); ("error", `String msg)]
+  in
+  Lwt.catch
+    (fun () ->
+      let request =
+        Yojson.Safe.to_string (`Assoc [("action", `String "stats")])
+      in
+      let+ resp = Ipc.send_lwt ~socket_path request in
+      let open Yojson.Safe.Util in
+      let json = Yojson.Safe.from_string resp in
+      match json |> member "domains" with
+        | `List (d :: _) -> (
+            match d |> member "mount" with
+              | `Assoc _ as m -> m
+              | _ -> unreachable "daemon reported no mount section")
+        | _ -> unreachable "daemon reported no domains")
+    (fun exn ->
+      Lwt.return
+        (unreachable
+           (match exn with
+             | Lwt_unix.Timeout -> "timed out"
+             | exn -> Printexc.to_string exn)))
+
+let status_json ~port ~tls ~totals routes =
+  let+ domains =
+    Lwt_list.map_p
+      (fun route ->
+        let* mount = fetch_mount ~socket_path:route.socket_path in
+        route.diagnose ~totals ~mount)
+      routes
+  in
+  `Assoc
+    (Diagnostics.process_json
+       ~extra:[("port", `Int port); ("tls", `Bool tls)]
+       ()
+    @ [("requests", counters_json ()); ("domains", `List domains)])
+
+(* The report is listener-wide rather than domain-scoped, so any secret that signs
+   for this listener authorizes it — there is no key to route on. Text and JSON are
+   the same collection rendered two ways, so a browser, [curl] and [tsync stats]
+   cannot disagree. *)
+let serve_status ~port ~tls ~json routes req body_str =
+  if not (List.exists (fun r -> authed r req body_str) routes) then begin
+    bump "unauthorized";
+    respond ~status:`Unauthorized "unauthorized"
+  end
+  else begin
+    bump "stats";
+    let totals =
+      Uri.get_query_param (Cohttp.Request.uri req) "totals" = Some "1"
+    in
+    let* report = status_json ~port ~tls ~totals routes in
+    if json then
+      respond
+        ~headers:[("content-type", "application/json")]
+        (Yojson.Safe.to_string report)
+    else
+      respond
+        ~headers:[("content-type", "text/plain; charset=utf-8")]
+        (Diagnostics.text report)
+  end
+
+let callback ~port ~tls routes _conn req body =
   let meth = Cohttp.Request.meth req in
   let uri = Cohttp.Request.uri req in
   match share_request routes uri with
     | Some (handle, token, sub) ->
+        bump "share";
         handle ~token ~sub ~query:(Uri.get_query_param uri)
           ~range:(Cohttp.Header.get (Cohttp.Request.headers req) "range")
     | None -> (
         let* body_str = Cohttp_lwt.Body.to_string body in
-        let op = parse_op meth uri body_str in
-        match route_key op with
-          | None -> respond ~status:`Bad_request "bad request"
-          | Some key -> (
-              match
-                route_for routes ~key ~authed:(fun r -> authed r req body_str)
-              with
-                | None -> respond ~status:`Not_found "unknown domain"
-                | Some route ->
-                    if not (authed route req body_str) then
-                      respond ~status:`Unauthorized "unauthorized"
-                    else
-                      Lwt.catch
-                        (fun () -> exec route op ~body:body_str)
-                        (fun exn ->
-                          Log.err "http-proxy: %s" (Printexc.to_string exn);
-                          respond ~status:`Internal_server_error
-                            (Printexc.to_string exn))))
+        match (meth, Uri.path uri) with
+          | `GET, ("/" | "/index.html") ->
+              bump "page";
+              respond
+                ~headers:[("content-type", "text/html; charset=utf-8")]
+                stats_html
+          | `GET, "/stats" ->
+              serve_status ~port ~tls ~json:false routes req body_str
+          | `GET, "/api/v1/stats" ->
+              serve_status ~port ~tls ~json:true routes req body_str
+          | _ -> (
+              let op = parse_op meth uri body_str in
+              match route_key op with
+                | None ->
+                    bump "badRequest";
+                    respond ~status:`Bad_request "bad request"
+                | Some key -> (
+                    match
+                      route_for routes ~key ~authed:(fun r ->
+                          authed r req body_str)
+                    with
+                      | None -> respond ~status:`Not_found "unknown domain"
+                      | Some route ->
+                          if not (authed route req body_str) then begin
+                            bump "unauthorized";
+                            respond ~status:`Unauthorized "unauthorized"
+                          end
+                          else begin
+                            bump (op_name op);
+                            incr in_flight;
+                            Lwt.finalize
+                              (fun () ->
+                                Lwt.catch
+                                  (fun () -> exec route op ~body:body_str)
+                                  (fun exn ->
+                                    bump "error";
+                                    Log.err "http-proxy: %s"
+                                      (Printexc.to_string exn);
+                                    respond ~status:`Internal_server_error
+                                      (Printexc.to_string exn)))
+                              (fun () ->
+                                decr in_flight;
+                                Lwt.return_unit)
+                          end)))
 
 (* ── Listener ───────────────────────────────────────────────────────────────── *)
 
@@ -393,7 +560,7 @@ let start bindings =
        [Sys.sigterm; Sys.sigint];
      let* () =
        Cohttp_lwt_unix.Server.create ~stop ~mode
-         (Cohttp_lwt_unix.Server.make ~callback:(callback routes) ())
+         (Cohttp_lwt_unix.Server.make ~callback:(callback ~port ~tls routes) ())
      in
      Log.info "http-proxy stopping, letting backends catch up";
      Backend.drain ())

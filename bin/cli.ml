@@ -119,40 +119,65 @@ let chunk_keys data =
    and one with only read-only stores gets an inner layer with nothing writable
    in it — which is what makes such a domain readable but not writable. *)
 let build_backends (d : Conf_parsing.domain) : (module Backend.S) list =
+  (* One instance per configured backend, made here and shared by every layer
+     below — a second [make_backend] for the same config would be a second client
+     against the same store. *)
+  let leaves =
+    List.map
+      (fun (bc : Conf_parsing.backend_config) -> (bc, make_backend bc))
+      (Conf_parsing.order_backends d.Conf_parsing.backends)
+  in
   let of_roles rs =
     List.filter
-      (fun (b : Conf_parsing.backend_config) -> List.mem b.role rs)
-      (Conf_parsing.order_backends d.Conf_parsing.backends)
+      (fun ((bc : Conf_parsing.backend_config), _) -> List.mem bc.role rs)
+      leaves
   in
   (* Role coherence is settled at parse time ({!Conf_parsing.validate_roles}), so
      [writable] is empty only for a domain that is legitimately read-only. *)
   let writable = of_roles [`Main; `Replica] in
-  let sub (bc : Conf_parsing.backend_config) =
-    { Fallback_backend.name = bc.name; backend = make_backend bc }
+  let sub ((bc : Conf_parsing.backend_config), backend) =
+    { Fallback_backend.name = bc.name; backend }
   in
   let inner =
     Fallback_backend.make ~writable:(List.map sub writable)
       ~fallbacks:(List.map sub (of_roles [`Read_only]))
   in
-  match of_roles [`Backfill] with
-    | [] -> [inner]
-    | bf ->
-        [
-          Backfill_backend.make
-            ~chunk_prefix:(Conf_parsing.chunk_prefix d)
-            ~chunk_keys
-            ~skip_prefixes:
-              [Conf_parsing.journal_prefix d; Conf_parsing.cursor_key d]
-            ~inners:[inner]
-            ~backfills:
-              (List.map
-                 (fun (bc : Conf_parsing.backend_config) ->
-                   {
-                     Backfill_backend.name = bc.Conf_parsing.name;
-                     backend = make_backend bc;
-                   })
-                 bf);
-        ]
+  let composite, lanes =
+    match of_roles [`Backfill] with
+      | [] -> (inner, [])
+      | bf ->
+          let bf_backend =
+            Backfill_backend.make
+              ~chunk_prefix:(Conf_parsing.chunk_prefix d)
+              ~chunk_keys
+              ~skip_prefixes:
+                [Conf_parsing.journal_prefix d; Conf_parsing.cursor_key d]
+              ~inners:[inner]
+              ~backfills:
+                (List.map
+                   (fun ((bc : Conf_parsing.backend_config), backend) ->
+                     { Backfill_backend.name = bc.Conf_parsing.name; backend })
+                   bf)
+          in
+          (bf_backend.Backfill_backend.backend, bf_backend.lanes)
+  in
+  (* Declare the individual stores for diagnosis: this is the only place that has
+     each backend's name, its role and its own module at once. *)
+  Backend.report_members ~domain:d.Conf_parsing.name
+    (List.map
+       (fun ((bc : Conf_parsing.backend_config), backend) ->
+         let lane = List.assoc_opt bc.name lanes in
+         let stat f = Option.map (fun l () -> f (l ())) lane in
+         {
+           Backend.name = bc.name;
+           role = Conf_parsing.role_name bc.role;
+           backend;
+           pending = stat (fun s -> s.Backfill_backend.queued);
+           in_flight = stat (fun s -> s.Backfill_backend.in_flight);
+           degraded = stat (fun s -> s.Backfill_backend.degraded);
+         })
+       leaves);
+  [composite]
 
 (* Ordered backends with the one named [source] moved to the head, so it serves
    reads (the primary). Fails if no backend has that name. *)

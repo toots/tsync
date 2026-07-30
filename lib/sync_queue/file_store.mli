@@ -5,6 +5,13 @@ module Make (C : Conf.S) : sig
   val bump_cursor : string -> unit Lwt.t
   val fetch_cursor : unit -> string option Lwt.t
 
+  (** How far this client has applied the shared journal: a journal key, or [""]
+      when it has never synced. Local state — it says what we caught up to, not
+      what has been published. *)
+  val read_last_sync_key : unit -> string
+
+  val write_last_sync_key : string -> unit
+
   val list_journal_keys :
     ?start_after:string -> unit -> (string * string) list Lwt.t
 

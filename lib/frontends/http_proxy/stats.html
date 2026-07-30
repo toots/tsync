@@ -1,0 +1,345 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>tsync server</title>
+    <style>
+      :root {
+        color-scheme: light dark;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        min-height: 100vh;
+        display: flex;
+        flex-direction: column;
+        font:
+          15px/1.5 -apple-system,
+          system-ui,
+          Segoe UI,
+          Roboto,
+          sans-serif;
+      }
+      header {
+        padding: 16px 20px;
+        border-bottom: 1px solid #8884;
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        flex-wrap: wrap;
+      }
+      h1 {
+        font-size: 18px;
+        margin: 0;
+        font-weight: 600;
+      }
+      .spacer {
+        flex: 1;
+      }
+      main {
+        padding: 20px;
+        flex: 1;
+      }
+      form {
+        max-width: 26rem;
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+      }
+      p.hint {
+        margin: 0;
+        opacity: 0.7;
+        font-size: 13px;
+      }
+      input[type="password"] {
+        font: inherit;
+        padding: 8px 10px;
+        border: 1px solid #8886;
+        border-radius: 6px;
+        background: transparent;
+        color: inherit;
+      }
+      button {
+        font: inherit;
+        padding: 6px 12px;
+        border: 1px solid #8886;
+        border-radius: 6px;
+        background: transparent;
+        color: inherit;
+        cursor: pointer;
+      }
+      button:hover {
+        border-color: currentColor;
+      }
+      label.toggle {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        font-size: 13px;
+        opacity: 0.8;
+      }
+      pre {
+        margin: 0;
+        overflow-x: auto;
+        font:
+          13px/1.45 ui-monospace,
+          SFMono-Regular,
+          Menlo,
+          monospace;
+        white-space: pre;
+      }
+      .error {
+        color: #c33;
+      }
+      @media (prefers-color-scheme: dark) {
+        .error {
+          color: #f77;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <header>
+      <h1>tsync server</h1>
+      <div class="spacer"></div>
+      <div id="controls" hidden>
+        <label class="toggle"
+          ><input type="checkbox" id="totals" /> count objects</label
+        >
+      </div>
+      <button id="refresh" hidden>Refresh</button>
+      <button id="forget" hidden>Forget secret</button>
+    </header>
+    <main>
+      <form id="login">
+        <p class="hint">
+          The shared secret stays in this browser. Requests are signed with it —
+          it is never sent.
+        </p>
+        <input
+          type="password"
+          id="secret"
+          placeholder="Shared secret"
+          autocomplete="current-password"
+          autofocus
+        />
+        <button type="submit">Show status</button>
+        <p class="hint error" id="login-error"></p>
+      </form>
+      <pre id="report" hidden></pre>
+    </main>
+
+    <script>
+      // The signature must match Http_proxy.Auth.sign:
+      //   HMAC-SHA256(secret, method \n path \n timestamp \n sha256_hex(body))
+      // crypto.subtle only exists in a secure context (https, or localhost), and
+      // this server is meant to be reachable over plain HTTP on a trusted LAN
+      // too — hence the baked-in fallback below.
+
+      const K = [
+        0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1,
+        0x923f82a4, 0xab1c5ed5, 0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3,
+        0x72be5d74, 0x80deb1fe, 0x9bdc06a7, 0xc19bf174, 0xe49b69c1, 0xefbe4786,
+        0x0fc19dc6, 0x240ca1cc, 0x2de92c6f, 0x4a7484aa, 0x5cb0a9dc, 0x76f988da,
+        0x983e5152, 0xa831c66d, 0xb00327c8, 0xbf597fc7, 0xc6e00bf3, 0xd5a79147,
+        0x06ca6351, 0x14292967, 0x27b70a85, 0x2e1b2138, 0x4d2c6dfc, 0x53380d13,
+        0x650a7354, 0x766a0abb, 0x81c2c92e, 0x92722c85, 0xa2bfe8a1, 0xa81a664b,
+        0xc24b8b70, 0xc76c51a3, 0xd192e819, 0xd6990624, 0xf40e3585, 0x106aa070,
+        0x19a4c116, 0x1e376c08, 0x2748774c, 0x34b0bcb5, 0x391c0cb3, 0x4ed8aa4a,
+        0x5b9cca4f, 0x682e6ff3, 0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208,
+        0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2,
+      ];
+
+      // SHA-256 over a byte array, returning 32 bytes.
+      function sha256(bytes) {
+        const h = [
+          0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a, 0x510e527f,
+          0x9b05688c, 0x1f83d9ab, 0x5be0cd19,
+        ];
+        const len = bytes.length;
+        const withPad = new Uint8Array((((len + 9) >> 6) + 1) << 6);
+        withPad.set(bytes);
+        withPad[len] = 0x80;
+        const bits = len * 8;
+        new DataView(withPad.buffer).setUint32(withPad.length - 4, bits >>> 0);
+        new DataView(withPad.buffer).setUint32(
+          withPad.length - 8,
+          Math.floor(bits / 0x100000000),
+        );
+        const w = new Uint32Array(64);
+        const view = new DataView(withPad.buffer);
+        const rotr = (x, n) => (x >>> n) | (x << (32 - n));
+        for (let off = 0; off < withPad.length; off += 64) {
+          for (let i = 0; i < 16; i++) w[i] = view.getUint32(off + i * 4);
+          for (let i = 16; i < 64; i++) {
+            const s0 =
+              rotr(w[i - 15], 7) ^ rotr(w[i - 15], 18) ^ (w[i - 15] >>> 3);
+            const s1 =
+              rotr(w[i - 2], 17) ^ rotr(w[i - 2], 19) ^ (w[i - 2] >>> 10);
+            w[i] = (w[i - 16] + s0 + w[i - 7] + s1) >>> 0;
+          }
+          let [a, b, c, d, e, f, g, hh] = h;
+          for (let i = 0; i < 64; i++) {
+            const S1 = rotr(e, 6) ^ rotr(e, 11) ^ rotr(e, 25);
+            const ch = (e & f) ^ (~e & g);
+            const t1 = (hh + S1 + ch + K[i] + w[i]) >>> 0;
+            const S0 = rotr(a, 2) ^ rotr(a, 13) ^ rotr(a, 22);
+            const maj = (a & b) ^ (a & c) ^ (b & c);
+            const t2 = (S0 + maj) >>> 0;
+            hh = g;
+            g = f;
+            f = e;
+            e = (d + t1) >>> 0;
+            d = c;
+            c = b;
+            b = a;
+            a = (t1 + t2) >>> 0;
+          }
+          const add = [a, b, c, d, e, f, g, hh];
+          for (let i = 0; i < 8; i++) h[i] = (h[i] + add[i]) >>> 0;
+        }
+        const out = new Uint8Array(32);
+        const ov = new DataView(out.buffer);
+        for (let i = 0; i < 8; i++) ov.setUint32(i * 4, h[i]);
+        return out;
+      }
+
+      function hmacSha256(keyBytes, msgBytes) {
+        let key = keyBytes;
+        if (key.length > 64) key = sha256(key);
+        const block = new Uint8Array(64);
+        block.set(key);
+        const ipad = new Uint8Array(64 + msgBytes.length);
+        const opad = new Uint8Array(64 + 32);
+        for (let i = 0; i < 64; i++) {
+          ipad[i] = block[i] ^ 0x36;
+          opad[i] = block[i] ^ 0x5c;
+        }
+        ipad.set(msgBytes, 64);
+        opad.set(sha256(ipad), 64);
+        return sha256(opad);
+      }
+
+      const enc = new TextEncoder();
+      const hex = (bytes) =>
+        Array.from(bytes)
+          .map((b) => b.toString(16).padStart(2, "0"))
+          .join("");
+
+      // Never sign with an implementation that cannot reproduce a known answer:
+      // a wrong signature is a failed request at best and a confusing one at
+      // worst. RFC 4231, test case 2.
+      let selfChecked = false;
+      function checkBakedHmac() {
+        if (selfChecked) return;
+        const got = hex(
+          hmacSha256(enc.encode("Jefe"), enc.encode("what do ya want for nothing?")),
+        );
+        if (
+          got !==
+          "5bdcc146bf60754e6a042426089575c75a003f089d2739839dec58b964ec3843"
+        )
+          throw new Error("built-in HMAC is broken; refusing to sign");
+        selfChecked = true;
+      }
+
+      async function sign(secret, method, path) {
+        const emptyBodyHash = hex(sha256(new Uint8Array(0)));
+        const ts = Math.floor(Date.now() / 1000).toString();
+        const canonical = [method, path, ts, emptyBodyHash].join("\n");
+        let signature;
+        if (window.crypto && window.crypto.subtle) {
+          const key = await crypto.subtle.importKey(
+            "raw",
+            enc.encode(secret),
+            { name: "HMAC", hash: "SHA-256" },
+            false,
+            ["sign"],
+          );
+          signature = hex(
+            new Uint8Array(
+              await crypto.subtle.sign("HMAC", key, enc.encode(canonical)),
+            ),
+          );
+        } else {
+          checkBakedHmac();
+          signature = hex(hmacSha256(enc.encode(secret), enc.encode(canonical)));
+        }
+        return { ts, signature };
+      }
+
+      const $ = (id) => document.getElementById(id);
+      const store = window.sessionStorage;
+      let timer = null;
+
+      async function load() {
+        const secret = store.getItem("tsync-secret");
+        if (!secret) return;
+        const path = $("totals").checked ? "/stats?totals=1" : "/stats";
+        try {
+          const { ts, signature } = await sign(secret, "GET", path);
+          const resp = await fetch(path, {
+            headers: {
+              "x-tsync-timestamp": ts,
+              "x-tsync-signature": signature,
+            },
+          });
+          if (resp.status === 401) {
+            logout("Wrong secret, or this machine's clock is off by more than 5 minutes.");
+            return;
+          }
+          const text = await resp.text();
+          if (!resp.ok) throw new Error(text || resp.statusText);
+          $("report").textContent = text;
+        } catch (e) {
+          $("report").textContent = "";
+          $("login-error").textContent = String(e.message || e);
+          $("login").hidden = false;
+        }
+      }
+
+      function showReport() {
+        $("login").hidden = true;
+        $("report").hidden = false;
+        for (const id of ["refresh", "forget", "controls"])
+          $(id).hidden = false;
+        if (!timer) timer = setInterval(load, 5000);
+      }
+
+      function logout(message) {
+        store.removeItem("tsync-secret");
+        if (timer) {
+          clearInterval(timer);
+          timer = null;
+        }
+        $("report").hidden = true;
+        $("report").textContent = "";
+        for (const id of ["refresh", "forget", "controls"]) $(id).hidden = true;
+        $("login").hidden = false;
+        $("login-error").textContent = message || "";
+        $("secret").value = "";
+      }
+
+      $("login").addEventListener("submit", (e) => {
+        e.preventDefault();
+        const secret = $("secret").value;
+        if (!secret) return;
+        store.setItem("tsync-secret", secret);
+        $("login-error").textContent = "";
+        showReport();
+        load();
+      });
+      $("refresh").addEventListener("click", load);
+      $("forget").addEventListener("click", () => logout(""));
+      $("totals").addEventListener("change", load);
+
+      if (store.getItem("tsync-secret")) {
+        showReport();
+        load();
+      }
+    </script>
+  </body>
+</html>

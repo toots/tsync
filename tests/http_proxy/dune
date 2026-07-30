@@ -7,4 +7,10 @@
   tsync_http_proxy_backend
   tsync_frontend_register
   tsync_frontend
+  tsync_diagnostics
+  tsync_conf
+  cohttp
+  yojson
+  str
+  lwt
   uri))

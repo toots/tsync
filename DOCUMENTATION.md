@@ -256,6 +256,46 @@ Two server-side options:
 A server can front several domains, and can mount a domain it serves: frontends are per
 domain, so `["fuse", {"type": "http-proxy", …}]` does both.
 
+### Checking on the server
+
+A server has no IPC socket, so `tsync stats` cannot reach it. It reports on itself over HTTP
+instead, on the same port and behind the same signature as the object API:
+
+| Route | Returns |
+|---|---|
+| `/` | A page that asks for the shared secret and shows the report |
+| `/stats` | The report as plain text — the same thing `tsync stats` prints for a mount |
+| `/api/v1/stats` | The same data as JSON |
+
+Open `/` in a browser and type the shared secret. It stays in that browser: the page signs
+each request with it and sends only the signature, exactly as a proxy client does. Note that
+browsers only expose the signing primitive over HTTPS or on `localhost` — over plain HTTP to
+another machine the page falls back to a signer built into it, which works but signs in the
+clear like every other request on that connection.
+
+The report says, per domain: the config as the daemon actually resolved it, the local chunk
+cache against `maxCache`, unpublished journal entries, and then per backend its reachability
+with latency, its journal backlog, and for a `backfill` target how far behind it is. It ends
+with the last warnings and errors from every subsystem, which is usually where the answer is.
+
+For scripts, `/api/v1/stats` is the same data with raw byte counts:
+
+```bash
+secret=a-long-random-string
+path=/api/v1/stats
+ts=$(date +%s)
+body_hash=$(printf '' | openssl dgst -sha256 -r | cut -d' ' -f1)
+sig=$(printf 'GET\n%s\n%s\n%s' "$path" "$ts" "$body_hash" \
+      | openssl dgst -sha256 -hmac "$secret" -r | cut -d' ' -f1)
+curl -sS "https://nas.example:8443$path" \
+  -H "x-tsync-timestamp: $ts" -H "x-tsync-signature: $sig"
+```
+
+Add `?totals=1` (to either route) to also count what each backend holds. That enumerates the
+manifest and chunk namespaces, so it costs a full listing per backend and is never done
+otherwise — every other figure is fixed-cost however large the domain. The query string is
+part of what gets signed.
+
 ## 8. Add a second backend
 
 A domain can have several backends, each with a **role**:
@@ -480,7 +520,8 @@ tsync import <dir>    # seed the domain from an existing folder
 tsync export <dir>    # write every file of the domain to a plain folder
 tsync share <path>    # print a public download URL for a file or folder (as a zip)
 tsync status          # show daemon state
-tsync stats           # transfer metrics (pending/completed, bandwidth, hashing)
+tsync stats           # full report: metrics, resolved config, cache, per-backend health
+tsync stats --totals  # also count what each backend holds (a full listing per backend)
 tsync print-config    # show the config as parsed, with secrets masked
 tsync paths           # show the config, cache, data and socket paths in use
 tsync build-config    # show which optional features this binary was built with
@@ -571,3 +612,6 @@ wire.
 | A backend was offline and has fallen behind | `tsync resync-remote --source <name>`. |
 | Local cache and remote disagree | `tsync recheck`, then `tsync sync --full` if it persists. |
 | Daemon state unclear | `tsync status`, `tsync stats`, and the service manager's log. |
+| One backend of several is misbehaving | `tsync stats` — each backend reports its own reachability, journal backlog and backfill queue. |
+| A backfill target says `DEGRADED` | Its queue overflowed and writes were dropped: `tsync resync-remote --source <main>`. |
+| A domain served over http-proxy misbehaves | Open the server's `/` page, or `curl` its `/stats` — [step 7](#checking-on-the-server). The server has no IPC socket, so `tsync stats` cannot reach it. |

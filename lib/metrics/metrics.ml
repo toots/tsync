@@ -57,3 +57,54 @@ let cpu_seconds () =
 
 (* Current resident set size in bytes. *)
 let rss_bytes () = (Mem_usage.info ()).Mem_usage.process_physical_memory
+
+(* OCaml heap alongside the RSS above: the two disagreeing is itself the answer
+   (a large RSS with a small heap is buffers and mmapped cache reads, not a leak
+   in OCaml code). *)
+type gc = {
+  heap_bytes : int;
+  top_heap_bytes : int;
+  minor_collections : int;
+  major_collections : int;
+}
+
+let gc_stats () =
+  let s = Gc.quick_stat () in
+  let bytes w = w * (Sys.word_size / 8) in
+  {
+    heap_bytes = bytes s.Gc.heap_words;
+    top_heap_bytes = bytes s.Gc.top_heap_words;
+    minor_collections = s.Gc.minor_collections;
+    major_collections = s.Gc.major_collections;
+  }
+
+(* The event loop's own load: descriptors it is watching, timers pending, and the
+   blocking-syscall pool ceiling. A server that has stopped answering while its
+   CPU is idle shows up here as watched descriptors that never drain. *)
+type lwt = {
+  readable_fds : int;
+  writable_fds : int;
+  timers : int;
+  pool_size : int;
+}
+
+let lwt_stats () =
+  {
+    readable_fds = Lwt_engine.readable_count ();
+    writable_fds = Lwt_engine.writable_count ();
+    timers = Lwt_engine.timer_count ();
+    pool_size = Lwt_unix.pool_size ();
+  }
+
+(* Byte counts as a person reads them. Here rather than in the CLI so every
+   report — [tsync stats], the http-proxy status page — spells a size the same
+   way. *)
+let human_bytes n =
+  let units = [| "B"; "KB"; "MB"; "GB"; "TB" |] in
+  let v = ref (float_of_int n) and i = ref 0 in
+  while !v >= 1024. && !i < Array.length units - 1 do
+    v := !v /. 1024.;
+    incr i
+  done;
+  if !i = 0 then Printf.sprintf "%d B" n
+  else Printf.sprintf "%.1f %s" !v units.(!i)

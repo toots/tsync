@@ -96,6 +96,11 @@
   manifest moved
   manifest orphan2
 
+=== how far behind the target is, as reported for diagnosis
+  queued right after a manifest put: 1 (degraded false)
+  drain
+  queued once drained: 0 (in flight 0, degraded false)
+
 === an unreachable target is logged, never fatal
   put chunk c8, put manifest safe, copy safe -> safe2, delete safe2
   drain

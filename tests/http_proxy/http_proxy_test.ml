@@ -1,3 +1,65 @@
+(* ── Fixture for the status endpoints ─────────────────────────────────────── *)
+
+let status_root = "/tmp/tsync-http-proxy-status-test"
+
+module C : Conf.S = struct
+  let versioning = false
+  let client_name = "test-client"
+  let domain_name = "statusdom"
+  let domain_prefix = "tsync/statusdom/manifests/"
+  let chunk_prefix = "tsync/statusdom/chunks/"
+  let versions_prefix = "tsync/statusdom/versions/"
+  let journal_prefix = "tsync/statusdom/journal/"
+  let cursor_key = "tsync/statusdom/cursor"
+  let shares_prefix = "tsync/shares/"
+  let backends = [Local_backend.make ~root:(status_root ^ "/store")]
+  let cache_root = status_root ^ "/cache"
+  let data_dir = status_root ^ "/data"
+
+  (* Nothing listens here: the report must say the mount is unreachable rather
+     than wait on it. *)
+  let socket_path = status_root ^ "/absent.sock"
+  let notify_path = ""
+  let max_uploads = 2
+  let max_downloads = 3
+  let chunk_size = Some 65536
+  let cache_chunk_size = Some 65536
+  let max_cache = None
+  let symlink_policy = `Keep
+  let read_only = false
+end
+
+(* A store that cannot be reached, so the report has a failure to point at. *)
+module Down : Backend.S = struct
+  let fail () = Lwt.fail (Backend.Backend_error "connection refused")
+  let put ~key:_ ~data:_ () = fail ()
+  let get ~key:_ () = fail ()
+  let get_opt ~key:_ () = fail ()
+  let head_opt ~key:_ () = fail ()
+  let delete ~key:_ () = fail ()
+  let delete_multi _ = fail ()
+  let copy ~src_key:_ ~dst_key:_ () = fail ()
+  let list_prefix ?max_keys:_ ~prefix:_ () = fail ()
+  let share_url ~prefix:_ () = Lwt.return_none
+  let default_chunk_size ~prefix:_ () = Lwt.return_none
+end
+
+let json_member name j = Yojson.Safe.Util.member name j
+
+let signed_request ~secret ~path =
+  let headers =
+    Http_proxy.Auth.request_headers ~secret ~meth:"GET" ~path ~body:""
+  in
+  Cohttp.Request.make
+    ~headers:(Cohttp.Header.of_list headers)
+    (Uri.of_string path)
+
+let status_code resp = Cohttp.Code.code_of_status (Cohttp.Response.status resp)
+
+let content_type resp =
+  Option.value ~default:""
+    (Cohttp.Header.get (Cohttp.Response.headers resp) "content-type")
+
 let () =
   let secret = "s3cr3t"
   and meth = "GET"
@@ -66,6 +128,8 @@ let () =
       primary = Local_backend.make ~root:"/tmp/tsync-route-test";
       all_backends = [];
       serve_share = None;
+      socket_path = "/nonexistent/tsync.sock";
+      diagnose = (fun ~totals:_ ~mount:_ -> Lwt.return (`Assoc []));
     }
   in
   let routes = [route "one"; route "two"] in
@@ -145,5 +209,148 @@ let () =
   let share_key = "tsync/shares/deadbeef" in
   assert (status (Http_proxy_frontend.Put share_key) ~read_only:true = 200);
   assert (status (Http_proxy_frontend.Delete share_key) ~read_only:true = 200);
+
+  (* ── Status endpoints ───────────────────────────────────────────────────── *)
+
+  (* Two stores, one of them down, so the report has to name which. *)
+  Backend.report_members ~domain:C.domain_name
+    [
+      {
+        Backend.name = "disk";
+        role = "main";
+        backend = List.hd C.backends;
+        pending = None;
+        in_flight = None;
+        degraded = None;
+      };
+      {
+        Backend.name = "archive";
+        role = "backfill";
+        backend = (module Down);
+        pending = Some (fun () -> 7);
+        in_flight = Some (fun () -> 2);
+        degraded = Some (fun () -> true);
+      };
+    ];
+  (* Through [make_route], so option masking and the diagnose wiring are the real
+     ones rather than a stand-in. *)
+  let binding =
+    {
+      Frontend.conf = (module C : Conf.S);
+      options = [("port", "8443"); ("secret", "s3cr3t")];
+      mount_point = "";
+    }
+  in
+  let status_routes = [Http_proxy_frontend.make_route [binding] binding] in
+  let report ?(totals = false) () =
+    Lwt_main.run
+      (Http_proxy_frontend.status_json ~port:8443 ~tls:true ~totals
+         status_routes)
+  in
+  let r = report () in
+  List.iter
+    (fun key -> assert (json_member key r <> `Null))
+    [
+      "server";
+      "process";
+      "lwt";
+      "traffic";
+      "requests";
+      "recentErrors";
+      "domains";
+    ];
+  let domain =
+    match json_member "domains" r with
+      | `List [d] -> d
+      | _ -> failwith "expected exactly one domain"
+  in
+  assert (json_member "name" domain = `String "statusdom");
+  assert (json_member "clientName" domain = `String "test-client");
+  (* Config as this process resolved it, not as a file spells it. *)
+  assert (json_member "maxDownloads" domain = `Int 3);
+  (* The shared secret must not leave the process, even to an authorized caller:
+     a report gets pasted into bug threads. *)
+  let options = json_member "options" domain in
+  assert (json_member "secret" options = `String "***");
+  assert (json_member "port" options = `String "8443");
+  (* Nothing listens on the socket, so the mount is reported absent, not awaited. *)
+  assert (json_member "reachable" (json_member "mount" domain) = `Bool false);
+  let backends =
+    match json_member "backends" domain with `List l -> l | _ -> []
+  in
+  assert (List.length backends = 2);
+  let by_name name =
+    List.find (fun b -> json_member "name" b = `String name) backends
+  in
+  assert (json_member "role" (by_name "disk") = `String "main");
+  assert (json_member "reachable" (by_name "disk") = `Bool true);
+  let archive = by_name "archive" in
+  assert (json_member "reachable" archive = `Bool false);
+  assert (json_member "error" archive <> `Null);
+  let backfill = json_member "backfill" archive in
+  assert (json_member "queued" backfill = `Int 7);
+  assert (json_member "degraded" backfill = `Bool true);
+
+  (* Counting what a store holds is opt-in: it enumerates the namespace. *)
+  assert (json_member "totals" (by_name "disk") = `Null);
+  let with_totals = report ~totals:true () in
+  let disk_totals =
+    match json_member "domains" with_totals with
+      | `List [d] -> (
+          match json_member "backends" d with
+            | `List l ->
+                json_member "totals"
+                  (List.find (fun b -> json_member "name" b = `String "disk") l)
+            | _ -> `Null)
+      | _ -> `Null
+  in
+  assert (json_member "chunks" disk_totals <> `Null);
+
+  (* The text report is the same collection rendered for a person: it must name
+     every domain and store, and say plainly which one is down. *)
+  let text = Diagnostics.text r in
+  let mentions s =
+    let re = Str.regexp_string s in
+    try
+      ignore (Str.search_forward re text 0);
+      true
+    with Not_found -> false
+  in
+  assert (mentions "Domain statusdom");
+  assert (mentions "Backend disk (main)");
+  assert (mentions "Backend archive (backfill)");
+  assert (mentions "UNREACHABLE");
+  assert (mentions "run tsync resync-remote");
+  (* Byte counts are raw in the JSON and human-readable only here. *)
+  assert (mentions "maxDownloads" = false);
+
+  (* Both routes verify the same HMAC as the object API, and neither answers
+     without one. *)
+  let serve ~json req =
+    let resp, _ =
+      Lwt_main.run
+        (Http_proxy_frontend.serve_status ~port:8443 ~tls:true ~json
+           status_routes req "")
+    in
+    (status_code resp, content_type resp)
+  in
+  assert (
+    fst (serve ~json:false (Cohttp.Request.make (Uri.of_string "/stats"))) = 401);
+  assert (
+    serve ~json:false (signed_request ~secret:"s3cr3t" ~path:"/stats")
+    = (200, "text/plain; charset=utf-8"));
+  assert (
+    serve ~json:true (signed_request ~secret:"s3cr3t" ~path:"/api/v1/stats")
+    = (200, "application/json"));
+  (* A wrong secret is refused. *)
+  assert (
+    fst
+      (serve ~json:true (signed_request ~secret:"wrong" ~path:"/api/v1/stats"))
+    = 401);
+
+  (* Serving those requests is itself counted, refusals included. *)
+  let counters = Http_proxy_frontend.counters_json () in
+  assert (json_member "stats" counters = `Int 2);
+  assert (json_member "unauthorized" counters = `Int 2);
 
   print_endline "http_proxy_test ok"

@@ -11,6 +11,21 @@ let send ~socket_path cmd =
   Unix.close fd;
   resp
 
+(* Same request, for a caller that is itself an event loop: the http-proxy asks
+   the mount daemon for its stats while serving, and must not block the listener
+   on a daemon that has wedged. A lapsed [timeout] is reported to the caller, not
+   swallowed. *)
+let send_lwt ?(timeout = 2.) ~socket_path cmd =
+  let open Lwt.Syntax in
+  Lwt_unix.with_timeout timeout (fun () ->
+      let* ic, oc = Lwt_io.open_connection (Unix.ADDR_UNIX socket_path) in
+      Lwt.finalize
+        (fun () ->
+          let* () = Lwt_io.write_line oc cmd in
+          let* () = Lwt_io.flush oc in
+          Lwt_io.read_line ic)
+        (fun () -> Lwt_io.close ic))
+
 let notify ~path msg =
   try
     let fd = Unix.socket Unix.PF_UNIX Unix.SOCK_STREAM 0 in

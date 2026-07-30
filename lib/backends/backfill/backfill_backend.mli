@@ -28,6 +28,19 @@
 
 type sub = { name : string; backend : (module Backend.S) }
 
+(** How far behind one target is: jobs waiting, chunk pushes in flight, and
+    whether the queue overflowed and writes were dropped — the one state that
+    means [tsync resync-remote] is needed rather than patience. *)
+type lane_stats = { queued : int; in_flight : int; degraded : bool }
+
+(** The composite, plus a live view of each target by name. Returned rather than
+    looked up globally so a process serving several domains cannot confuse two
+    targets that share a name. *)
+type t = {
+  backend : (module Backend.S);
+  lanes : (string * (unit -> lane_stats)) list;
+}
+
 (** [make ~chunk_prefix ~chunk_keys ~skip_prefixes ~inners ~backfills].
 
     [inners] are the authoritative backends: the head serves every read and a
@@ -42,7 +55,7 @@ val make :
   skip_prefixes:string list ->
   inners:(module Backend.S) list ->
   backfills:sub list ->
-  (module Backend.S)
+  t
 
 (** Wait for every target configured in this process to catch up, giving up
     after a bounded wait so an unreachable target cannot hang a command. {!make}

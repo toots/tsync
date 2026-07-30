@@ -3,6 +3,7 @@ open Lwt.Syntax
 module Make (C : Conf.S) (F : File.S) = struct
   module Fs = File_store.Make (C)
   module J = Journal.Make (C)
+  module Diag = Diagnostics.Make (C)
 
   type hooks = {
     path_to_key : string -> string;
@@ -371,26 +372,32 @@ module Make (C : Conf.S) (F : File.S) = struct
                            :: ("running", `Bool true)
                            :: hooks.status_fields ()))
                   | "stats" ->
-                      let rate f = `Int (int_of_float (f ())) in
-                      let+ staged = F.staged_count () in
+                      (* The whole picture, assembled by {!Diagnostics} so a mount
+                         and an http-proxy server answer in one shape. What only
+                         this daemon knows — its queues and staged files — goes in
+                         as the domain's [mount] section, which is where a proxy
+                         asking us over IPC puts our answer too. [totals]
+                         enumerates the store, so it is asked for explicitly. *)
+                      let totals = get_str obj "arg" = "totals" in
+                      let* staged = F.staged_count () in
+                      let mount =
+                        `Assoc
+                          (("reachable", `Bool true)
+                           :: [
+                                ( "pendingDownloads",
+                                  `Int (F.downloads_in_flight ()) );
+                                ("stagedFiles", `Int staged);
+                                ( "downloadsCompleted",
+                                  `Int (F.downloads_completed_count ()) );
+                                ("maxUploads", `Int C.max_uploads);
+                                ("maxDownloads", `Int C.max_downloads);
+                              ]
+                          @ hooks.stats_fields ())
+                      in
+                      let+ domain = Diag.domain_json ~totals ~mount () in
                       ok_json
-                        ([
-                           ("pendingDownloads", `Int (F.downloads_in_flight ()));
-                           ("stagedFiles", `Int staged);
-                           ( "downloadsCompleted",
-                             `Int (F.downloads_completed_count ()) );
-                           ("maxUploads", `Int C.max_uploads);
-                           ("maxDownloads", `Int C.max_downloads);
-                           ("bytesUploaded", `Int (Metrics.uploaded ()));
-                           ("bytesDownloaded", `Int (Metrics.downloaded ()));
-                           ("uploadBytesPerSec", rate Metrics.upload_rate);
-                           ("downloadBytesPerSec", rate Metrics.download_rate);
-                           ("chunksHashed", `Int (Metrics.hashed ()));
-                           ("hashesPerSec", rate Metrics.hash_rate);
-                           ("cpuSeconds", `Float (Metrics.cpu_seconds ()));
-                           ("rssBytes", `Int (Metrics.rss_bytes ()));
-                         ]
-                        @ hooks.stats_fields ())
+                        (Diagnostics.process_json ()
+                        @ [("domains", `List [domain])])
                   | "download_progress" ->
                       Lwt.return
                         (match F.download_progress path with
