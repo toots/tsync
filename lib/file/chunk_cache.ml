@@ -109,23 +109,31 @@ module Make (C : Conf.S) (F : Fetch) = struct
 
   let root () = Cache_layout.chunks_dir ~cache_root:C.cache_root C.domain_name
 
-  (* (path, bytes, mtime) for every chunk body, walking the fanout dirs. *)
+  (* (path, bytes, mtime) for every chunk body, walking the fanout dirs. Each
+     directory's entries are stat'd in parallel — the same shape
+     {!Local_backend.list_prefix} uses, and for the same reason: a stat per file
+     serialized through the Lwt thread pool costs a round trip each, which on a
+     cache of a few thousand chunks is the difference between milliseconds and
+     seconds. The pool bounds the actual concurrency. *)
   let entries () =
     let* dirs = Fs_util.readdir_list (root ()) in
-    Lwt_list.fold_left_s
-      (fun acc dir ->
-        let dir = Filename.concat (root ()) dir in
-        let* names = Fs_util.readdir_list dir in
-        Lwt_list.fold_left_s
-          (fun acc name ->
-            let path = Filename.concat dir name in
-            Lwt.catch
-              (fun () ->
-                let+ st = Lwt_unix_retry.stat path in
-                (path, st.Unix.st_size, st.Unix.st_mtime) :: acc)
-              (fun _ -> Lwt.return acc))
-          acc names)
-      [] dirs
+    let+ per_dir =
+      Lwt_list.map_p
+        (fun dir ->
+          let dir = Filename.concat (root ()) dir in
+          let* names = Fs_util.readdir_list dir in
+          Lwt_list.filter_map_p
+            (fun name ->
+              let path = Filename.concat dir name in
+              Lwt.catch
+                (fun () ->
+                  let+ st = Lwt_unix_retry.stat path in
+                  Some (path, st.Unix.st_size, st.Unix.st_mtime))
+                (fun _ -> Lwt.return_none))
+            names)
+        dirs
+    in
+    List.concat per_dir
 
   let stats () =
     Lwt.catch

@@ -19,9 +19,28 @@ let printf = Log_printf.log
 let prefix = ref ""
 let set_prefix p = prefix := p
 
+(* The last few warnings and errors, kept so a process with no other window into
+   itself (the http-proxy frontend, which has no IPC socket) can report what went
+   wrong lately. Only what actually reached the sink is remembered. *)
+let max_recent = 50
+let recent_q : (float * level * string) Queue.t = Queue.create ()
+
+let remember level msg =
+  if rank level >= rank `warn then begin
+    Queue.add (Unix.gettimeofday (), level, msg) recent_q;
+    if Queue.length recent_q > max_recent then ignore (Queue.pop recent_q)
+  end
+
+let recent () = List.rev (List.of_seq (Queue.to_seq recent_q))
+
 let log level fmt =
   if rank level >= rank !min_level then
-    Printf.ksprintf (fun msg -> !active level (!prefix ^ msg)) fmt
+    Printf.ksprintf
+      (fun msg ->
+        let msg = !prefix ^ msg in
+        remember level msg;
+        !active level msg)
+      fmt
   else Printf.ifprintf () fmt
 
 let debug fmt = log `debug fmt

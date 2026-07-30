@@ -61,3 +61,9 @@ val rm_rf : string -> unit Lwt.t
     [dir] holds nothing afterwards. Best-effort; a missing [dir] reads as empty.
 *)
 val reap_older_than : cutoff:float -> string -> bool Lwt.t
+
+(** [disk_space path] is [Some (available_bytes, total_bytes)] for the
+    filesystem holding [path], as an unprivileged writer sees it, or [None] when
+    [path] cannot be stat'd. One syscall: cheap enough to call per status
+    request. *)
+val disk_space : string -> (int64 * int64) option

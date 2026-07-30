@@ -7,10 +7,14 @@
  (preprocessor_deps
   %{project_root}/lambda/browse.html
   %{project_root}/lambda/player.js
-  %{project_root}/lambda/mime.json)
+  %{project_root}/lambda/mime.json
+  stats.html)
  (libraries
   tsync_frontend_register
   tsync_http_proxy
+  tsync_core
+  tsync_diagnostics
+  tsync_metrics
   tsync_backend_register
   tsync_conf
   tsync_file

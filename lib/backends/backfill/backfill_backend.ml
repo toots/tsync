@@ -46,6 +46,7 @@ open Lwt.Syntax
    predates it is the point of the role, not a shortcoming of this module. *)
 
 type sub = { name : string; backend : (module Backend.S) }
+type lane_stats = { queued : int; in_flight : int; degraded : bool }
 
 type job =
   | Put of string * string
@@ -118,9 +119,13 @@ let drain_all () =
      a body that is not a manifest. Injected so this library stays below
      [Chunk_table].
    [skip_prefixes]: keys never forwarded to a target. *)
+type t = {
+  backend : (module Backend.S);
+  lanes : (string * (unit -> lane_stats)) list;
+}
+
 let make ~chunk_prefix ~(chunk_keys : string -> string list) ~skip_prefixes
-    ~(inners : (module Backend.S) list) ~(backfills : sub list) :
-    (module Backend.S) =
+    ~(inners : (module Backend.S) list) ~(backfills : sub list) : t =
   let (module Pri : Backend.S) =
     match inners with b :: _ -> b | [] -> failwith "no backends configured"
   in
@@ -256,55 +261,72 @@ let make ~chunk_prefix ~(chunk_keys : string -> string list) ~skip_prefixes
   lanes := !lanes @ targets;
   let fill key f = if not (skipped key) then List.iter f targets in
   let write f = Lwt_list.iter_s f inners in
-  (module struct
-    let put ~key ~data () =
-      let* () = write (fun (module B : Backend.S) -> B.put ~key ~data ()) in
-      fill key (fun t ->
-          if is_chunk key then forward_chunk t key data
-          else enqueue t (Put (key, data)));
-      Lwt.return_unit
+  let lanes =
+    List.map
+      (fun t ->
+        ( t.name,
+          fun () ->
+            {
+              queued = Queue.length t.jobs;
+              in_flight = t.chunks_in_flight;
+              degraded = t.degraded;
+            } ))
+      targets
+  in
+  let backend : (module Backend.S) =
+    (module struct
+      let put ~key ~data () =
+        let* () = write (fun (module B : Backend.S) -> B.put ~key ~data ()) in
+        fill key (fun t ->
+            if is_chunk key then forward_chunk t key data
+            else enqueue t (Put (key, data)));
+        Lwt.return_unit
 
-    let delete ~key () =
-      let* () = write (fun (module B : Backend.S) -> B.delete ~key ()) in
-      fill key (fun t -> enqueue t (Delete key));
-      Lwt.return_unit
+      let delete ~key () =
+        let* () = write (fun (module B : Backend.S) -> B.delete ~key ()) in
+        fill key (fun t -> enqueue t (Delete key));
+        Lwt.return_unit
 
-    let delete_multi keys =
-      let* () = write (fun (module B : Backend.S) -> B.delete_multi keys) in
-      let keys = List.filter (fun k -> not (skipped k)) keys in
-      if keys <> [] then
-        List.iter (fun t -> enqueue t (Delete_multi keys)) targets;
-      Lwt.return_unit
+      let delete_multi keys =
+        let* () = write (fun (module B : Backend.S) -> B.delete_multi keys) in
+        let keys = List.filter (fun k -> not (skipped k)) keys in
+        if keys <> [] then
+          List.iter (fun t -> enqueue t (Delete_multi keys)) targets;
+        Lwt.return_unit
 
-    let copy ~src_key ~dst_key () =
-      let* () =
-        write (fun (module B : Backend.S) -> B.copy ~src_key ~dst_key ())
-      in
-      fill dst_key (fun t -> enqueue t (Copy (src_key, dst_key)));
-      Lwt.return_unit
+      let copy ~src_key ~dst_key () =
+        let* () =
+          write (fun (module B : Backend.S) -> B.copy ~src_key ~dst_key ())
+        in
+        fill dst_key (fun t -> enqueue t (Copy (src_key, dst_key)));
+        Lwt.return_unit
 
-    (* Reads never touch a backfill target: it is behind by construction. *)
-    let get ~key () = Pri.get ~key ()
-    let get_opt ~key () = Pri.get_opt ~key ()
-    let head_opt ~key () = Pri.head_opt ~key ()
-    let list_prefix ?max_keys ~prefix () = Pri.list_prefix ?max_keys ~prefix ()
+      (* Reads never touch a backfill target: it is behind by construction. *)
+      let get ~key () = Pri.get ~key ()
+      let get_opt ~key () = Pri.get_opt ~key ()
+      let head_opt ~key () = Pri.head_opt ~key ()
 
-    (* First authoritative backend with an opinion. *)
-    let share_url ~prefix () =
-      let rec go = function
-        | [] -> Lwt.return_none
-        | (module B : Backend.S) :: rest -> (
-            let* u = B.share_url ~prefix () in
-            match u with Some _ -> Lwt.return u | None -> go rest)
-      in
-      go inners
+      let list_prefix ?max_keys ~prefix () =
+        Pri.list_prefix ?max_keys ~prefix ()
 
-    let default_chunk_size ~prefix () =
-      let rec go = function
-        | [] -> Lwt.return_none
-        | (module B : Backend.S) :: rest -> (
-            let* n = B.default_chunk_size ~prefix () in
-            match n with Some _ -> Lwt.return n | None -> go rest)
-      in
-      go inners
-  end)
+      (* First authoritative backend with an opinion. *)
+      let share_url ~prefix () =
+        let rec go = function
+          | [] -> Lwt.return_none
+          | (module B : Backend.S) :: rest -> (
+              let* u = B.share_url ~prefix () in
+              match u with Some _ -> Lwt.return u | None -> go rest)
+        in
+        go inners
+
+      let default_chunk_size ~prefix () =
+        let rec go = function
+          | [] -> Lwt.return_none
+          | (module B : Backend.S) :: rest -> (
+              let* n = B.default_chunk_size ~prefix () in
+              match n with Some _ -> Lwt.return n | None -> go rest)
+        in
+        go inners
+    end)
+  in
+  { backend; lanes }

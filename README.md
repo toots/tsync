@@ -45,7 +45,7 @@ On every laptop and desktop:
                   "role": "main" }] }
 ```
 
-They all see the same folder, pick up each other's changes, and none can leak a bucket key. The server can hand out public download links itself, so nothing has to live in the cloud.
+They all see the same folder, pick up each other's changes, and none can leak a bucket key. The server can hand out public download links itself, so nothing has to live in the cloud. It also serves a status page at `/`, where the shared secret gets you the whole picture — resolved config, cache, and each backend's health — without ever leaving the browser.
 
 ## Beyond the filesystem
 

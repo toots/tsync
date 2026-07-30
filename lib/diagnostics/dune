@@ -1,15 +1,13 @@
 (library
- (name tsync_ipc_handler)
+ (name tsync_diagnostics)
  (wrapped false)
  (libraries
   tsync_conf
-  tsync_core
-  tsync_metrics
+  tsync_backend_register
   tsync_file
-  tsync_diagnostics
   tsync_queue
+  tsync_metrics
   tsync_log
-  tsync_lwt_unix
   yojson
   unix
   lwt

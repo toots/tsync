@@ -4,25 +4,8 @@ module Make (C : Conf.S) (F : File.S) = struct
   module Fs = File_store.Make (C)
   module J = Journal.Make (C)
 
-  let last_sync_file = Filename.concat C.data_dir ("last-sync-" ^ C.domain_name)
-
-  let read_last_sync_key () =
-    if Sys.file_exists last_sync_file then (
-      try
-        let ic = open_in last_sync_file in
-        let s = input_line ic in
-        close_in ic;
-        String.trim s
-      with _ -> "")
-    else ""
-
-  let write_last_sync_key key =
-    try
-      let oc = open_out last_sync_file in
-      output_string oc key;
-      close_out oc
-    with exn ->
-      Log.err "sync_poller: write_last_sync_key: %s" (Printexc.to_string exn)
+  let read_last_sync_key = Fs.read_last_sync_key
+  let write_last_sync_key = Fs.write_last_sync_key
 
   let op_key op =
     match op with

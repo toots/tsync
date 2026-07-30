@@ -140,52 +140,21 @@ let stop_cmd =
 (* ── tsync status ────────────────────────────────────────────────────────── *)
 
 let status_cmd =
-  let run () =
+  let run domain =
     try
-      let obj = ipc_action "status" in
-      print_endline (Yojson.Safe.to_string (`Assoc obj))
-    with _ -> print_endline "Daemon not running"
+      let socket_path = domain_socket ?domain () in
+      match ipc_action ~socket_path "status" with
+        | obj -> print_endline (Yojson.Safe.to_string (`Assoc obj))
+        | exception _ -> Printf.printf "No daemon answering on %s\n" socket_path
+    with e -> Printf.eprintf "Error: %s\n" (Printexc.to_string e)
   in
   Cmd.v
     (Cmd.info "status" ~doc:"Show daemon status")
-    Term.(const run $ const ())
+    Term.(const run $ domain_arg)
 
 (* ── tsync stats ─────────────────────────────────────────────────────────── *)
 
-let human_bytes n =
-  let units = [| "B"; "KB"; "MB"; "GB"; "TB" |] in
-  let v = ref (float_of_int n) and i = ref 0 in
-  while !v >= 1024. && !i < Array.length units - 1 do
-    v := !v /. 1024.;
-    incr i
-  done;
-  if !i = 0 then Printf.sprintf "%d B" n
-  else Printf.sprintf "%.1f %s" !v units.(!i)
-
-let print_stats obj =
-  let i k = match List.assoc_opt k obj with Some (`Int n) -> n | _ -> 0 in
-  let f k = match List.assoc_opt k obj with Some (`Float x) -> x | _ -> 0. in
-  let row label value = Printf.printf "  %-13s %s\n" label value in
-  Printf.printf "Uploads\n";
-  row "pending" (string_of_int (i "pendingUploads"));
-  row "completed" (string_of_int (i "uploadsCompleted"));
-  row "limit" (string_of_int (i "maxUploads"));
-  row "transferred" (human_bytes (i "bytesUploaded"));
-  row "rate" (human_bytes (i "uploadBytesPerSec") ^ "/s");
-  Printf.printf "Downloads\n";
-  row "pending" (string_of_int (i "pendingDownloads"));
-  row "completed" (string_of_int (i "downloadsCompleted"));
-  row "limit" (string_of_int (i "maxDownloads"));
-  row "transferred" (human_bytes (i "bytesDownloaded"));
-  row "rate" (human_bytes (i "downloadBytesPerSec") ^ "/s");
-  Printf.printf "Hashing\n";
-  row "chunks" (string_of_int (i "chunksHashed"));
-  row "rate" (Printf.sprintf "%d/s" (i "hashesPerSec"));
-  Printf.printf "Cache\n";
-  row "unsynced files" (string_of_int (i "stagedFiles"));
-  Printf.printf "Process\n";
-  row "cpu" (Printf.sprintf "%.1fs" (f "cpuSeconds"));
-  row "memory" (human_bytes (i "rssBytes"))
+let human_bytes = Metrics.human_bytes
 
 let stats_cmd =
   let watch_arg =
@@ -199,15 +168,27 @@ let stats_cmd =
     Arg.(
       value & flag & info ["json"] ~doc:"Output raw JSON, one object per line")
   in
-  let run json watch =
+  let totals_arg =
+    Arg.(
+      value & flag
+      & info ["totals"]
+          ~doc:
+            "Also count what each backend holds. Enumerates the manifest and \
+             chunk namespaces, so it costs a full listing per backend.")
+  in
+  let run json totals watch domain =
+    let arg = if totals then Some "totals" else None in
+    (* Resolved once: [--watch] must not re-read the config on every tick, and a
+       config error should be reported before the screen starts clearing. *)
+    let socket_path = domain_socket ?domain () in
     let show () =
-      match ipc_action "stats" with
+      match ipc_action ~socket_path ?arg "stats" with
         | obj when json ->
             let obj = ("t", `Float (Unix.gettimeofday ())) :: obj in
             print_endline (Yojson.Safe.to_string (`Assoc obj))
-        | obj -> print_stats obj
+        | obj -> print_string (Diagnostics.text (`Assoc obj))
         | exception Failure msg -> Printf.eprintf "Error: %s\n" msg
-        | exception _ -> print_endline "Daemon not running"
+        | exception _ -> Printf.printf "No daemon answering on %s\n" socket_path
     in
     match watch with
       | None -> show ()
@@ -221,8 +202,10 @@ let stats_cmd =
   in
   Cmd.v
     (Cmd.info "stats"
-       ~doc:"Show transfer metrics (pending/completed uploads and downloads)")
-    Term.(const run $ json_arg $ watch_arg)
+       ~doc:
+         "Report on the running daemon: transfer metrics, config as resolved, \
+          cache, journal backlog and each backend's health")
+    Term.(const run $ json_arg $ totals_arg $ watch_arg $ domain_arg)
 
 (* ── tsync evict ─────────────────────────────────────────────────────────── *)
 

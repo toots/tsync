@@ -99,7 +99,7 @@ module Down : Backend.S = struct
   let default_chunk_size ~prefix:_ () = Lwt.return_none
 end
 
-let wrap ~inners ~target ~name =
+let wrap ~inners ~target ~name : Backfill_backend.t =
   Backfill_backend.make ~chunk_prefix ~chunk_keys
     ~skip_prefixes:[journal_prefix; cursor_key]
     ~inners
@@ -108,11 +108,14 @@ let wrap ~inners ~target ~name =
 let () =
   let main = Local_backend.make ~root:main_root in
   let (module M : Backend.S) = main in
-  let (module B : Backend.S) =
+  let wrapped =
     wrap ~inners:[main]
       ~target:(Local_backend.make ~root:target_root)
       ~name:"target"
   in
+  let (module B : Backend.S) = wrapped.Backfill_backend.backend in
+  (* How far behind this target is, as the diagnosis endpoints report it. *)
+  let lane = List.assoc "target" wrapped.Backfill_backend.lanes in
   (* Deliberately the generic hook rather than [Backfill_backend.drain_all]: a
      target only ever catches up because [make] registered itself there, and a
      one-shot command exits without draining if it was not. *)
@@ -214,10 +217,22 @@ let () =
      let* () = drain () in
      dump_target ();
 
-     case "an unreachable target is logged, never fatal";
-     let (module D : Backend.S) =
-       wrap ~inners:[main] ~target:(module Down) ~name:"down"
+     case "how far behind the target is, as reported for diagnosis";
+     let* () =
+       B.put ~key:(manifest_key "two") ~data:(manifest ~name:"two" [c0]) ()
      in
+     let queued = lane () in
+     step "queued right after a manifest put: %d (degraded %b)"
+       queued.Backfill_backend.queued queued.Backfill_backend.degraded;
+     let* () = drain () in
+     let settled = lane () in
+     step "queued once drained: %d (in flight %d, degraded %b)"
+       settled.Backfill_backend.queued settled.Backfill_backend.in_flight
+       settled.Backfill_backend.degraded;
+
+     case "an unreachable target is logged, never fatal";
+     let down = wrap ~inners:[main] ~target:(module Down) ~name:"down" in
+     let (module D : Backend.S) = down.Backfill_backend.backend in
      let* () = D.put ~key:c8 ~data:"eeee" () in
      let* () =
        D.put ~key:(manifest_key "safe") ~data:(manifest ~name:"safe" [c8]) ()

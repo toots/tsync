@@ -9,6 +9,7 @@
   tsync_file
   tsync_queue
   tsync_ipc_handler
+  tsync_diagnostics
   yojson
   unix
   lwt

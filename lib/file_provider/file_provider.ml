@@ -98,7 +98,8 @@ module Make (C : Conf.S) = struct
             Ipc.notify_resync ~path:C.notify_path;
             Lwt.return_unit);
         status_fields = (fun () -> []);
-        stats_fields = E.stats_fields;
+        stats_fields =
+          (fun () -> ("frontend", `String "file_provider") :: E.stats_fields ());
         on_stop = (fun () -> ());
       }
 

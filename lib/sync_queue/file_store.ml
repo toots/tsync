@@ -17,6 +17,28 @@ module Make (C : Conf.S) = struct
 
   let bump_cursor entry_key = Bk.put ~key:C.cursor_key ~data:entry_key
 
+  (* How far this client has applied the shared journal. Local, because it says
+     what *we* have caught up to, not what was published. *)
+  let last_sync_file = Filename.concat C.data_dir ("last-sync-" ^ C.domain_name)
+
+  let read_last_sync_key () =
+    if Sys.file_exists last_sync_file then (
+      try
+        let ic = open_in last_sync_file in
+        let s = input_line ic in
+        close_in ic;
+        String.trim s
+      with _ -> "")
+    else ""
+
+  let write_last_sync_key key =
+    try
+      let oc = open_out last_sync_file in
+      output_string oc key;
+      close_out oc
+    with exn ->
+      Log.err "file_store: write_last_sync_key: %s" (Printexc.to_string exn)
+
   let fetch_cursor () =
     let (module Primary : Backend.S) = primary () in
     let+ body = Primary.get_opt ~key:C.cursor_key () in

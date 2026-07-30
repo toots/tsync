@@ -172,6 +172,11 @@ let rec prompt_size_opt ?(unset = "none") msg default =
                 unset;
               prompt_size_opt ~unset msg default)
 
+(* What a new domain is offered as its local cache cap. Only a suggestion — the
+   prompt still takes "none" — and only for a new domain; editing an existing one
+   shows what it already has. *)
+let default_max_cache = 1024 * 1024 * 1024
+
 (* ── Backend / domain builders ───────────────────────────────────────────── *)
 
 let role_names = List.map Conf_parsing.role_name Conf_parsing.roles
@@ -647,9 +652,12 @@ let edit_domain existing =
             "Cache chunk size (chunks grouped this big on local disk; larger \
              cuts I/O latency)"
             !cache_chunk_size;
+        (* Suggest a cap rather than none: an uncapped cache grows to the size of
+           whatever gets read, and the first anyone hears of it is a full disk.
+           Cached chunks are re-fetchable, so the cap costs downloads, never data. *)
         max_cache :=
           prompt_size_opt "Max local cache size (\"none\" = unlimited)"
-            !max_cache;
+            (Some default_max_cache);
         backends := prompt_backends ();
         frontends := edit_frontends !frontends
     | Some _ ->

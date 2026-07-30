@@ -61,6 +61,14 @@ module type S = sig
   val staged_count : unit -> int Lwt.t
 
   val downloads_completed_count : unit -> int
+
+  (* Files written but not yet published, as tracked in memory. *)
+  val dirty_count : unit -> int
+
+  (* Whether the metadata lock is held, and whether callers are queued behind it:
+     what a wedged mount looks like from outside. *)
+  val meta_locked : unit -> bool
+  val meta_waiters : unit -> bool
   val download_progress : t -> (int * int) option
 
   (** Drop [t]'s cached chunks, keeping its manifest. *)
@@ -112,6 +120,9 @@ struct
   let dirty_keys : (string, unit) Hashtbl.t = Hashtbl.create 16
   let downloading : (string, unit Lwt.t) Hashtbl.t = Hashtbl.create 8
   let downloads_completed = ref 0
+  let dirty_count () = Hashtbl.length dirty_keys
+  let meta_locked () = Lwt_mutex.is_locked meta_mutex
+  let meta_waiters () = not (Lwt_mutex.is_empty meta_mutex)
 
   (* ── Path helpers ──────────────────────────────────────────────────────── *)
 

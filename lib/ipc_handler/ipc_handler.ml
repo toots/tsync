@@ -3,6 +3,7 @@ open Lwt.Syntax
 module Make (C : Conf.S) (F : File.S) = struct
   module Fs = File_store.Make (C)
   module J = Journal.Make (C)
+  module Diag = Diagnostics.Make (C)
 
   type hooks = {
     path_to_key : string -> string;
@@ -371,26 +372,60 @@ module Make (C : Conf.S) (F : File.S) = struct
                            :: ("running", `Bool true)
                            :: hooks.status_fields ()))
                   | "stats" ->
-                      let rate f = `Int (int_of_float (f ())) in
-                      let+ staged = F.staged_count () in
+                      (* The whole picture, assembled by {!Diagnostics} so a mount
+                         and an http-proxy server answer in one shape. This daemon
+                         is one frontend of one domain, so it reports itself twice
+                         over: once at the top as the process answering, and once
+                         in the domain's [frontends] with the queues only it knows
+                         — which is where a proxy asking us over IPC picks it up.
+                         [totals] enumerates the store, so it is asked for
+                         explicitly. *)
+                      let totals = get_str obj "arg" = "totals" in
+                      let* staged = F.staged_count () in
+                      let queues =
+                        [
+                          ("reachable", `Bool true);
+                          ("pendingDownloads", `Int (F.downloads_in_flight ()));
+                          ("stagedFiles", `Int staged);
+                          ("dirtyFiles", `Int (F.dirty_count ()));
+                          ( "downloadsCompleted",
+                            `Int (F.downloads_completed_count ()) );
+                          ("maxUploads", `Int C.max_uploads);
+                          ("maxDownloads", `Int C.max_downloads);
+                          (* A mount gone quiet while its backends answer fine is
+                             usually this: the metadata lock held, with callers
+                             queued behind it. *)
+                          ("metaLocked", `Bool (F.meta_locked ()));
+                          ("metaWaiting", `Bool (F.meta_waiters ()));
+                        ]
+                        @ hooks.stats_fields ()
+                      in
+                      let frontend_type =
+                        match List.assoc_opt "frontend" queues with
+                          | Some (`String t) -> t
+                          | _ -> "unknown"
+                      in
+                      (* A frontend entry names itself with [type], the same key a
+                         backend entry uses. The frontends supply it as [frontend]
+                         in their stats fields, so normalise here — once, where the
+                         entry is built — rather than leaving every reader to know
+                         both spellings. *)
+                      let queues =
+                        ("type", `String frontend_type)
+                        :: List.remove_assoc "frontend" queues
+                      in
+                      let+ domain =
+                        Diag.domain_json ~totals ~frontends:[`Assoc queues] ()
+                      in
                       ok_json
-                        ([
-                           ("pendingDownloads", `Int (F.downloads_in_flight ()));
-                           ("stagedFiles", `Int staged);
-                           ( "downloadsCompleted",
-                             `Int (F.downloads_completed_count ()) );
-                           ("maxUploads", `Int C.max_uploads);
-                           ("maxDownloads", `Int C.max_downloads);
-                           ("bytesUploaded", `Int (Metrics.uploaded ()));
-                           ("bytesDownloaded", `Int (Metrics.downloaded ()));
-                           ("uploadBytesPerSec", rate Metrics.upload_rate);
-                           ("downloadBytesPerSec", rate Metrics.download_rate);
-                           ("chunksHashed", `Int (Metrics.hashed ()));
-                           ("hashesPerSec", rate Metrics.hash_rate);
-                           ("cpuSeconds", `Float (Metrics.cpu_seconds ()));
-                           ("rssBytes", `Int (Metrics.rss_bytes ()));
-                         ]
-                        @ hooks.stats_fields ())
+                        (Diagnostics.self_json
+                           ~extra:
+                             [
+                               ("frontend", `String frontend_type);
+                               ("serves", `List [`String C.domain_name]);
+                             ]
+                           ()
+                        @ [("domains", `List [domain])])
                   | "download_progress" ->
                       Lwt.return
                         (match F.download_progress path with

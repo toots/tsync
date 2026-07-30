@@ -119,40 +119,83 @@ let chunk_keys data =
    and one with only read-only stores gets an inner layer with nothing writable
    in it — which is what makes such a domain readable but not writable. *)
 let build_backends (d : Conf_parsing.domain) : (module Backend.S) list =
+  (* One instance per configured backend, made here and shared by every layer
+     below — a second [make_backend] for the same config would be a second client
+     against the same store. *)
+  let leaves =
+    List.map
+      (fun (bc : Conf_parsing.backend_config) -> (bc, make_backend bc))
+      (Conf_parsing.order_backends d.Conf_parsing.backends)
+  in
   let of_roles rs =
     List.filter
-      (fun (b : Conf_parsing.backend_config) -> List.mem b.role rs)
-      (Conf_parsing.order_backends d.Conf_parsing.backends)
+      (fun ((bc : Conf_parsing.backend_config), _) -> List.mem bc.role rs)
+      leaves
   in
   (* Role coherence is settled at parse time ({!Conf_parsing.validate_roles}), so
      [writable] is empty only for a domain that is legitimately read-only. *)
   let writable = of_roles [`Main; `Replica] in
-  let sub (bc : Conf_parsing.backend_config) =
-    { Fallback_backend.name = bc.name; backend = make_backend bc }
+  let sub ((bc : Conf_parsing.backend_config), backend) =
+    { Fallback_backend.name = bc.name; backend }
   in
   let inner =
     Fallback_backend.make ~writable:(List.map sub writable)
       ~fallbacks:(List.map sub (of_roles [`Read_only]))
   in
-  match of_roles [`Backfill] with
-    | [] -> [inner]
-    | bf ->
-        [
-          Backfill_backend.make
-            ~chunk_prefix:(Conf_parsing.chunk_prefix d)
-            ~chunk_keys
-            ~skip_prefixes:
-              [Conf_parsing.journal_prefix d; Conf_parsing.cursor_key d]
-            ~inners:[inner]
-            ~backfills:
-              (List.map
-                 (fun (bc : Conf_parsing.backend_config) ->
-                   {
-                     Backfill_backend.name = bc.Conf_parsing.name;
-                     backend = make_backend bc;
-                   })
-                 bf);
-        ]
+  let composite, lanes =
+    match of_roles [`Backfill] with
+      | [] -> (inner, [])
+      | bf ->
+          let bf_backend =
+            Backfill_backend.make
+              ~chunk_prefix:(Conf_parsing.chunk_prefix d)
+              ~chunk_keys
+              ~skip_prefixes:
+                [Conf_parsing.journal_prefix d; Conf_parsing.cursor_key d]
+              ~inners:[inner]
+              ~backfills:
+                (List.map
+                   (fun ((bc : Conf_parsing.backend_config), backend) ->
+                     { Backfill_backend.name = bc.Conf_parsing.name; backend })
+                   bf)
+          in
+          (bf_backend.Backfill_backend.backend, bf_backend.lanes)
+  in
+  (* Declare the individual stores for diagnosis: this is the only place that has
+     each backend's name, its role and its own module at once. *)
+  Backend.report_members ~domain:d.Conf_parsing.name
+    (List.map
+       (fun ((bc : Conf_parsing.backend_config), backend) ->
+         let lane = List.assoc_opt bc.name lanes in
+         let stat f = Option.map (fun l () -> f (l ())) lane in
+         {
+           Backend.name = bc.name;
+           role = Conf_parsing.role_name bc.role;
+           backend_type = bc.backend_type;
+           (* Masked by the same rule [tsync print-config] uses, so a report can
+              say which bucket or URL this is without carrying a credential. *)
+           config =
+             List.map
+               (fun (k, v) ->
+                 match
+                   Option.bind
+                     (Backend.spec_for bc.backend_type)
+                     (List.find_opt (fun (s : Backend.field_spec) -> s.name = k))
+                 with
+                   | Some { secret = true; _ } when v <> "" -> (k, "***")
+                   | _ -> (k, v))
+               bc.fields;
+           backend;
+           pending = stat (fun s -> s.Backfill_backend.queued);
+           in_flight = stat (fun s -> s.Backfill_backend.in_flight);
+           degraded = stat (fun s -> s.Backfill_backend.degraded);
+           (* Only a local store sits on a filesystem we can measure. *)
+           local_path =
+             (if bc.backend_type = "local" then List.assoc_opt "path" bc.fields
+              else None);
+         })
+       leaves);
+  [composite]
 
 (* Ordered backends with the one named [source] moved to the head, so it serves
    reads (the primary). Fails if no backend has that name. *)
@@ -248,6 +291,23 @@ let domain_arg =
     & info ["domain"] ~docv:"NAME" ~doc:"Domain name (default: from config)")
 
 let load_config () = Conf_parsing.load runtime_paths.Runtime.config_path
+
+(* The socket the daemon serving [domain] listens on. Every domain gets its own
+   on Linux (a domain is its own child process), while macOS shares one, so the
+   only way to reach the right daemon is to resolve the domain first: explicit
+   [--domain], else the persisted default, else the sole configured domain.
+
+   Commands that talk to a running daemon must go through this. The bare
+   [runtime_paths.socket_path] is the shared macOS socket and, on Linux, a path
+   nothing has listened on since domains got their own — which is why a
+   multi-domain host used to be told "daemon not running" by a daemon that was
+   running perfectly well. *)
+let domain_socket ?domain () =
+  let domain =
+    match domain with Some _ -> domain | None -> read_default_domain ()
+  in
+  let d = Conf_parsing.pick_domain ?domain (load_config ()) in
+  Runtime.domain_socket_path runtime_paths d.Conf_parsing.name
 
 let load_conf ?domain ?tier ?source () =
   make_conf ?domain ?tier ?source (load_config ())

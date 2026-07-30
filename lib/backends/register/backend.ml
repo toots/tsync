@@ -42,6 +42,38 @@ let drain_hooks : (unit -> unit Lwt.t) list ref = ref []
 let on_drain f = drain_hooks := f :: !drain_hooks
 let drain () = Lwt_list.iter_p (fun f -> f ()) !drain_hooks
 
+(* What a domain's backends are, individually — the composites ({!Fallback} and
+   {!Backfill}) present one {!S} and keep their members' names to themselves, so
+   nothing downstream can say "which store is down" or "how far behind is that
+   target". Whoever builds a domain's backends declares them here instead of the
+   composites growing an introspection interface each: same reasoning as
+   [on_drain] above. Only diagnosis reads this; nothing routes on it. *)
+type member = {
+  name : string;
+  role : string;  (** main | replica | backfill | readOnly *)
+  backend_type : string;  (** local | s3 | gcs | http-proxy *)
+  config : (string * string) list;
+      (** what this store points at — a bucket, a URL, a path — with secret
+          fields masked. Diagnosing "which store is this?" needs the answer, and
+          a report gets pasted into bug threads. *)
+  backend : (module S);
+      (** the leaf store, so a reader can probe it directly *)
+  pending : (unit -> int) option;  (** backfill: jobs queued for this target *)
+  in_flight : (unit -> int) option;  (** backfill: chunk forwards in flight *)
+  degraded : (unit -> bool) option;
+      (** backfill: writes were dropped, [tsync resync-remote] needed *)
+  local_path : string option;
+      (** where a [local] store keeps its files, so a report can say how much
+          room is left on it. Absent for stores whose capacity is not ours to
+          know. *)
+}
+
+let member_registry : (string, member list) Hashtbl.t = Hashtbl.create 4
+let report_members ~domain ms = Hashtbl.replace member_registry domain ms
+
+let members ~domain =
+  Option.value ~default:[] (Hashtbl.find_opt member_registry domain)
+
 type field_type = [ `String | `Bool ]
 
 type field_spec = {

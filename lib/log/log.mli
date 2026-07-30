@@ -14,6 +14,11 @@ val set_prefix : string -> unit
 (** Built-in sink: timestamped, colorized lines on stderr. *)
 val printf : level -> string -> unit
 
+(** The last 50 emitted [`warn]/[`err] messages, newest first, with the time
+    each was logged. For a process reporting on itself — see the http-proxy
+    status endpoint, which has no log of its own to point at. *)
+val recent : unit -> (float * level * string) list
+
 val debug : ('a, unit, string, unit) format4 -> 'a
 val info : ('a, unit, string, unit) format4 -> 'a
 val warn : ('a, unit, string, unit) format4 -> 'a

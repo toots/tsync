@@ -1,4 +1,4 @@
-(test
+(executable
  (name http_proxy_test)
  (libraries
   tsync_http_proxy
@@ -7,4 +7,29 @@
   tsync_http_proxy_backend
   tsync_frontend_register
   tsync_frontend
+  tsync_diagnostics
+  tsync_conf
+  tsync_local_io
+  cohttp
+  yojson
+  lwt
+  lwt.unix
   uri))
+
+(alias
+ (name default)
+ (deps http_proxy_test.exe))
+
+(rule
+ (alias runtest)
+ (target http_proxy_test.output)
+ (action
+  (with-stdout-to
+   http_proxy_test.output
+   (ignore-stderr
+    (run ./http_proxy_test.exe)))))
+
+(rule
+ (alias runtest)
+ (action
+  (diff http_proxy_test.expected http_proxy_test.output)))
