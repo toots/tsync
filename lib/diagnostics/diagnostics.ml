@@ -548,8 +548,14 @@ let text json =
          the block above for the figures it cannot attribute to one domain. *)
       List.iter
         (fun f ->
+          (* A frontend that never answered cannot tell us what it is, so say that
+             rather than calling it unknown. *)
           line 2 "Frontend %s%s"
-            (str ~default:"(unknown)" (mem f "type"))
+            (str
+               ~default:
+                 (if bool_of (mem f "reachable") then "(unknown)"
+                  else "(none answering)")
+               (mem f "type"))
             (if bool_of (mem f "shared") then " (shared listener, see above)"
              else "");
           if not (bool_of (mem f "reachable")) then

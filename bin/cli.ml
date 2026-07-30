@@ -292,6 +292,23 @@ let domain_arg =
 
 let load_config () = Conf_parsing.load runtime_paths.Runtime.config_path
 
+(* The socket the daemon serving [domain] listens on. Every domain gets its own
+   on Linux (a domain is its own child process), while macOS shares one, so the
+   only way to reach the right daemon is to resolve the domain first: explicit
+   [--domain], else the persisted default, else the sole configured domain.
+
+   Commands that talk to a running daemon must go through this. The bare
+   [runtime_paths.socket_path] is the shared macOS socket and, on Linux, a path
+   nothing has listened on since domains got their own — which is why a
+   multi-domain host used to be told "daemon not running" by a daemon that was
+   running perfectly well. *)
+let domain_socket ?domain () =
+  let domain =
+    match domain with Some _ -> domain | None -> read_default_domain ()
+  in
+  let d = Conf_parsing.pick_domain ?domain (load_config ()) in
+  Runtime.domain_socket_path runtime_paths d.Conf_parsing.name
+
 let load_conf ?domain ?tier ?source () =
   make_conf ?domain ?tier ?source (load_config ())
 

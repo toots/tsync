@@ -137,7 +137,7 @@ Domain statusdom
     public shares    off
     option port      8443
     option secret    ***
-  Frontend (unknown)
+  Frontend (none answering)
     NOT ANSWERING    /tmp/tsync-http-proxy-status-test/absent.sock: Unix.Unix_error(Unix.ENOENT, "connect", "")
   Backend disk (local, main)
     path             /tmp/tsync-http-proxy-status-test/store

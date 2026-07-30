@@ -168,6 +168,8 @@ type op =
   | Share_url of string
   | Chunk_size of string
   | Bad
+      (** one of ours, but malformed: an undecodable key, a missing argument *)
+  | Unknown  (** not part of the API at all — a browser asking for a favicon *)
 
 let parse_op meth uri body =
   let path = Uri.path uri in
@@ -208,7 +210,7 @@ let parse_op meth uri body =
         match q "prefix" with Some prefix -> Chunk_size prefix | None -> Bad)
     | `GET, "/share-url" -> (
         match q "prefix" with Some prefix -> Share_url prefix | None -> Bad)
-    | _ -> Bad
+    | _ -> Unknown
 
 let op_name = function
   | Get _ -> "get"
@@ -221,6 +223,7 @@ let op_name = function
   | Share_url _ -> "shareUrl"
   | Chunk_size _ -> "chunkSize"
   | Bad -> "badRequest"
+  | Unknown -> "notFound"
 
 (* The domain a request targets is the route whose [domain_root] prefixes the
    operation's key/prefix. *)
@@ -230,7 +233,7 @@ let route_key = function
   | Delete_multi [] -> None
   | Copy (src, _) -> Some src
   | List_all (p, _) | Share_url p | Chunk_size p -> Some p
-  | Bad -> None
+  | Bad | Unknown -> None
 
 let respond ?(status = `OK) ?(headers = []) body =
   Cohttp_lwt_unix.Server.respond_string ~status
@@ -353,7 +356,7 @@ let exec route op ~body =
           | Some n ->
               respond (Yojson.Safe.to_string (`Assoc [("chunkSize", `Int n)]))
           | None -> respond ~status:`Not_found "")
-    | Bad -> respond ~status:`Bad_request "bad request"
+    | Bad | Unknown -> respond ~status:`Bad_request "bad request"
 
 (* Share manifests are written outside every domain root ([shares_prefix] is
    domain-independent), so those keys have no domain to match on: fall back to
@@ -524,6 +527,13 @@ let callback ~port ~tls routes _conn req body =
           | _ -> (
               let op = parse_op meth uri body_str in
               match route_key op with
+                (* A path that is not part of the API is a 404: a browser asking
+                   for a favicon has not made a bad request, it has asked for
+                   something that is not here. [badRequest] is reserved for a call
+                   that aimed at this API and got it wrong. *)
+                | None when op = Unknown ->
+                    bump "notFound";
+                    respond ~status:`Not_found "not found"
                 | None ->
                     bump "badRequest";
                     respond ~status:`Bad_request "bad request"

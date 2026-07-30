@@ -140,15 +140,17 @@ let stop_cmd =
 (* ── tsync status ────────────────────────────────────────────────────────── *)
 
 let status_cmd =
-  let run () =
+  let run domain =
     try
-      let obj = ipc_action "status" in
-      print_endline (Yojson.Safe.to_string (`Assoc obj))
-    with _ -> print_endline "Daemon not running"
+      let socket_path = domain_socket ?domain () in
+      match ipc_action ~socket_path "status" with
+        | obj -> print_endline (Yojson.Safe.to_string (`Assoc obj))
+        | exception _ -> Printf.printf "No daemon answering on %s\n" socket_path
+    with e -> Printf.eprintf "Error: %s\n" (Printexc.to_string e)
   in
   Cmd.v
     (Cmd.info "status" ~doc:"Show daemon status")
-    Term.(const run $ const ())
+    Term.(const run $ domain_arg)
 
 (* ── tsync stats ─────────────────────────────────────────────────────────── *)
 
@@ -174,16 +176,19 @@ let stats_cmd =
             "Also count what each backend holds. Enumerates the manifest and \
              chunk namespaces, so it costs a full listing per backend.")
   in
-  let run json totals watch =
+  let run json totals watch domain =
     let arg = if totals then Some "totals" else None in
+    (* Resolved once: [--watch] must not re-read the config on every tick, and a
+       config error should be reported before the screen starts clearing. *)
+    let socket_path = domain_socket ?domain () in
     let show () =
-      match ipc_action ?arg "stats" with
+      match ipc_action ~socket_path ?arg "stats" with
         | obj when json ->
             let obj = ("t", `Float (Unix.gettimeofday ())) :: obj in
             print_endline (Yojson.Safe.to_string (`Assoc obj))
         | obj -> print_string (Diagnostics.text (`Assoc obj))
         | exception Failure msg -> Printf.eprintf "Error: %s\n" msg
-        | exception _ -> print_endline "Daemon not running"
+        | exception _ -> Printf.printf "No daemon answering on %s\n" socket_path
     in
     match watch with
       | None -> show ()
@@ -200,7 +205,7 @@ let stats_cmd =
        ~doc:
          "Report on the running daemon: transfer metrics, config as resolved, \
           cache, journal backlog and each backend's health")
-    Term.(const run $ json_arg $ totals_arg $ watch_arg)
+    Term.(const run $ json_arg $ totals_arg $ watch_arg $ domain_arg)
 
 (* ── tsync evict ─────────────────────────────────────────────────────────── *)
 
