@@ -181,7 +181,7 @@ let () =
       socket_path = "/nonexistent/tsync.sock";
       domain_name = "one";
       self_frontend = `Assoc [];
-      diagnose = (fun ~totals:_ ~frontends:_ -> Lwt.return (`Assoc []));
+      diagnose = (fun ~totals:_ ~exact:_ ~frontends:_ -> Lwt.return (`Assoc []));
     }
   in
   let routes = [route "one"; route "two"] in
@@ -268,6 +268,23 @@ let () =
      capacity of "unknown" is what an absent path correctly reports. *)
   Lwt_main.run (Fs_util.mkdir_p (status_root ^ "/store"));
 
+  (* A store with a chunk in every shard: the estimate scales one shard's worth
+     up by the shard count, so a uniformly filled store is the case where the
+     estimate and the truth have to agree exactly. Real keys are hashes, so this
+     is the distribution they approximate. *)
+  let planted = Chunk_layout.shards in
+  Lwt_main.run
+    (Lwt_list.iter_s
+       (fun i ->
+         let key =
+           Printf.sprintf "%s%013x-%016x" (Chunk_layout.shard_name i) i i
+         in
+         let (module B : Backend.S) = List.hd C.backends in
+         B.put
+           ~key:(C.chunk_prefix ^ Chunk_layout.relative_path key)
+           ~data:"chunk" ())
+       (List.init planted Fun.id));
+
   (* Two stores, one of them down, so the report has to name which. *)
   Backend.report_members ~domain:C.domain_name
     [
@@ -308,9 +325,9 @@ let () =
     }
   in
   let status_routes = [Http_proxy_frontend.make_route [binding] binding] in
-  let report ?(totals = false) () =
+  let report ?(totals = false) ?(exact = false) () =
     Lwt_main.run
-      (Http_proxy_frontend.status_json ~port:8443 ~tls:true ~totals
+      (Http_proxy_frontend.status_json ~port:8443 ~tls:true ~totals ~exact
          status_routes)
   in
   let r = report () in
@@ -401,6 +418,30 @@ let () =
   let counted = await_counts 40 in
   assert (json_member "chunks" counted <> `Null);
   assert (json_member "sampledSecondsAgo" counted <> `Null);
+
+  (* The default is an estimate, and it says so: a caller must be able to tell a
+     sampled figure from a counted one. *)
+  assert (json_member "chunksFromShards" counted <> `Null);
+  assert (json_member "chunks" counted = `Int planted);
+
+  (* [exact] is a separate sample, so asking for it must not be answered out of
+     the estimate's cache — and on this store it must reach the same number by
+     walking every shard. *)
+  let rec await_exact tries =
+    let t = disk_totals (report ~totals:true ~exact:true ()) in
+    if json_member "chunks" t <> `Null then t
+    else if tries = 0 then failwith "exact counts never arrived"
+    else begin
+      Lwt_main.run (Lwt_unix.sleep 0.05);
+      await_exact (tries - 1)
+    end
+  in
+  let exact = await_exact 40 in
+  assert (json_member "chunksFromShards" exact = `Null);
+  assert (json_member "chunks" exact = `Int planted);
+
+  (* How the two read is snapshotted below; both samples are warm by here, so
+     neither renders as "counting in the background". *)
 
   (* Both representations are snapshotted below, which is where the shape is
      actually reviewed. This one stays an assertion because a snapshot can be
@@ -513,4 +554,16 @@ let () =
                   ] );
             ]
           stable));
+  (* What a store holds, the cheap way and the thorough way. The store below is
+     one chunk in each of its shards, so the estimate and the count agree on the
+     number and differ only in how they say they got it — which is the thing to
+     read here. *)
+  let totals_text ~exact =
+    Diagnostics.text
+      (substitute ~values:stable_values (report ~totals:true ~exact ()))
+  in
+  print_endline "########## /stats?totals=1 ##########";
+  print_string (totals_text ~exact:false);
+  print_endline "########## /stats?totals=exact ##########";
+  print_string (totals_text ~exact:true);
   print_endline "http_proxy_test ok"

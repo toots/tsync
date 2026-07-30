@@ -173,11 +173,26 @@ let stats_cmd =
       value & flag
       & info ["totals"]
           ~doc:
-            "Also count what each backend holds. Enumerates the manifest and \
-             chunk namespaces, so it costs a full listing per backend.")
+            "Also report what each backend holds. The chunk count is estimated \
+             from a sample of the store's shards; the manifest count is a full \
+             listing. See $(b,--exact).")
   in
-  let run json totals watch domain =
-    let arg = if totals then Some "totals" else None in
+  let exact_arg =
+    Arg.(
+      value & flag
+      & info ["exact"]
+          ~doc:
+            "With $(b,--totals), count every chunk instead of estimating from \
+             a sample. Enumerates the whole chunk namespace, so it costs a \
+             full listing per backend.")
+  in
+  let run json totals exact watch domain =
+    let arg =
+      match (totals, exact) with
+        | _, true -> Some "totals-exact"
+        | true, false -> Some "totals"
+        | false, false -> None
+    in
     (* Resolved once: [--watch] must not re-read the config on every tick, and a
        config error should be reported before the screen starts clearing. *)
     let socket_path = domain_socket ?domain () in
@@ -205,7 +220,8 @@ let stats_cmd =
        ~doc:
          "Report on the running daemon: transfer metrics, config as resolved, \
           cache, journal backlog and each backend's health")
-    Term.(const run $ json_arg $ totals_arg $ watch_arg $ domain_arg)
+    Term.(
+      const run $ json_arg $ totals_arg $ exact_arg $ watch_arg $ domain_arg)
 
 (* ── tsync evict ─────────────────────────────────────────────────────────── *)
 

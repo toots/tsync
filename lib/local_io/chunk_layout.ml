@@ -7,6 +7,8 @@
    readdir stays cheap, without paying for tens of thousands of directories that
    would sit near-empty. *)
 let fanout = 3
+let shards = 1 lsl (4 * fanout)
+let shard_name n = Printf.sprintf "%0*x" fanout n
 
 let relative_path key =
   let shard =

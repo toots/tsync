@@ -199,4 +199,104 @@ Domain statusdom
     UNREACHABLE      Backend.Backend_error("connection refused")
     journal          error: Backend.Backend_error("connection refused")
     backfill         7 queued, 2 in flight — DEGRADED, run tsync resync-remote
+########## /stats?totals=1 ##########
+Frontend http-proxy on testhost (this process)
+  listener         port 8443, https
+  serving          1 domain: statusdom
+  process          pid 1234, up 1h 0m
+  cpu              12.5s (0.3% avg)
+  memory           40.0 MB rss, 8.0 MB heap (peak 12.0 MB)
+  gc               100 minor, 10 major
+  event loop       2 readable, 0 writable, 0 timers, pool 1000
+  traffic          up 4.0 KB (0 B/s), down 2.0 KB (0 B/s)
+  hashed           0 chunks (0/s)
+  requests         2 stats, 2 unauthorized
+
+Domain statusdom
+  client name      test-client
+  read-only        no
+  versioning       off
+  symlinks         keep
+  chunk size       64.0 KB
+  cache chunk      64.0 KB
+  concurrency      2 uploads, 3 downloads
+  cache root       /tmp/tsync-http-proxy-status-test/cache
+  socket           /tmp/tsync-http-proxy-status-test/absent.sock
+  Cache
+    chunks           0 (0 B of unlimited)
+    manifests        0
+    unpublished      0 journal entries
+  Frontend http-proxy (shared listener, see above)
+    public shares    off
+    option port      8443
+    option secret    ***
+  Frontend (none answering)
+    NOT ANSWERING    /tmp/tsync-http-proxy-status-test/absent.sock: Unix.Unix_error(Unix.ENOENT, "connect", "")
+  Backend disk (local, main)
+    path             /tmp/tsync-http-proxy-status-test/store
+    reachable        yes (1 ms)
+    journal          0 entries, 0 to apply
+    disk             100.0 GB free of 460.4 GB (78% used)
+    holds            0 manifests, ~4096 chunks, ~20.0 KB, as of 0m 0s ago
+  Backend archive (http-proxy, backfill)
+    url              https://nas.example:8443
+    secret           ***
+    UNREACHABLE      Backend.Backend_error("connection refused")
+    journal          error: Backend.Backend_error("connection refused")
+    backfill         7 queued, 2 in flight — DEGRADED, run tsync resync-remote
+    holds            could not count: Backend.Backend_error("connection refused")
+
+Recent warnings and errors (newest first)
+  16:13:20 warn  diagnostics: counting archive: Backend.Backend_error("connection refused")
+  16:13:20 warn  diagnostics: counting archive: Backend.Backend_error("connection refused")
+########## /stats?totals=exact ##########
+Frontend http-proxy on testhost (this process)
+  listener         port 8443, https
+  serving          1 domain: statusdom
+  process          pid 1234, up 1h 0m
+  cpu              12.5s (0.3% avg)
+  memory           40.0 MB rss, 8.0 MB heap (peak 12.0 MB)
+  gc               100 minor, 10 major
+  event loop       2 readable, 0 writable, 0 timers, pool 1000
+  traffic          up 4.0 KB (0 B/s), down 2.0 KB (0 B/s)
+  hashed           0 chunks (0/s)
+  requests         2 stats, 2 unauthorized
+
+Domain statusdom
+  client name      test-client
+  read-only        no
+  versioning       off
+  symlinks         keep
+  chunk size       64.0 KB
+  cache chunk      64.0 KB
+  concurrency      2 uploads, 3 downloads
+  cache root       /tmp/tsync-http-proxy-status-test/cache
+  socket           /tmp/tsync-http-proxy-status-test/absent.sock
+  Cache
+    chunks           0 (0 B of unlimited)
+    manifests        0
+    unpublished      0 journal entries
+  Frontend http-proxy (shared listener, see above)
+    public shares    off
+    option port      8443
+    option secret    ***
+  Frontend (none answering)
+    NOT ANSWERING    /tmp/tsync-http-proxy-status-test/absent.sock: Unix.Unix_error(Unix.ENOENT, "connect", "")
+  Backend disk (local, main)
+    path             /tmp/tsync-http-proxy-status-test/store
+    reachable        yes (1 ms)
+    journal          0 entries, 0 to apply
+    disk             100.0 GB free of 460.4 GB (78% used)
+    holds            0 manifests, 4096 chunks, 20.0 KB, as of 0m 0s ago
+  Backend archive (http-proxy, backfill)
+    url              https://nas.example:8443
+    secret           ***
+    UNREACHABLE      Backend.Backend_error("connection refused")
+    journal          error: Backend.Backend_error("connection refused")
+    backfill         7 queued, 2 in flight — DEGRADED, run tsync resync-remote
+    holds            could not count: Backend.Backend_error("connection refused")
+
+Recent warnings and errors (newest first)
+  16:13:20 warn  diagnostics: counting archive: Backend.Backend_error("connection refused")
+  16:13:20 warn  diagnostics: counting archive: Backend.Backend_error("connection refused")
 http_proxy_test ok
