@@ -73,6 +73,12 @@ let stable_values =
     ("uploadBytesPerSec", `Int 0);
     ("downloadBytesPerSec", `Int 0);
     ("hashesPerSec", `Int 0);
+    (* recentErrors entries: the message text is stable, the time is not. *)
+    ("t", `Float 1700000000.);
+    (* Whatever this machine happens to have free. *)
+    ("availableBytes", `Int 107374182400);
+    ("totalBytes", `Int 494384795648);
+    ("sampledSecondsAgo", `Int 0);
   ]
 
 (* Replace every present field named in [values], at any depth. Used both to pin
@@ -256,6 +262,10 @@ let () =
 
   (* ── Status endpoints ───────────────────────────────────────────────────── *)
 
+  (* The store directory has to exist for its filesystem to be measurable — a
+     capacity of "unknown" is what an absent path correctly reports. *)
+  Lwt_main.run (Fs_util.mkdir_p (status_root ^ "/store"));
+
   (* Two stores, one of them down, so the report has to name which. *)
   Backend.report_members ~domain:C.domain_name
     [
@@ -266,6 +276,9 @@ let () =
         pending = None;
         in_flight = None;
         degraded = None;
+        (* A real path, so the capacity line is exercised — its numbers are
+           whatever this machine has, hence pinned in the snapshot. *)
+        local_path = Some (status_root ^ "/store");
       };
       {
         Backend.name = "archive";
@@ -274,6 +287,7 @@ let () =
         pending = Some (fun () -> 7);
         in_flight = Some (fun () -> 2);
         degraded = Some (fun () -> true);
+        local_path = None;
       };
     ];
   (* Through [make_route], so option masking and the diagnose wiring are the real
@@ -335,11 +349,12 @@ let () =
   assert (json_member "queued" backfill = `Int 7);
   assert (json_member "degraded" backfill = `Bool true);
 
-  (* Counting what a store holds is opt-in: it enumerates the namespace. *)
+  (* Counting what a store holds is opt-in, and never done while a request waits:
+     the first ask starts a walk in the background and says so, a later one has the
+     numbers. A status endpoint must not block on enumerating a large store. *)
   assert (json_member "totals" (by_name "disk") = `Null);
-  let with_totals = report ~totals:true () in
-  let disk_totals =
-    match json_member "domains" with_totals with
+  let disk_totals report =
+    match json_member "domains" report with
       | `List [d] -> (
           match json_member "backends" d with
             | `List l ->
@@ -348,7 +363,22 @@ let () =
             | _ -> `Null)
       | _ -> `Null
   in
-  assert (json_member "chunks" disk_totals <> `Null);
+  assert (
+    json_member "counting" (disk_totals (report ~totals:true ())) = `Bool true);
+  (* Let the background walk land. Bounded retry rather than a fixed sleep: the
+     walk is over an empty store, so this is one iteration in practice. *)
+  let rec await_counts tries =
+    let t = disk_totals (report ~totals:true ()) in
+    if json_member "chunks" t <> `Null then t
+    else if tries = 0 then failwith "counts never arrived"
+    else begin
+      Lwt_main.run (Lwt_unix.sleep 0.05);
+      await_counts (tries - 1)
+    end
+  in
+  let counted = await_counts 40 in
+  assert (json_member "chunks" counted <> `Null);
+  assert (json_member "sampledSecondsAgo" counted <> `Null);
 
   (* Both representations are snapshotted below, which is where the shape is
      actually reviewed. This one stays an assertion because a snapshot can be

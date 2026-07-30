@@ -250,6 +250,7 @@ let setup_client (module C : Conf.S) root staging_prefix =
         pending = None;
         in_flight = None;
         degraded = None;
+        local_path = Some (Filename.concat root "backend");
       };
     ];
   let key p = C.domain_prefix ^ p in

@@ -68,6 +68,10 @@
             "truncated": false,
             "cursor": null,
             "lastSync": ""
+          },
+          "disk": {
+            "availableBytes": 107374182400,
+            "totalBytes": 494384795648
           }
         },
         {
@@ -123,6 +127,7 @@ Domain statusdom
   Backend disk (main)
     reachable        yes (1 ms)
     journal          0 entries, 0 to apply
+    disk             100.0 GB free of 460.4 GB (78% used)
   Backend archive (backfill)
     UNREACHABLE      Backend.Backend_error("connection refused")
     journal          error: Backend.Backend_error("connection refused")
@@ -163,6 +168,7 @@ Domain statusdom
   Backend disk (main)
     reachable        yes (1 ms)
     journal          0 entries, 0 to apply
+    disk             100.0 GB free of 460.4 GB (78% used)
   Backend archive (backfill)
     UNREACHABLE      Backend.Backend_error("connection refused")
     journal          error: Backend.Backend_error("connection refused")

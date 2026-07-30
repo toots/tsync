@@ -9,9 +9,11 @@
   tsync_frontend
   tsync_diagnostics
   tsync_conf
+  tsync_local_io
   cohttp
   yojson
   lwt
+  lwt.unix
   uri))
 
 (alias

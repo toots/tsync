@@ -175,6 +175,10 @@ let build_backends (d : Conf_parsing.domain) : (module Backend.S) list =
            pending = stat (fun s -> s.Backfill_backend.queued);
            in_flight = stat (fun s -> s.Backfill_backend.in_flight);
            degraded = stat (fun s -> s.Backfill_backend.degraded);
+           (* Only a local store sits on a filesystem we can measure. *)
+           local_path =
+             (if bc.backend_type = "local" then List.assoc_opt "path" bc.fields
+              else None);
          })
        leaves);
   [composite]

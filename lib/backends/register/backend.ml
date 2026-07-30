@@ -57,6 +57,10 @@ type member = {
   in_flight : (unit -> int) option;  (** backfill: chunk forwards in flight *)
   degraded : (unit -> bool) option;
       (** backfill: writes were dropped, [tsync resync-remote] needed *)
+  local_path : string option;
+      (** where a [local] store keeps its files, so a report can say how much
+          room is left on it. Absent for stores whose capacity is not ours to
+          know. *)
 }
 
 let member_registry : (string, member list) Hashtbl.t = Hashtbl.create 4

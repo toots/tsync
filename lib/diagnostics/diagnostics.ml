@@ -170,9 +170,23 @@ module Make (C : Conf.S) = struct
       (fun exn ->
         Lwt.return (`Assoc [("error", `String (Printexc.to_string exn))]))
 
-  (* What this store actually holds. Enumerates two namespaces in full, which is
-     why it is behind [?totals]. *)
-  let totals_of (module B : Backend.S) =
+  (* What this store actually holds: manifests, chunks, bytes. There is no cheap
+     way to know — it means enumerating two namespaces, which is a stat per file on
+     a [local] store and a paged LIST on a bucket, and grows with the domain.
+
+     So it is never counted while a request waits. A request serves the last
+     sample and says how old it is, kicking off a refresh in the background when
+     that sample has gone stale; the first ever request answers "counting". A
+     figure a few minutes old is worth having, and a status endpoint that blocks
+     for a 100k-object walk is not. *)
+  let totals_max_age = 300.
+
+  type sample = { at : float; counts : Yojson.Safe.t }
+
+  let samples : (string, sample) Hashtbl.t = Hashtbl.create 4
+  let counting : (string, unit) Hashtbl.t = Hashtbl.create 4
+
+  let count_now ~name (module B : Backend.S) =
     Lwt.catch
       (fun () ->
         let* manifests = B.list_prefix ~prefix:C.domain_prefix () in
@@ -188,16 +202,67 @@ module Make (C : Conf.S) = struct
                    0 chunks) );
           ])
       (fun exn ->
+        Log.warn "diagnostics: counting %s: %s" name (Printexc.to_string exn);
         Lwt.return (`Assoc [("error", `String (Printexc.to_string exn))]))
+
+  (* One walk at a time per store: a page refreshing every few seconds must not
+     stack walks on top of each other. *)
+  let refresh ~name backend =
+    if not (Hashtbl.mem counting name) then begin
+      Hashtbl.replace counting name ();
+      Lwt.async (fun () ->
+          Lwt.finalize
+            (fun () ->
+              let+ counts = count_now ~name backend in
+              Hashtbl.replace samples name { at = Unix.gettimeofday (); counts })
+            (fun () ->
+              Hashtbl.remove counting name;
+              Lwt.return_unit))
+    end
+
+  let totals_of ~name backend =
+    let now = Unix.gettimeofday () in
+    match Hashtbl.find_opt samples name with
+      | Some s ->
+          if now -. s.at > totals_max_age then refresh ~name backend;
+          let with_age =
+            match s.counts with
+              | `Assoc fields ->
+                  `Assoc
+                    (fields
+                    @ [("sampledSecondsAgo", `Int (int_of_float (now -. s.at)))]
+                    )
+              | other -> other
+          in
+          with_age
+      | None ->
+          refresh ~name backend;
+          `Assoc [("counting", `Bool true)]
+
+  (* Room left where a local store keeps its files. One syscall, so unlike the
+     counts above this is always reported. *)
+  let disk_json (m : Backend.member) =
+    match Option.bind m.Backend.local_path Fs_util.disk_space with
+      | None -> []
+      | Some (available, total) ->
+          [
+            ( "disk",
+              `Assoc
+                [
+                  ("availableBytes", `Int (Int64.to_int available));
+                  ("totalBytes", `Int (Int64.to_int total));
+                ] );
+          ]
 
   let member_json ~totals (m : Backend.member) =
     let* probed, cursor = probe m.Backend.backend in
-    let* jrnl = journal ~cursor m.Backend.backend in
-    let+ tot =
+    let+ jrnl = journal ~cursor m.Backend.backend in
+    (* Synchronous: it reads the last sample and, if that is stale, leaves a walk
+       running behind us rather than waiting for one. *)
+    let tot =
       if totals then
-        let+ t = totals_of m.Backend.backend in
-        [("totals", t)]
-      else Lwt.return []
+        [("totals", totals_of ~name:m.Backend.name m.Backend.backend)]
+      else []
     in
     let backfill =
       match (m.Backend.pending, m.in_flight, m.degraded) with
@@ -216,7 +281,7 @@ module Make (C : Conf.S) = struct
     `Assoc
       ((("name", `String m.Backend.name) :: ("role", `String m.role) :: probed)
       @ [("journal", jrnl)]
-      @ backfill @ tot)
+      @ disk_json m @ backfill @ tot)
 
   let symlink_policy =
     match C.symlink_policy with
@@ -467,18 +532,37 @@ let text json =
                      (if bool_of (mem bf "degraded") then
                         " — DEGRADED, run tsync resync-remote"
                       else "")));
+          (* Room left where a local store keeps its files: one syscall, so this is
+             here on every request, unlike the counts below. *)
+          (match mem m "disk" with
+            | `Null -> ()
+            | d ->
+                let avail = int_of (mem d "availableBytes")
+                and total = int_of (mem d "totalBytes") in
+                row 4 "disk"
+                  (Printf.sprintf "%s free of %s (%d%% used)"
+                     (Metrics.human_bytes avail)
+                     (Metrics.human_bytes total)
+                     (if total > 0 then 100 * (total - avail) / total else 0)));
           match mem m "totals" with
             | `Null -> ()
             | t -> (
-                (* "Could not look" must never read as "holds nothing". *)
-                  match mem t "error" with
-                  | `String e -> row 4 "holds" ("could not count: " ^ e)
+                (* "Could not look" must never read as "holds nothing", and neither
+                   must "not counted yet" — that walk runs in the background. *)
+                  match (mem t "error", mem t "counting") with
+                  | `String e, _ -> row 4 "holds" ("could not count: " ^ e)
+                  | _, `Bool true -> row 4 "holds" "counting in the background"
                   | _ ->
                       row 4 "holds"
-                        (Printf.sprintf "%d manifests, %d chunks, %s"
+                        (Printf.sprintf "%d manifests, %d chunks, %s%s"
                            (int_of (mem t "manifests"))
                            (int_of (mem t "chunks"))
-                           (Metrics.human_bytes (int_of (mem t "chunkBytes"))))))
+                           (Metrics.human_bytes (int_of (mem t "chunkBytes")))
+                           (match mem t "sampledSecondsAgo" with
+                             | `Null -> ""
+                             | age ->
+                                 Printf.sprintf ", as of %s ago"
+                                   (duration (num age))))))
         (match mem d "backends" with `List l -> l | _ -> []);
       match mem d "mount" with
         | `Null -> ()

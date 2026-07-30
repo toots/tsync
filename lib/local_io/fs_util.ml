@@ -244,3 +244,14 @@ let rec reap_older_than ~cutoff dir =
         0 names
     in
     kept = 0
+
+(* ── Filesystem capacity ─────────────────────────────────────────────────── *)
+
+external statvfs : string -> int64 * int64 = "tsync_statvfs"
+
+(* Bytes an unprivileged writer can still use, and the filesystem's size, for the
+   filesystem holding [path]. One syscall, so it is cheap enough to report on
+   every status request — unlike counting what a store holds. [None] when the path
+   cannot be stat'd (it may not exist yet), never an exception: capacity is a nice
+   thing to know, not a reason to fail a report. *)
+let disk_space path = try Some (statvfs path) with _ -> None
