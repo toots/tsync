@@ -1,0 +1,181 @@
+########## /api/v1/stats ##########
+{
+  "server": {
+    "hostname": "testhost",
+    "pid": 1234,
+    "startedAt": 1700000000.0,
+    "uptimeSeconds": 3600.0,
+    "port": 8443,
+    "tls": true
+  },
+  "process": {
+    "cpuSeconds": 12.5,
+    "cpuPercentAvg": 0.3,
+    "rssBytes": 41943040,
+    "heapBytes": 8388608,
+    "topHeapBytes": 12582912,
+    "minorCollections": 100,
+    "majorCollections": 10
+  },
+  "lwt": {
+    "readableFds": 2,
+    "writableFds": 0,
+    "timers": 0,
+    "poolSize": 1000
+  },
+  "traffic": {
+    "bytesUploaded": 4096,
+    "bytesDownloaded": 2048,
+    "uploadBytesPerSec": 0,
+    "downloadBytesPerSec": 0,
+    "chunksHashed": 0,
+    "hashesPerSec": 0
+  },
+  "recentErrors": [],
+  "requests": { "inFlight": 0 },
+  "domains": [
+    {
+      "name": "statusdom",
+      "clientName": "test-client",
+      "versioning": false,
+      "symlinks": "keep",
+      "domainReadOnly": false,
+      "chunkSize": 65536,
+      "cacheChunkSize": 65536,
+      "maxCache": null,
+      "maxUploads": 2,
+      "maxDownloads": 3,
+      "cacheRoot": "/tmp/tsync-http-proxy-status-test/cache",
+      "dataDir": "/tmp/tsync-http-proxy-status-test/data",
+      "socketPath": "/tmp/tsync-http-proxy-status-test/absent.sock",
+      "domainPrefix": "tsync/statusdom/manifests/",
+      "chunkPrefix": "tsync/statusdom/chunks/",
+      "readOnly": false,
+      "shares": false,
+      "options": { "port": "8443", "secret": "***" },
+      "cache": { "chunks": 0, "bytes": 0, "maxCache": null },
+      "journal": { "localPending": 0 },
+      "backends": [
+        {
+          "name": "disk",
+          "role": "main",
+          "reachable": true,
+          "latencyMs": 1.0,
+          "error": null,
+          "journal": {
+            "entries": 0,
+            "behind": 0,
+            "truncated": false,
+            "cursor": null,
+            "lastSync": ""
+          }
+        },
+        {
+          "name": "archive",
+          "role": "backfill",
+          "reachable": false,
+          "latencyMs": null,
+          "error": "Backend.Backend_error(\"connection refused\")",
+          "journal": {
+            "error": "Backend.Backend_error(\"connection refused\")"
+          },
+          "backfill": { "queued": 7, "inFlight": 2, "degraded": true }
+        }
+      ],
+      "mount": {
+        "reachable": false,
+        "error": "Unix.Unix_error(Unix.ENOENT, \"connect\", \"\")"
+      }
+    }
+  ]
+}
+########## /stats ##########
+tsync testhost (pid 1234), up 1h 0m
+  listener         port 8443, https
+  cpu              12.5s (0.3% avg)
+  memory           40.0 MB rss, 8.0 MB heap (peak 12.0 MB)
+  gc               100 minor, 10 major
+  event loop       2 readable, 0 writable, 0 timers, pool 1000
+
+Traffic
+  uploaded         4.0 KB (0 B/s)
+  downloaded       2.0 KB (0 B/s)
+  hashed           0 chunks (0/s)
+
+Requests
+  inFlight         0
+
+Domain statusdom
+  client name      test-client
+  read-only        no
+  versioning       off
+  symlinks         keep
+  chunk size       64.0 KB
+  cache chunk      64.0 KB
+  concurrency      2 uploads, 3 downloads
+  cache root       /tmp/tsync-http-proxy-status-test/cache
+  socket           /tmp/tsync-http-proxy-status-test/absent.sock
+  option port      8443
+  option secret    ***
+  Cache
+    chunks           0 (0 B of unlimited)
+    unpublished      0 journal entries
+  Backend disk (main)
+    reachable        yes (1 ms)
+    journal          0 entries, 0 to apply
+  Backend archive (backfill)
+    UNREACHABLE      Backend.Backend_error("connection refused")
+    journal          error: Backend.Backend_error("connection refused")
+    backfill         7 queued, 2 in flight — DEGRADED, run tsync resync-remote
+  Mount daemon
+    unreachable      Unix.Unix_error(Unix.ENOENT, "connect", "")
+########## /stats with a mount daemon ##########
+tsync testhost (pid 1234), up 1h 0m
+  listener         port 8443, https
+  cpu              12.5s (0.3% avg)
+  memory           40.0 MB rss, 8.0 MB heap (peak 12.0 MB)
+  gc               100 minor, 10 major
+  event loop       2 readable, 0 writable, 0 timers, pool 1000
+
+Traffic
+  uploaded         4.0 KB (0 B/s)
+  downloaded       2.0 KB (0 B/s)
+  hashed           0 chunks (0/s)
+
+Requests
+  inFlight         0
+
+Domain statusdom
+  client name      test-client
+  read-only        no
+  versioning       off
+  symlinks         keep
+  chunk size       64.0 KB
+  cache chunk      64.0 KB
+  concurrency      2 uploads, 3 downloads
+  cache root       /tmp/tsync-http-proxy-status-test/cache
+  socket           /tmp/tsync-http-proxy-status-test/absent.sock
+  option port      8443
+  option secret    ***
+  Cache
+    chunks           0 (0 B of unlimited)
+    unpublished      0 journal entries
+  Backend disk (main)
+    reachable        yes (1 ms)
+    journal          0 entries, 0 to apply
+  Backend archive (backfill)
+    UNREACHABLE      Backend.Backend_error("connection refused")
+    journal          error: Backend.Backend_error("connection refused")
+    backfill         7 queued, 2 in flight — DEGRADED, run tsync resync-remote
+  Mount daemon (fuse)
+    process          pid 18103, up 1h 0m, 35.5s cpu, 55.0 MB rss
+    uploaded         0 B (0 B/s)
+    downloaded       751.5 MB (1.0 MB/s)
+    hashed           0 chunks (0/s)
+    read             2.0 GB (5.0 MB/s)
+    written          0 B (0 B/s)
+    handles          3 open, 41 since start
+    mountPoint       /home/u/tsync/statusdom
+    stagedFiles      0
+    pendingUploads   2
+http_proxy_test ok

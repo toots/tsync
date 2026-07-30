@@ -129,7 +129,13 @@ module Make (C : Conf.S) = struct
             ()
         in
         let my_uuid = J.client_uuid () in
-        let last = Filename.basename (Fs.read_last_sync_key ()) in
+        (* [basename ""] is ".", which would both read as nonsense and make the
+           "never synced" case below compare against it instead of matching. *)
+        let last =
+          match Fs.read_last_sync_key () with
+            | "" -> ""
+            | key -> Filename.basename key
+        in
         let prefix_len = String.length C.journal_prefix in
         let basenames =
           List.filter_map
@@ -513,16 +519,56 @@ let text json =
                       (Printf.sprintf "%d chunks (%d/s)"
                          (int_of (mem t "chunksHashed"))
                          (int_of (mem t "hashesPerSec"))));
+              (* Volume through the frontend itself — what fuse serves out of the
+                 chunk cache never touches a backend, so this is the only place it
+                 shows up. Paired with its rate: whether the mount is busy *now* is
+                 what a total cannot say. *)
+              List.iter
+                (fun (label, total_key, rate_key) ->
+                  match mem m total_key with
+                    | `Null -> ()
+                    | v ->
+                        row 4 label
+                          (Printf.sprintf "%s (%s/s)"
+                             (Metrics.human_bytes (int_of v))
+                             (Metrics.human_bytes (int_of (mem m rate_key)))))
+                [
+                  ("read", "bytesRead", "bytesReadPerSec");
+                  ("written", "bytesWritten", "bytesWrittenPerSec");
+                ];
+              (match mem m "openHandles" with
+                | `Null -> ()
+                | v ->
+                    row 4 "handles"
+                      (Printf.sprintf "%d open, %d since start" (int_of v)
+                         (int_of (mem m "filesOpened"))));
               (* Whatever else the frontend reported — queue depths, staged files,
-                 anything a future frontend adds — without this having to know it. *)
+                 anything a future frontend adds — without this having to know it.
+                 A count of bytes is spelled as bytes wherever the name says so, so
+                 a new field does not arrive here as a bare integer. *)
               List.iter
                 (fun (k, v) ->
+                  let is_bytes =
+                    (* "bytesRead", "rssBytes", "stagedBytes"… *)
+                    let has sub =
+                      let n = String.length sub and len = String.length k in
+                      let rec at i =
+                        i + n <= len && (String.sub k i n = sub || at (i + 1))
+                      in
+                      at 0
+                    in
+                    has "bytes" || has "Bytes"
+                  in
                   match (k, v) with
                     | ( ( "reachable" | "frontend" | "pid" | "uptimeSeconds"
-                        | "cpuSeconds" | "rssBytes" | "traffic" ),
+                        | "cpuSeconds" | "rssBytes" | "traffic" | "bytesRead"
+                        | "bytesWritten" | "bytesReadPerSec"
+                        | "bytesWrittenPerSec" | "openHandles" | "filesOpened"
+                          ),
                         _ ) ->
                         ()
                     | _, `String s -> row 4 k s
+                    | _, `Int n when is_bytes -> row 4 k (Metrics.human_bytes n)
                     | _, `Int n -> row 4 k (string_of_int n)
                     | _, `Bool b -> row 4 k (string_of_bool b)
                     | _, v -> row 4 k (Yojson.Safe.to_string v))

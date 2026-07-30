@@ -1,4 +1,4 @@
-(test
+(executable
  (name http_proxy_test)
  (libraries
   tsync_http_proxy
@@ -11,6 +11,23 @@
   tsync_conf
   cohttp
   yojson
-  str
   lwt
   uri))
+
+(alias
+ (name default)
+ (deps http_proxy_test.exe))
+
+(rule
+ (alias runtest)
+ (target http_proxy_test.output)
+ (action
+  (with-stdout-to
+   http_proxy_test.output
+   (ignore-stderr
+    (run ./http_proxy_test.exe)))))
+
+(rule
+ (alias runtest)
+ (action
+  (diff http_proxy_test.expected http_proxy_test.output)))

@@ -59,8 +59,8 @@ module Make (C : Conf.S) = struct
       ("filesOpened", `Int !files_opened);
       ("bytesRead", `Int (Metrics.total read_bytes));
       ("bytesWritten", `Int (Metrics.total written_bytes));
-      ("readBytesPerSec", `Int (int_of_float (Metrics.rate read_bytes)));
-      ("writeBytesPerSec", `Int (int_of_float (Metrics.rate written_bytes)));
+      ("bytesReadPerSec", `Int (int_of_float (Metrics.rate read_bytes)));
+      ("bytesWrittenPerSec", `Int (int_of_float (Metrics.rate written_bytes)));
     ]
 
   let guard op path f =

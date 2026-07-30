@@ -46,6 +46,50 @@ end
 
 let json_member name j = Yojson.Safe.Util.member name j
 
+(* Everything in the report that moves between runs, pinned to a fixed value of
+   the same type — so the snapshot below reviews the shape and the wording while
+   staying readable as a real report. Rates are timing-dependent (a rolling window
+   over wall-clock seconds), hence pinned too; the mount snapshot exercises rate
+   rendering with literals instead. *)
+let stable_values =
+  [
+    ("hostname", `String "testhost");
+    ("pid", `Int 1234);
+    ("startedAt", `Float 1700000000.);
+    ("uptimeSeconds", `Float 3600.);
+    ("cpuSeconds", `Float 12.5);
+    ("cpuPercentAvg", `Float 0.3);
+    ("rssBytes", `Int 41943040);
+    ("heapBytes", `Int 8388608);
+    ("topHeapBytes", `Int 12582912);
+    ("minorCollections", `Int 100);
+    ("majorCollections", `Int 10);
+    ("readableFds", `Int 2);
+    ("writableFds", `Int 0);
+    ("timers", `Int 0);
+    ("latencyMs", `Float 1.);
+    ("bytesUploaded", `Int 4096);
+    ("bytesDownloaded", `Int 2048);
+    ("uploadBytesPerSec", `Int 0);
+    ("downloadBytesPerSec", `Int 0);
+    ("hashesPerSec", `Int 0);
+  ]
+
+(* Replace every present field named in [values], at any depth. Used both to pin
+   the moving parts and to drop a mount daemon into an otherwise real report. *)
+let rec substitute ~values (j : Yojson.Safe.t) =
+  match j with
+    | `Assoc fields ->
+        `Assoc
+          (List.map
+             (fun (k, v) ->
+               match List.assoc_opt k values with
+                 | Some fixed when v <> `Null -> (k, fixed)
+                 | _ -> (k, substitute ~values v))
+             fields)
+    | `List l -> `List (List.map (substitute ~values) l)
+    | v -> v
+
 let signed_request ~secret ~path =
   let headers =
     Http_proxy.Auth.request_headers ~secret ~meth:"GET" ~path ~body:""
@@ -306,80 +350,47 @@ let () =
   in
   assert (json_member "chunks" disk_totals <> `Null);
 
-  (* The text report is the same collection rendered for a person: it must name
-     every domain and store, and say plainly which one is down. *)
-  let text = Diagnostics.text r in
-  let mentions s =
-    let re = Str.regexp_string s in
-    try
-      ignore (Str.search_forward re text 0);
-      true
-    with Not_found -> false
-  in
-  assert (mentions "Domain statusdom");
-  assert (mentions "Backend disk (main)");
-  assert (mentions "Backend archive (backfill)");
-  assert (mentions "UNREACHABLE");
-  assert (mentions "run tsync resync-remote");
-  (* Byte counts are raw in the JSON and human-readable only here. *)
-  assert (mentions "maxDownloads" = false);
+  (* Both representations are snapshotted below, which is where the shape is
+     actually reviewed. This one stays an assertion because a snapshot can be
+     promoted without being read, and a leaked shared secret must not be able to
+     ride in on a promote. *)
+  assert (json_member "secret" (json_member "options" domain) = `String "***");
 
   (* A domain's frontends are separate processes with separate counters, so the
      bytes a mount moves are invisible to the proxy's own metrics. They are carried
      over IPC and reported under the mount, attributed to it — a page that showed
      only its own zero would say "no traffic" about a busy machine. Shaped as the
      daemon actually answers. *)
-  let with_mount =
+  let mount_fixture =
     `Assoc
       [
-        ( "domains",
-          `List
+        ("reachable", `Bool true);
+        ("frontend", `String "fuse");
+        ("mountPoint", `String "/home/u/tsync/statusdom");
+        ("stagedFiles", `Int 0);
+        ("pendingUploads", `Int 2);
+        ("openHandles", `Int 3);
+        ("filesOpened", `Int 41);
+        ("bytesRead", `Int 2147483648);
+        ("bytesWritten", `Int 0);
+        ("bytesReadPerSec", `Int 5242880);
+        ("bytesWrittenPerSec", `Int 0);
+        ("pid", `Int 18103);
+        ("uptimeSeconds", `Float 3600.);
+        ("cpuSeconds", `Float 35.5);
+        ("rssBytes", `Int 57638912);
+        ( "traffic",
+          `Assoc
             [
-              `Assoc
-                [
-                  ("name", `String "statusdom");
-                  ( "mount",
-                    `Assoc
-                      [
-                        ("reachable", `Bool true);
-                        ("frontend", `String "fuse");
-                        ("mountPoint", `String "/home/u/tsync/statusdom");
-                        ("stagedFiles", `Int 0);
-                        ("pendingUploads", `Int 2);
-                        ("pid", `Int 18103);
-                        ("uptimeSeconds", `Float 3600.);
-                        ("cpuSeconds", `Float 35.5);
-                        ("rssBytes", `Int 57638912);
-                        ( "traffic",
-                          `Assoc
-                            [
-                              ("bytesUploaded", `Int 0);
-                              ("bytesDownloaded", `Int 788029143);
-                              ("uploadBytesPerSec", `Int 0);
-                              ("downloadBytesPerSec", `Int 1048576);
-                              ("chunksHashed", `Int 0);
-                              ("hashesPerSec", `Int 0);
-                            ] );
-                      ] );
-                ];
+              ("bytesUploaded", `Int 0);
+              ("bytesDownloaded", `Int 788029143);
+              ("uploadBytesPerSec", `Int 0);
+              ("downloadBytesPerSec", `Int 1048576);
+              ("chunksHashed", `Int 0);
+              ("hashesPerSec", `Int 0);
             ] );
       ]
   in
-  let mount_text = Diagnostics.text with_mount in
-  let mount_mentions s =
-    let re = Str.regexp_string s in
-    try
-      ignore (Str.search_forward re mount_text 0);
-      true
-    with Not_found -> false
-  in
-  assert (mount_mentions "Mount daemon (fuse)");
-  assert (mount_mentions "751.5 MB");
-  (* the movie, in bytes the JSON kept raw *)
-  assert (mount_mentions "pid 18103");
-  (* Fields this renderer knows nothing about still show up. *)
-  assert (mount_mentions "pendingUploads");
-  assert (mount_mentions "mountPoint");
 
   (* Both routes verify the same HMAC as the object API, and neither answers
      without one. *)
@@ -410,4 +421,17 @@ let () =
   assert (json_member "stats" counters = `Int 2);
   assert (json_member "unauthorized" counters = `Int 2);
 
+  (* ── Snapshots ──────────────────────────────────────────────────────────────
+     The two representations side by side, which is the point: /api/v1/stats and
+     /stats are one collection rendered twice, and a diff here is the review of
+     both. The JSON keeps raw counts; only the text spells sizes for a person. *)
+  let stable = substitute ~values:stable_values r in
+  print_endline "########## /api/v1/stats ##########";
+  print_endline (Yojson.Safe.pretty_to_string stable);
+  print_endline "########## /stats ##########";
+  print_string (Diagnostics.text stable);
+  (* The same report on a host that also mounts the domain. *)
+  print_endline "########## /stats with a mount daemon ##########";
+  print_string
+    (Diagnostics.text (substitute ~values:[("mount", mount_fixture)] stable));
   print_endline "http_proxy_test ok"
