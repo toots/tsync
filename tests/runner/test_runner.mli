@@ -145,3 +145,8 @@ val run_ipc : ?versioning:bool -> scenario list -> unit
     delta), B's current cursor (up to date), and a pruned-past anchor (stale,
     which drives a full re-list). *)
 val run_ipc_changes : ?versioning:bool -> scenario list -> unit
+
+(** Snapshot the structure of the daemon's own report — the [stats] IPC action
+    behind [tsync stats], and the same collection the http-proxy serves. Values
+    that move between runs (pids, uptimes, paths, timings) are left out. *)
+val run_stats : ?versioning:bool -> scenario list -> unit

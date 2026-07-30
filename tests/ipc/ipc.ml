@@ -71,8 +71,24 @@ let changes_scenarios : scenario list =
     };
   ]
 
+(* The daemon reporting on itself: what [tsync stats] renders and what the
+   http-proxy serves over /stats. *)
+let stats_scenarios : scenario list =
+  [
+    {
+      name = "after uploads: cache filled, nothing left unpublished";
+      steps =
+        [
+          Write { path = "a.txt"; content = "hello" };
+          Write { path = "sub/b.txt"; content = "world" };
+        ];
+    };
+  ]
+
 let () =
   print_endline "########## LISTING ##########";
   run_ipc listing_scenarios;
   print_endline "########## CHANGES ##########";
-  run_ipc_changes changes_scenarios
+  run_ipc_changes changes_scenarios;
+  print_endline "########## STATS ##########";
+  run_stats stats_scenarios

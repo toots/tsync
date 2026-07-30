@@ -224,6 +224,9 @@ type client = {
   dump_listing : unit -> unit Lwt.t;
   dump_changes : label:string -> anchor:string -> unit Lwt.t;
   cursor : unit -> string Lwt.t;
+  (* The daemon's own report, as [tsync stats] and the http-proxy serve it. Whole
+     JSON rather than a snapshot: most of it is pids, uptimes and paths. *)
+  stats : unit -> (string * Yojson.Safe.t) list Lwt.t;
 }
 
 (* Tests drive the real IPC handler directly (no socket): every daemon service
@@ -236,6 +239,19 @@ let setup_client (module C : Conf.S) root staging_prefix =
   let module Sp = Sync_poller.Make (C) (F) in
   let module J = Journal.Make (C) in
   let module L = Layout.Inode.Make (C) in
+  (* What the daemon declares for diagnosis ([bin/cli.ml build_backends]), so the
+     [stats] action has a store to report on here too. *)
+  Backend.report_members ~domain:C.domain_name
+    [
+      {
+        Backend.name = "backend";
+        role = "main";
+        backend = List.hd C.backends;
+        pending = None;
+        in_flight = None;
+        degraded = None;
+      };
+    ];
   let key p = C.domain_prefix ^ p in
   let strip_root p =
     if String.length p > 0 && p.[0] = '/' then
@@ -767,6 +783,11 @@ let setup_client (module C : Conf.S) root staging_prefix =
     print_ipc (Printf.sprintf "changes_since %s" label) obj;
     Lwt.return_unit
   in
+  let stats () =
+    let+ obj = action "stats" "" in
+    must obj;
+    obj
+  in
   {
     do_step;
     drain;
@@ -777,6 +798,7 @@ let setup_client (module C : Conf.S) root staging_prefix =
     dump_listing;
     dump_changes;
     cursor;
+    stats;
   }
 
 (* ── Backend snapshot (shared between single- and two-client runners) ─────── *)
@@ -1183,6 +1205,63 @@ let run_ipc_scenario ?versioning ({ name; steps } : scenario) =
   rm_rf root;
   print_newline ()
 
+(* The daemon's own report, which [tsync stats] renders and the http-proxy serves.
+   Only its structure is printed: the rest is pids, uptimes, paths and timings. *)
+let run_stats_scenario ?versioning ({ name; steps } : scenario) =
+  reset_ids ();
+  Printf.printf "=== %s\n" name;
+  let root = Filename.temp_dir "tsync-stats-ipc" "" in
+  let module C =
+    (val make_conf ?versioning ~client_name:"Test Client"
+           ~backend_root:(Filename.concat root "backend")
+           ~cache_root:(Filename.concat root "cache")
+           ~data_dir:(Filename.concat root "data")
+           ~socket_path:(Filename.concat root "s.sock")
+           ~notify_path:(Filename.concat root "n.sock")
+           ())
+  in
+  Lwt_main.run
+    (let client = setup_client (module C) root "" in
+     let* () = Lwt_list.iter_s client.do_step steps in
+     let* () = client.drain () in
+     let* report = client.stats () in
+     let mem name j = Yojson.Safe.Util.member name j in
+     let json = `Assoc report in
+     Printf.printf "  sections: %s\n"
+       (String.concat " "
+          (List.filter
+             (fun k -> mem k json <> `Null)
+             ["server"; "process"; "lwt"; "traffic"; "domains"]));
+     let domain =
+       match mem "domains" json with `List (d :: _) -> d | _ -> `Null
+     in
+     Printf.printf "  domain %s: cache=%s journal.localPending=%s\n"
+       (Yojson.Safe.to_string (mem "name" domain))
+       (Yojson.Safe.to_string (mem "chunks" (mem "cache" domain)))
+       (Yojson.Safe.to_string (mem "localPending" (mem "journal" domain)));
+     (match mem "backends" domain with
+       | `List l ->
+           List.iter
+             (fun b ->
+               Printf.printf
+                 "  backend %s (%s): reachable=%s journal.behind=%s\n"
+                 (Yojson.Safe.to_string (mem "name" b))
+                 (Yojson.Safe.to_string (mem "role" b))
+                 (Yojson.Safe.to_string (mem "reachable" b))
+                 (Yojson.Safe.to_string (mem "behind" (mem "journal" b))))
+             l
+       | _ -> print_endline "  no backends reported");
+     let mount = mem "mount" domain in
+     Printf.printf "  mount: reachable=%s stagedFiles=%s\n"
+       (Yojson.Safe.to_string (mem "reachable" mount))
+       (Yojson.Safe.to_string (mem "stagedFiles" mount));
+     (* The report renders for a person without raising on any of it. *)
+     Printf.printf "  renders as text: %b\n"
+       (String.length (Diagnostics.text json) > 0);
+     client.stop ());
+  rm_rf root;
+  print_newline ()
+
 (* Two clients on one backend: A applies the steps, then B's change feed is
    probed from several anchors — a baseline (working delta), B's current cursor
    (up to date), and a pruned-past anchor (stale → full re-list). *)
@@ -1241,3 +1320,6 @@ let run_ipc ?versioning scenarios =
 
 let run_ipc_changes ?versioning scenarios =
   List.iter (run_ipc_changes_scenario ?versioning) scenarios
+
+let run_stats ?versioning scenarios =
+  List.iter (run_stats_scenario ?versioning) scenarios

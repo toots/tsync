@@ -95,34 +95,39 @@ module Make (C : Conf.S) = struct
 
   let int_opt = function Some n -> `Int n | None -> `Null
 
-  (* Can this store answer at all, and how fast? One key is enough — the point is
-     the round trip, not the listing. *)
+  (* Can this store answer, and how fast? Fetching the cursor — one small object at
+     a known key — is the whole probe: an answer of any kind means the store is
+     reachable, and a miss is still an answer. Deliberately not a listing: a
+     [local] backend walks its whole tree before honouring [max_keys], so "list one
+     key" costs a stat per manifest in the domain. The body comes back too, because
+     the journal section wants exactly this object. *)
   let probe (module B : Backend.S) =
     let t0 = Unix.gettimeofday () in
     Lwt.catch
       (fun () ->
-        let+ _ = B.list_prefix ~max_keys:1 ~prefix:C.domain_prefix () in
+        let+ cursor = B.get_opt ~key:C.cursor_key () in
         let ms = 1000. *. (Unix.gettimeofday () -. t0) in
-        [("reachable", `Bool true); ("latencyMs", `Float ms); ("error", `Null)])
+        ( [("reachable", `Bool true); ("latencyMs", `Float ms); ("error", `Null)],
+          cursor ))
       (fun exn ->
         Lwt.return
-          [
-            ("reachable", `Bool false);
-            ("latencyMs", `Null);
-            ("error", `String (Printexc.to_string exn));
-          ])
+          ( [
+              ("reachable", `Bool false);
+              ("latencyMs", `Null);
+              ("error", `String (Printexc.to_string exn));
+            ],
+            None ))
 
   (* Entries published in this store against what this client has applied:
      [behind] is what a sync pass would still have to do, our own entries
      excluded — they are ours already. *)
-  let journal (module B : Backend.S) =
+  let journal ~cursor (module B : Backend.S) =
     Lwt.catch
       (fun () ->
-        let* entries =
+        let+ entries =
           B.list_prefix ~max_keys:(journal_sample + 1) ~prefix:C.journal_prefix
             ()
         in
-        let+ cursor = B.get_opt ~key:C.cursor_key () in
         let my_uuid = J.client_uuid () in
         let last = Filename.basename (Fs.read_last_sync_key ()) in
         let prefix_len = String.length C.journal_prefix in
@@ -180,8 +185,8 @@ module Make (C : Conf.S) = struct
         Lwt.return (`Assoc [("error", `String (Printexc.to_string exn))]))
 
   let member_json ~totals (m : Backend.member) =
-    let* probed = probe m.Backend.backend in
-    let* jrnl = journal m.Backend.backend in
+    let* probed, cursor = probe m.Backend.backend in
+    let* jrnl = journal ~cursor m.Backend.backend in
     let+ tot =
       if totals then
         let+ t = totals_of m.Backend.backend in
