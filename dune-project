@@ -23,7 +23,6 @@
   eqaf
   yojson
   lwt
-  lwt_ppx
   ppx_blob
   mem_usage
   tls
