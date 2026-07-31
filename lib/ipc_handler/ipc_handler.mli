@@ -10,5 +10,8 @@ module Make (C : Conf.S) (F : File.S) : sig
     on_stop : unit -> unit;
   }
 
-  val handler : hooks -> string -> (string * [ `Continue | `Stop ]) Lwt.t
+  val handler :
+    hooks ->
+    string ->
+    (string * [ `Continue | `Stop | `Subscribe of string ]) Lwt.t
 end

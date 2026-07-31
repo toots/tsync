@@ -13,13 +13,13 @@ module C : Conf.S = struct
   let cursor_key = "tsync/statusdom/cursor"
   let shares_prefix = "tsync/shares/"
   let backends = [Local_backend.make ~root:(status_root ^ "/store")]
+  let share_backends = backends
   let cache_root = status_root ^ "/cache"
   let data_dir = status_root ^ "/data"
 
   (* Nothing listens here: the report must say the mount is unreachable rather
      than wait on it. *)
   let socket_path = status_root ^ "/absent.sock"
-  let notify_path = ""
   let max_uploads = 2
   let max_downloads = 3
   let chunk_size = Some 65536

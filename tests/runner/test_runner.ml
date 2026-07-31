@@ -107,9 +107,9 @@ let read_file path =
 let render_op = function
   | `Put (k, size) -> Printf.sprintf "put %s %Ld" k size
   | `Delete k -> "delete " ^ k
-  | `Mkdir k -> "mkdir " ^ k
-  | `Rmdir k -> "rmdir " ^ k
-  | `Rename { Journal.src; dst; size; is_dir } ->
+  | `Mkdir (k, _) -> "mkdir " ^ k
+  | `Rmdir (k, _) -> "rmdir " ^ k
+  | `Rename { Journal.src; dst; size; is_dir; _ } ->
       Printf.sprintf "rename %s -> %s%s%s" src dst
         (if is_dir then " dir" else "")
         (match size with Some s -> Printf.sprintf " %Ld" s | None -> "")
@@ -197,14 +197,7 @@ and normalize_kv (k, v) =
     | "mtime", `Float f -> (k, `String (if f > 0. then "<mtime>" else "<zero>"))
     | "cursor", `String s ->
         (k, `String (if s = "" then "<empty>" else "<cursor>"))
-    | "files", `List l ->
-        let l = List.map normalize_ipc l in
-        ( k,
-          `List
-            (List.stable_sort
-               (fun a b -> compare (ipc_entry_key a) (ipc_entry_key b))
-               l) )
-    | "dirs", `List l ->
+    | "items", `List l ->
         ( k,
           `List
             (List.stable_sort
@@ -654,37 +647,27 @@ let setup_client (module C : Conf.S) root staging_prefix =
   let get_str obj k =
     match List.assoc_opt k obj with Some (`String s) -> Some s | _ -> None
   in
+  (* One list now, each entry saying which it is. *)
+  let split_items obj =
+    let items =
+      match List.assoc_opt "items" obj with Some (`List l) -> l | _ -> []
+    in
+    List.partition_map
+      (function
+        | `Assoc f ->
+            let key = Option.value ~default:"" (get_str f "key") in
+            if get_str f "kind" = Some "dir" then Either.Left key
+            else Either.Right key
+        | _ -> Either.Right "")
+      items
+  in
   let dump_tree () =
     let files = ref [] in
     let rec walk prefix =
       let* obj = action "list_dir" prefix in
       must obj;
-      let dirs =
-        match List.assoc_opt "dirs" obj with
-          | Some (`List l) ->
-              List.filter_map
-                (function
-                  | `Assoc f -> (
-                      match List.assoc_opt "key" f with
-                        | Some (`String s) -> Some s
-                        | _ -> None)
-                  | _ -> None)
-                l
-          | _ -> []
-      in
-      let entries =
-        match List.assoc_opt "files" obj with
-          | Some (`List l) ->
-              List.filter_map
-                (function
-                  | `Assoc f -> (
-                      match get_str f "key" with
-                        | Some k -> Some (F.rel_key k)
-                        | None -> None)
-                  | _ -> None)
-                l
-          | _ -> []
-      in
+      let dirs, entries = split_items obj in
+      let entries = List.map F.rel_key entries in
       let* () =
         Lwt_list.iter_s
           (fun rel ->
@@ -769,30 +752,32 @@ let setup_client (module C : Conf.S) root staging_prefix =
   in
   (* Recursive list_dir (per directory) then the flat list_all working-set view —
      the actual IPC responses, normalized. *)
-  let dump_listing () =
-    let rec walk prefix =
-      let* obj = action "list_dir" prefix in
-      must obj;
-      print_ipc (Printf.sprintf "list_dir %s" prefix) obj;
-      let dirs =
-        match List.assoc_opt "dirs" obj with
-          | Some (`List l) ->
-              List.filter_map
-                (function
-                  | `Assoc f -> (
-                      match List.assoc_opt "key" f with
-                        | Some (`String s) -> Some s
-                        | _ -> None)
-                  | _ -> None)
-                l
-          | _ -> []
-      in
-      Lwt_list.iter_s walk (List.sort compare dirs)
+  (* Walked by reference rather than by key: that is how the File Provider asks,
+     and it is the only way the id-to-path resolution behind it gets exercised.
+     [dump_tree] still walks by key, so both ways of naming an item stay
+     covered. *)
+  let by_ref act r = request [("action", `String act); ("ref", `String r)] in
+  let dir_refs obj =
+    let items =
+      match List.assoc_opt "items" obj with Some (`List l) -> l | _ -> []
     in
-    let* () = walk C.domain_prefix in
-    let* obj = action "list_all" C.domain_prefix in
+    List.filter_map
+      (function
+        | `Assoc f when get_str f "kind" = Some "dir" -> get_str f "ref"
+        | _ -> None)
+      items
+  in
+  let dump_listing () =
+    let rec walk r =
+      let* obj = by_ref "list_dir" r in
+      must obj;
+      print_ipc (Printf.sprintf "list_dir %s" r) obj;
+      Lwt_list.iter_s walk (List.sort compare (dir_refs obj))
+    in
+    let* () = walk "root" in
+    let* obj = by_ref "list_all" "root" in
     must obj;
-    print_ipc (Printf.sprintf "list_all %s" C.domain_prefix) obj;
+    print_ipc "list_all root" obj;
     Lwt.return_unit
   in
   let cursor () =
@@ -995,10 +980,10 @@ let run_scenario ?(versioning = false) ?(symlink_policy = `Keep)
         Local_backend.make ~root:backend2_root;
       ]
 
+    let share_backends = backends
     let cache_root = Filename.concat root "cache"
     let data_dir = Filename.concat root "data"
     let socket_path = Filename.concat root "tsync.sock"
-    let notify_path = Filename.concat root "notify.sock"
     let max_uploads = 4
     let max_downloads = 8
     let chunk_size = Some chunk_size
@@ -1072,10 +1057,10 @@ let run_two_client_scenario ?(versioning = false)
     let cursor_key = "tsync/test/cursor"
     let shares_prefix = "tsync/shares/"
     let backends = shared_backends
+    let share_backends = backends
     let cache_root = Filename.concat root "cache-a"
     let data_dir = Filename.concat root "data-a"
     let socket_path = Filename.concat root "tsync-a.sock"
-    let notify_path = Filename.concat root "notify-a.sock"
     let max_uploads = 4
     let max_downloads = 8
     let chunk_size = Some chunk_size
@@ -1100,10 +1085,10 @@ let run_two_client_scenario ?(versioning = false)
     let cursor_key = "tsync/test/cursor"
     let shares_prefix = "tsync/shares/"
     let backends = shared_backends
+    let share_backends = backends
     let cache_root = Filename.concat root "cache-b"
     let data_dir = Filename.concat root "data-b"
     let socket_path = Filename.concat root "tsync-b.sock"
-    let notify_path = Filename.concat root "notify-b.sock"
     let max_uploads = 4
     let max_downloads = 8
     let chunk_size = Some chunk_size
@@ -1164,7 +1149,7 @@ let run_two_client_scenarios ?versioning scenarios =
 (* ── IPC snapshot runners ─────────────────────────────────────────────────── *)
 
 let make_conf ?(versioning = false) ~client_name ~backend_root ~cache_root
-    ~data_dir ~socket_path ~notify_path () : (module Conf.S) =
+    ~data_dir ~socket_path () : (module Conf.S) =
   (module struct
     let versioning = versioning
     let client_name = client_name
@@ -1176,10 +1161,10 @@ let make_conf ?(versioning = false) ~client_name ~backend_root ~cache_root
     let cursor_key = "tsync/test/cursor"
     let shares_prefix = "tsync/shares/"
     let backends = [Local_backend.make ~root:backend_root]
+    let share_backends = backends
     let cache_root = cache_root
     let data_dir = data_dir
     let socket_path = socket_path
-    let notify_path = notify_path
     let max_uploads = 4
     let max_downloads = 8
     let chunk_size = Some chunk_size
@@ -1207,7 +1192,6 @@ let run_ipc_scenario ?versioning ({ name; steps } : scenario) =
            ~cache_root:(Filename.concat root "cache")
            ~data_dir:(Filename.concat root "data")
            ~socket_path:(Filename.concat root "s.sock")
-           ~notify_path:(Filename.concat root "n.sock")
            ())
   in
   Lwt_main.run
@@ -1239,7 +1223,6 @@ let run_stats_scenario ?versioning ({ name; steps } : scenario) =
            ~cache_root:(Filename.concat root "cache")
            ~data_dir:(Filename.concat root "data")
            ~socket_path:(Filename.concat root "s.sock")
-           ~notify_path:(Filename.concat root "n.sock")
            ())
   in
   Lwt_main.run
@@ -1277,12 +1260,10 @@ let run_stats_scenario ?versioning ({ name; steps } : scenario) =
        match mem "frontends" domain with `List (f :: _) -> f | _ -> `Null
      in
      Printf.printf
-       "  frontend %s: reachable=%s stagedFiles=%s dirtyFiles=%s metaLocked=%s \
-        metaWaiting=%s\n"
+       "  frontend %s: reachable=%s stagedFiles=%s metaLocked=%s metaWaiting=%s\n"
        (Yojson.Safe.to_string (mem "type" mount))
        (Yojson.Safe.to_string (mem "reachable" mount))
        (Yojson.Safe.to_string (mem "stagedFiles" mount))
-       (Yojson.Safe.to_string (mem "dirtyFiles" mount))
        (Yojson.Safe.to_string (mem "metaLocked" mount))
        (Yojson.Safe.to_string (mem "metaWaiting" mount));
      (* The report renders for a person without raising on any of it. *)
@@ -1306,7 +1287,6 @@ let run_ipc_changes_scenario ?versioning ({ name; steps } : scenario) =
            ~cache_root:(Filename.concat root "cache-a")
            ~data_dir:(Filename.concat root "data-a")
            ~socket_path:(Filename.concat root "a.sock")
-           ~notify_path:(Filename.concat root "na.sock")
            ())
   in
   let module Cb =
@@ -1314,7 +1294,6 @@ let run_ipc_changes_scenario ?versioning ({ name; steps } : scenario) =
            ~cache_root:(Filename.concat root "cache-b")
            ~data_dir:(Filename.concat root "data-b")
            ~socket_path:(Filename.concat root "b.sock")
-           ~notify_path:(Filename.concat root "nb.sock")
            ())
   in
   Lwt_main.run

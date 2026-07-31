@@ -60,9 +60,6 @@ module type S = sig
 
   val downloads_completed_count : unit -> int
 
-  (* Files written but not yet published, as tracked in memory. *)
-  val dirty_count : unit -> int
-
   (* Whether the metadata lock is held, and whether callers are queued behind it:
      what a wedged mount looks like from outside. *)
   val meta_locked : unit -> bool
@@ -115,8 +112,6 @@ struct
      unrelated metadata ops measurably contend. *)
   let meta_mutex = Lwt_mutex.create ()
   let with_meta f = Lwt_mutex.with_lock meta_mutex f
-  let dirty_keys : (string, unit) Hashtbl.t = Hashtbl.create 16
-  let dirty_count () = Hashtbl.length dirty_keys
   let meta_locked () = Lwt_mutex.is_locked meta_mutex
   let meta_waiters () = not (Lwt_mutex.is_empty meta_mutex)
 
@@ -131,6 +126,13 @@ struct
   module D = Data.Make (C) (R)
 
   let manifest_path key = Mf.path key
+
+  (* A directory's id is what names it from outside, and the id survives a move —
+     but where it now lives has to be recorded, or the folder cannot be found by
+     it any more. Every path that moves a directory locally owes this call. *)
+  let reparent_dir key =
+    Folder_ids.reparent ~cache_root:C.cache_root ~domain_name:C.domain_name
+      (Key.chop_slash (rel_key key))
 
   (* ── Manifest ──────────────────────────────────────────────────────────── *)
 
@@ -376,8 +378,11 @@ struct
   let mkdir key =
     with_meta (fun () ->
         let* () = Mf.create_dir key in
+        (* Minted here rather than left to [put_folder_marker], so the same id
+           goes into the journal entry a peer will read. *)
+        let* fid = L.ensure_folder_id key in
         with_journal key
-          [`Mkdir (rel_key key)]
+          [`Mkdir (rel_key key, Some fid)]
           (fun () -> St.put_folder_marker ~key))
 
   (* O(1) delete: detach the folder by moving its parent marker into the trash
@@ -402,7 +407,7 @@ struct
         in
         let* () =
           with_journal key
-            [`Rmdir (rel_key key)]
+            [`Rmdir (rel_key key, Some fid)]
             (fun () ->
               let* () = St.put_raw ~bkey:trash_key ~data:marker in
               delete_old_marker ())
@@ -469,12 +474,23 @@ struct
           | None -> None
     in
     let* () = rename_local ~src ~dst in
+    let* () = if is_dir then reparent_dir dst else Lwt.return_unit in
+    (* Read after the move, where the folder now is; the id itself is what a
+       rename does not change, which is the whole reason to carry it. *)
+    let* dir_id =
+      if is_dir then
+        let+ id = L.ensure_folder_id dst in
+        Some id
+      else Lwt.return_none
+    in
     let* dst_staged = Mf.staged_exists dst in
     if src_was_uploading && dst_staged then queue_put dst
     else
       let* () = if not is_dir then save_version src else Lwt.return_unit in
       let rename_op =
-        `Rename Journal.{ dst = rel_key dst; src = rel_key src; size; is_dir }
+        `Rename
+          Journal.
+            { dst = rel_key dst; src = rel_key src; size; is_dir; id = dir_id }
       in
       Lwt.catch
         (fun () ->
@@ -656,17 +672,26 @@ struct
           unless_staged key (fun () ->
               ignore (cancel_upload key);
               clear_local key)
-      | `Mkdir rel ->
+      (* The id the op carries is deliberately not used here. Two clients can
+         create the same folder at once with different ids, and the backend
+         marker is what settles which one wins — adopting the id from whichever
+         entry happened to be read would leave the two disagreeing. The op
+         carries it for readers that must name a folder the mirror no longer
+         has, which is a different question. *)
+      | `Mkdir (rel, _) ->
           let* () = Mf.create_dir (C.domain_prefix ^ rel) in
           adopt_folder_id rel
-      | `Rmdir rel -> Mf.delete_dir (C.domain_prefix ^ rel)
+      | `Rmdir (rel, _) -> Mf.delete_dir (C.domain_prefix ^ rel)
       | `Rename { Journal.src; dst; is_dir = true; _ } ->
           let src_key = C.domain_prefix ^ src in
           let dst_key = C.domain_prefix ^ dst in
           let* exists = Lwt_unix_retry.file_exists (manifest_path src_key) in
           if exists then
             unless_staged src_key (fun () ->
-                rename_local ~src:src_key ~dst:dst_key)
+                (* Does not go through [rename], so it owes the same bookkeeping
+                   that one does. *)
+                let* () = rename_local ~src:src_key ~dst:dst_key in
+                reparent_dir dst_key)
           else Lwt.return_unit
       | `Rename { Journal.src; dst; is_dir = false; _ } ->
           let src_key = C.domain_prefix ^ src in

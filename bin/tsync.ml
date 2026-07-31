@@ -155,8 +155,8 @@ let stop_cmd =
 let status_cmd =
   let run domain =
     try
-      let socket_path = domain_socket ?domain () in
-      match ipc_action ~socket_path "status" with
+      let name, socket_path = domain_target ?domain () in
+      match ipc_action ~socket_path ~domain:name "status" with
         | obj -> print_endline (Yojson.Safe.to_string (`Assoc obj))
         | exception _ -> Printf.printf "No daemon answering on %s\n" socket_path
     with e -> Printf.eprintf "Error: %s\n" (Printexc.to_string e)
@@ -223,9 +223,9 @@ let stats_cmd =
     in
     (* Resolved once: [--watch] must not re-read the config on every tick, and a
        config error should be reported before the screen starts clearing. *)
-    let socket_path = domain_socket ?domain () in
+    let name, socket_path = domain_target ?domain () in
     let show () =
-      match ipc_action ~socket_path ?arg "stats" with
+      match ipc_action ~socket_path ~domain:name ?arg "stats" with
         | obj when json ->
             let obj = ("t", `Float (Unix.gettimeofday ())) :: obj in
             print_endline (Yojson.Safe.to_string (`Assoc obj))
@@ -710,8 +710,8 @@ let sync_cmd =
   let render_op = function
     | `Put (k, size) -> Printf.sprintf "put %s (%Ld bytes)" k size
     | `Delete k -> "delete " ^ k
-    | `Mkdir k -> "mkdir " ^ k
-    | `Rmdir k -> "rmdir " ^ k
+    | `Mkdir (k, _) -> "mkdir " ^ k
+    | `Rmdir (k, _) -> "rmdir " ^ k
     | `Rename { Journal.src; dst; is_dir; _ } ->
         Printf.sprintf "rename %s -> %s%s" src dst
           (if is_dir then " (dir)" else "")
@@ -780,8 +780,10 @@ let sync_cmd =
                          List.iter
                            (fun op ->
                              match op with
-                               | `Put (k, _) | `Delete k | `Mkdir k | `Rmdir k
-                                 ->
+                               | `Put (k, _)
+                               | `Delete k
+                               | `Mkdir (k, _)
+                               | `Rmdir (k, _) ->
                                    Hashtbl.replace remotely_modified k ()
                                | `Rename { Journal.dst; src; _ } ->
                                    Hashtbl.replace remotely_modified dst ();
@@ -794,7 +796,9 @@ let sync_cmd =
                (fun op ->
                  let k =
                    match op with
-                     | `Put (k, _) | `Delete k | `Mkdir k | `Rmdir k -> k
+                     | `Put (k, _) | `Delete k | `Mkdir (k, _) | `Rmdir (k, _)
+                       ->
+                         k
                      | `Rename { Journal.dst = k; _ } -> k
                  in
                  not (Hashtbl.mem remotely_modified k))
@@ -821,8 +825,10 @@ let sync_cmd =
                            F.queue_put (C.domain_prefix ^ rel_key)
                        | `Delete rel_key ->
                            F.apply_delete (C.domain_prefix ^ rel_key)
-                       | `Mkdir rel_key -> F.mkdir (C.domain_prefix ^ rel_key)
-                       | `Rmdir rel_key -> F.rmdir (C.domain_prefix ^ rel_key)
+                       | `Mkdir (rel_key, _) ->
+                           F.mkdir (C.domain_prefix ^ rel_key)
+                       | `Rmdir (rel_key, _) ->
+                           F.rmdir (C.domain_prefix ^ rel_key)
                        | `Rename { Journal.dst = dst_rel; src = src_rel; _ } ->
                            F.rename
                              ~src:(C.domain_prefix ^ src_rel)
@@ -1484,9 +1490,7 @@ let paths_cmd =
     Printf.printf "config:  %s\n" p.Runtime.config_path;
     Printf.printf "cache:   %s\n" p.Runtime.cache_root;
     Printf.printf "data:    %s\n" p.Runtime.data_dir;
-    Printf.printf "socket:  %s\n" p.Runtime.socket_path;
-    Printf.printf "notify:  %s\n"
-      (Filename.concat p.Runtime.data_dir "notify.sock")
+    Printf.printf "socket:  %s\n" p.Runtime.socket_path
   in
   Cmd.v
     (Cmd.info "paths" ~doc:"Show all filesystem paths used by this binary")

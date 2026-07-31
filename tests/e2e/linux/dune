@@ -1,0 +1,7 @@
+; Not a `test`: it mounts a filesystem. Run by hand with `make -C linux e2e`.
+
+(executable
+ (name e2e_linux)
+ (enabled_if
+  (= %{system} linux))
+ (libraries tsync_e2e tsync_core tsync_runtime yojson unix))

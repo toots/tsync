@@ -4,6 +4,7 @@
   tsync_queue
   tsync_conf
   tsync_backend
+  tsync_fallback_backend
   tsync_local_backend
   yojson
   lwt

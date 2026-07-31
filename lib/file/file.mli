@@ -84,7 +84,6 @@ module type S = sig
   (** Files written but not yet published, as this process currently tracks them
       — the in-memory view of what {!staged_count} finds on disk, and free to
       read. *)
-  val dirty_count : unit -> int
 
   (** Whether the metadata lock is held, and whether anything is queued behind
       it. A mount that has stopped answering while its backend looks fine is

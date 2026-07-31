@@ -111,78 +111,99 @@ module Make (C : Conf.S) = struct
       close_out oc
     with Sys_error msg -> Log.err "resync token: %s" msg
 
-  (* ── IPC hooks ────────────────────────────────────────────────────────── *)
+  (* ── Events ───────────────────────────────────────────────────────────── *)
 
-  (* Only the extension can move content in or out of the replica, and it binds
-     its notify socket while it runs and unlinks it on the way out — fileproviderd
-     stops it whenever the domain goes idle. So a request the user is waiting on
-     has to say it went nowhere rather than report an eviction that never
-     happened; browsing the domain in Finder is what starts the extension. *)
-  exception Extension_not_running
+  (* Only a process holding an [NSFileProviderManager] can move content in or out
+     of the replica, so the daemon has to ask one to do it. Whoever that is
+     subscribes to us; we never reach out to them. Each event is numbered so an
+     acknowledgement can be threaded back on the same connection later without
+     changing the wire. *)
+  let event_seq = ref 0
+
+  let publish ~subs name fields =
+    incr event_seq;
+    let msg =
+      Yojson.Safe.to_string
+        (`Assoc
+           (("event", `String name)
+           :: ("domain", `String C.domain_name)
+           :: ("id", `Int !event_seq)
+           :: fields))
+    in
+    Ipc.Subs.publish subs ~topic:C.domain_name msg
+
+  (* A request the user is waiting on has to say it went nowhere rather than
+     report an eviction that never happened. *)
+  exception No_subscriber
 
   let () =
     Printexc.register_printer (function
-      | Extension_not_running ->
+      | No_subscriber ->
           Some
             (Printf.sprintf
-               "the File Provider extension for '%s' is not running: open the \
-                domain's folder in Finder, then retry"
+               "nothing is listening for '%s': make sure TsyncApp is running, \
+                then retry"
                C.domain_name)
       | _ -> None)
 
   let require_delivery delivered =
-    if delivered then Lwt.return_unit else Lwt.fail Extension_not_running
+    if delivered > 0 then Lwt.return_unit else Lwt.fail No_subscriber
 
-  let hooks =
+  (* ── IPC hooks ────────────────────────────────────────────────────────── *)
+
+  let hooks ~subs =
     H.
       {
         path_to_key;
         evict =
           (fun key ->
-            require_delivery (Ipc.notify_evict ~path:C.notify_path key));
+            require_delivery (publish ~subs "evict" [("key", `String key)]));
         restore =
           (fun key ->
-            require_delivery (Ipc.notify_restore ~path:C.notify_path key));
-        (* Hints, not requests: an undelivered one costs nothing because the next
-           enumeration carries the same news. [changed] only drops a materialised
-           copy early — the item's contentVersion already forces that on re-list —
-           and [full_resync]'s token is on disk before this is even attempted. *)
+            require_delivery (publish ~subs "restore" [("key", `String key)]));
+        (* Hints, not requests: an undelivered one costs nothing because the
+           journal carries the same news and the next enumeration reads it.
+           [full_resync]'s token is on disk before this is even attempted, which
+           is what makes that one durable. *)
         changed =
-          (fun key -> ignore (Ipc.notify_changed ~path:C.notify_path key));
+          (fun key -> ignore (publish ~subs "changed" [("key", `String key)]));
         full_resync =
           (fun () ->
             stamp_resync_token ();
-            ignore (Ipc.notify_resync ~path:C.notify_path);
+            (* The mirror this indexes may have just been replaced wholesale, by
+               a command in another process. Restating it from the markers costs
+               one walk of a tree that is only as big as the folder count, and it
+               is the one moment we know for certain it is owed. *)
+            let open Lwt.Syntax in
+            let* () =
+              Folder_ids.rebuild ~cache_root:C.cache_root
+                ~domain_name:C.domain_name
+            in
+            ignore (publish ~subs "resync" []);
             Lwt.return_unit);
-        status_fields = (fun () -> []);
+        status_fields =
+          (fun () ->
+            [("subscribers", `Int (Ipc.Subs.count subs ~topic:C.domain_name))]);
         stats_fields =
           (fun () -> ("frontend", `String "file_provider") :: E.stats_fields ());
         on_stop = (fun () -> ());
       }
 
-  let handler = H.handler hooks
+  let handler ~subs = H.handler (hooks ~subs)
   let drain = Sq.drain
 
-  let init () =
-    let open Lwt.Syntax in
+  let init ~subs () =
     E.start
-      ~on_cursor:(fun ~entry_key:_ -> ())
       ~on_upload_done:(fun ~key ->
-        (* Nothing to drop: the extension keeps the file, and the daemon keeps
-           only the chunks the upload promoted — subject to the cache cap like
-           any other. *)
-        ignore (Ipc.notify_uploaded ~path:C.notify_path key);
+        (* Nothing to drop: the replica keeps the file, and the daemon keeps only
+           the chunks the upload promoted — subject to the cache cap like any
+           other. The item's upload state is part of its version, so a completed
+           upload is just another change. *)
+        ignore (publish ~subs "changed" [("key", `String key)]);
         Lwt.return_unit)
       ~on_changed:(fun key ->
-        ignore (Ipc.notify_changed ~path:C.notify_path key))
+        ignore (publish ~subs "changed" [("key", `String key)]))
       ()
-
-  let mount _mount_point =
-    Lwt_main.run
-      (let open Lwt.Syntax in
-       let* () = init () in
-       let* () = Ipc.serve ~path:C.socket_path handler in
-       drain ())
 end
 
 (* ── Multi-domain start ───────────────────────────────────────────────────── *)
@@ -191,7 +212,8 @@ type domain_runtime = {
   prefix : string;
   name : string;
   claims_path : string -> bool;
-  handler : string -> (string * [ `Continue | `Stop ]) Lwt.t;
+  handler :
+    string -> (string * [ `Continue | `Stop | `Subscribe of string ]) Lwt.t;
   drain : unit -> unit Lwt.t;
 }
 
@@ -200,18 +222,21 @@ let start ~confs ~socket_path =
   let error_json msg =
     Yojson.Safe.to_string (`Assoc [("ok", `Bool false); ("error", `String msg)])
   in
+  (* One registry for every domain: subscribers name the domain they want, and
+     the events themselves carry it too. *)
+  let subs = Ipc.Subs.create () in
   Lwt_main.run
     (let* domain_runtimes =
        Lwt_list.map_s
          (fun (module C : Conf.S) ->
            let module R = Make (C) in
-           let* () = R.init () in
+           let* () = R.init ~subs () in
            Lwt.return
              {
                prefix = C.domain_prefix;
                name = C.domain_name;
                claims_path = R.claims_path;
-               handler = R.handler;
+               handler = R.handler ~subs;
                drain = R.drain;
              })
          confs
@@ -246,13 +271,29 @@ let start ~confs ~socket_path =
                            && String.sub path 0 n = r.prefix)
                          domain_runtimes)
              in
+             (* Answering for the wrong domain is worse than not answering: a
+                reference carries no domain of its own, and folder ids are only
+                unique within one, so guessing would resolve a request against a
+                store that was never asked. With a single domain there is
+                nothing to guess. *)
              let runtime =
-               match runtime_opt with
-                 | Some r -> r
-                 | None -> List.hd domain_runtimes
+               match (runtime_opt, domain_runtimes) with
+                 | Some r, _ -> Some r
+                 | None, [only] -> Some only
+                 | None, _ -> None
              in
-             runtime.handler line
+             begin match runtime with
+               | Some runtime -> runtime.handler line
+               | None ->
+                   Lwt.return
+                     ( error_json
+                         (Printf.sprintf
+                            "cannot tell which domain '%s' is for: name it \
+                             with \"domain\""
+                            action),
+                       `Continue )
+             end
          | _ -> Lwt.return (error_json "expected JSON object", `Continue)
      in
-     let* () = Ipc.serve ~path:socket_path router in
+     let* () = Ipc.serve ~subs ~path:socket_path router in
      Lwt_list.iter_s (fun r -> r.drain ()) domain_runtimes)

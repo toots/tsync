@@ -35,10 +35,19 @@ module type S = sig
       Writes fan out to all elements. *)
   val backends : (module Backend.S) list
 
+  (** The individual stores that may serve a share link, in role order.
+
+      A share manifest lives under {!shares_prefix}, outside every domain root,
+      so publishing one changes no domain content — which is why a read-only
+      domain can still share what it can already read, and why this does not go
+      through the write composite in {!backends}. Backfill targets are left out:
+      a target is behind by construction, so a link served from one could point
+      at something it has not caught up with. *)
+  val share_backends : (module Backend.S) list
+
   val cache_root : string
   val data_dir : string
   val socket_path : string
-  val notify_path : string
 
   (** Max files uploaded concurrently (upload worker count). *)
   val max_uploads : int

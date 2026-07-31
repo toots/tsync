@@ -1,0 +1,3 @@
+(test
+ (name subs_test)
+ (libraries tsync_core lwt lwt.unix))

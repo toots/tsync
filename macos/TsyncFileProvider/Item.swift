@@ -11,8 +11,12 @@ final class TsyncItem: NSObject, NSFileProviderItem {
     let capabilities: NSFileProviderItemCapabilities
     let itemVersion: NSFileProviderItemVersion
     let isUploaded: Bool
-    let isDownloaded: Bool
     let symlinkTargetPath: String?
+
+    /// Download when read; download remote updates eagerly once a file is not
+    /// dataless; allow eviction under disk pressure. This is what makes an
+    /// explicit eviction on a content change unnecessary — a changed
+    /// `contentVersion` already brings the new bytes down by itself.
     var contentPolicy: NSFileProviderContentPolicy { .downloadLazily }
 
     init(
@@ -20,11 +24,10 @@ final class TsyncItem: NSObject, NSFileProviderItem {
         parent: NSFileProviderItemIdentifier,
         filename: String,
         isDirectory: Bool,
-        readOnly: Bool = false,
+        readOnly: Bool,
         size: Int64? = nil,
         modificationDate: Date? = nil,
-        etag: String? = nil,
-        isDownloaded: Bool = false,
+        etag: String = "",
         isUploaded: Bool = true,
         symlinkTarget: String? = nil
     ) {
@@ -39,85 +42,73 @@ final class TsyncItem: NSObject, NSFileProviderItem {
             : UTType(filenameExtension: (filename as NSString).pathExtension) ?? .data
         self.documentSize = size.map { NSNumber(value: $0) }
         self.contentModificationDate = modificationDate
-        self.capabilities = readOnly
-            ? (isDirectory ? [.allowsReading, .allowsContentEnumerating] : [.allowsReading, .allowsEvicting])
-            : isDirectory
-            ? [.allowsReading, .allowsContentEnumerating, .allowsAddingSubItems]
-            : symlinkTarget != nil
-            ? [.allowsReading, .allowsRenaming, .allowsReparenting, .allowsTrashing, .allowsDeleting]
-            : [.allowsReading, .allowsWriting, .allowsRenaming, .allowsReparenting, .allowsTrashing, .allowsDeleting, .allowsEvicting]
-        // contentVersion is the file's content hash (Manifest.h1). A dirty file has no clean
-        // hash, so fall back to size:mtime there. Symlink manifests all share the same fixed
-        // h1 (hash of an empty chunk list), so fold the target in to detect retargeting.
-        // metadataVersion additionally tracks upload state, so a completing upload refreshes
-        // the item without a content re-download. Both are non-empty by construction
-        // (FileProvider drops empty version data).
-        var content = etag.flatMap { $0.isEmpty ? nil : $0 }
-            ?? "\(size ?? 0):\(modificationDate?.timeIntervalSince1970 ?? 0)"
+
+        // Trashing is not offered: the domain is registered with
+        // supportsSyncingTrash = false, so there is no trash container to move
+        // anything into. `allowsEvicting` is gone too — deprecated since macOS 13
+        // and superseded by contentPolicy above.
+        if readOnly {
+            self.capabilities = isDirectory
+                ? [.allowsReading, .allowsContentEnumerating]
+                : [.allowsReading]
+        } else if isDirectory {
+            self.capabilities = [.allowsReading, .allowsContentEnumerating,
+                                 .allowsAddingSubItems, .allowsRenaming,
+                                 .allowsReparenting, .allowsDeleting]
+        } else if symlinkTarget != nil {
+            self.capabilities = [.allowsReading, .allowsRenaming,
+                                 .allowsReparenting, .allowsDeleting]
+        } else {
+            self.capabilities = [.allowsReading, .allowsWriting, .allowsRenaming,
+                                 .allowsReparenting, .allowsDeleting]
+        }
+
+        // contentVersion is the file's content hash. A file with unsynced edits
+        // has no clean hash, so it falls back to size:mtime. A directory's etag is
+        // its own folder id, which never changes while it exists — the parent's
+        // version says nothing about what is inside it, and what is inside
+        // arrives through the change feed. Symlink manifests all share one hash
+        // (of an empty chunk list), so the target is folded in to notice a
+        // retarget. metadataVersion additionally tracks upload state, so an
+        // upload completing refreshes the item without re-downloading it. Both
+        // must be non-empty: FileProvider drops empty version data.
+        var content = etag.isEmpty
+            ? "\(size ?? 0):\(modificationDate?.timeIntervalSince1970 ?? 0)"
+            : etag
         if let symlinkTarget { content += ":\(symlinkTarget)" }
         let metadata = "\(content):\(isUploaded ? 1 : 0)"
         self.itemVersion = NSFileProviderItemVersion(
             contentVersion: Data(content.utf8),
             metadataVersion: Data(metadata.utf8))
-        self.isDownloaded = isDownloaded
         self.isUploaded = isUploaded
     }
 
-    /// Synthetic root container item.
-    static func rootContainer(displayName: String, readOnly: Bool = false) -> TsyncItem {
-        TsyncItem(
-            identifier: .rootContainer,
-            parent: .rootContainer,
-            filename: displayName,
-            isDirectory: true,
-            readOnly: readOnly
-        )
-    }
-}
-
-/// Single source of truth for the item-identifier ⇄ storage-key mapping.
-///
-/// Invariant enforced here and nowhere else: an item's identifier *is* its full storage
-/// key; directory keys end in "/"; the domain-prefix key is the root container. Everything
-/// that turns a key into an item (enumeration, change feed, create/modify) goes through this
-/// so a given path always resolves to exactly one identity.
-enum ItemID {
-    static func identifier(forKey key: String, domainPrefix: String) -> NSFileProviderItemIdentifier {
-        key == domainPrefix ? .rootContainer : NSFileProviderItemIdentifier(key)
+    /// The domain root. Its parent is itself, which is what the system expects.
+    static func rootContainer(displayName: String, readOnly: Bool) -> TsyncItem {
+        TsyncItem(identifier: .rootContainer, parent: .rootContainer,
+                  filename: displayName, isDirectory: true, readOnly: readOnly)
     }
 
-    /// The storage key an identifier points at (directories end in "/").
-    static func key(for id: NSFileProviderItemIdentifier, domainPrefix: String) -> String {
-        id == .rootContainer ? domainPrefix : id.rawValue
-    }
-
-    static func parent(ofKey key: String, domainPrefix: String) -> NSFileProviderItemIdentifier {
-        let body = key.hasSuffix("/") ? String(key.dropLast()) : key
-        guard let slash = body.lastIndex(of: "/") else { return .rootContainer }
-        return identifier(forKey: String(body[...slash]), domainPrefix: domainPrefix)
-    }
-
-    static func filename(ofKey key: String) -> String {
-        let body = key.hasSuffix("/") ? String(key.dropLast()) : key
-        return body.split(separator: "/").last.map(String.init) ?? body
-    }
-}
-
-extension TsyncItem {
-    /// Build an item straight from its storage key — the only supported way to construct a
-    /// non-root item. Directory-ness, identifier, parent, and filename all follow from the key.
-    static func make(key: String, domainPrefix: String,
-                     readOnly: Bool = false,
-                     size: Int64? = nil, modificationDate: Date? = nil,
-                     etag: String? = nil, isDownloaded: Bool = false,
-                     isUploaded: Bool = true, symlinkTarget: String? = nil) -> TsyncItem {
-        TsyncItem(identifier: ItemID.identifier(forKey: key, domainPrefix: domainPrefix),
-                  parent: ItemID.parent(ofKey: key, domainPrefix: domainPrefix),
-                  filename: ItemID.filename(ofKey: key),
-                  isDirectory: key.hasSuffix("/"),
-                  readOnly: readOnly,
-                  size: size, modificationDate: modificationDate, etag: etag,
-                  isDownloaded: isDownloaded, isUploaded: isUploaded,
-                  symlinkTarget: symlinkTarget)
+    /// Build an item from what the daemon said about it. The daemon supplies the
+    /// item's own reference, its container's, and its name, so nothing here has
+    /// to work out where anything lives.
+    static func make(_ item: DaemonItem, readOnly: Bool) -> TsyncItem? {
+        guard let id = ItemID.parse(item.ref),
+              let parent = ItemID.parse(item.parentRef)
+        else { return nil }
+        return TsyncItem(
+            identifier: id.identifier,
+            parent: parent.identifier,
+            filename: item.name,
+            isDirectory: item.isDirectory,
+            readOnly: readOnly,
+            size: item.size,
+            // A directory reports mtime 0, meaning "no useful date" rather than
+            // the epoch; showing 1970 in Finder would be worse than showing none.
+            modificationDate: item.mtime > 0
+                ? Date(timeIntervalSince1970: item.mtime) : nil,
+            etag: item.etag,
+            isUploaded: item.isUploaded,
+            symlinkTarget: item.symlinkTarget)
     }
 }

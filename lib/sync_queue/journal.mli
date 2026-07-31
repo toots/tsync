@@ -3,14 +3,21 @@ type rename_op = {
   src : string;
   size : int64 option;
   is_dir : bool;
+  id : string option;  (** The folder's id, when [is_dir]. See {!op}. *)
 }
 
+(** Directory ops carry the folder's stable id alongside its path. A peer
+    applies the op before anything asks it about the folder, and applying a
+    removal destroys the local marker the id would have been read from — so an
+    id not recorded here cannot be recovered afterwards, and the folder cannot
+    be named to anything that knows it by id. [None] for entries written before
+    this was carried, and for a client that has no id for the folder. *)
 type op =
   [ `Delete of string
-  | `Mkdir of string
+  | `Mkdir of string * string option
   | `Put of string * int64
   | `Rename of rename_op
-  | `Rmdir of string ]
+  | `Rmdir of string * string option ]
 
 val timestamp_ms_of_filename : string -> int64
 val client_uuid_of_filename : string -> string
