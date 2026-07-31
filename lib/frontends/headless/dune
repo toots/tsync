@@ -1,0 +1,14 @@
+(library
+ (name tsync_headless_frontend)
+ (wrapped false)
+ (library_flags (-linkall))
+ (libraries
+  tsync_frontend_register
+  tsync_conf
+  tsync_core
+  tsync_engine
+  tsync_file
+  tsync_log
+  yojson
+  lwt
+  lwt.unix))
