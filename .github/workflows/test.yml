@@ -52,11 +52,7 @@ jobs:
       - name: Install system dependencies
         run: |
           sudo apt-get update
-          # fuse3, not fuse: the daemon links libfuse3, which mounts by running
-          # the setuid /usr/bin/fusermount3. That binary is in fuse3; the fuse
-          # package is the FUSE 2 userspace and provides fusermount, which
-          # libfuse3 will not use. With it installed, mounting needs no root.
-          sudo apt-get install -y libfuse3-dev fuse3 pkg-config libxxhash-dev libev-dev
+          sudo apt-get install -y libfuse3-dev fuse3 pkg-config libev-dev
       - uses: ocaml/setup-ocaml@v3
         with:
           ocaml-compiler: "5.5"
@@ -98,9 +94,9 @@ jobs:
           opam pin add -ny git+https://github.com/toots/aws-s3.git#tsync
       - name: Install dependencies
         run: |
-          brew install xcodegen xxhash libev coreutils pkg-config openssl@3
-          echo "CPATH=$(brew --prefix xxhash)/include:$(brew --prefix libev)/include:$CPATH" >> $GITHUB_ENV
-          echo "LIBRARY_PATH=$(brew --prefix xxhash)/lib:$(brew --prefix libev)/lib:$LIBRARY_PATH" >> $GITHUB_ENV
+          brew install xcodegen libev coreutils pkg-config openssl@3
+          echo "CPATH=$(brew --prefix libev)/include:$CPATH" >> $GITHUB_ENV
+          echo "LIBRARY_PATH=$(brew --prefix libev)/lib:$LIBRARY_PATH" >> $GITHUB_ENV
           # openssl@3 is keg-only, so conf-libssl only finds it via pkg-config.
           echo "PKG_CONFIG_PATH=$(brew --prefix openssl@3)/lib/pkgconfig:$PKG_CONFIG_PATH" >> $GITHUB_ENV
       - name: Install OCaml dependencies
