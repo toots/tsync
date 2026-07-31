@@ -170,6 +170,61 @@
   journal <entry-4> = rmdir sub/
   trash sub -> 547c2ad623ddba3f
 
+=== foreign_rmdir_after_repeated_mkdir
+  A: mkdir sub
+  A: drain
+  A: write sub/a.txt "nested"
+  A: drain
+  A: mkdir sub
+  A: drain
+  A: mkdir sub
+  A: drain
+  B: sync
+  A: delete sub/a.txt
+  A: drain
+  A: rmdir sub
+  A: drain
+  B: sync
+--- tree A
+--- content A
+--- pending A
+--- tree B
+--- content B
+--- pending B
+--- backend
+  chunk fa87ee5fc199e332-c7156c4359a54f81 size=6
+  cursor = <entry-6>
+  journal <entry-1> = mkdir sub/
+  journal <entry-2> = put sub/a.txt 6
+  journal <entry-3> = mkdir sub/
+  journal <entry-4> = mkdir sub/
+  journal <entry-5> = delete sub/a.txt
+  journal <entry-6> = rmdir sub/
+  trash sub -> 547c2ad623ddba3f
+
+=== concurrent_mkdir_then_rmdir
+  A: mkdir sub
+  A: drain
+  B: mkdir sub
+  B: drain
+  A: sync
+  B: sync
+  A: rmdir sub
+  A: drain
+  B: sync
+--- tree A
+--- content A
+--- pending A
+--- tree B
+--- content B
+--- pending B
+--- backend
+  cursor = <entry-3>
+  journal <entry-1> = mkdir sub/
+  journal <entry-2> = mkdir sub/
+  journal <entry-3> = rmdir sub/
+  trash sub -> 3171f9431b3d5a67
+
 === concurrent_create
   A: write foo.txt "from A"
   A: drain

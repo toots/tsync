@@ -109,6 +109,54 @@ let foreign_rmdir =
       ];
   }
 
+(* The shape a media manager actually produces: it re-creates a directory it
+   already has before filling it, so the same path is mkdir'd several times
+   before anything deletes it. The folder marker's key is derived from the
+   parent's id and the name, so every mkdir should address the same object and
+   the final rmdir should take it away — one leftover marker is enough for the
+   folder to come back on the next full resync. *)
+let foreign_rmdir_after_repeated_mkdir =
+  {
+    name = "foreign_rmdir_after_repeated_mkdir";
+    steps =
+      [
+        A (Mkdir "sub");
+        A Drain;
+        A (Write { path = "sub/a.txt"; content = "nested" });
+        A Drain;
+        A (Mkdir "sub");
+        A Drain;
+        A (Mkdir "sub");
+        A Drain;
+        B Sync;
+        A (Delete "sub/a.txt");
+        A Drain;
+        A (Rmdir "sub");
+        A Drain;
+        B Sync;
+      ];
+  }
+
+(* Both clients create the same directory before either deletes it. Each mints a
+   folder id locally when it has no marker, so this is where two markers for one
+   path could come from — and only one of them can be the marker rmdir removes. *)
+let concurrent_mkdir_then_rmdir =
+  {
+    name = "concurrent_mkdir_then_rmdir";
+    steps =
+      [
+        A (Mkdir "sub");
+        A Drain;
+        B (Mkdir "sub");
+        B Drain;
+        A Sync;
+        B Sync;
+        A (Rmdir "sub");
+        A Drain;
+        B Sync;
+      ];
+  }
+
 (* Both clients create the same file with different content. B uploads last so
    the backend holds B's version; when A syncs, its clean local copy is
    evicted and converges on B's version (last writer wins). *)
@@ -210,6 +258,8 @@ let () =
       foreign_rename_chain;
       foreign_mkdir;
       foreign_rmdir;
+      foreign_rmdir_after_repeated_mkdir;
+      concurrent_mkdir_then_rmdir;
       concurrent_create;
       open_file_guard;
       open_file_guard_closed;

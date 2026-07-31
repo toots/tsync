@@ -16,8 +16,8 @@ module type S = sig
   val write_manifest : t -> Manifest.t -> unit Lwt.t
   val upload : ?cancel:bool ref -> t -> unit Lwt.t
 
-  (** Fetch every chunk [t] needs, so later reads are served locally. Produces no
-      file: a caller that wants one asks for it by name with {!assemble_to}.
+  (** Fetch every chunk [t] needs, so later reads are served locally. Produces
+      no file: a caller that wants one asks for it by name with {!assemble_to}.
       Idempotent, and concurrent calls for one key share the fetching. *)
   val ensure_cached : t -> unit Lwt.t
 
