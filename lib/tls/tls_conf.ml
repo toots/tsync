@@ -47,19 +47,35 @@ let set backend =
       | Native -> Conduit_lwt_unix.Native
       | Openssl -> Conduit_lwt_unix.OpenSSL
 
-(* Apply a selection by name, raising [Failure] on an unknown or unavailable
-   choice. [None] selects the preferred available backend (OpenSSL when it is
-   compiled in, else Native). *)
+(* The preferred backend this build actually has. *)
+let use_preferred () =
+  match available () with
+    | name :: _ -> ( match of_string name with Some b -> set b | None -> ())
+    | [] -> ()
+
+(* Apply a selection by name. [None] selects the preferred available backend
+   (OpenSSL when it is compiled in, else Native).
+
+   An unknown name is a typo in the config and raises. A known name that this
+   build lacks does not: which backends are compiled in is a property of the
+   build, not of the configuration — the release build ships without OpenSSL —
+   and both backends speak TLS, so the choice is a performance preference. A
+   daemon that refuses to start over one is worse than a slower one, so warn
+   loudly and carry on with what is here. *)
 let apply = function
-  | None -> (
-      match available () with
-        | name :: _ -> (
-            match of_string name with Some b -> set b | None -> ())
-        | [] -> ())
+  | None -> use_preferred ()
   | Some name -> (
       match of_string name with
-        | Some backend -> set backend
         | None ->
             failwith
               (Printf.sprintf "unknown TLS backend %S (choose one of: %s)" name
-                 (String.concat ", " (available ()))))
+                 (String.concat ", " (available ())))
+        | Some backend when is_available backend -> set backend
+        | Some backend ->
+            use_preferred ();
+            Log.warn
+              "TLS backend %S is not available in this build (have: %s); using \
+               %s instead"
+              (to_string backend)
+              (String.concat ", " (available ()))
+              (current ()))

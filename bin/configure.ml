@@ -786,7 +786,21 @@ let cmd =
     let edit_globals () =
       client_name := prompt "Client name" (Some !client_name);
       max_uploads := prompt_int "Max concurrent uploads" !max_uploads;
-      max_downloads := prompt_int "Max concurrent downloads" !max_downloads
+      max_downloads := prompt_int "Max concurrent downloads" !max_downloads;
+      (* Only worth asking when this build has more than one backend to choose
+         between. "auto" leaves it unset, which takes the preferred one at
+         startup — the same answer picking the first entry would give, and the
+         one that keeps working if a later build drops a backend. *)
+      let available = Tls_conf.available () in
+      if List.length available >= 2 then begin
+        let choice =
+          prompt
+            (Printf.sprintf "TLS backend for S3 (auto/%s)"
+               (String.concat "/" available))
+            (Some (Option.value !tls ~default:"auto"))
+        in
+        tls := if List.mem choice available then Some choice else None
+      end
     in
     (* A brand-new config: gather globals and the first domain up front. *)
     if existing_root = None then begin
@@ -886,26 +900,6 @@ let cmd =
     done;
     if not !saved then Printf.printf "Aborted; config left untouched.\n"
     else begin
-      (* Ask for a TLS backend only when an S3 domain exists, more than one is
-         compiled in, and none is already set. *)
-      let any_s3 =
-        List.exists
-          (fun d ->
-            List.exists
-              (fun b -> jstr b "type" = Some "s3")
-              (jlist d "backends"))
-          !domains
-      in
-      let available = Tls_conf.available () in
-      if !tls = None && any_s3 && List.length available >= 2 then begin
-        let choice =
-          prompt
-            (Printf.sprintf "TLS backend for S3 (%s)"
-               (String.concat "/" available))
-            (Some (List.hd available))
-        in
-        if List.mem choice available then tls := Some choice
-      end;
       write_config ~path:config_path ~client_name:!client_name
         ~max_uploads:!max_uploads ~max_downloads:!max_downloads ~tls:!tls
         ~domains:!domains;

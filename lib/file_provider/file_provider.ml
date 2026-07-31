@@ -9,8 +9,7 @@ external is_dataless : string -> bool = "caml_is_dataless"
 
 let alnum s =
   String.to_seq (String.lowercase_ascii s)
-  |> Seq.filter (fun c ->
-         (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9'))
+  |> Seq.filter (fun c -> (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9'))
   |> String.of_seq
 
 let cloud_storage_root () =
@@ -139,7 +138,8 @@ module Make (C : Conf.S) = struct
       {
         path_to_key;
         evict =
-          (fun key -> require_delivery (Ipc.notify_evict ~path:C.notify_path key));
+          (fun key ->
+            require_delivery (Ipc.notify_evict ~path:C.notify_path key));
         restore =
           (fun key ->
             require_delivery (Ipc.notify_restore ~path:C.notify_path key));
@@ -173,7 +173,8 @@ module Make (C : Conf.S) = struct
            any other. *)
         ignore (Ipc.notify_uploaded ~path:C.notify_path key);
         Lwt.return_unit)
-      ~on_changed:(fun key -> ignore (Ipc.notify_changed ~path:C.notify_path key))
+      ~on_changed:(fun key ->
+        ignore (Ipc.notify_changed ~path:C.notify_path key))
       ()
 
   let mount _mount_point =

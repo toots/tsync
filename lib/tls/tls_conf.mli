@@ -15,6 +15,8 @@ val current : unit -> string
 val set : t -> unit
 
 (** [apply choice] selects the backend named by [choice]; [None] selects the
-    preferred available backend (OpenSSL when compiled in, else Native). Raises
-    [Failure] on an unknown or unavailable name. *)
+    preferred available backend (OpenSSL when compiled in, else Native). A name
+    this build does not have falls back to the preferred one with a warning —
+    which backends are linked is a property of the build, not of the config, and
+    both speak TLS. Raises [Failure] only on an unknown name. *)
 val apply : string option -> unit
