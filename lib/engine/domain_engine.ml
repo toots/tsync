@@ -12,9 +12,8 @@ module Make (C : Conf.S) = struct
   module Sp = Sync_poller.Make (C) (F)
   module Mf = Manifest.Make (C)
 
-  (* Periodic housekeeping: keep the chunk store under the cap (nudged after each
-     upload too, but downloads grow it as well) and drop handoff copies a frontend
-     never claimed. *)
+  (* Periodic housekeeping: keep the chunk store under the cap, nudged after each
+     upload too, but downloads grow it as well. *)
   let housekeeping_interval = 60.
 
   let start ?on_changed ~on_cursor ~on_upload_done () =
@@ -40,7 +39,6 @@ module Make (C : Conf.S) = struct
         let rec loop () =
           let* () = Lwt_unix.sleep housekeeping_interval in
           let* () = sweep "chunk cap sweep" F.enforce_chunk_cap in
-          let* () = sweep "handoff reap" F.reap_handoff in
           loop ()
         in
         loop ());

@@ -9,10 +9,11 @@ public struct IPCRequest: Codable, Sendable {
     public let arg: String?
     public let target: String?
     public let domain: String?
+    public let dest: String?
 
     public init(action: String, path: String? = nil, src: String? = nil,
                 staging: String? = nil, arg: String? = nil, target: String? = nil,
-                domain: String? = nil) {
+                domain: String? = nil, dest: String? = nil) {
         self.action = action
         self.path = path
         self.src = src
@@ -20,6 +21,7 @@ public struct IPCRequest: Codable, Sendable {
         self.arg = arg
         self.target = target
         self.domain = domain
+        self.dest = dest
     }
 }
 
@@ -187,8 +189,11 @@ public enum IPC {
         try await sendAsync(IPCRequest(action: "changes_since", arg: anchor, domain: domain))
     }
 
-    public static func ensureCached(key: String) async throws -> IPCResponse {
-        try await sendAsync(IPCRequest(action: "ensure_cached", path: key))
+    /// [dest] is where the daemon writes the assembled file. The extension may not
+    /// move a file into the directory the system wants it in, so it asks for the
+    /// bytes to land there in the first place.
+    public static func ensureCached(key: String, dest: String) async throws -> IPCResponse {
+        try await sendAsync(IPCRequest(action: "ensure_cached", path: key, dest: dest))
     }
 
     public static func createFile(key: String) async throws -> IPCResponse {

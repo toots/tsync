@@ -89,7 +89,7 @@ type step =
           after a crash. *)
   | ClearCache
       (** Wipe the local cache the way a full resync does — manifest mirror,
-          chunk store, scratch and handoff — keeping only the staged tree. *)
+          chunk store and scratch — keeping only the staged tree. *)
   | OnSecondary of step
       (** Apply a backend-damage step (delete/corrupt chunk, delete manifest) to
           the secondary backend instead of the primary. *)

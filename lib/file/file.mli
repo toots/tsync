@@ -16,18 +16,20 @@ module type S = sig
   val write_manifest : t -> Manifest.t -> unit Lwt.t
   val upload : ?cancel:bool ref -> t -> unit Lwt.t
 
-  (** Fetch every chunk [t] needs, so later reads are served locally.
-      Idempotent, and deduplicated per key. *)
+  (** Fetch every chunk [t] needs, so later reads are served locally. Produces no
+      file: a caller that wants one asks for it by name with {!assemble_to}.
+      Idempotent, and concurrent calls for one key share the fetching. *)
   val ensure_cached : t -> unit Lwt.t
 
-  (** Assemble [t] into a fresh file under the domain's handoff directory and
-      return its path — for a frontend that needs a real file and takes it over
-      (the FileProvider extension moves it into place itself). The daemon keeps
-      no other copy: the content lives in the chunk store. *)
-  val handoff : t -> string Lwt.t
+  (** Write [t]'s whole content to [dst_path], fetching whatever it still needs.
+      For a frontend that must hand over a real file and takes it over; the
+      daemon keeps no other copy, the content lives in the chunk store.
 
-  (** Drop handoff copies a frontend never claimed. *)
-  val reap_handoff : unit -> unit Lwt.t
+      The caller names the path rather than being handed one, because the place
+      a file may live is the caller's constraint: the macOS File Provider must
+      give the system a file in a directory of the system's choosing, and is not
+      permitted to move one in from elsewhere afterwards. *)
+  val assemble_to : t -> dst_path:string -> unit Lwt.t
 
   val stat : t -> Unix.LargeFile.stats option Lwt.t
 

@@ -70,6 +70,9 @@ module Make (C : Conf.S) (R : Remote.S) : sig
 
   val downloads_in_flight : unit -> int
 
+  (** Whole files pulled in since start-up, by any route. *)
+  val downloads_completed_count : unit -> int
+
   (** Stage a whole file handed over by a frontend as [key]'s new content,
       replacing anything staged before it. *)
   val stage_whole : string -> src_path:string -> unit Lwt.t

@@ -15,12 +15,10 @@ module type S = sig
   (** Fetch every chunk [t] needs, so later reads are served locally. *)
   val ensure_cached : t -> unit Lwt.t
 
-  (** Assemble [t] into a fresh file under the domain's handoff directory and
-      return its path, for a frontend that needs a real file. *)
-  val handoff : t -> string Lwt.t
-
-  (** Drop handoff files a frontend never claimed. *)
-  val reap_handoff : unit -> unit Lwt.t
+  (** Write [t]'s whole content to [dst_path], fetching what it needs. For a
+      caller that must hand over a real file and can only accept it in a
+      particular place. *)
+  val assemble_to : t -> dst_path:string -> unit Lwt.t
 
   val stat : t -> Unix.LargeFile.stats option Lwt.t
   val readlink : t -> string option Lwt.t
@@ -118,8 +116,6 @@ struct
   let meta_mutex = Lwt_mutex.create ()
   let with_meta f = Lwt_mutex.with_lock meta_mutex f
   let dirty_keys : (string, unit) Hashtbl.t = Hashtbl.create 16
-  let downloading : (string, unit Lwt.t) Hashtbl.t = Hashtbl.create 8
-  let downloads_completed = ref 0
   let dirty_count () = Hashtbl.length dirty_keys
   let meta_locked () = Lwt_mutex.is_locked meta_mutex
   let meta_waiters () = not (Lwt_mutex.is_empty meta_mutex)
@@ -149,49 +145,13 @@ struct
      chunks it staged, keep the ones it still inherits, then promote. *)
   let upload ?cancel key = D.sync key ?cancel ()
 
-  (* Pull the whole file into the chunk store, for an explicit restore or a
-     FileProvider fetch. Idempotent, and deduplicated per key so two restores of
-     one file share the work; the chunk GETs themselves are already bounded by
-     [Remote]'s download pool. *)
-  let ensure_cached key =
-    match Hashtbl.find_opt downloading key with
-      | Some p -> p
-      | None ->
-          let p =
-            Lwt.finalize
-              (fun () ->
-                let+ () = D.ensure_local key in
-                incr downloads_completed)
-              (fun () ->
-                Hashtbl.remove downloading key;
-                Lwt.return_unit)
-          in
-          Hashtbl.replace downloading key p;
-          p
+  (* Make every chunk local, so later reads are served without the network: what
+     a restore asks for. Produces no file — a caller that wants one asks for it
+     by name with [assemble_to], which fetches on its own. *)
+  let ensure_cached = D.ensure_local
 
-  (* A copy of the file for a frontend that needs a real one — the FileProvider
-     extension takes it over with its own move. Named by a fresh uuid so two
-     fetches never collide, and reaped if the frontend never claims it. *)
-  let handoff key =
-    let path =
-      Filename.concat
-        (Cache_layout.handoff_dir ~cache_root:C.cache_root C.domain_name)
-        (Manifest.new_uuid ())
-    in
-    let+ () = D.assemble_to key ~dst_path:path in
-    path
-
-  (* Long enough that a slow fetch-then-move is never cut off, short enough that
-     an abandoned copy does not sit in the cache. *)
-  let handoff_ttl = 3600.
-
-  let reap_handoff () =
-    let+ (_ : bool) =
-      Fs_util.reap_older_than
-        ~cutoff:(Unix.gettimeofday () -. handoff_ttl)
-        (Cache_layout.handoff_dir ~cache_root:C.cache_root C.domain_name)
-    in
-    ()
+  (* Write the whole file to a path the caller names. *)
+  let assemble_to = D.assemble_to
 
   (* ── Stat ──────────────────────────────────────────────────────────────── *)
 
@@ -292,7 +252,7 @@ struct
     let+ keys = Mf.list_staged () in
     List.length keys
 
-  let downloads_completed_count () = !downloads_completed
+  let downloads_completed_count = D.downloads_completed_count
   let download_progress = D.download_progress
 
   (* ── Local eviction ────────────────────────────────────────────────────── *)

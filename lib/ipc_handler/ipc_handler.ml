@@ -247,12 +247,13 @@ module Make (C : Conf.S) (F : File.S) = struct
           `String (newest_key ~init:(Option.value ~default:"" fetched) keys) );
       ]
 
-  (* The caller wants a real file: assemble one into the handoff directory and
-     hand over the path. It is the caller's copy to move or delete — the daemon
-     keeps the content in the chunk store, not as a file. *)
-  let handle_ensure_cached key =
-    let+ path = F.handoff key in
-    ok_json [("localPath", `String path)]
+  (* The caller wants a real file at a place of its choosing, and takes it over
+     from there — the daemon keeps the content in the chunk store, not as a
+     file. Writing straight to "dest" spares the caller a move it may not be
+     permitted to make. *)
+  let handle_ensure_cached ~dst_path key =
+    let+ () = F.assemble_to key ~dst_path in
+    ok_json [("localPath", `String dst_path)]
 
   let handle_create key =
     let+ () = F.create key in
@@ -344,7 +345,12 @@ module Make (C : Conf.S) (F : File.S) = struct
                   | "list_all" -> handle_list_all path
                   | "changes_since" -> handle_changes_since (get_str obj "arg")
                   | "cursor" -> handle_current_cursor ()
-                  | "ensure_cached" -> handle_ensure_cached path
+                  | "ensure_cached" -> (
+                      match get_str obj "dest" with
+                        | "" ->
+                            Lwt.return
+                              (error_json "ensure_cached requires \"dest\"")
+                        | dst_path -> handle_ensure_cached ~dst_path path)
                   | "create" -> handle_create path
                   | "write" -> handle_write path (get_str obj "staging")
                   | "delete" -> handle_delete path

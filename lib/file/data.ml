@@ -733,13 +733,25 @@ module Make (C : Conf.S) (R : Remote.S) = struct
         Hashtbl.remove active key;
         Lwt.return_unit)
 
+  (* Whole files pulled in since start-up, for [tsync stats]. Counted here rather
+     than at a caller so every route to a materialized file is included. *)
+  let downloads_completed = ref 0
+  let downloads_completed_count () = !downloads_completed
+
   (* Pull every chunk [key] needs into the store, so a later read is served
      without the network: what a restore asks for. Staged bodies are already
      local, so only the chunks a file still inherits are fetched. A file with no
      local metadata gets its sidecar written first, otherwise the restore leaves
-     nothing behind for the read path to resolve. *)
+     nothing behind for the read path to resolve.
+
+     Concurrent calls for one key need no coordination here: the actual fetching
+     is per chunk group and {!Chunk_cache.ensure} already shares one in-flight
+     fetch between all askers. *)
   let ensure_local key =
-    let ensure_groups = ensure_groups key in
+    let ensure_groups groups =
+      let+ () = ensure_groups key groups in
+      incr downloads_completed
+    in
     let* resolved = Mf.resolve key in
     match resolved with
       | Some (`Published m) -> ensure_groups (Mf.groups m)

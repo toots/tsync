@@ -203,20 +203,19 @@ final class TsyncExtension: NSObject, NSFileProviderReplicatedExtension, @unchec
                 }
             }
             do {
-                let resp = try await IPC.ensureCached(key: key)
-                poller.cancel()
-                guard let localPath = resp.localPath else { throw IPC.IPCError.badResponse }
-                let item = try await resolveItem(itemIdentifier, isDownloaded: true)
-                // Move the daemon's staging copy into the system's temporary
-                // directory: the OS takes ownership of it, so the daemon holds a
-                // file only while transferring it. If the move fails, drop the
-                // staging file and fail the fetch (the OS retries) rather than
-                // hand back a file that lives in the daemon's private cache.
-                guard let moved = moveForSystem(URL(fileURLWithPath: localPath)) else {
-                    try? FileManager.default.removeItem(atPath: localPath)
-                    throw NSError(domain: NSPOSIXErrorDomain, code: Int(EIO))
+                // The daemon assembles straight into the system's temporary directory:
+                // the OS takes ownership of the file there, and the extension is not
+                // permitted to move one in from the daemon's own cache.
+                guard let manager = NSFileProviderManager(for: domain),
+                      let tmpDir = try? manager.temporaryDirectoryURL() else {
+                    throw NSError(domain: NSCocoaErrorDomain, code: NSFileWriteUnknownError)
                 }
-                completionHandler(moved, item, nil)
+                let dst = tmpDir.appendingPathComponent(UUID().uuidString)
+                let resp = try await IPC.ensureCached(key: key, dest: dst.path)
+                poller.cancel()
+                guard resp.localPath != nil else { throw IPC.IPCError.badResponse }
+                let item = try await resolveItem(itemIdentifier, isDownloaded: true)
+                completionHandler(dst, item, nil)
             } catch {
                 poller.cancel()
                 log.error("fetchContents error: \(key, privacy: .public): \(error, privacy: .public)")
@@ -236,7 +235,7 @@ final class TsyncExtension: NSObject, NSFileProviderReplicatedExtension, @unchec
     ) -> Progress {
         let progress = Progress(totalUnitCount: 100)
         if isReadOnly {
-            completionHandler(nil, [], false, NSError(domain: NSPOSIXErrorDomain, code: Int(EROFS)))
+            completionHandler(nil, [], false, NSError(domain: NSCocoaErrorDomain, code: NSFileWriteVolumeReadOnlyError))
             return progress
         }
         Task {
@@ -289,7 +288,7 @@ final class TsyncExtension: NSObject, NSFileProviderReplicatedExtension, @unchec
     ) -> Progress {
         let progress = Progress(totalUnitCount: 100)
         if isReadOnly {
-            completionHandler(nil, [], false, NSError(domain: NSPOSIXErrorDomain, code: Int(EROFS)))
+            completionHandler(nil, [], false, NSError(domain: NSCocoaErrorDomain, code: NSFileWriteVolumeReadOnlyError))
             return progress
         }
         Task {
@@ -343,7 +342,7 @@ final class TsyncExtension: NSObject, NSFileProviderReplicatedExtension, @unchec
     ) -> Progress {
         let progress = Progress(totalUnitCount: 1)
         if isReadOnly {
-            completionHandler(NSError(domain: NSPOSIXErrorDomain, code: Int(EROFS)))
+            completionHandler(NSError(domain: NSCocoaErrorDomain, code: NSFileWriteVolumeReadOnlyError))
             return progress
         }
         Task {
@@ -405,22 +404,6 @@ final class TsyncExtension: NSObject, NSFileProviderReplicatedExtension, @unchec
     /// Hand fileproviderd its own copy instead of the daemon's live cache file: the system
     /// may move the returned URL, and an EVICT can race the transfer. The provider temp
     /// directory is on the same volume, so the copy is an APFS clone (no data duplicated).
-    /// Move the daemon's staging file into the system's temporary directory so
-    /// the OS takes ownership of it (the canonical fetchContents handoff — the
-    /// move removes the daemon's copy). Returns nil on failure.
-    private func moveForSystem(_ src: URL) -> URL? {
-        guard let manager = NSFileProviderManager(for: domain),
-              let tmpDir = try? manager.temporaryDirectoryURL() else { return nil }
-        let dst = tmpDir.appendingPathComponent(UUID().uuidString)
-        do {
-            try FileManager.default.moveItem(at: src, to: dst)
-            return dst
-        } catch {
-            log.error("moveForSystem failed: \(error, privacy: .public)")
-            return nil
-        }
-    }
-
     private func stageContent(_ url: URL) throws -> URL {
         let stagingDir = Config.groupContainerURL.appendingPathComponent("tsync/staging", isDirectory: true)
         try FileManager.default.createDirectory(at: stagingDir, withIntermediateDirectories: true)

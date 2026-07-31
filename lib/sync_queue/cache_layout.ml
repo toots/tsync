@@ -7,7 +7,6 @@
      <cache_root>/<domain>/staged/manifests/<path> — staged manifests (unsynced edits)
      <cache_root>/<domain>/staged/chunks/<uuid>    — staged chunk bodies
      <cache_root>/<domain>/staged/whole/<uuid>     — whole files handed back by a frontend
-     <cache_root>/<domain>/handoff/<uuid>          — assembled files handed to a frontend
    The manifest and scratch trees mirror each other by real path; both [Local]
    and [Folder_ids] derive their paths from here, so that mirror has exactly one
    definition. Everything under chunks/ and staged/ is keyed by content or by an
@@ -23,7 +22,6 @@ let manifests_dir ~cache_root domain_name =
 
 let scratch_dir ~cache_root domain_name = sub ~cache_root domain_name "scratch"
 let chunks_dir ~cache_root domain_name = sub ~cache_root domain_name "chunks"
-let handoff_dir ~cache_root domain_name = sub ~cache_root domain_name "handoff"
 
 let staged_manifests_dir ~cache_root domain_name =
   sub ~cache_root domain_name "staged/manifests"
@@ -41,12 +39,11 @@ let chunk_path ~cache_root ~domain_name chunk_key =
     (chunks_dir ~cache_root domain_name)
     (Chunk_layout.relative_path chunk_key)
 
-(* Remove the domain's local cache — manifest mirror, chunk store, scratch and
-   handoff trees — for a full resync that rebuilds it from the backend. Staged
-   edits are deliberately kept: nothing else holds those bytes. *)
+(* Remove the domain's local cache — manifest mirror, chunk store and scratch
+   tree — for a full resync that rebuilds it from the backend. Staged edits are
+   deliberately kept: nothing else holds those bytes. *)
 let clear ~cache_root ~domain_name =
   let open Lwt.Syntax in
   let* () = Fs_util.rm_rf (manifests_dir ~cache_root domain_name) in
   let* () = Fs_util.rm_rf (scratch_dir ~cache_root domain_name) in
-  let* () = Fs_util.rm_rf (handoff_dir ~cache_root domain_name) in
   Fs_util.rm_rf (chunks_dir ~cache_root domain_name)
