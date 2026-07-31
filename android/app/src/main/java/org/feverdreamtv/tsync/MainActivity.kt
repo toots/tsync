@@ -3,8 +3,11 @@ package org.feverdreamtv.tsync
 import android.app.Activity
 import android.content.Intent
 import android.graphics.Typeface
+import android.os.Build
 import android.os.Bundle
 import android.text.InputType
+import android.view.View
+import android.view.WindowInsets
 import android.view.ViewGroup.LayoutParams.MATCH_PARENT
 import android.view.ViewGroup.LayoutParams.WRAP_CONTENT
 import android.widget.Button
@@ -31,8 +34,8 @@ class MainActivity : Activity() {
 
     private fun showSetup() {
         val existing = Config.load(this)
-        val domain = field("Domain name", existing?.domain ?: "media")
-        val url = field("Server URL", existing?.url ?: "http://192.168.1.10:8443")
+        val domain = field("e.g. Jellyfin Media", existing?.domain ?: "")
+        val url = field("https://tsync.example.org", existing?.url ?: "")
         val secret = field("Shared secret", existing?.secret ?: "", secret = true)
         val cache = field("Cache limit", existing?.maxCache ?: "2G")
         val error = TextView(this).apply { setPadding(0, 8, 0, 8) }
@@ -46,7 +49,20 @@ class MainActivity : Activity() {
                     secret.text.toString().trim(),
                     cache.text.toString().trim().ifBlank { "2G" }
                 )
-                Config.validate(settings)?.let { error.text = it; return@setOnClickListener }
+                Config.validate(settings)?.let { problem ->
+                    // Put the message on the field it belongs to and scroll
+                    // there: with the keyboard up the form scrolls, and an
+                    // error at the bottom can refer to a field off the top.
+                    val culprit = when (problem.field) {
+                        Config.Field.DOMAIN -> domain
+                        Config.Field.URL -> url
+                        Config.Field.SECRET -> secret
+                    }
+                    error.text = ""
+                    culprit.error = problem.message
+                    culprit.requestFocus()
+                    return@setOnClickListener
+                }
 
                 Config.save(this@MainActivity, settings)
                 // The daemon is the authority on whether its own config parses;
@@ -61,7 +77,7 @@ class MainActivity : Activity() {
             }
         }
 
-        setContentView(ScrollView(this).apply {
+        setContentViewInsetAware(ScrollView(this).apply {
             addView(column {
                 addView(heading("Connect to your tsync server"))
                 addView(label("Domain name"));   addView(domain)
@@ -82,12 +98,25 @@ class MainActivity : Activity() {
             textSize = 10f
         }
 
+        // `stats` goes through the IPC socket, which does not exist until the
+        // daemon has started — and the service is only just being asked to
+        // start it. Wait for the socket rather than reporting a daemon that is
+        // merely still waking up as absent.
         fun refresh() = thread {
+            runOnUiThread { output.text = "starting…" }
+            val socket = Ipc.socketPath(filesDir, Config.load(this)?.domain ?: "")
+            var waited = 0
+            while (!socket.exists() && waited++ < 40) Thread.sleep(250)
             val (_, text) = DaemonService.run(this, "stats")
-            runOnUiThread { output.text = text.ifBlank { "no response — is the daemon running?" } }
+            runOnUiThread {
+                output.text = text.ifBlank {
+                    if (socket.exists()) "daemon is up but returned nothing"
+                    else "daemon did not start — check `adb logcat -s tsyncd`"
+                }
+            }
         }
 
-        setContentView(column {
+        setContentViewInsetAware(column {
             addView(row {
                 addView(Button(this@MainActivity).apply {
                     text = "Refresh"; setOnClickListener { refresh() }
@@ -114,6 +143,32 @@ class MainActivity : Activity() {
         // Idempotent: the service only spawns a daemon if it has none.
         startForegroundService(Intent(this, DaemonService::class.java))
         refresh()
+    }
+
+    /**
+     * targetSdk 35 draws edge to edge, so content starts at y=0 and the first
+     * rows of a form end up behind the status bar — which looked exactly like
+     * a missing field. Pad by whatever the system bars and keyboard occupy.
+     */
+    private fun setContentViewInsetAware(root: View) {
+        setContentView(root)
+        root.setOnApplyWindowInsetsListener { view, insets ->
+            val top: Int
+            val bottom: Int
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                val bars = insets.getInsets(
+                    WindowInsets.Type.systemBars() or WindowInsets.Type.ime()
+                )
+                top = bars.top
+                bottom = bars.bottom
+            } else {
+                @Suppress("DEPRECATION") top = insets.systemWindowInsetTop
+                @Suppress("DEPRECATION") bottom = insets.systemWindowInsetBottom
+            }
+            view.setPadding(view.paddingLeft, top, view.paddingRight, bottom)
+            insets
+        }
+        root.requestApplyInsets()
     }
 
     // ── Plumbing ─────────────────────────────────────────────────────────────

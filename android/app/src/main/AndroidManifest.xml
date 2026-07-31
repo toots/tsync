@@ -11,6 +11,7 @@
          build script; both are required. -->
     <application
         android:label="tsync"
+        android:theme="@android:style/Theme.Material.Light.NoActionBar"
         android:extractNativeLibs="true"
         android:icon="@android:drawable/stat_notify_sync">
 
