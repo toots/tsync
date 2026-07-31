@@ -75,20 +75,6 @@ module Make (C : Conf.S) = struct
      Called from FUSE worker threads (never the loop thread itself). *)
   let on_loop f = Lwt_preemptive.run_in_main f
 
-  (* ── Journal WAL helpers ──────────────────────────────────────────────── *)
-
-  let pending_cursor : string option ref = ref None
-
-  let set_pending_cursor ek =
-    match !pending_cursor with
-      | Some prev when prev >= ek -> ()
-      | _ -> pending_cursor := Some ek
-
-  let drain_pending_cursor () =
-    let v = !pending_cursor in
-    pending_cursor := None;
-    v
-
   (* ── Shutdown coordination ────────────────────────────────────────────── *)
 
   (* Deliberately unbounded: if the stop sequence wedges, hanging is the correct
@@ -381,23 +367,6 @@ module Make (C : Conf.S) = struct
 
   (* ── Main mount ───────────────────────────────────────────────────────── *)
 
-  let cursor_flusher () =
-    let rec loop () =
-      let* () = Lwt_unix.sleep 2.0 in
-      let* () =
-        match drain_pending_cursor () with
-          | None -> Lwt.return_unit
-          | Some ek ->
-              Lwt.catch
-                (fun () -> Fs.bump_cursor ek)
-                (fun exn ->
-                  Log.err "bump_cursor: %s" (Printexc.to_string exn);
-                  Lwt.return_unit)
-      in
-      loop ()
-    in
-    loop ()
-
   let mount ?(allow_other = false) mount_point =
     (* An exception escaping through Lwt.async (e.g. a socket error in a
        library's background loop) must not take down the daemon or, worse,
@@ -425,16 +394,10 @@ module Make (C : Conf.S) = struct
         (fun () ->
           Lwt_main.run
             (let* () =
-               E.start
-                 ~on_cursor:(fun ~entry_key -> set_pending_cursor entry_key)
-                 ~on_upload_done:(fun ~key ->
-                   (* A hint for whoever is listening, if anyone is. *)
-                   ignore (Ipc.notify_uploaded ~path:C.notify_path key);
-                   Lwt.return_unit)
-                 ()
+               (* Nothing to tell anyone: a FUSE mount is the filesystem, so an
+                  upload finishing changes nothing a reader can observe. *)
+               E.start ~on_upload_done:(fun ~key:_ -> Lwt.return_unit) ()
              in
-             Log.debug "starting cursor flusher";
-             Lwt.async cursor_flusher;
              Log.debug "starting IPC server at %s" C.socket_path;
              Lwt.async (fun () ->
                  Ipc.serve ~path:C.socket_path

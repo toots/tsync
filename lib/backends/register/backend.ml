@@ -3,6 +3,18 @@ type file_entry = { key : string; size : int; last_modified : float }
 exception Backend_error of string
 exception Cancelled
 
+(* No backend in this domain accepts writes. Its own exception rather than a
+   [Backend_error] carrying a sentence, because callers act on it: a frontend
+   turns it into a read-only error for the user, and matching on prose is how
+   that stops working the day the sentence is reworded. *)
+exception Not_writable
+
+let () =
+  Printexc.register_printer (function
+    | Not_writable ->
+        Some "no writable backend: every backend in this domain is \"readOnly\""
+    | _ -> None)
+
 module type S = sig
   val put : key:string -> data:string -> unit -> unit Lwt.t
   val get : key:string -> unit -> string Lwt.t

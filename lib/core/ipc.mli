@@ -6,20 +6,35 @@ val send : socket_path:string -> string -> string
     waited on. *)
 val send_lwt : ?timeout:float -> socket_path:string -> string -> string Lwt.t
 
-(** Fire-and-forget messages to a frontend listening on [path]. Each returns
-    whether the message was delivered: the listener only exists while the
-    frontend is running, and a caller with no other way to get the news through
-    must not report success on a message nothing received. *)
+(** Event subscribers.
 
-val notify_evict : path:string -> string -> bool
-val notify_restore : path:string -> string -> bool
-val notify_uploaded : path:string -> string -> bool
-val notify_changed : path:string -> string -> bool
-val notify_resync : path:string -> bool
+    The daemon never connects out to a frontend. A client that wants to hear
+    about changes connects to the daemon like any other caller and asks to
+    subscribe; its connection then carries a stream of events instead of
+    replies. That direction is the dependable one — a sandboxed extension can
+    always reach us, while its own lifetime belongs to the OS, so a channel that
+    exists only while it happens to be running is no channel at all. *)
+module Subs : sig
+  type t
 
-(** Start the IPC server loop, calling [handler] for each incoming line. Stops
-    when the handler returns [("...", `Stop)]. *)
+  val create : unit -> t
+
+  (** Queue [msg] for every subscriber of [topic] (a domain name; a subscriber
+      registered under [""] hears everything) and return how many there were.
+      Zero is the only honest answer to give a caller waiting on the result: it
+      says nobody was listening, not that the request failed. *)
+  val publish : t -> topic:string -> string -> int
+
+  val count : t -> topic:string -> int
+end
+
+(** Start the IPC server loop, calling [handler] for each incoming line. A
+    connection carries requests until the client closes it. Stops serving when
+    the handler returns [`Stop]; hands the connection to [subs] as an event
+    stream when it returns [`Subscribe topic]. Without [subs] a subscribe
+    request simply closes the connection. *)
 val serve :
+  ?subs:Subs.t ->
   path:string ->
-  (string -> (string * [ `Continue | `Stop ]) Lwt.t) ->
+  (string -> (string * [ `Continue | `Stop | `Subscribe of string ]) Lwt.t) ->
   unit Lwt.t

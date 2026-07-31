@@ -28,10 +28,10 @@ module C : Conf.S = struct
   let cursor_key = "tsync/testdom/cursor"
   let shares_prefix = "tsync/shares/"
   let backends = [(module Shareable : Backend.S)]
+  let share_backends = backends
   let cache_root = cache_dir
   let data_dir = data_dir
   let socket_path = ""
-  let notify_path = ""
   let max_uploads = 1
   let max_downloads = 1
   let chunk_size = Some (8 * 1024 * 1024)
@@ -93,10 +93,47 @@ let () =
     include C
 
     let backends = [(module NoShare : Backend.S)]
+    let share_backends = backends
   end in
   let module S2 = Share.Make (C2) in
   (match Lwt_main.run (S2.create ~expires:123 ~rel:"foo" ()) with
     | Error _ -> ()
+    | Ok _ -> assert false);
+
+  (* ── A read-only domain can still share ────────────────────────────────────
+     The composition a domain whose every backend has role [readOnly] gets:
+     nothing writable, the store reachable only as a fallback. Sharing has to
+     work anyway — a share manifest lives outside every domain root, so
+     publishing one is not a domain write. The earlier version asked the
+     composite for both the URL and the write and so could do neither, which is
+     the whole point of keeping [share_backends] separate. *)
+  let module ReadOnlyDomain : Conf.S = struct
+    include C
+
+    let backends =
+      [
+        Fallback_backend.make ~writable:[]
+          ~fallbacks:
+            [
+              { Fallback_backend.name = "archive"; backend = (module Shareable) };
+            ];
+      ]
+
+    let share_backends = [(module Shareable : Backend.S)]
+  end in
+  let module S3 = Share.Make (ReadOnlyDomain) in
+  (* The composite really does refuse writes: without that, this proves nothing. *)
+  let (module Composite : Backend.S) = List.hd ReadOnlyDomain.backends in
+  (match Lwt_main.run (Composite.put ~key:"tsync/shares/zz" ~data:"x" ()) with
+    | exception Backend.Not_writable -> ()
+    | _ -> assert false);
+  (match Lwt_main.run (S3.create ~token:"cc" ~expires:123 ~rel:"foo" ()) with
+    | Ok u -> assert (u = share_base ^ "/cc")
+    | Error e -> failwith e);
+
+  (* ── A path with nothing behind it is "not found", not "unavailable" ─────── *)
+  (match Lwt_main.run (S3.create ~expires:123 ~rel:"no/such/dir" ()) with
+    | Error e -> assert (String.length e >= 9 && String.sub e 0 9 = "not found")
     | Ok _ -> assert false);
 
   print_endline "share_test: OK"

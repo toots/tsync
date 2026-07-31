@@ -3,8 +3,8 @@
   write a.txt "hello"
   write b.txt "world"
 --- listing
-  list_dir tsync/test/manifests/ -> {"ok":true,"dirs":[],"files":[{"key":"tsync/test/manifests/a.txt","size":5,"mtime":"<mtime>","etag":"650e58ac64da6e0a"},{"key":"tsync/test/manifests/b.txt","size":5,"mtime":"<mtime>","etag":"0c85c7c61d1a6890"}]}
-  list_all tsync/test/manifests/ -> {"ok":true,"files":[{"key":"tsync/test/manifests/a.txt","size":5,"mtime":"<mtime>","etag":"650e58ac64da6e0a"},{"key":"tsync/test/manifests/b.txt","size":5,"mtime":"<mtime>","etag":"0c85c7c61d1a6890"}]}
+  list_dir root -> {"ok":true,"items":[{"ref":"f:.tsync-root/a.txt","parentRef":"root","name":"a.txt","key":"tsync/test/manifests/a.txt","kind":"file","size":5,"mtime":"<mtime>","etag":"650e58ac64da6e0a","isUploaded":true},{"ref":"f:.tsync-root/b.txt","parentRef":"root","name":"b.txt","key":"tsync/test/manifests/b.txt","kind":"file","size":5,"mtime":"<mtime>","etag":"0c85c7c61d1a6890","isUploaded":true}]}
+  list_all root -> {"ok":true,"items":[{"ref":"f:.tsync-root/a.txt","parentRef":"root","name":"a.txt","key":"tsync/test/manifests/a.txt","kind":"file","size":5,"mtime":"<mtime>","etag":"650e58ac64da6e0a","isUploaded":true},{"ref":"f:.tsync-root/b.txt","parentRef":"root","name":"b.txt","key":"tsync/test/manifests/b.txt","kind":"file","size":5,"mtime":"<mtime>","etag":"0c85c7c61d1a6890","isUploaded":true}]}
 
 === nested directories keyed as full paths
   mkdir sub
@@ -12,24 +12,24 @@
   write sub/c.txt "nested"
   write top.txt "top"
 --- listing
-  list_dir tsync/test/manifests/ -> {"ok":true,"dirs":[{"key":"tsync/test/manifests/sub/"}],"files":[{"key":"tsync/test/manifests/top.txt","size":3,"mtime":"<mtime>","etag":"97bb0a4a6df0d08e"}]}
-  list_dir tsync/test/manifests/sub/ -> {"ok":true,"dirs":[],"files":[{"key":"tsync/test/manifests/sub/c.txt","size":6,"mtime":"<mtime>","etag":"7546f608548f4d0d"}]}
-  list_all tsync/test/manifests/ -> {"ok":true,"files":[{"key":"tsync/test/manifests/sub/c.txt","size":6,"mtime":"<mtime>","etag":"7546f608548f4d0d"},{"key":"tsync/test/manifests/top.txt","size":3,"mtime":"<mtime>","etag":"97bb0a4a6df0d08e"}]}
+  list_dir root -> {"ok":true,"items":[{"ref":"d:547c2ad623ddba3f","parentRef":"root","name":"sub","key":"tsync/test/manifests/sub/","kind":"dir","size":0,"mtime":"<zero>","etag":"547c2ad623ddba3f","isUploaded":true},{"ref":"f:.tsync-root/top.txt","parentRef":"root","name":"top.txt","key":"tsync/test/manifests/top.txt","kind":"file","size":3,"mtime":"<mtime>","etag":"97bb0a4a6df0d08e","isUploaded":true}]}
+  list_dir d:547c2ad623ddba3f -> {"ok":true,"items":[{"ref":"f:547c2ad623ddba3f/c.txt","parentRef":"d:547c2ad623ddba3f","name":"c.txt","key":"tsync/test/manifests/sub/c.txt","kind":"file","size":6,"mtime":"<mtime>","etag":"7546f608548f4d0d","isUploaded":true}]}
+  list_all root -> {"ok":true,"items":[{"ref":"f:547c2ad623ddba3f/c.txt","parentRef":"d:547c2ad623ddba3f","name":"c.txt","key":"tsync/test/manifests/sub/c.txt","kind":"file","size":6,"mtime":"<mtime>","etag":"7546f608548f4d0d","isUploaded":true},{"ref":"f:.tsync-root/top.txt","parentRef":"root","name":"top.txt","key":"tsync/test/manifests/top.txt","kind":"file","size":3,"mtime":"<mtime>","etag":"97bb0a4a6df0d08e","isUploaded":true}]}
 
 === identical content shares an etag
   write x.txt "same bytes"
   drain
   write y.txt "same bytes"
 --- listing
-  list_dir tsync/test/manifests/ -> {"ok":true,"dirs":[],"files":[{"key":"tsync/test/manifests/x.txt","size":10,"mtime":"<mtime>","etag":"83aa3fc9fadd8e79"},{"key":"tsync/test/manifests/y.txt","size":10,"mtime":"<mtime>","etag":"83aa3fc9fadd8e79"}]}
-  list_all tsync/test/manifests/ -> {"ok":true,"files":[{"key":"tsync/test/manifests/x.txt","size":10,"mtime":"<mtime>","etag":"83aa3fc9fadd8e79"},{"key":"tsync/test/manifests/y.txt","size":10,"mtime":"<mtime>","etag":"83aa3fc9fadd8e79"}]}
+  list_dir root -> {"ok":true,"items":[{"ref":"f:.tsync-root/x.txt","parentRef":"root","name":"x.txt","key":"tsync/test/manifests/x.txt","kind":"file","size":10,"mtime":"<mtime>","etag":"83aa3fc9fadd8e79","isUploaded":true},{"ref":"f:.tsync-root/y.txt","parentRef":"root","name":"y.txt","key":"tsync/test/manifests/y.txt","kind":"file","size":10,"mtime":"<mtime>","etag":"83aa3fc9fadd8e79","isUploaded":true}]}
+  list_all root -> {"ok":true,"items":[{"ref":"f:.tsync-root/x.txt","parentRef":"root","name":"x.txt","key":"tsync/test/manifests/x.txt","kind":"file","size":10,"mtime":"<mtime>","etag":"83aa3fc9fadd8e79","isUploaded":true},{"ref":"f:.tsync-root/y.txt","parentRef":"root","name":"y.txt","key":"tsync/test/manifests/y.txt","kind":"file","size":10,"mtime":"<mtime>","etag":"83aa3fc9fadd8e79","isUploaded":true}]}
 
 ########## CHANGES ##########
 === foreign put
   A: write a.txt "hi"
   A: drain
 --- B changes_since (A's ops are foreign to B)
-  changes_since from baseline (working) -> {"ok":true,"stale":false,"cursor":"<cursor>","ops":[{"op":"put","key":"tsync/test/manifests/a.txt","size":2}]}
+  changes_since from baseline (working) -> {"ok":true,"stale":false,"cursor":"<cursor>","ops":[{"op":"put","key":"tsync/test/manifests/a.txt","size":2,"ref":"f:.tsync-root/a.txt","parentRef":"root","name":"a.txt"}]}
   changes_since from current (up to date) -> {"ok":true,"stale":false,"cursor":"<cursor>","ops":[]}
   changes_since from pruned anchor (stale) -> {"ok":true,"stale":true}
 
@@ -39,7 +39,7 @@
   A: write sub/f.txt "deep"
   A: drain
 --- B changes_since (A's ops are foreign to B)
-  changes_since from baseline (working) -> {"ok":true,"stale":false,"cursor":"<cursor>","ops":[{"op":"mkdir","key":"tsync/test/manifests/sub/"},{"op":"put","key":"tsync/test/manifests/sub/f.txt","size":4}]}
+  changes_since from baseline (working) -> {"ok":true,"stale":false,"cursor":"<cursor>","ops":[{"op":"mkdir","key":"tsync/test/manifests/sub/","id":"547c2ad623ddba3f","ref":"d:547c2ad623ddba3f","parentRef":"root","name":"sub"},{"op":"put","key":"tsync/test/manifests/sub/f.txt","size":4,"ref":"f:547c2ad623ddba3f/f.txt","parentRef":"d:547c2ad623ddba3f","name":"f.txt"}]}
   changes_since from current (up to date) -> {"ok":true,"stale":false,"cursor":"<cursor>","ops":[]}
   changes_since from pruned anchor (stale) -> {"ok":true,"stale":true}
 
@@ -49,7 +49,7 @@
   A: delete a.txt
   A: drain
 --- B changes_since (A's ops are foreign to B)
-  changes_since from baseline (working) -> {"ok":true,"stale":false,"cursor":"<cursor>","ops":[{"op":"put","key":"tsync/test/manifests/a.txt","size":1},{"op":"delete","key":"tsync/test/manifests/a.txt"}]}
+  changes_since from baseline (working) -> {"ok":true,"stale":false,"cursor":"<cursor>","ops":[{"op":"put","key":"tsync/test/manifests/a.txt","size":1,"ref":"f:.tsync-root/a.txt","parentRef":"root","name":"a.txt"},{"op":"delete","key":"tsync/test/manifests/a.txt","ref":"f:.tsync-root/a.txt","parentRef":"root","name":"a.txt"}]}
   changes_since from current (up to date) -> {"ok":true,"stale":false,"cursor":"<cursor>","ops":[]}
   changes_since from pruned anchor (stale) -> {"ok":true,"stale":true}
 
@@ -59,7 +59,27 @@
   A: rename a.txt -> b.txt
   A: drain
 --- B changes_since (A's ops are foreign to B)
-  changes_since from baseline (working) -> {"ok":true,"stale":false,"cursor":"<cursor>","ops":[{"op":"put","key":"tsync/test/manifests/a.txt","size":1},{"op":"rename","key":"tsync/test/manifests/b.txt","src":"tsync/test/manifests/a.txt","is_dir":false}]}
+  changes_since from baseline (working) -> {"ok":true,"stale":false,"cursor":"<cursor>","ops":[{"op":"put","key":"tsync/test/manifests/a.txt","size":1,"ref":"f:.tsync-root/a.txt","parentRef":"root","name":"a.txt"},{"op":"rename","key":"tsync/test/manifests/b.txt","src":"tsync/test/manifests/a.txt","is_dir":false,"ref":"f:.tsync-root/b.txt","parentRef":"root","name":"b.txt","srcRef":"f:.tsync-root/a.txt"}]}
+  changes_since from current (up to date) -> {"ok":true,"stale":false,"cursor":"<cursor>","ops":[]}
+  changes_since from pruned anchor (stale) -> {"ok":true,"stale":true}
+
+=== foreign rmdir carries the folder id
+  A: mkdir gone
+  A: drain
+  A: rmdir gone
+  A: drain
+--- B changes_since (A's ops are foreign to B)
+  changes_since from baseline (working) -> {"ok":true,"stale":false,"cursor":"<cursor>","ops":[{"op":"mkdir","key":"tsync/test/manifests/gone/","id":"547c2ad623ddba3f","ref":"d:547c2ad623ddba3f","parentRef":"root","name":"gone"},{"op":"rmdir","key":"tsync/test/manifests/gone/","id":"547c2ad623ddba3f","ref":"d:547c2ad623ddba3f","parentRef":"root","name":"gone"}]}
+  changes_since from current (up to date) -> {"ok":true,"stale":false,"cursor":"<cursor>","ops":[]}
+  changes_since from pruned anchor (stale) -> {"ok":true,"stale":true}
+
+=== foreign dir rename carries the folder id
+  A: mkdir before
+  A: drain
+  A: rename before -> after
+  A: drain
+--- B changes_since (A's ops are foreign to B)
+  changes_since from baseline (working) -> {"ok":true,"stale":false,"cursor":"<cursor>","ops":[{"op":"mkdir","key":"tsync/test/manifests/before/","id":"547c2ad623ddba3f","ref":"d:547c2ad623ddba3f","parentRef":"root","name":"before"},{"op":"rename","key":"tsync/test/manifests/after/","src":"tsync/test/manifests/before/","is_dir":true,"id":"547c2ad623ddba3f","ref":"d:547c2ad623ddba3f","parentRef":"root","name":"after","srcRef":"d:547c2ad623ddba3f"}]}
   changes_since from current (up to date) -> {"ok":true,"stale":false,"cursor":"<cursor>","ops":[]}
   changes_since from pruned anchor (stale) -> {"ok":true,"stale":true}
 
@@ -68,6 +88,6 @@
   sections: server process lwt traffic domains
   domain "test": cache=0 journal.localPending=0
   backend "backend" ("main"): reachable=true journal.behind=0
-  frontend "test": reachable=true stagedFiles=0 dirtyFiles=0 metaLocked=false metaWaiting=false
+  frontend "test": reachable=true stagedFiles=0 metaLocked=false metaWaiting=false
   renders as text: true
 

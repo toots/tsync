@@ -15,6 +15,13 @@ public struct DomainConfig: Codable, Sendable {
     }
 }
 
+/// What this side needs to know: which domains exist, whether each is writable,
+/// and where to reach the daemon.
+///
+/// Deliberately not the storage layout. This used to derive the S3 key prefix
+/// for a domain, restating a rule that lives in the daemon's `Conf_parsing` with
+/// nothing but a comment holding the two in agreement. Items are named by
+/// reference now, so where they are actually stored is the daemon's business.
 public struct Config: Codable, Sendable {
     public let domains: [DomainConfig]
 
@@ -24,6 +31,16 @@ public struct Config: Codable, Sendable {
         FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: groupID)
             ?? FileManager.default.homeDirectoryForCurrentUser
                 .appendingPathComponent("Library/Group Containers/\(groupID)")
+    }
+
+    /// Runtime state the daemon owns. Must agree with `Runtime.default_paths` in
+    /// `lib/runtime/macos_runtime.ml`.
+    public static var dataDirURL: URL {
+        groupContainerURL.appendingPathComponent("tsync", isDirectory: true)
+    }
+
+    public static var socketPath: String {
+        dataDirURL.appendingPathComponent("tsync.sock").path
     }
 
     public static func load() throws -> Config {
@@ -36,9 +53,15 @@ public struct Config: Codable, Sendable {
         domains.first(where: { $0.name == domainName })?.readOnly ?? false
     }
 
-    /// Full S3 key prefix for a domain's manifests. Must match the daemon's
-    /// Conf_parsing.domain_prefix (bin/tsync.ml): "tsync/" ^ name ^ "/manifests/".
-    public func domainPrefix(_ domainName: String) -> String {
-        "tsync/\(domainName)/manifests/"
+    /// Stamped by the daemon whenever it rebuilds a domain's local mirror — the
+    /// only way changes made straight in the store are ever picked up. Nothing
+    /// journals those, so no delta can bridge a sync anchor issued beforehand and
+    /// every enumerator has to drop its index and re-list. Anchors carry this
+    /// token so a mismatch expires them on sight, which still works when the
+    /// stamp lands while this extension is not running — as it usually does.
+    public static func resyncToken(domain: String) -> String {
+        let url = dataDirURL.appendingPathComponent("resync-\(domain)")
+        return ((try? String(contentsOf: url, encoding: .utf8)) ?? "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
     }
 }

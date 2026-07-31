@@ -67,6 +67,12 @@ jobs:
         run: opam exec -- dune build
       - name: Run tests
         run: opam exec -- dune test
+      # Drives a real FUSE mount: a store, a mount, and a second client, all
+      # staged under a scratch directory and taken down again. Separate from
+      # `dune test`, which must stay hermetic — this one mounts a filesystem.
+      # Everything it touches is its own, so there is nothing to clean up after.
+      - name: End-to-end (FUSE)
+        run: opam exec -- make -C linux e2e
 
   macos:
     runs-on: macos-latest
@@ -94,13 +100,18 @@ jobs:
         run: opam exec -- dune build
       - name: Run tests
         run: opam exec -- dune test
-      # Compile-only check that the Swift targets still build. Assembling the
-      # bundle — embedding the daemon, dylibbundler, signing, packaging — is
-      # exercised by the release workflow, which has the signing credentials.
-      - name: Build macOS app
+      # Builds the Swift targets and runs their tests. The protocol tests start
+      # the daemon built above against a local store in a temporary directory, so
+      # they need no network, no signing and no registered domain — and they are
+      # what holds the two halves of the IPC contract together.
+      #
+      # Assembling the bundle — embedding the daemon, dylibbundler, signing,
+      # packaging — is exercised by the release workflow, which has the signing
+      # credentials.
+      - name: Build and test macOS app
         run: |
           make generate
           xcodebuild -project tsync.xcodeproj -scheme TsyncApp \
             -configuration Debug -destination 'platform=macOS' \
-            CODE_SIGNING_ALLOWED=NO
+            CODE_SIGNING_ALLOWED=NO test
         working-directory: macos

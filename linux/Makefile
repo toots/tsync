@@ -1,4 +1,4 @@
-.PHONY: build test deploy configure install-deps install
+.PHONY: build test deploy configure install-deps install e2e
 
 build:
 	dune build
@@ -27,3 +27,9 @@ install:
 	systemctl --user enable tsync
 	systemctl --user restart tsync
 
+# End-to-end check against a real FUSE mount. Stages everything it needs — a
+# store, a mount, a second client — under a scratch directory and takes it all
+# down again, touching no shared config and no service. Needs fuse3 and
+# permission to mount. Not part of `dune test`: it mounts a filesystem.
+e2e:
+	cd .. && dune build tests/e2e/linux/e2e_linux.exe && ./_build/default/tests/e2e/linux/e2e_linux.exe

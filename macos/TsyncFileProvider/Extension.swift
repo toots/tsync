@@ -2,429 +2,359 @@ import AppKit
 import FileProvider
 import Foundation
 import OSLog
-import Darwin
 
 private let log = Logger(subsystem: "org.feverdreamtv.tsync", category: "Extension")
 
-private final class NotifyListener: @unchecked Sendable {
-    private let domain: NSFileProviderDomain
-    private var serverFD: Int32 = -1
-    private let path: String
-
-    init(domain: NSFileProviderDomain) {
-        self.domain = domain
-        self.path = Config.groupContainerURL
-            .appendingPathComponent("tsync/notify-\(domain.displayName).sock").path
-        try? FileManager.default.removeItem(atPath: path)
-        serverFD = socket(AF_UNIX, SOCK_STREAM, 0)
-        guard serverFD >= 0 else { return }
-        var addr = sockaddr_un()
-        addr.sun_family = sa_family_t(AF_UNIX)
-        path.withCString { cstr in
-            withUnsafeMutablePointer(to: &addr.sun_path) { ptr in
-                ptr.withMemoryRebound(to: CChar.self, capacity: 104) { _ = strlcpy($0, cstr, 104) }
-            }
-        }
-        let ok = withUnsafePointer(to: &addr) {
-            $0.withMemoryRebound(to: sockaddr.self, capacity: 1) {
-                bind(serverFD, $0, socklen_t(MemoryLayout<sockaddr_un>.size))
-            }
-        } == 0 && listen(serverFD, 5) == 0
-        guard ok else { close(serverFD); serverFD = -1; return }
-        Thread.detachNewThread { self.acceptLoop() }
-    }
-
-    deinit {
-        if serverFD >= 0 { close(serverFD); serverFD = -1 }
-        try? FileManager.default.removeItem(atPath: path)
-    }
-
-    private func acceptLoop() {
-        while serverFD >= 0 {
-            let clientFD = accept(serverFD, nil, nil)
-            guard clientFD >= 0 else { continue }
-            Thread.detachNewThread { self.handle(clientFD) }
-        }
-    }
-
-    private func handle(_ fd: Int32) {
-        defer { close(fd) }
-        var buf = [UInt8](repeating: 0, count: 4096)
-        let n = recv(fd, &buf, buf.count, 0)
-        guard n > 0 else { return }
-        let line = String(bytes: buf.prefix(n), encoding: .utf8)?
-            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        guard let manager = NSFileProviderManager(for: domain) else { return }
-        if line.hasPrefix("EVICT ") {
-            let key = String(line.dropFirst(6))
-            manager.evictItem(identifier: NSFileProviderItemIdentifier(key)) { _ in }
-        } else if line.hasPrefix("RESTORE ") {
-            let key = String(line.dropFirst(8))
-            manager.getUserVisibleURL(for: NSFileProviderItemIdentifier(key)) { url, _ in
-                guard let url else { return }
-                // A coordinated read forces fileproviderd to materialize the item.
-                var error: NSError?
-                NSFileCoordinator().coordinate(readingItemAt: url, options: [], error: &error) { _ in }
-            }
-        } else if line.hasPrefix("UPLOADED ") {
-            let key = String(line.dropFirst(9))
-            manager.signalEnumerator(for: NSFileProviderItemIdentifier(key)) { _ in }
-        } else if line.hasPrefix("CHANGED ") {
-            let key = String(line.dropFirst(8))
-            // Drop any stale materialized copy, then drive enumerateChanges via the working
-            // set — signaling the specific key can't introduce items the DB has never seen.
-            manager.evictItem(identifier: NSFileProviderItemIdentifier(key)) { _ in }
-            manager.signalEnumerator(for: .workingSet) { _ in }
-        } else if line == "RESYNC" {
-            // Force a full refresh, picking up changes made directly in the bucket
-            // (which write no journal entry). reimportItems reconciles the listing;
-            // evicting every materialized item drops stale downloaded content so it
-            // re-downloads fresh on next access.
-            evictAllMaterialized(manager)
-            manager.reimportItems(below: .rootContainer) { _ in }
-            manager.signalEnumerator(for: .workingSet) { _ in }
-        }
-    }
-
-    /// Evict every currently-materialized (downloaded) item so stale content is
-    /// dropped and re-downloaded fresh on next access. The materialized-items
-    /// enumeration is paged and asynchronous; the observer walks the pages and
-    /// evicts as it goes, retaining itself until enumeration finishes.
-    private func evictAllMaterialized(_ manager: NSFileProviderManager) {
-        MaterializedEvictionObserver(manager: manager).start()
-    }
-}
-
-private final class MaterializedEvictionObserver: NSObject, NSFileProviderEnumerationObserver {
-    private let manager: NSFileProviderManager
-    private let enumerator: NSFileProviderEnumerator
-    private var retain: MaterializedEvictionObserver?
-
-    init(manager: NSFileProviderManager) {
-        self.manager = manager
-        self.enumerator = manager.enumeratorForMaterializedItems()
-    }
-
-    func start() {
-        retain = self  // stay alive across the async enumeration
-        enumerator.enumerateItems(for: self,
-                                  startingAt: NSFileProviderPage(NSFileProviderPage.initialPageSortedByName as Data))
-    }
-
-    func didEnumerate(_ items: [NSFileProviderItemProtocol]) {
-        for item in items {
-            manager.evictItem(identifier: item.itemIdentifier) { _ in }
-        }
-    }
-
-    func finishEnumerating(upTo nextPage: NSFileProviderPage?) {
-        if let nextPage {
-            enumerator.enumerateItems(for: self, startingAt: nextPage)
-        } else {
-            finish()
-        }
-    }
-
-    func finishEnumeratingWithError(_ error: Error) { finish() }
-
-    private func finish() {
-        enumerator.invalidate()
-        retain = nil
-    }
-}
-
 final class TsyncExtension: NSObject, NSFileProviderReplicatedExtension, @unchecked Sendable {
-    let domain: NSFileProviderDomain
-    let config: Config
-    private var notifyListener: NotifyListener?
-
-    private static let startupAnchor = NSFileProviderSyncAnchor(
-        "\(Date().timeIntervalSinceReferenceDate)".data(using: .utf8)!
-    )
+    private let domain: NSFileProviderDomain
+    private let client: DaemonClient
+    private let readOnly: Bool
 
     required init(domain: NSFileProviderDomain) {
         self.domain = domain
-        self.config = (try? Config.load()) ?? Config(domains: [])
+        let config = (try? Config.load()) ?? Config(domains: [])
+        self.readOnly = config.isReadOnly(domain.displayName)
+        self.client = DaemonClient(domain: domain.displayName)
         super.init()
-        notifyListener = NotifyListener(domain: domain)
-        log.info("init: domain=\(domain.identifier.rawValue, privacy: .public)")
+        log.info("init: \(domain.identifier.rawValue, privacy: .public)")
     }
 
+    /// Nothing to tear down. This process holds no channel of its own: the daemon
+    /// is reached by connecting out, and being told about changes is the app's
+    /// job, because the app is still running when this is not.
     func invalidate() {
-        notifyListener = nil
-        log.info("invalidate: domain=\(self.domain.identifier.rawValue, privacy: .public)")
+        log.info("invalidate: \(self.domain.identifier.rawValue, privacy: .public)")
     }
 
-    // MARK: - NSFileProviderReplicatedExtension
+    // MARK: - Metadata
 
-    func item(
-        for identifier: NSFileProviderItemIdentifier,
-        request: NSFileProviderRequest,
-        completionHandler: @escaping (NSFileProviderItem?, Error?) -> Void
-    ) -> Progress {
+    func item(for identifier: NSFileProviderItemIdentifier,
+              request: NSFileProviderRequest,
+              completionHandler: @escaping (NSFileProviderItem?, Error?) -> Void) -> Progress {
         let progress = Progress(totalUnitCount: 1)
-        Task {
+        let task = Task {
             do {
-                completionHandler(try await resolveItem(identifier), nil)
+                completionHandler(try await resolve(identifier), nil)
             } catch {
-                completionHandler(nil, IPC.fileProviderError(error))
+                completionHandler(nil, FileProviderError.from(error, item: identifier))
             }
             progress.completedUnitCount = 1
         }
+        progress.cancellationHandler = { task.cancel() }
         return progress
     }
 
-    func fetchContents(
-        for itemIdentifier: NSFileProviderItemIdentifier,
-        version: NSFileProviderItemVersion?,
-        request: NSFileProviderRequest,
-        completionHandler: @escaping (URL?, NSFileProviderItem?, Error?) -> Void
-    ) -> Progress {
+    /// This is the system's authority on whether an item still exists: answering
+    /// for one that is gone keeps it on disk forever. Directories used to be
+    /// answered for straight from the identifier without asking anyone, which is
+    /// how a deleted folder could outlive its own deletion indefinitely.
+    private func resolve(_ identifier: NSFileProviderItemIdentifier) async throws -> TsyncItem {
+        if identifier == .rootContainer {
+            return TsyncItem.rootContainer(displayName: domain.displayName,
+                                           readOnly: readOnly)
+        }
+        let item = try await client.stat(ItemID.wire(identifier))
+        guard let built = TsyncItem.make(item, readOnly: readOnly) else {
+            throw DaemonError.remote(code: "not_found", message: "unknown item")
+        }
+        return built
+    }
+
+    // MARK: - Contents
+
+    func fetchContents(for itemIdentifier: NSFileProviderItemIdentifier,
+                       version: NSFileProviderItemVersion?,
+                       request: NSFileProviderRequest,
+                       completionHandler: @escaping (URL?, NSFileProviderItem?, Error?) -> Void) -> Progress {
         let progress = Progress(totalUnitCount: -1)
-        Task {
-            let key = itemIdentifier.rawValue
-            log.info("fetchContents: \(key, privacy: .public)")
-            // Poll download progress every 0.5 s while ensureCached is in flight.
-            // The first response that shows active=true also carries totalBytes,
-            // switching the bar from indeterminate to determinate.
+        let ref = ItemID.wire(itemIdentifier)
+        let task = Task {
+            // Poll the daemon while the fetch is in flight. The first answer that
+            // reports a total switches the bar from indeterminate to a real one.
             let poller = Task {
-                var gotTotal = false
                 while !Task.isCancelled {
                     try? await Task.sleep(nanoseconds: 500_000_000)
-                    guard let resp = try? await IPC.downloadProgress(key: key),
-                          resp.active == true else { continue }
-                    if !gotTotal, let total = resp.totalBytes, total > 0 {
-                        progress.totalUnitCount = total
-                        gotTotal = true
-                    }
-                    if let bytes = resp.bytesDownloaded {
-                        progress.completedUnitCount = bytes
-                    }
+                    guard let p = try? await client.downloadProgress(ref: ref),
+                          p.active == true else { continue }
+                    if let total = p.totalBytes, total > 0 { progress.totalUnitCount = total }
+                    if let done = p.bytesDownloaded { progress.completedUnitCount = done }
                 }
             }
+            defer { poller.cancel() }
             do {
-                // The daemon assembles straight into the system's temporary directory:
-                // the OS takes ownership of the file there, and the extension is not
-                // permitted to move one in from the daemon's own cache.
+                // The system takes ownership of the file, and this process is not
+                // allowed to move one into that directory itself — it fails with
+                // EPERM, on locally signed and notarised builds alike. So the
+                // daemon is asked to assemble it there to begin with.
                 guard let manager = NSFileProviderManager(for: domain),
-                      let tmpDir = try? manager.temporaryDirectoryURL() else {
-                    throw NSError(domain: NSCocoaErrorDomain, code: NSFileWriteUnknownError)
+                      let temporary = try? manager.temporaryDirectoryURL() else {
+                    throw DaemonError.transport("no temporary directory for domain")
                 }
-                let dst = tmpDir.appendingPathComponent(UUID().uuidString)
-                let resp = try await IPC.ensureCached(key: key, dest: dst.path)
-                poller.cancel()
-                guard resp.localPath != nil else { throw IPC.IPCError.badResponse }
-                let item = try await resolveItem(itemIdentifier, isDownloaded: true)
-                completionHandler(dst, item, nil)
+                let destination = temporary.appendingPathComponent(UUID().uuidString)
+                try await client.ensureCached(ref: ref, destination: destination.path)
+                try Task.checkCancellation()
+                completionHandler(destination, try await resolve(itemIdentifier), nil)
+            } catch is CancellationError {
+                completionHandler(nil, nil, CocoaError(.userCancelled))
             } catch {
-                poller.cancel()
-                log.error("fetchContents error: \(key, privacy: .public): \(error, privacy: .public)")
-                completionHandler(nil, nil, IPC.fileProviderError(error))
+                log.error("fetchContents \(ref, privacy: .public): \(error, privacy: .public)")
+                completionHandler(nil, nil, FileProviderError.from(error, item: itemIdentifier))
             }
         }
+        // The system cancels a fetch that is taking too long and then expects the
+        // completion handler promptly. Without this it waits on a request nobody
+        // is going to answer.
+        progress.cancellationHandler = { task.cancel() }
         return progress
     }
 
-    func createItem(
-        basedOn itemTemplate: NSFileProviderItem,
-        fields: NSFileProviderItemFields,
-        contents url: URL?,
-        options: NSFileProviderCreateItemOptions = [],
-        request: NSFileProviderRequest,
-        completionHandler: @escaping (NSFileProviderItem?, NSFileProviderItemFields, Bool, Error?) -> Void
-    ) -> Progress {
+    // MARK: - Mutation
+
+    /// Fields this side cannot store. Handing them back as still pending stops
+    /// the system propagating its own idea of them to disk — which is what
+    /// silently reverted a user's Finder tags — and, once a call reports the same
+    /// set it was given, stops it offering them again.
+    private func unsupported(_ fields: NSFileProviderItemFields) -> NSFileProviderItemFields {
+        fields.subtracting([.contents, .filename, .parentItemIdentifier])
+    }
+
+    func createItem(basedOn itemTemplate: NSFileProviderItem,
+                    fields: NSFileProviderItemFields,
+                    contents url: URL?,
+                    options: NSFileProviderCreateItemOptions = [],
+                    request: NSFileProviderRequest,
+                    completionHandler: @escaping (NSFileProviderItem?, NSFileProviderItemFields, Bool, Error?) -> Void) -> Progress {
         let progress = Progress(totalUnitCount: 100)
-        if isReadOnly {
-            completionHandler(nil, [], false, NSError(domain: NSCocoaErrorDomain, code: NSFileWriteVolumeReadOnlyError))
+        if readOnly {
+            completionHandler(nil, [], false, readOnlyError())
             return progress
         }
-        Task {
+        let task = Task {
+            let parent = ItemID.wire(itemTemplate.parentItemIdentifier)
+            let name = itemTemplate.filename
+            let pending = unsupported(fields)
             do {
-                let key = s3Key(for: itemTemplate)
+                // A reimport replays everything already on disk through this call.
+                // Matching an existing item instead of creating a second one is
+                // what keeps that from re-uploading the whole domain.
                 let isDirectory = itemTemplate.contentType == .folder
+                if options.contains(.mayAlreadyExist),
+                   let existing = try await lookup(parent: itemTemplate.parentItemIdentifier,
+                                                   name: name, isDirectory: isDirectory) {
+                    completionHandler(existing, pending, false, nil)
+                    return
+                }
 
+                let created: TsyncItem?
                 if isDirectory {
-                    let dirKey = key + "/"
-                    _ = try await IPC.mkdir(key: dirKey)
-                    completionHandler(TsyncItem.make(key: dirKey, domainPrefix: domainPrefix), [], false, nil)
+                    _ = try await client.mkdir(parentRef: parent, name: name)
+                    created = try await lookup(parent: itemTemplate.parentItemIdentifier,
+                                               name: name, isDirectory: true)
                 } else if itemTemplate.contentType == .symbolicLink {
                     guard let target = itemTemplate.symlinkTargetPath ?? nil else {
-                        throw IPC.IPCError.badResponse
+                        throw DaemonError.remote(code: "invalid", message: "symlink without a target")
                     }
-                    let resp = try await IPC.symlink(key: key, target: target)
-                    completionHandler(
-                        TsyncItem.make(key: key, domainPrefix: domainPrefix,
-                                       size: resp.size,
-                                       modificationDate: resp.mtime.map { Date(timeIntervalSince1970: $0) },
-                                       etag: resp.etag, symlinkTarget: target),
-                        [], false, nil)
+                    _ = try await client.symlink(parentRef: parent, name: name, target: target)
+                    created = try await lookup(parent: itemTemplate.parentItemIdentifier,
+                                               name: name, isDirectory: false)
+                } else if let url {
+                    let staged = try stage(url)
+                    defer { try? FileManager.default.removeItem(at: staged) }
+                    _ = try await client.write(parentRef: parent, name: name, staging: staged.path)
+                    created = try await lookup(parent: itemTemplate.parentItemIdentifier,
+                                               name: name, isDirectory: false)
                 } else {
-                    let staging = try url.map { try stageContent($0) }
-                    defer { staging.map { try? FileManager.default.removeItem(at: $0) } }
-                    let resp: IPCResponse
-                    if let staging {
-                        resp = try await IPC.writeFile(key: key, staging: staging)
-                    } else {
-                        resp = try await IPC.createFile(key: key)
-                    }
-                    completionHandler(makeItem(key: key, resp: resp, isDownloaded: url != nil), [], false, nil)
+                    _ = try await client.create(parentRef: parent, name: name)
+                    created = try await lookup(parent: itemTemplate.parentItemIdentifier,
+                                               name: name, isDirectory: false)
                 }
                 progress.completedUnitCount = 100
+                completionHandler(created, pending, false, nil)
+            } catch is CancellationError {
+                completionHandler(nil, [], false, CocoaError(.userCancelled))
             } catch {
-                completionHandler(nil, [], false, IPC.fileProviderError(error))
+                log.error("createItem \(name, privacy: .public): \(error, privacy: .public)")
+                completionHandler(nil, [], false, FileProviderError.from(error))
             }
         }
+        progress.cancellationHandler = { task.cancel() }
         return progress
     }
 
-    func modifyItem(
-        _ item: NSFileProviderItem,
-        baseVersion version: NSFileProviderItemVersion,
-        changedFields: NSFileProviderItemFields,
-        contents newContents: URL?,
-        options: NSFileProviderModifyItemOptions = [],
-        request: NSFileProviderRequest,
-        completionHandler: @escaping (NSFileProviderItem?, NSFileProviderItemFields, Bool, Error?) -> Void
-    ) -> Progress {
+    func modifyItem(_ item: NSFileProviderItem,
+                    baseVersion version: NSFileProviderItemVersion,
+                    changedFields: NSFileProviderItemFields,
+                    contents newContents: URL?,
+                    options: NSFileProviderModifyItemOptions = [],
+                    request: NSFileProviderRequest,
+                    completionHandler: @escaping (NSFileProviderItem?, NSFileProviderItemFields, Bool, Error?) -> Void) -> Progress {
         let progress = Progress(totalUnitCount: 100)
-        if isReadOnly {
-            completionHandler(nil, [], false, NSError(domain: NSCocoaErrorDomain, code: NSFileWriteVolumeReadOnlyError))
+        if readOnly {
+            completionHandler(nil, [], false, readOnlyError())
             return progress
         }
-        Task {
+        let task = Task {
+            let ref = ItemID.wire(item.itemIdentifier)
+            let pending = unsupported(changedFields)
+            let moved = changedFields.contains(.filename)
+                || changedFields.contains(.parentItemIdentifier)
             do {
-                let oldKey = item.itemIdentifier.rawValue
-                let newKey = s3Key(for: item)
-                let isRename = changedFields.contains(.filename) || changedFields.contains(.parentItemIdentifier)
-                let isDirectory = item.contentType == .folder
+                // `baseVersion` says which state the system was editing from, and
+                // the option that asks us to fail on a mismatch needs macOS 26,
+                // above what this ships against. Conflicts are settled in the
+                // daemon instead, which publishes the losing side alongside as a
+                // "(conflicted copy from …)" file rather than choosing for the
+                // user — see `File.rename`.
+                _ = version
 
-                if isDirectory {
-                    let dirKey = newKey + "/"
-                    if isRename && oldKey != dirKey {
-                        _ = try await IPC.renameItem(src: oldKey, dst: newKey)
+                if let contents = newContents, changedFields.contains(.contents) {
+                    let staged = try stage(contents)
+                    defer { try? FileManager.default.removeItem(at: staged) }
+                    // Name and content travel together: written apart, a file
+                    // shows up elsewhere with an extension that does not match
+                    // what is in it.
+                    _ = try await client.write(
+                        parentRef: ItemID.wire(item.parentItemIdentifier),
+                        name: item.filename, staging: staged.path)
+                    if moved, ref != ItemID.wire(item.itemIdentifier) {
+                        try await client.delete(ref: ref, isDirectory: false)
                     }
-                    completionHandler(TsyncItem.make(key: dirKey, domainPrefix: domainPrefix), [], false, nil)
-                } else if isRename && oldKey != newKey {
-                    let resp: IPCResponse
-                    if let contentURL = newContents {
-                        let staging = try stageContent(contentURL)
-                        defer { try? FileManager.default.removeItem(at: staging) }
-                        resp = try await IPC.writeFile(key: newKey, staging: staging)
-                        _ = try await IPC.deleteItem(key: oldKey)
-                    } else {
-                        resp = try await IPC.renameItem(src: oldKey, dst: newKey)
-                    }
-                    completionHandler(makeItem(key: newKey, resp: resp, isDownloaded: true), [], false, nil)
-                } else if let contentURL = newContents, changedFields.contains(.contents) {
-                    let staging = try stageContent(contentURL)
-                    defer { try? FileManager.default.removeItem(at: staging) }
-                    let resp = try await IPC.writeFile(key: newKey, staging: staging)
-                    completionHandler(makeItem(key: newKey, resp: resp, isDownloaded: true), [], false, nil)
-                } else {
-                    // Metadata-only change (tags, last-used date, etc.) — nothing to sync
-                    completionHandler(try await resolveItem(item.itemIdentifier), [], false, nil)
+                } else if moved {
+                    _ = try await client.rename(
+                        ref: ref,
+                        parentRef: ItemID.wire(item.parentItemIdentifier),
+                        name: item.filename)
                 }
+
+                let updated = try await lookup(parent: item.parentItemIdentifier,
+                                               name: item.filename,
+                                               isDirectory: ItemID.folderID(of: item.itemIdentifier) != nil)
                 progress.completedUnitCount = 100
+                completionHandler(updated, pending, false, nil)
+            } catch is CancellationError {
+                completionHandler(nil, [], false, CocoaError(.userCancelled))
             } catch {
-                log.error("modifyItem error: \(error, privacy: .public)")
-                completionHandler(nil, [], false, IPC.fileProviderError(error))
+                log.error("modifyItem \(ref, privacy: .public): \(error, privacy: .public)")
+                completionHandler(nil, [], false,
+                                  FileProviderError.from(error, item: item.itemIdentifier))
             }
         }
+        progress.cancellationHandler = { task.cancel() }
         return progress
     }
 
-    func deleteItem(
-        identifier: NSFileProviderItemIdentifier,
-        baseVersion version: NSFileProviderItemVersion,
-        options: NSFileProviderDeleteItemOptions = [],
-        request: NSFileProviderRequest,
-        completionHandler: @escaping (Error?) -> Void
-    ) -> Progress {
+    func deleteItem(identifier: NSFileProviderItemIdentifier,
+                    baseVersion version: NSFileProviderItemVersion,
+                    options: NSFileProviderDeleteItemOptions = [],
+                    request: NSFileProviderRequest,
+                    completionHandler: @escaping (Error?) -> Void) -> Progress {
         let progress = Progress(totalUnitCount: 1)
-        if isReadOnly {
-            completionHandler(NSError(domain: NSCocoaErrorDomain, code: NSFileWriteVolumeReadOnlyError))
+        if readOnly {
+            completionHandler(readOnlyError())
             return progress
         }
-        Task {
+        let task = Task {
+            let ref = ItemID.wire(identifier)
+            let isDirectory = ItemID.folderID(of: identifier) != nil
             do {
-                let key = identifier.rawValue
-                _ = try await (key.hasSuffix("/") ? IPC.rmdir(key: key) : IPC.deleteItem(key: key))
+                // The daemon's directory delete detaches the whole subtree at
+                // once. That is right for a recursive delete and wrong for a
+                // plain one, which must refuse a directory with anything in it —
+                // so the check lives here, where the distinction is made.
+                if isDirectory && !options.contains(.recursive) {
+                    let children = try await client.listDir(ref)
+                    if !children.isEmpty {
+                        throw DaemonError.remote(code: "not_empty",
+                                                 message: "the folder is not empty")
+                    }
+                }
+                try await client.delete(ref: ref, isDirectory: isDirectory)
                 completionHandler(nil)
+            } catch let error as DaemonError where error.code == "not_found" {
+                // Already gone remotely, which is the outcome that was wanted.
+                completionHandler(nil)
+            } catch is CancellationError {
+                completionHandler(CocoaError(.userCancelled))
             } catch {
-                completionHandler(IPC.fileProviderError(error))
+                completionHandler(FileProviderError.from(error, item: identifier))
             }
             progress.completedUnitCount = 1
         }
+        progress.cancellationHandler = { task.cancel() }
         return progress
     }
 
-    func enumerator(
-        for containerItemIdentifier: NSFileProviderItemIdentifier,
-        request: NSFileProviderRequest
-    ) throws -> NSFileProviderEnumerator {
-        TsyncEnumerator(
-            containerIdentifier: containerItemIdentifier,
-            domain: domain,
-            config: config,
-            startupAnchor: TsyncExtension.startupAnchor)
+    // MARK: - Enumeration
+
+    func enumerator(for containerItemIdentifier: NSFileProviderItemIdentifier,
+                    request: NSFileProviderRequest) throws -> NSFileProviderEnumerator {
+        // The domain is registered with supportsSyncingTrash = false, so the
+        // system should never ask — but a request that does arrive has a defined
+        // answer, and it is not a listing of whatever a literal "trash" key finds.
+        if containerItemIdentifier == .trashContainer {
+            throw CocoaError(.featureUnsupported)
+        }
+        return TsyncEnumerator(container: containerItemIdentifier, client: client,
+                               domainName: domain.displayName, readOnly: readOnly)
     }
 
     // MARK: - Helpers
 
-    private var domainPrefix: String { config.domainPrefix(domain.displayName) }
-    private var isReadOnly: Bool { config.isReadOnly(domain.displayName) }
+    private func readOnlyError() -> Error {
+        NSError(domain: NSCocoaErrorDomain, code: NSFileWriteVolumeReadOnlyError,
+                userInfo: [NSLocalizedDescriptionKey:
+                            "'\(domain.displayName)' is read-only"])
+    }
 
-    private func resolveItem(_ identifier: NSFileProviderItemIdentifier, isDownloaded: Bool = false) async throws -> TsyncItem {
-        if identifier == .rootContainer {
-            return TsyncItem.rootContainer(displayName: domain.displayName, readOnly: isReadOnly)
+    /// The item now at `name` inside `parent`.
+    ///
+    /// A file's reference is composable from its container and its leaf, which
+    /// saves listing the whole folder. A directory's is not — only the daemon
+    /// assigns a folder id — so it is found by listing. Asking for a directory by
+    /// the composed file form would name the same thing by the wrong kind of
+    /// reference, and the caller would then build its children's names from it.
+    private func lookup(parent: NSFileProviderItemIdentifier, name: String,
+                        isDirectory: Bool) async throws -> TsyncItem? {
+        if !isDirectory, let child = ItemID.file(in: parent, named: name),
+           let item = try? await client.stat(ItemID.wire(child.identifier)) {
+            return TsyncItem.make(item, readOnly: readOnly)
         }
-        let key = identifier.rawValue
-        if key.hasSuffix("/") {
-            return TsyncItem.make(key: key, domainPrefix: domainPrefix, readOnly: isReadOnly)
-        }
-        return makeItem(key: key, resp: try await IPC.stat(key: key), isDownloaded: isDownloaded)
+        let siblings = try await client.listDir(ItemID.wire(parent))
+        guard let match = siblings.first(where: { $0.name == name }) else { return nil }
+        return TsyncItem.make(match, readOnly: readOnly)
     }
 
-    private func makeItem(key: String, resp: IPCResponse, isDownloaded: Bool) -> TsyncItem {
-        TsyncItem.make(key: key, domainPrefix: domainPrefix,
-                       readOnly: isReadOnly,
-                       size: resp.size,
-                       modificationDate: resp.mtime.map { Date(timeIntervalSince1970: $0) },
-                       etag: resp.etag, isDownloaded: isDownloaded,
-                       isUploaded: resp.isUploaded ?? true,
-                       symlinkTarget: resp.symlinkTarget)
-    }
-
-    private func s3Key(for item: NSFileProviderItem) -> String {
-        // Parent key always ends in "/" (root maps to the domain prefix, dir keys keep their slash).
-        let parentKey = ItemID.key(for: item.parentItemIdentifier, domainPrefix: domainPrefix)
-        return parentKey + item.filename
-    }
-
-    /// Hand fileproviderd its own copy instead of the daemon's live cache file: the system
-    /// may move the returned URL, and an EVICT can race the transfer. The provider temp
-    /// directory is on the same volume, so the copy is an APFS clone (no data duplicated).
-    private func stageContent(_ url: URL) throws -> URL {
-        let stagingDir = Config.groupContainerURL.appendingPathComponent("tsync/staging", isDirectory: true)
-        try FileManager.default.createDirectory(at: stagingDir, withIntermediateDirectories: true)
-        let dest = stagingDir.appendingPathComponent(UUID().uuidString)
+    /// Hand the system's file over as a copy of our own. The system unlinks the
+    /// URL it gave us once this call returns, and the daemon's upload outlives
+    /// that. Same volume, so this is a clone and copies no data.
+    ///
+    /// It goes in this process's own container, not the group container the
+    /// daemon lives in. The extension's sandbox lets it read the group container
+    /// but not write to it — creating anything there fails with EPERM, which is
+    /// almost certainly why an earlier design's socket, which this process was
+    /// supposed to bind in that same directory, was never there. The app has no
+    /// such limit, and the daemon is unsandboxed, so it can read the file from
+    /// here and rename it away.
+    private func stage(_ url: URL) throws -> URL {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("staging", isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let destination = directory.appendingPathComponent(UUID().uuidString)
         do {
-            try FileManager.default.linkItem(at: url, to: dest)
+            try FileManager.default.linkItem(at: url, to: destination)
         } catch {
-            try FileManager.default.copyItem(at: url, to: dest)
+            try FileManager.default.copyItem(at: url, to: destination)
         }
-        return dest
+        return destination
     }
 }
 
 // MARK: - Finder actions
 
 extension TsyncExtension: NSFileProviderCustomAction {
-    func performAction(
-        identifier actionIdentifier: NSFileProviderExtensionActionIdentifier,
-        onItemsWithIdentifiers itemIdentifiers: [NSFileProviderItemIdentifier],
-        completionHandler: @escaping (Error?) -> Void
-    ) -> Progress {
+    func performAction(identifier actionIdentifier: NSFileProviderExtensionActionIdentifier,
+                       onItemsWithIdentifiers itemIdentifiers: [NSFileProviderItemIdentifier],
+                       completionHandler: @escaping (Error?) -> Void) -> Progress {
         let progress = Progress(totalUnitCount: 1)
         guard actionIdentifier.rawValue == "org.feverdreamtv.tsync.copyShareURL",
               let identifier = itemIdentifiers.first else {
@@ -432,21 +362,19 @@ extension TsyncExtension: NSFileProviderCustomAction {
             progress.completedUnitCount = 1
             return progress
         }
-        let key = ItemID.key(for: identifier, domainPrefix: domainPrefix)
-        Task {
+        let task = Task {
             do {
-                let resp = try await IPC.share(key: key)
-                guard let url = resp.url else { throw IPC.IPCError.badResponse }
-                let pasteboard = NSPasteboard.general
-                pasteboard.clearContents()
-                pasteboard.setString(url, forType: .string)
+                let url = try await client.share(ref: ItemID.wire(identifier))
+                NSPasteboard.general.clearContents()
+                NSPasteboard.general.setString(url, forType: .string)
                 completionHandler(nil)
             } catch {
                 log.error("copyShareURL failed: \(error, privacy: .public)")
-                completionHandler(IPC.fileProviderError(error))
+                completionHandler(FileProviderError.from(error, item: identifier))
             }
             progress.completedUnitCount = 1
         }
+        progress.cancellationHandler = { task.cancel() }
         return progress
     }
 }

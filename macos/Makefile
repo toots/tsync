@@ -26,3 +26,12 @@ deploy install:
 clean:
 	xcodebuild -project $(PROJ) -scheme TsyncApp clean
 	rm -rf dist
+
+# End-to-end check against a real File Provider replica. Stages its own domain
+# (store daemon, config entry, second client) and takes it down again, so it
+# needs the app installed but no manual setup. Not part of `dune test`: it
+# restarts the app and registers a domain.
+e2e:
+	cd .. && dune build tests/e2e/macos/e2e_macos.exe && ./_build/default/tests/e2e/macos/e2e_macos.exe
+
+.PHONY: e2e

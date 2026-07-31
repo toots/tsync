@@ -69,6 +69,20 @@ let changes_scenarios : scenario list =
           Drain;
         ];
     };
+    (* A removed folder is gone from the mirror by the time anyone reads the
+       feed, so its id has to be in the entry or the folder cannot be named at
+       all to a reader that knows it by id. Same for a folder rename, where the
+       id is also what says the two paths are one folder rather than a
+       disappearance and an unrelated arrival. *)
+    {
+      name = "foreign rmdir carries the folder id";
+      steps = [Mkdir "gone"; Drain; Rmdir "gone"; Drain];
+    };
+    {
+      name = "foreign dir rename carries the folder id";
+      steps =
+        [Mkdir "before"; Drain; Rename { src = "before"; dst = "after" }; Drain];
+    };
   ]
 
 (* The daemon reporting on itself: what [tsync stats] renders and what the

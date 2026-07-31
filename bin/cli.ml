@@ -118,7 +118,26 @@ let chunk_keys data =
    write side. A domain with only mains gets the inner layer and nothing else,
    and one with only read-only stores gets an inner layer with nothing writable
    in it — which is what makes such a domain readable but not writable. *)
-let build_backends (d : Conf_parsing.domain) : (module Backend.S) list =
+(* What a domain's configuration resolves to: the composite every read and write
+   goes through, and — separately — the individual stores a share link may be
+   served from. The two differ because a share manifest lives outside every
+   domain root, so publishing one is not a domain write and must not be refused
+   by a composite that has nothing writable in it. *)
+type resolved_backends = {
+  backends : (module Backend.S) list;
+  share_backends : (module Backend.S) list;
+}
+
+(* Role order is already settled by {!Conf_parsing.order_backends}; a backfill
+   target is behind by construction, so a link served from one could point at
+   something it has not caught up with. *)
+let share_leaves leaves =
+  List.filter_map
+    (fun ((bc : Conf_parsing.backend_config), backend) ->
+      if bc.role = `Backfill then None else Some backend)
+    leaves
+
+let build_backends (d : Conf_parsing.domain) : resolved_backends =
   (* One instance per configured backend, made here and shared by every layer
      below — a second [make_backend] for the same config would be a second client
      against the same store. *)
@@ -195,7 +214,7 @@ let build_backends (d : Conf_parsing.domain) : (module Backend.S) list =
               else None);
          })
        leaves);
-  [composite]
+  { backends = [composite]; share_backends = share_leaves leaves }
 
 (* Ordered backends with the one named [source] moved to the head, so it serves
    reads (the primary). Fails if no backend has that name. *)
@@ -252,17 +271,25 @@ let make_conf ?domain ?socket_path ?(tier = true) ?source cfg : (module Conf.S)
     let cursor_key = Conf_parsing.cursor_key d
     let shares_prefix = Conf_parsing.shares_prefix d
 
-    let backends =
+    (* Made once and shared: a second [make_backend] for the same config would be
+       a second client against the same store. *)
+    let resolved =
+      let flat ordered =
+        let leaves =
+          List.map
+            (fun (bc : Conf_parsing.backend_config) -> (bc, make_backend bc))
+            ordered
+        in
+        { backends = List.map snd leaves; share_backends = share_leaves leaves }
+      in
       match source with
-        | Some name ->
-            List.map make_backend
-              (order_backends_from name d.Conf_parsing.backends)
+        | Some name -> flat (order_backends_from name d.Conf_parsing.backends)
         | None ->
             if tier then build_backends d
-            else
-              List.map make_backend
-                (Conf_parsing.order_backends d.Conf_parsing.backends)
+            else flat (Conf_parsing.order_backends d.Conf_parsing.backends)
 
+    let backends = resolved.backends
+    let share_backends = resolved.share_backends
     let cache_root = runtime_paths.Runtime.cache_root
     let data_dir = runtime_paths.Runtime.data_dir
     let socket_path = socket_path
@@ -273,10 +300,6 @@ let make_conf ?domain ?socket_path ?(tier = true) ?source cfg : (module Conf.S)
     let max_cache = d.Conf_parsing.max_cache
     let symlink_policy = d.Conf_parsing.symlink_policy
     let read_only = d.Conf_parsing.read_only
-
-    let notify_path =
-      Filename.concat runtime_paths.Runtime.data_dir
-        ("notify-" ^ d.Conf_parsing.name ^ ".sock")
   end : Conf.S)
 
 (* ── Command scaffolding ─────────────────────────────────────────────────────
@@ -302,12 +325,19 @@ let load_config () = Conf_parsing.load runtime_paths.Runtime.config_path
    nothing has listened on since domains got their own — which is why a
    multi-domain host used to be told "daemon not running" by a daemon that was
    running perfectly well. *)
-let domain_socket ?domain () =
+(* Which domain a command is talking to, and where to reach it. Both are needed
+   together: macOS serves every domain on one socket, so the request has to name
+   the one it means — a daemon cannot guess, and guessing wrong would answer for
+   the wrong store. *)
+let domain_target ?domain () =
   let domain =
     match domain with Some _ -> domain | None -> read_default_domain ()
   in
   let d = Conf_parsing.pick_domain ?domain (load_config ()) in
-  Runtime.domain_socket_path runtime_paths d.Conf_parsing.name
+  let name = d.Conf_parsing.name in
+  (name, Runtime.domain_socket_path runtime_paths name)
+
+let domain_socket ?domain () = snd (domain_target ?domain ())
 
 let load_conf ?domain ?tier ?source () =
   make_conf ?domain ?tier ?source (load_config ())

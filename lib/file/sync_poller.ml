@@ -9,7 +9,7 @@ module Make (C : Conf.S) (F : File.S) = struct
 
   let op_key op =
     match op with
-      | `Put (rel, _) | `Delete rel | `Mkdir rel | `Rmdir rel ->
+      | `Put (rel, _) | `Delete rel | `Mkdir (rel, _) | `Rmdir (rel, _) ->
           C.domain_prefix ^ rel
       | `Rename { Journal.dst; _ } -> C.domain_prefix ^ dst
 

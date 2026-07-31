@@ -48,10 +48,34 @@ targets:
         ENABLE_HARDENED_RUNTIME: YES
         ENABLE_PREVIEWS: NO
 
+  # Logic the two targets share, checked on its own. The identifier scheme and
+  # the error mapping are both contracts with the daemon that nothing else
+  # notices breaking: an identifier that round-trips wrong renames every item,
+  # and an error mapped to the wrong domain silently stops the system retrying.
+  TsyncTests:
+    type: bundle.unit-test
+    platform: macOS
+    deploymentTarget: "13.0"
+    sources:
+      - path: Shared
+      - path: TsyncTests
+      # The item model belongs with the extension, but building one out of what
+      # the daemon actually said is part of what these tests check.
+      - path: TsyncFileProvider/Item.swift
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: org.feverdreamtv.tsync.tests
+        GENERATE_INFOPLIST_FILE: YES
+
 schemes:
   TsyncApp:
     build:
       targets:
         TsyncApp: all
+        TsyncTests: [test]
     run:
       config: Debug
+    test:
+      config: Debug
+      targets:
+        - TsyncTests

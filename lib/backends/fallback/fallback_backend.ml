@@ -29,10 +29,7 @@ let make ~(writable : sub list) ~(fallbacks : sub list) : (module Backend.S) =
      list would report success, so say so instead: a write that lands nowhere
      must not look like a write that landed. *)
   let write f =
-    if inners = [] then
-      Lwt.fail
-        (Backend.Backend_error
-           "no writable backend: every backend in this domain is \"readOnly\"")
+    if inners = [] then Lwt.fail Backend.Not_writable
     else Lwt_list.iter_s f inners
   in
   (* Walk [chain] for an answer. [stop_on_miss] returns the first reachable

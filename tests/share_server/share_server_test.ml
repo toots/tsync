@@ -28,10 +28,10 @@ module C : Conf.S = struct
   let cursor_key = "tsync/testdom/cursor"
   let shares_prefix = "tsync/shares/"
   let backends = [Local_backend.make ~root:store_dir]
+  let share_backends = backends
   let cache_root = cache_dir
   let data_dir = data_dir
   let socket_path = ""
-  let notify_path = ""
   let max_uploads = 1
   let max_downloads = 1
 

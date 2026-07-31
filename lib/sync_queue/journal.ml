@@ -3,14 +3,21 @@ type rename_op = {
   src : string;
   size : int64 option;
   is_dir : bool;
+  id : string option;  (** The folder's id, when [is_dir]. See {!op}. *)
 }
 
+(* Directory ops carry the folder's stable id alongside its path. A peer applies
+   the op before anything asks it about the folder, and applying a removal
+   destroys the local marker the id would have been read from — so an id that is
+   not recorded here cannot be recovered afterwards, and the folder cannot be
+   named to anything that knows it by id. [None] for entries written before this
+   was carried, and for a client that has no id for the folder. *)
 type op =
   [ `Delete of string
-  | `Mkdir of string
+  | `Mkdir of string * string option
   | `Put of string * int64
   | `Rename of rename_op
-  | `Rmdir of string ]
+  | `Rmdir of string * string option ]
 
 (* ponytail: the client uuid is stable for the process lifetime, so it is read
    (or generated) once and memoized. Keeping it synchronous avoids threading Lwt
@@ -77,6 +84,10 @@ let relative_path entry_key =
   Printf.sprintf "%04d-%02d/%s" (tm.Unix.tm_year + 1900) (tm.Unix.tm_mon + 1)
     entry_key
 
+(* Omitted rather than written as null, so an older client reading a newer
+   entry sees exactly what it saw before. *)
+let dir_id_field = function None -> [] | Some id -> [("id", `String id)]
+
 let encode ops =
   let encode_one = function
     | `Put (key, size) ->
@@ -87,9 +98,13 @@ let encode ops =
             ("size", `Int (Int64.to_int size));
           ]
     | `Delete key -> `Assoc [("op", `String "delete"); ("key", `String key)]
-    | `Mkdir key -> `Assoc [("op", `String "mkdir"); ("key", `String key)]
-    | `Rmdir key -> `Assoc [("op", `String "rmdir"); ("key", `String key)]
-    | `Rename { dst; src; size; is_dir } ->
+    | `Mkdir (key, id) ->
+        `Assoc
+          ([("op", `String "mkdir"); ("key", `String key)] @ dir_id_field id)
+    | `Rmdir (key, id) ->
+        `Assoc
+          ([("op", `String "rmdir"); ("key", `String key)] @ dir_id_field id)
+    | `Rename { dst; src; size; is_dir; id } ->
         let fields =
           [
             ("op", `String "rename");
@@ -97,6 +112,7 @@ let encode ops =
             ("src", `String src);
             ("is_dir", `Bool is_dir);
           ]
+          @ dir_id_field id
           @
             match size with
             | None -> []
@@ -118,12 +134,15 @@ let decode s =
           let open Yojson.Basic.Util in
           let j = Yojson.Basic.from_string line in
           let key = j |> member "key" |> to_string in
+          let dir_id =
+            match j |> member "id" with `String s -> Some s | _ -> None
+          in
           let op =
             match j |> member "op" |> to_string with
               | "put" -> `Put (key, j |> member "size" |> to_int |> Int64.of_int)
               | "delete" -> `Delete key
-              | "mkdir" -> `Mkdir key
-              | "rmdir" -> `Rmdir key
+              | "mkdir" -> `Mkdir (key, dir_id)
+              | "rmdir" -> `Rmdir (key, dir_id)
               | "rename" ->
                   let src = j |> member "src" |> to_string in
                   let size =
@@ -134,7 +153,7 @@ let decode s =
                   let is_dir =
                     match j |> member "is_dir" with `Bool b -> b | _ -> false
                   in
-                  `Rename { dst = key; src; size; is_dir }
+                  `Rename { dst = key; src; size; is_dir; id = dir_id }
               | s -> failwith ("unknown op: " ^ s)
           in
           Some op

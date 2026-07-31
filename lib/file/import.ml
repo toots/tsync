@@ -217,17 +217,24 @@ module Make (C : Conf.S) = struct
     (* Under the inode layout every folder needs its own marker (files no longer
        encode their path), so write one for every directory. [dirs] is sorted, so
        parents precede children and id resolution finds them. *)
-    let* () =
-      Lwt_list.iter_s
+    let* dir_ids =
+      Lwt_list.map_s
         (fun rel ->
           let key = C.domain_prefix ^ rel ^ "/" in
           let* () = Mf.create_dir key in
           let* () = St.put_folder_marker ~key in
-          Lwt.return (on_dir ~rel))
+          (* Already minted by the marker above; read back so the journal entry
+             carries the same id a peer will resolve the folder by. *)
+          let* id =
+            Folder_ids.ensure_id ~cache_root:C.cache_root
+              ~domain_name:C.domain_name rel
+          in
+          on_dir ~rel;
+          Lwt.return (rel, id))
         dirs
     in
     let ops =
-      List.map (fun d -> `Mkdir (d ^ "/")) dirs
+      List.map (fun (d, id) -> `Mkdir (d ^ "/", Some id)) dir_ids
       @ List.filter_map
           (function
             | rel, Imported size -> Some (`Put (rel, size))
