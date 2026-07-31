@@ -1,152 +1,153 @@
 package org.feverdreamtv.tsync
 
 import android.app.Activity
+import android.content.Intent
 import android.graphics.Typeface
 import android.os.Bundle
+import android.text.InputType
+import android.view.ViewGroup.LayoutParams.MATCH_PARENT
+import android.view.ViewGroup.LayoutParams.WRAP_CONTENT
 import android.widget.Button
+import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
-import org.json.JSONObject
-import java.io.File
+import android.widget.Toast
 import kotlin.concurrent.thread
 
 /**
- * Milestone 1: prove the daemon runs from nativeLibraryDir and can bind its IPC
- * socket in the app sandbox. That last part is the one thing adb shell cannot
- * test — /data/local/tmp is shell_data_file and the shell domain is denied
- * bind, so every IPC feature is unproven until this screen says otherwise.
- *
- * ponytail: local backend and a plain TextView. Swap in http-proxy and a real
- * status screen once the socket is known to work.
+ * Two states, not two screens: setup when there is no config, status once there
+ * is. Everything shown on the status screen is `tsync stats` verbatim, so it
+ * cannot drift from what the desktop reports.
  */
 class MainActivity : Activity() {
-    private val domain = "test"
-    private lateinit var output: TextView
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        if (Config.exists(this)) showStatus() else showSetup()
+    }
 
-        output = TextView(this).apply {
-            typeface = Typeface.MONOSPACE
-            textSize = 11f
-            setPadding(24, 24, 24, 24)
+    // ── Setup ────────────────────────────────────────────────────────────────
+
+    private fun showSetup() {
+        val existing = Config.load(this)
+        val domain = field("Domain name", existing?.domain ?: "media")
+        val url = field("Server URL", existing?.url ?: "http://192.168.1.10:8443")
+        val secret = field("Shared secret", existing?.secret ?: "", secret = true)
+        val cache = field("Cache limit", existing?.maxCache ?: "2G")
+        val error = TextView(this).apply { setPadding(0, 8, 0, 8) }
+
+        val save = Button(this).apply {
+            text = "Save and start"
+            setOnClickListener {
+                val settings = Config.Settings(
+                    domain.text.toString().trim(),
+                    url.text.toString().trim(),
+                    secret.text.toString().trim(),
+                    cache.text.toString().trim().ifBlank { "2G" }
+                )
+                Config.validate(settings)?.let { error.text = it; return@setOnClickListener }
+
+                Config.save(this@MainActivity, settings)
+                // The daemon is the authority on whether its own config parses;
+                // anything else here would be a second implementation that drifts.
+                val (code, output) = DaemonService.run(this@MainActivity, "print-config")
+                if (code != 0) {
+                    error.text = "tsync rejected the config:\n$output"
+                    return@setOnClickListener
+                }
+                startForegroundService(Intent(this@MainActivity, DaemonService::class.java))
+                showStatus()
+            }
         }
 
-        setContentView(LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            addView(button("Run checks") { thread { runChecks() } })
-            addView(button("Stop daemon") {
-                stopService(android.content.Intent(this@MainActivity, DaemonService::class.java))
-                log("stopped")
+        setContentView(ScrollView(this).apply {
+            addView(column {
+                addView(heading("Connect to your tsync server"))
+                addView(label("Domain name"));   addView(domain)
+                addView(label("Server URL"));    addView(url)
+                addView(label("Shared secret")); addView(secret)
+                addView(label("Cache limit"));   addView(cache)
+                addView(error)
+                addView(save)
+            })
+        })
+    }
+
+    // ── Status ───────────────────────────────────────────────────────────────
+
+    private fun showStatus() {
+        val output = TextView(this).apply {
+            typeface = Typeface.MONOSPACE
+            textSize = 10f
+        }
+
+        fun refresh() = thread {
+            val (_, text) = DaemonService.run(this, "stats")
+            runOnUiThread { output.text = text.ifBlank { "no response — is the daemon running?" } }
+        }
+
+        setContentView(column {
+            addView(row {
+                addView(Button(this@MainActivity).apply {
+                    text = "Refresh"; setOnClickListener { refresh() }
+                })
+                addView(Button(this@MainActivity).apply {
+                    text = "Sync"
+                    setOnClickListener {
+                        thread {
+                            val (_, out) = DaemonService.run(this@MainActivity, "sync", "--full")
+                            runOnUiThread {
+                                Toast.makeText(this@MainActivity, out.trim().takeLast(120), Toast.LENGTH_LONG).show()
+                                refresh()
+                            }
+                        }
+                    }
+                })
+                addView(Button(this@MainActivity).apply {
+                    text = "Settings"; setOnClickListener { showSetup() }
+                })
             })
             addView(ScrollView(this@MainActivity).apply { addView(output) })
         })
 
-        thread { runChecks() }
+        // Idempotent: the service only spawns a daemon if it has none.
+        startForegroundService(Intent(this, DaemonService::class.java))
+        refresh()
     }
 
-    private fun button(label: String, onClick: () -> Unit) =
-        Button(this).apply { text = label; setOnClickListener { onClick() } }
+    // ── Plumbing ─────────────────────────────────────────────────────────────
 
-    private fun log(line: String) = runOnUiThread { output.append(line + "\n") }
+    private fun column(build: LinearLayout.() -> Unit) = LinearLayout(this).apply {
+        orientation = LinearLayout.VERTICAL
+        setPadding(32, 32, 32, 32)
+        build()
+    }
 
-    private fun runChecks() {
-        runOnUiThread { output.text = "" }
+    private fun row(build: LinearLayout.() -> Unit) = LinearLayout(this).apply {
+        orientation = LinearLayout.HORIZONTAL
+        build()
+    }
 
-        val binary = DaemonService.binary(this)
-        log("binary: ${binary.absolutePath}")
-        log("  exists=${binary.exists()} executable=${binary.canExecute()}")
-        if (!binary.canExecute()) {
-            log("FAIL: not executable — check extractNativeLibs / useLegacyPackaging")
-            return
+    private fun heading(text: String) = TextView(this).apply {
+        this.text = text
+        textSize = 20f
+        setPadding(0, 0, 0, 24)
+    }
+
+    private fun label(text: String) = TextView(this).apply {
+        this.text = text
+        setPadding(0, 16, 0, 0)
+    }
+
+    private fun field(hint: String, value: String, secret: Boolean = false) =
+        EditText(this).apply {
+            this.hint = hint
+            setText(value)
+            setSingleLine()
+            layoutParams = LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT)
+            if (secret) {
+                inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD
+            }
         }
-
-        writeConfig()
-
-        val (code, out) = DaemonService.run(this, "print-config")
-        log("\n\$ tsync print-config (exit $code)\n$out")
-        if (code != 0) return
-
-        startForegroundService(android.content.Intent(this, DaemonService::class.java))
-
-        val socket = Ipc.socketPath(filesDir, domain)
-        log("waiting for socket: ${socket.absolutePath}")
-        val appeared = (1..40).any { Thread.sleep(250); socket.exists() }
-        if (!appeared) {
-            log("\nFAIL: socket never appeared — see `adb logcat -s tsyncd`")
-            return
-        }
-        log("socket bound ✓  <- the thing adb shell could not do\n")
-
-        probe("status")
-        probe("stats")
-        seedIfEmpty()
-
-        log("Now open Files and look for \"tsync\" under the ☰ menu.")
-    }
-
-    /** Something to browse in the picker. Uses the CLI importer rather than the
-     *  IPC write path so the two are exercised independently. */
-    private fun seedIfEmpty() {
-        val listing = runCatching {
-            Ipc.send(Ipc.socketPath(filesDir, domain), "list_dir",
-                mapOf("path" to "tsync/$domain/manifests/"))
-        }.getOrNull() ?: return
-        val empty = (listing.optJSONArray("files")?.length() ?: 0) == 0 &&
-            (listing.optJSONArray("dirs")?.length() ?: 0) == 0
-        if (!empty) {
-            log("domain already has content\n")
-            return
-        }
-
-        val seed = File(filesDir, "seed").apply { mkdirs() }
-        File(seed, "hello.txt").writeText("hello from a Pixel 9a\n")
-        File(seed, "notes.md").writeText("# tsync on Android\n\nBrowsed through SAF.\n")
-        File(seed, "nested").mkdirs()
-        File(seed, "nested/deep.txt").writeText("a file one level down\n")
-
-        val (code, out) = DaemonService.run(this, "import", seed.absolutePath)
-        log("\$ tsync import (exit $code)\n$out")
-        seed.deleteRecursively()
-
-        contentResolver.notifyChange(
-            android.provider.DocumentsContract.buildRootsUri("org.feverdreamtv.tsync.documents"),
-            null
-        )
-    }
-
-    private fun probe(action: String) {
-        runCatching { Ipc.send(Ipc.socketPath(filesDir, domain), action) }
-            .onSuccess { log("$action -> ${summarise(action, it)}\n") }
-            .onFailure { log("$action -> FAILED: ${it.message}\n") }
-    }
-
-    private fun summarise(action: String, response: JSONObject): String = when (action) {
-        "stats" -> response.optJSONObject("server")?.let {
-            "frontend=${it.opt("frontend")} pid=${it.opt("pid")} uptime=${it.opt("uptimeSeconds")}s"
-        } ?: response.toString()
-        else -> response.toString()
-    }
-
-    /** A local backend keeps this milestone offline; only the socket is under test. */
-    private fun writeConfig() {
-        val store = File(filesDir, "store").apply { mkdirs() }
-        val config = File(filesDir, ".config/tsync/config.json")
-        config.parentFile?.mkdirs()
-        config.writeText(
-            """
-            { "name": "android",
-              "domains": [{
-                "name": "$domain",
-                "versioning": true,
-                "symlinks": "skip",
-                "frontends": ["headless"],
-                "backends": [{ "type": "local", "name": "disk", "role": "main",
-                               "path": "${store.absolutePath}" }]
-              }] }
-            """.trimIndent()
-        )
-        log("config: ${config.absolutePath}")
-    }
 }

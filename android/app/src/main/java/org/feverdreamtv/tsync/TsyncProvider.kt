@@ -24,8 +24,10 @@ import java.util.UUID
  */
 class TsyncProvider : DocumentsProvider() {
 
-    private val domain = "test"
-    private val rootId = domain
+    /** Read per call rather than cached: the provider outlives a trip through
+     *  the settings screen, and a stale domain would point at a dead socket. */
+    private val domain: String
+        get() = Config.load(context!!)?.domain ?: "media"
 
     /** tsync/<domain>/manifests/ — see Conf.domain_prefix. */
     private val rootDocumentId get() = "tsync/$domain/manifests/"
@@ -54,7 +56,7 @@ class TsyncProvider : DocumentsProvider() {
         // Published even when the daemon is down: a root that disappears takes
         // the app out of every file picker and leaves no way to diagnose it.
         cursor.newRow()
-            .add(Root.COLUMN_ROOT_ID, rootId)
+            .add(Root.COLUMN_ROOT_ID, domain)
             .add(Root.COLUMN_DOCUMENT_ID, rootDocumentId)
             .add(Root.COLUMN_TITLE, "tsync")
             .add(Root.COLUMN_SUMMARY, domain)
