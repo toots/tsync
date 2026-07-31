@@ -428,7 +428,8 @@ module Make (C : Conf.S) = struct
                E.start
                  ~on_cursor:(fun ~entry_key -> set_pending_cursor entry_key)
                  ~on_upload_done:(fun ~key ->
-                   Ipc.notify_uploaded ~path:C.notify_path key;
+                   (* A hint for whoever is listening, if anyone is. *)
+                   ignore (Ipc.notify_uploaded ~path:C.notify_path key);
                    Lwt.return_unit)
                  ()
              in
