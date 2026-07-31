@@ -1,5 +1,32 @@
 external is_dataless : string -> bool = "caml_is_dataless"
 
+(* ── The domain's CloudStorage folder ──────────────────────────────────────
+   fileproviderd names it "<app name>-<domain displayName>" after dropping the
+   characters it will not put in a path: displayName "Jellyfin Media" becomes
+   "TsyncApp-JellyfinMedia". Rather than reproduce a rule Apple does not
+   document, compare on letters and digits alone, which survives whatever else
+   it strips or leaves cased. *)
+
+let alnum s =
+  String.to_seq (String.lowercase_ascii s)
+  |> Seq.filter (fun c -> (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9'))
+  |> String.of_seq
+
+let cloud_storage_root () =
+  Filename.concat (Sys.getenv "HOME") "Library/CloudStorage"
+
+let is_domain_dir ~domain_name dir = alnum dir = alnum ("TsyncApp" ^ domain_name)
+
+(* [None] until the domain is registered and fileproviderd has created its
+   folder, which is also what tells a caller there is nothing local to look at. *)
+let domain_dir ~domain_name =
+  let root = cloud_storage_root () in
+  match Sys.readdir root with
+    | exception _ -> None
+    | dirs ->
+        Array.find_opt (is_domain_dir ~domain_name) dirs
+        |> Option.map (Filename.concat root)
+
 module Make (C : Conf.S) = struct
   module E = Domain_engine.Make (C)
   module Sq = E.Sq
@@ -24,23 +51,12 @@ module Make (C : Conf.S) = struct
          else rest))
     else None
 
-  (* The CloudStorage folder fileproviderd creates for a domain is named
-     "<app>-<domain displayName>", and the displayName is the domain name.
-     ponytail: substring match; tighten if one domain name ever contains
-     another's. *)
-  let dir_is_own_domain dir =
-    let dn = String.length C.domain_name and n = String.length dir in
-    let rec search i =
-      i + dn <= n && (String.sub dir i dn = C.domain_name || search (i + 1))
-    in
-    search 0
+  let dir_is_own_domain = is_domain_dir ~domain_name:C.domain_name
 
   (* Strip a "~/Library/CloudStorage/<folder>/" prefix from [path];
      [own_only] restricts the match to this domain's folder. *)
   let strip_cloud_storage ~own_only path =
-    let cloud_root =
-      Filename.concat (Sys.getenv "HOME") "Library/CloudStorage"
-    in
+    let cloud_root = cloud_storage_root () in
     let found = ref None in
     (try
        Array.iter

@@ -1,15 +1,11 @@
 let implementation = "file_provider"
 
 let is_local ({ Conf.domain_name; domain_prefix; _ } : Conf.locality) key =
-  let rel = Key.strip_prefix ~domain_prefix key in
-  let normalized =
-    String.concat "-"
-      (String.split_on_char ' ' (String.lowercase_ascii domain_name))
-  in
-  let cloud_root = Filename.concat (Sys.getenv "HOME") "Library/CloudStorage" in
-  let domain_dir = Filename.concat cloud_root ("TsyncApp-" ^ normalized) in
-  let p = Filename.concat domain_dir rel in
-  Sys.file_exists p && not (File_provider.is_dataless p)
+  match File_provider.domain_dir ~domain_name with
+    | None -> false
+    | Some dir ->
+        let p = Filename.concat dir (Key.strip_prefix ~domain_prefix key) in
+        Sys.file_exists p && not (File_provider.is_dataless p)
 
 (* All domains share one IPC socket; the daemon routes by domain prefix. *)
 let start bindings =
