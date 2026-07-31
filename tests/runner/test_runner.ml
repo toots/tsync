@@ -44,6 +44,9 @@ type step =
       (** Print the whole chunk store's size: [chunks=n bytes=b]. *)
   | ShowNames of string
       (** Print the raw entry names FUSE readdir serves for a directory. *)
+  | Stat of string
+      (** Query a path through the IPC [stat] action. A query must leave nothing
+          behind: an absent path answers "not found" and stays absent. *)
   | Mark  (** record the current time, as an [Expire "mark"] cutoff *)
   | Expire of string
       (** cutoff selector: "all" (now), "none" (epoch), or "mark" *)
@@ -133,6 +136,7 @@ let rec render_step = function
   | ShowChunks p -> "chunks " ^ p
   | ShowChunkCache -> "chunk-cache"
   | ShowNames p -> "names " ^ if p = "" then "/" else p
+  | Stat p -> "stat " ^ p
   | Mark -> "mark"
   | Expire s -> "expire " ^ s
   | Drain -> "drain"
@@ -347,9 +351,11 @@ let setup_client (module C : Conf.S) root staging_prefix =
     | CorruptRemoteChunk { path; index } ->
         let* ck = remote_chunk_key path index in
         B.put ~key:ck ~data:"garbage" ()
-    | DeleteRemoteManifest p ->
+    | DeleteRemoteManifest p -> (
         let* bk = L.manifest_key (key p) in
-        B.delete ~key:bk ()
+        match bk with
+          | None -> failwith ("no backend key for " ^ p)
+          | Some bk -> B.delete ~key:bk ())
     | s -> failwith ("not a backend-damage step: " ^ render_step s)
   in
   let mkdir_p d =
@@ -420,6 +426,12 @@ let setup_client (module C : Conf.S) root staging_prefix =
         let* (_ : int) = F.write (key path) buf ~offset:(Int64.of_int offset) in
         Lwt.return_unit
     | Truncate { path; size } -> F.truncate (key path) (Int64.of_int size)
+    | Stat p ->
+        let+ obj = action "stat" (key p) in
+        if response_ok obj then
+          Printf.printf "  stat %s: %s\n" p
+            (Yojson.Safe.to_string (`Assoc (List.remove_assoc "mtime" obj)))
+        else Printf.printf "  stat %s: %s\n" p (response_error obj)
     | ShowNames p ->
         (* The entry names a readdir serves for this directory. *)
         let prefix = if p = "" then C.domain_prefix else key p ^ "/" in

@@ -58,7 +58,7 @@ let () =
   Lwt_main.run
     (let open Lwt.Syntax in
      (* ── File: put a (non-marker) manifest, share it ─────────────────────── *)
-     let* file_key = L.manifest_key (C.domain_prefix ^ "foo") in
+     let* file_key = L.ensure_manifest_key (C.domain_prefix ^ "foo") in
      let* () = B.put ~key:file_key ~data:"{\"chunks\":[]}" () in
      let* url = S.create ~token:"aa" ~expires:123 ~rel:"foo" () in
      let url = match url with Ok u -> u | Error e -> failwith e in

@@ -46,6 +46,10 @@ type step =
   | ShowChunkCache
       (** Print the whole chunk store's footprint: [chunks=n bytes=b]. *)
   | ShowNames of string
+  | Stat of string
+      (** Query a path through the IPC [stat] action and print what it answers.
+          A query must not change anything: a stat of something absent says so
+          and leaves no trace, rather than bringing the path into existence. *)
       (** Print the entry names a readdir serves for a directory ([""] for the
           domain root), subdirectories with a trailing slash. A file with only
           staged edits must appear; internal markers must not. *)

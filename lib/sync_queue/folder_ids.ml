@@ -35,8 +35,20 @@ let write ~cache_root ~domain_name rel (m : Folder.marker) =
   let path = Filename.concat dir marker_name in
   Fs_util.atomic_write path (Folder.marker_to_string m)
 
+(* Folder id of [rel] as already recorded, without minting one: [None] when this
+   client has no marker for it. What a read must use — a minted id is a fresh
+   random one, so it names a namespace the backend has never heard of and the
+   read misses anyway, while the marker it persists on the way re-creates the
+   local directory. That is how a deleted folder comes back from a stat. *)
+let lookup_id ~cache_root ~domain_name rel =
+  if rel = "" then Lwt.return_some Folder.root_id
+  else
+    let+ existing = read ~cache_root ~domain_name rel in
+    Option.map (fun m -> m.Folder.id) existing
+
 (* Folder id of [rel] — the root when empty; minted and persisted when a folder
-   has no marker yet. *)
+   has no marker yet. For the write paths, which are entitled to bring a folder
+   into existence. *)
 let ensure_id ~cache_root ~domain_name rel =
   if rel = "" then Lwt.return Folder.root_id
   else

@@ -161,6 +161,31 @@
   journal <entry-2> = rmdir sub/
   trash sub -> 547c2ad623ddba3f
 
+=== stat_absent_creates_nothing
+  stat no-such-file.txt
+  names /
+  stat no-such-dir/
+  names /
+  mkdir sub
+  drain
+  rmdir sub
+  drain
+  stat sub/
+  names /
+  stat no-such-file.txt: not found
+  names / = []
+  stat no-such-dir/: not found
+  names / = []
+  stat sub/: not found
+  names / = []
+--- tree
+--- content
+--- backend
+  cursor = <entry-2>
+  journal <entry-1> = mkdir sub/
+  journal <entry-2> = rmdir sub/
+  trash sub -> 547c2ad623ddba3f
+
 === rename_dir
   mkdir d
   drain

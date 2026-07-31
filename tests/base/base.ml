@@ -103,6 +103,28 @@ let scenarios : scenario list =
     };
     { name = "rmdir"; steps = [Mkdir "sub"; Drain; Rmdir "sub"; Drain] };
     {
+      (* A query answers about what is there and changes nothing. Resolving a
+         path used to mint a folder id for anything it could not find, and the
+         marker it persisted brought the directory into being — so a stat of a
+         deleted folder put it back, and the next listing showed it. Whoever is
+         asking, a miss must stay a miss: [names] after each stat must be
+         empty. *)
+      name = "stat_absent_creates_nothing";
+      steps =
+        [
+          Stat "no-such-file.txt";
+          ShowNames "";
+          Stat "no-such-dir/";
+          ShowNames "";
+          Mkdir "sub";
+          Drain;
+          Rmdir "sub";
+          Drain;
+          Stat "sub/";
+          ShowNames "";
+        ];
+    };
+    {
       (* Renaming a non-empty folder is O(1): the file's backend key is under the
          folder's stable id, so it doesn't move — only the folder marker does. *)
       name = "rename_dir";

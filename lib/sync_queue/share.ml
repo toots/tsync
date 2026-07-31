@@ -39,12 +39,16 @@ module Make (C : Conf.S) = struct
           (* A file manifest and a folder marker occupy the same key within a
              parent namespace, so classify by the body — otherwise a folder
              would be shared as a (chunkless) file and the Lambda would choke. *)
+          (* Sharing reads: an unresolvable key is one nothing has been recorded
+             under, which is the same answer as an absent object. *)
           let* obj =
-            if rel = "" then Lwt.return_none else B.get_opt ~key:file_key ()
+            match file_key with
+              | Some file_key when rel <> "" -> B.get_opt ~key:file_key ()
+              | _ -> Lwt.return_none
           in
           let marker = Option.bind obj Folder.marker_of_string in
-          match (obj, marker) with
-            | Some _, None ->
+          match (file_key, obj, marker) with
+            | Some file_key, Some _, None ->
                 (* Single file: the Lambda fetches the manifest by this key. *)
                 Lwt.return
                   (`Assoc

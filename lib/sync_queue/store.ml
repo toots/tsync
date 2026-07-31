@@ -11,35 +11,52 @@ module Make (C : Conf.S) (L : Layout.S) = struct
 
   let primary = Bk.primary
 
+  (* Publishing brings the folder into existence if this client has not recorded
+     it yet; every other operation resolves what is already there and treats an
+     unknown folder as an absent one. *)
   let put_manifest ~key ~data =
-    let* bk = L.manifest_key key in
+    let* bk = L.ensure_manifest_key key in
     Bk.put ~key:bk ~data
 
   let get_manifest ~key =
     let* bk = L.manifest_key key in
-    let (module B : Backend.S) = primary () in
-    B.get ~key:bk ()
+    match bk with
+      | None -> Lwt.fail Not_found
+      | Some bk ->
+          let (module B : Backend.S) = primary () in
+          B.get ~key:bk ()
 
   let get_manifest_opt ~key =
     let* bk = L.manifest_key key in
-    let (module B : Backend.S) = primary () in
-    B.get_opt ~key:bk ()
+    match bk with
+      | None -> Lwt.return_none
+      | Some bk ->
+          let (module B : Backend.S) = primary () in
+          B.get_opt ~key:bk ()
 
   let head_manifest ~key =
     let* bk = L.manifest_key key in
-    let (module B : Backend.S) = primary () in
-    B.head_opt ~key:bk ()
+    match bk with
+      | None -> Lwt.return_none
+      | Some bk ->
+          let (module B : Backend.S) = primary () in
+          B.head_opt ~key:bk ()
 
   let delete_manifest ~key =
     let* bk = L.manifest_key key in
-    Bk.delete ~key:bk
+    match bk with None -> Lwt.return_unit | Some bk -> Bk.delete ~key:bk
 
+  (* The destination is being written, so it may be brought into existence; the
+     source has to already be there or there is nothing to move. *)
   let copy_manifest ~src_key ~dst_key =
     let* src = L.manifest_key src_key in
-    let* dst = L.manifest_key dst_key in
-    Bk.all (fun (module B : Backend.S) ->
-        let* () = B.copy ~src_key:src ~dst_key:dst () in
-        B.delete ~key:src ())
+    match src with
+      | None -> Lwt.return_unit
+      | Some src ->
+          let* dst = L.ensure_manifest_key dst_key in
+          Bk.all (fun (module B : Backend.S) ->
+              let* () = B.copy ~src_key:src ~dst_key:dst () in
+              B.delete ~key:src ())
 
   (* Versions mirror the manifest key under the [versions/] prefix: a file's
      versions live at [<versions>/<manifest-key-tail>/<ts>], so they share the
@@ -47,25 +64,39 @@ module Make (C : Conf.S) (L : Layout.S) = struct
      a folder rename. *)
   let version_dir ~key =
     let+ bk = L.manifest_key key in
-    C.versions_prefix ^ Key.strip_prefix ~domain_prefix:C.domain_prefix bk ^ "/"
+    Option.map
+      (fun bk ->
+        C.versions_prefix
+        ^ Key.strip_prefix ~domain_prefix:C.domain_prefix bk
+        ^ "/")
+      bk
 
   (* Snapshot the current manifest object under a fresh timestamped version key,
      when it exists on the backend. *)
   let save_version ~key =
     let* bk = L.manifest_key key in
-    let (module Pri : Backend.S) = primary () in
-    let* head = Pri.head_opt ~key:bk () in
-    match head with
+    match bk with
       | None -> Lwt.return_unit
-      | Some _ ->
-          let ts = Int64.of_float (Unix.gettimeofday () *. 1e9) in
-          let* dir = version_dir ~key in
-          Bk.copy ~src_key:bk ~dst_key:(dir ^ Int64.to_string ts)
+      | Some bk -> (
+          let (module Pri : Backend.S) = primary () in
+          let* head = Pri.head_opt ~key:bk () in
+          match head with
+            | None -> Lwt.return_unit
+            | Some _ -> (
+                let ts = Int64.of_float (Unix.gettimeofday () *. 1e9) in
+                let* dir = version_dir ~key in
+                match dir with
+                  | None -> Lwt.return_unit
+                  | Some dir ->
+                      Bk.copy ~src_key:bk ~dst_key:(dir ^ Int64.to_string ts)))
 
   let list_versions ~key =
     let* dir = version_dir ~key in
-    let (module Pri : Backend.S) = primary () in
-    Pri.list_prefix ~prefix:dir ()
+    match dir with
+      | None -> Lwt.return_nil
+      | Some dir ->
+          let (module Pri : Backend.S) = primary () in
+          Pri.list_prefix ~prefix:dir ()
 
   let get_version ~vkey =
     let (module Pri : Backend.S) = primary () in
@@ -74,7 +105,7 @@ module Make (C : Conf.S) (L : Layout.S) = struct
   (* Folder markers (inode layout): record a directory under its parent's
      namespace so resync can rebuild the tree. No-op for layouts without one. *)
   let put_folder_marker ~key =
-    let* m = L.folder_marker key in
+    let* m = L.ensure_folder_marker key in
     match m with
       | None -> Lwt.return_unit
       | Some (bkey, data) -> Bk.put ~key:bkey ~data

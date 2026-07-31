@@ -437,7 +437,12 @@ let versions_cmd =
        match path with
          | Some rel ->
              let* dir = St.version_dir ~key:(C.domain_prefix ^ rel) in
-             let+ entries = B.list_prefix ~prefix:dir () in
+             (* No resolvable key means nothing was ever stored under it. *)
+             let+ entries =
+               match dir with
+                 | None -> Lwt.return_nil
+                 | Some dir -> B.list_prefix ~prefix:dir ()
+             in
              let versions =
                entries
                |> List.filter_map (fun (e : Backend.file_entry) ->

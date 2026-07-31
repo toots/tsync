@@ -368,9 +368,10 @@ struct
   (* Backend key of a directory's folder marker (under its parent's namespace).
      Used to move or remove a marker whose local dir has already moved or is
      gone, so the marker body [L] would build alongside it is not wanted. *)
-  let folder_marker_bkey key =
-    let+ bkey = L.folder_marker_key key in
-    Option.value bkey ~default:C.domain_prefix
+  (* [None] where there is no marker to name: the domain root, or a parent this
+     client never recorded. Callers skip rather than substitute a key — the old
+     default was the domain prefix, which is a real object name to delete. *)
+  let folder_marker_bkey = L.folder_marker_key
 
   let mkdir key =
     with_meta (fun () ->
@@ -386,7 +387,12 @@ struct
     with_meta (fun () ->
         let rel = Key.chop_slash (rel_key key) in
         let* old_marker = folder_marker_bkey key in
-        let* fid = L.folder_id key in
+        let* fid = L.ensure_folder_id key in
+        let delete_old_marker () =
+          match old_marker with
+            | None -> Lwt.return_unit
+            | Some bkey -> St.delete_raw ~bkey
+        in
         let trash_key =
           C.domain_prefix ^ Folder.trash_id ^ "/" ^ Folder.new_id ()
         in
@@ -399,7 +405,7 @@ struct
             [`Rmdir (rel_key key)]
             (fun () ->
               let* () = St.put_raw ~bkey:trash_key ~data:marker in
-              St.delete_raw ~bkey:old_marker)
+              delete_old_marker ())
         in
         Mf.delete_dir key)
 
@@ -481,7 +487,11 @@ struct
                    leaf, so it is moved and renamed. *)
                 if is_dir then
                   let* old_marker = folder_marker_bkey src in
-                  let* () = St.delete_raw ~bkey:old_marker in
+                  let* () =
+                    match old_marker with
+                      | None -> Lwt.return_unit
+                      | Some bkey -> St.delete_raw ~bkey
+                  in
                   let* () = Mf.refresh_dir_marker dst in
                   St.put_folder_marker ~key:dst
                 else Fs.rename_file ~src_key:src ~dst_key:dst)
@@ -540,9 +550,11 @@ struct
   let revert_body ?version key =
     let* src_key =
       match version with
-        | Some ts ->
-            let+ dir = St.version_dir ~key in
-            dir ^ ts
+        | Some ts -> (
+            let* dir = St.version_dir ~key in
+            match dir with
+              | Some dir -> Lwt.return (dir ^ ts)
+              | None -> failwith ("no versions for " ^ rel_key key))
         | None -> (
             let* entries = St.list_versions ~key in
             match latest_version entries with
@@ -599,16 +611,22 @@ struct
     if rel = "" then Lwt.return_unit
     else
       let* marker_key = folder_marker_bkey (C.domain_prefix ^ rel) in
-      Lwt.catch
-        (fun () ->
-          let* data = St.get_object ~bkey:marker_key in
-          match Folder.marker_of_string data with
-            | Some m ->
-                Folder_ids.write ~cache_root:C.cache_root
-                  ~domain_name:C.domain_name rel
-                  { Folder.name = Filename.basename rel; id = m.Folder.id }
-            | None -> Lwt.return_unit)
-        (fun _ -> Lwt.return_unit)
+      match marker_key with
+        | None -> Lwt.return_unit
+        | Some marker_key ->
+            Lwt.catch
+              (fun () ->
+                let* data = St.get_object ~bkey:marker_key in
+                match Folder.marker_of_string data with
+                  | Some m ->
+                      Folder_ids.write ~cache_root:C.cache_root
+                        ~domain_name:C.domain_name rel
+                        {
+                          Folder.name = Filename.basename rel;
+                          id = m.Folder.id;
+                        }
+                  | None -> Lwt.return_unit)
+              (fun _ -> Lwt.return_unit)
 
   (* A foreign op must never clobber unsynced local edits. The staged manifest is
      that flag, and unlike the open count it stood in for it survives a restart:
