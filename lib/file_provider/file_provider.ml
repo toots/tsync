@@ -9,7 +9,8 @@ external is_dataless : string -> bool = "caml_is_dataless"
 
 let alnum s =
   String.to_seq (String.lowercase_ascii s)
-  |> Seq.filter (fun c -> (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9'))
+  |> Seq.filter (fun c ->
+         (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9'))
   |> String.of_seq
 
 let cloud_storage_root () =
@@ -113,25 +114,45 @@ module Make (C : Conf.S) = struct
 
   (* ── IPC hooks ────────────────────────────────────────────────────────── *)
 
-  (* Eviction and restore are performed by the FileProvider extension; the
-     daemon just forwards the request over the notify socket. *)
+  (* Only the extension can move content in or out of the replica, and it binds
+     its notify socket while it runs and unlinks it on the way out — fileproviderd
+     stops it whenever the domain goes idle. So a request the user is waiting on
+     has to say it went nowhere rather than report an eviction that never
+     happened; browsing the domain in Finder is what starts the extension. *)
+  exception Extension_not_running
+
+  let () =
+    Printexc.register_printer (function
+      | Extension_not_running ->
+          Some
+            (Printf.sprintf
+               "the File Provider extension for '%s' is not running: open the \
+                domain's folder in Finder, then retry"
+               C.domain_name)
+      | _ -> None)
+
+  let require_delivery delivered =
+    if delivered then Lwt.return_unit else Lwt.fail Extension_not_running
+
   let hooks =
     H.
       {
         path_to_key;
         evict =
-          (fun key ->
-            Ipc.notify_evict ~path:C.notify_path key;
-            Lwt.return_unit);
+          (fun key -> require_delivery (Ipc.notify_evict ~path:C.notify_path key));
         restore =
           (fun key ->
-            Ipc.notify_restore ~path:C.notify_path key;
-            Lwt.return_unit);
-        changed = (fun key -> Ipc.notify_changed ~path:C.notify_path key);
+            require_delivery (Ipc.notify_restore ~path:C.notify_path key));
+        (* Hints, not requests: an undelivered one costs nothing because the next
+           enumeration carries the same news. [changed] only drops a materialised
+           copy early — the item's contentVersion already forces that on re-list —
+           and [full_resync]'s token is on disk before this is even attempted. *)
+        changed =
+          (fun key -> ignore (Ipc.notify_changed ~path:C.notify_path key));
         full_resync =
           (fun () ->
             stamp_resync_token ();
-            Ipc.notify_resync ~path:C.notify_path;
+            ignore (Ipc.notify_resync ~path:C.notify_path);
             Lwt.return_unit);
         status_fields = (fun () -> []);
         stats_fields =
@@ -150,9 +171,9 @@ module Make (C : Conf.S) = struct
         (* Nothing to drop: the extension keeps the file, and the daemon keeps
            only the chunks the upload promoted — subject to the cache cap like
            any other. *)
-        Ipc.notify_uploaded ~path:C.notify_path key;
+        ignore (Ipc.notify_uploaded ~path:C.notify_path key);
         Lwt.return_unit)
-      ~on_changed:(Ipc.notify_changed ~path:C.notify_path)
+      ~on_changed:(fun key -> ignore (Ipc.notify_changed ~path:C.notify_path key))
       ()
 
   let mount _mount_point =

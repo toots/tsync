@@ -6,11 +6,16 @@ val send : socket_path:string -> string -> string
     waited on. *)
 val send_lwt : ?timeout:float -> socket_path:string -> string -> string Lwt.t
 
-val notify_evict : path:string -> string -> unit
-val notify_restore : path:string -> string -> unit
-val notify_uploaded : path:string -> string -> unit
-val notify_changed : path:string -> string -> unit
-val notify_resync : path:string -> unit
+(** Fire-and-forget messages to a frontend listening on [path]. Each returns
+    whether the message was delivered: the listener only exists while the
+    frontend is running, and a caller with no other way to get the news through
+    must not report success on a message nothing received. *)
+
+val notify_evict : path:string -> string -> bool
+val notify_restore : path:string -> string -> bool
+val notify_uploaded : path:string -> string -> bool
+val notify_changed : path:string -> string -> bool
+val notify_resync : path:string -> bool
 
 (** Start the IPC server loop, calling [handler] for each incoming line. Stops
     when the handler returns [("...", `Stop)]. *)

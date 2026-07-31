@@ -26,17 +26,25 @@ let send_lwt ?(timeout = 2.) ~socket_path cmd =
           Lwt_io.read_line ic)
         (fun () -> Lwt_io.close ic))
 
+(* Returns whether anything was listening. The listener is a frontend process the
+   OS starts and stops as it pleases, so an undelivered message is routine, not an
+   error — but only the caller knows whether its message has another way through.
+   A frontend must not report a request it made no attempt at as done. *)
 let notify ~path msg =
-  try
-    let fd = Unix.socket Unix.PF_UNIX Unix.SOCK_STREAM 0 in
-    (try
-       Unix.connect fd (Unix.ADDR_UNIX path);
-       let oc = Unix.out_channel_of_descr fd in
-       output_string oc (msg ^ "\n");
-       flush oc
-     with _ -> ());
-    Unix.close fd
-  with _ -> ()
+  match Unix.socket Unix.PF_UNIX Unix.SOCK_STREAM 0 with
+    | exception _ -> false
+    | fd ->
+        let delivered =
+          try
+            Unix.connect fd (Unix.ADDR_UNIX path);
+            let oc = Unix.out_channel_of_descr fd in
+            output_string oc (msg ^ "\n");
+            flush oc;
+            true
+          with _ -> false
+        in
+        (try Unix.close fd with _ -> ());
+        delivered
 
 let notify_evict ~path key = notify ~path ("EVICT " ^ key)
 let notify_restore ~path key = notify ~path ("RESTORE " ^ key)
