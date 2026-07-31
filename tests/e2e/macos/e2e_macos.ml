@@ -74,7 +74,7 @@ let () =
              ~backends:[local_backend ~path:store]
              ~frontends:[proxy_frontend ~env];
          ];
-     store_pid := Some (spawn_daemon ~exe ~home:store_home ());
+     store_pid := Some (spawn_daemon ~exe ~home:store_home ~label:"store" ());
      wait_until ~timeout:30. ~what:"the store to listen" (fun () ->
          Sys.command
            (Printf.sprintf "curl -sf -o /dev/null http://127.0.0.1:%d/" env.port)
@@ -122,7 +122,7 @@ let () =
              ~backends:[proxy_backend ~env]
              ~frontends:[`String "file_provider"];
          ];
-     client_pid := Some (spawn_daemon ~exe ~home:client_home ());
+     client_pid := Some (spawn_daemon ~exe ~home:client_home ~label:"client" ());
      let client =
        {
          socket_path = domain_socket ~home:client_home ~domain:env.domain;
@@ -154,9 +154,11 @@ let () =
    with
     | Failed msg ->
         Printf.eprintf "staging failed: %s\n" msg;
+        report_daemon_logs ();
         finish 1
     | exn ->
         Printf.eprintf "staging failed: %s\n" (Printexc.to_string exn);
+        report_daemon_logs ();
         finish 1);
 
   finish (summary ())

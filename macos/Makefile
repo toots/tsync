@@ -32,6 +32,6 @@ clean:
 # needs the app installed but no manual setup. Not part of `dune test`: it
 # restarts the app and registers a domain.
 e2e:
-	cd .. && dune build tests/e2e/macos/e2e_macos.exe && ./_build/default/tests/e2e/macos/e2e_macos.exe
+	cd .. && dune build bin/tsync.exe tests/e2e/macos/e2e_macos.exe && ./_build/default/tests/e2e/macos/e2e_macos.exe
 
 .PHONY: e2e

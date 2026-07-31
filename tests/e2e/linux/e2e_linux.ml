@@ -73,7 +73,7 @@ let () =
              ~backends:[local_backend ~path:store]
              ~frontends:[proxy_frontend ~env];
          ];
-     store_pid := Some (spawn_daemon ~exe ~home:store_home ());
+     store_pid := Some (spawn_daemon ~exe ~home:store_home ~label:"store" ());
      wait_until ~timeout:30. ~what:"the store to listen" (fun () ->
          Sys.command
            (Printf.sprintf "curl -sf -o /dev/null http://127.0.0.1:%d/" env.port)
@@ -88,13 +88,14 @@ let () =
              ~frontends:[`String "fuse"];
          ];
      mount_pid :=
-       Some (spawn_daemon ~args:["--mount"; mount] ~exe ~home:mount_home ());
+       Some
+         (spawn_daemon ~args:["--mount"; mount] ~exe ~home:mount_home
+            ~label:"mount" ());
      (* Mounted, not merely started: until FUSE has taken the directory over,
         reads and writes go to the empty directory underneath and every check
         would pass against nothing. *)
      wait_until ~timeout:60. ~what:"the filesystem to be mounted" (fun () ->
-         Sys.command
-           (Printf.sprintf "mount | grep -q %s" (Filename.quote mount))
+         Sys.command (Printf.sprintf "mountpoint -q %s" (Filename.quote mount))
          = 0);
      wait_writable ~mount;
 
@@ -108,7 +109,9 @@ let () =
              ~frontends:[`String "fuse"];
          ];
      client_pid :=
-       Some (spawn_daemon ~args:["--mount"; mount_b] ~exe ~home:client_home ());
+       Some
+         (spawn_daemon ~args:["--mount"; mount_b] ~exe ~home:client_home
+            ~label:"client" ());
      let client =
        {
          socket_path = domain_socket ~home:client_home ~domain:env.domain;
@@ -125,9 +128,11 @@ let () =
    with
     | Failed msg ->
         Printf.eprintf "staging failed: %s\n" msg;
+        report_daemon_logs ();
         finish 1
     | exn ->
         Printf.eprintf "staging failed: %s\n" (Printexc.to_string exn);
+        report_daemon_logs ();
         finish 1);
 
   finish (summary ())

@@ -32,4 +32,4 @@ install:
 # down again, touching no shared config and no service. Needs fuse3 and
 # permission to mount. Not part of `dune test`: it mounts a filesystem.
 e2e:
-	cd .. && dune build tests/e2e/linux/e2e_linux.exe && ./_build/default/tests/e2e/linux/e2e_linux.exe
+	cd .. && dune build bin/tsync.exe tests/e2e/linux/e2e_linux.exe && ./_build/default/tests/e2e/linux/e2e_linux.exe

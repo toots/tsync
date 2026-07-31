@@ -52,7 +52,11 @@ jobs:
       - name: Install system dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y libfuse3-dev fuse pkg-config libxxhash-dev
+          # fuse3, not fuse: the daemon links libfuse3, which mounts by running
+          # the setuid /usr/bin/fusermount3. That binary is in fuse3; the fuse
+          # package is the FUSE 2 userspace and provides fusermount, which
+          # libfuse3 will not use. With it installed, mounting needs no root.
+          sudo apt-get install -y libfuse3-dev fuse3 pkg-config libxxhash-dev
       - uses: ocaml/setup-ocaml@v3
         with:
           ocaml-compiler: "5.5"

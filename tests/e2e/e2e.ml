@@ -285,7 +285,13 @@ let write_config ~home ~name ~domains =
    staged client off the real cache, journal and socket — and, just as much, off
    the shared client id, without which two daemons each skip the other's journal
    entries as their own. *)
-let spawn_daemon ?(args = []) ~exe ~home () =
+(* Each daemon's output is kept rather than discarded. A daemon that dies at
+   startup — a frontend the binary was built without, a mount helper that is not
+   installed — otherwise shows up only as whatever was being waited for never
+   happening, and "timed out after 60s" says nothing about why. *)
+let daemon_logs : (string * string) list ref = ref []
+
+let spawn_daemon ?(args = []) ~exe ~home ~label () =
   let env =
     Array.append
       (Array.of_list
@@ -294,11 +300,33 @@ let spawn_daemon ?(args = []) ~exe ~home () =
             (Array.to_list (Unix.environment ()))))
       [| "HOME=" ^ home |]
   in
-  let devnull = Unix.openfile "/dev/null" [Unix.O_WRONLY] 0o600 in
+  let log = Filename.concat home (label ^ ".log") in
+  daemon_logs := (label, log) :: !daemon_logs;
+  let fd =
+    Unix.openfile log [Unix.O_WRONLY; Unix.O_CREAT; Unix.O_TRUNC] 0o600
+  in
   let argv = Array.of_list (exe :: "start" :: args) in
-  let pid = Unix.create_process_env exe argv env Unix.stdin devnull devnull in
-  Unix.close devnull;
+  let pid = Unix.create_process_env exe argv env Unix.stdin fd fd in
+  Unix.close fd;
   pid
+
+(* What the staged daemons had to say, printed when staging fails — which is the
+   only time anyone wants it. *)
+let report_daemon_logs () =
+  List.iter
+    (fun (label, path) ->
+      match read_file path with
+        | exception _ -> Printf.eprintf "\n--- %s: no log\n" label
+        | "" -> Printf.eprintf "\n--- %s: said nothing\n" label
+        | body ->
+            let lines = String.split_on_char '\n' body in
+            let n = List.length lines in
+            let tail =
+              if n <= 25 then lines
+              else List.filteri (fun i _ -> i >= n - 25) lines
+            in
+            Printf.eprintf "\n--- %s ---\n%s\n" label (String.concat "\n" tail))
+    (List.rev !daemon_logs)
 
 let stop_daemon pid =
   (try Unix.kill pid Sys.sigterm with _ -> ());
