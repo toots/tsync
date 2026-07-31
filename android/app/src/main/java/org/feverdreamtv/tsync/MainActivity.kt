@@ -27,7 +27,10 @@ class MainActivity : Activity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        if (Config.exists(this)) showStatus() else showSetup()
+        if (Config.exists(this)) {
+            TsyncProvider.notifyRootsChanged(this)
+            showStatus()
+        } else showSetup()
     }
 
     // ── Setup ────────────────────────────────────────────────────────────────
@@ -73,6 +76,9 @@ class MainActivity : Activity() {
                     return@setOnClickListener
                 }
                 startForegroundService(Intent(this@MainActivity, DaemonService::class.java))
+                // The root's id and title come from the config, so the picker
+                // is holding a stale answer until it re-queries.
+                TsyncProvider.notifyRootsChanged(this@MainActivity)
                 showStatus()
             }
         }

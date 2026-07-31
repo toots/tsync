@@ -245,5 +245,15 @@ class TsyncProvider : DocumentsProvider() {
 
     companion object {
         const val TAG = "tsyncsaf"
+        const val AUTHORITY = "org.feverdreamtv.tsync.documents"
+
+        /** DocumentsUI caches the root list and only re-queries when told, so a
+         *  root that appears after its first query — a fresh install, or a
+         *  domain change — stays invisible until this fires. */
+        fun notifyRootsChanged(context: android.content.Context) {
+            context.contentResolver.notifyChange(
+                android.provider.DocumentsContract.buildRootsUri(AUTHORITY), null
+            )
+        }
     }
 }
