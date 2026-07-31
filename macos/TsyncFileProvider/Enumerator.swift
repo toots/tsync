@@ -63,10 +63,15 @@ final class TsyncEnumerator: NSObject, NSFileProviderEnumerator, @unchecked Send
 
     func enumerateChanges(for observer: any NSFileProviderChangeObserver, from anchor: NSFileProviderSyncAnchor) {
         Task {
-            let anchorStr = String(data: anchor.rawValue, encoding: .utf8) ?? ""
+            let (anchorToken, anchorCursor) = decodeAnchor(anchor)
+            // The daemon rebuilt its mirror wholesale since this anchor was issued, so no
+            // journal delta can bridge it — same recovery as a pruned journal below.
+            guard anchorToken == resyncToken else {
+                observer.finishEnumeratingWithError(NSFileProviderError(.syncAnchorExpired))
+                return
+            }
             do {
-                // "0" is the sentinel empty cursor; the daemon wants "" for "from the start".
-                let resp = try await IPC.changesSince(anchor: anchorStr == "0" ? "" : anchorStr,
+                let resp = try await IPC.changesSince(anchor: anchorCursor,
                                                       domain: domain.displayName)
                 // The journal was pruned past our anchor (or was cleaned up entirely): we
                 // can't produce a complete delta, so tell the OS to drop its cache and
@@ -101,7 +106,7 @@ final class TsyncEnumerator: NSObject, NSFileProviderEnumerator, @unchecked Send
                 }
                 if !deleted.isEmpty { observer.didDeleteItems(withIdentifiers: deleted) }
                 if !updated.isEmpty { observer.didUpdate(updated) }
-                observer.finishEnumeratingChanges(upTo: syncAnchor(resp.cursor ?? anchorStr), moreComing: false)
+                observer.finishEnumeratingChanges(upTo: syncAnchor(resp.cursor ?? anchorCursor), moreComing: false)
             } catch {
                 observer.finishEnumeratingChanges(upTo: anchor, moreComing: false)
             }
@@ -123,9 +128,32 @@ final class TsyncEnumerator: NSObject, NSFileProviderEnumerator, @unchecked Send
 
     private var isReadOnly: Bool { config.isReadOnly(domain.displayName) }
 
-    /// Sync anchors must carry non-empty data; use "0" as the empty-cursor sentinel.
+    /// Stamped by the daemon each time it rebuilds the local mirror from the backend
+    /// listing (`tsync sync --full`, `tsync fileprovider reimport`). Read per call rather
+    /// than cached: the stamp lands while this extension is stopped as often as not.
+    private var resyncToken: String {
+        let url = Config.groupContainerURL
+            .appendingPathComponent("tsync/resync-\(domain.displayName)")
+        return ((try? String(contentsOf: url, encoding: .utf8)) ?? "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    /// Anchors are "<resync token>|<cursor>", so an anchor records the mirror generation
+    /// it was issued against and a later resync invalidates it on sight.
     private func syncAnchor(_ cursor: String) -> NSFileProviderSyncAnchor {
-        NSFileProviderSyncAnchor((cursor.isEmpty ? "0" : cursor).data(using: .utf8)!)
+        NSFileProviderSyncAnchor("\(resyncToken)|\(cursor)".data(using: .utf8)!)
+    }
+
+    /// Anchors predating that encoding — and the startup anchor — carry no separator.
+    /// They decode to an empty token, which matches while no resync has ever been
+    /// stamped and expires them once one has.
+    private func decodeAnchor(_ anchor: NSFileProviderSyncAnchor) -> (String, String) {
+        let raw = String(data: anchor.rawValue, encoding: .utf8) ?? ""
+        guard let sep = raw.firstIndex(of: "|") else {
+            // "0" was the old empty-cursor sentinel; the daemon wants "" for "from the start".
+            return ("", raw == "0" ? "" : raw)
+        }
+        return (String(raw[raw.startIndex..<sep]), String(raw[raw.index(after: sep)...]))
     }
 
     /// Build the item for a key touched by a journal op (directories end in "/").

@@ -76,6 +76,25 @@ module Make (C : Conf.S) = struct
     in
     C.domain_prefix ^ rel
 
+  (* ── Resync token ─────────────────────────────────────────────────────── *)
+
+  (* A full resync rebuilds the local mirror from the backend listing, which is
+     the only way changes made straight in the bucket — writing no journal entry
+     — are ever picked up. Nothing journals them, so no delta can bridge a sync
+     anchor issued beforehand: every enumerator has to drop its index and
+     re-list. The extension stamps its anchors with this token and expires any
+     that no longer match, which is what makes the invalidation durable — the
+     notify below only reaches an extension that happens to be running, and
+     fileproviderd stops ours whenever the domain goes idle. *)
+  let resync_token_path = Filename.concat C.data_dir ("resync-" ^ C.domain_name)
+
+  let stamp_resync_token () =
+    try
+      let oc = open_out resync_token_path in
+      output_string oc (Printf.sprintf "%.0f" (Unix.gettimeofday () *. 1000.));
+      close_out oc
+    with Sys_error msg -> Log.err "resync token: %s" msg
+
   (* ── IPC hooks ────────────────────────────────────────────────────────── *)
 
   (* Eviction and restore are performed by the FileProvider extension; the
@@ -95,6 +114,7 @@ module Make (C : Conf.S) = struct
         changed = (fun key -> Ipc.notify_changed ~path:C.notify_path key);
         full_resync =
           (fun () ->
+            stamp_resync_token ();
             Ipc.notify_resync ~path:C.notify_path;
             Lwt.return_unit);
         status_fields = (fun () -> []);
