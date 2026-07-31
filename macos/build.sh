@@ -89,7 +89,7 @@ mkdir -p "$APP/Contents/Resources"
 cp "$MACOS_DIR/install-agent.sh" "$APP/Contents/Resources/install-agent.sh"
 chmod +x "$APP/Contents/Resources/install-agent.sh"
 
-# The daemon links Homebrew dylibs (openssl, gmp, pcre2, libev, xxhash) that are
+# The daemon links Homebrew dylibs (openssl, gmp, pcre2, libev) that are
 # not present on a user's machine. Copy them in and rewrite the install names.
 say "Bundling dylibs"
 rm -rf "$APP/Contents/libs"

@@ -16,7 +16,6 @@
   (tsync-fuse (= :os "linux"))
   dune
   conf-libev
-  conf-xxhash
   conduit-lwt-unix
   cohttp-lwt-unix
   digestif
