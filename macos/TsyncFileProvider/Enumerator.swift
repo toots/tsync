@@ -75,14 +75,25 @@ final class TsyncEnumerator: NSObject, NSFileProviderEnumerator, @unchecked Send
                     observer.finishEnumeratingWithError(NSFileProviderError(.syncAnchorExpired))
                     return
                 }
+                // Ops are in journal order and a key can be created and later deleted in the
+                // same batch, but the observer takes deletions and updates as two unordered
+                // sets — so only a key's *last* op may be reported, or the earlier creation
+                // resurrects what the later deletion removed.
+                let ops = resp.ops ?? []
+                var lastIndex: [String: Int] = [:]
+                for (i, op) in ops.enumerated() { lastIndex[op.key] = i }
+
                 var updated: [TsyncItem] = []
                 var deleted: [NSFileProviderItemIdentifier] = []
-                for op in resp.ops ?? [] {
+                for (i, op) in ops.enumerated() where lastIndex[op.key] == i {
                     switch op.op {
                     case "delete", "rmdir":
                         deleted.append(NSFileProviderItemIdentifier(op.key))
                     case "rename":
-                        if let src = op.src { deleted.append(NSFileProviderItemIdentifier(src)) }
+                        // The source is gone unless something later put it back.
+                        if let src = op.src, (lastIndex[src] ?? -1) < i {
+                            deleted.append(NSFileProviderItemIdentifier(src))
+                        }
                         if let item = try? await resolveChangeItem(op.key) { updated.append(item) }
                     default: // put, mkdir
                         if let item = try? await resolveChangeItem(op.key) { updated.append(item) }
@@ -118,11 +129,10 @@ final class TsyncEnumerator: NSObject, NSFileProviderEnumerator, @unchecked Send
     }
 
     /// Build the item for a key touched by a journal op (directories end in "/").
+    /// Directories go through stat like files do: it is what proves the key still
+    /// exists, so a stale creation op can't re-add something already deleted.
     private func resolveChangeItem(_ key: String) async throws -> TsyncItem {
         let domainPrefix = config.domainPrefix(domain.displayName)
-        if key.hasSuffix("/") {
-            return TsyncItem.make(key: key, domainPrefix: domainPrefix, readOnly: isReadOnly)
-        }
         let resp = try await IPC.stat(key: key)
         return TsyncItem.make(key: key, domainPrefix: domainPrefix,
                               readOnly: isReadOnly,
