@@ -28,5 +28,18 @@
             android:exported="false"
             android:foregroundServiceType="dataSync" />
 
+        <!-- MANAGE_DOCUMENTS is held by the system only, so this is reachable
+             through the picker rather than by arbitrary apps. -->
+        <provider
+            android:name=".TsyncProvider"
+            android:authorities="org.feverdreamtv.tsync.documents"
+            android:exported="true"
+            android:grantUriPermissions="true"
+            android:permission="android.permission.MANAGE_DOCUMENTS">
+            <intent-filter>
+                <action android:name="android.content.action.DOCUMENTS_PROVIDER" />
+            </intent-filter>
+        </provider>
+
     </application>
 </manifest>

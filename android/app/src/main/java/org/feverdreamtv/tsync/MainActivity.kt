@@ -81,6 +81,39 @@ class MainActivity : Activity() {
 
         probe("status")
         probe("stats")
+        seedIfEmpty()
+
+        log("Now open Files and look for \"tsync\" under the ☰ menu.")
+    }
+
+    /** Something to browse in the picker. Uses the CLI importer rather than the
+     *  IPC write path so the two are exercised independently. */
+    private fun seedIfEmpty() {
+        val listing = runCatching {
+            Ipc.send(Ipc.socketPath(filesDir, domain), "list_dir",
+                mapOf("path" to "tsync/$domain/manifests/"))
+        }.getOrNull() ?: return
+        val empty = (listing.optJSONArray("files")?.length() ?: 0) == 0 &&
+            (listing.optJSONArray("dirs")?.length() ?: 0) == 0
+        if (!empty) {
+            log("domain already has content\n")
+            return
+        }
+
+        val seed = File(filesDir, "seed").apply { mkdirs() }
+        File(seed, "hello.txt").writeText("hello from a Pixel 9a\n")
+        File(seed, "notes.md").writeText("# tsync on Android\n\nBrowsed through SAF.\n")
+        File(seed, "nested").mkdirs()
+        File(seed, "nested/deep.txt").writeText("a file one level down\n")
+
+        val (code, out) = DaemonService.run(this, "import", seed.absolutePath)
+        log("\$ tsync import (exit $code)\n$out")
+        seed.deleteRecursively()
+
+        contentResolver.notifyChange(
+            android.provider.DocumentsContract.buildRootsUri("org.feverdreamtv.tsync.documents"),
+            null
+        )
     }
 
     private fun probe(action: String) {
