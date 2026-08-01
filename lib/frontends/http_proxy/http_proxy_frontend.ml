@@ -35,14 +35,28 @@ let in_flight = ref 0
    ponytail: one global bound, not per-domain or per-client. The thing being
    protected is the storage under the process, which they all share. *)
 let default_max_concurrent = 16
-let data_slots : unit Lwt_pool.t option ref = ref None
+
+(* Slots for the work, and a bounded queue for whoever cannot have one yet.
+
+   The queue has to be bounded or the bound is only half a bound: holding every
+   caller that arrives converts a busy device into a growing list of promises in
+   this process, and the clients time out one by one with nothing to say why.
+   Past the queue a caller is refused instead, which is not a failure so much as
+   an instruction — every client here retries 5xx with exponential backoff, so
+   refusing is precisely how they are told to slow down.
+
+   The queue is sized off the limit: enough to absorb a burst while the device
+   works through it, small enough that sustained overload is refused rather than
+   accumulated. *)
+let gate : Lwt_bounded.t option ref = ref None
+let make_gate limit = Lwt_bounded.create ~max:limit ~max_waiting:(limit * 16) ()
 
 (* The bound in force, published to clients so they can hold their own excess. *)
 let effective_max_concurrent : int option ref = ref None
 
-let bounded op run =
-  match (!data_slots, op) with
-    | Some pool, (`Get | `Put) -> Lwt_pool.use pool (fun () -> run ())
+let bounded op ~busy run =
+  match (!gate, op) with
+    | Some g, (`Get | `Put) -> Lwt_bounded.use_or g ~busy run
     | _ -> run ()
 
 (* The bound several stores agree on: the smallest of those that hold one. A
@@ -61,8 +75,18 @@ let bump name =
     (1 + Option.value ~default:0 (Hashtbl.find_opt counters name))
 
 let counters_json () =
+  let held, waiting =
+    match !gate with
+      | Some g -> (Lwt_bounded.in_flight g, Lwt_bounded.waiting g)
+      | None -> (0, 0)
+  in
   `Assoc
     (("inFlight", `Int !in_flight)
+     (* What the bound is doing right now. [dataWaiting] above zero is the
+       storage being the limit; [busy] climbing is the queue overflowing, which
+       is the point at which more clients will not help. *)
+    :: ("dataInFlight", `Int held)
+    :: ("dataWaiting", `Int waiting)
     :: List.map
          (fun (k, v) -> (k, `Int v))
          (List.sort compare (List.of_seq (Hashtbl.to_seq counters))))
@@ -626,8 +650,14 @@ let callback ~port ~tls routes _conn req body =
                               (fun () ->
                                 Lwt.catch
                                   (fun () ->
-                                    bounded (data_kind op) (fun () ->
-                                        exec route op ~body:body_str))
+                                    bounded (data_kind op)
+                                      ~busy:(fun () ->
+                                        (* Refused, not failed: the client backs
+                                           off and comes back. *)
+                                        bump "busy";
+                                        respond ~status:`Service_unavailable
+                                          "busy")
+                                      (fun () -> exec route op ~body:body_str))
                                   (fun exn ->
                                     bump "error";
                                     Log.err "http-proxy: %s"
@@ -729,8 +759,14 @@ let start bindings =
          | Some _, _ -> "configured"
          | None, Some _ -> "from the storage"
          | None, None -> "default");
-     data_slots :=
-       Some (Lwt_pool.create max_concurrent (fun () -> Lwt.return_unit));
+     gate := Some (make_gate max_concurrent);
+     (* The gate holds callers at the door; this stops the threads behind it
+        outnumbering what the device can take even so. Only narrowed when the
+        storage said something — a purely network-backed domain keeps the
+        generous default, since nothing there is queueing on a spindle. *)
+       (match derived with
+       | Some n -> Frontend.size_blocking_pool ~concurrency:n
+       | None -> ());
      effective_max_concurrent := Some max_concurrent;
      let* () =
        Cohttp_lwt_unix.Server.create ~stop ~mode

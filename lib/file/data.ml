@@ -745,9 +745,14 @@ module Make (C : Conf.S) (R : Remote.S) = struct
   let groups_bytes groups =
     List.fold_left (fun acc g -> acc + Chunk_group.bytes g) 0 groups
 
-  (* Fetch the named groups, crediting each as it lands. [R.get_chunk] is
-     pool-bounded, so asking for a whole file at once cannot exceed
-     [max_downloads].
+  (* Fetch the named groups, crediting each as it lands.
+
+     Every group of the file is asked for at once, which is safe only because
+     {!Chunk_cache.ensure} bounds what a request goes on to *do*. It used to be
+     justified here instead — "get_chunk is pool-bounded, so a whole file cannot
+     exceed max_downloads" — which was true of downloads and false of everything
+     else a pending fetch holds. The bound belongs next to the resource, not
+     next to the fan-out.
 
      ponytail: credit is per group — 16 MB at the defaults, so a file smaller
      than one group only moves when it finishes. Per stored chunk would halve the

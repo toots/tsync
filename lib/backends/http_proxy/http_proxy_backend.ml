@@ -64,6 +64,19 @@ let call t ~meth ?(body = "") uri =
 let code resp = Cohttp.Code.code_of_status (Cohttp.Response.status resp)
 let is_ok resp = code resp >= 200 && code resp < 300
 
+(* Error bodies go in the log, and a proxy in front of us answers failures with
+   a full HTML page: one stalled fetch put two thousand lines of nginx markup in
+   the log, which is the log being least readable exactly when it is most needed.
+   The status carries the meaning; a first line of the body is enough to tell an
+   upstream apart from our own answer. *)
+let excerpt body =
+  let body = String.trim body in
+  match String.index_opt body '\n' with
+    | _ when String.length body = 0 -> "(empty)"
+    | Some i when i < 200 -> String.sub body 0 i ^ " ..."
+    | _ when String.length body > 200 -> String.sub body 0 200 ^ " ..."
+    | _ -> body
+
 let call_retry t ~meth ?body op uri =
   let rec go attempt =
     let* outcome =
@@ -83,7 +96,7 @@ let call_retry t ~meth ?body op uri =
     in
     match outcome with
       | `Ret (resp, body) when code resp >= 500 && attempt < max_attempts ->
-          retry (Printf.sprintf "HTTP %d: %s" (code resp) body)
+          retry (Printf.sprintf "HTTP %d: %s" (code resp) (excerpt body))
       | `Ret r -> Lwt.return r
       | `Raised Cancelled -> Lwt.fail Cancelled
       | `Raised exn when attempt < max_attempts ->

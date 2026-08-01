@@ -21,7 +21,23 @@ let write_file path data =
 let read_file path =
   Lwt_unix_retry.with_file ~mode:Lwt_io.Input path Lwt_io.read
 
+(* Directory-walk fan-out: enough concurrent stats to hide per-call latency on
+   high-latency storage, bounded so a large tree cannot become a descriptor
+   storm.
+
+   Shared by every walk on this store rather than created per call. A per-call
+   bound limits one walk, not how many walk at once, and listings are driven by
+   requests — so a per-call budget would still let concurrent callers multiply
+   it. What is being protected is the device under the store, and there is one
+   of those however many callers there are.
+
+   Held around the stat alone. This walk recurses, and a shared bound held
+   across a recursive call deadlocks — outer levels hold every slot while inner
+   levels wait for one. *)
+let walk_fanout = 64
+
 let make ~root : (module Backend.S) =
+  let walk_slots = Lwt_bounded.create ~max:walk_fanout () in
   let resolve key = if key = "" then root else Filename.concat root key in
   (* Keys with a trailing slash are directory markers: S3 stores them as
      zero-byte objects, here they map to actual directories. *)
@@ -81,9 +97,13 @@ let make ~root : (module Backend.S) =
     let list_prefix ?max_keys ~prefix () =
       let base = resolve prefix in
       (* Each directory level's entries are stat'd (and subdirs recursed) in
-         parallel, so on high-latency storage the walk costs a few round-trips per
-         level rather than one per entry. Actual I/O concurrency is bounded by the
-         Lwt thread pool. *)
+         parallel, so on high-latency storage the walk costs a few round-trips
+         per level rather than one per entry.
+
+         Bounded explicitly. Leaving it to the Lwt thread pool bounds threads,
+         not the descriptors and recursion a walk holds, and a directory is as
+         large as the user's data — the width here is not a number this code
+         gets to choose. *)
       let rec walk path key_prefix =
         Lwt.catch
           (fun () ->
@@ -95,7 +115,14 @@ let make ~root : (module Backend.S) =
                   let full_key = key_prefix ^ entry in
                   Lwt.catch
                     (fun () ->
-                      let* st = Lwt_unix_retry.stat full_path in
+                      (* The slot covers the stat and nothing else. Holding one
+                         across the recursion below would deadlock: a deep tree
+                         parks every slot in an outer level while the inner
+                         levels wait for the same budget. *)
+                      let* st =
+                        Lwt_bounded.use walk_slots (fun () ->
+                            Lwt_unix_retry.stat full_path)
+                      in
                       match st.Unix.st_kind with
                         | Unix.S_REG ->
                             Lwt.return

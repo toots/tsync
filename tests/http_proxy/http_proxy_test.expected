@@ -9,7 +9,7 @@
     "port": 8443,
     "tls": true,
     "serves": [ "statusdom" ],
-    "requests": { "inFlight": 0 }
+    "requests": { "inFlight": 0, "dataInFlight": 0, "dataWaiting": 0 }
   },
   "process": {
     "cpuSeconds": 12.5,

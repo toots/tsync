@@ -316,9 +316,17 @@ module Make_with_layout (C : Conf.S) (L : Layout.S) : S = struct
       let+ () = St.put_manifest ~key ~data:(Manifest.to_string expected) in
       true)
 
-  (* Bounds concurrent HEADs for manifest-driven rechecks. *)
-  let recheck_head_pool =
-    Lwt_pool.create (max 1 C.max_uploads) (fun () -> Lwt.return_unit)
+  (* Concurrent chunk checks during a manifest-driven recheck.
+
+     One bound for the whole check rather than one for the HEAD inside it: a
+     chunk the backend is missing goes on to read the local body and re-upload
+     it, and those cost what the HEAD does not. Bounding only the HEAD leaves
+     the rest to scale with the file.
+
+     Static, like every bound here. A recheck's width is the file's chunk count,
+     and a per-call budget would limit one recheck while saying nothing about
+     how many run at once — which is no bound on the store underneath. *)
+  let recheck_chunks = Lwt_bounded.create ~max:C.max_uploads ()
 
   (* Recheck a file from its manifest: every chunk it names must exist remotely
      with the right size, and a missing or wrong remote manifest is republished
@@ -332,8 +340,7 @@ module Make_with_layout (C : Conf.S) (L : Layout.S) : S = struct
     let check index =
       let chunk_key = Chunk_table.key table index in
       let* ok =
-        Lwt_pool.use recheck_head_pool (fun () ->
-            chunk_remote_ok ~chunk_key ~size:(Chunk_table.len table index))
+        chunk_remote_ok ~chunk_key ~size:(Chunk_table.len table index)
       in
       if ok then Lwt.return `Ok
       else
@@ -345,8 +352,10 @@ module Make_with_layout (C : Conf.S) (L : Layout.S) : S = struct
               let+ () = Bk.put ~key:(chunk_backend_key chunk_key) ~data in
               `Repaired
     in
+    (* One check per chunk of the file, so the width is the file's size. *)
     let* results =
-      Lwt_list.map_p check (List.init (Chunk_table.count table) Fun.id)
+      Lwt_bounded.map_with recheck_chunks check
+        (List.init (Chunk_table.count table) Fun.id)
     in
     let count what = List.length (List.filter (fun r -> r = what) results) in
     let chunks_unrepairable = count `Missing in
@@ -373,13 +382,12 @@ module Make_with_layout (C : Conf.S) (L : Layout.S) : S = struct
      [chunk_buffers] bounds upload work: every chunk of every file contends
      for the same [max_downloads] slots, so launching all of a file's chunk
      tasks up front cannot exceed the global ceiling. *)
-  let chunk_download_pool =
-    Lwt_pool.create (max 1 C.max_downloads) (fun () -> Lwt.return_unit)
+  let chunk_download_pool = Lwt_bounded.create ~max:C.max_downloads ()
 
   (* Fetch one chunk body by content key. The pool bounds concurrent GETs the
      same way for a demand-paged read as for a whole-file download. *)
   let get_chunk ~chunk_key =
-    Lwt_pool.use chunk_download_pool (fun () ->
+    Lwt_bounded.use chunk_download_pool (fun () ->
         let (module Primary : Backend.S) = primary () in
         let+ data = Primary.get ~key:(chunk_backend_key chunk_key) () in
         Metrics.add_downloaded (String.length data);

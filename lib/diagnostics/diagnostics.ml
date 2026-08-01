@@ -567,9 +567,28 @@ let text json =
        (int_of (mem traffic "hashesPerSec")));
   (match mem server "requests" with
     | `Assoc fields ->
-        (* Served since start, plus what is in flight right now. *)
-        let in_flight, served =
-          List.partition (fun (k, _) -> k = "inFlight") fields
+        (* Served since start, plus what is happening right now. The two read
+           very differently and must not be run together: a gauge of zero is an
+           idle server, while a counter of zero is one that has never been
+           asked, and "0 dataWaiting" alongside "2 stats" invites reading the
+           first as the second. *)
+        let is_gauge k =
+          List.mem k ["inFlight"; "dataInFlight"; "dataWaiting"]
+        in
+        let gauges, served = List.partition (fun (k, _) -> is_gauge k) fields in
+        let gauge k =
+          match List.assoc_opt k gauges with Some v -> int_of v | None -> 0
+        in
+        (* Only what is non-zero: a queue that is empty is the normal case and
+           saying so every time buries the case that matters. Requests waiting
+           on storage is the number that says the device, not the network, is
+           the limit. *)
+        let live =
+          List.filter_map
+            (fun (label, key) ->
+              let n = gauge key in
+              if n > 0 then Some (Printf.sprintf "%d %s" n label) else None)
+            [("in flight", "inFlight"); ("waiting on storage", "dataWaiting")]
         in
         row 2 "requests"
           (Printf.sprintf "%s%s"
@@ -579,10 +598,7 @@ let text json =
                   (List.map
                      (fun (k, v) -> Printf.sprintf "%d %s" (int_of v) k)
                      served))
-             (match in_flight with
-               | [(_, v)] when int_of v > 0 ->
-                   Printf.sprintf " (%d in flight)" (int_of v)
-               | _ -> ""))
+             (if live = [] then "" else " (" ^ String.concat ", " live ^ ")"))
     | _ -> ());
   let domains = match mem json "domains" with `List l -> l | _ -> [] in
   List.iter

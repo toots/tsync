@@ -76,6 +76,22 @@ let entries () =
    oversized config (maxDownloads has been seen at 1000) reopen the unbounded pool. *)
 let cap_blocking_pool () = Lwt_unix.set_pool_size 256
 
+(* Narrow that ceiling to what the storage will actually absorb, once something
+   has asked it.
+
+   256 is a ceiling for bursts, not a statement about any device: a USB
+   enclosure that accepts one command at a time was handed ninety-six threads,
+   which is how the block layer ran out of queue tags while the disk went no
+   faster. Threads past what the device takes do not become throughput, they
+   become a queue in the wrong place.
+
+   The multiple leaves room for the pool's other work — directory walks, stats,
+   the metadata that must not queue behind bulk reads — and the floor keeps a
+   slow device from making the process unresponsive rather than merely
+   unhurried. *)
+let size_blocking_pool ~concurrency =
+  Lwt_unix.set_pool_size (min 256 (max 32 (concurrency * 8)))
+
 (* Run [f] on each item, each in its own child process except the last (which
    runs in this process and blocks, since a frontend's [start] blocks). On
    return, SIGTERM and reap the forked children.

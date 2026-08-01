@@ -9,8 +9,7 @@ type dest_stats = {
 
 module Make (C : Conf.S) = struct
   (* Bounds concurrent HEAD/copy operations per destination. *)
-  let copy_pool =
-    Lwt_pool.create (max 1 C.max_uploads) (fun () -> Lwt.return_unit)
+  let copy_pool = Lwt_bounded.create ~max:C.max_uploads ()
 
   (* Copy [entry] from [src] to [dst] when it is missing there or its size
      differs (objects are content-addressed or immutable-once-written, so a
@@ -74,7 +73,7 @@ module Make (C : Conf.S) = struct
     let+ results =
       Lwt_list.map_p
         (fun entry ->
-          Lwt_pool.use copy_pool (fun () ->
+          Lwt_bounded.use copy_pool (fun () ->
               let+ copied = sync_entry src dst entry in
               (match copied with
                 | Some bytes -> on_copy ~index ~key:entry.Backend.key ~bytes
