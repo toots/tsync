@@ -18,10 +18,18 @@
  (modules macos_device)
  (libraries unix))
 
+; [descriptors] is not per-OS: getrlimit/setrlimit are POSIX and identical on
+; both targets, and the per-process ceiling is discovered by asking rather than
+; looked up per platform. It lives here because it is the same kind of fact as
+; [device] — a limit the platform imposes, discovered at runtime.
+
 (library
  (name tsync_device)
  (wrapped false)
- (modules device)
+ (modules device descriptors)
+ (foreign_stubs
+  (language c)
+  (names descriptors_stubs))
  (libraries
   (select
    device.ml

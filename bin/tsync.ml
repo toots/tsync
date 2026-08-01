@@ -109,6 +109,20 @@ let start_cmd =
       F.start bindings
     in
     Log.debug "cache root: %s" runtime_paths.Runtime.cache_root;
+    (* Before the fork, so every frontend inherits it. launchd hands this daemon
+       256 descriptors against an unlimited hard limit, and a burst of concurrent
+       work exhausted it — accept then failed with EMFILE and killed the daemon.
+       A process may raise its own soft limit without privilege, so it need not
+       be launched specially to get a workable one. Descriptors are allocated on
+       use, so asking for headroom costs nothing; what stops the daemon holding
+       too many is the bounds on its fan-outs, not this. *)
+      (match Descriptors.current () with
+      | Some before ->
+          let after = Descriptors.raise_to ~target:8192 in
+          if after > before then
+            Log.debug "open file limit: %d (was %d)" after before
+          else Log.debug "open file limit: %d" after
+      | None -> ());
     Frontend.run_forked run_group groups
   in
   Cmd.v
