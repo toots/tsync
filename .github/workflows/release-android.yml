@@ -12,6 +12,11 @@ on:
     types: [completed]
     branches: [main]
   workflow_dispatch:
+  # ponytail: temporary. A workflow only accepts a manual dispatch once it is on
+  # the default branch, and this one has to prove itself before it gets there.
+  # Remove with the branch.
+  push:
+    branches: [tsync-android]
 
 concurrency:
   group: release-android
