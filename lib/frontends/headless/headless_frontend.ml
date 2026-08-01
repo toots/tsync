@@ -35,20 +35,14 @@ module Make (C : Conf.S) = struct
         (* Name the frontend these numbers belong to — a domain can run several,
            each with its own counters. *)
         stats_fields =
-          (fun () ->
-            ("frontend", `String implementation) :: E.stats_fields ());
+          (fun () -> ("frontend", `String implementation) :: E.stats_fields ());
         on_stop = (fun () -> ());
       }
 
   let start () =
     let open Lwt.Syntax in
     Lwt_main.run
-      (let* () =
-         E.start
-           ~on_cursor:(fun ~entry_key:_ -> ())
-           ~on_upload_done:(fun ~key:_ -> Lwt.return_unit)
-           ()
-       in
+      (let* () = E.start ~on_upload_done:(fun ~key:_ -> Lwt.return_unit) () in
        (* [Ipc.serve] returns when a client sends [stop]. *)
        let* () = Ipc.serve ~path:C.socket_path (Ih.handler hooks) in
        E.drain ())
