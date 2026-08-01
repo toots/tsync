@@ -10,6 +10,8 @@ import android.view.View
 import android.view.WindowInsets
 import android.view.ViewGroup.LayoutParams.MATCH_PARENT
 import android.view.ViewGroup.LayoutParams.WRAP_CONTENT
+import android.widget.ArrayAdapter
+import android.widget.AutoCompleteTextView
 import android.widget.Button
 import android.widget.EditText
 import android.widget.LinearLayout
@@ -37,11 +39,46 @@ class MainActivity : Activity() {
 
     private fun showSetup() {
         val existing = Config.load(this)
-        val domain = field("e.g. Jellyfin Media", existing?.domain ?: "")
+        // Free text until "Check server" fills the dropdown: the server may be
+        // unreachable from here, and a typed name still has to be allowed then.
+        val domain = AutoCompleteTextView(this).apply {
+            hint = "e.g. Jellyfin Media"
+            setText(existing?.domain ?: "")
+            setSingleLine()
+            layoutParams = LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT)
+            setOnClickListener { showDropDown() }
+        }
         val url = field("https://tsync.example.org", existing?.url ?: "")
         val secret = field("Shared secret", existing?.secret ?: "", secret = true)
         val cache = field("Cache limit", existing?.maxCache ?: "2G")
         val error = TextView(this).apply { setPadding(0, 8, 0, 8) }
+
+        val check = Button(this).apply {
+            text = "Check server"
+            setOnClickListener {
+                val at = url.text.toString().trim()
+                val with = secret.text.toString().trim()
+                isEnabled = false
+                error.text = "checking…"
+                thread {
+                    val found = Server.domains(at, with)
+                    runOnUiThread {
+                        isEnabled = true
+                        found.onFailure { error.text = "Cannot use this server: ${it.message}" }
+                        found.onSuccess { names ->
+                            domain.setAdapter(ArrayAdapter(
+                                this@MainActivity, android.R.layout.simple_list_item_1, names))
+                            error.text = when {
+                                names.isEmpty() -> "Server reached, but it serves this secret no domain"
+                                names.size == 1 -> "Server reached, serving “${names[0]}”"
+                                else -> "Server reached — pick a domain"
+                            }
+                            if (names.size == 1) domain.setText(names[0]) else domain.showDropDown()
+                        }
+                    }
+                }
+            }
+        }
 
         val save = Button(this).apply {
             text = "Save and start"
@@ -89,6 +126,7 @@ class MainActivity : Activity() {
                 addView(label("Domain name"));   addView(domain)
                 addView(label("Server URL"));    addView(url)
                 addView(label("Shared secret")); addView(secret)
+                addView(check)
                 addView(label("Cache limit"));   addView(cache)
                 addView(error)
                 addView(save)

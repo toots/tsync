@@ -8,11 +8,16 @@
 
     <!-- extractNativeLibs: without it nativeLibraryDir points inside the APK and
          there is no file on disk to exec. Pairs with useLegacyPackaging in the
-         build script; both are required. -->
+         build script; both are required.
+
+         usesCleartextTraffic: the daemon is a native binary and reaches a
+         plain-http proxy on a LAN whatever the platform thinks. Blocking only
+         the setup form's check would refuse a server that then works. -->
     <application
         android:label="tsync"
         android:theme="@android:style/Theme.Material.Light.NoActionBar"
         android:extractNativeLibs="true"
+        android:usesCleartextTraffic="true"
         android:icon="@android:drawable/stat_notify_sync">
 
         <activity
