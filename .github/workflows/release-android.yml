@@ -1,0 +1,118 @@
+name: release-android
+
+# Runs after `test` passes on main, so a red build never reaches the nightly
+# download URL. workflow_dispatch is there to re-cut a release by hand.
+#
+# Separate from release-macos so either platform can be re-cut on its own: the
+# two share the `nightly` release but neither queues behind or cancels the
+# other.
+on:
+  workflow_run:
+    workflows: [test]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: release-android
+  cancel-in-progress: false
+
+jobs:
+  apk:
+    if: >-
+      github.event_name == 'workflow_dispatch'
+      || github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    permissions:
+      contents: write
+    env:
+      SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
+      # The floor the daemon runs on, and the app's minSdk. The two must agree.
+      ANDROID_API: "26"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+      # conf-ndk-android reads this itself, so it is exported for the later
+      # steps rather than passed to each.
+      - name: Locate the NDK
+        run: |
+          NDK="${ANDROID_NDK_LATEST_HOME:-$ANDROID_NDK_ROOT}"
+          test -d "$NDK"
+          echo "ANDROID_NDK_ROOT=$NDK" >> $GITHUB_ENV
+      - uses: ocaml/setup-ocaml@v3
+        with:
+          # What the cross compiler package is built for; the host switch has to
+          # match it.
+          ocaml-compiler: "5.4.1"
+      # Building the cross compiler and both dependency sets is most of this
+      # job. Restored after setup-ocaml, which re-initialises the switch and
+      # would wipe it.
+      - uses: actions/cache@v4
+        with:
+          # The switch lives in the workspace, not the opam root, so caching
+          # ~/.opam alone leaves every run rebuilding the compiler.
+          path: |
+            ~/.opam
+            _opam
+          # Deliberately not keyed on this file: editing a step below would
+          # otherwise rebuild the compiler from scratch. Bump the version
+          # segment when the cross package list changes — until then a new
+          # package is installed on every run and never cached.
+          key: opam-android-v1-${{ hashFiles('opam/*.opam') }}
+      # `dune -x` builds the host context too, and on linux that one includes
+      # the FUSE frontend.
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libfuse3-dev fuse3 pkg-config libev-dev
+      - name: Pin packages
+        # `opam repository add <url>` on a restored root finds the repository
+        # already there and keeps the snapshot the cache was built from, which
+        # is a silently stale package set. It is replaced on every run.
+        run: |
+          opam pin -ny .
+          opam pin add -ny fuse3 git+https://github.com/toots/ocamlfuse.git
+          opam repository remove android --all >/dev/null 2>&1 || true
+          opam repository add android git+https://github.com/toots/opam-cross-android.git
+      - name: Install OCaml dependencies
+        # The cross packages mirror tsync.opam's depends, minus what the Android
+        # build has no frontend for (FUSE) and does not configure (S3).
+        run: |
+          opam install -y conf-libev
+          opam install --deps-only -y tsync tsync-fuse
+          opam install -y ocaml-android \
+            conf-libev-android cohttp-lwt-unix-android conduit-lwt-unix-android \
+            digestif-android eqaf-android yojson-android lwt-android \
+            ppx_blob-android mem_usage-android tls-android base64-android \
+            x509-android mirage-crypto-pk-android cmdliner-android
+      - name: Cross-build the daemon
+        run: opam exec -- dune build -x android bin/tsync.exe
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+      # Debug-signed: a nightly has to install on a device without release keys,
+      # and an unsigned release APK does not.
+      - name: Build the APK
+        env:
+          BUILD_NUMBER: ${{ github.run_number }}
+        run: ./gradlew assembleDebug
+        working-directory: android
+      - uses: actions/upload-artifact@v4
+        with:
+          name: tsync-apk
+          path: android/app/build/outputs/apk/debug/app-debug.apk
+
+      - name: Publish nightly release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # The macOS workflow may be creating the same release at this moment.
+          # It owns the notes; two writers would fight over the one blob.
+          gh release view nightly >/dev/null 2>&1 \
+            || gh release create nightly --prerelease --title nightly --notes "" \
+            || gh release view nightly >/dev/null
+          cp android/app/build/outputs/apk/debug/app-debug.apk tsync.apk
+          gh release upload nightly tsync.apk --clobber
