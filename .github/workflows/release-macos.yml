@@ -1,11 +1,8 @@
 name: release-macos
 
 # Runs after `test` passes on main, so a red build never reaches the nightly
-# download URL. workflow_dispatch is there to re-cut a release by hand.
-#
-# One platform per workflow, each with its own queue: a failure or a re-cut on
-# one must not hold up or cancel the other. They share the `nightly` release,
-# which holds one artifact per platform.
+# download URL. One workflow per platform: either can be re-cut without the
+# other. Both publish to the same `nightly` release.
 on:
   workflow_run:
     workflows: [test]
@@ -19,8 +16,7 @@ concurrency:
 
 jobs:
   macos:
-    # Only guards the upstream `test` run: any other trigger asked for this
-    # build directly.
+    # Any other trigger asked for this build directly.
     if: >-
       github.event_name != 'workflow_run'
       || github.event.workflow_run.conclusion == 'success'
@@ -30,12 +26,10 @@ jobs:
     timeout-minutes: 60
     permissions:
       contents: write
-    env:
-      # workflow_run checks out the default branch unless told otherwise.
-      SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
     steps:
       - uses: actions/checkout@v4
         with:
+          # workflow_run checks out the default branch unless told otherwise.
           ref: ${{ github.event.workflow_run.head_sha || github.sha }}
       - uses: ocaml/setup-ocaml@v3
         with:
@@ -52,14 +46,9 @@ jobs:
           # openssl@3 is keg-only, so conf-libssl only finds it via pkg-config.
           echo "PKG_CONFIG_PATH=$(brew --prefix openssl@3)/lib/pkgconfig:$PKG_CONFIG_PATH" >> $GITHUB_ENV
       - name: Install OCaml dependencies
-        # conf-libev goes in first, on its own: lwt reads libev support from
-        # %{conf-libev:installed}% when it builds, and conf-libev is only a
-        # depopt, so nothing orders the two. An lwt built before it has no libev
-        # engine at all and silently falls back to select, which cannot watch a
-        # descriptor at or above FD_SETSIZE — see Frontend.use_libev.
-        #
-        # lwt_ssl is optional and enables the OpenSSL TLS backend, which is the
-        # faster one and what a released build should ship with.
+        # conf-libev first and alone: lwt reads %{conf-libev:installed}% when it
+        # builds and nothing orders the two, and an lwt without it falls back to
+        # select — see Frontend.use_libev. lwt_ssl is the faster TLS backend.
         run: |
           opam install -y conf-libev
           opam install --deps-only -y tsync tsync-s3
@@ -80,9 +69,8 @@ jobs:
           security unlock-keychain -p "$password" "$keychain"
           security list-keychains -d user -s "$keychain" $(security list-keychains -d user | tr -d '"')
 
-          # -A, not -T codesign: pkgbuild needs the Installer key too, and any
-          # tool missing from the ACL raises a keychain prompt that hangs the
-          # runner forever. This keychain is a throwaway in RUNNER_TEMP.
+          # -A, not -T codesign: pkgbuild needs the Installer key too, and a
+          # tool missing from the ACL hangs the runner on a keychain prompt.
           echo "$CERT_P12" | base64 -d > "$RUNNER_TEMP/cert.p12"
           security import "$RUNNER_TEMP/cert.p12" -k "$keychain" -P "$CERT_PASSWORD" -A
           security set-key-partition-list -S apple-tool:,apple:,codesign: \
@@ -92,9 +80,8 @@ jobs:
           echo "$PROFILE_APPEX_B64" | base64 -d > "$RUNNER_TEMP/appex.provisionprofile"
           echo "$AC_API_KEY_P8" | base64 -d > "$RUNNER_TEMP/ac_key.p8"
 
-          # The .p12 holds both Developer ID certificates: Application signs the
-          # bundle, Installer signs the .pkg. Only the former is a codesigning
-          # identity, so the latter has to be looked up without -p codesigning.
+          # Only the Application certificate is a codesigning identity; the
+          # Installer one, which signs the .pkg, needs the wider search.
           app_identity=$(security find-identity -v -p codesigning "$keychain" \
             | grep "Developer ID Application" | head -1 | sed 's/.*"\(.*\)"/\1/')
           installer_identity=$(security find-identity -v "$keychain" \
@@ -122,11 +109,9 @@ jobs:
           name: tsync-pkg
           path: macos/dist/tsync.pkg
 
+      # The `nightly` release exists; this replaces its macOS asset and leaves
+      # the rest of it alone.
       - name: Publish nightly release
         env:
           GH_TOKEN: ${{ github.token }}
-        run: |
-          gh release view nightly >/dev/null 2>&1 \
-            || gh release create nightly --prerelease --title nightly --notes ""
-          gh release upload nightly macos/dist/tsync.pkg --clobber
-          gh release edit nightly --notes "Rolling build of main, from $SHA."
+        run: gh release upload nightly macos/dist/tsync.pkg --clobber

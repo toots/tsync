@@ -62,11 +62,9 @@ jobs:
           opam pin add -ny fuse3 git+https://github.com/toots/ocamlfuse.git
           opam pin add -ny git+https://github.com/toots/aws-s3.git#tsync
       - name: Install OCaml dependencies
-        # conf-libev goes in first, on its own: lwt reads libev support from
-        # %{conf-libev:installed}% when it builds, and conf-libev is only a
-        # depopt, so nothing orders the two. An lwt built before it has no libev
-        # engine at all and silently falls back to select, which cannot watch a
-        # descriptor at or above FD_SETSIZE — see Frontend.use_libev.
+        # conf-libev first and alone: lwt reads %{conf-libev:installed}% when it
+        # builds and nothing orders the two, and an lwt without it falls back to
+        # select — see Frontend.use_libev.
         run: |
           opam install -y conf-libev
           opam install --deps-only -y tsync tsync-s3 tsync-fuse
@@ -74,10 +72,8 @@ jobs:
         run: opam exec -- dune build
       - name: Run tests
         run: opam exec -- dune test
-      # Drives a real FUSE mount: a store, a mount, and a second client, all
-      # staged under a scratch directory and taken down again. Separate from
-      # `dune test`, which must stay hermetic — this one mounts a filesystem.
-      # Everything it touches is its own, so there is nothing to clean up after.
+      # Mounts a real filesystem, so it stays out of `dune test`, which is
+      # hermetic. Everything it touches is under a scratch directory.
       - name: End-to-end (FUSE)
         run: opam exec -- make -C linux e2e
 
@@ -100,14 +96,9 @@ jobs:
           # openssl@3 is keg-only, so conf-libssl only finds it via pkg-config.
           echo "PKG_CONFIG_PATH=$(brew --prefix openssl@3)/lib/pkgconfig:$PKG_CONFIG_PATH" >> $GITHUB_ENV
       - name: Install OCaml dependencies
-        # conf-libev goes in first, on its own: lwt reads libev support from
-        # %{conf-libev:installed}% when it builds, and conf-libev is only a
-        # depopt, so nothing orders the two. An lwt built before it has no libev
-        # engine at all and silently falls back to select, which cannot watch a
-        # descriptor at or above FD_SETSIZE — see Frontend.use_libev.
-        #
-        # lwt_ssl is optional and enables the OpenSSL TLS backend, which is the
-        # faster one and what a released build should ship with.
+        # conf-libev first and alone: lwt reads %{conf-libev:installed}% when it
+        # builds and nothing orders the two, and an lwt without it falls back to
+        # select — see Frontend.use_libev. lwt_ssl is the faster TLS backend.
         run: |
           opam install -y conf-libev
           opam install --deps-only -y tsync tsync-s3
@@ -116,14 +107,9 @@ jobs:
         run: opam exec -- dune build
       - name: Run tests
         run: opam exec -- dune test
-      # Builds the Swift targets and runs their tests. The protocol tests start
-      # the daemon built above against a local store in a temporary directory, so
-      # they need no network, no signing and no registered domain — and they are
-      # what holds the two halves of the IPC contract together.
-      #
-      # Assembling the bundle — embedding the daemon, dylibbundler, signing,
-      # packaging — is exercised by the release workflow, which has the signing
-      # credentials.
+      # The protocol tests run the daemon built above against a local store, so
+      # they need no network, no signing and no registered domain. Assembling
+      # the bundle is the release workflow's job.
       - name: Build and test macOS app
         run: |
           make generate
