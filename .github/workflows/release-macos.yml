@@ -19,8 +19,10 @@ concurrency:
 
 jobs:
   macos:
+    # Only guards the upstream `test` run: any other trigger asked for this
+    # build directly.
     if: >-
-      github.event_name == 'workflow_dispatch'
+      github.event_name != 'workflow_run'
       || github.event.workflow_run.conclusion == 'success'
     runs-on: macos-latest
     # A keychain prompt or a stalled notarization otherwise sits until the

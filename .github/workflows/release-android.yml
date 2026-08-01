@@ -24,8 +24,10 @@ concurrency:
 
 jobs:
   apk:
+    # Only guards the upstream `test` run: any other trigger asked for this
+    # build directly.
     if: >-
-      github.event_name == 'workflow_dispatch'
+      github.event_name != 'workflow_run'
       || github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
     timeout-minutes: 120
