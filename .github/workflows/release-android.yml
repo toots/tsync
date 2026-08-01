@@ -65,7 +65,10 @@ jobs:
         # the ppx.
         run: |
           opam install -y ppx_blob
-          opam install -y ocaml-android \
+          # The conf- packages only detect what the sysroot holds; these are
+          # what put libev and gmp there.
+          opam install -y ocaml-android build-libev-android build-gmp-android
+          opam install -y \
             conf-libev-android cohttp-lwt-unix-android conduit-lwt-unix-android \
             digestif-android eqaf-android yojson-android lwt-android \
             ppx_blob-android mem_usage-android tls-android base64-android \
