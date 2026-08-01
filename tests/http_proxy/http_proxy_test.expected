@@ -309,4 +309,8 @@ Recent warnings and errors (newest first)
   plain /stats, nothing asked    manifests=0 chunks=4096 chunkBytes=20480 chunksFromShards=16 aged
   recount asked                  manifests=0 chunks=4096 chunkBytes=20480 chunksFromShards=16 refreshing=true aged
   store that cannot be read      error=Backend.Backend_error("connection refused") aged
+########## /domains ##########
+  unsigned         401 unauthorized
+  wrong secret     401 unauthorized
+  signed           200 {"domains":[{"name":"statusdom","readOnly":false}]}
 http_proxy_test ok
