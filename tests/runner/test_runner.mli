@@ -34,6 +34,11 @@ type step =
   | ReadRange of { path : string; offset : int; len : int }
       (** Read [len] bytes at [offset], fetching only the chunks they need, and
           print the bytes returned. *)
+  | FetchRange of { path : string; offset : int; len : int }
+      (** Serve [len] bytes at [offset] into a file the way the macOS File
+          Provider asks for a piece of a large file, and print how many bytes
+          were served, how long the destination file is — everything before the
+          range is a hole — and the bytes that landed in the range. *)
   | WriteAt of { path : string; offset : int; content : string }
       (** Write [content] at [offset] through the staged write path
           (read-modify-write of a partially covered chunk). *)

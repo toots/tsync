@@ -17,6 +17,8 @@ struct DaemonRequest: Encodable {
     var arg: String?
     var target: String?
     var dest: String?
+    var offset: Int64?
+    var length: Int64?
 }
 
 /// An item, as the daemon describes one. `ref`, `parentRef` and `name` are
@@ -63,6 +65,12 @@ struct DaemonResponse: Decodable {
     let bytesDownloaded: Int64?
     let totalBytes: Int64?
 
+    /// The range `fetch_range` actually served. `length` is short of what was
+    /// asked for at end of file, so it is the answer that matters rather than
+    /// the request.
+    let offset: Int64?
+    let length: Int64?
+
     /// `stat` answers with the item's fields at the top level rather than nested,
     /// so it is decoded from this same container and comes back nil for every
     /// other response.
@@ -70,7 +78,7 @@ struct DaemonResponse: Decodable {
 
     private enum CodingKeys: String, CodingKey {
         case ok, code, error, items, ops, stale, cursor, localPath, url
-        case active, bytesDownloaded, totalBytes
+        case active, bytesDownloaded, totalBytes, offset, length
     }
 
     init(from decoder: Decoder) throws {
@@ -87,6 +95,8 @@ struct DaemonResponse: Decodable {
         active = try c.decodeIfPresent(Bool.self, forKey: .active)
         bytesDownloaded = try c.decodeIfPresent(Int64.self, forKey: .bytesDownloaded)
         totalBytes = try c.decodeIfPresent(Int64.self, forKey: .totalBytes)
+        offset = try c.decodeIfPresent(Int64.self, forKey: .offset)
+        length = try c.decodeIfPresent(Int64.self, forKey: .length)
         item = try? DaemonItem(from: decoder)
     }
 }
@@ -299,6 +309,20 @@ extension DaemonClient {
     func ensureCached(ref: String, destination: String) async throws {
         _ = try await send(DaemonRequest(action: "ensure_cached", ref: ref,
                                          dest: destination))
+    }
+
+    /// Write one range of an item into `destination` at that same offset, the
+    /// rest of the file left sparse, and answer the range actually served —
+    /// short of what was asked for at end of file.
+    func fetchRange(ref: String, destination: String,
+                    offset: Int64, length: Int64) async throws -> NSRange {
+        let response = try await send(DaemonRequest(action: "fetch_range", ref: ref,
+                                                    dest: destination,
+                                                    offset: offset, length: length))
+        guard let served = response.length else {
+            throw DaemonError.transport("fetch_range answered no length")
+        }
+        return NSRange(location: Int(response.offset ?? offset), length: Int(served))
     }
 
     func downloadProgress(ref: String) async throws -> DaemonResponse {

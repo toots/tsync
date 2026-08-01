@@ -1,0 +1,3 @@
+(test
+ (name ipc_tap_test)
+ (libraries tsync_e2e yojson unix threads.posix))

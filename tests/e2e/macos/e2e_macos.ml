@@ -134,6 +134,74 @@ let () =
          match items client with _ -> true | exception _ -> false);
 
      let extra () =
+       (* Opening a large file must not pull the whole thing down. Whether the
+          system fetches a range or the lot is decided inside it, and both look
+          the same from out here once the read has returned — so the request the
+          extension makes on the way past is the only evidence there is. *)
+       check "reading part of a large file fetches only part of it" (fun () ->
+           let name = "big-" ^ string_of_int (Random.bits ()) ^ ".bin" in
+           (* Several chunks across several groups at the production chunk size,
+              which is what the installed daemon runs with: its environment
+              belongs to launchd, so the test cannot shrink them the way
+              tests/fetch_range does. *)
+           let size = 40 * 1024 * 1024 in
+           let contents =
+             String.init size (fun i -> Char.chr (i * 7 mod 251))
+           in
+           (* Created on the far side, so the replica has never held the bytes:
+              it is dataless without anything having to evict it. *)
+           remote_write client ~parent:"root" ~name contents;
+           let path = Filename.concat mount name in
+           wait_until ~timeout:120. ~what:(name ^ " to appear in the mount")
+             (fun () -> Sys.file_exists path);
+
+           let tap = Ipc_tap.start ~socket_path:paths.Runtime.socket_path in
+           Fun.protect
+             ~finally:(fun () -> Ipc_tap.stop tap)
+             (fun () ->
+               let offset = 20 * 1024 * 1024 in
+               let got =
+                 let fd = Unix.openfile path [Unix.O_RDONLY] 0 in
+                 Fun.protect
+                   ~finally:(fun () -> Unix.close fd)
+                   (fun () ->
+                     ignore (Unix.lseek fd offset Unix.SEEK_SET);
+                     let buf = Bytes.create 4096 in
+                     let n = Unix.read fd buf 0 4096 in
+                     Bytes.sub_string buf 0 n)
+               in
+               if got <> String.sub contents offset 4096 then
+                 failf "the bytes read back are not the file's";
+
+               (* A range fetch happening at all is the system taking the
+                  partial path; a whole-file fetch is it declining to. *)
+               let ranges = Ipc_tap.requests tap "fetch_range" in
+               let whole = Ipc_tap.requests tap "ensure_cached" in
+               if ranges = [] then
+                 failf
+                   "no fetch_range: the system did not use partial fetching \
+                    (%d whole-file fetches)"
+                   (List.length whole);
+               if whole <> [] then
+                 failf "%d whole-file fetches for a %d-byte read"
+                   (List.length whole) 4096;
+
+               (* And the ranges asked for have to be a fraction of the file,
+                  or partial fetching is only partial in name. *)
+               let asked =
+                 List.fold_left
+                   (fun acc r ->
+                     acc
+                     +
+                       match Ipc_tap.field "length" r with
+                       | `Int n -> n
+                       | _ -> 0)
+                   0 ranges
+               in
+               Printf.printf "  %d fetch_range request(s), %d bytes of %d\n%!"
+                 (List.length ranges) asked size;
+               if asked >= size then failf "fetched %d bytes to read 4096" asked));
+
        (* Apple's own checker over the replica. Nothing else here would notice
           the system's bookkeeping disagreeing with what it shows. *)
        check "fileproviderctl reports no broken invariants" (fun () ->

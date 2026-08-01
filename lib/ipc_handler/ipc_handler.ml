@@ -38,6 +38,9 @@ module Make (C : Conf.S) (F : File.S) = struct
   let get_str obj key =
     match List.assoc_opt key obj with Some (`String s) -> s | _ -> ""
 
+  let get_int obj key =
+    match List.assoc_opt key obj with Some (`Int n) -> Some n | _ -> None
+
   (* ── Naming items ─────────────────────────────────────────────────────────
      A request names what it wants either by reference or, for the callers that
      predate them, by logical key. Everything below works in keys; references
@@ -491,6 +494,18 @@ module Make (C : Conf.S) (F : File.S) = struct
     let+ () = F.assemble_to key ~dst_path in
     ok_json [("localPath", `String dst_path)]
 
+  (* The answer carries the range actually served rather than echoing the one
+     asked for: it is short at end of file, and the caller has to know how much
+     of the file it now holds. *)
+  let handle_fetch_range ~dst_path ~offset ~length key =
+    let+ n = F.fetch_range key ~dst_path ~offset ~length in
+    ok_json
+      [
+        ("localPath", `String dst_path);
+        ("offset", `Int offset);
+        ("length", `Int n);
+      ]
+
   let handle_create key =
     let+ () = F.create key in
     ok_json []
@@ -637,6 +652,25 @@ module Make (C : Conf.S) (F : File.S) = struct
                               fail `Invalid "ensure_cached requires \"dest\""
                           | dst_path ->
                               with_target (handle_ensure_cached ~dst_path))
+                    | "fetch_range" -> (
+                        match
+                          ( get_str obj "dest",
+                            get_int obj "offset",
+                            get_int obj "length" )
+                        with
+                          | "", _, _ ->
+                              fail `Invalid "fetch_range requires \"dest\""
+                          | _, None, _ | _, _, None ->
+                              fail `Invalid
+                                "fetch_range requires \"offset\" and \"length\""
+                          | _, Some offset, Some length
+                            when offset < 0 || length <= 0 ->
+                              fail `Invalid
+                                "fetch_range needs a non-negative \"offset\" \
+                                 and a positive \"length\""
+                          | dst_path, Some offset, Some length ->
+                              with_target
+                                (handle_fetch_range ~dst_path ~offset ~length))
                     | "create" -> with_destination handle_create
                     | "write" ->
                         with_destination (fun key ->

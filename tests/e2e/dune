@@ -5,4 +5,4 @@
 (library
  (name tsync_e2e)
  (wrapped false)
- (libraries tsync_core tsync_runtime yojson unix))
+ (libraries tsync_core tsync_runtime yojson unix threads.posix))

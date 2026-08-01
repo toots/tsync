@@ -20,6 +20,11 @@ module type S = sig
       particular place. *)
   val assemble_to : t -> dst_path:string -> unit Lwt.t
 
+  (** One range of [t] written into [dst_path] at the same offset, the rest of
+      the file left sparse. Returns the byte count, short at end of file. *)
+  val fetch_range :
+    t -> dst_path:string -> offset:int -> length:int -> int Lwt.t
+
   val stat : t -> Unix.LargeFile.stats option Lwt.t
   val readlink : t -> string option Lwt.t
 
@@ -154,6 +159,9 @@ struct
 
   (* Write the whole file to a path the caller names. *)
   let assemble_to = D.assemble_to
+
+  (* One range of it, for a caller that would rather not wait for the whole. *)
+  let fetch_range = D.fetch_range
 
   (* ── Stat ──────────────────────────────────────────────────────────────── *)
 
