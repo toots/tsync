@@ -62,6 +62,26 @@ let entries () =
     (fun name e acc -> (name, e.cli_group, e.commands) :: acc)
     registry []
 
+(* libev, never Lwt's default select engine. [select] cannot watch a descriptor
+   numbered at or above FD_SETSIZE — 1024 on macOS — so once {!Descriptors} lifts
+   the process limit past that, a single high-numbered descriptor raises EINVAL
+   out of [select] and takes the whole event loop down. That is strictly worse
+   than the EMFILE the higher limit exists to prevent: EMFILE fails one accept,
+   EINVAL fails everything.
+
+   Checked rather than assumed. [conf-libev] being installed only means the C
+   library is present; lwt built while it was absent has no libev engine at all
+   and silently falls back to select, which stays invisible until a descriptor
+   number happens to cross 1024 under load. *)
+let use_libev () =
+  if not (Lwt_sys.have `libev) then
+    failwith
+      "lwt was built without libev support, which tsync requires: select cannot \
+       watch descriptors above FD_SETSIZE. Rebuild it with libev available \
+       (opam reinstall lwt).";
+  Lwt_engine.set (new Lwt_engine.libev ());
+  Log.debug "event loop engine: libev"
+
 (* Call from inside a leaf's own Lwt loop, after all forking: the first Lwt_unix
    touch creates the notification eventfd, and a child inheriting a shared one
    loses its worker-completion wakeups.
@@ -70,7 +90,9 @@ let entries () =
    max_uploads and max_downloads already bound real concurrency. The ceiling stays
    generous rather than the per-domain sum because the parallel directory walk
    fans out one detached [stat] per entry. *)
-let cap_blocking_pool () = Lwt_unix.set_pool_size 256
+let cap_blocking_pool () =
+  use_libev ();
+  Lwt_unix.set_pool_size 256
 
 (* Narrow that ceiling to what the storage absorbs, once something has asked it.
 

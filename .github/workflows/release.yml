@@ -40,15 +40,24 @@ jobs:
           opam pin add -ny git+https://github.com/toots/aws-s3.git#tsync
       - name: Install dependencies
         run: |
-          brew install xcodegen xxhash coreutils dylibbundler pkg-config openssl@3
-          echo "CPATH=$(brew --prefix xxhash)/include:$CPATH" >> $GITHUB_ENV
-          echo "LIBRARY_PATH=$(brew --prefix xxhash)/lib:$LIBRARY_PATH" >> $GITHUB_ENV
+          brew install xcodegen xxhash libev coreutils dylibbundler pkg-config openssl@3
+          echo "CPATH=$(brew --prefix xxhash)/include:$(brew --prefix libev)/include:$CPATH" >> $GITHUB_ENV
+          echo "LIBRARY_PATH=$(brew --prefix xxhash)/lib:$(brew --prefix libev)/lib:$LIBRARY_PATH" >> $GITHUB_ENV
           # openssl@3 is keg-only, so conf-libssl only finds it via pkg-config.
           echo "PKG_CONFIG_PATH=$(brew --prefix openssl@3)/lib/pkgconfig:$PKG_CONFIG_PATH" >> $GITHUB_ENV
       - name: Install OCaml dependencies
+        # conf-libev goes in first, on its own: lwt reads libev support from
+        # %{conf-libev:installed}% when it builds, and conf-libev is only a
+        # depopt, so nothing orders the two. An lwt built before it has no libev
+        # engine at all and silently falls back to select, which cannot watch a
+        # descriptor at or above FD_SETSIZE — see Frontend.use_libev.
+        #
         # lwt_ssl is optional and enables the OpenSSL TLS backend, which is the
         # faster one and what a released build should ship with.
-        run: opam install --deps-only -y tsync tsync-s3 && opam install -y lwt_ssl
+        run: |
+          opam install -y conf-libev
+          opam install --deps-only -y tsync tsync-s3
+          opam install -y lwt_ssl
 
       - name: Import signing assets
         env:
