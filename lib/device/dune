@@ -1,0 +1,30 @@
+; Per-OS, on the model of lib/runtime: each platform builds only its own
+; implementation, and the dispatcher selects between them. A platform with no
+; implementation would answer [None] everywhere, which callers already handle as
+; "no opinion" — see device.mli.
+
+(library
+ (name tsync_linux_device)
+ (wrapped false)
+ (enabled_if
+  (= %{system} linux))
+ (modules linux_device))
+
+(library
+ (name tsync_macos_device)
+ (wrapped false)
+ (enabled_if
+  (= %{system} macosx))
+ (modules macos_device)
+ (libraries unix))
+
+(library
+ (name tsync_device)
+ (wrapped false)
+ (modules device)
+ (libraries
+  (select
+   device.ml
+   from
+   (tsync_linux_device -> device.linux.ml)
+   (tsync_macos_device -> device.macos.ml))))

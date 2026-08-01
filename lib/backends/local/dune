@@ -4,6 +4,7 @@
  (library_flags (-linkall))
  (libraries
   tsync_backend_register
+  tsync_device
   tsync_local_io
   tsync_lwt_unix
   unix

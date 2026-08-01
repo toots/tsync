@@ -327,6 +327,22 @@ let make ~chunk_prefix ~(chunk_keys : string -> string list) ~skip_prefixes
               match n with Some _ -> Lwt.return n | None -> go rest)
         in
         go inners
+
+      (* Smallest wins: a limit that ignores the slowest member is not a limit.
+         The backfill targets are written to as well as the main store, so their
+         devices are just as much in the path. *)
+      let max_concurrency ~prefix () =
+        let+ answers =
+          Lwt_list.map_s
+            (fun (module B : Backend.S) -> B.max_concurrency ~prefix ())
+            inners
+        in
+        List.fold_left
+          (fun acc n ->
+            match (acc, n) with
+              | Some a, Some b -> Some (min a b)
+              | None, some | some, None -> some)
+          None answers
     end)
   in
   { backend; lanes }

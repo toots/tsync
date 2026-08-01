@@ -33,6 +33,7 @@ type t = {
   cache : Cache.t;
   mutable share_url_cache : string option Lwt.t option;
   mutable chunk_size_cache : int option Lwt.t option;
+  mutable max_concurrency_cache : int option Lwt.t option;
 }
 
 let max_attempts = 8
@@ -227,6 +228,37 @@ let default_chunk_size t ~prefix () =
         t.chunk_size_cache <- Some p;
         p
 
+(* What the serving proxy will actually run at once, so a client in front of it
+   holds its own excess rather than parking it in the server's accept queue. The
+   limit belongs to hardware this process cannot see, which is exactly why it is
+   asked for instead of configured twice. 404 means the peer has no bound. *)
+let query_max_concurrency t ~prefix =
+  let uri =
+    Uri.with_query'
+      (Uri.with_path t.base_uri "/max-concurrency")
+      [("prefix", prefix)]
+  in
+  let+ resp, body = call_retry t ~meth:`GET "max_concurrency" uri in
+  if is_ok resp then (
+    match Yojson.Safe.from_string body with
+      | exception _ -> None
+      | j -> (
+          match Yojson.Safe.Util.member "maxConcurrency" j with
+            | `Int n when n > 0 -> Some n
+            | _ -> None))
+  else if code resp = 404 then None
+  else raise (backend_error "max_concurrency" (code resp) body)
+
+(* Asked once, like the chunk size. A peer that changes its bound is restarting
+   to do it, which drops these connections anyway. *)
+let max_concurrency t ~prefix () =
+  match t.max_concurrency_cache with
+    | Some p -> p
+    | None ->
+        let p = query_max_concurrency t ~prefix in
+        t.max_concurrency_cache <- Some p;
+        p
+
 let make ~url ~secret : (module Backend.S) =
   let t =
     {
@@ -235,6 +267,7 @@ let make ~url ~secret : (module Backend.S) =
       cache = Cache.create ~keep:keep_idle_ns ~parallel:max_parallel ();
       share_url_cache = None;
       chunk_size_cache = None;
+      max_concurrency_cache = None;
     }
   in
   (module struct
@@ -248,6 +281,7 @@ let make ~url ~secret : (module Backend.S) =
     let list_prefix ?max_keys ~prefix () = list_all t ?max_keys ~prefix ()
     let share_url ~prefix () = share_url t ~prefix ()
     let default_chunk_size ~prefix () = default_chunk_size t ~prefix ()
+    let max_concurrency ~prefix () = max_concurrency t ~prefix ()
   end)
 
 let spec =

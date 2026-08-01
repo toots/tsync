@@ -255,6 +255,11 @@ let make ?endpoint ?service_account_key ?share_url ~bucket () :
     let list_prefix ?max_keys ~prefix () = list_all t ?max_keys ~prefix ()
     let share_url ~prefix:_ () = Lwt.return t.share_url
     let default_chunk_size ~prefix:_ () = Lwt.return_none
+
+    (* No opinion: what limits an object store is the network and its own
+       concurrency, neither of which this process can measure, and both of which
+       take far more at once than any device would. *)
+    let max_concurrency ~prefix:_ () = Lwt.return_none
   end)
 
 let spec =

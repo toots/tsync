@@ -136,4 +136,20 @@ let make ~(writable : sub list) ~(fallbacks : sub list) : (module Backend.S) =
             match n with Some _ -> Lwt.return n | None -> go rest)
       in
       go inners
+
+    (* The lowest opinion any member holds. Unlike the chunk size, this is not a
+       preference to take from the first store that has one: it is a limit, and a
+       limit only holds if it is the smallest. *)
+    let max_concurrency ~prefix () =
+      let+ answers =
+        Lwt_list.map_s
+          (fun (module B : Backend.S) -> B.max_concurrency ~prefix ())
+          inners
+      in
+      List.fold_left
+        (fun acc n ->
+          match (acc, n) with
+            | Some a, Some b -> Some (min a b)
+            | None, some | some, None -> some)
+        None answers
   end)

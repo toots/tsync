@@ -42,6 +42,7 @@ module Down : Backend.S = struct
   let list_prefix ?max_keys:_ ~prefix:_ () = fail ()
   let share_url ~prefix:_ () = Lwt.return_none
   let default_chunk_size ~prefix:_ () = Lwt.return_none
+  let max_concurrency ~prefix:_ () = Lwt.return_none
 end
 
 let json_member name j = Yojson.Safe.Util.member name j

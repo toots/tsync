@@ -18,6 +18,44 @@ let stats_html = [%blob "stats.html"]
 let counters : (string, int) Hashtbl.t = Hashtbl.create 16
 let in_flight = ref 0
 
+(* How many requests may be reading or writing object data at once.
+
+   An inbound burst turns straight into that many concurrent reads of whatever
+   storage backs the domain, and there is no natural limit on the burst: one
+   client opening one large file can ask for many ranges at once, each of which
+   becomes a chunk read here. Past what the device can absorb this stops being
+   throughput and becomes queueing — on a slow disk the block layer runs out of
+   tags and every thread waits on one, so the work already accepted finishes
+   more slowly than if less had been accepted. Serving fewer at a time serves
+   them sooner.
+
+   Metadata is deliberately outside the bound: a listing costs almost nothing
+   and should not have to wait behind a transfer.
+
+   ponytail: one global bound, not per-domain or per-client. The thing being
+   protected is the storage under the process, which they all share. *)
+let default_max_concurrent = 16
+let data_slots : unit Lwt_pool.t option ref = ref None
+
+(* The bound in force, published to clients so they can hold their own excess. *)
+let effective_max_concurrent : int option ref = ref None
+
+let bounded op run =
+  match (!data_slots, op) with
+    | Some pool, (`Get | `Put) -> Lwt_pool.use pool (fun () -> run ())
+    | _ -> run ()
+
+(* The bound several stores agree on: the smallest of those that hold one. A
+   store with no opinion is silent, not zero — object stores answer that way and
+   must not drag the bound to nothing. *)
+let lowest answers =
+  List.fold_left
+    (fun acc n ->
+      match (acc, n) with
+        | Some a, Some b -> Some (min a b)
+        | None, some | some, None -> some)
+    None answers
+
 let bump name =
   Hashtbl.replace counters name
     (1 + Option.value ~default:0 (Hashtbl.find_opt counters name))
@@ -173,6 +211,7 @@ type op =
   | List_all of string * int option
   | Share_url of string
   | Chunk_size of string
+  | Max_concurrency of string
   | Bad
       (** one of ours, but malformed: an undecodable key, a missing argument *)
   | Unknown  (** not part of the API at all — a browser asking for a favicon *)
@@ -214,9 +253,17 @@ let parse_op meth uri body =
           | _ -> Bad)
     | `GET, "/chunk-size" -> (
         match q "prefix" with Some prefix -> Chunk_size prefix | None -> Bad)
+    | `GET, "/max-concurrency" -> (
+        match q "prefix" with
+          | Some prefix -> Max_concurrency prefix
+          | None -> Bad)
     | `GET, "/share-url" -> (
         match q "prefix" with Some prefix -> Share_url prefix | None -> Bad)
     | _ -> Unknown
+
+(* Whether serving this op reads or writes object data. [Head] is metadata only,
+   and [Copy] is settled by the backend without the bytes passing through here. *)
+let data_kind = function Get _ -> `Get | Put _ -> `Put | _ -> `Meta
 
 let op_name = function
   | Get _ -> "get"
@@ -228,6 +275,7 @@ let op_name = function
   | List_all _ -> "list"
   | Share_url _ -> "shareUrl"
   | Chunk_size _ -> "chunkSize"
+  | Max_concurrency _ -> "maxConcurrency"
   | Bad -> "badRequest"
   | Unknown -> "notFound"
 
@@ -238,7 +286,7 @@ let route_key = function
   | Delete_multi (k :: _) -> Some k
   | Delete_multi [] -> None
   | Copy (src, _) -> Some src
-  | List_all (p, _) | Share_url p | Chunk_size p -> Some p
+  | List_all (p, _) | Share_url p | Chunk_size p | Max_concurrency p -> Some p
   | Bad | Unknown -> None
 
 let respond ?(status = `OK) ?(headers = []) body =
@@ -361,6 +409,17 @@ let exec route op ~body =
           match route.chunk_size with
           | Some n ->
               respond (Yojson.Safe.to_string (`Assoc [("chunkSize", `Int n)]))
+          | None -> respond ~status:`Not_found "")
+    | Max_concurrency _ -> (
+        (* What we will actually serve at once, so a client in front of us holds
+           its own excess instead of parking it in our accept queue. This is our
+           effective bound — explicit setting or what our storage said — not a
+           preference, so unlike the chunk size it is worth chaining: a proxy
+           fronting a proxy is limited by whatever is furthest down. *)
+          match !effective_max_concurrent with
+          | Some n ->
+              respond
+                (Yojson.Safe.to_string (`Assoc [("maxConcurrency", `Int n)]))
           | None -> respond ~status:`Not_found "")
     | Bad | Unknown -> respond ~status:`Bad_request "bad request"
 
@@ -566,7 +625,9 @@ let callback ~port ~tls routes _conn req body =
                             Lwt.finalize
                               (fun () ->
                                 Lwt.catch
-                                  (fun () -> exec route op ~body:body_str)
+                                  (fun () ->
+                                    bounded (data_kind op) (fun () ->
+                                        exec route op ~body:body_str))
                                   (fun exn ->
                                     bump "error";
                                     Log.err "http-proxy: %s"
@@ -599,6 +660,16 @@ let start bindings =
       | Some p -> int_of_string p
       | None -> if tls then 443 else 80
   in
+  let configured_max_concurrent =
+    match listener_value bindings "max_concurrent" with
+      | Some v -> (
+          match int_of_string_opt v with
+            | Some n when n > 0 -> Some n
+            | _ ->
+                failwith "http-proxy: max_concurrent must be a positive integer"
+          )
+      | None -> None
+  in
   let routes = List.map (make_route bindings) bindings in
   let mode =
     match (cert, key) with
@@ -625,6 +696,42 @@ let start bindings =
      List.iter
        (fun s -> ignore (Lwt_unix.on_signal s (fun _ -> request_stop ())))
        [Sys.sigterm; Sys.sigint];
+     (* An explicit setting wins: whoever wrote it knows something about this
+        deployment that a probe cannot see. Otherwise ask the storage, taking
+        the lowest answer — a bound that ignores the slowest participant is not
+        a bound. If nothing has an opinion, which is every purely network-backed
+        domain, fall back to a figure that is only there to stop an unbounded
+        pile-up. *)
+     let* derived =
+       match configured_max_concurrent with
+         | Some _ -> Lwt.return_none
+         | None ->
+             let backends = List.concat_map (fun r -> r.all_backends) routes in
+             let+ answers =
+               Lwt_list.map_s
+                 (fun (module B : Backend.S) ->
+                   Lwt.catch
+                     (fun () -> B.max_concurrency ~prefix:"" ())
+                     (fun _ -> Lwt.return_none))
+                 backends
+             in
+             lowest answers
+     in
+     let max_concurrent =
+       match (configured_max_concurrent, derived) with
+         | Some n, _ -> n
+         | None, Some n -> n
+         | None, None -> default_max_concurrent
+     in
+     Log.info "http-proxy serving at most %d object reads/writes at once (%s)"
+       max_concurrent
+       (match (configured_max_concurrent, derived) with
+         | Some _, _ -> "configured"
+         | None, Some _ -> "from the storage"
+         | None, None -> "default");
+     data_slots :=
+       Some (Lwt_pool.create max_concurrent (fun () -> Lwt.return_unit));
+     effective_max_concurrent := Some max_concurrent;
      let* () =
        Cohttp_lwt_unix.Server.create ~stop ~mode
          (Cohttp_lwt_unix.Server.make ~callback:(callback ~port ~tls routes) ())
@@ -638,6 +745,17 @@ let spec =
       {
         name = "port";
         label = "Listen port (default: 443 with TLS, else 80)";
+        typ = `Int;
+        default = Some "";
+        secret = false;
+      };
+      {
+        name = "max_concurrent";
+        label =
+          Printf.sprintf
+            "Object reads/writes served at once, over which requests queue \
+             (default: %d)"
+            default_max_concurrent;
         typ = `Int;
         default = Some "";
         secret = false;

@@ -43,6 +43,17 @@ module type S = sig
       so a client behind one inherits it instead of mirroring the setting in two
       configs. Only consulted when the client's own config does not say. *)
   val default_chunk_size : prefix:string -> unit -> int option Lwt.t
+
+  (** How many object reads or writes this backend can usefully be serving at
+      once, or [None] if it has no opinion — which is every store whose limit is
+      the network rather than a device it can measure.
+
+      Asked by frontends that accept work from many clients at once, so they can
+      hold requests they cannot yet serve instead of handing them all to storage
+      and letting it thrash. A local store answers from the device under it; an
+      http-proxy asks the peer serving it, so a client behind one inherits the
+      real limit rather than guessing at hardware it cannot see. *)
+  val max_concurrency : prefix:string -> unit -> int option Lwt.t
 end
 
 type factory = (string -> string option) -> (module S)

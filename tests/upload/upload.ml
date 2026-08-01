@@ -52,6 +52,7 @@ let opinionated n : (module Backend.S) =
     include (val Local_backend.make ~root:backend_root : Backend.S)
 
     let default_chunk_size ~prefix:_ () = Lwt.return n
+    let max_concurrency ~prefix:_ () = Lwt.return_none
   end)
 
 module Unset (B : sig

@@ -26,13 +26,13 @@
         <string>group.org.feverdreamtv.tsync</string>
         <key>NSExtensionFileProviderSupportsEnumeration</key>
         <true/>
-        <!-- Outstanding range fetches the system may run at once. Reading a
-             large file sequentially only keeps the pipe full if the next ranges
-             are already in flight while the current one is being consumed, and
-             the daemon opens a connection per request, so these really do run in
-             parallel rather than queueing behind one another. -->
-        <key>NSExtensionFileProviderDownloadPipelineDepth</key>
-        <integer>8</integer>
+        <!-- No NSExtensionFileProviderDownloadPipelineDepth on purpose. Raising
+             it multiplies the range fetches in flight, and each one costs the
+             serving daemon a group read plus read-ahead — which against a small
+             chunk size on slow storage is how the backend gets buried rather
+             than kept busy. The system's own default holds until there is a
+             measurement that says otherwise. -->
+
         <key>NSExtensionFileProviderAllowsUserControlledEviction</key>
         <true/>
         <key>NSExtensionFileProviderActions</key>

@@ -150,6 +150,11 @@ let make ~root : (module Backend.S) =
 
     let share_url ~prefix:_ () = Lwt.return_none
     let default_chunk_size ~prefix:_ () = Lwt.return_none
+
+    (* Probed once: the device under a configured root does not change, and this
+       is asked while a request is waiting. *)
+    let concurrency = lazy (Device.max_concurrency root)
+    let max_concurrency ~prefix:_ () = Lwt.return (Lazy.force concurrency)
   end)
 
 let spec =
