@@ -1,11 +1,10 @@
-(* Linux: the kernel publishes what the device will take, so this is measured
-   rather than inferred.
+(* The kernel publishes what the device will take, so this is measured rather
+   than inferred.
 
-   [device/queue_depth] is what the hardware itself accepts — 1 for a USB
-   enclosure on Bulk-Only Transport, which is not a misreading but the protocol:
-   one command outstanding, ever. [queue/nr_requests] is the block layer's own
-   queue and stands in when the first is absent, as it is for anything that is
-   not a SCSI device. *)
+   [device/queue_depth] is what the hardware accepts — 1 for a USB enclosure on
+   Bulk-Only Transport, which is the protocol rather than a misreading.
+   [queue/nr_requests] is the block layer's own queue, standing in when the first
+   is absent, as it is for anything that is not a SCSI device. *)
 
 let read_line_opt path =
   match open_in path with

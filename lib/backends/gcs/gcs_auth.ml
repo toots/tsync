@@ -48,9 +48,9 @@ let of_service_account_json json =
     refresh_lock = Lwt_mutex.create ();
   }
 
-(* header.claims.signature, RS256 over the ASCII signing input. Deterministic
-   PKCS#1 v1.5, so [`No] masking needs no RNG — the JWT is signed before any TLS
-   connection exists to seed one, and blinding only guards local timing channels. *)
+(* RS256 over the ASCII signing input. PKCS#1 v1.5 is deterministic, so [`No]
+   masking needs no RNG: the JWT is signed before any TLS connection exists to
+   seed one, and blinding only guards local timing channels. *)
 let make_jwt t =
   let now = int_of_float (Unix.gettimeofday ()) in
   let header = `Assoc [("alg", `String "RS256"); ("typ", `String "JWT")] in
@@ -105,7 +105,7 @@ let request_token t =
     Lwt.return (token, Unix.gettimeofday () +. expires_in)
   end
 
-(* Refresh a minute early to dodge clock skew; anchor to absolute expiry. *)
+(* A minute early, to absorb clock skew. *)
 let refresh_margin = 60.
 
 let fresh t =
@@ -114,9 +114,8 @@ let fresh t =
         Some tok
     | _ -> None
 
-(* A valid bearer token. Concurrent callers on a cold cache share one refresh:
-   the mutex serializes them and the re-check inside returns the token the first
-   waiter just fetched. *)
+(* Concurrent callers on a cold cache share one refresh: the mutex serializes
+   them and the re-check inside returns what the first waiter fetched. *)
 let token t =
   match fresh t with
     | Some tok -> Lwt.return tok

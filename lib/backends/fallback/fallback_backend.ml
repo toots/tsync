@@ -1,22 +1,18 @@
 open Lwt.Syntax
 
-(* A composite Backend.S that composes the readable backends into one, in role
-   order, and decides how far a read is allowed to look.
+(* A composite Backend.S composing the readable backends in role order, and
+   deciding how far a read may look.
 
-   Two groups:
-
-   - [writable] — the [main] backends and then the [replica]s. Every write fans
-     out over all of them, so they hold the same content and any live one can
-     speak for the source of truth. A read walks them and takes the first answer
-     from one that is reachable; a definitive "not found" from that one is the
-     answer, because the next one holds the same thing.
+   - [writable] — the [main] backends then the [replica]s. Every write fans out
+     over all of them, so they hold the same content and any live one speaks for
+     the source of truth: a read takes the first answer from a reachable one, and
+     a definitive "not found" from it ends the read.
    - [fallbacks] — the [readOnly] stores. Different content (an old bucket still
-     worth serving, never worth writing), so they are consulted both when the
-     source of truth says no and when none of it is reachable. Never written.
+     worth serving, never worth writing), consulted both when the source of truth
+     says no and when none of it is reachable. Never written.
 
-   When nothing answers and nothing is left to try, the last error is re-raised.
-   Swallowing it into [None] would turn an unreachable backend into a confident
-   ENOENT, which is the one outcome a caller must never be handed. *)
+   When nothing answers, the last error is re-raised: swallowing it into [None]
+   would hand a caller a confident ENOENT from an unreachable backend. *)
 
 type sub = { name : string; backend : (module Backend.S) }
 
@@ -25,16 +21,14 @@ type sub = { name : string; backend : (module Backend.S) }
    [fallbacks]: read-only stores, consulted in order, never written. *)
 let make ~(writable : sub list) ~(fallbacks : sub list) : (module Backend.S) =
   let inners = List.map (fun (s : sub) -> s.backend) writable in
-  (* A read-only domain has nothing writable at all. Fanning out over the empty
-     list would report success, so say so instead: a write that lands nowhere
-     must not look like a write that landed. *)
+  (* Fanning out over an empty list would report success, and a write that lands
+     nowhere must not look like one that landed. *)
   let write f =
     if inners = [] then Lwt.fail Backend.Not_writable
     else Lwt_list.iter_s f inners
   in
-  (* Walk [chain] for an answer. [stop_on_miss] returns the first reachable
-     backend's [None] as the answer; otherwise a miss moves on. Returns
-     [`Answer]/[`Miss], or [`Unreachable exn] when every backend raised. *)
+  (* [stop_on_miss] takes the first reachable backend's [None] as the answer;
+     otherwise a miss moves on. [`Unreachable exn] when every backend raised. *)
   let walk ~stop_on_miss label chain f =
     let rec go last = function
       | [] -> (
@@ -61,10 +55,9 @@ let make ~(writable : sub list) ~(fallbacks : sub list) : (module Backend.S) =
     in
     go None chain
   in
-  (* The source of truth first, then the archives. A miss is only reported when
-     every backend that could have held the key was actually asked: if any of
-     them was unreachable, its error is what the caller gets, because "I could
-     not look" must never reach a caller as "it is not there". *)
+  (* Source of truth first, then the archives. A miss is reported only when every
+     backend that could hold the key was actually asked: an unreachable one
+     surfaces its error, since "could not look" must not read as "not there". *)
   let read label f =
     let* first = walk ~stop_on_miss:true label writable f in
     match first with
@@ -108,7 +101,7 @@ let make ~(writable : sub list) ~(fallbacks : sub list) : (module Backend.S) =
             Lwt.fail (Backend.Backend_error ("fallback get: not found: " ^ key))
 
     (* An empty listing is a real answer, so only an unreachable backend moves
-       on, and listings are never merged: one backend's view wins. *)
+       on. Listings are never merged: one backend's view wins. *)
     let list_prefix ?max_keys ~prefix () =
       let* r =
         read "list_prefix" (fun (module B : Backend.S) ->
@@ -117,8 +110,8 @@ let make ~(writable : sub list) ~(fallbacks : sub list) : (module Backend.S) =
       in
       Lwt.return (Option.value r ~default:[])
 
-    (* Shares and chunk sizes describe where new data goes, so only the writable
-       backends have a say. *)
+    (* These describe where new data goes, so only writable backends have a
+       say. *)
     let share_url ~prefix () =
       let rec go = function
         | [] -> Lwt.return_none
@@ -137,9 +130,8 @@ let make ~(writable : sub list) ~(fallbacks : sub list) : (module Backend.S) =
       in
       go inners
 
-    (* The lowest opinion any member holds. Unlike the chunk size, this is not a
-       preference to take from the first store that has one: it is a limit, and a
-       limit only holds if it is the smallest. *)
+    (* Unlike the chunk size this is a limit, not a preference, so it is the
+       lowest any member holds rather than the first opinion found. *)
     let max_concurrency ~prefix () =
       let+ answers =
         Lwt_list.map_s

@@ -1,10 +1,10 @@
 (** The local cache-chunk store: {!Chunk_group} bodies named by their content
     key.
 
-    A group is present iff its file exists — there is no residency record — and
-    any group may vanish at any time (the cache cap deletes them), so every read
-    treats a miss as ordinary and fetches again. Bodies are shared: two files
-    whose chunks group identically are one file on disk and one download. *)
+    A group is present iff its file exists, and any group may vanish at any time
+    (the cache cap deletes them), so every read treats a miss as ordinary and
+    fetches again. Bodies are shared: two files whose chunks group identically
+    are one file on disk and one download. *)
 
 (** What the store needs from the backend layer. {!Remote.S} satisfies it.
     Grouping is invisible here: a cache chunk is fetched as its members. *)
@@ -45,19 +45,19 @@ module Make (C : Conf.S) (F : Fetch) : sig
   val forget : group:Chunk_group.t -> unit Lwt.t
 
   (** Re-hash every member segment of a group already on disk against the key it
-      was published under, deleting the body when one does not match. [true] if
-      the group survived (or was not here to begin with). Driven from
-      {!Recheck}, which supplies the groups: unlike a lone chunk, a group body
-      cannot be checked against its own name. *)
+      was published under, deleting the body on a mismatch. [true] if the group
+      survived (or was never here). Driven from {!Recheck}, which supplies the
+      groups: unlike a lone chunk, a group body cannot be checked against its
+      own name. *)
   val verify_group : group:Chunk_group.t -> bool Lwt.t
 
   (** {2 Staged bodies}
 
-      A chunk being written locally has no content key yet — its bytes are still
-      changing — so it lives under a uuid until the upload that hashes it
-      publishes, and the group it belongs to is written out whole
-      ({!put_group}). Staged bodies are unsynced data and are never reclaimed by
-      the cap. One body per *stored* chunk: that is what an upload sends. *)
+      A chunk being written has no content key yet, its bytes still changing, so
+      it lives under a uuid until the upload that hashes it publishes and its
+      group is written out whole ({!put_group}). Staged bodies are unsynced data
+      and are never reclaimed by the cap. One body per {i stored} chunk, which
+      is what an upload sends. *)
 
   (** Path of a staged body, for the upload that reads and hashes it. *)
   val staged_path : string -> string
@@ -86,8 +86,8 @@ module Make (C : Conf.S) (F : Fetch) : sig
 
   val whole_path : string -> string
 
-  (** Take over [src] as whole body [uuid] (rename, or copy across filesystems).
-  *)
+  (** Take over [src] as whole body [uuid]: a rename, or a copy across
+      filesystems. *)
   val adopt_whole : src:string -> uuid:string -> unit Lwt.t
 
   val whole_read_into :
@@ -103,7 +103,7 @@ module Make (C : Conf.S) (F : Fetch) : sig
 
   (** While the store exceeds [C.max_cache], delete cache-chunk bodies
       oldest-mtime first. No-op when [max_cache] is unset. Needs no notion of
-      what is in use: a body deleted from under a reader is fetched again. Never
+      what is in use: a body deleted under a reader is fetched again. Never
       touches staged data, which lives in a different tree. *)
   val enforce_cap : unit -> unit Lwt.t
 end

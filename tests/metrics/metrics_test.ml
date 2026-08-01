@@ -8,7 +8,7 @@ let () =
   assert (Metrics.uploaded () = 150);
   assert (Metrics.downloaded () = 30);
   assert (Metrics.hashed () = 3);
-  (* window is 10s; all adds land in the current window, so rate = total / 10 *)
+  (* A 10s window, and every add lands in it, so rate = total / 10. *)
   assert (Metrics.upload_rate () = 15.0);
   assert (Metrics.download_rate () = 3.0);
   print_endline "metrics_test ok"

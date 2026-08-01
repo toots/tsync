@@ -1,10 +1,10 @@
 (* Cache chunks: a run of consecutive stored chunks, cached as a single file.
 
-   The two granularities pull in opposite directions. A stored chunk is network
-   granularity — smaller means less egress when a file changes and finer dedup.
-   A cache chunk is disk granularity — larger means fewer opens and less I/O
-   latency per read. This module is the seam between them, and the only place
-   that knows a cache file holds more than one stored chunk. *)
+   The two granularities pull opposite ways. A stored chunk is network
+   granularity: smaller means less egress when a file changes and finer dedup. A
+   cache chunk is disk granularity: larger means fewer opens and less latency per
+   read. This is the seam, and the only place knowing a cache file holds more
+   than one stored chunk. *)
 
 type t = {
   key : string;
@@ -13,17 +13,16 @@ type t = {
   first : int;  (** stored index of [members.(0)] *)
 }
 
-(* Stored chunks per cache chunk: the n that puts n * chunk_size closest to
-   cache_chunk_size. Integer round-half-up, so a tie takes the larger group. *)
+(* The n putting n * chunk_size closest to cache_chunk_size. Round-half-up, so a
+   tie takes the larger group. *)
 let per_group ~chunk_size ~cache_chunk_size =
   if chunk_size <= 0 then 1
   else max 1 ((cache_chunk_size + (chunk_size / 2)) / chunk_size)
 
-(* The group's name, hashed over its member keys — not "<first>-<last>". Two
-   groups can share their first and last chunk and differ in between (a run of
-   identical chunks, which any all-zero region gives you), and aliasing two
-   groups onto one cache file serves one file's bytes for the other's. Same
-   shape as a chunk key, so the fanout directory is unchanged. *)
+(* Hashed over the member keys, not "<first>-<last>": two groups can share their
+   first and last chunk and differ in between (any run of identical chunks does
+   it), and aliasing them onto one cache file serves the wrong bytes. Same shape
+   as a chunk key, so the fanout directory is unchanged. *)
 let key_of members =
   let s1 = Xxhash.create 0 and s2 = Xxhash.create 1 in
   Array.iter
@@ -35,10 +34,9 @@ let key_of members =
     members;
   Xxhash.digest_hex s1 ^ "-" ^ Xxhash.digest_hex s2
 
-(* The group holding stored chunk [i]; [None] only when [i] is out of range.
-   {!Chunk_table} rejects at decode any body whose length disagrees with the
-   chunk count in its header, so every index below [count] has a key and a group
-   can always be filled. *)
+(* [None] only when [i] is out of range: {!Chunk_table} rejects at decode any
+   body whose length disagrees with its header, so every index below [count] has
+   a key. *)
 let of_table ~table ~per i =
   let n = Chunk_table.count table in
   if per <= 0 || i < 0 || i >= n then None
@@ -75,8 +73,8 @@ let indices t = List.init (Array.length t.sizes) (fun j -> t.first + j)
 let size t i = t.sizes.(i - t.first)
 let member_key t i = t.members.(i - t.first)
 
-(* Byte offset of stored chunk [i] within the group body. A prefix sum rather
-   than [(i - first) * chunk_size]: the file's last chunk is short. *)
+(* A prefix sum rather than [(i - first) * chunk_size]: the file's last chunk is
+   short. *)
 let offset t i =
   let last = min (member_count t) (max 0 (i - t.first)) in
   let rec go j acc =

@@ -1,8 +1,6 @@
-(* End-to-end multi-chunk upload against a local backend: exercises the real
-   Remote.upload path (mmap the source, hash the whole file in one pass, slice
-   per-chunk views, store), plus round-trip download and chunk-level dedup. The
-   snapshot suites never exceed one 8 MB chunk, so this covers the boundaries the
-   new whole-file hasher and per-chunk slicing introduce. *)
+(* End-to-end multi-chunk upload against a local backend: the real Remote.upload
+   path, plus round-trip download and chunk-level dedup. The snapshot suites never
+   exceed one 8 MB chunk, so the multi-chunk boundaries are only covered here. *)
 
 open Lwt.Syntax
 
@@ -41,11 +39,9 @@ end
 module R = Remote.Make (C)
 module D = Data.Make (C) (R)
 
-(* ── Chunk size resolution ───────────────────────────────────────────────────
-   New files take the configured size when there is one; otherwise the client
-   asks the primary backend — an http-proxy answers with the serving domain's
-   own, so the setting lives in one config rather than two — and falls back to
-   the built-in default when nothing has an opinion. *)
+(* New files take the configured size when there is one, else what the primary
+   backend recommends (an http-proxy answers with the serving domain's own, so the
+   setting lives in one config), else the built-in default. *)
 
 let opinionated n : (module Backend.S) =
   (module struct
@@ -123,10 +119,9 @@ let () =
      assert (m.Manifest.size = Int64.of_int size);
      let* () = round_trip (C.domain_prefix ^ "big.bin") src data in
 
-     (* Backend-only resolution: fetching the manifest of a file with no local
-        sidecar yields the logical size, not the manifest object's own byte size.
-        This is what stat/list_dir fall back to for a never-cached file — the bug
-        that made evicted movies list at a few KB. *)
+     (* Fetching the manifest of a file with no local sidecar yields the logical
+        size, not the manifest object's own byte size. This is what stat and
+        list_dir fall back to for a never-cached file. *)
      let* rm = R.fetch_manifest ~key:(C.domain_prefix ^ "big.bin") () in
      (match rm with
        | Some m -> assert (m.Manifest.size = Int64.of_int size)
@@ -140,9 +135,9 @@ let () =
      let* after = count_chunks () in
      assert (after = before);
 
-     (* Three IDENTICAL chunks -> same chunk key uploaded concurrently in one
-        batch. Exercises the local backend's concurrent same-key write (must not
-        ENOENT on the temp rename) and intra-file dedup to one object. *)
+     (* Three identical chunks: one key, uploaded concurrently in a single batch.
+        Exercises the local backend's concurrent same-key write, which must not
+        ENOENT on the temp rename, and intra-file dedup to one object. *)
      let dup = String.make (3 * chunk_size) 'Z' in
      let dsrc = Filename.concat root "dup.bin" in
      write_file dsrc dup;

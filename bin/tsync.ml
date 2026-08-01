@@ -1,8 +1,6 @@
 open Cmdliner
 open Cli
 
-(* ── tsync start ─────────────────────────────────────────────────────────── *)
-
 let start_cmd =
   let mount_arg =
     Arg.(
@@ -25,9 +23,8 @@ let start_cmd =
   let run mount tls =
     Log.Daemon.init ();
     Log.debug "loading config from %s" runtime_paths.Runtime.config_path;
-    (* Nothing to serve yet is not a failure: the service is started by the
-       installer before the user has configured anything. Exiting 0 tells
-       launchd/systemd to leave it alone rather than respawn on a loop. *)
+    (* Not a failure: the installer starts the service before the user has
+       configured anything. Exit 0 so launchd/systemd does not respawn. *)
     if not (Sys.file_exists runtime_paths.Runtime.config_path) then begin
       Printf.eprintf
         "No config at %s. Run `tsync configure`, then `tsync restart`.\n"
@@ -52,7 +49,6 @@ let start_cmd =
         | Some p, [_] -> p
         | _ -> Filename.concat (Sys.getenv "HOME") ("tsync/" ^ domain_name)
     in
-    (* One conf + binding scaffold per domain; a domain's frontends share its conf. *)
     let per_domain =
       List.map
         (fun (d : Conf_parsing.domain) ->
@@ -62,14 +58,13 @@ let start_cmd =
         domains
     in
     (* Do NOT touch Lwt here: any Lwt_unix/Lwt_preemptive call initializes the
-       shared notification eventfd, and this process is about to fork. A forked
-       child would inherit that eventfd and its worker-completion wakeups would be
-       delivered to the wrong process, hanging its event loop. Each leaf caps its
-       own blocking-thread pool from inside its own Lwt loop, after all forking
-       (see [Frontend.cap_blocking_pool]). *)
-    (* One [binding] per (domain × frontend), grouped by frontend. Each group runs
-       as its own process (all but the last forked), so distinct frontends — e.g.
-       fuse and http-proxy on the same domain — run concurrently. *)
+       shared notification eventfd, and this process is about to fork. A child
+       inheriting it would have its worker wakeups delivered to the wrong
+       process. Each leaf caps its own blocking pool after forking, from inside
+       its own loop (see [Frontend.cap_blocking_pool]). *)
+    (* One [binding] per (domain × frontend), grouped by frontend. Each group is
+       its own process (all but the last forked), so distinct frontends on one
+       domain run concurrently. *)
     let all_bindings =
       List.concat_map
         (fun (d, conf, mount_point) ->
@@ -110,12 +105,10 @@ let start_cmd =
     in
     Log.debug "cache root: %s" runtime_paths.Runtime.cache_root;
     (* Before the fork, so every frontend inherits it. launchd hands this daemon
-       256 descriptors against an unlimited hard limit, and a burst of concurrent
-       work exhausted it — accept then failed with EMFILE and killed the daemon.
-       A process may raise its own soft limit without privilege, so it need not
-       be launched specially to get a workable one. Descriptors are allocated on
-       use, so asking for headroom costs nothing; what stops the daemon holding
-       too many is the bounds on its fan-outs, not this. *)
+       a 256 soft limit against an unlimited hard one, low enough that a burst of
+       concurrent work fails accept with EMFILE. Descriptors are allocated on
+       use, so headroom costs nothing; the fan-out bounds are what actually keep
+       the count down. *)
       (match Descriptors.current () with
       | Some before ->
           let after = Descriptors.raise_to ~target:8192 in
@@ -129,15 +122,11 @@ let start_cmd =
     (Cmd.info "start" ~doc:"Mount the filesystem (run under a service manager)")
     Term.(const run $ mount_arg $ tls_arg)
 
-(* ── tsync stop ─────────────────────────────────────────────────────────── *)
-
 let stop_cmd =
   let run () =
-    (* [start] runs every domain (fuse listens on a per-domain socket; file_provider
-       shares one), so stop each domain's socket. Frontends without an IPC socket
-       (http-proxy) aren't reached here — a supervisor's SIGTERM stops that group,
-       which it handles gracefully. A socket that's absent or unconnectable just
-       means that part isn't running. *)
+    (* Frontends without an IPC socket (http-proxy) are not reached here; a
+       supervisor's SIGTERM stops that group. An absent or unconnectable socket
+       just means that part is not running. *)
     let cfg = load_config () in
     let sockets =
       List.sort_uniq compare
@@ -164,8 +153,6 @@ let stop_cmd =
     (Cmd.info "stop" ~doc:"Stop the sync daemon")
     Term.(const run $ const ())
 
-(* ── tsync status ────────────────────────────────────────────────────────── *)
-
 let status_cmd =
   let run domain =
     try
@@ -178,8 +165,6 @@ let status_cmd =
   Cmd.v
     (Cmd.info "status" ~doc:"Show daemon status")
     Term.(const run $ domain_arg)
-
-(* ── tsync stats ─────────────────────────────────────────────────────────── *)
 
 let human_bytes = Metrics.human_bytes
 
@@ -224,7 +209,7 @@ let stats_cmd =
   in
   let run json totals exact reload watch domain =
     (* The daemon counts a store once and serves that until asked again, so the
-       flags travel as a set rather than a mode. *)
+       flags travel as a set, not a mode. *)
     let arg =
       match totals || exact || reload with
         | false -> None
@@ -235,8 +220,8 @@ let stats_cmd =
                  @ (if exact then ["exact"] else [])
                  @ if reload then ["reload"] else []))
     in
-    (* Resolved once: [--watch] must not re-read the config on every tick, and a
-       config error should be reported before the screen starts clearing. *)
+    (* Resolved once: [--watch] must not re-read the config per tick, and a
+       config error should surface before the screen starts clearing. *)
     let name, socket_path = domain_target ?domain () in
     let show () =
       match ipc_action ~socket_path ~domain:name ?arg "stats" with
@@ -266,8 +251,6 @@ let stats_cmd =
       const run $ json_arg $ totals_arg $ exact_arg $ reload_arg $ watch_arg
       $ domain_arg)
 
-(* ── tsync evict ─────────────────────────────────────────────────────────── *)
-
 let evict_cmd =
   let path_arg = Arg.(non_empty & pos_all string [] & info [] ~docv:"PATH") in
   let run paths =
@@ -282,8 +265,6 @@ let evict_cmd =
     (Cmd.info "evict" ~doc:"Evict files or directories from local cache")
     Term.(const run $ path_arg)
 
-(* ── tsync restore ───────────────────────────────────────────────────────── *)
-
 let restore_cmd =
   let path_arg = Arg.(non_empty & pos_all string [] & info [] ~docv:"PATH") in
   let run paths =
@@ -297,8 +278,6 @@ let restore_cmd =
   Cmd.v
     (Cmd.info "restore" ~doc:"Download evicted files or directories")
     Term.(const run $ path_arg)
-
-(* ── tsync ls ────────────────────────────────────────────────────────────── *)
 
 let ls_cmd =
   let path_arg =
@@ -337,8 +316,8 @@ let ls_cmd =
          match path with
            | None -> dp
            | Some p ->
-               (* Accept a domain-relative path ("radarr/dir/") or an absolute
-                  path under the mount point ("/home/…/tsync/domain/radarr/"). *)
+               (* Accepts a domain-relative path or an absolute one under the
+                  mount point. *)
                let rel =
                  let mp = mount_point ^ "/" in
                  if
@@ -361,7 +340,6 @@ let ls_cmd =
        let file_name (e : Backend.file_entry) =
          Key.strip_prefix ~domain_prefix:C.domain_prefix e.key
        in
-       (* Directories and files interleaved, alphabetized (case-insensitive). *)
        let items =
          List.map (fun d -> (d, `Dir d)) subdirs
          @ List.map (fun e -> (file_name e, `File e)) files
@@ -401,7 +379,7 @@ let ls_cmd =
          in
          Lwt_list.iter_s
            (fun (e : Backend.file_entry) ->
-             (* Version keys are hashed; the real path is in the version body. *)
+             (* Version keys are hashed: the real path is in the body. *)
                match
                  Versioning.parse ~versions_prefix:C.versions_prefix e.key
                with
@@ -410,9 +388,8 @@ let ls_cmd =
                    let* data = B.get ~key:e.key () in
                    match Manifest.of_string data with
                      | m ->
-                         (* [hrel] is the manifest key tail; a missing live
-                            manifest means the file was deleted. The leaf name is
-                            the version body's own name. *)
+                         (* A missing live manifest means the file was deleted;
+                            the leaf name comes from the version body. *)
                          let+ head =
                            B.head_opt ~key:(C.domain_prefix ^ hrel) ()
                          in
@@ -427,8 +404,6 @@ let ls_cmd =
   Cmd.v
     (Cmd.info "ls" ~doc:"List files with cache status")
     Term.(const run $ path_arg $ deleted_arg $ domain_arg $ frontend_arg)
-
-(* ── tsync versions ──────────────────────────────────────────────────────── *)
 
 let human_ts ts_ns =
   let secs = Int64.to_float (Int64.div ts_ns 1_000_000_000L) in
@@ -451,7 +426,6 @@ let versions_cmd =
        match path with
          | Some rel ->
              let* dir = St.version_dir ~key:(C.domain_prefix ^ rel) in
-             (* No resolvable key means nothing was ever stored under it. *)
              let+ entries =
                match dir with
                  | None -> Lwt.return_nil
@@ -472,10 +446,8 @@ let versions_cmd =
                    Printf.printf "%Ld  %s  %d bytes\n" ts (human_ts ts) size)
                  versions
          | None ->
-             (* Group every version by path; a path with no live manifest is a
-                deleted file. *)
-             (* Keyed by hashed rel; [sample] keeps one version key per file so a
-                deleted file's real path can be read from its version body. *)
+             (* [sample] keeps one version key per file, so a deleted file's
+                real path can be read out of its version body. *)
              let latest = Hashtbl.create 64
              and count = Hashtbl.create 64
              and sample = Hashtbl.create 64 in
@@ -536,8 +508,6 @@ let versions_cmd =
        ~doc:"List a file's versions, or all deleted files when no PATH is given")
     Term.(const run $ path_arg $ domain_arg)
 
-(* ── tsync revert ────────────────────────────────────────────────────────── *)
-
 let revert_cmd =
   let path_arg =
     Arg.(required & pos 0 (some string) None & info [] ~docv:"PATH")
@@ -559,8 +529,6 @@ let revert_cmd =
        ~doc:"Restore a previous version of a file (metadata only, no download)")
     Term.(const run $ path_arg $ version_arg)
 
-(* ── tsync purge ─────────────────────────────────────────────────────────── *)
-
 let purge_cmd =
   let path_arg =
     Arg.(required & pos 0 (some string) None & info [] ~docv:"PATH")
@@ -569,8 +537,6 @@ let purge_cmd =
   Cmd.v
     (Cmd.info "purge" ~doc:"Delete all versions from trash")
     Term.(const run $ path_arg)
-
-(* ── tsync trash / untrash ───────────────────────────────────────────────── *)
 
 let trash_markers (module B : Backend.S) domain_prefix =
   B.list_prefix ~prefix:(domain_prefix ^ Folder.trash_id ^ "/") ()
@@ -623,9 +589,8 @@ let untrash_cmd =
              Printf.eprintf "not in trash: %s\n" path;
              Lwt.return_unit
          | (trash_key, m) :: _ ->
-             (* Re-attach the folder under its original parent's namespace; the
-                subtree is untouched, so this is O(1). Its local mirror copy is
-                rebuilt by a subsequent full sync. *)
+             (* O(1): the subtree is untouched. The local mirror copy is rebuilt
+                by a later full sync. *)
              let* new_key = L.folder_marker_key (C.domain_prefix ^ path) in
              let new_key = Option.get new_key in
              let marker =
@@ -641,8 +606,6 @@ let untrash_cmd =
   Cmd.v
     (Cmd.info "untrash" ~doc:"Restore a trashed folder (see: tsync trash)")
     Term.(const run $ path_arg $ domain_arg)
-
-(* ── tsync expire ────────────────────────────────────────────────────────── *)
 
 let expire_cmd =
   let date_arg =
@@ -692,8 +655,6 @@ let expire_cmd =
          "Remove versions and journal entries older than DATE, then \
           garbage-collect unused chunks")
     Term.(const run $ date_arg $ domain_arg)
-
-(* ── tsync sync ──────────────────────────────────────────────────────────── *)
 
 let sync_cmd =
   let source_arg =
@@ -748,8 +709,6 @@ let sync_cmd =
        if !verbose then
          Log.info "syncing domain %s (client %s, uuid %s)" C.domain_name
            C.client_name my_uuid;
-
-       (* ── Sync bookmark: the journal key up to which this client is synced ── *)
        let last_sync_file =
          Filename.concat C.data_dir ("last-sync-" ^ C.domain_name)
        in
@@ -766,10 +725,8 @@ let sync_cmd =
          output_string oc key;
          close_out oc
        in
-
-       (* ── Journal sync: recover this client's own pending entries ────────── *)
-       (* A pending entry that never reached the backend is replayed, minus any
-          op another client has since overridden (last-writer-wins). *)
+       (* Replayed minus any op another client has since overridden
+          (last-writer-wins). *)
        let recover_entry entry_key ops =
          let short = Filename.basename entry_key in
          let* head = Fs.head_opt ~key:(C.journal_prefix ^ entry_key) in
@@ -779,7 +736,7 @@ let sync_cmd =
            J.delete_local_pending ~entry_key
          end
          else begin
-           (* Keys another client touched after this entry — those ops lose. *)
+           (* Keys another client touched after this entry: those ops lose. *)
            let* newer_keys = Fs.list_journal_keys ~start_after:entry_key () in
            let remotely_modified = Hashtbl.create 16 in
            let* () =
@@ -826,7 +783,7 @@ let sync_cmd =
                (if skipped > 0 then
                   Printf.sprintf " (%d skipped — remotely overridden)" skipped
                 else "");
-           (* Ops keep their journal order (a rename must follow its create). *)
+           (* Journal order matters: a rename must follow its create. *)
            let* () =
              Lwt_list.iter_s
                (fun op ->
@@ -834,8 +791,8 @@ let sync_cmd =
                    (fun () ->
                      match op with
                        | `Put (rel_key, _) ->
-                           (* Only a file that still owes an upload has anything
-                              to replay; its staged manifest says so. *)
+                           (* A staged manifest is what says an upload is still
+                              owed. *)
                            F.queue_put (C.domain_prefix ^ rel_key)
                        | `Delete rel_key ->
                            F.apply_delete (C.domain_prefix ^ rel_key)
@@ -866,24 +823,19 @@ let sync_cmd =
          if !verbose then
            Log.info "recovering %d pending journal entr%s" (List.length pending)
              (if List.length pending = 1 then "y" else "ies");
-         (* Sequential: entries replay in journal order. *)
+         (* Sequential: journal order. *)
          Lwt_list.iter_s
            (fun (entry_key, ops) -> recover_entry entry_key ops)
            pending
        in
+       (* Walk the inode tree from the root: a folder namespace lists its file
+          manifests and folder markers, and a marker gives a subfolder's name+id
+          plus the namespace to recurse into.
 
-       (* ── Manifest sync (full): rebuild the local mirror from the backend ── *)
-       (* Walk the inode tree from the root: each folder namespace lists its file
-          manifests and folder markers; a marker gives a subfolder's name+id
-          (recorded locally so keys resolve) and the id of its own namespace to
-          recurse into.
-
-          Concurrency is bounded by a single [pool] shared across the whole
-          recursion, so in-flight backend connections and open files stay under
-          [parallelism] no matter how wide or deep the tree — a per-namespace
-          bound would multiply with depth and exhaust DNS / file descriptors. A
-          pool slot only covers a fetch and its immediate local write; recursion
-          runs after the slot is released, so a deep tree cannot deadlock. *)
+          One [pool] is shared across the whole recursion: a per-namespace bound
+          would multiply with depth and exhaust DNS / descriptors. A slot covers
+          only a fetch and its local write — recursion runs after the slot is
+          released, so a deep tree cannot deadlock. *)
        let rebuild_mirror () =
          let pool =
            Lwt_pool.create (max 1 parallelism) (fun () -> Lwt.return_unit)
@@ -923,11 +875,9 @@ let sync_cmd =
                                      in
                                      None
                                  | exception parse_exn ->
-                                     (* Neither a folder marker nor a body this
-                                        build can read. Counted and logged: a
-                                        store whose manifests all fail to parse
-                                        would otherwise resync "successfully"
-                                        while writing nothing at all. *)
+                                     (* Counted, so a store whose manifests all
+                                        fail to parse cannot resync
+                                        "successfully" writing nothing. *)
                                      incr failed;
                                      Log.warn
                                        "resync %s: unreadable manifest: %s"
@@ -951,10 +901,9 @@ let sync_cmd =
        in
        let full_resync reason =
          if !verbose then Log.info "full resync: %s" reason;
-         (* Clear the mirror ourselves, then rebuild it, and only once every
-            manifest is in place notify the daemon so it re-reads the complete,
-            fresh mirror (rather than an empty one mid-rebuild). Unsynced edits
-            are kept: nothing else holds those bytes. *)
+         (* Notify the daemon only once the rebuild is complete, or it re-reads
+            an empty mirror mid-rebuild. Unsynced edits are kept: nothing else
+            holds those bytes. *)
          let* () =
            Cache_layout.clear ~cache_root:C.cache_root
              ~domain_name:C.domain_name
@@ -977,8 +926,6 @@ let sync_cmd =
             else "");
          Lwt.return_unit
        in
-
-       (* ── Journal sync (incremental): apply other clients' recent entries ── *)
        let incremental ~last_sync_key ~all_keys =
          let last_sync_basename = Filename.basename last_sync_key in
          let recent_foreign =
@@ -986,7 +933,7 @@ let sync_cmd =
            |> List.filter (fun (k, _) -> k > last_sync_basename)
            |> List.filter (fun (_, uuid) -> uuid <> my_uuid)
          in
-         (* Sequential: foreign entries apply in journal order. *)
+         (* Sequential: journal order. *)
          let* () =
            Lwt_list.iter_s
              (fun (ek, _) ->
@@ -1010,8 +957,6 @@ let sync_cmd =
            (if n = 1 then "y" else "ies");
          Lwt.return_unit
        in
-
-       (* ── Main flow ──────────────────────────────────────────────────────── *)
        let* () = recover_pending () in
        if !verbose then Log.info "draining upload queue";
        let* () = Sq.drain () in
@@ -1050,8 +995,6 @@ let sync_cmd =
       const run $ domain_arg $ source_arg $ full_arg $ parallelism_arg
       $ verbose_arg)
 
-(* ── tsync recheck ───────────────────────────────────────────────────────── *)
-
 let recheck_cmd =
   let run domain =
     let code =
@@ -1076,9 +1019,8 @@ let recheck_cmd =
                  s.Recheck.checked
                  (if s.Recheck.checked = 1 then "" else "s")
                  s.Recheck.repaired s.Recheck.unrepairable s.Recheck.skipped;
-               (* The local half: chunk bodies are content-addressed, so a body
-                  that no longer hashes to its own name is corrupt and is dropped
-                  to be fetched again. *)
+               (* Bodies are content-addressed: one that no longer hashes to its
+                  own name is corrupt, and is dropped to be re-fetched. *)
                let+ checked, dropped = Rc.verify_chunk_cache () in
                Printf.printf "%d chunk%s verified, %d dropped as corrupt\n"
                  checked
@@ -1094,8 +1036,6 @@ let recheck_cmd =
          "Verify all remote chunks and manifests against the local cache, \
           repairing what can be repaired")
     Term.(const run $ domain_arg)
-
-(* ── tsync resync-remote ─────────────────────────────────────────────────── *)
 
 let resync_remote_cmd =
   let source_arg =
@@ -1123,14 +1063,13 @@ let resync_remote_cmd =
         (let open Lwt.Syntax in
          let cfg = load_config () in
          let d = Conf_parsing.pick_domain ?domain cfg in
-         (* Same ordering make_conf applies, so positions line up with
-            C.backends. *)
+         (* make_conf's ordering, so positions line up with C.backends. *)
          let labels =
            List.map
              (fun (b : Conf_parsing.backend_config) -> b.Conf_parsing.name)
              (Conf_parsing.order_backends d.Conf_parsing.backends)
          in
-         (* Raw (untiered) backends so Mirror can copy between each one. *)
+         (* Untiered, so Mirror can copy between each one. *)
          let (module C : Conf.S) = make_conf ?domain ~tier:false cfg in
          let label i = List.nth labels i in
          let source_index =
@@ -1185,7 +1124,7 @@ let resync_remote_cmd =
                in
                List.iter
                  (fun (dst : Mirror.dest_stats) ->
-                   (* Keys are logged live under -v; only dump them otherwise. *)
+                   (* Under -v they are already logged live. *)
                    if not !verbose then
                      List.iter (Printf.printf "copied %s\n") dst.Mirror.copied;
                    Printf.printf
@@ -1207,8 +1146,6 @@ let resync_remote_cmd =
           size-mismatched on the other configured backends. Pass --manifests \
           to copy only the manifests.")
     Term.(const run $ domain_arg $ source_arg $ manifests_arg $ verbose_arg)
-
-(* ── tsync import ────────────────────────────────────────────────────────── *)
 
 let import_cmd =
   let src_arg =
@@ -1285,8 +1222,6 @@ let import_cmd =
       const run $ domain_arg $ src_arg $ only_arg $ exclude_arg
       $ force_rehash_arg $ verbose_arg)
 
-(* ── tsync export ────────────────────────────────────────────────────────── *)
-
 let export_cmd =
   let dst_arg =
     Arg.(
@@ -1329,8 +1264,6 @@ let export_cmd =
           locally; evicted files are recomposed from remote chunks without \
           populating the cache.")
     Term.(const run $ domain_arg $ dst_arg $ verbose_arg)
-
-(* ── tsync share ─────────────────────────────────────────────────────────── *)
 
 (* "<N>d" / "<N>h" -> seconds *)
 let parse_duration s =
@@ -1416,8 +1349,6 @@ let share_cmd =
     (Cmd.info "share" ~doc:"Print a shareable download URL for a file or folder")
     Term.(const run $ path_arg $ expires_arg $ domain_arg $ token_arg)
 
-(* ── tsync print-config ──────────────────────────────────────────────────── *)
-
 let print_conf_cmd =
   let mask (b : Conf_parsing.backend_config) k v =
     match Backend.spec_for b.backend_type with
@@ -1496,8 +1427,6 @@ let print_conf_cmd =
        ~doc:"Print the current configuration (sensitive values hidden)")
     Term.(const run $ const ())
 
-(* ── tsync paths ─────────────────────────────────────────────────────────── *)
-
 let paths_cmd =
   let run () =
     let p = runtime_paths in
@@ -1509,8 +1438,6 @@ let paths_cmd =
   Cmd.v
     (Cmd.info "paths" ~doc:"Show all filesystem paths used by this binary")
     Term.(const run $ const ())
-
-(* ── tsync restart ───────────────────────────────────────────────────────── *)
 
 let restart_cmd =
   let run () =
@@ -1524,8 +1451,6 @@ let restart_cmd =
     (Cmd.info "restart"
        ~doc:"Restart the background service so it re-reads the config")
     Term.(const run $ const ())
-
-(* ── tsync set-domain ────────────────────────────────────────────────────── *)
 
 let set_domain_cmd =
   let name_arg =
@@ -1566,8 +1491,6 @@ let set_domain_cmd =
           With no arguments, shows the current default.")
     Term.(const run $ name_arg $ clear_arg)
 
-(* ── tsync default-domain ────────────────────────────────────────────────── *)
-
 let default_domain_cmd =
   let run () =
     match read_default_domain () with
@@ -1580,8 +1503,6 @@ let default_domain_cmd =
     (Cmd.info "default-domain" ~doc:"Print the current default domain")
     Term.(const run $ const ())
 
-(* ── tsync build-config ──────────────────────────────────────────────────── *)
-
 let build_config_cmd =
   let run () =
     Printf.printf "frontends: %s\ns3 backend: %b\nlog: %s\n"
@@ -1593,13 +1514,10 @@ let build_config_cmd =
        ~doc:"Show optional features compiled into this binary")
     Term.(const run $ const ())
 
-(* ── Frontend-contributed commands ───────────────────────────────────────── *)
-
 (* Each registered frontend surfaces its commands as `tsync <cli_group> <verb>`.
-   The binary owns [--domain] parsing and verifies the frontend is configured
-   for the chosen domain before handing control to the frontend's [run]. Groups
-   only exist for frontends compiled into this binary (a link-time side effect),
-   so e.g. `fileprovider` appears on macOS but not Linux. *)
+   The binary owns [--domain] parsing and checks the frontend is configured for
+   that domain before handing over to its [run]. Groups exist only for frontends
+   linked into this binary, so `fileprovider` appears on macOS but not Linux. *)
 let frontend_cmds () =
   let run name (command : Frontend.command) domain =
     let cfg = load_config () in
@@ -1632,8 +1550,6 @@ let frontend_cmds () =
                     ~doc:(Printf.sprintf "%s frontend commands" cli_group))
                  subs))
     (Frontend.entries ())
-
-(* ── Main ────────────────────────────────────────────────────────────────── *)
 
 let () =
   Printexc.record_backtrace true;
@@ -1670,15 +1586,15 @@ let () =
        ]
       @ frontend_cmds ())
   in
-  (* A rejected config is a message to read and fix, not a stack trace: every
-     [failwith] on the way through [Conf_parsing] is phrased for a user. *)
+  (* Every [failwith] under [Conf_parsing] is phrased for a user: print it, not
+     a stack trace. *)
     match Cmd.eval ~catch:false cmd with
     | code -> exit code
     | exception Failure msg ->
         prerr_endline ("tsync: " ^ msg);
         exit 1
     | exception exn ->
-        (* What cmdliner's own catch would have printed. *)
+        (* Matches what cmdliner's own catch prints. *)
         Printf.eprintf "tsync: internal error, uncaught exception:\n%s\n"
           (Printexc.to_string exn);
         prerr_string (Printexc.get_backtrace ());

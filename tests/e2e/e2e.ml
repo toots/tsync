@@ -1,27 +1,25 @@
 (* The part of an end-to-end check that does not depend on how the domain is
    presented.
 
-   A frontend gives the user a directory. What is asserted about it is the same
-   whether that directory is a File Provider replica or a FUSE mount: work done
-   in it reaches the store, work done by another client reaches it, and nothing
-   is left behind afterwards. So the checks live here and each platform supplies
-   only the staging and whatever consistency checker it has of its own.
+   A frontend gives the user a directory, and what is asserted about it holds
+   whether that is a File Provider replica or a FUSE mount: work done in it
+   reaches the store, work done by another client reaches it, and nothing is left
+   behind. Each platform supplies only the staging and its own consistency
+   checker.
 
-   Everything a check waits on crosses a process boundary, so nothing is sampled
-   once — see {!until}. *)
+   Everything waited on crosses a process boundary, so nothing is sampled once —
+   see {!until}. *)
 
 exception Failed of string
 
 let failf fmt = Printf.ksprintf (fun s -> raise (Failed s)) fmt
 let sh fmt = Printf.ksprintf (fun cmd -> ignore (Sys.command cmd)) fmt
 
-(* How long to let a change travel. Generous: the change poller ticks every two
-   seconds and the presenting layer schedules work of its own on top. *)
+(* Generous: the change poller ticks every two seconds and the presenting layer
+   schedules work of its own on top. *)
 let settle = 30.
 
 type env = { domain : string; port : int; secret : string }
-
-(* ── Reporting ────────────────────────────────────────────────────────────── *)
 
 let results : (string * string option) list ref = ref []
 
@@ -47,8 +45,6 @@ let summary () =
     (List.length all);
   if failed = [] then 0 else 1
 
-(* ── Waiting ──────────────────────────────────────────────────────────────── *)
-
 let until ?(timeout = settle) ~what f =
   let deadline = Unix.gettimeofday () +. timeout in
   let rec loop () =
@@ -65,8 +61,6 @@ let until ?(timeout = settle) ~what f =
 
 let wait_until ?timeout ~what f =
   until ?timeout ~what (fun () -> if f () then Some () else None)
-
-(* ── Files ────────────────────────────────────────────────────────────────── *)
 
 let write_file path contents =
   let oc = open_out path in
@@ -117,16 +111,12 @@ let manifests ~env ~store =
   |> List.filter (fun p -> String.starts_with ~prefix p)
   |> List.filter (fun p -> not (contains p ".tsync-trash/"))
 
-(* ── JSON ─────────────────────────────────────────────────────────────────── *)
-
 let member k = function
   | `Assoc l -> ( match List.assoc_opt k l with Some v -> v | None -> `Null)
   | _ -> `Null
 
 let str j = match j with `String s -> s | _ -> ""
 let int_of j = match j with `Int n -> n | _ -> -1
-
-(* ── A client, driven over its IPC socket ─────────────────────────────────── *)
 
 type client = { socket_path : string; root : string; env : env }
 
@@ -206,14 +196,9 @@ let remote_rename client ~ref_ ~parent ~name =
          ("name", `String name);
        ])
 
-(* ── Staging ──────────────────────────────────────────────────────────────── *)
-
-(* Where a daemon started with this HOME keeps its things.
-
-   Asked of {!Runtime} rather than worked out here: the two platforms disagree
-   about all of it, and a copy of those rules would be one to keep in step. The
-   spawned daemon inherits everything but HOME, so it resolves the same paths
-   this does. *)
+(* Asked of {!Runtime} rather than worked out here: the platforms disagree about
+   all of it. The spawned daemon inherits everything but HOME, so it resolves the
+   same paths. *)
 let paths_for ~home =
   let saved = Sys.getenv_opt "HOME" in
   Unix.putenv "HOME" home;
@@ -281,14 +266,12 @@ let write_config ~home ~name ~domains =
             ("domains", `List domains);
           ]))
 
-(* The daemon derives every path from HOME, so redirecting it is what keeps a
-   staged client off the real cache, journal and socket — and, just as much, off
-   the shared client id, without which two daemons each skip the other's journal
-   entries as their own. *)
-(* Each daemon's output is kept rather than discarded. A daemon that dies at
-   startup — a frontend the binary was built without, a mount helper that is not
-   installed — otherwise shows up only as whatever was being waited for never
-   happening, and "timed out after 60s" says nothing about why. *)
+(* Every path derives from HOME, so redirecting it keeps a staged client off the
+   real cache, journal and socket — and off the shared client id, without which
+   two daemons each skip the other's journal entries as their own. *)
+(* Kept rather than discarded: a daemon dying at startup otherwise shows up only
+   as whatever was waited for never happening, and "timed out after 60s" says
+   nothing about why. *)
 let daemon_logs : (string * string) list ref = ref []
 
 let spawn_daemon ?(args = []) ~exe ~home ~label () =
@@ -310,8 +293,7 @@ let spawn_daemon ?(args = []) ~exe ~home ~label () =
   Unix.close fd;
   pid
 
-(* What the staged daemons had to say, printed when staging fails — which is the
-   only time anyone wants it. *)
+(* Printed when staging fails, which is the only time anyone wants it. *)
 let report_daemon_logs () =
   List.iter
     (fun (label, path) ->
@@ -347,11 +329,9 @@ let stop_daemon pid =
 let scratch_root prefix =
   Printf.sprintf "/tmp/%s-%06x" prefix (Random.bits () land 0xffffff)
 
-(* A directory existing does not mean the frontend behind it will take a write
-   yet. On macOS the folder appears as soon as the domain is registered, while
-   the system is still bringing the provider up, and the first write comes back
-   as a timeout. Probe until one goes through, rather than starting the checks
-   against something not ready and reporting its own staging as a failure. *)
+(* A directory existing does not mean the frontend behind it will take a write:
+   on macOS the folder appears as soon as the domain is registered, while the
+   system is still bringing the provider up, and the first write times out. *)
 let wait_writable ~mount =
   let probe = Filename.concat mount ".e2e-probe" in
   wait_until ~timeout:120. ~what:"the mount to accept a write" (fun () ->
@@ -363,8 +343,6 @@ let wait_writable ~mount =
         | exception _ ->
             (try Sys.remove probe with _ -> ());
             false)
-
-(* ── The checks ───────────────────────────────────────────────────────────── *)
 
 (* [mount] is the directory the frontend gives the user. [client] is a second,
    independent client against the same store. [extra] runs before the tidy-up,
@@ -449,7 +427,7 @@ let run ~env ~mount ~store ~client ~extra =
         failf "no manifest was removed (%d before, %d after)" before
           (List.length (manifests ~env ~store));
       (* And the daemon agrees it is gone, rather than answering from a stale
-         local mirror — which is what made a deleted item come back. *)
+         local mirror. *)
       let response =
         ipc ~expect_ok:false client
           [("action", `String "stat"); ("ref", `String ref_)]
@@ -457,8 +435,8 @@ let run ~env ~mount ~store ~client ~extra =
       if str (member "code" response) <> "not_found" then
         failf "stat says %S, expected not_found" (str (member "code" response)));
 
-  (* The other direction. Everything above could pass with the daemon unable to
-     tell the presenting layer anything at all. *)
+  (* The other direction: everything above could pass with the daemon unable to
+     tell the presenting layer anything. *)
   check "a file created by another client appears" (fun () ->
       let name = "remote-" ^ tag ^ ".txt" in
       remote_write client ~parent:"root" ~name "made by the other client";
@@ -504,9 +482,8 @@ let run ~env ~mount ~store ~client ~extra =
       wait_until ~what:(folder ^ " to disappear") (fun () ->
           not (List.mem folder (mounted ()))));
 
-  (* The identity property. A renamed folder keeps its reference; if it did not,
-     everything under it would be re-identified without the presenting layer
-     being told. *)
+  (* A renamed folder keeps its reference, or everything under it is
+     re-identified without the presenting layer being told. *)
   check "a folder renamed remotely keeps its identity" (fun () ->
       let before = "ren-before-" ^ tag and after = "ren-after-" ^ tag in
       remote_mkdir client ~parent:"root" ~name:before;
@@ -550,9 +527,8 @@ let run ~env ~mount ~store ~client ~extra =
             if body <> "shareable content" then failf "the URL served %S" body
         | _ -> failf "no URL in the response");
 
-  (* Waited for, not sampled: the second client starts with an empty mirror and
-     builds it by replaying the journal, so comparing straight away races its
-     catch-up rather than testing anything. *)
+  (* Waited for, not sampled: the second client builds its mirror by replaying
+     the journal, so comparing straight away races its catch-up. *)
   check "the mount and the store agree on what exists" (fun () ->
       try
         wait_until ~what:"the mount and the store to agree" (fun () ->
@@ -564,10 +540,9 @@ let run ~env ~mount ~store ~client ~extra =
 
   extra ();
 
-  (* Left as it was found. Removed through the mount rather than over the
-     daemon's socket on purpose: an operation a daemon performs itself is
-     journalled as its own and filtered back out of its own change feed, so the
-     presenting layer would never hear about it. *)
+  (* Removed through the mount rather than the daemon's socket: an operation a
+     daemon performs itself is journalled as its own and filtered out of its own
+     change feed, so the presenting layer would never hear about it. *)
   check "everything it made is cleaned up again" (fun () ->
       List.iter
         (fun name -> sh "rm -rf %s" (Filename.quote (path name)))

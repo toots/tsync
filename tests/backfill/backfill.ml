@@ -1,10 +1,10 @@
 (* A backfill target is a converging copy filled from the write side: chunks as
    they are written, and a manifest only once every chunk it names is confirmed
-   present. Each case prints what was done and then what the target holds, so the
+   present. Each case prints what it did and then what the target holds, so the
    snapshot states the policy rather than just passing.
 
-   Chunk and manifest keys are printed by short label ([c0], [one]) — the real
-   keys are hex digests and paths that say nothing here. *)
+   Keys are printed by short label ([c0], [one]): the real ones are hex digests
+   that say nothing here. *)
 
 open Lwt.Syntax
 
@@ -15,13 +15,10 @@ let chunk_prefix = "tsync/d/chunks/"
 let journal_prefix = "tsync/d/journal/"
 let cursor_key = "tsync/d/cursor"
 let manifest_prefix = "tsync/d/manifests/"
-
-(* ── Keys, and a label for each so the snapshot reads ─────────────────────── *)
-
 let labels : (string * string) list ref = ref []
 let hex n = Printf.sprintf "%016x" n
 
-(* A chunk key is ["<16 hex>-<16 hex>"]; only distinctness matters here. *)
+(* A chunk key is ["<16 hex>-<16 hex>"]; only distinctness matters. *)
 let chunk n =
   let key =
     chunk_prefix ^ Chunk_layout.relative_path (hex n ^ "-" ^ hex (n + 1))
@@ -44,8 +41,7 @@ let label key =
               (String.length key - String.length manifest_prefix)
         else key
 
-(* A manifest body naming [chunks], or a symlink when [symlink] is given (a
-   symlink is a chunkless manifest, which the chunk step must tolerate). *)
+(* A symlink is a chunkless manifest, which the chunk step must tolerate. *)
 let manifest ?symlink ~name chunks =
   let keys = List.map Filename.basename chunks in
   Chunk_table.encode ~name
@@ -56,8 +52,6 @@ let chunk_keys data =
   match Chunk_table.of_string data with
     | t -> List.init (Chunk_table.count t) (Chunk_table.key t)
     | exception _ -> []
-
-(* ── Reporting ───────────────────────────────────────────────────────────── *)
 
 let case name = Printf.printf "\n=== %s\n" name
 let step fmt = Printf.printf ("  " ^^ fmt ^^ "\n")
@@ -115,11 +109,10 @@ let () =
       ~name:"target"
   in
   let (module B : Backend.S) = wrapped.Backfill_backend.backend in
-  (* How far behind this target is, as the diagnosis endpoints report it. *)
+  (* As the diagnosis endpoints report it. *)
   let lane = List.assoc "target" wrapped.Backfill_backend.lanes in
-  (* Deliberately the generic hook rather than [Backfill_backend.drain_all]: a
-     target only ever catches up because [make] registered itself there, and a
-     one-shot command exits without draining if it was not. *)
+  (* The generic hook rather than [Backfill_backend.drain_all]: a target catches
+     up only because [make] registered itself there. *)
   let drain () =
     let+ () = Backend.drain () in
     step "drain"
@@ -142,9 +135,8 @@ let () =
 
      case "the dedup hole: a manifest whose chunks were never written here";
      (* [Remote.chunk_exists] skips a chunk PUT when the source of truth already
-        has it, so a copied file reaches the wrapper as a manifest and nothing
-        else. The manifest step has to fetch c4 itself or the target would hold a
-        manifest referencing a chunk it never got. *)
+        has it, so a copied file reaches the wrapper as a manifest alone. The
+        manifest step must fetch c4 itself. *)
      let* () = M.put ~key:c4 ~data:"cccc" () in
      step "put chunk c4 straight to main, bypassing the wrapper";
      let* () =

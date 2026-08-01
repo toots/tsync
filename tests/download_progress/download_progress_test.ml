@@ -1,27 +1,23 @@
 (* What a caller showing a progress bar can see while a file is made local.
 
-   Making a file local is two phases — fetch its chunks, then reassemble them
-   into the file the caller asked for — and both take real time on a large file.
-   The reporting used to cover only the first: the row was deleted the moment the
-   fetch finished, so anything watching saw "nothing is running" for the whole
-   reassembly and a bar that froze partway. On a multi-gigabyte file that reads as
-   a hang.
+   Making a file local is two phases — fetch, then reassemble — and both take
+   real time on a large file, so reporting only the first leaves the bar frozen
+   through the reassembly, which reads as a hang.
 
-   The chunk sizes here are tiny so that one small file is several chunks across
-   several groups — the shape of a large file, in bytes rather than gigabytes.
+   Chunk sizes here are tiny, so one small file is several chunks across several
+   groups: the shape of a large file, in bytes.
 
-   Sampling runs concurrently with the operation and yields with [Lwt.pause], not
-   with sleeps: what is asserted is the *shape* of the samples (never absent once
-   started, never decreasing, ends complete), which does not depend on how many
-   of them a given scheduling produces. The count is checked too, so a run that
-   observed nothing fails instead of passing vacuously. *)
+   Sampling runs concurrently and yields with [Lwt.pause] rather than sleeps.
+   What is asserted is the shape of the samples — never absent once started,
+   never decreasing, ends complete — which does not depend on how many a given
+   scheduling produces. The count is checked too, so a run that observed nothing
+   fails rather than passing vacuously. *)
 
 open Lwt.Syntax
 
 let chunk_size = 4096
 
-(* Four stored chunks to a group, so a group is a meaningful unit and the file
-   below spans several of them. *)
+(* Four stored chunks per group, so the file below spans several. *)
 let cache_chunk_size = 4 * chunk_size
 let root = Filename.temp_dir "tsync-progress" ""
 let backend_root = Filename.concat root "backend"
@@ -51,8 +47,8 @@ module C = struct
   let socket_path = Filename.concat root "s.sock"
   let max_uploads = 4
 
-  (* Comfortably more than the chunks in flight, so the download pool is never
-     the thing holding the fetch up. *)
+  (* More than the chunks in flight, so the download pool never holds the fetch
+     up. *)
   let max_downloads = 16
   let chunk_size = Some chunk_size
   let cache_chunk_size = Some cache_chunk_size
@@ -76,12 +72,11 @@ let read_file path =
   close_in ic;
   s
 
-(* Distinct bytes throughout, so a misplaced range shows up as wrong content
-   rather than as bytes that happen to match. *)
+(* Distinct bytes throughout, so a misplaced range shows as wrong content rather
+   than bytes that happen to match. *)
 let distinct n = String.init n (fun i -> Char.chr (i * 7 mod 251))
 
-(* Run [job] while sampling the progress of [key], yielding between samples so
-   the two interleave on the one Lwt loop. *)
+(* Yields between samples so the two interleave on the one Lwt loop. *)
 let sampling key job =
   let samples = ref [] in
   let running = ref true in
@@ -100,8 +95,8 @@ let sampling key job =
   let+ (), () = Lwt.both (work ()) (sample ()) in
   List.rev !samples
 
-(* Samples from the moment progress is first reported. A sampler can look before
-   the operation has opened its row, and that leading absence is not a gap. *)
+(* A sampler can look before the operation opens its row, and that leading
+   absence is not a gap. *)
 let from_first_report samples =
   let rec drop = function None :: rest -> drop rest | rest -> rest in
   drop samples
@@ -117,7 +112,6 @@ let () =
        R.upload ~key ~src_path:src ~mtime:0. ~chunk_size ()
      in
 
-     (* ── The whole job is reported, not just the fetch ────────────────────── *)
      let* () = D.forget_chunks key in
      let dst = Filename.concat root "out.bin" in
      let* samples = sampling key (fun () -> D.assemble_to key ~dst_path:dst) in
@@ -143,7 +137,6 @@ let () =
      check "the total covers both phases"
        (match seen with (_, total) :: _ -> total > size | [] -> false);
 
-     (* ── A file already local still reports its reassembly ────────────────── *)
      let dst2 = Filename.concat root "out2.bin" in
      let* samples = sampling key (fun () -> D.assemble_to key ~dst_path:dst2) in
      let reported = from_first_report samples in
@@ -151,7 +144,6 @@ let () =
        (List.length (List.filter Option.is_some reported) >= 3
        && List.for_all Option.is_some reported);
 
-     (* ── A staged file with no published base ─────────────────────────────── *)
      let staged_key = C.domain_prefix ^ "staged.bin" in
      let staged_src = Filename.concat root "staged.bin" in
      write_file staged_src data;
@@ -166,7 +158,6 @@ let () =
        && List.for_all Option.is_some reported);
      check "the staged file came out whole" (read_file dst3 = data);
 
-     (* ── Two callers materializing one key share a row ─────────────────────── *)
      let* () = D.forget_chunks key in
      let dst4 = Filename.concat root "out4.bin" in
      let dst5 = Filename.concat root "out5.bin" in

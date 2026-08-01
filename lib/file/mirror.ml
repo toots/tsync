@@ -11,10 +11,9 @@ module Make (C : Conf.S) = struct
   (* Bounds concurrent HEAD/copy operations per destination. *)
   let copy_pool = Lwt_bounded.create ~max:C.max_uploads ()
 
-  (* Copy [entry] from [src] to [dst] when it is missing there or its size
-     differs (objects are content-addressed or immutable-once-written, so a
-     size mismatch means the destination copy is corrupt). Returns the bytes
-     copied, or [None] when the destination was already correct. *)
+  (* Objects are content-addressed or immutable once written, so a size mismatch
+     means the destination copy is corrupt. [None] when it was already
+     correct. *)
   let sync_entry (module Src : Backend.S) (module Dst : Backend.S)
       (entry : Backend.file_entry) =
     let* head = Dst.head_opt ~key:entry.key () in
@@ -32,9 +31,9 @@ module Make (C : Conf.S) = struct
       let+ () = Dst.put ~key:entry.key ~data () in
       Some (String.length data)
 
-  (* Everything the daemon writes for this domain. The chunk store is shared
-     across domains on the same bucket; mirroring all of it is deliberate
-     (chunks are content-addressed, extra copies only help other domains). *)
+  (* The chunk store is shared across domains on one bucket, and mirroring all of
+     it is deliberate: chunks are content-addressed, so extra copies only help
+     the other domains. *)
   let source_entries ?(manifests_only = false) ?(on_list = fun ~name:_ -> ())
       (module Src : Backend.S) =
     let prefixes =
@@ -61,8 +60,7 @@ module Make (C : Conf.S) = struct
     let entries =
       List.concat per_prefix @ match cursor with Some e -> [e] | None -> []
     in
-    (* Listing order is backend-dependent; sort for deterministic processing
-       and reporting. *)
+    (* Listing order is backend-dependent. *)
     List.sort_uniq
       (fun (a : Backend.file_entry) (b : Backend.file_entry) ->
         compare a.key b.key)
@@ -97,12 +95,9 @@ module Make (C : Conf.S) = struct
     in
     { stats with copied = List.rev stats.copied }
 
-  (* Bring every other configured backend up to date with the backend at
-     [source] (position in [C.backends], 0 = primary): copy any object that is
-     missing or size-mismatched there. Additive only — objects deleted on the
-     source are not deleted on the destinations (deletes normally fan out to
-     all backends; resync is for backends that were down, drifted or were
-     added later). *)
+  (* [source] is a position in [C.backends], 0 being the primary. Additive only:
+     a delete normally fans out to every backend, and resync exists for backends
+     that were down, drifted, or were added later. *)
   let resync ?(source = 0) ?(manifests_only = false)
       ?(on_scan = fun ~objects:_ -> ()) ?(on_list = fun ~name:_ -> ()) ?on_copy
       () =

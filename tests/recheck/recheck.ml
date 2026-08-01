@@ -1,8 +1,7 @@
-(* Recheck scenarios: verify and repair remote chunks and manifests from the
-   local cache. Backend damage is injected behind the daemon's back
-   (DeleteRemoteChunk / CorruptRemoteChunk / DeleteRemoteManifest); each
-   snapshot shows the per-file recheck lines and the resulting bucket state,
-   including full manifest contents. *)
+(* Verify and repair remote chunks and manifests from the local cache. Damage is
+   injected behind the daemon's back (DeleteRemoteChunk / CorruptRemoteChunk /
+   DeleteRemoteManifest); each snapshot shows the per-file recheck lines and the
+   resulting bucket state, manifest contents included. *)
 
 open Test_runner
 

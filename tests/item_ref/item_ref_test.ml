@@ -1,9 +1,8 @@
 (* How an item is named on the wire.
 
-   [parse] has to be total: a reference arrives from another process, and a
-   malformed one must come back as an error to that caller rather than take down
-   the request. The forms also have to stay distinguishable from a logical key,
-   since both travel in the same protocol. *)
+   [parse] is total: a reference arrives from another process, and a malformed one
+   must come back as an error rather than take down the request. The forms also
+   stay distinguishable from a logical key, both travelling in one protocol. *)
 
 let failures = ref 0
 
@@ -20,8 +19,7 @@ let () =
   check "a file is named by parent and leaf"
     (Item_ref.parse "f:9f3a/report.pdf" = `File ("9f3a", "report.pdf"));
 
-  (* The root's id spells the root: one item, one name, or the system ends up
-     believing in two containers. *)
+  (* One item, one name, or the system believes in two containers. *)
   check "the root id normalises to the root"
     (Item_ref.parse ("d:" ^ Folder.root_id) = `Root);
 

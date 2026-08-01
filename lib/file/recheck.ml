@@ -35,12 +35,11 @@ module Make (C : Conf.S) = struct
   module Mf = Manifest.Make (C)
   module Cc = Chunk_cache.Make (C) (R)
 
-  (* The local half of a recheck: every member segment of every cache chunk must
-     hash to the key it was published under. Manifest-driven, unlike the rest of
-     the store's bookkeeping — a cache chunk holds several stored chunks, so its
-     body cannot be checked against its own name and the manifests are what say
-     which keys belong in it. Returns (checked, dropped); a dropped body
-     re-downloads on the next read. *)
+  (* Every member segment of every cache chunk must hash to the key it was
+     published under. Manifest-driven, unlike the rest of the store's
+     bookkeeping: a cache chunk holds several stored chunks, so its body cannot
+     be checked against its own name. A dropped body re-downloads on next
+     read. *)
   let verify_chunk_cache () =
     let* rels = Mf.walk () in
     Lwt_list.fold_left_s
@@ -59,10 +58,9 @@ module Make (C : Conf.S) = struct
           | None -> Lwt.return acc)
       (0, 0) rels
 
-  (* Verification is manifest-driven: every chunk a file names must be intact on
-     the backend. Local bytes are checked separately and wholesale by
-     {!Chunk_cache.verify_group} — content addressing makes that a stronger check than
-     re-hashing one file's copy, and there is no assembled file to re-hash. *)
+  (* Every chunk a file names must be intact on the backend. Local bytes are
+     checked separately and wholesale by {!Chunk_cache.verify_group}: there is no
+     assembled file to re-hash. *)
   let recheck_file rel =
     let key = C.domain_prefix ^ rel in
     let* staged = Mf.staged_exists key in
@@ -80,9 +78,8 @@ module Make (C : Conf.S) = struct
             let+ report = R.recheck_from_manifest ~key ~local_body m in
             Checked report
 
-  (* Recheck every file in the domain, sorted, one at a time (chunk checks
-     within a file run concurrently). Returns [None] when the domain has no
-     local cache. *)
+  (* One file at a time; chunk checks within a file run concurrently. [None] when
+     the domain has no local cache. *)
   let run ~on_file () =
     let* root_ok = Mf.mirror_exists () in
     if not root_ok then Lwt.return_none

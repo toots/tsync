@@ -1,8 +1,8 @@
 (* Streaming ZIP64 writer, STORED only. See zip_stream.mli for the contract.
 
-   Every archive is ZIP64 and every member carries a trailing data descriptor,
-   because member sizes are not known when their header is written. That costs a
-   few bytes per member and buys an unbounded size limit with no seeking. *)
+   Member sizes are unknown when their header is written, so every archive is
+   ZIP64 and every member carries a trailing data descriptor: a few bytes per
+   member, in exchange for no size limit and no seeking. *)
 
 let u16 b n =
   Buffer.add_char b (Char.chr (n land 0xff));
@@ -25,8 +25,6 @@ let u32i b n = u32 b (Int32.of_int n)
 let max32 = 0xFFFFFFFFL
 let sentinel32 = 0xFFFFFFFFl
 let needs64 n = Int64.unsigned_compare n max32 >= 0
-
-(* ── CRC32 (IEEE, reflected) ─────────────────────────────────────────────── *)
 
 let crc_table =
   lazy
@@ -58,8 +56,6 @@ let crc_feed running s =
 
 let crc_final running = Int32.lognot running
 
-(* ── DOS timestamps ──────────────────────────────────────────────────────── *)
-
 (* MS-DOS packed date/time; the format cannot represent anything before 1980, so
    older mtimes clamp to 1980-01-01. *)
 let dos_time mtime =
@@ -76,8 +72,6 @@ let dos_time mtime =
         in
         (time, date)
     | _ | (exception _) -> (0, 0x21)
-
-(* ── State ───────────────────────────────────────────────────────────────── *)
 
 type member = {
   name : string;
@@ -108,8 +102,8 @@ type t = {
 
 let create () = { pos = 0L; members = []; cur = None }
 
-(* Every emitted string goes through here so [pos] stays the true output offset —
-   the central directory's member offsets depend on it. *)
+(* Everything emitted goes through here, so [pos] stays the true output offset
+   the central directory's member offsets depend on. *)
 let emit t b =
   let s = Buffer.contents b in
   t.pos <- Int64.add t.pos (Int64.of_int (String.length s));
@@ -205,8 +199,6 @@ let add_directory t ~name ~mtime =
     | [] -> ());
   header ^ descriptor
 
-(* ── Central directory ───────────────────────────────────────────────────── *)
-
 (* External attributes: Unix mode in the high half, MS-DOS directory bit in the
    low half so DOS-heritage tools still see directories as such. *)
 let external_attrs m =
@@ -219,8 +211,8 @@ let external_attrs m =
 
 let central_entry b m =
   (* If any of size/offset overflows 32 bits, all three move to the ZIP64 extra
-     together. Emitting a partial extra is legal but trips implementations that
-     assume a fixed field order. *)
+     together: a partial extra is legal but trips implementations assuming a fixed
+     field order. *)
   let big = needs64 m.size || needs64 m.offset in
   u32 b 0x02014b50l;
   u16 b ((3 lsl 8) lor version) (* made by: Unix *);

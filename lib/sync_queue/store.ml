@@ -1,8 +1,7 @@
-(* Manifest-level backend access keyed by *logical* keys (domain_prefix ^ real
-   path). Every operation maps the logical key to a backend key through the
-   {!Layout} scheme, so callers never construct backend keys themselves. Writes
-   fan out to all backends; reads use the primary. Chunk, journal and cursor I/O
-   are not manifest keys and stay in {!File_store}/{!Remote}. *)
+(* Manifest-level backend access keyed by logical keys, mapped to backend keys
+   through the {!Layout} scheme so callers never construct one. Writes fan out to
+   all backends; reads use the primary. Chunk, journal and cursor I/O are not
+   manifest keys and stay in {!File_store}/{!Remote}. *)
 
 open Lwt.Syntax
 
@@ -11,9 +10,8 @@ module Make (C : Conf.S) (L : Layout.S) = struct
 
   let primary = Bk.primary
 
-  (* Publishing brings the folder into existence if this client has not recorded
-     it yet; every other operation resolves what is already there and treats an
-     unknown folder as an absent one. *)
+  (* Publishing may bring the folder into existence; every other operation
+     resolves what is already there and treats an unknown folder as absent. *)
   let put_manifest ~key ~data =
     let* bk = L.ensure_manifest_key key in
     Bk.put ~key:bk ~data
@@ -46,8 +44,8 @@ module Make (C : Conf.S) (L : Layout.S) = struct
     let* bk = L.manifest_key key in
     match bk with None -> Lwt.return_unit | Some bk -> Bk.delete ~key:bk
 
-  (* The destination is being written, so it may be brought into existence; the
-     source has to already be there or there is nothing to move. *)
+  (* The destination may be brought into existence; the source has to be there
+     already or there is nothing to move. *)
   let copy_manifest ~src_key ~dst_key =
     let* src = L.manifest_key src_key in
     match src with
@@ -58,10 +56,8 @@ module Make (C : Conf.S) (L : Layout.S) = struct
               let* () = B.copy ~src_key:src ~dst_key:dst () in
               B.delete ~key:src ())
 
-  (* Versions mirror the manifest key under the [versions/] prefix: a file's
-     versions live at [<versions>/<manifest-key-tail>/<ts>], so they share the
-     manifest's identity (a stable folder id under the inode layout) and survive
-     a folder rename. *)
+  (* [<versions>/<manifest-key-tail>/<ts>], so versions share the manifest's
+     identity — a stable folder id — and survive a folder rename. *)
   let version_dir ~key =
     let+ bk = L.manifest_key key in
     Option.map
@@ -102,8 +98,8 @@ module Make (C : Conf.S) (L : Layout.S) = struct
     let (module Pri : Backend.S) = primary () in
     Pri.get ~key:vkey ()
 
-  (* Folder markers (inode layout): record a directory under its parent's
-     namespace so resync can rebuild the tree. No-op for layouts without one. *)
+  (* Records a directory under its parent's namespace so resync can rebuild the
+     tree. No-op for layouts with no folder tree. *)
   let put_folder_marker ~key =
     let* m = L.ensure_folder_marker key in
     match m with

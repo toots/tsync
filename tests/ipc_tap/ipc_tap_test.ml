@@ -1,15 +1,13 @@
 (* The tap the end-to-end tests watch requests through.
 
-   Worth checking on its own because the end-to-end tests cannot check it: there
-   it is the instrument, so a tap that quietly recorded nothing would read as
-   "the system never made that call" — the exact conclusion the test exists to
-   draw. It would fail by reporting a wrong answer confidently.
+   Checked on its own because there it is the instrument: a tap that quietly
+   recorded nothing would read as "the system never made that call", which is the
+   exact conclusion those tests draw.
 
-   What is actually in question is whether a bound unix socket survives being
-   renamed. It does — the pathname is a lookup key, the socket lives in its
-   inode — and that is what lets the daemon be observed without any test-only
-   code inside it. A toy server stands in for the daemon here: what is under
-   test is the relay, not anything that speaks the daemon's protocol. *)
+   What is in question is whether a bound unix socket survives being renamed. It
+   does — the pathname is a lookup key, the socket lives in its inode — which is
+   what lets the daemon be observed without test-only code inside it. A toy server
+   stands in for it: the relay is what is under test. *)
 
 let failures = ref 0
 
@@ -23,8 +21,8 @@ let check name ok =
 let root = Filename.temp_dir "tsync-tap" ""
 let socket_path = Filename.concat root "s.sock"
 
-(* Answers every request line with the same line back, prefixed. Enough to tell
-   a relayed answer from a fabricated one. *)
+(* Echoes each request line back prefixed: enough to tell a relayed answer from a
+   fabricated one. *)
 let serve stop =
   let listener = Unix.socket Unix.PF_UNIX Unix.SOCK_STREAM 0 in
   Unix.bind listener (Unix.ADDR_UNIX socket_path);
@@ -97,8 +95,7 @@ let () =
   check "an action nobody asked for is not recorded"
     (Ipc_tap.requests tap "ensure_cached" = []);
 
-  (* Several callers at once, since the extension is not the only one talking to
-     the daemon and each gets its own connection. *)
+  (* The extension is not the only caller, and each gets its own connection. *)
   let answers =
     List.map
       (fun i ->
@@ -116,8 +113,8 @@ let () =
   check "forgetting clears what was seen" (Ipc_tap.seen tap = []);
 
   Ipc_tap.stop tap;
-  (* And the socket has to be handed back, or everything after the test that
-     used it — including the user's own daemon — is talking to nothing. *)
+  (* The socket has to be handed back, or everything after the test — the user's
+     own daemon included — is talking to nothing. *)
   check "the server is reachable again once the tap is gone"
     (request "{\"action\":\"stat\"}" = "{\"echo\":{\"action\":\"stat\"}}");
 

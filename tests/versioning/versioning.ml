@@ -1,7 +1,7 @@
-(* Versioning scenarios: every modify/rename/delete saves a timestamped copy of
-   the manifest under .versions/, and [revert] restores one without downloading
-   content (the restored file stays cached=false until opened). See
-   ../base/base.ml for the single-client harness. *)
+(* Every modify, rename and delete saves a timestamped copy of the manifest under
+   .versions/, and [revert] restores one without downloading content — the
+   restored file stays cached=false until opened. See ../base/base.ml for the
+   single-client harness. *)
 
 open Test_runner
 

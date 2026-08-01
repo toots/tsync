@@ -1,10 +1,10 @@
 (* The event channel, over a real socket.
 
-   Two things here are easy to get wrong and invisible until a client is left
-   waiting: a connection must keep answering questions until the client hangs up
+   Two things are easy to get wrong and invisible until a client is left waiting:
+   a connection must keep answering questions until the client hangs up
    (fileproviderd asks constantly), and a subscribed connection must stop
-   answering and carry events instead. Both are exercised end to end rather than
-   by inspecting [Subs] directly. *)
+   answering and carry events instead. Exercised end to end rather than by
+   inspecting [Subs]. *)
 
 open Lwt.Syntax
 
@@ -34,9 +34,9 @@ let ask (ic, oc) msg =
   let* () = Lwt_io.flush oc in
   Lwt_io.read_line ic
 
-(* A published event has to travel over the socket before we can look at it, and
-   nothing in the test can tell us when it has. Wait for the line, but never
-   forever: a bug here is a client that hangs, so the test must not hang too. *)
+(* A published event has to travel over the socket first and nothing here says
+   when it has. Wait for the line, but not forever: a bug here is a client that
+   hangs, so the test must not hang too. *)
 let read_within ic seconds =
   Lwt.pick
     [

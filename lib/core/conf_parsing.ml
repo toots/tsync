@@ -32,7 +32,7 @@ type t = {
   domains : domain list;
 }
 
-(* The role spelling used in JSON, in the order they are worth presenting. *)
+(* The JSON spelling, in the order worth presenting. *)
 let roles : role list = [`Main; `Replica; `Backfill; `Read_only]
 
 let role_name : role -> string = function
@@ -45,8 +45,8 @@ let role_of_string s = List.find_opt (fun r -> role_name r = s) roles
 let default_max_uploads = 4
 let default_max_downloads = 8
 
-(* Human-friendly byte sizes: a bare number is bytes; a K/M/G suffix (with an
-   optional B/iB) is a binary multiple (1K = 1024). *)
+(* A bare number is bytes; a K/M/G suffix (optionally B/iB) is a binary multiple
+   (1K = 1024). *)
 let format_size b =
   let k = 1024 and m = 1024 * 1024 and g = 1024 * 1024 * 1024 in
   if b >= g && b mod g = 0 then Printf.sprintf "%dG" (b / g)
@@ -117,16 +117,15 @@ let parse_backend json =
             | `String s -> Some (k, s)
             | `Bool b -> Some (k, string_of_bool b)
             | `Int n -> Some (k, string_of_int n)
-            (* Array fields (e.g. exec backend "command") pass through as JSON
+            (* Array fields (the exec backend's "command") pass through as JSON
                for the backend factory to decode. *)
             | `List _ -> Some (k, Yojson.Basic.to_string v)
             | _ -> None))
   in
   { backend_type; name; fields; role }
 
-(* Backends in read preference: mains, then replicas, then the rest — each group
-   keeping its config order. Reads use the head, so config order is what picks
-   the read primary; there is nothing to elect. *)
+(* Read preference: mains, then replicas, then the rest, each group keeping its
+   config order. Reads use the head, so config order picks the read primary. *)
 let order_backends backends =
   let rank b =
     match b.role with
@@ -137,9 +136,8 @@ let order_backends backends =
   in
   List.stable_sort (fun a b -> compare (rank a) (rank b)) backends
 
-(* A frontend is either a bare type name ["fuse"] or an object
-   [{"type": "fuse", ...options}]; the string form is shorthand for an object
-   with no options. Extra keys are kept as string fields for future options. *)
+(* A bare type name ["fuse"] is shorthand for [{"type": "fuse"}]. Extra keys are
+   kept as string fields. *)
 let parse_frontend json =
   let open Yojson.Basic.Util in
   match json with
@@ -173,10 +171,8 @@ let parse_symlink_policy json =
     | `Null -> failwith "domain config missing required \"symlinks\" field"
     | _ -> failwith "domain \"symlinks\" field must be a string"
 
-(* A size field: an integer, a size string, or absent. Kept as an option rather
-   than resolved to a default here, so a caller can tell "unset" from "set to
-   what the default happens to be" — [tsync print-config] shows only what the
-   config actually says. *)
+(* An integer, a size string, or absent. Kept optional rather than defaulted here
+   so a caller can tell "unset" from "set to the default value". *)
 let parse_size_field json name =
   let open Yojson.Basic.Util in
   match json |> member name with
@@ -190,10 +186,9 @@ let parse_size_field json name =
         failwith
           (Printf.sprintf "domain %S must be a size string or integer" name)
 
-(* A domain is either writable — at least one [main], which every replica and
-   backfill target is a copy of — or purely read-only, served by [readOnly]
-   stores alone. A replica or a backfill target with no main is a copy of
-   nothing, and a domain with no backend able to answer a read is unusable. *)
+(* A domain is either writable (at least one [main], which every replica and
+   backfill target copies) or purely read-only. A replica or backfill target with
+   no main is a copy of nothing. *)
 let validate_roles name backends =
   let count r = List.length (List.filter (fun b -> b.role = r) backends) in
   let fail fmt = failwith (Printf.sprintf ("domain %s: " ^^ fmt) name) in
@@ -230,9 +225,9 @@ let parse_domain json =
               "domain config missing required non-empty \"frontends\" array");
     symlink_policy = parse_symlink_policy json;
     versioning = json |> member "versioning" |> to_bool;
-    (* With no writable backend a write cannot possibly land, so the domain is
-       read-only whether or not it says so: better an EROFS at the mount than a
-       backend error per attempt. *)
+    (* With nothing writable a write cannot land, so the domain is read-only
+       whether it says so or not: EROFS at the mount beats a backend error per
+       attempt. *)
     read_only =
       (match json |> member "readOnly" with `Bool b -> b | _ -> false)
       || not (List.exists (fun b -> b.role <> `Read_only) backends);
@@ -288,8 +283,8 @@ let pick_domain ?domain cfg =
 
 let root_prefix = "tsync/"
 
-(* Everything for a domain lives under one folder so a domain can be dropped with
-   a single prefix delete. Chunks are per-domain (no cross-domain dedup). *)
+(* One folder per domain, so a domain is dropped with a single prefix delete.
+   Chunks are per-domain: no cross-domain dedup. *)
 let domain_root (d : domain) = root_prefix ^ d.name ^ "/"
 let domain_prefix d = domain_root d ^ "manifests/"
 let chunk_prefix d = domain_root d ^ "chunks/"
@@ -297,8 +292,8 @@ let versions_prefix d = domain_root d ^ "versions/"
 let journal_prefix d = domain_root d ^ "journal/"
 let cursor_key d = domain_root d ^ "cursor"
 
-(* Shares are NOT nested per-domain: they live at a single fixed root so the share
-   service's IAM/lifecycle can target one constant prefix. A share manifest is
-   token-addressed and records its own chunk/dir prefixes, so its domain is
-   recoverable from the body — the path needs no domain segment. *)
+(* Shares sit at one fixed root rather than per domain, so the share service's
+   IAM and lifecycle target a constant prefix. A share manifest is token-addressed
+   and records its own chunk/dir prefixes, so its domain is recoverable from the
+   body. *)
 let shares_prefix (_ : domain) = root_prefix ^ "shares/"

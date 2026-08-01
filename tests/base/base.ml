@@ -1,6 +1,6 @@
-(* Base scenarios: one representative case per file operation. To add another
-   suite, create a sibling directory with its own scenario file, [.expected]
-   snapshot, and the same three dune stanzas (see tests/base/dune). *)
+(* One representative case per file operation. A new suite is a sibling
+   directory with its own scenario file, [.expected] snapshot, and the same three
+   dune stanzas (see tests/base/dune). *)
 
 open Test_runner
 
@@ -46,9 +46,9 @@ let scenarios : scenario list =
         [
           Write { path = "a.txt"; content = "evicted" };
           Drain;
-          (* Read it first: a whole-file write leaves nothing in the chunk store,
-             so without this the eviction would have nothing to drop and the
-             snapshot could not tell a working evict from a no-op. *)
+          (* Read first: a whole-file write leaves nothing in the chunk store, so
+             the eviction would have nothing to drop and the snapshot could not
+             tell a working evict from a no-op. *)
           ReadRange { path = "a.txt"; offset = 0; len = 7 };
           ShowChunks "a.txt";
           Evict "a.txt";
@@ -68,9 +68,8 @@ let scenarios : scenario list =
         ];
     };
     {
-      (* A full resync wipes the manifest mirror and the chunk store and rebuilds
-         them from the backend. Unsynced edits are the one thing it must not
-         touch: nothing else holds those bytes. *)
+      (* A full resync rebuilds the mirror and chunk store from the backend.
+         Unsynced edits are the one thing it must not touch. *)
       name = "unsynced edits survive a full resync";
       steps =
         [
@@ -103,12 +102,9 @@ let scenarios : scenario list =
     };
     { name = "rmdir"; steps = [Mkdir "sub"; Drain; Rmdir "sub"; Drain] };
     {
-      (* A query answers about what is there and changes nothing. Resolving a
-         path used to mint a folder id for anything it could not find, and the
-         marker it persisted brought the directory into being — so a stat of a
-         deleted folder put it back, and the next listing showed it. Whoever is
-         asking, a miss must stay a miss: [names] after each stat must be
-         empty. *)
+      (* A query changes nothing: a miss must stay a miss, so [names] after each
+         stat must be empty. Resolving a path must not mint a folder id and
+         persist a marker, which would bring the directory back. *)
       name = "stat_absent_creates_nothing";
       steps =
         [
@@ -125,8 +121,8 @@ let scenarios : scenario list =
         ];
     };
     {
-      (* Renaming a non-empty folder is O(1): the file's backend key is under the
-         folder's stable id, so it doesn't move — only the folder marker does. *)
+      (* O(1): the file's backend key hangs off the folder's stable id, so only
+         the marker moves. *)
       name = "rename_dir";
       steps =
         [

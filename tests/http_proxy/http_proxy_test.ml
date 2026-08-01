@@ -1,5 +1,3 @@
-(* ── Fixture for the status endpoints ─────────────────────────────────────── *)
-
 let status_root = "/tmp/tsync-http-proxy-status-test"
 
 module C : Conf.S = struct
@@ -47,11 +45,10 @@ end
 
 let json_member name j = Yojson.Safe.Util.member name j
 
-(* Everything in the report that moves between runs, pinned to a fixed value of
-   the same type — so the snapshot below reviews the shape and the wording while
-   staying readable as a real report. Rates are timing-dependent (a rolling window
-   over wall-clock seconds), hence pinned too; the mount snapshot exercises rate
-   rendering with literals instead. *)
+(* Everything that moves between runs, pinned to a fixed value of the same type,
+   so the snapshot reviews shape and wording while reading as a real report. Rates
+   are timing-dependent and pinned too; the mount snapshot exercises rate
+   rendering with literals. *)
 let stable_values =
   [
     ("hostname", `String "testhost");
@@ -217,9 +214,8 @@ let () =
   assert (pick "elsewhere/x" "one" = None);
 
   (* Specs are what [tsync configure] prompts from, so a field missing here is
-     silently unconfigurable. [shares] is declared on the frontend only: the
-     client asks the proxy over /share-url rather than mirroring the setting,
-     so a second copy in backend config could only drift out of agreement. *)
+     silently unconfigurable. [shares] is on the frontend only: the client asks
+     over /share-url rather than mirroring the setting. *)
   let has_field name specs =
     List.exists (fun (s : Backend.field_spec) -> s.name = name) specs
   in
@@ -265,16 +261,13 @@ let () =
   assert (status (Http_proxy_frontend.Put share_key) ~read_only:true = 200);
   assert (status (Http_proxy_frontend.Delete share_key) ~read_only:true = 200);
 
-  (* ── Status endpoints ───────────────────────────────────────────────────── *)
-
   (* The store directory has to exist for its filesystem to be measurable — a
      capacity of "unknown" is what an absent path correctly reports. *)
   Lwt_main.run (Fs_util.mkdir_p (status_root ^ "/store"));
 
-  (* A store with a chunk in every shard: the estimate scales one shard's worth
-     up by the shard count, so a uniformly filled store is the case where the
-     estimate and the truth have to agree exactly. Real keys are hashes, so this
-     is the distribution they approximate. *)
+  (* A chunk in every shard: the estimate scales one shard's worth by the shard
+     count, so a uniformly filled store is where estimate and truth must agree
+     exactly. Real keys are hashes and approximate this distribution. *)
   let planted = Chunk_layout.shards in
   Lwt_main.run
     (Lwt_list.iter_s
@@ -337,9 +330,8 @@ let () =
   List.iter
     (fun key -> assert (json_member key r <> `Null))
     ["server"; "process"; "lwt"; "traffic"; "recentErrors"; "domains"];
-  (* The answering process says which frontend it is and which domains that
-     covers: a shared listener's cpu and counters belong to all of them, so they
-     are reported here and not filed under one domain. *)
+  (* A shared listener's cpu and counters belong to every domain it serves, so
+     they are reported here rather than filed under one. *)
   let server = json_member "server" r in
   assert (json_member "frontend" server = `String "http-proxy");
   assert (json_member "serves" server = `List [`String "statusdom"]);
@@ -353,9 +345,8 @@ let () =
   assert (json_member "clientName" domain = `String "test-client");
   (* Config as this process resolved it, not as a file spells it. *)
   assert (json_member "maxDownloads" domain = `Int 3);
-  (* The listener appears as one of the domain's frontends, carrying the settings
-     that are this domain's — the shared process figures being reported once, at
-     the top. *)
+  (* The listener appears as one of the domain's frontends carrying this domain's
+     settings; the shared process figures are reported once, at the top. *)
   let frontends =
     match json_member "frontends" domain with `List l -> l | _ -> []
   in
@@ -369,7 +360,7 @@ let () =
   assert (json_member "secret" options = `String "***");
   assert (json_member "port" options = `String "8443");
   (* Nothing listens on the socket, so the other frontend is reported as not
-     answering — named by the socket it was asked on — rather than awaited. *)
+     answering, named by the socket it was asked on. *)
   let mount_frontend =
     List.find (fun f -> json_member "type" f <> `String "http-proxy") frontends
   in
@@ -391,11 +382,10 @@ let () =
   assert (json_member "queued" backfill = `Int 7);
   assert (json_member "degraded" backfill = `Bool true);
 
-  (* What a store holds. Counting one is opt-in and never done while a request
-     waits: the first ask starts a walk in the background and says so, a later
-     one has the numbers. Once counted, the figure is reported by every request
-     until someone asks for a new one. Each state below is a row in the "store
-     totals" snapshot, which is where this is reviewed. *)
+  (* Counting is opt-in and never done while a request waits: the first ask
+     starts a background walk and says so, a later one has the numbers, and the
+     figure is then reported by every request until someone asks for a new one.
+     Each state below is a row in the "store totals" snapshot. *)
   let totals_for name report =
     match json_member "domains" report with
       | `List [d] -> (
@@ -458,9 +448,9 @@ let () =
   in
   row "estimate landed" counted;
 
-  (* [exact] is a separate sample: until its walk lands, asking for it is
-     answered with the estimate already in hand, hence waiting on the absence of
-     [chunksFromShards] rather than the presence of [chunks]. *)
+  (* [exact] is a separate sample, answered with the estimate in hand until its
+     walk lands — hence waiting on the absence of [chunksFromShards] rather than
+     the presence of [chunks]. *)
   let exact =
     await ~what:"exact counts"
       ~ready:(fun t ->
@@ -475,10 +465,8 @@ let () =
   row "store that cannot be read"
     (totals_for "archive" (report ~totals:true ()));
 
-  (* Both representations are snapshotted below, which is where the shape is
-     actually reviewed. This one stays an assertion because a snapshot can be
-     promoted without being read, and a leaked shared secret must not be able to
-     ride in on a promote. *)
+  (* An assertion, not just a snapshot: a snapshot can be promoted without being
+     read, and a leaked shared secret must not ride in on a promote. *)
   assert (
     json_member "secret" (json_member "options" proxy_frontend) = `String "***");
   (* The same rule for a backend that points at a remote server. *)
@@ -487,13 +475,13 @@ let () =
     = `String "***");
 
   (* A domain's frontends are separate processes with separate counters, so the
-     bytes a mount moves are invisible to the proxy's own metrics. They are carried
-     over IPC and reported as that frontend's own — a page showing only its own
-     zero would say "no traffic" about a busy machine.
+     bytes a mount moves are invisible to the proxy's metrics. They come over IPC
+     and are reported as that frontend's own, or a page showing its own zero calls
+     a busy machine idle.
 
      Keys are exactly the ones [Ipc_handler] emits: a fixture that says [type]
-     where the daemon says something else proves only that the fixture agrees with
-     the renderer. *)
+     where the daemon says something else only proves the fixture agrees with the
+     renderer. *)
   let mount_fixture =
     `Assoc
       [
@@ -586,10 +574,9 @@ let () =
                   ] );
             ]
           stable));
-  (* What a store holds, the cheap way and the thorough way. The store below is
-     one chunk in each of its shards, so the estimate and the count agree on the
-     number and differ only in how they say they got it — which is the thing to
-     read here. *)
+  (* The cheap way and the thorough way. The store is one chunk per shard, so
+     estimate and count agree on the number and differ only in how they say they
+     got it. *)
   let totals_text ~exact =
     Diagnostics.text
       (substitute ~values:stable_values (report ~totals:true ~exact ()))

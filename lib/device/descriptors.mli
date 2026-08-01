@@ -12,14 +12,12 @@ val current : unit -> int option
 
     A process may raise its own soft limit up to the hard one without privilege,
     which is what makes this worth doing at start-up: launchd hands the macOS
-    daemon 256 descriptors against an unlimited hard limit, and a burst of
-    concurrent work exhausted it — [accept] then failed with [EMFILE] and took
-    the daemon down. Asking for more costs nothing; descriptors are allocated on
-    use, not reserved.
+    daemon 256 descriptors against an unlimited hard limit, low enough that a
+    burst of concurrent work fails [accept] with [EMFILE]. Descriptors are
+    allocated on use, so asking for more costs nothing.
 
-    [target] is a request, not a demand. The real per-process cap is not visible
-    in the hard limit on every platform, so an over-large ask is stepped down
-    until the kernel accepts one. Raising the limit is not a fix for holding too
-    many open — {!Lwt_bounded} is for that — it removes an arbitrary ceiling far
-    below what the machine allows. *)
+    [target] is a request: the real per-process cap is not visible in the hard
+    limit on every platform, so an over-large ask is stepped down until the
+    kernel accepts one. This removes an arbitrary ceiling; holding too many open
+    is {!Lwt_bounded}'s problem. *)
 val raise_to : target:int -> int

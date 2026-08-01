@@ -1,12 +1,10 @@
-(* Runtime selection of conduit's TLS backend for the S3 client.
+(* Runtime selection of conduit's TLS backend, which conduit-lwt-unix picks once
+   at startup via its [tls_library] ref.
 
-   conduit-lwt-unix picks a backend once at startup (its [tls_library] ref).
-   [Native] (ocaml-tls, via tls-lwt) is a mandatory dependency; [OpenSSL] (via
-   lwt_ssl) is optional and only available when lwt_ssl is installed in the
-   switch. OpenSSL is much faster in general and is preferred by default when
-   it is available; Native is a robust fallback that avoids OpenSSL's
-   per-connection error-queue bug affecting some S3-compatible endpoints
-   (Backblaze B2), so it stays selectable for those situations. *)
+   [Native] (ocaml-tls) is a mandatory dependency; [OpenSSL] (lwt_ssl) is optional
+   and much faster, so it is preferred when compiled in. Native stays selectable
+   because it avoids OpenSSL's per-connection error-queue bug, which affects some
+   S3-compatible endpoints (Backblaze B2). *)
 
 type t = Native | Openssl
 
@@ -29,8 +27,7 @@ let current () =
     | Conduit_lwt_unix.OpenSSL -> "openssl"
     | Conduit_lwt_unix.No_tls -> "none"
 
-(* Backends compiled into this build, preferred first. OpenSSL is faster in
-   general, so it leads when available; Native is the fallback. *)
+(* Preferred first: OpenSSL when available, else Native. *)
 let available () =
   List.filter_map
     (fun b -> if is_available b then Some (to_string b) else None)
@@ -53,15 +50,12 @@ let use_preferred () =
     | name :: _ -> ( match of_string name with Some b -> set b | None -> ())
     | [] -> ()
 
-(* Apply a selection by name. [None] selects the preferred available backend
-   (OpenSSL when it is compiled in, else Native).
+(* [None] selects the preferred available backend.
 
-   An unknown name is a typo in the config and raises. A known name that this
-   build lacks does not: which backends are compiled in is a property of the
-   build, not of the configuration — the release build ships without OpenSSL —
-   and both backends speak TLS, so the choice is a performance preference. A
-   daemon that refuses to start over one is worse than a slower one, so warn
-   loudly and carry on with what is here. *)
+   An unknown name is a typo in the config and raises. A known name this build
+   lacks does not: which backends are linked is a property of the build (the
+   release build ships without OpenSSL), and both speak TLS, so the choice is a
+   performance preference. Warn loudly and carry on. *)
 let apply = function
   | None -> use_preferred ()
   | Some name -> (

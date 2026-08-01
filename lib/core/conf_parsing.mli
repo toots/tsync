@@ -4,8 +4,7 @@
       order; a write fans out over every main and replica.
     - [`Replica] — a complete second copy: it receives every write, journal and
       cursor included, and serves reads when no main is reachable. Differs from
-      a second [`Main] only in read preference, which is the point — it names
-      the intent. See {!Fallback_backend}.
+      a second [`Main] only in read preference. See {!Fallback_backend}.
     - [`Backfill] — a converging copy, filled lazily from the write side and
       never read from. Content only: no journal, no cursor. See
       {!Backfill_backend}.
@@ -24,51 +23,49 @@ val role_of_string : string -> role option
 type backend_config = {
   backend_type : string;
   name : string;
-      (** required; selects backends, e.g. [resync-remote --source] *)
+      (** Required; selects backends, e.g. [resync-remote --source]. *)
   fields : (string * string) list;
   role : role;
-      (** required: ["main"], ["replica"], ["backfill"] or ["readOnly"] *)
+      (** Required: ["main"], ["replica"], ["backfill"] or ["readOnly"]. *)
 }
 
 type frontend_config = {
   frontend_type : string;
   options : (string * string) list;
-      (** per-frontend options, e.g. http-proxy's [port] and [secret]; empty for
-          the bare-string form. Non-string JSON values arrive stringified *)
+      (** Per-frontend options, e.g. http-proxy's [port] and [secret]; empty for
+          the bare-string form. Non-string JSON values arrive stringified. *)
 }
 
 type domain = {
   name : string;
   backends : backend_config list;
   frontends : frontend_config list;
-      (** required, non-empty; each entry is a type name ["fuse"] or an object
-          [{"type": "fuse", ...options}] *)
+      (** Required, non-empty; each entry is a type name ["fuse"] or an object
+          [{"type": "fuse", ...options}]. *)
   symlink_policy : [ `Keep | `Follow | `Skip ];
   versioning : bool;
   read_only : bool;
-      (** the domain's [readOnly] flag, forced on when no backend is writable
-          (every one is [`Read_only]) — such a domain cannot accept a write, so
-          the mount says so up front *)
+      (** The domain's [readOnly] flag, forced on when every backend is
+          [`Read_only]: such a domain cannot accept a write, so the mount says
+          so up front. *)
   chunk_size : int option;
-      (** chunk size (bytes) for newly uploaded files. [None] when the config
-          does not say; what that resolves to is {!Conf.S.chunk_size}'s
-          business, not this layer's *)
+      (** Chunk size (bytes) for newly uploaded files. [None] when the config
+          does not say; resolving that is {!Conf.S.chunk_size}'s business. *)
   cache_chunk_size : int option;
-      (** cache chunk size (bytes): consecutive stored chunks are grouped into
+      (** Cache chunk size (bytes): consecutive stored chunks are grouped into
           local cache files of about this size. [None] when the config does not
-          say *)
+          say. *)
   max_cache : int option;
-      (** soft cap (bytes) on local cache usage; [None] = unbounded *)
+      (** Soft cap (bytes) on local cache usage; [None] is unbounded. *)
 }
 
 type t = {
   name : string;
   tls : string option;  (** conduit TLS backend: "native" | "openssl" *)
   max_uploads : int;
-      (** max concurrent upload operations (default 4): bounds both how many
-          files the upload workers process at once and, via the shared chunk
-          buffer pool, how many chunk reads/uploads run concurrently across all
-          of them combined *)
+      (** Max concurrent upload operations (default 4): bounds how many files
+          the upload workers process at once and, through the shared chunk
+          buffer pool, how many chunk reads/uploads run concurrently overall. *)
   max_downloads : int;  (** max concurrent file downloads (default 8) *)
   domains : domain list;
 }
@@ -93,10 +90,9 @@ val load : string -> t
     Raises [Failure] when multiple domains are configured and none is named. *)
 val pick_domain : ?domain:string -> t -> domain
 
-(** [order_backends bs] returns [bs] in read preference — mains, then replicas,
-    then read-only stores, then backfill targets — each group keeping its config
-    order. Reads use the head of the list, so config order is what selects the
-    read primary. *)
+(** [bs] in read preference — mains, then replicas, then read-only stores, then
+    backfill targets — each group keeping its config order. Reads use the head,
+    so config order selects the read primary. *)
 val order_backends : backend_config list -> backend_config list
 
 val domain_prefix : domain -> string

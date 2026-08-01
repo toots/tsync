@@ -1,10 +1,10 @@
 (* Two checks on the hand-rolled ZIP64 writer.
 
-   1. A byte-exact snapshot of a fixed archive: any change to the header layout,
-      the data descriptors or the ZIP64 trailer shows up as a diff. The mtime is
-      fixed and the dune rule pins TZ=UTC, since DOS timestamps are local time.
-   2. A real unzip must accept the archive and return the exact bytes back —
-      the snapshot alone would happily freeze a broken format. *)
+   1. A byte-exact snapshot of a fixed archive, so any change to the header
+      layout, the data descriptors or the ZIP64 trailer shows up as a diff. The
+      mtime is fixed and the dune rule pins TZ=UTC, DOS timestamps being local.
+   2. A real unzip must accept the archive and return the exact bytes: the
+      snapshot alone would happily freeze a broken format. *)
 
 let root = "/tmp/tsync-zip-test"
 let archive = root ^ "/out.zip"

@@ -1,11 +1,10 @@
 (* Role composition, and how far a read is allowed to look.
 
    Mains and replicas hold the same content, so the first reachable one's "not
-   found" ends the read. Read-only archives hold different content, so they
-   answer both a miss and an unreachable source of truth, and are never written.
-   A miss is only ever reported when every backend that could have held the key
-   was actually asked: "I could not look" must not reach a caller as "it is not
-   there". *)
+   found" ends the read. Read-only archives hold different content, so they answer
+   both a miss and an unreachable source of truth, and are never written. A miss
+   is reported only when every backend that could hold the key was asked: "could
+   not look" must not reach a caller as "not there". *)
 
 open Lwt.Syntax
 
@@ -34,8 +33,8 @@ let sub name backend = { Fallback_backend.name; backend }
 let case name = Printf.printf "\n=== %s\n" name
 let step fmt = Printf.printf ("  " ^^ fmt ^^ "\n")
 
-(* Every read is reported the same way, because which of the three outcomes a
-   caller gets is the entire subject of this suite. *)
+(* One reporting shape for every read: which of the three outcomes a caller gets
+   is the subject of this suite. *)
 let outcome to_string p =
   Lwt.catch
     (fun () ->

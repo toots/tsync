@@ -1,21 +1,18 @@
 /* This process's open-file limit.
  *
- * The OCaml stdlib has no getrlimit/setrlimit binding, and pulling in a whole
- * POSIX-extras library for two calls is not worth it. Both are POSIX, so one
- * implementation serves each platform tsync targets (see linux/ and macos/).
+ * The OCaml stdlib has no getrlimit/setrlimit binding, and both are POSIX, so
+ * one implementation serves every platform tsync targets.
  *
- * Why this exists: launchd starts the macOS daemon with a soft limit of 256
- * against a hard limit of unlimited, and a burst of concurrent work ran it out —
- * accept(2) then failed with EMFILE and killed the daemon. A process may raise
- * its own soft limit up to the hard one without privilege, so the daemon does
- * not have to be launched specially to get a workable one.
+ * launchd starts the macOS daemon with a soft limit of 256 against an unlimited
+ * hard limit, low enough that a burst of concurrent work fails accept(2) with
+ * EMFILE. A process may raise its own soft limit up to the hard one without
+ * privilege, so the daemon needs no special launch.
  *
- * The ceiling is not asked for, it is discovered. macOS caps a process at
+ * The real ceiling is discovered, not asked for: macOS caps a process at
  * kern.maxfilesperproc and Linux at /proc/sys/fs/nr_open, and on macOS the hard
- * limit is often RLIM_INFINITY, which is not the real answer — setrlimit simply
- * fails above the true cap. Rather than teach this two ways to look it up, ask
- * for the target and halve it until the kernel accepts one. Two or three tries
- * at most, once, at start-up.
+ * limit is often RLIM_INFINITY, above which setrlimit simply fails. So ask for
+ * the target and halve it until the kernel accepts one — two or three tries at
+ * most, once, at start-up.
  *
  * ponytail: no Windows branch. There the limit is per-CRT rather than per
  * process (_setmaxstdio) and tsync has no Windows target, so this reports the
@@ -46,9 +43,8 @@ CAMLprim value tsync_nofile_current(value unit) {
 #endif
 }
 
-/* Raise the soft limit toward [target], returning the soft limit now in force.
- * Never lowers it: a caller asking for less than the process already has is
- * asking for a limit it already exceeds. */
+/* Raise the soft limit toward [target], returning what is now in force. Never
+ * lowers it. */
 CAMLprim value tsync_nofile_raise(value _target) {
   CAMLparam1(_target);
 #ifdef _WIN32

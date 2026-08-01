@@ -1,14 +1,12 @@
 (* What a running tsync process can say about itself when something is wrong.
 
    One collector, two consumers: the http-proxy status endpoints (which have no
-   IPC socket to answer on) and the [diagnostics] IPC action behind
-   [tsync diagnose]. Both render with {!text}, so a server and a mount report the
-   same shape and the same numbers.
+   IPC socket) and the [diagnostics] IPC action behind [tsync diagnose]. Both
+   render with {!text}, so a server and a mount report the same shape.
 
-   Everything here is either in-process state or a bounded read. The exception is
-   [?totals:true], which reaches into the store, and it is opt-in for that
-   reason. Even then the chunk count is estimated from a sample of shards unless
-   [?exact:true] asks for every one to be counted. *)
+   Everything here is in-process state or a bounded read, except [?totals:true],
+   which reaches into the store and is opt-in for that reason. Even then the
+   chunk count is sampled unless [?exact:true]. *)
 
 open Lwt.Syntax
 
@@ -20,23 +18,18 @@ let level_name = function
   | `warn -> "warn"
   | `err -> "err"
 
-(* Journal keys to sample per backend. A domain's journal is unbounded and this
-   is a diagnosis page: report a bound rather than pay for one. *)
+(* A domain's journal is unbounded and this is a diagnosis page. *)
 let journal_sample = 1000
 
-(* ── Process-wide sections ──────────────────────────────────────────────── *)
+(* The frontend answering this request, as a process.
 
-(* The frontend answering this request, and everything true of it as a process.
+   At the top rather than under a domain, since a frontend need not belong to
+   one: an http-proxy listener's cpu, bytes and request counts cover every domain
+   it serves at once, listed in [serves]. A fuse mount is per-domain and appears
+   again in that domain's [frontends].
 
-   It sits at the top rather than under a domain because a frontend need not
-   belong to one: an http-proxy listener serves every domain configured on it, so
-   its cpu, its bytes and its request counts cover all of them at once. Which
-   domains those are is [serves], stated rather than implied. A fuse mount is
-   per-domain and appears again in that domain's [frontends], with the figures
-   only it knows.
-
-   [extra] is what the caller knows and this module cannot: the frontend's type,
-   its listening port, its request counters. *)
+   [extra] is what only the caller knows: the frontend's type, its port, its
+   request counters. *)
 let self_json ?(extra = []) () =
   let uptime = Unix.gettimeofday () -. started_at in
   let cpu = Metrics.cpu_seconds () in
@@ -95,8 +88,6 @@ let self_json ?(extra = []) () =
            (Log.recent ())) );
   ]
 
-(* ── Per-domain ─────────────────────────────────────────────────────────── *)
-
 module Make (C : Conf.S) = struct
   module R = Remote.Make_with_layout (C) (Layout.Identity)
   module D = Data.Make (C) (R)
@@ -105,12 +96,10 @@ module Make (C : Conf.S) = struct
 
   let int_opt = function Some n -> `Int n | None -> `Null
 
-  (* Can this store answer, and how fast? Fetching the cursor — one small object at
-     a known key — is the whole probe: an answer of any kind means the store is
-     reachable, and a miss is still an answer. Deliberately not a listing: a
-     [local] backend walks its whole tree before honouring [max_keys], so "list one
-     key" costs a stat per manifest in the domain. The body comes back too, because
-     the journal section wants exactly this object. *)
+  (* Fetching the cursor — one small object at a known key — is the whole probe:
+     any answer, including a miss, means the store is reachable. Deliberately not
+     a listing: a [local] backend walks its whole tree before honouring
+     [max_keys]. The body comes back too, since the journal section wants it. *)
   let probe (module B : Backend.S) =
     let t0 = Unix.gettimeofday () in
     Lwt.catch
@@ -128,9 +117,8 @@ module Make (C : Conf.S) = struct
             ],
             None ))
 
-  (* Entries published in this store against what this client has applied:
-     [behind] is what a sync pass would still have to do, our own entries
-     excluded — they are ours already. *)
+  (* [behind] is what a sync pass would still have to do, our own entries
+     excluded. *)
   let journal ~cursor (module B : Backend.S) =
     Lwt.catch
       (fun () ->
@@ -139,8 +127,8 @@ module Make (C : Conf.S) = struct
             ()
         in
         let my_uuid = J.client_uuid () in
-        (* [basename ""] is ".", which would both read as nonsense and make the
-           "never synced" case below compare against it instead of matching. *)
+        (* [basename ""] is ".", which reads as nonsense and stops the "never
+           synced" case below from matching. *)
         let last =
           match Fs.read_last_sync_key () with
             | "" -> ""
@@ -180,35 +168,27 @@ module Make (C : Conf.S) = struct
       (fun exn ->
         Lwt.return (`Assoc [("error", `String (Printexc.to_string exn))]))
 
-  (* What this store actually holds: manifests, chunks, bytes. Reading the whole
-     of either namespace is a stat per file on a [local] store and a paged LIST on
-     a bucket, and grows with the domain — so the chunk figure is sampled instead
-     (see [count_chunks]), and only [~exact] pays the full price.
+  (* Manifests, chunks and bytes held by the store. Reading either namespace
+     whole is a stat per file on [local] and a paged LIST on a bucket, growing
+     with the domain, so the chunk figure is sampled (see [count_chunks]) unless
+     [~exact].
 
-     Either way it is never counted while a request waits: a request serves the
-     last sample and says how old it is, and the first ever one answers
-     "counting" while a walk starts behind it. A status endpoint must not block
-     on a 100k-object walk.
-
-     A sample stands until someone asks for it to be recomputed ([~reload]), so
-     walking a store is always something a person chose to do. The age travels
-     with the figure, which is what makes a stale one safe to serve. *)
+     Never counted while a request waits: a request serves the last sample with
+     its age, and the first one answers "counting" while a walk starts behind it.
+     A sample stands until [~reload], so walking a store is always something
+     someone chose. *)
   type sample = { at : float; counts : Yojson.Safe.t }
 
   let samples : (string, sample) Hashtbl.t = Hashtbl.create 4
   let counting : (string, unit) Hashtbl.t = Hashtbl.create 4
 
-  (* Shards sampled to estimate the chunk store. Keys are uniformly hashed, so a
-     shard's share of the store is its share of the shard space: counting a few
-     and scaling costs a listing per sampled shard instead of one over the whole
-     namespace. The error is sampling error — with 16 of 4096 shards, a million
-     chunks means about 4000 counted and a relative error near 1.5%, which is
-     well inside what "how much does this backend hold" is asking. *)
+  (* Keys are uniformly hashed, so a shard's share of the store is its share of
+     the shard space: count a few and scale. With 16 of 4096 shards, a million
+     chunks means ~4000 counted and a relative error near 1.5%. *)
   let sampled_shards = 16
 
-  (* An empty directory is listed as its own marker key by the filesystem
-     backends (matching the zero-byte object S3 lists). A shard that has been
-     emptied is not a chunk. *)
+  (* Filesystem backends list an empty directory as its own marker key (matching
+     S3's zero-byte object). An emptied shard is not a chunk. *)
   let chunk_entries entries =
     List.filter
       (fun (e : Backend.file_entry) ->
@@ -250,21 +230,18 @@ module Make (C : Conf.S) = struct
     Lwt.catch
       (fun () ->
         let* manifests = B.list_prefix ~prefix:C.domain_prefix () in
-        (* Manifests are keyed by folder id, not by a hash, so they are not
-           spread evenly over anything samplable: that count stays a full walk.
-           It is also the smaller of the two — one object per file, against one
-           per chunk of every file. *)
+        (* Manifests are keyed by folder id, not hashed, so nothing is evenly
+           spread to sample: this count stays a full walk. It is also the smaller
+           of the two, one object per file. *)
         let+ chunks = count_chunks ~exact (module B) in
         `Assoc (("manifests", `Int (List.length manifests)) :: chunks))
       (fun exn ->
         Log.warn "diagnostics: counting %s: %s" name (Printexc.to_string exn);
         Lwt.return (`Assoc [("error", `String (Printexc.to_string exn))]))
 
-  (* One walk at a time per store: a page refreshing every few seconds must not
-     stack walks on top of each other. *)
-  (* Estimated and exact counts are separate samples: they answer the same
-     question to different precision, and one must not be served in place of the
-     other. *)
+  (* One walk at a time per store, or a page refreshing every few seconds stacks
+     them. *)
+  (* Separate samples: one precision must not be served in place of the other. *)
   let slot ~name ~exact = if exact then name ^ " (exact)" else name
 
   let refresh ~name ~exact backend =
@@ -281,11 +258,10 @@ module Make (C : Conf.S) = struct
               Lwt.return_unit))
     end
 
-  (* A figure already counted is reported by every request: it is sitting in
-     memory, so withholding it until asked would cost a walk to learn what is
-     already known. [compute] is what asking buys — a walk when there is nothing
-     yet, or a fresh one under [reload]. Without it and with nothing counted,
-     this store simply reports no totals. *)
+  (* An already-counted figure is reported by every request: it is in memory, so
+     withholding it would cost a walk to learn what is known. [compute] is what
+     asking buys — a walk when there is nothing yet, or a fresh one under
+     [reload]. *)
   let totals_of ~name ~exact ~compute ~reload backend =
     let now = Unix.gettimeofday () in
     let wanted = slot ~name ~exact in
@@ -294,16 +270,15 @@ module Make (C : Conf.S) = struct
     let served =
       match Hashtbl.find_opt samples wanted with
         | Some s -> Some (wanted, s)
-        (* Nothing at the precision asked for, but a figure is a figure — and
-           the "~" on an estimate says which kind reached the page. *)
+        (* Nothing at the precision asked for; the "~" says which kind this
+           is. *)
         | None ->
             let other = slot ~name ~exact:(not exact) in
             Option.map (fun s -> (other, s)) (Hashtbl.find_opt samples other)
     in
     match served with
       (* A walk in flight keeps serving the figure it will replace, so a report
-         never blanks out for the length of one. [refreshing] is how a reader
-         knows a newer one is coming; the age says how old this one is. *)
+         never blanks out. [refreshing] says a newer one is coming. *)
       | Some (slot, s) -> (
           let extra =
             [("sampledSecondsAgo", `Int (int_of_float (now -. s.at)))]
@@ -317,8 +292,7 @@ module Make (C : Conf.S) = struct
       | None when compute -> `Assoc [("counting", `Bool true)]
       | None -> `Null
 
-  (* Room left where a local store keeps its files. One syscall, so unlike the
-     counts above this is always reported. *)
+  (* One syscall, so unlike the counts above this is always reported. *)
   let disk_json (m : Backend.member) =
     match Option.bind m.Backend.local_path Fs_util.disk_space with
       | None -> []
@@ -335,8 +309,8 @@ module Make (C : Conf.S) = struct
   let member_json ~totals ~exact ~reload (m : Backend.member) =
     let* probed, cursor = probe m.Backend.backend in
     let+ jrnl = journal ~cursor m.Backend.backend in
-    (* Synchronous: it reads the last sample, leaving any walk it started running
-       behind us rather than waiting for one. *)
+    (* Synchronous: reads the last sample and leaves any walk it started running
+       behind us. *)
     let tot =
       match
         totals_of ~name:m.Backend.name ~exact ~compute:totals ~reload
@@ -375,9 +349,8 @@ module Make (C : Conf.S) = struct
       | `Follow -> "follow"
       | `Skip -> "skip"
 
-  (* The config as this process resolved it — not as the file spells it. A
-     misplaced or misspelled key shows up here as the default it fell back to,
-     which is the whole point of reading it from {!Conf.S}. *)
+  (* As this process resolved it, not as the file spells it: a misplaced key
+     shows up as the default it fell back to. *)
   let config_json =
     [
       ("name", `String C.domain_name);
@@ -397,8 +370,7 @@ module Make (C : Conf.S) = struct
       ("chunkPrefix", `String C.chunk_prefix);
     ]
 
-  (* Files in the local manifest mirror, markers excluded. A full tree walk, so
-     it is only done under [?totals]. *)
+  (* Markers excluded. A full tree walk, so only under [?totals]. *)
   let rec count_mirror dir =
     let* names =
       Lwt.catch (fun () -> Fs_util.readdir_list dir) (fun _ -> Lwt.return_nil)
@@ -441,15 +413,14 @@ module Make (C : Conf.S) = struct
         List.length entries)
       (fun _ -> Lwt.return 0)
 
-  (* [extra] carries what only the calling frontend knows — the http-proxy adds
-     its serve-side readOnly, whether it serves shares, and its options. [mount]
-     is the mount daemon's own queues: supplied directly when this *is* that
-     daemon, and fetched over IPC when a proxy is reporting on one. *)
-  (* [frontends] are the frontends serving this domain, each reporting what only
-     it knows. A per-domain frontend (a fuse mount) is a process of its own, so it
-     carries its own cpu and its own transfer figures; a shared listener (the
-     http-proxy) contributes only its per-domain settings here and reports itself
-     once, at the top. *)
+  (* [extra] is what only the calling frontend knows: the http-proxy adds its
+     serve-side readOnly, whether it serves shares, and its options. [mount] is
+     the mount daemon's queues — supplied directly when this is that daemon,
+     fetched over IPC when a proxy reports on one. *)
+  (* Each frontend serving this domain reports what only it knows. A per-domain
+     frontend (a fuse mount) is its own process and carries its own cpu and
+     transfer figures; a shared listener (the http-proxy) contributes only its
+     per-domain settings here, reporting itself once at the top. *)
   let domain_json ?(totals = false) ?(exact = false) ?(reload = false)
       ?(extra = []) ?(frontends = []) () =
     let* cache = cache_json ~totals in
@@ -469,11 +440,8 @@ module Make (C : Conf.S) = struct
         ])
 end
 
-(* ── Text rendering ─────────────────────────────────────────────────────── *)
-
-(* One renderer for every consumer, so a browser, [curl] and [tsync diagnose]
-   cannot disagree about what the process just said. Reads the JSON rather than
-   the records for the same reason. *)
+(* One renderer for every consumer, reading the JSON rather than the records, so
+   a browser, [curl] and [tsync diagnose] cannot disagree. *)
 
 let mem j name = try Yojson.Safe.Util.member name j with _ -> `Null
 let str ?(default = "") j = match j with `String s -> s | _ -> default
@@ -484,8 +452,8 @@ let bool_of j = match j with `Bool b -> b | _ -> false
 let bytes_or_unlimited j =
   match j with `Null -> "unlimited" | j -> Metrics.human_bytes (int_of j)
 
-(* An unset chunk size is not an absent limit: the effective value is whatever the
-   primary backend recommends, and the built-in default when it has no opinion. *)
+(* Unset is not absent: the effective value is what the primary backend
+   recommends, else the built-in default. *)
 let bytes_or_default j =
   match j with
     | `Null ->
@@ -513,9 +481,8 @@ let text json =
   let proc = mem json "process" in
   let lwt = mem json "lwt" in
   let traffic = mem json "traffic" in
-  (* The process answering, named as the frontend it is. Everything under this
-     heading is its own; a shared listener says so and lists what it serves, so no
-     figure here is mistaken for one domain's. *)
+  (* Everything under this heading belongs to the answering process; a shared
+     listener lists what it serves, so no figure reads as one domain's. *)
   line 0 "Frontend %s on %s (this process)"
     (str ~default:"?" (mem server "frontend"))
     (str ~default:"?" (mem server "hostname"));
@@ -567,11 +534,9 @@ let text json =
        (int_of (mem traffic "hashesPerSec")));
   (match mem server "requests" with
     | `Assoc fields ->
-        (* Served since start, plus what is happening right now. The two read
-           very differently and must not be run together: a gauge of zero is an
-           idle server, while a counter of zero is one that has never been
-           asked, and "0 dataWaiting" alongside "2 stats" invites reading the
-           first as the second. *)
+        (* Counters and gauges are kept apart: a gauge of zero is an idle
+           server, a counter of zero one never asked, and "0 dataWaiting" beside
+           "2 stats" invites reading the first as the second. *)
         let is_gauge k =
           List.mem k ["inFlight"; "dataInFlight"; "dataWaiting"]
         in
@@ -579,10 +544,8 @@ let text json =
         let gauge k =
           match List.assoc_opt k gauges with Some v -> int_of v | None -> 0
         in
-        (* Only what is non-zero: a queue that is empty is the normal case and
-           saying so every time buries the case that matters. Requests waiting
-           on storage is the number that says the device, not the network, is
-           the limit. *)
+        (* Non-zero only: an empty queue is the normal case and printing it
+           every time buries the one that matters. *)
         let live =
           List.filter_map
             (fun (label, key) ->
@@ -633,13 +596,11 @@ let text json =
       row 4 "unpublished"
         (Printf.sprintf "%d journal entries"
            (int_of (mem (mem d "journal") "localPending")));
-      (* Every frontend serving this domain, then every backend behind it. A
-         shared listener contributes its per-domain settings here and points at
-         the block above for the figures it cannot attribute to one domain. *)
+      (* A shared listener contributes its per-domain settings here and points at
+         the block above for figures it cannot attribute to one domain. *)
       List.iter
         (fun f ->
-          (* A frontend that never answered cannot tell us what it is, so say that
-             rather than calling it unknown. *)
+          (* A frontend that never answered cannot say what it is. *)
           line 2 "Frontend %s%s"
             (str
                ~default:
@@ -704,8 +665,7 @@ let text json =
                          "HELD, callers waiting"
                        else "held"
                      else "free"));
-            (* What this listener refuses or serves for this domain, as opposed to
-               what the domain itself is. *)
+            (* This listener's stance on the domain, not the domain's own. *)
             (match mem f "readOnly" with
               | `Bool true -> row 4 "read-only" "yes, for proxy clients"
               | _ -> ());
@@ -716,8 +676,8 @@ let text json =
               | `Assoc opts ->
                   List.iter (fun (k, v) -> row 4 ("option " ^ k) (str v)) opts
               | _ -> ());
-            (* Queue depths and anything else a frontend reports that this
-               renderer knows nothing about. *)
+            (* Queue depths and anything else this renderer knows nothing
+               about. *)
             List.iter
               (fun (k, v) ->
                 let is_bytes =
@@ -753,7 +713,7 @@ let text json =
             (str (mem m "name"))
             (str (mem m "type"))
             (str (mem m "role"));
-          (* What this store points at, so "which bucket is this?" has an answer. *)
+          (* So "which bucket is this?" has an answer. *)
             (match mem m "config" with
             | `Assoc fields when fields <> [] ->
                 List.iter (fun (k, v) -> row 4 k (str v)) fields
@@ -781,8 +741,7 @@ let text json =
                      (if bool_of (mem bf "degraded") then
                         " — DEGRADED, run tsync resync-remote"
                       else "")));
-          (* Room left where a local store keeps its files: one syscall, so this is
-             here on every request, unlike the counts below. *)
+          (* One syscall, so unlike the counts below this is on every request. *)
           (match mem m "disk" with
             | `Null -> ()
             | d ->
@@ -796,15 +755,14 @@ let text json =
           match mem m "totals" with
             | `Null -> ()
             | t -> (
-                (* "Could not look" must never read as "holds nothing", and neither
-                   must "not counted yet" — that walk runs in the background. *)
+                (* Neither "could not look" nor "not counted yet" may read as
+                   "holds nothing". *)
                   match (mem t "error", mem t "counting") with
                   | `String e, _ -> row 4 "holds" ("could not count: " ^ e)
                   | _, `Bool true -> row 4 "holds" "counting in the background"
                   | _ ->
-                      (* A sampled figure must never read as a counted one, hence
-                         the "~". How it was sampled is in the JSON, for whoever
-                         wants to know. *)
+                      (* The "~" keeps a sampled figure from reading as a counted
+                         one; how it was sampled is in the JSON. *)
                       let approx =
                         if mem t "chunksFromShards" = `Null then "" else "~"
                       in

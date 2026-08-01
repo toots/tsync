@@ -13,11 +13,9 @@ module Make (C : Conf.S) (F : File.S) = struct
           C.domain_prefix ^ rel
       | `Rename { Journal.dst; _ } -> C.domain_prefix ^ dst
 
-  (* Apply foreign entries in order, advancing the high-water mark only past
-     entries that applied cleanly. A failure (e.g. a transient backend error
-     fetching a manifest) aborts the pass; the failed entry is retried on the
-     next poll instead of being silently skipped, which would diverge local
-     state until a full resync. *)
+  (* The high-water mark only advances past entries that applied cleanly. A
+     failure aborts the pass and the entry is retried on the next poll, rather
+     than being skipped and diverging local state until a full resync. *)
   let do_sync ~on_changed ~my_uuid () =
     let last_key = read_last_sync_key () in
     let last_basename =
@@ -58,8 +56,8 @@ module Make (C : Conf.S) (F : File.S) = struct
                   | None -> Lwt.return_unit
                   | Some v when v = !last_version -> Lwt.return_unit
                   | Some v ->
-                      (* Record the cursor only after a clean pass, so a
-                         failed pass is retried on the next tick. *)
+                      (* Only after a clean pass, so a failed one is retried on
+                         the next tick. *)
                       let* () = do_sync ~on_changed ~my_uuid () in
                       last_version := v;
                       Lwt.return_unit)

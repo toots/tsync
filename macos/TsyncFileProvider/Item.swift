@@ -13,10 +13,9 @@ final class TsyncItem: NSObject, NSFileProviderItem {
     let isUploaded: Bool
     let symlinkTargetPath: String?
 
-    /// Download when read; download remote updates eagerly once a file is not
-    /// dataless; allow eviction under disk pressure. This is what makes an
-    /// explicit eviction on a content change unnecessary — a changed
-    /// `contentVersion` already brings the new bytes down by itself.
+    /// Download on read, pull remote updates eagerly once a file is not
+    /// dataless, evict under disk pressure. A changed `contentVersion` therefore
+    /// brings new bytes down on its own, with no explicit eviction.
     var contentPolicy: NSFileProviderContentPolicy { .downloadLazily }
 
     init(
@@ -43,10 +42,9 @@ final class TsyncItem: NSObject, NSFileProviderItem {
         self.documentSize = size.map { NSNumber(value: $0) }
         self.contentModificationDate = modificationDate
 
-        // Trashing is not offered: the domain is registered with
-        // supportsSyncingTrash = false, so there is no trash container to move
-        // anything into. `allowsEvicting` is gone too — deprecated since macOS 13
-        // and superseded by contentPolicy above.
+        // No trashing: the domain sets supportsSyncingTrash = false, so there is
+        // no container to move anything into. Eviction is covered by
+        // contentPolicy above.
         if readOnly {
             self.capabilities = isDirectory
                 ? [.allowsReading, .allowsContentEnumerating]
@@ -63,15 +61,14 @@ final class TsyncItem: NSObject, NSFileProviderItem {
                                  .allowsReparenting, .allowsDeleting]
         }
 
-        // contentVersion is the file's content hash. A file with unsynced edits
-        // has no clean hash, so it falls back to size:mtime. A directory's etag is
-        // its own folder id, which never changes while it exists — the parent's
-        // version says nothing about what is inside it, and what is inside
-        // arrives through the change feed. Symlink manifests all share one hash
-        // (of an empty chunk list), so the target is folded in to notice a
-        // retarget. metadataVersion additionally tracks upload state, so an
-        // upload completing refreshes the item without re-downloading it. Both
-        // must be non-empty: FileProvider drops empty version data.
+        // contentVersion is the content hash, falling back to size:mtime for a
+        // file with unsynced edits. A directory uses its folder id, constant for
+        // its lifetime: children arrive through the change feed, not through the
+        // parent's version. Symlink manifests all hash an empty chunk list, so
+        // the target is folded in to catch a retarget. metadataVersion also
+        // tracks upload state, so a finished upload refreshes the item without
+        // re-downloading. Both must be non-empty: FileProvider drops empty
+        // version data.
         var content = etag.isEmpty
             ? "\(size ?? 0):\(modificationDate?.timeIntervalSince1970 ?? 0)"
             : etag
@@ -83,15 +80,14 @@ final class TsyncItem: NSObject, NSFileProviderItem {
         self.isUploaded = isUploaded
     }
 
-    /// The domain root. Its parent is itself, which is what the system expects.
+    /// The domain root. The system expects its parent to be itself.
     static func rootContainer(displayName: String, readOnly: Bool) -> TsyncItem {
         TsyncItem(identifier: .rootContainer, parent: .rootContainer,
                   filename: displayName, isDirectory: true, readOnly: readOnly)
     }
 
-    /// Build an item from what the daemon said about it. The daemon supplies the
-    /// item's own reference, its container's, and its name, so nothing here has
-    /// to work out where anything lives.
+    /// The daemon supplies the item's reference, its container's and its name,
+    /// so nothing here works out where anything lives.
     static func make(_ item: DaemonItem, readOnly: Bool) -> TsyncItem? {
         guard let id = ItemID.parse(item.ref),
               let parent = ItemID.parse(item.parentRef)
@@ -103,8 +99,7 @@ final class TsyncItem: NSObject, NSFileProviderItem {
             isDirectory: item.isDirectory,
             readOnly: readOnly,
             size: item.size,
-            // A directory reports mtime 0, meaning "no useful date" rather than
-            // the epoch; showing 1970 in Finder would be worse than showing none.
+            // A directory reports mtime 0 for "no useful date", not the epoch.
             modificationDate: item.mtime > 0
                 ? Date(timeIntervalSince1970: item.mtime) : nil,
             etag: item.etag,

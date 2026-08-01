@@ -3,17 +3,11 @@ import Foundation
 
 /// Turning a daemon failure into an error the system will act on sensibly.
 ///
-/// This table is the fix for a specific failure that kept the domain broken for
-/// weeks. FileProvider divides errors in two: `serverUnreachable` and
-/// `notAuthenticated` mean *stop and wait to be signalled*, while anything else
-/// is transient and retried. The old code mapped every failure that was not
-/// literally "not found" to `serverUnreachable`, so a one-second daemon restart
-/// during an install told the system to stop trying — and the thing that was
-/// supposed to signal it afterwards had never worked either.
-///
-/// So the rule here is: only say the store is unreachable when the daemon says
-/// its store is unreachable. Everything unexplained fails one operation and is
-/// retried.
+/// FileProvider divides errors in two: `serverUnreachable` and `notAuthenticated`
+/// mean *stop and wait to be signalled*, everything else is transient and
+/// retried. So the rule is to claim unreachable only when the daemon says its
+/// store is unreachable — otherwise a one-second daemon restart latches the
+/// whole domain off. Unexplained failures fail one operation and are retried.
 enum DaemonError: Error {
     case transport(String)
     /// A structured failure: the daemon's code, and its prose for a human.
@@ -33,12 +27,12 @@ enum DaemonError: Error {
 }
 
 enum FileProviderError {
-    /// Errors must be in `NSCocoaErrorDomain` or `NSFileProviderErrorDomain`;
-    /// FileProvider rejects anything else outright, which is how an EPERM here
-    /// once surfaced as an unexplained I/O error for months.
+    /// FileProvider rejects any domain but `NSCocoaErrorDomain` and
+    /// `NSFileProviderErrorDomain` outright, surfacing it as an unexplained I/O
+    /// error.
     static func from(_ error: Error, item: NSFileProviderItemIdentifier? = nil) -> Error {
         guard let daemon = error as? DaemonError else {
-            // Already a Cocoa error — a staging file operation, most likely.
+            // Already a Cocoa error: a staging file operation, most likely.
             return error
         }
         switch daemon.code {
@@ -49,9 +43,8 @@ enum FileProviderError {
             return fp(.noSuchItem, daemon)
 
         case "exists":
-            // The header would rather have the colliding item attached so the
-            // system can reconcile against it; the daemon does not say which item
-            // it collided with, so the system resolves it by bouncing a name.
+            // The header prefers the colliding item attached, but the daemon
+            // does not report which one, so the system bounces a name instead.
             return fp(.filenameCollision, daemon)
 
         case "not_empty":
@@ -61,13 +54,13 @@ enum FileProviderError {
             return cocoa(NSFileWriteNoPermissionError, daemon)
 
         case "unreachable":
-            // Deliberately latching: the store really is unavailable, and the
-            // system should back off until signalled rather than hammer it.
+            // Deliberately latching: the store really is unavailable, so back
+            // off until signalled.
             return fp(.serverUnreachable, daemon)
 
         default:
-            // "invalid", "internal", and every transport failure. Retried, so a
-            // daemon that is restarting costs an operation, not the domain.
+            // "invalid", "internal" and transport failures. Retried, so a
+            // restarting daemon costs an operation, not the domain.
             return cocoa(NSFileWriteUnknownError, daemon)
         }
     }

@@ -21,11 +21,10 @@ let rec mkdir_p_sync ?(perm = 0o755) path =
     try Unix.mkdir path perm with Unix.Unix_error (Unix.EEXIST, _, _) -> ()
   end
 
-(* Replace [path] with [data] atomically. The temp gets a name of its own —
-   unique per process and per call — rather than [path ^ ".tmp"]: two writers of
-   the same path (a read-ahead and a foreground read, or a second tsync process)
-   would otherwise share one temp file and the loser's rename would fail ENOENT.
-   The ".tmp" suffix is what the mirror walkers skip and reap. *)
+(* The temp is named uniquely per process and per call rather than [path ^
+   ".tmp"]: two writers of one path would otherwise share a temp file and the
+   loser's rename would fail ENOENT. The ".tmp" suffix is what the mirror walkers
+   skip and reap. *)
 let temp_seq = ref 0
 
 let temp_path path =
@@ -33,9 +32,8 @@ let temp_path path =
   Filename.concat (Filename.dirname path)
     (Printf.sprintf ".tsync-tmp-%d-%d.tmp" (Unix.getpid ()) !temp_seq)
 
-(* All or nothing: a [fill] that fails part-way — a backend error mid-assembly,
-   a full disk — leaves no temp file behind to be counted against the cache or
-   swept later. *)
+(* All or nothing: a [fill] failing part-way leaves no temp file to be counted
+   against the cache or swept later. *)
 let with_temp_rename path fill =
   let tmp = temp_path path in
   Lwt.catch
@@ -60,9 +58,8 @@ let atomic_write path data =
 (* [atomic_write] for a body assembled from pieces, each known by position. The
    file is sized up front, then [put ~offset] writes one range through [pwrite],
    which carries its own offset and never touches the descriptor's shared
-   position — so pieces may be written concurrently, out of order, on this one
-   descriptor, and the caller never holds the whole body in memory. Still renamed
-   only once [write] returns, so a reader never sees a partial body. *)
+   position — so pieces may be written concurrently and out of order on one
+   descriptor. Renamed only once [write] returns. *)
 let atomic_write_at path ~size write =
   with_temp_rename path (fun tmp ->
       let* fd =
@@ -72,8 +69,8 @@ let atomic_write_at path ~size write =
       in
       Lwt.finalize
         (fun () ->
-          (* Allocated before any piece is produced, so a full disk fails here,
-             before the bytes are paid for. *)
+          (* Allocated before any piece is produced, so a full disk fails before
+             the bytes are paid for. *)
           let* () = Lwt_unix_retry.LargeFile.ftruncate fd (Int64.of_int size) in
           let put ~offset data =
             let total = String.length data in
@@ -129,7 +126,7 @@ let copy_file ~src ~dst =
     (fun () -> Lwt_unix_retry.close src_fd)
 
 let readdir_list path =
-  (* files_of_directory returns a stream; wrap the whole materialisation so
+  (* files_of_directory returns a stream, so the whole materialisation is wrapped:
      a signal interrupting opendir or readdir retries from the start. *)
   Lwt_unix_retry.retry_eintr (fun () ->
       let+ names = Lwt_stream.to_list (Lwt_unix.files_of_directory path) in
@@ -142,9 +139,8 @@ let is_directory path =
       st.Unix.st_kind = Unix.S_DIR)
     (fun _ -> Lwt.return_false)
 
-(* [stat] as an option: a path that is absent — or that we cannot stat for any
-   other reason — reads as [None]. Callers use the inode as an existence test,
-   so every failure is the same answer. *)
+(* Callers use the inode as an existence test, so every failure is the same
+   answer. *)
 let stat_opt path =
   Lwt.catch
     (fun () ->
@@ -173,8 +169,8 @@ let lstat_kind path =
         | _ -> Lwt.return `File)
     (fun _ -> Lwt.return `Missing)
 
-(* Recursively delete [path]; a missing path or unlink/rmdir failure is ignored.
-   Uses [lstat] so a symlink is removed rather than followed. *)
+(* Missing paths and unlink/rmdir failures are ignored. [lstat], so a symlink is
+   removed rather than followed. *)
 let rec rm_rf path =
   Lwt.catch
     (fun () ->
@@ -203,15 +199,13 @@ let quiet f =
     | Unix.Unix_error _ -> Lwt.return_unit
     | exn -> Lwt.fail exn)
 
-(* Deleting something that is already gone — or that we are not allowed to
-   delete — is the outcome the caller wanted either way. Every cache and scratch
-   path in the tree is re-derivable, so no unlink here is worth failing over. *)
+(* Already gone is the outcome the caller wanted, and every cache and scratch
+   path is re-derivable, so no unlink here is worth failing over. *)
 let unlink_quiet path = quiet (fun () -> Lwt_unix_retry.unlink path)
 
-(* Delete files under [dir] last modified before [cutoff] and prune directories
-   left empty; [true] when [dir] holds nothing afterwards. Best-effort: a missing
-   path or a failed unlink is ignored, and a file appearing mid-walk is simply
-   seen by the next sweep. *)
+(* [true] when [dir] holds nothing afterwards. Best-effort: a missing path or
+   failed unlink is ignored, and a file appearing mid-walk is seen by the next
+   sweep. *)
 let rec reap_older_than ~cutoff dir =
   let* is_dir = is_directory dir in
   if not is_dir then Lwt.return_true
@@ -245,13 +239,10 @@ let rec reap_older_than ~cutoff dir =
     in
     kept = 0
 
-(* ── Filesystem capacity ─────────────────────────────────────────────────── *)
-
 external statvfs : string -> int64 * int64 = "tsync_statvfs"
 
-(* Bytes an unprivileged writer can still use, and the filesystem's size, for the
-   filesystem holding [path]. One syscall, so it is cheap enough to report on
-   every status request — unlike counting what a store holds. [None] when the path
-   cannot be stat'd (it may not exist yet), never an exception: capacity is a nice
-   thing to know, not a reason to fail a report. *)
+(* Bytes an unprivileged writer can still use, plus the filesystem's size. One
+   syscall, so it is cheap enough for every status request. [None] rather than an
+   exception when the path cannot be stat'd: capacity is not worth failing a
+   report over. *)
 let disk_space path = try Some (statvfs path) with _ -> None

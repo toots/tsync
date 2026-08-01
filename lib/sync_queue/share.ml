@@ -1,10 +1,8 @@
 open Lwt.Syntax
 
-(* Errors surfaced to the caller. Two of them, because they mean different
-   things to whoever is asking: nothing here can serve a link at all, versus
-   there is nothing at that path to link to. Raised internally and mapped to
-   [Error] at the boundary so callers decide how to report — the CLI prints and
-   exits, the daemon returns an IPC error. *)
+(* Two, because they mean different things: nothing here can serve a link at all,
+   versus there is nothing at that path to link to. Raised internally and mapped
+   to [Error] at the boundary, so callers decide how to report. *)
 exception Share_unavailable of string
 exception Share_not_found of string
 
@@ -14,10 +12,9 @@ module Make (C : Conf.S) = struct
 
   let shares_prefix = C.shares_prefix
 
-  (* First store whose [share_url] serves this domain (an s3 with a shareUrl, or
-     an http-proxy that reports one). Asked of the individual stores, not of the
-     domain's read/write composite: a share manifest lives outside every domain
-     root, so a domain with nothing writable can still publish one. *)
+  (* Asked of the individual stores, not the read/write composite: a share
+     manifest lives outside every domain root, so a domain with nothing writable
+     can still publish one. *)
   let share_backend () =
     let rec find = function
       | [] ->
@@ -39,18 +36,18 @@ module Make (C : Conf.S) = struct
       (fun () ->
         let* share_backend, share_url = share_backend () in
         let (module B : Backend.S) = share_backend in
-        (* What is being shared is read through the domain's own read path. The
-           store that serves the link is chosen for where the link points, and
-           need not be the one holding the newest copy. *)
+        (* Read through the domain's own read path; the store serving the link
+           is chosen for where the link points, not for holding the newest
+           copy. *)
         let (module R : Backend.S) = Bks.primary () in
         let base_json = [("v", `Int 1); ("expires", `Int expires)] in
         let* manifest =
           let* file_key = L.manifest_key (C.domain_prefix ^ rel) in
           (* A file manifest and a folder marker occupy the same key within a
-             parent namespace, so classify by the body — otherwise a folder
-             would be shared as a (chunkless) file and the Lambda would choke. *)
-          (* Sharing reads: an unresolvable key is one nothing has been recorded
-             under, which is the same answer as an absent object. *)
+             parent namespace, so classification is by body: otherwise a folder is
+             shared as a chunkless file and the Lambda chokes. *)
+          (* Sharing is a read: an unresolvable key is the same answer as an
+             absent object. *)
           let* obj =
             match file_key with
               | Some file_key when rel <> "" -> R.get_opt ~key:file_key ()
@@ -70,13 +67,11 @@ module Make (C : Conf.S) = struct
                          ("filename", `String (Filename.basename rel));
                        ]))
             | _ ->
-                (* Directory (a folder marker, or the domain root): store the
-                   folder's namespace prefix (by id); the Lambda lists it lazily.
-                   Keeps share creation O(1). *)
-                (* Never mint one here. Reaching this with no marker means the
-                   folder does not exist remotely, so a fresh random id would
-                   name a namespace nothing has ever written to — and persisting
-                   it would re-create the local directory on what is a read. *)
+                (* Directory: store the folder's namespace prefix by id and let
+                   the Lambda list it lazily, keeping creation O(1). *)
+                (* Never mint here: no marker means the folder does not exist
+                   remotely, so a fresh id names a namespace nothing wrote to, and
+                   persisting it re-creates the local directory on a read. *)
                 let* dir_id =
                   match marker with
                     | Some m -> Lwt.return_some m.Folder.id
@@ -111,9 +106,9 @@ module Make (C : Conf.S) = struct
                            ("filename", `String (base ^ ".zip"));
                          ])))
         in
-        (* The token is just the manifest's id; the server rebuilds the key as
-           SHARES_PREFIX + token. Keeps the share URL short. Reuse a caller-
-           supplied id (stable links) or generate a random one. *)
+        (* The token is the manifest's id and the server rebuilds the key as
+           SHARES_PREFIX + token, keeping the URL short. A caller-supplied id
+           gives a stable link. *)
         let token = Option.value token ~default:(Id.token 16) in
         let manifest_key = shares_prefix ^ token in
         let* () =

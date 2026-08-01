@@ -1,8 +1,7 @@
 (** Import a folder of existing data into a domain: upload every file to all
-    backends (chunked, deduplicated), write manifest sidecars in the local
-    cache, and publish a journal entry so other clients converge. The data is
-    not copied into the cache — the cache data path is a symlink to the source
-    file, so imported files read as cached; evicting one removes the link.
+    backends (chunked, deduplicated), write manifest sidecars, and publish a
+    journal entry so other clients converge. No file data is cached locally:
+    imported files read as not cached and are fetched on demand.
 
     Symlink handling is controlled by [C.symlink_policy]:
     - [`Keep] — store as a first-class symlink object (chunkless manifest)

@@ -9,9 +9,9 @@ module Make (C : Conf.S) = struct
   module Mf = Manifest.Make (C)
   module D = Data.Make (C) (R)
 
-  (* One path for content: assemble through the read path, which covers a file
-     with unsynced staged edits, a partially cached one and a never-cached one
-     alike. Only symlinks are special, having no content at all. *)
+  (* Assembling through the read path covers unsynced staged edits, a partially
+     cached file and a never-cached one alike. Only symlinks are special, having
+     no content. *)
   let export_file ~dst rel =
     let key = C.domain_prefix ^ rel in
     let dst_path = Filename.concat dst rel in
@@ -34,11 +34,9 @@ module Make (C : Conf.S) = struct
             let+ () = D.assemble_to key ~dst_path in
             Exported
 
-  (* Export every file of the domain to [dst]. Files are the union of the
-     backend listing and the local sidecar tree (which adds local-only files
-     whose upload is still pending). *)
-  (* Every backend file's real path, by walking the inode tree from the root.
-     Errors are skipped rather than fatal: one unreadable object should cost its
+  (* Files are the union of the backend listing and the local sidecar tree, which
+     adds local-only files whose upload is still pending. *)
+  (* Errors are skipped rather than fatal: one unreadable object should cost its
      own file, not the whole export. *)
   let remote_rels () =
     Tree.fold_tree ~skip_errors:true ~folder_id:Folder.root_id ~rel:""

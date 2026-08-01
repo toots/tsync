@@ -47,8 +47,8 @@ let scenarios : scenario list =
         ];
     };
     {
-      (* A trashed folder past the cutoff is reclaimed: its subtree (kept intact
-         on delete for undo) is deleted and its now-unreferenced chunk collected. *)
+      (* A trashed folder past the cutoff is reclaimed: the subtree kept for undo
+         is deleted and its now-unreferenced chunk collected. *)
       name = "expire all: trashed folder reclaimed";
       steps =
         [

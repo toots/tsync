@@ -1,18 +1,16 @@
-(* Chunk size for newly uploaded files when neither the config nor the backend
-   says otherwise. 8 MiB favors sequential throughput and small manifests; lower
-   it for random-access workloads to cut read/write amplification. *)
+(* Used when neither the config nor the backend says otherwise. 8 MiB favors
+   sequential throughput and small manifests; lower it for random access to cut
+   read/write amplification. *)
 let default_chunk_size = 8 * 1024 * 1024
 
-(* Cache chunk size when the config does not say. Larger than a stored chunk on
-   purpose: this is a disk-latency knob, not a network one, and the two are free
-   to differ (see [cache_chunk_size]). *)
+(* Deliberately larger than a stored chunk: this is a disk-latency knob, not a
+   network one (see [cache_chunk_size]). *)
 let default_cache_chunk_size = 16 * 1024 * 1024
 
 (** What it takes to answer "is every byte of this key on this machine?": the
-    cache tree to look in, and the sizes that say which files to look for. Its
-    own record because the callers ({!Manifest.is_local} and every frontend) run
-    outside a functor, in plain non-Lwt CLI code — and because passing the parts
-    one by one meant every new field here touching each of them. *)
+    cache tree to look in and the sizes saying which files to look for. Its own
+    record because the callers ({!Manifest.is_local} and every frontend) run
+    outside a functor, in plain non-Lwt CLI code. *)
 type locality = {
   cache_root : string;
   domain_name : string;
@@ -38,11 +36,10 @@ module type S = sig
   (** The individual stores that may serve a share link, in role order.
 
       A share manifest lives under {!shares_prefix}, outside every domain root,
-      so publishing one changes no domain content — which is why a read-only
-      domain can still share what it can already read, and why this does not go
-      through the write composite in {!backends}. Backfill targets are left out:
-      a target is behind by construction, so a link served from one could point
-      at something it has not caught up with. *)
+      so publishing one changes no domain content: a read-only domain can share
+      what it can already read, and this does not go through the write composite
+      in {!backends}. Backfill targets are excluded, being behind by
+      construction. *)
   val share_backends : (module Backend.S) list
 
   val cache_root : string
@@ -55,32 +52,29 @@ module type S = sig
   (** Max files downloaded concurrently. *)
   val max_downloads : int
 
-  (** Chunk size (bytes) for newly uploaded files in this domain. Existing files
-      keep the chunk size recorded in their own manifest, so changing this only
-      affects files created afterwards. Smaller chunks cut read/write
-      amplification for random access at the cost of larger manifests and more
-      backend requests.
+  (** Chunk size (bytes) for newly uploaded files. Existing files keep the size
+      recorded in their own manifest, so changing this only affects files
+      created afterwards. Smaller chunks cut read/write amplification for random
+      access at the cost of larger manifests and more backend requests.
 
-      [None] when the config does not say: the effective size is then whatever
-      the primary backend recommends (an http-proxy answers with its own), and
-      [default_chunk_size] if it has no opinion either. Resolved once per
-      process — see {!Remote.S.chunk_size}. *)
+      [None] when the config does not say: the effective size is then what the
+      primary backend recommends (an http-proxy answers with its own), else
+      [default_chunk_size]. Resolved once per process — see
+      {!Remote.S.chunk_size}. *)
   val chunk_size : int option
 
-  (** Cache chunk size (bytes): the local cache stores consecutive stored chunks
-      grouped into files of about this size, the group being the [n] stored
-      chunks whose total is closest to it. Storage granularity wants to be small
-      (less egress when a file changes), disk granularity wants to be large
-      (fewer opens, less I/O latency per read), so the two are set apart. Unlike
-      [chunk_size] this is purely local: it is not recorded in any manifest and
+  (** Cache chunk size (bytes): the local cache groups consecutive stored chunks
+      into files of about this size, the group being the [n] chunks whose total
+      is closest to it. Storage granularity wants to be small (less egress when
+      a file changes) and disk granularity large (fewer opens, less latency per
+      read), hence two settings. Purely local: not recorded in any manifest, and
       changing it only orphans cache files, which the cap reclaims. [None] means
       [default_cache_chunk_size]. *)
   val cache_chunk_size : int option
 
-  (** Soft cap (bytes) on local cache disk usage for this domain. When set and
-      exceeded, the coldest clean, closed files are evicted (dropping their
-      local data, refetched on demand) until usage is back under the cap.
-      Best-effort; [None] means unbounded. *)
+  (** Soft cap (bytes) on local cache disk usage. When exceeded, the coldest
+      clean, closed files are evicted and re-fetched on demand until usage is
+      back under it. Best-effort; [None] is unbounded. *)
   val max_cache : int option
 
   (** How [import] treats symbolic links: [`Keep] preserves them as symlink
@@ -92,8 +86,8 @@ module type S = sig
   val read_only : bool
 end
 
-(** The domain's effective cache chunk size, config value or built-in default.
-    One spelling, so no caller can pick a different default by accident. *)
+(** The domain's effective cache chunk size: config value or built-in default.
+    One spelling, so no caller picks a different default by accident. *)
 let cache_chunk_size (module C : S) =
   Option.value C.cache_chunk_size ~default:default_cache_chunk_size
 

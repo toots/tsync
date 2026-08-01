@@ -69,9 +69,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             let domain = NSFileProviderDomain(
                 identifier: NSFileProviderDomainIdentifier(rawValue: identifier),
                 displayName: name)
-            // There is no trash container to sync into, and this defaults to
-            // true. Left on, Finder offers "Move to Trash" for an operation
-            // nothing implements.
+            // Defaults to true, which makes Finder offer "Move to Trash" for an
+            // operation nothing implements.
             domain.supportsSyncingTrash = false
             do {
                 try await NSFileProviderManager.add(domain)
@@ -97,11 +96,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     // MARK: - Identity scheme
 
-    /// Items used to be identified by their storage path and now carry an opaque
-    /// reference. Every identifier the system has recorded for an existing domain
-    /// is in the old spelling and cannot be translated, so such a domain is
-    /// rebuilt from scratch once. Downloaded content becomes dataless and comes
-    /// back on next access; nothing in the store is touched.
+    /// Identifiers recorded by the system before items carried opaque references
+    /// spell paths and cannot be translated, so such a domain is rebuilt from
+    /// scratch once. Content goes dataless and returns on next access; the store
+    /// is untouched.
     private static let identityScheme = 1
 
     private static var identityMarker: URL {
@@ -128,9 +126,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     // MARK: - Markers
 
-    /// Written by `tsync fileprovider purge`: unregister every domain and
-    /// register none. Deleting the marker last is how the CLI knows the domains
-    /// are gone and it is safe to tear the rest down.
+    /// Written by `tsync fileprovider purge`: unregister every domain, register
+    /// none. The marker is deleted last, which is how the CLI knows the domains
+    /// are gone and the rest can be torn down.
     private func purgeIfRequested() async -> Bool {
         let marker = Config.dataDirURL.appendingPathComponent("fileprovider-purge")
         guard FileManager.default.fileExists(atPath: marker.path) else { return false }
@@ -148,8 +146,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         return true
     }
 
-    /// Domain names written by `tsync fileprovider reset`, one per line. They are
-    /// removed before reconciling, so the loop above registers them afresh.
+    /// Domain names written by `tsync fileprovider reset`, one per line. Removed
+    /// before reconciling, so the loop above registers them afresh.
     private func consumeResetMarker() -> Set<String> {
         let marker = Config.dataDirURL.appendingPathComponent("fileprovider-reset")
         guard let text = try? String(contentsOf: marker, encoding: .utf8) else { return [] }

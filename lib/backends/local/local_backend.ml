@@ -4,8 +4,8 @@ let mkdir_p = Fs_util.mkdir_p
 let readdir_list = Fs_util.readdir_list
 
 (* Each write stages to its own temp file (pid + sequence suffix) and renames it
-   into place, so overlapping Lwt writes of the same key — e.g. the same chunk
-   uploaded twice concurrently — never see a partial file; last rename wins. *)
+   into place, so overlapping writes of one key never expose a partial file. Last
+   rename wins. *)
 let tmp_seq = ref 0
 
 let write_file path data =
@@ -21,19 +21,15 @@ let write_file path data =
 let read_file path =
   Lwt_unix_retry.with_file ~mode:Lwt_io.Input path Lwt_io.read
 
-(* Directory-walk fan-out: enough concurrent stats to hide per-call latency on
-   high-latency storage, bounded so a large tree cannot become a descriptor
-   storm.
+(* Enough concurrent stats to hide per-call latency on high-latency storage,
+   bounded so a large tree is not a descriptor storm.
 
-   Shared by every walk on this store rather than created per call. A per-call
-   bound limits one walk, not how many walk at once, and listings are driven by
-   requests — so a per-call budget would still let concurrent callers multiply
-   it. What is being protected is the device under the store, and there is one
-   of those however many callers there are.
+   Shared by every walk on this store: a per-call bound limits one walk, not how
+   many run at once, and what is protected is the one device under the store.
 
-   Held around the stat alone. This walk recurses, and a shared bound held
-   across a recursive call deadlocks — outer levels hold every slot while inner
-   levels wait for one. *)
+   Held around the stat alone. This walk recurses, and a shared bound held across
+   a recursive call deadlocks: outer levels hold every slot while inner levels
+   wait for one. *)
 let walk_fanout = 64
 
 let make ~root : (module Backend.S) =
@@ -96,14 +92,13 @@ let make ~root : (module Backend.S) =
 
     let list_prefix ?max_keys ~prefix () =
       let base = resolve prefix in
-      (* Each directory level's entries are stat'd (and subdirs recursed) in
-         parallel, so on high-latency storage the walk costs a few round-trips
-         per level rather than one per entry.
+      (* Entries are stat'd and subdirs recursed in parallel, so on high-latency
+         storage the walk costs a few round trips per level rather than one per
+         entry.
 
-         Bounded explicitly. Leaving it to the Lwt thread pool bounds threads,
-         not the descriptors and recursion a walk holds, and a directory is as
-         large as the user's data — the width here is not a number this code
-         gets to choose. *)
+         Bounded explicitly: the Lwt thread pool bounds threads, not the
+         descriptors and recursion a walk holds, and a directory is as large as
+         the user's data. *)
       let rec walk path key_prefix =
         Lwt.catch
           (fun () ->
@@ -115,10 +110,9 @@ let make ~root : (module Backend.S) =
                   let full_key = key_prefix ^ entry in
                   Lwt.catch
                     (fun () ->
-                      (* The slot covers the stat and nothing else. Holding one
-                         across the recursion below would deadlock: a deep tree
-                         parks every slot in an outer level while the inner
-                         levels wait for the same budget. *)
+                      (* The slot covers the stat only: held across the recursion
+                         below, a deep tree parks every slot in an outer level
+                         while inner levels wait for the same budget. *)
                       let* st =
                         Lwt_bounded.use walk_slots (fun () ->
                             Lwt_unix_retry.stat full_path)
@@ -142,8 +136,8 @@ let make ~root : (module Backend.S) =
                 names
             in
             let entries = List.concat nested in
-            (* Surface empty directories as their marker key, matching the
-               zero-byte marker object S3 lists for created directories. *)
+            (* Empty directories surface as their marker key, matching the
+               zero-byte object S3 lists. *)
             if names = [] && is_dir_key key_prefix then
               [Backend.{ key = key_prefix; size = 0; last_modified = 0. }]
             else entries)
@@ -179,7 +173,7 @@ let make ~root : (module Backend.S) =
     let default_chunk_size ~prefix:_ () = Lwt.return_none
 
     (* Probed once: the device under a configured root does not change, and this
-       is asked while a request is waiting. *)
+       is asked with a request waiting. *)
     let concurrency = lazy (Device.max_concurrency root)
     let max_concurrency ~prefix:_ () = Lwt.return (Lazy.force concurrency)
   end)

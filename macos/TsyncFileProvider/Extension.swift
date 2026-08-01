@@ -20,9 +20,9 @@ final class TsyncExtension: NSObject, NSFileProviderReplicatedExtension,
         log.info("init: \(domain.identifier.rawValue, privacy: .public)")
     }
 
-    /// Nothing to tear down. This process holds no channel of its own: the daemon
-    /// is reached by connecting out, and being told about changes is the app's
-    /// job, because the app is still running when this is not.
+    /// Nothing to tear down: this process holds no channel of its own. It
+    /// connects out to the daemon, and change notification is the app's job,
+    /// since the app runs when this does not.
     func invalidate() {
         log.info("invalidate: \(self.domain.identifier.rawValue, privacy: .public)")
     }
@@ -45,10 +45,9 @@ final class TsyncExtension: NSObject, NSFileProviderReplicatedExtension,
         return progress
     }
 
-    /// This is the system's authority on whether an item still exists: answering
-    /// for one that is gone keeps it on disk forever. Directories used to be
-    /// answered for straight from the identifier without asking anyone, which is
-    /// how a deleted folder could outlive its own deletion indefinitely.
+    /// The system's authority on whether an item still exists, so a directory
+    /// must be resolved against the daemon like anything else: answering from
+    /// the identifier alone keeps a deleted folder on disk forever.
     private func resolve(_ identifier: NSFileProviderItemIdentifier) async throws -> TsyncItem {
         if identifier == .rootContainer {
             return TsyncItem.rootContainer(displayName: domain.displayName,
@@ -70,14 +69,10 @@ final class TsyncExtension: NSObject, NSFileProviderReplicatedExtension,
         let progress = Progress(totalUnitCount: -1)
         let ref = ItemID.wire(itemIdentifier)
         let task = Task {
-            // Poll the daemon while the fetch is in flight. Asked before the
-            // first sleep, so the bar becomes a real one as soon as the daemon
-            // knows the size rather than half a second later.
-            //
-            // An answer of "nothing running" leaves the bar where it is instead
-            // of skipping the update: it means the work has not started yet or
-            // has just finished, and either way winding back to indeterminate
-            // would look like the transfer had restarted.
+            // Polled before the first sleep, so the bar becomes determinate as
+            // soon as the daemon knows the size. "Nothing running" leaves the
+            // bar where it is: the work has not started or has just finished,
+            // and resetting to indeterminate reads as a restarted transfer.
             let poller = Task {
                 while !Task.isCancelled {
                     if let p = try? await client.downloadProgress(ref: ref),
@@ -94,10 +89,9 @@ final class TsyncExtension: NSObject, NSFileProviderReplicatedExtension,
             }
             defer { poller.cancel() }
             do {
-                // The system takes ownership of the file, and this process is not
-                // allowed to move one into that directory itself — it fails with
-                // EPERM, on locally signed and notarised builds alike. So the
-                // daemon is asked to assemble it there to begin with.
+                // The system takes ownership of the file, but this process may
+                // not move one into that directory (EPERM, on locally signed and
+                // notarised builds alike), so the daemon assembles it in place.
                 guard let manager = NSFileProviderManager(for: domain),
                       let temporary = try? manager.temporaryDirectoryURL() else {
                     throw DaemonError.transport("no temporary directory for domain")
@@ -105,9 +99,8 @@ final class TsyncExtension: NSObject, NSFileProviderReplicatedExtension,
                 let destination = temporary.appendingPathComponent(UUID().uuidString)
                 try await client.ensureCached(ref: ref, destination: destination.path)
                 try Task.checkCancellation()
-                // Finish the bar explicitly. The last poll lands somewhere short
-                // of the end, and a bar that simply disappears at 90% reads as an
-                // abandoned transfer rather than a completed one.
+                // The last poll lands short of the end, and a bar vanishing at
+                // 90% reads as an abandoned transfer.
                 poller.cancel()
                 if progress.totalUnitCount > 0 {
                     progress.completedUnitCount = progress.totalUnitCount
@@ -120,24 +113,18 @@ final class TsyncExtension: NSObject, NSFileProviderReplicatedExtension,
                 completionHandler(nil, nil, FileProviderError.from(error, item: itemIdentifier))
             }
         }
-        // The system cancels a fetch that is taking too long and then expects the
-        // completion handler promptly. Without this it waits on a request nobody
-        // is going to answer.
+        // The system cancels a slow fetch and then expects the completion
+        // handler promptly; without this it waits on an unanswered request.
         progress.cancellationHandler = { task.cancel() }
         return progress
     }
 
-    /// Serve one range instead of the whole file.
+    /// Serve one range instead of the whole file, so opening a large file costs
+    /// only the bytes the application touched. The system writes what we return
+    /// into its own copy at that offset and comes back for more as it reads on.
     ///
-    /// This is what makes a large file usable rather than merely legible: opening
-    /// a 5 GB movie reads its header, and answering that read with the header is
-    /// the difference between playing at once and waiting for the whole download.
-    /// The system asks for the range an application actually touched, writes the
-    /// piece we hand back into its own copy at that offset, and comes back for
-    /// more as the application reads on.
-    ///
-    /// Whole-file `fetchContents` stays: the system still uses it to materialize
-    /// a file outright, and this method is only ever an optimisation on top.
+    /// An optimisation on top of `fetchContents`, which the system still uses to
+    /// materialize a file outright.
     func fetchPartialContents(for itemIdentifier: NSFileProviderItemIdentifier,
                               version requestedVersion: NSFileProviderItemVersion,
                               request: NSFileProviderRequest,
@@ -150,10 +137,9 @@ final class TsyncExtension: NSObject, NSFileProviderReplicatedExtension,
         let task = Task {
             do {
                 let item = try await resolve(itemIdentifier)
-                // With strict versioning the system discards anything but the
-                // version it asked for, so answering with the version we have
-                // would waste the transfer. Saying so instead lets it re-ask for
-                // the version we do have.
+                // Strict versioning discards anything but the requested
+                // version, so failing here lets the system re-ask for ours
+                // instead of wasting the transfer.
                 if options.contains(.strictVersioning),
                    item.itemVersion.contentVersion != requestedVersion.contentVersion {
                     throw NSError(domain: NSFileProviderErrorDomain,
@@ -163,9 +149,7 @@ final class TsyncExtension: NSObject, NSFileProviderReplicatedExtension,
                 let range = PartialRange.aligned(covering: requestedRange,
                                                  alignment: alignment,
                                                  documentSize: item.documentSize?.int64Value ?? 0)
-                // Same constraint as the whole-file path: the system takes
-                // ownership of this file and this process may not move one into
-                // its directory, so the daemon writes it there to begin with.
+                // Same EPERM constraint as the whole-file path.
                 guard let manager = NSFileProviderManager(for: domain),
                       let temporary = try? manager.temporaryDirectoryURL() else {
                     throw DaemonError.transport("no temporary directory for domain")
@@ -192,10 +176,10 @@ final class TsyncExtension: NSObject, NSFileProviderReplicatedExtension,
 
     // MARK: - Mutation
 
-    /// Fields this side cannot store. Handing them back as still pending stops
-    /// the system propagating its own idea of them to disk — which is what
-    /// silently reverted a user's Finder tags — and, once a call reports the same
-    /// set it was given, stops it offering them again.
+    /// Fields this side cannot store. Reporting them as still pending stops the
+    /// system propagating its own idea of them to disk (which silently reverted
+    /// Finder tags), and stops it re-offering them once a call reports back the
+    /// same set it was given.
     private func unsupported(_ fields: NSFileProviderItemFields) -> NSFileProviderItemFields {
         fields.subtracting([.contents, .filename, .parentItemIdentifier])
     }
@@ -216,9 +200,9 @@ final class TsyncExtension: NSObject, NSFileProviderReplicatedExtension,
             let name = itemTemplate.filename
             let pending = unsupported(fields)
             do {
-                // A reimport replays everything already on disk through this call.
-                // Matching an existing item instead of creating a second one is
-                // what keeps that from re-uploading the whole domain.
+                // A reimport replays everything on disk through this call:
+                // matching an existing item is what stops it re-uploading the
+                // whole domain.
                 let isDirectory = itemTemplate.contentType == .folder
                 if options.contains(.mayAlreadyExist),
                    let existing = try await lookup(parent: itemTemplate.parentItemIdentifier,
@@ -281,20 +265,17 @@ final class TsyncExtension: NSObject, NSFileProviderReplicatedExtension,
             let moved = changedFields.contains(.filename)
                 || changedFields.contains(.parentItemIdentifier)
             do {
-                // `baseVersion` says which state the system was editing from, and
-                // the option that asks us to fail on a mismatch needs macOS 26,
-                // above what this ships against. Conflicts are settled in the
-                // daemon instead, which publishes the losing side alongside as a
-                // "(conflicted copy from …)" file rather than choosing for the
-                // user — see `File.rename`.
+                // Failing on a `baseVersion` mismatch needs macOS 26, above what
+                // this ships against. Conflicts are settled in the daemon, which
+                // publishes the losing side as a "(conflicted copy from …)"
+                // file — see `File.rename`.
                 _ = version
 
                 if let contents = newContents, changedFields.contains(.contents) {
                     let staged = try stage(contents)
                     defer { try? FileManager.default.removeItem(at: staged) }
-                    // Name and content travel together: written apart, a file
-                    // shows up elsewhere with an extension that does not match
-                    // what is in it.
+                    // Name and content must travel together, or the file shows
+                    // up with an extension not matching its content.
                     _ = try await client.write(
                         parentRef: ItemID.wire(item.parentItemIdentifier),
                         name: item.filename, staging: staged.path)
@@ -339,10 +320,8 @@ final class TsyncExtension: NSObject, NSFileProviderReplicatedExtension,
             let ref = ItemID.wire(identifier)
             let isDirectory = ItemID.folderID(of: identifier) != nil
             do {
-                // The daemon's directory delete detaches the whole subtree at
-                // once. That is right for a recursive delete and wrong for a
-                // plain one, which must refuse a directory with anything in it —
-                // so the check lives here, where the distinction is made.
+                // The daemon's directory delete always detaches the whole
+                // subtree, so a non-recursive delete is guarded here.
                 if isDirectory && !options.contains(.recursive) {
                     let children = try await client.listDir(ref)
                     if !children.isEmpty {
@@ -353,7 +332,7 @@ final class TsyncExtension: NSObject, NSFileProviderReplicatedExtension,
                 try await client.delete(ref: ref, isDirectory: isDirectory)
                 completionHandler(nil)
             } catch let error as DaemonError where error.code == "not_found" {
-                // Already gone remotely, which is the outcome that was wanted.
+                // Already gone remotely: the outcome that was wanted.
                 completionHandler(nil)
             } catch is CancellationError {
                 completionHandler(CocoaError(.userCancelled))
@@ -370,9 +349,8 @@ final class TsyncExtension: NSObject, NSFileProviderReplicatedExtension,
 
     func enumerator(for containerItemIdentifier: NSFileProviderItemIdentifier,
                     request: NSFileProviderRequest) throws -> NSFileProviderEnumerator {
-        // The domain is registered with supportsSyncingTrash = false, so the
-        // system should never ask — but a request that does arrive has a defined
-        // answer, and it is not a listing of whatever a literal "trash" key finds.
+        // supportsSyncingTrash = false, so the system should never ask; a
+        // request that does arrive must not list a literal "trash" key.
         if containerItemIdentifier == .trashContainer {
             throw CocoaError(.featureUnsupported)
         }
@@ -390,11 +368,10 @@ final class TsyncExtension: NSObject, NSFileProviderReplicatedExtension,
 
     /// The item now at `name` inside `parent`.
     ///
-    /// A file's reference is composable from its container and its leaf, which
-    /// saves listing the whole folder. A directory's is not — only the daemon
-    /// assigns a folder id — so it is found by listing. Asking for a directory by
-    /// the composed file form would name the same thing by the wrong kind of
-    /// reference, and the caller would then build its children's names from it.
+    /// A file's reference composes from its container and leaf, avoiding a
+    /// listing. A directory's does not — only the daemon assigns folder ids — so
+    /// it must be found by listing; the composed form would name it by the wrong
+    /// kind of reference, and callers build children's names from it.
     private func lookup(parent: NSFileProviderItemIdentifier, name: String,
                         isDirectory: Bool) async throws -> TsyncItem? {
         if !isDirectory, let child = ItemID.file(in: parent, named: name),
@@ -406,17 +383,13 @@ final class TsyncExtension: NSObject, NSFileProviderReplicatedExtension,
         return TsyncItem.make(match, readOnly: readOnly)
     }
 
-    /// Hand the system's file over as a copy of our own. The system unlinks the
-    /// URL it gave us once this call returns, and the daemon's upload outlives
-    /// that. Same volume, so this is a clone and copies no data.
+    /// Take our own copy: the system unlinks the URL it gave us once this call
+    /// returns, and the daemon's upload outlives that. Same volume, so this is a
+    /// clone and copies no data.
     ///
-    /// It goes in this process's own container, not the group container the
-    /// daemon lives in. The extension's sandbox lets it read the group container
-    /// but not write to it — creating anything there fails with EPERM, which is
-    /// almost certainly why an earlier design's socket, which this process was
-    /// supposed to bind in that same directory, was never there. The app has no
-    /// such limit, and the daemon is unsandboxed, so it can read the file from
-    /// here and rename it away.
+    /// It lands in this process's container, not the group container: the
+    /// extension's sandbox can read that one but not write to it (EPERM). The
+    /// daemon is unsandboxed and reads the file from here.
     private func stage(_ url: URL) throws -> URL {
         let directory = FileManager.default.temporaryDirectory
             .appendingPathComponent("staging", isDirectory: true)

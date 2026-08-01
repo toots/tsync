@@ -22,17 +22,15 @@ module Make (C : Conf.S) : S = struct
 
   type put_data = { key : string; entry_key : string; ops : Journal.op list }
 
-  (* [cancel] is polled by the upload between chunks; setting it aborts the
-     in-flight upload at the next chunk boundary. [failures] counts consecutive
-     failed attempts, driving the requeue backoff. *)
+  (* [cancel] is polled between chunks, so setting it aborts at the next chunk
+     boundary. [failures] drives the requeue backoff. *)
   type slot = {
     cancel : bool ref;
     mutable pending : put_data option;
     mutable failures : int;
   }
 
-  (* All queue state is touched only from the Lwt event-loop thread (workers and
-     the post/cancel entry points all run there), so no locks are needed. *)
+  (* Queue state is touched only from the Lwt event-loop thread, so no locks. *)
   let slots : (string, slot) Hashtbl.t = Hashtbl.create 64
   let queue : put_data Queue.t = Queue.create ()
   let queue_cond = Lwt_condition.create ()
@@ -48,8 +46,8 @@ module Make (C : Conf.S) : S = struct
   let on_upload_done_fn : (key:string -> unit Lwt.t) ref =
     ref (fun ~key:_ -> Lwt.return_unit)
 
-  (* Pending-file cleanup is a best-effort disk unlink; fire it off without
-     blocking the synchronous post/cancel entry points.
+  (* Best-effort unlink, fired off without blocking the synchronous post/cancel
+     entry points.
      ponytail: fire-and-forget unlink; make post/cancel return Lwt only if a
      failed unlink ever needs to be surfaced. *)
   let drop_pending entry_key =
@@ -118,9 +116,8 @@ module Make (C : Conf.S) : S = struct
               let+ () = J.delete_local_pending ~entry_key in
               false
           | exn ->
-              (* A failed upload is never dropped: the file would sit dirty in
-                 the cache forever (auto-evict only runs after a successful
-                 upload). Hold this worker back briefly, then requeue. *)
+              (* Never dropped, or the file sits dirty in the cache forever:
+                 auto-evict only runs after a successful upload. *)
               slot.failures <- slot.failures + 1;
               let delay =
                 Float.min 300. (10. *. (2. ** float_of_int (slot.failures - 1)))

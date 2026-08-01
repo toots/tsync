@@ -6,17 +6,11 @@ private let log = Logger(subsystem: "org.feverdreamtv.tsync", category: "SignalR
 
 /// Carries the daemon's events to the system.
 ///
-/// Only a process holding an `NSFileProviderManager` can tell the system
-/// anything, and the daemon is not one — so somebody has to bridge the two. The
-/// extension is the wrong somebody: the OS starts and stops it as domains go
-/// idle, so a channel that only exists while it runs is missing exactly when
-/// changes need reporting. The app is a login item and stays up, so it is the
-/// one that subscribes.
-///
-/// The connection is made outwards, from here to the daemon. The previous design
-/// had the daemon connect into a socket the extension listened on; on a real
-/// machine that socket was never created, so every eviction, restore and change
-/// notice went nowhere for as long as the feature existed.
+/// Only a process holding an `NSFileProviderManager` can signal the system, and
+/// the daemon is not one. The extension cannot do it either: the OS stops it as
+/// domains go idle, which is exactly when changes need reporting. The app is a
+/// login item and stays up, so it subscribes — connecting outwards, since the
+/// daemon cannot reach into a sandboxed process.
 final class SignalRelay: @unchecked Sendable {
     private let domain: NSFileProviderDomain
     private let client: DaemonClient
@@ -29,9 +23,8 @@ final class SignalRelay: @unchecked Sendable {
 
     func start() {
         Thread.detachNewThread { [self] in
-            // The daemon restarts, and an install stops it for a moment. Backing
-            // off rather than spinning, and never giving up, is what makes the
-            // relay survive a `make install` without anyone reconnecting it.
+            // Back off but never give up, so the relay survives a `make install`
+            // without anyone reconnecting it.
             var backoff = 1.0
             while !stopped {
                 do {
@@ -55,15 +48,13 @@ final class SignalRelay: @unchecked Sendable {
         guard let manager = NSFileProviderManager(for: domain) else { return }
         switch event.event {
         case "changed", "resync":
-            // For a replicated extension only the working set may be signalled;
-            // the system propagates from there to whatever is on screen. Signalling
-            // a specific item is documented as ignored.
+            // A replicated extension may signal only the working set; the system
+            // propagates from there. Signalling a specific item is ignored.
             manager.signalEnumerator(for: .workingSet) { error in
                 if let error { log.error("signalEnumerator: \(error, privacy: .public)") }
             }
-            // A store that was unreachable leaves the domain backed off until it
-            // is told the problem is over. Saying so on any news is cheap, and
-            // not saying it leaves a domain stuck after a transient outage.
+            // `serverUnreachable` latches the domain off until cleared, so clear
+            // it on any news or a transient outage sticks.
             manager.signalErrorResolved(NSFileProviderError(.serverUnreachable)) { _ in }
 
         case "evict":
@@ -74,9 +65,8 @@ final class SignalRelay: @unchecked Sendable {
 
         case "restore":
             guard let ref = event.ref else { return }
-            // Asking the system to schedule a download is what a restore means.
-            // Reading the file through a coordinator would also pull it down, but
-            // as a side effect of pretending to want the bytes.
+            // Reading through a coordinator would also pull the file down, but
+            // only as a side effect of pretending to want the bytes.
             manager.requestDownloadForItem(
                 withIdentifier: NSFileProviderItemIdentifier(ref),
                 requestedRange: NSRange(location: NSNotFound, length: 0)

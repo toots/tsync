@@ -3,10 +3,9 @@ type file_entry = { key : string; size : int; last_modified : float }
 exception Backend_error of string
 exception Cancelled
 
-(* No backend in this domain accepts writes. Its own exception rather than a
-   [Backend_error] carrying a sentence, because callers act on it: a frontend
-   turns it into a read-only error for the user, and matching on prose is how
-   that stops working the day the sentence is reworded. *)
+(* Its own exception rather than a [Backend_error] carrying a sentence, because
+   callers act on it: a frontend turns it into a read-only error for the user,
+   and matching on prose breaks the day the sentence is reworded. *)
 exception Not_writable
 
 let () =
@@ -20,7 +19,7 @@ module type S = sig
   val get : key:string -> unit -> string Lwt.t
 
   (** [None] when the key does not exist; other failures raise. Saves the HEAD
-      round trip of [head_opt] + [get] when the body is wanted anyway. *)
+      round trip of [head_opt] + [get] when the body is wanted. *)
   val get_opt : key:string -> unit -> string option Lwt.t
 
   val head_opt : key:string -> unit -> file_entry option Lwt.t
@@ -44,51 +43,46 @@ module type S = sig
       configs. Only consulted when the client's own config does not say. *)
   val default_chunk_size : prefix:string -> unit -> int option Lwt.t
 
-  (** How many object reads or writes this backend can usefully be serving at
-      once, or [None] if it has no opinion — which is every store whose limit is
-      the network rather than a device it can measure.
+  (** How many object reads or writes this backend can usefully serve at once,
+      or [None] with no opinion — every store whose limit is the network rather
+      than a measurable device.
 
-      Asked by frontends that accept work from many clients at once, so they can
-      hold requests they cannot yet serve instead of handing them all to storage
-      and letting it thrash. A local store answers from the device under it; an
-      http-proxy asks the peer serving it, so a client behind one inherits the
-      real limit rather than guessing at hardware it cannot see. *)
+      Asked by frontends accepting work from many clients, so they can hold
+      requests instead of handing them all to storage. A local store answers
+      from the device under it; an http-proxy asks its peer, so a client
+      inherits the real limit rather than guessing at hardware it cannot see. *)
   val max_concurrency : prefix:string -> unit -> int option Lwt.t
 end
 
 type factory = (string -> string option) -> (module S)
 
-(* A composite backend that finishes work in the background registers here, so a
-   process about to exit can let it settle without knowing which composites are
-   in play. A one-shot command would otherwise take the pending work with it. *)
+(* A composite finishing work in the background registers here, so a process
+   about to exit can let it settle without knowing which composites are in play.
+   A one-shot command would otherwise take the pending work with it. *)
 let drain_hooks : (unit -> unit Lwt.t) list ref = ref []
 let on_drain f = drain_hooks := f :: !drain_hooks
 let drain () = Lwt_list.iter_p (fun f -> f ()) !drain_hooks
 
-(* What a domain's backends are, individually — the composites ({!Fallback} and
-   {!Backfill}) present one {!S} and keep their members' names to themselves, so
-   nothing downstream can say "which store is down" or "how far behind is that
-   target". Whoever builds a domain's backends declares them here instead of the
-   composites growing an introspection interface each: same reasoning as
-   [on_drain] above. Only diagnosis reads this; nothing routes on it. *)
+(* A domain's backends individually. The composites ({!Fallback}, {!Backfill})
+   present one {!S} and keep their members' names to themselves, so whoever builds
+   a domain's backends declares them here rather than each composite growing an
+   introspection interface. Only diagnosis reads this; nothing routes on it. *)
 type member = {
   name : string;
   role : string;  (** main | replica | backfill | readOnly *)
   backend_type : string;  (** local | s3 | gcs | http-proxy *)
   config : (string * string) list;
-      (** what this store points at — a bucket, a URL, a path — with secret
-          fields masked. Diagnosing "which store is this?" needs the answer, and
-          a report gets pasted into bug threads. *)
+      (** What this store points at — a bucket, a URL, a path — with secret
+          fields masked: a report gets pasted into bug threads. *)
   backend : (module S);
-      (** the leaf store, so a reader can probe it directly *)
+      (** The leaf store, so a reader can probe it directly. *)
   pending : (unit -> int) option;  (** backfill: jobs queued for this target *)
   in_flight : (unit -> int) option;  (** backfill: chunk forwards in flight *)
   degraded : (unit -> bool) option;
-      (** backfill: writes were dropped, [tsync resync-remote] needed *)
+      (** Backfill: writes were dropped, [tsync resync-remote] is needed. *)
   local_path : string option;
-      (** where a [local] store keeps its files, so a report can say how much
-          room is left on it. Absent for stores whose capacity is not ours to
-          know. *)
+      (** Where a [local] store keeps its files, so a report can say how much
+          room is left. Absent for stores whose capacity is not ours to know. *)
 }
 
 let member_registry : (string, member list) Hashtbl.t = Hashtbl.create 4
@@ -104,8 +98,8 @@ type field_spec = {
   label : string;
   typ : field_type;
   default : string option;
-      (** [None] = required; [Some ""] = optional, omit from JSON if blank;
-          [Some s] = optional with default [s] *)
+      (** [None] is required; [Some ""] optional, omitted from JSON when blank;
+          [Some s] optional with default [s]. *)
   secret : bool;
 }
 
@@ -119,7 +113,7 @@ let register ~spec name (f : factory) =
 let spec_for name =
   Option.map (fun e -> e.spec) (Hashtbl.find_opt registry name)
 
-(* Every registered type name, for a UI that offers a choice. What is available
+(* Every registered type name, for a UI offering a choice. What is available
    depends on how the binary was linked, since s3 is optional. *)
 let types () =
   List.sort compare (Hashtbl.fold (fun name _ acc -> name :: acc) registry [])

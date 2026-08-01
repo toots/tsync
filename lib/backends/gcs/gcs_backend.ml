@@ -1,6 +1,6 @@
-(* Google Cloud Storage backend over the JSON API. Auth is a bearer token minted
-   from a service-account key (see [Gcs_auth]); every request carries it. There is
-   no per-request signing (unlike s3), so the verbs are thin HTTP calls. *)
+(* Google Cloud Storage over the JSON API. Every request carries a bearer token
+   minted from a service-account key (see [Gcs_auth]); unlike s3 there is no
+   per-request signing, so the verbs are thin HTTP calls. *)
 
 open Lwt.Syntax
 module Auth = Gcs_auth
@@ -11,7 +11,7 @@ type t = {
   bucket : string;
   base : string; (* scheme + host, no trailing slash *)
   auth : Auth.t option;
-      (* [None] = anonymous, for emulators on a custom endpoint *)
+      (* [None] is anonymous, for emulators on a custom endpoint. *)
   share_url : string option;
 }
 
@@ -23,9 +23,9 @@ let backend_error op code body =
 let code resp = Cohttp.Code.code_of_status (Cohttp.Response.status resp)
 let is_ok resp = code resp >= 200 && code resp < 300
 
-(* Object names are a single path segment, so [/] and other reserved chars must
-   be percent-encoded ([/] -> %2F); [`Generic] encodes everything not unreserved,
-   and the escaped form survives [Uri.of_string]/[path_and_query] to the wire. *)
+(* An object name is a single path segment, so [/] and other reserved characters
+   must be percent-encoded. [`Generic] encodes everything not unreserved, and the
+   escaped form survives [Uri.of_string]/[path_and_query] to the wire. *)
 let enc_key key = Uri.pct_encode ~component:`Generic key
 let obj_path t key = t.base ^ "/storage/v1/b/" ^ t.bucket ^ "/o/" ^ enc_key key
 
@@ -33,8 +33,6 @@ let upload_uri t key =
   Uri.of_string
     (t.base ^ "/upload/storage/v1/b/" ^ t.bucket ^ "/o?uploadType=media&name="
    ^ enc_key key)
-
-(* ── HTTP with retry (TLS handled by conduit per the global [Tls_conf]) ─────── *)
 
 let max_attempts = 8
 
@@ -60,7 +58,7 @@ let call t ~meth ?ctype ?(body = "") uri =
   let+ s = Cohttp_lwt.Body.to_string rbody in
   (resp, s)
 
-(* 5xx and 429 are transient (back off + retry); [Cancelled] never retries. *)
+(* 5xx and 429 are transient: back off and retry. [Cancelled] never retries. *)
 let is_transient_code c = c >= 500 || c = 429
 
 let call_retry t ~meth ?ctype ?body op uri =
@@ -92,14 +90,11 @@ let call_retry t ~meth ?ctype ?body op uri =
   in
   go 1
 
-(* ── JSON object metadata ───────────────────────────────────────────────────── *)
-
 let str_member key j =
   match Yojson.Safe.Util.member key j with `String s -> s | _ -> ""
 
-(* Days since the Unix epoch for a civil (proleptic Gregorian) date.
-   Howard Hinnant's algorithm; avoids pulling in a date library for the one job
-   of turning GCS's RFC-3339 [updated] timestamp into epoch seconds. *)
+(* Howard Hinnant's civil-date algorithm, so turning GCS's RFC-3339 [updated]
+   timestamp into epoch seconds needs no date library. *)
 let days_from_civil y m d =
   let y = if m <= 2 then y - 1 else y in
   let era = (if y >= 0 then y else y - 399) / 400 in
@@ -128,8 +123,6 @@ let entry_of_json name j =
     size = size_of j;
     last_modified = parse_rfc3339 (str_member "updated" j);
   }
-
-(* ── Backend.S verbs ────────────────────────────────────────────────────────── *)
 
 let put t ~key ~data () =
   let+ resp, body =
@@ -163,7 +156,7 @@ let delete t ~key () =
   if is_ok resp || code resp = 404 then ()
   else raise (backend_error "delete" (code resp) body)
 
-(* GCS has no S3-style batch delete; fan out single deletes, bounded per batch. *)
+(* No S3-style batch delete: fan out single deletes, bounded per batch. *)
 let delete_multi t keys =
   let rec go = function
     | [] -> Lwt.return_unit
@@ -207,8 +200,8 @@ let parse_list body =
   in
   (items, next)
 
-(* Accumulate pages in reverse (O(1) prepend), same shape as the s3 backend;
-   [max_keys] caps the total and stops paging once reached. *)
+(* Reverse accumulation for O(1) prepend, as the s3 backend does. [max_keys] caps
+   the total and stops paging once reached. *)
 let list_all t ?max_keys ~prefix () =
   let enough acc =
     match max_keys with
@@ -256,9 +249,8 @@ let make ?endpoint ?service_account_key ?share_url ~bucket () :
     let share_url ~prefix:_ () = Lwt.return t.share_url
     let default_chunk_size ~prefix:_ () = Lwt.return_none
 
-    (* No opinion: what limits an object store is the network and its own
-       concurrency, neither of which this process can measure, and both of which
-       take far more at once than any device would. *)
+    (* No opinion: an object store is limited by the network and its own
+       concurrency, neither measurable from here. *)
     let max_concurrency ~prefix:_ () = Lwt.return_none
   end)
 

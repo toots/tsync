@@ -27,10 +27,9 @@ module Make (C : Conf.S) = struct
       (fun g -> Glob.matches g rel || Glob.matches g (Filename.basename rel))
       globs
 
-  (* All directories, files, and symlinks under [src], as relative paths,
-     sorted. Entries matching [exclude] are pruned; excluded directories are
-     not descended into. Dir-symlinks are not descended into regardless of
-     policy (the caller handles them). [seen] guards against cycles. *)
+  (* Relative paths, sorted. [exclude] prunes entries, and an excluded directory
+     is not descended into. A dir-symlink is never descended into whatever the
+     policy: the caller handles those. [seen] guards against cycles. *)
   let walk_source ~exclude src =
     let globs = List.map Glob.of_pattern exclude in
     let seen = Hashtbl.create 16 in
@@ -94,8 +93,7 @@ module Make (C : Conf.S) = struct
       let+ () = Mf.write key state in
       Imported state.Manifest.size)
 
-  (* Write a symlink manifest to all backends and the local sidecar. No cache
-     entry: there is no file data to cache for a symlink. *)
+  (* No cache entry: a symlink has no file data. *)
   let import_symlink ~force_rehash ~src_root rel target =
     let key = C.domain_prefix ^ rel in
     let* skip = if force_rehash then Lwt.return_false else exists key in
@@ -112,19 +110,15 @@ module Make (C : Conf.S) = struct
       let* () = Mf.write key state in
       Lwt.return (Imported state.Manifest.size))
 
-  (* Import every file under [src] into the domain: upload data to all
-     backends, write manifest sidecars (no local cache data — files read as
-     not cached and are fetched from the backend on demand), and publish a
-     single journal entry so other clients pick the files up incrementally.
-     Existing keys are skipped.
+  (* No local cache data is written: imported files read as not cached and are
+     fetched on demand. One journal entry covers the batch, so other clients pick
+     the files up incrementally. Existing keys are skipped.
 
-     Symlink handling is controlled by [C.symlink_policy]:
+     Symlink handling follows [C.symlink_policy]:
      - [`Keep]   — store as a first-class symlink object
      - [`Follow] — dereference and upload target content; broken links skipped
      - [`Skip]   — skip and count, no upload *)
-  (* Ancestor directory rels of [rel], from the root down (e.g. "a/b/c" →
-     ["a"; "a/b"]). Used to keep markers only for dirs that contain a kept
-     entry when [only] filtering is active. *)
+  (* Ancestor directory rels, root first ("a/b/c" → ["a"; "a/b"]). *)
   let ancestors rel =
     let rec go acc d =
       if d = "." || d = "/" || d = "" then acc
@@ -142,21 +136,19 @@ module Make (C : Conf.S) = struct
       try Unix.realpath p with _ -> p
     in
     let* dirs, files, symlinks = walk_source ~exclude src in
-    (* [only] keeps just the matching files/symlinks (empty = keep all);
-       [exclude] was already applied during the walk, so this composes as
-       (all \ exclude) ∩ only. *)
+    (* [exclude] was applied during the walk, so this composes as
+       (all \ exclude) ∩ only. Empty [only] keeps everything. *)
     let only_globs = List.map Glob.of_pattern only in
     (* [only foo] selects everything under a matching directory, mirroring how
-       [exclude foo] prunes a whole directory: a path is kept when it or any of
-       its ancestor dirs matches an [only] glob. *)
+       [exclude foo] prunes one. *)
     let kept rel =
       only = [] || excluded only_globs rel
       || List.exists (excluded only_globs) (ancestors rel)
     in
     let files = List.filter kept files in
     let symlinks = List.filter (fun (rel, _) -> kept rel) symlinks in
-    (* When [only] is active, keep dir markers only for ancestors of kept
-       entries so non-matching branches don't leave empty folders behind. *)
+    (* Under [only], markers are kept for ancestors of kept entries alone, so
+       non-matching branches leave no empty folders. *)
     let dirs =
       if only = [] then dirs
       else (
@@ -214,17 +206,17 @@ module Make (C : Conf.S) = struct
         symlinks
     in
     let all_statuses = file_statuses @ symlink_statuses in
-    (* Under the inode layout every folder needs its own marker (files no longer
-       encode their path), so write one for every directory. [dirs] is sorted, so
-       parents precede children and id resolution finds them. *)
+    (* Every folder needs its own marker under the inode layout: files no longer
+       encode their path. [dirs] is sorted, so parents precede children and id
+       resolution finds them. *)
     let* dir_ids =
       Lwt_list.map_s
         (fun rel ->
           let key = C.domain_prefix ^ rel ^ "/" in
           let* () = Mf.create_dir key in
           let* () = St.put_folder_marker ~key in
-          (* Already minted by the marker above; read back so the journal entry
-             carries the same id a peer will resolve the folder by. *)
+          (* Minted by the marker above; read back so the journal entry carries
+             the id a peer resolves the folder by. *)
           let* id =
             Folder_ids.ensure_id ~cache_root:C.cache_root
               ~domain_name:C.domain_name rel

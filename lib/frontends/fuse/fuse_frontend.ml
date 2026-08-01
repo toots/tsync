@@ -10,13 +10,13 @@ let prepare_mount_point mount_point =
   Fs_util.mkdir_p_sync mount_point
 
 let mount_binding (b : Frontend.binding) =
-  (* Leaf process (post-fork): safe to initialize Lwt now. *)
+  (* Post-fork leaf process: safe to initialize Lwt now. *)
   Frontend.cap_blocking_pool ();
   let module C = (val b.Frontend.conf : Conf.S) in
   (* Each domain is its own process; tag its log lines with the domain name. *)
   Log.set_prefix (Printf.sprintf "[%s] " C.domain_name);
-  (* [allowOther] frontend option → FUSE allow_other, so a service running as
-     another user (e.g. a media server) can read the mount. *)
+  (* FUSE allow_other, so a service running as another user can read the
+     mount. *)
   let allow_other =
     match List.assoc_opt "allowOther" b.Frontend.options with
       | Some ("true" | "1") -> true
@@ -26,8 +26,8 @@ let mount_binding (b : Frontend.binding) =
   let module R = Fuse_fs.Make (C) in
   R.mount ~allow_other b.Frontend.mount_point
 
-(* Each domain runs FUSE in its own child process (fuse's mount blocks); the last
-   one runs in this process. *)
+(* FUSE's mount blocks, so each domain runs in its own child process; the last
+   runs here. *)
 let start bindings = Frontend.run_forked mount_binding bindings
 
 let spec =

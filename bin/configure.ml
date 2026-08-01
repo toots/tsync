@@ -1,8 +1,6 @@
 open Cmdliner
 open Cli
 
-(* ── tsync configure ────────────────────────────────────────────────────── *)
-
 (* Read a JSON value's field, tolerating non-objects and missing keys. *)
 let jfield json key =
   match json with `Assoc l -> List.assoc_opt key l | _ -> None
@@ -56,8 +54,8 @@ let terraform_output dir =
 let tf_value root name =
   jfield (Option.value (jfield root name) ~default:`Null) "value"
 
-(* The stores-map output name differs by cloud; the per-store shape and the
-   credential outputs differ too (see below). *)
+(* The stores-map output name, the per-store shape and the credential outputs
+   all differ by cloud. *)
 let tf_stores_output = function `S3 -> "stores" | `Gcs -> "gcs_stores"
 
 (* Store keys present in `terraform output` for the given cloud. *)
@@ -96,9 +94,7 @@ let tf_lookup root which store =
           | None -> None)
     | None -> None
 
-(* ── Interactive prompt helpers ──────────────────────────────────────────── *)
-
-(* Clear the screen and home the cursor, so menus redraw in place. *)
+(* Redraws menus in place. *)
 let clear_screen () =
   print_string "\027[H\027[2J";
   flush stdout
@@ -155,9 +151,8 @@ let prompt_symlinks default =
   in
   ask ()
 
-(* A size, or nothing: [unset] is both the word shown when the field has no
-   value and a word that clears it. Every size in a domain is optional, so an
-   answered prompt is the only thing that ever writes one to the config. *)
+(* [unset] is both what is shown for an empty field and what clears it. Sizes are
+   optional, so only an answered prompt ever writes one. *)
 let rec prompt_size_opt ?(unset = "none") msg default =
   let def =
     match default with Some n -> Conf_parsing.format_size n | None -> unset
@@ -172,16 +167,12 @@ let rec prompt_size_opt ?(unset = "none") msg default =
                 unset;
               prompt_size_opt ~unset msg default)
 
-(* What a new domain is offered as its local cache cap. Only a suggestion — the
-   prompt still takes "none" — and only for a new domain; editing an existing one
-   shows what it already has. *)
+(* Suggested cache cap for a new domain; the prompt still takes "none". Editing
+   an existing domain shows what it already has. *)
 let default_max_cache = 1024 * 1024 * 1024
-
-(* ── Backend / domain builders ───────────────────────────────────────────── *)
-
 let role_names = List.map Conf_parsing.role_name Conf_parsing.roles
 
-(* One line each, because the difference between these is the whole point. *)
+(* One line each: the differences are the point. *)
 let role_help = function
   | `Main -> "writable source of truth; reads prefer it"
   | `Replica -> "complete copy: every write, read when no main is reachable"
@@ -211,8 +202,8 @@ let prompt_role default =
   in
   ask ()
 
-(* The backend fields a Terraform store fills — so the wizard skips prompting
-   for them. Exactly what [apply_store_fields] sets. *)
+(* Fields a Terraform store fills, which the wizard then skips. Exactly what
+   [apply_store_fields] sets. *)
 let store_fields (s : tf_store) =
   "bucket" :: "shareUrl" :: List.map fst s.fields
 
@@ -223,9 +214,8 @@ let apply_store_fields l (s : tf_store) =
   in
   assoc_set l "shareUrl" (`String s.share_url)
 
-(* Interactively pick a Terraform store (numbered menu of store + bucket) and read
-   its outputs. Pulls once; nothing about Terraform is persisted. [None] on
-   decline/failure. *)
+(* Pulls once; nothing about Terraform is persisted. [None] on decline or
+   failure. *)
 let terraform_store which =
   let dir = prompt "  Terraform directory" (Some "terraform") in
   let fail msg =
@@ -274,8 +264,8 @@ let prompt_backend () =
   in
   let backend_type = ask () in
   let name = prompt "  Backend name" (Some backend_type) in
-  (* For s3/gcs, offer to pull bucket/keys/share URL from Terraform up front,
-     then only prompt the fields Terraform doesn't provide. *)
+  (* Offer Terraform up front, then prompt only the fields it does not
+     provide. *)
   let which =
     match backend_type with "s3" -> Some `S3 | "gcs" -> Some `Gcs | _ -> None
   in
@@ -344,8 +334,8 @@ let prompt_backends () =
   done;
   !backends
 
-(* Prompt one backend spec field, pre-filled with [current]. [None] omits it
-   (blank optional string, or blank secret keeping no prior value). *)
+(* [None] omits the field: a blank optional string, or a blank secret with no
+   prior value. *)
 let prompt_spec_field (s : Backend.field_spec) ~current =
   match s.typ with
     | `Bool ->
@@ -482,8 +472,7 @@ let backend_summary = function
       String.concat ", "
         (List.map (fun b -> Option.value (jstr b "type") ~default:"?") bs)
 
-(* A frontend JSON entry is a bare type-name string or an object with a "type"
-   key; both forms are accepted on read. *)
+(* A frontend entry is a bare type-name string or an object with a "type" key. *)
 let frontend_type_of = function `String s -> Some s | j -> jstr j "type"
 
 let frontend_summary = function
@@ -525,8 +514,7 @@ let frontend_opt entry k =
           | _ -> None)
     | _ -> None
 
-(* Prompt one frontend spec field, pre-filled with [current]. [None] omits it
-   from the emitted options. *)
+(* [None] omits the field from the emitted options. *)
 let prompt_frontend_field (s : Frontend.field_spec) ~current =
   match s.typ with
     | `Bool ->
@@ -567,9 +555,8 @@ let prompt_frontend_field (s : Frontend.field_spec) ~current =
         let v = prompt ("  " ^ s.label) def in
         if v = "" then None else Some (s.name, `String v)
 
-(* Toggle each compiled-in frontend on or off and prompt its declared options,
-   pre-filled from [current]. A frontend with no options set is emitted as a bare
-   type-name string; otherwise as [{"type": name, ...options}]. *)
+(* A frontend with no options set is emitted as a bare type-name string, else as
+   [{"type": name, ...options}]. *)
 let edit_frontends current =
   let registered = Frontend.names () in
   let current_of name =
@@ -595,9 +582,8 @@ let edit_frontends current =
            else `Assoc (("type", `String name) :: opts))))
     registered
 
-(* Build or edit one domain. A new domain ([existing = None]) is filled in
-   linearly; an existing one is edited through a per-field menu, so untouched
-   fields keep their current values without re-prompting. *)
+(* A new domain ([existing = None]) is filled in linearly; an existing one goes
+   through a per-field menu, so untouched fields keep their values. *)
 let edit_domain existing =
   let cur k d =
     Option.value (Option.bind existing (fun j -> jstr j k)) ~default:d
@@ -626,7 +612,7 @@ let edit_domain existing =
   let backends =
     ref (match existing with Some j -> jlist j "backends" | None -> [])
   in
-  (* A new domain defaults to every compiled-in frontend (usually one). *)
+  (* A new domain defaults to every compiled-in frontend. *)
   let frontends =
     ref
       (match existing with
@@ -652,9 +638,9 @@ let edit_domain existing =
             "Cache chunk size (chunks grouped this big on local disk; larger \
              cuts I/O latency)"
             !cache_chunk_size;
-        (* Suggest a cap rather than none: an uncapped cache grows to the size of
-           whatever gets read, and the first anyone hears of it is a full disk.
-           Cached chunks are re-fetchable, so the cap costs downloads, never data. *)
+        (* An uncapped cache grows to the size of whatever gets read, and the
+           first notice is a full disk. Cached chunks are re-fetchable, so a cap
+           costs downloads, never data. *)
         max_cache :=
           prompt_size_opt "Max local cache size (\"none\" = unlimited)"
             (Some default_max_cache);
@@ -787,10 +773,10 @@ let cmd =
       client_name := prompt "Client name" (Some !client_name);
       max_uploads := prompt_int "Max concurrent uploads" !max_uploads;
       max_downloads := prompt_int "Max concurrent downloads" !max_downloads;
-      (* Only worth asking when this build has more than one backend to choose
-         between. "auto" leaves it unset, which takes the preferred one at
-         startup — the same answer picking the first entry would give, and the
-         one that keeps working if a later build drops a backend. *)
+      (* Only worth asking when the build has more than one backend. "auto"
+         leaves it unset, taking the preferred one at startup: the same answer as
+         picking the first entry, and one that survives a build dropping a
+         backend. *)
       let available = Tls_conf.available () in
       if List.length available >= 2 then begin
         let choice =

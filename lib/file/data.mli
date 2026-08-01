@@ -5,11 +5,10 @@
     kept beyond a read-ahead hint, and none is written to disk. *)
 
 module Make (C : Conf.S) (R : Remote.S) : sig
-  (** [pread ~id ~manifest buf ~offset] fills [buf] from [offset] in the file
-      [manifest] describes, returning the byte count — short only at end of
-      file. [id] names the file for the sequential read-ahead heuristic alone.
-      Raises {!Backend.Backend_error} for a manifest whose chunk list has a
-      hole, rather than serving zeros as content. *)
+  (** Fills [buf] from [offset] in the file [manifest] describes, returning the
+      byte count — short only at end of file. [id] is for the read-ahead
+      heuristic alone. Raises {!Backend.Backend_error} for a manifest whose
+      chunk list has a hole, rather than serving zeros as content. *)
   val pread :
     id:string ->
     manifest:Manifest.t ->
@@ -22,9 +21,9 @@ module Make (C : Conf.S) (R : Remote.S) : sig
       size and mtime rather than the manifest object's byte size. *)
   val resolved_manifest : string -> Manifest.t option Lwt.t
 
-  (** [pread_key key buf ~offset] is {!pread} for a key of this domain,
-      resolving it through {!Manifest.Make.resolve}: staged edits, else what was
-      published, else the backend's manifest. *)
+  (** {!pread} for a key of this domain, resolved through
+      {!Manifest.Make.resolve}: staged edits, else what was published, else the
+      backend's manifest. *)
   val pread_key : string -> Local_io.buffer -> offset:int64 -> int Lwt.t
 
   (** {2 Writes}
@@ -49,10 +48,10 @@ module Make (C : Conf.S) (R : Remote.S) : sig
       under the content keys they hashed to, the sidecar becomes what was
       published, and the staged manifest goes. No-op when nothing is staged.
 
-      Crash-safe in one direction: the upload records what it published in the
-      staged manifest before touching anything else, so a crash before that
-      point re-uploads (identical bytes, identical manifest) and a crash after
-      it replays only local moves. Every later step is idempotent. *)
+      The upload records what it published in the staged manifest before
+      touching anything else, so a crash before that point re-uploads identical
+      bytes and one after replays only local moves. Every later step is
+      idempotent. *)
   val sync : string -> ?cancel:bool ref -> unit -> unit Lwt.t
 
   (** {2 Chunk store housekeeping}
@@ -90,12 +89,10 @@ module Make (C : Conf.S) (R : Remote.S) : sig
       copy handed to a frontend. *)
   val assemble_to : string -> dst_path:string -> unit Lwt.t
 
-  (** [fetch_range key ~dst_path ~offset ~length] writes that range of [key]
-      into [dst_path] at the same offset, leaving the rest of the file sparse,
-      and returns the byte count — short only at end of file. Only the chunks
-      the range covers are fetched, so a large file can be served a piece at a
-      time rather than materialized whole. [dst_path] is created even when the
-      range lies past the end. *)
+  (** Writes that range of [key] into [dst_path] at the same offset, leaving the
+      rest sparse, and returns the byte count — short only at end of file. Only
+      the chunks the range covers are fetched, so a large file is served a piece
+      at a time. [dst_path] is created even for a range past the end. *)
   val fetch_range :
     string -> dst_path:string -> offset:int -> length:int -> int Lwt.t
 

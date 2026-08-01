@@ -10,17 +10,9 @@ module Make (C : Conf.S) = struct
   module H = Hidden_ops.Make (C)
   module I = Internal_ops.Make (F)
 
-  (* ── Full-file storage policy ─────────────────────────────────────────────
-     Files persist in the local cache. Eviction is deferred while a file has
-     open handles; a dirty file is queued for upload on last close.
-
-     All File operations run on the single Lwt event-loop thread. FUSE runs
-     Multi_threaded; each handler bridges into that loop with
-     [Lwt_preemptive.run_in_main], so a slow operation blocks only its own
-     kernel thread while other operations keep making progress on the loop. *)
-
-  (* ── Path helpers ─────────────────────────────────────────────────────── *)
-
+  (* FUSE runs Multi_threaded while all File operations run on the single Lwt
+     event-loop thread, so each handler bridges with [Lwt_preemptive.run_in_main]
+     and a slow operation blocks only its own kernel thread. *)
   let fuse_to_key path =
     let rel =
       if path = "/" then "" else String.sub path 1 (String.length path - 1)
@@ -29,27 +21,23 @@ module Make (C : Conf.S) = struct
 
   let fuse_to_dir_prefix path = Key.ensure_slash (fuse_to_key path)
 
-  (* ── The FUSE kernel creates .fuse_hidden* files when renaming a file that
-     has open file descriptors. These are kernel-internal; never mirror to backend. *)
+  (* The FUSE kernel creates .fuse_hidden* files when renaming a file with open
+     descriptors. Kernel-internal: never mirror to the backend. *)
   let is_fuse_hidden path =
     let basename = Filename.basename path in
     let prefix = ".fuse_hidden" in
     String.length basename >= String.length prefix
     && String.sub basename 0 (String.length prefix) = prefix
 
-  (* ── Exception guard ──────────────────────────────────────────────────── *)
-
-  (* What the kernel has actually asked of this mount. Counted at the FUSE
-     boundary because nothing below it sees these numbers: a read served from the
-     chunk cache never reaches a backend, so {!Metrics} stays at zero while a mount
-     streams gigabytes. Incremented inside [on_loop], i.e. on the event-loop
-     thread, so these are the same plain ints everything else here assumes — never
-     touched from a FUSE worker thread. *)
+  (* Counted at the FUSE boundary because nothing below sees these numbers: a
+     read served from the chunk cache never reaches a backend, so {!Metrics} stays
+     at zero while a mount streams gigabytes. Incremented inside [on_loop], on the
+     event-loop thread, so plain ints suffice. *)
   let open_handles = ref 0
   let files_opened = ref 0
 
-  (* Volume through the mount, with a rolling rate: whether a mount is streaming
-     right now is the question a total cannot answer. *)
+  (* Rolling rate as well as total: a total cannot say whether the mount is
+     streaming right now. *)
   let read_bytes = Metrics.counter ()
   let written_bytes = Metrics.counter ()
 
@@ -71,20 +59,14 @@ module Make (C : Conf.S) = struct
             (Printexc.to_string exn);
           raise (Unix.Unix_error (Unix.EIO, op, path))
 
-  (* Run an Lwt computation on the event-loop thread and wait for its result.
-     Called from FUSE worker threads (never the loop thread itself). *)
+  (* Called from FUSE worker threads, never the loop thread itself. *)
   let on_loop f = Lwt_preemptive.run_in_main f
 
-  (* ── Shutdown coordination ────────────────────────────────────────────── *)
-
-  (* Deliberately unbounded: if the stop sequence wedges, hanging is the correct
-     behaviour. Whatever supervises the process is what notices — it gives up on
-     its own stop timeout, kills us and reports the unit as failed, which someone
-     sees. Giving up on a timer of our own would abandon exactly the pending work
-     a kill does, only quietly and with an exit status saying all was well. The
-     individual steps that wait on something remote carry their own bounds
-     ({!Backfill_backend.drain_all}); a hang here means something is stuck that is
-     not supposed to be. *)
+  (* Deliberately unbounded: a wedged stop should hang so the supervisor's own
+     timeout kills us and reports the unit failed. A timer of our own would
+     abandon the same pending work, quietly and with an exit status saying all was
+     well. Steps waiting on something remote carry their own bounds
+     ({!Backfill_backend.drain_all}). *)
   let stop_t, stop_wake = Lwt.wait ()
 
   let do_stop () =
@@ -93,9 +75,8 @@ module Make (C : Conf.S) = struct
       | _ -> ()
 
   (* [Fuse.main] holds the main thread until the mount is gone, so a stop asked
-     for from the inside has to unmount as well or the process would drain and
-     then sit there. Set only in that case: when the FUSE loop exits on its own
-     (a manual [fusermount -u], or libfuse acting on a signal itself) the mount is
+     from the inside must unmount too or the process drains and then sits there.
+     Set only in that case: when the FUSE loop exits on its own the mount is
      already gone and unmounting again would only warn. *)
   let unmount_needed = ref false
 
@@ -103,12 +84,10 @@ module Make (C : Conf.S) = struct
     unmount_needed := true;
     do_stop ()
 
-  (* How the main thread asks the Lwt thread to stop once [Fuse.main] has
-     returned. It cannot use [Lwt_preemptive.run_in_main] for this: that blocks
-     until the loop picks the job up, and by then the loop may already have
-     finished — the main thread would then wait forever on a loop that will never
-     run again. A notification is delivered by the engine, is safe to send from
-     any thread, and is a no-op if the loop is already gone. *)
+  (* [Lwt_preemptive.run_in_main] cannot be used here: it blocks until the loop
+     picks the job up, and by then the loop may be finished, leaving the main
+     thread waiting forever. A notification is engine-delivered, safe from any
+     thread, and a no-op if the loop is already gone. *)
   let stop_notification = ref None
 
   let notify_stop_from_main () =
@@ -116,12 +95,10 @@ module Make (C : Conf.S) = struct
       | Some n -> ( try Lwt_unix.send_notification n with _ -> ())
       | None -> ()
 
-  (* [Lwt_process] reaps the child through the event loop, so no thread is blocked
-     waiting on it, and the shutdown sequence awaits this promise, so the process
-     cannot reach [exit] with the unmount still pending. It takes an argument
-     array, not a shell line, so the mount path needs no quoting. The short delay
-     lets the IPC [stop] reply reach its caller before the mount it is talking
-     about disappears. *)
+  (* [Lwt_process] reaps the child through the event loop, so no thread blocks on
+     it, and shutdown awaits this promise, so [exit] cannot happen with the
+     unmount pending. It takes an argument array, so the mount path needs no
+     quoting. The delay lets the IPC [stop] reply reach its caller first. *)
   let unmount mount_point =
     if not !unmount_needed then Lwt.return_unit
     else
@@ -131,15 +108,13 @@ module Make (C : Conf.S) = struct
       in
       match status with
         | Unix.WEXITED 0 -> ()
-        (* A mount that stays up leaves [Fuse.main] blocked for good, so this
-           warning is the only notice anyone gets. *)
+        (* A mount that stays up leaves [Fuse.main] blocked for good, so this is
+           the only notice anyone gets. *)
         | Unix.WEXITED n ->
             Log.warn "fusermount3 -u %s exited %d; it may still be mounted"
               mount_point n
         | Unix.WSIGNALED n | Unix.WSTOPPED n ->
             Log.warn "fusermount3 -u %s killed by signal %d" mount_point n
-
-  (* ── IPC ──────────────────────────────────────────────────────────────── *)
 
   let key_of_path mount_point path =
     let path =
@@ -157,16 +132,15 @@ module Make (C : Conf.S) = struct
            (String.length path - String.length mount_point))
     else fuse_to_key path
 
-  (* Directories exist only in the manifest mirror, so that is what decides
-     whether a key names one. *)
+  (* Directories exist only in the manifest mirror. *)
   let is_dir_key key =
     Key.is_dir key
     ||
     let mp = F.manifest_path key in
     Sys.file_exists mp && Sys.is_directory mp
 
-  (* Evict and restore both apply to a whole subtree when given a directory. One
-     file's failure must not abort the rest. *)
+  (* Given a directory, both apply to the whole subtree; one file's failure must
+     not abort the rest. *)
   let on_subtree what f key =
     if not (is_dir_key key) then f key
     else (
@@ -184,9 +158,8 @@ module Make (C : Conf.S) = struct
   let evict_key = on_subtree "evict" F.evict
   let restore_key = on_subtree "restore" F.ensure_cached
 
-  (* The mirror is cleared and rebuilt by the [sync --full] client before it
-     signals us; FUSE re-reads the fresh mirror on the next lookup, so there is
-     nothing destructive to do here. *)
+  (* The [sync --full] client clears and rebuilds the mirror before signalling
+     us, and FUSE re-reads it on the next lookup. *)
   let full_resync () = Lwt.return_unit
 
   let ipc_hooks mount_point =
@@ -198,9 +171,8 @@ module Make (C : Conf.S) = struct
         changed = (fun _ -> ());
         full_resync;
         status_fields = (fun () -> [("mount", `String mount_point)]);
-        (* Say which frontend these numbers belong to: a domain can run several,
-           each in its own process with its own counters, and a report that does
-           not name itself is a report you cannot place. *)
+        (* A domain can run several frontends, each its own process with its own
+           counters, so the numbers have to name themselves. *)
         stats_fields =
           (fun () ->
             ("frontend", `String "fuse")
@@ -209,8 +181,6 @@ module Make (C : Conf.S) = struct
             @ E.stats_fields ());
         on_stop = (fun () -> request_stop ());
       }
-
-  (* ── FUSE operations ──────────────────────────────────────────────────── *)
 
   let make_operations mount_point =
     let open Fuse in
@@ -276,8 +246,8 @@ module Make (C : Conf.S) = struct
         (fun path mode ->
           guard "mknod" path (fun () ->
               on_loop (fun () -> (dispatch path).mknod path mode)));
-      (* The accounting sits inside [on_loop], so it runs on the event-loop thread
-         and only when the operation actually succeeded. *)
+      (* Inside [on_loop], so it runs on the event-loop thread and only on
+         success. *)
       fopen =
         (fun path fi ->
           guard "fopen" path (fun () ->
@@ -305,9 +275,8 @@ module Make (C : Conf.S) = struct
           guard "release" path (fun () ->
               on_loop (fun () ->
                   let+ () = (dispatch path).release path fi in
-                  (* Never below zero: a release without a matching fopen (a
-                     handle inherited across a remount) must not make the gauge
-                     nonsense. *)
+                  (* A release without a matching fopen (a handle inherited
+                     across a remount) must not drive the gauge negative. *)
                   if !open_handles > 0 then decr open_handles)));
       unlink =
         (fun path ->
@@ -351,26 +320,22 @@ module Make (C : Conf.S) = struct
               f_namemax = 255L;
             });
       utimens = (fun _path _atime _mtime _fi -> ());
-      (* Object storage has no meaningful POSIX mode/owner — getattr synthesizes
-         them and they aren't persisted. Accept and ignore rather than returning
-         ENOSYS: rsync's do_mkstemp() fchmod()s the temp file, so an
-         unimplemented chmod surfaces as a spurious "mkstemp failed". *)
+      (* Object storage has no POSIX mode/owner: getattr synthesizes them and
+         they are not persisted. Accepted rather than ENOSYS because rsync's
+         do_mkstemp() fchmod()s its temp file, and an unimplemented chmod surfaces
+         as a spurious "mkstemp failed". *)
       chmod = (fun _path _mode _fi -> ());
       chown = (fun _path _uid _gid _fi -> ());
       (* Nothing is buffered per-fd: a write lands in a staged chunk body before
-         it returns, and there is no long-lived handle to sync. Both must still
-         succeed rather than report ENOSYS — an app that fsyncs its own file must
-         not see an error. *)
+         returning. Still must succeed rather than ENOSYS, or an app fsyncing its
+         own file sees an error. *)
       flush = (fun _path _fi -> ());
       fsync = (fun _path _datasync _fi -> ());
     }
 
-  (* ── Main mount ───────────────────────────────────────────────────────── *)
-
   let mount ?(allow_other = false) mount_point =
-    (* An exception escaping through Lwt.async (e.g. a socket error in a
-       library's background loop) must not take down the daemon or, worse,
-       leave it half-dead. Log and keep serving. *)
+    (* An exception escaping through Lwt.async (a socket error in a library's
+       background loop) must not take down the daemon or leave it half-dead. *)
     (Lwt.async_exception_hook :=
        fun exn -> Log.err "async exception: %s" (Printexc.to_string exn));
     let started = Mutex.create () in
@@ -394,35 +359,32 @@ module Make (C : Conf.S) = struct
         (fun () ->
           Lwt_main.run
             (let* () =
-               (* Nothing to tell anyone: a FUSE mount is the filesystem, so an
-                  upload finishing changes nothing a reader can observe. *)
+               (* A FUSE mount is the filesystem, so a finished upload changes
+                  nothing a reader can observe. *)
                E.start ~on_upload_done:(fun ~key:_ -> Lwt.return_unit) ()
              in
              Log.debug "starting IPC server at %s" C.socket_path;
              Lwt.async (fun () ->
                  Ipc.serve ~path:C.socket_path
                    (Ih.handler (ipc_hooks mount_point)));
-             (* A supervisor is expected to stop this group with [tsync stop], but
-                a plain SIGTERM reaches it too — from the supervisor if that call
-                fails or if it only ever signals, and always from the parent
-                process when this frontend was forked. libfuse
-                installs its own handlers in [Fuse.main] and would override
-                these; that route exits the FUSE loop, which drains below just
-                the same, so whichever handler wins the queue is flushed. This is
-                here for the case where it does not install any, where the
+             (* A plain SIGTERM reaches this group too: from a supervisor that
+                only signals, and always from the parent when this frontend was
+                forked. libfuse may install its own handlers in [Fuse.main] and
+                override these, but that route exits the FUSE loop and drains just
+                the same. This covers the case where it installs none, where the
                 default action would kill the process mid-queue. *)
              List.iter
                (fun s ->
                  ignore (Lwt_unix.on_signal s (fun _ -> request_stop ())))
                [Sys.sigterm; Sys.sigint];
-             (* Set before [signal_ready], so the main thread is guaranteed to
-                see it once it is past [wait_ready]. *)
+             (* Before [signal_ready], so the main thread sees it once past
+                [wait_ready]. *)
              stop_notification := Some (Lwt_unix.make_notification do_stop);
              signal_ready ();
              let* () = stop_t in
-             (* Concurrently: the unmount is what lets the main thread out of
-                [Fuse.main] so it can join this one, and it must not wait behind
-                the drain. Both are awaited before this thread ends. *)
+             (* Concurrent: the unmount is what lets the main thread out of
+                [Fuse.main] to join this one, so it must not wait behind the
+                drain. *)
              let unmount_t = unmount mount_point in
              Log.debug "draining upload queue and backends";
              let* () = E.drain () in
@@ -431,9 +393,8 @@ module Make (C : Conf.S) = struct
     in
     wait_ready ();
     Log.info "mounting FUSE at %s" mount_point;
-    (* [allow_other] lets other users (e.g. a media server running as its own
-       service account) reach the mount; it also needs [user_allow_other] in
-       /etc/fuse.conf. *)
+    (* [allow_other] lets other users reach the mount; it also needs
+       [user_allow_other] in /etc/fuse.conf. *)
     let opts =
       (if C.read_only then ["ro"] else [])
       @ if allow_other then ["allow_other"] else []
@@ -446,9 +407,9 @@ module Make (C : Conf.S) = struct
     Fuse.main ~loop_mode:Fuse.Multi_threaded mount_args
       (make_operations mount_point);
     Log.debug "FUSE loop exited, stopping services";
-    (* The loop may have exited because something asked us to stop, or on its own
-       (a manual unmount). Either way this is what releases the Lwt side, and it
-       has already happened in the first case. *)
+    (* The loop may have exited on request or on its own (a manual unmount).
+       Either way this releases the Lwt side; in the first case it already
+       happened. *)
     notify_stop_from_main ();
     Thread.join lwt_thread;
     try Unix.unlink C.socket_path with _ -> ()

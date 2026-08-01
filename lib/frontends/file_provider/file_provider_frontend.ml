@@ -9,7 +9,7 @@ let is_local ({ Conf.domain_name; domain_prefix; _ } : Conf.locality) key =
 
 (* All domains share one IPC socket; the daemon routes by domain prefix. *)
 let start bindings =
-  (* Leaf process (post-fork): safe to initialize Lwt now. *)
+  (* Post-fork leaf process: safe to initialize Lwt now. *)
   Frontend.cap_blocking_pool ();
   let paths = Runtime.default_paths () in
   let confs =
@@ -17,9 +17,8 @@ let start bindings =
   in
   File_provider.start ~confs ~socket_path:paths.Runtime.socket_path
 
-(* Ask the running daemon to have the File Provider drop its cached index and
-   re-enumerate this domain. Reuses the [full_resync] IPC action (routed to the
-   domain's runtime by the [domain] field). *)
+(* Reuses the [full_resync] IPC action, routed to the domain's runtime by the
+   [domain] field. *)
 let reimport (module C : Conf.S) =
   let req =
     `Assoc
@@ -44,7 +43,7 @@ let cli_symlink = "/usr/local/bin/tsync"
 let sh fmt = Printf.ksprintf (fun cmd -> Sys.command cmd = 0) fmt
 
 (* The app is a login item registered through SMAppService, whose launchd label
-   is opaque, so it cannot be kickstarted by name. Killing it and reopening the
+   is opaque, so it cannot be kickstarted by name. Killing and reopening the
    bundle is equivalent and fails cleanly when the app is not installed. *)
 let restart_app () =
   ignore (sh "pkill -f %s 2>/dev/null" (Filename.quote app_bundle));
@@ -61,8 +60,7 @@ let write_marker ?contents name =
   path
 
 (* Only the app owning the extension may remove a File Provider domain, and it
-   reconciles domains at launch. So name the domain in a marker the app picks up
-   on its next start, then bounce it. *)
+   reconciles at launch: name the domain in a marker, then bounce the app. *)
 let reset (module C : Conf.S) =
   let marker =
     write_marker "fileprovider-reset" ~contents:(C.domain_name ^ "\n")
@@ -73,9 +71,9 @@ let reset (module C : Conf.S) =
     exit 1);
   Printf.printf "reset requested for %s\n" C.domain_name
 
-(* Undo the install: unregister the domains (only the app can), then drop the
-   launchd agents, the app bundle and the runtime data directory. [config.json]
-   lives outside [data_dir] and survives, so `make install` restores everything. *)
+(* Unregister the domains (only the app can), then drop the launchd agents, the
+   app bundle and the runtime data directory. [config.json] lives outside
+   [data_dir] and survives, so `make install` restores everything. *)
 let purge (_ : (module Conf.S)) =
   let paths = Runtime.default_paths () in
   let marker = write_marker "fileprovider-purge" in
@@ -86,9 +84,9 @@ let purge (_ : (module Conf.S)) =
       Unix.sleepf 0.5;
       wait (attempts - 1))
   in
-  (* Without the app there is no agent to bounce and no domain left registered
-     (only the app can register one), so a re-run after an interrupted purge
-     falls through to the teardown rather than failing on the missing service. *)
+  (* Without the app there is no agent to bounce and no domain registered, so a
+     re-run after an interrupted purge falls through to the teardown rather than
+     failing on the missing service. *)
   if not (restart_app ()) then (
     Sys.remove marker;
     print_endline "TsyncApp is not running: skipping domain unregistration")
@@ -116,9 +114,8 @@ let purge (_ : (module Conf.S)) =
     exit 1);
   Printf.printf "purged: domains, launchd agents, %s, %s\nkept: %s\n" app_bundle
     paths.Runtime.data_dir paths.Runtime.config_path;
-  (* [lstat], not [Sys.file_exists]: the app bundle is gone by now, so the
-     symlink dangles. The installer creates it as root, so removing it needs
-     root too — say so rather than failing silently. *)
+  (* [lstat], not [Sys.file_exists]: the app bundle is gone, so the symlink
+     dangles. The installer creates it as root, so removing it needs root. *)
   if
     try
       ignore (Unix.lstat cli_symlink);

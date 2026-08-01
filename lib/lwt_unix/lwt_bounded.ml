@@ -53,11 +53,9 @@ let use_or t ~busy f =
 
 let use t f = use_or t ~busy:(fun () -> Lwt.fail Busy) f
 
-(* One fan-out gets its own bound: these limit a single caller-sized list
-   against the resources that list acquires, and a process-wide budget would
-   make unrelated work queue behind a large transfer. The queue is left
-   unbounded — every element is already in hand, so refusing one would only
-   force the caller to hold it instead. *)
+(* Own bound per fan-out: a process-wide budget would make unrelated work queue
+   behind a large transfer. The queue is unbounded — every element is already in
+   hand, so refusing one only forces the caller to hold it. *)
 let map_with t f xs = Lwt_list.map_p (fun x -> use t (fun () -> f x)) xs
 let iter_with t f xs = Lwt_list.iter_p (fun x -> use t (fun () -> f x)) xs
 let filter_map_with t f xs = Lwt.map (List.filter_map Fun.id) (map_with t f xs)

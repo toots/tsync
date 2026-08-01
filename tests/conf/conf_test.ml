@@ -15,21 +15,21 @@ let load json =
 let fails json = match load json with _ -> false | exception Failure _ -> true
 
 let () =
-  (* role decides read order, not config order or backend type *)
+  (* Role decides read order, not config order or backend type. *)
   assert (
     ids
       [bc ~role:`Backfill "local" "a"; bc "s3" "b"; bc ~role:`Replica "s3" "c"]
     = ["b"; "c"; "a"]);
-  (* read-only sits ahead of backfill, behind the writable ones *)
+  (* Read-only sits ahead of backfill, behind the writable ones. *)
   assert (
     ids [bc ~role:`Backfill "s3" "a"; bc ~role:`Read_only "s3" "b"; bc "s3" "c"]
     = ["c"; "b"; "a"]);
-  (* within a role, config order is kept *)
+  (* Within a role, config order is kept. *)
   assert (ids [bc "s3" "a"; bc "s3" "b"; bc "local" "c"] = ["a"; "b"; "c"]);
-  (* single backend is unchanged *)
+  (* A single backend is unchanged. *)
   assert (ids [bc "s3" "a"] = ["a"]);
 
-  (* "role" is required, and only the four spellings parse *)
+  (* "role" is required, and only the four spellings parse. *)
   let one_backend b =
     Printf.sprintf
       {|{"domains": [{"name": "d", "symlinks": "keep", "versioning": false,
@@ -39,9 +39,8 @@ let () =
   assert (fails (one_backend {|{"type": "s3", "name": "s"}|}));
   assert (fails (one_backend {|{"type": "s3", "name": "s", "role": "primary"}|}));
 
-  (* A domain is writable (has a main) or purely read-only (readOnly stores
-     alone). A replica or backfill target with no main is a copy of nothing, and
-     a domain nothing can answer a read from is unusable. *)
+  (* A domain is writable (has a main) or purely read-only. A replica or backfill
+     target with no main is a copy of nothing. *)
   let role r = Printf.sprintf {|{"type": "s3", "name": %S, "role": %S}|} r r in
   let with_backends bs = one_backend (String.concat ", " (List.map role bs)) in
   assert (fails (with_backends ["replica"]));
@@ -64,8 +63,8 @@ let () =
   in
   assert (read_only ["readOnly"]);
   assert (not (read_only ["main"; "readOnly"]));
-  (* Every spelling parses. Each is paired with a main, since three of the four
-     are not a whole domain on their own — see the role coherence rules below. *)
+  (* Each is paired with a main, since three of the four are not a whole domain
+     on their own. *)
   List.iter
     (fun r ->
       let json =
@@ -82,12 +81,12 @@ let () =
           d.Conf_parsing.backends
       in
       assert (b.Conf_parsing.role = r);
-      (* "role" is consumed, never passed on as a backend field *)
+      (* "role" is consumed, never passed on as a backend field. *)
       assert (List.assoc_opt "role" b.Conf_parsing.fields = None))
     Conf_parsing.roles;
-  (* Backend fields are handed to the factory untouched, whatever their JSON
-     type. An array arrives re-serialized rather than being dropped, so a backend
-     that wants a list gets one and a misplaced field is never silently lost. *)
+  (* Fields reach the factory untouched whatever their JSON type: an array
+     arrives re-serialized rather than dropped, so a misplaced field is never
+     silently lost. *)
   Unix.putenv "TSYNC_CONFIG_JSON"
     {|{"domains": [{"name": "d", "symlinks": "keep", "versioning": false,
                     "frontends": ["fuse"],
@@ -103,8 +102,8 @@ let () =
   assert (field "count" = "3");
   assert (field "flag" = "true");
 
-  (* frontends: bare string and object forms both parse; string = {type};
-     object keys beyond "type" are kept as option fields *)
+  (* Both frontend forms parse; a bare string is [{type}], and object keys beyond
+     "type" are kept as option fields. *)
   Unix.putenv "TSYNC_CONFIG_JSON"
     {|{"domains": [{"name": "d", "symlinks": "keep", "versioning": false,
                     "frontends": ["fuse", {"type": "http", "port": "8080"}],
@@ -120,7 +119,7 @@ let () =
         assert (List.assoc "port" b.Conf_parsing.options = "8080")
     | _ -> assert false);
 
-  (* sizes: integer and suffixed-string spellings both parse *)
+  (* Integer and suffixed-string sizes both parse. *)
   let domain json =
     Unix.putenv "TSYNC_CONFIG_JSON" json;
     List.hd (Conf_parsing.load "").Conf_parsing.domains
@@ -138,10 +137,9 @@ let () =
   assert (d.Conf_parsing.cache_chunk_size = Some (64 * 1024 * 1024));
   let d = domain (with_sizes {|"cacheChunkSize": 4096,|}) in
   assert (d.Conf_parsing.cache_chunk_size = Some 4096);
-  (* An absent size stays absent rather than being resolved to a default here:
-     that is what lets `tsync print-config` show only what the config says, and
-     what lets a domain that does not care (the FileProvider hands over whole
-     files, so it barely reads through the chunk cache) leave both out. *)
+  (* An absent size stays absent rather than resolving to a default, so
+     `tsync print-config` shows only what the config says and a domain that does
+     not care can leave both out. *)
   assert (d.Conf_parsing.chunk_size = None);
   let d = domain (with_sizes "") in
   assert (d.Conf_parsing.chunk_size = None);

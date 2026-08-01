@@ -1,23 +1,19 @@
 (* The manifest body, as bytes.
 
-   A manifest is a fixed-layout record followed by a flat run of chunk keys.
-   Nothing here is parsed in the usual sense: every field is at a known offset,
-   and chunk [i]'s key is a substring at [keys_at + i * key_bytes]. There is no
-   lexer, no tree, and no per-chunk allocation until a caller asks for one key.
+   A fixed-layout record followed by a flat run of chunk keys. Nothing is parsed:
+   every field is at a known offset and chunk [i]'s key is a substring at
+   [keys_at + i * key_bytes], with no per-chunk allocation until a caller asks
+   for one. A 32 GB file at a 1 MiB chunk size carries 31,230 keys, and opening
+   it for its name costs a few microseconds.
 
-   That matters at the sizes these bodies reach: a 32 GB file at a 1 MiB chunk
-   size carries 31,230 chunk keys. Opening one for its name costs a few
-   microseconds and no allocation beyond the name itself.
+   A local sidecar is mapped, so those bytes live in the page cache: file-backed,
+   clean, reclaimable, released when the value is collected. A body fetched from
+   a backend is a string and is read identically.
 
-   The local sidecar is read by mapping it, so those bytes live in the page
-   cache: file-backed and clean, which the kernel reclaims under pressure. The
-   mapping is released when the value is collected. Manifests fetched from a
-   backend arrive as strings and are read exactly the same way.
-
-   {b The mapping relies on the write discipline.} Sidecars are only ever
-   replaced by rename ({!Fs_util.atomic_write}), never rewritten in place, so a
-   mapping keeps the inode it opened and its bytes stay valid for as long as it
-   is held. Truncating a sidecar in place would fault every reader mapping it.
+   {b The mapping relies on the write discipline.} Sidecars are only replaced by
+   rename ({!Fs_util.atomic_write}), never rewritten in place, so a mapping keeps
+   its inode and its bytes stay valid while held. Truncating one in place would
+   fault every reader mapping it.
 
    Layout (little-endian, offsets in bytes):
    {v
@@ -32,9 +28,8 @@
      56  16  h2
      72      name bytes, then symlink target bytes, then count * 33 chunk keys
    v}
-   Every variable-length field is length-prefixed, so nothing needs escaping —
-   a leaf name is an arbitrary byte string and may contain anything, newlines
-   included. *)
+   Every variable-length field is length-prefixed, so nothing needs escaping: a
+   leaf name is an arbitrary byte string. *)
 
 type bytes_source =
   | Mapped of
@@ -59,9 +54,9 @@ exception Malformed of string
 let magic = "tsyncm03"
 let header_bytes = 72
 
-(* A chunk key is ["<h1>-<h2>"], two 16-character hex digests — the spelling
-   every other layer already uses, stored verbatim so reading one is a single
-   substring and never a concatenation. *)
+(* ["<h1>-<h2>"], two 16-character hex digests — the spelling every other layer
+   uses, stored verbatim so reading one is a substring and never a
+   concatenation. *)
 let key_bytes = 33
 
 let length = function
@@ -97,9 +92,8 @@ let int64_at src off =
   done;
   !r
 
-(* Read the header and validate that the body is exactly as long as it claims.
-   Doing it once, here, is what lets every accessor below skip bounds checks:
-   after this, chunk [i] for [i < count] is guaranteed to be in range. *)
+(* Validating the length once here is what lets every accessor below skip bounds
+   checks: after this, chunk [i] for [i < count] is in range. *)
 let of_source src =
   if length src < header_bytes then raise (Malformed "short manifest");
   if sub src 0 8 <> magic then raise (Malformed "bad magic");
@@ -135,10 +129,9 @@ let of_source src =
 
 let of_string s = of_source (Str s)
 
-(* Map the sidecar rather than reading it: the chunk keys then cost no heap at
-   all, and the pages are reclaimable. The descriptor is closed immediately —
-   the mapping holds its own reference — and the mapping itself goes when this
-   value is collected. *)
+(* Mapped rather than read, so the chunk keys cost no heap and the pages are
+   reclaimable. The descriptor closes immediately, the mapping holding its own
+   reference. *)
 let of_file path =
   let fd = Unix.openfile path [Unix.O_RDONLY] 0 in
   let map =
@@ -164,14 +157,12 @@ let key t i =
     invalid_arg (Printf.sprintf "Chunk_table.key: %d of %d" i t.count);
   unsafe_sub t.src (t.keys_at + (i * key_bytes)) key_bytes
 
-(* Bytes chunk [i] holds. Not stored: every chunk is [chunk_size] except the
-   last, so keeping it per chunk would be 12 bytes each to say what two header
-   fields already say. An empty file still has one chunk, of length zero. *)
+(* Derived, not stored: every chunk is [chunk_size] except the last, so a
+   per-chunk length would be 12 bytes each restating two header fields. An empty
+   file still has one chunk, of length zero. *)
 let len t i =
   if t.chunk_size <= 0 then 0
   else max 0 (min t.chunk_size (Int64.to_int t.size - (i * t.chunk_size)))
-
-(* ── Writing ─────────────────────────────────────────────────────────────── *)
 
 let encode ~name ~size ~chunk_size ~mtime ~h1 ~h2 ~symlink ~keys =
   let link = Option.value symlink ~default:"" in

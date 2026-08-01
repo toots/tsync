@@ -2,12 +2,10 @@ open Lwt.Syntax
 
 exception Cancelled = Backend.Cancelled
 
-(* Connections are pooled per endpoint rather than established per request. A
-   full resync fetches one object per manifest — tens of thousands — and a
-   one-shot client pays a DNS lookup, a TCP handshake and a TLS handshake for
-   every one of them, which caps throughput at a few dozen objects a second and
-   leaves thousands of sockets in TIME_WAIT. Reuse makes the handshake a
-   per-connection cost instead of a per-request one. *)
+(* Pooled per endpoint rather than per request. A full resync fetches one object
+   per manifest — tens of thousands — and a one-shot client pays DNS, TCP and TLS
+   handshakes for each, capping throughput at a few dozen objects a second and
+   leaving thousands of sockets in TIME_WAIT. *)
 module Connection = Cohttp_lwt.Connection.Make (Cohttp_lwt_unix.Net)
 
 module Cache =
@@ -17,14 +15,13 @@ module Cache =
       let sleep_ns ns = Lwt_unix.sleep (Int64.to_float ns /. 1e9)
     end)
 
-(* Idle connections are held for a minute: long enough to span the gaps between
-   the bursts a sync or a demand-paged read arrives in, short enough that an
-   idle client is not holding sockets open on the proxy indefinitely. *)
+(* Long enough to span the gaps between the bursts a sync or a demand-paged read
+   arrives in, short enough not to hold proxy sockets open indefinitely. *)
 let keep_idle_ns = 60_000_000_000L
 
-(* Concurrent connections to one endpoint. The caller's own parallelism (the
-   resync pool, the download pool) is what actually bounds work; this only has
-   to be wide enough not to become the narrower limit. *)
+(* The caller's own parallelism (the resync pool, the download pool) is what
+   bounds work; this only has to be wide enough not to become the narrower
+   limit. *)
 let max_parallel = 32
 
 type t = {
@@ -42,9 +39,8 @@ let backend_error op code body =
   Backend.Backend_error
     (Printf.sprintf "http-proxy %s: HTTP %d: %s" op code body)
 
-(* Sign method + request-target + body with the shared secret, then issue the
-   request over cohttp (TLS handled by conduit per the global [Tls_conf]). Returns
-   the response and its body as a string. *)
+(* Signs method + request-target + body with the shared secret. TLS is conduit's,
+   per the global [Tls_conf]. *)
 let call t ~meth ?(body = "") uri =
   let resource = Uri.path_and_query uri in
   let headers =
@@ -59,16 +55,15 @@ let call t ~meth ?(body = "") uri =
   let+ s = Cohttp_lwt.Body.to_string rbody in
   (resp, s)
 
-(* Connection failures and 5xx are transient (back off + retry); [Cancelled] never
-   retries. All proxied operations are idempotent, so retrying is safe. *)
+(* Connection failures and 5xx are transient; [Cancelled] never retries. Every
+   proxied operation is idempotent, so retrying is safe. *)
 let code resp = Cohttp.Code.code_of_status (Cohttp.Response.status resp)
 let is_ok resp = code resp >= 200 && code resp < 300
 
-(* Error bodies go in the log, and a proxy in front of us answers failures with
-   a full HTML page: one stalled fetch put two thousand lines of nginx markup in
-   the log, which is the log being least readable exactly when it is most needed.
-   The status carries the meaning; a first line of the body is enough to tell an
-   upstream apart from our own answer. *)
+(* A proxy in front of us answers failures with a full HTML page, and one stalled
+   fetch can put thousands of lines of nginx markup in the log. The status carries
+   the meaning; one line of body is enough to tell an upstream apart from our own
+   answer. *)
 let excerpt body =
   let body = String.trim body in
   match String.index_opt body '\n' with
@@ -175,10 +170,10 @@ let list_all t ?max_keys ~prefix () =
   if is_ok resp then Http_proxy.Wire.entries_of_json body
   else raise (backend_error "list_all" (code resp) body)
 
-(* Whether shares are exposed is the proxy's own setting, so ask it rather than
-   mirroring it in client config where the two could disagree. The proxy answers
-   yes/no only: it sits behind TLS termination and does not reliably know its own
-   public URL, whereas [base_uri] is exactly the URL this client reaches it on. *)
+(* The proxy's own setting, asked rather than mirrored in client config where the
+   two could disagree. It answers yes/no only: behind TLS termination it does not
+   reliably know its own public URL, while [base_uri] is exactly the URL this
+   client reaches it on. *)
 let query_share_url t ~prefix =
   let uri =
     Uri.with_query' (Uri.with_path t.base_uri "/share-url") [("prefix", prefix)]
@@ -191,7 +186,7 @@ let query_share_url t ~prefix =
           match
             (Yojson.Safe.Util.member "url" j, Yojson.Safe.Util.member "self" j)
           with
-            (* A backing store serves them: absolute URL, use as given. *)
+            (* A backing store serves them: absolute URL, used as given. *)
             | `String url, _ -> Some url
             (* The proxy serves them itself, off the address we reach it on. *)
             | _, `Bool true ->
@@ -200,8 +195,8 @@ let query_share_url t ~prefix =
   else if code resp = 404 then None
   else raise (backend_error "share_url" (code resp) body)
 
-(* Fixed for the life of the process: query once and memoize the promise, so
-   concurrent callers share the single request. *)
+(* Fixed for the life of the process, so the promise is memoized and concurrent
+   callers share one request. *)
 let share_url t ~prefix () =
   match t.share_url_cache with
     | Some p -> p
@@ -211,8 +206,8 @@ let share_url t ~prefix () =
         p
 
 (* The serving domain's own [chunkSize], so a client behind the proxy writes new
-   files at the size the domain already uses instead of the two configs having to
-   agree. 404 means the proxy has no opinion. *)
+   files at the size the domain uses instead of the two configs having to agree.
+   404 means no opinion. *)
 let query_chunk_size t ~prefix =
   let uri =
     Uri.with_query'
@@ -230,9 +225,8 @@ let query_chunk_size t ~prefix =
   else if code resp = 404 then None
   else raise (backend_error "chunk_size" (code resp) body)
 
-(* Fixed for the life of the process, like {!share_url}: a domain's chunk size
-   changing under a running client would only affect files it creates next, and
-   re-asking per upload would cost a round trip each time. *)
+(* Fixed for the process, like {!share_url}: a change would only affect files
+   created next, and re-asking per upload costs a round trip each time. *)
 let default_chunk_size t ~prefix () =
   match t.chunk_size_cache with
     | Some p -> p
@@ -241,10 +235,10 @@ let default_chunk_size t ~prefix () =
         t.chunk_size_cache <- Some p;
         p
 
-(* What the serving proxy will actually run at once, so a client in front of it
-   holds its own excess rather than parking it in the server's accept queue. The
-   limit belongs to hardware this process cannot see, which is exactly why it is
-   asked for instead of configured twice. 404 means the peer has no bound. *)
+(* What the serving proxy will run at once, so a client holds its own excess
+   rather than parking it in the server's accept queue. The limit belongs to
+   hardware this process cannot see, which is why it is asked for rather than
+   configured twice. 404 means no bound. *)
 let query_max_concurrency t ~prefix =
   let uri =
     Uri.with_query'
@@ -262,8 +256,8 @@ let query_max_concurrency t ~prefix =
   else if code resp = 404 then None
   else raise (backend_error "max_concurrency" (code resp) body)
 
-(* Asked once, like the chunk size. A peer that changes its bound is restarting
-   to do it, which drops these connections anyway. *)
+(* Asked once: a peer changing its bound restarts to do it, dropping these
+   connections anyway. *)
 let max_concurrency t ~prefix () =
   match t.max_concurrency_cache with
     | Some p -> p

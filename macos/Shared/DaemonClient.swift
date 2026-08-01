@@ -3,8 +3,8 @@ import Foundation
 
 // MARK: - Wire types
 
-/// One request. Everything is optional because the actions differ in what they
-/// need; the daemon reads only the fields its action uses.
+/// One request. Fields are optional because actions differ in what they need;
+/// the daemon reads only the ones its action uses.
 struct DaemonRequest: Encodable {
     let action: String
     var ref: String?
@@ -21,10 +21,10 @@ struct DaemonRequest: Encodable {
     var length: Int64?
 }
 
-/// An item, as the daemon describes one. `ref`, `parentRef` and `name` are
-/// everything needed to build an `NSFileProviderItem`; `key` is the daemon's
-/// storage key, reported for its path-speaking callers, and deliberately unused
-/// here — reading it would put knowledge of the key layout back in this process.
+/// An item, as the daemon describes one. `ref`, `parentRef` and `name` build an
+/// `NSFileProviderItem`. `key` is the daemon's storage key, for its
+/// path-speaking callers, and deliberately unused here: reading it would put
+/// knowledge of the key layout back in this process.
 struct DaemonItem: Decodable {
     let ref: String
     let parentRef: String
@@ -41,7 +41,7 @@ struct DaemonItem: Decodable {
 }
 
 /// One change from the journal. A directory keeps its `ref` across a rename, so
-/// `ref == srcRef` says the folder moved rather than vanished.
+/// `ref == srcRef` means the folder moved rather than vanished.
 struct DaemonOp: Decodable {
     let op: String
     let ref: String?
@@ -65,15 +65,12 @@ struct DaemonResponse: Decodable {
     let bytesDownloaded: Int64?
     let totalBytes: Int64?
 
-    /// The range `fetch_range` actually served. `length` is short of what was
-    /// asked for at end of file, so it is the answer that matters rather than
-    /// the request.
+    /// The range `fetch_range` served, short of the request at end of file.
     let offset: Int64?
     let length: Int64?
 
-    /// `stat` answers with the item's fields at the top level rather than nested,
-    /// so it is decoded from this same container and comes back nil for every
-    /// other response.
+    /// `stat` answers with the item's fields at the top level rather than
+    /// nested, so it decodes from this same container and is nil elsewhere.
     let item: DaemonItem?
 
     private enum CodingKeys: String, CodingKey {
@@ -114,13 +111,10 @@ struct DaemonEvent: Decodable {
 
 /// Talks to the daemon over its unix socket.
 ///
-/// Only this direction works: a sandboxed extension can always reach out, while
-/// its own lifetime belongs to the OS. The daemon never connects to us — an
-/// earlier design had it connect into a socket this process listened on, and on
-/// a real machine that socket was never there, so every eviction and change
-/// notice went nowhere for as long as the feature existed.
+/// Only this direction works: a sandboxed extension can always reach out, but
+/// the OS owns its lifetime, so the daemon cannot rely on connecting in.
 ///
-/// The socket path is injected rather than derived so a test can point a client
+/// The socket path is injected rather than derived, so a test can point a client
 /// at a daemon it started itself.
 struct DaemonClient: Sendable {
     let socketPath: String
@@ -181,8 +175,8 @@ struct DaemonClient: Sendable {
         }
     }
 
-    /// Reads whole lines off a socket, holding back whatever is left of a partial
-    /// one. A response can span reads, and events arrive one per line.
+    /// Reads whole lines, holding back a partial one: a response can span reads
+    /// and events arrive one per line.
     private final class LineReader {
         private let fd: Int32
         private var buffer = Data()
@@ -225,8 +219,8 @@ struct DaemonClient: Sendable {
         let fd = try Self.connect(to: socketPath)
         defer { close(fd) }
         try Self.writeLine(fd, try JSONEncoder().encode(request))
-        // Half-closing tells the daemon no more requests are coming on this
-        // connection, so it finishes and lets go.
+        // Half-close tells the daemon no more requests are coming, so it
+        // finishes and lets go.
         shutdown(fd, SHUT_WR)
 
         guard let line = try LineReader(fd: fd).next(), !line.isEmpty else {
@@ -246,9 +240,8 @@ struct DaemonClient: Sendable {
     /// Subscribe to this domain's events, calling `onEvent` for each until the
     /// connection drops. Blocking; run it on its own thread.
     ///
-    /// The write half is deliberately left open. The daemon treats end-of-input
-    /// on a subscribed connection as the subscriber going away, so half-closing
-    /// here — as a request does — would end the subscription the moment it began.
+    /// The write half stays open: the daemon reads end-of-input as the subscriber
+    /// going away, so half-closing would end the subscription immediately.
     func subscribe(onEvent: (DaemonEvent) -> Void) throws {
         let fd = try Self.connect(to: socketPath)
         defer { close(fd) }
@@ -302,18 +295,16 @@ extension DaemonClient {
         try await send(DaemonRequest(action: "changes_since", arg: anchor))
     }
 
-    /// The daemon assembles the file where the system wants it. This process may
-    /// not move a file into that directory itself — it fails with EPERM, on
-    /// locally signed and notarised builds alike — so the bytes have to land
-    /// there in the first place.
+    /// The daemon assembles the file where the system wants it: this process may
+    /// not move one into that directory (EPERM, on locally signed and notarised
+    /// builds alike).
     func ensureCached(ref: String, destination: String) async throws {
         _ = try await send(DaemonRequest(action: "ensure_cached", ref: ref,
                                          dest: destination))
     }
 
-    /// Write one range of an item into `destination` at that same offset, the
-    /// rest of the file left sparse, and answer the range actually served —
-    /// short of what was asked for at end of file.
+    /// Write one range into `destination` at that same offset, the rest left
+    /// sparse. Returns the range served, short of the request at end of file.
     func fetchRange(ref: String, destination: String,
                     offset: Int64, length: Int64) async throws -> NSRange {
         let response = try await send(DaemonRequest(action: "fetch_range", ref: ref,

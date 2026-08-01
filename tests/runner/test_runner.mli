@@ -1,14 +1,12 @@
 (* Snapshot test harness for tsync file operations. A scenario is a sequence of
-   steps run against a fresh daemon instance (local backend, real Unix socket)
-   over the JSON IPC protocol; [run] executes each scenario and prints a
-   snapshot of the resulting state to stdout. Scenario files pair with a
-   [.expected] snapshot; dune diffs the two under [dune test] and
-   [dune test --auto-promote] refreshes them.
+   steps run over the JSON IPC protocol against a fresh daemon (local backend,
+   real Unix socket); [run] prints a snapshot of the resulting state. Each
+   scenario file pairs with a [.expected] snapshot, diffed by [dune test] and
+   refreshed by [dune test --auto-promote].
 
-   Steps should mirror what a real user would do: write a file, create a
-   directory, import a folder from disk. Avoid steps that encode internal
-   implementation details (specific chunk keys, internal state transitions,
-   etc.) — those couple tests to the implementation rather than the behaviour. *)
+   Steps should mirror what a user would do: write a file, create a directory,
+   import a folder. Steps encoding implementation details (specific chunk keys,
+   internal state transitions) couple tests to the implementation. *)
 
 type step =
   | Write of { path : string; content : string }
@@ -35,10 +33,10 @@ type step =
       (** Read [len] bytes at [offset], fetching only the chunks they need, and
           print the bytes returned. *)
   | FetchRange of { path : string; offset : int; len : int }
-      (** Serve [len] bytes at [offset] into a file the way the macOS File
-          Provider asks for a piece of a large file, and print how many bytes
-          were served, how long the destination file is — everything before the
-          range is a hole — and the bytes that landed in the range. *)
+      (** Serve [len] bytes at [offset] the way the macOS File Provider asks for
+          a piece of a large file. Prints bytes served, the destination file's
+          length (everything before the range is a hole) and the bytes that
+          landed. *)
   | WriteAt of { path : string; offset : int; content : string }
       (** Write [content] at [offset] through the staged write path
           (read-modify-write of a partially covered chunk). *)
@@ -52,9 +50,8 @@ type step =
       (** Print the whole chunk store's footprint: [chunks=n bytes=b]. *)
   | ShowNames of string
   | Stat of string
-      (** Query a path through the IPC [stat] action and print what it answers.
-          A query must not change anything: a stat of something absent says so
-          and leaves no trace, rather than bringing the path into existence. *)
+      (** Query a path through the IPC [stat] action. A query changes nothing: a
+          stat of something absent says so and leaves no trace. *)
       (** Print the entry names a readdir serves for a directory ([""] for the
           domain root), subdirectories with a trailing slash. A file with only
           staged edits must appear; internal markers must not. *)
@@ -66,9 +63,9 @@ type step =
           ["mark"] (the time captured by the last [Mark] step — to expire across
           a boundary). *)
   | Drain
-      (** Wait for queued uploads to finish. Also guarantees the next journal
-          entry lands in a later millisecond, keeping snapshots deterministic
-          (entry keys are ms-timestamped and collide within the same ms). *)
+      (** Wait for queued uploads to finish. Also puts the next journal entry in
+          a later millisecond, keeping snapshots deterministic: entry keys are
+          ms-timestamped and collide within one ms. *)
   | Sync
       (** Call [Sync_poller.sync_once]: read the journal, skip our own entries,
           apply any foreign entries — the same path the background poller takes.
@@ -103,10 +100,9 @@ type step =
       (** Apply a backend-damage step (delete/corrupt chunk, delete manifest) to
           the secondary backend instead of the primary. *)
   | ResyncRemote
-      (** Run [Mirror.resync] from the primary to the other backends and print
-          the copied keys plus a per-destination summary (bytes omitted:
-          manifest objects embed mtimes, so their sizes are not deterministic).
-      *)
+      (** Run [Mirror.resync] from the primary to the other backends, printing the
+          copied keys and a per-destination summary. Bytes are omitted: manifest
+          objects embed mtimes, so their sizes are not deterministic. *)
   | LocalWrite of { path : string; content : string }
       (** Write [content] to [path] in the local staging directory (created on
           first use, reset after each [Import]). Parent directories are created

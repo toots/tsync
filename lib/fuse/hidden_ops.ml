@@ -1,9 +1,9 @@
 open Lwt.Syntax
 
-(* The FUSE kernel's .fuse_hidden* files: scratch created when a file with open
-   descriptors is renamed. They are kernel-internal and never reach the backend,
-   so they are plain local files under the domain's scratch tree — the one place
-   left that keeps a whole file on disk. *)
+(* The FUSE kernel's .fuse_hidden* files, created when a file with open
+   descriptors is renamed. Kernel-internal and never published, so they are plain
+   files under the domain's scratch tree — the one place left keeping a whole
+   file on disk. *)
 module Make (C : Conf.S) = struct
   let make ~fuse_to_key : Path_ops.t =
     let local_path path =

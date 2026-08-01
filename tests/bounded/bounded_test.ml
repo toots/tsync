@@ -1,10 +1,9 @@
 (* The shared bound for fan-outs whose width a caller chooses.
 
-   The bug this replaces was not "too many at once" but a bound that governed
-   the wrong resource: a whole-file fetch was correctly limited to
-   [max_downloads] downloads while descriptors scaled with the file, because
-   each pending fetch opened its destination before queueing for a slot. So what
-   is asserted here is that the body — where resources are taken — never runs
+   The failure it prevents is a bound governing the wrong resource: a whole-file
+   fetch limited to [max_downloads] downloads while descriptors scaled with the
+   file, each pending fetch opening its destination before queueing for a slot.
+   So what is asserted is that the body — where resources are taken — never runs
    wider than asked, and that a full queue refuses rather than accumulating. *)
 
 open Lwt.Syntax
@@ -47,8 +46,8 @@ let () =
      let* _, widest = peak (Lwt_bounded.create ~max:50 ()) ~jobs:3 Fun.id in
      check "a bound above the work does not force width" (widest <= 3);
 
-     (* Nonsense bounds must not mean "unbounded" — that is the failure mode
-        being prevented, so it must not be reachable by passing zero. *)
+     (* A nonsense bound must not mean "unbounded": that is the failure mode
+        being prevented. *)
      let* _, widest = peak (Lwt_bounded.create ~max:0 ()) ~jobs:20 Fun.id in
      check "a bound of zero serialises rather than unleashes" (widest = 1);
 
@@ -60,9 +59,8 @@ let () =
      in
      check "filter_map keeps the right ones, in order" (kept = [0; 2; 4; 6; 8]);
 
-     (* ── A bounded queue refuses rather than accumulating ───────────────── *)
      (* Holding every arrival turns a busy resource into a growing list of
-        promises whose callers time out one by one with nothing to say why. *)
+        promises whose callers time out with nothing to say why. *)
      let t = Lwt_bounded.create ~max:2 ~max_waiting:5 () in
      let gate, release = Lwt.wait () in
      let refused = ref 0 in
@@ -89,8 +87,8 @@ let () =
      Lwt.wakeup_later release ();
      let* () = Lwt.join all in
 
-     (* A refusal must not consume a slot, or the bound would erode with every
-        overload until nothing was served at all. *)
+     (* A refusal must not consume a slot, or the bound erodes with every
+        overload. *)
      check "every slot came back" (Lwt_bounded.in_flight t = 0);
      check "nothing is left queued" (Lwt_bounded.waiting t = 0);
 

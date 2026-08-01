@@ -1,12 +1,11 @@
-(* A published file's metadata: its name, size, mtime and the ordered keys of
-   the chunks holding its bytes.
+(* A published file's metadata: name, size, mtime and the ordered keys of the
+   chunks holding its bytes.
 
-   The body itself is {!Chunk_table} — a fixed-layout header followed by a flat
-   run of chunk keys, mapped rather than parsed. The header fields are lifted
-   out into this record so callers keep reading them as fields; the table is
-   authoritative for the chunks and is the only part that stays in the mapping.
-   For a 32 GB file at a 1 MiB chunk size that is 31,230 keys nobody has to
-   materialize to answer "what is this file called?". *)
+   The body is a {!Chunk_table} — a fixed header followed by a flat run of chunk
+   keys, mapped rather than parsed. Header fields are lifted into this record;
+   the table stays in the mapping and is authoritative for the chunks. A 32 GB
+   file at 1 MiB chunks is 31,230 keys nobody materializes to answer "what is
+   this file called?". *)
 
 type t = {
   name : string;  (** leaf name; authority for the file's own name *)
@@ -19,14 +18,13 @@ type t = {
   symlink : string option;
 }
 
-(* What an upload produces per chunk, on the way to a body. Read paths never
-   see one: they go through the table. *)
+(* What an upload produces per chunk. Read paths go through the table. *)
 type chunk_entry = { index : int; h1 : string; h2 : string; size : int }
 
 let chunk_key (entry : chunk_entry) = entry.h1 ^ "-" ^ entry.h2
 
-(* The reverse, for a chunk kept from a previous upload: its key is all that was
-   held onto, and the two digests are its halves. *)
+(* The reverse, for a chunk kept from a previous upload: only its key was held
+   onto, and the two digests are its halves. *)
 let entry_of_key ~index ~size key =
   match String.index_opt key '-' with
     | Some i ->
@@ -38,10 +36,9 @@ let entry_of_key ~index ~size key =
         }
     | None -> invalid_arg ("Manifest.entry_of_key: " ^ key)
 
-(* ── Grouping ────────────────────────────────────────────────────────────────
-   How a file's stored chunks fall into cache chunks. Derived from the file's
+(* How a file's stored chunks fall into cache chunks. Derived from the file's
    {i own} chunk size, so a file uploaded under a different setting still groups
-   correctly. {!Chunk_group} cannot host this: it sits below this module. *)
+   correctly. {!Chunk_group} sits below this module and cannot host it. *)
 
 let per ~cache_chunk_size (m : t) =
   Chunk_group.per_group ~chunk_size:m.chunk_size ~cache_chunk_size
@@ -55,9 +52,9 @@ let group_at ~cache_chunk_size m i =
 let group_count ~cache_chunk_size m =
   Chunk_group.count ~table:m.chunks ~per:(per ~cache_chunk_size m)
 
-(* Whole-file digest as a hash over the ordered chunk digests, so a changed
-   file's manifest is rebuildable from its chunk entries alone (no need to
-   re-read untouched chunk bytes). Seeds 0/1 give the two independent hashes. *)
+(* Hashed over the ordered chunk digests, so a changed file's manifest rebuilds
+   from its chunk entries without re-reading untouched bytes. Seeds 0/1 give the
+   two independent hashes. *)
 let digest_of_chunks chunks =
   let s1 = Xxhash.create 0 and s2 = Xxhash.create 1 in
   List.iter
@@ -82,8 +79,7 @@ let of_table chunks =
 
 let of_string s = of_table (Chunk_table.of_string s)
 
-(* The local sidecar, mapped: its chunk keys cost no heap and its pages are
-   reclaimable. *)
+(* Mapped: chunk keys cost no heap and the pages are reclaimable. *)
 let of_file path = of_table (Chunk_table.of_file path)
 
 let to_string (m : t) =
@@ -91,38 +87,35 @@ let to_string (m : t) =
     ~mtime:m.mtime ~h1:m.h1 ~h2:m.h2 ~symlink:m.symlink
     ~keys:(List.init (Chunk_table.count m.chunks) (Chunk_table.key m.chunks))
 
-(* Encode straight from the entries an upload built, then read the result back:
-   a [t] only ever exists as a decoded body, so there is no way to hold one that
-   would not round-trip. *)
+(* Encode then decode, so a [t] only ever exists as a decoded body and cannot
+   fail to round-trip. *)
 let make ~name ~h1 ~h2 ~size ~chunk_size ~chunks ~mtime =
   of_string
     (Chunk_table.encode ~name ~size ~chunk_size ~mtime ~h1 ~h2 ~symlink:None
        ~keys:(List.map chunk_key chunks))
 
-(* A symlink is a chunkless manifest carrying its target. size is the target's
-   byte length, POSIX-style. *)
+(* A chunkless manifest carrying its target; POSIX size is the target's byte
+   length. *)
 let make_symlink ~name ~target ~mtime =
   of_string
     (Chunk_table.encode ~name
        ~size:(Int64.of_int (String.length target))
-         (* No chunks, so nothing ever groups; the domain default keeps the
-            field well-formed. *)
+         (* No chunks to group; the domain default keeps the field
+            well-formed. *)
        ~chunk_size:Conf.default_chunk_size ~mtime ~h1:(Xxhash.hash_hex target 0)
        ~h2:(Xxhash.hash_hex target 1) ~symlink:(Some target) ~keys:[])
 
-(* ── Staged manifests ────────────────────────────────────────────────────────
-   A file with unsynced local edits has a staged manifest recording, per chunk,
+(* A file with unsynced local edits has a staged manifest recording, per chunk,
    where its bytes are: a staged body of its own, inherited from the published
-   manifest, or nothing at all (a hole from a grow, which reads as zeros and
-   needs no disk).
+   manifest, or nothing (a hole from a grow, reading as zeros and needing no
+   disk).
 
-   [size] is authoritative rather than derived from any file length, so truncate
-   in either direction is a metadata write plus at most one boundary fixup, and
-   growing by a gigabyte writes no bytes.
+   [size] is authoritative rather than derived from a file length, so a truncate
+   either way is a metadata write plus at most one boundary fixup.
 
-   A staged manifest on disk means an upload is owed. Once that upload publishes,
-   [published] carries the manifest it produced: from then on the staged manifest
-   is the commit record of a promotion that must be replayed, not re-uploaded. *)
+   A staged manifest on disk means an upload is owed. Once [published] is set the
+   upload has happened, and the staged manifest is the commit record of a
+   promotion to replay rather than re-upload. *)
 
 type slot =
   | Staged of string  (** body at [staged/chunks/<uuid>] *)
@@ -136,9 +129,9 @@ type staged = {
   s_chunk_size : int;
   s_slots : slot array;
   s_whole : string option;
-      (** A whole file handed over by a frontend, named by this uuid: its bytes
-          are one file, not per-chunk bodies, and [s_slots] is empty. Uploading
-          it needs no chunking pass of our own. *)
+      (** A whole file handed over by a frontend: its bytes are one file rather
+          than per-chunk bodies, [s_slots] is empty, and the upload needs no
+          chunking pass. *)
   s_published : t option;
 }
 
@@ -183,8 +176,8 @@ let staged_to_string (st : staged) =
        @
          match st.s_published with
          | None -> []
-         (* The published body is binary; base64 carries it inside this JSON
-            without a second file that would have to move atomically with it. *)
+         (* The published body is binary; base64 keeps it inside this JSON rather
+            than in a second file that would have to move atomically with it. *)
          | Some m ->
              [("published", `String (Base64.encode_string (to_string m)))]))
 
@@ -217,13 +210,11 @@ let staged_of_string body =
     s_published = published;
   }
 
-(* ── The local manifest mirror ───────────────────────────────────────────────
-   Everything about where a manifest lives and how the mirror tree is walked is
-   below, so a caller only ever names a logical key. The tree mirrors real paths:
-   directories are real directories (a name the filesystem cannot hold verbatim
-   becomes an escaped handle plus a marker file recording the real name), and a
-   file's authoritative name is the [name] in its own body — never the on-disk
-   filename, which may be that escaped handle. *)
+(* Everything about where a manifest lives and how the tree is walked is below,
+   so callers only name logical keys. The tree mirrors real paths: directories
+   are real directories (a name the filesystem cannot hold verbatim becomes an
+   escaped handle plus a marker file with the real name), and a file's
+   authoritative name is the [name] in its own body, never the on-disk one. *)
 
 open Lwt.Syntax
 
@@ -240,9 +231,9 @@ let staged_sidecar_path ~cache_root ~domain_name ~domain_prefix key =
     (Cache_layout.staged_manifests_dir ~cache_root domain_name)
     (Name_escape.encode_key (Key.strip_prefix ~domain_prefix key))
 
-(* Synchronous "is every byte of this file local?", for the CLI listing (plain
-   non-Lwt code). Unsynced edits are local by definition; otherwise every chunk
-   the sidecar names must be in the chunk store.
+(* Synchronous, for the CLI listing (plain non-Lwt code). Unsynced edits are
+   local by definition; otherwise every chunk the sidecar names must be in the
+   chunk store.
    ponytail: a bool, so a partly cached file reads as remote. Return the chunk
    counts here if `tsync ls` should distinguish "partial n/m". *)
 let is_local
@@ -263,8 +254,7 @@ let is_local
           (groups ~cache_chunk_size m)
     | exception _ -> false
 
-(* Write [name] into an escaped directory's marker file so readdir can recover
-   its real name; skipped when already present. *)
+(* Records an escaped directory's real name so readdir can recover it. *)
 let write_marker path name =
   let* exists = Lwt_unix_retry.file_exists path in
   if exists then Lwt.return_unit else Fs_util.atomic_write path name
@@ -274,15 +264,15 @@ let read_marker path =
     (fun () -> Lwt_unix_retry.with_file ~mode:Lwt_io.Input path Lwt_io.read)
     (fun _ -> Lwt.return "")
 
-(* Real name of a listed subdirectory [dir_path] whose on-disk name is [name]:
-   its marker when the name is escaped, else the on-disk name itself. *)
+(* Real name of a subdirectory: its marker when the on-disk name is escaped,
+   else the on-disk name. *)
 let real_dir_name dir_path name =
   if Name_escape.is_escaped name then
     read_marker (Filename.concat dir_path Name_escape.dir_marker)
   else Lwt.return name
 
-(* Create the escaped directory chain for real relative path [rel] under [root],
-   writing a name marker inside each escaped component. *)
+(* Creates the directory chain for [rel], with a name marker inside each escaped
+   component. *)
 let ensure_dirs root rel =
   let components =
     String.split_on_char '/' rel |> List.filter (fun c -> c <> "")
@@ -303,7 +293,7 @@ let ensure_dirs root rel =
   in
   go root components
 
-(* Entries the mirror keeps for itself: temp files and the two marker kinds. *)
+(* Entries the mirror keeps for itself. *)
 let is_internal name =
   Filename.check_suffix name ".tmp"
   || name = Name_escape.dir_marker
@@ -316,16 +306,13 @@ let read_body path =
       Some s)
     (fun _ -> Lwt.return_none)
 
-(* Mapping rather than reading: a directory listing wants each entry's name,
-   size and mtime, and mapping hands those over without the chunk keys being
-   touched at all. [Unix.openfile] is the only blocking call and no page is read
-   until something asks for one. *)
+(* Mapped, not read: a listing wants name, size and mtime, and never touches the
+   chunk keys. [Unix.openfile] is the only blocking call. *)
 let read_clean path =
   Lwt.return (match of_file path with m -> Some m | exception _ -> None)
 
-(* Fold [f] over every clean manifest under [start], depth first, passing the
-   real relative path of each. Directory recursion resolves escaped names through
-   their markers, so [rel] is always real-path shaped. *)
+(* Depth first, passing each manifest's real relative path: recursion resolves
+   escaped names through their markers, so [rel] is always real-path shaped. *)
 let fold_files ~start ~rel f acc =
   let rec walk dir rel acc =
     let* names = Fs_util.readdir_list dir in
@@ -364,16 +351,14 @@ let rec clean_tmp dir =
 module Make (C : Conf.S) = struct
   let root () = dir ~cache_root:C.cache_root C.domain_name
 
-  (* ── Grouping ─────────────────────────────────────────────────────────────
-     The domain's cache chunk size applied once, so no caller carries it. *)
+  (* The domain's cache chunk size applied once, so no caller carries it. *)
 
   let cache_chunk_size = Conf.cache_chunk_size (module C)
   let per = per ~cache_chunk_size
   let groups = groups ~cache_chunk_size
   let group_at = group_at ~cache_chunk_size
 
-  (* For the staged path, where the chunks a slot still inherits come from a
-     published manifest that may not exist: no base means nothing to inherit. *)
+  (* For the staged path: no base means nothing to inherit. *)
   let group_at_opt base i =
     match base with None -> None | Some m -> group_at m i
 
@@ -385,10 +370,10 @@ module Make (C : Conf.S) = struct
 
   let rel_of = Key.strip_prefix ~domain_prefix:C.domain_prefix
 
-  (* Parsed sidecars, each validated against the identity of the file it came
-     from. Sidecars are replaced by rename, so a fresh inode (or a changed
-     size/mtime) invalidates the entry — including when another tsync process
-     wrote it, which no in-process invalidation could catch. *)
+  (* Each entry is validated against the identity of the file it came from.
+     Sidecars are replaced by rename, so a fresh inode (or changed size/mtime)
+     invalidates it — including a write by another tsync process, which no
+     in-process invalidation could catch. *)
   type memo_entry = { ino : int; size : int; mtime : float; manifest : t }
 
   let memo : (string, memo_entry) Hashtbl.t = Hashtbl.create 256
@@ -439,13 +424,12 @@ module Make (C : Conf.S) = struct
       let* () = ensure_parent dst_key in
       Lwt_unix_retry.rename src (path dst_key)
 
-  (* Directories exist only here: the mirror is the directory structure. *)
+  (* The mirror is the directory structure: directories exist only here. *)
   let create_dir key = ensure_dirs (root ()) (rel_of key)
   let delete_dir key = Fs_util.rm_rf (path key)
 
-  (* After a directory moves, its escaped on-disk name hashes the *new* name
-     while the marker inside still holds the old one — rewrite it so readdir
-     shows the new name. No-op for a name the filesystem can hold verbatim. *)
+  (* After a move the escaped on-disk name hashes the new name while the marker
+     inside still holds the old one. No-op for an unescaped name. *)
   let refresh_dir_marker key =
     let rel = Key.chop_slash (rel_of key) in
     let leaf = if rel = "" then "" else Filename.basename rel in
@@ -457,9 +441,8 @@ module Make (C : Conf.S) = struct
       let dir = Filename.concat (root ()) (Name_escape.encode_key rel) in
       Fs_util.atomic_write (Filename.concat dir Name_escape.dir_marker) leaf)
 
-  (* ── Staged ───────────────────────────────────────────────────────────────
-     The staged tree is keyed the same way as the mirror, so a staged manifest
-     and its published sidecar sit at matching paths in the two trees. *)
+  (* The staged tree is keyed like the mirror, so a staged manifest and its
+     published sidecar sit at matching paths. *)
 
   let staged_root () =
     Cache_layout.staged_manifests_dir ~cache_root:C.cache_root C.domain_name
@@ -478,8 +461,8 @@ module Make (C : Conf.S) = struct
           match staged_of_string body with
             | st -> Lwt.return_some st
             | exception exn ->
-                (* Unsynced user data: never silently dropped. Set it aside so
-                   the next start does not trip over it again. *)
+                (* Unsynced user data: set aside rather than dropped, so the next
+                   start does not trip over it again. *)
                 Log.err "staged manifest %s unreadable (%s); moving aside" key
                   (Printexc.to_string exn);
                 let* () =
@@ -505,9 +488,8 @@ module Make (C : Conf.S) = struct
       let* () = Fs_util.ensure_parent dst in
       Lwt_unix_retry.rename src dst)
 
-  (* Fold [f acc rel st] over the staged manifests at (and with [deep], under)
-     [rel_dir]. Walks on-disk names: a staged manifest records its leaf name, but
-     the tree position is what identifies the file. *)
+  (* Walks on-disk names: a staged manifest records its leaf name, but tree
+     position is what identifies the file. *)
   let fold_staged ~rel_dir ~deep f acc =
     let start =
       if rel_dir = "" then staged_root ()
@@ -546,9 +528,8 @@ module Make (C : Conf.S) = struct
       (fun acc rel st -> (C.domain_prefix ^ Key.join rel st.s_name) :: acc)
       []
 
-  (* Staged files as directory entries. A file created locally has no published
-     sidecar yet, so the mirror alone would not list it at all — and its staged
-     size and mtime are the current ones for a file that does. *)
+  (* A locally created file has no published sidecar, so the mirror alone would
+     not list it; for one that does, the staged size and mtime are current. *)
   let staged_entries ~rel_dir ~deep =
     fold_staged ~rel_dir ~deep
       (fun acc rel st ->
@@ -561,7 +542,7 @@ module Make (C : Conf.S) = struct
         :: acc)
       []
 
-  (* Staged entries win over published ones for the same key.
+  (* Staged entries win for the same key.
      ponytail: quadratic in (staged × published); staged files are the handful
      currently being written, so make it a table only if that stops being true. *)
   let merge_entries published staged =
@@ -573,11 +554,10 @@ module Make (C : Conf.S) = struct
         (fun (e : Backend.file_entry) -> not (List.mem e.Backend.key keys))
         published
 
-  (* On-disk entry names directly under a directory key, from both trees: a file
-     created locally has no sidecar yet, so its name lives only in the staged
-     tree. Both trees escape names the same way, so the names line up. *)
-  (* Either tree may be missing on its own: the published one right after a full
-     resync clears it, the staged one whenever nothing is being written. *)
+  (* From both trees: a locally created file has no sidecar, so its name lives
+     only in the staged tree. Both escape names the same way. *)
+  (* Either tree may be missing: the published one right after a full resync
+     clears it, the staged one whenever nothing is being written. *)
   let readdir_opt dir =
     let* is_dir = Fs_util.is_directory dir in
     if is_dir then Fs_util.readdir_list dir else Lwt.return_nil
@@ -625,8 +605,7 @@ module Make (C : Conf.S) = struct
     in
     (merge_entries files staged, dirs)
 
-  (* Every file entry under [prefix], recursively. Backend keys are hashed, so
-     the mirror is what can answer this. *)
+  (* Backend keys are hashed, so only the mirror can answer this. *)
   let list_tree ~prefix () =
     let rel, start = dir_of_prefix prefix in
     let* published =
@@ -644,8 +623,7 @@ module Make (C : Conf.S) = struct
     let+ staged = staged_entries ~rel_dir:rel ~deep:true in
     merge_entries published staged
 
-  (* Domain-relative real path of every file the domain has locally, published or
-     only staged (unsorted). *)
+  (* Published or only staged, unsorted. *)
   let walk () =
     let* published =
       fold_files ~start:(root ()) ~rel:""
@@ -659,8 +637,8 @@ module Make (C : Conf.S) = struct
     in
     List.sort_uniq compare (published @ staged)
 
-  (* What [key]'s content is, staged edits taking precedence over what was last
-     published. The single resolution point: no caller decides this itself. *)
+  (* Staged edits take precedence over what was last published. The single
+     resolution point: no caller decides this itself. *)
   let resolve key =
     let* st = read_staged key in
     match st with

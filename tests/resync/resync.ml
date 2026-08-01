@@ -1,7 +1,7 @@
-(* Remote-resync scenarios: writes fan out to both backends, damage is
-   injected on the secondary (OnSecondary ...), then ResyncRemote copies
-   whatever is missing or size-mismatched there from the primary. Snapshots
-   show the copied keys and both buckets, including manifest contents. *)
+(* Writes fan out to both backends, damage is injected on the secondary
+   (OnSecondary ...), then ResyncRemote copies whatever is missing or
+   size-mismatched from the primary. Snapshots show the copied keys and both
+   buckets, manifest contents included. *)
 
 open Test_runner
 

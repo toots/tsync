@@ -2,10 +2,10 @@
    itself.
 
    The checks live in {!E2e}, which knows nothing about File Provider: a frontend
-   gives the user a directory, and what is asserted about that directory is the
-   same on either platform. What is here is the staging — which on macOS means
-   getting a domain registered with the system, since only the installed app can
-   do that — and the one consistency checker macOS has of its own.
+   gives the user a directory, and what is asserted about it is the same on either
+   platform. Here is the staging — on macOS, getting a domain registered with the
+   system, which only the installed app can do — and the one consistency checker
+   macOS has of its own.
 
    Staged and taken down again:
 
@@ -134,16 +134,15 @@ let () =
          match items client with _ -> true | exception _ -> false);
 
      let extra () =
-       (* Opening a large file must not pull the whole thing down. Whether the
-          system fetches a range or the lot is decided inside it, and both look
-          the same from out here once the read has returned — so the request the
-          extension makes on the way past is the only evidence there is. *)
+       (* Opening a large file must not pull the whole thing down. The choice is
+          made inside the system and both look the same once the read returns, so
+          the request the extension makes on the way past is the only
+          evidence. *)
        check "reading part of a large file fetches only part of it" (fun () ->
            let name = "big-" ^ string_of_int (Random.bits ()) ^ ".bin" in
-           (* Several chunks across several groups at the production chunk size,
-              which is what the installed daemon runs with: its environment
-              belongs to launchd, so the test cannot shrink them the way
-              tests/fetch_range does. *)
+           (* Several chunks across several groups at the production chunk size:
+              the installed daemon's environment belongs to launchd, so the test
+              cannot shrink them the way tests/fetch_range does. *)
            let size = 40 * 1024 * 1024 in
            let contents =
              String.init size (fun i -> Char.chr (i * 7 mod 251))

@@ -23,8 +23,8 @@ module Make (F : File.S) = struct
              else if truncating then "TRUNC"
              else if flags = [Unix.O_RDONLY] then "RDONLY"
              else "OTHER");
-          (* Nothing to prepare for a read: the first one resolves the file and
-             fetches only the chunks it needs. *)
+          (* Nothing to prepare: the first read resolves the file and fetches
+             only the chunks it needs. *)
           let* () =
             if truncating then F.truncate f 0L
             else if creating then

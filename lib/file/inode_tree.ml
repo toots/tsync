@@ -1,16 +1,12 @@
 (* Reading the backend's folder tree.
 
-   Under the inode layout a folder's children all live under
-   [manifests/<folder_id>/], and each object there is either a folder marker
-   (naming a subfolder and pointing at its namespace) or a file manifest. The
-   two are told apart only by their body, so every walk has to fetch each child
-   and classify it — export rebuilding real paths, expire collecting a trashed
-   subtree, the share server listing a shared folder. That step is here once.
+   A folder's children live under [manifests/<folder_id>/], each object either a
+   folder marker (naming a subfolder and pointing at its namespace) or a file
+   manifest, told apart only by their body. Every walk therefore fetches and
+   classifies each child; that step is here once.
 
-   Each caller keeps its own fold: they want genuinely different things (paths,
-   keys, sizes). What they share is knowing how to get from a folder id to its
-   classified children — including how to name a child folder's namespace, which
-   is not something to re-derive by taking a prefix apart. *)
+   Callers keep their own folds — they want different things (paths, keys, sizes)
+   — and share only the step from a folder id to its classified children. *)
 
 open Lwt.Syntax
 
@@ -30,14 +26,10 @@ module Make (C : Conf.S) = struct
             | m -> Some (File m)
             | exception _ -> None)
 
-  (* Direct children of a folder namespace, in listing order. An object that is
-     neither a marker nor a clean manifest is skipped: it is mid-write, and no
-     walk here can say anything about it.
-
-     With [skip_errors], a child that cannot be fetched is skipped too — for a
-     caller that would rather return a partial tree than none at all. Off by
-     default: a walk that decides what to delete must not mistake a failed GET
-     for an absent subtree.
+  (* An object that is neither a marker nor a clean manifest is mid-write and is
+     skipped. [skip_errors] also skips a child that cannot be fetched, for a
+     caller preferring a partial tree; off by default, since a walk deciding what
+     to delete must not mistake a failed GET for an absent subtree.
 
      ponytail: one GET per child. Fine for ordinary folders; a folder with
      thousands of direct children pays that many round trips. *)
@@ -55,10 +47,9 @@ module Make (C : Conf.S) = struct
         else fetch ())
       entries
 
-  (* Depth-first over the whole subtree under [folder_id]. [f acc rel entry] sees
-     each entry with the real relative path of the folder holding it, [rel]
-     starting from the caller's [rel] at the root. Folders are visited before
-     they are descended into, so a caller collecting keys gets the marker too. *)
+  (* [f acc rel entry] sees each entry with the real relative path of the folder
+     holding it. A folder is visited before it is descended into, so a caller
+     collecting keys gets the marker too. *)
   let fold_tree ?skip_errors ~folder_id ~rel f acc =
     let rec walk folder_id rel acc =
       let* entries = children ?skip_errors ~folder_id () in

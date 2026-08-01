@@ -1,35 +1,31 @@
 import FileProvider
 
-/// How an item is named to the daemon, and the only place that knows the spelling.
+/// How an item is named to the daemon, and the only place that knows the
+/// spelling.
 ///
-/// A path is the wrong name for a directory. FileProvider treats an identifier
-/// returned from `modifyItem` that differs from the one it passed in as an
-/// instruction to *merge* two items, so naming items by path makes every rename
-/// a merge — and renaming a folder silently re-identifies everything beneath it,
-/// which the system is never told about. Directories therefore carry an id the
-/// daemon assigns once and a rename does not touch.
+/// FileProvider reads an identifier returned from `modifyItem` that differs from
+/// the one it passed in as an instruction to *merge* two items. Naming a
+/// directory by path would therefore make every folder rename a merge, silently
+/// re-identifying its whole subtree without telling the system — so directories
+/// carry a daemon-assigned id that a rename does not touch.
 ///
-/// Files are named by their parent's id and their own leaf. That still changes
-/// when a file is renamed or moved, so a file rename is still expressed as a
-/// merge — of exactly one item, which the system reconciles. Giving files a
-/// stable id of their own would mean changing how they are stored, which is a
-/// bigger question than this layer.
+/// Files are named by parent id plus leaf, which still changes on rename: that
+/// merge covers exactly one item and the system reconciles it. A stable file id
+/// would mean changing how files are stored.
 ///
-/// Nothing here spells a storage key. The extension cannot compose one and does
-/// not need to: it asks for a container's contents by reference, and creates
-/// things by naming a parent and a leaf. Nothing here spells a user's path
-/// either, which matters because identifiers reach the system log.
+/// Nothing here spells a storage key or a user path; identifiers reach the
+/// system log.
 enum ItemID {
     private static let dirPrefix = "d:"
     private static let filePrefix = "f:"
 
-    /// The daemon's name for the domain root. `.rootContainer` is the system's,
-    /// and the two have to be kept apart: handing the system anything else for a
-    /// top-level item's parent makes it invent a container that does not exist.
+    /// The daemon's name for the domain root, kept distinct from the system's
+    /// `.rootContainer`: any other parent for a top-level item makes the system
+    /// invent a container that does not exist.
     static let rootForm = "root"
 
-    /// Reserved by the daemon for the root folder; it appears as the parent id of
-    /// every top-level file.
+    /// Reserved by the daemon for the root folder; the parent id of every
+    /// top-level file.
     static let rootFolderID = ".tsync-root"
 
     case root
@@ -47,7 +43,7 @@ enum ItemID {
     }
 
     /// What the daemon should be sent. The system's root identifier is not a
-    /// name the daemon knows, so it is translated here rather than at each call.
+    /// name it knows, so it is translated here rather than at each call.
     static func wire(_ identifier: NSFileProviderItemIdentifier) -> String {
         identifier == .rootContainer ? rootForm : identifier.rawValue
     }
@@ -62,17 +58,16 @@ enum ItemID {
         }
     }
 
-    /// What a file called `name` inside `parent` would be called. Composable
-    /// because the scheme belongs to this file — a directory's is not, since only
-    /// the daemon can assign a folder id.
+    /// Composable because the scheme belongs to this file. A directory's is not:
+    /// only the daemon assigns folder ids.
     static func file(in parent: NSFileProviderItemIdentifier, named name: String) -> ItemID? {
         guard let id = folderID(of: parent) else { return nil }
         return .file(parentID: id, name: name)
     }
 
-    /// Parse a reference as the daemon spells it. Returns nil for anything that
-    /// is not one — including a bare storage key, which the daemon still accepts
-    /// from its other callers but never sends here.
+    /// Returns nil for anything that is not a reference, including a bare
+    /// storage key: the daemon accepts those from other callers but never sends
+    /// one here.
     static func parse(_ s: String) -> ItemID? {
         if s == rootForm { return .root }
         if s.hasPrefix(dirPrefix) {
@@ -82,8 +77,8 @@ enum ItemID {
         }
         if s.hasPrefix(filePrefix) {
             let rest = s.dropFirst(filePrefix.count)
-            // A leaf name cannot contain "/" and no folder id does either, so the
-            // first one separates them however odd the name is.
+            // Neither a leaf name nor a folder id can contain "/", so the first
+            // one separates them.
             guard let slash = rest.firstIndex(of: "/") else { return nil }
             let parent = String(rest[rest.startIndex..<slash])
             let name = String(rest[rest.index(after: slash)...])

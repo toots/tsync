@@ -1,12 +1,12 @@
-(* Pure-helper unit tests for the GCS backend (no network). The full HTTP
-   roundtrip is exercised manually against fake-gcs-server; here we lock down the
-   parsing/encoding that has to be exactly right. *)
+(* Pure-helper unit tests for the GCS backend, no network: the parsing and
+   encoding that has to be exactly right. The full HTTP roundtrip is exercised
+   manually against fake-gcs-server. *)
 
 let check name cond = if not cond then failwith ("FAILED: " ^ name)
 
 let () =
-  (* Object names are one path segment: every reserved char, [/] included, must
-     be percent-encoded so the key isn't split into path components. *)
+  (* An object name is one path segment, so every reserved character — [/]
+     included — must be percent-encoded. *)
   check "enc_key encodes slashes and reserved chars"
     (Gcs_backend.enc_key "tsync/d/.chunks/aabb-ccdd"
     = "tsync%2Fd%2F.chunks%2Faabb-ccdd");

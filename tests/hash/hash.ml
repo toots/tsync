@@ -1,7 +1,6 @@
-(* Known-answer test for [Xxhash.hash_hex]: chunk keys are built from these hex
-   strings, so their values (XXH3-64, seeds 0 and 1, 16-char lowercase hex) must
-   never change — a change here breaks dedup against already-uploaded chunks.
-   The expected output is pinned in hash.expected. *)
+(* Known-answer test for [Xxhash.hash_hex]. Chunk keys are built from these hex
+   strings (XXH3-64, seeds 0 and 1, 16-char lowercase), so a change here breaks
+   dedup against already-uploaded chunks. *)
 
 let pattern i = Char.chr (((i * 31) + 7) land 0xff)
 

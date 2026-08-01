@@ -16,12 +16,10 @@ module Make (C : Conf.S) (F : File.S) = struct
     on_stop : unit -> unit;
   }
 
-  (* ── JSON helpers ─────────────────────────────────────────────────────── *)
-
   let ok_json fields =
     Yojson.Safe.to_string (`Assoc (("ok", `Bool true) :: fields))
 
-  (* The code is what a caller acts on; the prose is for whoever reads a log. *)
+  (* The code is what a caller acts on; the prose is for a log reader. *)
   let error_code_json code msg =
     Yojson.Safe.to_string
       (`Assoc
@@ -41,10 +39,9 @@ module Make (C : Conf.S) (F : File.S) = struct
   let get_int obj key =
     match List.assoc_opt key obj with Some (`Int n) -> Some n | _ -> None
 
-  (* ── Naming items ─────────────────────────────────────────────────────────
-     A request names what it wants either by reference or, for the callers that
-     predate them, by logical key. Everything below works in keys; references
-     are turned into one here and nowhere else. *)
+  (* A request names its target by reference or, for the callers that predate
+     them, by logical key. Everything below works in keys: references are
+     resolved here and nowhere else. *)
 
   module Ir = Item_ref.Make (C)
 
@@ -53,12 +50,11 @@ module Make (C : Conf.S) (F : File.S) = struct
       | Some (`String s) -> Item_ref.parse s
       | _ -> `Key (get_str obj "path")
 
-  (* The item's own reference, its container's, and its leaf name — everything
-     needed to describe it to a caller that does not know the key layout.
+  (* Reference, container reference and leaf name: enough to describe an item to
+     a caller that does not know the key layout.
 
-     A directory costs one marker read for its own id; a file costs one for its
-     parent's, which every file in a listing shares, so a listing resolves it
-     once rather than per entry. *)
+     A directory costs one marker read for its own id, a file one for its
+     parent's — shared across a listing, so it resolves once, not per entry. *)
   let ref_str r = `String (Item_ref.to_string r)
 
   let naming_fields ~container_id key =
@@ -85,8 +81,7 @@ module Make (C : Conf.S) (F : File.S) = struct
             ("ref", ref_str self);
             ("parentRef", ref_str parent);
             ("name", `String name);
-            (* Still reported for the callers that speak in paths — the CLI, the
-               test harness. Nothing that names items by reference needs it. *)
+            (* For the callers that speak in paths: the CLI, the test harness. *)
             ("key", `String key);
           ]
 
@@ -99,23 +94,19 @@ module Make (C : Conf.S) (F : File.S) = struct
   let rel_body key =
     Key.chop_slash (Key.strip_prefix ~domain_prefix:C.domain_prefix key)
 
-  (* The id of the folder [key] itself is — for a directory key. *)
+  (* For a directory key: the id of the folder [key] is. *)
   let own_folder_id key = lookup_folder (rel_body key)
 
   (* The id of the folder [key] sits in. *)
   let parent_folder_id key = lookup_folder (Key.parent (rel_body key))
 
-  (* ── File operation handlers ──────────────────────────────────────────── *)
-
-  (* Resolve the manifest once (local sidecar, else a single backend GET) and
-     derive size, mtime, etag and upload state from it. Going through F.stat
-     plus a separate etag lookup would fetch the same manifest up to twice
-     more per call, and fileproviderd stats items constantly. *)
-  (* A directory's mtime is reported as zero and its etag as its own id. Both
-     are constant for as long as the folder exists, which is what a caller
-     wanting to know whether it changed needs: the previous answer was the
-     current clock, so every look said the directory had just changed. What did
-     change inside it arrives through the change feed, not through the parent. *)
+  (* One manifest resolution (sidecar, else a single GET) yields size, mtime,
+     etag and upload state. F.stat plus a separate etag lookup would fetch the
+     same manifest twice more per call, and fileproviderd stats constantly. *)
+  (* A directory reports mtime zero and its own id as etag: both constant for
+     the folder's lifetime, so a caller checking for change is not told the
+     directory just changed on every look. Its contents arrive through the change
+     feed, not the parent. *)
   let dir_fields id =
     [
       ("kind", `String "dir");
@@ -136,11 +127,9 @@ module Make (C : Conf.S) (F : File.S) = struct
     ]
     @ match symlink with None -> [] | Some t -> [("symlinkTarget", `String t)]
 
-  (* What the reference said it was naming. A file reference and a directory
-     reference resolve to keys that differ only by a trailing slash, so without
-     this a directory would answer to both — and whichever the caller recorded
-     would be the one it used to build its children's keys. One item, one
-     reference, or the two spellings drift apart. *)
+  (* File and directory references resolve to keys differing only by a trailing
+     slash, so a directory would otherwise answer to both — and the caller builds
+     its children's keys from whichever it recorded. One item, one reference. *)
   let expected_kind = function
     | `File _ -> `File
     | `Dir _ | `Root -> `Dir
@@ -168,8 +157,8 @@ module Make (C : Conf.S) (F : File.S) = struct
                 | None -> not_found key
                 | Some id -> Lwt.return (ok_json (naming @ dir_fields id)))
           | _ -> (
-              (* Unsynced local edits answer from the staged manifest: it is the
-               authority for size and mtime until the upload publishes. *)
+              (* The staged manifest is authoritative for size and mtime until
+               the upload publishes. *)
               let* staged = F.resolve key in
               match staged with
                 | Some (`Staged (st, _)) ->
@@ -194,11 +183,10 @@ module Make (C : Conf.S) (F : File.S) = struct
                                ))
                       | None -> not_found key)))
 
-  (* The listed objects are manifests, so their backend size/mtime are the manifest's,
-     not the file's. Resolve the manifest (local sidecar, else fetched from the backend)
-     to report the real logical size/mtime and the content hash (h1) as the etag — the
-     same identity stat returns. Dirty or unknown files have no clean hash: fall back to
-     the backend metadata with an empty etag. *)
+  (* Listed objects are manifests, so their backend size/mtime describe the
+     manifest, not the file. Resolving gives the logical size/mtime and h1 as the
+     etag — the identity stat returns. A dirty file has no clean hash: fall back
+     to the backend metadata with an empty etag. *)
   (* Bounds concurrent per-file manifest resolutions during enumeration. *)
   let resolve_pool = Lwt_bounded.create ~max:C.max_downloads ()
 
@@ -220,18 +208,18 @@ module Make (C : Conf.S) (F : File.S) = struct
             @ file_fields ~size:e.size ~mtime:e.last_modified ~etag:""
                 ~is_uploaded:true ~symlink:None)
 
-  (* One list, each entry saying what kind it is. Directories and files differ in
-     what describes them, not in how they are named or asked about, and every
-     caller merged the two lists back together anyway. *)
+  (* One list, each entry tagged by kind: files and directories differ in what
+     describes them, not in how they are named, and callers merged two lists back
+     together anyway. *)
   let handle_list_dir prefix =
     let* container = own_folder_id prefix in
     match container with
       | None -> not_found prefix
       | Some container_id ->
           let* files, dirs = F.list_children ~prefix in
-          (* map_p: uncached entries each cost a backend GET; resolving them
-             sequentially made cold enumeration O(files) round trips end-to-end.
-             [resolve_pool] bounds the fan-out; map_p preserves result order. *)
+          (* Uncached entries each cost a GET, so sequential resolution makes a
+             cold enumeration O(files) round trips. [resolve_pool] bounds the
+             fan-out; map_p preserves order. *)
           let* files_json =
             Lwt_list.map_p (file_entry_json ~container_id) files
           in
@@ -249,8 +237,8 @@ module Make (C : Conf.S) (F : File.S) = struct
           ok_json
             [("items", `List (List.filter_map Fun.id dirs_json @ files_json))]
 
-  (* Every file under [prefix], at any depth. Entries are grouped by the folder
-     they are in so each folder's id is resolved once rather than per file. *)
+  (* Grouped by containing folder, so each folder id resolves once, not per
+     file. *)
   let handle_list_all prefix =
     let* files = F.list_tree ~prefix in
     let by_parent = Hashtbl.create 16 in
@@ -274,8 +262,6 @@ module Make (C : Conf.S) (F : File.S) = struct
     in
     ok_json [("items", `List (List.concat groups))]
 
-  (* ── Change feed (journal delta) ──────────────────────────────────────── *)
-
   (* Journal keys are relative to the domain prefix; the FileProvider uses full
      keys as item identifiers, with directories ending in "/". *)
   let full_key ?(dir = false) rel =
@@ -284,14 +270,13 @@ module Make (C : Conf.S) (F : File.S) = struct
 
   let dir_id_field = function None -> [] | Some id -> [("id", `String id)]
 
-  (* An op has to name the item it touched the same way everything else does, or
-     a reader that knows items by reference cannot act on it — and a deletion is
-     precisely the case where it cannot go and look the name up afterwards.
+  (* An op must name its item the way everything else does, since a reader
+     knowing items by reference cannot look up a deleted one afterwards.
 
      A file's reference needs its parent's id; a directory's own id travels in
-     the op ({!Journal.op}). [None] when the parent is not in this client's
-     mirror yet, which happens only in the window between a foreign entry being
-     published and this client's poller applying it. *)
+     the op ({!Journal.op}). [None] while the parent is not yet in this client's
+     mirror — the window between a foreign entry being published and the poller
+     applying it. *)
   let file_ref ~lookup rel =
     let+ pid = lookup (Key.parent rel) in
     Option.map (fun pid -> `File (pid, Filename.basename rel)) pid
@@ -299,7 +284,7 @@ module Make (C : Conf.S) (F : File.S) = struct
   let dir_ref ~lookup rel = function
     | Some id -> Lwt.return_some (`Dir id)
     | None ->
-        (* An entry written before ids were carried. *)
+        (* An entry from before ids were carried. *)
         let+ id = lookup rel in
         Option.map (fun id -> `Dir id) id
 
@@ -361,9 +346,9 @@ module Make (C : Conf.S) (F : File.S) = struct
             @ dir_id_field id)
             (named self parent key)
       | `Rename { Journal.dst; src; is_dir; id; _ } -> (
-          (* A directory keeps its id across the move, which is what says the two
-             paths are one folder rather than a disappearance and an unrelated
-             arrival. A file's reference changes, so both ends are named. *)
+          (* A directory keeps its id across a move, which is what marks the two
+             paths as one folder. A file's reference changes, so name both
+             ends. *)
           let* self = if is_dir then dir_ref dst id else file_ref dst in
           let* parent = parent_ref dst in
           let+ src_self = if is_dir then Lwt.return self else file_ref src in
@@ -384,11 +369,9 @@ module Make (C : Conf.S) (F : File.S) = struct
   let newest_key ~init keys =
     List.fold_left (fun acc (k, _) -> if k > acc then k else acc) init keys
 
-  (* The journal can no longer bridge [anchor]→now, so the caller must re-list
-     everything. This happens when the journal has been pruned past the anchor
-     (oldest surviving entry is newer), was cleaned up entirely while changes are
-     still pending (anchor ≠ cursor but no entries left), or the anchor is
-     unparseable. [keys] is ascending, so head = oldest. *)
+  (* True when the journal cannot bridge [anchor]→now: pruned past the anchor,
+     cleaned up entirely with changes still pending (anchor ≠ cursor, no entries
+     left), or the anchor is unparseable. [keys] is ascending. *)
   let cannot_bridge anchor keys =
     match keys with
       | [] -> true
@@ -406,7 +389,7 @@ module Make (C : Conf.S) (F : File.S) = struct
         | Some c -> newest_key ~init:c keys
         | None -> newest_key ~init:"" keys
     in
-    (* Up to date — safe to report even if the journal is empty or was pruned. *)
+    (* Up to date: safe even for an empty or pruned journal. *)
     if anchor <> "" && anchor = cursor then
       Lwt.return
         (ok_json
@@ -431,17 +414,16 @@ module Make (C : Conf.S) (F : File.S) = struct
         List.concat_map (function Some o -> o | None -> []) ops_lists
       in
       (* A batch answers for itself: a folder created earlier in it is not in
-         this client's mirror yet, but the op that created it carries its id, so
-         a file put into it can still be named. Without this, every foreign
-         "make a folder, then write into it" would report a gap. *)
+         the mirror yet, but its creating op carries the id, so a file put into
+         it can still be named. Otherwise every foreign "mkdir then write"
+         reports a gap. *)
       let learned : (string, string) Hashtbl.t = Hashtbl.create 8 in
       let lookup rel =
         match Hashtbl.find_opt learned rel with
           | Some id -> Lwt.return_some id
           | None -> lookup_folder rel
       in
-      (* Directory ops spell their key with a trailing slash; a lookup is by the
-         path without one. *)
+      (* Directory ops carry a trailing slash; lookups do not. *)
       let note = function
         | `Mkdir (rel, Some id) ->
             Hashtbl.replace learned (Key.chop_slash rel) id
@@ -456,11 +438,9 @@ module Make (C : Conf.S) (F : File.S) = struct
             op_to_json ~lookup op)
           ops
       in
-      (* An op naming something this client cannot describe yet — a folder whose
-         creation the poller has not applied — is reported as a gap rather than
-         guessed at or quietly dropped. The caller re-lists, which is correct and
-         costs a scan; the window is the couple of seconds between an entry being
-         published and this client ingesting it.
+      (* An op naming a folder the poller has not applied yet is reported as a
+         gap rather than guessed at: the caller re-lists. The window is the
+         seconds between an entry being published and ingested.
          ponytail: a whole re-list for a rare race. Carry the parent id on file
          ops too, as directory ops already do, if it ever shows up in practice. *)
       if List.exists Option.is_none described then
@@ -473,9 +453,9 @@ module Make (C : Conf.S) (F : File.S) = struct
             ("ops", `List (List.filter_map Fun.id described));
           ])
 
-  (* The backend cursor key is bumped on a lag, so fold it with the newest journal
-     entry — the same value handle_changes_since reports — so the anchor the caller
-     starts from is never behind what changes_since would hand back. *)
+  (* The backend cursor key lags, so fold it with the newest journal entry (what
+     handle_changes_since reports) or the caller's starting anchor sits behind
+     what changes_since would return. *)
   let handle_current_cursor () =
     let* keys = Fs.list_journal_keys () in
     let+ fetched = Fs.fetch_cursor () in
@@ -485,17 +465,13 @@ module Make (C : Conf.S) (F : File.S) = struct
           `String (newest_key ~init:(Option.value ~default:"" fetched) keys) );
       ]
 
-  (* The caller wants a real file at a place of its choosing, and takes it over
-     from there — the daemon keeps the content in the chunk store, not as a
-     file. Writing straight to "dest" spares the caller a move it may not be
-     permitted to make. *)
+  (* Content lives in the chunk store, not as a file. Writing straight to "dest"
+     spares the caller a move it may not be permitted to make. *)
   let handle_ensure_cached ~dst_path key =
     let+ () = F.assemble_to key ~dst_path in
     ok_json [("localPath", `String dst_path)]
 
-  (* The answer carries the range actually served rather than echoing the one
-     asked for: it is short at end of file, and the caller has to know how much
-     of the file it now holds. *)
+  (* The range served, not the one asked for: it is short at end of file. *)
   let handle_fetch_range ~dst_path ~offset ~length key =
     let+ n = F.fetch_range key ~dst_path ~offset ~length in
     ok_json
@@ -509,9 +485,8 @@ module Make (C : Conf.S) (F : File.S) = struct
     let+ () = F.create key in
     ok_json []
 
-  (* The extension hands back a complete file. It is taken over where it is — no
-     copy of the bytes and no chunking pass before the upload — and answered from
-     the staged metadata, which is the size and mtime that will be published. *)
+  (* The file is adopted where it is: no copy, no chunking pass. Answered from
+     the staged metadata, which is what will be published. *)
   let handle_write key staging_path =
     ignore (F.cancel_upload key);
     let* () = F.write_whole key ~src_path:staging_path in
@@ -525,7 +500,7 @@ module Make (C : Conf.S) (F : File.S) = struct
               ("mtime", `Float st.Manifest.s_mtime);
             ]
       | Some (`Published m) ->
-          (* The upload already finished and promoted. *)
+          (* Already uploaded and promoted. *)
           ok_json
             [
               ("size", `Int (Int64.to_int m.Manifest.size));
@@ -563,8 +538,8 @@ module Make (C : Conf.S) (F : File.S) = struct
 
   module Sh = Share.Make (C)
 
-  (* [key] is an item's full storage key ([C.domain_prefix ^ rel], directories
-     end in "/"); recover the domain-relative path the share core expects. *)
+  (* Recovers the domain-relative path the share core expects from a full
+     storage key. *)
   let handle_share key =
     let rel =
       Key.chop_slash (Key.strip_prefix ~domain_prefix:C.domain_prefix key)
@@ -575,16 +550,12 @@ module Make (C : Conf.S) (F : File.S) = struct
       | Ok url -> ok_json [("url", `String url)]
       | Error msg -> error_json msg
 
-  (* ── Dispatch ───────────────────────────────────────────────────────────
-     The action strings are a wire contract with the FileProvider extension
-     (see macos/TsyncFileProvider/IPC.swift): rename the handlers freely, never
-     these. *)
+  (* The action strings are a wire contract with the FileProvider extension (see
+     macos/TsyncFileProvider/IPC.swift): rename handlers freely, never these. *)
 
-  (* Actions that change the domain. A read-only domain refuses them here rather
-     than leaving it to a frontend's own idea of what it should offer: the
-     capabilities a UI honours are advice, and a direct request is not obliged to
-     have taken it. Sharing is deliberately absent — a share manifest lives
-     outside every domain root, so publishing one changes no domain content. *)
+  (* Actions a read-only domain refuses here rather than trusting a frontend's
+     advertised capabilities, which a direct request need not honour. Sharing is
+     absent: a share manifest lives outside every domain root. *)
   let mutating =
     [
       "create";
@@ -604,9 +575,8 @@ module Make (C : Conf.S) (F : File.S) = struct
       | `Assoc obj ->
           let action = get_str obj "action" in
           let path = get_str obj "path" in
-          (* What the request names, as a key. [None] means the reference points
-             at something that is no longer there — which is the answer, not a
-             failure to work it out. *)
+          (* [None] means the reference points at something no longer there,
+             which is an answer, not a failure. *)
           let with_target_ref f =
             let t = target obj in
             let* key = Ir.resolve t in
@@ -615,8 +585,8 @@ module Make (C : Conf.S) (F : File.S) = struct
               | Some key -> f t key
           in
           let with_target f = with_target_ref (fun _ key -> f key) in
-          (* A location to put something: a container and a leaf name. Callers
-             that still speak in keys give the whole key as "path". *)
+          (* A container plus a leaf name. Key-speaking callers pass the whole
+             key as "path". *)
           let with_destination f =
             match List.assoc_opt "parentRef" obj with
               | Some (`String s) -> (
@@ -676,8 +646,8 @@ module Make (C : Conf.S) (F : File.S) = struct
                             handle_write key (get_str obj "staging"))
                     | "delete" -> with_target handle_delete
                     | "rename" -> (
-                        (* The item moving is named the same way as anywhere
-                           else; where it lands is a destination. *)
+                        (* Source is named as anywhere else; the target is a
+                           destination. *)
                         let src_ref =
                           match List.assoc_opt "ref" obj with
                             | Some (`String s) -> Item_ref.parse s
@@ -697,9 +667,8 @@ module Make (C : Conf.S) (F : File.S) = struct
                             handle_symlink key (get_str obj "target"))
                     | "rmdir" -> with_target handle_rmdir
                     | "share" -> with_target handle_share
-                    (* These carry a filesystem path the user typed, not a
-                       reference: they come from the CLI, which knows where it
-                       is standing and nothing about ids. *)
+                    (* From the CLI, which speaks in typed filesystem paths and
+                       knows nothing about ids. *)
                     | "evict" ->
                         let+ () = hooks.evict (hooks.path_to_key path) in
                         ok_json []
@@ -719,17 +688,14 @@ module Make (C : Conf.S) (F : File.S) = struct
                              :: ("running", `Bool true)
                              :: hooks.status_fields ()))
                     | "stats" ->
-                        (* The whole picture, assembled by {!Diagnostics} so a mount
-                         and an http-proxy server answer in one shape. This daemon
-                         is one frontend of one domain, so it reports itself twice
-                         over: once at the top as the process answering, and once
-                         in the domain's [frontends] with the queues only it knows
-                         — which is where a proxy asking us over IPC picks it up.
-                         [totals] reaches for the store, so it is asked for
-                         explicitly, as a comma-separated set: [exact] counts
-                         every chunk rather than estimating from a sample of
-                         shards, and [reload] recomputes rather than serving what
-                         was counted before. *)
+                        (* Assembled by {!Diagnostics}, so a mount and an
+                         http-proxy answer in one shape. This daemon reports
+                         itself twice: at the top as the answering process, and in
+                         the domain's [frontends] with the queues only it knows —
+                         where a proxy asking over IPC picks it up. [totals]
+                         reaches for the store, so it is opt-in, as a
+                         comma-separated set: [exact] counts every chunk instead
+                         of sampling shards, [reload] recomputes. *)
                         let flags =
                           String.split_on_char ',' (get_str obj "arg")
                         in
@@ -747,9 +713,8 @@ module Make (C : Conf.S) (F : File.S) = struct
                               `Int (F.downloads_completed_count ()) );
                             ("maxUploads", `Int C.max_uploads);
                             ("maxDownloads", `Int C.max_downloads);
-                            (* A mount gone quiet while its backends answer fine is
-                             usually this: the metadata lock held, with callers
-                             queued behind it. *)
+                            (* Usual cause of a mount gone quiet while its
+                             backends answer fine. *)
                             ("metaLocked", `Bool (F.meta_locked ()));
                             ("metaWaiting", `Bool (F.meta_waiters ()));
                           ]
@@ -760,11 +725,9 @@ module Make (C : Conf.S) (F : File.S) = struct
                             | Some (`String t) -> t
                             | _ -> "unknown"
                         in
-                        (* A frontend entry names itself with [type], the same key a
-                         backend entry uses. The frontends supply it as [frontend]
-                         in their stats fields, so normalise here — once, where the
-                         entry is built — rather than leaving every reader to know
-                         both spellings. *)
+                        (* Frontends supply their name as [frontend]; entries use
+                         [type], as backend entries do. Normalised once here so no
+                         reader has to know both spellings. *)
                         let queues =
                           ("type", `String frontend_type)
                           :: List.remove_assoc "frontend" queues
@@ -799,7 +762,7 @@ module Make (C : Conf.S) (F : File.S) = struct
                         hooks.on_stop ();
                         Lwt.return (ok_json [])
                     (* Answered here so the connection can be handed over; the
-                     event stream itself belongs to {!Ipc.serve}. *)
+                     stream itself belongs to {!Ipc.serve}. *)
                     | "subscribe" when get_str obj "domain" = "" ->
                         fail `Invalid "subscribe requires \"domain\""
                     | "subscribe" -> Lwt.return (ok_json [])
@@ -812,9 +775,8 @@ module Make (C : Conf.S) (F : File.S) = struct
           let ctl =
             match action with
               | "stop" -> `Stop
-              (* The domain this request was routed to, not the name it asked
-                 for: they are the same by construction, and this one is the
-                 topic events are actually published under. *)
+              (* The routed domain, not the requested name: equal by
+                 construction, and this is the topic events publish under. *)
               | "subscribe" when get_str obj "domain" <> "" ->
                   `Subscribe C.domain_name
               | _ -> `Continue

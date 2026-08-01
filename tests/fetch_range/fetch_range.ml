@@ -1,15 +1,14 @@
 (* Behavioral snapshot of serving one range of a file rather than the whole one.
 
-   This is the seam behind NSFileProviderPartialContentFetching: the macOS File
-   Provider asks for the range an application actually read, gets a file holding
-   just that range at just that offset, and stitches the pieces together itself.
-   So the two things worth recording are where the bytes land — a range written
-   at the wrong offset is silent corruption, and the file's own length is what
-   shows it, since everything before the range is a hole — and how much of the
-   file is local afterwards, which is the whole point of not materializing it.
+   The seam behind NSFileProviderPartialContentFetching: the macOS File Provider
+   asks for the range an application read, gets a file holding just that range at
+   just that offset, and stitches the pieces together itself. So two things are
+   recorded — where the bytes land, since a range written at the wrong offset is
+   silent corruption and the file's own length is what shows it, and how much of
+   the file is local afterwards.
 
-   The chunk size is forced to 8 bytes (TSYNC_CHUNK_SIZE, set in dune) so a small
-   fixture spans several chunks. Content is laid out one distinct run per chunk:
+   Chunk size is forced to 8 bytes (TSYNC_CHUNK_SIZE, in dune) so a small fixture
+   spans several chunks, one distinct run per chunk:
      chunk#0 = "01234567"  chunk#1 = "89ABCDEF"  chunk#2 = "ghijklmn" *)
 
 open Test_runner

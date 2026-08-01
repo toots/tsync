@@ -48,8 +48,6 @@ module D = Data.Make (C) (R)
 let key = C.domain_prefix ^ "file.txt"
 let body = "abcdefghijklmnopqrstuvwx" (* 24 bytes = 3 chunks *)
 
-(* ── Reporting ───────────────────────────────────────────────────────────── *)
-
 let chunk_count () =
   let rec count dir =
     if not (Sys.file_exists dir) then 0
@@ -101,8 +99,6 @@ let show label =
   Printf.printf "%-26s %-34s cached=%d %S\n" label state (chunk_count ())
     content
 
-(* ── Fixture ─────────────────────────────────────────────────────────────── *)
-
 let publish () =
   let src = Filename.concat data_dir "file.txt" in
   let oc = open_out_bin src in
@@ -119,9 +115,8 @@ let write_at offset s =
   let+ (_ : int) = D.write key buf ~offset:(Int64.of_int offset) in
   ()
 
-(* ── The same domain with grouped cache chunks ───────────────────────────────
-   Three stored chunks of 8 to one cache chunk of 24. Its own domain so its
-   cache subtree can be counted on its own. *)
+(* Three stored chunks of 8 to one cache chunk of 24. Its own domain, so its
+   cache subtree can be counted separately. *)
 module CG : Conf.S = struct
   include C
 
@@ -236,7 +231,6 @@ let () =
      let* () = D.truncate key 20L in
      let* () = show "grow to 20" in
 
-     (* ── Upload and promotion ──────────────────────────────────────────────── *)
      (* Back to a normal edited file, then sync it. *)
      let* () = D.truncate key 24L in
      let* () = write_at 0 "ABCDEFGH" in
@@ -279,9 +273,8 @@ let () =
        (uploaded_after - uploaded_before);
 
      (* The other crash window: chunks were PUT but the commit record never
-        landed, so the whole upload runs again. Every chunk hashes to what it
-        hashed before, so the HEADs all skip and no bytes go out a second time —
-        the same staged manifest, re-synced. *)
+        landed, so the upload runs again. Every chunk hashes as before, so the
+        HEADs skip and no bytes go out twice. *)
      let* () = write_at 16 "89ABCDEF" in
      let* staged_before = Mf.read_staged key in
      let* () = D.sync key () in
@@ -297,10 +290,9 @@ let () =
      Printf.printf "bytes uploaded by re-upload: %d\n"
        (uploaded_after - uploaded_before);
 
-     (* ── Whole-file handoff ───────────────────────────────────────────────────
-        A frontend that gives back a complete file (the FileProvider extension
-        always does) has it adopted where it is: one rename, no copy of the bytes
-        and no chunking pass. Reads come straight out of that file. *)
+     (* A frontend giving back a complete file (as the FileProvider extension
+        always does) has it adopted where it is: one rename, no copy, no chunking
+        pass. Reads come straight out of that file. *)
      let handed = Filename.concat data_dir "handed.bin" in
      let oc = open_out_bin handed in
      output_string oc "WHOLE FILE FROM A FRONTEND";
@@ -310,9 +302,8 @@ let () =
        (Sys.file_exists handed);
      let* () = show "adopted whole file" in
 
-     (* A byte write into a whole-staged file splits it into chunks first — the
-        only path that needs it, since a whole-file frontend never writes
-        ranges. *)
+     (* A byte write into a whole-staged file splits it into chunks first: the
+        only path needing it, a whole-file frontend never writing ranges. *)
      let* () = write_at 6 "-" in
      let* () = show "byte write splits it" in
      let* () = D.sync key () in
@@ -330,12 +321,10 @@ let () =
      let* () = D.create key in
      let* () = show "create (O_TRUNC)" in
 
-     (* ── Grouped cache chunks ─────────────────────────────────────────────────
-        Same file, same three stored chunks, but a cache chunk size of 24 puts
-        all three in one cache file. Two things change and nothing else does:
-        a write stages the whole group rather than the one chunk it touches, and
-        promotion writes that group out of the staged bodies instead of leaving
-        it to be fetched. *)
+     (* Same file and stored chunks, but a cache chunk size of 24 puts all three
+        in one cache file. Two things change: a write stages the whole group
+        rather than the chunk it touches, and promotion writes that group out of
+        the staged bodies instead of leaving it to be fetched. *)
      let* () = Gm.init () in
      let* () = gpublish () in
      let* () = gshow "grouped: published" in
@@ -345,10 +334,9 @@ let () =
      let* () = gwrite_at 9 "ZZ" in
      let* () = gshow "grouped: write 2B" in
 
-     (* Promotion writes the group out of those staged bodies, so the file is
-        wholly cached afterwards without a single fetch — three stored chunks in
-        one cache file. The second file is the pre-edit group: its members
-        changed, so its key did, and it is garbage for the cap to reclaim. *)
+     (* The file is wholly cached afterwards without a fetch: three stored chunks
+        in one cache file. The second file is the pre-edit group — its members
+        changed, so its key did — and is garbage for the cap to reclaim. *)
      let* () = GD.sync gkey () in
      let* () = gshow "grouped: after sync" in
      let* present, total = GD.chunk_residency gkey in

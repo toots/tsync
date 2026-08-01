@@ -70,7 +70,6 @@ let () =
      assert (member "filename" m = `String "foo");
      assert (member "expires" m = `Int 123);
 
-     (* ── Directory: domain root, needs a listable object underneath ──────── *)
      let* () =
        B.put ~key:(C.domain_prefix ^ Folder.root_id ^ "/x") ~data:"x" ()
      in
@@ -85,7 +84,6 @@ let () =
        member "dirPrefix" m = `String (C.domain_prefix ^ Folder.root_id ^ "/"));
      Lwt.return_unit);
 
-  (* ── No backend serves shares → Error, not a crash ─────────────────────── *)
   let module NoShare : Backend.S = struct
     include (val Local_backend.make ~root:store_dir : Backend.S)
   end in
@@ -100,13 +98,10 @@ let () =
     | Error _ -> ()
     | Ok _ -> assert false);
 
-  (* ── A read-only domain can still share ────────────────────────────────────
-     The composition a domain whose every backend has role [readOnly] gets:
-     nothing writable, the store reachable only as a fallback. Sharing has to
-     work anyway — a share manifest lives outside every domain root, so
-     publishing one is not a domain write. The earlier version asked the
-     composite for both the URL and the write and so could do neither, which is
-     the whole point of keeping [share_backends] separate. *)
+  (* A domain whose every backend is [readOnly]: nothing writable, the store
+     reachable only as a fallback. Sharing still has to work, a share manifest
+     living outside every domain root — which is why [share_backends] is kept
+     apart from the write composite. *)
   let module ReadOnlyDomain : Conf.S = struct
     include C
 
@@ -131,7 +126,6 @@ let () =
     | Ok u -> assert (u = share_base ^ "/cc")
     | Error e -> failwith e);
 
-  (* ── A path with nothing behind it is "not found", not "unavailable" ─────── *)
   (match Lwt_main.run (S3.create ~expires:123 ~rel:"no/such/dir" ()) with
     | Error e -> assert (String.length e >= 9 && String.sub e 0 9 = "not found")
     | Ok _ -> assert false);

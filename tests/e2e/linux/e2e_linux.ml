@@ -1,11 +1,11 @@
 (* End-to-end check of the Linux FUSE mount, against a domain it stages itself.
 
    The checks live in {!E2e} and are the same ones the macOS program runs: a
-   frontend gives the user a directory, and what is asserted about that directory
-   does not depend on which frontend produced it. What is here is the staging.
+   frontend gives the user a directory, and what is asserted about it does not
+   depend on which frontend produced it. Here is the staging.
 
-   Simpler than macOS, because nothing has to be registered with the system —
-   the mount is the frontend. Staged and taken down again:
+   Simpler than macOS, since nothing has to be registered with the system: the
+   mount is the frontend. Staged and taken down again:
 
      - a store daemon, serving a local directory over http-proxy;
      - a client that mounts it with FUSE, which is the directory under test;
@@ -19,9 +19,8 @@ open E2e
 
 let env = { domain = "tsync-e2e"; port = 8788; secret = "e2e-secret" }
 
-(* The mount is the thing under test, so it has to be gone before the directory
-   holding it can be. A daemon that has already exited leaves the mount behind
-   as an unreachable stub until this runs. *)
+(* The mount has to be gone before the directory holding it can be: a daemon that
+   already exited leaves it behind as an unreachable stub. *)
 let unmount mount =
   sh
     "fusermount3 -u %s 2>/dev/null || fusermount -u %s 2>/dev/null || umount \
@@ -91,9 +90,9 @@ let () =
        Some
          (spawn_daemon ~args:["--mount"; mount] ~exe ~home:mount_home
             ~label:"mount" ());
-     (* Mounted, not merely started: until FUSE has taken the directory over,
-        reads and writes go to the empty directory underneath and every check
-        would pass against nothing. *)
+     (* Mounted, not merely started: until FUSE takes the directory over, reads
+        and writes go to the empty directory underneath and every check passes
+        against nothing. *)
      wait_until ~timeout:60. ~what:"the filesystem to be mounted" (fun () ->
          Sys.command (Printf.sprintf "mountpoint -q %s" (Filename.quote mount))
          = 0);

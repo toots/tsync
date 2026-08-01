@@ -1,11 +1,9 @@
 open Cmdliner
 
-(* ── Verbose output ──────────────────────────────────────────────────────── *)
-
 let verbose = ref false
 
-(* CLI progress goes through Log at info level; --verbose lowers the threshold
-   so those lines appear. Actual command results stay on stdout via Printf. *)
+(* Progress goes through Log at info level, which --verbose reveals. Command
+   results stay on stdout via Printf. *)
 let set_verbose v =
   verbose := v;
   Log.set_min_level (if v then `info else `warn)
@@ -15,12 +13,8 @@ let vprintf fmt = Log.info fmt
 let verbose_arg =
   Arg.(value & flag & info ["verbose"; "v"] ~doc:"Print detailed progress")
 
-(* ── Helpers ─────────────────────────────────────────────────────────────── *)
-
-(* Run [f] over [xs] with at most [parallelism] concurrent operations, in
-   batches so both the in-flight request count and the number of live Lwt
-   promises stay bounded (a plain [iter_p] over a huge list would allocate a
-   promise per element up front). Latency-bound backend work benefits most. *)
+(* Batched so both in-flight requests and live promises stay bounded: a plain
+   [iter_p] over a huge list allocates a promise per element up front. *)
 let iter_pooled ?(parallelism = 32) f xs =
   let open Lwt.Syntax in
   let rec take n = function
@@ -40,10 +34,9 @@ let iter_pooled ?(parallelism = 32) f xs =
 
 let runtime_paths = Runtime.default_paths ()
 
-(* Which frontend serves a domain: the [frontend] override if given (must be one
-   the domain lists), else the domain's first configured frontend. Errors if the
-   name isn't compiled into this binary. Resolved at call time (not module-init)
-   so frontend registration, a link-order side effect, has already happened. *)
+(* The [frontend] override if given (it must be one the domain lists), else the
+   domain's first. Resolved at call time, not module-init, so frontend
+   registration — a link-order side effect — has already happened. *)
 let frontend_names (d : Conf_parsing.domain) =
   List.map
     (fun (f : Conf_parsing.frontend_config) -> f.Conf_parsing.frontend_type)
@@ -74,8 +67,7 @@ let resolve_frontend ?frontend (d : Conf_parsing.domain) : (module Frontend.S) =
           (Printf.sprintf
              "frontend %s is configured but not compiled into this binary" name)
 
-(* Send a JSON IPC request; return the parsed response fields.
-   Raises Failure with the daemon's error message when ok=false. *)
+(* Raises Failure with the daemon's error message when ok=false. *)
 let ipc_request ?(socket_path = runtime_paths.Runtime.socket_path) fields =
   let request = Yojson.Safe.to_string (`Assoc fields) in
   match Yojson.Safe.from_string (Ipc.send ~socket_path request) with
@@ -100,37 +92,33 @@ let make_backend (bc : Conf_parsing.backend_config) =
   Backend.make ~backend_type:bc.backend_type ~get_field:(fun k ->
       List.assoc_opt k bc.fields)
 
-(* The chunk keys a manifest body names, and none for a body that is not a
-   manifest (a folder marker, a trash marker, a share). The only place that has
-   to know both a backend key and the manifest format. *)
+(* None for a body that is not a manifest (a folder marker, a trash marker, a
+   share). The only place needing both a backend key and the manifest format. *)
 let chunk_keys data =
   match Chunk_table.of_string data with
     | t -> List.init (Chunk_table.count t) (Chunk_table.key t)
     | exception _ -> []
 
-(* The domain's backends composed by role into the single module everything else
-   talks to.
+(* The domain's backends composed by role into one module.
 
-   Two layers, because they answer different questions. {!Fallback_backend} says
-   which backends a read may look at and how far a write fans out: mains and
-   replicas are the source of truth, read-only stores sit behind them.
-   {!Backfill_backend} then wraps that with the targets filled lazily from the
-   write side. A domain with only mains gets the inner layer and nothing else,
-   and one with only read-only stores gets an inner layer with nothing writable
-   in it — which is what makes such a domain readable but not writable. *)
-(* What a domain's configuration resolves to: the composite every read and write
-   goes through, and — separately — the individual stores a share link may be
-   served from. The two differ because a share manifest lives outside every
-   domain root, so publishing one is not a domain write and must not be refused
-   by a composite that has nothing writable in it. *)
+   Two layers answering different questions. {!Fallback_backend} says which
+   backends a read may look at and how far a write fans out: mains and replicas
+   are the source of truth, read-only stores sit behind them. {!Backfill_backend}
+   wraps that with the targets filled lazily from the write side. A domain of
+   only read-only stores gets an inner layer with nothing writable in it, which
+   is what makes it readable but not writable. *)
+(* The composite every read and write goes through, plus, separately, the stores
+   a share link may be served from. A share manifest lives outside every domain
+   root, so publishing one is not a domain write and must not be refused by a
+   composite with nothing writable in it. *)
 type resolved_backends = {
   backends : (module Backend.S) list;
   share_backends : (module Backend.S) list;
 }
 
-(* Role order is already settled by {!Conf_parsing.order_backends}; a backfill
-   target is behind by construction, so a link served from one could point at
-   something it has not caught up with. *)
+(* Order comes from {!Conf_parsing.order_backends}. A backfill target is behind
+   by construction, so a link served from one could point at something it has not
+   caught up with. *)
 let share_leaves leaves =
   List.filter_map
     (fun ((bc : Conf_parsing.backend_config), backend) ->
@@ -138,9 +126,8 @@ let share_leaves leaves =
     leaves
 
 let build_backends (d : Conf_parsing.domain) : resolved_backends =
-  (* One instance per configured backend, made here and shared by every layer
-     below — a second [make_backend] for the same config would be a second client
-     against the same store. *)
+  (* Shared by every layer below: a second [make_backend] for the same config is
+     a second client against the same store. *)
   let leaves =
     List.map
       (fun (bc : Conf_parsing.backend_config) -> (bc, make_backend bc))
@@ -151,8 +138,8 @@ let build_backends (d : Conf_parsing.domain) : resolved_backends =
       (fun ((bc : Conf_parsing.backend_config), _) -> List.mem bc.role rs)
       leaves
   in
-  (* Role coherence is settled at parse time ({!Conf_parsing.validate_roles}), so
-     [writable] is empty only for a domain that is legitimately read-only. *)
+  (* Roles are validated at parse time ({!Conf_parsing.validate_roles}), so
+     [writable] is empty only for a legitimately read-only domain. *)
   let writable = of_roles [`Main; `Replica] in
   let sub ((bc : Conf_parsing.backend_config), backend) =
     { Fallback_backend.name = bc.name; backend }
@@ -180,8 +167,7 @@ let build_backends (d : Conf_parsing.domain) : resolved_backends =
           in
           (bf_backend.Backfill_backend.backend, bf_backend.lanes)
   in
-  (* Declare the individual stores for diagnosis: this is the only place that has
-     each backend's name, its role and its own module at once. *)
+  (* The only place holding each backend's name, role and module at once. *)
   Backend.report_members ~domain:d.Conf_parsing.name
     (List.map
        (fun ((bc : Conf_parsing.backend_config), backend) ->
@@ -191,8 +177,8 @@ let build_backends (d : Conf_parsing.domain) : resolved_backends =
            Backend.name = bc.name;
            role = Conf_parsing.role_name bc.role;
            backend_type = bc.backend_type;
-           (* Masked by the same rule [tsync print-config] uses, so a report can
-              say which bucket or URL this is without carrying a credential. *)
+           (* Masked as [tsync print-config] does, so a report names the bucket
+              without carrying a credential. *)
            config =
              List.map
                (fun (k, v) ->
@@ -216,8 +202,8 @@ let build_backends (d : Conf_parsing.domain) : resolved_backends =
        leaves);
   { backends = [composite]; share_backends = share_leaves leaves }
 
-(* Ordered backends with the one named [source] moved to the head, so it serves
-   reads (the primary). Fails if no backend has that name. *)
+(* Moves [source] to the head so it serves reads. Fails if no backend has that
+   name. *)
 let order_backends_from source backends =
   let ordered = Conf_parsing.order_backends backends in
   match
@@ -245,11 +231,10 @@ let read_default_domain () =
         if s = "" then None else Some s
     | exception _ -> None
 
-(* [tier=false] exposes the raw backend list instead of the role composite — for
-   commands (resync-remote) that copy between individual backends, including the
-   ones the composite never reads from.
-   [source] forces reads to come from the named backend (moved to the head, no
-   composite) — for commands that pick which backend to read from. *)
+(* [tier=false] exposes the raw backend list instead of the role composite, for
+   commands (resync-remote) copying between individual backends including ones
+   the composite never reads from. [source] forces reads from the named backend,
+   for commands that pick where to read. *)
 let make_conf ?domain ?socket_path ?(tier = true) ?source cfg : (module Conf.S)
     =
   Tls_conf.apply cfg.Conf_parsing.tls;
@@ -271,8 +256,8 @@ let make_conf ?domain ?socket_path ?(tier = true) ?source cfg : (module Conf.S)
     let cursor_key = Conf_parsing.cursor_key d
     let shares_prefix = Conf_parsing.shares_prefix d
 
-    (* Made once and shared: a second [make_backend] for the same config would be
-       a second client against the same store. *)
+    (* Shared: a second [make_backend] for the same config is a second client
+       against the same store. *)
     let resolved =
       let flat ordered =
         let leaves =
@@ -302,10 +287,8 @@ let make_conf ?domain ?socket_path ?(tier = true) ?source cfg : (module Conf.S)
     let read_only = d.Conf_parsing.read_only
   end : Conf.S)
 
-(* ── Command scaffolding ─────────────────────────────────────────────────────
-   Every domain-scoped command declares the same option and opens by loading the
-   config and building one domain's conf. Declared once here rather than a dozen
-   times over. *)
+(* Every domain-scoped command declares the same option and opens by loading the
+   config and building one domain's conf. *)
 
 let domain_arg =
   Arg.(
@@ -315,20 +298,16 @@ let domain_arg =
 
 let load_config () = Conf_parsing.load runtime_paths.Runtime.config_path
 
-(* The socket the daemon serving [domain] listens on. Every domain gets its own
-   on Linux (a domain is its own child process), while macOS shares one, so the
-   only way to reach the right daemon is to resolve the domain first: explicit
-   [--domain], else the persisted default, else the sole configured domain.
+(* Linux gives each domain its own socket (a domain is its own child process)
+   while macOS shares one, so reaching the right daemon means resolving the
+   domain first: explicit [--domain], else the persisted default, else the sole
+   configured domain.
 
-   Commands that talk to a running daemon must go through this. The bare
+   Every command talking to a running daemon must go through this. The bare
    [runtime_paths.socket_path] is the shared macOS socket and, on Linux, a path
-   nothing has listened on since domains got their own — which is why a
-   multi-domain host used to be told "daemon not running" by a daemon that was
-   running perfectly well. *)
-(* Which domain a command is talking to, and where to reach it. Both are needed
-   together: macOS serves every domain on one socket, so the request has to name
-   the one it means — a daemon cannot guess, and guessing wrong would answer for
-   the wrong store. *)
+   nothing listens on. *)
+(* Both are needed together: macOS serves every domain on one socket, so the
+   request has to name the one it means. *)
 let domain_target ?domain () =
   let domain =
     match domain with Some _ -> domain | None -> read_default_domain ()
@@ -342,10 +321,9 @@ let domain_socket ?domain () = snd (domain_target ?domain ())
 let load_conf ?domain ?tier ?source () =
   make_conf ?domain ?tier ?source (load_config ())
 
-(* [Lwt_main.run] for a one-shot command: run the body, then let the backends
-   settle before the process goes away. A command returns as soon as its work is
-   posted and a backfill target is filled in the background, so without this a
-   short-lived command would routinely exit carrying pending copies with it. *)
+(* [Lwt_main.run] plus a drain: a command returns as soon as its work is posted
+   and a backfill target fills in the background, so without this a short-lived
+   command exits carrying pending copies with it. *)
 let run_lwt p =
   let open Lwt.Syntax in
   Lwt_main.run

@@ -1,5 +1,3 @@
-(* ── Client ──────────────────────────────────────────────────────────────── *)
-
 let send ~socket_path cmd =
   let fd = Unix.socket Unix.PF_UNIX Unix.SOCK_STREAM 0 in
   Unix.connect fd (Unix.ADDR_UNIX socket_path);
@@ -11,10 +9,9 @@ let send ~socket_path cmd =
   Unix.close fd;
   resp
 
-(* Same request, for a caller that is itself an event loop: the http-proxy asks
-   the mount daemon for its stats while serving, and must not block the listener
-   on a daemon that has wedged. A lapsed [timeout] is reported to the caller, not
-   swallowed. *)
+(* For a caller that is itself an event loop: the http-proxy asks the mount daemon
+   for stats while serving, and must not block its listener on a wedged daemon. A
+   lapsed [timeout] is reported, not swallowed. *)
 let send_lwt ?(timeout = 2.) ~socket_path cmd =
   let open Lwt.Syntax in
   Lwt_unix.with_timeout timeout (fun () ->
@@ -26,13 +23,10 @@ let send_lwt ?(timeout = 2.) ~socket_path cmd =
           Lwt_io.read_line ic)
         (fun () -> Lwt_io.close ic))
 
-(* ── Event subscribers ─────────────────────────────────────────────────────
-   The daemon never connects out. A client that wants to be told about changes
-   connects here like any other caller and asks to subscribe; the connection is
-   then dedicated to a stream of events. Only this direction is dependable: a
-   sandboxed macOS extension can reach us, and its own lifetime is the OS's to
-   decide, so a channel that exists only while it happens to be running is no
-   channel at all. *)
+(* The daemon never connects out. A client wanting change notifications connects
+   like any other caller and asks to subscribe, dedicating the connection to a
+   stream of events. Only this direction is dependable: a sandboxed macOS
+   extension can always reach us, while the OS decides its lifetime. *)
 module Subs = struct
   type sub = {
     topic : string;
@@ -52,9 +46,8 @@ module Subs = struct
   let max_queued = 256
   let matches ~topic sub = sub.topic = "" || sub.topic = topic
 
-  (* Number of subscribers the message was queued for. Zero means nobody is
-     listening for this topic, which is the only thing a caller waiting on a
-     reply can honestly be told. *)
+  (* Zero means nobody is listening for this topic, which is all a caller waiting
+     on a reply can honestly be told. *)
   let publish t ~topic msg =
     let targets = List.filter (matches ~topic) t.subs in
     List.iter
@@ -79,9 +72,8 @@ module Subs = struct
 
   let unregister t sub = t.subs <- List.filter (fun s -> s != sub) t.subs
 
-  (* Drain the queue, then park until something is published. Nothing yields
-     between the empty check and the wait, so a publish cannot slip through the
-     gap and leave us asleep on a non-empty queue. *)
+  (* Nothing yields between the empty check and the wait, so a publish cannot slip
+     through and leave us asleep on a non-empty queue. *)
   let rec write_pending sub oc =
     let open Lwt.Syntax in
     match Queue.take_opt sub.queue with
@@ -93,8 +85,7 @@ module Subs = struct
           let* () = Lwt_condition.wait sub.wake in
           write_pending sub oc
 
-  (* Hand the connection over to the event stream. It ends when the client goes
-     away, which shows up either as EOF on the read side or as a failed write. *)
+  (* Ends when the client goes away: EOF on the read side, or a failed write. *)
   let serve t ~topic ~ic ~oc =
     let open Lwt.Syntax in
     let sub = register t ~topic in
@@ -115,8 +106,6 @@ module Subs = struct
         Lwt.return_unit)
 end
 
-(* ── Server ──────────────────────────────────────────────────────────────── *)
-
 let rec mkdir_p path =
   if not (Sys.file_exists path) then begin
     mkdir_p (Filename.dirname path);
@@ -129,11 +118,10 @@ let serve ?subs ~path handler =
   mkdir_p dir;
   (try Unix.unlink path with Unix.Unix_error (Unix.ENOENT, _, _) -> ());
   let stopped, wake_stop = Lwt.wait () in
-  (* Each connection is served on its own Lwt task, so a slow request (e.g. a
-     large restore) never blocks other clients (e.g. status). A connection
-     carries requests until the client closes it: fileproviderd asks constantly,
-     and a connect and accept per question is a cost with nothing to show for
-     it. [read_line] raising at EOF is how a connection ends. *)
+  (* One Lwt task per connection, so a slow request (a large restore) never blocks
+     another client. A connection carries requests until the client closes it:
+     fileproviderd asks constantly, and a connect and accept per question buys
+     nothing. [read_line] raising at EOF is how a connection ends. *)
   let handle_client (ic, oc) =
     let rec loop () =
       let* line = Lwt_io.read_line ic in
@@ -145,8 +133,8 @@ let serve ?subs ~path handler =
             if Lwt.state stopped = Lwt.Sleep then Lwt.wakeup_later wake_stop ();
             Lwt.return_unit
         | `Subscribe topic -> (
-            (* The connection stops answering questions and becomes the event
-               stream, so events and replies never interleave on it. *)
+            (* The connection becomes the event stream, so events and replies
+               never interleave. *)
               match subs with
               | None -> Lwt.return_unit
               | Some subs -> Subs.serve subs ~topic ~ic ~oc)

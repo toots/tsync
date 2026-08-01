@@ -1,10 +1,9 @@
 open Lwt.Syntax
 
-(* The per-domain sync engine shared by all frontends: the upload queue, file
-   ops, journal/IPC handler and the change poller. A frontend instantiates one
-   [Make(C)] per domain and calls [start] on its own Lwt loop, supplying the
-   callbacks that differ between presentations; everything below is identical
-   across frontends, so it lives here once. *)
+(* The per-domain sync engine: upload queue, file ops, journal/IPC handler and
+   change poller. A frontend instantiates one [Make(C)] per domain and calls
+   [start] on its own Lwt loop, supplying only the callbacks that differ between
+   presentations. *)
 module Make (C : Conf.S) = struct
   module Sq = Sync_queue.Make (C)
   module F = File.Make (C) (Sq)
@@ -13,17 +12,15 @@ module Make (C : Conf.S) = struct
   module Mf = Manifest.Make (C)
   module Fs = File_store.Make (C)
 
-  (* Periodic housekeeping: keep the chunk store under the cap, nudged after each
-     upload too, but downloads grow it as well. *)
+  (* Also nudged after each upload, but downloads grow the store too. *)
   let housekeeping_interval = 60.
 
-  (* ── Cursor batching ──────────────────────────────────────────────────────
-     An upload owes a cursor bump once its journal entry lands, and a busy queue
-     owes one per file. The cursor only ever moves forward, so a batch of them
-     collapses to its newest — hold the pending value and publish it on a timer
-     rather than paying a backend PUT per upload. Metadata ops do not come
-     through here: [File.with_journal] bumps synchronously, because a peer
-     waiting on a rename should not wait out this interval. *)
+  (* An upload owes a cursor bump once its journal entry lands, one per file on a
+     busy queue. The cursor only moves forward, so a batch collapses to its
+     newest: hold the pending value and publish on a timer rather than paying a
+     PUT per upload. Metadata ops bypass this — [File.with_journal] bumps
+     synchronously, since a peer waiting on a rename should not wait out the
+     interval. *)
   let cursor_flush_interval = 2.
   let pending_cursor : string option ref = ref None
 
@@ -60,10 +57,9 @@ module Make (C : Conf.S) = struct
       ~on_upload_done:(fun ~key ->
         let* () = on_upload_done ~key in
         F.enforce_chunk_cap ());
-    (* Anything the staged tree still owes predates this process: queue it before
-       serving, so a file edited before a crash is not left looking unsynced. The
-       queue must be running first — recovery goes through it, for the journal
-       entry and cursor bump an upload owes. *)
+    (* Queued before serving, so a file edited before a crash is not left looking
+       unsynced. The queue must be running first: recovery goes through it, for
+       the journal entry and cursor bump an upload owes. *)
     let* () = F.recover_staged () in
     Sp.start ?on_changed ();
     Lwt.async cursor_flusher;
@@ -82,9 +78,9 @@ module Make (C : Conf.S) = struct
     Lwt.return_unit
 
   (* Uploads produce backfill work, so the queue settles first and the backends
-     second. The last batch of cursor bumps is published in between: the queue
-     has stopped owing them by then, and a peer must not have to wait for this
-     client to run again to learn what it already uploaded. *)
+     second, with the last cursor bump published in between: by then the queue
+     owes none, and a peer must not wait for this client to run again to learn
+     what it already uploaded. *)
   let drain () =
     let* () = Sq.drain () in
     let* () = flush_cursor () in

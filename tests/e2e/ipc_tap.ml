@@ -1,21 +1,17 @@
 (* What the system actually asked the daemon for.
 
-   Some of what matters here happens inside the OS and leaves no trace on either
-   side of it. Whether macOS fetched a file whole or a range at a time is its
-   decision, made in its own process, and once the bytes have arrived the two
-   are indistinguishable from outside: the file reads correctly either way. The
-   only place that choice is visible is the request the extension makes on the
-   way past.
+   Whether macOS fetched a file whole or a range at a time is decided inside the
+   OS, and once the bytes arrive the two are indistinguishable from outside. The
+   request the extension makes on the way past is the only evidence.
 
-   So this stands in front of the daemon's socket and writes down what goes
-   through. A bound unix socket is reached by pathname but lives in its inode,
-   so renaming the daemon's socket leaves it listening and reachable at the new
-   name — which frees the well-known path for a listener of our own that relays
-   to it. The daemon does not know, and needs no test-only code to be observed.
+   So this stands in front of the daemon's socket and records what goes through.
+   A bound unix socket is reached by pathname but lives in its inode, so renaming
+   the daemon's socket leaves it listening and reachable at the new name, freeing
+   the well-known path for a relay. The daemon needs no test-only code.
 
-   Byte-for-byte relay, in both directions. Requests are recorded as they pass
-   but never interpreted, so a caller that half-closes, streams, or pipelines
-   behaves exactly as it would against the real socket. *)
+   Byte-for-byte in both directions: requests are recorded but never interpreted,
+   so a caller that half-closes, streams or pipelines behaves exactly as it would
+   against the real socket. *)
 
 type t = {
   path : string;  (** the well-known path, now ours *)
@@ -53,9 +49,8 @@ let rec write_all fd buf offset len =
     let n = Unix.write fd buf offset len in
     if n > 0 then write_all fd buf (offset + n) (len - n))
 
-(* One connection, relayed until both directions are done. A caller that
-   half-closes to say "no more requests" has to have that passed on, or the
-   daemon waits for a request that is never coming. *)
+(* A caller half-closing to say "no more requests" must have that passed on, or
+   the daemon waits for a request that is never coming. *)
 let relay tap client =
   let up = Unix.socket Unix.PF_UNIX Unix.SOCK_STREAM 0 in
   let shut fd = try Unix.shutdown fd Unix.SHUTDOWN_SEND with _ -> () in
@@ -94,8 +89,8 @@ let relay tap client =
   close up;
   close client
 
-(* [stop] closes the listener from another thread, so a wait already in progress
-   fails rather than returning — expected, and not something to report. *)
+(* [stop] closes the listener from another thread, so a wait in progress fails
+   rather than returning. Expected. *)
 let accept_loop tap =
   while not tap.stopping do
     match Unix.select [tap.listener] [] [] 0.5 with
@@ -107,8 +102,8 @@ let accept_loop tap =
       | exception Unix.Unix_error _ -> tap.stopping <- true
   done
 
-(* Take over [socket_path]. The daemon must already be listening on it: its
-   socket is what gets moved aside, and there is nothing to relay to otherwise. *)
+(* The daemon must already be listening on [socket_path]: its socket is what gets
+   moved aside, and there is nothing to relay to otherwise. *)
 let start ~socket_path =
   if not (Sys.file_exists socket_path) then
     failwith ("no daemon socket at " ^ socket_path);
@@ -118,9 +113,8 @@ let start ~socket_path =
   let listener = Unix.socket Unix.PF_UNIX Unix.SOCK_STREAM 0 in
   Unix.bind listener (Unix.ADDR_UNIX socket_path);
   Unix.listen listener 64;
-  (* The callers are this user's own processes, but the extension is sandboxed
-     and gets nothing by being the same user, so do not narrow what the daemon
-     itself published. *)
+  (* The extension is sandboxed and gains nothing by being the same user, so do
+     not narrow what the daemon itself published. *)
   (try Unix.chmod socket_path (Unix.stat real).Unix.st_perm with _ -> ());
   let tap =
     {
@@ -136,12 +130,10 @@ let start ~socket_path =
   ignore (Thread.create accept_loop tap);
   tap
 
-(* Put the daemon's socket back where its callers expect it — but only if the
-   socket there is still the one this put down. A daemon that restarted while
-   the tap was up will have bound the path again for itself, and restoring over
-   that would unlink a live socket and leave a dead one in its place: the tap
-   would be the reason the daemon became unreachable. In that case the moved
-   socket is the stale one, so it just goes. *)
+(* Only if the socket there is still the one this put down: a daemon that
+   restarted while the tap was up has bound the path again, and restoring over
+   that would unlink a live socket in favour of a dead one. In that case the moved
+   socket is the stale one and simply goes. *)
 let stop tap =
   tap.stopping <- true;
   (try Unix.close tap.listener with _ -> ());

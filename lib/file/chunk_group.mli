@@ -2,9 +2,8 @@
 
     Stored chunk size is network granularity (smaller: less egress when a file
     changes); cache chunk size is disk granularity (larger: fewer opens, less
-    I/O latency). This is the seam between them — above it, callers still speak
-    in stored chunk indices; below it, {!Chunk_cache} stores one file per group.
-*)
+    latency). This is the seam — above it callers speak in stored chunk indices,
+    below it {!Chunk_cache} stores one file per group. *)
 
 type t
 
@@ -12,9 +11,9 @@ type t
     [|n * chunk_size - cache_chunk_size|]. A tie takes the larger group. *)
 val per_group : chunk_size:int -> cache_chunk_size:int -> int
 
-(** The group holding stored chunk [i]; [None] only when [i] is out of range.
-    {!Chunk_table} rejects a body whose length disagrees with its header, so
-    every index below its count has a key and a group can always be filled. *)
+(** [None] only when [i] is out of range: {!Chunk_table} rejects a body whose
+    length disagrees with its header, so every index below its count has a key.
+*)
 val of_table : table:Chunk_table.t -> per:int -> int -> t option
 
 (** Every group of a file, in order. *)
@@ -28,7 +27,7 @@ val count : table:Chunk_table.t -> per:int -> int
 val index_of : per:int -> int -> int
 
 (** The cache file's name: a hash over the member keys, in the same
-    ["<h1>-<h2>"] shape as a chunk key. Not ["<first>-<last>"] — two groups can
+    ["<h1>-<h2>"] shape as a chunk key. Not ["<first>-<last>"]: two groups can
     share their first and last chunk and differ in between (any run of identical
     chunks does it), and aliasing them onto one file serves the wrong bytes. *)
 val key : t -> string

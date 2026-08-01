@@ -1,12 +1,12 @@
 (* Public share serving for the http-proxy frontend.
 
-   Share links are public URLs: these routes carry no HMAC and are guarded only
-   by the unguessable token plus the shares-prefix confinement in {!load}. They
-   are deliberately kept off the signed object API.
+   These routes carry no HMAC and are guarded only by the unguessable token plus
+   the shares-prefix confinement in {!load}, so they are kept off the signed
+   object API.
 
-   Content is served by {!Data} straight out of the domain's chunk cache: an HTTP
-   range fetches only the chunks it covers, nothing is ever assembled, and
-   nothing is written into the local manifest mirror. *)
+   Content comes from {!Data} straight out of the domain's chunk cache: a range
+   fetches only the chunks it covers, nothing is assembled, and nothing is
+   written into the local manifest mirror. *)
 
 open Lwt.Syntax
 
@@ -42,11 +42,8 @@ let str name j =
 
 let block_size = 256 * 1024
 
-(* ── Content types ───────────────────────────────────────────────────────── *)
-
-(* Extension -> MIME type, embedded from the file the share Lambda loads at
-   runtime, so the table has exactly one definition. Same for the browser UI
-   below: both deployments serve the same page. *)
+(* Embedded from the file the share Lambda loads at runtime, so the table has one
+   definition. Same for the browser UI below: both deployments serve one page. *)
 let mime_json = [%blob "../../../lambda/mime.json"]
 let browse_html = [%blob "../../../lambda/browse.html"]
 let player_js = [%blob "../../../lambda/player.js"]
@@ -79,8 +76,8 @@ let preview_kind mime =
   else if base = "text/html" then "html"
   else "text"
 
-(* ext -> preview kind, injected into browse.html so the page carries no second
-   copy of the extension list. *)
+(* Injected into browse.html so the page carries no second copy of the extension
+   list. *)
 let preview_kinds_json =
   `Assoc (List.map (fun (e, m) -> (e, `String (preview_kind m))) mime_table)
 
@@ -88,12 +85,11 @@ module Make (C : Conf.S) = struct
   module R = Remote.Make_with_layout (C) (Layout.Identity)
   module D = Data.Make (C) (R)
 
-  (* Share manifests come from the backend, never from the local mirror: their
-     keys are inode-space, so mirroring them would plant phantom entries in the
-     domain's listings. Content then pages through the domain's ordinary chunk
-     cache — chunk keys are content addresses with nothing path-specific about
-     them, so a shared chunk is the same file on disk as the mount's, governed by
-     the same [maxCache]. Nothing about serving a share is written locally.
+  (* Share manifests come from the backend, never the local mirror: their keys
+     are inode-space, so mirroring them would plant phantom entries in the
+     domain's listings. Content pages through the ordinary chunk cache — chunk
+     keys are content addresses, so a shared chunk is the same file on disk as the
+     mount's, under the same [maxCache].
 
      ponytail: manifests are memoized unbounded-but-cleared; a share of a 30k
      chunk file is a 2.5MB body we should not re-GET per range request. Swap in
@@ -118,8 +114,6 @@ module Make (C : Conf.S) = struct
   module Tree = Inode_tree.Make (C)
 
   let primary = Bk.primary
-
-  (* ── Share manifest ────────────────────────────────────────────────────── *)
 
   let is_hex s =
     s <> ""
@@ -155,11 +149,8 @@ module Make (C : Conf.S) = struct
               dir_prefix = str "dirPrefix" j;
             }
 
-  (* ── Inode navigation ──────────────────────────────────────────────────── *)
-
-  (* Direct children of a folder namespace, in the shape the browse UI and the
-     zip writer want. A subdirectory's [key] is its own namespace, so [resolve]
-     descends by handing it straight back. *)
+  (* A subdirectory's [key] is its own namespace, so [resolve] descends by
+     handing it straight back. *)
   let children ns =
     let folder_id = Filename.basename (Key.chop_slash ns) in
     let+ entries = Tree.children ~skip_errors:true ~folder_id () in
@@ -184,7 +175,7 @@ module Make (C : Conf.S) = struct
               })
       entries
 
-  (* A browse-supplied path, rejected if it could escape the shared folder. *)
+  (* Rejects a browse-supplied path that could escape the shared folder. *)
   let safe_parts path =
     let parts =
       List.filter
@@ -209,18 +200,14 @@ module Make (C : Conf.S) = struct
     in
     go ns parts
 
-  (* ── Streaming ─────────────────────────────────────────────────────────── *)
-
-  (* Headers are already on the wire by the time a body stream runs, so a failure
-     here can only truncate the response — cohttp closes the connection and logs
-     nothing of ours. Log it before it disappears. *)
+  (* Headers are already on the wire when a body stream runs, so a failure here
+     only truncates the response and cohttp logs nothing of ours. *)
   let logged what f =
     Lwt.catch f (fun exn ->
         Log.err "share: %s stream failed: %s" what (Printexc.to_string exn);
         Lwt.fail exn)
 
-  (* Read [len] bytes from [offset] as a stream, one block at a time: each block
-     fetches only the chunks it covers. *)
+  (* One block at a time: each fetches only the chunks it covers. *)
   let byte_stream ~manifest key ~offset ~len =
     let pos = ref offset and left = ref len in
     Lwt_stream.from (fun () ->
@@ -236,11 +223,10 @@ module Make (C : Conf.S) = struct
             left := Int64.sub !left (Int64.of_int got);
             Lwt.return_some (String.init got (Bigarray.Array1.get buf)))))
 
-  (* Flatten a shared folder into zip members, depth first. Directories are
-     emitted too so empty ones survive the round trip. *)
+  (* Depth first. Directories are emitted too, so empty ones survive the round
+     trip. *)
   let walk ns root =
-    (* Accumulate reversed and flip once: appending per entry would be quadratic
-       in the file count. *)
+    (* Reversed then flipped once: appending per entry is quadratic. *)
     let rec go acc ns prefix =
       let* cs = children ns in
       let cs = List.sort (fun a b -> compare a.name b.name) cs in
@@ -254,8 +240,7 @@ module Make (C : Conf.S) = struct
     let+ rev = go [] ns root in
     List.rev rev
 
-  (* Stream a zip over the flattened members: one block in memory at a time, so
-     archive size is bounded only by the ZIP64 format. *)
+  (* One block in memory at a time, so archive size is bounded only by ZIP64. *)
   let zip_stream members =
     let z = Zip_stream.create () in
     let queue = ref members in
@@ -304,7 +289,7 @@ module Make (C : Conf.S) = struct
                     match manifest with
                       | None ->
                           (* Vanished or replaced mid-archive: skip the member
-                             rather than abort the whole download. *)
+                             rather than abort the download. *)
                           Log.err "share: no manifest for %s" c.key;
                           Lwt.return_some ""
                       | Some manifest ->
@@ -320,8 +305,6 @@ module Make (C : Conf.S) = struct
                             (Zip_stream.start_entry z ~name:path ~mtime:c.mtime
                                ()))))
 
-  (* ── Responses ─────────────────────────────────────────────────────────── *)
-
   let text ?(status = `OK) body =
     Cohttp_lwt_unix.Server.respond_string ~status
       ~headers:(Cohttp.Header.of_list [("content-type", "text/plain")])
@@ -333,8 +316,8 @@ module Make (C : Conf.S) = struct
       ~body:(Yojson.Safe.to_string obj)
       ()
 
-  (* RFC 5987 so non-ASCII names survive; the bare [filename] is a fallback for
-     clients that ignore [filename*]. *)
+  (* RFC 5987 for non-ASCII names; bare [filename] is the fallback for clients
+     ignoring [filename*]. *)
   let disposition ~inline name =
     let ascii =
       String.map
@@ -481,8 +464,8 @@ module Make (C : Conf.S) = struct
     match target with
       | Some (`File c) -> (
           if want_json then
-            (* browse.html previews media from this URL; it points back here so
-               the bytes still stream through the cache. *)
+            (* browse.html previews media from this URL, pointing back here so
+               the bytes stream through the cache. *)
             json
               (`Assoc
                  [
@@ -551,8 +534,6 @@ module Make (C : Conf.S) = struct
       ~headers:
         (Cohttp.Header.of_list [("content-type", "text/html; charset=utf-8")])
       ~body:html ()
-
-  (* ── Entry point ───────────────────────────────────────────────────────── *)
 
   let handle ~token ~sub ~query ~range =
     Lwt.catch

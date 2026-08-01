@@ -1,11 +1,9 @@
 external is_dataless : string -> bool = "caml_is_dataless"
 
-(* ── The domain's CloudStorage folder ──────────────────────────────────────
-   fileproviderd names it "<app name>-<domain displayName>" after dropping the
-   characters it will not put in a path: displayName "Jellyfin Media" becomes
-   "TsyncApp-JellyfinMedia". Rather than reproduce a rule Apple does not
-   document, compare on letters and digits alone, which survives whatever else
-   it strips or leaves cased. *)
+(* fileproviderd names the domain's folder "<app name>-<domain displayName>"
+   after dropping characters it will not put in a path: "Jellyfin Media" becomes
+   "TsyncApp-JellyfinMedia". The rule is undocumented, so compare on letters and
+   digits alone. *)
 
 let alnum s =
   String.to_seq (String.lowercase_ascii s)
@@ -18,7 +16,7 @@ let cloud_storage_root () =
 let is_domain_dir ~domain_name dir = alnum dir = alnum ("TsyncApp" ^ domain_name)
 
 (* [None] until the domain is registered and fileproviderd has created its
-   folder, which is also what tells a caller there is nothing local to look at. *)
+   folder, which also tells a caller there is nothing local to look at. *)
 let domain_dir ~domain_name =
   let root = cloud_storage_root () in
   match Sys.readdir root with
@@ -33,8 +31,6 @@ module Make (C : Conf.S) = struct
   module F = E.F
   module H = E.Ih
   module Sp = E.Sp
-
-  (* ── Key helpers ──────────────────────────────────────────────────────── *)
 
   let expand_home path =
     if String.length path >= 2 && path.[0] = '~' && path.[1] = '/' then
@@ -53,8 +49,7 @@ module Make (C : Conf.S) = struct
 
   let dir_is_own_domain = is_domain_dir ~domain_name:C.domain_name
 
-  (* Strip a "~/Library/CloudStorage/<folder>/" prefix from [path];
-     [own_only] restricts the match to this domain's folder. *)
+  (* [own_only] restricts the match to this domain's folder. *)
   let strip_cloud_storage ~own_only path =
     let cloud_root = cloud_storage_root () in
     let found = ref None in
@@ -67,8 +62,7 @@ module Make (C : Conf.S) = struct
      with _ -> ());
     !found
 
-  (* True when [path] lies under this domain's CloudStorage folder; the
-     multi-domain router uses this to direct path-based requests
+  (* The multi-domain router uses this to direct path-based requests
      (evict/restore/revert) to the right domain. *)
   let claims_path path =
     Option.is_some (strip_cloud_storage ~own_only:true (expand_home path))
@@ -92,16 +86,12 @@ module Make (C : Conf.S) = struct
     in
     C.domain_prefix ^ rel
 
-  (* ── Resync token ─────────────────────────────────────────────────────── *)
-
-  (* A full resync rebuilds the local mirror from the backend listing, which is
-     the only way changes made straight in the bucket — writing no journal entry
-     — are ever picked up. Nothing journals them, so no delta can bridge a sync
-     anchor issued beforehand: every enumerator has to drop its index and
-     re-list. The extension stamps its anchors with this token and expires any
-     that no longer match, which is what makes the invalidation durable — the
-     notify below only reaches an extension that happens to be running, and
-     fileproviderd stops ours whenever the domain goes idle. *)
+  (* A full resync rebuilds the mirror from the backend listing, the only way
+     changes made straight in the bucket are picked up. Nothing journals those, so
+     no delta can bridge an anchor issued beforehand and every enumerator must
+     re-list. The extension stamps anchors with this token and expires mismatches,
+     which is what makes the invalidation durable: the notify below only reaches
+     an extension that happens to be running. *)
   let resync_token_path = Filename.concat C.data_dir ("resync-" ^ C.domain_name)
 
   let stamp_resync_token () =
@@ -111,13 +101,10 @@ module Make (C : Conf.S) = struct
       close_out oc
     with Sys_error msg -> Log.err "resync token: %s" msg
 
-  (* ── Events ───────────────────────────────────────────────────────────── *)
-
   (* Only a process holding an [NSFileProviderManager] can move content in or out
-     of the replica, so the daemon has to ask one to do it. Whoever that is
-     subscribes to us; we never reach out to them. Each event is numbered so an
-     acknowledgement can be threaded back on the same connection later without
-     changing the wire. *)
+     of the replica, so the daemon asks one to. That process subscribes to us; we
+     never reach out. Events are numbered so an acknowledgement can be threaded
+     back on the same connection without changing the wire. *)
   let event_seq = ref 0
 
   let publish ~subs name fields =
@@ -132,8 +119,8 @@ module Make (C : Conf.S) = struct
     in
     Ipc.Subs.publish subs ~topic:C.domain_name msg
 
-  (* A request the user is waiting on has to say it went nowhere rather than
-     report an eviction that never happened. *)
+  (* A request the user waits on must say it went nowhere rather than report an
+     eviction that never happened. *)
   exception No_subscriber
 
   let () =
@@ -149,8 +136,6 @@ module Make (C : Conf.S) = struct
   let require_delivery delivered =
     if delivered > 0 then Lwt.return_unit else Lwt.fail No_subscriber
 
-  (* ── IPC hooks ────────────────────────────────────────────────────────── *)
-
   let hooks ~subs =
     H.
       {
@@ -161,19 +146,17 @@ module Make (C : Conf.S) = struct
         restore =
           (fun key ->
             require_delivery (publish ~subs "restore" [("key", `String key)]));
-        (* Hints, not requests: an undelivered one costs nothing because the
-           journal carries the same news and the next enumeration reads it.
-           [full_resync]'s token is on disk before this is even attempted, which
-           is what makes that one durable. *)
+        (* Hints, not requests: the journal carries the same news and the next
+           enumeration reads it. [full_resync]'s token is on disk before this is
+           attempted, which is what makes that one durable. *)
         changed =
           (fun key -> ignore (publish ~subs "changed" [("key", `String key)]));
         full_resync =
           (fun () ->
             stamp_resync_token ();
-            (* The mirror this indexes may have just been replaced wholesale, by
-               a command in another process. Restating it from the markers costs
-               one walk of a tree that is only as big as the folder count, and it
-               is the one moment we know for certain it is owed. *)
+            (* The mirror may have just been replaced wholesale by a command in
+               another process, and this is the one moment we know a rebuild is
+               owed. The walk is only as big as the folder count. *)
             let open Lwt.Syntax in
             let* () =
               Folder_ids.rebuild ~cache_root:C.cache_root
@@ -195,18 +178,16 @@ module Make (C : Conf.S) = struct
   let init ~subs () =
     E.start
       ~on_upload_done:(fun ~key ->
-        (* Nothing to drop: the replica keeps the file, and the daemon keeps only
-           the chunks the upload promoted — subject to the cache cap like any
-           other. The item's upload state is part of its version, so a completed
-           upload is just another change. *)
+        (* Nothing to drop: the replica keeps the file and the daemon keeps only
+           the promoted chunks, under the cache cap like any other. Upload state
+           is part of the item's version, so a finished upload is just another
+           change. *)
         ignore (publish ~subs "changed" [("key", `String key)]);
         Lwt.return_unit)
       ~on_changed:(fun key ->
         ignore (publish ~subs "changed" [("key", `String key)]))
       ()
 end
-
-(* ── Multi-domain start ───────────────────────────────────────────────────── *)
 
 type domain_runtime = {
   prefix : string;
@@ -222,8 +203,7 @@ let start ~confs ~socket_path =
   let error_json msg =
     Yojson.Safe.to_string (`Assoc [("ok", `Bool false); ("error", `String msg)])
   in
-  (* One registry for every domain: subscribers name the domain they want, and
-     the events themselves carry it too. *)
+  (* Subscribers name the domain they want, and events carry it too. *)
   let subs = Ipc.Subs.create () in
   Lwt_main.run
     (let* domain_runtimes =
@@ -257,9 +237,8 @@ let start ~confs ~socket_path =
                else (
                  match action with
                    | "evict" | "restore" | "revert" ->
-                       (* These carry a filesystem path, not a storage key:
-                          resolve it to the domain whose CloudStorage folder
-                          contains it. *)
+                       (* A filesystem path, not a storage key: resolve it to the
+                          domain whose CloudStorage folder contains it. *)
                        List.find_opt
                          (fun r -> r.claims_path path)
                          domain_runtimes
@@ -271,11 +250,9 @@ let start ~confs ~socket_path =
                            && String.sub path 0 n = r.prefix)
                          domain_runtimes)
              in
-             (* Answering for the wrong domain is worse than not answering: a
-                reference carries no domain of its own, and folder ids are only
-                unique within one, so guessing would resolve a request against a
-                store that was never asked. With a single domain there is
-                nothing to guess. *)
+             (* A reference carries no domain and folder ids are unique only
+                within one, so guessing would resolve a request against a store
+                that was never asked. *)
              let runtime =
                match (runtime_opt, domain_runtimes) with
                  | Some r, _ -> Some r

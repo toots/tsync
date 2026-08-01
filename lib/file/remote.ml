@@ -15,16 +15,12 @@ let manifest_matches (a : Manifest.t) (b : Manifest.t) =
   && a.Manifest.h2 = b.Manifest.h2
   && a.Manifest.size = b.Manifest.size
 
-(* Read [len] bytes at [offset] from [fd] into [buf] (starting at 0). Uses
-   positioned reads rather than lseek+read: chunks, including chunks of the
-   same file, are read concurrently (see [chunk_buffers] and [max_uploads]),
-   and a shared fd's seek position would race across concurrent readers.
-   pread has no such shared state, so one fd can be opened per file instead
-   of per chunk — each open, seek and close was a separate blocking syscall
-   dispatched to Lwt's worker-thread pool, and for a multi-GB file split
-   into hundreds of 8 MB chunks that adds up to thousands of thread-pool
-   round trips per upload. A short read means the file was truncated under
-   us: abort the upload. *)
+(* Positioned reads rather than lseek+read: chunks of one file are read
+   concurrently (see [chunk_buffers] and [max_uploads]) and a shared fd's seek
+   position would race. pread has no such state, so one fd serves a whole file
+   instead of one per chunk — each open/seek/close is a blocking syscall on Lwt's
+   worker pool, thousands of round trips for a multi-GB upload. A short read
+   means the file was truncated under us: abort. *)
 let read_chunk_into fd offset len buf =
   let rec loop pos =
     if pos >= len then Lwt.return_unit
@@ -72,39 +68,32 @@ module type S = sig
 end
 
 module Make_with_layout (C : Conf.S) (L : Layout.S) : S = struct
-  (* Manifest reads/writes go through [St], which maps logical keys to backend
-     keys via the layout scheme. *)
+  (* [St] maps logical keys to backend keys through the layout scheme. *)
   module St = Store.Make (C) (L)
   module Bk = Backends.Make (C)
 
   let primary = Bk.primary
 
-  (* A bounded pool of chunk-sized buffers (this domain's configured chunk
-     size), shared by every concurrent upload. Reusing a fixed set avoids a
-     constant stream of large major-heap allocations (significant GC overhead
-     under sustained upload traffic); Lwt_pool allocates each slot lazily, so
-     nothing is held when no upload is in flight. Callers must not retain the
-     string derived from a buffer past the pool callback: it aliases the
-     buffer's backing memory.
+  (* Chunk-sized buffers shared by every concurrent upload: a fixed set avoids a
+     stream of large major-heap allocations under sustained upload traffic, and
+     Lwt_pool allocates lazily so nothing is held when idle. A string derived from
+     a buffer aliases its backing memory and must not outlive the callback.
 
-     Acquiring from this pool is also what actually bounds concurrent chunk
-     work system-wide: a chunk read blocks here until a slot frees, whatever
-     file it belongs to, making [max_uploads] the single, real ceiling on
-     concurrent upload operations. *)
-  (* The pool sizes buffers off the configured value, not the resolved one: it
-     only needs an upper bound that fits the common case, and an oversized chunk
-     already falls through to a one-off allocation below. *)
+     Acquiring here is also the real system-wide bound on concurrent chunk work:
+     a chunk read blocks until a slot frees, whatever file it belongs to, making
+     [max_uploads] the single ceiling. *)
+  (* Sized off the configured value, not the resolved one: only an upper bound
+     for the common case is needed, and an oversized chunk falls through to a
+     one-off allocation below. *)
   let buffer_size = Option.value C.chunk_size ~default:Conf.default_chunk_size
 
   let chunk_buffers =
     Lwt_pool.create (max 1 C.max_uploads) (fun () ->
         Lwt.return (Bytes.create buffer_size))
 
-  (* Chunk size for files this client creates: what the config says, else what
-     the primary backend recommends (an http-proxy answers with the serving
-     domain's own, so the setting need not live in two configs), else the
-     built-in default. Asked once and memoized — the answer is fixed for the life
-     of the process, and every caller is on the creation path. *)
+  (* Config, else what the primary backend recommends (an http-proxy answers with
+     the serving domain's own, so the setting need not live in two configs), else
+     the built-in default. Memoized: the answer is fixed for the process. *)
   let resolved_chunk_size = ref None
 
   let chunk_size () =
@@ -127,27 +116,22 @@ module Make_with_layout (C : Conf.S) (L : Layout.S) : S = struct
           resolved_chunk_size := Some p;
           p
 
-  (* Read a chunk of [size] bytes into a buffer: from the pool when it fits the
-     domain chunk size, else a one-off allocation. The oversized case is only
-     hit re-chunking a pre-existing file whose manifest used a larger chunk size
-     than the domain now configures. *)
+  (* From the pool when it fits the domain chunk size, else a one-off allocation
+     — only hit re-chunking a file whose manifest used a larger chunk size than
+     the domain now configures. *)
   let with_chunk_buffer ~size f =
     if size <= buffer_size then Lwt_pool.use chunk_buffers f
     else f (Bytes.create size)
 
-  (* Chunk keys known to exist on the primary backend, for this session only.
-     A HEAD check decides existence per chunk; once confirmed (either found
-     or just uploaded), the result is memoized here so a chunk repeated
-     within the same session — the same content in another file, or a retry
-     after a crash — skips the round trip. We don't pre-populate this by
-     listing the whole chunk prefix: that cost scales with the size of the
-     entire historical archive rather than with the upload actually being
-     done, and only pays off for cross-session or cross-file dedup, which is
-     rare for largely-unique source content. *)
+  (* Chunk keys known present on the primary backend, this session only: a HEAD
+     decides, and the result is memoized so a chunk repeated within the session
+     skips the round trip. Not pre-populated by listing the chunk prefix — that
+     cost scales with the whole historical archive rather than the upload at hand,
+     and only pays off for cross-session dedup. *)
   let known_chunks : (string, unit) Hashtbl.t = Hashtbl.create 4096
 
-  (* The backend key holding chunk [chunk_key]'s bytes. Sharded, so no single
-     directory holds the whole store on a filesystem backend. *)
+  (* Sharded, so no single directory holds the whole store on a filesystem
+     backend. *)
   let chunk_backend_key chunk_key =
     C.chunk_prefix ^ Chunk_layout.relative_path chunk_key
 
@@ -156,9 +140,8 @@ module Make_with_layout (C : Conf.S) (L : Layout.S) : S = struct
     let+ head = Primary.head_opt ~key:ck () in
     Option.is_some head
 
-  (* Hash [data] as chunk [index] and upload it unless the backend already has
-     that content. [data] is not retained past this call, so a caller may pass a
-     string aliasing a pooled buffer. *)
+  (* [data] is not retained past this call, so a caller may pass a string
+     aliasing a pooled buffer. *)
   let put_chunk ~index ~data =
     let size = String.length data in
     let entry =
@@ -188,29 +171,27 @@ module Make_with_layout (C : Conf.S) (L : Layout.S) : S = struct
     in
     entry
 
-  (* Read, hash and (if not already present) upload chunk [index], returning its
-     manifest entry. *)
+  (* Reads, hashes and uploads chunk [index] unless it is already present. *)
   let upload_chunk fd ~cancel ~file_size ~chunk_size index =
     if !cancel then raise Cancelled;
     let offset = index * chunk_size in
     let size = min chunk_size (file_size - offset) in
     with_chunk_buffer ~size (fun buf ->
         let* () = read_chunk_into fd offset size buf in
-        (* Zero-copy in the common (full-chunk) case; the last chunk of a file is
-           short and needs its own copy since it can't alias the whole pooled
-           buffer. Either way, [data] must not outlive this chunk's use (hash +
-           upload) since the buffer is reused once released below. *)
+        (* Zero-copy for a full chunk; a short last chunk needs its own copy
+           since it cannot alias the whole pooled buffer. Either way [data] must
+           not outlive the hash and upload: the buffer is reused once
+           released. *)
         let data =
           if size = Bytes.length buf then Bytes.unsafe_to_string buf
           else Bytes.sub_string buf 0 size
         in
         put_chunk ~index ~data)
 
-  (* Publish [entries] as [key]'s manifest: the tail every upload shares. A
-     cancellation that lands while the put is in flight unpublishes it again —
-     leaving it would create a ghost object under a name that may no longer
-     exist locally. Chunks stay: they are content-addressed and the successor
-     upload references them. *)
+  (* The tail every upload shares. A cancellation landing while the put is in
+     flight unpublishes it again, or a ghost object survives under a name that may
+     no longer exist locally. Chunks stay: they are content-addressed and the
+     successor upload references them. *)
   let publish ~key ~name ~size ~chunk_size ~mtime ~cancel entries =
     if !cancel then raise Cancelled;
     let h1, h2 = Manifest.digest_of_chunks entries in
@@ -232,9 +213,7 @@ module Make_with_layout (C : Conf.S) (L : Layout.S) : S = struct
       raise Cancelled
     else Lwt.return state
 
-  (* Whole-file upload: every chunk is read, hashed and sent unless the backend
-     already holds that content. For a file handed over as one file — import, and
-     the FileProvider's whole-file re-import. *)
+  (* For a file handed over whole: import, and the FileProvider's re-import. *)
   let upload ~key ~src_path ~mtime ~chunk_size ?(cancel = ref false) () =
     let* st = Lwt_unix_retry.stat src_path in
     let file_size = st.Unix.st_size in
@@ -246,11 +225,9 @@ module Make_with_layout (C : Conf.S) (L : Layout.S) : S = struct
     let* entries =
       Lwt.finalize
         (fun () ->
-          (* Launching every chunk's task up front is safe even for files
-             with thousands of chunks: each one immediately blocks on the
-             [chunk_buffers] pool until a slot is free, so real concurrency
-             stays capped at [max_uploads] regardless of how many chunks (or
-             how many other files' chunks) are contending for one. *)
+          (* Safe to launch every chunk's task up front: each blocks on the
+             [chunk_buffers] pool until a slot frees, so concurrency stays capped
+             at [max_uploads] however many chunks contend. *)
           Lwt_list.map_p
             (upload_chunk fd ~cancel ~file_size ~chunk_size)
             (List.init num_chunks Fun.id))
@@ -259,10 +236,9 @@ module Make_with_layout (C : Conf.S) (L : Layout.S) : S = struct
     publish ~key ~name:(Filename.basename key) ~size:(Int64.of_int file_size)
       ~chunk_size ~mtime ~cancel entries
 
-  (* Upload a file whose bytes the caller supplies per chunk: [source index] is
-     either the key of a chunk to keep as-is (unchanged, never read or sent) or
-     the chunk's bytes. Knowing nothing about where those bytes live keeps
-     staging out of this module. An empty file still gets one (empty) chunk, so
+  (* [source index] is either the key of a chunk to keep as-is (never read or
+     sent) or the chunk's bytes; knowing nothing about where those live keeps
+     staging out of this module. An empty file still gets one empty chunk, so
      every manifest has at least one. *)
   let upload_chunks ~key ~name ~size ~chunk_size ~mtime
       ~(source : int -> [ `Reuse of string | `Data of string ] Lwt.t)
@@ -287,24 +263,21 @@ module Make_with_layout (C : Conf.S) (L : Layout.S) : S = struct
     match body with
       | None -> None
       | Some body -> (
-          (* A manifest that fails to parse is treated as absent: stat/getattr
-             report ENOENT rather than surfacing garbage metadata. *)
+          (* An unparseable manifest is treated as absent, so stat reports ENOENT
+             rather than garbage metadata. *)
             match Manifest.of_string body with
             | m -> Some m
             | exception _ -> None)
 
-  (* ── Recheck: verify remote state against local data / sidecar ─────────── *)
-
-  (* A chunk is correct remotely when it exists on the primary backend and its
-     size matches: chunk keys are content-addressed, so a size mismatch means
-     the remote object is corrupt. *)
+  (* Chunk keys are content-addressed, so a size mismatch means the remote object
+     is corrupt. *)
   let chunk_remote_ok ~chunk_key ~size =
     let (module Primary : Backend.S) = primary () in
     let+ head = Primary.head_opt ~key:(chunk_backend_key chunk_key) () in
     match head with Some h -> h.Backend.size = size | None -> false
 
-  (* Fetch the remote manifest for [key] and republish [expected] when it is
-     missing, dirty or differs. Returns [true] when a repair was made. *)
+  (* Republishes [expected] when the remote manifest is missing, dirty or
+     differs. [true] when a repair was made. *)
   let recheck_manifest ~key (expected : Manifest.t) =
     let* remote = fetch_manifest ~key () in
     let ok =

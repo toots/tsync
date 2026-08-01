@@ -1,9 +1,8 @@
-(* Transfer and hashing counters for the stats command. Bytes are counted at
-   the chunk put/get choke points (actual data volume, not small metadata);
-   hashes count chunks hashed. Each counter keeps a cumulative total (for the
-   lifetime mean) and a ring of one-second buckets (for a recent rolling rate).
+(* Transfer and hashing counters. Bytes are counted at the chunk put/get choke
+   points, so they are data volume rather than metadata. Each counter keeps a
+   cumulative total and a ring of one-second buckets for a rolling rate.
 
-   Touched only from the Lwt event-loop thread, so no locking is needed. *)
+   Touched only from the Lwt event-loop thread, so no locking. *)
 
 let window = 10 (* seconds in the rolling-rate window *)
 
@@ -36,8 +35,7 @@ let rate c =
   advance c (now_sec ());
   float_of_int (Array.fold_left ( + ) 0 c.buckets) /. float_of_int window
 
-(* The same counter, for anyone outside this module who wants a throughput figure
-   without a second implementation of the ring. *)
+(* Exposed so nothing outside reimplements the ring for its own rate. *)
 let counter = make
 let count = add
 let total c = c.total
@@ -54,8 +52,8 @@ let upload_rate () = rate uploaded_c
 let download_rate () = rate downloaded_c
 let hash_rate () = rate hashed_c
 
-(* Cumulative CPU seconds used by this process (user + system). The grapher
-   diffs consecutive samples to get CPU%. Cross-platform via stdlib. *)
+(* Cumulative CPU seconds (user + system); callers diff consecutive samples for a
+   percentage. *)
 let cpu_seconds () =
   let t = Unix.times () in
   t.Unix.tms_utime +. t.Unix.tms_stime
@@ -63,9 +61,8 @@ let cpu_seconds () =
 (* Current resident set size in bytes. *)
 let rss_bytes () = (Mem_usage.info ()).Mem_usage.process_physical_memory
 
-(* OCaml heap alongside the RSS above: the two disagreeing is itself the answer
-   (a large RSS with a small heap is buffers and mmapped cache reads, not a leak
-   in OCaml code). *)
+(* Read next to the RSS above: a large RSS over a small heap is buffers and
+   mapped cache reads, not an OCaml leak. *)
 type gc = {
   heap_bytes : int;
   top_heap_bytes : int;
@@ -83,9 +80,8 @@ let gc_stats () =
     major_collections = s.Gc.major_collections;
   }
 
-(* The event loop's own load: descriptors it is watching, timers pending, and the
-   blocking-syscall pool ceiling. A server that has stopped answering while its
-   CPU is idle shows up here as watched descriptors that never drain. *)
+(* The event loop's load. A server that stopped answering while its CPU is idle
+   shows up here as watched descriptors that never drain. *)
 type lwt = {
   readable_fds : int;
   writable_fds : int;
@@ -101,9 +97,7 @@ let lwt_stats () =
     pool_size = Lwt_unix.pool_size ();
   }
 
-(* Byte counts as a person reads them. Here rather than in the CLI so every
-   report — [tsync stats], the http-proxy status page — spells a size the same
-   way. *)
+(* Here rather than in the CLI, so every report spells a size the same way. *)
 let human_bytes n =
   let units = [| "B"; "KB"; "MB"; "GB"; "TB" |] in
   let v = ref (float_of_int n) and i = ref 0 in

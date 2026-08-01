@@ -1,9 +1,8 @@
 open Lwt.Syntax
 
-(* Stored chunk size for the scenarios. Forced small via [TSYNC_CHUNK_SIZE] so a
-   test can exercise multi-chunk files without multi-megabyte fixtures; each
-   scenario's conf sets it explicitly, and every manifest records its own, so
-   nothing outside the tests reads this. *)
+(* Forced small via [TSYNC_CHUNK_SIZE] so a test exercises multi-chunk files
+   without multi-megabyte fixtures. Each scenario's conf sets it explicitly and
+   every manifest records its own, so nothing outside the tests reads this. *)
 let env_int name ~default =
   match Sys.getenv_opt name with
     | Some s -> ( try int_of_string s with _ -> default)
@@ -11,9 +10,8 @@ let env_int name ~default =
 
 let chunk_size = env_int "TSYNC_CHUNK_SIZE" ~default:Conf.default_chunk_size
 
-(* Cache chunk size: the same as the stored chunk size unless a test sets
-   [TSYNC_CACHE_CHUNK_SIZE], so grouping is off by default and a test that wants
-   it opts in. *)
+(* Equal to the stored chunk size unless a test sets [TSYNC_CACHE_CHUNK_SIZE], so
+   grouping is opt-in. *)
 let cache_chunk_size = env_int "TSYNC_CACHE_CHUNK_SIZE" ~default:chunk_size
 
 type step =
@@ -48,11 +46,11 @@ type step =
   | ShowNames of string
       (** Print the raw entry names FUSE readdir serves for a directory. *)
   | Stat of string
-      (** Query a path through the IPC [stat] action. A query must leave nothing
+      (** Query a path through the IPC [stat] action. A query leaves nothing
           behind: an absent path answers "not found" and stays absent. *)
   | Mark  (** record the current time, as an [Expire "mark"] cutoff *)
   | Expire of string
-      (** cutoff selector: "all" (now), "none" (epoch), or "mark" *)
+      (** Cutoff selector: "all" (now), "none" (epoch), or "mark". *)
   | Drain
   | Sync
   | DeleteRemoteChunk of { path : string; index : int }
@@ -69,8 +67,8 @@ type step =
   | RecoverStaged
       (** Replay every upload the staged tree still owes, as a restart does. *)
   | ClearCache
-      (** Wipe the local cache the way a full resync does — manifest mirror,
-          chunk store and all — keeping only the staged tree. *)
+      (** Wipe the local cache the way a full resync does: manifest mirror and
+          chunk store, keeping only the staged tree. *)
   | OnSecondary of step
   | ResyncRemote
   | LocalWrite of { path : string; content : string }
@@ -82,8 +80,6 @@ type step =
 type scenario = { name : string; steps : step list }
 type two_client_step = A of step | B of step
 type two_client_scenario = { name : string; steps : two_client_step list }
-
-(* ── Helpers ──────────────────────────────────────────────────────────────── *)
 
 let rec rm_rf path =
   match Unix.lstat path with
@@ -181,11 +177,9 @@ let starts_with prefix s =
   String.length s >= String.length prefix
   && String.sub s 0 (String.length prefix) = prefix
 
-(* ── IPC response snapshots ───────────────────────────────────────────────── *)
-
-(* Render an IPC response verbatim, stabilising only the non-deterministic parts:
-   wall-clock mtimes, journal-key cursors, and the filesystem-order [files]/[dirs]
-   arrays. etags (content hashes) and keys are deterministic and shown as-is. *)
+(* Verbatim but for the non-deterministic parts: wall-clock mtimes, journal-key
+   cursors, and the filesystem-order [files]/[dirs] arrays. etags and keys are
+   deterministic and shown as-is. *)
 let ipc_entry_key = function
   | `Assoc kvs -> (
       match List.assoc_opt "key" kvs with Some (`String s) -> s | _ -> "")
@@ -214,8 +208,6 @@ let print_ipc label obj =
   Printf.printf "  %s -> %s\n" label
     (Yojson.Safe.to_string (normalize_ipc (`Assoc obj)))
 
-(* ── Client setup ─────────────────────────────────────────────────────────── *)
-
 type client = {
   do_step : step -> unit Lwt.t;
   drain : unit -> unit Lwt.t;
@@ -226,13 +218,13 @@ type client = {
   dump_listing : unit -> unit Lwt.t;
   dump_changes : label:string -> anchor:string -> unit Lwt.t;
   cursor : unit -> string Lwt.t;
-  (* The daemon's own report, as [tsync stats] and the http-proxy serve it. Whole
-     JSON rather than a snapshot: most of it is pids, uptimes and paths. *)
+  (* Whole JSON rather than a snapshot: most of it is pids, uptimes and
+     paths. *)
   stats : unit -> (string * Yojson.Safe.t) list Lwt.t;
 }
 
-(* Tests drive the real IPC handler directly (no socket): every daemon service
-   and the handler all run on the one Lwt event loop [run_scenario] spins up. *)
+(* The real IPC handler, driven directly without a socket: every daemon service
+   and the handler run on the one Lwt loop [run_scenario] spins up. *)
 let setup_client (module C : Conf.S) root staging_prefix =
   let module Sq = Sync_queue.Make (C) in
   let module F = File.Make (C) (Sq) in
@@ -241,8 +233,8 @@ let setup_client (module C : Conf.S) root staging_prefix =
   let module Sp = Sync_poller.Make (C) (F) in
   let module J = Journal.Make (C) in
   let module L = Layout.Inode.Make (C) in
-  (* What the daemon declares for diagnosis ([bin/cli.ml build_backends]), so the
-     [stats] action has a store to report on here too. *)
+  (* What the daemon declares for diagnosis ([bin/cli.ml build_backends]), so
+     [stats] has a store to report on here too. *)
   Backend.report_members ~domain:C.domain_name
     [
       {
@@ -272,8 +264,8 @@ let setup_client (module C : Conf.S) root staging_prefix =
         changed = (fun _ -> ());
         full_resync = (fun () -> Lwt.return_unit);
         status_fields = (fun () -> []);
-        (* Frontends name themselves in their stats, as fuse and file_provider do,
-           so the report can say whose numbers these are. *)
+        (* Frontends name themselves in their stats, as fuse and file_provider
+           do, so the report can say whose numbers these are. *)
         stats_fields = (fun () -> [("frontend", `String "test")]);
         on_stop = (fun () -> ());
       }
@@ -965,8 +957,6 @@ let dump_backend_at ~backend_root ~domain_prefix ~chunk_prefix ~journal_prefix
         Lwt.return_unit))
     entries
 
-(* ── Scenario runners ─────────────────────────────────────────────────────── *)
-
 (* Seed the RNG so [Folder.new_id] is deterministic within a scenario: folder ids
    are then stable across runs, which keeps both the backend-key ordering and the
    snapshots reproducible (and makes the real ids readable in the dump). Each
@@ -1171,8 +1161,6 @@ let run ?versioning ?symlink_policy scenarios =
 
 let run_two_client_scenarios ?versioning scenarios =
   List.iter (run_two_client_scenario ?versioning) scenarios
-
-(* ── IPC snapshot runners ─────────────────────────────────────────────────── *)
 
 let make_conf ?(versioning = false) ~client_name ~backend_root ~cache_root
     ~data_dir ~socket_path () : (module Conf.S) =

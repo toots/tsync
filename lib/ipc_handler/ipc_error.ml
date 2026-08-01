@@ -1,12 +1,11 @@
 (* What went wrong, as something a caller can act on.
 
-   The frontends have to turn a failure into their own vocabulary, and the macOS
-   one has to be careful about which: some of its error codes make the system
-   back off until it is signalled again, and others make it retry. Getting that
-   backwards turns a daemon restart into a domain that stays broken. Matching on
-   the wording of an exception is how that choice silently stops being made the
-   day the wording changes, so the wire carries a code and the prose comes along
-   only for a human to read. *)
+   Frontends translate a failure into their own vocabulary, and the macOS one must
+   pick carefully: some of its error codes make the system back off until
+   signalled, others make it retry, and getting that backwards turns a daemon
+   restart into a domain that stays broken. Matching on the wording of an
+   exception breaks the day the wording changes, so the wire carries a code and
+   the prose is only for a human. *)
 
 type t =
   [ `Not_found
@@ -28,10 +27,9 @@ let to_string = function
   | `Invalid -> "invalid"
   | `Internal -> "internal"
 
-(* [Unreachable] is the one that costs something to get wrong: it tells a caller
-   the store is the problem and to stop trying for now. Anything we cannot place
-   is [Internal], which a caller retries — one unexplained failure should cost
-   one operation, not the domain. *)
+(* [Unreachable] tells a caller the store is the problem and to stop trying, so
+   anything unplaceable is [Internal] and retried: one unexplained failure should
+   cost one operation, not the domain. *)
 let of_exn = function
   | Unix.Unix_error (Unix.ENOENT, _, _) -> `Not_found
   | Unix.Unix_error (Unix.EEXIST, _, _) -> `Exists

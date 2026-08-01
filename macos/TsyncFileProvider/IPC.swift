@@ -102,12 +102,11 @@ public enum IPC {
 
     // MARK: - Low-level send
 
-    // FileProvider only accepts errors in NSCocoaErrorDomain or NSFileProviderErrorDomain.
-    // Returning our own domain makes fileproviderd treat the failure as fatal and cache an
-    // empty listing forever, so every IPCError must be mapped: "not found" to noSuchItem,
-    // everything else (connection failures, daemon-side S3 errors — transient from our
-    // perspective) to serverUnreachable so fileproviderd retries. Non-IPC errors (e.g.
-    // CocoaError from staging file operations) are already in an accepted domain.
+    // FileProvider accepts only NSCocoaErrorDomain and NSFileProviderErrorDomain;
+    // any other domain makes fileproviderd treat the failure as fatal and cache an
+    // empty listing forever. So "not found" maps to noSuchItem and everything else
+    // (connection failures, daemon-side S3 errors) to serverUnreachable, which is
+    // retried. Non-IPC errors are already in an accepted domain.
     static func fileProviderError(_ error: Error) -> Error {
         switch error {
         case IPCError.remoteError("not found"):
@@ -189,9 +188,8 @@ public enum IPC {
         try await sendAsync(IPCRequest(action: "changes_since", arg: anchor, domain: domain))
     }
 
-    /// [dest] is where the daemon writes the assembled file. The extension may not
-    /// move a file into the directory the system wants it in, so it asks for the
-    /// bytes to land there in the first place.
+    /// [dest] is where the daemon writes the assembled file: the extension may
+    /// not move one into the directory the system wants it in.
     public static func ensureCached(key: String, dest: String) async throws -> IPCResponse {
         try await sendAsync(IPCRequest(action: "ensure_cached", path: key, dest: dest))
     }

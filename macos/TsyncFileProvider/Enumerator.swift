@@ -9,10 +9,9 @@ final class TsyncEnumerator: NSObject, NSFileProviderEnumerator, @unchecked Send
     private let domainName: String
     private let readOnly: Bool
 
-    /// The listing this enumeration is walking. Fetched once and paged from
-    /// memory: the system asks for page after page from the same enumerator, and
-    /// re-listing per page would both cost a round trip each time and let the
-    /// contents shift underneath, which shows up as items skipped or repeated.
+    /// Fetched once and paged from memory: re-listing per page would cost a
+    /// round trip each time and let the contents shift underneath, showing up as
+    /// items skipped or repeated.
     private var page: [DaemonItem]?
 
     init(container: NSFileProviderItemIdentifier, client: DaemonClient,
@@ -41,14 +40,10 @@ final class TsyncEnumerator: NSObject, NSFileProviderEnumerator, @unchecked Send
 
     private func listing() async throws -> [DaemonItem] {
         if let page { return page }
-        // The working set lists the domain's top level, not the whole tree.
-        // Enumerating everything is the other documented option, and it was tried
-        // here: on a real media domain it left the extension re-listing the tree
-        // continuously and the daemon resolving a manifest per file, at hundreds
-        // of megabytes of resident memory, without ever settling. Nothing was
-        // gained for it — remote changes reach the system through
-        // enumerateChanges below, which reports items at any depth straight from
-        // the journal.
+        // Top level only. Enumerating the whole tree is the other documented
+        // option; on a real media domain it left the extension re-listing
+        // continuously at hundreds of megabytes resident without settling, and
+        // gained nothing — enumerateChanges below reports items at any depth.
         //
         // ponytail: an item outside the working set whose parent is never browsed
         // learns about changes only through that change feed. Track the
@@ -60,7 +55,7 @@ final class TsyncEnumerator: NSObject, NSFileProviderEnumerator, @unchecked Send
         return items
     }
 
-    /// A page's rawValue is an offset into the listing above; the initial-page
+    /// A page's rawValue is an offset into the listing; the initial-page
     /// sentinels are not integers and read as zero.
     private func offset(of page: NSFileProviderPage) -> Int {
         guard let s = String(data: page.rawValue, encoding: .utf8),
@@ -70,10 +65,8 @@ final class TsyncEnumerator: NSObject, NSFileProviderEnumerator, @unchecked Send
 
     private func emit(_ items: [DaemonItem], from offset: Int,
                       to observer: any NSFileProviderEnumerationObserver) {
-        // Reporting too much at once aborts the extension with
-        // __FILEPROVIDER_OBSERVER_TOO_MANY_ITEMS__, which is the system enforcing
-        // a hundred times the size it asked for. Ask what it wants rather than
-        // guessing a number.
+        // Over a hundred times the requested page size, the system aborts the
+        // extension with __FILEPROVIDER_OBSERVER_TOO_MANY_ITEMS__.
         let size = observer.suggestedPageSize ?? 100
         let end = min(offset + max(size, 1), items.count)
         if offset < end {
@@ -95,8 +88,8 @@ final class TsyncEnumerator: NSObject, NSFileProviderEnumerator, @unchecked Send
         Task {
             let (token, cursor) = decode(anchor)
             guard token == Config.resyncToken(domain: domainName) else {
-                // The daemon rebuilt its mirror since this anchor was handed out,
-                // so no delta can bridge it.
+                // The mirror was rebuilt since this anchor was issued, so no
+                // delta can bridge it.
                 observer.finishEnumeratingWithError(
                     NSFileProviderError(.syncAnchorExpired))
                 return
@@ -104,8 +97,8 @@ final class TsyncEnumerator: NSObject, NSFileProviderEnumerator, @unchecked Send
             do {
                 let response = try await client.changesSince(cursor)
                 if response.stale == true {
-                    // The journal no longer reaches back this far, or a change
-                    // names something this client cannot describe yet.
+                    // The journal no longer reaches back this far, or names
+                    // something this client cannot describe.
                     observer.finishEnumeratingWithError(
                         NSFileProviderError(.syncAnchorExpired))
                     return
@@ -116,10 +109,9 @@ final class TsyncEnumerator: NSObject, NSFileProviderEnumerator, @unchecked Send
                 observer.finishEnumeratingChanges(
                     upTo: encode(cursor: response.cursor ?? cursor), moreComing: false)
             } catch {
-                // Never report success here. Finishing at the anchor we started
-                // from claims the client is up to date, so the system stops
-                // asking — and a failure then looks exactly like "nothing
-                // changed", for as long as the domain lives.
+                // Never report success: finishing at the anchor we started from
+                // claims the client is up to date and the system stops asking,
+                // for as long as the domain lives.
                 log.error("enumerateChanges failed: \(error, privacy: .public)")
                 observer.finishEnumeratingWithError(FileProviderError.from(error))
             }
@@ -129,8 +121,8 @@ final class TsyncEnumerator: NSObject, NSFileProviderEnumerator, @unchecked Send
     /// Turn journal ops into the two sets the observer takes.
     ///
     /// The ops are ordered but the observer's sets are not, so only a reference's
-    /// *last* op may be reported: a key created and then deleted in one batch
-    /// would otherwise be resurrected by the creation.
+    /// last op may be reported: a key created then deleted in one batch would
+    /// otherwise be resurrected by the creation.
     private func resolve(_ ops: [DaemonOp]) async throws
         -> ([NSFileProviderItem], [NSFileProviderItemIdentifier]) {
         var lastIndex: [String: Int] = [:]
@@ -145,9 +137,8 @@ final class TsyncEnumerator: NSObject, NSFileProviderEnumerator, @unchecked Send
             guard let ref = op.ref, lastIndex[ref] == i,
                   let id = ItemID.parse(ref) else { continue }
 
-            // A rename's source is gone unless something later put it back. A
-            // directory keeps its reference across a move, so this only fires for
-            // a file, or for a directory that genuinely became something else.
+            // A directory keeps its reference across a move, so this fires only
+            // for a file, or a directory that became something else.
             if let src = op.srcRef, src != ref, (lastIndex[src] ?? -1) < i,
                let srcID = ItemID.parse(src) {
                 deleted.append(srcID.identifier)
@@ -157,8 +148,8 @@ final class TsyncEnumerator: NSObject, NSFileProviderEnumerator, @unchecked Send
             case "delete", "rmdir":
                 deleted.append(id.identifier)
             default:
-                // put, mkdir, rename. Ask what the item looks like now; if it has
-                // gone in the meantime, report that instead of a stale creation.
+                // put, mkdir, rename. An item gone in the meantime is reported
+                // as such rather than as a stale creation.
                 do {
                     let item = try await client.stat(ref)
                     if let built = TsyncItem.make(item, readOnly: readOnly) {
@@ -177,9 +168,8 @@ final class TsyncEnumerator: NSObject, NSFileProviderEnumerator, @unchecked Send
             do {
                 completionHandler(encode(cursor: try await client.currentCursor()))
             } catch {
-                // No anchor rather than an invented one. A made-up anchor would be
-                // handed back later as a cursor the daemon cannot parse, buying a
-                // full rescan to learn what asking again would have said.
+                // No anchor rather than an invented one: a made-up cursor comes
+                // back unparseable and costs a full rescan.
                 completionHandler(nil)
             }
         }
@@ -187,8 +177,8 @@ final class TsyncEnumerator: NSObject, NSFileProviderEnumerator, @unchecked Send
 
     // MARK: - Anchors
 
-    /// An anchor records which generation of the mirror it was issued against, so
-    /// a resync invalidates every outstanding one without having to reach them.
+    /// An anchor records the mirror generation it was issued against, so a
+    /// resync invalidates every outstanding one without reaching them.
     private func encode(cursor: String) -> NSFileProviderSyncAnchor {
         let token = Config.resyncToken(domain: domainName)
         return NSFileProviderSyncAnchor("\(token)|\(cursor)".data(using: .utf8)!)

@@ -35,12 +35,11 @@ let string_of_error = function
 
 let s3_eio msg = Unix.Unix_error (Unix.EIO, "s3", msg)
 
-(* B2 (and S3 under load) routinely answers 503: the client is expected to back
-   off and retry, not fail the operation. Connection-level failures are equally
-   transient — whether the client surfaces them as [S3.Failed] or raises them
-   outright (a DNS "Failed to resolve host", a dropped socket, a TLS reset). Both
-   forms are retried with exponential backoff and jitter, capped per attempt and
-   in attempt count; only [Cancelled] is never retried. *)
+(* B2 (and S3 under load) routinely answers 503, expecting a back off and retry
+   rather than a failed operation. Connection-level failures are equally
+   transient, whether surfaced as [S3.Failed] or raised outright (DNS, a dropped
+   socket, a TLS reset). Both are retried with exponential backoff and jitter,
+   capped per attempt and in attempt count; only [Cancelled] is never retried. *)
 let max_attempts = 8
 
 let is_transient = function
@@ -164,14 +163,13 @@ let copy t ~src_key ~dst_key () =
   put t ~key:dst_key ~data ()
 
 let list_all t ?max_keys ~prefix () =
-  (* Accumulate pages in reverse (prepend, O(1) each) rather than appending
-     each page onto a growing list (O(page count) each, so O(n^2) overall
-     across a large prefix) — this runs unbounded over however many objects
-     share the prefix, e.g. the full chunk store during GC.
+  (* Reverse accumulation for O(1) prepend: appending each page onto a growing
+     list is O(n^2) overall, and this runs unbounded over however many objects
+     share the prefix (the whole chunk store during GC).
 
-     [max_keys] caps how many entries we return and stops pagination once
-     reached, so a bounded existence check ("does this prefix hold anything?")
-     costs a single small request instead of a full recursive listing. *)
+     [max_keys] caps the entries returned and stops pagination once reached, so a
+     bounded existence check costs one small request rather than a full recursive
+     listing. *)
   let enough acc =
     match max_keys with
       | None -> false
@@ -219,9 +217,8 @@ let make ?endpoint ?unsigned_payload ?share_url ~bucket ~region ~access_key_id
     let share_url ~prefix:_ () = Lwt.return t.share_url
     let default_chunk_size ~prefix:_ () = Lwt.return_none
 
-    (* No opinion: what limits an object store is the network and its own
-       concurrency, neither of which this process can measure, and both of which
-       take far more at once than any device would. *)
+    (* No opinion: an object store is limited by the network and its own
+       concurrency, neither measurable from here. *)
     let max_concurrency ~prefix:_ () = Lwt.return_none
   end)
 

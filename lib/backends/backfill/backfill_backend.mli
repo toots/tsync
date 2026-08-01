@@ -4,38 +4,34 @@
     A backfill target is a converging copy, not a replica: never read from,
     never in the way of a foreground write. It receives chunks as they are
     written, and a manifest only once every chunk that manifest names is
-    confirmed present on it — so it never holds a manifest referencing blocks it
-    does not have, which is what a copy of a deduped file (a file copy, an
-    incremental re-upload) would otherwise leave behind.
+    confirmed present — so it never holds a manifest referencing blocks it
+    lacks, which is what a copy of a deduped file would otherwise leave behind.
 
-    The role is for when copying the data already in the source of truth is
-    impractical or not worth it — a very large dataset whose full integrity is a
-    nice-to-have rather than a requirement. The target starts empty and covers
-    what gets written from then on, giving
-    {i partial coverage, never partial files}: what it holds is whole and
-    restorable, what it lacks is whole files. Use [`Replica] instead when the
-    copy has to be a guarantee.
+    The role is for when copying what the source of truth already holds is
+    impractical — a very large dataset whose full integrity is a nice-to-have.
+    The target starts empty and covers what is written from then on, giving
+    {i partial coverage, never partial files}. Use [`Replica] when the copy has
+    to be a guarantee.
 
-    Writes to a target are ordered, because a rename is a copy followed by a
+    Writes to a target are ordered, since a rename is a copy followed by a
     delete of the source. Chunk pushes are not, and are dropped when too many
-    are already in flight: the manifest step re-fetches whatever is missing, so
-    dropping one costs a fetch and nothing else.
+    are in flight: the manifest step re-fetches whatever is missing.
 
     Nothing here is durable. A daemon exit loses what is queued, and a target is
-    only ever filled with writes made while it was configured, so
+    only filled with writes made while it was configured, so
     [tsync resync-remote --source <main>] is both the initial fill and the
     repair. *)
 
 type sub = { name : string; backend : (module Backend.S) }
 
 (** How far behind one target is: jobs waiting, chunk pushes in flight, and
-    whether the queue overflowed and writes were dropped — the one state that
-    means [tsync resync-remote] is needed rather than patience. *)
+    whether the queue overflowed and dropped writes — the one state needing
+    [tsync resync-remote] rather than patience. *)
 type lane_stats = { queued : int; in_flight : int; degraded : bool }
 
 (** The composite, plus a live view of each target by name. Returned rather than
-    looked up globally so a process serving several domains cannot confuse two
-    targets that share a name. *)
+    global, so a process serving several domains cannot confuse two targets
+    sharing a name. *)
 type t = {
   backend : (module Backend.S);
   lanes : (string * (unit -> lane_stats)) list;
@@ -57,9 +53,8 @@ val make :
   backfills:sub list ->
   t
 
-(** Wait for every target configured in this process to catch up, giving up
-    after a bounded wait so an unreachable target cannot hang a command. {!make}
-    registers this with {!Backend.on_drain}, so callers normally reach it
-    through [Backend.drain]; it is exposed for tests that assert on what a
-    target holds. *)
+(** Wait for every target in this process to catch up, giving up after a bounded
+    wait so an unreachable one cannot hang a command. {!make} registers this
+    with {!Backend.on_drain}, so callers normally reach it through
+    [Backend.drain]; exposed for tests that assert on what a target holds. *)
 val drain_all : unit -> unit Lwt.t

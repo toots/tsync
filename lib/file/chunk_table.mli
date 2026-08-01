@@ -2,17 +2,15 @@
     chunk keys.
 
     Every field sits at a known offset and chunk [i]'s key is a substring at a
-    computed one, so reading a manifest costs a few microseconds and reading one
-    chunk key costs one substring. Nothing is parsed into a tree and no
-    per-chunk value exists until a caller asks for it — which is what makes a
-    31,230-chunk manifest cheap to open for its name alone.
+    computed one, so nothing is parsed into a tree and no per-chunk value exists
+    until a caller asks for it — which is what makes a 31,230-chunk manifest
+    cheap to open for its name alone.
 
     A local sidecar is {b mapped}, so its chunk keys live in the page cache
-    rather than the heap: file-backed, clean, and reclaimable by the kernel
-    under pressure. The mapping is released when the value is collected. This
-    relies on sidecars only ever being replaced by rename, never rewritten in
-    place — see {!Fs_util.atomic_write}. A body fetched from a backend is a
-    string and is read identically. *)
+    rather than the heap, released when the value is collected. This relies on
+    sidecars only being replaced by rename, never rewritten in place — see
+    {!Fs_util.atomic_write}. A body fetched from a backend is a string and is
+    read identically. *)
 
 type t
 
@@ -42,9 +40,8 @@ val symlink : t -> string option
     zero); a symlink has none. *)
 val count : t -> int
 
-(** Chunk [i]'s key, ["<h1>-<h2>"] — the spelling every other layer uses,
-    stored verbatim so this is one substring and never a concatenation. Raises
-    [Invalid_argument] outside [0, count). *)
+(** Chunk [i]'s key, ["<h1>-<h2>"], stored verbatim so this is one substring and
+    never a concatenation. Raises [Invalid_argument] outside [0, count). *)
 val key : t -> int -> string
 
 (** Bytes chunk [i] holds: [chunk_size] for every chunk but the last. Derived

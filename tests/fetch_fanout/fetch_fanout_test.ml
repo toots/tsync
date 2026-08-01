@@ -1,16 +1,13 @@
 (* How many files a whole-file fetch has open at once.
 
-   A file is asked for a group at a time, all groups at once, and each fetch
-   opens its destination before it waits for a download slot. Nothing bounded
-   that, so the descriptors held scaled with the *file*, not with the transfer:
-   one 250 MB file at a 1 MiB group size held 247 open files inside 200ms
-   against a 256 descriptor limit, and the daemon died on its next accept. The
-   download pool was never the thing being exceeded — only eight of those were
-   moving bytes; the rest were open files waiting for a turn.
+   A file is asked for all groups at once and each fetch opens its destination
+   before waiting for a download slot, so unbounded the descriptors held scale
+   with the file rather than the transfer: 247 open files inside 200ms on a 250 MB
+   file at a 1 MiB group size, against a 256 limit. The download pool was never
+   exceeded — the rest were open files waiting for a turn.
 
-   So what is measured here is descriptors, not parallelism. The fetch stub
-   blocks until released, which holds every fetch that has started in its
-   destination-open state — exactly the window that overflowed. *)
+   So what is measured is descriptors, not parallelism. The fetch stub blocks
+   until released, holding every started fetch in its destination-open state. *)
 
 open Lwt.Syntax
 
@@ -51,8 +48,7 @@ module C : Conf.S = struct
   let read_only = false
 end
 
-(* Every fetch parks here, so each one that has started is holding whatever it
-   opened. Releasing lets them all finish. *)
+(* Every fetch parks here, so each started one holds whatever it opened. *)
 let gate, release = Lwt.wait ()
 let started = ref 0
 
@@ -65,9 +61,8 @@ end
 
 module Cc = Chunk_cache.Make (C) (F)
 
-(* Destination files this process has open — what actually ran out. Counted
-   through lsof rather than inferred, since the whole point is the descriptor,
-   not the promise. *)
+(* Counted through lsof rather than inferred: the descriptor is the point, not
+   the promise. *)
 let open_cache_files () =
   let ic =
     Unix.open_process_in
@@ -80,8 +75,8 @@ let open_cache_files () =
   ignore (Unix.close_process_in ic);
   n
 
-(* One group per stored chunk, which is what a domain gets when its cache chunk
-   size equals its chunk size — jelly's shape, and the one that fans out most. *)
+(* One group per stored chunk, what a domain gets when its cache chunk size
+   equals its chunk size — the shape that fans out most. *)
 let group_of i =
   let key = Printf.sprintf "%016x-%016x" i (i * 7 land 0xffffffff) in
   Chunk_group.of_table
@@ -100,8 +95,8 @@ let () =
      (* Ask for the whole file at once, the way a materialization does. *)
      let all = Lwt_list.iter_p (fun group -> Cc.ensure ~group ()) groups in
 
-     (* Let everything that can start, start. Real filesystem work happens on
-        the blocking pool, so this waits rather than merely yielding. *)
+     (* Real filesystem work happens on the blocking pool, so this waits rather
+        than merely yielding. *)
      let rec settle n =
        if n = 0 then Lwt.return_unit
        else
@@ -116,7 +111,7 @@ let () =
        (List.length groups) !started open_files;
 
      (* The bound is on fetches in flight, so descriptors cannot scale with the
-        size of the file. Some slack for the temp file of a fetch mid-rename. *)
+        file. Slack for the temp file of a fetch mid-rename. *)
      check "open files do not scale with the file" (open_files <= slots + 4);
      check "no more fetches start than there are slots" (!started <= slots);
      check "but the transfer is not serialised either" (!started > 1);

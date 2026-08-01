@@ -15,10 +15,10 @@ module Make (C : Conf.S) = struct
   let primary = Bk.primary
   let delete_all = Bk.delete_many
 
-  (* Chunk keys referenced by the manifest stored at [key]. Directory markers
-     reference nothing; a dirty manifest is mid-write and has no committed
-     chunks. An unexpected parse failure aborts (raises) rather than reporting
-     "references nothing", which would let the sweep delete the file's chunks. *)
+  (* Directory markers reference nothing; a dirty manifest is mid-write and has
+     no committed chunks. An unexpected parse failure raises rather than
+     reporting "references nothing", which would let the sweep delete the file's
+     chunks. *)
   let referenced_chunks (module B : Backend.S) key =
     if Key.is_dir key then Lwt.return []
     else
@@ -38,10 +38,9 @@ module Make (C : Conf.S) = struct
 
   let parse = Versioning.parse ~versions_prefix:C.versions_prefix
 
-  (* All object keys under folder [folder_id] (recursively, following folder
-     markers), including the markers themselves — the reclaim set for a trashed
-     subtree. Errors propagate: collecting a short list here would leave part of
-     the subtree undeleted while its parent marker goes. *)
+  (* The reclaim set for a trashed subtree, markers included. Errors propagate: a
+     short list would leave part of the subtree undeleted while its parent marker
+     goes. *)
   let collect_namespace folder_id acc =
     Tree.fold_tree ~folder_id ~rel:""
       (fun acc _rel entry -> Lwt.return (entry.Inode_tree.bkey :: acc))
@@ -50,9 +49,8 @@ module Make (C : Conf.S) = struct
   let expire ~cutoff () =
     let (module B : Backend.S) = primary () in
     let cutoff_ns = Int64.of_float (cutoff *. 1e9) in
-    (* Phase 0: empty trashed folders past the cutoff. Delete the whole subtree
-       under each expired trash marker (recursively by folder id) so its chunks
-       drop out of the live set marked below. *)
+    (* Phase 0: empty trashed folders past the cutoff, whole subtree at a time,
+       so their chunks drop out of the live set marked below. *)
     let* trash =
       B.list_prefix ~prefix:(C.domain_prefix ^ Folder.trash_id ^ "/") ()
     in
@@ -84,8 +82,8 @@ module Make (C : Conf.S) = struct
                | None -> (expired, surviving))
            ([], [])
     in
-    (* Phase 2: mark chunks referenced by live files and surviving versions.
-       Done before any deletion so a bad manifest aborts with nothing removed.
+    (* Phase 2: mark chunks referenced by live files and surviving versions,
+       before any deletion, so a bad manifest aborts with nothing removed.
        ponytail: GET per manifest — no chunk refcount index; add one only if a
        scan measurably hurts. *)
     let live = Hashtbl.create 4096 in
@@ -99,8 +97,7 @@ module Make (C : Conf.S) = struct
     in
     let* () = Lwt_list.iter_s (fun (key, _rel) -> mark key) surviving in
     (* Phase 3: delete expired versions, then the version directories they
-       emptied. On S3 no directory object exists, so those deletes are harmless
-       no-ops; on a filesystem backend they prune the now-empty directory. *)
+       emptied. No-ops on S3, where no directory object exists. *)
     let* () = delete_all (List.map fst expired) in
     let survivor_rels = List.map snd surviving in
     let* () =
@@ -115,8 +112,8 @@ module Make (C : Conf.S) = struct
     let unreferenced =
       chunks
       |> List.filter_map (fun (e : Backend.file_entry) ->
-          (* The store is sharded ({!Chunk_layout}), so the key is the entry's
-             last path segment, not everything past the prefix. *)
+          (* Sharded ({!Chunk_layout}), so the key is the entry's last path
+             segment, not everything past the prefix. *)
           let ck = Filename.basename e.key in
           if Hashtbl.mem live ck then (
             incr kept;
@@ -124,16 +121,16 @@ module Make (C : Conf.S) = struct
           else Some e.key)
     in
     let* () = delete_all unreferenced in
-    (* Phase 5: drop journal entries older than the cutoff. The journal only ever
+    (* Phase 5: drop journal entries older than the cutoff. The journal only
        grows — one object per write — and nothing else prunes it. Age is the only
        safe criterion: the cursor says what was published, not what every client
-       has applied, so entries above it are still owed to clients that are
-       behind. A client offline longer than the retention window has to resync
-       anyway, since the versions and trashed files it missed are gone too.
+       has applied, so entries above it are still owed to clients that are behind.
+       A client offline longer than the retention window must resync anyway, the
+       versions and trashed files it missed being gone too.
 
-       The entry the cursor names is kept whatever its age: a quiet domain whose
-       last write predates the cutoff would otherwise be left with a cursor
-       pointing at nothing. *)
+       The entry the cursor names is kept whatever its age, or a quiet domain
+       whose last write predates the cutoff is left with a cursor pointing at
+       nothing. *)
     let* cursor = Fs.fetch_cursor () in
     let cutoff_ms = Int64.of_float (cutoff *. 1000.) in
     let* journal = B.list_prefix ~prefix:C.journal_prefix () in

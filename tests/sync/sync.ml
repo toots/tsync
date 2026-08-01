@@ -1,8 +1,7 @@
-(* Sync scenarios: two full client instances (A and B) share the same backend
-   but keep separate caches, data dirs and journal identities. Client A makes
-   changes through the normal user-facing IPC operations; client B picks them
-   up via [Sync] (the same code path as the background sync poller). The final
-   snapshot shows both clients' views plus the shared backend state. *)
+(* Two full clients (A and B) share a backend but keep separate caches, data dirs
+   and journal identities. A makes changes through the user-facing IPC
+   operations; B picks them up via [Sync], the same path the background poller
+   takes. The snapshot shows both views plus the shared backend state. *)
 
 open Test_runner
 
@@ -109,12 +108,11 @@ let foreign_rmdir =
       ];
   }
 
-(* The shape a media manager actually produces: it re-creates a directory it
-   already has before filling it, so the same path is mkdir'd several times
-   before anything deletes it. The folder marker's key is derived from the
-   parent's id and the name, so every mkdir should address the same object and
-   the final rmdir should take it away — one leftover marker is enough for the
-   folder to come back on the next full resync. *)
+(* The shape a media manager produces: it re-creates a directory it already has
+   before filling it, so one path is mkdir'd several times before anything
+   deletes it. The marker's key derives from the parent's id and the name, so
+   every mkdir addresses the same object and the final rmdir takes it away — one
+   leftover marker brings the folder back on the next full resync. *)
 let foreign_rmdir_after_repeated_mkdir =
   {
     name = "foreign_rmdir_after_repeated_mkdir";
@@ -139,7 +137,7 @@ let foreign_rmdir_after_repeated_mkdir =
 
 (* Both clients create the same directory before either deletes it. Each mints a
    folder id locally when it has no marker, so this is where two markers for one
-   path could come from — and only one of them can be the marker rmdir removes. *)
+   path could come from, and rmdir removes only one. *)
 let concurrent_mkdir_then_rmdir =
   {
     name = "concurrent_mkdir_then_rmdir";
@@ -173,9 +171,9 @@ let concurrent_create =
       ];
   }
 
-(* A overwrites a file B currently has open. The sync must not touch it: B
-   keeps its cached version until the file is closed. (The change is only
-   picked up again on a later foreign op or a full resync.) *)
+(* A overwrites a file B has open. The sync must not touch it: B keeps its cached
+   version until the file is closed, and picks the change up on a later foreign op
+   or a full resync. *)
 let open_file_guard =
   {
     name = "open_file_guard";

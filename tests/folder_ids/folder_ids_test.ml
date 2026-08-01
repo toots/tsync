@@ -1,10 +1,9 @@
 (* Reading a folder's path back out of its id.
 
-   This is what an item identifier asks, and the answers that matter are the
-   negative ones: a folder that is gone must resolve to nothing, or the caller
-   goes on believing in a directory that was deleted. The index is derived from
-   the [.tsync-dir] markers and can be rebuilt from them, so the tests here also
-   damage it deliberately and check it heals. *)
+   What an item identifier asks, and the answers that matter are the negative
+   ones: a folder that is gone must resolve to nothing, or the caller goes on
+   believing in a deleted directory. The index derives from the [.tsync-dir]
+   markers, so it is also damaged deliberately here and checked to heal. *)
 
 open Lwt.Syntax
 
@@ -35,13 +34,12 @@ let index_file id =
   Filename.concat (Cache_layout.folders_dir ~cache_root domain_name) id
 
 let main () =
-  (* ── A minted folder is findable by its id, ancestors and all ───────────── *)
   let* deep = ensure "a/b/c" in
   let* got = rel_of deep in
   check "a minted folder resolves back to its path" (got = Some "a/b/c");
 
-  (* Intermediates are minted on the way, so every folder on the path has an
-     identity — one with none could not be named in a listing. *)
+  (* Intermediates are minted on the way: a folder with no id could not be named
+     in a listing. *)
   let* a = lookup "a" in
   let* b = lookup "a/b" in
   check "ancestors are minted too" (a <> None && b <> None);
@@ -53,7 +51,6 @@ let main () =
   let* missing = rel_of "0000000000000000" in
   check "an unknown id resolves to nothing" (missing = None);
 
-  (* ── A rename keeps the id and moves the path ───────────────────────────── *)
   let* () = Lwt_unix.rename (mirror "a/b") (mirror "a/moved") in
   let* () = reparent "a/moved" in
   let* got = rel_of deep in
@@ -61,14 +58,12 @@ let main () =
   let* still = lookup "a/moved" in
   check "the renamed folder is the same folder" (still = b);
 
-  (* ── A deleted folder resolves to nothing ──────────────────────────────── *)
   let* () = Fs_util.rm_rf (mirror "a/moved") in
   let* gone = rel_of deep in
   check "a deleted folder resolves to nothing" (gone = None);
   let* gone_parent = rel_of (Option.get b) in
   check "its deleted parent does too" (gone_parent = None);
 
-  (* ── A wrong index entry cannot hand back the wrong folder ─────────────── *)
   let* other = ensure "elsewhere" in
   let* () =
     Fs_util.atomic_write (index_file other)
@@ -80,12 +75,10 @@ let main () =
   check "a corrupted entry does not resolve to another folder"
     (wrong = Some "elsewhere");
 
-  (* ── A missing index heals ──────────────────────────────────────────────── *)
   let* () = Fs_util.rm_rf (Cache_layout.folders_dir ~cache_root domain_name) in
   let* healed = rel_of other in
   check "a lost index is rebuilt on demand" (healed = Some "elsewhere");
 
-  (* ── Rebuild drops entries for folders that no longer exist ─────────────── *)
   let* stale = ensure "temporary" in
   let* () = Fs_util.rm_rf (mirror "temporary") in
   let* () = rebuild () in

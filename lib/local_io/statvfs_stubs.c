@@ -1,13 +1,12 @@
 /* Free and total bytes of the filesystem holding a path.
  *
- * The OCaml stdlib has no statvfs binding and pulling in a whole POSIX-extras
- * library for one call is not worth it. POSIX, so one implementation serves both
- * platforms tsync targets (see linux/ and macos/).
+ * The OCaml stdlib has no statvfs binding, and POSIX means one implementation
+ * serves every platform tsync targets.
  *
  * f_frsize is the fragment size the block counts are expressed in; f_bsize is
- * only a hint about efficient I/O and is the wrong multiplier here. f_bavail is
- * what an unprivileged writer can actually use, which is the number worth
- * reporting — f_bfree includes the reserved margin nobody gets.
+ * only a hint about efficient I/O and is the wrong multiplier. f_bavail is what
+ * an unprivileged writer can actually use, unlike f_bfree, which includes the
+ * reserved margin.
  *
  * ponytail: Windows has no statvfs (it would be GetDiskFreeSpaceEx) and tsync has
  * no Windows target, so there it fails and the caller reports no capacity rather

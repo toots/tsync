@@ -1,11 +1,10 @@
-(* Behavioral snapshot of demand paging: an evicted file is read back chunk by
+(* Behavioral snapshot of demand paging: an evicted file reads back chunk by
    chunk, and only the chunks a read touches are fetched. Nothing records which
-   ones are local — the chunk store answers that by what it holds — so this is
-   also the snapshot for "presence survives close/reopen": there is no state to
-   survive.
+   are local — the store answers that by what it holds — so this also covers
+   "presence survives close/reopen": there is no state to survive.
 
-   The chunk size is forced to 8 bytes (TSYNC_CHUNK_SIZE, set in dune) so a small
-   fixture spans several chunks. Content is laid out one distinct run per chunk:
+   Chunk size is forced to 8 bytes (TSYNC_CHUNK_SIZE, in dune) so a small fixture
+   spans several chunks, one distinct run per chunk:
      chunk#0 = "01234567"  chunk#1 = "89ABCDEF"  chunk#2 = "ghijklmn" *)
 
 open Test_runner
@@ -41,8 +40,7 @@ let scenarios : scenario list =
           ReadRange { path = "gone.txt"; offset = 0; len = 8 };
           DeleteCachedChunk { path = "gone.txt"; index = 0 };
           ShowChunks "gone.txt";
-          (* The cap may unlink a body at any time, so a miss is ordinary: the
-             read refetches and still returns the right bytes. *)
+          (* The cap may unlink a body at any time, so a miss is ordinary. *)
           ReadRange { path = "gone.txt"; offset = 0; len = 8 };
           ShowChunks "gone.txt";
         ];
@@ -72,8 +70,8 @@ let scenarios : scenario list =
           Write { path = "rmw.txt"; content = edit };
           Drain;
           Evict "rmw.txt";
-          (* Two bytes inside chunk#1: its other bytes must survive, so exactly
-             that chunk is fetched and copied into a staged body. *)
+          (* Two bytes inside chunk#1: its others must survive, so exactly that
+             chunk is fetched and copied into a staged body. *)
           WriteAt { path = "rmw.txt"; offset = 10; content = "XX" };
           ShowChunks "rmw.txt";
           Close "rmw.txt";
@@ -89,7 +87,7 @@ let scenarios : scenario list =
           Drain;
           Evict "shrink.txt";
           (* The new end lands inside chunk#0, whose bytes must survive the
-             resize: exactly that one chunk is fetched. *)
+             resize, so exactly that chunk is fetched. *)
           Truncate { path = "shrink.txt"; size = 4 };
           ShowChunks "shrink.txt";
           Close "shrink.txt";

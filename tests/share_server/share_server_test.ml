@@ -1,10 +1,10 @@
 (* End-to-end snapshot of the http-proxy share server: a token resolves to a
-   share manifest, and content is served out of the demand-paged cache — whole
-   files, byte ranges, folder listings, per-file fetches and folder zips —
+   share manifest, and content — whole files, byte ranges, folder listings,
+   per-file fetches, folder zips — is served out of the demand-paged cache
    without any HMAC and without assembling anything into the store.
 
-   The fixture uploads real files (real chunks, real manifests) into a local
-   backend, then pins folder ids so every key in the snapshot is stable. *)
+   The fixture uploads real files into a local backend, then pins folder ids so
+   every key in the snapshot is stable. *)
 
 open Lwt.Syntax
 
@@ -49,8 +49,6 @@ module Mf = Manifest.Make (C)
 module Sh = Share_server.Make (C)
 
 let backend () = List.hd C.backends
-
-(* ── Fixture ─────────────────────────────────────────────────────────────── *)
 
 let write_local path content =
   let oc = open_out_bin path in
@@ -124,8 +122,6 @@ let build_fixture () =
          ("filename", `String "hello.txt");
        ])
 
-(* ── Request helper ──────────────────────────────────────────────────────── *)
-
 let show label ?(body = true) ?range ?(query = []) ~token ~sub () =
   Printf.printf "\n=== %s\n" label;
   let* resp, rbody =
@@ -159,7 +155,6 @@ let () =
     (let* () = Mf.init () in
      let* () = build_fixture () in
 
-     (* ── File share ───────────────────────────────────────────────────────── *)
      let* _ = show "file share: whole file" ~token:"aa" ~sub:"" () in
      let* _ =
        show "file share: byte range" ~token:"aa" ~sub:"" ~range:"bytes=6-10" ()
@@ -172,7 +167,6 @@ let () =
          ~range:"bytes=9999-10000" ()
      in
 
-     (* ── Directory share ──────────────────────────────────────────────────── *)
      let* _ = show "dir share: root listing" ~token:"bb" ~sub:"list" () in
      let* _ =
        show "dir share: sub listing" ~token:"bb" ~sub:"list"
@@ -195,7 +189,6 @@ let () =
          ()
      in
 
-     (* ── Guards ───────────────────────────────────────────────────────────── *)
      let* _ = show "bad token" ~token:"nothex!" ~sub:"" () in
      let* _ = show "unknown token" ~token:"deadbeef" ~sub:"" () in
      let* _ = show "expired token" ~token:"cc" ~sub:"" () in
@@ -208,7 +201,6 @@ let () =
        show "missing file" ~token:"bb" ~sub:"f" ~query:[("path", "nope.txt")] ()
      in
 
-     (* ── Folder zip ───────────────────────────────────────────────────────── *)
      let* zip =
        show "dir share: folder zip" ~body:false ~token:"bb" ~sub:"download" ()
      in
@@ -230,7 +222,6 @@ let () =
         done
       with End_of_file -> close_in ic);
 
-     (* ── Local footprint ─────────────────────────────────────────────────── *)
      (* Serving a share writes nothing into the manifest mirror and assembles
         nothing: the bytes it fetched are in the domain's chunk cache, which the
         mount shares. *)

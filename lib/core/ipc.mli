@@ -8,12 +8,11 @@ val send_lwt : ?timeout:float -> socket_path:string -> string -> string Lwt.t
 
 (** Event subscribers.
 
-    The daemon never connects out to a frontend. A client that wants to hear
-    about changes connects to the daemon like any other caller and asks to
-    subscribe; its connection then carries a stream of events instead of
-    replies. That direction is the dependable one — a sandboxed extension can
-    always reach us, while its own lifetime belongs to the OS, so a channel that
-    exists only while it happens to be running is no channel at all. *)
+    The daemon never connects out. A client wanting change notifications
+    connects like any other caller and asks to subscribe; its connection then
+    carries a stream of events instead of replies. That direction is the
+    dependable one: a sandboxed extension can always reach us, while the OS owns
+    its lifetime. *)
 module Subs : sig
   type t
 
@@ -21,8 +20,7 @@ module Subs : sig
 
   (** Queue [msg] for every subscriber of [topic] (a domain name; a subscriber
       registered under [""] hears everything) and return how many there were.
-      Zero is the only honest answer to give a caller waiting on the result: it
-      says nobody was listening, not that the request failed. *)
+      Zero says nobody was listening, not that the request failed. *)
   val publish : t -> topic:string -> string -> int
 
   val count : t -> topic:string -> int

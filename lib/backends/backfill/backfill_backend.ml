@@ -1,44 +1,35 @@
 open Lwt.Syntax
 
-(* A composite Backend.S that wraps the authoritative backends and lazily fills
-   one or more *backfill* targets from the write side.
+(* A composite Backend.S wrapping the authoritative backends and lazily filling
+   one or more {i backfill} targets from the write side.
 
-   A backfill target is a converging copy, not a replica: it is never read from,
-   it never blocks a foreground write, and it never fails one.
+   A backfill target is a converging copy, not a replica: never read from, never
+   blocking or failing a foreground write. The role is for when copying what the
+   source of truth already holds is impractical — a very large dataset, a metered
+   link, an archive tier. The target starts empty and covers only what is written
+   from then on, giving {i partial coverage, never partial files}: whatever it
+   holds is whole and restorable, and missing means a whole file is missing.
 
-   The role exists for the case where copying the data already in the source of
-   truth is impractical or not worth doing — a very large dataset, a metered link,
-   an archive tier where insuring everything costs more than the data is worth. So
-   the target starts empty and covers only what is written from then on. What makes
-   that useful rather than merely incomplete is *partial coverage, never partial
-   files*: whatever the target does hold is whole and restorable on its own.
-   Missing means a whole file is missing — never half of one, and never a manifest
-   naming chunks that were never copied. Coverage only ever grows, so the active
-   set converges over time while cold data nothing touches again is never copied.
+   What a target gets:
 
-   What it gets:
-
-   - chunk PUTs, forwarded in the background — best-effort, deduped, and dropped
-     outright when too many are already in flight.
-   - manifest PUTs (and folder/trash markers, share manifests — anything that is
-     not a chunk), queued in order. Before the PUT, every chunk key the body
-     names is confirmed present on the target: HEAD, and on a miss fetch the
-     bytes from the authoritative backend and PUT them. The manifest lands only
-     after all of them, so the target never holds a manifest referencing chunks
-     it does not have.
+   - chunk PUTs, forwarded in the background: best-effort, deduped, and dropped
+     outright when too many are in flight.
+   - manifest PUTs (and folder/trash markers, share manifests — anything not a
+     chunk), queued in order. Every chunk key the body names is confirmed present
+     first (HEAD, then fetch-and-PUT on a miss), so the target never holds a
+     manifest referencing chunks it lacks.
    - copies (a rename's copy+delete, a version snapshot) and deletes, in order.
-   - nothing under [skip_prefixes] — the journal and the cursor are sync
-     bookkeeping, not content.
+   - nothing under [skip_prefixes]: the journal and cursor are bookkeeping.
 
-   Correctness rests entirely on the manifest step, which is why dropping a
-   chunk forward is safe: the chunk lane only saves the manifest job a fetch.
-   That matters because the dedup in [Remote.chunk_exists] means a file copy or
-   an incremental re-upload issues *no* chunk PUTs at all — just a manifest.
+   Correctness rests entirely on the manifest step, which is why dropping a chunk
+   forward is safe — the chunk lane only saves the manifest job a fetch. That
+   matters because the dedup in [Remote.chunk_exists] means a file copy or an
+   incremental re-upload issues no chunk PUTs at all.
 
-   Ordering is why the metadata lane is a queue and not N independent async
-   jobs: [Store.copy_manifest] renames with a copy immediately followed by a
-   delete of the source, and running those out of order would lose the file on
-   the target. Chunks need no ordering — they are content-addressed.
+   Ordering is why the metadata lane is a queue rather than N async jobs:
+   [Store.copy_manifest] renames with a copy immediately followed by a delete of
+   the source, and running those out of order loses the file on the target.
+   Chunks are content-addressed and need no ordering.
 
    ponytail: the queue is in memory, so a daemon exit loses what is pending. That
    and closing the gap on purpose are both
@@ -62,18 +53,18 @@ type lane = {
   settled : unit Lwt_condition.t;
   mutable idle : bool;
   mutable chunks_in_flight : int;
-  (* Keys known present on the target: skips a HEAD per chunk, and is what makes
-     a copy of an already-filled file nearly free. *)
+  (* Skips a HEAD per chunk, which is what makes a copy of an already-filled file
+     nearly free. *)
   ensured : (string, unit) Hashtbl.t;
   mutable degraded : bool;
 }
 
-(* Concurrent chunk forwards. Past this, a chunk PUT is dropped rather than held
-   in memory — the manifest job fetches it later. *)
+(* Past this, a chunk PUT is dropped rather than held in memory: the manifest job
+   fetches it later. *)
 let max_chunks_in_flight = 32
 
-(* Queued metadata jobs. Past this the target is declared degraded and jobs are
-   dropped; a queue this deep means the target cannot keep up at all. *)
+(* Past this the target is declared degraded and jobs are dropped: a queue this
+   deep means it cannot keep up at all. *)
 let max_queued = 10_000
 
 (* ponytail: crude memo — reset the whole table past the cap rather than keeping
@@ -95,8 +86,8 @@ let rec settle t =
 
 let lanes : lane list ref = ref []
 
-(* A target that has gone away must not hold a command open forever; giving up
-   and saying so beats hanging. resync-remote is the repair. *)
+(* A target that has gone away must not hold a command open forever.
+   resync-remote is the repair. *)
 let drain_timeout = 60.
 
 let drain_all () =
@@ -159,9 +150,9 @@ let make ~chunk_prefix ~(chunk_keys : string -> string list) ~skip_prefixes
           Lwt.catch
             (fun () -> T.copy ~src_key:src ~dst_key:dst ())
             (fun _ ->
-              (* The target has no [src] — added after it was written, or its job
+              (* The target has no [src]: added after it was written, or its job
                  was dropped. The authoritative [dst] exists by now, so rebuild
-                 from that instead, chunk check included. *)
+                 from that, chunk check included. *)
               let* data = Pri.get_opt ~key:dst () in
               match data with
                 | None -> Lwt.return_unit
@@ -173,9 +164,9 @@ let make ~chunk_prefix ~(chunk_keys : string -> string list) ~skip_prefixes
           List.iter (fun k -> Hashtbl.remove t.ensured k) keys;
           T.delete_multi keys
   in
-  (* One sequential worker per target: order is the point, and a target that
-     stalls must not stall the others. A failed job is dropped rather than
-     retried — retrying at the head would block every later rename behind it. *)
+  (* One sequential worker per target: order is the point, and a stalled target
+     must not stall the others. A failed job is dropped rather than retried, or
+     it blocks every later rename behind it. *)
   let rec worker t =
     if Queue.is_empty t.jobs then begin
       t.idle <- true;
@@ -328,9 +319,8 @@ let make ~chunk_prefix ~(chunk_keys : string -> string list) ~skip_prefixes
         in
         go inners
 
-      (* Smallest wins: a limit that ignores the slowest member is not a limit.
-         The backfill targets are written to as well as the main store, so their
-         devices are just as much in the path. *)
+      (* Smallest wins: a limit ignoring the slowest member is not a limit, and
+         targets are written to as well as the main store. *)
       let max_concurrency ~prefix () =
         let+ answers =
           Lwt_list.map_s

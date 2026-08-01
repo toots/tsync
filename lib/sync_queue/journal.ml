@@ -6,12 +6,11 @@ type rename_op = {
   id : string option;  (** The folder's id, when [is_dir]. See {!op}. *)
 }
 
-(* Directory ops carry the folder's stable id alongside its path. A peer applies
-   the op before anything asks it about the folder, and applying a removal
-   destroys the local marker the id would have been read from — so an id that is
-   not recorded here cannot be recovered afterwards, and the folder cannot be
-   named to anything that knows it by id. [None] for entries written before this
-   was carried, and for a client that has no id for the folder. *)
+(* Directory ops carry the folder's stable id alongside its path: applying a
+   removal destroys the local marker the id would have been read from, so an id
+   not recorded here cannot be recovered and the folder cannot be named to
+   anything that knows it by id. [None] for entries written before this was
+   carried, and for a client with no id for the folder. *)
 type op =
   [ `Delete of string
   | `Mkdir of string * string option
@@ -46,12 +45,11 @@ let get_client_uuid ~share_dir =
         Hashtbl.replace uuid_cache share_dir uuid;
         uuid
 
-(* %013Ld: 13-digit zero-padded int64; current ms timestamps are 13 digits,
-   ensuring lexicographic order matches chronological order.
-   Entry keys are backend object names: two ops in the same millisecond would
-   collide and the second journal entry would overwrite the first, silently
-   losing the op for other clients. Bump the timestamp to keep keys strictly
-   increasing within this process.
+(* %013Ld: 13-digit zero-padded int64, so lexicographic order matches chronological
+   order at current ms timestamps.
+   Entry keys are backend object names, so two ops in the same millisecond would
+   collide and the second entry would overwrite the first. The timestamp is
+   bumped to keep keys strictly increasing within this process.
    ponytail: monotonic per process only; two processes sharing a client uuid
    (daemon + concurrent import) can still collide within one ms. *)
 let last_ms = ref 0L
@@ -72,12 +70,10 @@ let client_uuid_of_filename s =
   let i = String.index s '-' in
   String.sub s (i + 1) (String.length s - i - 1)
 
-(* Where an entry lives, relative to the journal prefix. A month directory keeps
-   the listing bounded — the journal only ever grows, one object per write — and
-   costs the readers nothing: entry names are zero-padded timestamps, so both the
-   shard and the name within it sort chronologically, which is the order every
-   cursor comparison depends on. The entry key itself is unchanged, so cursors
-   and last-sync marks keep naming an entry the same way. *)
+(* A month directory keeps the listing bounded — the journal only grows, one
+   object per write — and costs readers nothing: entry names are zero-padded
+   timestamps, so shard and name both sort chronologically, which every cursor
+   comparison depends on. The entry key itself is unchanged. *)
 let relative_path entry_key =
   let ms = timestamp_ms_of_filename entry_key in
   let tm = Unix.gmtime (Int64.to_float ms /. 1000.) in
@@ -160,9 +156,8 @@ let decode s =
         with _ -> None))
     (String.split_on_char '\n' s)
 
-(* Pending entries are per-domain: the ops they carry are domain-relative keys,
-   so a shared queue would let one domain's [sync] replay another domain's
-   entries against the wrong backend. *)
+(* Per-domain: the ops carry domain-relative keys, so a shared queue would let
+   one domain's [sync] replay another's entries against the wrong backend. *)
 let pending_dir ~share_dir ~domain =
   Filename.concat (Filename.concat share_dir "journal-pending") domain
 

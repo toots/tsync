@@ -1,10 +1,6 @@
-(* The shape of the configured backend list, in one place: the head is the
-   primary and serves every read; a write goes to all of them, in order.
-
-   Both halves used to be re-derived wherever a module touched [C.backends] —
-   five copies of the same [primary ()], a dozen open-coded [Lwt_list.iter_s]
-   fan-outs. Nothing here is more than a line; the point is that "which backend
-   reads?" and "how far does a write go?" are answered once. *)
+(* The shape of the configured backend list: the head is the primary and serves
+   every read, and a write goes to all of them, in order. Nothing here is more
+   than a line; the point is that both questions are answered once. *)
 
 module Make (C : Conf.S) = struct
   let primary () =

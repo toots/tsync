@@ -1,27 +1,25 @@
-(* The cache-chunk store's contract, against a stub fetcher that counts GETs: a
-   body is fetched once and only once, concurrent readers of the same cache chunk
-   share that fetch, a body deleted underneath us is fetched again, and the store
-   is keyed by content alone (nothing about it is per-file).
+(* The cache-chunk store's contract, against a stub fetcher counting GETs: a body
+   is fetched once, concurrent readers of one cache chunk share that fetch, a body
+   deleted underneath is fetched again, and the store is keyed by content alone.
 
-   Both granularities are exercised: single-chunk groups (cache chunk size =
-   stored chunk size) and a three-chunk group, where one cache file holds three
-   backend chunks and a read addresses one member of it.
+   Both granularities are exercised: single-chunk groups, and a three-chunk group
+   where one cache file holds three backend chunks and a read addresses one
+   member.
 
-   The GET counts are the point of the snapshot: they are what proves dedup and
-   cache hits, and a regression there is invisible in the returned bytes. *)
+   The GET counts are the point of the snapshot — they prove dedup and cache
+   hits, and a regression there is invisible in the returned bytes. *)
 
 open Lwt.Syntax
 
 let root = "/tmp/tsync-chunk-cache-test"
 
-(* What a published chunk is named after. The dedup and cap cases below do not
-   care (any distinct name will do), but the integrity check does: it re-derives
-   this from the bytes. *)
+(* The dedup and cap cases below take any distinct name, but the integrity check
+   re-derives this from the bytes. *)
 let key_of body =
   Printf.sprintf "%s-%s" (Xxhash.hash_hex body 0) (Xxhash.hash_hex body 1)
 
-(* Keys are a fixed width, so the stand-ins for the two cases that do not care
-   about content still have to be shaped like real ones. *)
+(* Keys are a fixed width, so even the content-agnostic stand-ins must be shaped
+   like real ones. *)
 let bodies =
   [
     (key_of "first chunk body", "first chunk body");
@@ -35,18 +33,16 @@ let bodies =
 let gets : (string, int) Hashtbl.t = Hashtbl.create 8
 let count ck = Option.value ~default:0 (Hashtbl.find_opt gets ck)
 
-(* How many GETs are in the fetcher at once, and the high-water mark since the
-   last [watch_overlap]. Counting overlap is what shows whether a group's members
-   are fetched concurrently, and unlike elapsed time it does not depend on how
-   loaded the machine is. *)
+(* Overlap is what shows whether a group's members are fetched concurrently, and
+   unlike elapsed time it does not depend on machine load. *)
 let in_fetch = ref 0
 let peak_in_fetch = ref 0
 let watch_overlap () = peak_in_fetch := !in_fetch
 
 module Fetch = struct
-  (* Deliberately slow: without a yield inside the fetch, concurrent callers
-     would each run to completion in turn, so dedup would pass trivially and no
-     overlap would be observable. *)
+  (* Deliberately slow: without a yield inside the fetch, concurrent callers run
+     to completion in turn, dedup passes trivially and no overlap is
+     observable. *)
   let get_chunk ~chunk_key =
     Hashtbl.replace gets chunk_key (count chunk_key + 1);
     incr in_fetch;
@@ -108,8 +104,8 @@ module Capped0 =
     end)
     (Fetch)
 
-(* A manifest body over [keys]. Chunk lengths are derived from the header, so
-   the file size and chunk size are what set them. *)
+(* Chunk lengths derive from the header, so file size and chunk size set
+   them. *)
 let table ~chunk_size ~size keys =
   Chunk_table.of_string
     (Chunk_table.encode ~name:"t" ~size:(Int64.of_int size) ~chunk_size
@@ -119,8 +115,7 @@ let table ~chunk_size ~size keys =
 let build ~per ~chunk_size ~size keys i =
   Option.get (Chunk_group.of_table ~table:(table ~chunk_size ~size keys) ~per i)
 
-(* A group of one: what a domain whose cache chunk size equals its stored chunk
-   size gets for every chunk. *)
+(* What a domain whose cache chunk size equals its stored chunk size gets. *)
 let solo ck =
   let n = String.length (List.assoc ck bodies) in
   build ~per:1 ~chunk_size:n ~size:n [ck] 0
@@ -135,7 +130,7 @@ let k5 = fst (List.nth bodies 4)
 let trio_table = table ~chunk_size:4 ~size:10 [k3; k4; k5]
 let trio = Option.get (Chunk_group.of_table ~table:trio_table ~per:3 0)
 
-(* The store's own layout rule; the test never recomputes it. *)
+(* The store's own rule; never recomputed here. *)
 let path g =
   Cache_layout.chunk_path ~cache_root:C.cache_root ~domain_name:C.domain_name
     (Chunk_group.key g)
@@ -156,7 +151,7 @@ let show label g =
   Printf.printf "%-28s present=%-5b gets=%d in_flight=%d\n" label present
     (gets_for g) (Cc.in_flight ())
 
-(* Read one member the way the read path does: into a buffer, by index. *)
+(* As the read path does: into a buffer, by index. *)
 let read_member g index =
   let want = Chunk_group.size g index in
   let buf = Bigarray.Array1.create Bigarray.char Bigarray.c_layout want in
@@ -192,13 +187,13 @@ let () =
      let* () = show_body "second key" g2 0 in
      Printf.printf "%-28s %s\n" "layout" (rel (path g2));
 
-     (* ── Grouped: three stored chunks, one cache file ─────────────────────── *)
      (* One cache miss costs one GET per member, and lands as a single file. *)
      let* () = show "trio cold" trio in
      watch_overlap ();
      let* () = show_body "trio member 0" trio 0 in
-     (* All three members are in the fetcher at once, each writing its own offset,
-        so the miss costs about one round trip. Serial fetching would peak at 1. *)
+     (* All three members are in the fetcher at once, each writing its own
+        offset, so the miss costs about one round trip. Serial fetching peaks
+        at 1. *)
      Printf.printf "%-28s peak_concurrent_gets=%d of %d\n"
        "trio fetch concurrency" !peak_in_fetch
        (Chunk_group.member_count trio);
@@ -224,8 +219,8 @@ let () =
          (String.init n (Bigarray.Array1.get buf))
      in
 
-     (* Grouping is content-addressed like any chunk: the same three chunks in
-        another file are the same cache file, already here. *)
+     (* Content-addressed like any chunk: the same three chunks in another file
+        are the same cache file, already here. *)
      let same = build ~per:3 ~chunk_size:4 ~size:10 [k3; k4; k5] 2 in
      Printf.printf "%-28s same_key=%b\n" "trio in another file"
        (Chunk_group.key same = Chunk_group.key trio);
@@ -248,9 +243,8 @@ let () =
            Lwt.return_unit)
      in
 
-     (* ── Integrity ────────────────────────────────────────────────────────── *)
-     (* A group body cannot be checked against its own name, so verification
-        hashes each member segment against the key it was published under. *)
+     (* A group body cannot be checked against its own name, so each member
+        segment is hashed against the key it was published under. *)
      let* ok = Cc.verify_group ~group:trio in
      Printf.printf "%-28s ok=%b\n" "verify intact group" ok;
      let* () =
@@ -263,9 +257,8 @@ let () =
      Printf.printf "%-28s ok=%-5b present=%b\n" "verify corrupt member" ok
        (Sys.file_exists (path trio));
 
-     (* ── Cache cap ────────────────────────────────────────────────────────── *)
-     (* Explicit mtimes: coldest-first ordering must not depend on filesystem
-        timestamp resolution. *)
+     (* Explicit mtimes: ordering must not depend on filesystem timestamp
+        resolution. *)
      Unix.utimes (path g1) 1000. 1000.;
      Unix.utimes (path g2) 2000. 2000.;
      let show_cap label =

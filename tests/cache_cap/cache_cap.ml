@@ -1,14 +1,13 @@
-(* Behavioral snapshot of the cache-size cap (maxCache). Chunk size and the cap
-   are both forced to 8 bytes (see dune), so each single-chunk fixture is exactly
-   one "slot": the cap holds one chunk body. The cap needs no bookkeeping — every
-   body is interchangeable and re-fetchable — so a sweep just drops the coldest
-   bodies, and a read that finds one missing fetches it again. Staged bodies live
-   outside the store and are never touched. *)
+(* Behavioral snapshot of the cache-size cap (maxCache). Chunk size and cap are
+   both forced to 8 bytes (see dune), so each single-chunk fixture is one slot.
+   The cap needs no bookkeeping — every body is interchangeable and re-fetchable
+   — so a sweep drops the coldest and a read that misses fetches again. Staged
+   bodies live outside the store and are never touched. *)
 
 open Test_runner
 
-(* Pull a file's one chunk into the store. The trailing [Drain] spaces successive
-   reads out in time so the coldest-first order is deterministic. *)
+(* The trailing [Drain] spaces successive reads out in time, so coldest-first
+   ordering is deterministic. *)
 let cache path = [ReadRange { path; offset = 0; len = 8 }; Drain]
 
 let scenarios : scenario list =
