@@ -705,33 +705,61 @@ module Make (C : Conf.S) (R : Remote.S) = struct
 
   (* ── Whole-file materialization ───────────────────────────────────────────── *)
 
-  (* Per-key (bytes fetched, bytes to fetch) while a whole file is being pulled
-     in, for the FileProvider's progress bar. Advisory only: absent means no
-     materialization is running. *)
-  let active : (string, int * int) Hashtbl.t = Hashtbl.create 8
-  let download_progress key = Hashtbl.find_opt active key
+  (* What a file being made local still owes, for the caller showing a progress
+     bar. Advisory only: absent means nothing is running for that key.
 
-  (* Fetch the named groups, tracking progress. [R.get_chunk] is pool-bounded, so
-     asking for a whole file at once cannot exceed [max_downloads]. *)
-  let ensure_groups key groups =
-    let total =
-      List.fold_left (fun acc g -> acc + Chunk_group.bytes g) 0 groups
-    in
-    Hashtbl.replace active key (0, total);
-    Lwt.finalize
-      (fun () ->
-        Lwt_list.iter_p
-          (fun group ->
-            let+ () = Cc.ensure ~group () in
-            match Hashtbl.find_opt active key with
-              | Some (done_, total) ->
-                  Hashtbl.replace active key
-                    (done_ + Chunk_group.bytes group, total)
-              | None -> ())
-          groups)
-      (fun () ->
-        Hashtbl.remove active key;
+     One span covers the whole job, not one phase of it. Making a file local is a
+     fetch followed by a reassembly, and both take real time on a large file — a
+     row that ends with the fetch leaves the bar frozen and the caller unable to
+     tell a slow copy from a hang. So [total] counts the bytes of both, and the
+     bar crosses the middle when the download finishes.
+
+     [holders] is what lets two materializations of one key share a row: without
+     it they overwrite each other's progress and the first to finish takes the
+     row away from the one still running. *)
+  type span = { mutable fetched : int; total : int; mutable holders : int }
+
+  let active : (string, span) Hashtbl.t = Hashtbl.create 8
+
+  let download_progress key =
+    Option.map (fun s -> (s.fetched, s.total)) (Hashtbl.find_opt active key)
+
+  (* Clamped: a group already on disk is credited in full, and a re-fetch would
+     otherwise push the bar past its own end. *)
+  let credit key n =
+    match Hashtbl.find_opt active key with
+      | Some s -> s.fetched <- min s.total (s.fetched + n)
+      | None -> ()
+
+  let with_span key ~total f =
+    (match Hashtbl.find_opt active key with
+      | Some s -> s.holders <- s.holders + 1
+      | None -> Hashtbl.replace active key { fetched = 0; total; holders = 1 });
+    Lwt.finalize f (fun () ->
+        (match Hashtbl.find_opt active key with
+          | Some s when s.holders <= 1 -> Hashtbl.remove active key
+          | Some s -> s.holders <- s.holders - 1
+          | None -> ());
         Lwt.return_unit)
+
+  let groups_bytes groups =
+    List.fold_left (fun acc g -> acc + Chunk_group.bytes g) 0 groups
+
+  (* Fetch the named groups, crediting each as it lands. [R.get_chunk] is
+     pool-bounded, so asking for a whole file at once cannot exceed
+     [max_downloads].
+
+     ponytail: credit is per group — 16 MB at the defaults, so a file smaller
+     than one group only moves when it finishes. Per stored chunk would halve the
+     step and no more, and {!Chunk_cache.ensure} hands a second caller the
+     in-flight promise without its callback, so doing it properly needs a
+     listener registry. Worth it only if the step is ever felt. *)
+  let fetch_groups key groups =
+    Lwt_list.iter_p
+      (fun group ->
+        let+ () = Cc.ensure ~group () in
+        credit key (Chunk_group.bytes group))
+      groups
 
   (* Whole files pulled in since start-up, for [tsync stats]. Counted here rather
      than at a caller so every route to a materialized file is included. *)
@@ -747,23 +775,23 @@ module Make (C : Conf.S) (R : Remote.S) = struct
      Concurrent calls for one key need no coordination here: the actual fetching
      is per chunk group and {!Chunk_cache.ensure} already shares one in-flight
      fetch between all askers. *)
-  let ensure_local key =
-    let ensure_groups groups =
-      let+ () = ensure_groups key groups in
-      incr downloads_completed
-    in
+  (* Which groups [key] still owes the network, resolved before any of them is
+     asked for — a caller sizing a progress bar has to know the whole job before
+     it starts. [None] is "nothing to materialize at all", which is not the same
+     as an empty list: a file with no chunks was still made local. *)
+  let fetch_plan key =
     let* resolved = Mf.resolve key in
     match resolved with
-      | Some (`Published m) -> ensure_groups (Mf.groups m)
+      | Some (`Published m) -> Lwt.return_some (Mf.groups m)
       | Some (`Staged (st, base)) -> (
           match base with
-            | None -> Lwt.return_unit
+            | None -> Lwt.return_none
             | Some m ->
                 let slots = st.Manifest.s_slots in
                 let still_inherited i =
                   i < Array.length slots && slots.(i) = Manifest.Inherit
                 in
-                ensure_groups
+                Lwt.return_some
                   (List.filter
                      (fun g ->
                        List.exists still_inherited (Chunk_group.indices g))
@@ -773,8 +801,25 @@ module Make (C : Conf.S) (R : Remote.S) = struct
           match state with
             | Some m ->
                 let* () = Mf.write key m in
-                ensure_groups (Mf.groups m)
-            | None -> Lwt.return_unit)
+                Lwt.return_some (Mf.groups m)
+            | None -> Lwt.return_none)
+
+  (* [key]'s content length, for sizing the reassembly half of a span. *)
+  let content_size key =
+    let+ resolved = Mf.resolve key in
+    match resolved with
+      | Some (`Published m) -> Int64.to_int m.Manifest.size
+      | Some (`Staged (st, _)) -> Int64.to_int st.Manifest.s_size
+      | None -> 0
+
+  let ensure_local key =
+    let* plan = fetch_plan key in
+    match plan with
+      | None -> Lwt.return_unit
+      | Some groups ->
+          with_span key ~total:(groups_bytes groups) (fun () ->
+              let+ () = fetch_groups key groups in
+              incr downloads_completed)
 
   (* Write [key]'s whole content to [dst_path]: the one way a caller that needs a
      real file (export, or the file handed to the FileProvider extension) gets
@@ -783,7 +828,22 @@ module Make (C : Conf.S) (R : Remote.S) = struct
      way. *)
   let assemble_to key ~dst_path =
     let* () = Fs_util.ensure_parent dst_path in
-    let* () = ensure_local key in
+    (* Both halves of the job are inside one span, so the caller's bar advances
+       from the first chunk fetched to the last byte written and is never absent
+       in between. Reassembly is a full read of the file out of the cache and a
+       full write of it here, which on a large file is long enough that going
+       quiet through it looks like a hang. *)
+    let* plan = fetch_plan key in
+    let* size = content_size key in
+    let to_fetch = match plan with None -> 0 | Some gs -> groups_bytes gs in
+    with_span key ~total:(to_fetch + size) @@ fun () ->
+    let* () =
+      match plan with
+        | None -> Lwt.return_unit
+        | Some groups ->
+            let+ () = fetch_groups key groups in
+            incr downloads_completed
+    in
     let buf =
       Bigarray.Array1.create Bigarray.char Bigarray.c_layout cache_chunk_size
     in
@@ -800,6 +860,7 @@ module Make (C : Conf.S) (R : Remote.S) = struct
         let* (_ : int) =
           Local_io.write dst_path (Bigarray.Array1.sub buf 0 n) ~offset
         in
+        credit key n;
         go (Int64.add offset (Int64.of_int n))
     in
     let* () = go 0L in

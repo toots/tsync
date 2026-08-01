@@ -1,0 +1,9 @@
+(test
+ (name download_progress_test)
+ (libraries
+  tsync_conf
+  tsync_backend
+  tsync_local_backend
+  tsync_file
+  lwt
+  lwt.unix))

@@ -14,6 +14,7 @@ APP="${1:-/Applications/TsyncApp.app}"
 LABEL=org.feverdreamtv.tsync.daemon
 PLIST="$HOME/Library/LaunchAgents/$LABEL.plist"
 SOCKET="$HOME/Library/Group Containers/group.org.feverdreamtv.tsync/tsync/tsync.sock"
+LOG="$HOME/Library/Logs/tsync-daemon.log"
 
 [[ -x "$APP/Contents/MacOS/tsync" ]] || {
     echo "no daemon at $APP/Contents/MacOS/tsync" >&2
@@ -24,7 +25,7 @@ launchctl bootout "gui/$UID/$LABEL" 2>/dev/null || true
 # A leftover socket makes callers think the daemon is up before it is.
 rm -f "$SOCKET"
 
-mkdir -p "$(dirname "$PLIST")"
+mkdir -p "$(dirname "$PLIST")" "$(dirname "$LOG")"
 cat > "$PLIST" <<EOF
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -46,6 +47,14 @@ cat > "$PLIST" <<EOF
         <key>SuccessfulExit</key>
         <false/>
     </dict>
+    <!-- Keep whatever the daemon says on its way out. launchd restarts it on a
+         crash, so without this an uncaught exception leaves nothing behind but a
+         higher restart count: the process that could explain itself is already
+         gone and its successor is healthy. -->
+    <key>StandardOutPath</key>
+    <string>$LOG</string>
+    <key>StandardErrorPath</key>
+    <string>$LOG</string>
 </dict>
 </plist>
 EOF

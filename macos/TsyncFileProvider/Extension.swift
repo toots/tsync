@@ -69,15 +69,26 @@ final class TsyncExtension: NSObject, NSFileProviderReplicatedExtension, @unchec
         let progress = Progress(totalUnitCount: -1)
         let ref = ItemID.wire(itemIdentifier)
         let task = Task {
-            // Poll the daemon while the fetch is in flight. The first answer that
-            // reports a total switches the bar from indeterminate to a real one.
+            // Poll the daemon while the fetch is in flight. Asked before the
+            // first sleep, so the bar becomes a real one as soon as the daemon
+            // knows the size rather than half a second later.
+            //
+            // An answer of "nothing running" leaves the bar where it is instead
+            // of skipping the update: it means the work has not started yet or
+            // has just finished, and either way winding back to indeterminate
+            // would look like the transfer had restarted.
             let poller = Task {
                 while !Task.isCancelled {
+                    if let p = try? await client.downloadProgress(ref: ref),
+                       p.active == true {
+                        if let total = p.totalBytes, total > 0 {
+                            progress.totalUnitCount = total
+                        }
+                        if let done = p.bytesDownloaded {
+                            progress.completedUnitCount = done
+                        }
+                    }
                     try? await Task.sleep(nanoseconds: 500_000_000)
-                    guard let p = try? await client.downloadProgress(ref: ref),
-                          p.active == true else { continue }
-                    if let total = p.totalBytes, total > 0 { progress.totalUnitCount = total }
-                    if let done = p.bytesDownloaded { progress.completedUnitCount = done }
                 }
             }
             defer { poller.cancel() }
@@ -93,6 +104,13 @@ final class TsyncExtension: NSObject, NSFileProviderReplicatedExtension, @unchec
                 let destination = temporary.appendingPathComponent(UUID().uuidString)
                 try await client.ensureCached(ref: ref, destination: destination.path)
                 try Task.checkCancellation()
+                // Finish the bar explicitly. The last poll lands somewhere short
+                // of the end, and a bar that simply disappears at 90% reads as an
+                // abandoned transfer rather than a completed one.
+                poller.cancel()
+                if progress.totalUnitCount > 0 {
+                    progress.completedUnitCount = progress.totalUnitCount
+                }
                 completionHandler(destination, try await resolve(itemIdentifier), nil)
             } catch is CancellationError {
                 completionHandler(nil, nil, CocoaError(.userCancelled))
