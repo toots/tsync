@@ -136,6 +136,47 @@ final class DaemonProtocolTests: XCTestCase {
         XCTAssertNotNil(TsyncItem.make(file, readOnly: false))
     }
 
+    /// Partial fetching rests entirely on this call, and both sides have to
+    /// agree on field names that appear nowhere else in the protocol. The
+    /// arithmetic around it is checked in `PartialRangeTests`; what is checked
+    /// here is that the request reaches the daemon and the served range comes
+    /// back — a typo in either direction is invisible until a file is opened.
+    func testRangeIsServedAtItsOwnOffset() async throws {
+        _ = try await client.write(parentRef: ItemID.rootForm, name: "big.txt",
+                                   staging: try staged("0123456789ABCDEF"))
+        let items = try await listRoot()
+        let listed = try XCTUnwrap(items.first)
+        let destination = root.appendingPathComponent("range-\(UUID().uuidString)")
+
+        let served = try await client.fetchRange(ref: listed.ref,
+                                                 destination: destination.path,
+                                                 offset: 8, length: 4)
+        XCTAssertEqual(served, NSRange(location: 8, length: 4))
+
+        // Everything before the range is a hole, so the file stops where the
+        // range does: that is what shows the bytes landed at their own offset
+        // rather than at the start of the file.
+        let written = try Data(contentsOf: destination)
+        XCTAssertEqual(written.count, 12)
+        XCTAssertEqual(String(decoding: written[8..<12], as: UTF8.self), "89AB")
+    }
+
+    /// A range running past the end comes back short rather than padded. The
+    /// system checks the served length against the size we reported for the
+    /// item, so inventing bytes here would fail the whole fetch.
+    func testRangePastTheEndIsServedShort() async throws {
+        _ = try await client.write(parentRef: ItemID.rootForm, name: "small.txt",
+                                   staging: try staged("0123456789"))
+        let items = try await listRoot()
+        let listed = try XCTUnwrap(items.first)
+        let destination = root.appendingPathComponent("short-\(UUID().uuidString)")
+
+        let served = try await client.fetchRange(ref: listed.ref,
+                                                 destination: destination.path,
+                                                 offset: 8, length: 64)
+        XCTAssertEqual(served, NSRange(location: 8, length: 2))
+    }
+
     /// A reference composed here must name the same item the daemon named, or
     /// creating an item and then finding it again would take a full listing.
     func testFileReferenceIsComposable() async throws {

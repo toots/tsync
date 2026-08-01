@@ -874,6 +874,35 @@ module Make (C : Conf.S) (R : Remote.S) = struct
           Lwt_unix_retry.utimes dst_path m.Manifest.mtime m.Manifest.mtime
       | None -> Lwt.return_unit
 
+  (* Write just [offset, offset + length) of [key] into [dst_path], at that same
+     offset, and return the byte count — short only at end of file. Everything
+     outside the range is left sparse.
+
+     This is {!assemble_to} for one range rather than the whole file, and the
+     reason a large file can be opened without pulling it whole: the read goes
+     through the same demand-paged path, so only the chunks the range covers are
+     fetched.
+
+     The file is created even when the range lies entirely past the end, since
+     the caller is handed this path either way.
+
+     ponytail: no progress span. A range is bounded by construction and its
+     caller already knows how many bytes it asked for; the span exists for
+     whole-file materialization, where the total is not knowable up front. *)
+  let fetch_range key ~dst_path ~offset ~length =
+    let* () = Fs_util.ensure_parent dst_path in
+    let* fd =
+      Lwt_unix_retry.openfile dst_path [Unix.O_WRONLY; Unix.O_CREAT] 0o644
+    in
+    let* () = Lwt_unix_retry.close fd in
+    let buf = Bigarray.Array1.create Bigarray.char Bigarray.c_layout length in
+    let offset = Int64.of_int offset in
+    let* n = pread_key key buf ~offset in
+    let+ (_ : int) =
+      Local_io.write dst_path (Bigarray.Array1.sub buf 0 n) ~offset
+    in
+    n
+
   (* Drop [key]'s locally cached chunks. Unreference-blind by design: a chunk
      shared with another file goes too and is re-fetched on demand — refcounting
      is exactly the bookkeeping this design removes. Staged bodies are never

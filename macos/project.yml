@@ -62,6 +62,9 @@ targets:
       # The item model belongs with the extension, but building one out of what
       # the daemon actually said is part of what these tests check.
       - path: TsyncFileProvider/Item.swift
+      # Range arithmetic against an alignment the system picks at runtime, so
+      # there is no value to hard-code and no way to eyeball it in place.
+      - path: TsyncFileProvider/PartialRange.swift
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: org.feverdreamtv.tsync.tests

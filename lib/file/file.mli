@@ -31,6 +31,15 @@ module type S = sig
       permitted to move one in from elsewhere afterwards. *)
   val assemble_to : t -> dst_path:string -> unit Lwt.t
 
+  (** [fetch_range t ~dst_path ~offset ~length] is {!assemble_to} for one range:
+      it writes those bytes into [dst_path] at the same offset and leaves the
+      rest of the file sparse, returning the byte count — short only at end of
+      file. Only the chunks the range covers are fetched, which is how a large
+      file is opened without materializing it whole. [dst_path] is created even
+      when the range lies past the end. *)
+  val fetch_range :
+    t -> dst_path:string -> offset:int -> length:int -> int Lwt.t
+
   val stat : t -> Unix.LargeFile.stats option Lwt.t
 
   (** Return the symlink target for a key whose manifest is a symlink, or [None]

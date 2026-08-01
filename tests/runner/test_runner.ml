@@ -33,6 +33,9 @@ type step =
   | ReadRange of { path : string; offset : int; len : int }
       (** Read [len] bytes at [offset], fetching only the chunks they need, and
           print the bytes returned. *)
+  | FetchRange of { path : string; offset : int; len : int }
+      (** Serve one range into a file, the way the File Provider asks for a
+          piece of a large file. *)
   | WriteAt of { path : string; offset : int; content : string }
       (** Write [content] at [offset] through the staged write path
           (read-modify-write of a partially covered chunk). *)
@@ -130,6 +133,8 @@ let rec render_step = function
   | Close p -> "close " ^ p
   | ReadRange { path; offset; len } ->
       Printf.sprintf "read %s [%d,%d)" path offset (offset + len)
+  | FetchRange { path; offset; len } ->
+      Printf.sprintf "fetch-range %s [%d,%d)" path offset (offset + len)
   | WriteAt { path; offset; content } ->
       Printf.sprintf "write-at %s @%d %S" path offset content
   | Truncate { path; size } -> Printf.sprintf "truncate %s %d" path size
@@ -409,6 +414,27 @@ let setup_client (module C : Conf.S) root staging_prefix =
         done;
         Printf.printf "  read %s [%d,%d) = %S\n" path offset (offset + len)
           (Bytes.to_string bytes);
+        Lwt.return_unit
+    | FetchRange { path; offset; len } ->
+        (* Somewhere outside the cache and the data dir, so the destination is
+           not mistaken for daemon state. The system hands the extension a fresh
+           path per range; one reused path shows the same thing here. *)
+        let dst = Filename.concat (Filename.dirname C.cache_root) "range.out" in
+        let* () = Fs_util.unlink_quiet dst in
+        let* n = F.fetch_range (key path) ~dst_path:dst ~offset ~length:len in
+        let served =
+          let ic = open_in_bin dst in
+          let size = in_channel_length ic in
+          seek_in ic (min offset size);
+          let s = really_input_string ic (max 0 (min n (size - offset))) in
+          close_in ic;
+          s
+        in
+        (* The file length is the point of the range landing at its own offset:
+           everything before it is a hole, so the file stops where the range
+           does rather than starting at zero. *)
+        Printf.printf "  fetch-range %s [%d,%d) served=%d file-size=%d = %S\n"
+          path offset (offset + len) n (Unix.stat dst).Unix.st_size served;
         Lwt.return_unit
     | WriteAt { path; offset; content } ->
         let len = String.length content in

@@ -5,7 +5,8 @@ import OSLog
 
 private let log = Logger(subsystem: "org.feverdreamtv.tsync", category: "Extension")
 
-final class TsyncExtension: NSObject, NSFileProviderReplicatedExtension, @unchecked Sendable {
+final class TsyncExtension: NSObject, NSFileProviderReplicatedExtension,
+                            NSFileProviderPartialContentFetching, @unchecked Sendable {
     private let domain: NSFileProviderDomain
     private let client: DaemonClient
     private let readOnly: Bool
@@ -122,6 +123,69 @@ final class TsyncExtension: NSObject, NSFileProviderReplicatedExtension, @unchec
         // The system cancels a fetch that is taking too long and then expects the
         // completion handler promptly. Without this it waits on a request nobody
         // is going to answer.
+        progress.cancellationHandler = { task.cancel() }
+        return progress
+    }
+
+    /// Serve one range instead of the whole file.
+    ///
+    /// This is what makes a large file usable rather than merely legible: opening
+    /// a 5 GB movie reads its header, and answering that read with the header is
+    /// the difference between playing at once and waiting for the whole download.
+    /// The system asks for the range an application actually touched, writes the
+    /// piece we hand back into its own copy at that offset, and comes back for
+    /// more as the application reads on.
+    ///
+    /// Whole-file `fetchContents` stays: the system still uses it to materialize
+    /// a file outright, and this method is only ever an optimisation on top.
+    func fetchPartialContents(for itemIdentifier: NSFileProviderItemIdentifier,
+                              version requestedVersion: NSFileProviderItemVersion,
+                              request: NSFileProviderRequest,
+                              minimalRange requestedRange: NSRange,
+                              aligningTo alignment: Int,
+                              options: NSFileProviderFetchContentsOptions = [],
+                              completionHandler: @escaping (URL?, NSFileProviderItem?, NSRange, NSFileProviderMaterializationFlags, Error?) -> Void) -> Progress {
+        let progress = Progress(totalUnitCount: Int64(max(0, requestedRange.length)))
+        let ref = ItemID.wire(itemIdentifier)
+        let task = Task {
+            do {
+                let item = try await resolve(itemIdentifier)
+                // With strict versioning the system discards anything but the
+                // version it asked for, so answering with the version we have
+                // would waste the transfer. Saying so instead lets it re-ask for
+                // the version we do have.
+                if options.contains(.strictVersioning),
+                   item.itemVersion.contentVersion != requestedVersion.contentVersion {
+                    throw NSError(domain: NSFileProviderErrorDomain,
+                                  code: NSFileProviderError.versionNoLongerAvailable.rawValue)
+                }
+
+                let range = PartialRange.aligned(covering: requestedRange,
+                                                 alignment: alignment,
+                                                 documentSize: item.documentSize?.int64Value ?? 0)
+                // Same constraint as the whole-file path: the system takes
+                // ownership of this file and this process may not move one into
+                // its directory, so the daemon writes it there to begin with.
+                guard let manager = NSFileProviderManager(for: domain),
+                      let temporary = try? manager.temporaryDirectoryURL() else {
+                    throw DaemonError.transport("no temporary directory for domain")
+                }
+                let destination = temporary.appendingPathComponent(UUID().uuidString)
+                let served = try await client.fetchRange(ref: ref,
+                                                         destination: destination.path,
+                                                         offset: Int64(range.location),
+                                                         length: Int64(range.length))
+                try Task.checkCancellation()
+                progress.completedUnitCount = progress.totalUnitCount
+                completionHandler(destination, item, served, [], nil)
+            } catch is CancellationError {
+                completionHandler(nil, nil, requestedRange, [], CocoaError(.userCancelled))
+            } catch {
+                log.error("fetchPartialContents \(ref, privacy: .public) \(requestedRange.location)+\(requestedRange.length): \(error, privacy: .public)")
+                completionHandler(nil, nil, requestedRange, [],
+                                  FileProviderError.from(error, item: itemIdentifier))
+            }
+        }
         progress.cancellationHandler = { task.cancel() }
         return progress
     }

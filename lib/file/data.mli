@@ -90,6 +90,15 @@ module Make (C : Conf.S) (R : Remote.S) : sig
       copy handed to a frontend. *)
   val assemble_to : string -> dst_path:string -> unit Lwt.t
 
+  (** [fetch_range key ~dst_path ~offset ~length] writes that range of [key]
+      into [dst_path] at the same offset, leaving the rest of the file sparse,
+      and returns the byte count — short only at end of file. Only the chunks
+      the range covers are fetched, so a large file can be served a piece at a
+      time rather than materialized whole. [dst_path] is created even when the
+      range lies past the end. *)
+  val fetch_range :
+    string -> dst_path:string -> offset:int -> length:int -> int Lwt.t
+
   (** [Some (bytes_done, bytes_total)] while [key] is being pulled in whole;
       [None] otherwise. *)
   val download_progress : string -> (int * int) option
