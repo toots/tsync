@@ -27,7 +27,6 @@ jobs:
     permissions:
       contents: write
     env:
-      SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
       # The floor the daemon runs on, and the app's minSdk. The two must agree.
       ANDROID_API: "26"
     steps:
@@ -56,39 +55,35 @@ jobs:
           path: |
             ~/.opam
             _opam
-          # Deliberately not keyed on this file: editing a step below would
-          # otherwise rebuild the compiler from scratch. Bump the version
-          # segment when the cross package list changes — until then a new
+          # A fixed key, deliberately: nothing in the tree determines what
+          # goes in the switch, and keying on this file would rebuild the
+          # compiler whenever a step below is edited. Bump the version segment
+          # when the compiler or the package list changes — until then a new
           # package is installed on every run and never cached.
-          key: opam-android-v1-${{ hashFiles('opam/*.opam') }}
-      # `dune -x` builds the host context too, and on linux that one includes
-      # the FUSE frontend.
-      - name: Install system dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y libfuse3-dev fuse3 pkg-config libev-dev
-      - name: Pin packages
+          key: opam-android-v1
+      - name: Register the cross repository
         # `opam repository add <url>` on a restored root finds the repository
         # already there and keeps the snapshot the cache was built from, which
         # is a silently stale package set. It is replaced on every run.
         run: |
-          opam pin -ny .
-          opam pin add -ny fuse3 git+https://github.com/toots/ocamlfuse.git
           opam repository remove android --all >/dev/null 2>&1 || true
           opam repository add android git+https://github.com/toots/opam-cross-android.git
       - name: Install OCaml dependencies
-        # The cross packages mirror tsync.opam's depends, minus what the Android
-        # build has no frontend for (FUSE) and does not configure (S3).
+        # The cross packages mirror tsync.opam's depends, minus what Android has
+        # no frontend for (FUSE) and does not configure (S3). The host switch
+        # only builds the ppx, which runs on the runner rather than the phone.
         run: |
-          opam install -y conf-libev
-          opam install --deps-only -y tsync tsync-fuse
+          opam install -y ppx_blob
           opam install -y ocaml-android \
             conf-libev-android cohttp-lwt-unix-android conduit-lwt-unix-android \
             digestif-android eqaf-android yojson-android lwt-android \
             ppx_blob-android mem_usage-android tls-android base64-android \
             x509-android mirage-crypto-pk-android cmdliner-android
       - name: Cross-build the daemon
-        run: opam exec -- dune build -x android bin/tsync.exe
+        # Naming the context's own path rather than `bin/tsync.exe`, which would
+        # build the host context too — and on linux that one wants FUSE, which
+        # this app has no use for.
+        run: opam exec -- dune build -x android _build/default.android/bin/tsync.exe
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
