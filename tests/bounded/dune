@@ -1,0 +1,3 @@
+(test
+ (name bounded_test)
+ (libraries tsync_lwt_unix lwt lwt.unix))

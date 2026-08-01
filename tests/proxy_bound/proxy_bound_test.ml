@@ -27,14 +27,19 @@ let check name ok =
 
 let limit = 4
 
-(* Runs [n] jobs through [bounded] at once, each parking until released, and
-   reports how many were ever running together. *)
+(* Runs [jobs] through [bounded] at once, each parking until released, and
+   reports how many ran together, how many were admitted, and how many were
+   turned away because the queue was full. *)
 let peak_concurrency ~kind ~jobs =
   let running = ref 0 and peak = ref 0 in
   let gate, release = Lwt.wait () in
-  let started = ref 0 in
+  let started = ref 0 and refused = ref 0 in
   let job () =
-    Http_proxy_frontend.bounded kind (fun () ->
+    Http_proxy_frontend.bounded kind
+      ~busy:(fun () ->
+        incr refused;
+        Lwt.return_unit)
+      (fun () ->
         incr started;
         incr running;
         if !running > !peak then peak := !running;
@@ -57,15 +62,14 @@ let peak_concurrency ~kind ~jobs =
   let admitted = !started in
   Lwt.wakeup_later release ();
   let+ () = Lwt.join all in
-  (admitted, !peak)
+  (admitted, !peak, !refused)
 
 let () =
   Lwt_main.run
-    (Http_proxy_frontend.data_slots :=
-       Some (Lwt_pool.create limit (fun () -> Lwt.return_unit));
+    (Http_proxy_frontend.gate := Some (Http_proxy_frontend.make_gate limit);
 
      (* ── Reads are bounded ─────────────────────────────────────────────── *)
-     let* admitted, peak = peak_concurrency ~kind:`Get ~jobs:32 in
+     let* admitted, peak, _ = peak_concurrency ~kind:`Get ~jobs:32 in
      check "no more reads run at once than the limit" (peak <= limit);
      check "the limit is actually reached, so the bound is what capped it"
        (peak = limit);
@@ -73,19 +77,39 @@ let () =
 
      (* ── Writes share the same budget ──────────────────────────────────── *)
      (* One device underneath, so a write costs what a read costs. *)
-     let* _, peak = peak_concurrency ~kind:`Put ~jobs:32 in
+     let* _, peak, _ = peak_concurrency ~kind:`Put ~jobs:32 in
      check "writes are bounded too" (peak <= limit);
 
      (* ── Metadata is not bounded ───────────────────────────────────────── *)
-     let* admitted, peak = peak_concurrency ~kind:`Meta ~jobs:32 in
+     let* admitted, peak, _ = peak_concurrency ~kind:`Meta ~jobs:32 in
      check "metadata is not held behind data" (admitted = 32 && peak = 32);
 
      (* ── Every slot is given back ──────────────────────────────────────── *)
      (* A slot leaked on one request would shrink the bound until the frontend
         served nothing at all — a failure that only shows up under load, hours
         in. *)
-     let* _, peak = peak_concurrency ~kind:`Get ~jobs:32 in
+     let* _, peak, _ = peak_concurrency ~kind:`Get ~jobs:32 in
      check "the same budget is available afterwards" (peak = limit);
+
+     (* ── The queue is bounded, and overflow is refused ─────────────────── *)
+     (* Holding every arrival would turn a busy device into a growing list of
+        promises here, and the callers would time out one by one with nothing
+        to say why. Refusing is what tells them to slow down: every client
+        retries 5xx with backoff. *)
+     let queue_limit = limit * 16 in
+     let flood = limit + queue_limit + 25 in
+     let* admitted, peak, refused = peak_concurrency ~kind:`Get ~jobs:flood in
+     check "the bound still holds under a flood" (peak = limit);
+     check "the queue holds exactly its limit"
+       (admitted = limit && refused = flood - limit - queue_limit);
+     check "nothing is silently dropped"
+       (admitted + refused + queue_limit = flood);
+
+     (* A refusal must not consume a slot, or the bound would erode with every
+        overload until the frontend served nothing at all. *)
+     let* _, peak, refused = peak_concurrency ~kind:`Get ~jobs:32 in
+     check "the budget survives a flood" (peak = limit);
+     check "a quiet period refuses nobody" (refused = 0);
 
      (* ── Backends set the bound when nothing is configured ─────────────── *)
      (* Lowest wins: the device that can take least is the one that decides, or
@@ -100,7 +124,7 @@ let () =
      check "a single backend speaks for itself" (resolve [Some 4] = Some 4);
 
      (* ── With no pool configured, nothing is held ──────────────────────── *)
-     Http_proxy_frontend.data_slots := None;
-     let+ admitted, _ = peak_concurrency ~kind:`Get ~jobs:8 in
+     Http_proxy_frontend.gate := None;
+     let+ admitted, _, _ = peak_concurrency ~kind:`Get ~jobs:8 in
      check "an unconfigured bound lets everything through" (admitted = 8));
   exit (if !failures = 0 then 0 else 1)

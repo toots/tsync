@@ -200,11 +200,10 @@ module Make (C : Conf.S) (F : File.S) = struct
      same identity stat returns. Dirty or unknown files have no clean hash: fall back to
      the backend metadata with an empty etag. *)
   (* Bounds concurrent per-file manifest resolutions during enumeration. *)
-  let resolve_pool =
-    Lwt_pool.create (max 1 C.max_downloads) (fun () -> Lwt.return_unit)
+  let resolve_pool = Lwt_bounded.create ~max:C.max_downloads ()
 
   let file_entry_json ~container_id (e : Backend.file_entry) =
-    Lwt_pool.use resolve_pool @@ fun () ->
+    Lwt_bounded.use resolve_pool @@ fun () ->
     let* naming = naming_fields ~container_id e.key in
     let+ m = F.resolved_manifest e.key in
     match m with

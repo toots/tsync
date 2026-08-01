@@ -65,9 +65,27 @@ module Make (C : Conf.S) (F : Fetch) = struct
             else put ~offset:(Chunk_group.offset group i) data)
           (Chunk_group.indices group))
 
+  (* Fetches that have actually started, as opposed to groups someone has asked
+     for. A whole file is asked for at once — every group, in parallel — but a
+     fetch opens its destination before it waits for a download slot, so without
+     this each pending group holds a descriptor while only [max_downloads] of
+     them can be making progress.
+
+     That is not a slow leak but an instant one: measured on a 250 MB file at a
+     1 MiB group size, 247 files open inside 200ms against a 256 descriptor
+     limit, and the daemon died on its next [accept]. Concurrency beyond the
+     download pool was never buying anything — the pool is what limits progress
+     either way — it was only buying open files.
+
+     Bounded here rather than at the caller so every route in gets it: whole-file
+     materialization, a ranged read, and demand paging all arrive through
+     {!ensure}. *)
+  let slots = Lwt_bounded.create ~max:C.max_downloads ()
+
   let fetch group =
-    write_group group (fun i ->
-        F.get_chunk ~chunk_key:(Chunk_group.member_key group i))
+    Lwt_bounded.use slots (fun () ->
+        write_group group (fun i ->
+            F.get_chunk ~chunk_key:(Chunk_group.member_key group i)))
 
   (* Put [group]'s body on disk, unless it is already there. Concurrent callers
      await the same fetch; [force] re-fetches a body believed corrupt. *)
@@ -109,12 +127,32 @@ module Make (C : Conf.S) (F : Fetch) = struct
 
   let root () = Cache_layout.chunks_dir ~cache_root:C.cache_root C.domain_name
 
-  (* (path, bytes, mtime) for every chunk body, walking the fanout dirs. Each
-     directory's entries are stat'd in parallel — the same shape
-     {!Local_backend.list_prefix} uses, and for the same reason: a stat per file
-     serialized through the Lwt thread pool costs a round trip each, which on a
-     cache of a few thousand chunks is the difference between milliseconds and
-     seconds. The pool bounds the actual concurrency. *)
+  (* Metadata fan-out. Enough concurrent stats to hide per-call latency, few
+     enough that a large directory cannot become a descriptor storm. Not derived
+     from the device: a stat is not a transfer, and pacing these to what a slow
+     disk can stream would make a cache sweep crawl.
+
+     One budget for the store, not one per sweep: [stats] is answered per status
+     request, so a per-call bound would limit each sweep and none of them
+     together.
+
+     It covers the stats only. The fanout directories are walked with a plain
+     [map_p] — there is a fixed number of them, chosen here rather than by the
+     data — and holding a slot per directory while its entries queue for the
+     same budget is a deadlock: the outer jobs wait on slots the inner jobs can
+     never get. A shared bound must be taken around the resource, never around
+     something that goes on to take it again. *)
+  let metadata_slots = Lwt_bounded.create ~max:64 ()
+
+  (* (path, bytes, mtime) for every chunk body, walking the fanout dirs. Entries
+     are stat'd in parallel because a stat per file, one at a time, costs a round
+     trip each — on a cache of a few thousand chunks that is the difference
+     between milliseconds and seconds.
+
+     Bounded explicitly rather than left to the Lwt thread pool. That pool is a
+     ceiling on threads, not on anything a job holds, and a cache is as large as
+     the user's data: "as many at once as there are files" is not a number this
+     code gets to choose. *)
   let entries () =
     let* dirs = Fs_util.readdir_list (root ()) in
     let+ per_dir =
@@ -122,7 +160,7 @@ module Make (C : Conf.S) (F : Fetch) = struct
         (fun dir ->
           let dir = Filename.concat (root ()) dir in
           let* names = Fs_util.readdir_list dir in
-          Lwt_list.filter_map_p
+          Lwt_bounded.filter_map_with metadata_slots
             (fun name ->
               let path = Filename.concat dir name in
               Lwt.catch
