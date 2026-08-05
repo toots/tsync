@@ -49,12 +49,12 @@ type step =
   | ShowChunkCache
       (** Print the whole chunk store's footprint: [chunks=n bytes=b]. *)
   | ShowNames of string
-  | Stat of string
-      (** Query a path through the IPC [stat] action. A query changes nothing: a
-          stat of something absent says so and leaves no trace. *)
       (** Print the entry names a readdir serves for a directory ([""] for the
           domain root), subdirectories with a trailing slash. A file with only
           staged edits must appear; internal markers must not. *)
+  | Stat of string
+      (** Query a path through the IPC [stat] action. A query changes nothing: a
+          stat of something absent says so and leaves no trace. *)
   | Mark
       (** Record the current time, usable later as an [Expire "mark"] cutoff. *)
   | Expire of string
@@ -100,9 +100,10 @@ type step =
       (** Apply a backend-damage step (delete/corrupt chunk, delete manifest) to
           the secondary backend instead of the primary. *)
   | ResyncRemote
-      (** Run [Mirror.resync] from the primary to the other backends, printing the
-          copied keys and a per-destination summary. Bytes are omitted: manifest
-          objects embed mtimes, so their sizes are not deterministic. *)
+      (** Run [Mirror.resync] from the primary to the other backends, printing
+          the copied keys and a per-destination summary. Bytes are omitted:
+          manifest objects embed mtimes, so their sizes are not deterministic.
+      *)
   | LocalWrite of { path : string; content : string }
       (** Write [content] to [path] in the local staging directory (created on
           first use, reset after each [Import]). Parent directories are created

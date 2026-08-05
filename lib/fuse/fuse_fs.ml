@@ -303,15 +303,26 @@ module Make (C : Conf.S) = struct
         (fun path size fi ->
           guard "truncate" path (fun () ->
               on_loop (fun () -> (dispatch path).truncate path size fi)));
+      (* The store has no size, but a write lands on the cache filesystem before
+         it is uploaded, so report that one: what df shows is then the space a
+         write can actually use. Inode counts stay nominal — nothing here maps to
+         one. One statvfs, no cache walk, since df-alikes poll this. *)
       statfs =
         (fun _path ->
+          let bsize = 4096L in
+          let blocks bytes = Int64.div bytes bsize in
+          let total, avail =
+            match Fs_util.disk_space C.cache_root with
+              | Some (avail, total) -> (blocks total, blocks avail)
+              | None -> (0L, 0L)
+          in
           Unix_util.
             {
-              f_bsize = 4096L;
-              f_frsize = 4096L;
-              f_blocks = Int64.of_int max_int;
-              f_bfree = Int64.of_int max_int;
-              f_bavail = Int64.of_int max_int;
+              f_bsize = bsize;
+              f_frsize = bsize;
+              f_blocks = total;
+              f_bfree = avail;
+              f_bavail = avail;
               f_files = Int64.of_int max_int;
               f_ffree = Int64.of_int max_int;
               f_favail = Int64.of_int max_int;
