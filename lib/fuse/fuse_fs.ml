@@ -70,13 +70,16 @@ module Make (C : Conf.S) = struct
               Lwt.return_unit))
     end
 
-  (* How much a write can still land, which is a property of the stores behind
+  (* How much more the domain can hold, which is a property of the stores behind
      the mount rather than of the mount: a bucket has no size we could report, a
-     local store has its device's. Every write also stages locally in full before
-     it uploads, so the cache filesystem bounds one either way — with a bucket it
-     is the only bound there is, and saying so beats inventing an infinity.
-     Writable means [main] or [replica]: a backfill target catches up on its own
-     time and a read-only store is never written. *)
+     local store has its device's, and a write must fit every store that keeps a
+     copy — so the smallest wins. Writable means [main] or [replica]: a backfill
+     target catches up on its own time and a read-only store is never written.
+
+     The cache filesystem answers only when nothing else can. A write does stage
+     there in full before it uploads, but that bounds one write rather than the
+     domain, and the cap already keeps the cache small; with a bucket behind the
+     mount it is the only figure there is, which beats inventing an infinity. *)
   let writable_space () =
     let free path = Option.map fst (Fs_util.disk_space path) in
     if C.read_only then 0L
@@ -89,11 +92,12 @@ module Make (C : Conf.S) = struct
       if writable = [] then 0L
       else (
         (* A store whose capacity is not ours to know constrains nothing. *)
-        let limits =
-          List.filter_map (fun (m : Backend.member) -> m.local_path) writable
-        in
-        match List.filter_map free (C.cache_root :: limits) with
-          | [] -> 0L
+          match
+            List.filter_map
+              (fun (m : Backend.member) -> Option.bind m.local_path free)
+              writable
+          with
+          | [] -> Option.value ~default:0L (free C.cache_root)
           | limits -> List.fold_left min Int64.max_int limits))
 
   let usage_notification = ref None
