@@ -1,4 +1,4 @@
-name: release
+name: release-macos
 
 # Runs after `test` passes on main, so a red build never reaches the nightly
 # download URL. workflow_dispatch is there to re-cut a release by hand.
