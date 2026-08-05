@@ -1,0 +1,102 @@
+name: release-android
+
+# One workflow per platform: either can be re-cut without the other. Both
+# publish to the same `nightly` release.
+on:
+  workflow_run:
+    workflows: [test]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+  # ponytail: temporary — a workflow is only dispatchable once it is on the
+  # default branch. Remove with the branch.
+  push:
+    branches: [tsync-android]
+
+concurrency:
+  group: release-android
+  cancel-in-progress: false
+
+jobs:
+  apk:
+    # Any other trigger asked for this build directly.
+    if: >-
+      github.event_name != 'workflow_run'
+      || github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    permissions:
+      contents: write
+    env:
+      # Must match the app's minSdk.
+      ANDROID_API: "26"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+      - name: Locate the NDK
+        # conf-ndk-android reads this.
+        run: |
+          NDK="${ANDROID_NDK_LATEST_HOME:-$ANDROID_NDK_ROOT}"
+          test -d "$NDK"
+          echo "ANDROID_NDK_ROOT=$NDK" >> $GITHUB_ENV
+      - uses: ocaml/setup-ocaml@v3
+        with:
+          # What ocaml-android is built for.
+          ocaml-compiler: "5.4.1"
+      # After setup-ocaml, which re-initialises the switch and would wipe it.
+      - uses: actions/cache@v4
+        with:
+          # The switch lives in the workspace, so ~/.opam alone is not enough.
+          path: |
+            ~/.opam
+            _opam
+          # Fixed: nothing in the tree says what goes in the switch. Bump when
+          # the compiler or the package list below changes.
+          key: opam-android-v1
+      - name: Register the cross repository
+        # A restored root already has it, at the revision the cache was built
+        # from.
+        run: |
+          opam repository remove android --all >/dev/null 2>&1 || true
+          opam repository add android git+https://github.com/toots/opam-cross-android.git
+      - name: Install OCaml dependencies
+        # tsync.opam's depends, minus FUSE and S3. The host switch only builds
+        # the ppx.
+        run: |
+          opam install -y ppx_blob
+          # The conf- packages only detect what the sysroot holds; these are
+          # what put libev and gmp there.
+          opam install -y ocaml-android build-libev-android build-gmp-android
+          opam install -y \
+            conf-libev-android cohttp-lwt-unix-android conduit-lwt-unix-android \
+            digestif-android eqaf-android yojson-android lwt-android \
+            ppx_blob-android mem_usage-android tls-android base64-android \
+            x509-android mirage-crypto-pk-android cmdliner-android
+      - name: Cross-build the daemon
+        # The context path, not `bin/tsync.exe`: that builds the host context
+        # too, which on linux wants FUSE.
+        run: opam exec -- dune build -x android _build/default.android/bin/tsync.exe
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+      - name: Build the APK
+        # Debug-signed: a nightly has to install without release keys.
+        env:
+          BUILD_NUMBER: ${{ github.run_number }}
+        run: ./gradlew assembleDebug
+        working-directory: android
+      - uses: actions/upload-artifact@v4
+        with:
+          name: tsync-apk
+          path: android/app/build/outputs/apk/debug/app-debug.apk
+
+      # The `nightly` release exists; this replaces its Android asset and leaves
+      # the rest of it alone.
+      - name: Publish nightly release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cp android/app/build/outputs/apk/debug/app-debug.apk tsync.apk
+          gh release upload nightly tsync.apk --clobber

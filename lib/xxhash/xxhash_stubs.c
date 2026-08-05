@@ -1,4 +1,7 @@
-#include <xxhash.h>
+/* XXH_INLINE_ALL compiles the vendored single-header library straight into this
+   stub, so there is no libxxhash to find, link or cross-build. */
+#define XXH_INLINE_ALL
+#include "xxhash.h"
 
 #include <caml/alloc.h>
 #include <caml/custom.h>

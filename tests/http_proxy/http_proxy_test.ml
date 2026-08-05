@@ -588,4 +588,24 @@ let () =
   (* Every state a store's totals pass through, in the order they happen. *)
   print_endline "########## store totals, state by state ##########";
   List.iter print_endline !rows;
+  (* What a setup form asks before it has a config: the domains this secret is
+     good for, and nothing at all without one. Last, so the counters it bumps do
+     not land in the snapshots above. *)
+  let domains req =
+    let resp, body =
+      Lwt_main.run (Http_proxy_frontend.serve_domains status_routes req "")
+    in
+    (status_code resp, Lwt_main.run (Cohttp_lwt.Body.to_string body))
+  in
+  print_endline "########## /domains ##########";
+  List.iter
+    (fun (label, req) ->
+      let code, listing = domains req in
+      Printf.printf "  %-16s %d %s\n" label code listing)
+    [
+      ("unsigned", Cohttp.Request.make (Uri.of_string "/domains"));
+      ("wrong secret", signed_request ~secret:"wrong" ~path:"/domains");
+      ("signed", signed_request ~secret:"s3cr3t" ~path:"/domains");
+    ];
+
   print_endline "http_proxy_test ok"
