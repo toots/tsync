@@ -25,6 +25,10 @@ jobs:
       fail-fast: false
       matrix:
         image: [debian:13, "ubuntu:26.04"]
+        arch: [amd64, arm64]
+        # `arch` has to be a matrix key, not only an include key: an include
+        # entry sharing no key with the matrix is merged into every combination
+        # instead of selecting one, which collapses this to two jobs.
         include:
           - arch: amd64
             runner: ubuntu-latest

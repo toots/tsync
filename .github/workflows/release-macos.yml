@@ -34,6 +34,7 @@ jobs:
       - uses: ocaml/setup-ocaml@v3
         with:
           ocaml-compiler: "5.5"
+          dune-cache: true
       - name: Pin packages
         run: |
           opam pin -ny .
