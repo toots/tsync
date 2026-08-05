@@ -30,8 +30,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func registerDomains() async {
-        if await purgeIfRequested() { return }
-
         let domainNames: [String]
         if let config = try? Config.load() {
             domainNames = config.domains.map(\.name)
@@ -40,9 +38,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             domainNames = []
         }
 
+        // Ahead of anything that can fail or return early, so a failure shows
+        // up in the menu bar instead of leaving no interface at all.
+        statusMenu = await StatusMenu(domains: domainNames)
+
+        if await purgeIfRequested() { return }
+
         let existing: [NSFileProviderDomain]
         do {
-            existing = try await NSFileProviderManager.domains()
+            existing = try await retryingWhileInvalidating { try await NSFileProviderManager.domains() }
         } catch {
             log.error("domains() failed: \(error, privacy: .public)")
             existing = []
@@ -74,7 +78,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             // operation nothing implements.
             domain.supportsSyncingTrash = false
             do {
-                try await NSFileProviderManager.add(domain)
+                try await retryingWhileInvalidating { try await NSFileProviderManager.add(domain) }
                 log.info("registered domain '\(identifier, privacy: .public)'")
             } catch {
                 log.error("add '\(identifier, privacy: .public)' failed: \(error, privacy: .public)")
@@ -83,6 +87,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         recordIdentityScheme()
         await startRelays()
+    }
+
+    /// The system rejects domain calls with `providerNotFound` ("is in the
+    /// process of being invalidated. Retry later.") while it swaps the
+    /// extension registration — which is what the installer opening the app
+    /// races against on every fresh install.
+    private func retryingWhileInvalidating<T>(_ body: () async throws -> T) async throws -> T {
+        for attempt in 1...10 {
+            do {
+                return try await body()
+            } catch let error as NSError where error.domain == NSFileProviderErrorDomain
+                && error.code == NSFileProviderError.Code.providerNotFound.rawValue {
+                log.info("provider still invalidating, retry \(attempt)")
+                try? await Task.sleep(for: .seconds(1))
+            }
+        }
+        return try await body()
     }
 
     /// One relay per domain, for as long as the app runs.
@@ -94,7 +115,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             relays.append(relay)
         }
         log.info("relaying events for \(self.relays.count) domain(s)")
-        statusMenu = await StatusMenu(domains: domains.map(\.displayName))
     }
 
     // MARK: - Identity scheme
