@@ -498,9 +498,13 @@ dropped until usage is back under — cache files, not whole files, so a large f
 the parts you're reading and lose the parts you aren't. Nothing is delisted; a dropped range
 is re-fetched on next read.
 
-**Concurrency.** `maxUploads` (default 4) bounds upload operations and, via a shared chunk
-buffer pool, how many chunk reads and uploads run at once across all files. `maxDownloads`
-(default 8) bounds concurrent file downloads.
+**Concurrency.** `maxUploads` (default 4) bounds upload operations — how many files the
+upload workers process at once. `maxChunkBuffers` (default: `maxUploads`) bounds how many
+chunk bodies are held in memory at once across all of them, so the upload path costs about
+`maxChunkBuffers` × the domain's chunk size. Lower it on a memory-tight host to raise
+`maxUploads` without raising the ceiling: the extra uploads then overlap the round trips that
+carry no chunk — dedup checks, manifest writes, TLS setup. `maxDownloads` (default 8) bounds
+concurrent file downloads.
 
 Sizes accept a byte count or a suffixed string — `512K`, `8M`, `1G`, binary multiples — so
 both `8388608` and `"8M"` work.
@@ -520,6 +524,7 @@ Top level:
 | `name` | no | This machine's name, used to label conflict copies. Defaults to the hostname. |
 | `domains` | yes | One entry per synced folder. |
 | `maxUploads` | no | Concurrent upload operations, default `4`. |
+| `maxChunkBuffers` | no | Chunk bodies held in memory at once, default `maxUploads`. |
 | `maxDownloads` | no | Concurrent file downloads, default `8`. |
 | `tls` | no | `"openssl"` or `"native"` — see [TLS](#tls). |
 

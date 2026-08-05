@@ -8,8 +8,10 @@ type dest_stats = {
 }
 
 module Make (C : Conf.S) = struct
-  (* Bounds concurrent HEAD/copy operations per destination. *)
-  let copy_pool = Lwt_bounded.create ~max:C.max_uploads ()
+  (* Bounds concurrent HEAD/copy operations per destination. A copy holds the
+     whole object body, so this follows [max_chunk_buffers] rather than the
+     file-level [max_uploads]. *)
+  let copy_pool = Lwt_bounded.create ~max:C.max_chunk_buffers ()
 
   (* Objects are content-addressed or immutable once written, so a size mismatch
      means the destination copy is corrupt. [None] when it was already

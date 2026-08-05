@@ -22,6 +22,7 @@ module C : Conf.S = struct
   let data_dir = root ^ "/data"
   let socket_path = ""
   let max_uploads = 2
+  let max_chunk_buffers = 2
   let max_downloads = 2
   let chunk_size = Some 8
   let cache_chunk_size = Some 8

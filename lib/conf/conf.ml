@@ -49,6 +49,10 @@ module type S = sig
   (** Max files uploaded concurrently (upload worker count). *)
   val max_uploads : int
 
+  (** Max chunk bodies held in memory at once, across every upload. Times the
+      chunk size, this is what the upload path costs in memory. *)
+  val max_chunk_buffers : int
+
   (** Max files downloaded concurrently. *)
   val max_downloads : int
 

@@ -75,6 +75,7 @@ module C : Conf.S = struct
   let data_dir = root
   let socket_path = ""
   let max_uploads = 1
+  let max_chunk_buffers = 1
   let max_downloads = 4
   let chunk_size = Some 16
   let cache_chunk_size = Some 48

@@ -1430,11 +1430,12 @@ let print_conf_cmd =
   let run () =
     let cfg = load_config () in
     let default = read_default_domain () in
-    Printf.printf "name:          %s\n" cfg.Conf_parsing.name;
-    Printf.printf "maxUploads:    %d\n" cfg.Conf_parsing.max_uploads;
-    Printf.printf "maxDownloads:  %d\n" cfg.Conf_parsing.max_downloads;
+    Printf.printf "name:            %s\n" cfg.Conf_parsing.name;
+    Printf.printf "maxUploads:      %d\n" cfg.Conf_parsing.max_uploads;
+    Printf.printf "maxChunkBuffers: %d\n" cfg.Conf_parsing.max_chunk_buffers;
+    Printf.printf "maxDownloads:    %d\n" cfg.Conf_parsing.max_downloads;
     (match cfg.Conf_parsing.tls with
-      | Some t -> Printf.printf "tls:           %s\n" t
+      | Some t -> Printf.printf "tls:             %s\n" t
       | None -> ());
     List.iter
       (fun (d : Conf_parsing.domain) ->

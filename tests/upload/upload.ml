@@ -28,6 +28,7 @@ module C = struct
   let data_dir = Filename.concat root "data"
   let socket_path = Filename.concat root "s.sock"
   let max_uploads = 4
+  let max_chunk_buffers = 4
   let max_downloads = 8
   let chunk_size = Some chunk_size
   let cache_chunk_size = Some cache_chunk_size

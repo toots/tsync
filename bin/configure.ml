@@ -714,13 +714,15 @@ let edit_domain existing =
     @ [("backends", `List !backends); ("frontends", `List !frontends)])
 
 (* Serialize globals + domains to [path] with 0600 perms. *)
-let write_config ~path ~client_name ~max_uploads ~max_downloads ~tls ~domains =
+let write_config ~path ~client_name ~max_uploads ~max_chunk_buffers
+    ~max_downloads ~tls ~domains =
   Fs_util.mkdir_p_sync (Filename.dirname path);
   let json =
     `Assoc
       ([
          ("name", `String client_name);
          ("maxUploads", `Int max_uploads);
+         ("maxChunkBuffers", `Int max_chunk_buffers);
          ("maxDownloads", `Int max_downloads);
        ]
       @ (match tls with Some t -> [("tls", `String t)] | None -> [])
@@ -759,6 +761,12 @@ let cmd =
            (Option.bind existing_root (fun r -> jint r "maxUploads"))
            ~default:Conf_parsing.default_max_uploads)
     in
+    let max_chunk_buffers =
+      ref
+        (Option.value
+           (Option.bind existing_root (fun r -> jint r "maxChunkBuffers"))
+           ~default:!max_uploads)
+    in
     let max_downloads =
       ref
         (Option.value
@@ -772,6 +780,9 @@ let cmd =
     let edit_globals () =
       client_name := prompt "Client name" (Some !client_name);
       max_uploads := prompt_int "Max concurrent uploads" !max_uploads;
+      (* Times the chunk size, this is what uploading costs in memory. *)
+      max_chunk_buffers :=
+        prompt_int "Max chunk buffers held in memory" !max_chunk_buffers;
       max_downloads := prompt_int "Max concurrent downloads" !max_downloads;
       (* Only worth asking when the build has more than one backend. "auto"
          leaves it unset, taking the preferred one at startup: the same answer as
@@ -887,8 +898,8 @@ let cmd =
     if not !saved then Printf.printf "Aborted; config left untouched.\n"
     else begin
       write_config ~path:config_path ~client_name:!client_name
-        ~max_uploads:!max_uploads ~max_downloads:!max_downloads ~tls:!tls
-        ~domains:!domains;
+        ~max_uploads:!max_uploads ~max_chunk_buffers:!max_chunk_buffers
+        ~max_downloads:!max_downloads ~tls:!tls ~domains:!domains;
       Printf.printf "\nConfig written to %s\n" config_path;
       print_endline "Run `tsync restart` to apply it."
     end

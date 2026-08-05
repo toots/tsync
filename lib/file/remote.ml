@@ -80,15 +80,16 @@ module Make_with_layout (C : Conf.S) (L : Layout.S) : S = struct
      a buffer aliases its backing memory and must not outlive the callback.
 
      Acquiring here is also the real system-wide bound on concurrent chunk work:
-     a chunk read blocks until a slot frees, whatever file it belongs to, making
-     [max_uploads] the single ceiling. *)
+     a chunk read blocks until a slot frees, whatever file it belongs to, so
+     [max_chunk_buffers] times the chunk size is what the upload path costs in
+     memory however many files [max_uploads] admits. *)
   (* Sized off the configured value, not the resolved one: only an upper bound
      for the common case is needed, and an oversized chunk falls through to a
      one-off allocation below. *)
   let buffer_size = Option.value C.chunk_size ~default:Conf.default_chunk_size
 
   let chunk_buffers =
-    Lwt_pool.create (max 1 C.max_uploads) (fun () ->
+    Lwt_pool.create (max 1 C.max_chunk_buffers) (fun () ->
         Lwt.return (Bytes.create buffer_size))
 
   (* Config, else what the primary backend recommends (an http-proxy answers with
@@ -227,7 +228,7 @@ module Make_with_layout (C : Conf.S) (L : Layout.S) : S = struct
         (fun () ->
           (* Safe to launch every chunk's task up front: each blocks on the
              [chunk_buffers] pool until a slot frees, so concurrency stays capped
-             at [max_uploads] however many chunks contend. *)
+             at [max_chunk_buffers] however many chunks contend. *)
           Lwt_list.map_p
             (upload_chunk fd ~cancel ~file_size ~chunk_size)
             (List.init num_chunks Fun.id))
@@ -299,7 +300,7 @@ module Make_with_layout (C : Conf.S) (L : Layout.S) : S = struct
      Static, like every bound here. A recheck's width is the file's chunk count,
      and a per-call budget would limit one recheck while saying nothing about
      how many run at once — which is no bound on the store underneath. *)
-  let recheck_chunks = Lwt_bounded.create ~max:C.max_uploads ()
+  let recheck_chunks = Lwt_bounded.create ~max:C.max_chunk_buffers ()
 
   (* Recheck a file from its manifest: every chunk it names must exist remotely
      with the right size, and a missing or wrong remote manifest is republished

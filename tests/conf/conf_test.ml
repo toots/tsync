@@ -145,5 +145,22 @@ let () =
   assert (d.Conf_parsing.chunk_size = None);
   assert (d.Conf_parsing.cache_chunk_size = None);
 
+  (* [maxChunkBuffers] follows [maxUploads] unless it is set, so a config
+     written before the two were separable keeps its memory ceiling. *)
+  let globals extra =
+    Printf.sprintf
+      {|{%s "domains": [{"name": "d", "symlinks": "keep", "versioning": false,
+                         "frontends": ["fuse"],
+                         "backends": [{"type": "s3", "name": "s",
+                                       "role": "main"}]}]}|}
+      extra
+  in
+  let buffers extra = (load (globals extra)).Conf_parsing.max_chunk_buffers in
+  assert (buffers "" = Conf_parsing.default_max_uploads);
+  assert (buffers {|"maxUploads": 16,|} = 16);
+  assert (buffers {|"maxUploads": 16, "maxChunkBuffers": 4,|} = 4);
+  (* Zero would deadlock the pool, so it falls back rather than being taken. *)
+  assert (buffers {|"maxUploads": 16, "maxChunkBuffers": 0,|} = 16);
+
   Unix.putenv "TSYNC_CONFIG_JSON" "";
   print_endline "conf_test ok"

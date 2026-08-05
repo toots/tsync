@@ -294,6 +294,7 @@ let make_conf ?domain ?socket_path ?(tier = true) ?source cfg : (module Conf.S)
     let data_dir = runtime_paths.Runtime.data_dir
     let socket_path = socket_path
     let max_uploads = cfg.Conf_parsing.max_uploads
+    let max_chunk_buffers = cfg.Conf_parsing.max_chunk_buffers
     let max_downloads = cfg.Conf_parsing.max_downloads
     let chunk_size = d.Conf_parsing.chunk_size
     let cache_chunk_size = d.Conf_parsing.cache_chunk_size

@@ -19,6 +19,7 @@ module C : Conf.S = struct
      than wait on it. *)
   let socket_path = status_root ^ "/absent.sock"
   let max_uploads = 2
+  let max_chunk_buffers = 2
   let max_downloads = 3
   let chunk_size = Some 65536
   let cache_chunk_size = Some 65536

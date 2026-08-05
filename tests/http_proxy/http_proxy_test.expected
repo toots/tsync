@@ -46,6 +46,7 @@
       "cacheChunkSize": 65536,
       "maxCache": null,
       "maxUploads": 2,
+      "maxChunkBuffers": 2,
       "maxDownloads": 3,
       "cacheRoot": "/tmp/tsync-http-proxy-status-test/cache",
       "dataDir": "/tmp/tsync-http-proxy-status-test/data",

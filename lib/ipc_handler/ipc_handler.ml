@@ -722,6 +722,7 @@ module Make (C : Conf.S) (F : File.S) = struct
                             ( "downloadsCompleted",
                               `Int (F.downloads_completed_count ()) );
                             ("maxUploads", `Int C.max_uploads);
+                            ("maxChunkBuffers", `Int C.max_chunk_buffers);
                             ("maxDownloads", `Int C.max_downloads);
                             (* Usual cause of a mount gone quiet while its
                              backends answer fine. *)

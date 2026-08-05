@@ -28,6 +28,7 @@ type t = {
   name : string;
   tls : string option;
   max_uploads : int;
+  max_chunk_buffers : int;
   max_downloads : int;
   domains : domain list;
 }
@@ -251,16 +252,25 @@ let load path =
       | None -> Yojson.Basic.from_file path
   in
   let open Yojson.Basic.Util in
+  let max_uploads =
+    match json |> member "maxUploads" with
+      | `Int n when n > 0 -> n
+      | _ -> default_max_uploads
+  in
   {
     name =
       (match json |> member "name" with
         | `String s -> s
         | _ -> Unix.gethostname ());
     tls = (match json |> member "tls" with `String s -> Some s | _ -> None);
-    max_uploads =
-      (match json |> member "maxUploads" with
+    max_uploads;
+    (* Defaults to [max_uploads], which is the behaviour before the two were
+       separable: only a host short on memory relative to its chunk size needs
+       to set it. *)
+    max_chunk_buffers =
+      (match json |> member "maxChunkBuffers" with
         | `Int n when n > 0 -> n
-        | _ -> default_max_uploads);
+        | _ -> max_uploads);
     max_downloads =
       (match json |> member "maxDownloads" with
         | `Int n when n > 0 -> n

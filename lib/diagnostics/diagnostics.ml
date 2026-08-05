@@ -362,6 +362,7 @@ module Make (C : Conf.S) = struct
       ("cacheChunkSize", `Int (Conf.cache_chunk_size (module C)));
       ("maxCache", int_opt C.max_cache);
       ("maxUploads", `Int C.max_uploads);
+      ("maxChunkBuffers", `Int C.max_chunk_buffers);
       ("maxDownloads", `Int C.max_downloads);
       ("cacheRoot", `String C.cache_root);
       ("dataDir", `String C.data_dir);

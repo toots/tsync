@@ -46,6 +46,7 @@ module C = struct
   let data_dir = Filename.concat root "data"
   let socket_path = Filename.concat root "s.sock"
   let max_uploads = 4
+  let max_chunk_buffers = 4
 
   (* More than the chunks in flight, so the download pool never holds the fetch
      up. *)

@@ -63,9 +63,13 @@ type t = {
   name : string;
   tls : string option;  (** conduit TLS backend: "native" | "openssl" *)
   max_uploads : int;
-      (** Max concurrent upload operations (default 4): bounds how many files
-          the upload workers process at once and, through the shared chunk
-          buffer pool, how many chunk reads/uploads run concurrently overall. *)
+      (** Max concurrent upload operations (default 4): how many files the
+          upload workers process at once. *)
+  max_chunk_buffers : int;
+      (** Max chunk bodies held in memory at once, across every upload (default:
+          [max_uploads]). The real memory ceiling of the upload path is this
+          times the domain's chunk size, so a host that cannot afford
+          [max_uploads] whole chunks lowers this instead of the chunk size. *)
   max_downloads : int;  (** max concurrent file downloads (default 8) *)
   domains : domain list;
 }
