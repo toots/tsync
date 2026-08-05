@@ -164,6 +164,27 @@ let status_cmd =
     (Cmd.info "status" ~doc:"Show daemon status")
     Term.(const run $ domain_arg)
 
+(* Uploads only: a download runs because something is blocked waiting for it. *)
+let pause_cmd ~verb ~arg ~done_ ~doc =
+  let run domain =
+    try
+      let name, socket_path = domain_target ?domain () in
+      let (_ : (string * Yojson.Safe.t) list) =
+        ipc_action ~socket_path ~domain:name ~arg "pause"
+      in
+      Printf.printf "Uploads %s for '%s'\n" done_ name
+    with e -> Printf.eprintf "Error: %s\n" (Printexc.to_string e)
+  in
+  Cmd.v (Cmd.info verb ~doc) Term.(const run $ domain_arg)
+
+let pause_uploads_cmd =
+  pause_cmd ~verb:"pause" ~arg:"on" ~done_:"paused"
+    ~doc:"Pause uploads (queued work is kept)"
+
+let resume_uploads_cmd =
+  pause_cmd ~verb:"resume" ~arg:"off" ~done_:"resumed"
+    ~doc:"Resume paused uploads"
+
 let human_bytes = Metrics.human_bytes
 
 let stats_cmd =
@@ -1563,6 +1584,8 @@ let () =
          start_cmd;
          stop_cmd;
          status_cmd;
+         pause_uploads_cmd;
+         resume_uploads_cmd;
          stats_cmd;
          sync_cmd;
          recheck_cmd;

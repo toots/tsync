@@ -11,6 +11,13 @@ module type S = sig
   (** Uploads completed since the daemon started. *)
   val completed_count : unit -> int
 
+  (** Park the workers between uploads. Queued work is kept, so {!pending} keeps
+      reporting it, and {!drain} still runs to completion. Not persisted: a
+      restart resumes. *)
+  val set_paused : bool -> unit
+
+  val paused : unit -> bool
+
   val start :
     upload:(key:string -> cancel:bool ref -> unit Lwt.t) ->
     on_cursor:(entry_key:string -> unit) ->

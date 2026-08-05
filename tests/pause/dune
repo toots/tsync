@@ -1,0 +1,28 @@
+(executable
+ (name pause_test)
+ (libraries
+  tsync_conf
+  tsync_backend
+  tsync_local_backend
+  tsync_local_io
+  tsync_queue
+  lwt
+  lwt.unix))
+
+(alias
+ (name default)
+ (deps pause_test.exe))
+
+(rule
+ (alias runtest)
+ (target pause_test.output)
+ (action
+  (with-stdout-to
+   pause_test.output
+   (ignore-stderr
+    (run ./pause_test.exe)))))
+
+(rule
+ (alias runtest)
+ (action
+  (diff pause_test.expected pause_test.output)))

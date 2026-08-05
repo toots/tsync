@@ -11,6 +11,7 @@ private func domainIdentifier(_ name: String) -> String {
 @main
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private var relays: [SignalRelay] = []
+    private var statusMenu: StatusMenu?
 
     static func main() {
         let app = NSApplication.shared
@@ -86,12 +87,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     /// One relay per domain, for as long as the app runs.
     private func startRelays() async {
-        for domain in (try? await NSFileProviderManager.domains()) ?? [] {
+        let domains = (try? await NSFileProviderManager.domains()) ?? []
+        for domain in domains {
             let relay = SignalRelay(domain: domain)
             relay.start()
             relays.append(relay)
         }
         log.info("relaying events for \(self.relays.count) domain(s)")
+        statusMenu = await StatusMenu(domains: domains.map(\.displayName))
     }
 
     // MARK: - Identity scheme

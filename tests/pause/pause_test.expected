@@ -1,0 +1,4 @@
+posted while paused          paused=true  pending=1 uploaded=0
+resumed                      paused=false pending=0 uploaded=1
+posted while paused again    paused=true  pending=1 uploaded=1
+after drain                  paused=true  pending=0 uploaded=2

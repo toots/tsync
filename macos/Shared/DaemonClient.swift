@@ -65,6 +65,11 @@ struct DaemonResponse: Decodable {
     let bytesDownloaded: Int64?
     let totalBytes: Int64?
 
+    /// `status` only.
+    let paused: Bool?
+    let pendingUploads: Int?
+    let pendingDownloads: Int?
+
     /// The range `fetch_range` served, short of the request at end of file.
     let offset: Int64?
     let length: Int64?
@@ -76,6 +81,7 @@ struct DaemonResponse: Decodable {
     private enum CodingKeys: String, CodingKey {
         case ok, code, error, items, ops, stale, cursor, localPath, url
         case active, bytesDownloaded, totalBytes, offset, length
+        case paused, pendingUploads, pendingDownloads
     }
 
     init(from decoder: Decoder) throws {
@@ -94,6 +100,9 @@ struct DaemonResponse: Decodable {
         totalBytes = try c.decodeIfPresent(Int64.self, forKey: .totalBytes)
         offset = try c.decodeIfPresent(Int64.self, forKey: .offset)
         length = try c.decodeIfPresent(Int64.self, forKey: .length)
+        paused = try c.decodeIfPresent(Bool.self, forKey: .paused)
+        pendingUploads = try c.decodeIfPresent(Int.self, forKey: .pendingUploads)
+        pendingDownloads = try c.decodeIfPresent(Int.self, forKey: .pendingDownloads)
         item = try? DaemonItem(from: decoder)
     }
 }
@@ -318,6 +327,18 @@ extension DaemonClient {
 
     func downloadProgress(ref: String) async throws -> DaemonResponse {
         try await send(DaemonRequest(action: "download_progress", ref: ref))
+    }
+
+    /// Deliberately cheap on the daemon side — no store or backend access — so
+    /// it can back a poll.
+    func status() async throws -> DaemonResponse {
+        try await send(DaemonRequest(action: "status"))
+    }
+
+    /// Uploads only: a download runs because something is blocked waiting for
+    /// it. Not persisted — a daemon restart resumes.
+    func setPaused(_ paused: Bool) async throws {
+        _ = try await send(DaemonRequest(action: "pause", arg: paused ? "on" : "off"))
     }
 
     func create(parentRef: String, name: String) async throws -> DaemonResponse {

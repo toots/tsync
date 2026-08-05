@@ -681,12 +681,22 @@ module Make (C : Conf.S) (F : File.S) = struct
                     | "full_resync" ->
                         let+ () = hooks.full_resync () in
                         ok_json []
+                    (* Cheap by design: no store access, no backend health, so a
+                       menu-bar poll costs one socket round trip. The whole
+                       report is [stats]. *)
                     | "status" ->
                         Lwt.return
                           (ok_json
                              (("domain", `String C.domain_name)
                              :: ("running", `Bool true)
+                             :: ("paused", `Bool (F.uploads_paused ()))
+                             :: ("pendingUploads", `Int (F.uploads_pending ()))
+                             :: ( "pendingDownloads",
+                                  `Int (F.downloads_in_flight ()) )
                              :: hooks.status_fields ()))
+                    | "pause" ->
+                        F.set_uploads_paused (get_str obj "arg" <> "off");
+                        Lwt.return (ok_json [])
                     | "stats" ->
                         (* Assembled by {!Diagnostics}, so a mount and an
                          http-proxy answer in one shape. This daemon reports
