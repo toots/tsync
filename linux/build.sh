@@ -9,6 +9,9 @@ SWITCH=${SWITCH:-tsync}
 COMPILER=${COMPILER:-ocaml-base-compiler.5.5.0}
 
 export OPAMYES=1
+# Let opam install any depext the caller missed rather than stopping at an
+# interactive prompt. Needs root, which is what the CI containers run as.
+export OPAMCONFIRMLEVEL=unsafe-yes
 
 # bwrap has no privileges inside a CI container.
 [ -d "${OPAMROOT:-$HOME/.opam}" ] || opam init --bare --disable-sandboxing

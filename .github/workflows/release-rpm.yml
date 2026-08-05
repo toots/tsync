@@ -47,7 +47,8 @@ jobs:
           dnf install -y \
             opam gcc gcc-c++ make m4 pkgconf-pkg-config git curl unzip rsync \
             rpm-build systemd-rpm-macros gh \
-            fuse3-devel fuse3 xxhash-devel libev-devel openssl-devel gmp-devel
+            fuse3-devel fuse3 xxhash-devel libev-devel openssl-devel gmp-devel \
+            pcre2-devel
 
       - uses: actions/checkout@v4
         with:

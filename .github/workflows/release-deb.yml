@@ -52,7 +52,8 @@ jobs:
           apt-get install -y --no-install-recommends \
             opam build-essential dpkg-dev m4 pkg-config git curl \
             ca-certificates unzip rsync gh \
-            libfuse3-dev fuse3 libxxhash-dev libev-dev libssl-dev libgmp-dev
+            libfuse3-dev fuse3 libxxhash-dev libev-dev libssl-dev libgmp-dev \
+            libpcre2-dev
 
       - uses: actions/checkout@v4
         with:
