@@ -34,6 +34,13 @@ let spec =
   Frontend.
     [
       {
+        name = "mountPoint";
+        label = "Directory to mount the domain at (blank: ~/tsync/DOMAIN)";
+        typ = `String;
+        default = Some "";
+        secret = false;
+      };
+      {
         name = "allowOther";
         label = "Allow other users to access the mount (media servers, etc.)";
         typ = `Bool;

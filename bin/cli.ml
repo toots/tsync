@@ -34,6 +34,21 @@ let iter_pooled ?(parallelism = 32) f xs =
 
 let runtime_paths = Runtime.default_paths ()
 
+(* Where fuse mounts a domain: its [mountPoint] option, else ~/tsync/<domain>.
+   Also used by commands that accept an absolute path under the mount. *)
+let mount_point_of (d : Conf_parsing.domain) =
+  let opt =
+    List.find_map
+      (fun (f : Conf_parsing.frontend_config) ->
+        if f.Conf_parsing.frontend_type = "fuse" then
+          List.assoc_opt "mountPoint" f.Conf_parsing.options
+        else None)
+      d.Conf_parsing.frontends
+  in
+  match opt with
+    | Some p when p <> "" -> p
+    | _ -> Filename.concat (Sys.getenv "HOME") ("tsync/" ^ d.Conf_parsing.name)
+
 (* The [frontend] override if given (it must be one the domain lists), else the
    domain's first. Resolved at call time, not module-init, so frontend
    registration — a link-order side effect — has already happened. *)

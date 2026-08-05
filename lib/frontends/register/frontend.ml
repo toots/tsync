@@ -76,9 +76,9 @@ let entries () =
 let use_libev () =
   if not (Lwt_sys.have `libev) then
     failwith
-      "lwt was built without libev support, which tsync requires: select cannot \
-       watch descriptors above FD_SETSIZE. Rebuild it with libev available \
-       (opam reinstall lwt).";
+      "lwt was built without libev support, which tsync requires: select \
+       cannot watch descriptors above FD_SETSIZE. Rebuild it with libev \
+       available (opam reinstall lwt).";
   Lwt_engine.set (new Lwt_engine.libev ());
   Log.debug "event loop engine: libev"
 

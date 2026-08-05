@@ -44,17 +44,15 @@ let start_cmd =
       end;
       cfg.Conf_parsing.domains
     in
-    let mount_fn domain_name =
-      match (mount, domains) with
-        | Some p, [_] -> p
-        | _ -> Filename.concat (Sys.getenv "HOME") ("tsync/" ^ domain_name)
+    let mount_fn d =
+      match (mount, domains) with Some p, [_] -> p | _ -> mount_point_of d
     in
     let per_domain =
       List.map
         (fun (d : Conf_parsing.domain) ->
           let socket_path = Runtime.domain_socket_path runtime_paths d.name in
           let conf = make_conf ~domain:d.name ~socket_path cfg in
-          (d, conf, mount_fn d.Conf_parsing.name))
+          (d, conf, mount_fn d))
         domains
     in
     (* Do NOT touch Lwt here: any Lwt_unix/Lwt_preemptive call initializes the
@@ -309,7 +307,7 @@ let ls_cmd =
        in
        let module Fs = File_store.Make (C) in
        let mount_point =
-         Filename.concat (Sys.getenv "HOME") ("tsync/" ^ C.domain_name)
+         mount_point_of (Conf_parsing.pick_domain ?domain cfg)
        in
        let prefix =
          let dp = C.domain_prefix in
@@ -1315,9 +1313,7 @@ let share_cmd =
     let expires = int_of_float (Unix.time () +. ttl) in
     (* Resolve PATH to a domain-relative path; accept an absolute path under the
        mount point too. Empty rel means the whole domain. *)
-    let mount_point =
-      Filename.concat (Sys.getenv "HOME") ("tsync/" ^ C.domain_name)
-    in
+    let mount_point = mount_point_of (Conf_parsing.pick_domain ?domain cfg) in
     let rel =
       let mp = mount_point ^ "/" in
       if
