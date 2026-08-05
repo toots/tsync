@@ -9,6 +9,8 @@ import os
 import uuid
 from datetime import timedelta
 
+import google.auth
+import google.auth.transport.requests
 from google.cloud import storage
 from google.cloud.exceptions import NotFound
 
@@ -24,6 +26,8 @@ class Store:
         self.presign_ttl = int(os.environ.get("PRESIGN_TTL", "600"))
         self.client = storage.Client()
         self.bucket = self.client.bucket(self.bucket_name)
+        # Resolved on first signature; tests against the emulator have no ADC.
+        self.credentials = None
 
     def get_bytes(self, key):
         try:
@@ -49,14 +53,24 @@ class Store:
         self.bucket.blob(key).upload_from_filename(local)
 
     def signed_url(self, key, filename, content_type=None, inline=False):
-        # V4 signing. On Cloud Functions the runtime has no raw private key, so
-        # the client signs via the IAM SignBlob API — the function SA needs
-        # roles/iam.serviceAccountTokenCreator on itself (see terraform).
+        # V4 signing. On Cloud Functions the runtime credentials are a bare token
+        # with no private key, so signing must go through the IAM SignBlob API.
+        # generate_signed_url only takes that path when handed an explicit SA
+        # email + live access token; without them it demands a local key and
+        # raises AttributeError. The SA needs roles/iam.serviceAccountTokenCreator
+        # on itself (see terraform).
+        if self.credentials is None:
+            self.credentials, _ = google.auth.default()
+        if not self.credentials.valid:
+            # Also what populates service_account_email from the metadata server.
+            self.credentials.refresh(google.auth.transport.requests.Request())
         return self.bucket.blob(key).generate_signed_url(
             version="v4",
             expiration=timedelta(seconds=self.presign_ttl),
             response_disposition=content_disposition(inline, filename),
             response_type=content_type,
+            service_account_email=self.credentials.service_account_email,
+            access_token=self.credentials.token,
         )
 
     def _compose(self, keys, dest_key):

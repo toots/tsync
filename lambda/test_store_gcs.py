@@ -84,3 +84,32 @@ def test_missing_source_raises(store):
     store.put_bytes("p/.chunks/a", b"AAAA")
     with pytest.raises((ShareError, Exception)):
         store.assemble(["p/.chunks/a", "p/.chunks/missing"], "p/.shares/bad.data")
+
+
+def test_signed_url_delegates_to_iam_signblob(monkeypatch):
+    # Cloud Functions credentials hold no private key: without an explicit SA
+    # email + access token, generate_signed_url tries to sign locally and raises
+    # AttributeError. The emulator cannot sign, so assert on the arguments; no
+    # bucket is touched either, hence no `store` fixture.
+    captured = {}
+
+    class FakeCredentials:
+        valid = False
+        service_account_email = "share@example.iam.gserviceaccount.com"
+        token = "access-token"
+
+        def refresh(self, request):
+            captured["refreshed"] = True
+
+    def fake_generate_signed_url(self, **kwargs):
+        captured.update(kwargs)
+        return "https://signed"
+
+    store = Store()
+    store.credentials = FakeCredentials()
+    monkeypatch.setattr(storage.Blob, "generate_signed_url", fake_generate_signed_url)
+
+    assert store.signed_url("p/.shares/x.data", "x.pdf") == "https://signed"
+    assert captured["refreshed"]
+    assert captured["service_account_email"] == FakeCredentials.service_account_email
+    assert captured["access_token"] == "access-token"
