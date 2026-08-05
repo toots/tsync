@@ -1,0 +1,89 @@
+name: release-deb
+
+# Same trigger as release-macos: runs after `test` passes on main, so a red
+# build never reaches the nightly download URL.
+on:
+  workflow_run:
+    workflows: [test]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+
+# Its own group, so the three release workflows do not serialize behind each
+# other. They all upload to the same nightly tag, which the publish step below
+# is written to tolerate.
+concurrency:
+  group: release-deb
+  cancel-in-progress: false
+
+jobs:
+  deb:
+    if: >-
+      github.event_name == 'workflow_dispatch'
+      || github.event.workflow_run.conclusion == 'success'
+    strategy:
+      fail-fast: false
+      matrix:
+        image: [debian:13, "ubuntu:26.04"]
+        include:
+          - arch: amd64
+            runner: ubuntu-latest
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    container: ${{ matrix.image }}
+    timeout-minutes: 90
+    permissions:
+      contents: write
+    env:
+      SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
+      RUN_NUMBER: ${{ github.run_number }}
+    steps:
+      - name: Install system dependencies
+        # fuse3, not fuse: the daemon links libfuse3, which mounts by running
+        # the setuid /usr/bin/fusermount3. That binary is in fuse3; the fuse
+        # package is the FUSE 2 userspace and provides fusermount, which
+        # libfuse3 will not use.
+        #
+        # libgmp-dev is for mirage-crypto-pk -> conf-gmp, and gh is for the
+        # publish step: neither container ships them.
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends \
+            opam build-essential dpkg-dev m4 pkg-config git curl \
+            ca-certificates unzip rsync gh \
+            libfuse3-dev fuse3 libxxhash-dev libev-dev libssl-dev libgmp-dev
+
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+
+      # Every job would otherwise compile a fresh OCaml switch.
+      - uses: actions/cache@v4
+        with:
+          path: ~/.opam
+          key: opam-${{ matrix.image }}-${{ matrix.arch }}-${{ hashFiles('dune-project', 'opam/*.opam') }}
+          restore-keys: opam-${{ matrix.image }}-${{ matrix.arch }}-
+
+      - name: Build
+        run: ./linux/build.sh
+
+      - name: Package
+        run: ./linux/deb/build.sh
+
+      - name: Verify the package installs
+        # Catches a bad Depends or a missing library before anyone downloads it.
+        run: |
+          apt-get install -y ./dist/*.deb
+          test "$(ldd "$(command -v tsync)" | grep -c 'not found')" = 0
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: tsync-deb-${{ matrix.arch }}-${{ strategy.job-index }}
+          path: dist/*.deb
+
+      - uses: ./.github/actions/publish-nightly
+        with:
+          files: dist/*.deb
+          sha: ${{ env.SHA }}
+          token: ${{ github.token }}

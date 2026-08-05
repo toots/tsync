@@ -10,7 +10,7 @@ on:
   workflow_dispatch:
 
 concurrency:
-  group: release
+  group: release-macos
   cancel-in-progress: false
 
 jobs:
@@ -46,16 +46,9 @@ jobs:
           # openssl@3 is keg-only, so conf-libssl only finds it via pkg-config.
           echo "PKG_CONFIG_PATH=$(brew --prefix openssl@3)/lib/pkgconfig:$PKG_CONFIG_PATH" >> $GITHUB_ENV
       - name: Install OCaml dependencies
-        # conf-libev goes in first, on its own: lwt reads libev support from
-        # %{conf-libev:installed}% when it builds, and conf-libev is only a
-        # depopt, so nothing orders the two. An lwt built before it has no libev
-        # engine at all and silently falls back to select, which cannot watch a
-        # descriptor at or above FD_SETSIZE — see Frontend.use_libev.
-        #
         # lwt_ssl is optional and enables the OpenSSL TLS backend, which is the
         # faster one and what a released build should ship with.
         run: |
-          opam install -y conf-libev
           opam install --deps-only -y tsync tsync-s3
           opam install -y lwt_ssl
 
@@ -116,11 +109,8 @@ jobs:
           name: tsync-pkg
           path: macos/dist/tsync.pkg
 
-      - name: Publish nightly release
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          gh release view nightly >/dev/null 2>&1 \
-            || gh release create nightly --prerelease --title nightly --notes ""
-          gh release upload nightly macos/dist/tsync.pkg --clobber
-          gh release edit nightly --notes "Rolling build of main, from $SHA."
+      - uses: ./.github/actions/publish-nightly
+        with:
+          files: macos/dist/tsync.pkg
+          sha: ${{ env.SHA }}
+          token: ${{ github.token }}

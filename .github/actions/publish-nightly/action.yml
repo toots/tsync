@@ -1,0 +1,32 @@
+name: Publish nightly
+description: Upload build artifacts to the rolling `nightly` prerelease.
+
+inputs:
+  files:
+    description: Files to upload, as a glob.
+    required: true
+  sha:
+    description: Commit the artifacts were built from, for the release notes.
+    required: true
+  token:
+    description: Token with contents:write.
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.token }}
+        FILES: ${{ inputs.files }}
+        SHA: ${{ inputs.sha }}
+      run: |
+        # The container-based jobs check out as a different uid than gh runs as.
+        git config --global --add safe.directory "$GITHUB_WORKSPACE" || true
+        # Every release workflow races to bootstrap the same tag, so losing that
+        # race is not an error — the release simply already exists.
+        gh release view nightly >/dev/null 2>&1 \
+          || gh release create nightly --prerelease --title nightly --notes "" \
+          || true
+        gh release upload nightly $FILES --clobber
+        gh release edit nightly --notes "Rolling build of main, from $SHA."

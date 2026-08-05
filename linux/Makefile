@@ -1,4 +1,4 @@
-.PHONY: build test deploy configure install-deps install e2e
+.PHONY: build test deploy configure install-deps install uninstall e2e
 
 build:
 	dune build
@@ -26,6 +26,21 @@ install:
 	systemctl --user daemon-reload
 	systemctl --user enable tsync
 	systemctl --user restart tsync
+	# Without lingering the user manager only runs while a session is open, so a
+	# headless box comes back from reboot with nothing started. Needs root, so
+	# skip the prompt when it is already set.
+	loginctl show-user "$$USER" -p Linger 2>/dev/null | grep -q 'Linger=yes' \
+	  || sudo loginctl enable-linger "$$USER"
+
+# Every step tolerates already being undone, so a partial install still cleans
+# up. Lingering is left enabled: it is a user-wide setting other services may
+# depend on, and turning it off is one command if you want it gone.
+uninstall:
+	-systemctl --user disable --now tsync
+	rm -f ~/.config/systemd/user/tsync.service
+	-systemctl --user daemon-reload
+	rm -f ~/.local/bin/tsync
+	-opam remove -y tsync tsync-s3 tsync-fuse
 
 # End-to-end check against a real FUSE mount. Stages everything it needs — a
 # store, a mount, a second client — under a scratch directory and takes it all

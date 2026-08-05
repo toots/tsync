@@ -1,0 +1,24 @@
+# System unit shipped by the deb/rpm. Instanced on the user to run as, since a
+# package cannot know it: `systemctl enable --now tsync@alice`.
+#
+# The source install uses tsync.service instead — a user unit, which needs
+# lingering to survive reboot. This one starts at boot on its own.
+#
+# Do not add ProtectHome=, PrivateTmp= or PrivateMounts=: they give the service
+# a private mount namespace, and the FUSE mount then exists for nobody else.
+
+[Unit]
+Description=tsync FUSE filesystem for %i
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=%i
+ExecStart=/usr/bin/tsync start
+ExecStop=/usr/bin/tsync stop
+Restart=on-failure
+RestartSec=5
+LimitNOFILE=65536
+
+[Install]
+WantedBy=multi-user.target

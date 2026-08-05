@@ -43,18 +43,30 @@ make package        # signed, notarized dist/tsync.pkg (needs Developer ID crede
 [`macos/RELEASING.md`](macos/RELEASING.md) covers the bundle layout, the signing
 credentials and the release workflow.
 
-On **Linux**:
+On **Linux**, install a package from the [nightly
+release](https://github.com/toots/tsync/releases/tag/nightly) — Debian 13,
+Ubuntu 26.04 LTS and Fedora 44, for x86-64 and arm64. It puts `tsync` in
+`/usr/bin` and ships a systemd template unit instanced on the user to run as,
+so it starts at boot with nobody logged in:
 
-> [!WARNING]
-> **`make install` takes shortcuts to get you running quickly**, and there is no
-> `make uninstall`. Read [`linux/Makefile`](linux/Makefile) for exactly what it touches.
-> Developer setup for now; a proper package is planned.
+```bash
+sudo apt install ./tsync_*.deb     # Debian / Ubuntu
+sudo dnf install ./tsync-*.rpm     # Fedora
+sudo systemctl enable --now tsync@$USER
+```
+
+To build it yourself instead, you need [opam](https://opam.ocaml.org/) and
+OCaml ≥ 5.5:
 
 ```bash
 cd linux
 make install-deps   # includes the FUSE bindings
 make install
 ```
+
+That variant installs into `~/.local/bin` and runs as a *user* service, which
+systemd only keeps alive while you have a session, so `make install` also
+enables lingering. `make uninstall` reverses it.
 
 ```bash
 tsync build-config   # which optional features this binary has
@@ -116,9 +128,9 @@ pass through rather than being rejected, so a typo can look like it was set.
 
 ## 3. Mount it
 
-You don't run `tsync start` yourself. A background service does — a systemd user unit on
-Linux (set up by `make install`, part of what the [step 1](#1-install) warning is about),
-and on macOS a launchd agent the installer sets up.
+You don't run `tsync start` yourself. A background service does — on Linux a systemd
+unit, `tsync@<user>` from the package or a user unit if you built from source
+([step 1](#1-install)), and on macOS a launchd agent the installer sets up.
 
 After configuring, restart the service so it picks up the new config:
 

@@ -1,0 +1,84 @@
+name: release-rpm
+
+# Same trigger as release-macos: runs after `test` passes on main, so a red
+# build never reaches the nightly download URL.
+on:
+  workflow_run:
+    workflows: [test]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+
+# Its own group, so the three release workflows do not serialize behind each
+# other. They all upload to the same nightly tag, which the publish step below
+# is written to tolerate.
+concurrency:
+  group: release-rpm
+  cancel-in-progress: false
+
+jobs:
+  rpm:
+    if: >-
+      github.event_name == 'workflow_dispatch'
+      || github.event.workflow_run.conclusion == 'success'
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-latest
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    container: fedora:44
+    timeout-minutes: 90
+    permissions:
+      contents: write
+    env:
+      SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
+      RUN_NUMBER: ${{ github.run_number }}
+    steps:
+      - name: Install system dependencies
+        # fuse3, not fuse: the daemon links libfuse3, which mounts by running
+        # the setuid fusermount3, and only fuse3 provides it.
+        #
+        # gmp-devel is for mirage-crypto-pk -> conf-gmp.
+        run: |
+          dnf install -y \
+            opam gcc gcc-c++ make m4 pkgconf-pkg-config git curl unzip rsync \
+            rpm-build systemd-rpm-macros gh \
+            fuse3-devel fuse3 xxhash-devel libev-devel openssl-devel gmp-devel
+
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+
+      # Every job would otherwise compile a fresh OCaml switch.
+      - uses: actions/cache@v4
+        with:
+          path: ~/.opam
+          key: opam-fedora44-${{ matrix.arch }}-${{ hashFiles('dune-project', 'opam/*.opam') }}
+          restore-keys: opam-fedora44-${{ matrix.arch }}-
+
+      - name: Build
+        run: ./linux/build.sh
+
+      - name: Package
+        run: ./linux/rpm/build.sh
+
+      - name: Verify the package installs
+        # Catches a bad Requires or a missing library before anyone downloads it.
+        run: |
+          dnf install -y ./dist/*.rpm
+          test "$(ldd "$(command -v tsync)" | grep -c 'not found')" = 0
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: tsync-rpm-${{ matrix.arch }}
+          path: dist/*.rpm
+
+      - uses: ./.github/actions/publish-nightly
+        with:
+          files: dist/*.rpm
+          sha: ${{ env.SHA }}
+          token: ${{ github.token }}

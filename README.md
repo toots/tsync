@@ -74,10 +74,23 @@ Uninstalling is `tsync fileprovider purge`.
 
 ### Linux
 
-> [!WARNING]
-> **`make install` takes shortcuts to get you running quickly**, and there is no
-> `make uninstall`. See `linux/Makefile` for what it touches. Developer setup for
-> now; a proper package is planned.
+Grab a package for your distribution from the [nightly
+release](https://github.com/toots/tsync/releases/tag/nightly) — Debian 13,
+Ubuntu 26.04 LTS and Fedora 44, each for x86-64 and arm64.
+
+```bash
+sudo apt install ./tsync_*.deb     # Debian / Ubuntu
+sudo dnf install ./tsync-*.rpm     # Fedora
+
+tsync configure                    # folder name and a storage backend
+sudo systemctl enable --now tsync@$USER
+```
+
+The service is a systemd template instanced on the user to run as, so it starts
+at boot without anyone logging in. Uninstall with `apt remove tsync` or
+`dnf remove tsync`.
+
+### Building Linux from source
 
 Needs [opam](https://opam.ocaml.org/) and OCaml ≥ 5.5.
 
@@ -88,6 +101,11 @@ make install     # builds, installs, starts the background service
 tsync configure  # folder name and a storage backend
 make install     # re-run to restart with the new config
 ```
+
+This installs into `~/.local/bin` and runs as a **user** service, which systemd
+only keeps alive while you have a session — `make install` therefore enables
+lingering for you, so it survives a reboot on a headless machine. `make
+uninstall` reverses all of it.
 
 ### Building macOS from source
 
