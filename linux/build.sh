@@ -13,8 +13,10 @@ export OPAMYES=1
 # interactive prompt. Needs root, which is what the CI containers run as.
 export OPAMCONFIRMLEVEL=unsafe-yes
 
+# `config` is opam's root marker: the directory alone can exist and be empty or
+# half-restored from a CI cache, which opam then rejects as an invalid root.
 # bwrap has no privileges inside a CI container.
-[ -d "${OPAMROOT:-$HOME/.opam}" ] || opam init --bare --disable-sandboxing
+[ -f "${OPAMROOT:-$HOME/.opam}/config" ] || opam init --bare --disable-sandboxing
 opam switch list --short | grep -qx "$SWITCH" || opam switch create "$SWITCH" "$COMPILER"
 eval "$(opam env --switch="$SWITCH" --set-switch)"
 
