@@ -68,7 +68,9 @@ module Make (C : Conf.S) (L : Layout.S) = struct
       bk
 
   (* Snapshot the current manifest object under a fresh timestamped version key,
-     when it exists on the backend. *)
+     when it exists on the backend. Best-effort: the source is only checked on
+     the primary, so a replica that never got it fails the copy — and a lost
+     snapshot must not wedge the write it precedes. *)
   let save_version ~key =
     let* bk = L.manifest_key key in
     match bk with
@@ -84,7 +86,13 @@ module Make (C : Conf.S) (L : Layout.S) = struct
                 match dir with
                   | None -> Lwt.return_unit
                   | Some dir ->
-                      Bk.copy ~src_key:bk ~dst_key:(dir ^ Int64.to_string ts)))
+                      Lwt.catch
+                        (fun () ->
+                          Bk.copy ~src_key:bk ~dst_key:(dir ^ Int64.to_string ts))
+                        (fun exn ->
+                          Log.warn "save_version %s: %s" key
+                            (Printexc.to_string exn);
+                          Lwt.return_unit)))
 
   let list_versions ~key =
     let* dir = version_dir ~key in
