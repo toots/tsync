@@ -34,6 +34,14 @@ val h1 : t -> string
 val h2 : t -> string
 val symlink : t -> string option
 
+(** How many leading bytes {!size_of_prefix} needs. *)
+val size_prefix_bytes : int
+
+(** The logical size from a body's first bytes alone, so summing sizes over a
+    domain reads {!size_prefix_bytes} per file and maps none of them. [None] for
+    a prefix that is short or not one of ours. *)
+val size_of_prefix : string -> int64 option
+
 (** {2 Chunks} *)
 
 (** How many chunk keys the body carries. An empty file has one (of length

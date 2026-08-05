@@ -43,6 +43,9 @@ type step =
           many of its chunks are local. *)
   | ShowChunkCache
       (** Print the whole chunk store's size: [chunks=n bytes=b]. *)
+  | ShowUsage
+      (** Print what the domain holds, as df reports it:
+          [usage bytes=b files=n]. *)
   | ShowNames of string
       (** Print the raw entry names FUSE readdir serves for a directory. *)
   | Stat of string
@@ -136,6 +139,7 @@ let rec render_step = function
   | Truncate { path; size } -> Printf.sprintf "truncate %s %d" path size
   | ShowChunks p -> "chunks " ^ p
   | ShowChunkCache -> "chunk-cache"
+  | ShowUsage -> "usage"
   | ShowNames p -> "names " ^ if p = "" then "/" else p
   | Stat p -> "stat " ^ p
   | Mark -> "mark"
@@ -459,6 +463,9 @@ let setup_client (module C : Conf.S) root staging_prefix =
     | ShowChunkCache ->
         let+ chunks, bytes = F.chunk_stats () in
         Printf.printf "  chunk-cache chunks=%d bytes=%d\n" chunks bytes
+    | ShowUsage ->
+        let+ bytes, files = Mf.logical_usage () in
+        Printf.printf "  usage bytes=%Ld files=%d\n" bytes files
     | ShowChunks p ->
         let k = key p in
         let* resolved = F.resolve k in

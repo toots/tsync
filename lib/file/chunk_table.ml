@@ -92,6 +92,17 @@ let int64_at src off =
   done;
   !r
 
+let size_prefix_bytes = 16
+
+(* Enough of a body to answer how big the file is. Summing sizes over a whole
+   domain reads this much per sidecar and maps nothing: one mapping per file,
+   released only at the next collection, is what makes {!of_file} the wrong tool
+   for tens of thousands of them. *)
+let size_of_prefix s =
+  let src = Str s in
+  if length src < size_prefix_bytes || sub src 0 8 <> magic then None
+  else Some (int64_at src 8)
+
 (* Validating the length once here is what lets every accessor below skip bounds
    checks: after this, chunk [i] for [i < count] is in range. *)
 let of_source src =

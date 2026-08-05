@@ -41,6 +41,82 @@ module Make (C : Conf.S) = struct
   let read_bytes = Metrics.counter ()
   let written_bytes = Metrics.counter ()
 
+  (* What the domain holds, for [df]. Written on the loop thread and read from
+     FUSE worker threads, hence [Atomic]: no lock, and never half a value.
+     [-1L] until the first walk lands. *)
+  let domain_bytes = Atomic.make (-1L)
+  let domain_files = Atomic.make 0
+  let usage_walked_at = Atomic.make 0.
+  let usage_min_interval = 60.
+
+  (* Summing the mirror is a walk of every sidecar, so it happens behind whoever
+     asked rather than under them: [statfs] serves the last figure and this
+     replaces it. Stamped before the walk, not after, so a slow one cannot stack
+     with the next request. *)
+  let refresh_usage () =
+    let now = Unix.gettimeofday () in
+    if now -. Atomic.get usage_walked_at > usage_min_interval then begin
+      Atomic.set usage_walked_at now;
+      Lwt.async (fun () ->
+          Lwt.catch
+            (fun () ->
+              let+ bytes, files = E.Mf.logical_usage () in
+              Atomic.set domain_bytes bytes;
+              Atomic.set domain_files files)
+            (fun exn ->
+              (* A full resync clears the mirror under this. Keep the last
+                 figure rather than blanking what df reports. *)
+              Log.warn "usage walk: %s" (Printexc.to_string exn);
+              Lwt.return_unit))
+    end
+
+  (* How much a write can still land, which is a property of the stores behind
+     the mount rather than of the mount: a bucket has no size we could report, a
+     local store has its device's. Every write also stages locally in full before
+     it uploads, so the cache filesystem bounds one either way — with a bucket it
+     is the only bound there is, and saying so beats inventing an infinity.
+     Writable means [main] or [replica]: a backfill target catches up on its own
+     time and a read-only store is never written. *)
+  let writable_space () =
+    let free path = Option.map fst (Fs_util.disk_space path) in
+    if C.read_only then 0L
+    else (
+      let writable =
+        List.filter
+          (fun (m : Backend.member) -> m.role = "main" || m.role = "replica")
+          (Backend.members ~domain:C.domain_name)
+      in
+      if writable = [] then 0L
+      else (
+        (* A store whose capacity is not ours to know constrains nothing. *)
+        let limits =
+          List.filter_map (fun (m : Backend.member) -> m.local_path) writable
+        in
+        match List.filter_map free (C.cache_root :: limits) with
+          | [] -> 0L
+          | limits -> List.fold_left min Int64.max_int limits))
+
+  let usage_notification = ref None
+
+  let request_usage_refresh () =
+    match !usage_notification with
+      | Some n -> ( try Lwt_unix.send_notification n with _ -> ())
+      | None -> ()
+
+  let usage_fields () =
+    match Atomic.get domain_bytes with
+      | bytes when bytes >= 0L ->
+          [
+            ("domainBytes", `Int (Int64.to_int bytes));
+            ("domainFiles", `Int (Atomic.get domain_files));
+            ( "domainSampledSecondsAgo",
+              `Int
+                (int_of_float
+                   (Unix.gettimeofday () -. Atomic.get usage_walked_at)) );
+          ]
+      (* Withheld rather than zero: nothing has been counted yet. *)
+      | _ -> []
+
   let fuse_stats_fields () =
     [
       ("openHandles", `Int !open_handles);
@@ -50,6 +126,7 @@ module Make (C : Conf.S) = struct
       ("bytesReadPerSec", `Int (int_of_float (Metrics.rate read_bytes)));
       ("bytesWrittenPerSec", `Int (int_of_float (Metrics.rate written_bytes)));
     ]
+    @ usage_fields ()
 
   let guard op path f =
     try f () with
@@ -303,26 +380,34 @@ module Make (C : Conf.S) = struct
         (fun path size fi ->
           guard "truncate" path (fun () ->
               on_loop (fun () -> (dispatch path).truncate path size fi)));
-      (* The store has no size, but a write lands on the cache filesystem before
-         it is uploaded, so report that one: what df shows is then the space a
-         write can actually use. Inode counts stay nominal — nothing here maps to
-         one. One statvfs, no cache walk, since df-alikes poll this. *)
+      (* Used is what the domain holds — the logical size of its files, cached or
+         not, sampled in the background by [refresh_usage] and only read here, so
+         df never waits on a walk and answers even while the loop is busy.
+         Free is whatever {!writable_space} says the stores behind this mount
+         will still take.
+
+         Both are honest about being neither exact nor a snapshot: logical bytes
+         ignore per-file block rounding and count a deduplicated byte once per
+         file that names it, saved versions are not counted, and the sum is read
+         file by file rather than at an instant. *)
       statfs =
         (fun _path ->
+          request_usage_refresh ();
           let bsize = 4096L in
-          let blocks bytes = Int64.div bytes bsize in
-          let total, avail =
-            match Fs_util.disk_space C.cache_root with
-              | Some (avail, total) -> (blocks total, blocks avail)
-              | None -> (0L, 0L)
+          (* Rounded up: a file smaller than a block still occupies one. *)
+          let blocks bytes =
+            Int64.div (Int64.add bytes (Int64.pred bsize)) bsize
           in
+          let used = blocks (max 0L (Atomic.get domain_bytes)) in
+          let avail = blocks (writable_space ()) in
           Unix_util.
             {
               f_bsize = bsize;
               f_frsize = bsize;
-              f_blocks = total;
+              f_blocks = Int64.add used avail;
               f_bfree = avail;
               f_bavail = avail;
+              (* Nothing here maps to an inode. *)
               f_files = Int64.of_int max_int;
               f_ffree = Int64.of_int max_int;
               f_favail = Int64.of_int max_int;
@@ -391,6 +476,11 @@ module Make (C : Conf.S) = struct
              (* Before [signal_ready], so the main thread sees it once past
                 [wait_ready]. *)
              stop_notification := Some (Lwt_unix.make_notification do_stop);
+             usage_notification :=
+               Some (Lwt_unix.make_notification refresh_usage);
+             (* So the first df after a mount reports the domain rather than an
+                empty one. *)
+             refresh_usage ();
              signal_ready ();
              let* () = stop_t in
              (* Concurrent: the unmount is what lets the main thread out of

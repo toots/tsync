@@ -333,6 +333,63 @@ let fold_files ~start ~rel f acc =
   let* ok = Fs_util.is_directory start in
   if ok then walk start rel acc else Lwt.return acc
 
+(* Directory or sidecar, told apart by the read rather than by a [stat]: opening
+   a directory read-only succeeds and it is the [pread] that says EISDIR, so the
+   answer costs no syscall the size does not already need. Anything else — an
+   entry deleted mid-walk, a body that is not ours — is skipped: the mirror moves
+   while this runs. *)
+let probe_size path =
+  Lwt.catch
+    (fun () ->
+      let* fd = Lwt_unix_retry.openfile path [Unix.O_RDONLY] 0 in
+      Lwt.finalize
+        (fun () ->
+          let len = Chunk_table.size_prefix_bytes in
+          let buf = Bytes.create len in
+          let+ got = Lwt_unix_retry.pread fd buf ~file_offset:0 0 len in
+          match Chunk_table.size_of_prefix (Bytes.sub_string buf 0 got) with
+            | Some size -> `Size size
+            | None -> `Skip)
+        (fun () -> Lwt_unix_retry.close fd))
+    (function
+      | Unix.Unix_error (Unix.EISDIR, _, _) -> Lwt.return `Dir
+      | _ -> Lwt.return `Skip)
+
+(* One slot per open sidecar, released before descending: held across the
+   recursion, outer directories would hold every slot while their children wait
+   for one. *)
+let size_reads = Lwt_bounded.create ~max:32 ()
+
+(* [(bytes, files)] under [start], from headers alone. Concurrent across a
+   directory's entries and sequential in depth: fan-out is what pays on a cold
+   page cache, depth is what would multiply open descriptors. Escaped names are
+   never resolved — a sum does not care what anything is called. *)
+let sum_sizes start =
+  let rec walk dir acc =
+    let* names = Fs_util.readdir_list dir in
+    let names = List.filter (fun name -> not (is_internal name)) names in
+    let* probed =
+      Lwt_bounded.map_with size_reads
+        (fun name ->
+          let path = Filename.concat dir name in
+          let+ probe = probe_size path in
+          (path, probe))
+        names
+    in
+    let (bytes, files), dirs =
+      List.fold_left
+        (fun ((bytes, files), dirs) (path, probe) ->
+          match probe with
+            | `Size size -> ((Int64.add bytes size, files + 1), dirs)
+            | `Dir -> ((bytes, files), path :: dirs)
+            | `Skip -> ((bytes, files), dirs))
+        (acc, []) probed
+    in
+    Lwt_list.fold_left_s (fun acc dir -> walk dir acc) (bytes, files) dirs
+  in
+  let* ok = Fs_util.is_directory start in
+  if ok then walk start (0L, 0) else Lwt.return (0L, 0)
+
 let rec clean_tmp dir =
   let* is_dir = Fs_util.is_directory dir in
   if not is_dir then Lwt.return_unit
@@ -636,6 +693,21 @@ module Make (C : Conf.S) = struct
         []
     in
     List.sort_uniq compare (published @ staged)
+
+  (* What {!list_tree} of the whole domain would total, without building it.
+     Staged files are added only where nothing is published yet: a file being
+     written has no sidecar at all, so leaving them out would hide exactly the
+     write someone is watching, while a staged size that merely differs from its
+     published one is not worth a second read at this freshness. *)
+  let logical_usage () =
+    let* bytes, files = sum_sizes (root ()) in
+    let* staged = staged_entries ~rel_dir:"" ~deep:true in
+    Lwt_list.fold_left_s
+      (fun (bytes, files) (e : Backend.file_entry) ->
+        let+ published = Lwt_unix_retry.file_exists (path e.key) in
+        if published then (bytes, files)
+        else (Int64.add bytes (Int64.of_int e.size), files + 1))
+      (bytes, files) staged
 
   (* Staged edits take precedence over what was last published. The single
      resolution point: no caller decides this itself. *)

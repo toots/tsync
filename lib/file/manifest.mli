@@ -143,6 +143,14 @@ module Make (C : Conf.S) : sig
       published or only staged (unsorted). *)
   val walk : unit -> string list Lwt.t
 
+  (** [(logical bytes, files)] across the domain: what every file says it holds,
+      whether or not its data is cached, plus the files that exist only as
+      staged edits. One 16-byte header read per file — no body is mapped and no
+      escaped name resolved — but still a walk of the whole mirror, so callers
+      cache the result rather than asking per request. Best effort: an entry
+      that vanishes or fails to read counts zero. *)
+  val logical_usage : unit -> (int64 * int) Lwt.t
+
   (** [key]'s content, staged edits winning over what was last published, with
       the published manifest alongside for inherited chunks. The single
       resolution point: no caller decides this itself. *)

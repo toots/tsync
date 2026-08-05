@@ -48,6 +48,10 @@ type step =
           grow) — plus how many of its chunks are in the local chunk store. *)
   | ShowChunkCache
       (** Print the whole chunk store's footprint: [chunks=n bytes=b]. *)
+  | ShowUsage
+      (** Print what the domain holds, the figure df reports as used:
+          [usage bytes=b files=n]. Logical sizes, so eviction does not change it
+          and a file that exists only as a staged edit still counts. *)
   | ShowNames of string
       (** Print the entry names a readdir serves for a directory ([""] for the
           domain root), subdirectories with a trailing slash. A file with only

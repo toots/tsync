@@ -259,6 +259,51 @@
   journal <entry-1> = put link.txt 8
   journal <entry-2> = delete link.txt
 
+=== usage
+  usage
+  write a.txt "12345"
+  usage
+  drain
+  usage
+  mkdir d
+  write d/b.txt "1234567890"
+  drain
+  usage
+  read a.txt [0,5)
+  evict a.txt
+  usage
+  rename a.txt -> c.txt
+  drain
+  usage
+  delete c.txt
+  drain
+  usage
+  usage bytes=0 files=0
+  usage bytes=5 files=1
+  usage bytes=5 files=1
+  usage bytes=15 files=2
+  read a.txt [0,5) = "12345"
+  usage bytes=15 files=2
+  usage bytes=15 files=2
+  usage bytes=10 files=1
+--- tree
+  d d/
+  f d/b.txt size=10 cached=0/1 uploaded=true etag=e054ad102ab4e8af
+--- content
+  d/b.txt = "1234567890"
+--- backend
+  chunk 80048550fad2b420-e450114d73c0cb52 size=10
+  chunk f34099ede96b5581-1c650e3af7fd9aa7 size=5
+  cursor = <entry-5>
+  journal <entry-1> = put a.txt 5
+  journal <entry-2> = mkdir d/
+  journal <entry-3> = put d/b.txt 10
+  journal <entry-4> = rename a.txt -> c.txt 5
+  journal <entry-5> = delete c.txt
+  folder d [.tsync-root/45f80274c9c7a7ca-6e6bfc18706e03e7] -> 3171f9431b3d5a67
+  file b.txt [3171f9431b3d5a67/3c697ec236bbf61f-698ad1290042cc94] = manifest size=10 chunks=1 h1=e054ad102ab4e8af h2=2ca65913dd62a33d
+    chunk#0 80048550fad2b420-e450114d73c0cb52 size=10
+
 === follow: symlink creation rejected
   symlink link.txt -> real.txt
   symlink link.txt: rejected (Unix.Unix_error(Unix.EPERM, "symlink", "tsync/test/manifests/link.txt"))

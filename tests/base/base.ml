@@ -168,6 +168,33 @@ let scenarios : scenario list =
           Drain;
         ];
     };
+    {
+      (* What df reports as used. Logical sizes: a file counts whether or not its
+         bytes are here, so an eviction leaves the figure alone, and a write with
+         nothing published yet counts from the staged tree. *)
+      name = "usage";
+      steps =
+        [
+          ShowUsage;
+          Write { path = "a.txt"; content = "12345" };
+          ShowUsage;
+          Drain;
+          ShowUsage;
+          Mkdir "d";
+          Write { path = "d/b.txt"; content = "1234567890" };
+          Drain;
+          ShowUsage;
+          ReadRange { path = "a.txt"; offset = 0; len = 5 };
+          Evict "a.txt";
+          ShowUsage;
+          Rename { src = "a.txt"; dst = "c.txt" };
+          Drain;
+          ShowUsage;
+          Delete "c.txt";
+          Drain;
+          ShowUsage;
+        ];
+    };
   ]
 
 let () = run scenarios
