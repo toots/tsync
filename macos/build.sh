@@ -62,6 +62,12 @@ XCODE_FLAGS=(
 )
 
 say "Building OCaml daemon"
+# lwt records -lev with no -L, and Homebrew's lib dir is not on the default
+# linker search path. Without this the daemon fails to link on a Mac whose libev
+# came from Homebrew.
+if BREW_PREFIX="$(brew --prefix 2>/dev/null)"; then
+    export LIBRARY_PATH="$BREW_PREFIX/lib${LIBRARY_PATH:+:$LIBRARY_PATH}"
+fi
 (cd "$REPO" && eval "$(opam env)" && dune build bin/tsync.exe)
 
 say "Building $CONFIGURATION app"

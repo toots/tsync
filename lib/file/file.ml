@@ -63,6 +63,12 @@ module type S = sig
 
   val downloads_completed_count : unit -> int
 
+  (** The upload queue's depth, and its pause switch. *)
+  val uploads_pending : unit -> int
+
+  val uploads_paused : unit -> bool
+  val set_uploads_paused : bool -> unit
+
   (* Metadata lock state: held, and callers queued behind it. Reported by
      diagnostics to spot a wedged mount. *)
   val meta_locked : unit -> bool
@@ -246,6 +252,9 @@ struct
   let write_whole key ~src_path = D.stage_whole key ~src_path
   let read key (buf : buffer) ~offset = D.pread_key key buf ~offset
   let cancel_upload key = Sq.cancel_put key
+  let uploads_pending = Sq.pending
+  let uploads_paused = Sq.paused
+  let set_uploads_paused = Sq.set_paused
 
   let write key (buf : buffer) ~offset =
     (* An in-flight upload is reading the bodies we are about to mutate: cancel

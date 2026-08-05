@@ -85,6 +85,15 @@ module type S = sig
   (** Whole-file materializations completed since the daemon started. *)
   val downloads_completed_count : unit -> int
 
+  (** Files with an active or queued upload. *)
+  val uploads_pending : unit -> int
+
+  (** Whether uploads are parked. Queued work is kept while paused, and a
+      restart resumes. *)
+  val uploads_paused : unit -> bool
+
+  val set_uploads_paused : bool -> unit
+
   (** Files written but not yet published, as this process tracks them: the
       in-memory view of what {!staged_count} finds on disk. *)
 

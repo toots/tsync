@@ -6,6 +6,8 @@ module type S = sig
   val idle : unit -> bool
   val pending : unit -> int
   val completed_count : unit -> int
+  val set_paused : bool -> unit
+  val paused : unit -> bool
 
   val start :
     upload:(key:string -> cancel:bool ref -> unit Lwt.t) ->
@@ -35,6 +37,7 @@ module Make (C : Conf.S) : S = struct
   let queue : put_data Queue.t = Queue.create ()
   let queue_cond = Lwt_condition.create ()
   let stop = ref false
+  let paused = ref false
   let workers : unit Lwt.t list ref = ref []
 
   let upload_fn : (key:string -> cancel:bool ref -> unit Lwt.t) ref =
@@ -127,12 +130,13 @@ module Make (C : Conf.S) : S = struct
               let+ () = Lwt_unix.sleep delay in
               true)
 
+  (* Parking on [queue_cond] is how a worker waits for either more work or a
+     resume. [stop] wins over [paused], or a paused queue would never drain. *)
   let rec worker_loop () =
-    if Queue.is_empty queue then
-      if !stop then Lwt.return_unit
-      else
-        let* () = Lwt_condition.wait queue_cond in
-        worker_loop ()
+    if (Queue.is_empty queue || !paused) && not !stop then
+      let* () = Lwt_condition.wait queue_cond in
+      worker_loop ()
+    else if Queue.is_empty queue then Lwt.return_unit
     else begin
       let pd = Queue.pop queue in
       let slot = Hashtbl.find slots pd.key in
@@ -146,6 +150,13 @@ module Make (C : Conf.S) : S = struct
         | None, false -> Hashtbl.remove slots pd.key);
       worker_loop ()
     end
+
+  (* Below [worker_loop], so the loop above still sees the ref this shadows. *)
+  let set_paused b =
+    paused := b;
+    if not b then Lwt_condition.broadcast queue_cond ()
+
+  let paused () = !paused
 
   let start ~upload ~on_cursor ~on_upload_done =
     upload_fn := upload;
