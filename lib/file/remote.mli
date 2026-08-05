@@ -37,18 +37,28 @@ module type S = sig
 
   (** Upload a file whose bytes the caller supplies per chunk, then publish its
       manifest. [source index] is either [`Reuse key] — an unchanged chunk,
-      neither read nor sent, kept under the key it already has — or
-      [`Data bytes]. Knowing nothing about where those bytes come from keeps
-      local staging out of this module. An empty file still yields one empty
-      chunk. [cancel] aborts at the next chunk boundary with {!Cancelled},
-      unpublishing the manifest if it already went. *)
+      neither read nor sent, kept under the key it already has — or [`Fill f],
+      where [f buf] writes the chunk's bytes into the first [Manifest.chunk_len]
+      of [buf]. Knowing nothing about where those bytes come from keeps local
+      staging out of this module. An empty file still yields one empty chunk.
+      [cancel] aborts at the next chunk boundary with {!Cancelled}, unpublishing
+      the manifest if it already went.
+
+      [buf] is pooled and arrives holding whatever the last chunk left there, so
+      [f] writes every byte it claims and a short read pads rather than
+      returning early — filling a buffer this module owns is what caps the
+      upload path at [max_chunk_buffers] chunks whatever the file's size.
+
+      [source] itself does no I/O, deciding only which case a chunk is: one that
+      reads up front puts the whole file in memory before anything queues for a
+      buffer. *)
   val upload_chunks :
     key:string ->
     name:string ->
     size:int64 ->
     chunk_size:int ->
     mtime:float ->
-    source:(int -> [ `Reuse of string | `Data of string ] Lwt.t) ->
+    source:(int -> [ `Reuse of string | `Fill of bytes -> unit Lwt.t ] Lwt.t) ->
     ?cancel:bool ref ->
     unit ->
     Manifest.t Lwt.t

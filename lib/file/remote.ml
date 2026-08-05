@@ -53,7 +53,7 @@ module type S = sig
     size:int64 ->
     chunk_size:int ->
     mtime:float ->
-    source:(int -> [ `Reuse of string | `Data of string ] Lwt.t) ->
+    source:(int -> [ `Reuse of string | `Fill of bytes -> unit Lwt.t ] Lwt.t) ->
     ?cancel:bool ref ->
     unit ->
     Manifest.t Lwt.t
@@ -237,24 +237,35 @@ module Make_with_layout (C : Conf.S) (L : Layout.S) : S = struct
     publish ~key ~name:(Filename.basename key) ~size:(Int64.of_int file_size)
       ~chunk_size ~mtime ~cancel entries
 
-  (* [source index] is either the key of a chunk to keep as-is (never read or
-     sent) or the chunk's bytes; knowing nothing about where those live keeps
-     staging out of this module. An empty file still gets one empty chunk, so
-     every manifest has at least one. *)
+  (* Fillers write into a pooled buffer, which is what holds this path to
+     [max_chunk_buffers] chunks however wide the fan-out below runs.
+
+     Deciding which case a chunk is must stay free of I/O, or every chunk's bytes
+     land before anything queues for a buffer. *)
   let upload_chunks ~key ~name ~size ~chunk_size ~mtime
-      ~(source : int -> [ `Reuse of string | `Data of string ] Lwt.t)
+      ~(source :
+         int -> [ `Reuse of string | `Fill of bytes -> unit Lwt.t ] Lwt.t)
       ?(cancel = ref false) () =
     let n = max 1 (Manifest.num_chunks_for size chunk_size) in
     let one index =
       if !cancel then raise Cancelled;
+      let len = Manifest.chunk_len ~size ~chunk_size index in
       let* src = source index in
       match src with
         | `Reuse chunk_key ->
-            Lwt.return
-              (Manifest.entry_of_key ~index
-                 ~size:(Manifest.chunk_len ~size ~chunk_size index)
-                 chunk_key)
-        | `Data data -> put_chunk ~index ~data
+            Lwt.return (Manifest.entry_of_key ~index ~size:len chunk_key)
+        | `Fill fill ->
+            with_chunk_buffer ~size:len (fun buf ->
+                let* () = fill buf in
+                (* Zero-copy for a full chunk; a short last chunk needs its own
+                   copy since it cannot alias the whole pooled buffer. Either way
+                   [data] must not outlive the hash and upload: the buffer is
+                   reused once released. *)
+                let data =
+                  if len = Bytes.length buf then Bytes.unsafe_to_string buf
+                  else Bytes.sub_string buf 0 len
+                in
+                put_chunk ~index ~data)
     in
     let* entries = Lwt_list.map_p one (List.init n Fun.id) in
     publish ~key ~name ~size ~chunk_size ~mtime ~cancel entries

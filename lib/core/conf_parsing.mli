@@ -67,9 +67,13 @@ type t = {
           upload workers process at once. *)
   max_chunk_buffers : int;
       (** Max chunk bodies held in memory at once, across every upload (default:
-          [max_uploads]). The real memory ceiling of the upload path is this
-          times the domain's chunk size, so a host that cannot afford
-          [max_uploads] whole chunks lowers this instead of the chunk size. *)
+          [max_uploads]); a host that cannot afford [max_uploads] whole chunks
+          lowers this rather than the chunk size.
+
+          Budget about twice this times the domain's chunk size: the pool holds
+          that many bodies, and the backend holds its own copy of each one it is
+          sending. It bounds an upload path rather than the process, so a
+          concurrent recheck or import brings its own. *)
   max_downloads : int;  (** max concurrent file downloads (default 8) *)
   domains : domain list;
 }

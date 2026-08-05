@@ -128,7 +128,7 @@ Domain statusdom
   symlinks         keep
   chunk size       64.0 KB
   cache chunk      64.0 KB
-  concurrency      2 uploads, 3 downloads
+  concurrency      2 uploads, 2 chunk buffers, 3 downloads
   cache root       /tmp/tsync-http-proxy-status-test/cache
   socket           /tmp/tsync-http-proxy-status-test/absent.sock
   Cache
@@ -171,7 +171,7 @@ Domain statusdom
   symlinks         keep
   chunk size       64.0 KB
   cache chunk      64.0 KB
-  concurrency      2 uploads, 3 downloads
+  concurrency      2 uploads, 2 chunk buffers, 3 downloads
   cache root       /tmp/tsync-http-proxy-status-test/cache
   socket           /tmp/tsync-http-proxy-status-test/absent.sock
   Cache
@@ -220,7 +220,7 @@ Domain statusdom
   symlinks         keep
   chunk size       64.0 KB
   cache chunk      64.0 KB
-  concurrency      2 uploads, 3 downloads
+  concurrency      2 uploads, 2 chunk buffers, 3 downloads
   cache root       /tmp/tsync-http-proxy-status-test/cache
   socket           /tmp/tsync-http-proxy-status-test/absent.sock
   Cache
@@ -271,7 +271,7 @@ Domain statusdom
   symlinks         keep
   chunk size       64.0 KB
   cache chunk      64.0 KB
-  concurrency      2 uploads, 3 downloads
+  concurrency      2 uploads, 2 chunk buffers, 3 downloads
   cache root       /tmp/tsync-http-proxy-status-test/cache
   socket           /tmp/tsync-http-proxy-status-test/absent.sock
   Cache

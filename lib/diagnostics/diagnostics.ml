@@ -578,9 +578,13 @@ let text json =
       row 2 "symlinks" (str (mem d "symlinks"));
       row 2 "chunk size" (bytes_or_default (mem d "chunkSize"));
       row 2 "cache chunk" (bytes_or_unlimited (mem d "cacheChunkSize"));
+      (* Chunk buffers belong here and not only in the frontend block: they are
+         what bounds the upload path's memory, so reading it against the chunk
+         size above is how an operator sizes a small machine. *)
       row 2 "concurrency"
-        (Printf.sprintf "%d uploads, %d downloads"
+        (Printf.sprintf "%d uploads, %d chunk buffers, %d downloads"
            (int_of (mem d "maxUploads"))
+           (int_of (mem d "maxChunkBuffers"))
            (int_of (mem d "maxDownloads")));
       row 2 "cache root" (str (mem d "cacheRoot"));
       row 2 "socket" (str (mem d "socketPath"));

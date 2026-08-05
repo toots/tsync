@@ -437,19 +437,65 @@ module Make (C : Conf.S) (R : Remote.S) = struct
         s_published = None;
       }
 
-  (* Bytes for chunk [i] in the form {!Remote.upload_chunks} wants: an inherited
-     chunk keeps its published entry and is never re-sent, a hole hashes as zeros
-     without touching disk, a staged body is padded to its chunk length. *)
+  (* A staged body is whatever the writer left on disk and may fall short of its
+     chunk length, grown by a truncate that never wrote or lost entirely.
+
+     The manifest's length wins either way, so a short or missing body zeroes the
+     tail rather than shrinking the chunk. *)
+  let fill_from_staged ~uuid ~len buf =
+    let* fd =
+      Lwt.catch
+        (fun () ->
+          let+ fd =
+            Lwt_unix_retry.openfile (Cc.staged_path uuid) [Unix.O_RDONLY] 0
+          in
+          Some fd)
+        (fun _ -> Lwt.return_none)
+    in
+    match fd with
+      | None ->
+          Bytes.fill buf 0 len '\000';
+          Lwt.return_unit
+      | Some fd ->
+          Lwt.finalize
+            (fun () ->
+              let rec loop pos =
+                if pos >= len then Lwt.return_unit
+                else
+                  let* n =
+                    Lwt_unix_retry.pread fd buf ~file_offset:pos pos (len - pos)
+                  in
+                  (* Short of [len]: the rest of the chunk is a hole. *)
+                  if n = 0 then (
+                    Bytes.fill buf pos (len - pos) '\000';
+                    Lwt.return_unit)
+                  else loop (pos + n)
+              in
+              loop 0)
+            (fun () -> Lwt_unix_retry.close fd)
+
+  (* Chunk [i] in the form {!Remote.upload_chunks} wants: an inherited chunk
+     keeps its published entry and is never re-sent, a hole zeroes the buffer
+     without touching disk, a staged body is read into it.
+
+     Deciding which is I/O-free by contract, the reads happening inside the
+     fillers once upload_chunks has a buffer to hand them. *)
   let staged_source ~(staged : Manifest.staged) ~base i =
     let cs = staged.Manifest.s_chunk_size in
     let len =
       Manifest.chunk_len ~size:staged.Manifest.s_size ~chunk_size:cs i
     in
+    let zeroes =
+      `Fill
+        (fun buf ->
+          Bytes.fill buf 0 len '\000';
+          Lwt.return_unit)
+    in
     let slots = staged.Manifest.s_slots in
-    if i >= Array.length slots then Lwt.return (`Data (String.make len '\000'))
+    if i >= Array.length slots then Lwt.return zeroes
     else (
       match slots.(i) with
-        | Manifest.Zero -> Lwt.return (`Data (String.make len '\000'))
+        | Manifest.Zero -> Lwt.return zeroes
         | Manifest.Inherit -> (
             match base with
               | Some m when i < Chunk_table.count m.Manifest.chunks ->
@@ -459,18 +505,7 @@ module Make (C : Conf.S) (R : Remote.S) = struct
                     (Backend.Backend_error
                        (Printf.sprintf "staged chunk %d inherits nothing" i)))
         | Manifest.Staged uuid ->
-            let+ body =
-              Lwt.catch
-                (fun () ->
-                  Lwt_unix_retry.with_file ~mode:Lwt_io.Input
-                    (Cc.staged_path uuid) Lwt_io.read)
-                (fun _ -> Lwt.return "")
-            in
-            let have = String.length body in
-            `Data
-              (if have = len then body
-               else if have > len then String.sub body 0 len
-               else body ^ String.make (len - have) '\000'))
+            Lwt.return (`Fill (fun buf -> fill_from_staged ~uuid ~len buf)))
 
   (* Recording the published manifest inside the staged one is the commit point
      of the promotion below: after it, recovery replays the local moves instead
@@ -547,10 +582,19 @@ module Make (C : Conf.S) (R : Remote.S) = struct
         (fun group ->
           if touched group && local group then
             Cc.put_group ~group ~member:(fun i ->
-                let+ source = staged_source ~staged ~base:None i in
+                let* source = staged_source ~staged ~base:None i in
                 match source with
-                  | `Data body -> body
-                  | `Reuse _ -> assert false (* [local] ruled this out *))
+                  | `Reuse _ -> assert false (* [local] ruled this out *)
+                  | `Fill fill ->
+                      (* Its own buffer rather than the upload path's pool: this
+                         runs over a group's members, two at the defaults. *)
+                      let len =
+                        Manifest.chunk_len ~size:staged.Manifest.s_size
+                          ~chunk_size:staged.Manifest.s_chunk_size i
+                      in
+                      let buf = Bytes.create len in
+                      let+ () = fill buf in
+                      Bytes.unsafe_to_string buf)
           else Lwt.return_unit)
         (Mf.groups published)
     in
