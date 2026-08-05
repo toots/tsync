@@ -559,6 +559,7 @@ tsync share <path>    # print a public download URL for a file or folder (as a z
 tsync status          # show daemon state
 tsync stats           # full report: metrics, resolved config, cache, per-backend health
 tsync stats --totals  # also count what each backend holds (a full listing per backend)
+tsync logs            # show the daemon log (-f to follow, -n N for how far back)
 tsync print-config    # show the config as parsed, with secrets masked
 tsync paths           # show the config, cache, data and socket paths in use
 tsync build-config    # show which optional features this binary was built with
@@ -570,6 +571,27 @@ tsync stop            # unmount
 ```
 
 `--verbose` / `-v` works on all of them.
+
+### Reading the log
+
+The daemon keeps no log file of its own: it logs through `syslog(3)` and lets the platform
+store the result. `tsync logs` is a thin wrapper over whichever reader that platform
+provides, so it inherits that platform's requirements:
+
+| Platform | Reads | Requires |
+|---|---|---|
+| Linux | the systemd journal, via `journalctl -t tsync` | **systemd-journald**. On a system without it there is nothing to read, and `tsync logs` says so. Use your syslog daemon's own files instead. |
+| macOS | `~/Library/Logs/tsync-daemon.log`, via `tail` | the LaunchAgent installed by `install-agent.sh`, which is what points the daemon's output at that file. |
+
+On Linux the journal is matched by syslog identity (`tsync`), not by unit name, so renaming
+the unit or switching between the user unit and the packaged system instance does not affect
+it. Nothing rotates the macOS log file.
+
+Only the daemon's log. On macOS the File Provider extension is started by the OS, so its
+output goes to the unified log — `log show --predicate 'subsystem == "org.feverdreamtv.tsync"'`.
+Separately, the daemon keeps its last 50 warnings and errors in memory and reports them as
+`recentErrors` in `tsync stats`, which is how an http-proxy server — no journal of its own to
+point at — explains itself.
 
 ### Multiple domains
 
@@ -649,7 +671,7 @@ wire.
 | Finder disagrees with `tsync ls` (macOS) | `tsync fileprovider reimport`. |
 | A backend was offline and has fallen behind | `tsync resync-remote --source <name>`. |
 | Local cache and remote disagree | `tsync recheck`, then `tsync sync --full` if it persists. |
-| Daemon state unclear | `tsync status`, `tsync stats`, and the service manager's log. |
+| Daemon state unclear | `tsync status`, `tsync stats`, and `tsync logs -f` — [reading the log](#reading-the-log). |
 | One backend of several is misbehaving | `tsync stats` — each backend reports its own reachability, journal backlog and backfill queue. |
 | A backfill target says `DEGRADED` | Its queue overflowed and writes were dropped: `tsync resync-remote --source <main>`. |
 | A domain served over http-proxy misbehaves | Open the server's `/` page, or `curl` its `/stats` — [step 7](#checking-on-the-server). The server has no IPC socket, so `tsync stats` cannot reach it. |

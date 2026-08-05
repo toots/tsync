@@ -24,6 +24,15 @@ let app_bundle = "/Applications/TsyncApp.app"
 let daemon_label = "org.feverdreamtv.tsync.daemon"
 let sh fmt = Printf.ksprintf (fun cmd -> Sys.command cmd = 0) fmt
 
+(* Where install-agent.sh points the LaunchAgent's stdout and stderr. syslog is
+   opened with LOG_PERROR, so this file has every line the unified log has. *)
+let log_path =
+  Filename.concat (Sys.getenv "HOME") "Library/Logs/tsync-daemon.log"
+
+let log_command ~follow ~lines =
+  (["tail"; "-n"; string_of_int lines] @ if follow then ["-f"] else [])
+  @ [log_path]
+
 (* Both halves read the config: the daemon at startup, and the app at launch to
    reconcile File Provider domains. [kickstart] both starts a stopped agent and
    restarts a running one, which covers the daemon having exited cleanly for

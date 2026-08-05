@@ -36,3 +36,14 @@ let domain_socket_path paths domain_name =
 
 let restart_service () =
   Sys.command "systemctl --user restart tsync 2>/dev/null" = 0
+
+(* Requires systemd-journald: the daemon logs through syslog(3) and ships no log
+   file of its own, so on a non-systemd system there is nothing here to read.
+
+   Matched by syslog identity, not by unit — the ident comes from the daemon's
+   own openlog, so renaming or reinstancing the unit cannot cost us the log. Both
+   install shapes (a user unit from source, a system instance from a package) run
+   under the invoking user's uid, whose journal that user can read. *)
+let log_command ~follow ~lines =
+  ["journalctl"; "-t"; "tsync"; "-n"; string_of_int lines]
+  @ if follow then ["-f"] else []
