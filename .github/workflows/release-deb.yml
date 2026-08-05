@@ -90,5 +90,6 @@ jobs:
       - uses: ./.github/actions/publish-nightly
         with:
           files: dist/*.deb
+          prune: "*.deb"
           sha: ${{ env.SHA }}
           token: ${{ github.token }}

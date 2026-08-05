@@ -81,5 +81,6 @@ jobs:
       - uses: ./.github/actions/publish-nightly
         with:
           files: dist/*.rpm
+          prune: "*.rpm"
           sha: ${{ env.SHA }}
           token: ${{ github.token }}
