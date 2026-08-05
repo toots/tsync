@@ -5,9 +5,6 @@ inputs:
   files:
     description: Files to upload, as a glob.
     required: true
-  prune:
-    description: Glob of existing asset names to delete before uploading, e.g. `*.deb`.
-    required: false
   sha:
     description: Commit the artifacts were built from, for the release notes.
     required: true
@@ -22,7 +19,6 @@ runs:
       env:
         GH_TOKEN: ${{ inputs.token }}
         FILES: ${{ inputs.files }}
-        PRUNE: ${{ inputs.prune }}
         SHA: ${{ inputs.sha }}
       run: |
         # The container-based jobs check out as a different uid than gh runs as.
@@ -33,11 +29,17 @@ runs:
           || gh release create nightly --prerelease --title nightly --notes "" \
           || true
         # Versioned filenames mean --clobber never replaces the previous build,
-        # so drop every matching asset first.
-        if [ -n "$PRUNE" ]; then
-          gh release view nightly --json assets -q '.assets[].name' | while read -r asset; do
-            case "$asset" in $PRUNE) gh release delete-asset nightly "$asset" -y;; esac
+        # so drop the older builds of the same package first. The run number is
+        # the only part that varies; the rest of the name pins distro and arch,
+        # so a prune here never touches another job's asset. Names without a
+        # version (tsync.pkg) are left to --clobber.
+        assets=$(gh release view nightly --json assets -q '.assets[].name')
+        for file in $FILES; do
+          glob=$(basename "$file" | sed 's/0\.0\.0-[0-9][0-9]*/0.0.0-*/')
+          case "$glob" in *'*'*) ;; *) continue ;; esac
+          echo "$assets" | while read -r asset; do
+            case "$asset" in $glob) gh release delete-asset nightly "$asset" -y ;; esac
           done
-        fi
+        done
         gh release upload nightly $FILES --clobber
         gh release edit nightly --notes "Rolling build of main, from $SHA."
