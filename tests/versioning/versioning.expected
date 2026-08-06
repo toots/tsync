@@ -97,3 +97,29 @@
   version foo.txt [.tsync-root/b306717ed3feaa3f-615fce859cf8a12f]#1 = manifest size=3 chunks=1
   version foo.txt [.tsync-root/b306717ed3feaa3f-615fce859cf8a12f]#2 = manifest size=3 chunks=1
 
+=== revert drops staged bodies
+  write foo.txt "one"
+  drain
+  write foo.txt "two"
+  drain
+  stage-write foo.txt "edited, not uploaded"
+  staged
+  revert foo.txt @latest
+  staged
+  staged manifests=1 bodies=1
+  staged manifests=0 bodies=0
+--- tree
+  f foo.txt size=3 cached=0/1 uploaded=true etag=927288390658e64d
+--- content
+  foo.txt = "one"
+--- backend
+  chunk 6c0560bdcb29998b-8f653076428650aa size=3
+  chunk 911faba7321fe1a0-a3cf92cbf55153da size=3
+  cursor = <entry-3>
+  journal <entry-1> = put foo.txt 3
+  journal <entry-2> = put foo.txt 3
+  journal <entry-3> = put foo.txt 3
+  file foo.txt [.tsync-root/b306717ed3feaa3f-615fce859cf8a12f] = manifest size=3 chunks=1 h1=927288390658e64d h2=b8b5ebbd37156bca
+    chunk#0 911faba7321fe1a0-a3cf92cbf55153da size=3
+  version foo.txt [.tsync-root/b306717ed3feaa3f-615fce859cf8a12f]#1 = manifest size=3 chunks=1
+

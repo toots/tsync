@@ -88,6 +88,21 @@ let scenarios : scenario list =
         ];
     };
     {
+      (* Deleting a key drops its staged bodies too: nothing else references
+         them and there is no longer anywhere to upload them to. *)
+      name = "delete drops staged bodies";
+      steps =
+        [
+          Write { path = "doomed.txt"; content = "published" };
+          Drain;
+          StageWrite { path = "doomed.txt"; content = "edited, not uploaded" };
+          ShowStaged;
+          Delete "doomed.txt";
+          Drain;
+          ShowStaged;
+        ];
+    };
+    {
       name = "mkdir";
       steps =
         [

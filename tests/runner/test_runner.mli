@@ -48,6 +48,9 @@ type step =
           grow) — plus how many of its chunks are in the local chunk store. *)
   | ShowChunkCache
       (** Print the whole chunk store's footprint: [chunks=n bytes=b]. *)
+  | ShowStaged
+      (** Print the staged tree's contents: manifests and the bodies they are
+          supposed to be the only reference to. *)
   | ShowNames of string
       (** Print the entry names a readdir serves for a directory ([""] for the
           domain root), subdirectories with a trailing slash. A file with only

@@ -43,6 +43,9 @@ type step =
           many of its chunks are local. *)
   | ShowChunkCache
       (** Print the whole chunk store's size: [chunks=n bytes=b]. *)
+  | ShowStaged
+      (** Print the staged tree's contents: manifests and the bodies they are
+          supposed to be the only reference to. *)
   | ShowNames of string
       (** Print the raw entry names FUSE readdir serves for a directory. *)
   | Stat of string
@@ -136,6 +139,7 @@ let rec render_step = function
   | Truncate { path; size } -> Printf.sprintf "truncate %s %d" path size
   | ShowChunks p -> "chunks " ^ p
   | ShowChunkCache -> "chunk-cache"
+  | ShowStaged -> "staged"
   | ShowNames p -> "names " ^ if p = "" then "/" else p
   | Stat p -> "stat " ^ p
   | Mark -> "mark"
@@ -459,6 +463,24 @@ let setup_client (module C : Conf.S) root staging_prefix =
     | ShowChunkCache ->
         let+ chunks, bytes = F.chunk_stats () in
         Printf.printf "  chunk-cache chunks=%d bytes=%d\n" chunks bytes
+    | ShowStaged ->
+        let count dir =
+          let rec walk dir =
+            if not (Sys.file_exists dir) then 0
+            else
+              Array.fold_left
+                (fun n name ->
+                  let p = Filename.concat dir name in
+                  if Sys.is_directory p then n + walk p else n + 1)
+                0 (Sys.readdir dir)
+          in
+          walk (dir ~cache_root:C.cache_root C.domain_name)
+        in
+        Printf.printf "  staged manifests=%d bodies=%d\n"
+          (count Cache_layout.staged_manifests_dir)
+          (count Cache_layout.staged_chunks_dir
+          + count Cache_layout.staged_whole_dir);
+        Lwt.return_unit
     | ShowChunks p ->
         let k = key p in
         let* resolved = F.resolve k in

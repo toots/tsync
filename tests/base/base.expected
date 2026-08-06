@@ -127,6 +127,24 @@
   file kept.txt [.tsync-root/2af84fa98a68a9b1-19465e194feef43e] = manifest size=20 chunks=1 h1=c28eb646647717df h2=3aa7df8d1f659304
     chunk#0 bc6ece615ce2b70e-d07697eb1fc3e43e size=20
 
+=== delete drops staged bodies
+  write doomed.txt "published"
+  drain
+  stage-write doomed.txt "edited, not uploaded"
+  staged
+  delete doomed.txt
+  drain
+  staged
+  staged manifests=1 bodies=1
+  staged manifests=0 bodies=0
+--- tree
+--- content
+--- backend
+  chunk 049b50dd364dcae9-6f20090ec5c663a9 size=9
+  cursor = <entry-2>
+  journal <entry-1> = put doomed.txt 9
+  journal <entry-2> = delete doomed.txt
+
 === mkdir
   mkdir sub
   drain

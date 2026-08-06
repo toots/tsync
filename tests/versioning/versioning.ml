@@ -61,6 +61,22 @@ let scenarios : scenario list =
           RevertVersion { path = "foo.txt"; version = None };
         ];
     };
+    {
+      (* Revert throws away the staged edit — bodies included, or they outlive
+         the manifest that named them. *)
+      name = "revert drops staged bodies";
+      steps =
+        [
+          Write { path = "foo.txt"; content = "one" };
+          Drain;
+          Write { path = "foo.txt"; content = "two" };
+          Drain;
+          StageWrite { path = "foo.txt"; content = "edited, not uploaded" };
+          ShowStaged;
+          RevertVersion { path = "foo.txt"; version = None };
+          ShowStaged;
+        ];
+    };
   ]
 
 let () = run ~versioning:true scenarios

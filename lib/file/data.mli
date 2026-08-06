@@ -103,4 +103,7 @@ module Make (C : Conf.S) (R : Remote.S) : sig
   (** Drop [key]'s cached chunks; they re-fetch on demand. Unreference-blind: a
       chunk shared with another file goes too. Staged bodies are untouched. *)
   val forget_chunks : string -> unit Lwt.t
+
+  (** Drop [key]'s staged manifest and the bodies it names. *)
+  val discard_staged : string -> unit Lwt.t
 end

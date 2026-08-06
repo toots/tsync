@@ -417,6 +417,13 @@ module Make (C : Conf.S) (R : Remote.S) = struct
       | Some uuid -> Cc.whole_forget ~uuid
       | None -> Lwt.return_unit
 
+  let discard_staged key =
+    let* st = Mf.read_staged key in
+    let* () =
+      match st with Some st -> discard_bodies st | None -> Lwt.return_unit
+    in
+    Mf.delete_staged key
+
   let create key =
     let* st = Mf.read_staged key in
     let* () =
@@ -598,14 +605,7 @@ module Make (C : Conf.S) (R : Remote.S) = struct
           else Lwt.return_unit)
         (Mf.groups published)
     in
-    let* () =
-      Lwt_list.iter_s
-        (fun slot ->
-          match slot with
-            | Manifest.Staged uuid -> Cc.stage_forget ~uuid
-            | Manifest.Inherit | Manifest.Zero -> Lwt.return_unit)
-        (Array.to_list slots)
-    in
+    let* () = discard_bodies staged in
     let* () = Mf.write key published in
     Mf.delete_staged key
 

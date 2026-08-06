@@ -245,7 +245,7 @@ struct
      upload them to. *)
   let clear_local key =
     let* () = evict key in
-    let* () = Mf.delete_staged key in
+    let* () = D.discard_staged key in
     delete_manifest key
 
   let create key = D.create key
@@ -538,9 +538,10 @@ struct
           ignore (cancel_upload key);
           let* () = St.put_manifest ~key ~data in
           let* () = write_manifest key m in
-          (* Chunks are left alone: shared ones may still be wanted, missing
-             ones fetch on demand. Staged edits are what revert discards. *)
-          let* () = Mf.delete_staged key in
+          (* Cached chunks are left alone: shared ones may still be wanted,
+             missing ones fetch on demand. Staged edits, manifest and bodies
+             both, are what revert discards. *)
+          let* () = D.discard_staged key in
           let* ek =
             Fs.write_journal_entry [`Put (rel_key key, m.Manifest.size)]
           in
