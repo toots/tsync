@@ -35,12 +35,8 @@ module type S = sig
   (** Handle closed: queue the file for upload if it has staged edits. *)
   val close : t -> unit Lwt.t
 
-  (** Finish every upload the staged tree still owes. Crash recovery, run once
-      at startup. *)
-  val recover_staged : unit -> unit Lwt.t
-
-  (** Free staged bodies nothing references. Part of {!recover_staged}; run once
-      at startup, never while writes may be staging. *)
+  (** Free staged bodies nothing references. Part of {!Replay.reconcile}; run
+      once at startup, never while writes may be staging. *)
   val reclaim_staged_orphans : unit -> unit Lwt.t
 
   (** Keep the chunk store under [C.max_cache]; never touches staged data. *)
@@ -93,6 +89,10 @@ module type S = sig
   val truncate : t -> int64 -> unit Lwt.t
   val apply_delete : t -> unit Lwt.t
   val queue_put : t -> unit Lwt.t
+
+  val resume_put :
+    t -> entry_key:Journal.Entry_key.t -> ops:Journal.op list -> bool Lwt.t
+
   val delete : t -> unit Lwt.t
   val mkdir : t -> unit Lwt.t
   val rmdir : t -> unit Lwt.t
@@ -313,30 +313,17 @@ struct
           let+ () = W.advance ek Wal.Prepared in
           Sq.post ~key ~entry_key:ek ~ops
 
-  (* A staged manifest on disk means an upload is owed: nothing else records
-     that across a restart. Replaying covers a crash mid-write (upload never
-     ran) and mid-promotion ({!Data.sync} finishes the local moves without
-     re-sending). *)
+  (* The record already exists and already names this work; posting under its
+     key is what keeps one unit of work to one key across a restart. *)
+  let resume_put key ~entry_key ~ops =
+    let* staged = Mf.staged_exists key in
+    if not staged then Lwt.return_false
+    else begin
+      Sq.post ~key ~entry_key ~ops;
+      Lwt.return_true
+    end
 
   let reclaim_staged_orphans = D.reclaim_staged_orphans
-
-  let recover_staged () =
-    (* Before the replays: they are the first thing that can stage a body, and a
-       body created after this point may not yet be named by a manifest. *)
-    let* () = reclaim_staged_orphans () in
-    let* keys = Mf.list_staged () in
-    Lwt_list.iter_s
-      (fun key ->
-        Log.info "resuming staged upload for %s" key;
-        Lwt.catch
-          (* Through the queue, not straight to [D.sync]: the upload also owes a
-             journal entry and a cursor bump, or peers never learn of the
-             change. *)
-          (fun () -> queue_put key)
-          (fun exn ->
-            Log.err "staged upload %s failed: %s" key (Printexc.to_string exn);
-            Lwt.return_unit))
-      keys
 
   let close key =
     let* staged = Mf.staged_exists key in

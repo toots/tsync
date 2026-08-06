@@ -737,15 +737,6 @@ let sync_cmd =
             "Max concurrent backend operations during a full resync (default \
              32). Lower it if you hit DNS or open-file limits.")
   in
-  let render_op = function
-    | `Put (k, size) -> Printf.sprintf "put %s (%Ld bytes)" k size
-    | `Delete k -> "delete " ^ k
-    | `Mkdir (k, _) -> "mkdir " ^ k
-    | `Rmdir (k, _) -> "rmdir " ^ k
-    | `Rename { Journal.src; dst; is_dir; _ } ->
-        Printf.sprintf "rename %s -> %s%s" src dst
-          (if is_dir then " (dir)" else "")
-  in
   let run domain source full parallelism v =
     set_verbose v;
     run_lwt
@@ -757,6 +748,7 @@ let sync_cmd =
        let module St = Store.Make (C) (Layout.Inode.Make (C)) in
        let module Sq = Sync_queue.Make (C) in
        let module F = File.Make (C) (Sq) in
+       let module Rp = Replay.Make (C) (F) in
        Sq.start
          ~upload:(fun ~key ~cancel -> F.upload ~cancel key)
          ~on_cursor:(fun ~entry_key:_ -> ())
@@ -765,117 +757,6 @@ let sync_cmd =
        if !verbose then
          Log.info "syncing domain %s (client %s, uuid %s)" C.domain_name
            C.client_name my_uuid;
-       (* The same accessor the daemon uses: this used to be a second copy that
-          wrote the key prefixed where the daemon wrote it bare, and only worked
-          because every reader took the basename. *)
-       let read_bookmark = Fs.read_last_sync_key in
-       let write_bookmark = Fs.write_last_sync_key in
-       (* Replayed minus any op another client has since overridden
-          (last-writer-wins). *)
-       let recover_entry entry_key ops =
-         let short = Journal.Entry_key.to_string entry_key in
-         let* published = Fs.journal_entry_published entry_key in
-         if published then begin
-           if !verbose then
-             Log.info "%s: already published remotely, cleaned up" short;
-           W.complete entry_key
-         end
-         else begin
-           (* Keys another client touched after this entry: those ops lose. *)
-           let* newer_keys = Fs.list_journal_keys ~start_after:entry_key () in
-           let remotely_modified = Hashtbl.create 16 in
-           let* () =
-             iter_pooled
-               (fun ek ->
-                 if Journal.Entry_key.client_uuid ek = my_uuid then
-                   Lwt.return_unit
-                 else
-                   let+ e = Fs.get_journal_entry ek in
-                   match e with
-                     | None -> ()
-                     | Some remote_ops ->
-                         List.iter
-                           (fun op ->
-                             match op with
-                               | `Put (k, _)
-                               | `Delete k
-                               | `Mkdir (k, _)
-                               | `Rmdir (k, _) ->
-                                   Hashtbl.replace remotely_modified k ()
-                               | `Rename { Journal.dst; src; _ } ->
-                                   Hashtbl.replace remotely_modified dst ();
-                                   Hashtbl.replace remotely_modified src ())
-                           remote_ops)
-               newer_keys
-           in
-           let replayed =
-             List.filter
-               (fun op ->
-                 let k =
-                   match op with
-                     | `Put (k, _) | `Delete k | `Mkdir (k, _) | `Rmdir (k, _)
-                       ->
-                         k
-                     | `Rename { Journal.dst = k; _ } -> k
-                 in
-                 not (Hashtbl.mem remotely_modified k))
-               ops
-           in
-           let skipped = List.length ops - List.length replayed in
-           if !verbose then
-             Log.info "%s: replaying %d/%d op%s%s" short (List.length replayed)
-               (List.length ops)
-               (if List.length ops = 1 then "" else "s")
-               (if skipped > 0 then
-                  Printf.sprintf " (%d skipped — remotely overridden)" skipped
-                else "");
-           (* Journal order matters: a rename must follow its create. *)
-           let* () =
-             Lwt_list.iter_s
-               (fun op ->
-                 Lwt.catch
-                   (fun () ->
-                     match op with
-                       | `Put (rel_key, _) ->
-                           (* A staged manifest is what says an upload is still
-                              owed. *)
-                           F.queue_put (C.domain_prefix ^ rel_key)
-                       | `Delete rel_key ->
-                           F.apply_delete (C.domain_prefix ^ rel_key)
-                       | `Mkdir (rel_key, _) ->
-                           F.mkdir (C.domain_prefix ^ rel_key)
-                       | `Rmdir (rel_key, _) ->
-                           F.rmdir (C.domain_prefix ^ rel_key)
-                       | `Rename { Journal.dst = dst_rel; src = src_rel; _ } ->
-                           F.rename
-                             ~src:(C.domain_prefix ^ src_rel)
-                             ~dst:(C.domain_prefix ^ dst_rel))
-                   (fun exn ->
-                     Log.err "recover_pending_ops: %s" (Printexc.to_string exn);
-                     Lwt.return_unit))
-               replayed
-           in
-           let* () =
-             if replayed <> [] then
-               let* (_ : Journal.Entry_key.t) =
-                 Fs.write_journal_entry ~entry_key replayed
-               in
-               Fs.bump_cursor entry_key
-             else Lwt.return_unit
-           in
-           W.complete entry_key
-         end
-       in
-       let recover_pending () =
-         let* pending = W.list () in
-         if !verbose then
-           Log.info "recovering %d pending journal entr%s" (List.length pending)
-             (if List.length pending = 1 then "y" else "ies");
-         (* Sequential: journal order. *)
-         Lwt_list.iter_s
-           (fun (r : Wal.record) -> recover_entry r.Wal.key r.Wal.ops)
-           pending
-       in
        (* Walk the inode tree from the root: a folder namespace lists its file
           manifests and folder markers, and a marker gives a subfolder's name+id
           plus the namespace to recurse into.
@@ -957,7 +838,7 @@ let sync_cmd =
              ~domain_name:C.domain_name
          in
          let* n, failed = rebuild_mirror () in
-         write_bookmark (J.entry_key ());
+         Fs.write_last_sync_key (J.entry_key ());
          (try
             if !verbose then Log.info "notifying daemon of completed resync";
             ignore
@@ -974,42 +855,21 @@ let sync_cmd =
             else "");
          Lwt.return_unit
        in
-       let incremental ~last_sync_key ~all_keys =
-         let recent_foreign =
-           all_keys
-           |> List.filter (fun k ->
-               match last_sync_key with
-                 | None -> true
-                 | Some last -> Journal.Entry_key.compare k last > 0)
-           |> List.filter (fun k -> Journal.Entry_key.client_uuid k <> my_uuid)
-         in
-         (* Sequential: journal order. *)
-         let* () =
-           Lwt_list.iter_s
-             (fun ek ->
-               let* e = Fs.get_journal_entry ek in
-               match e with
-                 | None -> Lwt.return_unit
-                 | Some ops ->
-                     if !verbose then
-                       Log.info "journal entry %s: %s"
-                         (Journal.Entry_key.to_string ek)
-                         (String.concat ", " (List.map render_op ops));
-                     F.apply_foreign_ops ops)
-             recent_foreign
-         in
-         (match List.rev all_keys with
-           | [] -> ()
-           | last_key :: _ -> write_bookmark last_key);
-         let n = List.length recent_foreign in
+       (* One pass of the same engine the daemon polls with, so the two cannot
+          drift apart. *)
+       let incremental () =
+         let+ n = Rp.apply_foreign () in
+         (match Fs.read_last_sync_key () with
+           | Some k when !verbose ->
+               Log.info "applied through %s" (Journal.Entry_key.to_string k)
+           | _ -> ());
          Printf.printf "%d journal entr%s from other clients\n" n
-           (if n = 1 then "y" else "ies");
-         Lwt.return_unit
+           (if n = 1 then "y" else "ies")
        in
-       let* () = recover_pending () in
+       let* () = Rp.reconcile () in
        if !verbose then Log.info "draining upload queue";
        let* () = Sq.drain () in
-       let last_sync_key = read_bookmark () in
+       let last_sync_key = Fs.read_last_sync_key () in
        if !verbose then
          Log.info "last sync bookmark: %s"
            (match last_sync_key with
@@ -1033,7 +893,7 @@ let sync_cmd =
        in
        match resync_reason with
          | Some reason -> full_resync reason
-         | None -> incremental ~last_sync_key ~all_keys)
+         | None -> incremental ())
   in
   Cmd.v
     (Cmd.info "sync"

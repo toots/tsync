@@ -9,6 +9,7 @@ module Make (C : Conf.S) = struct
   module F = File.Make (C) (Sq)
   module Ih = Ipc_handler.Make (C) (F)
   module Sp = Sync_poller.Make (C) (F)
+  module Rp = Replay.Make (C) (F)
   module Mf = Manifest.Make (C)
   module Fs = File_store.Make (C)
 
@@ -60,7 +61,7 @@ module Make (C : Conf.S) = struct
     (* Queued before serving, so a file edited before a crash is not left looking
        unsynced. The queue must be running first: recovery goes through it, for
        the journal entry and cursor bump an upload owes. *)
-    let* () = F.recover_staged () in
+    let* () = Rp.reconcile () in
     Sp.start ?on_changed ();
     Lwt.async cursor_flusher;
     Lwt.async (fun () ->

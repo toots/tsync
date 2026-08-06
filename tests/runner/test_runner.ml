@@ -68,7 +68,8 @@ type step =
   | DeleteCachedChunk of { path : string; index : int }
   | Recheck
   | RecoverStaged
-      (** Replay every upload the staged tree still owes, as a restart does. *)
+      (** Finish or discard every unfinished record, and adopt staged data no
+          record names, exactly as a restart does. *)
   | OrphanStagedBody
       (** Drop a staged body no manifest names into each body tree, the way a
           crash between staging and the manifest write does. *)
@@ -241,6 +242,7 @@ let setup_client (module C : Conf.S) root staging_prefix =
   let module Mf = Manifest.Make (C) in
   let module H = Ipc_handler.Make (C) (F) in
   let module Sp = Sync_poller.Make (C) (F) in
+  let module Rp = Replay.Make (C) (F) in
   let module J = Journal.Make (C) in
   let module W = Wal.Make (C) in
   let module L = Layout.Inode.Make (C) in
@@ -665,7 +667,7 @@ let setup_client (module C : Conf.S) root staging_prefix =
         let* () = F.ensure_cached (key path) in
         let* p = cached_chunk_path (key path) index in
         Lwt.catch (fun () -> Lwt_unix_retry.unlink p) (fun _ -> Lwt.return_unit)
-    | RecoverStaged -> F.recover_staged ()
+    | RecoverStaged -> Rp.reconcile ()
     | OrphanStagedBody ->
         (* What a crash between staging a body and writing the manifest that
            names it leaves behind, in both body trees. *)
