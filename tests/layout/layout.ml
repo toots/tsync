@@ -30,6 +30,10 @@ let () =
   check "entry key survives"
     (Filename.basename (Journal.relative_path feb) = feb);
   check "entry keys ordered" (dec < jan && jan < feb);
+  (* An entry key is not itself a path under the journal prefix: a lookup built
+     by concatenation lands somewhere no entry was ever written and reports the
+     entry missing. Go through {!File_store.journal_entry_published}. *)
+  check "entry key is not the object path" (Journal.relative_path feb <> feb);
   check "sharded paths ordered in the same order"
     (Journal.relative_path dec < Journal.relative_path jan
     && Journal.relative_path jan < Journal.relative_path feb);

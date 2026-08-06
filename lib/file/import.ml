@@ -76,7 +76,7 @@ module Make (C : Conf.S) = struct
     match sidecar with
       | Some _ -> Lwt.return_true
       | None ->
-          let+ head = Fs.head_opt ~key in
+          let+ head = Fs.head_manifest_opt ~key in
           Option.is_some head
 
   let import_file ~force_rehash ~src_root rel =

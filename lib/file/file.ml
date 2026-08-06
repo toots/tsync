@@ -488,7 +488,7 @@ struct
           let* src_head =
             if is_dir then Lwt.return_some ()
             else
-              let+ h = Fs.head_opt ~key:src in
+              let+ h = Fs.head_manifest_opt ~key:src in
               Option.map (fun _ -> ()) h
           in
           if is_dir || Option.is_some src_head then Lwt.fail exn

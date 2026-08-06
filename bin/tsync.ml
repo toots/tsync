@@ -784,8 +784,8 @@ let sync_cmd =
           (last-writer-wins). *)
        let recover_entry entry_key ops =
          let short = Filename.basename entry_key in
-         let* head = Fs.head_opt ~key:(C.journal_prefix ^ entry_key) in
-         if head <> None then begin
+         let* published = Fs.journal_entry_published entry_key in
+         if published then begin
            if !verbose then
              Log.info "%s: already published remotely, cleaned up" short;
            J.delete_local_pending ~entry_key

@@ -7,12 +7,15 @@ module Make (C : Conf.S) = struct
 
   let primary = Bk.primary
   let rename_file ~src_key ~dst_key = St.copy_manifest ~src_key ~dst_key
-  let head_opt ~key = St.head_manifest ~key
+  let head_manifest_opt ~key = St.head_manifest ~key
+
+  (* The one place an entry key becomes a backend key. Concatenating the prefix
+     onto a bare entry key skips the month directory and silently misses. *)
+  let journal_key entry_key = C.journal_prefix ^ Journal.relative_path entry_key
 
   let write_journal_entry ?entry_key ops =
     let ek = match entry_key with Some k -> k | None -> J.entry_key () in
-    let key = C.journal_prefix ^ Journal.relative_path ek in
-    let+ () = Bk.put ~key ~data:(Journal.encode ops) in
+    let+ () = Bk.put ~key:(journal_key ek) ~data:(Journal.encode ops) in
     ek
 
   let bump_cursor entry_key = Bk.put ~key:C.cursor_key ~data:entry_key
@@ -69,10 +72,15 @@ module Make (C : Conf.S) = struct
 
   let get_journal_entry entry_key =
     let (module Primary : Backend.S) = primary () in
-    let key = C.journal_prefix ^ Journal.relative_path entry_key in
+    let key = journal_key entry_key in
     Lwt.catch
       (fun () ->
         let+ d = Primary.get ~key () in
         Some (Journal.decode d))
       (fun _ -> Lwt.return_none)
+
+  let journal_entry_published entry_key =
+    let (module Primary : Backend.S) = primary () in
+    let+ head = Primary.head_opt ~key:(journal_key entry_key) () in
+    head <> None
 end
