@@ -172,7 +172,60 @@ module Make (C : Conf.S) = struct
         on_stop = (fun () -> ());
       }
 
-  let handler ~subs = H.handler (hooks ~subs)
+  (* The menu bar app is sandboxed, and a file in the shared container is "data
+     from other apps" to it, so the bytes come from here instead.
+
+     The FileProvider frontend's own verb, not a core one: it exists to serve
+     this platform's menu bar and nothing else speaks it. *)
+  open Lwt.Syntax
+
+  let ok_json fields =
+    Yojson.Safe.to_string (`Assoc (("ok", `Bool true) :: fields))
+
+  let handle_preview path =
+    let* uploads = F.uploads_in_flight () in
+    (* Only a body an upload is holding right now, so a caller cannot name a
+       path of its own choosing. *)
+    match
+      List.find_opt (fun ({ File.body; _ } : File.in_flight) -> body = Some path)
+        uploads
+    with
+      | None ->
+          Lwt.return
+            (Yojson.Safe.to_string
+               (`Assoc
+                  [
+                    ("ok", `Bool false);
+                    ("code", `String "not_found");
+                    ("error", `String "preview: not an upload in flight");
+                  ]))
+      | Some { File.name; _ } ->
+          (* Under the cache root, so the link QuickLook needs lands on the same
+             filesystem as the body it points at. *)
+          let scratch = Filename.concat C.cache_root "previews" in
+          let+ picture = Preview.of_file ~scratch ~name path in
+          (match picture with
+            | Some picture ->
+                ok_json [("data", `String (Base64.encode_string picture))]
+            (* Answered, with nothing to show: the caller falls back to an icon
+               rather than asking again. *)
+            | None -> ok_json [])
+
+  (* Wraps the core handler rather than living in it. *)
+  let handler ~subs =
+    let core = H.handler (hooks ~subs) in
+    fun line ->
+      match Yojson.Safe.from_string line with
+        | `Assoc obj when List.assoc_opt "action" obj = Some (`String "preview")
+          ->
+            let path =
+              match List.assoc_opt "path" obj with
+                | Some (`String s) -> s
+                | _ -> ""
+            in
+            let+ resp = handle_preview path in
+            (resp, `Continue)
+        | _ | (exception _) -> core line
   let drain = Sq.drain
 
   let init ~subs () =

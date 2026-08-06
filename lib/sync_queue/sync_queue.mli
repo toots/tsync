@@ -10,6 +10,13 @@ module type S = sig
   (** Files with an active or queued upload. *)
   val pending : unit -> int
 
+  (** Keys of the files a worker is uploading right now. *)
+  val uploading : unit -> string list
+
+  (** Bytes still owed: everything queued plus everything in flight. Counted
+      whole per file, so a file half sent still counts for its full size. *)
+  val pending_bytes : unit -> int64
+
   (** Uploads completed since the daemon started. *)
   val completed_count : unit -> int
 

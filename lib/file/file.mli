@@ -1,5 +1,10 @@
 type buffer = Local_io.buffer
 
+(** A file the upload queue is working on right now. [rel] names it from the
+    domain root, the way its reader sees it; [body] is where its bytes are on
+    disk, for anything that wants to look at them. *)
+type in_flight = { name : string; rel : string; body : string option }
+
 module type S = sig
   type t = string
 
@@ -90,6 +95,12 @@ module type S = sig
 
   (** Files with an active or queued upload. *)
   val uploads_pending : unit -> int
+
+  (** The files being uploaded right now. *)
+  val uploads_in_flight : unit -> in_flight list Lwt.t
+
+  (** Bytes still owed by the upload queue. *)
+  val uploads_pending_bytes : unit -> int64
 
   (** Whether uploads are parked. Queued work is kept while paused, and a
       restart resumes. *)

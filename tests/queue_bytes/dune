@@ -1,0 +1,28 @@
+(executable
+ (name queue_bytes_test)
+ (libraries
+  tsync_conf
+  tsync_backend
+  tsync_local_backend
+  tsync_local_io
+  tsync_queue
+  lwt
+  lwt.unix))
+
+(alias
+ (name default)
+ (deps queue_bytes_test.exe))
+
+(rule
+ (alias runtest)
+ (target queue_bytes_test.output)
+ (action
+  (with-stdout-to
+   queue_bytes_test.output
+   (ignore-stderr
+    (run ./queue_bytes_test.exe)))))
+
+(rule
+ (alias runtest)
+ (action
+  (diff queue_bytes_test.expected queue_bytes_test.output)))

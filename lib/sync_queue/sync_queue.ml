@@ -7,6 +7,8 @@ module type S = sig
   val cancel_put : string -> bool
   val idle : unit -> bool
   val pending : unit -> int
+  val uploading : unit -> string list
+  val pending_bytes : unit -> int64
   val completed_count : unit -> int
   val set_paused : bool -> unit
   val paused : unit -> bool
@@ -28,6 +30,7 @@ module Make (C : Conf.S) : S = struct
     key : string;
     entry_key : Journal.Entry_key.t;
     ops : Journal.op list;
+    size : int64;
   }
 
   (* [cancel] is polled between chunks, so setting it aborts at the next chunk
@@ -41,6 +44,10 @@ module Make (C : Conf.S) : S = struct
   (* Queue state is touched only from the Lwt event-loop thread, so no locks. *)
   let slots : (string, slot) Hashtbl.t = Hashtbl.create 64
   let queue : put_data Queue.t = Queue.create ()
+
+  (* What a worker is on right now, as opposed to [queue], which is what none has
+     picked up yet. Both are needed to say what is still owed. *)
+  let active : (string, put_data) Hashtbl.t = Hashtbl.create 8
   let queue_cond = Lwt_condition.create ()
   let stop = ref false
   let paused = ref false
@@ -95,6 +102,13 @@ module Make (C : Conf.S) : S = struct
   let pending () = Hashtbl.length slots
   let completed = ref 0
   let completed_count () = !completed
+
+  let uploading () = Hashtbl.fold (fun key _ acc -> key :: acc) active []
+
+  let pending_bytes () =
+    let add total pd = Int64.add total pd.size in
+    Hashtbl.fold (fun _ pd total -> add total pd) active
+      (Queue.fold add 0L queue)
 
   (* Returns [true] if the put failed transiently and should be requeued. *)
   let exec_put slot ({ key; entry_key; ops } : put_data) =
@@ -168,7 +182,14 @@ module Make (C : Conf.S) : S = struct
     else begin
       let pd = Queue.pop queue in
       let slot = Hashtbl.find slots pd.key in
-      let* retry = exec_put slot pd in
+      Hashtbl.replace active pd.key pd;
+      let* retry =
+        Lwt.finalize
+          (fun () -> exec_put slot pd)
+          (fun () ->
+            Hashtbl.remove active pd.key;
+            Lwt.return_unit)
+      in
       (match (slot.pending, retry && not !stop) with
         | Some next, _ ->
             slot.cancel := false;
@@ -199,8 +220,16 @@ module Make (C : Conf.S) : S = struct
     workers := [];
     Lwt.return_unit
 
+  (* Only a [`Put] carries bytes; the other ops are metadata the backend answers
+     in one round trip. *)
+  let ops_size ops =
+    List.fold_left
+      (fun total op ->
+        match op with `Put (_, size) -> Int64.add total size | _ -> total)
+      0L ops
+
   let post ~key ~entry_key ~ops =
-    let pd = { key; entry_key; ops } in
+    let pd = { key; entry_key; ops; size = ops_size ops } in
     match Hashtbl.find_opt slots key with
       | None ->
           add_slot key;

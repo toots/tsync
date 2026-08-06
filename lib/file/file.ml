@@ -2,6 +2,8 @@ open Lwt.Syntax
 
 type buffer = Local_io.buffer
 
+type in_flight = { name : string; rel : string; body : string option }
+
 module type S = sig
   type t = string
 
@@ -65,6 +67,8 @@ module type S = sig
 
   (** The upload queue's depth, and its pause switch. *)
   val uploads_pending : unit -> int
+  val uploads_in_flight : unit -> in_flight list Lwt.t
+  val uploads_pending_bytes : unit -> int64
 
   val uploads_paused : unit -> bool
   val set_uploads_paused : bool -> unit
@@ -258,6 +262,17 @@ struct
   let read key (buf : buffer) ~offset = D.pread_key key buf ~offset
   let cancel_upload key = Sq.cancel_put key
   let uploads_pending = Sq.pending
+  let uploads_in_flight () =
+    Lwt_list.map_s
+      (fun key ->
+        let+ body = D.staged_body_path key in
+        {
+          name = Filename.basename key;
+          rel = Key.chop_slash (rel_key key);
+          body;
+        })
+      (Sq.uploading ())
+  let uploads_pending_bytes = Sq.pending_bytes
   let uploads_paused = Sq.paused
   let set_uploads_paused = Sq.set_paused
 
