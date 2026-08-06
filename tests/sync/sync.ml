@@ -246,6 +246,59 @@ let rename_rename_race =
       ];
   }
 
+(* The window itself: A's bytes are on the backend and the record says so, but
+   no entry names them, so B sees nothing. Before the WAL there was no record to
+   show here — the change was simply lost. *)
+let crash_leaves_a_record =
+  {
+    name = "crash_leaves_a_record";
+    steps =
+      [
+        A
+          (StageWrite { path = "foo.txt"; content = "written but not announced" });
+        A (CrashBeforeCommit "foo.txt");
+        B Sync;
+      ];
+  }
+
+(* The lost write. A's bytes reach the backend but the process dies before the
+   journal entry is published: A looks synced locally and B can see nothing.
+   Reconcile — which the daemon now runs at startup — publishes the entry under
+   the key the record already holds, and B's next sync picks the file up. *)
+let crash_before_commit =
+  {
+    name = "crash_before_commit";
+    steps =
+      [
+        A
+          (StageWrite { path = "foo.txt"; content = "written but not announced" });
+        A (CrashBeforeCommit "foo.txt");
+        (* B sees nothing: the bytes are there, no entry names them. *)
+        B Sync;
+        (* Restart. *)
+        A RecoverStaged;
+        A Drain;
+        B Sync;
+      ];
+  }
+
+(* Reconcile must not publish an entry for data that is gone: the record is the
+   one a cancelled or superseded upload leaves behind, and its staged content
+   was dropped. Telling peers to fetch it would strand them on a missing key. *)
+let stale_record_discarded =
+  {
+    name = "stale_record_discarded";
+    steps =
+      [
+        A (Write { path = "kept.txt"; content = "kept" });
+        A Drain;
+        A StaleRecord;
+        A RecoverStaged;
+        A Drain;
+        B Sync;
+      ];
+  }
+
 let () =
   run_two_client_scenarios
     [
@@ -263,4 +316,7 @@ let () =
       open_file_guard_closed;
       delete_rename_race;
       rename_rename_race;
+      crash_leaves_a_record;
+      crash_before_commit;
+      stale_record_discarded;
     ]

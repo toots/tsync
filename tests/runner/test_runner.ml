@@ -70,6 +70,14 @@ type step =
   | RecoverStaged
       (** Finish or discard every unfinished record, and adopt staged data no
           record names, exactly as a restart does. *)
+  | CrashBeforeCommit of string
+      (** Upload the bytes, record them as executed, and stop before publishing
+          the journal entry — the window a kill -9 mid-upload leaves. The change
+          exists on the backend and no peer can see it. *)
+  | StaleRecord
+      (** Drop a record in the pre-state format naming a put whose data was
+          never staged: what repeated replays left behind, 295 of them on one
+          domain, before recovery kept one key per unit of work. *)
   | OrphanStagedBody
       (** Drop a staged body no manifest names into each body tree, the way a
           crash between staging and the manifest write does. *)
@@ -164,6 +172,8 @@ let rec render_step = function
       Printf.sprintf "delete-cached-chunk %s #%d" path index
   | Recheck -> "recheck"
   | RecoverStaged -> "recover-staged"
+  | CrashBeforeCommit p -> "crash-before-commit " ^ p
+  | StaleRecord -> "stale-record"
   | OrphanStagedBody -> "orphan-staged-body"
   | ReclaimStaged -> "reclaim-staged"
   | ClearCache -> "clear-cache"
@@ -668,6 +678,25 @@ let setup_client (module C : Conf.S) root staging_prefix =
         let* p = cached_chunk_path (key path) index in
         Lwt.catch (fun () -> Lwt_unix_retry.unlink p) (fun _ -> Lwt.return_unit)
     | RecoverStaged -> Rp.reconcile ()
+    | CrashBeforeCommit path ->
+        let k = key path in
+        let* () = F.upload k in
+        let* m = F.read_manifest k in
+        let size = match m with Some m -> m.Manifest.size | None -> 0L in
+        let ek = J.entry_key () in
+        let* () = W.record ek [`Put (F.rel_key k, size)] in
+        W.advance ek Wal.Executed
+    | StaleRecord ->
+        let dir =
+          Filename.concat
+            (Filename.concat C.data_dir "journal-pending")
+            C.domain_name
+        in
+        mkdir_p dir;
+        write_file
+          (Filename.concat dir (Journal.Entry_key.to_string (J.entry_key ())))
+          (Journal.encode [`Put ("gone.zip", 42L)]);
+        Lwt.return_unit
     | OrphanStagedBody ->
         (* What a crash between staging a body and writing the manifest that
            names it leaves behind, in both body trees. *)

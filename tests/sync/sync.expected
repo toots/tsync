@@ -361,3 +361,68 @@
   file foo.txt [.tsync-root/e51b88f287203f60-f8bc60cf0cdf7bd7] = manifest size=16 chunks=1 h1=1e569fd0dd003545 h2=3854f28a02fadbd7
     chunk#0 63867f7d13d542db-2d81578912f1ac43 size=16
 
+=== crash_leaves_a_record
+  A: stage-write foo.txt "written but not announced"
+  A: crash-before-commit foo.txt
+  B: sync
+--- tree A
+  f foo.txt size=25 cached=1/1 uploaded=true etag=1598b0980b85a4ef
+--- content A
+  foo.txt = "written but not announced"
+--- pending A
+  pending executed [put foo.txt 25]
+--- tree B
+--- content B
+--- pending B
+--- backend
+  chunk 122bfe91acd98f69-bc6c6c3c246f7758 size=25
+  file foo.txt [.tsync-root/b306717ed3feaa3f-615fce859cf8a12f] = manifest size=25 chunks=1 h1=1598b0980b85a4ef h2=22060f0758319965
+    chunk#0 122bfe91acd98f69-bc6c6c3c246f7758 size=25
+
+=== crash_before_commit
+  A: stage-write foo.txt "written but not announced"
+  A: crash-before-commit foo.txt
+  B: sync
+  A: recover-staged
+  A: drain
+  B: sync
+--- tree A
+  f foo.txt size=25 cached=1/1 uploaded=true etag=1598b0980b85a4ef
+--- content A
+  foo.txt = "written but not announced"
+--- pending A
+--- tree B
+  f foo.txt size=25 cached=0/1 uploaded=true etag=1598b0980b85a4ef
+--- content B
+  foo.txt = "written but not announced"
+--- pending B
+--- backend
+  chunk 122bfe91acd98f69-bc6c6c3c246f7758 size=25
+  cursor = <entry-1>
+  journal <entry-1> = put foo.txt 25
+  file foo.txt [.tsync-root/b306717ed3feaa3f-615fce859cf8a12f] = manifest size=25 chunks=1 h1=1598b0980b85a4ef h2=22060f0758319965
+    chunk#0 122bfe91acd98f69-bc6c6c3c246f7758 size=25
+
+=== stale_record_discarded
+  A: write kept.txt "kept"
+  A: drain
+  A: stale-record
+  A: recover-staged
+  A: drain
+  B: sync
+--- tree A
+  f kept.txt size=4 cached=0/1 uploaded=true etag=d919e86de687ce50
+--- content A
+  kept.txt = "kept"
+--- pending A
+--- tree B
+  f kept.txt size=4 cached=0/1 uploaded=true etag=d919e86de687ce50
+--- content B
+  kept.txt = "kept"
+--- pending B
+--- backend
+  chunk 2fbef8c1952e19fd-2277f2bac962dc19 size=4
+  journal <entry-1> = put kept.txt 4
+  file kept.txt [.tsync-root/2af84fa98a68a9b1-19465e194feef43e] = manifest size=4 chunks=1 h1=d919e86de687ce50 h2=05cef325b63712c0
+    chunk#0 2fbef8c1952e19fd-2277f2bac962dc19 size=4
+
