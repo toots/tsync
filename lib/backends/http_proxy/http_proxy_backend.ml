@@ -35,6 +35,12 @@ type t = {
 
 let max_attempts = 8
 
+(* The connection cache has no deadline of its own: a pooled connection whose
+   peer went away without a FIN leaves its request pending forever, and
+   [call_retry] only ever sees failures, never stalls. Generous enough for a
+   chunk over a slow link — it is a stall detector, not a latency budget. *)
+let request_timeout = 300.
+
 let backend_error op code body =
   Backend.Backend_error
     (Printf.sprintf "http-proxy %s: HTTP %d: %s" op code body)
@@ -49,11 +55,14 @@ let call t ~meth ?(body = "") uri =
          ~meth:(Cohttp.Code.string_of_method meth)
          ~path:resource ~body)
   in
-  let* resp, rbody =
-    Cache.call t.cache ~headers ~body:(Cohttp_lwt.Body.of_string body) meth uri
-  in
-  let+ s = Cohttp_lwt.Body.to_string rbody in
-  (resp, s)
+  Lwt_unix.with_timeout request_timeout (fun () ->
+      let* resp, rbody =
+        Cache.call t.cache ~headers
+          ~body:(Cohttp_lwt.Body.of_string body)
+          meth uri
+      in
+      let+ s = Cohttp_lwt.Body.to_string rbody in
+      (resp, s))
 
 (* Connection failures and 5xx are transient; [Cancelled] never retries. Every
    proxied operation is idempotent, so retrying is safe. *)
