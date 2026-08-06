@@ -282,6 +282,32 @@ let () =
            ~data:"chunk" ())
        (List.init planted Fun.id));
 
+  (* A journal with a cursor set, so "to apply" is counted against something.
+     Entries sit in month directories, so the count only comes out right if the
+     cursor is compared against bare entry keys: with the directory kept, every
+     entry sorts above the cursor and an idle client reports a permanent backlog.
+     Only the one foreign entry past the cursor is behind — our own entries never
+     are, whatever their timestamp. *)
+  let module Fs = File_store.Make (C) in
+  let module J = Journal.Make (C) in
+  let other = "ffffffffffffffffffffffffffffffff" in
+  let cursor_entry = "1785969965857-" ^ other in
+  let mine = J.client_uuid () in
+  Lwt_main.run
+    (Lwt_list.iter_s
+       (fun entry ->
+         let (module B : Backend.S) = List.hd C.backends in
+         B.put
+           ~key:(C.journal_prefix ^ Journal.relative_path entry)
+           ~data:"{}" ())
+       [
+         "1785969965000-" ^ other;
+         cursor_entry;
+         "1785969966000-" ^ other;
+         "1785969967000-" ^ mine;
+       ]);
+  Fs.write_last_sync_key cursor_entry;
+
   (* Two stores, one of them down, so the report has to name which. *)
   Backend.report_members ~domain:C.domain_name
     [
@@ -376,6 +402,10 @@ let () =
   in
   assert (json_member "role" (by_name "disk") = `String "main");
   assert (json_member "reachable" (by_name "disk") = `Bool true);
+  (* Asserted, not just snapshotted: a wrong backlog looks like a stalled sync. *)
+  let journal = json_member "journal" (by_name "disk") in
+  assert (json_member "entries" journal = `Int 4);
+  assert (json_member "behind" journal = `Int 1);
   let archive = by_name "archive" in
   assert (json_member "reachable" archive = `Bool false);
   assert (json_member "error" archive <> `Null);

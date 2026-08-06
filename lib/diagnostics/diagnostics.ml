@@ -135,13 +135,14 @@ module Make (C : Conf.S) = struct
             | key -> Filename.basename key
         in
         let prefix_len = String.length C.journal_prefix in
+        (* Entries sit in month directories ({!Journal.relative_path}); the entry
+           key is the last segment, as in {!File_store.list_journal_keys}. Keeping
+           the month directory here would make every entry sort above [last]. *)
         let basenames =
           List.filter_map
             (fun (e : Backend.file_entry) ->
               if String.length e.key > prefix_len then
-                Some
-                  (String.sub e.key prefix_len
-                     (String.length e.key - prefix_len))
+                Some (Filename.basename e.key)
               else None)
             entries
         in

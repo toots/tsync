@@ -80,11 +80,11 @@
           "latencyMs": 1.0,
           "error": null,
           "journal": {
-            "entries": 0,
-            "behind": 0,
+            "entries": 4,
+            "behind": 1,
             "truncated": false,
             "cursor": null,
-            "lastSync": ""
+            "lastSync": "1785969965857-ffffffffffffffffffffffffffffffff"
           },
           "disk": {
             "availableBytes": 107374182400,
@@ -143,7 +143,7 @@ Domain statusdom
   Backend disk (local, main)
     path             /tmp/tsync-http-proxy-status-test/store
     reachable        yes (1 ms)
-    journal          0 entries, 0 to apply
+    journal          4 entries, 1 to apply
     disk             100.0 GB free of 460.4 GB (78% used)
   Backend archive (http-proxy, backfill)
     url              https://nas.example:8443
@@ -192,7 +192,7 @@ Domain statusdom
   Backend disk (local, main)
     path             /tmp/tsync-http-proxy-status-test/store
     reachable        yes (1 ms)
-    journal          0 entries, 0 to apply
+    journal          4 entries, 1 to apply
     disk             100.0 GB free of 460.4 GB (78% used)
   Backend archive (http-proxy, backfill)
     url              https://nas.example:8443
@@ -236,7 +236,7 @@ Domain statusdom
   Backend disk (local, main)
     path             /tmp/tsync-http-proxy-status-test/store
     reachable        yes (1 ms)
-    journal          0 entries, 0 to apply
+    journal          4 entries, 1 to apply
     disk             100.0 GB free of 460.4 GB (78% used)
     holds            0 manifests, ~4096 chunks, ~20.0 KB, as of 0m 0s ago
   Backend archive (http-proxy, backfill)
@@ -287,7 +287,7 @@ Domain statusdom
   Backend disk (local, main)
     path             /tmp/tsync-http-proxy-status-test/store
     reachable        yes (1 ms)
-    journal          0 entries, 0 to apply
+    journal          4 entries, 1 to apply
     disk             100.0 GB free of 460.4 GB (78% used)
     holds            0 manifests, 4096 chunks, 20.0 KB, as of 0m 0s ago
   Backend archive (http-proxy, backfill)

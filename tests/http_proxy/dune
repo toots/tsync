@@ -8,6 +8,7 @@
   tsync_frontend_register
   tsync_frontend
   tsync_diagnostics
+  tsync_queue
   tsync_conf
   tsync_local_io
   cohttp
