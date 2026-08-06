@@ -42,7 +42,7 @@ private struct DomainStatus {
 /// Polled rather than pushed — the daemon publishes events for content changes,
 /// not for queue depth, and a status call costs one socket round trip.
 @MainActor
-final class StatusMenu {
+final class StatusMenu: NSObject, NSMenuDelegate {
     private let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
     private let clients: [DaemonClient]
     private var statuses: [DomainStatus]
@@ -56,15 +56,27 @@ final class StatusMenu {
     /// is derived from the display name by rules that are not ours to guess.
     private var domainURLs: [String: URL] = [:]
 
-    /// Previews by body path, and the paths already asked for, so one that never
-    /// arrives is not re-requested every poll.
+    /// Previews by body path, and the paths already asked for, so one the daemon
+    /// has no picture for is not re-requested every poll.
     private var thumbnails: [String: NSImage] = [:]
     private var thumbnailsAsked: Set<String> = []
 
+    /// The rows a preview can still land in. A menu on screen is the one built
+    /// when it was opened, so a later [item.menu] never reaches it — the row's
+    /// own image does.
+    private var rows: [String: NSMenuItem] = [:]
+
+    /// Rebuilding under an open menu would dismiss it. Counts hold still for as
+    /// long as it is up; the pictures do not have to.
+    private var isOpen = false
+
+
+    override init() { fatalError("use init(domains:)") }
 
     init(domains: [String]) {
         clients = domains.map { DaemonClient(domain: $0) }
         statuses = domains.map { DomainStatus(name: $0) }
+        super.init()
         item.menu = NSMenu()
         render()
         let timer = Timer.scheduledTimer(withTimeInterval: Self.pollInterval,
@@ -210,6 +222,8 @@ final class StatusMenu {
     }
 
     private func render() {
+        guard !isOpen else { return }
+        rows.removeAll()
         let image = NSImage(systemSymbolName: symbolName, accessibilityDescription: "tsync")
         image?.isTemplate = true
         item.button?.image = image
@@ -219,6 +233,7 @@ final class StatusMenu {
         // Off, or AppKit disables every item with no action and draws it grey —
         // which is how information ends up looking like a broken command.
         menu.autoenablesItems = false
+        menu.delegate = self
         menu.addItem(info("tsync — \(summary)"))
         if !statuses.isEmpty {
             menu.addItem(.separator())
@@ -229,11 +244,13 @@ final class StatusMenu {
                 // must not push the rest of the menu off the screen.
                 let shown = status.uploading.sorted { $0.name < $1.name }
                 for upload in shown.prefix(Self.maxUploadingShown) {
-                    menu.addItem(info(upload.name, secondary: true,
-                                      icon: preview(of: upload, in: status.name),
-                                      indent: 1,
-                                      opens: fileURL(upload, in: status.name),
-                                      reveals: true))
+                    let row = info(upload.name, secondary: true,
+                                   icon: preview(of: upload, in: status.name),
+                                   indent: 1,
+                                   opens: fileURL(upload, in: status.name),
+                                   reveals: true)
+                    if let body = upload.body { rows[body] = row }
+                    menu.addItem(row)
                 }
                 let hidden = status.uploading.count - Self.maxUploadingShown
                 if hidden > 0 {
@@ -310,13 +327,26 @@ final class StatusMenu {
         guard let client = clients.first(where: { $0.domain == domain }) else { return }
         let scale = NSScreen.main?.backingScaleFactor ?? 2
         Task {
-            guard let head = try? await client.preview(path: path),
-                  let image = Self.thumbnail(from: head, scale: scale) else { return }
-            await MainActor.run {
-                self.thumbnails[path] = image
-                self.render()
+            do {
+                let picture = try await client.preview(path: path)
+                guard let picture,
+                      let image = Self.thumbnail(from: picture, scale: scale)
+                else { return }  // Answered with nothing to show: no point asking again.
+                await MainActor.run { self.show(image, for: path) }
+            } catch {
+                // The upload can finish between the listing and this request,
+                // which the daemon answers as a path it no longer holds. Let a
+                // later render ask again rather than settling for the icon.
+                await MainActor.run { self.thumbnailsAsked.remove(path) }
             }
         }
+    }
+
+    /// Straight into the row when there is one, so a picture arriving under an
+    /// open menu still appears in it.
+    private func show(_ image: NSImage, for path: String) {
+        thumbnails[path] = image
+        if let row = rows[path] { row.image = image } else { render() }
     }
 
     /// The head of a file rather than all of it: a camera or scanner stores a
@@ -361,6 +391,14 @@ final class StatusMenu {
     }
 
     // MARK: - Actions
+
+    func menuWillOpen(_ menu: NSMenu) { isOpen = true }
+
+    func menuDidClose(_ menu: NSMenu) {
+        isOpen = false
+        // Whatever the polls had to say while it was up.
+        render()
+    }
 
     /// A Finder window rooted at the folder. Not [NSWorkspace.open], which is
     /// this app opening a folder the sandbox never granted it: asking the Finder
