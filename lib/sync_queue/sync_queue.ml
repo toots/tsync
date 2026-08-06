@@ -1,17 +1,21 @@
 open Lwt.Syntax
 
 module type S = sig
-  val post : key:string -> entry_key:string -> ops:Journal.op list -> unit
+  val post :
+    key:string -> entry_key:Journal.Entry_key.t -> ops:Journal.op list -> unit
+
   val cancel_put : string -> bool
   val idle : unit -> bool
   val pending : unit -> int
+  val uploading : unit -> string list
+  val pending_bytes : unit -> int64
   val completed_count : unit -> int
   val set_paused : bool -> unit
   val paused : unit -> bool
 
   val start :
     upload:(key:string -> cancel:bool ref -> unit Lwt.t) ->
-    on_cursor:(entry_key:string -> unit) ->
+    on_cursor:(entry_key:Journal.Entry_key.t -> unit) ->
     on_upload_done:(key:string -> unit Lwt.t) ->
     unit
 
@@ -20,9 +24,14 @@ end
 
 module Make (C : Conf.S) : S = struct
   module Fs = File_store.Make (C)
-  module J = Journal.Make (C)
+  module W = Wal.Make (C)
 
-  type put_data = { key : string; entry_key : string; ops : Journal.op list }
+  type put_data = {
+    key : string;
+    entry_key : Journal.Entry_key.t;
+    ops : Journal.op list;
+    size : int64;
+  }
 
   (* [cancel] is polled between chunks, so setting it aborts at the next chunk
      boundary. [failures] drives the requeue backoff. *)
@@ -35,6 +44,10 @@ module Make (C : Conf.S) : S = struct
   (* Queue state is touched only from the Lwt event-loop thread, so no locks. *)
   let slots : (string, slot) Hashtbl.t = Hashtbl.create 64
   let queue : put_data Queue.t = Queue.create ()
+
+  (* What a worker is on right now, as opposed to [queue], which is what none has
+     picked up yet. Both are needed to say what is still owed. *)
+  let active : (string, put_data) Hashtbl.t = Hashtbl.create 8
   let queue_cond = Lwt_condition.create ()
   let stop = ref false
   let paused = ref false
@@ -43,18 +56,17 @@ module Make (C : Conf.S) : S = struct
   let upload_fn : (key:string -> cancel:bool ref -> unit Lwt.t) ref =
     ref (fun ~key:_ ~cancel:_ -> Lwt.return_unit)
 
-  let on_cursor_fn : (entry_key:string -> unit) ref =
+  let on_cursor_fn : (entry_key:Journal.Entry_key.t -> unit) ref =
     ref (fun ~entry_key:_ -> ())
 
   let on_upload_done_fn : (key:string -> unit Lwt.t) ref =
     ref (fun ~key:_ -> Lwt.return_unit)
 
-  (* Best-effort unlink, fired off without blocking the synchronous post/cancel
-     entry points.
-     ponytail: fire-and-forget unlink; make post/cancel return Lwt only if a
-     failed unlink ever needs to be surfaced. *)
-  let drop_pending entry_key =
-    Lwt.async (fun () -> J.delete_local_pending ~entry_key)
+  (* Fired off without blocking the synchronous post/cancel entry points. A
+     failed unlink is not lost work: the record names a put whose data is no
+     longer staged, which is exactly what {!Replay.reconcile} discards on the
+     next start. *)
+  let drop_pending entry_key = Lwt.async (fun () -> W.complete entry_key)
 
   let enqueue pd =
     Queue.add pd queue;
@@ -91,21 +103,38 @@ module Make (C : Conf.S) : S = struct
   let completed = ref 0
   let completed_count () = !completed
 
+  let uploading () = Hashtbl.fold (fun key _ acc -> key :: acc) active []
+
+  let pending_bytes () =
+    let add total pd = Int64.add total pd.size in
+    Hashtbl.fold (fun _ pd total -> add total pd) active
+      (Queue.fold add 0L queue)
+
   (* Returns [true] if the put failed transiently and should be requeued. *)
   let exec_put slot ({ key; entry_key; ops } : put_data) =
     if !(slot.cancel) then
-      let+ () = J.delete_local_pending ~entry_key in
+      let+ () = W.complete entry_key in
       false
     else
       Lwt.catch
         (fun () ->
           let* () = !upload_fn ~key ~cancel:slot.cancel in
           if !(slot.cancel) then
-            let+ () = J.delete_local_pending ~entry_key in
+            let+ () = W.complete entry_key in
             false
           else
-            let* () = J.delete_local_pending ~entry_key in
-            let* (_ : string) = Fs.write_journal_entry ~entry_key ops in
+            (* Executed, then published, then the record goes. A crash in the
+               first window leaves a record saying the bytes are up and the
+               entry is not, which is what reconcile finishes; a crash in the
+               second leaves the same record, and reconcile finds the entry
+               already published and drops it. Dropping the record first would
+               leave the bytes uploaded, no entry for peers to read, and nothing
+               saying anything was owed. *)
+            let* () = W.advance entry_key Wal.Executed in
+            let* (_ : Journal.Entry_key.t) =
+              Fs.write_journal_entry ~entry_key ops
+            in
+            let* () = W.complete entry_key in
             !on_cursor_fn ~entry_key;
             incr completed;
             slot.failures <- 0;
@@ -113,22 +142,35 @@ module Make (C : Conf.S) : S = struct
             false)
         (function
           | Backend.Cancelled ->
-              let+ () = J.delete_local_pending ~entry_key in
+              let+ () = W.complete entry_key in
               false
           | Unix.Unix_error (Unix.ENOENT, _, _) ->
-              let+ () = J.delete_local_pending ~entry_key in
+              let+ () = W.complete entry_key in
               false
-          | exn ->
-              (* Never dropped, or the file sits dirty in the cache forever:
-                 auto-evict only runs after a successful upload. *)
-              slot.failures <- slot.failures + 1;
-              let delay =
-                Float.min 300. (10. *. (2. ** float_of_int (slot.failures - 1)))
-              in
-              Log.err "sync_queue put %s: %s; requeue %d in %.0fs" key
-                (Printexc.to_string exn) slot.failures delay;
-              let+ () = Lwt_unix.sleep delay in
-              true)
+          | exn -> (
+              (* The record is never dropped on failure, or the file sits dirty
+                 in the cache forever: auto-evict only runs after a successful
+                 upload, and nothing else remembers the upload is owed. *)
+              let kind = Backend.classify exn in
+              let* () = W.note_failure entry_key kind (Backend.reason exn) in
+              match kind with
+                | Backend.Permanent ->
+                    (* A 403, a read-only domain, a key the store refuses: the
+                       same request will be refused again. Stop, and let the
+                       record carry why — this used to spin forever. *)
+                    Log.err "sync_queue put %s: %s; not retrying" key
+                      (Backend.reason exn);
+                    Lwt.return_false
+                | Backend.Transient ->
+                    slot.failures <- slot.failures + 1;
+                    let delay =
+                      Float.min 300.
+                        (10. *. (2. ** float_of_int (slot.failures - 1)))
+                    in
+                    Log.err "sync_queue put %s: %s; requeue %d in %.0fs" key
+                      (Backend.reason exn) slot.failures delay;
+                    let+ () = Lwt_unix.sleep delay in
+                    true))
 
   (* Parking on [queue_cond] is how a worker waits for either more work or a
      resume. [stop] wins over [paused], or a paused queue would never drain. *)
@@ -140,7 +182,14 @@ module Make (C : Conf.S) : S = struct
     else begin
       let pd = Queue.pop queue in
       let slot = Hashtbl.find slots pd.key in
-      let* retry = exec_put slot pd in
+      Hashtbl.replace active pd.key pd;
+      let* retry =
+        Lwt.finalize
+          (fun () -> exec_put slot pd)
+          (fun () ->
+            Hashtbl.remove active pd.key;
+            Lwt.return_unit)
+      in
       (match (slot.pending, retry && not !stop) with
         | Some next, _ ->
             slot.cancel := false;
@@ -171,8 +220,16 @@ module Make (C : Conf.S) : S = struct
     workers := [];
     Lwt.return_unit
 
+  (* Only a [`Put] carries bytes; the other ops are metadata the backend answers
+     in one round trip. *)
+  let ops_size ops =
+    List.fold_left
+      (fun total op ->
+        match op with `Put (_, size) -> Int64.add total size | _ -> total)
+      0L ops
+
   let post ~key ~entry_key ~ops =
-    let pd = { key; entry_key; ops } in
+    let pd = { key; entry_key; ops; size = ops_size ops } in
     match Hashtbl.find_opt slots key with
       | None ->
           add_slot key;

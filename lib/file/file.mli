@@ -1,5 +1,10 @@
 type buffer = Local_io.buffer
 
+(** A file the upload queue is working on right now. [rel] names it from the
+    domain root, the way its reader sees it; [body] is where its bytes are on
+    disk, for anything that wants to look at them. *)
+type in_flight = { name : string; rel : string; body : string option }
+
 module type S = sig
   type t = string
 
@@ -56,14 +61,10 @@ module type S = sig
       a restart. *)
   val close : t -> unit Lwt.t
 
-  (** Finish every upload the staged tree still owes. Crash recovery, run once
-      at startup. *)
-  val recover_staged : unit -> unit Lwt.t
-
   (** Delete staged bodies no staged manifest names — what a crash between
       staging a body and writing its manifest leaves behind — and prune the
       empty directories left in the staged manifest tree. Part of
-      {!recover_staged}: run at startup, never while writes may be staging, or
+      {!Replay.reconcile}: run at startup, never while writes may be staging, or
       it can collect a body a write is about to use. *)
   val reclaim_staged_orphans : unit -> unit Lwt.t
 
@@ -94,6 +95,12 @@ module type S = sig
 
   (** Files with an active or queued upload. *)
   val uploads_pending : unit -> int
+
+  (** The files being uploaded right now. *)
+  val uploads_in_flight : unit -> in_flight list Lwt.t
+
+  (** Bytes still owed by the upload queue. *)
+  val uploads_pending_bytes : unit -> int64
 
   (** Whether uploads are parked. Queued work is kept while paused, and a
       restart resumes. *)
@@ -129,7 +136,18 @@ module type S = sig
   val cancel_upload : t -> bool
   val truncate : t -> int64 -> unit Lwt.t
   val apply_delete : t -> unit Lwt.t
+
+  (** Queue the staged content for upload under a freshly minted entry key. For
+      work a WAL record already names, use {!resume_put}: minting a second key
+      for it orphans the record that was already tracking it. *)
   val queue_put : t -> unit Lwt.t
+
+  (** Re-queue a put under the entry key its record already holds. [false] when
+      nothing is staged for the key any more — the record names data that is
+      gone, and the caller should discard it. *)
+  val resume_put :
+    t -> entry_key:Journal.Entry_key.t -> ops:Journal.op list -> bool Lwt.t
+
   val delete : t -> unit Lwt.t
   val mkdir : t -> unit Lwt.t
   val rmdir : t -> unit Lwt.t

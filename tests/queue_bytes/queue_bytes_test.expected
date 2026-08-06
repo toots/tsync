@@ -1,0 +1,4 @@
+empty                  pending=0 uploading=[] bytes=0
+4 posted               pending=4 uploading=[tsync/testdom/manifests/f1.txt tsync/testdom/manifests/f2.txt] bytes=1000
+gate open              pending=0 uploading=[] bytes=0
+after drain            pending=0 uploading=[] bytes=0

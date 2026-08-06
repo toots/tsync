@@ -4,10 +4,16 @@
 
 let check name cond = if not cond then failwith ("layout: " ^ name)
 
+module Ek = Journal.Entry_key
+
 (* Fixed epoch milliseconds rather than a run-time calendar:
-   [Journal.relative_path] shards by UTC, so going through local time would file
+   [Ek.relative_path] shards by UTC, so going through local time would file
    entries in a different month depending on where the test ran. *)
-let entry ms = Printf.sprintf "%013Ld-client" ms
+let entry ms =
+  match Ek.of_string (Printf.sprintf "%013Ld-client" ms) with
+    | Some ek -> ek
+    | None -> failwith "layout: fixture entry key rejected"
+
 let dec_31 = entry 1798718400000L (* 2026-12-31T12:00:00Z *)
 let jan_01 = entry 1798804800000L (* 2027-01-01T12:00:00Z *)
 let feb_01 = entry 1801483200000L (* 2027-02-01T12:00:00Z *)
@@ -25,12 +31,31 @@ let () =
      sort like the bare entry keys — including across a month and a year
      boundary, where the shard changes. *)
   let dec = dec_31 and jan = jan_01 and feb = feb_01 in
-  check "month shard" (Journal.relative_path jan = "2027-01/" ^ jan);
-  check "year boundary" (Journal.relative_path dec = "2026-12/" ^ dec);
-  check "entry key survives"
-    (Filename.basename (Journal.relative_path feb) = feb);
-  check "entry keys ordered" (dec < jan && jan < feb);
+  check "month shard" (Ek.relative_path jan = "2027-01/" ^ Ek.to_string jan);
+  check "year boundary" (Ek.relative_path dec = "2026-12/" ^ Ek.to_string dec);
+  check "entry key survives" (Ek.of_string (Ek.relative_path feb) = Some feb);
+  check "entry keys ordered" (Ek.compare dec jan < 0 && Ek.compare jan feb < 0);
+  (* An entry key is not itself a path under the journal prefix: a lookup built
+     by concatenation lands somewhere no entry was ever written and reports the
+     entry missing. Go through {!File_store.journal_entry_published}. *)
+  check "entry key is not the object path"
+    (Ek.relative_path feb <> Ek.to_string feb);
   check "sharded paths ordered in the same order"
-    (Journal.relative_path dec < Journal.relative_path jan
-    && Journal.relative_path jan < Journal.relative_path feb);
+    (Ek.relative_path dec < Ek.relative_path jan
+    && Ek.relative_path jan < Ek.relative_path feb);
+
+  (* [of_string] is the only parser, so what it accepts is what the rest of the
+     code can assume it holds. *)
+  check "round trips" (Ek.of_string (Ek.to_string feb) = Some feb);
+  check "reads a backend listing key"
+    (Ek.of_string ("tsync/dom/journal/" ^ Ek.relative_path feb) = Some feb);
+  check "keeps the timestamp" (Ek.timestamp_ms feb = 1801483200000L);
+  check "keeps the uuid" (Ek.client_uuid feb = "client");
+  (* A month directory has a digits-then-dash shape too. Accepting a short
+     timestamp would report a shard as an entry of its own. *)
+  check "rejects a month directory" (Ek.of_string "2027-01" = None);
+  check "rejects a short timestamp" (Ek.of_string "123-client" = None);
+  check "rejects a non-numeric timestamp" (Ek.of_string "notatime-abc" = None);
+  check "rejects a missing uuid" (Ek.of_string "1801483200000-" = None);
+  check "rejects a bare prefix" (Ek.of_string "tsync/dom/journal/" = None);
   print_endline "layout ok"

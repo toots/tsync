@@ -93,6 +93,7 @@ module Make (C : Conf.S) = struct
   module D = Data.Make (C) (R)
   module Fs = File_store.Make (C)
   module J = Journal.Make (C)
+  module W = Wal.Make (C)
 
   let int_opt = function Some n -> `Int n | None -> `Null
 
@@ -127,44 +128,34 @@ module Make (C : Conf.S) = struct
             ()
         in
         let my_uuid = J.client_uuid () in
-        (* [basename ""] is ".", which reads as nonsense and stops the "never
-           synced" case below from matching. *)
-        let last =
-          match Fs.read_last_sync_key () with
-            | "" -> ""
-            | key -> Filename.basename key
-        in
-        let prefix_len = String.length C.journal_prefix in
-        (* Entries sit in month directories ({!Journal.relative_path}); the entry
-           key is the last segment, as in {!File_store.list_journal_keys}. Keeping
-           the month directory here would make every entry sort above [last]. *)
-        let basenames =
+        let last = Fs.read_last_sync_key () in
+        let keys =
           List.filter_map
-            (fun (e : Backend.file_entry) ->
-              if String.length e.key > prefix_len then
-                Some (Filename.basename e.key)
-              else None)
+            (fun (e : Backend.file_entry) -> Journal.Entry_key.of_string e.key)
             entries
         in
         let behind =
           List.filter
-            (fun b ->
-              (last = "" || b > last)
-              &&
-                try Journal.client_uuid_of_filename b <> my_uuid
-                with _ -> false)
-            basenames
+            (fun ek ->
+              (match last with
+                | None -> true
+                | Some last -> Journal.Entry_key.compare ek last > 0)
+              && Journal.Entry_key.client_uuid ek <> my_uuid)
+            keys
         in
         `Assoc
           [
-            ("entries", `Int (List.length basenames));
+            ("entries", `Int (List.length keys));
             ("behind", `Int (List.length behind));
-            ("truncated", `Bool (List.length basenames > journal_sample));
+            ("truncated", `Bool (List.length keys > journal_sample));
             ( "cursor",
               match cursor with
                 | Some c -> `String (String.trim c)
                 | None -> `Null );
-            ("lastSync", `String last);
+            ( "lastSync",
+              match last with
+                | Some k -> `String (Journal.Entry_key.to_string k)
+                | None -> `Null );
           ])
       (fun exn ->
         Lwt.return (`Assoc [("error", `String (Printexc.to_string exn))]))
@@ -408,12 +399,34 @@ module Make (C : Conf.S) = struct
        ]
       @ manifests)
 
-  let local_pending () =
+  (* Broken down by state, and by the last failure when there was one: "295
+     unpublished entries" says a number, "295 intent, oldest failed permanent:
+     forbidden" says what to do about it. *)
+  let wal_json () =
     Lwt.catch
       (fun () ->
-        let+ entries = J.local_pending_entries ~uuid:(J.client_uuid ()) in
-        List.length entries)
-      (fun _ -> Lwt.return 0)
+        let+ records = W.list () in
+        let count state =
+          List.length (List.filter (fun r -> r.Wal.state = state) records)
+        in
+        let stuck =
+          List.filter_map (fun r -> r.Wal.last_error) records
+          |> List.filter (fun (kind, _) -> kind = Backend.Permanent)
+        in
+        `Assoc
+          [
+            ("pending", `Int (List.length records));
+            ("intent", `Int (count Wal.Intent));
+            ("prepared", `Int (count Wal.Prepared));
+            ("executed", `Int (count Wal.Executed));
+            ("stuck", `Int (List.length stuck));
+            ( "lastError",
+              match stuck with
+                | (_, detail) :: _ -> `String detail
+                | [] -> `Null );
+          ])
+      (fun exn ->
+        Lwt.return (`Assoc [("error", `String (Printexc.to_string exn))]))
 
   (* [extra] is what only the calling frontend knows: the http-proxy adds its
      serve-side readOnly, whether it serves shares, and its options. [mount] is
@@ -426,7 +439,7 @@ module Make (C : Conf.S) = struct
   let domain_json ?(totals = false) ?(exact = false) ?(reload = false)
       ?(extra = []) ?(frontends = []) () =
     let* cache = cache_json ~totals in
-    let* pending = local_pending () in
+    let* wal = wal_json () in
     let+ backends =
       Lwt_list.map_p
         (member_json ~totals ~exact ~reload)
@@ -436,7 +449,7 @@ module Make (C : Conf.S) = struct
       (config_json @ extra
       @ [
           ("cache", cache);
-          ("journal", `Assoc [("localPending", `Int pending)]);
+          ("wal", wal);
           ("frontends", `List frontends);
           ("backends", `List backends);
         ])
@@ -599,9 +612,22 @@ let text json =
       (match mem cache "manifests" with
         | `Null -> ()
         | m -> row 4 "manifests" (string_of_int (int_of m)));
-      row 4 "unpublished"
-        (Printf.sprintf "%d journal entries"
-           (int_of (mem (mem d "journal") "localPending")));
+      (* Silent when there is nothing owed, which is the normal state. *)
+      let wal = mem d "wal" in
+      if int_of (mem wal "pending") > 0 then (
+        let part name =
+          match int_of (mem wal name) with
+            | 0 -> None
+            | n -> Some (Printf.sprintf "%d %s" n name)
+        in
+        row 4 "unsynced"
+          (String.concat ", "
+             (List.filter_map part ["intent"; "prepared"; "executed"]));
+        match (int_of (mem wal "stuck"), mem wal "lastError") with
+          | 0, _ | _, `Null -> ()
+          | n, `String detail ->
+              row 4 "stuck" (Printf.sprintf "%d, last: %s" n detail)
+          | _ -> ());
       (* A shared listener contributes its per-domain settings here and points at
          the block above for figures it cannot attribute to one domain. *)
       List.iter

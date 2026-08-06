@@ -684,6 +684,15 @@ module Make (C : Conf.S) (R : Remote.S) = struct
         s_published = None;
       }
 
+  (* The very bytes an upload is reading: a frontend hands a file over whole, so
+     it stays one plain file on disk for as long as the upload owes it. [None]
+     once it has been split into chunks, or for a key nothing staged. *)
+  let staged_body_path key =
+    let+ st = Mf.read_staged key in
+    match st with
+      | Some { Manifest.s_whole = Some uuid; _ } -> Some (Cc.whole_path uuid)
+      | _ -> None
+
   (* Staged bodies count as present: they are the newest bytes there are. *)
   let chunk_residency key =
     let* resolved = Mf.resolve key in

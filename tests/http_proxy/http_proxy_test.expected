@@ -54,7 +54,14 @@
       "domainPrefix": "tsync/statusdom/manifests/",
       "chunkPrefix": "tsync/statusdom/chunks/",
       "cache": { "chunks": 0, "bytes": 0, "maxCache": null },
-      "journal": { "localPending": 0 },
+      "wal": {
+        "pending": 0,
+        "intent": 0,
+        "prepared": 0,
+        "executed": 0,
+        "stuck": 0,
+        "lastError": null
+      },
       "frontends": [
         {
           "type": "http-proxy",
@@ -133,7 +140,6 @@ Domain statusdom
   socket           /tmp/tsync-http-proxy-status-test/absent.sock
   Cache
     chunks           0 (0 B of unlimited)
-    unpublished      0 journal entries
   Frontend http-proxy (shared listener, see above)
     public shares    off
     option port      8443
@@ -176,7 +182,6 @@ Domain statusdom
   socket           /tmp/tsync-http-proxy-status-test/absent.sock
   Cache
     chunks           0 (0 B of unlimited)
-    unpublished      0 journal entries
   Frontend http-proxy (shared listener, see above)
     public shares    off
     option port      8443
@@ -226,7 +231,6 @@ Domain statusdom
   Cache
     chunks           0 (0 B of unlimited)
     manifests        0
-    unpublished      0 journal entries
   Frontend http-proxy (shared listener, see above)
     public shares    off
     option port      8443
@@ -277,7 +281,6 @@ Domain statusdom
   Cache
     chunks           0 (0 B of unlimited)
     manifests        0
-    unpublished      0 journal entries
   Frontend http-proxy (shared listener, see above)
     public shares    off
     option port      8443

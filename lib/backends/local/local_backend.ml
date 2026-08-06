@@ -32,6 +32,22 @@ let read_file path =
    wait for one. *)
 let walk_fanout = 64
 
+(* A device error, a full disk or an exhausted descriptor table clears once the
+   condition does; a permissions or read-only-mount problem needs someone to act
+   before the same write can succeed. *)
+let of_errno ~op key e =
+  let kind =
+    match e with
+      | Unix.EIO | Unix.ENOSPC | Unix.EMFILE | Unix.ENFILE | Unix.EAGAIN
+      | Unix.EINTR | Unix.EBUSY ->
+          Backend.Transient
+      | _ -> Backend.Permanent
+  in
+  (* The store's name is in [op]: a domain has several backends, and which one
+     failed is the first thing a report needs. Stores that retry get it from
+     {!Backend.with_retry}'s [~name] instead. *)
+  Backend.failed ~kind ~op:("local " ^ op) (key ^ ": " ^ Unix.error_message e)
+
 let make ~root : (module Backend.S) =
   let walk_slots = Lwt_bounded.create ~max:walk_fanout () in
   let resolve key = if key = "" then root else Filename.concat root key in
@@ -49,10 +65,7 @@ let make ~root : (module Backend.S) =
       Lwt.catch
         (fun () -> read_file (resolve key))
         (function
-          | Unix.Unix_error (e, _, _) ->
-              Lwt.fail
-                (Backend.Backend_error
-                   ("local get " ^ key ^ ": " ^ Unix.error_message e))
+          | Unix.Unix_error (e, _, _) -> Lwt.fail (of_errno ~op:"get" key e)
           | exn -> Lwt.fail exn)
 
     let get_opt ~key () =
@@ -62,10 +75,7 @@ let make ~root : (module Backend.S) =
           Some data)
         (function
           | Unix.Unix_error (Unix.ENOENT, _, _) -> Lwt.return_none
-          | Unix.Unix_error (e, _, _) ->
-              Lwt.fail
-                (Backend.Backend_error
-                   ("local get " ^ key ^ ": " ^ Unix.error_message e))
+          | Unix.Unix_error (e, _, _) -> Lwt.fail (of_errno ~op:"get_opt" key e)
           | exn -> Lwt.fail exn)
 
     let head_opt ~key () =

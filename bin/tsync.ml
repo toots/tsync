@@ -737,25 +737,18 @@ let sync_cmd =
             "Max concurrent backend operations during a full resync (default \
              32). Lower it if you hit DNS or open-file limits.")
   in
-  let render_op = function
-    | `Put (k, size) -> Printf.sprintf "put %s (%Ld bytes)" k size
-    | `Delete k -> "delete " ^ k
-    | `Mkdir (k, _) -> "mkdir " ^ k
-    | `Rmdir (k, _) -> "rmdir " ^ k
-    | `Rename { Journal.src; dst; is_dir; _ } ->
-        Printf.sprintf "rename %s -> %s%s" src dst
-          (if is_dir then " (dir)" else "")
-  in
   let run domain source full parallelism v =
     set_verbose v;
     run_lwt
       (let open Lwt.Syntax in
        let (module C : Conf.S) = load_conf ?domain ?source () in
        let module J = Journal.Make (C) in
+       let module W = Wal.Make (C) in
        let module Fs = File_store.Make (C) in
        let module St = Store.Make (C) (Layout.Inode.Make (C)) in
        let module Sq = Sync_queue.Make (C) in
        let module F = File.Make (C) (Sq) in
+       let module Rp = Replay.Make (C) (F) in
        Sq.start
          ~upload:(fun ~key ~cancel -> F.upload ~cancel key)
          ~on_cursor:(fun ~entry_key:_ -> ())
@@ -764,125 +757,6 @@ let sync_cmd =
        if !verbose then
          Log.info "syncing domain %s (client %s, uuid %s)" C.domain_name
            C.client_name my_uuid;
-       let last_sync_file =
-         Filename.concat C.data_dir ("last-sync-" ^ C.domain_name)
-       in
-       let read_bookmark () =
-         if Sys.file_exists last_sync_file then (
-           let ic = open_in last_sync_file in
-           let s = input_line ic in
-           close_in ic;
-           String.trim s)
-         else ""
-       in
-       let write_bookmark key =
-         let oc = open_out last_sync_file in
-         output_string oc key;
-         close_out oc
-       in
-       (* Replayed minus any op another client has since overridden
-          (last-writer-wins). *)
-       let recover_entry entry_key ops =
-         let short = Filename.basename entry_key in
-         let* head = Fs.head_opt ~key:(C.journal_prefix ^ entry_key) in
-         if head <> None then begin
-           if !verbose then
-             Log.info "%s: already published remotely, cleaned up" short;
-           J.delete_local_pending ~entry_key
-         end
-         else begin
-           (* Keys another client touched after this entry: those ops lose. *)
-           let* newer_keys = Fs.list_journal_keys ~start_after:entry_key () in
-           let remotely_modified = Hashtbl.create 16 in
-           let* () =
-             iter_pooled
-               (fun (ek, uuid) ->
-                 if uuid = my_uuid then Lwt.return_unit
-                 else
-                   let+ e = Fs.get_journal_entry ek in
-                   match e with
-                     | None -> ()
-                     | Some remote_ops ->
-                         List.iter
-                           (fun op ->
-                             match op with
-                               | `Put (k, _)
-                               | `Delete k
-                               | `Mkdir (k, _)
-                               | `Rmdir (k, _) ->
-                                   Hashtbl.replace remotely_modified k ()
-                               | `Rename { Journal.dst; src; _ } ->
-                                   Hashtbl.replace remotely_modified dst ();
-                                   Hashtbl.replace remotely_modified src ())
-                           remote_ops)
-               newer_keys
-           in
-           let replayed =
-             List.filter
-               (fun op ->
-                 let k =
-                   match op with
-                     | `Put (k, _) | `Delete k | `Mkdir (k, _) | `Rmdir (k, _)
-                       ->
-                         k
-                     | `Rename { Journal.dst = k; _ } -> k
-                 in
-                 not (Hashtbl.mem remotely_modified k))
-               ops
-           in
-           let skipped = List.length ops - List.length replayed in
-           if !verbose then
-             Log.info "%s: replaying %d/%d op%s%s" short (List.length replayed)
-               (List.length ops)
-               (if List.length ops = 1 then "" else "s")
-               (if skipped > 0 then
-                  Printf.sprintf " (%d skipped — remotely overridden)" skipped
-                else "");
-           (* Journal order matters: a rename must follow its create. *)
-           let* () =
-             Lwt_list.iter_s
-               (fun op ->
-                 Lwt.catch
-                   (fun () ->
-                     match op with
-                       | `Put (rel_key, _) ->
-                           (* A staged manifest is what says an upload is still
-                              owed. *)
-                           F.queue_put (C.domain_prefix ^ rel_key)
-                       | `Delete rel_key ->
-                           F.apply_delete (C.domain_prefix ^ rel_key)
-                       | `Mkdir (rel_key, _) ->
-                           F.mkdir (C.domain_prefix ^ rel_key)
-                       | `Rmdir (rel_key, _) ->
-                           F.rmdir (C.domain_prefix ^ rel_key)
-                       | `Rename { Journal.dst = dst_rel; src = src_rel; _ } ->
-                           F.rename
-                             ~src:(C.domain_prefix ^ src_rel)
-                             ~dst:(C.domain_prefix ^ dst_rel))
-                   (fun exn ->
-                     Log.err "recover_pending_ops: %s" (Printexc.to_string exn);
-                     Lwt.return_unit))
-               replayed
-           in
-           let* () =
-             if replayed <> [] then
-               let* (_ : string) = Fs.write_journal_entry ~entry_key replayed in
-               Fs.bump_cursor entry_key
-             else Lwt.return_unit
-           in
-           J.delete_local_pending ~entry_key
-         end
-       in
-       let recover_pending () =
-         let* pending = J.local_pending_entries ~uuid:my_uuid in
-         if !verbose then
-           Log.info "recovering %d pending journal entr%s" (List.length pending)
-             (if List.length pending = 1 then "y" else "ies");
-         (* Sequential: journal order. *)
-         Lwt_list.iter_s
-           (fun (entry_key, ops) -> recover_entry entry_key ops)
-           pending
-       in
        (* Walk the inode tree from the root: a folder namespace lists its file
           manifests and folder markers, and a marker gives a subfolder's name+id
           plus the namespace to recurse into.
@@ -964,7 +838,7 @@ let sync_cmd =
              ~domain_name:C.domain_name
          in
          let* n, failed = rebuild_mirror () in
-         write_bookmark (C.journal_prefix ^ J.entry_key ());
+         Fs.write_last_sync_key (J.entry_key ());
          (try
             if !verbose then Log.info "notifying daemon of completed resync";
             ignore
@@ -981,62 +855,45 @@ let sync_cmd =
             else "");
          Lwt.return_unit
        in
-       let incremental ~last_sync_key ~all_keys =
-         let last_sync_basename = Filename.basename last_sync_key in
-         let recent_foreign =
-           all_keys
-           |> List.filter (fun (k, _) -> k > last_sync_basename)
-           |> List.filter (fun (_, uuid) -> uuid <> my_uuid)
-         in
-         (* Sequential: journal order. *)
-         let* () =
-           Lwt_list.iter_s
-             (fun (ek, _) ->
-               let* e = Fs.get_journal_entry ek in
-               match e with
-                 | None -> Lwt.return_unit
-                 | Some ops ->
-                     if !verbose then
-                       Log.info "journal entry %s: %s" ek
-                         (String.concat ", " (List.map render_op ops));
-                     F.apply_foreign_ops ops)
-             recent_foreign
-         in
-         (match all_keys with
-           | [] -> ()
-           | _ ->
-               let last_key, _ = List.nth all_keys (List.length all_keys - 1) in
-               write_bookmark (C.journal_prefix ^ last_key));
-         let n = List.length recent_foreign in
+       (* One pass of the same engine the daemon polls with, so the two cannot
+          drift apart. *)
+       let incremental () =
+         let+ n = Rp.apply_foreign () in
+         (match Fs.read_last_sync_key () with
+           | Some k when !verbose ->
+               Log.info "applied through %s" (Journal.Entry_key.to_string k)
+           | _ -> ());
          Printf.printf "%d journal entr%s from other clients\n" n
-           (if n = 1 then "y" else "ies");
-         Lwt.return_unit
+           (if n = 1 then "y" else "ies")
        in
-       let* () = recover_pending () in
+       let* () = Rp.reconcile () in
        if !verbose then Log.info "draining upload queue";
        let* () = Sq.drain () in
-       let last_sync_key = read_bookmark () in
+       let last_sync_key = Fs.read_last_sync_key () in
        if !verbose then
          Log.info "last sync bookmark: %s"
-           (if last_sync_key = "" then "none (first run)" else last_sync_key);
+           (match last_sync_key with
+             | None -> "none (first run)"
+             | Some k -> Journal.Entry_key.to_string k);
        let* all_keys = Fs.list_journal_keys () in
        if !verbose then
          Log.info "journal: %d entr%s" (List.length all_keys)
            (if List.length all_keys = 1 then "y" else "ies");
        let resync_reason =
-         if full then Some "--full flag"
-         else if last_sync_key = "" then Some "no bookmark (first run)"
-         else (
-           match all_keys with
-             | (oldest_key, _) :: _
-               when Journal.timestamp_ms_of_filename oldest_key
-                    > Journal.timestamp_ms_of_filename last_sync_key ->
-                 Some "bookmark older than oldest journal entry"
-             | _ -> None)
+         match last_sync_key with
+           | _ when full -> Some "--full flag"
+           | None -> Some "no bookmark (first run)"
+           | Some last -> (
+               match all_keys with
+                 | oldest :: _
+                   when Journal.Entry_key.timestamp_ms oldest
+                        > Journal.Entry_key.timestamp_ms last ->
+                     Some "bookmark older than oldest journal entry"
+                 | _ -> None)
        in
        match resync_reason with
          | Some reason -> full_resync reason
-         | None -> incremental ~last_sync_key ~all_keys)
+         | None -> incremental ())
   in
   Cmd.v
     (Cmd.info "sync"

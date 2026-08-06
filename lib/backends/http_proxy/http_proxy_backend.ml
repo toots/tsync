@@ -33,11 +33,21 @@ type t = {
   mutable max_concurrency_cache : int option Lwt.t option;
 }
 
-let max_attempts = 8
+(* The connection cache has no deadline of its own: a pooled connection whose
+   peer went away without a FIN leaves its request pending forever, and
+   [call_retry] only ever sees failures, never stalls. Generous enough for a
+   chunk over a slow link — it is a stall detector, not a latency budget. *)
+let request_timeout = 300.
+
+(* A 5xx is the serving side struggling; a 4xx is its answer. *)
+let is_transient_code c = c >= 500
 
 let backend_error op code body =
-  Backend.Backend_error
-    (Printf.sprintf "http-proxy %s: HTTP %d: %s" op code body)
+  Backend.failed
+    ~kind:
+      (if is_transient_code code then Backend.Transient else Backend.Permanent)
+    ~op
+    (Printf.sprintf "HTTP %d: %s" code body)
 
 (* Signs method + request-target + body with the shared secret. TLS is conduit's,
    per the global [Tls_conf]. *)
@@ -49,14 +59,15 @@ let call t ~meth ?(body = "") uri =
          ~meth:(Cohttp.Code.string_of_method meth)
          ~path:resource ~body)
   in
-  let* resp, rbody =
-    Cache.call t.cache ~headers ~body:(Cohttp_lwt.Body.of_string body) meth uri
-  in
-  let+ s = Cohttp_lwt.Body.to_string rbody in
-  (resp, s)
+  Lwt_unix.with_timeout request_timeout (fun () ->
+      let* resp, rbody =
+        Cache.call t.cache ~headers
+          ~body:(Cohttp_lwt.Body.of_string body)
+          meth uri
+      in
+      let+ s = Cohttp_lwt.Body.to_string rbody in
+      (resp, s))
 
-(* Connection failures and 5xx are transient; [Cancelled] never retries. Every
-   proxied operation is idempotent, so retrying is safe. *)
 let code resp = Cohttp.Code.code_of_status (Cohttp.Response.status resp)
 let is_ok resp = code resp >= 200 && code resp < 300
 
@@ -72,33 +83,15 @@ let excerpt body =
     | _ when String.length body > 200 -> String.sub body 0 200 ^ " ..."
     | _ -> body
 
+(* Raises on a transient status so the shared loop retries it; every other
+   response comes back for the verb to interpret. Every proxied operation is
+   idempotent, so retrying is safe. *)
 let call_retry t ~meth ?body op uri =
-  let rec go attempt =
-    let* outcome =
-      Lwt.catch
-        (fun () ->
-          let+ r = call t ~meth ?body uri in
-          `Ret r)
-        (fun exn -> Lwt.return (`Raised exn))
-    in
-    let retry reason =
-      let backoff = Float.min 20. (0.5 *. (2. ** float_of_int (attempt - 1))) in
-      let delay = backoff *. (0.5 +. Random.float 1.0) in
-      Log.warn "http-proxy %s: %s; retrying (%d/%d) in %.1fs" op reason attempt
-        max_attempts delay;
-      let* () = Lwt_unix.sleep delay in
-      go (attempt + 1)
-    in
-    match outcome with
-      | `Ret (resp, body) when code resp >= 500 && attempt < max_attempts ->
-          retry (Printf.sprintf "HTTP %d: %s" (code resp) (excerpt body))
-      | `Ret r -> Lwt.return r
-      | `Raised Cancelled -> Lwt.fail Cancelled
-      | `Raised exn when attempt < max_attempts ->
-          retry (Printexc.to_string exn)
-      | `Raised exn -> Lwt.fail exn
-  in
-  go 1
+  Backend.with_retry ~name:"http-proxy" ~op (fun () ->
+      let* resp, rbody = call t ~meth ?body uri in
+      if is_transient_code (code resp) then
+        Lwt.fail (backend_error op (code resp) (excerpt rbody))
+      else Lwt.return (resp, rbody))
 
 let obj_uri t key =
   Uri.with_path t.base_uri ("/o/" ^ Http_proxy.Wire.encode_key key)

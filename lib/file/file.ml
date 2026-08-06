@@ -2,6 +2,8 @@ open Lwt.Syntax
 
 type buffer = Local_io.buffer
 
+type in_flight = { name : string; rel : string; body : string option }
+
 module type S = sig
   type t = string
 
@@ -35,12 +37,8 @@ module type S = sig
   (** Handle closed: queue the file for upload if it has staged edits. *)
   val close : t -> unit Lwt.t
 
-  (** Finish every upload the staged tree still owes. Crash recovery, run once
-      at startup. *)
-  val recover_staged : unit -> unit Lwt.t
-
-  (** Free staged bodies nothing references. Part of {!recover_staged}; run once
-      at startup, never while writes may be staging. *)
+  (** Free staged bodies nothing references. Part of {!Replay.reconcile}; run
+      once at startup, never while writes may be staging. *)
   val reclaim_staged_orphans : unit -> unit Lwt.t
 
   (** Keep the chunk store under [C.max_cache]; never touches staged data. *)
@@ -69,6 +67,8 @@ module type S = sig
 
   (** The upload queue's depth, and its pause switch. *)
   val uploads_pending : unit -> int
+  val uploads_in_flight : unit -> in_flight list Lwt.t
+  val uploads_pending_bytes : unit -> int64
 
   val uploads_paused : unit -> bool
   val set_uploads_paused : bool -> unit
@@ -93,6 +93,10 @@ module type S = sig
   val truncate : t -> int64 -> unit Lwt.t
   val apply_delete : t -> unit Lwt.t
   val queue_put : t -> unit Lwt.t
+
+  val resume_put :
+    t -> entry_key:Journal.Entry_key.t -> ops:Journal.op list -> bool Lwt.t
+
   val delete : t -> unit Lwt.t
   val mkdir : t -> unit Lwt.t
   val rmdir : t -> unit Lwt.t
@@ -110,6 +114,7 @@ end
 module Make_with_layout (C : Conf.S) (Sq : Sync_queue.S) (L : Layout.S) : S =
 struct
   module J = Journal.Make (C)
+  module W = Wal.Make (C)
   module Fs = File_store.Make (C)
   module R = Remote.Make_with_layout (C) (L)
 
@@ -257,6 +262,17 @@ struct
   let read key (buf : buffer) ~offset = D.pread_key key buf ~offset
   let cancel_upload key = Sq.cancel_put key
   let uploads_pending = Sq.pending
+  let uploads_in_flight () =
+    Lwt_list.map_s
+      (fun key ->
+        let+ body = D.staged_body_path key in
+        {
+          name = Filename.basename key;
+          rel = Key.chop_slash (rel_key key);
+          body;
+        })
+      (Sq.uploading ())
+  let uploads_pending_bytes = Sq.pending_bytes
   let uploads_paused = Sq.paused
   let set_uploads_paused = Sq.set_paused
 
@@ -276,17 +292,18 @@ struct
 
   let with_journal key ops s3_op =
     let ek = J.entry_key () in
-    let* () = J.write_local_pending ~entry_key:ek ops in
-    (* The pending entry is for crash recovery. Drop it on synchronous failure,
-       or recover_pending_ops replays a known-failed op at every startup. *)
+    let* () = W.record ek ops in
+    (* Dropped on a synchronous failure, or reconcile replays a known-failed op
+       at every startup. *)
     let* () =
       Lwt.catch s3_op (fun exn ->
-          let* () = J.delete_local_pending ~entry_key:ek in
+          let* () = W.complete ek in
           Lwt.fail exn)
     in
-    let* (_ : string) = Fs.write_journal_entry ~entry_key:ek ops in
+    let* () = W.advance ek Wal.Executed in
+    let* (_ : Journal.Entry_key.t) = Fs.write_journal_entry ~entry_key:ek ops in
     let* () = Fs.bump_cursor ek in
-    J.delete_local_pending ~entry_key:ek
+    W.complete ek
 
   let save_version key =
     if C.versioning then St.save_version ~key else Lwt.return_unit
@@ -305,33 +322,23 @@ struct
       | Some st ->
           let ek = J.entry_key () in
           let ops = [`Put (rel_key key, st.Manifest.s_size)] in
-          let+ () = J.write_local_pending ~entry_key:ek ops in
+          (* [Prepared], not [Intent]: the staged manifest read above is the
+             data, so the upload is owed from here on. *)
+          let* () = W.record ek ops in
+          let+ () = W.advance ek Wal.Prepared in
           Sq.post ~key ~entry_key:ek ~ops
 
-  (* A staged manifest on disk means an upload is owed: nothing else records
-     that across a restart. Replaying covers a crash mid-write (upload never
-     ran) and mid-promotion ({!Data.sync} finishes the local moves without
-     re-sending). *)
+  (* The record already exists and already names this work; posting under its
+     key is what keeps one unit of work to one key across a restart. *)
+  let resume_put key ~entry_key ~ops =
+    let* staged = Mf.staged_exists key in
+    if not staged then Lwt.return_false
+    else begin
+      Sq.post ~key ~entry_key ~ops;
+      Lwt.return_true
+    end
 
   let reclaim_staged_orphans = D.reclaim_staged_orphans
-
-  let recover_staged () =
-    (* Before the replays: they are the first thing that can stage a body, and a
-       body created after this point may not yet be named by a manifest. *)
-    let* () = reclaim_staged_orphans () in
-    let* keys = Mf.list_staged () in
-    Lwt_list.iter_s
-      (fun key ->
-        Log.info "resuming staged upload for %s" key;
-        Lwt.catch
-          (* Through the queue, not straight to [D.sync]: the upload also owes a
-             journal entry and a cursor bump, or peers never learn of the
-             change. *)
-          (fun () -> queue_put key)
-          (fun exn ->
-            Log.err "staged upload %s failed: %s" key (Printexc.to_string exn);
-            Lwt.return_unit))
-      keys
 
   let close key =
     let* staged = Mf.staged_exists key in
@@ -488,7 +495,7 @@ struct
           let* src_head =
             if is_dir then Lwt.return_some ()
             else
-              let+ h = Fs.head_opt ~key:src in
+              let+ h = Fs.head_manifest_opt ~key:src in
               Option.map (fun _ -> ()) h
           in
           if is_dir || Option.is_some src_head then Lwt.fail exn

@@ -68,7 +68,16 @@ type step =
   | DeleteCachedChunk of { path : string; index : int }
   | Recheck
   | RecoverStaged
-      (** Replay every upload the staged tree still owes, as a restart does. *)
+      (** Finish or discard every unfinished record, and adopt staged data no
+          record names, exactly as a restart does. *)
+  | CrashBeforeCommit of string
+      (** Upload the bytes, record them as executed, and stop before publishing
+          the journal entry — the window a kill -9 mid-upload leaves. The change
+          exists on the backend and no peer can see it. *)
+  | StaleRecord
+      (** Drop a record in the pre-state format naming a put whose data was
+          never staged: what repeated replays left behind, 295 of them on one
+          domain, before recovery kept one key per unit of work. *)
   | OrphanStagedBody
       (** Drop a staged body no manifest names into each body tree, the way a
           crash between staging and the manifest write does. *)
@@ -163,6 +172,8 @@ let rec render_step = function
       Printf.sprintf "delete-cached-chunk %s #%d" path index
   | Recheck -> "recheck"
   | RecoverStaged -> "recover-staged"
+  | CrashBeforeCommit p -> "crash-before-commit " ^ p
+  | StaleRecord -> "stale-record"
   | OrphanStagedBody -> "orphan-staged-body"
   | ReclaimStaged -> "reclaim-staged"
   | ClearCache -> "clear-cache"
@@ -241,7 +252,9 @@ let setup_client (module C : Conf.S) root staging_prefix =
   let module Mf = Manifest.Make (C) in
   let module H = Ipc_handler.Make (C) (F) in
   let module Sp = Sync_poller.Make (C) (F) in
+  let module Rp = Replay.Make (C) (F) in
   let module J = Journal.Make (C) in
+  let module W = Wal.Make (C) in
   let module L = Layout.Inode.Make (C) in
   (* What the daemon declares for diagnosis ([bin/cli.ml build_backends]), so
      [stats] has a store to report on here too. *)
@@ -664,7 +677,26 @@ let setup_client (module C : Conf.S) root staging_prefix =
         let* () = F.ensure_cached (key path) in
         let* p = cached_chunk_path (key path) index in
         Lwt.catch (fun () -> Lwt_unix_retry.unlink p) (fun _ -> Lwt.return_unit)
-    | RecoverStaged -> F.recover_staged ()
+    | RecoverStaged -> Rp.reconcile ()
+    | CrashBeforeCommit path ->
+        let k = key path in
+        let* () = F.upload k in
+        let* m = F.read_manifest k in
+        let size = match m with Some m -> m.Manifest.size | None -> 0L in
+        let ek = J.entry_key () in
+        let* () = W.record ek [`Put (F.rel_key k, size)] in
+        W.advance ek Wal.Executed
+    | StaleRecord ->
+        let dir =
+          Filename.concat
+            (Filename.concat C.data_dir "journal-pending")
+            C.domain_name
+        in
+        mkdir_p dir;
+        write_file
+          (Filename.concat dir (Journal.Entry_key.to_string (J.entry_key ())))
+          (Journal.encode [`Put ("gone.zip", 42L)]);
+        Lwt.return_unit
     | OrphanStagedBody ->
         (* What a crash between staging a body and writing the manifest that
            names it leaves behind, in both body trees. *)
@@ -800,11 +832,12 @@ let setup_client (module C : Conf.S) root staging_prefix =
       files
   in
   let dump_pending () =
-    let+ pending = J.local_pending_entries ~uuid:(J.client_uuid ()) in
+    let+ pending = W.list () in
     List.iter
-      (fun (_, ops) ->
-        Printf.printf "  pending [%s]\n"
-          (String.concat "; " (List.map render_op ops)))
+      (fun (r : Wal.record) ->
+        Printf.printf "  pending %s [%s]\n"
+          (Wal.string_of_state r.Wal.state)
+          (String.concat "; " (List.map render_op r.Wal.ops)))
       pending
   in
   (* Recursive list_dir (per directory) then the flat list_all working-set view —
@@ -1297,10 +1330,10 @@ let run_stats_scenario ?versioning ({ name; steps } : scenario) =
      let domain =
        match mem "domains" json with `List (d :: _) -> d | _ -> `Null
      in
-     Printf.printf "  domain %s: cache=%s journal.localPending=%s\n"
+     Printf.printf "  domain %s: cache=%s wal.pending=%s\n"
        (Yojson.Safe.to_string (mem "name" domain))
        (Yojson.Safe.to_string (mem "chunks" (mem "cache" domain)))
-       (Yojson.Safe.to_string (mem "localPending" (mem "journal" domain)));
+       (Yojson.Safe.to_string (mem "pending" (mem "wal" domain)));
      (match mem "backends" domain with
        | `List l ->
            List.iter

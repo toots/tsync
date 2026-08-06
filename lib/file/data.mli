@@ -107,6 +107,10 @@ module Make (C : Conf.S) (R : Remote.S) : sig
   (** Drop [key]'s staged manifest and the bodies it names. *)
   val discard_staged : string -> unit Lwt.t
 
+  (** Where a whole staged body sits on disk, for a reader that wants the bytes
+      an upload is sending. [None] once chunked, or for an unstaged key. *)
+  val staged_body_path : string -> string option Lwt.t
+
   (** Delete staged bodies no staged manifest names, and prune the empty
       directories left in the staged manifest tree. Startup only: staging
       creates a body before the manifest that names it. *)

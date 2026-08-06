@@ -94,8 +94,16 @@ type step =
       (** Run [Recheck.run] over the whole domain and print each file's status
           line plus a summary, then the chunk-store integrity pass. *)
   | RecoverStaged
-      (** Replay every upload the staged tree still owes, the way a restart does
-          after a crash. *)
+      (** Finish or discard every unfinished WAL record, and adopt staged data
+          no record names, the way a restart does after a crash. *)
+  | CrashBeforeCommit of string
+      (** Upload the bytes, record them as executed, and stop before publishing
+          the journal entry — the window a kill -9 mid-upload leaves. The change
+          is on the backend and no peer can see it. *)
+  | StaleRecord
+      (** Drop a record in the pre-state format naming a put whose data was
+          never staged: what repeated replays left behind, 295 of them on one
+          domain, before recovery kept one key per unit of work. *)
   | OrphanStagedBody
       (** Drop a staged body no manifest names into each body tree, the way a
           crash between staging a body and writing its manifest does. *)

@@ -1,5 +1,7 @@
 module type S = sig
-  val post : key:string -> entry_key:string -> ops:Journal.op list -> unit
+  val post :
+    key:string -> entry_key:Journal.Entry_key.t -> ops:Journal.op list -> unit
+
   val cancel_put : string -> bool
 
   (** [true] when no upload is queued or running. *)
@@ -7,6 +9,13 @@ module type S = sig
 
   (** Files with an active or queued upload. *)
   val pending : unit -> int
+
+  (** Keys of the files a worker is uploading right now. *)
+  val uploading : unit -> string list
+
+  (** Bytes still owed: everything queued plus everything in flight. Counted
+      whole per file, so a file half sent still counts for its full size. *)
+  val pending_bytes : unit -> int64
 
   (** Uploads completed since the daemon started. *)
   val completed_count : unit -> int
@@ -20,7 +29,7 @@ module type S = sig
 
   val start :
     upload:(key:string -> cancel:bool ref -> unit Lwt.t) ->
-    on_cursor:(entry_key:string -> unit) ->
+    on_cursor:(entry_key:Journal.Entry_key.t -> unit) ->
     on_upload_done:(key:string -> unit Lwt.t) ->
     unit
 

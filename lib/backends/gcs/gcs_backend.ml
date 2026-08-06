@@ -15,10 +15,15 @@ type t = {
   share_url : string option;
 }
 
-let gcs_eio msg = Unix.Unix_error (Unix.EIO, "gcs", msg)
+(* 5xx and 429 clear on their own; a 4xx is the bucket's answer. *)
+let is_transient_code c = c >= 500 || c = 429
 
 let backend_error op code body =
-  gcs_eio (Printf.sprintf "%s: HTTP %d: %s" op code body)
+  Backend.failed
+    ~kind:
+      (if is_transient_code code then Backend.Transient else Backend.Permanent)
+    ~op
+    (Printf.sprintf "HTTP %d: %s" code body)
 
 let code resp = Cohttp.Code.code_of_status (Cohttp.Response.status resp)
 let is_ok resp = code resp >= 200 && code resp < 300
@@ -33,8 +38,6 @@ let upload_uri t key =
   Uri.of_string
     (t.base ^ "/upload/storage/v1/b/" ^ t.bucket ^ "/o?uploadType=media&name="
    ^ enc_key key)
-
-let max_attempts = 8
 
 let call t ~meth ?ctype ?(body = "") uri =
   let* auth_header =
@@ -58,37 +61,14 @@ let call t ~meth ?ctype ?(body = "") uri =
   let+ s = Cohttp_lwt.Body.to_string rbody in
   (resp, s)
 
-(* 5xx and 429 are transient: back off and retry. [Cancelled] never retries. *)
-let is_transient_code c = c >= 500 || c = 429
-
+(* Raises on a transient status so the shared loop retries it; every other
+   response comes back for the verb to interpret, 404 included. *)
 let call_retry t ~meth ?ctype ?body op uri =
-  let rec go attempt =
-    let* outcome =
-      Lwt.catch
-        (fun () ->
-          let+ r = call t ~meth ?ctype ?body uri in
-          `Ret r)
-        (fun exn -> Lwt.return (`Raised exn))
-    in
-    let retry reason =
-      let backoff = Float.min 20. (0.5 *. (2. ** float_of_int (attempt - 1))) in
-      let delay = backoff *. (0.5 +. Random.float 1.0) in
-      Log.warn "gcs %s: %s; retrying (%d/%d) in %.1fs" op reason attempt
-        max_attempts delay;
-      let* () = Lwt_unix.sleep delay in
-      go (attempt + 1)
-    in
-    match outcome with
-      | `Ret (resp, body)
-        when is_transient_code (code resp) && attempt < max_attempts ->
-          retry (Printf.sprintf "HTTP %d: %s" (code resp) body)
-      | `Ret r -> Lwt.return r
-      | `Raised Cancelled -> Lwt.fail Cancelled
-      | `Raised exn when attempt < max_attempts ->
-          retry (Printexc.to_string exn)
-      | `Raised exn -> Lwt.fail exn
-  in
-  go 1
+  Backend.with_retry ~name:"gcs" ~op (fun () ->
+      let* resp, rbody = call t ~meth ?ctype ?body uri in
+      if is_transient_code (code resp) then
+        Lwt.fail (backend_error op (code resp) rbody)
+      else Lwt.return (resp, rbody))
 
 let str_member key j =
   match Yojson.Safe.Util.member key j with `String s -> s | _ -> ""
