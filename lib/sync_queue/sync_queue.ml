@@ -1,7 +1,9 @@
 open Lwt.Syntax
 
 module type S = sig
-  val post : key:string -> entry_key:string -> ops:Journal.op list -> unit
+  val post :
+    key:string -> entry_key:Journal.Entry_key.t -> ops:Journal.op list -> unit
+
   val cancel_put : string -> bool
   val idle : unit -> bool
   val pending : unit -> int
@@ -11,7 +13,7 @@ module type S = sig
 
   val start :
     upload:(key:string -> cancel:bool ref -> unit Lwt.t) ->
-    on_cursor:(entry_key:string -> unit) ->
+    on_cursor:(entry_key:Journal.Entry_key.t -> unit) ->
     on_upload_done:(key:string -> unit Lwt.t) ->
     unit
 
@@ -22,7 +24,11 @@ module Make (C : Conf.S) : S = struct
   module Fs = File_store.Make (C)
   module J = Journal.Make (C)
 
-  type put_data = { key : string; entry_key : string; ops : Journal.op list }
+  type put_data = {
+    key : string;
+    entry_key : Journal.Entry_key.t;
+    ops : Journal.op list;
+  }
 
   (* [cancel] is polled between chunks, so setting it aborts at the next chunk
      boundary. [failures] drives the requeue backoff. *)
@@ -43,7 +49,7 @@ module Make (C : Conf.S) : S = struct
   let upload_fn : (key:string -> cancel:bool ref -> unit Lwt.t) ref =
     ref (fun ~key:_ ~cancel:_ -> Lwt.return_unit)
 
-  let on_cursor_fn : (entry_key:string -> unit) ref =
+  let on_cursor_fn : (entry_key:Journal.Entry_key.t -> unit) ref =
     ref (fun ~entry_key:_ -> ())
 
   let on_upload_done_fn : (key:string -> unit Lwt.t) ref =
@@ -107,7 +113,9 @@ module Make (C : Conf.S) : S = struct
             (* The journal entry lands before the local record is dropped: a
                crash the other way round leaves the bytes uploaded, no entry for
                peers to see, and nothing left saying the upload is owed. *)
-            let* (_ : string) = Fs.write_journal_entry ~entry_key ops in
+            let* (_ : Journal.Entry_key.t) =
+              Fs.write_journal_entry ~entry_key ops
+            in
             let* () = J.delete_local_pending ~entry_key in
             !on_cursor_fn ~entry_key;
             incr completed;

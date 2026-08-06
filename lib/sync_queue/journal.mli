@@ -19,22 +19,43 @@ type op =
   | `Rename of rename_op
   | `Rmdir of string * string option ]
 
-val timestamp_ms_of_filename : string -> int64
-val client_uuid_of_filename : string -> string
+(** Names one unit of work for its whole life: the local record of the intent,
+    the published journal object, and the cursors compared against it. Abstract
+    because the same key used to have three string spellings — bare, prefixed
+    with the journal prefix, and month-sharded — and a reader holding the wrong
+    one compared it against the right one and concluded it was behind. *)
+module Entry_key : sig
+  type t
 
-(** [relative_path entry_key] is ["<YYYY-MM>/<entry_key>"], the entry's path
-    relative to the journal prefix. Both levels sort chronologically, so the
-    lexicographic order readers rely on is unchanged; {!Filename.basename}
-    recovers the entry key from a listing. *)
-val relative_path : string -> string
+  val make : share_dir:string -> unit -> t
+
+  (** The only parser. Takes the last path segment, so a backend listing key or
+      a stored path is accepted as-is, and returns [None] for a name no client
+      wrote rather than raising: callers are listings, where an unreadable name
+      is worth reporting, not crashing on. *)
+  val of_string : string -> t option
+
+  val to_string : t -> string
+  val timestamp_ms : t -> int64
+  val client_uuid : t -> string
+
+  (** Chronological — the order ops must be applied in. *)
+  val compare : t -> t -> int
+
+  (** ["<YYYY-MM>/<entry key>"], the entry's path relative to the journal
+      prefix. Both levels sort chronologically, so the lexicographic order
+      readers rely on is unchanged. Only {!File_store} needs this: it is the
+      difference between an entry key and a backend key. *)
+  val relative_path : t -> string
+end
 
 val encode : op list -> string
 val decode : string -> op list
 
 module Make (C : Conf.S) : sig
   val client_uuid : unit -> string
-  val entry_key : unit -> string
-  val write_local_pending : entry_key:string -> op list -> unit Lwt.t
-  val delete_local_pending : entry_key:string -> unit Lwt.t
-  val local_pending_entries : uuid:string -> (string * op list) list Lwt.t
+  val entry_key : unit -> Entry_key.t
+  val write_local_pending : entry_key:Entry_key.t -> op list -> unit Lwt.t
+  val delete_local_pending : entry_key:Entry_key.t -> unit Lwt.t
+  val local_pending_entries : uuid:string -> (Entry_key.t * op list) list Lwt.t
 end

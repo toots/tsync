@@ -1,5 +1,7 @@
 module type S = sig
-  val post : key:string -> entry_key:string -> ops:Journal.op list -> unit
+  val post :
+    key:string -> entry_key:Journal.Entry_key.t -> ops:Journal.op list -> unit
+
   val cancel_put : string -> bool
 
   (** [true] when no upload is queued or running. *)
@@ -20,7 +22,7 @@ module type S = sig
 
   val start :
     upload:(key:string -> cancel:bool ref -> unit Lwt.t) ->
-    on_cursor:(entry_key:string -> unit) ->
+    on_cursor:(entry_key:Journal.Entry_key.t -> unit) ->
     on_upload_done:(key:string -> unit Lwt.t) ->
     unit
 

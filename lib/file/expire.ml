@@ -137,10 +137,14 @@ module Make (C : Conf.S) = struct
     let stale =
       journal
       |> List.filter (fun (e : Backend.file_entry) ->
-          let ek = Filename.basename e.key in
-          match Journal.timestamp_ms_of_filename ek with
-            | ms -> ms < cutoff_ms && Some ek <> cursor
-            | exception _ -> false)
+          match Journal.Entry_key.of_string e.key with
+            | None -> false
+            | Some ek ->
+                Journal.Entry_key.timestamp_ms ek < cutoff_ms
+                && not
+                     (Option.fold ~none:false
+                        ~some:(fun c -> Journal.Entry_key.compare c ek = 0)
+                        cursor))
       |> List.map (fun (e : Backend.file_entry) -> e.key)
     in
     let+ () = delete_all stale in

@@ -18,7 +18,10 @@ type kind = Transient | Permanent
 exception Failed of { kind : kind; op : string; detail : string }
 
 let failed ~kind ~op detail = Failed { kind; op; detail }
-let string_of_kind = function Transient -> "transient" | Permanent -> "permanent"
+
+let string_of_kind = function
+  | Transient -> "transient"
+  | Permanent -> "permanent"
 
 (* [Transient] for anything unrecognised: a failure mode nobody classified is
    retried rather than silently abandoning the work. *)

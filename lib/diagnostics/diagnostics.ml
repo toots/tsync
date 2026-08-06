@@ -127,44 +127,34 @@ module Make (C : Conf.S) = struct
             ()
         in
         let my_uuid = J.client_uuid () in
-        (* [basename ""] is ".", which reads as nonsense and stops the "never
-           synced" case below from matching. *)
-        let last =
-          match Fs.read_last_sync_key () with
-            | "" -> ""
-            | key -> Filename.basename key
-        in
-        let prefix_len = String.length C.journal_prefix in
-        (* Entries sit in month directories ({!Journal.relative_path}); the entry
-           key is the last segment, as in {!File_store.list_journal_keys}. Keeping
-           the month directory here would make every entry sort above [last]. *)
-        let basenames =
+        let last = Fs.read_last_sync_key () in
+        let keys =
           List.filter_map
-            (fun (e : Backend.file_entry) ->
-              if String.length e.key > prefix_len then
-                Some (Filename.basename e.key)
-              else None)
+            (fun (e : Backend.file_entry) -> Journal.Entry_key.of_string e.key)
             entries
         in
         let behind =
           List.filter
-            (fun b ->
-              (last = "" || b > last)
-              &&
-                try Journal.client_uuid_of_filename b <> my_uuid
-                with _ -> false)
-            basenames
+            (fun ek ->
+              (match last with
+                | None -> true
+                | Some last -> Journal.Entry_key.compare ek last > 0)
+              && Journal.Entry_key.client_uuid ek <> my_uuid)
+            keys
         in
         `Assoc
           [
-            ("entries", `Int (List.length basenames));
+            ("entries", `Int (List.length keys));
             ("behind", `Int (List.length behind));
-            ("truncated", `Bool (List.length basenames > journal_sample));
+            ("truncated", `Bool (List.length keys > journal_sample));
             ( "cursor",
               match cursor with
                 | Some c -> `String (String.trim c)
                 | None -> `Null );
-            ("lastSync", `String last);
+            ( "lastSync",
+              match last with
+                | Some k -> `String (Journal.Entry_key.to_string k)
+                | None -> `Null );
           ])
       (fun exn ->
         Lwt.return (`Assoc [("error", `String (Printexc.to_string exn))]))

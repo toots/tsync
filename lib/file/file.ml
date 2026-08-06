@@ -284,7 +284,7 @@ struct
           let* () = J.delete_local_pending ~entry_key:ek in
           Lwt.fail exn)
     in
-    let* (_ : string) = Fs.write_journal_entry ~entry_key:ek ops in
+    let* (_ : Journal.Entry_key.t) = Fs.write_journal_entry ~entry_key:ek ops in
     let* () = Fs.bump_cursor ek in
     J.delete_local_pending ~entry_key:ek
 

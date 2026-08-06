@@ -367,49 +367,62 @@ module Make (C : Conf.S) (F : File.S) = struct
             | _ -> None)
 
   let newest_key ~init keys =
-    List.fold_left (fun acc (k, _) -> if k > acc then k else acc) init keys
+    List.fold_left
+      (fun acc k ->
+        match acc with
+          | Some a when Journal.Entry_key.compare k a <= 0 -> acc
+          | _ -> Some k)
+      init keys
+
+  (* The wire carries the anchor as a string, [""] from a caller that has never
+     synced. *)
+  let cursor_field = function
+    | Some c -> `String (Journal.Entry_key.to_string c)
+    | None -> `String ""
 
   (* True when the journal cannot bridge [anchor]→now: pruned past the anchor,
-     cleaned up entirely with changes still pending (anchor ≠ cursor, no entries
-     left), or the anchor is unparseable. [keys] is ascending. *)
+     or cleaned up entirely with changes still pending. [keys] is ascending. *)
   let cannot_bridge anchor keys =
     match keys with
       | [] -> true
-      | (oldest, _) :: _ -> (
-          try
-            Journal.timestamp_ms_of_filename oldest
-            > Journal.timestamp_ms_of_filename anchor
-          with _ -> true)
+      | oldest :: _ ->
+          Journal.Entry_key.timestamp_ms oldest
+          > Journal.Entry_key.timestamp_ms anchor
 
   let handle_changes_since anchor =
+    let anchor =
+      if anchor = "" then None else Journal.Entry_key.of_string anchor
+    in
     let* keys = Fs.list_journal_keys () in
     let* fetched = Fs.fetch_cursor () in
-    let cursor =
-      match fetched with
-        | Some c -> newest_key ~init:c keys
-        | None -> newest_key ~init:"" keys
+    let cursor = newest_key ~init:fetched keys in
+    let up_to_date =
+      match (anchor, cursor) with
+        | Some a, Some c -> Journal.Entry_key.compare a c = 0
+        | _ -> false
     in
     (* Up to date: safe even for an empty or pruned journal. *)
-    if anchor <> "" && anchor = cursor then
+    if up_to_date then
       Lwt.return
         (ok_json
            [
              ("stale", `Bool false);
-             ("cursor", `String cursor);
+             ("cursor", cursor_field cursor);
              ("ops", `List []);
            ])
-    else if anchor <> "" && cannot_bridge anchor keys then
-      Lwt.return (ok_json [("stale", `Bool true)])
+    else if match anchor with Some a -> cannot_bridge a keys | None -> false
+    then Lwt.return (ok_json [("stale", `Bool true)])
     else (
       let my_uuid = J.client_uuid () in
       let foreign =
         keys
-        |> List.filter (fun (k, _) -> anchor = "" || k > anchor)
-        |> List.filter (fun (_, uuid) -> uuid <> my_uuid)
+        |> List.filter (fun k ->
+            match anchor with
+              | None -> true
+              | Some a -> Journal.Entry_key.compare k a > 0)
+        |> List.filter (fun k -> Journal.Entry_key.client_uuid k <> my_uuid)
       in
-      let* ops_lists =
-        Lwt_list.map_s (fun (ek, _) -> Fs.get_journal_entry ek) foreign
-      in
+      let* ops_lists = Lwt_list.map_s Fs.get_journal_entry foreign in
       let ops =
         List.concat_map (function Some o -> o | None -> []) ops_lists
       in
@@ -449,7 +462,7 @@ module Make (C : Conf.S) (F : File.S) = struct
         ok_json
           [
             ("stale", `Bool false);
-            ("cursor", `String cursor);
+            ("cursor", cursor_field cursor);
             ("ops", `List (List.filter_map Fun.id described));
           ])
 
@@ -459,11 +472,7 @@ module Make (C : Conf.S) (F : File.S) = struct
   let handle_current_cursor () =
     let* keys = Fs.list_journal_keys () in
     let+ fetched = Fs.fetch_cursor () in
-    ok_json
-      [
-        ( "cursor",
-          `String (newest_key ~init:(Option.value ~default:"" fetched) keys) );
-      ]
+    ok_json [("cursor", cursor_field (newest_key ~init:fetched keys))]
 
   (* Content lives in the chunk store, not as a file. Writing straight to "dest"
      spares the caller a move it may not be permitted to make. *)

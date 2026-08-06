@@ -20,7 +20,8 @@ let is_transient_code c = c >= 500 || c = 429
 
 let backend_error op code body =
   Backend.failed
-    ~kind:(if is_transient_code code then Backend.Transient else Backend.Permanent)
+    ~kind:
+      (if is_transient_code code then Backend.Transient else Backend.Permanent)
     ~op
     (Printf.sprintf "HTTP %d: %s" code body)
 

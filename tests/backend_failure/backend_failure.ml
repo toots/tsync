@@ -29,8 +29,7 @@ let count_attempts ~max_attempts exn =
         Lwt.fail exn)
   in
   let outcome =
-    try
-      Lwt_main.run (Lwt.bind (run ()) (fun () -> Lwt.return "returned"))
+    try Lwt_main.run (Lwt.bind (run ()) (fun () -> Lwt.return "returned"))
     with e -> Backend.reason e
   in
   (!attempts, outcome)

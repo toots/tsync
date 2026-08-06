@@ -764,26 +764,15 @@ let sync_cmd =
        if !verbose then
          Log.info "syncing domain %s (client %s, uuid %s)" C.domain_name
            C.client_name my_uuid;
-       let last_sync_file =
-         Filename.concat C.data_dir ("last-sync-" ^ C.domain_name)
-       in
-       let read_bookmark () =
-         if Sys.file_exists last_sync_file then (
-           let ic = open_in last_sync_file in
-           let s = input_line ic in
-           close_in ic;
-           String.trim s)
-         else ""
-       in
-       let write_bookmark key =
-         let oc = open_out last_sync_file in
-         output_string oc key;
-         close_out oc
-       in
+       (* The same accessor the daemon uses: this used to be a second copy that
+          wrote the key prefixed where the daemon wrote it bare, and only worked
+          because every reader took the basename. *)
+       let read_bookmark = Fs.read_last_sync_key in
+       let write_bookmark = Fs.write_last_sync_key in
        (* Replayed minus any op another client has since overridden
           (last-writer-wins). *)
        let recover_entry entry_key ops =
-         let short = Filename.basename entry_key in
+         let short = Journal.Entry_key.to_string entry_key in
          let* published = Fs.journal_entry_published entry_key in
          if published then begin
            if !verbose then
@@ -796,8 +785,9 @@ let sync_cmd =
            let remotely_modified = Hashtbl.create 16 in
            let* () =
              iter_pooled
-               (fun (ek, uuid) ->
-                 if uuid = my_uuid then Lwt.return_unit
+               (fun ek ->
+                 if Journal.Entry_key.client_uuid ek = my_uuid then
+                   Lwt.return_unit
                  else
                    let+ e = Fs.get_journal_entry ek in
                    match e with
@@ -866,7 +856,9 @@ let sync_cmd =
            in
            let* () =
              if replayed <> [] then
-               let* (_ : string) = Fs.write_journal_entry ~entry_key replayed in
+               let* (_ : Journal.Entry_key.t) =
+                 Fs.write_journal_entry ~entry_key replayed
+               in
                Fs.bump_cursor entry_key
              else Lwt.return_unit
            in
@@ -964,7 +956,7 @@ let sync_cmd =
              ~domain_name:C.domain_name
          in
          let* n, failed = rebuild_mirror () in
-         write_bookmark (C.journal_prefix ^ J.entry_key ());
+         write_bookmark (J.entry_key ());
          (try
             if !verbose then Log.info "notifying daemon of completed resync";
             ignore
@@ -982,31 +974,32 @@ let sync_cmd =
          Lwt.return_unit
        in
        let incremental ~last_sync_key ~all_keys =
-         let last_sync_basename = Filename.basename last_sync_key in
          let recent_foreign =
            all_keys
-           |> List.filter (fun (k, _) -> k > last_sync_basename)
-           |> List.filter (fun (_, uuid) -> uuid <> my_uuid)
+           |> List.filter (fun k ->
+               match last_sync_key with
+                 | None -> true
+                 | Some last -> Journal.Entry_key.compare k last > 0)
+           |> List.filter (fun k -> Journal.Entry_key.client_uuid k <> my_uuid)
          in
          (* Sequential: journal order. *)
          let* () =
            Lwt_list.iter_s
-             (fun (ek, _) ->
+             (fun ek ->
                let* e = Fs.get_journal_entry ek in
                match e with
                  | None -> Lwt.return_unit
                  | Some ops ->
                      if !verbose then
-                       Log.info "journal entry %s: %s" ek
+                       Log.info "journal entry %s: %s"
+                         (Journal.Entry_key.to_string ek)
                          (String.concat ", " (List.map render_op ops));
                      F.apply_foreign_ops ops)
              recent_foreign
          in
-         (match all_keys with
+         (match List.rev all_keys with
            | [] -> ()
-           | _ ->
-               let last_key, _ = List.nth all_keys (List.length all_keys - 1) in
-               write_bookmark (C.journal_prefix ^ last_key));
+           | last_key :: _ -> write_bookmark last_key);
          let n = List.length recent_foreign in
          Printf.printf "%d journal entr%s from other clients\n" n
            (if n = 1 then "y" else "ies");
@@ -1018,21 +1011,24 @@ let sync_cmd =
        let last_sync_key = read_bookmark () in
        if !verbose then
          Log.info "last sync bookmark: %s"
-           (if last_sync_key = "" then "none (first run)" else last_sync_key);
+           (match last_sync_key with
+             | None -> "none (first run)"
+             | Some k -> Journal.Entry_key.to_string k);
        let* all_keys = Fs.list_journal_keys () in
        if !verbose then
          Log.info "journal: %d entr%s" (List.length all_keys)
            (if List.length all_keys = 1 then "y" else "ies");
        let resync_reason =
-         if full then Some "--full flag"
-         else if last_sync_key = "" then Some "no bookmark (first run)"
-         else (
-           match all_keys with
-             | (oldest_key, _) :: _
-               when Journal.timestamp_ms_of_filename oldest_key
-                    > Journal.timestamp_ms_of_filename last_sync_key ->
-                 Some "bookmark older than oldest journal entry"
-             | _ -> None)
+         match last_sync_key with
+           | _ when full -> Some "--full flag"
+           | None -> Some "no bookmark (first run)"
+           | Some last -> (
+               match all_keys with
+                 | oldest :: _
+                   when Journal.Entry_key.timestamp_ms oldest
+                        > Journal.Entry_key.timestamp_ms last ->
+                     Some "bookmark older than oldest journal entry"
+                 | _ -> None)
        in
        match resync_reason with
          | Some reason -> full_resync reason

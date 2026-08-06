@@ -291,20 +291,25 @@ let () =
   let module Fs = File_store.Make (C) in
   let module J = Journal.Make (C) in
   let other = "ffffffffffffffffffffffffffffffff" in
-  let cursor_entry = "1785969965857-" ^ other in
+  let entry_key s =
+    match Journal.Entry_key.of_string s with
+      | Some ek -> ek
+      | None -> failwith ("http_proxy_test: bad entry key " ^ s)
+  in
+  let cursor_entry = entry_key ("1785969965857-" ^ other) in
   let mine = J.client_uuid () in
   Lwt_main.run
     (Lwt_list.iter_s
        (fun entry ->
          let (module B : Backend.S) = List.hd C.backends in
          B.put
-           ~key:(C.journal_prefix ^ Journal.relative_path entry)
+           ~key:(C.journal_prefix ^ Journal.Entry_key.relative_path entry)
            ~data:"{}" ())
        [
-         "1785969965000-" ^ other;
+         entry_key ("1785969965000-" ^ other);
          cursor_entry;
-         "1785969966000-" ^ other;
-         "1785969967000-" ^ mine;
+         entry_key ("1785969966000-" ^ other);
+         entry_key ("1785969967000-" ^ mine);
        ]);
   Fs.write_last_sync_key cursor_entry;
 
