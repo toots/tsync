@@ -8,11 +8,62 @@ exception Cancelled
    and matching on prose breaks the day the sentence is reworded. *)
 exception Not_writable
 
+(* Whether a failure is worth trying again, decided by the store that produced
+   it — one vocabulary rather than each backend's own notion of "transient" and
+   each caller having to recognise it. A 503, a dropped socket and a full disk
+   clear on their own; a 403, a bad key and a read-only domain do not, and
+   retrying those only delays the report. *)
+type kind = Transient | Permanent
+
+exception Failed of { kind : kind; op : string; detail : string }
+
+let failed ~kind ~op detail = Failed { kind; op; detail }
+let string_of_kind = function Transient -> "transient" | Permanent -> "permanent"
+
+(* [Transient] for anything unrecognised: a failure mode nobody classified is
+   retried rather than silently abandoning the work. *)
+let classify = function
+  | Failed { kind; _ } -> kind
+  | Not_writable -> Permanent
+  (* A store's considered answer — a missing chunk, a truncated body — not a
+     hiccup. *)
+  | Backend_error _ -> Permanent
+  | _ -> Transient
+
+(* What to put in a log line: [Printexc] would repeat the operation name the
+   caller has already printed. *)
+let reason = function
+  | Failed { detail; _ } -> detail
+  | exn -> Printexc.to_string exn
+
 let () =
   Printexc.register_printer (function
     | Not_writable ->
         Some "no writable backend: every backend in this domain is \"readOnly\""
+    | Failed { kind; op; detail } ->
+        Some (Printf.sprintf "%s: %s (%s)" op detail (string_of_kind kind))
     | _ -> None)
+
+(* The one retry loop. A backend decides only what [Transient] means for it; the
+   backoff, the cap and the log line are shared, so two stores cannot drift into
+   retrying differently. [Cancelled] is never retried. *)
+let default_attempts = 8
+
+let with_retry ?(max_attempts = default_attempts) ~name ~op f =
+  let rec go attempt =
+    Lwt.catch f (function
+      | Cancelled as exn -> Lwt.fail exn
+      | exn when attempt < max_attempts && classify exn = Transient ->
+          let backoff =
+            Float.min 20. (0.5 *. (2. ** float_of_int (attempt - 1)))
+          in
+          let delay = backoff *. (0.5 +. Random.float 1.0) in
+          Log.warn "%s %s: %s; retrying (%d/%d) in %.1fs" name op (reason exn)
+            attempt max_attempts delay;
+          Lwt.bind (Lwt_unix.sleep delay) (fun () -> go (attempt + 1))
+      | exn -> Lwt.fail exn)
+  in
+  go 1
 
 module type S = sig
   val put : key:string -> data:string -> unit -> unit Lwt.t

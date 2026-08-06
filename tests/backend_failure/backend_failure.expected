@@ -1,0 +1,13 @@
+classify
+s3 503 (transient)           transient
+s3 403 (permanent)           permanent
+not writable                 permanent
+backend error                permanent
+unknown exception            transient
+unix error                   transient
+
+with_retry (max 3)
+transient                    3 attempt(s), raised HTTP 503
+permanent                    1 attempt(s), raised forbidden
+cancelled                    1 attempt(s), raised Backend.Cancelled
+unknown exception            3 attempt(s), raised Failure("something new")

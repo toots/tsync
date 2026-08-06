@@ -33,53 +33,33 @@ let string_of_error = function
   | S3.Forbidden -> "forbidden"
   | S3.Not_found -> "not found"
 
-let s3_eio msg = Unix.Unix_error (Unix.EIO, "s3", msg)
-
 (* B2 (and S3 under load) routinely answers 503, expecting a back off and retry
    rather than a failed operation. Connection-level failures are equally
    transient, whether surfaced as [S3.Failed] or raised outright (DNS, a dropped
-   socket, a TLS reset). Both are retried with exponential backoff and jitter,
-   capped per attempt and in attempt count; only [Cancelled] is never retried. *)
-let max_attempts = 8
-
+   socket, a TLS reset). Everything else is the bucket's considered answer. *)
 let is_transient = function
   | S3.Throttled | S3.Failed _ -> true
   | S3.Redirect _ | S3.Unknown _ | S3.Forbidden | S3.Not_found -> false
 
+let failed op e =
+  Backend.failed
+    ~kind:(if is_transient e then Backend.Transient else Backend.Permanent)
+    ~op (string_of_error e)
+
+(* Raises on a transient error so the shared loop retries it; every other
+   outcome, [Not_found] included, comes back for the verb to interpret. *)
 let with_retry op f =
-  let rec go attempt =
-    let* outcome =
-      Lwt.catch
-        (fun () ->
-          let+ res = f () in
-          `Ret res)
-        (fun exn -> Lwt.return (`Raised exn))
-    in
-    let retry reason =
-      let backoff = Float.min 20. (0.5 *. (2. ** float_of_int (attempt - 1))) in
-      let delay = backoff *. (0.5 +. Random.float 1.0) in
-      Log.warn "s3 %s: %s; retrying (%d/%d) in %.1fs" op reason attempt
-        max_attempts delay;
-      let* () = Lwt_unix.sleep delay in
-      go (attempt + 1)
-    in
-    match outcome with
-      | `Ret (Error e) when attempt < max_attempts && is_transient e ->
-          retry (string_of_error e)
-      | `Ret res -> Lwt.return res
-      | `Raised Cancelled -> Lwt.fail Cancelled
-      | `Raised exn when attempt < max_attempts ->
-          retry (Printexc.to_string exn)
-      | `Raised exn -> Lwt.fail exn
-  in
-  go 1
+  Backend.with_retry ~name:"s3" ~op (fun () ->
+      let* res = f () in
+      match res with
+        | Error e when is_transient e -> Lwt.fail (failed op e)
+        | res -> Lwt.return res)
 
 let unwrap op = function
   | Ok v -> v
   | Error e ->
-      let msg = string_of_error e in
-      Log.err "s3 %s: %s" op msg;
-      raise (s3_eio msg)
+      Log.err "s3 %s: %s" op (string_of_error e);
+      raise (failed op e)
 
 let entry_of c =
   Backend.
@@ -111,9 +91,8 @@ let get_opt t ~key () =
     | Ok body -> Some body
     | Error S3.Not_found -> None
     | Error e ->
-        let msg = string_of_error e in
-        Log.err "s3 get %s: %s" key msg;
-        raise (s3_eio msg)
+        Log.err "s3 get %s: %s" key (string_of_error e);
+        raise (failed "get" e)
 
 let head_opt t ~key () =
   let+ res =
@@ -125,9 +104,8 @@ let head_opt t ~key () =
     | Ok c -> Some (entry_of c)
     | Error S3.Not_found -> None
     | Error e ->
-        let msg = string_of_error e in
-        Log.err "s3 head %s: %s" key msg;
-        raise (s3_eio msg)
+        Log.err "s3 head %s: %s" key (string_of_error e);
+        raise (failed "head" e)
 
 let delete t ~key () =
   let+ res =
@@ -137,7 +115,7 @@ let delete t ~key () =
   in
   match res with
     | Ok _ | Error S3.Not_found -> ()
-    | Error e -> raise (s3_eio (string_of_error e))
+    | Error e -> raise (failed "delete" e)
 
 let delete_multi t keys =
   let open S3.Delete_multi in
@@ -185,7 +163,7 @@ let list_all t ?max_keys ~prefix () =
             match res with
               | Ok (items, next) ->
                   collect (List.map entry_of items :: acc) next
-              | Error e -> Lwt.fail (s3_eio (string_of_error e))))
+              | Error e -> Lwt.fail (failed "ls-cont" e)))
   in
   let* res =
     with_retry "ls" (fun () ->
@@ -195,9 +173,8 @@ let list_all t ?max_keys ~prefix () =
   match res with
     | Ok (items, cont) -> collect [List.map entry_of items] cont
     | Error e ->
-        let msg = string_of_error e in
-        Log.err "s3 ls %s: %s" prefix msg;
-        Lwt.fail (s3_eio msg)
+        Log.err "s3 ls %s: %s" prefix (string_of_error e);
+        Lwt.fail (failed "ls" e)
 
 let make ?endpoint ?unsigned_payload ?share_url ~bucket ~region ~access_key_id
     ~secret_access_key () : (module Backend.S) =
