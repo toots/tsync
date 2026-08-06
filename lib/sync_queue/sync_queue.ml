@@ -22,7 +22,7 @@ end
 
 module Make (C : Conf.S) : S = struct
   module Fs = File_store.Make (C)
-  module J = Journal.Make (C)
+  module W = Wal.Make (C)
 
   type put_data = {
     key : string;
@@ -55,12 +55,11 @@ module Make (C : Conf.S) : S = struct
   let on_upload_done_fn : (key:string -> unit Lwt.t) ref =
     ref (fun ~key:_ -> Lwt.return_unit)
 
-  (* Best-effort unlink, fired off without blocking the synchronous post/cancel
-     entry points.
-     ponytail: fire-and-forget unlink; make post/cancel return Lwt only if a
-     failed unlink ever needs to be surfaced. *)
-  let drop_pending entry_key =
-    Lwt.async (fun () -> J.delete_local_pending ~entry_key)
+  (* Fired off without blocking the synchronous post/cancel entry points. A
+     failed unlink is not lost work: the record names a put whose data is no
+     longer staged, which is exactly what {!Replay.reconcile} discards on the
+     next start. *)
+  let drop_pending entry_key = Lwt.async (fun () -> W.complete entry_key)
 
   let enqueue pd =
     Queue.add pd queue;
@@ -100,23 +99,28 @@ module Make (C : Conf.S) : S = struct
   (* Returns [true] if the put failed transiently and should be requeued. *)
   let exec_put slot ({ key; entry_key; ops } : put_data) =
     if !(slot.cancel) then
-      let+ () = J.delete_local_pending ~entry_key in
+      let+ () = W.complete entry_key in
       false
     else
       Lwt.catch
         (fun () ->
           let* () = !upload_fn ~key ~cancel:slot.cancel in
           if !(slot.cancel) then
-            let+ () = J.delete_local_pending ~entry_key in
+            let+ () = W.complete entry_key in
             false
           else
-            (* The journal entry lands before the local record is dropped: a
-               crash the other way round leaves the bytes uploaded, no entry for
-               peers to see, and nothing left saying the upload is owed. *)
+            (* Executed, then published, then the record goes. A crash in the
+               first window leaves a record saying the bytes are up and the
+               entry is not, which is what reconcile finishes; a crash in the
+               second leaves the same record, and reconcile finds the entry
+               already published and drops it. Dropping the record first would
+               leave the bytes uploaded, no entry for peers to read, and nothing
+               saying anything was owed. *)
+            let* () = W.advance entry_key Wal.Executed in
             let* (_ : Journal.Entry_key.t) =
               Fs.write_journal_entry ~entry_key ops
             in
-            let* () = J.delete_local_pending ~entry_key in
+            let* () = W.complete entry_key in
             !on_cursor_fn ~entry_key;
             incr completed;
             slot.failures <- 0;
@@ -124,22 +128,35 @@ module Make (C : Conf.S) : S = struct
             false)
         (function
           | Backend.Cancelled ->
-              let+ () = J.delete_local_pending ~entry_key in
+              let+ () = W.complete entry_key in
               false
           | Unix.Unix_error (Unix.ENOENT, _, _) ->
-              let+ () = J.delete_local_pending ~entry_key in
+              let+ () = W.complete entry_key in
               false
-          | exn ->
-              (* Never dropped, or the file sits dirty in the cache forever:
-                 auto-evict only runs after a successful upload. *)
-              slot.failures <- slot.failures + 1;
-              let delay =
-                Float.min 300. (10. *. (2. ** float_of_int (slot.failures - 1)))
-              in
-              Log.err "sync_queue put %s: %s; requeue %d in %.0fs" key
-                (Printexc.to_string exn) slot.failures delay;
-              let+ () = Lwt_unix.sleep delay in
-              true)
+          | exn -> (
+              (* The record is never dropped on failure, or the file sits dirty
+                 in the cache forever: auto-evict only runs after a successful
+                 upload, and nothing else remembers the upload is owed. *)
+              let kind = Backend.classify exn in
+              let* () = W.note_failure entry_key kind (Backend.reason exn) in
+              match kind with
+                | Backend.Permanent ->
+                    (* A 403, a read-only domain, a key the store refuses: the
+                       same request will be refused again. Stop, and let the
+                       record carry why — this used to spin forever. *)
+                    Log.err "sync_queue put %s: %s; not retrying" key
+                      (Backend.reason exn);
+                    Lwt.return_false
+                | Backend.Transient ->
+                    slot.failures <- slot.failures + 1;
+                    let delay =
+                      Float.min 300.
+                        (10. *. (2. ** float_of_int (slot.failures - 1)))
+                    in
+                    Log.err "sync_queue put %s: %s; requeue %d in %.0fs" key
+                      (Backend.reason exn) slot.failures delay;
+                    let+ () = Lwt_unix.sleep delay in
+                    true))
 
   (* Parking on [queue_cond] is how a worker waits for either more work or a
      resume. [stop] wins over [paused], or a paused queue would never drain. *)

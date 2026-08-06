@@ -86,7 +86,7 @@
 ########## STATS ##########
 === after uploads: cache filled, nothing left unpublished
   sections: server process lwt traffic domains
-  domain "test": cache=0 journal.localPending=0
+  domain "test": cache=0 wal.pending=0
   backend "backend" ("main"): reachable=true journal.behind=0
   frontend "test": reachable=true stagedFiles=0 metaLocked=false metaWaiting=false
   renders as text: true

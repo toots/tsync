@@ -242,6 +242,7 @@ let setup_client (module C : Conf.S) root staging_prefix =
   let module H = Ipc_handler.Make (C) (F) in
   let module Sp = Sync_poller.Make (C) (F) in
   let module J = Journal.Make (C) in
+  let module W = Wal.Make (C) in
   let module L = Layout.Inode.Make (C) in
   (* What the daemon declares for diagnosis ([bin/cli.ml build_backends]), so
      [stats] has a store to report on here too. *)
@@ -800,11 +801,12 @@ let setup_client (module C : Conf.S) root staging_prefix =
       files
   in
   let dump_pending () =
-    let+ pending = J.local_pending_entries ~uuid:(J.client_uuid ()) in
+    let+ pending = W.list () in
     List.iter
-      (fun (_, ops) ->
-        Printf.printf "  pending [%s]\n"
-          (String.concat "; " (List.map render_op ops)))
+      (fun (r : Wal.record) ->
+        Printf.printf "  pending %s [%s]\n"
+          (Wal.string_of_state r.Wal.state)
+          (String.concat "; " (List.map render_op r.Wal.ops)))
       pending
   in
   (* Recursive list_dir (per directory) then the flat list_all working-set view —
@@ -1297,10 +1299,10 @@ let run_stats_scenario ?versioning ({ name; steps } : scenario) =
      let domain =
        match mem "domains" json with `List (d :: _) -> d | _ -> `Null
      in
-     Printf.printf "  domain %s: cache=%s journal.localPending=%s\n"
+     Printf.printf "  domain %s: cache=%s wal.pending=%s\n"
        (Yojson.Safe.to_string (mem "name" domain))
        (Yojson.Safe.to_string (mem "chunks" (mem "cache" domain)))
-       (Yojson.Safe.to_string (mem "localPending" (mem "journal" domain)));
+       (Yojson.Safe.to_string (mem "pending" (mem "wal" domain)));
      (match mem "backends" domain with
        | `List l ->
            List.iter

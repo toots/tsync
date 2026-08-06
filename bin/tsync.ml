@@ -752,6 +752,7 @@ let sync_cmd =
       (let open Lwt.Syntax in
        let (module C : Conf.S) = load_conf ?domain ?source () in
        let module J = Journal.Make (C) in
+       let module W = Wal.Make (C) in
        let module Fs = File_store.Make (C) in
        let module St = Store.Make (C) (Layout.Inode.Make (C)) in
        let module Sq = Sync_queue.Make (C) in
@@ -777,7 +778,7 @@ let sync_cmd =
          if published then begin
            if !verbose then
              Log.info "%s: already published remotely, cleaned up" short;
-           J.delete_local_pending ~entry_key
+           W.complete entry_key
          end
          else begin
            (* Keys another client touched after this entry: those ops lose. *)
@@ -862,17 +863,17 @@ let sync_cmd =
                Fs.bump_cursor entry_key
              else Lwt.return_unit
            in
-           J.delete_local_pending ~entry_key
+           W.complete entry_key
          end
        in
        let recover_pending () =
-         let* pending = J.local_pending_entries ~uuid:my_uuid in
+         let* pending = W.list () in
          if !verbose then
            Log.info "recovering %d pending journal entr%s" (List.length pending)
              (if List.length pending = 1 then "y" else "ies");
          (* Sequential: journal order. *)
          Lwt_list.iter_s
-           (fun (entry_key, ops) -> recover_entry entry_key ops)
+           (fun (r : Wal.record) -> recover_entry r.Wal.key r.Wal.ops)
            pending
        in
        (* Walk the inode tree from the root: a folder namespace lists its file

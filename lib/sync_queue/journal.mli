@@ -49,13 +49,18 @@ module Entry_key : sig
   val relative_path : t -> string
 end
 
+(** One op as it appears in a published entry, and as {!Wal} stores it. *)
+val to_json : op -> Yojson.Basic.t
+
+val of_json : Yojson.Basic.t -> op option
+
+(** A published journal entry: one op per line. Unreadable lines are skipped — a
+    newer client may have written an op this one does not know. *)
 val encode : op list -> string
+
 val decode : string -> op list
 
 module Make (C : Conf.S) : sig
   val client_uuid : unit -> string
   val entry_key : unit -> Entry_key.t
-  val write_local_pending : entry_key:Entry_key.t -> op list -> unit Lwt.t
-  val delete_local_pending : entry_key:Entry_key.t -> unit Lwt.t
-  val local_pending_entries : uuid:string -> (Entry_key.t * op list) list Lwt.t
 end

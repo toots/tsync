@@ -110,6 +110,7 @@ end
 module Make_with_layout (C : Conf.S) (Sq : Sync_queue.S) (L : Layout.S) : S =
 struct
   module J = Journal.Make (C)
+  module W = Wal.Make (C)
   module Fs = File_store.Make (C)
   module R = Remote.Make_with_layout (C) (L)
 
@@ -276,17 +277,18 @@ struct
 
   let with_journal key ops s3_op =
     let ek = J.entry_key () in
-    let* () = J.write_local_pending ~entry_key:ek ops in
-    (* The pending entry is for crash recovery. Drop it on synchronous failure,
-       or recover_pending_ops replays a known-failed op at every startup. *)
+    let* () = W.record ek ops in
+    (* Dropped on a synchronous failure, or reconcile replays a known-failed op
+       at every startup. *)
     let* () =
       Lwt.catch s3_op (fun exn ->
-          let* () = J.delete_local_pending ~entry_key:ek in
+          let* () = W.complete ek in
           Lwt.fail exn)
     in
+    let* () = W.advance ek Wal.Executed in
     let* (_ : Journal.Entry_key.t) = Fs.write_journal_entry ~entry_key:ek ops in
     let* () = Fs.bump_cursor ek in
-    J.delete_local_pending ~entry_key:ek
+    W.complete ek
 
   let save_version key =
     if C.versioning then St.save_version ~key else Lwt.return_unit
@@ -305,7 +307,10 @@ struct
       | Some st ->
           let ek = J.entry_key () in
           let ops = [`Put (rel_key key, st.Manifest.s_size)] in
-          let+ () = J.write_local_pending ~entry_key:ek ops in
+          (* [Prepared], not [Intent]: the staged manifest read above is the
+             data, so the upload is owed from here on. *)
+          let* () = W.record ek ops in
+          let+ () = W.advance ek Wal.Prepared in
           Sq.post ~key ~entry_key:ek ~ops
 
   (* A staged manifest on disk means an upload is owed: nothing else records

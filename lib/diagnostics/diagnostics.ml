@@ -93,6 +93,7 @@ module Make (C : Conf.S) = struct
   module D = Data.Make (C) (R)
   module Fs = File_store.Make (C)
   module J = Journal.Make (C)
+  module W = Wal.Make (C)
 
   let int_opt = function Some n -> `Int n | None -> `Null
 
@@ -398,12 +399,34 @@ module Make (C : Conf.S) = struct
        ]
       @ manifests)
 
-  let local_pending () =
+  (* Broken down by state, and by the last failure when there was one: "295
+     unpublished entries" says a number, "295 intent, oldest failed permanent:
+     forbidden" says what to do about it. *)
+  let wal_json () =
     Lwt.catch
       (fun () ->
-        let+ entries = J.local_pending_entries ~uuid:(J.client_uuid ()) in
-        List.length entries)
-      (fun _ -> Lwt.return 0)
+        let+ records = W.list () in
+        let count state =
+          List.length (List.filter (fun r -> r.Wal.state = state) records)
+        in
+        let stuck =
+          List.filter_map (fun r -> r.Wal.last_error) records
+          |> List.filter (fun (kind, _) -> kind = Backend.Permanent)
+        in
+        `Assoc
+          [
+            ("pending", `Int (List.length records));
+            ("intent", `Int (count Wal.Intent));
+            ("prepared", `Int (count Wal.Prepared));
+            ("executed", `Int (count Wal.Executed));
+            ("stuck", `Int (List.length stuck));
+            ( "lastError",
+              match stuck with
+                | (_, detail) :: _ -> `String detail
+                | [] -> `Null );
+          ])
+      (fun exn ->
+        Lwt.return (`Assoc [("error", `String (Printexc.to_string exn))]))
 
   (* [extra] is what only the calling frontend knows: the http-proxy adds its
      serve-side readOnly, whether it serves shares, and its options. [mount] is
@@ -416,7 +439,7 @@ module Make (C : Conf.S) = struct
   let domain_json ?(totals = false) ?(exact = false) ?(reload = false)
       ?(extra = []) ?(frontends = []) () =
     let* cache = cache_json ~totals in
-    let* pending = local_pending () in
+    let* wal = wal_json () in
     let+ backends =
       Lwt_list.map_p
         (member_json ~totals ~exact ~reload)
@@ -426,7 +449,7 @@ module Make (C : Conf.S) = struct
       (config_json @ extra
       @ [
           ("cache", cache);
-          ("journal", `Assoc [("localPending", `Int pending)]);
+          ("wal", wal);
           ("frontends", `List frontends);
           ("backends", `List backends);
         ])
@@ -589,9 +612,22 @@ let text json =
       (match mem cache "manifests" with
         | `Null -> ()
         | m -> row 4 "manifests" (string_of_int (int_of m)));
-      row 4 "unpublished"
-        (Printf.sprintf "%d journal entries"
-           (int_of (mem (mem d "journal") "localPending")));
+      (* Silent when there is nothing owed, which is the normal state. *)
+      let wal = mem d "wal" in
+      if int_of (mem wal "pending") > 0 then (
+        let part name =
+          match int_of (mem wal name) with
+            | 0 -> None
+            | n -> Some (Printf.sprintf "%d %s" n name)
+        in
+        row 4 "unsynced"
+          (String.concat ", "
+             (List.filter_map part ["intent"; "prepared"; "executed"]));
+        match (int_of (mem wal "stuck"), mem wal "lastError") with
+          | 0, _ | _, `Null -> ()
+          | n, `String detail ->
+              row 4 "stuck" (Printf.sprintf "%d, last: %s" n detail)
+          | _ -> ());
       (* A shared listener contributes its per-domain settings here and points at
          the block above for figures it cannot attribute to one domain. *)
       List.iter

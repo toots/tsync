@@ -123,40 +123,64 @@ end
    entry sees exactly what it saw before. *)
 let dir_id_field = function None -> [] | Some id -> [("id", `String id)]
 
+let to_json = function
+  | `Put (key, size) ->
+      `Assoc
+        [
+          ("op", `String "put");
+          ("key", `String key);
+          ("size", `Int (Int64.to_int size));
+        ]
+  | `Delete key -> `Assoc [("op", `String "delete"); ("key", `String key)]
+  | `Mkdir (key, id) ->
+      `Assoc ([("op", `String "mkdir"); ("key", `String key)] @ dir_id_field id)
+  | `Rmdir (key, id) ->
+      `Assoc ([("op", `String "rmdir"); ("key", `String key)] @ dir_id_field id)
+  | `Rename { dst; src; size; is_dir; id } ->
+      let fields =
+        [
+          ("op", `String "rename");
+          ("key", `String dst);
+          ("src", `String src);
+          ("is_dir", `Bool is_dir);
+        ]
+        @ dir_id_field id
+        @
+          match size with
+          | None -> []
+          | Some s -> [("size", `Int (Int64.to_int s))]
+      in
+      `Assoc fields
+
+let of_json j =
+  try
+    let open Yojson.Basic.Util in
+    let key = j |> member "key" |> to_string in
+    let dir_id =
+      match j |> member "id" with `String s -> Some s | _ -> None
+    in
+    match j |> member "op" |> to_string with
+      | "put" -> Some (`Put (key, j |> member "size" |> to_int |> Int64.of_int))
+      | "delete" -> Some (`Delete key)
+      | "mkdir" -> Some (`Mkdir (key, dir_id))
+      | "rmdir" -> Some (`Rmdir (key, dir_id))
+      | "rename" ->
+          let src = j |> member "src" |> to_string in
+          let size =
+            match j |> member "size" with
+              | `Int n -> Some (Int64.of_int n)
+              | _ -> None
+          in
+          let is_dir =
+            match j |> member "is_dir" with `Bool b -> b | _ -> false
+          in
+          Some (`Rename { dst = key; src; size; is_dir; id = dir_id })
+      | _ -> None
+  with _ -> None
+
 let encode ops =
-  let encode_one = function
-    | `Put (key, size) ->
-        `Assoc
-          [
-            ("op", `String "put");
-            ("key", `String key);
-            ("size", `Int (Int64.to_int size));
-          ]
-    | `Delete key -> `Assoc [("op", `String "delete"); ("key", `String key)]
-    | `Mkdir (key, id) ->
-        `Assoc
-          ([("op", `String "mkdir"); ("key", `String key)] @ dir_id_field id)
-    | `Rmdir (key, id) ->
-        `Assoc
-          ([("op", `String "rmdir"); ("key", `String key)] @ dir_id_field id)
-    | `Rename { dst; src; size; is_dir; id } ->
-        let fields =
-          [
-            ("op", `String "rename");
-            ("key", `String dst);
-            ("src", `String src);
-            ("is_dir", `Bool is_dir);
-          ]
-          @ dir_id_field id
-          @
-            match size with
-            | None -> []
-            | Some s -> [("size", `Int (Int64.to_int s))]
-        in
-        `Assoc fields
-  in
   String.concat "\n"
-    (List.map (fun op -> Yojson.Basic.to_string (encode_one op)) ops)
+    (List.map (fun op -> Yojson.Basic.to_string (to_json op)) ops)
   ^ "\n"
 
 let decode s =
@@ -165,89 +189,15 @@ let decode s =
       let line = String.trim line in
       if line = "" then None
       else (
-        try
-          let open Yojson.Basic.Util in
-          let j = Yojson.Basic.from_string line in
-          let key = j |> member "key" |> to_string in
-          let dir_id =
-            match j |> member "id" with `String s -> Some s | _ -> None
-          in
-          let op =
-            match j |> member "op" |> to_string with
-              | "put" -> `Put (key, j |> member "size" |> to_int |> Int64.of_int)
-              | "delete" -> `Delete key
-              | "mkdir" -> `Mkdir (key, dir_id)
-              | "rmdir" -> `Rmdir (key, dir_id)
-              | "rename" ->
-                  let src = j |> member "src" |> to_string in
-                  let size =
-                    match j |> member "size" with
-                      | `Int n -> Some (Int64.of_int n)
-                      | _ -> None
-                  in
-                  let is_dir =
-                    match j |> member "is_dir" with `Bool b -> b | _ -> false
-                  in
-                  `Rename { dst = key; src; size; is_dir; id = dir_id }
-              | s -> failwith ("unknown op: " ^ s)
-          in
-          Some op
-        with _ -> None))
+        match Yojson.Basic.from_string line with
+          | j -> of_json j
+          | exception _ -> None))
     (String.split_on_char '\n' s)
 
-(* Per-domain: the ops carry domain-relative keys, so a shared queue would let
-   one domain's [sync] replay another's entries against the wrong backend. *)
-let pending_dir ~share_dir ~domain =
-  Filename.concat (Filename.concat share_dir "journal-pending") domain
-
-let pending_path ~share_dir ~domain entry_key =
-  Filename.concat
-    (pending_dir ~share_dir ~domain)
-    (Entry_key.to_string entry_key)
-
-let write_local_pending ~share_dir ~domain ~entry_key ops =
-  let open Lwt.Syntax in
-  let* () = Fs_util.mkdir_p (pending_dir ~share_dir ~domain) in
-  Lwt_unix_retry.with_file ~mode:Lwt_io.Output
-    (pending_path ~share_dir ~domain entry_key) (fun oc ->
-      Lwt_io.write oc (encode ops))
-
-let delete_local_pending ~share_dir ~domain ~entry_key =
-  Fs_util.unlink_quiet (pending_path ~share_dir ~domain entry_key)
-
-let local_pending_entries ~share_dir ~domain ~uuid =
-  let open Lwt.Syntax in
-  let dir = pending_dir ~share_dir ~domain in
-  let* exists = Lwt_unix_retry.file_exists dir in
-  if not exists then Lwt.return_nil
-  else
-    let* names = Fs_util.readdir_list dir in
-    names
-    |> List.filter_map Entry_key.of_string
-    |> List.filter (fun ek -> Entry_key.client_uuid ek = uuid)
-    |> List.sort Entry_key.compare
-    |> Lwt_list.filter_map_s (fun ek ->
-        let path = pending_path ~share_dir ~domain ek in
-        Lwt.catch
-          (fun () ->
-            let+ s = Lwt_io.with_file ~mode:Lwt_io.Input path Lwt_io.read in
-            Some (ek, decode s))
-          (fun _ -> Lwt.return_none))
-
 module Make (C : Conf.S) = struct
-  (* The client identity (uuid, entry keys) is shared across domains; the pending
-     queue is scoped to this domain. *)
+  (* The client identity — uuid and entry keys — is shared across domains; the
+     pending records {!Wal} keeps under it are per-domain. *)
   let share_dir = C.data_dir
-  let domain = C.domain_name
   let client_uuid () = get_client_uuid ~share_dir
   let entry_key () = Entry_key.make ~share_dir ()
-
-  let write_local_pending ~entry_key:ek ops =
-    write_local_pending ~share_dir ~domain ~entry_key:ek ops
-
-  let delete_local_pending ~entry_key:ek =
-    delete_local_pending ~share_dir ~domain ~entry_key:ek
-
-  let local_pending_entries ~uuid =
-    local_pending_entries ~share_dir ~domain ~uuid
 end
