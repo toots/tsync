@@ -104,8 +104,11 @@ module Make (C : Conf.S) : S = struct
             let+ () = J.delete_local_pending ~entry_key in
             false
           else
-            let* () = J.delete_local_pending ~entry_key in
+            (* The journal entry lands before the local record is dropped: a
+               crash the other way round leaves the bytes uploaded, no entry for
+               peers to see, and nothing left saying the upload is owed. *)
             let* (_ : string) = Fs.write_journal_entry ~entry_key ops in
+            let* () = J.delete_local_pending ~entry_key in
             !on_cursor_fn ~entry_key;
             incr completed;
             slot.failures <- 0;
