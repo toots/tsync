@@ -698,39 +698,36 @@ module Make (C : Conf.S) (F : File.S) = struct
                            in-flight upload are, so a previewer can look at
                            them. A handful of local reads, not a walk. *)
                         let+ uploading = F.uploads_in_flight () in
-                        (ok_json
-                             (("domain", `String C.domain_name)
-                             :: ("running", `Bool true)
-                             :: ("paused", `Bool (F.uploads_paused ()))
-                             :: ("pendingUploads", `Int (F.uploads_pending ()))
-                             :: ( "pendingDownloads",
-                                  `Int (F.downloads_in_flight ()) )
-                             :: ( "uploading",
-                                  `List
-                                    (List.map
-                                       (fun
-                                           ({ name; rel; body } :
-                                             File.in_flight)
-                                         ->
-                                         `Assoc
-                                           (("name", `String name)
-                                           :: ("rel", `String rel)
-                                           ::
-                                           (match body with
-                                             | Some body ->
-                                                 [("body", `String body)]
-                                             | None -> [])))
-                                       uploading) )
-                             :: ( "pendingBytes",
-                                  `Int
-                                    (Int64.to_int (F.uploads_pending_bytes ()))
-                                )
-                               (* Process-wide, not per domain: one uplink is
+                        ok_json
+                          (("domain", `String C.domain_name)
+                          :: ("running", `Bool true)
+                          :: ("paused", `Bool (F.uploads_paused ()))
+                          :: ("pendingUploads", `Int (F.uploads_pending ()))
+                          :: ( "pendingDownloads",
+                               `Int (F.downloads_in_flight ()) )
+                          :: ( "uploading",
+                               `List
+                                 (List.map
+                                    (fun ({ name; rel; body } : File.in_flight)
+                                       ->
+                                      `Assoc
+                                        (("name", `String name)
+                                        :: ("rel", `String rel)
+                                        ::
+                                          (match body with
+                                          | Some body ->
+                                              [("body", `String body)]
+                                          | None -> [])))
+                                    uploading) )
+                          :: ( "pendingBytes",
+                               `Int (Int64.to_int (F.uploads_pending_bytes ()))
+                             )
+                             (* Process-wide, not per domain: one uplink is
                                   what an ETA is against. *)
-                             :: ("bytesUploaded", `Int (Metrics.uploaded ()))
-                             :: ( "uploadBytesPerSec",
-                                  `Float (Metrics.upload_rate ()) )
-                             :: hooks.status_fields ()))
+                          :: ("bytesUploaded", `Int (Metrics.uploaded ()))
+                          :: ( "uploadBytesPerSec",
+                               `Float (Metrics.upload_rate ()) )
+                          :: hooks.status_fields ())
                     | "pause" ->
                         F.set_uploads_paused (get_str obj "arg" <> "off");
                         Lwt.return (ok_json [])

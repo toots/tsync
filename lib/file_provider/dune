@@ -14,10 +14,14 @@
   (flags
    (-x objective-c -fobjc-arc)))
  (c_library_flags
-  (-framework QuickLookThumbnailing
-   -framework ImageIO
-   -framework CoreGraphics
-   -framework Foundation))
+  (-framework
+   QuickLookThumbnailing
+   -framework
+   ImageIO
+   -framework
+   CoreGraphics
+   -framework
+   Foundation))
  (libraries
   tsync_conf
   tsync_core

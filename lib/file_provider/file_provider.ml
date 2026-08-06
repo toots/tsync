@@ -186,10 +186,11 @@ module Make (C : Conf.S) = struct
     let* uploads = F.uploads_in_flight () in
     (* Only a body an upload is holding right now, so a caller cannot name a
        path of its own choosing. *)
-    match
-      List.find_opt (fun ({ File.body; _ } : File.in_flight) -> body = Some path)
-        uploads
-    with
+      match
+        List.find_opt
+          (fun ({ File.body; _ } : File.in_flight) -> body = Some path)
+          uploads
+      with
       | None ->
           Lwt.return
             (Yojson.Safe.to_string
@@ -199,12 +200,12 @@ module Make (C : Conf.S) = struct
                     ("code", `String "not_found");
                     ("error", `String "preview: not an upload in flight");
                   ]))
-      | Some { File.name; _ } ->
+      | Some { File.name; _ } -> (
           (* Under the cache root, so the link QuickLook needs lands on the same
              filesystem as the body it points at. *)
           let scratch = Filename.concat C.cache_root "previews" in
           let+ picture = Preview.of_file ~scratch ~name path in
-          (match picture with
+          match picture with
             | Some picture ->
                 ok_json [("data", `String (Base64.encode_string picture))]
             (* Answered, with nothing to show: the caller falls back to an icon
@@ -226,6 +227,7 @@ module Make (C : Conf.S) = struct
             let+ resp = handle_preview path in
             (resp, `Continue)
         | _ | (exception _) -> core line
+
   let drain = Sq.drain
 
   let init ~subs () =

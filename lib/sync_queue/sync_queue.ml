@@ -102,13 +102,13 @@ module Make (C : Conf.S) : S = struct
   let pending () = Hashtbl.length slots
   let completed = ref 0
   let completed_count () = !completed
-
   let uploading () = Hashtbl.fold (fun key _ acc -> key :: acc) active []
 
   let pending_bytes () =
     let add total pd = Int64.add total pd.size in
-    Hashtbl.fold (fun _ pd total -> add total pd) active
-      (Queue.fold add 0L queue)
+    Hashtbl.fold
+      (fun _ pd total -> add total pd)
+      active (Queue.fold add 0L queue)
 
   (* Returns [true] if the put failed transiently and should be requeued. *)
   let exec_put slot ({ key; entry_key; ops } : put_data) =
