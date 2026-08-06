@@ -106,4 +106,9 @@ module Make (C : Conf.S) (R : Remote.S) : sig
 
   (** Drop [key]'s staged manifest and the bodies it names. *)
   val discard_staged : string -> unit Lwt.t
+
+  (** Delete staged bodies no staged manifest names, and prune the empty
+      directories left in the staged manifest tree. Startup only: staging
+      creates a body before the manifest that names it. *)
+  val reclaim_staged_orphans : unit -> unit Lwt.t
 end

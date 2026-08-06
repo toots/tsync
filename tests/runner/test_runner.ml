@@ -69,6 +69,10 @@ type step =
   | Recheck
   | RecoverStaged
       (** Replay every upload the staged tree still owes, as a restart does. *)
+  | OrphanStagedBody
+      (** Drop a staged body no manifest names into each body tree, the way a
+          crash between staging and the manifest write does. *)
+  | ReclaimStaged  (** Sweep unreferenced staged bodies, as a restart does. *)
   | ClearCache
       (** Wipe the local cache the way a full resync does: manifest mirror and
           chunk store, keeping only the staged tree. *)
@@ -159,6 +163,8 @@ let rec render_step = function
       Printf.sprintf "delete-cached-chunk %s #%d" path index
   | Recheck -> "recheck"
   | RecoverStaged -> "recover-staged"
+  | OrphanStagedBody -> "orphan-staged-body"
+  | ReclaimStaged -> "reclaim-staged"
   | ClearCache -> "clear-cache"
   | OnSecondary s -> "on-secondary " ^ render_step s
   | ResyncRemote -> "resync-remote"
@@ -659,6 +665,17 @@ let setup_client (module C : Conf.S) root staging_prefix =
         let* p = cached_chunk_path (key path) index in
         Lwt.catch (fun () -> Lwt_unix_retry.unlink p) (fun _ -> Lwt.return_unit)
     | RecoverStaged -> F.recover_staged ()
+    | OrphanStagedBody ->
+        (* What a crash between staging a body and writing the manifest that
+           names it leaves behind, in both body trees. *)
+        List.iter
+          (fun dir ->
+            let dir = dir ~cache_root:C.cache_root C.domain_name in
+            mkdir_p dir;
+            write_file (Filename.concat dir "orphan-uuid") "leaked bytes")
+          [Cache_layout.staged_chunks_dir; Cache_layout.staged_whole_dir];
+        Lwt.return_unit
+    | ReclaimStaged -> F.reclaim_staged_orphans ()
     | ClearCache ->
         Cache_layout.clear ~cache_root:C.cache_root ~domain_name:C.domain_name
     | Recheck ->

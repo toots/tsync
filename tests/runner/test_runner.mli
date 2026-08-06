@@ -96,6 +96,11 @@ type step =
   | RecoverStaged
       (** Replay every upload the staged tree still owes, the way a restart does
           after a crash. *)
+  | OrphanStagedBody
+      (** Drop a staged body no manifest names into each body tree, the way a
+          crash between staging a body and writing its manifest does. *)
+  | ReclaimStaged
+      (** Sweep staged bodies nothing references, as a restart does. *)
   | ClearCache
       (** Wipe the local cache the way a full resync does — manifest mirror,
           chunk store and scratch — keeping only the staged tree. *)

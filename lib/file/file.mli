@@ -60,6 +60,13 @@ module type S = sig
       at startup. *)
   val recover_staged : unit -> unit Lwt.t
 
+  (** Delete staged bodies no staged manifest names — what a crash between
+      staging a body and writing its manifest leaves behind — and prune the
+      empty directories left in the staged manifest tree. Part of
+      {!recover_staged}: run at startup, never while writes may be staging, or
+      it can collect a body a write is about to use. *)
+  val reclaim_staged_orphans : unit -> unit Lwt.t
+
   (** Keep the chunk store under [C.max_cache]; never touches staged data. *)
   val enforce_chunk_cap : unit -> unit Lwt.t
 

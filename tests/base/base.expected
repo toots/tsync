@@ -145,6 +145,27 @@
   journal <entry-1> = put doomed.txt 9
   journal <entry-2> = delete doomed.txt
 
+=== startup reclaims orphaned staged bodies
+  write kept.txt "published"
+  drain
+  stage-write kept.txt "edited, not uploaded"
+  orphan-staged-body
+  staged
+  reclaim-staged
+  staged
+  drain
+  staged manifests=1 bodies=3
+  staged manifests=1 bodies=1
+--- tree
+  f kept.txt size=20 cached=1/1 uploaded=false etag=
+--- content
+  kept.txt = "edited, not uploaded"
+--- backend
+  chunk 049b50dd364dcae9-6f20090ec5c663a9 size=9
+  journal <entry-1> = put kept.txt 9
+  file kept.txt [.tsync-root/2af84fa98a68a9b1-19465e194feef43e] = manifest size=9 chunks=1 h1=a8329a6950d36ba5 h2=7d97004ddaf6ae9a
+    chunk#0 049b50dd364dcae9-6f20090ec5c663a9 size=9
+
 === mkdir
   mkdir sub
   drain

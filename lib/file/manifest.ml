@@ -528,6 +528,27 @@ module Make (C : Conf.S) = struct
       (fun acc rel st -> (C.domain_prefix ^ Key.join rel st.s_name) :: acc)
       []
 
+  (* Every staged body reachable from a manifest: what a sweep of the body trees
+     must keep. *)
+  let staged_uuids () =
+    fold_staged ~rel_dir:"" ~deep:true
+      (fun acc _ st ->
+        let acc =
+          match st.s_whole with Some uuid -> uuid :: acc | None -> acc
+        in
+        Array.fold_left
+          (fun acc slot ->
+            match slot with Staged uuid -> uuid :: acc | Inherit | Zero -> acc)
+          acc st.s_slots)
+      []
+
+  (* Directories outlive the manifests that created them, and an occupied-looking
+     staged tree with nothing staged in it is misleading. Cutoff 0 deletes no
+     file, only prunes what is left empty. *)
+  let prune_staged_dirs () =
+    let+ (_ : bool) = Fs_util.reap_older_than ~cutoff:0. (staged_root ()) in
+    ()
+
   (* A locally created file has no published sidecar, so the mirror alone would
      not list it; for one that does, the staged size and mtime are current. *)
   let staged_entries ~rel_dir ~deep =

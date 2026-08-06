@@ -158,6 +158,12 @@ module Make (C : Conf.S) : sig
   (** Logical keys of every file owing an upload. *)
   val list_staged : unit -> string list Lwt.t
 
+  (** Uuids of every staged body some staged manifest names. *)
+  val staged_uuids : unit -> string list Lwt.t
+
+  (** Remove empty directories left in the staged manifest tree. *)
+  val prune_staged_dirs : unit -> unit Lwt.t
+
   (** Whether the mirror exists, i.e. this domain has a local cache. *)
   val mirror_exists : unit -> bool Lwt.t
 

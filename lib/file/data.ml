@@ -424,6 +424,38 @@ module Make (C : Conf.S) (R : Remote.S) = struct
     in
     Mf.delete_staged key
 
+  (* Staged bodies are named by uuid and referenced only from staged manifests,
+     so a body no manifest names is unreachable by construction.
+
+     Startup only: {!stage_slot} creates a body before the manifest records it,
+     so mid-session an unreferenced body can be one a write is about to use. *)
+  let reclaim_staged_orphans () =
+    let* uuids = Mf.staged_uuids () in
+    let live = Hashtbl.create (List.length uuids) in
+    List.iter (fun uuid -> Hashtbl.replace live uuid ()) uuids;
+    let sweep dir =
+      let* exists = Fs_util.is_directory dir in
+      if not exists then Lwt.return_unit
+      else
+        let* names = Fs_util.readdir_list dir in
+        Lwt_list.iter_s
+          (fun name ->
+            if Hashtbl.mem live name then Lwt.return_unit
+            else (
+              Log.info "reclaiming orphaned staged body %s" name;
+              Fs_util.unlink_quiet (Filename.concat dir name)))
+          names
+    in
+    let* () =
+      sweep
+        (Cache_layout.staged_chunks_dir ~cache_root:C.cache_root C.domain_name)
+    in
+    let* () =
+      sweep
+        (Cache_layout.staged_whole_dir ~cache_root:C.cache_root C.domain_name)
+    in
+    Mf.prune_staged_dirs ()
+
   let create key =
     let* st = Mf.read_staged key in
     let* () =

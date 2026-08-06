@@ -103,6 +103,23 @@ let scenarios : scenario list =
         ];
     };
     {
+      (* A body no staged manifest names is unreachable, so the startup sweep
+         frees it — while a body the live staged manifest names survives, and
+         its upload still works. *)
+      name = "startup reclaims orphaned staged bodies";
+      steps =
+        [
+          Write { path = "kept.txt"; content = "published" };
+          Drain;
+          StageWrite { path = "kept.txt"; content = "edited, not uploaded" };
+          OrphanStagedBody;
+          ShowStaged;
+          ReclaimStaged;
+          ShowStaged;
+          Drain;
+        ];
+    };
+    {
       name = "mkdir";
       steps =
         [

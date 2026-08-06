@@ -39,6 +39,10 @@ module type S = sig
       at startup. *)
   val recover_staged : unit -> unit Lwt.t
 
+  (** Free staged bodies nothing references. Part of {!recover_staged}; run once
+      at startup, never while writes may be staging. *)
+  val reclaim_staged_orphans : unit -> unit Lwt.t
+
   (** Keep the chunk store under [C.max_cache]; never touches staged data. *)
   val enforce_chunk_cap : unit -> unit Lwt.t
 
@@ -309,7 +313,12 @@ struct
      ran) and mid-promotion ({!Data.sync} finishes the local moves without
      re-sending). *)
 
+  let reclaim_staged_orphans = D.reclaim_staged_orphans
+
   let recover_staged () =
+    (* Before the replays: they are the first thing that can stage a body, and a
+       body created after this point may not yet be named by a manifest. *)
+    let* () = reclaim_staged_orphans () in
     let* keys = Mf.list_staged () in
     Lwt_list.iter_s
       (fun key ->
