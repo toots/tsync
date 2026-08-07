@@ -2,42 +2,18 @@ type file_entry = { key : string; size : int; last_modified : float }
 
 exception Backend_error of string
 exception Cancelled
-
-(* Its own exception rather than a [Backend_error] carrying a sentence, because
-   callers act on it: a frontend turns it into a read-only error for the user,
-   and matching on prose breaks the day the sentence is reworded. *)
 exception Not_writable
 
-(* Whether a failure is worth trying again, decided by the store that produced
-   it — one vocabulary rather than each backend's own notion of "transient" and
-   each caller having to recognise it. A 503, a dropped socket and a full disk
-   clear on their own; a 403, a bad key and a read-only domain do not, and
-   retrying those only delays the report. *)
 type kind = Transient | Permanent
 
 exception Failed of { kind : kind; op : string; detail : string }
 
 let failed ~kind ~op detail = Failed { kind; op; detail }
 
-(* These reach users verbatim, through [Printexc.to_string] in diagnostics and
-   the CLI. The default printer spells an exception with its full module path,
-   which for a wrapped library means the internal library name; pin the text
-   here so how the module is packaged cannot change what a user reads. *)
-let () =
-  Printexc.register_printer (function
-    | Backend_error msg -> Some (Printf.sprintf "Backend.Backend_error(%S)" msg)
-    | Cancelled -> Some "Backend.Cancelled"
-    | Not_writable -> Some "Backend.Not_writable"
-    | Failed { kind = _; op; detail } ->
-        Some (Printf.sprintf "Backend.Failed(%s: %s)" op detail)
-    | _ -> None)
-
 let string_of_kind = function
   | Transient -> "transient"
   | Permanent -> "permanent"
 
-(* [Transient] for anything unrecognised: a failure mode nobody classified is
-   retried rather than silently abandoning the work. *)
 let classify = function
   | Failed { kind; _ } -> kind
   | Not_writable -> Permanent
@@ -46,23 +22,25 @@ let classify = function
   | Backend_error _ -> Permanent
   | _ -> Transient
 
-(* What to put in a log line: [Printexc] would repeat the operation name the
-   caller has already printed. *)
 let reason = function
   | Failed { detail; _ } -> detail
   | exn -> Printexc.to_string exn
 
+(* These reach users verbatim, through [Printexc.to_string] in diagnostics and
+   the CLI. The default printer spells an exception with its full module path,
+   which for a wrapped library is the internal library name, so every case is
+   spelled out here: how the module is packaged cannot change what a user
+   reads. *)
 let () =
   Printexc.register_printer (function
     | Not_writable ->
         Some "no writable backend: every backend in this domain is \"readOnly\""
     | Failed { kind; op; detail } ->
         Some (Printf.sprintf "%s: %s (%s)" op detail (string_of_kind kind))
+    | Backend_error msg -> Some (Printf.sprintf "Backend.Backend_error(%S)" msg)
+    | Cancelled -> Some "Backend.Cancelled"
     | _ -> None)
 
-(* The one retry loop. A backend decides only what [Transient] means for it; the
-   backoff, the cap and the log line are shared, so two stores cannot drift into
-   retrying differently. [Cancelled] is never retried. *)
 let default_attempts = 8
 
 let with_retry ?(max_attempts = default_attempts) ~name ~op f =
@@ -123,17 +101,10 @@ end
 
 type factory = (string -> string option) -> (module S)
 
-(* A composite finishing work in the background registers here, so a process
-   about to exit can let it settle without knowing which composites are in play.
-   A one-shot command would otherwise take the pending work with it. *)
 let drain_hooks : (unit -> unit Lwt.t) list ref = ref []
 let on_drain f = drain_hooks := f :: !drain_hooks
 let drain () = Lwt_list.iter_p (fun f -> f ()) !drain_hooks
 
-(* A domain's backends individually. The composites ({!Fallback}, {!Lane})
-   present one {!S} and keep their members' names to themselves, so whoever builds
-   a domain's backends declares them here rather than each composite growing an
-   introspection interface. Only diagnosis reads this; nothing routes on it. *)
 type member = {
   name : string;
   role : string;  (** main | replica | backfill | readOnly *)
@@ -184,8 +155,6 @@ let register ~spec name (f : factory) =
 let spec_for name =
   Option.map (fun e -> e.spec) (Hashtbl.find_opt registry name)
 
-(* Every registered type name, for a UI offering a choice. What is available
-   depends on how the binary was linked, since s3 is optional. *)
 let types () =
   List.sort compare (Hashtbl.fold (fun name _ acc -> name :: acc) registry [])
 

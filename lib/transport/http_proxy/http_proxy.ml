@@ -1,7 +1,3 @@
-(* Shared between the http-proxy backend (client) and frontend (server): HMAC
-   request authentication over a shared secret, plus the wire encoding of keys and
-   listings. No transport here — cohttp lives in the backend/frontend. *)
-
 module Auth = struct
   let timestamp_header = "x-tsync-timestamp"
   let signature_header = "x-tsync-signature"

@@ -24,6 +24,7 @@
    -open
    Tsync_log))
  (name tsync_file_provider_frontend)
+ (private_modules file_provider_frontend)
  (enabled_if
   (= %{system} macosx))
  (library_flags (-linkall))

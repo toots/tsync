@@ -1,3 +1,8 @@
+(* Lwt_unix, minus EINTR. A signal arriving mid-syscall makes it fail with
+   EINTR rather than doing anything wrong, so every wrapper here just calls
+   again; the daemon takes SIGCHLD and SIGWINCH often enough for this to matter.
+   Same names and argument order as Lwt_unix, so a call site reads the same. *)
+
 let rec retry_eintr f =
   Lwt.catch f (function
     | Unix.Unix_error (Unix.EINTR, _, _) -> retry_eintr f
