@@ -1,0 +1,41 @@
+; A mutation, recorded so it survives a crash and replayed until every peer
+; agrees: this client's intent log, the upload queue that drains it, the shared
+; journal read back in both directions, and the per-domain file operations a
+; frontend actually calls.
+
+(library
+ (flags
+  (:standard
+   -open
+   Tsync_conf
+   -open
+   Tsync_naming
+   -open
+   Tsync_object
+   -open
+   Tsync_store
+   -open
+   Tsync_content
+   -open
+   Tsync_local_io
+   -open
+   Tsync_lwt_unix
+   -open
+   Tsync_backend_register
+   -open
+   Tsync_log))
+ (name tsync_sync)
+ (libraries
+  tsync_conf
+  tsync_naming
+  tsync_object
+  tsync_store
+  tsync_content
+  tsync_local_io
+  tsync_lwt_unix
+  tsync_backend_register
+  tsync_log
+  yojson
+  unix
+  lwt
+  lwt.unix))

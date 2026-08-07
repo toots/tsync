@@ -1,4 +1,6 @@
 (executable
+ (flags
+  (:standard -open Tsync_test_runner))
  (name ipc)
  (libraries tsync_test_runner))
 

@@ -3,6 +3,7 @@
 ; is the same either way.
 
 (library
+ (flags
+  (:standard -open Tsync_ipc -open Tsync_runtime))
  (name tsync_e2e)
- (wrapped false)
- (libraries tsync_core tsync_runtime yojson unix threads.posix))
+ (libraries tsync_ipc tsync_runtime yojson unix threads.posix))

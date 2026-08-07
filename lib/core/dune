@@ -1,4 +1,0 @@
-(library
- (name tsync_core)
- (wrapped false)
- (libraries tsync_log tsync_xxhash unix yojson lwt lwt.unix))

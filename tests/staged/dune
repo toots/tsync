@@ -1,11 +1,28 @@
 (executable
+ (flags
+  (:standard
+   -open
+   Tsync_content
+   -open
+   Tsync_object
+   -open
+   Tsync_naming
+   -open
+   Tsync_metrics
+   -open
+   Tsync_backend_register
+   -open
+   Tsync_conf
+   -open
+   Tsync_local_backend))
  (name staged_test)
  (libraries
-  tsync_file
+  tsync_content
+  tsync_object
+  tsync_naming
   tsync_conf
-  tsync_backend
+  tsync_backend_register
   tsync_local_backend
-  tsync_queue
   tsync_metrics
   lwt
   lwt.unix))

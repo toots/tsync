@@ -1,7 +1,9 @@
 ; Not a `test`: it mounts a filesystem. Run by hand with `make -C linux e2e`.
 
 (executable
+ (flags
+  (:standard -open Tsync_runtime -open Tsync_e2e))
  (name e2e_linux)
  (enabled_if
   (= %{system} linux))
- (libraries tsync_e2e tsync_core tsync_runtime yojson unix))
+ (libraries tsync_e2e tsync_runtime yojson unix))

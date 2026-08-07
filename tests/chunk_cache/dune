@@ -1,6 +1,28 @@
 (executable
+ (flags
+  (:standard
+   -open
+   Tsync_content
+   -open
+   Tsync_object
+   -open
+   Tsync_naming
+   -open
+   Tsync_xxhash
+   -open
+   Tsync_backend_register
+   -open
+   Tsync_conf))
  (name chunk_cache_test)
- (libraries tsync_file tsync_conf tsync_backend tsync_queue lwt lwt.unix))
+ (libraries
+  tsync_content
+  tsync_object
+  tsync_naming
+  tsync_xxhash
+  tsync_conf
+  tsync_backend_register
+  lwt
+  lwt.unix))
 
 (alias
  (name default)

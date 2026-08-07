@@ -1,13 +1,27 @@
 (library
+ (flags
+  (:standard
+   -open
+   Tsync_naming
+   -open
+   Tsync_ipc
+   -open
+   Tsync_conf
+   -open
+   Tsync_frontend_register
+   -open
+   Tsync_file_provider
+   -open
+   Tsync_runtime))
  (name tsync_file_provider_frontend)
  (optional)
- (wrapped false)
  (library_flags (-linkall))
  (libraries
+  tsync_naming
   tsync_frontend_register
   tsync_file_provider
   tsync_runtime
   tsync_conf
-  tsync_core
+  tsync_ipc
   unix
   yojson))

@@ -1,6 +1,26 @@
 (library
+ (flags
+  (:standard
+   -open
+   Tsync_object
+   -open
+   Tsync_conf
+   -open
+   Tsync_frontend_register
+   -open
+   Tsync_fuse
+   -open
+   Tsync_local_io
+   -open
+   Tsync_log))
  (name tsync_fuse_frontend)
  (optional)
- (wrapped false)
  (library_flags (-linkall))
- (libraries tsync_frontend_register tsync_fuse tsync_file tsync_conf unix))
+ (libraries
+  tsync_object
+  tsync_local_io
+  tsync_log
+  tsync_frontend_register
+  tsync_fuse
+  tsync_conf
+  unix))

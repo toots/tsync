@@ -1,3 +1,5 @@
 (test
+ (flags
+  (:standard -open Tsync_ipc))
  (name subs_test)
- (libraries tsync_core lwt lwt.unix))
+ (libraries tsync_ipc lwt lwt.unix))

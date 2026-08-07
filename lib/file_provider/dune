@@ -1,6 +1,21 @@
 (library
+ (flags
+  (:standard
+   -open
+   Tsync_sync
+   -open
+   Tsync_naming
+   -open
+   Tsync_ipc
+   -open
+   Tsync_log
+   -open
+   Tsync_conf
+   -open
+   Tsync_ipc_handler
+   -open
+   Tsync_engine))
  (name tsync_file_provider)
- (wrapped false)
  (enabled_if
   (= %{system} macosx))
  (foreign_stubs
@@ -23,14 +38,15 @@
    -framework
    Foundation))
  (libraries
+  tsync_sync
+  tsync_naming
   tsync_conf
-  tsync_core
+  tsync_ipc
   tsync_engine
-  tsync_file
-  tsync_queue
   tsync_ipc_handler
   yojson
   base64
+  tsync_log
   unix
   lwt
   lwt.unix))

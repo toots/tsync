@@ -1,3 +1,5 @@
 (test
+ (flags
+  (:standard -open Tsync_conf_parsing))
  (name conf_test)
- (libraries tsync_core))
+ (libraries tsync_conf_parsing))

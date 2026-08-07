@@ -1,6 +1,38 @@
 (executable
+ (flags
+  (:standard
+   -open
+   Tsync_store
+   -open
+   Tsync_object
+   -open
+   Tsync_naming
+   -open
+   Tsync_local_io
+   -open
+   Tsync_http_proxy
+   -open
+   Tsync_backend_register
+   -open
+   Tsync_conf
+   -open
+   Tsync_local_backend
+   -open
+   Tsync_http_proxy_backend
+   -open
+   Tsync_frontend_register
+   -open
+   Tsync_diagnostics
+   -open
+   Tsync_frontend
+   -open
+   Tsync_http_proxy_frontend))
  (name http_proxy_test)
  (libraries
+  tsync_store
+  tsync_object
+  tsync_naming
+  tsync_http_proxy_frontend
   tsync_http_proxy
   tsync_backend_register
   tsync_local_backend
@@ -8,7 +40,6 @@
   tsync_frontend_register
   tsync_frontend
   tsync_diagnostics
-  tsync_queue
   tsync_conf
   tsync_local_io
   cohttp

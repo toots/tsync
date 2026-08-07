@@ -1,3 +1,5 @@
 (test
+ (flags
+  (:standard -open Tsync_http_proxy_frontend))
  (name proxy_bound_test)
  (libraries tsync_http_proxy_frontend lwt lwt.unix))

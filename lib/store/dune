@@ -1,0 +1,28 @@
+; Object access, in logical keys. The configured backend list decides which one
+; reads and how far a write goes; the layout scheme turns a logical key into the
+; backend key it lives under, so no caller above this ever spells one. Manifests,
+; the shared journal and its cursor, and the children of a folder.
+
+(library
+ (flags
+  (:standard
+   -open
+   Tsync_conf
+   -open
+   Tsync_naming
+   -open
+   Tsync_object
+   -open
+   Tsync_backend_register
+   -open
+   Tsync_log))
+ (name tsync_store)
+ (libraries
+  tsync_conf
+  tsync_naming
+  tsync_object
+  tsync_backend_register
+  tsync_log
+  unix
+  lwt
+  lwt.unix))

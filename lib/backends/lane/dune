@@ -1,7 +1,19 @@
 (library
+ (flags
+  (:standard
+   -open
+   Tsync_naming
+   -open
+   Tsync_log
+   -open
+   Tsync_lwt_unix
+   -open
+   Tsync_local_io
+   -open
+   Tsync_backend_register))
  (name tsync_lane_backend)
- (wrapped false)
  (libraries
+  tsync_naming
   tsync_backend_register
   tsync_local_io
   tsync_lwt_unix

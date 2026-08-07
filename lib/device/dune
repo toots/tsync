@@ -5,14 +5,12 @@
 
 (library
  (name tsync_linux_device)
- (wrapped false)
  (enabled_if
   (= %{system} linux))
  (modules linux_device))
 
 (library
  (name tsync_macos_device)
- (wrapped false)
  (enabled_if
   (= %{system} macosx))
  (modules macos_device)
@@ -25,7 +23,6 @@
 
 (library
  (name tsync_device)
- (wrapped false)
  (modules device descriptors)
  (foreign_stubs
   (language c)

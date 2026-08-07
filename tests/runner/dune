@@ -1,13 +1,42 @@
 (library
+ (flags
+  (:standard
+   -open
+   Tsync_ops
+   -open
+   Tsync_sync
+   -open
+   Tsync_object
+   -open
+   Tsync_naming
+   -open
+   Tsync_conf_parsing
+   -open
+   Tsync_local_io
+   -open
+   Tsync_lwt_unix
+   -open
+   Tsync_backend_register
+   -open
+   Tsync_conf
+   -open
+   Tsync_local_backend
+   -open
+   Tsync_diagnostics
+   -open
+   Tsync_ipc_handler))
  (name tsync_test_runner)
- (wrapped false)
  (libraries
+  tsync_ops
+  tsync_sync
+  tsync_object
+  tsync_naming
+  tsync_lwt_unix
+  tsync_local_io
   tsync_conf
-  tsync_backend
+  tsync_backend_register
   tsync_local_backend
-  tsync_core
-  tsync_file
-  tsync_queue
+  tsync_conf_parsing
   tsync_ipc_handler
   tsync_diagnostics
   yojson

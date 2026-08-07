@@ -1,6 +1,15 @@
 (library
+ (flags
+  (:standard
+   -open
+   Tsync_lwt_unix
+   -open
+   Tsync_local_io
+   -open
+   Tsync_backend_register
+   -open
+   Tsync_device))
  (name tsync_local_backend)
- (wrapped false)
  (library_flags (-linkall))
  (libraries
   tsync_backend_register

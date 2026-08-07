@@ -1,6 +1,5 @@
 (library
  (name tsync_backend)
- (wrapped false)
  (libraries
   tsync_backend_register
   tsync_local_backend

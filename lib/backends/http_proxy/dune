@@ -1,6 +1,14 @@
 (library
+ (flags
+  (:standard
+   -open
+   Tsync_log
+   -open
+   Tsync_http_proxy
+   -open
+   Tsync_backend_register))
  (name tsync_http_proxy_backend)
- (wrapped false)
+ (private_modules http_proxy_backend)
  (library_flags (-linkall))
  (libraries
   tsync_backend_register

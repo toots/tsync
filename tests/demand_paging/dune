@@ -1,4 +1,6 @@
 (executable
+ (flags
+  (:standard -open Tsync_test_runner))
  (name demand_paging)
  (libraries tsync_test_runner))
 

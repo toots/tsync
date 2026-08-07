@@ -1,6 +1,23 @@
 (executable
+ (flags
+  (:standard
+   -open
+   Tsync_content
+   -open
+   Tsync_object
+   -open
+   Tsync_backend_register
+   -open
+   Tsync_conf
+   -open
+   Tsync_local_backend))
  (name upload)
- (libraries tsync_conf tsync_backend tsync_local_backend tsync_file))
+ (libraries
+  tsync_content
+  tsync_object
+  tsync_conf
+  tsync_backend_register
+  tsync_local_backend))
 
 (alias
  (name default)

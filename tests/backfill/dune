@@ -1,9 +1,26 @@
 (executable
+ (flags
+  (:standard
+   -open
+   Tsync_object
+   -open
+   Tsync_naming
+   -open
+   Tsync_local_io
+   -open
+   Tsync_backend_register
+   -open
+   Tsync_local_backend
+   -open
+   Tsync_lane_backend))
  (name backfill)
  (libraries
+  tsync_object
+  tsync_naming
+  tsync_backend_register
+  tsync_local_io
   tsync_lane_backend
   tsync_local_backend
-  tsync_file
   lwt
   lwt.unix
   unix))

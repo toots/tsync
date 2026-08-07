@@ -1,3 +1,5 @@
 (test
+ (flags
+  (:standard -open Tsync_e2e))
  (name ipc_tap_test)
  (libraries tsync_e2e yojson unix threads.posix))

@@ -1,4 +1,6 @@
 (executable
+ (flags
+  (:standard -open Tsync_zip))
  (name zip_test)
  (libraries tsync_zip))
 

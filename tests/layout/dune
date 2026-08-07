@@ -1,6 +1,8 @@
 (executable
+ (flags
+  (:standard -open Tsync_object -open Tsync_naming -open Tsync_local_io))
  (name layout)
- (libraries tsync_local_io tsync_queue unix))
+ (libraries tsync_object tsync_naming tsync_local_io unix))
 
 (alias
  (name default)

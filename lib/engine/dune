@@ -1,4 +1,27 @@
 (library
+ (flags
+  (:standard
+   -open
+   Tsync_sync
+   -open
+   Tsync_store
+   -open
+   Tsync_object
+   -open
+   Tsync_log
+   -open
+   Tsync_conf
+   -open
+   Tsync_backend_register
+   -open
+   Tsync_ipc_handler))
  (name tsync_engine)
- (wrapped false)
- (libraries tsync_conf tsync_queue tsync_file tsync_ipc_handler lwt))
+ (libraries
+  tsync_sync
+  tsync_store
+  tsync_object
+  tsync_backend_register
+  tsync_conf
+  tsync_ipc_handler
+  tsync_log
+  lwt))

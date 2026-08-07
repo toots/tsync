@@ -1,6 +1,8 @@
 (library
+ (flags
+  (:standard -open Tsync_log -open Tsync_backend_register))
  (name tsync_gcs_backend)
- (wrapped false)
+ (private_modules gcs_auth)
  (library_flags (-linkall))
  (libraries
   tsync_backend_register
