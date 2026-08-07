@@ -160,7 +160,7 @@ let make_route bindings (b : Frontend.binding) =
       (fun (name, value) ->
         match
           List.find_opt
-            (fun (s : Frontend.field_spec) -> s.name = name)
+            (fun (s : Field_spec.t) -> s.name = name)
             (Frontend.spec_for implementation)
         with
           | Some { secret = true; _ } when value <> "" -> (name, `String "***")
@@ -722,7 +722,7 @@ let start bindings =
      Backend.drain ())
 
 let spec =
-  Frontend.
+  Field_spec.
     [
       {
         name = "port";

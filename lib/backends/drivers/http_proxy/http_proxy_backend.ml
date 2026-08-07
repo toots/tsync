@@ -287,7 +287,7 @@ let make ~url ~secret : (module Backend.S) =
   end)
 
 let spec =
-  Backend.
+  Field_spec.
     [
       {
         name = "url";

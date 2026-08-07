@@ -151,19 +151,7 @@ let member ?(role = "main") ?(readable = true) ?(backend_type = "local")
     local_path;
   }
 
-type field_type = [ `String | `Bool ]
-
-type field_spec = {
-  name : string;
-  label : string;
-  typ : field_type;
-  default : string option;
-      (** [None] is required; [Some ""] optional, omitted from JSON when blank;
-          [Some s] optional with default [s]. *)
-  secret : bool;
-}
-
-type entry = { factory : factory; spec : field_spec list }
+type entry = { factory : factory; spec : Field_spec.t list }
 
 let registry : (string, entry) Hashtbl.t = Hashtbl.create 4
 

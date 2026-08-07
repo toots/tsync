@@ -31,7 +31,7 @@ let mount_binding (b : Frontend.binding) =
 let start bindings = Frontend.run_forked mount_binding bindings
 
 let spec =
-  Frontend.
+  Field_spec.
     [
       {
         name = "mountPoint";

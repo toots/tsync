@@ -178,22 +178,12 @@ val member :
     link by [-linkall], so adding one is a matter of linking its library. *)
 
 type factory = (string -> string option) -> (module S)
-type field_type = [ `String | `Bool ]
 
-(** One configuration field, so [tsync configure] can prompt for a backend's
-    settings without knowing the backend. *)
-type field_spec = {
-  name : string;
-  label : string;
-  typ : field_type;
-  default : string option;
-      (** [None] is required; [Some ""] optional, omitted from JSON when blank;
-          [Some s] optional with default [s]. *)
-  secret : bool;
-}
+(** The settings this backend type needs, so [tsync configure] can prompt for
+    them without knowing the backend. See {!Field_spec}. *)
+val register : spec:Field_spec.t list -> string -> factory -> unit
 
-val register : spec:field_spec list -> string -> factory -> unit
-val spec_for : string -> field_spec list option
+val spec_for : string -> Field_spec.t list option
 
 (** Every registered type name, for a UI offering a choice. What is available
     depends on how the binary was linked, since s3 is optional. *)

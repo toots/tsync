@@ -1240,16 +1240,14 @@ let print_conf_cmd =
     match Backend.spec_for b.backend_type with
       | None -> v
       | Some specs -> (
-          match
-            List.find_opt (fun (s : Backend.field_spec) -> s.name = k) specs
-          with
+          match List.find_opt (fun (s : Field_spec.t) -> s.name = k) specs with
             | Some { secret = true; _ } -> "***"
             | _ -> v)
   in
   let mask_frontend ftype k v =
     match
       List.find_opt
-        (fun (s : Frontend.field_spec) -> s.name = k)
+        (fun (s : Field_spec.t) -> s.name = k)
         (Frontend.spec_for ftype)
     with
       | Some { secret = true; _ } -> "***"
