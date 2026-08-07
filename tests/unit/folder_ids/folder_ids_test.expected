@@ -1,0 +1,13 @@
+a minted folder resolves back to its path: ok
+ancestors are minted too: ok
+an ancestor resolves too: ok
+the root resolves to the domain root: ok
+an unknown id resolves to nothing: ok
+a renamed folder keeps its id: ok
+the renamed folder is the same folder: ok
+a deleted folder resolves to nothing: ok
+its deleted parent does too: ok
+a corrupted entry does not resolve to another folder: ok
+a lost index is rebuilt on demand: ok
+rebuild prunes entries for departed folders: ok
+a rebuilt index recovers an escaped name: ok

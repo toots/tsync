@@ -11,6 +11,10 @@
 set -eu
 cd "$(dirname "$0")"
 
+# Byte order, not the machine's collation: this file is committed, and macOS and
+# Linux disagree on where "_" sorts relative to "/".
+export LC_ALL=C
+
 # The only per-test variation worth a knob. Kept here rather than in each dune,
 # so the exceptions are countable.
 env_for() {

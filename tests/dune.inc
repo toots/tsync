@@ -121,6 +121,20 @@
   (action
    (diff demand_paging.expected demand_paging.output))))
 
+(subdir content/download_progress
+ (alias
+  (name default)
+  (deps download_progress_test.exe))
+ (rule
+  (alias runtest)
+  (target download_progress_test.output)
+  (action
+   (with-stdout-to download_progress_test.output (ignore-stderr (run ./download_progress_test.exe)))))
+ (rule
+  (alias runtest)
+  (action
+   (diff download_progress_test.expected download_progress_test.output))))
+
 (subdir content/fetch_range
  (alias
   (name default)
@@ -134,6 +148,20 @@
   (alias runtest)
   (action
    (diff fetch_range.expected fetch_range.output))))
+
+(subdir e2e/ipc_tap
+ (alias
+  (name default)
+  (deps ipc_tap_test.exe))
+ (rule
+  (alias runtest)
+  (target ipc_tap_test.output)
+  (action
+   (with-stdout-to ipc_tap_test.output (ignore-stderr (run ./ipc_tap_test.exe)))))
+ (rule
+  (alias runtest)
+  (action
+   (diff ipc_tap_test.expected ipc_tap_test.output))))
 
 (subdir frontends/http_proxy
  (alias
@@ -163,6 +191,20 @@
    (= %{system} macosx))
   (action
    (diff preview_test.expected preview_test.output))))
+
+(subdir frontends/proxy_bound
+ (alias
+  (name default)
+  (deps proxy_bound_test.exe))
+ (rule
+  (alias runtest)
+  (target proxy_bound_test.output)
+  (action
+   (with-stdout-to proxy_bound_test.output (ignore-stderr (run ./proxy_bound_test.exe)))))
+ (rule
+  (alias runtest)
+  (action
+   (diff proxy_bound_test.expected proxy_bound_test.output))))
 
 (subdir frontends/share_server
  (alias
@@ -304,6 +346,20 @@
   (action
    (diff staged_test.expected staged_test.output))))
 
+(subdir scenario/staged_fanout
+ (alias
+  (name default)
+  (deps staged_fanout_test.exe))
+ (rule
+  (alias runtest)
+  (target staged_fanout_test.output)
+  (action
+   (with-stdout-to staged_fanout_test.output (ignore-stderr (run ./staged_fanout_test.exe)))))
+ (rule
+  (alias runtest)
+  (action
+   (diff staged_fanout_test.expected staged_fanout_test.output))))
+
 (subdir scenario/sync
  (alias
   (name default)
@@ -346,6 +402,34 @@
   (action
    (diff versioning.expected versioning.output))))
 
+(subdir unit/bounded
+ (alias
+  (name default)
+  (deps bounded_test.exe))
+ (rule
+  (alias runtest)
+  (target bounded_test.output)
+  (action
+   (with-stdout-to bounded_test.output (ignore-stderr (run ./bounded_test.exe)))))
+ (rule
+  (alias runtest)
+  (action
+   (diff bounded_test.expected bounded_test.output))))
+
+(subdir unit/folder_ids
+ (alias
+  (name default)
+  (deps folder_ids_test.exe))
+ (rule
+  (alias runtest)
+  (target folder_ids_test.output)
+  (action
+   (with-stdout-to folder_ids_test.output (ignore-stderr (run ./folder_ids_test.exe)))))
+ (rule
+  (alias runtest)
+  (action
+   (diff folder_ids_test.expected folder_ids_test.output))))
+
 (subdir unit/glob
  (alias
   (name default)
@@ -368,6 +452,20 @@
   (action
    (diff hash.expected hash.output))))
 
+(subdir unit/item_ref
+ (alias
+  (name default)
+  (deps item_ref_test.exe))
+ (rule
+  (alias runtest)
+  (target item_ref_test.output)
+  (action
+   (with-stdout-to item_ref_test.output (ignore-stderr (run ./item_ref_test.exe)))))
+ (rule
+  (alias runtest)
+  (action
+   (diff item_ref_test.expected item_ref_test.output))))
+
 (subdir unit/layout
  (alias
   (name default)
@@ -375,6 +473,20 @@
  (rule
   (alias runtest)
   (action (run ./layout.exe))))
+
+(subdir unit/subs
+ (alias
+  (name default)
+  (deps subs_test.exe))
+ (rule
+  (alias runtest)
+  (target subs_test.output)
+  (action
+   (with-stdout-to subs_test.output (ignore-stderr (run ./subs_test.exe)))))
+ (rule
+  (alias runtest)
+  (action
+   (diff subs_test.expected subs_test.output))))
 
 (subdir unit/zip
  (alias

@@ -1,0 +1,14 @@
+never wider than the bound: ok
+as wide as the bound, so it is the bound that capped it: ok
+every job still ran: ok
+results keep the caller's order: ok
+a bound above the work does not force width: ok
+a bound of zero serialises rather than unleashes: ok
+filter_map keeps the right ones, in order: ok
+only the limit is running: ok
+only the queue is waiting: ok
+everyone else is refused, not held: ok
+every slot came back: ok
+nothing is left queued: ok
+an unbounded queue serves everyone: ok
+and leaves nothing queued: ok

@@ -1,0 +1,11 @@
+no subscribers yet: ok
+connection serves more than one request: ok
+subscribe is acknowledged: ok
+subscriber is counted: ok
+other topics are unaffected: ok
+publish reports the delivery: ok
+event reaches the subscriber: ok
+a different topic is not delivered: ok
+events arrive in order: ok
+a departed subscriber is dropped: ok
+publishing to nobody reports zero: ok
