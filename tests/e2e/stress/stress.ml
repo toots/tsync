@@ -426,10 +426,18 @@ let () =
     in
     let fault_rnd = Random.State.make [| seed lxor 0x5eed |] in
     let faulter () =
-      (* Soon, and often: the load is over in tens of seconds, and a first
-          fault scheduled later than that lands after the work it was meant to
-          interrupt. That is how a fault mode comes to inject nothing. *)
-      Thread.delay 1.5;
+      (* Wait for the load to start, not for a length of time. A fixed delay is
+         a guess about how fast the machine is, and the guess was made on the
+         machine this was written on: 1.5s lands mid-run there and lands after
+         the run on a CI runner with a faster /tmp, where the whole load is over
+         first. Every fault cell then reports none landed -- which is what the
+         first scheduled run did, across all nine of them.
+
+         Waiting on the first journalled op instead ties the fault to the work
+         rather than to the clock, and holds on any machine. *)
+      while !load_running && !ops_run = 0 do
+        Thread.delay 0.02
+      done;
       while !load_running do
         if !load_running then (
           match fault_mode with
@@ -451,7 +459,8 @@ let () =
                 crash_and_restart ~exe store_d ~after_start:remount
             | "load" -> if !spinners = [] then start_pressure ()
             | _ -> ());
-        Thread.delay (1.5 +. Random.State.float fault_rnd 2.5)
+        (* Short enough that a run measured in seconds still gets several. *)
+        Thread.delay (0.4 +. Random.State.float fault_rnd 1.2)
       done
     in
     let fault_thread =
