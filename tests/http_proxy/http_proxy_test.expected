@@ -109,7 +109,7 @@
           "journal": {
             "error": "Backend.Backend_error(\"connection refused\")"
           },
-          "backfill": { "queued": 7, "inFlight": 2, "degraded": true }
+          "lane": { "queued": 7, "inFlight": 2, "degraded": true }
         }
       ]
     }
@@ -156,7 +156,7 @@ Domain statusdom
     secret           ***
     UNREACHABLE      Backend.Backend_error("connection refused")
     journal          error: Backend.Backend_error("connection refused")
-    backfill         7 queued, 2 in flight — DEGRADED, run tsync resync-remote
+    behind           7 queued, 2 in flight — DEGRADED, run tsync resync-remote
 ########## /stats with a mount daemon ##########
 Frontend http-proxy on testhost (this process)
   listener         port 8443, https
@@ -204,7 +204,7 @@ Domain statusdom
     secret           ***
     UNREACHABLE      Backend.Backend_error("connection refused")
     journal          error: Backend.Backend_error("connection refused")
-    backfill         7 queued, 2 in flight — DEGRADED, run tsync resync-remote
+    behind           7 queued, 2 in flight — DEGRADED, run tsync resync-remote
 ########## /stats?totals=1 ##########
 Frontend http-proxy on testhost (this process)
   listener         port 8443, https
@@ -248,7 +248,7 @@ Domain statusdom
     secret           ***
     UNREACHABLE      Backend.Backend_error("connection refused")
     journal          error: Backend.Backend_error("connection refused")
-    backfill         7 queued, 2 in flight — DEGRADED, run tsync resync-remote
+    behind           7 queued, 2 in flight — DEGRADED, run tsync resync-remote
     holds            could not count: Backend.Backend_error("connection refused")
 
 Recent warnings and errors (newest first)
@@ -298,7 +298,7 @@ Domain statusdom
     secret           ***
     UNREACHABLE      Backend.Backend_error("connection refused")
     journal          error: Backend.Backend_error("connection refused")
-    backfill         7 queued, 2 in flight — DEGRADED, run tsync resync-remote
+    behind           7 queued, 2 in flight — DEGRADED, run tsync resync-remote
     holds            could not count: Backend.Backend_error("connection refused")
 
 Recent warnings and errors (newest first)

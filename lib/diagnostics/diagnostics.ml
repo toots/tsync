@@ -330,11 +330,11 @@ module Make (C : Conf.S) = struct
         | `Null -> []
         | counts -> [("totals", counts)]
     in
-    let backfill =
+    let lane =
       match (m.Backend.pending, m.in_flight, m.degraded) with
         | Some queued, Some in_flight, Some degraded ->
             [
-              ( "backfill",
+              ( "lane",
                 `Assoc
                   [
                     ("queued", `Int (queued ()));
@@ -352,7 +352,7 @@ module Make (C : Conf.S) = struct
             `Assoc (List.map (fun (k, v) -> (k, `String v)) m.Backend.config) )
        :: probed
       @ [("journal", jrnl)]
-      @ disk_json m @ backfill @ tot)
+      @ disk_json m @ lane @ tot)
 
   let symlink_policy =
     match C.symlink_policy with
@@ -782,10 +782,10 @@ let text json =
                      (int_of (mem j "entries"))
                      (if bool_of (mem j "truncated") then "+" else "")
                      (int_of (mem j "behind"))));
-          (match mem m "backfill" with
+          (match mem m "lane" with
             | `Null -> ()
             | bf ->
-                row 4 "backfill"
+                row 4 "behind"
                   (Printf.sprintf "%d queued, %d in flight%s"
                      (int_of (mem bf "queued"))
                      (int_of (mem bf "inFlight"))

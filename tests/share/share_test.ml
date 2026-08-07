@@ -108,7 +108,7 @@ let () =
 
     let backends =
       [
-        Fallback_backend.make ~writable:[]
+        Fallback_backend.make ~sync:[] ~deferred:[]
           ~fallbacks:
             [
               { Fallback_backend.name = "archive"; backend = (module Shareable) };

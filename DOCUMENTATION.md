@@ -310,7 +310,7 @@ against `maxCache`, unpublished journal entries, and two lists:
   the socket it was asked on.
 - **Backends** — every store behind it, by name, type and role, each saying what it points at
   (bucket, URL or path, secrets masked), whether it answers and how fast, its journal backlog,
-  free space for a `local` store, and for a `backfill` target how far behind it is.
+  free space for a `local` store, and for a `replica` or `backfill` target how far behind it is.
 
 It ends with the last warnings and errors from every subsystem, which is usually where the
 answer is.
@@ -339,8 +339,8 @@ A domain can have several backends, each with a **role**:
 
 | `role` | Written | Read | What it is for |
 |---|---|---|---|
-| `main` | every write | preferred | The writable source of truth. Several are fine: all get every write, the first in config order serves reads. |
-| `replica` | every write | when no `main` is reachable | A complete second copy, journal and cursor included. Same traffic as a `main` but never preferred for reads, so it says "this is a copy" rather than "another source of truth". |
+| `main` | every write, and the write waits for it | preferred | The writable source of truth. Several are fine: all get every write, the first in config order serves reads. |
+| `replica` | every write, in the background | when no `main` is reachable | A complete second copy, journal and cursor included. A write returns as soon as the mains have it, so a slow or unreachable replica never sets the pace of a copy — it catches up afterwards. |
 | `backfill` | lazily, in the background | never | A copy that grows to cover what you write. Writes never block on it and never fail because of it. No journal, no cursor. |
 | `readOnly` | never | when the source of truth misses or is unreachable | An authoritative store worth serving but not writing — an old bucket you're migrating off. |
 
@@ -361,6 +361,27 @@ tsync resync-remote --source cloud     # ...copying *from* the named one
 tsync recheck                          # verify the remote against the local cache
 ```
 
+### Catching up
+
+Neither a `replica` nor a `backfill` target is written on the path of your copy. A write lands
+on the mains and returns; each target then works through what it owes on its own. So writing a
+file into the mount runs at the speed of the fastest `main` — a local disk stays a local disk —
+and a cloud copy behind it costs nothing but time it spends on its own.
+
+What each target still owes is kept on disk, under `<data dir>/lane-pending/<domain>/`, and is
+recorded before the write is reported done. Losing the network, or the machine, does not lose
+it: a failure that can clear (a dropped link, a throttling store) is waited out and retried,
+and anything still queued when the daemon stops is picked up when it next starts. `tsync stats`
+shows how far behind each target is.
+
+Two things are not waited out. A failure that cannot clear — a wrong credential, a bucket that
+refuses writes — drops the job rather than blocking everything queued behind it, and the target
+is reported `DEGRADED` from then on. So is a queue that has grown absurd. Both mean the target
+is missing data that patience will not supply: `tsync resync-remote --source <main>`.
+
+Between a write and its target catching up, that write exists only on the mains. With a single
+local `main`, that means only on that machine — which is the trade being made.
+
 ### Choosing between `replica` and `backfill`
 
 `replica` is a guarantee, and costs a full copy of every write.
@@ -376,8 +397,9 @@ confirmed present. What's missing is entire files — never half of one, never a
 pointing at blocks that were never copied. Coverage only grows; cold data nothing touches
 again is never copied.
 
-`tsync resync-remote --source <main>` closes the gap deliberately, and is the repair path
-after a target has been unreachable — the daemon logs what it dropped.
+`tsync resync-remote --source <main>` is how a target added to an existing domain gets filled,
+and the repair path after one has been reported `DEGRADED`. A target that is merely behind
+needs no help.
 
 ### Rules
 
@@ -619,8 +641,9 @@ Every backend needs a `type`, a `name` (used by `resync-remote --source`) and a
 ## Backend role reference
 
 See [step 8](#8-add-a-second-backend) for the table and rules. In short: `main` is the source
-of truth, `replica` an eager complete copy, `backfill` a lazy converging copy, `readOnly` an
-archive read but never written. At least one `main`, or `readOnly` stores alone.
+of truth and the only role a write waits for, `replica` a complete copy that catches up behind
+it, `backfill` a converging copy that starts empty, `readOnly` an archive read but never
+written. At least one `main`, or `readOnly` stores alone.
 
 ## Symlink policies
 
@@ -677,6 +700,7 @@ wire.
 | A backend was offline and has fallen behind | `tsync resync-remote --source <name>`. |
 | Local cache and remote disagree | `tsync recheck`, then `tsync sync --full` if it persists. |
 | Daemon state unclear | `tsync status`, `tsync stats`, and `tsync logs -f` — [reading the log](#reading-the-log). |
-| One backend of several is misbehaving | `tsync stats` — each backend reports its own reachability, journal backlog and backfill queue. |
-| A backfill target says `DEGRADED` | Its queue overflowed and writes were dropped: `tsync resync-remote --source <main>`. |
+| One backend of several is misbehaving | `tsync stats` — each backend reports its own reachability, journal backlog and how far behind it is. |
+| A `replica` or `backfill` target is behind | Normal: it catches up on its own, and what it owes survives a restart. `tsync stats` says by how much. |
+| A target says `DEGRADED` | Writes were dropped — refused, or queued past all reason: `tsync resync-remote --source <main>`. |
 | A domain served over http-proxy misbehaves | Open the server's `/` page, or `curl` its `/stats` — [step 7](#checking-on-the-server). The server has no IPC socket, so `tsync stats` cannot reach it. |

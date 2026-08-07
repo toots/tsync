@@ -3,10 +3,14 @@ open Lwt.Syntax
 (* A composite Backend.S composing the readable backends in role order, and
    deciding how far a read may look.
 
-   - [writable] — the [main] backends then the [replica]s. Every write fans out
-     over all of them, so they hold the same content and any live one speaks for
-     the source of truth: a read takes the first answer from a reachable one, and
-     a definitive "not found" from it ends the read.
+   - [sync] — the [main] backends. A write goes here and nowhere else, and
+     returns once it has landed: this is the source of truth.
+   - [deferred] — the [replica]s. Read behind the mains, but not written here:
+     {!Lane_backend} carries them, so a slow or unreachable replica cannot hold
+     up a write. They hold the same content as the mains eventually, which is why
+     a read may fall through to one — a definitive "not found" from the first
+     reachable backend still ends the read, so a failover read is behind by
+     whatever its lane still owes.
    - [fallbacks] — the [readOnly] stores. Different content (an old bucket still
      worth serving, never worth writing), consulted both when the source of truth
      says no and when none of it is reachable. Never written.
@@ -16,16 +20,22 @@ open Lwt.Syntax
 
 type sub = { name : string; backend : (module Backend.S) }
 
-(* [writable]: mains then replicas — the head serves reads, a write fans out over
-     all of them.
+(* [sync]: the mains — the head serves reads, and a write fans out over these
+     alone.
+   [deferred]: the replicas, read after the mains and written by their lane.
    [fallbacks]: read-only stores, consulted in order, never written. *)
-let make ~(writable : sub list) ~(fallbacks : sub list) : (module Backend.S) =
-  let inners = List.map (fun (s : sub) -> s.backend) writable in
+let make ~(sync : sub list) ~(deferred : sub list) ~(fallbacks : sub list) :
+    (module Backend.S) =
+  let readable = sync @ deferred in
+  (* Every store holding the domain's own content, for the questions that are
+     about the stores rather than about one key. *)
+  let inners = List.map (fun (s : sub) -> s.backend) readable in
+  let writers = List.map (fun (s : sub) -> s.backend) sync in
   (* Fanning out over an empty list would report success, and a write that lands
      nowhere must not look like one that landed. *)
   let write f =
-    if inners = [] then Lwt.fail Backend.Not_writable
-    else Lwt_list.iter_s f inners
+    if writers = [] then Lwt.fail Backend.Not_writable
+    else Lwt_list.iter_s f writers
   in
   (* [stop_on_miss] takes the first reachable backend's [None] as the answer;
      otherwise a miss moves on. [`Unreachable exn] when every backend raised. *)
@@ -59,7 +69,7 @@ let make ~(writable : sub list) ~(fallbacks : sub list) : (module Backend.S) =
      backend that could hold the key was actually asked: an unreachable one
      surfaces its error, since "could not look" must not read as "not there". *)
   let read label f =
-    let* first = walk ~stop_on_miss:true label writable f in
+    let* first = walk ~stop_on_miss:true label readable f in
     match first with
       | `Answer v -> Lwt.return (Some v)
       | _ -> (
@@ -110,8 +120,8 @@ let make ~(writable : sub list) ~(fallbacks : sub list) : (module Backend.S) =
       in
       Lwt.return (Option.value r ~default:[])
 
-    (* These describe where new data goes, so only writable backends have a
-       say. *)
+    (* These describe where the domain's own data lives, so the read-only
+       archives have no say — a replica does, being a full copy. *)
     let share_url ~prefix () =
       let rec go = function
         | [] -> Lwt.return_none

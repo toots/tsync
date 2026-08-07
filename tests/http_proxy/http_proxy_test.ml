@@ -414,9 +414,9 @@ let () =
   let archive = by_name "archive" in
   assert (json_member "reachable" archive = `Bool false);
   assert (json_member "error" archive <> `Null);
-  let backfill = json_member "backfill" archive in
-  assert (json_member "queued" backfill = `Int 7);
-  assert (json_member "degraded" backfill = `Bool true);
+  let lane = json_member "lane" archive in
+  assert (json_member "queued" lane = `Int 7);
+  assert (json_member "degraded" lane = `Bool true);
 
   (* Counting is opt-in and never done while a request waits: the first ask
      starts a background walk and says so, a later one has the numbers, and the

@@ -51,7 +51,10 @@ let start_cmd =
       List.map
         (fun (d : Conf_parsing.domain) ->
           let socket_path = Runtime.domain_socket_path runtime_paths d.name in
-          let conf = make_conf ~domain:d.name ~socket_path cfg in
+          (* The only [resume]: the daemon is the process that outlives a lane's
+             work, so it is the one that picks up what a previous run left owed.
+          *)
+          let conf = make_conf ~domain:d.name ~socket_path ~resume:true cfg in
           (d, conf, mount_fn d))
         domains
     in

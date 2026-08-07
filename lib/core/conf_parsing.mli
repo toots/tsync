@@ -1,13 +1,16 @@
 (** What a backend is for. Required per backend; there is no default.
 
     - [`Main] — a writable source of truth. Reads prefer the first one in config
-      order; a write fans out over every main and replica.
+      order; a write fans out over every main and returns once they have it.
     - [`Replica] — a complete second copy: it receives every write, journal and
-      cursor included, and serves reads when no main is reachable. Differs from
-      a second [`Main] only in read preference. See {!Fallback_backend}.
-    - [`Backfill] — a converging copy, filled lazily from the write side and
-      never read from. Content only: no journal, no cursor. See
-      {!Backfill_backend}.
+      cursor included, and serves reads when no main is reachable. Filled behind
+      the write rather than in it, so a slow or unreachable replica never sets
+      the pace of a copy, and a failover read is behind by whatever its lane
+      still owes. Queued work is kept on disk and resumes after a restart. See
+      {!Lane_backend} and {!Fallback_backend}.
+    - [`Backfill] — a converging copy, filled the same way but never read from,
+      and starting empty: it covers what is written from then on. Content only:
+      no journal, no cursor. See {!Lane_backend}.
     - [`Read_only] — an authoritative store consulted when the source of truth
       misses or is unreachable, and never written. See {!Fallback_backend}. *)
 type role = [ `Main | `Replica | `Backfill | `Read_only ]

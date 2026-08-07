@@ -94,11 +94,19 @@ module Down : Backend.S = struct
   let max_concurrency ~prefix:_ () = Lwt.return_none
 end
 
-let wrap ~inners ~target ~name : Backfill_backend.t =
-  Backfill_backend.make ~chunk_prefix ~chunk_keys
-    ~skip_prefixes:[journal_prefix; cursor_key]
+let wrap ~inners ~target ~name : Lane_backend.t =
+  Lane_backend.make ~chunk_prefix ~chunk_keys
+    ~log_dir:(Filename.concat root "lanes")
     ~inners
-    ~backfills:[{ Backfill_backend.name; backend = target }]
+    ~targets:
+      [
+        {
+          Lane_backend.name;
+          backend = target;
+          skip_prefixes = [journal_prefix; cursor_key];
+        };
+      ]
+    ()
 
 let () =
   let main = Local_backend.make ~root:main_root in
@@ -108,10 +116,10 @@ let () =
       ~target:(Local_backend.make ~root:target_root)
       ~name:"target"
   in
-  let (module B : Backend.S) = wrapped.Backfill_backend.backend in
+  let (module B : Backend.S) = wrapped.Lane_backend.backend in
   (* As the diagnosis endpoints report it. *)
-  let lane = List.assoc "target" wrapped.Backfill_backend.lanes in
-  (* The generic hook rather than [Backfill_backend.drain_all]: a target catches
+  let lane = List.assoc "target" wrapped.Lane_backend.lanes in
+  (* The generic hook rather than [Lane_backend.drain_all]: a target catches
      up only because [make] registered itself there. *)
   let drain () =
     let+ () = Backend.drain () in
@@ -216,16 +224,16 @@ let () =
      in
      let queued = lane () in
      step "queued right after a manifest put: %d (degraded %b)"
-       queued.Backfill_backend.queued queued.Backfill_backend.degraded;
+       queued.Lane_backend.queued queued.Lane_backend.degraded;
      let* () = drain () in
      let settled = lane () in
      step "queued once drained: %d (in flight %d, degraded %b)"
-       settled.Backfill_backend.queued settled.Backfill_backend.in_flight
-       settled.Backfill_backend.degraded;
+       settled.Lane_backend.queued settled.Lane_backend.in_flight
+       settled.Lane_backend.degraded;
 
      case "an unreachable target is logged, never fatal";
      let down = wrap ~inners:[main] ~target:(module Down) ~name:"down" in
-     let (module D : Backend.S) = down.Backfill_backend.backend in
+     let (module D : Backend.S) = down.Lane_backend.backend in
      let* () = D.put ~key:c8 ~data:"eeee" () in
      let* () =
        D.put ~key:(manifest_key "safe") ~data:(manifest ~name:"safe" [c8]) ()

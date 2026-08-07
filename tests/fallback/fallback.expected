@@ -9,7 +9,7 @@
   head nowhere = error: down
 
 === main + replica: same content, so a miss is authoritative
-  put both -> on main: true, on replica: true
+  put both -> on main: true, on replica: false
   get on-replica (main is reachable and misses) = none
 
 === main unreachable, replica reachable

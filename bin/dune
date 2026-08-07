@@ -9,7 +9,7 @@
   tsync_backend
   tsync_diagnostics
   tsync_fallback_backend
-  tsync_backfill_backend
+  tsync_lane_backend
   tsync_local_io
   tsync_queue
   tsync_file

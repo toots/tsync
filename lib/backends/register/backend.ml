@@ -117,7 +117,7 @@ let drain_hooks : (unit -> unit Lwt.t) list ref = ref []
 let on_drain f = drain_hooks := f :: !drain_hooks
 let drain () = Lwt_list.iter_p (fun f -> f ()) !drain_hooks
 
-(* A domain's backends individually. The composites ({!Fallback}, {!Backfill})
+(* A domain's backends individually. The composites ({!Fallback}, {!Lane})
    present one {!S} and keep their members' names to themselves, so whoever builds
    a domain's backends declares them here rather than each composite growing an
    introspection interface. Only diagnosis reads this; nothing routes on it. *)
@@ -130,10 +130,14 @@ type member = {
           fields masked: a report gets pasted into bug threads. *)
   backend : (module S);
       (** The leaf store, so a reader can probe it directly. *)
-  pending : (unit -> int) option;  (** backfill: jobs queued for this target *)
-  in_flight : (unit -> int) option;  (** backfill: chunk forwards in flight *)
+  pending : (unit -> int) option;
+      (** Replica and backfill: jobs this target still owes, kept on disk. *)
+  in_flight : (unit -> int) option;
+      (** Replica and backfill: chunk forwards in flight. *)
   degraded : (unit -> bool) option;
-      (** Backfill: writes were dropped, [tsync resync-remote] is needed. *)
+      (** Replica and backfill: writes were dropped, [tsync resync-remote] is
+          needed — unlike a target merely being behind, patience will not fix
+          this. *)
   local_path : string option;
       (** Where a [local] store keeps its files, so a report can say how much
           room is left. Absent for stores whose capacity is not ours to know. *)

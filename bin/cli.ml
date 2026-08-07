@@ -116,12 +116,12 @@ let chunk_keys data =
 
 (* The domain's backends composed by role into one module.
 
-   Two layers answering different questions. {!Fallback_backend} says which
-   backends a read may look at and how far a write fans out: mains and replicas
-   are the source of truth, read-only stores sit behind them. {!Backfill_backend}
-   wraps that with the targets filled lazily from the write side. A domain of
-   only read-only stores gets an inner layer with nothing writable in it, which
-   is what makes it readable but not writable. *)
+   Two layers answering different questions. {!Fallback_backend} says where a
+   read may look and in what order: mains, then replicas, then the read-only
+   stores. {!Lane_backend} says which of them a write waits for — the mains — and
+   which catch up behind it, namely the replicas and the backfill targets. A
+   domain of only read-only stores gets an inner layer with nothing writable in
+   it, which is what makes it readable but not writable. *)
 (* The composite every read and write goes through, plus, separately, the stores
    a share link may be served from. A share manifest lives outside every domain
    root, so publishing one is not a domain write and must not be refused by a
@@ -131,16 +131,27 @@ type resolved_backends = {
   share_backends : (module Backend.S) list;
 }
 
-(* Order comes from {!Conf_parsing.order_backends}. A backfill target is behind
-   by construction, so a link served from one could point at something it has not
-   caught up with. *)
+(* Order comes from {!Conf_parsing.order_backends}, so a main answers first. A
+   backfill target is excluded: it holds only part of the domain, so a link
+   served from one could point at a file it will never have. A replica is kept,
+   being a complete copy — a link served from one during the window its lane is
+   still catching up can 404, which is the same window everything else about a
+   replica lives in. *)
 let share_leaves leaves =
   List.filter_map
     (fun ((bc : Conf_parsing.backend_config), backend) ->
       if bc.role = `Backfill then None else Some backend)
     leaves
 
-let build_backends (d : Conf_parsing.domain) : resolved_backends =
+(* Where the lanes keep what they still owe. Per domain, since the jobs name
+   domain keys and a shared directory would replay one domain's against
+   another's backends — the same reason {!Wal} shards by domain. *)
+let lane_log_dir (d : Conf_parsing.domain) =
+  Filename.concat
+    (Filename.concat runtime_paths.Runtime.data_dir "lane-pending")
+    d.Conf_parsing.name
+
+let build_backends ~resume (d : Conf_parsing.domain) : resolved_backends =
   (* Shared by every layer below: a second [make_backend] for the same config is
      a second client against the same store. *)
   let leaves =
@@ -153,34 +164,44 @@ let build_backends (d : Conf_parsing.domain) : resolved_backends =
       (fun ((bc : Conf_parsing.backend_config), _) -> List.mem bc.role rs)
       leaves
   in
-  (* Roles are validated at parse time ({!Conf_parsing.validate_roles}), so
-     [writable] is empty only for a legitimately read-only domain. *)
-  let writable = of_roles [`Main; `Replica] in
+  (* Roles are validated at parse time ({!Conf_parsing.validate_roles}), so the
+     mains are empty only for a legitimately read-only domain. *)
   let sub ((bc : Conf_parsing.backend_config), backend) =
     { Fallback_backend.name = bc.name; backend }
   in
   let inner =
-    Fallback_backend.make ~writable:(List.map sub writable)
+    Fallback_backend.make
+      ~sync:(List.map sub (of_roles [`Main]))
+      ~deferred:(List.map sub (of_roles [`Replica]))
       ~fallbacks:(List.map sub (of_roles [`Read_only]))
   in
+  (* A backfill target has no use for the sync bookkeeping; a replica needs it,
+     since a peer reading one reads its journal. *)
+  let skip_prefixes (bc : Conf_parsing.backend_config) =
+    if bc.role = `Backfill then
+      [Conf_parsing.journal_prefix d; Conf_parsing.cursor_key d]
+    else []
+  in
   let composite, lanes =
-    match of_roles [`Backfill] with
+    match of_roles [`Replica; `Backfill] with
       | [] -> (inner, [])
-      | bf ->
-          let bf_backend =
-            Backfill_backend.make
+      | behind ->
+          let laned =
+            Lane_backend.make ~resume
               ~chunk_prefix:(Conf_parsing.chunk_prefix d)
-              ~chunk_keys
-              ~skip_prefixes:
-                [Conf_parsing.journal_prefix d; Conf_parsing.cursor_key d]
-              ~inners:[inner]
-              ~backfills:
+              ~chunk_keys ~log_dir:(lane_log_dir d) ~inners:[inner]
+              ~targets:
                 (List.map
                    (fun ((bc : Conf_parsing.backend_config), backend) ->
-                     { Backfill_backend.name = bc.Conf_parsing.name; backend })
-                   bf)
+                     {
+                       Lane_backend.name = bc.Conf_parsing.name;
+                       backend;
+                       skip_prefixes = skip_prefixes bc;
+                     })
+                   behind)
+              ()
           in
-          (bf_backend.Backfill_backend.backend, bf_backend.lanes)
+          (laned.Lane_backend.backend, laned.lanes)
   in
   (* The only place holding each backend's name, role and module at once. *)
   Backend.report_members ~domain:d.Conf_parsing.name
@@ -206,9 +227,9 @@ let build_backends (d : Conf_parsing.domain) : resolved_backends =
                    | _ -> (k, v))
                bc.fields;
            backend;
-           pending = stat (fun s -> s.Backfill_backend.queued);
-           in_flight = stat (fun s -> s.Backfill_backend.in_flight);
-           degraded = stat (fun s -> s.Backfill_backend.degraded);
+           pending = stat (fun s -> s.Lane_backend.queued);
+           in_flight = stat (fun s -> s.Lane_backend.in_flight);
+           degraded = stat (fun s -> s.Lane_backend.degraded);
            (* Only a local store sits on a filesystem we can measure. *)
            local_path =
              (if bc.backend_type = "local" then List.assoc_opt "path" bc.fields
@@ -249,9 +270,12 @@ let read_default_domain () =
 (* [tier=false] exposes the raw backend list instead of the role composite, for
    commands (resync-remote) copying between individual backends including ones
    the composite never reads from. [source] forces reads from the named backend,
-   for commands that pick where to read. *)
-let make_conf ?domain ?socket_path ?(tier = true) ?source cfg : (module Conf.S)
-    =
+   for commands that pick where to read. [resume] picks up the lane work a
+   previous run left owed, and belongs to the daemon alone — a one-shot command
+   records and drains its own, but must not run jobs the daemon is also running.
+*)
+let make_conf ?domain ?socket_path ?(tier = true) ?(resume = false) ?source cfg
+    : (module Conf.S) =
   Tls_conf.apply cfg.Conf_parsing.tls;
   let domain =
     match domain with Some _ -> domain | None -> read_default_domain ()
@@ -285,7 +309,7 @@ let make_conf ?domain ?socket_path ?(tier = true) ?source cfg : (module Conf.S)
       match source with
         | Some name -> flat (order_backends_from name d.Conf_parsing.backends)
         | None ->
-            if tier then build_backends d
+            if tier then build_backends ~resume d
             else flat (Conf_parsing.order_backends d.Conf_parsing.backends)
 
     let backends = resolved.backends
@@ -338,8 +362,9 @@ let load_conf ?domain ?tier ?source () =
   make_conf ?domain ?tier ?source (load_config ())
 
 (* [Lwt_main.run] plus a drain: a command returns as soon as its work is posted
-   and a backfill target fills in the background, so without this a short-lived
-   command exits carrying pending copies with it. *)
+   and a lane target fills in the background, so without this a short-lived
+   command exits leaving copies for the daemon it may not be running alongside.
+*)
 let run_lwt p =
   let open Lwt.Syntax in
   Lwt_main.run
