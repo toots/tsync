@@ -1,1 +1,1 @@
-(* fuse frontend not compiled in *)
+let fuse_frontend_enabled = false
