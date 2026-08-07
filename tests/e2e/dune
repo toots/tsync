@@ -1,8 +1,0 @@
-; Shared by the per-platform end-to-end programs. No frontend dependency: a
-; frontend gives the user a directory, and what is asserted about that directory
-; is the same either way.
-
-(library
- (name tsync_e2e)
- (wrapped false)
- (libraries tsync_core tsync_runtime yojson unix threads.posix))

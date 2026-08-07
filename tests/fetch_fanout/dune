@@ -1,3 +1,0 @@
-(test
- (name fetch_fanout_test)
- (libraries tsync_conf tsync_file lwt lwt.unix unix))

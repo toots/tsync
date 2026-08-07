@@ -1,3 +1,0 @@
-(test
- (name metrics_test)
- (libraries tsync_metrics))

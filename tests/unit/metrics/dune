@@ -1,0 +1,5 @@
+(test
+ (flags
+  (:standard -open Tsync_metrics))
+ (name metrics_test)
+ (libraries tsync_metrics))

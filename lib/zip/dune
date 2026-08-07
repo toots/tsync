@@ -1,4 +1,0 @@
-(library
- (name tsync_zip)
- (wrapped false)
- (libraries unix))

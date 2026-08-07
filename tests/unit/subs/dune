@@ -1,0 +1,5 @@
+(executable
+ (flags
+  (:standard -open Tsync_ipc))
+ (name subs_test)
+ (libraries tsync_ipc lwt lwt.unix))

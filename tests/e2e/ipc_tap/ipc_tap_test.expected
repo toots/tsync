@@ -1,0 +1,8 @@
+the server answers before anything is in the way: ok
+a request through the tap is answered by the real server: ok
+the request was recorded: ok
+the recorded request keeps its arguments: ok
+an action nobody asked for is not recorded: ok
+concurrent requests are all recorded: ok
+forgetting clears what was seen: ok
+the server is reachable again once the tap is gone: ok

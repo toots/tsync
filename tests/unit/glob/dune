@@ -1,0 +1,5 @@
+(executable
+ (flags
+  (:standard -open Tsync_glob))
+ (name glob)
+ (libraries tsync_glob))

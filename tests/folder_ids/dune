@@ -1,3 +1,0 @@
-(test
- (name folder_ids_test)
- (libraries tsync_queue tsync_local_io lwt lwt.unix unix))

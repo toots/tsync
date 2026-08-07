@@ -1,0 +1,5 @@
+(executable
+ (flags
+  (:standard -open Tsync_lwt_unix))
+ (name bounded_test)
+ (libraries tsync_lwt_unix lwt lwt.unix))

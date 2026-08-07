@@ -1,0 +1,5 @@
+(executable
+ (flags
+  (:standard -open Tsync_backend_register -open Tsync_gcs_backend))
+ (name gcs)
+ (libraries tsync_gcs_backend tsync_backend_register))

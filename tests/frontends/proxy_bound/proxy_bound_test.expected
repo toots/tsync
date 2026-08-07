@@ -1,0 +1,16 @@
+no more reads run at once than the limit: ok
+the limit is actually reached, so the bound is what capped it: ok
+the rest were held, not rejected: ok
+writes are bounded too: ok
+metadata is not held behind data: ok
+the same budget is available afterwards: ok
+the bound still holds under a flood: ok
+the queue holds exactly its limit: ok
+nothing is silently dropped: ok
+the budget survives a flood: ok
+a quiet period refuses nobody: ok
+the slowest backend sets the bound: ok
+backends with no opinion are ignored, not counted as zero: ok
+no opinion anywhere leaves it to the default: ok
+a single backend speaks for itself: ok
+an unconfigured bound lets everything through: ok

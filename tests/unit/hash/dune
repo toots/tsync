@@ -1,0 +1,5 @@
+(executable
+ (flags
+  (:standard -open Tsync_xxhash))
+ (name hash)
+ (libraries tsync_xxhash))

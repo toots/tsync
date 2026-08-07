@@ -1,6 +1,0 @@
-(library
- (name tsync_s3_backend)
- (optional)
- (wrapped false)
- (library_flags (-linkall))
- (libraries tsync_backend_register tsync_log aws-s3-lwt lwt lwt.unix))

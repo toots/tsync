@@ -1,3 +1,0 @@
-(test
- (name item_ref_test)
- (libraries tsync_queue))

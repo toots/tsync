@@ -1,0 +1,20 @@
+(executable
+ (flags
+  (:standard
+   -open
+   Tsync_backend_register
+   -open
+   Tsync_conf
+   -open
+   Tsync_local_backend
+   -open
+   Tsync_diagnostics))
+ (name probe_deadline_test)
+ (libraries
+  tsync_backend_register
+  tsync_local_backend
+  tsync_diagnostics
+  tsync_conf
+  yojson
+  lwt
+  lwt.unix))

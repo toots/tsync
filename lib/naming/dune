@@ -1,0 +1,26 @@
+; Every namespace this system has, and the translations between them: a logical
+; key, the backend key it maps to, the local mirror path, a frontend's item ref,
+; a folder id, a version key, a chunk's shard. Depends on nothing that stores or
+; transfers anything -- it only says what things are called.
+
+(library
+ (flags
+  (:standard
+   -open
+   Tsync_conf
+   -open
+   Tsync_local_io
+   -open
+   Tsync_lwt_unix
+   -open
+   Tsync_xxhash))
+ (name tsync_naming)
+ (libraries
+  tsync_conf
+  tsync_local_io
+  tsync_lwt_unix
+  tsync_xxhash
+  yojson
+  unix
+  lwt
+  lwt.unix))

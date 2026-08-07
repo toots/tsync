@@ -1,0 +1,5 @@
+(executable
+ (flags
+  (:standard -open Tsync_test_runner))
+ (name versioning)
+ (libraries tsync_test_runner))

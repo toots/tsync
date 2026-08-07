@@ -1,0 +1,5 @@
+(library
+ (flags
+  (:standard -open Tsync_log))
+ (name tsync_tls)
+ (libraries conduit-lwt-unix tsync_log))

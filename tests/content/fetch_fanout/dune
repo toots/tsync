@@ -1,0 +1,5 @@
+(test
+ (flags
+  (:standard -open Tsync_content -open Tsync_object -open Tsync_conf))
+ (name fetch_fanout_test)
+ (libraries tsync_content tsync_object tsync_conf lwt lwt.unix unix))

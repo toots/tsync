@@ -1,0 +1,5 @@
+(executable
+ (flags
+  (:standard -open Tsync_naming -open Tsync_local_io -open Tsync_lwt_unix))
+ (name folder_ids_test)
+ (libraries tsync_naming tsync_lwt_unix tsync_local_io lwt lwt.unix unix))

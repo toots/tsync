@@ -1,0 +1,5 @@
+(library
+ (flags
+  (:standard -open Tsync_backend_register))
+ (name tsync_conf)
+ (libraries tsync_backend_register))

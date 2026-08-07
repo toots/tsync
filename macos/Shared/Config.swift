@@ -32,7 +32,7 @@ public struct Config: Codable, Sendable {
     }
 
     /// Runtime state the daemon owns. Must agree with `Runtime.default_paths` in
-    /// `lib/runtime/macos_runtime.ml`.
+    /// `lib/platform/runtime/macos_runtime.ml`.
     public static var dataDirURL: URL {
         groupContainerURL.appendingPathComponent("tsync", isDirectory: true)
     }

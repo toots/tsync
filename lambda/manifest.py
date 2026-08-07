@@ -5,7 +5,7 @@ field sits at a known offset and chunk i's key is a slice at a computed one, so
 there is no parsing beyond a struct unpack — which matters at the sizes these
 reach: a 32 GB file at a 1 MiB chunk size carries 31,230 chunk keys.
 
-This mirrors lib/file/chunk_table.ml. The two must agree byte for byte; the
+This mirrors lib/object/chunk_table.ml. The two must agree byte for byte; the
 layout is documented in both.
 
 Folder markers are a different thing and stay JSON — they are one small object

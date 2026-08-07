@@ -1,0 +1,3 @@
+(library
+ (name tsync_lwt_unix)
+ (libraries unix lwt lwt.unix))

@@ -1,4 +1,0 @@
-(library
- (name tsync_tls)
- (wrapped false)
- (libraries conduit-lwt-unix tsync_log))

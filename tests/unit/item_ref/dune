@@ -1,0 +1,5 @@
+(executable
+ (flags
+  (:standard -open Tsync_naming))
+ (name item_ref_test)
+ (libraries tsync_naming))

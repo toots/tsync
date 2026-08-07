@@ -1,0 +1,15 @@
+the root has its own spelling: ok
+a directory is named by id: ok
+a file is named by parent and leaf: ok
+the root id normalises to the root: ok
+only the first slash separates: ok
+a colon in a name is just a character: ok
+a storage key stays a key: ok
+a file form with no leaf is bad: ok
+a file form with an empty leaf is bad: ok
+a file form with no parent is bad: ok
+a bare prefix is not a reference: ok
+round trips: root: ok
+round trips: d:9f3a: ok
+round trips: f:9f3a/report.pdf: ok
+round trips: tsync/dom/manifests/a.txt: ok

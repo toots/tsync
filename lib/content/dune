@@ -1,0 +1,43 @@
+; Bytes to and from a manifest: chunking and dedup on the way out, the local
+; cache-chunk store, and demand-paged range reads on the way back. A file is
+; never assembled -- a read maps its byte range onto the chunks backing it and
+; fetches only the ones that are absent.
+
+(library
+ (flags
+  (:standard
+   -open
+   Tsync_conf
+   -open
+   Tsync_naming
+   -open
+   Tsync_object
+   -open
+   Tsync_store
+   -open
+   Tsync_local_io
+   -open
+   Tsync_lwt_unix
+   -open
+   Tsync_xxhash
+   -open
+   Tsync_metrics
+   -open
+   Tsync_backend_register
+   -open
+   Tsync_log))
+ (name tsync_content)
+ (libraries
+  tsync_conf
+  tsync_naming
+  tsync_object
+  tsync_store
+  tsync_local_io
+  tsync_lwt_unix
+  tsync_xxhash
+  tsync_metrics
+  tsync_backend_register
+  tsync_log
+  unix
+  lwt
+  lwt.unix))

@@ -2,13 +2,15 @@
 ; domain. Run by hand with `make -C macos e2e`.
 
 (executable
+ (flags
+  (:standard
+   -open
+   Tsync_file_provider_frontend
+   -open
+   Tsync_runtime
+   -open
+   Tsync_e2e))
  (name e2e_macos)
  (enabled_if
   (= %{system} macosx))
- (libraries
-  tsync_e2e
-  tsync_core
-  tsync_runtime
-  tsync_file_provider
-  yojson
-  unix))
+ (libraries tsync_e2e tsync_runtime tsync_file_provider_frontend yojson unix))

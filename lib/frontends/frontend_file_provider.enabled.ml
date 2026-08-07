@@ -1,1 +1,1 @@
-let () = File_provider_frontend.register ()
+let file_provider_frontend_enabled = true

@@ -126,7 +126,7 @@ let purge (_ : (module Conf.S)) =
     with Sys_error _ ->
       Printf.printf "remaining: %s\n  sudo rm %s\n" cli_symlink cli_symlink)
 
-let register () =
+let () =
   Frontend.register implementation ~cli_group:"fileprovider"
     ~commands:
       [

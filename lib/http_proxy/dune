@@ -1,4 +1,0 @@
-(library
- (name tsync_http_proxy)
- (wrapped false)
- (libraries tsync_backend_register digestif eqaf base64 yojson unix))

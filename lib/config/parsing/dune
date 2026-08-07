@@ -1,0 +1,3 @@
+(library
+ (name tsync_conf_parsing)
+ (libraries unix yojson))

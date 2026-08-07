@@ -1,6 +1,5 @@
 (library
  (name tsync_frontend)
- (wrapped false)
  (library_flags (-linkall))
  (libraries
   tsync_frontend_register

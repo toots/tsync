@@ -1,0 +1,5 @@
+(library
+ (flags
+  (:standard -open Tsync_log))
+ (name tsync_ipc)
+ (libraries tsync_log unix lwt lwt.unix))

@@ -1,0 +1,21 @@
+(library
+ (flags
+  (:standard
+   -open
+   Tsync_log
+   -open
+   Tsync_http_proxy
+   -open
+   Tsync_backend_register))
+ (name tsync_http_proxy_backend)
+ (private_modules http_proxy_backend)
+ (library_flags (-linkall))
+ (libraries
+  tsync_backend_register
+  tsync_http_proxy
+  tsync_log
+  cohttp-lwt-unix
+  uri
+  yojson
+  lwt
+  lwt.unix))

@@ -1,6 +1,35 @@
 (library
+ (flags
+  (:standard
+   -open
+   Tsync_content
+   -open
+   Tsync_store
+   -open
+   Tsync_object
+   -open
+   Tsync_naming
+   -open
+   Tsync_ipc
+   -open
+   Tsync_log
+   -open
+   Tsync_metrics
+   -open
+   Tsync_zip
+   -open
+   Tsync_lwt_unix
+   -open
+   Tsync_http_proxy
+   -open
+   Tsync_backend_register
+   -open
+   Tsync_conf
+   -open
+   Tsync_frontend_register
+   -open
+   Tsync_diagnostics))
  (name tsync_http_proxy_frontend)
- (wrapped false)
  (library_flags (-linkall))
  (preprocess
   (pps ppx_blob))
@@ -10,15 +39,18 @@
   %{project_root}/lambda/mime.json
   stats.html)
  (libraries
+  tsync_content
+  tsync_store
+  tsync_object
+  tsync_naming
+  tsync_lwt_unix
   tsync_frontend_register
   tsync_http_proxy
-  tsync_core
+  tsync_ipc
   tsync_diagnostics
   tsync_metrics
   tsync_backend_register
   tsync_conf
-  tsync_file
-  tsync_queue
   tsync_zip
   tsync_log
   cohttp-lwt-unix

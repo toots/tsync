@@ -1,0 +1,5 @@
+(library
+ (flags
+  (:standard -open Tsync_log -open Tsync_conf))
+ (name tsync_frontend_register)
+ (libraries tsync_conf tsync_log unix lwt.unix))

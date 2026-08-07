@@ -1,18 +1,69 @@
 (executable
+ (flags
+  (:standard
+   -open
+   Tsync_sync
+   -open
+   Tsync_ops
+   -open
+   Tsync_store
+   -open
+   Tsync_object
+   -open
+   Tsync_naming
+   -open
+   Tsync_ipc
+   -open
+   Tsync_conf_parsing
+   -open
+   Tsync_log
+   -open
+   Tsync_local_io
+   -open
+   Tsync_metrics
+   -open
+   Tsync_tls
+   -open
+   Tsync_conf
+   -open
+   Tsync_backend_register
+   -open
+   Tsync_lane_backend
+   -open
+   Tsync_fallback_backend
+   -open
+   Tsync_backend
+   -open
+   Tsync_diagnostics
+   -open
+   Tsync_frontend_register
+   -open
+   Tsync_frontend
+   -open
+   Tsync_device
+   -open
+   Tsync_runtime))
  (name tsync)
  (modules cli configure tsync)
  (public_name tsync)
  (package tsync)
  (libraries
-  tsync_core
+  tsync_sync
+  tsync_ops
+  tsync_store
+  tsync_object
+  tsync_naming
+  tsync_frontend_register
+  tsync_backend_register
+  tsync_metrics
+  tsync_conf_parsing
+  tsync_ipc
   tsync_conf
   tsync_backend
   tsync_diagnostics
   tsync_fallback_backend
   tsync_lane_backend
   tsync_local_io
-  tsync_queue
-  tsync_file
   tsync_log
   tsync_runtime
   tsync_device

@@ -1,0 +1,27 @@
+(test
+ (flags
+  (:standard
+   -open
+   Tsync_ops
+   -open
+   Tsync_naming
+   -open
+   Tsync_backend_register
+   -open
+   Tsync_conf
+   -open
+   Tsync_local_backend
+   -open
+   Tsync_fallback_backend))
+ (name share_test)
+ (libraries
+  tsync_ops
+  tsync_naming
+  tsync_conf
+  tsync_backend_register
+  tsync_fallback_backend
+  tsync_local_backend
+  yojson
+  lwt
+  lwt.unix
+  unix))

@@ -1,0 +1,5 @@
+(library
+ (flags
+  (:standard -open Tsync_log -open Tsync_backend_register))
+ (name tsync_fallback_backend)
+ (libraries tsync_backend_register tsync_log lwt))

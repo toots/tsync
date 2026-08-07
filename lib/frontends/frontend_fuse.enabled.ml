@@ -1,1 +1,1 @@
-let () = Fuse_frontend.register ()
+let fuse_frontend_enabled = true
