@@ -1,6 +1,12 @@
+; The macOS File Provider frontend, whole: the extension-facing operations, the
+; QuickLook thumbnailer, and the registration that offers them as a frontend.
+; File_provider and Preview stay public -- tests drive them without a frontend.
+
 (library
  (flags
   (:standard
+   -open
+   Tsync_sync
    -open
    Tsync_naming
    -open
@@ -8,20 +14,50 @@
    -open
    Tsync_conf
    -open
+   Tsync_ipc_handler
+   -open
+   Tsync_engine
+   -open
+   Tsync_runtime
+   -open
    Tsync_frontend_register
    -open
-   Tsync_file_provider
-   -open
-   Tsync_runtime))
+   Tsync_log))
  (name tsync_file_provider_frontend)
- (optional)
+ (enabled_if
+  (= %{system} macosx))
  (library_flags (-linkall))
+ (foreign_stubs
+  (language c)
+  (names platform_stubs))
+ (foreign_stubs
+  (language c)
+  (names preview_stubs)
+  ; QuickLook's generators are Objective-C, and ARC keeps the request and its
+  ; completion block from having to be released by hand.
+  (flags
+   (-x objective-c -fobjc-arc)))
+ (c_library_flags
+  (-framework
+   QuickLookThumbnailing
+   -framework
+   ImageIO
+   -framework
+   CoreGraphics
+   -framework
+   Foundation))
  (libraries
+  tsync_sync
   tsync_naming
-  tsync_frontend_register
-  tsync_file_provider
-  tsync_runtime
   tsync_conf
   tsync_ipc
+  tsync_engine
+  tsync_ipc_handler
+  tsync_runtime
+  tsync_frontend_register
+  tsync_log
+  yojson
+  base64
   unix
-  yojson))
+  lwt
+  lwt.unix))

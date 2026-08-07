@@ -1,26 +1,60 @@
+; The FUSE frontend, whole: the filesystem operations and the registration that
+; offers them as a frontend. Every module is private -- nothing outside names
+; one, the registration happens from the library's own initialiser, and
+; -linkall is what keeps it in the link.
+
 (library
  (flags
   (:standard
    -open
+   Tsync_sync
+   -open
+   Tsync_store
+   -open
+   Tsync_naming
+   -open
    Tsync_object
    -open
-   Tsync_conf
+   Tsync_ipc
    -open
-   Tsync_frontend_register
+   Tsync_metrics
    -open
-   Tsync_fuse
+   Tsync_lwt_unix
    -open
    Tsync_local_io
    -open
+   Tsync_conf
+   -open
+   Tsync_ipc_handler
+   -open
+   Tsync_engine
+   -open
+   Tsync_frontend_register
+   -open
+   Tsync_backend_register
+   -open
    Tsync_log))
  (name tsync_fuse_frontend)
+ (private_modules fuse_fs hidden_ops internal_ops path_ops fuse_frontend)
  (optional)
  (library_flags (-linkall))
  (libraries
+  tsync_sync
+  tsync_store
+  tsync_naming
   tsync_object
-  tsync_local_io
-  tsync_log
+  tsync_backend_register
   tsync_frontend_register
-  tsync_fuse
+  tsync_log
   tsync_conf
-  unix))
+  tsync_engine
+  tsync_ipc
+  tsync_metrics
+  tsync_local_io
+  tsync_ipc_handler
+  tsync_lwt_unix
+  fuse3
+  unix
+  lwt
+  lwt.unix
+  threads.posix))
