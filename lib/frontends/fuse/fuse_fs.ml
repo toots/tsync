@@ -241,6 +241,32 @@ module Make (C : Conf.S) = struct
                   files
                 @ List.map fst dirs
               in
+              (* Files and directories are two listings of one namespace, and a
+                 name can land in both -- a file key and a folder marker that
+                 share it. Concatenated, the directory then returns that name
+                 twice, which no caller is prepared for: `ls` prints it twice
+                 and anything building a map from the listing loses one silently.
+                 A stress run caught a mount doing exactly this.
+
+                 Whatever produced the collision is upstream of here and is not
+                 something readdir can repair, so it is logged rather than
+                 quietly absorbed. What readdir owes its caller either way is a
+                 listing with each name once. *)
+              let names =
+                let seen = Hashtbl.create 16 in
+                List.filter
+                  (fun n ->
+                    if Hashtbl.mem seen n then begin
+                      Log.warn "readdir %s: %S is both a file and a directory"
+                        path n;
+                      false
+                    end
+                    else begin
+                      Hashtbl.add seen n ();
+                      true
+                    end)
+                  names
+              in
               List.map entry_of_name ("." :: ".." :: names)));
       mknod =
         (fun path mode ->
@@ -374,10 +400,35 @@ module Make (C : Conf.S) = struct
                   nothing a reader can observe. *)
                E.start
                  ~freshness:
-                   (* Nothing to push: this mount asks again rather than being
-                      told. [cache_opts] is what makes that true, and how far
-                      it goes. *)
-                   Frontend.Revalidates
+                   (* This mount has to be told. [cache_opts] turns off the
+                      attribute and entry timeouts, which is why a re-lookup
+                      sees fresh data -- but it does not stop the kernel
+                      answering a lookup from a dentry it already holds, and a
+                      name another client renamed away stays resolvable in a
+                      directory already open. Claiming {!Frontend.Revalidates}
+                      was claiming a coherence the mount did not have.
+
+                      Pushing an invalidation is the part that was missing, not
+                      a shorter timeout. *)
+                   (Frontend.Notify
+                      (fun key ->
+                        (* Backend key to the path this mount shows. A key
+                           outside the domain is not ours to invalidate. *)
+                        let rel =
+                          Key.chop_slash
+                            (Key.strip_prefix ~domain_prefix:C.domain_prefix key)
+                        in
+                        (* Never from inside an operation on this path: the
+                           kernel waits on the request, and the invalidation
+                           waits on the kernel. This runs on the event loop,
+                           which is not a FUSE thread. *)
+                        try Fuse.invalidate_path ("/" ^ rel)
+                        with Unix.Unix_error (e, _, _) ->
+                          (* The kernel not holding it is the state we wanted;
+                             anything else the mount cannot fix, and silence
+                             here is a stale name nobody can account for. *)
+                          Log.debug "invalidate %s: %s" rel
+                            (Unix.error_message e)))
                  ~on_upload_done:(fun ~key:_ -> Lwt.return_unit)
                  ()
              in
