@@ -1,0 +1,101 @@
+# Concurrent load over two real FUSE mounts, on a schedule.
+#
+# Separate from `test` because it is the only suite that is allowed to fail
+# without blocking a merge: it injects crashes and store faults, so a red cell
+# here is a finding to read, not a broken build. Keeping it out of the required
+# checks is what lets it stay honest about what it finds.
+#
+# One job per (fault mode, seed) rather than a wrapper that loops and tallies.
+# The matrix already reports per-cell pass/fail with its own log, and a wrapper
+# that decides what counts as a pass is a wrapper that can get it wrong -- an
+# earlier one scored "no FAIL lines" as clean and so reported sixteen clean runs
+# over sixteen that had aborted before checking anything.
+name: stress
+
+on:
+  schedule:
+    # Three times a day. The seeds move with the run number, so each firing
+    # explores paths the last one did not; a fixed seed set would re-verify the
+    # same handful forever and go quiet about everything else.
+    - cron: "0 2,10,18 * * *"
+  workflow_dispatch:
+    inputs:
+      ops:
+        description: "operations per client"
+        default: "14"
+      seeds:
+        description: "how many seeds per fault mode (1-6)"
+        default: "3"
+  push:
+    # ponytail: temporary. `schedule` and `workflow_dispatch` are only ever read
+    # from the default branch, so this is the one trigger that can exercise the
+    # job before it merges. Drop this block in the merge commit.
+    branches: [overhaul/domain-store-and-durable-queue]
+
+concurrency:
+  group: stress-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  stress:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        # none is the baseline: any failure there is a plain concurrency bug,
+        # with nothing injected to blame it on. The other three are the fault
+        # modes the harness knows how to inject.
+        fault: [none, crash, store, load]
+        seed: [1, 2, 3]
+    name: ${{ matrix.fault }} / seed ${{ matrix.seed }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libfuse3-dev fuse3 pkg-config libev-dev
+      - uses: ocaml/setup-ocaml@v3
+        with:
+          ocaml-compiler: "5.5"
+          dune-cache: true
+      - name: Pin packages
+        run: |
+          opam pin -ny .
+          opam pin add -ny fuse3 git+https://github.com/toots/ocamlfuse.git
+          opam pin add -ny git+https://github.com/toots/aws-s3.git#tsync
+      - name: Install OCaml dependencies
+        run: opam install --deps-only -y tsync tsync-fuse
+      - name: Build
+        run: opam exec -- dune build bin/tsync.exe tests/e2e/stress/stress.exe
+
+      - name: Stress (${{ matrix.fault }})
+        env:
+          # Distinct per firing, so the schedule keeps covering new ground.
+          TSYNC_STRESS_SEED: ${{ github.run_number }}${{ matrix.seed }}
+          TSYNC_STRESS_OPS: ${{ github.event.inputs.ops || '14' }}
+          TSYNC_STRESS_FAULT: ${{ matrix.fault }}
+          TSYNC_STRESS_KEEP: "1"
+        run: opam exec -- make -C linux stress
+
+      # The harness keeps its scratch directory when a run fails, and that
+      # directory is the whole diagnosis: both clients' logs, both caches and
+      # the store as it was left. Reproducing a concurrency failure from the
+      # summary line alone is not realistic.
+      - name: Collect the scratch directory
+        if: failure()
+        run: |
+          for d in /tmp/tss-*; do
+            [ -d "$d" ] || continue
+            # The caches hold file bodies, which are large and are not what a
+            # failure is read from; the logs, manifests and store are.
+            find "$d" -type d -name 'cache' -prune -exec rm -rf {} + 2>/dev/null || true
+          done
+          tar czf scratch.tar.gz /tmp/tss-* 2>/dev/null || true
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: scratch-${{ matrix.fault }}-${{ matrix.seed }}
+          path: scratch.tar.gz
+          retention-days: 14
+          if-no-files-found: warn
