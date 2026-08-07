@@ -5,7 +5,7 @@
     daemon runs for weeks and never reconciled its own intent log — which is why
     one domain sat on 295 stale records for hours — and nothing under [tests/]
     could reach a copy that lived in an executable. *)
-module Make (C : Conf.S) (F : File.S) : sig
+module Make (C : Conf.S) (F : File_ops.S) : sig
   (** Finish or discard every record this client left behind, oldest first, each
       under the entry key it already has. Startup only: it replays ops and
       re-queues uploads, so it must not run while writes are staging.

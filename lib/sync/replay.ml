@@ -1,7 +1,7 @@
 open Lwt.Syntax
 module Ek = Journal.Entry_key
 
-module Make (C : Conf.S) (F : File.S) = struct
+module Make (C : Conf.S) (F : File_ops.S) = struct
   module Fs = File_store.Make (C)
   module J = Journal.Make (C)
   module W = Wal.Make (C)

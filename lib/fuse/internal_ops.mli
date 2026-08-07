@@ -3,6 +3,6 @@
     address chunk bodies, not one assembled file — so a handle's whole lifetime
     is [fopen] deciding what a create or truncate means and [release] queueing
     the upload a staged file owes. *)
-module Make (F : File.S) : sig
+module Make (F : File_ops.S) : sig
   val make : fuse_to_key:(string -> string) -> Path_ops.t
 end

@@ -1,6 +1,6 @@
 open Lwt.Syntax
 
-module Make (F : File.S) = struct
+module Make (F : File_ops.S) = struct
   let make ~fuse_to_key : Path_ops.t =
     let file path = fuse_to_key path in
     {

@@ -188,7 +188,7 @@ module Make (C : Conf.S) = struct
        path of its own choosing. *)
       match
         List.find_opt
-          (fun ({ File.body; _ } : File.in_flight) -> body = Some path)
+          (fun ({ File_ops.body; _ } : File_ops.in_flight) -> body = Some path)
           uploads
       with
       | None ->
@@ -200,7 +200,7 @@ module Make (C : Conf.S) = struct
                     ("code", `String "not_found");
                     ("error", `String "preview: not an upload in flight");
                   ]))
-      | Some { File.name; _ } -> (
+      | Some { File_ops.name; _ } -> (
           (* Under the cache root, so the link QuickLook needs lands on the same
              filesystem as the body it points at. *)
           let scratch = Filename.concat C.cache_root "previews" in

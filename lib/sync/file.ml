@@ -1,117 +1,7 @@
 open Lwt.Syntax
 
-type buffer = Local_io.buffer
-type in_flight = { name : string; rel : string; body : string option }
-
-module type S = sig
-  type t = string
-
-  val manifest_path : t -> string
-  val rel_key : t -> string
-  val read_manifest : t -> Manifest.t option Lwt.t
-  val resolved_manifest : t -> Manifest.t option Lwt.t
-  val write_manifest : t -> Manifest.t -> unit Lwt.t
-  val upload : ?cancel:bool ref -> t -> unit Lwt.t
-
-  (** Fetch every chunk [t] needs, so later reads are served locally. *)
-  val ensure_cached : t -> unit Lwt.t
-
-  (** Write [t]'s whole content to [dst_path], fetching what it needs. *)
-  val assemble_to : t -> dst_path:string -> unit Lwt.t
-
-  (** One range of [t] written into [dst_path] at the same offset, the rest of
-      the file left sparse. Returns the byte count, short at end of file. *)
-  val fetch_range :
-    t -> dst_path:string -> offset:int -> length:int -> int Lwt.t
-
-  val stat : t -> Unix.LargeFile.stats option Lwt.t
-  val readlink : t -> string option Lwt.t
-
-  val list_children :
-    prefix:string ->
-    (Backend.file_entry list * (string * float option) list) Lwt.t
-
-  val list_tree : prefix:string -> Backend.file_entry list Lwt.t
-
-  (** Handle closed: queue the file for upload if it has staged edits. *)
-  val close : t -> unit Lwt.t
-
-  (** Free staged bodies nothing references. Part of {!Replay.reconcile}; run
-      once at startup, never while writes may be staging. *)
-  val reclaim_staged_orphans : unit -> unit Lwt.t
-
-  (** Keep the chunk store under [C.max_cache]; never touches staged data. *)
-  val enforce_chunk_cap : unit -> unit Lwt.t
-
-  (** [(chunks, bytes)] held in the chunk store. *)
-  val chunk_stats : unit -> (int * int) Lwt.t
-
-  (** [t]'s content: staged edits if any, else what was published. *)
-  val resolve :
-    t ->
-    [ `Staged of Manifest.staged * Manifest.t option | `Published of Manifest.t ]
-    option
-    Lwt.t
-
-  (** [(chunks present locally, chunks total)] for [t]. *)
-  val chunk_residency : t -> (int * int) Lwt.t
-
-  (** Chunk downloads currently in flight. *)
-  val downloads_in_flight : unit -> int
-
-  (** How many files owe an upload. *)
-  val staged_count : unit -> int Lwt.t
-
-  val downloads_completed_count : unit -> int
-
-  (** The upload queue's depth, and its pause switch. *)
-  val uploads_pending : unit -> int
-
-  val uploads_in_flight : unit -> in_flight list Lwt.t
-  val uploads_pending_bytes : unit -> int64
-  val uploads_paused : unit -> bool
-  val set_uploads_paused : bool -> unit
-
-  (* Metadata lock state: held, and callers queued behind it. Reported by
-     diagnostics to spot a wedged mount. *)
-  val meta_locked : unit -> bool
-  val meta_waiters : unit -> bool
-  val download_progress : t -> (int * int) option
-
-  (** Drop [t]'s cached chunks, keeping its manifest. *)
-  val evict : t -> unit Lwt.t
-
-  val create : t -> unit Lwt.t
-
-  (** Stage a whole file handed over by a frontend as [t]'s new content. *)
-  val write_whole : t -> src_path:string -> unit Lwt.t
-
-  val read : t -> buffer -> offset:int64 -> int Lwt.t
-  val write : t -> buffer -> offset:int64 -> int Lwt.t
-  val cancel_upload : t -> bool
-  val truncate : t -> int64 -> unit Lwt.t
-  val apply_delete : t -> unit Lwt.t
-  val queue_put : t -> unit Lwt.t
-
-  val resume_put :
-    t -> entry_key:Journal.Entry_key.t -> ops:Journal.op list -> bool Lwt.t
-
-  val delete : t -> unit Lwt.t
-  val mkdir : t -> unit Lwt.t
-  val rmdir : t -> unit Lwt.t
-  val rename : src:t -> dst:t -> unit Lwt.t
-
-  (** Restore a saved version of [key] to the live location. [version] names a
-      timestamp, otherwise the most recent one. Only the manifest is copied
-      back; content stays evicted and is fetched lazily on next open. *)
-  val revert : ?version:string -> t -> unit Lwt.t
-
-  val symlink : target:string -> t -> unit Lwt.t
-  val apply_foreign_ops : Journal.op list -> unit Lwt.t
-end
-
-module Make_with_layout (C : Conf.S) (Sq : Sync_queue.S) (L : Layout.S) : S =
-struct
+module Make_with_layout (C : Conf.S) (Sq : Sync_queue.S) (L : Layout.S) :
+  File_ops.S = struct
   module J = Journal.Make (C)
   module W = Wal.Make (C)
   module Fs = File_store.Make (C)
@@ -258,7 +148,7 @@ struct
 
   let create key = D.create key
   let write_whole key ~src_path = D.stage_whole key ~src_path
-  let read key (buf : buffer) ~offset = D.pread_key key buf ~offset
+  let read key (buf : File_ops.buffer) ~offset = D.pread_key key buf ~offset
   let cancel_upload key = Sq.cancel_put key
   let uploads_pending = Sq.pending
 
@@ -267,7 +157,7 @@ struct
       (fun key ->
         let+ body = D.staged_body_path key in
         {
-          name = Filename.basename key;
+          File_ops.name = Filename.basename key;
           rel = Key.chop_slash (rel_key key);
           body;
         })
@@ -277,7 +167,7 @@ struct
   let uploads_paused = Sq.paused
   let set_uploads_paused = Sq.set_paused
 
-  let write key (buf : buffer) ~offset =
+  let write key (buf : File_ops.buffer) ~offset =
     (* An in-flight upload is reading the bodies we are about to mutate: cancel
        it or it publishes a manifest for torn content. Release re-queues it. *)
     ignore (cancel_upload key);

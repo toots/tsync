@@ -1,4 +1,4 @@
-module Make (C : Conf.S) (F : File.S) : sig
+module Make (C : Conf.S) (F : File_ops.S) : sig
   type hooks = {
     path_to_key : string -> string;
     evict : string -> unit Lwt.t;

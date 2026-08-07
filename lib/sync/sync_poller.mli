@@ -1,4 +1,4 @@
-module Make (C : Conf.S) (F : File.S) : sig
+module Make (C : Conf.S) (F : File_ops.S) : sig
   (** One pass of {!Replay.apply_foreign}, for tests that want it on demand
       rather than on the timer. *)
   val sync_once : unit -> unit Lwt.t
