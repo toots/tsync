@@ -202,6 +202,47 @@
   journal <entry-6> = rmdir sub/
   trash sub -> 547c2ad623ddba3f
 
+=== concurrent_mkdir_then_write
+  A: mkdir sub
+  B: mkdir sub
+  A: write sub/from-a.txt "a"
+  B: write sub/from-b.txt "b"
+  A: drain
+  B: drain
+  A: sync
+  B: sync
+  A: drain
+  B: drain
+--- tree A
+  d sub/
+  f sub/from-a.txt size=1 cached=0/1 uploaded=true etag=15da855801af627d
+  f sub/from-b.txt size=1 cached=0/1 uploaded=true etag=6c25cc3db3ce7928
+--- content A
+  sub/from-a.txt = "a"
+  sub/from-b.txt = "b"
+--- pending A
+--- tree B
+  d sub/
+  f sub/from-a.txt size=1 cached=0/1 uploaded=true etag=15da855801af627d
+  f sub/from-b.txt size=1 cached=0/1 uploaded=true etag=6c25cc3db3ce7928
+--- content B
+  sub/from-a.txt = "a"
+  sub/from-b.txt = "b"
+--- pending B
+--- backend
+  chunk 575a0b1c44d8843f-99009138a3452320 size=1
+  chunk e6c632b61e964e1f-d2f6d0996f37a720 size=1
+  cursor = <entry-2>
+  journal <entry-1> = mkdir sub/
+  journal <entry-2> = mkdir sub/
+  journal <entry-3> = put sub/from-a.txt 1
+  journal <entry-4> = put sub/from-b.txt 1
+  folder sub [.tsync-root/4f7b4244079f8bf6-67a7ed7af26470c3] -> 547c2ad623ddba3f
+  file from-a.txt [547c2ad623ddba3f/3958c931de20fdc1-cf2927274a2ee417] = manifest size=1 chunks=1 h1=15da855801af627d h2=206c8135a9dd3b50
+    chunk#0 e6c632b61e964e1f-d2f6d0996f37a720 size=1
+  file from-b.txt [547c2ad623ddba3f/f87da0e66b299a40-05ed2ebb07efe2e0] = manifest size=1 chunks=1 h1=6c25cc3db3ce7928 h2=6816a4fbbf51c9a5
+    chunk#0 575a0b1c44d8843f-99009138a3452320 size=1
+
 === concurrent_mkdir_then_rmdir
   A: mkdir sub
   A: drain
@@ -223,7 +264,7 @@
   journal <entry-1> = mkdir sub/
   journal <entry-2> = mkdir sub/
   journal <entry-3> = rmdir sub/
-  trash sub -> 3171f9431b3d5a67
+  trash sub -> 547c2ad623ddba3f
 
 === concurrent_create
   A: write foo.txt "from A"

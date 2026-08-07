@@ -118,6 +118,16 @@ let put t ~key ~data () =
   let+ resp, body = call_retry t ~meth:`PUT ~body:data "put" (obj_uri t key) in
   if not (is_ok resp) then raise (backend_error "put" (code resp) body)
 
+(* The serving side arbitrates, since it is the one holding the store; the reply
+   body is whatever ended up at the key. A proxy too old to know the parameter
+   would treat this as a plain put and answer its own body, which reads as
+   "you won" -- so the two sides must be of a version. *)
+let put_if_absent t ~key ~data () =
+  let uri = Uri.add_query_param' (obj_uri t key) ("if_absent", "1") in
+  let+ resp, body = call_retry t ~meth:`PUT ~body:data "put_if_absent" uri in
+  if is_ok resp then body
+  else raise (backend_error "put_if_absent" (code resp) body)
+
 let get t ~key () =
   let+ resp, body = call_retry t ~meth:`GET "get" (obj_uri t key) in
   if is_ok resp then body else raise (backend_error "get" (code resp) body)
@@ -276,6 +286,7 @@ let make ~url ~secret : (module Backend.S) =
   in
   (module struct
     let put ~key ~data () = put t ~key ~data ()
+    let put_if_absent ~key ~data () = put_if_absent t ~key ~data ()
     let get ~key () = get t ~key ()
     let get_opt ~key () = get_opt t ~key ()
     let head_opt ~key () = head_opt t ~key ()

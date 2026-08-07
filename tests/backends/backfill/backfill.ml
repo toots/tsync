@@ -82,6 +82,7 @@ let dump_target () =
 module Down : Backend.S = struct
   let fail () = Lwt.fail (Backend.Backend_error "down")
   let put ~key:_ ~data:_ () = fail ()
+  let put_if_absent ~key:_ ~data:_ () = fail ()
   let get ~key:_ () = fail ()
   let get_opt ~key:_ () = fail ()
   let head_opt ~key:_ () = fail ()

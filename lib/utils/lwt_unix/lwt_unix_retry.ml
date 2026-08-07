@@ -15,6 +15,10 @@ let readlink path = retry_eintr (fun () -> Lwt_unix.readlink path)
 let symlink target path = retry_eintr (fun () -> Lwt_unix.symlink target path)
 let rename src dst = retry_eintr (fun () -> Lwt_unix.rename src dst)
 let unlink path = retry_eintr (fun () -> Lwt_unix.unlink path)
+
+(* Unlike rename, this fails with EEXIST rather than replacing, which is what
+   makes it a claim. *)
+let link src dst = retry_eintr (fun () -> Lwt_unix.link src dst)
 let mkdir path mode = retry_eintr (fun () -> Lwt_unix.mkdir path mode)
 let rmdir path = retry_eintr (fun () -> Lwt_unix.rmdir path)
 

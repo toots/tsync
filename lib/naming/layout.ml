@@ -41,11 +41,6 @@ module Inode = struct
   module Make (C : Conf.S) : S = struct
     open Lwt.Syntax
 
-    (* Minting one when the folder has no marker yet — see {!Folder_ids}. *)
-    let ensure_id rel =
-      Folder_ids.ensure_id ~cache_root:C.cache_root ~domain_name:C.domain_name
-        rel
-
     let lookup_id rel =
       Folder_ids.lookup_id ~cache_root:C.cache_root ~domain_name:C.domain_name
         rel
@@ -55,6 +50,63 @@ module Inode = struct
     (* Backend key of [leaf] within its parent folder's namespace. *)
     let child_key ~folder_id leaf =
       C.domain_prefix ^ Folder.child_key ~folder_id leaf
+
+    (* A store that cannot arbitrate leaves the old behaviour: mint locally and
+       hope. Said once, because it is a real weakening — two clients creating one
+       directory can then still strand each other. *)
+    let warned_unarbitrated = ref false
+
+    (* A folder's id is claimed from the store rather than chosen here.
+
+       Deciding locally is what made concurrent creation lossy: two clients that
+       have not yet seen each other both hold nothing, both mint, and both write
+       the same marker key, so the second silently took the name and left the
+       first's namespace unreachable. The marker {i is} the claim, so the id a
+       client puts its children under is the one the store accepted, and every
+       client agrees on it.
+
+       Still local-first: a folder already resolved costs no round trip, and the
+       claim's outcome is what gets cached. *)
+    let rec ensure_id rel =
+      if rel = "" then Lwt.return Folder.root_id
+      else
+        let* known = lookup_id rel in
+        match known with
+          | Some id -> Lwt.return id
+          | None ->
+              let name = Filename.basename rel in
+              (* The parent is claimed first, so the key this claim names is
+                 already the agreed one. *)
+              let* pid = ensure_id (Key.parent rel) in
+              let candidate = { Folder.name; id = Folder.new_id () } in
+              let key = child_key ~folder_id:pid name in
+              let module B = (val C.store : Backend.S) in
+              let* held =
+                Lwt.catch
+                  (fun () ->
+                    B.put_if_absent ~key
+                      ~data:(Folder.marker_to_string candidate)
+                      ())
+                  (fun exn ->
+                    if not !warned_unarbitrated then begin
+                      warned_unarbitrated := true;
+                      Log.warn
+                        "%s: this store cannot claim a name (%s); folder \
+                         ids                          are minted locally and \
+                         concurrent creation of one                          \
+                         directory can strand files"
+                        C.domain_name (Printexc.to_string exn)
+                    end;
+                    Lwt.return (Folder.marker_to_string candidate))
+              in
+              let winner =
+                Option.value (Folder.marker_of_string held) ~default:candidate
+              in
+              let+ () =
+                Folder_ids.write ~cache_root:C.cache_root
+                  ~domain_name:C.domain_name rel winner
+              in
+              winner.Folder.id
 
     let ensure_manifest_key key =
       let rel = rel_of key in

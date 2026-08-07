@@ -49,6 +49,21 @@ module type S = sig
       round trip of [head_opt] + [get] when the body is wanted. *)
   val get_opt : key:string -> unit -> string option Lwt.t
 
+  (** Write [data] at [key] only if nothing is there, answering with whatever is
+      there afterwards — [data] itself when this call won, the other writer's
+      body when it did not.
+
+      For a key that names a claim rather than content: several clients may
+      reach for it at once, and exactly one must win. {!put} cannot express that
+      — it is last-writer-wins, so the loser's work is stranded with nothing
+      saying so. Every store can do better: a generation precondition on the
+      object stores, an exclusive create on a filesystem.
+
+      A claim is the only thing this is for. Content is either
+      content-addressed, in which case racing writers agree, or owned by one
+      client, in which case there is no race. *)
+  val put_if_absent : key:string -> data:string -> unit -> string Lwt.t
+
   val head_opt : key:string -> unit -> file_entry option Lwt.t
   val delete : key:string -> unit -> unit Lwt.t
   val delete_multi : string list -> unit Lwt.t

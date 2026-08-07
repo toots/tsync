@@ -18,6 +18,7 @@ let root = "/tmp/tsync-probe-deadline-test"
 module Hung : Backend.S = struct
   let never () = fst (Lwt.wait ())
   let put ~key:_ ~data:_ () = never ()
+  let put_if_absent ~key:_ ~data:_ () = never ()
   let get ~key:_ () = never ()
   let get_opt ~key:_ () = never ()
   let head_opt ~key:_ () = never ()

@@ -111,6 +111,7 @@ let flaky ~fails ~root : (module Backend.S) * (unit -> int) =
 module Refuses : Backend.S = struct
   let fail () = Lwt.fail Backend.Not_writable
   let put ~key:_ ~data:_ () = fail ()
+  let put_if_absent ~key:_ ~data:_ () = fail ()
   let get ~key:_ () = fail ()
   let get_opt ~key:_ () = fail ()
   let head_opt ~key:_ () = Lwt.return_none

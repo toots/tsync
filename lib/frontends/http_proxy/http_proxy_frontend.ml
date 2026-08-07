@@ -198,6 +198,10 @@ type op =
   | Get of string
   | Head of string
   | Put of string
+  | Put_if_absent of string
+      (** A claim: write only if the key is free, and answer with whatever holds
+          it afterwards. Distinct from {!Put} on the wire because the answer
+          differs, not just the effect. *)
   | Delete of string
   | Delete_multi of string list
   | Copy of string * string
@@ -226,7 +230,12 @@ let parse_op meth uri body =
     | `HEAD, p when is_obj p -> (
         match obj_key () with Some k -> Head k | None -> Bad)
     | `PUT, p when is_obj p -> (
-        match obj_key () with Some k -> Put k | None -> Bad)
+        match obj_key () with
+          | Some k ->
+              if Uri.get_query_param uri "if_absent" = Some "1" then
+                Put_if_absent k
+              else Put k
+          | None -> Bad)
     | `DELETE, p when is_obj p -> (
         match obj_key () with Some k -> Delete k | None -> Bad)
     | `POST, "/delete-multi" -> (
@@ -262,6 +271,7 @@ let op_name = function
   | Get _ -> "get"
   | Head _ -> "head"
   | Put _ -> "put"
+  | Put_if_absent _ -> "putIfAbsent"
   | Delete _ -> "delete"
   | Delete_multi _ -> "deleteMulti"
   | Copy _ -> "copy"
@@ -274,7 +284,7 @@ let op_name = function
 
 (* A request targets the route whose [domain_root] prefixes its key. *)
 let route_key = function
-  | Get k | Head k | Put k | Delete k -> Some k
+  | Get k | Head k | Put k | Put_if_absent k | Delete k -> Some k
   | Delete_multi (k :: _) -> Some k
   | Delete_multi [] -> None
   | Copy (src, _) -> Some src
@@ -331,6 +341,14 @@ let exec route op ~body =
                   ]
                 ""
           | None -> respond ~status:`Not_found "")
+    | Put_if_absent key ->
+        if not (writable key) then reject_ro ()
+        else
+          let module B = (val route.store : Backend.S) in
+          let* held = B.put_if_absent ~key ~data:body () in
+          (* The body that won, so the caller learns whether it was theirs
+             without a second round trip. *)
+          respond held
     | Put key ->
         if not (writable key) then reject_ro ()
         else
