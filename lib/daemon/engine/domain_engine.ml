@@ -50,7 +50,10 @@ module Make (C : Conf.S) = struct
     in
     loop ()
 
-  let start ?on_changed ~on_upload_done () =
+  (* [freshness] is required, not optional: a frontend that says nothing here
+     leaves its users looking at a stale view, and an omitted argument is
+     indistinguishable from a considered "nothing to do". *)
+  let start ~freshness ~on_upload_done () =
     let* () = Mf.init () in
     Sq.start
       ~upload:(fun ~key ~cancel -> F.upload ~cancel key)
@@ -62,7 +65,12 @@ module Make (C : Conf.S) = struct
        unsynced. The queue must be running first: recovery goes through it, for
        the journal entry and cursor bump an upload owes. *)
     let* () = Rp.reconcile () in
-    Sp.start ?on_changed ();
+    Sp.start
+      ~on_changed:
+        (match freshness with
+          | Frontend.Notify f -> f
+          | Frontend.Revalidates -> fun _ -> ())
+      ();
     Lwt.async cursor_flusher;
     Lwt.async (fun () ->
         let sweep what f =

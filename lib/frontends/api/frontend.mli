@@ -14,6 +14,27 @@ type binding = {
   mount_point : string;
 }
 
+(** How a frontend lets a user see a change some other client made.
+
+    Every frontend needs an answer, and the answer differs by what the
+    presentation layer underneath it can be told. Required rather than optional
+    because a frontend with no answer looks like one that simply has nothing to
+    do: the mount keeps serving names that no longer resolve, and nothing
+    reports it. That is how the FUSE mount came to show a file under its name
+    from before another client renamed it, unopenable, until the mount was taken
+    down.
+
+    A frontend picks the one that is true of it, not the one that is convenient. *)
+type freshness =
+  | Notify of (string -> unit)
+      (** Hand each changed key to the presentation layer as it happens, for a
+          layer that keeps its own state and has to be told. macOS File Provider
+          works this way. *)
+  | Revalidates
+      (** Nothing has to be pushed, because the layer asks again on every access.
+          A claim to earn: FUSE says this only because it mounts with the
+          kernel's caches disabled, which is what makes the kernel re-ask. *)
+
 module type S = sig
   (** Whether every byte of [key] is on this machine, for [tsync ls]. *)
   val is_local : Conf.locality -> string -> bool

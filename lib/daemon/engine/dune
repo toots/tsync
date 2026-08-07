@@ -2,6 +2,8 @@
  (flags
   (:standard
    -open
+   Tsync_frontend_register
+   -open
    Tsync_sync
    -open
    Tsync_store
@@ -17,6 +19,7 @@
    Tsync_ipc_handler))
  (name tsync_engine)
  (libraries
+  tsync_frontend_register
   tsync_sync
   tsync_store
   tsync_object

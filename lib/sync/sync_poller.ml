@@ -6,11 +6,13 @@ module Make (C : Conf.S) (F : File_ops.S) = struct
   module Fs = File_store.Make (C)
   module Rp = Replay.Make (C) (F)
 
+  (* One shot, from the CLI: there is no presentation layer running to refresh,
+     so there is genuinely nothing to hand a changed key to. *)
   let sync_once () =
-    let+ (_ : int) = Rp.apply_foreign () in
+    let+ (_ : int) = Rp.apply_foreign ~on_changed:(fun _ -> ()) () in
     ()
 
-  let start ?(on_changed = fun _ -> ()) () =
+  let start ~on_changed () =
     Lwt.async (fun () ->
         let last_version = ref None in
         let same v =

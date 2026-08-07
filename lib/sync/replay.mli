@@ -21,5 +21,5 @@ module Make (C : Conf.S) (F : File_ops.S) : sig
       [on_changed] is called with each affected backend key, for a frontend that
       invalidates its own view. Returns how many foreign entries were applied.
   *)
-  val apply_foreign : ?on_changed:(string -> unit) -> unit -> int Lwt.t
+  val apply_foreign : on_changed:(string -> unit) -> unit -> int Lwt.t
 end
