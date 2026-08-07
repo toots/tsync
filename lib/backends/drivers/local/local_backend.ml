@@ -21,6 +21,30 @@ let write_file path data =
 let read_file path =
   Lwt_unix_retry.with_file ~mode:Lwt_io.Input path Lwt_io.read
 
+(* Claim [path] for [data], answering with whatever ends up there.
+
+   [link] rather than [rename]: rename replaces silently, link fails with EEXIST
+   when the destination is taken, which is the whole point. The temp file is
+   written first, so the claim that wins is complete the instant it appears. *)
+let create_exclusive path data =
+  let* () = Fs_util.ensure_parent path in
+  incr tmp_seq;
+  let tmp = Printf.sprintf "%s.%d.%d.claim" path (Unix.getpid ()) !tmp_seq in
+  let* () =
+    Lwt_unix_retry.with_file ~mode:Lwt_io.Output tmp (fun oc ->
+        Lwt_io.write oc data)
+  in
+  Lwt.finalize
+    (fun () ->
+      Lwt.catch
+        (fun () ->
+          let+ () = Lwt_unix_retry.link tmp path in
+          data)
+        (function
+          | Unix.Unix_error (Unix.EEXIST, _, _) -> read_file path
+          | exn -> Lwt.fail exn))
+    (fun () -> Fs_util.unlink_quiet tmp)
+
 (* Enough concurrent stats to hide per-call latency on high-latency storage,
    bounded so a large tree is not a descriptor storm.
 
@@ -60,6 +84,14 @@ let make ~root : (module Backend.S) =
     let put ~key ~data () =
       if is_dir_key key then mkdir_p (resolve key)
       else write_file (resolve key) data
+
+    let put_if_absent ~key ~data () =
+      Lwt.catch
+        (fun () -> create_exclusive (resolve key) data)
+        (function
+          | Unix.Unix_error (e, _, _) ->
+              Lwt.fail (of_errno ~op:"put_if_absent" key e)
+          | exn -> Lwt.fail exn)
 
     let get ~key () =
       Lwt.catch

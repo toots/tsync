@@ -93,6 +93,7 @@ module type S = sig
       round trip of [head_opt] + [get] when the body is wanted. *)
   val get_opt : key:string -> unit -> string option Lwt.t
 
+  val put_if_absent : key:string -> data:string -> unit -> string Lwt.t
   val head_opt : key:string -> unit -> file_entry option Lwt.t
   val delete : key:string -> unit -> unit Lwt.t
   val delete_multi : string list -> unit Lwt.t

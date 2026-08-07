@@ -1,13 +1,21 @@
 ; Every namespace this system has, and the translations between them: a logical
 ; key, the backend key it maps to, the local mirror path, a frontend's item ref,
-; a folder id, a version key, a chunk's shard. Depends on nothing that stores or
-; transfers anything -- it only says what things are called.
+; a folder id, a version key, a chunk's shard.
+;
+; Naming alone, with one exception: a folder's id is not a name this client gets
+; to pick, it is a claim several clients race for, so resolving one talks to the
+; store. That it used to be decided here, locally, is exactly why concurrent
+; creation of a directory silently stranded files.
 
 (library
  (flags
   (:standard
    -open
    Tsync_conf
+   -open
+   Tsync_backend_register
+   -open
+   Tsync_log
    -open
    Tsync_local_io
    -open
@@ -17,6 +25,8 @@
  (name tsync_naming)
  (libraries
   tsync_conf
+  tsync_backend_register
+  tsync_log
   tsync_local_io
   tsync_lwt_unix
   tsync_xxhash

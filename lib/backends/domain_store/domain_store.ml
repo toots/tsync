@@ -106,6 +106,26 @@ let rec make ~(mains : sub list)
       let* () = write (fun (module B : Backend.S) -> B.put ~key ~data ()) in
       fill (Deferred.Put { key; data }) key
 
+    (* Arbitrated by the first main alone, then fanned out as an ordinary write.
+       A claim needs one decider: asking each main in turn would let two clients
+       each win somewhere and disagree about who holds the name. The rest of the
+       domain then simply learns what was decided. *)
+    let put_if_absent ~key ~data () =
+      match mains with
+        | [] -> Lwt.fail Backend.Not_writable
+        | first :: rest ->
+            let module A = (val first.backend : Backend.S) in
+            let* held = A.put_if_absent ~key ~data () in
+            let* () =
+              Lwt_list.iter_s
+                (fun s ->
+                  let module B = (val s.backend : Backend.S) in
+                  B.put ~key ~data:held ())
+                rest
+            in
+            let+ () = fill (Deferred.Put { key; data = held }) key in
+            held
+
     let delete ~key () =
       let* () = write (fun (module B : Backend.S) -> B.delete ~key ()) in
       fill (Deferred.Delete key) key

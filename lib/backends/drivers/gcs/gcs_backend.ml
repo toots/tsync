@@ -123,6 +123,21 @@ let get_opt t ~key () =
   else if code resp = 404 then None
   else raise (backend_error "get_opt" (code resp) body)
 
+(* [ifGenerationMatch=0] means "only if this object does not exist"; GCS answers
+   412 when it already does, which is the claim being lost rather than an
+   error. *)
+let put_if_absent t ~key ~data () =
+  let uri =
+    Uri.add_query_param' (upload_uri t key) ("ifGenerationMatch", "0")
+  in
+  let* resp, body =
+    call_retry t ~meth:`POST ~ctype:"application/octet-stream" ~body:data
+      "put_if_absent" uri
+  in
+  if is_ok resp then Lwt.return data
+  else if code resp = 412 then get t ~key ()
+  else raise (backend_error "put_if_absent" (code resp) body)
+
 let head_opt t ~key () =
   let uri = Uri.of_string (obj_path t key) in
   let+ resp, body = call_retry t ~meth:`GET "head" uri in
@@ -219,6 +234,7 @@ let make ?endpoint ?service_account_key ?share_url ~bucket () :
   let t = { bucket; base; auth; share_url } in
   (module struct
     let put ~key ~data () = put t ~key ~data ()
+    let put_if_absent ~key ~data () = put_if_absent t ~key ~data ()
     let get ~key () = get t ~key ()
     let get_opt ~key () = get_opt t ~key ()
     let head_opt ~key () = head_opt t ~key ()

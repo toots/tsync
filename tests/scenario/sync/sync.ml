@@ -138,6 +138,33 @@ let foreign_rmdir_after_repeated_mkdir =
 (* Both clients create the same directory before either deletes it. Each mints a
    folder id locally when it has no marker, so this is where two markers for one
    path could come from, and rmdir removes only one. *)
+(* Both clients create one directory before either has seen the other, then each
+   writes into it. The directory's id is a claim, and only one client can hold
+   it: whoever loses has to adopt the winner's rather than keep its own, or its
+   file ends up in a namespace nothing points at -- present on the backend,
+   reachable from neither mount, reported by nothing.
+
+   The rmdir case below misses this: with no file written, both markers land on
+   the same key and the loser's namespace is empty, so nothing is stranded to
+   find. *)
+let concurrent_mkdir_then_write =
+  {
+    name = "concurrent_mkdir_then_write";
+    steps =
+      [
+        A (Mkdir "sub");
+        B (Mkdir "sub");
+        A (Write { path = "sub/from-a.txt"; content = "a" });
+        B (Write { path = "sub/from-b.txt"; content = "b" });
+        A Drain;
+        B Drain;
+        A Sync;
+        B Sync;
+        A Drain;
+        B Drain;
+      ];
+  }
+
 let concurrent_mkdir_then_rmdir =
   {
     name = "concurrent_mkdir_then_rmdir";
@@ -310,6 +337,7 @@ let () =
       foreign_mkdir;
       foreign_rmdir;
       foreign_rmdir_after_repeated_mkdir;
+      concurrent_mkdir_then_write;
       concurrent_mkdir_then_rmdir;
       concurrent_create;
       open_file_guard;

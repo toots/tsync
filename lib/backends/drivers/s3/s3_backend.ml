@@ -81,6 +81,19 @@ let get t ~key () =
   in
   unwrap "get" res
 
+(* S3 has supported [If-None-Match: *] on PutObject since late 2024, but the
+   binding cannot send it: its [meta_headers] are prefixed [x-amz-meta-] and so
+   become user metadata, not a precondition.
+
+   Refused rather than emulated with a HEAD and a PUT: that would look like a
+   claim and lose races silently, which is the failure this operation exists to
+   prevent. A domain whose store cannot arbitrate should say so, and the caller
+   will report it. Lifting this is a header passthrough in the aws-s3 fork. *)
+let put_if_absent _t ~key ~data:_ () =
+  Lwt.fail
+    (Backend.failed ~kind:Backend.Permanent ~op:"s3 put_if_absent"
+       (key ^ ": this s3 binding cannot send a write precondition"))
+
 let get_opt t ~key () =
   let+ res =
     with_retry "get" (fun () ->
@@ -184,6 +197,7 @@ let make ?endpoint ?unsigned_payload ?share_url ~bucket ~region ~access_key_id
   in
   (module struct
     let put ~key ~data () = put t ~key ~data ()
+    let put_if_absent ~key ~data () = put_if_absent t ~key ~data ()
     let get ~key () = get t ~key ()
     let get_opt ~key () = get_opt t ~key ()
     let head_opt ~key () = head_opt t ~key ()
