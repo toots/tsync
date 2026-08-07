@@ -18,21 +18,3 @@
   yojson
   lwt
   lwt.unix))
-
-(alias
- (name default)
- (deps probe_deadline_test.exe))
-
-(rule
- (alias runtest)
- (target probe_deadline_test.output)
- (action
-  (with-stdout-to
-   probe_deadline_test.output
-   (ignore-stderr
-    (run ./probe_deadline_test.exe)))))
-
-(rule
- (alias runtest)
- (action
-  (diff probe_deadline_test.expected probe_deadline_test.output)))

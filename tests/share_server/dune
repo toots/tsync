@@ -28,24 +28,3 @@
   yojson
   lwt
   lwt.unix))
-
-(alias
- (name default)
- (deps share_server_test.exe))
-
-(rule
- (alias runtest)
- (target share_server_test.output)
- (action
-  (with-stdout-to
-   share_server_test.output
-   (ignore-stderr
-    (setenv
-     TZ
-     UTC
-     (run ./share_server_test.exe))))))
-
-(rule
- (alias runtest)
- (action
-  (diff share_server_test.expected share_server_test.output)))

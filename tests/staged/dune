@@ -26,21 +26,3 @@
   tsync_metrics
   lwt
   lwt.unix))
-
-(alias
- (name default)
- (deps staged_test.exe))
-
-(rule
- (alias runtest)
- (target staged_test.output)
- (action
-  (with-stdout-to
-   staged_test.output
-   (ignore-stderr
-    (run ./staged_test.exe)))))
-
-(rule
- (alias runtest)
- (action
-  (diff staged_test.expected staged_test.output)))

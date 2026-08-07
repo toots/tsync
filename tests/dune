@@ -1,0 +1,25 @@
+; Every snapshot test repeats the same three stanzas, varying only in its name,
+; so they are generated into dune.inc rather than written out thirty times. The
+; runtest rule below re-runs the generator and diffs, which is what stops a test
+; added without regenerating from silently never running.
+
+(include dune.inc)
+
+(rule
+ (target dune.inc.gen)
+ (deps
+  (source_tree .))
+ (action
+  (with-stdout-to
+   dune.inc.gen
+   (run bash %{dep:gen-dune.sh}))))
+
+(rule
+ (alias runtest)
+ (action
+  (diff dune.inc dune.inc.gen)))
+
+(rule
+ (alias gentests)
+ (action
+  (diff dune.inc dune.inc.gen)))

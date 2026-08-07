@@ -24,21 +24,3 @@
   lwt
   lwt.unix
   unix))
-
-(alias
- (name default)
- (deps backfill.exe))
-
-(rule
- (alias runtest)
- (target backfill.output)
- (action
-  (with-stdout-to
-   backfill.output
-   (ignore-stderr
-    (run ./backfill.exe)))))
-
-(rule
- (alias runtest)
- (action
-  (diff backfill.expected backfill.output)))

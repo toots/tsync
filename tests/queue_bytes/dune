@@ -23,21 +23,3 @@
   tsync_local_io
   lwt
   lwt.unix))
-
-(alias
- (name default)
- (deps queue_bytes_test.exe))
-
-(rule
- (alias runtest)
- (target queue_bytes_test.output)
- (action
-  (with-stdout-to
-   queue_bytes_test.output
-   (ignore-stderr
-    (run ./queue_bytes_test.exe)))))
-
-(rule
- (alias runtest)
- (action
-  (diff queue_bytes_test.expected queue_bytes_test.output)))

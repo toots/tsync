@@ -3,12 +3,3 @@
   (:standard -open Tsync_glob))
  (name glob)
  (libraries tsync_glob))
-
-(alias
- (name default)
- (deps glob.exe))
-
-(rule
- (alias runtest)
- (action
-  (run ./glob.exe)))

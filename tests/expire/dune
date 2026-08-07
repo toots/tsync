@@ -3,21 +3,3 @@
   (:standard -open Tsync_test_runner))
  (name expire)
  (libraries tsync_test_runner))
-
-(alias
- (name default)
- (deps expire.exe))
-
-(rule
- (alias runtest)
- (target expire.output)
- (action
-  (with-stdout-to
-   expire.output
-   (ignore-stderr
-    (run ./expire.exe)))))
-
-(rule
- (alias runtest)
- (action
-  (diff expire.expected expire.output)))

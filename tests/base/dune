@@ -3,21 +3,3 @@
   (:standard -open Tsync_test_runner))
  (name base)
  (libraries tsync_test_runner))
-
-(alias
- (name default)
- (deps base.exe))
-
-(rule
- (alias runtest)
- (target base.output)
- (action
-  (with-stdout-to
-   base.output
-   (ignore-stderr
-    (run ./base.exe)))))
-
-(rule
- (alias runtest)
- (action
-  (diff base.expected base.output)))

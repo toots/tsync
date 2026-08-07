@@ -23,21 +23,3 @@
   tsync_backend_register
   lwt
   lwt.unix))
-
-(alias
- (name default)
- (deps chunk_cache_test.exe))
-
-(rule
- (alias runtest)
- (target chunk_cache_test.output)
- (action
-  (with-stdout-to
-   chunk_cache_test.output
-   (ignore-stderr
-    (run ./chunk_cache_test.exe)))))
-
-(rule
- (alias runtest)
- (action
-  (diff chunk_cache_test.expected chunk_cache_test.output)))

@@ -47,29 +47,3 @@
   lwt
   lwt.unix
   uri))
-
-(alias
- (name default)
- (deps http_proxy_test.exe))
-
-; The report stamps its recent errors in local time, which is what someone
-; reading their own server wants and what makes the snapshot depend on the
-; machine that ran it. Pinned here so the recorded times are the same
-; everywhere.
-
-(rule
- (alias runtest)
- (target http_proxy_test.output)
- (action
-  (with-stdout-to
-   http_proxy_test.output
-   (ignore-stderr
-    (setenv
-     TZ
-     UTC
-     (run ./http_proxy_test.exe))))))
-
-(rule
- (alias runtest)
- (action
-  (diff http_proxy_test.expected http_proxy_test.output)))

@@ -3,21 +3,3 @@
   (:standard -open Tsync_backend_register))
  (name backend_failure)
  (libraries tsync_backend_register lwt lwt.unix))
-
-(alias
- (name default)
- (deps backend_failure.exe))
-
-(rule
- (alias runtest)
- (target backend_failure.output)
- (action
-  (with-stdout-to
-   backend_failure.output
-   (ignore-stderr
-    (run ./backend_failure.exe)))))
-
-(rule
- (alias runtest)
- (action
-  (diff backend_failure.expected backend_failure.output)))
