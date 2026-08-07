@@ -29,8 +29,7 @@ let () =
      in
      let* stored = B.get ~key:"claimed" () in
      step "claimants: %d" (List.length answers);
-     step "distinct answers: %d"
-       (List.length (List.sort_uniq compare answers));
+     step "distinct answers: %d" (List.length (List.sort_uniq compare answers));
      step "every answer is what the store holds: %b"
        (List.for_all (fun a -> a = stored) answers);
 
@@ -60,6 +59,8 @@ let () =
        (List.length
           (List.filter
              (fun (e : Backend.file_entry) ->
-               not (String.length e.key > 0 && e.key.[String.length e.key - 1] = '/'))
+               not
+                 (String.length e.key > 0
+                 && e.key.[String.length e.key - 1] = '/'))
              entries)));
   Lwt_main.run (Fs_util.rm_rf root)

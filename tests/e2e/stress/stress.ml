@@ -33,7 +33,6 @@ let unmount mount =
 
 type outcome = Acked | Interrupted | Failed_op
 type op = Write of string | Delete | Rename_away | Rename_onto of string
-
 type record = { path : string; op : op; outcome : outcome; at : float }
 
 let journal : record list ref = ref []
@@ -50,6 +49,15 @@ let record r =
    against the strict expectation. *)
 let fault_in_flight = ref false
 let faults_landed = ref 0
+let load_running = ref true
+
+(* One daemon this run started, so a fault can take it away and bring it back. *)
+type daemon = {
+  label : string;
+  home : string;
+  args : string list;
+  mutable pid : int;
+}
 
 (* {1 Load} *)
 
@@ -96,15 +104,20 @@ let worker ~mount ~ns ~ops ~seed ~wid ~sizes =
     let p = Filename.concat mount name in
     let pick = Random.State.int rnd 100 in
     if pick < 45 then begin
-      let data = body rnd (List.nth sizes (Random.State.int rnd (List.length sizes))) in
+      let data =
+        body rnd (List.nth sizes (Random.State.int rnd (List.length sizes)))
+      in
       with_lock (path_lock name) (fun () ->
-          attempt name (Write (digest data)) (fun () ->
+          attempt name
+            (Write (digest data))
+            (fun () ->
               sh "mkdir -p %s" (Filename.quote (Filename.dirname p));
               write_file p data))
     end
     else if pick < 70 then
       with_lock (path_lock name) (fun () ->
-          attempt name (Write (if Sys.file_exists p then digest (read_file p) else ""))
+          attempt name
+            (Write (if Sys.file_exists p then digest (read_file p) else ""))
             (fun () -> if Sys.file_exists p then ignore (read_file p)))
     else if pick < 85 then begin
       let dst = Printf.sprintf "%s/f%02d" ns (Random.State.int rnd 12) in
@@ -113,9 +126,15 @@ let worker ~mount ~ns ~ops ~seed ~wid ~sizes =
         with_lock (path_lock first) (fun () ->
             let inner () =
               attempt name Rename_away (fun () ->
-                  if Sys.file_exists p then Sys.rename p (Filename.concat mount dst));
-              record { path = dst; op = Rename_onto name; outcome = Acked;
-                       at = Unix.gettimeofday () }
+                  if Sys.file_exists p then
+                    Sys.rename p (Filename.concat mount dst));
+              record
+                {
+                  path = dst;
+                  op = Rename_onto name;
+                  outcome = Acked;
+                  at = Unix.gettimeofday ();
+                }
             in
             if first = second then inner ()
             else with_lock (path_lock second) inner)
@@ -127,6 +146,45 @@ let worker ~mount ~ns ~ops ~seed ~wid ~sizes =
     Thread.delay (Random.State.float rnd 0.15)
   done
 
+(* {1 Faults}
+
+   Each opens a window that the journal records, so work caught in one is judged
+   as "either outcome is legal" rather than held to what an undisturbed run
+   would have produced. Every fault increments a counter, because a mode that
+   injected nothing must not be able to report a pass -- a run that tested
+   nothing looks exactly like a clean one otherwise. *)
+
+let during_fault what f =
+  fault_in_flight := true;
+  incr faults_landed;
+  Printf.printf "  fault: %s\n%!" what;
+  Fun.protect ~finally:(fun () -> fault_in_flight := false) f
+
+(* SIGKILL, not a stop: what has to survive is the process vanishing mid-write,
+   which is the case the write-ahead records exist for. *)
+let crash_and_restart ~exe d ~after_start =
+  during_fault (Printf.sprintf "killing %s" d.label) (fun () ->
+      (try Unix.kill d.pid Sys.sigkill with _ -> ());
+      (try ignore (Unix.waitpid [] d.pid) with _ -> ());
+      Unix.sleepf 1.5;
+      d.pid <- spawn_daemon ~args:d.args ~exe ~home:d.home ~label:d.label ();
+      after_start d)
+
+let spinners = ref []
+
+let start_pressure () =
+  during_fault "cpu load" (fun () ->
+      spinners :=
+        List.init 4 (fun _ ->
+            Unix.create_process "/bin/sh"
+              [| "/bin/sh"; "-c"; "while :; do :; done" |]
+              Unix.stdin Unix.stdout Unix.stderr))
+
+let stop_pressure () =
+  List.iter (fun p -> try Unix.kill p Sys.sigkill with _ -> ()) !spinners;
+  List.iter (fun p -> try ignore (Unix.waitpid [] p) with _ -> ()) !spinners;
+  spinners := []
+
 (* {1 The oracle} *)
 
 (* Legal end states for a strict path: what stood after the last acked
@@ -137,14 +195,18 @@ let legal_states path =
     List.filter (fun r -> r.path = path) !journal
     |> List.sort (fun a b -> compare a.at b.at)
   in
-  if List.exists (fun r -> match r.op with Rename_away | Rename_onto _ -> true | _ -> false) mine
+  if
+    List.exists
+      (fun r ->
+        match r.op with Rename_away | Rename_onto _ -> true | _ -> false)
+      mine
   then None
   else begin
     let states = ref [] and cur = ref None in
     List.iter
       (fun r ->
         (match r.op with
-          | Write "" -> ()                      (* a read, which changes nothing *)
+          | Write "" -> () (* a read, which changes nothing *)
           | Write h -> cur := Some h
           | Delete -> cur := None
           | _ -> ());
@@ -166,8 +228,10 @@ let legal_states path =
 let tree mount =
   all_files mount
   |> List.map (fun p ->
-         (String.sub p (String.length mount + 1) (String.length p - String.length mount - 1),
-          try digest (read_file p) with _ -> "UNREADABLE"))
+      ( String.sub p
+          (String.length mount + 1)
+          (String.length p - String.length mount - 1),
+        try digest (read_file p) with _ -> "UNREADABLE" ))
   |> List.sort compare
 
 (* Every chunk a manifest names, read with the product's own parser. *)
@@ -180,24 +244,26 @@ let check_store ~store =
   let files = all_files store in
   let chunk_of p = Filename.basename p in
   let present =
-    files
-    |> List.filter (fun p -> contains p "/chunks/")
-    |> List.map chunk_of
+    files |> List.filter (fun p -> contains p "/chunks/") |> List.map chunk_of
   in
   let manifests = manifests ~env ~store in
   check "the load reached the store" (fun () ->
       if manifests = [] then
-        failf "no manifest under %s -- nothing was actually published, so the \
-               checks below verified nothing"
+        failf
+          "no manifest under %s -- nothing was actually published, so the \
+           checks below verified nothing"
           store);
   List.iter
     (fun m ->
       match manifest_chunks m with
-        | None -> ()                       (* a folder marker, not a manifest *)
+        | None -> () (* a folder marker, not a manifest *)
         | Some keys ->
-            let missing = List.filter (fun k -> not (List.mem k present)) keys in
+            let missing =
+              List.filter (fun k -> not (List.mem k present)) keys
+            in
             check
-              (Printf.sprintf "every chunk of %s is present" (Filename.basename m))
+              (Printf.sprintf "every chunk of %s is present"
+                 (Filename.basename m))
               (fun () ->
                 if missing <> [] then
                   failf "%d absent, e.g. %s" (List.length missing)
@@ -210,8 +276,11 @@ let () =
       | Some s -> int_of_string s
       | None -> Random.int 1_000_000
   in
-  let ops = match Sys.getenv_opt "TSYNC_STRESS_OPS" with
-    | Some s -> int_of_string s | None -> 60 in
+  let ops =
+    match Sys.getenv_opt "TSYNC_STRESS_OPS" with
+      | Some s -> int_of_string s
+      | None -> 60
+  in
   Printf.printf "seed %d  (replay with TSYNC_STRESS_SEED=%d)\n%!" seed seed;
   (* After the seed is read: where this run stages is incidental, and tying it
      to the seed gave every replay the same directory to collide in. *)
@@ -221,133 +290,239 @@ let () =
   let root = scratch_root "tss" in
   let store = Filename.concat root "store" in
   let store_home = Filename.concat root "sh" in
-  let home_a = Filename.concat root "ha" and home_b = Filename.concat root "hb" in
-  let mnt_a = Filename.concat root "mnt-a" and mnt_b = Filename.concat root "mnt-b" in
-  List.iter (fun d -> sh "mkdir -p %s" (Filename.quote d))
+  let home_a = Filename.concat root "ha"
+  and home_b = Filename.concat root "hb" in
+  let mnt_a = Filename.concat root "mnt-a"
+  and mnt_b = Filename.concat root "mnt-b" in
+  List.iter
+    (fun d -> sh "mkdir -p %s" (Filename.quote d))
     [store; store_home; home_a; home_b; mnt_a; mnt_b];
 
-  let pids = ref [] in
+  let daemons = ref [] in
+  let pids () = List.map (fun d -> d.pid) !daemons in
   (* Kept on request, and always kept when something failed: a run that found
      something is exactly the one whose logs, store and mounts you want, and
      they are gone the moment this returns. *)
   let keep = Sys.getenv_opt "TSYNC_STRESS_KEEP" <> None in
   let restore ?(failed = false) () =
-    List.iter stop_daemon !pids;
-    unmount mnt_a; unmount mnt_b;
+    stop_pressure ();
+    List.iter stop_daemon (pids ());
+    unmount mnt_a;
+    unmount mnt_b;
     Unix.sleepf 1.;
     if keep || failed then
       Printf.printf "left in place for inspection: %s\n%!" root
     else sh "rm -rf %s" (Filename.quote root)
   in
-  let finish code = restore (); exit code in
+  let finish code =
+    restore ();
+    exit code
+  in
 
-  (try
-     Printf.printf "staging in %s\n%!" root;
-     write_config ~home:store_home ~name:"stress-store"
-       ~domains:[domain_json ~env ~backends:[local_backend ~path:store]
-                   ~frontends:[proxy_frontend ~env]];
-     pids := spawn_daemon ~exe ~home:store_home ~label:"store" () :: !pids;
-     wait_until ~timeout:30. ~what:"the store to listen" (fun () ->
-         Sys.command
-           (Printf.sprintf "curl -sf -o /dev/null http://127.0.0.1:%d/" env.port)
-         = 0);
-     List.iter
-       (fun (home, label, mount) ->
-         write_config ~home ~name:label
-           ~domains:[domain_json ~env ~backends:[proxy_backend ~env]
-                       ~frontends:[`String "fuse"]];
-         (* Without --mount the daemon takes its default under the real HOME,
+  try
+    Printf.printf "staging in %s\n%!" root;
+    write_config ~home:store_home ~name:"stress-store"
+      ~domains:
+        [
+          domain_json ~env
+            ~backends:[local_backend ~path:store]
+            ~frontends:[proxy_frontend ~env];
+        ];
+    let store_d =
+      {
+        label = "store";
+        home = store_home;
+        args = [];
+        pid = spawn_daemon ~exe ~home:store_home ~label:"store" ();
+      }
+    in
+    daemons := [store_d];
+    wait_until ~timeout:30. ~what:"the store to listen" (fun () ->
+        Sys.command
+          (Printf.sprintf "curl -sf -o /dev/null http://127.0.0.1:%d/" env.port)
+        = 0);
+    List.iter
+      (fun (home, label, mount) ->
+        write_config ~home ~name:label
+          ~domains:
+            [
+              domain_json ~env
+                ~backends:[proxy_backend ~env]
+                ~frontends:[`String "fuse"];
+            ];
+        (* Without --mount the daemon takes its default under the real HOME,
             leaving these directories empty and every check judging nothing. *)
-         pids :=
-           spawn_daemon ~args:["--mount"; mount] ~exe ~home ~label () :: !pids)
-       [(home_a, "A", mnt_a); (home_b, "B", mnt_b)];
-     (* Waiting on a successful write is not enough: it succeeds against the
+        let args = ["--mount"; mount] in
+        daemons :=
+          { label; home; args; pid = spawn_daemon ~args ~exe ~home ~label () }
+          :: !daemons)
+      [(home_a, "A", mnt_a); (home_b, "B", mnt_b)];
+    (* Waiting on a successful write is not enough: it succeeds against the
         empty staging directory before FUSE takes it over, and then the whole
         run judges a plain directory. Wait for the mount itself, then for it to
         accept a write. *)
-     let mounted m =
-       Sys.command (Printf.sprintf "mountpoint -q %s" (Filename.quote m)) = 0
-     in
-     List.iter
-       (fun mount ->
-         wait_until ~timeout:120. ~what:"FUSE to take the directory over"
-           (fun () -> mounted mount);
-         wait_writable ~mount)
-       [mnt_a; mnt_b];
+    let mounted m =
+      Sys.command (Printf.sprintf "mountpoint -q %s" (Filename.quote m)) = 0
+    in
+    List.iter
+      (fun mount ->
+        wait_until ~timeout:120. ~what:"FUSE to take the directory over"
+          (fun () -> mounted mount);
+        wait_writable ~mount)
+      [mnt_a; mnt_b];
 
-     let sizes = [1024; 64 * 1024; 1_200_000] in
-     let threads =
-       List.concat_map
-         (fun (mount, own) ->
-           List.init 3 (fun i ->
-               Thread.create (fun () ->
-                   worker ~mount ~ns:own ~ops ~seed ~wid:i ~sizes) ())
-           @ [ Thread.create (fun () ->
-                   worker ~mount ~ns:"shared" ~ops:(ops / 2) ~seed ~wid:99 ~sizes) () ])
-         [(mnt_a, "a"); (mnt_b, "b")]
-     in
-     List.iter Thread.join threads;
-     Printf.printf "ops journalled: %d, faults landed: %d\n%!" !ops_run !faults_landed;
+    let mount_of d = if d.label = "A" then mnt_a else mnt_b in
+    let remount d =
+      if d.label <> "store" then begin
+        let m = mount_of d in
+        wait_until ~timeout:120. ~what:"the mount to come back" (fun () ->
+            mounted m);
+        wait_writable ~mount:m
+      end
+      else
+        wait_until ~timeout:60. ~what:"the store to listen again" (fun () ->
+            Sys.command
+              (Printf.sprintf "curl -sf -o /dev/null http://127.0.0.1:%d/"
+                 env.port)
+            = 0)
+    in
+    let fault_mode =
+      Option.value (Sys.getenv_opt "TSYNC_STRESS_FAULT") ~default:"none"
+    in
+    let fault_rnd = Random.State.make [| seed lxor 0x5eed |] in
+    let faulter () =
+      (* Soon, and often: the load is over in tens of seconds, and a first
+          fault scheduled later than that lands after the work it was meant to
+          interrupt. That is how a fault mode comes to inject nothing. *)
+      Thread.delay 1.5;
+      while !load_running do
+        if !load_running then (
+          match fault_mode with
+            | "crash" ->
+                let clients =
+                  List.filter (fun d -> d.label <> "store") !daemons
+                in
+                let d =
+                  List.nth clients
+                    (Random.State.int fault_rnd (List.length clients))
+                in
+                (* Unmounted first: a killed daemon leaves the mount as a stub
+                    the next one cannot take over. *)
+                unmount (mount_of d);
+                crash_and_restart ~exe d ~after_start:remount
+            | "store" ->
+                (* The remote going away and coming back, which is what the
+                    deferred targets and the retry ladder are for. *)
+                crash_and_restart ~exe store_d ~after_start:remount
+            | "load" -> if !spinners = [] then start_pressure ()
+            | _ -> ());
+        Thread.delay (1.5 +. Random.State.float fault_rnd 2.5)
+      done
+    in
+    let fault_thread =
+      if fault_mode = "none" then None else Some (Thread.create faulter ())
+    in
+    let sizes = [1024; 64 * 1024; 1_200_000] in
+    let threads =
+      List.concat_map
+        (fun (mount, own) ->
+          List.init 3 (fun i ->
+              Thread.create
+                (fun () -> worker ~mount ~ns:own ~ops ~seed ~wid:i ~sizes)
+                ())
+          @ [
+              Thread.create
+                (fun () ->
+                  worker ~mount ~ns:"shared" ~ops:(ops / 2) ~seed ~wid:99 ~sizes)
+                ();
+            ])
+        [(mnt_a, "a"); (mnt_b, "b")]
+    in
+    List.iter Thread.join threads;
+    load_running := false;
+    Option.iter Thread.join fault_thread;
+    stop_pressure ();
+    Printf.printf "ops journalled: %d, faults landed: %d\n%!" !ops_run
+      !faults_landed;
+    (* A mode that injected nothing tested nothing it claims to, and its report
+        is indistinguishable from a clean run. *)
+    check "the faults this run asked for actually landed" (fun () ->
+        if fault_mode <> "none" && !faults_landed = 0 then
+          failf
+            "TSYNC_STRESS_FAULT=%s, none injected -- the run exercised none of \
+             what it names"
+            fault_mode);
+    (* Whatever a fault left down has to be back before the domain can settle. *)
+    List.iter
+      (fun d ->
+        match Unix.waitpid [Unix.WNOHANG] d.pid with
+          | 0, _ -> ()
+          | _ ->
+              d.pid <-
+                spawn_daemon ~args:d.args ~exe ~home:d.home ~label:d.label ();
+              remount d
+          | exception _ -> ())
+      (List.rev !daemons);
 
-     (* A run that exercised nothing must not be able to pass: that is how a job
+    (* A run that exercised nothing must not be able to pass: that is how a job
         goes green over an empty set. *)
-     if !ops_run = 0 then begin
-       prerr_endline "FAILED: no operation was journalled";
-       finish 2
-     end;
+    if !ops_run = 0 then begin
+      prerr_endline "FAILED: no operation was journalled";
+      finish 2
+    end;
 
-     (* Settle, then judge. *)
-     (* Settle before judging: the checks are about the converged domain, and a
+    (* Settle, then judge. *)
+    (* Settle before judging: the checks are about the converged domain, and a
         sample taken mid-upload says nothing. Waiting on the store going quiet
         rather than on a fixed sleep, since how long the load takes to land
         depends on how much of it there was. *)
-     let publish_round () =
-       List.iter
-         (fun home ->
-           sh "HOME=%s %s sync --domain %s >/dev/null 2>&1 || true"
-             (Filename.quote home) (Filename.quote exe) env.domain)
-         [home_a; home_b]
-     in
-     publish_round ();
-     let stable = ref 0 and last = ref (-1) in
-     wait_until ~timeout:180. ~what:"the store to stop changing" (fun () ->
-         let n = List.length (all_files store) in
-         if n = !last && n > 0 then incr stable else stable := 0;
-         last := n;
-         if !stable >= 3 then true
-         else (
-           Unix.sleepf 2.;
-           false));
-     publish_round ();
-     Unix.sleepf 3.;
+    let publish_round () =
+      List.iter
+        (fun home ->
+          sh "HOME=%s %s sync --domain %s >/dev/null 2>&1 || true"
+            (Filename.quote home) (Filename.quote exe) env.domain)
+        [home_a; home_b]
+    in
+    publish_round ();
+    let stable = ref 0 and last = ref (-1) in
+    wait_until ~timeout:180. ~what:"the store to stop changing" (fun () ->
+        let n = List.length (all_files store) in
+        if n = !last && n > 0 then incr stable else stable := 0;
+        last := n;
+        if !stable >= 3 then true
+        else (
+          Unix.sleepf 2.;
+          false));
+    publish_round ();
+    Unix.sleepf 3.;
 
-     let ta = tree mnt_a and tb = tree mnt_b in
-     check "both mounts see the same tree" (fun () ->
-         if ta <> tb then
-           failf "%d vs %d entries; first difference %s" (List.length ta)
-             (List.length tb)
-             (match List.filter (fun e -> not (List.mem e tb)) ta with
-               | (p, _) :: _ -> p
-               | [] -> (
-                   match List.filter (fun e -> not (List.mem e ta)) tb with
-                     | (p, _) :: _ -> p
-                     | [] -> "?")));
-     check "nothing is listed but unreadable" (fun () ->
-         match List.filter (fun (_, d) -> d = "UNREADABLE") ta with
-           | (p, _) :: _ -> failf "%s" p
-           | [] -> ());
-     List.iter
-       (fun (path, actual) ->
-         match legal_states path with
-           | None -> ()
-           | Some legal ->
-               check (Printf.sprintf "%s holds something that was written" path)
-                 (fun () ->
-                   if not (List.mem (Some actual) legal) then
-                     failf "holds %s" actual))
-       ta;
-     check_store ~store;
-     finish (summary ())
-   with e ->
-     Printf.printf "stress aborted: %s\n%!" (Printexc.to_string e);
-     finish 2)
+    let ta = tree mnt_a and tb = tree mnt_b in
+    check "both mounts see the same tree" (fun () ->
+        if ta <> tb then
+          failf "%d vs %d entries; first difference %s" (List.length ta)
+            (List.length tb)
+            (match List.filter (fun e -> not (List.mem e tb)) ta with
+              | (p, _) :: _ -> p
+              | [] -> (
+                  match List.filter (fun e -> not (List.mem e ta)) tb with
+                    | (p, _) :: _ -> p
+                    | [] -> "?")));
+    check "nothing is listed but unreadable" (fun () ->
+        match List.filter (fun (_, d) -> d = "UNREADABLE") ta with
+          | (p, _) :: _ -> failf "%s" p
+          | [] -> ());
+    List.iter
+      (fun (path, actual) ->
+        match legal_states path with
+          | None -> ()
+          | Some legal ->
+              check (Printf.sprintf "%s holds something that was written" path)
+                (fun () ->
+                  if not (List.mem (Some actual) legal) then
+                    failf "holds %s" actual))
+      ta;
+    check_store ~store;
+    finish (summary ())
+  with e ->
+    Printf.printf "stress aborted: %s\n%!" (Printexc.to_string e);
+    finish 2
