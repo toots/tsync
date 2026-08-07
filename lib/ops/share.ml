@@ -1,8 +1,5 @@
 open Lwt.Syntax
 
-(* Two, because they mean different things: nothing here can serve a link at all,
-   versus there is nothing at that path to link to. Raised internally and mapped
-   to [Error] at the boundary, so callers decide how to report. *)
 exception Share_unavailable of string
 exception Share_not_found of string
 

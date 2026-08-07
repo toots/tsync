@@ -1,14 +1,3 @@
-(* Backend folder inode model.
-
-   A directory is identified by a stable random [id], not by its (mutable) name,
-   so renaming or moving a folder never rewrites its descendants — their keys
-   live under [manifests/<id>/…] and that id never changes. Only the parent's
-   marker entry (name → child id) is updated.
-
-   Two kinds of object live under [manifests/<folder_id>/<hash(childname)>]:
-   a file manifest, or a folder marker ({dir,name,id}) that both names a child
-   directory and points at the namespace holding its children. *)
-
 (* Reserved namespace ids share the [.tsync-] sentinel prefix used for internal
    markers, so they never collide with a (random hex) folder id and read as
    internal. *)

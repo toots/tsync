@@ -1,15 +1,3 @@
-(* Client-side name escaping for the local manifest mirror.
-
-   A path component is stored verbatim whenever the filesystem can hold it. When
-   it cannot — over the per-component byte limit, or colliding with the escape
-   sentinel — it is replaced by a fixed-length handle [sentinel ^ hash]. A handle
-   is lossy, so the real name is recovered elsewhere: for a file from its manifest
-   body's [path], for a directory from a local-only [dir_marker] inside it.
-
-   The sentinel leads with a dot so handles sort together and read as internal.
-   Any real name starting with it is itself escaped, so the prefix unambiguously
-   marks an escaped component. *)
-
 let sentinel = ".tsync-esc-"
 let dir_marker = ".tsync-name"
 

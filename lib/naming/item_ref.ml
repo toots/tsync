@@ -1,23 +1,3 @@
-(* How a frontend names an item to the daemon.
-
-   A path is the wrong name for a directory: renaming one would change what every
-   item beneath it is called. Directories already have an id a rename does not
-   touch ({!Folder}), so that is what names them here.
-
-   A file is named by its parent's id and its own leaf, which changes on a rename
-   exactly as a path would — a deliberate limit, since the storage layout gives a
-   file no id of its own. The blast radius is one item rather than a subtree.
-
-   The forms are:
-
-     "root"                  the domain root
-     "d:<folder id>"         a directory
-     "f:<folder id>/<leaf>"  a file or symlink, by its parent and name
-     anything else           a logical key, for the callers that predate this
-
-   Nothing here spells a storage key, so a frontend need not know the layout, and
-   nothing spells a user's path, which matters because these reach system logs. *)
-
 open Lwt.Syntax
 
 type t =
@@ -67,9 +47,6 @@ module Make (C : Conf.S) = struct
   let rel_of_id id =
     Folder_ids.rel_of_id ~cache_root:C.cache_root ~domain_name:C.domain_name id
 
-  let lookup_id rel =
-    Folder_ids.lookup_id ~cache_root:C.cache_root ~domain_name:C.domain_name rel
-
   let key_of_rel rel = C.domain_prefix ^ rel
 
   let dir_key_of_rel rel =
@@ -88,26 +65,4 @@ module Make (C : Conf.S) = struct
         Option.map (fun rel -> key_of_rel (Key.join rel name)) rel
     | `Key k -> Lwt.return_some k
     | `Bad _ -> Lwt.return_none
-
-  (* Resolves only what this client records and mints nothing: naming is a
-     read. *)
-  let of_key key =
-    let rel = Key.strip_prefix ~domain_prefix:C.domain_prefix key in
-    let body = Key.chop_slash rel in
-    if body = "" then Lwt.return_some `Root
-    else if Key.is_dir rel then
-      let+ id = lookup_id body in
-      Option.map (fun id -> `Dir id) id
-    else
-      let+ pid = lookup_id (Key.parent body) in
-      Option.map (fun pid -> `File (pid, Filename.basename body)) pid
-
-  (* The reference naming the container [key] sits in. *)
-  let parent_of_key key =
-    let rel = Key.strip_prefix ~domain_prefix:C.domain_prefix key in
-    let parent = Key.parent (Key.chop_slash rel) in
-    if parent = "" then Lwt.return_some `Root
-    else
-      let+ id = lookup_id parent in
-      Option.map (fun id -> `Dir id) id
 end

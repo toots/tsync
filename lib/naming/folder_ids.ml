@@ -1,18 +1,3 @@
-(* Client-side folder-inode resolution, both ways round.
-
-   Every folder in the local mirror carries a [.tsync-dir] marker holding its
-   stable backend id and its real name (the on-disk name may be escaped).
-   Path → id reads those markers, minting one for a folder that has content but
-   no marker yet. The format is the same {dir,name,id} JSON as a backend folder
-   marker ({!Folder}).
-
-   Id → path is what an item identifier asks, an id being the only folder name a
-   rename does not change. The markers are filed under the path and cannot answer
-   it, so each is mirrored by an entry under {!Cache_layout.folders_dir} holding
-   the folder's parent id and real name, and a path is read back by climbing those
-   to the root. The entries hold nothing the markers do not, so {!rebuild}
-   restates them whenever one is missing or wrong. *)
-
 open Lwt.Syntax
 
 let marker_name = ".tsync-dir"

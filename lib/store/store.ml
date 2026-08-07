@@ -1,8 +1,3 @@
-(* Manifest-level backend access keyed by logical keys, mapped to backend keys
-   through the {!Layout} scheme so callers never construct one. Writes fan out to
-   all backends; reads use the primary. Chunk, journal and cursor I/O are not
-   manifest keys and stay in {!File_store}/{!Remote}. *)
-
 open Lwt.Syntax
 
 module Make (C : Conf.S) (L : Layout.S) = struct
@@ -15,14 +10,6 @@ module Make (C : Conf.S) (L : Layout.S) = struct
   let put_manifest ~key ~data =
     let* bk = L.ensure_manifest_key key in
     Bk.put ~key:bk ~data
-
-  let get_manifest ~key =
-    let* bk = L.manifest_key key in
-    match bk with
-      | None -> Lwt.fail Not_found
-      | Some bk ->
-          let (module B : Backend.S) = primary () in
-          B.get ~key:bk ()
 
   let get_manifest_opt ~key =
     let* bk = L.manifest_key key in
@@ -113,10 +100,6 @@ module Make (C : Conf.S) (L : Layout.S) = struct
     match m with
       | None -> Lwt.return_unit
       | Some (bkey, data) -> Bk.put ~key:bkey ~data
-
-  let delete_folder_marker ~key =
-    let* bkey = L.folder_marker_key key in
-    match bkey with None -> Lwt.return_unit | Some bkey -> Bk.delete ~key:bkey
 
   (* Direct children (file manifests and folder markers) of a folder namespace,
      and a raw object fetch — used by resync to walk the inode tree by id. *)
