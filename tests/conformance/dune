@@ -1,0 +1,5 @@
+(executable
+ (flags
+  (:standard -open Tsync_backend_register -open Tsync_backend))
+ (name conformance)
+ (libraries tsync_backend_register tsync_backend lwt lwt.unix unix))

@@ -53,10 +53,11 @@ printf '; Run `dune build @gentests --auto-promote` after adding a test.\n'
 # Tests are grouped by what they are for, so walk every level below the top.
 for dune in $(find . -mindepth 2 -name dune | sed 's|^\./||' | sort); do
   dir=${dune%/dune}
-  # Not hermetic: these mount a real filesystem and start a daemon, so they are
-  # driven by `make -C linux e2e` and deliberately stay out of `dune runtest`.
+  # Not hermetic: e2e mounts a real filesystem and starts a daemon, conformance
+  # talks to real object stores with credentials only CI holds. Both are driven
+  # by their own make target and deliberately stay out of `dune runtest`.
   case "$dir" in
-    e2e/linux | e2e/macos) continue ;;
+    e2e/linux | e2e/macos | conformance) continue ;;
   esac
   # First stanza keyword; comments and blank lines are skipped.
   kind=$(grep -m1 -oE '^\((executable|executables|test|tests|library)' "$dir/dune" | tr -d '(' || true)
