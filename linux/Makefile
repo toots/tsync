@@ -1,4 +1,4 @@
-.PHONY: build test deploy configure install-deps install uninstall e2e conformance
+.PHONY: build test deploy configure install-deps install uninstall e2e conformance stress
 
 build:
 	dune build
@@ -54,3 +54,10 @@ e2e:
 # rather than reporting a pass it did not earn.
 conformance:
 	cd .. && dune build tests/conformance/conformance.exe && ./_build/default/tests/conformance/conformance.exe
+
+# Concurrent load over two real mounts, judged against an oracle. Prints the
+# seed it used; TSYNC_STRESS_SEED replays a run, TSYNC_STRESS_OPS sizes it, and
+# TSYNC_STRESS_KEEP leaves the scratch directory behind (a failing run keeps it
+# either way).
+stress:
+	cd .. && dune build bin/tsync.exe tests/e2e/stress/stress.exe && ./_build/default/tests/e2e/stress/stress.exe
