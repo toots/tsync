@@ -19,6 +19,19 @@ exception Failed of { kind : kind; op : string; detail : string }
 
 let failed ~kind ~op detail = Failed { kind; op; detail }
 
+(* These reach users verbatim, through [Printexc.to_string] in diagnostics and
+   the CLI. The default printer spells an exception with its full module path,
+   which for a wrapped library means the internal library name; pin the text
+   here so how the module is packaged cannot change what a user reads. *)
+let () =
+  Printexc.register_printer (function
+    | Backend_error msg -> Some (Printf.sprintf "Backend.Backend_error(%S)" msg)
+    | Cancelled -> Some "Backend.Cancelled"
+    | Not_writable -> Some "Backend.Not_writable"
+    | Failed { kind = _; op; detail } ->
+        Some (Printf.sprintf "Backend.Failed(%s: %s)" op detail)
+    | _ -> None)
+
 let string_of_kind = function
   | Transient -> "transient"
   | Permanent -> "permanent"
