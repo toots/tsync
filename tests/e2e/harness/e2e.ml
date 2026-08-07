@@ -97,7 +97,17 @@ let rec all_files dir =
         List.concat_map
           (fun n ->
             let p = Filename.concat dir n in
-            if Sys.is_directory p then all_files p else [p])
+            match Sys.is_directory p with
+              | true -> all_files p
+              | false -> [p]
+              (* Listed by readdir and gone by the time it was stat'd. Kept as
+                 a file rather than dropped: over a mount that is exactly the
+                 defect worth reporting -- a name `ls` shows and nothing can
+                 open -- and a caller that reads it will mark it unreadable and
+                 say so. Dropping it here would delete the evidence and leave a
+                 walk that raises mid-directory, which is how it surfaced: as
+                 an abort naming a path, with nothing to say about it. *)
+              | exception _ -> [p])
           (Array.to_list names)
 
 (* Live manifests and folder markers. The trash namespace is left out on

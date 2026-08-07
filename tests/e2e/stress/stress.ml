@@ -305,6 +305,7 @@ let check_store ~store =
     manifests
 
 let () =
+  Printexc.record_backtrace true;
   let seed =
     match Sys.getenv_opt "TSYNC_STRESS_SEED" with
       | Some s -> int_of_string s
@@ -574,5 +575,9 @@ let () =
     check_store ~store;
     finish (summary ())
   with e ->
-    Printf.printf "stress aborted: %s\n%!" (Printexc.to_string e);
+    (* Where it came from, not just what it was. An abort is the one outcome
+       that reports nothing about the product, so the message has to be enough
+       to find the site without a second run to reproduce it. *)
+    Printf.printf "stress aborted: %s\n%s%!" (Printexc.to_string e)
+      (Printexc.get_backtrace ());
     finish 2
