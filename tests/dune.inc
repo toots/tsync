@@ -29,6 +29,20 @@
   (action
    (diff backfill.expected backfill.output))))
 
+(subdir backends/deferred
+ (alias
+  (name default)
+  (deps deferred.exe))
+ (rule
+  (alias runtest)
+  (target deferred.output)
+  (action
+   (with-stdout-to deferred.output (ignore-stderr (run ./deferred.exe)))))
+ (rule
+  (alias runtest)
+  (action
+   (diff deferred.expected deferred.output))))
+
 (subdir backends/fallback
  (alias
   (name default)
@@ -50,20 +64,6 @@
  (rule
   (alias runtest)
   (action (run ./gcs.exe))))
-
-(subdir backends/lane
- (alias
-  (name default)
-  (deps lane.exe))
- (rule
-  (alias runtest)
-  (target lane.output)
-  (action
-   (with-stdout-to lane.output (ignore-stderr (run ./lane.exe)))))
- (rule
-  (alias runtest)
-  (action
-   (diff lane.expected lane.output))))
 
 (subdir backends/probe_deadline
  (alias

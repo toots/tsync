@@ -59,6 +59,3 @@ let use t f = use_or t ~busy:(fun () -> Lwt.fail Busy) f
 let map_with t f xs = Lwt_list.map_p (fun x -> use t (fun () -> f x)) xs
 let iter_with t f xs = Lwt_list.iter_p (fun x -> use t (fun () -> f x)) xs
 let filter_map_with t f xs = Lwt.map (List.filter_map Fun.id) (map_with t f xs)
-let map ~max f xs = map_with (create ~max ()) f xs
-let iter ~max f xs = iter_with (create ~max ()) f xs
-let filter_map ~max f xs = filter_map_with (create ~max ()) f xs

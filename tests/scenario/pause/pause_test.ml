@@ -16,8 +16,8 @@ module C : Conf.S = struct
   let journal_prefix = "tsync/testdom/journal/"
   let cursor_key = "tsync/testdom/cursor"
   let shares_prefix = "tsync/shares/"
-  let backends = [Local_backend.make ~root:store_dir]
-  let share_backends = backends
+  let store = Local_backend.make ~root:store_dir
+  let members = [Backend.member ~name:"local" store]
   let cache_root = root ^ "/cache"
   let data_dir = root ^ "/data"
   let socket_path = ""
@@ -41,8 +41,13 @@ let settle () = Lwt_unix.sleep 0.2
 
 let post n =
   let name = Printf.sprintf "f%d.txt" n in
-  Sq.post ~key:(C.domain_prefix ^ name) ~entry_key:(J.entry_key ())
-    ~ops:[`Put (name, 0L)]
+  Sq.post ~entry_key:(J.entry_key ())
+    {
+      Wal.ops = [`Put (name, 0L)];
+      state = Wal.Prepared;
+      attempts = 0;
+      last_error = None;
+    }
 
 let report label =
   Printf.printf "%-28s paused=%-5b pending=%d uploaded=%d\n" label
@@ -59,7 +64,7 @@ let () =
        ~on_upload_done:(fun ~key:_ -> Lwt.return_unit);
 
      Sq.set_paused true;
-     post 1;
+     let* () = post 1 in
      let* () = settle () in
      report "posted while paused";
 
@@ -69,7 +74,7 @@ let () =
 
      (* [drain] must win over [paused], or shutdown never finishes. *)
      Sq.set_paused true;
-     post 2;
+     let* () = post 2 in
      let* () = settle () in
      report "posted while paused again";
      let* () = Sq.drain () in

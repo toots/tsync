@@ -13,25 +13,6 @@ let vprintf fmt = Log.info fmt
 let verbose_arg =
   Arg.(value & flag & info ["verbose"; "v"] ~doc:"Print detailed progress")
 
-(* Batched so both in-flight requests and live promises stay bounded: a plain
-   [iter_p] over a huge list allocates a promise per element up front. *)
-let iter_pooled ?(parallelism = 32) f xs =
-  let open Lwt.Syntax in
-  let rec take n = function
-    | x :: tl when n > 0 ->
-        let batch, rest = take (n - 1) tl in
-        (x :: batch, rest)
-    | rest -> ([], rest)
-  in
-  let rec loop = function
-    | [] -> Lwt.return_unit
-    | xs ->
-        let batch, rest = take parallelism xs in
-        let* () = Lwt_list.iter_p f batch in
-        loop rest
-  in
-  loop xs
-
 let runtime_paths = Runtime.default_paths ()
 
 (* Where fuse mounts a domain: its [mountPoint] option, else ~/tsync/<domain>.
@@ -114,46 +95,25 @@ let chunk_keys data =
     | t -> List.init (Chunk_table.count t) (Chunk_table.key t)
     | exception _ -> []
 
-(* The domain's backends composed by role into one module.
-
-   Two layers answering different questions. {!Fallback_backend} says where a
-   read may look and in what order: mains, then replicas, then the read-only
-   stores. {!Lane_backend} says which of them a write waits for — the mains — and
-   which catch up behind it, namely the replicas and the backfill targets. A
-   domain of only read-only stores gets an inner layer with nothing writable in
-   it, which is what makes it readable but not writable. *)
-(* The composite every read and write goes through, plus, separately, the stores
-   a share link may be served from. A share manifest lives outside every domain
-   root, so publishing one is not a domain write and must not be refused by a
-   composite with nothing writable in it. *)
-type resolved_backends = {
-  backends : (module Backend.S) list;
-  share_backends : (module Backend.S) list;
-}
-
-(* Order comes from {!Conf_parsing.order_backends}, so a main answers first. A
-   backfill target is excluded: it holds only part of the domain, so a link
-   served from one could point at a file it will never have. A replica is kept,
-   being a complete copy — a link served from one during the window its lane is
-   still catching up can 404, which is the same window everything else about a
-   replica lives in. *)
-let share_leaves leaves =
-  List.filter_map
-    (fun ((bc : Conf_parsing.backend_config), backend) ->
-      if bc.role = `Backfill then None else Some backend)
-    leaves
-
-(* Where the lanes keep what they still owe. Per domain, since the jobs name
-   domain keys and a shared directory would replay one domain's against
+(* Where the deferred targets keep what they still owe. Per domain, since the
+   jobs name domain keys and a shared root would replay one domain's against
    another's backends — the same reason {!Wal} shards by domain. *)
-let lane_log_dir (d : Conf_parsing.domain) =
+let deferred_root (d : Conf_parsing.domain) =
   Filename.concat
-    (Filename.concat runtime_paths.Runtime.data_dir "lane-pending")
+    (Filename.concat runtime_paths.Runtime.data_dir "deferred-pending")
     d.Conf_parsing.name
 
-let build_backends ~resume (d : Conf_parsing.domain) : resolved_backends =
+(* The one place a configured role becomes behavior. [replica] and [backfill]
+   are the same target with one bit between them — whether reads may reach it —
+   and everything else follows from that bit rather than being decided again:
+   {!Deferred.Readable} is what carries the journal and cursor, and what lets a
+   share link be served from the store. So a resynced backfill is promoted by
+   editing one word. *)
+let build_backends ~resume (d : Conf_parsing.domain) :
+    (module Backend.S) * Backend.member list =
   (* Shared by every layer below: a second [make_backend] for the same config is
-     a second client against the same store. *)
+     a second client against the same store. Order comes from
+     {!Conf_parsing.order_backends}, so a main answers first. *)
   let leaves =
     List.map
       (fun (bc : Conf_parsing.backend_config) -> (bc, make_backend bc))
@@ -164,59 +124,62 @@ let build_backends ~resume (d : Conf_parsing.domain) : resolved_backends =
       (fun ((bc : Conf_parsing.backend_config), _) -> List.mem bc.role rs)
       leaves
   in
+  let sub ((bc : Conf_parsing.backend_config), backend) =
+    { Domain_store.name = bc.Conf_parsing.name; backend }
+  in
+  (* Kept so [report_members] and the share list can ask a target how it is
+     doing, and whether reads reach it, without re-deriving either from the
+     role. *)
+  let built : (string, (module Deferred.S)) Hashtbl.t = Hashtbl.create 4 in
+  let target ((bc : Conf_parsing.backend_config), backend) ~source =
+    let plain =
+      Deferred.make ~resume ~name:bc.name ~backend ~source
+        ~chunk_prefix:(Conf_parsing.chunk_prefix d)
+        ~chunk_keys
+        ~journal_prefix:(Conf_parsing.journal_prefix d)
+        ~cursor_key:(Conf_parsing.cursor_key d)
+        ~root:(deferred_root d) ()
+    in
+    let built_target =
+      match bc.role with
+        | `Replica ->
+            let module R = Deferred.Readable ((val plain : Deferred.S)) in
+            (module R : Deferred.S)
+        | _ -> plain
+    in
+    Hashtbl.replace built bc.name built_target;
+    built_target
+  in
   (* Roles are validated at parse time ({!Conf_parsing.validate_roles}), so the
      mains are empty only for a legitimately read-only domain. *)
-  let sub ((bc : Conf_parsing.backend_config), backend) =
-    { Fallback_backend.name = bc.name; backend }
+  let composite =
+    Domain_store.make
+      ~mains:(List.map sub (of_roles [`Main]))
+      ~targets:(List.map target (of_roles [`Replica; `Backfill]))
+      ~archives:(List.map sub (of_roles [`Read_only]))
   in
-  let inner =
-    Fallback_backend.make
-      ~sync:(List.map sub (of_roles [`Main]))
-      ~deferred:(List.map sub (of_roles [`Replica]))
-      ~fallbacks:(List.map sub (of_roles [`Read_only]))
-  in
-  (* A backfill target has no use for the sync bookkeeping; a replica needs it,
-     since a peer reading one reads its journal. *)
-  let skip_prefixes (bc : Conf_parsing.backend_config) =
-    if bc.role = `Backfill then
-      [Conf_parsing.journal_prefix d; Conf_parsing.cursor_key d]
-    else []
-  in
-  let composite, lanes =
-    match of_roles [`Replica; `Backfill] with
-      | [] -> (inner, [])
-      | behind ->
-          let laned =
-            Lane_backend.make ~resume
-              ~chunk_prefix:(Conf_parsing.chunk_prefix d)
-              ~chunk_keys ~log_dir:(lane_log_dir d) ~inners:[inner]
-              ~targets:
-                (List.map
-                   (fun ((bc : Conf_parsing.backend_config), backend) ->
-                     {
-                       Lane_backend.name = bc.Conf_parsing.name;
-                       backend;
-                       skip_prefixes = skip_prefixes bc;
-                     })
-                   behind)
-              ()
-          in
-          (laned.Lane_backend.backend, laned.lanes)
-  in
-  (* The only place holding each backend's name, role and module at once. *)
-  Backend.report_members ~domain:d.Conf_parsing.name
-    (List.map
-       (fun ((bc : Conf_parsing.backend_config), backend) ->
-         let lane = List.assoc_opt bc.name lanes in
-         let stat f = Option.map (fun l () -> f (l ())) lane in
-         {
-           Backend.name = bc.name;
-           role = Conf_parsing.role_name bc.role;
-           backend_type = bc.backend_type;
-           (* Masked as [tsync print-config] does, so a report names the bucket
-              without carrying a credential. *)
-           config =
-             List.map
+  (* The only place holding each store's name, role and module at once. A store
+     with no target behind it is a main or an archive, both of which reads
+     reach. *)
+  let members =
+    List.map
+      (fun ((bc : Conf_parsing.backend_config), backend) ->
+        let stat f =
+          Option.map
+            (fun (module D : Deferred.S) () -> f (D.stats ()))
+            (Hashtbl.find_opt built bc.name)
+        in
+        Backend.member ~name:bc.name
+          ~role:(Conf_parsing.role_name bc.role)
+          ~readable:
+            (match Hashtbl.find_opt built bc.name with
+              | Some (module D : Deferred.S) -> D.readable <> None
+              | None -> true)
+          ~backend_type:bc.backend_type
+            (* Masked as [tsync print-config] does, so a report names the
+                bucket without carrying a credential. *)
+          ~config:
+            (List.map
                (fun (k, v) ->
                  match
                    Option.bind
@@ -225,36 +188,18 @@ let build_backends ~resume (d : Conf_parsing.domain) : resolved_backends =
                  with
                    | Some { secret = true; _ } when v <> "" -> (k, "***")
                    | _ -> (k, v))
-               bc.fields;
-           backend;
-           pending = stat (fun s -> s.Lane_backend.queued);
-           in_flight = stat (fun s -> s.Lane_backend.in_flight);
-           degraded = stat (fun s -> s.Lane_backend.degraded);
-           (* Only a local store sits on a filesystem we can measure. *)
-           local_path =
-             (if bc.backend_type = "local" then List.assoc_opt "path" bc.fields
-              else None);
-         })
-       leaves);
-  { backends = [composite]; share_backends = share_leaves leaves }
-
-(* Moves [source] to the head so it serves reads. Fails if no backend has that
-   name. *)
-let order_backends_from source backends =
-  let ordered = Conf_parsing.order_backends backends in
-  match
-    List.partition
-      (fun (b : Conf_parsing.backend_config) -> b.name = source)
-      ordered
-  with
-    | [], _ ->
-        failwith
-          (Printf.sprintf "no backend named %s (available: %s)" source
-             (String.concat ", "
-                (List.map
-                   (fun (b : Conf_parsing.backend_config) -> b.name)
-                   ordered)))
-    | chosen, rest -> chosen @ rest
+               bc.fields)
+          ?pending:(stat (fun s -> s.Deferred.queued))
+          ?in_flight:(stat (fun s -> s.Deferred.in_flight))
+          ?degraded:(stat (fun s -> s.Deferred.degraded))
+            (* Only a local store sits on a filesystem we can measure. *)
+          ?local_path:
+            (if bc.backend_type = "local" then List.assoc_opt "path" bc.fields
+             else None)
+          backend)
+      leaves
+  in
+  (composite, members)
 
 let default_domain_file () =
   Filename.concat runtime_paths.Runtime.data_dir "default-domain"
@@ -267,15 +212,13 @@ let read_default_domain () =
         if s = "" then None else Some s
     | exception _ -> None
 
-(* [tier=false] exposes the raw backend list instead of the role composite, for
-   commands (resync-remote) copying between individual backends including ones
-   the composite never reads from. [source] forces reads from the named backend,
-   for commands that pick where to read. [resume] picks up the lane work a
-   previous run left owed, and belongs to the daemon alone — a one-shot command
-   records and drains its own, but must not run jobs the daemon is also running.
-*)
-let make_conf ?domain ?socket_path ?(tier = true) ?(resume = false) ?source cfg
-    : (module Conf.S) =
+(* [resume] picks up the deferred work a previous run left owed, and belongs to
+   the daemon alone — a one-shot command records and drains its own, but must
+   not run jobs the daemon is also running.
+
+   One shape, whatever the command: a caller wanting an individual store reaches
+   for {!Conf.S.members} rather than a differently-built conf. *)
+let make_conf ?domain ?socket_path ?(resume = false) cfg : (module Conf.S) =
   Tls_conf.apply cfg.Conf_parsing.tls;
   let domain =
     match domain with Some _ -> domain | None -> read_default_domain ()
@@ -294,26 +237,7 @@ let make_conf ?domain ?socket_path ?(tier = true) ?(resume = false) ?source cfg
     let journal_prefix = Conf_parsing.journal_prefix d
     let cursor_key = Conf_parsing.cursor_key d
     let shares_prefix = Conf_parsing.shares_prefix d
-
-    (* Shared: a second [make_backend] for the same config is a second client
-       against the same store. *)
-    let resolved =
-      let flat ordered =
-        let leaves =
-          List.map
-            (fun (bc : Conf_parsing.backend_config) -> (bc, make_backend bc))
-            ordered
-        in
-        { backends = List.map snd leaves; share_backends = share_leaves leaves }
-      in
-      match source with
-        | Some name -> flat (order_backends_from name d.Conf_parsing.backends)
-        | None ->
-            if tier then build_backends ~resume d
-            else flat (Conf_parsing.order_backends d.Conf_parsing.backends)
-
-    let backends = resolved.backends
-    let share_backends = resolved.share_backends
+    let store, members = build_backends ~resume d
     let cache_root = runtime_paths.Runtime.cache_root
     let data_dir = runtime_paths.Runtime.data_dir
     let socket_path = socket_path
@@ -357,12 +281,47 @@ let domain_target ?domain () =
   (name, Runtime.domain_socket_path runtime_paths name)
 
 let domain_socket ?domain () = snd (domain_target ?domain ())
+let load_conf ?domain () = make_conf ?domain (load_config ())
 
-let load_conf ?domain ?tier ?source () =
-  make_conf ?domain ?tier ?source (load_config ())
+(* [--source] says where to read from, so only reads move: a write still goes
+   through the domain's own path and reaches the deferred targets behind it. For
+   the commands that pick a store to catch up from, rather than letting the read
+   order decide. Raises [Failure] when nothing has that name. *)
+let reading_from name (module C : Conf.S) : (module Conf.S) =
+  let m =
+    match
+      List.filter (fun (m : Backend.member) -> m.Backend.name = name) C.members
+    with
+      | [m] -> m
+      | [] ->
+          failwith
+            (Printf.sprintf "no backend named %s (available: %s)" name
+               (String.concat ", "
+                  (List.map (fun (m : Backend.member) -> m.name) C.members)))
+      | _ ->
+          failwith
+            (Printf.sprintf
+               "backend name %s is ambiguous; set distinct \"name\" fields in \
+                the config"
+               name)
+  in
+  (module struct
+    include C
+
+    let store =
+      (module struct
+        include (val C.store : Backend.S)
+        module Src = (val m.Backend.backend : Backend.S)
+
+        let get = Src.get
+        let get_opt = Src.get_opt
+        let head_opt = Src.head_opt
+        let list_prefix = Src.list_prefix
+      end : Backend.S)
+  end : Conf.S)
 
 (* [Lwt_main.run] plus a drain: a command returns as soon as its work is posted
-   and a lane target fills in the background, so without this a short-lived
+   and a deferred target fills in the background, so without this a short-lived
    command exits leaving copies for the daemon it may not be running alongside.
 *)
 let run_lwt p =

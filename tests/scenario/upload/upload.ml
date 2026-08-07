@@ -22,8 +22,8 @@ module C = struct
   let journal_prefix = "tsync/test/journal/"
   let cursor_key = "tsync/test/cursor"
   let shares_prefix = "tsync/shares/"
-  let backends = [Local_backend.make ~root:backend_root]
-  let share_backends = backends
+  let store = Local_backend.make ~root:backend_root
+  let members = [Backend.member ~name:"local" store]
   let cache_root = Filename.concat root "cache"
   let data_dir = Filename.concat root "data"
   let socket_path = Filename.concat root "s.sock"
@@ -48,8 +48,8 @@ let opinionated n : (module Backend.S) =
   (module struct
     include (val Local_backend.make ~root:backend_root : Backend.S)
 
-    let default_chunk_size ~prefix:_ () = Lwt.return n
-    let max_concurrency ~prefix:_ () = Lwt.return_none
+    let capabilities ~prefix:_ () =
+      Lwt.return { Backend.no_caps with chunk_size = n }
   end)
 
 module Unset (B : sig
@@ -59,7 +59,7 @@ struct
   include C
 
   let chunk_size = None
-  let backends = [opinionated B.answer]
+  let store = opinionated B.answer
 end
 
 module From_backend = Remote.Make (Unset (struct

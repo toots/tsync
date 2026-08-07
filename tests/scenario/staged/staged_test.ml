@@ -27,8 +27,8 @@ module C : Conf.S = struct
   let journal_prefix = "tsync/testdom/journal/"
   let cursor_key = "tsync/testdom/cursor"
   let shares_prefix = "tsync/shares/"
-  let backends = [Local_backend.make ~root:store_dir]
-  let share_backends = backends
+  let store = Local_backend.make ~root:store_dir
+  let members = [Backend.member ~name:"local" store]
   let cache_root = cache_dir
   let data_dir = data_dir
   let socket_path = ""
@@ -242,7 +242,7 @@ let () =
      (* A published file edited in one chunk must re-upload that chunk and no
         other: the untouched ones stay [Inherit] and keep their entries. *)
      let backend_chunks () =
-       let (module B : Backend.S) = List.hd C.backends in
+       let (module B : Backend.S) = C.store in
        let+ entries = B.list_prefix ~prefix:C.chunk_prefix () in
        List.length entries
      in

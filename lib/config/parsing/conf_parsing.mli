@@ -3,16 +3,19 @@
     - [`Main] — a writable source of truth. Reads prefer the first one in config
       order; a write fans out over every main and returns once they have it.
     - [`Replica] — a complete second copy: it receives every write, journal and
-      cursor included, and serves reads when no main is reachable. Filled behind
-      the write rather than in it, so a slow or unreachable replica never sets
-      the pace of a copy, and a failover read is behind by whatever its lane
-      still owes. Queued work is kept on disk and resumes after a restart. See
-      {!Lane_backend} and {!Fallback_backend}.
-    - [`Backfill] — a converging copy, filled the same way but never read from,
-      and starting empty: it covers what is written from then on. Content only:
-      no journal, no cursor. See {!Lane_backend}.
+      cursor included, and serves reads when no main is reachable.
+    - [`Backfill] — the same copy, never read from, and starting empty: it
+      covers what is written from then on. Content only: no journal, no cursor,
+      since nothing reads those from a store nothing reads.
     - [`Read_only] — an authoritative store consulted when the source of truth
-      misses or is unreachable, and never written. See {!Fallback_backend}. *)
+      misses or is unreachable, and never written.
+
+    A replica and a backfill target are one thing, {!Deferred}, differing only
+    in whether reads reach it — which is why a resynced backfill is promoted by
+    changing this one word. Both are filled behind the write rather than in it,
+    so a slow or unreachable one never sets the pace of a copy, and a failover
+    read is behind by whatever it still owes. That work is kept on disk and
+    resumes after a restart. See {!Deferred} and {!Domain_store}. *)
 type role = [ `Main | `Replica | `Backfill | `Read_only ]
 
 (** Every role, in the order worth presenting to a user. *)

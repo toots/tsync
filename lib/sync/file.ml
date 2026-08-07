@@ -211,23 +211,25 @@ module Make_with_layout (C : Conf.S) (Sq : Sync_queue.S) (L : Layout.S) :
           Log.debug "queue_put %s: nothing staged, skipping" key;
           Lwt.return_unit
       | Some st ->
-          let ek = J.entry_key () in
-          let ops = [`Put (rel_key key, st.Manifest.s_size)] in
-          (* [Prepared], not [Intent]: the staged manifest read above is the
-             data, so the upload is owed from here on. *)
-          let* () = W.record ek ops in
-          let+ () = W.advance ek Wal.Prepared in
-          Sq.post ~key ~entry_key:ek ~ops
+          (* One write: the queue records the job before it returns, which is
+             what makes a crash here leave something saying the upload is
+             owed. *)
+          Sq.post ~entry_key:(J.entry_key ())
+            {
+              Wal.ops = [`Put (rel_key key, st.Manifest.s_size)];
+              state = Wal.Prepared;
+              attempts = 0;
+              last_error = None;
+            }
 
   (* The record already exists and already names this work; posting under its
      key is what keeps one unit of work to one key across a restart. *)
-  let resume_put key ~entry_key ~ops =
+  let resume_put key ~entry_key ~record =
     let* staged = Mf.staged_exists key in
     if not staged then Lwt.return_false
-    else begin
-      Sq.post ~key ~entry_key ~ops;
-      Lwt.return_true
-    end
+    else
+      let+ () = Sq.post ~entry_key record in
+      true
 
   let reclaim_staged_orphans = D.reclaim_staged_orphans
 

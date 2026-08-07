@@ -66,7 +66,7 @@ module Make (C : Conf.S) = struct
      timeout kills us and reports the unit failed. A timer of our own would
      abandon the same pending work, quietly and with an exit status saying all was
      well. Steps waiting on something remote carry their own bounds
-     ({!Lane_backend.drain_all}). *)
+     ({!Domain_store.drain}). *)
   let stop_t, stop_wake = Lwt.wait ()
 
   let do_stop () =

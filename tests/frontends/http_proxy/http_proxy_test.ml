@@ -1,5 +1,18 @@
 let status_root = "/tmp/tsync-http-proxy-status-test"
 
+module Down : Backend.S = struct
+  let fail () = Lwt.fail (Backend.Backend_error "connection refused")
+  let put ~key:_ ~data:_ () = fail ()
+  let get ~key:_ () = fail ()
+  let get_opt ~key:_ () = fail ()
+  let head_opt ~key:_ () = fail ()
+  let delete ~key:_ () = fail ()
+  let delete_multi _ = fail ()
+  let copy ~src_key:_ ~dst_key:_ () = fail ()
+  let list_prefix ?max_keys:_ ~prefix:_ () = fail ()
+  let capabilities ~prefix:_ () = Lwt.return Backend.no_caps
+end
+
 module C : Conf.S = struct
   let versioning = false
   let client_name = "test-client"
@@ -10,8 +23,27 @@ module C : Conf.S = struct
   let journal_prefix = "tsync/statusdom/journal/"
   let cursor_key = "tsync/statusdom/cursor"
   let shares_prefix = "tsync/shares/"
-  let backends = [Local_backend.make ~root:(status_root ^ "/store")]
-  let share_backends = backends
+  let store = Local_backend.make ~root:(status_root ^ "/store")
+
+  (* Two stores, one of them down, so the report has to name which. *)
+  let members =
+    [
+      Backend.member ~name:"disk"
+        ~config:[("path", status_root ^ "/store")]
+          (* A real path, so the capacity line is exercised — its numbers are
+             whatever this machine has, hence pinned in the snapshot. *)
+        ~local_path:(status_root ^ "/store") store;
+      Backend.member ~name:"archive" ~role:"backfill" ~readable:false
+        ~backend_type:"http-proxy"
+          (* A remote store, so the report has to say where it points — and the
+             secret must not be what it says. *)
+        ~config:[("url", "https://nas.example:8443"); ("secret", "***")]
+        ~pending:(fun () -> 7)
+        ~in_flight:(fun () -> 2)
+        ~degraded:(fun () -> true)
+        (module Down);
+    ]
+
   let cache_root = status_root ^ "/cache"
   let data_dir = status_root ^ "/data"
 
@@ -29,20 +61,6 @@ module C : Conf.S = struct
 end
 
 (* A store that cannot be reached, so the report has a failure to point at. *)
-module Down : Backend.S = struct
-  let fail () = Lwt.fail (Backend.Backend_error "connection refused")
-  let put ~key:_ ~data:_ () = fail ()
-  let get ~key:_ () = fail ()
-  let get_opt ~key:_ () = fail ()
-  let head_opt ~key:_ () = fail ()
-  let delete ~key:_ () = fail ()
-  let delete_multi _ = fail ()
-  let copy ~src_key:_ ~dst_key:_ () = fail ()
-  let list_prefix ?max_keys:_ ~prefix:_ () = fail ()
-  let share_url ~prefix:_ () = Lwt.return_none
-  let default_chunk_size ~prefix:_ () = Lwt.return_none
-  let max_concurrency ~prefix:_ () = Lwt.return_none
-end
 
 let json_member name j = Yojson.Safe.Util.member name j
 
@@ -174,8 +192,10 @@ let () =
       secret = name;
       read_only = false;
       chunk_size = None;
-      primary = Local_backend.make ~root:"/tmp/tsync-route-test";
-      all_backends = [];
+      (* A fresh root per run: a write through a route really reaches its store
+         now, so a leftover object would answer the read this asserts is a
+         miss. *)
+      store = Local_backend.make ~root:(Filename.temp_dir "tsync-route-test" "");
       serve_share = None;
       socket_path = "/nonexistent/tsync.sock";
       domain_name = "one";
@@ -276,7 +296,7 @@ let () =
          let key =
            Printf.sprintf "%s%013x-%016x" (Chunk_layout.shard_name i) i i
          in
-         let (module B : Backend.S) = List.hd C.backends in
+         let (module B : Backend.S) = C.store in
          B.put
            ~key:(C.chunk_prefix ^ Chunk_layout.relative_path key)
            ~data:"chunk" ())
@@ -301,7 +321,7 @@ let () =
   Lwt_main.run
     (Lwt_list.iter_s
        (fun entry ->
-         let (module B : Backend.S) = List.hd C.backends in
+         let (module B : Backend.S) = C.store in
          B.put
            ~key:(C.journal_prefix ^ Journal.Entry_key.relative_path entry)
            ~data:"{}" ())
@@ -313,36 +333,6 @@ let () =
        ]);
   Fs.write_last_sync_key cursor_entry;
 
-  (* Two stores, one of them down, so the report has to name which. *)
-  Backend.report_members ~domain:C.domain_name
-    [
-      {
-        Backend.name = "disk";
-        role = "main";
-        backend_type = "local";
-        config = [("path", status_root ^ "/store")];
-        backend = List.hd C.backends;
-        pending = None;
-        in_flight = None;
-        degraded = None;
-        (* A real path, so the capacity line is exercised — its numbers are
-           whatever this machine has, hence pinned in the snapshot. *)
-        local_path = Some (status_root ^ "/store");
-      };
-      {
-        Backend.name = "archive";
-        role = "backfill";
-        backend_type = "http-proxy";
-        (* A remote store, so the report has to say where it points — and the
-           secret must not be what it says. *)
-        config = [("url", "https://nas.example:8443"); ("secret", "***")];
-        backend = (module Down);
-        pending = Some (fun () -> 7);
-        in_flight = Some (fun () -> 2);
-        degraded = Some (fun () -> true);
-        local_path = None;
-      };
-    ];
   (* Through [make_route], so option masking and the diagnose wiring are the real
      ones rather than a stand-in. *)
   let binding =
@@ -414,9 +404,9 @@ let () =
   let archive = by_name "archive" in
   assert (json_member "reachable" archive = `Bool false);
   assert (json_member "error" archive <> `Null);
-  let lane = json_member "lane" archive in
-  assert (json_member "queued" lane = `Int 7);
-  assert (json_member "degraded" lane = `Bool true);
+  let deferred = json_member "deferred" archive in
+  assert (json_member "queued" deferred = `Int 7);
+  assert (json_member "degraded" deferred = `Bool true);
 
   (* Counting is opt-in and never done while a request waits: the first ask
      starts a background walk and says so, a later one has the numbers, and the

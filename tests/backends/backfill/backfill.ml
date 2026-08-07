@@ -89,38 +89,48 @@ module Down : Backend.S = struct
   let delete_multi _ = fail ()
   let copy ~src_key:_ ~dst_key:_ () = fail ()
   let list_prefix ?max_keys:_ ~prefix:_ () = fail ()
-  let share_url ~prefix:_ () = Lwt.return_none
-  let default_chunk_size ~prefix:_ () = Lwt.return_none
-  let max_concurrency ~prefix:_ () = Lwt.return_none
+  let capabilities ~prefix:_ () = Lwt.return Backend.no_caps
 end
 
-let wrap ~inners ~target ~name : Lane_backend.t =
-  Lane_backend.make ~chunk_prefix ~chunk_keys
-    ~log_dir:(Filename.concat root "lanes")
-    ~inners
-    ~targets:
-      [
-        {
-          Lane_backend.name;
-          backend = target;
-          skip_prefixes = [journal_prefix; cursor_key];
-        };
-      ]
-    ()
+(* A plain {!Deferred.make}: a backfill target is the one reads never reach, and
+   so has no use for the journal or cursor either. The composite and the target
+   both come back, since the target is what says how far behind it is. *)
+let wrap ~inners ~target ~name =
+  let built = ref None in
+  let spec ~source =
+    let d =
+      Deferred.make ~name ~backend:target ~source ~chunk_prefix ~chunk_keys
+        ~journal_prefix ~cursor_key
+        ~root:(Filename.concat root "pending")
+        ()
+    in
+    built := Some d;
+    d
+  in
+  let composite =
+    Domain_store.make
+      ~mains:
+        (List.mapi
+           (fun i backend ->
+             { Domain_store.name = Printf.sprintf "main%d" i; backend })
+           inners)
+      ~targets:[spec] ~archives:[]
+  in
+  (composite, Option.get !built)
 
 let () =
   let main = Local_backend.make ~root:main_root in
   let (module M : Backend.S) = main in
-  let wrapped =
+  let composite, (module T : Deferred.S) =
     wrap ~inners:[main]
       ~target:(Local_backend.make ~root:target_root)
       ~name:"target"
   in
-  let (module B : Backend.S) = wrapped.Lane_backend.backend in
+  let (module B : Backend.S) = composite in
   (* As the diagnosis endpoints report it. *)
-  let lane = List.assoc "target" wrapped.Lane_backend.lanes in
-  (* The generic hook rather than [Lane_backend.drain_all]: a target catches
-     up only because [make] registered itself there. *)
+  let owed = T.stats in
+  (* The generic hook rather than [Domain_store.drain]: a target catches up only
+     because [make] registered itself there. *)
   let drain () =
     let+ () = Backend.drain () in
     step "drain"
@@ -222,18 +232,18 @@ let () =
      let* () =
        B.put ~key:(manifest_key "two") ~data:(manifest ~name:"two" [c0]) ()
      in
-     let queued = lane () in
+     let queued = owed () in
      step "queued right after a manifest put: %d (degraded %b)"
-       queued.Lane_backend.queued queued.Lane_backend.degraded;
+       queued.Deferred.queued queued.Deferred.degraded;
      let* () = drain () in
-     let settled = lane () in
+     let settled = owed () in
      step "queued once drained: %d (in flight %d, degraded %b)"
-       settled.Lane_backend.queued settled.Lane_backend.in_flight
-       settled.Lane_backend.degraded;
+       settled.Deferred.queued settled.Deferred.in_flight
+       settled.Deferred.degraded;
 
      case "an unreachable target is logged, never fatal";
-     let down = wrap ~inners:[main] ~target:(module Down) ~name:"down" in
-     let (module D : Backend.S) = down.Lane_backend.backend in
+     let down, _ = wrap ~inners:[main] ~target:(module Down) ~name:"down" in
+     let (module D : Backend.S) = down in
      let* () = D.put ~key:c8 ~data:"eeee" () in
      let* () =
        D.put ~key:(manifest_key "safe") ~data:(manifest ~name:"safe" [c8]) ()

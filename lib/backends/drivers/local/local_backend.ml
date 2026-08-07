@@ -179,13 +179,13 @@ let make ~root : (module Backend.S) =
             List.filteri (fun i _ -> i < n) entries
         | _ -> entries
 
-    let share_url ~prefix:_ () = Lwt.return_none
-    let default_chunk_size ~prefix:_ () = Lwt.return_none
-
     (* Probed once: the device under a configured root does not change, and this
        is asked with a request waiting. *)
     let concurrency = lazy (Device.max_concurrency root)
-    let max_concurrency ~prefix:_ () = Lwt.return (Lazy.force concurrency)
+
+    let capabilities ~prefix:_ () =
+      Lwt.return
+        { Backend.no_caps with max_concurrency = Lazy.force concurrency }
   end)
 
 let spec =

@@ -43,21 +43,47 @@ let () =
 
 let default_attempts = 8
 
+let backoff ~base ~cap attempt =
+  Float.min cap (base *. (2. ** float_of_int (min 10 (attempt - 1))))
+
 let with_retry ?(max_attempts = default_attempts) ~name ~op f =
   let rec go attempt =
     Lwt.catch f (function
       | Cancelled as exn -> Lwt.fail exn
       | exn when attempt < max_attempts && classify exn = Transient ->
-          let backoff =
-            Float.min 20. (0.5 *. (2. ** float_of_int (attempt - 1)))
+          let delay =
+            backoff ~base:0.5 ~cap:20. attempt *. (0.5 +. Random.float 1.0)
           in
-          let delay = backoff *. (0.5 +. Random.float 1.0) in
           Log.warn "%s %s: %s; retrying (%d/%d) in %.1fs" name op (reason exn)
             attempt max_attempts delay;
           Lwt.bind (Lwt_unix.sleep delay) (fun () -> go (attempt + 1))
       | exn -> Lwt.fail exn)
   in
   go 1
+
+type caps = {
+  share_url : string option;
+  chunk_size : int option;
+  max_concurrency : int option;
+}
+
+let no_caps = { share_url = None; chunk_size = None; max_concurrency = None }
+
+let merge_caps =
+  let first a b = match a with Some _ -> a | None -> b in
+  let lowest a b =
+    match (a, b) with
+      | Some a, Some b -> Some (min a b)
+      | None, some | some, None -> some
+  in
+  List.fold_left
+    (fun acc c ->
+      {
+        share_url = first acc.share_url c.share_url;
+        chunk_size = first acc.chunk_size c.chunk_size;
+        max_concurrency = lowest acc.max_concurrency c.max_concurrency;
+      })
+    no_caps
 
 module type S = sig
   val put : key:string -> data:string -> unit -> unit Lwt.t
@@ -75,28 +101,10 @@ module type S = sig
   val list_prefix :
     ?max_keys:int -> prefix:string -> unit -> file_entry list Lwt.t
 
-  (** The share base URL if this backend serves shares for [prefix]'s domain,
-      else [None]. s3 returns its configured [shareUrl]; http-proxy asks the
-      frontend; others return [None]. [prefix] identifies the domain for
-      backends (like http-proxy) that front several. *)
-  val share_url : prefix:string -> unit -> string option Lwt.t
-
-  (** The chunk size this backend recommends for new files in [prefix]'s domain,
-      or [None] if it has no opinion (which is every store that only holds
-      bytes). An http-proxy answers with the serving domain's own [chunkSize],
-      so a client behind one inherits it instead of mirroring the setting in two
-      configs. Only consulted when the client's own config does not say. *)
-  val default_chunk_size : prefix:string -> unit -> int option Lwt.t
-
-  (** How many object reads or writes this backend can usefully serve at once,
-      or [None] with no opinion — every store whose limit is the network rather
-      than a measurable device.
-
-      Asked by frontends accepting work from many clients, so they can hold
-      requests instead of handing them all to storage. A local store answers
-      from the device under it; an http-proxy asks its peer, so a client
-      inherits the real limit rather than guessing at hardware it cannot see. *)
-  val max_concurrency : prefix:string -> unit -> int option Lwt.t
+  (** What this store can tell a client about [prefix]'s domain beyond holding
+      its bytes. See {!caps}; [no_caps] is the honest answer for every store
+      that only holds bytes. *)
+  val capabilities : prefix:string -> unit -> caps Lwt.t
 end
 
 type factory = (string -> string option) -> (module S)
@@ -108,6 +116,7 @@ let drain () = Lwt_list.iter_p (fun f -> f ()) !drain_hooks
 type member = {
   name : string;
   role : string;  (** main | replica | backfill | readOnly *)
+  readable : bool;
   backend_type : string;  (** local | s3 | gcs | http-proxy *)
   config : (string * string) list;
       (** What this store points at — a bucket, a URL, a path — with secret
@@ -127,11 +136,20 @@ type member = {
           room is left. Absent for stores whose capacity is not ours to know. *)
 }
 
-let member_registry : (string, member list) Hashtbl.t = Hashtbl.create 4
-let report_members ~domain ms = Hashtbl.replace member_registry domain ms
-
-let members ~domain =
-  Option.value ~default:[] (Hashtbl.find_opt member_registry domain)
+let member ?(role = "main") ?(readable = true) ?(backend_type = "local")
+    ?(config = []) ?local_path ?pending ?in_flight ?degraded ~name backend =
+  {
+    name;
+    role;
+    readable;
+    backend_type;
+    config;
+    backend;
+    pending;
+    in_flight;
+    degraded;
+    local_path;
+  }
 
 type field_type = [ `String | `Bool ]
 

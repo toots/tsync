@@ -368,7 +368,7 @@ on the mains and returns; each target then works through what it owes on its own
 file into the mount runs at the speed of the fastest `main` — a local disk stays a local disk —
 and a cloud copy behind it costs nothing but time it spends on its own.
 
-What each target still owes is kept on disk, under `<data dir>/lane-pending/<domain>/`, and is
+What each target still owes is kept on disk, under `<data dir>/deferred-pending/<domain>/`, and is
 recorded before the write is reported done. Losing the network, or the machine, does not lose
 it: a failure that can clear (a dropped link, a throttling store) is waited out and retried,
 and anything still queued when the daemon stops is picked up when it next starts. `tsync stats`

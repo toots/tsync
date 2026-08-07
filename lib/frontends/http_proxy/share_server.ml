@@ -110,10 +110,8 @@ module Make (C : Conf.S) = struct
                 Lwt.return_some m
             | None -> Lwt.return_none)
 
-  module Bk = Backends.Make (C)
   module Tree = Inode_tree.Make (C)
-
-  let primary = Bk.primary
+  module B = (val C.store : Backend.S)
 
   let is_hex s =
     s <> ""
@@ -125,7 +123,6 @@ module Make (C : Conf.S) = struct
      prefix, so a hex-only token cannot address anything outside it. *)
   let load token =
     if not (is_hex token) then fail `Bad_request "bad token";
-    let (module B : Backend.S) = primary () in
     let* body = B.get_opt ~key:(C.shares_prefix ^ token) () in
     match body with
       | None -> fail `Not_found "not found"

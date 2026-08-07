@@ -17,8 +17,8 @@ module C : Conf.S = struct
   let journal_prefix = "tsync/testdom/journal/"
   let cursor_key = "tsync/testdom/cursor"
   let shares_prefix = "tsync/shares/"
-  let backends = [Local_backend.make ~root:store_dir]
-  let share_backends = backends
+  let store = Local_backend.make ~root:store_dir
+  let members = [Backend.member ~name:"local" store]
   let cache_root = root ^ "/cache"
   let data_dir = root ^ "/data"
   let socket_path = ""
@@ -44,8 +44,13 @@ let gate, open_gate = Lwt.wait ()
 
 let post n size =
   let name = Printf.sprintf "f%d.txt" n in
-  Sq.post ~key:(C.domain_prefix ^ name) ~entry_key:(J.entry_key ())
-    ~ops:[`Put (name, Int64.of_int size)]
+  Sq.post ~entry_key:(J.entry_key ())
+    {
+      Wal.ops = [`Put (name, Int64.of_int size)];
+      state = Wal.Prepared;
+      attempts = 0;
+      last_error = None;
+    }
 
 (* Sorted: [uploading] reports a set, and the workers' order within it is not
    something to pin down. *)
@@ -65,10 +70,10 @@ let () =
 
      report "empty";
 
-     post 1 100;
-     post 2 200;
-     post 3 300;
-     post 4 400;
+     let* () = post 1 100 in
+     let* () = post 2 200 in
+     let* () = post 3 300 in
+     let* () = post 4 400 in
      let* () = settle () in
      report "4 posted";
 

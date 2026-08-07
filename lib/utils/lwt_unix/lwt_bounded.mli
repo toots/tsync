@@ -75,5 +75,8 @@ val waiting : t -> int
     [Lwt_list.map_p]. *)
 val map_with : t -> ('a -> 'b Lwt.t) -> 'a list -> 'b list Lwt.t
 
+(** {!map_with} for a fan-out whose results are not wanted. *)
+val iter_with : t -> ('a -> unit Lwt.t) -> 'a list -> unit Lwt.t
+
 (** {!map_with} keeping the results that are [Some], in input order. *)
 val filter_map_with : t -> ('a -> 'b option Lwt.t) -> 'a list -> 'b list Lwt.t

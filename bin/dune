@@ -28,9 +28,7 @@
    -open
    Tsync_backend_register
    -open
-   Tsync_lane_backend
-   -open
-   Tsync_fallback_backend
+   Tsync_domain_store
    -open
    Tsync_backend
    -open
@@ -61,8 +59,7 @@
   tsync_conf
   tsync_backend
   tsync_diagnostics
-  tsync_fallback_backend
-  tsync_lane_backend
+  tsync_domain_store
   tsync_local_io
   tsync_log
   tsync_runtime

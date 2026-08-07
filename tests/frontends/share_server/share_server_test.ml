@@ -27,8 +27,8 @@ module C : Conf.S = struct
   let journal_prefix = "tsync/testdom/journal/"
   let cursor_key = "tsync/testdom/cursor"
   let shares_prefix = "tsync/shares/"
-  let backends = [Local_backend.make ~root:store_dir]
-  let share_backends = backends
+  let store = Local_backend.make ~root:store_dir
+  let members = [Backend.member ~name:"local" store]
   let cache_root = cache_dir
   let data_dir = data_dir
   let socket_path = ""
@@ -49,7 +49,7 @@ module R = Remote.Make (C)
 module Mf = Manifest.Make (C)
 module Sh = Share_server.Make (C)
 
-let backend () = List.hd C.backends
+let backend () = C.store
 
 let write_local path content =
   let oc = open_out_bin path in

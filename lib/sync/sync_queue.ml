@@ -1,16 +1,40 @@
 open Lwt.Syntax
+module Ek = Journal.Entry_key
 
 module type S = sig
-  val post :
-    key:string -> entry_key:Journal.Entry_key.t -> ops:Journal.op list -> unit
+  (** Record the work and queue it. Returns once the record is durable, not once
+      the upload has landed. [entry_key] names the record, and goes on to name
+      the journal entry the upload publishes; the file is read from the record's
+      ops, so there is nowhere for the two to disagree about which one this is.
+
+      The whole record is the caller's to supply, so re-queueing one carries
+      forward what it has already been through rather than presenting it as
+      fresh. *)
+  val post : entry_key:Journal.Entry_key.t -> Wal.record -> unit Lwt.t
 
   val cancel_put : string -> bool
+
+  (** [true] when no upload is queued or running. *)
   val idle : unit -> bool
+
+  (** Files with an active or queued upload. *)
   val pending : unit -> int
+
+  (** Keys of the files a worker is uploading right now. *)
   val uploading : unit -> string list
+
+  (** Bytes still owed: everything queued plus everything in flight. Counted
+      whole per file, so a file half sent still counts for its full size. *)
   val pending_bytes : unit -> int64
+
+  (** Uploads completed since the daemon started. *)
   val completed_count : unit -> int
+
+  (** Park the workers between uploads. Queued work is kept, so {!pending} keeps
+      reporting it, and {!drain} still runs to completion. Not persisted: a
+      restart resumes. *)
   val set_paused : bool -> unit
+
   val paused : unit -> bool
 
   val start :
@@ -25,33 +49,25 @@ end
 module Make (C : Conf.S) : S = struct
   module Fs = File_store.Make (C)
   module W = Wal.Make (C)
+  module Q = Wal.Q
 
-  type put_data = {
-    key : string;
-    entry_key : Journal.Entry_key.t;
-    ops : Journal.op list;
-    size : int64;
-  }
+  (* The file a record is about, and what it will cost to send. Both derived
+     from the ops rather than carried alongside them, so the two cannot disagree
+     about which file a record names. *)
+  let op_key = function
+    | `Put (k, _) | `Delete k | `Mkdir (k, _) | `Rmdir (k, _) -> k
+    | `Rename { Journal.dst; _ } -> dst
 
-  (* [cancel] is polled between chunks, so setting it aborts at the next chunk
-     boundary. [failures] drives the requeue backoff. *)
-  type slot = {
-    cancel : bool ref;
-    mutable pending : put_data option;
-    mutable failures : int;
-  }
+  let key_of (r : Wal.record) =
+    match r.Wal.ops with op :: _ -> C.domain_prefix ^ op_key op | [] -> ""
 
-  (* Queue state is touched only from the Lwt event-loop thread, so no locks. *)
-  let slots : (string, slot) Hashtbl.t = Hashtbl.create 64
-  let queue : put_data Queue.t = Queue.create ()
-
-  (* What a worker is on right now, as opposed to [queue], which is what none has
-     picked up yet. Both are needed to say what is still owed. *)
-  let active : (string, put_data) Hashtbl.t = Hashtbl.create 8
-  let queue_cond = Lwt_condition.create ()
-  let stop = ref false
-  let paused = ref false
-  let workers : unit Lwt.t list ref = ref []
+  (* Only a [`Put] carries bytes; the other ops are metadata the backend answers
+     in one round trip. *)
+  let size_of (r : Wal.record) =
+    List.fold_left
+      (fun total op ->
+        match op with `Put (_, size) -> Int64.add total size | _ -> total)
+      0L r.Wal.ops
 
   let upload_fn : (key:string -> cancel:bool ref -> unit Lwt.t) ref =
     ref (fun ~key:_ ~cancel:_ -> Lwt.return_unit)
@@ -62,179 +78,84 @@ module Make (C : Conf.S) : S = struct
   let on_upload_done_fn : (key:string -> unit Lwt.t) ref =
     ref (fun ~key:_ -> Lwt.return_unit)
 
-  (* Fired off without blocking the synchronous post/cancel entry points. A
-     failed unlink is not lost work: the record names a put whose data is no
-     longer staged, which is exactly what {!Replay.reconcile} discards on the
-     next start. *)
-  let drop_pending entry_key = Lwt.async (fun () -> W.complete entry_key)
-
-  let enqueue pd =
-    Queue.add pd queue;
-    Lwt_condition.signal queue_cond ()
-
-  let add_slot key =
-    Hashtbl.add slots key { cancel = ref false; pending = None; failures = 0 }
-
-  let replace_pending slot pd =
-    (match slot.pending with
-      | Some { entry_key; _ } -> drop_pending entry_key
-      | None -> ());
-    slot.pending <- Some pd
-
-  let clear_pending slot =
-    (match slot.pending with
-      | Some { entry_key; _ } -> drop_pending entry_key
-      | None -> ());
-    slot.pending <- None
-
-  let cancel_put key =
-    match Hashtbl.find_opt slots key with
-      | Some slot ->
-          slot.cancel := true;
-          clear_pending slot;
-          true
-      | None -> false
-
-  let idle () = Queue.is_empty queue && Hashtbl.length slots = 0
-
-  (* Metrics: files with an active or queued upload, and uploads finished since
-     start. *)
-  let pending () = Hashtbl.length slots
   let completed = ref 0
   let completed_count () = !completed
-  let uploading () = Hashtbl.fold (fun key _ acc -> key :: acc) active []
 
-  let pending_bytes () =
-    let add total pd = Int64.add total pd.size in
-    Hashtbl.fold
-      (fun _ pd total -> add total pd)
-      active (Queue.fold add 0L queue)
+  (* The record's id is the entry key: one unit of work keeps one name, from the
+     local record through the published journal entry to the cursor a peer
+     compares against. *)
+  let run ~id (r : Wal.record) ~cancel =
+    match Ek.of_string id with
+      | None -> Lwt.return_unit
+      | Some entry_key ->
+          let key = key_of r in
+          let abandon () = W.complete entry_key in
+          Lwt.catch
+            (fun () ->
+              if !cancel then abandon ()
+              else
+                let* () = !upload_fn ~key ~cancel in
+                if !cancel then abandon ()
+                else
+                  (* Executed, then published, then the record goes. A crash in
+                     the first window leaves a record saying the bytes are up
+                     and the entry is not, which is what reconcile finishes; a
+                     crash in the second leaves the same record, and reconcile
+                     finds the entry already published and drops it. Dropping
+                     the record first would leave the bytes uploaded, no entry
+                     for peers to read, and nothing saying anything was owed. *)
+                  let* () = W.advance entry_key Wal.Executed in
+                  let* (_ : Ek.t) =
+                    Fs.write_journal_entry ~entry_key r.Wal.ops
+                  in
+                  let* () = W.complete entry_key in
+                  !on_cursor_fn ~entry_key;
+                  incr completed;
+                  !on_upload_done_fn ~key)
+            (function
+              (* Superseded, or the staged bytes are gone: nothing is owed any
+                 more, so the record goes rather than being retried. *)
+              | Backend.Cancelled | Unix.Unix_error (Unix.ENOENT, _, _) ->
+                  abandon ()
+              | exn ->
+                  (* The record is never dropped on a real failure, or the file
+                     sits dirty in the cache forever: auto-evict only runs after
+                     a successful upload, and nothing else remembers the upload
+                     is owed. Re-raised, so the queue backs off or gives up on
+                     it by the shared rules. *)
+                  let* () =
+                    W.note_failure entry_key (Backend.classify exn)
+                      (Backend.reason exn)
+                  in
+                  Lwt.fail exn)
 
-  (* Returns [true] if the put failed transiently and should be requeued. *)
-  let exec_put slot ({ key; entry_key; ops } : put_data) =
-    if !(slot.cancel) then
-      let+ () = W.complete entry_key in
-      false
-    else
-      Lwt.catch
-        (fun () ->
-          let* () = !upload_fn ~key ~cancel:slot.cancel in
-          if !(slot.cancel) then
-            let+ () = W.complete entry_key in
-            false
-          else
-            (* Executed, then published, then the record goes. A crash in the
-               first window leaves a record saying the bytes are up and the
-               entry is not, which is what reconcile finishes; a crash in the
-               second leaves the same record, and reconcile finds the entry
-               already published and drops it. Dropping the record first would
-               leave the bytes uploaded, no entry for peers to read, and nothing
-               saying anything was owed. *)
-            let* () = W.advance entry_key Wal.Executed in
-            let* (_ : Journal.Entry_key.t) =
-              Fs.write_journal_entry ~entry_key ops
-            in
-            let* () = W.complete entry_key in
-            !on_cursor_fn ~entry_key;
-            incr completed;
-            slot.failures <- 0;
-            let+ () = !on_upload_done_fn ~key in
-            false)
-        (function
-          | Backend.Cancelled ->
-              let+ () = W.complete entry_key in
-              false
-          | Unix.Unix_error (Unix.ENOENT, _, _) ->
-              let+ () = W.complete entry_key in
-              false
-          | exn -> (
-              (* The record is never dropped on failure, or the file sits dirty
-                 in the cache forever: auto-evict only runs after a successful
-                 upload, and nothing else remembers the upload is owed. *)
-              let kind = Backend.classify exn in
-              let* () = W.note_failure entry_key kind (Backend.reason exn) in
-              match kind with
-                | Backend.Permanent ->
-                    (* A 403, a read-only domain, a key the store refuses: the
-                       same request will be refused again. Stop, and let the
-                       record carry why — this used to spin forever. *)
-                    Log.err "sync_queue put %s: %s; not retrying" key
-                      (Backend.reason exn);
-                    Lwt.return_false
-                | Backend.Transient ->
-                    slot.failures <- slot.failures + 1;
-                    let delay =
-                      Float.min 300.
-                        (10. *. (2. ** float_of_int (slot.failures - 1)))
-                    in
-                    Log.err "sync_queue put %s: %s; requeue %d in %.0fs" key
-                      (Backend.reason exn) slot.failures delay;
-                    let+ () = Lwt_unix.sleep delay in
-                    true))
+  (* [Stop], not [Drop]: the record is what {!Replay} reconciles and what stats
+     reports as stuck, so a permanent failure has to leave it behind. *)
+  let queue =
+    Q.keyed ~workers:(max 1 C.max_uploads) ~weight:size_of ~name:"upload"
+      ~log:W.log ~key:key_of ~poison:Durable_queue.Stop ~run ()
 
-  (* Parking on [queue_cond] is how a worker waits for either more work or a
-     resume. [stop] wins over [paused], or a paused queue would never drain. *)
-  let rec worker_loop () =
-    if (Queue.is_empty queue || !paused) && not !stop then
-      let* () = Lwt_condition.wait queue_cond in
-      worker_loop ()
-    else if Queue.is_empty queue then Lwt.return_unit
-    else begin
-      let pd = Queue.pop queue in
-      let slot = Hashtbl.find slots pd.key in
-      Hashtbl.replace active pd.key pd;
-      let* retry =
-        Lwt.finalize
-          (fun () -> exec_put slot pd)
-          (fun () ->
-            Hashtbl.remove active pd.key;
-            Lwt.return_unit)
-      in
-      (match (slot.pending, retry && not !stop) with
-        | Some next, _ ->
-            slot.cancel := false;
-            slot.pending <- None;
-            enqueue next
-        | None, true -> enqueue pd
-        | None, false -> Hashtbl.remove slots pd.key);
-      worker_loop ()
-    end
+  (* [Prepared]: whatever staged data the caller read is what this names, so the
+     upload is owed from here on. *)
+  let post ~entry_key (r : Wal.record) =
+    Q.post ~id:(Ek.to_string entry_key) queue
+      { r with Wal.state = Wal.Prepared }
 
-  (* Below [worker_loop], so the loop above still sees the ref this shadows. *)
-  let set_paused b =
-    paused := b;
-    if not b then Lwt_condition.broadcast queue_cond ()
-
-  let paused () = !paused
+  let cancel_put key = Q.cancel queue key
+  let pending () = Q.owed queue
+  let idle () = pending () = 0
+  let uploading () = Q.in_flight_keys queue
+  let pending_bytes () = (Q.stats queue).Durable_queue.bytes
+  let set_paused b = Q.set_paused queue b
+  let paused () = Q.paused queue
 
   let start ~upload ~on_cursor ~on_upload_done =
     upload_fn := upload;
     on_cursor_fn := on_cursor;
     on_upload_done_fn := on_upload_done;
-    workers := List.init (max 1 C.max_uploads) (fun _ -> worker_loop ())
+    (* No recovery here: {!Replay} reads the records itself, decides what is
+       still owed against the shared journal, and re-posts only that. *)
+    Q.start queue
 
-  let drain () =
-    stop := true;
-    Lwt_condition.broadcast queue_cond ();
-    let* () = Lwt.join !workers in
-    workers := [];
-    Lwt.return_unit
-
-  (* Only a [`Put] carries bytes; the other ops are metadata the backend answers
-     in one round trip. *)
-  let ops_size ops =
-    List.fold_left
-      (fun total op ->
-        match op with `Put (_, size) -> Int64.add total size | _ -> total)
-      0L ops
-
-  let post ~key ~entry_key ~ops =
-    let pd = { key; entry_key; ops; size = ops_size ops } in
-    match Hashtbl.find_opt slots key with
-      | None ->
-          add_slot key;
-          enqueue pd
-      | Some slot ->
-          slot.cancel := true;
-          replace_pending slot pd
+  let drain () = Q.stop queue
 end
