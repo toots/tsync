@@ -88,14 +88,27 @@ let body rnd n =
 
 let digest s = String.sub (Digest.to_hex (Digest.string s)) 0 16
 
-let attempt path op f =
+(* What an operation did is settled by doing it, which is why the action reports
+   its own op rather than being handed one.
+
+   Preparing the op first means deciding it from a look at the filesystem taken
+   outside the guard, and in a tree two clients are writing to that look can go
+   stale -- or raise -- between the look and the act. It did: a run died on
+   [Sys.file_exists p] answering yes and the read that followed finding nothing,
+   with the exception escaping [attempt] because OCaml evaluates an argument
+   before the call it belongs to. That is the same assumption the product had to
+   drop, a decision made from a snapshot no single writer owns.
+
+   The oracle discards [Failed_op] records, so a raise needs no op of its own. *)
+let attempt path f =
   let dirty = !fault_in_flight in
-  let outcome =
+  let op, outcome =
     match f () with
-      | () -> if dirty || !fault_in_flight then Interrupted else Acked
-      | exception _ -> Failed_op
+      | op -> (op, if dirty || !fault_in_flight then Interrupted else Acked)
+      | exception _ -> (Write "", Failed_op)
   in
-  record { path; op; outcome; at = Unix.gettimeofday () }
+  record { path; op; outcome; at = Unix.gettimeofday () };
+  outcome
 
 let worker ~mount ~ns ~ops ~seed ~wid ~sizes =
   let rnd = Random.State.make [| seed; Hashtbl.hash ns; wid |] in
@@ -108,33 +121,49 @@ let worker ~mount ~ns ~ops ~seed ~wid ~sizes =
         body rnd (List.nth sizes (Random.State.int rnd (List.length sizes)))
       in
       with_lock (path_lock name) (fun () ->
-          attempt name
-            (Write (digest data))
-            (fun () ->
-              sh "mkdir -p %s" (Filename.quote (Filename.dirname p));
-              write_file p data))
+          ignore
+            (attempt name (fun () ->
+                 sh "mkdir -p %s" (Filename.quote (Filename.dirname p));
+                 write_file p data;
+                 Write (digest data))))
     end
     else if pick < 70 then
       with_lock (path_lock name) (fun () ->
-          attempt name
-            (Write (if Sys.file_exists p then digest (read_file p) else ""))
-            (fun () -> if Sys.file_exists p then ignore (read_file p)))
+          ignore
+            (attempt name (fun () ->
+                 (* One read, and the op is whatever it saw. An absent file is
+                    an answer, not a failure: it changes nothing, which is what
+                    [Write ""] says. *)
+                 match read_file p with
+                   | data -> Write (digest data)
+                   | exception _ -> Write "")))
     else if pick < 85 then begin
       let dst = Printf.sprintf "%s/f%02d" ns (Random.State.int rnd 12) in
       if dst <> name then begin
         let first, second = if name < dst then (name, dst) else (dst, name) in
         with_lock (path_lock first) (fun () ->
             let inner () =
-              attempt name Rename_away (fun () ->
-                  if Sys.file_exists p then
-                    Sys.rename p (Filename.concat mount dst));
-              record
-                {
-                  path = dst;
-                  op = Rename_onto name;
-                  outcome = Acked;
-                  at = Unix.gettimeofday ();
-                }
+              let moved = ref false in
+              let outcome =
+                attempt name (fun () ->
+                    match Sys.rename p (Filename.concat mount dst) with
+                      | () ->
+                          moved := true;
+                          Rename_away
+                      (* The source was already gone, so nothing moved and the
+                         path is still judgeable. Recording [Rename_away] here
+                         would retire it from the oracle for a move that never
+                         happened. *)
+                      | exception _ -> Write "")
+              in
+              (* And the destination only hears about it if a file actually
+                 arrived, with the outcome the move actually had -- claiming
+                 [Acked] unconditionally told the oracle about writes that never
+                 landed. *)
+              if !moved then
+                record
+                  { path = dst; op = Rename_onto name; outcome;
+                    at = Unix.gettimeofday () }
             in
             if first = second then inner ()
             else with_lock (path_lock second) inner)
@@ -142,7 +171,12 @@ let worker ~mount ~ns ~ops ~seed ~wid ~sizes =
     end
     else
       with_lock (path_lock name) (fun () ->
-          attempt name Delete (fun () -> if Sys.file_exists p then Sys.remove p));
+          ignore
+            (attempt name (fun () ->
+                 (* Removing a file that is already gone leaves the same state,
+                    so it is an outcome rather than a failure. *)
+                 (try Sys.remove p with Sys_error _ -> ());
+                 Delete)));
     Thread.delay (Random.State.float rnd 0.15)
   done
 
@@ -497,16 +531,32 @@ let () =
     Unix.sleepf 3.;
 
     let ta = tree mnt_a and tb = tree mnt_b in
+    (* Says which way each path diverged, because the three possibilities have
+       nothing to do with each other: a path only one mount lists is a
+       visibility failure, whereas a path both list with different bodies is a
+       convergence failure, and they are fixed in different places. Naming the
+       first differing path alone left that unanswered. *)
     check "both mounts see the same tree" (fun () ->
-        if ta <> tb then
-          failf "%d vs %d entries; first difference %s" (List.length ta)
-            (List.length tb)
-            (match List.filter (fun e -> not (List.mem e tb)) ta with
-              | (p, _) :: _ -> p
-              | [] -> (
-                  match List.filter (fun e -> not (List.mem e ta)) tb with
-                    | (p, _) :: _ -> p
-                    | [] -> "?")));
+        if ta <> tb then begin
+          let paths l = List.map fst l in
+          let only_a = List.filter (fun p -> not (List.mem p (paths tb))) (paths ta)
+          and only_b = List.filter (fun p -> not (List.mem p (paths ta))) (paths tb) in
+          let differing =
+            List.filter_map
+              (fun (p, da) ->
+                match List.assoc_opt p tb with
+                  | Some db when db <> da -> Some (Printf.sprintf "%s a=%s b=%s" p da db)
+                  | _ -> None)
+              ta
+          in
+          let show label = function
+            | [] -> ""
+            | l -> Printf.sprintf "; %s %s" label (String.concat "," l)
+          in
+          failf "%d vs %d entries%s%s%s" (List.length ta) (List.length tb)
+            (show "only on a:" only_a) (show "only on b:" only_b)
+            (show "differing bodies:" differing)
+        end);
     check "nothing is listed but unreadable" (fun () ->
         match List.filter (fun (_, d) -> d = "UNREADABLE") ta with
           | (p, _) :: _ -> failf "%s" p
