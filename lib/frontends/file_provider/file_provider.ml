@@ -239,8 +239,11 @@ module Make (C : Conf.S) = struct
            change. *)
         ignore (publish ~subs "changed" [("key", `String key)]);
         Lwt.return_unit)
-      ~on_changed:(fun key ->
-        ignore (publish ~subs "changed" [("key", `String key)]))
+      ~freshness:
+        (* The extension keeps its own view of the tree, so it has to be told;
+           it will not ask again on its own. *)
+        (Frontend.Notify
+           (fun key -> ignore (publish ~subs "changed" [("key", `String key)])))
       ()
 end
 

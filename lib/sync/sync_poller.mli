@@ -11,5 +11,5 @@ module Make (C : Conf.S) (F : File_ops.S) : sig
       [on_changed key] is called for each key a foreign op touched, after the op
       is applied. Defaults to a no-op; pass [Ipc.notify_changed ~path] to signal
       the FileProvider extension. *)
-  val start : ?on_changed:(string -> unit) -> unit -> unit
+  val start : on_changed:(string -> unit) -> unit -> unit
 end

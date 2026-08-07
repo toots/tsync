@@ -12,6 +12,7 @@ module type S = sig
   val start : binding list -> unit
 end
 
+type freshness = Notify of (string -> unit) | Revalidates
 type command = { verb : string; doc : string; run : (module Conf.S) -> unit }
 
 type entry = {

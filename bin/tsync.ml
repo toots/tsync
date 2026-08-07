@@ -863,7 +863,8 @@ let sync_cmd =
        (* One pass of the same engine the daemon polls with, so the two cannot
           drift apart. *)
        let incremental () =
-         let+ n = Rp.apply_foreign () in
+         (* A one-shot command: no mount of ours is running to refresh. *)
+         let+ n = Rp.apply_foreign ~on_changed:(fun _ -> ()) () in
          (match Fs.read_last_sync_key () with
            | Some k when !verbose ->
                Log.info "applied through %s" (Journal.Entry_key.to_string k)

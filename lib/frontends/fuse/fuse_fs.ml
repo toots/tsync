@@ -372,7 +372,14 @@ module Make (C : Conf.S) = struct
             (let* () =
                (* A FUSE mount is the filesystem, so a finished upload changes
                   nothing a reader can observe. *)
-               E.start ~on_upload_done:(fun ~key:_ -> Lwt.return_unit) ()
+               E.start
+                 ~freshness:
+                   (* Nothing to push: this mount asks again rather than being
+                      told. [cache_opts] is what makes that true, and how far
+                      it goes. *)
+                   Frontend.Revalidates
+                 ~on_upload_done:(fun ~key:_ -> Lwt.return_unit)
+                 ()
              in
              Log.debug "starting IPC server at %s" C.socket_path;
              Lwt.async (fun () ->
@@ -406,9 +413,34 @@ module Make (C : Conf.S) = struct
     Log.info "mounting FUSE at %s" mount_point;
     (* [allow_other] lets other users reach the mount; it also needs
        [user_allow_other] in /etc/fuse.conf. *)
+    (* The kernel's own caches, turned off.
+
+       They assume this filesystem changes only through the kernel's own calls,
+       which is false the moment a second client shares the domain: a rename
+       made elsewhere left the old name in the dentry cache, listed but no longer
+       openable, and the new one invisible -- until the mount was taken down.
+       Nothing invalidated them, because libfuse's high-level API offers no way
+       to; [fuse_lowlevel_notify_inval_entry] is not reachable from this binding.
+
+       So freshness is bought by re-asking: a LOOKUP per path access rather than
+       one per timeout. That is the standing cost of {!Frontend.Revalidates}
+       here, and the reason to want a lowlevel binding is to stop paying it.
+
+       It buys resolution, not enumeration. A name another client has since
+       created or moved now resolves correctly -- opening it works where it used
+       to fail -- but the kernel's cached listing of a directory is not covered
+       by these timeouts, and this API cannot invalidate it either, so a stale
+       readdir survives until the directory is opened afresh. Closing that needs
+       [fuse_lowlevel_notify_inval_entry], which means a lowlevel binding; the
+       directory's mtime already moves when a foreign change lands, so the
+       signal a smarter cache would need is there. *)
+    let cache_opts =
+      ["entry_timeout=0"; "attr_timeout=0"; "negative_timeout=0"; "auto_cache"]
+    in
     let opts =
       (if C.read_only then ["ro"] else [])
-      @ if allow_other then ["allow_other"] else []
+      @ (if allow_other then ["allow_other"] else [])
+      @ cache_opts
     in
     let mount_args =
       Array.of_list

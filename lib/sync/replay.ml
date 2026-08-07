@@ -165,7 +165,7 @@ module Make (C : Conf.S) (F : File_ops.S) = struct
     in
     adopt_unrecorded ~recorded
 
-  let apply_foreign ?(on_changed = fun _ -> ()) () =
+  let apply_foreign ~on_changed () =
     let my_uuid = J.client_uuid () in
     let* keys =
       Fs.list_journal_keys ?start_after:(Fs.read_last_sync_key ()) ()
