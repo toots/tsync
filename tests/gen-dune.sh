@@ -57,7 +57,7 @@ for dune in $(find . -mindepth 2 -name dune | sed 's|^\./||' | sort); do
   # talks to real object stores with credentials only CI holds. Both are driven
   # by their own make target and deliberately stay out of `dune runtest`.
   case "$dir" in
-    e2e/linux | e2e/macos | conformance) continue ;;
+    e2e/linux | e2e/macos | e2e/stress | conformance) continue ;;
   esac
   # First stanza keyword; comments and blank lines are skipped.
   kind=$(grep -m1 -oE '^\((executable|executables|test|tests|library)' "$dir/dune" | tr -d '(' || true)
