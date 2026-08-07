@@ -1,6 +1,6 @@
 (* One representative case per file operation. A new suite is a sibling
-   directory with its own scenario file, [.expected] snapshot, and the same three
-   dune stanzas (see tests/base/dune). *)
+   directory with its own scenario file and [.expected] snapshot; the dune rules
+   that run it are generated (see tests/gen-dune.sh). *)
 
 open Test_runner
 
