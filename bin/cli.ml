@@ -184,7 +184,7 @@ let build_backends ~resume (d : Conf_parsing.domain) :
                  match
                    Option.bind
                      (Backend.spec_for bc.backend_type)
-                     (List.find_opt (fun (s : Backend.field_spec) -> s.name = k))
+                     (List.find_opt (fun (s : Field_spec.t) -> s.name = k))
                  with
                    | Some { secret = true; _ } when v <> "" -> (k, "***")
                    | _ -> (k, v))

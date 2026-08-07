@@ -2,6 +2,8 @@
  (flags
   (:standard
    -open
+   Tsync_field_spec
+   -open
    Tsync_log
    -open
    Tsync_http_proxy
@@ -11,6 +13,7 @@
  (private_modules http_proxy_backend)
  (library_flags (-linkall))
  (libraries
+  tsync_field_spec
   tsync_backend_register
   tsync_http_proxy
   tsync_log

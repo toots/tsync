@@ -199,7 +199,7 @@ let make ?endpoint ?unsigned_payload ?share_url ~bucket ~region ~access_key_id
   end)
 
 let spec =
-  Backend.
+  Field_spec.
     [
       {
         name = "bucket";

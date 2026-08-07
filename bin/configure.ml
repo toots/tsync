@@ -106,14 +106,6 @@ let prompt msg def =
   let line = read_line () in
   if line = "" then Option.value def ~default:"" else line
 
-let rec prompt_required msg =
-  let v = prompt msg None in
-  if v <> "" then v
-  else begin
-    Printf.printf "  (required — cannot be blank)\n%!";
-    prompt_required msg
-  end
-
 let prompt_bool ?(default = false) msg =
   Printf.printf "%s [%s]: %!" msg (if default then "Y/n" else "y/N");
   match String.lowercase_ascii (read_line ()) with
@@ -246,6 +238,70 @@ let terraform_store which =
                     Some s
                 | _ -> fail "invalid choice"))
 
+(* One setting prompted for, whatever declared it and whether it is being
+   created or edited.
+
+   [current] is what the config already holds. Answering blank keeps it; with
+   nothing to keep, a required setting ([default = None]) is asked again and an
+   optional one ([default = Some ""]) is omitted, which is what the spec's
+   [default] means. [None] therefore says "leave this out of the config", not
+   "the user typed nothing".
+
+   This was three near-copies — one for creating a backend, one for editing one,
+   one for a frontend — which is how they came to disagree about blanks and how
+   [`Int] ended up reachable from only one of them. *)
+let rec prompt_field ?(indent = "") ?current (s : Field_spec.t) =
+  let label = indent ^ s.label in
+  let required = s.default = None in
+  let again () = prompt_field ~indent ?current s in
+  (* What to offer as the pre-filled answer: what is configured now, else the
+     spec's default unless that default is the "omit when blank" marker. *)
+  let suggestion =
+    match current with
+      | Some c -> Some c
+      | None -> ( match s.default with Some "" | None -> None | d -> d)
+  in
+  (* Blank, with nothing already configured to fall back on. *)
+  let blank () =
+    match current with
+      | Some c -> Some (s.name, `String c)
+      | None when required ->
+          Printf.printf "%s(required — cannot be blank)\n%!" indent;
+          again ()
+      | None -> None
+  in
+  match s.typ with
+    | `Bool ->
+        let default =
+          match current with
+            | Some v -> v = "true"
+            | None -> s.default = Some "true"
+        in
+        Some (s.name, `Bool (prompt_bool ~default label))
+    | `Int -> (
+        match prompt label suggestion with
+          | "" -> if required then blank () else None
+          | v -> (
+              match int_of_string_opt v with
+                | Some n -> Some (s.name, `Int n)
+                | None ->
+                    Printf.printf "%s(must be a number)\n%!" indent;
+                    again ()))
+    | `String when s.secret -> (
+        let suffix = if current <> None then " (blank keeps current)" else "" in
+        match read_password (label ^ suffix) with
+          | "" -> blank ()
+          | v -> Some (s.name, `String v))
+    | `String -> (
+        match prompt label suggestion with
+          (* Only a spec saying [Some ""] means a blank leaves the field out; a
+             field that is merely optional-with-a-default keeps the empty
+             string the user chose. *)
+          | "" when current <> None || s.default = Some "" -> blank ()
+          | "" when not required -> Some (s.name, `String "")
+          | "" -> blank ()
+          | v -> Some (s.name, `String v))
+
 let prompt_backend () =
   let types = Backend.types () in
   let default =
@@ -281,36 +337,9 @@ let prompt_backend () =
   let spec = Option.value ~default:[] (Backend.spec_for backend_type) in
   let fields =
     List.filter_map
-      (fun (s : Backend.field_spec) ->
+      (fun (s : Field_spec.t) ->
         if List.mem s.name synced_skip then None
-        else (
-          let value =
-            match s.typ with
-              | `Bool ->
-                  string_of_bool
-                    (prompt_bool ~default:(s.default = Some "true")
-                       ("  " ^ s.label))
-              | `String when s.secret ->
-                  let rec ask () =
-                    let v = read_password ("  " ^ s.label) in
-                    if v <> "" then v
-                    else begin
-                      Printf.printf "  (required — cannot be blank)\n%!";
-                      ask ()
-                    end
-                  in
-                  ask ()
-              | `String -> (
-                  match s.default with
-                    | None -> prompt_required ("  " ^ s.label)
-                    | Some d ->
-                        prompt ("  " ^ s.label)
-                          (if d = "" then None else Some d))
-          in
-          match (s.typ, s.default, value) with
-            | `String, Some "", "" -> None
-            | `Bool, _, v -> Some (s.name, `Bool (v = "true"))
-            | `String, _, v -> Some (s.name, `String v)))
+        else prompt_field ~indent:"  " s)
       spec
   in
   let synced_fields =
@@ -334,30 +363,6 @@ let prompt_backends () =
   done;
   !backends
 
-(* [None] omits the field: a blank optional string, or a blank secret with no
-   prior value. *)
-let prompt_spec_field (s : Backend.field_spec) ~current =
-  match s.typ with
-    | `Bool ->
-        let default =
-          match current with
-            | Some v -> v = "true"
-            | None -> s.default = Some "true"
-        in
-        Some (s.name, `Bool (prompt_bool ~default s.label))
-    | `String when s.secret ->
-        let v = read_password (s.label ^ " (blank keeps current)") in
-        if v <> "" then Some (s.name, `String v)
-        else Option.map (fun c -> (s.name, `String c)) current
-    | `String ->
-        let def =
-          match current with
-            | Some c -> Some c
-            | None -> ( match s.default with Some "" -> None | d -> d)
-        in
-        let v = prompt s.label def in
-        if v = "" && s.default = Some "" then None else Some (s.name, `String v)
-
 (* Per-field editor for one backend, with a Terraform sync action for s3. *)
 let edit_backend b =
   let l = ref (match b with `Assoc l -> l | _ -> []) in
@@ -380,7 +385,7 @@ let edit_backend b =
     Printf.printf "Editing backend: %s (%s)\n\nFields:\n" (get "name") btype;
     Printf.printf "  1. %-16s %s\n" "name:" (get "name");
     List.iteri
-      (fun i (s : Backend.field_spec) ->
+      (fun i (s : Field_spec.t) ->
         let v = get s.name in
         Printf.printf "  %d. %-16s %s\n" (i + 2) (s.name ^ ":")
           (if s.secret && v <> "" then "***" else v))
@@ -410,7 +415,7 @@ let edit_backend b =
                 l := assoc_set !l "role" (`String (prompt_role (role_of !l)))
             | Some n when n >= 2 && n <= List.length spec + 1 -> (
                 let s = List.nth spec (n - 2) in
-                match prompt_spec_field s ~current:(Some (get s.name)) with
+                match prompt_field s ~current:(get s.name) with
                   | Some (k, v) -> l := assoc_set !l k v
                   | None -> l := List.remove_assoc s.name !l)
             | _ -> status := Printf.sprintf "(unknown field %S)" input)
@@ -514,47 +519,6 @@ let frontend_opt entry k =
           | _ -> None)
     | _ -> None
 
-(* [None] omits the field from the emitted options. *)
-let prompt_frontend_field (s : Frontend.field_spec) ~current =
-  match s.typ with
-    | `Bool ->
-        let default =
-          match current with
-            | Some v -> v = "true"
-            | None -> s.default = Some "true"
-        in
-        Some (s.name, `Bool (prompt_bool ~default ("  " ^ s.label)))
-    | `Int ->
-        let def =
-          match current with
-            | Some c -> Some c
-            | None -> ( match s.default with Some "" | None -> None | d -> d)
-        in
-        let rec ask () =
-          let v = prompt ("  " ^ s.label) def in
-          if v = "" then None
-          else (
-            match int_of_string_opt v with
-              | Some n -> Some (s.name, `Int n)
-              | None ->
-                  Printf.printf "  (must be a number)\n%!";
-                  ask ())
-        in
-        ask ()
-    | `String when s.secret ->
-        let suffix = if current <> None then " (blank keeps current)" else "" in
-        let v = read_password ("  " ^ s.label ^ suffix) in
-        if v <> "" then Some (s.name, `String v)
-        else Option.map (fun c -> (s.name, `String c)) current
-    | `String ->
-        let def =
-          match current with
-            | Some c -> Some c
-            | None -> ( match s.default with Some "" -> None | d -> d)
-        in
-        let v = prompt ("  " ^ s.label) def in
-        if v = "" then None else Some (s.name, `String v)
-
 (* A frontend with no options set is emitted as a bare type-name string, else as
    [{"type": name, ...options}]. *)
 let edit_frontends current =
@@ -573,8 +537,9 @@ let edit_frontends current =
       else (
         let opts =
           List.filter_map
-            (fun (s : Frontend.field_spec) ->
-              prompt_frontend_field s ~current:(frontend_opt existing s.name))
+            (fun (s : Field_spec.t) ->
+              prompt_field ~indent:"  " s
+                ?current:(frontend_opt existing s.name))
             (Frontend.spec_for name)
         in
         Some

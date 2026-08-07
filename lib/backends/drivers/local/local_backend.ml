@@ -189,7 +189,7 @@ let make ~root : (module Backend.S) =
   end)
 
 let spec =
-  Backend.
+  Field_spec.
     [
       {
         name = "path";

@@ -234,7 +234,7 @@ let make ?endpoint ?service_account_key ?share_url ~bucket () :
   end)
 
 let spec =
-  Backend.
+  Field_spec.
     [
       {
         name = "bucket";

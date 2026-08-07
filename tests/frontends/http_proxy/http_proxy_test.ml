@@ -238,7 +238,7 @@ let () =
      silently unconfigurable. [shares] is on the frontend only: the client asks
      over /share-url rather than mirroring the setting. *)
   let has_field name specs =
-    List.exists (fun (s : Backend.field_spec) -> s.name = name) specs
+    List.exists (fun (s : Field_spec.t) -> s.name = name) specs
   in
   let backend_spec =
     match Backend.spec_for "http-proxy" with
@@ -250,7 +250,7 @@ let () =
   assert (not (has_field "shares" backend_spec));
   let frontend_spec = Frontend.spec_for "http-proxy" in
   let has_frontend_field name =
-    List.exists (fun (s : Frontend.field_spec) -> s.name = name) frontend_spec
+    List.exists (fun (s : Field_spec.t) -> s.name = name) frontend_spec
   in
   assert (has_frontend_field "shares");
   assert (has_frontend_field "readOnly");

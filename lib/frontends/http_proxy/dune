@@ -2,6 +2,8 @@
  (flags
   (:standard
    -open
+   Tsync_field_spec
+   -open
    Tsync_content
    -open
    Tsync_store
@@ -39,6 +41,7 @@
   %{project_root}/lambda/mime.json
   stats.html)
  (libraries
+  tsync_field_spec
   tsync_content
   tsync_store
   tsync_object

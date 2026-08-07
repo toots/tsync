@@ -12,23 +12,11 @@ module type S = sig
   val start : binding list -> unit
 end
 
-type field_type = [ `String | `Bool | `Int ]
-
-type field_spec = {
-  name : string;
-  label : string;
-  typ : field_type;
-  default : string option;
-      (** [None] is required; [Some ""] optional, omitted when blank; [Some s]
-          optional with default [s]. *)
-  secret : bool;
-}
-
 type command = { verb : string; doc : string; run : (module Conf.S) -> unit }
 
 type entry = {
   modl : (module S);
-  spec : field_spec list;
+  spec : Field_spec.t list;
   cli_group : string;
   commands : command list;
 }

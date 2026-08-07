@@ -7,6 +7,8 @@
  (flags
   (:standard
    -open
+   Tsync_field_spec
+   -open
    Tsync_sync
    -open
    Tsync_store
@@ -39,6 +41,7 @@
  (optional)
  (library_flags (-linkall))
  (libraries
+  tsync_field_spec
   tsync_sync
   tsync_store
   tsync_naming

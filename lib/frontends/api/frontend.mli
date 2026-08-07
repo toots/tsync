@@ -24,20 +24,6 @@ end
 
 (** {1 Registry} *)
 
-type field_type = [ `String | `Bool | `Int ]
-
-(** One configuration field. Mirrors {!Backend.field_spec}, so [tsync configure]
-    prompts for a frontend's options without knowing the frontend. *)
-type field_spec = {
-  name : string;
-  label : string;
-  typ : field_type;
-  default : string option;
-      (** [None] is required; [Some ""] optional, omitted when blank; [Some s]
-          optional with default [s]. *)
-  secret : bool;
-}
-
 (** A CLI subcommand a frontend contributes, surfaced as
     [tsync <cli_group> <verb>]. Declarative and cmdliner-free, like
     {!field_spec}: the binary parses the arguments and resolves [--domain] to a
@@ -46,8 +32,10 @@ type field_spec = {
 type command = { verb : string; doc : string; run : (module Conf.S) -> unit }
 
 (** [cli_group] defaults to [name]. *)
+(** [spec] is what [tsync configure] prompts for; see {!Field_spec}, which a
+    backend declares its settings with too. *)
 val register :
-  ?spec:field_spec list ->
+  ?spec:Field_spec.t list ->
   ?cli_group:string ->
   ?commands:command list ->
   string ->
@@ -55,7 +43,7 @@ val register :
   unit
 
 val find : string -> (module S) option
-val spec_for : string -> field_spec list
+val spec_for : string -> Field_spec.t list
 
 (** Every registered frontend name. What is available depends on how the binary
     was linked. *)
