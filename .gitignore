@@ -5,6 +5,10 @@
 # OCaml / dune
 _build/
 compile_commands.json
+# Local switch selection, so a global `opam switch` elsewhere cannot change
+# which compiler builds this tree. `opam switch link 5.4.1 .` points it at an
+# existing switch rather than building a private copy of every dependency.
+_opam
 
 # Debian packages from linux/Dockerfile
 dist/

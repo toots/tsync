@@ -27,7 +27,7 @@ let max_parallel = 32
 type t = {
   base_uri : Uri.t;
   secret : string;
-  cache : Cache.t;
+  mutable cache : Cache.t;
   mutable share_url_cache : string option Lwt.t option;
   mutable chunk_size_cache : int option Lwt.t option;
   mutable max_concurrency_cache : int option Lwt.t option;
@@ -49,8 +49,18 @@ let backend_error op code body =
     ~op
     (Printf.sprintf "HTTP %d: %s" code body)
 
+let new_cache () = Cache.create ~keep:keep_idle_ns ~parallel:max_parallel ()
+
 (* Signs method + request-target + body with the shared secret. TLS is conduit's,
-   per the global [Tls_conf]. *)
+   per the global [Tls_conf].
+
+   [Connection.Retry] means the pooled connection was unusable and the request
+   never left: the cache is meant to redial, but one torn down by
+   [request_timeout] above stays in its table as permanently failed, so every
+   later request draws the same corpse and the endpoint never recovers. Only a
+   new cache redials. Replaced once per generation, so requests that raced into
+   the same dead pool share the one redial rather than each building their
+   own. *)
 let call t ~meth ?(body = "") uri =
   let resource = Uri.path_and_query uri in
   let headers =
@@ -59,14 +69,24 @@ let call t ~meth ?(body = "") uri =
          ~meth:(Cohttp.Code.string_of_method meth)
          ~path:resource ~body)
   in
-  Lwt_unix.with_timeout request_timeout (fun () ->
-      let* resp, rbody =
-        Cache.call t.cache ~headers
-          ~body:(Cohttp_lwt.Body.of_string body)
-          meth uri
-      in
-      let+ s = Cohttp_lwt.Body.to_string rbody in
-      (resp, s))
+  let attempt cache =
+    Lwt_unix.with_timeout request_timeout (fun () ->
+        let* resp, rbody =
+          Cache.call cache ~headers
+            ~body:(Cohttp_lwt.Body.of_string body)
+            meth uri
+        in
+        let+ s = Cohttp_lwt.Body.to_string rbody in
+        (resp, s))
+  in
+  let used = t.cache in
+  Lwt.catch
+    (fun () -> attempt used)
+    (function
+      | Connection.Retry ->
+          if t.cache == used then t.cache <- new_cache ();
+          attempt t.cache
+      | exn -> Lwt.fail exn)
 
 let code resp = Cohttp.Code.code_of_status (Cohttp.Response.status resp)
 let is_ok resp = code resp >= 200 && code resp < 300
@@ -264,7 +284,7 @@ let make ~url ~secret : (module Backend.S) =
     {
       base_uri = Uri.of_string url;
       secret;
-      cache = Cache.create ~keep:keep_idle_ns ~parallel:max_parallel ();
+      cache = new_cache ();
       share_url_cache = None;
       chunk_size_cache = None;
       max_concurrency_cache = None;

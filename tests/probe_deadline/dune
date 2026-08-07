@@ -1,0 +1,28 @@
+(executable
+ (name probe_deadline_test)
+ (libraries
+  tsync_backend_register
+  tsync_local_backend
+  tsync_diagnostics
+  tsync_conf
+  yojson
+  lwt
+  lwt.unix))
+
+(alias
+ (name default)
+ (deps probe_deadline_test.exe))
+
+(rule
+ (alias runtest)
+ (target probe_deadline_test.output)
+ (action
+  (with-stdout-to
+   probe_deadline_test.output
+   (ignore-stderr
+    (run ./probe_deadline_test.exe)))))
+
+(rule
+ (alias runtest)
+ (action
+  (diff probe_deadline_test.expected probe_deadline_test.output)))

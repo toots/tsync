@@ -97,6 +97,22 @@ module Make (C : Conf.S) = struct
 
   let int_opt = function Some n -> `Int n | None -> `Null
 
+  (* A report has to arrive. Backend calls carry their own retry ladder — eight
+     attempts backing off to 20s — which is right for work that must eventually
+     land and wrong for a health check, where waiting a minute only delays
+     printing the "unreachable" the first round trip already showed. This is the
+     deadline for the whole answer, retries included. *)
+  let probe_timeout = 10.
+
+  let unreachable exn =
+    let detail =
+      match exn with
+        | Lwt_unix.Timeout ->
+            Printf.sprintf "no answer within %.0fs" probe_timeout
+        | exn -> Printexc.to_string exn
+    in
+    `String detail
+
   (* Fetching the cursor — one small object at a known key — is the whole probe:
      any answer, including a miss, means the store is reachable. Deliberately not
      a listing: a [local] backend walks its whole tree before honouring
@@ -105,7 +121,10 @@ module Make (C : Conf.S) = struct
     let t0 = Unix.gettimeofday () in
     Lwt.catch
       (fun () ->
-        let+ cursor = B.get_opt ~key:C.cursor_key () in
+        let+ cursor =
+          Lwt_unix.with_timeout probe_timeout (fun () ->
+              B.get_opt ~key:C.cursor_key ())
+        in
         let ms = 1000. *. (Unix.gettimeofday () -. t0) in
         ( [("reachable", `Bool true); ("latencyMs", `Float ms); ("error", `Null)],
           cursor ))
@@ -114,7 +133,7 @@ module Make (C : Conf.S) = struct
           ( [
               ("reachable", `Bool false);
               ("latencyMs", `Null);
-              ("error", `String (Printexc.to_string exn));
+              ("error", unreachable exn);
             ],
             None ))
 
@@ -124,8 +143,9 @@ module Make (C : Conf.S) = struct
     Lwt.catch
       (fun () ->
         let+ entries =
-          B.list_prefix ~max_keys:(journal_sample + 1) ~prefix:C.journal_prefix
-            ()
+          Lwt_unix.with_timeout probe_timeout (fun () ->
+              B.list_prefix ~max_keys:(journal_sample + 1)
+                ~prefix:C.journal_prefix ())
         in
         let my_uuid = J.client_uuid () in
         let last = Fs.read_last_sync_key () in
@@ -157,8 +177,7 @@ module Make (C : Conf.S) = struct
                 | Some k -> `String (Journal.Entry_key.to_string k)
                 | None -> `Null );
           ])
-      (fun exn ->
-        Lwt.return (`Assoc [("error", `String (Printexc.to_string exn))]))
+      (fun exn -> Lwt.return (`Assoc [("error", unreachable exn)]))
 
   (* Manifests, chunks and bytes held by the store. Reading either namespace
      whole is a stat per file on [local] and a paged LIST on a bucket, growing
