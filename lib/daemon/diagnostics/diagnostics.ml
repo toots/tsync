@@ -330,11 +330,11 @@ module Make (C : Conf.S) = struct
         | `Null -> []
         | counts -> [("totals", counts)]
     in
-    let lane =
+    let deferred =
       match (m.Backend.pending, m.in_flight, m.degraded) with
         | Some queued, Some in_flight, Some degraded ->
             [
-              ( "lane",
+              ( "deferred",
                 `Assoc
                   [
                     ("queued", `Int (queued ()));
@@ -352,7 +352,7 @@ module Make (C : Conf.S) = struct
             `Assoc (List.map (fun (k, v) -> (k, `String v)) m.Backend.config) )
        :: probed
       @ [("journal", jrnl)]
-      @ disk_json m @ lane @ tot)
+      @ disk_json m @ deferred @ tot)
 
   let symlink_policy =
     match C.symlink_policy with
@@ -426,10 +426,10 @@ module Make (C : Conf.S) = struct
       (fun () ->
         let+ records = W.list () in
         let count state =
-          List.length (List.filter (fun r -> r.Wal.state = state) records)
+          List.length (List.filter (fun (_, r) -> r.Wal.state = state) records)
         in
         let stuck =
-          List.filter_map (fun r -> r.Wal.last_error) records
+          List.filter_map (fun (_, r) -> r.Wal.last_error) records
           |> List.filter (fun (kind, _) -> kind = Backend.Permanent)
         in
         `Assoc
@@ -460,9 +460,7 @@ module Make (C : Conf.S) = struct
     let* cache = cache_json ~totals in
     let* wal = wal_json () in
     let+ backends =
-      Lwt_list.map_p
-        (member_json ~totals ~exact ~reload)
-        (Backend.members ~domain:C.domain_name)
+      Lwt_list.map_p (member_json ~totals ~exact ~reload) C.members
     in
     `Assoc
       (config_json @ extra
@@ -782,7 +780,7 @@ let text json =
                      (int_of (mem j "entries"))
                      (if bool_of (mem j "truncated") then "+" else "")
                      (int_of (mem j "behind"))));
-          (match mem m "lane" with
+          (match mem m "deferred" with
             | `Null -> ()
             | bf ->
                 row 4 "behind"

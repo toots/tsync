@@ -149,11 +149,12 @@ module type S = sig
       for it orphans the record that was already tracking it. *)
   val queue_put : t -> unit Lwt.t
 
-  (** Re-queue a put under the entry key its record already holds. [false] when
-      nothing is staged for the key any more — the record names data that is
-      gone, and the caller should discard it. *)
+  (** Re-queue a put under the entry key its record already holds, carrying the
+      record forward so what it has already been through is not forgotten on
+      every restart. [false] when nothing is staged for the key any more — the
+      record names data that is gone, and the caller should discard it. *)
   val resume_put :
-    t -> entry_key:Journal.Entry_key.t -> ops:Journal.op list -> bool Lwt.t
+    t -> entry_key:Journal.Entry_key.t -> record:Wal.record -> bool Lwt.t
 
   val delete : t -> unit Lwt.t
   val mkdir : t -> unit Lwt.t

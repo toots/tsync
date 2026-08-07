@@ -191,12 +191,11 @@ let make ?endpoint ?unsigned_payload ?share_url ~bucket ~region ~access_key_id
     let delete_multi keys = delete_multi t keys
     let copy ~src_key ~dst_key () = copy t ~src_key ~dst_key ()
     let list_prefix ?max_keys ~prefix () = list_all t ?max_keys ~prefix ()
-    let share_url ~prefix:_ () = Lwt.return t.share_url
-    let default_chunk_size ~prefix:_ () = Lwt.return_none
 
-    (* No opinion: an object store is limited by the network and its own
-       concurrency, neither measurable from here. *)
-    let max_concurrency ~prefix:_ () = Lwt.return_none
+    (* No chunk size or concurrency opinion: an object store is limited by the
+       network and its own concurrency, neither measurable from here. *)
+    let capabilities ~prefix:_ () =
+      Lwt.return { Backend.no_caps with share_url = t.share_url }
   end)
 
 let spec =

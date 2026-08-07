@@ -12,6 +12,22 @@ open Lwt.Syntax
 
 let root = "/tmp/tsync-probe-deadline-test"
 
+(* Every call parks forever, so nothing here raises: a store that refuses is
+   already covered elsewhere, and what is under test is the answer that never
+   comes. *)
+module Hung : Backend.S = struct
+  let never () = fst (Lwt.wait ())
+  let put ~key:_ ~data:_ () = never ()
+  let get ~key:_ () = never ()
+  let get_opt ~key:_ () = never ()
+  let head_opt ~key:_ () = never ()
+  let delete ~key:_ () = never ()
+  let delete_multi _ = never ()
+  let copy ~src_key:_ ~dst_key:_ () = never ()
+  let list_prefix ?max_keys:_ ~prefix:_ () = never ()
+  let capabilities ~prefix:_ () = Lwt.return Backend.no_caps
+end
+
 module C : Conf.S = struct
   let versioning = false
   let client_name = "test-client"
@@ -22,8 +38,16 @@ module C : Conf.S = struct
   let journal_prefix = "tsync/wedgedom/journal/"
   let cursor_key = "tsync/wedgedom/cursor"
   let shares_prefix = "tsync/shares/"
-  let backends = [Local_backend.make ~root:(root ^ "/store")]
-  let share_backends = backends
+  let store = Local_backend.make ~root:(root ^ "/store")
+
+  (* The store that never answers, declared as the daemon would. *)
+  let members =
+    [
+      Backend.member ~name:"wedged" ~backend_type:"http-proxy"
+        ~config:[("url", "http://wedged.example:8000")]
+        (module Hung);
+    ]
+
   let cache_root = root ^ "/cache"
   let data_dir = root ^ "/data"
   let socket_path = root ^ "/absent.sock"
@@ -39,24 +63,6 @@ end
 
 module Diag = Diagnostics.Make (C)
 
-(* Every call parks forever, so nothing here raises: a store that refuses is
-   already covered elsewhere, and what is under test is the answer that never
-   comes. *)
-module Hung : Backend.S = struct
-  let never () = fst (Lwt.wait ())
-  let put ~key:_ ~data:_ () = never ()
-  let get ~key:_ () = never ()
-  let get_opt ~key:_ () = never ()
-  let head_opt ~key:_ () = never ()
-  let delete ~key:_ () = never ()
-  let delete_multi _ = never ()
-  let copy ~src_key:_ ~dst_key:_ () = never ()
-  let list_prefix ?max_keys:_ ~prefix:_ () = never ()
-  let share_url ~prefix:_ () = Lwt.return_none
-  let default_chunk_size ~prefix:_ () = Lwt.return_none
-  let max_concurrency ~prefix:_ () = Lwt.return_none
-end
-
 let member name j = Yojson.Safe.Util.member name j
 
 (* Generous next to the probe's own deadline: this is here to turn "hangs
@@ -64,20 +70,6 @@ let member name j = Yojson.Safe.Util.member name j
 let bound = 120.
 
 let main () =
-  Backend.report_members ~domain:C.domain_name
-    [
-      {
-        Backend.name = "wedged";
-        role = "main";
-        backend_type = "http-proxy";
-        config = [("url", "http://wedged.example:8000")];
-        backend = (module Hung);
-        pending = None;
-        in_flight = None;
-        degraded = None;
-        local_path = None;
-      };
-    ];
   let+ domain = Lwt_unix.with_timeout bound (fun () -> Diag.domain_json ()) in
   let wedged =
     match member "backends" domain with

@@ -20,6 +20,8 @@
    -open
    Tsync_conf
    -open
+   Tsync_domain_store
+   -open
    Tsync_local_backend
    -open
    Tsync_diagnostics
@@ -35,6 +37,7 @@
   tsync_local_io
   tsync_conf
   tsync_backend_register
+  tsync_domain_store
   tsync_local_backend
   tsync_conf_parsing
   tsync_ipc_handler

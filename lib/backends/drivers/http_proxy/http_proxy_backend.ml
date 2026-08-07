@@ -28,9 +28,7 @@ type t = {
   base_uri : Uri.t;
   secret : string;
   mutable cache : Cache.t;
-  mutable share_url_cache : string option Lwt.t option;
-  mutable chunk_size_cache : int option Lwt.t option;
-  mutable max_concurrency_cache : int option Lwt.t option;
+  mutable caps_cache : Backend.caps Lwt.t option;
 }
 
 (* The connection cache has no deadline of its own: a pooled connection whose
@@ -208,16 +206,6 @@ let query_share_url t ~prefix =
   else if code resp = 404 then None
   else raise (backend_error "share_url" (code resp) body)
 
-(* Fixed for the life of the process, so the promise is memoized and concurrent
-   callers share one request. *)
-let share_url t ~prefix () =
-  match t.share_url_cache with
-    | Some p -> p
-    | None ->
-        let p = query_share_url t ~prefix in
-        t.share_url_cache <- Some p;
-        p
-
 (* The serving domain's own [chunkSize], so a client behind the proxy writes new
    files at the size the domain uses instead of the two configs having to agree.
    404 means no opinion. *)
@@ -237,16 +225,6 @@ let query_chunk_size t ~prefix =
             | _ -> None))
   else if code resp = 404 then None
   else raise (backend_error "chunk_size" (code resp) body)
-
-(* Fixed for the process, like {!share_url}: a change would only affect files
-   created next, and re-asking per upload costs a round trip each time. *)
-let default_chunk_size t ~prefix () =
-  match t.chunk_size_cache with
-    | Some p -> p
-    | None ->
-        let p = query_chunk_size t ~prefix in
-        t.chunk_size_cache <- Some p;
-        p
 
 (* What the serving proxy will run at once, so a client holds its own excess
    rather than parking it in the server's accept queue. The limit belongs to
@@ -269,14 +247,22 @@ let query_max_concurrency t ~prefix =
   else if code resp = 404 then None
   else raise (backend_error "max_concurrency" (code resp) body)
 
-(* Asked once: a peer changing its bound restarts to do it, dropping these
-   connections anyway. *)
-let max_concurrency t ~prefix () =
-  match t.max_concurrency_cache with
+(* Fixed for the life of the process — a peer changing any of these restarts to
+   do it, dropping these connections anyway — so the promise is memoized and
+   concurrent callers share one set of requests. Three endpoints rather than
+   one, so a client speaks to a proxy of any version; they run together, and
+   only once. *)
+let capabilities t ~prefix () =
+  match t.caps_cache with
     | Some p -> p
     | None ->
-        let p = query_max_concurrency t ~prefix in
-        t.max_concurrency_cache <- Some p;
+        let p =
+          let* share_url = query_share_url t ~prefix
+          and* chunk_size = query_chunk_size t ~prefix
+          and* max_concurrency = query_max_concurrency t ~prefix in
+          Lwt.return { Backend.share_url; chunk_size; max_concurrency }
+        in
+        t.caps_cache <- Some p;
         p
 
 let make ~url ~secret : (module Backend.S) =
@@ -285,9 +271,7 @@ let make ~url ~secret : (module Backend.S) =
       base_uri = Uri.of_string url;
       secret;
       cache = new_cache ();
-      share_url_cache = None;
-      chunk_size_cache = None;
-      max_concurrency_cache = None;
+      caps_cache = None;
     }
   in
   (module struct
@@ -299,9 +283,7 @@ let make ~url ~secret : (module Backend.S) =
     let delete_multi keys = delete_multi t keys
     let copy ~src_key ~dst_key () = copy t ~src_key ~dst_key ()
     let list_prefix ?max_keys ~prefix () = list_all t ?max_keys ~prefix ()
-    let share_url ~prefix () = share_url t ~prefix ()
-    let default_chunk_size ~prefix () = default_chunk_size t ~prefix ()
-    let max_concurrency ~prefix () = max_concurrency t ~prefix ()
+    let capabilities ~prefix () = capabilities t ~prefix ()
   end)
 
 let spec =

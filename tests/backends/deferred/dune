@@ -12,13 +12,13 @@
    -open
    Tsync_local_backend
    -open
-   Tsync_lane_backend))
- (name lane)
+   Tsync_domain_store))
+ (name deferred)
  (libraries
   tsync_object
   tsync_naming
   tsync_backend_register
-  tsync_lane_backend
+  tsync_domain_store
   tsync_local_backend
   tsync_local_io
   lwt

@@ -70,9 +70,7 @@ end
 module Make_with_layout (C : Conf.S) (L : Layout.S) : S = struct
   (* [St] maps logical keys to backend keys through the layout scheme. *)
   module St = Store.Make (C) (L)
-  module Bk = Backends.Make (C)
-
-  let primary = Bk.primary
+  module B = (val C.store : Backend.S)
 
   (* Chunk-sized buffers shared by every concurrent upload: a fixed set avoids a
      stream of large major-heap allocations under sustained upload traffic, and
@@ -92,7 +90,7 @@ module Make_with_layout (C : Conf.S) (L : Layout.S) : S = struct
     Lwt_pool.create (max 1 C.max_chunk_buffers) (fun () ->
         Lwt.return (Bytes.create buffer_size))
 
-  (* Config, else what the primary backend recommends (an http-proxy answers with
+  (* Config, else what the domain's stores recommend (an http-proxy answers with
      the serving domain's own, so the setting need not live in two configs), else
      the built-in default. Memoized: the answer is fixed for the process. *)
   let resolved_chunk_size = ref None
@@ -107,11 +105,9 @@ module Make_with_layout (C : Conf.S) (L : Layout.S) : S = struct
               | None ->
                   Lwt.catch
                     (fun () ->
-                      let (module Primary : Backend.S) = primary () in
-                      let+ n =
-                        Primary.default_chunk_size ~prefix:C.domain_prefix ()
-                      in
-                      Option.value n ~default:Conf.default_chunk_size)
+                      let+ caps = B.capabilities ~prefix:C.domain_prefix () in
+                      Option.value caps.Backend.chunk_size
+                        ~default:Conf.default_chunk_size)
                     (fun _ -> Lwt.return Conf.default_chunk_size)
           in
           resolved_chunk_size := Some p;
@@ -124,7 +120,7 @@ module Make_with_layout (C : Conf.S) (L : Layout.S) : S = struct
     if size <= buffer_size then Lwt_pool.use chunk_buffers f
     else f (Bytes.create size)
 
-  (* Chunk keys known present on the primary backend, this session only: a HEAD
+  (* Chunk keys known present on the domain's stores, this session only: a HEAD
      decides, and the result is memoized so a chunk repeated within the session
      skips the round trip. Not pre-populated by listing the chunk prefix — that
      cost scales with the whole historical archive rather than the upload at hand,
@@ -137,8 +133,7 @@ module Make_with_layout (C : Conf.S) (L : Layout.S) : S = struct
     C.chunk_prefix ^ Chunk_layout.relative_path chunk_key
 
   let chunk_exists ck =
-    let (module Primary : Backend.S) = primary () in
-    let+ head = Primary.head_opt ~key:ck () in
+    let+ head = B.head_opt ~key:ck () in
     Option.is_some head
 
   (* [data] is not retained past this call, so a caller may pass a string
@@ -167,7 +162,7 @@ module Make_with_layout (C : Conf.S) (L : Layout.S) : S = struct
         Lwt.return_unit)
       else (
         Metrics.add_uploaded size;
-        let+ () = Bk.put ~key:ck ~data in
+        let+ () = B.put ~key:ck ~data () in
         Hashtbl.replace known_chunks ck_rel ())
     in
     entry
@@ -284,8 +279,7 @@ module Make_with_layout (C : Conf.S) (L : Layout.S) : S = struct
   (* Chunk keys are content-addressed, so a size mismatch means the remote object
      is corrupt. *)
   let chunk_remote_ok ~chunk_key ~size =
-    let (module Primary : Backend.S) = primary () in
-    let+ head = Primary.head_opt ~key:(chunk_backend_key chunk_key) () in
+    let+ head = B.head_opt ~key:(chunk_backend_key chunk_key) () in
     match head with Some h -> h.Backend.size = size | None -> false
 
   (* Republishes [expected] when the remote manifest is missing, dirty or
@@ -334,7 +328,7 @@ module Make_with_layout (C : Conf.S) (L : Layout.S) : S = struct
           | None -> Lwt.return `Missing
           | Some data ->
               Log.info "recheck: re-uploading chunk %s" chunk_key;
-              let+ () = Bk.put ~key:(chunk_backend_key chunk_key) ~data in
+              let+ () = B.put ~key:(chunk_backend_key chunk_key) ~data () in
               `Repaired
     in
     (* One check per chunk of the file, so the width is the file's size. *)
@@ -373,8 +367,7 @@ module Make_with_layout (C : Conf.S) (L : Layout.S) : S = struct
      same way for a demand-paged read as for a whole-file download. *)
   let get_chunk ~chunk_key =
     Lwt_bounded.use chunk_download_pool (fun () ->
-        let (module Primary : Backend.S) = primary () in
-        let+ data = Primary.get ~key:(chunk_backend_key chunk_key) () in
+        let+ data = B.get ~key:(chunk_backend_key chunk_key) () in
         Metrics.add_downloaded (String.length data);
         data)
 end

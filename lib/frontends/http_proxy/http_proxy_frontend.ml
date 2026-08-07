@@ -49,16 +49,6 @@ let bounded op ~busy run =
     | Some g, (`Get | `Put) -> Lwt_bounded.use_or g ~busy run
     | _ -> run ()
 
-(* Smallest of the bounds the stores state. A store with no opinion is silent,
-   not zero: object stores answer that way and must not drag the bound down. *)
-let lowest answers =
-  List.fold_left
-    (fun acc n ->
-      match (acc, n) with
-        | Some a, Some b -> Some (min a b)
-        | None, some | some, None -> some)
-    None answers
-
 let bump name =
   Hashtbl.replace counters name
     (1 + Option.value ~default:0 (Hashtbl.find_opt counters name))
@@ -109,8 +99,9 @@ type route = {
   secret : string;
   read_only : bool;
   chunk_size : int option;  (** what this domain's config says, if anything *)
-  primary : (module Backend.S);
-  all_backends : (module Backend.S) list;
+  store : (module Backend.S);
+      (** The domain's stores as one. It resolves the read order and carries the
+          deferred targets internally, so this side never sees a role. *)
   serve_share : share_handler option;
       (** [None] when this domain has no shares. *)
   socket_path : string;  (** the mount daemon's socket, if one runs here *)
@@ -143,8 +134,6 @@ let make_route bindings (b : Frontend.binding) =
       | None ->
           failwith ("http-proxy: missing secret for domain " ^ C.domain_name)
   in
-  (* [C.backends] is the role composite: [primary] resolves read fallbacks and
-     backfill targets internally; writes fan out over [all_backends]. *)
   let serve_share =
     match inherited bindings b "shares" with
       | Some ("true" | "1") ->
@@ -185,8 +174,7 @@ let make_route bindings (b : Frontend.binding) =
     secret;
     read_only;
     chunk_size = C.chunk_size;
-    primary = List.hd C.backends;
-    all_backends = C.backends;
+    store = C.store;
     serve_share;
     socket_path = C.socket_path;
     domain_name = C.domain_name;
@@ -311,8 +299,6 @@ let authed route req body =
           ~signature ~body
     | _ -> false
 
-let fanout route f = Lwt_list.iter_s (fun b -> f b) route.all_backends
-
 let exec route op ~body =
   let reject_ro () = respond ~status:`Forbidden "read-only domain" in
   (* Share manifests live outside every domain root, so publishing or revoking a
@@ -322,7 +308,7 @@ let exec route op ~body =
   in
   match op with
     | Get key -> (
-        let module B = (val route.primary : Backend.S) in
+        let module B = (val route.store : Backend.S) in
         let* data = B.get_opt ~key () in
         match data with
           | Some data ->
@@ -332,7 +318,7 @@ let exec route op ~body =
               respond data
           | None -> respond ~status:`Not_found "")
     | Head key -> (
-        let module B = (val route.primary : Backend.S) in
+        let module B = (val route.store : Backend.S) in
         let* e = B.head_opt ~key () in
         match e with
           | Some e ->
@@ -349,8 +335,8 @@ let exec route op ~body =
         if not (writable key) then reject_ro ()
         else
           let* () =
-            fanout route (fun (module B : Backend.S) ->
-                B.put ~key ~data:body ())
+            let module B = (val route.store : Backend.S) in
+            B.put ~key ~data:body ()
           in
           Metrics.add_uploaded (String.length body);
           respond ""
@@ -358,48 +344,48 @@ let exec route op ~body =
         if not (writable key) then reject_ro ()
         else
           let* () =
-            fanout route (fun (module B : Backend.S) -> B.delete ~key ())
+            let module B = (val route.store : Backend.S) in
+            B.delete ~key ()
           in
           respond ""
     | Delete_multi keys ->
         if route.read_only then reject_ro ()
         else
           let* () =
-            fanout route (fun (module B : Backend.S) -> B.delete_multi keys)
+            let module B = (val route.store : Backend.S) in
+            B.delete_multi keys
           in
           respond ""
     | Copy (src_key, dst_key) ->
         if route.read_only then reject_ro ()
         else
           let* () =
-            fanout route (fun (module B : Backend.S) ->
-                B.copy ~src_key ~dst_key ())
+            let module B = (val route.store : Backend.S) in
+            B.copy ~src_key ~dst_key ()
           in
           respond ""
     | List_all (prefix, max_keys) ->
-        let module B = (val route.primary : Backend.S) in
+        let module B = (val route.store : Backend.S) in
         let* entries = B.list_prefix ?max_keys ~prefix () in
         respond (Http_proxy.Wire.entries_to_json entries)
-    | Share_url prefix ->
+    | Share_url prefix -> (
         if route.serve_share <> None then
           (* The client composes the URL from the address it already reaches us
              on: TLS termination leaves us without a reliable view of our own
              public URL. *)
           respond (Yojson.Safe.to_string (`Assoc [("self", `Bool true)]))
-        else (
-          (* A backing store may serve shares itself (an s3 with a configured
+        else
+          let module
+            (* A backing store may serve shares itself (an s3 with a configured
              shareUrl): pass its absolute URL through. *)
-          let rec find = function
-            | [] -> respond ~status:`Not_found ""
-            | (module B : Backend.S) :: rest -> (
-                let* u = B.share_url ~prefix () in
-                match u with
-                  | Some url ->
-                      respond
-                        (Yojson.Safe.to_string (`Assoc [("url", `String url)]))
-                  | None -> find rest)
+            B =
+            (val route.store : Backend.S)
           in
-          find route.all_backends)
+          let* caps = B.capabilities ~prefix () in
+          match caps.Backend.share_url with
+            | Some url ->
+                respond (Yojson.Safe.to_string (`Assoc [("url", `String url)]))
+            | None -> respond ~status:`Not_found "")
     | Chunk_size _ -> (
         (* So a client behind us writes new files at the size this domain already
            uses, instead of the setting living in both configs. Silence when
@@ -697,16 +683,16 @@ let start bindings =
        match configured_max_concurrent with
          | Some _ -> Lwt.return_none
          | None ->
-             let backends = List.concat_map (fun r -> r.all_backends) routes in
              let+ answers =
                Lwt_list.map_s
-                 (fun (module B : Backend.S) ->
+                 (fun r ->
+                   let module B = (val r.store : Backend.S) in
                    Lwt.catch
-                     (fun () -> B.max_concurrency ~prefix:"" ())
-                     (fun _ -> Lwt.return_none))
-                 backends
+                     (fun () -> B.capabilities ~prefix:"" ())
+                     (fun _ -> Lwt.return Backend.no_caps))
+                 routes
              in
-             lowest answers
+             (Backend.merge_caps answers).Backend.max_concurrency
      in
      let max_concurrent =
        match (configured_max_concurrent, derived) with

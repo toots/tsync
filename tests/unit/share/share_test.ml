@@ -14,7 +14,8 @@ let share_base = "https://share.example"
 module Shareable : Backend.S = struct
   include (val Local_backend.make ~root:store_dir : Backend.S)
 
-  let share_url ~prefix:_ () = Lwt.return_some share_base
+  let capabilities ~prefix:_ () =
+    Lwt.return { Backend.no_caps with share_url = Some share_base }
 end
 
 module C : Conf.S = struct
@@ -27,8 +28,8 @@ module C : Conf.S = struct
   let journal_prefix = "tsync/testdom/journal/"
   let cursor_key = "tsync/testdom/cursor"
   let shares_prefix = "tsync/shares/"
-  let backends = [(module Shareable : Backend.S)]
-  let share_backends = backends
+  let store = (module Shareable : Backend.S)
+  let members = [Backend.member ~name:"local" store]
   let cache_root = cache_dir
   let data_dir = data_dir
   let socket_path = ""
@@ -91,8 +92,8 @@ let () =
   let module C2 : Conf.S = struct
     include C
 
-    let backends = [(module NoShare : Backend.S)]
-    let share_backends = backends
+    let store = (module NoShare : Backend.S)
+    let members = [Backend.member ~name:"local" store]
   end in
   let module S2 = Share.Make (C2) in
   (match Lwt_main.run (S2.create ~expires:123 ~rel:"foo" ()) with
@@ -101,25 +102,22 @@ let () =
 
   (* A domain whose every backend is [readOnly]: nothing writable, the store
      reachable only as a fallback. Sharing still has to work, a share manifest
-     living outside every domain root — which is why [share_backends] is kept
-     apart from the write composite. *)
+     living outside every domain root — which is why it goes to a member
+     directly rather than through the write composite. *)
   let module ReadOnlyDomain : Conf.S = struct
     include C
 
-    let backends =
-      [
-        Fallback_backend.make ~sync:[] ~deferred:[]
-          ~fallbacks:
-            [
-              { Fallback_backend.name = "archive"; backend = (module Shareable) };
-            ];
-      ]
+    let store =
+      Domain_store.make ~mains:[] ~targets:[]
+        ~archives:
+          [{ Domain_store.name = "archive"; backend = (module Shareable) }]
 
-    let share_backends = [(module Shareable : Backend.S)]
+    let members =
+      [Backend.member ~name:"archive" ~role:"readOnly" (module Shareable)]
   end in
   let module S3 = Share.Make (ReadOnlyDomain) in
   (* The composite really does refuse writes: without that, this proves nothing. *)
-  let (module Composite : Backend.S) = List.hd ReadOnlyDomain.backends in
+  let (module Composite : Backend.S) = ReadOnlyDomain.store in
   (match Lwt_main.run (Composite.put ~key:"tsync/shares/zz" ~data:"x" ()) with
     | exception Backend.Not_writable -> ()
     | _ -> assert false);

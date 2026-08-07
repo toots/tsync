@@ -1,14 +1,12 @@
 (** Manifest-level backend access, keyed by logical keys.
 
     A logical key becomes a backend key through the {!Layout} scheme, so no
-    caller here or above ever constructs one. Writes fan out to every configured
-    backend; reads go to the primary. Chunk, journal and cursor objects are not
-    manifest keys and live in {!File_store} and {!Remote}. *)
+    caller here or above ever constructs one. Everything goes through
+    {!Conf.store}, which is what fans a write out and orders a read. Chunk,
+    journal and cursor objects are not manifest keys and live in {!File_store}
+    and {!Remote}. *)
 
 module Make (C : Conf.S) (L : Layout.S) : sig
-  (** The backend every read goes to. *)
-  val primary : unit -> (module Backend.S)
-
   (** Publish a manifest, bringing its folder into existence if needed. Every
       other operation here resolves what is already there and treats an unknown
       folder as absent. *)
@@ -28,9 +26,8 @@ module Make (C : Conf.S) (L : Layout.S) : sig
   val version_dir : key:string -> string option Lwt.t
 
   (** Snapshot the current manifest object under a fresh timestamped version
-      key, when the backend has one. Best-effort: the source is only checked on
-      the primary, so a replica that never received it fails the copy — and a
-      lost snapshot must not wedge the write it precedes. *)
+      key, when the backend has one. Best-effort: a lost snapshot must not wedge
+      the write it precedes. *)
   val save_version : key:string -> unit Lwt.t
 
   val list_versions : key:string -> Backend.file_entry list Lwt.t

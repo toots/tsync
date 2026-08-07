@@ -12,14 +12,14 @@
    -open
    Tsync_local_backend
    -open
-   Tsync_fallback_backend))
+   Tsync_domain_store))
  (name share_test)
  (libraries
   tsync_ops
   tsync_naming
   tsync_conf
   tsync_backend_register
-  tsync_fallback_backend
+  tsync_domain_store
   tsync_local_backend
   yojson
   lwt

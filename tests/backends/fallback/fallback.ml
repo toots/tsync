@@ -1,7 +1,7 @@
 (* Role composition, and how far a read is allowed to look.
 
    A write goes to the mains alone and waits for them; a replica is filled behind
-   it by its lane, which is {!Lane_backend}'s business, not this one's. Mains and
+   filling it, which is {!Deferred}'s business, not this one's. Mains and
    replicas hold the same content, so the first reachable one's "not found" ends
    the read. Read-only archives hold different content, so they answer both a
    miss and an unreachable source of truth, and are never written. A miss is
@@ -26,12 +26,23 @@ module Down : Backend.S = struct
   let delete_multi _ = fail ()
   let copy ~src_key:_ ~dst_key:_ () = fail ()
   let list_prefix ?max_keys:_ ~prefix:_ () = fail ()
-  let share_url ~prefix:_ () = Lwt.return_none
-  let default_chunk_size ~prefix:_ () = Lwt.return_none
-  let max_concurrency ~prefix:_ () = Lwt.return_none
+  let capabilities ~prefix:_ () = Lwt.return Backend.no_caps
 end
 
-let sub name backend = { Fallback_backend.name; backend }
+let sub name backend = { Domain_store.name; backend }
+
+(* A replica the read chain may reach. Filling one is {!Deferred}'s business,
+   not this file's, so this one accepts nothing and only answers reads. *)
+let readable name backend ~source:_ : (module Deferred.S) =
+  (module struct
+    let name = name
+    let backend = backend
+    let readable = Some backend
+    let accept _ = Lwt.return_unit
+    let skip _ = false
+    let stats () = { Deferred.queued = 0; in_flight = 0; degraded = false }
+  end)
+
 let case name = Printf.printf "\n=== %s\n" name
 let step fmt = Printf.printf ("  " ^^ fmt ^^ "\n")
 
@@ -83,7 +94,7 @@ let () =
 
      case "one main, nothing behind it";
      let solo =
-       Fallback_backend.make ~sync:[sub "main" main] ~deferred:[] ~fallbacks:[]
+       Domain_store.make ~mains:[sub "main" main] ~targets:[] ~archives:[]
      in
      let (module Solo : Backend.S) = solo in
      let* () = Solo.put ~key:(k "on-main") ~data:"from-main" () in
@@ -96,9 +107,9 @@ let () =
      case "the only main is unreachable";
      (* Reporting a miss here would tell a caller the file is gone. *)
      let dead =
-       Fallback_backend.make
-         ~sync:[sub "main" (module Down)]
-         ~deferred:[] ~fallbacks:[]
+       Domain_store.make
+         ~mains:[sub "main" (module Down)]
+         ~targets:[] ~archives:[]
      in
      let* r = get dead (k "nowhere") in
      step "get nowhere = %s" r;
@@ -107,10 +118,10 @@ let () =
 
      case "main + replica: same content, so a miss is authoritative";
      let with_rep =
-       Fallback_backend.make
-         ~sync:[sub "main" main]
-         ~deferred:[sub "replica" replica]
-         ~fallbacks:[]
+       Domain_store.make
+         ~mains:[sub "main" main]
+         ~targets:[readable "replica" replica]
+         ~archives:[]
      in
      let (module WithRep : Backend.S) = with_rep in
      (* The write waits for the main and nothing else: the replica is filled off
@@ -126,10 +137,10 @@ let () =
 
      case "main unreachable, replica reachable";
      let dead_main =
-       Fallback_backend.make
-         ~sync:[sub "main" (module Down)]
-         ~deferred:[sub "replica" replica]
-         ~fallbacks:[]
+       Domain_store.make
+         ~mains:[sub "main" (module Down)]
+         ~targets:[readable "replica" replica]
+         ~archives:[]
      in
      let (module DeadMain : Backend.S) = dead_main in
      let* r = get dead_main (k "on-replica") in
@@ -150,10 +161,10 @@ let () =
 
      case "main + readOnly archive: different content, so a miss falls through";
      let with_arc =
-       Fallback_backend.make
-         ~sync:[sub "main" main]
-         ~deferred:[]
-         ~fallbacks:[sub "archive" archive]
+       Domain_store.make
+         ~mains:[sub "main" main]
+         ~targets:[]
+         ~archives:[sub "archive" archive]
      in
      let (module WithArc : Backend.S) = with_arc in
      let* r = get with_arc (k "on-archive") in
@@ -172,10 +183,10 @@ let () =
 
      case "main unreachable, archive behind it";
      let dead_to_arc =
-       Fallback_backend.make
-         ~sync:[sub "main" (module Down)]
-         ~deferred:[]
-         ~fallbacks:[sub "archive" archive]
+       Domain_store.make
+         ~mains:[sub "main" (module Down)]
+         ~targets:[]
+         ~archives:[sub "archive" archive]
      in
      let* r = get dead_to_arc (k "on-archive") in
      step "get on-archive = %s" r;
@@ -185,10 +196,10 @@ let () =
 
      case "reachable main, unreachable archive behind it";
      let dead_arc =
-       Fallback_backend.make
-         ~sync:[sub "main" main]
-         ~deferred:[]
-         ~fallbacks:[sub "archive" (module Down)]
+       Domain_store.make
+         ~mains:[sub "main" main]
+         ~targets:[]
+         ~archives:[sub "archive" (module Down)]
      in
      (* The archive might have held it, so again not a miss. *)
      let* r = get dead_arc (k "nowhere") in
@@ -199,8 +210,7 @@ let () =
 
      case "a read-only domain: archives only, nothing writable at all";
      let ro =
-       Fallback_backend.make ~sync:[] ~deferred:[]
-         ~fallbacks:[sub "archive" archive]
+       Domain_store.make ~mains:[] ~targets:[] ~archives:[sub "archive" archive]
      in
      let (module Ro : Backend.S) = ro in
      let* r = get ro (k "on-archive") in

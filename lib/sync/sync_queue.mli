@@ -1,6 +1,13 @@
 module type S = sig
-  val post :
-    key:string -> entry_key:Journal.Entry_key.t -> ops:Journal.op list -> unit
+  (** Record the work and queue it. Returns once the record is durable, not once
+      the upload has landed. [entry_key] names the record, and goes on to name
+      the journal entry the upload publishes; the file is read from the record's
+      ops, so there is nowhere for the two to disagree about which one this is.
+
+      The whole record is the caller's to supply, so re-queueing one carries
+      forward what it has already been through rather than presenting it as
+      fresh. *)
+  val post : entry_key:Journal.Entry_key.t -> Wal.record -> unit Lwt.t
 
   val cancel_put : string -> bool
 

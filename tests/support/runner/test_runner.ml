@@ -256,22 +256,6 @@ let setup_client (module C : Conf.S) root staging_prefix =
   let module J = Journal.Make (C) in
   let module W = Wal.Make (C) in
   let module L = Layout.Inode.Make (C) in
-  (* What the daemon declares for diagnosis ([bin/cli.ml build_backends]), so
-     [stats] has a store to report on here too. *)
-  Backend.report_members ~domain:C.domain_name
-    [
-      {
-        Backend.name = "backend";
-        role = "main";
-        backend_type = "local";
-        config = [("path", Filename.concat root "backend")];
-        backend = List.hd C.backends;
-        pending = None;
-        in_flight = None;
-        degraded = None;
-        local_path = Some (Filename.concat root "backend");
-      };
-    ];
   let key p = C.domain_prefix ^ p in
   let strip_root p =
     if String.length p > 0 && p.[0] = '/' then
@@ -556,10 +540,10 @@ let setup_client (module C : Conf.S) root staging_prefix =
     | Sync -> Sp.sync_once ()
     | (DeleteRemoteChunk _ | CorruptRemoteChunk _ | DeleteRemoteManifest _) as s
       ->
-        damage (List.hd C.backends) s
+        damage (List.hd C.members).Backend.backend s
     | OnSecondary s -> (
-        match C.backends with
-          | _ :: dst :: _ -> damage dst s
+        match C.members with
+          | _ :: dst :: _ -> damage dst.Backend.backend s
           | _ -> failwith "OnSecondary: no secondary backend configured")
     | LocalWrite { path; content } ->
         let staging = get_or_create_staging () in
@@ -645,13 +629,14 @@ let setup_client (module C : Conf.S) root staging_prefix =
     | ResyncRemote ->
         let module M = Mirror.Make (C) in
         let+ dests = M.resync () in
-        List.iter
-          (fun (d : Mirror.dest_stats) ->
+        List.iteri
+          (fun i (d : Mirror.dest_stats) ->
             (* Only counts: copied keys carry non-deterministic folder ids /
                version timestamps, and the aliased backend dump already shows the
                resulting state. Bytes are omitted (manifests embed mtimes). *)
+            (* Numbered from the source, which is destination zero. *)
             Printf.printf "  resync backend #%d: %d checked, %d copied\n"
-              (d.Mirror.index + 1) d.Mirror.checked
+              (i + 2) d.Mirror.checked
               (List.length d.Mirror.copied))
           dests
     | StageWrite { path; content } ->
@@ -834,7 +819,7 @@ let setup_client (module C : Conf.S) root staging_prefix =
   let dump_pending () =
     let+ pending = W.list () in
     List.iter
-      (fun (r : Wal.record) ->
+      (fun (_, (r : Wal.record)) ->
         Printf.printf "  pending %s [%s]\n"
           (Wal.string_of_state r.Wal.state)
           (String.concat "; " (List.map render_op r.Wal.ops)))
@@ -1062,13 +1047,29 @@ let run_scenario ?(versioning = false) ?(symlink_policy = `Keep)
     let cursor_key = "tsync/test/cursor"
     let shares_prefix = "tsync/shares/"
 
-    let backends =
+    (* Two mains, so a write fans out over both and [ResyncRemote] has a second
+       store to copy into. *)
+    let members =
       [
-        Local_backend.make ~root:backend_root;
-        Local_backend.make ~root:backend2_root;
+        Backend.member ~name:"backend"
+          ~config:[("path", backend_root)]
+          (Local_backend.make ~root:backend_root);
+        Backend.member ~name:"backend2"
+          ~config:[("path", backend2_root)]
+          (Local_backend.make ~root:backend2_root);
       ]
 
-    let share_backends = backends
+    let store =
+      Domain_store.make ~targets:[] ~archives:[]
+        ~mains:
+          (List.map
+             (fun (m : Backend.member) ->
+               {
+                 Domain_store.name = m.Backend.name;
+                 backend = m.Backend.backend;
+               })
+             members)
+
     let cache_root = Filename.concat root "cache"
     let data_dir = Filename.concat root "data"
     let socket_path = Filename.concat root "tsync.sock"
@@ -1134,7 +1135,13 @@ let run_two_client_scenario ?(versioning = false)
     steps;
   let root = Filename.temp_dir "tsync-test-2" "" in
   let backend_root = Filename.concat root "backend" in
-  let shared_backends = [Local_backend.make ~root:backend_root] in
+  let shared_members =
+    [
+      Backend.member ~name:"backend"
+        ~config:[("path", backend_root)]
+        (Local_backend.make ~root:backend_root);
+    ]
+  in
   let module Ca = struct
     let versioning = versioning
     let client_name = "Client A"
@@ -1145,8 +1152,8 @@ let run_two_client_scenario ?(versioning = false)
     let journal_prefix = "tsync/test/journal/"
     let cursor_key = "tsync/test/cursor"
     let shares_prefix = "tsync/shares/"
-    let backends = shared_backends
-    let share_backends = backends
+    let members = shared_members
+    let store = (List.hd members).Backend.backend
     let cache_root = Filename.concat root "cache-a"
     let data_dir = Filename.concat root "data-a"
     let socket_path = Filename.concat root "tsync-a.sock"
@@ -1174,8 +1181,8 @@ let run_two_client_scenario ?(versioning = false)
     let journal_prefix = "tsync/test/journal/"
     let cursor_key = "tsync/test/cursor"
     let shares_prefix = "tsync/shares/"
-    let backends = shared_backends
-    let share_backends = backends
+    let members = shared_members
+    let store = (List.hd members).Backend.backend
     let cache_root = Filename.concat root "cache-b"
     let data_dir = Filename.concat root "data-b"
     let socket_path = Filename.concat root "tsync-b.sock"
@@ -1249,8 +1256,13 @@ let make_conf ?(versioning = false) ~client_name ~backend_root ~cache_root
     let journal_prefix = "tsync/test/journal/"
     let cursor_key = "tsync/test/cursor"
     let shares_prefix = "tsync/shares/"
-    let backends = [Local_backend.make ~root:backend_root]
-    let share_backends = backends
+    let store = Local_backend.make ~root:backend_root
+
+    (* What the daemon declares for diagnosis ([bin/cli.ml build_backends]), so
+       [stats] has a store to report on here too. *)
+    let members =
+      [Backend.member ~name:"backend" ~config:[("path", backend_root)] store]
+
     let cache_root = cache_root
     let data_dir = data_dir
     let socket_path = socket_path

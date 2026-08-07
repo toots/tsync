@@ -3,10 +3,9 @@ module Ek = Journal.Entry_key
 
 module Make (C : Conf.S) = struct
   module J = Journal.Make (C)
-  module Bk = Backends.Make (C)
   module St = Store.Make (C) (Layout.Inode.Make (C))
+  module B = (val C.store : Backend.S)
 
-  let primary = Bk.primary
   let rename_file ~src_key ~dst_key = St.copy_manifest ~src_key ~dst_key
   let head_manifest_opt ~key = St.head_manifest ~key
 
@@ -16,11 +15,11 @@ module Make (C : Conf.S) = struct
 
   let write_journal_entry ?entry_key ops =
     let ek = match entry_key with Some k -> k | None -> J.entry_key () in
-    let+ () = Bk.put ~key:(journal_key ek) ~data:(Journal.encode ops) in
+    let+ () = B.put ~key:(journal_key ek) ~data:(Journal.encode ops) () in
     ek
 
   let bump_cursor entry_key =
-    Bk.put ~key:C.cursor_key ~data:(Ek.to_string entry_key)
+    B.put ~key:C.cursor_key ~data:(Ek.to_string entry_key) ()
 
   (* How far this client has applied the shared journal. Local, because it says
      what *we* have caught up to, not what was published. *)
@@ -45,13 +44,11 @@ module Make (C : Conf.S) = struct
       Log.err "file_store: write_last_sync_key: %s" (Printexc.to_string exn)
 
   let fetch_cursor () =
-    let (module Primary : Backend.S) = primary () in
-    let+ body = Primary.get_opt ~key:C.cursor_key () in
+    let+ body = B.get_opt ~key:C.cursor_key () in
     Option.bind body (fun b -> Ek.of_string (String.trim b))
 
   let list_journal_keys ?start_after () =
-    let (module Primary : Backend.S) = primary () in
-    let+ all = Primary.list_prefix ~prefix:C.journal_prefix () in
+    let+ all = B.list_prefix ~prefix:C.journal_prefix () in
     List.filter_map
       (fun (e : Backend.file_entry) ->
         (* Entries sit in month directories ({!Ek.relative_path}); [of_string]
@@ -70,16 +67,14 @@ module Make (C : Conf.S) = struct
     |> List.sort Ek.compare
 
   let get_journal_entry entry_key =
-    let (module Primary : Backend.S) = primary () in
     let key = journal_key entry_key in
     Lwt.catch
       (fun () ->
-        let+ d = Primary.get ~key () in
+        let+ d = B.get ~key () in
         Some (Journal.decode d))
       (fun _ -> Lwt.return_none)
 
   let journal_entry_published entry_key =
-    let (module Primary : Backend.S) = primary () in
-    let+ head = Primary.head_opt ~key:(journal_key entry_key) () in
+    let+ head = B.head_opt ~key:(journal_key entry_key) () in
     head <> None
 end

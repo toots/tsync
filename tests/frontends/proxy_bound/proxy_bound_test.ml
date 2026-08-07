@@ -102,7 +102,13 @@ let () =
      check "a quiet period refuses nobody" (refused = 0);
 
      (* Lowest wins, or the bound does not bind. *)
-     let resolve = Http_proxy_frontend.lowest in
+     let resolve answers =
+       (Backend.merge_caps
+          (List.map
+             (fun n -> { Backend.no_caps with max_concurrency = n })
+             answers))
+         .Backend.max_concurrency
+     in
      check "the slowest backend sets the bound"
        (resolve [Some 32; Some 4; Some 16] = Some 4);
      check "backends with no opinion are ignored, not counted as zero"

@@ -17,10 +17,11 @@ module Make (C : Conf.S) (F : File_ops.S) = struct
   let op_key op = List.hd (op_keys op)
 
   (* Bounded rather than [iter_p]: recovery can face a journal of any size, and
-     a promise per entry up front is both memory and a request storm. *)
-  let iter_pooled ?(parallelism = 32) f xs =
-    let pool = Lwt_pool.create parallelism (fun () -> Lwt.return_unit) in
-    Lwt_list.iter_p (fun x -> Lwt_pool.use pool (fun () -> f x)) xs
+     a promise per entry up front is both memory and a request storm. Module
+     scope, not per call: the bound stands for the requests this process will
+     have outstanding, and one created per call would not bound two overlapping
+     recoveries. *)
+  let journal_reads = Lwt_bounded.create ~max:32 ()
 
   (* Keys another client has touched since [entry_key]: our ops for those lose,
      because the other client's change is newer than the one we never finished
@@ -30,7 +31,7 @@ module Make (C : Conf.S) (F : File_ops.S) = struct
     let* newer = Fs.list_journal_keys ~start_after:entry_key () in
     let touched = Hashtbl.create 16 in
     let+ () =
-      iter_pooled
+      Lwt_bounded.iter_with journal_reads
         (fun ek ->
           if Ek.client_uuid ek = my_uuid then Lwt.return_unit
           else
@@ -66,20 +67,20 @@ module Make (C : Conf.S) (F : File_ops.S) = struct
 
   (* A record whose bytes are up owes only the entry. Asking the backend is what
      makes the publish idempotent across a crash in either direction. *)
-  let finish_executed (r : Wal.record) =
-    let* published = Fs.journal_entry_published r.Wal.key in
-    if published then W.complete r.Wal.key
+  let finish_executed key (r : Wal.record) =
+    let* published = Fs.journal_entry_published key in
+    if published then W.complete key
     else
-      let* (_ : Ek.t) = Fs.write_journal_entry ~entry_key:r.Wal.key r.Wal.ops in
-      let* () = Fs.bump_cursor r.Wal.key in
-      W.complete r.Wal.key
+      let* (_ : Ek.t) = Fs.write_journal_entry ~entry_key:key r.Wal.ops in
+      let* () = Fs.bump_cursor key in
+      W.complete key
 
   (* Nothing was published, so the ops still have to happen. Metadata ops are
      re-applied and the entry published here; a put goes back through the queue
      under this same key, and the queue publishes it when the bytes land. *)
-  let replay_unpublished (r : Wal.record) =
-    let short = Ek.to_string r.Wal.key in
-    let* touched = overridden_since r.Wal.key in
+  let replay_unpublished key (r : Wal.record) =
+    let short = Ek.to_string key in
+    let* touched = overridden_since key in
     let ops =
       List.filter (fun op -> not (Hashtbl.mem touched (op_key op))) r.Wal.ops
     in
@@ -88,7 +89,7 @@ module Make (C : Conf.S) (F : File_ops.S) = struct
       Log.info "%s: %d op(s) skipped — another client has since changed them"
         short skipped;
     match ops with
-      | [] -> W.complete r.Wal.key
+      | [] -> W.complete key
       | ops ->
           let puts, meta =
             List.partition (function `Put _ -> true | _ -> false) ops
@@ -98,7 +99,8 @@ module Make (C : Conf.S) (F : File_ops.S) = struct
           let* resumed =
             match puts with
               | [(`Put (rel, _) as op)] ->
-                  F.resume_put (full_key rel) ~entry_key:r.Wal.key ~ops:[op]
+                  F.resume_put (full_key rel) ~entry_key:key
+                    ~record:{ r with Wal.ops = [op] }
               | _ -> Lwt.return_false
           in
           if resumed then
@@ -106,31 +108,28 @@ module Make (C : Conf.S) (F : File_ops.S) = struct
                drops the record when the upload lands. *)
             Lwt.return_unit
           else if meta <> [] then
-            let* (_ : Ek.t) =
-              Fs.write_journal_entry ~entry_key:r.Wal.key meta
-            in
-            let* () = Fs.bump_cursor r.Wal.key in
-            W.complete r.Wal.key
+            let* (_ : Ek.t) = Fs.write_journal_entry ~entry_key:key meta in
+            let* () = Fs.bump_cursor key in
+            W.complete key
           else begin
             (* A put whose staged data is gone: the bytes it named cannot be
                recovered, and publishing an entry for them would tell peers to
                fetch something that was never uploaded. *)
             Log.info "%s: nothing staged, discarding" short;
-            W.complete r.Wal.key
+            W.complete key
           end
 
-  let reconcile_record (r : Wal.record) =
+  let reconcile_record (key, (r : Wal.record)) =
     Lwt.catch
       (fun () ->
         match r.Wal.state with
-          | Wal.Executed -> finish_executed r
-          | Wal.Intent | Wal.Prepared -> replay_unpublished r)
+          | Wal.Executed -> finish_executed key r
+          | Wal.Intent | Wal.Prepared -> replay_unpublished key r)
       (fun exn ->
         (* Left in place: a record that could not be reconciled is tried again
            next start, and stats reports it in the meantime. *)
-        Log.err "reconcile %s: %s" (Ek.to_string r.Wal.key)
-          (Printexc.to_string exn);
-        W.note_failure r.Wal.key (Backend.classify exn) (Backend.reason exn))
+        Log.err "reconcile %s: %s" (Ek.to_string key) (Printexc.to_string exn);
+        W.note_failure key (Backend.classify exn) (Backend.reason exn))
 
   (* Staged data no record names: a crash between staging the content and
      recording the intent. Adopted under a new record, which is correct here
@@ -161,7 +160,7 @@ module Make (C : Conf.S) (F : File_ops.S) = struct
     let* () = Lwt_list.iter_s reconcile_record records in
     let recorded =
       List.concat_map
-        (fun (r : Wal.record) -> List.map op_key r.Wal.ops)
+        (fun (_, (r : Wal.record)) -> List.map op_key r.Wal.ops)
         records
     in
     adopt_unrecorded ~recorded

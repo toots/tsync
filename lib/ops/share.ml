@@ -5,26 +5,31 @@ exception Share_not_found of string
 
 module Make (C : Conf.S) = struct
   module L = Layout.Inode.Make (C)
-  module Bks = Backends.Make (C)
+  module R = (val C.store : Backend.S)
 
   let shares_prefix = C.shares_prefix
 
   (* Asked of the individual stores, not the read/write composite: a share
      manifest lives outside every domain root, so a domain with nothing writable
-     can still publish one. *)
+     can still publish one.
+
+     A member reads never reach is skipped: it holds part of the domain, so a
+     link served from it could name a file it will never have. *)
   let share_backend () =
     let rec find = function
       | [] ->
           Lwt.fail
             (Share_unavailable
                (Printf.sprintf "Sharing is not available for %s." C.domain_name))
-      | (module Bk : Backend.S) :: rest -> (
-          let* u = Bk.share_url ~prefix:C.domain_prefix () in
-          match u with
+      | (m : Backend.member) :: rest -> (
+          let (module Bk : Backend.S) = m.Backend.backend in
+          let* caps = Bk.capabilities ~prefix:C.domain_prefix () in
+          match caps.Backend.share_url with
             | Some url -> Lwt.return ((module Bk : Backend.S), url)
             | None -> find rest)
     in
-    find C.share_backends
+    find
+      (List.filter (fun (m : Backend.member) -> m.Backend.readable) C.members)
 
   (* Build the manifest for [rel] ("" = whole domain), PUT it under a token, and
      return the download URL. *)
@@ -36,7 +41,6 @@ module Make (C : Conf.S) = struct
         (* Read through the domain's own read path; the store serving the link
            is chosen for where the link points, not for holding the newest
            copy. *)
-        let (module R : Backend.S) = Bks.primary () in
         let base_json = [("v", `Int 1); ("expires", `Int expires)] in
         let* manifest =
           let* file_key = L.manifest_key (C.domain_prefix ^ rel) in

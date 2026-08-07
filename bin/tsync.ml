@@ -51,8 +51,9 @@ let start_cmd =
       List.map
         (fun (d : Conf_parsing.domain) ->
           let socket_path = Runtime.domain_socket_path runtime_paths d.name in
-          (* The only [resume]: the daemon is the process that outlives a lane's
-             work, so it is the one that picks up what a previous run left owed.
+          (* The only [resume]: the daemon is the process that outlives a
+             deferred target's work, so it is the one that picks up what a
+             previous run left owed.
           *)
           let conf = make_conf ~domain:d.name ~socket_path ~resume:true cfg in
           (d, conf, mount_fn d))
@@ -393,7 +394,7 @@ let ls_cmd =
                dp ^ rel
        in
        let module Mf = Manifest.Make (C) in
-       let module Bk = Backends.Make (C) in
+       let module B = (val C.store : Backend.S) in
        let* files, subdirs = Mf.list_children ~prefix () in
        let file_name (e : Backend.file_entry) =
          Key.strip_prefix ~domain_prefix:C.domain_prefix e.key
@@ -421,7 +422,6 @@ let ls_cmd =
          items;
        if show_deleted then begin
          (* Versioned paths in this directory with no live manifest. *)
-         let (module B : Backend.S) = Bk.primary () in
          let reldir =
            Key.chop_slash
              (Key.strip_prefix ~domain_prefix:C.domain_prefix prefix)
@@ -479,7 +479,7 @@ let versions_cmd =
       (let open Lwt.Syntax in
        let (module C : Conf.S) = load_conf ?domain () in
        let module St = Store.Make (C) (Layout.Inode.Make (C)) in
-       let (module B : Backend.S) = St.primary () in
+       let module B = (val C.store : Backend.S) in
        let parse = Versioning.parse ~versions_prefix:C.versions_prefix in
        match path with
          | Some rel ->
@@ -604,8 +604,7 @@ let trash_cmd =
     run_lwt
       (let open Lwt.Syntax in
        let (module C : Conf.S) = load_conf ?domain () in
-       let module Bk = Backends.Make (C) in
-       let (module B : Backend.S) = Bk.primary () in
+       let module B = (val C.store : Backend.S) in
        let* markers = trash_markers (module B) C.domain_prefix in
        Lwt_list.iter_s
          (fun (e : Backend.file_entry) ->
@@ -629,7 +628,7 @@ let untrash_cmd =
        let (module C : Conf.S) = load_conf ?domain () in
        let module L = Layout.Inode.Make (C) in
        let module St = Store.Make (C) (L) in
-       let (module B : Backend.S) = St.primary () in
+       let module B = (val C.store : Backend.S) in
        let* markers = trash_markers (module B) C.domain_prefix in
        let* found =
          Lwt_list.filter_map_s
@@ -744,7 +743,10 @@ let sync_cmd =
     set_verbose v;
     run_lwt
       (let open Lwt.Syntax in
-       let (module C : Conf.S) = load_conf ?domain ?source () in
+       let (module C : Conf.S) =
+         let conf = load_conf ?domain () in
+         match source with Some name -> reading_from name conf | None -> conf
+       in
        let module J = Journal.Make (C) in
        let module W = Wal.Make (C) in
        let module Fs = File_store.Make (C) in
@@ -976,80 +978,51 @@ let resync_remote_cmd =
     let code =
       run_lwt
         (let open Lwt.Syntax in
-         let cfg = load_config () in
-         let d = Conf_parsing.pick_domain ?domain cfg in
-         (* make_conf's ordering, so positions line up with C.backends. *)
-         let labels =
-           List.map
-             (fun (b : Conf_parsing.backend_config) -> b.Conf_parsing.name)
-             (Conf_parsing.order_backends d.Conf_parsing.backends)
+         let (module C : Conf.S) = load_conf ?domain () in
+         (* Mirror copies between the stores themselves, so it reads
+            [C.members] rather than going through the composite. *)
+         let src =
+           Option.value source
+             ~default:
+               (match C.members with m :: _ -> m.Backend.name | [] -> "")
          in
-         (* Untiered, so Mirror can copy between each one. *)
-         let (module C : Conf.S) = make_conf ?domain ~tier:false cfg in
-         let label i = List.nth labels i in
-         let source_index =
-           match source with
-             | None -> Ok 0
-             | Some name -> (
-                 match
-                   List.concat
-                     (List.mapi
-                        (fun i l -> if l = name then [i] else [])
-                        labels)
-                 with
-                   | [i] -> Ok i
-                   | [] ->
-                       Error
-                         (Printf.sprintf "no backend named %s (available: %s)"
-                            name
-                            (String.concat ", " labels))
-                   | _ ->
-                       Error
-                         (Printf.sprintf
-                            "backend name %s is ambiguous; set distinct \
-                             \"name\" fields in the config"
-                            name))
-         in
-         match source_index with
-           | Error msg ->
-               Printf.eprintf "%s\n" msg;
-               Lwt.return 1
-           | Ok _ when List.length C.backends < 2 ->
-               Printf.eprintf
-                 "resync-remote requires at least two configured backends \
-                  (domain %s has %d)\n"
-                 C.domain_name (List.length C.backends);
-               Lwt.return 1
-           | Ok source ->
-               vprintf "initiating remote sync: copying %s from %s..."
-                 (if manifests_only then "manifests" else "all objects")
-                 (label source);
-               let module M = Mirror.Make (C) in
-               let on_list ~name = vprintf "  fetching %s listing..." name in
-               let on_scan ~objects =
-                 vprintf "scanned %s: %d object%s to check" (label source)
-                   objects
-                   (if objects = 1 then "" else "s")
-               in
-               let on_copy ~index ~key ~bytes =
-                 vprintf "  copied %s (%d bytes) -> %s" key bytes (label index)
-               in
-               let+ dests =
-                 M.resync ~source ~manifests_only ~on_scan ~on_list ~on_copy ()
-               in
-               List.iter
-                 (fun (dst : Mirror.dest_stats) ->
-                   (* Under -v they are already logged live. *)
-                   if not !verbose then
-                     List.iter (Printf.printf "copied %s\n") dst.Mirror.copied;
-                   Printf.printf
-                     "%s -> %s: %d object%s checked, %d copied (%d bytes)\n"
-                     (label source) (label dst.Mirror.index) dst.Mirror.checked
-                     (if dst.Mirror.checked = 1 then "" else "s")
-                     (List.length dst.Mirror.copied)
-                     dst.Mirror.copied_bytes)
-                 dests;
-               0)
+         if List.length C.members < 2 then begin
+           Printf.eprintf
+             "resync-remote requires at least two configured backends (domain \
+              %s has %d)\n"
+             C.domain_name (List.length C.members);
+           Lwt.return 1
+         end
+         else begin
+           vprintf "initiating remote sync: copying %s from %s..."
+             (if manifests_only then "manifests" else "all objects")
+             src;
+           let module M = Mirror.Make (C) in
+           let on_list ~name = vprintf "  fetching %s listing..." name in
+           let on_scan ~objects =
+             vprintf "scanned %s: %d object%s to check" src objects
+               (if objects = 1 then "" else "s")
+           in
+           let on_copy ~name ~key ~bytes =
+             vprintf "  copied %s (%d bytes) -> %s" key bytes name
+           in
+           let+ dests =
+             M.resync ~source:src ~manifests_only ~on_scan ~on_list ~on_copy ()
+           in
+           List.iter
+             (fun (dst : Mirror.dest_stats) ->
+               (* Under -v they are already logged live. *)
+               if not !verbose then
+                 List.iter (Printf.printf "copied %s\n") dst.Mirror.copied;
+               Printf.printf
+                 "%s -> %s: %d object%s checked, %d copied (%d bytes)\n" src
+                 dst.Mirror.name dst.Mirror.checked
+                 (if dst.Mirror.checked = 1 then "" else "s")
+                 (List.length dst.Mirror.copied)
+                 dst.Mirror.copied_bytes)
+             dests;
+           0
+         end)
     in
     if code <> 0 then exit code
   in

@@ -1,10 +1,8 @@
-open Lwt.Syntax
 module Ek = Journal.Entry_key
 
 type state = Intent | Prepared | Executed
 
 type record = {
-  key : Ek.t;
   ops : Journal.op list;
   state : state;
   attempts : int;
@@ -51,10 +49,9 @@ let to_json r =
 (* Records written before the state was carried hold one op per line and no
    envelope. They read as [Intent], which is what they were: reconcile finds no
    staged data behind them and discards them. *)
-let of_body key body =
+let of_body body =
   let legacy () =
     {
-      key;
       ops = Journal.decode body;
       state = Intent;
       attempts = 0;
@@ -79,7 +76,6 @@ let of_body key body =
             | _ -> None
         in
         {
-          key;
           ops;
           state = state_of_string (j |> member "state" |> to_string);
           attempts = (match j |> member "attempts" with `Int n -> n | _ -> 0);
@@ -88,55 +84,59 @@ let of_body key body =
     | _ -> legacy ()
     | exception _ -> legacy ()
 
+(* The record is the durable job the upload queue drains, so it is a
+   {!Durable_queue.JOB} rather than a format this module reads and writes
+   itself. Metadata operations use the log without the queue: they happen
+   synchronously and only need the record to survive a crash. *)
+module Job = struct
+  type t = record
+
+  let to_string r = Yojson.Basic.to_string (to_json r)
+  let of_string body = Some (of_body body)
+end
+
+module Q = Durable_queue.Make (Job)
+
 module Make (C : Conf.S) = struct
   module J = Journal.Make (C)
 
   (* One directory per domain: the ops carry domain-relative keys, so a shared
      store would let one domain's replay run another's entries against the wrong
      backend. *)
-  let dir =
-    Filename.concat (Filename.concat C.data_dir "journal-pending") C.domain_name
+  let log =
+    Q.Records.create
+      ~dir:
+        (Filename.concat
+           (Filename.concat C.data_dir "journal-pending")
+           C.domain_name)
 
-  let path key = Filename.concat dir (Ek.to_string key)
-
-  let write r =
-    let* () = Fs_util.mkdir_p dir in
-    Fs_util.atomic_write (path r.key) (Yojson.Basic.to_string (to_json r))
-
-  let read key =
-    Lwt.catch
-      (fun () ->
-        let+ body =
-          Lwt_io.with_file ~mode:Lwt_io.Input (path key) Lwt_io.read
-        in
-        Some (of_body key body))
-      (fun _ -> Lwt.return_none)
+  (* An entry key names one unit of work for its whole life — here, in the
+     backend journal, and in the cursor a peer compares against — so it is the
+     record's id rather than something minted per queue. *)
+  let id = Ek.to_string
 
   let record key ops =
-    write { key; ops; state = Intent; attempts = 0; last_error = None }
+    Q.Records.write log ~id:(id key)
+      { ops; state = Intent; attempts = 0; last_error = None }
 
-  (* A record that is already gone is not an error: [complete] may have run
-     before a straggling caller. *)
-  let update key f =
-    let* r = read key in
-    match r with None -> Lwt.return_unit | Some r -> write (f r)
-
-  let advance key state = update key (fun r -> { r with state })
+  let advance key state =
+    Q.Records.update log (id key) (fun r -> { r with state })
 
   let note_failure key kind detail =
-    update key (fun r ->
+    Q.Records.update log (id key) (fun r ->
         { r with attempts = r.attempts + 1; last_error = Some (kind, detail) })
 
-  let complete key = Fs_util.unlink_quiet (path key)
+  let complete key = Q.Records.complete log (id key)
 
+  (* Ours alone: another client's records are its own to reconcile, and the
+     directory is per domain rather than per client. *)
   let list () =
     let uuid = J.client_uuid () in
-    let* exists = Lwt_unix_retry.file_exists dir in
-    if not exists then Lwt.return_nil
-    else
-      let* names = Fs_util.readdir_list dir in
-      names
-      |> List.filter_map Ek.of_string
-      |> List.filter (fun key -> Ek.client_uuid key = uuid)
-      |> List.sort Ek.compare |> Lwt_list.filter_map_s read
+    let open Lwt.Syntax in
+    let+ records = Q.Records.list log in
+    records
+    |> List.filter_map (fun (id, r) ->
+        Option.map (fun key -> (key, r)) (Ek.of_string id))
+    |> List.filter (fun (key, _) -> Ek.client_uuid key = uuid)
+    |> List.sort (fun (a, _) (b, _) -> Ek.compare a b)
 end

@@ -1,4 +1,4 @@
-(* What a lane owes, and what it takes to lose it.
+(* What a deferred target owes, and what it takes to lose it.
 
    A write returns once the mains have it, so everything a target still needs is
    a job on disk. Those jobs are the subject here: the write records one before
@@ -13,9 +13,9 @@
 
 open Lwt.Syntax
 
-let root = Filename.temp_dir "tsync-lane" ""
+let root = Filename.temp_dir "tsync-deferred" ""
 let main_root = Filename.concat root "main"
-let log_dir = Filename.concat root "lanes"
+let log_dir = Filename.concat root "pending"
 let chunk_prefix = "tsync/d/chunks/"
 let journal_prefix = "tsync/d/journal/"
 let cursor_key = "tsync/d/cursor"
@@ -118,9 +118,7 @@ module Refuses : Backend.S = struct
   let delete_multi _ = fail ()
   let copy ~src_key:_ ~dst_key:_ () = fail ()
   let list_prefix ?max_keys:_ ~prefix:_ () = Lwt.return_nil
-  let share_url ~prefix:_ () = Lwt.return_none
-  let default_chunk_size ~prefix:_ () = Lwt.return_none
-  let max_concurrency ~prefix:_ () = Lwt.return_none
+  let capabilities ~prefix:_ () = Lwt.return Backend.no_caps
 end
 
 (* Reachable only while [up]. *)
@@ -150,23 +148,40 @@ let switchable ~up ~root : (module Backend.S) =
       Real.delete ~key ()
   end)
 
-(* [skip_prefixes] empty, as a replica's lane has it: a peer reading one reads
-   its journal too. *)
-let lane ?resume ~inners ~target ~name () =
-  Lane_backend.make ?resume ~chunk_prefix ~chunk_keys ~log_dir ~inners
-    ~targets:[{ Lane_backend.name; backend = target; skip_prefixes = [] }]
-    ()
+(* {!Deferred.Readable}, as a replica is: reads may reach it, so it carries the
+   journal and cursor a peer reading it needs. The composite and the target both
+   come back, since the target is what says how far behind it is. *)
+let target_for ?resume ~inners ~target ~name () =
+  let built = ref None in
+  let spec ~source =
+    let plain =
+      Deferred.make ?resume ~name ~backend:target ~source ~chunk_prefix
+        ~chunk_keys ~journal_prefix ~cursor_key ~root:log_dir ()
+    in
+    let module R = Deferred.Readable ((val plain : Deferred.S)) in
+    built := Some (module R : Deferred.S);
+    (module R : Deferred.S)
+  in
+  let composite =
+    Domain_store.make
+      ~mains:
+        (List.mapi
+           (fun i backend ->
+             { Domain_store.name = Printf.sprintf "main%d" i; backend })
+           inners)
+      ~targets:[spec] ~archives:[]
+  in
+  (composite, Option.get !built)
 
-(* Waits for the lane to owe nothing, on disk as well as in memory: a job being
+(* Waits for the target to owe nothing, on disk as well as in memory: a job being
    retried is still owed, which is the point. Bounded, so a case that never
    converges fails as a diff rather than a hang. *)
 let settled ~name stats =
   let deadline = Unix.gettimeofday () +. 30. in
   let rec go () =
     let s = stats () in
-    if
-      s.Lane_backend.queued = 0 && s.Lane_backend.in_flight = 0 && owed name = 0
-    then Lwt.return_unit
+    if s.Deferred.queued = 0 && s.Deferred.in_flight = 0 && owed name = 0 then
+      Lwt.return_unit
     else if Unix.gettimeofday () > deadline then begin
       step "gave up waiting on %s" name;
       Lwt.return_unit
@@ -189,9 +204,11 @@ let () =
      let* () = M.put ~key:c0 ~data:"aaaa" () in
      let t1_root = Filename.concat root "t1" in
      let target1, refused = flaky ~fails:1 ~root:t1_root in
-     let l1 = lane ~inners:[main] ~target:target1 ~name:"flaky" () in
-     let (module B1 : Backend.S) = l1.Lane_backend.backend in
-     let stats1 = List.assoc "flaky" l1.Lane_backend.lanes in
+     let l1, (module T1 : Deferred.S) =
+       target_for ~inners:[main] ~target:target1 ~name:"flaky" ()
+     in
+     let (module B1 : Backend.S) = l1 in
+     let stats1 = T1.stats in
      let* () =
        B1.put ~key:(manifest_key "one") ~data:(manifest ~name:"one" [c0]) ()
      in
@@ -199,30 +216,32 @@ let () =
      step "owed the moment the put returned: %d" (owed "flaky");
      let* () = settled ~name:"flaky" stats1 in
      step "owed once caught up: %d (target refused %d, degraded %b)"
-       (owed "flaky") (refused ()) (stats1 ()).Lane_backend.degraded;
+       (owed "flaky") (refused ()) (stats1 ()).Deferred.degraded;
      dump_target t1_root;
 
-     case "a failure that cannot clear is dropped, and the lane says so";
-     let l2 = lane ~inners:[main] ~target:(module Refuses) ~name:"refuses" () in
-     let (module B2 : Backend.S) = l2.Lane_backend.backend in
-     let stats2 = List.assoc "refuses" l2.Lane_backend.lanes in
+     case "a failure that cannot clear is dropped, and the target says so";
+     let l2, (module T2 : Deferred.S) =
+       target_for ~inners:[main] ~target:(module Refuses) ~name:"refuses" ()
+     in
+     let (module B2 : Backend.S) = l2 in
+     let stats2 = T2.stats in
      let* () =
        B2.put ~key:(manifest_key "two") ~data:(manifest ~name:"two" [c0]) ()
      in
      step "put manifest two [c0]";
      let* () = settled ~name:"refuses" stats2 in
      step "owed: %d (degraded %b — needs tsync resync-remote)" (owed "refuses")
-       (stats2 ()).Lane_backend.degraded;
+       (stats2 ()).Deferred.degraded;
 
      case "a target that was down the whole time a process ran";
      let t3_root = Filename.concat root "t3" in
      let down = ref false in
-     let l3 =
-       lane ~inners:[main]
+     let l3, (module T3 : Deferred.S) =
+       target_for ~inners:[main]
          ~target:(switchable ~up:down ~root:t3_root)
          ~name:"offline" ()
      in
-     let (module B3 : Backend.S) = l3.Lane_backend.backend in
+     let (module B3 : Backend.S) = l3 in
      let* () = B3.put ~key:c2 ~data:"bbbb" () in
      let* () =
        B3.put ~key:(manifest_key "three") ~data:(manifest ~name:"three" [c2]) ()
@@ -237,31 +256,31 @@ let () =
      step "on the target so far: %d key(s)" (List.length (keys_under t3_root));
 
      case "the next daemon start picks up what it left owed";
-     (* A second lane over the same log, as a restart is: same name, same
+     (* A second target over the same log, as a restart is: same name, same
         directory, and the link is back. *)
      let up = ref true in
-     let l4 =
-       lane ~resume:true ~inners:[main]
+     let l4, (module T4 : Deferred.S) =
+       target_for ~resume:true ~inners:[main]
          ~target:(switchable ~up ~root:t3_root)
          ~name:"offline" ()
      in
-     let stats4 = List.assoc "offline" l4.Lane_backend.lanes in
+     let stats4 = T4.stats in
      let* () = settled ~name:"offline" stats4 in
      step "owed once caught up: %d" (owed "offline");
      (* [three] was copied to [four] and then deleted, in that order: a target
         that replayed them out of order would hold neither. *)
      dump_target t3_root;
 
-     case "a replica's lane carries the sync bookkeeping too";
+     case "a replica carries the sync bookkeeping too";
      (* A backfill target skips both; a peer reading a replica needs them. *)
      let t5_root = Filename.concat root "t5" in
-     let l5 =
-       lane ~inners:[main]
+     let l5, (module T5 : Deferred.S) =
+       target_for ~inners:[main]
          ~target:(Local_backend.make ~root:t5_root)
          ~name:"replica" ()
      in
-     let (module B5 : Backend.S) = l5.Lane_backend.backend in
-     let stats5 = List.assoc "replica" l5.Lane_backend.lanes in
+     let (module B5 : Backend.S) = l5 in
+     let stats5 = T5.stats in
      let* () = B5.put ~key:(journal_prefix ^ "e1") ~data:"{}" () in
      let* () = B5.put ~key:cursor_key ~data:"e1" () in
      step "put journal entry, put cursor";
@@ -272,5 +291,5 @@ let () =
      let* h = M.head_opt ~key:(manifest_key "one") () in
      step "manifest one on main: %b" (h <> None);
      let* h = M.head_opt ~key:(manifest_key "two") () in
-     step "manifest two on main, though its lane dropped it: %b" (h <> None);
+     step "manifest two on main, though its target dropped it: %b" (h <> None);
      Lwt.return_unit)

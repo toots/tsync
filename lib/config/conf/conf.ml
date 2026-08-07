@@ -29,18 +29,20 @@ module type S = sig
   val cursor_key : string
   val shares_prefix : string
 
-  (** Ordered list of backends. First element is primary (used for reads).
-      Writes fan out to all elements. *)
-  val backends : (module Backend.S) list
+  (** The domain's stores as one: reads walk them in order, a write lands on the
+      mains and the deferred targets catch up behind it. Everything that reads
+      or writes a domain key goes through this and nothing else. *)
+  val store : (module Backend.S)
 
-  (** The individual stores that may serve a share link, in role order.
+  (** The same stores individually, in role order, for the callers that need one
+      rather than the domain: a report naming each, a resync copying between
+      two, a share link choosing where to point.
 
       A share manifest lives under {!shares_prefix}, outside every domain root,
-      so publishing one changes no domain content: a read-only domain can share
-      what it can already read, and this does not go through the write composite
-      in {!backends}. Backfill targets are excluded, being behind by
-      construction. *)
-  val share_backends : (module Backend.S) list
+      so publishing one changes no domain content — which is why it goes to a
+      member directly rather than through {!store}, and why a read-only domain
+      can share what it can already read. *)
+  val members : Backend.member list
 
   val cache_root : string
   val data_dir : string

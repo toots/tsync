@@ -7,7 +7,7 @@
   chunk c0
   manifest one
 
-=== a failure that cannot clear is dropped, and the lane says so
+=== a failure that cannot clear is dropped, and the target says so
   put manifest two [c0]
   owed: 0 (degraded true — needs tsync resync-remote)
 
@@ -22,7 +22,7 @@
   chunk c2
   manifest four
 
-=== a replica's lane carries the sync bookkeeping too
+=== a replica carries the sync bookkeeping too
   put journal entry, put cursor
 --- target
   cursor
@@ -30,4 +30,4 @@
 
 === the mains are what a write waits for
   manifest one on main: true
-  manifest two on main, though its lane dropped it: true
+  manifest two on main, though its target dropped it: true

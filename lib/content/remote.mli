@@ -23,12 +23,12 @@ module type S = sig
     unit ->
     Manifest.t Lwt.t
 
-  (** Fetch one chunk body from the primary backend by its content key
+  (** Fetch one chunk body from the domain's stores by its content key
       ([Manifest.chunk_key], without the domain's chunk prefix). *)
   val get_chunk : chunk_key:string -> string Lwt.t
 
   (** Chunk size for files this client creates: [Conf.S.chunk_size] when the
-      config says, else what the primary backend recommends — an http-proxy
+      config says, else what the domain's stores recommend — an http-proxy
       answers with the serving domain's own, so the setting need not be mirrored
       in two configs — else [Conf.default_chunk_size]. Asked once and memoized;
       existing files always use the size recorded in their own manifest and

@@ -10,10 +10,13 @@
    -open
    Tsync_local_io
    -open
-   Tsync_backend_register))
- (name tsync_lane_backend)
+   Tsync_backend_register
+   -open
+   Tsync_work))
+ (name tsync_domain_store)
  (libraries
   tsync_naming
+  tsync_work
   tsync_backend_register
   tsync_local_io
   tsync_lwt_unix

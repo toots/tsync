@@ -1,7 +1,7 @@
 open Lwt.Syntax
 
 type dest_stats = {
-  index : int;
+  name : string;
   checked : int;
   copied : string list;
   copied_bytes : int;
@@ -68,7 +68,7 @@ module Make (C : Conf.S) = struct
         compare a.key b.key)
       entries
 
-  let resync_to ?(on_copy = fun ~index:_ ~key:_ ~bytes:_ -> ()) src dst ~index
+  let resync_to ?(on_copy = fun ~name:_ ~key:_ ~bytes:_ -> ()) src dst ~name
       entries =
     let+ results =
       Lwt_list.map_p
@@ -76,7 +76,7 @@ module Make (C : Conf.S) = struct
           Lwt_bounded.use copy_pool (fun () ->
               let+ copied = sync_entry src dst entry in
               (match copied with
-                | Some bytes -> on_copy ~index ~key:entry.Backend.key ~bytes
+                | Some bytes -> on_copy ~name ~key:entry.Backend.key ~bytes
                 | None -> ());
               (entry.Backend.key, copied)))
         entries
@@ -92,22 +92,53 @@ module Make (C : Conf.S) = struct
                   copied = key :: acc.copied;
                   copied_bytes = acc.copied_bytes + bytes;
                 })
-        { index; checked = List.length entries; copied = []; copied_bytes = 0 }
+        { name; checked = List.length entries; copied = []; copied_bytes = 0 }
         results
     in
     { stats with copied = List.rev stats.copied }
 
-  (* [source] is a position in [C.backends], 0 being the primary. Additive only:
-     a delete normally fans out to every backend, and resync exists for backends
-     that were down, drifted, or were added later. *)
-  let resync ?(source = 0) ?(manifests_only = false)
-      ?(on_scan = fun ~objects:_ -> ()) ?(on_list = fun ~name:_ -> ()) ?on_copy
-      () =
-    let src = List.nth C.backends source in
-    let* entries = source_entries ~manifests_only ~on_list src in
+  (* [source] names a member; the default is the first, which role order makes a
+     main. Copies between the stores themselves rather than through {!Conf.store}
+     — the point is to reach the ones the composite writes off the caller's path,
+     or does not write at all. Additive only: a delete normally fans out to every
+     store, and resync exists for those that were down, drifted, or were added
+     later.
+
+     Raises [Failure] when nothing has that name. *)
+  let resync ?source ?(manifests_only = false) ?(on_scan = fun ~objects:_ -> ())
+      ?(on_list = fun ~name:_ -> ()) ?on_copy () =
+    let named name =
+      match
+        List.filter
+          (fun (m : Backend.member) -> m.Backend.name = name)
+          C.members
+      with
+        | [m] -> m
+        | [] ->
+            failwith
+              (Printf.sprintf "no backend named %s (available: %s)" name
+                 (String.concat ", "
+                    (List.map (fun (m : Backend.member) -> m.name) C.members)))
+        | _ ->
+            failwith
+              (Printf.sprintf
+                 "backend name %s is ambiguous; set distinct \"name\" fields \
+                  in the config"
+                 name)
+    in
+    let src =
+      match (source, C.members) with
+        | Some name, _ -> named name
+        | None, m :: _ -> m
+        | None, [] -> failwith "no backends configured"
+    in
+    let* entries =
+      source_entries ~manifests_only ~on_list src.Backend.backend
+    in
     on_scan ~objects:(List.length entries);
-    List.mapi (fun i b -> (i, b)) C.backends
-    |> List.filter (fun (i, _) -> i <> source)
-    |> Lwt_list.map_s (fun (index, dst) ->
-        resync_to ?on_copy src dst ~index entries)
+    C.members
+    |> List.filter (fun (m : Backend.member) -> m.Backend.name <> src.name)
+    |> Lwt_list.map_s (fun (m : Backend.member) ->
+        resync_to ?on_copy src.Backend.backend m.Backend.backend
+          ~name:m.Backend.name entries)
 end

@@ -109,7 +109,7 @@
           "journal": {
             "error": "Backend.Backend_error(\"connection refused\")"
           },
-          "lane": { "queued": 7, "inFlight": 2, "degraded": true }
+          "deferred": { "queued": 7, "inFlight": 2, "degraded": true }
         }
       ]
     }

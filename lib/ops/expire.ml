@@ -8,12 +8,12 @@ type stats = {
 }
 
 module Make (C : Conf.S) = struct
-  module Bk = Backends.Make (C)
   module Fs = File_store.Make (C)
   module Tree = Inode_tree.Make (C)
+  module B = (val C.store : Backend.S)
 
-  let primary = Bk.primary
-  let delete_all = Bk.delete_many
+  let delete_all keys =
+    if keys = [] then Lwt.return_unit else B.delete_multi keys
 
   (* Directory markers reference nothing; a dirty manifest is mid-write and has
      no committed chunks. An unexpected parse failure raises rather than
@@ -47,7 +47,6 @@ module Make (C : Conf.S) = struct
       acc
 
   let expire ~cutoff () =
-    let (module B : Backend.S) = primary () in
     let cutoff_ns = Int64.of_float (cutoff *. 1e9) in
     (* Phase 0: empty trashed folders past the cutoff, whole subtree at a time,
        so their chunks drop out of the live set marked below. *)
