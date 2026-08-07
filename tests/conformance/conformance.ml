@@ -31,7 +31,8 @@ let env name = match Sys.getenv_opt name with Some "" | None -> None | v -> v
 (* One prefix per run, so two runs -- or a run and a human -- never meet. *)
 let run_prefix =
   Printf.sprintf "tsync/ci-%s/"
-    (Option.value (env "GITHUB_RUN_ID") ~default:(string_of_int (Unix.getpid ())))
+    (Option.value (env "GITHUB_RUN_ID")
+       ~default:(string_of_int (Unix.getpid ())))
 
 let suite name (module B : Backend.S) =
   let open Lwt.Syntax in
@@ -60,7 +61,9 @@ let suite name (module B : Backend.S) =
   in
   let* () =
     let* entries = B.list_prefix ~prefix:run_prefix () in
-    let keys = List.map (fun (e : Backend.file_entry) -> e.Backend.key) entries in
+    let keys =
+      List.map (fun (e : Backend.file_entry) -> e.Backend.key) entries
+    in
     check "list_prefix sees both objects"
       (List.mem (key "a") keys && List.mem (key "b") keys);
     (* Not a page boundary -- that would want a thousand objects and the minutes
@@ -114,7 +117,9 @@ let sweep (module B : Backend.S) =
   Lwt.catch
     (fun () ->
       let* entries = B.list_prefix ~prefix:run_prefix () in
-      match List.map (fun (e : Backend.file_entry) -> e.Backend.key) entries with
+      match
+        List.map (fun (e : Backend.file_entry) -> e.Backend.key) entries
+      with
         | [] -> Lwt.return_unit
         | keys -> B.delete_multi keys)
     (fun _ -> Lwt.return_unit)
@@ -128,7 +133,9 @@ let () =
     [
       ( "gcs",
         fun () ->
-          match (env "TSYNC_CI_GCS_BUCKET", env "TSYNC_CI_GCS_SERVICE_ACCOUNT_KEY") with
+          match
+            (env "TSYNC_CI_GCS_BUCKET", env "TSYNC_CI_GCS_SERVICE_ACCOUNT_KEY")
+          with
             | Some bucket, Some key ->
                 Some [("bucket", bucket); ("serviceAccountKey", key)]
             | _ -> None );
@@ -143,8 +150,10 @@ let () =
             | Some bucket, Some region, Some id, Some secret ->
                 Some
                   [
-                    ("bucket", bucket); ("region", region);
-                    ("accessKeyId", id); ("secretAccessKey", secret);
+                    ("bucket", bucket);
+                    ("region", region);
+                    ("accessKeyId", id);
+                    ("secretAccessKey", secret);
                   ]
             | _ -> None );
     ]
@@ -154,8 +163,10 @@ let () =
   List.iter
     (fun (name, config) ->
       match (List.mem name linked, config ()) with
-        | false, _ -> Printf.printf "\n  %s: not linked into this binary\n%!" name
-        | true, None -> Printf.printf "\n  %s: no credentials in the environment\n%!" name
+        | false, _ ->
+            Printf.printf "\n  %s: not linked into this binary\n%!" name
+        | true, None ->
+            Printf.printf "\n  %s: no credentials in the environment\n%!" name
         | true, Some fields ->
             incr ran;
             let b = backend_of name fields in
@@ -170,12 +181,13 @@ let () =
                          (Printexc.to_string exn);
                        Lwt.return_unit))
                  (fun () -> sweep b)))
-      candidates
+    candidates
   |> ignore;
   (* A run that verified nothing must not look like a run that passed: that is
      how a job goes green while testing an empty set. *)
   if !ran = 0 then begin
-    Printf.printf "\nno store was both linked and configured -- nothing verified\n";
+    Printf.printf
+      "\nno store was both linked and configured -- nothing verified\n";
     exit 2
   end;
   Printf.printf "\n%d check(s), %d failure(s) across %d store(s)\n" !checks
