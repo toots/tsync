@@ -67,7 +67,7 @@ def object_exists(key):
 
 
 # Chunk keys are fixed-length hex; the store shards them by their first
-# CHUNK_FANOUT characters. Must match lib/local_io/chunk_layout.ml.
+# CHUNK_FANOUT characters. Must match lib/naming/chunk_layout.ml.
 CHUNK_FANOUT = 3
 
 

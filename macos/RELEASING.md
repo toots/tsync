@@ -48,7 +48,7 @@ login item and removes the bundle, agent plist, cache and symlink, keeping
 | Team ID | `PSE2VP6582` |
 
 All five have to agree across `project.yml`, both `.entitlements` files,
-`Shared/Config.swift`, `install-agent.sh` and `lib/runtime/macos_runtime.ml`.
+`Shared/Config.swift`, `install-agent.sh` and `lib/platform/runtime/macos_runtime.ml`.
 Changing the App Group changes the container path, which orphans any existing
 local cache and config.
 

@@ -1,4 +1,4 @@
-; Per-OS, on the model of lib/runtime: each platform builds only its own
+; Per-OS, on the model of lib/platform/runtime: each platform builds only its own
 ; implementation, and the dispatcher selects between them. A platform with no
 ; implementation would answer [None] everywhere, which callers already handle as
 ; "no opinion" — see device.mli.
