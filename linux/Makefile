@@ -1,4 +1,4 @@
-.PHONY: build test deploy configure install-deps install uninstall e2e
+.PHONY: build test deploy configure install-deps install uninstall e2e conformance
 
 build:
 	dune build
@@ -48,3 +48,9 @@ uninstall:
 # permission to mount. Not part of `dune test`: it mounts a filesystem.
 e2e:
 	cd .. && dune build bin/tsync.exe tests/e2e/linux/e2e_linux.exe && ./_build/default/tests/e2e/linux/e2e_linux.exe
+
+# Talks to real object stores, so it is driven from here rather than from
+# `dune runtest`: it needs credentials, and it exits 2 when it was given none
+# rather than reporting a pass it did not earn.
+conformance:
+	cd .. && dune build tests/conformance/conformance.exe && ./_build/default/tests/conformance/conformance.exe

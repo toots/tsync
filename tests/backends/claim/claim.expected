@@ -1,0 +1,19 @@
+
+=== several clients reach for one name at once
+  claimants: 5
+  distinct answers: 1
+  every answer is what the store holds: true
+
+=== a later claim on a taken name
+  answered with the holder rather than itself: true
+  the holder is untouched: true
+
+=== a free name
+  answered with its own body: true
+  and that is what landed: true
+
+=== a name released, then claimed again
+  the next claimant wins it: true
+
+=== nothing left over
+  objects after all of that: 2

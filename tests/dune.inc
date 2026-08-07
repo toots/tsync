@@ -29,6 +29,20 @@
   (action
    (diff backfill.expected backfill.output))))
 
+(subdir backends/claim
+ (alias
+  (name default)
+  (deps claim.exe))
+ (rule
+  (alias runtest)
+  (target claim.output)
+  (action
+   (with-stdout-to claim.output (ignore-stderr (run ./claim.exe)))))
+ (rule
+  (alias runtest)
+  (action
+   (diff claim.expected claim.output))))
+
 (subdir backends/deferred
  (alias
   (name default)
