@@ -1,4 +1,6 @@
-# tsync perf scripts
+# tsync scripts
+
+## Performance
 
 Collect `tsync stats` once per second and graph it. Collection and graphing are
 separate so a crash never loses data and you can graph mid-run.
@@ -34,3 +36,23 @@ Both scripts take optional args:
 
 The log is NDJSON (one `tsync stats --json` object per line, with a `t`
 timestamp), so you can also process it with `jq` or anything else.
+
+
+## CI credentials
+
+`setup_ci_secrets.sh` provisions what the backend conformance job needs: a test
+bucket on GCS and on S3, credentials scoped to those buckets alone, and the six
+repository secrets the workflow reads. Objects expire after two days, so a run
+that is cancelled before it can clean up costs nothing for long.
+
+```sh
+bash scripts/setup_ci_secrets.sh --dry-run   # what it would do
+bash scripts/setup_ci_secrets.sh             # confirms before creating anything
+```
+
+Safe to re-run: everything is create-if-missing or an overwrite, and a
+credential is only replaced once its successor has been proven against the live
+bucket and stored, so a failure part-way never leaves CI holding a revoked key.
+
+Needs `gh`, `gcloud` and `aws` logged in. Without the aws cli it does the GCS
+half and says so.
