@@ -438,7 +438,13 @@ let () =
       while !load_running && !ops_run = 0 do
         Thread.delay 0.02
       done;
-      while !load_running do
+      (* Faults interrupt the work; they do not replace it. Unbounded, a mode
+         whose fault is cheap to inject runs it as fast as the loop turns -- the
+         store mode landed 218 in a single run, which is not an intermittent
+         outage but a permanent one, and tests something other than what it
+         names. Scaled to the load so the bound holds at any size. *)
+      let budget = max 1 (ops / 4) in
+      while !load_running && !faults_landed < budget do
         if !load_running then (
           match fault_mode with
             | "crash" ->
