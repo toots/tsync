@@ -445,27 +445,9 @@ module Make (C : Conf.S) = struct
     invalidate key;
     Fs_util.unlink_quiet (path key)
 
-  let rename ~src_key ~dst_key =
-    invalidate src_key;
-    invalidate dst_key;
-    let src = path src_key in
-    let* exists = Lwt_unix_retry.file_exists src in
-    if not exists then Lwt.return_unit
-    else
-      let* () = ensure_parent dst_key in
-      let* () = Lwt_unix_retry.rename src (path dst_key) in
-      (* Re-stamped, not just moved: the body still records the source's leaf,
-         and an escaped destination has nowhere else to read its name from. *)
-        match of_file (path dst_key) with
-        | m -> write dst_key m
-        | exception _ -> Lwt.return_unit
-
-  (* The mirror is the directory structure: directories exist only here. *)
-  let create_dir key = ensure_dirs (root ()) (rel_of key)
-  let delete_dir key = Fs_util.rm_rf (path key)
-
-  (* After a move the escaped on-disk name hashes the new name while the marker
-     inside still holds the old one. No-op for an unescaped name. *)
+  (* A directory keeps its real name in a marker beside it, for the same reason a
+     manifest keeps one in its body: an escaped on-disk name is a hash. No-op for
+     a name the filesystem can hold, where the path already says it. *)
   let refresh_dir_marker key =
     let rel = Key.chop_slash (rel_of key) in
     let leaf = if rel = "" then "" else Filename.basename rel in
@@ -476,6 +458,31 @@ module Make (C : Conf.S) = struct
     else (
       let dir = Filename.concat (root ()) (Name_escape.encode_key rel) in
       Fs_util.atomic_write (Filename.concat dir Name_escape.dir_marker) leaf)
+
+  (* Moving is half of a rename: whatever records the name has to be brought to
+     the destination's, and where that is depends on which kind was moved — a
+     manifest's body for a file, the marker beside it for a directory. Both are
+     done here so that no caller has to know which it moved. *)
+  let rename ~src_key ~dst_key =
+    invalidate src_key;
+    invalidate dst_key;
+    let src = path src_key in
+    let* exists = Lwt_unix_retry.file_exists src in
+    if not exists then Lwt.return_unit
+    else
+      let dst = path dst_key in
+      let* () = ensure_parent dst_key in
+      let* () = Lwt_unix_retry.rename src dst in
+      let* is_dir = Fs_util.is_directory dst in
+      if is_dir then refresh_dir_marker dst_key
+      else
+        match of_file dst with
+          | m -> write dst_key m
+          | exception _ -> Lwt.return_unit
+
+  (* The mirror is the directory structure: directories exist only here. *)
+  let create_dir key = ensure_dirs (root ()) (rel_of key)
+  let delete_dir key = Fs_util.rm_rf (path key)
 
   (* The staged tree is keyed like the mirror, so a staged manifest and its
      published sidecar sit at matching paths. *)
