@@ -370,6 +370,25 @@ module Make (C : Conf.S) = struct
       fsync = (fun _path _datasync _fi -> ());
     }
 
+  (* The event loop runs on a thread of its own here, and every FUSE handler
+     reaches it through [Lwt_preemptive.run_in_main]. An exception escaping
+     [Lwt_main.run] therefore does not stop the process: it leaves one with no
+     loop, in which every filesystem call blocks on a thread that is gone, and
+     nothing reports it until a stop is attempted and hangs. One of these sat
+     silent for 47 minutes after an SSL read raised inside libev's dispatch --
+     outside any promise, so neither [Lwt.catch] nor {!Lwt.async_exception_hook}
+     could see it.
+
+     There is nothing to recover to, so the process ends at once and says why; a
+     supervisor restarts it in seconds. [Unix._exit], because at_exit handlers
+     would drain through the loop that just died, which is the wedge again. *)
+  let loop_died exn =
+    Log.err "event loop stopped: %s\n%s" (Printexc.to_string exn)
+      (Printexc.get_backtrace ());
+    flush stdout;
+    flush stderr;
+    Unix._exit 1
+
   let mount ?(allow_other = false) mount_point =
     (* An exception escaping through Lwt.async (a socket error in a library's
        background loop) must not take down the daemon or leave it half-dead. *)
@@ -394,8 +413,9 @@ module Make (C : Conf.S) = struct
     let lwt_thread =
       Thread.create
         (fun () ->
-          Lwt_main.run
-            (let* () =
+          match
+            Lwt_main.run
+              (let* () =
                (* A FUSE mount is the filesystem, so a finished upload changes
                   nothing a reader can observe. *)
                E.start
@@ -456,8 +476,11 @@ module Make (C : Conf.S) = struct
                 drain. *)
              let unmount_t = unmount mount_point in
              Log.debug "draining upload queue and backends";
-             let* () = E.drain () in
-             unmount_t))
+               let* () = E.drain () in
+               unmount_t)
+          with
+            | () -> ()
+            | exception exn -> loop_died exn)
         ()
     in
     wait_ready ();
