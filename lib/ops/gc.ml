@@ -199,45 +199,60 @@ module Make (C : Conf.S) = struct
 
   (* {1 Marking} *)
 
-  (* Everything that can reference a chunk lives under one of two prefixes, and
-     both are a directory of namespaces: [manifests/<folder-id>/...] and
-     [versions/<folder-id>/...].
+  let parse_version = Versioning.parse ~versions_prefix:C.versions_prefix
 
-     Enumerated a namespace at a time, by reading those two directories, rather
+  (* A namespace is a name in one of the two directories that can hold something
+     referencing a chunk: [manifests/<folder-id>/...] and
+     [versions/<folder-id>/...]. Tagged so the two cannot collide in a cursor, and
+     so that manifests sort first.
+
+     Encoded and decoded next to each other. A fixed offset written at the other
+     end of a file from the tag it takes apart is how the two drift. *)
+  let encode which id =
+    (match which with `Manifests -> "m" | `Versions -> "v") ^ "/" ^ id
+
+  let decode ns =
+    let id = String.sub ns 2 (String.length ns - 2) in
+    ((if ns.[0] = 'v' then `Versions else `Manifests), id)
+
+  (* Enumerated a namespace at a time, by reading those two directories, rather
      than by listing both prefixes whole. Listing them whole means walking every
      object in the store before the first chunk is marked — minutes on a large
      domain, outside any budget because it happens before the first step, and paid
      again on every resume, so a budgeted collection would spend most of itself
-     re-listing. Two directory reads instead, and the walk of a namespace is part
-     of the step that marks it.
+     re-listing. Two directory reads instead, and the walk of a namespace is part of
+     the step that marks it.
 
-     A namespace is named [m/<id>] or [v/<id>] so the two spaces cannot collide in
-     a cursor, and sorted, so a resume can skip what is done. A namespace created
-     after this read is missed and does not need to be caught: whatever writes it
-     promotes its own chunks when it publishes. *)
+     Sorted, so a resume can skip what is done. A namespace created after this read
+     is missed and does not need catching: whatever writes it promotes its own
+     chunks when it publishes. *)
   let namespaces root =
     let read dir =
       Lwt.catch
         (fun () -> Fs_util.readdir_list (Filename.concat root dir))
         (function Unix.Unix_error _ -> Lwt.return_nil | e -> Lwt.fail e)
     in
-    let tag t = List.map (fun id -> t ^ "/" ^ id) in
     let* manifests = read (dir_of_prefix C.domain_prefix) in
     let+ versions = read (dir_of_prefix C.versions_prefix) in
-    tag "m" manifests @ tag "v" versions |> List.sort String.compare
+    List.map (encode `Manifests) manifests
+    @ List.map (encode `Versions) versions
+    |> List.sort String.compare
 
-  (* The prefix a namespace name stands for.
+  (* The prefix a namespace stands for.
 
      The trailing slash is not decoration. A backend builds the keys it lists by
      concatenating this onto each entry it finds, so leaving it off yields
      [manifests/<id><hash>] — a key that names nothing. Every lookup through it
-     would come back empty, nothing would be promoted, and the collection would
-     then discard every chunk in the store. Hence the [`Dir] / [`File]
-     distinction: a namespace that is really a single object must not have one. *)
+     would come back empty, nothing would be promoted, and the collection would then
+     discard every chunk in the store. Hence the [`Dir] / [`File] distinction: a
+     namespace that is really a single object must not have one. *)
   let prefix_of_namespace root ns =
     let base =
-      let id = String.sub ns 2 (String.length ns - 2) in
-      (if ns.[0] = 'v' then C.versions_prefix else C.domain_prefix) ^ id
+      let which, id = decode ns in
+      (match which with
+        | `Versions -> C.versions_prefix
+        | `Manifests -> C.domain_prefix)
+      ^ id
     in
     let+ kind = Fs_util.lstat_kind (Filename.concat root base) in
     match kind with `Dir -> base ^ "/" | _ -> base
@@ -277,7 +292,7 @@ module Make (C : Conf.S) = struct
     Lwt.catch
       (fun () ->
         let+ names = Fs_util.readdir_list dir in
-        List.filter (fun s -> String.length s = Chunk_layout.fanout) names)
+        List.filter Chunk_layout.is_shard_name names)
       (function Unix.Unix_error _ -> Lwt.return_nil | e -> Lwt.fail e)
 
   (* Abandoning visits the space on its way out; closing visits both, since a shard
@@ -301,11 +316,16 @@ module Make (C : Conf.S) = struct
       (fun (e : Backend.file_entry) ->
         Hashtbl.replace kept (Filename.basename e.Backend.key) ())
       surviving;
+    (* What is reclaimed is counted in chunks. A write left in flight in the space
+       going away is discarded with it, but it was never a chunk and saying so would
+       overstate what the collection recovered. *)
     let* going = M.list_prefix ~prefix:(Space.from_prefix ^ shard ^ "/") () in
     let reclaimed, bytes =
       List.fold_left
         (fun (n, b) (e : Backend.file_entry) ->
-          if Hashtbl.mem kept (Filename.basename e.Backend.key) then (n, b)
+          let name = Filename.basename e.Backend.key in
+          if Hashtbl.mem kept name || not (Chunk_layout.is_chunk_key name) then
+            (n, b)
           else (n + 1, b + e.Backend.size))
         (0, 0) going
     in
@@ -340,12 +360,16 @@ module Make (C : Conf.S) = struct
     if held = [] && not is_replica then Lwt.return (0, 0, true)
     else
       let* mine = M.list_prefix ~prefix () in
+      (* Only chunks, on both sides. A target's shard may hold a directory marker,
+         or a write some other client has in flight this second — and everything
+         here is either compared against the main, deleted for not being there, or
+         uploaded. Deleting an unrecognised name off a copy is the worst of those:
+         it would take out an upload in progress. *)
       let names entries =
         List.filter_map
           (fun (e : Backend.file_entry) ->
-            let k = e.Backend.key in
-            if String.length k > 0 && k.[String.length k - 1] = '/' then None
-            else Some (Filename.basename k))
+            let n = Filename.basename e.Backend.key in
+            if Chunk_layout.is_chunk_key n then Some n else None)
           entries
       in
       let mine = names mine and theirs = names held in
@@ -636,10 +660,25 @@ module Make (C : Conf.S) = struct
   let mark_one s ns =
     let* prefix = prefix_of_namespace s.root ns in
     let* entries = B.list_prefix ~prefix () in
+    (* Everything left here is read and parsed, and something that will not parse
+       aborts the whole collection with nothing discarded. That is deliberate: the
+       alternative is treating an unreadable manifest as referencing nothing, and
+       discarding the chunks of the file it names.
+
+       Which is why this skips only what is positively a write in flight, and not
+       everything it fails to recognise. Skipping is the *dangerous* direction here
+       — a root not marked is a file's chunks reclaimed — whereas in a chunk shard
+       it is the safe one, and the same rule in both places is how a first attempt
+       at this discarded an entire store. What is unrecognised is still read, and
+       still stops the collection loudly, which is a thing somebody can go and
+       fix. *)
     let keys =
       List.filter_map
         (fun (e : Backend.file_entry) ->
-          if Key.is_dir e.Backend.key then None else Some e.Backend.key)
+          let k = e.Backend.key in
+          if Key.is_dir k || Fs_util.is_temp_name (Filename.basename k) then
+            None
+          else Some k)
         entries
     in
     let* () =

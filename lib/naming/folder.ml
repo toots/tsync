@@ -17,7 +17,6 @@ let new_id = Id.short
    filesystem-safe regardless of the real name. *)
 let hash_name name = Xxhash.hash_hex name 0 ^ "-" ^ Xxhash.hash_hex name 1
 
-(* Manifests-relative key of [name] inside folder [folder_id]. *)
 let child_key ~folder_id name = folder_id ^ "/" ^ hash_name name
 
 type marker = { name : string; id : string }

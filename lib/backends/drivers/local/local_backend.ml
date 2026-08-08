@@ -3,15 +3,18 @@ open Lwt.Syntax
 let mkdir_p = Fs_util.mkdir_p
 let readdir_list = Fs_util.readdir_list
 
-(* Each write stages to its own temp file (pid + sequence suffix) and renames it
-   into place, so overlapping writes of one key never expose a partial file. Last
-   rename wins. *)
-let tmp_seq = ref 0
+(* Each write stages to its own temp file and renames it into place, so
+   overlapping writes of one key never expose a partial file. Last rename wins.
 
+   The name comes from {!Fs_util.temp_path} rather than being spelled here, so
+   that {!Fs_util.is_temp_name} recognises it. A walker meeting one of these has
+   to be able to tell it apart from real content — the collector reads every name
+   in a namespace and parses it, and a write in flight that it cannot identify
+   stops the whole collection. Two spellings of the same idea meant the one
+   predicate for it answered no. *)
 let write_file path data =
   let* () = Fs_util.ensure_parent path in
-  incr tmp_seq;
-  let tmp = Printf.sprintf "%s.%d.%d.tmp" path (Unix.getpid ()) !tmp_seq in
+  let tmp = Fs_util.temp_path path in
   let* () =
     Lwt_unix_retry.with_file ~mode:Lwt_io.Output tmp (fun oc ->
         Lwt_io.write oc data)
@@ -28,8 +31,7 @@ let read_file path =
    written first, so the claim that wins is complete the instant it appears. *)
 let create_exclusive path data =
   let* () = Fs_util.ensure_parent path in
-  incr tmp_seq;
-  let tmp = Printf.sprintf "%s.%d.%d.claim" path (Unix.getpid ()) !tmp_seq in
+  let tmp = Fs_util.temp_path path in
   let* () =
     Lwt_unix_retry.with_file ~mode:Lwt_io.Output tmp (fun oc ->
         Lwt_io.write oc data)
