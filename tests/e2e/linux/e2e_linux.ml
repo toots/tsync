@@ -123,7 +123,49 @@ let () =
 
      (* Nothing on Linux plays the part fileproviderctl does on macOS; the
         mount's own consistency is what the checks above already assert. *)
-     run ~env ~mount ~store ~client ~extra:(fun () -> ())
+     run ~env ~mount ~store ~client ~extra:(fun () -> ());
+
+     (* Last, because it takes the mount down. A reader holding a descriptor open
+        must not keep the daemon from stopping: a clean unmount refuses while the
+        mount is busy, and the FUSE session outlives the mount point anyway for as
+        long as that descriptor is held, so a daemon that waits on its own FUSE
+        loop waits on a reader who need never let go. That is a stop timeout per
+        restart on any machine where a media server reads the mount. *)
+     check "the mount stops while a file is held open" (fun () ->
+         match !mount_pid with
+           | None -> failf "no mount daemon to stop"
+           | Some pid ->
+               let probe = Filename.concat mount ".e2e-busy" in
+               write_file probe "held";
+               let held = open_in_bin probe in
+               let started = Unix.gettimeofday () in
+               let elapsed () = Unix.gettimeofday () -. started in
+               (try Unix.kill pid Sys.sigterm with _ -> ());
+               let rec wait () =
+                 match Unix.waitpid [Unix.WNOHANG] pid with
+                   | 0, _ when elapsed () < 20. ->
+                       Unix.sleepf 0.2;
+                       wait ()
+                   | 0, _ -> None
+                   | _, status -> Some status
+                   (* Already reaped: it stopped. *)
+                   | exception _ -> Some (Unix.WEXITED 0)
+               in
+               let status = wait () in
+               let took = elapsed () in
+               close_in_noerr held;
+               (* Reaped here, so the teardown must not wait on it again. *)
+               mount_pid := None;
+               (match status with
+                 | None ->
+                     failf "still running %.0fs after SIGTERM with a file open"
+                       took
+                 | Some (Unix.WSIGNALED n) ->
+                     failf "killed by signal %d rather than stopping on its own"
+                       n
+                 | Some _ -> ());
+               if took > 10. then
+                 failf "took %.1fs to stop with a file open" took)
    with
     | Failed msg ->
         Printf.eprintf "staging failed: %s\n" msg;

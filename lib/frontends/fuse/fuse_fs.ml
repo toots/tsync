@@ -95,26 +95,52 @@ module Make (C : Conf.S) = struct
       | Some n -> ( try Lwt_unix.send_notification n with _ -> ())
       | None -> ()
 
+  let exit_status = function
+    | Unix.WEXITED n -> Printf.sprintf "exited %d" n
+    | Unix.WSIGNALED n -> Printf.sprintf "killed by signal %d" n
+    | Unix.WSTOPPED n -> Printf.sprintf "stopped by signal %d" n
+
   (* [Lwt_process] reaps the child through the event loop, so no thread blocks on
-     it, and shutdown awaits this promise, so [exit] cannot happen with the
-     unmount pending. It takes an argument array, so the mount path needs no
-     quoting. The delay lets the IPC [stop] reply reach its caller first. *)
+     it. It takes an argument array, so the mount path needs no quoting.
+
+     [-u] refuses while anything still holds the mount, leaving every open
+     descriptor valid; [-z] detaches from the tree regardless and lets those
+     descriptors fail afterwards. Breaking a reader is only the right trade once
+     the mount is going away anyway, which is here and nowhere else. *)
+  let detach ?(lazily = false) mount_point =
+    Lwt_process.exec
+      ("", [| "fusermount3"; (if lazily then "-uz" else "-u"); mount_point |])
+
+  (* Shutdown awaits this promise, so [exit] cannot happen with the unmount
+     pending. The delay lets the IPC [stop] reply reach its caller first.
+
+     A clean detach fails whenever anything still holds the mount -- one media
+     server keeping a file open across the stop is enough -- and the lazy one is
+     what then keeps the mount point from being left behind as a stale entry
+     nobody can reach or remove. It does not end the session: that is
+     {!finish_stop}'s part, and the two together are what a stop needs. *)
   let unmount mount_point =
     if not !unmount_needed then Lwt.return_unit
     else
       let* () = Lwt_unix.sleep 0.1 in
-      let+ status =
-        Lwt_process.exec ("", [| "fusermount3"; "-u"; mount_point |])
-      in
+      let* status = detach mount_point in
       match status with
-        | Unix.WEXITED 0 -> ()
-        (* A mount that stays up leaves [Fuse.main] blocked for good, so this is
-           the only notice anyone gets. *)
-        | Unix.WEXITED n ->
-            Log.warn "fusermount3 -u %s exited %d; it may still be mounted"
-              mount_point n
-        | Unix.WSIGNALED n | Unix.WSTOPPED n ->
-            Log.warn "fusermount3 -u %s killed by signal %d" mount_point n
+        | Unix.WEXITED 0 -> Lwt.return_unit
+        | status -> (
+            Log.info "fusermount3 -u %s %s; detaching lazily" mount_point
+              (exit_status status);
+            let+ status = detach ~lazily:true mount_point in
+            match status with
+              | Unix.WEXITED 0 -> ()
+              (* Nothing further to try from in here. The stop still finishes, so
+                 what is left behind is a mount point pointing at a process that
+                 is gone -- which the next start clears
+                 ({!Fuse_frontend.prepare_mount_point}). Worth an error: it is
+                 the one path where a mount outlives the daemon. *)
+              | status ->
+                  Log.err
+                    "fusermount3 -uz %s %s; the mount point is left behind"
+                    mount_point (exit_status status))
 
   let key_of_path mount_point path =
     let path =
@@ -413,6 +439,25 @@ module Make (C : Conf.S) = struct
     flush stderr;
     Unix._exit 1
 
+  (* [Fuse.main] returns when the kernel drops the connection, and detaching the
+     mount is not what drops it: the session outlives the mount point for as long
+     as another process holds a descriptor on it, which a reader need never let
+     go of. So the main thread cannot be waited on here.
+
+     By this point everything this process owed is done -- uploads drained, mount
+     out of the tree -- and exiting is what closes /dev/fuse, which is what ends
+     the connection and turns the reader's descriptor into ESTALE. Waiting
+     instead is the 90-second stop that ends in SIGABRT.
+
+     [Unix._exit], as in {!loop_died}: at_exit handlers would drain through the
+     loop that has just finished. *)
+  let finish_stop () =
+    Log.debug "stop complete, exiting";
+    (try Unix.unlink C.socket_path with _ -> ());
+    flush stdout;
+    flush stderr;
+    Unix._exit 0
+
   let mount ?(allow_other = false) mount_point =
     (* An exception escaping through Lwt.async (a socket error in a library's
        background loop) must not take down the daemon or leave it half-dead. *)
@@ -504,7 +549,10 @@ module Make (C : Conf.S) = struct
                let* () = E.drain () in
                unmount_t)
           with
-            | () -> ()
+            (* Only for a stop we asked for. When the FUSE loop exits on its own
+               -- someone unmounted from outside -- the main thread is already on
+               its way out and does the same cleanup in order. *)
+            | () -> if !unmount_needed then finish_stop ()
             | exception exn -> loop_died exn)
         ()
     in
