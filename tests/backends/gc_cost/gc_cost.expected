@@ -22,6 +22,13 @@
   chunks still on the main: 12 of 12
   chunks on the replica: 12 of 12
 
+=== an interrupted abandonment stays an abandonment
+  started collecting, phase: marking
+  changed our mind, phase: abandoning
+  resumed with a plain start, phase: abandoning  <- not "marking"
+  finished abandoning: 11 chunk(s) kept
+  chunks still on the main: 12 of 12
+
 === the copies were told nothing about the collection
   run markers written to the replica: 0
   replica holds a run marker afterwards: false

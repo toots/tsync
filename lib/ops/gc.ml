@@ -265,26 +265,31 @@ module Make (C : Conf.S) = struct
 
   (* {1 Closing} *)
 
-  (* The shards that actually exist, either space, by reading the two directories
-     rather than walking all {!Chunk_layout.shards} of a space that may hold
-     nothing. On a small store that is the difference between a handful of
-     listings per replica and 4096 of them, and a listing of a remote replica is a
-     request.
+  (* Which shards a phase has to visit, read from the directories rather than
+     assumed to be all {!Chunk_layout.shards} of them. A store holding a handful of
+     chunks occupies a handful of shards, and walking 4096 of anything to find them
+     is work in proportion to the layout instead of to the data.
 
-     ponytail: a replica holding chunks in a shard the main has never had is not
-     reached, since nothing here enumerates the replica's own shards. Those are
-     orphans from before this ran and stay orphans. Enumerate the members too if
-     it ever matters; it costs a full listing of each. *)
+     Only the main's own spaces are read this way. What a *target* holds is not
+     knowable from here, so reconciling asks it about every shard there could be —
+     see {!all_shards}. *)
+  let shards_in dir =
+    Lwt.catch
+      (fun () ->
+        let+ names = Fs_util.readdir_list dir in
+        List.filter (fun s -> String.length s = Chunk_layout.fanout) names)
+      (function Unix.Unix_error _ -> Lwt.return_nil | e -> Lwt.fail e)
+
+  (* Abandoning visits the space on its way out; closing visits both, since a shard
+     may exist in either. *)
+  let from_shards root =
+    let+ going = shards_in (from_dir root) in
+    List.sort String.compare going
+
   let live_shards root =
-    let read dir =
-      Lwt.catch
-        (fun () -> Fs_util.readdir_list dir)
-        (function Unix.Unix_error _ -> Lwt.return_nil | e -> Lwt.fail e)
-    in
-    let* surviving = read (to_dir root) in
-    let+ going = read (from_dir root) in
+    let* surviving = shards_in (to_dir root) in
+    let+ going = shards_in (from_dir root) in
     List.sort_uniq String.compare (surviving @ going)
-    |> List.filter (fun s -> String.length s = Chunk_layout.fanout)
 
   (* Discard one shard of the space on its way out, and report what it held that
      the surviving space does not. Nothing here holds more than a shard's worth of
@@ -405,6 +410,7 @@ module Make (C : Conf.S) = struct
       there could be, because only the target knows which ones it holds. *)
   type work =
     | Mark of string list
+    | Keep of string list
     | Close of string list
     | Reconcile of string list
 
@@ -448,6 +454,7 @@ module Make (C : Conf.S) = struct
   let phase s =
     match s.work with
       | Mark _ -> "marking"
+      | Keep _ -> "abandoning"
       | Close _ -> "closing"
       | Reconcile _ -> "reconciling"
   let done_ s = s.done_
@@ -456,8 +463,8 @@ module Make (C : Conf.S) = struct
 
   let cursor s =
     match s.work with
-      | Mark (k :: _) | Close (k :: _) | Reconcile (k :: _) -> k
-      | Mark [] | Close [] | Reconcile [] -> ""
+      | Mark (k :: _) | Keep (k :: _) | Close (k :: _) | Reconcile (k :: _) -> k
+      | Mark [] | Keep [] | Close [] | Reconcile [] -> ""
 
   let stats s =
     {
@@ -476,7 +483,7 @@ module Make (C : Conf.S) = struct
   let save s phase cursor =
     Space.write_run { Chunk_space.phase; started = s.started; cursor }
 
-  let start ?concurrency () =
+  let start ?concurrency ?(keep = false) () =
     let* main, root = collector () in
     (* Under the lock before the marker is read, so the decision to open or resume
        is made by one process. *)
@@ -530,6 +537,31 @@ module Make (C : Conf.S) = struct
        at its shard. Nothing here is ambiguous, which is why each phase is
        recorded before the step it names rather than after. *)
     match phase with
+      (* Abandoning first, and its override before any phase it overrides: a
+         guard placed after the constructors it is meant to take precedence over
+         never fires for them. *)
+      | Chunk_space.Abandoning ->
+          let* shards = from_shards root in
+          let pending =
+            List.filter (fun s -> String.compare s cursor > 0) shards
+          in
+          Log.info "gc: resuming abandonment, %d shard(s) left to keep"
+            (List.length pending);
+          Lwt.return (fresh (Keep pending) (List.length shards))
+      (* Abandoning overrides whatever phase the collection had reached, and takes
+         no cursor from it: a cursor means something different in each phase, and
+         one left by marking or closing says nothing about which shards still need
+         keeping. Shards already discarded are gone and cannot be brought back — so
+         this keeps what is still there, which is all it can promise. *)
+      | _ when keep ->
+          let* shards = from_shards root in
+          Log.info
+            "gc: abandoning the collection of %s, keeping everything left in %d \
+             shard(s)"
+            C.domain_name (List.length shards);
+          let s = fresh (Keep shards) (List.length shards) in
+          let+ () = save s Chunk_space.Abandoning "" in
+          s
       | Chunk_space.Reconciling ->
           let pending =
             List.filter (fun s -> String.compare s cursor > 0) all_shards
@@ -544,24 +576,27 @@ module Make (C : Conf.S) = struct
           in
           Log.info "gc: resuming, %d shard(s) to close" (List.length pending);
           Lwt.return (fresh (Close pending) (List.length shards))
+      (* Once a collection has been called off it stays called off: coming back to
+         an [Abandoning] run continues abandoning it rather than quietly resuming a
+         collection whoever stopped it did not want. *)
       | Chunk_space.Opening | Chunk_space.Marking ->
           if existing = None then
             Log.info "gc: opening a collection of %s" C.domain_name;
           let s = fresh (Mark []) 0 in
           let* () = save s Chunk_space.Opening "" in
           let* () = open_space root in
-          (* Enumerated before the phase is recorded as [Marking], so a [--status]
-             during it does not claim to be marking while it is still working out
-             what to mark. *)
-          let* found = namespaces root in
-          let pending =
-            List.filter (fun n -> String.compare n cursor > 0) found
-          in
-          let* () = save s Chunk_space.Marking cursor in
-          Log.info "gc: %d namespace(s) to mark" (List.length pending);
-          s.work <- Mark pending;
-          s.total <- List.length pending;
-          Lwt.return s
+            (* Enumerated before the phase is recorded as [Marking], so a
+               [--status] during it does not claim to be marking while it is still
+               working out what to mark. *)
+            let* found = namespaces root in
+            let pending =
+              List.filter (fun n -> String.compare n cursor > 0) found
+            in
+            let* () = save s Chunk_space.Marking cursor in
+            Log.info "gc: %d namespace(s) to mark" (List.length pending);
+            s.work <- Mark pending;
+            s.total <- List.length pending;
+            Lwt.return s
 
   (* Marking one root: read it, and give every chunk it names a link under the
      surviving root. The links go out concurrently within the root, on the same
@@ -644,6 +679,38 @@ module Make (C : Conf.S) = struct
            Log.debug "gc: %d/%d shard(s) closed, %d chunk(s) reclaimed" s.done_
              s.total s.chunks_reclaimed;
            s.on_close ~shards:s.done_ ~reclaimed:s.chunks_reclaimed));
+    Lwt.return_unit
+
+  (* Abandoning one shard: give everything in it a name in the surviving space, so
+     that discarding the old space costs nothing. The same shape as marking a
+     namespace — bounded concurrency, cursor per unit — because abandoning is a
+     collection in which every chunk turns out to be live. *)
+  let keep_one s shard =
+    let* going =
+      let (module M : Backend.S) = s.main in
+      M.list_prefix ~prefix:(Space.from_prefix ^ shard ^ "/") ()
+    in
+    let keys =
+      List.filter_map
+        (fun (e : Backend.file_entry) ->
+          if Key.is_dir e.Backend.key then None
+          else Some (Filename.basename e.Backend.key))
+        going
+    in
+    let* () =
+      Lwt_list.iter_p
+        (fun ck -> Lwt_bounded.use s.chunk_slots (fun () -> Space.promote ck))
+        keys
+    in
+    s.chunks_promoted <- s.chunks_promoted + List.length keys;
+    s.done_ <- s.done_ + 1;
+    let* () = save s Chunk_space.Abandoning shard in
+    ignore
+      (throttled (fun () ->
+           Log.debug "gc: kept %d/%d shard(s), %d chunk(s)" s.done_ s.total
+             s.chunks_promoted;
+           s.on_mark ~namespaces:s.done_ ~total:s.total ~roots:s.done_
+             ~promoted:s.chunks_promoted));
     Lwt.return_unit
 
   (* Cumulative figures for one target, for reporting mid-phase rather than only
@@ -756,7 +823,7 @@ module Make (C : Conf.S) = struct
      observable — which is what makes the interleaving testable. *)
   let step ?(units = 1) s =
     match s.work with
-      | Mark [] ->
+      | Mark [] | Keep [] ->
           let+ () = begin_closing s in
           `More
       (* Nothing left of the old space. The targets are only reconciled when there
@@ -778,6 +845,11 @@ module Make (C : Conf.S) = struct
          which is why [out_of_time] is consulted between them rather than only
          between whole steps. Without that, a budget could be overshot by however
          long a batch happens to take. *)
+      | Keep shards ->
+          let batch, rest = take (max 1 units) shards in
+          let* remaining = each s keep_one batch in
+          s.work <- Keep (remaining @ rest);
+          Lwt.return `More
       | Mark namespaces ->
           let batch, rest = take (max 1 units) namespaces in
           let rec go done_ = function
@@ -818,7 +890,8 @@ module Make (C : Conf.S) = struct
 
   (* {1 Driving it} *)
 
-  let run ?budget ?(units = 256) ?pause ?concurrency ?(on_open = fun () -> ())
+  let run ?budget ?(units = 256) ?pause ?concurrency ?(keep = false)
+      ?(on_open = fun () -> ())
       ?(on_mark = fun ~namespaces:_ ~total:_ ~roots:_ ~promoted:_ -> ())
       ?(on_close = fun ~shards:_ ~reclaimed:_ -> ())
       ?(on_reconcile = fun ~name:_ ~shards:_ ~total:_ ~deleted:_ ~uploaded:_ ->
@@ -831,7 +904,7 @@ module Make (C : Conf.S) = struct
             fun () -> Unix.gettimeofday () >= stop
     in
     on_open ();
-    let* s = start ?concurrency () in
+    let* s = start ?concurrency ~keep () in
     s.out_of_time <- deadline;
     s.on_mark <- on_mark;
     s.on_close <- on_close;
@@ -862,37 +935,17 @@ module Make (C : Conf.S) = struct
      the close find nothing to reclaim. *)
   (* Under the lock like a run: promoting everything while another process
      discards shards is the same race, from the other side. *)
-  let abort ?(on_mark = fun ~namespaces:_ ~total:_ ~roots:_ ~promoted:_ -> ())
-      () =
-    let* main, root = collector () in
-    let* lock = take_lock root in
-    Lwt.finalize
-      (fun () ->
-        let* existing = Space.read_run () in
-        match existing with
-          | None -> Lwt.return empty
-          | Some _ ->
-              let (module M : Backend.S) = main in
-              Log.info "gc: abandoning the collection of %s, keeping everything"
-                C.domain_name;
-              let* going = M.list_prefix ~prefix:Space.from_prefix () in
-              let total = List.length going in
-              let done_ = ref 0 in
-              let* () =
-                Lwt_list.iter_s
-                  (fun (e : Backend.file_entry) ->
-                    let+ () = Space.promote (Filename.basename e.Backend.key) in
-                    incr done_;
-                    ignore
-                      (throttled (fun () ->
-                           Log.debug "gc: kept %d/%d chunk(s)" !done_ total;
-                           on_mark ~namespaces:!done_ ~total ~roots:!done_
-                         ~promoted:!done_)))
-                  going
-              in
-              let* () = Fs_util.rm_rf (from_dir root) in
-              let+ () = Space.clear_run () in
-              Log.info "gc: abandoned, %d chunk(s) kept" total;
-              { empty with chunks_promoted = total })
-      (fun () -> drop_lock lock)
+  (* Abandoning is a collection in which every chunk turns out to be live, so it is
+     {!run} with the marking phase pointed at the space on its way out. Everything
+     that made a collection bearable on a large store — the shard cursor, the
+     budget, the pause, the bounded concurrency, the progress — comes along, rather
+     than being a loop of its own that had none of it. *)
+  let abort ?budget ?units ?pause ?concurrency ?on_open ?on_mark ?on_close
+      ?on_reconcile () =
+    let* open_ = Space.read_run () in
+    match open_ with
+      | None -> Lwt.return empty
+      | Some _ ->
+          run ~keep:true ?budget ?units ?pause ?concurrency ?on_open ?on_mark
+            ?on_close ?on_reconcile ()
 end

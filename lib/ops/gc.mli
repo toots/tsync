@@ -111,9 +111,11 @@ module Make (C : Conf.S) : sig
       possible. The work is I/O bound, so this and not the batch size is what
       decides how hard a step leans on the device.
 
+      [keep] makes this an abandonment rather than a collection: see {!abort}.
+
       Raises {!Unsupported} when no main can collect, {!Busy} when a collection is
       already under way. *)
-  val start : ?concurrency:int -> unit -> session Lwt.t
+  val start : ?concurrency:int -> ?keep:bool -> unit -> session Lwt.t
 
   (** Do up to [units] units (default 1) and report whether any remain. Saves
       enough as it goes that dropping the session — or the process — loses at most
@@ -163,6 +165,7 @@ module Make (C : Conf.S) : sig
     ?units:int ->
     ?pause:float ->
     ?concurrency:int ->
+    ?keep:bool ->
     ?on_open:(unit -> unit) ->
     ?on_mark:
       (namespaces:int -> total:int -> roots:int -> promoted:int -> unit) ->
@@ -179,14 +182,36 @@ module Make (C : Conf.S) : sig
 
   (** {1 Getting out of one} *)
 
-  (** Abandon an open run, keeping everything: every chunk still in the discarded
-      space is promoted first, so nothing is collected. For getting a store back
-      to one space without waiting for a mark to finish.
+  (** Abandon an open run, keeping everything: every chunk still in the space on
+      its way out is given a name in the surviving one first, so nothing is
+      collected. For getting a store back to one space without waiting for a mark
+      to finish.
+
+      This is {!run} with one difference — every chunk is treated as live — so it
+      takes the same pacing arguments and is resumable in the same way, a shard at
+      a time. Worth having, since what someone reaching for this most likely wants
+      is out of a collection that is already going badly, and a recovery that
+      itself runs for an hour with no way to interrupt it is not much of one.
+      Coming back to an abandonment continues abandoning rather than resuming the
+      collection.
 
       A no-op when no run is open. *)
   val abort :
+    ?budget:float ->
+    ?units:int ->
+    ?pause:float ->
+    ?concurrency:int ->
+    ?on_open:(unit -> unit) ->
     ?on_mark:
       (namespaces:int -> total:int -> roots:int -> promoted:int -> unit) ->
+    ?on_close:(shards:int -> reclaimed:int -> unit) ->
+    ?on_reconcile:
+      (name:string ->
+      shards:int ->
+      total:int ->
+      deleted:int ->
+      uploaded:int ->
+      unit) ->
     unit ->
     stats Lwt.t
 

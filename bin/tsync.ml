@@ -768,25 +768,35 @@ let gc_cmd =
     Arg.(
       value & flag
       & info ["abort"]
-          ~doc:"Abandon an open collection, keeping every chunk it holds.")
+          ~doc:
+            "Abandon an open collection, keeping every chunk it still holds. \
+             Takes $(b,--budget), $(b,--pause) and $(b,--concurrency) like a \
+             collection does, and resumes the same way — a second \
+             $(b,--abort) continues abandoning rather than starting over.")
   in
   let status_arg =
     Arg.(
       value & flag
       & info ["status"] ~doc:"Report an open collection without continuing it.")
   in
-  let report (s : Gc.stats) =
+  let report ~abort (s : Gc.stats) =
     (match s.Gc.outcome with
+      | Gc.Completed when abort ->
+          Printf.printf "Collection abandoned; %d chunk(s) kept.\n"
+            s.chunks_promoted
       | Gc.Completed ->
           Printf.printf "Reclaimed %d chunk(s), %s. Kept %d.\n"
             s.chunks_reclaimed
             (human_bytes s.bytes_reclaimed)
             s.chunks_promoted
       | Gc.Suspended { phase; _ } ->
+          (* Naming the command that continues *this*, since [tsync gc] on an
+             abandoned collection would go back to collecting it. *)
           Printf.printf
-            "Stopped while %s: %d root(s) marked, %d chunk(s) reclaimed.\n\
-             The collection is still open; rerun tsync gc to continue it.\n"
-            phase s.roots_marked s.chunks_reclaimed);
+            "Stopped while %s: %d file(s) marked, %d chunk(s) reclaimed.\n\
+             Still open; rerun tsync gc%s to continue.\n"
+            phase s.roots_marked s.chunks_reclaimed
+            (if abort then " --abort" else ""));
     List.iter
       (fun (m : Gc.member_stats) ->
         Printf.printf "  %s: %d deleted%s\n" m.Gc.name m.deleted
@@ -812,41 +822,51 @@ let gc_cmd =
               C.domain_name
               (Chunk_space.string_of_phase r.Chunk_space.phase)
               (Unix.gettimeofday () -. r.Chunk_space.started)
-    else if abort then
-      translate (fun () ->
-          let s = run_lwt (G.abort ()) in
-          Printf.printf "Collection abandoned; %d chunk(s) kept.\n"
-            s.Gc.chunks_promoted)
     else
+      (* Abandoning is the same machinery with everything treated as live, so it
+         takes the same pacing and reports the same way. Someone reaching for
+         --abort is most likely getting out of a collection that is already going
+         badly; a recovery with no way to slow it down or interrupt it would be a
+         poor one.
+
+         Progress to stderr, so stdout carries only the summary a script would
+         read. A collection of a large store runs for a long time and must not look
+         wedged. *)
+      let budget = Option.map parse_duration budget
+      and pause = Option.map parse_duration pause in
+      let on_open () =
+        Printf.eprintf "%s %s...\n%!"
+          (if abort then "Abandoning the collection of" else "Collecting")
+          C.domain_name
+      in
+      let on_mark ~namespaces ~total ~roots ~promoted =
+        Printf.eprintf "  %s %d/%d, %d file(s), %d chunk(s) kept\r%!"
+          (if abort then "kept shard(s)" else "marked folder(s)")
+          namespaces total roots promoted
+      in
+      let on_close ~shards ~reclaimed =
+        Printf.eprintf "  closed %d shard(s), %d chunk(s) reclaimed\r%!" shards
+          reclaimed
+      in
+      let on_reconcile ~name ~shards ~total ~deleted ~uploaded =
+        Printf.eprintf "  %s: %d/%d shard(s), %d deleted, %d filled\r%!" name
+          shards total deleted uploaded
+      in
       translate (fun () ->
-          (* Progress to stderr, so stdout carries only the summary a script
-             would read. A collection of a large store runs for a long time and
-             must not look wedged. *)
           let s =
             run_lwt
-              (G.run ?budget:(Option.map parse_duration budget)
-                 ?pause:(Option.map parse_duration pause) ?concurrency
-                 ~on_open:(fun () ->
-                   Printf.eprintf "Collecting %s...\n%!" C.domain_name)
-                 ~on_mark:(fun ~namespaces ~total ~roots ~promoted ->
-                   Printf.eprintf
-                     "  marked %d/%d folder(s), %d file(s), %d chunk(s) kept\r%!"
-                     namespaces total roots promoted)
-                 ~on_close:(fun ~shards ~reclaimed ->
-                   Printf.eprintf
-                     "  closed %d shard(s), %d chunk(s) reclaimed\r%!" shards
-                     reclaimed)
-                 ~on_reconcile:(fun ~name ~shards ~total ~deleted ~uploaded ->
-                   Printf.eprintf
-                     "  %s: %d/%d shard(s), %d deleted, %d filled\r%!" name
-                     shards total deleted uploaded)
-                 ())
+              (if abort then
+                 G.abort ?budget ?pause ?concurrency ~on_open ~on_mark ~on_close
+                   ~on_reconcile ()
+               else
+                 G.run ?budget ?pause ?concurrency ~on_open ~on_mark ~on_close
+                   ~on_reconcile ())
           in
           (* The progress lines above end in a carriage return, so the last one is
              still sitting on the terminal's current line. Cleared before the
              summary goes to stdout, or the two land on top of each other. *)
           Printf.eprintf "\r%*s\r%!" 72 "";
-          report s)
+          report ~abort s)
   in
   Cmd.v
     (Cmd.info "gc"

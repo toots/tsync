@@ -1,18 +1,20 @@
 open Lwt.Syntax
 
-type phase = Opening | Marking | Closing | Reconciling
+type phase = Opening | Marking | Abandoning | Closing | Reconciling
 
 type run = { phase : phase; started : float; cursor : string }
 
 let string_of_phase = function
   | Opening -> "opening"
   | Marking -> "marking"
+  | Abandoning -> "abandoning"
   | Closing -> "closing"
   | Reconciling -> "reconciling"
 
 let phase_of_string = function
   | "opening" -> Some Opening
   | "marking" -> Some Marking
+  | "abandoning" -> Some Abandoning
   | "closing" -> Some Closing
   | "reconciling" -> Some Reconciling
   | _ -> None

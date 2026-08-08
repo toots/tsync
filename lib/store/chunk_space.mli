@@ -14,6 +14,10 @@
 type phase =
   | Opening  (** The chunk root has not been renamed away yet. *)
   | Marking  (** Live chunks are being given names in the new root. *)
+  | Abandoning
+      (** Like {!Marking}, but keeping everything rather than only what is
+          referenced: the collection was called off and the chunks are being given
+          names in the new root regardless. *)
   | Closing  (** The old root is being discarded. *)
   | Reconciling
       (** The main is settled; the replicas and backfill targets are being

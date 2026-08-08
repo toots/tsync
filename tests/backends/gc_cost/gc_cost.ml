@@ -214,6 +214,34 @@ let () =
      in
      step "chunks on the replica: %d of %d" (List.length filled) folders;
 
+     (* Abandoning is the collection machinery with everything treated as live, so
+        it is resumable the same way — and the thing that has to hold is that it
+        resumes as an abandonment. Coming back to one and quietly collecting
+        instead would discard exactly what somebody stopped it to keep. *)
+     case "an interrupted abandonment stays an abandonment";
+     let* s = G.start () in
+     let* _ = G.step ~units:1 s in
+     step "started collecting, phase: %s" (G.phase s);
+     let* () = G.release s in
+     let* s = G.start ~keep:true () in
+     step "changed our mind, phase: %s" (G.phase s);
+     let* _ = G.step ~units:1 s in
+     let* () = G.release s in
+     let* s = G.start () in
+     step "resumed with a plain start, phase: %s  <- not \"marking\""
+       (G.phase s);
+     let* () = G.release s in
+     let* kept = G.abort () in
+     step "finished abandoning: %d chunk(s) kept" kept.Gc.chunks_promoted;
+     let* left = Main.list_prefix ~prefix:chunk_prefix () in
+     let left =
+       List.filter
+         (fun (e : Backend.file_entry) ->
+           not (Filename.check_suffix e.Backend.key "/"))
+         left
+     in
+     step "chunks still on the main: %d of %d" (List.length left) folders;
+
      case "the copies were told nothing about the collection";
      step "run markers written to the replica: %d" replica_ops.markers;
      let* leftover = Replica.get_opt ~key:marker_key () in
