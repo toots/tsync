@@ -965,7 +965,7 @@ let dump_backend_at ~backend_root ~domain_prefix ~chunk_prefix ~journal_prefix
               let name, desc =
                 match Manifest.of_string data with
                   | m ->
-                      ( m.Manifest.name,
+                      ( Manifest.recorded_name m,
                         Printf.sprintf "manifest size=%Ld chunks=%d"
                           m.Manifest.size
                           (Chunk_table.count m.Manifest.chunks) )
@@ -993,13 +993,14 @@ let dump_backend_at ~backend_root ~domain_prefix ~chunk_prefix ~journal_prefix
                     m.Folder.id
             | None -> (
                 match Manifest.of_string data with
-                  | { symlink = Some target; name; _ } ->
-                      Printf.printf "  symlink %s [%s] -> %s\n" name rel target
+                  | { symlink = Some target; _ } as m ->
+                      Printf.printf "  symlink %s [%s] -> %s\n"
+                        (Manifest.recorded_name m) rel target
                   | m ->
                       Printf.printf
                         "  file %s [%s] = manifest size=%Ld chunks=%d h1=%s \
                          h2=%s\n"
-                        m.Manifest.name rel m.Manifest.size
+                        (Manifest.recorded_name m) rel m.Manifest.size
                         (Chunk_table.count m.Manifest.chunks)
                         m.Manifest.h1 m.Manifest.h2;
                       let table = m.Manifest.chunks in

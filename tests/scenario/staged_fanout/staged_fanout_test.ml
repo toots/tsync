@@ -75,7 +75,7 @@ let source index =
 let () =
   Lwt_main.run
     (let* state =
-       R.upload_chunks ~key:"staged.bin" ~name:"staged.bin"
+       R.upload_chunks ~key:"staged.bin"
          ~size:(Int64.of_int (chunks * csize))
          ~chunk_size:csize ~mtime:0. ~source ()
      in

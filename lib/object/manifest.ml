@@ -7,8 +7,12 @@
    file at 1 MiB chunks is 31,230 keys nobody materializes to answer "what is
    this file called?". *)
 
+(* A name belongs to where a manifest is filed, so it is not a field here. The
+   body carries one only for the locations that cannot express it: a backend key
+   is [<folder-id>/<hash>] and an escaped cache leaf is [.tsync-esc-<hash>],
+   both one-way. Everywhere else the logical key is real-path shaped and holds
+   the answer. {!Make.name_of} asks the location first. *)
 type t = {
-  name : string;  (** leaf name; authority for the file's own name *)
   size : int64;
   chunk_size : int;
   chunks : Chunk_table.t;
@@ -17,6 +21,10 @@ type t = {
   mtime : float;
   symlink : string option;
 }
+
+(* The name in the body. Only the location can say whether this is worth
+   consulting, so callers holding a key should not: see {!Make.name_of}. *)
+let recorded_name m = Chunk_table.name m.chunks
 
 (* What an upload produces per chunk. Read paths go through the table. *)
 type chunk_entry = { index : int; h1 : string; h2 : string; size : int }
@@ -67,7 +75,6 @@ let digest_of_chunks chunks =
 
 let of_table chunks =
   {
-    name = Chunk_table.name chunks;
     size = Chunk_table.size chunks;
     chunk_size = Chunk_table.chunk_size chunks;
     chunks;
@@ -82,9 +89,12 @@ let of_string s = of_table (Chunk_table.of_string s)
 (* Mapped: chunk keys cost no heap and the pages are reclaimable. *)
 let of_file path = of_table (Chunk_table.of_file path)
 
-let to_string (m : t) =
-  Chunk_table.encode ~name:m.name ~size:m.size ~chunk_size:m.chunk_size
-    ~mtime:m.mtime ~h1:m.h1 ~h2:m.h2 ~symlink:m.symlink
+(* Encoding needs a name, so every caller states one. A version snapshot and a
+   trashed marker are filed under keys that do not describe them, and are the
+   only callers passing anything but the key's own leaf. *)
+let to_string ~name (m : t) =
+  Chunk_table.encode ~name ~size:m.size ~chunk_size:m.chunk_size ~mtime:m.mtime
+    ~h1:m.h1 ~h2:m.h2 ~symlink:m.symlink
     ~keys:(List.init (Chunk_table.count m.chunks) (Chunk_table.key m.chunks))
 
 (* Encode then decode, so a [t] only ever exists as a decoded body and cannot
@@ -179,7 +189,12 @@ let staged_to_string (st : staged) =
          (* The published body is binary; base64 keeps it inside this JSON rather
             than in a second file that would have to move atomically with it. *)
          | Some m ->
-             [("published", `String (Base64.encode_string (to_string m)))]))
+             [
+               ( "published",
+                 (* Same file, so the same name: this is the published body of
+                    the very record carrying it. *)
+                 `String (Base64.encode_string (to_string ~name:st.s_name m)) );
+             ]))
 
 let staged_of_string body =
   let open Yojson.Basic.Util in
@@ -311,8 +326,12 @@ let read_body path =
 let read_clean path =
   Lwt.return (match of_file path with m -> Some m | exception _ -> None)
 
-(* Depth first, passing each manifest's real relative path: recursion resolves
-   escaped names through their markers, so [rel] is always real-path shaped. *)
+(* Depth first, passing each manifest's real relative path and real leaf name:
+   recursion resolves escaped names through their markers, so [rel] is always
+   real-path shaped, and the leaf is resolved the same way a directory's is. *)
+let real_file_name name m =
+  if Name_escape.is_escaped name then recorded_name m else name
+
 let fold_files ~start ~rel f acc =
   let rec walk dir rel acc =
     let* names = Fs_util.readdir_list dir in
@@ -327,7 +346,9 @@ let fold_files ~start ~rel f acc =
             walk path (Key.join rel real) acc
           else
             let+ m = read_clean path in
-            match m with Some m -> f acc rel m | None -> acc))
+            match m with
+              | Some m -> f acc rel (real_file_name name m) m
+              | None -> acc))
       acc names
   in
   let* ok = Fs_util.is_directory start in
@@ -405,10 +426,20 @@ module Make (C : Conf.S) = struct
     let reldir = Key.parent rel in
     ensure_dirs (root ()) reldir
 
+  (* The name for a manifest at [key]. The location answers whenever it can; the
+     body is consulted only for an escaped on-disk leaf, which is the one case
+     the path cannot express. This is {!real_dir_name} for files. *)
+  let name_of ~key m =
+    let leaf = Key.leaf ~domain_prefix:C.domain_prefix key in
+    if Name_escape.is_escaped leaf then recorded_name m else leaf
+
+  (* The name is stamped from the key, so a mirror manifest always records the
+     name it is filed under. Sole writer of a manifest body in the cache. *)
   let write key manifest =
     invalidate key;
     let* () = ensure_parent key in
-    Fs_util.atomic_write (path key) (to_string manifest)
+    Fs_util.atomic_write (path key)
+      (to_string ~name:(Key.leaf ~domain_prefix:C.domain_prefix key) manifest)
 
   let delete key =
     invalidate key;
@@ -422,7 +453,12 @@ module Make (C : Conf.S) = struct
     if not exists then Lwt.return_unit
     else
       let* () = ensure_parent dst_key in
-      Lwt_unix_retry.rename src (path dst_key)
+      let* () = Lwt_unix_retry.rename src (path dst_key) in
+      (* Re-stamped, not just moved: the body still records the source's leaf,
+         and an escaped destination has nowhere else to read its name from. *)
+        match of_file (path dst_key) with
+        | m -> write dst_key m
+        | exception _ -> Lwt.return_unit
 
   (* The mirror is the directory structure: directories exist only here. *)
   let create_dir key = ensure_dirs (root ()) (rel_of key)
@@ -472,10 +508,14 @@ module Make (C : Conf.S) = struct
                 in
                 Lwt.return_none)
 
+  (* Stamped from the key, as {!write} is: a staged record names the file it is
+     filed as, and its name is what a listing shows before an upload lands. *)
   let write_staged key (st : staged) =
     let p = staged_path key in
     let* () = Fs_util.ensure_parent p in
-    Fs_util.atomic_write p (staged_to_string st)
+    Fs_util.atomic_write p
+      (staged_to_string
+         { st with s_name = Key.leaf ~domain_prefix:C.domain_prefix key })
 
   let delete_staged key = Fs_util.unlink_quiet (staged_path key)
 
@@ -486,7 +526,14 @@ module Make (C : Conf.S) = struct
     else (
       let dst = staged_path dst_key in
       let* () = Fs_util.ensure_parent dst in
-      Lwt_unix_retry.rename src dst)
+      let* () = Lwt_unix_retry.rename src dst in
+      let* body = read_body dst in
+      match body with
+        | None -> Lwt.return_unit
+        | Some body -> (
+            match staged_of_string body with
+              | st -> write_staged dst_key st
+              | exception _ -> Lwt.return_unit))
 
   (* Walks on-disk names: a staged manifest records its leaf name, but tree
      position is what identifies the file. *)
@@ -514,7 +561,12 @@ module Make (C : Conf.S) = struct
               match body with
                 | Some body -> (
                     match staged_of_string body with
-                      | st -> f acc rel st
+                      | st ->
+                          let leaf =
+                            if Name_escape.is_escaped name then st.s_name
+                            else name
+                          in
+                          f acc rel leaf st
                       | exception _ -> acc)
                 | None -> acc))
         acc names
@@ -525,14 +577,15 @@ module Make (C : Conf.S) = struct
   (* Logical keys owing an upload. *)
   let list_staged () =
     fold_staged ~rel_dir:"" ~deep:true
-      (fun acc rel st -> (C.domain_prefix ^ Key.join rel st.s_name) :: acc)
+      (fun acc rel leaf (_ : staged) ->
+        (C.domain_prefix ^ Key.join rel leaf) :: acc)
       []
 
   (* Every staged body reachable from a manifest: what a sweep of the body trees
      must keep. *)
   let staged_uuids () =
     fold_staged ~rel_dir:"" ~deep:true
-      (fun acc _ st ->
+      (fun acc _ _ st ->
         let acc =
           match st.s_whole with Some uuid -> uuid :: acc | None -> acc
         in
@@ -553,10 +606,10 @@ module Make (C : Conf.S) = struct
      not list it; for one that does, the staged size and mtime are current. *)
   let staged_entries ~rel_dir ~deep =
     fold_staged ~rel_dir ~deep
-      (fun acc rel st ->
+      (fun acc rel leaf st ->
         Backend.
           {
-            key = C.domain_prefix ^ Key.join rel st.s_name;
+            key = C.domain_prefix ^ Key.join rel leaf;
             size = Int64.to_int st.s_size;
             last_modified = st.s_mtime;
           }
@@ -615,7 +668,7 @@ module Make (C : Conf.S) = struct
                 | Some m ->
                     ( Backend.
                         {
-                          key = child_base ^ m.name;
+                          key = child_base ^ real_file_name name m;
                           size = Int64.to_int m.size;
                           last_modified = m.mtime;
                         }
@@ -631,10 +684,10 @@ module Make (C : Conf.S) = struct
     let rel, start = dir_of_prefix prefix in
     let* published =
       fold_files ~start ~rel
-        (fun acc rel m ->
+        (fun acc rel leaf m ->
           Backend.
             {
-              key = C.domain_prefix ^ Key.join rel m.name;
+              key = C.domain_prefix ^ Key.join rel leaf;
               size = Int64.to_int m.size;
               last_modified = m.mtime;
             }
@@ -648,12 +701,12 @@ module Make (C : Conf.S) = struct
   let walk () =
     let* published =
       fold_files ~start:(root ()) ~rel:""
-        (fun acc rel m -> Key.join rel m.name :: acc)
+        (fun acc rel leaf (_ : t) -> Key.join rel leaf :: acc)
         []
     in
     let+ staged =
       fold_staged ~rel_dir:"" ~deep:true
-        (fun acc rel st -> Key.join rel st.s_name :: acc)
+        (fun acc rel leaf (_ : staged) -> Key.join rel leaf :: acc)
         []
     in
     List.sort_uniq compare (published @ staged)

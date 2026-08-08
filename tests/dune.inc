@@ -332,6 +332,20 @@
   (action
    (diff recheck.expected recheck.output))))
 
+(subdir scenario/rename_listing
+ (alias
+  (name default)
+  (deps rename_listing_test.exe))
+ (rule
+  (alias runtest)
+  (target rename_listing_test.output)
+  (action
+   (with-stdout-to rename_listing_test.output (ignore-stderr (run ./rename_listing_test.exe)))))
+ (rule
+  (alias runtest)
+  (action
+   (diff rename_listing_test.expected rename_listing_test.output))))
+
 (subdir scenario/resync
  (alias
   (name default)
@@ -487,6 +501,20 @@
  (rule
   (alias runtest)
   (action (run ./layout.exe))))
+
+(subdir unit/manifest_naming
+ (alias
+  (name default)
+  (deps manifest_naming_test.exe))
+ (rule
+  (alias runtest)
+  (target manifest_naming_test.output)
+  (action
+   (with-stdout-to manifest_naming_test.output (ignore-stderr (run ./manifest_naming_test.exe)))))
+ (rule
+  (alias runtest)
+  (action
+   (diff manifest_naming_test.expected manifest_naming_test.output))))
 
 (subdir unit/subs
  (alias

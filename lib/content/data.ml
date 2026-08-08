@@ -191,14 +191,13 @@ module Make (C : Conf.S) (R : Remote.S) = struct
       | None -> (
           let* chunk_size = R.chunk_size () in
           let+ published = Mf.read key in
-          let name =
-            Filename.basename
-              (Key.strip_prefix ~domain_prefix:C.domain_prefix key)
-          in
+          let name = Key.leaf ~domain_prefix:C.domain_prefix key in
           match published with
             | Some m ->
                 {
-                  Manifest.s_name = m.Manifest.name;
+                  (* The key names this file; the published body names whatever
+                     it was filed as. *)
+                  Manifest.s_name = name;
                   s_size = m.Manifest.size;
                   s_mtime = Unix.gettimeofday ();
                   s_chunk_size = m.Manifest.chunk_size;
@@ -461,9 +460,7 @@ module Make (C : Conf.S) (R : Remote.S) = struct
     let* () =
       match st with Some st -> discard_bodies st | None -> Lwt.return_unit
     in
-    let name =
-      Filename.basename (Key.strip_prefix ~domain_prefix:C.domain_prefix key)
-    in
+    let name = Key.leaf ~domain_prefix:C.domain_prefix key in
     let* chunk_size = R.chunk_size () in
     Mf.write_staged key
       {
@@ -564,9 +561,8 @@ module Make (C : Conf.S) (R : Remote.S) = struct
     let* base = Mf.read key in
     let base = match base with Some m -> Some m | _ -> None in
     let* state =
-      R.upload_chunks ~key ~name:staged.Manifest.s_name
-        ~size:staged.Manifest.s_size ~chunk_size:staged.Manifest.s_chunk_size
-        ~mtime:staged.Manifest.s_mtime
+      R.upload_chunks ~key ~size:staged.Manifest.s_size
+        ~chunk_size:staged.Manifest.s_chunk_size ~mtime:staged.Manifest.s_mtime
         ~source:(staged_source ~staged ~base)
         ?cancel ()
     in
@@ -673,9 +669,7 @@ module Make (C : Conf.S) (R : Remote.S) = struct
     let* () = Cc.adopt_whole ~src:src_path ~uuid in
     Mf.write_staged key
       {
-        Manifest.s_name =
-          Filename.basename
-            (Key.strip_prefix ~domain_prefix:C.domain_prefix key);
+        Manifest.s_name = Key.leaf ~domain_prefix:C.domain_prefix key;
         s_size = stat.Unix.LargeFile.st_size;
         s_mtime = stat.Unix.LargeFile.st_mtime;
         s_chunk_size = chunk_size;

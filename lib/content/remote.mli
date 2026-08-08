@@ -54,7 +54,6 @@ module type S = sig
       buffer. *)
   val upload_chunks :
     key:string ->
-    name:string ->
     size:int64 ->
     chunk_size:int ->
     mtime:float ->

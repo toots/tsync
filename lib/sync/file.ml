@@ -290,7 +290,8 @@ module Make_with_layout (C : Conf.S) (Sq : Sync_queue.S) (L : Layout.S) :
      and journal entry are missing. *)
   let publish_manifest key (m : Manifest.t) =
     Log.info "publish_manifest %s: size=%Ld" key m.Manifest.size;
-    let* () = St.put_manifest ~key ~data:(Manifest.to_string m) in
+    let name = Key.leaf ~domain_prefix:C.domain_prefix key in
+    let* () = St.put_manifest ~key ~data:(Manifest.to_string ~name m) in
     let* ek = Fs.write_journal_entry [`Put (rel_key key, m.Manifest.size)] in
     Fs.bump_cursor ek
 
@@ -311,15 +312,16 @@ module Make_with_layout (C : Conf.S) (Sq : Sync_queue.S) (L : Layout.S) :
   (* A rename moves the manifest object but not its body, so the leaf [name] it
      records goes stale. Directory renames leave descendants' leaf names
      unchanged. *)
+  (* Moving an object on the backend does not rewrite its body, so the copy at
+     the new key still records the old leaf. Unconditional: the mirror is
+     already stamped by the time this runs, so its body cannot be used to detect
+     whether the backend's needs it. *)
   let resync_manifest_name key =
-    let name = Filename.basename key in
+    let name = Key.leaf ~domain_prefix:C.domain_prefix key in
     let* m = read_manifest key in
     match m with
-      | Some man when man.Manifest.name <> name ->
-          let renamed = { man with Manifest.name } in
-          let* () = write_manifest key renamed in
-          St.put_manifest ~key ~data:(Manifest.to_string renamed)
-      | _ -> Lwt.return_unit
+      | Some man -> St.put_manifest ~key ~data:(Manifest.to_string ~name man)
+      | None -> Lwt.return_unit
 
   let rename_body ~src ~dst =
     let mp = manifest_path src in
@@ -466,11 +468,11 @@ module Make_with_layout (C : Conf.S) (Sq : Sync_queue.S) (L : Layout.S) :
       | `Keep -> ()
       | `Follow | `Skip -> raise (Unix.Unix_error (Unix.EPERM, "symlink", key)));
     with_meta (fun () ->
+        let name = Key.leaf ~domain_prefix:C.domain_prefix key in
         let state =
-          Manifest.make_symlink ~name:(Filename.basename key) ~target
-            ~mtime:(Unix.gettimeofday ())
+          Manifest.make_symlink ~name ~target ~mtime:(Unix.gettimeofday ())
         in
-        let data = Manifest.to_string state in
+        let data = Manifest.to_string ~name state in
         let* () = St.put_manifest ~key ~data in
         let* () = write_manifest key state in
         let* ek =

@@ -1,0 +1,14 @@
+
+=== a published file, renamed
+  file a.tmp
+  -- renamed a.tmp -> a.final
+  file a.final
+  a.final resolves: true
+  a.tmp resolves: false
+
+=== a staged file, renamed before its upload lands
+  file a.final
+  file b.tmp
+  -- renamed b.tmp -> b.final
+  file a.final
+  file b.final

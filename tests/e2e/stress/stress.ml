@@ -134,7 +134,7 @@ let worker ~mount ~ns ~ops ~seed ~wid ~sizes =
                  (* One read, and the op is whatever it saw. An absent file is
                     an answer, not a failure: it changes nothing, which is what
                     [Write ""] says. *)
-                 match read_file p with
+                   match read_file p with
                    | data -> Write (digest data)
                    | exception _ -> Write "")))
     else if pick < 85 then begin
@@ -162,8 +162,12 @@ let worker ~mount ~ns ~ops ~seed ~wid ~sizes =
                  landed. *)
               if !moved then
                 record
-                  { path = dst; op = Rename_onto name; outcome;
-                    at = Unix.gettimeofday () }
+                  {
+                    path = dst;
+                    op = Rename_onto name;
+                    outcome;
+                    at = Unix.gettimeofday ();
+                  }
             in
             if first = second then inner ()
             else with_lock (path_lock second) inner)
@@ -555,13 +559,17 @@ let () =
     check "both mounts see the same tree" (fun () ->
         if ta <> tb then begin
           let paths l = List.map fst l in
-          let only_a = List.filter (fun p -> not (List.mem p (paths tb))) (paths ta)
-          and only_b = List.filter (fun p -> not (List.mem p (paths ta))) (paths tb) in
+          let only_a =
+            List.filter (fun p -> not (List.mem p (paths tb))) (paths ta)
+          and only_b =
+            List.filter (fun p -> not (List.mem p (paths ta))) (paths tb)
+          in
           let differing =
             List.filter_map
               (fun (p, da) ->
                 match List.assoc_opt p tb with
-                  | Some db when db <> da -> Some (Printf.sprintf "%s a=%s b=%s" p da db)
+                  | Some db when db <> da ->
+                      Some (Printf.sprintf "%s a=%s b=%s" p da db)
                   | _ -> None)
               ta
           in
