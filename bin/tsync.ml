@@ -779,8 +779,14 @@ let gc_cmd =
       value & flag
       & info ["status"] ~doc:"Report an open collection without continuing it.")
   in
-  let report ~abort (s : Gc.stats) =
+  let report ~abort ~domain (s : Gc.stats) =
     (match s.Gc.outcome with
+      | Gc.Completed when abort && s.chunks_promoted = 0 ->
+          (* Nothing was open, or nothing was left in it. Either way saying
+             "abandoned; 0 kept" invites the reader to wonder what happened to
+             their chunks. *)
+          Printf.printf "No collection was open for %s; nothing to abandon.\n"
+            domain
       | Gc.Completed when abort ->
           Printf.printf "Collection abandoned; %d chunk(s) kept.\n"
             s.chunks_promoted
@@ -834,23 +840,28 @@ let gc_cmd =
          wedged. *)
       let budget = Option.map parse_duration budget
       and pause = Option.map parse_duration pause in
+      (* Carriage-return progress belongs on a terminal. Down a pipe it is a line
+         of padding in front of the summary, so a non-interactive run gets the
+         summary alone -- and the logs, which is what [-v] is for. *)
+      let watching = Unix.isatty Unix.stderr in
+      let progress fmt = if watching then Printf.eprintf fmt else Printf.ifprintf stderr fmt in
       let on_open () =
-        Printf.eprintf "%s %s...\n%!"
+        progress "%s %s...\n%!"
           (if abort then "Abandoning the collection of" else "Collecting")
           C.domain_name
       in
       let on_mark ~namespaces ~total ~roots ~promoted =
-        Printf.eprintf "  %s %d/%d, %d file(s), %d chunk(s) kept\r%!"
+        progress "  %s %d/%d, %d file(s), %d chunk(s) kept\r%!"
           (if abort then "kept shard(s)" else "marked folder(s)")
           namespaces total roots promoted
       in
       let on_close ~shards ~reclaimed =
-        Printf.eprintf "  closed %d shard(s), %d chunk(s) reclaimed\r%!" shards
+        progress "  closed %d shard(s), %d chunk(s) reclaimed\r%!" shards
           reclaimed
       in
       let on_reconcile ~name ~shards ~total ~deleted ~uploaded =
-        Printf.eprintf "  %s: %d/%d shard(s), %d deleted, %d filled\r%!" name
-          shards total deleted uploaded
+        progress "  %s: %d/%d shard(s), %d deleted, %d filled\r%!" name shards
+          total deleted uploaded
       in
       translate (fun () ->
           let s =
@@ -865,8 +876,8 @@ let gc_cmd =
           (* The progress lines above end in a carriage return, so the last one is
              still sitting on the terminal's current line. Cleared before the
              summary goes to stdout, or the two land on top of each other. *)
-          Printf.eprintf "\r%*s\r%!" 72 "";
-          report ~abort s)
+          if watching then Printf.eprintf "\r%*s\r%!" 72 "";
+          report ~abort ~domain:C.domain_name s)
   in
   Cmd.v
     (Cmd.info "gc"
