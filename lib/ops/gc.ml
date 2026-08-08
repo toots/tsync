@@ -774,26 +774,28 @@ module Make (C : Conf.S) = struct
         | Unix.Unix_error (Unix.ENOENT, _, _) -> Lwt.return (Some 0)
         | exn -> Lwt.fail exn)
 
-  (* Chunk by chunk, for a shard both spaces hold: read the directory, link each
-     name across, and take [EEXIST] as done.
+  (* Chunk by chunk, for a shard both spaces hold: read the directory and move each
+     name across.
+
+     A move and not a link. Linking leaves the old name behind for the closing
+     [rm -rf] to unlink, so every chunk is touched twice — two journalled
+     transactions against the inode and both directories, where one will do. What is
+     left afterwards is empty directories to remove rather than millions of entries.
+
+     It also needs no [EEXIST] branch. [rename] replaces the destination, which for
+     a content-addressed name is no loss because the same name is the same bytes;
+     and where the destination is already a link to the same inode, which is what
+     marking's promote leaves behind, [rename] does nothing and says it succeeded.
 
      Nothing here asks whether a chunk is where it was just seen. A [readdir] gives
-     the names, so a link is the only thing left to do with each — and [link] itself
-     reports the one case worth branching on. The parent is created once for the
-     shard rather than once per chunk, being the same directory every time.
-
-     That is three syscalls a chunk less than going through {!Chunk_space.promote},
-     which is built for a caller that does *not* know where the chunk is: a stat to
-     find out, a stat to make sure of the parent, then the link. Over a shard of
-     several hundred chunks the difference is the whole cost of this. *)
-  let keep_by_link s shard =
+     the names, so moving is the only thing left to do with each. The parent is
+     created once for the shard rather than once per chunk, being the same directory
+     every time. *)
+  let keep_by_move s shard =
     let src_dir = Filename.concat (from_dir s.root) shard
     and dst_dir = Filename.concat (to_dir s.root) shard in
     let* names = Fs_util.readdir_list src_dir in
     let names = List.filter Chunk_layout.is_chunk_key names in
-    (* Once for the shard. It is there already whenever this is reached — the
-       rename failed precisely because it was — but one stat is cheaper than
-       depending on that being true. *)
     let* () = Fs_util.mkdir_p dst_dir in
     let+ () =
       Lwt_list.iter_p
@@ -801,12 +803,12 @@ module Make (C : Conf.S) = struct
           Lwt_bounded.use s.item_slots (fun () ->
               Lwt.catch
                 (fun () ->
-                  Lwt_unix_retry.link (Filename.concat src_dir n)
+                  Lwt_unix_retry.rename (Filename.concat src_dir n)
                     (Filename.concat dst_dir n))
                 (function
-                  (* Already carried across, by a previous attempt at this shard or
-                     by a publish that named the chunk. *)
-                  | Unix.Unix_error (Unix.EEXIST, _, _) -> Lwt.return_unit
+                  (* Gone from under us: a previous attempt at this shard already
+                     moved it. *)
+                  | Unix.Unix_error (Unix.ENOENT, _, _) -> Lwt.return_unit
                   | exn -> Lwt.fail exn)))
         names
     in
@@ -819,7 +821,7 @@ module Make (C : Conf.S) = struct
         | Some n ->
             s.chunks_promoted <- s.chunks_promoted + n;
             Lwt.return_unit
-        | None -> keep_by_link s shard
+        | None -> keep_by_move s shard
     in
     s.done_ <- s.done_ + 1;
     let* () = save s Chunk_space.Abandoning shard in
