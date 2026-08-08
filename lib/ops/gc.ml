@@ -774,44 +774,60 @@ module Make (C : Conf.S) = struct
         | Unix.Unix_error (Unix.ENOENT, _, _) -> Lwt.return (Some 0)
         | exn -> Lwt.fail exn)
 
-  (* Chunk by chunk, for a shard both spaces hold: read the directory and move each
-     name across.
+  (* Chunk by chunk, for a shard both spaces hold: move across only the names the
+     surviving space does not already have.
 
-     A move and not a link. Linking leaves the old name behind for the closing
-     [rm -rf] to unlink, so every chunk is touched twice — two journalled
-     transactions against the inode and both directories, where one will do. What is
-     left afterwards is empty directories to remove rather than millions of entries.
+     Comparing two directory reads first is the whole point. By the time a
+     collection is abandoned, marking has usually promoted most of what it was going
+     to — a file's chunks scatter across nearly every shard, so a few thousand files
+     is enough to touch all of them — and for those the surviving space already holds
+     the name. Moving it anyway is a [rename] between two links to one inode, which
+     POSIX defines to do nothing and report success: real cost, no effect. Measured on
+     a store mid-abandonment, the two spaces held 595 and 592 chunks in the same
+     shard, so essentially every move was one of those.
 
-     It also needs no [EEXIST] branch. [rename] replaces the destination, which for
-     a content-addressed name is no loss because the same name is the same bytes;
-     and where the destination is already a link to the same inode, which is what
-     marking's promote leaves behind, [rename] does nothing and says it succeeded.
+     A name present in the surviving space means the chunk is safe, because a chunk
+     key is its content: the same name is the same bytes. That is the assumption the
+     whole store already rests on.
 
-     Nothing here asks whether a chunk is where it was just seen. A [readdir] gives
-     the names, so moving is the only thing left to do with each. The parent is
-     created once for the shard rather than once per chunk, being the same directory
-     every time. *)
+     A move and not a link for the ones that do need it. Linking leaves the old name
+     for the closing [rm -rf], so every chunk is touched twice — two journalled
+     transactions against the inode and both directories, where one will do. *)
   let keep_by_move s shard =
     let src_dir = Filename.concat (from_dir s.root) shard
     and dst_dir = Filename.concat (to_dir s.root) shard in
-    let* names = Fs_util.readdir_list src_dir in
-    let names = List.filter Chunk_layout.is_chunk_key names in
-    let* () = Fs_util.mkdir_p dst_dir in
-    let+ () =
-      Lwt_list.iter_p
-        (fun n ->
-          Lwt_bounded.use s.item_slots (fun () ->
-              Lwt.catch
-                (fun () ->
-                  Lwt_unix_retry.rename (Filename.concat src_dir n)
-                    (Filename.concat dst_dir n))
-                (function
-                  (* Gone from under us: a previous attempt at this shard already
-                     moved it. *)
-                  | Unix.Unix_error (Unix.ENOENT, _, _) -> Lwt.return_unit
-                  | exn -> Lwt.fail exn)))
-        names
+    let read dir =
+      Lwt.catch
+        (fun () -> Fs_util.readdir_list dir)
+        (function Unix.Unix_error _ -> Lwt.return_nil | e -> Lwt.fail e)
     in
+    let* names = read src_dir in
+    let names = List.filter Chunk_layout.is_chunk_key names in
+    let* here = read dst_dir in
+    let present = Hashtbl.create (List.length here) in
+    List.iter (fun n -> Hashtbl.replace present n ()) here;
+    let missing = List.filter (fun n -> not (Hashtbl.mem present n)) names in
+    let+ () =
+      if missing = [] then Lwt.return_unit
+      else
+        let* () = Fs_util.mkdir_p dst_dir in
+        Lwt_list.iter_p
+          (fun n ->
+            Lwt_bounded.use s.item_slots (fun () ->
+                Lwt.catch
+                  (fun () ->
+                    Lwt_unix_retry.rename (Filename.concat src_dir n)
+                      (Filename.concat dst_dir n))
+                  (function
+                    (* Gone from under us: a previous attempt at this shard moved
+                       it. *)
+                    | Unix.Unix_error (Unix.ENOENT, _, _) -> Lwt.return_unit
+                    | exn -> Lwt.fail exn)))
+          missing
+    in
+    (* Every name the old space held is kept, whether this had to move it or found
+       it already across. What is left of the old space is names, and the close
+       removes them. *)
     s.chunks_promoted <- s.chunks_promoted + List.length names
 
   let keep_one s shard =

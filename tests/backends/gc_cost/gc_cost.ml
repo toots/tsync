@@ -243,6 +243,19 @@ let () =
              "for d in %s/*/; do : > \"$d/deadbeefdeadbeef.$$.1.tmp\"; done"
              (Filename.quote from_dir)));
      step "planted a write in flight in each of %d shard(s)" strays;
+     (* A chunk in a shard the surviving space already has, but under a name it does
+        not. Marking promoted one chunk into shard 001, so that shard takes neither
+        the whole-directory rename nor the found-already-there path — it is the one
+        case where abandoning has to move something, and the only one that moves
+        data. Without this the moving branch is never run by any test. *)
+     let orphan = Printf.sprintf "%03x%013x-%016x" 1 999 999 in
+     ignore
+       (Sys.command
+          (Printf.sprintf "printf 'a chunk!' > %s"
+             (Filename.quote
+                (Filename.concat from_dir
+                   (Chunk_layout.relative_path orphan)))));
+     step "planted a chunk only the old space has, in a shard the new one holds";
      let* () = G.release s in
      let* s = G.start ~keep:true () in
      step "changed our mind, phase: %s" (G.phase s);
@@ -270,6 +283,11 @@ let () =
         not 22. *)
      step "writes in flight carried along by a renamed shard: %d"
        (count_strays left);
+     let* moved =
+       Main.head_opt ~key:(chunk_prefix ^ Chunk_layout.relative_path orphan) ()
+     in
+     step "the chunk only the old space had was moved across: %b"
+       (moved <> None);
 
      (* The pool discipline, which is the thing here most easily got wrong: shards
         run concurrently and each may upload, so the outer level and the inner one

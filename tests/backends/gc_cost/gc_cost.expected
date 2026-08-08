@@ -25,12 +25,14 @@
 === an interrupted abandonment stays an abandonment
   started collecting, phase: marking
   planted a write in flight in each of 12 shard(s)
+  planted a chunk only the old space has, in a shard the new one holds
   changed our mind, phase: abandoning
   resumed with a plain start, phase: abandoning  <- not "marking"
   finished abandoning: 11 chunk(s) kept
   listings of the replica during the abandonment: 0
-  chunks still on the main: 12 of 12
+  chunks still on the main: 13 of 12
   writes in flight carried along by a renamed shard: 11
+  the chunk only the old space had was moved across: true
 
 === many shards uploading at once, with fewer slots than shards
   emptied the replica, refilled it with 2 slots and 12 shards
