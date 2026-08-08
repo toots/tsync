@@ -110,6 +110,17 @@ let case name = Printf.printf "\n=== %s\n" name
 let ck n = Printf.sprintf "%03x%013x-%016x" n n n
 let folders = 12
 
+(* Counted by what a chunk is named, so a write left in flight is never mistaken
+   for one. *)
+let count_chunks entries =
+  List.length
+    (List.filter
+       (fun (e : Backend.file_entry) ->
+         Chunk_layout.is_chunk_key (Filename.basename e.Backend.key))
+       entries)
+
+let count_strays entries = List.length entries - count_chunks entries
+
 let () =
   ignore
     (Sys.command
@@ -198,24 +209,12 @@ let () =
         collection reporting a tidy success over an emptied store is the worst
         thing this can do, so it is the thing counted last. *)
      let* left = Main.list_prefix ~prefix:chunk_prefix () in
-     let left =
-       List.filter
-         (fun (e : Backend.file_entry) ->
-           not (Filename.check_suffix e.Backend.key "/"))
-         left
-     in
-     step "chunks still on the main: %d of %d" (List.length left) folders;
+     step "chunks still on the main: %d of %d" (count_chunks left) folders;
      (* The replica started empty, so finishing across two sessions has to have
         filled it — an interruptible fill that quietly drops what it did not get to
         would look identical above. *)
      let* filled = Replica.list_prefix ~prefix:chunk_prefix () in
-     let filled =
-       List.filter
-         (fun (e : Backend.file_entry) ->
-           not (Filename.check_suffix e.Backend.key "/"))
-         filled
-     in
-     step "chunks on the replica: %d of %d" (List.length filled) folders;
+     step "chunks on the replica: %d of %d" (count_chunks filled) folders;
 
      (* Abandoning is the collection machinery with everything treated as live, so
         it is resumable the same way — and the thing that has to hold is that it
@@ -225,6 +224,25 @@ let () =
      let* s = G.start () in
      let* _ = G.step ~units:1 s in
      step "started collecting, phase: %s" (G.phase s);
+     (* One write in flight per shard, of the shape the local driver leaves behind,
+        planted after the space was moved aside. Abandoning must not count these as
+        chunks kept — and the shards it links rather than renames must not carry
+        them across. Both filters show up in the one number: without them the count
+        below doubles. *)
+     let from_dir =
+       Filename.concat main_dir
+         (Filename.chop_suffix (Chunk_space.from_prefix ~chunk_prefix) "/")
+     in
+     let* strays =
+       let+ shards = Fs_util.readdir_list from_dir in
+       List.length shards
+     in
+     ignore
+       (Sys.command
+          (Printf.sprintf
+             "for d in %s/*/; do : > \"$d/deadbeefdeadbeef.$$.1.tmp\"; done"
+             (Filename.quote from_dir)));
+     step "planted a write in flight in each of %d shard(s)" strays;
      let* () = G.release s in
      let* s = G.start ~keep:true () in
      step "changed our mind, phase: %s" (G.phase s);
@@ -243,13 +261,15 @@ let () =
      step "finished abandoning: %d chunk(s) kept" kept.Gc.chunks_promoted;
      step "listings of the replica during the abandonment: %d" replica_ops.lists;
      let* left = Main.list_prefix ~prefix:chunk_prefix () in
-     let left =
-       List.filter
-         (fun (e : Backend.file_entry) ->
-           not (Filename.check_suffix e.Backend.key "/"))
-         left
-     in
-     step "chunks still on the main: %d of %d" (List.length left) folders;
+     step "chunks still on the main: %d of %d" (count_chunks left) folders;
+     (* A shard carried over by rename brings whatever else was in it, the writes in
+        flight included: picking them out would cost the per-file work the rename
+        exists to avoid. They are where they already were, nothing names them, and
+        the next collection discards them along with anything else unreferenced.
+        What matters is that they were never counted as chunks kept — 11 above and
+        not 22. *)
+     step "writes in flight carried along by a renamed shard: %d"
+       (count_strays left);
 
      (* The pool discipline, which is the thing here most easily got wrong: shards
         run concurrently and each may upload, so the outer level and the inner one
@@ -273,14 +293,8 @@ let () =
      in
      let* _ = G.run ~concurrency:2 () in
      let* refilled = Replica.list_prefix ~prefix:chunk_prefix () in
-     let refilled =
-       List.filter
-         (fun (e : Backend.file_entry) ->
-           not (Filename.check_suffix e.Backend.key "/"))
-         refilled
-     in
      step "emptied the replica, refilled it with 2 slots and %d shards" folders;
-     step "chunks back on the replica: %d of %d" (List.length refilled) folders;
+     step "chunks back on the replica: %d of %d" (count_chunks refilled) folders;
 
      case "the copies were told nothing about the collection";
      step "run markers written to the replica: %d" replica_ops.markers;

@@ -720,7 +720,11 @@ module Make (C : Conf.S) = struct
         let* names = Fs_util.readdir_list src in
         let* () = Fs_util.ensure_parent dst in
         let+ () = Lwt_unix_retry.rename src dst in
-        Some (List.length names))
+        (* Counted, not filtered: the rename takes the whole directory, so anything
+           else in it comes along. That is where it already was, and picking it out
+           would cost the per-file work this exists to avoid — but it is not a chunk
+           and must not be reported as one. *)
+        Some (List.length (List.filter Chunk_layout.is_chunk_key names)))
       (function
         (* The surviving space already has this shard: link the chunks instead. *)
         | Unix.Unix_error
@@ -747,10 +751,7 @@ module Make (C : Conf.S) = struct
     let src_dir = Filename.concat (from_dir s.root) shard
     and dst_dir = Filename.concat (to_dir s.root) shard in
     let* names = Fs_util.readdir_list src_dir in
-    (* A chunk key is hex and a dash. Anything with a dot is a write that was in
-       flight when the space was renamed away, and linking it across would leave a
-       stray temp file behind for nobody. *)
-    let names = List.filter (fun n -> not (String.contains n '.')) names in
+    let names = List.filter Chunk_layout.is_chunk_key names in
     (* Once for the shard. It is there already whenever this is reached — the
        rename failed precisely because it was — but one stat is cheaper than
        depending on that being true. *)

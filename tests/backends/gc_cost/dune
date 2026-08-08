@@ -16,7 +16,9 @@
    -open
    Tsync_local_backend
    -open
-   Tsync_domain_store))
+   Tsync_domain_store
+   -open
+   Tsync_local_io))
  (name gc_cost)
  (libraries
   tsync_ops
@@ -26,6 +28,7 @@
   tsync_conf
   tsync_backend_register
   tsync_local_backend
+  tsync_local_io
   tsync_domain_store
   lwt
   lwt.unix

@@ -134,23 +134,42 @@ let make ~root : (module Backend.S) =
        Safe because a name here is only ever replaced by [write_file]'s rename,
        never written through, so two names sharing an inode cannot observe each
        other. [EEXIST] counts as success — the destination already holds these
-       bytes, and a copy that has nothing left to do is done. *)
+       bytes, and a copy that has nothing left to do is done.
+
+       The link is attempted before the destination's directory is made sure of,
+       rather than after. Almost every copy lands in a directory that already
+       exists, so making sure first is a stat spent to learn nothing — and on the
+       paths that copy in bulk it is a third to a half of the whole cost. [ENOENT]
+       is the only answer that leaves a question: create the parent, try once more,
+       and let a second [ENOENT] be the missing source it then is. *)
     let copy ~src_key ~dst_key () =
       if is_dir_key src_key then mkdir_p (resolve dst_key)
       else
         let src = resolve src_key and dst = resolve dst_key in
-        let* () = Fs_util.ensure_parent dst in
-        Lwt.catch
-          (fun () -> Lwt_unix_retry.link src dst)
-          (function
-            | Unix.Unix_error (Unix.EEXIST, _, _) -> Lwt.return_unit
-            (* Different device, link count exhausted, or a filesystem that has
-               no links to give. *)
-            | Unix.Unix_error ((Unix.EXDEV | Unix.EMLINK | Unix.EPERM), _, _)
-            | Unix.Unix_error (Unix.EOPNOTSUPP, _, _) ->
-                let* data = read_file src in
-                write_file dst data
-            | exn -> Lwt.fail exn)
+        let body () =
+          let* data = read_file src in
+          let* () = Fs_util.ensure_parent dst in
+          write_file dst data
+        in
+        let rec attempt ~parent_made =
+          Lwt.catch
+            (fun () -> Lwt_unix_retry.link src dst)
+            (function
+              | Unix.Unix_error (Unix.EEXIST, _, _) -> Lwt.return_unit
+              (* Either the source is gone or the destination has nowhere to be.
+                 One retry tells them apart, and the second failure is the
+                 source's. *)
+              | Unix.Unix_error (Unix.ENOENT, _, _) when not parent_made ->
+                  let* () = Fs_util.ensure_parent dst in
+                  attempt ~parent_made:true
+              (* Different device, link count exhausted, or a filesystem that has
+                 no links to give. *)
+              | Unix.Unix_error ((Unix.EXDEV | Unix.EMLINK | Unix.EPERM), _, _)
+              | Unix.Unix_error (Unix.EOPNOTSUPP, _, _) ->
+                  body ()
+              | exn -> Lwt.fail exn)
+        in
+        attempt ~parent_made:false
 
     let list_prefix ?max_keys ~prefix () =
       let base = resolve prefix in
