@@ -1,8 +1,17 @@
 (** A published file's metadata. Header fields are lifted out of the body;
     [chunks] is the body itself ({!Chunk_table}), mapped for a sidecar, so chunk
-    keys cost no heap until one is asked for. *)
-type t = {
-  name : string;  (** leaf name; authority for the file's own name *)
+    keys cost no heap until one is asked for.
+
+    No [name]: a name belongs to where a manifest is filed, not to the manifest.
+    The body carries one only because some locations cannot yield it — a backend
+    key is [<folder-id>/<hash>], an escaped cache leaf is [.tsync-esc-<hash>],
+    and both are one-way. Everywhere else the logical key is real-path shaped
+    and already holds the answer.
+
+    [private], so the record cannot be built or functionally updated from
+    outside: a name reaches disk only through a writer that stamps it from the
+    key. *)
+type t = private {
   size : int64;
   chunk_size : int;
   chunks : Chunk_table.t;
@@ -55,7 +64,15 @@ val of_string : string -> t
 (** Map a sidecar: chunk keys stay in the page cache rather than the heap. *)
 val of_file : string -> t
 
-val to_string : t -> string
+(** The name recorded in the body. Meaningful only where the location cannot
+    yield one; a caller holding a key wants {!Make.name_of} instead. *)
+val recorded_name : t -> string
+
+(** Encoding needs a name, so every caller states which one. The two that
+    deliberately file a manifest under a key that does not describe it — a
+    version snapshot, a trashed marker — are then visible as the only ones
+    passing something other than the key's own leaf. *)
+val to_string : name:string -> t -> string
 
 (** Where a chunk of a locally edited file has its bytes. *)
 type slot =
@@ -119,7 +136,15 @@ module Make (C : Conf.S) : sig
   (** [key]'s manifest, parsed and cached. [None] when absent or unparseable. *)
   val read : string -> t option Lwt.t
 
+  (** The name a manifest at [key] has. The location answers whenever it can;
+      the body is consulted only for an escaped on-disk leaf, which is the one
+      case a path cannot express. The file counterpart of [real_dir_name]. *)
+  val name_of : key:string -> t -> string
+
+  (** Writes [t] under [key], recording the name [key] encodes. A caller cannot
+      file a manifest under one name and have it record another. *)
   val write : string -> t -> unit Lwt.t
+
   val delete : string -> unit Lwt.t
   val rename : src_key:string -> dst_key:string -> unit Lwt.t
   val create_dir : string -> unit Lwt.t

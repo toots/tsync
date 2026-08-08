@@ -13,6 +13,9 @@ let is_dir key = String.ends_with ~suffix:"/" key
 let chop_slash key =
   if is_dir key then String.sub key 0 (String.length key - 1) else key
 
+let leaf ~domain_prefix key =
+  Filename.basename (chop_slash (strip_prefix ~domain_prefix key))
+
 let ensure_slash key = if is_dir key then key else key ^ "/"
 
 (* Parent of a relative path, with the root spelled [""] rather than

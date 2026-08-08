@@ -1,0 +1,18 @@
+
+=== written under a key
+  a/b.txt -> name_of="b.txt" recorded="b.txt"
+
+=== renamed
+  a/c.txt -> name_of="c.txt" recorded="c.txt"
+  a/b.txt: absent
+
+=== a name the filesystem cannot hold
+  we:ird.txt -> name_of="we:ird.txt" recorded="we:ird.txt"
+  on-disk leaf is escaped: true
+
+=== renamed to an ordinary name
+  plain.txt -> name_of="plain.txt" recorded="plain.txt"
+
+=== staged, then renamed
+  s/one.txt staged name="one.txt"
+  s/two.txt staged name="two.txt"

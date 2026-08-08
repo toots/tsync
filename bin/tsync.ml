@@ -452,7 +452,8 @@ let ls_cmd =
                            B.head_opt ~key:(C.domain_prefix ^ hrel) ()
                          in
                          if head = None then
-                           Printf.printf "deleted  %s\n" m.Manifest.name
+                           Printf.printf "deleted  %s\n"
+                             (Manifest.recorded_name m)
                      | exception _ -> Lwt.return_unit)
                | _ -> Lwt.return_unit)
            entries
@@ -532,7 +533,7 @@ let versions_cmd =
                  (fun () ->
                    let+ data = B.get ~key:(Hashtbl.find sample hrel) () in
                    match Manifest.of_string data with
-                     | m -> m.Manifest.name
+                     | m -> Manifest.recorded_name m
                      | exception _ -> hrel)
                  (fun _ -> Lwt.return hrel)
              in
@@ -798,13 +799,14 @@ let sync_cmd =
                                match Manifest.of_string data with
                                  | man ->
                                      incr count;
+                                     (* Read by backend key, which is hashed:
+                                        the body is what names it. *)
+                                     let leaf = Manifest.recorded_name man in
                                      if !verbose then
-                                       Log.info "manifest %s"
-                                         (join rel man.Manifest.name);
+                                       Log.info "manifest %s" (join rel leaf);
                                      let+ () =
                                        F.write_manifest
-                                         (C.domain_prefix
-                                        ^ join rel man.Manifest.name)
+                                         (C.domain_prefix ^ join rel leaf)
                                          man
                                      in
                                      None

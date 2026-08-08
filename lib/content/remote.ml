@@ -49,7 +49,6 @@ module type S = sig
 
   val upload_chunks :
     key:string ->
-    name:string ->
     size:int64 ->
     chunk_size:int ->
     mtime:float ->
@@ -188,15 +187,17 @@ module Make_with_layout (C : Conf.S) (L : Layout.S) : S = struct
      flight unpublishes it again, or a ghost object survives under a name that may
      no longer exist locally. Chunks stay: they are content-addressed and the
      successor upload references them. *)
-  let publish ~key ~name ~size ~chunk_size ~mtime ~cancel entries =
+  let publish ~key ~size ~chunk_size ~mtime ~cancel entries =
     if !cancel then raise Cancelled;
     let h1, h2 = Manifest.digest_of_chunks entries in
+    (* The key being published under is what names this file. *)
+    let name = Key.leaf ~domain_prefix:C.domain_prefix key in
     let state =
       Manifest.make ~name ~h1 ~h2 ~size ~chunk_size ~chunks:entries ~mtime
     in
     let* () = if C.versioning then St.save_version ~key else Lwt.return_unit in
     Log.info "upload %s: publishing manifest, size=%Ld" key size;
-    let* () = St.put_manifest ~key ~data:(Manifest.to_string state) in
+    let* () = St.put_manifest ~key ~data:(Manifest.to_string ~name state) in
     if !cancel then
       let* () =
         Lwt.catch
@@ -229,15 +230,15 @@ module Make_with_layout (C : Conf.S) (L : Layout.S) : S = struct
             (List.init num_chunks Fun.id))
         (fun () -> Lwt_unix_retry.close fd)
     in
-    publish ~key ~name:(Filename.basename key) ~size:(Int64.of_int file_size)
-      ~chunk_size ~mtime ~cancel entries
+    publish ~key ~size:(Int64.of_int file_size) ~chunk_size ~mtime ~cancel
+      entries
 
   (* Fillers write into a pooled buffer, which is what holds this path to
      [max_chunk_buffers] chunks however wide the fan-out below runs.
 
      Deciding which case a chunk is must stay free of I/O, or every chunk's bytes
      land before anything queues for a buffer. *)
-  let upload_chunks ~key ~name ~size ~chunk_size ~mtime
+  let upload_chunks ~key ~size ~chunk_size ~mtime
       ~(source :
          int -> [ `Reuse of string | `Fill of bytes -> unit Lwt.t ] Lwt.t)
       ?(cancel = ref false) () =
@@ -263,7 +264,7 @@ module Make_with_layout (C : Conf.S) (L : Layout.S) : S = struct
                 put_chunk ~index ~data)
     in
     let* entries = Lwt_list.map_p one (List.init n Fun.id) in
-    publish ~key ~name ~size ~chunk_size ~mtime ~cancel entries
+    publish ~key ~size ~chunk_size ~mtime ~cancel entries
 
   let fetch_manifest ~key () =
     let+ body = St.get_manifest_opt ~key in
@@ -292,7 +293,10 @@ module Make_with_layout (C : Conf.S) (L : Layout.S) : S = struct
     if ok then Lwt.return_false
     else (
       Log.info "recheck: republishing manifest %s" key;
-      let+ () = St.put_manifest ~key ~data:(Manifest.to_string expected) in
+      let name = Key.leaf ~domain_prefix:C.domain_prefix key in
+      let+ () =
+        St.put_manifest ~key ~data:(Manifest.to_string ~name expected)
+      in
       true)
 
   (* Concurrent chunk checks during a manifest-driven recheck.

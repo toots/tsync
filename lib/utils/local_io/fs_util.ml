@@ -42,7 +42,8 @@ let temp_path path =
    folder downloading ".syncthing.<name>.tmp" re-fetched the same gigabytes
    forever and landed nothing. *)
 let is_temp_name name =
-  String.starts_with ~prefix:temp_prefix name && Filename.check_suffix name ".tmp"
+  String.starts_with ~prefix:temp_prefix name
+  && Filename.check_suffix name ".tmp"
 
 (* All or nothing: a [fill] failing part-way leaves no temp file to be counted
    against the cache or swept later. *)

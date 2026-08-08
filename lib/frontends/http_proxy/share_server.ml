@@ -164,7 +164,9 @@ module Make (C : Conf.S) = struct
               }
           | Inode_tree.File m ->
               {
-                name = m.Manifest.name;
+                (* Fetched by backend key ([<folder-id>/<hash>]), so the
+                   location cannot name it and the body must. *)
+                name = Manifest.recorded_name m;
                 key = e.Inode_tree.bkey;
                 is_dir = false;
                 size = m.Manifest.size;
@@ -401,7 +403,8 @@ module Make (C : Conf.S) = struct
     if share.typ = "file" then
       let* manifest = file_target share in
       serve_bytes ~manifest ~key:share.key ~size:manifest.Manifest.size
-        ~name:manifest.Manifest.name ~inline:false ~range
+        ~name:(Manifest.recorded_name manifest)
+        ~inline:false ~range
     else (
       let root = Filename.remove_extension share.filename in
       let* members = walk share.dir_prefix root in

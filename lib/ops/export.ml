@@ -42,7 +42,10 @@ module Make (C : Conf.S) = struct
     Tree.fold_tree ~skip_errors:true ~folder_id:Folder.root_id ~rel:""
       (fun acc rel entry ->
         match entry.Inode_tree.body with
-          | Inode_tree.File m -> Lwt.return (Key.join rel m.Manifest.name :: acc)
+          (* Walked by backend key, which is hashed, so the body is the only
+             thing that knows the name. *)
+          | Inode_tree.File m ->
+              Lwt.return (Key.join rel (Manifest.recorded_name m) :: acc)
           | Inode_tree.Dir _ -> Lwt.return acc)
       []
 
