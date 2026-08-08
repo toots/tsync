@@ -150,8 +150,6 @@ module Make (C : Conf.S) : sig
   val create_dir : string -> unit Lwt.t
   val delete_dir : string -> unit Lwt.t
 
-  (** Rewrite the name marker of a directory that has just moved. *)
-  val refresh_dir_marker : string -> unit Lwt.t
 
   (** Immediate children of [prefix]: file entries (logical keys, size, mtime)
       and real subdirectory names. The one directory listing there is, serving

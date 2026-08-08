@@ -378,7 +378,6 @@ module Make_with_layout (C : Conf.S) (Sq : Sync_queue.S) (L : Layout.S) :
                       | None -> Lwt.return_unit
                       | Some bkey -> St.delete_raw ~bkey
                   in
-                  let* () = Mf.refresh_dir_marker dst in
                   St.put_folder_marker ~key:dst
                 else Fs.rename_file ~src_key:src ~dst_key:dst)
           in

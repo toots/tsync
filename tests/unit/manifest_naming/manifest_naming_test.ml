@@ -76,6 +76,12 @@ let report rel =
         step "%s -> name_of=%S recorded=%S" rel (Mf.name_of ~key:k m)
           (Manifest.recorded_name m)
 
+(* Directory names as a listing shows them, which is where an escaped name is
+   resolved back through its marker. *)
+let list_dirs () =
+  let+ _files, dirs = Mf.list_children ~prefix:C.domain_prefix () in
+  String.concat ", " (List.sort compare dirs)
+
 let () =
   Lwt_main.run
     (case "written under a key";
@@ -106,6 +112,18 @@ let () =
      case "renamed to an ordinary name";
      let* () = Mf.rename ~src_key:(key odd) ~dst_key:(key "plain.txt") in
      let* () = report "plain.txt" in
+
+     case "a directory whose name the filesystem cannot hold";
+     (* A directory keeps its real name in a [.tsync-name] marker beside it, for
+        the same reason a manifest keeps one in its body: the escaped on-disk
+        name is a hash. Renaming has to move the marker's contents too, or the
+        directory goes on presenting its previous name. *)
+     let* () = Mf.create_dir (key "di:r/") in
+     let* dirs = list_dirs () in
+     step "before: %s" dirs;
+     let* () = Mf.rename ~src_key:(key "di:r/") ~dst_key:(key "ot:her/") in
+     let* dirs = list_dirs () in
+     step "after renaming di:r -> ot:her: %s" dirs;
 
      case "staged, then renamed";
      let staged =

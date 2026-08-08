@@ -13,6 +13,10 @@
 === renamed to an ordinary name
   plain.txt -> name_of="plain.txt" recorded="plain.txt"
 
+=== a directory whose name the filesystem cannot hold
+  before: a, di:r
+  after renaming di:r -> ot:her: a, ot:her
+
 === staged, then renamed
   s/one.txt staged name="one.txt"
   s/two.txt staged name="two.txt"
