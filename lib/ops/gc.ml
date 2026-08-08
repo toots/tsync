@@ -199,15 +199,48 @@ module Make (C : Conf.S) = struct
 
   (* {1 Marking} *)
 
-  (* Every object that can reference a chunk: live manifests and folder markers,
-     and the versions that survived {!Expire}. Sorted as one sequence — a cursor
-     is a key, and "manifests" sorts before "versions" anyway. *)
-  let list_roots () =
-    let* manifests = B.list_prefix ~prefix:C.domain_prefix () in
-    let+ versions = B.list_prefix ~prefix:C.versions_prefix () in
-    List.map (fun (e : Backend.file_entry) -> e.Backend.key) manifests
-    @ List.map (fun (e : Backend.file_entry) -> e.Backend.key) versions
-    |> List.sort String.compare
+  (* Everything that can reference a chunk lives under one of two prefixes, and
+     both are a directory of namespaces: [manifests/<folder-id>/...] and
+     [versions/<folder-id>/...].
+
+     Enumerated a namespace at a time, by reading those two directories, rather
+     than by listing both prefixes whole. Listing them whole means walking every
+     object in the store before the first chunk is marked — minutes on a large
+     domain, outside any budget because it happens before the first step, and paid
+     again on every resume, so a budgeted collection would spend most of itself
+     re-listing. Two directory reads instead, and the walk of a namespace is part
+     of the step that marks it.
+
+     A namespace is named [m/<id>] or [v/<id>] so the two spaces cannot collide in
+     a cursor, and sorted, so a resume can skip what is done. A namespace created
+     after this read is missed and does not need to be caught: whatever writes it
+     promotes its own chunks when it publishes. *)
+  let namespaces root =
+    let read dir =
+      Lwt.catch
+        (fun () -> Fs_util.readdir_list (Filename.concat root dir))
+        (function Unix.Unix_error _ -> Lwt.return_nil | e -> Lwt.fail e)
+    in
+    let tag t = List.map (fun id -> t ^ "/" ^ id) in
+    let* manifests = read (dir_of_prefix C.domain_prefix) in
+    let+ versions = read (dir_of_prefix C.versions_prefix) in
+    tag "m" manifests @ tag "v" versions |> List.sort String.compare
+
+  (* The prefix a namespace name stands for.
+
+     The trailing slash is not decoration. A backend builds the keys it lists by
+     concatenating this onto each entry it finds, so leaving it off yields
+     [manifests/<id><hash>] — a key that names nothing. Every lookup through it
+     would come back empty, nothing would be promoted, and the collection would
+     then discard every chunk in the store. Hence the [`Dir] / [`File]
+     distinction: a namespace that is really a single object must not have one. *)
+  let prefix_of_namespace root ns =
+    let base =
+      let id = String.sub ns 2 (String.length ns - 2) in
+      (if ns.[0] = 'v' then C.versions_prefix else C.domain_prefix) ^ id
+    in
+    let+ kind = Fs_util.lstat_kind (Filename.concat root base) in
+    match kind with `Dir -> base ^ "/" | _ -> base
 
   (* Directory and folder markers reference nothing. An unexpected parse failure
      raises rather than reporting "references nothing", which would let the run
@@ -366,6 +399,9 @@ module Make (C : Conf.S) = struct
        pools cannot: a chunk slot is only ever held by a link, which finishes. *)
     root_slots : Lwt_bounded.t;
     chunk_slots : Lwt_bounded.t;
+    (* Consulted between units so a long batch cannot overshoot a caller's time
+       limit. Always false unless someone set one. *)
+    mutable out_of_time : unit -> bool;
     mutable finished : bool;
     mutable work : work;
     mutable total : int;
@@ -375,7 +411,8 @@ module Make (C : Conf.S) = struct
     mutable chunks_reclaimed : int;
     mutable bytes_reclaimed : int;
     mutable tallies : member_stats list;
-    mutable on_mark : roots:int -> total:int -> promoted:int -> unit;
+    mutable on_mark :
+      namespaces:int -> total:int -> roots:int -> promoted:int -> unit;
     mutable on_close : shards:int -> reclaimed:int -> unit;
     mutable on_reconcile : name:string -> deleted:int -> uploaded:int -> unit;
   }
@@ -431,7 +468,9 @@ module Make (C : Conf.S) = struct
         | Some n -> Lwt.return (max 1 n)
         | None ->
             let+ caps = M.capabilities ~prefix:C.domain_prefix () in
-            Option.value caps.Backend.max_concurrency ~default:8
+            (* Clamped, not trusted: a bounded pool of zero admits nothing and the
+               first step would wait forever. *)
+            max 1 (Option.value caps.Backend.max_concurrency ~default:8)
     in
     let fresh work total =
       {
@@ -442,6 +481,7 @@ module Make (C : Conf.S) = struct
         lock;
         root_slots = Lwt_bounded.create ~max:max_slots ();
         chunk_slots = Lwt_bounded.create ~max:max_slots ();
+        out_of_time = (fun () -> false);
         finished = false;
         work;
         total;
@@ -451,7 +491,7 @@ module Make (C : Conf.S) = struct
         chunks_reclaimed = 0;
         bytes_reclaimed = 0;
         tallies = [];
-        on_mark = (fun ~roots:_ ~total:_ ~promoted:_ -> ());
+        on_mark = (fun ~namespaces:_ ~total:_ ~roots:_ ~promoted:_ -> ());
         on_close = (fun ~shards:_ ~reclaimed:_ -> ());
         on_reconcile = (fun ~name:_ ~deleted:_ ~uploaded:_ -> ());
       }
@@ -481,12 +521,15 @@ module Make (C : Conf.S) = struct
           let s = fresh (Mark []) 0 in
           let* () = save s Chunk_space.Opening "" in
           let* () = open_space root in
-          let* () = save s Chunk_space.Marking cursor in
-          let* roots = list_roots () in
+          (* Enumerated before the phase is recorded as [Marking], so a [--status]
+             during it does not claim to be marking while it is still working out
+             what to mark. *)
+          let* found = namespaces root in
           let pending =
-            List.filter (fun k -> String.compare k cursor > 0) roots
+            List.filter (fun n -> String.compare n cursor > 0) found
           in
-          Log.info "gc: %d root(s) to mark" (List.length pending);
+          let* () = save s Chunk_space.Marking cursor in
+          Log.info "gc: %d namespace(s) to mark" (List.length pending);
           s.work <- Mark pending;
           s.total <- List.length pending;
           Lwt.return s
@@ -495,7 +538,7 @@ module Make (C : Conf.S) = struct
      surviving root. The links go out concurrently within the root, on the same
      budget as the roots themselves — a big file naming thousands of chunks is
      otherwise thousands of serial [link] calls. *)
-  let mark_one s key =
+  let mark_root s key =
     let* chunks = referenced_chunks key in
     let* () =
       Lwt_list.iter_p
@@ -504,17 +547,43 @@ module Make (C : Conf.S) = struct
     in
     s.chunks_promoted <- s.chunks_promoted + List.length chunks;
     s.roots_marked <- s.roots_marked + 1;
-    s.done_ <- s.done_ + 1;
     Log.debug "gc: marked %s (%d chunk(s))" key (List.length chunks);
+    Lwt.return_unit
+
+  (* One namespace: list it, then mark everything in it. The listing is part of
+     the step rather than something done to the whole store up front.
+
+     Roots go out on [root_slots] and the chunks within a root on [chunk_slots] —
+     the two pools exist for exactly this nesting, and using one for both levels
+     would park every slot on a root waiting for a chunk. Note that the caller must
+     not also hold a [root_slots] slot for this whole namespace. *)
+  let mark_one s ns =
+    let* prefix = prefix_of_namespace s.root ns in
+    let* entries = B.list_prefix ~prefix () in
+    let keys =
+      List.filter_map
+        (fun (e : Backend.file_entry) ->
+          if Key.is_dir e.Backend.key then None else Some e.Backend.key)
+        entries
+    in
+    let* () =
+      Lwt_list.iter_p
+        (fun k -> Lwt_bounded.use s.root_slots (fun () -> mark_root s k))
+        keys
+    in
+    s.done_ <- s.done_ + 1;
+    Log.debug "gc: marked namespace %s (%d root(s))" ns (List.length keys);
     ignore
       (throttled (fun () ->
            (* Debug, not info: the caller's progress callback is what a terminal
               shows, and saying it twice is worse than once. The phase transitions
               stay at info, so a log kept without [-v] still records that a
               collection ran and what it came to. *)
-           Log.debug "gc: marked %d/%d root(s), %d chunk(s) kept" s.done_ s.total
-             s.chunks_promoted;
-           s.on_mark ~roots:s.done_ ~total:s.total ~promoted:s.chunks_promoted));
+           Log.debug
+             "gc: marked %d/%d namespace(s), %d root(s), %d chunk(s) kept"
+             s.done_ s.total s.roots_marked s.chunks_promoted;
+           s.on_mark ~namespaces:s.done_ ~total:s.total ~roots:s.roots_marked
+             ~promoted:s.chunks_promoted));
     Lwt.return_unit
 
   (* Accumulated per target across every shard, kept in configuration order. *)
@@ -597,14 +666,24 @@ module Make (C : Conf.S) = struct
   (* Everything left of the old root is empty shards and the root itself. *)
   let discard_from_space s = Fs_util.rm_rf (from_dir s.root)
 
-  (* The cursor advances by whole batch, to the largest key in it, and only once
-     every root in the batch is done. A batch runs concurrently, so "the last root
-     finished" is not the largest one and saving that would strand the roots that
-     had not finished yet. Per batch it is also one small write instead of one per
-     root, which on a store of a million roots is the difference between noise and
-     a phase of its own. *)
+  (* The cursor advances to the largest name done, and only once everything before
+     it is done too. Saved per batch rather than per item: one small write against
+     a store of a million roots is the difference between noise and a phase of its
+     own, and redoing a batch costs a failed link each, promoting being
+     idempotent. *)
   let last_of batch =
     List.fold_left (fun acc k -> if k > acc then k else acc) "" batch
+
+  (* One unit at a time, stopping at a boundary when the caller's time is up and
+     handing back what was not reached. Each of these units saves its own cursor. *)
+  let each s f batch =
+    let rec go = function
+      | x :: more when not (s.out_of_time ()) ->
+          let* () = f s x in
+          go more
+      | remaining -> Lwt.return remaining
+    in
+    go batch
 
   let take n l =
     let rec go acc n = function
@@ -636,35 +715,45 @@ module Make (C : Conf.S) = struct
       | Reconcile [] ->
           let+ () = finish s in
           `Done
-      | Mark roots ->
-          let batch, rest = take (max 1 units) roots in
-          let* () =
-            Lwt_list.iter_p
-              (fun key ->
-                Lwt_bounded.use s.root_slots (fun () -> mark_one s key))
-              batch
+      (* Namespaces one at a time within a batch, the concurrency being inside each
+         (its roots, and their chunks). A namespace is already a large unit — a
+         listing plus every manifest in it — so a batch of them can run for minutes,
+         which is why [out_of_time] is consulted between them rather than only
+         between whole steps. Without that, a budget could be overshot by however
+         long a batch happens to take. *)
+      | Mark namespaces ->
+          let batch, rest = take (max 1 units) namespaces in
+          let rec go done_ = function
+            | ns :: more when not (s.out_of_time ()) ->
+                let* () = mark_one s ns in
+                go (ns :: done_) more
+            | remaining -> Lwt.return (done_, remaining)
           in
-          let* () = save s Chunk_space.Marking (last_of batch) in
-          s.work <- Mark rest;
+          let* done_, remaining = go [] batch in
+          let* () =
+            if done_ = [] then Lwt.return_unit
+            else save s Chunk_space.Marking (last_of done_)
+          in
+          s.work <- Mark (remaining @ rest);
           Lwt.return `More
       (* Shards are not batched concurrently: each one deletes a directory and
          then lists every replica, and its cursor is saved as it goes. Overlapping
          them would buy little and make the cursor mean less. *)
       | Close shards ->
           let batch, rest = take (max 1 units) shards in
-          let* () = Lwt_list.iter_s (close_one s) batch in
-          s.work <- Close rest;
+          let* remaining = each s close_one batch in
+          s.work <- Close (remaining @ rest);
           Lwt.return `More
       | Reconcile shards ->
           let batch, rest = take (max 1 units) shards in
-          let* () = Lwt_list.iter_s (reconcile_one s) batch in
-          s.work <- Reconcile rest;
+          let* remaining = each s reconcile_one batch in
+          s.work <- Reconcile (remaining @ rest);
           Lwt.return `More
 
   (* {1 Driving it} *)
 
   let run ?budget ?(units = 256) ?pause ?concurrency ?(on_open = fun () -> ())
-      ?(on_mark = fun ~roots:_ ~total:_ ~promoted:_ -> ())
+      ?(on_mark = fun ~namespaces:_ ~total:_ ~roots:_ ~promoted:_ -> ())
       ?(on_close = fun ~shards:_ ~reclaimed:_ -> ())
       ?(on_reconcile = fun ~name:_ ~deleted:_ ~uploaded:_ -> ()) () =
     let deadline =
@@ -676,6 +765,7 @@ module Make (C : Conf.S) = struct
     in
     on_open ();
     let* s = start ?concurrency () in
+    s.out_of_time <- deadline;
     s.on_mark <- on_mark;
     s.on_close <- on_close;
     s.on_reconcile <- on_reconcile;
@@ -705,7 +795,8 @@ module Make (C : Conf.S) = struct
      the close find nothing to reclaim. *)
   (* Under the lock like a run: promoting everything while another process
      discards shards is the same race, from the other side. *)
-  let abort ?(on_mark = fun ~roots:_ ~total:_ ~promoted:_ -> ()) () =
+  let abort ?(on_mark = fun ~namespaces:_ ~total:_ ~roots:_ ~promoted:_ -> ())
+      () =
     let* main, root = collector () in
     let* lock = take_lock root in
     Lwt.finalize
@@ -728,7 +819,8 @@ module Make (C : Conf.S) = struct
                     ignore
                       (throttled (fun () ->
                            Log.debug "gc: kept %d/%d chunk(s)" !done_ total;
-                           on_mark ~roots:!done_ ~total ~promoted:!done_)))
+                           on_mark ~namespaces:!done_ ~total ~roots:!done_
+                         ~promoted:!done_)))
                   going
               in
               let* () = Fs_util.rm_rf (from_dir root) in

@@ -71,6 +71,20 @@
   (action
    (diff fallback.expected fallback.output))))
 
+(subdir backends/gc_cost
+ (alias
+  (name default)
+  (deps gc_cost.exe))
+ (rule
+  (alias runtest)
+  (target gc_cost.output)
+  (action
+   (with-stdout-to gc_cost.output (ignore-stderr (run ./gc_cost.exe)))))
+ (rule
+  (alias runtest)
+  (action
+   (diff gc_cost.expected gc_cost.output))))
+
 (subdir backends/gc_reconcile
  (alias
   (name default)

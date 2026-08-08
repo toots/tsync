@@ -1,0 +1,21 @@
+
+=== opening, with 12 namespaces to do
+  listings of the store during start: 0
+    (the work is found by reading two directories, so this is 0 however
+     many namespaces there are; enumerating up front would make it 12)
+  namespaces to mark: 12
+
+=== marking, one unit at a time
+  listings for one namespace: 1
+
+=== resuming does not re-find the work
+  listings during a resume's start: 0
+  namespaces left: 11
+
+=== finishing
+  reclaimed 0 chunk(s)
+  chunks still on the main: 12 of 12
+
+=== the copies were told nothing about the collection
+  run markers written to the replica: 0
+  replica holds a run marker afterwards: false

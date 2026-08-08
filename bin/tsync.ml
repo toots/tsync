@@ -828,9 +828,10 @@ let gc_cmd =
                  ?pause:(Option.map parse_duration pause) ?concurrency
                  ~on_open:(fun () ->
                    Printf.eprintf "Collecting %s...\n%!" C.domain_name)
-                 ~on_mark:(fun ~roots ~total ~promoted ->
-                   Printf.eprintf "  marked %d/%d root(s), %d chunk(s) kept\r%!"
-                     roots total promoted)
+                 ~on_mark:(fun ~namespaces ~total ~roots ~promoted ->
+                   Printf.eprintf
+                     "  marked %d/%d folder(s), %d file(s), %d chunk(s) kept\r%!"
+                     namespaces total roots promoted)
                  ~on_close:(fun ~shards ~reclaimed ->
                    Printf.eprintf
                      "  closed %d shard(s), %d chunk(s) reclaimed\r%!" shards

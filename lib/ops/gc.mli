@@ -84,10 +84,16 @@ exception Busy of string
 module Make (C : Conf.S) : sig
   (** {1 Stepping}
 
-      A unit of work is one root while marking, and one shard while closing or
-      reconciling. They are not the same size — a reconciled shard is a listing of
-      every target and of the main — so a caller pacing itself should think in
-      seconds spent rather than in units done. *)
+      A unit of work is one namespace while marking — a folder's worth of
+      manifests, or of versions — and one shard while closing or reconciling. They
+      are not the same size, so a caller pacing itself should think in seconds spent
+      rather than in units done.
+
+      Nothing is enumerated whole up front. Marking reads the two directories that
+      hold the namespaces and walks one at a time, so the cost of finding the work
+      is spread through the work rather than paid before any of it starts — and paid
+      again on every resume, which is what a budgeted collection would otherwise
+      spend most of itself doing. *)
 
   type session
 
@@ -135,8 +141,10 @@ module Make (C : Conf.S) : sig
 
       [units] per step (default 256), [concurrency] within a step and [pause]
       seconds of sleep between steps (default none) are the pace. [budget] is a
-      wall-clock limit in seconds, checked between steps, after which the run is
-      left open and {!Suspended} is returned.
+      wall-clock limit in seconds, after which the run is left open and
+      {!Suspended} is returned. It is checked between units, not merely between
+      steps: a unit can run for a while, and a limit only honoured at the end of a
+      batch of them is not much of a limit.
 
       Progress is reported because a run over a large store takes a long time and
       a silent process is indistinguishable from a wedged one. [on_mark] and
@@ -148,7 +156,8 @@ module Make (C : Conf.S) : sig
     ?pause:float ->
     ?concurrency:int ->
     ?on_open:(unit -> unit) ->
-    ?on_mark:(roots:int -> total:int -> promoted:int -> unit) ->
+    ?on_mark:
+      (namespaces:int -> total:int -> roots:int -> promoted:int -> unit) ->
     ?on_close:(shards:int -> reclaimed:int -> unit) ->
     ?on_reconcile:(name:string -> deleted:int -> uploaded:int -> unit) ->
     unit ->
@@ -162,7 +171,8 @@ module Make (C : Conf.S) : sig
 
       A no-op when no run is open. *)
   val abort :
-    ?on_mark:(roots:int -> total:int -> promoted:int -> unit) ->
+    ?on_mark:
+      (namespaces:int -> total:int -> roots:int -> promoted:int -> unit) ->
     unit ->
     stats Lwt.t
 

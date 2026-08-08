@@ -101,7 +101,7 @@
   gc (close)
   evict bar.txt
   expire all -> 1 version(s), 1 journal entr(ies)
-  gc marked 2 root(s), 0 chunk(s) kept
+  gc marked 0 root(s), 0 chunk(s) kept
   gc kept 0 chunk(s), reclaimed 0
 --- tree
   f bar.txt size=11 cached=0/1 uploaded=true etag=34c32a865edce724
@@ -173,7 +173,7 @@
   gc (mark only)
   evict foo.txt
   expire all -> 1 version(s), 2 journal entr(ies)
-  gc marked 2 root(s), 1 chunk(s) kept
+  gc marked 1 root(s), 1 chunk(s) kept
 --- tree
   f foo.txt size=7 cached=0/1 uploaded=true etag=46316ec1c85082b9
 --- content
@@ -196,7 +196,7 @@
   gc --abort
   evict foo.txt
   expire all -> 1 version(s), 2 journal entr(ies)
-  gc marked 2 root(s), 1 chunk(s) kept
+  gc marked 1 root(s), 1 chunk(s) kept
   gc abandoned, 2 chunk(s) kept
 --- tree
   f foo.txt size=7 cached=0/1 uploaded=true etag=46316ec1c85082b9

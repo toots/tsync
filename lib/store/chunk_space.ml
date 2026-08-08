@@ -105,8 +105,17 @@ module Make (C : Conf.S) = struct
           capable := Some p;
           p
 
+  (* The marker describes one store's own state, so it is read from and written to
+     the main directly and never through the composite. Through it, every write
+     would be fanned out to each replica and backfill target — once per batch of a
+     collection — leaving them carrying a marker about a collection that is not
+     theirs and that they can do nothing with. *)
+  let marker_store () =
+    match main () with Some b -> b | None -> (module B : Backend.S)
+
   let read_run () =
-    let* data = B.get_opt ~key:marker_key () in
+    let (module Mk : Backend.S) = marker_store () in
+    let* data = Mk.get_opt ~key:marker_key () in
     match data with
       | None -> Lwt.return_none
       | Some data -> (
@@ -120,8 +129,13 @@ module Make (C : Conf.S) = struct
                   marker_key "the store as idle";
                 Lwt.return_none)
 
-  let write_run run = B.put ~key:marker_key ~data:(to_string run) ()
-  let clear_run () = B.delete ~key:marker_key ()
+  let write_run run =
+    let (module Mk : Backend.S) = marker_store () in
+    Mk.put ~key:marker_key ~data:(to_string run) ()
+
+  let clear_run () =
+    let (module Mk : Backend.S) = marker_store () in
+    Mk.delete ~key:marker_key ()
 
   (* Whether a run is open, cached: reading the marker per chunk lookup would cost
      more than the lookup it saves. *)
