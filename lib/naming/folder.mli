@@ -15,8 +15,8 @@
 val root_id : string
 
 (** Where a deleted folder's marker is moved: unreachable from the root, so the
-    subtree vanishes from listings and resync, and [expire] reclaims it past a
-    grace period. *)
+    subtree vanishes from listings and resync, and [expire] drops it past a grace
+    period — after which [gc] reclaims the chunks it was holding. *)
 val trash_id : string
 
 (** A fresh folder id, minted at mkdir. *)
