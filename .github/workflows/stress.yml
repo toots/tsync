@@ -1,9 +1,12 @@
-# Concurrent load over two real FUSE mounts, on a schedule.
+# Concurrent load over two real FUSE mounts, run by hand.
 #
 # Separate from `test` because it is the only suite that is allowed to fail
 # without blocking a merge: it injects crashes and store faults, so a red cell
 # here is a finding to read, not a broken build. Keeping it out of the required
 # checks is what lets it stay honest about what it finds.
+#
+# Dispatch is only readable from the default branch, so this cannot be run
+# against a branch until it merges.
 #
 # One job per (fault mode, seed) rather than a wrapper that loops and tallies.
 # The matrix already reports per-cell pass/fail with its own log, and a wrapper
@@ -12,25 +15,14 @@
 # over sixteen that had aborted before checking anything.
 name: stress
 
+# Run by hand only. The seeds move with the run number, so repeated runs cover
+# new ground rather than re-verifying the same handful.
 on:
-  schedule:
-    # Three times a day. The seeds move with the run number, so each firing
-    # explores paths the last one did not; a fixed seed set would re-verify the
-    # same handful forever and go quiet about everything else.
-    - cron: "0 2,10,18 * * *"
   workflow_dispatch:
     inputs:
       ops:
         description: "operations per client"
         default: "14"
-      seeds:
-        description: "how many seeds per fault mode (1-6)"
-        default: "3"
-  push:
-    # ponytail: temporary. `schedule` and `workflow_dispatch` are only ever read
-    # from the default branch, so this is the one trigger that can exercise the
-    # job before it merges. Drop this block in the merge commit.
-    branches: [overhaul/domain-store-and-durable-queue]
 
 concurrency:
   group: stress-${{ github.ref }}
@@ -71,7 +63,7 @@ jobs:
 
       - name: Stress (${{ matrix.fault }})
         env:
-          # Distinct per firing, so the schedule keeps covering new ground.
+          # Distinct per run, so repeated runs keep covering new ground.
           TSYNC_STRESS_SEED: ${{ github.run_number }}${{ matrix.seed }}
           TSYNC_STRESS_OPS: ${{ github.event.inputs.ops || '14' }}
           TSYNC_STRESS_FAULT: ${{ matrix.fault }}
