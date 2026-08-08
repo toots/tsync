@@ -774,36 +774,74 @@ module Make (C : Conf.S) = struct
         | Unix.Unix_error (Unix.ENOENT, _, _) -> Lwt.return (Some 0)
         | exn -> Lwt.fail exn)
 
-  (* Chunk by chunk, for a shard both spaces hold: move across only the names the
-     surviving space does not already have.
+  let shard_dirs s shard =
+    ( Filename.concat (from_dir s.root) shard,
+      Filename.concat (to_dir s.root) shard )
 
-     Comparing two directory reads first is the whole point. By the time a
-     collection is abandoned, marking has usually promoted most of what it was going
-     to — a file's chunks scatter across nearly every shard, so a few thousand files
-     is enough to touch all of them — and for those the surviving space already holds
-     the name. Moving it anyway is a [rename] between two links to one inode, which
-     POSIX defines to do nothing and report success: real cost, no effect. Measured on
-     a store mid-abandonment, the two spaces held 595 and 592 chunks in the same
-     shard, so essentially every move was one of those.
+  let read_dir dir =
+    Lwt.catch
+      (fun () ->
+        let+ names = Fs_util.readdir_list dir in
+        List.filter Chunk_layout.is_chunk_key names)
+      (function Unix.Unix_error _ -> Lwt.return_nil | e -> Lwt.fail e)
 
-     A name present in the surviving space means the chunk is safe, because a chunk
-     key is its content: the same name is the same bytes. That is the assumption the
-     whole store already rests on.
+  let move_into ~src_dir ~dst_dir names =
+    Lwt_list.iter_s
+      (fun n ->
+        Lwt.catch
+          (fun () ->
+            Lwt_unix_retry.rename (Filename.concat src_dir n)
+              (Filename.concat dst_dir n))
+          (function
+            | Unix.Unix_error (Unix.ENOENT, _, _) -> Lwt.return_unit
+            | exn -> Lwt.fail exn))
+      names
 
-     A move and not a link for the ones that do need it. Linking leaves the old name
-     for the closing [rm -rf], so every chunk is touched twice — two journalled
-     transactions against the inode and both directories, where one will do. *)
-  let keep_by_move s shard =
-    let src_dir = Filename.concat (from_dir s.root) shard
-    and dst_dir = Filename.concat (to_dir s.root) shard in
-    let read dir =
-      Lwt.catch
-        (fun () -> Fs_util.readdir_list dir)
-        (function Unix.Unix_error _ -> Lwt.return_nil | e -> Lwt.fail e)
+  (* Emptying the surviving shard so that the whole directory can be renamed into
+     its place, which is what a shard both spaces hold otherwise costs six hundred
+     renames to achieve.
+
+     Measured ahead of an abandonment's cursor: the surviving space held one to six
+     chunks of a shard, against some six hundred in the space going away — marking
+     had barely started on them. Those few are the only thing making the directory
+     rename fail, and pushing them down into the old space makes it succeed, [rename]
+     onto an empty directory being defined to work.
+
+     Nothing needs undoing if this stops half way. A shard left with an emptied
+     surviving directory and everything in the old one is exactly the state a fresh
+     attempt handles best: the directory rename simply succeeds. *)
+  let push_down s shard =
+    let src_dir, dst_dir = shard_dirs s shard in
+    let* here = read_dir dst_dir in
+    let* theirs = read_dir src_dir in
+    let below = Hashtbl.create (List.length theirs) in
+    List.iter (fun n -> Hashtbl.replace below n ()) theirs;
+    (* Unlinked, not renamed, for the names the old space already has. Marking put
+       them there by linking, so the two names are one inode — and [rename] between
+       two links to the same file is defined to do nothing and report success, which
+       would leave the directory exactly as full as it was. Dropping this name keeps
+       the inode, the old space still holding it.
+
+       A name the old space does not have is moved down instead, and the inode goes
+       with it. Either way the surviving directory ends up empty, which is the whole
+       object. *)
+    let+ () =
+      Lwt_list.iter_s
+        (fun n ->
+          if Hashtbl.mem below n then
+            Fs_util.unlink_quiet (Filename.concat dst_dir n)
+          else move_into ~src_dir:dst_dir ~dst_dir:src_dir [n])
+        here
     in
-    let* names = read src_dir in
-    let names = List.filter Chunk_layout.is_chunk_key names in
-    let* here = read dst_dir in
+    List.length here
+
+  (* Chunk by chunk, for the shards where that is genuinely the cheaper way round:
+     the surviving space holds most of one already, so moving the few that are
+     missing beats pushing the many back down to rename the directory. *)
+  let move_across s shard =
+    let src_dir, dst_dir = shard_dirs s shard in
+    let* names = read_dir src_dir in
+    let* here = read_dir dst_dir in
     let present = Hashtbl.create (List.length here) in
     List.iter (fun n -> Hashtbl.replace present n ()) here;
     let missing = List.filter (fun n -> not (Hashtbl.mem present n)) names in
@@ -814,39 +852,46 @@ module Make (C : Conf.S) = struct
         Lwt_list.iter_p
           (fun n ->
             Lwt_bounded.use s.item_slots (fun () ->
-                Lwt.catch
-                  (fun () ->
-                    Lwt_unix_retry.rename (Filename.concat src_dir n)
-                      (Filename.concat dst_dir n))
-                  (function
-                    (* Gone from under us: a previous attempt at this shard moved
-                       it. *)
-                    | Unix.Unix_error (Unix.ENOENT, _, _) -> Lwt.return_unit
-                    | exn -> Lwt.fail exn)))
+                move_into ~src_dir ~dst_dir [n]))
           missing
     in
-    (* Every name the old space held is kept, whether this had to move it or found
-       it already across. What is left of the old space is names, and the close
-       removes them. *)
-    s.chunks_promoted <- s.chunks_promoted + List.length names
+    List.length names
 
+  (* Whichever way round is fewer operations, decided from the two counts rather
+     than assumed. Pushing [k] chunks down and renaming the directory costs [k + 1];
+     moving the missing ones across costs [m - k]. So the directory rename wins while
+     the surviving space holds less than about half the shard, which ahead of an
+     abandonment's cursor it overwhelmingly does — and where it holds most of one,
+     moving across is picked instead and nothing is worse than before. *)
   let keep_one s shard =
-    let* carried = carry_over s shard in
-    let* () =
+    let src_dir, dst_dir = shard_dirs s shard in
+    let* kept =
+      let* carried = carry_over s shard in
       match carried with
-        | Some n ->
-            s.chunks_promoted <- s.chunks_promoted + n;
-            Lwt.return_unit
-        | None -> keep_by_move s shard
+        | Some n -> Lwt.return n
+        | None ->
+            let* here = read_dir dst_dir in
+            let* theirs = read_dir src_dir in
+            let k = List.length here and m = List.length theirs in
+            if k + 1 < m - k then
+              let* _ = push_down s shard in
+              let* carried = carry_over s shard in
+              match carried with
+                | Some n -> Lwt.return n
+                (* Something landed in the shard while it was being emptied. Moving
+                   what is missing is always correct, only dearer. *)
+                | None -> move_across s shard
+            else move_across s shard
     in
+    s.chunks_promoted <- s.chunks_promoted + kept;
     s.done_ <- s.done_ + 1;
     let* () = save s Chunk_space.Abandoning shard in
     (* [roots:0]: there are no files here, only shards. What the caller prints for
        a collection would read as a second, wrong count of them. *)
     ignore
       (throttled (fun () ->
-           Log.debug "gc: kept %d/%d shard(s), %d chunk(s) linked" s.done_
-             s.total s.chunks_promoted;
+           Log.debug "gc: kept %d/%d shard(s), %d chunk(s)" s.done_ s.total
+             s.chunks_promoted;
            s.on_mark ~namespaces:s.done_ ~total:s.total ~roots:0
              ~promoted:s.chunks_promoted));
     Lwt.return_unit

@@ -248,14 +248,23 @@ let () =
         the whole-directory rename nor the found-already-there path — it is the one
         case where abandoning has to move something, and the only one that moves
         data. Without this the moving branch is never run by any test. *)
-     let orphan = Printf.sprintf "%03x%013x-%016x" 1 999 999 in
-     ignore
-       (Sys.command
-          (Printf.sprintf "printf 'a chunk!' > %s"
-             (Filename.quote
-                (Filename.concat from_dir
-                   (Chunk_layout.relative_path orphan)))));
-     step "planted a chunk only the old space has, in a shard the new one holds";
+     (* Several, so the shard is lopsided enough to take the cheaper way round:
+        emptying the one chunk out of the surviving space and renaming the whole
+        directory in, rather than moving five across. One planted chunk would leave
+        the two sides even and exercise only the other branch. *)
+     let orphans =
+       List.init 5 (fun i -> Printf.sprintf "%03x%013x-%016x" 1 (900 + i) i)
+     in
+     List.iter
+       (fun k ->
+         ignore
+           (Sys.command
+              (Printf.sprintf "printf 'a chunk!' > %s"
+                 (Filename.quote
+                    (Filename.concat from_dir (Chunk_layout.relative_path k))))))
+       orphans;
+     step "planted %d chunk(s) only the old space has, in a shard the new one holds"
+       (List.length orphans);
      let* () = G.release s in
      let* s = G.start ~keep:true () in
      step "changed our mind, phase: %s" (G.phase s);
@@ -281,13 +290,31 @@ let () =
         the next collection discards them along with anything else unreferenced.
         What matters is that they were never counted as chunks kept — 11 above and
         not 22. *)
+     (* This number is also how the cheap path is watched. A shard renamed as a
+        directory brings whatever else was in it, so each of the 12 planted writes in
+        flight arrives; a shard that fell back to moving chunks one at a time filters
+        them out, and the count drops. 12 therefore says every shard took the
+        directory rename — including the lopsided one, which only gets there by
+        having the surviving space emptied first.
+
+        Which is worth having, because that emptying quietly did nothing at first:
+        it renamed each name down onto its own hard link, which POSIX defines as a
+        no-op, so the directory stayed full and every shard fell back. Correctness
+        was unaffected and the count of chunks kept was identical. This was the only
+        number that moved. *)
      step "writes in flight carried along by a renamed shard: %d"
        (count_strays left);
-     let* moved =
-       Main.head_opt ~key:(chunk_prefix ^ Chunk_layout.relative_path orphan) ()
+     let* arrived =
+       Lwt_list.filter_s
+         (fun k ->
+           let+ h =
+             Main.head_opt ~key:(chunk_prefix ^ Chunk_layout.relative_path k) ()
+           in
+           h <> None)
+         orphans
      in
-     step "the chunk only the old space had was moved across: %b"
-       (moved <> None);
+     step "chunks only the old space had, now in the new one: %d of %d"
+       (List.length arrived) (List.length orphans);
 
      (* The pool discipline, which is the thing here most easily got wrong: shards
         run concurrently and each may upload, so the outer level and the inner one
