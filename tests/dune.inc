@@ -71,6 +71,20 @@
   (action
    (diff fallback.expected fallback.output))))
 
+(subdir backends/gc_reconcile
+ (alias
+  (name default)
+  (deps gc_reconcile.exe))
+ (rule
+  (alias runtest)
+  (target gc_reconcile.output)
+  (action
+   (with-stdout-to gc_reconcile.output (ignore-stderr (run ./gc_reconcile.exe)))))
+ (rule
+  (alias runtest)
+  (action
+   (diff gc_reconcile.expected gc_reconcile.output))))
+
 (subdir backends/gcs
  (alias
   (name default)
@@ -262,6 +276,20 @@
   (action
    (diff expire.expected expire.output))))
 
+(subdir scenario/gc
+ (alias
+  (name default)
+  (deps gc.exe))
+ (rule
+  (alias runtest)
+  (target gc.output)
+  (action
+   (with-stdout-to gc.output (ignore-stderr (run ./gc.exe)))))
+ (rule
+  (alias runtest)
+  (action
+   (diff gc.expected gc.output))))
+
 (subdir scenario/import_export
  (alias
   (name default)
@@ -443,6 +471,20 @@
   (alias runtest)
   (action
    (diff bounded_test.expected bounded_test.output))))
+
+(subdir unit/chunk_space
+ (alias
+  (name default)
+  (deps chunk_space_test.exe))
+ (rule
+  (alias runtest)
+  (target chunk_space_test.output)
+  (action
+   (with-stdout-to chunk_space_test.output (ignore-stderr (run ./chunk_space_test.exe)))))
+ (rule
+  (alias runtest)
+  (action
+   (diff chunk_space_test.expected chunk_space_test.output))))
 
 (subdir unit/folder_ids
  (alias

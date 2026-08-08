@@ -1,28 +1,30 @@
-=== expire all: old version's chunk collected, live chunk kept
+=== expire all: old version dropped, its chunk left behind
   write foo.txt "one"
   drain
   write foo.txt "two two"
   drain
   expire all
-  expire all -> 1 version(s), 1 chunk(s) removed, 1 kept, 2 journal entr(ies)
+  expire all -> 1 version(s), 2 journal entr(ies)
 --- tree
   f foo.txt size=7 cached=0/1 uploaded=true etag=46316ec1c85082b9
 --- content
   foo.txt = "two two"
 --- backend
   chunk 3ab8997bc73098ac-74d584d55f333769 size=7
+  chunk 911faba7321fe1a0-a3cf92cbf55153da size=3
   file foo.txt [.tsync-root/b306717ed3feaa3f-615fce859cf8a12f] = manifest size=7 chunks=1 h1=46316ec1c85082b9 h2=8f37316767529460
     chunk#0 3ab8997bc73098ac-74d584d55f333769 size=7
 
-=== expire all: deleted file fully reclaimed
+=== expire all: deleted file dropped, chunk left behind
   write foo.txt "gone soon"
   drain
   delete foo.txt
   expire all
-  expire all -> 1 version(s), 1 chunk(s) removed, 0 kept, 1 journal entr(ies)
+  expire all -> 1 version(s), 1 journal entr(ies)
 --- tree
 --- content
 --- backend
+  chunk 56194c57c0bcf47e-5602995ae585dc6a size=9
   cursor = <entry-1>
   journal <entry-1> = delete foo.txt
 
@@ -36,20 +38,21 @@
   write foo.txt "three three three"
   drain
   expire mark
-  expire mark -> 1 version(s), 1 chunk(s) removed, 2 kept, 2 journal entr(ies)
+  expire mark -> 1 version(s), 2 journal entr(ies)
 --- tree
   f foo.txt size=17 cached=0/1 uploaded=true etag=bc4fe9e67f44fd6f
 --- content
   foo.txt = "three three three"
 --- backend
   chunk 3ab8997bc73098ac-74d584d55f333769 size=7
+  chunk 911faba7321fe1a0-a3cf92cbf55153da size=3
   chunk faf60158c5948cd2-60f690e9588d51bd size=17
   journal <entry-1> = put foo.txt 17
   file foo.txt [.tsync-root/b306717ed3feaa3f-615fce859cf8a12f] = manifest size=17 chunks=1 h1=bc4fe9e67f44fd6f h2=6fd12d97f02740c8
     chunk#0 faf60158c5948cd2-60f690e9588d51bd size=17
   version foo.txt [.tsync-root/b306717ed3feaa3f-615fce859cf8a12f]#1 = manifest size=7 chunks=1
 
-=== expire all: trashed folder reclaimed
+=== expire all: trashed folder dropped, chunk left behind
   mkdir d
   drain
   write d/a.txt "trash me"
@@ -57,10 +60,11 @@
   rmdir d
   drain
   expire all
-  expire all -> 0 version(s), 1 chunk(s) removed, 0 kept, 2 journal entr(ies)
+  expire all -> 0 version(s), 2 journal entr(ies)
 --- tree
 --- content
 --- backend
+  chunk 5e4c66b9cb232332-2fc4674f963b00e3 size=8
   cursor = <entry-1>
   journal <entry-1> = rmdir d/
 
@@ -70,7 +74,7 @@
   write foo.txt "two two"
   drain
   expire none
-  expire none -> 0 version(s), 0 chunk(s) removed, 2 kept, 0 journal entr(ies)
+  expire none -> 0 version(s), 0 journal entr(ies)
 --- tree
   f foo.txt size=7 cached=0/1 uploaded=true etag=46316ec1c85082b9
 --- content

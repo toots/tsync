@@ -1,4 +1,4 @@
-; One-shot jobs over a whole domain: import, export, expire, recheck, remote
+; One-shot jobs over a whole domain: import, export, expire, gc, recheck, remote
 ; mirror, share. Applications of the layers below rather than an abstraction of
 ; their own -- nothing depends on this library, which is what lets each of these
 ; run without a daemon.

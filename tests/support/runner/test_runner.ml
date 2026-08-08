@@ -54,6 +54,10 @@ type step =
   | Mark  (** record the current time, as an [Expire "mark"] cutoff *)
   | Expire of string
       (** Cutoff selector: "all" (now), "none" (epoch), or "mark". *)
+  | Gc  (** Collect chunks nothing references. *)
+  | GcMark  (** Collect as far as the end of marking; leave it open. *)
+  | GcClose  (** Finish what [GcMark] left open. *)
+  | GcAbort  (** Abandon an open collection, keeping everything. *)
   | Drain
   | Sync
   | DeleteRemoteChunk of { path : string; index : int }
@@ -157,6 +161,10 @@ let rec render_step = function
   | Stat p -> "stat " ^ p
   | Mark -> "mark"
   | Expire s -> "expire " ^ s
+  | Gc -> "gc"
+  | GcMark -> "gc (mark only)"
+  | GcClose -> "gc (close)"
+  | GcAbort -> "gc --abort"
   | Drain -> "drain"
   | Sync -> "sync"
   | DeleteRemoteChunk { path; index } ->
@@ -197,6 +205,19 @@ let rec render_step = function
 let starts_with prefix s =
   String.length s >= String.length prefix
   && String.sub s 0 (String.length prefix) = prefix
+
+(* Counts, not bytes: byte totals are the test's own payload sizes and would pin
+   the snapshot to them without saying anything about the behaviour. Targets are
+   listed only when one needed something, so a domain with a single store prints
+   one line. *)
+let print_gc (s : Gc.stats) =
+  Printf.printf "  gc kept %d chunk(s), reclaimed %d\n" s.Gc.chunks_promoted
+    s.chunks_reclaimed;
+  List.iter
+    (fun (m : Gc.member_stats) ->
+      Printf.printf "  gc %s: %d deleted, %d filled\n" m.Gc.name m.deleted
+        m.uploaded)
+    s.members
 
 (* Verbatim but for the non-deterministic parts: wall-clock mtimes, journal-key
    cursors, and the filesystem-order [files]/[dirs] arrays. etags and keys are
@@ -522,11 +543,40 @@ let setup_client (module C : Conf.S) root staging_prefix =
             | _ -> failwith ("unknown expire selector: " ^ selector)
         in
         let+ s = E.expire ~cutoff () in
-        Printf.printf
-          "  expire %s -> %d version(s), %d chunk(s) removed, %d kept, %d \
-           journal entr(ies)\n"
-          selector s.Expire.versions_deleted s.chunks_deleted s.chunks_kept
-          s.journal_deleted
+        Printf.printf "  expire %s -> %d version(s), %d journal entr(ies)\n"
+          selector s.Expire.versions_deleted s.journal_deleted
+    | Gc ->
+        let module G = Gc.Make (C) in
+        let+ s = G.run () in
+        print_gc s
+    | GcMark ->
+        (* Stopped at the phase boundary rather than after a duration, so a
+           scenario can act on a half-collected store deterministically. *)
+        let module G = Gc.Make (C) in
+        let* session = G.start () in
+        let rec until_closing () =
+          if G.phase session <> "marking" then Lwt.return_unit
+          else
+            let* outcome = G.step ~units:64 session in
+            match outcome with
+              | `Done -> Lwt.return_unit
+              | `More -> until_closing ()
+        in
+        let* () = until_closing () in
+        let s = G.stats session in
+        (* The lock goes back, not the collection: the next step picks it up from
+           the marker, which is what a separate invocation would do. *)
+        let+ () = G.release session in
+        Printf.printf "  gc marked %d root(s), %d chunk(s) kept\n"
+          s.Gc.roots_marked s.chunks_promoted
+    | GcClose ->
+        let module G = Gc.Make (C) in
+        let+ s = G.run () in
+        print_gc s
+    | GcAbort ->
+        let module G = Gc.Make (C) in
+        let+ s = G.abort () in
+        Printf.printf "  gc abandoned, %d chunk(s) kept\n" s.Gc.chunks_promoted
     | Drain ->
         let rec wait () =
           if Sq.idle () then Lwt.return_unit
@@ -928,6 +978,13 @@ let dump_backend_at ~backend_root ~domain_prefix ~chunk_prefix ~journal_prefix
     index 0 journal_names
   in
   let is_marker k = String.length k > 0 && k.[String.length k - 1] = '/' in
+  (* A collection in progress: the space chunks are on their way out of, and the
+     marker naming the phase. Shown rather than hidden — a snapshot taken
+     mid-collection is meant to say which space each chunk is in. The lock beside
+     the marker is not shown: it is an empty file whose only content is who holds
+     it, and that is never this. *)
+  let from_prefix = Chunk_space.from_prefix ~chunk_prefix in
+  let gc_marker = Chunk_space.marker_key ~chunk_prefix in
   (* Folder ids are deterministic (the RNG is seeded per scenario), so the dump
      prints them raw: a reviewer can trace [file <id>/<hash>] back to the
      [folder … -> <id>] marker that named it. *)
@@ -941,6 +998,19 @@ let dump_backend_at ~backend_root ~domain_prefix ~chunk_prefix ~journal_prefix
            || starts_with versions_prefix e.key
            || starts_with journal_prefix e.key)
       then Lwt.return_unit
+      else if e.key = gc_marker ^ ".lock" then Lwt.return_unit
+      else if e.key = gc_marker then
+        let+ data = B.get ~key:e.key () in
+        Printf.printf "  collecting: %s\n"
+          (match Chunk_space.of_string data with
+            | Some r -> Chunk_space.string_of_phase r.Chunk_space.phase
+            | None -> "unreadable")
+      else if starts_with from_prefix e.key then (
+        if is_marker e.key then Lwt.return_unit
+        else (
+          Printf.printf "  chunk(going) %s size=%d\n" (Filename.basename e.key)
+            e.size;
+          Lwt.return_unit))
       else if starts_with chunk_prefix e.key then (
         (* The key, without the shard directory holding it: what a chunk is
            named matters here, where it lives is {!Chunk_layout}'s business. *)
@@ -1052,11 +1122,11 @@ let run_scenario ?(versioning = false) ?(symlink_policy = `Keep)
        store to copy into. *)
     let members =
       [
-        Backend.member ~name:"backend"
-          ~config:[("path", backend_root)]
+        Backend.member ~name:"backend" ~backend_type:"local"
+          ~config:[("path", backend_root)] ~local_path:backend_root
           (Local_backend.make ~root:backend_root);
-        Backend.member ~name:"backend2"
-          ~config:[("path", backend2_root)]
+        Backend.member ~name:"backend2" ~backend_type:"local"
+          ~config:[("path", backend2_root)] ~local_path:backend2_root
           (Local_backend.make ~root:backend2_root);
       ]
 
@@ -1138,8 +1208,8 @@ let run_two_client_scenario ?(versioning = false)
   let backend_root = Filename.concat root "backend" in
   let shared_members =
     [
-      Backend.member ~name:"backend"
-        ~config:[("path", backend_root)]
+      Backend.member ~name:"backend" ~backend_type:"local"
+        ~config:[("path", backend_root)] ~local_path:backend_root
         (Local_backend.make ~root:backend_root);
     ]
   in
@@ -1262,7 +1332,10 @@ let make_conf ?(versioning = false) ~client_name ~backend_root ~cache_root
     (* What the daemon declares for diagnosis ([bin/cli.ml build_backends]), so
        [stats] has a store to report on here too. *)
     let members =
-      [Backend.member ~name:"backend" ~config:[("path", backend_root)] store]
+      [
+        Backend.member ~name:"backend" ~backend_type:"local"
+          ~config:[("path", backend_root)] ~local_path:backend_root store;
+      ]
 
     let cache_root = cache_root
     let data_dir = data_dir
