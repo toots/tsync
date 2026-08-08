@@ -7,6 +7,7 @@
 
 === marking, one unit at a time
   listings for one namespace: 1
+  chunks asked about before being promoted: 0
 
 === resuming does not re-find the work
   listings during a resume's start: 0

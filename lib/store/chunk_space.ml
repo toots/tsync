@@ -189,25 +189,27 @@ module Make (C : Conf.S) = struct
      when it is not in the space on its way out — so a caller can promote whatever
      it names without first asking where any of it is.
 
-     Asked before copied, rather than copying and forgiving the failure: a copy
-     whose source is missing is a real error for every other caller, and a driver
-     is free to report it however it likes. Most calls land here anyway —
-     {!promote_all} runs over every chunk a manifest names and the freshly written
-     ones are in the surviving space already — so this is the common path, not the
-     exception.
+     Which is the point: it does not ask. [copy] on a filesystem attempts the link
+     before it makes sure of anything, so the link itself answers both questions —
+     it succeeds, or says [EEXIST] because the chunk is across already, or [ENOENT]
+     because there is nothing to move. Asking first with a [head_opt] doubles the
+     cost of the one operation a collection performs millions of times.
 
-     Idempotent: the local driver's [copy] links, and counts an existing
-     destination as done, so a resumed run redoes a chunk for the price of one
-     failed link. *)
+     [ENOENT] arriving as a raw Unix error rather than in a driver's own vocabulary
+     is not an oversight to tidy: promotion only ever does anything on a main that
+     answers {!Backend.caps.gc}, which is to say a filesystem, which is the driver
+     that raises it. On any other store a run cannot be open and this is never
+     reached. *)
   let promote chunk_key =
     match main () with
       | None -> Lwt.return_unit
-      | Some (module M : Backend.S) -> (
-          let src = from_key chunk_key in
-          let* there = M.head_opt ~key:src () in
-          match there with
-            | None -> Lwt.return_unit
-            | Some _ -> M.copy ~src_key:src ~dst_key:(key chunk_key) ())
+      | Some (module M : Backend.S) ->
+          Lwt.catch
+            (fun () ->
+              M.copy ~src_key:(from_key chunk_key) ~dst_key:(key chunk_key) ())
+            (function
+              | Unix.Unix_error (Unix.ENOENT, _, _) -> Lwt.return_unit
+              | exn -> Lwt.fail exn)
 
   (* Every chunk a manifest names, given a name in the surviving space — called
      immediately before the manifest is published.

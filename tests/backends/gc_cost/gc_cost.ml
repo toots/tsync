@@ -23,9 +23,14 @@ let chunk_prefix = "tsync/testdom/chunks/"
 let domain_prefix = "tsync/testdom/manifests/"
 let marker_key = Chunk_space.marker_key ~chunk_prefix
 
-type tally = { mutable lists : int; mutable puts : int; mutable markers : int }
+type tally = {
+  mutable lists : int;
+  mutable puts : int;
+  mutable markers : int;
+  mutable heads : int;
+}
 
-let counted () = { lists = 0; puts = 0; markers = 0 }
+let counted () = { lists = 0; puts = 0; markers = 0; heads = 0 }
 let main_ops = counted ()
 let replica_ops = counted ()
 
@@ -44,6 +49,10 @@ end) : Backend.S = struct
     T.t.puts <- T.t.puts + 1;
     if key = marker_key then T.t.markers <- T.t.markers + 1;
     B.put ~key ~data ()
+
+  let head_opt ~key () =
+    T.t.heads <- T.t.heads + 1;
+    B.head_opt ~key ()
 end
 
 module Main =
@@ -162,8 +171,13 @@ let () =
 
      case "marking, one unit at a time";
      main_ops.lists <- 0;
+     main_ops.heads <- 0;
      let* _ = G.step ~units:1 s in
      step "listings for one namespace: %d" main_ops.lists;
+     (* Promoting a chunk is one link and nothing else. It used to ask first whether
+        the chunk was in the old space, which the link answers by succeeding or not —
+        a stat per chunk, over the millions of them a collection promotes. *)
+     step "chunks asked about before being promoted: %d" main_ops.heads;
      let* () = G.release s in
 
      case "resuming does not re-find the work";
