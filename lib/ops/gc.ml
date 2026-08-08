@@ -882,9 +882,24 @@ module Make (C : Conf.S) = struct
      observable — which is what makes the interleaving testable. *)
   let step ?(units = 1) s =
     match s.work with
-      | Mark [] | Keep [] ->
+      | Mark [] ->
           let+ () = begin_closing s in
           `More
+      (* Abandoning ends here, rather than going on through the phases a collection
+         does. This is chunk-only work: everything the discarded space held now has
+         a name in the surviving one, so what is left of it is names and nothing
+         else.
+
+         Closing would list both spaces of every shard to count what was reclaimed,
+         which an abandonment has defined to be zero. Reconciling would then ask
+         every target about all 4096 shards — over a network, for a target on one —
+         to find orphans that cannot exist, since nothing was removed from the main
+         for them to be orphaned by. Repairing drift a collection did not cause is
+         [tsync resync-remote]'s job, and not what someone abandoning one wants. *)
+      | Keep [] ->
+          let* () = discard_from_space s in
+          let+ () = finish s in
+          `Done
       (* Nothing left of the old space. The targets are only reconciled when there
          are any; a domain with one store is done here. *)
       | Close [] ->

@@ -234,8 +234,14 @@ let () =
      step "resumed with a plain start, phase: %s  <- not \"marking\""
        (G.phase s);
      let* () = G.release s in
+     (* Abandoning is chunk-only work on the main, so the copies should not be
+        touched at all. Nothing was removed for them to have orphaned, and asking
+        each about all 4096 shards — over a network, for a target on one — to find
+        orphans that cannot exist is a long detour bolted onto a recovery. *)
+     replica_ops.lists <- 0;
      let* kept = G.abort () in
      step "finished abandoning: %d chunk(s) kept" kept.Gc.chunks_promoted;
+     step "listings of the replica during the abandonment: %d" replica_ops.lists;
      let* left = Main.list_prefix ~prefix:chunk_prefix () in
      let left =
        List.filter

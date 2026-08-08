@@ -27,6 +27,7 @@
   changed our mind, phase: abandoning
   resumed with a plain start, phase: abandoning  <- not "marking"
   finished abandoning: 11 chunk(s) kept
+  listings of the replica during the abandonment: 0
   chunks still on the main: 12 of 12
 
 === many shards uploading at once, with fewer slots than shards
