@@ -548,9 +548,23 @@ let () =
           Unix.sleepf 2.;
           false));
     publish_round ();
-    Unix.sleepf 3.;
-
-    let ta = tree mnt_a and tb = tree mnt_b in
+    (* Each mount is waited on the way the store above is: until it stops
+       changing. How long a client takes to apply a round depends on how much
+       there was, so a fixed wait compares the two while one is still catching
+       up and calls the lag a divergence. Quiescing first is what makes a
+       difference afterwards mean something. Not circular: the two are waited on
+       separately and only then compared, so two mounts that settle on different
+       answers still fail. *)
+    let stable = ref 0 and last = ref None in
+    wait_until ~timeout:120. ~what:"both mounts to stop changing" (fun () ->
+        let now = Some (tree mnt_a, tree mnt_b) in
+        if now = !last then incr stable else stable := 0;
+        last := now;
+        if !stable >= 3 then true
+        else (
+          Unix.sleepf 1.;
+          false));
+    let ta, tb = match !last with Some p -> p | None -> ([], []) in
     (* Says which way each path diverged, because the three possibilities have
        nothing to do with each other: a path only one mount lists is a
        visibility failure, whereas a path both list with different bodies is a

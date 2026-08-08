@@ -36,8 +36,25 @@ module J = Journal.Make (C)
 
 let uploaded = ref 0
 
-(* Long enough for a worker to reach the backend and back on a local store. *)
-let settle () = Lwt_unix.sleep 0.2
+(* Waits for the queue to stop moving rather than for a length of time.
+
+   A duration is a guess about how fast the machine is, and the guess was made
+   on the machine this was written on: on a loaded CI runner 0.2s elapsed before
+   the worker had dequeued, and the report read one item still pending. Pausing
+   is part of what is under test, so this cannot wait for the queue to empty --
+   while paused it never does. It waits for it to stop changing. *)
+let settle () =
+  let rec go ~stable ~last ~polls =
+    if polls > 200 then Lwt.return_unit (* ~10s: a queue this stuck is the finding *)
+    else
+      let now = (Sq.pending (), Sq.paused ()) in
+      let stable = if now = last then stable + 1 else 0 in
+      if stable >= 4 then Lwt.return_unit
+      else
+        let* () = Lwt_unix.sleep 0.05 in
+        go ~stable ~last:now ~polls:(polls + 1)
+  in
+  go ~stable:0 ~last:(-1, false) ~polls:0
 
 let post n =
   let name = Printf.sprintf "f%d.txt" n in
