@@ -92,9 +92,9 @@ let escape name =
     name;
   Buffer.contents buf
 
-let make ?(resume = false) ~name ~backend ~source ~chunk_prefix
-    ~(chunk_keys : string -> string list) ~journal_prefix ~cursor_key ~root () :
-    (module S) =
+let make ?(resume = false) ?chunk_from_prefix ~name ~backend ~source
+    ~chunk_prefix ~(chunk_keys : string -> string list) ~journal_prefix
+    ~cursor_key ~root () : (module S) =
   let (module Target : Backend.S) = backend in
   let (module Source : Backend.S) = source in
   (* Skips a HEAD per chunk, which is what makes a copy of an already-filled
@@ -106,6 +106,19 @@ let make ?(resume = false) ~name ~backend ~source ~chunk_prefix
   in
   let chunks_in_flight = ref 0 in
   let quiet = Lwt_condition.create () in
+  (* The source may be mid-collection, in which case a chunk that has not been
+     promoted yet is only under the from-space prefix. Tried second and only when
+     the target actually needs the body, so the ordinary path is unchanged and an
+     idle store never looks. The key written to the target is the plain one either
+     way: a target has one space, and never learns the source had two. *)
+  let source_body key chunk_key =
+    let* data = Source.get_opt ~key () in
+    match (data, chunk_from_prefix) with
+      | Some data, _ -> Lwt.return data
+      | None, None -> Source.get ~key ()
+      | None, Some prefix ->
+          Source.get ~key:(prefix ^ Chunk_layout.relative_path chunk_key) ()
+  in
   let ensure_chunk chunk_key =
     let key = chunk_prefix ^ Chunk_layout.relative_path chunk_key in
     if Hashtbl.mem ensured key then Lwt.return_unit
@@ -115,7 +128,7 @@ let make ?(resume = false) ~name ~backend ~source ~chunk_prefix
         match head with
           | Some _ -> Lwt.return_unit
           | None ->
-              let* data = Source.get ~key () in
+              let* data = source_body key chunk_key in
               Target.put ~key ~data ()
       in
       remember key;
