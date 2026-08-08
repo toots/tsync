@@ -987,12 +987,11 @@ module Make (C : Conf.S) = struct
       ?(on_close = fun ~shards:_ ~reclaimed:_ -> ())
       ?(on_reconcile = fun ~name:_ ~shards:_ ~total:_ ~deleted:_ ~uploaded:_ ->
         ()) () =
+    let began = Unix.gettimeofday () in
     let deadline =
       match budget with
         | None -> fun () -> false
-        | Some seconds ->
-            let stop = Unix.gettimeofday () +. seconds in
-            fun () -> Unix.gettimeofday () >= stop
+        | Some seconds -> fun () -> Unix.gettimeofday () -. began >= seconds
     in
     on_open ();
     let* s = start ?concurrency ~keep () in
@@ -1006,7 +1005,14 @@ module Make (C : Conf.S) = struct
         | `Done -> Lwt.return (stats s)
         | `More ->
             if deadline () then begin
-              Log.info "gc: out of budget while %s; run left open" (phase s);
+              (* The budget and what it actually took, because "out of budget"
+                 alone cannot be checked against anything: a limit honoured to the
+                 second and one overshot twentyfold read identically. *)
+              Log.info
+                "gc: %.0fs budget spent in %.0fs while %s; run left open"
+                (Option.value budget ~default:0.)
+                (Unix.gettimeofday () -. began)
+                (phase s);
               Lwt.return (stats s)
             end
             else

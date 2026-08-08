@@ -795,14 +795,24 @@ let gc_cmd =
             s.chunks_reclaimed
             (human_bytes s.bytes_reclaimed)
             s.chunks_promoted
-      | Gc.Suspended { phase; _ } ->
-          (* Naming the command that continues *this*, since [tsync gc] on an
-             abandoned collection would go back to collecting it. *)
+      (* Each phase fills in different fields, so reporting one fixed set of them
+         means printing zeroes that read as "nothing happened" rather than as "this
+         phase does not count that". Abandoning marks no files and reclaims
+         nothing; what it does is keep chunks.
+
+         The continue line names the command that continues *this*: a plain
+         [tsync gc] over an abandoned collection would go back to collecting it. *)
+      | Gc.Suspended { phase; _ } when abort ->
           Printf.printf
-            "Stopped while %s: %d file(s) marked, %d chunk(s) reclaimed.\n\
-             Still open; rerun tsync gc%s to continue.\n"
-            phase s.roots_marked s.chunks_reclaimed
-            (if abort then " --abort" else ""));
+            "Stopped while %s: %d chunk(s) kept so far.\n\
+             Still open; rerun tsync gc --abort to continue.\n"
+            phase s.chunks_promoted
+      | Gc.Suspended { phase; _ } ->
+          Printf.printf
+            "Stopped while %s: %d file(s) marked, %d chunk(s) kept, %d \
+             reclaimed.\n\
+             Still open; rerun tsync gc to continue.\n"
+            phase s.roots_marked s.chunks_promoted s.chunks_reclaimed);
     List.iter
       (fun (m : Gc.member_stats) ->
         Printf.printf "  %s: %d deleted%s\n" m.Gc.name m.deleted
