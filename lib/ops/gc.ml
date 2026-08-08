@@ -731,26 +731,46 @@ module Make (C : Conf.S) = struct
         | Unix.Unix_error (Unix.ENOENT, _, _) -> Lwt.return (Some 0)
         | exn -> Lwt.fail exn)
 
-  (* Chunk by chunk, for a shard both spaces hold. Bounded the same way marking a
-     namespace is bounded, this being the same work seen from the other end. *)
+  (* Chunk by chunk, for a shard both spaces hold: read the directory, link each
+     name across, and take [EEXIST] as done.
+
+     Nothing here asks whether a chunk is where it was just seen. A [readdir] gives
+     the names, so a link is the only thing left to do with each — and [link] itself
+     reports the one case worth branching on. The parent is created once for the
+     shard rather than once per chunk, being the same directory every time.
+
+     That is three syscalls a chunk less than going through {!Chunk_space.promote},
+     which is built for a caller that does *not* know where the chunk is: a stat to
+     find out, a stat to make sure of the parent, then the link. Over a shard of
+     several hundred chunks the difference is the whole cost of this. *)
   let keep_by_link s shard =
-    let* going =
-      let (module M : Backend.S) = s.main in
-      M.list_prefix ~prefix:(Space.from_prefix ^ shard ^ "/") ()
-    in
-    let keys =
-      List.filter_map
-        (fun (e : Backend.file_entry) ->
-          if Key.is_dir e.Backend.key then None
-          else Some (Filename.basename e.Backend.key))
-        going
-    in
+    let src_dir = Filename.concat (from_dir s.root) shard
+    and dst_dir = Filename.concat (to_dir s.root) shard in
+    let* names = Fs_util.readdir_list src_dir in
+    (* A chunk key is hex and a dash. Anything with a dot is a write that was in
+       flight when the space was renamed away, and linking it across would leave a
+       stray temp file behind for nobody. *)
+    let names = List.filter (fun n -> not (String.contains n '.')) names in
+    (* Once for the shard. It is there already whenever this is reached — the
+       rename failed precisely because it was — but one stat is cheaper than
+       depending on that being true. *)
+    let* () = Fs_util.mkdir_p dst_dir in
     let+ () =
       Lwt_list.iter_p
-        (fun ck -> Lwt_bounded.use s.item_slots (fun () -> Space.promote ck))
-        keys
+        (fun n ->
+          Lwt_bounded.use s.item_slots (fun () ->
+              Lwt.catch
+                (fun () ->
+                  Lwt_unix_retry.link (Filename.concat src_dir n)
+                    (Filename.concat dst_dir n))
+                (function
+                  (* Already carried across, by a previous attempt at this shard or
+                     by a publish that named the chunk. *)
+                  | Unix.Unix_error (Unix.EEXIST, _, _) -> Lwt.return_unit
+                  | exn -> Lwt.fail exn)))
+        names
     in
-    s.chunks_promoted <- s.chunks_promoted + List.length keys
+    s.chunks_promoted <- s.chunks_promoted + List.length names
 
   let keep_one s shard =
     let* carried = carry_over s shard in
