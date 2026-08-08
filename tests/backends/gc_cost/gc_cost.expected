@@ -39,6 +39,11 @@
   emptied the replica, refilled it with 2 slots and 12 shards
   chunks back on the replica: 12 of 12
 
+=== shards the cursor skipped are swept up, chunks and all
+  kept while sweeping: 12 chunk(s)
+  chunks on the main afterwards: 12 of 12
+  collection closed: true
+
 === the copies were told nothing about the collection
   run markers written to the replica: 0
   replica holds a run marker afterwards: false

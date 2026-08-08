@@ -113,6 +113,7 @@ module C : Conf.S = struct
 end
 
 module G = Gc.Make (C)
+module Space = Chunk_space.Make (C)
 
 let step fmt = Printf.printf ("  " ^^ fmt ^^ "\n")
 let case name = Printf.printf "\n=== %s\n" name
@@ -351,6 +352,26 @@ let () =
      let* refilled = Replica.list_prefix ~prefix:chunk_prefix () in
      step "emptied the replica, refilled it with 2 slots and %d shards" folders;
      step "chunks back on the replica: %d of %d" (count_chunks refilled) folders;
+
+     (* A collection abandoned under an older build left the old space's directories
+        behind, below its cursor, for a sweep at the end to remove. Those shards are
+        work like any other and go round the loop again — which has to keep their
+        chunks before removing anything, not merely delete what it finds. Forced here
+        by putting the cursor past every shard, so the first pass does nothing at all
+        and only the sweep is left. *)
+     case "shards the cursor skipped are swept up, chunks and all";
+     let* s = G.start () in
+     let* () = G.release s in
+     let* () =
+       Space.write_run
+         { Chunk_space.phase = Abandoning; started = 0.; cursor = "fff" }
+     in
+     let* swept = G.abort () in
+     step "kept while sweeping: %d chunk(s)" swept.Gc.chunks_promoted;
+     let* left = Main.list_prefix ~prefix:chunk_prefix () in
+     step "chunks on the main afterwards: %d of %d" (count_chunks left) folders;
+     let* run = G.status () in
+     step "collection closed: %b" (run = None);
 
      case "the copies were told nothing about the collection";
      step "run markers written to the replica: %d" replica_ops.markers;

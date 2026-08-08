@@ -732,6 +732,32 @@ module Make (C : Conf.S) = struct
            s.on_close ~shards:s.done_ ~reclaimed:s.chunks_reclaimed));
     Lwt.return_unit
 
+  (* One shard of the old space, removed by unlinking what is in it and then the
+     directory. Not {!Fs_util.rm_rf}, which lstats every name before unlinking it and
+     walks strictly one at a time: for a shard of six hundred chunks that is twelve
+     hundred sequential syscalls to learn nothing, the entries of a shard being files.
+
+     A shard carried across as a directory is already gone, and this finds nothing to
+     do. What is left here is the shards that were moved across chunk by chunk, whose
+     old names stayed behind. *)
+  let discard_shard s shard =
+    let dir = Filename.concat (from_dir s.root) shard in
+    let* names =
+      Lwt.catch
+        (fun () -> Fs_util.readdir_list dir)
+        (function Unix.Unix_error _ -> Lwt.return_nil | e -> Lwt.fail e)
+    in
+    let* () =
+      Lwt_list.iter_p
+        (fun n ->
+          Lwt_bounded.use s.item_slots (fun () ->
+              Fs_util.unlink_quiet (Filename.concat dir n)))
+        names
+    in
+    Lwt.catch
+      (fun () -> Lwt_unix_retry.rmdir dir)
+      (function Unix.Unix_error _ -> Lwt.return_unit | e -> Lwt.fail e)
+
   (* {1 Abandoning} *)
 
   (* Abandoning one shard means giving everything in it a name in the surviving
@@ -884,6 +910,11 @@ module Make (C : Conf.S) = struct
             else move_across s shard
     in
     s.chunks_promoted <- s.chunks_promoted + kept;
+    (* Removed here rather than in one sweep at the end, so it happens inside the
+       loop that has a cursor, a budget and something to report. Left to the end it
+       was hundreds of thousands of sequential unlinks after the last shard, with no
+       progress and no way to interrupt it — which reads exactly like a hang. *)
+    let* () = discard_shard s shard in
     s.done_ <- s.done_ + 1;
     let* () = save s Chunk_space.Abandoning shard in
     (* [roots:0]: there are no files here, only shards. What the caller prints for
@@ -1019,10 +1050,25 @@ module Make (C : Conf.S) = struct
          to find orphans that cannot exist, since nothing was removed from the main
          for them to be orphaned by. Repairing drift a collection did not cause is
          [tsync resync-remote]'s job, and not what someone abandoning one wants. *)
+      (* Any shard still holding an old directory goes round again — a collection
+         abandoned under an older build left them behind, and they are work like any
+         other, so they belong in the loop with a cursor rather than in a sweep at the
+         end. Each pass removes directories, so this converges. *)
       | Keep [] ->
-          let* () = discard_from_space s in
-          let+ () = finish s in
-          `Done
+          let* leftover = from_shards s.root in
+          if leftover <> [] then begin
+            Log.info "gc: %d shard(s) of the old space still to remove"
+              (List.length leftover);
+            s.work <- Keep leftover;
+            s.total <- List.length leftover;
+            s.done_ <- 0;
+            let+ () = save s Chunk_space.Abandoning "" in
+            `More
+          end
+          else
+            let* () = discard_from_space s in
+            let+ () = finish s in
+            `Done
       (* Nothing left of the old space. The targets are only reconciled when there
          are any; a domain with one store is done here. *)
       | Close [] ->
