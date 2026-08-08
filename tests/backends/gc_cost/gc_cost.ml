@@ -284,26 +284,23 @@ let () =
      step "listings of the replica during the abandonment: %d" replica_ops.lists;
      let* left = Main.list_prefix ~prefix:chunk_prefix () in
      step "chunks still on the main: %d of %d" (count_chunks left) folders;
-     (* A shard carried over by rename brings whatever else was in it, the writes in
+     (* A shard renamed as a directory brings whatever else was in it, the writes in
         flight included: picking them out would cost the per-file work the rename
-        exists to avoid. They are where they already were, nothing names them, and
-        the next collection discards them along with anything else unreferenced.
-        What matters is that they were never counted as chunks kept — 11 above and
-        not 22. *)
-     (* This number is also how the cheap path is watched. A shard renamed as a
-        directory brings whatever else was in it, so each of the 12 planted writes in
-        flight arrives; a shard that fell back to moving chunks one at a time filters
-        them out, and the count drops. 12 therefore says every shard took the
-        directory rename — including the lopsided one, which only gets there by
-        having the surviving space emptied first.
+        exists to avoid. They are where they already were, nothing names them, and the
+        next collection discards them with everything else unreferenced. What matters
+        is that they were never counted as chunks kept.
 
-        Which is worth having, because that emptying quietly did nothing at first:
-        it renamed each name down onto its own hard link, which POSIX defines as a
-        no-op, so the directory stayed full and every shard fell back. Correctness
-        was unaffected and the count of chunks kept was identical. This was the only
-        number that moved. *)
-     step "writes in flight carried along by a renamed shard: %d"
-       (count_strays left);
+        Which makes this the number that watches the cheap path. A shard moved chunk
+        by chunk filters its stray out, so one short of the planted count means a
+        shard did not take the directory rename — and the lopsided shard only gets
+        there by having the surviving space emptied first.
+
+        Worth watching, because that emptying quietly did nothing at first: it renamed
+        each name down onto its own hard link, which POSIX defines as a no-op, so the
+        directory stayed as full as it was and every shard fell back. Chunks kept was
+        identical and every test passed. This was the only number that moved. *)
+     step "writes in flight carried along by a renamed shard: %d of %d"
+       (count_strays left) strays;
      let* arrived =
        Lwt_list.filter_s
          (fun k ->
