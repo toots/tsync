@@ -182,8 +182,11 @@ let () =
      let* () = G.release s in
      let* s = G.start () in
      step "phase on resume: %s" (G.phase s);
+     (* [total] is what this session has to do, not what the store has — a resume
+        that reported the whole shard space would say nothing about its own
+        progress. *)
      step "shards left to reconcile: %d of %d  <- the first %d are not redone"
-       (G.total s - after_four) (G.total s) after_four;
+       (G.total s) Chunk_layout.shards after_four;
      let* () = G.release s in
 
      case "finishing";
@@ -241,6 +244,37 @@ let () =
          left
      in
      step "chunks still on the main: %d of %d" (List.length left) folders;
+
+     (* The pool discipline, which is the thing here most easily got wrong: shards
+        run concurrently and each may upload, so the outer level and the inner one
+        have to draw from different pools. Sharing one, every slot ends up held by a
+        shard waiting to upload and nothing proceeds.
+
+        Showing that takes contention, and contention takes more shards wanting to
+        upload at once than there are slots — hence emptying the replica first and
+        setting the concurrency below the number of shards involved. With a slot per
+        shard to spare, a shared pool looks perfectly healthy, which is how this
+        went unnoticed twice. *)
+     case "many shards uploading at once, with fewer slots than shards";
+     let* held = Replica.list_prefix ~prefix:chunk_prefix () in
+     let* () =
+       Replica.delete_multi
+         (List.filter_map
+            (fun (e : Backend.file_entry) ->
+              if Filename.check_suffix e.Backend.key "/" then None
+              else Some e.Backend.key)
+            held)
+     in
+     let* _ = G.run ~concurrency:2 () in
+     let* refilled = Replica.list_prefix ~prefix:chunk_prefix () in
+     let refilled =
+       List.filter
+         (fun (e : Backend.file_entry) ->
+           not (Filename.check_suffix e.Backend.key "/"))
+         refilled
+     in
+     step "emptied the replica, refilled it with 2 slots and %d shards" folders;
+     step "chunks back on the replica: %d of %d" (List.length refilled) folders;
 
      case "the copies were told nothing about the collection";
      step "run markers written to the replica: %d" replica_ops.markers;

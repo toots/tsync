@@ -850,10 +850,17 @@ let gc_cmd =
           (if abort then "Abandoning the collection of" else "Collecting")
           C.domain_name
       in
+      (* The two phases count different things, so they get different lines rather
+         than one line with a field that means nothing in one of them. Abandoning
+         walks shards and has no notion of a file; marking walks folders and
+         counts the files in them. *)
       let on_mark ~namespaces ~total ~roots ~promoted =
-        progress "  %s %d/%d, %d file(s), %d chunk(s) kept\r%!"
-          (if abort then "kept shard(s)" else "marked folder(s)")
-          namespaces total roots promoted
+        if abort then
+          progress "  kept %d/%d shard(s), %d chunk(s)\r%!" namespaces total
+            promoted
+        else
+          progress "  marked %d/%d folder(s), %d file(s), %d chunk(s) kept\r%!"
+            namespaces total roots promoted
       in
       let on_close ~shards ~reclaimed =
         progress "  closed %d shard(s), %d chunk(s) reclaimed\r%!" shards

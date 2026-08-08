@@ -29,6 +29,10 @@
   finished abandoning: 11 chunk(s) kept
   chunks still on the main: 12 of 12
 
+=== many shards uploading at once, with fewer slots than shards
+  emptied the replica, refilled it with 2 slots and 12 shards
+  chunks back on the replica: 12 of 12
+
 === the copies were told nothing about the collection
   run markers written to the replica: 0
   replica holds a run marker afterwards: false

@@ -420,13 +420,16 @@ module Make (C : Conf.S) = struct
     started : float;
     targets : Backend.member list;
     lock : Lwt_unix.file_descr;
-    (* Two pools, not one. A root holds a [root_slots] slot for as long as it
-       takes, and inside that asks for a [chunk_slots] slot per link — one shared
-       pool would deadlock the moment every slot was held by a root waiting to
-       promote, which is the trap [Local_backend.list_prefix] documents. Distinct
-       pools cannot: a chunk slot is only ever held by a link, which finishes. *)
-    root_slots : Lwt_bounded.t;
-    chunk_slots : Lwt_bounded.t;
+    (* Two pools, and which one to use is decided by nesting depth, not by what is
+       being iterated. Whatever this runs several of at once takes from
+       [unit_slots]; the per-object work inside one of those takes from
+       [item_slots]. One shared pool deadlocks the moment every slot is held by an
+       outer unit waiting for an inner one — the trap [Local_backend.list_prefix]
+       documents, and one this has fallen into more than once by naming pools after
+       the phase that happened to use them. Named for the depth instead, because
+       every phase has both. *)
+    unit_slots : Lwt_bounded.t;
+    item_slots : Lwt_bounded.t;
     (* Consulted between units so a long batch cannot overshoot a caller's time
        limit. Always false unless someone set one. *)
     mutable out_of_time : unit -> bool;
@@ -475,7 +478,16 @@ module Make (C : Conf.S) = struct
       chunks_promoted = s.chunks_promoted;
       chunks_reclaimed = s.chunks_reclaimed;
       bytes_reclaimed = s.bytes_reclaimed;
-      members = List.rev s.tallies;
+      (* Ordered by configuration, not by whichever target finished first: shards
+         run concurrently, so completion order is not stable and a report that
+         reshuffles between runs is a report nobody can diff. *)
+      members =
+        List.filter_map
+          (fun (m : Backend.member) ->
+            List.find_opt
+              (fun (ms : member_stats) -> ms.name = m.Backend.name)
+              s.tallies)
+          s.targets;
     }
 
   let status () = Space.read_run ()
@@ -514,8 +526,8 @@ module Make (C : Conf.S) = struct
         started;
         targets = deferred_members ();
         lock;
-        root_slots = Lwt_bounded.create ~max:max_slots ();
-        chunk_slots = Lwt_bounded.create ~max:max_slots ();
+        unit_slots = Lwt_bounded.create ~max:max_slots ();
+        item_slots = Lwt_bounded.create ~max:max_slots ();
         out_of_time = (fun () -> false);
         finished = false;
         work;
@@ -547,7 +559,7 @@ module Make (C : Conf.S) = struct
           in
           Log.info "gc: resuming abandonment, %d shard(s) left to keep"
             (List.length pending);
-          Lwt.return (fresh (Keep pending) (List.length shards))
+          Lwt.return (fresh (Keep pending) (List.length pending))
       (* Abandoning overrides whatever phase the collection had reached, and takes
          no cursor from it: a cursor means something different in each phase, and
          one left by marking or closing says nothing about which shards still need
@@ -568,14 +580,14 @@ module Make (C : Conf.S) = struct
           in
           Log.info "gc: resuming, %d shard(s) left to reconcile"
             (List.length pending);
-          Lwt.return (fresh (Reconcile pending) (List.length all_shards))
+          Lwt.return (fresh (Reconcile pending) (List.length pending))
       | Chunk_space.Closing ->
           let* shards = live_shards root in
           let pending =
             List.filter (fun s -> String.compare s cursor > 0) shards
           in
           Log.info "gc: resuming, %d shard(s) to close" (List.length pending);
-          Lwt.return (fresh (Close pending) (List.length shards))
+          Lwt.return (fresh (Close pending) (List.length pending))
       (* Once a collection has been called off it stays called off: coming back to
          an [Abandoning] run continues abandoning it rather than quietly resuming a
          collection whoever stopped it did not want. *)
@@ -606,7 +618,7 @@ module Make (C : Conf.S) = struct
     let* chunks = referenced_chunks key in
     let* () =
       Lwt_list.iter_p
-        (fun ck -> Lwt_bounded.use s.chunk_slots (fun () -> Space.promote ck))
+        (fun ck -> Lwt_bounded.use s.item_slots (fun () -> Space.promote ck))
         chunks
     in
     s.chunks_promoted <- s.chunks_promoted + List.length chunks;
@@ -632,7 +644,7 @@ module Make (C : Conf.S) = struct
     in
     let* () =
       Lwt_list.iter_p
-        (fun k -> Lwt_bounded.use s.root_slots (fun () -> mark_root s k))
+        (fun k -> Lwt_bounded.use s.unit_slots (fun () -> mark_root s k))
         keys
     in
     s.done_ <- s.done_ + 1;
@@ -681,11 +693,47 @@ module Make (C : Conf.S) = struct
            s.on_close ~shards:s.done_ ~reclaimed:s.chunks_reclaimed));
     Lwt.return_unit
 
-  (* Abandoning one shard: give everything in it a name in the surviving space, so
-     that discarding the old space costs nothing. The same shape as marking a
-     namespace — bounded concurrency, cursor per unit — because abandoning is a
-     collection in which every chunk turns out to be live. *)
-  let keep_one s shard =
+  (* {1 Abandoning} *)
+
+  (* Abandoning one shard means giving everything in it a name in the surviving
+     space, so that discarding the old space costs nothing. Two ways to do that,
+     and the cheap one is usually available.
+
+     A shard the surviving space has nothing of yet is carried over whole: one
+     rename in place of a link per chunk. A collection called off early is mostly
+     this, marking having reached almost none of the shards, which turns the
+     recovery from millions of links into a few thousand renames.
+
+     [rename] onto a directory that exists and holds anything fails, so the shards
+     marking did reach fall through to linking. That also settles the race worth
+     worrying about: a writer landing a chunk in the shard between the attempt and
+     now merely makes the rename fail, and the slower path is correct regardless. *)
+  let carry_over s shard =
+    let src = Filename.concat (from_dir s.root) shard
+    and dst = Filename.concat (to_dir s.root) shard in
+    Lwt.catch
+      (fun () ->
+        (* Counted before it moves, so what gets reported is chunks kept and not
+           chunks linked — a carried shard keeps everything in it and would
+           otherwise contribute nothing to the total. One directory read against
+           the link per chunk it saves. *)
+        let* names = Fs_util.readdir_list src in
+        let* () = Fs_util.ensure_parent dst in
+        let+ () = Lwt_unix_retry.rename src dst in
+        Some (List.length names))
+      (function
+        (* The surviving space already has this shard: link the chunks instead. *)
+        | Unix.Unix_error
+            ((Unix.ENOTEMPTY | Unix.EEXIST | Unix.ENOTDIR | Unix.EISDIR), _, _)
+          ->
+            Lwt.return_none
+        (* Nothing there to carry: already done, or never existed. *)
+        | Unix.Unix_error (Unix.ENOENT, _, _) -> Lwt.return (Some 0)
+        | exn -> Lwt.fail exn)
+
+  (* Chunk by chunk, for a shard both spaces hold. Bounded the same way marking a
+     namespace is bounded, this being the same work seen from the other end. *)
+  let keep_by_link s shard =
     let* going =
       let (module M : Backend.S) = s.main in
       M.list_prefix ~prefix:(Space.from_prefix ^ shard ^ "/") ()
@@ -697,19 +745,31 @@ module Make (C : Conf.S) = struct
           else Some (Filename.basename e.Backend.key))
         going
     in
-    let* () =
+    let+ () =
       Lwt_list.iter_p
-        (fun ck -> Lwt_bounded.use s.chunk_slots (fun () -> Space.promote ck))
+        (fun ck -> Lwt_bounded.use s.item_slots (fun () -> Space.promote ck))
         keys
     in
-    s.chunks_promoted <- s.chunks_promoted + List.length keys;
+    s.chunks_promoted <- s.chunks_promoted + List.length keys
+
+  let keep_one s shard =
+    let* carried = carry_over s shard in
+    let* () =
+      match carried with
+        | Some n ->
+            s.chunks_promoted <- s.chunks_promoted + n;
+            Lwt.return_unit
+        | None -> keep_by_link s shard
+    in
     s.done_ <- s.done_ + 1;
     let* () = save s Chunk_space.Abandoning shard in
+    (* [roots:0]: there are no files here, only shards. What the caller prints for
+       a collection would read as a second, wrong count of them. *)
     ignore
       (throttled (fun () ->
-           Log.debug "gc: kept %d/%d shard(s), %d chunk(s)" s.done_ s.total
-             s.chunks_promoted;
-           s.on_mark ~namespaces:s.done_ ~total:s.total ~roots:s.done_
+           Log.debug "gc: kept %d/%d shard(s), %d chunk(s) linked" s.done_
+             s.total s.chunks_promoted;
+           s.on_mark ~namespaces:s.done_ ~total:s.total ~roots:0
              ~promoted:s.chunks_promoted));
     Lwt.return_unit
 
@@ -737,7 +797,7 @@ module Make (C : Conf.S) = struct
       Lwt_list.iter_s
         (fun (m : Backend.member) ->
           let+ deleted, uploaded, complete =
-            reconcile_shard ~main:s.main ~shard ~slots:s.chunk_slots
+            reconcile_shard ~main:s.main ~shard ~slots:s.item_slots
               ~out_of_time:s.out_of_time
               ~on_step:(fun () ->
                 ignore (throttled (fun () -> report_target s m.Backend.name)))
@@ -751,7 +811,6 @@ module Make (C : Conf.S) = struct
     if not !finished then Lwt.return_false
     else begin
       s.done_ <- s.done_ + 1;
-      let* () = save s Chunk_space.Reconciling shard in
       ignore
         (throttled (fun () ->
              List.iter
@@ -876,16 +935,48 @@ module Make (C : Conf.S) = struct
       (* Unlike the other phases, a unit here can stop part-way: filling a replica
          is unbounded work. A shard that did not finish stays at the head of the
          queue rather than being counted done. *)
+      (* Shards go out concurrently here, unlike the other phases. A target has to
+         be asked about every shard there could be — only it knows what it holds —
+         so this is 4096 requests against a store that may be across a network,
+         and one at a time that is a quarter of an hour of asking about mostly
+         empty prefixes. Bounded by the same pool as the rest of the bulk work, so
+         [--concurrency 1] still means one at a time.
+
+         The cursor is a single high-water mark and these finish out of order, so
+         it advances only when a whole batch did. A batch with anything left in it
+         is redone from the last mark, which costs listings and no correctness:
+         reconciling a shard twice finds nothing to do the second time. *)
       | Reconcile shards ->
           let batch, rest = take (max 1 units) shards in
-          let rec go = function
-            | shard :: more when not (s.out_of_time ()) ->
-                let* finished = reconcile_one s shard in
-                if finished then go more else Lwt.return (shard :: more)
-            | remaining -> Lwt.return remaining
+          let unfinished = ref [] in
+          let* () =
+            Lwt_list.iter_p
+              (fun shard ->
+                if s.out_of_time () then begin
+                  unfinished := shard :: !unfinished;
+                  Lwt.return_unit
+                end
+                else
+                  (* [unit_slots]: this is the outer level, and the uploads inside
+                     one of these shards take from [item_slots]. *)
+                  Lwt_bounded.use s.unit_slots (fun () ->
+                      (* Checked again on the way in: a shard can wait a while for a
+                         slot, and the answer may have changed since. *)
+                      if s.out_of_time () then begin
+                        unfinished := shard :: !unfinished;
+                        Lwt.return_unit
+                      end
+                      else
+                        let+ finished = reconcile_one s shard in
+                        if not finished then unfinished := shard :: !unfinished))
+              batch
           in
-          let* remaining = go batch in
-          s.work <- Reconcile (remaining @ rest);
+          let* () =
+            if !unfinished = [] then save s Chunk_space.Reconciling (last_of batch)
+            else Lwt.return_unit
+          in
+          s.work <-
+            Reconcile (List.sort String.compare !unfinished @ rest);
           Lwt.return `More
 
   (* {1 Driving it} *)
