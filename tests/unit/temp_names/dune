@@ -1,0 +1,5 @@
+(executable
+ (flags
+  (:standard -open Tsync_local_io))
+ (name temp_names_test)
+ (libraries tsync_local_io lwt lwt.unix unix))

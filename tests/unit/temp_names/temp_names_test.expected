@@ -1,0 +1,21 @@
+
+=== the names we generate
+  .tsync-tmp-<pid>-1.tmp             ours
+  .tsync-tmp-<pid>-2.tmp             ours
+
+=== files a user might have
+  .syncthing.Big.Buck.Bunny.mkv.tmp  user's
+  download.part.tmp                  user's
+  no.dot.lead.mkv.tmp                user's
+  x.tmp                              user's
+  .tmp                               user's
+  plain.txt                          user's
+  .dot.txt                           user's
+  .hidden                            user's
+
+=== near misses
+  .tsync-tmp-123-4.tmp               ours
+  .tsync-tmp-123-4.txt               user's
+  .tsync-tmp-                        user's
+  tsync-tmp-123-4.tmp                user's
+  my.tsync-tmp-1-2.tmp               user's

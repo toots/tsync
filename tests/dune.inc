@@ -502,6 +502,20 @@
   (action
    (diff subs_test.expected subs_test.output))))
 
+(subdir unit/temp_names
+ (alias
+  (name default)
+  (deps temp_names_test.exe))
+ (rule
+  (alias runtest)
+  (target temp_names_test.output)
+  (action
+   (with-stdout-to temp_names_test.output (ignore-stderr (run ./temp_names_test.exe)))))
+ (rule
+  (alias runtest)
+  (action
+   (diff temp_names_test.expected temp_names_test.output))))
+
 (subdir unit/zip
  (alias
   (name default)

@@ -295,7 +295,7 @@ let ensure_dirs root rel =
 
 (* Entries the mirror keeps for itself. *)
 let is_internal name =
-  Filename.check_suffix name ".tmp"
+  Fs_util.is_temp_name name
   || name = Name_escape.dir_marker
   || name = Folder_ids.marker_name
 
@@ -343,7 +343,7 @@ let rec clean_tmp dir =
         let path = Filename.concat dir name in
         let* is_dir = Fs_util.is_directory path in
         if is_dir then clean_tmp path
-        else if Filename.check_suffix name ".tmp" then Fs_util.unlink_quiet path
+        else if Fs_util.is_temp_name name then Fs_util.unlink_quiet path
         else Lwt.return_unit)
       names
 

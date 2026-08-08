@@ -23,14 +23,26 @@ let rec mkdir_p_sync ?(perm = 0o755) path =
 
 (* The temp is named uniquely per process and per call rather than [path ^
    ".tmp"]: two writers of one path would otherwise share a temp file and the
-   loser's rename would fail ENOENT. The ".tmp" suffix is what the mirror walkers
-   skip and reap. *)
+   loser's rename would fail ENOENT. *)
+let temp_prefix = ".tsync-tmp-"
 let temp_seq = ref 0
 
 let temp_path path =
   incr temp_seq;
   Filename.concat (Filename.dirname path)
-    (Printf.sprintf ".tsync-tmp-%d-%d.tmp" (Unix.getpid ()) !temp_seq)
+    (Printf.sprintf "%s%d-%d.tmp" temp_prefix (Unix.getpid ()) !temp_seq)
+
+(* Whether a name is one of ours, for the mirror walkers that skip and reap
+   them.
+
+   Next to [temp_path] because it is the same fact stated backwards, and stated
+   apart they drift: this was a ".tmp" suffix test living in another module,
+   which matched every user file ending in ".tmp" as well as our own. The
+   walkers hid them from listings and startup deleted them, so a Syncthing
+   folder downloading ".syncthing.<name>.tmp" re-fetched the same gigabytes
+   forever and landed nothing. *)
+let is_temp_name name =
+  String.starts_with ~prefix:temp_prefix name && Filename.check_suffix name ".tmp"
 
 (* All or nothing: a [fill] failing part-way leaves no temp file to be counted
    against the cache or swept later. *)
