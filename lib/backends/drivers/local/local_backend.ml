@@ -126,11 +126,31 @@ let make ~root : (module Backend.S) =
     let delete ~key () = Fs_util.rm_rf (resolve key)
     let delete_multi keys = Lwt_list.iter_s (fun key -> delete ~key ()) keys
 
+    (* A hard link when the filesystem allows one, so copying within a store
+       costs a directory entry instead of the body. {!Chunk_space} leans on this:
+       collecting chunks links a whole store's live set, and reading and
+       rewriting every byte to do it would be absurd.
+
+       Safe because a name here is only ever replaced by [write_file]'s rename,
+       never written through, so two names sharing an inode cannot observe each
+       other. [EEXIST] counts as success — the destination already holds these
+       bytes, and a copy that has nothing left to do is done. *)
     let copy ~src_key ~dst_key () =
       if is_dir_key src_key then mkdir_p (resolve dst_key)
       else
-        let* data = read_file (resolve src_key) in
-        write_file (resolve dst_key) data
+        let src = resolve src_key and dst = resolve dst_key in
+        let* () = Fs_util.ensure_parent dst in
+        Lwt.catch
+          (fun () -> Lwt_unix_retry.link src dst)
+          (function
+            | Unix.Unix_error (Unix.EEXIST, _, _) -> Lwt.return_unit
+            (* Different device, link count exhausted, or a filesystem that has
+               no links to give. *)
+            | Unix.Unix_error ((Unix.EXDEV | Unix.EMLINK | Unix.EPERM), _, _)
+            | Unix.Unix_error (Unix.EOPNOTSUPP, _, _) ->
+                let* data = read_file src in
+                write_file dst data
+            | exn -> Lwt.fail exn)
 
     let list_prefix ?max_keys ~prefix () =
       let base = resolve prefix in
@@ -215,9 +235,15 @@ let make ~root : (module Backend.S) =
        is asked with a request waiting. *)
     let concurrency = lazy (Device.max_concurrency root)
 
+    (* [gc]: a filesystem has the two things collecting chunks takes — a link
+       within the store and a directory rename. *)
     let capabilities ~prefix:_ () =
       Lwt.return
-        { Backend.no_caps with max_concurrency = Lazy.force concurrency }
+        {
+          Backend.no_caps with
+          max_concurrency = Lazy.force concurrency;
+          gc = true;
+        }
   end)
 
 let spec =

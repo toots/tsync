@@ -12,8 +12,9 @@ type file_entry = { key : string; size : int; last_modified : float }
     Beyond holding bytes, a store may know things about the domain it fronts.
     One record rather than a method each: a composite merges them once, and
     adding a capability is a field here instead of an edit to every driver and
-    every composite. Every field is [None] for a store with no opinion, which is
-    every store that only holds bytes. *)
+    every composite. A preference is [None] for a store with no opinion, which
+    is every store that only holds bytes; a capability is a plain [bool], having
+    no gap between "no opinion" and "cannot". *)
 type caps = {
   share_url : string option;
       (** The share base URL, if this store serves shares for the domain. s3 and
@@ -31,14 +32,20 @@ type caps = {
           from the device under it; an http-proxy asks its peer, so a client
           inherits the real limit rather than guessing at hardware it cannot
           see. *)
+  gc : bool;
+      (** Whether this store can collect its own unreferenced chunks. That takes
+          a same-store link and a directory rename — see {!Chunk_space} — which
+          a filesystem has and an object store does not. Asked of a domain's
+          main directly rather than of the composite: it describes one store's
+          machinery, not the domain's. *)
 }
 
 val no_caps : caps
 
 (** One store's answer out of several. First opinion wins for the preferences;
     the lowest wins for {!caps.max_concurrency}, since a limit that ignores the
-    slowest participant is not a limit. Defined once so two composites cannot
-    drift into merging differently. *)
+    slowest participant is not a limit; any wins for {!caps.gc}. Defined once so
+    two composites cannot drift into merging differently. *)
 val merge_caps : caps list -> caps
 
 module type S = sig
