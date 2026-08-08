@@ -162,6 +162,30 @@ let () =
      step "namespaces left: %d" (G.total s);
      let* () = G.release s in
 
+     (* Reconciling is the phase that can run long — filling a replica is the only
+        part of a collection that sends bytes anywhere — so it is the one whose
+        resumability is worth pinning. Driven a step at a time rather than with a
+        time limit, which would make the snapshot depend on how fast the machine
+        is. *)
+     case "reconciling picks up where it stopped";
+     let* s = G.start () in
+     let rec until phase =
+       if G.phase s = phase then Lwt.return_unit
+       else
+         let* outcome = G.step ~units:1 s in
+         match outcome with `Done -> Lwt.return_unit | `More -> until phase
+     in
+     let* () = until "reconciling" in
+     let* _ = G.step ~units:4 s in
+     let after_four = G.done_ s in
+     step "shards reconciled before stopping: %d" after_four;
+     let* () = G.release s in
+     let* s = G.start () in
+     step "phase on resume: %s" (G.phase s);
+     step "shards left to reconcile: %d of %d  <- the first %d are not redone"
+       (G.total s - after_four) (G.total s) after_four;
+     let* () = G.release s in
+
      case "finishing";
      let* stats = G.run () in
      step "reclaimed %d chunk(s)" stats.Gc.chunks_reclaimed;
@@ -178,6 +202,17 @@ let () =
          left
      in
      step "chunks still on the main: %d of %d" (List.length left) folders;
+     (* The replica started empty, so finishing across two sessions has to have
+        filled it — an interruptible fill that quietly drops what it did not get to
+        would look identical above. *)
+     let* filled = Replica.list_prefix ~prefix:chunk_prefix () in
+     let filled =
+       List.filter
+         (fun (e : Backend.file_entry) ->
+           not (Filename.check_suffix e.Backend.key "/"))
+         filled
+     in
+     step "chunks on the replica: %d of %d" (List.length filled) folders;
 
      case "the copies were told nothing about the collection";
      step "run markers written to the replica: %d" replica_ops.markers;

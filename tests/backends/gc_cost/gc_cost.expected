@@ -12,9 +12,15 @@
   listings during a resume's start: 0
   namespaces left: 11
 
+=== reconciling picks up where it stopped
+  shards reconciled before stopping: 4
+  phase on resume: reconciling
+  shards left to reconcile: 4092 of 4096  <- the first 4 are not redone
+
 === finishing
   reclaimed 0 chunk(s)
   chunks still on the main: 12 of 12
+  chunks on the replica: 12 of 12
 
 === the copies were told nothing about the collection
   run markers written to the replica: 0

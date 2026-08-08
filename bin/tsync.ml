@@ -836,9 +836,10 @@ let gc_cmd =
                    Printf.eprintf
                      "  closed %d shard(s), %d chunk(s) reclaimed\r%!" shards
                      reclaimed)
-                 ~on_reconcile:(fun ~name ~deleted ~uploaded ->
-                   Printf.eprintf "  %s: %d deleted, %d filled\r%!" name deleted
-                     uploaded)
+                 ~on_reconcile:(fun ~name ~shards ~total ~deleted ~uploaded ->
+                   Printf.eprintf
+                     "  %s: %d/%d shard(s), %d deleted, %d filled\r%!" name
+                     shards total deleted uploaded)
                  ())
           in
           (* The progress lines above end in a carriage return, so the last one is

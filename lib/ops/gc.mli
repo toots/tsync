@@ -32,6 +32,12 @@
     that. So a remote store sees deletes and puts, never a rename, and can sit on a
     storage class where renaming would be absurd.
 
+    Filling a replica is the only part of a collection that sends bytes anywhere,
+    so it is the part that can run long: it goes out concurrently and can be
+    interrupted between chunks. A shard stopped part-way is simply done again —
+    reconciling one is idempotent, so repeating it costs a listing and finds less
+    to do — which is why no cursor finer than a shard is needed.
+
     {b Pace.} Driven a step at a time rather than as one long call, because this
     is maintenance on a live filesystem and it should be possible to run it
     without taking the machine over. A caller decides how much to do and how long
@@ -147,9 +153,11 @@ module Make (C : Conf.S) : sig
       batch of them is not much of a limit.
 
       Progress is reported because a run over a large store takes a long time and
-      a silent process is indistinguishable from a wedged one. [on_mark] and
-      [on_close] are throttled to about one call a second; [on_reconcile] fires
-      for each target that needed anything in a shard. *)
+      a silent process is indistinguishable from a wedged one. All three are
+      throttled to about one call a second, and carry running totals rather than
+      per-item deltas. [on_reconcile] names the target it is talking about and
+      fires while a replica is being filled, that being the slowest thing a
+      collection does and the one worth watching. *)
   val run :
     ?budget:float ->
     ?units:int ->
@@ -159,7 +167,13 @@ module Make (C : Conf.S) : sig
     ?on_mark:
       (namespaces:int -> total:int -> roots:int -> promoted:int -> unit) ->
     ?on_close:(shards:int -> reclaimed:int -> unit) ->
-    ?on_reconcile:(name:string -> deleted:int -> uploaded:int -> unit) ->
+    ?on_reconcile:
+      (name:string ->
+      shards:int ->
+      total:int ->
+      deleted:int ->
+      uploaded:int ->
+      unit) ->
     unit ->
     stats Lwt.t
 

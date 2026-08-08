@@ -326,12 +326,13 @@ module Make (C : Conf.S) = struct
      A replica is meant to be a full copy, so for one a gap is drift and gets
      filled — the same one bit between the two roles that decides whether reads
      may reach it, showing up again. *)
-  let reconcile_shard ~main:(module M : Backend.S) ~shard (m : Backend.member) =
+  let reconcile_shard ~main:(module M : Backend.S) ~shard ~slots ~out_of_time
+      ~on_step (m : Backend.member) =
     let (module T : Backend.S) = m.Backend.backend in
     let prefix = C.chunk_prefix ^ shard ^ "/" in
     let* held = T.list_prefix ~prefix () in
     let is_replica = m.Backend.role = "replica" in
-    if held = [] && not is_replica then Lwt.return (0, 0)
+    if held = [] && not is_replica then Lwt.return (0, 0, true)
     else
       let* mine = M.list_prefix ~prefix () in
       let names entries =
@@ -343,8 +344,12 @@ module Make (C : Conf.S) = struct
           entries
       in
       let mine = names mine and theirs = names held in
-      let on_main = Hashtbl.create 256 in
-      List.iter (fun k -> Hashtbl.replace on_main k ()) mine;
+      let set l =
+        let h = Hashtbl.create 256 in
+        List.iter (fun k -> Hashtbl.replace h k ()) l;
+        h
+      in
+      let on_main = set mine and on_target = set theirs in
       let orphaned =
         List.filter (fun k -> not (Hashtbl.mem on_main k)) theirs
         |> List.map (fun k -> prefix ^ k)
@@ -356,26 +361,43 @@ module Make (C : Conf.S) = struct
           Log.debug "gc: %s: deleted %d orphan(s) in shard %s" m.Backend.name
             (List.length orphaned) shard
       in
-      let+ uploaded =
-        if not is_replica then Lwt.return 0
-        else begin
-          let theirs_set = Hashtbl.create 256 in
-          List.iter (fun k -> Hashtbl.replace theirs_set k ()) theirs;
-          let missing =
-            List.filter (fun k -> not (Hashtbl.mem theirs_set k)) mine
-          in
-          let+ () =
-            Lwt_list.iter_s
-              (fun k ->
-                let* data = M.get ~key:(prefix ^ k) () in
-                let+ () = T.put ~key:(prefix ^ k) ~data () in
-                Log.debug "gc: %s: filled %s" m.Backend.name k)
-              missing
-          in
-          List.length missing
-        end
+      let missing =
+        if is_replica then
+          List.filter (fun k -> not (Hashtbl.mem on_target k)) mine
+        else []
       in
-      (List.length orphaned, uploaded)
+      (* Filling a replica is the one part of a collection that sends bytes
+         anywhere, so it is the part that can run long. Concurrent rather than one
+         at a time -- a replica far behind is otherwise a queue of sequential
+         round trips, which is what makes a collection look wedged rather than
+         busy -- and interruptible between chunks.
+
+         Stopping part-way through a shard loses nothing and needs no finer
+         cursor: what has been uploaded stays uploaded, and coming back re-lists
+         and finds only what is still missing. So the shard simply reports itself
+         unfinished and its cursor is not advanced. *)
+      let uploaded = ref 0 in
+      let stop = ref false in
+      let+ () =
+        Lwt_list.iter_p
+          (fun k ->
+            if !stop then Lwt.return_unit
+            else
+              Lwt_bounded.use slots (fun () ->
+                  if !stop then Lwt.return_unit
+                  else if out_of_time () then begin
+                    stop := true;
+                    Lwt.return_unit
+                  end
+                  else
+                    let* data = M.get ~key:(prefix ^ k) () in
+                    let+ () = T.put ~key:(prefix ^ k) ~data () in
+                    incr uploaded;
+                    on_step ();
+                    Log.debug "gc: %s: filled %s" m.Backend.name k))
+          missing
+      in
+      (List.length orphaned, !uploaded, not !stop)
 
   (* {1 A session} *)
 
@@ -414,7 +436,13 @@ module Make (C : Conf.S) = struct
     mutable on_mark :
       namespaces:int -> total:int -> roots:int -> promoted:int -> unit;
     mutable on_close : shards:int -> reclaimed:int -> unit;
-    mutable on_reconcile : name:string -> deleted:int -> uploaded:int -> unit;
+    mutable on_reconcile :
+      name:string ->
+      shards:int ->
+      total:int ->
+      deleted:int ->
+      uploaded:int ->
+      unit;
   }
 
   let phase s =
@@ -493,7 +521,8 @@ module Make (C : Conf.S) = struct
         tallies = [];
         on_mark = (fun ~namespaces:_ ~total:_ ~roots:_ ~promoted:_ -> ());
         on_close = (fun ~shards:_ ~reclaimed:_ -> ());
-        on_reconcile = (fun ~name:_ ~deleted:_ ~uploaded:_ -> ());
+        on_reconcile =
+          (fun ~name:_ ~shards:_ ~total:_ ~deleted:_ ~uploaded:_ -> ());
       }
     in
     (* Whatever state the store is in, continue from there: an interrupted rename
@@ -617,24 +646,52 @@ module Make (C : Conf.S) = struct
            s.on_close ~shards:s.done_ ~reclaimed:s.chunks_reclaimed));
     Lwt.return_unit
 
-  (* One shard of every target brought into line with the main. *)
+  (* Cumulative figures for one target, for reporting mid-phase rather than only
+     at the end: a target being filled is the slowest thing a collection does and
+     the one a caller most wants to watch. *)
+  let tally_of s name =
+    match List.find_opt (fun (ms : member_stats) -> ms.name = name) s.tallies with
+      | Some ms -> (ms.deleted, ms.uploaded)
+      | None -> (0, 0)
+
+  let report_target s name =
+    let deleted, uploaded = tally_of s name in
+    Log.debug "gc: %s: %d/%d shard(s), %d deleted, %d filled" name s.done_
+      s.total deleted uploaded;
+    s.on_reconcile ~name ~shards:s.done_ ~total:s.total ~deleted ~uploaded
+
+  (* One shard of every target brought into line with the main. [false] when it
+     ran out of time part-way, in which case its cursor is deliberately not saved
+     and the shard is done again next time: reconciling a shard is idempotent, so
+     repeating one costs a listing and finds less to do. *)
   let reconcile_one s shard =
+    let finished = ref true in
     let* () =
       Lwt_list.iter_s
         (fun (m : Backend.member) ->
-          let+ deleted, uploaded = reconcile_shard ~main:s.main ~shard m in
+          let+ deleted, uploaded, complete =
+            reconcile_shard ~main:s.main ~shard ~slots:s.chunk_slots
+              ~out_of_time:s.out_of_time
+              ~on_step:(fun () ->
+                ignore (throttled (fun () -> report_target s m.Backend.name)))
+              m
+          in
           record_member s m.Backend.name ~deleted ~uploaded;
-          if deleted > 0 || uploaded > 0 then
-            s.on_reconcile ~name:m.Backend.name ~deleted ~uploaded)
+          if not complete then finished := false;
+          if deleted > 0 || uploaded > 0 then report_target s m.Backend.name)
         s.targets
     in
-    s.done_ <- s.done_ + 1;
-    let* () = save s Chunk_space.Reconciling shard in
-    ignore
-      (throttled (fun () ->
-           Log.debug "gc: reconciled %d/%d shard(s)" s.done_ s.total;
-           s.on_close ~shards:s.done_ ~reclaimed:s.chunks_reclaimed));
-    Lwt.return_unit
+    if not !finished then Lwt.return_false
+    else begin
+      s.done_ <- s.done_ + 1;
+      let* () = save s Chunk_space.Reconciling shard in
+      ignore
+        (throttled (fun () ->
+             List.iter
+               (fun (m : Backend.member) -> report_target s m.Backend.name)
+               s.targets));
+      Lwt.return_true
+    end
 
   (* Marking done: what is left in the old space is garbage, so switch phases.
      Recorded before the first shard is touched. *)
@@ -744,9 +801,18 @@ module Make (C : Conf.S) = struct
           let* remaining = each s close_one batch in
           s.work <- Close (remaining @ rest);
           Lwt.return `More
+      (* Unlike the other phases, a unit here can stop part-way: filling a replica
+         is unbounded work. A shard that did not finish stays at the head of the
+         queue rather than being counted done. *)
       | Reconcile shards ->
           let batch, rest = take (max 1 units) shards in
-          let* remaining = each s reconcile_one batch in
+          let rec go = function
+            | shard :: more when not (s.out_of_time ()) ->
+                let* finished = reconcile_one s shard in
+                if finished then go more else Lwt.return (shard :: more)
+            | remaining -> Lwt.return remaining
+          in
+          let* remaining = go batch in
           s.work <- Reconcile (remaining @ rest);
           Lwt.return `More
 
@@ -755,7 +821,8 @@ module Make (C : Conf.S) = struct
   let run ?budget ?(units = 256) ?pause ?concurrency ?(on_open = fun () -> ())
       ?(on_mark = fun ~namespaces:_ ~total:_ ~roots:_ ~promoted:_ -> ())
       ?(on_close = fun ~shards:_ ~reclaimed:_ -> ())
-      ?(on_reconcile = fun ~name:_ ~deleted:_ ~uploaded:_ -> ()) () =
+      ?(on_reconcile = fun ~name:_ ~shards:_ ~total:_ ~deleted:_ ~uploaded:_ ->
+        ()) () =
     let deadline =
       match budget with
         | None -> fun () -> false
