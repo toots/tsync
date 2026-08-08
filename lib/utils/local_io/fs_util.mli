@@ -74,8 +74,12 @@ val rm_rf : string -> unit Lwt.t
 *)
 val reap_older_than : cutoff:float -> string -> bool Lwt.t
 
-(** [disk_space path] is [Some (available_bytes, total_bytes)] for the
-    filesystem holding [path], as an unprivileged writer sees it, or [None] when
-    [path] cannot be stat'd. One syscall: cheap enough to call per status
-    request. *)
-val disk_space : string -> (int64 * int64) option
+(** Capacity of a filesystem, in bytes. [avail] is what an unprivileged writer
+    can still use; [free] also counts the margin reserved for root, and is the
+    one a used-space figure must be derived from. *)
+type disk_space = { avail : int64; free : int64; total : int64 }
+
+(** [disk_space path] is the capacity of the filesystem holding [path], or
+    [None] when [path] cannot be stat'd. One syscall: cheap enough to call per
+    status request. *)
+val disk_space : string -> disk_space option

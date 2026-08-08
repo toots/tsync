@@ -307,12 +307,12 @@ module Make (C : Conf.S) = struct
   let disk_json (m : Backend.member) =
     match Option.bind m.Backend.local_path Fs_util.disk_space with
       | None -> []
-      | Some (available, total) ->
+      | Some { Fs_util.avail; total; _ } ->
           [
             ( "disk",
               `Assoc
                 [
-                  ("availableBytes", `Int (Int64.to_int available));
+                  ("availableBytes", `Int (Int64.to_int avail));
                   ("totalBytes", `Int (Int64.to_int total));
                 ] );
           ]

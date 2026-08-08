@@ -252,10 +252,15 @@ let rec reap_older_than ~cutoff dir =
     in
     kept = 0
 
-external statvfs : string -> int64 * int64 = "tsync_statvfs"
+type disk_space = { avail : int64; free : int64; total : int64 }
 
-(* Bytes an unprivileged writer can still use, plus the filesystem's size. One
-   syscall, so it is cheap enough for every status request. [None] rather than an
-   exception when the path cannot be stat'd: capacity is not worth failing a
-   report over. *)
-let disk_space path = try Some (statvfs path) with _ -> None
+external statvfs : string -> int64 * int64 * int64 = "tsync_statvfs"
+
+(* One syscall, so it is cheap enough for every status request. [None] rather
+   than an exception when the path cannot be stat'd: capacity is not worth
+   failing a report over. *)
+let disk_space path =
+  try
+    let avail, free, total = statvfs path in
+    Some { avail; free; total }
+  with _ -> None

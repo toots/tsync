@@ -6,7 +6,9 @@
  * f_frsize is the fragment size the block counts are expressed in; f_bsize is
  * only a hint about efficient I/O and is the wrong multiplier. f_bavail is what
  * an unprivileged writer can actually use, unlike f_bfree, which includes the
- * reserved margin.
+ * reserved margin. Both are reported: a writer sizing a request wants f_bavail,
+ * while df derives its used column as f_blocks - f_bfree and overstates usage by
+ * the reserved margin if handed f_bavail instead.
  *
  * ponytail: Windows has no statvfs (it would be GetDiskFreeSpaceEx) and tsync has
  * no Windows target, so there it fails and the caller reports no capacity rather
@@ -54,11 +56,13 @@ CAMLprim value tsync_statvfs(value _path) {
     caml_uerror("statvfs", _path);
   }
 
-  /* (available, total) in bytes. */
-  result = caml_alloc_tuple(2);
+  /* (available, free, total) in bytes. */
+  result = caml_alloc_tuple(3);
   Store_field(result, 0,
               caml_copy_int64((int64_t)buf.f_bavail * (int64_t)buf.f_frsize));
   Store_field(result, 1,
+              caml_copy_int64((int64_t)buf.f_bfree * (int64_t)buf.f_frsize));
+  Store_field(result, 2,
               caml_copy_int64((int64_t)buf.f_blocks * (int64_t)buf.f_frsize));
   CAMLreturn(result);
 #endif

@@ -162,6 +162,32 @@ module Make (C : Conf.S) = struct
      us, and FUSE re-reads it on the next lookup. *)
   let full_resync () = Lwt.return_unit
 
+  (* What a domain backed only by object storage reports. Its size is not ours
+     to know and no local disk bounds it, so the figure only has to be large
+     enough that nothing sizing a write against it ever refuses. *)
+  let unlimited_bytes = Int64.shift_left 1L 50
+
+  (* A write has to land on every store that keeps the domain, so the room left
+     is the least of theirs. Only a local store can say: object storage reports
+     no path and bounds nothing, and a read-only member takes no writes. The
+     figures come as a set from one store rather than a per-field minimum, so
+     that total, free and available stay describing the same disk. *)
+  let store_capacity () =
+    let bounded m =
+      if m.Backend.role = "readOnly" then None
+      else Option.bind m.Backend.local_path Fs_util.disk_space
+    in
+    let tighter a b = if b.Fs_util.avail < a.Fs_util.avail then b else a in
+    match List.filter_map bounded C.members with
+      | [] ->
+          Fs_util.
+            {
+              avail = unlimited_bytes;
+              free = unlimited_bytes;
+              total = unlimited_bytes;
+            }
+      | first :: rest -> List.fold_left tighter first rest
+
   let ipc_hooks mount_point =
     Ih.
       {
@@ -329,26 +355,24 @@ module Make (C : Conf.S) = struct
         (fun path size fi ->
           guard "truncate" path (fun () ->
               on_loop (fun () -> (dispatch path).truncate path size fi)));
-      (* The store has no size, but a write lands on the cache filesystem before
-         it is uploaded, so report that one: what df shows is then the space a
-         write can actually use. Inode counts stay nominal — nothing here maps to
-         one. One statvfs, no cache walk, since df-alikes poll this. *)
+      (* What a file costs is room in the domain's stores, not in the cache it is
+         staged through, so df reports the stores. Inode counts stay nominal —
+         nothing here maps to one. One statvfs per bounded store, no cache walk,
+         since df-alikes poll this. *)
       statfs =
         (fun _path ->
           let bsize = 4096L in
           let blocks bytes = Int64.div bytes bsize in
-          let total, avail =
-            match Fs_util.disk_space C.cache_root with
-              | Some (avail, total) -> (blocks total, blocks avail)
-              | None -> (0L, 0L)
-          in
+          let { Fs_util.avail; free; total } = store_capacity () in
           Unix_util.
             {
               f_bsize = bsize;
               f_frsize = bsize;
-              f_blocks = total;
-              f_bfree = avail;
-              f_bavail = avail;
+              f_blocks = blocks total;
+              (* df derives its used column from f_bfree, which counts the margin
+                 reserved for root; only f_bavail says what this writer gets. *)
+              f_bfree = blocks free;
+              f_bavail = blocks avail;
               f_files = Int64.of_int max_int;
               f_ffree = Int64.of_int max_int;
               f_favail = Int64.of_int max_int;
@@ -416,11 +440,11 @@ module Make (C : Conf.S) = struct
           match
             Lwt_main.run
               (let* () =
-               (* A FUSE mount is the filesystem, so a finished upload changes
+                 (* A FUSE mount is the filesystem, so a finished upload changes
                   nothing a reader can observe. *)
-               E.start
-                 ~freshness:
-                   (* This mount has to be told. [cache_opts] turns off the
+                 E.start
+                   ~freshness:
+                     (* This mount has to be told. [cache_opts] turns off the
                       attribute and entry timeouts, which is why a re-lookup
                       sees fresh data -- but it does not stop the kernel
                       answering a lookup from a dentry it already holds, and a
@@ -430,52 +454,53 @@ module Make (C : Conf.S) = struct
 
                       Pushing an invalidation is the part that was missing, not
                       a shorter timeout. *)
-                   (Frontend.Notify
-                      (fun key ->
-                        (* Backend key to the path this mount shows. A key
+                     (Frontend.Notify
+                        (fun key ->
+                          (* Backend key to the path this mount shows. A key
                            outside the domain is not ours to invalidate. *)
-                        let rel =
-                          Key.chop_slash
-                            (Key.strip_prefix ~domain_prefix:C.domain_prefix key)
-                        in
-                        (* Never from inside an operation on this path: the
+                          let rel =
+                            Key.chop_slash
+                              (Key.strip_prefix ~domain_prefix:C.domain_prefix
+                                 key)
+                          in
+                          (* Never from inside an operation on this path: the
                            kernel waits on the request, and the invalidation
                            waits on the kernel. This runs on the event loop,
                            which is not a FUSE thread. *)
-                        try Fuse.invalidate_path ("/" ^ rel)
-                        with Unix.Unix_error (e, _, _) ->
-                          (* The kernel not holding it is the state we wanted;
+                          try Fuse.invalidate_path ("/" ^ rel)
+                          with Unix.Unix_error (e, _, _) ->
+                            (* The kernel not holding it is the state we wanted;
                              anything else the mount cannot fix, and silence
                              here is a stale name nobody can account for. *)
-                          Log.debug "invalidate %s: %s" rel
-                            (Unix.error_message e)))
-                 ~on_upload_done:(fun ~key:_ -> Lwt.return_unit)
-                 ()
-             in
-             Log.debug "starting IPC server at %s" C.socket_path;
-             Lwt.async (fun () ->
-                 Ipc.serve ~path:C.socket_path
-                   (Ih.handler (ipc_hooks mount_point)));
-             (* A plain SIGTERM reaches this group too: from a supervisor that
+                            Log.debug "invalidate %s: %s" rel
+                              (Unix.error_message e)))
+                   ~on_upload_done:(fun ~key:_ -> Lwt.return_unit)
+                   ()
+               in
+               Log.debug "starting IPC server at %s" C.socket_path;
+               Lwt.async (fun () ->
+                   Ipc.serve ~path:C.socket_path
+                     (Ih.handler (ipc_hooks mount_point)));
+               (* A plain SIGTERM reaches this group too: from a supervisor that
                 only signals, and always from the parent when this frontend was
                 forked. libfuse may install its own handlers in [Fuse.main] and
                 override these, but that route exits the FUSE loop and drains just
                 the same. This covers the case where it installs none, where the
                 default action would kill the process mid-queue. *)
-             List.iter
-               (fun s ->
-                 ignore (Lwt_unix.on_signal s (fun _ -> request_stop ())))
-               [Sys.sigterm; Sys.sigint];
-             (* Before [signal_ready], so the main thread sees it once past
+               List.iter
+                 (fun s ->
+                   ignore (Lwt_unix.on_signal s (fun _ -> request_stop ())))
+                 [Sys.sigterm; Sys.sigint];
+               (* Before [signal_ready], so the main thread sees it once past
                 [wait_ready]. *)
-             stop_notification := Some (Lwt_unix.make_notification do_stop);
-             signal_ready ();
-             let* () = stop_t in
-             (* Concurrent: the unmount is what lets the main thread out of
+               stop_notification := Some (Lwt_unix.make_notification do_stop);
+               signal_ready ();
+               let* () = stop_t in
+               (* Concurrent: the unmount is what lets the main thread out of
                 [Fuse.main] to join this one, so it must not wait behind the
                 drain. *)
-             let unmount_t = unmount mount_point in
-             Log.debug "draining upload queue and backends";
+               let unmount_t = unmount mount_point in
+               Log.debug "draining upload queue and backends";
                let* () = E.drain () in
                unmount_t)
           with

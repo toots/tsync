@@ -469,16 +469,16 @@ module Make (C : Conf.S) = struct
     let src = path src_key in
     let* exists = Lwt_unix_retry.file_exists src in
     if not exists then Lwt.return_unit
-    else
+    else (
       let dst = path dst_key in
       let* () = ensure_parent dst_key in
       let* () = Lwt_unix_retry.rename src dst in
       let* is_dir = Fs_util.is_directory dst in
       if is_dir then refresh_dir_marker dst_key
-      else
+      else (
         match of_file dst with
           | m -> write dst_key m
-          | exception _ -> Lwt.return_unit
+          | exception _ -> Lwt.return_unit))
 
   (* The mirror is the directory structure: directories exist only here. *)
   let create_dir key = ensure_dirs (root ()) (rel_of key)

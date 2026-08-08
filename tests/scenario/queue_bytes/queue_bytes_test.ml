@@ -44,14 +44,15 @@ module J = Journal.Make (C)
    while paused it never does. It waits for it to stop changing. *)
 let settle () =
   let rec go ~stable ~last ~polls =
-    if polls > 200 then Lwt.return_unit (* ~10s: a queue this stuck is the finding *)
-    else
+    if polls > 200 then Lwt.return_unit
+      (* ~10s: a queue this stuck is the finding *)
+    else (
       let now = (Sq.pending (), Sq.paused ()) in
       let stable = if now = last then stable + 1 else 0 in
       if stable >= 4 then Lwt.return_unit
       else
         let* () = Lwt_unix.sleep 0.05 in
-        go ~stable ~last:now ~polls:(polls + 1)
+        go ~stable ~last:now ~polls:(polls + 1))
   in
   go ~stable:0 ~last:(-1, false) ~polls:0
 
