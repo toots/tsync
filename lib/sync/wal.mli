@@ -37,8 +37,6 @@ type record = {
           counted. *)
 }
 
-val string_of_state : state -> string
-
 module Q : module type of Durable_queue.Make (struct
   type t = record
 

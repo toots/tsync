@@ -206,6 +206,51 @@ let starts_with prefix s =
   String.length s >= String.length prefix
   && String.sub s 0 (String.length prefix) = prefix
 
+(* Folder ids are minted at random, so a snapshot cannot record one. Each is
+   aliased to <folder-N>. The backend dump assigns them by walking the tree, so
+   the numbering follows the folder structure rather than the ids; anything an
+   IPC response mentions first is numbered on sight. Reset per scenario. *)
+let folder_alias : (string, string) Hashtbl.t = Hashtbl.create 16
+let alias_counter = ref 0
+
+let reset_folder_aliases () =
+  Hashtbl.reset folder_alias;
+  alias_counter := 0
+
+(* [root_id] and [trash_id] are constants, not minted ids: they are already
+   stable and saying so is the point of printing them. *)
+let alias_id id =
+  if id = Folder.root_id || id = Folder.trash_id then id
+  else (
+    match Hashtbl.find_opt folder_alias id with
+      | Some a -> a
+      | None ->
+          incr alias_counter;
+          let a = Printf.sprintf "<folder-%d>" !alias_counter in
+          Hashtbl.add folder_alias id a;
+          a)
+
+(* A minted id is 16 lowercase hex characters. Distinguishes one from a name or
+   from the [root_id]/[trash_id] constants. *)
+let is_minted_id s =
+  String.length s = 16
+  && String.for_all (function '0' .. '9' | 'a' .. 'f' -> true | _ -> false) s
+
+(* A reference names a folder by id: ["d:<id>"] or ["f:<id>/<leaf>"]. *)
+let alias_ref s =
+  let alias_after n =
+    let rest = String.sub s n (String.length s - n) in
+    match String.index_opt rest '/' with
+      | Some i ->
+          String.sub s 0 n
+          ^ alias_id (String.sub rest 0 i)
+          ^ String.sub rest i (String.length rest - i)
+      | None -> String.sub s 0 n ^ alias_id rest
+  in
+  if starts_with "d:" s then alias_after 2
+  else if starts_with "f:" s then alias_after 2
+  else s
+
 (* Counts, not bytes: byte totals are the test's own payload sizes and would pin
    the snapshot to them without saying anything about the behaviour. Targets are
    listed only when one needed something, so a domain with a single store prints
@@ -235,6 +280,13 @@ let rec normalize_ipc (j : Yojson.Safe.t) : Yojson.Safe.t =
 
 and normalize_kv (k, v) =
   match (k, v) with
+    | ("ref" | "parentRef" | "srcRef"), `String s -> (k, `String (alias_ref s))
+    (* A bare "id" in a journal op names a folder. Unlike an etag, it cannot be
+       a content hash, so it needs no table lookup to tell the two apart. *)
+    | "id", `String s when is_minted_id s -> (k, `String (alias_id s))
+    (* A directory's etag is its own folder id. *)
+    | "etag", `String s when Hashtbl.mem folder_alias s ->
+        (k, `String (alias_id s))
     | "mtime", `Float f -> (k, `String (if f > 0. then "<mtime>" else "<zero>"))
     | "cursor", `String s ->
         (k, `String (if s = "" then "<empty>" else "<cursor>"))
@@ -247,7 +299,9 @@ and normalize_kv (k, v) =
     | k, v -> (k, normalize_ipc v)
 
 let print_ipc label obj =
-  Printf.printf "  %s -> %s\n" label
+  (* The label is the request, which names its target by reference. *)
+  Printf.printf "  %s -> %s\n"
+    (String.concat " " (List.map alias_ref (String.split_on_char ' ' label)))
     (Yojson.Safe.to_string (normalize_ipc (`Assoc obj)))
 
 type client = {
@@ -272,7 +326,6 @@ let setup_client (module C : Conf.S) root staging_prefix =
   let module F = File.Make (C) (Sq) in
   let module Mf = Manifest.Make (C) in
   let module H = Ipc_handler.Make (C) (F) in
-  let module Sp = Sync_poller.Make (C) (F) in
   let module Rp = Replay.Make (C) (F) in
   let module J = Journal.Make (C) in
   let module W = Wal.Make (C) in
@@ -579,7 +632,7 @@ let setup_client (module C : Conf.S) root staging_prefix =
         Printf.printf "  gc abandoned, %d chunk(s) kept\n" s.Gc.chunks_promoted
     | Drain ->
         let rec wait () =
-          if Sq.idle () then Lwt.return_unit
+          if Sq.pending () = 0 then Lwt.return_unit
           else
             let* () = Lwt.pause () in
             wait ()
@@ -587,7 +640,11 @@ let setup_client (module C : Conf.S) root staging_prefix =
         let* () = wait () in
         (* Move past the current ms so the next journal entry key is distinct. *)
         Lwt_unix.sleep 0.002
-    | Sync -> Sp.sync_once ()
+    (* One pass of the poller's algorithm without its timer. Nothing here is
+       presenting a mount, so no changed key has anywhere to go. *)
+    | Sync ->
+        let+ (_ : int) = Rp.apply_foreign ~on_changed:(fun _ -> ()) () in
+        ()
     | (DeleteRemoteChunk _ | CorruptRemoteChunk _ | DeleteRemoteManifest _) as s
       ->
         damage (List.hd C.members).Backend.backend s
@@ -866,12 +923,17 @@ let setup_client (module C : Conf.S) root staging_prefix =
                   Lwt.return_unit))
       files
   in
+  let string_of_state = function
+    | Wal.Intent -> "intent"
+    | Wal.Prepared -> "prepared"
+    | Wal.Executed -> "executed"
+  in
   let dump_pending () =
     let+ pending = W.list () in
     List.iter
       (fun (_, (r : Wal.record)) ->
         Printf.printf "  pending %s [%s]\n"
-          (Wal.string_of_state r.Wal.state)
+          (string_of_state r.Wal.state)
           (String.concat "; " (List.map render_op r.Wal.ops)))
       pending
   in
@@ -961,6 +1023,58 @@ let dump_backend_at ~backend_root ~domain_prefix ~chunk_prefix ~journal_prefix
       |> List.sort (fun (_, a, _) (_, b, _) -> Int64.compare a b)
       |> List.iteri (fun i (_, _, k) -> Hashtbl.replace version_alias k (i + 1)))
     (List.sort_uniq compare (List.map (fun (r, _, _) -> r) version_entries));
+  (* Folder ids are minted at random, so a snapshot cannot record one. Each is
+     aliased to <folder-N>, numbered by walking the tree from the root and taking
+     each folder's children in name order — a property of the tree rather than of
+     the ids, so the numbering holds even though the ids differ every run. *)
+  let* markers =
+    Lwt_list.filter_map_s
+      (fun (e : Backend.file_entry) ->
+        if
+          starts_with domain_prefix e.key
+          && not
+               (String.length e.key > 0 && e.key.[String.length e.key - 1] = '/')
+        then
+          let+ data = B.get ~key:e.key () in
+          match Folder.marker_of_string data with
+            | Some m ->
+                let rel = rel_key e.key in
+                let parent =
+                  match String.index_opt rel '/' with
+                    | Some i -> String.sub rel 0 i
+                    | None -> rel
+                in
+                Some (parent, m.Folder.name, m.Folder.id)
+            | None -> None
+        else Lwt.return_none)
+      entries
+  in
+  let rec number_under parent =
+    List.iter
+      (fun (_, _, id) ->
+        if not (Hashtbl.mem folder_alias id) then (
+          ignore (alias_id id);
+          number_under id))
+      (List.sort compare (List.filter (fun (p, _, _) -> p = parent) markers))
+  in
+  number_under Folder.root_id;
+  number_under Folder.trash_id;
+  (* Anything the walk did not reach — a marker whose parent is gone — still
+     needs a stable name, taken in name order. *)
+  List.iter
+    (fun (n, _, id) ->
+      if not (Hashtbl.mem folder_alias id) then ignore (alias_id id))
+    (List.sort compare (List.map (fun (_, n, i) -> (n, n, i)) markers));
+  (* A rel key under a folder namespace leads with that folder's id. *)
+  let alias_rel rel =
+    match String.index_opt rel '/' with
+      | Some i -> (
+          let head = String.sub rel 0 i in
+          match Hashtbl.find_opt folder_alias head with
+            | Some a -> a ^ String.sub rel i (String.length rel - i)
+            | None -> rel)
+      | None -> rel
+  in
   let journal_names =
     List.filter_map
       (fun (e : Backend.file_entry) ->
@@ -1057,20 +1171,22 @@ let dump_backend_at ~backend_root ~domain_prefix ~chunk_prefix ~journal_prefix
             | Some m ->
                 if starts_with (domain_prefix ^ Folder.trash_id ^ "/") e.key
                 then
-                  Printf.printf "  trash %s -> %s\n" m.Folder.name m.Folder.id
+                  Printf.printf "  trash %s -> %s\n" m.Folder.name
+                    (alias_id m.Folder.id)
                 else
-                  Printf.printf "  folder %s [%s] -> %s\n" m.Folder.name rel
-                    m.Folder.id
+                  Printf.printf "  folder %s [%s] -> %s\n" m.Folder.name
+                    (alias_rel rel) (alias_id m.Folder.id)
             | None -> (
                 match Manifest.of_string data with
                   | { symlink = Some target; _ } as m ->
                       Printf.printf "  symlink %s [%s] -> %s\n"
-                        (Manifest.recorded_name m) rel target
+                        (Manifest.recorded_name m) (alias_rel rel) target
                   | m ->
                       Printf.printf
                         "  file %s [%s] = manifest size=%Ld chunks=%d h1=%s \
                          h2=%s\n"
-                        (Manifest.recorded_name m) rel m.Manifest.size
+                        (Manifest.recorded_name m) (alias_rel rel)
+                        m.Manifest.size
                         (Chunk_table.count m.Manifest.chunks)
                         m.Manifest.h1 m.Manifest.h2;
                       let table = m.Manifest.chunks in
@@ -1079,7 +1195,8 @@ let dump_backend_at ~backend_root ~domain_prefix ~chunk_prefix ~journal_prefix
                           (Chunk_table.key table i) (Chunk_table.len table i)
                       done
                   | exception _ ->
-                      Printf.printf "  file %s = raw size=%d\n" rel e.size))
+                      Printf.printf "  file %s = raw size=%d\n" (alias_rel rel)
+                        e.size))
       else (
         Printf.printf "  other %s size=%d\n" e.key e.size;
         Lwt.return_unit))
@@ -1089,7 +1206,9 @@ let dump_backend_at ~backend_root ~domain_prefix ~chunk_prefix ~journal_prefix
    are then stable across runs, which keeps both the backend-key ordering and the
    snapshots reproducible (and makes the real ids readable in the dump). Each
    scenario re-seeds so it stays independent of the ones before it. *)
-let reset_ids () = Id.reseed 0x7c9c5
+(* Ids are random every run; the snapshot aliases them instead of fixing them,
+   so what resets between scenarios is the alias numbering. *)
+let reset_ids () = reset_folder_aliases ()
 
 let run_scenario ?(versioning = false) ?(symlink_policy = `Keep)
     ({ name; steps } : scenario) =

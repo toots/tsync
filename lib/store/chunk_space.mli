@@ -56,11 +56,8 @@ module Make (C : Conf.S) : sig
 
   val marker_key : string
 
-  (** Backend keys for a chunk key, in the surviving space and in the space on
-      its way out. *)
+  (** The backend key for a chunk key, in the surviving space. *)
   val key : string -> string
-
-  val from_key : string -> string
 
   (** The run in progress, or [None] when the store is idle. Costs one read; a
       marker that will not parse logs and reads as idle. *)

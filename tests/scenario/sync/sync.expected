@@ -140,8 +140,8 @@
   cursor = <entry-1>
   journal <entry-1> = mkdir sub/
   journal <entry-2> = put sub/a.txt 6
-  folder sub [.tsync-root/4f7b4244079f8bf6-67a7ed7af26470c3] -> 547c2ad623ddba3f
-  file a.txt [547c2ad623ddba3f/f01e5cbbc09d4fc4-9a0fcd66f030de75] = manifest size=6 chunks=1 h1=7546f608548f4d0d h2=aaeab951ddf2968e
+  folder sub [.tsync-root/4f7b4244079f8bf6-67a7ed7af26470c3] -> <folder-1>
+  file a.txt [<folder-1>/f01e5cbbc09d4fc4-9a0fcd66f030de75] = manifest size=6 chunks=1 h1=7546f608548f4d0d h2=aaeab951ddf2968e
     chunk#0 fa87ee5fc199e332-c7156c4359a54f81 size=6
 
 === foreign_rmdir
@@ -168,7 +168,7 @@
   journal <entry-2> = put sub/a.txt 6
   journal <entry-3> = delete sub/a.txt
   journal <entry-4> = rmdir sub/
-  trash sub -> 547c2ad623ddba3f
+  trash sub -> <folder-1>
 
 === foreign_rmdir_after_repeated_mkdir
   A: mkdir sub
@@ -200,7 +200,7 @@
   journal <entry-4> = mkdir sub/
   journal <entry-5> = delete sub/a.txt
   journal <entry-6> = rmdir sub/
-  trash sub -> 547c2ad623ddba3f
+  trash sub -> <folder-1>
 
 === concurrent_mkdir_then_write
   A: mkdir sub
@@ -237,10 +237,10 @@
   journal <entry-2> = mkdir sub/
   journal <entry-3> = put sub/from-a.txt 1
   journal <entry-4> = put sub/from-b.txt 1
-  folder sub [.tsync-root/4f7b4244079f8bf6-67a7ed7af26470c3] -> 547c2ad623ddba3f
-  file from-a.txt [547c2ad623ddba3f/3958c931de20fdc1-cf2927274a2ee417] = manifest size=1 chunks=1 h1=15da855801af627d h2=206c8135a9dd3b50
+  folder sub [.tsync-root/4f7b4244079f8bf6-67a7ed7af26470c3] -> <folder-1>
+  file from-a.txt [<folder-1>/3958c931de20fdc1-cf2927274a2ee417] = manifest size=1 chunks=1 h1=15da855801af627d h2=206c8135a9dd3b50
     chunk#0 e6c632b61e964e1f-d2f6d0996f37a720 size=1
-  file from-b.txt [547c2ad623ddba3f/f87da0e66b299a40-05ed2ebb07efe2e0] = manifest size=1 chunks=1 h1=6c25cc3db3ce7928 h2=6816a4fbbf51c9a5
+  file from-b.txt [<folder-1>/f87da0e66b299a40-05ed2ebb07efe2e0] = manifest size=1 chunks=1 h1=6c25cc3db3ce7928 h2=6816a4fbbf51c9a5
     chunk#0 575a0b1c44d8843f-99009138a3452320 size=1
 
 === concurrent_mkdir_then_rmdir
@@ -264,7 +264,7 @@
   journal <entry-1> = mkdir sub/
   journal <entry-2> = mkdir sub/
   journal <entry-3> = rmdir sub/
-  trash sub -> 547c2ad623ddba3f
+  trash sub -> <folder-1>
 
 === concurrent_create
   A: write foo.txt "from A"

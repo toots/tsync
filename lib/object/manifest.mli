@@ -40,7 +40,6 @@ val entry_of_key : index:int -> size:int -> string -> chunk_entry
 val per : cache_chunk_size:int -> t -> int
 val groups : cache_chunk_size:int -> t -> Chunk_group.t list
 val group_at : cache_chunk_size:int -> t -> int -> Chunk_group.t option
-val group_count : cache_chunk_size:int -> t -> int
 
 (** Whole-file [h1]/[h2] as a hash over the ordered chunk digests, so a changed
     file's manifest is rebuildable from its chunk entries alone. *)
@@ -61,11 +60,8 @@ val make_symlink : name:string -> target:string -> mtime:float -> t
 
 val of_string : string -> t
 
-(** Map a sidecar: chunk keys stay in the page cache rather than the heap. *)
-val of_file : string -> t
-
 (** The name recorded in the body. Meaningful only where the location cannot
-    yield one; a caller holding a key wants {!Make.name_of} instead. *)
+    yield one; a caller holding a key takes the name from the key. *)
 val recorded_name : t -> string
 
 (** Encoding needs a name, so every caller states which one. The two that
@@ -127,19 +123,12 @@ module Make (C : Conf.S) : sig
       that may not exist: no base means nothing to inherit. *)
   val group_at_opt : t option -> int -> Chunk_group.t option
 
-  val groups_opt : t option -> Chunk_group.t list
-
   (** On-disk path of [key]'s sidecar. Its inode doubles as the existence and
       directory test, since directories exist only in this tree. *)
   val path : string -> string
 
   (** [key]'s manifest, parsed and cached. [None] when absent or unparseable. *)
   val read : string -> t option Lwt.t
-
-  (** The name a manifest at [key] has. The location answers whenever it can;
-      the body is consulted only for an escaped on-disk leaf, which is the one
-      case a path cannot express. The file counterpart of [real_dir_name]. *)
-  val name_of : key:string -> t -> string
 
   (** Writes [t] under [key], recording the name [key] encodes. A caller cannot
       file a manifest under one name and have it record another. *)

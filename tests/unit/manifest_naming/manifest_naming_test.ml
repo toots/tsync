@@ -67,13 +67,20 @@ let body ~name =
 
 (* What a listing would show for [rel], and what the body says on its own. Equal
    for an ordinary name; only the second is available for an escaped one. *)
+(* The rule under test, spelled here rather than called: ask the location, and
+   consult the body only for an escaped on-disk leaf, which is the one case a
+   path cannot express. *)
+let name_of ~key m =
+  let leaf = Key.leaf ~domain_prefix:C.domain_prefix key in
+  if Name_escape.is_escaped leaf then Manifest.recorded_name m else leaf
+
 let report rel =
   let k = key rel in
   let+ m = Mf.read k in
   match m with
     | None -> step "%s: absent" rel
     | Some m ->
-        step "%s -> name_of=%S recorded=%S" rel (Mf.name_of ~key:k m)
+        step "%s -> name_of=%S recorded=%S" rel (name_of ~key:k m)
           (Manifest.recorded_name m)
 
 (* Directory names as a listing shows them, which is where an escaped name is

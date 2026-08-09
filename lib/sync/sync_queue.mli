@@ -11,9 +11,6 @@ module type S = sig
 
   val cancel_put : string -> bool
 
-  (** [true] when no upload is queued or running. *)
-  val idle : unit -> bool
-
   (** Files with an active or queued upload. *)
   val pending : unit -> int
 

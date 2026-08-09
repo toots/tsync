@@ -5,10 +5,6 @@
     enough that a syscall each would show. *)
 val short : unit -> string
 
-(** Fix {!short}'s seed, making the ids it mints reproducible. For tests, whose
-    snapshots record real folder ids. *)
-val reseed : int -> unit
-
 (** [n] bytes straight from [/dev/urandom], hex encoded. For ids whose
     unguessability is load-bearing: share tokens, the client uuid. Raises if
     [/dev/urandom] cannot be read rather than falling back to something weaker.

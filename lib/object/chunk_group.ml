@@ -83,5 +83,4 @@ let offset t i =
   go 0 0
 
 let bytes t = Array.fold_left ( + ) 0 t.sizes
-let members t = Array.to_list t.members
 let key t = t.key
