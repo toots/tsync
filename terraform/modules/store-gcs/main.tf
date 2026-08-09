@@ -71,6 +71,11 @@ resource "google_service_account" "client" {
   display_name = "tsync client ${var.name}"
 }
 
+# The daemon mints its token with the devstorage.full_control scope, because the
+# XML API's bulk delete — which is how `tsync gc` removes chunks, a thousand keys
+# to the request — rejects a read_write token. That is a ceiling on the token,
+# not a grant: this role is what the account may actually do, and it stays
+# objects-only. Widening it to roles/storage.admin would be the thing to avoid.
 resource "google_storage_bucket_iam_member" "client" {
   bucket = local.bucket_name
   role   = "roles/storage.objectUser" # get/create/delete/list objects

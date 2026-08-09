@@ -43,7 +43,17 @@ let of_service_account_json json =
     client_email;
     private_key;
     token_uri;
-    scope = "https://www.googleapis.com/auth/devstorage.read_write";
+    (* [full_control] rather than [read_write] for one operation: the XML API's
+       bulk delete refuses a [read_write] token outright — "Provided scope(s) are
+       not authorized" — where the JSON API's single delete accepts it, and bulk
+       delete is what a collection does a thousand keys at a time.
+
+       A scope is a ceiling on the token, not a grant: what this service account
+       may actually do stays whatever its IAM role says, which is
+       [roles/storage.objectUser] — objects only, no bucket or IAM policy. So the
+       wider scope buys the delete and grants nothing the role does not already
+       allow. *)
+    scope = "https://www.googleapis.com/auth/devstorage.full_control";
     cached = None;
     refresh_lock = Lwt_mutex.create ();
   }
