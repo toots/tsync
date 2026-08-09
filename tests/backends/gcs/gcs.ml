@@ -39,10 +39,12 @@ let () =
      end the element early and delete something else. *)
   check "delete_body names each key"
     (Gcs_backend.delete_body ["a/x"; "a/y"]
-    = "<Delete><Quiet>true</Quiet><Object><Key>a/x</Key></Object><Object><Key>a/y</Key></Object></Delete>");
+    = "<Delete><Quiet>true</Quiet><Object><Key>a/x</Key></Object><Object><Key>a/y</Key></Object></Delete>"
+    );
   check "delete_body escapes metacharacters"
     (Gcs_backend.delete_body ["a&b<c>d\"e'f"]
-    = "<Delete><Quiet>true</Quiet><Object><Key>a&amp;b&lt;c&gt;d&quot;e&apos;f</Key></Object></Delete>");
+    = "<Delete><Quiet>true</Quiet><Object><Key>a&amp;b&lt;c&gt;d&quot;e&apos;f</Key></Object></Delete>"
+    );
 
   (* [Quiet] means a clean delete answers with no [Error] at all, so the empty
      case is the one that has to read as success. *)

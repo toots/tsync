@@ -31,9 +31,9 @@ type caps = {
           handing them all to storage. A local store answers from the device
           under it; an http-proxy asks its peer. *)
   gc : bool;
-      (** Whether this store can collect its own unreferenced chunks, which takes
-          renaming a directory and renaming within it — see {!Chunk_space} —
-          that a filesystem has and an object store does not. Nothing beyond
+      (** Whether this store can collect its own unreferenced chunks, which
+          takes renaming a directory and renaming within it — see {!Chunk_space}
+          — that a filesystem has and an object store does not. Nothing beyond
           [rename] is asked of it: a store with no hard links to give collects
           the same way.
 
@@ -77,17 +77,18 @@ module type S = sig
   (** Delete every key, or raise. Two things callers depend on and every driver
       owes them:
 
-      - a key that is not there is not a failure. {!Gc} sends every copy the same
-        list whether or not it holds each one, and a resumed run repeats a batch
-        it may already have deleted.
+      - a key that is not there is not a failure. {!Gc} sends every copy the
+        same list whether or not it holds each one, and a resumed run repeats a
+        batch it may already have deleted.
       - a list longer than whatever the store takes per request is still deleted
         whole; the driver pages.
 
       Bulk deletes are the awkward case, because a store answers one of these
       with a [200] carrying a per-key failure list. A driver that reads only the
-      status reports success over keys that are still there — and nothing walks a
-      copy afterwards to notice. See {!absent_code}. *)
+      status reports success over keys that are still there — and nothing walks
+      a copy afterwards to notice. See {!absent_code}. *)
   val delete_multi : string list -> unit Lwt.t
+
   val copy : src_key:string -> dst_key:string -> unit -> unit Lwt.t
 
   val list_prefix :

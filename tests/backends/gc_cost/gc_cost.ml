@@ -227,19 +227,25 @@ let () =
          match outcome with `Done -> Lwt.return_unit | `More -> until phase
      in
      let* () = until "closing" in
-     step "shards to close: %d of a possible %d" (G.total s)
-       Chunk_layout.shards;
+     step "shards to close: %d of a possible %d" (G.total s) Chunk_layout.shards;
      replica_ops.lists <- 0;
      main_ops.lists <- 0;
+     main_ops.heads <- 0;
      let* _ = G.step ~units:4 s in
      let after_four = G.done_ s in
      step "shards closed before stopping: %d" after_four;
-     (* Two listings a shard, both of the main's own directories: what is going and
-        what survived. A copy is written to, never read — asking it what it holds
-        is the 4096 round trips this stopped doing. *)
+     (* One listing a shard, of the shard on its way out. A copy is written to,
+        never read — asking it what it holds is the 4096 round trips this stopped
+        doing. *)
      step "listings of the main while closing 4 shard(s): %d" main_ops.lists;
      step "listings of the replica while closing 4 shard(s): %d"
        replica_ops.lists;
+     (* What survived is asked after by name, and only for whatever the outgoing
+        shard still holds. Listing the surviving shard instead read its several
+        hundred entries to adjudicate the handful marking left behind, which on a
+        spinning main was the whole phase. Nothing here is garbage, so the
+        question is never reached. *)
+     step "chunks asked after in the surviving space: %d" main_ops.heads;
      let* () = G.release s in
      let* s = G.start () in
      step "phase on resume: %s" (G.phase s);

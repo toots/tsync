@@ -18,3 +18,7 @@
   the chunk in shard 009, which the main never had, is still there: true
   the replica is still short chunk 003, which the main kept: true
   filling either of those is tsync mirror's job, not this one's
+
+=== a chunk uploaded again mid-run is not deleted off the copies
+  the re-uploaded chunk 004 survives on the main: true
+  and is still on the replica, not deleted out from under it: true

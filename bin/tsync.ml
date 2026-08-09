@@ -794,7 +794,7 @@ let gc_cmd =
      abandoned after a finished mark moves nothing and a count of zero says
      nothing about whether there was a run at all. *)
   let report ~abort ~was_open ~domain (s : Gc.stats) =
-    (match s.Gc.outcome with
+    match s.Gc.outcome with
       | Gc.Completed when abort && not was_open ->
           Printf.printf "No collection was open for %s; nothing to abandon.\n"
             domain
@@ -825,7 +825,7 @@ let gc_cmd =
             "Stopped while %s: %d file(s) marked, %d chunk(s) kept, %d \
              reclaimed.\n\
              Still open; rerun tsync gc to continue.\n"
-            phase s.roots_marked s.chunks_promoted s.chunks_reclaimed)
+            phase s.roots_marked s.chunks_promoted s.chunks_reclaimed
   in
   let run budget pause concurrency delete_batch abort status domain =
     (* Reported as [Failure], which the top level prints as "tsync: <sentence>"

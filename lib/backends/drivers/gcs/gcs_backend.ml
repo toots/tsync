@@ -51,7 +51,7 @@ let call t ~meth ?ctype ?(extra_headers = []) ?(body = "") uri =
     Cohttp.Header.of_list
       (extra_headers
       @
-      match ctype with
+        match ctype with
         | Some c -> ("Content-Type", c) :: auth_header
         | None -> auth_header)
   in
@@ -248,11 +248,11 @@ let delete_multi t keys =
            would read as a permanent refusal: the codes here are per key, a
            retried batch costs a repeat of something idempotent, and being wrong
            the other way strands the objects on a copy nothing walks. *)
-        (match
-           List.filter
-             (fun (c, _) -> not (Backend.absent_code c))
-             (delete_errors body)
-         with
+          (match
+             List.filter
+               (fun (c, _) -> not (Backend.absent_code c))
+               (delete_errors body)
+           with
           | [] -> ()
           | (code_, key) :: _ as failed ->
               raise

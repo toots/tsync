@@ -17,8 +17,9 @@
 === closing asks the copies nothing
   shards to close: 12 of a possible 4096
   shards closed before stopping: 4
-  listings of the main while closing 4 shard(s): 8
+  listings of the main while closing 4 shard(s): 4
   listings of the replica while closing 4 shard(s): 0
+  chunks asked after in the surviving space: 0
   phase on resume: closing
   shards left to close: 8  <- the first 4 are not redone
 

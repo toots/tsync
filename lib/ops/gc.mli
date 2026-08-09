@@ -95,9 +95,9 @@ module Make (C : Conf.S) : sig
       possible. The work is I/O bound, so this and not the batch size decides
       how hard a step leans on the device.
 
-      [delete_batch] is how many keys go into one delete against a copy
-      (default 1000, which is what s3 and gcs both cap a bulk delete at). Raise
-      it for a store that takes more, lower it for one that chokes.
+      [delete_batch] is how many keys go into one delete against a copy (default
+      1000, which is what s3 and gcs both cap a bulk delete at). Raise it for a
+      store that takes more, lower it for one that chokes.
 
       [keep] makes this an abandonment rather than a collection: see {!abort}.
 

@@ -37,6 +37,12 @@ module Make (C : Conf.S) = struct
   let report_interval = 1.
   let last_report = ref neg_infinity
 
+  (* How long the closing phase may go without recording where it got to. Longer
+     than the reporting interval, a checkpoint costing a delete against every
+     copy rather than a line of output, and short enough that what a crash
+     repeats is seconds of scanning. *)
+  let checkpoint_interval = 5.
+
   let throttled f =
     let now = Unix.gettimeofday () in
     if now -. !last_report >= report_interval then begin
@@ -273,42 +279,55 @@ module Make (C : Conf.S) = struct
      completed mark is the garbage itself: marking moves each live chunk across
      rather than linking it, so nothing has to be worked out here twice.
 
-     The surviving space is still listed, for a case moving does not cover: a
-     chunk can be orphaned and, during the run, uploaded again by a writer that
-     never saw the outgoing copy. On the main that is harmless — the new name
-     survives the discard — but deleting the key off a replica would take out a
-     live chunk. Listed second so a {!Chunk_space.promote_all} landing between
-     the two is seen rather than missed.
+     Each candidate is then asked after by name in the surviving space, for a
+     case moving does not cover: a chunk can be orphaned and, during the run,
+     uploaded again by a writer that never saw the outgoing copy. On the main
+     that is harmless — the new name survives the discard — but deleting the key
+     off a replica would take out a live chunk. Asked after the outgoing listing,
+     so a {!Chunk_space.promote_all} landing between the two is seen rather than
+     missed.
+
+     By name rather than by listing the surviving shard, because the two are
+     nowhere near the same size once marking has run: the shard on its way out
+     holds the handful of chunks nothing referenced, the surviving one holds the
+     several hundred that everything did. Listing it stats every one of them to
+     adjudicate one or two, and on a spinning disk that ratio is the whole
+     phase. A shard marking emptied asks nothing at all.
 
      Keys come back spelled as a target holds them, a target having no
      from-space. Nothing here holds more than a shard's worth of them, whatever
      the store's size. *)
-  let orphans_in_shard ~main:(module M : Backend.S) shard =
+  let orphans_in_shard ~main:(module M : Backend.S) ~slots shard =
     let prefix = C.chunk_prefix ^ shard ^ "/" in
     let* going = M.list_prefix ~prefix:(Space.from_prefix ^ shard ^ "/") () in
-    let* surviving = M.list_prefix ~prefix () in
-    let kept = Hashtbl.create 256 in
-    List.iter
-      (fun (e : Backend.file_entry) ->
-        Hashtbl.replace kept (Filename.basename e.Backend.key) ())
-      surviving;
     (* Only chunks: a write left in flight is discarded with the old space, but
        it was never a chunk — counting it would overstate what the collection
        recovered, and naming it in a delete would take out another client's
-       upload. *)
-    Lwt.return
-      (List.fold_left
-         (fun (keys, bytes) (e : Backend.file_entry) ->
-           let name = Filename.basename e.Backend.key in
-           if Hashtbl.mem kept name || not (Chunk_layout.is_chunk_key name) then
-             (keys, bytes)
-           else ((prefix ^ name) :: keys, bytes + e.Backend.size))
-         ([], 0) going)
+       upload. Filtered before anything is asked of the store, so a shard of
+       leftovers costs nothing to dismiss. *)
+    let candidates =
+      List.filter_map
+        (fun (e : Backend.file_entry) ->
+          let name = Filename.basename e.Backend.key in
+          if Chunk_layout.is_chunk_key name then Some (name, e.Backend.size)
+          else None)
+        going
+    in
+    if candidates = [] then Lwt.return ([], 0)
+    else
+      let+ doomed =
+        Lwt_bounded.filter_map_with slots
+          (fun (name, size) ->
+            let key = prefix ^ name in
+            let+ surviving = M.head_opt ~key () in
+            match surviving with Some _ -> None | None -> Some (key, size))
+          candidates
+      in
+      List.fold_left
+        (fun (keys, bytes) (key, size) -> (key :: keys, bytes + size))
+        ([], 0) doomed
 
-  type work =
-    | Mark of string list
-    | Keep of string list
-    | Close of string list
+  type work = Mark of string list | Keep of string list | Close of string list
 
   type session = {
     main : (module Backend.S);
@@ -607,13 +626,23 @@ module Make (C : Conf.S) = struct
 
   (* Shards are scanned in order and their doomed keys pooled, so a store holding
      a handful of chunks in each pays one delete per copy for hundreds of shards
-     rather than one per shard. Scanning is two local listings; the delete is a
-     round trip, and it is the round trips this exists to spend fewer of.
+     rather than one per shard. The delete is a round trip, and it is the round
+     trips this exists to spend fewer of.
+
+     Flushing is also what moves the cursor, so it cannot be paced solely by the
+     thing it exists to batch: a store with little garbage never fills a batch,
+     and the cursor would then sit still for as long as the phase ran. Three ways
+     to be ready, whichever comes first — a full batch, a few seconds since the
+     last one, or no copies at all, there being no round trip to save.
 
      Hands back the shards it did not reach, so a caller's time limit stops this
      at a shard boundary with everything before it flushed. *)
   let close_batch s shards =
-    let pending = ref [] and doomed = ref [] and count = ref 0 and bytes = ref 0 in
+    let pending = ref []
+    and doomed = ref []
+    and count = ref 0
+    and bytes = ref 0 in
+    let flushed = ref (Unix.gettimeofday ()) in
     let flush () =
       if !pending = [] then Lwt.return_unit
       else begin
@@ -623,12 +652,19 @@ module Make (C : Conf.S) = struct
         doomed := [];
         count := 0;
         bytes := 0;
+        flushed := Unix.gettimeofday ();
         flush_close s ~shards ~doomed:keys ~reclaimed ~bytes:size
       end
     in
+    let ready () =
+      s.targets = [] || !count >= s.delete_batch
+      || Unix.gettimeofday () -. !flushed >= checkpoint_interval
+    in
     let rec go = function
       | shard :: more when not (s.out_of_time ()) ->
-          let* keys, size = orphans_in_shard ~main:s.main shard in
+          let* keys, size =
+            orphans_in_shard ~main:s.main ~slots:s.item_slots shard
+          in
           pending := shard :: !pending;
           doomed := List.rev_append keys !doomed;
           count := !count + List.length keys;
@@ -639,14 +675,12 @@ module Make (C : Conf.S) = struct
           ignore
             (throttled (fun () ->
                  let scanned = s.done_ + List.length !pending in
-                 Log.debug
-                   "gc: %d/%d shard(s) scanned, %d chunk(s) to delete" scanned
-                   s.total (s.chunks_reclaimed + !count);
+                 Log.debug "gc: %d/%d shard(s) scanned, %d chunk(s) to delete"
+                   scanned s.total
+                   (s.chunks_reclaimed + !count);
                  s.on_close ~shards:scanned
                    ~reclaimed:(s.chunks_reclaimed + !count)));
-          let* () =
-            if !count >= s.delete_batch then flush () else Lwt.return_unit
-          in
+          let* () = if ready () then flush () else Lwt.return_unit in
           go more
       | remaining ->
           let+ () = flush () in

@@ -178,4 +178,38 @@ let () =
        (label 3)
        (List.mem (ck 3) main && not (List.mem (ck 3) replica));
      step "filling either of those is tsync mirror's job, not this one's";
+
+     (* The one case being absent from the space on its way out does not settle:
+        a chunk is orphaned when the run opens, and a writer that never heard of
+        the run uploads it again before closing reaches its shard. On the main
+        the new name survives the discard, but a copy is sent keys rather than
+        asked what it holds, so naming this one would take out a chunk something
+        references again. *)
+     case "a chunk uploaded again mid-run is not deleted off the copies";
+     let* () = Main.put ~key:(key 4) ~data:"orphan-4" () in
+     let* () = Replica.put ~key:(key 4) ~data:"orphan-4" () in
+     let* s = G.start () in
+     let rec until phase =
+       if G.phase s = phase then Lwt.return_unit
+       else
+         let* outcome = G.step ~units:1 s in
+         match outcome with `Done -> Lwt.return_unit | `More -> until phase
+     in
+     let* () = until "closing" in
+     (* Marking is done and nothing referenced chunk 4, so it is sitting in the
+        space on its way out. This is the writer, landing it in the space every
+        write goes to. *)
+     let* () = Main.put ~key:(key 4) ~data:"orphan-4" () in
+     let rec drain () =
+       let* outcome = G.step ~units:16 s in
+       match outcome with `Done -> Lwt.return_unit | `More -> drain ()
+     in
+     let* () = drain () in
+     let* () = G.release s in
+     let* main = chunks_of (module Main) in
+     let* replica = chunks_of (module Replica) in
+     step "the re-uploaded chunk %s survives on the main: %b" (label 4)
+       (List.mem (ck 4) main);
+     step "and is still on the replica, not deleted out from under it: %b"
+       (List.mem (ck 4) replica);
      Lwt.return_unit)
