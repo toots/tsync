@@ -179,6 +179,13 @@ let () =
         the chunk was in the old space, which the link answers by succeeding or not —
         a stat per chunk, over the millions of them a collection promotes. *)
      step "chunks asked about before being promoted: %d" main_ops.heads;
+     (* One saved cursor per namespace, so an interruption gives back at most the
+        namespace in flight. Saved per batch instead — [units] namespaces, each a
+        folder's worth of manifests — an interruption threw away hours of relinking,
+        and the cursor sat empty meanwhile saying nothing had been done. *)
+     main_ops.markers <- 0;
+     let* _ = G.step ~units:4 s in
+     step "cursors saved while marking 4 namespace(s): %d" main_ops.markers;
      let* () = G.release s in
 
      case "resuming does not re-find the work";

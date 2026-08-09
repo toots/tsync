@@ -8,10 +8,11 @@
 === marking, one unit at a time
   listings for one namespace: 1
   chunks asked about before being promoted: 0
+  cursors saved while marking 4 namespace(s): 4
 
 === resuming does not re-find the work
   listings during a resume's start: 0
-  namespaces left: 11
+  namespaces left: 7
 
 === reconciling picks up where it stopped
   shards reconciled before stopping: 4

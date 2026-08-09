@@ -1095,17 +1095,24 @@ module Make (C : Conf.S) = struct
           Lwt.return `More
       | Mark namespaces ->
           let batch, rest = take (max 1 units) namespaces in
-          let rec go done_ = function
+          (* The cursor advances per namespace, not per batch. A batch is [units] of
+             them and a namespace can be a folder's worth of manifests, so saving at
+             the end of a batch meant an interruption threw away everything since the
+             last one — hundreds of folders on a large domain, which is hours of
+             relinking. One small write per namespace against that is nothing.
+
+             Sound because namespaces here go one at a time: the concurrency is
+             inside one, over its roots and their chunks. Were these overlapped, "the
+             last one finished" would not be the furthest one and saving it would
+             strand the rest. *)
+          let rec go = function
             | ns :: more when not (s.out_of_time ()) ->
                 let* () = mark_one s ns in
-                go (ns :: done_) more
-            | remaining -> Lwt.return (done_, remaining)
+                let* () = save s Chunk_space.Marking ns in
+                go more
+            | remaining -> Lwt.return remaining
           in
-          let* done_, remaining = go [] batch in
-          let* () =
-            if done_ = [] then Lwt.return_unit
-            else save s Chunk_space.Marking (last_of done_)
-          in
+          let* remaining = go batch in
           s.work <- Mark (remaining @ rest);
           Lwt.return `More
       (* Shards are not batched concurrently: each one deletes a directory and
