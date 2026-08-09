@@ -11,7 +11,7 @@
 
 Name:           tsync
 Version:        0.0.0
-Release:        %{?run_number}%{!?run_number:0}%{?dist}
+Release:        %{?build_release}%{!?build_release:0}%{?dist}
 Summary:        Cloud-backed filesystem sync tool
 License:        MIT
 URL:            https://github.com/toots/tsync

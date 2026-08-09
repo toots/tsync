@@ -1,9 +1,12 @@
 #!/bin/sh
-# Assembles dist/tsync_<version>_<arch>.deb from the binary linux/build.sh made.
+# Assembles dist/tsync_<distro>_<arch>.deb from the binary linux/build.sh made.
 # Run from the repo root, on the distro being targeted.
 set -eu
 
 RUN_NUMBER=${RUN_NUMBER:-0}
+# Dated so a version says when it was built. The run number keeps same-day
+# builds distinct, which is what apt compares to decide an upgrade.
+DATE=${BUILD_DATE:-$(date -u +%Y%m%d)}
 
 # Debian 13 and Ubuntu 26.04 otherwise produce identically named files, and the
 # second one uploaded to the nightly release silently replaces the first.
@@ -12,7 +15,7 @@ case "$ID" in
   debian) suffix="deb$VERSION_ID" ;;
   *) suffix="$ID$VERSION_ID" ;;
 esac
-version="0.0.0-${RUN_NUMBER}~${suffix}"
+version="0.0.0-${DATE}.${RUN_NUMBER}~${suffix}"
 
 arch=$(dpkg --print-architecture)
 root=$(mktemp -d)
@@ -48,7 +51,10 @@ Description: Cloud-backed filesystem sync tool
 EOF
 
 mkdir -p dist
-out="dist/tsync_${version}_${arch}.deb"
+# The name carries no version: the nightly release keeps one asset per distro
+# and architecture, so uploading over it is the whole of the cleanup. The
+# version is inside the package, which is where apt reads it.
+out="dist/tsync_${suffix}_${arch}.deb"
 dpkg-deb --build --root-owner-group "$root" "$out"
 dpkg-deb --info "$out"
 rm -rf "$root" "$stub"

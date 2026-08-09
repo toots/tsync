@@ -28,18 +28,8 @@ runs:
         gh release view nightly >/dev/null 2>&1 \
           || gh release create nightly --prerelease --title nightly --notes "" \
           || true
-        # Versioned filenames mean --clobber never replaces the previous build,
-        # so drop the older builds of the same package first. The run number is
-        # the only part that varies; the rest of the name pins distro and arch,
-        # so a prune here never touches another job's asset. Names without a
-        # version (tsync.pkg) are left to --clobber.
-        assets=$(gh release view nightly --json assets -q '.assets[].name')
-        for file in $FILES; do
-          glob=$(basename "$file" | sed 's/0\.0\.0-[0-9][0-9]*/0.0.0-*/')
-          case "$glob" in *'*'*) ;; *) continue ;; esac
-          echo "$assets" | while read -r asset; do
-            case "$asset" in $glob) gh release delete-asset nightly "$asset" -y ;; esac
-          done
-        done
+        # Every artifact is named for its distro and architecture and nothing
+        # else, so --clobber leaves exactly one of each and there is no older
+        # build to prune. Versions live inside the packages.
         gh release upload nightly $FILES --clobber
         gh release edit nightly --notes "Rolling build of main, from $SHA."
