@@ -7,10 +7,6 @@ on:
     types: [completed]
     branches: [main]
   workflow_dispatch:
-  # ponytail: temporary — a workflow is only dispatchable once it is on the
-  # default branch. Remove with the branch.
-  push:
-    branches: [tsync-android]
 
 concurrency:
   group: release-android
@@ -19,7 +15,7 @@ concurrency:
 jobs:
   apk:
     if: >-
-      github.event_name != 'workflow_run'
+      github.event_name == 'workflow_dispatch'
       || github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
     timeout-minutes: 120
