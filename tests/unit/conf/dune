@@ -1,5 +1,8 @@
+; [tsync_metrics] for the one assertion that spans both: what [human_bytes]
+; prints is what [configure] offers back as a default, so it has to parse.
+
 (test
  (flags
-  (:standard -open Tsync_conf_parsing))
+  (:standard -open Tsync_conf_parsing -open Tsync_metrics))
  (name conf_test)
- (libraries tsync_conf_parsing))
+ (libraries tsync_conf_parsing tsync_metrics))
