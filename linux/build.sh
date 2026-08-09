@@ -27,6 +27,16 @@ opam pin -ny .
 opam pin add -ny fuse3 git+https://github.com/toots/ocamlfuse.git
 opam pin add -ny git+https://github.com/toots/aws-s3.git#tsync
 
+# A branch pin keeps its version string, so a restored opam root already
+# holding an older build of these satisfies the dependency and nothing rebuilds.
+# Only reached when the cache carried one in: on a fresh switch they are absent
+# and the install below fetches the current revision.
+for pkg in fuse3 aws-s3 aws-s3-lwt; do
+  if opam list --installed --short | grep -qx "$pkg"; then
+    opam reinstall -y "$pkg"
+  fi
+done
+
 opam install --deps-only tsync tsync-s3 tsync-fuse
 # The OpenSSL TLS backend. Optional to the build, preferred at runtime.
 opam install lwt_ssl
