@@ -9,23 +9,17 @@ module Auth : sig
   val timestamp_header : string
   val signature_header : string
 
-  (** The signature for one request, given the timestamp to sign under.
-      {!request_headers} is what a client wants; this is for a caller choosing
-      the timestamp itself, which is how the replay window is tested. *)
-  val sign :
-    secret:string ->
-    meth:string ->
-    path:string ->
-    timestamp:string ->
-    body:string ->
-    string
-
-  (** Headers to send with a request. The timestamp is now. *)
+  (** Headers to send with a request. [timestamp] defaults to now; passing one
+      signs under a time of the caller's choosing, which is how the replay
+      window is exercised — the signature is genuine and only the clock is
+      wrong. *)
   val request_headers :
+    ?timestamp:string ->
     secret:string ->
     meth:string ->
     path:string ->
     body:string ->
+    unit ->
     (string * string) list
 
   (** Whether a request's signature holds and its timestamp is within the replay
