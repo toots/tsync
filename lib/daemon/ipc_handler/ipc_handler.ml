@@ -101,12 +101,12 @@ module Make (C : Conf.S) (F : File_ops.S) = struct
   let parent_folder_id key = lookup_folder (Key.parent (rel_body key))
 
   (* One manifest resolution (sidecar, else a single GET) yields size, mtime,
-     etag and upload state. F.stat plus a separate etag lookup would fetch the
-     same manifest twice more per call, and fileproviderd stats constantly. *)
-  (* A directory reports mtime zero and its own id as etag: both constant for
-     the folder's lifetime, so a caller checking for change is not told the
-     directory just changed on every look. Its contents arrive through the change
-     feed, not the parent. *)
+     etag and upload state; F.stat plus a separate etag lookup would fetch the
+     same manifest twice more per call, and fileproviderd stats constantly.
+
+     A directory reports mtime zero and its own id as etag, both constant for the
+     folder's lifetime, so a caller checking for change is not told the directory
+     just changed on every look. *)
   let dir_fields id =
     [
       ("kind", `String "dir");
@@ -183,13 +183,13 @@ module Make (C : Conf.S) (F : File_ops.S) = struct
                                ))
                       | None -> not_found key)))
 
+  (* Bounds concurrent per-file manifest resolutions during enumeration. *)
+  let resolve_pool = Lwt_bounded.create ~max:C.max_downloads ()
+
   (* Listed objects are manifests, so their backend size/mtime describe the
      manifest, not the file. Resolving gives the logical size/mtime and h1 as the
      etag — the identity stat returns. A dirty file has no clean hash: fall back
      to the backend metadata with an empty etag. *)
-  (* Bounds concurrent per-file manifest resolutions during enumeration. *)
-  let resolve_pool = Lwt_bounded.create ~max:C.max_downloads ()
-
   let file_entry_json ~container_id (e : Backend.file_entry) =
     Lwt_bounded.use resolve_pool @@ fun () ->
     let* naming = naming_fields ~container_id e.key in
@@ -209,8 +209,7 @@ module Make (C : Conf.S) (F : File_ops.S) = struct
                 ~is_uploaded:true ~symlink:None)
 
   (* One list, each entry tagged by kind: files and directories differ in what
-     describes them, not in how they are named, and callers merged two lists back
-     together anyway. *)
+     describes them, not in how they are named. *)
   let handle_list_dir prefix =
     let* container = own_folder_id prefix in
     match container with
@@ -726,14 +725,14 @@ module Make (C : Conf.S) (F : File_ops.S) = struct
                         F.set_uploads_paused (get_str obj "arg" <> "off");
                         Lwt.return (ok_json [])
                     | "stats" ->
-                        (* Assembled by {!Diagnostics}, so a mount and an
-                         http-proxy answer in one shape. This daemon reports
-                         itself twice: at the top as the answering process, and in
-                         the domain's [frontends] with the queues only it knows —
-                         where a proxy asking over IPC picks it up. [totals]
-                         reaches for the store, so it is opt-in, as a
-                         comma-separated set: [exact] counts every chunk instead
-                         of sampling shards, [reload] recomputes. *)
+                        (* This daemon reports itself twice: at the top as the
+                         answering process, and in the domain's [frontends] with
+                         the queues only it knows, where a proxy asking over IPC
+                         picks it up.
+
+                         [arg] is a comma-separated set: [totals] reaches for the
+                         store, [exact] counts every chunk instead of sampling
+                         shards, [reload] recomputes. *)
                         let flags =
                           String.split_on_char ',' (get_str obj "arg")
                         in

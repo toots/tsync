@@ -1,8 +1,7 @@
 (** File content as bytes, read per chunk out of {!Chunk_cache}.
 
     A file is never assembled: a read maps its byte range onto the chunks
-    backing it, fetching only the ones that are absent. No per-file state is
-    kept beyond a read-ahead hint, and none is written to disk. *)
+    backing it, fetching only the ones that are absent. *)
 
 module Make (C : Conf.S) (R : Remote.S) : sig
   (** Fills [buf] from [offset] in the file [manifest] describes, returning the
@@ -48,10 +47,9 @@ module Make (C : Conf.S) (R : Remote.S) : sig
       under the content keys they hashed to, the sidecar becomes what was
       published, and the staged manifest goes. No-op when nothing is staged.
 
-      The upload records what it published in the staged manifest before
-      touching anything else, so a crash before that point re-uploads identical
-      bytes and one after replays only local moves. Every later step is
-      idempotent. *)
+      Every step is idempotent, and the upload records what it published in the
+      staged manifest before touching anything else: a crash before that point
+      re-uploads identical bytes, one after replays only local moves. *)
   val sync : string -> ?cancel:bool ref -> unit -> unit Lwt.t
 
   (** {2 Chunk store housekeeping}

@@ -1,10 +1,11 @@
 (* Cache chunks: a run of consecutive stored chunks, cached as a single file.
 
-   The two granularities pull opposite ways. A stored chunk is network
-   granularity: smaller means less egress when a file changes and finer dedup. A
-   cache chunk is disk granularity: larger means fewer opens and less latency per
-   read. This is the seam, and the only place knowing a cache file holds more
-   than one stored chunk. *)
+   The two granularities pull opposite ways: a stored chunk is network
+   granularity (smaller means less egress and finer dedup), a cache chunk is
+   disk granularity (larger means fewer opens and less latency per read).
+
+   This is the seam, and the only place knowing a cache file holds more than one
+   stored chunk. *)
 
 type t = {
   key : string;
@@ -13,16 +14,14 @@ type t = {
   first : int;  (** stored index of [members.(0)] *)
 }
 
-(* The n putting n * chunk_size closest to cache_chunk_size. Round-half-up, so a
-   tie takes the larger group. *)
+(* Round-half-up, so a tie takes the larger group. *)
 let per_group ~chunk_size ~cache_chunk_size =
   if chunk_size <= 0 then 1
   else max 1 ((cache_chunk_size + (chunk_size / 2)) / chunk_size)
 
 (* Hashed over the member keys, not "<first>-<last>": two groups can share their
    first and last chunk and differ in between (any run of identical chunks does
-   it), and aliasing them onto one cache file serves the wrong bytes. Same shape
-   as a chunk key, so the fanout directory is unchanged. *)
+   it), and aliasing them onto one cache file serves the wrong bytes. *)
 let key_of members =
   let s1 = Xxhash.create 0 and s2 = Xxhash.create 1 in
   Array.iter

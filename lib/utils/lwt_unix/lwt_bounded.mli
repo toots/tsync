@@ -1,21 +1,19 @@
 (** Running only so much at once.
 
-    [Lwt_list.iter_p] and friends start every element at once. That is right for
-    a list whose length the code chooses — a chunk group's two members, a
-    domain's three backends — and wrong for one whose length a caller chooses:
-    the chunks in a file, the entries in a directory, the groups in a transfer.
+    [Lwt_list.iter_p] and friends start every element at once, which is right
+    for a list whose length the code chooses — a chunk group's two members — and
+    wrong for one whose length a caller chooses: the chunks in a file, the
+    entries in a directory.
 
     Such a fan-out usually {i is} bounded somewhere, but the bound often governs
-    a different resource than the one that runs out. A whole-file fetch was
-    bounded to [max_downloads] concurrent downloads, yet each pending fetch
-    opened its destination before queueing for a slot, so descriptors scaled
-    with the file: a 250 MB file held 247 open against a limit of 256.
+    a different resource than the one that runs out: a whole-file fetch bounded
+    to [max_downloads] still opened each destination before queueing for a slot,
+    so a 250 MB file held 247 descriptors against a limit of 256.
 
     Two rules follow:
 
     - A fan-out over a caller-sized list bounds itself here rather than relying
-      on something downstream. A pool limiting one resource says nothing about
-      the others a job acquires.
+      on something downstream.
     - The slot is taken before the resource, never after. *)
 
 (** {1 A bound that outlives one fan-out}
@@ -55,20 +53,14 @@ val waiting : t -> int
 
 (** {1 Fanning a list out under a bound}
 
-    Both take a {!t} explicitly, and it should outlive the call — bound at
-    module or instance scope, next to the resource it protects. A bound created
-    per invocation limits one fan-out and says nothing about how many run at
-    once, so where callers arrive on their own schedule it only looks like a
-    bound.
+    Both take a {!t} explicitly, and it should outlive the call: a bound stands
+    for a resource — a device's queue depth, a connection budget — and a
+    resource belongs to the process, so one created per invocation only looks
+    like a bound. Where fairness matters, use a separate {!t} per class of work.
 
-    A bound stands for a resource — a device's queue depth, a connection budget,
-    a memory ceiling — and a resource belongs to the process, not a call. Where
-    fairness matters, use a separate {!t} per class of work (metadata apart from
-    bulk) rather than a fresh one per caller.
-
-    A shared {!t} must be held around the resource and nothing more. Held across
-    a recursive call, or around work that asks for the same budget, it
-    deadlocks: outer jobs hold every slot while inner jobs wait for one. *)
+    A shared {!t} must be held around the resource and nothing more: held across
+    a recursive call, or around work that asks for the same budget, it deadlocks
+    with outer jobs holding every slot while inner jobs wait for one. *)
 
 (** [map_with t f xs] runs [f] over [xs] under [t], results in the order of [xs]
     rather than of completion. Fails with the first exception raised, like

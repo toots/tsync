@@ -58,24 +58,22 @@ module type S = sig
   (** Max files downloaded concurrently. *)
   val max_downloads : int
 
-  (** Chunk size (bytes) for newly uploaded files. Existing files keep the size
-      recorded in their own manifest, so changing this only affects files
-      created afterwards. Smaller chunks cut read/write amplification for random
-      access at the cost of larger manifests and more backend requests.
+  (** Chunk size (bytes) for newly uploaded files; existing files keep the size
+      recorded in their own manifest, and smaller chunks cut read/write
+      amplification for random access at the cost of larger manifests and more
+      backend requests.
 
-      [None] when the config does not say: the effective size is then what the
-      primary backend recommends (an http-proxy answers with its own), else
-      [default_chunk_size]. Resolved once per process — see
+      [None] falls back to what the primary backend recommends, else
+      [default_chunk_size], resolved once per process — see
       {!Remote.S.chunk_size}. *)
   val chunk_size : int option
 
   (** Cache chunk size (bytes): the local cache groups consecutive stored chunks
-      into files of about this size, the group being the [n] chunks whose total
-      is closest to it. Storage granularity wants to be small (less egress when
-      a file changes) and disk granularity large (fewer opens, less latency per
-      read), hence two settings. Purely local: not recorded in any manifest, and
-      changing it only orphans cache files, which the cap reclaims. [None] means
-      [default_cache_chunk_size]. *)
+      into files of about this size, disk granularity wanting to be large where
+      storage granularity wants to be small, hence two settings.
+
+      Purely local, so changing it only orphans cache files, which the cap
+      reclaims; [None] means [default_cache_chunk_size]. *)
   val cache_chunk_size : int option
 
   (** Soft cap (bytes) on local cache disk usage. When exceeded, the coldest

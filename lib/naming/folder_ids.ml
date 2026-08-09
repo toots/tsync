@@ -50,15 +50,13 @@ let read_entry ~cache_root ~domain_name id =
       entry_of_string s)
     (fun _ -> Lwt.return_none)
 
-(* Ids no folder has any more. A miss is the ordinary answer for a deleted
-   folder and fileproviderd asks repeatedly, so an id still missing after a
-   rebuild is remembered as gone rather than costing a walk each time. Ids are
-   random and minted once, so the only things that bring one back — a peer's
-   folder adopted here, a full resync — go through [write_entry], which clears
-   the memo.
+(* Ids no folder has any more, so the repeated lookups fileproviderd makes for a
+   deleted folder do not each cost a walk. Ids are random and minted once, so
+   anything that brings one back goes through [write_entry], which clears the
+   memo.
 
-   ponytail: one walk per distinct missing id, so deleting a great many folders
-   costs a walk each, once. Add a time floor if that is ever felt. *)
+   ponytail: one walk per distinct missing id; add a time floor if that is ever
+   felt. *)
 let absent : (string, unit) Hashtbl.t = Hashtbl.create 64
 
 let absent_key ~cache_root ~domain_name id =
@@ -84,8 +82,7 @@ let rec write ~cache_root ~domain_name rel (m : Folder.marker) =
     write_entry ~cache_root ~domain_name ~id:m.Folder.id
       { parent; name = Filename.basename rel }
 
-(* Minted and persisted when a folder has no marker yet, so this is for the write
-   paths, which may bring a folder into existence. *)
+(* Mints and persists a marker, so this is for the write paths only. *)
 and ensure_id ~cache_root ~domain_name rel =
   if rel = "" then Lwt.return Folder.root_id
   else
@@ -99,20 +96,17 @@ and ensure_id ~cache_root ~domain_name rel =
           let+ () = write ~cache_root ~domain_name rel m in
           m.Folder.id
 
-(* What a read must use. A minted id is a fresh random one naming a namespace the
-   backend never heard of, so the read misses anyway while the marker it persists
-   re-creates the local directory — which is how a deleted folder comes back from
-   a stat. *)
+(* What a read must use: minting here would persist a marker that re-creates the
+   local directory, which is how a deleted folder comes back from a stat. *)
 let lookup_id ~cache_root ~domain_name rel =
   if rel = "" then Lwt.return_some Folder.root_id
   else
     let+ existing = read ~cache_root ~domain_name rel in
     Option.map (fun m -> m.Folder.id) existing
 
-(* The markers are the truth; this restates them the other way round. Reached
-   when a lookup finds an entry missing or disagreeing: the mirror is written by
-   other processes too ([tsync import], [tsync sync --full]), so no care at the
-   mutation sites makes an in-process view sufficient. *)
+(* The markers are the truth; this restates them the other way round. The mirror
+   is written by other processes too ([tsync import], [tsync sync --full]), so no
+   care at the mutation sites would make an in-process view sufficient. *)
 let rebuild ~cache_root ~domain_name =
   let base = Cache_layout.manifests_dir ~cache_root domain_name in
   let seen = Hashtbl.create 64 in
@@ -139,9 +133,8 @@ let rebuild ~cache_root ~domain_name =
                 (fun _ -> Lwt.return_none)
             in
             match (marker, parent_id) with
-              (* No marker means no id, so nothing below is reachable by one
-                 either. Filing children under the nearest marked ancestor would
-                 name a path they are not at. *)
+              (* No marker means no id, and filing children under the nearest
+                 marked ancestor would name a path they are not at. *)
               | None, _ -> walk path ~parent_id:None
               | Some m, None -> walk path ~parent_id:(Some m.Folder.id)
               | Some m, Some parent ->
@@ -196,13 +189,9 @@ let climb ~cache_root ~domain_name id =
   in
   go id [] 0
 
-(* [None] when no folder has this id any more, which is what tells a caller a
-   directory is gone.
-
-   The climbed path is checked against the markers before it is believed, so a
-   stale entry costs an answer rather than naming some other folder. A failed
-   check is also the signal to rebuild, after which the question is asked once
-   more. *)
+(* The climbed path is checked against the markers before it is believed, so a
+   stale entry costs an answer rather than naming some other folder, and a failed
+   check is the signal to rebuild and ask once more. *)
 let rel_of_id ~cache_root ~domain_name id =
   if id = Folder.root_id then Lwt.return_some ""
   else (
@@ -226,9 +215,8 @@ let rel_of_id ~cache_root ~domain_name id =
             Hashtbl.replace absent (absent_key ~cache_root ~domain_name id) ();
           second)
 
-(* The name is taken from the new path and written back to the marker too: a
-   marker travels with its directory, so after a rename it still spells the old
-   leaf, and it is what {!rebuild} reads. *)
+(* A marker travels with its directory and so still spells the old leaf after a
+   rename; {!rebuild} reads it, so the new name is written back. *)
 let reparent ~cache_root ~domain_name rel =
   if rel = "" then Lwt.return_unit
   else

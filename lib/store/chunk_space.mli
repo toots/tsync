@@ -1,23 +1,21 @@
 (** Where a chunk lives while its store is being collected.
 
     Collecting chunks moves the old chunk root out of the way and lets the live
-    set accumulate under the name every writer already uses — see {!Gc}. So
-    during a run a chunk may still be in the space on its way out, and the two
+    set accumulate under the name every writer already uses — see {!Gc} — so
+    during a run a chunk may still be in the space on its way out. The two
     things that have to know are a read, which needs a key that works, and a
     presence check, whose [Some] talks a caller out of writing the chunk at all.
 
-    Nothing here redirects a write. That is the point of collecting in this
+    Nothing here redirects a write, which is the point of collecting in this
     direction: new chunks are written to the surviving space by code that has
-    never heard of a run, so there is no barrier to install and no client to
-    keep informed. *)
+    never heard of a run. *)
 
 type phase =
   | Opening  (** The chunk root has not been renamed away yet. *)
   | Marking  (** Live chunks are being given names in the new root. *)
   | Abandoning
       (** Like {!Marking}, but keeping everything rather than only what is
-          referenced: the collection was called off and the chunks are being
-          given names in the new root regardless. *)
+          referenced: the collection was called off. *)
   | Closing  (** The old root is being discarded. *)
   | Reconciling
       (** The main is settled; the replicas and backfill targets are being
@@ -38,8 +36,7 @@ val string_of_phase : phase -> string
     itself away.
 
     Outside the functor because {!Deferred} is built before there is a {!Conf.S}
-    to apply one to, and it needs the from-space prefix as well. One definition,
-    so the two cannot disagree about where the space is. *)
+    to apply one to, and it needs the from-space prefix as well. *)
 val from_prefix : chunk_prefix:string -> string
 
 val marker_key : chunk_prefix:string -> string
@@ -70,14 +67,11 @@ module Make (C : Conf.S) : sig
       publishing that manifest**: it is what makes a run safe, and it is the
       only thing that does.
 
-      Hanging survival on the publish rather than on how each chunk was found
-      covers what a presence check cannot — a chunk skipped by an uploader's
-      session memo, a chunk written before the run opened and moved by the
-      rename since, an upload still in flight when the run opened. The invariant
-      is that a manifest becomes visible only once every chunk it names has a
-      name in the surviving space.
-
-      Costs one marker read when the store is idle. *)
+      The invariant is that a manifest becomes visible only once every chunk it
+      names has a name in the surviving space, which covers what a presence
+      check cannot: a chunk skipped by an uploader's session memo, a chunk
+      written before the run opened and moved by the rename since, an upload
+      still in flight when the run opened. *)
   val promote_all : string list -> unit Lwt.t
 
   (** Whether the store holds this chunk. Falls through to the space on its way
@@ -91,10 +85,9 @@ module Make (C : Conf.S) : sig
       the mark reaches anyway.
 
       {!head} and this both look in the space on its way out *first* while a run
-      is open, since it holds everything that existed when the run started. So a
-      read costs one lookup as usual, and only a chunk written during the run
-      needs a second. A main that can never be mid-run — every object store — is
-      not routed through any of this and keeps the single lookup it always had.
+      is open, since it holds everything that existed when the run started, so
+      only a chunk written during the run costs a second lookup. A main that can
+      never be mid-run — every object store — is not routed through any of this.
 
       Raises the way a plain backend read does when the chunk is in no space. *)
   val get : string -> string Lwt.t

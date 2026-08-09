@@ -13,8 +13,8 @@ module Make (C : Conf.S) = struct
      manifest lives outside every domain root, so a domain with nothing writable
      can still publish one.
 
-     A member reads never reach is skipped: it holds part of the domain, so a
-     link served from it could name a file it will never have. *)
+     A member reads never reach is skipped, since a link served from it could
+     name a file it will never have. *)
   let share_backend () =
     let rec find = function
       | [] ->
@@ -31,8 +31,7 @@ module Make (C : Conf.S) = struct
     find
       (List.filter (fun (m : Backend.member) -> m.Backend.readable) C.members)
 
-  (* Build the manifest for [rel] ("" = whole domain), PUT it under a token, and
-     return the download URL. *)
+  (* [rel] of "" is the whole domain. *)
   let create ?token ~expires ~rel () =
     Lwt.catch
       (fun () ->
@@ -45,9 +44,10 @@ module Make (C : Conf.S) = struct
         let* manifest =
           let* file_key = L.manifest_key (C.domain_prefix ^ rel) in
           (* A file manifest and a folder marker occupy the same key within a
-             parent namespace, so classification is by body: otherwise a folder is
-             shared as a chunkless file and the Lambda chokes. *)
-          (* Sharing is a read: an unresolvable key is the same answer as an
+             parent namespace, so classification is by body: otherwise a folder
+             is shared as a chunkless file and the Lambda chokes.
+
+             Sharing is a read, so an unresolvable key is the same answer as an
              absent object. *)
           let* obj =
             match file_key with
@@ -69,10 +69,12 @@ module Make (C : Conf.S) = struct
                        ]))
             | _ ->
                 (* Directory: store the folder's namespace prefix by id and let
-                   the Lambda list it lazily, keeping creation O(1). *)
-                (* Never mint here: no marker means the folder does not exist
-                   remotely, so a fresh id names a namespace nothing wrote to, and
-                   persisting it re-creates the local directory on a read. *)
+                   the Lambda list it lazily, keeping creation O(1).
+
+                   Never mint an id here: no marker means the folder does not
+                   exist remotely, so a fresh id names a namespace nothing wrote
+                   to and persisting it re-creates the local directory on a
+                   read. *)
                 let* dir_id =
                   match marker with
                     | Some m -> Lwt.return_some m.Folder.id

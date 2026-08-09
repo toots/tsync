@@ -73,14 +73,13 @@ end
 let max_chunks_in_flight = 32
 
 (* ponytail: crude memo — reset the whole table past the cap rather than keeping
-   an LRU. 100k keys is a few MB, and overflowing costs only a HEAD per chunk
-   again. Per-key eviction if the extra HEADs ever show up in a profile. *)
+   an LRU, overflowing costing only a HEAD per chunk again. Per-key eviction if
+   the extra HEADs ever show up in a profile. *)
 let max_ensured = 100_000
 
 (* A target's directory is named after the store, which is whatever the config
-   says. Anything outside the safe set becomes [%XX] so a name with a slash in it
-   cannot climb out of the root. Not reversed anywhere: the name is only ever
-   written. *)
+   says, so anything outside the safe set becomes [%XX] and a name with a slash
+   in it cannot climb out of the root. *)
 let escape name =
   let buf = Buffer.create (String.length name) in
   String.iter
@@ -106,11 +105,11 @@ let make ?(resume = false) ?chunk_from_prefix ~name ~backend ~source
   in
   let chunks_in_flight = ref 0 in
   let quiet = Lwt_condition.create () in
-  (* The source may be mid-collection, in which case a chunk that has not been
-     promoted yet is only under the from-space prefix. Tried second and only when
-     the target actually needs the body, so the ordinary path is unchanged and an
-     idle store never looks. The key written to the target is the plain one either
-     way: a target has one space, and never learns the source had two. *)
+  (* The source may be mid-collection, in which case a chunk not yet promoted is
+     only under the from-space prefix.
+
+     The key written to the target is the plain one either way: a target has one
+     space, and never learns the source had two. *)
   let source_body key chunk_key =
     let* data = Source.get_opt ~key () in
     match (data, chunk_from_prefix) with
@@ -180,9 +179,10 @@ let make ?(resume = false) ?chunk_from_prefix ~name ~backend ~source
   in
   Durable_queue.register_settle chunks_quiet;
   (* Best-effort and unrecorded: correctness rests entirely on the manifest job's
-     chunk check, so dropping one only costs that job a fetch. This matters
-     because dedup means a file copy or an incremental re-upload issues no chunk
-     PUTs at all, which is why the durable log holds one record per user-visible
+     chunk check, so dropping one only costs that job a fetch.
+
+     Dedup means a file copy or an incremental re-upload issues no chunk PUTs at
+     all, which is why the durable log holds one record per user-visible
      operation rather than one per chunk. *)
   let forward_chunk key data =
     if Hashtbl.mem ensured key || !chunks_in_flight >= max_chunks_in_flight then

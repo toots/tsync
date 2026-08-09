@@ -8,9 +8,7 @@ type rename_op = {
 
 (* Directory ops carry the folder's stable id alongside its path: applying a
    removal destroys the local marker the id would have been read from, so an id
-   not recorded here cannot be recovered and the folder cannot be named to
-   anything that knows it by id. [None] for entries written before this was
-   carried, and for a client with no id for the folder. *)
+   not recorded here cannot be recovered afterwards. *)
 type op =
   [ `Delete of string
   | `Mkdir of string * string option
@@ -18,9 +16,8 @@ type op =
   | `Rename of rename_op
   | `Rmdir of string * string option ]
 
-(* ponytail: the client uuid is stable for the process lifetime, so it is read
-   (or generated) once and memoized. Keeping it synchronous avoids threading Lwt
-   through entry_key, which is called on every journal write. *)
+(* ponytail: memoized and synchronous, to avoid threading Lwt through
+   [entry_key], which is called on every journal write. *)
 let uuid_cache : (string, string) Hashtbl.t = Hashtbl.create 1
 
 let get_client_uuid ~share_dir =
@@ -57,10 +54,9 @@ module Entry_key = struct
   type t = { ms : int64; client_uuid : string }
 
   (* %013Ld: 13-digit zero-padded int64, so lexicographic order matches
-     chronological order at current ms timestamps.
-     Entry keys are backend object names, so two ops in the same millisecond
-     would collide and the second entry would overwrite the first. The timestamp
-     is bumped to keep keys strictly increasing within this process.
+     chronological order, and the timestamp is bumped rather than repeated
+     because two ops in one millisecond would collide as object names.
+
      ponytail: monotonic per process only; two processes sharing a client uuid
      (daemon + concurrent import) can still collide within one ms. *)
   let last_ms = ref 0L
@@ -73,10 +69,7 @@ module Entry_key = struct
 
   let to_string { ms; client_uuid } = Printf.sprintf "%013Ld-%s" ms client_uuid
 
-  (* [None] rather than an exception: the callers are listings and stored files,
-     where a name nobody wrote is a thing to report, not to crash on.
-
-     The timestamp must be the full 13 digits {!to_string} writes. Accepting a
+  (* The timestamp must be the full 13 digits {!to_string} writes: accepting a
      shorter one would make the month directory "2026-08" parse as an entry key
      of its own, and a listing that includes directories would report a shard as
      an entry. *)
@@ -117,9 +110,8 @@ module Entry_key = struct
     | oldest :: _ -> Int64.compare oldest.ms anchor.ms > 0
 
   (* A month directory keeps the listing bounded — the journal only grows, one
-     object per write — and costs readers nothing: entry names are zero-padded
-     timestamps, so shard and name both sort chronologically, which every cursor
-     comparison depends on. The entry key itself is unchanged. *)
+     object per write — and costs readers nothing: shard and name both sort
+     chronologically, which every cursor comparison depends on. *)
   let relative_path t =
     let tm = Unix.gmtime (Int64.to_float t.ms /. 1000.) in
     Printf.sprintf "%04d-%02d/%s" (tm.Unix.tm_year + 1900) (tm.Unix.tm_mon + 1)

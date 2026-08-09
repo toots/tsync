@@ -1,6 +1,6 @@
 (* Shape of a logical key, in one place: [domain_prefix ^ real-path], with a
-   directory key ending in "/". Nothing below is more than a few lines; the point
-   is that there is exactly one of each. *)
+   directory key ending in "/". Nothing below is more than a few lines; the
+   point is that each has exactly one spelling. *)
 
 let strip_prefix ~domain_prefix key =
   if String.starts_with ~prefix:domain_prefix key then (

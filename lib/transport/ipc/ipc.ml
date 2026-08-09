@@ -9,9 +9,6 @@ let send ~socket_path cmd =
   Unix.close fd;
   resp
 
-(* For a caller that is itself an event loop: the http-proxy asks the mount daemon
-   for stats while serving, and must not block its listener on a wedged daemon. A
-   lapsed [timeout] is reported, not swallowed. *)
 let send_lwt ?(timeout = 2.) ~socket_path cmd =
   let open Lwt.Syntax in
   Lwt_unix.with_timeout timeout (fun () ->
@@ -23,10 +20,6 @@ let send_lwt ?(timeout = 2.) ~socket_path cmd =
           Lwt_io.read_line ic)
         (fun () -> Lwt_io.close ic))
 
-(* The daemon never connects out. A client wanting change notifications connects
-   like any other caller and asks to subscribe, dedicating the connection to a
-   stream of events. Only this direction is dependable: a sandboxed macOS
-   extension can always reach us, while the OS decides its lifetime. *)
 module Subs = struct
   type sub = {
     topic : string;
@@ -39,10 +32,9 @@ module Subs = struct
   let create () = { subs = [] }
 
   (* ponytail: a subscriber that stops reading is trimmed rather than allowed to
-     grow the output buffer without bound. Safe to lose: events are hints on top
-     of the journal, which is what actually says what changed — a dropped one
-     costs promptness, not correctness. Raise this, or fold the drop count into a
-     resync event, if a real client is ever seen falling behind. *)
+     grow the output buffer without bound; events are hints on top of the
+     journal, so a dropped one costs promptness, not correctness. Raise it if a
+     real client is ever seen falling behind. *)
   let max_queued = 256
   let matches ~topic sub = sub.topic = "" || sub.topic = topic
 
@@ -118,10 +110,10 @@ let serve ?subs ~path handler =
   mkdir_p dir;
   (try Unix.unlink path with Unix.Unix_error (Unix.ENOENT, _, _) -> ());
   let stopped, wake_stop = Lwt.wait () in
-  (* One Lwt task per connection, so a slow request (a large restore) never blocks
-     another client. A connection carries requests until the client closes it:
-     fileproviderd asks constantly, and a connect and accept per question buys
-     nothing. [read_line] raising at EOF is how a connection ends. *)
+  (* One Lwt task per connection, so a slow request (a large restore) never
+     blocks another client. A connection carries requests until the client
+     closes it: fileproviderd asks constantly, and a connect and accept per
+     question buys nothing. *)
   let handle_client (ic, oc) =
     let rec loop () =
       let* line = Lwt_io.read_line ic in

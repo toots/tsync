@@ -36,11 +36,9 @@ let temp_path path =
    them.
 
    Next to [temp_path] because it is the same fact stated backwards, and stated
-   apart they drift: this was a ".tmp" suffix test living in another module,
-   which matched every user file ending in ".tmp" as well as our own. The
-   walkers hid them from listings and startup deleted them, so a Syncthing
-   folder downloading ".syncthing.<name>.tmp" re-fetched the same gigabytes
-   forever and landed nothing. *)
+   apart they drift: as a ".tmp" suffix test in another module it matched user
+   files too, and the walkers hid and deleted them, so a Syncthing folder
+   downloading ".syncthing.<name>.tmp" re-fetched the same gigabytes forever. *)
 let is_temp_name name =
   String.starts_with ~prefix:temp_prefix name
   && Filename.check_suffix name ".tmp"
@@ -68,11 +66,9 @@ let write_then_rename path write =
 let atomic_write path data =
   write_then_rename path (fun oc -> Lwt_io.write oc data)
 
-(* [atomic_write] for a body assembled from pieces, each known by position. The
-   file is sized up front, then [put ~offset] writes one range through [pwrite],
-   which carries its own offset and never touches the descriptor's shared
-   position — so pieces may be written concurrently and out of order on one
-   descriptor. Renamed only once [write] returns. *)
+(* [pwrite] carries its own offset and never touches the descriptor's shared
+   position, so pieces may be written concurrently and out of order on one
+   descriptor. *)
 let atomic_write_at path ~size write =
   with_temp_rename path (fun tmp ->
       let* fd =

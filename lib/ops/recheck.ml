@@ -35,11 +35,9 @@ module Make (C : Conf.S) = struct
   module Mf = Manifest.Make (C)
   module Cc = Chunk_cache.Make (C) (R)
 
-  (* Every member segment of every cache chunk must hash to the key it was
-     published under. Manifest-driven, unlike the rest of the store's
-     bookkeeping: a cache chunk holds several stored chunks, so its body cannot
-     be checked against its own name. A dropped body re-downloads on next
-     read. *)
+  (* Manifest-driven, unlike the rest of the store's bookkeeping: a cache chunk
+     holds several stored chunks, so its body cannot be checked against its own
+     name. A dropped body re-downloads on the next read. *)
   let verify_chunk_cache () =
     let* rels = Mf.walk () in
     Lwt_list.fold_left_s

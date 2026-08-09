@@ -34,8 +34,6 @@ module Make (C : Conf.S) = struct
             let+ () = D.assemble_to key ~dst_path in
             Exported
 
-  (* Files are the union of the backend listing and the local sidecar tree, which
-     adds local-only files whose upload is still pending. *)
   (* Errors are skipped rather than fatal: one unreadable object should cost its
      own file, not the whole export. *)
   let remote_rels () =

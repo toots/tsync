@@ -1,11 +1,12 @@
 (* What went wrong, as something a caller can act on.
 
-   Frontends translate a failure into their own vocabulary, and the macOS one must
-   pick carefully: some of its error codes make the system back off until
-   signalled, others make it retry, and getting that backwards turns a daemon
-   restart into a domain that stays broken. Matching on the wording of an
-   exception breaks the day the wording changes, so the wire carries a code and
-   the prose is only for a human. *)
+   Frontends translate a failure into their own vocabulary, and the macOS one
+   must pick carefully: some of its error codes make the system back off until
+   signalled, and getting that backwards turns a daemon restart into a domain
+   that stays broken.
+
+   The wire carries a code rather than prose, because matching on the wording of
+   an exception breaks the day the wording changes. *)
 
 type t =
   [ `Not_found

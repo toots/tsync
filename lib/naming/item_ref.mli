@@ -4,14 +4,12 @@
     every item beneath it is called. Directories already have an id a rename
     does not touch ({!Folder}), so that is what names them here.
 
-    A file is named by its parent's id and its own leaf, which changes on a
-    rename exactly as a path would — a deliberate limit, since the storage
-    layout gives a file no id of its own. The blast radius is one item rather
-    than a subtree.
+    A file is named by its parent's id and its own leaf, which a rename changes
+    exactly as a path would: the storage layout gives a file no id of its own,
+    so the blast radius is one item rather than a subtree.
 
-    Nothing here spells a storage key, so a frontend need not know the layout,
-    and nothing spells a user's path, which matters because these reach system
-    logs. *)
+    Nothing here spells a storage key or a user's path, the latter mattering
+    because these reach system logs. *)
 
 (** The wire forms are ["root"], ["d:<folder id>"], ["f:<folder id>/<leaf>"],
     and anything else as a logical key, for the callers that predate this. *)
@@ -30,10 +28,9 @@ val to_string : t -> string
 
 module Make (C : Conf.S) : sig
   (** The logical key an item reference names, or [None] when nothing is there
-      any more — the point of the scheme. A caller is told the directory is gone
+      any more — the point of the scheme: a caller is told the directory is gone
       rather than handed a path that now resolves to whatever took its place.
 
-      Resolves only what this client already records and mints nothing: naming
-      is a read. *)
+      Resolves only what this client already records and mints nothing. *)
   val resolve : t -> string option Lwt.t
 end

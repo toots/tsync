@@ -11,11 +11,11 @@
       misses or is unreachable, and never written.
 
     A replica and a backfill target are one thing, {!Deferred}, differing only
-    in whether reads reach it — which is why a resynced backfill is promoted by
-    changing this one word. Both are filled behind the write rather than in it,
-    so a slow or unreachable one never sets the pace of a copy, and a failover
-    read is behind by whatever it still owes. That work is kept on disk and
-    resumes after a restart. See {!Deferred} and {!Domain_store}. *)
+    in whether reads reach it.
+
+    Both are filled behind the write rather than in it, so a failover read is
+    behind by whatever the target still owes — work kept on disk and resumed
+    after a restart. *)
 type role = [ `Main | `Replica | `Backfill | `Read_only ]
 
 (** Every role, in the order worth presenting to a user. *)
@@ -76,10 +76,9 @@ type t = {
           [max_uploads]); a host that cannot afford [max_uploads] whole chunks
           lowers this rather than the chunk size.
 
-          Budget about twice this times the domain's chunk size: the pool holds
-          that many bodies, and the backend holds its own copy of each one it is
-          sending. It bounds an upload path rather than the process, so a
-          concurrent recheck or import brings its own. *)
+          Budget about twice this times the domain's chunk size, the backend
+          holding its own copy of each body it sends, and per upload path rather
+          than per process. *)
   max_downloads : int;  (** max concurrent file downloads (default 8) *)
   domains : domain list;
 }
@@ -94,8 +93,7 @@ val default_max_downloads : int
 
     There is no matching [format_size]: a size shown to a person is spelled by
     {!Metrics.human_bytes}, and a size stored in the config or on the wire is a
-    plain integer of bytes. Rendering one here as well is what let
-    [tsync print-config] and [tsync diagnose] disagree about the same field. *)
+    plain integer of bytes. *)
 val parse_size : string -> int option
 
 (** Load configuration from [path], or from the JSON string in
@@ -105,10 +103,8 @@ val load : string -> t
 (** {!load}'s parse and validation, over a JSON value already in hand. Raises
     [Failure] with the same message {!load} would.
 
-    Exported so [tsync configure] can check what it is about to write with the
-    reader's own rules rather than a second set of its own: every way it could
-    produce a file {!load} rejects — no [main] backend, an empty [frontends] —
-    was a file it wrote happily. *)
+    Exported so [tsync configure] validates what it is about to write with the
+    reader's own rules rather than a second set of its own. *)
 val of_json : Yojson.Basic.t -> t
 
 (** Return the domain matching [domain], or the unique domain when omitted.

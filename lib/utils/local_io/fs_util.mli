@@ -15,11 +15,10 @@ val temp_path : string -> string
 
 (** Whether a name was produced by {!temp_path}.
 
-    Exposed as a pair with it because callers that walk a directory the user
-    also writes to must be able to tell our scratch files from theirs, and the
-    only safe test is the one that matches what we actually generate. A wider
-    test — the ".tmp" suffix, say — matches a Syncthing download in flight, and
-    the walkers both hide and delete what it matches. *)
+    Callers walk directories the user also writes to, so the only safe test is
+    the one matching what {!temp_path} generates: a wider test — the ".tmp"
+    suffix, say — matches a Syncthing download in flight, which the walkers both
+    hide and delete. *)
 val is_temp_name : string -> bool
 
 (** [atomic_write path data] writes [data] to a uniquely named temp file in

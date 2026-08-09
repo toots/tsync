@@ -5,10 +5,8 @@
     it can already read. The token is the manifest's id, and the server rebuilds
     the key from it, so the token alone is what guards the URL. *)
 
-(** Two exceptions rather than one, because they mean different things: nothing
-    here can serve a link at all, versus there is nothing at that path to link
-    to. Raised internally and mapped to [Error] at the boundary, so a caller
-    decides how to report them. *)
+(** Both are raised internally and mapped to [Error] at the boundary, so a
+    caller decides how to report them. *)
 
 (** No configured backend can hold a share manifest. *)
 exception Share_unavailable of string

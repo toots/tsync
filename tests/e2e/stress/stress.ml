@@ -96,8 +96,7 @@ let digest s = String.sub (Digest.to_hex (Digest.string s)) 0 16
    stale -- or raise -- between the look and the act. It did: a run died on
    [Sys.file_exists p] answering yes and the read that followed finding nothing,
    with the exception escaping [attempt] because OCaml evaluates an argument
-   before the call it belongs to. That is the same assumption the product had to
-   drop, a decision made from a snapshot no single writer owns.
+   before the call it belongs to.
 
    The oracle discards [Failed_op] records, so a raise needs no op of its own. *)
 let attempt path f =

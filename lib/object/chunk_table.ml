@@ -3,17 +3,11 @@
    A fixed-layout record followed by a flat run of chunk keys. Nothing is parsed:
    every field is at a known offset and chunk [i]'s key is a substring at
    [keys_at + i * key_bytes], with no per-chunk allocation until a caller asks
-   for one. A 32 GB file at a 1 MiB chunk size carries 31,230 keys, and opening
-   it for its name costs a few microseconds.
-
-   A local sidecar is mapped, so those bytes live in the page cache: file-backed,
-   clean, reclaimable, released when the value is collected. A body fetched from
-   a backend is a string and is read identically.
+   for one.
 
    {b The mapping relies on the write discipline.} Sidecars are only replaced by
    rename ({!Fs_util.atomic_write}), never rewritten in place, so a mapping keeps
-   its inode and its bytes stay valid while held. Truncating one in place would
-   fault every reader mapping it.
+   its inode and truncating one in place would fault every reader mapping it.
 
    Layout (little-endian, offsets in bytes):
    {v
@@ -54,9 +48,8 @@ exception Malformed of string
 let magic = "tsyncm03"
 let header_bytes = 72
 
-(* ["<h1>-<h2>"], two 16-character hex digests — the spelling every other layer
-   uses, stored verbatim so reading one is a substring and never a
-   concatenation. *)
+(* ["<h1>-<h2>"], two 16-character hex digests, stored verbatim so reading one
+   is a substring and never a concatenation. *)
 let key_bytes = 33
 
 let length = function
@@ -129,9 +122,8 @@ let of_source src =
 
 let of_string s = of_source (Str s)
 
-(* Mapped rather than read, so the chunk keys cost no heap and the pages are
-   reclaimable. The descriptor closes immediately, the mapping holding its own
-   reference. *)
+(* Mapped rather than read, so the chunk keys cost no heap; the descriptor
+   closes immediately, the mapping holding its own reference. *)
 let of_file path =
   let fd = Unix.openfile path [Unix.O_RDONLY] 0 in
   let map =
@@ -158,8 +150,7 @@ let key t i =
   unsafe_sub t.src (t.keys_at + (i * key_bytes)) key_bytes
 
 (* Derived, not stored: every chunk is [chunk_size] except the last, so a
-   per-chunk length would be 12 bytes each restating two header fields. An empty
-   file still has one chunk, of length zero. *)
+   per-chunk length would be 12 bytes each restating two header fields. *)
 let len t i =
   if t.chunk_size <= 0 then 0
   else max 0 (min t.chunk_size (Int64.to_int t.size - (i * t.chunk_size)))

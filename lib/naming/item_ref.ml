@@ -52,9 +52,9 @@ module Make (C : Conf.S) = struct
   let dir_key_of_rel rel =
     if rel = "" then C.domain_prefix else key_of_rel rel ^ "/"
 
-  (* [None] when nothing is there any more — the point of the scheme: a caller is
-     told a directory is gone rather than handed a path resolving to whatever now
-     sits there. *)
+  (* [None] when nothing is there any more, which is the point of the scheme: a
+     caller is told a directory is gone rather than handed a path resolving to
+     whatever now sits there. *)
   let resolve = function
     | `Root -> Lwt.return_some C.domain_prefix
     | `Dir id ->

@@ -1,15 +1,13 @@
 (* Points, not pixels, and larger than the 16 the menu draws: a retina screen
-   asks for three times that, and a picture this small costs a couple of
-   kilobytes either way. *)
+   asks for three times that. *)
 let max_side = 64
 
 (* An empty result is "no picture here", which is not an error worth raising. *)
 external render : string -> int -> string = "caml_preview_thumbnail"
 
 (* QuickLook types a file by the extension on it, and a staged body is named by
-   uuid. A hardlink carries the name in its own directory entry, which is what
-   the generators read — a symlink does not do: they resolve it and find the
-   uuid again. *)
+   uuid. A hardlink carries the name in its own directory entry; a symlink does
+   not do, the generators resolving it back to the uuid. *)
 let linked = ref 0
 
 let with_extension ~scratch ~name path f =

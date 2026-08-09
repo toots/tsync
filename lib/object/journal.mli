@@ -6,12 +6,12 @@ type rename_op = {
   id : string option;  (** The folder's id, when [is_dir]. See {!op}. *)
 }
 
-(** Directory ops carry the folder's stable id alongside its path. A peer
-    applies the op before anything asks it about the folder, and applying a
-    removal destroys the local marker the id would have been read from — so an
-    id not recorded here cannot be recovered afterwards, and the folder cannot
-    be named to anything that knows it by id. [None] for entries written before
-    this was carried, and for a client that has no id for the folder. *)
+(** Directory ops carry the folder's stable id alongside its path: applying a
+    removal destroys the local marker the id would have been read from, so an id
+    not recorded here cannot be recovered afterwards.
+
+    [None] for entries written before this was carried, and for a client that
+    has no id for the folder. *)
 type op =
   [ `Delete of string
   | `Mkdir of string * string option
@@ -44,10 +44,10 @@ module Entry_key : sig
       past it, or cleaned up entirely with changes still pending. [keys] is the
       published journal, ascending.
 
-      An empty journal answers [true]. That is the conservative reading — a
-      resync costs a walk, whereas treating "no entries" as "nothing happened"
-      silently skips whatever the pruning removed. Here rather than at the two
-      callers, which had drifted into opposite answers for that case. *)
+      An empty journal answers [true]: a resync costs a walk, whereas treating
+      "no entries" as "nothing happened" silently skips whatever the pruning
+      removed. Decided here rather than at the two callers, which had drifted
+      into opposite answers for that case. *)
   val cannot_bridge : t -> t list -> bool
 
   (** ["<YYYY-MM>/<entry key>"], the entry's path relative to the journal

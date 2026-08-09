@@ -38,13 +38,10 @@ end
 module Sq = Sync_queue.Make (C)
 module J = Journal.Make (C)
 
-(* Waits for the queue to stop moving rather than for a length of time.
-
-   A duration is a guess about how fast the machine is, and the guess was made
-   on the machine this was written on: on a loaded CI runner 0.2s elapsed before
-   the worker had dequeued, and the report read one item still pending. Pausing
-   is part of what is under test, so this cannot wait for the queue to empty --
-   while paused it never does. It waits for it to stop changing. *)
+(* Waits for the queue to stop moving rather than for a length of time: on a
+   loaded CI runner 0.2s elapsed before the worker had dequeued, and the report
+   read one item still pending. Pausing is part of what is under test, so this
+   cannot wait for the queue to empty -- while paused it never does. *)
 let settle () =
   let rec go ~stable ~last ~polls =
     if polls > 200 then Lwt.return_unit

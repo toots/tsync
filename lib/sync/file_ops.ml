@@ -1,9 +1,6 @@
-(* What a frontend can do to a file in a domain, as a signature on its own.
-
-   Both the upload queue's replay and the change poller are written against it,
-   so neither depends on the implementation below it -- which is what lets a
-   test drive them with a stub instead of a whole domain. No .mli: this module
-   is already nothing but a signature. *)
+(* What a frontend can do to a file in a domain, as a signature on its own: the
+   upload queue's replay and the change poller are written against it, so a test
+   can drive them with a stub instead of a whole domain. *)
 
 type buffer = Local_io.buffer
 
@@ -114,9 +111,6 @@ module type S = sig
   val uploads_paused : unit -> bool
 
   val set_uploads_paused : bool -> unit
-
-  (** Files written but not yet published, as this process tracks them: the
-      in-memory view of what {!staged_count} finds on disk. *)
 
   (** Whether the metadata lock is held, and whether anything is queued behind
       it. Held with waiters is the usual cause of a mount that has stopped

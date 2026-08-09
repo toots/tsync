@@ -2,10 +2,9 @@ open Lwt.Syntax
 
 exception Cancelled = Backend.Cancelled
 
-(* Pooled per endpoint rather than per request. A full resync fetches one object
-   per manifest — tens of thousands — and a one-shot client pays DNS, TCP and TLS
-   handshakes for each, capping throughput at a few dozen objects a second and
-   leaving thousands of sockets in TIME_WAIT. *)
+(* Pooled per endpoint rather than per request: a full resync fetches tens of
+   thousands of objects, and a handshake each caps throughput at a few dozen a
+   second while leaving thousands of sockets in TIME_WAIT. *)
 module Connection = Cohttp_lwt.Connection.Make (Cohttp_lwt_unix.Net)
 
 module Cache =
@@ -33,8 +32,10 @@ type t = {
 
 (* The connection cache has no deadline of its own: a pooled connection whose
    peer went away without a FIN leaves its request pending forever, and
-   [call_retry] only ever sees failures, never stalls. Generous enough for a
-   chunk over a slow link — it is a stall detector, not a latency budget. *)
+   [call_retry] only ever sees failures, never stalls.
+
+   A stall detector, not a latency budget, hence generous enough for a chunk
+   over a slow link. *)
 let request_timeout = 300.
 
 (* A 5xx is the serving side struggling; a 4xx is its answer. *)
@@ -49,16 +50,14 @@ let backend_error op code body =
 
 let new_cache () = Cache.create ~keep:keep_idle_ns ~parallel:max_parallel ()
 
-(* Signs method + request-target + body with the shared secret. TLS is conduit's,
-   per the global [Tls_conf].
+(* Signs method + request-target + body with the shared secret; TLS is
+   conduit's, per the global [Tls_conf].
 
    [Connection.Retry] means the pooled connection was unusable and the request
-   never left: the cache is meant to redial, but one torn down by
-   [request_timeout] above stays in its table as permanently failed, so every
-   later request draws the same corpse and the endpoint never recovers. Only a
-   new cache redials. Replaced once per generation, so requests that raced into
-   the same dead pool share the one redial rather than each building their
-   own. *)
+   never left, and one torn down by [request_timeout] above stays in the cache's
+   table as permanently failed, so only a new cache redials. It is replaced once
+   per generation, so requests that raced into the same dead pool share the one
+   redial. *)
 let call t ~meth ?(body = "") uri =
   let resource = Uri.path_and_query uri in
   let headers =
@@ -90,9 +89,9 @@ let code resp = Cohttp.Code.code_of_status (Cohttp.Response.status resp)
 let is_ok resp = code resp >= 200 && code resp < 300
 
 (* A proxy in front of us answers failures with a full HTML page, and one stalled
-   fetch can put thousands of lines of nginx markup in the log. The status carries
-   the meaning; one line of body is enough to tell an upstream apart from our own
-   answer. *)
+   fetch can put thousands of lines of nginx markup in the log; the status
+   carries the meaning, one line of body only tells an upstream apart from our
+   own answer. *)
 let excerpt body =
   let body = String.trim body in
   match String.index_opt body '\n' with
@@ -118,10 +117,10 @@ let put t ~key ~data () =
   let+ resp, body = call_retry t ~meth:`PUT ~body:data "put" (obj_uri t key) in
   if not (is_ok resp) then raise (backend_error "put" (code resp) body)
 
-(* The serving side arbitrates, since it is the one holding the store; the reply
-   body is whatever ended up at the key. A proxy too old to know the parameter
-   would treat this as a plain put and answer its own body, which reads as
-   "you won" -- so the two sides must be of a version. *)
+(* The serving side arbitrates, holding the store, and the reply body is
+   whatever ended up at the key. A proxy too old to know the parameter would
+   treat this as a plain put and answer its own body, which reads as "you won",
+   so the two sides must be of a version. *)
 let put_if_absent t ~key ~data () =
   let uri = Uri.add_query_param' (obj_uri t key) ("if_absent", "1") in
   let+ resp, body = call_retry t ~meth:`PUT ~body:data "put_if_absent" uri in
@@ -191,10 +190,9 @@ let list_all t ?max_keys ~prefix () =
   if is_ok resp then Http_proxy.Wire.entries_of_json body
   else raise (backend_error "list_all" (code resp) body)
 
-(* The proxy's own setting, asked rather than mirrored in client config where the
-   two could disagree. It answers yes/no only: behind TLS termination it does not
-   reliably know its own public URL, while [base_uri] is exactly the URL this
-   client reaches it on. *)
+(* The proxy answers yes/no only: behind TLS termination it does not reliably
+   know its own public URL, while [base_uri] is exactly the URL this client
+   reaches it on. *)
 let query_share_url t ~prefix =
   let uri =
     Uri.with_query' (Uri.with_path t.base_uri "/share-url") [("prefix", prefix)]
@@ -237,9 +235,9 @@ let query_chunk_size t ~prefix =
   else raise (backend_error "chunk_size" (code resp) body)
 
 (* What the serving proxy will run at once, so a client holds its own excess
-   rather than parking it in the server's accept queue. The limit belongs to
-   hardware this process cannot see, which is why it is asked for rather than
-   configured twice. 404 means no bound. *)
+   rather than parking it in the server's accept queue. Asked rather than
+   configured twice, the limit belonging to hardware this process cannot see;
+   404 means no bound. *)
 let query_max_concurrency t ~prefix =
   let uri =
     Uri.with_query'
@@ -259,9 +257,10 @@ let query_max_concurrency t ~prefix =
 
 (* Fixed for the life of the process — a peer changing any of these restarts to
    do it, dropping these connections anyway — so the promise is memoized and
-   concurrent callers share one set of requests. Three endpoints rather than
-   one, so a client speaks to a proxy of any version; they run together, and
-   only once. *)
+   concurrent callers share one set of requests.
+
+   Three endpoints rather than one, so a client speaks to a proxy of any
+   version. *)
 let capabilities t ~prefix () =
   match t.caps_cache with
     | Some p -> p

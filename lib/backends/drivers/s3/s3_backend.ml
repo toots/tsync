@@ -34,9 +34,8 @@ let string_of_error = function
   | S3.Not_found -> "not found"
 
 (* B2 (and S3 under load) routinely answers 503, expecting a back off and retry
-   rather than a failed operation. Connection-level failures are equally
-   transient, whether surfaced as [S3.Failed] or raised outright (DNS, a dropped
-   socket, a TLS reset). Everything else is the bucket's considered answer. *)
+   rather than a failed operation, and connection-level failures are equally
+   transient. Everything else is the bucket's considered answer. *)
 let is_transient = function
   | S3.Throttled | S3.Failed _ -> true
   | S3.Redirect _ | S3.Unknown _ | S3.Forbidden | S3.Not_found -> false
@@ -83,8 +82,8 @@ let get t ~key () =
 
 (* [`If_none_match] is s3's own "only if this key is free": it decides, and
    answers 412 when it declines, so the object is never replaced and the loser
-   learns it lost. Emulating this with a HEAD and a PUT would look like a claim
-   while losing races silently, which is the failure it exists to prevent. *)
+   learns it lost. Emulating it with a HEAD and a PUT would lose races
+   silently. *)
 let put_if_absent t ~key ~data () =
   let* res =
     with_retry "put_if_absent" (fun () ->
@@ -160,12 +159,11 @@ let copy t ~src_key ~dst_key () =
 
 let list_all t ?max_keys ~prefix () =
   (* Reverse accumulation for O(1) prepend: appending each page onto a growing
-     list is O(n^2) overall, and this runs unbounded over however many objects
-     share the prefix (a whole namespace during a resync).
+     list is O(n^2), and this runs over however many objects share the prefix (a
+     whole namespace during a resync).
 
-     [max_keys] caps the entries returned and stops pagination once reached, so a
-     bounded existence check costs one small request rather than a full recursive
-     listing. *)
+     [max_keys] stops pagination once reached, so a bounded existence check
+     costs one small request rather than a full listing. *)
   let enough acc =
     match max_keys with
       | None -> false

@@ -578,10 +578,9 @@ let () =
   assert (json_member "stats" counters = `Int 2);
   assert (json_member "unauthorized" counters = `Int 2);
 
-  (* ── Snapshots ──────────────────────────────────────────────────────────────
-     The two representations side by side, which is the point: /api/v1/stats and
-     /stats are one collection rendered twice, and a diff here is the review of
-     both. The JSON keeps raw counts; only the text spells sizes for a person. *)
+  (* /api/v1/stats and /stats are one collection rendered twice, so a diff here
+     is the review of both. The JSON keeps raw counts; only the text spells
+     sizes for a person. *)
   let stable = substitute ~values:stable_values r in
   print_endline "########## /api/v1/stats ##########";
   print_endline (Yojson.Safe.pretty_to_string stable);

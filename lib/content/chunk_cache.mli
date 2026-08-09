@@ -3,8 +3,10 @@
 
     A group is present iff its file exists, and any group may vanish at any time
     (the cache cap deletes them), so every read treats a miss as ordinary and
-    fetches again. Bodies are shared: two files whose chunks group identically
-    are one file on disk and one download. *)
+    fetches again.
+
+    Bodies are shared: two files whose chunks group identically are one file on
+    disk and one download. *)
 
 (** What the store needs from the backend layer. {!Remote.S} satisfies it.
     Grouping is invisible here: a cache chunk is fetched as its members. *)
@@ -55,9 +57,9 @@ module Make (C : Conf.S) (F : Fetch) : sig
 
       A chunk being written has no content key yet, its bytes still changing, so
       it lives under a uuid until the upload that hashes it publishes and its
-      group is written out whole ({!put_group}). Staged bodies are unsynced data
-      and are never reclaimed by the cap. One body per {i stored} chunk, which
-      is what an upload sends. *)
+      group is written out whole ({!put_group}).
+
+      Staged bodies are unsynced data and are never reclaimed by the cap. *)
 
   (** Path of a staged body, for the upload that reads and hashes it. *)
   val staged_path : string -> string
@@ -102,8 +104,9 @@ module Make (C : Conf.S) (F : Fetch) : sig
   val stats : unit -> (int * int) Lwt.t
 
   (** While the store exceeds [C.max_cache], delete cache-chunk bodies
-      oldest-mtime first. No-op when [max_cache] is unset. Needs no notion of
-      what is in use: a body deleted under a reader is fetched again. Never
-      touches staged data, which lives in a different tree. *)
+      oldest-mtime first; no-op when [max_cache] is unset.
+
+      Needs no notion of what is in use, a body deleted under a reader being
+      fetched again, and never touches staged data. *)
   val enforce_cap : unit -> unit Lwt.t
 end

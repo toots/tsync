@@ -33,7 +33,6 @@ type t = {
   domains : domain list;
 }
 
-(* The JSON spelling, in the order worth presenting. *)
 let roles : role list = [`Main; `Replica; `Backfill; `Read_only]
 
 let role_name : role -> string = function
@@ -46,11 +45,8 @@ let role_of_string s = List.find_opt (fun r -> role_name r = s) roles
 let default_max_uploads = 4
 let default_max_downloads = 8
 
-(* A bare number is bytes; a K/M/G/T suffix (optionally B/iB, optionally after a
-   space) is a binary multiple (1K = 1024). A decimal mantissa is accepted so
-   that what {!Metrics.human_bytes} prints — the one spelling shown to a person —
-   can be typed straight back in. Sizes are written to the config as plain
-   integers; this parses what a human hands us. *)
+(* A decimal mantissa is accepted so that what {!Metrics.human_bytes} prints —
+   the one spelling shown to a person — can be typed straight back in. *)
 let parse_size s =
   let s = String.trim (String.lowercase_ascii s) in
   if s = "" then None
@@ -126,8 +122,7 @@ let parse_backend json =
   in
   { backend_type; name; fields; role }
 
-(* Read preference: mains, then replicas, then the rest, each group keeping its
-   config order. Reads use the head, so config order picks the read primary. *)
+(* Reads use the head, so config order picks the read primary. *)
 let order_backends backends =
   let rank b =
     match b.role with
@@ -260,9 +255,8 @@ let of_json json =
         | _ -> Unix.gethostname ());
     tls = (match json |> member "tls" with `String s -> Some s | _ -> None);
     max_uploads;
-    (* Defaults to [max_uploads], which is the behaviour before the two were
-       separable: only a host short on memory relative to its chunk size needs
-       to set it. *)
+    (* Defaults to [max_uploads]: only a host short on memory relative to its
+       chunk size needs to set it. *)
     max_chunk_buffers =
       (match json |> member "maxChunkBuffers" with
         | `Int n when n > 0 -> n

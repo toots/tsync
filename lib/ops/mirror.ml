@@ -99,14 +99,9 @@ module Make (C : Conf.S) = struct
     in
     { stats with copied = List.rev stats.copied }
 
-  (* [source] names a member; the default is the first, which role order makes a
-     main. Copies between the stores themselves rather than through {!Conf.store}
-     — the point is to reach the ones the composite writes off the caller's path,
-     or does not write at all. Additive only: a delete normally fans out to every
-     store, and resync exists for those that were down, drifted, or were added
-     later.
-
-     Raises [Failure] when nothing has that name. *)
+  (* Copies between the stores themselves rather than through {!Conf.store}: the
+     point is to reach the ones the composite writes off the caller's path, or
+     does not write at all. Raises [Failure] when nothing has that name. *)
   let resync ?source ?(manifests_only = false) ?(on_scan = fun ~objects:_ -> ())
       ?(on_list = fun ~name:_ -> ()) ?on_copy () =
     let named name =
@@ -134,10 +129,9 @@ module Make (C : Conf.S) = struct
         | None, m :: _ -> m
         | None, [] -> failwith "no backends configured"
     in
-    (* A collection in progress leaves the chunk prefix holding only what has been
-       marked so far, so listing it would copy a partial chunk set to every
-       target and call it a resync. Refused rather than reported, since the whole
-       point of this command is to be able to trust the copies afterwards. *)
+    (* A collection in progress leaves the chunk prefix holding only what has
+       been marked so far, so listing it would copy a partial chunk set to every
+       target and call it a resync. *)
     let* () =
       let* run = Space.read_run () in
       match (run, manifests_only) with

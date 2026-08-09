@@ -203,8 +203,6 @@ module Make (J : JOB) = struct
       bytes;
     }
 
-  (* {1 Recording} *)
-
   let announce t = Lwt_condition.broadcast t.settled ()
 
   let enqueue t e =
@@ -266,11 +264,9 @@ module Make (J : JOB) = struct
                 slot.pending <- None;
                 true)
 
-  (* {1 Settling} *)
-
-  (* A queue that has started failing ends the wait too. What it still owes is
-     on disk and outlives the process, so holding a command open for a store
-     that is down buys nothing. *)
+  (* A queue that has started failing ends the wait too: what it owes is on disk
+     and outlives the process, so holding a command open for a store that is
+     down buys nothing. *)
   let rec settle t =
     if idle t then Lwt.return_unit
     else if t.failures > 0 then begin
@@ -281,8 +277,6 @@ module Make (J : JOB) = struct
     else
       let* () = Lwt_condition.wait t.settled in
       settle t
-
-  (* {1 The workers} *)
 
   let slot_of t e =
     match t.topo with

@@ -1,19 +1,13 @@
 (* The local cache-chunk store: {!Chunk_group} bodies named by a content key
    derived from the stored chunks they hold.
 
-   Nothing here is per-file. A group is present iff its file exists, so there is
-   no residency record to disagree with the disk, and any group may be deleted at
-   any moment since it can be fetched again — callers must treat a miss as
-   ordinary (see {!read_into}).
-
-   Content addressing also makes the store shared: two files whose chunks group
-   identically are one file on disk and one download. *)
+   A group is present iff its file exists and may be deleted at any moment, so
+   callers must treat a miss as ordinary (see {!read_into}). *)
 
 open Lwt.Syntax
 
-(* One stored chunk body by content key. Narrower than [Remote.S] so the store
-   has no cycle with it and can be driven by a stub in tests. Grouping is
-   invisible to the backend: a cache chunk is fetched as its members. *)
+(* Narrower than [Remote.S] so the store has no cycle with it and can be driven
+   by a stub in tests. *)
 module type Fetch = sig
   val get_chunk : chunk_key:string -> string Lwt.t
 end
@@ -33,11 +27,6 @@ module Make (C : Conf.S) (F : Fetch) = struct
   (* The file is sized up front and each member written at its own offset, so
      members are produced concurrently and land in any order: a cold group costs
      about one round trip whatever [cache_chunk_size] is.
-
-     Concurrency is bounded in the producer — [Remote.get_chunk] takes a slot from
-     the process-wide [max_downloads] pool — and resident bytes follow the same
-     bound, a body existing only between its producer returning and its write
-     completing.
 
      {!Fs_util.atomic_write_at} requires every byte covered exactly once, which
      the length check enforces: a member disagreeing with the manifest fails the
@@ -60,15 +49,13 @@ module Make (C : Conf.S) (F : Fetch) = struct
             else put ~offset:(Chunk_group.offset group i) data)
           (Chunk_group.indices group))
 
-  (* Bounds fetches that have started, not groups asked for. A whole file is
-     asked for at once, but a fetch opens its destination before waiting for a
-     download slot, so without this every pending group holds a descriptor while
-     only [max_downloads] make progress — 247 open files inside 200ms on a 250 MB
-     file at a 1 MiB group size, against a 256 descriptor limit.
+  (* Bounds fetches that have started, not groups asked for: a fetch opens its
+     destination before waiting for a download slot, so without this every
+     pending group holds a descriptor while only [max_downloads] make progress —
+     247 open files inside 200ms on a 250 MB file at a 1 MiB group size, against
+     a 256 descriptor limit.
 
-     Bounded here rather than at the callers so every route in gets it:
-     whole-file materialization, ranged reads and demand paging all reach
-     {!ensure}. *)
+     Bounded here rather than at the callers so every route in gets it. *)
   let slots = Lwt_bounded.create ~max:C.max_downloads ()
 
   let fetch group =
@@ -108,32 +95,21 @@ module Make (C : Conf.S) (F : Fetch) = struct
     if present then Lwt.return_unit else write_group group member
 
   (* Every chunk here is re-fetchable, so holding the store under [C.max_cache]
-     needs no residency, open counts or dirty checks. Unsynced data lives in the
-     staged tree, which this never visits. *)
+     needs no residency, open counts or dirty checks. *)
 
   let root () = Cache_layout.chunks_dir ~cache_root:C.cache_root C.domain_name
 
-  (* Enough concurrent stats to hide per-call latency, few enough that a large
-     directory is not a descriptor storm. Not derived from the device: a stat is
-     not a transfer, and pacing to what a slow disk streams would make a sweep
-     crawl.
-
-     One budget for the store, not per sweep: [stats] is answered per status
+  (* One budget for the store, not per sweep: [stats] is answered per status
      request, so a per-call bound would limit each sweep and none of them
      together.
 
-     Stats only. The fanout directories are walked with a plain [map_p] — a fixed
-     number, chosen here rather than by the data — because holding a slot per
-     directory while its entries queue for the same budget deadlocks. *)
+     Held around a stat only — the fanout directories are walked with a plain
+     [map_p] — because holding a slot per directory while its entries queue for
+     the same budget deadlocks. *)
   let metadata_slots = Lwt_bounded.create ~max:64 ()
 
-  (* (path, bytes, mtime) per chunk body, walking the fanout dirs. Stat'd in
-     parallel: one at a time is a round trip each, milliseconds against seconds on
-     a few thousand chunks.
-
-     Bounded explicitly rather than left to the Lwt thread pool, which caps
-     threads but not what a job holds — and a cache is as large as the user's
-     data. *)
+  (* (path, bytes, mtime) per chunk body. Stat'd in parallel: one at a time is a
+     round trip each, milliseconds against seconds on a few thousand chunks. *)
   let entries () =
     let* dirs = Fs_util.readdir_list (root ()) in
     let+ per_dir =
@@ -205,9 +181,8 @@ module Make (C : Conf.S) (F : Fetch) = struct
             if String.length body = len then Some body else None))
       (fun _ -> Lwt.return_none)
 
-  (* Every member segment must hash to the key the manifest published it under.
-     The repair is a deletion; the bytes come back on the next read. [false] when
-     the group was dropped. *)
+  (* Every member segment must hash to the key the manifest published it under;
+     the repair is a deletion, the bytes coming back on the next read. *)
   let verify_group ~group =
     let* present = exists group in
     if not present then Lwt.return_true
@@ -233,10 +208,10 @@ module Make (C : Conf.S) (F : Fetch) = struct
         let+ () = forget ~group in
         false)
 
-  (* A chunk being written cannot live under a content key: a published chunk's
-     name is its hash and this content is still changing. It gets a uuid, renamed
-     under its content key once the upload that hashes it succeeds ({!promote}).
-     Staged bodies are unsynced data and are never deleted behind the writer. *)
+  (* A chunk being written cannot live under a content key, its content still
+     changing, so it gets a uuid until the upload that hashes it succeeds
+     ({!promote}). Staged bodies are unsynced data and are never deleted behind
+     the writer. *)
 
   let staged_path uuid =
     Filename.concat
@@ -291,7 +266,7 @@ module Make (C : Conf.S) (F : Fetch) = struct
   let stage_forget ~uuid = Fs_util.unlink_quiet (staged_path uuid)
 
   (* A frontend handing back a complete file (as the FileProvider extension
-     always does) gets it adopted as-is: one file, no chunk split, no copy. *)
+     always does) gets it adopted as-is: one file, no chunk split. *)
 
   let whole_path uuid =
     Filename.concat

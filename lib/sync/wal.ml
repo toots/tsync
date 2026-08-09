@@ -46,9 +46,8 @@ let to_json r =
                 ] );
           ])
 
-(* Records written before the state was carried hold one op per line and no
-   envelope. They read as [Intent], which is what they were: reconcile finds no
-   staged data behind them and discards them. *)
+(* A record with no envelope — one op per line — reads as [Intent], so reconcile
+   finds no staged data behind it and discards it. *)
 let of_body body =
   let legacy () =
     {
@@ -86,8 +85,7 @@ let of_body body =
 
 (* The record is the durable job the upload queue drains, so it is a
    {!Durable_queue.JOB} rather than a format this module reads and writes
-   itself. Metadata operations use the log without the queue: they happen
-   synchronously and only need the record to survive a crash. *)
+   itself. *)
 module Job = struct
   type t = record
 

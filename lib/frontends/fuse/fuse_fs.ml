@@ -10,7 +10,7 @@ module Make (C : Conf.S) = struct
   module H = Hidden_ops.Make (C)
   module I = Internal_ops.Make (F)
 
-  (* FUSE runs Multi_threaded while all File operations run on the single Lwt
+  (* FUSE runs Multi_threaded while every File operation runs on the single Lwt
      event-loop thread, so each handler bridges with [Lwt_preemptive.run_in_main]
      and a slow operation blocks only its own kernel thread. *)
   let fuse_to_key path =
@@ -30,9 +30,9 @@ module Make (C : Conf.S) = struct
     && String.sub basename 0 (String.length prefix) = prefix
 
   (* Counted at the FUSE boundary because nothing below sees these numbers: a
-     read served from the chunk cache never reaches a backend, so {!Metrics} stays
-     at zero while a mount streams gigabytes. Incremented inside [on_loop], on the
-     event-loop thread, so plain ints suffice. *)
+     read served from the chunk cache never reaches a backend, so {!Metrics}
+     stays at zero while a mount streams gigabytes. Incremented inside [on_loop],
+     on the event-loop thread, so plain ints suffice. *)
   let open_handles = ref 0
   let files_opened = ref 0
 
@@ -63,9 +63,9 @@ module Make (C : Conf.S) = struct
   let on_loop f = Lwt_preemptive.run_in_main f
 
   (* Deliberately unbounded: a wedged stop should hang so the supervisor's own
-     timeout kills us and reports the unit failed. A timer of our own would
-     abandon the same pending work, quietly and with an exit status saying all was
-     well. Steps waiting on something remote carry their own bounds
+     timeout kills us and reports the unit failed, where a timer of our own would
+     abandon the same pending work with an exit status saying all was well.
+     Steps waiting on something remote carry their own bounds
      ({!Domain_store.drain}). *)
   let stop_t, stop_wake = Lwt.wait ()
 
@@ -77,7 +77,7 @@ module Make (C : Conf.S) = struct
   (* [Fuse.main] holds the main thread until the mount is gone, so a stop asked
      from the inside must unmount too or the process drains and then sits there.
      Set only in that case: when the FUSE loop exits on its own the mount is
-     already gone and unmounting again would only warn. *)
+     already gone. *)
   let unmount_needed = ref false
 
   let request_stop () =
@@ -100,25 +100,22 @@ module Make (C : Conf.S) = struct
     | Unix.WSIGNALED n -> Printf.sprintf "killed by signal %d" n
     | Unix.WSTOPPED n -> Printf.sprintf "stopped by signal %d" n
 
-  (* [Lwt_process] reaps the child through the event loop, so no thread blocks on
-     it. It takes an argument array, so the mount path needs no quoting.
-
-     [-u] refuses while anything still holds the mount, leaving every open
+  (* [-u] refuses while anything still holds the mount, leaving every open
      descriptor valid; [-z] detaches from the tree regardless and lets those
-     descriptors fail afterwards. Breaking a reader is only the right trade once
-     the mount is going away anyway, which is here and nowhere else. *)
+     descriptors fail afterwards, which is only the right trade once the mount is
+     going away anyway. *)
   let detach ?(lazily = false) mount_point =
     Lwt_process.exec
       ("", [| "fusermount3"; (if lazily then "-uz" else "-u"); mount_point |])
 
   (* Shutdown awaits this promise, so [exit] cannot happen with the unmount
-     pending. The delay lets the IPC [stop] reply reach its caller first.
+     pending; the delay lets the IPC [stop] reply reach its caller first.
 
      A clean detach fails whenever anything still holds the mount -- one media
-     server keeping a file open across the stop is enough -- and the lazy one is
-     what then keeps the mount point from being left behind as a stale entry
-     nobody can reach or remove. It does not end the session: that is
-     {!finish_stop}'s part, and the two together are what a stop needs. *)
+     server keeping a file open across the stop is enough -- and the lazy one
+     then keeps the mount point from being left behind as a stale entry nobody
+     can reach or remove. It does not end the session: that is {!finish_stop}'s
+     part. *)
   let unmount mount_point =
     if not !unmount_needed then Lwt.return_unit
     else
@@ -132,11 +129,9 @@ module Make (C : Conf.S) = struct
             let+ status = detach ~lazily:true mount_point in
             match status with
               | Unix.WEXITED 0 -> ()
-              (* Nothing further to try from in here. The stop still finishes, so
-                 what is left behind is a mount point pointing at a process that
-                 is gone -- which the next start clears
-                 ({!Fuse_frontend.prepare_mount_point}). Worth an error: it is
-                 the one path where a mount outlives the daemon. *)
+              (* Nothing further to try from in here, and the next start clears
+                 the leftover ({!Fuse_frontend.prepare_mount_point}). Worth an
+                 error: it is the one path where a mount outlives the daemon. *)
               | status ->
                   Log.err
                     "fusermount3 -uz %s %s; the mount point is left behind"
@@ -165,8 +160,8 @@ module Make (C : Conf.S) = struct
     let mp = F.manifest_path key in
     Sys.file_exists mp && Sys.is_directory mp
 
-  (* Given a directory, both apply to the whole subtree; one file's failure must
-     not abort the rest. *)
+  (* Given a directory this applies to the whole subtree, and one file's failure
+     must not abort the rest. *)
   let on_subtree what f key =
     if not (is_dir_key key) then f key
     else (
@@ -194,10 +189,9 @@ module Make (C : Conf.S) = struct
   let unlimited_bytes = Int64.shift_left 1L 50
 
   (* A write has to land on every store that keeps the domain, so the room left
-     is the least of theirs. Only a local store can say: object storage reports
-     no path and bounds nothing, and a read-only member takes no writes. The
-     figures come as a set from one store rather than a per-field minimum, so
-     that total, free and available stay describing the same disk. *)
+     is the least of theirs, and only a local store can say. The figures come as
+     a set from one store rather than a per-field minimum, so that total, free
+     and available stay describing the same disk. *)
   let store_capacity () =
     let bounded m =
       if m.Backend.role = "readOnly" then None
@@ -293,17 +287,13 @@ module Make (C : Conf.S) = struct
                   files
                 @ List.map fst dirs
               in
-              (* Files and directories are two listings of one namespace, and a
-                 name can land in both -- a file key and a folder marker that
-                 share it. Concatenated, the directory then returns that name
-                 twice, which no caller is prepared for: `ls` prints it twice
-                 and anything building a map from the listing loses one silently.
-                 A stress run caught a mount doing exactly this.
+              (* Files and directories are two listings of one namespace and a
+                 name can land in both, which a stress run caught a mount doing:
+                 concatenated, the directory returns that name twice and anything
+                 building a map from the listing loses one silently.
 
-                 Whatever produced the collision is upstream of here and is not
-                 something readdir can repair, so it is logged rather than
-                 quietly absorbed. What readdir owes its caller either way is a
-                 listing with each name once. *)
+                 The collision is upstream of here and not something readdir can
+                 repair, so it is logged rather than quietly absorbed. *)
               let names =
                 let seen = Hashtbl.create 16 in
                 List.filter
@@ -382,9 +372,9 @@ module Make (C : Conf.S) = struct
           guard "truncate" path (fun () ->
               on_loop (fun () -> (dispatch path).truncate path size fi)));
       (* What a file costs is room in the domain's stores, not in the cache it is
-         staged through, so df reports the stores. Inode counts stay nominal —
-         nothing here maps to one. One statvfs per bounded store, no cache walk,
-         since df-alikes poll this. *)
+         staged through, so df reports the stores; inode counts stay nominal,
+         nothing here mapping to one. One statvfs per bounded store and no cache
+         walk, since df-alikes poll this. *)
       statfs =
         (fun _path ->
           let bsize = 4096L in
@@ -420,18 +410,16 @@ module Make (C : Conf.S) = struct
       fsync = (fun _path _datasync _fi -> ());
     }
 
-  (* The event loop runs on a thread of its own here, and every FUSE handler
-     reaches it through [Lwt_preemptive.run_in_main]. An exception escaping
-     [Lwt_main.run] therefore does not stop the process: it leaves one with no
-     loop, in which every filesystem call blocks on a thread that is gone, and
-     nothing reports it until a stop is attempted and hangs. One of these sat
-     silent for 47 minutes after an SSL read raised inside libev's dispatch --
-     outside any promise, so neither [Lwt.catch] nor {!Lwt.async_exception_hook}
-     could see it.
+  (* An exception escaping [Lwt_main.run] does not stop the process: it leaves
+     one with no loop, in which every filesystem call blocks on a thread that is
+     gone, and nothing reports it until a stop is attempted and hangs -- one of
+     these sat silent for 47 minutes after an SSL read raised inside libev's
+     dispatch, outside any promise and so invisible to both [Lwt.catch] and
+     {!Lwt.async_exception_hook}.
 
-     There is nothing to recover to, so the process ends at once and says why; a
-     supervisor restarts it in seconds. [Unix._exit], because at_exit handlers
-     would drain through the loop that just died, which is the wedge again. *)
+     There is nothing to recover to, so the process ends at once and says why.
+     [Unix._exit], because at_exit handlers would drain through the loop that
+     just died, which is the wedge again. *)
   let loop_died exn =
     Log.err "event loop stopped: %s\n%s" (Printexc.to_string exn)
       (Printexc.get_backtrace ());
@@ -439,18 +427,15 @@ module Make (C : Conf.S) = struct
     flush stderr;
     Unix._exit 1
 
-  (* [Fuse.main] returns when the kernel drops the connection, and detaching the
-     mount is not what drops it: the session outlives the mount point for as long
-     as another process holds a descriptor on it, which a reader need never let
-     go of. So the main thread cannot be waited on here.
+  (* The main thread cannot be waited on here: [Fuse.main] returns when the
+     kernel drops the connection, and the session outlives the mount point for as
+     long as another process holds a descriptor on it, which a reader need never
+     let go of.
 
-     By this point everything this process owed is done -- uploads drained, mount
-     out of the tree -- and exiting is what closes /dev/fuse, which is what ends
-     the connection and turns the reader's descriptor into ESTALE. Waiting
-     instead is the 90-second stop that ends in SIGABRT.
-
-     [Unix._exit], as in {!loop_died}: at_exit handlers would drain through the
-     loop that has just finished. *)
+     By this point everything this process owed is done, and exiting is what
+     closes /dev/fuse and turns the reader's descriptor into ESTALE; waiting
+     instead is the 90-second stop that ends in SIGABRT. [Unix._exit], as in
+     {!loop_died}. *)
   let finish_stop () =
     Log.debug "stop complete, exiting";
     (try Unix.unlink C.socket_path with _ -> ());
@@ -489,16 +474,11 @@ module Make (C : Conf.S) = struct
                   nothing a reader can observe. *)
                  E.start
                    ~freshness:
-                     (* This mount has to be told. [cache_opts] turns off the
-                      attribute and entry timeouts, which is why a re-lookup
-                      sees fresh data -- but it does not stop the kernel
-                      answering a lookup from a dentry it already holds, and a
-                      name another client renamed away stays resolvable in a
-                      directory already open. Claiming {!Frontend.Revalidates}
-                      was claiming a coherence the mount did not have.
-
-                      Pushing an invalidation is the part that was missing, not
-                      a shorter timeout. *)
+                     (* This mount has to be told: [cache_opts] turns off the
+                      attribute and entry timeouts, but that does not stop the
+                      kernel answering a lookup from a dentry it already holds,
+                      so a name another client renamed away stays resolvable in
+                      a directory already open. *)
                      (Frontend.Notify
                         (fun key ->
                           (* Backend key to the path this mount shows. A key
@@ -526,12 +506,11 @@ module Make (C : Conf.S) = struct
                Lwt.async (fun () ->
                    Ipc.serve ~path:C.socket_path
                      (Ih.handler (ipc_hooks mount_point)));
-               (* A plain SIGTERM reaches this group too: from a supervisor that
-                only signals, and always from the parent when this frontend was
+               (* A plain SIGTERM reaches this group too, from a supervisor that
+                only signals and always from the parent when this frontend was
                 forked. libfuse may install its own handlers in [Fuse.main] and
-                override these, but that route exits the FUSE loop and drains just
-                the same. This covers the case where it installs none, where the
-                default action would kill the process mid-queue. *)
+                override these; this covers the case where it installs none, in
+                which the default action would kill the process mid-queue. *)
                List.iter
                  (fun s ->
                    ignore (Lwt_unix.on_signal s (fun _ -> request_stop ())))
@@ -560,27 +539,15 @@ module Make (C : Conf.S) = struct
     Log.info "mounting FUSE at %s" mount_point;
     (* [allow_other] lets other users reach the mount; it also needs
        [user_allow_other] in /etc/fuse.conf. *)
-    (* The kernel's own caches, turned off.
+    (* The kernel's own caches, turned off: they assume this filesystem changes
+       only through the kernel's own calls, which is false the moment a second
+       client shares the domain, and freshness is bought instead by a LOOKUP per
+       path access.
 
-       They assume this filesystem changes only through the kernel's own calls,
-       which is false the moment a second client shares the domain: a rename
-       made elsewhere left the old name in the dentry cache, listed but no longer
-       openable, and the new one invisible -- until the mount was taken down.
-       Nothing invalidated them, because libfuse's high-level API offers no way
-       to; [fuse_lowlevel_notify_inval_entry] is not reachable from this binding.
-
-       So freshness is bought by re-asking: a LOOKUP per path access rather than
-       one per timeout. That is the standing cost of {!Frontend.Revalidates}
-       here, and the reason to want a lowlevel binding is to stop paying it.
-
-       It buys resolution, not enumeration. A name another client has since
-       created or moved now resolves correctly -- opening it works where it used
-       to fail -- but the kernel's cached listing of a directory is not covered
-       by these timeouts, and this API cannot invalidate it either, so a stale
-       readdir survives until the directory is opened afresh. Closing that needs
-       [fuse_lowlevel_notify_inval_entry], which means a lowlevel binding; the
-       directory's mtime already moves when a foreign change lands, so the
-       signal a smarter cache would need is there. *)
+       That buys resolution, not enumeration -- a directory's cached listing is
+       not covered by these timeouts and this API cannot invalidate it either, so
+       a stale readdir survives until the directory is opened afresh. Closing
+       that needs [fuse_lowlevel_notify_inval_entry], hence a lowlevel binding. *)
     let cache_opts =
       ["entry_timeout=0"; "attr_timeout=0"; "negative_timeout=0"; "auto_cache"]
     in

@@ -11,10 +11,8 @@ module type S = sig
   val manifest_key : string -> string option Lwt.t
 
   (** {!manifest_key}, minting and persisting any missing folder id. Only for a
-      caller entitled to bring a folder into existence. A minted id is fresh and
-      random, naming a namespace the backend never heard of, so a reader gains
-      nothing and pays for the marker — which re-creates the local directory the
-      key names. *)
+      caller entitled to bring a folder into existence: the marker a mint
+      persists re-creates the local directory the key names. *)
   val ensure_manifest_key : string -> string Lwt.t
 
   (** For a directory's logical key: the backend key of its folder marker (under
@@ -47,26 +45,21 @@ module Inode = struct
 
     let rel_of = Key.strip_prefix ~domain_prefix:C.domain_prefix
 
-    (* Backend key of [leaf] within its parent folder's namespace. *)
     let child_key ~folder_id leaf =
       C.domain_prefix ^ Folder.child_key ~folder_id leaf
 
-    (* A store that cannot arbitrate leaves the old behaviour: mint locally and
-       hope. Said once, because it is a real weakening — two clients creating one
-       directory can then still strand each other. *)
+    (* A store that cannot arbitrate falls back to minting locally, said once
+       because it is a real weakening: two clients creating one directory can
+       then still strand each other. *)
     let warned_unarbitrated = ref false
 
-    (* A folder's id is claimed from the store rather than chosen here.
+    (* A folder's id is claimed from the store rather than chosen here: two
+       clients that have not yet seen each other would both mint and both write
+       the same marker key, the second silently taking the name and leaving the
+       first's namespace unreachable. The marker {i is} the claim, so every
+       client puts its children under the id the store accepted.
 
-       Deciding locally is what made concurrent creation lossy: two clients that
-       have not yet seen each other both hold nothing, both mint, and both write
-       the same marker key, so the second silently took the name and left the
-       first's namespace unreachable. The marker {i is} the claim, so the id a
-       client puts its children under is the one the store accepted, and every
-       client agrees on it.
-
-       Still local-first: a folder already resolved costs no round trip, and the
-       claim's outcome is what gets cached. *)
+       Still local-first: a folder already resolved costs no round trip. *)
     let rec ensure_id rel =
       if rel = "" then Lwt.return Folder.root_id
       else
@@ -111,7 +104,6 @@ module Inode = struct
     let ensure_manifest_key key =
       let rel = rel_of key in
       if Key.is_dir rel then
-        (* A directory prefix maps to the folder's own namespace. *)
         let+ id = ensure_id (Key.chop_slash rel) in
         C.domain_prefix ^ id ^ "/"
       else
@@ -157,10 +149,9 @@ module Inode = struct
   end
 end
 
-(* The logical key already is the backend key, for callers holding inode-space
-   keys and no path (share serving walks the folder tree by id) so they can reuse
-   the path-keyed read machinery. Read-only: there is no folder tree to
-   record. *)
+(* The logical key already is the backend key, so callers holding inode-space
+   keys and no path (share serving walks the folder tree by id) can reuse the
+   path-keyed read machinery. Read-only: there is no folder tree to record. *)
 module Identity : S = struct
   let manifest_key key = Lwt.return_some key
   let ensure_manifest_key key = Lwt.return key

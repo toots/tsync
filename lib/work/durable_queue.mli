@@ -7,17 +7,12 @@
     Two things sit here, because the durable record outlives the queue that
     drains it:
 
-    - {!Make.Records} — the records themselves. Usable on its own by work that
-      is done synchronously and only needs to survive a crash, and read by
-      whatever reconciles or reports on what is outstanding.
-    - {!Make.t} — a worker draining that log, in one of two topologies. Both
-      share the log, the backoff, the poison policy and the drain; they differ
-      in what the work is, which is not something a parameter can paper over.
-      {!Make.ordered} is one worker taking jobs in the order they were recorded,
-      for a stream to a single target where a rename's copy must not overtake
-      its delete. {!Make.keyed} is several workers over jobs named by a key, at
-      most one per key at a time, where a fresh job for a busy key cancels and
-      replaces what is running. *)
+    - {!Make.Records} — the records themselves, usable on their own by work done
+      synchronously that only needs to survive a crash, and read by whatever
+      reconciles or reports on what is outstanding.
+    - {!Make.t} — a worker draining that log, either {!Make.ordered} or
+      {!Make.keyed}; both share the log, the backoff, the poison policy and the
+      drain, and differ only in what the work is. *)
 
 (** What to do with a job whose failure will not clear.
 
@@ -59,10 +54,8 @@ end
 val settle_all : ?timeout:float -> unit -> unit Lwt.t
 
 (** Also wait for this, under the same [timeout]. For background work a queue's
-    owner runs beside it and does not record — a best-effort push that only
-    saves a queued job some work. Such a push is not owed, but it is still in
-    flight, and a caller that has waited for quiet should not have it land
-    afterwards. *)
+    owner runs beside it without recording: not owed, but still in flight, and a
+    caller that has waited for quiet should not have it land afterwards. *)
 val register_settle : (unit -> unit Lwt.t) -> unit
 
 module Make (J : JOB) : sig
@@ -105,15 +98,14 @@ module Make (J : JOB) : sig
     unit ->
     t
 
-  (** [workers] jobs at once, at most one per [key].
+  (** [workers] jobs at once, at most one per [key]: posting a job whose key is
+      already busy cancels the running one and takes its place, so a file
+      rewritten while its upload is in flight uploads once, from the newer bytes
+      ([run] is handed the flag to poll for that).
 
-      Posting a job whose key is already busy cancels the running one and takes
-      its place, so a file rewritten while its upload is in flight uploads once,
-      from the newer bytes. [run] is handed the flag to poll for that.
-
-      A transient failure requeues at the back rather than the head: with keys
-      independent of each other, holding the head would stall every other key
-      behind one that is failing. [weight] is what {!stats.bytes} sums. *)
+      A transient failure requeues at the back rather than the head, holding the
+      head being what would stall every other key behind one that is failing;
+      [weight] is what {!stats.bytes} sums. *)
   val keyed :
     ?max_queued:int ->
     ?workers:int ->

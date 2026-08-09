@@ -2,11 +2,8 @@
 
    A folder's children live under [manifests/<folder_id>/], each object either a
    folder marker (naming a subfolder and pointing at its namespace) or a file
-   manifest, told apart only by their body. Every walk therefore fetches and
-   classifies each child; that step is here once.
-
-   Callers keep their own folds — they want different things (paths, keys, sizes)
-   — and share only the step from a folder id to its classified children. *)
+   manifest, told apart only by their body. Callers keep their own folds — they
+   want different things — and share only that classification step. *)
 
 open Lwt.Syntax
 

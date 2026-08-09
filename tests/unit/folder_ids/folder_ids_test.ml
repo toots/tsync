@@ -85,9 +85,9 @@ let main () =
   let* exists = Lwt_unix_retry.file_exists (index_file stale) in
   check "rebuild prunes entries for departed folders" (not exists);
 
-  (* ── Escaped names survive the round trip ──────────────────────────────────
-     The on-disk directory name is a hash when the real one is not portable, and
-     nothing can decode it — so the real name has to come from the marker. *)
+  (* Escaped names survive the round trip: the on-disk directory name is a hash
+     when the real one is not portable, and nothing can decode it, so the real
+     name has to come from the marker. *)
   let odd = "awkward:name" in
   let* odd_id = ensure odd in
   let* () = Fs_util.rm_rf (Cache_layout.folders_dir ~cache_root domain_name) in

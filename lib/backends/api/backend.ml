@@ -26,11 +26,9 @@ let reason = function
   | Failed { detail; _ } -> detail
   | exn -> Printexc.to_string exn
 
-(* These reach users verbatim, through [Printexc.to_string] in diagnostics and
-   the CLI. The default printer spells an exception with its full module path,
-   which for a wrapped library is the internal library name, so every case is
-   spelled out here: how the module is packaged cannot change what a user
-   reads. *)
+(* These reach users verbatim through [Printexc.to_string], whose default
+   printer spells an exception with its full module path — the internal library
+   name, for a wrapped library — so every case is spelled out here. *)
 let () =
   Printexc.register_printer (function
     | Not_writable ->
