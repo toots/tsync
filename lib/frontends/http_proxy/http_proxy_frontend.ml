@@ -560,6 +560,34 @@ let serve_status ~port ~tls ~json routes req body_str =
         (Diagnostics.text report)
   end
 
+(* What a client holding this secret may configure itself against. Unlike the
+   object API there is no key to route on, so the secret is the selector: a
+   listener fronting several domains under different secrets answers each caller
+   with its own, not the whole listing. *)
+let serve_domains routes req body_str =
+  match List.filter (fun r -> authed r req body_str) routes with
+    | [] ->
+        bump "unauthorized";
+        respond ~status:`Unauthorized "unauthorized"
+    | routes ->
+        bump "domains";
+        respond
+          ~headers:[("content-type", "application/json")]
+          (Yojson.Safe.to_string
+             (`Assoc
+                [
+                  ( "domains",
+                    `List
+                      (List.map
+                         (fun r ->
+                           `Assoc
+                             [
+                               ("name", `String r.domain_name);
+                               ("readOnly", `Bool r.read_only);
+                             ])
+                         routes) );
+                ]))
+
 let callback ~port ~tls routes _conn req body =
   let meth = Cohttp.Request.meth req in
   let uri = Cohttp.Request.uri req in
@@ -576,6 +604,7 @@ let callback ~port ~tls routes _conn req body =
               respond
                 ~headers:[("content-type", "text/html; charset=utf-8")]
                 stats_html
+          | `GET, "/domains" -> serve_domains routes req body_str
           | `GET, "/stats" ->
               serve_status ~port ~tls ~json:false routes req body_str
           | `GET, "/api/v1/stats" ->
