@@ -1087,13 +1087,10 @@ let sync_cmd =
          match last_sync_key with
            | _ when full -> Some "--full flag"
            | None -> Some "no bookmark (first run)"
-           | Some last -> (
-               match all_keys with
-                 | oldest :: _
-                   when Journal.Entry_key.timestamp_ms oldest
-                        > Journal.Entry_key.timestamp_ms last ->
-                     Some "bookmark older than oldest journal entry"
-                 | _ -> None)
+           | Some last ->
+               if Journal.Entry_key.cannot_bridge last all_keys then
+                 Some "bookmark older than oldest journal entry"
+               else None
        in
        match resync_reason with
          | Some reason -> full_resync reason

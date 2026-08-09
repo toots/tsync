@@ -380,15 +380,6 @@ module Make (C : Conf.S) (F : File_ops.S) = struct
     | Some c -> `String (Journal.Entry_key.to_string c)
     | None -> `String ""
 
-  (* True when the journal cannot bridge [anchor]→now: pruned past the anchor,
-     or cleaned up entirely with changes still pending. [keys] is ascending. *)
-  let cannot_bridge anchor keys =
-    match keys with
-      | [] -> true
-      | oldest :: _ ->
-          Journal.Entry_key.timestamp_ms oldest
-          > Journal.Entry_key.timestamp_ms anchor
-
   let handle_changes_since anchor =
     let anchor =
       if anchor = "" then None else Journal.Entry_key.of_string anchor
@@ -410,7 +401,10 @@ module Make (C : Conf.S) (F : File_ops.S) = struct
              ("cursor", cursor_field cursor);
              ("ops", `List []);
            ])
-    else if match anchor with Some a -> cannot_bridge a keys | None -> false
+    else if
+      match anchor with
+        | Some a -> Journal.Entry_key.cannot_bridge a keys
+        | None -> false
     then Lwt.return (ok_json [("stale", `Bool true)])
     else (
       let my_uuid = J.client_uuid () in

@@ -27,8 +27,6 @@ type op =
 module Entry_key : sig
   type t
 
-  val make : share_dir:string -> unit -> t
-
   (** The only parser. Takes the last path segment, so a backend listing key or
       a stored path is accepted as-is, and returns [None] for a name no client
       wrote rather than raising: callers are listings, where an unreadable name
@@ -41,6 +39,16 @@ module Entry_key : sig
 
   (** Chronological — the order ops must be applied in. *)
   val compare : t -> t -> int
+
+  (** Whether the journal cannot carry a reader from [anchor] to now: pruned
+      past it, or cleaned up entirely with changes still pending. [keys] is the
+      published journal, ascending.
+
+      An empty journal answers [true]. That is the conservative reading — a
+      resync costs a walk, whereas treating "no entries" as "nothing happened"
+      silently skips whatever the pruning removed. Here rather than at the two
+      callers, which had drifted into opposite answers for that case. *)
+  val cannot_bridge : t -> t list -> bool
 
   (** ["<YYYY-MM>/<entry key>"], the entry's path relative to the journal
       prefix. Both levels sort chronologically, so the lexicographic order

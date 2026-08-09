@@ -109,6 +109,13 @@ module Entry_key = struct
       | 0 -> String.compare a.client_uuid b.client_uuid
       | c -> c
 
+  (* Empty answers [true]: "no entries" is indistinguishable from "every entry
+     that mattered was pruned", and a needless resync is cheaper than skipping
+     the ops the pruning took. *)
+  let cannot_bridge anchor = function
+    | [] -> true
+    | oldest :: _ -> Int64.compare oldest.ms anchor.ms > 0
+
   (* A month directory keeps the listing bounded — the journal only grows, one
      object per write — and costs readers nothing: entry names are zero-padded
      timestamps, so shard and name both sort chronologically, which every cursor
