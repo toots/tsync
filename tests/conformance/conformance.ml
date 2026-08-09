@@ -109,6 +109,85 @@ let suite name (module B : Backend.S) =
     let+ left = B.list_prefix ~prefix:run_prefix () in
     check "delete_multi clears the rest" (left = [])
   in
+  (* Names that break an encoder rather than a store. A bulk delete names each key
+     inside a document -- XML for both s3 and gcs -- so a key carrying a
+     metacharacter is the case where a delete silently takes out the wrong object
+     or none at all, and none of it shows up with keys spelled [a] and [b].
+
+     [+] is here because it has already cost this project a day: signing encoded
+     it as [%2B] while the URI carried it raw, and every such key answered 403.
+     [%] catches the mirror-image bug of encoding twice. The rest are the XML
+     metacharacters and the URL delimiters.
+
+     Every one of these is a legal object name on both stores, and they are the
+     names real files have. *)
+  let special =
+    [
+      "amp-&-key";
+      "angle-<tag>-key";
+      "quotes-\"double\"-'single'";
+      "plus+key";
+      "percent-%2F-key";
+      "hash#and?query";
+      "space in key";
+      "unicode-é-å-日本";
+    ]
+  in
+  let* () =
+    let* () =
+      Lwt_list.iter_s
+        (fun n -> B.put ~key:(key ("bulk/" ^ n)) ~data:n ())
+        special
+    in
+    let* ok =
+      Lwt_list.fold_left_s
+        (fun acc n ->
+          let+ got = B.get_opt ~key:(key ("bulk/" ^ n)) () in
+          acc && got = Some n)
+        true special
+    in
+    check "a key with metacharacters round-trips through put and get" ok;
+    let+ listed = B.list_prefix ~prefix:(run_prefix ^ "bulk/") () in
+    check "and comes back from a listing spelled the same"
+      (List.length listed = List.length special)
+  in
+  (* The two things {!Gc} now leans on, neither of which an emulator is trusted
+     for. Closing deletes off every copy the keys it discards on the main, so:
+
+     - a key that is not there must not be an error. Every copy is sent the same
+       list whether or not it holds each one, and a resumed run deletes a batch
+       it may already have deleted.
+     - a list longer than the store's own cap on a batch must all go. s3 and gcs
+       both stop at 1000 per request and the driver pages past it; a paging bug
+       leaves the tail behind, and nothing sweeps a copy any more.
+
+     Done with a mostly-absent list, so pinning the paging costs a handful of
+     writes rather than a thousand: the survivors sit at the front, on the
+     boundary and past it, with the awkward names among them. *)
+  let* () =
+    let over = 1000 in
+    let pad i = key (Printf.sprintf "bulk/absent-%04d" i) in
+    let live = [key "bulk/first"; key "bulk/at-cap"; key "bulk/past-cap"] in
+    let* () = Lwt_list.iter_s (fun k -> B.put ~key:k ~data:"x" ()) live in
+    let awkward = List.map (fun n -> key ("bulk/" ^ n)) special in
+    let batch =
+      List.concat
+        [
+          [List.nth live 0];
+          awkward;
+          List.init (over - 2 - List.length awkward) pad;
+          [List.nth live 1];
+          List.init 200 (fun i -> pad (over + i));
+          [List.nth live 2];
+        ]
+    in
+    let* () = B.delete_multi batch in
+    let+ left = B.list_prefix ~prefix:(run_prefix ^ "bulk/") () in
+    check
+      (Printf.sprintf "delete_multi of %d keys, mostly absent, clears every one"
+         (List.length batch))
+      (left = [])
+  in
   Lwt.return_unit
 
 (* Cleans up whatever the suite did not, including after a failure. *)

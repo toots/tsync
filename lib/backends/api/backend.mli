@@ -73,6 +73,20 @@ module type S = sig
 
   val head_opt : key:string -> unit -> file_entry option Lwt.t
   val delete : key:string -> unit -> unit Lwt.t
+
+  (** Delete every key, or raise. Two things callers depend on and every driver
+      owes them:
+
+      - a key that is not there is not a failure. {!Gc} sends every copy the same
+        list whether or not it holds each one, and a resumed run repeats a batch
+        it may already have deleted.
+      - a list longer than whatever the store takes per request is still deleted
+        whole; the driver pages.
+
+      Bulk deletes are the awkward case, because a store answers one of these
+      with a [200] carrying a per-key failure list. A driver that reads only the
+      status reports success over keys that are still there — and nothing walks a
+      copy afterwards to notice. See {!absent_code}. *)
   val delete_multi : string list -> unit Lwt.t
   val copy : src_key:string -> dst_key:string -> unit -> unit Lwt.t
 
@@ -110,6 +124,13 @@ val failed : kind:kind -> op:string -> string -> exn
 val classify : exn -> kind
 
 val string_of_kind : kind -> string
+
+(** Whether a per-key error code from a bulk delete means the object was already
+    gone, which is a success. Here rather than in each driver because s3 and gcs
+    answer the same question in the same vocabulary, and a driver that got the
+    list wrong on its own would either fail a resumed collection or hide a
+    delete that did not happen. *)
+val absent_code : string -> bool
 
 (** What to put in a log line. {!Printexc.to_string} would repeat the operation
     name the caller has already printed. *)

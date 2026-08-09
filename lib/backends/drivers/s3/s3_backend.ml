@@ -148,7 +148,32 @@ let delete_multi t keys =
               S3.delete_multi ~credentials:t.credentials ~endpoint:t.endpoint
                 ~bucket:t.bucket ~objects ())
         in
-        let (_ : S3.Delete_multi.result) = unwrap "delete_multi" res in
+        let result = unwrap "delete_multi" res in
+        (* A bulk delete answers 200 and reports what it refused inside the body,
+           so the request succeeding says nothing about the objects. This list
+           used to be discarded, which made a refusal indistinguishable from a
+           delete: {!Gc} discards the main's copy right after this returns, and
+           since nothing walks a copy afterwards the keys would stay on it for
+           good, under a run that reported a tidy success.
+
+           Classified [Transient] rather than by the code, which is per key and
+           not one answer: a batch retried costs a repeat of something idempotent,
+           and being wrong the other way strands the objects. *)
+        (match
+           List.filter
+             (fun (e : S3.Delete_multi.error) ->
+               not (Backend.absent_code e.S3.Delete_multi.code))
+             result.S3.Delete_multi.error
+         with
+          | [] -> ()
+          | first :: _ as refused ->
+              raise
+                (Backend.failed ~kind:Backend.Transient ~op:"delete_multi"
+                   (Printf.sprintf
+                      "%d of %d object(s) not deleted; first was %s: %s (%s)"
+                      (List.length refused) (List.length here)
+                      first.S3.Delete_multi.key first.S3.Delete_multi.code
+                      first.S3.Delete_multi.message)));
         go rest
   in
   go keys
