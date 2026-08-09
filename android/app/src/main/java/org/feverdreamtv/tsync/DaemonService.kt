@@ -86,6 +86,25 @@ class DaemonService : Service() {
             return bundle
         }
 
+        /** Whether a full sync this app started is still going. The app owns
+         *  that subprocess, so this is the one thing it can say honestly: the
+         *  daemon runs in another process and is not told about the walk. */
+        @Volatile
+        var syncRunning: Boolean = false
+            private set
+
+        /** Minutes of work on a large domain, so the caller runs it off the
+         *  main thread and reads the exit code: a resync that could not finish
+         *  reports non-zero rather than leaving a half-mirror looking whole. */
+        fun runFullSync(context: Context): Pair<Int, String> {
+            syncRunning = true
+            return try {
+                run(context, "sync", "--full")
+            } finally {
+                syncRunning = false
+            }
+        }
+
         fun run(context: Context, vararg args: String): Pair<Int, String> {
             val process = Runtime.getRuntime().exec(
                 arrayOf(binary(context).absolutePath) + args,
@@ -93,7 +112,13 @@ class DaemonService : Service() {
             )
             val output = process.inputStream.bufferedReader().readText() +
                 process.errorStream.bufferedReader().readText()
-            return process.waitFor() to output
+            val code = process.waitFor()
+            // Also to logcat: the caller shows this in a toast, and a resync
+            // that names the objects it could not fetch says it once, into a
+            // message that is gone in four seconds.
+            val summary = "${args.joinToString(" ")} exited $code\n${output.trim()}"
+            if (code == 0) Log.i(TAG, summary) else Log.w(TAG, summary)
+            return code to output
         }
     }
 

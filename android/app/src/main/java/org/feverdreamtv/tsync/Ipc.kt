@@ -19,7 +19,9 @@ object Ipc {
 
     class Error(message: String) : Exception(message)
 
-    fun send(socket: File, action: String, fields: Map<String, String> = emptyMap()): JSONObject {
+    /** Values are typed: the daemon reads offsets and lengths as JSON numbers
+     *  and ignores a string spelling of one. */
+    fun send(socket: File, action: String, fields: Map<String, Any> = emptyMap()): JSONObject {
         val request = JSONObject().put("action", action)
         fields.forEach { (k, v) -> request.put(k, v) }
 

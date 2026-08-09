@@ -152,8 +152,14 @@ class MainActivity : Activity() {
             var waited = 0
             while (!socket.exists() && waited++ < 40) Thread.sleep(250)
             val (_, text) = DaemonService.run(this, "stats")
+            // A walk creates each folder before fetching what is inside it, so
+            // mid-sync a directory that looks empty is not one.
+            val syncing =
+                if (DaemonService.syncRunning)
+                    "full sync running — folders fill in as it walks\n\n"
+                else ""
             runOnUiThread {
-                output.text = text.ifBlank {
+                output.text = syncing + text.ifBlank {
                     if (socket.exists()) "daemon is up but returned nothing"
                     else "daemon did not start — check `adb logcat -s tsyncd`"
                 }
@@ -165,13 +171,26 @@ class MainActivity : Activity() {
                 addView(Button(this@MainActivity).apply {
                     text = "Refresh"; setOnClickListener { refresh() }
                 })
-                addView(Button(this@MainActivity).apply {
+                val sync = Button(this@MainActivity)
+                addView(sync.apply {
                     text = "Sync"
                     setOnClickListener {
+                        sync.isEnabled = false
+                        sync.text = "Syncing…"
+                        refresh()
                         thread {
-                            val (_, out) = DaemonService.run(this@MainActivity, "sync", "--full")
+                            val (code, out) = DaemonService.runFullSync(this@MainActivity)
                             runOnUiThread {
-                                Toast.makeText(this@MainActivity, out.trim().takeLast(120), Toast.LENGTH_LONG).show()
+                                sync.isEnabled = true
+                                sync.text = "Sync"
+                                Toast.makeText(
+                                    this@MainActivity,
+                                    if (code == 0) out.trim().takeLast(120)
+                                    // It says which part it could not fetch, and
+                                    // running it again is what finishes the job.
+                                    else "sync incomplete — run it again\n" + out.trim().takeLast(100),
+                                    Toast.LENGTH_LONG
+                                ).show()
                                 refresh()
                             }
                         }

@@ -6,12 +6,17 @@ import android.os.CancellationSignal
 import android.os.Handler
 import android.os.HandlerThread
 import android.os.ParcelFileDescriptor
+import android.os.ProxyFileDescriptorCallback
+import android.os.storage.StorageManager
+import android.system.ErrnoException
+import android.system.OsConstants
 import android.provider.DocumentsContract.Document
 import android.provider.DocumentsContract.Root
 import android.provider.DocumentsProvider
 import android.util.Log
 import android.webkit.MimeTypeMap
 import java.io.File
+import java.io.RandomAccessFile
 import java.util.UUID
 
 /**
@@ -132,20 +137,52 @@ class TsyncProvider : DocumentsProvider() {
         mode: String,
         signal: CancellationSignal?
     ): ParcelFileDescriptor {
-        // Whole-file, as the macOS File Provider does: ensure_cached assembles the
-        // content at a destination we name. Ranged reads via
-        // openProxyFileDescriptor are a later milestone; nothing here needs them
-        // until something tries to stream rather than open.
+        // Demand-paged: the platform services each read through the callback
+        // below, so a player starts on the first frame instead of waiting for a
+        // whole film to land. The descriptor is seekable like any file, which is
+        // what container probing needs.
         if (!mode.contains("w")) {
-            val copy = File(context!!.cacheDir, "reads").apply { mkdirs() }
+            val size = Ipc.send(socket, "stat", mapOf("path" to documentId)).getLong("size")
+            // Ranges land at their own offset, so this is a sparse partial mirror
+            // of the file rather than a buffer, and one open never sees another's
+            // bytes.
+            val scratch = File(context!!.cacheDir, "ranges").apply { mkdirs() }
                 .resolve(UUID.randomUUID().toString())
-            Ipc.send(socket, "ensure_cached",
-                mapOf("path" to documentId, "dest" to copy.absolutePath))
-            // Our copy, not the daemon's cache entry, so closing it is what ends
-            // its life.
-            return ParcelFileDescriptor.open(
-                copy, ParcelFileDescriptor.MODE_READ_ONLY, callbackHandler
-            ) { copy.delete() }
+            val storage = context!!.getSystemService(StorageManager::class.java)
+            return storage.openProxyFileDescriptor(
+                ParcelFileDescriptor.MODE_READ_ONLY,
+                object : ProxyFileDescriptorCallback() {
+                    override fun onGetSize(): Long = size
+
+                    override fun onRead(offset: Long, size: Int, data: ByteArray): Int {
+                        val served = try {
+                            val response = Ipc.send(socket, "fetch_range", mapOf(
+                                "path" to documentId,
+                                "dest" to scratch.absolutePath,
+                                "offset" to offset,
+                                "length" to size
+                            ))
+                            response.getInt("length")
+                        } catch (e: Exception) {
+                            Log.w(TAG, "fetch_range $documentId @$offset: ${e.message}")
+                            throw ErrnoException("onRead", OsConstants.EIO)
+                        }
+                        // Short at end of file, and the caller is told so rather
+                        // than handed the zeros the sparse hole would read as.
+                        if (served <= 0) return 0
+                        RandomAccessFile(scratch, "r").use { file ->
+                            file.seek(offset)
+                            file.readFully(data, 0, served)
+                        }
+                        return served
+                    }
+
+                    override fun onRelease() {
+                        scratch.delete()
+                    }
+                },
+                callbackHandler
+            )
         }
 
         val staging = File(context!!.filesDir, "staging").apply { mkdirs() }
