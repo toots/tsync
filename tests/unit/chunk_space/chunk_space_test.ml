@@ -17,7 +17,9 @@ let marker_key = Chunk_space.marker_key ~chunk_prefix
 (* An object store's stand-in: a local backend that says it cannot collect, which
    is what every non-filesystem driver answers. *)
 module Uncollectable : Backend.S = struct
-  include (val Local_backend.make ~root:store_dir : Backend.S)
+  include
+    (val Backend.make ~backend_type:"local" ~get_field:(fun _ -> Some store_dir)
+        : Backend.S)
 
   let capabilities ~prefix:_ () = Lwt.return Backend.no_caps
 end
@@ -48,7 +50,10 @@ module Conf_of (B : Backend.S) : Conf.S = struct
 end
 
 module Collectable =
-  Conf_of ((val Local_backend.make ~root:store_dir : Backend.S))
+  Conf_of
+    ((val Backend.make ~backend_type:"local" ~get_field:(fun _ ->
+              Some store_dir)
+         : Backend.S))
 
 module Space = Chunk_space.Make (Collectable)
 module Frozen = Conf_of (Uncollectable)
@@ -61,7 +66,9 @@ let step fmt = Printf.printf ("  " ^^ fmt ^^ "\n")
    matter here, being the shard it lands in. *)
 let ck n = Printf.sprintf "%016x-%016x" n n
 
-module Store = (val Local_backend.make ~root:store_dir : Backend.S)
+module Store =
+  (val Backend.make ~backend_type:"local" ~get_field:(fun _ -> Some store_dir)
+      : Backend.S)
 
 let () =
   ignore

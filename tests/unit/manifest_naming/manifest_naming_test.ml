@@ -17,7 +17,9 @@ let domain = "testdom"
 let step fmt = Printf.printf ("  " ^^ fmt ^^ "\n")
 let case name = Printf.printf "\n=== %s\n" name
 
-module Store = (val Local_backend.make ~root:(Filename.concat root "store"))
+module Store =
+  (val Backend.make ~backend_type:"local" ~get_field:(fun _ ->
+           Some (Filename.concat root "store")))
 
 module C : Conf.S = struct
   let versioning = false

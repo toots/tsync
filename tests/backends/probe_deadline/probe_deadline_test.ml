@@ -39,7 +39,10 @@ module C : Conf.S = struct
   let journal_prefix = "tsync/wedgedom/journal/"
   let cursor_key = "tsync/wedgedom/cursor"
   let shares_prefix = "tsync/shares/"
-  let store = Local_backend.make ~root:(root ^ "/store")
+
+  let store =
+    Backend.make ~backend_type:"local" ~get_field:(fun _ ->
+        Some (root ^ "/store"))
 
   (* The store that never answers, declared as the daemon would. *)
   let members =

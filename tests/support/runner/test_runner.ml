@@ -1015,7 +1015,9 @@ let setup_client (module C : Conf.S) root staging_prefix =
 
 let dump_backend_at ~backend_root ~domain_prefix ~chunk_prefix ~journal_prefix
     ~versions_prefix ~cursor_key =
-  let (module B : Backend.S) = Local_backend.make ~root:backend_root in
+  let (module B : Backend.S) =
+    Backend.make ~backend_type:"local" ~get_field:(fun _ -> Some backend_root)
+  in
   let rel_key k =
     let pfx = String.length domain_prefix in
     if String.length k > pfx then String.sub k pfx (String.length k - pfx)
@@ -1272,11 +1274,13 @@ let run_scenario ?(versioning = false) ?(symlink_policy = `Keep)
         Backend.member ~name:"backend" ~backend_type:"local"
           ~config:[("path", backend_root)]
           ~local_path:backend_root
-          (Local_backend.make ~root:backend_root);
+          (Backend.make ~backend_type:"local" ~get_field:(fun _ ->
+               Some backend_root));
         Backend.member ~name:"backend2" ~backend_type:"local"
           ~config:[("path", backend2_root)]
           ~local_path:backend2_root
-          (Local_backend.make ~root:backend2_root);
+          (Backend.make ~backend_type:"local" ~get_field:(fun _ ->
+               Some backend2_root));
       ]
 
     let store =
@@ -1360,7 +1364,8 @@ let run_two_client_scenario ?(versioning = false)
       Backend.member ~name:"backend" ~backend_type:"local"
         ~config:[("path", backend_root)]
         ~local_path:backend_root
-        (Local_backend.make ~root:backend_root);
+        (Backend.make ~backend_type:"local" ~get_field:(fun _ ->
+             Some backend_root));
     ]
   in
   let module Ca = struct
@@ -1477,7 +1482,9 @@ let make_conf ?(versioning = false) ~client_name ~backend_root ~cache_root
     let journal_prefix = "tsync/test/journal/"
     let cursor_key = "tsync/test/cursor"
     let shares_prefix = "tsync/shares/"
-    let store = Local_backend.make ~root:backend_root
+
+    let store =
+      Backend.make ~backend_type:"local" ~get_field:(fun _ -> Some backend_root)
 
     (* What the daemon declares for diagnosis ([bin/cli.ml build_backends]), so
        [stats] has a store to report on here too. *)

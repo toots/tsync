@@ -29,7 +29,10 @@ module C : Conf.S = struct
   let journal_prefix = "tsync/testdom/journal/"
   let cursor_key = "tsync/testdom/cursor"
   let shares_prefix = "tsync/shares/"
-  let store = Local_backend.make ~root:store_dir
+
+  let store =
+    Backend.make ~backend_type:"local" ~get_field:(fun _ -> Some store_dir)
+
   let members = [Backend.member ~name:"local" store]
   let cache_root = cache_dir
   let data_dir = data_dir

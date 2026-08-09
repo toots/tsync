@@ -24,7 +24,10 @@ module C : Conf.S = struct
   let journal_prefix = "tsync/statusdom/journal/"
   let cursor_key = "tsync/statusdom/cursor"
   let shares_prefix = "tsync/shares/"
-  let store = Local_backend.make ~root:(status_root ^ "/store")
+
+  let store =
+    Backend.make ~backend_type:"local" ~get_field:(fun _ ->
+        Some (status_root ^ "/store"))
 
   (* Two stores, one of them down, so the report has to name which. *)
   let members =
@@ -200,7 +203,9 @@ let () =
       (* A fresh root per run: a write through a route really reaches its store
          now, so a leftover object would answer the read this asserts is a
          miss. *)
-      store = Local_backend.make ~root:(Filename.temp_dir "tsync-route-test" "");
+      store =
+        Backend.make ~backend_type:"local" ~get_field:(fun _ ->
+            Some (Filename.temp_dir "tsync-route-test" ""));
       serve_share = None;
       socket_path = "/nonexistent/tsync.sock";
       domain_name = "one";

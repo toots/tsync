@@ -16,7 +16,9 @@ let step fmt = Printf.printf ("  " ^^ fmt ^^ "\n")
 let case name = Printf.printf "\n=== %s\n" name
 
 let () =
-  let (module B : Backend.S) = Local_backend.make ~root in
+  let (module B : Backend.S) =
+    Backend.make ~backend_type:"local" ~get_field:(fun _ -> Some root)
+  in
   Lwt_main.run
     (case "several clients reach for one name at once";
      (* Started together and resolved together: whichever lands first, the rest

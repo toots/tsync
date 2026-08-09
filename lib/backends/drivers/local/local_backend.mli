@@ -1,7 +1,6 @@
 (** A backend over a directory on this machine.
 
-    Registers itself as ["local"]; {!make} is here for a caller building one
-    directly, which is every test that needs a real store without a config. *)
-
-(** [root] is created if missing. *)
-val make : root:string -> (module Backend.S)
+    Registers itself as ["local"] and exposes nothing: a caller that wants one
+    asks {!Backend.make} for it by name, the way a configured domain does. The
+    library still has to be linked — [-linkall] is what puts the registration in
+    the binary. *)
