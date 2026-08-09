@@ -19,9 +19,18 @@ let backfill_dir = root ^ "/backfill"
 let chunk_prefix = "tsync/testdom/chunks/"
 let domain_prefix = "tsync/testdom/manifests/"
 
-module Main = (val Local_backend.make ~root:main_dir : Backend.S)
-module Replica = (val Local_backend.make ~root:replica_dir : Backend.S)
-module Backfill = (val Local_backend.make ~root:backfill_dir : Backend.S)
+module Main =
+  (val Backend.make ~backend_type:"local" ~get_field:(fun _ -> Some main_dir)
+      : Backend.S)
+
+module Replica =
+  (val Backend.make ~backend_type:"local" ~get_field:(fun _ -> Some replica_dir)
+      : Backend.S)
+
+module Backfill =
+  (val Backend.make ~backend_type:"local" ~get_field:(fun _ ->
+           Some backfill_dir)
+      : Backend.S)
 
 module C : Conf.S = struct
   let versioning = false

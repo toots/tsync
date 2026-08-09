@@ -120,11 +120,15 @@ let wrap ~inners ~target ~name =
   (composite, Option.get !built)
 
 let () =
-  let main = Local_backend.make ~root:main_root in
+  let main =
+    Backend.make ~backend_type:"local" ~get_field:(fun _ -> Some main_root)
+  in
   let (module M : Backend.S) = main in
   let composite, (module T : Deferred.S) =
     wrap ~inners:[main]
-      ~target:(Local_backend.make ~root:target_root)
+      ~target:
+        (Backend.make ~backend_type:"local" ~get_field:(fun _ ->
+             Some target_root))
       ~name:"target"
   in
   let (module B : Backend.S) = composite in

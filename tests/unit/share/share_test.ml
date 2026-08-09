@@ -12,7 +12,9 @@ let share_base = "https://share.example"
 (* A local backend that also advertises a share URL (a plain local backend
    never serves shares). *)
 module Shareable : Backend.S = struct
-  include (val Local_backend.make ~root:store_dir : Backend.S)
+  include
+    (val Backend.make ~backend_type:"local" ~get_field:(fun _ -> Some store_dir)
+        : Backend.S)
 
   let capabilities ~prefix:_ () =
     Lwt.return { Backend.no_caps with share_url = Some share_base }
@@ -87,7 +89,10 @@ let () =
      Lwt.return_unit);
 
   let module NoShare : Backend.S = struct
-    include (val Local_backend.make ~root:store_dir : Backend.S)
+    include
+      (val Backend.make ~backend_type:"local" ~get_field:(fun _ ->
+               Some store_dir)
+          : Backend.S)
   end in
   let module C2 : Conf.S = struct
     include C

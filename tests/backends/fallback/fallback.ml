@@ -83,9 +83,15 @@ let listing (module B : Backend.S) prefix =
 let holds root key = Sys.file_exists (Filename.concat root key)
 
 let () =
-  let main = Local_backend.make ~root:main_root in
-  let replica = Local_backend.make ~root:replica_root in
-  let archive = Local_backend.make ~root:archive_root in
+  let main =
+    Backend.make ~backend_type:"local" ~get_field:(fun _ -> Some main_root)
+  in
+  let replica =
+    Backend.make ~backend_type:"local" ~get_field:(fun _ -> Some replica_root)
+  in
+  let archive =
+    Backend.make ~backend_type:"local" ~get_field:(fun _ -> Some archive_root)
+  in
   let (module Rep : Backend.S) = replica in
   let (module Arc : Backend.S) = archive in
   Lwt_main.run

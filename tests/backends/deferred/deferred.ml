@@ -91,7 +91,9 @@ let owed name = List.length (keys_under (Filename.concat log_dir name))
 let flaky ~fails ~root : (module Backend.S) * (unit -> int) =
   let left = ref fails in
   let refused = ref 0 in
-  let (module Real : Backend.S) = Local_backend.make ~root in
+  let (module Real : Backend.S) =
+    Backend.make ~backend_type:"local" ~get_field:(fun _ -> Some root)
+  in
   ( (module struct
       include Real
 
@@ -124,7 +126,9 @@ end
 
 (* Reachable only while [up]. *)
 let switchable ~up ~root : (module Backend.S) =
-  let (module Real : Backend.S) = Local_backend.make ~root in
+  let (module Real : Backend.S) =
+    Backend.make ~backend_type:"local" ~get_field:(fun _ -> Some root)
+  in
   (module struct
     include Real
 
@@ -194,7 +198,9 @@ let settled ~name stats =
   go ()
 
 let () =
-  let main = Local_backend.make ~root:main_root in
+  let main =
+    Backend.make ~backend_type:"local" ~get_field:(fun _ -> Some main_root)
+  in
   let (module M : Backend.S) = main in
   Lwt_main.run
     (let c0 = chunk 0 and c2 = chunk 2 in
@@ -277,7 +283,9 @@ let () =
      let t5_root = Filename.concat root "t5" in
      let l5, (module T5 : Deferred.S) =
        target_for ~inners:[main]
-         ~target:(Local_backend.make ~root:t5_root)
+         ~target:
+           (Backend.make ~backend_type:"local" ~get_field:(fun _ ->
+                Some t5_root))
          ~name:"replica" ()
      in
      let (module B5 : Backend.S) = l5 in

@@ -22,7 +22,10 @@ module C = struct
   let journal_prefix = "tsync/test/journal/"
   let cursor_key = "tsync/test/cursor"
   let shares_prefix = "tsync/shares/"
-  let store = Local_backend.make ~root:backend_root
+
+  let store =
+    Backend.make ~backend_type:"local" ~get_field:(fun _ -> Some backend_root)
+
   let members = [Backend.member ~name:"local" store]
   let cache_root = Filename.concat root "cache"
   let data_dir = Filename.concat root "data"
@@ -46,7 +49,10 @@ module D = Data.Make (C) (R)
 
 let opinionated n : (module Backend.S) =
   (module struct
-    include (val Local_backend.make ~root:backend_root : Backend.S)
+    include
+      (val Backend.make ~backend_type:"local" ~get_field:(fun _ ->
+               Some backend_root)
+          : Backend.S)
 
     let capabilities ~prefix:_ () =
       Lwt.return { Backend.no_caps with chunk_size = n }
@@ -87,7 +93,9 @@ let read_file path =
   s
 
 let count_chunks () =
-  let (module B : Backend.S) = Local_backend.make ~root:backend_root in
+  let (module B : Backend.S) =
+    Backend.make ~backend_type:"local" ~get_field:(fun _ -> Some backend_root)
+  in
   let+ entries = B.list_prefix ~prefix:C.chunk_prefix () in
   List.length
     (List.filter
