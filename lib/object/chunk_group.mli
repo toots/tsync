@@ -32,9 +32,6 @@ val index_of : per:int -> int -> int
     chunks does it), and aliasing them onto one file serves the wrong bytes. *)
 val key : t -> string
 
-(** The member chunk keys, in index order. *)
-val members : t -> string list
-
 val member_count : t -> int
 
 (** The stored chunk indices this group covers, in order. *)

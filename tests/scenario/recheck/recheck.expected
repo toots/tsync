@@ -221,7 +221,7 @@
     chunk#0 5f60fd5c4664e947-8c1c9d7881c6107a size=7
   file ok.bin [.tsync-root/4675454c5194c6a7-5f00ae60e6d18820] = manifest size=4 chunks=1 h1=4adfcb2ace61a6a1 h2=5872029ca96b3c51
     chunk#0 002783db772ad77d-0760f49141bb4bb5 size=4
-  folder sub [.tsync-root/4f7b4244079f8bf6-67a7ed7af26470c3] -> 3171f9431b3d5a67
-  file nested.bin [3171f9431b3d5a67/1427ec502d51cc85-a6b2693498cea2e1] = manifest size=6 chunks=1 h1=7546f608548f4d0d h2=aaeab951ddf2968e
+  folder sub [.tsync-root/4f7b4244079f8bf6-67a7ed7af26470c3] -> <folder-1>
+  file nested.bin [<folder-1>/1427ec502d51cc85-a6b2693498cea2e1] = manifest size=6 chunks=1 h1=7546f608548f4d0d h2=aaeab951ddf2968e
     chunk#0 fa87ee5fc199e332-c7156c4359a54f81 size=6
 

@@ -30,10 +30,6 @@ let seed_from_kernel () =
 
 let state = ref (Random.State.make (seed_from_kernel ()))
 
-(* Tests fix the seed so folder ids — and with them backend key ordering and
-   every snapshot — are reproducible. *)
-let reseed n = state := Random.State.make [| n |]
-
 (* 64 bits: enough that the staged bodies alive at any moment never collide. *)
 let short () =
   Printf.sprintf "%08Lx%08Lx"

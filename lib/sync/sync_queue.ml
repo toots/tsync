@@ -14,9 +14,6 @@ module type S = sig
 
   val cancel_put : string -> bool
 
-  (** [true] when no upload is queued or running. *)
-  val idle : unit -> bool
-
   (** Files with an active or queued upload. *)
   val pending : unit -> int
 
@@ -143,7 +140,6 @@ module Make (C : Conf.S) : S = struct
 
   let cancel_put key = Q.cancel queue key
   let pending () = Q.owed queue
-  let idle () = pending () = 0
   let uploading () = Q.in_flight_keys queue
   let pending_bytes () = (Q.stats queue).Durable_queue.bytes
   let set_paused b = Q.set_paused queue b

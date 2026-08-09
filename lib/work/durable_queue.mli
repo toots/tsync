@@ -76,14 +76,7 @@ module Make (J : JOB) : sig
         another's. *)
     val create : dir:string -> t
 
-    (** An id that sorts chronologically and stays distinct across the processes
-        sharing a [dir] — the daemon forks one per frontend, and a one-shot
-        command records what it does too. Use it when the id means nothing
-        outside this log; supply your own when it does. *)
-    val mint_id : t -> string
-
     val write : t -> id:string -> J.t -> unit Lwt.t
-    val read : t -> string -> J.t option Lwt.t
 
     (** Read, transform, write back. A record that is already gone is not an
         error: whatever owns it may have finished first. *)
@@ -153,9 +146,6 @@ module Make (J : JOB) : sig
 
   val paused : t -> bool
 
-  (** Wait for this queue alone. See {!settle_all}. *)
-  val settle : t -> unit Lwt.t
-
   (** Stop the workers and wait for them, leaving anything unstarted on disk. *)
   val stop : t -> unit Lwt.t
 
@@ -163,9 +153,6 @@ module Make (J : JOB) : sig
 
   (** Keys running right now, as opposed to merely queued. *)
   val in_flight_keys : t -> string list
-
-  (** Nothing running and nothing queued. *)
-  val idle : t -> bool
 
   (** Distinct keys still owed, running or queued. *)
   val owed : t -> int

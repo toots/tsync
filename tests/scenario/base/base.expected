@@ -183,8 +183,8 @@
   cursor = <entry-1>
   journal <entry-1> = mkdir sub/
   journal <entry-2> = put sub/a.txt 6
-  folder sub [.tsync-root/4f7b4244079f8bf6-67a7ed7af26470c3] -> 547c2ad623ddba3f
-  file a.txt [547c2ad623ddba3f/f01e5cbbc09d4fc4-9a0fcd66f030de75] = manifest size=6 chunks=1 h1=7546f608548f4d0d h2=aaeab951ddf2968e
+  folder sub [.tsync-root/4f7b4244079f8bf6-67a7ed7af26470c3] -> <folder-1>
+  file a.txt [<folder-1>/f01e5cbbc09d4fc4-9a0fcd66f030de75] = manifest size=6 chunks=1 h1=7546f608548f4d0d h2=aaeab951ddf2968e
     chunk#0 fa87ee5fc199e332-c7156c4359a54f81 size=6
 
 === rmdir
@@ -198,7 +198,7 @@
   cursor = <entry-2>
   journal <entry-1> = mkdir sub/
   journal <entry-2> = rmdir sub/
-  trash sub -> 547c2ad623ddba3f
+  trash sub -> <folder-1>
 
 === stat_absent_creates_nothing
   stat no-such-file.txt
@@ -223,7 +223,7 @@
   cursor = <entry-2>
   journal <entry-1> = mkdir sub/
   journal <entry-2> = rmdir sub/
-  trash sub -> 547c2ad623ddba3f
+  trash sub -> <folder-1>
 
 === rename_dir
   mkdir d
@@ -243,8 +243,8 @@
   journal <entry-1> = mkdir d/
   journal <entry-2> = put d/a.txt 9
   journal <entry-3> = rename d/ -> d2/ dir
-  folder d2 [.tsync-root/9300b48b23e547eb-b163fe9e56d6ceb1] -> 547c2ad623ddba3f
-  file a.txt [547c2ad623ddba3f/f01e5cbbc09d4fc4-9a0fcd66f030de75] = manifest size=9 chunks=1 h1=95c3b9346e4258b2 h2=10be3ebb668637a3
+  folder d2 [.tsync-root/9300b48b23e547eb-b163fe9e56d6ceb1] -> <folder-1>
+  file a.txt [<folder-1>/f01e5cbbc09d4fc4-9a0fcd66f030de75] = manifest size=9 chunks=1 h1=95c3b9346e4258b2 h2=10be3ebb668637a3
     chunk#0 53706aefc11d0c46-cac003653b45e8bd size=9
 
 === rmdir_nonempty
@@ -262,8 +262,8 @@
   journal <entry-1> = mkdir d/
   journal <entry-2> = put d/a.txt 8
   journal <entry-3> = rmdir d/
-  trash d -> 547c2ad623ddba3f
-  file a.txt [547c2ad623ddba3f/f01e5cbbc09d4fc4-9a0fcd66f030de75] = manifest size=8 chunks=1 h1=d1591408076924eb h2=4becff1a22312f14
+  trash d -> <folder-1>
+  file a.txt [<folder-1>/f01e5cbbc09d4fc4-9a0fcd66f030de75] = manifest size=8 chunks=1 h1=d1591408076924eb h2=4becff1a22312f14
     chunk#0 5e4c66b9cb232332-2fc4674f963b00e3 size=8
 
 === symlink

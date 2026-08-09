@@ -11,7 +11,7 @@
    body carries one only for the locations that cannot express it: a backend key
    is [<folder-id>/<hash>] and an escaped cache leaf is [.tsync-esc-<hash>],
    both one-way. Everywhere else the logical key is real-path shaped and holds
-   the answer. {!Make.name_of} asks the location first. *)
+   the answer, so a reader asks the location first. *)
 type t = {
   size : int64;
   chunk_size : int;
@@ -23,7 +23,7 @@ type t = {
 }
 
 (* The name in the body. Only the location can say whether this is worth
-   consulting, so callers holding a key should not: see {!Make.name_of}. *)
+   consulting, so a caller holding a key uses the key instead. *)
 let recorded_name m = Chunk_table.name m.chunks
 
 (* What an upload produces per chunk. Read paths go through the table. *)
@@ -56,9 +56,6 @@ let groups ~cache_chunk_size m =
 
 let group_at ~cache_chunk_size m i =
   Chunk_group.of_table ~table:m.chunks ~per:(per ~cache_chunk_size m) i
-
-let group_count ~cache_chunk_size m =
-  Chunk_group.count ~table:m.chunks ~per:(per ~cache_chunk_size m)
 
 (* Hashed over the ordered chunk digests, so a changed file's manifest rebuilds
    from its chunk entries without re-reading untouched bytes. Seeds 0/1 give the
@@ -383,8 +380,6 @@ module Make (C : Conf.S) = struct
   let group_at_opt base i =
     match base with None -> None | Some m -> group_at m i
 
-  let groups_opt = function None -> [] | Some m -> groups m
-
   let path key =
     sidecar_path ~cache_root:C.cache_root ~domain_name:C.domain_name
       ~domain_prefix:C.domain_prefix key
@@ -425,13 +420,6 @@ module Make (C : Conf.S) = struct
     let rel = rel_of key in
     let reldir = Key.parent rel in
     ensure_dirs (root ()) reldir
-
-  (* The name for a manifest at [key]. The location answers whenever it can; the
-     body is consulted only for an escaped on-disk leaf, which is the one case
-     the path cannot express. This is {!real_dir_name} for files. *)
-  let name_of ~key m =
-    let leaf = Key.leaf ~domain_prefix:C.domain_prefix key in
-    if Name_escape.is_escaped leaf then recorded_name m else leaf
 
   (* The name is stamped from the key, so a mirror manifest always records the
      name it is filed under. Sole writer of a manifest body in the cache. *)

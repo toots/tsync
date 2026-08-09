@@ -161,8 +161,11 @@ let rel path =
       (String.length path - String.length prefix)
   else path
 
-let gets_for g =
-  List.fold_left (fun acc ck -> acc + count ck) 0 (Chunk_group.members g)
+(* The group's member keys, in index order. *)
+let members g =
+  List.init (Chunk_group.member_count g) (Chunk_group.member_key g)
+
+let gets_for g = List.fold_left (fun acc ck -> acc + count ck) 0 (members g)
 
 let show label g =
   let+ present = Lwt.return (Sys.file_exists (path g)) in
