@@ -34,4 +34,32 @@ let () =
   let _, next = Gcs_backend.parse_list {|{"items":[]}|} in
   check "parse_list no token" (next = None);
 
+  (* Bulk delete is the one verb on the XML API, so its body is built by hand and
+     its answer read by hand. A key carrying an XML metacharacter would otherwise
+     end the element early and delete something else. *)
+  check "delete_body names each key"
+    (Gcs_backend.delete_body ["a/x"; "a/y"]
+    = "<Delete><Quiet>true</Quiet><Object><Key>a/x</Key></Object><Object><Key>a/y</Key></Object></Delete>");
+  check "delete_body escapes metacharacters"
+    (Gcs_backend.delete_body ["a&b<c>d\"e'f"]
+    = "<Delete><Quiet>true</Quiet><Object><Key>a&amp;b&lt;c&gt;d&quot;e&apos;f</Key></Object></Delete>");
+
+  (* [Quiet] means a clean delete answers with no [Error] at all, so the empty
+     case is the one that has to read as success. *)
+  check "delete_errors on a clean answer"
+    (Gcs_backend.delete_errors "<?xml version='1.0'?><DeleteResult/>" = []);
+  check "delete_errors reads code and key"
+    (Gcs_backend.delete_errors
+       "<DeleteResult><Error><Code>AccessDenied</Code><Key>a/x</Key><Message>no</Message></Error></DeleteResult>"
+    = [("AccessDenied", "a/x")]);
+  check "delete_errors reads every one"
+    (List.length
+       (Gcs_backend.delete_errors
+          "<DeleteResult><Error><Code>A</Code><Key>1</Key></Error><Error><Code>B</Code><Key>2</Key></Error></DeleteResult>")
+    = 2);
+  (* A key that was already gone is not a failure: a resumed collection deletes
+     the same batch again, and being told that went wrong would stop it. *)
+  check "an absent object is not a failure" (Backend.absent_code "NoSuchKey");
+  check "anything else is" (not (Backend.absent_code "AccessDenied"));
+
   print_endline "gcs: all helper checks passed"
