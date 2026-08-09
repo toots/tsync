@@ -116,7 +116,7 @@ let rec substitute ~values (j : Yojson.Safe.t) =
 
 let signed_request ~secret ~path =
   let headers =
-    Http_proxy.Auth.request_headers ~secret ~meth:"GET" ~path ~body:""
+    Http_proxy.Auth.request_headers ~secret ~meth:"GET" ~path ~body:"" ()
   in
   Cohttp.Request.make
     ~headers:(Cohttp.Header.of_list headers)
@@ -134,7 +134,7 @@ let () =
   and path = "/o/abc"
   and body = "hello" in
   (* A freshly-signed request verifies. *)
-  let headers = Http_proxy.Auth.request_headers ~secret ~meth ~path ~body in
+  let headers = Http_proxy.Auth.request_headers ~secret ~meth ~path ~body () in
   let ts = List.assoc Http_proxy.Auth.timestamp_header headers in
   let sig_ = List.assoc Http_proxy.Auth.signature_header headers in
   assert (
@@ -161,8 +161,12 @@ let () =
 
   (* A stale timestamp (outside the skew window) fails. *)
   let old_ts = Printf.sprintf "%.0f" (Unix.time () -. 1000.) in
+  (* Signed the way a client signs, only under an old clock: what is being
+     rejected is the timestamp, not the signature. *)
   let old_sig =
-    Http_proxy.Auth.sign ~secret ~meth ~path ~timestamp:old_ts ~body
+    List.assoc Http_proxy.Auth.signature_header
+      (Http_proxy.Auth.request_headers ~timestamp:old_ts ~secret ~meth ~path
+         ~body ())
   in
   assert (
     not

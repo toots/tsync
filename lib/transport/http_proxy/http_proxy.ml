@@ -16,8 +16,15 @@ module Auth = struct
     Digestif.SHA256.(
       to_hex (hmac_string ~key:secret (canonical ~meth ~path ~timestamp ~body)))
 
-  let request_headers ~secret ~meth ~path ~body =
-    let timestamp = Printf.sprintf "%.0f" (Unix.time ()) in
+  (* [timestamp] defaults to now. A caller passing one is signing under a time
+     it chose, which is how the replay window is exercised: the signature is
+     genuine and only the clock is wrong. *)
+  let request_headers ?timestamp ~secret ~meth ~path ~body () =
+    let timestamp =
+      match timestamp with
+        | Some t -> t
+        | None -> Printf.sprintf "%.0f" (Unix.time ())
+    in
     [
       (timestamp_header, timestamp);
       (signature_header, sign ~secret ~meth ~path ~timestamp ~body);

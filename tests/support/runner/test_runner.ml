@@ -211,10 +211,12 @@ let starts_with prefix s =
    the numbering follows the folder structure rather than the ids; anything an
    IPC response mentions first is numbered on sight. Reset per scenario. *)
 let folder_alias : (string, string) Hashtbl.t = Hashtbl.create 16
+let alias_index : (string, int) Hashtbl.t = Hashtbl.create 16
 let alias_counter = ref 0
 
 let reset_folder_aliases () =
   Hashtbl.reset folder_alias;
+  Hashtbl.reset alias_index;
   alias_counter := 0
 
 (* [root_id] and [trash_id] are constants, not minted ids: they are already
@@ -228,7 +230,21 @@ let alias_id id =
           incr alias_counter;
           let a = Printf.sprintf "<folder-%d>" !alias_counter in
           Hashtbl.add folder_alias id a;
+          Hashtbl.add alias_index id !alias_counter;
           a)
+
+(* Backend keys under a folder lead with that folder's id, so listing them in key
+   order orders them by a random number. Sorting on this instead puts them in
+   alias order, which follows the tree. Zero-padded so <folder-10> does not sort
+   before <folder-2>. *)
+let sort_key k =
+  String.concat "/"
+    (List.map
+       (fun part ->
+         match Hashtbl.find_opt alias_index part with
+           | Some i -> Printf.sprintf "%06d" i
+           | None -> part)
+       (String.split_on_char '/' k))
 
 (* A minted id is 16 lowercase hex characters. Distinguishes one from a name or
    from the [root_id]/[trash_id] constants. *)
@@ -1065,6 +1081,12 @@ let dump_backend_at ~backend_root ~domain_prefix ~chunk_prefix ~journal_prefix
     (fun (n, _, id) ->
       if not (Hashtbl.mem folder_alias id) then ignore (alias_id id))
     (List.sort compare (List.map (fun (_, n, i) -> (n, n, i)) markers));
+  let entries =
+    List.stable_sort
+      (fun (a : Backend.file_entry) (b : Backend.file_entry) ->
+        compare (sort_key a.key) (sort_key b.key))
+      entries
+  in
   (* A rel key under a folder namespace leads with that folder's id. *)
   let alias_rel rel =
     match String.index_opt rel '/' with
@@ -1115,10 +1137,16 @@ let dump_backend_at ~backend_root ~domain_prefix ~chunk_prefix ~journal_prefix
       else if e.key = gc_marker ^ ".lock" then Lwt.return_unit
       else if e.key = gc_marker then
         let+ data = B.get ~key:e.key () in
+        (* The marker's phase, read straight from its body. The snapshot pins
+           the phase name, so a change to how the marker is written shows up as
+           "unreadable" in the diff rather than passing quietly. *)
         Printf.printf "  collecting: %s\n"
-          (match Chunk_space.of_string data with
-            | Some r -> Chunk_space.string_of_phase r.Chunk_space.phase
-            | None -> "unreadable")
+          (match Yojson.Safe.from_string data with
+            | `Assoc kvs -> (
+                match List.assoc_opt "phase" kvs with
+                  | Some (`String p) -> p
+                  | _ -> "unreadable")
+            | _ | (exception _) -> "unreadable")
       else if starts_with from_prefix e.key then
         if is_marker e.key then Lwt.return_unit
         else (

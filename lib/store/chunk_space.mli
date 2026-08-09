@@ -44,11 +44,6 @@ val from_prefix : chunk_prefix:string -> string
 
 val marker_key : chunk_prefix:string -> string
 
-(** The marker's body, for a reader holding it as bytes rather than going
-    through a functor — a test dumping a store, a tool inspecting one. [None]
-    for anything that is not a marker. *)
-val of_string : string -> run option
-
 module Make (C : Conf.S) : sig
   (** The chunk root a run renames away, and where the run records itself. Both
       sit beside {!Conf.S.chunk_prefix}. *)

@@ -65,7 +65,7 @@ let call t ~meth ?(body = "") uri =
     Cohttp.Header.of_list
       (Http_proxy.Auth.request_headers ~secret:t.secret
          ~meth:(Cohttp.Code.string_of_method meth)
-         ~path:resource ~body)
+         ~path:resource ~body ())
   in
   let attempt cache =
     Lwt_unix.with_timeout request_timeout (fun () ->
