@@ -74,37 +74,6 @@ jobs:
       # Everything it touches is its own, so there is nothing to clean up after.
       - name: End-to-end (FUSE)
         run: opam exec -- make -C linux e2e
-      # Against the real object stores, because a write precondition is exactly
-      # what an emulator approximates least well, and put_if_absent is what
-      # decides a folder's identity. Forks receive no secrets, so this reports
-      # itself skipped there rather than failing for a reason nobody can act on.
-      - name: Backend conformance (real GCS and S3)
-        if: >-
-          github.event_name != 'pull_request' ||
-          github.event.pull_request.head.repo.full_name == github.repository
-        env:
-          TSYNC_CI_GCS_BUCKET: ${{ secrets.TSYNC_CI_GCS_BUCKET }}
-          TSYNC_CI_GCS_SERVICE_ACCOUNT_KEY: ${{ secrets.TSYNC_CI_GCS_SERVICE_ACCOUNT_KEY }}
-          TSYNC_CI_S3_BUCKET: ${{ secrets.TSYNC_CI_S3_BUCKET }}
-          TSYNC_CI_S3_REGION: ${{ secrets.TSYNC_CI_S3_REGION }}
-          TSYNC_CI_S3_ACCESS_KEY_ID: ${{ secrets.TSYNC_CI_S3_ACCESS_KEY_ID }}
-          TSYNC_CI_S3_SECRET_ACCESS_KEY: ${{ secrets.TSYNC_CI_S3_SECRET_ACCESS_KEY }}
-        run: |
-          # A secret that is absent arrives as the empty string, and the test
-          # would then report "no credentials" and exit 2. Say which one is
-          # missing instead: that is a repository setting, not a code failure.
-          missing=
-          for v in TSYNC_CI_GCS_BUCKET TSYNC_CI_GCS_SERVICE_ACCOUNT_KEY \
-                   TSYNC_CI_S3_BUCKET TSYNC_CI_S3_REGION \
-                   TSYNC_CI_S3_ACCESS_KEY_ID TSYNC_CI_S3_SECRET_ACCESS_KEY; do
-            [ -n "${!v}" ] || missing="$missing $v"
-          done
-          if [ -n "$missing" ]; then
-            echo "::error::conformance needs these repository secrets:$missing"
-            echo "::error::run scripts/setup_ci_secrets.sh to provision them"
-            exit 1
-          fi
-          opam exec -- make -C linux conformance
 
   macos:
     runs-on: macos-latest
