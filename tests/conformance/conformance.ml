@@ -113,23 +113,20 @@ let suite name (module B : Backend.S) =
      inside an XML document on both stores, so a key carrying a metacharacter is
      where a delete takes out the wrong object or none at all -- and none of that
      shows up with keys spelled [a] and [b]. The first three are what the document
-     itself has to survive; the rest stress the signing and URI path, [+] because
-     it has already cost this project a day, signing encoding it as [%2B] while
-     the URI carried it raw.
+     itself has to survive; the rest stress the signing and URI path.
 
-     Not here: a key containing a literal [%]. s3 answers 403 to a [put] of one --
-     the mirror of the [+] bug, encoded twice instead of not at all, and still
-     present in the pinned aws-s3 fork. It is left out rather than left failing
-     because tsync cannot produce such a key: every key it writes is hex, [-],
-     [/], a fixed segment or a base64url share token, filenames being hashed by
-     {!Folder.child_key} rather than embedded. Put it back the day a key carries
-     something a user typed. *)
+     [+] and [%] are the two that have actually cost this project something, and
+     they are the same bug the two ways round: [+] was signed as [%2B] and sent
+     raw, [%] was signed as a literal and sent as the escape it looked like, so a
+     key holding either answered 403. Both fixes are in the pinned aws-s3 fork
+     and this is what holds them there. *)
   let special =
     [
       "amp-&-key";
       "angle-<tag>-key";
       "quotes-\"double\"-'single'";
       "plus+key";
+      "percent-%2F-key";
       "hash#and?query";
       "space in key";
       "unicode-é-å-日本";
