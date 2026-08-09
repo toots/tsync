@@ -53,17 +53,16 @@ let start_cmd =
           let socket_path = Runtime.domain_socket_path runtime_paths d.name in
           (* The only [resume]: the daemon is the process that outlives a
              deferred target's work, so it is the one that picks up what a
-             previous run left owed.
-          *)
+             previous run left owed. *)
           let conf = make_conf ~domain:d.name ~socket_path ~resume:true cfg in
           (d, conf, mount_fn d))
         domains
     in
     (* Do NOT touch Lwt here: any Lwt_unix/Lwt_preemptive call initializes the
-       shared notification eventfd, and this process is about to fork. A child
-       inheriting it would have its worker wakeups delivered to the wrong
-       process. Each leaf caps its own blocking pool after forking, from inside
-       its own loop (see [Frontend.cap_blocking_pool]). *)
+       shared notification eventfd, and a child inheriting it across the fork
+       below would have its worker wakeups delivered to the wrong process. Each
+       leaf caps its own blocking pool after forking, from inside its own loop
+       (see [Frontend.cap_blocking_pool]). *)
     (* One [binding] per (domain × frontend), grouped by frontend. Each group is
        its own process (all but the last forked), so distinct frontends on one
        domain run concurrently. *)
@@ -108,9 +107,7 @@ let start_cmd =
     Log.debug "cache root: %s" runtime_paths.Runtime.cache_root;
     (* Before the fork, so every frontend inherits it. launchd hands this daemon
        a 256 soft limit against an unlimited hard one, low enough that a burst of
-       concurrent work fails accept with EMFILE. Descriptors are allocated on
-       use, so headroom costs nothing; the fan-out bounds are what actually keep
-       the count down. *)
+       concurrent work fails accept with EMFILE. *)
       (match Descriptors.current () with
       | Some before ->
           let after = Descriptors.raise_to ~target:8192 in
@@ -169,10 +166,9 @@ let status_cmd =
     Term.(const run $ domain_arg)
 
 (* The service manager already keeps and rotates the log, so this hands the
-   terminal to the reader it provides rather than shipping lines over IPC: one
-   exec buys history, follow and paging. Only the daemon's own log — a frontend
-   the OS starts elsewhere (the macOS FileProvider extension) logs where the OS
-   decides. *)
+   terminal to the reader it provides rather than shipping lines over IPC. Only
+   the daemon's own log — a frontend the OS starts elsewhere (the macOS
+   FileProvider extension) logs where the OS decides. *)
 let logs_cmd =
   let follow_arg =
     Arg.(
@@ -798,10 +794,9 @@ let gc_cmd =
             s.chunks_reclaimed
             (human_bytes s.bytes_reclaimed)
             s.chunks_promoted
-      (* Each phase fills in different fields, so reporting one fixed set of them
-         means printing zeroes that read as "nothing happened" rather than as "this
-         phase does not count that". Abandoning marks no files and reclaims
-         nothing; what it does is keep chunks.
+      (* Each phase fills in different fields, so one fixed set of them would
+         print zeroes that read as "nothing happened" rather than as "this phase
+         does not count that".
 
          The continue line names the command that continues *this*: a plain
          [tsync gc] over an abandoned collection would go back to collecting it. *)
@@ -843,14 +838,11 @@ let gc_cmd =
               (Unix.gettimeofday () -. r.Chunk_space.started))
     else (
       (* Abandoning is the same machinery with everything treated as live, so it
-         takes the same pacing and reports the same way. Someone reaching for
-         --abort is most likely getting out of a collection that is already going
-         badly; a recovery with no way to slow it down or interrupt it would be a
-         poor one.
+         takes the same pacing and reports the same way — whoever reaches for
+         --abort is getting out of a collection that is already going badly.
 
          Progress to stderr, so stdout carries only the summary a script would
-         read. A collection of a large store runs for a long time and must not look
-         wedged. *)
+         read. *)
       let budget = Option.map parse_duration budget
       and pause = Option.map parse_duration pause in
       (* Carriage-return progress belongs on a terminal. Down a pipe it is a line
@@ -865,10 +857,9 @@ let gc_cmd =
           (if abort then "Abandoning the collection of" else "Collecting")
           C.domain_name
       in
-      (* The two phases count different things, so they get different lines rather
-         than one line with a field that means nothing in one of them. Abandoning
-         walks shards and has no notion of a file; marking walks folders and
-         counts the files in them. *)
+      (* Abandoning walks shards and has no notion of a file; marking walks
+         folders and counts the files in them, so the two get different lines
+         rather than one with a field that means nothing in half the runs. *)
       let on_mark ~namespaces ~total ~roots ~promoted =
         if abort then
           progress "  kept %d/%d shard(s), %d chunk(s)\r%!" namespaces total
@@ -959,14 +950,13 @@ let sync_cmd =
        if !verbose then
          Log.info "syncing domain %s (client %s, uuid %s)" C.domain_name
            C.client_name my_uuid;
-       (* Walk the inode tree from the root: a folder namespace lists its file
-          manifests and folder markers, and a marker gives a subfolder's name+id
-          plus the namespace to recurse into.
+       (* Walks the inode tree from the root, a folder marker giving a
+          subfolder's name+id plus the namespace to recurse into.
 
-          One [pool] is shared across the whole recursion: a per-namespace bound
-          would multiply with depth and exhaust DNS / descriptors. A slot covers
-          only a fetch and its local write — recursion runs after the slot is
-          released, so a deep tree cannot deadlock. *)
+          One [pool] is shared across the whole recursion, a per-namespace bound
+          multiplying with depth until it exhausts DNS / descriptors; a slot
+          covers only a fetch and its local write, so a deep tree cannot
+          deadlock. *)
        let rebuild_mirror () =
          let pool =
            Lwt_pool.create (max 1 parallelism) (fun () -> Lwt.return_unit)
@@ -1584,10 +1574,10 @@ let build_config_cmd =
        ~doc:"Show optional features compiled into this binary")
     Term.(const run $ const ())
 
-(* Each registered frontend surfaces its commands as `tsync <cli_group> <verb>`.
-   The binary owns [--domain] parsing and checks the frontend is configured for
-   that domain before handing over to its [run]. Groups exist only for frontends
-   linked into this binary, so `fileprovider` appears on macOS but not Linux. *)
+(* Each registered frontend surfaces its commands as `tsync <cli_group> <verb>`,
+   the binary owning [--domain] parsing and checking the frontend is configured
+   for that domain before handing over. Groups exist only for frontends linked
+   into this binary, so `fileprovider` appears on macOS but not Linux. *)
 let frontend_cmds () =
   let run name (command : Frontend.command) domain =
     let cfg = load_config () in

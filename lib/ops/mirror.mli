@@ -26,9 +26,9 @@ module Make (C : Conf.S) : sig
 
       [on_list] fires before listing each source namespace ([name] is
       "manifests"/"chunks"/"journal"/"versions"). [on_scan] fires once with the
-      total number of source objects to examine (after listing, before copying).
-      [on_copy] fires per object actually copied, with the destination's name
-      and the bytes written — for live progress. *)
+      total number of source objects to examine, after listing and before
+      copying. [on_copy] fires per object actually copied, with the
+      destination's name and the bytes written. *)
   val resync :
     ?source:string ->
     ?manifests_only:bool ->

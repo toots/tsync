@@ -1,9 +1,6 @@
-(* Random hex ids: staged-body names, folder ids, share tokens, the client uuid.
-
-   Two generators. Body and folder ids are minted on the write path, one per
-   staged chunk, and only need not to collide, so they come from a PRNG seeded
-   once. Share tokens and the client uuid are minted rarely, and a share token is
-   the only thing guarding a public URL, so those come from the kernel.
+(* Two generators: a PRNG seeded once for ids minted on the write path, which
+   only need not to collide, and the kernel for the rare ids whose
+   unguessability is load-bearing.
 
    The PRNG carries its own state rather than using the global [Random], which is
    only as seeded as whichever module called [Random.self_init] first — a

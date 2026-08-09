@@ -2,8 +2,7 @@ module Auth = struct
   let timestamp_header = "x-tsync-timestamp"
   let signature_header = "x-tsync-signature"
 
-  (* Reject requests whose timestamp is more than this far from now (replay
-     window). Both clocks are assumed roughly in sync. *)
+  (* Replay window: both clocks are assumed roughly in sync. *)
   let max_skew = 300.
   let sha256_hex s = Digestif.SHA256.(to_hex (digest_string s))
 
@@ -16,9 +15,6 @@ module Auth = struct
     Digestif.SHA256.(
       to_hex (hmac_string ~key:secret (canonical ~meth ~path ~timestamp ~body)))
 
-  (* [timestamp] defaults to now. A caller passing one is signing under a time
-     it chose, which is how the replay window is exercised: the signature is
-     genuine and only the clock is wrong. *)
   let request_headers ?timestamp ~secret ~meth ~path ~body () =
     let timestamp =
       match timestamp with
@@ -41,7 +37,6 @@ module Auth = struct
 end
 
 module Wire = struct
-  (* Keys hold '/', '-' and hex; base64url makes them a single safe path segment. *)
   let encode_key key =
     Base64.encode_string ~alphabet:Base64.uri_safe_alphabet ~pad:false key
 

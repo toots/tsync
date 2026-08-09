@@ -1,8 +1,6 @@
-(* Public share serving for the http-proxy frontend.
-
-   These routes carry no HMAC and are guarded only by the unguessable token plus
-   the shares-prefix confinement in {!load}, so they are kept off the signed
-   object API.
+(* Public share serving for the http-proxy frontend. These routes carry no HMAC
+   and are guarded only by the unguessable token plus the shares-prefix
+   confinement in {!load}, so they are kept off the signed object API.
 
    Content comes from {!Data} straight out of the domain's chunk cache: a range
    fetches only the chunks it covers, nothing is assembled, and nothing is
@@ -42,8 +40,8 @@ let str name j =
 
 let block_size = 256 * 1024
 
-(* Embedded from the file the share Lambda loads at runtime, so the table has one
-   definition. Same for the browser UI below: both deployments serve one page. *)
+(* Embedded from the files the share Lambda loads at runtime, so the table and
+   the browser UI have one definition across both deployments. *)
 let mime_json = [%blob "../../../lambda/mime.json"]
 let browse_html = [%blob "../../../lambda/browse.html"]
 let player_js = [%blob "../../../lambda/player.js"]
@@ -87,13 +85,11 @@ module Make (C : Conf.S) = struct
 
   (* Share manifests come from the backend, never the local mirror: their keys
      are inode-space, so mirroring them would plant phantom entries in the
-     domain's listings. Content pages through the ordinary chunk cache — chunk
-     keys are content addresses, so a shared chunk is the same file on disk as the
-     mount's, under the same [maxCache].
+     domain's listings.
 
-     ponytail: manifests are memoized unbounded-but-cleared; a share of a 30k
-     chunk file is a 2.5MB body we should not re-GET per range request. Swap in
-     an LRU if one proxy ever fronts enough distinct shares to matter. *)
+     ponytail: manifests are memoized unbounded-but-cleared, a share of a 30k
+     chunk file being a 2.5MB body not worth re-GETting per range request. Swap
+     in an LRU if one proxy ever fronts enough distinct shares to matter. *)
   let manifests : (string, Manifest.t) Hashtbl.t = Hashtbl.create 32
   let max_memoized_manifests = 256
 

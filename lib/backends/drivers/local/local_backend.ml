@@ -4,14 +4,12 @@ let mkdir_p = Fs_util.mkdir_p
 let readdir_list = Fs_util.readdir_list
 
 (* Each write stages to its own temp file and renames it into place, so
-   overlapping writes of one key never expose a partial file. Last rename wins.
+   overlapping writes of one key never expose a partial file.
 
-   The name comes from {!Fs_util.temp_path} rather than being spelled here, so
-   that {!Fs_util.is_temp_name} recognises it. A walker meeting one of these has
-   to be able to tell it apart from real content — the collector reads every name
-   in a namespace and parses it, and a write in flight that it cannot identify
-   stops the whole collection. Two spellings of the same idea meant the one
-   predicate for it answered no. *)
+   The name comes from {!Fs_util.temp_path} rather than being spelled here so
+   that {!Fs_util.is_temp_name} recognises it: the collector parses every name
+   in a namespace, and a write in flight it cannot identify stops the whole
+   collection. *)
 let write_file path data =
   let* () = Fs_util.ensure_parent path in
   let tmp = Fs_util.temp_path path in
@@ -24,11 +22,11 @@ let write_file path data =
 let read_file path =
   Lwt_unix_retry.with_file ~mode:Lwt_io.Input path Lwt_io.read
 
-(* Claim [path] for [data], answering with whatever ends up there.
+(* [link] rather than [rename]: rename replaces silently, link fails with EEXIST
+   when the destination is taken, which is the whole point.
 
-   [link] rather than [rename]: rename replaces silently, link fails with EEXIST
-   when the destination is taken, which is the whole point. The temp file is
-   written first, so the claim that wins is complete the instant it appears. *)
+   The temp file is written first, so the claim that wins is complete the
+   instant it appears. *)
 let create_exclusive path data =
   let* () = Fs_util.ensure_parent path in
   let tmp = Fs_util.temp_path path in
@@ -47,15 +45,12 @@ let create_exclusive path data =
           | exn -> Lwt.fail exn))
     (fun () -> Fs_util.unlink_quiet tmp)
 
-(* Enough concurrent stats to hide per-call latency on high-latency storage,
-   bounded so a large tree is not a descriptor storm.
-
-   Shared by every walk on this store: a per-call bound limits one walk, not how
+(* Shared by every walk on this store: a per-call bound limits one walk, not how
    many run at once, and what is protected is the one device under the store.
 
-   Held around the stat alone. This walk recurses, and a shared bound held across
-   a recursive call deadlocks: outer levels hold every slot while inner levels
-   wait for one. *)
+   Held around the stat alone, since a shared bound held across this walk's
+   recursion deadlocks: outer levels hold every slot while inner levels wait for
+   one. *)
 let walk_fanout = 64
 
 (* A device error, a full disk or an exhausted descriptor table clears once the
@@ -70,8 +65,7 @@ let of_errno ~op key e =
       | _ -> Backend.Permanent
   in
   (* The store's name is in [op]: a domain has several backends, and which one
-     failed is the first thing a report needs. Stores that retry get it from
-     {!Backend.with_retry}'s [~name] instead. *)
+     failed is the first thing a report needs. *)
   Backend.failed ~kind ~op:("local " ^ op) (key ^ ": " ^ Unix.error_message e)
 
 let make ~root : (module Backend.S) =
@@ -129,21 +123,17 @@ let make ~root : (module Backend.S) =
     let delete_multi keys = Lwt_list.iter_s (fun key -> delete ~key ()) keys
 
     (* A hard link when the filesystem allows one, so copying within a store
-       costs a directory entry instead of the body. {!Chunk_space} leans on this:
-       collecting chunks links a whole store's live set, and reading and
-       rewriting every byte to do it would be absurd.
+       costs a directory entry instead of the body — {!Chunk_space} leans on
+       this, collecting chunks by linking a whole store's live set.
 
        Safe because a name here is only ever replaced by [write_file]'s rename,
        never written through, so two names sharing an inode cannot observe each
-       other. [EEXIST] counts as success — the destination already holds these
-       bytes, and a copy that has nothing left to do is done.
+       other.
 
-       The link is attempted before the destination's directory is made sure of,
-       rather than after. Almost every copy lands in a directory that already
-       exists, so making sure first is a stat spent to learn nothing — and on the
-       paths that copy in bulk it is a third to a half of the whole cost. [ENOENT]
-       is the only answer that leaves a question: create the parent, try once more,
-       and let a second [ENOENT] be the missing source it then is. *)
+       The link is attempted before the destination's directory is made sure of:
+       almost every copy lands in a directory that already exists, and on the
+       paths that copy in bulk that stat is a third to a half of the whole
+       cost. *)
     let copy ~src_key ~dst_key () =
       if is_dir_key src_key then mkdir_p (resolve dst_key)
       else (
@@ -177,11 +167,7 @@ let make ~root : (module Backend.S) =
       let base = resolve prefix in
       (* Entries are stat'd and subdirs recursed in parallel, so on high-latency
          storage the walk costs a few round trips per level rather than one per
-         entry.
-
-         Bounded explicitly: the Lwt thread pool bounds threads, not the
-         descriptors and recursion a walk holds, and a directory is as large as
-         the user's data. *)
+         entry. *)
       let rec walk path key_prefix =
         Lwt.catch
           (fun () ->
@@ -253,7 +239,7 @@ let make ~root : (module Backend.S) =
         | _ -> entries
 
     (* Probed once: the device under a configured root does not change, and this
-       is asked with a request waiting. *)
+       is asked with a request waiting on the answer. *)
     let concurrency = lazy (Device.max_concurrency root)
 
     (* [gc]: a filesystem has the two things collecting chunks takes — a link

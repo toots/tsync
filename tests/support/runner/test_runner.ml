@@ -1011,8 +1011,6 @@ let setup_client (module C : Conf.S) root staging_prefix =
     stats;
   }
 
-(* ── Backend snapshot (shared between single- and two-client runners) ─────── *)
-
 let dump_backend_at ~backend_root ~domain_prefix ~chunk_prefix ~journal_prefix
     ~versions_prefix ~cursor_key =
   let (module B : Backend.S) =

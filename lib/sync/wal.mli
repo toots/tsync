@@ -4,17 +4,16 @@
     this module never sees a backend key — which is what lets the same recovery
     run against any store.
 
-    The record is the source of truth for a unit of work, not the staged tree.
-    Recovery used to be driven from the staged tree, minting a fresh entry key
-    on every replay and orphaning the record it should have finished; one domain
-    accumulated 295 orphans that way, all reported as one opaque number.
+    The record, not the staged tree, is the source of truth for a unit of work:
+    driving recovery from the staged tree mints a fresh entry key on every
+    replay and orphans the record it should have finished, which once left one
+    domain with 295 orphans reported as a single opaque number.
 
     A record is also the durable job {!Sync_queue} drains, so it is a
-    {!Durable_queue.JOB} and the log below is a {!Durable_queue.Make.Records}.
-    The two uses are deliberate: an upload is queued and retried, while a
-    metadata operation happens synchronously here and only needs its record to
-    survive a crash. Both write to the same log, so one reconcile and one report
-    see everything this client owes. *)
+    {!Durable_queue.JOB} and the log below is a {!Durable_queue.Make.Records}. A
+    metadata operation happens synchronously here rather than through the queue,
+    but writes to the same log, so one reconcile and one report see everything
+    this client owes. *)
 
 (** There is no "committed" state: the record is deleted the moment the entry is
     published, and a crash in that window leaves [Executed], which reconcile

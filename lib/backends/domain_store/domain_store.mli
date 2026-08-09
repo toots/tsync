@@ -20,11 +20,12 @@
 
 type sub = { name : string; backend : (module Backend.S) }
 
-(** A target is given the store to catch up from, which is the mains alone — see
-    {!Deferred.make}. Supplied here rather than by the caller, since only this
-    module knows which members are authoritative. Whether the resulting target
-    is readable is the caller's to say, by applying {!Deferred.Readable} or not.
-*)
+(** A target is given the store to catch up from — the mains alone, see
+    {!Deferred.make} — supplied here rather than by the caller, since only this
+    module knows which members are authoritative.
+
+    Whether the resulting target is readable is the caller's to say, by applying
+    {!Deferred.Readable} or not. *)
 val make :
   mains:sub list ->
   targets:(source:(module Backend.S) -> (module Deferred.S)) list ->

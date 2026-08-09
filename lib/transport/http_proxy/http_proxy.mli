@@ -1,7 +1,7 @@
 (** The wire contract between the http-proxy backend (client) and frontend
     (server): request authentication, and how keys and listings are encoded.
 
-    No transport here — cohttp lives on either side. This module exists so the
+    No transport here — cohttp lives on either side; this module exists so the
     two halves cannot drift. *)
 
 (** HMAC-SHA256 over a shared secret. *)

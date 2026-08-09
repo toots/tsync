@@ -9,8 +9,7 @@ let manifests_dir ~cache_root domain_name =
 let scratch_dir ~cache_root domain_name = sub ~cache_root domain_name "scratch"
 
 (* The [.tsync-dir] markers say what id a path has; this says where an id lives,
-   which is what an item identifier asks. Rebuildable from the markers at any
-   time — see {!Folder_ids.rebuild}. *)
+   and is rebuildable from them — see {!Folder_ids.rebuild}. *)
 let folders_dir ~cache_root domain_name = sub ~cache_root domain_name "folders"
 let chunks_dir ~cache_root domain_name = sub ~cache_root domain_name "chunks"
 

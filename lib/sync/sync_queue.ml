@@ -3,13 +3,12 @@ module Ek = Journal.Entry_key
 
 module type S = sig
   (** Record the work and queue it. Returns once the record is durable, not once
-      the upload has landed. [entry_key] names the record, and goes on to name
+      the upload has landed. [entry_key] names the record and goes on to name
       the journal entry the upload publishes; the file is read from the record's
       ops, so there is nowhere for the two to disagree about which one this is.
 
       The whole record is the caller's to supply, so re-queueing one carries
-      forward what it has already been through rather than presenting it as
-      fresh. *)
+      forward what it has already been through. *)
   val post : entry_key:Journal.Entry_key.t -> Wal.record -> unit Lwt.t
 
   val cancel_put : string -> bool
@@ -94,13 +93,11 @@ module Make (C : Conf.S) : S = struct
                 let* () = !upload_fn ~key ~cancel in
                 if !cancel then abandon ()
                 else
-                  (* Executed, then published, then the record goes. A crash in
-                     the first window leaves a record saying the bytes are up
-                     and the entry is not, which is what reconcile finishes; a
-                     crash in the second leaves the same record, and reconcile
-                     finds the entry already published and drops it. Dropping
-                     the record first would leave the bytes uploaded, no entry
-                     for peers to read, and nothing saying anything was owed. *)
+                  (* Executed, then published, then the record goes: a crash in
+                     either window leaves a record reconcile can finish from what
+                     the backend says. Dropping the record first would leave the
+                     bytes uploaded, no entry for peers to read, and nothing
+                     saying anything was owed. *)
                   let* () = W.advance entry_key Wal.Executed in
                   let* (_ : Ek.t) =
                     Fs.write_journal_entry ~entry_key r.Wal.ops
@@ -116,10 +113,8 @@ module Make (C : Conf.S) : S = struct
                   abandon ()
               | exn ->
                   (* The record is never dropped on a real failure, or the file
-                     sits dirty in the cache forever: auto-evict only runs after
-                     a successful upload, and nothing else remembers the upload
-                     is owed. Re-raised, so the queue backs off or gives up on
-                     it by the shared rules. *)
+                     sits dirty in the cache forever: nothing else remembers the
+                     upload is owed. *)
                   let* () =
                     W.note_failure entry_key (Backend.classify exn)
                       (Backend.reason exn)

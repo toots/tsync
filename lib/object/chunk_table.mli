@@ -2,15 +2,12 @@
     chunk keys.
 
     Every field sits at a known offset and chunk [i]'s key is a substring at a
-    computed one, so nothing is parsed into a tree and no per-chunk value exists
-    until a caller asks for it — which is what makes a 31,230-chunk manifest
-    cheap to open for its name alone.
+    computed one, so no per-chunk value exists until a caller asks for it —
+    which is what makes a 31,230-chunk manifest cheap to open for its name
+    alone.
 
-    A local sidecar is {b mapped}, so its chunk keys live in the page cache
-    rather than the heap, released when the value is collected. This relies on
-    sidecars only being replaced by rename, never rewritten in place — see
-    {!Fs_util.atomic_write}. A body fetched from a backend is a string and is
-    read identically. *)
+    A local sidecar is {b mapped}, which relies on sidecars only being replaced
+    by rename, never rewritten in place — see {!Fs_util.atomic_write}. *)
 
 type t
 

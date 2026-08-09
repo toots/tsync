@@ -9,12 +9,12 @@ type file_entry = { key : string; size : int; last_modified : float }
 
 (** {1 What a store can say about a domain}
 
-    Beyond holding bytes, a store may know things about the domain it fronts.
     One record rather than a method each: a composite merges them once, and
     adding a capability is a field here instead of an edit to every driver and
-    every composite. A preference is [None] for a store with no opinion, which
-    is every store that only holds bytes; a capability is a plain [bool], having
-    no gap between "no opinion" and "cannot". *)
+    every composite.
+
+    A preference is [None] for a store with no opinion; a capability is a plain
+    [bool], having no gap between "no opinion" and "cannot". *)
 type caps = {
   share_url : string option;
       (** The share base URL, if this store serves shares for the domain. s3 and
@@ -26,18 +26,17 @@ type caps = {
           inherits it instead of the value being mirrored in two configs.
           Consulted only when the client's own config is silent. *)
   max_concurrency : int option;
-      (** How many object reads or writes this store can usefully serve at once.
-          Asked by frontends taking work from many clients, so they hold
-          requests instead of handing them all to storage. A local store answers
-          from the device under it; an http-proxy asks its peer, so a client
-          inherits the real limit rather than guessing at hardware it cannot
-          see. *)
+      (** How many object reads or writes this store can usefully serve at once,
+          so a frontend taking work from many clients holds requests instead of
+          handing them all to storage. A local store answers from the device
+          under it; an http-proxy asks its peer. *)
   gc : bool;
-      (** Whether this store can collect its own unreferenced chunks. That takes
-          a same-store link and a directory rename — see {!Chunk_space} — which
-          a filesystem has and an object store does not. Asked of a domain's
-          main directly rather than of the composite: it describes one store's
-          machinery, not the domain's. *)
+      (** Whether this store can collect its own unreferenced chunks, which
+          takes a same-store link and a directory rename — see {!Chunk_space} —
+          that a filesystem has and an object store does not.
+
+          Asked of a domain's main directly rather than of the composite: it
+          describes one store's machinery, not the domain's. *)
 }
 
 val no_caps : caps
@@ -60,15 +59,14 @@ module type S = sig
       there afterwards — [data] itself when this call won, the other writer's
       body when it did not.
 
-      For a key that names a claim rather than content: several clients may
-      reach for it at once, and exactly one must win. {!put} cannot express that
-      — it is last-writer-wins, so the loser's work is stranded with nothing
-      saying so. Every store can do better: a generation precondition on the
-      object stores, an exclusive create on a filesystem.
+      For a key that names a claim rather than content, where several clients
+      may reach for it at once and exactly one must win: {!put} is
+      last-writer-wins, so the loser's work would be stranded with nothing
+      saying so.
 
-      A claim is the only thing this is for. Content is either
+      A claim is the only thing this is for — content is either
       content-addressed, in which case racing writers agree, or owned by one
-      client, in which case there is no race. *)
+      client. *)
   val put_if_absent : key:string -> data:string -> unit -> string Lwt.t
 
   val head_opt : key:string -> unit -> file_entry option Lwt.t
@@ -118,9 +116,7 @@ val reason : exn -> string
 (** How long to wait before attempt [n] (1-based): [base] doubling to [cap].
 
     One formula, so the several things that wait out a transient failure differ
-    only in how patient they are, not in shape. They differ deliberately: a
-    request has a caller waiting and retries in fractions of a second, while a
-    queue with nobody waiting measures its first delay against an outage. *)
+    only in how patient they are, not in shape. *)
 val backoff : base:float -> cap:float -> int -> float
 
 (** The one retry loop for a single request. A backend decides only what
@@ -147,19 +143,19 @@ val drain : unit -> unit Lwt.t
 
     The composite presents one {!S} and keeps its members' names to itself, so
     whoever builds a domain's stores describes them here rather than the
-    composite growing an introspection interface. Carried on {!Conf.S}, which is
-    where a caller that needs one store rather than the domain finds it: a
-    report naming each, a resync copying between two, a share link choosing
-    where to point. *)
+    composite growing an introspection interface.
+
+    Carried on {!Conf.S}, which is where a caller that needs one store rather
+    than the domain finds it: a report naming each, a resync copying between
+    two, a share link choosing where to point. *)
 
 type member = {
   name : string;
   role : string;  (** main | replica | backfill | readOnly *)
   readable : bool;
       (** Whether reads reach this store. False only for a backfill target, and
-          that one bit is also what says a share link must not point into it:
-          the store holds part of the domain, so the link could name a file it
-          will never have. *)
+          that one bit is also what says a share link must not point into it,
+          since such a link could name a file the store will never have. *)
   backend_type : string;  (** local | s3 | gcs | http-proxy *)
   config : (string * string) list;
       (** What this store points at — a bucket, a URL, a path — with secret

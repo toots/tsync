@@ -2,30 +2,27 @@
 
     A write returns once the mains have it; a deferred target then catches up on
     its own, so a slow, metered or unreachable store never sets the pace of a
-    copy into the mount. It receives chunks as they are written, and a manifest
-    only once every chunk that manifest names is confirmed present — so it never
-    holds a manifest referencing blocks it lacks, which is what a copy of a
-    deduped file would otherwise leave behind. That is
+    copy into the mount.
+
+    A manifest reaches the target only once every chunk it names is confirmed
+    present, so the target never holds a manifest referencing blocks it lacks:
     {i partial coverage, never partial files}.
 
     Work owed is kept on disk ({!Durable_queue}), so an offline target catches
     up when the link returns rather than needing a resync. A job is retried for
     as long as the failure is {!Backend.Transient} and dropped on a permanent
     one, which marks the target degraded — the one state needing
-    [tsync resync-remote --source <main>] rather than patience. Resync is also
-    the initial fill for a target added to an existing domain.
+    [tsync resync-remote --source <main>] rather than patience.
 
-    A queued job names a key and carries no body: the worker re-reads from the
-    mains when it runs the job. That is what keeps the log small enough for
-    disk, and it means a job always writes the current body — repeated puts to
-    one key converge on the latest, and a put whose key has since been deleted
-    reads back nothing and is skipped, its delete being queued behind it.
+    A queued job names a key and carries no body, the worker re-reading from the
+    mains when it runs: repeated puts to one key converge on the latest, and a
+    put whose key has since been deleted reads back nothing and is skipped.
 
     {1 Two roles, one behavior}
 
     A target that is read from and one that is not differ in exactly one thing,
-    and everything else follows from it — which is why there is one module here
-    and a three-line {!Readable} rather than two implementations:
+    which is why there is one module here and a three-line {!Readable} rather
+    than two implementations:
 
     - a [backfill] target is {!make} as it stands: never read from, and with no
       use for the journal or cursor, since nothing reads those from it either;
@@ -33,8 +30,8 @@
       no main is reachable, and carrying the journal and cursor a peer reading
       it needs.
 
-    So a resynced backfill is promotable to a replica, and promotion is which
-    functor its config spells rather than a different code path. *)
+    So promotion of a resynced backfill is which functor its config spells,
+    rather than a different code path. *)
 
 type op =
   | Put of { key : string; data : string }
@@ -90,10 +87,9 @@ end
     records and drains its own.
 
     [chunk_from_prefix] is where the source keeps chunks it has not finished
-    collecting — see {!Chunk_space}. A chunk a manifest names may be only there,
-    so a read of one falls through to it; what is written to the target is
-    always the ordinary chunk key, a target having one space and no notion of a
-    collection. Omit it for a source that is never collected. *)
+    collecting — see {!Chunk_space} — and a read falls through to it, though
+    what is written to the target is always the ordinary chunk key. Omit it for
+    a source that is never collected. *)
 val make :
   ?resume:bool ->
   ?chunk_from_prefix:string ->
@@ -108,7 +104,6 @@ val make :
   unit ->
   (module S)
 
-(** A target reads are allowed to fall through to. It therefore also carries the
-    journal and cursor, which a peer reading it needs — the one difference
-    stated once, rather than decided again at each place that cares. *)
+(** A target reads are allowed to fall through to, and which therefore also
+    carries the journal and cursor a peer reading it needs. *)
 module Readable (D : S) : S

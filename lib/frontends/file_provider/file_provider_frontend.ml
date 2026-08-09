@@ -71,9 +71,9 @@ let reset (module C : Conf.S) =
     exit 1);
   Printf.printf "reset requested for %s\n" C.domain_name
 
-(* Unregister the domains (only the app can), then drop the launchd agents, the
-   app bundle and the runtime data directory. [config.json] lives outside
-   [data_dir] and survives, so `make install` restores everything. *)
+(* Only the app can unregister the domains, so that goes first. [config.json]
+   lives outside [data_dir] and survives, so `make install` restores
+   everything. *)
 let purge (_ : (module Conf.S)) =
   let paths = Runtime.default_paths () in
   let marker = write_marker "fileprovider-purge" in

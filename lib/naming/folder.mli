@@ -1,22 +1,21 @@
 (** The backend's folder inode model.
 
     A directory is identified by a stable random id, not by its mutable name, so
-    renaming or moving one never rewrites its descendants: their keys live under
-    [manifests/<id>/…] and that id never changes. Only the parent's marker entry
-    is updated.
+    renaming or moving one rewrites only the parent's marker entry and never its
+    descendants, whose keys live under [manifests/<id>/…].
 
     Two kinds of object live at [manifests/<folder id>/<hash of child name>] — a
-    file manifest, or a folder marker that both names a child directory and
-    points at the namespace holding its children. They are told apart only by
-    their body, which is what {!marker_of_string} is for. *)
+    file manifest, or a folder marker naming a child directory and the namespace
+    holding its children — told apart only by their body, which is what
+    {!marker_of_string} is for. *)
 
 (** The root namespace. Reserved ids carry the [.tsync-] sentinel, so they never
     collide with a folder id (random hex) and read as internal. *)
 val root_id : string
 
 (** Where a deleted folder's marker is moved: unreachable from the root, so the
-    subtree vanishes from listings and resync, and [expire] drops it past a
-    grace period — after which [gc] reclaims the chunks it was holding. *)
+    subtree vanishes from listings and resync until [expire] drops it past a
+    grace period. *)
 val trash_id : string
 
 (** A fresh folder id, minted at mkdir. *)

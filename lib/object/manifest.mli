@@ -2,11 +2,10 @@
     [chunks] is the body itself ({!Chunk_table}), mapped for a sidecar, so chunk
     keys cost no heap until one is asked for.
 
-    No [name]: a name belongs to where a manifest is filed, not to the manifest.
-    The body carries one only because some locations cannot yield it — a backend
-    key is [<folder-id>/<hash>], an escaped cache leaf is [.tsync-esc-<hash>],
-    and both are one-way. Everywhere else the logical key is real-path shaped
-    and already holds the answer.
+    No [name]: a name belongs to where a manifest is filed, and the body carries
+    one only because some locations cannot yield it — a backend key is
+    [<folder-id>/<hash>], an escaped cache leaf is [.tsync-esc-<hash>], and both
+    are one-way.
 
     [private], so the record cannot be built or functionally updated from
     outside: a name reaches disk only through a writer that stamps it from the
@@ -64,10 +63,10 @@ val of_string : string -> t
     yield one; a caller holding a key takes the name from the key. *)
 val recorded_name : t -> string
 
-(** Encoding needs a name, so every caller states which one. The two that
-    deliberately file a manifest under a key that does not describe it — a
-    version snapshot, a trashed marker — are then visible as the only ones
-    passing something other than the key's own leaf. *)
+(** Encoding needs a name, so every caller states which one; the two that file a
+    manifest under a key that does not describe it — a version snapshot, a
+    trashed marker — are then the only ones passing other than the key's leaf.
+*)
 val to_string : name:string -> t -> string
 
 (** Where a chunk of a locally edited file has its bytes. *)
@@ -140,10 +139,12 @@ module Make (C : Conf.S) : sig
   val delete_dir : string -> unit Lwt.t
 
   (** Immediate children of [prefix]: file entries (logical keys, size, mtime)
-      and real subdirectory names. The one directory listing there is, serving
-      both readdir and frontend enumeration. Internal markers are filtered,
-      names are real rather than escaped, and a staged file's own size and mtime
-      win — it is listed even when nothing of it has been published. *)
+      and real subdirectory names, serving both readdir and frontend
+      enumeration.
+
+      Internal markers are filtered, names are real rather than escaped, and a
+      staged file's own size and mtime win — it is listed even when nothing of
+      it has been published. *)
   val list_children :
     prefix:string -> unit -> (Backend.file_entry list * string list) Lwt.t
 

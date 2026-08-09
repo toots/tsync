@@ -14,27 +14,19 @@ let stats_html = [%blob "stats.html"]
 let counters : (string, int) Hashtbl.t = Hashtbl.create 16
 let in_flight = ref 0
 
-(* How many requests may read or write object data at once.
+(* An inbound burst has no natural limit -- one client opening one large file can
+   ask for many ranges at once -- and past what the device absorbs it is queueing
+   rather than throughput. Metadata is outside the bound: a listing costs almost
+   nothing and should not wait behind a transfer.
 
-   An inbound burst becomes that many concurrent reads of the backing storage,
-   and the burst has no natural limit: one client opening one large file can ask
-   for many ranges at once. Past what the device absorbs this is queueing, not
-   throughput — a slow disk runs out of block-layer tags and the work already
-   accepted finishes more slowly than if less had been.
-
-   Metadata is outside the bound: a listing costs almost nothing and should not
-   wait behind a transfer.
-
-   ponytail: one global bound, not per-domain or per-client. The thing being
-   protected is the storage under the process, which they all share. *)
+   ponytail: one global bound, not per-domain or per-client, the storage under
+   the process being what they all share. *)
 let default_max_concurrent = 16
 
-(* Slots for the work, plus a bounded queue for whoever cannot have one yet.
-
-   An unbounded queue would turn a busy device into a growing list of promises
-   and clients timing out with nothing to say why. Past the queue a caller is
-   refused, which clients here read as backpressure: they retry 5xx with
-   exponential backoff.
+(* An unbounded queue would turn a busy device into a growing list of promises
+   and clients timing out with nothing to say why; past the queue a caller is
+   refused, which clients here read as backpressure and retry with exponential
+   backoff.
 
    Sized off the limit: enough to absorb a burst, small enough that sustained
    overload is refused rather than accumulated. *)
@@ -145,7 +137,7 @@ let make_route bindings (b : Frontend.binding) =
   in
   (* Serve-side write ban, independent of the domain's own [read_only]: it bars
      proxy clients while leaving this host's mount writable, and a client cannot
-     opt out. Additive: a read-only domain is read-only over the proxy too. *)
+     opt out. *)
   let read_only =
     C.read_only
     ||
@@ -406,8 +398,9 @@ let exec route op ~body =
             | None -> respond ~status:`Not_found "")
     | Chunk_size _ -> (
         (* So a client behind us writes new files at the size this domain already
-           uses, instead of the setting living in both configs. Silence when
-           unconfigured: the client's default matches what ours would be.
+           uses, instead of the setting living in both configs; silence when
+           unconfigured, the client's default matching what ours would be.
+
            ponytail: not chained through our own backends, so a proxy fronting a
            proxy answers only for itself. *)
           match route.chunk_size with
@@ -415,10 +408,10 @@ let exec route op ~body =
               respond (Yojson.Safe.to_string (`Assoc [("chunkSize", `Int n)]))
           | None -> respond ~status:`Not_found "")
     | Max_concurrency _ -> (
-        (* Our effective bound — explicit setting or what our storage said — so a
-           client in front of us holds its excess rather than parking it in our
-           accept queue. Unlike the chunk size this is worth chaining: a proxy
-           fronting a proxy is limited by whatever is furthest down. *)
+        (* Our effective bound, so a client in front of us holds its excess
+           rather than parking it in our accept queue. Unlike the chunk size this
+           is worth chaining: a proxy fronting a proxy is limited by whatever is
+           furthest down. *)
           match !effective_max_concurrent with
           | Some n ->
               respond
@@ -428,6 +421,7 @@ let exec route op ~body =
 
 (* [shares_prefix] is domain-independent, so a share key has no domain to match
    on: fall back to the route whose secret signed the request.
+
    ponytail: the manifest then lands in that domain's store, which is what the
    share server reads as long as the fronted domains share one bucket. *)
 let route_for routes ~key ~authed =
@@ -442,12 +436,12 @@ let route_for routes ~key ~authed =
         List.find_opt authed routes
     | None -> None
 
-(* Share links go to recipients holding no secret, so these routes carry no HMAC.
-   The token is the only credential; {!Share_server.load} confines it to the
+(* Share links go to recipients holding no secret, so these routes carry no HMAC:
+   the token is the only credential, and {!Share_server.load} confines it to the
    shares prefix.
-   ponytail: the first share-enabled domain answers — exact for a single-domain
-   listener, and tokens are domain-independent anyway (shares_prefix is global);
-   probe each domain here if one listener ever fronts several share stores. *)
+
+   ponytail: the first share-enabled domain answers; probe each domain here if
+   one listener ever fronts several share stores. *)
 let share_request routes uri =
   let path = Uri.path uri in
   if not (String.starts_with ~prefix:"/s/" path) then None
@@ -465,13 +459,10 @@ let share_request routes uri =
           in
           Some (Option.get r.serve_share, token, sub))
 
-(* The mount daemon serving this domain on this host, when there is one.
-
-   A domain's frontends are separate processes and {!Metrics} counts per process,
-   so a mount's traffic is invisible here. On a host that both mounts and serves,
-   reporting only our own would call a busy machine idle. Its transfer figures
-   and process cost therefore come across too, attributed to it under the
-   domain's [frontends] rather than added to ours. *)
+(* A domain's frontends are separate processes and {!Metrics} counts per process,
+   so a mount's traffic is invisible here and reporting only our own would call a
+   busy machine idle. Its transfer figures and process cost come across
+   attributed to it under the domain's [frontends], not added to ours. *)
 let fetch_mount ~socket_path =
   let unreachable msg =
     `Assoc
@@ -516,9 +507,8 @@ let fetch_mount ~socket_path =
              | exn -> Printexc.to_string exn)))
 
 (* One listener serves every domain configured on it, so its cpu, bytes and
-   request counts cover all of them at once and belong to no single domain: they
-   go in one labelled block at the top, and each domain lists only its own
-   settings. *)
+   request counts belong to no single domain and go in one labelled block at the
+   top. *)
 let status_json ~port ~tls ~totals ~exact ~reload routes =
   let+ domains =
     Lwt_list.map_p
@@ -692,11 +682,10 @@ let start bindings =
      List.iter
        (fun s -> ignore (Lwt_unix.on_signal s (fun _ -> request_stop ())))
        [Sys.sigterm; Sys.sigint];
-     (* An explicit setting wins: it knows things about the deployment a probe
-        cannot see. Otherwise take the storage's lowest answer — a bound ignoring
-        the slowest participant is not a bound. With no opinion anywhere (every
-        purely network-backed domain), fall back to a figure that only exists to
-        stop an unbounded pile-up. *)
+     (* An explicit setting wins, knowing things about the deployment a probe
+        cannot see; otherwise the storage's lowest answer, a bound ignoring the
+        slowest participant not being a bound. With no opinion anywhere, the
+        fallback exists only to stop an unbounded pile-up. *)
      let* derived =
        match configured_max_concurrent with
          | Some _ -> Lwt.return_none

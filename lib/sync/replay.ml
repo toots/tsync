@@ -18,9 +18,7 @@ module Make (C : Conf.S) (F : File_ops.S) = struct
 
   (* Bounded rather than [iter_p]: recovery can face a journal of any size, and
      a promise per entry up front is both memory and a request storm. Module
-     scope, not per call: the bound stands for the requests this process will
-     have outstanding, and one created per call would not bound two overlapping
-     recoveries. *)
+     scope, so two overlapping recoveries share the one bound. *)
   let journal_reads = Lwt_bounded.create ~max:32 ()
 
   (* Keys another client has touched since [entry_key]: our ops for those lose,

@@ -14,9 +14,9 @@ let read_line_opt path =
         line
     | exception _ -> None
 
-(* The device holding [path], spelled the way sysfs names it. Taken from
-   /proc/self/mountinfo, which already carries the major:minor — steadier than
-   decoding a [dev_t], whose layout is libc's business rather than ours.
+(* The device holding [path], from /proc/self/mountinfo, which already carries
+   the major:minor — steadier than decoding a [dev_t], whose layout is libc's
+   business rather than ours.
 
    Longest mount point wins: /mnt/tsync has to beat / for a path inside it. *)
 let device_of_path path =

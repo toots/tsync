@@ -55,16 +55,10 @@ let cap_blocking_pool () =
   use_libev ();
   Lwt_unix.set_pool_size 256
 
-(* ponytail: the only place a per-domain figure meets a per-process resource.
-   [max_uploads], [max_downloads] and [max_chunk_buffers] are configured per
-   domain, while the thread pool, the descriptor table and the heap belong to
-   the process — and the daemon forks one child per group of domains, so N
-   domains in one child mean N times the configured budget against one pool.
-   This narrowing is what keeps that from mattering in practice.
-
-   The upgrade path, if it ever does: derive one process-wide budget from the
-   negotiated {!Backend.caps.max_concurrency} at startup and have each domain
-   draw from it, rather than each reading its own config figure. Not built,
+(* ponytail: the concurrency figures are per domain while the thread pool is per
+   process, so N domains in one forked child mean N times the configured budget
+   against one pool; this narrowing is what keeps that from mattering. The
+   upgrade path is one process-wide budget each domain draws from, not built
    because nothing has yet run enough domains in one process to feel it. *)
 let size_blocking_pool ~concurrency =
   Lwt_unix.set_pool_size (min 256 (max 32 (concurrency * 8)))

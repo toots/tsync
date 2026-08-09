@@ -3,10 +3,9 @@
    the answer, so this reads that: one subprocess, once per store, at start-up.
 
    It answers with a category, not a number, so the figures below judge classes
-   of device rather than measuring this one. The distinction that matters is the
-   same as on Linux: a spinning disk behind USB takes very little at once and
-   everything else takes plenty. Being wrong high costs requests queueing at the
-   device instead of in front of it, so uncertain cases lean low. *)
+   of device rather than measuring this one. Being wrong high costs requests
+   queueing at the device instead of in front of it, so uncertain cases lean
+   low. *)
 
 let field name line =
   match String.index_opt line ':' with

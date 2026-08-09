@@ -3,18 +3,15 @@
    internal. *)
 let root_id = ".tsync-root"
 
-(* Deleted folders are detached from their parent and their marker moved under
-   this namespace (unreachable from root, so they vanish from listings/resync);
-   [expire] drops the subtree past a grace period, and [gc] then reclaims the
-   chunks it was the last to name. *)
+(* A deleted folder's marker moves here, unreachable from root, so the subtree
+   vanishes from listings and resync until [expire] drops it. *)
 let trash_id = ".tsync-trash"
 
-(* Random id, minted at mkdir. Xxhash-free: ids are opaque handles. *)
+(* Minted at mkdir. *)
 let new_id = Id.short
 
-(* A child's key component within its parent's namespace: the dual-seed xxHash
-   of its leaf name, matching the chunk-key convention. Fixed length and
-   filesystem-safe regardless of the real name. *)
+(* The dual-seed xxHash of the leaf name, matching the chunk-key convention:
+   fixed length and filesystem-safe regardless of the real name. *)
 let hash_name name = Xxhash.hash_hex name 0 ^ "-" ^ Xxhash.hash_hex name 1
 let child_key ~folder_id name = folder_id ^ "/" ^ hash_name name
 

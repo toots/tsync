@@ -17,11 +17,9 @@ let hook_drain () =
 let rec make ~(mains : sub list)
     ~(targets : (source:(module Backend.S) -> (module Deferred.S)) list)
     ~(archives : sub list) : (module Backend.S) =
-  (* Each target catches up by re-reading from the source of truth, and from
-     nothing else: a job is consumed once it succeeds, so a body read from a
-     copy that is itself behind would land here and never be corrected. The
-     mains alone are that store — which is this same composite with nothing
-     else in it. *)
+  (* Each target catches up by re-reading from the source of truth and nothing
+     else: a job is consumed once it succeeds, so a body read from a copy
+     that is itself behind would land here and never be corrected. *)
   let targets =
     match targets with
       | [] -> []
@@ -81,9 +79,9 @@ let rec make ~(mains : sub list)
     in
     go None chain
   in
-  (* Source of truth first, then the archives. A miss is reported only when every
-     store that could hold the key was actually asked: an unreachable one
-     surfaces its error, since "could not look" must not read as "not there". *)
+  (* A miss is reported only when every store that could hold the key was
+     actually asked: an unreachable one surfaces its error, since "could not
+     look" must not read as "not there". *)
   let read label f =
     let* first = walk ~stop_on_miss:true label readable f in
     match first with
@@ -106,10 +104,9 @@ let rec make ~(mains : sub list)
       let* () = write (fun (module B : Backend.S) -> B.put ~key ~data ()) in
       fill (Deferred.Put { key; data }) key
 
-    (* Arbitrated by the first main alone, then fanned out as an ordinary write.
-       A claim needs one decider: asking each main in turn would let two clients
-       each win somewhere and disagree about who holds the name. The rest of the
-       domain then simply learns what was decided. *)
+    (* Arbitrated by the first main alone, then fanned out as an ordinary write:
+       asking each main in turn would let two clients each win somewhere and
+       disagree about who holds the name. *)
     let put_if_absent ~key ~data () =
       match mains with
         | [] -> Lwt.fail Backend.Not_writable
@@ -157,9 +154,9 @@ let rec make ~(mains : sub list)
       let* d = read "get" (fun (module B : Backend.S) -> B.get_opt ~key ()) in
       match d with
         | Some d -> Lwt.return d
-        (* Every store that could hold it was asked and none had it — an
-           unreachable one would have surfaced its own error out of [read]. The
-           drivers' own vocabulary, so a caller classifying this reads it the
+        (* Every store that could hold it was asked and none had it, an
+           unreachable one having surfaced its own error out of [read]. Spelled
+           in the drivers' vocabulary, so a caller classifying this reads it the
            same way as a 404 from one store. *)
         | None ->
             Lwt.fail

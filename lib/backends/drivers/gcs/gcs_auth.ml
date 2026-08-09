@@ -20,7 +20,7 @@ let member_string j key =
     | `String s -> s
     | _ -> failwith ("gcs: service account key missing string field: " ^ key)
 
-(* Parse a service-account JSON key (the file downloaded from GCP). *)
+(* The file downloaded from GCP. *)
 let of_service_account_json json =
   let j =
     try Yojson.Safe.from_string json
@@ -48,9 +48,9 @@ let of_service_account_json json =
     refresh_lock = Lwt_mutex.create ();
   }
 
-(* RS256 over the ASCII signing input. PKCS#1 v1.5 is deterministic, so [`No]
-   masking needs no RNG: the JWT is signed before any TLS connection exists to
-   seed one, and blinding only guards local timing channels. *)
+(* PKCS#1 v1.5 is deterministic, so [`No] masking needs no RNG: the JWT is
+   signed before any TLS connection exists to seed one, and blinding only guards
+   local timing channels. *)
 let make_jwt t =
   let now = int_of_float (Unix.gettimeofday ()) in
   let header = `Assoc [("alg", `String "RS256"); ("typ", `String "JWT")] in

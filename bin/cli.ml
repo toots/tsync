@@ -88,8 +88,8 @@ let make_backend (bc : Conf_parsing.backend_config) =
   Backend.make ~backend_type:bc.backend_type ~get_field:(fun k ->
       List.assoc_opt k bc.fields)
 
-(* None for a body that is not a manifest (a folder marker, a trash marker, a
-   share). The only place needing both a backend key and the manifest format. *)
+(* Empty for a body that is not a manifest: a folder marker, a trash marker, a
+   share. *)
 let chunk_keys data =
   match Chunk_table.of_string data with
     | t -> List.init (Chunk_table.count t) (Chunk_table.key t)
@@ -103,12 +103,9 @@ let deferred_root (d : Conf_parsing.domain) =
     (Filename.concat runtime_paths.Runtime.data_dir "deferred-pending")
     d.Conf_parsing.name
 
-(* The one place a configured role becomes behavior. [replica] and [backfill]
+(* The one place a configured role becomes behavior: [replica] and [backfill]
    are the same target with one bit between them — whether reads may reach it —
-   and everything else follows from that bit rather than being decided again:
-   {!Deferred.Readable} is what carries the journal and cursor, and what lets a
-   share link be served from the store. So a resynced backfill is promoted by
-   editing one word. *)
+   so a resynced backfill is promoted by editing one word. *)
 let build_backends ~resume (d : Conf_parsing.domain) :
     (module Backend.S) * Backend.member list =
   (* Shared by every layer below: a second [make_backend] for the same config is
@@ -216,10 +213,7 @@ let read_default_domain () =
 
 (* [resume] picks up the deferred work a previous run left owed, and belongs to
    the daemon alone — a one-shot command records and drains its own, but must
-   not run jobs the daemon is also running.
-
-   One shape, whatever the command: a caller wanting an individual store reaches
-   for {!Conf.S.members} rather than a differently-built conf. *)
+   not run jobs the daemon is also running. *)
 let make_conf ?domain ?socket_path ?(resume = false) cfg : (module Conf.S) =
   Tls_conf.apply cfg.Conf_parsing.tls;
   let domain =
@@ -253,9 +247,6 @@ let make_conf ?domain ?socket_path ?(resume = false) cfg : (module Conf.S) =
     let read_only = d.Conf_parsing.read_only
   end : Conf.S)
 
-(* Every domain-scoped command declares the same option and opens by loading the
-   config and building one domain's conf. *)
-
 let domain_arg =
   Arg.(
     value
@@ -269,11 +260,9 @@ let load_config () = Conf_parsing.load runtime_paths.Runtime.config_path
    domain first: explicit [--domain], else the persisted default, else the sole
    configured domain.
 
-   Every command talking to a running daemon must go through this. The bare
+   Every command talking to a running daemon must go through this: the bare
    [runtime_paths.socket_path] is the shared macOS socket and, on Linux, a path
    nothing listens on. *)
-(* Both are needed together: macOS serves every domain on one socket, so the
-   request has to name the one it means. *)
 let domain_target ?domain () =
   let domain =
     match domain with Some _ -> domain | None -> read_default_domain ()
@@ -286,9 +275,8 @@ let domain_socket ?domain () = snd (domain_target ?domain ())
 let load_conf ?domain () = make_conf ?domain (load_config ())
 
 (* [--source] says where to read from, so only reads move: a write still goes
-   through the domain's own path and reaches the deferred targets behind it. For
-   the commands that pick a store to catch up from, rather than letting the read
-   order decide. Raises [Failure] when nothing has that name. *)
+   through the domain's own path and reaches the deferred targets behind it.
+   Raises [Failure] when nothing has that name. *)
 let reading_from name (module C : Conf.S) : (module Conf.S) =
   let m =
     match

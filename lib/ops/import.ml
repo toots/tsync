@@ -27,9 +27,9 @@ module Make (C : Conf.S) = struct
       (fun g -> Glob.matches g rel || Glob.matches g (Filename.basename rel))
       globs
 
-  (* Relative paths, sorted. [exclude] prunes entries, and an excluded directory
-     is not descended into. A dir-symlink is never descended into whatever the
-     policy: the caller handles those. [seen] guards against cycles. *)
+  (* An excluded directory is not descended into, and neither is a dir-symlink
+     whatever the policy: the caller handles those. [seen] guards against
+     cycles. *)
   let walk_source ~exclude src =
     let globs = List.map Glob.of_pattern exclude in
     let seen = Hashtbl.create 16 in
@@ -108,14 +108,6 @@ module Make (C : Conf.S) = struct
       let* () = Mf.write key state in
       Lwt.return (Imported state.Manifest.size))
 
-  (* No local cache data is written: imported files read as not cached and are
-     fetched on demand. One journal entry covers the batch, so other clients pick
-     the files up incrementally. Existing keys are skipped.
-
-     Symlink handling follows [C.symlink_policy]:
-     - [`Keep]   — store as a first-class symlink object
-     - [`Follow] — dereference and upload target content; broken links skipped
-     - [`Skip]   — skip and count, no upload *)
   (* Ancestor directory rels, root first ("a/b/c" → ["a"; "a/b"]). *)
   let ancestors rel =
     let rec go acc d =
@@ -204,8 +196,8 @@ module Make (C : Conf.S) = struct
         symlinks
     in
     let all_statuses = file_statuses @ symlink_statuses in
-    (* Every folder needs its own marker under the inode layout: files no longer
-       encode their path. [dirs] is sorted, so parents precede children and id
+    (* Every folder needs its own marker under the inode layout, files not
+       encoding their path. [dirs] is sorted, so parents precede children and id
        resolution finds them. *)
     let* dir_ids =
       Lwt_list.map_s

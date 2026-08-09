@@ -1,10 +1,9 @@
 (** Everything that reads a journal: our own unfinished work, and other
     clients'.
 
-    It lives here rather than in the CLI because both callers need it. The
-    daemon runs for weeks and never reconciled its own intent log — which is why
-    one domain sat on 295 stale records for hours — and nothing under [tests/]
-    could reach a copy that lived in an executable. *)
+    It lives here rather than in the CLI because both callers need it, and
+    because a copy living in an executable was unreachable from [tests/] — which
+    is how one domain sat on 295 stale records for hours. *)
 module Make (C : Conf.S) (F : File_ops.S) : sig
   (** Finish or discard every record this client left behind, oldest first, each
       under the entry key it already has. Startup only: it replays ops and

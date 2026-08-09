@@ -16,11 +16,10 @@ let manifest_matches (a : Manifest.t) (b : Manifest.t) =
   && a.Manifest.size = b.Manifest.size
 
 (* Positioned reads rather than lseek+read: chunks of one file are read
-   concurrently (see [chunk_buffers] and [max_uploads]) and a shared fd's seek
-   position would race. pread has no such state, so one fd serves a whole file
-   instead of one per chunk — each open/seek/close is a blocking syscall on Lwt's
-   worker pool, thousands of round trips for a multi-GB upload. A short read
-   means the file was truncated under us: abort. *)
+   concurrently and a shared fd's seek position would race, so one fd serves a
+   whole file instead of one per chunk.
+
+   A short read means the file was truncated under us: abort. *)
 let read_chunk_into fd offset len buf =
   let rec loop pos =
     if pos >= len then Lwt.return_unit
@@ -72,21 +71,18 @@ module Make_with_layout (C : Conf.S) (L : Layout.S) : S = struct
   module B = (val C.store : Backend.S)
 
   (* Chunk writes go where they always went; only presence checks and reads have
-     to know that a collection may be in progress. See {!Chunk_space}. *)
+     to know that a collection may be in progress ({!Chunk_space}). *)
   module Space = Chunk_space.Make (C)
 
-  (* Chunk-sized buffers shared by every concurrent upload: a fixed set avoids a
-     stream of large major-heap allocations under sustained upload traffic, and
-     Lwt_pool allocates lazily so nothing is held when idle. A string derived from
-     a buffer aliases its backing memory and must not outlive the callback.
-
-     Acquiring here is also the real system-wide bound on concurrent chunk work:
+  (* Acquiring a buffer is the real system-wide bound on concurrent chunk work:
      a chunk read blocks until a slot frees, whatever file it belongs to, so
      [max_chunk_buffers] times the chunk size is what the upload path costs in
-     memory however many files [max_uploads] admits. *)
-  (* Sized off the configured value, not the resolved one: only an upper bound
-     for the common case is needed, and an oversized chunk falls through to a
-     one-off allocation below. *)
+     memory however many files [max_uploads] admits.
+
+     A string derived from a buffer aliases its backing memory and must not
+     outlive the callback. *)
+  (* Sized off the configured value, not the resolved one: an oversized chunk
+     falls through to a one-off allocation below. *)
   let buffer_size = Option.value C.chunk_size ~default:Conf.default_chunk_size
 
   let chunk_buffers =
@@ -94,8 +90,8 @@ module Make_with_layout (C : Conf.S) (L : Layout.S) : S = struct
         Lwt.return (Bytes.create buffer_size))
 
   (* Config, else what the domain's stores recommend (an http-proxy answers with
-     the serving domain's own, so the setting need not live in two configs), else
-     the built-in default. Memoized: the answer is fixed for the process. *)
+     the serving domain's own, so the setting need not live in two configs),
+     else the built-in default. *)
   let resolved_chunk_size = ref None
 
   let chunk_size () =
@@ -116,22 +112,18 @@ module Make_with_layout (C : Conf.S) (L : Layout.S) : S = struct
           resolved_chunk_size := Some p;
           p
 
-  (* From the pool when it fits the domain chunk size, else a one-off allocation
-     — only hit re-chunking a file whose manifest used a larger chunk size than
-     the domain now configures. *)
+  (* The one-off allocation is only hit re-chunking a file whose manifest used a
+     larger chunk size than the domain now configures. *)
   let with_chunk_buffer ~size f =
     if size <= buffer_size then Lwt_pool.use chunk_buffers f
     else f (Bytes.create size)
 
-  (* Chunk keys known present on the domain's stores, this session only: a HEAD
-     decides, and the result is memoized so a chunk repeated within the session
-     skips the round trip. Not pre-populated by listing the chunk prefix — that
-     cost scales with the whole historical archive rather than the upload at hand,
-     and only pays off for cross-session dedup. *)
+  (* Chunk keys known present on the domain's stores, this session only. Not
+     pre-populated by listing the chunk prefix: that cost scales with the whole
+     historical archive rather than the upload at hand. *)
   let known_chunks : (string, unit) Hashtbl.t = Hashtbl.create 4096
 
-  (* Sharded, so no single directory holds the whole store on a filesystem
-     backend. This is where a chunk is written; where it can be *read* is
+  (* Where a chunk is written; where it can be *read* is
      {!Chunk_space.read_key}'s business, a collection in progress being the one
      thing that makes the two differ. *)
   let chunk_backend_key = Space.key
@@ -171,27 +163,26 @@ module Make_with_layout (C : Conf.S) (L : Layout.S) : S = struct
     in
     entry
 
-  (* Reads, hashes and uploads chunk [index] unless it is already present. *)
   let upload_chunk fd ~cancel ~file_size ~chunk_size index =
     if !cancel then raise Cancelled;
     let offset = index * chunk_size in
     let size = min chunk_size (file_size - offset) in
     with_chunk_buffer ~size (fun buf ->
         let* () = read_chunk_into fd offset size buf in
-        (* Zero-copy for a full chunk; a short last chunk needs its own copy
-           since it cannot alias the whole pooled buffer. Either way [data] must
-           not outlive the hash and upload: the buffer is reused once
-           released. *)
+        (* Zero-copy for a full chunk, a short last chunk needing its own;
+           either way [data] must not outlive the upload, the buffer being
+           reused once released. *)
         let data =
           if size = Bytes.length buf then Bytes.unsafe_to_string buf
           else Bytes.sub_string buf 0 size
         in
         put_chunk ~index ~data)
 
-  (* The tail every upload shares. A cancellation landing while the put is in
-     flight unpublishes it again, or a ghost object survives under a name that may
-     no longer exist locally. Chunks stay: they are content-addressed and the
-     successor upload references them. *)
+  (* A cancellation landing while the put is in flight unpublishes it again, or
+     a ghost object survives under a name that may no longer exist locally.
+
+     Chunks stay: they are content-addressed and the successor upload references
+     them. *)
   let publish ~key ~size ~chunk_size ~mtime ~cancel entries =
     if !cancel then raise Cancelled;
     let h1, h2 = Manifest.digest_of_chunks entries in
@@ -262,10 +253,9 @@ module Make_with_layout (C : Conf.S) (L : Layout.S) : S = struct
         | `Fill fill ->
             with_chunk_buffer ~size:len (fun buf ->
                 let* () = fill buf in
-                (* Zero-copy for a full chunk; a short last chunk needs its own
-                   copy since it cannot alias the whole pooled buffer. Either way
-                   [data] must not outlive the hash and upload: the buffer is
-                   reused once released. *)
+                (* Zero-copy for a full chunk, a short last chunk needing its
+                   own; either way [data] must not outlive the upload, the
+                   buffer being reused once released. *)
                 let data =
                   if len = Bytes.length buf then Bytes.unsafe_to_string buf
                   else Bytes.sub_string buf 0 len
@@ -292,8 +282,8 @@ module Make_with_layout (C : Conf.S) (L : Layout.S) : S = struct
     let+ head = Space.head chunk_key in
     match head with Some h -> h.Backend.size = size | None -> false
 
-  (* Republishes [expected] when the remote manifest is missing, dirty or
-     differs. [true] when a repair was made. *)
+  (* Republishes [expected] when the remote manifest is missing or differs;
+     [true] when a repair was made. *)
   let recheck_manifest ~key (expected : Manifest.t) =
     let* remote = fetch_manifest ~key () in
     let ok =
@@ -315,22 +305,14 @@ module Make_with_layout (C : Conf.S) (L : Layout.S) : S = struct
       in
       true)
 
-  (* Concurrent chunk checks during a manifest-driven recheck.
-
-     One bound for the whole check rather than one for the HEAD inside it: a
+  (* One bound for the whole check rather than one for the HEAD inside it: a
      chunk the backend is missing goes on to read the local body and re-upload
-     it, and those cost what the HEAD does not. Bounding only the HEAD leaves
-     the rest to scale with the file.
+     it, and those cost what the HEAD does not.
 
-     Static, like every bound here. A recheck's width is the file's chunk count,
-     and a per-call budget would limit one recheck while saying nothing about
-     how many run at once — which is no bound on the store underneath. *)
+     Static, like every bound here: a per-call budget would limit one recheck
+     while saying nothing about how many run at once. *)
   let recheck_chunks = Lwt_bounded.create ~max:C.max_chunk_buffers ()
 
-  (* Recheck a file from its manifest: every chunk it names must exist remotely
-     with the right size, and a missing or wrong remote manifest is republished
-     from the sidecar as long as they all do. Local bytes play no part — verifying
-     those is {!Chunk_cache.verify_group}'s job. *)
   let recheck_from_manifest ~key ~local_body (m : Manifest.t) =
     (* A chunk missing or corrupt on the backend can still be restored from the
        local chunk store: content addressing means a body found under that key is
@@ -351,7 +333,6 @@ module Make_with_layout (C : Conf.S) (L : Layout.S) : S = struct
               let+ () = B.put ~key:(chunk_backend_key chunk_key) ~data () in
               `Repaired
     in
-    (* One check per chunk of the file, so the width is the file's size. *)
     let* results =
       Lwt_bounded.map_with recheck_chunks check
         (List.init (Chunk_table.count table) Fun.id)
@@ -377,14 +358,11 @@ module Make_with_layout (C : Conf.S) (L : Layout.S) : S = struct
       manifest_bad;
     }
 
-  (* Bounds concurrent chunk GETs across all downloads, mirroring how
-     [chunk_buffers] bounds upload work: every chunk of every file contends
-     for the same [max_downloads] slots, so launching all of a file's chunk
-     tasks up front cannot exceed the global ceiling. *)
+  (* Every chunk of every file contends for the same [max_downloads] slots, so
+     launching all of a file's chunk tasks up front cannot exceed the global
+     ceiling. *)
   let chunk_download_pool = Lwt_bounded.create ~max:C.max_downloads ()
 
-  (* Fetch one chunk body by content key. The pool bounds concurrent GETs the
-     same way for a demand-paged read as for a whole-file download. *)
   let get_chunk ~chunk_key =
     Lwt_bounded.use chunk_download_pool (fun () ->
         let+ data = Space.get chunk_key in

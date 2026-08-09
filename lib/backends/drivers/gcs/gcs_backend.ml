@@ -1,6 +1,6 @@
-(* Google Cloud Storage over the JSON API. Every request carries a bearer token
-   minted from a service-account key (see [Gcs_auth]); unlike s3 there is no
-   per-request signing, so the verbs are thin HTTP calls. *)
+(* Google Cloud Storage over the JSON API: every request carries a bearer token
+   minted from a service-account key ({!Gcs_auth}), and unlike s3 there is no
+   per-request signing. *)
 
 open Lwt.Syntax
 module Auth = Gcs_auth
@@ -29,8 +29,8 @@ let code resp = Cohttp.Code.code_of_status (Cohttp.Response.status resp)
 let is_ok resp = code resp >= 200 && code resp < 300
 
 (* An object name is a single path segment, so [/] and other reserved characters
-   must be percent-encoded. [`Generic] encodes everything not unreserved, and the
-   escaped form survives [Uri.of_string]/[path_and_query] to the wire. *)
+   must be percent-encoded; the escaped form survives
+   [Uri.of_string]/[path_and_query] to the wire. *)
 let enc_key key = Uri.pct_encode ~component:`Generic key
 let obj_path t key = t.base ^ "/storage/v1/b/" ^ t.bucket ^ "/o/" ^ enc_key key
 
@@ -123,9 +123,8 @@ let get_opt t ~key () =
   else if code resp = 404 then None
   else raise (backend_error "get_opt" (code resp) body)
 
-(* [ifGenerationMatch=0] means "only if this object does not exist"; GCS answers
-   412 when it already does, which is the claim being lost rather than an
-   error. *)
+(* [ifGenerationMatch=0] means "only if this object does not exist", and the 412
+   GCS answers when it already does is the claim being lost, not an error. *)
 let put_if_absent t ~key ~data () =
   let uri =
     Uri.add_query_param' (upload_uri t key) ("ifGenerationMatch", "0")

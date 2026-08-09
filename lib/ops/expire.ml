@@ -28,9 +28,8 @@ module Make (C : Conf.S) = struct
 
   let parse = Versioning.parse ~versions_prefix:C.versions_prefix
 
-  (* The reclaim set for a trashed subtree, markers included. Errors propagate: a
-     short list would leave part of the subtree undeleted while its parent marker
-     goes. *)
+  (* Errors propagate: a short list would leave part of the subtree undeleted
+     while its parent marker goes. *)
   let collect_namespace folder_id acc =
     Tree.fold_tree ~folder_id ~rel:""
       (fun acc _rel entry -> Lwt.return (entry.Inode_tree.bkey :: acc))
@@ -40,8 +39,8 @@ module Make (C : Conf.S) = struct
       ?(on_scan = fun ~name:_ ~objects:_ -> ())
       ?(on_delete = fun ~name:_ ~deleted:_ -> ()) ~cutoff () =
     let cutoff_ns = Int64.of_float (cutoff *. 1e9) in
-    (* Phase 0: empty trashed folders past the cutoff, whole subtree at a time,
-       so nothing in them counts as a reference any more. *)
+    (* Trashed folders go first, whole subtree at a time, so nothing in them
+       counts as a reference by the time versions are partitioned. *)
     on_list ~name:"trash";
     let* trash =
       B.list_prefix ~prefix:(C.domain_prefix ^ Folder.trash_id ^ "/") ()
@@ -62,7 +61,6 @@ module Make (C : Conf.S) = struct
         [] trash
     in
     let* () = delete_all ~name:"trash" ~on_delete trash_keys in
-    (* Phase 1: partition versions by the cutoff (no deletion yet). *)
     on_list ~name:"versions";
     let* versions = B.list_prefix ~prefix:C.versions_prefix () in
     on_scan ~name:"versions" ~objects:(List.length versions);
@@ -78,8 +76,8 @@ module Make (C : Conf.S) = struct
                | None -> (expired, surviving))
            ([], [])
     in
-    (* Phase 2: delete expired versions, then the version directories they
-       emptied. No-ops on S3, where no directory object exists. *)
+    (* The version directories go after what they held. No-ops on S3, where no
+       directory object exists. *)
     let* () = delete_all ~name:"versions" ~on_delete (List.map fst expired) in
     let survivor_rels = List.map snd surviving in
     let* () =
@@ -88,12 +86,9 @@ module Make (C : Conf.S) = struct
       |> List.map (fun rel -> C.versions_prefix ^ rel ^ "/")
       |> delete_all ~name:"version directories" ~on_delete
     in
-    (* Phase 3: drop journal entries older than the cutoff. The journal only
-       grows — one object per write — and nothing else prunes it. Age is the only
-       safe criterion: the cursor says what was published, not what every client
-       has applied, so entries above it are still owed to clients that are behind.
-       A client offline longer than the retention window must resync anyway, the
-       versions and trashed files it missed being gone too.
+    (* Age is the only safe criterion for the journal: the cursor says what was
+       published, not what every client has applied, so entries above it are
+       still owed to clients that are behind.
 
        The entry the cursor names is kept whatever its age, or a quiet domain
        whose last write predates the cutoff is left with a cursor pointing at

@@ -50,15 +50,8 @@ let of_string data =
    rather than its children: what opens a run is renaming the chunk root itself
    out of the way, so nothing that has to survive that can live inside it.
 
-   Derived from the chunk prefix rather than carried on {!Conf.S}, where every
-   config module — including one per test — would have to name two keys only this
-   module and {!Gc} ever touch. Safe by construction:
-   {!Conf_parsing.chunk_prefix} is the one thing that builds a chunk prefix and
-   always ends this way.
-
-   Outside the functor because {!Deferred} is built before there is a {!Conf.S} to
-   apply one to, and it needs the from-space prefix too. One definition, so the
-   two cannot drift into disagreeing about where the space is. *)
+   Outside the functor because {!Deferred} is built before there is a {!Conf.S}
+   to apply one to, and it needs the from-space prefix too. *)
 let domain_root ~chunk_prefix = Filename.chop_suffix chunk_prefix "chunks/"
 let from_prefix ~chunk_prefix = domain_root ~chunk_prefix ^ "chunks.from/"
 let marker_key ~chunk_prefix = domain_root ~chunk_prefix ^ "gc-run"
@@ -84,12 +77,9 @@ module Make (C : Conf.S) = struct
       | Some m -> Some m.Backend.backend
       | None -> None
 
-  (* Whether the main can be mid-run at all. Static for the life of the process,
-     and the promise is memoized so concurrent lookups share one probe.
-
-     This is what keeps a store that will never be collected — s3, gcs, a proxy —
-     on exactly the lookup path it had before any of this existed: one probe of
-     one space, no second key, no marker. *)
+  (* Whether the main can be mid-run at all, memoized so concurrent lookups share
+     one probe. This is what keeps a store that will never be collected — s3,
+     gcs, a proxy — on the single-lookup path: no second key, no marker. *)
   let capable = ref None
 
   let is_capable () =
@@ -106,11 +96,10 @@ module Make (C : Conf.S) = struct
           capable := Some p;
           p
 
-  (* The marker describes one store's own state, so it is read from and written to
-     the main directly and never through the composite. Through it, every write
-     would be fanned out to each replica and backfill target — once per batch of a
-     collection — leaving them carrying a marker about a collection that is not
-     theirs and that they can do nothing with. *)
+  (* The marker describes one store's own state, so it goes to the main directly:
+     through the composite every write would fan out to each replica and backfill
+     target, leaving them carrying a marker about a collection that is not theirs
+     and that they can do nothing with. *)
   let marker_store () =
     match main () with Some b -> b | None -> (module B : Backend.S)
 
@@ -123,9 +112,8 @@ module Make (C : Conf.S) = struct
           match of_string data with
             | Some run -> Lwt.return_some run
             | None ->
-                (* Written by [put], so it is either absent or whole. Garbage
-                   here means someone else put it there; say so rather than
-                   silently reading the store as idle. *)
+                (* Written by [put], so it is either absent or whole: garbage
+                   here means someone else put it there. *)
                 Log.warn "chunk space: unreadable run marker %s; treating %s"
                   marker_key "the store as idle";
                 Lwt.return_none)
@@ -155,25 +143,22 @@ module Make (C : Conf.S) = struct
       Lwt.return !running
     else refresh_order ()
 
-  (* The keys on the main that could hold [chunk_key], in the order worth trying.
-     While a run is open the space on its way out holds everything that existed
-     when the run started, which is nearly everything, so that is where to look
-     first and one lookup does it; only a chunk written during the run needs the
-     second. An idle store looks in one place and is done.
+  (* The keys on the main that could hold [chunk_key], in the order worth trying:
+     while a run is open the space on its way out holds everything that existed
+     when the run started, so one lookup usually does it and only a chunk written
+     during the run needs the second.
 
-     Believing the cache is what buys the single lookup. Nothing believes it in
-     the direction where being wrong would matter: see {!missed}. *)
+     Believing the cache is what buys the single lookup, and nothing believes it
+     in the direction where being wrong would matter — see {!missed}. *)
   let candidates chunk_key =
     let+ running = probably_running () in
     if running then [from_key chunk_key; key chunk_key] else [key chunk_key]
 
-  (* One more place to look once every candidate has missed.
-
-     A store the cache called idle has only been asked about one space, and the
-     cache may be behind a run that opened since — so before a miss is reported as
-     an answer, the marker is read for real. This is what keeps a stale cache from
-     turning into a wrong answer, and it is why the TTL above is a performance knob
-     with no correct value rather than something to get right.
+  (* One more place to look once every candidate has missed. A store the cache
+     called idle has only been asked about one space and the cache may be behind
+     a run that opened since, so the marker is read for real before a miss
+     becomes an answer — which is why the TTL above is a performance knob with no
+     correct value.
 
      Nothing more to try when the cache already said a run was open: both spaces
      were asked. *)
@@ -184,21 +169,15 @@ module Make (C : Conf.S) = struct
       let+ opened = refresh_order () in
       if opened then Some (from_key chunk_key) else None
 
-  (* Give [chunk_key] a name in the space that survives the run, and nothing at all
-     when it is not in the space on its way out — so a caller can promote whatever
-     it names without first asking where any of it is.
+  (* The link itself answers where the chunk is: it succeeds, or says [EEXIST]
+     because the chunk is across already, or [ENOENT] because there is nothing to
+     move. Asking first with a [head_opt] would double the cost of the one
+     operation a collection performs millions of times.
 
-     Which is the point: it does not ask. [copy] on a filesystem attempts the link
-     before it makes sure of anything, so the link itself answers both questions —
-     it succeeds, or says [EEXIST] because the chunk is across already, or [ENOENT]
-     because there is nothing to move. Asking first with a [head_opt] doubles the
-     cost of the one operation a collection performs millions of times.
-
-     [ENOENT] arriving as a raw Unix error rather than in a driver's own vocabulary
-     is not an oversight to tidy: promotion only ever does anything on a main that
-     answers {!Backend.caps.gc}, which is to say a filesystem, which is the driver
-     that raises it. On any other store a run cannot be open and this is never
-     reached. *)
+     [ENOENT] arriving as a raw Unix error rather than in a driver's own
+     vocabulary is not an oversight to tidy: promotion only ever does anything on
+     a main that answers {!Backend.caps.gc}, which is to say a filesystem, which
+     is the driver that raises it. *)
   let promote chunk_key =
     match main () with
       | None -> Lwt.return_unit
@@ -210,40 +189,31 @@ module Make (C : Conf.S) = struct
               | Unix.Unix_error (Unix.ENOENT, _, _) -> Lwt.return_unit
               | exn -> Lwt.fail exn)
 
-  (* Every chunk a manifest names, given a name in the surviving space — called
-     immediately before the manifest is published.
+  (* Called immediately before a manifest is published, and this — not the
+     presence check below — is what makes a run safe.
 
-     This, and not the presence check below, is what makes a run safe. Tying it
-     to the publish rather than to how each chunk was found covers the cases a
-     check cannot: a chunk skipped by an uploader's own session memo (see
-     [Remote.known_chunks]), a chunk this process wrote before the run opened and
-     that the rename has since moved, and an upload still in flight when the run
-     opened. The invariant is "a manifest is visible only once every chunk it
-     names has a name in the surviving space", and it holds however the chunk got
-     there.
-
-     One marker read per published manifest when the store is idle, which is the
-     cheapest thing a publish does. *)
+     Tying survival to the publish rather than to how each chunk was found covers
+     the cases a check cannot: a chunk skipped by an uploader's own session memo
+     (see [Remote.known_chunks]), a chunk written before the run opened and moved
+     by the rename since, an upload still in flight when the run opened. *)
   let promote_all chunk_keys =
     let* run = read_run () in
     match run with
       | None -> Lwt.return_unit
       | Some _ -> Lwt_list.iter_s promote chunk_keys
 
-  (* Ask the main for each candidate in turn, then the domain. Spelled out twice
-     below rather than shared through a combinator, because the two differ in
-     what "not there" is: an option for one, a raised failure for the other.
+  (* The two lookups below are spelled out rather than shared through a
+     combinator, because they differ in what "not there" is: an option for one, a
+     raised failure for the other.
 
-     The main's spaces come first, and the composite only once both have missed.
-     Routing a miss through the composite instead would walk past the main to a
+     Both ask the main's spaces first and the composite only once those have
+     missed: routing a miss through the composite would walk past the main to a
      replica, which during a run is nearly every read — an object-store request
      per chunk, for as long as the run lasts. *)
 
-  (* Whether the store holds [chunk_key]. Deliberately does not promote what it
-     finds in the space on its way out: {!promote_all} at publish time is what a
-     chunk's survival hangs on, and one mechanism for that is easier to be sure
-     of than two. Falling through still matters, so that an uploader holding the
-     chunk does not re-send one that is merely waiting to be promoted. *)
+  (* Deliberately does not promote what it finds in the space on its way out:
+     {!promote_all} at publish time is what a chunk's survival hangs on, and one
+     mechanism for that is easier to be sure of than two. *)
   let head chunk_key =
     let* capable = is_capable () in
     match (capable, main ()) with
@@ -259,7 +229,7 @@ module Make (C : Conf.S) = struct
                       match found with
                         | Some _ -> Lwt.return found
                         (* A replica may hold a chunk the main has lost, which is
-                           the composite's job and was true before any of this. *)
+                           the composite's job. *)
                         | None -> B.head_opt ~key:(key chunk_key) ())
                   | None -> B.head_opt ~key:(key chunk_key) ())
             | k :: rest ->
@@ -268,14 +238,11 @@ module Make (C : Conf.S) = struct
           in
           first keys
 
-  (* The chunk body, from whichever space holds it.
-
-     Reading does not promote: it says nothing about whether anything still
+  (* Reading does not promote: it says nothing about whether anything still
      references the chunk, and whatever does is a root the mark reaches anyway.
 
-     The last attempt goes through the composite and is a [get], not a [get_opt],
-     so a chunk that is simply gone is reported in the store's own words rather
-     than in a sentence duplicated here. *)
+     The last attempt is a [get], not a [get_opt], so a chunk that is simply gone
+     is reported in the store's own words. *)
   let get chunk_key =
     let* capable = is_capable () in
     match (capable, main ()) with

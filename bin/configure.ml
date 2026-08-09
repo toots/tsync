@@ -242,18 +242,12 @@ let terraform_store which =
                     Some s
                 | _ -> fail "invalid choice"))
 
-(* One setting prompted for, whatever declared it and whether it is being
-   created or edited.
+(* Answering blank keeps [current]; with nothing to keep, a required setting
+   ([default = None]) is asked again and an optional one ([default = Some ""])
+   is omitted.
 
-   [current] is what the config already holds. Answering blank keeps it; with
-   nothing to keep, a required setting ([default = None]) is asked again and an
-   optional one ([default = Some ""]) is omitted, which is what the spec's
-   [default] means. [None] therefore says "leave this out of the config", not
-   "the user typed nothing".
-
-   This was three near-copies — one for creating a backend, one for editing one,
-   one for a frontend — which is how they came to disagree about blanks and how
-   [`Int] ended up reachable from only one of them. *)
+   [None] therefore says "leave this out of the config", not "the user typed
+   nothing". *)
 let rec prompt_field ?(indent = "") ?current (s : Field_spec.t) =
   let label = indent ^ s.label in
   let required = s.default = None in
@@ -695,9 +689,8 @@ let write_config ~path ~client_name ~max_uploads ~max_chunk_buffers
       @ (match tls with Some t -> [("tls", `String t)] | None -> [])
       @ [("domains", `List domains)])
   in
-  (* Checked with the reader's own rules before it lands. Every way this could
-     write a file the daemon then refuses to start on — no [main] backend, no
-     frontends enabled — was a file it used to write without complaint. *)
+  (* Checked with the reader's own rules before it lands, so this cannot write
+     a file the daemon then refuses to start on. *)
   (match Conf_parsing.of_json json with
     | _ -> ()
     | exception Failure msg ->
@@ -760,9 +753,8 @@ let cmd =
         prompt_int "Max chunk buffers held in memory" !max_chunk_buffers;
       max_downloads := prompt_int "Max concurrent downloads" !max_downloads;
       (* Only worth asking when the build has more than one backend. "auto"
-         leaves it unset, taking the preferred one at startup: the same answer as
-         picking the first entry, and one that survives a build dropping a
-         backend. *)
+         leaves it unset, taking the preferred one at startup, which survives a
+         build dropping a backend. *)
       let available = Tls_conf.available () in
       if List.length available >= 2 then begin
         let choice =

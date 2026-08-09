@@ -20,7 +20,6 @@ let is_available = function
   | Native -> Conduit_lwt_tls.available
   | Openssl -> Conduit_lwt_unix_ssl.available
 
-(* The backend conduit will actually use for the next connection. *)
 let current () =
   match !Conduit_lwt_unix.tls_library with
     | Conduit_lwt_unix.Native -> "native"
@@ -44,18 +43,14 @@ let set backend =
       | Native -> Conduit_lwt_unix.Native
       | Openssl -> Conduit_lwt_unix.OpenSSL
 
-(* The preferred backend this build actually has. *)
 let use_preferred () =
   match available () with
     | name :: _ -> ( match of_string name with Some b -> set b | None -> ())
     | [] -> ()
 
-(* [None] selects the preferred available backend.
-
-   An unknown name is a typo in the config and raises. A known name this build
-   lacks does not: which backends are linked is a property of the build (the
-   release build ships without OpenSSL), and both speak TLS, so the choice is a
-   performance preference. Warn loudly and carry on. *)
+(* An unknown name is a typo in the config and raises; a known name this build
+   lacks only warns, since which backends are linked is a property of the build
+   and both speak TLS. *)
 let apply = function
   | None -> use_preferred ()
   | Some name -> (

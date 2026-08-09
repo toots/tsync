@@ -10,9 +10,8 @@ val strip_prefix : domain_prefix:string -> string -> string
     key's trailing ["/"] dropped.
 
     This is what a manifest filed under [key] is called, and the only name a
-    writer may record for it. In one place because it is one fact: a name
-    derived independently at each writer is a name that can disagree with
-    itself. *)
+    writer may record for it: a name derived independently at each writer is a
+    name that can disagree with itself. *)
 val leaf : domain_prefix:string -> string -> string
 
 (** Whether [key] names a directory, i.e. ends in ["/"]. *)

@@ -1,11 +1,8 @@
 (* File content as bytes, served per cache chunk out of {!Chunk_cache}.
 
    A file is never assembled: a read maps its byte range onto the stored chunks
-   backing it and copies out of the cache chunks those group into, fetching what
-   is absent. Nothing records which chunks are local — the store answers that by
-   existing — so there is no per-file state beyond a read-ahead hint.
-   {!Chunk_group} is the only thing between the two granularities; above it,
-   everything counts in stored chunks. *)
+   backing it and fetches what is absent, the store answering "is it local?" by
+   the body existing. *)
 
 open Lwt.Syntax
 
@@ -54,8 +51,7 @@ module Make (C : Conf.S) (R : Remote.S) = struct
               go first)
             (fun _ -> Lwt.return_unit))
 
-  (* [id] is used for the read-ahead heuristic only. Returns bytes read, short
-     only at end of file. *)
+  (* [id] is for the read-ahead heuristic only. *)
   let pread ~id ~(manifest : Manifest.t) buf ~offset =
     let cs = manifest.Manifest.chunk_size in
     let size = manifest.Manifest.size in
@@ -94,9 +90,6 @@ module Make (C : Conf.S) (R : Remote.S) = struct
       Hashtbl.replace last_read_end id (start + got);
       Lwt.return got)
 
-  (* Sources, in order: the whole body a frontend handed over, else per chunk
-     from its staged body, the published chunk it inherits, or a hole left by a
-     grow (reads as zeros). *)
   let rec pread_staged ~id ~(staged : Manifest.staged) ~base buf ~offset =
     match staged.Manifest.s_whole with
       | Some uuid ->
@@ -157,10 +150,7 @@ module Make (C : Conf.S) (R : Remote.S) = struct
       in
       go start 0)
 
-  (* Sidecar first, else the backend, so a file that was never cached still
-     reports its logical size and mtime rather than the manifest object's own
-     byte size.
-     ponytail: one GET per uncached file; add a metadata cache if a cold
+  (* ponytail: one GET per uncached file; add a metadata cache if a cold
      full-directory enumeration gets slow. *)
   let resolved_manifest key =
     let* m = Mf.read key in
@@ -178,9 +168,8 @@ module Make (C : Conf.S) (R : Remote.S) = struct
             | Some m -> pread ~id:key ~manifest:m buf ~offset
             | None -> Lwt.return 0)
 
-  (* The staged manifest a write starts from: the existing one, else one
-     inheriting every published chunk, else an empty file. A whole body is split
-     into chunks first, since only chunks can be addressed by a partial write. *)
+  (* A whole body is split into chunks first: only chunks can be addressed by a
+     partial write. *)
   let rec staged_for key =
     let* st = Mf.read_staged key in
     match st with
@@ -220,7 +209,6 @@ module Make (C : Conf.S) (R : Remote.S) = struct
                   s_published = None;
                 })
 
-  (* Copy a whole body into per-chunk staged bodies, then drop it. *)
   and split_whole key (st : Manifest.staged) uuid =
     let* cs = R.chunk_size () in
     let total = Int64.to_int st.Manifest.s_size in
@@ -279,10 +267,10 @@ module Make (C : Conf.S) (R : Remote.S) = struct
             | None -> stage_sparse uuid)
       | Manifest.Inherit | Manifest.Zero -> stage_sparse (Manifest.new_uuid ())
 
-  (* Stages the whole group [i] falls in, so a group is either untouched or
-     wholly local — never a mix of staged bodies and chunks whose bytes only
-     exist under the old group key the write invalidated. [covers j] reports a
-     full overwrite of chunk [j], which costs no copy.
+  (* Stages the whole group [i] falls in, so a group is never a mix of staged
+     bodies and chunks whose bytes only exist under the group key this write
+     invalidated.
+
      ponytail: a one-byte write materializes up to [cacheChunkSize] of staged
      bodies; stage per member and assemble the remainder at promotion time if
      write amplification ever bites. *)
@@ -510,12 +498,9 @@ module Make (C : Conf.S) (R : Remote.S) = struct
               loop 0)
             (fun () -> Lwt_unix_retry.close fd)
 
-  (* Chunk [i] in the form {!Remote.upload_chunks} wants: an inherited chunk
-     keeps its published entry and is never re-sent, a hole zeroes the buffer
-     without touching disk, a staged body is read into it.
-
-     Deciding which is I/O-free by contract, the reads happening inside the
-     fillers once upload_chunks has a buffer to hand them. *)
+  (* Deciding which source a chunk has must stay I/O-free: the reads happen
+     inside the fillers, once {!Remote.upload_chunks} has a buffer to hand
+     them. *)
   let staged_source ~(staged : Manifest.staged) ~base i =
     let cs = staged.Manifest.s_chunk_size in
     let len =
@@ -543,9 +528,6 @@ module Make (C : Conf.S) (R : Remote.S) = struct
         | Manifest.Staged uuid ->
             Lwt.return (`Fill (fun buf -> fill_from_staged ~uuid ~len buf)))
 
-  (* Recording the published manifest inside the staged one is the commit point
-     of the promotion below: after it, recovery replays the local moves instead
-     of re-sending bytes. *)
   let rec upload_staged ~key ~(staged : Manifest.staged) ?cancel () =
     match staged.Manifest.s_whole with
       | Some uuid ->
@@ -568,8 +550,8 @@ module Make (C : Conf.S) (R : Remote.S) = struct
     in
     commit key staged state
 
-  (* Written before anything local moves. A crash before this re-uploads
-     identical bytes; after it, only local moves are left to replay. *)
+  (* Written before anything local moves: a crash before this re-uploads
+     identical bytes, after it only local moves are left to replay. *)
   and commit key (staged : Manifest.staged) published =
     let+ () =
       Mf.write_staged key { staged with Manifest.s_published = Some published }
@@ -580,11 +562,10 @@ module Make (C : Conf.S) (R : Remote.S) = struct
   let rec promote key (staged : Manifest.staged) (published : Manifest.t) =
     match staged.Manifest.s_whole with
       | Some uuid ->
-          (* The chunk store deliberately ends up holding none of this file's
+          (* The chunk store deliberately ends up with none of this file's
              chunks: the only caller handing over whole files is the FileProvider
-             extension, which keeps its own copy of everything it materialized.
-             Caching the bytes again would double the disk cost of every edit;
-             reads from elsewhere fetch like any other published file. *)
+             extension, which already keeps its own copy, and caching the bytes
+             again would double the disk cost of every edit. *)
           let* () = Mf.write key published in
           let* () = Cc.whole_forget ~uuid in
           Mf.delete_staged key
@@ -601,7 +582,7 @@ module Make (C : Conf.S) (R : Remote.S) = struct
         (Chunk_group.indices group)
     in
     (* [stage_group] stages a group whole, so a touched group has every member
-       on disk. Anything else would come from the old, invalidated group key. *)
+       on disk; anything else would come from the old, invalidated group key. *)
     let local group =
       List.for_all
         (fun i ->
@@ -610,8 +591,8 @@ module Make (C : Conf.S) (R : Remote.S) = struct
             | Manifest.Inherit -> false)
         (Chunk_group.indices group)
     in
-    (* Local-only: every member's bytes are already here. An untouched group
-       keeps its key, so whatever body we hold for it is still right. *)
+    (* An untouched group keeps its key, so whatever body we hold for it is
+       still right. *)
     let* () =
       Lwt_list.iter_s
         (fun group ->
@@ -678,9 +659,6 @@ module Make (C : Conf.S) (R : Remote.S) = struct
         s_published = None;
       }
 
-  (* The very bytes an upload is reading: a frontend hands a file over whole, so
-     it stays one plain file on disk for as long as the upload owes it. [None]
-     once it has been split into chunks, or for a key nothing staged. *)
   let staged_body_path key =
     let+ st = Mf.read_staged key in
     match st with
@@ -725,13 +703,11 @@ module Make (C : Conf.S) (R : Remote.S) = struct
           in
           (present, total)
 
-  (* Progress of a file being made local, for a caller showing a bar. Advisory:
-     absent means nothing is running for that key.
+  (* [total] counts fetch *and* reassembly bytes: a bar that stops at the end of
+     the fetch cannot be told from a hang.
 
-     [total] counts fetch *and* reassembly bytes, since both take real time on a
-     large file and a bar that stops at the end of the fetch cannot be told from
-     a hang. [holders] lets two materializations of one key share a row instead
-     of the first to finish taking it away from the other. *)
+     [holders] lets two materializations of one key share a row instead of the
+     first to finish taking it away from the other. *)
   type span = { mutable fetched : int; total : int; mutable holders : int }
 
   let active : (string, span) Hashtbl.t = Hashtbl.create 8
@@ -764,10 +740,9 @@ module Make (C : Conf.S) (R : Remote.S) = struct
      {!Chunk_cache.ensure}, which limits what a request goes on to do.
 
      ponytail: credit is per group — 16 MB at the defaults, so a file smaller
-     than one group only moves when it finishes. Per stored chunk would halve the
-     step and no more, and {!Chunk_cache.ensure} hands a second caller the
-     in-flight promise without its callback, so doing it properly needs a
-     listener registry. Worth it only if the step is ever felt. *)
+     than one group only moves when it finishes; doing it per stored chunk needs
+     a listener registry, since {!Chunk_cache.ensure} hands a second caller the
+     in-flight promise without its callback. *)
   let fetch_groups key groups =
     Lwt_list.iter_p
       (fun group ->
@@ -781,8 +756,8 @@ module Make (C : Conf.S) (R : Remote.S) = struct
   let downloads_completed_count () = !downloads_completed
 
   (* Which groups [key] still owes the network, resolved up front so a caller
-     can size a progress bar. [None] is "nothing to materialize", distinct from
-     an empty list: a file with no chunks was still made local. *)
+     can size a progress bar; [None] is "nothing to materialize", distinct from
+     the empty list a chunkless file gives. *)
   let fetch_plan key =
     let* resolved = Mf.resolve key in
     match resolved with
@@ -868,12 +843,7 @@ module Make (C : Conf.S) (R : Remote.S) = struct
           Lwt_unix_retry.utimes dst_path m.Manifest.mtime m.Manifest.mtime
       | None -> Lwt.return_unit
 
-  (* {!assemble_to} for one range: everything outside it is left sparse, and
-     only the chunks the range covers are fetched. Returns the byte count, short
-     only at end of file. The file is created even for a range wholly past the
-     end, since the caller is handed this path either way.
-
-     ponytail: no progress span. A range is bounded by construction and its
+  (* ponytail: no progress span — a range is bounded by construction and its
      caller knows how many bytes it asked for. *)
   let fetch_range key ~dst_path ~offset ~length =
     let* () = Fs_util.ensure_parent dst_path in
@@ -889,9 +859,8 @@ module Make (C : Conf.S) (R : Remote.S) = struct
     in
     n
 
-  (* Unreference-blind by design: a chunk shared with another file goes too and
-     is re-fetched on demand, which is what avoids refcounting. Staged bodies are
-     never dropped, being the only copy of unsynced bytes. *)
+  (* Unreference-blind: a chunk shared with another file goes too and is
+     re-fetched on demand, which is what avoids refcounting. *)
   let forget_chunks key =
     let* published = Mf.read key in
     match published with

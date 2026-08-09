@@ -27,9 +27,8 @@ module Make_with_layout (C : Conf.S) (Sq : Sync_queue.S) (L : Layout.S) :
 
   let manifest_path key = Mf.path key
 
-  (* A folder id survives a move but its recorded path does not: every path that
-     moves a directory locally owes this call, or the folder becomes
-     unreachable by id. *)
+  (* Every path that moves a directory locally owes this call, or the folder
+     becomes unreachable by id. *)
   let reparent_dir key =
     Folder_ids.reparent ~cache_root:C.cache_root ~domain_name:C.domain_name
       (Key.chop_slash (rel_key key))
@@ -310,9 +309,6 @@ module Make_with_layout (C : Conf.S) (Sq : Sync_queue.S) (L : Layout.S) :
     in
     Key.join dir base
 
-  (* A rename moves the manifest object but not its body, so the leaf [name] it
-     records goes stale. Directory renames leave descendants' leaf names
-     unchanged. *)
   (* Moving an object on the backend does not rewrite its body, so the copy at
      the new key still records the old leaf. Unconditional: the mirror is
      already stamped by the time this runs, so its body cannot be used to detect

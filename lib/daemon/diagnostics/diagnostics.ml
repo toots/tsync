@@ -5,8 +5,7 @@
    render with {!text}, so a server and a mount report the same shape.
 
    Everything here is in-process state or a bounded read, except [?totals:true],
-   which reaches into the store and is opt-in for that reason. Even then the
-   chunk count is sampled unless [?exact:true]. *)
+   which reaches into the store and is opt-in for that reason. *)
 
 open Lwt.Syntax
 
@@ -24,12 +23,9 @@ let journal_sample = 1000
 (* The frontend answering this request, as a process.
 
    At the top rather than under a domain, since a frontend need not belong to
-   one: an http-proxy listener's cpu, bytes and request counts cover every domain
-   it serves at once, listed in [serves]. A fuse mount is per-domain and appears
-   again in that domain's [frontends].
-
-   [extra] is what only the caller knows: the frontend's type, its port, its
-   request counters. *)
+   one: an http-proxy listener's figures cover every domain it serves at once,
+   listed in [serves]. A fuse mount is per-domain and appears again in that
+   domain's [frontends]. *)
 let self_json ?(extra = []) () =
   let uptime = Unix.gettimeofday () -. started_at in
   let cpu = Metrics.cpu_seconds () in
@@ -98,11 +94,9 @@ module Make (C : Conf.S) = struct
 
   let int_opt = function Some n -> `Int n | None -> `Null
 
-  (* A report has to arrive. Backend calls carry their own retry ladder — eight
-     attempts backing off to 20s — which is right for work that must eventually
-     land and wrong for a health check, where waiting a minute only delays
-     printing the "unreachable" the first round trip already showed. This is the
-     deadline for the whole answer, retries included. *)
+  (* Deadline for the whole answer, retries included: a backend's own ladder
+     backs off to 20s, which is right for work that must land and wrong for a
+     health check the first round trip already answered. *)
   let probe_timeout = 10.
 
   let unreachable exn =
@@ -181,14 +175,12 @@ module Make (C : Conf.S) = struct
       (fun exn -> Lwt.return (`Assoc [("error", unreachable exn)]))
 
   (* Manifests, chunks and bytes held by the store. Reading either namespace
-     whole is a stat per file on [local] and a paged LIST on a bucket, growing
-     with the domain, so the chunk figure is sampled (see [count_chunks]) unless
-     [~exact].
+     whole grows with the domain, so the chunk figure is sampled (see
+     [count_chunks]) unless [~exact].
 
      Never counted while a request waits: a request serves the last sample with
-     its age, and the first one answers "counting" while a walk starts behind it.
-     A sample stands until [~reload], so walking a store is always something
-     someone chose. *)
+     its age, and a sample stands until [~reload], so walking a store is always
+     something someone chose. *)
   type sample = { at : float; counts : Yojson.Safe.t }
 
   let samples : (string, sample) Hashtbl.t = Hashtbl.create 4
@@ -247,8 +239,7 @@ module Make (C : Conf.S) = struct
            of the two, one object per file. *)
         let* chunks = count_chunks ~exact (module B) in
         (* Mid-collection the chunk prefix holds only what has been marked so
-           far, so these figures are a floor rather than a count. Said plainly:
-           a number that quietly means something else is worse than no number. *)
+           far, so these figures are reported as a floor rather than a count. *)
         let+ run = Space.read_run () in
         let collecting =
           match run with
@@ -464,14 +455,10 @@ module Make (C : Conf.S) = struct
       (fun exn ->
         Lwt.return (`Assoc [("error", `String (Printexc.to_string exn))]))
 
-  (* [extra] is what only the calling frontend knows: the http-proxy adds its
-     serve-side readOnly, whether it serves shares, and its options. [mount] is
-     the mount daemon's queues — supplied directly when this is that daemon,
-     fetched over IPC when a proxy reports on one. *)
-  (* Each frontend serving this domain reports what only it knows. A per-domain
-     frontend (a fuse mount) is its own process and carries its own cpu and
-     transfer figures; a shared listener (the http-proxy) contributes only its
-     per-domain settings here, reporting itself once at the top. *)
+  (* [extra] and [frontends] are what only the calling frontend knows. A
+     per-domain frontend (a fuse mount) is its own process and carries its own
+     cpu and transfer figures; a shared listener (the http-proxy) contributes
+     only its per-domain settings here, reporting itself once at the top. *)
   let domain_json ?(totals = false) ?(exact = false) ?(reload = false)
       ?(extra = []) ?(frontends = []) () =
     let* cache = cache_json ~totals in
