@@ -14,15 +14,18 @@
   listings during a resume's start: 0
   namespaces left: 7
 
-=== reconciling picks up where it stopped
-  shards reconciled before stopping: 4
-  phase on resume: reconciling
-  shards left to reconcile: 4092 of 4096  <- the first 4 are not redone
+=== closing asks the copies nothing
+  shards to close: 12 of a possible 4096
+  shards closed before stopping: 4
+  listings of the main while closing 4 shard(s): 8
+  listings of the replica while closing 4 shard(s): 0
+  phase on resume: closing
+  shards left to close: 8  <- the first 4 are not redone
 
 === finishing
   reclaimed 0 chunk(s)
   chunks still on the main: 12 of 12
-  chunks on the replica: 12 of 12
+  chunks on the replica: 0  <- a collection never fills one
 
 === an interrupted abandonment stays an abandonment
   started collecting, phase: marking
@@ -36,14 +39,17 @@
   writes in flight carried along by a renamed shard: 12 of 12
   chunks only the old space had, now in the new one: 5 of 5
 
-=== many shards uploading at once, with fewer slots than shards
-  emptied the replica, refilled it with 2 slots and 12 shards
-  chunks back on the replica: 12 of 12
+=== many roots promoting at once, with fewer slots than roots
+  collected 8 root(s) of 8 chunk(s) each with 2 slots
+  chunks on the main: 76 of 76
 
 === shards the cursor skipped are swept up, chunks and all
-  kept while sweeping: 12 chunk(s)
-  chunks on the main afterwards: 12 of 12
+  kept while sweeping: 76 chunk(s)
+  chunks on the main afterwards: 76 of 76
   collection closed: true
+
+=== collecting asks the filesystem for nothing but rename
+  calls to Backend.copy across every run above: 0
 
 === the copies were told nothing about the collection
   run markers written to the replica: 0

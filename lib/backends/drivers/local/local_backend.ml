@@ -123,8 +123,11 @@ let make ~root : (module Backend.S) =
     let delete_multi keys = Lwt_list.iter_s (fun key -> delete ~key ()) keys
 
     (* A hard link when the filesystem allows one, so copying within a store
-       costs a directory entry instead of the body — {!Chunk_space} leans on
-       this, collecting chunks by linking a whole store's live set.
+       costs a directory entry instead of the body, and the body only where there
+       are no links to be had. Nothing on the collection path depends on which:
+       {!Chunk_space} moves chunks rather than copying them, precisely so a
+       filesystem without links does not turn a collection into a rewrite of the
+       whole live set.
 
        Safe because a name here is only ever replaced by [write_file]'s rename,
        never written through, so two names sharing an inode cannot observe each
@@ -242,8 +245,9 @@ let make ~root : (module Backend.S) =
        is asked with a request waiting on the answer. *)
     let concurrency = lazy (Device.max_concurrency root)
 
-    (* [gc]: a filesystem has the two things collecting chunks takes — a link
-       within the store and a directory rename. *)
+    (* [gc]: a filesystem has the one thing collecting chunks takes, which is
+       [rename] — of a directory to open a run, and within it to mark. True of
+       every filesystem, not only the ones with hard links to give. *)
     let capabilities ~prefix:_ () =
       Lwt.return
         {

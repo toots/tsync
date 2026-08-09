@@ -15,6 +15,10 @@
    -open
    Tsync_backend_register
    -open
+   Tsync_local_io
+   -open
+   Tsync_lwt_unix
+   -open
    Tsync_log))
  (name tsync_store)
  (libraries
@@ -22,6 +26,8 @@
   tsync_naming
   tsync_object
   tsync_backend_register
+  tsync_local_io
+  tsync_lwt_unix
   tsync_log
   yojson
   unix

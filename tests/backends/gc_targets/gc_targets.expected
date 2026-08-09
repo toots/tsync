@@ -1,0 +1,20 @@
+
+=== before
+  main:     001 002 003
+  replica:  001 002 009
+  backfill: 009
+
+=== collect
+  main reclaimed 1 chunk(s), kept 2
+
+=== after
+  main:     001 003
+  replica:  001 009
+  backfill: 009
+
+=== what that means
+  the reclaimed chunk in shard 002 is gone from the replica too: true
+  a live chunk the replica had is untouched: true
+  the chunk in shard 009, which the main never had, is still there: true
+  the replica is still short chunk 003, which the main kept: true
+  filling either of those is tsync mirror's job, not this one's

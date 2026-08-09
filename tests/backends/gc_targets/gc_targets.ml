@@ -1,18 +1,19 @@
-(* Bringing the copies into line once the main has been collected.
+(* What a collection does to the copies, which the scenario tests cannot say,
+   having one store.
 
-   A replica is meant to be a complete copy, so a gap in one is drift and gets
-   filled. A backfill target is incomplete by design — it is filled behind the
-   write and has its own queue for that — so a gap there says nothing and is left
-   alone. Both lose whatever the main no longer has.
+   Closing deletes off every replica and backfill target the same keys it
+   discards on the main — no walk of the copies, so the cost is the garbage's and
+   not the layout's. What that buys is also what it gives up, and both are
+   pinned here: a chunk the main never had stays where it is, and a copy short of
+   a chunk the main kept is not filled. Neither is drift this knows how to see;
+   [tsync mirror] is what does.
 
-   Three things this pins down that the scenario tests cannot, having one store:
-   the walk is driven by the target's own shards (so a chunk in a shard the main
-   has never had is still found), a replica is filled, and a backfill target is
-   not. *)
+   Chunk keys are built so each lands in a shard of its own, which is what makes
+   "a shard the main never had" a case at all. *)
 
 open Lwt.Syntax
 
-let root = "/tmp/tsync-gc-reconcile-test"
+let root = "/tmp/tsync-gc-targets-test"
 let main_dir = root ^ "/main"
 let replica_dir = root ^ "/replica"
 let backfill_dir = root ^ "/backfill"
@@ -80,21 +81,23 @@ let step fmt = Printf.printf ("  " ^^ fmt ^^ "\n")
 let case name = Printf.printf "\n=== %s\n" name
 
 (* "<h1>-<h2>", 16 hex each. Built so that [n] is the leading three characters,
-   which is the shard ({!Chunk_layout.relative_path}) — the point being that each
-   of these chunks lands in a shard of its own. Without that, "a shard the main has
-   never had" would not be tested at all: numbering the low bits instead puts every
-   chunk in shard 000. *)
+   which is the shard ({!Chunk_layout.relative_path}). Numbering the low bits
+   instead would put every chunk in shard 000 and the shard cases would not be
+   cases. *)
 let ck n = Printf.sprintf "%03x%013x-%016x" n n n
 let key n = chunk_prefix ^ Chunk_layout.relative_path (ck n)
 let label n = Printf.sprintf "%03x" n
 
+(* By what a chunk is named, the same question {!Gc} asks of a listing before it
+   names anything in a delete. Filtering out directory markers instead let
+   anything else through, so the two sides of this test answered "is that a
+   chunk" differently from each other and from the code under test. *)
 let chunks_of (module B : Backend.S) =
   let+ entries = B.list_prefix ~prefix:chunk_prefix () in
   List.filter_map
     (fun (e : Backend.file_entry) ->
-      let k = e.Backend.key in
-      if String.length k > 0 && k.[String.length k - 1] = '/' then None
-      else Some (Filename.basename k))
+      let name = Filename.basename e.Backend.key in
+      if Chunk_layout.is_chunk_key name then Some name else None)
     entries
   |> List.sort String.compare
 
@@ -131,16 +134,15 @@ let () =
          ~data:(Manifest.to_string ~name:"f" manifest)
          ()
      in
-     (* The replica holds two chunks it should not — chunk 2, which the collection
-        is about to reclaim, and chunk 9, which the main has never had at all — and
-        is short one it should have, chunk 3. So both directions are exercised: what
-        it has too much of goes, what it lacks is filled. *)
+     (* The replica holds chunk 2, which the collection is about to reclaim, and
+        chunk 9, which the main has never had; it is short chunk 3, which the
+        collection keeps. One of each case the closing phase can meet. *)
      let* () = Replica.put ~key:(key 1) ~data:"live-one" () in
      let* () = Replica.put ~key:(key 2) ~data:"orphaned" () in
      let* () = Replica.put ~key:(key 9) ~data:"never-was" () in
-     (* The backfill target is behind — it has neither live chunk — and also holds
-        one the main never had. It must lose that one and be filled with nothing:
-        being behind is not drift for a target whose whole job is catching up. *)
+     (* The backfill target holds only the chunk the main never had, so it also
+        pins that a delete naming keys this store does not have is not an error:
+        every copy is sent the same list. *)
      let* () = Backfill.put ~key:(key 9) ~data:"never-was" () in
 
      case "before";
@@ -152,11 +154,6 @@ let () =
      let* s = G.run () in
      step "main reclaimed %d chunk(s), kept %d" s.Gc.chunks_reclaimed
        s.chunks_promoted;
-     List.iter
-       (fun (m : Gc.member_stats) ->
-         step "%-9s %d deleted, %d filled" (m.Gc.name ^ ":") m.deleted
-           m.uploaded)
-       s.members;
 
      case "after";
      let* () = show "main" (module Main) in
@@ -167,10 +164,18 @@ let () =
      let* main = chunks_of (module Main) in
      let* replica = chunks_of (module Replica) in
      let* backfill = chunks_of (module Backfill) in
-     step "replica now matches the main: %b" (replica = main);
-     step
-       "the chunk in shard %s, which the main never had, is gone from both: %b"
+     step "the reclaimed chunk in shard %s is gone from the replica too: %b"
+       (label 2)
+       (not (List.mem (ck 2) replica));
+     step "a live chunk the replica had is untouched: %b"
+       (List.mem (ck 1) replica);
+     (* The two the closing phase deliberately cannot see. Printed rather than
+        asserted away, so the trade is in the snapshot instead of in a comment. *)
+     step "the chunk in shard %s, which the main never had, is still there: %b"
        (label 9)
-       (not (List.mem (ck 9) replica || List.mem (ck 9) backfill));
-     step "the backfill target was not filled, only trimmed: %b" (backfill = []);
+       (List.mem (ck 9) replica && List.mem (ck 9) backfill);
+     step "the replica is still short chunk %s, which the main kept: %b"
+       (label 3)
+       (List.mem (ck 3) main && not (List.mem (ck 3) replica));
+     step "filling either of those is tsync mirror's job, not this one's";
      Lwt.return_unit)

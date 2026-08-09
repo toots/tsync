@@ -763,6 +763,17 @@ let gc_cmd =
             "Operations in flight (default: what the device says). $(b,1) is \
              as gentle as it gets.")
   in
+  let delete_batch_arg =
+    Arg.(
+      value
+      & opt (some int) None
+      & info ["delete-batch"] ~docv:"N"
+          ~doc:
+            "Chunks per delete request against a replica or backfill target \
+             (default: 1000, which is what S3 and GCS both cap a bulk delete \
+             at). Raise it for a store that takes more, lower it for one that \
+             chokes.")
+  in
   let abort_arg =
     Arg.(
       value & flag
@@ -778,16 +789,20 @@ let gc_cmd =
       value & flag
       & info ["status"] ~doc:"Report an open collection without continuing it.")
   in
-  let report ~abort ~domain (s : Gc.stats) =
+  (* [was_open] is read before the abandonment rather than inferred from its
+     counts: what it moves back is what marking had not reached yet, so a run
+     abandoned after a finished mark moves nothing and a count of zero says
+     nothing about whether there was a run at all. *)
+  let report ~abort ~was_open ~domain (s : Gc.stats) =
     (match s.Gc.outcome with
-      | Gc.Completed when abort && s.chunks_promoted = 0 ->
-          (* Nothing was open, or nothing was left in it. Either way saying
-             "abandoned; 0 kept" invites the reader to wonder what happened to
-             their chunks. *)
+      | Gc.Completed when abort && not was_open ->
           Printf.printf "No collection was open for %s; nothing to abandon.\n"
             domain
       | Gc.Completed when abort ->
-          Printf.printf "Collection abandoned; %d chunk(s) kept.\n"
+          (* Moved back, not kept: everything marking had already moved across is
+             kept too, and was never at risk. *)
+          Printf.printf
+            "Collection abandoned; %d chunk(s) moved back, none discarded.\n"
             s.chunks_promoted
       | Gc.Completed ->
           Printf.printf "Reclaimed %d chunk(s), %s. Kept %d.\n"
@@ -802,7 +817,7 @@ let gc_cmd =
          [tsync gc] over an abandoned collection would go back to collecting it. *)
       | Gc.Suspended { phase; _ } when abort ->
           Printf.printf
-            "Stopped while %s: %d chunk(s) kept so far.\n\
+            "Stopped while %s: %d chunk(s) moved back so far.\n\
              Still open; rerun tsync gc --abort to continue.\n"
             phase s.chunks_promoted
       | Gc.Suspended { phase; _ } ->
@@ -810,15 +825,9 @@ let gc_cmd =
             "Stopped while %s: %d file(s) marked, %d chunk(s) kept, %d \
              reclaimed.\n\
              Still open; rerun tsync gc to continue.\n"
-            phase s.roots_marked s.chunks_promoted s.chunks_reclaimed);
-    List.iter
-      (fun (m : Gc.member_stats) ->
-        Printf.printf "  %s: %d deleted%s\n" m.Gc.name m.deleted
-          (if m.uploaded > 0 then Printf.sprintf ", %d filled" m.uploaded
-           else ""))
-      s.members
+            phase s.roots_marked s.chunks_promoted s.chunks_reclaimed)
   in
-  let run budget pause concurrency abort status domain =
+  let run budget pause concurrency delete_batch abort status domain =
     (* Reported as [Failure], which the top level prints as "tsync: <sentence>"
        and exits nonzero on. Both carry prose written for whoever typed this. *)
     let translate f =
@@ -872,34 +881,33 @@ let gc_cmd =
         progress "  closed %d shard(s), %d chunk(s) reclaimed\r%!" shards
           reclaimed
       in
-      let on_reconcile ~name ~shards ~total ~deleted ~uploaded =
-        progress "  %s: %d/%d shard(s), %d deleted, %d filled\r%!" name shards
-          total deleted uploaded
-      in
       translate (fun () ->
+          let was_open = abort && run_lwt (G.status ()) <> None in
           let s =
             run_lwt
               (if abort then
                  G.abort ?budget ?pause ?concurrency ~on_open ~on_mark ~on_close
-                   ~on_reconcile ()
+                   ()
                else
-                 G.run ?budget ?pause ?concurrency ~on_open ~on_mark ~on_close
-                   ~on_reconcile ())
+                 G.run ?budget ?pause ?concurrency ?delete_batch ~on_open
+                   ~on_mark ~on_close ())
           in
           (* The progress lines above end in a carriage return, so the last one is
              still sitting on the terminal's current line. Cleared before the
              summary goes to stdout, or the two land on top of each other. *)
           if watching then Printf.eprintf "\r%*s\r%!" 72 "";
-          report ~abort ~domain:C.domain_name s))
+          report ~abort ~was_open ~domain:C.domain_name s))
   in
   Cmd.v
     (Cmd.info "gc"
        ~doc:
          "Reclaim chunks nothing references any more (run tsync expire first). \
-          Local main stores only.")
+          Local main stores only. Deletes the same chunks off the replicas and \
+          backfill targets; filling a copy that has fallen behind is tsync \
+          mirror's job, not this one's.")
     Term.(
-      const run $ budget_arg $ pause_arg $ concurrency_arg $ abort_arg
-      $ status_arg $ domain_arg)
+      const run $ budget_arg $ pause_arg $ concurrency_arg $ delete_batch_arg
+      $ abort_arg $ status_arg $ domain_arg)
 
 let sync_cmd =
   let source_arg =

@@ -179,7 +179,6 @@
 --- content
   foo.txt = "two two"
 --- backend
-  chunk(going) 3ab8997bc73098ac-74d584d55f333769 size=7
   chunk(going) 911faba7321fe1a0-a3cf92cbf55153da size=3
   chunk 3ab8997bc73098ac-74d584d55f333769 size=7
   collecting: closing
@@ -197,7 +196,7 @@
   evict foo.txt
   expire all -> 1 version(s), 2 journal entr(ies)
   gc marked 1 root(s), 1 chunk(s) kept
-  gc abandoned, 2 chunk(s) kept
+  gc abandoned, 1 chunk(s) moved back
 --- tree
   f foo.txt size=7 cached=0/1 uploaded=true etag=46316ec1c85082b9
 --- content

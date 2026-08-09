@@ -11,8 +11,10 @@
    - The run marker written through the composite, so every replica and backfill
      target received a copy of it, once per batch, describing a collection that is
      none of their business.
+   - Closing asking every copy about every shard there could be, so a domain
+     holding twelve chunks paid 4096 round trips per copy to find them.
 
-   Both are about counts, not outcomes, so they are what this counts. *)
+   All three are about counts, not outcomes, so they are what this counts. *)
 
 open Lwt.Syntax
 
@@ -28,9 +30,10 @@ type tally = {
   mutable puts : int;
   mutable markers : int;
   mutable heads : int;
+  mutable copies : int;
 }
 
-let counted () = { lists = 0; puts = 0; markers = 0; heads = 0 }
+let counted () = { lists = 0; puts = 0; markers = 0; heads = 0; copies = 0 }
 let main_ops = counted ()
 let replica_ops = counted ()
 
@@ -55,6 +58,16 @@ module Count
   let head_opt ~key () =
     T.t.heads <- T.t.heads + 1;
     B.head_opt ~key ()
+
+  (* [copies] is the hard-link requirement, counted. Marking used to promote a
+     chunk through here, and [Local_backend.copy] answers a filesystem with no
+     links to give by rewriting the body — so on exFAT, on an Android shared
+     volume, on several network mounts, a collection rewrote the whole live set
+     while reporting itself supported. Promotion is a [rename] now and nothing on
+     that path may come back through here. *)
+  let copy ~src_key ~dst_key () =
+    T.t.copies <- T.t.copies + 1;
+    B.copy ~src_key ~dst_key ()
 end
 
 module Main =
@@ -180,9 +193,10 @@ let () =
      main_ops.heads <- 0;
      let* _ = G.step ~units:1 s in
      step "listings for one namespace: %d" main_ops.lists;
-     (* Promoting a chunk is one link and nothing else. It used to ask first whether
-        the chunk was in the old space, which the link answers by succeeding or not —
-        a stat per chunk, over the millions of them a collection promotes. *)
+     (* Promoting a chunk is one rename and nothing else. It used to ask first
+        whether the chunk was in the old space, which the rename answers by
+        succeeding or not — a stat per chunk, over the millions of them a
+        collection promotes. *)
      step "chunks asked about before being promoted: %d" main_ops.heads;
      (* One saved cursor per namespace, so an interruption gives back at most the
         namespace in flight. Saved per batch instead — [units] namespaces, each a
@@ -200,12 +214,11 @@ let () =
      step "namespaces left: %d" (G.total s);
      let* () = G.release s in
 
-     (* Reconciling is the phase that can run long — filling a replica is the only
-        part of a collection that sends bytes anywhere — so it is the one whose
-        resumability is worth pinning. Driven a step at a time rather than with a
-        time limit, which would make the snapshot depend on how fast the machine
-        is. *)
-     case "reconciling picks up where it stopped";
+     (* The phase this file exists for as much as for the marking counts: closing
+        used to walk every shard there could be on every copy, so its cost was the
+        shard space's and not the store's. What it must be now is the shards the
+        main actually holds, whatever else the domain is configured with. *)
+     case "closing asks the copies nothing";
      let* s = G.start () in
      let rec until phase =
        if G.phase s = phase then Lwt.return_unit
@@ -213,18 +226,27 @@ let () =
          let* outcome = G.step ~units:1 s in
          match outcome with `Done -> Lwt.return_unit | `More -> until phase
      in
-     let* () = until "reconciling" in
+     let* () = until "closing" in
+     step "shards to close: %d of a possible %d" (G.total s)
+       Chunk_layout.shards;
+     replica_ops.lists <- 0;
+     main_ops.lists <- 0;
      let* _ = G.step ~units:4 s in
      let after_four = G.done_ s in
-     step "shards reconciled before stopping: %d" after_four;
+     step "shards closed before stopping: %d" after_four;
+     (* Two listings a shard, both of the main's own directories: what is going and
+        what survived. A copy is written to, never read — asking it what it holds
+        is the 4096 round trips this stopped doing. *)
+     step "listings of the main while closing 4 shard(s): %d" main_ops.lists;
+     step "listings of the replica while closing 4 shard(s): %d"
+       replica_ops.lists;
      let* () = G.release s in
      let* s = G.start () in
      step "phase on resume: %s" (G.phase s);
      (* [total] is what this session has to do, not what the store has — a resume
-        that reported the whole shard space would say nothing about its own
-        progress. *)
-     step "shards left to reconcile: %d of %d  <- the first %d are not redone"
-       (G.total s) Chunk_layout.shards after_four;
+        that reported everything again would say nothing about its own progress. *)
+     step "shards left to close: %d  <- the first %d are not redone" (G.total s)
+       after_four;
      let* () = G.release s in
 
      case "finishing";
@@ -237,11 +259,11 @@ let () =
         thing this can do, so it is the thing counted last. *)
      let* left = Main.list_prefix ~prefix:chunk_prefix () in
      step "chunks still on the main: %d of %d" (count_chunks left) folders;
-     (* The replica started empty, so finishing across two sessions has to have
-        filled it — an interruptible fill that quietly drops what it did not get to
-        would look identical above. *)
-     let* filled = Replica.list_prefix ~prefix:chunk_prefix () in
-     step "chunks on the replica: %d of %d" (count_chunks filled) folders;
+     (* The replica started empty and stays empty: a collection deletes on the
+        copies and never writes to them. Filling one is [tsync mirror]'s job. *)
+     let* copied = Replica.list_prefix ~prefix:chunk_prefix () in
+     step "chunks on the replica: %d  <- a collection never fills one"
+       (count_chunks copied);
 
      (* Abandoning is the collection machinery with everything treated as live, so
         it is resumable the same way — and the thing that has to hold is that it
@@ -342,30 +364,54 @@ let () =
      step "chunks only the old space had, now in the new one: %d of %d"
        (List.length arrived) (List.length orphans);
 
-     (* The pool discipline, which is the thing here most easily got wrong: shards
-        run concurrently and each may upload, so the outer level and the inner one
-        have to draw from different pools. Sharing one, every slot ends up held by a
-        shard waiting to upload and nothing proceeds.
+     (* The pool discipline, which is the thing here most easily got wrong: a
+        namespace runs its roots concurrently and each root promotes its chunks
+        concurrently, so the outer level and the inner one have to draw from
+        different pools. Sharing one, every slot ends up held by a root waiting on
+        a chunk and nothing proceeds — a hang, not a wrong answer, which is why it
+        went unnoticed twice.
 
-        Showing that takes contention, and contention takes more shards wanting to
-        upload at once than there are slots — hence emptying the replica first and
-        setting the concurrency below the number of shards involved. With a slot per
-        shard to spare, a shared pool looks perfectly healthy, which is how this
-        went unnoticed twice. *)
-     case "many shards uploading at once, with fewer slots than shards";
-     let* held = Replica.list_prefix ~prefix:chunk_prefix () in
+        Showing that takes contention, and contention takes more roots wanting to
+        promote at once than there are slots: hence a namespace of [wide] files,
+        each naming [wide] chunks, collected with two slots. With a slot per root
+        to spare, a shared pool looks perfectly healthy. *)
+     case "many roots promoting at once, with fewer slots than roots";
+     let wide = 8 in
+     let wide_ck f i = Printf.sprintf "%03x%013x-%016x" (0x100 + f) i i in
      let* () =
-       Replica.delete_multi
-         (List.filter_map
-            (fun (e : Backend.file_entry) ->
-              if Filename.check_suffix e.Backend.key "/" then None
-              else Some e.Backend.key)
-            held)
+       Lwt_list.iter_s
+         (fun f ->
+           let chunks = List.init wide (fun i -> wide_ck f i) in
+           let* () =
+             Lwt_list.iter_s
+               (fun k ->
+                 Main.put
+                   ~key:(chunk_prefix ^ Chunk_layout.relative_path k)
+                   ~data:"a chunk!" ())
+               chunks
+           in
+           let m =
+             Manifest.make ~name:"f" ~h1:(String.make 16 '0')
+               ~h2:(String.make 16 '0')
+               ~size:(Int64.of_int (8 * wide))
+               ~chunk_size:8
+               ~chunks:
+                 (List.mapi
+                    (fun i k -> Manifest.entry_of_key ~index:i ~size:8 k)
+                    chunks)
+               ~mtime:0.
+           in
+           Main.put
+             ~key:(Printf.sprintf "%swide/%016x" domain_prefix f)
+             ~data:(Manifest.to_string ~name:"f" m)
+             ())
+         (List.init wide (fun i -> i))
      in
      let* _ = G.run ~concurrency:2 () in
-     let* refilled = Replica.list_prefix ~prefix:chunk_prefix () in
-     step "emptied the replica, refilled it with 2 slots and %d shards" folders;
-     step "chunks back on the replica: %d of %d" (count_chunks refilled) folders;
+     let* after = Main.list_prefix ~prefix:chunk_prefix () in
+     step "collected %d root(s) of %d chunk(s) each with 2 slots" wide wide;
+     step "chunks on the main: %d of %d" (count_chunks after)
+       (folders + (wide * wide));
 
      (* A collection abandoned under an older build left the old space's directories
         behind, below its cursor, for a sweep at the end to remove. Those shards are
@@ -383,9 +429,16 @@ let () =
      let* swept = G.abort () in
      step "kept while sweeping: %d chunk(s)" swept.Gc.chunks_promoted;
      let* left = Main.list_prefix ~prefix:chunk_prefix () in
-     step "chunks on the main afterwards: %d of %d" (count_chunks left) folders;
+     step "chunks on the main afterwards: %d of %d" (count_chunks left)
+       (folders + (wide * wide));
      let* run = G.status () in
      step "collection closed: %b" (run = None);
+
+     (* Counted over every collection and abandonment this file has run, not one
+        of them: a single [copy] anywhere on the path is the requirement coming
+        back. *)
+     case "collecting asks the filesystem for nothing but rename";
+     step "calls to Backend.copy across every run above: %d" main_ops.copies;
 
      case "the copies were told nothing about the collection";
      step "run markers written to the replica: %d" replica_ops.markers;

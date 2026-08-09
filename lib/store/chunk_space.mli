@@ -1,10 +1,10 @@
 (** Where a chunk lives while its store is being collected.
 
-    Collecting chunks moves the old chunk root out of the way and lets the live
-    set accumulate under the name every writer already uses — see {!Gc} — so
-    during a run a chunk may still be in the space on its way out. The two
-    things that have to know are a read, which needs a key that works, and a
-    presence check, whose [Some] talks a caller out of writing the chunk at all.
+    Collecting chunks moves the old chunk root out of the way and moves the live
+    set back under the name every writer already uses — see {!Gc} — so during a
+    run a chunk may still be in the space on its way out. The two things that
+    have to know are a read, which needs a key that works, and a presence check,
+    whose [Some] talks a caller out of writing the chunk at all.
 
     Nothing here redirects a write, which is the point of collecting in this
     direction: new chunks are written to the surviving space by code that has
@@ -12,14 +12,13 @@
 
 type phase =
   | Opening  (** The chunk root has not been renamed away yet. *)
-  | Marking  (** Live chunks are being given names in the new root. *)
+  | Marking  (** Live chunks are being moved into the new root. *)
   | Abandoning
       (** Like {!Marking}, but keeping everything rather than only what is
           referenced: the collection was called off. *)
-  | Closing  (** The old root is being discarded. *)
-  | Reconciling
-      (** The main is settled; the replicas and backfill targets are being
-          brought into line with it. *)
+  | Closing
+      (** What is left of the old root is the garbage: it is being deleted off
+          the replicas and backfill targets and discarded here. *)
 
 (** Enough to resume: which step to redo, and how far it got. [started] is for
     reporting how long a run that is still open has been open.
@@ -58,9 +57,13 @@ module Make (C : Conf.S) : sig
   val write_run : run -> unit Lwt.t
   val clear_run : unit -> unit Lwt.t
 
-  (** Give a chunk a name in the surviving space. Idempotent, and a no-op when
-      the chunk is not in the space on its way out — so a caller can promote
-      whatever it names without first asking where any of it is. *)
+  (** Move a chunk into the surviving space. Idempotent, and a no-op when the
+      chunk is not in the space on its way out — so a caller can promote
+      whatever it names without first asking where any of it is.
+
+      A move rather than a copy, so what is left behind in the outgoing space is
+      the garbage itself; it also asks nothing of the filesystem beyond
+      [rename]. *)
   val promote : string -> unit Lwt.t
 
   (** {!promote} every chunk a manifest names. **Call this immediately before
@@ -84,10 +87,11 @@ module Make (C : Conf.S) : sig
       chunk says nothing about what references it, and whatever does is a root
       the mark reaches anyway.
 
-      {!head} and this both look in the space on its way out *first* while a run
-      is open, since it holds everything that existed when the run started, so
-      only a chunk written during the run costs a second lookup. A main that can
-      never be mid-run — every object store — is not routed through any of this.
+      {!head} and this both look in the surviving space *first* while a run is
+      open, that being where every write lands and where marking moves each live
+      chunk, so only a chunk marking has not reached yet costs a second lookup.
+      A main that can never be mid-run — every object store — is not routed
+      through any of this.
 
       Raises the way a plain backend read does when the chunk is in no space. *)
   val get : string -> string Lwt.t
