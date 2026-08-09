@@ -145,6 +145,14 @@ let readdir_list path =
       let+ names = Lwt_stream.to_list (Lwt_unix.files_of_directory path) in
       List.filter (fun name -> name <> "." && name <> "..") names)
 
+(* A directory that is not there holds nothing, which is the same answer a caller
+   sweeping a layout wants for one that is. Only [Unix_error] is swallowed: a
+   parse or programming error still propagates. *)
+let readdir_list_quiet path =
+  Lwt.catch
+    (fun () -> readdir_list path)
+    (function Unix.Unix_error _ -> Lwt.return_nil | exn -> Lwt.fail exn)
+
 let is_directory path =
   Lwt.catch
     (fun () ->
