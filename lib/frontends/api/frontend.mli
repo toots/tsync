@@ -52,9 +52,8 @@ end
     calling [run]. *)
 type command = { verb : string; doc : string; run : (module Conf.S) -> unit }
 
-(** [cli_group] defaults to [name]. *)
 (** [spec] is what [tsync configure] prompts for; see {!Field_spec}, which a
-    backend declares its settings with too. *)
+    backend declares its settings with too. [cli_group] defaults to [name]. *)
 val register :
   ?spec:Field_spec.t list ->
   ?cli_group:string ->
