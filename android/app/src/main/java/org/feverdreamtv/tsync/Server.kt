@@ -46,7 +46,10 @@ object Server {
                     (0 until list.length()).map { list.getJSONObject(it).getString("name") }
                 }
                 401 -> error("the secret was refused (or this device's clock is off)")
-                404 -> error("no tsync proxy answering at that URL")
+                // The signature was accepted for a route the server does not
+                // have, so something tsync-shaped is answering and it is older
+                // than this endpoint. Type the domain name instead.
+                404 -> error("this server cannot list its domains — update tsync on it")
                 else -> error("the server answered HTTP $code")
             }
         } finally {
