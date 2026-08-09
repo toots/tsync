@@ -119,5 +119,4 @@ let () =
 
      Http_proxy_frontend.gate := None;
      let+ admitted, _, _ = peak_concurrency ~kind:`Get ~jobs:8 in
-     check "an unconfigured bound lets everything through" (admitted = 8));
-  exit (if !failures = 0 then 0 else 1)
+     check "an unconfigured bound lets everything through" (admitted = 8))

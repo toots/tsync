@@ -96,5 +96,4 @@ let main () =
 let () =
   Lwt_main.run (main ());
   (try Unix.unlink socket_path with _ -> ());
-  (try Unix.rmdir root with _ -> ());
-  exit (if !failures = 0 then 0 else 1)
+  try Unix.rmdir root with _ -> ()

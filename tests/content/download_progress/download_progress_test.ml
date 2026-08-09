@@ -23,11 +23,15 @@ let root = Filename.temp_dir "tsync-progress" ""
 let backend_root = Filename.concat root "backend"
 let failures = ref 0
 
-let check name ok =
+(* [why] runs only on failure, so a passing run prints what the snapshot
+   records. *)
+let check ?why name ok =
   if ok then Printf.printf "%s: ok\n%!" name
   else begin
     incr failures;
-    Printf.printf "%s: FAILED\n%!" name
+    match why with
+      | Some why -> Printf.printf "%s: FAILED -- %s\n%!" name (why ())
+      | None -> Printf.printf "%s: FAILED\n%!" name
   end
 
 module C = struct
@@ -102,6 +106,36 @@ let from_first_report samples =
   let rec drop = function None :: rest -> drop rest | rest -> rest in
   drop samples
 
+(* A gap in the middle means a row was closed and reopened; leading absence only
+   means the operation was not observed yet. *)
+let shape samples =
+  let reported = from_first_report samples in
+  let holes =
+    List.filteri (fun _ x -> Option.is_none x) reported |> List.length
+  in
+  let first_hole =
+    let rec go i = function
+      | [] -> -1
+      | None :: _ -> i
+      | Some _ :: rest -> go (i + 1) rest
+    in
+    go 0 reported
+  in
+  let value = function
+    | Some (d, t) -> Printf.sprintf "%d/%d" d t
+    | None -> "-"
+  in
+  Printf.sprintf
+    "%d sample(s), %d before the first report, %d reported, %d gap(s)%s, first \
+     %s, last %s"
+    (List.length samples)
+    (List.length samples - List.length reported)
+    (List.length (List.filter Option.is_some reported))
+    holes
+    (if first_hole >= 0 then Printf.sprintf " (first at %d)" first_hole else "")
+    (value (match reported with x :: _ -> x | [] -> None))
+    (value (match List.rev reported with x :: _ -> x | [] -> None))
+
 let () =
   Lwt_main.run
     (let key = C.domain_prefix ^ "movie.bin" in
@@ -119,8 +153,10 @@ let () =
      let reported = from_first_report samples in
 
      check "the operation was observed while it ran"
+       ~why:(fun () -> shape samples)
        (List.length (List.filter Option.is_some reported) >= 3);
      check "progress is reported continuously once it starts"
+       ~why:(fun () -> shape samples)
        (List.for_all Option.is_some reported);
      check "the file came out whole" (read_file dst = data);
 
@@ -142,6 +178,7 @@ let () =
      let* samples = sampling key (fun () -> D.assemble_to key ~dst_path:dst2) in
      let reported = from_first_report samples in
      check "a cached file still reports its reassembly"
+       ~why:(fun () -> shape samples)
        (List.length (List.filter Option.is_some reported) >= 3
        && List.for_all Option.is_some reported);
 
@@ -155,6 +192,7 @@ let () =
      in
      let reported = from_first_report samples in
      check "a staged file with nothing to fetch is still reported"
+       ~why:(fun () -> shape samples)
        (List.length (List.filter Option.is_some reported) >= 3
        && List.for_all Option.is_some reported);
      check "the staged file came out whole" (read_file dst3 = data);
@@ -174,10 +212,10 @@ let () =
      let reported = from_first_report samples in
      (* Whichever finishes first must not take the row away from the other. *)
      check "overlapping materializations keep one shared row"
+       ~why:(fun () -> shape samples)
        (List.for_all Option.is_some reported);
      check "both copies came out whole"
        (read_file dst4 = data && read_file dst5 = data);
 
      Lwt.return_unit);
-  ignore (Sys.command (Printf.sprintf "rm -rf %s" (Filename.quote root)));
-  exit (if !failures = 0 then 0 else 1)
+  ignore (Sys.command (Printf.sprintf "rm -rf %s" (Filename.quote root)))

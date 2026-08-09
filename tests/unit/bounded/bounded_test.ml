@@ -98,5 +98,4 @@ let () =
        Lwt_bounded.map_with t (fun _ -> Lwt.pause ()) (List.init 50 Fun.id)
      in
      check "an unbounded queue serves everyone" (Lwt_bounded.in_flight t = 0);
-     check "and leaves nothing queued" (Lwt_bounded.waiting t = 0));
-  exit (if !failures = 0 then 0 else 1)
+     check "and leaves nothing queued" (Lwt_bounded.waiting t = 0))
