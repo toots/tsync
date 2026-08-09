@@ -35,7 +35,12 @@ module Conf_of (B : Backend.S) : Conf.S = struct
   let cursor_key = "tsync/testdom/cursor"
   let shares_prefix = "tsync/shares/"
   let store = (module B : Backend.S)
-  let members = [Backend.member ~role:"main" ~name:"local" store]
+
+  (* [local_path] is not decoration here: promoting is a rename within the store's
+     own tree, so it is the path and not the module that does it. {!Gc} refuses to
+     open a run on a main without one, which is what keeps the two in step. *)
+  let members =
+    [Backend.member ~role:"main" ~name:"local" ~local_path:store_dir store]
   let cache_root = root ^ "/cache"
   let data_dir = root ^ "/data"
   let socket_path = ""
@@ -62,8 +67,10 @@ module Frozen_space = Chunk_space.Make (Frozen)
 let case name = Printf.printf "\n=== %s\n" name
 let step fmt = Printf.printf ("  " ^^ fmt ^^ "\n")
 
-(* A chunk key is "<h1>-<h2>", 16 hex each. Only its first three characters
-   matter here, being the shard it lands in. *)
+(* A chunk key is "<h1>-<h2>", 16 hex each. Every one of these lands in shard
+   [000], which is what this file wants: it is about the two spaces, and keeping
+   the chunks in one shard means a path here is wrong for a reason worth
+   reading. *)
 let ck n = Printf.sprintf "%016x-%016x" n n
 
 module Store =
@@ -123,18 +130,18 @@ let () =
      step "promote gives it a name in the surviving space: %b" (still <> None);
      let* body = Store.get ~key:(Space.key going) () in
      step "and the same bytes: %S" body;
-     (* The load-bearing property of the whole scheme: a second *name*, not a
-        second copy. It is why marking a multi-terabyte store costs no disk and no
-        data movement, and why discarding the old space reclaims anything at all —
-        an inode goes when its last name does. A driver that quietly copied
-        instead would double the store during a collection and still be green on
-        every other check here. *)
-     let inode path = (Unix.stat path).Unix.st_ino in
+     (* The load-bearing property of the whole scheme: the chunk is *moved*, not
+        copied. It is what leaves the space on its way out holding the garbage and
+        nothing else, so closing deletes by name instead of working the difference
+        out per shard — and it is why marking a multi-terabyte store costs no disk
+        and no data movement. A driver that copied instead would double the store
+        during a collection and still be green on every other check here, so the
+        outgoing name is checked to be gone rather than the bytes to be
+        present. *)
      let shard = Chunk_layout.relative_path going in
-     step "one inode, two names: %b"
-       (inode (Filename.concat store_dir (chunk_prefix ^ shard))
-       = inode (Filename.concat store_dir (from_prefix ^ shard)));
-     step "and that name is the only thing that was added: nlink=%d"
+     let exists p = Sys.file_exists (Filename.concat store_dir p) in
+     step "the outgoing name is gone: %b" (not (exists (from_prefix ^ shard)));
+     step "one name, one link: nlink=%d"
        (Unix.stat (Filename.concat store_dir (chunk_prefix ^ shard)))
          .Unix.st_nlink;
      let* () = Space.promote going in
@@ -147,7 +154,7 @@ let () =
      let* () = Space.promote absent in
      step "promoting one that is in neither space is a no-op";
      let* () = Space.promote_all [live; going; absent] in
-     step "promote_all over a mixture is a no-op for all but the moved one";
+     step "promote_all over a mixture moves what is left and leaves the rest";
 
      case "reading a body still works once the discarded space is gone";
      let* () = Space.clear_run () in

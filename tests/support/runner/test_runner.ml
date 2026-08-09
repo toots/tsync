@@ -268,17 +268,10 @@ let alias_ref s =
   else s
 
 (* Counts, not bytes: byte totals are the test's own payload sizes and would pin
-   the snapshot to them without saying anything about the behaviour. Targets are
-   listed only when one needed something, so a domain with a single store prints
-   one line. *)
+   the snapshot to them without saying anything about the behaviour. *)
 let print_gc (s : Gc.stats) =
   Printf.printf "  gc kept %d chunk(s), reclaimed %d\n" s.Gc.chunks_promoted
-    s.chunks_reclaimed;
-  List.iter
-    (fun (m : Gc.member_stats) ->
-      Printf.printf "  gc %s: %d deleted, %d filled\n" m.Gc.name m.deleted
-        m.uploaded)
-    s.members
+    s.chunks_reclaimed
 
 (* Verbatim but for the non-deterministic parts: wall-clock mtimes, journal-key
    cursors, and the filesystem-order [files]/[dirs] arrays. etags and keys are
@@ -645,7 +638,10 @@ let setup_client (module C : Conf.S) root staging_prefix =
     | GcAbort ->
         let module G = Gc.Make (C) in
         let+ s = G.abort () in
-        Printf.printf "  gc abandoned, %d chunk(s) kept\n" s.Gc.chunks_promoted
+        (* Moved back, not kept: what marking had already moved across is kept
+           too, so this is the count that shrinks as a mark gets further along. *)
+        Printf.printf "  gc abandoned, %d chunk(s) moved back\n"
+          s.Gc.chunks_promoted
     | Drain ->
         let rec wait () =
           if Sq.pending () = 0 then Lwt.return_unit

@@ -85,19 +85,19 @@
   (action
    (diff gc_cost.expected gc_cost.output))))
 
-(subdir backends/gc_reconcile
+(subdir backends/gc_targets
  (alias
   (name default)
-  (deps gc_reconcile.exe))
+  (deps gc_targets.exe))
  (rule
   (alias runtest)
-  (target gc_reconcile.output)
+  (target gc_targets.output)
   (action
-   (with-stdout-to gc_reconcile.output (ignore-stderr (run ./gc_reconcile.exe)))))
+   (with-stdout-to gc_targets.output (ignore-stderr (run ./gc_targets.exe)))))
  (rule
   (alias runtest)
   (action
-   (diff gc_reconcile.expected gc_reconcile.output))))
+   (diff gc_targets.expected gc_targets.output))))
 
 (subdir backends/gcs
  (alias

@@ -16,12 +16,12 @@
 === promoting
   promote gives it a name in the surviving space: true
   and the same bytes: "going"
-  one inode, two names: true
-  and that name is the only thing that was added: nlink=2
+  the outgoing name is gone: true
+  one name, one link: nlink=1
   promoting twice is not an error
   promoting one that is only in the surviving space is a no-op
   promoting one that is in neither space is a no-op
-  promote_all over a mixture is a no-op for all but the moved one
+  promote_all over a mixture moves what is left and leaves the rest
 
 === reading a body still works once the discarded space is gone
   get(promoted) = "going"

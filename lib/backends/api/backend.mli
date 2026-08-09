@@ -31,9 +31,11 @@ type caps = {
           handing them all to storage. A local store answers from the device
           under it; an http-proxy asks its peer. *)
   gc : bool;
-      (** Whether this store can collect its own unreferenced chunks, which
-          takes a same-store link and a directory rename — see {!Chunk_space} —
-          that a filesystem has and an object store does not.
+      (** Whether this store can collect its own unreferenced chunks, which takes
+          renaming a directory and renaming within it — see {!Chunk_space} —
+          that a filesystem has and an object store does not. Nothing beyond
+          [rename] is asked of it: a store with no hard links to give collects
+          the same way.
 
           Asked of a domain's main directly rather than of the composite: it
           describes one store's machinery, not the domain's. *)

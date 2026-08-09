@@ -15,7 +15,7 @@
    Tsync_conf
    -open
    Tsync_local_backend))
- (name gc_reconcile)
+ (name gc_targets)
  (libraries
   tsync_ops
   tsync_store

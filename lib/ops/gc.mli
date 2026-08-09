@@ -6,30 +6,30 @@
 
     {b How it works.} A run moves the chunk root aside to [chunks.from/] and
     lets the live set accumulate under [chunks/], the name every writer already
-    uses; marking gives each chunk a live root names a second hard link under
-    [chunks/], and closing discards [chunks.from/] along with the inodes that
-    never earned one, so reclaiming is the link count's doing rather than a
-    delete's.
+    uses; marking then {i moves} each chunk a live root names back into
+    [chunks/]. So what is left in [chunks.from/] once marking is done is the
+    garbage itself, named rather than inferred, and closing has only to delete
+    it.
 
     Writes need no cooperation: a client that has never heard of a run still
     writes to the space that survives. The one thing a writer must do is
     {!Chunk_space.promote_all} before publishing a manifest, which
     {!Remote.publish} does.
 
-    {b Where it runs.} Only on a main that answers {!Backend.caps.gc}, a rename
-    and a link within the store being what the whole scheme rests on; an s3, gcs
-    or http-proxy main is refused rather than half-served.
+    {b Where it runs.} Only on a main that answers {!Backend.caps.gc}, a
+    directory rename within the store being the whole of what this rests on; an
+    s3, gcs or http-proxy main is refused rather than half-served.
 
-    {b The copies.} Replicas and backfill targets are never renamed: once the
-    main has settled each is walked shard by shard — the target's own shards,
-    since only it knows what it holds — and whatever the main no longer has is
-    deleted. A replica is additionally filled where it falls short, being meant
-    to be a complete copy; a backfill target is not, being incomplete by design
-    and having its own queue for that.
+    {b The copies.} Replicas and backfill targets are never renamed. Closing
+    deletes off each of them the same keys it discards here, batched by key
+    count across as many shards as it takes to fill one — the copies before the
+    main, so an interruption leaves keys to delete again rather than keys
+    nothing will ever name.
 
-    Filling a replica is the only part that sends bytes anywhere, so it goes out
-    concurrently and can be interrupted between chunks; a shard stopped part-way
-    is simply done again, reconciling one being idempotent.
+    What this does {i not} do is fill a copy that has fallen behind, or find
+    chunks a copy holds that the main never had. That is {!Mirror.resync} —
+    [tsync mirror] — and asking for it here meant walking every shard there
+    could be on every target, whatever the store held.
 
     {b Pace.} Driven a step at a time so this can run without taking the machine
     over, {!run} being the impatient version of that loop. A run left open
@@ -46,20 +46,16 @@ type outcome =
       (** Stopped at a boundary with the run still open. The next call continues
           from [cursor]. *)
 
-(** What reconciling one copy came to. [uploaded] is always zero for a backfill
-    target: being incomplete is its normal condition, so a gap there says
-    nothing and is left to its own queue. *)
-type member_stats = { name : string; deleted : int; uploaded : int }
-
+(** No per-copy figures: every copy is sent the same keys, so a count against
+    each would be one number repeated. Which copies were talked to is logged
+    when closing starts, and a copy that refused a delete raises rather than
+    being tallied. *)
 type stats = {
   outcome : outcome;
   roots_marked : int;
   chunks_promoted : int;
   chunks_reclaimed : int;
   bytes_reclaimed : int;
-  members : member_stats list;
-      (** One entry per replica or backfill target that needed anything, in
-          configuration order. *)
 }
 
 (** No main can collect: every one is an object store, or there is none. Carries
@@ -84,9 +80,10 @@ module Make (C : Conf.S) : sig
       done wants {!run}.
 
       A unit of work is one namespace while marking — a folder's worth of
-      manifests, or of versions — and one shard while closing or reconciling.
-      They are not the same size, so a caller pacing itself should think in
-      seconds spent rather than in units done. *)
+      manifests, or of versions — and one shard while closing, though closing
+      pools several shards into one delete. They are not the same size, so a
+      caller pacing itself should think in seconds spent rather than in units
+      done. *)
 
   type session
 
@@ -98,11 +95,16 @@ module Make (C : Conf.S) : sig
       possible. The work is I/O bound, so this and not the batch size decides
       how hard a step leans on the device.
 
+      [delete_batch] is how many keys go into one delete against a copy
+      (default 1000, which is what s3 and gcs both cap a bulk delete at). Raise
+      it for a store that takes more, lower it for one that chokes.
+
       [keep] makes this an abandonment rather than a collection: see {!abort}.
 
       Raises {!Unsupported} when no main can collect, {!Busy} when a collection
       is already under way. *)
-  val start : ?concurrency:int -> ?keep:bool -> unit -> session Lwt.t
+  val start :
+    ?concurrency:int -> ?delete_batch:int -> ?keep:bool -> unit -> session Lwt.t
 
   (** Do up to [units] units (default 1) and report whether any remain. Saves
       enough as it goes that dropping the session — or the process — loses at
@@ -142,26 +144,18 @@ module Make (C : Conf.S) : sig
       steps: a unit can run for a while, and a limit only honoured at the end of
       a batch of them is not much of a limit.
 
-      All three progress callbacks are throttled to about one call a second and
-      carry running totals rather than per-item deltas. [on_reconcile] names the
-      target it is talking about and fires while a replica is being filled, that
-      being the slowest thing a collection does. *)
+      Both progress callbacks are throttled to about one call a second and carry
+      running totals rather than per-item deltas. *)
   val run :
     ?budget:float ->
     ?units:int ->
     ?pause:float ->
     ?concurrency:int ->
+    ?delete_batch:int ->
     ?keep:bool ->
     ?on_open:(unit -> unit) ->
     ?on_mark:(namespaces:int -> total:int -> roots:int -> promoted:int -> unit) ->
     ?on_close:(shards:int -> reclaimed:int -> unit) ->
-    ?on_reconcile:
-      (name:string ->
-      shards:int ->
-      total:int ->
-      deleted:int ->
-      uploaded:int ->
-      unit) ->
     unit ->
     stats Lwt.t
 
@@ -183,13 +177,6 @@ module Make (C : Conf.S) : sig
     ?on_open:(unit -> unit) ->
     ?on_mark:(namespaces:int -> total:int -> roots:int -> promoted:int -> unit) ->
     ?on_close:(shards:int -> reclaimed:int -> unit) ->
-    ?on_reconcile:
-      (name:string ->
-      shards:int ->
-      total:int ->
-      deleted:int ->
-      uploaded:int ->
-      unit) ->
     unit ->
     stats Lwt.t
 

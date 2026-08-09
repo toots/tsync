@@ -1,6 +1,6 @@
 open Lwt.Syntax
 
-type phase = Opening | Marking | Abandoning | Closing | Reconciling
+type phase = Opening | Marking | Abandoning | Closing
 type run = { phase : phase; started : float; cursor : string }
 
 let string_of_phase = function
@@ -8,14 +8,19 @@ let string_of_phase = function
   | Marking -> "marking"
   | Abandoning -> "abandoning"
   | Closing -> "closing"
-  | Reconciling -> "reconciling"
 
 let phase_of_string = function
   | "opening" -> Some Opening
   | "marking" -> Some Marking
   | "abandoning" -> Some Abandoning
   | "closing" -> Some Closing
-  | "reconciling" -> Some Reconciling
+  (* A marker an older binary left behind, when deleting on the copies was a
+     phase of its own after this one. Read as [Closing] rather than as garbage:
+     an unreadable marker reads as an idle store, which would strand
+     [chunks.from/] on disk for good. Nothing is left to do by then — the old
+     space is already discarded — so the close pass finds it empty and
+     finishes. *)
+  | "reconciling" -> Some Closing
   | _ -> None
 
 let to_string { phase; started; cursor } =
@@ -75,6 +80,15 @@ module Make (C : Conf.S) = struct
   let main () =
     match Lazy.force main_backend with
       | Some m -> Some m.Backend.backend
+      | None -> None
+
+  (* Promotion is a rename between two directories of one filesystem, so it
+     needs the path rather than the store: the same reason {!Gc} opens and closes
+     a run through [Lwt_unix] on [local_path] instead of through a backend. A
+     main without one cannot be mid-run — {!Gc} refuses to start there. *)
+  let local_root () =
+    match Lazy.force main_backend with
+      | Some m -> m.Backend.local_path
       | None -> None
 
   (* Whether the main can be mid-run at all, memoized so concurrent lookups share
@@ -143,16 +157,17 @@ module Make (C : Conf.S) = struct
       Lwt.return !running
     else refresh_order ()
 
-  (* The keys on the main that could hold [chunk_key], in the order worth trying:
-     while a run is open the space on its way out holds everything that existed
-     when the run started, so one lookup usually does it and only a chunk written
-     during the run needs the second.
+  (* The keys on the main that could hold [chunk_key], in the order worth trying.
+     The surviving space first, which is where marking moves each live chunk and
+     where every write has always landed: only a live chunk marking has not
+     reached yet costs the second lookup, and once marking is done nothing does.
 
+     Order is a cost, not a correctness matter — both names are tried either way.
      Believing the cache is what buys the single lookup, and nothing believes it
      in the direction where being wrong would matter — see {!missed}. *)
   let candidates chunk_key =
     let+ running = probably_running () in
-    if running then [from_key chunk_key; key chunk_key] else [key chunk_key]
+    if running then [key chunk_key; from_key chunk_key] else [key chunk_key]
 
   (* One more place to look once every candidate has missed. A store the cache
      called idle has only been asked about one space and the cache may be behind
@@ -169,25 +184,40 @@ module Make (C : Conf.S) = struct
       let+ opened = refresh_order () in
       if opened then Some (from_key chunk_key) else None
 
-  (* The link itself answers where the chunk is: it succeeds, or says [EEXIST]
-     because the chunk is across already, or [ENOENT] because there is nothing to
-     move. Asking first with a [head_opt] would double the cost of the one
-     operation a collection performs millions of times.
+  (* A move, not a copy: what stays behind in the space on its way out is then
+     the garbage itself, which is what lets a collection delete by name instead
+     of working the difference out again per shard. It also drops the one
+     filesystem requirement a link imposed — [Local_backend.copy] answers a
+     filesystem with no links to give by rewriting the body, which on such a
+     store turns a collection into a rewrite of the whole live set.
 
-     [ENOENT] arriving as a raw Unix error rather than in a driver's own
-     vocabulary is not an oversight to tidy: promotion only ever does anything on
-     a main that answers {!Backend.caps.gc}, which is to say a filesystem, which
-     is the driver that raises it. *)
+     The rename itself answers where the chunk is, no [head_opt] first: doubling
+     the cost of the one operation a collection performs millions of times to
+     learn what the call is about to say anyway.
+
+     [ENOENT] means either name — a chunk already across, or a shard directory
+     not made yet — so the destination is made sure of and the rename tried once
+     more; a second [ENOENT] is the source's and the chunk is already where it
+     belongs. Promotion stays idempotent either way, which is what a resumed mark
+     rests on. Making the parent first instead would be a [stat] per chunk to
+     learn what is almost always already true. *)
   let promote chunk_key =
-    match main () with
+    match local_root () with
       | None -> Lwt.return_unit
-      | Some (module M : Backend.S) ->
-          Lwt.catch
-            (fun () ->
-              M.copy ~src_key:(from_key chunk_key) ~dst_key:(key chunk_key) ())
-            (function
-              | Unix.Unix_error (Unix.ENOENT, _, _) -> Lwt.return_unit
-              | exn -> Lwt.fail exn)
+      | Some root ->
+          let src = Filename.concat root (from_key chunk_key)
+          and dst = Filename.concat root (key chunk_key) in
+          let rec attempt ~parent_made =
+            Lwt.catch
+              (fun () -> Lwt_unix_retry.rename src dst)
+              (function
+                | Unix.Unix_error (Unix.ENOENT, _, _) when not parent_made ->
+                    let* () = Fs_util.ensure_parent dst in
+                    attempt ~parent_made:true
+                | Unix.Unix_error (Unix.ENOENT, _, _) -> Lwt.return_unit
+                | exn -> Lwt.fail exn)
+          in
+          attempt ~parent_made:false
 
   (* Called immediately before a manifest is published, and this — not the
      presence check below — is what makes a run safe.
