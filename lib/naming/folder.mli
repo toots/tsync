@@ -15,8 +15,8 @@
 val root_id : string
 
 (** Where a deleted folder's marker is moved: unreachable from the root, so the
-    subtree vanishes from listings and resync, and [expire] drops it past a grace
-    period — after which [gc] reclaims the chunks it was holding. *)
+    subtree vanishes from listings and resync, and [expire] drops it past a
+    grace period — after which [gc] reclaims the chunks it was holding. *)
 val trash_id : string
 
 (** A fresh folder id, minted at mkdir. *)
@@ -25,7 +25,6 @@ val new_id : unit -> string
 (** Manifests-relative key of [name] within [folder_id]'s namespace. Fixed
     length and filesystem-safe whatever the real name is. *)
 val child_key : folder_id:string -> string -> string
-
 
 type marker = { name : string; id : string }
 

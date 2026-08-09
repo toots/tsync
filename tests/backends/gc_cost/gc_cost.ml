@@ -36,9 +36,11 @@ let replica_ops = counted ()
 
 (* Passes everything through and keeps score. [markers] counts writes of the run
    marker specifically: on a copy, any at all is one too many. *)
-module Count (B : Backend.S) (T : sig
-  val t : tally
-end) : Backend.S = struct
+module Count
+    (B : Backend.S)
+    (T : sig
+      val t : tally
+    end) : Backend.S = struct
   include B
 
   let list_prefix ?max_keys ~prefix () =
@@ -147,15 +149,14 @@ let () =
                ~data:"a chunk!" ()
            in
            let m =
-             Manifest.make ~name:"f"
-               ~h1:(String.make 16 '0')
-               ~h2:(String.make 16 '0')
-               ~size:8L ~chunk_size:8
+             Manifest.make ~name:"f" ~h1:(String.make 16 '0')
+               ~h2:(String.make 16 '0') ~size:8L ~chunk_size:8
                ~chunks:[Manifest.entry_of_key ~index:0 ~size:8 (ck n)]
                ~mtime:0.
            in
            Main.put
-             ~key:(Printf.sprintf "%sfolder%02d/deadbeefdeadbeef" domain_prefix n)
+             ~key:
+               (Printf.sprintf "%sfolder%02d/deadbeefdeadbeef" domain_prefix n)
              ~data:(Manifest.to_string ~name:"f" m)
              ())
          (List.init folders (fun i -> i + 1))
@@ -165,7 +166,8 @@ let () =
      main_ops.lists <- 0;
      let* s = G.start () in
      step "listings of the store during start: %d" main_ops.lists;
-     step "  (the work is found by reading two directories, so this is 0 however";
+     step
+       "  (the work is found by reading two directories, so this is 0 however";
      step "   many namespaces there are; enumerating up front would make it %d)"
        folders;
      step "namespaces to mark: %d" (G.total s);
@@ -285,7 +287,9 @@ let () =
                  (Filename.quote
                     (Filename.concat from_dir (Chunk_layout.relative_path k))))))
        orphans;
-     step "planted %d chunk(s) only the old space has, in a shard the new one holds"
+     step
+       "planted %d chunk(s) only the old space has, in a shard the new one \
+        holds"
        (List.length orphans);
      let* () = G.release s in
      let* s = G.start ~keep:true () in

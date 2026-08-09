@@ -10,7 +10,6 @@
 
 let root = "/tmp/tsync-chunk-space-test"
 let store_dir = root ^ "/store"
-
 let chunk_prefix = "tsync/testdom/chunks/"
 let from_prefix = Chunk_space.from_prefix ~chunk_prefix
 let marker_key = Chunk_space.marker_key ~chunk_prefix
@@ -48,7 +47,9 @@ module Conf_of (B : Backend.S) : Conf.S = struct
   let read_only = false
 end
 
-module Collectable = Conf_of ((val Local_backend.make ~root:store_dir : Backend.S))
+module Collectable =
+  Conf_of ((val Local_backend.make ~root:store_dir : Backend.S))
+
 module Space = Chunk_space.Make (Collectable)
 module Frozen = Conf_of (Uncollectable)
 module Frozen_space = Chunk_space.Make (Frozen)
@@ -64,8 +65,7 @@ module Store = (val Local_backend.make ~root:store_dir : Backend.S)
 
 let () =
   ignore
-    (Sys.command
-       (Printf.sprintf "rm -rf %s && mkdir -p %s" root store_dir));
+    (Sys.command (Printf.sprintf "rm -rf %s && mkdir -p %s" root store_dir));
   Lwt_main.run
     (let open Lwt.Syntax in
      let live = ck 1 and going = ck 2 and absent = ck 3 in
@@ -73,7 +73,8 @@ let () =
         the state a half-marked collection is in. *)
      let* () = Store.put ~key:(Space.key live) ~data:"live" () in
      let* () =
-       Store.put ~key:(from_prefix ^ Chunk_layout.relative_path going)
+       Store.put
+         ~key:(from_prefix ^ Chunk_layout.relative_path going)
          ~data:"going" ()
      in
 

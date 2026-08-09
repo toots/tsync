@@ -146,7 +146,7 @@ let make ~root : (module Backend.S) =
        and let a second [ENOENT] be the missing source it then is. *)
     let copy ~src_key ~dst_key () =
       if is_dir_key src_key then mkdir_p (resolve dst_key)
-      else
+      else (
         let src = resolve src_key and dst = resolve dst_key in
         let body () =
           let* data = read_file src in
@@ -171,7 +171,7 @@ let make ~root : (module Backend.S) =
                   body ()
               | exn -> Lwt.fail exn)
         in
-        attempt ~parent_made:false
+        attempt ~parent_made:false)
 
     let list_prefix ?max_keys ~prefix () =
       let base = resolve prefix in

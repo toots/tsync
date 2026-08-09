@@ -1,7 +1,6 @@
 open Lwt.Syntax
 
 type outcome = Completed | Suspended of { phase : string; cursor : string }
-
 type member_stats = { name : string; deleted : int; uploaded : int }
 
 type stats = {
@@ -150,7 +149,7 @@ module Make (C : Conf.S) = struct
     if !held then
       let* exn = busy () in
       Lwt.fail exn
-    else
+    else (
       let path = lock_path root in
       let* () = Fs_util.ensure_parent path in
       let* fd = Lwt_unix.openfile path [Unix.O_RDWR; Unix.O_CREAT] 0o644 in
@@ -167,7 +166,7 @@ module Make (C : Conf.S) = struct
               Lwt.fail exn
           | exn ->
               let* () = Lwt_unix.close fd in
-              Lwt.fail exn)
+              Lwt.fail exn))
 
   (* Closing the descriptor drops the lock. Worth doing even though exiting would:
      a process that collects twice, or does anything else afterwards, must not go
@@ -484,6 +483,7 @@ module Make (C : Conf.S) = struct
       | Keep _ -> "abandoning"
       | Close _ -> "closing"
       | Reconcile _ -> "reconciling"
+
   let done_ s = s.done_
   let total s = s.total
   let release s = drop_lock s.lock
@@ -572,7 +572,7 @@ module Make (C : Conf.S) = struct
        is redone, an interrupted mark resumes at its cursor, an interrupted close
        at its shard. Nothing here is ambiguous, which is why each phase is
        recorded before the step it names rather than after. *)
-    match phase with
+      match phase with
       (* Abandoning first, and its override before any phase it overrides: a
          guard placed after the constructors it is meant to take precedence over
          never fires for them. *)
@@ -592,8 +592,8 @@ module Make (C : Conf.S) = struct
       | _ when keep ->
           let* shards = from_shards root in
           Log.info
-            "gc: abandoning the collection of %s, keeping everything left in %d \
-             shard(s)"
+            "gc: abandoning the collection of %s, keeping everything left in \
+             %d shard(s)"
             C.domain_name (List.length shards);
           let s = fresh (Keep shards) (List.length shards) in
           let+ () = save s Chunk_space.Abandoning "" in
@@ -621,18 +621,18 @@ module Make (C : Conf.S) = struct
           let s = fresh (Mark []) 0 in
           let* () = save s Chunk_space.Opening "" in
           let* () = open_space root in
-            (* Enumerated before the phase is recorded as [Marking], so a
+          (* Enumerated before the phase is recorded as [Marking], so a
                [--status] during it does not claim to be marking while it is still
                working out what to mark. *)
-            let* found = namespaces root in
-            let pending =
-              List.filter (fun n -> String.compare n cursor > 0) found
-            in
-            let* () = save s Chunk_space.Marking cursor in
-            Log.info "gc: %d namespace(s) to mark" (List.length pending);
-            s.work <- Mark pending;
-            s.total <- List.length pending;
-            Lwt.return s
+          let* found = namespaces root in
+          let pending =
+            List.filter (fun n -> String.compare n cursor > 0) found
+          in
+          let* () = save s Chunk_space.Marking cursor in
+          Log.info "gc: %d namespace(s) to mark" (List.length pending);
+          s.work <- Mark pending;
+          s.total <- List.length pending;
+          Lwt.return s
 
   (* Marking one root: read it, and give every chunk it names a link under the
      surviving root. The links go out concurrently within the root, on the same
@@ -655,7 +655,8 @@ module Make (C : Conf.S) = struct
        A root is small enough that once a second means it. *)
     ignore
       (throttled (fun () ->
-           Log.debug "gc: marked %d/%d namespace(s), %d root(s), %d chunk(s) kept"
+           Log.debug
+             "gc: marked %d/%d namespace(s), %d root(s), %d chunk(s) kept"
              s.done_ s.total s.roots_marked s.chunks_promoted;
            s.on_mark ~namespaces:s.done_ ~total:s.total ~roots:s.roots_marked
              ~promoted:s.chunks_promoted));
@@ -703,7 +704,7 @@ module Make (C : Conf.S) = struct
 
   (* Accumulated per target across every shard, kept in configuration order. *)
   let record_member s name ~deleted ~uploaded =
-    if deleted > 0 || uploaded > 0 then
+    if deleted > 0 || uploaded > 0 then (
       let prior =
         List.find_opt (fun (ms : member_stats) -> ms.name = name) s.tallies
       in
@@ -711,11 +712,12 @@ module Make (C : Conf.S) = struct
         Option.value prior ~default:{ name; deleted = 0; uploaded = 0 }
       in
       s.tallies <-
-        { before with
+        {
+          before with
           deleted = before.deleted + deleted;
           uploaded = before.uploaded + uploaded;
         }
-        :: List.filter (fun (ms : member_stats) -> ms.name <> name) s.tallies
+        :: List.filter (fun (ms : member_stats) -> ms.name <> name) s.tallies)
 
   (* Closing one shard, cursor saved per shard: a shard is a large enough unit
      that one small write against it is nothing. *)
@@ -816,7 +818,8 @@ module Make (C : Conf.S) = struct
       (fun n ->
         Lwt.catch
           (fun () ->
-            Lwt_unix_retry.rename (Filename.concat src_dir n)
+            Lwt_unix_retry.rename
+              (Filename.concat src_dir n)
               (Filename.concat dst_dir n))
           (function
             | Unix.Unix_error (Unix.ENOENT, _, _) -> Lwt.return_unit
@@ -931,7 +934,9 @@ module Make (C : Conf.S) = struct
      at the end: a target being filled is the slowest thing a collection does and
      the one a caller most wants to watch. *)
   let tally_of s name =
-    match List.find_opt (fun (ms : member_stats) -> ms.name = name) s.tallies with
+    match
+      List.find_opt (fun (ms : member_stats) -> ms.name = name) s.tallies
+    with
       | Some ms -> (ms.deleted, ms.uploaded)
       | None -> (0, 0)
 
@@ -1163,11 +1168,11 @@ module Make (C : Conf.S) = struct
               batch
           in
           let* () =
-            if !unfinished = [] then save s Chunk_space.Reconciling (last_of batch)
+            if !unfinished = [] then
+              save s Chunk_space.Reconciling (last_of batch)
             else Lwt.return_unit
           in
-          s.work <-
-            Reconcile (List.sort String.compare !unfinished @ rest);
+          s.work <- Reconcile (List.sort String.compare !unfinished @ rest);
           Lwt.return `More
 
   (* {1 Driving it} *)
@@ -1176,8 +1181,8 @@ module Make (C : Conf.S) = struct
       ?(on_open = fun () -> ())
       ?(on_mark = fun ~namespaces:_ ~total:_ ~roots:_ ~promoted:_ -> ())
       ?(on_close = fun ~shards:_ ~reclaimed:_ -> ())
-      ?(on_reconcile = fun ~name:_ ~shards:_ ~total:_ ~deleted:_ ~uploaded:_ ->
-        ()) () =
+      ?(on_reconcile =
+        fun ~name:_ ~shards:_ ~total:_ ~deleted:_ ~uploaded:_ -> ()) () =
     let began = Unix.gettimeofday () in
     let deadline =
       match budget with
@@ -1199,8 +1204,7 @@ module Make (C : Conf.S) = struct
               (* The budget and what it actually took, because "out of budget"
                  alone cannot be checked against anything: a limit honoured to the
                  second and one overshot twentyfold read identically. *)
-              Log.info
-                "gc: %.0fs budget spent in %.0fs while %s; run left open"
+              Log.info "gc: %.0fs budget spent in %.0fs while %s; run left open"
                 (Option.value budget ~default:0.)
                 (Unix.gettimeofday () -. began)
                 (phase s);

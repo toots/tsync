@@ -16,7 +16,6 @@ let new_id = Id.short
    of its leaf name, matching the chunk-key convention. Fixed length and
    filesystem-safe regardless of the real name. *)
 let hash_name name = Xxhash.hash_hex name 0 ^ "-" ^ Xxhash.hash_hex name 1
-
 let child_key ~folder_id name = folder_id ^ "/" ^ hash_name name
 
 type marker = { name : string; id : string }

@@ -17,9 +17,7 @@ module Make (C : Conf.S) = struct
       | [] -> Lwt.return_unit
       | keys ->
           let batch = List.filteri (fun i _ -> i < delete_batch) keys in
-          let rest =
-            List.filteri (fun i _ -> i >= delete_batch) keys
-          in
+          let rest = List.filteri (fun i _ -> i >= delete_batch) keys in
           let* () = B.delete_multi batch in
           let done_ = done_ + List.length batch in
           Log.debug "expire: deleted %d %s object(s)" done_ name;
@@ -38,8 +36,9 @@ module Make (C : Conf.S) = struct
       (fun acc _rel entry -> Lwt.return (entry.Inode_tree.bkey :: acc))
       acc
 
-  let expire ?(on_list = fun ~name:_ -> ()) ?(on_scan = fun ~name:_ ~objects:_ ->
-      ()) ?(on_delete = fun ~name:_ ~deleted:_ -> ()) ~cutoff () =
+  let expire ?(on_list = fun ~name:_ -> ())
+      ?(on_scan = fun ~name:_ ~objects:_ -> ())
+      ?(on_delete = fun ~name:_ ~deleted:_ -> ()) ~cutoff () =
     let cutoff_ns = Int64.of_float (cutoff *. 1e9) in
     (* Phase 0: empty trashed folders past the cutoff, whole subtree at a time,
        so nothing in them counts as a reference any more. *)
