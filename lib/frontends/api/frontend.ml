@@ -70,15 +70,27 @@ let binding_concurrency bindings =
       acc + C.max_uploads + C.max_downloads)
     0 bindings
 
+(* A frontend that later hears what its storage absorbs sets the size twice.
+   Worded apart so the second line reads as the correction it is rather than as
+   the first one logged again. *)
+let pool_size_set = ref 0
+
 let set_pool_size n =
   Lwt_unix.set_pool_size n;
-  Log.debug "blocking thread pool: at most %d" n
+  pool_size_set := n
 
 let cap_blocking_pool ~concurrency =
   use_libev ();
-  set_pool_size (pool_size concurrency)
+  let n = pool_size concurrency in
+  set_pool_size n;
+  Log.debug "blocking thread pool: at most %d" n
 
-let size_blocking_pool ~concurrency = set_pool_size (pool_size concurrency)
+let size_blocking_pool ~concurrency =
+  let n = pool_size concurrency in
+  if n <> !pool_size_set then begin
+    set_pool_size n;
+    Log.debug "blocking thread pool: narrowed to %d" n
+  end
 
 let run_forked f items =
   let rec go child_pids = function

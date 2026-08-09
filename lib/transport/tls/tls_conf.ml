@@ -32,16 +32,25 @@ let available () =
     (fun b -> if is_available b then Some (to_string b) else None)
     [Openssl; Native]
 
+(* Reported from here rather than by the caller: the config's backend is applied
+   when a domain is built, long after startup, so anything logging the choice
+   earlier reports conduit's default and not what will be used. *)
+let logged = ref None
+
 let set backend =
   if not (is_available backend) then
     failwith
       (Printf.sprintf "TLS backend %S is not available (built: %s)"
          (to_string backend)
          (String.concat ", " (available ())));
-  Conduit_lwt_unix.tls_library :=
-    match backend with
-      | Native -> Conduit_lwt_unix.Native
-      | Openssl -> Conduit_lwt_unix.OpenSSL
+  (Conduit_lwt_unix.tls_library :=
+     match backend with
+       | Native -> Conduit_lwt_unix.Native
+       | Openssl -> Conduit_lwt_unix.OpenSSL);
+  if !logged <> Some backend then
+    Log.debug "TLS backend: %s (available: %s)" (to_string backend)
+      (String.concat ", " (available ()));
+  logged := Some backend
 
 let use_preferred () =
   match available () with

@@ -32,10 +32,10 @@ let start_cmd =
       exit 0
     end;
     let cfg = load_config () in
-    (* CLI --tls wins over the config value applied by make_conf. *)
+    (* CLI --tls wins over the config value applied by make_conf, which is also
+       what reports the choice: doing it here would name conduit's default,
+       the config not having been read yet. *)
     if tls <> None then Tls_conf.apply tls;
-    Log.debug "TLS backend: %s (available: %s)" (Tls_conf.current ())
-      (String.concat ", " (Tls_conf.available ()));
     let domains =
       if cfg.Conf_parsing.domains = [] then begin
         Printf.eprintf "No domains configured in %s. Run `tsync configure`.\n"
