@@ -150,14 +150,107 @@ let delete t ~key () =
   if is_ok resp || code resp = 404 then ()
   else raise (backend_error "delete" (code resp) body)
 
-(* No S3-style batch delete: fan out single deletes, bounded per batch. *)
+(* Bulk delete is the one verb that leaves the JSON API, which has no equivalent:
+   the XML API takes 1000 objects in a request, against 1000 requests to do the
+   same one at a time. Same bearer token, so nothing else changes.
+
+   Enough XML for one request and one answer, rather than a parser dependency for
+   a single call. Both halves are pure and tested; what is not tested here is the
+   roundtrip, this driver having no emulator in the suite. *)
+let bulk_delete_limit = 1000
+
+let xml_escape s =
+  let b = Buffer.create (String.length s + 16) in
+  String.iter
+    (function
+      | '&' -> Buffer.add_string b "&amp;"
+      | '<' -> Buffer.add_string b "&lt;"
+      | '>' -> Buffer.add_string b "&gt;"
+      | '"' -> Buffer.add_string b "&quot;"
+      | '\'' -> Buffer.add_string b "&apos;"
+      | c -> Buffer.add_char b c)
+    s;
+  Buffer.contents b
+
+(* [Quiet] so a clean delete of a thousand objects answers with an empty
+   [DeleteResult] instead of a thousand [Deleted] elements. *)
+let delete_body keys =
+  let b = Buffer.create (64 * List.length keys) in
+  Buffer.add_string b "<Delete><Quiet>true</Quiet>";
+  List.iter
+    (fun key ->
+      Buffer.add_string b "<Object><Key>";
+      Buffer.add_string b (xml_escape key);
+      Buffer.add_string b "</Key></Object>")
+    keys;
+  Buffer.add_string b "</Delete>";
+  Buffer.contents b
+
+let find_from s sub from =
+  let n = String.length s and m = String.length sub in
+  let rec go i =
+    if i + m > n then None
+    else if String.sub s i m = sub then Some i
+    else go (i + 1)
+  in
+  go (max 0 from)
+
+(* Every [<Error>] the answer reports, as (code, key). Empty on a clean delete,
+   [Quiet] having kept the successes out of it. *)
+let delete_errors body =
+  let text tag from =
+    match find_from body ("<" ^ tag ^ ">") from with
+      | None -> ""
+      | Some i -> (
+          let start = i + String.length tag + 2 in
+          match find_from body ("</" ^ tag ^ ">") start with
+            | None -> ""
+            | Some j -> String.sub body start (j - start))
+  in
+  let rec go acc from =
+    match find_from body "<Error>" from with
+      | None -> List.rev acc
+      | Some i -> go ((text "Code" i, text "Key" i) :: acc) (i + 7)
+  in
+  go [] 0
+
+(* Path-style bucket, the XML API's own shape, so a custom endpoint keeps
+   working. *)
+let delete_uri t = Uri.of_string (t.base ^ "/" ^ t.bucket ^ "?delete")
+
 let delete_multi t keys =
   let rec go = function
     | [] -> Lwt.return_unit
     | batch ->
-        let here = List.filteri (fun i _ -> i < 32) batch in
-        let rest = List.filteri (fun i _ -> i >= 32) batch in
-        let* () = Lwt_list.iter_p (fun key -> delete t ~key ()) here in
+        let here = List.filteri (fun i _ -> i < bulk_delete_limit) batch in
+        let rest = List.filteri (fun i _ -> i >= bulk_delete_limit) batch in
+        let* resp, body =
+          call_retry t ~meth:`POST ~ctype:"application/xml"
+            ~body:(delete_body here) "delete_multi" (delete_uri t)
+        in
+        if not (is_ok resp) then
+          raise (backend_error "delete_multi" (code resp) body);
+        (* A 2xx says the request was understood, not that every object went:
+           what failed comes back per key in the body, and reading it is the
+           difference between a delete that worked and one that was merely
+           accepted.
+
+           Classified [Transient] rather than from the status, which is 200 and
+           would read as a permanent refusal: the codes here are per key, a
+           retried batch costs a repeat of something idempotent, and being wrong
+           the other way strands the objects on a copy nothing walks. *)
+        (match
+           List.filter
+             (fun (c, _) -> not (Backend.absent_code c))
+             (delete_errors body)
+         with
+          | [] -> ()
+          | (code_, key) :: _ as failed ->
+              raise
+                (Backend.failed ~kind:Backend.Transient ~op:"delete_multi"
+                   (Printf.sprintf
+                      "%d of %d object(s) not deleted; first was %s: %s"
+                      (List.length failed) (List.length here) key code_)));
         go rest
   in
   go keys
