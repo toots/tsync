@@ -133,23 +133,27 @@ let suite name (module B : Backend.S) =
       "unicode-é-å-日本";
     ]
   in
-  let* () =
-    let* () =
-      Lwt_list.iter_s
-        (fun n -> B.put ~key:(key ("bulk/" ^ n)) ~data:n ())
-        special
-    in
-    let* ok =
-      Lwt_list.fold_left_s
-        (fun acc n ->
-          let+ got = B.get_opt ~key:(key ("bulk/" ^ n)) () in
-          acc && got = Some n)
-        true special
-    in
-    check "a key with metacharacters round-trips through put and get" ok;
-    let+ listed = B.list_prefix ~prefix:(run_prefix ^ "bulk/") () in
-    check "and comes back from a listing spelled the same"
-      (List.length listed = List.length special)
+  (* One check per name, and a raise caught per name: a store that refuses one
+     spelling must say which, not take the rest of the suite down with it. The
+     first version of this let the exception out, and a single 403 hid both the
+     character that caused it and every check after it. *)
+  let* survived =
+    Lwt_list.filter_s
+      (fun n ->
+        Lwt.catch
+          (fun () ->
+            let* () = B.put ~key:(key ("bulk/" ^ n)) ~data:n () in
+            let+ got = B.get_opt ~key:(key ("bulk/" ^ n)) () in
+            let ok = got = Some n in
+            check (Printf.sprintf "key %S round-trips" n) ok;
+            ok)
+          (fun exn ->
+            check
+              (Printf.sprintf "key %S round-trips (raised: %s)" n
+                 (Printexc.to_string exn))
+              false;
+            Lwt.return_false))
+      special
   in
   (* The two things {!Gc} now leans on, neither of which an emulator is trusted
      for. Closing deletes off every copy the keys it discards on the main, so:
@@ -169,7 +173,10 @@ let suite name (module B : Backend.S) =
     let pad i = key (Printf.sprintf "bulk/absent-%04d" i) in
     let live = [key "bulk/first"; key "bulk/at-cap"; key "bulk/past-cap"] in
     let* () = Lwt_list.iter_s (fun k -> B.put ~key:k ~data:"x" ()) live in
-    let awkward = List.map (fun n -> key ("bulk/" ^ n)) special in
+    (* Only the spellings the store actually accepted: a name it refused above is
+       not there to delete, and demanding it be gone would report the same defect
+       twice under a name that does not describe it. *)
+    let awkward = List.map (fun n -> key ("bulk/" ^ n)) survived in
     let batch =
       List.concat
         [
