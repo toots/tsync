@@ -92,6 +92,10 @@ exception Busy of string
 module Make (C : Conf.S) : sig
   (** {1 Stepping}
 
+      The pacing seam under {!run}, for a caller that has to hold one collection
+      across many steps and watch it — which today means measuring what a step
+      costs. Anything driving a collection to get it done wants {!run}.
+
       A unit of work is one namespace while marking — a folder's worth of
       manifests, or of versions — and one shard while closing or reconciling.
       They are not the same size, so a caller pacing itself should think in
