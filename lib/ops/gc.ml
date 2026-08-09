@@ -31,8 +31,8 @@ module Make (C : Conf.S) = struct
   module Space = Chunk_space.Make (C)
   module B = (val C.store : Backend.S)
 
-  (* Per item, reporting would be the expensive part of marking a store whose
-     chunks are already in place. Returns whether it fired, so other once-a-second
+  (* Asked per item: a clock read against a rename is nothing, and every coarser
+     unit here can take minutes. Returns whether it fired, so other once-a-second
      work can hang off the same clock. *)
   let report_interval = 1.
   let last_report = ref neg_infinity
@@ -486,27 +486,33 @@ module Make (C : Conf.S) = struct
 
   (* Moves go out concurrently within the root: a big file naming thousands of
      chunks is otherwise thousands of serial [rename] calls. *)
-  let mark_root s key =
-    let* chunks = referenced_chunks key in
-    let* () =
-      Lwt_list.iter_p
-        (fun ck -> Lwt_bounded.use s.item_slots (fun () -> Space.promote ck))
-        chunks
-    in
-    s.chunks_promoted <- s.chunks_promoted + List.length chunks;
-    s.roots_marked <- s.roots_marked + 1;
-    Log.debug "gc: marked %s (%d chunk(s))" key (List.length chunks);
-    (* Reported per root, not per namespace: a clock is only read where something
-       looks at it, and a namespace is a folder's worth of manifests — minutes
-       between glances on a slow disk, so the line sat still while the work did
-       not. *)
+  (* Per chunk, not per root: one video's manifest names a hundred thousand of
+     them, and reporting after the root left the line reading "1 file, 0 chunks"
+     for minutes, which reads as wedged. *)
+  let report_mark s =
     ignore
       (throttled (fun () ->
            Log.debug
              "gc: marked %d/%d namespace(s), %d root(s), %d chunk(s) kept"
              s.done_ s.total s.roots_marked s.chunks_promoted;
            s.on_mark ~namespaces:s.done_ ~total:s.total ~roots:s.roots_marked
-             ~promoted:s.chunks_promoted));
+             ~promoted:s.chunks_promoted))
+
+  let mark_root s key =
+    let* chunks = referenced_chunks key in
+    (* Before the work, so [-v] names the file while it is on it. *)
+    Log.debug "gc: marking %s (%d chunk(s))" key (List.length chunks);
+    let* () =
+      Lwt_list.iter_p
+        (fun ck ->
+          Lwt_bounded.use s.item_slots (fun () ->
+              let+ () = Space.promote ck in
+              s.chunks_promoted <- s.chunks_promoted + 1;
+              report_mark s))
+        chunks
+    in
+    s.roots_marked <- s.roots_marked + 1;
+    report_mark s;
     Lwt.return_unit
 
   (* Roots go out on [unit_slots] and the chunks within a root on [item_slots]:
@@ -627,6 +633,17 @@ module Make (C : Conf.S) = struct
           doomed := List.rev_append keys !doomed;
           count := !count + List.length keys;
           bytes := !bytes + size;
+          (* Per shard, not per flush: a flush is a thousand keys away, which on
+             a store with little garbage is the whole phase. Counts include what
+             is pooled and not yet deleted. *)
+          ignore
+            (throttled (fun () ->
+                 let scanned = s.done_ + List.length !pending in
+                 Log.debug
+                   "gc: %d/%d shard(s) scanned, %d chunk(s) to delete" scanned
+                   s.total (s.chunks_reclaimed + !count);
+                 s.on_close ~shards:scanned
+                   ~reclaimed:(s.chunks_reclaimed + !count)));
           let* () =
             if !count >= s.delete_batch then flush () else Lwt.return_unit
           in
