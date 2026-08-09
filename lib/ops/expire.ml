@@ -49,7 +49,10 @@ module Make (C : Conf.S) = struct
     let* trash_keys =
       Lwt_list.fold_left_s
         (fun acc (e : Backend.file_entry) ->
-          if e.Backend.last_modified >= cutoff then Lwt.return acc
+          (* An empty trash lists as its own directory key, which holds no
+             marker and cannot be fetched on a filesystem store. *)
+          if Key.is_dir e.Backend.key || e.Backend.last_modified >= cutoff then
+            Lwt.return acc
           else
             let* data = B.get ~key:e.key () in
             match Folder.marker_of_string data with

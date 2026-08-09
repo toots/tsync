@@ -68,6 +68,24 @@
   cursor = <entry-1>
   journal <entry-1> = rmdir d/
 
+=== expire all: trashed folder emptied first
+  mkdir d
+  drain
+  write d/a.txt "gone before the folder"
+  drain
+  delete d/a.txt
+  drain
+  rmdir d
+  drain
+  expire all
+  expire all -> 1 version(s), 3 journal entr(ies)
+--- tree
+--- content
+--- backend
+  chunk 6e60aa731ca17a23-98d370f11239d9ba size=22
+  cursor = <entry-1>
+  journal <entry-1> = rmdir d/
+
 === expire none: nothing removed
   write foo.txt "one"
   drain

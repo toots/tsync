@@ -66,6 +66,24 @@ let scenarios : scenario list =
         ];
     };
     {
+      (* Emptying the folder leaves its namespace behind on a store that has
+         real directories, so the trashed subtree lists as the bare directory
+         key: no child of it, and no manifest to fetch. *)
+      name = "expire all: trashed folder emptied first";
+      steps =
+        [
+          Mkdir "d";
+          Drain;
+          Write { path = "d/a.txt"; content = "gone before the folder" };
+          Drain;
+          Delete "d/a.txt";
+          Drain;
+          Rmdir "d";
+          Drain;
+          Expire "all";
+        ];
+    };
+    {
       name = "expire none: nothing removed";
       steps =
         [

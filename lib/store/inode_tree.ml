@@ -32,6 +32,14 @@ module Make (C : Conf.S) = struct
      thousands of direct children pays that many round trips. *)
   let children ?(skip_errors = false) ~folder_id () =
     let* entries = St.list_namespace ~folder_id in
+    (* An empty namespace lists as its own directory key — a zero-byte object on
+       S3, a real directory on a filesystem, where the GET below fails outright.
+       It is not a child on either. *)
+    let entries =
+      List.filter
+        (fun (e : Backend.file_entry) -> not (Key.is_dir e.Backend.key))
+        entries
+    in
     Lwt_list.filter_map_s
       (fun (e : Backend.file_entry) ->
         let fetch () =
