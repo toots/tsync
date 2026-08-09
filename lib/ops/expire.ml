@@ -1,40 +1,32 @@
 open Lwt.Syntax
 
-type stats = {
-  versions_deleted : int;
-  chunks_deleted : int;
-  chunks_kept : int;
-  journal_deleted : int;
-}
+type stats = { versions_deleted : int; journal_deleted : int }
 
 module Make (C : Conf.S) = struct
   module Fs = File_store.Make (C)
   module Tree = Inode_tree.Make (C)
   module B = (val C.store : Backend.S)
 
-  let delete_all keys =
-    if keys = [] then Lwt.return_unit else B.delete_multi keys
+  (* Deleted in batches rather than one call with everything, so a long delete
+     reports progress from inside it. 1000 matches what the object stores accept
+     per request, so batching here costs a driver nothing. *)
+  let delete_batch = 1000
 
-  (* Directory markers reference nothing; a dirty manifest is mid-write and has
-     no committed chunks. An unexpected parse failure raises rather than
-     reporting "references nothing", which would let the sweep delete the file's
-     chunks. *)
-  let referenced_chunks (module B : Backend.S) key =
-    if Key.is_dir key then Lwt.return []
-    else
-      let+ data = B.get ~key () in
-      match Folder.marker_of_string data with
-        | Some _ -> [] (* folder / trash marker: references no chunks *)
-        | None -> (
-            match Manifest.of_string data with
-              | m ->
-                  let t = m.Manifest.chunks in
-                  List.init (Chunk_table.count t) (Chunk_table.key t)
-              | exception e ->
-                  failwith
-                    (Printf.sprintf
-                       "cannot read manifest %s (%s); aborting before chunk GC"
-                       key (Printexc.to_string e)))
+  let delete_all ~name ~on_delete keys =
+    let rec go done_ = function
+      | [] -> Lwt.return_unit
+      | keys ->
+          let batch = List.filteri (fun i _ -> i < delete_batch) keys in
+          let rest =
+            List.filteri (fun i _ -> i >= delete_batch) keys
+          in
+          let* () = B.delete_multi batch in
+          let done_ = done_ + List.length batch in
+          Log.debug "expire: deleted %d %s object(s)" done_ name;
+          on_delete ~name ~deleted:done_;
+          go done_ rest
+    in
+    go 0 keys
 
   let parse = Versioning.parse ~versions_prefix:C.versions_prefix
 
@@ -46,13 +38,16 @@ module Make (C : Conf.S) = struct
       (fun acc _rel entry -> Lwt.return (entry.Inode_tree.bkey :: acc))
       acc
 
-  let expire ~cutoff () =
+  let expire ?(on_list = fun ~name:_ -> ()) ?(on_scan = fun ~name:_ ~objects:_ ->
+      ()) ?(on_delete = fun ~name:_ ~deleted:_ -> ()) ~cutoff () =
     let cutoff_ns = Int64.of_float (cutoff *. 1e9) in
     (* Phase 0: empty trashed folders past the cutoff, whole subtree at a time,
-       so their chunks drop out of the live set marked below. *)
+       so nothing in them counts as a reference any more. *)
+    on_list ~name:"trash";
     let* trash =
       B.list_prefix ~prefix:(C.domain_prefix ^ Folder.trash_id ^ "/") ()
     in
+    on_scan ~name:"trash" ~objects:(List.length trash);
     let* trash_keys =
       Lwt_list.fold_left_s
         (fun acc (e : Backend.file_entry) ->
@@ -61,14 +56,17 @@ module Make (C : Conf.S) = struct
             let* data = B.get ~key:e.key () in
             match Folder.marker_of_string data with
               | Some m ->
+                  Log.debug "expire: reclaiming trashed folder %s" m.Folder.name;
                   let+ subtree = collect_namespace m.Folder.id [] in
                   (e.key :: subtree) @ acc
               | None -> Lwt.return acc)
         [] trash
     in
-    let* () = delete_all trash_keys in
+    let* () = delete_all ~name:"trash" ~on_delete trash_keys in
     (* Phase 1: partition versions by the cutoff (no deletion yet). *)
+    on_list ~name:"versions";
     let* versions = B.list_prefix ~prefix:C.versions_prefix () in
+    on_scan ~name:"versions" ~objects:(List.length versions);
     let expired, surviving =
       versions
       |> List.fold_left
@@ -81,46 +79,17 @@ module Make (C : Conf.S) = struct
                | None -> (expired, surviving))
            ([], [])
     in
-    (* Phase 2: mark chunks referenced by live files and surviving versions,
-       before any deletion, so a bad manifest aborts with nothing removed.
-       ponytail: GET per manifest — no chunk refcount index; add one only if a
-       scan measurably hurts. *)
-    let live = Hashtbl.create 4096 in
-    let mark key =
-      let+ cks = referenced_chunks (module B) key in
-      List.iter (fun ck -> Hashtbl.replace live ck ()) cks
-    in
-    let* live_files = B.list_prefix ~prefix:C.domain_prefix () in
-    let* () =
-      Lwt_list.iter_s (fun (e : Backend.file_entry) -> mark e.key) live_files
-    in
-    let* () = Lwt_list.iter_s (fun (key, _rel) -> mark key) surviving in
-    (* Phase 3: delete expired versions, then the version directories they
+    (* Phase 2: delete expired versions, then the version directories they
        emptied. No-ops on S3, where no directory object exists. *)
-    let* () = delete_all (List.map fst expired) in
+    let* () = delete_all ~name:"versions" ~on_delete (List.map fst expired) in
     let survivor_rels = List.map snd surviving in
     let* () =
       List.sort_uniq compare (List.map snd expired)
       |> List.filter (fun rel -> not (List.mem rel survivor_rels))
       |> List.map (fun rel -> C.versions_prefix ^ rel ^ "/")
-      |> delete_all
+      |> delete_all ~name:"version directories" ~on_delete
     in
-    (* Phase 4: sweep every chunk not referenced anywhere, regardless of age. *)
-    let* chunks = B.list_prefix ~prefix:C.chunk_prefix () in
-    let kept = ref 0 in
-    let unreferenced =
-      chunks
-      |> List.filter_map (fun (e : Backend.file_entry) ->
-          (* Sharded ({!Chunk_layout}), so the key is the entry's last path
-             segment, not everything past the prefix. *)
-          let ck = Filename.basename e.key in
-          if Hashtbl.mem live ck then (
-            incr kept;
-            None)
-          else Some e.key)
-    in
-    let* () = delete_all unreferenced in
-    (* Phase 5: drop journal entries older than the cutoff. The journal only
+    (* Phase 3: drop journal entries older than the cutoff. The journal only
        grows — one object per write — and nothing else prunes it. Age is the only
        safe criterion: the cursor says what was published, not what every client
        has applied, so entries above it are still owed to clients that are behind.
@@ -132,7 +101,9 @@ module Make (C : Conf.S) = struct
        nothing. *)
     let* cursor = Fs.fetch_cursor () in
     let cutoff_ms = Int64.of_float (cutoff *. 1000.) in
+    on_list ~name:"journal";
     let* journal = B.list_prefix ~prefix:C.journal_prefix () in
+    on_scan ~name:"journal" ~objects:(List.length journal);
     let stale =
       journal
       |> List.filter (fun (e : Backend.file_entry) ->
@@ -146,11 +117,9 @@ module Make (C : Conf.S) = struct
                         cursor))
       |> List.map (fun (e : Backend.file_entry) -> e.key)
     in
-    let+ () = delete_all stale in
+    let+ () = delete_all ~name:"journal" ~on_delete stale in
     {
       versions_deleted = List.length expired;
-      chunks_deleted = List.length unreferenced;
-      chunks_kept = !kept;
       journal_deleted = List.length stale;
     }
 end

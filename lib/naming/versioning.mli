@@ -2,8 +2,8 @@
     [versions_prefix] every time the file is modified, renamed or deleted (see
     {!Store.save_version}). Since manifests reference shared content-addressed
     chunks, a version is a cheap manifest copy and can be restored without
-    transferring any file content. Chunks are collected only when [Expire]
-    removes the last version referencing them. *)
+    transferring any file content. A chunk is reclaimed only once nothing names it
+    — [Expire] removing the last version that did, and [Gc] then collecting it. *)
 
 (** Split a version object key into its identity (a [folder-id/leaf-hash] pair,
     used only as an opaque grouping key) and its timestamp suffix, or [None] if

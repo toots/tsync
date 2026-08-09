@@ -92,6 +92,7 @@ module Make (C : Conf.S) = struct
   module R = Remote.Make_with_layout (C) (Layout.Identity)
   module D = Data.Make (C) (R)
   module Fs = File_store.Make (C)
+  module Space = Chunk_space.Make (C)
   module J = Journal.Make (C)
   module W = Wal.Make (C)
 
@@ -244,8 +245,24 @@ module Make (C : Conf.S) = struct
         (* Manifests are keyed by folder id, not hashed, so nothing is evenly
            spread to sample: this count stays a full walk. It is also the smaller
            of the two, one object per file. *)
-        let+ chunks = count_chunks ~exact (module B) in
-        `Assoc (("manifests", `Int (List.length manifests)) :: chunks))
+        let* chunks = count_chunks ~exact (module B) in
+        (* Mid-collection the chunk prefix holds only what has been marked so
+           far, so these figures are a floor rather than a count. Said plainly:
+           a number that quietly means something else is worse than no number. *)
+        let+ run = Space.read_run () in
+        let collecting =
+          match run with
+            | None -> []
+            | Some r ->
+                [
+                  ( "chunksPartial",
+                    `String
+                      (Printf.sprintf "collection in progress (%s)"
+                         (Chunk_space.string_of_phase r.Chunk_space.phase)) );
+                ]
+        in
+        `Assoc
+          ((("manifests", `Int (List.length manifests)) :: chunks) @ collecting))
       (fun exn ->
         Log.warn "diagnostics: counting %s: %s" name (Printexc.to_string exn);
         Lwt.return (`Assoc [("error", `String (Printexc.to_string exn))]))

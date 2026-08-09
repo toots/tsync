@@ -87,9 +87,16 @@ end
     [resume] picks up what a previous run left in [dir]. The daemon passes it; a
     one-shot command does not, so two processes cannot run one target's jobs at
     once and reorder a rename's copy and delete. A one-shot command still
-    records and drains its own. *)
+    records and drains its own.
+
+    [chunk_from_prefix] is where the source keeps chunks it has not finished
+    collecting — see {!Chunk_space}. A chunk a manifest names may be only there,
+    so a read of one falls through to it; what is written to the target is always
+    the ordinary chunk key, a target having one space and no notion of a
+    collection. Omit it for a source that is never collected. *)
 val make :
   ?resume:bool ->
+  ?chunk_from_prefix:string ->
   name:string ->
   backend:(module Backend.S) ->
   source:(module Backend.S) ->

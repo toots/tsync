@@ -18,3 +18,11 @@ val shard_name : int -> string
     store root. The key itself is unchanged: {!Filename.basename} recovers it
     from a listing entry. A key shorter than {!fanout} lands under ["_"]. *)
 val relative_path : string -> string
+
+(** Whether a name found in a shard is a chunk, and whether a name found in the
+    chunk root is a shard. Both are asked while walking a directory, where the
+    answer decides whether something is copied or deleted, so both say what the
+    name {i is} — see {!Xxhash.is_hex}. *)
+val is_chunk_key : string -> bool
+
+val is_shard_name : string -> bool

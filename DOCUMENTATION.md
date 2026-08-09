@@ -443,16 +443,46 @@ tsync untrash <path>   # bring one back, then run tsync sync
 tsync purge <path>     # drop one for good, with all its versions
 ```
 
-History grows until you trim it:
+History grows until you trim it, in two steps:
 
 ```bash
-tsync expire 2025-01-01
+tsync expire 2025-01-01   # drop the old versions
+tsync gc                  # reclaim the blocks that leaves unreferenced
 ```
 
-That drops every version older than the cutoff, then deletes any block no longer referenced
-by a live file or surviving version. The date only bounds versions; blocks go purely by
-whether anything still points at them. Run it while machines are idle — collecting blocks a
-client is mid-upload could race the upload.
+`expire` drops every version, trashed folder and journal entry older than the cutoff. That
+is what stops old blocks being referenced, but it does not remove them — `gc` does, and it
+goes purely by whether anything still points at a block, with no notion of a date.
+
+They are separate commands because only some stores can do the second. `gc` reclaims by
+renaming the block directory aside, giving every block a live file still names a second hard
+link under the original name, and deleting what is left; the inodes nothing linked go with
+it. That needs a rename and a link inside the store, which a filesystem has and an object
+store does not — so `gc` runs on a **local main store** and says so plainly otherwise.
+`expire` works on every backend.
+
+Unlike the older single-command version, this is safe to run while machines are working. A
+client uploading a file whose blocks already exist promotes them before publishing, so a
+block cannot be reclaimed out from under an upload that deduplicated onto it. Replicas and
+backfill targets are never renamed: once the main is settled, each is walked shard by shard
+and whatever the main no longer has is deleted — so a remote store on cold storage sees
+deletes and nothing else. A replica is additionally filled where it falls short, being meant
+to be a complete copy.
+
+A collection over a large store takes a while, and can be spread over several sittings or
+paced to stay out of the way:
+
+```bash
+tsync gc --budget 30m        # stop after about half an hour, resume next time
+tsync gc --pause 1s          # idle between batches
+tsync gc --concurrency 1     # one operation at a time
+tsync gc --status            # is one open, and how far along
+tsync gc --abort             # abandon an open one, keeping every block
+```
+
+Leaving a collection open is safe indefinitely: reads look in both places and writes were
+never redirected. While one is open the block prefix holds only part of the store, so
+`tsync stats` says so and `tsync resync-remote` refuses until it finishes.
 
 ## 10. Share public download links
 
@@ -575,7 +605,8 @@ tsync revert <path>   # bring back a previous version (or an undeleted file)
 tsync trash           # list deleted folders
 tsync untrash <path>  # restore a deleted folder, then run tsync sync
 tsync purge <path>    # drop a trashed folder for good, with all its versions
-tsync expire <date>   # drop versions older than a date, then reclaim unused blocks
+tsync expire <date>   # drop versions, trashed folders and journal entries older than a date
+tsync gc              # reclaim unreferenced blocks (local main stores only)
 tsync sync            # apply changes from other machines (incremental)
 tsync sync --full     # clear local cache and re-download all manifests
 tsync recheck         # verify the remote against the local cache, repair what's possible
@@ -623,7 +654,7 @@ point at — explains itself.
 ### Multiple domains
 
 With more than one domain, pass `--domain <name>` to commands that act on a specific one
-(`ls`, `versions`, `expire`, `sync`, `recheck`, `resync-remote`, `import`, `export`,
+(`ls`, `versions`, `expire`, `gc`, `sync`, `recheck`, `resync-remote`, `import`, `export`,
 `share`). `tsync set-domain <name>` persists a default; an explicit `--domain` always wins.
 
 ## Backend type reference

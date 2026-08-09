@@ -665,6 +665,18 @@ let untrash_cmd =
     (Cmd.info "untrash" ~doc:"Restore a trashed folder (see: tsync trash)")
     Term.(const run $ path_arg $ domain_arg)
 
+let parse_duration s =
+  let n = String.length s in
+  let fail () = failwith ("invalid duration (use <N>d, <N>h, <N>m or <N>s): " ^ s) in
+  if n < 2 then fail ()
+  else (
+    match (int_of_string_opt (String.sub s 0 (n - 1)), s.[n - 1]) with
+      | Some k, 'd' when k > 0 -> float_of_int (k * 86400)
+      | Some k, 'h' when k > 0 -> float_of_int (k * 3600)
+      | Some k, 'm' when k > 0 -> float_of_int (k * 60)
+      | Some k, 's' when k > 0 -> float_of_int k
+      | _ -> fail ())
+
 let expire_cmd =
   let date_arg =
     Arg.(
@@ -697,22 +709,201 @@ let expire_cmd =
         (let cutoff = parse_date date in
          let (module C : Conf.S) = load_conf ?domain () in
          let module E = Expire.Make (C) in
-         E.expire ~cutoff ())
+         (* A domain with a long history spends minutes listing before it deletes
+            anything, so say what is happening rather than sit silent. Progress
+            goes to stderr, leaving stdout to the one summary line a script would
+            read. *)
+         E.expire
+           ~on_list:(fun ~name -> Printf.eprintf "Listing %s...\n%!" name)
+           ~on_scan:(fun ~name ~objects ->
+             Printf.eprintf "  %s: %d object(s)\n%!" name objects)
+           ~on_delete:(fun ~name ~deleted ->
+             Printf.eprintf "  %s: %d deleted\r%!" name deleted)
+           ~cutoff ())
     with
       | s ->
-          Printf.printf
-            "Removed %d version(s), %d chunk(s), %d journal entr(ies); kept %d \
-             chunk(s)\n"
-            s.Expire.versions_deleted s.chunks_deleted s.journal_deleted
-            s.chunks_kept
+          Printf.printf "Removed %d version(s), %d journal entr(ies)\n"
+            s.Expire.versions_deleted s.journal_deleted
       | exception Failure msg -> Printf.eprintf "Error: %s\n" msg
   in
   Cmd.v
     (Cmd.info "expire"
        ~doc:
-         "Remove versions and journal entries older than DATE, then \
-          garbage-collect unused chunks")
+         "Remove trashed folders, versions and journal entries older than DATE \
+          (then: tsync gc)")
     Term.(const run $ date_arg $ domain_arg)
+
+let gc_cmd =
+  let budget_arg =
+    Arg.(
+      value
+      & opt (some string) None
+      & info ["budget"] ~docv:"DUR"
+          ~doc:
+            "Spend at most this long, then stop and leave the collection open \
+             where it is; the next $(b,tsync gc) continues from there. Checked \
+             between batches, so a batch already running is not cut short. An \
+             open collection is safe to leave indefinitely. One count and one \
+             unit: $(b,30s), $(b,10m), $(b,2h), $(b,1d).")
+  in
+  let pause_arg =
+    Arg.(
+      value
+      & opt (some string) None
+      & info ["pause"] ~docv:"DUR"
+          ~doc:
+            "Idle this long between batches. Where $(b,--budget) bounds how long \
+             the whole thing takes, this bounds how hard it pushes while it runs.")
+  in
+  let concurrency_arg =
+    Arg.(
+      value
+      & opt (some int) None
+      & info ["concurrency"] ~docv:"N"
+          ~doc:
+            "Operations in flight (default: what the device says). $(b,1) is as \
+             gentle as it gets.")
+  in
+  let abort_arg =
+    Arg.(
+      value & flag
+      & info ["abort"]
+          ~doc:
+            "Abandon an open collection, keeping every chunk it still holds. \
+             Takes $(b,--budget), $(b,--pause) and $(b,--concurrency) like a \
+             collection does, and resumes the same way — a second \
+             $(b,--abort) continues abandoning rather than starting over.")
+  in
+  let status_arg =
+    Arg.(
+      value & flag
+      & info ["status"] ~doc:"Report an open collection without continuing it.")
+  in
+  let report ~abort ~domain (s : Gc.stats) =
+    (match s.Gc.outcome with
+      | Gc.Completed when abort && s.chunks_promoted = 0 ->
+          (* Nothing was open, or nothing was left in it. Either way saying
+             "abandoned; 0 kept" invites the reader to wonder what happened to
+             their chunks. *)
+          Printf.printf "No collection was open for %s; nothing to abandon.\n"
+            domain
+      | Gc.Completed when abort ->
+          Printf.printf "Collection abandoned; %d chunk(s) kept.\n"
+            s.chunks_promoted
+      | Gc.Completed ->
+          Printf.printf "Reclaimed %d chunk(s), %s. Kept %d.\n"
+            s.chunks_reclaimed
+            (human_bytes s.bytes_reclaimed)
+            s.chunks_promoted
+      (* Each phase fills in different fields, so reporting one fixed set of them
+         means printing zeroes that read as "nothing happened" rather than as "this
+         phase does not count that". Abandoning marks no files and reclaims
+         nothing; what it does is keep chunks.
+
+         The continue line names the command that continues *this*: a plain
+         [tsync gc] over an abandoned collection would go back to collecting it. *)
+      | Gc.Suspended { phase; _ } when abort ->
+          Printf.printf
+            "Stopped while %s: %d chunk(s) kept so far.\n\
+             Still open; rerun tsync gc --abort to continue.\n"
+            phase s.chunks_promoted
+      | Gc.Suspended { phase; _ } ->
+          Printf.printf
+            "Stopped while %s: %d file(s) marked, %d chunk(s) kept, %d \
+             reclaimed.\n\
+             Still open; rerun tsync gc to continue.\n"
+            phase s.roots_marked s.chunks_promoted s.chunks_reclaimed);
+    List.iter
+      (fun (m : Gc.member_stats) ->
+        Printf.printf "  %s: %d deleted%s\n" m.Gc.name m.deleted
+          (if m.uploaded > 0 then Printf.sprintf ", %d filled" m.uploaded
+           else ""))
+      s.members
+  in
+  let run budget pause concurrency abort status domain =
+    (* Reported as [Failure], which the top level prints as "tsync: <sentence>"
+       and exits nonzero on. Both carry prose written for whoever typed this. *)
+    let translate f =
+      try f () with
+        | Gc.Unsupported msg | Gc.Busy msg -> failwith msg
+        | Failure msg -> failwith msg
+    in
+    let (module C : Conf.S) = load_conf ?domain () in
+    let module G = Gc.Make (C) in
+    if status then
+      match run_lwt (G.status ()) with
+        | None -> Printf.printf "No collection is open for %s.\n" C.domain_name
+        | Some r ->
+            Printf.printf "Collection of %s open: %s, %.0fs so far.\n"
+              C.domain_name
+              (Chunk_space.string_of_phase r.Chunk_space.phase)
+              (Unix.gettimeofday () -. r.Chunk_space.started)
+    else
+      (* Abandoning is the same machinery with everything treated as live, so it
+         takes the same pacing and reports the same way. Someone reaching for
+         --abort is most likely getting out of a collection that is already going
+         badly; a recovery with no way to slow it down or interrupt it would be a
+         poor one.
+
+         Progress to stderr, so stdout carries only the summary a script would
+         read. A collection of a large store runs for a long time and must not look
+         wedged. *)
+      let budget = Option.map parse_duration budget
+      and pause = Option.map parse_duration pause in
+      (* Carriage-return progress belongs on a terminal. Down a pipe it is a line
+         of padding in front of the summary, so a non-interactive run gets the
+         summary alone -- and the logs, which is what [-v] is for. *)
+      let watching = Unix.isatty Unix.stderr in
+      let progress fmt = if watching then Printf.eprintf fmt else Printf.ifprintf stderr fmt in
+      let on_open () =
+        progress "%s %s...\n%!"
+          (if abort then "Abandoning the collection of" else "Collecting")
+          C.domain_name
+      in
+      (* The two phases count different things, so they get different lines rather
+         than one line with a field that means nothing in one of them. Abandoning
+         walks shards and has no notion of a file; marking walks folders and
+         counts the files in them. *)
+      let on_mark ~namespaces ~total ~roots ~promoted =
+        if abort then
+          progress "  kept %d/%d shard(s), %d chunk(s)\r%!" namespaces total
+            promoted
+        else
+          progress "  marked %d/%d folder(s), %d file(s), %d chunk(s) kept\r%!"
+            namespaces total roots promoted
+      in
+      let on_close ~shards ~reclaimed =
+        progress "  closed %d shard(s), %d chunk(s) reclaimed\r%!" shards
+          reclaimed
+      in
+      let on_reconcile ~name ~shards ~total ~deleted ~uploaded =
+        progress "  %s: %d/%d shard(s), %d deleted, %d filled\r%!" name shards
+          total deleted uploaded
+      in
+      translate (fun () ->
+          let s =
+            run_lwt
+              (if abort then
+                 G.abort ?budget ?pause ?concurrency ~on_open ~on_mark ~on_close
+                   ~on_reconcile ()
+               else
+                 G.run ?budget ?pause ?concurrency ~on_open ~on_mark ~on_close
+                   ~on_reconcile ())
+          in
+          (* The progress lines above end in a carriage return, so the last one is
+             still sitting on the terminal's current line. Cleared before the
+             summary goes to stdout, or the two land on top of each other. *)
+          if watching then Printf.eprintf "\r%*s\r%!" 72 "";
+          report ~abort ~domain:C.domain_name s)
+  in
+  Cmd.v
+    (Cmd.info "gc"
+       ~doc:
+         "Reclaim chunks nothing references any more (run tsync expire first). \
+          Local main stores only.")
+    Term.(
+      const run $ budget_arg $ pause_arg $ concurrency_arg $ abort_arg
+      $ status_arg $ domain_arg)
 
 let sync_cmd =
   let source_arg =
@@ -1157,16 +1348,6 @@ let export_cmd =
     Term.(const run $ domain_arg $ dst_arg $ verbose_arg)
 
 (* "<N>d" / "<N>h" -> seconds *)
-let parse_duration s =
-  let n = String.length s in
-  let fail () = failwith ("invalid duration (use <N>d or <N>h): " ^ s) in
-  if n < 2 then fail ()
-  else (
-    match (int_of_string_opt (String.sub s 0 (n - 1)), s.[n - 1]) with
-      | Some k, 'd' when k > 0 -> float_of_int (k * 86400)
-      | Some k, 'h' when k > 0 -> float_of_int (k * 3600)
-      | _ -> fail ())
-
 let share_cmd =
   let path_arg =
     Arg.(required & pos 0 (some string) None & info [] ~docv:"PATH")
@@ -1474,6 +1655,7 @@ let () =
          untrash_cmd;
          purge_cmd;
          expire_cmd;
+         gc_cmd;
        ]
       @ frontend_cmds ())
   in

@@ -71,6 +71,10 @@ module Make_with_layout (C : Conf.S) (L : Layout.S) : S = struct
   module St = Store.Make (C) (L)
   module B = (val C.store : Backend.S)
 
+  (* Chunk writes go where they always went; only presence checks and reads have
+     to know that a collection may be in progress. See {!Chunk_space}. *)
+  module Space = Chunk_space.Make (C)
+
   (* Chunk-sized buffers shared by every concurrent upload: a fixed set avoids a
      stream of large major-heap allocations under sustained upload traffic, and
      Lwt_pool allocates lazily so nothing is held when idle. A string derived from
@@ -127,12 +131,13 @@ module Make_with_layout (C : Conf.S) (L : Layout.S) : S = struct
   let known_chunks : (string, unit) Hashtbl.t = Hashtbl.create 4096
 
   (* Sharded, so no single directory holds the whole store on a filesystem
-     backend. *)
-  let chunk_backend_key chunk_key =
-    C.chunk_prefix ^ Chunk_layout.relative_path chunk_key
+     backend. This is where a chunk is written; where it can be *read* is
+     {!Chunk_space.read_key}'s business, a collection in progress being the one
+     thing that makes the two differ. *)
+  let chunk_backend_key = Space.key
 
-  let chunk_exists ck =
-    let+ head = B.head_opt ~key:ck () in
+  let chunk_exists ck_rel =
+    let+ head = Space.head ck_rel in
     Option.is_some head
 
   (* [data] is not retained past this call, so a caller may pass a string
@@ -153,7 +158,7 @@ module Make_with_layout (C : Conf.S) (L : Layout.S) : S = struct
     let ck = chunk_backend_key ck_rel in
     let* known =
       if Hashtbl.mem known_chunks ck_rel then Lwt.return_true
-      else chunk_exists ck
+      else chunk_exists ck_rel
     in
     let+ () =
       if known then (
@@ -197,6 +202,10 @@ module Make_with_layout (C : Conf.S) (L : Layout.S) : S = struct
     in
     let* () = if C.versioning then St.save_version ~key else Lwt.return_unit in
     Log.info "upload %s: publishing manifest, size=%Ld" key size;
+    (* Before the manifest is visible, never after: a chunk this upload did not
+       write — deduplicated, or already known to this session — may hold a name
+       only in a space a collection is about to discard. *)
+    let* () = Space.promote_all (List.map Manifest.chunk_key entries) in
     let* () = St.put_manifest ~key ~data:(Manifest.to_string ~name state) in
     if !cancel then
       let* () =
@@ -280,7 +289,7 @@ module Make_with_layout (C : Conf.S) (L : Layout.S) : S = struct
   (* Chunk keys are content-addressed, so a size mismatch means the remote object
      is corrupt. *)
   let chunk_remote_ok ~chunk_key ~size =
-    let+ head = B.head_opt ~key:(chunk_backend_key chunk_key) () in
+    let+ head = Space.head chunk_key in
     match head with Some h -> h.Backend.size = size | None -> false
 
   (* Republishes [expected] when the remote manifest is missing, dirty or
@@ -294,6 +303,13 @@ module Make_with_layout (C : Conf.S) (L : Layout.S) : S = struct
     else (
       Log.info "recheck: republishing manifest %s" key;
       let name = Key.leaf ~domain_prefix:C.domain_prefix key in
+      (* Same rule as a fresh publish: a chunk this recheck verified rather than
+         re-uploaded may only have a name in a space about to be discarded. *)
+      let table = expected.Manifest.chunks in
+      let* () =
+        Space.promote_all
+          (List.init (Chunk_table.count table) (Chunk_table.key table))
+      in
       let+ () =
         St.put_manifest ~key ~data:(Manifest.to_string ~name expected)
       in
@@ -371,7 +387,7 @@ module Make_with_layout (C : Conf.S) (L : Layout.S) : S = struct
      same way for a demand-paged read as for a whole-file download. *)
   let get_chunk ~chunk_key =
     Lwt_bounded.use chunk_download_pool (fun () ->
-        let+ data = B.get ~key:(chunk_backend_key chunk_key) () in
+        let+ data = Space.get chunk_key in
         Metrics.add_downloaded (String.length data);
         data)
 end

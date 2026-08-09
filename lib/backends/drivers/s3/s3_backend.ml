@@ -161,7 +161,7 @@ let copy t ~src_key ~dst_key () =
 let list_all t ?max_keys ~prefix () =
   (* Reverse accumulation for O(1) prepend: appending each page onto a growing
      list is O(n^2) overall, and this runs unbounded over however many objects
-     share the prefix (the whole chunk store during GC).
+     share the prefix (a whole namespace during a resync).
 
      [max_keys] caps the entries returned and stops pagination once reached, so a
      bounded existence check costs one small request rather than a full recursive

@@ -1,0 +1,29 @@
+
+=== idle: one space, and the other is never consulted
+  head(live) = true
+  head(in the discarded space) = false  <- no run, so not looked for
+  get(live) = "live"
+
+=== a store that cannot collect never grows a second lookup
+  head(in the discarded space) = false  <- caps.gc = false
+
+=== collecting: found in either space
+  head(surviving) = true
+  head(discarded) = true  <- cache still says idle
+  get(discarded) = "going"
+  head(in neither) = false
+
+=== promoting
+  promote gives it a name in the surviving space: true
+  and the same bytes: "going"
+  one inode, two names: true
+  and that name is the only thing that was added: nlink=2
+  promoting twice is not an error
+  promoting one that is only in the surviving space is a no-op
+  promoting one that is in neither space is a no-op
+  promote_all over a mixture is a no-op for all but the moved one
+
+=== reading a body still works once the discarded space is gone
+  get(promoted) = "going"
+  run marker cleared: true
+  marker key = tsync/testdom/gc-run

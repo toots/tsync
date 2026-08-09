@@ -270,7 +270,11 @@ let capabilities t ~prefix () =
           let* share_url = query_share_url t ~prefix
           and* chunk_size = query_chunk_size t ~prefix
           and* max_concurrency = query_max_concurrency t ~prefix in
-          Lwt.return { Backend.share_url; chunk_size; max_concurrency }
+          (* [gc] is not asked over the wire: collecting chunks needs a link and
+             a rename in the store itself, which is the serving side's business
+             and not something a proxy client can do on its behalf. *)
+          Lwt.return
+            { Backend.share_url; chunk_size; max_concurrency; gc = false }
         in
         t.caps_cache <- Some p;
         p

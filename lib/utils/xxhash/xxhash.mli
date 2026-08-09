@@ -5,6 +5,20 @@ external hash_with_seed : string -> int -> int64 = "caml_xxh3_64_with_seed"
     lowercase hex string. *)
 val hash_hex : string -> int -> string
 
+(** Length of what {!hash_hex} produces, for the callers that build fixed-width
+    names out of it. *)
+val hex_length : int
+
+(** Whether a string is shaped like {!hash_hex}'s output.
+
+    Callers name things after digests — a chunk key, a manifest's leaf — and then
+    walk a directory full of them, where they meet whatever else ended up there: a
+    write that was in flight, something a person left behind. Deciding by what a
+    digest *is* means the unrecognised gets skipped; deciding by what it is not
+    admits everything nobody thought of, which for a caller that copies what it
+    finds means copying rubbish, and for one that deletes means worse. *)
+val is_hex : string -> bool
+
 (** Incremental XXH3-64 state for streaming hashes. *)
 type state
 

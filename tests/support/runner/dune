@@ -4,6 +4,8 @@
    -open
    Tsync_ops
    -open
+   Tsync_store
+   -open
    Tsync_sync
    -open
    Tsync_object
@@ -30,6 +32,7 @@
  (name tsync_test_runner)
  (libraries
   tsync_ops
+  tsync_store
   tsync_sync
   tsync_object
   tsync_naming

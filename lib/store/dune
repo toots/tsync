@@ -23,6 +23,7 @@
   tsync_object
   tsync_backend_register
   tsync_log
+  yojson
   unix
   lwt
   lwt.unix))

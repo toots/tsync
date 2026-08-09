@@ -61,10 +61,21 @@ type step =
   | Mark
       (** Record the current time, usable later as an [Expire "mark"] cutoff. *)
   | Expire of string
-      (** Run [Expire.expire]: prune versions older than a cutoff, then GC
-          unused chunks. Selector is ["all"] (now), ["none"] (epoch), or
-          ["mark"] (the time captured by the last [Mark] step — to expire across
-          a boundary). *)
+      (** Run [Expire.expire]: drop trashed folders, versions and journal entries
+          older than a cutoff. Selector is ["all"] (now), ["none"] (epoch), or
+          ["mark"] (the time captured by the last [Mark] step — to expire across a
+          boundary). Leaves the chunks it orphaned behind; collecting those is
+          [Gc]. *)
+  | Gc  (** Run [Gc.run]: collect the chunks nothing references any more. *)
+  | GcMark
+      (** Collect only as far as the end of marking, leaving the collection open.
+          Paired with [GcClose], this is how a scenario gets to act — write a
+          file, read one — with the store mid-collection, which is where the
+          interesting races are. *)
+  | GcClose
+      (** Finish a collection [GcMark] left open. *)
+  | GcAbort
+      (** Abandon an open collection, keeping every chunk it holds. *)
   | Drain
       (** Wait for queued uploads to finish. Also puts the next journal entry in
           a later millisecond, keeping snapshots deterministic: entry keys are

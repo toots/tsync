@@ -3,15 +3,18 @@ open Lwt.Syntax
 let mkdir_p = Fs_util.mkdir_p
 let readdir_list = Fs_util.readdir_list
 
-(* Each write stages to its own temp file (pid + sequence suffix) and renames it
-   into place, so overlapping writes of one key never expose a partial file. Last
-   rename wins. *)
-let tmp_seq = ref 0
+(* Each write stages to its own temp file and renames it into place, so
+   overlapping writes of one key never expose a partial file. Last rename wins.
 
+   The name comes from {!Fs_util.temp_path} rather than being spelled here, so
+   that {!Fs_util.is_temp_name} recognises it. A walker meeting one of these has
+   to be able to tell it apart from real content — the collector reads every name
+   in a namespace and parses it, and a write in flight that it cannot identify
+   stops the whole collection. Two spellings of the same idea meant the one
+   predicate for it answered no. *)
 let write_file path data =
   let* () = Fs_util.ensure_parent path in
-  incr tmp_seq;
-  let tmp = Printf.sprintf "%s.%d.%d.tmp" path (Unix.getpid ()) !tmp_seq in
+  let tmp = Fs_util.temp_path path in
   let* () =
     Lwt_unix_retry.with_file ~mode:Lwt_io.Output tmp (fun oc ->
         Lwt_io.write oc data)
@@ -28,8 +31,7 @@ let read_file path =
    written first, so the claim that wins is complete the instant it appears. *)
 let create_exclusive path data =
   let* () = Fs_util.ensure_parent path in
-  incr tmp_seq;
-  let tmp = Printf.sprintf "%s.%d.%d.claim" path (Unix.getpid ()) !tmp_seq in
+  let tmp = Fs_util.temp_path path in
   let* () =
     Lwt_unix_retry.with_file ~mode:Lwt_io.Output tmp (fun oc ->
         Lwt_io.write oc data)
@@ -126,11 +128,50 @@ let make ~root : (module Backend.S) =
     let delete ~key () = Fs_util.rm_rf (resolve key)
     let delete_multi keys = Lwt_list.iter_s (fun key -> delete ~key ()) keys
 
+    (* A hard link when the filesystem allows one, so copying within a store
+       costs a directory entry instead of the body. {!Chunk_space} leans on this:
+       collecting chunks links a whole store's live set, and reading and
+       rewriting every byte to do it would be absurd.
+
+       Safe because a name here is only ever replaced by [write_file]'s rename,
+       never written through, so two names sharing an inode cannot observe each
+       other. [EEXIST] counts as success — the destination already holds these
+       bytes, and a copy that has nothing left to do is done.
+
+       The link is attempted before the destination's directory is made sure of,
+       rather than after. Almost every copy lands in a directory that already
+       exists, so making sure first is a stat spent to learn nothing — and on the
+       paths that copy in bulk it is a third to a half of the whole cost. [ENOENT]
+       is the only answer that leaves a question: create the parent, try once more,
+       and let a second [ENOENT] be the missing source it then is. *)
     let copy ~src_key ~dst_key () =
       if is_dir_key src_key then mkdir_p (resolve dst_key)
       else
-        let* data = read_file (resolve src_key) in
-        write_file (resolve dst_key) data
+        let src = resolve src_key and dst = resolve dst_key in
+        let body () =
+          let* data = read_file src in
+          let* () = Fs_util.ensure_parent dst in
+          write_file dst data
+        in
+        let rec attempt ~parent_made =
+          Lwt.catch
+            (fun () -> Lwt_unix_retry.link src dst)
+            (function
+              | Unix.Unix_error (Unix.EEXIST, _, _) -> Lwt.return_unit
+              (* Either the source is gone or the destination has nowhere to be.
+                 One retry tells them apart, and the second failure is the
+                 source's. *)
+              | Unix.Unix_error (Unix.ENOENT, _, _) when not parent_made ->
+                  let* () = Fs_util.ensure_parent dst in
+                  attempt ~parent_made:true
+              (* Different device, link count exhausted, or a filesystem that has
+                 no links to give. *)
+              | Unix.Unix_error ((Unix.EXDEV | Unix.EMLINK | Unix.EPERM), _, _)
+              | Unix.Unix_error (Unix.EOPNOTSUPP, _, _) ->
+                  body ()
+              | exn -> Lwt.fail exn)
+        in
+        attempt ~parent_made:false
 
     let list_prefix ?max_keys ~prefix () =
       let base = resolve prefix in
@@ -215,9 +256,15 @@ let make ~root : (module Backend.S) =
        is asked with a request waiting. *)
     let concurrency = lazy (Device.max_concurrency root)
 
+    (* [gc]: a filesystem has the two things collecting chunks takes — a link
+       within the store and a directory rename. *)
     let capabilities ~prefix:_ () =
       Lwt.return
-        { Backend.no_caps with max_concurrency = Lazy.force concurrency }
+        {
+          Backend.no_caps with
+          max_concurrency = Lazy.force concurrency;
+          gc = true;
+        }
   end)
 
 let spec =

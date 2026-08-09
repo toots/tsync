@@ -8,6 +8,8 @@ type dest_stats = {
 }
 
 module Make (C : Conf.S) = struct
+  module Space = Chunk_space.Make (C)
+
   (* Bounds concurrent HEAD/copy operations per destination. A copy holds the
      whole object body, so this follows [max_chunk_buffers] rather than the
      file-level [max_uploads]. *)
@@ -131,6 +133,24 @@ module Make (C : Conf.S) = struct
         | Some name, _ -> named name
         | None, m :: _ -> m
         | None, [] -> failwith "no backends configured"
+    in
+    (* A collection in progress leaves the chunk prefix holding only what has been
+       marked so far, so listing it would copy a partial chunk set to every
+       target and call it a resync. Refused rather than reported, since the whole
+       point of this command is to be able to trust the copies afterwards. *)
+    let* () =
+      let* run = Space.read_run () in
+      match (run, manifests_only) with
+        | None, _ | Some _, true -> Lwt.return_unit
+        | Some r, false ->
+            failwith
+              (Printf.sprintf
+                 "%s is being collected (%s, started %.0fs ago), so its chunks \
+                  are only partly under the usual prefix. Let tsync gc finish, \
+                  or stop it with tsync gc --abort, then resync."
+                 C.domain_name
+                 (Chunk_space.string_of_phase r.Chunk_space.phase)
+                 (Unix.gettimeofday () -. r.Chunk_space.started))
     in
     let* entries =
       source_entries ~manifests_only ~on_list src.Backend.backend

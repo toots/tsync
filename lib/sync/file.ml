@@ -259,7 +259,8 @@ module Make_with_layout (C : Conf.S) (Sq : Sync_queue.S) (L : Layout.S) :
           (fun () -> St.put_folder_marker ~key))
 
   (* O(1) delete: move the parent marker into the trash namespace. The subtree
-     stays on the backend for undo, reclaimed later by [expire]. *)
+     stays on the backend for undo, dropped later by [expire] and its chunks
+     reclaimed by [gc]. *)
   let rmdir key =
     with_meta (fun () ->
         let rel = Key.chop_slash (rel_key key) in

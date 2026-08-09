@@ -5,7 +5,8 @@ let root_id = ".tsync-root"
 
 (* Deleted folders are detached from their parent and their marker moved under
    this namespace (unreachable from root, so they vanish from listings/resync);
-   [expire] reclaims the subtree past a grace period. *)
+   [expire] drops the subtree past a grace period, and [gc] then reclaims the
+   chunks it was the last to name. *)
 let trash_id = ".tsync-trash"
 
 (* Random id, minted at mkdir. Xxhash-free: ids are opaque handles. *)
@@ -16,7 +17,6 @@ let new_id = Id.short
    filesystem-safe regardless of the real name. *)
 let hash_name name = Xxhash.hash_hex name 0 ^ "-" ^ Xxhash.hash_hex name 1
 
-(* Manifests-relative key of [name] inside folder [folder_id]. *)
 let child_key ~folder_id name = folder_id ^ "/" ^ hash_name name
 
 type marker = { name : string; id : string }

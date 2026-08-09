@@ -1,14 +1,18 @@
-(* Expire scenarios: [expire] deletes versions older than a cutoff, then
-   garbage-collects any chunk no longer referenced by a live file or a surviving
-   version. "all" expires every existing version (cutoff = now); "none" expires
-   nothing (cutoff = epoch). See ../base/base.ml for the single-client harness. *)
+(* Expire scenarios: [expire] drops trashed folders, versions and journal entries
+   older than a cutoff. "all" expires every existing version (cutoff = now);
+   "none" expires nothing (cutoff = epoch).
+
+   The chunks this orphans stay on the backend — visible in each snapshot below as
+   a chunk no file references. Reclaiming them is a separate step with separate
+   requirements; see ../gc/gc.ml. See ../base/base.ml for the single-client
+   harness. *)
 
 open Test_runner
 
 let scenarios : scenario list =
   [
     {
-      name = "expire all: old version's chunk collected, live chunk kept";
+      name = "expire all: old version dropped, its chunk left behind";
       steps =
         [
           Write { path = "foo.txt"; content = "one" };
@@ -19,7 +23,7 @@ let scenarios : scenario list =
         ];
     };
     {
-      name = "expire all: deleted file fully reclaimed";
+      name = "expire all: deleted file dropped, chunk left behind";
       steps =
         [
           Write { path = "foo.txt"; content = "gone soon" };
@@ -47,9 +51,9 @@ let scenarios : scenario list =
         ];
     };
     {
-      (* A trashed folder past the cutoff is reclaimed: the subtree kept for undo
-         is deleted and its now-unreferenced chunk collected. *)
-      name = "expire all: trashed folder reclaimed";
+      (* A trashed folder past the cutoff loses the subtree kept for undo, which
+         is what stops its chunk being referenced. *)
+      name = "expire all: trashed folder dropped, chunk left behind";
       steps =
         [
           Mkdir "d";

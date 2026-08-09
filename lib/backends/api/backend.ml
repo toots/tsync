@@ -65,9 +65,11 @@ type caps = {
   share_url : string option;
   chunk_size : int option;
   max_concurrency : int option;
+  gc : bool;
 }
 
-let no_caps = { share_url = None; chunk_size = None; max_concurrency = None }
+let no_caps =
+  { share_url = None; chunk_size = None; max_concurrency = None; gc = false }
 
 let merge_caps =
   let first a b = match a with Some _ -> a | None -> b in
@@ -82,6 +84,7 @@ let merge_caps =
         share_url = first acc.share_url c.share_url;
         chunk_size = first acc.chunk_size c.chunk_size;
         max_concurrency = lowest acc.max_concurrency c.max_concurrency;
+        gc = acc.gc || c.gc;
       })
     no_caps
 
