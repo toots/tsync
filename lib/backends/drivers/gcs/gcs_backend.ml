@@ -39,7 +39,7 @@ let upload_uri t key =
     (t.base ^ "/upload/storage/v1/b/" ^ t.bucket ^ "/o?uploadType=media&name="
    ^ enc_key key)
 
-let call t ~meth ?ctype ?(body = "") uri =
+let call t ~meth ?ctype ?(extra_headers = []) ?(body = "") uri =
   let* auth_header =
     match t.auth with
       | None -> Lwt.return []
@@ -49,7 +49,9 @@ let call t ~meth ?ctype ?(body = "") uri =
   in
   let headers =
     Cohttp.Header.of_list
-      (match ctype with
+      (extra_headers
+      @
+      match ctype with
         | Some c -> ("Content-Type", c) :: auth_header
         | None -> auth_header)
   in
@@ -63,9 +65,9 @@ let call t ~meth ?ctype ?(body = "") uri =
 
 (* Raises on a transient status so the shared loop retries it; every other
    response comes back for the verb to interpret, 404 included. *)
-let call_retry t ~meth ?ctype ?body op uri =
+let call_retry t ~meth ?ctype ?extra_headers ?body op uri =
   Backend.with_retry ~name:"gcs" ~op (fun () ->
-      let* resp, rbody = call t ~meth ?ctype ?body uri in
+      let* resp, rbody = call t ~meth ?ctype ?extra_headers ?body uri in
       if is_transient_code (code resp) then
         Lwt.fail (backend_error op (code resp) rbody)
       else Lwt.return (resp, rbody))
@@ -224,9 +226,16 @@ let delete_multi t keys =
     | batch ->
         let here = List.filteri (fun i _ -> i < bulk_delete_limit) batch in
         let rest = List.filteri (fun i _ -> i >= bulk_delete_limit) batch in
+        let request = delete_body here in
+        (* Required, and answered with a 400 naming it when absent: this is the
+           one request whose body the store checks before acting on it, a
+           truncated list of keys to delete being worse than no list at all.
+           [Stdlib.Digest] is MD5, which is all this is. *)
         let* resp, body =
           call_retry t ~meth:`POST ~ctype:"application/xml"
-            ~body:(delete_body here) "delete_multi" (delete_uri t)
+            ~extra_headers:
+              [("Content-MD5", Base64.encode_string (Digest.string request))]
+            ~body:request "delete_multi" (delete_uri t)
         in
         if not (is_ok resp) then
           raise (backend_error "delete_multi" (code resp) body);
