@@ -14,6 +14,13 @@ let string_of_kind = function
   | Transient -> "transient"
   | Permanent -> "permanent"
 
+(* Both spellings, from both stores, in one list: a driver deciding this for
+   itself is how two of them came to disagree about what a bulk delete reporting
+   a missing key means. *)
+let absent_code = function
+  | "NoSuchKey" | "NotFound" -> true
+  | _ -> false
+
 let classify = function
   | Failed { kind; _ } -> kind
   | Not_writable -> Permanent
