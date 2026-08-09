@@ -500,6 +500,32 @@ module Make_with_layout (C : Conf.S) (Sq : Sync_queue.S) (L : Layout.S) :
                   | None -> Lwt.return_unit)
               (fun _ -> Lwt.return_unit)
 
+  (* A [Put] materialises the directories above it as a side effect of writing
+     the manifest, and those carry no id: only a [Mkdir] op adopts one, and the
+     mkdir for a folder created before this client's cursor is not in the
+     journal it replays. Left alone, the directory exists in the mirror and can
+     be named to nobody.
+
+     Top-down, because a marker's key is built from the id of the folder above
+     it, and adoption only — the marker is the store's, and minting one here
+     would fork the namespace the other clients already agree on. *)
+  let adopt_ancestor_ids rel =
+    let rec ancestors acc rel =
+      match Key.parent rel with
+        | "" -> acc
+        | parent -> ancestors (parent :: acc) parent
+    in
+    Lwt_list.iter_s
+      (fun dir ->
+        let* known =
+          Folder_ids.lookup_id ~cache_root:C.cache_root
+            ~domain_name:C.domain_name dir
+        in
+        match known with
+          | Some _ -> Lwt.return_unit
+          | None -> adopt_folder_id dir)
+      (ancestors [] rel)
+
   (* A foreign op must never clobber unsynced local edits. The staged manifest
      is that flag and survives a restart. *)
   let unless_staged key f =
@@ -514,6 +540,10 @@ module Make_with_layout (C : Conf.S) (Sq : Sync_queue.S) (L : Layout.S) :
           let key = C.domain_prefix ^ rel in
           unless_staged key (fun () ->
               ignore (cancel_upload key);
+              (* Before the fetch, not after: the manifest's own key is built
+                 from the parent folder's id, so a missing one does not fail
+                 loudly here — it resolves to no key and the put is skipped. *)
+              let* () = adopt_ancestor_ids rel in
               let* m = R.fetch_manifest ~key () in
               match m with
                 | None -> Lwt.return_unit
@@ -528,6 +558,7 @@ module Make_with_layout (C : Conf.S) (Sq : Sync_queue.S) (L : Layout.S) :
          the mirror no longer has. *)
       | `Mkdir (rel, _) ->
           let* () = Mf.create_dir (C.domain_prefix ^ rel) in
+          let* () = adopt_ancestor_ids rel in
           adopt_folder_id rel
       | `Rmdir (rel, _) -> Mf.delete_dir (C.domain_prefix ^ rel)
       | `Rename { Journal.src; dst; is_dir = true; _ } ->
@@ -536,6 +567,7 @@ module Make_with_layout (C : Conf.S) (Sq : Sync_queue.S) (L : Layout.S) :
           let* exists = Lwt_unix_retry.file_exists (manifest_path src_key) in
           if exists then
             unless_staged src_key (fun () ->
+                let* () = adopt_ancestor_ids dst in
                 let* () = rename_local ~src:src_key ~dst:dst_key in
                 reparent_dir dst_key)
           else Lwt.return_unit
@@ -545,6 +577,7 @@ module Make_with_layout (C : Conf.S) (Sq : Sync_queue.S) (L : Layout.S) :
           let* exists = Lwt_unix_retry.file_exists (manifest_path src_key) in
           if exists then
             unless_staged src_key (fun () ->
+                let* () = adopt_ancestor_ids dst in
                 rename_local ~src:src_key ~dst:dst_key)
           else
             unless_staged dst_key (fun () ->

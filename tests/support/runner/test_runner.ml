@@ -70,6 +70,7 @@ type step =
       (** Overwrite a cached chunk body with garbage, so it no longer hashes to
           its own name. *)
   | DeleteCachedChunk of { path : string; index : int }
+  | ForgetFolderId of string
   | Recheck
   | RecoverStaged
       (** Finish or discard every unfinished record, and adopt staged data no
@@ -178,6 +179,7 @@ let rec render_step = function
       Printf.sprintf "corrupt-cached-chunk %s #%d" path index
   | DeleteCachedChunk { path; index } ->
       Printf.sprintf "delete-cached-chunk %s #%d" path index
+  | ForgetFolderId rel -> "forget-folder-id " ^ rel
   | Recheck -> "recheck"
   | RecoverStaged -> "recover-staged"
   | CrashBeforeCommit p -> "crash-before-commit " ^ p
@@ -781,6 +783,18 @@ let setup_client (module C : Conf.S) root staging_prefix =
         let* () = F.ensure_cached (key path) in
         let* p = cached_chunk_path (key path) index in
         Lwt.catch (fun () -> Lwt_unix_retry.unlink p) (fun _ -> Lwt.return_unit)
+    | ForgetFolderId rel ->
+        let marker =
+          Filename.concat
+            (Filename.concat
+               (Cache_layout.manifests_dir ~cache_root:C.cache_root
+                  C.domain_name)
+               (Name_escape.encode_key rel))
+            Folder_ids.marker_name
+        in
+        Lwt.catch
+          (fun () -> Lwt_unix_retry.unlink marker)
+          (fun _ -> Lwt.return_unit)
     | RecoverStaged -> Rp.reconcile ()
     | CrashBeforeCommit path ->
         let k = key path in

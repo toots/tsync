@@ -467,3 +467,42 @@
   file kept.txt [.tsync-root/2af84fa98a68a9b1-19465e194feef43e] = manifest size=4 chunks=1 h1=d919e86de687ce50 h2=05cef325b63712c0
     chunk#0 2fbef8c1952e19fd-2277f2bac962dc19 size=4
 
+=== foreign_put_readopts_a_forgotten_folder_id
+  A: mkdir sub
+  A: drain
+  A: write sub/first.txt "one"
+  A: drain
+  B: sync
+  B: forget-folder-id sub
+  A: write sub/second.txt "two"
+  A: drain
+  B: sync
+--- tree A
+  d sub/
+  f sub/first.txt size=3 cached=0/1 uploaded=true etag=927288390658e64d
+  f sub/second.txt size=3 cached=0/1 uploaded=true etag=f7cd621f4f189919
+--- content A
+  sub/first.txt = "one"
+  sub/second.txt = "two"
+--- pending A
+--- tree B
+  d sub/
+  f sub/first.txt size=3 cached=0/1 uploaded=true etag=927288390658e64d
+  f sub/second.txt size=3 cached=0/1 uploaded=true etag=f7cd621f4f189919
+--- content B
+  sub/first.txt = "one"
+  sub/second.txt = "two"
+--- pending B
+--- backend
+  chunk 6c0560bdcb29998b-8f653076428650aa size=3
+  chunk 911faba7321fe1a0-a3cf92cbf55153da size=3
+  cursor = <entry-1>
+  journal <entry-1> = mkdir sub/
+  journal <entry-2> = put sub/first.txt 3
+  journal <entry-3> = put sub/second.txt 3
+  folder sub [.tsync-root/4f7b4244079f8bf6-67a7ed7af26470c3] -> <folder-1>
+  file second.txt [<folder-1>/5f6e39261bd1cacd-9908fb8a30dc8930] = manifest size=3 chunks=1 h1=f7cd621f4f189919 h2=e85ff58d754105ea
+    chunk#0 6c0560bdcb29998b-8f653076428650aa size=3
+  file first.txt [<folder-1>/fb911c13b0312a04-e4d81e41f926300d] = manifest size=3 chunks=1 h1=927288390658e64d h2=b8b5ebbd37156bca
+    chunk#0 911faba7321fe1a0-a3cf92cbf55153da size=3
+
