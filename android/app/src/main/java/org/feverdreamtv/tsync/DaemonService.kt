@@ -7,6 +7,7 @@ import android.app.Service
 import android.content.Context
 import android.content.Intent
 import android.os.IBinder
+import android.os.SystemClock
 import android.util.Log
 import java.io.File
 
@@ -20,6 +21,11 @@ import java.io.File
 class DaemonService : Service() {
     companion object {
         const val TAG = "tsyncd"
+
+        /** Long enough to mean it started properly rather than died on config. */
+        const val SETTLED_MS = 60_000L
+        const val RESTART_DELAY_MS = 5_000L
+        const val MAX_RESTARTS = 5
         private const val CHANNEL = "tsync-daemon"
         private const val NOTIFICATION_ID = 1
 
@@ -124,11 +130,21 @@ class DaemonService : Service() {
 
     private var daemon: Process? = null
 
+    /** Set while onDestroy is tearing down, so the pump does not read the exit
+     *  it asked for as a death to recover from. */
+    @Volatile
+    private var stopping = false
+    private var restarts = 0
+
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         startForeground(NOTIFICATION_ID, notification())
-        if (daemon == null) start()
+        // Liveness, not nullness: the daemon is an exec'd child rather than a
+        // process the system manages, so Android reaps it on its own while this
+        // service object survives. Holding a dead Process here is what left it
+        // down until something killed the whole app.
+        if (daemon?.isAlive != true) start()
         return START_STICKY
     }
 
@@ -138,10 +154,29 @@ class DaemonService : Service() {
             env(this)
         )
         daemon = process
+        // Local, not a field: a restart would otherwise stamp this thread's
+        // process with the successor's start time.
+        val launchedAt = SystemClock.elapsedRealtime()
         // Without syslog compiled in, Log.Daemon falls through to stdout, so this
         // pump is the only way to see anything the daemon says.
         Thread {
             process.inputStream.bufferedReader().forEachLine { Log.i(TAG, it) }
+            // EOF means it exited: Android reaps this child on its own, and a
+            // picker in another app needs it back without anyone opening ours.
+            val lived = SystemClock.elapsedRealtime() - launchedAt
+            Log.w(TAG, "daemon exited ${process.waitFor()} after ${lived / 1000}s")
+            if (lived > SETTLED_MS) restarts = 0
+            when {
+                stopping -> {}
+                // A daemon that dies immediately dies for a reason a retry will
+                // not change — say so once instead of spinning on it.
+                ++restarts > MAX_RESTARTS ->
+                    Log.e(TAG, "daemon died $MAX_RESTARTS times in a row; leaving it down")
+                else -> {
+                    Thread.sleep(RESTART_DELAY_MS)
+                    if (!stopping) start()
+                }
+            }
         }.start()
         Thread {
             process.errorStream.bufferedReader().forEachLine { Log.w(TAG, it) }
@@ -149,6 +184,7 @@ class DaemonService : Service() {
     }
 
     override fun onDestroy() {
+        stopping = true
         // Ask it to drain first; the handler returns `Stop and unwinds cleanly.
         runCatching { run(this, "stop") }
         daemon?.destroy()

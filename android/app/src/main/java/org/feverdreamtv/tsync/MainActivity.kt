@@ -142,15 +142,21 @@ class MainActivity : Activity() {
             textSize = 10f
         }
 
-        // `stats` goes through the IPC socket, which does not exist until the
-        // daemon has started — and the service is only just being asked to
-        // start it. Wait for the socket rather than reporting a daemon that is
-        // merely still waking up as absent.
+        // Wait until the daemon answers, not until its socket file is there:
+        // the socket lives on the filesystem, so the file outlives the process
+        // that bound it. Android kills this app's process while it is away and
+        // the daemon, its child, goes too — leaving a path that exists and
+        // listens to nothing, which is what made a restarting daemon report as
+        // absent.
         fun refresh() = thread {
             runOnUiThread { output.text = "starting…" }
             val socket = Ipc.socketPath(filesDir, Config.load(this)?.domain ?: "")
             var waited = 0
-            while (!socket.exists() && waited++ < 40) Thread.sleep(250)
+            var answering = false
+            while (waited++ < 40 && !answering) {
+                answering = runCatching { Ipc.send(socket, "status") }.isSuccess
+                if (!answering) Thread.sleep(250)
+            }
             val (_, text) = DaemonService.run(this, "stats")
             // A walk creates each folder before fetching what is inside it, so
             // mid-sync a directory that looks empty is not one.
@@ -160,7 +166,7 @@ class MainActivity : Activity() {
                 else ""
             runOnUiThread {
                 output.text = syncing + text.ifBlank {
-                    if (socket.exists()) "daemon is up but returned nothing"
+                    if (answering) "daemon is up but returned nothing"
                     else "daemon did not start — check `adb logcat -s tsyncd`"
                 }
             }
