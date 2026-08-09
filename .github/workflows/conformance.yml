@@ -1,0 +1,76 @@
+name: conformance
+
+# Against the real object stores, because the things this asks about are exactly
+# the ones an emulator approximates least well: whether a write precondition is
+# honoured, and whether a bulk delete reports per key what it refused.
+#
+# Its own workflow rather than a step of `test`, because it is the only job that
+# needs credentials and the only one that touches something outside the runner.
+# A failure here means the bucket disagreed with us, which is a different thing
+# from the build being broken and is worth being able to re-run on its own.
+#
+# One job on purpose: the test works under a prefix named after the run, and
+# GITHUB_RUN_ID is shared by every job of a run — a second job here would sweep
+# the first one's objects out from under it.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  merge_group:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  conformance:
+    runs-on: ubuntu-latest
+    # Forks receive no secrets, so this reports itself skipped there rather than
+    # failing for a reason nobody who sent the pull request can act on.
+    if: >-
+      github.event_name != 'pull_request' ||
+      github.event.pull_request.head.repo.full_name == github.repository
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y pkg-config libev-dev
+      - uses: ocaml/setup-ocaml@v3
+        with:
+          ocaml-compiler: "5.5"
+          dune-cache: true
+      - name: Pin packages
+        run: |
+          opam pin -ny .
+          opam pin add -ny git+https://github.com/toots/aws-s3.git#tsync
+      # No fuse: this builds one executable over the backend drivers, and the
+      # frontends are no part of what it asks.
+      - name: Install OCaml dependencies
+        run: opam install --deps-only -y tsync tsync-s3
+      - name: Backend conformance (real GCS and S3)
+        env:
+          TSYNC_CI_GCS_BUCKET: ${{ secrets.TSYNC_CI_GCS_BUCKET }}
+          TSYNC_CI_GCS_SERVICE_ACCOUNT_KEY: ${{ secrets.TSYNC_CI_GCS_SERVICE_ACCOUNT_KEY }}
+          TSYNC_CI_S3_BUCKET: ${{ secrets.TSYNC_CI_S3_BUCKET }}
+          TSYNC_CI_S3_REGION: ${{ secrets.TSYNC_CI_S3_REGION }}
+          TSYNC_CI_S3_ACCESS_KEY_ID: ${{ secrets.TSYNC_CI_S3_ACCESS_KEY_ID }}
+          TSYNC_CI_S3_SECRET_ACCESS_KEY: ${{ secrets.TSYNC_CI_S3_SECRET_ACCESS_KEY }}
+        run: |
+          # A secret that is absent arrives as the empty string, and the test
+          # would then report "no credentials" and exit 2. Say which one is
+          # missing instead: that is a repository setting, not a code failure.
+          missing=
+          for v in TSYNC_CI_GCS_BUCKET TSYNC_CI_GCS_SERVICE_ACCOUNT_KEY \
+                   TSYNC_CI_S3_BUCKET TSYNC_CI_S3_REGION \
+                   TSYNC_CI_S3_ACCESS_KEY_ID TSYNC_CI_S3_SECRET_ACCESS_KEY; do
+            [ -n "${!v}" ] || missing="$missing $v"
+          done
+          if [ -n "$missing" ]; then
+            echo "::error::conformance needs these repository secrets:$missing"
+            echo "::error::run scripts/setup_ci_secrets.sh to provision them"
+            exit 1
+          fi
+          opam exec -- make -C linux conformance
