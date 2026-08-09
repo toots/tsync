@@ -648,6 +648,17 @@ module Make (C : Conf.S) = struct
     s.chunks_promoted <- s.chunks_promoted + List.length chunks;
     s.roots_marked <- s.roots_marked + 1;
     Log.debug "gc: marked %s (%d chunk(s))" key (List.length chunks);
+    (* Reported from here and not from the namespace above. The clock says once a
+       second, but a clock is only ever read where it is looked at, and a namespace
+       is a folder's worth of manifests with a hundred chunks apiece — minutes
+       between glances on a slow disk, so the line sat still while the work did not.
+       A root is small enough that once a second means it. *)
+    ignore
+      (throttled (fun () ->
+           Log.debug "gc: marked %d/%d namespace(s), %d root(s), %d chunk(s) kept"
+             s.done_ s.total s.roots_marked s.chunks_promoted;
+           s.on_mark ~namespaces:s.done_ ~total:s.total ~roots:s.roots_marked
+             ~promoted:s.chunks_promoted));
     Lwt.return_unit
 
   (* One namespace: list it, then mark everything in it. The listing is part of
@@ -688,17 +699,6 @@ module Make (C : Conf.S) = struct
     in
     s.done_ <- s.done_ + 1;
     Log.debug "gc: marked namespace %s (%d root(s))" ns (List.length keys);
-    ignore
-      (throttled (fun () ->
-           (* Debug, not info: the caller's progress callback is what a terminal
-              shows, and saying it twice is worse than once. The phase transitions
-              stay at info, so a log kept without [-v] still records that a
-              collection ran and what it came to. *)
-           Log.debug
-             "gc: marked %d/%d namespace(s), %d root(s), %d chunk(s) kept"
-             s.done_ s.total s.roots_marked s.chunks_promoted;
-           s.on_mark ~namespaces:s.done_ ~total:s.total ~roots:s.roots_marked
-             ~promoted:s.chunks_promoted));
     Lwt.return_unit
 
   (* Accumulated per target across every shard, kept in configuration order. *)
