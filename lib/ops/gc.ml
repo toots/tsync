@@ -198,8 +198,6 @@ module Make (C : Conf.S) = struct
 
   (* {1 Marking} *)
 
-  let parse_version = Versioning.parse ~versions_prefix:C.versions_prefix
-
   (* A namespace is a name in one of the two directories that can hold something
      referencing a chunk: [manifests/<folder-id>/...] and
      [versions/<folder-id>/...]. Tagged so the two cannot collide in a cursor, and
@@ -226,11 +224,7 @@ module Make (C : Conf.S) = struct
      is missed and does not need catching: whatever writes it promotes its own
      chunks when it publishes. *)
   let namespaces root =
-    let read dir =
-      Lwt.catch
-        (fun () -> Fs_util.readdir_list (Filename.concat root dir))
-        (function Unix.Unix_error _ -> Lwt.return_nil | e -> Lwt.fail e)
-    in
+    let read dir = Fs_util.readdir_list_quiet (Filename.concat root dir) in
     let* manifests = read (dir_of_prefix C.domain_prefix) in
     let+ versions = read (dir_of_prefix C.versions_prefix) in
     List.map (encode `Manifests) manifests
@@ -288,11 +282,8 @@ module Make (C : Conf.S) = struct
      knowable from here, so reconciling asks it about every shard there could be —
      see {!all_shards}. *)
   let shards_in dir =
-    Lwt.catch
-      (fun () ->
-        let+ names = Fs_util.readdir_list dir in
-        List.filter Chunk_layout.is_shard_name names)
-      (function Unix.Unix_error _ -> Lwt.return_nil | e -> Lwt.fail e)
+    let+ names = Fs_util.readdir_list_quiet dir in
+    List.filter Chunk_layout.is_shard_name names
 
   (* Abandoning visits the space on its way out; closing visits both, since a shard
      may exist in either. *)
@@ -744,11 +735,7 @@ module Make (C : Conf.S) = struct
      old names stayed behind. *)
   let discard_shard s shard =
     let dir = Filename.concat (from_dir s.root) shard in
-    let* names =
-      Lwt.catch
-        (fun () -> Fs_util.readdir_list dir)
-        (function Unix.Unix_error _ -> Lwt.return_nil | e -> Lwt.fail e)
-    in
+    let* names = Fs_util.readdir_list_quiet dir in
     let* () =
       Lwt_list.iter_p
         (fun n ->
@@ -807,11 +794,8 @@ module Make (C : Conf.S) = struct
       Filename.concat (to_dir s.root) shard )
 
   let read_dir dir =
-    Lwt.catch
-      (fun () ->
-        let+ names = Fs_util.readdir_list dir in
-        List.filter Chunk_layout.is_chunk_key names)
-      (function Unix.Unix_error _ -> Lwt.return_nil | e -> Lwt.fail e)
+    let+ names = Fs_util.readdir_list_quiet dir in
+    List.filter Chunk_layout.is_chunk_key names
 
   let move_into ~src_dir ~dst_dir names =
     Lwt_list.iter_s

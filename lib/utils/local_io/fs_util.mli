@@ -47,6 +47,11 @@ val copy_file : src:string -> dst:string -> unit Lwt.t
 (** Directory entries of [path], excluding ["."] and [".."]. *)
 val readdir_list : string -> string list Lwt.t
 
+(** {!readdir_list}, answering [[]] for a directory that is missing or cannot be
+    read. For a caller sweeping a layout, where an absent directory and an empty
+    one mean the same thing. Only [Unix_error] is swallowed. *)
+val readdir_list_quiet : string -> string list Lwt.t
+
 (** [true] if [path] exists and is a directory (following symlinks). *)
 val is_directory : string -> bool Lwt.t
 
