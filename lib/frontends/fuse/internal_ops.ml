@@ -4,13 +4,10 @@ module Make (F : File_ops.S) = struct
   let make ~fuse_to_key : Path_ops.t =
     let file path = fuse_to_key path in
     {
-      mknod =
-        (fun path _mode ->
-          Lwt.catch
-            (fun () -> F.create (file path))
-            (fun exn ->
-              Log.err "mknod %s: %s" path (Printexc.to_string exn);
-              Lwt.fail (Unix.Unix_error (Unix.EIO, "mknod", path))));
+      (* No local catch: [Fuse_fs]'s [guard "mknod"] already turns anything that
+         is not a [Unix_error] into EIO, and catching here first made that
+         wrapper unreachable. *)
+      mknod = (fun path _mode -> F.create (file path));
       fopen =
         (fun path fi ->
           let flags = fi.fi_flags in
