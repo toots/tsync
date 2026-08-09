@@ -1039,7 +1039,11 @@ let sync_cmd =
              ~domain_name:C.domain_name
          in
          let* n, failed = rebuild_mirror () in
-         Fs.write_last_sync_key (J.entry_key ());
+         (* Only a rebuild that reached everything may say so. Recording the
+            mark after a partial walk moves the cursor past folders that were
+            never fetched, and nothing revisits them: their files arrive later
+            as journal puts, into directories no id names. *)
+         if failed = 0 then Fs.write_last_sync_key (J.entry_key ());
          (try
             if !verbose then Log.info "notifying daemon of completed resync";
             ignore
@@ -1054,6 +1058,7 @@ let sync_cmd =
               Printf.sprintf
                 " (%d failed — re-run 'tsync sync --full' to complete)" failed
             else "");
+         if failed > 0 then exit 1;
          Lwt.return_unit
        in
        (* One pass of the same engine the daemon polls with, so the two cannot

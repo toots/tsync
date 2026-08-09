@@ -208,6 +208,22 @@ module Make (C : Conf.S) (F : File_ops.S) = struct
             @ file_fields ~size:e.size ~mtime:e.last_modified ~etag:""
                 ~is_uploaded:true ~symlink:None)
 
+  (* An item under a folder this client holds no id for cannot be named to a
+     caller, and both listings answer with what they could name. How many they
+     could not is part of the answer: a short list and a complete one are
+     otherwise the same reply, which is how a folder stays invisible with
+     nothing looking wrong. *)
+  let unnamed_field prefix n =
+    if n = 0 then []
+    else begin
+      Log.warn
+        "%s: %d item%s this client has no folder id for; run 'tsync sync \
+         --full'"
+        prefix n
+        (if n = 1 then "" else "s");
+      [("unnamed", `Int n)]
+    end
+
   (* One list, each entry tagged by kind: files and directories differ in what
      describes them, not in how they are named. *)
   let handle_list_dir prefix =
@@ -233,8 +249,11 @@ module Make (C : Conf.S) (F : File_ops.S) = struct
                   | naming, Some id -> Some (`Assoc (naming @ dir_fields id)))
               dirs
           in
+          let named = List.filter_map Fun.id dirs_json in
+          let unnamed = List.length dirs_json - List.length named in
           ok_json
-            [("items", `List (List.filter_map Fun.id dirs_json @ files_json))]
+            (("items", `List (named @ files_json))
+            :: unnamed_field prefix unnamed)
 
   (* Grouped by containing folder, so each folder id resolves once, not per
      file. *)
@@ -252,14 +271,25 @@ module Make (C : Conf.S) (F : File_ops.S) = struct
         (fun (parent, entries) ->
           let* id = lookup_folder parent in
           match id with
-            | None -> Lwt.return []
+            (* The whole group, not one entry: an unnamed folder takes every
+               file under it out of the answer. *)
+            | None -> Lwt.return (`Unnamed (List.length entries))
             | Some container_id ->
-                Lwt_list.map_p
-                  (file_entry_json ~container_id)
-                  (List.rev entries))
+                let+ json =
+                  Lwt_list.map_p
+                    (file_entry_json ~container_id)
+                    (List.rev entries)
+                in
+                `Named json)
         (Hashtbl.fold (fun k v acc -> (k, v) :: acc) by_parent [])
     in
-    ok_json [("items", `List (List.concat groups))]
+    let named = List.concat_map (function `Named j -> j | _ -> []) groups in
+    let unnamed =
+      List.fold_left
+        (fun n g -> match g with `Unnamed k -> n + k | `Named _ -> n)
+        0 groups
+    in
+    ok_json (("items", `List named) :: unnamed_field prefix unnamed)
 
   (* Journal keys are relative to the domain prefix; the FileProvider uses full
      keys as item identifiers, with directories ending in "/". *)

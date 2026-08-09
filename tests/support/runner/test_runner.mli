@@ -99,6 +99,10 @@ type step =
   | DeleteCachedChunk of { path : string; index : int }
       (** Delete a cached chunk body behind the daemon's back, as the cache cap
           may at any moment. *)
+  | ForgetFolderId of string
+      (** Drop a directory's local id marker, leaving the mirror holding the
+          folder and its files but no name to offer a frontend. What a client
+          that replayed a put whose mkdir predates its cursor is left with. *)
   | Recheck
       (** Run [Recheck.run] over the whole domain and print each file's status
           line plus a summary, then the chunk-store integrity pass. *)

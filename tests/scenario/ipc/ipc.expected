@@ -16,6 +16,17 @@
   list_dir d:<folder-1> -> {"ok":true,"items":[{"ref":"f:<folder-1>/c.txt","parentRef":"d:<folder-1>","name":"c.txt","key":"tsync/test/manifests/sub/c.txt","kind":"file","size":6,"mtime":"<mtime>","etag":"7546f608548f4d0d","isUploaded":true}]}
   list_all root -> {"ok":true,"items":[{"ref":"f:<folder-1>/c.txt","parentRef":"d:<folder-1>","name":"c.txt","key":"tsync/test/manifests/sub/c.txt","kind":"file","size":6,"mtime":"<mtime>","etag":"7546f608548f4d0d","isUploaded":true},{"ref":"f:.tsync-root/top.txt","parentRef":"root","name":"top.txt","key":"tsync/test/manifests/top.txt","kind":"file","size":3,"mtime":"<mtime>","etag":"97bb0a4a6df0d08e","isUploaded":true}]}
 
+=== a folder this client cannot name is counted, not dropped
+  mkdir sub
+  drain
+  write sub/c.txt "nested"
+  write top.txt "top"
+  drain
+  forget-folder-id sub
+--- listing
+  list_dir root -> {"ok":true,"items":[{"ref":"f:.tsync-root/top.txt","parentRef":"root","name":"top.txt","key":"tsync/test/manifests/top.txt","kind":"file","size":3,"mtime":"<mtime>","etag":"97bb0a4a6df0d08e","isUploaded":true}],"unnamed":1}
+  list_all root -> {"ok":true,"items":[{"ref":"f:.tsync-root/top.txt","parentRef":"root","name":"top.txt","key":"tsync/test/manifests/top.txt","kind":"file","size":3,"mtime":"<mtime>","etag":"97bb0a4a6df0d08e","isUploaded":true}],"unnamed":1}
+
 === identical content shares an etag
   write x.txt "same bytes"
   drain

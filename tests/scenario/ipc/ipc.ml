@@ -27,6 +27,18 @@ let listing_scenarios : scenario list =
         ];
     };
     {
+      name = "a folder this client cannot name is counted, not dropped";
+      steps =
+        [
+          Mkdir "sub";
+          Drain;
+          Write { path = "sub/c.txt"; content = "nested" };
+          Write { path = "top.txt"; content = "top" };
+          Drain;
+          ForgetFolderId "sub";
+        ];
+    };
+    {
       name = "identical content shares an etag";
       steps =
         [

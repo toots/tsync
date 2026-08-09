@@ -326,6 +326,27 @@ let stale_record_discarded =
       ];
   }
 
+(* B holds the folder's files but not its id — what a client is left with when
+   the mkdir predates the cursor it replays from. The next foreign put into that
+   folder is what repairs it: the id comes from the marker the store already
+   holds, so B ends up naming the folder the same way A does. *)
+let foreign_put_readopts_a_forgotten_folder_id =
+  {
+    name = "foreign_put_readopts_a_forgotten_folder_id";
+    steps =
+      [
+        A (Mkdir "sub");
+        A Drain;
+        A (Write { path = "sub/first.txt"; content = "one" });
+        A Drain;
+        B Sync;
+        B (ForgetFolderId "sub");
+        A (Write { path = "sub/second.txt"; content = "two" });
+        A Drain;
+        B Sync;
+      ];
+  }
+
 let () =
   run_two_client_scenarios
     [
@@ -347,4 +368,5 @@ let () =
       crash_leaves_a_record;
       crash_before_commit;
       stale_record_discarded;
+      foreign_put_readopts_a_forgotten_folder_id;
     ]
