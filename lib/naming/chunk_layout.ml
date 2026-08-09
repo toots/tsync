@@ -26,8 +26,7 @@ let is_chunk_key name =
   match String.index_opt name '-' with
     | Some i when i = Xxhash.hex_length ->
         Xxhash.is_hex (String.sub name 0 i)
-        && Xxhash.is_hex
-             (String.sub name (i + 1) (String.length name - i - 1))
+        && Xxhash.is_hex (String.sub name (i + 1) (String.length name - i - 1))
     | _ -> false
 
 let is_shard_name name =

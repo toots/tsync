@@ -91,8 +91,8 @@ end
 
     [chunk_from_prefix] is where the source keeps chunks it has not finished
     collecting — see {!Chunk_space}. A chunk a manifest names may be only there,
-    so a read of one falls through to it; what is written to the target is always
-    the ordinary chunk key, a target having one space and no notion of a
+    so a read of one falls through to it; what is written to the target is
+    always the ordinary chunk key, a target having one space and no notion of a
     collection. Omit it for a source that is never collected. *)
 val make :
   ?resume:bool ->

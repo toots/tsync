@@ -1,16 +1,16 @@
 (** Collect chunks nothing references any more.
 
     {!Expire} drops the references — old versions, trashed folders, journal
-    entries. What it leaves behind is chunks no manifest and no surviving version
-    points at, and this reclaims them. Run one then the other; neither does the
-    other's job.
+    entries. What it leaves behind is chunks no manifest and no surviving
+    version points at, and this reclaims them. Run one then the other; neither
+    does the other's job.
 
-    {b How it works.} A run moves the chunk root aside to [chunks.from/] and lets
-    the live set accumulate under [chunks/], the name every writer already uses.
-    Marking gives each chunk a live root names a second hard link under the new
-    root, so nothing is copied and nothing is deleted; closing discards
-    [chunks.from/], and the inodes that never earned a link go with it. Reclaiming
-    is therefore the link count's doing, not a delete's.
+    {b How it works.} A run moves the chunk root aside to [chunks.from/] and
+    lets the live set accumulate under [chunks/], the name every writer already
+    uses. Marking gives each chunk a live root names a second hard link under
+    the new root, so nothing is copied and nothing is deleted; closing discards
+    [chunks.from/], and the inodes that never earned a link go with it.
+    Reclaiming is therefore the link count's doing, not a delete's.
 
     Writes need no cooperation, which is the point of collecting in this
     direction: a client that has never heard of a run still writes to [chunks/],
@@ -23,32 +23,33 @@
     scheme rests on. An object store gets neither, so an s3, gcs or http-proxy
     main is refused rather than half-served.
 
-    {b The copies.} Replicas and backfill targets are never renamed. Once the main
-    has settled, each is walked shard by shard — the target's own shards, since
-    only it knows what it holds, and a shard the main never had is exactly where
-    its orphans hide — and whatever the main no longer has is deleted. A replica is
-    additionally filled where it falls short, being meant to be a complete copy; a
-    backfill target is not, being incomplete by design and having its own queue for
-    that. So a remote store sees deletes and puts, never a rename, and can sit on a
-    storage class where renaming would be absurd.
+    {b The copies.} Replicas and backfill targets are never renamed. Once the
+    main has settled, each is walked shard by shard — the target's own shards,
+    since only it knows what it holds, and a shard the main never had is exactly
+    where its orphans hide — and whatever the main no longer has is deleted. A
+    replica is additionally filled where it falls short, being meant to be a
+    complete copy; a backfill target is not, being incomplete by design and
+    having its own queue for that. So a remote store sees deletes and puts,
+    never a rename, and can sit on a storage class where renaming would be
+    absurd.
 
-    Filling a replica is the only part of a collection that sends bytes anywhere,
-    so it is the part that can run long: it goes out concurrently and can be
-    interrupted between chunks. A shard stopped part-way is simply done again —
-    reconciling one is idempotent, so repeating it costs a listing and finds less
-    to do — which is why no cursor finer than a shard is needed.
+    Filling a replica is the only part of a collection that sends bytes
+    anywhere, so it is the part that can run long: it goes out concurrently and
+    can be interrupted between chunks. A shard stopped part-way is simply done
+    again — reconciling one is idempotent, so repeating it costs a listing and
+    finds less to do — which is why no cursor finer than a shard is needed.
 
     {b Pace.} Driven a step at a time rather than as one long call, because this
     is maintenance on a live filesystem and it should be possible to run it
-    without taking the machine over. A caller decides how much to do and how long
-    to wait in between; {!run} is the impatient version of that loop. A run left
-    open between steps — or between whole invocations — is safe indefinitely:
-    reads look in both spaces and writes were never redirected.
+    without taking the machine over. A caller decides how much to do and how
+    long to wait in between; {!run} is the impatient version of that loop. A run
+    left open between steps — or between whole invocations — is safe
+    indefinitely: reads look in both spaces and writes were never redirected.
 
     {b Scale.} The surviving root {i is} the record of what has been marked, so
     nothing is held in memory and no live set is written down. A run is
-    interrupted at a root or shard boundary and continues where it left off, which
-    is what makes a multi-terabyte store a matter of several sittings. *)
+    interrupted at a root or shard boundary and continues where it left off,
+    which is what makes a multi-terabyte store a matter of several sittings. *)
 
 type outcome =
   | Completed
@@ -57,9 +58,9 @@ type outcome =
           from [cursor]. *)
 
 (** What reconciling one copy came to. [uploaded] is always zero for a backfill
-    target: being incomplete is its normal condition, so a gap there says nothing
-    and is left to its own queue. A replica is meant to be a full copy, so a gap
-    there is drift and gets filled. *)
+    target: being incomplete is its normal condition, so a gap there says
+    nothing and is left to its own queue. A replica is meant to be a full copy,
+    so a gap there is drift and gets filled. *)
 type member_stats = { name : string; deleted : int; uploaded : int }
 
 type stats = {
@@ -78,28 +79,29 @@ type stats = {
 exception Unsupported of string
 
 (** Something else is already stepping a run. Two collectors on one run lose
-    chunks — they resume from the same cursor, so their root lists partition, and
-    whichever finishes its share first starts discarding the old space while the
-    other still has roots nothing has promoted. Carries a sentence for the user.
+    chunks — they resume from the same cursor, so their root lists partition,
+    and whichever finishes its share first starts discarding the old space while
+    the other still has roots nothing has promoted. Carries a sentence for the
+    user.
 
-    Exclusion is a lock file on the main, so the kernel releases it if the holder
-    dies: a crashed collection leaves a run that resumes, never a run nobody may
-    touch. *)
+    Exclusion is a lock file on the main, so the kernel releases it if the
+    holder dies: a crashed collection leaves a run that resumes, never a run
+    nobody may touch. *)
 exception Busy of string
 
 module Make (C : Conf.S) : sig
   (** {1 Stepping}
 
       A unit of work is one namespace while marking — a folder's worth of
-      manifests, or of versions — and one shard while closing or reconciling. They
-      are not the same size, so a caller pacing itself should think in seconds spent
-      rather than in units done.
+      manifests, or of versions — and one shard while closing or reconciling.
+      They are not the same size, so a caller pacing itself should think in
+      seconds spent rather than in units done.
 
-      Nothing is enumerated whole up front. Marking reads the two directories that
-      hold the namespaces and walks one at a time, so the cost of finding the work
-      is spread through the work rather than paid before any of it starts — and paid
-      again on every resume, which is what a budgeted collection would otherwise
-      spend most of itself doing. *)
+      Nothing is enumerated whole up front. Marking reads the two directories
+      that hold the namespaces and walks one at a time, so the cost of finding
+      the work is spread through the work rather than paid before any of it
+      starts — and paid again on every resume, which is what a budgeted
+      collection would otherwise spend most of itself doing. *)
 
   type session
 
@@ -113,20 +115,21 @@ module Make (C : Conf.S) : sig
 
       [keep] makes this an abandonment rather than a collection: see {!abort}.
 
-      Raises {!Unsupported} when no main can collect, {!Busy} when a collection is
-      already under way. *)
+      Raises {!Unsupported} when no main can collect, {!Busy} when a collection
+      is already under way. *)
   val start : ?concurrency:int -> ?keep:bool -> unit -> session Lwt.t
 
   (** Do up to [units] units (default 1) and report whether any remain. Saves
-      enough as it goes that dropping the session — or the process — loses at most
-      the last step.
+      enough as it goes that dropping the session — or the process — loses at
+      most the last step.
 
       [`Done] means the run is closed and the store is back to one space. *)
   val step : ?units:int -> session -> [ `More | `Done ] Lwt.t
 
-  (** Give up the collection lock. A caller driving {!step} itself must call this
-      when it stops, whether or not the run finished — the run is meant to outlive
-      the process and be resumed, the lock is not. {!run} does it for you.
+  (** Give up the collection lock. A caller driving {!step} itself must call
+      this when it stops, whether or not the run finished — the run is meant to
+      outlive the process and be resumed, the lock is not. {!run} does it for
+      you.
 
       Not needed for correctness after the process exits: the kernel drops the
       lock with the process, which is why a crash leaves a resumable run. *)
@@ -151,11 +154,11 @@ module Make (C : Conf.S) : sig
       seconds of sleep between steps (default none) are the pace. [budget] is a
       wall-clock limit in seconds, after which the run is left open and
       {!Suspended} is returned. It is checked between units, not merely between
-      steps: a unit can run for a while, and a limit only honoured at the end of a
-      batch of them is not much of a limit.
+      steps: a unit can run for a while, and a limit only honoured at the end of
+      a batch of them is not much of a limit.
 
-      Progress is reported because a run over a large store takes a long time and
-      a silent process is indistinguishable from a wedged one. All three are
+      Progress is reported because a run over a large store takes a long time
+      and a silent process is indistinguishable from a wedged one. All three are
       throttled to about one call a second, and carry running totals rather than
       per-item deltas. [on_reconcile] names the target it is talking about and
       fires while a replica is being filled, that being the slowest thing a
@@ -167,8 +170,7 @@ module Make (C : Conf.S) : sig
     ?concurrency:int ->
     ?keep:bool ->
     ?on_open:(unit -> unit) ->
-    ?on_mark:
-      (namespaces:int -> total:int -> roots:int -> promoted:int -> unit) ->
+    ?on_mark:(namespaces:int -> total:int -> roots:int -> promoted:int -> unit) ->
     ?on_close:(shards:int -> reclaimed:int -> unit) ->
     ?on_reconcile:
       (name:string ->
@@ -184,16 +186,16 @@ module Make (C : Conf.S) : sig
 
   (** Abandon an open run, keeping everything: every chunk still in the space on
       its way out is given a name in the surviving one first, so nothing is
-      collected. For getting a store back to one space without waiting for a mark
-      to finish.
+      collected. For getting a store back to one space without waiting for a
+      mark to finish.
 
-      This is {!run} with one difference — every chunk is treated as live — so it
-      takes the same pacing arguments and is resumable in the same way, a shard at
-      a time. Worth having, since what someone reaching for this most likely wants
-      is out of a collection that is already going badly, and a recovery that
-      itself runs for an hour with no way to interrupt it is not much of one.
-      Coming back to an abandonment continues abandoning rather than resuming the
-      collection.
+      This is {!run} with one difference — every chunk is treated as live — so
+      it takes the same pacing arguments and is resumable in the same way, a
+      shard at a time. Worth having, since what someone reaching for this most
+      likely wants is out of a collection that is already going badly, and a
+      recovery that itself runs for an hour with no way to interrupt it is not
+      much of one. Coming back to an abandonment continues abandoning rather
+      than resuming the collection.
 
       A no-op when no run is open. *)
   val abort :
@@ -202,8 +204,7 @@ module Make (C : Conf.S) : sig
     ?pause:float ->
     ?concurrency:int ->
     ?on_open:(unit -> unit) ->
-    ?on_mark:
-      (namespaces:int -> total:int -> roots:int -> promoted:int -> unit) ->
+    ?on_mark:(namespaces:int -> total:int -> roots:int -> promoted:int -> unit) ->
     ?on_close:(shards:int -> reclaimed:int -> unit) ->
     ?on_reconcile:
       (name:string ->

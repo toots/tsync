@@ -24,16 +24,18 @@ type binding = {
     from before another client renamed it, unopenable, until the mount was taken
     down.
 
-    A frontend picks the one that is true of it, not the one that is convenient. *)
+    A frontend picks the one that is true of it, not the one that is convenient.
+*)
 type freshness =
   | Notify of (string -> unit)
       (** Hand each changed key to the presentation layer as it happens, for a
           layer that keeps its own state and has to be told. macOS File Provider
           works this way. *)
   | Revalidates
-      (** Nothing has to be pushed, because the layer asks again on every access.
-          A claim to earn: FUSE says this only because it mounts with the
-          kernel's caches disabled, which is what makes the kernel re-ask. *)
+      (** Nothing has to be pushed, because the layer asks again on every
+          access. A claim to earn: FUSE says this only because it mounts with
+          the kernel's caches disabled, which is what makes the kernel re-ask.
+      *)
 
 module type S = sig
   (** Whether every byte of [key] is on this machine, for [tsync ls]. *)

@@ -667,7 +667,9 @@ let untrash_cmd =
 
 let parse_duration s =
   let n = String.length s in
-  let fail () = failwith ("invalid duration (use <N>d, <N>h, <N>m or <N>s): " ^ s) in
+  let fail () =
+    failwith ("invalid duration (use <N>d, <N>h, <N>m or <N>s): " ^ s)
+  in
   if n < 2 then fail ()
   else (
     match (int_of_string_opt (String.sub s 0 (n - 1)), s.[n - 1]) with
@@ -752,8 +754,9 @@ let gc_cmd =
       & opt (some string) None
       & info ["pause"] ~docv:"DUR"
           ~doc:
-            "Idle this long between batches. Where $(b,--budget) bounds how long \
-             the whole thing takes, this bounds how hard it pushes while it runs.")
+            "Idle this long between batches. Where $(b,--budget) bounds how \
+             long the whole thing takes, this bounds how hard it pushes while \
+             it runs.")
   in
   let concurrency_arg =
     Arg.(
@@ -761,8 +764,8 @@ let gc_cmd =
       & opt (some int) None
       & info ["concurrency"] ~docv:"N"
           ~doc:
-            "Operations in flight (default: what the device says). $(b,1) is as \
-             gentle as it gets.")
+            "Operations in flight (default: what the device says). $(b,1) is \
+             as gentle as it gets.")
   in
   let abort_arg =
     Arg.(
@@ -771,8 +774,8 @@ let gc_cmd =
           ~doc:
             "Abandon an open collection, keeping every chunk it still holds. \
              Takes $(b,--budget), $(b,--pause) and $(b,--concurrency) like a \
-             collection does, and resumes the same way — a second \
-             $(b,--abort) continues abandoning rather than starting over.")
+             collection does, and resumes the same way — a second $(b,--abort) \
+             continues abandoning rather than starting over.")
   in
   let status_arg =
     Arg.(
@@ -830,15 +833,15 @@ let gc_cmd =
     in
     let (module C : Conf.S) = load_conf ?domain () in
     let module G = Gc.Make (C) in
-    if status then
+    if status then (
       match run_lwt (G.status ()) with
         | None -> Printf.printf "No collection is open for %s.\n" C.domain_name
         | Some r ->
             Printf.printf "Collection of %s open: %s, %.0fs so far.\n"
               C.domain_name
               (Chunk_space.string_of_phase r.Chunk_space.phase)
-              (Unix.gettimeofday () -. r.Chunk_space.started)
-    else
+              (Unix.gettimeofday () -. r.Chunk_space.started))
+    else (
       (* Abandoning is the same machinery with everything treated as live, so it
          takes the same pacing and reports the same way. Someone reaching for
          --abort is most likely getting out of a collection that is already going
@@ -854,7 +857,9 @@ let gc_cmd =
          of padding in front of the summary, so a non-interactive run gets the
          summary alone -- and the logs, which is what [-v] is for. *)
       let watching = Unix.isatty Unix.stderr in
-      let progress fmt = if watching then Printf.eprintf fmt else Printf.ifprintf stderr fmt in
+      let progress fmt =
+        if watching then Printf.eprintf fmt else Printf.ifprintf stderr fmt
+      in
       let on_open () =
         progress "%s %s...\n%!"
           (if abort then "Abandoning the collection of" else "Collecting")
@@ -894,7 +899,7 @@ let gc_cmd =
              still sitting on the terminal's current line. Cleared before the
              summary goes to stdout, or the two land on top of each other. *)
           if watching then Printf.eprintf "\r%*s\r%!" 72 "";
-          report ~abort ~domain:C.domain_name s)
+          report ~abort ~domain:C.domain_name s))
   in
   Cmd.v
     (Cmd.info "gc"

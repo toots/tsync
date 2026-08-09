@@ -8,16 +8,16 @@
 
     Nothing here redirects a write. That is the point of collecting in this
     direction: new chunks are written to the surviving space by code that has
-    never heard of a run, so there is no barrier to install and no client to keep
-    informed. *)
+    never heard of a run, so there is no barrier to install and no client to
+    keep informed. *)
 
 type phase =
   | Opening  (** The chunk root has not been renamed away yet. *)
   | Marking  (** Live chunks are being given names in the new root. *)
   | Abandoning
       (** Like {!Marking}, but keeping everything rather than only what is
-          referenced: the collection was called off and the chunks are being given
-          names in the new root regardless. *)
+          referenced: the collection was called off and the chunks are being
+          given names in the new root regardless. *)
   | Closing  (** The old root is being discarded. *)
   | Reconciling
       (** The main is settled; the replicas and backfill targets are being
@@ -27,26 +27,26 @@ type phase =
     reporting how long a run that is still open has been open.
 
     [cursor] is the last thing finished, by name and not by position: resuming
-    re-lists, and a store that has changed in between yields a different list, so
-    an index into it would skip or repeat work. Empty means nothing yet. *)
+    re-lists, and a store that has changed in between yields a different list,
+    so an index into it would skip or repeat work. Empty means nothing yet. *)
 type run = { phase : phase; started : float; cursor : string }
 
 val string_of_phase : phase -> string
 
 (** Where the space on its way out lives, and where a run records itself: both
-    siblings of [chunk_prefix], since opening a run renames the chunk root itself
-    away.
+    siblings of [chunk_prefix], since opening a run renames the chunk root
+    itself away.
 
     Outside the functor because {!Deferred} is built before there is a {!Conf.S}
-    to apply one to, and it needs the from-space prefix as well. One definition, so
-    the two cannot disagree about where the space is. *)
+    to apply one to, and it needs the from-space prefix as well. One definition,
+    so the two cannot disagree about where the space is. *)
 val from_prefix : chunk_prefix:string -> string
 
 val marker_key : chunk_prefix:string -> string
 
-(** The marker's body, for a reader holding it as bytes rather than going through
-    a functor — a test dumping a store, a tool inspecting one. [None] for anything
-    that is not a marker. *)
+(** The marker's body, for a reader holding it as bytes rather than going
+    through a functor — a test dumping a store, a tool inspecting one. [None]
+    for anything that is not a marker. *)
 val of_string : string -> run option
 
 module Make (C : Conf.S) : sig
@@ -75,8 +75,8 @@ module Make (C : Conf.S) : sig
   val promote : string -> unit Lwt.t
 
   (** {!promote} every chunk a manifest names. **Call this immediately before
-      publishing that manifest**: it is what makes a run safe, and it is the only
-      thing that does.
+      publishing that manifest**: it is what makes a run safe, and it is the
+      only thing that does.
 
       Hanging survival on the publish rather than on how each chunk was found
       covers what a presence check cannot — a chunk skipped by an uploader's

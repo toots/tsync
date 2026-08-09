@@ -1,7 +1,6 @@
 open Lwt.Syntax
 
 type phase = Opening | Marking | Abandoning | Closing | Reconciling
-
 type run = { phase : phase; started : float; cursor : string }
 
 let string_of_phase = function
@@ -40,7 +39,9 @@ let of_string data =
             | Some (`Int i) -> float_of_int i
             | _ -> 0.
         in
-        Option.bind (phase_of_string (str "phase")) (fun phase ->
+        Option.bind
+          (phase_of_string (str "phase"))
+          (fun phase ->
             Some { phase; started = num "started"; cursor = str "cursor" })
     | _ -> None
     | exception _ -> None
@@ -67,9 +68,7 @@ module Make (C : Conf.S) = struct
 
   let from_prefix = from_prefix ~chunk_prefix:C.chunk_prefix
   let marker_key = marker_key ~chunk_prefix:C.chunk_prefix
-
   let key chunk_key = C.chunk_prefix ^ Chunk_layout.relative_path chunk_key
-
   let from_key chunk_key = from_prefix ^ Chunk_layout.relative_path chunk_key
 
   (* The main is where both spaces are: a run renames a directory and links

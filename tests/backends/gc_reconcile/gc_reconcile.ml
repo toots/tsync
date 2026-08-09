@@ -42,11 +42,14 @@ module C : Conf.S = struct
   let members =
     [
       Backend.member ~role:"main" ~backend_type:"local" ~local_path:main_dir
-        ~name:"main" (module Main);
+        ~name:"main"
+        (module Main);
       Backend.member ~role:"replica" ~backend_type:"local"
-        ~local_path:replica_dir ~name:"replica" (module Replica);
+        ~local_path:replica_dir ~name:"replica"
+        (module Replica);
       Backend.member ~role:"backfill" ~backend_type:"local"
-        ~local_path:backfill_dir ~name:"backfill" (module Backfill);
+        ~local_path:backfill_dir ~name:"backfill"
+        (module Backfill);
     ]
 
   let cache_root = root ^ "/cache"
@@ -156,9 +159,9 @@ let () =
      let* replica = chunks_of (module Replica) in
      let* backfill = chunks_of (module Backfill) in
      step "replica now matches the main: %b" (replica = main);
-     step "the chunk in shard %s, which the main never had, is gone from both: %b"
+     step
+       "the chunk in shard %s, which the main never had, is gone from both: %b"
        (label 9)
        (not (List.mem (ck 9) replica || List.mem (ck 9) backfill));
-     step "the backfill target was not filled, only trimmed: %b"
-       (backfill = []);
+     step "the backfill target was not filled, only trimmed: %b" (backfill = []);
      Lwt.return_unit)

@@ -1005,12 +1005,12 @@ let dump_backend_at ~backend_root ~domain_prefix ~chunk_prefix ~journal_prefix
           (match Chunk_space.of_string data with
             | Some r -> Chunk_space.string_of_phase r.Chunk_space.phase
             | None -> "unreadable")
-      else if starts_with from_prefix e.key then (
+      else if starts_with from_prefix e.key then
         if is_marker e.key then Lwt.return_unit
         else (
           Printf.printf "  chunk(going) %s size=%d\n" (Filename.basename e.key)
             e.size;
-          Lwt.return_unit))
+          Lwt.return_unit)
       else if starts_with chunk_prefix e.key then (
         (* The key, without the shard directory holding it: what a chunk is
            named matters here, where it lives is {!Chunk_layout}'s business. *)
@@ -1123,10 +1123,12 @@ let run_scenario ?(versioning = false) ?(symlink_policy = `Keep)
     let members =
       [
         Backend.member ~name:"backend" ~backend_type:"local"
-          ~config:[("path", backend_root)] ~local_path:backend_root
+          ~config:[("path", backend_root)]
+          ~local_path:backend_root
           (Local_backend.make ~root:backend_root);
         Backend.member ~name:"backend2" ~backend_type:"local"
-          ~config:[("path", backend2_root)] ~local_path:backend2_root
+          ~config:[("path", backend2_root)]
+          ~local_path:backend2_root
           (Local_backend.make ~root:backend2_root);
       ]
 
@@ -1209,7 +1211,8 @@ let run_two_client_scenario ?(versioning = false)
   let shared_members =
     [
       Backend.member ~name:"backend" ~backend_type:"local"
-        ~config:[("path", backend_root)] ~local_path:backend_root
+        ~config:[("path", backend_root)]
+        ~local_path:backend_root
         (Local_backend.make ~root:backend_root);
     ]
   in
@@ -1334,7 +1337,8 @@ let make_conf ?(versioning = false) ~client_name ~backend_root ~cache_root
     let members =
       [
         Backend.member ~name:"backend" ~backend_type:"local"
-          ~config:[("path", backend_root)] ~local_path:backend_root store;
+          ~config:[("path", backend_root)]
+          ~local_path:backend_root store;
       ]
 
     let cache_root = cache_root
