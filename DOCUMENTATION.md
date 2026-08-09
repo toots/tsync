@@ -289,6 +289,15 @@ instead, on the same port and behind the same signature as the object API:
 | `/` | A page that asks for the shared secret and shows the report |
 | `/stats` | The report as plain text — the same thing `tsync stats` prints for a mount |
 | `/api/v1/stats` | The same data as JSON |
+| `/domains` | The domains this server serves to holders of the signing secret, as JSON |
+
+`/domains` is what a client asks before it has a config — the Android app's setup form fills
+its domain list from it. It answers with the domains that secret is good for, not everything
+the listener fronts:
+
+```json
+{ "domains": [ { "name": "Family Photos", "readOnly": false } ] }
+```
 
 Open `/` in a browser and type the shared secret. It stays in that browser: the page signs
 each request with it and sends only the signature, exactly as a proxy client does. Note that

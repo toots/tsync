@@ -1,1 +1,7 @@
-app/
+.gradle/
+.kotlin/
+build/
+app/build/
+local.properties
+# The daemon, staged out of the dune cross build by `stageDaemon`.
+app/src/main/jniLibs/
