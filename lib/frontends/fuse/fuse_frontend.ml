@@ -11,7 +11,7 @@ let prepare_mount_point mount_point =
 
 let mount_binding (b : Frontend.binding) =
   (* Post-fork leaf process: safe to initialize Lwt now. *)
-  Frontend.cap_blocking_pool ();
+  Frontend.cap_blocking_pool ~concurrency:(Frontend.binding_concurrency [b]);
   let module C = (val b.Frontend.conf : Conf.S) in
   (* Each domain is its own process; tag its log lines with the domain name. *)
   Log.set_prefix (Printf.sprintf "[%s] " C.domain_name);

@@ -51,16 +51,21 @@ module Make (C : Conf.S) = struct
       ("bytesWrittenPerSec", `Int (int_of_float (Metrics.rate written_bytes)));
     ]
 
-  let guard op path f =
-    try f () with
+  (* Called from FUSE worker threads, never the loop thread itself.
+
+     Also where an unexpected exception becomes an errno, rather than a step a
+     handler asks for separately: libfuse maps what it does not recognize to a
+     nonsense errno (a backend hiccup during [getattr] reached rclone as ERANGE,
+     "numerical result out of range"), and four handlers had already forgotten to
+     ask. Every handler must cross to the loop to reach a domain, so requiring
+     the op and path here is what a new one cannot skip. *)
+  let on_loop op path f =
+    try Lwt_preemptive.run_in_main f with
       | Unix.Unix_error _ as e -> raise e
       | exn ->
           Log.err "fuse %s %s: unexpected exception: %s" op path
             (Printexc.to_string exn);
           raise (Unix.Unix_error (Unix.EIO, op, path))
-
-  (* Called from FUSE worker threads, never the loop thread itself. *)
-  let on_loop f = Lwt_preemptive.run_in_main f
 
   (* Deliberately unbounded: a wedged stop should hang so the supervisor's own
      timeout kills us and reports the unit failed, where a timer of our own would
@@ -246,7 +251,7 @@ module Make (C : Conf.S) = struct
       init = (fun () -> ());
       getattr =
         (fun path _fi ->
-          on_loop (fun () ->
+          on_loop "getattr" path (fun () ->
               let* st = F.stat (fuse_to_key path) in
               match st with
                 | Some st ->
@@ -263,7 +268,7 @@ module Make (C : Conf.S) = struct
                     Lwt.fail (Unix.Unix_error (Unix.ENOENT, "getattr", path))));
       readlink =
         (fun path ->
-          Lwt_preemptive.run_in_main (fun () ->
+          on_loop "readlink" path (fun () ->
               let key = fuse_to_key path in
               let* target = F.readlink key in
               match target with
@@ -272,11 +277,11 @@ module Make (C : Conf.S) = struct
                     Lwt.fail (Unix.Unix_error (Unix.EINVAL, "readlink", path))));
       symlink =
         (fun target path ->
-          guard "symlink" path (fun () ->
-              on_loop (fun () -> F.symlink ~target (fuse_to_key path))));
+          on_loop "symlink" path (fun () ->
+              F.symlink ~target (fuse_to_key path)));
       readdir =
         (fun path _offset _fi _flags ->
-          on_loop (fun () ->
+          on_loop "readdir" path (fun () ->
               let+ files, dirs =
                 F.list_children ~prefix:(fuse_to_dir_prefix path)
               in
@@ -312,65 +317,56 @@ module Make (C : Conf.S) = struct
               List.map entry_of_name ("." :: ".." :: names)));
       mknod =
         (fun path mode ->
-          guard "mknod" path (fun () ->
-              on_loop (fun () -> (dispatch path).mknod path mode)));
+          on_loop "mknod" path (fun () -> (dispatch path).mknod path mode));
       (* Inside [on_loop], so it runs on the event-loop thread and only on
          success. *)
       fopen =
         (fun path fi ->
-          guard "fopen" path (fun () ->
-              on_loop (fun () ->
-                  let+ update = (dispatch path).fopen path fi in
-                  incr open_handles;
-                  incr files_opened;
-                  update)));
+          on_loop "fopen" path (fun () ->
+              let+ update = (dispatch path).fopen path fi in
+              incr open_handles;
+              incr files_opened;
+              update));
       read =
         (fun path buf offset fi ->
-          guard "read" path (fun () ->
-              on_loop (fun () ->
-                  let+ n = (dispatch path).read path buf offset fi in
-                  Metrics.count read_bytes n;
-                  n)));
+          on_loop "read" path (fun () ->
+              let+ n = (dispatch path).read path buf offset fi in
+              Metrics.count read_bytes n;
+              n));
       write =
         (fun path buf offset fi ->
-          guard "write" path (fun () ->
-              on_loop (fun () ->
-                  let+ n = (dispatch path).write path buf offset fi in
-                  Metrics.count written_bytes n;
-                  n)));
+          on_loop "write" path (fun () ->
+              let+ n = (dispatch path).write path buf offset fi in
+              Metrics.count written_bytes n;
+              n));
       release =
         (fun path fi ->
-          guard "release" path (fun () ->
-              on_loop (fun () ->
-                  let+ () = (dispatch path).release path fi in
-                  (* A release without a matching fopen (a handle inherited
-                     across a remount) must not drive the gauge negative. *)
-                  if !open_handles > 0 then decr open_handles)));
+          on_loop "release" path (fun () ->
+              let+ () = (dispatch path).release path fi in
+              (* A release without a matching fopen (a handle inherited across a
+                 remount) must not drive the gauge negative. *)
+              if !open_handles > 0 then decr open_handles));
       unlink =
         (fun path ->
-          guard "unlink" path (fun () ->
-              on_loop (fun () -> (dispatch path).unlink path)));
+          on_loop "unlink" path (fun () -> (dispatch path).unlink path));
       mkdir =
         (fun path _mode ->
-          guard "mkdir" path (fun () ->
-              on_loop (fun () -> F.mkdir (fuse_to_dir_prefix path))));
+          on_loop "mkdir" path (fun () -> F.mkdir (fuse_to_dir_prefix path)));
       rmdir =
         (fun path ->
-          guard "rmdir" path (fun () ->
-              on_loop (fun () -> F.rmdir (fuse_to_dir_prefix path))));
+          on_loop "rmdir" path (fun () -> F.rmdir (fuse_to_dir_prefix path)));
       rename =
         (fun src dst flags ->
-          guard "rename" src (fun () ->
-              on_loop (fun () ->
-                  let is_hidden = is_fuse_hidden dst in
-                  let* () =
-                    (if is_hidden then hidden else real).rename src dst flags
-                  in
-                  if is_hidden then real.unlink src else Lwt.return_unit)));
+          on_loop "rename" src (fun () ->
+              let is_hidden = is_fuse_hidden dst in
+              let* () =
+                (if is_hidden then hidden else real).rename src dst flags
+              in
+              if is_hidden then real.unlink src else Lwt.return_unit));
       truncate =
         (fun path size fi ->
-          guard "truncate" path (fun () ->
-              on_loop (fun () -> (dispatch path).truncate path size fi)));
+          on_loop "truncate" path (fun () ->
+              (dispatch path).truncate path size fi));
       (* What a file costs is room in the domain's stores, not in the cache it is
          staged through, so df reports the stores; inode counts stay nominal,
          nothing here mapping to one. One statvfs per bounded store and no cache

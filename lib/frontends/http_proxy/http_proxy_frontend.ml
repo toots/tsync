@@ -659,7 +659,8 @@ let callback ~port ~tls routes _conn req body =
 
 let start bindings =
   (* Post-fork leaf process: safe to initialize Lwt now. *)
-  Frontend.cap_blocking_pool ();
+  Frontend.cap_blocking_pool
+    ~concurrency:(Frontend.binding_concurrency bindings);
   (Lwt.async_exception_hook :=
      fun exn ->
        Log.err "http-proxy async exception: %s" (Printexc.to_string exn));

@@ -51,17 +51,34 @@ let use_libev () =
   Lwt_engine.set (new Lwt_engine.libev ());
   Log.debug "event loop engine: libev"
 
-let cap_blocking_pool () =
-  use_libev ();
-  Lwt_unix.set_pool_size 256
+(* Lwt grows the pool to its ceiling on demand and never gives a thread back, so
+   the ceiling is a memory floor once anything has been busy: each thread's
+   touched stack costs around half a megabyte, and a mount left at 256 settled at
+   ~114MB of anonymous memory, which is the whole budget of a small host.
 
-(* ponytail: the concurrency figures are per domain while the thread pool is per
-   process, so N domains in one forked child mean N times the configured budget
-   against one pool; this narrowing is what keeps that from mattering. The
-   upgrade path is one process-wide budget each domain draws from, not built
-   because nothing has yet run enough domains in one process to feel it. *)
-let size_blocking_pool ~concurrency =
-  Lwt_unix.set_pool_size (min 256 (max 32 (concurrency * 8)))
+   The threads serve blocking I/O, so nothing about the machine bounds a useful
+   number of them -- more than the storage absorbs is a queue in the wrong place,
+   and that figure comes from the domains, never from here. *)
+let pool_size concurrency = min 256 (max 32 (concurrency * 8))
+
+(* Summed rather than maxed: the pool is per process while the figures are per
+   domain, so a child serving several owes each of them its budget. *)
+let binding_concurrency bindings =
+  List.fold_left
+    (fun acc b ->
+      let module C = (val b.conf : Conf.S) in
+      acc + C.max_uploads + C.max_downloads)
+    0 bindings
+
+let set_pool_size n =
+  Lwt_unix.set_pool_size n;
+  Log.debug "blocking thread pool: at most %d" n
+
+let cap_blocking_pool ~concurrency =
+  use_libev ();
+  set_pool_size (pool_size concurrency)
+
+let size_blocking_pool ~concurrency = set_pool_size (pool_size concurrency)
 
 let run_forked f items =
   let rec go child_pids = function

@@ -86,14 +86,24 @@ val entries : unit -> (string * string * command list) list
     descriptor at or above FD_SETSIZE — 1024 on macOS — so once {!Descriptors}
     lifts the process limit past that, one high-numbered descriptor raises
     EINVAL and takes the whole event loop down, which is worse than the EMFILE
-    the higher limit exists to prevent. *)
-val cap_blocking_pool : unit -> unit
+    the higher limit exists to prevent.
+
+    [concurrency] is how many blocking operations the domains this process
+    serves can have outstanding — {!binding_concurrency} answers it. Asked for
+    rather than defaulted because Lwt never returns a pool thread once it grows
+    one, so a frontend that does not say sets a memory floor for the life of the
+    process rather than a ceiling it might not reach. *)
+val cap_blocking_pool : concurrency:int -> unit
 
 (** Narrow that ceiling to what the storage absorbs, once something has asked
     it. Threads past what the device takes are a queue in the wrong place; the
     floor keeps a slow device from making the process unresponsive rather than
     merely unhurried. *)
 val size_blocking_pool : concurrency:int -> unit
+
+(** What the domains in these bindings ask of the blocking pool, for
+    {!cap_blocking_pool}. *)
+val binding_concurrency : binding list -> int
 
 (** Run [f] on every item, each in its own child process except the last, which
     runs here and blocks — a frontend's [start] blocks. On return, SIGTERM and

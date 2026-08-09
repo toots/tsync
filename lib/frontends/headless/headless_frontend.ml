@@ -58,7 +58,7 @@ end
 
 let start_binding (b : Frontend.binding) =
   (* Leaf process (post-fork): safe to initialize Lwt now. *)
-  Frontend.cap_blocking_pool ();
+  Frontend.cap_blocking_pool ~concurrency:(Frontend.binding_concurrency [b]);
   let module C = (val b.Frontend.conf : Conf.S) in
   Log.set_prefix (Printf.sprintf "[%s] " C.domain_name);
   let module R = Make (C) in
