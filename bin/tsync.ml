@@ -1427,7 +1427,7 @@ let print_conf_cmd =
       | None -> v
       | Some specs -> (
           match List.find_opt (fun (s : Field_spec.t) -> s.name = k) specs with
-            | Some { secret = true; _ } -> "***"
+            | Some { secret = true; _ } when v <> "" -> "***"
             | _ -> v)
   in
   let mask_frontend ftype k v =
@@ -1436,7 +1436,7 @@ let print_conf_cmd =
         (fun (s : Field_spec.t) -> s.name = k)
         (Frontend.spec_for ftype)
     with
-      | Some { secret = true; _ } -> "***"
+      | Some { secret = true; _ } when v <> "" -> "***"
       | _ -> v
   in
   let symlink_str = function
@@ -1463,15 +1463,14 @@ let print_conf_cmd =
         Printf.printf "  symlinks:   %s\n" (symlink_str d.symlink_policy);
         let show_size label = function
           | Some n ->
-              Printf.printf "  %-11s %s\n" (label ^ ":")
-                (Conf_parsing.format_size n)
+              Printf.printf "  %-11s %s\n" (label ^ ":") (Metrics.human_bytes n)
           | None -> ()
         in
         show_size "chunkSize" d.chunk_size;
         show_size "cacheChunk" d.cache_chunk_size;
         Printf.printf "  maxCache:   %s\n"
           (match d.max_cache with
-            | Some n -> Conf_parsing.format_size n
+            | Some n -> Metrics.human_bytes n
             | None -> "none");
         List.iter
           (fun (f : Conf_parsing.frontend_config) ->

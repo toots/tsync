@@ -147,10 +147,14 @@ let prompt_symlinks default =
    optional, so only an answered prompt ever writes one. *)
 let rec prompt_size_opt ?(unset = "none") msg default =
   let def =
-    match default with Some n -> Conf_parsing.format_size n | None -> unset
+    match default with Some n -> Metrics.human_bytes n | None -> unset
   in
   match String.lowercase_ascii (String.trim (prompt msg (Some def))) with
     | "none" | "unlimited" | "default" | "0" | "" -> None
+    (* Accepting the offered default keeps the stored value exactly:
+       [human_bytes] rounds to one decimal, so re-parsing what it just printed
+       would quietly move a size the user did not touch. *)
+    | v when v = String.lowercase_ascii def -> default
     | v -> (
         match Conf_parsing.parse_size v with
           | Some n -> Some n
@@ -622,14 +626,14 @@ let edit_domain existing =
           Printf.printf "  3. symlinks:    %s\n" !symlinks;
           Printf.printf "  4. read-only:   %b\n" !read_only;
           let size_str = function
-            | Some n -> Conf_parsing.format_size n
+            | Some n -> Metrics.human_bytes n
             | None -> "default"
           in
           Printf.printf "  5. chunk size:  %s\n" (size_str !chunk_size);
           Printf.printf "  6. cache chunk: %s\n" (size_str !cache_chunk_size);
           Printf.printf "  7. max cache:   %s\n"
             (match !max_cache with
-              | Some n -> Conf_parsing.format_size n
+              | Some n -> Metrics.human_bytes n
               | None -> "none");
           Printf.printf "  8. backends:    %s\n" (backend_summary !backends);
           Printf.printf "  9. frontends:   %s\n" (frontend_summary !frontends);
@@ -667,15 +671,13 @@ let edit_domain existing =
        ("symlinks", `String !symlinks);
        ("readOnly", `Bool !read_only);
      ]
-    @ (match !chunk_size with
-      | Some n -> [("chunkSize", `String (Conf_parsing.format_size n))]
-      | None -> [])
+    (* Written as plain byte counts: the config is data. A hand-written "8M" is
+       still accepted on the way in — see {!Conf_parsing.parse_size}. *)
+    @ (match !chunk_size with Some n -> [("chunkSize", `Int n)] | None -> [])
     @ (match !cache_chunk_size with
-      | Some n -> [("cacheChunkSize", `String (Conf_parsing.format_size n))]
+      | Some n -> [("cacheChunkSize", `Int n)]
       | None -> [])
-    @ (match !max_cache with
-      | Some n -> [("maxCache", `String (Conf_parsing.format_size n))]
-      | None -> [])
+    @ (match !max_cache with Some n -> [("maxCache", `Int n)] | None -> [])
     @ [("backends", `List !backends); ("frontends", `List !frontends)])
 
 (* Serialize globals + domains to [path] with 0600 perms. *)
@@ -693,6 +695,14 @@ let write_config ~path ~client_name ~max_uploads ~max_chunk_buffers
       @ (match tls with Some t -> [("tls", `String t)] | None -> [])
       @ [("domains", `List domains)])
   in
+  (* Checked with the reader's own rules before it lands. Every way this could
+     write a file the daemon then refuses to start on — no [main] backend, no
+     frontends enabled — was a file it used to write without complaint. *)
+  (match Conf_parsing.of_json json with
+    | _ -> ()
+    | exception Failure msg ->
+        Printf.eprintf "Refusing to write an invalid config: %s\n" msg;
+        exit 1);
   let oc = open_out path in
   output_string oc (Yojson.Basic.pretty_to_string json);
   output_char oc '\n';

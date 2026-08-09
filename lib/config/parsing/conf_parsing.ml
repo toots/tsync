@@ -46,15 +46,11 @@ let role_of_string s = List.find_opt (fun r -> role_name r = s) roles
 let default_max_uploads = 4
 let default_max_downloads = 8
 
-(* A bare number is bytes; a K/M/G suffix (optionally B/iB) is a binary multiple
-   (1K = 1024). *)
-let format_size b =
-  let k = 1024 and m = 1024 * 1024 and g = 1024 * 1024 * 1024 in
-  if b >= g && b mod g = 0 then Printf.sprintf "%dG" (b / g)
-  else if b >= m && b mod m = 0 then Printf.sprintf "%dM" (b / m)
-  else if b >= k && b mod k = 0 then Printf.sprintf "%dK" (b / k)
-  else string_of_int b
-
+(* A bare number is bytes; a K/M/G/T suffix (optionally B/iB, optionally after a
+   space) is a binary multiple (1K = 1024). A decimal mantissa is accepted so
+   that what {!Metrics.human_bytes} prints — the one spelling shown to a person —
+   can be typed straight back in. Sizes are written to the config as plain
+   integers; this parses what a human hands us. *)
 let parse_size s =
   let s = String.trim (String.lowercase_ascii s) in
   if s = "" then None
@@ -65,17 +61,22 @@ let parse_size s =
       else if s.[n - 1] = 'b' then String.sub s 0 (n - 1)
       else s
     in
+    let s = String.trim s in
     if s = "" then None
     else (
       let mult, digits =
+        let chop m = (m, String.sub s 0 (String.length s - 1)) in
         match s.[String.length s - 1] with
-          | 'k' -> (1024, String.sub s 0 (String.length s - 1))
-          | 'm' -> (1024 * 1024, String.sub s 0 (String.length s - 1))
-          | 'g' -> (1024 * 1024 * 1024, String.sub s 0 (String.length s - 1))
+          | 'k' -> chop 1024
+          | 'm' -> chop (1024 * 1024)
+          | 'g' -> chop (1024 * 1024 * 1024)
+          | 't' -> chop (1024 * 1024 * 1024 * 1024)
           | _ -> (1, s)
       in
-      match int_of_string_opt (String.trim digits) with
-        | Some n when n > 0 -> Some (n * mult)
+      match float_of_string_opt (String.trim digits) with
+        | Some f when f > 0. && Float.is_finite f ->
+            let n = int_of_float (Float.round (f *. float_of_int mult)) in
+            if n > 0 then Some n else None
         | _ -> None))
 
 let parse_backend json =
@@ -245,12 +246,7 @@ let parse_domain json =
         | _ -> failwith "domain \"maxCache\" must be a size string or integer");
   }
 
-let load path =
-  let json =
-    match Sys.getenv_opt "TSYNC_CONFIG_JSON" with
-      | Some s -> Yojson.Basic.from_string s
-      | None -> Yojson.Basic.from_file path
-  in
+let of_json json =
   let open Yojson.Basic.Util in
   let max_uploads =
     match json |> member "maxUploads" with
@@ -277,6 +273,12 @@ let load path =
         | _ -> default_max_downloads);
     domains = json |> member "domains" |> to_list |> List.map parse_domain;
   }
+
+let load path =
+  of_json
+    (match Sys.getenv_opt "TSYNC_CONFIG_JSON" with
+      | Some s -> Yojson.Basic.from_string s
+      | None -> Yojson.Basic.from_file path)
 
 let pick_domain ?domain cfg =
   match domain with

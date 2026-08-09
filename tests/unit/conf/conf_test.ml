@@ -145,6 +145,26 @@ let () =
   assert (d.Conf_parsing.chunk_size = None);
   assert (d.Conf_parsing.cache_chunk_size = None);
 
+  (* Sizes are shown to a person in exactly one spelling — [Metrics.human_bytes]
+     — and [configure] offers that spelling back as a prompt default, so
+     whatever it prints has to parse. Checked here because it is the one
+     contract that spans the two modules. *)
+  let k = 1024 in
+  List.iter
+    (fun n -> assert (Conf_parsing.parse_size (Metrics.human_bytes n) = Some n))
+    [512; 8 * k; 512 * k; 8 * k * k; 3 * k * k * k; 2 * k * k * k * k];
+  (* The spellings a person may type by hand, all still accepted. *)
+  assert (Conf_parsing.parse_size "8M" = Some (8 * k * k));
+  assert (Conf_parsing.parse_size "8mib" = Some (8 * k * k));
+  assert (Conf_parsing.parse_size "8388608" = Some (8 * k * k));
+  assert (Conf_parsing.parse_size "0.5 GB" = Some (512 * k * k));
+  (* Not a size: rejected rather than silently read as some number of bytes. *)
+  assert (Conf_parsing.parse_size "" = None);
+  assert (Conf_parsing.parse_size "lots" = None);
+  assert (Conf_parsing.parse_size "-4M" = None);
+  assert (Conf_parsing.parse_size "0" = None);
+  assert (Conf_parsing.parse_size "inf" = None);
+
   (* [maxChunkBuffers] follows [maxUploads] unless it is set, so a config
      written before the two were separable keeps its memory ceiling. *)
   let globals extra =

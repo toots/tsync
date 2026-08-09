@@ -87,18 +87,29 @@ type t = {
 val default_max_uploads : int
 val default_max_downloads : int
 
-(** Render a byte count as a human-friendly binary size (e.g. [8M], [512K]);
-    exact multiples only, else the raw number. *)
-val format_size : int -> string
+(** Parse a human-friendly size into bytes: [512K], [8M], [1G], [1048576], and
+    the decimal spelling {!Metrics.human_bytes} prints ([8.0 MB], [1.5 GB]),
+    with optional [B]/[iB] and an optional space. Binary multiples (1K = 1024).
+    [None] if unparseable.
 
-(** Parse a human-friendly size ([512K], [8M], [1G], [1048576], with optional
-    [B]/[iB]) into bytes. Binary multiples (1K = 1024). [None] if unparseable.
-*)
+    There is no matching [format_size]: a size shown to a person is spelled by
+    {!Metrics.human_bytes}, and a size stored in the config or on the wire is a
+    plain integer of bytes. Rendering one here as well is what let
+    [tsync print-config] and [tsync diagnose] disagree about the same field. *)
 val parse_size : string -> int option
 
 (** Load configuration from [path], or from the JSON string in
     [$TSYNC_CONFIG_JSON] if set (overrides [path]). *)
 val load : string -> t
+
+(** {!load}'s parse and validation, over a JSON value already in hand. Raises
+    [Failure] with the same message {!load} would.
+
+    Exported so [tsync configure] can check what it is about to write with the
+    reader's own rules rather than a second set of its own: every way it could
+    produce a file {!load} rejects — no [main] backend, an empty [frontends] —
+    was a file it wrote happily. *)
+val of_json : Yojson.Basic.t -> t
 
 (** Return the domain matching [domain], or the unique domain when omitted.
     Raises [Failure] when multiple domains are configured and none is named. *)
