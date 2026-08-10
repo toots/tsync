@@ -177,6 +177,32 @@ module Make (C : Conf.S) (R : Remote.S) = struct
       | Unix.Unix_error (Unix.ENOENT, _, _) -> attempt ()
       | exn -> Lwt.fail exn)
 
+  (* One mutation of a key at a time. Promotion hands a staged body to the chunk
+     store under its content name, so a write arriving partway through would
+     change bytes the upload has already hashed and published.
+
+     Reads stay outside it: verifying a large file holds the key for as long as
+     the read takes, which is exactly the caller a promotion must not wait for. *)
+  let key_locks : (string, Lwt_mutex.t * int ref) Hashtbl.t = Hashtbl.create 16
+
+  let with_key key f =
+    let entry =
+      match Hashtbl.find_opt key_locks key with
+        | Some entry -> entry
+        | None ->
+            let entry = (Lwt_mutex.create (), ref 0) in
+            Hashtbl.replace key_locks key entry;
+            entry
+    in
+    let mutex, holders = entry in
+    incr holders;
+    Lwt.finalize
+      (fun () -> Lwt_mutex.with_lock mutex f)
+      (fun () ->
+        decr holders;
+        if !holders = 0 then Hashtbl.remove key_locks key;
+        Lwt.return_unit)
+
   (* A whole body is split into chunks first: only chunks can be addressed by a
      partial write. *)
   let rec staged_for key =
@@ -313,7 +339,7 @@ module Make (C : Conf.S) (R : Remote.S) = struct
 
   (* Bytes land before the staged manifest: a crash in between leaves an
      unreferenced body rather than a manifest pointing at unwritten bytes. *)
-  let write key buf ~offset =
+  let write_locked key buf ~offset =
     let len = Bigarray.Array1.dim buf in
     let* st = staged_for key in
     let* base = Mf.read key in
@@ -363,7 +389,10 @@ module Make (C : Conf.S) (R : Remote.S) = struct
     len
 
   (* A grow is pure metadata: new chunks are holes until written. *)
-  let truncate key size =
+  let write key buf ~offset =
+    with_key key (fun () -> write_locked key buf ~offset)
+
+  let truncate_locked key size =
     let* st = staged_for key in
     let* base = Mf.read key in
     let base = match base with Some m -> Some m | _ -> None in
@@ -423,7 +452,9 @@ module Make (C : Conf.S) (R : Remote.S) = struct
       | Some uuid -> Cc.whole_forget ~uuid
       | None -> Lwt.return_unit
 
-  let discard_staged key =
+  let truncate key size = with_key key (fun () -> truncate_locked key size)
+
+  let discard_staged_locked key =
     let* st = Mf.read_staged key in
     let* () =
       match st with Some st -> discard_bodies st | None -> Lwt.return_unit
@@ -462,7 +493,9 @@ module Make (C : Conf.S) (R : Remote.S) = struct
     in
     Mf.prune_staged_dirs ()
 
-  let create key =
+  let discard_staged key = with_key key (fun () -> discard_staged_locked key)
+
+  let create_locked key =
     let* st = Mf.read_staged key in
     let* () =
       match st with Some st -> discard_bodies st | None -> Lwt.return_unit
@@ -479,6 +512,8 @@ module Make (C : Conf.S) (R : Remote.S) = struct
         s_whole = None;
         s_published = None;
       }
+
+  let create key = with_key key (fun () -> create_locked key)
 
   (* A staged body is whatever the writer left on disk and may fall short of its
      chunk length, grown by a truncate that never wrote or lost entirely.
@@ -641,17 +676,30 @@ module Make (C : Conf.S) (R : Remote.S) = struct
     let* () = Mf.delete_staged key in
     discard_bodies staged
 
+  (* Read again under the lock rather than promoting the record the upload
+     started from: a write since then has retired it, and what it describes is
+     no longer what the file holds. The next close or the next start queues the
+     upload that owes. *)
+  let promote_pending key =
+    with_key key (fun () ->
+        let* staged = Mf.read_staged key in
+        match staged with
+          | Some ({ Manifest.s_published = Some published; _ } as staged) ->
+              promote key staged published
+          | _ ->
+              Log.debug "sync %s: superseded before promotion" key;
+              Lwt.return_unit)
+
   (* A staged manifest already carrying a published one was interrupted
      mid-promotion: finish it without re-uploading. *)
   let sync key ?cancel () =
     let* staged = Mf.read_staged key in
     match staged with
       | None -> Lwt.return_unit
-      | Some ({ Manifest.s_published = Some published; _ } as staged) ->
-          promote key staged published
+      | Some { Manifest.s_published = Some _; _ } -> promote_pending key
       | Some staged ->
-          let* published = upload_staged ~key ~staged ?cancel () in
-          promote key staged published
+          let* (_ : Manifest.t) = upload_staged ~key ~staged ?cancel () in
+          promote_pending key
 
   (* Re-exported so a domain has exactly one {!Chunk_cache} instance: two would
      each keep their own in-flight table and stop deduplicating downloads. *)
@@ -662,7 +710,7 @@ module Make (C : Conf.S) (R : Remote.S) = struct
 
   (* Adopts [src_path] by rename: no copy, no chunking pass; the upload reads it
      directly. *)
-  let stage_whole key ~src_path =
+  let stage_whole_locked key ~src_path =
     let* st = Mf.read_staged key in
     let* () =
       match st with Some st -> discard_bodies st | None -> Lwt.return_unit
@@ -681,6 +729,9 @@ module Make (C : Conf.S) (R : Remote.S) = struct
         s_whole = Some uuid;
         s_published = None;
       }
+
+  let stage_whole key ~src_path =
+    with_key key (fun () -> stage_whole_locked key ~src_path)
 
   let staged_body_path key =
     let+ st = Mf.read_staged key in
