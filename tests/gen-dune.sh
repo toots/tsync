@@ -21,6 +21,9 @@ env_for() {
   case "$1" in
     content/cache_cap) echo "TSYNC_CHUNK_SIZE=8 TSYNC_MAX_CACHE=8" ;;
     content/demand_paging | content/fetch_range) echo "TSYNC_CHUNK_SIZE=8" ;;
+    # The only test where a cache group holds more than one chunk, which is
+    # what makes staging per group distinguishable from staging per chunk.
+    scenario/staged_groups) echo "TSYNC_CHUNK_SIZE=8 TSYNC_CACHE_CHUNK_SIZE=24" ;;
     # These report timestamps in local time, which is what someone reading their
     # own server wants and what would otherwise make a snapshot depend on the
     # machine that recorded it.
