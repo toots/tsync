@@ -1,0 +1,163 @@
+=== a write covering the file stages it
+  write whole.txt "AAAAAAAABBBBBBBBCCCCCCCCDDDDDDDDEEEEEEEEFFFFFFFF"
+  staged
+  chunks whole.txt
+  drain
+  staged
+  chunks whole.txt
+  staged manifests=1 bodies=1
+  chunks whole.txt staged size=48 slots=[] cached=6/6
+  staged manifests=0 bodies=0
+  chunks whole.txt published size=48 chunks=6 cached=0/6
+--- tree
+  f whole.txt size=48 cached=0/6 uploaded=true etag=58e96e1e8013e967
+--- content
+  whole.txt = "AAAAAAAABBBBBBBBCCCCCCCCDDDDDDDDEEEEEEEEFFFFFFFF"
+--- backend
+  chunk 24fd18b0b1197417-02b6ce49b5452893 size=8
+  chunk 2d55ba67f4d554d6-87e9b038c3e09c0f size=8
+  chunk 3968c4418875223b-5d95def42075050c size=8
+  chunk 7102aa676ece60f4-81fefb32a96a9c49 size=8
+  chunk b42f3c030c14d901-12f642311958ac8b size=8
+  chunk c8053270bb6d59dd-bb6ad2b1c53900f3 size=8
+  journal <entry-1> = put whole.txt 48
+  file whole.txt [.tsync-root/049debf9b3bcb8f3-0c8b9d1e3b7837da] = manifest size=48 chunks=6 h1=58e96e1e8013e967 h2=a44d968152627397
+    chunk#0 24fd18b0b1197417-02b6ce49b5452893 size=8
+    chunk#1 3968c4418875223b-5d95def42075050c size=8
+    chunk#2 b42f3c030c14d901-12f642311958ac8b size=8
+    chunk#3 7102aa676ece60f4-81fefb32a96a9c49 size=8
+    chunk#4 c8053270bb6d59dd-bb6ad2b1c53900f3 size=8
+    chunk#5 2d55ba67f4d554d6-87e9b038c3e09c0f size=8
+
+=== a partial write stages the group it lands in
+  write part.txt "AAAAAAAABBBBBBBBCCCCCCCCDDDDDDDDEEEEEEEEFFFFFFFF"
+  drain
+  write-at part.txt @8 "bbbbbbbb"
+  staged
+  chunks part.txt
+  read part.txt [0,48)
+  drain
+  chunks part.txt
+  staged manifests=1 bodies=3
+  chunks part.txt staged size=48 slots=[SSSIII] cached=3/6
+  read part.txt [0,48) = "AAAAAAAAbbbbbbbbCCCCCCCCDDDDDDDDEEEEEEEEFFFFFFFF"
+  chunks part.txt staged size=48 slots=[SSSIII] cached=6/6
+--- tree
+  f part.txt size=48 cached=6/6 uploaded=false etag=
+--- content
+  part.txt = "AAAAAAAAbbbbbbbbCCCCCCCCDDDDDDDDEEEEEEEEFFFFFFFF"
+--- backend
+  chunk 24fd18b0b1197417-02b6ce49b5452893 size=8
+  chunk 2d55ba67f4d554d6-87e9b038c3e09c0f size=8
+  chunk 3968c4418875223b-5d95def42075050c size=8
+  chunk 7102aa676ece60f4-81fefb32a96a9c49 size=8
+  chunk b42f3c030c14d901-12f642311958ac8b size=8
+  chunk c8053270bb6d59dd-bb6ad2b1c53900f3 size=8
+  journal <entry-1> = put part.txt 48
+  file part.txt [.tsync-root/96988e11fbd602f9-4953ea21cb246e32] = manifest size=48 chunks=6 h1=58e96e1e8013e967 h2=a44d968152627397
+    chunk#0 24fd18b0b1197417-02b6ce49b5452893 size=8
+    chunk#1 3968c4418875223b-5d95def42075050c size=8
+    chunk#2 b42f3c030c14d901-12f642311958ac8b size=8
+    chunk#3 7102aa676ece60f4-81fefb32a96a9c49 size=8
+    chunk#4 c8053270bb6d59dd-bb6ad2b1c53900f3 size=8
+    chunk#5 2d55ba67f4d554d6-87e9b038c3e09c0f size=8
+
+=== a second write to the same group adds nothing
+  write twice.txt "AAAAAAAABBBBBBBBCCCCCCCCDDDDDDDDEEEEEEEEFFFFFFFF"
+  drain
+  write-at twice.txt @0 "aaaaaaaa"
+  staged
+  write-at twice.txt @16 "cccccccc"
+  staged
+  read twice.txt [0,48)
+  drain
+  chunks twice.txt
+  staged manifests=1 bodies=3
+  staged manifests=1 bodies=3
+  read twice.txt [0,48) = "aaaaaaaaBBBBBBBBccccccccDDDDDDDDEEEEEEEEFFFFFFFF"
+  chunks twice.txt staged size=48 slots=[SSSIII] cached=6/6
+--- tree
+  f twice.txt size=48 cached=6/6 uploaded=false etag=
+--- content
+  twice.txt = "aaaaaaaaBBBBBBBBccccccccDDDDDDDDEEEEEEEEFFFFFFFF"
+--- backend
+  chunk 24fd18b0b1197417-02b6ce49b5452893 size=8
+  chunk 2d55ba67f4d554d6-87e9b038c3e09c0f size=8
+  chunk 3968c4418875223b-5d95def42075050c size=8
+  chunk 7102aa676ece60f4-81fefb32a96a9c49 size=8
+  chunk b42f3c030c14d901-12f642311958ac8b size=8
+  chunk c8053270bb6d59dd-bb6ad2b1c53900f3 size=8
+  journal <entry-1> = put twice.txt 48
+  file twice.txt [.tsync-root/a2d6a5e7b3c0ad87-681387cebfce1800] = manifest size=48 chunks=6 h1=58e96e1e8013e967 h2=a44d968152627397
+    chunk#0 24fd18b0b1197417-02b6ce49b5452893 size=8
+    chunk#1 3968c4418875223b-5d95def42075050c size=8
+    chunk#2 b42f3c030c14d901-12f642311958ac8b size=8
+    chunk#3 7102aa676ece60f4-81fefb32a96a9c49 size=8
+    chunk#4 c8053270bb6d59dd-bb6ad2b1c53900f3 size=8
+    chunk#5 2d55ba67f4d554d6-87e9b038c3e09c0f size=8
+
+=== a grow extends the last chunk and then adds one
+  write grow.txt "AAAAAAAABBBB"
+  drain
+  write-at grow.txt @12 "bbbb"
+  staged
+  chunks grow.txt
+  write-at grow.txt @16 "CCCCCCCC"
+  staged
+  chunks grow.txt
+  read grow.txt [0,24)
+  drain
+  chunks grow.txt
+  staged manifests=1 bodies=2
+  chunks grow.txt staged size=16 slots=[SS] cached=2/2
+  staged manifests=1 bodies=3
+  chunks grow.txt staged size=24 slots=[SSS] cached=3/3
+  read grow.txt [0,24) = "AAAAAAAABBBBbbbbCCCCCCCC"
+  chunks grow.txt staged size=24 slots=[SSS] cached=3/3
+--- tree
+  f grow.txt size=24 cached=3/3 uploaded=false etag=
+--- content
+  grow.txt = "AAAAAAAABBBBbbbbCCCCCCCC"
+--- backend
+  chunk 24fd18b0b1197417-02b6ce49b5452893 size=8
+  chunk b83135dd1a4fbfc7-decd6d509213b8a8 size=4
+  journal <entry-1> = put grow.txt 12
+  file grow.txt [.tsync-root/4b4935f2bac532c5-7041cc2cafde9c73] = manifest size=12 chunks=2 h1=00e7c9a6486b3fa7 h2=6c3858f9b77eaa2e
+    chunk#0 24fd18b0b1197417-02b6ce49b5452893 size=8
+    chunk#1 b83135dd1a4fbfc7-decd6d509213b8a8 size=4
+
+=== a truncate drops chunks from a group
+  write cut.txt "AAAAAAAABBBBBBBBCCCCCCCCDDDDDDDDEEEEEEEEFFFFFFFF"
+  drain
+  truncate cut.txt 12
+  staged
+  chunks cut.txt
+  read cut.txt [0,12)
+  drain
+  chunks cut.txt
+  chunk-cache
+  staged manifests=1 bodies=2
+  chunks cut.txt staged size=12 slots=[SS] cached=2/2
+  read cut.txt [0,12) = "AAAAAAAABBBB"
+  chunks cut.txt staged size=12 slots=[SS] cached=2/2
+  chunk-cache chunks=1 bytes=24
+--- tree
+  f cut.txt size=12 cached=2/2 uploaded=false etag=
+--- content
+  cut.txt = "AAAAAAAABBBB"
+--- backend
+  chunk 24fd18b0b1197417-02b6ce49b5452893 size=8
+  chunk 2d55ba67f4d554d6-87e9b038c3e09c0f size=8
+  chunk 3968c4418875223b-5d95def42075050c size=8
+  chunk 7102aa676ece60f4-81fefb32a96a9c49 size=8
+  chunk b42f3c030c14d901-12f642311958ac8b size=8
+  chunk c8053270bb6d59dd-bb6ad2b1c53900f3 size=8
+  journal <entry-1> = put cut.txt 48
+  file cut.txt [.tsync-root/c690fcd1b8f0c512-35d16da951e35388] = manifest size=48 chunks=6 h1=58e96e1e8013e967 h2=a44d968152627397
+    chunk#0 24fd18b0b1197417-02b6ce49b5452893 size=8
+    chunk#1 3968c4418875223b-5d95def42075050c size=8
+    chunk#2 b42f3c030c14d901-12f642311958ac8b size=8
+    chunk#3 7102aa676ece60f4-81fefb32a96a9c49 size=8
+    chunk#4 c8053270bb6d59dd-bb6ad2b1c53900f3 size=8
+    chunk#5 2d55ba67f4d554d6-87e9b038c3e09c0f size=8
+

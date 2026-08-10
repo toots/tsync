@@ -444,6 +444,20 @@
   (action
    (diff staged_fanout_test.expected staged_fanout_test.output))))
 
+(subdir scenario/staged_groups
+ (alias
+  (name default)
+  (deps staged_groups.exe))
+ (rule
+  (alias runtest)
+  (target staged_groups.output)
+  (action
+   (with-stdout-to staged_groups.output (ignore-stderr (setenv TSYNC_CACHE_CHUNK_SIZE 24 (setenv TSYNC_CHUNK_SIZE 8 (run ./staged_groups.exe)))))))
+ (rule
+  (alias runtest)
+  (action
+   (diff staged_groups.expected staged_groups.output))))
+
 (subdir scenario/sync
  (alias
   (name default)
