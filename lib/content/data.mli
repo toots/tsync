@@ -43,13 +43,23 @@ module Make (C : Conf.S) (R : Remote.S) : sig
   (** Reset [key] to an empty staged file, dropping any staged bodies. *)
   val create : string -> unit Lwt.t
 
-  (** Upload [key]'s staged edits and promote them: staged bodies are renamed
-      under the content keys they hashed to, the sidecar becomes what was
-      published, and the staged manifest goes. No-op when nothing is staged.
+  (** Upload [key]'s staged edits and promote them. A staged body already holds
+      its group's bytes in the group's layout, so promotion gives it the group's
+      content name rather than copying it, then writes the published sidecar,
+      then drops the staged manifest, and only then the staged name. No-op when
+      nothing is staged.
+
+      The order is what lets a reader run alongside: the key resolves to the
+      staged manifest or the published one, and whichever it lands on names
+      bytes that are on disk. Where the cache root cannot hold a second name for
+      one inode the group is written out instead, which costs the copy but
+      changes nothing else.
 
       Every step is idempotent, and the upload records what it published in the
       staged manifest before touching anything else: a crash before that point
-      re-uploads identical bytes, one after replays only local moves. *)
+      re-uploads identical bytes, one after replays only local moves. A write
+      arriving in between retires that record, and the promotion is abandoned
+      rather than publishing bytes the file no longer holds. *)
   val sync : string -> ?cancel:bool ref -> unit -> unit Lwt.t
 
   (** {2 Chunk store housekeeping}

@@ -56,8 +56,11 @@ module Make (C : Conf.S) (F : Fetch) : sig
   (** {2 Staged bodies}
 
       A chunk being written has no content key yet, its bytes still changing, so
-      it lives under a uuid until the upload that hashes it publishes and its
-      group is written out whole ({!put_group}).
+      it lives under a uuid until the upload that hashes it publishes.
+
+      One body holds a whole {!Chunk_group}, laid out as the group will be, so
+      publishing it is {!stage_link_group} rather than a copy. Its members are
+      told apart by the offset each slot carries.
 
       Staged bodies are unsynced data and are never reclaimed by the cap. *)
 
