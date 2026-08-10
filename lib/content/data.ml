@@ -156,17 +156,26 @@ module Make (C : Conf.S) (R : Remote.S) = struct
     let* m = Mf.read key in
     match m with Some _ -> Lwt.return m | None -> R.fetch_manifest ~key ()
 
+  (* A promotion can retire the staged bodies between resolving the key and
+     reading them, so a miss is resolved again and read once more. The retry
+     finds the published manifest because {!promote} puts it in place before any
+     body goes, the same shape as {!Chunk_cache.read_into} against the cap. *)
   let pread_key key buf ~offset =
-    let* resolved = Mf.resolve key in
-    match resolved with
-      | Some (`Staged (staged, base)) ->
-          pread_staged ~id:key ~staged ~base buf ~offset
-      | Some (`Published m) -> pread ~id:key ~manifest:m buf ~offset
-      | None -> (
-          let* state = R.fetch_manifest ~key () in
-          match state with
-            | Some m -> pread ~id:key ~manifest:m buf ~offset
-            | None -> Lwt.return 0)
+    let attempt () =
+      let* resolved = Mf.resolve key in
+      match resolved with
+        | Some (`Staged (staged, base)) ->
+            pread_staged ~id:key ~staged ~base buf ~offset
+        | Some (`Published m) -> pread ~id:key ~manifest:m buf ~offset
+        | None -> (
+            let* state = R.fetch_manifest ~key () in
+            match state with
+              | Some m -> pread ~id:key ~manifest:m buf ~offset
+              | None -> Lwt.return 0)
+    in
+    Lwt.catch attempt (function
+      | Unix.Unix_error (Unix.ENOENT, _, _) -> attempt ()
+      | exn -> Lwt.fail exn)
 
   (* A whole body is split into chunks first: only chunks can be addressed by a
      partial write. *)
@@ -558,7 +567,11 @@ module Make (C : Conf.S) (R : Remote.S) = struct
     in
     published
 
-  (* Every step is idempotent, so a crash anywhere replays. *)
+  (* Every step is idempotent, so a crash anywhere replays.
+
+     Bodies go last, after the published manifest and after the marker that
+     chooses between the two: a reader resolving the key partway through has to
+     find whichever representation it lands on still on disk. *)
   let rec promote key (staged : Manifest.staged) (published : Manifest.t) =
     match staged.Manifest.s_whole with
       | Some uuid ->
@@ -567,8 +580,8 @@ module Make (C : Conf.S) (R : Remote.S) = struct
              extension, which already keeps its own copy, and caching the bytes
              again would double the disk cost of every edit. *)
           let* () = Mf.write key published in
-          let* () = Cc.whole_forget ~uuid in
-          Mf.delete_staged key
+          let* () = Mf.delete_staged key in
+          Cc.whole_forget ~uuid
       | None -> promote_chunked key staged published
 
   and promote_chunked key (staged : Manifest.staged) (published : Manifest.t) =
@@ -614,9 +627,9 @@ module Make (C : Conf.S) (R : Remote.S) = struct
           else Lwt.return_unit)
         (Mf.groups published)
     in
-    let* () = discard_bodies staged in
     let* () = Mf.write key published in
-    Mf.delete_staged key
+    let* () = Mf.delete_staged key in
+    discard_bodies staged
 
   (* A staged manifest already carrying a published one was interrupted
      mid-promotion: finish it without re-uploading. *)

@@ -107,12 +107,11 @@ let start_cmd =
          samples into a file that still reads clean, and neither says which
          process allocated. MEMTRACE names a directory, one file per frontend
          inside it. Sampling defaults to 1e-6; MEMTRACE_RATE raises it. *)
-      (match Sys.getenv_opt "MEMTRACE" with
+        (match Sys.getenv_opt "MEMTRACE" with
         | None | Some "" -> ()
         | Some dir ->
             if not (Sys.file_exists dir && Sys.is_directory dir) then
-              failwith
-                (Printf.sprintf "MEMTRACE=%s is not a directory" dir);
+              failwith (Printf.sprintf "MEMTRACE=%s is not a directory" dir);
             let filename = Filename.concat dir (name ^ ".ctf") in
             Unix.putenv "MEMTRACE" filename;
             Memtrace.trace_if_requested ~context:name ();
