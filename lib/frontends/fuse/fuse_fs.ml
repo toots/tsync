@@ -41,6 +41,13 @@ module Make (C : Conf.S) = struct
   let read_bytes = Metrics.counter ()
   let written_bytes = Metrics.counter ()
 
+  (* A handler that blew up is reported by a count as well as by its log line:
+     the exception that a starved process raises is the one whose log entry it
+     cannot afford to format, and no ERROR line then reads as a healthy mount.
+     Bumping an int allocates nothing, so this survives what the log does not. *)
+  let handler_failures = ref 0
+  let last_handler_failure = ref ""
+
   let fuse_stats_fields () =
     [
       ("openHandles", `Int !open_handles);
@@ -49,23 +56,39 @@ module Make (C : Conf.S) = struct
       ("bytesWritten", `Int (Metrics.total written_bytes));
       ("bytesReadPerSec", `Int (int_of_float (Metrics.rate read_bytes)));
       ("bytesWrittenPerSec", `Int (int_of_float (Metrics.rate written_bytes)));
+      ("handlerFailures", `Int !handler_failures);
+      ("lastHandlerFailure", `String !last_handler_failure);
     ]
+
+  (* Raised rather than built per failure: formatting the op and path into a
+     fresh exception allocates, and the failure this runs on is the one where
+     allocating is what went wrong. The op and path reach the caller through the
+     log line instead. *)
+  let eio = Unix.Unix_error (Unix.EIO, "fuse", "")
 
   (* Called from FUSE worker threads, never the loop thread itself.
 
      Also where an unexpected exception becomes an errno, rather than a step a
-     handler asks for separately: libfuse maps what it does not recognize to a
-     nonsense errno (a backend hiccup during [getattr] reached rclone as ERANGE,
-     "numerical result out of range"), and four handlers had already forgotten to
-     ask. Every handler must cross to the loop to reach a domain, so requiring
-     the op and path here is what a new one cannot skip. *)
+     handler asks for separately: the binding maps what it does not recognize to
+     a nonsense errno (a backend hiccup during [getattr] reached rclone as
+     ERANGE, "numerical result out of range"), and four handlers had already
+     forgotten to ask. Every handler must cross to the loop to reach a domain, so
+     requiring the op and path here is what a new one cannot skip.
+
+     The errno is settled before anything that can fail: reporting used to run
+     first, so an exception raised while reporting one escaped to the binding and
+     came back out as the nonsense errno this exists to prevent. *)
   let on_loop op path f =
     try Lwt_preemptive.run_in_main f with
       | Unix.Unix_error _ as e -> raise e
       | exn ->
-          Log.err "fuse %s %s: unexpected exception: %s" op path
-            (Printexc.to_string exn);
-          raise (Unix.Unix_error (Unix.EIO, op, path))
+          incr handler_failures;
+          (try
+             last_handler_failure := Printexc.to_string exn;
+             Log.err "fuse %s %s: unexpected exception: %s" op path
+               !last_handler_failure
+           with _ -> ());
+          raise eio
 
   (* Deliberately unbounded: a wedged stop should hang so the supervisor's own
      timeout kills us and reports the unit failed, where a timer of our own would
