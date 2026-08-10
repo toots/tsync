@@ -191,6 +191,14 @@
   (action
    (diff fetch_range.expected fetch_range.output))))
 
+(subdir content/promote_race
+ (alias
+  (name default)
+  (deps promote_race.exe))
+ (rule
+  (alias runtest)
+  (action (run ./promote_race.exe))))
+
 (subdir e2e/ipc_tap
  (alias
   (name default)
