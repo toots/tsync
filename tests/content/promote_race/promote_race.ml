@@ -95,6 +95,48 @@ let reader_loop ~expect ~stop =
   in
   go 0
 
+(* A write arriving while a promotion runs must not reach the bytes that
+   promotion is handing to the chunk store under their content name: the name
+   was computed from what the upload hashed, so changing them afterwards
+   publishes one file's content under another's key. Uniform fixtures make it
+   visible -- every write lays down one letter, so a body holding both was
+   assembled from two of them. *)
+let write_during_promote round =
+  let key = Printf.sprintf "%sraced-%d.txt" C.domain_prefix round in
+  let size = 512 in
+  let fill c = String.make size c in
+  let* () = write_all key (fill 'A') in
+  let* () = D.sync key () in
+  let* () = write_all key (fill 'A') in
+
+  let stop = ref false in
+  let rec writer n =
+    if !stop then Lwt.return n
+    else
+      let* () = write_all key (fill (if n land 1 = 0 then 'B' else 'A')) in
+      let* () = Lwt.pause () in
+      writer (n + 1)
+  in
+  let writing = writer 0 in
+  let* () = D.sync key () in
+  stop := true;
+  let* writes = writing in
+  (* Settle whatever the last write left owed. *)
+  let* () = D.sync key () in
+
+  let buf = Bigarray.Array1.create Bigarray.char Bigarray.c_layout size in
+  let* n = D.pread_key key buf ~offset:0L in
+  let s = string_of_buffer buf n in
+  if writes < 2 then
+    note (Printf.sprintf "only %d writes raced the promote" writes)
+  else if n <> size then note (Printf.sprintf "short read after the race: %d" n)
+  else if not (String.for_all (fun c -> c = s.[0]) s) then
+    note
+      (Printf.sprintf "torn body: %d A, %d B"
+         (String.fold_left (fun n c -> if c = 'A' then n + 1 else n) 0 s)
+         (String.fold_left (fun n c -> if c = 'B' then n + 1 else n) 0 s));
+  Lwt.return_unit
+
 let main () =
   let* (_ : Unix.process_status) = Lwt_unix.system ("rm -rf " ^ root) in
   List.iter
@@ -130,6 +172,11 @@ let main () =
   let* got, s = read_all key in
   if got <> String.length edited || s <> edited then
     note "the file is wrong after the promote";
+
+  (* Repeated: a write only tears a group if it lands between the upload that
+     hashed the bytes and the promotion that re-reads them, which is a slice of
+     each sync rather than all of it. *)
+  let* () = Lwt_list.iter_s write_during_promote (List.init 12 Fun.id) in
 
   match List.rev !failures with
     | [] ->
