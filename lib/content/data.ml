@@ -723,6 +723,16 @@ module Make (C : Conf.S) (R : Remote.S) = struct
     in
     (* Anything else -- a body per chunk from an older sidecar, or a group the
        cache size no longer matches -- has to be written out. *)
+    (* The staged record's own account of the group's length, which the link
+       refuses unless it matches the published group's. *)
+    let staged_len group =
+      let indices = Chunk_group.indices group in
+      match indices with
+        | [] -> 0
+        | first :: _ ->
+            let last = List.nth indices (List.length indices - 1) in
+            snd (group_layout ~st:staged ~first ~last)
+    in
     let single_body group =
       shared_body ~slot_at
         (List.map
@@ -754,7 +764,9 @@ module Make (C : Conf.S) (R : Remote.S) = struct
           else (
             match single_body group with
               | Some uuid ->
-                  let* linked = Cc.stage_link_group ~uuid ~group in
+                  let* linked =
+                    Cc.stage_link_group ~uuid ~len:(staged_len group) ~group
+                  in
                   if linked then Lwt.return_unit else write_group group
               | None -> write_group group))
         (Mf.groups published)

@@ -284,15 +284,20 @@ module Make (C : Conf.S) (F : Fetch) = struct
      that are per-inode or transient leave it unanswered. *)
   let links_supported = ref None
 
-  let stage_link_group ~uuid ~group =
-    if !links_supported = Some false then Lwt.return_false
+  let stage_link_group ~uuid ~len ~group =
+    (* The copy path fails a member whose length disagrees with the manifest
+       ({!write_group}); the link path publishes the body whole, so the same
+       disagreement has to stop it here or it reaches the store under a name
+       derived from bytes it does not hold. *)
+    if len <> Chunk_group.bytes group then Lwt.return_false
+    else if !links_supported = Some false then Lwt.return_false
     else (
       let dst = path group in
       Lwt.catch
         (fun () ->
           (* Inside the guard: a promotion replayed after the body was dropped
              finds nothing to resize, and writing the group is the answer. *)
-          let* () = stage_resize ~uuid ~len:(Chunk_group.bytes group) in
+          let* () = stage_resize ~uuid ~len in
           let* () = Fs_util.ensure_parent dst in
           let* () = Lwt_unix_retry.link (staged_path uuid) dst in
           let now = Unix.gettimeofday () in

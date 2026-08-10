@@ -319,15 +319,19 @@ let () =
            ())
          [(0, "AAAA"); (1, "BBBB"); (2, "CC")]
      in
-     let* linked = Cc.stage_link_group ~uuid ~group:trio in
+     let* linked = Cc.stage_link_group ~uuid ~len:bytes ~group:trio in
      let staged = Cc.staged_path uuid in
      let same_inode () =
        (Unix.stat staged).Unix.st_ino = (Unix.stat (path trio)).Unix.st_ino
      in
      Printf.printf "%-28s linked=%b one body=%b names=%d\n" "publish by link"
        linked (same_inode ()) (Unix.stat (path trio)).Unix.st_nlink;
-     let* again = Cc.stage_link_group ~uuid ~group:trio in
+     let* again = Cc.stage_link_group ~uuid ~len:bytes ~group:trio in
      Printf.printf "%-28s linked=%b\n" "publishing it again" again;
+     let* disagreeing =
+       Cc.stage_link_group ~uuid ~len:(bytes + 1) ~group:trio
+     in
+     Printf.printf "%-28s linked=%b\n" "a length that disagrees" disagreeing;
      let* () = Cc.stage_forget ~uuid in
      let* () = show_body "read after the staged name goes" trio 1 in
      let+ () = show_body "and its short last member" trio 2 in
