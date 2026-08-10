@@ -24,6 +24,7 @@
   lwt
   ppx_blob
   mem_usage
+  memtrace
   tls
   base64
   x509

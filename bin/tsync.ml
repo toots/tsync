@@ -102,6 +102,21 @@ let start_cmd =
                    name)
       in
       Log.debug "starting frontend %s (%d domains)" name (List.length bindings);
+      (* Here rather than at startup: this runs once per frontend process, after
+         the fork. Two processes inheriting one trace fd drop about half their
+         samples into a file that still reads clean, and neither says which
+         process allocated. MEMTRACE names a directory, one file per frontend
+         inside it. Sampling defaults to 1e-6; MEMTRACE_RATE raises it. *)
+      (match Sys.getenv_opt "MEMTRACE" with
+        | None | Some "" -> ()
+        | Some dir ->
+            if not (Sys.file_exists dir && Sys.is_directory dir) then
+              failwith
+                (Printf.sprintf "MEMTRACE=%s is not a directory" dir);
+            let filename = Filename.concat dir (name ^ ".ctf") in
+            Unix.putenv "MEMTRACE" filename;
+            Memtrace.trace_if_requested ~context:name ();
+            Log.info "memory trace: %s" filename);
       F.start bindings
     in
     Log.debug "cache root: %s" runtime_paths.Runtime.cache_root;
