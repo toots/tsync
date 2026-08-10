@@ -94,6 +94,18 @@ module Make (C : Conf.S) (F : Fetch) : sig
 
   val stage_forget : uuid:string -> unit Lwt.t
 
+  (** Publish a staged body under its group's content name, by giving the same
+      bytes a second name rather than copying them. Both names are readable
+      until the staged one is dropped, so a reader resolving either during a
+      promotion finds it.
+
+      [false] where the cache root cannot hold a second name for one inode, and
+      the caller writes the group out instead. Whether it can is asked once.
+
+      The body is resized to the group's length first, which supplies zeros for
+      a member never written and cuts anything past the last one. *)
+  val stage_link_group : uuid:string -> group:Chunk_group.t -> bool Lwt.t
+
   (** {2 Whole bodies}
 
       A frontend that hands back a complete file gets it adopted as one file: no

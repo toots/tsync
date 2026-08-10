@@ -711,27 +711,55 @@ module Make (C : Conf.S) (R : Remote.S) = struct
             | Manifest.Inherit -> false)
         (Chunk_group.indices group)
     in
+    (* A group already assembled in one body is published by naming it, which is
+       what staging in group layout was for. Anything else -- a body per chunk
+       from an older sidecar, or a group the cache size no longer matches -- is
+       written out. *)
+    let single_body group =
+      List.fold_left
+        (fun acc i ->
+          match (acc, slot_at i) with
+            | None, _ -> None
+            | Some _, Manifest.Zero -> acc
+            | Some None, Manifest.Staged b
+              when b.Manifest.offset = Chunk_group.offset group i ->
+                Some (Some b.Manifest.uuid)
+            | Some (Some u), Manifest.Staged b
+              when b.Manifest.uuid = u
+                   && b.Manifest.offset = Chunk_group.offset group i ->
+                acc
+            | _ -> None)
+        (Some None)
+        (Chunk_group.indices group)
+    in
+    let write_group group =
+      Cc.put_group ~group ~member:(fun i ->
+          let* source = staged_source ~staged ~base:None i in
+          match source with
+            | `Reuse _ -> assert false (* [local] ruled this out *)
+            | `Fill fill ->
+                (* Its own buffer rather than the upload path's pool: this
+                         runs over a group's members, two at the defaults. *)
+                let len =
+                  Manifest.chunk_len ~size:staged.Manifest.s_size
+                    ~chunk_size:staged.Manifest.s_chunk_size i
+                in
+                let buf = Bytes.create len in
+                let+ () = fill buf in
+                Bytes.unsafe_to_string buf)
+    in
     (* An untouched group keeps its key, so whatever body we hold for it is
        still right. *)
     let* () =
       Lwt_list.iter_s
         (fun group ->
-          if touched group && local group then
-            Cc.put_group ~group ~member:(fun i ->
-                let* source = staged_source ~staged ~base:None i in
-                match source with
-                  | `Reuse _ -> assert false (* [local] ruled this out *)
-                  | `Fill fill ->
-                      (* Its own buffer rather than the upload path's pool: this
-                         runs over a group's members, two at the defaults. *)
-                      let len =
-                        Manifest.chunk_len ~size:staged.Manifest.s_size
-                          ~chunk_size:staged.Manifest.s_chunk_size i
-                      in
-                      let buf = Bytes.create len in
-                      let+ () = fill buf in
-                      Bytes.unsafe_to_string buf)
-          else Lwt.return_unit)
+          if not (touched group && local group) then Lwt.return_unit
+          else (
+            match single_body group with
+              | Some (Some uuid) ->
+                  let* linked = Cc.stage_link_group ~uuid ~group in
+                  if linked then Lwt.return_unit else write_group group
+              | _ -> write_group group))
         (Mf.groups published)
     in
     let* () = Mf.write key published in

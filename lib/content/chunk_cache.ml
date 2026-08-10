@@ -278,6 +278,49 @@ module Make (C : Conf.S) (F : Fetch) = struct
 
   let stage_forget ~uuid = Fs_util.unlink_quiet (staged_path uuid)
 
+  (* Not every cache root can hold a second name for one inode -- some Android
+     storage goes through a shim that cannot -- and the answer is the same for
+     every group once it is known, so it is asked once and remembered. Errors
+     that are per-inode or transient leave it unanswered. *)
+  let links_supported = ref None
+
+  (* Publishes a staged body under its group's content name by giving it a
+     second name rather than a second copy, so both are readable until the
+     staged one is dropped. [false] means the caller writes the group instead. *)
+  let stage_link_group ~uuid ~group =
+    if !links_supported = Some false then Lwt.return_false
+    else (
+      let dst = path group in
+      Lwt.catch
+        (fun () ->
+          (* Inside the guard: a promotion replayed after the body was dropped
+             finds nothing to resize, and writing the group is the answer. *)
+          let* () = stage_resize ~uuid ~len:(Chunk_group.bytes group) in
+          let* () = Fs_util.ensure_parent dst in
+          let* () = Lwt_unix_retry.link (staged_path uuid) dst in
+          let now = Unix.gettimeofday () in
+          (* Dated now, or the cap reads a freshly published group as being as
+             old as the write that staged it. *)
+          let+ () =
+            Lwt.catch
+              (fun () -> Lwt_unix.utimes dst now now)
+              (fun _ -> Lwt.return_unit)
+          in
+          links_supported := Some true;
+          true)
+        (function
+          | Unix.Unix_error (Unix.EEXIST, _, _) ->
+              links_supported := Some true;
+              Lwt.return_true
+          | Unix.Unix_error
+              ((Unix.EPERM | Unix.ENOSYS | Unix.EOPNOTSUPP | Unix.EXDEV), _, _)
+            as exn ->
+              Log.info "chunk cache: publishing by link unavailable (%s)"
+                (Printexc.to_string exn);
+              links_supported := Some false;
+              Lwt.return_false
+          | _ -> Lwt.return_false))
+
   (* A frontend handing back a complete file (as the FileProvider extension
      always does) gets it adopted as-is: one file, no chunk split. *)
 
