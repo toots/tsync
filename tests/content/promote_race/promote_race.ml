@@ -70,8 +70,15 @@ let read_all key =
   let+ n = D.pread_key key buf ~offset:0L in
   (n, string_of_buffer buf n)
 
+(* Recorded rather than raised, so one run reports every way it went wrong. *)
 let failures = ref []
 let note what = failures := what :: !failures
+
+let report label =
+  (match List.rev !failures with
+    | [] -> Printf.printf "%s: ok\n" label
+    | fs -> List.iter (Printf.printf "%s: %s\n" label) fs);
+  failures := []
 
 let reader_loop ~expect ~stop =
   let rec go n =
@@ -172,18 +179,13 @@ let main () =
   let* got, s = read_all key in
   if got <> String.length edited || s <> edited then
     note "the file is wrong after the promote";
+  report "reads during a promotion";
 
   (* Repeated: a write only tears a group if it lands between the upload that
      hashed the bytes and the promotion that re-reads them, which is a slice of
      each sync rather than all of it. *)
   let* () = Lwt_list.iter_s write_during_promote (List.init 12 Fun.id) in
-
-  match List.rev !failures with
-    | [] ->
-        Printf.printf "%d reads during promote, all correct\n" reads;
-        Lwt.return_unit
-    | fs ->
-        List.iter (Printf.printf "FAIL: %s\n") fs;
-        exit 1
+  report "writes during a promotion";
+  Lwt.return_unit
 
 let () = Lwt_main.run (main ())
