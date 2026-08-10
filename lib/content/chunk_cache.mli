@@ -72,7 +72,7 @@ module Make (C : Conf.S) (F : Fetch) : sig
       not lose them. *)
   val stage_ensure : uuid:string -> len:int -> unit Lwt.t
 
-  (** Set the length exactly, for a truncate. *)
+  (** Set the length exactly. *)
   val stage_resize : uuid:string -> len:int -> unit Lwt.t
 
   val stage_len : uuid:string -> int option Lwt.t
@@ -105,9 +105,12 @@ module Make (C : Conf.S) (F : Fetch) : sig
       [false] where the cache root cannot hold a second name for one inode, and
       the caller writes the group out instead. Whether it can is asked once.
 
-      The body is resized to the group's length first, which supplies zeros for
-      a member never written and cuts anything past the last one. *)
-  val stage_link_group : uuid:string -> group:Chunk_group.t -> bool Lwt.t
+      [len] is the caller's account of how long the body should be, and it must
+      match the group's own or the two disagree about the layout and nothing is
+      published. The body is resized to it first, which supplies zeros for a
+      member never written and cuts anything past the last one. *)
+  val stage_link_group :
+    uuid:string -> len:int -> group:Chunk_group.t -> bool Lwt.t
 
   (** {2 Whole bodies}
 
