@@ -75,7 +75,6 @@ module Make (C : Conf.S) (F : Fetch) : sig
   (** Set the length exactly. *)
   val stage_resize : uuid:string -> len:int -> unit Lwt.t
 
-  val stage_len : uuid:string -> int option Lwt.t
   val stage_write : uuid:string -> Local_io.buffer -> offset:int -> int Lwt.t
 
   val stage_read_into :

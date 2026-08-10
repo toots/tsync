@@ -206,6 +206,20 @@ module Make (C : Conf.S) (R : Remote.S) = struct
         if !holders = 0 then Hashtbl.remove key_locks key;
         Lwt.return_unit)
 
+  (* Where each member of a group sits in the body that holds it: the running
+     sum of the lengths before it, which is what {!Chunk_group.offset} computes
+     for the published group these bytes become. *)
+  let group_layout ~(st : Manifest.staged) ~first ~last =
+    let len j =
+      Manifest.chunk_len ~size:st.Manifest.s_size
+        ~chunk_size:st.Manifest.s_chunk_size j
+    in
+    let rec go j offset acc =
+      if j > last then (List.rev acc, offset)
+      else go (j + 1) (offset + len j) ((j, offset, len j) :: acc)
+    in
+    go first 0 []
+
   (* A whole body is split into chunks first: only chunks can be addressed by a
      partial write. *)
   let rec staged_for key =
@@ -249,24 +263,26 @@ module Make (C : Conf.S) (R : Remote.S) = struct
 
   and split_whole key (st : Manifest.staged) uuid =
     let* cs = R.chunk_size () in
-    let total = Int64.to_int st.Manifest.s_size in
     let n = Manifest.num_chunks_for st.Manifest.s_size cs in
     let slots = Array.make n Manifest.Zero in
     let buf = Bigarray.Array1.create Bigarray.char Bigarray.c_layout cs in
     let per = Chunk_group.per_group ~chunk_size:cs ~cache_chunk_size in
+    let st_for_layout = { st with Manifest.s_chunk_size = cs } in
     let rec chunk i body offset =
       if i >= n then Lwt.return_unit
       else
         let* body, offset =
-          if i mod per = 0 then (
+          if Chunk_group.index_of ~per i * per = i then (
             let body = Manifest.new_uuid () in
             let last = min (n - 1) (i + per - 1) in
-            let len = min total ((last + 1) * cs) - (i * cs) in
-            let+ () = Cc.stage_ensure ~uuid:body ~len in
+            let _, body_len = group_layout ~st:st_for_layout ~first:i ~last in
+            let+ () = Cc.stage_ensure ~uuid:body ~len:body_len in
             (body, 0))
           else Lwt.return (body, offset)
         in
-        let len = min cs (total - (i * cs)) in
+        let len =
+          Manifest.chunk_len ~size:st.Manifest.s_size ~chunk_size:cs i
+        in
         let slice = Bigarray.Array1.sub buf 0 len in
         let* (_ : int) =
           Cc.whole_read_into ~uuid slice ~offset:(Int64.of_int (i * cs))
@@ -301,20 +317,6 @@ module Make (C : Conf.S) (R : Remote.S) = struct
       let a = Array.make n Manifest.Zero in
       Array.blit slots 0 a 0 old;
       a)
-
-  (* Where each member of a group sits in the body that holds it: the running
-     sum of the lengths before it, which is what {!Chunk_group.offset} computes
-     for the published group these bytes become. *)
-  let group_layout ~(st : Manifest.staged) ~first ~last =
-    let len j =
-      Manifest.chunk_len ~size:st.Manifest.s_size
-        ~chunk_size:st.Manifest.s_chunk_size j
-    in
-    let rec go j offset acc =
-      if j > last then (List.rev acc, offset)
-      else go (j + 1) (offset + len j) ((j, offset, len j) :: acc)
-    in
-    go first 0 []
 
   (* The body a group's staged members share, when they share one: the same
      uuid, each at the offset [members] says it belongs at. [Zero] members are
@@ -414,7 +416,6 @@ module Make (C : Conf.S) (R : Remote.S) = struct
     let len = Bigarray.Array1.dim buf in
     let* st = staged_for key in
     let* base = Mf.read key in
-    let base = match base with Some m -> Some m | _ -> None in
     let cs = st.Manifest.s_chunk_size in
     let start = Int64.to_int offset in
     let new_size =
@@ -468,7 +469,6 @@ module Make (C : Conf.S) (R : Remote.S) = struct
   let truncate_locked key size =
     let* st = staged_for key in
     let* base = Mf.read key in
-    let base = match base with Some m -> Some m | _ -> None in
     let cs = st.Manifest.s_chunk_size in
     let n = Manifest.num_chunks_for size cs in
     let old = st.Manifest.s_slots in
@@ -667,7 +667,6 @@ module Make (C : Conf.S) (R : Remote.S) = struct
 
   and upload_chunked ~key ~(staged : Manifest.staged) ?cancel () =
     let* base = Mf.read key in
-    let base = match base with Some m -> Some m | _ -> None in
     let* state =
       R.upload_chunks ~key ~size:staged.Manifest.s_size
         ~chunk_size:staged.Manifest.s_chunk_size ~mtime:staged.Manifest.s_mtime
