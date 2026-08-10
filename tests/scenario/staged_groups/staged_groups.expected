@@ -38,7 +38,7 @@
   read part.txt [0,48)
   drain
   chunks part.txt
-  staged manifests=1 bodies=3
+  staged manifests=1 bodies=1
   chunks part.txt staged size=48 slots=[SSSIII] cached=3/6
   read part.txt [0,48) = "AAAAAAAAbbbbbbbbCCCCCCCCDDDDDDDDEEEEEEEEFFFFFFFF"
   chunks part.txt staged size=48 slots=[SSSIII] cached=6/6
@@ -72,8 +72,8 @@
   read twice.txt [0,48)
   drain
   chunks twice.txt
-  staged manifests=1 bodies=3
-  staged manifests=1 bodies=3
+  staged manifests=1 bodies=1
+  staged manifests=1 bodies=1
   read twice.txt [0,48) = "aaaaaaaaBBBBBBBBccccccccDDDDDDDDEEEEEEEEFFFFFFFF"
   chunks twice.txt staged size=48 slots=[SSSIII] cached=6/6
 --- tree
@@ -108,9 +108,9 @@
   read grow.txt [0,24)
   drain
   chunks grow.txt
-  staged manifests=1 bodies=2
+  staged manifests=1 bodies=1
   chunks grow.txt staged size=16 slots=[SS] cached=2/2
-  staged manifests=1 bodies=3
+  staged manifests=1 bodies=1
   chunks grow.txt staged size=24 slots=[SSS] cached=3/3
   read grow.txt [0,24) = "AAAAAAAABBBBbbbbCCCCCCCC"
   chunks grow.txt staged size=24 slots=[SSS] cached=3/3
@@ -136,7 +136,7 @@
   drain
   chunks cut.txt
   chunk-cache
-  staged manifests=1 bodies=2
+  staged manifests=1 bodies=1
   chunks cut.txt staged size=12 slots=[SS] cached=2/2
   read cut.txt [0,12) = "AAAAAAAABBBB"
   chunks cut.txt staged size=12 slots=[SS] cached=2/2

@@ -218,50 +218,63 @@ module Make (C : Conf.S) (F : Fetch) = struct
       (Cache_layout.staged_chunks_dir ~cache_root:C.cache_root C.domain_name)
       uuid
 
-  (* Sparse, so a grown chunk costs no disk until written. *)
-  let stage_empty ~uuid ~len =
+  (* Sparse, so the part of a group nobody has written costs no disk. *)
+  let stage_len ~uuid =
+    Lwt.catch
+      (fun () ->
+        let+ st = Lwt_unix_retry.LargeFile.stat (staged_path uuid) in
+        Some (Int64.to_int st.Unix.LargeFile.st_size))
+      (fun _ -> Lwt.return_none)
+
+  let stage_ensure ~uuid ~len =
     let p = staged_path uuid in
     let* () = Fs_util.ensure_parent p in
-    let* fd =
-      Lwt_unix_retry.openfile p
-        [Unix.O_WRONLY; Unix.O_CREAT; Unix.O_TRUNC]
-        0o644
-    in
-    Lwt.finalize
-      (fun () -> Lwt_unix_retry.LargeFile.ftruncate fd (Int64.of_int len))
-      (fun () -> Lwt_unix_retry.close fd)
+    let* have = stage_len ~uuid in
+    match have with
+      | Some n when n >= len -> Lwt.return_unit
+      | _ ->
+          let* fd =
+            Lwt_unix_retry.openfile p [Unix.O_WRONLY; Unix.O_CREAT] 0o644
+          in
+          Lwt.finalize
+            (fun () -> Lwt_unix_retry.LargeFile.ftruncate fd (Int64.of_int len))
+            (fun () -> Lwt_unix_retry.close fd)
 
-  (* For a write not replacing all of a published chunk. The copy is the price of
-     immutable content-addressed chunks. *)
-  let stage_from_chunk ~group ~index ~uuid =
-    let* () = ensure ~group () in
-    let p = staged_path uuid in
-    let* () = Fs_util.ensure_parent p in
-    let len = Chunk_group.size group index in
-    let buf = Bigarray.Array1.create Bigarray.char Bigarray.c_layout len in
-    let* n =
-      Local_io.read (path group) buf
-        ~offset:(Int64.of_int (Chunk_group.offset group index))
-    in
-    let* () = stage_empty ~uuid ~len in
-    let+ (_ : int) =
-      Local_io.write p (Bigarray.Array1.sub buf 0 n) ~offset:0L
-    in
-    ()
-
-  let stage_write ~uuid buf ~chunk_off =
-    Local_io.write (staged_path uuid) buf ~offset:(Int64.of_int chunk_off)
-
-  let stage_read_into ~uuid buf ~chunk_off =
-    Local_io.read (staged_path uuid) buf ~offset:(Int64.of_int chunk_off)
-
-  let stage_truncate ~uuid ~len =
+  let stage_resize ~uuid ~len =
     let* fd =
       Lwt_unix_retry.openfile (staged_path uuid) [Unix.O_WRONLY] 0o644
     in
     Lwt.finalize
       (fun () -> Lwt_unix_retry.LargeFile.ftruncate fd (Int64.of_int len))
       (fun () -> Lwt_unix_retry.close fd)
+
+  let stage_write ~uuid buf ~offset =
+    Local_io.write (staged_path uuid) buf ~offset:(Int64.of_int offset)
+
+  let stage_read_into ~uuid buf ~offset =
+    Local_io.read (staged_path uuid) buf ~offset:(Int64.of_int offset)
+
+  (* For a write not replacing all of a published chunk. The copy is the price of
+     immutable content-addressed chunks. *)
+  let stage_copy_chunk ~group ~index ~uuid ~offset =
+    let* () = ensure ~group () in
+    let len = Chunk_group.size group index in
+    let buf = Bigarray.Array1.create Bigarray.char Bigarray.c_layout len in
+    let* n =
+      Local_io.read (path group) buf
+        ~offset:(Int64.of_int (Chunk_group.offset group index))
+    in
+    let+ (_ : int) = stage_write ~uuid (Bigarray.Array1.sub buf 0 n) ~offset in
+    ()
+
+  (* Regrouping: the same bytes under a body that holds the whole group. *)
+  let stage_copy ~src ~src_off ~dst ~dst_off ~len =
+    let buf = Bigarray.Array1.create Bigarray.char Bigarray.c_layout len in
+    let* n = stage_read_into ~uuid:src buf ~offset:src_off in
+    let+ (_ : int) =
+      stage_write ~uuid:dst (Bigarray.Array1.sub buf 0 n) ~offset:dst_off
+    in
+    ()
 
   let stage_forget ~uuid = Fs_util.unlink_quiet (staged_path uuid)
 

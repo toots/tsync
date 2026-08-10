@@ -64,20 +64,34 @@ module Make (C : Conf.S) (F : Fetch) : sig
   (** Path of a staged body, for the upload that reads and hashes it. *)
   val staged_path : string -> string
 
-  (** Create a sparse body of [len] zero bytes. *)
-  val stage_empty : uuid:string -> len:int -> unit Lwt.t
+  (** Create the body if absent and grow it to [len], never shrinking: one body
+      holds a whole cache group, and a member written before its neighbours must
+      not lose them. *)
+  val stage_ensure : uuid:string -> len:int -> unit Lwt.t
 
-  (** Create a body holding a published chunk's bytes, read out of its group,
-      for a write that does not replace all of them (read-modify-write). *)
-  val stage_from_chunk :
-    group:Chunk_group.t -> index:int -> uuid:string -> unit Lwt.t
+  (** Set the length exactly, for a truncate. *)
+  val stage_resize : uuid:string -> len:int -> unit Lwt.t
 
-  val stage_write : uuid:string -> Local_io.buffer -> chunk_off:int -> int Lwt.t
+  val stage_len : uuid:string -> int option Lwt.t
+  val stage_write : uuid:string -> Local_io.buffer -> offset:int -> int Lwt.t
 
   val stage_read_into :
-    uuid:string -> Local_io.buffer -> chunk_off:int -> int Lwt.t
+    uuid:string -> Local_io.buffer -> offset:int -> int Lwt.t
 
-  val stage_truncate : uuid:string -> len:int -> unit Lwt.t
+  (** Copy a published chunk's bytes out of its group into [offset] of a staged
+      body, for a write that does not replace all of them. *)
+  val stage_copy_chunk :
+    group:Chunk_group.t -> index:int -> uuid:string -> offset:int -> unit Lwt.t
+
+  (** Move [len] bytes between staged bodies, for regrouping. *)
+  val stage_copy :
+    src:string ->
+    src_off:int ->
+    dst:string ->
+    dst_off:int ->
+    len:int ->
+    unit Lwt.t
+
   val stage_forget : uuid:string -> unit Lwt.t
 
   (** {2 Whole bodies}

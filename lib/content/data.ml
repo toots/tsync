@@ -123,8 +123,11 @@ module Make (C : Conf.S) (R : Remote.S) = struct
             let slice = Bigarray.Array1.sub buf done_ take in
             let* got =
               match slots.(i) with
-                | Manifest.Staged { uuid; _ } ->
-                    let* got = Cc.stage_read_into ~uuid slice ~chunk_off in
+                | Manifest.Staged { uuid; offset = body_off } ->
+                    let* got =
+                      Cc.stage_read_into ~uuid slice
+                        ~offset:(body_off + chunk_off)
+                    in
                     (* A staged body is only as long as the writes that reached
                        it: past its end is a hole, reading as zeros. *)
                     if got < take then (
@@ -250,21 +253,30 @@ module Make (C : Conf.S) (R : Remote.S) = struct
     let n = Manifest.num_chunks_for st.Manifest.s_size cs in
     let slots = Array.make n Manifest.Zero in
     let buf = Bigarray.Array1.create Bigarray.char Bigarray.c_layout cs in
-    let rec chunk i =
+    let per = Chunk_group.per_group ~chunk_size:cs ~cache_chunk_size in
+    (* One body per group, laid out as the group will be. *)
+    let rec chunk i body offset =
       if i >= n then Lwt.return_unit
-      else (
+      else
+        let* body, offset =
+          if i mod per = 0 then (
+            let body = Manifest.new_uuid () in
+            let last = min (n - 1) (i + per - 1) in
+            let len = min total ((last + 1) * cs) - (i * cs) in
+            let+ () = Cc.stage_ensure ~uuid:body ~len in
+            (body, 0))
+          else Lwt.return (body, offset)
+        in
         let len = min cs (total - (i * cs)) in
         let slice = Bigarray.Array1.sub buf 0 len in
         let* (_ : int) =
           Cc.whole_read_into ~uuid slice ~offset:(Int64.of_int (i * cs))
         in
-        let body = Manifest.new_uuid () in
-        let* () = Cc.stage_empty ~uuid:body ~len in
-        let* (_ : int) = Cc.stage_write ~uuid:body slice ~chunk_off:0 in
-        slots.(i) <- Manifest.Staged { uuid = body; offset = 0 };
-        chunk (i + 1))
+        let* (_ : int) = Cc.stage_write ~uuid:body slice ~offset in
+        slots.(i) <- Manifest.Staged { uuid = body; offset };
+        chunk (i + 1) body (offset + len)
     in
-    let* () = chunk 0 in
+    let* () = chunk 0 "" 0 in
     let st =
       {
         st with
@@ -291,51 +303,100 @@ module Make (C : Conf.S) (R : Remote.S) = struct
       Array.blit slots 0 a 0 old;
       a)
 
-  (* An inherited chunk is copied in only on a partial write, where its
-     untouched bytes must survive; [full_cover] skips that read. *)
-  let stage_slot ~base ~(st : Manifest.staged) ~full_cover i =
-    let slots = st.Manifest.s_slots in
-    let stage_sparse uuid =
-      let len =
-        Manifest.chunk_len ~size:st.Manifest.s_size
-          ~chunk_size:st.Manifest.s_chunk_size i
-      in
-      let+ () = Cc.stage_empty ~uuid ~len in
-      slots.(i) <- Manifest.Staged { uuid; offset = 0 }
+  (* Where each member of a group sits in the body that holds it: the running
+     sum of the lengths before it, which is what {!Chunk_group.offset} computes
+     for the published group these bytes become. *)
+  let group_layout ~(st : Manifest.staged) ~first ~last =
+    let len j =
+      Manifest.chunk_len ~size:st.Manifest.s_size
+        ~chunk_size:st.Manifest.s_chunk_size j
     in
-    match slots.(i) with
-      | Manifest.Staged _ -> Lwt.return_unit
-      | Manifest.Inherit when not full_cover -> (
-          let uuid = Manifest.new_uuid () in
-          match Mf.group_at_opt base i with
-            | Some group ->
-                let+ () = Cc.stage_from_chunk ~group ~index:i ~uuid in
-                slots.(i) <- Manifest.Staged { uuid; offset = 0 }
-            | None -> stage_sparse uuid)
-      | Manifest.Inherit | Manifest.Zero -> stage_sparse (Manifest.new_uuid ())
+    let rec go j offset acc =
+      if j > last then (List.rev acc, offset)
+      else go (j + 1) (offset + len j) ((j, offset, len j) :: acc)
+    in
+    go first 0 []
 
-  (* Stages the whole group [i] falls in, so a group is never a mix of staged
-     bodies and chunks whose bytes only exist under the group key this write
-     invalidated.
+  (* Establishes that every staged member of the group [i] falls in shares one
+     body and sits at its layout offset, so the body is the group's bytes
+     already assembled and publishing it is a link rather than a copy.
 
-     ponytail: a one-byte write materializes up to [cacheChunkSize] of staged
-     bodies; stage per member and assemble the remainder at promotion time if
-     write amplification ever bites. *)
-  let stage_group ~base ~(st : Manifest.staged) ~covers i =
+     The whole group is staged, never part of it: the group's key covers all its
+     members, so a body holding only some of them could not be published under
+     the key the others still name. *)
+  let ensure_group_body ~base ~(st : Manifest.staged) ~covers i =
+    let slots = st.Manifest.s_slots in
     let per =
       Chunk_group.per_group ~chunk_size:st.Manifest.s_chunk_size
         ~cache_chunk_size
     in
-    let n = Array.length st.Manifest.s_slots in
+    let n = Array.length slots in
     let first = Chunk_group.index_of ~per i * per in
     let last = min (n - 1) (first + per - 1) in
-    let rec go j =
-      if j > last then Lwt.return_unit
-      else
-        let* () = stage_slot ~base ~st ~full_cover:(covers j) j in
-        go (j + 1)
+    let members, body_len = group_layout ~st ~first ~last in
+
+    (* Already one body at the right offsets: the common case, and the whole
+       point -- a second write to a group costs no copy. *)
+    let shared =
+      List.fold_left
+        (fun acc (j, offset, _) ->
+          match (acc, slots.(j)) with
+            | None, _ -> None
+            | Some _, Manifest.Zero -> acc
+            | Some None, Manifest.Staged b when b.Manifest.offset = offset ->
+                Some (Some b.Manifest.uuid)
+            | Some (Some u), Manifest.Staged b
+              when b.Manifest.uuid = u && b.Manifest.offset = offset ->
+                acc
+            | _ -> None)
+        (Some None) members
     in
-    go first
+    match shared with
+      | Some (Some uuid) ->
+          let+ () = Cc.stage_ensure ~uuid ~len:body_len in
+          List.iter
+            (fun (j, offset, _) ->
+              match slots.(j) with
+                | Manifest.Zero when covers j ->
+                    slots.(j) <- Manifest.Staged { uuid; offset }
+                | _ -> ())
+            members
+      | _ ->
+          let uuid = Manifest.new_uuid () in
+          let stale = Manifest.body_uuids slots in
+          let* () = Cc.stage_ensure ~uuid ~len:body_len in
+          let* () =
+            Lwt_list.iter_s
+              (fun (j, offset, len) ->
+                (* A member the write is about to replace whole needs nothing
+                   read in. *)
+                if covers j then Lwt.return_unit
+                else (
+                  match slots.(j) with
+                    | Manifest.Staged b ->
+                        Cc.stage_copy ~src:b.Manifest.uuid
+                          ~src_off:b.Manifest.offset ~dst:uuid ~dst_off:offset
+                          ~len
+                    | Manifest.Inherit -> (
+                        match Mf.group_at_opt base j with
+                          | Some group ->
+                              Cc.stage_copy_chunk ~group ~index:j ~uuid ~offset
+                          (* Nothing published to inherit: a hole, and the body
+                             is already sparse there. *)
+                          | None -> Lwt.return_unit)
+                    | Manifest.Zero -> Lwt.return_unit))
+              members
+          in
+          List.iter
+            (fun (j, offset, _) ->
+              slots.(j) <- Manifest.Staged { uuid; offset })
+            members;
+          let live = Manifest.body_uuids slots in
+          Lwt_list.iter_s
+            (fun old ->
+              if List.mem old live then Lwt.return_unit
+              else Cc.stage_forget ~uuid:old)
+            stale
 
   (* Bytes land before the staged manifest: a crash in between leaves an
      unreferenced body rather than a manifest pointing at unwritten bytes. *)
@@ -370,16 +431,18 @@ module Make (C : Conf.S) (R : Remote.S) = struct
         let take =
           min (cs - chunk_off) (len - ((i * cs) + chunk_off - start))
         in
-        let* () = stage_group ~base ~st ~covers i in
+        let* () = ensure_group_body ~base ~st ~covers i in
         let* () =
           match st.Manifest.s_slots.(i) with
-            | Manifest.Staged { uuid; _ } ->
+            | Manifest.Staged { uuid; offset = body_off } ->
                 let src_off = (i * cs) + chunk_off - start in
                 let slice = Bigarray.Array1.sub buf src_off take in
-                let+ (_ : int) = Cc.stage_write ~uuid slice ~chunk_off in
+                let+ (_ : int) =
+                  Cc.stage_write ~uuid slice ~offset:(body_off + chunk_off)
+                in
                 ()
             | Manifest.Inherit | Manifest.Zero ->
-                (* [stage_slot] just made this a staged body. *)
+                (* [ensure_group_body] just made this a staged body. *)
                 Lwt.fail_with "data: slot not staged"
         in
         go (i + 1))
@@ -399,20 +462,16 @@ module Make (C : Conf.S) (R : Remote.S) = struct
     let cs = st.Manifest.s_chunk_size in
     let n = Manifest.num_chunks_for size cs in
     let old = st.Manifest.s_slots in
-    let* () =
-      let rec drop i =
-        if i >= Array.length old then Lwt.return_unit
-        else
-          let* () =
-            match old.(i) with
-              | Manifest.Staged { uuid; _ } -> Cc.stage_forget ~uuid
-              | Manifest.Inherit | Manifest.Zero -> Lwt.return_unit
-          in
-          drop (i + 1)
-      in
-      drop n
-    in
     let slots = grow_slots (Array.sub old 0 (min n (Array.length old))) n in
+    (* By difference, not per dropped slot: the members of a group share one
+       body, and one of them surviving keeps it. *)
+    let* () =
+      let kept = Manifest.body_uuids slots in
+      Lwt_list.iter_s
+        (fun uuid ->
+          if List.mem uuid kept then Lwt.return_unit else Cc.stage_forget ~uuid)
+        (Manifest.body_uuids old)
+    in
     let st = { st with Manifest.s_slots = slots; s_size = size } in
     let* () =
       let i = n - 1 in
@@ -420,7 +479,8 @@ module Make (C : Conf.S) (R : Remote.S) = struct
       else (
         let len = Manifest.chunk_len ~size ~chunk_size:cs i in
         match slots.(i) with
-          | Manifest.Staged { uuid; _ } -> Cc.stage_truncate ~uuid ~len
+          | Manifest.Staged { uuid; offset } ->
+              Cc.stage_resize ~uuid ~len:(offset + len)
           | Manifest.Zero -> Lwt.return_unit
           | Manifest.Inherit -> (
               let inherited_len =
@@ -432,9 +492,12 @@ module Make (C : Conf.S) (R : Remote.S) = struct
               in
               if inherited_len = len then Lwt.return_unit
               else
-                let* () = stage_group ~base ~st ~covers:(fun _ -> false) i in
+                let* () =
+                  ensure_group_body ~base ~st ~covers:(fun _ -> false) i
+                in
                 match slots.(i) with
-                  | Manifest.Staged { uuid; _ } -> Cc.stage_truncate ~uuid ~len
+                  | Manifest.Staged { uuid; offset } ->
+                      Cc.stage_resize ~uuid ~len:(offset + len)
                   | Manifest.Inherit | Manifest.Zero -> Lwt.return_unit))
     in
     Mf.write_staged key (mutated st)
@@ -442,11 +505,8 @@ module Make (C : Conf.S) (R : Remote.S) = struct
   let discard_bodies (st : Manifest.staged) =
     let* () =
       Lwt_list.iter_s
-        (fun slot ->
-          match slot with
-            | Manifest.Staged { uuid; _ } -> Cc.stage_forget ~uuid
-            | Manifest.Inherit | Manifest.Zero -> Lwt.return_unit)
-        (Array.to_list st.Manifest.s_slots)
+        (fun uuid -> Cc.stage_forget ~uuid)
+        (Manifest.body_uuids st.Manifest.s_slots)
     in
     match st.Manifest.s_whole with
       | Some uuid -> Cc.whole_forget ~uuid
@@ -520,7 +580,7 @@ module Make (C : Conf.S) (R : Remote.S) = struct
 
      The manifest's length wins either way, so a short or missing body zeroes the
      tail rather than shrinking the chunk. *)
-  let fill_from_staged ~uuid ~len buf =
+  let fill_from_staged ~uuid ~offset ~len buf =
     let* fd =
       Lwt.catch
         (fun () ->
@@ -541,7 +601,8 @@ module Make (C : Conf.S) (R : Remote.S) = struct
                 if pos >= len then Lwt.return_unit
                 else
                   let* n =
-                    Lwt_unix_retry.pread fd buf ~file_offset:pos pos (len - pos)
+                    Lwt_unix_retry.pread fd buf ~file_offset:(offset + pos) pos
+                      (len - pos)
                   in
                   (* Short of [len]: the rest of the chunk is a hole. *)
                   if n = 0 then (
@@ -579,8 +640,9 @@ module Make (C : Conf.S) (R : Remote.S) = struct
                   Lwt.fail
                     (Backend.Backend_error
                        (Printf.sprintf "staged chunk %d inherits nothing" i)))
-        | Manifest.Staged { uuid; _ } ->
-            Lwt.return (`Fill (fun buf -> fill_from_staged ~uuid ~len buf)))
+        | Manifest.Staged { uuid; offset } ->
+            Lwt.return
+              (`Fill (fun buf -> fill_from_staged ~uuid ~offset ~len buf)))
 
   let rec upload_staged ~key ~(staged : Manifest.staged) ?cancel () =
     match staged.Manifest.s_whole with
