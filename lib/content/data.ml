@@ -240,10 +240,22 @@ module Make (C : Conf.S) (R : Remote.S) = struct
     in
     let* () = chunk 0 in
     let st =
-      { st with Manifest.s_slots = slots; s_chunk_size = cs; s_whole = None }
+      {
+        st with
+        Manifest.s_slots = slots;
+        s_chunk_size = cs;
+        s_whole = None;
+        s_published = None;
+      }
     in
     let* () = Mf.write_staged key st in
     Cc.whole_forget ~uuid
+
+  (* [s_published] is the manifest an upload published for the bytes it hashed,
+     so changing those bytes retires it: leaving it set promotes a description of
+     what the file used to hold. *)
+  let mutated (st : Manifest.staged) =
+    { st with Manifest.s_mtime = Unix.gettimeofday (); s_published = None }
 
   let grow_slots slots n =
     let old = Array.length slots in
@@ -347,8 +359,7 @@ module Make (C : Conf.S) (R : Remote.S) = struct
         go (i + 1))
     in
     let* () = go first in
-    let st = { st with Manifest.s_mtime = Unix.gettimeofday () } in
-    let+ () = Mf.write_staged key st in
+    let+ () = Mf.write_staged key (mutated st) in
     len
 
   (* A grow is pure metadata: new chunks are holes until written. *)
@@ -397,8 +408,7 @@ module Make (C : Conf.S) (R : Remote.S) = struct
                   | Manifest.Staged uuid -> Cc.stage_truncate ~uuid ~len
                   | Manifest.Inherit | Manifest.Zero -> Lwt.return_unit))
     in
-    let st = { st with Manifest.s_mtime = Unix.gettimeofday () } in
-    Mf.write_staged key st
+    Mf.write_staged key (mutated st)
 
   let discard_bodies (st : Manifest.staged) =
     let* () =

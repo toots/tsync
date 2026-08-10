@@ -294,6 +294,24 @@ let () =
      Printf.printf "bytes uploaded by re-upload: %d\n"
        (uploaded_after - uploaded_before);
 
+     (* A write landing in that same window changes the bytes the commit record
+        was written for, so the record cannot stand: promoting it would publish
+        a manifest describing what the file held before the write. *)
+     let* () = write_at 0 "ZZZZZZZZ" in
+     let* staged_before = Mf.read_staged key in
+     let* () = D.sync key () in
+     let* published = Mf.read key in
+     let* () =
+       match (staged_before, published) with
+         | Some st, Some m ->
+             Mf.write_staged key { st with Manifest.s_published = Some m }
+         | _ -> Lwt.return_unit
+     in
+     let* () = write_at 0 "YYYYYYYY" in
+     let* () = D.sync key () in
+     let* content = read_all () in
+     Printf.printf "after a write into the promote window: %s\n" content;
+
      (* A frontend giving back a complete file (as the FileProvider extension
         always does) has it adopted where it is: one rename, no copy, no chunking
         pass. Reads come straight out of that file. *)
