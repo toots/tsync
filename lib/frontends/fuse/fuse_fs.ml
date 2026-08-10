@@ -1,5 +1,11 @@
 open Lwt.Syntax
 
+(* Carries the backtrace of a raise across [Lwt_preemptive.run_in_main], which
+   re-raises on the calling thread and so replaces the backtrace of what
+   actually failed with its own line. The exception value is the only thing
+   that crosses, so the backtrace travels inside it. *)
+exception With_backtrace of exn * Printexc.raw_backtrace
+
 module Make (C : Conf.S) = struct
   module E = Domain_engine.Make (C)
   module Sq = E.Sq
@@ -12,7 +18,11 @@ module Make (C : Conf.S) = struct
 
   (* FUSE runs Multi_threaded while every File operation runs on the single Lwt
      event-loop thread, so each handler bridges with [Lwt_preemptive.run_in_main]
-     and a slow operation blocks only its own kernel thread. *)
+     and a slow operation blocks only its own kernel thread.
+
+     Nothing is reported from there: the binding records what a handler raised
+     and answers EIO, and formatting a message on a thread that has just failed
+     is how the exception used to be lost. *)
   let fuse_to_key path =
     let rel =
       if path = "/" then "" else String.sub path 1 (String.length path - 1)
@@ -31,8 +41,8 @@ module Make (C : Conf.S) = struct
 
   (* Counted at the FUSE boundary because nothing below sees these numbers: a
      read served from the chunk cache never reaches a backend, so {!Metrics}
-     stays at zero while a mount streams gigabytes. Incremented inside [on_loop],
-     on the event-loop thread, so plain ints suffice. *)
+     stays at zero while a mount streams gigabytes. Incremented on the
+     event-loop thread, so plain ints suffice. *)
   let open_handles = ref 0
   let files_opened = ref 0
 
@@ -49,23 +59,60 @@ module Make (C : Conf.S) = struct
       ("bytesWritten", `Int (Metrics.total written_bytes));
       ("bytesReadPerSec", `Int (int_of_float (Metrics.rate read_bytes)));
       ("bytesWrittenPerSec", `Int (int_of_float (Metrics.rate written_bytes)));
+      ("handlerFailures", `Int (Fuse.error_count ()));
     ]
 
-  (* Called from FUSE worker threads, never the loop thread itself.
+  let on_loop f =
+    Lwt_preemptive.run_in_main (fun () ->
+        Lwt.catch f (function
+          (* Matched before the capture rather than after: a [Unix_error] is an
+             answer rather than a failure and wants no backtrace, matching
+             cannot raise, and [getattr] answering ENOENT is the hot path. *)
+          | Unix.Unix_error _ as exn -> Lwt.fail exn
+          | exn ->
+              let backtrace = Printexc.get_raw_backtrace () in
+              Lwt.fail (With_backtrace (exn, backtrace))))
 
-     Also where an unexpected exception becomes an errno, rather than a step a
-     handler asks for separately: libfuse maps what it does not recognize to a
-     nonsense errno (a backend hiccup during [getattr] reached rclone as ERANGE,
-     "numerical result out of range"), and four handlers had already forgotten to
-     ask. Every handler must cross to the loop to reach a domain, so requiring
-     the op and path here is what a new one cannot skip. *)
-  let on_loop op path f =
-    try Lwt_preemptive.run_in_main f with
-      | Unix.Unix_error _ as e -> raise e
-      | exn ->
-          Log.err "fuse %s %s: unexpected exception: %s" op path
-            (Printexc.to_string exn);
-          raise (Unix.Unix_error (Unix.EIO, op, path))
+  (* What the binding recorded, logged from the loop rather than from the
+     handler that failed.
+
+     Polled because there is nothing to be notified by: recording a failure has
+     to stay free of anything that can fail, which rules out waking a reader. *)
+  let report_interval = 30.
+
+  let rec report_recorded_failures last_seen =
+    let* () = Lwt_unix.sleep report_interval in
+    let fresh =
+      List.filter
+        (fun e -> e.Fuse.ticket >= last_seen)
+        (Array.to_list (Fuse.recent_errors ()))
+    in
+    List.iter
+      (fun e ->
+        (* The wrapped backtrace is the raise itself; the binding's own is the
+           crossing, and only worth having for handlers that do not cross. *)
+        let exn, backtrace =
+          match e.Fuse.exn with
+            | With_backtrace (exn, raw) -> (exn, Some raw)
+            | exn -> (exn, e.Fuse.backtrace)
+        in
+        Log.err "fuse %s %s: %s" e.Fuse.op e.Fuse.path (Printexc.to_string exn);
+        match backtrace with
+          | Some raw when Printexc.raw_backtrace_length raw > 0 ->
+              Log.err "%s" (Printexc.raw_backtrace_to_string raw)
+          | _ -> ())
+      fresh;
+    let last_seen =
+      match List.rev fresh with e :: _ -> e.Fuse.ticket + 1 | [] -> last_seen
+    in
+    (* A count that outran the entries means the ring wrapped between polls, and
+       the missing ones are gone rather than pending. *)
+    let count = Fuse.error_count () in
+    if count > last_seen then begin
+      Log.err "fuse: %d handler failures went unreported" (count - last_seen);
+      report_recorded_failures count
+    end
+    else report_recorded_failures last_seen
 
   (* Deliberately unbounded: a wedged stop should hang so the supervisor's own
      timeout kills us and reports the unit failed, where a timer of our own would
@@ -251,7 +298,7 @@ module Make (C : Conf.S) = struct
       init = (fun () -> ());
       getattr =
         (fun path _fi ->
-          on_loop "getattr" path (fun () ->
+          on_loop (fun () ->
               let* st = F.stat (fuse_to_key path) in
               match st with
                 | Some st ->
@@ -268,7 +315,7 @@ module Make (C : Conf.S) = struct
                     Lwt.fail (Unix.Unix_error (Unix.ENOENT, "getattr", path))));
       readlink =
         (fun path ->
-          on_loop "readlink" path (fun () ->
+          on_loop (fun () ->
               let key = fuse_to_key path in
               let* target = F.readlink key in
               match target with
@@ -277,11 +324,10 @@ module Make (C : Conf.S) = struct
                     Lwt.fail (Unix.Unix_error (Unix.EINVAL, "readlink", path))));
       symlink =
         (fun target path ->
-          on_loop "symlink" path (fun () ->
-              F.symlink ~target (fuse_to_key path)));
+          on_loop (fun () -> F.symlink ~target (fuse_to_key path)));
       readdir =
         (fun path _offset _fi _flags ->
-          on_loop "readdir" path (fun () ->
+          on_loop (fun () ->
               let+ files, dirs =
                 F.list_children ~prefix:(fuse_to_dir_prefix path)
               in
@@ -316,48 +362,43 @@ module Make (C : Conf.S) = struct
               in
               List.map entry_of_name ("." :: ".." :: names)));
       mknod =
-        (fun path mode ->
-          on_loop "mknod" path (fun () -> (dispatch path).mknod path mode));
-      (* Inside [on_loop], so it runs on the event-loop thread and only on
-         success. *)
+        (fun path mode -> on_loop (fun () -> (dispatch path).mknod path mode));
+      (* Bumped on the event-loop thread, and only on success. *)
       fopen =
         (fun path fi ->
-          on_loop "fopen" path (fun () ->
+          on_loop (fun () ->
               let+ update = (dispatch path).fopen path fi in
               incr open_handles;
               incr files_opened;
               update));
       read =
         (fun path buf offset fi ->
-          on_loop "read" path (fun () ->
+          on_loop (fun () ->
               let+ n = (dispatch path).read path buf offset fi in
               Metrics.count read_bytes n;
               n));
       write =
         (fun path buf offset fi ->
-          on_loop "write" path (fun () ->
+          on_loop (fun () ->
               let+ n = (dispatch path).write path buf offset fi in
               Metrics.count written_bytes n;
               n));
       release =
         (fun path fi ->
-          on_loop "release" path (fun () ->
+          on_loop (fun () ->
               let+ () = (dispatch path).release path fi in
               (* A release without a matching fopen (a handle inherited across a
                  remount) must not drive the gauge negative. *)
               if !open_handles > 0 then decr open_handles));
-      unlink =
-        (fun path ->
-          on_loop "unlink" path (fun () -> (dispatch path).unlink path));
+      unlink = (fun path -> on_loop (fun () -> (dispatch path).unlink path));
       mkdir =
         (fun path _mode ->
-          on_loop "mkdir" path (fun () -> F.mkdir (fuse_to_dir_prefix path)));
+          on_loop (fun () -> F.mkdir (fuse_to_dir_prefix path)));
       rmdir =
-        (fun path ->
-          on_loop "rmdir" path (fun () -> F.rmdir (fuse_to_dir_prefix path)));
+        (fun path -> on_loop (fun () -> F.rmdir (fuse_to_dir_prefix path)));
       rename =
         (fun src dst flags ->
-          on_loop "rename" src (fun () ->
+          on_loop (fun () ->
               let is_hidden = is_fuse_hidden dst in
               let* () =
                 (if is_hidden then hidden else real).rename src dst flags
@@ -365,8 +406,7 @@ module Make (C : Conf.S) = struct
               if is_hidden then real.unlink src else Lwt.return_unit));
       truncate =
         (fun path size fi ->
-          on_loop "truncate" path (fun () ->
-              (dispatch path).truncate path size fi));
+          on_loop (fun () -> (dispatch path).truncate path size fi));
       (* What a file costs is room in the domain's stores, not in the cache it is
          staged through, so df reports the stores; inode counts stay nominal,
          nothing here mapping to one. One statvfs per bounded store and no cache
@@ -440,6 +480,11 @@ module Make (C : Conf.S) = struct
     Unix._exit 0
 
   let mount ?(allow_other = false) mount_point =
+    (* Worth the allocation it costs on the failing thread: an
+       [Invalid_argument] from some [String.sub] names neither the file it came
+       from nor the caller that reached it, and the count that says a handler
+       failed at all is bumped before the capture either way. *)
+    Fuse.set_backtrace_capture true;
     (* An exception escaping through Lwt.async (a socket error in a library's
        background loop) must not take down the daemon or leave it half-dead. *)
     (Lwt.async_exception_hook :=
@@ -502,6 +547,7 @@ module Make (C : Conf.S) = struct
                Lwt.async (fun () ->
                    Ipc.serve ~path:C.socket_path
                      (Ih.handler (ipc_hooks mount_point)));
+               Lwt.async (fun () -> report_recorded_failures 0);
                (* A plain SIGTERM reaches this group too, from a supervisor that
                 only signals and always from the parent when this frontend was
                 forked. libfuse may install its own handlers in [Fuse.main] and
