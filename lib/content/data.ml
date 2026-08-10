@@ -123,7 +123,7 @@ module Make (C : Conf.S) (R : Remote.S) = struct
             let slice = Bigarray.Array1.sub buf done_ take in
             let* got =
               match slots.(i) with
-                | Manifest.Staged uuid ->
+                | Manifest.Staged { uuid; _ } ->
                     let* got = Cc.stage_read_into ~uuid slice ~chunk_off in
                     (* A staged body is only as long as the writes that reached
                        it: past its end is a hole, reading as zeros. *)
@@ -261,7 +261,7 @@ module Make (C : Conf.S) (R : Remote.S) = struct
         let body = Manifest.new_uuid () in
         let* () = Cc.stage_empty ~uuid:body ~len in
         let* (_ : int) = Cc.stage_write ~uuid:body slice ~chunk_off:0 in
-        slots.(i) <- Manifest.Staged body;
+        slots.(i) <- Manifest.Staged { uuid = body; offset = 0 };
         chunk (i + 1))
     in
     let* () = chunk 0 in
@@ -301,7 +301,7 @@ module Make (C : Conf.S) (R : Remote.S) = struct
           ~chunk_size:st.Manifest.s_chunk_size i
       in
       let+ () = Cc.stage_empty ~uuid ~len in
-      slots.(i) <- Manifest.Staged uuid
+      slots.(i) <- Manifest.Staged { uuid; offset = 0 }
     in
     match slots.(i) with
       | Manifest.Staged _ -> Lwt.return_unit
@@ -310,7 +310,7 @@ module Make (C : Conf.S) (R : Remote.S) = struct
           match Mf.group_at_opt base i with
             | Some group ->
                 let+ () = Cc.stage_from_chunk ~group ~index:i ~uuid in
-                slots.(i) <- Manifest.Staged uuid
+                slots.(i) <- Manifest.Staged { uuid; offset = 0 }
             | None -> stage_sparse uuid)
       | Manifest.Inherit | Manifest.Zero -> stage_sparse (Manifest.new_uuid ())
 
@@ -373,7 +373,7 @@ module Make (C : Conf.S) (R : Remote.S) = struct
         let* () = stage_group ~base ~st ~covers i in
         let* () =
           match st.Manifest.s_slots.(i) with
-            | Manifest.Staged uuid ->
+            | Manifest.Staged { uuid; _ } ->
                 let src_off = (i * cs) + chunk_off - start in
                 let slice = Bigarray.Array1.sub buf src_off take in
                 let+ (_ : int) = Cc.stage_write ~uuid slice ~chunk_off in
@@ -405,7 +405,7 @@ module Make (C : Conf.S) (R : Remote.S) = struct
         else
           let* () =
             match old.(i) with
-              | Manifest.Staged uuid -> Cc.stage_forget ~uuid
+              | Manifest.Staged { uuid; _ } -> Cc.stage_forget ~uuid
               | Manifest.Inherit | Manifest.Zero -> Lwt.return_unit
           in
           drop (i + 1)
@@ -420,7 +420,7 @@ module Make (C : Conf.S) (R : Remote.S) = struct
       else (
         let len = Manifest.chunk_len ~size ~chunk_size:cs i in
         match slots.(i) with
-          | Manifest.Staged uuid -> Cc.stage_truncate ~uuid ~len
+          | Manifest.Staged { uuid; _ } -> Cc.stage_truncate ~uuid ~len
           | Manifest.Zero -> Lwt.return_unit
           | Manifest.Inherit -> (
               let inherited_len =
@@ -434,7 +434,7 @@ module Make (C : Conf.S) (R : Remote.S) = struct
               else
                 let* () = stage_group ~base ~st ~covers:(fun _ -> false) i in
                 match slots.(i) with
-                  | Manifest.Staged uuid -> Cc.stage_truncate ~uuid ~len
+                  | Manifest.Staged { uuid; _ } -> Cc.stage_truncate ~uuid ~len
                   | Manifest.Inherit | Manifest.Zero -> Lwt.return_unit))
     in
     Mf.write_staged key (mutated st)
@@ -444,7 +444,7 @@ module Make (C : Conf.S) (R : Remote.S) = struct
       Lwt_list.iter_s
         (fun slot ->
           match slot with
-            | Manifest.Staged uuid -> Cc.stage_forget ~uuid
+            | Manifest.Staged { uuid; _ } -> Cc.stage_forget ~uuid
             | Manifest.Inherit | Manifest.Zero -> Lwt.return_unit)
         (Array.to_list st.Manifest.s_slots)
     in
@@ -579,7 +579,7 @@ module Make (C : Conf.S) (R : Remote.S) = struct
                   Lwt.fail
                     (Backend.Backend_error
                        (Printf.sprintf "staged chunk %d inherits nothing" i)))
-        | Manifest.Staged uuid ->
+        | Manifest.Staged { uuid; _ } ->
             Lwt.return (`Fill (fun buf -> fill_from_staged ~uuid ~len buf)))
 
   let rec upload_staged ~key ~(staged : Manifest.staged) ?cancel () =

@@ -1,0 +1,26 @@
+(executable
+ (flags
+  (:standard
+   -open
+   Tsync_object
+   -open
+   Tsync_naming
+   -open
+   Tsync_conf
+   -open
+   Tsync_backend_register
+   -open
+   Tsync_local_backend
+   -open
+   Tsync_local_io))
+ (name staged_codec_test)
+ (libraries
+  tsync_object
+  tsync_naming
+  tsync_conf
+  tsync_backend_register
+  tsync_local_backend
+  tsync_local_io
+  lwt
+  lwt.unix
+  unix))

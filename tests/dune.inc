@@ -586,6 +586,20 @@
   (action
    (diff manifest_naming_test.expected manifest_naming_test.output))))
 
+(subdir unit/staged_codec
+ (alias
+  (name default)
+  (deps staged_codec_test.exe))
+ (rule
+  (alias runtest)
+  (target staged_codec_test.output)
+  (action
+   (with-stdout-to staged_codec_test.output (ignore-stderr (run ./staged_codec_test.exe)))))
+ (rule
+  (alias runtest)
+  (action
+   (diff staged_codec_test.expected staged_codec_test.output))))
+
 (subdir unit/subs
  (alias
   (name default)
