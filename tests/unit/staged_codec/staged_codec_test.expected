@@ -1,0 +1,6 @@
+written and read back: aaaa@0 aaaa@8 aaaa@16
+written and read back: bodies aaaa
+a sidecar written before offsets: b0@0 b1@0 b2@0
+a sidecar written before offsets: bodies b0,b1,b2
+a sidecar from a newer build: no staged manifest
+set aside: true

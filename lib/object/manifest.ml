@@ -112,8 +112,15 @@ let make_symlink ~name ~target ~mtime =
    A staged manifest on disk means an upload is owed; once [s_published] is set
    it is instead the commit record of a promotion to replay. *)
 
+(** Where a chunk's bytes are within [staged/chunks/<uuid>]. One body holds
+    every staged member of a cache group, so the offset is what separates them
+    and is carried rather than derived: it is fixed when the bytes are written,
+    while the group size it would be derived from is configuration and can
+    change between runs. *)
+type body = { uuid : string; offset : int }
+
 type slot =
-  | Staged of string  (** body at [staged/chunks/<uuid>] *)
+  | Staged of body
   | Inherit  (** the published manifest's entry at this index *)
   | Zero  (** never written; reads as zeros *)
 
@@ -141,21 +148,51 @@ let chunk_len ~size ~chunk_size i =
 let new_uuid = Id.short
 
 let slot_to_json = function
-  | Staged uuid -> `Assoc [("u", `String uuid)]
+  (* The offset is omitted when zero, which is every slot of an ungrouped file
+     and every first member of a group. *)
+  | Staged { uuid; offset } ->
+      `Assoc
+        (("u", `String uuid)
+        :: (if offset = 0 then [] else [("o", `Int offset)]))
   | Inherit -> `Assoc []
   | Zero -> `Assoc [("z", `Bool true)]
 
 let slot_of_json j =
   let open Yojson.Basic.Util in
   match j |> member "u" with
-    | `String uuid -> Staged uuid
+    | `String uuid ->
+        let offset = match j |> member "o" with `Int o -> o | _ -> 0 in
+        Staged { uuid; offset }
     | _ -> ( match j |> member "z" with `Bool true -> Zero | _ -> Inherit)
+
+let slot_body = function Staged b -> Some b | Inherit | Zero -> None
+
+(* Deduplicated, since a group's members share one. *)
+let body_uuids slots =
+  Array.fold_left
+    (fun acc slot ->
+      match slot_body slot with
+        | Some { uuid; _ } when not (List.mem uuid acc) -> uuid :: acc
+        | _ -> acc)
+    [] slots
+  |> List.sort compare
+
+(* Read as well as written, so a sidecar from a newer build is set aside rather
+   than decoded into something it does not mean. *)
+let staged_version = 2
+
+let staged_of_version json =
+  let open Yojson.Basic.Util in
+  match json |> member "v" with
+    | `Int v when v > staged_version ->
+        failwith (Printf.sprintf "staged manifest version %d" v)
+    | _ -> ()
 
 let staged_to_string (st : staged) =
   Yojson.Basic.to_string
     (`Assoc
        ([
-          ("v", `Int 1);
+          ("v", `Int staged_version);
           ("name", `String st.s_name);
           ("size", `Int (Int64.to_int st.s_size));
           ("mtime", `Float st.s_mtime);
@@ -184,6 +221,7 @@ let staged_to_string (st : staged) =
 let staged_of_string body =
   let open Yojson.Basic.Util in
   let json = Yojson.Basic.from_string body in
+  staged_of_version json;
   let published =
     match json |> member "published" with
       | `String b64 -> (
@@ -563,10 +601,7 @@ module Make (C : Conf.S) = struct
         let acc =
           match st.s_whole with Some uuid -> uuid :: acc | None -> acc
         in
-        Array.fold_left
-          (fun acc slot ->
-            match slot with Staged uuid -> uuid :: acc | Inherit | Zero -> acc)
-          acc st.s_slots)
+        List.rev_append (body_uuids st.s_slots) acc)
       []
 
   (* Cutoff 0 deletes no file, only prunes what is left empty. *)
