@@ -316,6 +316,26 @@ module Make (C : Conf.S) (R : Remote.S) = struct
     in
     go first 0 []
 
+  (* The body a group's staged members share, when they share one: the same
+     uuid, each at the offset [members] says it belongs at. [Zero] members are
+     skipped, since a hole is whatever the body already holds there. *)
+  let shared_body ~slot_at members =
+    List.fold_left
+      (fun acc (j, offset) ->
+        match (acc, slot_at j) with
+          | `No, _ -> `No
+          | acc, Manifest.Zero -> acc
+          | `Unset, Manifest.Staged b when b.Manifest.offset = offset ->
+              `Body b.Manifest.uuid
+          | `Body u, Manifest.Staged b
+            when b.Manifest.uuid = u && b.Manifest.offset = offset ->
+              `Body u
+          | _ -> `No)
+      `Unset members
+    |> function
+    | `Body uuid -> Some uuid
+    | `Unset | `No -> None
+
   (* Establishes that every staged member of the group [i] falls in shares one
      body and sits at its layout offset, so the body is the group's bytes
      already assembled and publishing it is a link rather than a copy.
@@ -337,21 +357,12 @@ module Make (C : Conf.S) (R : Remote.S) = struct
     (* Already one body at the right offsets, which is a second write to a group
        it has staged before: no copy. *)
     let shared =
-      List.fold_left
-        (fun acc (j, offset, _) ->
-          match (acc, slots.(j)) with
-            | None, _ -> None
-            | Some _, Manifest.Zero -> acc
-            | Some None, Manifest.Staged b when b.Manifest.offset = offset ->
-                Some (Some b.Manifest.uuid)
-            | Some (Some u), Manifest.Staged b
-              when b.Manifest.uuid = u && b.Manifest.offset = offset ->
-                acc
-            | _ -> None)
-        (Some None) members
+      shared_body
+        ~slot_at:(fun j -> slots.(j))
+        (List.map (fun (j, offset, _) -> (j, offset)) members)
     in
     match shared with
-      | Some (Some uuid) ->
+      | Some uuid ->
           let+ () = Cc.stage_ensure ~uuid ~len:body_len in
           List.iter
             (fun (j, offset, _) ->
@@ -360,7 +371,7 @@ module Make (C : Conf.S) (R : Remote.S) = struct
                     slots.(j) <- Manifest.Staged { uuid; offset }
                 | _ -> ())
             members
-      | _ ->
+      | None ->
           let uuid = Manifest.new_uuid () in
           let stale = Manifest.body_uuids slots in
           let* () = Cc.stage_ensure ~uuid ~len:body_len in
@@ -713,21 +724,10 @@ module Make (C : Conf.S) (R : Remote.S) = struct
     (* Anything else -- a body per chunk from an older sidecar, or a group the
        cache size no longer matches -- has to be written out. *)
     let single_body group =
-      List.fold_left
-        (fun acc i ->
-          match (acc, slot_at i) with
-            | None, _ -> None
-            | Some _, Manifest.Zero -> acc
-            | Some None, Manifest.Staged b
-              when b.Manifest.offset = Chunk_group.offset group i ->
-                Some (Some b.Manifest.uuid)
-            | Some (Some u), Manifest.Staged b
-              when b.Manifest.uuid = u
-                   && b.Manifest.offset = Chunk_group.offset group i ->
-                acc
-            | _ -> None)
-        (Some None)
-        (Chunk_group.indices group)
+      shared_body ~slot_at
+        (List.map
+           (fun i -> (i, Chunk_group.offset group i))
+           (Chunk_group.indices group))
     in
     let write_group group =
       Cc.put_group ~group ~member:(fun i ->
@@ -753,10 +753,10 @@ module Make (C : Conf.S) (R : Remote.S) = struct
           if not (touched group && local group) then Lwt.return_unit
           else (
             match single_body group with
-              | Some (Some uuid) ->
+              | Some uuid ->
                   let* linked = Cc.stage_link_group ~uuid ~group in
                   if linked then Lwt.return_unit else write_group group
-              | _ -> write_group group))
+              | None -> write_group group))
         (Mf.groups published)
     in
     let* () = Mf.write key published in
