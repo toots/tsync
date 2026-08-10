@@ -134,15 +134,13 @@ let write_during_promote round =
   let buf = Bigarray.Array1.create Bigarray.char Bigarray.c_layout size in
   let* n = D.pread_key key buf ~offset:0L in
   let s = string_of_buffer buf n in
-  if writes < 2 then
-    note (Printf.sprintf "only %d writes raced the promote" writes)
-  else if n <> size then note (Printf.sprintf "short read after the race: %d" n)
+  if n <> size then note (Printf.sprintf "short read after the race: %d" n)
   else if not (String.for_all (fun c -> c = s.[0]) s) then
     note
       (Printf.sprintf "torn body: %d A, %d B"
          (String.fold_left (fun n c -> if c = 'A' then n + 1 else n) 0 s)
          (String.fold_left (fun n c -> if c = 'B' then n + 1 else n) 0 s));
-  Lwt.return_unit
+  Lwt.return writes
 
 let main () =
   let* (_ : Unix.process_status) = Lwt_unix.system ("rm -rf " ^ root) in
@@ -184,7 +182,14 @@ let main () =
   (* Repeated: a write only tears a group if it lands between the upload that
      hashed the bytes and the promotion that re-reads them, which is a slice of
      each sync rather than all of it. *)
-  let* () = Lwt_list.iter_s write_during_promote (List.init 12 Fun.id) in
+  let rounds = 12 in
+  let* writes = Lwt_list.map_s write_during_promote (List.init rounds Fun.id) in
+  (* Counted over every round rather than within one: a write reaching the
+     promotion itself waits for the lock, so how many turns a single round
+     gives the writer is the machine's business, not this filesystem's. *)
+  let total = List.fold_left ( + ) 0 writes in
+  if total < rounds then
+    note (Printf.sprintf "only %d writes across %d rounds" total rounds);
   report "writes during a promotion";
   Lwt.return_unit
 
