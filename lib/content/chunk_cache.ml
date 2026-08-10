@@ -284,9 +284,6 @@ module Make (C : Conf.S) (F : Fetch) = struct
      that are per-inode or transient leave it unanswered. *)
   let links_supported = ref None
 
-  (* Publishes a staged body under its group's content name by giving it a
-     second name rather than a second copy, so both are readable until the
-     staged one is dropped. [false] means the caller writes the group instead. *)
   let stage_link_group ~uuid ~group =
     if !links_supported = Some false then Lwt.return_false
     else (

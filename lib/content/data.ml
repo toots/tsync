@@ -254,7 +254,6 @@ module Make (C : Conf.S) (R : Remote.S) = struct
     let slots = Array.make n Manifest.Zero in
     let buf = Bigarray.Array1.create Bigarray.char Bigarray.c_layout cs in
     let per = Chunk_group.per_group ~chunk_size:cs ~cache_chunk_size in
-    (* One body per group, laid out as the group will be. *)
     let rec chunk i body offset =
       if i >= n then Lwt.return_unit
       else
@@ -335,8 +334,8 @@ module Make (C : Conf.S) (R : Remote.S) = struct
     let last = min (n - 1) (first + per - 1) in
     let members, body_len = group_layout ~st ~first ~last in
 
-    (* Already one body at the right offsets: the common case, and the whole
-       point -- a second write to a group costs no copy. *)
+    (* Already one body at the right offsets, which is a second write to a group
+       it has staged before: no copy. *)
     let shared =
       List.fold_left
         (fun acc (j, offset, _) ->
@@ -711,10 +710,8 @@ module Make (C : Conf.S) (R : Remote.S) = struct
             | Manifest.Inherit -> false)
         (Chunk_group.indices group)
     in
-    (* A group already assembled in one body is published by naming it, which is
-       what staging in group layout was for. Anything else -- a body per chunk
-       from an older sidecar, or a group the cache size no longer matches -- is
-       written out. *)
+    (* Anything else -- a body per chunk from an older sidecar, or a group the
+       cache size no longer matches -- has to be written out. *)
     let single_body group =
       List.fold_left
         (fun acc i ->

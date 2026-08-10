@@ -1,14 +1,10 @@
-(* Staging when a cache group holds more than one chunk.
+(* Staging when a cache group holds more than one chunk: 8-byte chunks in a
+   24-byte group (TSYNC_CHUNK_SIZE and TSYNC_CACHE_CHUNK_SIZE, in dune), where
+   every other runner test leaves the two equal and grouping never shows.
 
-   Everywhere else the two sizes are equal, so a group is a single chunk at
-   offset zero and grouping never shows. Here the chunk is 8 bytes and the cache
-   group 24 (TSYNC_CHUNK_SIZE and TSYNC_CACHE_CHUNK_SIZE, in dune), so three
-   chunks share a group and the counts distinguish per-chunk staging from
-   per-group staging.
-
-   [ShowStaged] is the number to watch: manifests stay one per edited file while
-   bodies say how the bytes underneath are divided. [ShowChunks] prints the
-   slots, S staged, I inherited, Z a hole. *)
+   [ShowStaged]'s body count is what to watch, since it says how the bytes
+   under one edited file are divided; [ShowChunks] prints the slots, S staged,
+   I inherited, Z a hole. *)
 
 open Test_runner
 
