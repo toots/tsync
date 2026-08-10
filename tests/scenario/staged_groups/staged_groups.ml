@@ -79,6 +79,30 @@ let scenarios : scenario list =
         ];
     };
     {
+      (* The shape rclone writes in: a chunk arrives in pieces, so the first
+         piece lands in a member the group has not staged yet and covers only
+         part of it. *)
+      name = "a partial write into a member the group has not staged";
+      steps =
+        [
+          (* No drain: the first chunk stays staged rather than becoming
+             inherited, so the group is one this file already owns a body for
+             and the second chunk is a hole inside it. *)
+          Write { path = "piece.txt"; content = "AAAAAAAA" };
+          ShowChunks "piece.txt";
+          (* Into the second chunk, but not all of it. *)
+          WriteAt { path = "piece.txt"; offset = 8; content = "bb" };
+          ShowStaged;
+          ShowChunks "piece.txt";
+          (* And the third, still partly. *)
+          WriteAt { path = "piece.txt"; offset = 18; content = "cc" };
+          ShowChunks "piece.txt";
+          ReadRange { path = "piece.txt"; offset = 0; len = 24 };
+          Drain;
+          ShowChunks "piece.txt";
+        ];
+    };
+    {
       name = "a truncate drops chunks from a group";
       steps =
         [
