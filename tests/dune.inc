@@ -197,7 +197,13 @@
   (deps promote_race.exe))
  (rule
   (alias runtest)
-  (action (run ./promote_race.exe))))
+  (target promote_race.output)
+  (action
+   (with-stdout-to promote_race.output (ignore-stderr (run ./promote_race.exe)))))
+ (rule
+  (alias runtest)
+  (action
+   (diff promote_race.expected promote_race.output))))
 
 (subdir e2e/ipc_tap
  (alias
