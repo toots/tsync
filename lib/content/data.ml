@@ -366,12 +366,15 @@ module Make (C : Conf.S) (R : Remote.S) = struct
     match shared with
       | Some uuid ->
           let+ () = Cc.stage_ensure ~uuid ~len:body_len in
+          (* Every hole in the group becomes part of the body, covered by this
+             write or not: the body is sparse there, which is the same bytes a
+             hole reads as, and a member left behind is one the write is about
+             to be told it cannot address. *)
           List.iter
             (fun (j, offset, _) ->
               match slots.(j) with
-                | Manifest.Zero when covers j ->
-                    slots.(j) <- Manifest.Staged { uuid; offset }
-                | _ -> ())
+                | Manifest.Zero -> slots.(j) <- Manifest.Staged { uuid; offset }
+                | Manifest.Staged _ | Manifest.Inherit -> ())
             members
       | None ->
           let uuid = Manifest.new_uuid () in
