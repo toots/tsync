@@ -24,3 +24,7 @@ cap=none (no-op)             chunks=2 bytes=22 first=true  second=true
 cap=20 (drops coldest)       chunks=1 bytes= 6 first=false second=true
 refetch after cap            body="first chunk body" gets=4
 cap=0 (drops all)            chunks=0 bytes= 0 first=false second=false
+publish by link              linked=true one body=true names=2
+publishing it again          linked=true
+read after the staged name goes body="BBBB"             gets=3
+and its short last member    body="CC"               gets=3

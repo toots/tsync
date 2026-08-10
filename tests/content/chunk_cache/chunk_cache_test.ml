@@ -298,5 +298,37 @@ let () =
      (* A dropped chunk is not lost, just not local. *)
      let* () = show_body "refetch after cap" g1 0 in
      let* () = Capped0.enforce_cap () in
-     let+ () = show_cap "cap=0 (drops all)" in
+     let* () = show_cap "cap=0 (drops all)" in
+
+     (* Publishing a group that was staged in its own layout: the bytes get a
+        second name rather than a second copy, so both are readable until the
+        staged one goes and the cache keeps the body afterwards. *)
+     let uuid = "stagedbody000001" in
+     let bytes = Chunk_group.bytes trio in
+     let* () = Cc.stage_ensure ~uuid ~len:bytes in
+     let* () =
+       Lwt_list.iter_s
+         (fun (i, body) ->
+           let buf =
+             Bigarray.Array1.of_array Bigarray.char Bigarray.c_layout
+               (Array.init (String.length body) (String.get body))
+           in
+           let+ (_ : int) =
+             Cc.stage_write ~uuid buf ~offset:(Chunk_group.offset trio i)
+           in
+           ())
+         [(0, "AAAA"); (1, "BBBB"); (2, "CC")]
+     in
+     let* linked = Cc.stage_link_group ~uuid ~group:trio in
+     let staged = Cc.staged_path uuid in
+     let same_inode () =
+       (Unix.stat staged).Unix.st_ino = (Unix.stat (path trio)).Unix.st_ino
+     in
+     Printf.printf "%-28s linked=%b one body=%b names=%d\n" "publish by link"
+       linked (same_inode ()) (Unix.stat (path trio)).Unix.st_nlink;
+     let* again = Cc.stage_link_group ~uuid ~group:trio in
+     Printf.printf "%-28s linked=%b\n" "publishing it again" again;
+     let* () = Cc.stage_forget ~uuid in
+     let* () = show_body "read after the staged name goes" trio 1 in
+     let+ () = show_body "and its short last member" trio 2 in
      ())
