@@ -81,8 +81,6 @@ type slot =
   | Inherit  (** the published manifest's entry at the same index *)
   | Zero  (** a hole from a grow: reads as zeros, occupies no disk *)
 
-val slot_body : slot -> body option
-
 (** The distinct bodies a slot array names, sorted. Fewer than the slots
     wherever a group shares one. *)
 val body_uuids : slot array -> string list
