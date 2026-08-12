@@ -6,10 +6,25 @@ terraform {
   }
 }
 
+locals {
+  # No s3 stores — the aws provider is configured but never called. It still
+  # resolves credentials eagerly when configured, so a GCS-only deploy fails on
+  # "No valid credential sources found" unless the checks are switched off and
+  # placeholder keys supplied. With s3 stores these are all null/false and the
+  # normal credential chain applies.
+  aws_unused = length(var.stores) == 0
+}
+
 provider "aws" {
   # Placeholder when unset — a GCS-only deploy configures but never calls the AWS
   # provider. s3 stores always set var.region, so this fallback is never used.
   region = coalesce(var.region, "us-east-1")
+
+  access_key                  = local.aws_unused ? "placeholder" : null
+  secret_key                  = local.aws_unused ? "placeholder" : null
+  skip_credentials_validation = local.aws_unused
+  skip_requesting_account_id  = local.aws_unused
+  skip_metadata_api_check     = local.aws_unused
 }
 
 # Only used when var.gcs_stores is non-empty; project/region may be null for

@@ -29,9 +29,13 @@ type tf_store = {
   fields : (string * string) list; (* backend-specific fields terraform fills *)
 }
 
-let terraform_output dir =
+(* OpenTofu is a drop-in fork: same [-chdir], same [output -json]. Either one
+   answers, so ask them in turn and take the first that does. *)
+let tf_commands = ["terraform"; "tofu"]
+
+let tf_json exe dir =
   let cmd =
-    Printf.sprintf "terraform -chdir=%s output -json 2>/dev/null"
+    Printf.sprintf "%s -chdir=%s output -json 2>/dev/null" exe
       (Filename.quote dir)
   in
   let ic = Unix.open_process_in cmd in
@@ -50,6 +54,9 @@ let terraform_output dir =
         try Some (Yojson.Basic.from_string (Buffer.contents buf))
         with _ -> None)
     | _ -> None
+
+let terraform_output dir =
+  List.find_map (fun exe -> tf_json exe dir) tf_commands
 
 let tf_value root name =
   jfield (Option.value (jfield root name) ~default:`Null) "value"
@@ -132,16 +139,29 @@ let read_password msg =
         Unix.tcsetattr Unix.stdin Unix.TCSAFLUSH old_attr;
         raise e
 
-let prompt_symlinks default =
-  let rec ask () =
-    let v = prompt "Symlinks policy (keep/follow/skip)" (Some default) in
-    if List.mem v ["keep"; "follow"; "skip"] then v
-    else begin
-      Printf.printf "  Unknown policy %S — choose keep, follow, or skip.\n%!" v;
-      ask ()
-    end
+(* Ask until the answer is one of [choices], which the prompt lists. [on_error]
+   is for the prompts that have more to say about a wrong answer than the list
+   itself already says. *)
+let rec prompt_choice ?(indent = "") ?on_error ~noun label choices default =
+  let v =
+    prompt
+      (Printf.sprintf "%s%s (%s)" indent label (String.concat "/" choices))
+      default
   in
-  ask ()
+  if List.mem v choices then v
+  else begin
+    (match on_error with
+      | Some f -> f v
+      | None ->
+          Printf.printf "%s  Unknown %s %S — choose one of: %s.\n%!" indent noun
+            v
+            (String.concat ", " choices));
+    prompt_choice ~indent ?on_error ~noun label choices default
+  end
+
+let prompt_symlinks default =
+  prompt_choice ~noun:"policy" "Symlinks policy" ["keep"; "follow"; "skip"]
+    (Some default)
 
 (* [unset] is both what is shown for an empty field and what clears it. Sizes are
    optional, so only an answered prompt ever writes one. *)
@@ -181,22 +201,15 @@ let role_of l =
     | _ -> "main"
 
 let prompt_role default =
-  let rec ask () =
-    let v =
-      prompt ("  Role (" ^ String.concat "/" role_names ^ ")") (Some default)
-    in
-    if List.mem v role_names then v
-    else begin
+  prompt_choice ~indent:"  " ~noun:"role" "Role" role_names (Some default)
+    ~on_error:(fun v ->
+      (* The names alone do not say what a role does; spell them out. *)
       Printf.printf "  Unknown role %S:\n" v;
       List.iter
         (fun r ->
           Printf.printf "    %-10s %s\n%!" (Conf_parsing.role_name r)
             (role_help r))
-        Conf_parsing.roles;
-      ask ()
-    end
-  in
-  ask ()
+        Conf_parsing.roles)
 
 (* Fields a Terraform store fills, which the wizard then skips. Exactly what
    [apply_store_fields] sets. *)
@@ -219,7 +232,9 @@ let terraform_store which =
     None
   in
   match terraform_output dir with
-    | None -> fail (Printf.sprintf "could not read terraform output in %s" dir)
+    | None ->
+        fail
+          (Printf.sprintf "could not read terraform or tofu output in %s" dir)
     | Some root -> (
         let entries =
           List.filter_map
@@ -300,23 +315,26 @@ let rec prompt_field ?(indent = "") ?current (s : Field_spec.t) =
           | "" -> blank ()
           | v -> Some (s.name, `String v))
 
-let prompt_backend () =
+(* A cloud backend is normally a copy of something local, so s3 and gcs default
+   to [replica] — but only once there is a main to be a copy of: a domain whose
+   backends are all replicas has no source of truth and will not load
+   (conf_parsing.ml:validate_roles). *)
+let default_role ~siblings which =
+  let is_main b = role_of (match b with `Assoc l -> l | _ -> []) = "main" in
+  if which <> None && List.exists is_main siblings then "replica" else "main"
+
+let prompt_backend ?(siblings = []) () =
   let types = Backend.types () in
+  (* [local] is always compiled in and is the only type that needs no bucket
+     and no credentials, so it is the one default that cannot ask for something
+     the user does not have yet. Falling back to the first registered type used
+     to hand out whichever cloud sorted first. *)
   let default =
-    if List.mem "s3" types then Some "s3" else List.nth_opt types 0
+    if List.mem "local" types then Some "local" else List.nth_opt types 0
   in
-  let rec ask () =
-    let t =
-      prompt ("  Backend type (" ^ String.concat "/" types ^ ")") default
-    in
-    if List.mem t types then t
-    else begin
-      Printf.printf "  Unknown backend type %S — choose one of: %s.\n%!" t
-        (String.concat ", " types);
-      ask ()
-    end
+  let backend_type =
+    prompt_choice ~indent:"  " ~noun:"backend type" "Backend type" types default
   in
-  let backend_type = ask () in
   let name = prompt "  Backend name" (Some backend_type) in
   (* Offer Terraform up front, then prompt only the fields it does not
      provide. *)
@@ -343,23 +361,79 @@ let prompt_backend () =
   let synced_fields =
     match synced with Some s -> apply_store_fields [] s | None -> []
   in
-  let role = prompt_role "main" in
+  let role = prompt_role (default_role ~siblings which) in
   `Assoc
     ([("name", `String name); ("type", `String backend_type)]
     @ synced_fields @ fields
     @ [("role", `String role)])
 
-let prompt_backends () =
-  let backends = ref [] in
+(* Backends and frontends are both a numbered list of entries the user builds
+   up and then edits; only what an entry holds differs. These two loops are the
+   shape they share. *)
+
+(* Fill a list from empty, one entry at a time. [more] stops the offer when
+   there is nothing left worth adding. *)
+let add_loop ~noun ?(more = fun _ -> true) add =
+  let items = ref [] in
   let n = ref 1 in
   let continue_ = ref true in
   while !continue_ do
-    Printf.printf "\n  Backend %d\n" !n;
-    backends := !backends @ [prompt_backend ()];
+    Printf.printf "\n  %s %d\n" (String.capitalize_ascii noun) !n;
+    items := !items @ [add !items];
     incr n;
-    continue_ := prompt_bool "  Add another backend?"
+    continue_ :=
+      more !items && prompt_bool (Printf.sprintf "  Add another %s?" noun)
   done;
-  !backends
+  !items
+
+(* Menu over an existing list: edit one, [a]dd, [r]emove, [d]one. [add] and
+   [edit] answer [Error msg] to decline with a reason shown in the menu. *)
+let list_menu ~noun ~row ~add ~edit items =
+  let items = ref items in
+  let running = ref true in
+  let status = ref "" in
+  while !running do
+    clear_screen ();
+    Printf.printf "%ss:\n" (String.capitalize_ascii noun);
+    if !items = [] then Printf.printf "  (none)\n"
+    else
+      List.iteri (fun i x -> Printf.printf "  %d. %s\n" (i + 1) (row x)) !items;
+    if !status <> "" then Printf.printf "\n%s\n" !status;
+    Printf.printf
+      "\nEnter a %s number to edit, [a]dd, [r]emove N, or [d]one:\n> %!" noun;
+    status := "";
+    let parts =
+      List.filter (( <> ) "")
+        (String.split_on_char ' '
+           (String.lowercase_ascii (String.trim (read_line ()))))
+    in
+    let nth_ok i = i >= 1 && i <= List.length !items in
+    match parts with
+      | [] | ["d"] -> running := false
+      | ["a"] -> (
+          match add !items with
+            | Ok x -> items := !items @ [x]
+            | Error msg -> status := msg)
+      | ["r"; n] -> (
+          match int_of_string_opt n with
+            | Some i when nth_ok i ->
+                items := List.filteri (fun j _ -> j <> i - 1) !items
+            | _ -> status := Printf.sprintf "(need a valid %s number)" noun)
+      | [n] -> (
+          match int_of_string_opt n with
+            | Some i when nth_ok i -> (
+                match edit (List.nth !items (i - 1)) with
+                  | Ok x ->
+                      items :=
+                        List.mapi (fun j y -> if j = i - 1 then x else y) !items
+                  | Error msg -> status := msg)
+            | _ -> status := Printf.sprintf "(unknown action %S)" n)
+      | _ -> status := "(unknown action)"
+  done;
+  !items
+
+let prompt_backends () =
+  add_loop ~noun:"backend" (fun siblings -> prompt_backend ~siblings ())
 
 (* Per-field editor for one backend, with a Terraform sync action for s3. *)
 let edit_backend b =
@@ -420,54 +494,18 @@ let edit_backend b =
   done;
   `Assoc !l
 
-(* Backend list menu for a domain: add / edit / remove. *)
 let edit_backends backends =
-  let backends = ref backends in
-  let running = ref true in
-  let status = ref "" in
-  while !running do
-    clear_screen ();
-    Printf.printf "Backends:\n";
-    if !backends = [] then Printf.printf "  (none)\n"
-    else
-      List.iteri
-        (fun i b ->
-          Printf.printf "  %d. %s (%s) [%s]\n" (i + 1)
-            (Option.value (jstr b "name") ~default:"?")
-            (Option.value (jstr b "type") ~default:"?")
-            (role_of (match b with `Assoc l -> l | _ -> [])))
-        !backends;
-    if !status <> "" then Printf.printf "\n%s\n" !status;
-    Printf.printf
-      "\nEnter a backend number to edit, [a]dd, [r]emove N, or [d]one:\n> %!";
-    status := "";
-    let parts =
-      List.filter (( <> ) "")
-        (String.split_on_char ' '
-           (String.lowercase_ascii (String.trim (read_line ()))))
-    in
-    let nth_ok i = i >= 1 && i <= List.length !backends in
-    match parts with
-      | [] | ["d"] -> running := false
-      | ["a"] ->
-          Printf.printf "\nNew backend\n";
-          backends := !backends @ [prompt_backend ()]
-      | ["r"; n] -> (
-          match int_of_string_opt n with
-            | Some i when nth_ok i ->
-                backends := List.filteri (fun j _ -> j <> i - 1) !backends
-            | _ -> status := "(need a valid backend number)")
-      | [n] -> (
-          match int_of_string_opt n with
-            | Some i when nth_ok i ->
-                backends :=
-                  List.mapi
-                    (fun j b -> if j = i - 1 then edit_backend b else b)
-                    !backends
-            | _ -> status := Printf.sprintf "(unknown action %S)" n)
-      | _ -> status := "(unknown action)"
-  done;
-  !backends
+  list_menu ~noun:"backend"
+    ~row:(fun b ->
+      Printf.sprintf "%s (%s) [%s]"
+        (Option.value (jstr b "name") ~default:"?")
+        (Option.value (jstr b "type") ~default:"?")
+        (role_of (match b with `Assoc l -> l | _ -> [])))
+    ~add:(fun siblings ->
+      Printf.printf "\nNew backend\n";
+      Ok (prompt_backend ~siblings ()))
+    ~edit:(fun b -> Ok (edit_backend b))
+    backends
 
 let backend_summary = function
   | [] -> "(none)"
@@ -506,44 +544,112 @@ let frontend_summary = function
                | _ -> name)
            fs)
 
-(* Value of option [k] in a frontend JSON entry (object form), if present. *)
-let frontend_opt entry k =
-  match entry with
-    | Some (`Assoc l) -> (
-        match List.assoc_opt k l with
-          | Some (`String s) -> Some s
-          | Some (`Bool b) -> Some (string_of_bool b)
-          | Some (`Int n) -> Some (string_of_int n)
-          | _ -> None)
-    | _ -> None
-
 (* A frontend with no options set is emitted as a bare type-name string, else as
    [{"type": name, ...options}]. *)
-let edit_frontends current =
-  let registered = Frontend.names () in
-  let current_of name =
-    List.find_opt (fun j -> frontend_type_of j = Some name) current
+let frontend_entry name opts =
+  if opts = [] then `String name else `Assoc (("type", `String name) :: opts)
+
+(* Sorted, as {!Backend.types} is: [Frontend.names] comes out of a hashtable, so
+   without this the wizard asks in whatever order the frontends hashed into. *)
+let frontend_types () = List.sort compare (Frontend.names ())
+
+(* The frontend a fresh domain most likely wants: the platform's own mount if
+   one is compiled in, else headless, which is what is left to serve IPC when
+   there is nothing to mount. *)
+let preferred_frontend types =
+  match List.find_opt (fun n -> List.mem n types) ["fuse"; "file_provider"] with
+    | Some n -> Some n
+    | None -> List.nth_opt types 0
+
+(* Mirrors {!prompt_backend}: choose a type, then fill in that type's fields.
+   Unlike a backend, a frontend has no name and no role — the type names it, and
+   a domain runs at most one of each, so [taken] drops the ones already
+   configured from the offer. *)
+let prompt_frontend ?(taken = []) () =
+  let types =
+    List.filter (fun n -> not (List.mem n taken)) (frontend_types ())
   in
-  List.filter_map
-    (fun name ->
-      let existing = current_of name in
-      if
-        not
-          (prompt_bool ~default:(existing <> None)
-             ("  Enable frontend " ^ name ^ "?"))
-      then None
-      else (
-        let opts =
-          List.filter_map
-            (fun (s : Field_spec.t) ->
-              prompt_field ~indent:"  " s
-                ?current:(frontend_opt existing s.name))
-            (Frontend.spec_for name)
-        in
-        Some
-          (if opts = [] then `String name
-           else `Assoc (("type", `String name) :: opts))))
-    registered
+  let ftype =
+    prompt_choice ~indent:"  " ~noun:"frontend type" "Frontend type" types
+      (preferred_frontend types)
+  in
+  let opts =
+    List.filter_map
+      (fun (s : Field_spec.t) -> prompt_field ~indent:"  " s)
+      (Frontend.spec_for ftype)
+  in
+  frontend_entry ftype opts
+
+let taken_frontends fs = List.filter_map frontend_type_of fs
+
+(* Every compiled-in frontend configured: nothing left to offer. *)
+let all_frontends_taken fs =
+  List.length (taken_frontends fs) >= List.length (frontend_types ())
+
+let prompt_frontends () =
+  add_loop ~noun:"frontend"
+    ~more:(fun fs -> not (all_frontends_taken fs))
+    (fun fs -> prompt_frontend ~taken:(taken_frontends fs) ())
+
+(* Per-field editor for one frontend. Its type is fixed, as a backend's is. *)
+let edit_frontend f =
+  let ftype = Option.value (frontend_type_of f) ~default:"" in
+  let l =
+    ref (match f with `Assoc l -> List.remove_assoc "type" l | _ -> [])
+  in
+  let get k =
+    match List.assoc_opt k !l with
+      | Some (`String s) -> s
+      | Some (`Bool b) -> string_of_bool b
+      | Some (`Int n) -> string_of_int n
+      | _ -> ""
+  in
+  let spec = Frontend.spec_for ftype in
+  let running = ref true in
+  let status = ref "" in
+  while !running do
+    clear_screen ();
+    Printf.printf "Editing frontend: %s\n\nFields:\n" ftype;
+    List.iteri
+      (fun i (s : Field_spec.t) ->
+        let v = get s.name in
+        Printf.printf "  %d. %-16s %s\n" (i + 1) (s.name ^ ":")
+          (if s.secret && v <> "" then "***" else v))
+      spec;
+    if !status <> "" then Printf.printf "\n%s\n" !status;
+    Printf.printf "\nEnter a field number to edit, or [d]one:\n> %!";
+    status := "";
+    let input = String.lowercase_ascii (String.trim (read_line ())) in
+    match input with
+      | "d" | "" -> running := false
+      | _ -> (
+          match int_of_string_opt input with
+            | Some n when n >= 1 && n <= List.length spec -> (
+                let s = List.nth spec (n - 1) in
+                match prompt_field s ~current:(get s.name) with
+                  | Some (k, v) -> l := assoc_set !l k v
+                  | None -> l := List.remove_assoc s.name !l)
+            | _ -> status := Printf.sprintf "(unknown field %S)" input)
+  done;
+  frontend_entry ftype !l
+
+let edit_frontends frontends =
+  list_menu ~noun:"frontend"
+    ~row:(fun f -> frontend_summary [f])
+    ~add:(fun fs ->
+      if all_frontends_taken fs then
+        Error "(every compiled-in frontend is already configured)"
+      else begin
+        Printf.printf "\nNew frontend\n";
+        Ok (prompt_frontend ~taken:(taken_frontends fs) ())
+      end)
+    ~edit:(fun f ->
+      let ftype = Option.value (frontend_type_of f) ~default:"" in
+      (* headless has no options, so there is no editor to open. *)
+      if Frontend.spec_for ftype = [] then
+        Error (Printf.sprintf "(%s has no options)" ftype)
+      else Ok (edit_frontend f))
+    frontends
 
 (* A new domain ([existing = None]) is filled in linearly; an existing one goes
    through a per-field menu, so untouched fields keep their values. *)
@@ -551,9 +657,13 @@ let edit_domain existing =
   let cur k d =
     Option.value (Option.bind existing (fun j -> jstr j k)) ~default:d
   in
-  let curbool k = match existing with Some j -> jbool j k | None -> false in
+  let curbool ?(default = false) k =
+    match existing with Some j -> jbool ~default j k | None -> default
+  in
   let name = ref (cur "name" "default") in
-  let versioning = ref (curbool "versioning") in
+  (* History costs storage the backend expires on its own; losing an overwrite
+     costs the file. A new domain therefore keeps versions unless told not to. *)
+  let versioning = ref (curbool ~default:true "versioning") in
   let symlinks = ref (cur "symlinks" "keep") in
   let read_only = ref (curbool "readOnly") in
   let size_field name =
@@ -575,12 +685,8 @@ let edit_domain existing =
   let backends =
     ref (match existing with Some j -> jlist j "backends" | None -> [])
   in
-  (* A new domain defaults to every compiled-in frontend. *)
   let frontends =
-    ref
-      (match existing with
-        | Some j -> jlist j "frontends"
-        | None -> List.map (fun name -> `String name) (Frontend.names ()))
+    ref (match existing with Some j -> jlist j "frontends" | None -> [])
   in
   (match existing with
     | None ->
@@ -608,7 +714,7 @@ let edit_domain existing =
           prompt_size_opt "Max local cache size (\"none\" = unlimited)"
             (Some default_max_cache);
         backends := prompt_backends ();
-        frontends := edit_frontends !frontends
+        frontends := prompt_frontends ()
     | Some _ ->
         let running = ref true in
         let status = ref "" in
