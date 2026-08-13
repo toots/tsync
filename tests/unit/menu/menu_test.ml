@@ -1,12 +1,11 @@
-(* The tray menu is a copy of the one in macos/TsyncApp/StatusMenu.swift, and a
-   copy is only worth having if it stays one. This prints what the model would
-   draw, so a change to any of those strings has to be agreed to in the diff.
+(* Every string the tray draws, printed. The menu is what a user reads to decide
+   whether anything is wrong, so a change to any of it has to be agreed to in the
+   diff rather than noticed on a desktop.
 
-   It runs on both platforms deliberately: the macOS runner is where a
-   divergence from the menu being copied would actually be noticed. *)
+   Builds on both platforms, since the model links no D-Bus and no toolkit. *)
 
 let action = function
-  | Tray_model.Nothing -> ""
+  | Menu.Nothing -> ""
   | Open_folder p -> " -> open " ^ p
   | Reveal_file p -> " -> reveal " ^ p
   | Set_paused b -> Printf.sprintf " -> pause %b" b
@@ -18,46 +17,44 @@ let action = function
 let print_entries entries =
   List.iter
     (function
-      | Tray_model.Separator -> print_endline "        ---"
+      | Menu.Separator -> print_endline "        ---"
       | Item i ->
           Printf.printf "        %s%s%s%s%s%s\n"
-            (String.make (4 * i.Tray_model.indent) ' ')
-            (match i.Tray_model.checked with
+            (String.make (4 * i.Menu.indent) ' ')
+            (match i.Menu.checked with
               | Some true -> "[x] "
               | Some false -> "[ ] "
               | None -> "")
-            i.Tray_model.label
-            (match i.Tray_model.icon with
-              | Some c -> " (" ^ c ^ ")"
-              | None -> "")
-            (if i.Tray_model.submenu then " >" else "")
-            (if i.Tray_model.enabled then action i.Tray_model.action
-             else " (disabled)"))
+            i.Menu.label
+            (match i.Menu.icon with Some c -> " (" ^ c ^ ")" | None -> "")
+            (if i.Menu.submenu then " >" else "")
+            (if i.Menu.enabled then action i.Menu.action else " (disabled)"))
     entries
 
 let print_menu name statuses =
-  let m = Tray_model.render statuses in
+  let m = Menu.render statuses in
   Printf.printf "== %s\n" name;
-  Printf.printf "icon    %s\n" m.Tray_model.icon;
-  Printf.printf "tooltip %s\n" m.Tray_model.tooltip;
-  print_entries m.Tray_model.entries;
+  Printf.printf "icon    %s\n" m.Menu.icon;
+  Printf.printf "tooltip %s\n" m.Menu.tooltip;
+  print_entries m.Menu.entries;
   print_newline ()
 
 let print_stats name all =
   Printf.printf "== %s\n" name;
-  print_entries (Tray_model.stats_entries all);
+  print_entries (Menu.stats_entries all);
   print_newline ()
 
-let upload name rel = { Tray_model.name; rel }
+let upload name rel = { Menu.name; rel }
 
 let domain ?(uploads = 0) ?(downloads = 0) ?(paused = false) ?(uploading = [])
-    ?(pending = 0L) ?sent ?rate ?mount name =
+    ?(downloading = []) ?(pending = 0L) ?sent ?rate ?mount name =
   {
-    Tray_model.name;
+    Menu.name;
     uploads = Some uploads;
     downloads = Some downloads;
     paused = Some paused;
     uploading;
+    downloading;
     pending_bytes = Some pending;
     bytes_uploaded = sent;
     upload_rate = rate;
@@ -80,12 +77,7 @@ let () =
   (* Nothing answering. No traffic or rate line at all -- the daemon never told
      us a total, and inventing one is worse than leaving it out. *)
   print_menu "daemon not running"
-    [
-      {
-        (Tray_model.unreachable "photos") with
-        mount = Some "/home/u/tsync/photos";
-      };
-    ];
+    [{ (Menu.unreachable "photos") with mount = Some "/home/u/tsync/photos" }];
 
   (* Paused with a backlog: the overflow row, and no rate line because the rate
      is zero. *)
@@ -105,6 +97,33 @@ let () =
   print_menu "one domain not mounted"
     [domain "photos" ~downloads:2 ~sent:1_070_000_000L];
 
+  (* Downloads draw exactly as uploads do, and the count on the domain row is
+     the number of rows under it -- not pendingDownloads, which counts chunk
+     fetches and would read "Downloading 9" above two files. *)
+  print_menu "downloading, with uploads alongside"
+    [
+      domain "photos" ~uploads:1 ~downloads:9 ~mount:"/home/u/tsync/photos"
+        ~uploading:[upload "out.raw" "out.raw"]
+        ~downloading:
+          [
+            upload "holiday.mov" "trips/holiday.mov";
+            upload "notes.pdf" "notes.pdf";
+          ]
+        ~sent:1_000L;
+    ];
+
+  (* The overflow row belongs to each list on its own. *)
+  print_menu "more downloads than fit"
+    [
+      domain "photos" ~downloads:7 ~mount:"/home/u/tsync/photos"
+        ~downloading:
+          (List.map
+             (fun n ->
+               upload (Printf.sprintf "f%d.iso" n) (Printf.sprintf "f%d.iso" n))
+             [7; 1; 2; 3; 4; 5; 6])
+        ~sent:0L;
+    ];
+
   print_menu "no domains" [];
 
   (* The submenu, which is the part of the report that does not fit in the menu.
@@ -113,7 +132,7 @@ let () =
      that is not stays quiet, and that a wal with nothing owed draws no row. *)
   let backend ?latency ?error ?behind ~reachable name role entries =
     {
-      Tray_model.backend_name = name;
+      Menu.backend_name = name;
       role;
       backend_reachable = reachable;
       latency_ms = latency;
@@ -125,7 +144,7 @@ let () =
   print_stats "stats submenu"
     [
       {
-        Tray_model.host = "booky";
+        Menu.host = "booky";
         frontend = "fuse";
         pid = 102259;
         uptime = 43_511.;
@@ -139,7 +158,7 @@ let () =
         domain_stats =
           [
             {
-              Tray_model.domain_name = "Jellyfin Media";
+              Menu.domain_name = "Jellyfin Media";
               mount_point = Some "/home/u/tsync/Jellyfin Media";
               read_only = true;
               versioning = true;
@@ -171,7 +190,7 @@ let () =
   print_stats "stats, sparse"
     [
       {
-        Tray_model.host = "server";
+        Menu.host = "server";
         frontend = "headless";
         pid = 7;
         uptime = 12.;
@@ -185,7 +204,7 @@ let () =
         domain_stats =
           [
             {
-              Tray_model.domain_name = "docs";
+              Menu.domain_name = "docs";
               mount_point = None;
               read_only = false;
               versioning = false;
@@ -209,7 +228,7 @@ let () =
 
   print_endline "== human_bytes";
   List.iter
-    (fun n -> Printf.printf "%-16Ld %s\n" n (Tray_model.human_bytes n))
+    (fun n -> Printf.printf "%-16Ld %s\n" n (Menu.human_bytes n))
     [
       0L;
       1L;
@@ -231,11 +250,11 @@ let () =
   List.iter
     (fun s ->
       Printf.printf "%-10.0f %s\n" s
-        (match Tray_model.eta s with Some t -> t | None -> "(none)"))
+        (match Menu.eta s with Some t -> t | None -> "(none)"))
     [0.; 45.; 60.; 90.; 3600.; 8000.; 86_400.; 90_000.; 180_000.];
 
   print_newline ();
   print_endline "== file_icon";
   List.iter
-    (fun n -> Printf.printf "%-16s %s\n" n (Tray_model.file_icon n))
+    (fun n -> Printf.printf "%-16s %s\n" n (Menu.file_icon n))
     ["a.jpg"; "b.MOV"; "c.flac"; "d.pdf"; "e.xlsx"; "f.zip"; "g.txt"; "h"]

@@ -1,12 +1,3 @@
-; The menu's strings and its icon are decided by [Tray_model] alone, which knows
-; nothing about D-Bus. It is the half worth pinning in a test, and pinning it on
-; a machine that has no tray -- the macOS runner -- is the point: this menu is a
-; copy of the one in macos/TsyncApp, and a divergence should fail there.
-
-(library
- (name tsync_tray_model)
- (modules tray_model))
-
 ; Linux only: macOS has its own menu bar app, and would be linking a library it
 ; never calls. The libdbus dependency is confined to tray/dbus, which is why
 ; this is its own opam package -- see dune-project.
@@ -25,14 +16,14 @@
    -open
    Tsync_log
    -open
-   Tsync_tray_model))
+   Tsync_menu))
  (name tsync_tray)
  (modules sni dbusmenu tray_poll tray)
  (enabled_if
   (= %{system} linux))
  (libraries
   tsync_dbus
-  tsync_tray_model
+  tsync_menu
   tsync_ipc
   tsync_conf_parsing
   tsync_runtime

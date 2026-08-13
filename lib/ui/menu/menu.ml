@@ -1,11 +1,12 @@
-type upload = { name : string; rel : string }
+type transfer = { name : string; rel : string }
 
 type status = {
   name : string;
   uploads : int option;
   downloads : int option;
   paused : bool option;
-  uploading : upload list;
+  uploading : transfer list;
+  downloading : transfer list;
   pending_bytes : int64 option;
   bytes_uploaded : int64 option;
   upload_rate : float option;
@@ -19,6 +20,7 @@ let unreachable name =
     downloads = None;
     paused = None;
     uploading = [];
+    downloading = [];
     pending_bytes = None;
     bytes_uploaded = None;
     upload_rate = None;
@@ -125,43 +127,9 @@ let first_some f statuses = List.find_map f statuses
 let bytes_uploaded statuses = first_some (fun s -> s.bytes_uploaded) statuses
 let upload_rate statuses = first_some (fun s -> s.upload_rate) statuses
 
-(* Decimal, and with the Finder's precision: no fraction under a megabyte, one
-   at megabytes, two above, and never a trailing zero. Deliberately not
-   [Metrics.human_bytes], which counts in 1024s because [Conf_parsing.parse_size]
-   has to read back what it prints -- a size someone typed into config.json
-   would move if these two were the same function.
-
-   One deliberate difference from macOS: ByteCountFormatter renders zero as
-   "Zero KB", which reads as a fault rather than as nothing to report. *)
-let human_bytes n =
-  let trim s =
-    if String.contains s '.' then (
-      let last = ref (String.length s - 1) in
-      while !last >= 0 && s.[!last] = '0' do
-        decr last
-      done;
-      if !last >= 0 && s.[!last] = '.' then decr last;
-      String.sub s 0 (!last + 1))
-    else s
-  in
-  let scaled unit digits divisor =
-    Printf.sprintf "%s %s"
-      (trim (Printf.sprintf "%.*f" digits (Int64.to_float n /. divisor)))
-      unit
-  in
-  (* The unit is chosen by what the number rounds to, not by what it is: at zero
-     fraction digits 999_999 bytes would otherwise read "1000 KB" instead of
-     "1 MB". *)
-  let fits digits divisor =
-    Int64.to_float n /. divisor < 1000. -. (0.5 /. (10. ** float_of_int digits))
-  in
-  if n < 0L then "0 bytes"
-  else if n = 1L then "1 byte"
-  else if n < 1_000L then Printf.sprintf "%Ld bytes" n
-  else if fits 0 1e3 then scaled "KB" 0 1e3
-  else if fits 1 1e6 then scaled "MB" 1 1e6
-  else if fits 2 1e9 then scaled "GB" 2 1e9
-  else scaled "TB" 2 1e12
+(* The same formatter `tsync stats' prints with, so one byte count does not read
+   two ways depending on where you looked. *)
+let human_bytes n = Metrics.human_bytes (Int64.to_int n)
 
 (* Day, hour and minute, the two largest non-zero of them, truncated. Anything
    under a minute has no honest answer, and a made-up one is worse than none. *)
@@ -186,13 +154,21 @@ let eta seconds =
             (String.concat " "
                (List.map (fun (n, u) -> Printf.sprintf "%d%s" n u) l)))
 
+(* [downloads] counts chunk fetches in flight, which is not what the rows under
+   this count: one file is many chunks, and several files can share one fetch.
+   Where there are rows, they are what the number has to agree with. *)
+let download_count s =
+  match s.downloading with
+    | [] -> s.downloads
+    | files -> Some (List.length files)
+
 let summary statuses =
   if statuses = [] then "No domains configured"
   else if any_unreachable statuses && all_unreachable statuses then
     "Daemon not running"
   else (
     let uploads = sum_opt (fun s -> s.uploads) statuses in
-    let downloads = sum_opt (fun s -> s.downloads) statuses in
+    let downloads = sum_opt download_count statuses in
     if uploads = 0 && downloads = 0 then
       if all_paused statuses then "Paused" else "Idle"
     else (
@@ -205,7 +181,7 @@ let summary statuses =
       String.concat " · " parts))
 
 let detail s =
-  match (s.uploads, s.downloads) with
+  match (s.uploads, download_count s) with
     | None, _ | _, None -> "not answering"
     | Some 0, Some 0 -> if s.paused = Some true then "Paused" else "Idle"
     | Some up, Some 0 -> Printf.sprintf "Uploading %d" up
@@ -445,6 +421,28 @@ let stats_entries = function
              if i = 0 then daemon_section s else Separator :: daemon_section s)
            all)
 
+(* One shape for both directions, so a download row and an upload row cannot
+   drift apart. Which downloads are worth a row was settled by the daemon, which
+   is why nothing here has to weigh them. *)
+let file_rows s transfers =
+  let shown =
+    List.sort (fun (a : transfer) b -> compare a.name b.name) transfers
+  in
+  let rows =
+    List.filteri (fun i _ -> i < max_uploading_shown) shown
+    |> List.map (fun (u : transfer) ->
+        info u.name ~icon:(file_icon u.name) ~indent:1
+          ~action:
+            (match s.mount with
+              | Some m -> Reveal_file (Filename.concat m u.rel)
+              | None -> Nothing))
+  in
+  let hidden = List.length transfers - max_uploading_shown in
+  rows
+  @
+  if hidden > 0 then [info (Printf.sprintf "… and %d more" hidden) ~indent:1]
+  else []
+
 let render statuses =
   let header = info (Printf.sprintf "tsync — %s" (summary statuses)) in
   let domain s =
@@ -453,25 +451,7 @@ let render statuses =
         (Printf.sprintf "%s — %s" s.name (detail s))
         ~action:(match s.mount with Some m -> Open_folder m | None -> Nothing)
     in
-    let shown =
-      List.sort (fun (a : upload) b -> compare a.name b.name) s.uploading
-    in
-    let files =
-      List.filteri (fun i _ -> i < max_uploading_shown) shown
-      |> List.map (fun (u : upload) ->
-          info u.name ~icon:(file_icon u.name) ~indent:1
-            ~action:
-              (match s.mount with
-                | Some m -> Reveal_file (Filename.concat m u.rel)
-                | None -> Nothing))
-    in
-    let hidden = List.length s.uploading - max_uploading_shown in
-    let more =
-      if hidden > 0 then
-        [info (Printf.sprintf "… and %d more" hidden) ~indent:1]
-      else []
-    in
-    (row :: files) @ more
+    (row :: file_rows s s.uploading) @ file_rows s s.downloading
   in
   let domains =
     if statuses = [] then [] else Separator :: List.concat_map domain statuses

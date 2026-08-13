@@ -1,11 +1,12 @@
 (** What the tray says, decided from what the daemons answered.
 
-    A copy of macos/TsyncApp/StatusMenu.swift, deliberately: the two menus
-    should read the same on both platforms, so the strings here are that file's
-    strings and the test pins them. Nothing in this module knows about D-Bus,
-    which is what makes that test possible on a machine with no tray. *)
+    The strings and the rules live here once for both platforms. The Linux tray
+    links this directly; anything that is not OCaml asks the daemon for the
+    [menu] action, which is this rendered as JSON. Nothing here knows about
+    D-Bus, a mount path or a menu toolkit, which is what lets the test pin it on
+    a machine with no tray at all. *)
 
-type upload = {
+type transfer = {
   name : string;  (** the base name, which is what a row is labelled with *)
   rel : string;  (** where it sits under the domain root, for revealing it *)
 }
@@ -17,7 +18,11 @@ type status = {
   uploads : int option;
   downloads : int option;
   paused : bool option;
-  uploading : upload list;
+  uploading : transfer list;
+  downloading : transfer list;
+      (** Files whose content is coming off a backend because something is
+          reading them. The daemon has already dropped the ones too small or too
+          brief to be worth a row. *)
   pending_bytes : int64 option;
   bytes_uploaded : int64 option;  (** process-wide, so repeated per domain *)
   upload_rate : float option;  (** process-wide *)
@@ -128,9 +133,8 @@ val rate_line : status list -> string option
 val icon_name : status list -> string
 val file_icon : string -> string
 
-(** Decimal, like the Finder: 223200000 is ["223.2 MB"], not ["212.9 MiB"].
-    Deliberately not [Metrics.human_bytes], which is 1024-based because
-    [Conf_parsing.parse_size] has to read back what it prints. *)
+(** {!Metrics.human_bytes} widened to [int64], so a figure reads the same here
+    as in [tsync stats]. *)
 val human_bytes : int64 -> string
 
 (** The two largest non-zero units of a duration, abbreviated, truncated:

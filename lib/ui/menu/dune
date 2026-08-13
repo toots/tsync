@@ -1,0 +1,10 @@
+; What the tray says, decided from what the daemons answered. Shared rather
+; than per platform: the Linux tray links it, and the `menu' IPC action serves
+; the same rows to a client that is not OCaml -- which is how the macOS menu
+; stops being a second copy of these rules.
+
+(library
+ (name tsync_menu)
+ (flags
+  (:standard -open Tsync_metrics))
+ (libraries tsync_metrics))

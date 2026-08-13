@@ -7,17 +7,17 @@ let peer = "org.freedesktop.DBus.Peer"
    contents on close would then hold its first contents forever. *)
 let open_for_at_most = 60.
 
-type row = { entry : Tray_model.entry; id : int; children : row list }
+type row = { entry : Menu.entry; id : int; children : row list }
 
 type t = {
   conn : Dbus.connection;
   path : string;
   mutable rows : row list;
-  mutable pending : Tray_model.entry list option;
+  mutable pending : Menu.entry list option;
   mutable revision : int;
   mutable next_id : int;
   mutable opened_at : float option;
-  mutable click : Tray_model.action -> unit;
+  mutable click : Menu.action -> unit;
   mutable opened : unit -> unit;
 }
 
@@ -33,26 +33,24 @@ let is_open t =
    file called my_photo_01.jpg would be drawn as myphoto01.jpg. *)
 let escape_mnemonics label = String.concat "__" (String.split_on_char '_' label)
 
-let props_of_entry (entry : Tray_model.entry) =
+let props_of_entry (entry : Menu.entry) =
   match entry with
-    | Tray_model.Separator -> [("type", Dbus.String "separator")]
+    | Menu.Separator -> [("type", Dbus.String "separator")]
     | Item i ->
         (* The macOS menu indents a file under its domain; dbusmenu has no
            property for that, so the nesting is spent on leading space. *)
-        let label =
-          String.make (4 * i.Tray_model.indent) ' ' ^ i.Tray_model.label
-        in
+        let label = String.make (4 * i.Menu.indent) ' ' ^ i.Menu.label in
         [
           ("label", Dbus.String (escape_mnemonics label));
-          ("enabled", Dbus.Bool i.Tray_model.enabled);
+          ("enabled", Dbus.Bool i.Menu.enabled);
           (* Sent rather than left to default: hosts disagree about what an
              absent "visible" means. *)
           ("visible", Dbus.Bool true);
         ]
-        @ (match i.Tray_model.icon with
+        @ (match i.Menu.icon with
           | Some name -> [("icon-name", Dbus.String name)]
           | None -> [])
-        @ (match i.Tray_model.checked with
+        @ (match i.Menu.checked with
           | Some on ->
               [
                 ("toggle-type", Dbus.String "checkmark");
@@ -64,8 +62,7 @@ let props_of_entry (entry : Tray_model.entry) =
            something. It comes from the model rather than from whether children
            happen to have arrived yet: a row that drew as an ordinary one until
            its contents loaded would move under the pointer. *)
-        if i.Tray_model.submenu then
-          [("children-display", Dbus.String "submenu")]
+        if i.Menu.submenu then [("children-display", Dbus.String "submenu")]
         else []
 
 (* Only what was asked for. An empty request means everything, which is what
@@ -124,7 +121,7 @@ let layout t names depth parent =
           | None -> node ~id ~props:[] ~children:[])
 
 let submenu_action = function
-  | Tray_model.Item i when i.Tray_model.submenu -> Some i.Tray_model.action
+  | Menu.Item i when i.Menu.submenu -> Some i.Menu.action
   | _ -> None
 
 (* Rows are matched by position below, which a row that moved does not survive.
@@ -188,7 +185,7 @@ let set_children t action entries =
     List.find_opt
       (fun r ->
         match r.entry with
-          | Tray_model.Item i -> i.Tray_model.action = action
+          | Menu.Item i -> i.Menu.action = action
           | Separator -> false)
       t.rows
   with
@@ -298,7 +295,7 @@ let row t id = find_row id t.rows
 
 let action_of_row r =
   match r.entry with
-    | Tray_model.Item i when i.Tray_model.enabled -> Some i.Tray_model.action
+    | Menu.Item i when i.Menu.enabled -> Some i.Menu.action
     | _ -> None
 
 let handle_menu t msg =

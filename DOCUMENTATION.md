@@ -770,6 +770,12 @@ opens its folder, clicking a file selects it in the file manager, and *Pause
 uploads* is the same switch as `tsync pause` — it applies to every domain, and
 the checkmark shows what the daemon actually did rather than what it was asked.
 
+Under each domain sit the files moving right now, uploads and downloads alike
+and drawn the same way. A download appears when something reads a file whose
+content is not cached and has to come from a backend; the ones too small or too
+brief to notice are left out, so a thumbnailer walking a folder does not fill
+the menu. `tsync stats` lists them all, unfiltered.
+
 *Stats* opens a submenu with the short version of `tsync stats`: the daemon's
 pid and uptime, its cpu and memory, what it has moved and how fast, then per
 domain the mount, the cache, what is queued, what has been read and written,

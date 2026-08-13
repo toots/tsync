@@ -56,10 +56,9 @@ let run () =
 
   let refresh () =
     domains := Tray_poll.domains ();
-    let rendered = Tray_model.render (Tray_poll.poll !domains) in
-    Sni.set sni ~icon:rendered.Tray_model.icon
-      ~tooltip:rendered.Tray_model.tooltip;
-    Dbusmenu.set menu rendered.Tray_model.entries;
+    let rendered = Menu.render (Tray_poll.poll !domains) in
+    Sni.set sni ~icon:rendered.Menu.icon ~tooltip:rendered.Menu.tooltip;
+    Dbusmenu.set menu rendered.Menu.entries;
     last_poll := Unix.gettimeofday ()
   in
 
@@ -73,12 +72,12 @@ let run () =
       let now = Unix.gettimeofday () in
       if now -. !last_stats >= stats_settled then (
         last_stats := now;
-        Dbusmenu.set_children menu Tray_model.Show_stats
-          (Tray_model.stats_entries (Tray_poll.stats !domains))));
+        Dbusmenu.set_children menu Menu.Show_stats
+          (Menu.stats_entries (Tray_poll.stats !domains))));
 
   Dbusmenu.on_click menu (fun action ->
       match action with
-        | Tray_model.Nothing -> ()
+        | Menu.Nothing -> ()
         | Quit -> quit := true
         | Open_folder path -> Tray_poll.open_folder conn path
         | Reveal_file path -> Tray_poll.reveal_file conn path
@@ -93,7 +92,7 @@ let run () =
 
   refresh ();
   (* So the row has a submenu to open before anyone has opened one. *)
-  Dbusmenu.set_children menu Tray_model.Show_stats Tray_model.stats_placeholder;
+  Dbusmenu.set_children menu Menu.Show_stats Menu.stats_placeholder;
 
   let rec loop () =
     if !quit then Log.info "tray: quit"

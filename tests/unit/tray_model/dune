@@ -1,5 +1,0 @@
-(executable
- (flags
-  (:standard -open Tsync_tray_model))
- (name tray_model_test)
- (libraries tsync_tray_model))

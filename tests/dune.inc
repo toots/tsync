@@ -608,6 +608,20 @@
   (action
    (diff manifest_naming_test.expected manifest_naming_test.output))))
 
+(subdir unit/menu
+ (alias
+  (name default)
+  (deps menu_test.exe))
+ (rule
+  (alias runtest)
+  (target menu_test.output)
+  (action
+   (with-stdout-to menu_test.output (ignore-stderr (run ./menu_test.exe)))))
+ (rule
+  (alias runtest)
+  (action
+   (diff menu_test.expected menu_test.output))))
+
 (subdir unit/staged_codec
  (alias
   (name default)
@@ -663,20 +677,6 @@
   (alias runtest)
   (action
    (diff temp_names_test.expected temp_names_test.output))))
-
-(subdir unit/tray_model
- (alias
-  (name default)
-  (deps tray_model_test.exe))
- (rule
-  (alias runtest)
-  (target tray_model_test.output)
-  (action
-   (with-stdout-to tray_model_test.output (ignore-stderr (run ./tray_model_test.exe)))))
- (rule
-  (alias runtest)
-  (action
-   (diff tray_model_test.expected tray_model_test.output))))
 
 (subdir unit/zip
  (alias

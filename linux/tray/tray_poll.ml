@@ -61,29 +61,32 @@ let string_field json name =
     | Some (`String s) when s <> "" -> Some s
     | _ -> None
 
-let uploads_of json =
-  match member "uploading" json with
+(* One shape for both lists: the daemon reports downloads with the same name and
+   rel an upload carries, plus figures the menu does not draw. *)
+let transfers_of json field =
+  match member field json with
     | Some (`List items) ->
         List.filter_map
           (fun item ->
             match (string_field item "name", string_field item "rel") with
-              | Some name, Some rel -> Some { Tray_model.name; rel }
+              | Some name, Some rel -> Some { Menu.name; rel }
               | _ -> None)
           items
     | _ -> []
 
 let status_of_json (d : domain) json =
   match bool_field json "ok" with
-    | Some false | None -> Tray_model.unreachable d.name
+    | Some false | None -> Menu.unreachable d.name
     | Some true ->
         {
-          Tray_model.name = d.name;
+          Menu.name = d.name;
           uploads =
             Some (Option.value (int_field json "pendingUploads") ~default:0);
           downloads =
             Some (Option.value (int_field json "pendingDownloads") ~default:0);
           paused = Some (Option.value (bool_field json "paused") ~default:false);
-          uploading = uploads_of json;
+          uploading = transfers_of json "uploading";
+          downloading = transfers_of json "downloading";
           pending_bytes = int64_field json "pendingBytes";
           bytes_uploaded = int64_field json "bytesUploaded";
           upload_rate = float_field json "uploadBytesPerSec";
@@ -108,12 +111,12 @@ let poll ds =
             {|{"action":"status"}|}
         in
         status_of_json d (Yojson.Basic.from_string reply))
-      (fun _ -> Lwt.return (Tray_model.unreachable d.name))
+      (fun _ -> Lwt.return (Menu.unreachable d.name))
   in
   try Lwt_main.run (Lwt_list.map_p ask ds)
   with e ->
     Log.warn "tray: poll failed: %s" (Printexc.to_string e);
-    List.map (fun d -> Tray_model.unreachable d.name) ds
+    List.map (fun d -> Menu.unreachable d.name) ds
 
 let list_field json name =
   match member name json with Some (`List items) -> items | _ -> []
@@ -125,7 +128,7 @@ let sub json name field key =
 
 let backend_of json =
   {
-    Tray_model.backend_name =
+    Menu.backend_name =
       Option.value (string_field json "name") ~default:"backend";
     role = Option.value (string_field json "role") ~default:"?";
     backend_reachable =
@@ -158,8 +161,7 @@ let frontend_first json key =
 
 let domain_stats_of json =
   {
-    Tray_model.domain_name =
-      Option.value (string_field json "name") ~default:"domain";
+    Menu.domain_name = Option.value (string_field json "name") ~default:"domain";
     mount_point = frontend_first json "mountPoint";
     read_only = Option.value (bool_field json "domainReadOnly") ~default:false;
     versioning = Option.value (bool_field json "versioning") ~default:false;
@@ -186,7 +188,7 @@ let stats_of_json json =
         let field o name f = Option.bind o (fun o -> f o name) in
         Some
           {
-            Tray_model.host =
+            Menu.host =
               Option.value (field server "hostname" string_field) ~default:"?";
             frontend =
               Option.value (field server "frontend" string_field) ~default:"?";
