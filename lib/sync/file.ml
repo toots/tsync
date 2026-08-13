@@ -151,16 +151,29 @@ module Make_with_layout (C : Conf.S) (Sq : Sync_queue.S) (L : Layout.S) :
   let cancel_upload key = Sq.cancel_put key
   let uploads_pending = Sq.pending
 
+  (* What to call a row, and where the file sits under the domain root. *)
+  let describe key = (Filename.basename key, Key.chop_slash (rel_key key))
+
   let uploads_in_flight () =
     Lwt_list.map_s
       (fun key ->
         let+ body = D.staged_body_path key in
-        {
-          File_ops.name = Filename.basename key;
-          rel = Key.chop_slash (rel_key key);
-          body;
-        })
+        let name, rel = describe key in
+        { File_ops.name; rel; body })
       (Sq.uploading ())
+
+  let downloading_now () =
+    List.map
+      (fun (p : D.pulling) ->
+        let name, rel = describe p.D.key in
+        {
+          File_ops.d_name = name;
+          d_rel = rel;
+          d_bytes = p.D.bytes;
+          d_size = p.D.size;
+          d_seconds = p.D.seconds;
+        })
+      (D.pulling_now ())
 
   let uploads_pending_bytes = Sq.pending_bytes
   let uploads_paused = Sq.paused

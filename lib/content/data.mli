@@ -108,6 +108,30 @@ module Make (C : Conf.S) (R : Remote.S) : sig
       [None] otherwise. *)
   val download_progress : string -> (int * int) option
 
+  (** One file being read whose chunks are coming off a backend right now.
+      [bytes] is what this read has pulled, not what the file holds; [size] is
+      the whole file, so a caller can say "12.4 MB of 1.2 GB" without touching
+      the store. *)
+  type pulling = { key : string; bytes : int; size : int; seconds : float }
+
+  (** Files currently waiting on the network because something is reading them —
+      distinct from {!download_progress}, which is whole-file materialization.
+      Biggest first and capped, since [status] asks on every poll, and pruned of
+      anything gone quiet as a side effect of asking.
+
+      Synchronous on purpose: the table is mutated by reads on the same Lwt
+      loop, so a fold that could yield would see it change underneath itself.
+
+      Note that [Make] is applied once per consumer — {!Sync.File},
+      {!Diagnostics}, the share server, {!Ops.Export} — and each gets its own
+      table. Only the one behind [File_ops.S] is reachable over IPC, so a file
+      served by the share server does not appear here. The same is already true
+      of {!downloads_in_flight}.
+
+      [now] overrides the clock the idle sweep reads, so a caller can ask what
+      the table will look like later without waiting for it. *)
+  val pulling_now : ?now:float -> unit -> pulling list
+
   (** Drop [key]'s cached chunks; they re-fetch on demand. Unreference-blind: a
       chunk shared with another file goes too. Staged bodies are untouched. *)
   val forget_chunks : string -> unit Lwt.t

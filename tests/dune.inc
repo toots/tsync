@@ -205,6 +205,14 @@
   (action
    (diff promote_race.expected promote_race.output))))
 
+(subdir content/pulling
+ (alias
+  (name default)
+  (deps pulling_test.exe))
+ (rule
+  (alias runtest)
+  (action (run ./pulling_test.exe))))
+
 (subdir e2e/ipc_tap
  (alias
   (name default)

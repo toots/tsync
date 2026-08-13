@@ -16,6 +16,79 @@ module Make (C : Conf.S) (R : Remote.S) = struct
 
   (* Advisory: a lost or stale entry costs at most one un-prefetched read. *)
   let last_read_end : (string, int) Hashtbl.t = Hashtbl.create 64
+
+  (* Files waiting on the network because something is reading them. Separate
+     from [active] below, which tracks whole-file materialization: that has a
+     total known up front and a scoped lifetime, and a demand read has neither.
+
+     Materialization does not land here even though [assemble_to] reads through
+     [pread] -- it fetches every group first, so its reads find the chunks local
+     and report no backend. *)
+  type pull = {
+    size : int;
+    started : float;
+    mutable bytes : int;
+    mutable last : float;
+  }
+
+  let pulls : (string, pull) Hashtbl.t = Hashtbl.create 8
+
+  (* Longer than the tray's poll interval, or a row blinks out between two polls
+     that both saw traffic. *)
+  let pull_idle = 8.
+
+  (* A cold `grep -r' over a large tree touches every file in it. Without a cap
+     the table grows for the life of the process whether or not anyone is
+     watching. *)
+  let max_pulling = 256
+
+  let prune_pulls now =
+    Hashtbl.filter_map_inplace
+      (fun _ p ->
+        let idle = now -. p.last in
+        (* A negative idle is the clock having stepped, not a fresh entry.
+           Expiring it beats letting a row sit there until the daemon restarts. *)
+        if idle > pull_idle || idle < 0. then None else Some p)
+      pulls
+
+  (* Synchronous, and called with no await between the lookup and the update:
+     every writer runs on the Lwt loop (FUSE workers reach it through
+     [Lwt_preemptive.run_in_main]), so that is all the mutual exclusion this
+     needs. *)
+  let credit_pull key ~size n =
+    let now = Unix.gettimeofday () in
+    match Hashtbl.find_opt pulls key with
+      | Some p ->
+          p.bytes <- p.bytes + n;
+          p.last <- now
+      | None ->
+          if Hashtbl.length pulls >= max_pulling then prune_pulls now;
+          Hashtbl.replace pulls key
+            { size; started = now; bytes = n; last = now }
+
+  type pulling = { key : string; bytes : int; size : int; seconds : float }
+
+  (* [status] asks on every tray poll, so the answer is bounded. Biggest first,
+     so what is cut is what mattered least. *)
+  let max_reported = 16
+
+  let pulling_now ?now () =
+    let now = match now with Some t -> t | None -> Unix.gettimeofday () in
+    prune_pulls now;
+    Hashtbl.fold
+      (fun key (p : pull) acc ->
+        {
+          key;
+          bytes = p.bytes;
+          size = p.size;
+          (* Guarded for the same clock step [prune_pulls] guards against. *)
+          seconds = Float.max 0. (now -. p.started);
+        }
+        :: acc)
+      pulls []
+    |> List.sort (fun a b -> compare b.bytes a.bytes)
+    |> List.filteri (fun i _ -> i < max_reported)
+
   let cache_chunk_size = Conf.cache_chunk_size (module C)
 
   (* Reuses [cached] while [i] stays in the same group, so a sequential read
@@ -26,7 +99,10 @@ module Make (C : Conf.S) (R : Remote.S) = struct
       | Some (j, g) when j = gi -> Some (gi, g)
       | _ -> Option.map (fun g -> (gi, g)) (Chunk_group.of_table ~table ~per i)
 
-  let read_ahead ~table ~per ~chunk_size ~last =
+  (* Credits {!pulls} as a foreground read does: prefetch is what pulls the bytes
+     during sequential streaming, so leaving it out would empty the display
+     exactly when a large file is downloading well. *)
+  let read_ahead ~id ~size ~table ~per ~chunk_size ~last =
     let n = Chunk_table.count table in
     let window =
       min max_readahead_groups
@@ -43,7 +119,10 @@ module Make (C : Conf.S) (R : Remote.S) = struct
                 else
                   let* () =
                     match Chunk_group.of_table ~table ~per i with
-                      | Some group -> Cc.ensure ~group ()
+                      | Some group ->
+                          let+ fetched = Cc.ensure_fetched ~group () in
+                          if fetched then
+                            credit_pull id ~size (Chunk_group.bytes group)
                       | None -> Lwt.return_unit
                   in
                   go (i + per)
@@ -51,7 +130,8 @@ module Make (C : Conf.S) (R : Remote.S) = struct
               go first)
             (fun _ -> Lwt.return_unit))
 
-  (* [id] is for the read-ahead heuristic only. *)
+  (* [id] names the file for the read-ahead heuristic and for {!pulling}, which
+     is how a byte fetched here is attributed to the file someone is reading. *)
   let pread ~id ~(manifest : Manifest.t) buf ~offset =
     let cs = manifest.Manifest.chunk_size in
     let size = manifest.Manifest.size in
@@ -79,14 +159,21 @@ module Make (C : Conf.S) (R : Remote.S) = struct
                        (Printf.sprintf "manifest %s: missing chunk %d" id i))
               | Some (_, group) as cached ->
                   let slice = Bigarray.Array1.sub buf done_ take in
-                  let* got = Cc.read_into ~group ~index:i slice ~chunk_off in
+                  let* served = Cc.read_into ~group ~index:i slice ~chunk_off in
+                  let got = served.Cc.bytes in
+                  (* The group's size, not the slice's: what came down the wire
+                     is the whole group, however little of it this read wanted. *)
+                  if served.Cc.from_backend then
+                    credit_pull id ~size:(Int64.to_int size)
+                      (Chunk_group.bytes group);
                   if got <= 0 then Lwt.return done_
                   else go (pos + got) (done_ + got) cached))
       in
       let* got = go start 0 None in
       let last = min (n - 1) ((start + max 0 (got - 1)) / cs) in
       if Hashtbl.find_opt last_read_end id = Some start then
-        read_ahead ~table ~per ~chunk_size:cs ~last;
+        read_ahead ~id ~size:(Int64.to_int size) ~table ~per ~chunk_size:cs
+          ~last;
       Hashtbl.replace last_read_end id (start + got);
       Lwt.return got)
 
@@ -142,7 +229,14 @@ module Make (C : Conf.S) (R : Remote.S) = struct
                 | Manifest.Inherit -> (
                     match Mf.group_at_opt base i with
                       | Some group ->
-                          Cc.read_into ~group ~index:i slice ~chunk_off
+                          let+ served =
+                            Cc.read_into ~group ~index:i slice ~chunk_off
+                          in
+                          if served.Cc.from_backend then
+                            credit_pull id
+                              ~size:(Int64.to_int staged.Manifest.s_size)
+                              (Chunk_group.bytes group);
+                          served.Cc.bytes
                       | None ->
                           Lwt.fail
                             (Backend.Backend_error

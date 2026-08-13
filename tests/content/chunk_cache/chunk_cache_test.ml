@@ -176,20 +176,29 @@ let show label g =
 let read_member g index =
   let want = Chunk_group.size g index in
   let buf = Bigarray.Array1.create Bigarray.char Bigarray.c_layout want in
-  let+ n = Cc.read_into ~group:g ~index buf ~chunk_off:0 in
-  String.init n (Bigarray.Array1.get buf)
+  let+ served = Cc.read_into ~group:g ~index buf ~chunk_off:0 in
+  (String.init served.Cc.bytes (Bigarray.Array1.get buf), served.Cc.from_backend)
 
 let show_body label g index =
-  let+ body = read_member g index in
-  Printf.printf "%-28s body=%-18S gets=%d\n" label body (gets_for g)
+  let+ body, from_backend = read_member g index in
+  Printf.printf "%-28s body=%-18S gets=%d backend=%b\n" label body (gets_for g)
+    from_backend
 
 let () =
   ignore (Sys.command (Printf.sprintf "rm -rf %s" root));
   Lwt_main.run
     (let* () = show "cold" g1 in
 
-     (* Two readers, one GET. *)
-     let* () = Lwt.join [Cc.ensure ~group:g1 (); Cc.ensure ~group:g1 ()] in
+     (* Two readers, one GET, and both told it came from a backend -- the one
+        that only joined waited on the network just as the other did. *)
+     let* () =
+       let+ fetched =
+         Lwt.all
+           [Cc.ensure_fetched ~group:g1 (); Cc.ensure_fetched ~group:g1 ()]
+       in
+       Printf.printf "%-28s backend=%s\n" "2 concurrent ensures"
+         (String.concat "," (List.map string_of_bool fetched))
+     in
      let* () = show "after 2 concurrent ensures" g1 in
 
      (* Already present: no GET at all. *)
@@ -235,9 +244,9 @@ let () =
      (* A partial read inside a member is still addressed by member offset. *)
      let* () =
        let buf = Bigarray.Array1.create Bigarray.char Bigarray.c_layout 2 in
-       let+ n = Cc.read_into ~group:trio ~index:1 buf ~chunk_off:2 in
+       let+ served = Cc.read_into ~group:trio ~index:1 buf ~chunk_off:2 in
        Printf.printf "%-28s body=%S\n" "trio member 1 at +2"
-         (String.init n (Bigarray.Array1.get buf))
+         (String.init served.Cc.bytes (Bigarray.Array1.get buf))
      in
 
      (* Content-addressed like any chunk: the same three chunks in another file
@@ -254,7 +263,7 @@ let () =
              build ~per:1 ~chunk_size:4 ~size:4 [key_of "never uploaded"] 0
            in
            let buf = Bigarray.Array1.create Bigarray.char Bigarray.c_layout 4 in
-           let+ (_ : int) =
+           let+ (_ : Cc.served) =
              Cc.read_into ~group:missing ~index:0 buf ~chunk_off:0
            in
            Printf.printf "%-28s no error\n" "missing chunk")
