@@ -37,4 +37,7 @@
 ; the daemon.
 
 (package
- (name tsync-tray))
+ (name tsync-tray)
+ ; Its stanzas are Linux-only, so on macOS the package has none at all and dune
+ ; refuses to build a tree containing it.
+ (allow_empty))
