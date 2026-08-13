@@ -1,9 +1,12 @@
 (* Runtime selection of conduit's TLS backend, which conduit-lwt-unix picks once
    at startup via its [tls_library] ref.
 
-   [Native] (ocaml-tls) is a mandatory dependency; [OpenSSL] (lwt_ssl) is optional
-   and much faster, so it is preferred when compiled in. Native stays selectable
-   because it avoids OpenSSL's per-connection error-queue bug, which affects some
+   Which backends exist is fixed when conduit is built, from its optional
+   dependencies: [Native] (ocaml-tls) comes from the tsync-tls package and
+   [OpenSSL] (lwt_ssl) from tsync-ssl. tsync.opam requires one of the two, so at
+   least one is always compiled in, and a build carrying both chooses here.
+   OpenSSL is much faster and preferred. Native stays selectable because it
+   avoids OpenSSL's per-connection error-queue bug, which affects some
    S3-compatible endpoints (Backblaze B2). *)
 
 type t = Native | Openssl

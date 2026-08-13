@@ -1,14 +1,17 @@
 opam-version: "2.0"
 version: "1"
-synopsis: "Virtual package install tsync S3 dependencies"
+synopsis: "Virtual package install tsync native TLS dependencies"
 maintainer: ["Romain Beauxis <toots@rastageeks.org>"]
 authors: ["Romain Beauxis <toots@rastageeks.org>"]
 license: "MIT"
 homepage: "https://github.com/toots/tsync"
 bug-reports: "https://github.com/toots/tsync/issues"
+# tls-lwt, not tls: conduit-lwt-unix takes its native backend from that depopt
+# and ignores the core library. Installing it after conduit is fine — opam
+# rebuilds conduit when one of its optional dependencies appears.
 depends: [
   "dune" {>= "3.23"}
-  "aws-s3-lwt"
+  "tls-lwt"
   "odoc" {with-doc}
 ]
 build: [

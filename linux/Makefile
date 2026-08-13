@@ -44,7 +44,7 @@ uninstall:
 	rm -f ~/.config/systemd/user/tsync.service
 	-systemctl --user daemon-reload
 	rm -f ~/.local/bin/tsync
-	-opam remove -y tsync tsync-s3 tsync-fuse
+	-opam remove -y tsync tsync-tls tsync-ssl tsync-s3 tsync-fuse
 
 # End-to-end check against a real FUSE mount. Stages everything it needs — a
 # store, a mount, a second client — under a scratch directory and takes it all
