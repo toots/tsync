@@ -111,7 +111,7 @@ let () =
      in
      Printf.printf "domain at %s\n%!" mount;
      wait_until ~timeout:60. ~what:"the daemon socket" (fun () ->
-         Sys.file_exists paths.Runtime.socket_path);
+         Sys.file_exists (Runtime.domain_socket_path paths env.domain));
      wait_writable ~mount;
 
      (* The second client, against the same store. *)
@@ -154,7 +154,10 @@ let () =
            wait_until ~timeout:120. ~what:(name ^ " to appear in the mount")
              (fun () -> Sys.file_exists path);
 
-           let tap = Ipc_tap.start ~socket_path:paths.Runtime.socket_path in
+           let tap =
+             Ipc_tap.start
+               ~socket_path:(Runtime.domain_socket_path paths env.domain)
+           in
            Fun.protect
              ~finally:(fun () -> Ipc_tap.stop tap)
              (fun () ->

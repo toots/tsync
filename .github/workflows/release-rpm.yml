@@ -48,7 +48,7 @@ jobs:
             opam gcc gcc-c++ make m4 pkgconf-pkg-config git curl unzip rsync \
             rpm-build systemd-rpm-macros gh \
             fuse3-devel fuse3 xxhash-devel libev-devel openssl-devel gmp-devel \
-            pcre2-devel
+            pcre2-devel dbus-devel
 
       - uses: actions/checkout@v4
         with:
@@ -75,11 +75,20 @@ jobs:
       - name: Package
         run: ./linux/rpm/build.sh
 
-      - name: Verify the package installs
+      - name: Verify the packages install
         # Catches a bad Requires or a missing library before anyone downloads it.
+        # ldd alone cannot fail here -- the build container installed dbus-devel,
+        # so the runtime library is present whatever the package declares. The
+        # Requires assertions are what actually hold: the tray must ask for
+        # libdbus, and tsync must not, which is the point of shipping them
+        # separately.
         run: |
           dnf install -y ./dist/*.rpm
-          test "$(ldd "$(command -v tsync)" | grep -c 'not found')" = 0
+          for b in tsync tsync-tray; do
+            test "$(ldd "$(command -v $b)" | grep -c 'not found')" = 0
+          done
+          rpm -qpR dist/tsync-tray_*.rpm | grep -q libdbus-1
+          ! rpm -qpR dist/tsync_*.rpm | grep -q libdbus-1
 
       - uses: actions/upload-artifact@v4
         with:

@@ -16,6 +16,22 @@ module Make (C : Conf.S) (F : File_ops.S) = struct
     on_stop : unit -> unit;
   }
 
+  (* Facts, not a filtered view: which of these is worth a menu row is a
+     question for whatever draws the menu, and `tsync stats' wants all of them. *)
+  let downloading_json () =
+    List.map
+      (fun (d : File_ops.downloading) ->
+        `Assoc
+          [
+            ("name", `String d.File_ops.d_name);
+            ("rel", `String d.d_rel);
+            ("bytes", `Int d.d_bytes);
+            ("size", `Int d.d_size);
+            ("seconds", `Float d.d_seconds);
+            ("rate", `Float d.d_rate);
+          ])
+      (F.downloading_now ())
+
   let ok_json fields =
     Yojson.Safe.to_string (`Assoc (("ok", `Bool true) :: fields))
 
@@ -731,17 +747,26 @@ module Make (C : Conf.S) (F : File_ops.S) = struct
                           :: ( "uploading",
                                `List
                                  (List.map
-                                    (fun ({ name; rel; body } :
+                                    (fun ({ name; rel; body; size } :
                                            File_ops.in_flight) ->
                                       `Assoc
                                         (("name", `String name)
-                                        :: ("rel", `String rel)
-                                        ::
-                                          (match body with
-                                          | Some body ->
-                                              [("body", `String body)]
-                                          | None -> [])))
+                                         :: ("rel", `String rel)
+                                         ::
+                                           (match body with
+                                           | Some body ->
+                                               [("body", `String body)]
+                                           | None -> [])
+                                        @
+                                          match size with
+                                          | Some size ->
+                                              [
+                                                ( "size",
+                                                  `Int (Int64.to_int size) );
+                                              ]
+                                          | None -> []))
                                     uploading) )
+                          :: ("downloading", `List (downloading_json ()))
                           :: ( "pendingBytes",
                                `Int (Int64.to_int (F.uploads_pending_bytes ()))
                              )
@@ -775,6 +800,7 @@ module Make (C : Conf.S) (F : File_ops.S) = struct
                           [
                             ("reachable", `Bool true);
                             ("pendingDownloads", `Int (F.downloads_in_flight ()));
+                            ("downloading", `List (downloading_json ()));
                             ("stagedFiles", `Int staged);
                             ( "downloadsCompleted",
                               `Int (F.downloads_completed_count ()) );

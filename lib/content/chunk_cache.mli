@@ -23,6 +23,15 @@ module Make (C : Conf.S) (F : Fetch) : sig
       for a body believed corrupt. *)
   val ensure : ?force:bool -> group:Chunk_group.t -> unit -> unit Lwt.t
 
+  (** {!ensure}, answering whether the body had to come from a backend. A caller
+      joining an in-flight fetch gets [true] as well: it waited on the network
+      just as the caller that started the fetch did. *)
+  val ensure_fetched : ?force:bool -> group:Chunk_group.t -> unit -> bool Lwt.t
+
+  (** What a read cost. [from_backend] is the part a caller cannot work out for
+      itself, and is what attributes a network wait to the file being read. *)
+  type served = { bytes : int; from_backend : bool }
+
   (** Write a group from bytes the caller already holds, one member at a time —
       the tail of a promotion, where every member is a local staged body. No-op
       when the body is already here. *)
@@ -37,7 +46,7 @@ module Make (C : Conf.S) (F : Fetch) : sig
     index:int ->
     Local_io.buffer ->
     chunk_off:int ->
-    int Lwt.t
+    served Lwt.t
 
   (** One stored chunk's bytes if its group is already here, without fetching.
   *)

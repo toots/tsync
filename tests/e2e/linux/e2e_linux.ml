@@ -123,7 +123,26 @@ let () =
 
      (* Nothing on Linux plays the part fileproviderctl does on macOS; the
         mount's own consistency is what the checks above already assert. *)
-     run ~env ~mount ~store ~client ~extra:(fun () -> ());
+     run ~env ~mount ~store ~client ~extra:(fun () ->
+         (* A path names its domain, and on Linux each domain binds its own
+            socket -- the shared one macOS uses is bound by nothing here. Driven
+            through the CLI because the resolution is the CLI's: the daemon
+            never sees a request that failed to reach it. *)
+         check "a path-based command finds its domain's socket" (fun () ->
+             let target = Filename.concat mount "evict-me.txt" in
+             write_file target "evict me";
+             let out = Filename.concat root "evict.out" in
+             let status =
+               Sys.command
+                 (Printf.sprintf "HOME=%s %s evict %s >%s 2>&1"
+                    (Filename.quote mount_home)
+                    (Filename.quote exe) (Filename.quote target)
+                    (Filename.quote out))
+             in
+             let said = read_file out in
+             if status <> 0 then failf "exited %d: %s" status said;
+             if not (String.starts_with ~prefix:"Evicted:" said) then
+               failf "did not evict: %s" said));
 
      (* Last, because it takes the mount down. A reader holding a descriptor open
         must not keep the daemon from stopping: a clean unmount refuses while the

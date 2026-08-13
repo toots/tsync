@@ -1,18 +1,19 @@
 cold                         present=false gets=0 in_flight=0
+2 concurrent ensures         backend=true,true
 after 2 concurrent ensures   present=true  gets=1 in_flight=0
-cached read                  body="first chunk body" gets=1
+cached read                  body="first chunk body" gets=1 backend=false
 layout                       testdom/chunks/abb/abbd5be7f7f1ea08-164c4bd493e0e119
-read after eviction          body="first chunk body" gets=2
+read after eviction          body="first chunk body" gets=2 backend=true
 forced refetch               present=true  gets=3 in_flight=0
-second key                   body="second"           gets=1
+second key                   body="second"           gets=1 backend=true
 layout                       testdom/chunks/3da/3daa2a13ce7216c7-a62bfe2b997ff6a9
 trio cold                    present=false gets=0 in_flight=0
-trio member 0                body="AAAA"             gets=3
+trio member 0                body="AAAA"             gets=3 backend=true
 trio fetch concurrency       peak_concurrent_gets=3 of 3
 layout                       testdom/chunks/f28/f2816b06404b734b-effdaa3fc72ceaa1
 trio body                    bytes=10 members=3
-trio member 1 (cached)       body="BBBB"             gets=3
-trio member 2 (cached)       body="CC"               gets=3
+trio member 1 (cached)       body="BBBB"             gets=3 backend=false
+trio member 2 (cached)       body="CC"               gets=3 backend=false
 trio offsets                 off0=0 off1=4 off2=8
 trio member 1 at +2          body="BB"
 trio in another file         same_key=true
@@ -22,10 +23,10 @@ verify corrupt member        ok=false present=false
 uncapped                     chunks=2 bytes=22 first=true  second=true
 cap=none (no-op)             chunks=2 bytes=22 first=true  second=true
 cap=20 (drops coldest)       chunks=1 bytes= 6 first=false second=true
-refetch after cap            body="first chunk body" gets=4
+refetch after cap            body="first chunk body" gets=4 backend=true
 cap=0 (drops all)            chunks=0 bytes= 0 first=false second=false
 publish by link              linked=true one body=true names=2
 publishing it again          linked=true
 a length that disagrees      linked=false
-read after the staged name goes body="BBBB"             gets=3
-and its short last member    body="CC"               gets=3
+read after the staged name goes body="BBBB"             gets=3 backend=false
+and its short last member    body="CC"               gets=3 backend=false

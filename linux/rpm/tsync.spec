@@ -23,14 +23,35 @@ BuildRequires:  systemd-rpm-macros
 Mounts a cloud bucket as a local filesystem, storing files as
 content-addressed chunks so edits and duplicates upload once.
 
+# A subpackage, not part of tsync: the tray pulls libdbus and is useless without
+# a desktop session, and a headless server installing tsync should get neither.
+# Pinned to the exact build it ships beside -- the two speak over the IPC socket,
+# and a mismatched pair is not something to discover at runtime.
+%package tray
+Summary:        System-tray status icon for tsync
+Requires:       %{name} = %{version}-%{release}
+
+%description tray
+Shows what each tsync domain is doing in the desktop notification area, with a
+menu listing the files in flight and a switch that pauses uploads.
+
 %install
 install -Dm755 %{srcdir}/_build/default/bin/tsync.exe %{buildroot}%{_bindir}/tsync
 strip %{buildroot}%{_bindir}/tsync
+install -Dm755 %{srcdir}/_build/default/tray/main.exe %{buildroot}%{_bindir}/tsync-tray
+strip %{buildroot}%{_bindir}/tsync-tray
 install -Dm644 %{srcdir}/linux/tsync@.service %{buildroot}%{_unitdir}/tsync@.service
+install -d %{buildroot}%{_sysconfdir}/xdg/autostart
+sed 's|@BIN@|%{_bindir}/tsync-tray|' %{srcdir}/linux/tsync-tray.desktop.in \
+  > %{buildroot}%{_sysconfdir}/xdg/autostart/tsync-tray.desktop
 
 %files
 %{_bindir}/tsync
 %{_unitdir}/tsync@.service
+
+%files tray
+%{_bindir}/tsync-tray
+%{_sysconfdir}/xdg/autostart/tsync-tray.desktop
 
 # The unit is a template with no default instance, so these only refresh
 # already-enabled tsync@<user> instances across an upgrade.

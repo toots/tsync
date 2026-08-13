@@ -7,7 +7,23 @@ type buffer = Local_io.buffer
 (** A file the upload queue is working on right now. [rel] names it from the
     domain root, the way its reader sees it; [body] is where its bytes are on
     disk, for anything that wants to look at them. *)
-type in_flight = { name : string; rel : string; body : string option }
+type in_flight = {
+  name : string;
+  rel : string;
+  body : string option;
+  size : int64 option;
+}
+
+(** A file whose chunks are coming off a backend because something is reading
+    it. [bytes] is what this read has pulled so far, [size] the whole file. *)
+type downloading = {
+  d_name : string;
+  d_rel : string;
+  d_bytes : int;
+  d_size : int;
+  d_seconds : float;
+  d_rate : float;
+}
 
 module type S = sig
   type t = string
@@ -102,6 +118,12 @@ module type S = sig
 
   (** The files being uploaded right now. *)
   val uploads_in_flight : unit -> in_flight list Lwt.t
+
+  (** The files being read whose content is coming off a backend right now.
+      Distinct from {!download_progress}, which follows a whole-file
+      materialization. Synchronous because the table behind it is mutated by
+      reads on this same loop. *)
+  val downloading_now : unit -> downloading list
 
   (** Bytes still owed by the upload queue. *)
   val uploads_pending_bytes : unit -> int64

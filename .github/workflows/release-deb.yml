@@ -57,7 +57,7 @@ jobs:
             opam build-essential dpkg-dev m4 pkg-config git curl \
             ca-certificates unzip rsync gh \
             libfuse3-dev fuse3 libxxhash-dev libev-dev libssl-dev libgmp-dev \
-            libpcre2-dev
+            libpcre2-dev libdbus-1-dev
 
       - uses: actions/checkout@v4
         with:
@@ -84,11 +84,20 @@ jobs:
       - name: Package
         run: ./linux/deb/build.sh
 
-      - name: Verify the package installs
+      - name: Verify the packages install
         # Catches a bad Depends or a missing library before anyone downloads it.
+        # ldd alone cannot fail here -- the build container installed
+        # libdbus-1-dev, so the runtime library is present whatever the package
+        # declares. The Depends assertions are what actually hold: the tray must
+        # ask for libdbus, and tsync must not, which is the point of shipping
+        # them separately.
         run: |
           apt-get install -y ./dist/*.deb
-          test "$(ldd "$(command -v tsync)" | grep -c 'not found')" = 0
+          for b in tsync tsync-tray; do
+            test "$(ldd "$(command -v $b)" | grep -c 'not found')" = 0
+          done
+          dpkg-deb -f dist/tsync-tray_*.deb Depends | grep -q libdbus-1
+          ! dpkg-deb -f dist/tsync_*.deb Depends | grep -q libdbus-1
 
       - uses: actions/upload-artifact@v4
         with:

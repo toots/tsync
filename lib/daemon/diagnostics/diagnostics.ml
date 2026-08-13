@@ -779,6 +779,18 @@ let text json =
                   has "bytes" || has "Bytes"
                 in
                 match (k, v) with
+                  (* Rendered below rather than through the generic arm, which
+                     would print the list as raw JSON. *)
+                  | "downloading", `List entries ->
+                      List.iter
+                        (fun e ->
+                          row 4 "downloading"
+                            (Printf.sprintf "%s (%s of %s, %s)"
+                               (str (mem e "name"))
+                               (Metrics.human_bytes (int_of (mem e "bytes")))
+                               (Metrics.human_bytes (int_of (mem e "size")))
+                               (duration (num (mem e "seconds")))))
+                        entries
                   | ( ( "type" | "shared" | "reachable" | "socketPath" | "error"
                       | "frontend" | "pid" | "uptimeSeconds" | "cpuSeconds"
                       | "rssBytes" | "traffic" | "bytesRead" | "bytesWritten"

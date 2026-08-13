@@ -205,6 +205,14 @@
   (action
    (diff promote_race.expected promote_race.output))))
 
+(subdir content/pulling
+ (alias
+  (name default)
+  (deps pulling_test.exe))
+ (rule
+  (alias runtest)
+  (action (run ./pulling_test.exe))))
+
 (subdir e2e/ipc_tap
  (alias
   (name default)
@@ -599,6 +607,20 @@
   (alias runtest)
   (action
    (diff manifest_naming_test.expected manifest_naming_test.output))))
+
+(subdir unit/menu
+ (alias
+  (name default)
+  (deps menu_test.exe))
+ (rule
+  (alias runtest)
+  (target menu_test.output)
+  (action
+   (with-stdout-to menu_test.output (ignore-stderr (run ./menu_test.exe)))))
+ (rule
+  (alias runtest)
+  (action
+   (diff menu_test.expected menu_test.output))))
 
 (subdir unit/staged_codec
  (alias

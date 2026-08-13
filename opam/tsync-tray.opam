@@ -1,0 +1,36 @@
+opam-version: "2.0"
+synopsis: "System-tray status icon for tsync"
+maintainer: ["Romain Beauxis <toots@rastageeks.org>"]
+authors: ["Romain Beauxis <toots@rastageeks.org>"]
+license: "MIT"
+homepage: "https://github.com/toots/tsync"
+bug-reports: "https://github.com/toots/tsync/issues"
+# Linux only. macOS has its own menu bar app under macos/, and the tray speaks
+# StatusNotifierItem, which is a freedesktop protocol.
+available: os = "linux"
+depends: [
+  "ocaml" {>= "5.1"}
+  "dune" {>= "3.23"}
+  # libdbus-1 is a header dependency at build time and a link one after; the
+  # runtime .so.3 is already on every desktop, so only the -dev half is new.
+  "conf-dbus"
+  "yojson"
+  "lwt"
+  "cmdliner"
+  "odoc" {with-doc}
+]
+build: [
+  ["dune" "subst"] {dev}
+  [
+    "dune"
+    "build"
+    "-p"
+    name
+    "-j"
+    jobs
+    "@install"
+    "@runtest" {with-test}
+    "@doc" {with-doc}
+  ]
+]
+x-maintenance-intent: ["(latest)"]

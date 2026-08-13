@@ -363,7 +363,9 @@ let evict_cmd =
   let run paths =
     List.iter
       (fun path ->
-        match ipc_action ~path "evict" with
+        match
+          ipc_action ~socket_path:(domain_socket_for_path path) ~path "evict"
+        with
           | _ -> Printf.printf "Evicted: %s\n" path
           | exception Failure msg -> Printf.eprintf "Error: %s\n" msg)
       paths
@@ -377,7 +379,9 @@ let restore_cmd =
   let run paths =
     List.iter
       (fun path ->
-        match ipc_action ~path "restore" with
+        match
+          ipc_action ~socket_path:(domain_socket_for_path path) ~path "restore"
+        with
           | _ -> Printf.printf "Restored: %s\n" path
           | exception Failure msg -> Printf.eprintf "Error: %s\n" msg)
       paths
@@ -627,7 +631,11 @@ let revert_cmd =
           ~doc:"Version timestamp to restore (default: most recent)")
   in
   let run path version =
-    match ipc_action ~path ?arg:version "revert" with
+    match
+      ipc_action
+        ~socket_path:(domain_socket_for_path path)
+        ~path ?arg:version "revert"
+    with
       | _ -> Printf.printf "Reverted: %s\n" path
       | exception Failure msg -> Printf.eprintf "Error: %s\n" msg
   in
@@ -1558,7 +1566,11 @@ let paths_cmd =
     Printf.printf "config:  %s\n" p.Runtime.config_path;
     Printf.printf "cache:   %s\n" p.Runtime.cache_root;
     Printf.printf "data:    %s\n" p.Runtime.data_dir;
-    Printf.printf "socket:  %s\n" p.Runtime.socket_path
+    (* Per domain, since that is how many there are: one each under FUSE, the
+       same one repeated on macOS. *)
+    List.iter
+      (fun (name, socket) -> Printf.printf "socket:  %s (%s)\n" socket name)
+      (try domain_targets () with _ -> [])
   in
   Cmd.v
     (Cmd.info "paths" ~doc:"Show all filesystem paths used by this binary")

@@ -274,6 +274,28 @@ let start ~confs ~socket_path =
              })
          confs
      in
+     (* The whole menu, for a client that cannot link {!Menu}. Answered here
+        rather than by a domain's handler because it spans them: this process
+        holds every domain, which is what lets one reply carry the summary and
+        the icon as well as the rows. *)
+     let menu_reply runtimes =
+       let+ statuses =
+         Lwt_list.map_s
+           (fun r ->
+             let+ reply, _ = r.handler {|{"action":"status"}|} in
+             Menu.of_status_json ~name:r.name (Yojson.Safe.from_string reply))
+           runtimes
+       in
+       ( Yojson.Safe.to_string
+           (`Assoc
+              [
+                ("ok", `Bool true);
+                ( "menu",
+                  Menu.to_json
+                    (Menu.render ~quit_label:"Quit tsync menu bar" statuses) );
+              ]),
+         `Continue )
+     in
      let router line =
        match Yojson.Safe.from_string line with
          | exception _ -> Lwt.return (error_json "invalid JSON", `Continue)
@@ -284,45 +306,47 @@ let start ~confs ~socket_path =
              let action = get_str "action" in
              let path = get_str "path" in
              let domain = get_str "domain" in
-             let runtime_opt =
-               if domain <> "" then
-                 List.find_opt (fun r -> r.name = domain) domain_runtimes
-               else (
-                 match action with
-                   | "evict" | "restore" | "revert" ->
-                       (* A filesystem path, not a storage key: resolve it to the
+             if action = "menu" then menu_reply domain_runtimes
+             else (
+               let runtime_opt =
+                 if domain <> "" then
+                   List.find_opt (fun r -> r.name = domain) domain_runtimes
+                 else (
+                   match action with
+                     | "evict" | "restore" | "revert" ->
+                         (* A filesystem path, not a storage key: resolve it to the
                           domain whose CloudStorage folder contains it. *)
-                       List.find_opt
-                         (fun r -> r.claims_path path)
-                         domain_runtimes
-                   | _ ->
-                       List.find_opt
-                         (fun r ->
-                           let n = String.length r.prefix in
-                           String.length path >= n
-                           && String.sub path 0 n = r.prefix)
-                         domain_runtimes)
-             in
-             (* A reference carries no domain and folder ids are unique only
+                         List.find_opt
+                           (fun r -> r.claims_path path)
+                           domain_runtimes
+                     | _ ->
+                         List.find_opt
+                           (fun r ->
+                             let n = String.length r.prefix in
+                             String.length path >= n
+                             && String.sub path 0 n = r.prefix)
+                           domain_runtimes)
+               in
+               (* A reference carries no domain and folder ids are unique only
                 within one, so guessing would resolve a request against a store
                 that was never asked. *)
-             let runtime =
-               match (runtime_opt, domain_runtimes) with
-                 | Some r, _ -> Some r
-                 | None, [only] -> Some only
-                 | None, _ -> None
-             in
-             begin match runtime with
-               | Some runtime -> runtime.handler line
-               | None ->
-                   Lwt.return
-                     ( error_json
-                         (Printf.sprintf
-                            "cannot tell which domain '%s' is for: name it \
-                             with \"domain\""
-                            action),
-                       `Continue )
-             end
+               let runtime =
+                 match (runtime_opt, domain_runtimes) with
+                   | Some r, _ -> Some r
+                   | None, [only] -> Some only
+                   | None, _ -> None
+               in
+               begin match runtime with
+                 | Some runtime -> runtime.handler line
+                 | None ->
+                     Lwt.return
+                       ( error_json
+                           (Printf.sprintf
+                              "cannot tell which domain '%s' is for: name it \
+                               with \"domain\""
+                              action),
+                         `Continue )
+               end)
          | _ -> Lwt.return (error_json "expected JSON object", `Continue)
      in
      let* () = Ipc.serve ~subs ~path:socket_path router in

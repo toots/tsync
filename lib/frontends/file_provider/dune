@@ -22,7 +22,9 @@
    -open
    Tsync_frontend_register
    -open
-   Tsync_log))
+   Tsync_log
+   -open
+   Tsync_menu))
  (name tsync_file_provider_frontend)
  (private_modules file_provider_frontend)
  (enabled_if
@@ -48,6 +50,7 @@
    -framework
    Foundation))
  (libraries
+  tsync_menu
   tsync_sync
   tsync_naming
   tsync_conf

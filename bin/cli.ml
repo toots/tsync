@@ -49,8 +49,12 @@ let resolve_frontend ?frontend (d : Conf_parsing.domain) : (module Frontend.S) =
           (Printf.sprintf
              "frontend %s is configured but not compiled into this binary" name)
 
-(* Raises Failure with the daemon's error message when ok=false. *)
-let ipc_request ?(socket_path = runtime_paths.Runtime.socket_path) fields =
+(* Raises Failure with the daemon's error message when ok=false.
+
+   [socket_path] is required rather than defaulted: a socket belongs to a
+   domain, and which domain a command means is the caller's to decide. Resolve
+   one with {!domain_socket} or {!domain_socket_for_path}. *)
+let ipc_request ~socket_path fields =
   let request = Yojson.Safe.to_string (`Assoc fields) in
   match Yojson.Safe.from_string (Ipc.send ~socket_path request) with
     | `Assoc obj when List.assoc_opt "ok" obj = Some (`Bool true) -> obj
@@ -63,8 +67,8 @@ let ipc_request ?(socket_path = runtime_paths.Runtime.socket_path) fields =
         failwith msg
     | _ -> failwith "unexpected response"
 
-let ipc_action ?socket_path ?path ?arg ?domain action =
-  ipc_request ?socket_path
+let ipc_action ~socket_path ?path ?arg ?domain action =
+  ipc_request ~socket_path
     ([("action", `String action)]
     @ (match path with Some p -> [("path", `String p)] | None -> [])
     @ (match domain with Some d -> [("domain", `String d)] | None -> [])
@@ -207,7 +211,9 @@ let make_conf ?domain ?socket_path ?(resume = false) cfg : (module Conf.S) =
   in
   let d = Conf_parsing.pick_domain ?domain cfg in
   let socket_path =
-    Option.value socket_path ~default:runtime_paths.Runtime.socket_path
+    match socket_path with
+      | Some p -> p
+      | None -> Runtime.domain_socket_path runtime_paths d.Conf_parsing.name
   in
   (module struct
     let versioning = d.Conf_parsing.versioning
@@ -246,9 +252,9 @@ let load_config () = Conf_parsing.load runtime_paths.Runtime.config_path
    domain first: explicit [--domain], else the persisted default, else the sole
    configured domain.
 
-   Every command talking to a running daemon must go through this: the bare
-   [runtime_paths.socket_path] is the shared macOS socket and, on Linux, a path
-   nothing listens on. *)
+   Every command talking to a running daemon goes through this or
+   {!domain_socket_for_path}, which is why {!ipc_request} requires its socket
+   rather than defaulting one: there is nothing to fall through to. *)
 let domain_target ?domain () =
   let domain =
     match domain with Some _ -> domain | None -> read_default_domain ()
@@ -258,6 +264,27 @@ let domain_target ?domain () =
   (name, Runtime.domain_socket_path runtime_paths name)
 
 let domain_socket ?domain () = snd (domain_target ?domain ())
+
+(* A path names its own domain by sitting under that domain's mount, which is
+   how the macOS router resolves one as well. A path under none of them falls
+   back to the default domain, so the answer is a daemon saying it does not know
+   the file rather than a connection to nothing. *)
+let domain_socket_for_path path =
+  let path =
+    if Filename.is_relative path then Filename.concat (Sys.getcwd ()) path
+    else path
+  in
+  let under mount =
+    let mount = if mount = "/" then "" else mount in
+    String.starts_with ~prefix:(mount ^ "/") path || path = mount
+  in
+  match
+    List.find_opt
+      (fun d -> under (Conf_parsing.mount_point_of d))
+      (load_config ()).Conf_parsing.domains
+  with
+    | Some d -> Runtime.domain_socket_path runtime_paths d.Conf_parsing.name
+    | None | (exception _) -> domain_socket ()
 
 (* For a command that reports rather than acts: every configured domain, never
    one. The default domain, and [--domain] with it, say which domain a command

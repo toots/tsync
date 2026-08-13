@@ -19,9 +19,17 @@ module Make (C : Conf.S) (F : Fetch) = struct
 
   let exists group = Lwt_unix_retry.file_exists (path group)
 
+  type served = { bytes : int; from_backend : bool }
+
   (* Keyed by content, so two readers of one group share a fetch whether or not
-     they are reading the same file. *)
-  let fetching : (string, unit Lwt.t) Hashtbl.t = Hashtbl.create 64
+     they are reading the same file.
+
+     Owner and joiners share one record, so a reader that only waited on someone
+     else's fetch is told the group came from a backend too -- which is what it
+     was held up by. *)
+  type inflight = { mutable done_ : unit Lwt.t; mutable from_backend : bool }
+
+  let fetching : (string, inflight) Hashtbl.t = Hashtbl.create 64
   let in_flight () = Hashtbl.length fetching
 
   (* The file is sized up front and each member written at its own offset, so
@@ -64,12 +72,15 @@ module Make (C : Conf.S) (F : Fetch) = struct
             F.get_chunk ~chunk_key:(Chunk_group.member_key group i)))
 
   (* Concurrent callers await the same fetch; [force] re-fetches a body believed
-     corrupt. *)
-  let ensure ?(force = false) ~group () =
+     corrupt. Answers whether the body had to come from a backend. *)
+  let ensure_fetched ?(force = false) ~group () =
     let key = Chunk_group.key group in
     match Hashtbl.find_opt fetching key with
-      | Some t -> t
+      | Some entry ->
+          let+ () = entry.done_ in
+          entry.from_backend
       | None ->
+          let entry = { done_ = Lwt.return_unit; from_backend = false } in
           let t =
             Lwt.finalize
               (fun () ->
@@ -80,13 +91,27 @@ module Make (C : Conf.S) (F : Fetch) = struct
                 let* present =
                   if force then Lwt.return_false else exists group
                 in
-                if present then Lwt.return_unit else fetch group)
+                if present then Lwt.return_unit
+                else (
+                  (* Before [fetch], not inside it: the wait on [slots] is part
+                     of what the network costs this reader. *)
+                  entry.from_backend <- true;
+                  fetch group))
               (fun () ->
                 Hashtbl.remove fetching key;
                 Lwt.return_unit)
           in
-          Hashtbl.replace fetching key t;
-          t
+          (* Filled in after the fact rather than at construction: [Lwt.finalize]
+             above runs as far as that [Lwt.pause ()] and no further, so no
+             second caller can reach the table in between. *)
+          entry.done_ <- t;
+          Hashtbl.replace fetching key entry;
+          let+ () = t in
+          entry.from_backend
+
+  let ensure ?force ~group () =
+    let+ _ = ensure_fetched ?force ~group () in
+    ()
 
   (* The tail of a promotion, where every member is a local staged body.
      Idempotent: a body already under this key is the same bytes. *)
@@ -356,15 +381,18 @@ module Make (C : Conf.S) (F : Fetch) = struct
     let want = Bigarray.Array1.dim buf in
     let offset = Int64.of_int (Chunk_group.offset group index + chunk_off) in
     let attempt () = Local_io.read (path group) buf ~offset in
+    (* A refetch went to a backend by construction, whatever the first [ensure]
+       answered. *)
     let refetch () =
-      let* () = ensure ~force:true ~group () in
-      attempt ()
+      let* _ = ensure_fetched ~force:true ~group () in
+      let+ n = attempt () in
+      { bytes = n; from_backend = true }
     in
-    let* () = ensure ~group () in
+    let* from_backend = ensure_fetched ~group () in
     Lwt.catch
       (fun () ->
         let* n = attempt () in
-        if n = want then Lwt.return n else refetch ())
+        if n = want then Lwt.return { bytes = n; from_backend } else refetch ())
       (function
         | Unix.Unix_error (Unix.ENOENT, _, _) -> refetch ()
         | exn -> Lwt.fail exn)
