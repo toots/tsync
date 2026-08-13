@@ -1,9 +1,4 @@
-type paths = {
-  cache_root : string;
-  socket_path : string;
-  data_dir : string;
-  config_path : string;
-}
+type paths = { cache_root : string; data_dir : string; config_path : string }
 
 let default_paths () =
   let home = Sys.getenv "HOME" in
@@ -25,7 +20,6 @@ let default_paths () =
   let data_dir = Filename.concat data_base "tsync" in
   {
     cache_root = Filename.concat cache_base "tsync";
-    socket_path = Filename.concat data_dir "tsync.sock";
     data_dir;
     config_path = Filename.concat config_base "tsync/config.json";
   }

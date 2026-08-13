@@ -12,11 +12,19 @@ let start bindings =
   (* Post-fork leaf process: safe to initialize Lwt now. *)
   Frontend.cap_blocking_pool
     ~concurrency:(Frontend.binding_concurrency bindings);
-  let paths = Runtime.default_paths () in
   let confs =
     List.map (fun (b : Frontend.binding) -> b.Frontend.conf) bindings
   in
-  File_provider.start ~confs ~socket_path:paths.Runtime.socket_path
+  (* Each conf was handed the socket its domain is reachable at, and here that
+     is one path however many domains there are -- so any of them names it. *)
+  let socket_path =
+    match confs with
+      | [] -> failwith "file_provider: no domains to serve"
+      | conf :: _ ->
+          let (module C : Conf.S) = conf in
+          C.socket_path
+  in
+  File_provider.start ~confs ~socket_path
 
 (* Reuses the [full_resync] IPC action, routed to the domain's runtime by the
    [domain] field. *)

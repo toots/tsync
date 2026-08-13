@@ -1566,7 +1566,11 @@ let paths_cmd =
     Printf.printf "config:  %s\n" p.Runtime.config_path;
     Printf.printf "cache:   %s\n" p.Runtime.cache_root;
     Printf.printf "data:    %s\n" p.Runtime.data_dir;
-    Printf.printf "socket:  %s\n" p.Runtime.socket_path
+    (* Per domain, since that is how many there are: one each under FUSE, the
+       same one repeated on macOS. *)
+    List.iter
+      (fun (name, socket) -> Printf.printf "socket:  %s (%s)\n" socket name)
+      (try domain_targets () with _ -> [])
   in
   Cmd.v
     (Cmd.info "paths" ~doc:"Show all filesystem paths used by this binary")

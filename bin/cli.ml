@@ -51,11 +51,9 @@ let resolve_frontend ?frontend (d : Conf_parsing.domain) : (module Frontend.S) =
 
 (* Raises Failure with the daemon's error message when ok=false.
 
-   [socket_path] is required rather than defaulted. The obvious default is
-   [runtime_paths.socket_path], which is the shared macOS socket and, on Linux, a
-   path nothing binds -- so a caller that forgot it would work on one platform
-   and raise ENOENT on the other. Resolve one with {!domain_socket} or
-   {!domain_socket_for_path}. *)
+   [socket_path] is required rather than defaulted: a socket belongs to a
+   domain, and which domain a command means is the caller's to decide. Resolve
+   one with {!domain_socket} or {!domain_socket_for_path}. *)
 let ipc_request ~socket_path fields =
   let request = Yojson.Safe.to_string (`Assoc fields) in
   match Yojson.Safe.from_string (Ipc.send ~socket_path request) with
@@ -213,7 +211,9 @@ let make_conf ?domain ?socket_path ?(resume = false) cfg : (module Conf.S) =
   in
   let d = Conf_parsing.pick_domain ?domain cfg in
   let socket_path =
-    Option.value socket_path ~default:runtime_paths.Runtime.socket_path
+    match socket_path with
+      | Some p -> p
+      | None -> Runtime.domain_socket_path runtime_paths d.Conf_parsing.name
   in
   (module struct
     let versioning = d.Conf_parsing.versioning
