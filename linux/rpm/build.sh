@@ -15,12 +15,14 @@ rpmbuild -bb linux/rpm/tsync.spec \
   --define "srcdir $src" \
   --define "build_release ${DATE}.${RUN_NUMBER}"
 
-# Named without a version: the nightly release keeps one asset per distro and
-# architecture, so uploading over it is the whole of the cleanup.
+# Named without a version: the nightly release keeps one asset per package,
+# distro and architecture, so uploading over it is the whole of the cleanup. The
+# package name is part of it -- the build emits tsync and tsync-tray, and
+# without it the second would be copied over the first.
 mkdir -p dist
 distro=$(rpm --eval '%{?dist}' | sed 's/^\.//')
 find "$top/RPMS" -name '*.rpm' | while read -r f; do
-  cp "$f" "dist/tsync_${distro}_$(rpm -qp --qf '%{ARCH}' "$f").rpm"
+  cp "$f" "dist/$(rpm -qp --qf '%{NAME}' "$f")_${distro}_$(rpm -qp --qf '%{ARCH}' "$f").rpm"
 done
 rm -rf "$top"
 

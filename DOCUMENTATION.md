@@ -51,12 +51,28 @@ so it starts at boot with nobody logged in:
 
 ```bash
 sudo apt install ./tsync_*.deb     # Debian / Ubuntu
-sudo dnf install ./tsync-*.rpm     # Fedora
+sudo dnf install ./tsync_*.rpm     # Fedora
 sudo systemctl enable --now tsync@$USER
+```
+
+On a desktop, `tsync-tray` is a separate package that puts sync status in the
+notification area — see [Linux specifics](#linux-specifics). It is kept apart so
+a server does not pull a tray it cannot show, or the D-Bus library it needs:
+
+```bash
+sudo apt install ./tsync-tray_*.deb
+sudo dnf install ./tsync-tray_*.rpm
 ```
 
 To build it yourself instead, you need [opam](https://opam.ocaml.org/) and
 OCaml ≥ 5.5:
+
+System libraries first — the FUSE headers, libev, and libdbus for the tray:
+
+```bash
+sudo apt install libfuse3-dev libev-dev libdbus-1-dev   # Debian / Ubuntu
+sudo dnf install fuse3-devel libev-devel dbus-devel      # Fedora
+```
 
 ```bash
 cd linux
@@ -745,6 +761,39 @@ Unlike the FUSE mount, the extension hands back whole files rather than deltas, 
 file edited in place is re-uploaded in full. Chunk dedup still keeps unchanged blocks off the
 wire.
 
+## Linux specifics
+
+`tsync-tray` shows what each domain is doing in the notification area, next to
+bluetooth and wifi: an icon whose glyph says idle, transferring, paused or
+unreachable, and a menu listing the files currently in flight. Clicking a domain
+opens its folder, clicking a file selects it in the file manager, and *Pause
+uploads* is the same switch as `tsync pause` — it applies to every domain, and
+the checkmark shows what the daemon actually did rather than what it was asked.
+
+The `tsync-tray` package installs an autostart entry, so it comes up with the
+desktop. Turn it off in your desktop's Startup Applications, or:
+
+```bash
+cp /etc/xdg/autostart/tsync-tray.desktop ~/.config/autostart/
+echo 'Hidden=true' >> ~/.config/autostart/tsync-tray.desktop
+```
+
+Run it by hand with `tsync-tray -v` to see what it makes of your session.
+
+It draws nothing itself — it publishes a
+[StatusNotifierItem](https://freedesktop.org/wiki/Specifications/StatusNotifierItem/)
+over D-Bus and the desktop's panel draws it, so it behaves the same under X11
+and Wayland. KDE Plasma, XFCE, Cinnamon and LXQt host those out of the box.
+**GNOME Shell does not**: it dropped the status area in 3.26 and needs the
+*AppIndicator and KStatusNotifierItem Support* extension
+(`gnome-shell-extension-appindicator`, packaged under that name on Debian,
+Ubuntu and Fedora). Without it the tray starts, registers, and simply has nobody
+to draw it.
+
+Quitting from the menu stops only the tray. The daemon is a separate service,
+and `systemctl --user stop tsync` — or `tsync@$USER` for the system unit — is
+what stops syncing.
+
 ## Troubleshooting
 
 | Symptom | Try |
@@ -759,4 +808,6 @@ wire.
 | One backend of several is misbehaving | `tsync stats` — each backend reports its own reachability, journal backlog and how far behind it is. |
 | A `replica` or `backfill` target is behind | Normal: it catches up on its own, and what it owes survives a restart. `tsync stats` says by how much. |
 | A target says `DEGRADED` | Writes were dropped — refused, or queued past all reason: `tsync resync-remote --source <main>`. |
+| No tray icon on GNOME | Install `gnome-shell-extension-appindicator` and log back in — GNOME has no built-in host. |
+| No tray icon elsewhere | Run `tsync-tray -v` in a terminal; it says whether it found a host, and stays running if it did not. |
 | A domain served over http-proxy misbehaves | Open the server's `/` page, or `curl` its `/stats` — [step 7](#checking-on-the-server). The server has no IPC socket, so `tsync stats` cannot reach it. |

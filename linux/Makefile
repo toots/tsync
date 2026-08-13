@@ -23,6 +23,11 @@ install-opam:
 install-system:
 	mkdir -p ~/.local/bin
 	ln -sf "$$(opam var bin)/tsync" ~/.local/bin/tsync
+	ln -sf "$$(opam var bin)/tsync-tray" ~/.local/bin/tsync-tray
+	# Started by the desktop, not by systemd: see the comment in the .desktop.
+	mkdir -p ~/.config/autostart
+	sed 's|@BIN@|$(HOME)/.local/bin/tsync-tray|' tsync-tray.desktop.in \
+	  > ~/.config/autostart/tsync-tray.desktop
 	mkdir -p ~/.config/systemd/user
 	cp tsync.service ~/.config/systemd/user/
 	systemctl --user daemon-reload
@@ -43,8 +48,9 @@ uninstall:
 	-systemctl --user disable --now tsync
 	rm -f ~/.config/systemd/user/tsync.service
 	-systemctl --user daemon-reload
-	rm -f ~/.local/bin/tsync
-	-opam remove -y tsync tsync-tls tsync-ssl tsync-s3 tsync-fuse
+	rm -f ~/.local/bin/tsync ~/.local/bin/tsync-tray
+	rm -f ~/.config/autostart/tsync-tray.desktop
+	-opam remove -y tsync tsync-tls tsync-ssl tsync-s3 tsync-fuse tsync-tray
 
 # End-to-end check against a real FUSE mount. Stages everything it needs — a
 # store, a mount, a second client — under a scratch directory and takes it all

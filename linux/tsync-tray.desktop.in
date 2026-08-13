@@ -1,0 +1,17 @@
+[Desktop Entry]
+Type=Application
+Name=tsync tray
+Comment=Sync status in the system tray
+Exec=@BIN@
+Icon=view-refresh
+Terminal=false
+Categories=Utility;
+# XDG autostart rather than a systemd user unit: graphical-session.target is
+# only populated where the session is systemd-managed, which Plasma and GNOME
+# do and XFCE and Cinnamon generally do not. This is honoured by all four, and
+# systemd-xdg-autostart-generator turns it into a session-bound unit where that
+# exists -- so the systemd lifecycle comes for free without being required.
+#
+# Deliberately not NoDisplay: the entry should stay visible in the desktop's own
+# Startup Applications list, which is where someone turns it off.
+X-GNOME-Autostart-enabled=true
