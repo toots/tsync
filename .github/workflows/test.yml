@@ -63,7 +63,7 @@ jobs:
           opam pin add -ny fuse3 git+https://github.com/toots/ocamlfuse.git
           opam pin add -ny git+https://github.com/toots/aws-s3.git#tsync
       - name: Install OCaml dependencies
-        run: opam install --deps-only -y tsync tsync-s3 tsync-fuse
+        run: opam install --deps-only -y tsync tsync-tls tsync-s3 tsync-fuse
       - name: Build OCaml daemon
         run: opam exec -- dune build
       - name: Run tests
@@ -95,11 +95,9 @@ jobs:
           # openssl@3 is keg-only, so conf-libssl only finds it via pkg-config.
           echo "PKG_CONFIG_PATH=$(brew --prefix openssl@3)/lib/pkgconfig:$PKG_CONFIG_PATH" >> $GITHUB_ENV
       - name: Install OCaml dependencies
-        # lwt_ssl is optional and enables the OpenSSL TLS backend, which is the
-        # faster one and what a released build should ship with.
-        run: |
-          opam install --deps-only -y tsync tsync-s3
-          opam install -y lwt_ssl
+        # Both TLS backends: tsync alone would pull tsync-tls, and a released
+        # build should also carry tsync-ssl, the faster one.
+        run: opam install --deps-only -y tsync tsync-tls tsync-ssl tsync-s3
       - name: Build OCaml daemon
         run: opam exec -- dune build
       - name: Run tests

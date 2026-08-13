@@ -57,7 +57,7 @@ jobs:
           opam pin add -ny fuse3 git+https://github.com/toots/ocamlfuse.git
           opam pin add -ny git+https://github.com/toots/aws-s3.git#tsync
       - name: Install OCaml dependencies
-        run: opam install --deps-only -y tsync tsync-fuse
+        run: opam install --deps-only -y tsync tsync-tls tsync-fuse
       - name: Build
         run: opam exec -- dune build bin/tsync.exe tests/e2e/stress/stress.exe
 

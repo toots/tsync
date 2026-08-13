@@ -705,12 +705,21 @@ the import policy.
 
 ## TLS
 
-S3 connections use OpenSSL when available (install `lwt_ssl` in your switch) because it's
-considerably faster. The native OCaml TLS stack is a built-in fallback that resolves
-connection problems OpenSSL causes with some endpoints — Backblaze B2 among them.
+Conduit compiles its TLS backend in from an optional dependency, so which ones a build has
+is settled in the switch, by two virtual packages:
 
-Force one with `tsync start --tls native` or `"tls": "native"`. `tsync start` logs which is
-active and what's available.
+| Package | Pulls | Backend |
+| --- | --- | --- |
+| `tsync-tls` | `tls-lwt` | `native` — the pure OCaml stack, builds anywhere |
+| `tsync-ssl` | `lwt_ssl` | `openssl` — considerably faster, wants a system libssl |
+
+`tsync` depends on `tsync-tls | tsync-ssl`, so a plain `opam install tsync` picks up the
+native one and https works out of the box. Install both to have the choice at runtime;
+opam rebuilds conduit when either appears in the switch.
+
+OpenSSL is preferred when compiled in. Native is worth forcing on endpoints that trip
+OpenSSL's per-connection error queue — Backblaze B2 among them — with `tsync start --tls
+native` or `"tls": "native"`. `tsync start` logs which is active and what's available.
 
 ## macOS specifics
 

@@ -47,11 +47,9 @@ jobs:
           # openssl@3 is keg-only, so conf-libssl only finds it via pkg-config.
           echo "PKG_CONFIG_PATH=$(brew --prefix openssl@3)/lib/pkgconfig:$PKG_CONFIG_PATH" >> $GITHUB_ENV
       - name: Install OCaml dependencies
-        # lwt_ssl is optional and enables the OpenSSL TLS backend, which is the
-        # faster one and what a released build should ship with.
-        run: |
-          opam install --deps-only -y tsync tsync-s3
-          opam install -y lwt_ssl
+        # Both TLS backends: tsync alone would pull tsync-tls, and a released
+        # build should also carry tsync-ssl, the faster one.
+        run: opam install --deps-only -y tsync tsync-tls tsync-ssl tsync-s3
 
       - name: Import signing assets
         env:

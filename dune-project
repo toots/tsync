@@ -1,51 +1,31 @@
 (lang dune 3.23)
 (name tsync)
-(generate_opam_files true)
-(opam_file_location inside_opam_directory)
- (maintainers "Romain Beauxis <toots@rastageeks.org>")
- (authors "Romain Beauxis <toots@rastageeks.org>")
- (homepage "https://github.com/toots/tsync")
- (bug_reports "https://github.com/toots/tsync/issues")
 (license MIT)
 
+; The opam files under opam/ are written by hand, not generated from these
+; stanzas: tsync depends on one of two TLS backend packages and dune has no
+; syntax for an opam alternative. What is left here is only what dune itself
+; reads — the package names it builds with `dune build -p`.
+
 (package
- (name tsync)
- (synopsis "Cloud-backed filesystem sync tool")
- (depends
-  (ocaml (>= 5.1))
-  (tsync-fuse (= :os "linux"))
-  dune
-  conf-libev
-  conduit-lwt-unix
-  cohttp-lwt-unix
-  digestif
-  eqaf
-  yojson
-  lwt
-  ppx_blob
-  mem_usage
-  memtrace
-  tls
-  base64
-  x509
-  mirage-crypto-pk
-  cmdliner)
- (depopts
-   syslog
-  tsync-s3))
+ (name tsync))
+
+(package
+ (name tsync-tls)
+ (version 1)
+ (allow_empty))
+
+(package
+ (name tsync-ssl)
+ (version 1)
+ (allow_empty))
 
 (package
  (name tsync-s3)
  (version 1)
- (allow_empty)
- (synopsis "Virtual package install tsync S3 dependencies")
- (depends aws-s3-lwt tls-lwt)
- (depopts lwt_ssl)
- )
+ (allow_empty))
 
 (package
  (name tsync-fuse)
  (version 1)
- (allow_empty)
- (synopsis "Virtual package install tsync fuse dependencies")
- (depends fuse3))
+ (allow_empty))

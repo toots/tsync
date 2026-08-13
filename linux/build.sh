@@ -37,8 +37,9 @@ for pkg in fuse3 aws-s3 aws-s3-lwt; do
   fi
 done
 
-opam install --deps-only tsync tsync-s3 tsync-fuse
-# The OpenSSL TLS backend. Optional to the build, preferred at runtime.
-opam install lwt_ssl
+# tsync-tls and tsync-ssl are the two TLS backends. tsync alone would pull the
+# first, and a released build ships both: OpenSSL is preferred at runtime and
+# native is what the endpoints OpenSSL trips over fall back to.
+opam install --deps-only tsync tsync-tls tsync-ssl tsync-s3 tsync-fuse
 
 opam exec -- dune build --profile release bin/tsync.exe
