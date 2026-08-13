@@ -2,41 +2,16 @@ open Lwt.Syntax
 
 exception Cancelled = Backend.Cancelled
 
-(* Pooled per endpoint rather than per request: a full resync fetches tens of
-   thousands of objects, and a handshake each caps throughput at a few dozen a
-   second while leaving thousands of sockets in TIME_WAIT. *)
-module Connection = Cohttp_lwt.Connection.Make (Cohttp_lwt_unix.Net)
-
-module Cache =
-  Cohttp_lwt.Connection_cache.Make
-    (Connection)
-    (struct
-      let sleep_ns ns = Lwt_unix.sleep (Int64.to_float ns /. 1e9)
-    end)
-
-(* Long enough to span the gaps between the bursts a sync or a demand-paged read
-   arrives in, short enough not to hold proxy sockets open indefinitely. *)
-let keep_idle_ns = 60_000_000_000L
-
-(* The caller's own parallelism (the resync pool, the download pool) is what
-   bounds work; this only has to be wide enough not to become the narrower
-   limit. *)
-let max_parallel = 32
-
 type t = {
   base_uri : Uri.t;
+  (* Carries the endpoint, a config being free to give two domains a backend of
+     this type each: without it both spell their retries "http-proxy" and the
+     log says everything except which one is down. *)
+  name : string;
   secret : string;
-  mutable cache : Cache.t;
+  http : Http_client.t;
   mutable caps_cache : Backend.caps Lwt.t option;
 }
-
-(* The connection cache has no deadline of its own: a pooled connection whose
-   peer went away without a FIN leaves its request pending forever, and
-   [call_retry] only ever sees failures, never stalls.
-
-   A stall detector, not a latency budget, hence generous enough for a chunk
-   over a slow link. *)
-let request_timeout = 300.
 
 (* A 5xx is the serving side struggling; a 4xx is its answer. *)
 let is_transient_code c = c >= 500
@@ -48,16 +23,9 @@ let backend_error op code body =
     ~op
     (Printf.sprintf "HTTP %d: %s" code body)
 
-let new_cache () = Cache.create ~keep:keep_idle_ns ~parallel:max_parallel ()
-
-(* Signs method + request-target + body with the shared secret; TLS is
-   conduit's, per the global [Tls_conf].
-
-   [Connection.Retry] means the pooled connection was unusable and the request
-   never left, and one torn down by [request_timeout] above stays in the cache's
-   table as permanently failed, so only a new cache redials. It is replaced once
-   per generation, so requests that raced into the same dead pool share the one
-   redial. *)
+(* Signs method + request-target + body with the shared secret; the pooling and
+   the deadlines are {!Http_client}'s, TLS is conduit's per the global
+   [Tls_conf]. *)
 let call t ~meth ?(body = "") uri =
   let resource = Uri.path_and_query uri in
   let headers =
@@ -66,24 +34,7 @@ let call t ~meth ?(body = "") uri =
          ~meth:(Cohttp.Code.string_of_method meth)
          ~path:resource ~body ())
   in
-  let attempt cache =
-    Lwt_unix.with_timeout request_timeout (fun () ->
-        let* resp, rbody =
-          Cache.call cache ~headers
-            ~body:(Cohttp_lwt.Body.of_string body)
-            meth uri
-        in
-        let+ s = Cohttp_lwt.Body.to_string rbody in
-        (resp, s))
-  in
-  let used = t.cache in
-  Lwt.catch
-    (fun () -> attempt used)
-    (function
-      | Connection.Retry ->
-          if t.cache == used then t.cache <- new_cache ();
-          attempt t.cache
-      | exn -> Lwt.fail exn)
+  Http_client.call t.http ~headers ~body meth uri
 
 let code resp = Cohttp.Code.code_of_status (Cohttp.Response.status resp)
 let is_ok resp = code resp >= 200 && code resp < 300
@@ -104,7 +55,7 @@ let excerpt body =
    response comes back for the verb to interpret. Every proxied operation is
    idempotent, so retrying is safe. *)
 let call_retry t ~meth ?body op uri =
-  Backend.with_retry ~name:"http-proxy" ~op (fun () ->
+  Backend.with_retry ~name:t.name ~op (fun () ->
       let* resp, rbody = call t ~meth ?body uri in
       if is_transient_code (code resp) then
         Lwt.fail (backend_error op (code resp) (excerpt rbody))
@@ -282,8 +233,9 @@ let make ~url ~secret : (module Backend.S) =
   let t =
     {
       base_uri = Uri.of_string url;
+      name = Printf.sprintf "http-proxy(%s)" url;
       secret;
-      cache = new_cache ();
+      http = Http_client.create ();
       caps_cache = None;
     }
   in

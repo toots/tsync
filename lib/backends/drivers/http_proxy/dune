@@ -8,7 +8,9 @@
    -open
    Tsync_http_proxy
    -open
-   Tsync_backend_register))
+   Tsync_backend_register
+   -open
+   Tsync_http_client))
  (name tsync_http_proxy_backend)
  (private_modules http_proxy_backend)
  (library_flags (-linkall))
@@ -17,6 +19,7 @@
   tsync_backend_register
   tsync_http_proxy
   tsync_log
+  tsync_http_client
   cohttp-lwt-unix
   uri
   yojson

@@ -13,6 +13,7 @@ type t = {
   auth : Auth.t option;
       (* [None] is anonymous, for emulators on a custom endpoint. *)
   share_url : string option;
+  http : Http_client.t;
 }
 
 (* 5xx and 429 clear on their own; a 4xx is the bucket's answer. *)
@@ -55,13 +56,7 @@ let call t ~meth ?ctype ?(extra_headers = []) ?(body = "") uri =
         | Some c -> ("Content-Type", c) :: auth_header
         | None -> auth_header)
   in
-  let* resp, rbody =
-    Cohttp_lwt_unix.Client.call ~headers
-      ~body:(Cohttp_lwt.Body.of_string body)
-      meth uri
-  in
-  let+ s = Cohttp_lwt.Body.to_string rbody in
-  (resp, s)
+  Http_client.call t.http ~headers ~body meth uri
 
 (* Raises on a transient status so the shared loop retries it; every other
    response comes back for the verb to interpret, 404 included. *)
@@ -332,7 +327,7 @@ let make ?endpoint ?service_account_key ?share_url ~bucket () :
     if n > 0 && base.[n - 1] = '/' then String.sub base 0 (n - 1) else base
   in
   let auth = Option.map Auth.of_service_account_json service_account_key in
-  let t = { bucket; base; auth; share_url } in
+  let t = { bucket; base; auth; share_url; http = Http_client.create () } in
   (module struct
     let put ~key ~data () = put t ~key ~data ()
     let put_if_absent ~key ~data () = put_if_absent t ~key ~data ()

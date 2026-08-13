@@ -1,0 +1,3 @@
+(library
+ (name tsync_http_client)
+ (libraries cohttp-lwt-unix uri lwt lwt.unix))
