@@ -614,6 +614,20 @@
   (action
    (diff staged_codec_test.expected staged_codec_test.output))))
 
+(subdir unit/stats_merge
+ (alias
+  (name default)
+  (deps stats_merge_test.exe))
+ (rule
+  (alias runtest)
+  (target stats_merge_test.output)
+  (action
+   (with-stdout-to stats_merge_test.output (ignore-stderr (run ./stats_merge_test.exe)))))
+ (rule
+  (alias runtest)
+  (action
+   (diff stats_merge_test.expected stats_merge_test.output))))
+
 (subdir unit/subs
  (alias
   (name default)

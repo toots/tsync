@@ -1,0 +1,36 @@
+########## two domains, one daemon ##########
+Frontend fuse on testhost (this process)
+  serving          2 domains: alpha, beta
+  process          pid 4242, up 1h 2m
+  cpu              12.5s (0.3% avg)
+  memory           1.0 MB rss, 512.0 KB heap (peak 768.0 KB)
+  gc               7 minor, 2 major
+  event loop       3 readable, 0 writable, 4 timers, pool 8
+  traffic          up 2.0 KB (0 B/s), down 4.0 KB (0 B/s)
+  hashed           5 chunks (0/s)
+
+Domain alpha
+  client name      testhost
+  read-only        no
+  versioning       on
+  symlinks         keep
+  chunk size       not set (8.0 MB default)
+  cache chunk      unlimited
+  concurrency      4 uploads, 4 chunk buffers, 8 downloads
+  cache root       /cache
+  socket           /run/tsync-alpha.sock
+  Cache
+    chunks           2 (8.0 KB of unlimited)
+
+Domain beta
+  client name      testhost
+  read-only        no
+  versioning       on
+  symlinks         keep
+  chunk size       not set (8.0 MB default)
+  cache chunk      unlimited
+  concurrency      4 uploads, 4 chunk buffers, 8 downloads
+  cache root       /cache
+  socket           /run/tsync-beta.sock
+  Cache
+    chunks           2 (8.0 KB of unlimited)

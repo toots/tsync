@@ -14,7 +14,6 @@ let verbose_arg =
   Arg.(value & flag & info ["verbose"; "v"] ~doc:"Print detailed progress")
 
 let runtime_paths = Runtime.default_paths ()
-
 let mount_point_of = Conf_parsing.mount_point_of
 
 (* The [frontend] override if given (it must be one the domain lists), else the
@@ -259,6 +258,24 @@ let domain_target ?domain () =
   (name, Runtime.domain_socket_path runtime_paths name)
 
 let domain_socket ?domain () = snd (domain_target ?domain ())
+
+(* For a command that reports rather than acts: every configured domain, never
+   one. The default domain, and [--domain] with it, say which domain a command
+   acts on; a report answers for the machine, and narrowing it would leave the
+   rest of what runs here unaccounted for.
+
+   Each domain keeps its own name even where the socket is shared, since that is
+   what the macOS daemon routes on. *)
+let domain_targets () =
+  match (load_config ()).Conf_parsing.domains with
+    | [] -> failwith "no domains configured"
+    | domains ->
+        List.map
+          (fun (d : Conf_parsing.domain) ->
+            ( d.Conf_parsing.name,
+              Runtime.domain_socket_path runtime_paths d.Conf_parsing.name ))
+          domains
+
 let load_conf ?domain () = make_conf ?domain (load_config ())
 
 (* [--source] says where to read from, so only reads move: a write still goes

@@ -247,7 +247,9 @@ let stats_cmd =
   in
   let json_arg =
     Arg.(
-      value & flag & info ["json"] ~doc:"Output raw JSON, one object per line")
+      value & flag
+      & info ["json"]
+          ~doc:"Output raw JSON, one object per answering daemon per line")
   in
   let totals_arg =
     Arg.(
@@ -276,7 +278,7 @@ let stats_cmd =
              before. A store is counted once and that figure served from then \
              on, with its age, until this asks for a new one.")
   in
-  let run json totals exact reload watch domain =
+  let run json totals exact reload watch =
     (* The daemon counts a store once and serves that until asked again, so the
        flags travel as a set, not a mode. *)
     let arg =
@@ -291,15 +293,51 @@ let stats_cmd =
     in
     (* Resolved once: [--watch] must not re-read the config per tick, and a
        config error should surface before the screen starts clearing. *)
-    let name, socket_path = domain_target ?domain () in
-    let show () =
+    let targets = domain_targets () in
+    (* A domain that is down must not cost the others their report, so a failure
+       here is a line on stderr and one report fewer. *)
+    let ask (name, socket_path) =
       match ipc_action ~socket_path ~domain:name ?arg "stats" with
-        | obj when json ->
-            let obj = ("t", `Float (Unix.gettimeofday ())) :: obj in
-            print_endline (Yojson.Safe.to_string (`Assoc obj))
-        | obj -> print_string (Diagnostics.text (`Assoc obj))
-        | exception Failure msg -> Printf.eprintf "Error: %s\n" msg
-        | exception _ -> Printf.printf "No daemon answering on %s\n" socket_path
+        | obj -> Some (socket_path, `Assoc obj)
+        | exception Failure msg ->
+            Printf.eprintf "Error: %s: %s\n" name msg;
+            None
+        | exception _ ->
+            Printf.eprintf "%s: no daemon answering on %s\n" name socket_path;
+            None
+    in
+    (* One report per answering process, not per domain: a daemon serving
+       several answers once per domain, and its pid, cpu and traffic are one set
+       of figures. The socket is that identity — Linux gives each domain its
+       own, macOS shares one. *)
+    let group answers =
+      let sockets =
+        List.fold_left
+          (fun acc (s, _) -> if List.mem s acc then acc else acc @ [s])
+          [] answers
+      in
+      List.map
+        (fun s ->
+          Diagnostics.merge
+            (List.filter_map
+               (fun (s', obj) -> if s' = s then Some obj else None)
+               answers))
+        sockets
+    in
+    let show () =
+      List.iteri
+        (fun i report ->
+          if json then begin
+            let obj = match report with `Assoc obj -> obj | _ -> [] in
+            print_endline
+              (Yojson.Safe.to_string
+                 (`Assoc (("t", `Float (Unix.gettimeofday ())) :: obj)))
+          end
+          else begin
+            if i > 0 then print_newline ();
+            print_string (Diagnostics.text report)
+          end)
+        (group (List.filter_map ask targets))
     in
     match watch with
       | None -> show ()
@@ -314,11 +352,11 @@ let stats_cmd =
   Cmd.v
     (Cmd.info "stats"
        ~doc:
-         "Report on the running daemon: transfer metrics, config as resolved, \
-          cache, journal backlog and each backend's health")
+         "Report on the running daemons: transfer metrics, config as resolved, \
+          cache, journal backlog and each backend's health. Covers every \
+          configured domain.")
     Term.(
-      const run $ json_arg $ totals_arg $ exact_arg $ reload_arg $ watch_arg
-      $ domain_arg)
+      const run $ json_arg $ totals_arg $ exact_arg $ reload_arg $ watch_arg)
 
 let evict_cmd =
   let path_arg = Arg.(non_empty & pos_all string [] & info [] ~docv:"PATH") in

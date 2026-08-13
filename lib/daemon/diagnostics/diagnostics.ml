@@ -505,6 +505,41 @@ let duration s =
   else if h > 0 then Printf.sprintf "%dh %dm" h m
   else Printf.sprintf "%dm %ds" m (s mod 60)
 
+(* Several answers from one process into the one report it would have given had
+   it been asked once. A daemon serving more than one domain answers for the
+   domain it was asked about, so a caller wanting all of them asks repeatedly;
+   everything outside [domains] is the process's own and comes from the first
+   answer, with [serves] widened to what the merged report shows. *)
+let merge reports =
+  let domains =
+    List.concat_map
+      (fun r -> match mem r "domains" with `List l -> l | _ -> [])
+      reports
+  in
+  let served =
+    List.filter_map
+      (fun d ->
+        match mem d "name" with `String n -> Some (`String n) | _ -> None)
+      domains
+  in
+  match reports with
+    | [] -> `Assoc []
+    | first :: _ ->
+        let server =
+          match (mem first "server", served) with
+            | `Assoc s, _ :: _ ->
+                `Assoc (("serves", `List served) :: List.remove_assoc "serves" s)
+            | s, _ -> s
+        in
+        `Assoc
+          (List.map
+             (fun (k, v) ->
+               match k with
+                 | "server" -> (k, server)
+                 | "domains" -> (k, `List domains)
+                 | _ -> (k, v))
+             (match first with `Assoc fields -> fields | _ -> []))
+
 let text json =
   let b = Buffer.create 4096 in
   let line indent fmt =

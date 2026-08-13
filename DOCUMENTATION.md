@@ -667,6 +667,12 @@ With more than one domain, pass `--domain <name>` to commands that act on a spec
 (`ls`, `versions`, `expire`, `gc`, `sync`, `recheck`, `resync-remote`, `import`, `export`,
 `share`). `tsync set-domain <name>` persists a default; an explicit `--domain` always wins.
 
+`tsync stats` is the exception: it always reports on every configured domain, and takes no
+`--domain`. A report answers for the machine, so narrowing it — by the flag or by the default
+— would leave the rest of what runs here unaccounted for. Each domain that has a daemon of its
+own gets its own report, and a domain whose daemon is not answering is named on stderr without
+costing the others theirs.
+
 ## Backend type reference
 
 Every backend needs a `type`, a `name` (used by `resync-remote --source`) and a

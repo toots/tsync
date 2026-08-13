@@ -30,5 +30,10 @@ module Make (C : Conf.S) : sig
     Yojson.Safe.t Lwt.t
 end
 
+(** Fold reports from one process into a single report: the domains are
+    concatenated, everything else comes from the first. For a caller that had to
+    ask a multi-domain daemon once per domain. *)
+val merge : Yojson.Safe.t list -> Yojson.Safe.t
+
 (** Render a report for a human. *)
 val text : Yojson.Safe.t -> string
