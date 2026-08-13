@@ -18,6 +18,12 @@ val domains : unit -> domain list
     domain that does not answer comes back as {!Tray_model.unreachable}. *)
 val poll : domain list -> Tray_model.status list
 
+(** The fuller report behind the stats submenu, one entry per domain that
+    answered. Kept off {!poll} deliberately: the daemon reaches every backend
+    before answering this, so it is asked only when someone opens the menu.
+    Never raises; a domain that does not answer is simply absent. *)
+val stats : domain list -> Tray_model.stats list
+
 (** Best effort across every domain, like the macOS switch: one that refuses is
     logged and the rest still change. Nothing is applied locally -- the next
     poll reads back what the daemon did. *)

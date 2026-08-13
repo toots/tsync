@@ -63,12 +63,28 @@ let run () =
     last_poll := Unix.gettimeofday ()
   in
 
+  (* Every time the menu opens, not once: the point of the submenu is what is
+     true now. A host that sends both AboutToShow and Event "opened" would ask
+     twice for the same opening, which is a round trip to each daemon, so the
+     second is dropped. *)
+  let last_stats = ref neg_infinity in
+  let stats_settled = 1. in
+  Dbusmenu.on_open menu (fun () ->
+      let now = Unix.gettimeofday () in
+      if now -. !last_stats >= stats_settled then (
+        last_stats := now;
+        Dbusmenu.set_children menu Tray_model.Show_stats
+          (Tray_model.stats_entries (Tray_poll.stats !domains))));
+
   Dbusmenu.on_click menu (fun action ->
       match action with
         | Tray_model.Nothing -> ()
         | Quit -> quit := true
         | Open_folder path -> Tray_poll.open_folder conn path
         | Reveal_file path -> Tray_poll.reveal_file conn path
+        (* A submenu, so clicking the row itself does nothing; its contents
+           arrive when it opens. *)
+        | Show_stats -> ()
         | Set_paused paused ->
             Tray_poll.set_paused !domains paused;
             (* Read it back rather than assume: the checkmark should show what
@@ -76,6 +92,8 @@ let run () =
             refresh ());
 
   refresh ();
+  (* So the row has a submenu to open before anyone has opened one. *)
+  Dbusmenu.set_children menu Tray_model.Show_stats Tray_model.stats_placeholder;
 
   let rec loop () =
     if !quit then Log.info "tray: quit"

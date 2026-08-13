@@ -7,7 +7,7 @@ let peer = "org.freedesktop.DBus.Peer"
    contents on close would then hold its first contents forever. *)
 let open_for_at_most = 60.
 
-type row = { entry : Tray_model.entry; id : int }
+type row = { entry : Tray_model.entry; id : int; children : row list }
 
 type t = {
   conn : Dbus.connection;
@@ -18,9 +18,11 @@ type t = {
   mutable next_id : int;
   mutable opened_at : float option;
   mutable click : Tray_model.action -> unit;
+  mutable opened : unit -> unit;
 }
 
 let on_click t f = t.click <- f
+let on_open t f = t.opened <- f
 
 let is_open t =
   match t.opened_at with
@@ -34,7 +36,7 @@ let escape_mnemonics label = String.concat "__" (String.split_on_char '_' label)
 let props_of_entry (entry : Tray_model.entry) =
   match entry with
     | Tray_model.Separator -> [("type", Dbus.String "separator")]
-    | Item i -> (
+    | Item i ->
         (* The macOS menu indents a file under its domain; dbusmenu has no
            property for that, so the nesting is spent on leading space. *)
         let label =
@@ -50,14 +52,21 @@ let props_of_entry (entry : Tray_model.entry) =
         @ (match i.Tray_model.icon with
           | Some name -> [("icon-name", Dbus.String name)]
           | None -> [])
-        @
-          match i.Tray_model.checked with
+        @ (match i.Tray_model.checked with
           | Some on ->
               [
                 ("toggle-type", Dbus.String "checkmark");
                 ("toggle-state", Dbus.Int32 (if on then 1l else 0l));
               ]
           | None -> [])
+        @
+        (* The one property that makes a row open a menu instead of doing
+           something. It comes from the model rather than from whether children
+           happen to have arrived yet: a row that drew as an ordinary one until
+           its contents loaded would move under the pointer. *)
+        if i.Tray_model.submenu then
+          [("children-display", Dbus.String "submenu")]
+        else []
 
 (* Only what was asked for. An empty request means everything, which is what
    every host actually sends. *)
@@ -73,43 +82,126 @@ let node ~id ~props ~children =
       Dbus.Array ("v", children);
     ]
 
-let layout t names depth =
-  let children =
-    if depth = 0 then []
-    else
-      List.map
-        (fun r ->
-          Dbus.Variant
-            (node ~id:r.id
-               ~props:(filter_props names (props_of_entry r.entry))
-               ~children:[]))
-        t.rows
-  in
-  node ~id:0
-    ~props:(filter_props names [("children-display", Dbus.String "submenu")])
-    ~children
+(* [depth] is the host's recursionDepth: 0 stops at this level and -1 means all
+   of it, which is why it is counted down rather than tested for positive. *)
+let rec node_of names depth r =
+  node ~id:r.id
+    ~props:(filter_props names (props_of_entry r.entry))
+    ~children:
+      (if depth = 0 then []
+       else
+         List.map
+           (fun c -> Dbus.Variant (node_of names (depth - 1) c))
+           r.children)
+
+let rec find_row id rows =
+  List.find_map
+    (fun r -> if r.id = id then Some r else find_row id r.children)
+    rows
+
+(* Every row in the tree, for the lookups that are given an id and no idea where
+   it sits. *)
+let rec all_rows rows = List.concat_map (fun r -> r :: all_rows r.children) rows
+
+let layout t names depth parent =
+  match parent with
+    | 0 ->
+        node ~id:0
+          ~props:
+            (filter_props names [("children-display", Dbus.String "submenu")])
+          ~children:
+            (if depth = 0 then []
+             else
+               List.map
+                 (fun r -> Dbus.Variant (node_of names (depth - 1) r))
+                 t.rows)
+    (* A host that was told one subtree changed asks for that subtree. An id
+       that has since gone is answered with an empty node rather than an error:
+       it is a layout the host is about to be told to drop anyway. *)
+    | id -> (
+        match find_row id t.rows with
+          | Some r -> node_of names depth r
+          | None -> node ~id ~props:[] ~children:[])
+
+let submenu_action = function
+  | Tray_model.Item i when i.Tray_model.submenu -> Some i.Tray_model.action
+  | _ -> None
+
+(* Rows are matched by position below, which a row that moved does not survive.
+   A submenu is found by what it does instead, so that one new domain row above
+   it does not leave the stats empty until the next time it is opened -- and a
+   submenu with nothing in it is one some panels decline to open at all. *)
+let adopted previous entry =
+  match submenu_action entry with
+    | None -> []
+    | Some action -> (
+        match
+          List.find_opt (fun r -> submenu_action r.entry = Some action) previous
+        with
+          | Some r -> r.children
+          | None -> [])
 
 (* A row that did not change keeps its id; anything else gets a fresh one, and
    ids are never reused. So a click naming a row that has since changed is
    dropped rather than firing whatever took its place -- with rows appearing and
    disappearing every three seconds, that is a real way to reveal the wrong file
    -- while a click on a row that only sat there still works, which it would not
-   if one changed label retired the whole tree. *)
-let install t entries =
-  let previous = t.rows in
-  t.rows <-
-    List.mapi
-      (fun i entry ->
+   if one changed label retired the whole tree.
+
+   A row's children are this module's state rather than the model's, which only
+   marks that there is a submenu, so they survive that redraw too: otherwise the
+   poll three seconds after the stats arrived would put the placeholder back. *)
+let build t previous entries =
+  List.mapi
+    (fun i entry ->
+      let kept =
         match List.nth_opt previous i with
-          | Some r when r.entry = entry -> r
-          | _ ->
-              let id = t.next_id in
-              t.next_id <- id + 1;
-              { entry; id })
-      entries;
+          | Some r when r.entry = entry -> Some r
+          | _ -> None
+      in
+      match kept with
+        | Some r -> r
+        | None ->
+            let id = t.next_id in
+            t.next_id <- id + 1;
+            { entry; id; children = adopted previous entry })
+    entries
+
+(* [parent] is what the host is told changed: the root for a new menu, one row
+   for a submenu that has just been filled in. Naming the row rather than the
+   root is what keeps an open menu from being torn down around it. *)
+let announce t parent =
   t.revision <- t.revision + 1;
   Dbus.emit t.conn ~path:t.path ~iface ~member:"LayoutUpdated"
-    [Dbus.Uint32 (Int32.of_int t.revision); Dbus.Int32 0l]
+    [Dbus.Uint32 (Int32.of_int t.revision); Dbus.Int32 (Int32.of_int parent)]
+
+let install t entries =
+  t.rows <- build t t.rows entries;
+  announce t 0
+
+(* Fill in one row's submenu, leaving the rest of the tree and its ids alone.
+   Announced against that row rather than the root, which is what lets it happen
+   under a menu that is already open: the host refetches the one subtree instead
+   of dropping the menu it is drawing. *)
+let set_children t action entries =
+  match
+    List.find_opt
+      (fun r ->
+        match r.entry with
+          | Tray_model.Item i -> i.Tray_model.action = action
+          | Separator -> false)
+      t.rows
+  with
+    | None -> ()
+    | Some parent ->
+        let current = List.map (fun r -> r.entry) parent.children in
+        if entries <> current then (
+          let filled =
+            { parent with children = build t parent.children entries }
+          in
+          t.rows <-
+            List.map (fun r -> if r.id = parent.id then filled else r) t.rows;
+          announce t parent.id)
 
 let set t entries =
   let current = List.map (fun r -> r.entry) t.rows in
@@ -202,7 +294,7 @@ let arg_strings = function Dbus.Array (_, vs) -> strings vs | _ -> []
 let arg_ints = function Dbus.Array (_, vs) -> ints vs | _ -> []
 
 (* The row a click names, or None when the tree it belonged to is gone. *)
-let row t id = List.find_opt (fun r -> r.id = id) t.rows
+let row t id = find_row id t.rows
 
 let action_of_row r =
   match r.entry with
@@ -212,17 +304,19 @@ let action_of_row r =
 let handle_menu t msg =
   let reply = Dbus.reply t.conn msg in
   match (Dbus.message_member msg, Dbus.body msg) with
-    | "GetLayout", [Dbus.Int32 _parent; Dbus.Int32 depth; names] ->
+    | "GetLayout", [Dbus.Int32 parent; Dbus.Int32 depth; names] ->
         reply
           [
             Dbus.Uint32 (Int32.of_int t.revision);
-            layout t (arg_strings names) (Int32.to_int depth);
+            layout t (arg_strings names) (Int32.to_int depth)
+              (Int32.to_int parent);
           ]
     | "GetGroupProperties", [ids; names] ->
         let wanted = arg_ints ids and names = arg_strings names in
+        let rows = all_rows t.rows in
         let rows =
-          if wanted = [] then t.rows
-          else List.filter (fun r -> List.mem r.id wanted) t.rows
+          if wanted = [] then rows
+          else List.filter (fun r -> List.mem r.id wanted) rows
         in
         reply
           [
@@ -246,21 +340,31 @@ let handle_menu t msg =
         with
           | Some v -> reply [Dbus.Variant v]
           | None -> reply [Dbus.Variant (Dbus.String "")])
+    (* Answered before the hook runs, not after: filling a submenu means asking
+       every daemon, and a host waiting on this reply is a menu that has not
+       appeared yet. What the hook installs arrives as its own LayoutUpdated,
+       which is what that signal is for. *)
     | "AboutToShow", [Dbus.Int32 _] ->
         t.opened_at <- Some (Unix.gettimeofday ());
         (* [false]: the layout is already current, and claiming otherwise makes
            a host refetch on every open for nothing. *)
-        reply [Dbus.Bool false]
+        reply [Dbus.Bool false];
+        Dbus.flush t.conn;
+        t.opened ()
     | "AboutToShowGroup", [_] ->
         t.opened_at <- Some (Unix.gettimeofday ());
-        reply [Dbus.Array ("i", []); Dbus.Array ("i", [])]
+        reply [Dbus.Array ("i", []); Dbus.Array ("i", [])];
+        Dbus.flush t.conn;
+        t.opened ()
     | "Event", [Dbus.Int32 id; Dbus.String event; _; _] -> (
         (* Answered before acting, always: opening a file manager blocks, and a
            menu that has not been let go of looks stuck. *)
         reply [];
         Dbus.flush t.conn;
         match event with
-          | "opened" -> t.opened_at <- Some (Unix.gettimeofday ())
+          | "opened" ->
+              t.opened_at <- Some (Unix.gettimeofday ());
+              t.opened ()
           | "closed" -> close t
           | "clicked" -> (
               match Option.bind (row t (Int32.to_int id)) action_of_row with
@@ -304,4 +408,5 @@ let create conn ~path =
     next_id = 1;
     opened_at = None;
     click = (fun _ -> ());
+    opened = (fun () -> ());
   }

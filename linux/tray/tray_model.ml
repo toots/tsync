@@ -25,11 +25,58 @@ let unreachable name =
     mount = None;
   }
 
+(* What the submenu draws, which is `tsync stats' with most of it left out: the
+   figures someone opens a tray menu to see, rather than the ones they would run
+   the command for. *)
+type backend_stats = {
+  backend_name : string;
+  role : string;
+  backend_reachable : bool;
+  latency_ms : float option;
+  backend_error : string option;
+  journal_entries : int option;
+  journal_behind : int option;
+}
+
+type domain_stats = {
+  domain_name : string;
+  mount_point : string option;
+  read_only : bool;
+  versioning : bool;
+  cache_chunks : int option;
+  cache_bytes : int64 option;
+  cache_max : int64 option;
+  in_uploads : int option;
+  in_downloads : int option;
+  staged : int option;
+  bytes_read : int64 option;
+  bytes_written : int64 option;
+  wal_pending : int option;
+  wal_stuck : int option;
+  backends : backend_stats list;
+}
+
+type stats = {
+  host : string;
+  frontend : string;
+  pid : int;
+  uptime : float;
+  cpu_percent : float;
+  rss : int64;
+  heap : int64;
+  uploaded : int64;
+  up_rate : float;
+  downloaded : int64;
+  down_rate : float;
+  domain_stats : domain_stats list;
+}
+
 type action =
   | Nothing
   | Open_folder of string
   | Reveal_file of string
   | Set_paused of bool
+  | Show_stats
   | Quit
 
 type item = {
@@ -39,6 +86,7 @@ type item = {
   checked : bool option;
   indent : int;
   action : action;
+  submenu : bool;
 }
 
 type entry = Separator | Item of item
@@ -228,11 +276,174 @@ let file_icon name =
         "package-x-generic"
     | _ -> "text-x-generic"
 
+(* Up to three, newest first: enough to see that something is wrong and roughly
+   what, which is all a menu row can carry. The rest is what `tsync stats' is
+   for. *)
+(* A mount path or a backend's complaint can run to any length, and a menu that
+   wide is one that covers the screen it is meant to sit beside. Cut at the last
+   space before the limit so a word is not split, and never inside a UTF-8
+   character -- a continuation byte on its own is a label the panel may refuse. *)
+let max_row_width = 64
+
+let ellipsis text =
+  if String.length text <= max_row_width then text
+  else (
+    let cut = ref max_row_width in
+    while !cut > 0 && Char.code text.[!cut] land 0xC0 = 0x80 do
+      decr cut
+    done;
+    match String.rindex_from_opt text (!cut - 1) ' ' with
+      | Some space when space > max_row_width / 2 ->
+          String.sub text 0 space ^ "…"
+      | _ -> String.sub text 0 !cut ^ "…")
+
 (* Informational rows stay enabled. Disabling them would be the honest thing if
    "enabled" meant "does something", but every menu draws a disabled row grey,
    which is how information ends up looking like a broken command. *)
-let info ?icon ?(indent = 0) ?(action = Nothing) label =
-  Item { label; enabled = true; icon; checked = None; indent; action }
+let info ?icon ?(indent = 0) ?(action = Nothing) ?(submenu = false) label =
+  Item { label; enabled = true; icon; checked = None; indent; action; submenu }
+
+(* An uptime, not a countdown, so [eta]'s "nothing honest to say" under a minute
+   becomes the thing there is to say. *)
+let uptime_text seconds =
+  match eta seconds with Some t -> "up " ^ t | None -> "just started"
+
+let backend_row (b : backend_stats) =
+  let health =
+    if b.backend_reachable then (
+      match b.latency_ms with
+        | Some ms -> Printf.sprintf "reachable, %.0f ms" ms
+        | None -> "reachable")
+    else (
+      (* Only the message is cut. Trimming the whole row instead would drop the
+         journal figures off the end, which are the part that says how far
+         behind this backend now is. *)
+        match b.backend_error with
+        | Some why -> "unreachable: " ^ ellipsis why
+        | None -> "unreachable")
+  in
+  let journal =
+    match (b.journal_entries, b.journal_behind) with
+      | None, _ -> []
+      (* Behind is the number worth saying; level is the normal state and says
+         nothing. *)
+      | Some n, Some behind when behind > 0 ->
+          [Printf.sprintf "journal %d entries, %d behind" n behind]
+      | Some n, _ -> [Printf.sprintf "journal %d entries" n]
+  in
+  info ~indent:1
+    (String.concat " · "
+       (Printf.sprintf "%s (%s) — %s" b.backend_name b.role health :: journal))
+
+(* A row per figure that has one, skipped where the daemon did not report it:
+   half a row is worse than none, and a frontend that keeps no byte counters
+   should not be made to look like one that read nothing. *)
+let optional_row indent = function
+  | [] -> []
+  | parts -> [info ~indent (String.concat " · " parts)]
+
+let cache_row (d : domain_stats) =
+  match (d.cache_chunks, d.cache_bytes) with
+    | Some chunks, Some bytes ->
+        let of_max =
+          match d.cache_max with
+            | Some max when max > 0L -> " of " ^ human_bytes max
+            | _ -> ""
+        in
+        [
+          info ~indent:1
+            (Printf.sprintf "cache %d chunks · %s%s" chunks (human_bytes bytes)
+               of_max);
+        ]
+    | _ -> []
+
+let queue_row (d : domain_stats) =
+  optional_row 1
+    (List.filter_map Fun.id
+       [
+         Option.map (Printf.sprintf "%d uploading") d.in_uploads;
+         Option.map (Printf.sprintf "%d downloading") d.in_downloads;
+         Option.map (Printf.sprintf "%d staged") d.staged;
+       ])
+
+let io_row (d : domain_stats) =
+  optional_row 1
+    (List.filter_map Fun.id
+       [
+         Option.map (fun n -> "read " ^ human_bytes n) d.bytes_read;
+         Option.map (fun n -> "written " ^ human_bytes n) d.bytes_written;
+       ])
+
+(* Only when there is something owed. An empty journal is the normal state, and
+   a row saying so every time is one more line between the reader and the one
+   that matters. *)
+let wal_row (d : domain_stats) =
+  optional_row 1
+    (List.filter_map Fun.id
+       [
+         (match d.wal_pending with
+           | Some n when n > 0 -> Some (Printf.sprintf "wal %d pending" n)
+           | _ -> None);
+         (match d.wal_stuck with
+           | Some n when n > 0 -> Some (Printf.sprintf "%d stuck" n)
+           | _ -> None);
+       ])
+
+let domain_section (d : domain_stats) =
+  let flags =
+    (if d.read_only then ["read-only"] else [])
+    @ if d.versioning then ["versioned"] else []
+  in
+  let head =
+    match flags with
+      | [] -> d.domain_name
+      | fs -> Printf.sprintf "%s — %s" d.domain_name (String.concat ", " fs)
+  in
+  info head
+  ::
+    (match d.mount_point with
+    | Some m -> [info ~indent:1 (ellipsis m)]
+    | None -> [])
+  @ cache_row d @ queue_row d @ io_row d @ wal_row d
+  @ List.map backend_row d.backends
+
+(* "12.49 GB (1.6 MB/s)", or the total alone while nothing is moving: a rate of
+   zero is the normal state, and repeating it on every row is noise. *)
+let with_rate total rate =
+  if rate > 0. then
+    Printf.sprintf "%s (%s/s)" (human_bytes total)
+      (human_bytes (Int64.of_float rate))
+  else human_bytes total
+
+(* One section per answering daemon. Linux gives each domain its own process, so
+   that is usually one section per domain, each with its own pid and its own
+   share of the machine. *)
+let daemon_section (s : stats) =
+  [
+    info (Printf.sprintf "%s — %s" s.host s.frontend);
+    info (Printf.sprintf "pid %d · %s" s.pid (uptime_text s.uptime));
+    info
+      (Printf.sprintf "cpu %.1f%% · %s rss · %s heap" s.cpu_percent
+         (human_bytes s.rss) (human_bytes s.heap));
+    info
+      (Printf.sprintf "up %s · down %s"
+         (with_rate s.uploaded s.up_rate)
+         (with_rate s.downloaded s.down_rate));
+  ]
+  @ List.concat_map (fun d -> Separator :: domain_section d) s.domain_stats
+
+(* What the submenu holds until the first answer arrives. A submenu with nothing
+   in it is one some panels decline to open at all, so it is never empty. *)
+let stats_placeholder = [info "Reading…"]
+
+let stats_entries = function
+  | [] -> [info "No daemon answering"]
+  | all ->
+      List.concat
+        (List.mapi
+           (fun i s ->
+             if i = 0 then daemon_section s else Separator :: daemon_section s)
+           all)
 
 let render statuses =
   let header = info (Printf.sprintf "tsync — %s" (summary statuses)) in
@@ -283,8 +494,15 @@ let render statuses =
         (* Never set from here: the next poll reads back what the daemon did, so
            the checkmark shows the daemon's answer rather than our request. *)
         action = Set_paused (not (all_paused statuses));
+        submenu = false;
       }
   in
+  (* A submenu rather than a row: what the panel draws next to the icon is the
+     only window we get, and the rest of the report is more than the menu itself
+     has room for. Its rows are filled in when it opens -- a [stats] call
+     reaches every backend, which is a round trip nobody asked for every three
+     seconds. Until then it says so. *)
+  let stats = info "Stats" ~action:Show_stats ~submenu:true in
   (* "Quit tsync" on macOS, where quitting the app is quitting the whole thing.
      Here the daemon is a service this process does not own, and someone hiding
      an icon must not find their files stopped syncing. *)
@@ -297,11 +515,13 @@ let render statuses =
         checked = None;
         indent = 0;
         action = Quit;
+        submenu = false;
       }
   in
   {
     icon = icon_name statuses;
     tooltip = Printf.sprintf "tsync — %s" (summary statuses);
     entries =
-      ((header :: domains) @ traffic) @ [Separator; pause; Separator; quit];
+      ((header :: domains) @ traffic)
+      @ [Separator; stats; pause; Separator; quit];
   }

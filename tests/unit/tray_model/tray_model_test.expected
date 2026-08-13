@@ -11,6 +11,7 @@ tooltip tsync — Uploading 3
         223.2 MB sent · 12.8 GB to go
         1.6 MB/s · 2h 13m left
         ---
+        Stats >
         [ ] Pause uploads -> pause true
         ---
         Quit tsync tray -> quit
@@ -22,6 +23,7 @@ tooltip tsync — Daemon not running
         ---
         photos — not answering -> open /home/u/tsync/photos
         ---
+        Stats >
         [ ] Pause uploads (disabled)
         ---
         Quit tsync tray -> quit
@@ -41,6 +43,7 @@ tooltip tsync — Paused
         ---
         0 bytes sent · 500 bytes to go
         ---
+        Stats >
         [x] Pause uploads -> pause false
         ---
         Quit tsync tray -> quit
@@ -54,6 +57,7 @@ tooltip tsync — Downloading 2
         ---
         1.07 GB sent
         ---
+        Stats >
         [ ] Pause uploads -> pause true
         ---
         Quit tsync tray -> quit
@@ -63,9 +67,37 @@ icon    dialog-warning
 tooltip tsync — No domains configured
         tsync — No domains configured
         ---
+        Stats >
         [ ] Pause uploads (disabled)
         ---
         Quit tsync tray -> quit
+
+== stats submenu
+        booky — fuse
+        pid 102259 · up 12h 5m
+        cpu 1.0% · 775.7 MB rss · 88.3 MB heap
+        up 0 bytes · down 12.49 GB (1.6 MB/s)
+        ---
+        Jellyfin Media — read-only, versioned
+            /home/u/tsync/Jellyfin Media
+            cache 1216 chunks · 10.73 GB of 10.74 GB
+            0 uploading · 2 downloading · 0 staged
+            read 540.4 MB · written 0 bytes
+            http-proxy (main) — reachable, 11 ms · journal 402 entries
+            cold (replica) — unreachable: connection refused · journal 88 entries, 12 behind
+
+== stats, sparse
+        server — headless
+        pid 7 · just started
+        cpu 0.0% · 41.2 MB rss · 8 MB heap
+        up 223.2 MB (1.6 MB/s) · down 0 bytes
+        ---
+        docs
+            wal 3 pending · 1 stuck
+            disk (main) — reachable
+
+== stats, nothing answering
+        No daemon answering
 
 == human_bytes
 0                0 bytes

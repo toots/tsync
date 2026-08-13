@@ -19,5 +19,18 @@ val set : t -> Tray_model.entry list -> unit
     wedged. *)
 val on_click : t -> (Tray_model.action -> unit) -> unit
 
+(** Run when the menu is opened, after the host's request is answered. Where the
+    contents of a submenu are fetched: doing it on the poll instead would ask
+    every daemon every few seconds whether or not anyone was looking. May be
+    called more than once per opening -- hosts differ about which of
+    [AboutToShow] and [Event "opened"] they send. *)
+val on_open : t -> (unit -> unit) -> unit
+
+(** Replace the submenu under the row carrying [action], leaving the rest of the
+    tree and its ids alone. Announced against that row rather than the root,
+    which is what lets it happen while the menu is on screen: the host refetches
+    the one subtree instead of dropping the menu it is drawing. *)
+val set_children : t -> Tray_model.action -> Tray_model.entry list -> unit
+
 (** [true] when the message was addressed to us and has been answered. *)
 val handle : t -> Dbus.message -> bool

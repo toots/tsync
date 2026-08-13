@@ -770,6 +770,16 @@ opens its folder, clicking a file selects it in the file manager, and *Pause
 uploads* is the same switch as `tsync pause` — it applies to every domain, and
 the checkmark shows what the daemon actually did rather than what it was asked.
 
+*Stats* opens a submenu with the short version of `tsync stats`: the daemon's
+pid and uptime, its cpu and memory, what it has moved and how fast, then per
+domain the mount, the cache, what is queued, what has been read and written,
+anything the journal still owes, and each backend's role, reachability and
+backlog. Figures the daemon does not report are left out rather than drawn as
+zero. It is read when the menu opens rather than on the tray's poll — answering
+it means reaching every backend — so it is current as of the moment you opened
+it, not live. `tsync stats` remains the full report, and the only one carrying
+recent warnings.
+
 The `tsync-tray` package installs an autostart entry, so it comes up with the
 desktop. Turn it off in your desktop's Startup Applications, or:
 
