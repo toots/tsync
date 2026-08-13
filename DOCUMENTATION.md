@@ -86,16 +86,17 @@ in this order:
 | Client name | This machine's name. Labels conflict copies. Defaults to the hostname. |
 | Max concurrent uploads / downloads | Defaults (4 and 8). |
 | Domain name | The folder name, e.g. `media`. |
-| Enable versioning? | Yes for undo — [step 9](#9-versions-trash-and-cleanup). |
+| Enable versioning? | Defaults to yes, for undo — [step 9](#9-versions-trash-and-cleanup). |
 | Symlinks policy | `keep` unless you have a reason. See [symlink policies](#symlink-policies). |
 | Read-only mount? | No, for now — [step 6](#6-add-a-second-machine). |
 | Chunk size / cache chunk size / max local cache | `default` / `none` — [tuning](#11-tuning). |
-| Backend type | `s3`, `gcs`, `local` or `http-proxy`. See [backend types](#backend-type-reference). |
+| Backend type | `s3`, `gcs`, `local` or `http-proxy`; defaults to `local`, the one type that needs no bucket or credentials. See [backend types](#backend-type-reference). |
 | Backend name | A label, used by `resync-remote --source`. |
 | *(s3/gcs)* Fill from Terraform? | Only with the [bundled Terraform](terraform/README.md), applied with either `terraform` or `tofu`; otherwise `n` and type the bucket and keys. |
-| Role | `main` — the others in [step 8](#8-add-a-second-backend). |
+| Role | `main` for the first backend; a cloud backend added after one defaults to `replica`. The others in [step 8](#8-add-a-second-backend). |
 | Add another backend? | No, for now. |
-| Enable frontend …? | `fuse` on Linux, `file_provider` on macOS. Skip `http-proxy` until [step 7](#7-run-tsync-as-a-server-for-your-network). |
+| Frontend type | `fuse` on Linux, `file_provider` on macOS — both offered as the default. `headless` is for a domain driven over IPC with nothing to mount. |
+| Add another frontend? | No — skip `http-proxy` until [step 7](#7-run-tsync-as-a-server-for-your-network). Only the types not already configured are offered. |
 
 The simplest result — a folder backed by another disk:
 
