@@ -1,0 +1,30 @@
+; As much of libdbus as a StatusNotifierItem needs, kept to itself: this is the
+; only library in the tree with a C dependency on dbus-1, so the header
+; requirement stops here rather than spreading through the tray.
+
+(library
+ (name tsync_dbus)
+ (enabled_if
+  (= %{system} linux))
+ (foreign_stubs
+  (language c)
+  (names dbus_stubs)
+  (flags
+   (:include dbus_cflags.sexp)))
+ (c_library_flags (-ldbus-1)))
+
+; pkg-config rather than a hardcoded -I: dbus-arch-deps.h lives in a libdir that
+; differs per distro and per architecture, so the include path cannot be
+; guessed. The parens make the output a sexp list for (:include).
+
+(rule
+ (target dbus_cflags.sexp)
+ (enabled_if
+  (= %{system} linux))
+ (action
+  (with-stdout-to
+   %{target}
+   (progn
+    (echo "(")
+    (run pkg-config --cflags dbus-1)
+    (echo ")")))))

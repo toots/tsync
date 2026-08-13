@@ -1,0 +1,26 @@
+opam-version: "2.0"
+synopsis: "Virtual package relying on libdbus-1"
+description: """
+Checks that the D-Bus client library and its development headers are installed.
+Carried here because opam-repository has no conf-dbus of its own; if one is
+added upstream, delete this file and depend on that instead.
+"""
+maintainer: ["Romain Beauxis <toots@rastageeks.org>"]
+authors: ["Romain Beauxis <toots@rastageeks.org>"]
+license: "MIT"
+homepage: "https://github.com/toots/tsync"
+bug-reports: "https://github.com/toots/tsync/issues"
+depends: ["conf-pkg-config"]
+# Asks rather than assumes: a depext that silently did not install leaves the
+# headers missing, and the failure would otherwise land in the middle of
+# compiling dbus_stubs.c rather than here.
+build: [["pkg-config" "--print-errors" "--exists" "dbus-1"]]
+depexts: [
+  ["libdbus-1-dev"] {os-family = "debian"}
+  ["dbus-devel"] {os-family = "fedora" | os-family = "rhel"}
+  ["dbus-1-devel"] {os-family = "suse" | os-family = "opensuse"}
+  ["dbus"] {os-family = "arch"}
+  ["dbus-dev"] {os-family = "alpine"}
+]
+flags: conf
+x-maintenance-intent: ["(latest)"]

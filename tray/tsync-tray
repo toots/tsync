@@ -1,0 +1,8 @@
+#!/bin/sh
+
+# The repo root, not this script's directory: dune's --root is what makes the
+# build the same one ../tsync drives, and the exe path below is relative to it.
+DIR="$(dirname "$0")/.."
+export DIR
+
+opam exec dune -- exec --display=quiet --no-print-directory --root="$DIR" tray/main.exe -- "$@"

@@ -656,6 +656,20 @@
   (action
    (diff temp_names_test.expected temp_names_test.output))))
 
+(subdir unit/tray_model
+ (alias
+  (name default)
+  (deps tray_model_test.exe))
+ (rule
+  (alias runtest)
+  (target tray_model_test.output)
+  (action
+   (with-stdout-to tray_model_test.output (ignore-stderr (run ./tray_model_test.exe)))))
+ (rule
+  (alias runtest)
+  (action
+   (diff tray_model_test.expected tray_model_test.output))))
+
 (subdir unit/zip
  (alias
   (name default)

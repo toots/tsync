@@ -29,3 +29,12 @@
  (name tsync-fuse)
  (version 1)
  (allow_empty))
+
+; Its own package rather than a tsync subcommand: libdbus is a header
+; dependency at build time, and confining it here keeps `dune build -p tsync'
+; working on a machine that has none. The binary links the IPC client and the
+; config parser and nothing else, so it is small rather than a second copy of
+; the daemon.
+
+(package
+ (name tsync-tray))

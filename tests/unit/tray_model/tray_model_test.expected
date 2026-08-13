@@ -1,0 +1,104 @@
+== two domains, one busy
+icon    state-sync
+tooltip tsync — Uploading 3
+        tsync — Uploading 3
+        ---
+        photos — Uploading 3 -> open /home/u/tsync/photos
+            a_1.jpg (image-x-generic) -> reveal /home/u/tsync/photos/a_1.jpg
+            b.mov (video-x-generic) -> reveal /home/u/tsync/photos/b.mov
+        docs — Idle -> open /home/u/tsync/docs
+        ---
+        223.2 MB sent · 12.8 GB to go
+        1.6 MB/s · 2h 13m left
+        ---
+        [ ] Pause uploads -> pause true
+        ---
+        Quit tsync tray -> quit
+
+== daemon not running
+icon    dialog-warning
+tooltip tsync — Daemon not running
+        tsync — Daemon not running
+        ---
+        photos — not answering -> open /home/u/tsync/photos
+        ---
+        [ ] Pause uploads (disabled)
+        ---
+        Quit tsync tray -> quit
+
+== paused with a backlog
+icon    media-playback-pause
+tooltip tsync — Paused
+        tsync — Paused
+        ---
+        photos — Paused -> open /home/u/tsync/photos
+            f1.txt (text-x-generic) -> reveal /home/u/tsync/photos/f1.txt
+            f2.txt (text-x-generic) -> reveal /home/u/tsync/photos/f2.txt
+            f3.txt (text-x-generic) -> reveal /home/u/tsync/photos/f3.txt
+            f4.txt (text-x-generic) -> reveal /home/u/tsync/photos/f4.txt
+            f5.txt (text-x-generic) -> reveal /home/u/tsync/photos/f5.txt
+            … and 2 more
+        ---
+        0 bytes sent · 500 bytes to go
+        ---
+        [x] Pause uploads -> pause false
+        ---
+        Quit tsync tray -> quit
+
+== one domain not mounted
+icon    state-sync
+tooltip tsync — Downloading 2
+        tsync — Downloading 2
+        ---
+        photos — Downloading 2
+        ---
+        1.07 GB sent
+        ---
+        [ ] Pause uploads -> pause true
+        ---
+        Quit tsync tray -> quit
+
+== no domains
+icon    dialog-warning
+tooltip tsync — No domains configured
+        tsync — No domains configured
+        ---
+        [ ] Pause uploads (disabled)
+        ---
+        Quit tsync tray -> quit
+
+== human_bytes
+0                0 bytes
+1                1 byte
+999              999 bytes
+1000             1 KB
+1500             2 KB
+999999           1 MB
+1000000          1 MB
+223200000        223.2 MB
+1000000000       1 GB
+1070000000       1.07 GB
+12800000000      12.8 GB
+5000000000       5 GB
+2500000000000    2.5 TB
+
+== eta
+0          (none)
+45         (none)
+60         1m
+90         1m
+3600       1h
+8000       2h 13m
+86400      1d
+90000      1d 1h
+180000     2d 2h
+
+== file_icon
+a.jpg            image-x-generic
+b.MOV            video-x-generic
+c.flac           audio-x-generic
+d.pdf            x-office-document
+e.xlsx           x-office-spreadsheet
+f.zip            package-x-generic
+g.txt            text-x-generic
+h                text-x-generic
