@@ -363,7 +363,9 @@ let evict_cmd =
   let run paths =
     List.iter
       (fun path ->
-        match ipc_action ~path "evict" with
+        match
+          ipc_action ~socket_path:(domain_socket_for_path path) ~path "evict"
+        with
           | _ -> Printf.printf "Evicted: %s\n" path
           | exception Failure msg -> Printf.eprintf "Error: %s\n" msg)
       paths
@@ -377,7 +379,9 @@ let restore_cmd =
   let run paths =
     List.iter
       (fun path ->
-        match ipc_action ~path "restore" with
+        match
+          ipc_action ~socket_path:(domain_socket_for_path path) ~path "restore"
+        with
           | _ -> Printf.printf "Restored: %s\n" path
           | exception Failure msg -> Printf.eprintf "Error: %s\n" msg)
       paths
@@ -627,7 +631,11 @@ let revert_cmd =
           ~doc:"Version timestamp to restore (default: most recent)")
   in
   let run path version =
-    match ipc_action ~path ?arg:version "revert" with
+    match
+      ipc_action
+        ~socket_path:(domain_socket_for_path path)
+        ~path ?arg:version "revert"
+    with
       | _ -> Printf.printf "Reverted: %s\n" path
       | exception Failure msg -> Printf.eprintf "Error: %s\n" msg
   in
