@@ -303,3 +303,18 @@ let cursor_key d = domain_root d ^ "cursor"
    and records its own chunk/dir prefixes, so its domain is recoverable from the
    body. *)
 let shares_prefix (_ : domain) = root_prefix ^ "shares/"
+
+(* Where fuse mounts a domain: its [mountPoint] option, else ~/tsync/<domain>.
+   Here rather than in the CLI because it is derived entirely from the config,
+   and both the CLI and the tray have to agree on the answer. *)
+let mount_point_of (d : domain) =
+  let opt =
+    List.find_map
+      (fun (f : frontend_config) ->
+        if f.frontend_type = "fuse" then List.assoc_opt "mountPoint" f.options
+        else None)
+      d.frontends
+  in
+  match opt with
+    | Some p when p <> "" -> p
+    | _ -> Filename.concat (Sys.getenv "HOME") ("tsync/" ^ d.name)

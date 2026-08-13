@@ -122,3 +122,8 @@ val versions_prefix : domain -> string
 val journal_prefix : domain -> string
 val cursor_key : domain -> string
 val shares_prefix : domain -> string
+
+(** Where fuse mounts [d]: its ["mountPoint"] frontend option, else
+    [~/tsync/<domain>]. Also the root that commands accepting an absolute path
+    under the mount resolve against. *)
+val mount_point_of : domain -> string
