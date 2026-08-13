@@ -157,9 +157,19 @@ module Make_with_layout (C : Conf.S) (Sq : Sync_queue.S) (L : Layout.S) :
   let uploads_in_flight () =
     Lwt_list.map_s
       (fun key ->
-        let+ body = D.staged_body_path key in
+        let* body = D.staged_body_path key in
+        (* How much there is to send. What has gone already is not tracked per
+           file -- the chunk upload counts bytes process-wide -- so a row can say
+           how big a file is but not how far along it is. *)
+        let+ resolved = Mf.resolve key in
         let name, rel = describe key in
-        { File_ops.name; rel; body })
+        let size =
+          match resolved with
+            | Some (`Staged (st, _)) -> Some st.Manifest.s_size
+            | Some (`Published m) -> Some m.Manifest.size
+            | None -> None
+        in
+        { File_ops.name; rel; body; size })
       (Sq.uploading ())
 
   let downloading_now () =

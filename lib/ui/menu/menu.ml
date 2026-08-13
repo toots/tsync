@@ -179,14 +179,6 @@ let eta seconds =
             (String.concat " "
                (List.map (fun (n, u) -> Printf.sprintf "%d%s" n u) l)))
 
-(* [downloads] counts chunk fetches in flight, which is not what the rows under
-   this count: one file is many chunks, and several files can share one fetch.
-   Where there are rows, they are what the number has to agree with. *)
-let download_count s =
-  match s.downloading with
-    | [] -> s.downloads
-    | files -> Some (List.length files)
-
 let summary statuses =
   if statuses = [] then "No domains configured"
   else if any_unreachable statuses && all_unreachable statuses then
@@ -217,11 +209,14 @@ let detail s =
 (* "223.2 MB sent · 12.8 GB to go", or just what has been sent once the queue is
    empty. *)
 let traffic_line statuses =
+  let pending = pending_bytes statuses in
   match bytes_uploaded statuses with
+    (* Nothing sent and nothing owed is a row saying zero, which the rows above
+       it already imply. It earns its place once either number is real. *)
+    | (None | Some 0L) when pending <= 0L -> None
     | None -> None
     | Some sent ->
         let head = Printf.sprintf "%s sent" (human_bytes sent) in
-        let pending = pending_bytes statuses in
         if pending <= 0L then Some head
         else Some (Printf.sprintf "%s · %s to go" head (human_bytes pending))
 
@@ -462,7 +457,10 @@ let progress_line (u : transfer) =
       | Some moved, Some total ->
           [Printf.sprintf "%s of %s" (human_bytes moved) (human_bytes total)]
       | Some moved, None -> [human_bytes moved]
-      | None, _ -> [])
+      (* An upload knows how big it is and not how far along, which is still
+         worth saying: it is the number that answers what this will cost. *)
+      | None, Some total -> [human_bytes total]
+      | None, None -> [])
     @ (match u.rate with
       | Some rate when rate > 0. ->
           [Printf.sprintf "%s/s" (human_bytes (Int64.of_float rate))]
@@ -497,7 +495,15 @@ let file_rows s transfers =
   else []
 
 let render statuses =
-  let header = info (Printf.sprintf "tsync — %s" (summary statuses)) in
+  (* Only when there is no domain row to say it instead. A domain row carries
+     the same state, names which domain it is about, and opens the folder; the
+     summary across all of them is in the tooltip. With nothing configured there
+     are no rows at all, and this is the whole message. *)
+  let header =
+    if statuses = [] then
+      [info (Printf.sprintf "tsync — %s" (summary statuses))]
+    else []
+  in
   let domain s =
     let row =
       info
@@ -506,9 +512,10 @@ let render statuses =
     in
     (row :: file_rows s s.uploading) @ file_rows s s.downloading
   in
-  let domains =
-    if statuses = [] then [] else Separator :: List.concat_map domain statuses
-  in
+  (* No separator ahead of the domains any more: with the header gone they are
+     the first thing in the menu, and a rule above the first row draws as a gap
+     at the top. *)
+  let domains = List.concat_map domain statuses in
   let traffic =
     match traffic_line statuses with
       | None -> []
@@ -555,7 +562,7 @@ let render statuses =
     icon = icon_name statuses;
     tooltip = Printf.sprintf "tsync — %s" (summary statuses);
     entries =
-      ((header :: domains) @ traffic)
+      ((header @ domains) @ traffic)
       @ [Separator; stats; pause; Separator; quit];
   }
 

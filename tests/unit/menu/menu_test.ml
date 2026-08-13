@@ -125,6 +125,27 @@ let () =
 
   print_menu "no domains" [];
 
+  (* The wire the macOS menu draws from. Pinned because nothing on this side can
+     compile the client that reads it: a field renamed here is a menu that comes
+     up empty over there, and this is what would say so. *)
+  print_endline "== menu as JSON";
+  print_endline
+    (Yojson.Safe.pretty_to_string
+       (Menu.to_json
+          (Menu.render
+             [
+               domain "photos" ~uploads:1
+                 ~uploading:[upload "out.raw" "out.raw" ~total:1_200_000L]
+                 ~downloading:
+                   [
+                     upload "holiday.mov" "trips/holiday.mov"
+                       ~moved:788_529_152L ~total:15_589_124_313L
+                       ~rate:1_600_000.;
+                   ]
+                 ~sent:1_000L;
+             ])));
+  print_newline ();
+
   (* The submenu, which is the part of the report that does not fit in the menu.
      Pins that cpuPercentAvg is printed as it arrives rather than scaled, that a
      rate of zero is left off, that a backend which is behind says so while one

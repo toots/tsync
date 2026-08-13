@@ -747,16 +747,24 @@ module Make (C : Conf.S) (F : File_ops.S) = struct
                           :: ( "uploading",
                                `List
                                  (List.map
-                                    (fun ({ name; rel; body } :
+                                    (fun ({ name; rel; body; size } :
                                            File_ops.in_flight) ->
                                       `Assoc
                                         (("name", `String name)
-                                        :: ("rel", `String rel)
-                                        ::
-                                          (match body with
-                                          | Some body ->
-                                              [("body", `String body)]
-                                          | None -> [])))
+                                         :: ("rel", `String rel)
+                                         ::
+                                           (match body with
+                                           | Some body ->
+                                               [("body", `String body)]
+                                           | None -> [])
+                                        @
+                                          match size with
+                                          | Some size ->
+                                              [
+                                                ( "size",
+                                                  `Int (Int64.to_int size) );
+                                              ]
+                                          | None -> []))
                                     uploading) )
                           :: ("downloading", `List (downloading_json ()))
                           :: ( "pendingBytes",

@@ -1,8 +1,6 @@
 == two domains, one busy
 icon    state-sync
 tooltip tsync — Uploading 3
-        tsync — Uploading 3
-        ---
         photos — Uploading 3 -> open photos
             a_1.jpg (image-x-generic) -> reveal photos:a_1.jpg
             b.mov (video-x-generic) -> reveal photos:b.mov
@@ -19,8 +17,6 @@ tooltip tsync — Uploading 3
 == daemon not running
 icon    dialog-warning
 tooltip tsync — Daemon not running
-        tsync — Daemon not running
-        ---
         photos — not answering -> open photos
         ---
         Stats >
@@ -31,8 +27,6 @@ tooltip tsync — Daemon not running
 == paused with a backlog
 icon    media-playback-pause
 tooltip tsync — Paused
-        tsync — Paused
-        ---
         photos — Paused -> open photos
             f1.txt (text-x-generic) -> reveal photos:f1.txt
             f2.txt (text-x-generic) -> reveal photos:f2.txt
@@ -51,8 +45,6 @@ tooltip tsync — Paused
 == downloads below the threshold
 icon    state-sync
 tooltip tsync — Downloading 2
-        tsync — Downloading 2
-        ---
         photos — Downloading 2 -> open photos
         ---
         1020.4 MB sent
@@ -65,8 +57,6 @@ tooltip tsync — Downloading 2
 == downloading, with uploads alongside
 icon    state-sync
 tooltip tsync — Uploading 1 · Downloading 2
-        tsync — Uploading 1 · Downloading 2
-        ---
         photos — Uploading 1 · Downloading 2 -> open photos
             out.raw (image-x-generic) -> reveal photos:out.raw
             holiday.mov (video-x-generic) -> reveal photos:trips/holiday.mov
@@ -84,8 +74,6 @@ tooltip tsync — Uploading 1 · Downloading 2
 == more downloads than fit
 icon    state-sync
 tooltip tsync — Downloading 7
-        tsync — Downloading 7
-        ---
         photos — Downloading 7 -> open photos
             f1.iso (package-x-generic) -> reveal photos:f1.iso
             f2.iso (package-x-generic) -> reveal photos:f2.iso
@@ -93,8 +81,6 @@ tooltip tsync — Downloading 7
             f4.iso (package-x-generic) -> reveal photos:f4.iso
             f5.iso (package-x-generic) -> reveal photos:f5.iso
             … and 2 more
-        ---
-        0 B sent
         ---
         Stats >
         [ ] Pause uploads -> pause true
@@ -110,6 +96,67 @@ tooltip tsync — No domains configured
         [ ] Pause uploads (disabled)
         ---
         Quit tsync tray -> quit
+
+== menu as JSON
+{
+  "icon": "state-sync",
+  "tooltip": "tsync — Uploading 1 · Downloading 1",
+  "rows": [
+    {
+      "label": "photos — Uploading 1 · Downloading 1",
+      "enabled": true,
+      "indent": 0,
+      "action": { "openFolder": "photos" }
+    },
+    {
+      "label": "out.raw",
+      "enabled": true,
+      "indent": 1,
+      "action": { "reveal": { "domain": "photos", "rel": "out.raw" } },
+      "icon": "image-x-generic"
+    },
+    { "label": "1.1 MB", "enabled": true, "indent": 2, "action": {} },
+    {
+      "label": "holiday.mov",
+      "enabled": true,
+      "indent": 1,
+      "action": {
+        "reveal": { "domain": "photos", "rel": "trips/holiday.mov" }
+      },
+      "icon": "video-x-generic"
+    },
+    {
+      "label": "752.0 MB of 14.5 GB · 1.5 MB/s · 2h 34m left",
+      "enabled": true,
+      "indent": 2,
+      "action": {}
+    },
+    { "separator": true },
+    { "label": "1000 B sent", "enabled": true, "indent": 0, "action": {} },
+    { "separator": true },
+    {
+      "label": "Stats",
+      "enabled": true,
+      "indent": 0,
+      "action": { "stats": true },
+      "submenu": true
+    },
+    {
+      "label": "Pause uploads",
+      "enabled": true,
+      "indent": 0,
+      "action": { "setPaused": true },
+      "checked": false
+    },
+    { "separator": true },
+    {
+      "label": "Quit tsync tray",
+      "enabled": true,
+      "indent": 0,
+      "action": { "quit": true }
+    }
+  ]
+}
 
 == stats submenu
         booky — fuse

@@ -7,7 +7,12 @@ type buffer = Local_io.buffer
 (** A file the upload queue is working on right now. [rel] names it from the
     domain root, the way its reader sees it; [body] is where its bytes are on
     disk, for anything that wants to look at them. *)
-type in_flight = { name : string; rel : string; body : string option }
+type in_flight = {
+  name : string;
+  rel : string;
+  body : string option;
+  size : int64 option;
+}
 
 (** A file whose chunks are coming off a backend because something is reading
     it. [bytes] is what this read has pulled so far, [size] the whole file. *)

@@ -50,15 +50,6 @@ struct DaemonOp: Decodable {
     let srcRef: String?
 }
 
-/// One file a worker is uploading.
-struct DaemonUpload: Decodable {
-    let name: String
-    /// Where the file sits under the domain root, for showing it in the Finder.
-    let rel: String
-    /// Where its bytes are, for `preview`; absent once the body is chunked.
-    let body: String?
-}
-
 /// What a row does when clicked. Every case names a domain and a path under it
 /// rather than a place on disk: only this process can ask the File Provider
 /// where a domain's folder was surfaced, so resolving one is the menu's job.
@@ -113,23 +104,8 @@ struct DaemonResponse: Decodable {
     let bytesDownloaded: Int64?
     let totalBytes: Int64?
 
-    /// `status` only.
-    let paused: Bool?
-    let pendingUploads: Int?
-    let pendingDownloads: Int?
-
-    /// `status` only. Base names of what is being uploaded right now, the bytes
-    /// the queue still owes, and the process-wide upload counters an ETA needs.
-    let uploading: [DaemonUpload]?
-    let pendingBytes: Int64?
-    let bytesUploaded: Int64?
-    let uploadBytesPerSec: Double?
-
     /// `menu` only: the whole status menu, decided by the daemon.
     let menu: DaemonMenu?
-
-    /// `preview` only: the head of a file, base64.
-    let data: String?
 
     /// The range `fetch_range` served, short of the request at end of file.
     let offset: Int64?
@@ -142,8 +118,6 @@ struct DaemonResponse: Decodable {
     private enum CodingKeys: String, CodingKey {
         case ok, code, error, items, ops, stale, cursor, localPath, url
         case active, bytesDownloaded, totalBytes, offset, length
-        case paused, pendingUploads, pendingDownloads, data
-        case uploading, pendingBytes, bytesUploaded, uploadBytesPerSec
         case menu
     }
 
@@ -163,15 +137,7 @@ struct DaemonResponse: Decodable {
         totalBytes = try c.decodeIfPresent(Int64.self, forKey: .totalBytes)
         offset = try c.decodeIfPresent(Int64.self, forKey: .offset)
         length = try c.decodeIfPresent(Int64.self, forKey: .length)
-        paused = try c.decodeIfPresent(Bool.self, forKey: .paused)
-        pendingUploads = try c.decodeIfPresent(Int.self, forKey: .pendingUploads)
-        pendingDownloads = try c.decodeIfPresent(Int.self, forKey: .pendingDownloads)
-        uploading = try c.decodeIfPresent([DaemonUpload].self, forKey: .uploading)
         menu = try c.decodeIfPresent(DaemonMenu.self, forKey: .menu)
-        data = try c.decodeIfPresent(String.self, forKey: .data)
-        pendingBytes = try c.decodeIfPresent(Int64.self, forKey: .pendingBytes)
-        bytesUploaded = try c.decodeIfPresent(Int64.self, forKey: .bytesUploaded)
-        uploadBytesPerSec = try c.decodeIfPresent(Double.self, forKey: .uploadBytesPerSec)
         item = try? DaemonItem(from: decoder)
     }
 }
@@ -398,12 +364,6 @@ extension DaemonClient {
         try await send(DaemonRequest(action: "download_progress", ref: ref))
     }
 
-    /// Deliberately cheap on the daemon side — no store or backend access — so
-    /// it can back a poll.
-    func status() async throws -> DaemonResponse {
-        try await send(DaemonRequest(action: "status"))
-    }
-
     /// The whole menu, across every domain this daemon serves — so it is asked
     /// once, not once per domain, and the summary and icon come back decided.
     /// The daemon renders it from the same model the Linux tray links.
@@ -419,14 +379,6 @@ extension DaemonClient {
     /// it. Not persisted — a daemon restart resumes.
     func setPaused(_ paused: Bool) async throws {
         _ = try await send(DaemonRequest(action: "pause", arg: paused ? "on" : "off"))
-    }
-
-    /// The head of a staged upload's body, enough for the thumbnail embedded in
-    /// it. The daemon reads the file: this process is sandboxed, and one in the
-    /// shared container counts as another app's data.
-    func preview(path: String) async throws -> Data? {
-        let response = try await send(DaemonRequest(action: "preview", path: path))
-        return response.data.flatMap { Data(base64Encoded: $0) }
     }
 
     func create(parentRef: String, name: String) async throws -> DaemonResponse {
