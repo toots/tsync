@@ -10,7 +10,6 @@ type status = {
   pending_bytes : int64 option;
   bytes_uploaded : int64 option;
   upload_rate : float option;
-  mount : string option;
 }
 
 let unreachable name =
@@ -24,7 +23,6 @@ let unreachable name =
     pending_bytes = None;
     bytes_uploaded = None;
     upload_rate = None;
-    mount = None;
   }
 
 (* What the submenu draws, which is `tsync stats' with most of it left out: the
@@ -73,10 +71,15 @@ type stats = {
   domain_stats : domain_stats list;
 }
 
+(* A domain and a path under it, never an absolute one: where a domain's folder
+   actually is differs per client -- on macOS only the app can ask the File
+   Provider -- so resolving it is the renderer's job. *)
+type target = { domain : string; rel : string }
+
 type action =
   | Nothing
   | Open_folder of string
-  | Reveal_file of string
+  | Reveal_file of target
   | Set_paused of bool
   | Show_stats
   | Quit
@@ -432,10 +435,7 @@ let file_rows s transfers =
     List.filteri (fun i _ -> i < max_uploading_shown) shown
     |> List.map (fun (u : transfer) ->
         info u.name ~icon:(file_icon u.name) ~indent:1
-          ~action:
-            (match s.mount with
-              | Some m -> Reveal_file (Filename.concat m u.rel)
-              | None -> Nothing))
+          ~action:(Reveal_file { domain = s.name; rel = u.rel }))
   in
   let hidden = List.length transfers - max_uploading_shown in
   rows
@@ -449,7 +449,7 @@ let render statuses =
     let row =
       info
         (Printf.sprintf "%s — %s" s.name (detail s))
-        ~action:(match s.mount with Some m -> Open_folder m | None -> Nothing)
+        ~action:(Open_folder s.name)
     in
     (row :: file_rows s s.uploading) @ file_rows s s.downloading
   in
@@ -505,3 +505,94 @@ let render statuses =
       ((header :: domains) @ traffic)
       @ [Separator; stats; pause; Separator; quit];
   }
+
+let action_json = function
+  | Nothing -> `Assoc []
+  | Open_folder domain -> `Assoc [("openFolder", `String domain)]
+  | Reveal_file { domain; rel } ->
+      `Assoc
+        [("reveal", `Assoc [("domain", `String domain); ("rel", `String rel)])]
+  | Set_paused paused -> `Assoc [("setPaused", `Bool paused)]
+  | Show_stats -> `Assoc [("stats", `Bool true)]
+  | Quit -> `Assoc [("quit", `Bool true)]
+
+(* Only what a row actually carries, so a renderer can tell "no icon" from an
+   icon it failed to read. *)
+let entry_json = function
+  | Separator -> `Assoc [("separator", `Bool true)]
+  | Item i ->
+      `Assoc
+        ([
+           ("label", `String i.label);
+           ("enabled", `Bool i.enabled);
+           ("indent", `Int i.indent);
+           ("action", action_json i.action);
+         ]
+        @ (match i.icon with Some n -> [("icon", `String n)] | None -> [])
+        @ (match i.checked with
+          | Some on -> [("checked", `Bool on)]
+          | None -> [])
+        @ if i.submenu then [("submenu", `Bool true)] else [])
+
+let to_json m =
+  `Assoc
+    [
+      ("icon", `String m.icon);
+      ("tooltip", `String m.tooltip);
+      ("rows", `List (List.map entry_json m.entries));
+    ]
+
+let member name = function
+  | `Assoc fields -> List.assoc_opt name fields
+  | _ -> None
+
+let int_field json name =
+  match member name json with Some (`Int n) -> Some n | _ -> None
+
+let int64_field json name =
+  match member name json with
+    | Some (`Int n) -> Some (Int64.of_int n)
+    | _ -> None
+
+let float_field json name =
+  match member name json with
+    | Some (`Float f) -> Some f
+    | Some (`Int n) -> Some (float_of_int n)
+    | _ -> None
+
+let bool_field json name =
+  match member name json with Some (`Bool b) -> Some b | _ -> None
+
+let string_field json name =
+  match member name json with
+    | Some (`String s) when s <> "" -> Some s
+    | _ -> None
+
+let transfers_of json field =
+  match member field json with
+    | Some (`List items) ->
+        List.filter_map
+          (fun item ->
+            match (string_field item "name", string_field item "rel") with
+              | Some name, Some rel -> Some { name; rel }
+              | _ -> None)
+          items
+    | _ -> []
+
+let of_status_json ~name json =
+  match bool_field json "ok" with
+    | Some false | None -> unreachable name
+    | Some true ->
+        {
+          name;
+          uploads =
+            Some (Option.value (int_field json "pendingUploads") ~default:0);
+          downloads =
+            Some (Option.value (int_field json "pendingDownloads") ~default:0);
+          paused = Some (Option.value (bool_field json "paused") ~default:false);
+          uploading = transfers_of json "uploading";
+          downloading = transfers_of json "downloading";
+          pending_bytes = int64_field json "pendingBytes";
+          bytes_uploaded = int64_field json "bytesUploaded";
+          upload_rate = float_field json "uploadBytesPerSec";
+        }

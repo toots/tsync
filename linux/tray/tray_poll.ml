@@ -61,42 +61,6 @@ let string_field json name =
     | Some (`String s) when s <> "" -> Some s
     | _ -> None
 
-(* One shape for both lists: the daemon reports downloads with the same name and
-   rel an upload carries, plus figures the menu does not draw. *)
-let transfers_of json field =
-  match member field json with
-    | Some (`List items) ->
-        List.filter_map
-          (fun item ->
-            match (string_field item "name", string_field item "rel") with
-              | Some name, Some rel -> Some { Menu.name; rel }
-              | _ -> None)
-          items
-    | _ -> []
-
-let status_of_json (d : domain) json =
-  match bool_field json "ok" with
-    | Some false | None -> Menu.unreachable d.name
-    | Some true ->
-        {
-          Menu.name = d.name;
-          uploads =
-            Some (Option.value (int_field json "pendingUploads") ~default:0);
-          downloads =
-            Some (Option.value (int_field json "pendingDownloads") ~default:0);
-          paused = Some (Option.value (bool_field json "paused") ~default:false);
-          uploading = transfers_of json "uploading";
-          downloading = transfers_of json "downloading";
-          pending_bytes = int64_field json "pendingBytes";
-          bytes_uploaded = int64_field json "bytesUploaded";
-          upload_rate = float_field json "uploadBytesPerSec";
-          (* The daemon reports where it actually mounted; the config only says
-             where it was asked to. Prefer the fact over the intention, and keep
-             the config's answer for a domain that is not answering at all. *)
-          mount =
-            Some (Option.value (string_field json "mount") ~default:d.mount);
-        }
-
 (* [Ipc.send], the blocking one, has no timeout, and this loop is single
    threaded: one wedged daemon would freeze the whole tray. Every domain goes at
    once and each is bounded, so a poll costs the timeout at worst however many
@@ -110,7 +74,7 @@ let poll ds =
           Ipc.send_lwt ~timeout:1.5 ~socket_path:d.socket
             {|{"action":"status"}|}
         in
-        status_of_json d (Yojson.Basic.from_string reply))
+        Menu.of_status_json ~name:d.name (Yojson.Safe.from_string reply))
       (fun _ -> Lwt.return (Menu.unreachable d.name))
   in
   try Lwt_main.run (Lwt_list.map_p ask ds)
@@ -237,9 +201,9 @@ let stats ds =
         let+ reply =
           Ipc.send_lwt ~timeout:stats_timeout ~socket_path:d.socket
             (Printf.sprintf {|{"action":"stats","domain":%s}|}
-               (Yojson.Basic.to_string (`String d.name)))
+               (Yojson.Safe.to_string (`String d.name)))
         in
-        stats_of_json (Yojson.Basic.from_string reply))
+        stats_of_json (Yojson.Safe.from_string reply))
       (fun e ->
         Log.debug "tray: stats %S: %s" d.name (Printexc.to_string e);
         Lwt.return None)
@@ -266,6 +230,14 @@ let set_paused ds paused =
   in
   try Lwt_main.run (Lwt_list.iter_p ask ds)
   with e -> Log.warn "tray: pause failed: %s" (Printexc.to_string e)
+
+(* The daemon reports where it actually mounted; the config only says where it
+   was asked to. A domain that is not answering keeps the config's answer, which
+   is still where its folder would be. *)
+let mount_of ds name =
+  match List.find_opt (fun d -> d.name = name) ds with
+    | Some d -> Some d.mount
+    | None -> None
 
 let file_manager = "org.freedesktop.FileManager1"
 let file_manager_path = "/org/freedesktop/FileManager1"

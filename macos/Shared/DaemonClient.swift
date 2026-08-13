@@ -59,6 +59,45 @@ struct DaemonUpload: Decodable {
     let body: String?
 }
 
+/// What a row does when clicked. Every case names a domain and a path under it
+/// rather than a place on disk: only this process can ask the File Provider
+/// where a domain's folder was surfaced, so resolving one is the menu's job.
+struct DaemonMenuAction: Decodable {
+    struct Target: Decodable {
+        let domain: String
+        let rel: String
+    }
+
+    var openFolder: String?
+    var reveal: Target?
+    var setPaused: Bool?
+    var stats: Bool?
+    var quit: Bool?
+}
+
+/// One row. A separator carries nothing else; everything else is a label plus
+/// whatever of the trimmings it uses.
+struct DaemonMenuRow: Decodable {
+    var separator: Bool?
+    var label: String?
+    var enabled: Bool?
+    var indent: Int?
+    var icon: String?
+    var checked: Bool?
+    var submenu: Bool?
+    var action: DaemonMenuAction?
+
+    var isSeparator: Bool { separator == true }
+}
+
+/// The menu as the daemon decided it: the strings, the icon and the rows all
+/// come from one place, shared with the Linux tray, so the two cannot drift.
+struct DaemonMenu: Decodable {
+    let icon: String
+    let tooltip: String
+    let rows: [DaemonMenuRow]
+}
+
 struct DaemonResponse: Decodable {
     let ok: Bool
     let code: String?
@@ -86,6 +125,9 @@ struct DaemonResponse: Decodable {
     let bytesUploaded: Int64?
     let uploadBytesPerSec: Double?
 
+    /// `menu` only: the whole status menu, decided by the daemon.
+    let menu: DaemonMenu?
+
     /// `preview` only: the head of a file, base64.
     let data: String?
 
@@ -102,6 +144,7 @@ struct DaemonResponse: Decodable {
         case active, bytesDownloaded, totalBytes, offset, length
         case paused, pendingUploads, pendingDownloads, data
         case uploading, pendingBytes, bytesUploaded, uploadBytesPerSec
+        case menu
     }
 
     init(from decoder: Decoder) throws {
@@ -124,6 +167,7 @@ struct DaemonResponse: Decodable {
         pendingUploads = try c.decodeIfPresent(Int.self, forKey: .pendingUploads)
         pendingDownloads = try c.decodeIfPresent(Int.self, forKey: .pendingDownloads)
         uploading = try c.decodeIfPresent([DaemonUpload].self, forKey: .uploading)
+        menu = try c.decodeIfPresent(DaemonMenu.self, forKey: .menu)
         data = try c.decodeIfPresent(String.self, forKey: .data)
         pendingBytes = try c.decodeIfPresent(Int64.self, forKey: .pendingBytes)
         bytesUploaded = try c.decodeIfPresent(Int64.self, forKey: .bytesUploaded)
@@ -358,6 +402,17 @@ extension DaemonClient {
     /// it can back a poll.
     func status() async throws -> DaemonResponse {
         try await send(DaemonRequest(action: "status"))
+    }
+
+    /// The whole menu, across every domain this daemon serves — so it is asked
+    /// once, not once per domain, and the summary and icon come back decided.
+    /// The daemon renders it from the same model the Linux tray links.
+    func menu() async throws -> DaemonMenu {
+        let response = try await send(DaemonRequest(action: "menu"))
+        guard let menu = response.menu else {
+            throw DaemonError.transport("daemon returned no menu")
+        }
+        return menu
     }
 
     /// Uploads only: a download runs because something is blocked waiting for

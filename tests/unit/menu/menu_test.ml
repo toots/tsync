@@ -7,7 +7,8 @@
 let action = function
   | Menu.Nothing -> ""
   | Open_folder p -> " -> open " ^ p
-  | Reveal_file p -> " -> reveal " ^ p
+  | Reveal_file { Menu.domain; rel } ->
+      Printf.sprintf " -> reveal %s:%s" domain rel
   | Set_paused b -> Printf.sprintf " -> pause %b" b
   (* A submenu: the row opens one rather than doing anything, which the trailing
      marker below already says. *)
@@ -47,7 +48,7 @@ let print_stats name all =
 let upload name rel = { Menu.name; rel }
 
 let domain ?(uploads = 0) ?(downloads = 0) ?(paused = false) ?(uploading = [])
-    ?(downloading = []) ?(pending = 0L) ?sent ?rate ?mount name =
+    ?(downloading = []) ?(pending = 0L) ?sent ?rate name =
   {
     Menu.name;
     uploads = Some uploads;
@@ -58,7 +59,6 @@ let domain ?(uploads = 0) ?(downloads = 0) ?(paused = false) ?(uploading = [])
     pending_bytes = Some pending;
     bytes_uploaded = sent;
     upload_rate = rate;
-    mount;
   }
 
 let () =
@@ -67,24 +67,21 @@ let () =
      the two formatters. *)
   print_menu "two domains, one busy"
     [
-      domain "photos" ~uploads:3 ~mount:"/home/u/tsync/photos"
+      domain "photos" ~uploads:3
         ~uploading:[upload "b.mov" "b.mov"; upload "a_1.jpg" "a_1.jpg"]
         ~pending:12_800_000_000L ~sent:223_200_000L ~rate:1_600_000.;
-      domain "docs" ~mount:"/home/u/tsync/docs" ~sent:223_200_000L
-        ~rate:1_600_000.;
+      domain "docs" ~sent:223_200_000L ~rate:1_600_000.;
     ];
 
   (* Nothing answering. No traffic or rate line at all -- the daemon never told
      us a total, and inventing one is worse than leaving it out. *)
-  print_menu "daemon not running"
-    [{ (Menu.unreachable "photos") with mount = Some "/home/u/tsync/photos" }];
+  print_menu "daemon not running" [Menu.unreachable "photos"];
 
   (* Paused with a backlog: the overflow row, and no rate line because the rate
      is zero. *)
   print_menu "paused with a backlog"
     [
-      domain "photos" ~paused:true ~mount:"/home/u/tsync/photos" ~pending:500L
-        ~sent:0L ~rate:0.
+      domain "photos" ~paused:true ~pending:500L ~sent:0L ~rate:0.
         ~uploading:
           (List.map
              (fun n ->
@@ -92,9 +89,9 @@ let () =
              [7; 1; 2; 3; 4; 5; 6]);
     ];
 
-  (* A domain that answers but has no mount to open, alongside one that does:
-     the row is still worth showing, it just cannot go anywhere. *)
-  print_menu "one domain not mounted"
+  (* Downloads counted but no rows to show for them: the daemon left them out as
+     too small, and the count still comes from somewhere. *)
+  print_menu "downloads below the threshold"
     [domain "photos" ~downloads:2 ~sent:1_070_000_000L];
 
   (* Downloads draw exactly as uploads do, and the count on the domain row is
@@ -102,7 +99,7 @@ let () =
      fetches and would read "Downloading 9" above two files. *)
   print_menu "downloading, with uploads alongside"
     [
-      domain "photos" ~uploads:1 ~downloads:9 ~mount:"/home/u/tsync/photos"
+      domain "photos" ~uploads:1 ~downloads:9
         ~uploading:[upload "out.raw" "out.raw"]
         ~downloading:
           [
@@ -115,7 +112,7 @@ let () =
   (* The overflow row belongs to each list on its own. *)
   print_menu "more downloads than fit"
     [
-      domain "photos" ~downloads:7 ~mount:"/home/u/tsync/photos"
+      domain "photos" ~downloads:7
         ~downloading:
           (List.map
              (fun n ->

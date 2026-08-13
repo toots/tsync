@@ -48,6 +48,7 @@
    -framework
    Foundation))
  (libraries
+  tsync_menu
   tsync_sync
   tsync_naming
   tsync_conf

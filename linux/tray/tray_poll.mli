@@ -29,6 +29,9 @@ val stats : domain list -> Menu.stats list
     poll reads back what the daemon did. *)
 val set_paused : domain list -> bool -> unit
 
+(** Where a domain's folder is, for resolving a menu action. *)
+val mount_of : domain list -> string -> string option
+
 (** Show [path] in the desktop's file manager: a folder opened, a file selected
     inside its folder. A file is never opened, only revealed -- launching
     whatever owns the type may pull down a body that is still being written. *)

@@ -26,7 +26,6 @@ type status = {
   pending_bytes : int64 option;
   bytes_uploaded : int64 option;  (** process-wide, so repeated per domain *)
   upload_rate : float option;  (** process-wide *)
-  mount : string option;
 }
 
 val unreachable : string -> status
@@ -86,10 +85,15 @@ type stats = {
   domain_stats : domain_stats list;
 }
 
+(** A domain and a path under it, never an absolute one: where a domain's folder
+    actually is differs per client -- on macOS only the app can ask the File
+    Provider for it -- so resolving it belongs to whoever draws the menu. *)
+type target = { domain : string; rel : string }
+
 type action =
   | Nothing
-  | Open_folder of string
-  | Reveal_file of string
+  | Open_folder of string  (** the domain's name *)
+  | Reveal_file of target
   | Set_paused of bool
   | Show_stats
   | Quit
@@ -115,6 +119,18 @@ type entry = Separator | Item of item
 type menu = { icon : string; tooltip : string; entries : entry list }
 
 val render : status list -> menu
+
+(** The menu as a client that is not OCaml receives it. A row is flat —
+    [separator], or a label with its optional icon, indent, checkmark and
+    submenu marker — and its action names a domain and a path under it rather
+    than a place on disk, since only the client knows where a domain's folder
+    was surfaced. *)
+val to_json : menu -> Yojson.Safe.t
+
+(** One domain's [status] reply, as the daemon sends it. [name] is the domain
+    asked, since a reply that failed carries nothing to name it with. A missing
+    field is a daemon that predates it, not an error. *)
+val of_status_json : name:string -> Yojson.Safe.t -> status
 
 (** The stats submenu's rows, to be installed under the row whose action is
     [Show_stats]. Never empty: a submenu with nothing in it is one some panels

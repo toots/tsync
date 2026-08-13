@@ -79,8 +79,17 @@ let run () =
       match action with
         | Menu.Nothing -> ()
         | Quit -> quit := true
-        | Open_folder path -> Tray_poll.open_folder conn path
-        | Reveal_file path -> Tray_poll.reveal_file conn path
+        (* The model names a domain and a path under it; where that domain
+           actually sits is this client's to know. *)
+        | Open_folder domain -> (
+            match Tray_poll.mount_of !domains domain with
+              | Some mount -> Tray_poll.open_folder conn mount
+              | None -> ())
+        | Reveal_file { Menu.domain; rel } -> (
+            match Tray_poll.mount_of !domains domain with
+              | Some mount ->
+                  Tray_poll.reveal_file conn (Filename.concat mount rel)
+              | None -> ())
         (* A submenu, so clicking the row itself does nothing; its contents
            arrive when it opens. *)
         | Show_stats -> ()
