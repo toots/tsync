@@ -1,4 +1,4 @@
-.PHONY: build test deploy configure install-deps install uninstall e2e conformance stress
+.PHONY: build test deploy configure install-deps install-opam install-system install uninstall e2e conformance stress
 
 build:
 	dune build
@@ -17,8 +17,10 @@ install-deps:
 	opam pin add -ny git+https://github.com/toots/aws-s3.git#tsync
 	opam install --deps-only -y ..
 
-install:
+install-opam:
 	opam install ..
+
+install-system:
 	mkdir -p ~/.local/bin
 	ln -sf "$$(opam var bin)/tsync" ~/.local/bin/tsync
 	mkdir -p ~/.config/systemd/user
@@ -31,6 +33,8 @@ install:
 	# skip the prompt when it is already set.
 	loginctl show-user "$$USER" -p Linger 2>/dev/null | grep -q 'Linger=yes' \
 	  || sudo loginctl enable-linger "$$USER"
+
+install: install-opam install-system
 
 # Every step tolerates already being undone, so a partial install still cleans
 # up. Lingering is left enabled: it is a user-wide setting other services may
