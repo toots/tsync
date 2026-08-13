@@ -68,7 +68,10 @@ let dict_sv fields =
 
 external session_bus : unit -> connection = "tsync_dbus_bus_get"
 external close : connection -> unit = "tsync_dbus_close"
-external request_name : connection -> string -> int -> int = "tsync_dbus_request_name"
+
+external request_name : connection -> string -> int -> int
+  = "tsync_dbus_request_name"
+
 external add_match : connection -> string -> unit = "tsync_dbus_add_match"
 external flush : connection -> unit = "tsync_dbus_flush"
 external send : connection -> message -> unit = "tsync_dbus_send"
@@ -82,28 +85,43 @@ external pop_message : connection -> message option = "tsync_dbus_pop_message"
 external new_method_call : string -> string -> string -> string -> message
   = "tsync_dbus_new_method_call"
 
-external new_signal : string -> string -> string -> message = "tsync_dbus_new_signal"
+external new_signal : string -> string -> string -> message
+  = "tsync_dbus_new_signal"
+
 external new_method_return : message -> message = "tsync_dbus_new_method_return"
-external new_error : message -> string -> string -> message = "tsync_dbus_new_error"
+
+external new_error : message -> string -> string -> message
+  = "tsync_dbus_new_error"
+
 external message_type : message -> int = "tsync_dbus_message_type"
 external message_path : message -> string = "tsync_dbus_message_path"
 external message_interface : message -> string = "tsync_dbus_message_interface"
 external message_member : message -> string = "tsync_dbus_message_member"
 external message_sender : message -> string = "tsync_dbus_message_sender"
-external message_error_name : message -> string = "tsync_dbus_message_error_name"
+
+external message_error_name : message -> string
+  = "tsync_dbus_message_error_name"
+
 external message_no_reply : message -> bool = "tsync_dbus_message_no_reply"
 external iter_init_append : message -> iter = "tsync_dbus_iter_init_append"
 external iter_open : iter -> int -> string -> iter = "tsync_dbus_iter_open"
 external iter_close : iter -> iter -> unit = "tsync_dbus_iter_close"
-external iter_append_int : iter -> int -> int64 -> unit = "tsync_dbus_iter_append_int"
-external iter_append_double : iter -> float -> unit = "tsync_dbus_iter_append_double"
+
+external iter_append_int : iter -> int -> int64 -> unit
+  = "tsync_dbus_iter_append_int"
+
+external iter_append_double : iter -> float -> unit
+  = "tsync_dbus_iter_append_double"
 
 external iter_append_string : iter -> int -> string -> unit
   = "tsync_dbus_iter_append_string"
 
 external iter_init : message -> iter = "tsync_dbus_iter_init"
 external iter_arg_type : iter -> int = "tsync_dbus_iter_arg_type"
-external iter_element_signature : iter -> string = "tsync_dbus_iter_element_signature"
+
+external iter_element_signature : iter -> string
+  = "tsync_dbus_iter_element_signature"
+
 external iter_next : iter -> bool = "tsync_dbus_iter_next"
 external iter_recurse : iter -> iter = "tsync_dbus_iter_recurse"
 external iter_get_int : iter -> int64 = "tsync_dbus_iter_get_int"
@@ -114,7 +132,10 @@ let method_call = 1
 let method_return = 2
 let error = 3
 let signal = 4
-let message_new_method_call ~dest ~path ~iface ~member = new_method_call dest path iface member
+
+let message_new_method_call ~dest ~path ~iface ~member =
+  new_method_call dest path iface member
+
 let message_new_signal ~path ~iface ~member = new_signal path iface member
 
 (* Where the four container kinds are handled, and the only reason the C side
@@ -165,31 +186,37 @@ let rec read_value iter =
   else if code = t_string then String (iter_get_string iter)
   else if code = t_path then Path (iter_get_string iter)
   else if code = t_sig then Sig (iter_get_string iter)
-  else if code = t_array then
+  else if code = t_array then (
     (* The element signature has to be taken before recursing: an empty array
        has nothing inside to read it off. [get_signature] answers the whole
        array's, so drop the leading 'a'. *)
     let whole = iter_element_signature iter in
-    let elt = if String.length whole > 1 then String.sub whole 1 (String.length whole - 1) else "" in
-    Array (elt, read_sequence (iter_recurse iter))
+    let elt =
+      if String.length whole > 1 then
+        String.sub whole 1 (String.length whole - 1)
+      else ""
+    in
+    Array (elt, read_sequence (iter_recurse iter)))
   else if code = t_struct then Struct (read_sequence (iter_recurse iter))
-  else if code = t_variant then
+  else if code = t_variant then (
     match read_sequence (iter_recurse iter) with
       | [v] -> Variant v
-      | _ -> failwith "dbus: malformed variant"
-  else if code = t_dict then
+      | _ -> failwith "dbus: malformed variant")
+  else if code = t_dict then (
     match read_sequence (iter_recurse iter) with
       | [k; v] -> Dict (k, v)
-      | _ -> failwith "dbus: malformed dict entry"
-  else failwith (Printf.sprintf "dbus: unsupported type '%c'" (Char.chr (code land 0xff)))
+      | _ -> failwith "dbus: malformed dict entry")
+  else
+    failwith
+      (Printf.sprintf "dbus: unsupported type '%c'" (Char.chr (code land 0xff)))
 
 and read_sequence iter =
   (* [invalid] -- 0 -- is how libdbus spells "past the end", which is also the
      empty container. *)
   if iter_arg_type iter = 0 then []
-  else
+  else (
     let v = read_value iter in
-    if iter_next iter then v :: read_sequence iter else [v]
+    if iter_next iter then v :: read_sequence iter else [v])
 
 let body msg = read_sequence (iter_init msg)
 
@@ -254,7 +281,10 @@ let call conn ?(timeout = 5000) ~dest ~path ~iface ~member args =
   append msg args;
   let reply = send_with_reply_and_block conn msg timeout in
   if message_type reply = error then
-    raise (Error (message_error_name reply, match body reply with String s :: _ -> s | _ -> ""));
+    raise
+      (Error
+         ( message_error_name reply,
+           match body reply with String s :: _ -> s | _ -> "" ));
   body reply
 
 (* DBUS_NAME_FLAG_DO_NOT_QUEUE; DBUS_REQUEST_NAME_REPLY_PRIMARY_OWNER. *)

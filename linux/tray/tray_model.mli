@@ -53,7 +53,6 @@ val render : status list -> menu
 (** {1 The pieces, exposed for the test that pins them} *)
 
 val summary : status list -> string
-
 val detail : status -> string
 val traffic_line : status list -> string option
 val rate_line : status list -> string option

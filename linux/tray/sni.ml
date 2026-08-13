@@ -4,14 +4,16 @@ let watcher_path = "/StatusNotifierWatcher"
 (* Hosts disagree about which name an item's interface has: KDE minted the
    protocol under org.kde and the freedesktop spelling followed. Nothing else
    uses these member names, so answering to both costs nothing. *)
-let ifaces = ["org.kde.StatusNotifierItem"; "org.freedesktop.StatusNotifierItem"]
+let ifaces =
+  ["org.kde.StatusNotifierItem"; "org.freedesktop.StatusNotifierItem"]
 
 let properties = "org.freedesktop.DBus.Properties"
 let introspectable = "org.freedesktop.DBus.Introspectable"
 let peer = "org.freedesktop.DBus.Peer"
 
 (* One item per process, and the watcher keys its list on this. *)
-let bus_name () = Printf.sprintf "org.kde.StatusNotifierItem-%d-1" (Unix.getpid ())
+let bus_name () =
+  Printf.sprintf "org.kde.StatusNotifierItem-%d-1" (Unix.getpid ())
 
 type t = {
   conn : Dbus.connection;
@@ -42,7 +44,12 @@ let props t =
     ("AttentionMovieName", Dbus.String "");
     ( "ToolTip",
       Dbus.Struct
-        [Dbus.String ""; Dbus.Array ("(iiay)", []); Dbus.String t.tooltip; Dbus.String ""] );
+        [
+          Dbus.String "";
+          Dbus.Array ("(iiay)", []);
+          Dbus.String t.tooltip;
+          Dbus.String "";
+        ] );
     (* The whole item is a menu: a left click should drop it down rather than
        activate something, there being no window to raise. *)
     ("ItemIsMenu", Dbus.Bool true);
@@ -87,7 +94,10 @@ let introspection =
   </interface>
 |xml}
 
-let announce t member = List.iter (fun iface -> Dbus.emit t.conn ~path:t.item_path ~iface ~member []) ifaces
+let announce t member =
+  List.iter
+    (fun iface -> Dbus.emit t.conn ~path:t.item_path ~iface ~member [])
+    ifaces
 
 (* Asking the watcher to take us. [ServiceUnknown] is the ordinary case at
    login, when the panel has not started yet -- the NameOwnerChanged match in
@@ -96,12 +106,14 @@ let register t =
   (try
      ignore
        (Dbus.call t.conn ~dest:watcher ~path:watcher_path ~iface:watcher
-          ~member:"RegisterStatusNotifierItem" [Dbus.String (bus_name ())])
+          ~member:"RegisterStatusNotifierItem"
+          [Dbus.String (bus_name ())])
    with Dbus.Error (name, msg) -> Log.debug "tray: register: %s: %s" name msg);
   t.host <-
     (try
        match
-         Dbus.call t.conn ~dest:watcher ~path:watcher_path ~iface:properties ~member:"Get"
+         Dbus.call t.conn ~dest:watcher ~path:watcher_path ~iface:properties
+           ~member:"Get"
            [Dbus.String watcher; Dbus.String "IsStatusNotifierHostRegistered"]
        with
          | [Dbus.Variant (Dbus.Bool b)] -> b
@@ -110,7 +122,14 @@ let register t =
 
 let create conn ~item_path ~menu_path =
   let t =
-    { conn; item_path; menu_path; icon = "view-refresh"; tooltip = "tsync"; host = false }
+    {
+      conn;
+      item_path;
+      menu_path;
+      icon = "view-refresh";
+      tooltip = "tsync";
+      host = false;
+    }
   in
   (* The panel restarting takes the item's registration with it. Watching the
      watcher's owner is what brings the icon back, and its absence is the
@@ -134,7 +153,8 @@ let set t ~icon ~tooltip =
 
 let handle_properties t msg =
   match (Dbus.message_member msg, Dbus.body msg) with
-    | "Get", [Dbus.String iface; Dbus.String name] when List.mem iface ifaces -> (
+    | "Get", [Dbus.String iface; Dbus.String name] when List.mem iface ifaces
+      -> (
         match List.assoc_opt name (props t) with
           | Some v -> Dbus.reply t.conn msg [Dbus.Variant v]
           | None -> Dbus.unknown_property t.conn msg name)
@@ -151,7 +171,8 @@ let handle_properties t msg =
    holding whatever it said at login. *)
 let handle_name_owner_changed t msg =
   match Dbus.body msg with
-    | [Dbus.String name; _; Dbus.String owner] when name = watcher && owner <> "" ->
+    | [Dbus.String name; _; Dbus.String owner]
+      when name = watcher && owner <> "" ->
         Log.info "tray: %s is back, registering again" watcher;
         register t;
         announce t "NewIcon";
@@ -170,15 +191,16 @@ let handle t msg =
   else (
     let requested = Dbus.message_interface msg in
     if requested = properties then handle_properties t msg
-    else if requested = introspectable then Dbus.reply t.conn msg [Dbus.String introspection]
+    else if requested = introspectable then
+      Dbus.reply t.conn msg [Dbus.String introspection]
     else if requested = peer then Dbus.reply t.conn msg []
-    else if List.mem requested ifaces then
+    else if List.mem requested ifaces then (
       match Dbus.message_member msg with
         (* Nothing to do for any of them -- ItemIsMenu says the click belongs to
            the menu -- but each still has to be answered, or the host waits out
            its timeout on a click nobody meant anything by. *)
         | "Activate" | "SecondaryActivate" | "ContextMenu" | "Scroll" ->
             Dbus.reply t.conn msg []
-        | _ -> Dbus.unknown_method t.conn msg
+        | _ -> Dbus.unknown_method t.conn msg)
     else Dbus.unknown_interface t.conn msg;
     true)

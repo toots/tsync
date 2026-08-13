@@ -31,9 +31,9 @@ type value =
   | Path of string  (** object path, ['o'] *)
   | Sig of string  (** signature, ['g'] *)
   | Array of string * value list
-      (** element signature, then elements. The signature is carried rather
-          than derived because an empty array must still be typed: [a{sv}] and
-          [as] are both [Array (_, [])]. *)
+      (** element signature, then elements. The signature is carried rather than
+          derived because an empty array must still be typed: [a{sv}] and [as]
+          are both [Array (_, [])]. *)
   | Struct of value list
   | Variant of value
   | Dict of value * value  (** only legal inside an {!Array} *)
@@ -75,7 +75,6 @@ val message_type : message -> int
     without an option dance for headers that are simply absent. *)
 
 val message_path : message -> string
-
 val message_interface : message -> string
 val message_member : message -> string
 val message_sender : message -> string
@@ -91,20 +90,27 @@ val body : message -> value list
 
 val send : connection -> message -> unit
 val flush : connection -> unit
-val emit : connection -> path:string -> iface:string -> member:string -> value list -> unit
+
+val emit :
+  connection ->
+  path:string ->
+  iface:string ->
+  member:string ->
+  value list ->
+  unit
+
 val reply : connection -> message -> value list -> unit
 
 (** [error_reply conn to_ name text] answers a call with a D-Bus error. Every
     method call must be answered with one or the other: a call left hanging
-    costs the caller its full timeout, which for a menu is 25 seconds of
-    looking wedged. *)
+    costs the caller its full timeout, which for a menu is 25 seconds of looking
+    wedged. *)
 val error_reply : connection -> message -> string -> string -> unit
 
-(** The four standard refusals, named so that an object's dispatch reads as
-    what it does rather than as error strings. *)
+(** The four standard refusals, named so that an object's dispatch reads as what
+    it does rather than as error strings. *)
 
 val unknown_method : connection -> message -> unit
-
 val unknown_property : connection -> message -> string -> unit
 val unknown_interface : connection -> message -> unit
 val read_only_property : connection -> message -> unit
@@ -140,6 +146,6 @@ val read_write : connection -> int -> bool
 
 (** The next queued message, taken without running libdbus's own dispatch --
     which would answer method calls we mean to handle with an automatic
-    UnknownMethod. Routing is entirely the caller's, and so is the obligation
-    to reply to everything. *)
+    UnknownMethod. Routing is entirely the caller's, and so is the obligation to
+    reply to everything. *)
 val pop_message : connection -> message option

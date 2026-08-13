@@ -21,7 +21,9 @@ let ensure_bus_address () =
           | Some dir when Sys.file_exists (Filename.concat dir "bus") ->
               Unix.putenv "DBUS_SESSION_BUS_ADDRESS"
                 ("unix:path=" ^ Filename.concat dir "bus")
-          | _ -> failwith "no session bus: the tray needs a running desktop session")
+          | _ ->
+              failwith
+                "no session bus: the tray needs a running desktop session")
 
 let run () =
   ensure_bus_address ();
@@ -55,7 +57,8 @@ let run () =
   let refresh () =
     domains := Tray_poll.domains ();
     let rendered = Tray_model.render (Tray_poll.poll !domains) in
-    Sni.set sni ~icon:rendered.Tray_model.icon ~tooltip:rendered.Tray_model.tooltip;
+    Sni.set sni ~icon:rendered.Tray_model.icon
+      ~tooltip:rendered.Tray_model.tooltip;
     Dbusmenu.set menu rendered.Tray_model.entries;
     last_poll := Unix.gettimeofday ()
   in
@@ -81,7 +84,8 @@ let run () =
       Log.info "tray: session bus closed"
     else (
       drain ();
-      if (not !quit) && Unix.gettimeofday () -. !last_poll >= poll_every then refresh ();
+      if (not !quit) && Unix.gettimeofday () -. !last_poll >= poll_every then
+        refresh ();
       loop ())
   and drain () =
     match Dbus.pop_message conn with
@@ -94,10 +98,13 @@ let run () =
       (* Nothing claimed it. A signal is free to go unread, but a call left
          unanswered costs the caller its full timeout -- 25 seconds of a menu
          looking wedged -- so every one of them gets an error. *)
-      if Dbus.message_type msg = Dbus.method_call && not (Dbus.message_no_reply msg)
+      if
+        Dbus.message_type msg = Dbus.method_call
+        && not (Dbus.message_no_reply msg)
       then (
         Log.debug "tray: unhandled %s %s.%s" (Dbus.message_path msg)
-          (Dbus.message_interface msg) (Dbus.message_member msg);
+          (Dbus.message_interface msg)
+          (Dbus.message_member msg);
         Dbus.error_reply conn msg "org.freedesktop.DBus.Error.UnknownMethod"
           "tsync-tray does not implement that")
   in

@@ -20,14 +20,17 @@ let load_domains () =
 
 let domains () =
   let stamp =
-    try (Unix.stat paths.Runtime.config_path).Unix.st_mtime with Unix.Unix_error _ -> 0.
+    try (Unix.stat paths.Runtime.config_path).Unix.st_mtime
+    with Unix.Unix_error _ -> 0.
   in
   match !cached with
     | Some (seen, ds) when seen = stamp -> ds
     | _ ->
-        let ds = try load_domains () with Failure msg ->
-          Log.warn "tray: %s: %s" paths.Runtime.config_path msg;
-          []
+        let ds =
+          try load_domains ()
+          with Failure msg ->
+            Log.warn "tray: %s: %s" paths.Runtime.config_path msg;
+            []
         in
         cached := Some (stamp, ds);
         ds
@@ -37,9 +40,7 @@ let member name = function
   | _ -> None
 
 let int_field json name =
-  match member name json with
-    | Some (`Int n) -> Some n
-    | _ -> None
+  match member name json with Some (`Int n) -> Some n | _ -> None
 
 let int64_field json name =
   match member name json with
@@ -53,9 +54,7 @@ let float_field json name =
     | _ -> None
 
 let bool_field json name =
-  match member name json with
-    | Some (`Bool b) -> Some b
-    | _ -> None
+  match member name json with Some (`Bool b) -> Some b | _ -> None
 
 let string_field json name =
   match member name json with
@@ -79,8 +78,10 @@ let status_of_json (d : domain) json =
     | Some true ->
         {
           Tray_model.name = d.name;
-          uploads = Some (Option.value (int_field json "pendingUploads") ~default:0);
-          downloads = Some (Option.value (int_field json "pendingDownloads") ~default:0);
+          uploads =
+            Some (Option.value (int_field json "pendingUploads") ~default:0);
+          downloads =
+            Some (Option.value (int_field json "pendingDownloads") ~default:0);
           paused = Some (Option.value (bool_field json "paused") ~default:false);
           uploading = uploads_of json;
           pending_bytes = int64_field json "pendingBytes";
@@ -89,7 +90,8 @@ let status_of_json (d : domain) json =
           (* The daemon reports where it actually mounted; the config only says
              where it was asked to. Prefer the fact over the intention, and keep
              the config's answer for a domain that is not answering at all. *)
-          mount = Some (Option.value (string_field json "mount") ~default:d.mount);
+          mount =
+            Some (Option.value (string_field json "mount") ~default:d.mount);
         }
 
 (* [Ipc.send], the blocking one, has no timeout, and this loop is single
@@ -102,7 +104,8 @@ let poll ds =
       (fun () ->
         let open Lwt.Syntax in
         let+ reply =
-          Ipc.send_lwt ~timeout:1.5 ~socket_path:d.socket {|{"action":"status"}|}
+          Ipc.send_lwt ~timeout:1.5 ~socket_path:d.socket
+            {|{"action":"status"}|}
         in
         status_of_json d (Yojson.Basic.from_string reply))
       (fun _ -> Lwt.return (Tray_model.unreachable d.name))
@@ -153,8 +156,7 @@ let file_uri path =
 let xdg_open path =
   match Unix.fork () with
     | 0 -> (
-        try Unix.execvp "xdg-open" [|"xdg-open"; path|]
-        with _ -> exit 127)
+        try Unix.execvp "xdg-open" [| "xdg-open"; path |] with _ -> exit 127)
     | _ -> ()
     | exception Unix.Unix_error (e, _, _) ->
         Log.warn "tray: cannot start xdg-open: %s" (Unix.error_message e)

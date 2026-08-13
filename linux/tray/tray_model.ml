@@ -47,23 +47,30 @@ type menu = { icon : string; tooltip : string; entries : entry list }
 (* The queue runs a handful at a time, but a wide fan-out must not push the rest
    of the menu off the screen. *)
 let max_uploading_shown = 5
-
 let reachable s = s.uploads <> None
-let is_transferring s = Option.value s.uploads ~default:0 + Option.value s.downloads ~default:0 > 0
-let all_unreachable statuses = List.for_all (fun s -> not (reachable s)) statuses
+
+let is_transferring s =
+  Option.value s.uploads ~default:0 + Option.value s.downloads ~default:0 > 0
+
+let all_unreachable statuses =
+  List.for_all (fun s -> not (reachable s)) statuses
+
 let any_unreachable statuses = List.exists (fun s -> not (reachable s)) statuses
 
 let all_paused statuses =
   statuses <> [] && List.for_all (fun s -> s.paused = Some true) statuses
 
 let sum_opt f statuses =
-  List.fold_left (fun acc s -> match f s with Some v -> acc + v | None -> acc) 0 statuses
+  List.fold_left
+    (fun acc s -> match f s with Some v -> acc + v | None -> acc)
+    0 statuses
 
 (* The domains' own bytes are summed; the rate and the running total are the
    daemon's, one per process, so they are read once rather than added up. *)
 let pending_bytes statuses =
   List.fold_left
-    (fun acc s -> match s.pending_bytes with Some v -> Int64.add acc v | None -> acc)
+    (fun acc s ->
+      match s.pending_bytes with Some v -> Int64.add acc v | None -> acc)
     0L statuses
 
 let first_some f statuses = List.find_map f statuses
@@ -82,13 +89,17 @@ let human_bytes n =
   let trim s =
     if String.contains s '.' then (
       let last = ref (String.length s - 1) in
-      while !last >= 0 && s.[!last] = '0' do decr last done;
+      while !last >= 0 && s.[!last] = '0' do
+        decr last
+      done;
       if !last >= 0 && s.[!last] = '.' then decr last;
       String.sub s 0 (!last + 1))
     else s
   in
   let scaled unit digits divisor =
-    Printf.sprintf "%s %s" (trim (Printf.sprintf "%.*f" digits (Int64.to_float n /. divisor))) unit
+    Printf.sprintf "%s %s"
+      (trim (Printf.sprintf "%.*f" digits (Int64.to_float n /. divisor)))
+      unit
   in
   (* The unit is chosen by what the number rounds to, not by what it is: at zero
      fraction digits 999_999 bytes would otherwise read "1000 KB" instead of
@@ -111,26 +122,36 @@ let eta seconds =
   else (
     let total = int_of_float seconds in
     let parts =
-      [(total / 86400, "d"); (total mod 86400 / 3600, "h"); (total mod 3600 / 60, "m")]
+      [
+        (total / 86400, "d");
+        (total mod 86400 / 3600, "h");
+        (total mod 3600 / 60, "m");
+      ]
     in
     let shown =
       List.filteri (fun i _ -> i < 2) (List.filter (fun (n, _) -> n > 0) parts)
     in
     match shown with
       | [] -> None
-      | l -> Some (String.concat " " (List.map (fun (n, u) -> Printf.sprintf "%d%s" n u) l)))
+      | l ->
+          Some
+            (String.concat " "
+               (List.map (fun (n, u) -> Printf.sprintf "%d%s" n u) l)))
 
 let summary statuses =
   if statuses = [] then "No domains configured"
-  else if any_unreachable statuses && all_unreachable statuses then "Daemon not running"
+  else if any_unreachable statuses && all_unreachable statuses then
+    "Daemon not running"
   else (
     let uploads = sum_opt (fun s -> s.uploads) statuses in
     let downloads = sum_opt (fun s -> s.downloads) statuses in
-    if uploads = 0 && downloads = 0 then if all_paused statuses then "Paused" else "Idle"
+    if uploads = 0 && downloads = 0 then
+      if all_paused statuses then "Paused" else "Idle"
     else (
       let parts =
         (if uploads > 0 then [Printf.sprintf "Uploading %d" uploads] else [])
-        @ (if downloads > 0 then [Printf.sprintf "Downloading %d" downloads] else [])
+        @ (if downloads > 0 then [Printf.sprintf "Downloading %d" downloads]
+           else [])
         @ if all_paused statuses then ["paused"] else []
       in
       String.concat " · " parts))
@@ -141,7 +162,8 @@ let detail s =
     | Some 0, Some 0 -> if s.paused = Some true then "Paused" else "Idle"
     | Some up, Some 0 -> Printf.sprintf "Uploading %d" up
     | Some 0, Some down -> Printf.sprintf "Downloading %d" down
-    | Some up, Some down -> Printf.sprintf "Uploading %d · Downloading %d" up down
+    | Some up, Some down ->
+        Printf.sprintf "Uploading %d · Downloading %d" up down
 
 (* "223.2 MB sent · 12.8 GB to go", or just what has been sent once the queue is
    empty. *)
@@ -191,14 +213,18 @@ let file_icon name =
     | ".jpg" | ".jpeg" | ".png" | ".gif" | ".webp" | ".heic" | ".heif" | ".tif"
     | ".tiff" | ".bmp" | ".svg" | ".raw" | ".cr2" | ".nef" | ".dng" ->
         "image-x-generic"
-    | ".mp4" | ".mov" | ".mkv" | ".avi" | ".webm" | ".m4v" | ".mpg" | ".mpeg" | ".wmv" ->
+    | ".mp4" | ".mov" | ".mkv" | ".avi" | ".webm" | ".m4v" | ".mpg" | ".mpeg"
+    | ".wmv" ->
         "video-x-generic"
-    | ".mp3" | ".flac" | ".wav" | ".aac" | ".m4a" | ".ogg" | ".opus" | ".aiff" | ".aif" ->
+    | ".mp3" | ".flac" | ".wav" | ".aac" | ".m4a" | ".ogg" | ".opus" | ".aiff"
+    | ".aif" ->
         "audio-x-generic"
     | ".xls" | ".xlsx" | ".ods" | ".csv" -> "x-office-spreadsheet"
     | ".ppt" | ".pptx" | ".odp" -> "x-office-presentation"
-    | ".pdf" | ".doc" | ".docx" | ".odt" | ".rtf" | ".epub" -> "x-office-document"
-    | ".zip" | ".tar" | ".gz" | ".bz2" | ".xz" | ".zst" | ".7z" | ".rar" | ".dmg" | ".iso" ->
+    | ".pdf" | ".doc" | ".docx" | ".odt" | ".rtf" | ".epub" ->
+        "x-office-document"
+    | ".zip" | ".tar" | ".gz" | ".bz2" | ".xz" | ".zst" | ".7z" | ".rar"
+    | ".dmg" | ".iso" ->
         "package-x-generic"
     | _ -> "text-x-generic"
 
@@ -216,19 +242,22 @@ let render statuses =
         (Printf.sprintf "%s — %s" s.name (detail s))
         ~action:(match s.mount with Some m -> Open_folder m | None -> Nothing)
     in
-    let shown = List.sort (fun (a : upload) b -> compare a.name b.name) s.uploading in
+    let shown =
+      List.sort (fun (a : upload) b -> compare a.name b.name) s.uploading
+    in
     let files =
       List.filteri (fun i _ -> i < max_uploading_shown) shown
       |> List.map (fun (u : upload) ->
-             info u.name ~icon:(file_icon u.name) ~indent:1
-               ~action:
-                 (match s.mount with
-                   | Some m -> Reveal_file (Filename.concat m u.rel)
-                   | None -> Nothing))
+          info u.name ~icon:(file_icon u.name) ~indent:1
+            ~action:
+              (match s.mount with
+                | Some m -> Reveal_file (Filename.concat m u.rel)
+                | None -> Nothing))
     in
     let hidden = List.length s.uploading - max_uploading_shown in
     let more =
-      if hidden > 0 then [info (Printf.sprintf "… and %d more" hidden) ~indent:1]
+      if hidden > 0 then
+        [info (Printf.sprintf "… and %d more" hidden) ~indent:1]
       else []
     in
     (row :: files) @ more
@@ -239,9 +268,9 @@ let render statuses =
   let traffic =
     match traffic_line statuses with
       | None -> []
-      | Some line ->
+      | Some line -> (
           (Separator :: [info line])
-          @ (match rate_line statuses with Some r -> [info r] | None -> [])
+          @ match rate_line statuses with Some r -> [info r] | None -> [])
   in
   let pause =
     Item
@@ -259,12 +288,20 @@ let render statuses =
   (* "Quit tsync" on macOS, where quitting the app is quitting the whole thing.
      Here the daemon is a service this process does not own, and someone hiding
      an icon must not find their files stopped syncing. *)
-  let quit = Item
-      { label = "Quit tsync tray"; enabled = true; icon = None; checked = None;
-        indent = 0; action = Quit }
+  let quit =
+    Item
+      {
+        label = "Quit tsync tray";
+        enabled = true;
+        icon = None;
+        checked = None;
+        indent = 0;
+        action = Quit;
+      }
   in
   {
     icon = icon_name statuses;
     tooltip = Printf.sprintf "tsync — %s" (summary statuses);
-    entries = ((header :: domains) @ traffic) @ [Separator; pause; Separator; quit];
+    entries =
+      ((header :: domains) @ traffic) @ [Separator; pause; Separator; quit];
   }

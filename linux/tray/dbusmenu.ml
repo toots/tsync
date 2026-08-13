@@ -29,13 +29,12 @@ let is_open t =
 
 (* dbusmenu reads a lone underscore as the mnemonic marker and eats it, so a
    file called my_photo_01.jpg would be drawn as myphoto01.jpg. *)
-let escape_mnemonics label =
-  String.concat "__" (String.split_on_char '_' label)
+let escape_mnemonics label = String.concat "__" (String.split_on_char '_' label)
 
 let props_of_entry (entry : Tray_model.entry) =
   match entry with
     | Tray_model.Separator -> [("type", Dbus.String "separator")]
-    | Item i ->
+    | Item i -> (
         (* The macOS menu indents a file under its domain; dbusmenu has no
            property for that, so the nesting is spent on leading space. *)
         let label =
@@ -49,24 +48,30 @@ let props_of_entry (entry : Tray_model.entry) =
           ("visible", Dbus.Bool true);
         ]
         @ (match i.Tray_model.icon with
-            | Some name -> [("icon-name", Dbus.String name)]
-            | None -> [])
+          | Some name -> [("icon-name", Dbus.String name)]
+          | None -> [])
         @
-        match i.Tray_model.checked with
+          match i.Tray_model.checked with
           | Some on ->
               [
                 ("toggle-type", Dbus.String "checkmark");
                 ("toggle-state", Dbus.Int32 (if on then 1l else 0l));
               ]
-          | None -> []
+          | None -> [])
 
 (* Only what was asked for. An empty request means everything, which is what
    every host actually sends. *)
 let filter_props names props =
-  if names = [] then props else List.filter (fun (k, _) -> List.mem k names) props
+  if names = [] then props
+  else List.filter (fun (k, _) -> List.mem k names) props
 
 let node ~id ~props ~children =
-  Dbus.Struct [Dbus.Int32 (Int32.of_int id); Dbus.dict_sv props; Dbus.Array ("v", children)]
+  Dbus.Struct
+    [
+      Dbus.Int32 (Int32.of_int id);
+      Dbus.dict_sv props;
+      Dbus.Array ("v", children);
+    ]
 
 let layout t names depth =
   let children =
@@ -75,7 +80,9 @@ let layout t names depth =
       List.map
         (fun r ->
           Dbus.Variant
-            (node ~id:r.id ~props:(filter_props names (props_of_entry r.entry)) ~children:[]))
+            (node ~id:r.id
+               ~props:(filter_props names (props_of_entry r.entry))
+               ~children:[]))
         t.rows
   in
   node ~id:0
@@ -187,7 +194,9 @@ let menu_props =
   ]
 
 let strings = List.filter_map (function Dbus.String s -> Some s | _ -> None)
-let ints = List.filter_map (function Dbus.Int32 n -> Some (Int32.to_int n) | _ -> None)
+
+let ints =
+  List.filter_map (function Dbus.Int32 n -> Some (Int32.to_int n) | _ -> None)
 
 let arg_strings = function Dbus.Array (_, vs) -> strings vs | _ -> []
 let arg_ints = function Dbus.Array (_, vs) -> ints vs | _ -> []
@@ -212,7 +221,8 @@ let handle_menu t msg =
     | "GetGroupProperties", [ids; names] ->
         let wanted = arg_ints ids and names = arg_strings names in
         let rows =
-          if wanted = [] then t.rows else List.filter (fun r -> List.mem r.id wanted) t.rows
+          if wanted = [] then t.rows
+          else List.filter (fun r -> List.mem r.id wanted) t.rows
         in
         reply
           [
@@ -223,13 +233,16 @@ let handle_menu t msg =
                     Dbus.Struct
                       [
                         Dbus.Int32 (Int32.of_int r.id);
-                        Dbus.dict_sv (filter_props names (props_of_entry r.entry));
+                        Dbus.dict_sv
+                          (filter_props names (props_of_entry r.entry));
                       ])
                   rows );
           ]
     | "GetProperty", [Dbus.Int32 id; Dbus.String name] -> (
-        match Option.bind (row t (Int32.to_int id)) (fun r ->
-                  List.assoc_opt name (props_of_entry r.entry))
+        match
+          Option.bind
+            (row t (Int32.to_int id))
+            (fun r -> List.assoc_opt name (props_of_entry r.entry))
         with
           | Some v -> reply [Dbus.Variant v]
           | None -> reply [Dbus.Variant (Dbus.String "")])
@@ -241,12 +254,12 @@ let handle_menu t msg =
     | "AboutToShowGroup", [_] ->
         t.opened_at <- Some (Unix.gettimeofday ());
         reply [Dbus.Array ("i", []); Dbus.Array ("i", [])]
-    | "Event", [Dbus.Int32 id; Dbus.String event; _; _] ->
+    | "Event", [Dbus.Int32 id; Dbus.String event; _; _] -> (
         (* Answered before acting, always: opening a file manager blocks, and a
            menu that has not been let go of looks stuck. *)
         reply [];
         Dbus.flush t.conn;
-        (match event with
+        match event with
           | "opened" -> t.opened_at <- Some (Unix.gettimeofday ())
           | "closed" -> close t
           | "clicked" -> (
@@ -272,7 +285,8 @@ let handle t msg =
   else (
     let requested = Dbus.message_interface msg in
     if requested = properties then handle_properties t msg
-    else if requested = introspectable then Dbus.reply t.conn msg [Dbus.String introspection]
+    else if requested = introspectable then
+      Dbus.reply t.conn msg [Dbus.String introspection]
     else if requested = peer then Dbus.reply t.conn msg []
     else if requested = iface then handle_menu t msg
     else Dbus.unknown_interface t.conn msg;

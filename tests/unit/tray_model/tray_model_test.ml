@@ -28,7 +28,9 @@ let print_menu name statuses =
               | Some false -> "[ ] "
               | None -> "")
             i.Tray_model.label
-            (match i.Tray_model.icon with Some c -> " (" ^ c ^ ")" | None -> "")
+            (match i.Tray_model.icon with
+              | Some c -> " (" ^ c ^ ")"
+              | None -> "")
             (if i.Tray_model.enabled then action i.Tray_model.action
              else " (disabled)"))
     m.Tray_model.entries;
@@ -59,13 +61,19 @@ let () =
       domain "photos" ~uploads:3 ~mount:"/home/u/tsync/photos"
         ~uploading:[upload "b.mov" "b.mov"; upload "a_1.jpg" "a_1.jpg"]
         ~pending:12_800_000_000L ~sent:223_200_000L ~rate:1_600_000.;
-      domain "docs" ~mount:"/home/u/tsync/docs" ~sent:223_200_000L ~rate:1_600_000.;
+      domain "docs" ~mount:"/home/u/tsync/docs" ~sent:223_200_000L
+        ~rate:1_600_000.;
     ];
 
   (* Nothing answering. No traffic or rate line at all -- the daemon never told
      us a total, and inventing one is worse than leaving it out. *)
   print_menu "daemon not running"
-    [{ (Tray_model.unreachable "photos") with mount = Some "/home/u/tsync/photos" }];
+    [
+      {
+        (Tray_model.unreachable "photos") with
+        mount = Some "/home/u/tsync/photos";
+      };
+    ];
 
   (* Paused with a backlog: the overflow row, and no rate line because the rate
      is zero. *)
@@ -75,7 +83,8 @@ let () =
         ~sent:0L ~rate:0.
         ~uploading:
           (List.map
-             (fun n -> upload (Printf.sprintf "f%d.txt" n) (Printf.sprintf "f%d.txt" n))
+             (fun n ->
+               upload (Printf.sprintf "f%d.txt" n) (Printf.sprintf "f%d.txt" n))
              [7; 1; 2; 3; 4; 5; 6]);
     ];
 
@@ -90,8 +99,18 @@ let () =
   List.iter
     (fun n -> Printf.printf "%-16Ld %s\n" n (Tray_model.human_bytes n))
     [
-      0L; 1L; 999L; 1_000L; 1_500L; 999_999L; 1_000_000L; 223_200_000L;
-      1_000_000_000L; 1_070_000_000L; 12_800_000_000L; 5_000_000_000L;
+      0L;
+      1L;
+      999L;
+      1_000L;
+      1_500L;
+      999_999L;
+      1_000_000L;
+      223_200_000L;
+      1_000_000_000L;
+      1_070_000_000L;
+      12_800_000_000L;
+      5_000_000_000L;
       2_500_000_000_000L;
     ];
 

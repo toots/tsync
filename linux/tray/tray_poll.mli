@@ -1,8 +1,8 @@
 (** Asking each domain's daemon what it is doing.
 
     Polled rather than subscribed: the daemon publishes events for content
-    changes, not for queue depth, and on Linux the FUSE frontend serves no
-    event stream at all. A status call costs one round trip on a socket that is
+    changes, not for queue depth, and on Linux the FUSE frontend serves no event
+    stream at all. A status call costs one round trip on a socket that is
     already there. *)
 
 type domain = { name : string; socket : string; mount : string }
@@ -14,8 +14,8 @@ type domain = { name : string; socket : string; mount : string }
 val domains : unit -> domain list
 
 (** One [status] round trip per domain, all at once and each bounded, so a
-    wedged daemon costs one stale row rather than a frozen tray. Never raises:
-    a domain that does not answer comes back as {!Tray_model.unreachable}. *)
+    wedged daemon costs one stale row rather than a frozen tray. Never raises: a
+    domain that does not answer comes back as {!Tray_model.unreachable}. *)
 val poll : domain list -> Tray_model.status list
 
 (** Best effort across every domain, like the macOS switch: one that refuses is
