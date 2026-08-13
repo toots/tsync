@@ -70,7 +70,9 @@ tooltip tsync — Uploading 1 · Downloading 2
         photos — Uploading 1 · Downloading 2 -> open photos
             out.raw (image-x-generic) -> reveal photos:out.raw
             holiday.mov (video-x-generic) -> reveal photos:trips/holiday.mov
+                752.0 MB of 14.5 GB · 1.5 MB/s · 2h 34m left
             notes.pdf (x-office-document) -> reveal photos:notes.pdf
+                234.4 KB of 878.9 KB
         ---
         1000 B sent
         ---

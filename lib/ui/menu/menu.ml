@@ -1,4 +1,10 @@
-type transfer = { name : string; rel : string }
+type transfer = {
+  name : string;
+  rel : string;
+  moved : int64 option;
+  total : int64 option;
+  rate : float option;
+}
 
 type status = {
   name : string;
@@ -102,8 +108,24 @@ type menu = { icon : string; tooltip : string; entries : entry list }
 let max_uploading_shown = 5
 let reachable s = s.uploads <> None
 
+(* [downloads] counts chunk fetches in flight, which is not what the rows under
+   this count: one file is many chunks, and several files can share one fetch.
+   Where there are rows, they are what the number has to agree with. *)
+let download_count s =
+  match s.downloading with
+    | [] -> s.downloads
+    | files -> Some (List.length files)
+
+(* Counted off the rows wherever there are rows: [downloads] is chunk fetches at
+   the instant of asking, so a sequential read that is plainly moving reads zero
+   between one fetch and the next -- and the icon would blink to idle under a row
+   saying otherwise. Below the reporting threshold there are no rows, and the
+   fetch count is what is left to notice it by. *)
 let is_transferring s =
-  Option.value s.uploads ~default:0 + Option.value s.downloads ~default:0 > 0
+  Option.value s.uploads ~default:0
+  + Option.value (download_count s) ~default:0
+  + Option.value s.downloads ~default:0
+  > 0
 
 let all_unreachable statuses =
   List.for_all (fun s -> not (reachable s)) statuses
@@ -427,15 +449,46 @@ let stats_entries = function
 (* One shape for both directions, so a download row and an upload row cannot
    drift apart. Which downloads are worth a row was settled by the daemon, which
    is why nothing here has to weigh them. *)
+(* "752 MB of 14.5 GB · 1.6 MB/s · 2h 23m left", dropping whatever the daemon
+   did not report. Under the name rather than beside it: a menu is as wide as
+   its widest row, and file names are long enough already.
+
+   The estimate reads the whole file as what is left to fetch, so a file part of
+   which was already cached finishes sooner than it says. Over-stating what
+   remains beats a number that runs out while the transfer is still going. *)
+let progress_line (u : transfer) =
+  let parts =
+    (match (u.moved, u.total) with
+      | Some moved, Some total ->
+          [Printf.sprintf "%s of %s" (human_bytes moved) (human_bytes total)]
+      | Some moved, None -> [human_bytes moved]
+      | None, _ -> [])
+    @ (match u.rate with
+      | Some rate when rate > 0. ->
+          [Printf.sprintf "%s/s" (human_bytes (Int64.of_float rate))]
+      | _ -> [])
+    @
+      match (u.moved, u.total, u.rate) with
+      | Some moved, Some total, Some rate when rate > 0. && total > moved -> (
+          match eta (Int64.to_float (Int64.sub total moved) /. rate) with
+            | Some left -> [left ^ " left"]
+            | None -> ["under a minute left"])
+      | _ -> []
+  in
+  match parts with
+    | [] -> []
+    | parts -> [info (String.concat " · " parts) ~indent:2]
+
 let file_rows s transfers =
   let shown =
     List.sort (fun (a : transfer) b -> compare a.name b.name) transfers
   in
   let rows =
     List.filteri (fun i _ -> i < max_uploading_shown) shown
-    |> List.map (fun (u : transfer) ->
-        info u.name ~icon:(file_icon u.name) ~indent:1
-          ~action:(Reveal_file { domain = s.name; rel = u.rel }))
+    |> List.concat_map (fun (u : transfer) ->
+        info (ellipsis u.name) ~icon:(file_icon u.name) ~indent:1
+          ~action:(Reveal_file { domain = s.name; rel = u.rel })
+        :: progress_line u)
   in
   let hidden = List.length transfers - max_uploading_shown in
   rows
@@ -574,7 +627,15 @@ let transfers_of json field =
         List.filter_map
           (fun item ->
             match (string_field item "name", string_field item "rel") with
-              | Some name, Some rel -> Some { name; rel }
+              | Some name, Some rel ->
+                  Some
+                    {
+                      name;
+                      rel;
+                      moved = int64_field item "bytes";
+                      total = int64_field item "size";
+                      rate = float_field item "rate";
+                    }
               | _ -> None)
           items
     | _ -> []

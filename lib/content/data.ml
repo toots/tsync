@@ -29,8 +29,15 @@ module Make (C : Conf.S) (R : Remote.S) = struct
     started : float;
     mutable bytes : int;
     mutable last : float;
+    (* Measured over a window rather than since the start, so a stall shows as
+       the rate falling rather than as an average that takes as long to decay as
+       it took to build. *)
+    mutable mark_at : float;
+    mutable mark_bytes : int;
+    mutable rate : float;
   }
 
+  let rate_window = 2.
   let pulls : (string, pull) Hashtbl.t = Hashtbl.create 8
 
   (* Longer than the tray's poll interval, or a row blinks out between two polls
@@ -60,13 +67,32 @@ module Make (C : Conf.S) (R : Remote.S) = struct
     match Hashtbl.find_opt pulls key with
       | Some p ->
           p.bytes <- p.bytes + n;
-          p.last <- now
+          p.last <- now;
+          let elapsed = now -. p.mark_at in
+          if elapsed >= rate_window then (
+            p.rate <- float_of_int (p.bytes - p.mark_bytes) /. elapsed;
+            p.mark_at <- now;
+            p.mark_bytes <- p.bytes)
       | None ->
           if Hashtbl.length pulls >= max_pulling then prune_pulls now;
           Hashtbl.replace pulls key
-            { size; started = now; bytes = n; last = now }
+            {
+              size;
+              started = now;
+              bytes = n;
+              last = now;
+              mark_at = now;
+              mark_bytes = 0;
+              rate = 0.;
+            }
 
-  type pulling = { key : string; bytes : int; size : int; seconds : float }
+  type pulling = {
+    key : string;
+    bytes : int;
+    size : int;
+    seconds : float;
+    rate : float;
+  }
 
   (* [status] asks on every tray poll, so the answer is bounded. Biggest first,
      so what is cut is what mattered least. *)
@@ -83,6 +109,13 @@ module Make (C : Conf.S) (R : Remote.S) = struct
           size = p.size;
           (* Guarded for the same clock step [prune_pulls] guards against. *)
           seconds = Float.max 0. (now -. p.started);
+          (* Nothing measured yet, so the average stands in rather than a zero
+             that would read as a stall. *)
+          rate =
+            (if p.rate > 0. then p.rate
+             else (
+               let elapsed = Float.max 0. (now -. p.started) in
+               if elapsed > 0. then float_of_int p.bytes /. elapsed else 0.));
         }
         :: acc)
       pulls []

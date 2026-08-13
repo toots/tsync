@@ -45,7 +45,7 @@ let print_stats name all =
   print_entries (Menu.stats_entries all);
   print_newline ()
 
-let upload name rel = { Menu.name; rel }
+let upload ?moved ?total ?rate name rel = { Menu.name; rel; moved; total; rate }
 
 let domain ?(uploads = 0) ?(downloads = 0) ?(paused = false) ?(uploading = [])
     ?(downloading = []) ?(pending = 0L) ?sent ?rate name =
@@ -103,8 +103,10 @@ let () =
         ~uploading:[upload "out.raw" "out.raw"]
         ~downloading:
           [
-            upload "holiday.mov" "trips/holiday.mov";
-            upload "notes.pdf" "notes.pdf";
+            upload "holiday.mov" "trips/holiday.mov" ~moved:788_529_152L
+              ~total:15_589_124_313L ~rate:1_600_000.;
+            (* Reported without a rate yet, so no estimate is offered. *)
+            upload "notes.pdf" "notes.pdf" ~moved:240_000L ~total:900_000L;
           ]
         ~sent:1_000L;
     ];

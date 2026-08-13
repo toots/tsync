@@ -28,6 +28,7 @@ module Make (C : Conf.S) (F : File_ops.S) = struct
             ("bytes", `Int d.d_bytes);
             ("size", `Int d.d_size);
             ("seconds", `Float d.d_seconds);
+            ("rate", `Float d.d_rate);
           ])
       (F.downloading_now ())
 

@@ -172,6 +172,7 @@ module Make_with_layout (C : Conf.S) (Sq : Sync_queue.S) (L : Layout.S) :
           d_bytes = p.D.bytes;
           d_size = p.D.size;
           d_seconds = p.D.seconds;
+          d_rate = p.D.rate;
         })
       (D.pulling_now ())
 

@@ -17,6 +17,7 @@ type downloading = {
   d_bytes : int;
   d_size : int;
   d_seconds : float;
+  d_rate : float;
 }
 
 module type S = sig

@@ -112,7 +112,13 @@ module Make (C : Conf.S) (R : Remote.S) : sig
       [bytes] is what this read has pulled, not what the file holds; [size] is
       the whole file, so a caller can say "12.4 MB of 1.2 GB" without touching
       the store. *)
-  type pulling = { key : string; bytes : int; size : int; seconds : float }
+  type pulling = {
+    key : string;
+    bytes : int;
+    size : int;
+    seconds : float;
+    rate : float;  (** bytes per second, over a recent window *)
+  }
 
   (** Files currently waiting on the network because something is reading them —
       distinct from {!download_progress}, which is whole-file materialization.

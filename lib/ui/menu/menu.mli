@@ -6,9 +6,15 @@
     D-Bus, a mount path or a menu toolkit, which is what lets the test pin it on
     a machine with no tray at all. *)
 
+(** A file moving in either direction. The figures are [None] where the daemon
+    does not track them -- uploads report no per-file progress yet -- and a row
+    with none of them is just a name. *)
 type transfer = {
   name : string;  (** the base name, which is what a row is labelled with *)
   rel : string;  (** where it sits under the domain root, for revealing it *)
+  moved : int64 option;  (** bytes across the wire for this transfer *)
+  total : int64 option;  (** the whole file *)
+  rate : float option;  (** bytes per second, recently *)
 }
 
 (** One domain's last answer. [None] counts mean it did not answer at all --
