@@ -150,7 +150,7 @@ tooltip tsync — No domains configured
     },
     { "separator": true },
     {
-      "label": "Quit tsync tray",
+      "label": "Quit tsync menu bar",
       "enabled": true,
       "indent": 0,
       "action": { "quit": true }

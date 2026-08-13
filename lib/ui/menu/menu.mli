@@ -124,7 +124,11 @@ type item = {
 type entry = Separator | Item of item
 type menu = { icon : string; tooltip : string; entries : entry list }
 
-val render : status list -> menu
+(** [quit_label] names the icon the [Quit] row removes, since that is all it
+    removes: the daemon runs under systemd or launchd and keeps syncing. It is
+    the caller's because only the client knows what its own icon is called -- a
+    panel tray on Linux, the menu bar on macOS. *)
+val render : ?quit_label:string -> status list -> menu
 
 (** The menu as a client that is not OCaml receives it. A row is flat —
     [separator], or a label with its optional icon, indent, checkmark and

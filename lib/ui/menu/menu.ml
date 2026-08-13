@@ -494,7 +494,7 @@ let file_rows s transfers =
   if hidden > 0 then [info (Printf.sprintf "… and %d more" hidden) ~indent:1]
   else []
 
-let render statuses =
+let render ?(quit_label = "Quit tsync tray") statuses =
   (* Only when there is no domain row to say it instead. A domain row carries
      the same state, names which domain it is about, and opens the folder; the
      summary across all of them is in the tooltip. With nothing configured there
@@ -543,13 +543,14 @@ let render statuses =
      reaches every backend, which is a round trip nobody asked for every three
      seconds. Until then it says so. *)
   let stats = info "Stats" ~action:Show_stats ~submenu:true in
-  (* "Quit tsync" on macOS, where quitting the app is quitting the whole thing.
-     Here the daemon is a service this process does not own, and someone hiding
-     an icon must not find their files stopped syncing. *)
+  (* The daemon is a service this menu does not own, on either platform: it
+     outlives us under systemd or launchd, and someone hiding an icon must not
+     find their files stopped syncing. So the label names the icon rather than
+     tsync -- what that icon is called is the caller's to say. *)
   let quit =
     Item
       {
-        label = "Quit tsync tray";
+        label = quit_label;
         enabled = true;
         icon = None;
         checked = None;

@@ -132,7 +132,7 @@ let () =
   print_endline
     (Yojson.Safe.pretty_to_string
        (Menu.to_json
-          (Menu.render
+          (Menu.render ~quit_label:"Quit tsync menu bar"
              [
                domain "photos" ~uploads:1
                  ~uploading:[upload "out.raw" "out.raw" ~total:1_200_000L]

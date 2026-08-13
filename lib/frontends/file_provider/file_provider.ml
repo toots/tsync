@@ -289,7 +289,10 @@ let start ~confs ~socket_path =
        ( Yojson.Safe.to_string
            (`Assoc
               [
-                ("ok", `Bool true); ("menu", Menu.to_json (Menu.render statuses));
+                ("ok", `Bool true);
+                ( "menu",
+                  Menu.to_json
+                    (Menu.render ~quit_label:"Quit tsync menu bar" statuses) );
               ]),
          `Continue )
      in
