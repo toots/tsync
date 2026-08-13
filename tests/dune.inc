@@ -57,6 +57,20 @@
   (action
    (diff deferred.expected deferred.output))))
 
+(subdir backends/dial_deadline
+ (alias
+  (name default)
+  (deps dial_deadline.exe))
+ (rule
+  (alias runtest)
+  (target dial_deadline.output)
+  (action
+   (with-stdout-to dial_deadline.output (ignore-stderr (run ./dial_deadline.exe)))))
+ (rule
+  (alias runtest)
+  (action
+   (diff dial_deadline.expected dial_deadline.output))))
+
 (subdir backends/fallback
  (alias
   (name default)

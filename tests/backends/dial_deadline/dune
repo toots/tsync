@@ -1,0 +1,5 @@
+(executable
+ (flags
+  (:standard -open Tsync_http_client))
+ (name dial_deadline)
+ (libraries tsync_http_client cohttp-lwt-unix uri lwt lwt.unix))
