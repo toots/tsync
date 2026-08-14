@@ -21,9 +21,12 @@ module Make (C : Conf.S) (R : Remote.S) = struct
      from [active] below, which tracks whole-file materialization: that has a
      total known up front and a scoped lifetime, and a demand read has neither.
 
-     Materialization does not land here even though [assemble_to] reads through
-     [pread] -- it fetches every group first, so its reads find the chunks local
-     and report no backend. *)
+     A materialization's reads do not land here on their own: it fetches every
+     group first, so by the time [pread] runs the chunks are local and report no
+     backend. {!fetch_groups} credits it instead, at the one point where it does
+     touch the network -- otherwise a fetch started from Finder, which is the
+     whole of what the macOS frontend does, shows in the tray as a count with no
+     rows under it. *)
   type pull = {
     size : int;
     started : float;
@@ -1046,10 +1049,19 @@ module Make (C : Conf.S) (R : Remote.S) = struct
      a listener registry, since {!Chunk_cache.ensure} hands a second caller the
      in-flight promise without its callback. *)
   let fetch_groups key groups =
+    (* What is owed the network, not the size of the file: a partly cached file
+       finishes sooner, and an ETA is against what is left to come down. *)
+    let owed = groups_bytes groups in
     Lwt_list.iter_p
       (fun group ->
-        let+ () = Cc.ensure ~group () in
-        credit key (Chunk_group.bytes group))
+        let+ fetched = Cc.ensure_fetched ~group () in
+        let bytes = Chunk_group.bytes group in
+        (* The bar counts every group: one already on disk is progress toward a
+           materialized file. The tray row counts only what crossed the wire, or
+           a part-cached file credits its local groups at once and reads as a
+           rate in the gigabytes. *)
+        credit key bytes;
+        if fetched then credit_pull key ~size:owed bytes)
       groups
 
   (* Counted here, not at the callers, so every route to a materialized file is
