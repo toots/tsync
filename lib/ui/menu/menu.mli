@@ -131,10 +131,11 @@ type menu = { icon : string; tooltip : string; entries : entry list }
 val render : ?quit_label:string -> status list -> menu
 
 (** The menu as a client that is not OCaml receives it. A row is flat —
-    [separator], or a label with its optional icon, indent, checkmark and
-    submenu marker — and its action names a domain and a path under it rather
-    than a place on disk, since only the client knows where a domain's folder
-    was surfaced. *)
+    [separator], or a label with its indent, checkmark and submenu marker — and
+    its action names a domain and a path under it rather than a place on disk,
+    since only the client knows where a domain's folder was surfaced. [icon] is
+    left out: it is a freedesktop name for a panel to look up, and no client
+    reading this JSON has those icons. *)
 val to_json : menu -> Yojson.Safe.t
 
 (** Rows on their own, for a set that is not a whole menu: the stats submenu is

@@ -112,8 +112,7 @@ tooltip tsync — No domains configured
       "label": "out.raw",
       "enabled": true,
       "indent": 1,
-      "action": { "reveal": { "domain": "photos", "rel": "out.raw" } },
-      "icon": "image-x-generic"
+      "action": { "reveal": { "domain": "photos", "rel": "out.raw" } }
     },
     { "label": "1.1 MB", "enabled": true, "indent": 2, "action": {} },
     {
@@ -122,8 +121,7 @@ tooltip tsync — No domains configured
       "indent": 1,
       "action": {
         "reveal": { "domain": "photos", "rel": "trips/holiday.mov" }
-      },
-      "icon": "video-x-generic"
+      }
     },
     {
       "label": "752.0 MB of 14.5 GB · 1.5 MB/s · 2h 34m left",

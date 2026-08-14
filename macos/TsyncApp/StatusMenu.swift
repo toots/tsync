@@ -164,7 +164,10 @@ final class StatusMenu: NSObject, NSMenuDelegate {
                 entry.target = self
                 entry.representedObject = url
                 entry.toolTip = url.path(percentEncoded: false)
-                entry.image = Self.icon(forFileNamed: title)
+                // From the path, not from the label: a long name reaches the
+                // row ellipsised, and a name cut short of its extension asks
+                // the workspace about a file type that does not exist.
+                entry.image = Self.icon(forFileNamed: (target.rel as NSString).lastPathComponent)
             } else if action.setPaused != nil {
                 entry.action = #selector(togglePause)
                 entry.target = self

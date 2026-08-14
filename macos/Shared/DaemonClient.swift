@@ -73,7 +73,6 @@ struct DaemonMenuRow: Decodable {
     var label: String?
     var enabled: Bool?
     var indent: Int?
-    var icon: String?
     var checked: Bool?
     var submenu: Bool?
     var action: DaemonMenuAction?

@@ -592,7 +592,9 @@ let entry_json = function
            ("indent", `Int i.indent);
            ("action", action_json i.action);
          ]
-        @ (match i.icon with Some n -> [("icon", `String n)] | None -> [])
+        (* [icon] is not here: it names a freedesktop icon for a panel to look
+           up, and the only reader of this JSON is a menu bar that has no such
+           icons and derives its own from the file's path. *)
         @ (match i.checked with
           | Some on -> [("checked", `Bool on)]
           | None -> [])
