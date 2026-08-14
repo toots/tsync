@@ -173,7 +173,9 @@ let status_cmd =
       match ipc_action ~socket_path ~domain:name "status" with
         | obj -> print_endline (Yojson.Safe.to_string (`Assoc obj))
         | exception _ -> Printf.printf "No daemon answering on %s\n" socket_path
-    with e -> Printf.eprintf "Error: %s\n" (Printexc.to_string e)
+    with e ->
+      Printf.eprintf "Error: %s\n" (Printexc.to_string e);
+      exit 1
   in
   Cmd.v
     (Cmd.info "status" ~doc:"Show daemon status")
@@ -223,7 +225,9 @@ let pause_cmd ~verb ~arg ~done_ ~doc =
         ipc_action ~socket_path ~domain:name ~arg "pause"
       in
       Printf.printf "Uploads %s for '%s'\n" done_ name
-    with e -> Printf.eprintf "Error: %s\n" (Printexc.to_string e)
+    with e ->
+      Printf.eprintf "Error: %s\n" (Printexc.to_string e);
+      exit 1
   in
   Cmd.v (Cmd.info verb ~doc) Term.(const run $ domain_arg)
 

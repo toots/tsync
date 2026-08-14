@@ -193,12 +193,23 @@ let build_backends ~resume (d : Conf_parsing.domain) :
 let default_domain_file () =
   Filename.concat runtime_paths.Runtime.data_dir "default-domain"
 
+(* The config says which domains exist: a name left here by a domain since
+   dropped from it is ignored rather than fatal, so removing a domain does not
+   break every command that omits [--domain]. *)
 let read_default_domain () =
+  let configured name =
+    match Conf_parsing.load runtime_paths.Runtime.config_path with
+      | cfg ->
+          List.exists
+            (fun (d : Conf_parsing.domain) -> d.name = name)
+            cfg.Conf_parsing.domains
+      | exception _ -> true
+  in
   match open_in (default_domain_file ()) with
     | ic ->
         let s = String.trim (input_line ic) in
         close_in ic;
-        if s = "" then None else Some s
+        if s = "" || not (configured s) then None else Some s
     | exception _ -> None
 
 (* [resume] picks up the deferred work a previous run left owed, and belongs to
