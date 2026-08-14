@@ -183,7 +183,9 @@ final class StatusMenu: NSObject, NSMenuDelegate {
             let submenu = NSMenu()
             submenu.autoenablesItems = false
             submenu.delegate = self
-            submenu.addItem(Self.plainItem("Reading…"))
+            for row in menu?.submenuPlaceholder ?? [] {
+                submenu.addItem(self.entry(row))
+            }
             entry.submenu = submenu
             if row.action?.stats == true { statsMenu = submenu }
         }
@@ -231,28 +233,19 @@ final class StatusMenu: NSObject, NSMenuDelegate {
         lastStatsFetch = now
         guard let client = clients.first else { return }
         Task {
-            let rows = try? await client.menuStats()
+            // A failure leaves the placeholder standing rather than replacing
+            // it with a message of our own: what to say about a daemon that did
+            // not answer is the model's to decide, and it already does when it
+            // answers at all.
+            guard let rows = try? await client.menuStats(), !rows.isEmpty else { return }
             await MainActor.run {
                 guard menu === self.statsMenu else { return }
                 menu.removeAllItems()
-                for row in rows ?? [] {
+                for row in rows {
                     menu.addItem(row.isSeparator ? .separator() : self.entry(row))
-                }
-                // Never empty: a submenu with nothing in it reads as a menu that
-                // failed to open rather than as a daemon that did not answer.
-                if menu.items.isEmpty {
-                    menu.addItem(Self.plainItem("Not answering"))
                 }
             }
         }
-    }
-
-    /// A row that is text, not a command: enabled so AppKit does not grey it,
-    /// with nothing behind it to click.
-    private static func plainItem(_ title: String) -> NSMenuItem {
-        let item = NSMenuItem(title: title, action: nil, keyEquivalent: "")
-        item.isEnabled = false
-        return item
     }
 
     // MARK: - Actions

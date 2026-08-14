@@ -153,6 +153,9 @@ tooltip tsync — No domains configured
       "indent": 0,
       "action": { "quit": true }
     }
+  ],
+  "submenuPlaceholder": [
+    { "label": "Reading…", "enabled": true, "indent": 0, "action": {} }
   ]
 }
 

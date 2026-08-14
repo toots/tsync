@@ -608,6 +608,10 @@ let to_json m =
       ("icon", `String m.icon);
       ("tooltip", `String m.tooltip);
       ("rows", entries_to_json m.entries);
+      (* A submenu's rows are fetched when it opens, so a client needs something
+         to put in it until they land. Carried rather than spelled by the client
+         so both platforms say the same thing. *)
+      ("submenuPlaceholder", entries_to_json stats_placeholder);
     ]
 
 let member name = function

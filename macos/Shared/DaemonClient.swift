@@ -85,6 +85,9 @@ struct DaemonMenuRow: Decodable {
 struct DaemonMenu: Decodable {
     let icon: String
     let tooltip: String
+
+    /// What a submenu holds until the rows it fetches on opening arrive.
+    let submenuPlaceholder: [DaemonMenuRow]?
     let rows: [DaemonMenuRow]
 }
 
