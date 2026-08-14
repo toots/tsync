@@ -144,6 +144,74 @@
   file a.txt [.tsync-root/f01e5cbbc09d4fc4-9a0fcd66f030de75] = manifest size=11 chunks=1 h1=1b5eab7935b34700 h2=72dfaa8cad2e9a42
     chunk#0 cba685e06d3e500f-293331628d03f29b size=11
 
+=== gc --verify finds damage nothing wrote through the store
+  write a.txt "hello tsync"
+  drain
+  scramble-backend-file a.txt #0
+  rescan-corrupted
+  list-corrupted
+  gc --verify
+  rescan-corrupted
+  list-corrupted
+  corrupted: 0
+  gc kept 1 chunk(s), reclaimed 0
+  gc verified 1 chunk(s): 1 corrupt, 0 unreadable, 0 cleared
+  corrupted: 1
+    cba685e06d3e500f-293331628d03f29b on backend
+--- tree
+  f a.txt size=11 cached=0/1 uploaded=true etag=1b5eab7935b34700
+--- content
+  a.txt = "ifmmp!utzod"
+--- backend
+  chunk cba685e06d3e500f-293331628d03f29b size=11
+  corrupted cba685e06d3e500f-293331628d03f29b
+  journal <entry-1> = put a.txt 11
+  file a.txt [.tsync-root/f01e5cbbc09d4fc4-9a0fcd66f030de75] = manifest size=11 chunks=1 h1=1b5eab7935b34700 h2=72dfaa8cad2e9a42
+    chunk#0 cba685e06d3e500f-293331628d03f29b size=11
+
+=== a chunk that fails the check is kept, not reclaimed
+  write a.txt "hello tsync"
+  drain
+  scramble-backend-file a.txt #0
+  gc --verify
+  rescan-corrupted
+  list-corrupted
+  chunks a.txt
+  gc kept 1 chunk(s), reclaimed 0
+  gc verified 1 chunk(s): 1 corrupt, 0 unreadable, 0 cleared
+  corrupted: 1
+    cba685e06d3e500f-293331628d03f29b on backend
+  chunks a.txt published size=11 chunks=1 cached=0/1
+--- tree
+  f a.txt size=11 cached=0/1 uploaded=true etag=1b5eab7935b34700
+--- content
+  a.txt = "ifmmp!utzod"
+--- backend
+  chunk cba685e06d3e500f-293331628d03f29b size=11
+  corrupted cba685e06d3e500f-293331628d03f29b
+  journal <entry-1> = put a.txt 11
+  file a.txt [.tsync-root/f01e5cbbc09d4fc4-9a0fcd66f030de75] = manifest size=11 chunks=1 h1=1b5eab7935b34700 h2=72dfaa8cad2e9a42
+    chunk#0 cba685e06d3e500f-293331628d03f29b size=11
+
+=== a plain collection checks nothing
+  write a.txt "hello tsync"
+  drain
+  scramble-backend-file a.txt #0
+  gc
+  rescan-corrupted
+  list-corrupted
+  gc kept 1 chunk(s), reclaimed 0
+  corrupted: 0
+--- tree
+  f a.txt size=11 cached=0/1 uploaded=true etag=1b5eab7935b34700
+--- content
+  a.txt = "ifmmp!utzod"
+--- backend
+  chunk cba685e06d3e500f-293331628d03f29b size=11
+  journal <entry-1> = put a.txt 11
+  file a.txt [.tsync-root/f01e5cbbc09d4fc4-9a0fcd66f030de75] = manifest size=11 chunks=1 h1=1b5eab7935b34700 h2=72dfaa8cad2e9a42
+    chunk#0 cba685e06d3e500f-293331628d03f29b size=11
+
 === collecting a chunk takes its marker with it
   write a.txt "hello tsync"
   drain

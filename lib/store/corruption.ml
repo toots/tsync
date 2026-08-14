@@ -36,9 +36,7 @@ module Make (C : Conf.S) = struct
   let prefix = Chunk_layout.corrupted_prefix ~chunk_prefix:C.chunk_prefix
   let key chunk_key = prefix ^ Chunk_layout.relative_path chunk_key
 
-  (* [max_keys] because a report has to stay a report: a store in real trouble
-     should read as such rather than take the listing down with it. Unbounded for
-     {!list}, which is feeding a repair. *)
+  (* Unbounded for {!list}, which is feeding a repair rather than a report. *)
   let entries_on ?max_keys ~store (module B : Backend.S) =
     let+ found = B.list_prefix ?max_keys ~prefix () in
     List.filter_map
@@ -55,10 +53,6 @@ module Make (C : Conf.S) = struct
         else None)
       found
 
-  (* One member, for a caller that reports per store rather than per domain.
-     Raises what the store raised: whether an unreachable store is a failure or
-     a line in a report is the caller's to decide, and {!list} and the
-     diagnostics probe decide it differently. *)
   let member_entries ?max_keys (m : Backend.member) =
     let (module B : Backend.S) = m.Backend.backend in
     let* caps = B.capabilities ~prefix:C.domain_prefix () in
@@ -69,13 +63,6 @@ module Make (C : Conf.S) = struct
       in
       `Entries entries
 
-  (* Every member, never through {!Conf.store}: the composite serves a listing
-     from whichever store answers first, and a chunk corrupt on one copy only
-     would then depend on which that was.
-
-     A store that cannot be reached is named rather than skipped silently, and a
-     store nothing checks is named too — the two ways of finding nothing are not
-     the same, and a report that renders both as "clean" is the dangerous one. *)
   let list () =
     let+ per_member =
       Lwt_list.map_s
@@ -99,13 +86,9 @@ module Make (C : Conf.S) = struct
       { entries = []; unverified = []; unreachable = [] }
       per_member
 
-  (* What a marker's body says beyond its existence, fetched only when a caller
-     means to show it: the key is the finding, so a listing never needs this.
-
-     From the member the entry names, for the same reason {!list} asks each of
-     them: the composite serves a read from whichever store answers first, and a
-     chunk corrupt on one copy only would have its marker fetched from a store
-     that never wrote one. *)
+  (* From the member the entry names, for the reason {!list} asks each of them
+     separately: a read through the composite would come back from whichever
+     store answered first, which need not be the one that wrote the marker. *)
   let detail e =
     match
       List.find_opt
@@ -132,9 +115,8 @@ module Make (C : Conf.S) = struct
   (* The timestamp is stamped before the listing is awaited, so the chunks of one
      upload share a single request rather than each starting its own.
 
-     A listing that fails reads as "nothing marked", which is what every caller
-     did before this existed: an unreachable store must not be able to stop an
-     upload, and the chunk it would have held back is caught by the next pass. *)
+     A listing that fails reads as "nothing marked" — see the .mli — and the
+     chunk it would have held back is caught by the next pass. *)
   let marked () =
     let m = memo () in
     let now = Unix.gettimeofday () in

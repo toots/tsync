@@ -43,9 +43,6 @@ type backend_stats = {
   journal_entries : int option;
   journal_behind : int option;
   corrupted_chunks : int option;
-      (* [None] when nothing checks this store: silence, not zero. A store
-         nobody verifies and a store with nothing wrong report the same count,
-         and only one of those is worth saying nothing about. *)
   corruption : [ `Checked | `Unchecked | `Failed ];
 }
 
@@ -335,9 +332,6 @@ let backend_row (b : backend_stats) =
           [Printf.sprintf "journal %d entries, %d behind" n behind]
       | Some n, _ -> [Printf.sprintf "journal %d entries" n]
   in
-  (* Loud when there is damage, silent when a checked store is clean, and
-     explicit when nothing is checking: "0 corrupt" from a store nobody looks at
-     is the one reading that must not be mistaken for health. *)
   let corrupted =
     match (b.corruption, b.corrupted_chunks) with
       | `Failed, _ -> ["corruption check failed"]
@@ -713,9 +707,6 @@ let backend_of json =
     journal_entries = sub json "journal" int_field "entries";
     journal_behind = sub json "journal" int_field "behind";
     corrupted_chunks = sub json "corrupted" int_field "chunks";
-    (* Three states, not two: a probe that errored or timed out has said nothing
-       about this store's bytes, which is not the same as a store nothing is
-       checking — and neither is the same as clean. *)
     corruption =
       (match
          ( sub json "corrupted" string_field "error",

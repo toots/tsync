@@ -418,6 +418,14 @@ tsync repair --dry-run    # ...say what would be rewritten, and write nothing
 `tsync verify` distinguishes a store that looked and found nothing from a store nothing is
 checking. Both would otherwise report zero, and only one of those is good news.
 
+On a `local` store, `tsync gc --verify` sweeps the whole thing: a collection already walks every
+block a file still references, so checking them as it goes costs one pass instead of two. It is
+opt-in because it reads every live byte where a collection otherwise touches only metadata —
+minutes become hours on a large store. A block that fails is kept where it belongs and marked,
+never reclaimed: a file still names it, so discarding it would take that file's only copy too.
+This is also the pass that finds bit rot, which arrives as an unreadable block rather than a
+wrong one and is recorded the same way.
+
 `tsync repair` hashes a candidate copy before trusting it — a second copy can be wrong too, and
 writing one bad block over another would spread the damage while reporting a repair. It writes
 only to the damaged store. Where no store holds good bytes, it names the blocks rather than
@@ -683,6 +691,7 @@ tsync untrash <path>  # restore a deleted folder, then run tsync sync
 tsync purge <path>    # drop a trashed folder for good, with all its versions
 tsync expire <date>   # drop versions, trashed folders and journal entries older than a date
 tsync gc              # reclaim unreferenced blocks (local main stores only)
+tsync gc --verify     # ...and check each block it keeps against its own name
 tsync sync            # apply changes from other machines (incremental)
 tsync sync --full     # clear local cache and re-download all manifests
 tsync recheck         # verify the remote against the local cache, repair what's possible

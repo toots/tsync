@@ -9,6 +9,12 @@ type t = {
   computed : string option;  (** what the body hashed to instead *)
   size : int option;  (** what the bad body measured *)
   at : float option;  (** when it was found *)
+  reason : string option;
+      (** What was wrong, when the key alone does not say. A body that hashed to
+          something else needs no explanation — {!computed} is the whole of it —
+          but a chunk the store would not read has no hash to record, and on a
+          failing disk that is what bit rot looks like: [EIO], not wrong bytes.
+      *)
 }
 
 val to_string : t -> string

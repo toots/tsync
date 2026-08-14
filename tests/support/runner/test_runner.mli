@@ -67,6 +67,9 @@ type step =
           expire across a boundary). Leaves the chunks it orphaned behind;
           collecting those is [Gc]. *)
   | Gc  (** Run [Gc.run]: collect the chunks nothing references any more. *)
+  | GcVerify
+      (** The same collection with [~verify], which holds each live chunk
+          against its own name as it keeps it. *)
   | GcMark
       (** Collect only as far as the end of marking, leaving the collection
           open. Paired with [GcClose], this is how a scenario gets to act —
@@ -93,6 +96,11 @@ type step =
           different bytes of the {i same} size, which nothing short of hashing
           the body can tell from the real one. Written through the store's own
           [put], so the store files its own marker for it. *)
+  | ScrambleBackendFile of { path : string; index : int }
+      (** Same damage as {!ScrambleRemoteChunk}, done straight to the file
+          rather than through the store's [put] — so nothing notices at the
+          time. What bit rot on a disk looks like, and what only a pass that
+          reads the bytes back can find. *)
   | ListCorrupted
       (** Print what {!Corruption.list} reports, prefixed by a count so a
           listing that finds nothing is still visible. Names any store nothing

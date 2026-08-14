@@ -126,7 +126,7 @@ let () =
      step "head(in neither) = %b" (head <> None);
 
      case "promoting";
-     let* () = Space.promote going in
+     let* (_ : bool) = Space.promote going in
      let* still = Store.head_opt ~key:(Space.key going) () in
      step "promote gives it a name in the surviving space: %b" (still <> None);
      let* body = Store.get ~key:(Space.key going) () in
@@ -145,14 +145,14 @@ let () =
      step "one name, one link: nlink=%d"
        (Unix.stat (Filename.concat store_dir (chunk_prefix ^ shard)))
          .Unix.st_nlink;
-     let* () = Space.promote going in
+     let* (_ : bool) = Space.promote going in
      step "promoting twice is not an error";
      (* The case [promote_all] hits constantly: every chunk a manifest names is
         promoted before it is published, and the freshly written ones are in the
         surviving space only. *)
-     let* () = Space.promote live in
+     let* (_ : bool) = Space.promote live in
      step "promoting one that is only in the surviving space is a no-op";
-     let* () = Space.promote absent in
+     let* (_ : bool) = Space.promote absent in
      step "promoting one that is in neither space is a no-op";
      let* () = Space.promote_all [live; going; absent] in
      step "promote_all over a mixture moves what is left and leaves the rest";
