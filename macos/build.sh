@@ -25,6 +25,17 @@ command -v dylibbundler >/dev/null || {
     echo "dylibbundler not found: brew install dylibbundler" >&2
     exit 1
 }
+command -v xcodegen >/dev/null || {
+    echo "xcodegen not found: brew install xcodegen" >&2
+    exit 1
+}
+
+# The .xcodeproj is generated and gitignored, so a build against a stale one is
+# a build of whatever project.yml said last time it was run by hand. A file
+# added since -- Assets.xcassets was one -- is simply absent from the bundle,
+# and the app comes out with no icon rather than with an error.
+say "Generating project"
+(cd "$MACOS_DIR" && xcodegen generate --quiet)
 
 # The final signature is always applied here, because the daemon and its dylibs
 # are injected after the Xcode build and would invalidate an earlier seal. What
