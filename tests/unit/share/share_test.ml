@@ -130,6 +130,23 @@ let () =
     | Ok u -> assert (u = share_base ^ "/cc")
     | Error e -> failwith e);
 
+  (* Only the backfill target serves shares, and reads never reach it: it is
+     the last choice, not a skipped one. *)
+  let module BackfillOnly : Conf.S = struct
+    include C
+
+    let members =
+      [
+        Backend.member ~name:"local" (module NoShare);
+        Backend.member ~name:"gcs" ~role:"backfill" ~readable:false
+          (module Shareable);
+      ]
+  end in
+  let module S4 = Share.Make (BackfillOnly) in
+  (match Lwt_main.run (S4.create ~token:"dd" ~expires:123 ~rel:"foo" ()) with
+    | Ok u -> assert (u = share_base ^ "/dd")
+    | Error e -> failwith e);
+
   (match Lwt_main.run (S3.create ~expires:123 ~rel:"no/such/dir" ()) with
     | Error e -> assert (String.length e >= 9 && String.sub e 0 9 = "not found")
     | Ok _ -> assert false);

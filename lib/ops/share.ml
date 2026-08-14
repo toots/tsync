@@ -13,8 +13,10 @@ module Make (C : Conf.S) = struct
      manifest lives outside every domain root, so a domain with nothing writable
      can still publish one.
 
-     A member reads never reach is skipped, since a link served from it could
-     name a file it will never have. *)
+     A member reads never reach comes last rather than being skipped: a link
+     served from it can name a file it does not hold yet, but a backfill target
+     is filling from the write side, and a domain whose readable stores serve
+     no shares would otherwise have none at all. *)
   let share_backend () =
     let rec find = function
       | [] ->
@@ -28,8 +30,10 @@ module Make (C : Conf.S) = struct
             | Some url -> Lwt.return ((module Bk : Backend.S), url)
             | None -> find rest)
     in
-    find
-      (List.filter (fun (m : Backend.member) -> m.Backend.readable) C.members)
+    let readable, rest =
+      List.partition (fun (m : Backend.member) -> m.Backend.readable) C.members
+    in
+    find (readable @ rest)
 
   (* [rel] of "" is the whole domain. *)
   let create ?token ~expires ~rel () =
