@@ -74,17 +74,14 @@ module Make_with_layout (C : Conf.S) (L : Layout.S) : S = struct
      to know that a collection may be in progress ({!Chunk_space}). *)
   module Space = Chunk_space.Make (C)
 
-  (* Acquiring a buffer is the real system-wide bound on concurrent chunk work:
-     a chunk read blocks until a slot frees, whatever file it belongs to, so
-     [max_chunk_buffers] times the chunk size is what the upload path costs in
-     memory however many files [max_uploads] admits.
-
-     A string derived from a buffer aliases its backing memory and must not
-     outlive the callback. *)
   (* Sized off the configured value, not the resolved one: an oversized chunk
      falls through to a one-off allocation below. *)
   let buffer_size = Option.value C.chunk_size ~default:Conf.default_chunk_size
 
+  (* Acquiring a buffer is the real system-wide bound on concurrent chunk work:
+     a chunk read blocks until a slot frees, whatever file it belongs to, so
+     [max_chunk_buffers] times the chunk size is what the upload path costs in
+     memory however many files [max_uploads] admits. *)
   let chunk_buffers =
     Lwt_pool.create (max 1 C.max_chunk_buffers) (fun () ->
         Lwt.return (Bytes.create buffer_size))
@@ -118,6 +115,13 @@ module Make_with_layout (C : Conf.S) (L : Layout.S) : S = struct
     if size <= buffer_size then Lwt_pool.use chunk_buffers f
     else f (Bytes.create size)
 
+  (* A copy, never [Bytes.unsafe_to_string]: the buffer returns to the pool as
+     soon as the put does, while a deferred target ({!Deferred}) may still be
+     sending from it — what would go on the wire is the next chunk to claim the
+     buffer, under this chunk's key. The memcpy is invisible on a path bounded by
+     network latency. *)
+  let chunk_data buf len = Bytes.sub_string buf 0 len
+
   (* Chunk keys known present on the domain's stores, this session only. Not
      pre-populated by listing the chunk prefix: that cost scales with the whole
      historical archive rather than the upload at hand. *)
@@ -132,8 +136,8 @@ module Make_with_layout (C : Conf.S) (L : Layout.S) : S = struct
     let+ head = Space.head ck_rel in
     Option.is_some head
 
-  (* [data] is not retained past this call, so a caller may pass a string
-     aliasing a pooled buffer. *)
+  (* [data] must own its bytes: a store is free to keep sending after this
+     returns, and the key is the hash of what was passed, not of what lands. *)
   let put_chunk ~index ~data =
     let size = String.length data in
     let entry =
@@ -169,14 +173,7 @@ module Make_with_layout (C : Conf.S) (L : Layout.S) : S = struct
     let size = min chunk_size (file_size - offset) in
     with_chunk_buffer ~size (fun buf ->
         let* () = read_chunk_into fd offset size buf in
-        (* Zero-copy for a full chunk, a short last chunk needing its own;
-           either way [data] must not outlive the upload, the buffer being
-           reused once released. *)
-        let data =
-          if size = Bytes.length buf then Bytes.unsafe_to_string buf
-          else Bytes.sub_string buf 0 size
-        in
-        put_chunk ~index ~data)
+        put_chunk ~index ~data:(chunk_data buf size))
 
   (* A cancellation landing while the put is in flight unpublishes it again, or
      a ghost object survives under a name that may no longer exist locally.
@@ -253,14 +250,7 @@ module Make_with_layout (C : Conf.S) (L : Layout.S) : S = struct
         | `Fill fill ->
             with_chunk_buffer ~size:len (fun buf ->
                 let* () = fill buf in
-                (* Zero-copy for a full chunk, a short last chunk needing its
-                   own; either way [data] must not outlive the upload, the
-                   buffer being reused once released. *)
-                let data =
-                  if len = Bytes.length buf then Bytes.unsafe_to_string buf
-                  else Bytes.sub_string buf 0 len
-                in
-                put_chunk ~index ~data)
+                put_chunk ~index ~data:(chunk_data buf len))
     in
     let* entries = Lwt_list.map_p one (List.init n Fun.id) in
     publish ~key ~size ~chunk_size ~mtime ~cancel entries
