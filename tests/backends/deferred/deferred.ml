@@ -92,7 +92,9 @@ let flaky ~fails ~root : (module Backend.S) * (unit -> int) =
   let left = ref fails in
   let refused = ref 0 in
   let (module Real : Backend.S) =
-    Backend.make ~backend_type:"local" ~get_field:(fun _ -> Some root)
+    Backend.make ~backend_type:"local" ~get_field:(function
+      | "verifyWrites" -> Some "false"
+      | _ -> Some root)
   in
   ( (module struct
       include Real
@@ -127,7 +129,9 @@ end
 (* Reachable only while [up]. *)
 let switchable ~up ~root : (module Backend.S) =
   let (module Real : Backend.S) =
-    Backend.make ~backend_type:"local" ~get_field:(fun _ -> Some root)
+    Backend.make ~backend_type:"local" ~get_field:(function
+      | "verifyWrites" -> Some "false"
+      | _ -> Some root)
   in
   (module struct
     include Real
@@ -199,7 +203,9 @@ let settled ~name stats =
 
 let () =
   let main =
-    Backend.make ~backend_type:"local" ~get_field:(fun _ -> Some main_root)
+    Backend.make ~backend_type:"local" ~get_field:(function
+      | "verifyWrites" -> Some "false"
+      | _ -> Some main_root)
   in
   let (module M : Backend.S) = main in
   Lwt_main.run
@@ -284,8 +290,9 @@ let () =
      let l5, (module T5 : Deferred.S) =
        target_for ~inners:[main]
          ~target:
-           (Backend.make ~backend_type:"local" ~get_field:(fun _ ->
-                Some t5_root))
+           (Backend.make ~backend_type:"local" ~get_field:(function
+             | "verifyWrites" -> Some "false"
+             | _ -> Some t5_root))
          ~name:"replica" ()
      in
      let (module B5 : Backend.S) = l5 in

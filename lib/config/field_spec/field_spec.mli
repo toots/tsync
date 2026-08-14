@@ -17,3 +17,14 @@ type t = {
   secret : bool;
       (** Read without echo, and masked wherever the config is printed. *)
 }
+
+(** Read a [`Bool] field's value, as a driver or frontend receives it: a string,
+    since [tsync configure] writes a JSON boolean that {!Conf_parsing} flattens
+    and a hand-edited config holds whatever was typed.
+
+    [default] is what an absent or unrecognised value means, and is the whole
+    reason this is shared. Spelling the test at each reader had them disagreeing
+    about it — one field taking ["1"] for true while another took only ["true"],
+    and a field that defaults on answering the question the opposite way round
+    from one that defaults off, so that ["no"] turned a setting {i on}. *)
+val bool : default:bool -> string option -> bool

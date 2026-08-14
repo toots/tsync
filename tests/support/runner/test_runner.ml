@@ -63,6 +63,9 @@ type step =
   | DeleteRemoteChunk of { path : string; index : int }
   | CorruptRemoteChunk of { path : string; index : int }
   | ScrambleRemoteChunk of { path : string; index : int }
+  | ListCorrupted
+  | RescanCorrupted
+  | Repair
   | DeleteRemoteManifest of string
   | StageWrite of { path : string; content : string }
       (** Replace the file's content locally without uploading: unsynced edits,
@@ -176,6 +179,9 @@ let rec render_step = function
       Printf.sprintf "corrupt-remote-chunk %s #%d" path index
   | ScrambleRemoteChunk { path; index } ->
       Printf.sprintf "scramble-remote-chunk %s #%d" path index
+  | ListCorrupted -> "list-corrupted"
+  | RescanCorrupted -> "rescan-corrupted"
+  | Repair -> "repair"
   | DeleteRemoteManifest p -> "delete-remote-manifest " ^ p
   | StageWrite { path; content } ->
       Printf.sprintf "stage-write %s %S" path content
@@ -679,6 +685,38 @@ let setup_client (module C : Conf.S) root staging_prefix =
     | ( DeleteRemoteChunk _ | CorruptRemoteChunk _ | ScrambleRemoteChunk _
       | DeleteRemoteManifest _ ) as s ->
         damage (List.hd C.members).Backend.backend s
+    | ListCorrupted ->
+        let module Cor = Corruption.Make (C) in
+        let+ report = Cor.list () in
+        let entries = List.sort compare report.Corruption.entries in
+        (* A count first, so a listing is visible even when it finds nothing and
+           two of them in one scenario cannot be read as one. *)
+        Printf.printf "  corrupted: %d\n%!" (List.length entries);
+        List.iter
+          (fun (e : Corruption.entry) ->
+            Printf.printf "    %s on %s\n%!" e.Corruption.chunk_key
+              e.Corruption.store)
+          entries;
+        List.iter
+          (fun name -> Printf.printf "    unchecked store %s\n%!" name)
+          report.Corruption.unverified
+    | RescanCorrupted ->
+        let module Cor = Corruption.Make (C) in
+        Cor.invalidate ();
+        Lwt.return_unit
+    | Repair ->
+        let module Rp = Repair.Make (C) in
+        let+ s =
+          Rp.run
+            ~on_chunk:(fun ~chunk_key ~store outcome ->
+              Printf.printf "  %s\n%!"
+                (Repair.describe ~chunk_key ~store outcome))
+            ()
+        in
+        Printf.printf
+          "  repair: %d checked, %d repaired, %d cleared, %d lost\n%!"
+          s.Repair.checked s.Repair.repaired s.Repair.cleared
+          s.Repair.unrepairable
     | OnSecondary s -> (
         match C.members with
           | _ :: dst :: _ -> damage dst.Backend.backend s
@@ -1260,6 +1298,13 @@ let dump_backend_at ~backend_root ~domain_prefix ~chunk_prefix ~journal_prefix
                   | exception _ ->
                       Printf.printf "  file %s = raw size=%d\n" (alias_rel rel)
                         e.size))
+      else if Chunk_layout.is_marker_key e.key then (
+        (* The chunk it accuses, not the marker's own path, and never its size:
+           the body carries the moment it was found, whose float renders to a
+           different width from one run to the next. *)
+        Printf.printf "  corrupted %s\n"
+          (Chunk_layout.chunk_key_of_marker e.key);
+        Lwt.return_unit)
       else (
         Printf.printf "  other %s size=%d\n" e.key e.size;
         Lwt.return_unit))

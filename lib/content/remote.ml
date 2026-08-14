@@ -74,6 +74,10 @@ module Make_with_layout (C : Conf.S) (L : Layout.S) : S = struct
      to know that a collection may be in progress ({!Chunk_space}). *)
   module Space = Chunk_space.Make (C)
 
+  (* What the stores found was not what its name said. Consulted before dedup
+     skips a write: see {!put_chunk}. *)
+  module Corrupt = Corruption.Make (C)
+
   (* Sized off the configured value, not the resolved one: an oversized chunk
      falls through to a one-off allocation below. *)
   let buffer_size = Option.value C.chunk_size ~default:Conf.default_chunk_size
@@ -140,20 +144,23 @@ module Make_with_layout (C : Conf.S) (L : Layout.S) : S = struct
      returns, and the key is the hash of what was passed, not of what lands. *)
   let put_chunk ~index ~data =
     let size = String.length data in
-    let entry =
-      Manifest.
-        {
-          index;
-          h1 = Xxhash.hash_hex data 0;
-          h2 = Xxhash.hash_hex data 1;
-          size;
-        }
-    in
+    let entry = Manifest.chunk_entry_of_body ~index data in
     Metrics.add_hashed 1;
     let ck_rel = Manifest.chunk_key entry in
     let ck = chunk_backend_key ck_rel in
     let* known =
-      if Hashtbl.mem known_chunks ck_rel then Lwt.return_true
+      (* Ahead of the session memo rather than behind it. A chunk this session
+         uploaded is already in [known_chunks], and a marker says exactly that
+         what it uploaded is not what landed; asking the store instead would not
+         help either, a corrupt chunk being the right size and so present.
+
+         This is what closes the loop. Skipping the write would leave the marker
+         standing with nothing to clear it, and — because dedup is what makes a
+         chunk shared — would hand the bad bytes to every later file that
+         contains it. *)
+      let* marked = Corrupt.is_marked ck_rel in
+      if marked then Lwt.return_false
+      else if Hashtbl.mem known_chunks ck_rel then Lwt.return_true
       else chunk_exists ck_rel
     in
     let+ () =
@@ -163,6 +170,10 @@ module Make_with_layout (C : Conf.S) (L : Layout.S) : S = struct
       else (
         Metrics.add_uploaded size;
         let+ () = B.put ~key:ck ~data () in
+        (* The write is what clears the marker — the store re-verified the object
+           as it took it — so stop holding this key against the rest of the
+           session. *)
+        Corrupt.forget ck_rel;
         Hashtbl.replace known_chunks ck_rel ())
     in
     entry
@@ -267,10 +278,16 @@ module Make_with_layout (C : Conf.S) (L : Layout.S) : S = struct
             | exception _ -> None)
 
   (* Chunk keys are content-addressed, so a size mismatch means the remote object
-     is corrupt. *)
+     is corrupt — and a size {i match} means very little, the bug this most has
+     to catch being a whole chunk landing under another one's name. A marker is
+     the only thing that can tell those apart without reading the body back, so
+     it is asked first. *)
   let chunk_remote_ok ~chunk_key ~size =
-    let+ head = Space.head chunk_key in
-    match head with Some h -> h.Backend.size = size | None -> false
+    let* marked = Corrupt.is_marked chunk_key in
+    if marked then Lwt.return_false
+    else
+      let+ head = Space.head chunk_key in
+      match head with Some h -> h.Backend.size = size | None -> false
 
   (* Republishes [expected] when the remote manifest is missing or differs;
      [true] when a repair was made. *)

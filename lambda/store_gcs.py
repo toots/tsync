@@ -45,6 +45,14 @@ class Store:
     def put_bytes(self, key, data):
         self.bucket.blob(key).upload_from_string(data)
 
+    def delete(self, key):
+        """Absent is not an error: the verifier clears a marker before it looks,
+        and most chunks never had one."""
+        try:
+            self.bucket.blob(key).delete()
+        except NotFound:
+            pass
+
     def list_keys(self, prefix):
         for blob in self.client.list_blobs(self.bucket_name, prefix=prefix):
             yield blob.name

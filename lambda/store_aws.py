@@ -53,6 +53,11 @@ class Store:
     def put_bytes(self, key, data):
         self.s3.put_object(Bucket=self.bucket, Key=key, Body=data)
 
+    def delete(self, key):
+        """Absent is not an error: the verifier clears a marker before it looks,
+        and most chunks never had one."""
+        self.s3.delete_object(Bucket=self.bucket, Key=key)
+
     def list_keys(self, prefix):
         paginator = self.s3.get_paginator("list_objects_v2")
         for page in paginator.paginate(Bucket=self.bucket, Prefix=prefix):

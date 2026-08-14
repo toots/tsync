@@ -47,7 +47,12 @@ variable "gcs_stores" {
     archive_after_days = optional(number) # null = no cold-storage transition; keep > share_expiry_days
     presign_ttl        = optional(number, 600)
     memory_mb          = optional(number, 2048)
-    max_share_bytes    = optional(number, 10737418240)
+    # Domains whose chunks live in this bucket. Empty deploys no verifier: see
+    # modules/store-gcs/variables.tf for why there is no safe default.
+    chunk_domains          = optional(list(string), [])
+    verify_timeout_seconds = optional(number, 120)
+    verify_memory_mb       = optional(number, 512)
+    max_share_bytes        = optional(number, 10737418240)
   }))
   default = {}
 }
@@ -69,6 +74,13 @@ variable "stores" {
     presign_ttl          = optional(number, 600)
     lambda_memory_mb     = optional(number, 2048)
     ephemeral_storage_mb = optional(number, 10240)
+    # Domains whose chunks live in this bucket, e.g. ["photos"]. Empty deploys
+    # no verifier: see modules/store-s3/variables.tf for why there is no safe
+    # default. A prefix that matches nothing looks exactly like a clean store.
+    chunk_domains          = optional(list(string), [])
+    manage_notifications   = optional(bool, true)
+    verify_timeout_seconds = optional(number, 120)
+    verify_memory_mb       = optional(number, 512)
     extra_lifecycle_rules = optional(list(object({
       id              = string
       prefix          = optional(string, "")

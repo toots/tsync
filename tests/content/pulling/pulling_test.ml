@@ -6,7 +6,8 @@
    file is waiting, and the chunk store cannot say either — a group is keyed by
    content, so two files can share one fetch. What is asserted here is that a
    read attributes its fetches to the file being read, that a read served
-   locally attributes nothing, and that a row goes away once it falls quiet.
+   locally attributes nothing, that a row goes away once it falls quiet, and
+   that a whole-file materialization is credited for what it pulls down.
 
    Chunk sizes are tiny, so one small file spans several groups: the shape of a
    large file, in bytes. *)
@@ -66,7 +67,24 @@ let write_file path contents =
   output_string oc contents;
   close_out oc
 
-let distinct n = String.init n (fun i -> Char.chr (i * 7 mod 251))
+(* Salted so two fixtures share no chunk: a group is keyed by content, so a file
+   made of another one's bytes finds them already local and pulls nothing. *)
+let distinct ?(salt = 0) n =
+  String.init n (fun i -> Char.chr (((i * 7) + salt) mod 251))
+
+let size = 40 * chunk_size
+
+(* A fixture that has to come down: uploading leaves every group local, so what
+   is published is forgotten again before anyone looks at a pull. *)
+let publish ~salt name =
+  let key = C.domain_prefix ^ name in
+  let src = Filename.concat root name in
+  write_file src (distinct ~salt size);
+  let* (_ : Manifest.t) =
+    R.upload ~key ~src_path:src ~mtime:0. ~chunk_size ()
+  in
+  let+ () = D.forget_chunks key in
+  key
 
 (* Reads one cache chunk's worth at [offset], as a frontend serving a read
    does. *)
@@ -78,6 +96,10 @@ let read_at key ~offset =
 
 let row_for key =
   List.find_opt (fun (p : D.pulling) -> p.D.key = key) (D.pulling_now ())
+
+(* Prunes every row, so what comes next is measured against an empty table. *)
+let forget_rows () =
+  ignore (D.pulling_now ~now:(Unix.gettimeofday () +. 3600.) ())
 
 let describe () =
   let rows = D.pulling_now () in
@@ -92,19 +114,11 @@ let describe () =
 
 let () =
   Lwt_main.run
-    (let key = C.domain_prefix ^ "movie.bin" in
-     let size = 40 * chunk_size in
-     let data = distinct size in
-     let src = Filename.concat root "movie.bin" in
-     write_file src data;
-     let* (_ : Manifest.t) =
-       R.upload ~key ~src_path:src ~mtime:0. ~chunk_size ()
-     in
+    (let* key = publish ~salt:0 "movie.bin" in
 
      (* Nothing has been read, so nothing is waiting on the network. *)
      check "idle before any read" ~why:describe (D.pulling_now () = []);
 
-     let* () = D.forget_chunks key in
      let* (_ : int) = read_at key ~offset:0 in
 
      (match row_for key with
@@ -129,20 +143,8 @@ let () =
        ~why:(fun () -> Printf.sprintf "before=%d after=%d" before after)
        (before = after && before > 0);
 
-     (* Materialization has its own reporting; it must not show up twice. *)
-     let other = C.domain_prefix ^ "restored.bin" in
-     let other_src = Filename.concat root "restored.bin" in
-     write_file other_src data;
-     let* (_ : Manifest.t) =
-       R.upload ~key:other ~src_path:other_src ~mtime:0. ~chunk_size ()
-     in
-     let* () = D.forget_chunks other in
-     let* () = D.ensure_local other in
-     check "a restore is not counted as a read" ~why:describe
-       (row_for other = None);
-
      (* A second file gets its own row rather than joining the first. *)
-     let* () = D.forget_chunks other in
+     let* other = publish ~salt:1 "other.bin" in
      let* (_ : int) = read_at other ~offset:0 in
      check "two files being read are two rows" ~why:describe
        (row_for key <> None && row_for other <> None);
@@ -151,6 +153,44 @@ let () =
      let later = Unix.gettimeofday () +. 3600. in
      check "a row that has fallen quiet goes away" ~why:describe
        (D.pulling_now ~now:later () = []);
+
+     (* A materialization has no read of its own to credit: it fetches every
+        group up front, so the reassembly that follows finds them local. The
+        fetch credits it instead, or a file pulled from the frontend shows in the
+        tray as a count with no rows under it. *)
+     let* whole = publish ~salt:2 "whole.bin" in
+     let* () = D.ensure_local whole in
+     (match row_for whole with
+       | None ->
+           check "a materialization is attributed to its file" ~why:describe
+             false
+       | Some row ->
+           check "a materialization is attributed to its file" true;
+           check "it credits every group that came down"
+             ~why:(fun () -> Printf.sprintf "bytes=%d want=%d" row.D.bytes size)
+             (row.D.bytes = size));
+
+     (* Only what crossed the wire counts, or a part-cached file credits its
+        local groups at once and reads as a rate in the gigabytes. A first read
+        never reads ahead, so exactly the group it lands in is local. *)
+     let* partial = publish ~salt:3 "partial.bin" in
+     let* (_ : int) = read_at partial ~offset:0 in
+     forget_rows ();
+     let* () = D.ensure_local partial in
+     (match row_for partial with
+       | None ->
+           check "a group already local is not credited" ~why:describe false
+       | Some row ->
+           check "a group already local is not credited"
+             ~why:(fun () ->
+               Printf.sprintf "bytes=%d want=%d" row.D.bytes
+                 (size - cache_chunk_size))
+             (row.D.bytes = size - cache_chunk_size);
+           (* Against what the file owes the network, so a caller can say
+              "x of y" without going near the store. *)
+           check "it is still measured against the whole file"
+             ~why:(fun () -> Printf.sprintf "size=%d want=%d" row.D.size size)
+             (row.D.size = size));
 
      Printf.printf "\n%s\n"
        (if !failures = 0 then "all ok" else Printf.sprintf "%d FAILED" !failures);

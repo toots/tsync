@@ -285,10 +285,13 @@ let rec prompt_field ?(indent = "") ?current (s : Field_spec.t) =
   in
   match s.typ with
     | `Bool ->
+        (* Read the same way the driver will read it, or the box this prompt
+           ticks and the setting that takes effect are two different answers to
+           one question. *)
         let default =
-          match current with
-            | Some v -> v = "true"
-            | None -> s.default = Some "true"
+          Field_spec.bool
+            ~default:(Field_spec.bool ~default:false s.default)
+            current
         in
         Some (s.name, `Bool (prompt_bool ~default label))
     | `Int -> (

@@ -97,3 +97,40 @@ variable "lambda_zip_hash" {
   type        = string
   description = "base64 sha256 of the Lambda zip, for redeploy detection."
 }
+
+# ── Chunk verification ─────────────────────────────────────────────────────
+
+variable "chunk_domains" {
+  type        = list(string)
+  default     = []
+  description = <<-EOT
+    tsync domain names whose chunks live in this bucket, e.g. ["photos"] for
+    keys under tsync/photos/chunks/. Each gets an object-created trigger that
+    checks the chunk against its own name.
+
+    Empty (the default) deploys nothing. There is no safe guess: the store name
+    and the domain name are only conventionally equal, and a wrong prefix means
+    a function that never fires — which looks exactly like a store with no
+    corruption. Set this to the domain names in the daemon's config, and set
+    each backend's verifyChunks accordingly so `tsync verify` knows to trust
+    the answer.
+  EOT
+}
+
+variable "manage_notifications" {
+  type        = bool
+  default     = true
+  description = "Manage the bucket's notification config. aws_s3_bucket_notification owns it entirely, so this REPLACES any notification already on the bucket. False = leave it untouched and wire the verify function yourself."
+}
+
+variable "verify_timeout_seconds" {
+  type        = number
+  default     = 120
+  description = "Per-object timeout for the chunk verifier. One chunk per invocation, so this is a stall guard rather than a budget."
+}
+
+variable "verify_memory_mb" {
+  type        = number
+  default     = 512
+  description = "Memory for the chunk verifier. Lambda scales CPU and network with memory, and the work is dominated by reading one chunk."
+}

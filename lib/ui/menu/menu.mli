@@ -51,6 +51,13 @@ type backend_stats = {
   backend_error : string option;
   journal_entries : int option;
   journal_behind : int option;
+  corrupted_chunks : int option;
+  corruption : [ `Checked | `Unchecked | `Failed ];
+      (** Whether anything holds this store's chunks against their own names,
+          and whether asking worked. Three states because all three report no
+          markers: a store that looked and found none is clean, a store nothing
+          verifies has no answer, and a probe that failed has not given one.
+          Only the first is good news. *)
 }
 
 (** [None] throughout means the daemon did not report that figure, which is

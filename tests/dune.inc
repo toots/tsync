@@ -149,6 +149,20 @@
   (action
    (diff chunk_cache_test.expected chunk_cache_test.output))))
 
+(subdir content/corruption
+ (alias
+  (name default)
+  (deps corruption_test.exe))
+ (rule
+  (alias runtest)
+  (target corruption_test.output)
+  (action
+   (with-stdout-to corruption_test.output (ignore-stderr (run ./corruption_test.exe)))))
+ (rule
+  (alias runtest)
+  (action
+   (diff corruption_test.expected corruption_test.output))))
+
 (subdir content/demand_paging
  (alias
   (name default)
@@ -297,6 +311,20 @@
   (alias runtest)
   (action
    (diff base.expected base.output))))
+
+(subdir scenario/corruption
+ (alias
+  (name default)
+  (deps corruption.exe))
+ (rule
+  (alias runtest)
+  (target corruption.output)
+  (action
+   (with-stdout-to corruption.output (ignore-stderr (run ./corruption.exe)))))
+ (rule
+  (alias runtest)
+  (action
+   (diff corruption.expected corruption.output))))
 
 (subdir scenario/expire
  (alias
@@ -535,6 +563,20 @@
   (alias runtest)
   (action
    (diff chunk_space_test.expected chunk_space_test.output))))
+
+(subdir unit/field_spec
+ (alias
+  (name default)
+  (deps field_spec_test.exe))
+ (rule
+  (alias runtest)
+  (target field_spec_test.output)
+  (action
+   (with-stdout-to field_spec_test.output (ignore-stderr (run ./field_spec_test.exe)))))
+ (rule
+  (alias runtest)
+  (action
+   (diff field_spec_test.expected field_spec_test.output))))
 
 (subdir unit/folder_ids
  (alias

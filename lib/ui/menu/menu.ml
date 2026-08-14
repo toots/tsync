@@ -42,6 +42,11 @@ type backend_stats = {
   backend_error : string option;
   journal_entries : int option;
   journal_behind : int option;
+  corrupted_chunks : int option;
+      (* [None] when nothing checks this store: silence, not zero. A store
+         nobody verifies and a store with nothing wrong report the same count,
+         and only one of those is worth saying nothing about. *)
+  corruption : [ `Checked | `Unchecked | `Failed ];
 }
 
 type domain_stats = {
@@ -330,9 +335,21 @@ let backend_row (b : backend_stats) =
           [Printf.sprintf "journal %d entries, %d behind" n behind]
       | Some n, _ -> [Printf.sprintf "journal %d entries" n]
   in
+  (* Loud when there is damage, silent when a checked store is clean, and
+     explicit when nothing is checking: "0 corrupt" from a store nobody looks at
+     is the one reading that must not be mistaken for health. *)
+  let corrupted =
+    match (b.corruption, b.corrupted_chunks) with
+      | `Failed, _ -> ["corruption check failed"]
+      | `Unchecked, _ -> ["not checked"]
+      | `Checked, Some n when n > 0 ->
+          [Printf.sprintf "%d corrupt — run tsync repair" n]
+      | `Checked, _ -> []
+  in
   info ~indent:1
     (String.concat " · "
-       (Printf.sprintf "%s (%s) — %s" b.backend_name b.role health :: journal))
+       (Printf.sprintf "%s (%s) — %s" b.backend_name b.role health
+       :: (journal @ corrupted)))
 
 (* A row per figure that has one, skipped where the daemon did not report it:
    half a row is worse than none, and a frontend that keeps no byte counters
@@ -687,8 +704,7 @@ let sub json name field key =
 
 let backend_of json =
   {
-    backend_name =
-      Option.value (string_field json "name") ~default:"backend";
+    backend_name = Option.value (string_field json "name") ~default:"backend";
     role = Option.value (string_field json "role") ~default:"?";
     backend_reachable =
       Option.value (bool_field json "reachable") ~default:false;
@@ -696,6 +712,18 @@ let backend_of json =
     backend_error = string_field json "error";
     journal_entries = sub json "journal" int_field "entries";
     journal_behind = sub json "journal" int_field "behind";
+    corrupted_chunks = sub json "corrupted" int_field "chunks";
+    (* Three states, not two: a probe that errored or timed out has said nothing
+       about this store's bytes, which is not the same as a store nothing is
+       checking — and neither is the same as clean. *)
+    corruption =
+      (match
+         ( sub json "corrupted" string_field "error",
+           sub json "corrupted" bool_field "checked" )
+       with
+        | Some _, _ -> `Failed
+        | None, Some true -> `Checked
+        | None, (Some false | None) -> `Unchecked);
   }
 
 (* The frontends of one domain, which on Linux is one. Their queue and byte

@@ -50,6 +50,7 @@
   file.bin = <unavailable: Backend.Backend_error("chunk d447b1ea40e6988b-b7aeb52a10fdaf2d: have 7 bytes, manifest says 11")>
 --- backend
   chunk d447b1ea40e6988b-b7aeb52a10fdaf2d size=7
+  corrupted d447b1ea40e6988b-b7aeb52a10fdaf2d
   journal <entry-1> = put file.bin 11
   file file.bin [.tsync-root/5364ca580b2eed57-b0140ab2eda14287] = manifest size=11 chunks=1 h1=d94b4e9626fdc9c1 h2=f3f6d793ca1ea424
     chunk#0 d447b1ea40e6988b-b7aeb52a10fdaf2d size=11

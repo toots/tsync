@@ -1,0 +1,147 @@
+"""Moto-backed tests for the chunk verifier. Run manually:
+
+    python3 -m venv .venv && . .venv/bin/activate
+    pip install boto3 moto pytest xxhash
+    pytest lambda/test_verify.py
+
+That the key it computes agrees with OCaml's is a separate matter, and the more
+important one: see test_chunk_key.py.
+"""
+
+import importlib
+import json
+import os
+
+import boto3
+import pytest
+from moto import mock_aws
+
+BUCKET = "tsync-test"
+
+
+@pytest.fixture
+def store_and_verify():
+    with mock_aws():
+        os.environ.update(BUCKET=BUCKET, STORE="aws")
+        boto3.client("s3", region_name="us-east-1").create_bucket(Bucket=BUCKET)
+        import store_aws
+        import verify
+
+        importlib.reload(store_aws)
+        importlib.reload(verify)
+        verify._store = None
+        yield verify.store(), verify
+
+
+def chunk_path(domain, body, verify):
+    """Where a body belongs: named by its own hash, under its shard."""
+    key = verify.key_of_body([body])
+    return f"tsync/{domain}/chunks/{key[:3]}/{key}", key
+
+
+def test_a_good_chunk_leaves_no_marker(store_and_verify):
+    st, verify = store_and_verify
+    body = b"hello world" * 100
+    path, key = chunk_path("d", body, verify)
+    st.put_bytes(path, body)
+
+    assert verify.verify_object(st, path) is True
+    assert list(st.list_keys("tsync/d/corrupted/")) == []
+
+
+def test_a_scrambled_body_is_filed(store_and_verify):
+    st, verify = store_and_verify
+    body = b"hello world" * 100
+    path, key = chunk_path("d", body, verify)
+    # Same length, different bytes: what a size comparison cannot see, and what
+    # the write-after-use bug in 82abb72 actually produced.
+    st.put_bytes(path, bytes(b ^ 0xFF for b in body))
+
+    assert verify.verify_object(st, path) is False
+    marker = f"tsync/d/corrupted/{key[:3]}/{key}"
+    assert list(st.list_keys("tsync/d/corrupted/")) == [marker]
+
+    recorded = json.loads(st.get_bytes(marker))
+    assert recorded["computed"] != key
+    assert recorded["computed"] == verify.key_of_body(
+        [bytes(b ^ 0xFF for b in body)]
+    )
+    assert recorded["size"] == len(body)
+
+
+def test_a_good_rewrite_clears_the_marker(store_and_verify):
+    """The whole repair loop: nothing ever deletes a marker on purpose, it is
+    cleared by the store re-verifying the object it was handed."""
+    st, verify = store_and_verify
+    body = b"hello world" * 100
+    path, key = chunk_path("d", body, verify)
+
+    st.put_bytes(path, bytes(b ^ 0xFF for b in body))
+    verify.verify_object(st, path)
+    assert list(st.list_keys("tsync/d/corrupted/")) != []
+
+    st.put_bytes(path, body)
+    assert verify.verify_object(st, path) is True
+    assert list(st.list_keys("tsync/d/corrupted/")) == []
+
+
+def test_a_manifest_is_never_read(store_and_verify):
+    """A manifest is filed under the hash of its own file name, so it is spelled
+    exactly like a chunk key. Deciding membership by the shape of the name rather
+    than by the prefix would file every manifest in the bucket as corrupt."""
+    st, verify = store_and_verify
+    key = verify.key_of_body([b"anything"])
+    manifest_key = f"tsync/d/manifests/{key[:3]}/{key}"
+    st.put_bytes(manifest_key, b"not a chunk body")
+
+    assert verify.marker_key(manifest_key) is None
+    assert verify.verify_object(st, manifest_key) is None
+    assert list(st.list_keys("tsync/d/corrupted/")) == []
+
+
+def test_a_marker_never_earns_one_of_its_own(store_and_verify):
+    """The non-recursion guard, held in code as well as in the notification's
+    prefix filter: the function writes into the bucket it watches."""
+    st, verify = store_and_verify
+    key = verify.key_of_body([b"anything"])
+    assert verify.marker_key(f"tsync/d/corrupted/{key[:3]}/{key}") is None
+    # And a chunk in the space a collection is moving out of is left alone.
+    assert verify.marker_key(f"tsync/d/chunks.from/{key[:3]}/{key}") is None
+
+
+def test_domains_do_not_share_a_corrupted_prefix(store_and_verify):
+    """One bucket can hold several domains, and the root is derived from the key
+    rather than from an env var precisely so this works."""
+    st, verify = store_and_verify
+    body = b"x" * 500
+    scrambled = b"y" * 500
+    for domain in ("one", "two"):
+        path, key = chunk_path(domain, body, verify)
+        st.put_bytes(path, scrambled)
+        verify.verify_object(st, path)
+        assert list(st.list_keys(f"tsync/{domain}/corrupted/")) == [
+            f"tsync/{domain}/corrupted/{key[:3]}/{key}"
+        ]
+
+
+def test_a_body_larger_than_one_read_slice(store_and_verify):
+    """store_aws yields 1 MiB at a time, so anything bigger exercises the
+    streamed hash rather than a one-shot one."""
+    st, verify = store_and_verify
+    body = bytes(((i * 31) + 7) & 0xFF for i in range(3 * 1024 * 1024))
+    path, key = chunk_path("d", body, verify)
+    st.put_bytes(path, body)
+
+    assert verify.verify_object(st, path) is True
+    assert list(st.list_keys("tsync/d/corrupted/")) == []
+
+
+def test_the_aws_event_shape_is_decoded(store_and_verify):
+    """S3 URL-encodes the key in the notification."""
+    st, verify = store_and_verify
+    body = b"hello world" * 100
+    path, key = chunk_path("d", body, verify)
+    st.put_bytes(path, bytes(b ^ 0xFF for b in body))
+
+    event = {"Records": [{"s3": {"object": {"key": path.replace("/", "%2F")}}}]}
+    assert verify.handler(event, None) == {"checked": 1, "corrupt": 1}

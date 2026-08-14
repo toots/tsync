@@ -91,7 +91,20 @@ type step =
   | ScrambleRemoteChunk of { path : string; index : int }
       (** Overwrite chunk [index] of [path]'s manifest on the backend with
           different bytes of the {i same} size, which nothing short of hashing
-          the body can tell from the real one. *)
+          the body can tell from the real one. Written through the store's own
+          [put], so the store files its own marker for it. *)
+  | ListCorrupted
+      (** Print what {!Corruption.list} reports, prefixed by a count so a
+          listing that finds nothing is still visible. Names any store nothing
+          checks: a store that never looked and a store that found nothing both
+          list zero markers, and only one of those is good news. *)
+  | RescanCorrupted
+      (** Drop the memo behind {!Corruption.is_marked}. What the few-second TTL
+          does on its own in a running daemon; a snapshot must not sleep for it.
+      *)
+  | Repair
+      (** Run [Repair.run]: rewrite each marked chunk from a copy that hashes to
+          its key, and print what became of every one. *)
   | DeleteRemoteManifest of string
       (** Delete the file's manifest object from the backend. *)
   | StageWrite of { path : string; content : string }

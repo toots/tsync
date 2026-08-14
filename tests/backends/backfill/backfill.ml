@@ -121,14 +121,17 @@ let wrap ~inners ~target ~name =
 
 let () =
   let main =
-    Backend.make ~backend_type:"local" ~get_field:(fun _ -> Some main_root)
+    Backend.make ~backend_type:"local" ~get_field:(function
+      | "verifyWrites" -> Some "false"
+      | _ -> Some main_root)
   in
   let (module M : Backend.S) = main in
   let composite, (module T : Deferred.S) =
     wrap ~inners:[main]
       ~target:
-        (Backend.make ~backend_type:"local" ~get_field:(fun _ ->
-             Some target_root))
+        (Backend.make ~backend_type:"local" ~get_field:(function
+          | "verifyWrites" -> Some "false"
+          | _ -> Some target_root))
       ~name:"target"
   in
   let (module B : Backend.S) = composite in

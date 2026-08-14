@@ -1,3 +1,6 @@
 # Installed by Cloud Functions gen2 (GCS deploy). AWS Lambda uses its built-in
-# boto3 and ignores this file.
+# boto3 and ignores this file — which is why xxhash is also vendored, see
+# vendor/README.md. verify.py appends vendor/ to sys.path rather than
+# prepending, so what pip installs here wins on GCP.
 google-cloud-storage>=2.10
+xxhash>=3.2

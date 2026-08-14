@@ -255,11 +255,30 @@ let query_max_concurrency t ~prefix =
   else if code resp = 404 then None
   else raise (backend_error "max_concurrency" (code resp) body)
 
+(* 404 reads as [false], which is the honest answer twice over: a proxy too old
+   to have this endpoint is one whose store nothing was checking when it was
+   built, and a peer that cannot say whether its bytes are held against their
+   names has not said they are. *)
+let query_verified t ~prefix =
+  let uri =
+    Uri.with_query' (Uri.with_path t.base_uri "/verified") [("prefix", prefix)]
+  in
+  let+ resp, body = call_retry t ~meth:`GET "verified" uri in
+  if is_ok resp then (
+    match Yojson.Safe.from_string body with
+      | exception _ -> false
+      | j -> (
+          match Yojson.Safe.Util.member "verified" j with
+            | `Bool b -> b
+            | _ -> false))
+  else if code resp = 404 then false
+  else raise (backend_error "verified" (code resp) body)
+
 (* Fixed for the life of the process — a peer changing any of these restarts to
    do it, dropping these connections anyway — so the promise is memoized and
    concurrent callers share one set of requests.
 
-   Three endpoints rather than one, so a client speaks to a proxy of any
+   An endpoint each rather than one, so a client speaks to a proxy of any
    version. *)
 let capabilities t ~prefix () =
   match t.caps_cache with
@@ -268,12 +287,23 @@ let capabilities t ~prefix () =
         let p =
           let* share_url = query_share_url t ~prefix
           and* chunk_size = query_chunk_size t ~prefix
-          and* max_concurrency = query_max_concurrency t ~prefix in
+          and* max_concurrency = query_max_concurrency t ~prefix
+          and* verified = query_verified t ~prefix in
           (* [gc] is not asked over the wire: collecting chunks needs a link and
              a rename in the store itself, which is the serving side's business
-             and not something a proxy client can do on its behalf. *)
+             and not something a proxy client can do on its behalf.
+
+             [verified] is asked, because unlike collecting it is a fact about
+             the bytes rather than about machinery, and the markers it describes
+             are ones we go on to list through this same peer. *)
           Lwt.return
-            { Backend.share_url; chunk_size; max_concurrency; gc = false }
+            {
+              Backend.share_url;
+              chunk_size;
+              max_concurrency;
+              gc = false;
+              verified;
+            }
         in
         t.caps_cache <- Some p;
         p

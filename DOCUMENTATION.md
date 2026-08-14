@@ -387,6 +387,47 @@ tsync resync-remote --source cloud     # ...copying *from* the named one
 tsync recheck                          # verify the remote against the local cache
 ```
 
+### Blocks that are not what their names say
+
+A block's name *is* the hash of its bytes. So a store can check every block it takes with
+nothing but the block itself: hash what landed, compare it to the name it arrived under. What
+fails is recorded as an object under `tsync/<domain>/corrupted/`, and reading the list is just
+a listing of that prefix.
+
+This catches what a size comparison cannot. A block that is the right length but holds the
+wrong bytes — a whole block written under another one's name — passes every check that only
+looks at metadata.
+
+Who does the checking depends on the store:
+
+- **`local`** checks each block as it writes it (`verifyWrites`, on by default). It costs one
+  read back per block written, usually from the page cache; turn it off for a store where
+  throughput matters more than finding out early.
+- **`s3` and `gcs`** check in a function the bucket itself triggers on each new object, so the
+  blocks are never downloaded to be checked. Deploy it by naming your domains in Terraform's
+  `chunk_domains`, then set `verifyChunks: true` on that backend so tsync knows the answer can
+  be trusted.
+
+```bash
+tsync verify              # what each store found, and which stores nothing is checking
+tsync verify --detail     # ...and what each bad block hashed to instead
+tsync repair              # rewrite them from a copy that hashes to the right key
+tsync repair --dry-run    # ...say what would be rewritten, and write nothing
+```
+
+`tsync verify` distinguishes a store that looked and found nothing from a store nothing is
+checking. Both would otherwise report zero, and only one of those is good news.
+
+`tsync repair` hashes a candidate copy before trusting it — a second copy can be wrong too, and
+writing one bad block over another would spread the damage while reporting a repair. It writes
+only to the damaged store. Where no store holds good bytes, it names the blocks rather than
+reporting success; `tsync recheck` may still fix those from a machine whose cache holds the
+files that use them.
+
+Nothing deletes a marker directly. It is cleared by the store re-checking the object as it
+takes the next write — which is also why simply saving the file again repairs it, and why a
+block known to be bad is re-uploaded instead of being deduplicated against.
+
 ### Catching up
 
 Neither a `replica` nor a `backfill` target is written on the path of your copy. A write lands
@@ -645,6 +686,8 @@ tsync gc              # reclaim unreferenced blocks (local main stores only)
 tsync sync            # apply changes from other machines (incremental)
 tsync sync --full     # clear local cache and re-download all manifests
 tsync recheck         # verify the remote against the local cache, repair what's possible
+tsync verify          # list blocks a store found were not what their names say
+tsync repair          # rewrite those from a copy that hashes to the right key
 tsync resync-remote   # copy missing/damaged objects from one backend to the others
 tsync import <dir>    # seed the domain from an existing folder
 tsync export <dir>    # write every file of the domain to a plain folder
@@ -705,9 +748,9 @@ Every backend needs a `type`, a `name` (used by `resync-remote --source`) and a
 
 | `type` | Required fields | Optional | Notes |
 |---|---|---|---|
-| `s3` | `bucket`, `accessKeyId`, `secretAccessKey` | `region` (default `us-east-1`), `endpoint`, `shareUrl`, `unsignedPayload` | Also works with S3-compatible services (Backblaze B2, MinIO, …) via `endpoint`. |
-| `gcs` | `bucket`, `serviceAccountKey` | `endpoint`, `shareUrl` | `serviceAccountKey` is the service-account JSON itself, not a path to it. Blank only to reach an emulator anonymously, with `endpoint`. |
-| `local` | `path` | — | A directory: another disk, a mounted NAS, anything the filesystem reaches. |
+| `s3` | `bucket`, `accessKeyId`, `secretAccessKey` | `region` (default `us-east-1`), `endpoint`, `shareUrl`, `unsignedPayload`, `verifyChunks` | Also works with S3-compatible services (Backblaze B2, MinIO, …) via `endpoint`. |
+| `gcs` | `bucket`, `serviceAccountKey` | `endpoint`, `shareUrl`, `verifyChunks` | `serviceAccountKey` is the service-account JSON itself, not a path to it. Blank only to reach an emulator anonymously, with `endpoint`. |
+| `local` | `path` | `verifyWrites` (default on) | A directory: another disk, a mounted NAS, anything the filesystem reaches. |
 | `http-proxy` | `url`, `secret` | — | Another machine running tsync with the `http-proxy` frontend — [step 7](#7-run-tsync-as-a-server-for-your-network). |
 
 ## Backend role reference

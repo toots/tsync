@@ -34,11 +34,26 @@ provider "google" {
   region  = var.gcp_region
 }
 
-# Package the shared Lambda handler once; every store reuses the same zip.
+# Package the shared Lambda source once; every store reuses the same zip, and
+# both functions in a store are entry points into it (handler.handler for
+# shares, verify.handler for the chunk check).
+#
+# Excludes are exact paths, not globs, so each test file has to be named. A
+# missed one ships harmlessly — nothing imports it — but it also ships its
+# import of moto, so keep the list current.
 data "archive_file" "handler" {
-  type        = "zip"
-  source_dir  = "${path.module}/../lambda"
-  excludes    = ["test_handler.py", "__pycache__"]
+  type       = "zip"
+  source_dir = "${path.module}/../lambda"
+  excludes = [
+    "test_handler.py",
+    "test_store_gcs.py",
+    "test_verify.py",
+    "test_chunk_key.py",
+    "test_verify_gcs.py",
+    "vendor/README.md",
+    "__pycache__",
+    "vendor/xxhash/__pycache__",
+  ]
   output_path = "${path.module}/build/lambda.zip"
 }
 
@@ -61,6 +76,11 @@ module "store" {
   presign_ttl           = each.value.presign_ttl
   lambda_memory_mb      = each.value.lambda_memory_mb
   ephemeral_storage_mb  = each.value.ephemeral_storage_mb
+
+  chunk_domains          = each.value.chunk_domains
+  manage_notifications   = each.value.manage_notifications
+  verify_timeout_seconds = each.value.verify_timeout_seconds
+  verify_memory_mb       = each.value.verify_memory_mb
 
   lambda_zip      = data.archive_file.handler.output_path
   lambda_zip_hash = data.archive_file.handler.output_base64sha256
@@ -94,6 +114,11 @@ module "store_gcs" {
   presign_ttl        = each.value.presign_ttl
   memory_mb          = each.value.memory_mb
   max_share_bytes    = each.value.max_share_bytes
+
+  project                = var.gcp_project
+  chunk_domains          = each.value.chunk_domains
+  verify_timeout_seconds = each.value.verify_timeout_seconds
+  verify_memory_mb       = each.value.verify_memory_mb
 
   source_bucket = google_storage_bucket.functions_source[0].name
   source_zip    = data.archive_file.handler.output_path
