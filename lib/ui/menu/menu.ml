@@ -237,17 +237,20 @@ let rate_line statuses =
    outranks what is merely busy. An empty domain list lands on the warning too,
    which is right -- nothing configured is nothing working.
 
-   ponytail: placeholders borrowed from the icon theme, pending four of our own.
-   They are only borrowed, so they are chosen for being present rather than for
-   reading as one set -- and being present is not portable: the spec's
-   [network-transmit-receive] is in neither Breeze nor a current Adwaita, so a
-   name has to be checked against a real theme before it goes here. Shipping our
-   own into hicolor, which every theme inherits, ends the guessing. *)
+   Our own four, shipped into hicolor from [assets/tray]. They used to be
+   borrowed from the icon theme, which meant they were chosen for being present
+   rather than for reading as one set, and being present was not portable: the
+   spec's [network-transmit-receive] is in neither Breeze nor a current Adwaita.
+
+   The [-symbolic] suffix is load-bearing on Linux. It is what makes a panel
+   recolour the icon to its own foreground instead of drawing it in the colour
+   the file names, which is the difference between visible and invisible on a
+   dark panel. macOS ignores the name and maps it to an SF Symbol. *)
 let icon_name statuses =
-  if all_unreachable statuses then "dialog-warning"
-  else if all_paused statuses then "media-playback-pause"
-  else if List.exists is_transferring statuses then "state-sync"
-  else "view-refresh"
+  if all_unreachable statuses then "tsync-error-symbolic"
+  else if all_paused statuses then "tsync-paused-symbolic"
+  else if List.exists is_transferring statuses then "tsync-sync-symbolic"
+  else "tsync-idle-symbolic"
 
 (* The generic names only, never [image-jpeg]: a specific name a theme happens
    not to carry draws nothing at all, and without a toolkit there is no way to

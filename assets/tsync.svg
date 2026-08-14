@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24"
+     fill="currentColor">
+  <title>tsync</title>
+  <!-- A lowercase t whose stem turns into an arrow: the letter reads first, the
+       motion second. On the 24-unit grid at a 2-unit stem, which is what keeps
+       the edges on whole pixels at 24, 32 and 48.
+
+       The letter is drawn as an outline rather than a stroke, so the ascender
+       can carry the diagonal top cut a typeset t has. A stroke has one uniform
+       width and no way to express it.
+
+       The arrow head is a filled triangle rather than a chevron. A chevron
+       drawn in stroke sits within a pixel of the tail it caps, and the two
+       merge into a blob everywhere below 32px. -->
+  <path d="M9 5 11 3V15a2 2 0 0 0 2 2h2v2h-2a4 4 0 0 1-4-4Z"/>
+  <path d="M6 7h8v2H6Z"/>
+  <path d="M15 15.4 19.6 18 15 20.6Z"/>
+</svg>

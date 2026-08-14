@@ -3,7 +3,7 @@ Type=Application
 Name=tsync tray
 Comment=Sync status in the system tray
 Exec=@BIN@
-Icon=view-refresh
+Icon=tsync
 Terminal=false
 Categories=Utility;
 # XDG autostart rather than a systemd user unit: graphical-session.target is

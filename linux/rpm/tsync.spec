@@ -44,6 +44,16 @@ install -Dm644 %{srcdir}/linux/tsync@.service %{buildroot}%{_unitdir}/tsync@.ser
 install -d %{buildroot}%{_sysconfdir}/xdg/autostart
 sed 's|@BIN@|%{_bindir}/tsync-tray|' %{srcdir}/linux/tsync-tray.desktop.in \
   > %{buildroot}%{_sysconfdir}/xdg/autostart/tsync-tray.desktop
+# The .desktop names an icon and the tray asks for four more, so the package
+# that ships them is the package that has to ship the icons. The suffix and the
+# symbolic/ directory are a pair: together they are what makes a panel recolour
+# to its own foreground instead of drawing black on black.
+install -Dm644 %{srcdir}/assets/tsync-app.svg \
+  %{buildroot}%{_datadir}/icons/hicolor/scalable/apps/tsync.svg
+for state in idle sync paused error; do
+  install -Dm644 %{srcdir}/assets/tray/tsync-$state-symbolic.svg \
+    %{buildroot}%{_datadir}/icons/hicolor/symbolic/apps/tsync-$state-symbolic.svg
+done
 
 %files
 %{_bindir}/tsync
@@ -52,6 +62,8 @@ sed 's|@BIN@|%{_bindir}/tsync-tray|' %{srcdir}/linux/tsync-tray.desktop.in \
 %files tray
 %{_bindir}/tsync-tray
 %{_sysconfdir}/xdg/autostart/tsync-tray.desktop
+%{_datadir}/icons/hicolor/scalable/apps/tsync.svg
+%{_datadir}/icons/hicolor/symbolic/apps/tsync-*-symbolic.svg
 
 # The unit is a template with no default instance, so these only refresh
 # already-enabled tsync@<user> instances across an upgrade.

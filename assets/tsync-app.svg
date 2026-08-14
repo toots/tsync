@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" width="128" height="128">
+  <title>tsync</title>
+  <rect width="128" height="128" rx="28" fill="#4263EB"/>
+  <!-- The mark from tsync.svg on its own 24-unit grid, scaled into the field.
+       A whole-number scale is what holds the edges on pixel boundaries once
+       this is rasterised back down. -->
+  <g transform="translate(0 5) scale(5)" fill="#fff">
+    <path d="M9 5 11 3V15a2 2 0 0 0 2 2h2v2h-2a4 4 0 0 1-4-4Z"/>
+    <path d="M6 7h8v2H6Z"/>
+    <path d="M15 15.4 19.6 18 15 20.6Z"/>
+  </g>
+</svg>

@@ -98,24 +98,25 @@ final class StatusMenu: NSObject, NSMenuDelegate {
 
     // MARK: - Rendering
 
-    /// The daemon names icons from the freedesktop set, which is what a Linux
-    /// panel looks up. The nearest SF Symbol is this side's business.
-    private static func symbol(for name: String) -> String {
-        switch name {
-        case "dialog-warning": return "exclamationmark.triangle"
-        case "media-playback-pause": return "pause.circle"
-        case "state-sync": return "arrow.triangle.2.circlepath"
-        default: return "arrow.clockwise"
-        }
+    /// The daemon names icons the way a Linux panel looks them up, and the
+    /// asset catalog carries an image set under each of those names — so there
+    /// is no mapping table here, and a fifth state needs only a fifth imageset.
+    /// An unknown name falls back to idle rather than to no icon at all: a menu
+    /// bar extra with a nil image is a dead gap the user cannot click.
+    private static func statusImage(named name: String) -> NSImage? {
+        let image = NSImage(named: name) ?? NSImage(named: "tsync-idle-symbolic")
+        // Template, so AppKit paints it black on a light menu bar and white on
+        // a dark one instead of drawing our own colour into both.
+        image?.isTemplate = true
+        image?.size = NSSize(width: 18, height: 18)
+        image?.accessibilityDescription = "tsync"
+        return image
     }
 
     private func render() {
         guard !isOpen else { return }
 
-        let icon = NSImage(systemSymbolName: Self.symbol(for: menu?.icon ?? ""),
-                           accessibilityDescription: "tsync")
-        icon?.isTemplate = true
-        item.button?.image = icon
+        item.button?.image = Self.statusImage(named: menu?.icon ?? "")
         item.button?.toolTip = menu?.tooltip
 
         let built = NSMenu()

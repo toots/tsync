@@ -28,6 +28,17 @@ install-system:
 	mkdir -p ~/.config/autostart
 	sed 's|@BIN@|$(HOME)/.local/bin/tsync-tray|' tsync-tray.desktop.in \
 	  > ~/.config/autostart/tsync-tray.desktop
+	# Every theme inherits hicolor, so this is where an icon is found whatever
+	# the desktop. The four tray states go under symbolic/ and keep the suffix
+	# in their name: that pairing is what makes a panel recolour them to its own
+	# foreground rather than drawing them in the colour the file names.
+	mkdir -p ~/.local/share/icons/hicolor/scalable/apps
+	mkdir -p ~/.local/share/icons/hicolor/symbolic/apps
+	cp ../assets/tsync-app.svg ~/.local/share/icons/hicolor/scalable/apps/tsync.svg
+	cp ../assets/tray/tsync-*-symbolic.svg ~/.local/share/icons/hicolor/symbolic/apps/
+	# Advisory: GTK scans the directory when the cache is missing or stale, so a
+	# desktop without the tool installed still finds the icons.
+	-gtk-update-icon-cache -f -t ~/.local/share/icons/hicolor 2>/dev/null
 	mkdir -p ~/.config/systemd/user
 	cp tsync.service ~/.config/systemd/user/
 	systemctl --user daemon-reload
@@ -50,6 +61,9 @@ uninstall:
 	-systemctl --user daemon-reload
 	rm -f ~/.local/bin/tsync ~/.local/bin/tsync-tray
 	rm -f ~/.config/autostart/tsync-tray.desktop
+	rm -f ~/.local/share/icons/hicolor/scalable/apps/tsync.svg
+	rm -f ~/.local/share/icons/hicolor/symbolic/apps/tsync-*-symbolic.svg
+	-gtk-update-icon-cache -f -t ~/.local/share/icons/hicolor 2>/dev/null
 	-opam remove -y tsync tsync-tls tsync-ssl tsync-s3 tsync-fuse tsync-tray
 
 # End-to-end check against a real FUSE mount. Stages everything it needs — a

@@ -40,7 +40,7 @@ in that file rather than as an empty menu on your machine.
 Shape:
 
 ```json
-{ "icon": "state-sync",
+{ "icon": "tsync-sync-symbolic",
   "tooltip": "tsync — Downloading 1",
   "rows": [ { "label": "...", "enabled": true, "indent": 0,
               "action": { ... }, "icon": "...", "checked": true,
@@ -61,11 +61,22 @@ ask `NSFileProviderManager.getUserVisibleURL`. `StatusMenu.domainURLs` holds
 that mapping and `folderURL`/`fileURL` do the resolving. A row whose domain is
 not in that map gets no action rather than a broken one.
 
-**Icons are freedesktop names**, because that is what a Linux panel looks up.
-`StatusMenu.symbol(for:)` maps the four the model emits — `dialog-warning`,
-`media-playback-pause`, `state-sync`, `view-refresh` — onto SF Symbols. File
-rows carry names like `image-x-generic`, which the Swift ignores in favour of
+**Icons are icon-theme names**, because that is what a Linux panel looks up.
+The four the model emits are our own — `tsync-idle-symbolic`,
+`tsync-sync-symbolic`, `tsync-paused-symbolic`, `tsync-error-symbolic` — drawn
+in `assets/tray` and installed into `~/.local/share/icons/hicolor/symbolic/apps`
+by `linux/Makefile`. `StatusMenu.symbol(for:)` maps them onto SF Symbols, so
+renaming one means editing both sides and promoting
+`tests/unit/menu/menu_test.expected`. File rows still carry freedesktop names
+like `image-x-generic`, which the Swift ignores in favour of
 `NSWorkspace.icon(forFile:)` on the label.
+
+The `-symbolic` suffix and the `symbolic/` directory are a pair, and both are
+load-bearing: together they are what makes a panel recolour the icon to its own
+foreground. Without them the icon draws in the colour the file names, which is
+black on a dark panel. That is also why every mark in those four files is a
+fill — GTK recolours by forcing `fill` on `rect`, `circle` and `path`, so a
+stroked glyph would keep its own colour and gain a filled interior.
 
 ## Where the code is
 

@@ -126,7 +126,7 @@ let create conn ~item_path ~menu_path =
       conn;
       item_path;
       menu_path;
-      icon = "view-refresh";
+      icon = "tsync-idle-symbolic";
       tooltip = "tsync";
       host = false;
     }

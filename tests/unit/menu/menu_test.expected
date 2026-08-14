@@ -1,5 +1,5 @@
 == two domains, one busy
-icon    state-sync
+icon    tsync-sync-symbolic
 tooltip tsync — Uploading 3
         photos — Uploading 3 -> open photos
             a_1.jpg (image-x-generic) -> reveal photos:a_1.jpg
@@ -15,7 +15,7 @@ tooltip tsync — Uploading 3
         Quit tsync tray -> quit
 
 == daemon not running
-icon    dialog-warning
+icon    tsync-error-symbolic
 tooltip tsync — Daemon not running
         photos — not answering -> open photos
         ---
@@ -25,7 +25,7 @@ tooltip tsync — Daemon not running
         Quit tsync tray -> quit
 
 == paused with a backlog
-icon    media-playback-pause
+icon    tsync-paused-symbolic
 tooltip tsync — Paused
         photos — Paused -> open photos
             f1.txt (text-x-generic) -> reveal photos:f1.txt
@@ -43,7 +43,7 @@ tooltip tsync — Paused
         Quit tsync tray -> quit
 
 == downloads below the threshold
-icon    state-sync
+icon    tsync-sync-symbolic
 tooltip tsync — Downloading 2
         photos — Downloading 2 -> open photos
         ---
@@ -55,7 +55,7 @@ tooltip tsync — Downloading 2
         Quit tsync tray -> quit
 
 == downloading, with uploads alongside
-icon    state-sync
+icon    tsync-sync-symbolic
 tooltip tsync — Uploading 1 · Downloading 2
         photos — Uploading 1 · Downloading 2 -> open photos
             out.raw (image-x-generic) -> reveal photos:out.raw
@@ -72,7 +72,7 @@ tooltip tsync — Uploading 1 · Downloading 2
         Quit tsync tray -> quit
 
 == more downloads than fit
-icon    state-sync
+icon    tsync-sync-symbolic
 tooltip tsync — Downloading 7
         photos — Downloading 7 -> open photos
             f1.iso (package-x-generic) -> reveal photos:f1.iso
@@ -88,7 +88,7 @@ tooltip tsync — Downloading 7
         Quit tsync tray -> quit
 
 == no domains
-icon    dialog-warning
+icon    tsync-error-symbolic
 tooltip tsync — No domains configured
         tsync — No domains configured
         ---
@@ -99,7 +99,7 @@ tooltip tsync — No domains configured
 
 == menu as JSON
 {
-  "icon": "state-sync",
+  "icon": "tsync-sync-symbolic",
   "tooltip": "tsync — Uploading 1 · Downloading 1",
   "rows": [
     {

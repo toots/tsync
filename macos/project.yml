@@ -27,6 +27,11 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: org.feverdreamtv.tsync
         CODE_SIGN_ENTITLEMENTS: TsyncApp/TsyncApp.entitlements
         INFOPLIST_FILE: TsyncApp/Info.plist
+        # Regenerate the catalog with scripts/make-icons.sh after changing
+        # anything in assets/. Only the app names an app icon: an app-extension
+        # takes the host bundle's. The menu bar image sets in the same catalog
+        # are looked up by name at runtime, so they need no setting here.
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         LD_RUNPATH_SEARCH_PATHS: "$(inherited) @executable_path/../Frameworks @executable_path/../../Frameworks"
     dependencies:
       - target: TsyncFileProvider

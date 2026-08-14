@@ -83,6 +83,16 @@ mkdir -p "$tray/etc/xdg/autostart"
 sed 's|@BIN@|/usr/bin/tsync-tray|' linux/tsync-tray.desktop.in \
   > "$tray/etc/xdg/autostart/tsync-tray.desktop"
 chmod 644 "$tray/etc/xdg/autostart/tsync-tray.desktop"
+# The .desktop names an icon and the tray asks for four more, so the package
+# that ships them is the package that has to ship the icons. The suffix and the
+# symbolic/ directory are a pair: together they are what makes a panel recolour
+# to its own foreground instead of drawing black on black.
+install -Dm644 assets/tsync-app.svg \
+  "$tray/usr/share/icons/hicolor/scalable/apps/tsync.svg"
+for state in idle sync paused error; do
+    install -Dm644 "assets/tray/tsync-$state-symbolic.svg" \
+      "$tray/usr/share/icons/hicolor/symbolic/apps/tsync-$state-symbolic.svg"
+done
 tray_deps=$(shlibdeps tsync-tray "$tray/usr/bin/tsync-tray")
 test -n "$tray_deps"
 emit tsync-tray "$tray" "$tray_deps, tsync (= $version)" 'Sync status in the system tray
