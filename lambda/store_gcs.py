@@ -2,9 +2,11 @@
 
 Same interface as store_aws. Assembly uses GCS `compose` (server-side, no /tmp):
 up to 32 source objects concatenate into one in a single call; more than 32 are
-composed in tiers through temporary objects that are cleaned up afterwards.
+composed in tiers through temporary objects that are cleaned up afterwards, each
+tier running its groups concurrently the way store_aws runs its part copies.
 """
 
+import concurrent.futures
 import os
 import uuid
 from datetime import timedelta
@@ -84,28 +86,50 @@ class Store:
             raise ShareError(502, "a data block of this file is missing on the backend")
         return dest
 
+    def _delete_quietly(self, key):
+        try:
+            self.bucket.blob(key).delete()
+        except Exception:
+            pass
+
     def assemble(self, chunk_keys, dest_key):
         """Concatenate [chunk_keys] (in order) into dest_key via compose,
-        tiering through temp objects when there are more than COMPOSE_MAX."""
+        tiering through temp objects when there are more than COMPOSE_MAX.
+
+        A tier's groups are independent server-side operations, so they run
+        concurrently: a tier costs one compose rather than one per group, which
+        is the difference between seconds and minutes on a file with hundreds of
+        chunks. Only the tiers themselves are sequential, each needing the one
+        below it to exist."""
         temps = []
         try:
             keys = list(chunk_keys)
             while len(keys) > COMPOSE_MAX:
-                next_keys = []
-                for i in range(0, len(keys), COMPOSE_MAX):
-                    group = keys[i:i + COMPOSE_MAX]
-                    if len(group) == 1:
-                        next_keys.append(group[0])
-                        continue
-                    tmp = "%scompose-tmp/%s-%d" % (self.cache_prefix, uuid.uuid4().hex, i)
-                    self._compose(group, tmp)
-                    temps.append(tmp)
-                    next_keys.append(tmp)
-                keys = next_keys
+                groups = [
+                    keys[i:i + COMPOSE_MAX]
+                    for i in range(0, len(keys), COMPOSE_MAX)
+                ]
+                # A group of one is already the result it would compose to.
+                plan = [
+                    (g, "" if len(g) == 1 else
+                     "%scompose-tmp/%s" % (self.cache_prefix, uuid.uuid4().hex))
+                    for g in groups
+                ]
+                pending = [(g, tmp) for g, tmp in plan if tmp]
+                # Recorded before the composes run: one failing mid-tier still
+                # leaves the others to clean up.
+                temps.extend(tmp for _, tmp in pending)
+                self._parallel(lambda item: self._compose(*item), pending)
+                keys = [tmp or g[0] for g, tmp in plan]
             self._compose(keys, dest_key)
         finally:
-            for tmp in temps:
-                try:
-                    self.bucket.blob(tmp).delete()
-                except Exception:
-                    pass
+            self._parallel(self._delete_quietly, temps)
+
+    @staticmethod
+    def _parallel(fn, items):
+        """Run [fn] over [items], propagating the first exception. [map] is lazy,
+        so the result has to be consumed for that to happen."""
+        if not items:
+            return
+        with concurrent.futures.ThreadPoolExecutor(max_workers=COMPOSE_MAX) as ex:
+            list(ex.map(fn, items))
