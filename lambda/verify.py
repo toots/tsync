@@ -34,6 +34,7 @@ import xxhash  # noqa: E402
 
 CHUNKS_SEG = "/chunks/"
 CORRUPTED_SEG = "/corrupted/"
+JOBS_SEG = "/verify-jobs/"
 FANOUT = 3  # lib/naming/chunk_layout.ml
 KEY_HEX = 16  # lib/utils/xxhash/xxhash.ml, hex_length
 
@@ -116,6 +117,45 @@ def marker_key(key):
     return key[:cut] + CORRUPTED_SEG + rest
 
 
+def job_shard(key):
+    """The shard a whole-store request names, or None when [key] is not one.
+
+    A request is an empty object under `verify-jobs/`, written by the client one
+    per shard; the bucket's own notification delivers it here. So a sweep is the
+    same function on the same trigger doing the same per-chunk check — there is
+    no second path to keep in step, and nothing to run but what already runs on
+    every upload.
+    """
+    cut = key.rfind(JOBS_SEG)
+    if cut < 0:
+        return None
+    shard = key[cut + len(JOBS_SEG):]
+    return shard if is_shard_name(shard) else None
+
+
+def verify_shard(st, key):
+    """Check every chunk in the shard a request names, then drop the request.
+
+    Deleted last, so a run that dies partway leaves the request in place: it is
+    then visible to whoever asks why the sweep never finished, and re-queueing is
+    what retries it. Deleting first would lose that.
+    """
+    shard = job_shard(key)
+    if shard is None:
+        return None
+    prefix = key[: key.rfind(JOBS_SEG)] + CHUNKS_SEG + shard + "/"
+    checked = bad = 0
+    for chunk in st.list_keys(prefix):
+        result = verify_object(st, chunk)
+        if result is None:
+            continue
+        checked += 1
+        bad += 0 if result else 1
+    st.delete(key)
+    print(f"shard {shard}: {checked} chunk(s) checked, {bad} corrupt")
+    return {"checked": checked, "corrupt": bad}
+
+
 def verify_object(st, key):
     """Check one chunk object. Returns True when it is what its name says, False
     when it is not, and None when [key] does not name a chunk (nothing read)."""
@@ -146,13 +186,24 @@ def _keys_from_event(event):
             yield unquote_plus(s3["object"]["key"])
 
 
+def verify_key(st, key):
+    """One object-created event, whichever kind. A chunk is checked; a request
+    sweeps the shard it names; anything else is not ours."""
+    if job_shard(key) is not None:
+        return verify_shard(st, key)
+    result = verify_object(st, key)
+    if result is None:
+        return None
+    return {"checked": 1, "corrupt": 0 if result else 1}
+
+
 def handler(event, context):
     """AWS entry point: an s3:ObjectCreated:* notification."""
     checked = 0
     bad = 0
     for key in _keys_from_event(event):
         try:
-            result = verify_object(store(), key)
+            result = verify_key(store(), key)
         except Exception:
             # One bad object must not abandon the rest of the batch, and a raise
             # here would have S3 redeliver the whole notification.
@@ -160,8 +211,8 @@ def handler(event, context):
             continue
         if result is None:
             continue
-        checked += 1
-        bad += 0 if result else 1
+        checked += result["checked"]
+        bad += result["corrupt"]
     return {"checked": checked, "corrupt": bad}
 
 
@@ -176,7 +227,4 @@ def gcp_verify(cloud_event):
     key = attributes.get("objectId")
     if not key:
         return {"checked": 0, "corrupt": 0}
-    result = verify_object(store(), key)
-    if result is None:
-        return {"checked": 0, "corrupt": 0}
-    return {"checked": 1, "corrupt": 0 if result else 1}
+    return verify_key(store(), key) or {"checked": 0, "corrupt": 0}

@@ -106,6 +106,25 @@ module type S = sig
   val list_prefix :
     ?max_keys:int -> prefix:string -> unit -> file_entry list Lwt.t
 
+  (** Ask the store to check every chunk it holds against its own name, on its
+      own side, and file what fails under {!Chunk_layout.corrupted_prefix}. The
+      answer is how many units of work were queued, not a result: the checking
+      happens where the bytes are, and a client learns what came of it by
+      listing markers afterwards.
+
+      Optional, and [`Unsupported] is the useful half of that. A store with
+      nothing on its side to run this — a filesystem has no event source, an
+      http-proxy peer owns its own store — says so rather than pretending, and
+      the command asking for it fails instead of reporting a verification that
+      never happened. An s3 or gcs store answers [`Unsupported] until its config
+      says the function is deployed, for the same reason {!caps.verified}
+      exists: an un-deployed bucket would otherwise queue work nothing consumes
+      and look like it had been checked.
+
+      Reading every byte is what this costs, so it is never implicit. *)
+  val verify_all :
+    chunk_prefix:string -> unit -> [ `Queued of int | `Unsupported ] Lwt.t
+
   (** What this store can tell a client about [prefix]'s domain. [prefix]
       identifies the domain, for backends that front several. *)
   val capabilities : prefix:string -> unit -> caps Lwt.t

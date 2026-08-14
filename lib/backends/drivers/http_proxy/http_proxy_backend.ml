@@ -327,6 +327,10 @@ let make ~url ~secret : (module Backend.S) =
     let delete_multi keys = delete_multi t keys
     let copy ~src_key ~dst_key () = copy t ~src_key ~dst_key ()
     let list_prefix ?max_keys ~prefix () = list_all t ?max_keys ~prefix ()
+
+    (* The peer owns that store and whatever checks it; asking it to start a
+       sweep on our behalf is a decision for whoever administers it. *)
+    let verify_all ~chunk_prefix:_ () = Lwt.return `Unsupported
     let capabilities ~prefix () = capabilities t ~prefix ()
   end)
 

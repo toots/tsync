@@ -196,6 +196,44 @@ let suite name (module B : Backend.S) =
   in
   Lwt.return_unit
 
+let backend_of name fields =
+  Backend.make ~backend_type:name ~get_field:(fun k -> List.assoc_opt k fields)
+
+(* What a real store does with a request to check everything it holds.
+
+   The half that is reachable from here is the client's: whether the store
+   refuses when nothing is deployed to answer, and whether queueing lands real
+   objects a real listing returns. The half that is not is the trigger — a
+   notification exists per configured domain, created by terraform, and this
+   suite works under a CI prefix no notification matches. Nothing here is
+   therefore evidence that the function ever runs; that wants a deployed stack,
+   not a bucket and a key.
+
+   Kept honest by asserting the refusal first: it is what the command leans on
+   to fail rather than report a check that never happened. *)
+let verify_suite name fields =
+  let open Lwt.Syntax in
+  let chunk_prefix = run_prefix ^ "chunks/" in
+  let jobs = run_prefix ^ "verify-jobs/" in
+  let (module Off : Backend.S) = backend_of name fields in
+  let* answer = Off.verify_all ~chunk_prefix () in
+  check "verify_all refuses when no verifier is configured"
+    (answer = `Unsupported);
+  let (module On : Backend.S) =
+    backend_of name (("verifyChunks", "true") :: fields)
+  in
+  let* answer = On.verify_all ~chunk_prefix () in
+  check "verify_all queues one request per shard"
+    (answer = `Queued Chunk_layout.shards);
+  let+ queued = On.list_prefix ~prefix:jobs () in
+  check "the requests are objects the store lists back"
+    (List.length queued = Chunk_layout.shards);
+  check "and each names a shard"
+    (List.for_all
+       (fun (e : Backend.file_entry) ->
+         Chunk_layout.shard_of_verify_job e.Backend.key <> None)
+       queued)
+
 (* Cleans up whatever the suite did not, including after a failure. *)
 let sweep (module B : Backend.S) =
   let open Lwt.Syntax in
@@ -208,9 +246,6 @@ let sweep (module B : Backend.S) =
         | [] -> Lwt.return_unit
         | keys -> B.delete_multi keys)
     (fun _ -> Lwt.return_unit)
-
-let backend_of name fields =
-  Backend.make ~backend_type:name ~get_field:(fun k -> List.assoc_opt k fields)
 
 let () =
   let linked = Backend.types () in
@@ -259,7 +294,9 @@ let () =
               (Lwt.finalize
                  (fun () ->
                    Lwt.catch
-                     (fun () -> suite name b)
+                     (fun () ->
+                       Lwt.bind (suite name b) (fun () ->
+                           verify_suite name fields))
                      (fun exn ->
                        incr failures;
                        Printf.printf "    FAIL  %s raised: %s\n%!" name

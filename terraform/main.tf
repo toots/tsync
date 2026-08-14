@@ -81,6 +81,7 @@ module "store" {
   manage_notifications   = each.value.manage_notifications
   verify_timeout_seconds = each.value.verify_timeout_seconds
   verify_memory_mb       = each.value.verify_memory_mb
+  verify_max_concurrency = each.value.verify_max_concurrency
 
   lambda_zip      = data.archive_file.handler.output_path
   lambda_zip_hash = data.archive_file.handler.output_base64sha256

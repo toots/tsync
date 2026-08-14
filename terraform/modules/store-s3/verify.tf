@@ -44,6 +44,16 @@ data "aws_iam_policy_document" "verify" {
     actions   = ["s3:PutObject", "s3:DeleteObject"]
     resources = ["${local.bucket_arn}/tsync/*/corrupted/*"]
   }
+  # Sweep requests: listed to walk a shard, deleted once it is done. The client
+  # writes them; this only consumes them.
+  statement {
+    actions   = ["s3:GetObject", "s3:DeleteObject"]
+    resources = ["${local.bucket_arn}/tsync/*/verify-jobs/*"]
+  }
+  statement {
+    actions   = ["s3:ListBucket"]
+    resources = [local.bucket_arn]
+  }
 }
 
 resource "aws_iam_role_policy" "verify" {
@@ -72,6 +82,12 @@ resource "aws_lambda_function" "verify" {
   # a budget. No ephemeral storage: nothing here touches /tmp.
   timeout     = var.verify_timeout_seconds
   memory_size = var.verify_memory_mb
+
+  # A whole-store sweep queues one request per shard, and they all become
+  # deliverable at once. Unbounded, that is thousands of concurrent readers
+  # against one bucket and whatever else in the account shares the account
+  # concurrency pool.
+  reserved_concurrent_executions = var.verify_max_concurrency
 
   environment {
     variables = {
@@ -114,6 +130,19 @@ resource "aws_s3_bucket_notification" "chunks" {
       lambda_function_arn = aws_lambda_function.verify[0].arn
       events              = ["s3:ObjectCreated:*"]
       filter_prefix       = "tsync/${lambda_function.value}/chunks/"
+    }
+  }
+
+  # The other way in: `tsync chunks-integrity --verify` writes one request per
+  # shard here, and this delivers them to the same function. A separate rule
+  # rather than a wider prefix, so a marker still cannot trigger anything.
+  dynamic "lambda_function" {
+    for_each = toset(var.chunk_domains)
+    content {
+      id                  = "tsync-verify-jobs-${lambda_function.value}"
+      lambda_function_arn = aws_lambda_function.verify[0].arn
+      events              = ["s3:ObjectCreated:*"]
+      filter_prefix       = "tsync/${lambda_function.value}/verify-jobs/"
     }
   }
 

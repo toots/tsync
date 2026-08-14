@@ -1242,151 +1242,197 @@ let recheck_cmd =
           repairing what can be repaired")
     Term.(const run $ domain_arg)
 
-(* Distinct from [recheck], which walks the local mirror and so can only see
-   chunks some manifest here names — and answers nothing at all on a machine
-   with no cache. This walks the stores, so it also finds a corrupt chunk no
-   file references yet, and works from anywhere.
+(* One command for the three things anyone does about a chunk that is not what
+   its name says: ask for a check, read what was found, put it right.
 
-   It reads a listing that the stores wrote for themselves. Nothing is hashed
-   here and no chunk body is fetched: a [local] store checked as it took each
-   write, and an s3 or gcs bucket checked in a function its own object-created
-   event triggered. *)
-let verify_cmd =
-  let run domain detail =
+   Separate from [recheck], which walks the local mirror and so sees only chunks
+   some manifest here names — and answers nothing at all on a machine with no
+   cache. This walks the stores. *)
+let chunks_integrity_cmd =
+  let report (module C : Conf.S) detail =
+    let open Lwt.Syntax in
+    let module Cor = Corruption.Make (C) in
+    let* r = Cor.list () in
+    let entries =
+      List.sort
+        (fun (a : Corruption.entry) b ->
+          compare
+            (a.Corruption.store, a.Corruption.chunk_key)
+            (b.Corruption.store, b.Corruption.chunk_key))
+        r.Corruption.entries
+    in
+    let* () =
+      Lwt_list.iter_s
+        (fun (e : Corruption.entry) ->
+          if not detail then (
+            Printf.printf "CORRUPT %s on %s\n%!" e.Corruption.chunk_key
+              e.Corruption.store;
+            Lwt.return_unit)
+          else
+            let+ found = Cor.detail e in
+            let extra =
+              match found with
+                | Some { Corruption_marker.computed = Some c; size; _ } ->
+                    Printf.sprintf " (hashed to %s%s)" c
+                      (match size with
+                        | Some n -> Printf.sprintf ", %d bytes" n
+                        | None -> "")
+                | Some { Corruption_marker.reason = Some why; _ } ->
+                    Printf.sprintf " (%s)" why
+                | _ -> ""
+            in
+            Printf.printf "CORRUPT %s on %s%s\n%!" e.Corruption.chunk_key
+              e.Corruption.store extra)
+        entries
+    in
+    List.iter
+      (fun (name, why) -> Printf.printf "UNREACHABLE %s (%s)\n%!" name why)
+      r.Corruption.unreachable;
+    List.iter
+      (fun name -> Printf.printf "NOT CHECKED %s — no verifier\n%!" name)
+      r.Corruption.unverified;
+    let n = List.length entries in
+    let silent =
+      r.Corruption.unverified @ List.map fst r.Corruption.unreachable
+    in
+    (* Never a bare "0 corrupt chunks" while some store has said nothing: that
+       line is the one a reader takes away, and alone it reads as a clean bill
+       of health for the whole domain. *)
+    Printf.printf "%d corrupt chunk%s%s\n" n
+      (if n = 1 then "" else "s")
+      (match silent with
+        | [] -> ""
+        | names ->
+            Printf.sprintf ", and nothing checked %s" (String.concat ", " names));
+    Lwt.return (if n > 0 || silent <> [] then 1 else 0)
+  in
+  (* Fails rather than reporting a check that did not happen: a store with
+     nothing on its side to run one says so, and saying "queued" anyway would be
+     the same lie as printing zero for a store nobody looks at. *)
+  let verify (module C : Conf.S) =
+    let open Lwt.Syntax in
+    let+ answers =
+      Lwt_list.map_s
+        (fun (m : Backend.member) ->
+          let (module B : Backend.S) = m.Backend.backend in
+          let+ a = B.verify_all ~chunk_prefix:C.chunk_prefix () in
+          (m.Backend.name, a))
+        C.members
+    in
+    let queued =
+      List.filter_map
+        (function name, `Queued n -> Some (name, n) | _, `Unsupported -> None)
+        answers
+    in
+    List.iter
+      (fun (name, n) ->
+        Printf.printf "%s: queued %d shard(s) to check\n" name n)
+      queued;
+    List.iter
+      (function
+        | name, `Unsupported ->
+            Printf.eprintf
+              "%s: cannot check itself — no verifier runs on that store\n" name
+        | _, `Queued _ -> ())
+      answers;
+    if queued = [] then (
+      Printf.eprintf
+        "Nothing was asked to check anything. A local store is swept by tsync \
+         gc --verify instead.\n";
+      1)
+    else (
+      Printf.printf
+        "The stores check in the background; read the result with tsync \
+         chunks-integrity --report.\n";
+      0)
+  in
+  let repair (module C : Conf.S) source dry_run verbose =
+    let open Lwt.Syntax in
+    let module Rp = Repair.Make (C) in
+    let+ s =
+      Rp.run ?source ~dry_run
+        ~on_chunk:(fun ~chunk_key ~store outcome ->
+          if verbose || outcome <> Repair.Cleared then
+            Printf.printf "%s\n%!" (Repair.describe ~chunk_key ~store outcome))
+        ()
+    in
+    Printf.printf
+      "%d chunk%s: %d repaired, %d stale marker%s cleared, %d unrepairable%s\n"
+      s.Repair.checked
+      (if s.Repair.checked = 1 then "" else "s")
+      s.Repair.repaired s.Repair.cleared
+      (if s.Repair.cleared = 1 then "" else "s")
+      s.Repair.unrepairable
+      (if dry_run then " (dry run, nothing written)" else "");
+    if s.Repair.unrepairable > 0 then (
+      Printf.eprintf
+        "\nNo copy of these chunks hashes to its own key anywhere:\n";
+      List.iter (fun k -> Printf.eprintf "  %s\n" k) s.Repair.lost;
+      Printf.eprintf
+        "Run tsync recheck on a machine whose cache still holds the files that \
+         use them.\n";
+      1)
+    else 0
+  in
+  let run domain do_verify do_repair detail source dry_run verbose =
+    let (module C : Conf.S) = load_conf ?domain () in
     let code =
       run_lwt
-        (let open Lwt.Syntax in
-         let (module C : Conf.S) = load_conf ?domain () in
-         let module Cor = Corruption.Make (C) in
-         let* report = Cor.list () in
-         let entries =
-           List.sort
-             (fun (a : Corruption.entry) b ->
-               compare
-                 (a.Corruption.store, a.Corruption.chunk_key)
-                 (b.Corruption.store, b.Corruption.chunk_key))
-             report.Corruption.entries
-         in
-         let* () =
-           Lwt_list.iter_s
-             (fun (e : Corruption.entry) ->
-               if not detail then (
-                 Printf.printf "CORRUPT %s on %s\n%!" e.Corruption.chunk_key
-                   e.Corruption.store;
-                 Lwt.return_unit)
-               else
-                 let+ found = Cor.detail e in
-                 let extra =
-                   match found with
-                     | Some { Corruption_marker.computed = Some c; size; _ } ->
-                         Printf.sprintf " (hashed to %s%s)" c
-                           (match size with
-                             | Some n -> Printf.sprintf ", %d bytes" n
-                             | None -> "")
-                     | _ -> ""
-                 in
-                 Printf.printf "CORRUPT %s on %s%s\n%!" e.Corruption.chunk_key
-                   e.Corruption.store extra)
-             entries
-         in
-         List.iter
-           (fun (name, why) -> Printf.printf "UNREACHABLE %s (%s)\n%!" name why)
-           report.Corruption.unreachable;
-         (* Said out loud, because it is the difference between a clean store
-            and one nobody looked at — and both otherwise print zero. *)
-         List.iter
-           (fun name -> Printf.printf "NOT CHECKED %s — no verifier\n%!" name)
-           report.Corruption.unverified;
-         let n = List.length entries in
-         let silent =
-           report.Corruption.unverified
-           @ List.map fst report.Corruption.unreachable
-         in
-         (* Never a bare "0 corrupt chunks" while some store has said nothing:
-            that line is the one a reader takes away, and on its own it reads as
-            a clean bill of health for the whole domain. *)
-         Printf.printf "%d corrupt chunk%s%s\n" n
-           (if n = 1 then "" else "s")
-           (match silent with
-             | [] -> ""
-             | names ->
-                 Printf.sprintf ", and nothing checked %s"
-                   (String.concat ", " names));
-         Lwt.return (if n > 0 || silent <> [] then 1 else 0))
+        (match (do_verify, do_repair) with
+          | true, true ->
+              failwith "--verify and --repair are separate steps; run one."
+          | true, false -> verify (module C)
+          | false, true -> repair (module C) source dry_run verbose
+          | false, false -> report (module C) detail)
     in
     if code <> 0 then exit code
+  in
+  let verify_arg =
+    Arg.(
+      value & flag
+      & info ["verify"]
+          ~doc:
+            "Ask every store that can to check all of its chunks, and return. \
+             Fails if no store can — a local store is swept by $(b,tsync gc \
+             --verify) instead. Reads every byte, on the store's side.")
+  in
+  let repair_arg =
+    Arg.(
+      value & flag
+      & info ["repair"]
+          ~doc:
+            "Rewrite what was found, from a copy that hashes to the right key.")
   in
   let detail_arg =
     Arg.(
       value & flag
       & info ["detail"]
-          ~doc:"Read each marker's body for what the chunk hashed to instead")
-  in
-  Cmd.v
-    (Cmd.info "verify"
-       ~doc:
-         "List chunks the stores found were not what their names say. Repair \
-          them by re-uploading the file, or with tsync recheck where the local \
-          cache still holds the bytes")
-    Term.(const run $ domain_arg $ detail_arg)
-
-let repair_cmd =
-  let run domain source dry_run verbose =
-    let code =
-      run_lwt
-        (let open Lwt.Syntax in
-         let (module C : Conf.S) = load_conf ?domain () in
-         let module Rp = Repair.Make (C) in
-         let+ s =
-           Rp.run ?source ~dry_run
-             ~on_chunk:(fun ~chunk_key ~store outcome ->
-               if verbose || outcome <> Repair.Cleared then
-                 Printf.printf "%s\n%!"
-                   (Repair.describe ~chunk_key ~store outcome))
-             ()
-         in
-         Printf.printf
-           "%d chunk%s: %d repaired, %d stale marker%s cleared, %d \
-            unrepairable%s\n"
-           s.Repair.checked
-           (if s.Repair.checked = 1 then "" else "s")
-           s.Repair.repaired s.Repair.cleared
-           (if s.Repair.cleared = 1 then "" else "s")
-           s.Repair.unrepairable
-           (if dry_run then " (dry run, nothing written)" else "");
-         if s.Repair.unrepairable > 0 then (
-           (* Named, not just counted: these are bytes no store has any more, and
-              which files they belong to is the next thing to ask. *)
-           Printf.eprintf
-             "\nNo copy of these chunks hashes to its own key anywhere:\n";
-           List.iter (fun k -> Printf.eprintf "  %s\n" k) s.Repair.lost;
-           Printf.eprintf
-             "Run tsync recheck on a machine whose cache still holds the files \
-              that use them.\n";
-           1)
-         else 0)
-    in
-    if code <> 0 then exit code
+          ~doc:"With no other flag: also say what each bad chunk hashed to.")
   in
   let source_arg =
     Arg.(
       value
       & opt (some string) None
       & info ["source"] ~docv:"NAME"
-          ~doc:"Take replacement bytes only from this backend")
+          ~doc:
+            "With $(b,--repair): take replacement bytes only from this store.")
   in
   let dry_run_arg =
     Arg.(
       value & flag
       & info ["dry-run"]
-          ~doc:"Report what would be rewritten, and write nothing")
+          ~doc:
+            "With $(b,--repair): report what would be rewritten, write nothing.")
   in
   Cmd.v
-    (Cmd.info "repair"
+    (Cmd.info "chunks-integrity"
        ~doc:
-         "Rewrite chunks a store filed as corrupt, from a copy that hashes to \
-          the right key")
-    Term.(const run $ domain_arg $ source_arg $ dry_run_arg $ verbose_arg)
+         "Chunks that are not what their names say: ask for a check \
+          ($(b,--verify)), list what was found (the default), or put it right \
+          ($(b,--repair)).")
+    Term.(
+      const run $ domain_arg $ verify_arg $ repair_arg $ detail_arg $ source_arg
+      $ dry_run_arg $ verbose_arg)
 
 let resync_remote_cmd =
   let source_arg =
@@ -1967,8 +2013,7 @@ let () =
          stats_cmd;
          sync_cmd;
          recheck_cmd;
-         verify_cmd;
-         repair_cmd;
+         chunks_integrity_cmd;
          resync_remote_cmd;
          import_cmd;
          export_cmd;

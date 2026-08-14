@@ -175,6 +175,24 @@ let rec make ~(mains : sub list)
 
     (* These describe where the domain's own data lives, so the archives have no
        say — a readable target does, being a full copy. *)
+    (* Fanned out to the mains and the readable targets, and summed: each store
+       runs its own check, and one that cannot is not a reason the others should
+       not. [`Unsupported] only when nothing at all could be asked. *)
+    let verify_all ~chunk_prefix () =
+      let+ answers =
+        Lwt_list.map_s
+          (fun (module B : Backend.S) -> B.verify_all ~chunk_prefix ())
+          inners
+      in
+      let queued =
+        List.fold_left
+          (fun acc a ->
+            match a with `Queued n -> acc + n | `Unsupported -> acc)
+          0 answers
+      in
+      if List.exists (fun a -> a <> `Unsupported) answers then `Queued queued
+      else `Unsupported
+
     let capabilities ~prefix () =
       let+ answers =
         Lwt_list.map_s

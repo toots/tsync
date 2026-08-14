@@ -351,6 +351,11 @@ let make ?(verify_writes = true) ~root () : (module Backend.S) =
        [corrupted/] prefix is a live answer rather than an empty prefix nobody
        writes. False when the operator turned that off, since a listing that
        finds nothing would otherwise read as a clean bill of health. *)
+    (* A filesystem has nothing on its side to wake. Every write is already
+       checked as it lands ({!verify_written}), and [tsync gc --verify] is the
+       sweep over what is already there. *)
+    let verify_all ~chunk_prefix:_ () = Lwt.return `Unsupported
+
     let capabilities ~prefix:_ () =
       Lwt.return
         {

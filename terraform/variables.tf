@@ -52,6 +52,7 @@ variable "gcs_stores" {
     chunk_domains          = optional(list(string), [])
     verify_timeout_seconds = optional(number, 120)
     verify_memory_mb       = optional(number, 512)
+    verify_max_concurrency = optional(number, 32)
     max_share_bytes        = optional(number, 10737418240)
   }))
   default = {}
