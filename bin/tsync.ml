@@ -1217,6 +1217,153 @@ let recheck_cmd =
           repairing what can be repaired")
     Term.(const run $ domain_arg)
 
+(* Distinct from [recheck], which walks the local mirror and so can only see
+   chunks some manifest here names — and answers nothing at all on a machine
+   with no cache. This walks the stores, so it also finds a corrupt chunk no
+   file references yet, and works from anywhere.
+
+   It reads a listing that the stores wrote for themselves. Nothing is hashed
+   here and no chunk body is fetched: a [local] store checked as it took each
+   write, and an s3 or gcs bucket checked in a function its own object-created
+   event triggered. *)
+let verify_cmd =
+  let run domain detail =
+    let code =
+      run_lwt
+        (let open Lwt.Syntax in
+         let (module C : Conf.S) = load_conf ?domain () in
+         let module Cor = Corruption.Make (C) in
+         let* report = Cor.list () in
+         let entries =
+           List.sort
+             (fun (a : Corruption.entry) b ->
+               compare
+                 (a.Corruption.store, a.Corruption.chunk_key)
+                 (b.Corruption.store, b.Corruption.chunk_key))
+             report.Corruption.entries
+         in
+         let* () =
+           Lwt_list.iter_s
+             (fun (e : Corruption.entry) ->
+               if not detail then (
+                 Printf.printf "CORRUPT %s on %s\n%!" e.Corruption.chunk_key
+                   e.Corruption.store;
+                 Lwt.return_unit)
+               else
+                 let+ found = Cor.detail e in
+                 let extra =
+                   match found with
+                     | Some { Corruption_marker.computed = Some c; size; _ } ->
+                         Printf.sprintf " (hashed to %s%s)" c
+                           (match size with
+                             | Some n -> Printf.sprintf ", %d bytes" n
+                             | None -> "")
+                     | _ -> ""
+                 in
+                 Printf.printf "CORRUPT %s on %s%s\n%!" e.Corruption.chunk_key
+                   e.Corruption.store extra)
+             entries
+         in
+         List.iter
+           (fun (name, why) -> Printf.printf "UNREACHABLE %s (%s)\n%!" name why)
+           report.Corruption.unreachable;
+         (* Said out loud, because it is the difference between a clean store
+            and one nobody looked at — and both otherwise print zero. *)
+         List.iter
+           (fun name -> Printf.printf "NOT CHECKED %s — no verifier\n%!" name)
+           report.Corruption.unverified;
+         let n = List.length entries in
+         let silent =
+           report.Corruption.unverified
+           @ List.map fst report.Corruption.unreachable
+         in
+         (* Never a bare "0 corrupt chunks" while some store has said nothing:
+            that line is the one a reader takes away, and on its own it reads as
+            a clean bill of health for the whole domain. *)
+         Printf.printf "%d corrupt chunk%s%s\n" n
+           (if n = 1 then "" else "s")
+           (match silent with
+             | [] -> ""
+             | names ->
+                 Printf.sprintf ", and nothing checked %s"
+                   (String.concat ", " names));
+         (* A store that said nothing is not a store that said "clean". *)
+         Lwt.return (if n > 0 || silent <> [] then 1 else 0))
+    in
+    if code <> 0 then exit code
+  in
+  let detail_arg =
+    Arg.(
+      value & flag
+      & info ["detail"]
+          ~doc:"Read each marker's body for what the chunk hashed to instead")
+  in
+  Cmd.v
+    (Cmd.info "verify"
+       ~doc:
+         "List chunks the stores found were not what their names say. Repair \
+          them by re-uploading the file, or with tsync recheck where the local \
+          cache still holds the bytes")
+    Term.(const run $ domain_arg $ detail_arg)
+
+let repair_cmd =
+  let run domain source dry_run verbose =
+    let code =
+      run_lwt
+        (let open Lwt.Syntax in
+         let (module C : Conf.S) = load_conf ?domain () in
+         let module Rp = Repair.Make (C) in
+         let+ s =
+           Rp.run ?source ~dry_run
+             ~on_chunk:(fun ~chunk_key ~store outcome ->
+               if verbose || outcome <> Repair.Cleared then
+                 Printf.printf "%s\n%!"
+                   (Repair.describe ~chunk_key ~store outcome))
+             ()
+         in
+         Printf.printf
+           "%d chunk%s: %d repaired, %d stale marker%s cleared, %d \
+            unrepairable%s\n"
+           s.Repair.checked
+           (if s.Repair.checked = 1 then "" else "s")
+           s.Repair.repaired s.Repair.cleared
+           (if s.Repair.cleared = 1 then "" else "s")
+           s.Repair.unrepairable
+           (if dry_run then " (dry run, nothing written)" else "");
+         if s.Repair.unrepairable > 0 then (
+           (* Named, not just counted: these are bytes no store has any more, and
+              which files they belong to is the next thing to ask. *)
+           Printf.eprintf
+             "\nNo copy of these chunks hashes to its own key anywhere:\n";
+           List.iter (fun k -> Printf.eprintf "  %s\n" k) s.Repair.lost;
+           Printf.eprintf
+             "Run tsync recheck on a machine whose cache still holds the files \
+              that use them.\n";
+           1)
+         else 0)
+    in
+    if code <> 0 then exit code
+  in
+  let source_arg =
+    Arg.(
+      value
+      & opt (some string) None
+      & info ["source"] ~docv:"NAME"
+          ~doc:"Take replacement bytes only from this backend")
+  in
+  let dry_run_arg =
+    Arg.(
+      value & flag
+      & info ["dry-run"]
+          ~doc:"Report what would be rewritten, and write nothing")
+  in
+  Cmd.v
+    (Cmd.info "repair"
+       ~doc:
+         "Rewrite chunks a store filed as corrupt, from a copy that hashes to \
+          the right key")
+    Term.(const run $ domain_arg $ source_arg $ dry_run_arg $ verbose_arg)
+
 let resync_remote_cmd =
   let source_arg =
     Arg.(
@@ -1796,6 +1943,8 @@ let () =
          stats_cmd;
          sync_cmd;
          recheck_cmd;
+         verify_cmd;
+         repair_cmd;
          resync_remote_cmd;
          import_cmd;
          export_cmd;

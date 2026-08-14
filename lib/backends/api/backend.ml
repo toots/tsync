@@ -69,27 +69,42 @@ type caps = {
   chunk_size : int option;
   max_concurrency : int option;
   gc : bool;
+  verified : bool;
 }
 
 let no_caps =
-  { share_url = None; chunk_size = None; max_concurrency = None; gc = false }
+  {
+    share_url = None;
+    chunk_size = None;
+    max_concurrency = None;
+    gc = false;
+    verified = false;
+  }
 
-let merge_caps =
+let merge_caps cs =
   let first a b = match a with Some _ -> a | None -> b in
   let lowest a b =
     match (a, b) with
       | Some a, Some b -> Some (min a b)
       | None, some | some, None -> some
   in
-  List.fold_left
-    (fun acc c ->
-      {
-        share_url = first acc.share_url c.share_url;
-        chunk_size = first acc.chunk_size c.chunk_size;
-        max_concurrency = lowest acc.max_concurrency c.max_concurrency;
-        gc = acc.gc || c.gc;
-      })
-    no_caps
+  let merged =
+    List.fold_left
+      (fun acc c ->
+        {
+          share_url = first acc.share_url c.share_url;
+          chunk_size = first acc.chunk_size c.chunk_size;
+          max_concurrency = lowest acc.max_concurrency c.max_concurrency;
+          gc = acc.gc || c.gc;
+          verified = acc.verified;
+        })
+      no_caps cs
+  in
+  (* Every store, where {!caps.gc} takes any: gc describes machinery one store
+     either has or does not, while this is a claim about the domain's bytes, and
+     one unchecked store is enough to make "no corruption found" mean "nothing
+     looked". Empty is nobody's claim, so it is not one either. *)
+  { merged with verified = cs <> [] && List.for_all (fun c -> c.verified) cs }
 
 module type S = sig
   val put : key:string -> data:string -> unit -> unit Lwt.t

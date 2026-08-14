@@ -45,6 +45,21 @@ let create_exclusive path data =
           | exn -> Lwt.fail exn))
     (fun () -> Fs_util.unlink_quiet tmp)
 
+(* A marker's shard directory exists only to hold markers, so an emptied one is
+   residue — and residue that shows up in a listing of the prefix as an entry
+   naming no chunk. Pruned wherever a marker goes away: cleared by a good write,
+   or deleted with the chunk it accused when a collection discards it.
+
+   Best effort both ways: a marker landing concurrently recreates the directory,
+   and a shard still holding one refuses to go. *)
+let prune_marker_dirs marker_path =
+  let rmdir path =
+    Lwt.catch (fun () -> Lwt_unix_retry.rmdir path) (fun _ -> Lwt.return_unit)
+  in
+  let shard = Filename.dirname marker_path in
+  let* () = rmdir shard in
+  rmdir (Filename.dirname shard)
+
 (* Shared by every walk on this store: a per-call bound limits one walk, not how
    many run at once, and what is protected is the one device under the store.
 
@@ -68,7 +83,7 @@ let of_errno ~op key e =
      failed is the first thing a report needs. *)
   Backend.failed ~kind ~op:("local " ^ op) (key ^ ": " ^ Unix.error_message e)
 
-let make ~root : (module Backend.S) =
+let make ?(verify_writes = true) ~root () : (module Backend.S) =
   let walk_slots = Lwt_bounded.create ~max:walk_fanout () in
   let resolve key = if key = "" then root else Filename.concat root key in
   (* Keys with a trailing slash are directory markers: S3 stores them as
@@ -76,10 +91,62 @@ let make ~root : (module Backend.S) =
   let is_dir_key key =
     String.length key > 0 && key.[String.length key - 1] = '/'
   in
+  (* What the bucket's object-created function does for s3 and gcs, done here
+     because a filesystem has no event source to hang it on. In the driver rather
+     than in the uploader so that it covers every way a chunk lands — a client
+     PUTting through the http-proxy frontend, a resync, a recheck's re-upload, a
+     deferred forward — none of which go through {!Remote.put_chunk}.
+
+     Read back, never hashed from [data]: what this catches is a body that did
+     not survive the write, and [data] may alias a buffer its owner has already
+     moved on from. Hashing the argument would agree with itself and see nothing,
+     which is precisely the write-after-use this exists to catch.
+
+     Verify then act, where the cloud side deletes the marker first: there the
+     events are at-least-once and unordered, here we are the writer and the
+     rename has already happened. *)
+  let verify_written key =
+    match Chunk_layout.marker_key key with
+      | None -> Lwt.return_unit
+      | Some marker ->
+          let* stored = read_file (resolve key) in
+          let computed = Chunk_layout.key_of_body stored in
+          if computed = Filename.basename key then
+            (* Clears a marker an earlier bad copy left, which is the whole of
+               how a repair is recorded: the good write is the record.
+
+               The unlink happens either way, so asking whether it removed
+               anything is free, and it is worth asking: a shard directory here
+               exists only to hold markers, and an empty one left behind is an
+               entry in a listing of the prefix — a chunk reported corrupt that
+               is not. Best effort, since a marker landing concurrently just
+               recreates it. *)
+            let* cleared =
+              Lwt.catch
+                (fun () ->
+                  let+ () = Lwt_unix_retry.unlink (resolve marker) in
+                  true)
+                (fun _ -> Lwt.return_false)
+            in
+            if cleared then prune_marker_dirs (resolve marker)
+            else Lwt.return_unit
+          else (
+            Log.err "chunk %s hashed to %s: filing %s" (Filename.basename key)
+              computed marker;
+            write_file (resolve marker)
+              (Corruption_marker.to_string
+                 {
+                   computed = Some computed;
+                   size = Some (String.length stored);
+                   at = Some (Unix.gettimeofday ());
+                 }))
+  in
   (module struct
     let put ~key ~data () =
       if is_dir_key key then mkdir_p (resolve key)
-      else write_file (resolve key) data
+      else
+        let* () = write_file (resolve key) data in
+        if verify_writes then verify_written key else Lwt.return_unit
 
     let put_if_absent ~key ~data () =
       Lwt.catch
@@ -119,7 +186,13 @@ let make ~root : (module Backend.S) =
           | Unix.Unix_error (Unix.ENOENT, _, _) -> Lwt.return_none
           | exn -> Lwt.fail exn)
 
-    let delete ~key () = Fs_util.rm_rf (resolve key)
+    let delete ~key () =
+      let* () = Fs_util.rm_rf (resolve key) in
+      (* A collection deletes a chunk's marker along with the chunk ({!Gc}), and
+         that is the other way a shard empties. *)
+      if Chunk_layout.is_marker_key key then prune_marker_dirs (resolve key)
+      else Lwt.return_unit
+
     let delete_multi keys = Lwt_list.iter_s (fun key -> delete ~key ()) keys
 
     (* A hard link when the filesystem allows one, so copying within a store
@@ -247,13 +320,19 @@ let make ~root : (module Backend.S) =
 
     (* [gc]: a filesystem has the one thing collecting chunks takes, which is
        [rename] — of a directory to open a run, and within it to mark. True of
-       every filesystem, not only the ones with hard links to give. *)
+       every filesystem, not only the ones with hard links to give.
+
+       [verified]: this store checks each chunk as it takes it, so its
+       [corrupted/] prefix is a live answer rather than an empty prefix nobody
+       writes. False when the operator turned that off, since a listing that
+       finds nothing would otherwise read as a clean bill of health. *)
     let capabilities ~prefix:_ () =
       Lwt.return
         {
           Backend.no_caps with
           max_concurrency = Lazy.force concurrency;
           gc = true;
+          verified = verify_writes;
         }
   end)
 
@@ -267,6 +346,13 @@ let spec =
         default = None;
         secret = false;
       };
+      {
+        name = "verifyWrites";
+        label = "Hold each chunk against its own name as it is written";
+        typ = `Bool;
+        default = Some "true";
+        secret = false;
+      };
     ]
 
 let () =
@@ -276,4 +362,8 @@ let () =
           | Some p -> p
           | None -> failwith "local backend: missing field: path"
       in
-      make ~root)
+      (* Costs one read back per chunk written, usually from page cache. Off is
+         for a store whose throughput matters more than knowing early — the
+         chunks are still checked wherever else they land. *)
+      let verify_writes = Field_spec.bool ~default:true (get "verifyWrites") in
+      make ~verify_writes ~root ())

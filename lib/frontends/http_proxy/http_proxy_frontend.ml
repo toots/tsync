@@ -127,23 +127,18 @@ let make_route bindings (b : Frontend.binding) =
           failwith ("http-proxy: missing secret for domain " ^ C.domain_name)
   in
   let serve_share =
-    match inherited bindings b "shares" with
-      | Some ("true" | "1") ->
-          let module Sh = Share_server.Make (C) in
-          Some
-            (fun ~token ~sub ~query ~range ->
-              Sh.handle ~token ~sub ~query ~range)
-      | _ -> None
+    if Field_spec.bool ~default:false (inherited bindings b "shares") then
+      let module Sh = Share_server.Make (C) in
+      Some
+        (fun ~token ~sub ~query ~range -> Sh.handle ~token ~sub ~query ~range)
+    else None
   in
   (* Serve-side write ban, independent of the domain's own [read_only]: it bars
      proxy clients while leaving this host's mount writable, and a client cannot
      opt out. *)
   let read_only =
     C.read_only
-    ||
-      match inherited bindings b "readOnly" with
-      | Some ("true" | "1") -> true
-      | _ -> false
+    || Field_spec.bool ~default:false (inherited bindings b "readOnly")
   in
   (* Secrets masked, as [tsync print-config] does: this gets pasted into bug
      reports. *)
@@ -201,6 +196,7 @@ type op =
   | Share_url of string
   | Chunk_size of string
   | Max_concurrency of string
+  | Verified of string
   | Bad
       (** One of ours but malformed: an undecodable key, a missing argument. *)
   | Unknown  (** not part of the API at all — a browser asking for a favicon *)
@@ -253,6 +249,8 @@ let parse_op meth uri body =
           | None -> Bad)
     | `GET, "/share-url" -> (
         match q "prefix" with Some prefix -> Share_url prefix | None -> Bad)
+    | `GET, "/verified" -> (
+        match q "prefix" with Some prefix -> Verified prefix | None -> Bad)
     | _ -> Unknown
 
 (* [Head] is metadata only; [Copy] is settled by the backend without the bytes
@@ -271,6 +269,7 @@ let op_name = function
   | Share_url _ -> "shareUrl"
   | Chunk_size _ -> "chunkSize"
   | Max_concurrency _ -> "maxConcurrency"
+  | Verified _ -> "verified"
   | Bad -> "badRequest"
   | Unknown -> "notFound"
 
@@ -280,7 +279,12 @@ let route_key = function
   | Delete_multi (k :: _) -> Some k
   | Delete_multi [] -> None
   | Copy (src, _) -> Some src
-  | List_all (p, _) | Share_url p | Chunk_size p | Max_concurrency p -> Some p
+  | List_all (p, _)
+  | Share_url p
+  | Chunk_size p
+  | Max_concurrency p
+  | Verified p ->
+      Some p
   | Bad | Unknown -> None
 
 let respond ?(status = `OK) ?(headers = []) body =
@@ -417,6 +421,16 @@ let exec route op ~body =
               respond
                 (Yojson.Safe.to_string (`Assoc [("maxConcurrency", `Int n)]))
           | None -> respond ~status:`Not_found "")
+    | Verified prefix ->
+        (* Chained through our own store, unlike the chunk size: a client behind
+           us reads markers out of that store, so what it may claim about them is
+           exactly what the store claims. Answering for ourselves would let a
+           proxy in front of an unchecked bucket report a clean domain. *)
+        let module B = (val route.store : Backend.S) in
+        let* caps = B.capabilities ~prefix () in
+        respond
+          (Yojson.Safe.to_string
+             (`Assoc [("verified", `Bool caps.Backend.verified)]))
     | Bad | Unknown -> respond ~status:`Bad_request "bad request"
 
 (* [shares_prefix] is domain-independent, so a share key has no domain to match

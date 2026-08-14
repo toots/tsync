@@ -329,8 +329,7 @@ let start ~confs ~socket_path =
              let path = get_str "path" in
              let domain = get_str "domain" in
              if action = "menu" then menu_reply domain_runtimes
-             else if action = "menu_stats" then
-               menu_stats_reply domain_runtimes
+             else if action = "menu_stats" then menu_stats_reply domain_runtimes
              else (
                let runtime_opt =
                  if domain <> "" then

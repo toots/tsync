@@ -1,0 +1,14 @@
+value            default:false  default:true
+"true"           true           true 
+"false"          false          false
+"1"              true           true 
+"0"              false          false
+"yes"            true           true 
+"no"             false          false
+"on"             true           true 
+"off"            false          false
+"TRUE"           true           true 
+"Off"            false          false
+"perhaps"        false          true 
+""               false          true 
+(absent)         false          true 

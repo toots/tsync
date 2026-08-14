@@ -34,6 +34,11 @@ val key_of_body : string -> string
     [Invalid_argument] for a key that is not ["<h1>-<h2>"]. *)
 val entry_of_key : index:int -> size:int -> string -> chunk_entry
 
+(** What an uploader publishes for [data]: {!key_of_body} split into the halves
+    a manifest records. The one way to build an entry from bytes, so a stored
+    chunk is always named by the same expression a check holds it against. *)
+val chunk_entry_of_body : index:int -> string -> chunk_entry
+
 (** {2 Grouping}
 
     How a manifest's stored chunks fall into cache chunks. Derived from the

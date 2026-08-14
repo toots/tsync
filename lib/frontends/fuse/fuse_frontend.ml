@@ -18,9 +18,8 @@ let mount_binding (b : Frontend.binding) =
   (* FUSE allow_other, so a service running as another user can read the
      mount. *)
   let allow_other =
-    match List.assoc_opt "allowOther" b.Frontend.options with
-      | Some ("true" | "1") -> true
-      | _ -> false
+    Field_spec.bool ~default:false
+      (List.assoc_opt "allowOther" b.Frontend.options)
   in
   prepare_mount_point b.Frontend.mount_point;
   let module R = Fuse_fs.Make (C) in

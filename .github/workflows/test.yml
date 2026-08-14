@@ -19,9 +19,17 @@ jobs:
         with:
           python-version: "3.13"
       - name: Install test dependencies
-        run: pip install boto3 moto pytest
+        run: pip install boto3 moto pytest xxhash
       - name: Run share handler tests (S3 store)
         run: pytest lambda/test_handler.py
+      - name: Run chunk verifier tests (S3 store)
+        run: pytest lambda/test_verify.py
+      # The key this computes must equal the one OCaml uploaded under. If the
+      # two implementations disagree the verifier does not miss corruption --
+      # it files every chunk in the store as corrupt. Checked against
+      # tests/unit/hash/hash.expected, which the OCaml side generates.
+      - name: Check chunk keys agree with the OCaml implementation
+        run: pytest lambda/test_chunk_key.py
 
   lambda-gcs:
     runs-on: ubuntu-latest
@@ -39,11 +47,15 @@ jobs:
             sleep 1
           done
       - name: Install test dependencies
-        run: pip install google-cloud-storage pytest
+        run: pip install google-cloud-storage pytest xxhash
       - name: Run GCS store tests
         env:
           STORAGE_EMULATOR_HOST: http://localhost:4443
         run: pytest lambda/test_store_gcs.py
+      - name: Run chunk verifier tests (GCS store)
+        env:
+          STORAGE_EMULATOR_HOST: http://localhost:4443
+        run: pytest lambda/test_verify_gcs.py
 
   linux:
     runs-on: ubuntu-latest

@@ -9,10 +9,12 @@ type t = {
   endpoint : Aws_s3.Region.endpoint;
   unsigned_payload : bool;
   share_url : string option;
+  verify_chunks : bool;
 }
 
-let make_t ?endpoint ?(unsigned_payload = false) ?share_url ~bucket ~region
-    ~access_key_id ~secret_access_key () =
+let make_t ?endpoint ?(unsigned_payload = false) ?share_url
+    ?(verify_chunks = false) ~bucket ~region ~access_key_id ~secret_access_key
+    () =
   let credentials =
     Aws_s3.Credentials.make ~access_key:access_key_id
       ~secret_key:secret_access_key ()
@@ -23,7 +25,7 @@ let make_t ?endpoint ?(unsigned_payload = false) ?share_url ~bucket ~region
       | None -> Aws_s3.Region.of_string region
   in
   let endpoint = Aws_s3.Region.endpoint ~inet:`V4 ~scheme:`Https region in
-  { bucket; credentials; endpoint; unsigned_payload; share_url }
+  { bucket; credentials; endpoint; unsigned_payload; share_url; verify_chunks }
 
 let string_of_error = function
   | S3.Redirect _ -> "redirect"
@@ -217,11 +219,11 @@ let list_all t ?max_keys ~prefix () =
         Log.err "s3 ls %s: %s" prefix (string_of_error e);
         Lwt.fail (failed "ls" e)
 
-let make ?endpoint ?unsigned_payload ?share_url ~bucket ~region ~access_key_id
-    ~secret_access_key () : (module Backend.S) =
+let make ?endpoint ?unsigned_payload ?share_url ?verify_chunks ~bucket ~region
+    ~access_key_id ~secret_access_key () : (module Backend.S) =
   let t =
-    make_t ?endpoint ?unsigned_payload ?share_url ~bucket ~region ~access_key_id
-      ~secret_access_key ()
+    make_t ?endpoint ?unsigned_payload ?share_url ?verify_chunks ~bucket ~region
+      ~access_key_id ~secret_access_key ()
   in
   (module struct
     let put ~key ~data () = put t ~key ~data ()
@@ -235,9 +237,20 @@ let make ?endpoint ?unsigned_payload ?share_url ~bucket ~region ~access_key_id
     let list_prefix ?max_keys ~prefix () = list_all t ?max_keys ~prefix ()
 
     (* No chunk size or concurrency opinion: an object store is limited by the
-       network and its own concurrency, neither measurable from here. *)
+       network and its own concurrency, neither measurable from here.
+
+       [verified] is the operator's word, not something this can observe: what
+       checks the chunks runs in the bucket, out of reach of any client. It says
+       whether the terraform was applied, and it is asked for rather than assumed
+       because the failure it guards is silent — an un-deployed bucket lists no
+       markers, and "no markers" would otherwise read as "no corruption". *)
     let capabilities ~prefix:_ () =
-      Lwt.return { Backend.no_caps with share_url = t.share_url }
+      Lwt.return
+        {
+          Backend.no_caps with
+          share_url = t.share_url;
+          verified = t.verify_chunks;
+        }
   end)
 
 let spec =
@@ -292,6 +305,15 @@ let spec =
         default = Some "";
         secret = false;
       };
+      {
+        name = "verifyChunks";
+        label =
+          "Is the chunk-verifier function deployed for this bucket (terraform \
+           chunk_domains)?";
+        typ = `Bool;
+        default = Some "false";
+        secret = false;
+      };
     ]
 
 let () =
@@ -301,16 +323,18 @@ let () =
       | None -> failwith ("s3 backend: missing field: " ^ key)
   in
   Backend.register ~spec "s3" (fun get ->
+      (* [None] rather than [Some false]: unset must leave the store's own
+         default alone. *)
       let unsigned_payload =
-        match get "unsignedPayload" with
-          | Some ("true" | "1") -> Some true
-          | Some _ | None -> None
+        if Field_spec.bool ~default:false (get "unsignedPayload") then Some true
+        else None
       in
       let share_url =
         match get "shareUrl" with Some "" | None -> None | s -> s
       in
+      let verify_chunks = Field_spec.bool ~default:false (get "verifyChunks") in
       make ?endpoint:(get "endpoint") ?unsigned_payload ?share_url
-        ~bucket:(req get "bucket") ~region:(req get "region")
+        ~verify_chunks ~bucket:(req get "bucket") ~region:(req get "region")
         ~access_key_id:(req get "accessKeyId")
         ~secret_access_key:(req get "secretAccessKey")
         ())

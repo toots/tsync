@@ -39,14 +39,26 @@ type caps = {
 
           Asked of a domain's main directly rather than of the composite: it
           describes one store's machinery, not the domain's. *)
+  verified : bool;
+      (** Whether every chunk this store takes is held against its own name —
+          see {!Corruption}. A [local] store does it as it writes; an s3 or gcs
+          store does it in a function the bucket triggers, and answers [true]
+          only once its config says that function is deployed.
+
+          Reported, not merely used, because the two ways of finding nothing are
+          not the same: a store that checks and finds no corruption is clean,
+          and one that never looked is unknown. A report that renders both as "0
+          corrupt" is the more dangerous of the two, having no way to say so. *)
 }
 
 val no_caps : caps
 
 (** One store's answer out of several. First opinion wins for the preferences;
     the lowest wins for {!caps.max_concurrency}, since a limit that ignores the
-    slowest participant is not a limit; any wins for {!caps.gc}. Defined once so
-    two composites cannot drift into merging differently. *)
+    slowest participant is not a limit; any wins for {!caps.gc}; every one must
+    agree for {!caps.verified}, one unchecked store being enough to make the
+    domain's clean bill of health worth nothing. Defined once so two composites
+    cannot drift into merging differently. *)
 val merge_caps : caps list -> caps
 
 module type S = sig

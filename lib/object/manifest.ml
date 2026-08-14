@@ -29,8 +29,10 @@ type chunk_entry = { index : int; h1 : string; h2 : string; size : int }
 let chunk_key (entry : chunk_entry) = entry.h1 ^ "-" ^ entry.h2
 
 (* Content addressing means a chunk's key is a function of its bytes, so a body
-   can always be held against the name it arrived under. *)
-let key_of_body data = Xxhash.hash_hex data 0 ^ "-" ^ Xxhash.hash_hex data 1
+   can always be held against the name it arrived under. Composed where the
+   stores can reach it without depending on the shapes that reference a chunk:
+   the check runs inside a backend driver. *)
+let key_of_body = Chunk_layout.key_of_body
 
 (* The reverse, for a chunk kept from a previous upload: the two digests are the
    key's halves. *)
@@ -44,6 +46,14 @@ let entry_of_key ~index ~size key =
           size;
         }
     | None -> invalid_arg ("Manifest.entry_of_key: " ^ key)
+
+(* Composed rather than hashed again, so the name an upload publishes and the
+   name a check recomputes are the same expression. Spelling the two digests at
+   the call site would let the writer and {!key_of_body} drift, and a chunk whose
+   body no longer hashes to its own key is exactly what a check cannot then
+   tell apart from corruption. *)
+let chunk_entry_of_body ~index data =
+  entry_of_key ~index ~size:(String.length data) (key_of_body data)
 
 (* Derived from the file's {i own} chunk size, so a file uploaded under a
    different setting still groups correctly. *)

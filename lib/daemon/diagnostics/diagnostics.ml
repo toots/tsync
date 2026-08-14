@@ -20,6 +20,11 @@ let level_name = function
 (* A domain's journal is unbounded and this is a diagnosis page. *)
 let journal_sample = 1000
 
+(* Enough that a store in real trouble reads as such rather than as a handful,
+   and bounded because a listing that grew with the damage would make the report
+   worse exactly when it matters most. *)
+let corrupted_sample = 1000
+
 (* The frontend answering this request, as a process.
 
    At the top rather than under a domain, since a frontend need not belong to
@@ -91,6 +96,7 @@ module Make (C : Conf.S) = struct
   module Space = Chunk_space.Make (C)
   module J = Journal.Make (C)
   module W = Wal.Make (C)
+  module Cor = Corruption.Make (C)
 
   let int_opt = function Some n -> `Int n | None -> `Null
 
@@ -172,6 +178,35 @@ module Make (C : Conf.S) = struct
                 | Some k -> `String (Journal.Entry_key.to_string k)
                 | None -> `Null );
           ])
+      (fun exn -> Lwt.return (`Assoc [("error", unreachable exn)]))
+
+  (* Chunks the store found were not what their names say ({!Corruption}).
+
+     Beside [journal] rather than inside [totals]: one bounded listing of a
+     prefix that is empty on a healthy store, where [totals] exists because
+     counting chunks walks the whole namespace. It costs a round trip per member
+     per report, and a report is asked for — [tsync stats], the menu's Stats
+     submenu when it opens — not polled.
+
+     [checked] is the field that matters. A store nothing verifies lists no
+     markers, and so does a store with nothing wrong; printing both as zero
+     would turn "nobody looked" into a clean bill of health. *)
+  let corrupted m =
+    Lwt.catch
+      (fun () ->
+        let+ found =
+          Lwt_unix.with_timeout probe_timeout (fun () ->
+              Cor.member_entries ~max_keys:(corrupted_sample + 1) m)
+        in
+        match found with
+          | `Unverified -> `Assoc [("checked", `Bool false)]
+          | `Entries es ->
+              `Assoc
+                [
+                  ("checked", `Bool true);
+                  ("chunks", `Int (List.length es));
+                  ("truncated", `Bool (List.length es > corrupted_sample));
+                ])
       (fun exn -> Lwt.return (`Assoc [("error", unreachable exn)]))
 
   (* Manifests, chunks and bytes held by the store. Reading either namespace
@@ -327,7 +362,8 @@ module Make (C : Conf.S) = struct
 
   let member_json ~totals ~exact ~reload (m : Backend.member) =
     let* probed, cursor = probe m.Backend.backend in
-    let+ jrnl = journal ~cursor m.Backend.backend in
+    let* jrnl = journal ~cursor m.Backend.backend in
+    let+ corrupt = corrupted m in
     (* Synchronous: reads the last sample and leaves any walk it started running
        behind us. *)
     let tot =
@@ -359,7 +395,7 @@ module Make (C : Conf.S) = struct
        :: ( "config",
             `Assoc (List.map (fun (k, v) -> (k, `String v)) m.Backend.config) )
        :: probed
-      @ [("journal", jrnl)]
+      @ [("journal", jrnl); ("corrupted", corrupt)]
       @ disk_json m @ deferred @ tot)
 
   let symlink_policy =
@@ -831,6 +867,21 @@ let text json =
                      (int_of (mem j "entries"))
                      (if bool_of (mem j "truncated") then "+" else "")
                      (int_of (mem j "behind"))));
+          (* Silent on a store that is checked and clean, which is every store
+             almost always: a row of zeros on every report is one more line
+             between the reader and the one that matters. Not silent when
+             nothing is checking, because that zero means something else. *)
+          (let c = mem m "corrupted" in
+           match (mem c "error", mem c "checked", int_of (mem c "chunks")) with
+             | `String e, _, _ -> row 4 "corrupted" ("error: " ^ e)
+             | _, `Bool false, _ ->
+                 row 4 "corrupted" "not checked — no verifier for this store"
+             | _, _, 0 -> ()
+             | _, _, n ->
+                 row 4 "corrupted"
+                   (Printf.sprintf "%d chunk%s%s — run tsync repair" n
+                      (if n = 1 then "" else "s")
+                      (if bool_of (mem c "truncated") then "+" else "")));
           (match mem m "deferred" with
             | `Null -> ()
             | bf ->

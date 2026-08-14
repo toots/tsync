@@ -48,7 +48,18 @@ module type S = sig
 
       [source] itself does no I/O, deciding only which case a chunk is: one that
       reads up front puts the whole file in memory before anything queues for a
-      buffer. *)
+      buffer.
+
+      {b A chunk a [`Reuse] names is taken on trust.} That branch carries a key
+      and no bytes, so there is nothing to re-upload if the stored copy turns
+      out to be corrupt, and unlike the [`Fill] path this never consults
+      {!Corruption}. A marked chunk inherited by a staged partial write
+      therefore stays marked and stays bad.
+
+      Deliberate: the alternative is fetching a chunk the caller never asked
+      for, on a path that must stay free of I/O to decide a case. [tsync repair]
+      takes the bytes from another store and [tsync recheck] from the local
+      cache, both of which have some to work with. *)
   val upload_chunks :
     key:string ->
     size:int64 ->

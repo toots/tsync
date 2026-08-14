@@ -148,6 +148,11 @@ resource "aws_lambda_function" "share" {
   timeout          = 900
   memory_size      = var.lambda_memory_mb
 
+  # Deliberately not pinned, though the zip it shares with the verify function
+  # carries an aarch64 xxhash extension: nothing in handler.py imports it, so
+  # the file is inert here. Pinning would force an architecture migration on
+  # every existing deployment to buy nothing.
+
   ephemeral_storage {
     size = var.ephemeral_storage_mb
   }

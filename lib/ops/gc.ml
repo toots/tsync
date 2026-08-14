@@ -612,6 +612,26 @@ module Make (C : Conf.S) = struct
             Log.debug "gc: %s: deleted %d chunk(s)" m.Backend.name reclaimed)
           s.targets
     in
+    (* A marker accuses a chunk by naming it ({!Corruption}); once the chunk is
+       gone the accusation stands against nothing, and nothing else would ever
+       remove it — a marker is cleared by re-verifying the object, and there is
+       no object left to re-verify. Left alone they accumulate as permanent
+       findings that no repair can answer.
+
+       The main as well as the copies: [discard_shard] unlinks inside the space
+       on its way out, which is not where markers live. A separate call rather
+       than keys appended to [doomed], so the batch stays the size the operator
+       asked for, and absent keys are already a success ({!Backend.S.delete_multi}). *)
+    let markers = List.filter_map Chunk_layout.marker_key doomed in
+    let* () =
+      if markers = [] then Lwt.return_unit
+      else
+        Lwt_list.iter_s
+          (fun (module T : Backend.S) -> T.delete_multi markers)
+          (s.main
+          :: List.map (fun (m : Backend.member) -> m.Backend.backend) s.targets
+          )
+    in
     let* () = Lwt_list.iter_s (discard_shard s) shards in
     s.chunks_reclaimed <- s.chunks_reclaimed + reclaimed;
     s.bytes_reclaimed <- s.bytes_reclaimed + bytes;

@@ -1,0 +1,168 @@
+=== a good upload is accused of nothing
+  write a.txt "hello tsync"
+  drain
+  list-corrupted
+  corrupted: 0
+--- tree
+  f a.txt size=11 cached=0/1 uploaded=true etag=1b5eab7935b34700
+--- content
+  a.txt = "hello tsync"
+--- backend
+  chunk cba685e06d3e500f-293331628d03f29b size=11
+  journal <entry-1> = put a.txt 11
+  file a.txt [.tsync-root/f01e5cbbc09d4fc4-9a0fcd66f030de75] = manifest size=11 chunks=1 h1=1b5eab7935b34700 h2=72dfaa8cad2e9a42
+    chunk#0 cba685e06d3e500f-293331628d03f29b size=11
+
+=== a scrambled chunk is filed under its own key
+  write a.txt "hello tsync"
+  drain
+  scramble-remote-chunk a.txt #0
+  rescan-corrupted
+  list-corrupted
+  corrupted: 1
+    cba685e06d3e500f-293331628d03f29b on backend
+--- tree
+  f a.txt size=11 cached=0/1 uploaded=true etag=1b5eab7935b34700
+--- content
+  a.txt = "ifmmp!utzod"
+--- backend
+  chunk cba685e06d3e500f-293331628d03f29b size=11
+  corrupted cba685e06d3e500f-293331628d03f29b
+  journal <entry-1> = put a.txt 11
+  file a.txt [.tsync-root/f01e5cbbc09d4fc4-9a0fcd66f030de75] = manifest size=11 chunks=1 h1=1b5eab7935b34700 h2=72dfaa8cad2e9a42
+    chunk#0 cba685e06d3e500f-293331628d03f29b size=11
+
+=== re-uploading the same bytes repairs it
+  write a.txt "hello tsync"
+  drain
+  scramble-remote-chunk a.txt #0
+  rescan-corrupted
+  list-corrupted
+  write b.txt "hello tsync"
+  drain
+  list-corrupted
+  corrupted: 1
+    cba685e06d3e500f-293331628d03f29b on backend
+  corrupted: 0
+--- tree
+  f a.txt size=11 cached=0/1 uploaded=true etag=1b5eab7935b34700
+  f b.txt size=11 cached=0/1 uploaded=true etag=1b5eab7935b34700
+--- content
+  a.txt = "hello tsync"
+  b.txt = "hello tsync"
+--- backend
+  chunk cba685e06d3e500f-293331628d03f29b size=11
+  journal <entry-1> = put a.txt 11
+  journal <entry-2> = put b.txt 11
+  file b.txt [.tsync-root/3c697ec236bbf61f-698ad1290042cc94] = manifest size=11 chunks=1 h1=1b5eab7935b34700 h2=72dfaa8cad2e9a42
+    chunk#0 cba685e06d3e500f-293331628d03f29b size=11
+  file a.txt [.tsync-root/f01e5cbbc09d4fc4-9a0fcd66f030de75] = manifest size=11 chunks=1 h1=1b5eab7935b34700 h2=72dfaa8cad2e9a42
+    chunk#0 cba685e06d3e500f-293331628d03f29b size=11
+
+=== damage on the secondary is reported against it
+  write a.txt "hello tsync"
+  drain
+  on-secondary scramble-remote-chunk a.txt #0
+  rescan-corrupted
+  list-corrupted
+  corrupted: 1
+    cba685e06d3e500f-293331628d03f29b on backend2
+--- tree
+  f a.txt size=11 cached=0/1 uploaded=true etag=1b5eab7935b34700
+--- content
+  a.txt = "hello tsync"
+--- backend
+  chunk cba685e06d3e500f-293331628d03f29b size=11
+  journal <entry-1> = put a.txt 11
+  file a.txt [.tsync-root/f01e5cbbc09d4fc4-9a0fcd66f030de75] = manifest size=11 chunks=1 h1=1b5eab7935b34700 h2=72dfaa8cad2e9a42
+    chunk#0 cba685e06d3e500f-293331628d03f29b size=11
+--- backend 2
+  chunk cba685e06d3e500f-293331628d03f29b size=11
+  corrupted cba685e06d3e500f-293331628d03f29b
+  journal <entry-1> = put a.txt 11
+  file a.txt [.tsync-root/f01e5cbbc09d4fc4-9a0fcd66f030de75] = manifest size=11 chunks=1 h1=1b5eab7935b34700 h2=72dfaa8cad2e9a42
+    chunk#0 cba685e06d3e500f-293331628d03f29b size=11
+
+=== repair rewrites a bad copy from a good one
+  write a.txt "hello tsync"
+  drain
+  on-secondary scramble-remote-chunk a.txt #0
+  rescan-corrupted
+  list-corrupted
+  repair
+  rescan-corrupted
+  list-corrupted
+  corrupted: 1
+    cba685e06d3e500f-293331628d03f29b on backend2
+  FIXED cba685e06d3e500f-293331628d03f29b on backend2 (from backend)
+  repair: 1 checked, 1 repaired, 0 cleared, 0 lost
+  corrupted: 0
+--- tree
+  f a.txt size=11 cached=0/1 uploaded=true etag=1b5eab7935b34700
+--- content
+  a.txt = "hello tsync"
+--- backend
+  chunk cba685e06d3e500f-293331628d03f29b size=11
+  journal <entry-1> = put a.txt 11
+  file a.txt [.tsync-root/f01e5cbbc09d4fc4-9a0fcd66f030de75] = manifest size=11 chunks=1 h1=1b5eab7935b34700 h2=72dfaa8cad2e9a42
+    chunk#0 cba685e06d3e500f-293331628d03f29b size=11
+--- backend 2
+  chunk cba685e06d3e500f-293331628d03f29b size=11
+  journal <entry-1> = put a.txt 11
+  file a.txt [.tsync-root/f01e5cbbc09d4fc4-9a0fcd66f030de75] = manifest size=11 chunks=1 h1=1b5eab7935b34700 h2=72dfaa8cad2e9a42
+    chunk#0 cba685e06d3e500f-293331628d03f29b size=11
+
+=== nothing to repair from is reported, not silently skipped
+  write a.txt "hello tsync"
+  drain
+  scramble-remote-chunk a.txt #0
+  on-secondary scramble-remote-chunk a.txt #0
+  rescan-corrupted
+  repair
+  rescan-corrupted
+  list-corrupted
+  LOST  cba685e06d3e500f-293331628d03f29b on backend (no store holds these bytes)
+  LOST  cba685e06d3e500f-293331628d03f29b on backend2 (no store holds these bytes)
+  repair: 2 checked, 0 repaired, 0 cleared, 2 lost
+  corrupted: 2
+    cba685e06d3e500f-293331628d03f29b on backend
+    cba685e06d3e500f-293331628d03f29b on backend2
+--- tree
+  f a.txt size=11 cached=0/1 uploaded=true etag=1b5eab7935b34700
+--- content
+  a.txt = "ifmmp!utzod"
+--- backend
+  chunk cba685e06d3e500f-293331628d03f29b size=11
+  corrupted cba685e06d3e500f-293331628d03f29b
+  journal <entry-1> = put a.txt 11
+  file a.txt [.tsync-root/f01e5cbbc09d4fc4-9a0fcd66f030de75] = manifest size=11 chunks=1 h1=1b5eab7935b34700 h2=72dfaa8cad2e9a42
+    chunk#0 cba685e06d3e500f-293331628d03f29b size=11
+--- backend 2
+  chunk cba685e06d3e500f-293331628d03f29b size=11
+  corrupted cba685e06d3e500f-293331628d03f29b
+  journal <entry-1> = put a.txt 11
+  file a.txt [.tsync-root/f01e5cbbc09d4fc4-9a0fcd66f030de75] = manifest size=11 chunks=1 h1=1b5eab7935b34700 h2=72dfaa8cad2e9a42
+    chunk#0 cba685e06d3e500f-293331628d03f29b size=11
+
+=== collecting a chunk takes its marker with it
+  write a.txt "hello tsync"
+  drain
+  scramble-remote-chunk a.txt #0
+  rescan-corrupted
+  list-corrupted
+  delete a.txt
+  expire all
+  gc
+  rescan-corrupted
+  list-corrupted
+  corrupted: 1
+    cba685e06d3e500f-293331628d03f29b on backend
+  expire all -> 0 version(s), 1 journal entr(ies)
+  gc kept 0 chunk(s), reclaimed 1
+  corrupted: 0
+--- tree
+--- content
+--- backend
+  cursor = <entry-1>
+  journal <entry-1> = delete a.txt
+

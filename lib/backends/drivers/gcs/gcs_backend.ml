@@ -13,6 +13,7 @@ type t = {
   auth : Auth.t option;
       (* [None] is anonymous, for emulators on a custom endpoint. *)
   share_url : string option;
+  verify_chunks : bool;
 }
 
 (* 5xx and 429 clear on their own; a 4xx is the bucket's answer. *)
@@ -320,8 +321,8 @@ let list_all t ?max_keys ~prefix () =
   in
   collect [] None
 
-let make ?endpoint ?service_account_key ?share_url ~bucket () :
-    (module Backend.S) =
+let make ?endpoint ?service_account_key ?share_url ?(verify_chunks = false)
+    ~bucket () : (module Backend.S) =
   let base =
     match endpoint with
       | Some e when e <> "" -> e
@@ -332,7 +333,7 @@ let make ?endpoint ?service_account_key ?share_url ~bucket () :
     if n > 0 && base.[n - 1] = '/' then String.sub base 0 (n - 1) else base
   in
   let auth = Option.map Auth.of_service_account_json service_account_key in
-  let t = { bucket; base; auth; share_url } in
+  let t = { bucket; base; auth; share_url; verify_chunks } in
   (module struct
     let put ~key ~data () = put t ~key ~data ()
     let put_if_absent ~key ~data () = put_if_absent t ~key ~data ()
@@ -345,9 +346,21 @@ let make ?endpoint ?service_account_key ?share_url ~bucket () :
     let list_prefix ?max_keys ~prefix () = list_all t ?max_keys ~prefix ()
 
     (* No chunk size or concurrency opinion: an object store is limited by the
-       network and its own concurrency, neither measurable from here. *)
+       network and its own concurrency, neither measurable from here.
+
+       [verified] is the operator's word, not something this can observe: what
+       checks the chunks runs beside the bucket, out of reach of any client. It
+       says whether the terraform was applied, and it is asked for rather than
+       assumed because the failure it guards is silent — an un-deployed bucket
+       lists no markers, and "no markers" would otherwise read as "no
+       corruption". *)
     let capabilities ~prefix:_ () =
-      Lwt.return { Backend.no_caps with share_url = t.share_url }
+      Lwt.return
+        {
+          Backend.no_caps with
+          share_url = t.share_url;
+          verified = t.verify_chunks;
+        }
   end)
 
 let spec =
@@ -382,6 +395,15 @@ let spec =
         default = Some "";
         secret = false;
       };
+      {
+        name = "verifyChunks";
+        label =
+          "Is the chunk-verifier function deployed for this bucket (terraform \
+           chunk_domains)?";
+        typ = `Bool;
+        default = Some "false";
+        secret = false;
+      };
     ]
 
 let () =
@@ -394,4 +416,6 @@ let () =
   Backend.register ~spec "gcs" (fun get ->
       make ?endpoint:(opt get "endpoint")
         ?service_account_key:(opt get "serviceAccountKey")
-        ?share_url:(opt get "shareUrl") ~bucket:(req get "bucket") ())
+        ?share_url:(opt get "shareUrl")
+        ~verify_chunks:(Field_spec.bool ~default:false (get "verifyChunks"))
+        ~bucket:(req get "bucket") ())

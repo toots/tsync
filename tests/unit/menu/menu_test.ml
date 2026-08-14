@@ -150,7 +150,8 @@ let () =
      Pins that cpuPercentAvg is printed as it arrives rather than scaled, that a
      rate of zero is left off, that a backend which is behind says so while one
      that is not stays quiet, and that a wal with nothing owed draws no row. *)
-  let backend ?latency ?error ?behind ~reachable name role entries =
+  let backend ?latency ?error ?behind ?corrupted ?(corruption = `Checked)
+      ~reachable name role entries =
     {
       Menu.backend_name = name;
       role;
@@ -159,6 +160,8 @@ let () =
       backend_error = error;
       journal_entries = entries;
       journal_behind = behind;
+      corrupted_chunks = corrupted;
+      corruption;
     }
   in
   print_stats "stats submenu"
@@ -238,7 +241,21 @@ let () =
               bytes_written = None;
               wal_pending = Some 3;
               wal_stuck = Some 1;
-              backends = [backend "disk" "main" ~reachable:true ~behind:0 None];
+              backends =
+                [
+                  backend "disk" "main" ~reachable:true ~behind:0 None;
+                  (* A checked store with damage says so and says what to run;
+                     a store nothing checks says that instead, because its zero
+                     means something else entirely. *)
+                  backend "cloud" "replica" ~reachable:true ~behind:0
+                    ~corrupted:3 None;
+                  backend "archive" "readOnly" ~reachable:true ~behind:0
+                    ~corruption:`Unchecked None;
+                  (* A probe that failed has said nothing about this store's
+                     bytes, which is not the same as nothing checking it. *)
+                  backend "flaky" "replica" ~reachable:true ~behind:0
+                    ~corruption:`Failed None;
+                ];
             };
           ];
       };

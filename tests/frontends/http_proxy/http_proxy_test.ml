@@ -26,8 +26,12 @@ module C : Conf.S = struct
   let shares_prefix = "tsync/shares/"
 
   let store =
-    Backend.make ~backend_type:"local" ~get_field:(fun _ ->
-        Some (status_root ^ "/store"))
+    (* [verifyWrites] off: the chunks planted here are named to land one per
+       shard, which a real content key cannot be made to do, so the store would
+       rightly file every one of them as corrupt. *)
+    Backend.make ~backend_type:"local" ~get_field:(function
+      | "verifyWrites" -> Some "false"
+      | _ -> Some (status_root ^ "/store"))
 
   (* Two stores, one of them down, so the report has to name which. *)
   let members =
