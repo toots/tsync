@@ -104,6 +104,10 @@ struct DaemonResponse: Decodable {
     let bytesDownloaded: Int64?
     let totalBytes: Int64?
 
+    /// `menu` with `arg: "stats"`: the submenu's rows on their own. A submenu
+    /// carries no icon and no tooltip, so it is rows and nothing else.
+    let rows: [DaemonMenuRow]?
+
     /// `menu` only: the whole status menu, decided by the daemon.
     let menu: DaemonMenu?
 
@@ -118,7 +122,7 @@ struct DaemonResponse: Decodable {
     private enum CodingKeys: String, CodingKey {
         case ok, code, error, items, ops, stale, cursor, localPath, url
         case active, bytesDownloaded, totalBytes, offset, length
-        case menu
+        case menu, rows
     }
 
     init(from decoder: Decoder) throws {
@@ -138,6 +142,7 @@ struct DaemonResponse: Decodable {
         offset = try c.decodeIfPresent(Int64.self, forKey: .offset)
         length = try c.decodeIfPresent(Int64.self, forKey: .length)
         menu = try c.decodeIfPresent(DaemonMenu.self, forKey: .menu)
+        rows = try c.decodeIfPresent([DaemonMenuRow].self, forKey: .rows)
         item = try? DaemonItem(from: decoder)
     }
 }
@@ -373,6 +378,17 @@ extension DaemonClient {
             throw DaemonError.transport("daemon returned no menu")
         }
         return menu
+    }
+
+    /// The stats submenu's rows, rendered by the daemon like the menu itself.
+    /// Separate from ``menu()`` because it reaches every backend: it is asked
+    /// when the submenu opens, not on the poll.
+    func menuStats() async throws -> [DaemonMenuRow] {
+        let response = try await send(DaemonRequest(action: "menu", arg: "stats"))
+        guard let rows = response.rows else {
+            throw DaemonError.transport("daemon returned no stats rows")
+        }
+        return rows
     }
 
     /// Uploads only: a download runs because something is blocked waiting for

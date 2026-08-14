@@ -296,6 +296,38 @@ let start ~confs ~socket_path =
               ]),
          `Continue )
      in
+     (* The stats submenu, for the same client and for the same reason: it
+        cannot link {!Menu}, so its rows arrive rendered. Asked when the submenu
+        opens rather than on the poll — this reaches every backend, which is not
+        something to do every three seconds.
+
+        Parallel across domains, unlike the status call above. That one is
+        in-process bookkeeping; this one is a round trip per domain, and they
+        should overlap rather than add up. *)
+     let stats_reply runtimes =
+       let+ replies =
+         Lwt_list.map_p
+           (fun r ->
+             let+ reply, _ = r.handler {|{"action":"stats"}|} in
+             Yojson.Safe.from_string reply)
+           runtimes
+       in
+       (* Merged before parsing, because these are one process answering once
+          per domain and {!Diagnostics.merge} is what folds that back into the
+          single report it came from. Rendering them separately draws this
+          daemon once per domain — the same host, pid and uptime repeated —
+          which is right on Linux, where a domain really is its own process,
+          and wrong here. *)
+       let stats = Menu.of_stats_json (Diagnostics.merge replies) in
+       ( Yojson.Safe.to_string
+           (`Assoc
+              [
+                ("ok", `Bool true);
+                ( "rows",
+                  Menu.rows_json (Menu.stats_entries (Option.to_list stats)) );
+              ]),
+         `Continue )
+     in
      let router line =
        match Yojson.Safe.from_string line with
          | exception _ -> Lwt.return (error_json "invalid JSON", `Continue)
@@ -306,7 +338,9 @@ let start ~confs ~socket_path =
              let action = get_str "action" in
              let path = get_str "path" in
              let domain = get_str "domain" in
-             if action = "menu" then menu_reply domain_runtimes
+             if action = "menu" then
+               if get_str "arg" = "stats" then stats_reply domain_runtimes
+               else menu_reply domain_runtimes
              else (
                let runtime_opt =
                  if domain <> "" then

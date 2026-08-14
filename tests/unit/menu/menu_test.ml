@@ -278,3 +278,44 @@ let () =
   List.iter
     (fun n -> Printf.printf "%-16s %s\n" n (Menu.file_icon n))
     ["a.jpg"; "b.MOV"; "c.flac"; "d.pdf"; "e.xlsx"; "f.zip"; "g.txt"; "h"]
+
+(* The reply as the daemon actually sends it, drawn. This parser moved here from
+   the Linux tray, where nothing exercised it, and it now feeds two clients: the
+   tray, which renders the rows itself, and the macOS app, which is served them
+   already rendered. A field renamed on the daemon side is a submenu that
+   silently says "?" — this is what would notice.
+
+   The unreachable member is the case that matters: it is why anyone opens the
+   submenu. *)
+let daemon_reply =
+  {|{"ok":true,
+     "server":{"hostname":"duppy","frontend":"file_provider","pid":4242,
+               "uptimeSeconds":3671.0},
+     "process":{"cpuPercentAvg":0.4,"rssBytes":14300000,"heapBytes":2300000},
+     "traffic":{"bytesUploaded":223200000,"uploadBytesPerSec":1500000,
+                "bytesDownloaded":5000000,"downloadBytesPerSec":0},
+     "domains":[
+       {"name":"Files","domainReadOnly":false,"versioning":true,
+        "frontends":[{"mountPoint":"/Users/toots/tsync/Files",
+                      "pendingUploads":2,"pendingDownloads":1,"stagedFiles":3,
+                      "bytesRead":1000000,"bytesWritten":2000000}],
+        "cache":{"chunks":128,"bytes":1070000000,"maxCache":2500000000},
+        "wal":{"pending":1,"stuck":0},
+        "backends":[
+          {"name":"http-proxy","role":"main","reachable":true,"latencyMs":12.5,
+           "journal":{"entries":40,"behind":2}},
+          {"name":"archive","role":"backfill","reachable":false,
+           "error":"no answer within 10s"}]}]}|}
+
+let () =
+  print_newline ();
+  print_endline "== stats, parsed from a daemon reply";
+  (match Menu.of_stats_json (Yojson.Safe.from_string daemon_reply) with
+    | None -> print_endline "        (did not parse)"
+    | Some s -> print_entries (Menu.stats_entries [s]));
+
+  print_newline ();
+  print_endline "== stats, a reply that failed";
+  match Menu.of_stats_json (Yojson.Safe.from_string {|{"ok":false}|}) with
+    | None -> print_endline "        (no stats, as it should be)"
+    | Some _ -> print_endline "        parsed a failure as an answer"

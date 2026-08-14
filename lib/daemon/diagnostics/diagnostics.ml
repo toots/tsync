@@ -112,7 +112,9 @@ module Make (C : Conf.S) = struct
      any answer, including a miss, means the store is reachable. Deliberately not
      a listing: a [local] backend walks its whole tree before honouring
      [max_keys]. The body comes back too, since the journal section wants it. *)
-  let probe (module B : Backend.S) =
+  type probe_answer = (string * Yojson.Safe.t) list * string option
+
+  let probe (module B : Backend.S) : probe_answer Lwt.t =
     let t0 = Unix.gettimeofday () in
     Lwt.catch
       (fun () ->
@@ -131,6 +133,28 @@ module Make (C : Conf.S) = struct
               ("error", unreachable exn);
             ],
             None ))
+
+  (* A menu opened twice, or a poll landing next to an open, should not each pay
+     a round trip to every backend. Short on purpose: this is a health display,
+     and one that lags is worse than one that waits. *)
+  let probe_ttl = 5.
+  let probes : (string, float * probe_answer Lwt.t) Hashtbl.t = Hashtbl.create 4
+
+  (* The promise is cached, not the answer, so a second asker arriving mid-flight
+     joins the round trip already running rather than starting another. An entry
+     in flight is stamped [infinity] and so never looks stale; the clock starts
+     when the answer lands, which makes the window mean "since we last knew"
+     instead of "since we last asked". *)
+  let probe_cached ~name backend =
+    let fresh (at, _) = Unix.gettimeofday () -. at < probe_ttl in
+    match Hashtbl.find_opt probes name with
+      | Some entry when fresh entry -> snd entry
+      | _ ->
+          let answer = probe backend in
+          Hashtbl.replace probes name (infinity, answer);
+          Lwt.on_success answer (fun _ ->
+              Hashtbl.replace probes name (Unix.gettimeofday (), answer));
+          answer
 
   (* [behind] is what a sync pass would still have to do, our own entries
      excluded. *)
@@ -325,9 +349,24 @@ module Make (C : Conf.S) = struct
                 ] );
           ]
 
+  (* The probe has already spent [probe_timeout] discovering this backend is not
+     there, and the journal listing would spend another one discovering the same
+     thing — the two are sequential, so an unreachable backend used to cost twice
+     the deadline it is meant to cost. Nothing is lost by not asking: a store
+     that cannot answer a single small key cannot answer a listing either. *)
+  let unasked = `Assoc [("error", `String "not asked: the probe found it down")]
+
+  let reachable probed =
+    match List.assoc_opt "reachable" probed with
+      | Some (`Bool r) -> r
+      | _ -> false
+
   let member_json ~totals ~exact ~reload (m : Backend.member) =
-    let* probed, cursor = probe m.Backend.backend in
-    let+ jrnl = journal ~cursor m.Backend.backend in
+    let* probed, cursor = probe_cached ~name:m.Backend.name m.Backend.backend in
+    let+ jrnl =
+      if reachable probed then journal ~cursor m.Backend.backend
+      else Lwt.return unasked
+    in
     (* Synchronous: reads the last sample and leaves any walk it started running
        behind us. *)
     let tot =

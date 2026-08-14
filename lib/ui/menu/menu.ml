@@ -598,12 +598,14 @@ let entry_json = function
           | None -> [])
         @ if i.submenu then [("submenu", `Bool true)] else [])
 
+let rows_json entries = `List (List.map entry_json entries)
+
 let to_json m =
   `Assoc
     [
       ("icon", `String m.icon);
       ("tooltip", `String m.tooltip);
-      ("rows", `List (List.map entry_json m.entries));
+      ("rows", rows_json m.entries);
     ]
 
 let member name = function
@@ -650,6 +652,120 @@ let transfers_of json field =
               | _ -> None)
           items
     | _ -> []
+
+(* The stats reply, parsed into what the submenu draws. Beside
+   {!of_status_json} because it is the same job on the fuller report: the Linux
+   tray reads it to render the submenu itself, and the daemon reads it to render
+   those rows for a client that cannot link this module. *)
+
+let list_field json name =
+  match member name json with Some (`List items) -> items | _ -> []
+
+(* Reads a field out of a sub-object that may not be there at all, which is
+   every one of these: the daemon leaves out what its frontend does not keep. *)
+let sub json name field key =
+  Option.bind (member name json) (fun o -> field o key)
+
+let backend_of json =
+  {
+    backend_name = Option.value (string_field json "name") ~default:"backend";
+    role = Option.value (string_field json "role") ~default:"?";
+    backend_reachable =
+      Option.value (bool_field json "reachable") ~default:false;
+    latency_ms = float_field json "latencyMs";
+    backend_error = string_field json "error";
+    journal_entries = sub json "journal" int_field "entries";
+    journal_behind = sub json "journal" int_field "behind";
+  }
+
+(* The frontends of one domain, which on Linux is one. Their queue and byte
+   counters are summed rather than picked from the first: two frontends serving
+   a domain are each doing part of its work. *)
+let frontend_sum json key field =
+  match
+    List.filter_map (fun f -> field f key) (list_field json "frontends")
+  with
+    | [] -> None
+    | values -> Some (List.fold_left ( + ) 0 values)
+
+let frontend_sum64 json key =
+  match
+    List.filter_map (fun f -> int64_field f key) (list_field json "frontends")
+  with
+    | [] -> None
+    | values -> Some (List.fold_left Int64.add 0L values)
+
+let frontend_first json key =
+  List.find_map (fun f -> string_field f key) (list_field json "frontends")
+
+let domain_stats_of json =
+  {
+    domain_name = Option.value (string_field json "name") ~default:"domain";
+    mount_point = frontend_first json "mountPoint";
+    read_only = Option.value (bool_field json "domainReadOnly") ~default:false;
+    versioning = Option.value (bool_field json "versioning") ~default:false;
+    cache_chunks = sub json "cache" int_field "chunks";
+    cache_bytes = sub json "cache" int64_field "bytes";
+    cache_max = sub json "cache" int64_field "maxCache";
+    in_uploads = frontend_sum json "pendingUploads" int_field;
+    in_downloads = frontend_sum json "pendingDownloads" int_field;
+    staged = frontend_sum json "stagedFiles" int_field;
+    bytes_read = frontend_sum64 json "bytesRead";
+    bytes_written = frontend_sum64 json "bytesWritten";
+    wal_pending = sub json "wal" int_field "pending";
+    wal_stuck = sub json "wal" int_field "stuck";
+    backends = List.map backend_of (list_field json "backends");
+  }
+
+let of_stats_json json =
+  match bool_field json "ok" with
+    | Some false | None -> None
+    | Some true ->
+        let server = member "server" json in
+        let process = member "process" json in
+        let traffic = member "traffic" json in
+        let field o name f = Option.bind o (fun o -> f o name) in
+        Some
+          {
+            host =
+              Option.value (field server "hostname" string_field) ~default:"?";
+            frontend =
+              Option.value (field server "frontend" string_field) ~default:"?";
+            pid = Option.value (field server "pid" int_field) ~default:0;
+            uptime =
+              Option.value
+                (field server "uptimeSeconds" float_field)
+                ~default:0.;
+            cpu_percent =
+              Option.value
+                (field process "cpuPercentAvg" float_field)
+                ~default:0.;
+            rss =
+              Option.value (field process "rssBytes" int64_field) ~default:0L;
+            heap =
+              Option.value (field process "heapBytes" int64_field) ~default:0L;
+            uploaded =
+              Option.value
+                (field traffic "bytesUploaded" int64_field)
+                ~default:0L;
+            up_rate =
+              Option.value
+                (field traffic "uploadBytesPerSec" float_field)
+                ~default:0.;
+            downloaded =
+              Option.value
+                (field traffic "bytesDownloaded" int64_field)
+                ~default:0L;
+            down_rate =
+              Option.value
+                (field traffic "downloadBytesPerSec" float_field)
+                ~default:0.;
+            domain_stats = List.map domain_stats_of (list_field json "domains");
+          }
+
+(* Longer than the status poll's timeout because it is doing more: the daemon
+   reaches every backend before answering. Still bounded, and still one request
+   per domain at once, since this runs in the same single-threaded loop. *)
 
 let of_status_json ~name json =
   match bool_field json "ok" with

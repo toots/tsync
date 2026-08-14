@@ -1,0 +1,4 @@
+first call:        timed out
+2 further calls:   timed out
+gave up on:        the response deadline
+sockets held:      one per abandoned call, at most

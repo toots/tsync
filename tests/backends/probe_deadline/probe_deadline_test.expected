@@ -1,4 +1,6 @@
 probe of a backend that never answers
   reachable false
   error     "no answer within 10s"
-  journal   "no answer within 10s"
+  journal   "not asked: the probe found it down"
+  cost      one probe deadline
+  again     answered from the last probe

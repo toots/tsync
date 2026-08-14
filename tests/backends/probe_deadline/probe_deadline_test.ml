@@ -73,8 +73,35 @@ let member name j = Yojson.Safe.Util.member name j
    forever" into a failed test, not to measure how long the probe takes. *)
 let bound = 120.
 
+(* One probe deadline is the whole point. A backend that never answers is
+   discovered by the probe, and everything else about it follows — asking a
+   second question over the same dead connection buys nothing and spends the
+   deadline again. It used to be two, which put a stats call past the timeout
+   its own callers allow it.
+
+   The probe's deadline is not exported, deliberately: only a test would want
+   it. So this is the midpoint between one and two of them at its current 10s,
+   and what it has to separate is "asked once" from "asked twice". Revisit it if
+   that value moves. *)
+let two_deadlines_from = 15.
+
+let deadlines_spent elapsed =
+  if elapsed < two_deadlines_from then "one" else "more than one"
+
+let timed f =
+  let started = Unix.gettimeofday () in
+  let+ v = f () in
+  (v, Unix.gettimeofday () -. started)
+
 let main () =
-  let+ domain = Lwt_unix.with_timeout bound (fun () -> Diag.domain_json ()) in
+  let* domain, elapsed =
+    timed (fun () ->
+        Lwt_unix.with_timeout bound (fun () -> Diag.domain_json ()))
+  in
+  (* Straight away, so it falls inside the window: what a second menu open, or a
+     poll landing next to one, costs. Nothing — the answer is already known, and
+     asking a store that just failed to answer would only fail again. *)
+  let+ _, again = timed (fun () -> Diag.domain_json ()) in
   let wedged =
     match member "backends" domain with
       | `List [b] -> b
@@ -86,6 +113,10 @@ let main () =
   Printf.printf "  error     %s\n"
     (Yojson.Safe.to_string (member "error" wedged));
   Printf.printf "  journal   %s\n"
-    (Yojson.Safe.to_string (member "error" (member "journal" wedged)))
+    (Yojson.Safe.to_string (member "error" (member "journal" wedged)));
+  Printf.printf "  cost      %s probe deadline\n" (deadlines_spent elapsed);
+  Printf.printf "  again     %s\n"
+    (if again < 1. then "answered from the last probe"
+     else Printf.sprintf "probed again (%.0fs)" again)
 
 let () = Lwt_main.run (main ())

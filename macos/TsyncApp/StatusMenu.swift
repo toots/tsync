@@ -33,6 +33,16 @@ final class StatusMenu: NSObject, NSMenuDelegate {
     /// long as it is up.
     private var isOpen = false
 
+    /// The stats submenu, held because it is the one part of the menu that
+    /// updates while the menu is open — and so the one part that must be
+    /// changed in place rather than through ``render()``, which rebuilds the
+    /// whole menu and is suppressed while it is up.
+    private weak var statsMenu: NSMenu?
+
+    /// One fetch at a time. Opening the submenu repeatedly while a slow backend
+    /// is being probed should not queue up a call per open.
+    private var statsInFlight = false
+
     override init() { fatalError("use init(domains:)") }
 
     init(domains: [String]) {
@@ -165,7 +175,19 @@ final class StatusMenu: NSObject, NSMenuDelegate {
 
         // A submenu the daemon has not filled in yet still has to open as one,
         // or the row moves under the pointer once it does.
-        if row.submenu == true { entry.submenu = NSMenu() }
+        if row.submenu == true {
+            let submenu = NSMenu()
+            submenu.autoenablesItems = false
+            // Filled when it opens rather than on the poll: the answer reaches
+            // every backend. Until the first one lands it says so, an empty
+            // submenu being one AppKit may decline to open at all.
+            submenu.addItem(Self.plain("Reading…"))
+            if row.action?.stats == true {
+                submenu.delegate = self
+                statsMenu = submenu
+            }
+            entry.submenu = submenu
+        }
 
         // The deliberate grey for a detail under a heading, as opposed to the
         // one AppKit applies to anything it thinks is unavailable.
@@ -185,13 +207,52 @@ final class StatusMenu: NSObject, NSMenuDelegate {
         return image
     }
 
+    /// A row that says something rather than doing something: enabled, so it
+    /// reads as text instead of as a command AppKit has switched off.
+    private static func plain(_ title: String) -> NSMenuItem {
+        let item = NSMenuItem(title: title, action: nil, keyEquivalent: "")
+        item.isEnabled = true
+        return item
+    }
+
     // MARK: - NSMenuDelegate
 
-    func menuWillOpen(_ menu: NSMenu) { isOpen = true }
+    func menuWillOpen(_ menu: NSMenu) {
+        if menu === statsMenu {
+            fetchStats(into: menu)
+        } else {
+            isOpen = true
+        }
+    }
 
     func menuDidClose(_ menu: NSMenu) {
+        // The submenu closing is not the menu closing: the parent is still up,
+        // and treating it as a close would rebuild the menu under the pointer.
+        guard menu !== statsMenu else { return }
         isOpen = false
         render()
+    }
+
+    /// Replaces the submenu's items in place. Deliberately not via ``render()``:
+    /// that rebuilds the whole menu, which is both suppressed while the menu is
+    /// open and would dismiss it if it were not.
+    private func fetchStats(into submenu: NSMenu) {
+        guard !statsInFlight, let client = clients.first else { return }
+        statsInFlight = true
+        Task {
+            let rows = try? await client.menuStats()
+            await MainActor.run {
+                self.statsInFlight = false
+                // A failed fetch leaves what is already there — the placeholder
+                // on a first open, the last answer afterwards. Blanking it would
+                // turn a slow backend into a menu that looks broken.
+                guard let rows, !rows.isEmpty else { return }
+                submenu.removeAllItems()
+                for row in rows {
+                    submenu.addItem(row.isSeparator ? .separator() : self.entry(row))
+                }
+            }
+        }
     }
 
     // MARK: - Actions
