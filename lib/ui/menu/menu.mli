@@ -137,10 +137,18 @@ val render : ?quit_label:string -> status list -> menu
     was surfaced. *)
 val to_json : menu -> Yojson.Safe.t
 
+(** Rows on their own, for a set that is not a whole menu: the stats submenu is
+    fetched when it opens, so it travels without an icon or a tooltip. *)
+val entries_to_json : entry list -> Yojson.Safe.t
+
 (** One domain's [status] reply, as the daemon sends it. [name] is the domain
     asked, since a reply that failed carries nothing to name it with. A missing
     field is a daemon that predates it, not an error. *)
 val of_status_json : name:string -> Yojson.Safe.t -> status
+
+(** One daemon's [stats] reply. [None] is a daemon that answered with a failure,
+    which has nothing to report rather than zeroes to report. *)
+val of_stats_json : Yojson.Safe.t -> stats option
 
 (** The stats submenu's rows, to be installed under the row whose action is
     [Show_stats]. Never empty: a submenu with nothing in it is one some panels

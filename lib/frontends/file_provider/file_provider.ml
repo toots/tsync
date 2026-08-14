@@ -296,6 +296,28 @@ let start ~confs ~socket_path =
               ]),
          `Continue )
      in
+     (* The stats submenu's rows, on the same terms: rendered here because the
+        client cannot link {!Menu}, and asked for separately because a [stats]
+        call reaches every backend -- a round trip nobody wants on the poll that
+        runs whether or not the menu is open. *)
+     let menu_stats_reply runtimes =
+       let+ stats =
+         Lwt_list.map_s
+           (fun r ->
+             let+ reply, _ = r.handler {|{"action":"stats"}|} in
+             Menu.of_stats_json (Yojson.Safe.from_string reply))
+           runtimes
+       in
+       ( Yojson.Safe.to_string
+           (`Assoc
+              [
+                ("ok", `Bool true);
+                ( "rows",
+                  Menu.entries_to_json
+                    (Menu.stats_entries (List.filter_map Fun.id stats)) );
+              ]),
+         `Continue )
+     in
      let router line =
        match Yojson.Safe.from_string line with
          | exception _ -> Lwt.return (error_json "invalid JSON", `Continue)
@@ -307,6 +329,8 @@ let start ~confs ~socket_path =
              let path = get_str "path" in
              let domain = get_str "domain" in
              if action = "menu" then menu_reply domain_runtimes
+             else if action = "menu_stats" then
+               menu_stats_reply domain_runtimes
              else (
                let runtime_opt =
                  if domain <> "" then

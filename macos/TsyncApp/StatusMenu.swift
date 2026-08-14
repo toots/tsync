@@ -29,6 +29,17 @@ final class StatusMenu: NSObject, NSMenuDelegate {
     /// is derived from the display name by rules that are not ours to guess.
     private var domainURLs: [String: URL] = [:]
 
+    /// The submenu under the Stats row, kept so the delegate callbacks can tell
+    /// it from the menu it hangs under. Its rows are not part of the poll: the
+    /// daemon reaches every backend to answer, so they are asked for when it
+    /// opens and it says "Reading…" until they arrive.
+    private var statsMenu: NSMenu?
+
+    /// A host that asks twice for one opening would cost two round trips to
+    /// every backend.
+    private var lastStatsFetch: Date = .distantPast
+    private static let statsSettled: TimeInterval = 1
+
     /// Rebuilding under an open menu would dismiss it. Rows hold still for as
     /// long as it is up.
     private var isOpen = false
@@ -165,7 +176,14 @@ final class StatusMenu: NSObject, NSMenuDelegate {
 
         // A submenu the daemon has not filled in yet still has to open as one,
         // or the row moves under the pointer once it does.
-        if row.submenu == true { entry.submenu = NSMenu() }
+        if row.submenu == true {
+            let submenu = NSMenu()
+            submenu.autoenablesItems = false
+            submenu.delegate = self
+            submenu.addItem(Self.plainItem("Reading…"))
+            entry.submenu = submenu
+            if row.action?.stats == true { statsMenu = submenu }
+        }
 
         // The deliberate grey for a detail under a heading, as opposed to the
         // one AppKit applies to anything it thinks is unavailable.
@@ -187,11 +205,51 @@ final class StatusMenu: NSObject, NSMenuDelegate {
 
     // MARK: - NSMenuDelegate
 
-    func menuWillOpen(_ menu: NSMenu) { isOpen = true }
+    /// Only the menu bar's own menu decides this. A submenu opening and closing
+    /// is not the menu closing, and re-rendering on it would rebuild the rows
+    /// under the pointer.
+    func menuWillOpen(_ menu: NSMenu) {
+        guard menu === item.menu else { return }
+        isOpen = true
+    }
 
     func menuDidClose(_ menu: NSMenu) {
+        guard menu === item.menu else { return }
         isOpen = false
         render()
+    }
+
+    /// Every time it opens, not once: the point of the submenu is what is true
+    /// now.
+    func menuNeedsUpdate(_ menu: NSMenu) {
+        guard menu === statsMenu else { return }
+        let now = Date()
+        guard now.timeIntervalSince(lastStatsFetch) >= Self.statsSettled else { return }
+        lastStatsFetch = now
+        guard let client = clients.first else { return }
+        Task {
+            let rows = try? await client.menuStats()
+            await MainActor.run {
+                guard menu === self.statsMenu else { return }
+                menu.removeAllItems()
+                for row in rows ?? [] {
+                    menu.addItem(row.isSeparator ? .separator() : self.entry(row))
+                }
+                // Never empty: a submenu with nothing in it reads as a menu that
+                // failed to open rather than as a daemon that did not answer.
+                if menu.items.isEmpty {
+                    menu.addItem(Self.plainItem("Not answering"))
+                }
+            }
+        }
+    }
+
+    /// A row that is text, not a command: enabled so AppKit does not grey it,
+    /// with nothing behind it to click.
+    private static func plainItem(_ title: String) -> NSMenuItem {
+        let item = NSMenuItem(title: title, action: nil, keyEquivalent: "")
+        item.isEnabled = false
+        return item
     }
 
     // MARK: - Actions
