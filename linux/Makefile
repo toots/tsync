@@ -30,8 +30,8 @@ install-system:
 	  > ~/.config/autostart/tsync-tray.desktop
 	# Every theme inherits hicolor, so this is where an icon is found whatever
 	# the desktop. The four tray states go under symbolic/ and keep the suffix
-	# in their name: that pairing is what makes a panel recolour them to its own
-	# foreground rather than drawing them in the colour the file names.
+	# in their name: GTK only recolours an icon to the panel foreground when
+	# both are true, and the SVGs carry the stylesheet KDE recolours by.
 	mkdir -p ~/.local/share/icons/hicolor/scalable/apps
 	mkdir -p ~/.local/share/icons/hicolor/symbolic/apps
 	cp ../assets/tsync-app.svg ~/.local/share/icons/hicolor/scalable/apps/tsync.svg
@@ -39,6 +39,12 @@ install-system:
 	# Advisory: GTK scans the directory when the cache is missing or stale, so a
 	# desktop without the tool installed still finds the icons.
 	-gtk-update-icon-cache -f -t ~/.local/share/icons/hicolor 2>/dev/null
+	# Not advisory for Plasma. It snapshots which of hicolor's directories
+	# exist, and the two above are ones a fresh machine has never had, so a
+	# panel already running resolves nothing under them until told to look
+	# again -- an install whose icons only appear after the next login.
+	-gdbus emit --session --object-path /KIconLoader \
+	  --signal org.kde.KIconLoader.iconChanged 0 2>/dev/null
 	mkdir -p ~/.config/systemd/user
 	cp tsync.service ~/.config/systemd/user/
 	systemctl --user daemon-reload

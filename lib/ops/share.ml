@@ -158,11 +158,12 @@ module Make (C : Conf.S) = struct
         in
         let keys = List.map (fun (e : Backend.file_entry) -> e.key) entries in
         let bytes =
-          List.fold_left (fun n (e : Backend.file_entry) -> n + e.size) 0 entries
+          List.fold_left
+            (fun n (e : Backend.file_entry) -> n + e.size)
+            0 entries
         in
         let+ () = if keys = [] then Lwt.return_unit else B.delete_multi keys in
         Ok (List.length keys, bytes))
       (function
-        | Share_unavailable msg -> Lwt.return_error msg
-        | exn -> Lwt.fail exn)
+        | Share_unavailable msg -> Lwt.return_error msg | exn -> Lwt.fail exn)
 end

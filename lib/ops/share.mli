@@ -26,8 +26,8 @@ module Make (C : Conf.S) : sig
     (string, string) result Lwt.t
 
   (** Delete every object the share server has assembled and cached, answering
-      how many went and how many bytes they held. Published links are untouched —
-      a share manifest lives beside the cache subtree, not in it — so the next
+      how many went and how many bytes they held. Published links are untouched
+      — a share manifest lives beside the cache subtree, not in it — so the next
       download rebuilds what it needs. *)
   val clear_cache : unit -> (int * int, string) result Lwt.t
 end

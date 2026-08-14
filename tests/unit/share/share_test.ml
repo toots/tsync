@@ -165,13 +165,9 @@ let () =
          shares_prefix ^ "3333333333333333-4444444444444444.data";
        ]
      in
-     let* () =
-       Lwt_list.iter_s (fun key -> B.put ~key ~data:"1234" ()) cached
-     in
+     let* () = Lwt_list.iter_s (fun key -> B.put ~key ~data:"1234" ()) cached in
      let* result = S.clear_cache () in
-     let n, bytes =
-       match result with Ok v -> v | Error e -> failwith e
-     in
+     let n, bytes = match result with Ok v -> v | Error e -> failwith e in
      assert (n = List.length cached);
      assert (bytes = 4 * List.length cached);
      let* left = B.list_prefix ~prefix:shares_prefix () in
@@ -186,10 +182,7 @@ let () =
      in
      (* The tokens published above, and nothing else. *)
      assert (
-       left
-       = List.map
-           (fun t -> shares_prefix ^ t)
-           ["aa"; "bb"; "cc"; "dd"]);
+       left = List.map (fun t -> shares_prefix ^ t) ["aa"; "bb"; "cc"; "dd"]);
      (* Idempotent: a second pass has nothing to take. *)
      let+ again = S.clear_cache () in
      assert (again = Ok (0, 0)));

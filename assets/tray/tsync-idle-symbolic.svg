@@ -1,7 +1,22 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24"
-     fill="currentColor">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24">
   <title>tsync: idle</title>
-  <path d="M9 5 11 3V15a2 2 0 0 0 2 2h2v2h-2a4 4 0 0 1-4-4Z"/>
-  <path d="M6 7h8v2H6Z"/>
-  <path d="M15 15.4 19.6 18 15 20.6Z"/>
+  <!-- Recolouring is a contract each toolkit reads a different half of. KDE
+       swaps the whole `current-color-scheme` block for one naming the panel's
+       foreground; GTK ignores it and forces `fill` on rect, circle and path
+       with !important. Left to itself `currentColor` resolves to the `color`
+       declared here, which is why it has to be declared: Qt has no wrapper to
+       inherit one from, and the initial value is black, i.e. an invisible icon
+       on a dark panel. Black is also what the macOS render wants, since
+       make-icons.sh takes its alpha from negated luminance. -->
+  <defs>
+    <style type="text/css" id="current-color-scheme">.ColorScheme-Text { color:#000000; }</style>
+  </defs>
+  <!-- Every mark is a fill, never a stroke. GTK's rule only reaches `fill`; a
+       stroked glyph keeps its own colour and gains a filled interior, so it
+       survives as a blob in the wrong colour. -->
+  <g class="ColorScheme-Text" style="fill:currentColor">
+    <path d="M9 5 11 3V15a2 2 0 0 0 2 2h2v2h-2a4 4 0 0 1-4-4Z"/>
+    <path d="M6 7h8v2H6Z"/>
+    <path d="M15 15.4 19.6 18 15 20.6Z"/>
+  </g>
 </svg>

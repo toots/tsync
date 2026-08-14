@@ -85,8 +85,9 @@ sed 's|@BIN@|/usr/bin/tsync-tray|' linux/tsync-tray.desktop.in \
 chmod 644 "$tray/etc/xdg/autostart/tsync-tray.desktop"
 # The .desktop names an icon and the tray asks for four more, so the package
 # that ships them is the package that has to ship the icons. The suffix and the
-# symbolic/ directory are a pair: together they are what makes a panel recolour
-# to its own foreground instead of drawing black on black.
+# symbolic/ directory are a pair: together they are what makes GTK recolour to
+# the panel foreground. Qt ignores both and recolours by the stylesheet the
+# SVGs carry instead.
 install -Dm644 assets/tsync-app.svg \
   "$tray/usr/share/icons/hicolor/scalable/apps/tsync.svg"
 for state in idle sync paused error; do

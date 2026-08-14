@@ -1561,9 +1561,9 @@ let clear_share_cache_cmd =
   Cmd.v
     (Cmd.info "clear-share-cache"
        ~doc:
-         "Delete the files the share server has assembled and cached. Published \
-          links are not touched and keep working: the next download rebuilds \
-          what it needs.")
+         "Delete the files the share server has assembled and cached. \
+          Published links are not touched and keep working: the next download \
+          rebuilds what it needs.")
     Term.(const run $ domain_arg)
 
 let print_conf_cmd =

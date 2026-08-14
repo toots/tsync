@@ -1,12 +1,17 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24"
-     fill="currentColor">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24">
   <title>tsync: paused</title>
+  <!-- See tsync-idle-symbolic.svg for what the stylesheet is doing. -->
+  <defs>
+    <style type="text/css" id="current-color-scheme">.ColorScheme-Text { color:#000000; }</style>
+  </defs>
   <!-- Every mark is a fill, never a stroke. GTK recolours a symbolic icon by
        forcing `fill` on rect, circle and path; a stroked glyph keeps its own
        colour and gains a filled interior, so it survives as a blob in the
        wrong colour. -->
-  <path d="M9 5 11 3V15a2 2 0 0 0 2 2h1v2h-1a4 4 0 0 1-4-4Z"/>
-  <path d="M6 7h8v2H6Z"/>
-  <path d="M15 15h2v6h-2Z"/>
-  <path d="M19 15h2v6h-2Z"/>
+  <g class="ColorScheme-Text" style="fill:currentColor">
+    <path d="M9 5 11 3V15a2 2 0 0 0 2 2h1v2h-1a4 4 0 0 1-4-4Z"/>
+    <path d="M6 7h8v2H6Z"/>
+    <path d="M15 15h2v6h-2Z"/>
+    <path d="M19 15h2v6h-2Z"/>
+  </g>
 </svg>
