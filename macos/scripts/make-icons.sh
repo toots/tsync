@@ -27,11 +27,19 @@ sed 's/width="128" height="128"/width="1024" height="1024"/' \
     "$ASSETS/tsync-app.svg" >"$WORK/app.svg"
 render "$WORK/app.svg" 1024 "$WORK/app.png"
 
-# Apple's grid: the rounded rect covers 824 of a 1024 canvas and the rest is
-# transparent margin. Skipping this is what makes an icon sit oversized next to
-# every other one in the Dock.
-magick "$WORK/app.png" -resize 824x824 \
-    -background none -gravity center -extent 1024x1024 PNG32:"$WORK/app-master.png"
+# qlmanage renders a thumbnail onto white, so the artwork comes back as an
+# opaque square: the rounded corners are filled in and no transparency is left.
+# The alpha is redrawn from the shape the SVG already declares -- one rounded
+# rect over the whole canvas, rx 28 of 128 -- drawn oversized and scaled down,
+# since -draw's own antialiasing is not enough at a radius this large.
+#
+# Full bleed, no margin: macOS 26 draws every icon edge to edge, so the 824-of-
+# 1024 grid the older Dock wanted now reads as an icon two sizes too small.
+magick "$WORK/app.png" \
+    \( -size 4096x4096 xc:black -fill white \
+       -draw 'roundrectangle 0,0 4095,4095 896,896' \
+       -alpha off -colorspace gray -resize 1024x1024 \) \
+    -alpha off -compose copy_opacity -composite PNG32:"$WORK/app-master.png"
 
 appicon="$CATALOG/AppIcon.appiconset"
 mkdir -p "$appicon"

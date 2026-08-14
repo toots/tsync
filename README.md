@@ -1,3 +1,5 @@
+<img src="assets/tsync-app.svg" alt="" width="96">
+
 # tsync
 
 Mount storage you control as a folder that only downloads what you open. An S3 or GCS bucket, a disk or NAS, or one machine on your network serving all the others.
