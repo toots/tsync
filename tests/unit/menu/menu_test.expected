@@ -220,3 +220,21 @@ e.xlsx           x-office-spreadsheet
 f.zip            package-x-generic
 g.txt            text-x-generic
 h                text-x-generic
+
+== stats, parsed from a daemon reply
+        duppy — file_provider
+        pid 4242 · up 1h 1m
+        cpu 0.4% · 13.6 MB rss · 2.2 MB heap
+        up 212.9 MB (1.4 MB/s) · down 4.8 MB
+        ---
+        Files — versioned
+            /Users/toots/tsync/Files
+            cache 128 chunks · 1020.4 MB of 2.3 GB
+            2 uploading · 1 downloading · 3 staged
+            read 976.6 KB · written 1.9 MB
+            wal 1 pending
+            http-proxy (main) — reachable, 12 ms · journal 40 entries, 2 behind
+            archive (backfill) — unreachable: no answer within 10s
+
+== stats, a reply that failed
+        (no stats, as it should be)
