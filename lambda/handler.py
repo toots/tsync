@@ -13,9 +13,10 @@ Serves shared files/folders from the tsync S3 chunk store. A request path is
 
 A dir share stores only the directory's key prefix; the browser lists one folder
 at a time via ``/list``, so ``tsync share`` and page load stay O(1) regardless of
-how many files the directory holds. Assembled artifacts are cached next to / under
-the manifest and served via a short-lived presigned GET (responses are size-capped,
-so we never stream bodies ourselves).
+how many files the directory holds. Assembled artifacts are cached under
+``SHARES_PREFIX + "cache/"`` and served via a short-lived presigned GET (responses
+are size-capped, so we never stream bodies ourselves). Everything in that subtree
+is rebuildable, which is what makes ``tsync clear-share-cache`` safe.
 
 Size guard: a single file (or per-file preview) and the running total of a folder
 zip are both capped at MAX_BYTES (default 10 GiB) -> 413, so a build can't blow
@@ -32,9 +33,11 @@ import traceback
 import zipfile
 
 import manifest
-from share_common import ShareError
+from share_common import ShareError, cache_prefix
 
 SHARES_PREFIX = os.environ.get("SHARES_PREFIX", "tsync/shares/")  # guard: keys must start with this
+# A token is hex, so nothing published can ever land in here.
+CACHE_PREFIX = cache_prefix(SHARES_PREFIX)
 MAX_BYTES = int(os.environ.get("MAX_BYTES", str(10 * 1024**3)))
 
 # Pick the storage backend by env; import lazily so one deployment zip runs on
@@ -335,14 +338,14 @@ def load_share(token):
         raise ShareError(404, "not found")
     if time.time() > share.get("expires", 0):
         raise ShareError(410, "link expired")
-    return manifest_key, share
+    return share
 
 
-def download_artifact(manifest_key, share):
-    # The whole artifact (a file's bytes, or a directory zipped) is cached at
-    # <manifest>.data and served presigned. For a dir this freezes the zip at
+def download_artifact(token, share):
+    # The whole artifact (a file's bytes, or a directory zipped) is cached under
+    # CACHE_PREFIX and served presigned. For a dir this freezes the zip at
     # first-download time; fine given the short share TTL.
-    cache_key = manifest_key + ".data"
+    cache_key = CACHE_PREFIX + token + ".data"
     if not object_exists(cache_key):
         if share["type"] == "file":
             build_file(share["key"], share["chunkPrefix"], cache_key)
@@ -393,7 +396,7 @@ def serve_file(share, path, as_download, want_json):
     if not r or r[0] != "file":
         raise ShareError(404, "file not found")
     m = file_manifest(r[1])
-    cache_key = SHARES_PREFIX + m.h1 + "-" + m.h2 + ".data"
+    cache_key = CACHE_PREFIX + m.h1 + "-" + m.h2 + ".data"
     if not object_exists(cache_key):
         assemble(m, share["chunkPrefix"], cache_key)
     name = os.path.basename(rel)
@@ -413,15 +416,15 @@ def handler(event, context):
         sub = parts[1] if len(parts) > 1 else ""
         if not token:
             raise ShareError(400, "missing token")
-        manifest_key, share = load_share(token)
+        share = load_share(token)
         q = event.get("queryStringParameters") or {}
         is_dir = share.get("type") == "dir"
         if sub == "":
             if is_dir:
                 return html_response(render_browse(share, token))
-            return download_artifact(manifest_key, share)
+            return download_artifact(token, share)
         if sub == "download":
-            return download_artifact(manifest_key, share)
+            return download_artifact(token, share)
         if is_dir and sub == "list":
             return list_response(share, q.get("path", ""))
         if is_dir and sub == "f":

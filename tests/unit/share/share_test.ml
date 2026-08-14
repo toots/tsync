@@ -151,4 +151,47 @@ let () =
     | Error e -> assert (String.length e >= 9 && String.sub e 0 9 = "not found")
     | Ok _ -> assert false);
 
+  (* Clearing the cache takes the assembled artifacts — the ones under cache/,
+     and the loose .data siblings written before that subtree existed — and
+     leaves every published manifest where it is. *)
+  let (module B : Backend.S) = (module Shareable) in
+  Lwt_main.run
+    (let open Lwt.Syntax in
+     let cached =
+       [
+         shares_prefix ^ "cache/aa.data";
+         shares_prefix ^ "cache/1111111111111111-2222222222222222.data";
+         shares_prefix ^ "cache/compose-tmp/deadbeef-0";
+         shares_prefix ^ "3333333333333333-4444444444444444.data";
+       ]
+     in
+     let* () =
+       Lwt_list.iter_s (fun key -> B.put ~key ~data:"1234" ()) cached
+     in
+     let* result = S.clear_cache () in
+     let n, bytes =
+       match result with Ok v -> v | Error e -> failwith e
+     in
+     assert (n = List.length cached);
+     assert (bytes = 4 * List.length cached);
+     let* left = B.list_prefix ~prefix:shares_prefix () in
+     (* A filesystem backend lists the directories a delete left behind; an
+        object store has none. *)
+     let left =
+       List.sort compare
+         (List.filter_map
+            (fun (e : Backend.file_entry) ->
+              if Key.is_dir e.key then None else Some e.key)
+            left)
+     in
+     (* The tokens published above, and nothing else. *)
+     assert (
+       left
+       = List.map
+           (fun t -> shares_prefix ^ t)
+           ["aa"; "bb"; "cc"; "dd"]);
+     (* Idempotent: a second pass has nothing to take. *)
+     let+ again = S.clear_cache () in
+     assert (again = Ok (0, 0)));
+
   print_endline "share_test: OK"

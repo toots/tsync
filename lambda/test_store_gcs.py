@@ -65,8 +65,8 @@ def test_tiered_compose_and_cleanup(store):
     assert store.get_bytes("p/.shares/many.data") == b"".join(
         ("%03d" % i).encode() for i in range(n)
     )
-    # Temp compose objects were cleaned up.
-    assert list(store.list_keys("p/.shares/compose-tmp/")) == []
+    # Temp compose objects were cleaned up, and lived in the cache subtree.
+    assert list(store.list_keys("p/.shares/cache/compose-tmp/")) == []
 
 
 def test_missing_and_read(store):

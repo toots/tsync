@@ -14,7 +14,7 @@ import google.auth.transport.requests
 from google.cloud import storage
 from google.cloud.exceptions import NotFound
 
-from share_common import ShareError, content_disposition
+from share_common import ShareError, cache_prefix, content_disposition
 
 COMPOSE_MAX = 32  # GCS caps a single compose at 32 source objects
 
@@ -22,7 +22,9 @@ COMPOSE_MAX = 32  # GCS caps a single compose at 32 source objects
 class Store:
     def __init__(self):
         self.bucket_name = os.environ["BUCKET"]
-        self.shares_prefix = os.environ.get("SHARES_PREFIX", "tsync/shares/")
+        self.cache_prefix = cache_prefix(
+            os.environ.get("SHARES_PREFIX", "tsync/shares/")
+        )
         self.presign_ttl = int(os.environ.get("PRESIGN_TTL", "600"))
         self.client = storage.Client()
         self.bucket = self.client.bucket(self.bucket_name)
@@ -95,7 +97,7 @@ class Store:
                     if len(group) == 1:
                         next_keys.append(group[0])
                         continue
-                    tmp = "%scompose-tmp/%s-%d" % (self.shares_prefix, uuid.uuid4().hex, i)
+                    tmp = "%scompose-tmp/%s-%d" % (self.cache_prefix, uuid.uuid4().hex, i)
                     self._compose(group, tmp)
                     temps.append(tmp)
                     next_keys.append(tmp)

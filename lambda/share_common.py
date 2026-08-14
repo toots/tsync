@@ -4,6 +4,16 @@ from urllib.parse import quote
 
 CHUNK_READ = 1024 * 1024
 
+# Assembled artifacts and the scratch objects that build them, kept in one
+# subtree of SHARES_PREFIX so they can be dropped without touching a share
+# manifest. Nothing here is authoritative: every object under it is rebuildable
+# from the chunks it was assembled from.
+CACHE_DIR = "cache/"
+
+
+def cache_prefix(shares_prefix):
+    return shares_prefix + CACHE_DIR
+
 
 class ShareError(Exception):
     def __init__(self, code, msg):

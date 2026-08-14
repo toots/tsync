@@ -537,6 +537,15 @@ bucket, IAM keys and lifecycle come from the Terraform config under
 `shareUrl`, bucket and credentials — no Terraform details are stored in your config. With
 several S3 backends, the first with a `shareUrl` serves shares.
 
+Those assembled copies pile up under `shares/cache/` in the bucket, and nothing expires them.
+To reclaim the space:
+
+```
+tsync clear-share-cache
+```
+
+Published links are untouched and keep working — the next download assembles again.
+
 ## 11. Tuning
 
 All optional; the defaults are reasonable.

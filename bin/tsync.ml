@@ -1540,6 +1540,32 @@ let share_cmd =
     (Cmd.info "share" ~doc:"Print a shareable download URL for a file or folder")
     Term.(const run $ path_arg $ expires_arg $ domain_arg $ token_arg)
 
+let clear_share_cache_cmd =
+  let run domain =
+    let cfg = load_config () in
+    let domain =
+      match domain with Some _ -> domain | None -> read_default_domain ()
+    in
+    let (module C : Conf.S) = make_conf ?domain cfg in
+    let module S = Share.Make (C) in
+    match run_lwt (S.clear_cache ()) with
+      | Error msg ->
+          Printf.eprintf "%s\n" msg;
+          exit 1
+      | Ok (0, _) -> print_endline "Nothing cached."
+      | Ok (n, bytes) ->
+          Printf.printf "Deleted %d cached object%s (%s).\n" n
+            (if n = 1 then "" else "s")
+            (human_bytes bytes)
+  in
+  Cmd.v
+    (Cmd.info "clear-share-cache"
+       ~doc:
+         "Delete the files the share server has assembled and cached. Published \
+          links are not touched and keep working: the next download rebuilds \
+          what it needs.")
+    Term.(const run $ domain_arg)
+
 let print_conf_cmd =
   let mask (b : Conf_parsing.backend_config) k v =
     match Backend.spec_for b.backend_type with
@@ -1773,6 +1799,7 @@ let () =
          restore_cmd;
          ls_cmd;
          share_cmd;
+         clear_share_cache_cmd;
          versions_cmd;
          revert_cmd;
          trash_cmd;

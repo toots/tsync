@@ -125,4 +125,44 @@ module Make (C : Conf.S) = struct
       (function
         | Share_unavailable msg | Share_not_found msg -> Lwt.return_error msg
         | exn -> Lwt.fail exn)
+
+  (* The share server assembles a whole file or a folder's zip and keeps it under
+     [cache_prefix], so a second download of the same link costs nothing. Every
+     object there is rebuildable from the chunks it was stitched from, which is
+     what makes dropping the lot safe: links keep working, the next download pays
+     to assemble again. *)
+  let cache_prefix = shares_prefix ^ "cache/"
+
+  (* An assembled artifact filed before the cache subtree existed: a [.data]
+     sibling of the manifests. A share manifest is [shares_prefix ^ token] and a
+     token is hex, so no published object can end that way. *)
+  let is_loose_artifact key =
+    (not (String.starts_with ~prefix:cache_prefix key))
+    && Filename.extension key = ".data"
+
+  let clear_cache () =
+    Lwt.catch
+      (fun () ->
+        let* (module B : Backend.S), _ = share_backend () in
+        let* entries = B.list_prefix ~prefix:shares_prefix () in
+        let entries =
+          List.filter
+            (fun (e : Backend.file_entry) ->
+              (* A filesystem backend lists the directories holding the cache,
+                 and they outlive their contents: counting them would report a
+                 delete that took nothing and never settle. *)
+              (not (Key.is_dir e.key))
+              && (String.starts_with ~prefix:cache_prefix e.key
+                 || is_loose_artifact e.key))
+            entries
+        in
+        let keys = List.map (fun (e : Backend.file_entry) -> e.key) entries in
+        let bytes =
+          List.fold_left (fun n (e : Backend.file_entry) -> n + e.size) 0 entries
+        in
+        let+ () = if keys = [] then Lwt.return_unit else B.delete_multi keys in
+        Ok (List.length keys, bytes))
+      (function
+        | Share_unavailable msg -> Lwt.return_error msg
+        | exn -> Lwt.fail exn)
 end
