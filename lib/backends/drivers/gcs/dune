@@ -6,13 +6,16 @@
    -open
    Tsync_log
    -open
-   Tsync_backend_register))
+   Tsync_backend_register
+   -open
+   Tsync_naming))
  (name tsync_gcs_backend)
  (private_modules gcs_auth)
  (library_flags (-linkall))
  (libraries
   tsync_field_spec
   tsync_backend_register
+  tsync_naming
   tsync_log
   cohttp-lwt-unix
   uri

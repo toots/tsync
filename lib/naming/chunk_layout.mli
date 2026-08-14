@@ -44,6 +44,22 @@ val key_of_body : string -> string
     so nothing walking chunks meets one. *)
 val corrupted_prefix : chunk_prefix:string -> string
 
+(** Where a request to check one shard is filed. The bucket is the queue: a
+    client writes one of these per shard, the store's own object-created
+    notification carries it to the function that checks chunks, and the function
+    deletes it when the shard is done. So a whole-store verification needs no
+    queueing service and no second code path — the same per-chunk check runs,
+    reached the same way.
+
+    A sibling of the chunk root, like {!corrupted_prefix}, so nothing walking
+    chunks meets one and a collection renaming the root away leaves them be. *)
+val verify_jobs_prefix : chunk_prefix:string -> string
+
+val verify_job_key : chunk_prefix:string -> string -> string
+
+(** The shard a job names, [None] for anything else found under the prefix. *)
+val shard_of_verify_job : string -> string option
+
 (** Where a marker for the chunk object at [key] belongs, [None] when [key]
     names something else. Pure surgery on a backend key: ["…/chunks/abb/<k>"]
     becomes ["…/corrupted/abb/<k>"].

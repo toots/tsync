@@ -236,6 +236,15 @@ let make ?endpoint ?unsigned_payload ?share_url ?verify_chunks ~bucket ~region
     let copy ~src_key ~dst_key () = copy t ~src_key ~dst_key ()
     let list_prefix ?max_keys ~prefix () = list_all t ?max_keys ~prefix ()
 
+    (* [`Unsupported] rather than queueing into a bucket with no function
+       behind it: the requests would sit unread and the command would report a
+       verification that never ran. *)
+    let verify_all ~chunk_prefix () =
+      if not t.verify_chunks then Lwt.return `Unsupported
+      else
+        let+ n = Verify_queue.queue ~put ~chunk_prefix in
+        `Queued n
+
     (* No chunk size or concurrency opinion: an object store is limited by the
        network and its own concurrency, neither measurable from here.
 

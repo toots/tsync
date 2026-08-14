@@ -106,6 +106,11 @@ type step =
           listing that finds nothing is still visible. Names any store nothing
           checks: a store that never looked and a store that found nothing both
           list zero markers, and only one of those is good news. *)
+  | RequestVerify
+      (** Ask each store to check all of its chunks — {!Backend.S.verify_all} —
+          and print what each answered. A [local] store cannot, which is the
+          case worth pinning: the command built on this has to fail rather than
+          report a check that never ran. *)
   | RescanCorrupted
       (** Drop the memo behind {!Corruption.is_marked}. What the few-second TTL
           does on its own in a running daemon; a snapshot must not sleep for it.

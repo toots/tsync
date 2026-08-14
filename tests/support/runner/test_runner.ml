@@ -66,6 +66,7 @@ type step =
   | ScrambleRemoteChunk of { path : string; index : int }
   | ScrambleBackendFile of { path : string; index : int }
   | ListCorrupted
+  | RequestVerify
   | RescanCorrupted
   | Repair
   | DeleteRemoteManifest of string
@@ -185,6 +186,7 @@ let rec render_step = function
   | ScrambleBackendFile { path; index } ->
       Printf.sprintf "scramble-backend-file %s #%d" path index
   | ListCorrupted -> "list-corrupted"
+  | RequestVerify -> "request-verify"
   | RescanCorrupted -> "rescan-corrupted"
   | Repair -> "repair"
   | DeleteRemoteManifest p -> "delete-remote-manifest " ^ p
@@ -745,6 +747,22 @@ let setup_client (module C : Conf.S) root staging_prefix =
         List.iter
           (fun name -> Printf.printf "    unchecked store %s\n%!" name)
           report.Corruption.unverified
+    | RequestVerify ->
+        let+ answers =
+          Lwt_list.map_s
+            (fun (m : Backend.member) ->
+              let (module B : Backend.S) = m.Backend.backend in
+              let+ a = B.verify_all ~chunk_prefix:C.chunk_prefix () in
+              (m.Backend.name, a))
+            C.members
+        in
+        List.iter
+          (fun (name, a) ->
+            Printf.printf "  %s: %s\n%!" name
+              (match a with
+                | `Queued n -> Printf.sprintf "queued %d" n
+                | `Unsupported -> "unsupported"))
+          answers
     | RescanCorrupted ->
         let module Cor = Corruption.Make (C) in
         Cor.invalidate ();

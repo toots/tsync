@@ -36,8 +36,19 @@ let key_of_body data = Xxhash.hash_hex data 0 ^ "-" ^ Xxhash.hash_hex data 1
 let chunks_seg = "/chunks/"
 let corrupted_seg = "/corrupted/"
 
-let corrupted_prefix ~chunk_prefix =
-  Filename.chop_suffix chunk_prefix "chunks/" ^ "corrupted/"
+let sibling ~chunk_prefix name =
+  Filename.chop_suffix chunk_prefix "chunks/" ^ name
+
+let corrupted_prefix ~chunk_prefix = sibling ~chunk_prefix "corrupted/"
+let verify_jobs_prefix ~chunk_prefix = sibling ~chunk_prefix "verify-jobs/"
+
+let verify_job_key ~chunk_prefix shard =
+  verify_jobs_prefix ~chunk_prefix ^ shard
+
+(* The shard a job names, or [None] for anything else under the prefix. *)
+let shard_of_verify_job key =
+  let leaf = Filename.basename key in
+  if is_shard_name leaf then Some leaf else None
 
 (* Last, not first: a domain named "chunks" would otherwise cut the key short. *)
 let rfind_seg s seg =

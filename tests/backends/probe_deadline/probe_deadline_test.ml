@@ -26,6 +26,7 @@ module Hung : Backend.S = struct
   let delete_multi _ = never ()
   let copy ~src_key:_ ~dst_key:_ () = never ()
   let list_prefix ?max_keys:_ ~prefix:_ () = never ()
+  let verify_all ~chunk_prefix:_ () = Lwt.return `Unsupported
   let capabilities ~prefix:_ () = Lwt.return Backend.no_caps
 end
 

@@ -387,54 +387,62 @@ tsync resync-remote --source cloud     # ...copying *from* the named one
 tsync recheck                          # verify the remote against the local cache
 ```
 
-### Blocks that are not what their names say
+### Chunks that are not what their names say
 
-A block's name *is* the hash of its bytes. So a store can check every block it takes with
-nothing but the block itself: hash what landed, compare it to the name it arrived under. What
+A chunk's name *is* the hash of its bytes. So a store can check every chunk it takes with
+nothing but the chunk itself: hash what landed, compare it to the name it arrived under. What
 fails is recorded as an object under `tsync/<domain>/corrupted/`, and reading the list is just
 a listing of that prefix.
 
-This catches what a size comparison cannot. A block that is the right length but holds the
-wrong bytes — a whole block written under another one's name — passes every check that only
+This catches what a size comparison cannot. A chunk that is the right length but holds the
+wrong bytes — a whole chunk written under another one's name — passes every check that only
 looks at metadata.
 
 Who does the checking depends on the store:
 
-- **`local`** checks each block as it writes it (`verifyWrites`, on by default). It costs one
-  read back per block written, usually from the page cache; turn it off for a store where
+- **`local`** checks each chunk as it writes it (`verifyWrites`, on by default). It costs one
+  read back per chunk written, usually from the page cache; turn it off for a store where
   throughput matters more than finding out early.
 - **`s3` and `gcs`** check in a function the bucket itself triggers on each new object, so the
-  blocks are never downloaded to be checked. Deploy it by naming your domains in Terraform's
+  chunks are never downloaded to be checked. Deploy it by naming your domains in Terraform's
   `chunk_domains`, then set `verifyChunks: true` on that backend so tsync knows the answer can
   be trusted.
 
 ```bash
-tsync verify              # what each store found, and which stores nothing is checking
-tsync verify --detail     # ...and what each bad block hashed to instead
-tsync repair              # rewrite them from a copy that hashes to the right key
-tsync repair --dry-run    # ...say what would be rewritten, and write nothing
+tsync chunks-integrity              # what each store found, and which stores nothing is checking
+tsync chunks-integrity --detail     # ...and what each bad chunk hashed to instead
+tsync chunks-integrity --verify     # ask every store that can to check all of its chunks
+tsync chunks-integrity --repair     # rewrite them from a copy that hashes to the right key
+tsync chunks-integrity --repair --dry-run   # ...say what would be rewritten, write nothing
 ```
 
-`tsync verify` distinguishes a store that looked and found nothing from a store nothing is
-checking. Both would otherwise report zero, and only one of those is good news.
+`tsync chunks-integrity` distinguishes a store that looked and found nothing from a store nothing
+is checking. Both would otherwise report zero, and only one of those is good news.
+
+`--verify` is the stores' own work: an s3 or gcs bucket queues one request per shard into
+itself, and its object-created notification hands each to the same function that checks a fresh
+upload — so a whole-store pass needs no queue service and runs the same per-chunk check. It
+returns as soon as the work is queued; read the outcome afterwards with a plain
+`tsync chunks-integrity`. A store with nothing on its side to run a check says so and the
+command fails, rather than reporting one that never happened.
 
 On a `local` store, `tsync gc --verify` sweeps the whole thing: a collection already walks every
-block a file still references, so checking them as it goes costs one pass instead of two. It is
+chunk a file still references, so checking them as it goes costs one pass instead of two. It is
 opt-in because it reads every live byte where a collection otherwise touches only metadata —
-minutes become hours on a large store. A block that fails is kept where it belongs and marked,
+minutes become hours on a large store. A chunk that fails is kept where it belongs and marked,
 never reclaimed: a file still names it, so discarding it would take that file's only copy too.
-This is also the pass that finds bit rot, which arrives as an unreadable block rather than a
+This is also the pass that finds bit rot, which arrives as an unreadable chunk rather than a
 wrong one and is recorded the same way.
 
-`tsync repair` hashes a candidate copy before trusting it — a second copy can be wrong too, and
-writing one bad block over another would spread the damage while reporting a repair. It writes
-only to the damaged store. Where no store holds good bytes, it names the blocks rather than
+`--repair` hashes a candidate copy before trusting it — a second copy can be wrong too, and
+writing one bad chunk over another would spread the damage while reporting a repair. It writes
+only to the damaged store. Where no store holds good bytes, it names the chunks rather than
 reporting success; `tsync recheck` may still fix those from a machine whose cache holds the
 files that use them.
 
 Nothing deletes a marker directly. It is cleared by the store re-checking the object as it
 takes the next write — which is also why simply saving the file again repairs it, and why a
-block known to be bad is re-uploaded instead of being deduplicated against.
+chunk known to be bad is re-uploaded instead of being deduplicated against.
 
 ### Catching up
 
@@ -691,12 +699,12 @@ tsync untrash <path>  # restore a deleted folder, then run tsync sync
 tsync purge <path>    # drop a trashed folder for good, with all its versions
 tsync expire <date>   # drop versions, trashed folders and journal entries older than a date
 tsync gc              # reclaim unreferenced blocks (local main stores only)
-tsync gc --verify     # ...and check each block it keeps against its own name
+tsync gc --verify     # ...and check each chunk it keeps against its own name
 tsync sync            # apply changes from other machines (incremental)
 tsync sync --full     # clear local cache and re-download all manifests
 tsync recheck         # verify the remote against the local cache, repair what's possible
-tsync verify          # list blocks a store found were not what their names say
-tsync repair          # rewrite those from a copy that hashes to the right key
+tsync chunks-integrity  # list chunks a store found were not what their names say
+                        # --verify asks the stores to check everything; --repair fixes it
 tsync resync-remote   # copy missing/damaged objects from one backend to the others
 tsync import <dir>    # seed the domain from an existing folder
 tsync export <dir>    # write every file of the domain to a plain folder

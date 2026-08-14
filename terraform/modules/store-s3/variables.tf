@@ -134,3 +134,9 @@ variable "verify_memory_mb" {
   default     = 512
   description = "Memory for the chunk verifier. Lambda scales CPU and network with memory, and the work is dominated by reading one chunk."
 }
+
+variable "verify_max_concurrency" {
+  type        = number
+  default     = 32
+  description = "Ceiling on concurrent chunk-verifier invocations. A whole-store sweep queues one request per shard (4096) and they become deliverable at once; this is what stops that from being 4096 concurrent readers. -1 removes the ceiling."
+}

@@ -145,3 +145,49 @@ def test_the_aws_event_shape_is_decoded(store_and_verify):
 
     event = {"Records": [{"s3": {"object": {"key": path.replace("/", "%2F")}}}]}
     assert verify.handler(event, None) == {"checked": 1, "corrupt": 1}
+
+
+def test_a_job_sweeps_its_shard(store_and_verify):
+    """The whole-store check: one request object per shard, delivered by the same
+    notification, running the same per-chunk check."""
+    st, verify = store_and_verify
+    good = b"hello world" * 100
+    bad = b"goodbye moon" * 100
+    good_path, good_key = chunk_path("d", good, verify)
+    bad_path, bad_key = chunk_path("d", bad, verify)
+    st.put_bytes(good_path, good)
+    st.put_bytes(bad_path, bytes(b ^ 0xFF for b in bad))
+    # Both chunks land in the same shard only by luck, so drive each one's own.
+    for key in (good_key, bad_key):
+        job = f"tsync/d/verify-jobs/{key[:3]}"
+        assert verify.job_shard(job) == key[:3]
+        st.put_bytes(job, b"")
+        verify.verify_key(st, job)
+        # The request is gone once the shard is done.
+        assert not st.exists(job)
+
+    marked = list(st.list_keys("tsync/d/corrupted/"))
+    assert marked == [f"tsync/d/corrupted/{bad_key[:3]}/{bad_key}"]
+
+
+def test_a_job_for_an_empty_shard_is_just_dropped(store_and_verify):
+    """Every shard is queued blind — an object store cannot cheaply say which
+    prefixes are populated — so most requests find nothing and must cost
+    nothing but their own deletion."""
+    st, verify = store_and_verify
+    job = "tsync/d/verify-jobs/fff"
+    st.put_bytes(job, b"")
+    assert verify.verify_key(st, job) == {"checked": 0, "corrupt": 0}
+    assert not st.exists(job)
+    assert list(st.list_keys("tsync/d/corrupted/")) == []
+
+
+def test_a_request_never_looks_like_a_chunk(store_and_verify):
+    """The two prefixes are told apart by the key alone, so neither entry point
+    has to decide what it was handed."""
+    st, verify = store_and_verify
+    job = "tsync/d/verify-jobs/abc"
+    assert verify.marker_key(job) is None
+    key = verify.key_of_body([b"anything"])
+    assert verify.job_shard(f"tsync/d/chunks/{key[:3]}/{key}") is None
+    assert verify.job_shard("tsync/d/verify-jobs/not-a-shard") is None

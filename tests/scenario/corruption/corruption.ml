@@ -98,6 +98,19 @@ let () =
           ];
       };
       {
+        (* A whole-store check is the store's own work, so a store with nothing
+           on its side to do it says so — and the command fails rather than
+           reporting a check that never ran. A local store is swept by
+           [gc --verify] instead. *)
+        name = "a local store cannot be asked to check itself";
+        steps =
+          [
+            Write { path = "a.txt"; content = "hello tsync" };
+            Drain;
+            RequestVerify;
+          ];
+      };
+      {
         (* The sweep rides the collection that already walks every live chunk,
            so damage done behind the daemon's back is found without a second
            pass over the store. *)

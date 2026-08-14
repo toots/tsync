@@ -123,6 +123,9 @@ module type S = sig
   val list_prefix :
     ?max_keys:int -> prefix:string -> unit -> file_entry list Lwt.t
 
+  val verify_all :
+    chunk_prefix:string -> unit -> [ `Queued of int | `Unsupported ] Lwt.t
+
   (** What this store can tell a client about [prefix]'s domain beyond holding
       its bytes. See {!caps}; [no_caps] is the honest answer for every store
       that only holds bytes. *)

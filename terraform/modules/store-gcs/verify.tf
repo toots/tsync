@@ -50,10 +50,13 @@ resource "google_storage_bucket_iam_member" "verify_mark" {
     title = "corrupted-prefix-only"
     # One condition covering every domain in this bucket: IAM conditions do not
     # take a list, and a binding per domain would collide on the title.
-    expression = join(" || ", [
-      for d in var.chunk_domains :
-      "resource.name.startsWith(\"projects/_/buckets/${local.bucket_name}/objects/tsync/${d}/corrupted/\")"
-    ])
+    # Markers to file, and sweep requests to consume once their shard is done.
+    expression = join(" || ", flatten([
+      for d in var.chunk_domains : [
+        "resource.name.startsWith(\"projects/_/buckets/${local.bucket_name}/objects/tsync/${d}/corrupted/\")",
+        "resource.name.startsWith(\"projects/_/buckets/${local.bucket_name}/objects/tsync/${d}/verify-jobs/\")",
+      ]
+    ]))
   }
 }
 
@@ -86,6 +89,20 @@ resource "google_storage_notification" "chunks" {
   object_name_prefix = "tsync/${each.key}/chunks/"
 
   # The binding must exist first or the notification is rejected.
+  depends_on = [google_pubsub_topic_iam_member.gcs_publisher]
+}
+
+# The other way in: `tsync chunks-integrity --verify` writes one request per
+# shard here, and this delivers them to the same function. Its own notification
+# rather than a wider prefix, so a marker still cannot trigger anything.
+resource "google_storage_notification" "verify_jobs" {
+  for_each           = local.verify_enabled ? toset(var.chunk_domains) : toset([])
+  bucket             = local.bucket_name
+  topic              = google_pubsub_topic.chunks[0].id
+  payload_format     = "JSON_API_V1"
+  event_types        = ["OBJECT_FINALIZE"]
+  object_name_prefix = "tsync/${each.key}/verify-jobs/"
+
   depends_on = [google_pubsub_topic_iam_member.gcs_publisher]
 }
 

@@ -123,6 +123,7 @@ module Refuses : Backend.S = struct
   let delete_multi _ = fail ()
   let copy ~src_key:_ ~dst_key:_ () = fail ()
   let list_prefix ?max_keys:_ ~prefix:_ () = Lwt.return_nil
+  let verify_all ~chunk_prefix:_ () = Lwt.return `Unsupported
   let capabilities ~prefix:_ () = Lwt.return Backend.no_caps
 end
 
