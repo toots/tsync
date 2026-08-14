@@ -28,6 +28,10 @@ type chunk_entry = { index : int; h1 : string; h2 : string; size : int }
 
 let chunk_key (entry : chunk_entry) = entry.h1 ^ "-" ^ entry.h2
 
+(* Content addressing means a chunk's key is a function of its bytes, so a body
+   can always be held against the name it arrived under. *)
+let key_of_body data = Xxhash.hash_hex data 0 ^ "-" ^ Xxhash.hash_hex data 1
+
 (* The reverse, for a chunk kept from a previous upload: the two digests are the
    key's halves. *)
 let entry_of_key ~index ~size key =

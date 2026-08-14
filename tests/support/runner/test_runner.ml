@@ -62,6 +62,7 @@ type step =
   | Sync
   | DeleteRemoteChunk of { path : string; index : int }
   | CorruptRemoteChunk of { path : string; index : int }
+  | ScrambleRemoteChunk of { path : string; index : int }
   | DeleteRemoteManifest of string
   | StageWrite of { path : string; content : string }
       (** Replace the file's content locally without uploading: unsynced edits,
@@ -92,6 +93,7 @@ type step =
           chunk store, keeping only the staged tree. *)
   | OnSecondary of step
   | ResyncRemote
+  | ResyncScoped of { path : string option; verify : bool }
   | LocalWrite of { path : string; content : string }
   | LocalMkdir of string
   | LocalSymlink of { path : string; target : string }
@@ -172,6 +174,8 @@ let rec render_step = function
       Printf.sprintf "delete-remote-chunk %s #%d" path index
   | CorruptRemoteChunk { path; index } ->
       Printf.sprintf "corrupt-remote-chunk %s #%d" path index
+  | ScrambleRemoteChunk { path; index } ->
+      Printf.sprintf "scramble-remote-chunk %s #%d" path index
   | DeleteRemoteManifest p -> "delete-remote-manifest " ^ p
   | StageWrite { path; content } ->
       Printf.sprintf "stage-write %s %S" path content
@@ -189,6 +193,10 @@ let rec render_step = function
   | ClearCache -> "clear-cache"
   | OnSecondary s -> "on-secondary " ^ render_step s
   | ResyncRemote -> "resync-remote"
+  | ResyncScoped { path; verify } ->
+      "resync-remote"
+      ^ (match path with Some p -> " --path " ^ p | None -> "")
+      ^ if verify then " --verify" else ""
   | LocalWrite { path; content } ->
       Printf.sprintf "local-write %s %S" path content
   | LocalMkdir path -> "local-mkdir " ^ path
@@ -433,6 +441,15 @@ let setup_client (module C : Conf.S) root staging_prefix =
     | CorruptRemoteChunk { path; index } ->
         let* ck = remote_chunk_key path index in
         B.put ~key:ck ~data:"garbage" ()
+    (* Same length, different bytes: what a body written from reused memory looks
+       like, and what a size comparison cannot see. *)
+    | ScrambleRemoteChunk { path; index } ->
+        let* ck = remote_chunk_key path index in
+        let* data = B.get ~key:ck () in
+        B.put ~key:ck
+          ~data:
+            (String.map (fun c -> Char.chr ((Char.code c + 1) land 0xff)) data)
+          ()
     | DeleteRemoteManifest p -> (
         let* bk = L.manifest_key (key p) in
         match bk with
@@ -659,8 +676,8 @@ let setup_client (module C : Conf.S) root staging_prefix =
     | Sync ->
         let+ (_ : int) = Rp.apply_foreign ~on_changed:(fun _ -> ()) () in
         ()
-    | (DeleteRemoteChunk _ | CorruptRemoteChunk _ | DeleteRemoteManifest _) as s
-      ->
+    | ( DeleteRemoteChunk _ | CorruptRemoteChunk _ | ScrambleRemoteChunk _
+      | DeleteRemoteManifest _ ) as s ->
         damage (List.hd C.members).Backend.backend s
     | OnSecondary s -> (
         match C.members with
@@ -747,9 +764,17 @@ let setup_client (module C : Conf.S) root staging_prefix =
             (List.sort compare names)
         in
         dump ""
-    | ResyncRemote ->
+    | (ResyncRemote | ResyncScoped _) as s ->
         let module M = Mirror.Make (C) in
-        let+ dests = M.resync () in
+        let verify =
+          match s with ResyncScoped { verify; _ } -> verify | _ -> false
+        in
+        let scope =
+          match s with
+            | ResyncScoped { path = Some rel; _ } -> `Path rel
+            | _ -> `All
+        in
+        let+ dests = M.resync ~scope ~verify () in
         List.iteri
           (fun i (d : Mirror.dest_stats) ->
             (* Only counts: copied keys carry non-deterministic folder ids /

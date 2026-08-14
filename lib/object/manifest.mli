@@ -25,6 +25,11 @@ type chunk_entry = { index : int; h1 : string; h2 : string; size : int }
 
 val chunk_key : chunk_entry -> string
 
+(** The key [data] belongs under, hashed from the bytes themselves. What a
+    stored body is checked against when its size alone cannot say whether it is
+    the right one. *)
+val key_of_body : string -> string
+
 (** The reverse, for a chunk kept from a previous upload. Raises
     [Invalid_argument] for a key that is not ["<h1>-<h2>"]. *)
 val entry_of_key : index:int -> size:int -> string -> chunk_entry

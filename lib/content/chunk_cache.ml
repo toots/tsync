@@ -221,8 +221,7 @@ module Make (C : Conf.S) (F : Fetch) = struct
               match body with
                 | None -> false
                 | Some body ->
-                    Printf.sprintf "%s-%s" (Xxhash.hash_hex body 0)
-                      (Xxhash.hash_hex body 1)
+                    Manifest.key_of_body body
                     = Chunk_group.member_key group index)
           true
           (Chunk_group.indices group)

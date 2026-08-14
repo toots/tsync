@@ -88,6 +88,10 @@ type step =
   | CorruptRemoteChunk of { path : string; index : int }
       (** Overwrite chunk [index] of [path]'s manifest on the backend with
           garbage of the wrong size. *)
+  | ScrambleRemoteChunk of { path : string; index : int }
+      (** Overwrite chunk [index] of [path]'s manifest on the backend with
+          different bytes of the {i same} size, which nothing short of hashing
+          the body can tell from the real one. *)
   | DeleteRemoteManifest of string
       (** Delete the file's manifest object from the backend. *)
   | StageWrite of { path : string; content : string }
@@ -133,6 +137,10 @@ type step =
           the copied keys and a per-destination summary. Bytes are omitted:
           manifest objects embed mtimes, so their sizes are not deterministic.
       *)
+  | ResyncScoped of { path : string option; verify : bool }
+      (** [ResyncRemote] with the CLI's two narrowing options: [path] restricts
+          it to one folder and the chunks its files name, [verify] hashes each
+          destination chunk instead of comparing its size. *)
   | LocalWrite of { path : string; content : string }
       (** Write [content] to [path] in the local staging directory (created on
           first use, reset after each [Import]). Parent directories are created

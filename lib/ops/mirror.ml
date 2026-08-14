@@ -9,37 +9,68 @@ type dest_stats = {
 
 module Make (C : Conf.S) = struct
   module Space = Chunk_space.Make (C)
+  module Tree = Inode_tree.Make (C)
 
   (* Bounds concurrent HEAD/copy operations per destination. A copy holds the
      whole object body, so this follows [max_chunk_buffers] rather than the
      file-level [max_uploads]. *)
   let copy_pool = Lwt_bounded.create ~max:C.max_chunk_buffers ()
 
-  (* Objects are content-addressed or immutable once written, so a size mismatch
-     means the destination copy is corrupt. [None] when it was already
-     correct. *)
-  let sync_entry (module Src : Backend.S) (module Dst : Backend.S)
-      (entry : Backend.file_entry) =
-    let* head = Dst.head_opt ~key:entry.key () in
-    let up_to_date =
-      match head with
-        | Some h -> Key.is_dir entry.key || h.Backend.size = entry.size
-        | None -> false
-    in
-    if up_to_date then Lwt.return_none
-    else if Key.is_dir entry.key then
-      let+ () = Dst.put ~key:entry.key ~data:"" () in
-      Some 0
+  (* Size says a chunk is the right length, never that it holds the right bytes.
+     Only the chunk namespace can be asked without reading the source back, its
+     key being the hash of its own body; the read of every candidate is what
+     keeps this opt-in.
+
+     Membership is the prefix, never the shape of the name: a manifest is filed
+     under the hash of its own file name, so it is spelled exactly like a chunk
+     key and would fail a hash-of-body check every time. *)
+  let dst_intact ~verify (module Dst : Backend.S) key =
+    if not (verify && String.starts_with ~prefix:C.chunk_prefix key) then
+      Lwt.return_true
     else
-      let* data = Src.get ~key:entry.key () in
-      let+ () = Dst.put ~key:entry.key ~data () in
-      Some (String.length data)
+      let+ data = Dst.get ~key () in
+      Manifest.key_of_body data = Filename.basename key
+
+  (* Objects are content-addressed or immutable once written, so a size mismatch
+     means the destination copy is corrupt. [None] when it was already correct;
+     otherwise what was wrong with it, which is the whole of what [--verify] buys
+     over a size comparison and so is worth carrying to the caller. *)
+  let sync_entry ?(verify = false) (module Src : Backend.S)
+      (module Dst : Backend.S) (entry : Backend.file_entry) =
+    let* head = Dst.head_opt ~key:entry.key () in
+    let* reason =
+      match head with
+        | None -> Lwt.return_some `Missing
+        | Some h ->
+            if Key.is_dir entry.key then Lwt.return_none
+            else if h.Backend.size <> entry.size then
+              Lwt.return_some `Wrong_size
+            else
+              let+ intact = dst_intact ~verify (module Dst) entry.key in
+              if intact then None else Some `Wrong_body
+    in
+    match reason with
+      | None -> Lwt.return_none
+      | Some reason ->
+          if Key.is_dir entry.key then
+            let+ () = Dst.put ~key:entry.key ~data:"" () in
+            Some (reason, 0)
+          else
+            let* data = Src.get ~key:entry.key () in
+            let+ () = Dst.put ~key:entry.key ~data () in
+            Some (reason, String.length data)
+
+  let dedup_entries entries =
+    (* Listing order is backend-dependent. *)
+    List.sort_uniq
+      (fun (a : Backend.file_entry) (b : Backend.file_entry) ->
+        compare a.key b.key)
+      entries
 
   (* The chunk store is shared across domains on one bucket, and mirroring all of
      it is deliberate: chunks are content-addressed, so extra copies only help
      the other domains. *)
-  let source_entries ?(manifests_only = false) ?(on_list = fun ~name:_ -> ())
-      (module Src : Backend.S) =
+  let namespace_entries ~manifests_only ~on_list (module Src : Backend.S) =
     let prefixes =
       if manifests_only then [("manifests", C.domain_prefix)]
       else
@@ -53,7 +84,7 @@ module Make (C : Conf.S) = struct
     let* per_prefix =
       Lwt_list.map_s
         (fun (name, prefix) ->
-          on_list ~name;
+          on_list ~name:("listing " ^ name);
           Src.list_prefix ~prefix ())
         prefixes
     in
@@ -61,24 +92,87 @@ module Make (C : Conf.S) = struct
       if manifests_only then Lwt.return_none
       else Src.head_opt ~key:C.cursor_key ()
     in
-    let entries =
-      List.concat per_prefix @ match cursor with Some e -> [e] | None -> []
-    in
-    (* Listing order is backend-dependent. *)
-    List.sort_uniq
-      (fun (a : Backend.file_entry) (b : Backend.file_entry) ->
-        compare a.key b.key)
-      entries
+    dedup_entries
+      (List.concat per_prefix @ match cursor with Some e -> [e] | None -> [])
 
-  let resync_to ?(on_copy = fun ~name:_ ~key:_ ~bytes:_ -> ()) src dst ~name
-      entries =
+  (* [rel] itself and everything under it. *)
+  let within ~rel path =
+    rel = "" || path = rel || String.starts_with ~prefix:(rel ^ "/") path
+
+  (* A folder [rel] sits inside: descended into, but nothing of its own is
+     taken. *)
+  let holds ~rel path = String.starts_with ~prefix:(path ^ "/") rel
+
+  let chunk_keys (m : Manifest.t) =
+    let table = m.Manifest.chunks in
+    List.init (Chunk_table.count table) (fun i ->
+        Space.key (Chunk_table.key table i))
+
+  (* Only the folders [rel] runs through or lives in are descended into, so
+     scoping to one folder costs its own subtree rather than the whole tree. A
+     file brings the chunks it names: manifests alone would copy a listing the
+     far side cannot read a byte of.
+
+     Journal, versions and cursor are left out — they describe the domain, not
+     this subtree, and copying part of a journal would state a history that never
+     happened. *)
+  let path_keys ~rel =
+    let rec walk folder_id here acc =
+      let* entries = Tree.children ~folder_id () in
+      Lwt_list.fold_left_s
+        (fun acc (entry : Inode_tree.entry) ->
+          match entry.Inode_tree.body with
+            | Inode_tree.Dir m ->
+                let path = Key.join here m.Folder.name in
+                if within ~rel path then
+                  walk m.Folder.id path (entry.Inode_tree.bkey :: acc)
+                else if holds ~rel path then walk m.Folder.id path acc
+                else Lwt.return acc
+            | Inode_tree.File m ->
+                let path = Key.join here (Manifest.recorded_name m) in
+                if within ~rel path then
+                  Lwt.return (chunk_keys m @ (entry.Inode_tree.bkey :: acc))
+                else Lwt.return acc)
+        acc entries
+    in
+    let+ keys = walk Folder.root_id "" [] in
+    List.sort_uniq compare keys
+
+  (* This command copies a full backend onto a partial one, so an object the
+     source cannot produce is the source being wrong, not the scope. *)
+  let path_entries ~rel ~src_name ~on_list (module Src : Backend.S) =
+    on_list ~name:(Printf.sprintf "walking the tree under %s" rel);
+    let* keys = path_keys ~rel in
+    on_list
+      ~name:
+        (Printf.sprintf "sizing %d object%s on %s" (List.length keys)
+           (if List.length keys = 1 then "" else "s")
+           src_name);
+    let+ entries =
+      Lwt_list.map_p
+        (fun key ->
+          Lwt_bounded.use copy_pool (fun () ->
+              let+ head = Src.head_opt ~key () in
+              match head with
+                | Some e -> e
+                | None ->
+                    failwith
+                      (Printf.sprintf "%s is missing from source %s" key
+                         src_name)))
+        keys
+    in
+    dedup_entries entries
+
+  let resync_to ?verify ?(on_copy = fun ~name:_ ~key:_ ~reason:_ ~bytes:_ -> ())
+      src dst ~name entries =
     let+ results =
       Lwt_list.map_p
         (fun entry ->
           Lwt_bounded.use copy_pool (fun () ->
-              let+ copied = sync_entry src dst entry in
+              let+ copied = sync_entry ?verify src dst entry in
               (match copied with
-                | Some bytes -> on_copy ~name ~key:entry.Backend.key ~bytes
+                | Some (reason, bytes) ->
+                    on_copy ~name ~key:entry.Backend.key ~reason ~bytes
                 | None -> ());
               (entry.Backend.key, copied)))
         entries
@@ -88,7 +182,7 @@ module Make (C : Conf.S) = struct
         (fun acc (key, copied) ->
           match copied with
             | None -> acc
-            | Some bytes ->
+            | Some (_, bytes) ->
                 {
                   acc with
                   copied = key :: acc.copied;
@@ -102,7 +196,7 @@ module Make (C : Conf.S) = struct
   (* Copies between the stores themselves rather than through {!Conf.store}: the
      point is to reach the ones the composite writes off the caller's path, or
      does not write at all. Raises [Failure] when nothing has that name. *)
-  let resync ?source ?(manifests_only = false) ?(on_scan = fun ~objects:_ -> ())
+  let resync ?source ?verify ?(scope = `All) ?(on_scan = fun ~objects:_ -> ())
       ?(on_list = fun ~name:_ -> ()) ?on_copy () =
     let named name =
       match
@@ -134,9 +228,9 @@ module Make (C : Conf.S) = struct
        target and call it a resync. *)
     let* () =
       let* run = Space.read_run () in
-      match (run, manifests_only) with
-        | None, _ | Some _, true -> Lwt.return_unit
-        | Some r, false ->
+      match (run, scope) with
+        | None, _ | Some _, `Manifests -> Lwt.return_unit
+        | Some r, (`All | `Path _) ->
             failwith
               (Printf.sprintf
                  "%s is being collected (%s, started %.0fs ago), so its chunks \
@@ -147,12 +241,17 @@ module Make (C : Conf.S) = struct
                  (Unix.gettimeofday () -. r.Chunk_space.started))
     in
     let* entries =
-      source_entries ~manifests_only ~on_list src.Backend.backend
+      match scope with
+        | `All -> namespace_entries ~manifests_only:false ~on_list src.backend
+        | `Manifests ->
+            namespace_entries ~manifests_only:true ~on_list src.backend
+        | `Path rel ->
+            path_entries ~rel ~src_name:src.name ~on_list src.Backend.backend
     in
     on_scan ~objects:(List.length entries);
     C.members
     |> List.filter (fun (m : Backend.member) -> m.Backend.name <> src.name)
     |> Lwt_list.map_s (fun (m : Backend.member) ->
-        resync_to ?on_copy src.Backend.backend m.Backend.backend
+        resync_to ?verify ?on_copy src.Backend.backend m.Backend.backend
           ~name:m.Backend.name entries)
 end

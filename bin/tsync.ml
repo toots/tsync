@@ -1232,7 +1232,28 @@ let resync_remote_cmd =
              versions, cursor) — a cheap way to complete a backend's structure \
              without hauling chunk data.")
   in
-  let run domain source manifests_only v =
+  let path_arg =
+    Arg.(
+      value
+      & opt (some string) None
+      & info ["path"] ~docv:"PATH"
+          ~doc:
+            "Copy only what is under this domain-relative folder: its files, \
+             and the chunks their manifests name. Journal, versions and cursor \
+             are skipped — they describe the whole domain, not a subtree.")
+  in
+  let verify_arg =
+    Arg.(
+      value & flag
+      & info ["verify"]
+          ~doc:
+            "Hash each destination chunk against the key it is filed under \
+             rather than trusting its size, so a chunk of the right length \
+             holding the wrong bytes is recopied. Reads every candidate chunk \
+             off the destination: pair it with --path unless re-reading the \
+             whole chunk store is intended.")
+  in
+  let run domain source manifests_only path verify v =
     set_verbose v;
     let code =
       run_lwt
@@ -1252,21 +1273,46 @@ let resync_remote_cmd =
              C.domain_name (List.length C.members);
            Lwt.return 1
          end
+         else if manifests_only && path <> None then begin
+           prerr_endline
+             "resync-remote: --manifests and --path select different things; \
+              pass one";
+           Lwt.return 1
+         end
          else begin
+           let scope =
+             match (manifests_only, path) with
+               | _, Some rel -> `Path rel
+               | true, None -> `Manifests
+               | false, None -> `All
+           in
            vprintf "initiating remote sync: copying %s from %s..."
-             (if manifests_only then "manifests" else "all objects")
+             (match scope with
+               | `All -> "all objects"
+               | `Manifests -> "manifests"
+               | `Path rel -> Printf.sprintf "%s and its chunks" rel)
              src;
            let module M = Mirror.Make (C) in
-           let on_list ~name = vprintf "  fetching %s listing..." name in
+           let on_list ~name = vprintf "  %s..." name in
            let on_scan ~objects =
              vprintf "scanned %s: %d object%s to check" src objects
                (if objects = 1 then "" else "s")
            in
-           let on_copy ~name ~key ~bytes =
-             vprintf "  copied %s (%d bytes) -> %s" key bytes name
+           (* A body of the right length that hashes to something else is the one
+              outcome a reader cannot infer, so it is counted and reported even
+              without -v. *)
+           let corrupt = ref 0 in
+           let on_copy ~name ~key ~reason ~bytes =
+             if reason = `Wrong_body then incr corrupt;
+             vprintf "  copied %s (%d bytes, %s) -> %s" key bytes
+               (match reason with
+                 | `Missing -> "missing"
+                 | `Wrong_size -> "wrong size"
+                 | `Wrong_body -> "wrong contents")
+               name
            in
            let+ dests =
-             M.resync ~source:src ~manifests_only ~on_scan ~on_list ~on_copy ()
+             M.resync ~source:src ~scope ~verify ~on_scan ~on_list ~on_copy ()
            in
            List.iter
              (fun (dst : Mirror.dest_stats) ->
@@ -1280,6 +1326,12 @@ let resync_remote_cmd =
                  (List.length dst.Mirror.copied)
                  dst.Mirror.copied_bytes)
              dests;
+           if !corrupt > 0 then
+             Printf.printf
+               "%d chunk%s held the wrong contents at the right size; only \
+                --verify finds those\n"
+               !corrupt
+               (if !corrupt = 1 then "" else "s");
            0
          end)
     in
@@ -1291,8 +1343,12 @@ let resync_remote_cmd =
          "Sync one remote backend from another: copy every object of the \
           domain (manifests, chunks, journal, versions) that is missing or \
           size-mismatched on the other configured backends. Pass --manifests \
-          to copy only the manifests.")
-    Term.(const run $ domain_arg $ source_arg $ manifests_arg $ verbose_arg)
+          to copy only the manifests, --path to copy one folder and the chunks \
+          its files name, --verify to check destination chunks by their \
+          contents rather than their size.")
+    Term.(
+      const run $ domain_arg $ source_arg $ manifests_arg $ path_arg
+      $ verify_arg $ verbose_arg)
 
 let import_cmd =
   let src_arg =

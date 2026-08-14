@@ -49,6 +49,46 @@ let () =
           ];
       };
       {
+        (* Same length, different bytes: the size comparison sees nothing, so
+           only --verify recopies it. *)
+        name = "resync-remote misses a scrambled chunk without --verify";
+        steps =
+          [
+            Write { path = "file.bin"; content = "hello world" };
+            Drain;
+            OnSecondary (ScrambleRemoteChunk { path = "file.bin"; index = 0 });
+            ResyncRemote;
+            ResyncScoped { path = None; verify = true };
+          ];
+      };
+      {
+        name = "resync-remote --path copies one folder and its chunks";
+        steps =
+          [
+            Write { path = "outside.bin"; content = "not this one" };
+            Mkdir "keep";
+            Write { path = "keep/inside.bin"; content = "this one" };
+            Drain;
+            OnSecondary (DeleteRemoteChunk { path = "outside.bin"; index = 0 });
+            OnSecondary
+              (DeleteRemoteChunk { path = "keep/inside.bin"; index = 0 });
+            ResyncScoped { path = Some "keep"; verify = false };
+          ];
+      };
+      {
+        name = "resync-remote --path --verify heals a scrambled chunk";
+        steps =
+          [
+            Mkdir "keep";
+            Write { path = "keep/inside.bin"; content = "this one" };
+            Drain;
+            OnSecondary
+              (ScrambleRemoteChunk { path = "keep/inside.bin"; index = 0 });
+            ResyncScoped { path = Some "keep"; verify = true };
+            ResyncScoped { path = Some "keep"; verify = true };
+          ];
+      };
+      {
         name = "resync-remote heals mixed tree on secondary";
         steps =
           [
