@@ -161,11 +161,6 @@ val stats_placeholder : entry list
 
 (** {1 The pieces, exposed for the test that pins them} *)
 
-val summary : status list -> string
-val detail : status -> string
-val traffic_line : status list -> string option
-val rate_line : status list -> string option
-val icon_name : status list -> string
 val file_icon : string -> string
 
 (** {!Metrics.human_bytes} widened to [int64], so a figure reads the same here
