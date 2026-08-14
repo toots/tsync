@@ -47,7 +47,8 @@ let () =
   let each = (Unix.gettimeofday () -. started) /. float_of_int attempts in
   let after = open_fds () in
   Printf.printf "first call:        %s\n" first;
-  Printf.printf "%d further calls:   %s\n" attempts (String.concat ", " outcomes);
+  Printf.printf "%d further calls:   %s\n" attempts
+    (String.concat ", " outcomes);
   Printf.printf "gave up on:        %s\n"
     (if each < Http_client.body_timeout /. 2. then "the response deadline"
      else "the body budget");

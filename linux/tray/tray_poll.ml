@@ -34,6 +34,7 @@ let domains () =
         in
         cached := Some (stamp, ds);
         ds
+
 let stats_timeout = 4.
 
 let stats ds =

@@ -76,7 +76,8 @@ let entry_of c =
 let put t ~key ~data () =
   let+ res =
     with_retry "put" (fun () ->
-        S3.put ~credentials:t.credentials ~connect_timeout_ms ~endpoint:t.endpoint ~bucket:t.bucket
+        S3.put ~credentials:t.credentials ~connect_timeout_ms
+          ~endpoint:t.endpoint ~bucket:t.bucket
           ~unsigned_payload:t.unsigned_payload ~key ~data ())
   in
   ignore (unwrap "put" res)
@@ -84,8 +85,8 @@ let put t ~key ~data () =
 let get t ~key () =
   let+ res =
     with_retry "get" (fun () ->
-        S3.get ~credentials:t.credentials ~connect_timeout_ms ~endpoint:t.endpoint ~bucket:t.bucket
-          ~key ())
+        S3.get ~credentials:t.credentials ~connect_timeout_ms
+          ~endpoint:t.endpoint ~bucket:t.bucket ~key ())
   in
   unwrap "get" res
 
@@ -96,7 +97,8 @@ let get t ~key () =
 let put_if_absent t ~key ~data () =
   let* res =
     with_retry "put_if_absent" (fun () ->
-        S3.put ~credentials:t.credentials ~connect_timeout_ms ~endpoint:t.endpoint ~bucket:t.bucket
+        S3.put ~credentials:t.credentials ~connect_timeout_ms
+          ~endpoint:t.endpoint ~bucket:t.bucket
           ~unsigned_payload:t.unsigned_payload ~precondition:`If_none_match ~key
           ~data ())
   in
@@ -110,8 +112,8 @@ let put_if_absent t ~key ~data () =
 let get_opt t ~key () =
   let+ res =
     with_retry "get" (fun () ->
-        S3.get ~credentials:t.credentials ~connect_timeout_ms ~endpoint:t.endpoint ~bucket:t.bucket
-          ~key ())
+        S3.get ~credentials:t.credentials ~connect_timeout_ms
+          ~endpoint:t.endpoint ~bucket:t.bucket ~key ())
   in
   match res with
     | Ok body -> Some body
@@ -123,8 +125,8 @@ let get_opt t ~key () =
 let head_opt t ~key () =
   let+ res =
     with_retry "head" (fun () ->
-        S3.head ~credentials:t.credentials ~connect_timeout_ms ~endpoint:t.endpoint ~bucket:t.bucket
-          ~key ())
+        S3.head ~credentials:t.credentials ~connect_timeout_ms
+          ~endpoint:t.endpoint ~bucket:t.bucket ~key ())
   in
   match res with
     | Ok c -> Some (entry_of c)
@@ -136,8 +138,8 @@ let head_opt t ~key () =
 let delete t ~key () =
   let+ res =
     with_retry "delete" (fun () ->
-        S3.delete ~credentials:t.credentials ~connect_timeout_ms ~endpoint:t.endpoint
-          ~bucket:t.bucket ~key ())
+        S3.delete ~credentials:t.credentials ~connect_timeout_ms
+          ~endpoint:t.endpoint ~bucket:t.bucket ~key ())
   in
   match res with
     | Ok _ | Error S3.Not_found -> ()
@@ -154,8 +156,8 @@ let delete_multi t keys =
         let objects = List.map (fun key -> { key; version_id = None }) here in
         let* res =
           with_retry "delete_multi" (fun () ->
-              S3.delete_multi ~credentials:t.credentials ~connect_timeout_ms ~endpoint:t.endpoint
-                ~bucket:t.bucket ~objects ())
+              S3.delete_multi ~credentials:t.credentials ~connect_timeout_ms
+                ~endpoint:t.endpoint ~bucket:t.bucket ~objects ())
         in
         let result = unwrap "delete_multi" res in
         (* A bulk delete answers 200 and reports what it refused inside the body,
@@ -217,8 +219,8 @@ let list_all t ?max_keys ~prefix () =
   in
   let* res =
     with_retry "ls" (fun () ->
-        S3.ls ~credentials:t.credentials ~connect_timeout_ms ~endpoint:t.endpoint ~bucket:t.bucket
-          ?max_keys ~prefix ())
+        S3.ls ~credentials:t.credentials ~connect_timeout_ms
+          ~endpoint:t.endpoint ~bucket:t.bucket ?max_keys ~prefix ())
   in
   match res with
     | Ok (items, cont) -> collect [List.map entry_of items] cont

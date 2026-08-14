@@ -95,7 +95,8 @@ let timed f =
 
 let main () =
   let* domain, elapsed =
-    timed (fun () -> Lwt_unix.with_timeout bound (fun () -> Diag.domain_json ()))
+    timed (fun () ->
+        Lwt_unix.with_timeout bound (fun () -> Diag.domain_json ()))
   in
   (* Straight away, so it falls inside the window: what a second menu open, or a
      poll landing next to one, costs. Nothing — the answer is already known, and

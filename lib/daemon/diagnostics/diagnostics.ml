@@ -138,7 +138,6 @@ module Make (C : Conf.S) = struct
      a round trip to every backend. Short on purpose: this is a health display,
      and one that lags is worse than one that waits. *)
   let probe_ttl = 5.
-
   let probes : (string, float * probe_answer Lwt.t) Hashtbl.t = Hashtbl.create 4
 
   (* The promise is cached, not the answer, so a second asker arriving mid-flight

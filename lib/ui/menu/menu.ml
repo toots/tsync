@@ -668,8 +668,7 @@ let sub json name field key =
 
 let backend_of json =
   {
-    backend_name =
-      Option.value (string_field json "name") ~default:"backend";
+    backend_name = Option.value (string_field json "name") ~default:"backend";
     role = Option.value (string_field json "role") ~default:"?";
     backend_reachable =
       Option.value (bool_field json "reachable") ~default:false;

@@ -70,8 +70,10 @@ let call t ~headers ?(body = "") meth uri =
   let attempt cache =
     Lwt.bind
       (Lwt_unix.with_timeout response_timeout (fun () ->
-           Cache.call cache ~headers ~body:(Cohttp_lwt.Body.of_string body) meth
-             uri)) (fun (resp, rbody) ->
+           Cache.call cache ~headers
+             ~body:(Cohttp_lwt.Body.of_string body)
+             meth uri))
+      (fun (resp, rbody) ->
         Lwt.map
           (fun s -> (resp, s))
           (Lwt_unix.with_timeout body_timeout (fun () ->

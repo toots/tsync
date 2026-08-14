@@ -324,8 +324,7 @@ let start ~confs ~socket_path =
               [
                 ("ok", `Bool true);
                 ( "rows",
-                  Menu.rows_json
-                    (Menu.stats_entries (Option.to_list stats)) );
+                  Menu.rows_json (Menu.stats_entries (Option.to_list stats)) );
               ]),
          `Continue )
      in
