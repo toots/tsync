@@ -54,6 +54,17 @@ type stats = {
   outcome : outcome;
   roots_marked : int;
   chunks_promoted : int;
+  chunks_verified : int;
+      (** Live chunks held against their own names, under [~verify]. Zero
+          otherwise: a collection is renames and listings, and reads nothing. *)
+  chunks_corrupt : int;  (** of those, the ones that were not what they say *)
+  chunks_unreadable : int;
+      (** Live chunks the store would not hand over. Filed as corrupt too, and
+          on a failing disk this is the commoner half: bit rot surfaces as [EIO]
+          on read rather than as wrong bytes. *)
+  chunks_cleared : int;
+      (** Chunks that carried a marker and turned out to be fine, so it was
+          removed. A repair someone made elsewhere, noticed. *)
   chunks_reclaimed : int;
   bytes_reclaimed : int;
 }
@@ -101,10 +112,25 @@ module Make (C : Conf.S) : sig
 
       [keep] makes this an abandonment rather than a collection: see {!abort}.
 
+      [verify] holds every live chunk against its own name as marking promotes
+      it, filing what fails under {!Corruption}. Opt-in because it reads every
+      live byte where the rest of a collection touches only metadata — the same
+      reason [tsync mirror --verify] is.
+
+      Live chunks only: what marking never reaches is the garbage closing is
+      about to delete. A chunk that fails is promoted and marked, never
+      discarded — a manifest names it, so dropping it would take a file's only
+      copy with it.
+
       Raises {!Unsupported} when no main can collect, {!Busy} when a collection
       is already under way. *)
   val start :
-    ?concurrency:int -> ?delete_batch:int -> ?keep:bool -> unit -> session Lwt.t
+    ?concurrency:int ->
+    ?delete_batch:int ->
+    ?keep:bool ->
+    ?verify:bool ->
+    unit ->
+    session Lwt.t
 
   (** Do up to [units] units (default 1) and report whether any remain. Saves
       enough as it goes that dropping the session — or the process — loses at
@@ -153,6 +179,7 @@ module Make (C : Conf.S) : sig
     ?concurrency:int ->
     ?delete_batch:int ->
     ?keep:bool ->
+    ?verify:bool ->
     ?on_open:(unit -> unit) ->
     ?on_mark:(namespaces:int -> total:int -> roots:int -> promoted:int -> unit) ->
     ?on_close:(shards:int -> reclaimed:int -> unit) ->

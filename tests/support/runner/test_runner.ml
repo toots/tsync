@@ -55,6 +55,7 @@ type step =
   | Expire of string
       (** Cutoff selector: "all" (now), "none" (epoch), or "mark". *)
   | Gc  (** Collect chunks nothing references. *)
+  | GcVerify
   | GcMark  (** Collect as far as the end of marking; leave it open. *)
   | GcClose  (** Finish what [GcMark] left open. *)
   | GcAbort  (** Abandon an open collection, keeping everything. *)
@@ -63,6 +64,7 @@ type step =
   | DeleteRemoteChunk of { path : string; index : int }
   | CorruptRemoteChunk of { path : string; index : int }
   | ScrambleRemoteChunk of { path : string; index : int }
+  | ScrambleBackendFile of { path : string; index : int }
   | ListCorrupted
   | RescanCorrupted
   | Repair
@@ -168,6 +170,7 @@ let rec render_step = function
   | Mark -> "mark"
   | Expire s -> "expire " ^ s
   | Gc -> "gc"
+  | GcVerify -> "gc --verify"
   | GcMark -> "gc (mark only)"
   | GcClose -> "gc (close)"
   | GcAbort -> "gc --abort"
@@ -179,6 +182,8 @@ let rec render_step = function
       Printf.sprintf "corrupt-remote-chunk %s #%d" path index
   | ScrambleRemoteChunk { path; index } ->
       Printf.sprintf "scramble-remote-chunk %s #%d" path index
+  | ScrambleBackendFile { path; index } ->
+      Printf.sprintf "scramble-backend-file %s #%d" path index
   | ListCorrupted -> "list-corrupted"
   | RescanCorrupted -> "rescan-corrupted"
   | Repair -> "repair"
@@ -287,7 +292,14 @@ let alias_ref s =
    the snapshot to them without saying anything about the behaviour. *)
 let print_gc (s : Gc.stats) =
   Printf.printf "  gc kept %d chunk(s), reclaimed %d\n" s.Gc.chunks_promoted
-    s.chunks_reclaimed
+    s.chunks_reclaimed;
+  (* Only under [GcVerify]: an ordinary collection reads nothing, and a row of
+     zeros would read as "checked, nothing wrong". *)
+  if s.Gc.chunks_verified > 0 || s.Gc.chunks_unreadable > 0 then
+    Printf.printf
+      "  gc verified %d chunk(s): %d corrupt, %d unreadable, %d cleared\n"
+      s.Gc.chunks_verified s.Gc.chunks_corrupt s.Gc.chunks_unreadable
+      s.Gc.chunks_cleared
 
 (* Verbatim but for the non-deterministic parts: wall-clock mtimes, journal-key
    cursors, and the filesystem-order [files]/[dirs] arrays. etags and keys are
@@ -440,7 +452,11 @@ let setup_client (module C : Conf.S) root staging_prefix =
                 (Chunk_table.key m.Manifest.chunks index))
       | _ -> failwith ("no clean sidecar for " ^ path)
   in
-  let damage (module B : Backend.S) = function
+  (* The member, not just its module: damaging a file behind the store's back
+     needs to know where the store keeps it. *)
+  let damage (m : Backend.member) =
+    let (module B : Backend.S) = m.Backend.backend in
+    function
     | DeleteRemoteChunk { path; index } ->
         let* ck = remote_chunk_key path index in
         B.delete ~key:ck ()
@@ -456,6 +472,27 @@ let setup_client (module C : Conf.S) root staging_prefix =
           ~data:
             (String.map (fun c -> Char.chr ((Char.code c + 1) land 0xff)) data)
           ()
+    (* Straight at the file, where [ScrambleRemoteChunk] goes through the
+       store's own [put] and is caught on the way in. This is what bit rot looks
+       like: the bytes changed under a store that was never asked to write them,
+       and only a pass that reads them back can tell. *)
+    | ScrambleBackendFile { path; index } ->
+        let* ck = remote_chunk_key path index in
+        let root =
+          match m.Backend.local_path with
+            | Some root -> root
+            | None -> failwith "scramble-backend-file: not a local store"
+        in
+        let p = Filename.concat root ck in
+        let ic = open_in_bin p in
+        let len = in_channel_length ic in
+        let body = really_input_string ic len in
+        close_in ic;
+        let oc = open_out_bin p in
+        output_string oc
+          (String.map (fun c -> Char.chr ((Char.code c + 1) land 0xff)) body);
+        close_out oc;
+        Lwt.return_unit
     | DeleteRemoteManifest p -> (
         let* bk = L.manifest_key (key p) in
         match bk with
@@ -636,6 +673,14 @@ let setup_client (module C : Conf.S) root staging_prefix =
         let module G = Gc.Make (C) in
         let+ s = G.run () in
         print_gc s
+    | GcVerify ->
+        let module G = Gc.Make (C) in
+        let* s = G.run ~verify:true () in
+        print_gc s;
+        (* The collection just changed what is marked. *)
+        let module Cor = Corruption.Make (C) in
+        Cor.invalidate ();
+        Lwt.return_unit
     | GcMark ->
         (* Stopped at the phase boundary rather than after a duration, so a
            scenario can act on a half-collected store deterministically. *)
@@ -683,8 +728,8 @@ let setup_client (module C : Conf.S) root staging_prefix =
         let+ (_ : int) = Rp.apply_foreign ~on_changed:(fun _ -> ()) () in
         ()
     | ( DeleteRemoteChunk _ | CorruptRemoteChunk _ | ScrambleRemoteChunk _
-      | DeleteRemoteManifest _ ) as s ->
-        damage (List.hd C.members).Backend.backend s
+      | ScrambleBackendFile _ | DeleteRemoteManifest _ ) as s ->
+        damage (List.hd C.members) s
     | ListCorrupted ->
         let module Cor = Corruption.Make (C) in
         let+ report = Cor.list () in
@@ -719,7 +764,7 @@ let setup_client (module C : Conf.S) root staging_prefix =
           s.Repair.unrepairable
     | OnSecondary s -> (
         match C.members with
-          | _ :: dst :: _ -> damage dst.Backend.backend s
+          | _ :: dst :: _ -> damage dst s
           | _ -> failwith "OnSecondary: no secondary backend configured")
     | LocalWrite { path; content } ->
         let staging = get_or_create_staging () in

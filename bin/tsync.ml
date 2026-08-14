@@ -853,10 +853,34 @@ let gc_cmd =
       value & flag
       & info ["status"] ~doc:"Report an open collection without continuing it.")
   in
+  let verify_arg =
+    Arg.(
+      value & flag
+      & info ["verify"]
+          ~doc:
+            "Also hold each live chunk against its own name as it is kept, and \
+             record what fails for $(b,tsync repair). Reads every live byte, \
+             where a collection otherwise touches only metadata — minutes \
+             become hours on a large store. A chunk that fails is kept and \
+             marked, never discarded.")
+  in
   (* [was_open] is read before the abandonment rather than inferred from its
      counts: what it moves back is what marking had not reached yet, so a run
      abandoned after a finished mark moves nothing and a count of zero says
      nothing about whether there was a run at all. *)
+  let verified_line (s : Gc.stats) =
+    if s.Gc.chunks_verified = 0 && s.Gc.chunks_unreadable = 0 then ""
+    else
+      Printf.sprintf
+        "\n\
+         %d chunk(s) checked: %d corrupt, %d unreadable, %d marker(s) \
+         cleared.%s"
+        s.Gc.chunks_verified s.Gc.chunks_corrupt s.Gc.chunks_unreadable
+        s.Gc.chunks_cleared
+        (if s.Gc.chunks_corrupt + s.Gc.chunks_unreadable > 0 then
+           " Run tsync repair."
+         else "")
+  in
   let report ~abort ~was_open ~domain (s : Gc.stats) =
     match s.Gc.outcome with
       | Gc.Completed when abort && not was_open ->
@@ -869,10 +893,10 @@ let gc_cmd =
             "Collection abandoned; %d chunk(s) moved back, none discarded.\n"
             s.chunks_promoted
       | Gc.Completed ->
-          Printf.printf "Reclaimed %d chunk(s), %s. Kept %d.\n"
+          Printf.printf "Reclaimed %d chunk(s), %s. Kept %d.%s\n"
             s.chunks_reclaimed
             (human_bytes s.bytes_reclaimed)
-            s.chunks_promoted
+            s.chunks_promoted (verified_line s)
       (* Each phase fills in different fields, so one fixed set of them would
          print zeroes that read as "nothing happened" rather than as "this phase
          does not count that".
@@ -887,11 +911,12 @@ let gc_cmd =
       | Gc.Suspended { phase; _ } ->
           Printf.printf
             "Stopped while %s: %d file(s) marked, %d chunk(s) kept, %d \
-             reclaimed.\n\
+             reclaimed.%s\n\
              Still open; rerun tsync gc to continue.\n"
             phase s.roots_marked s.chunks_promoted s.chunks_reclaimed
+            (verified_line s)
   in
-  let run budget pause concurrency delete_batch abort status domain =
+  let run budget pause concurrency delete_batch abort status verify domain =
     (* Reported as [Failure], which the top level prints as "tsync: <sentence>"
        and exits nonzero on. Both carry prose written for whoever typed this. *)
     let translate f =
@@ -953,8 +978,8 @@ let gc_cmd =
                  G.abort ?budget ?pause ?concurrency ~on_open ~on_mark ~on_close
                    ()
                else
-                 G.run ?budget ?pause ?concurrency ?delete_batch ~on_open
-                   ~on_mark ~on_close ())
+                 G.run ?budget ?pause ?concurrency ?delete_batch ~verify
+                   ~on_open ~on_mark ~on_close ())
           in
           (* The progress lines above end in a carriage return, so the last one is
              still sitting on the terminal's current line. Cleared before the
@@ -971,7 +996,7 @@ let gc_cmd =
           mirror's job, not this one's.")
     Term.(
       const run $ budget_arg $ pause_arg $ concurrency_arg $ delete_batch_arg
-      $ abort_arg $ status_arg $ domain_arg)
+      $ abort_arg $ status_arg $ verify_arg $ domain_arg)
 
 let sync_cmd =
   let source_arg =
@@ -1287,7 +1312,6 @@ let verify_cmd =
              | names ->
                  Printf.sprintf ", and nothing checked %s"
                    (String.concat ", " names));
-         (* A store that said nothing is not a store that said "clean". *)
          Lwt.return (if n > 0 || silent <> [] then 1 else 0))
     in
     if code <> 0 then exit code

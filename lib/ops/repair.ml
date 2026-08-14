@@ -34,10 +34,6 @@ module Make (C : Conf.S) = struct
   module Cor = Corruption.Make (C)
   module Space = Chunk_space.Make (C)
 
-  (* Never trusted for coming from somewhere reputable: a copy can be wrong too,
-     and writing one bad body over another spreads the damage under cover of
-     repairing it. A chunk's key is the hash of its bytes, so every candidate
-     carries its own proof and is made to show it. *)
   let good_body (module B : Backend.S) chunk_key =
     Lwt.catch
       (fun () ->
@@ -51,14 +47,8 @@ module Make (C : Conf.S) = struct
   let member_named name =
     List.find_opt (fun (m : Backend.member) -> m.Backend.name = name) C.members
 
-  (* Configuration order, which {!Conf_parsing} has already put main first: the
-     authoritative copy is the one to prefer, and a replica is worth asking only
-     because the main is what may be broken. The store being repaired is never
-     its own source, and a backfill target is not one either — it is not readable
-     and may not hold the chunk at all.
-
-     [source] narrows this to one named store, for an operator who knows which
-     copy to trust. *)
+  (* A backfill target is excluded by [readable]: it is not read from, and may
+     not hold the chunk at all. *)
   let sources_for ~source ~bad_store =
     List.filter
       (fun (m : Backend.member) ->
@@ -75,16 +65,9 @@ module Make (C : Conf.S) = struct
           | Some body -> Lwt.return_some (m.Backend.name, body)
           | None -> first_good chunk_key rest)
 
-  (* Written to the marked store directly, not through {!Conf.store}: only one
-     copy is wrong, and a fan-out write would re-send the chunk to healthy stores
-     and queue deferred jobs for them.
-
-     Nothing here deletes a marker. The store clears it by re-verifying the
-     object as it takes it — which is the whole of how a repair is recorded, and
-     is what stops a client that merely believes it fixed something from being
-     able to say so. It is also why a stale marker is repaired by rewriting the
-     body over itself rather than by removing the marker: the store must be the
-     one to conclude the object is fine. *)
+  (* A stale marker is repaired by rewriting the body over itself rather than by
+     removing the marker: the store has to be the one to conclude the object is
+     fine — see the .mli. *)
   let repair_one ~source ~dry_run (e : Corruption.entry) =
     let chunk_key = e.Corruption.chunk_key in
     match member_named e.Corruption.store with
@@ -95,11 +78,7 @@ module Make (C : Conf.S) = struct
             if dry_run then Lwt.return_unit
             else Dst.put ~key:(Space.key chunk_key) ~data:body ()
           in
-          (* Its own copy first. A cloud marker outlives the write that fixed the
-             chunk whenever two object events arrive out of order, so a marker on
-             a body that is already correct is an expected state and not a
-             finding — and rewriting it is both the cheapest repair and the only
-             thing that will clear it. *)
+          (* Its own copy first: see {!Cleared}. *)
           let* mine = good_body m.Backend.backend chunk_key in
           match mine with
             | Some body ->

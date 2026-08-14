@@ -108,11 +108,35 @@ let make ?(verify_writes = true) ~root () : (module Backend.S) =
   let verify_written key =
     match Chunk_layout.marker_key key with
       | None -> Lwt.return_unit
-      | Some marker ->
-          let* stored = read_file (resolve key) in
-          let computed = Chunk_layout.key_of_body stored in
-          if computed = Filename.basename key then
-            (* Clears a marker an earlier bad copy left, which is the whole of
+      | Some marker -> (
+          let* stored =
+            (* Not allowed to fail the write. The bytes are on the disk — the
+               rename already happened — and a read that will not come back is
+               itself the finding, which on a failing disk is [EIO] rather than
+               wrong bytes. Raising here would turn a fault worth recording into
+               an upload error, and lose the record. *)
+            Lwt.catch
+              (fun () ->
+                let+ body = read_file (resolve key) in
+                `Body body)
+              (fun exn -> Lwt.return (`Unreadable (Printexc.to_string exn)))
+          in
+          match stored with
+            | `Unreadable why ->
+                Log.err "chunk %s could not be read back (%s): filing %s"
+                  (Filename.basename key) why marker;
+                write_file (resolve marker)
+                  (Corruption_marker.to_string
+                     {
+                       computed = None;
+                       size = None;
+                       at = Some (Unix.gettimeofday ());
+                       reason = Some why;
+                     })
+            | `Body stored ->
+                let computed = Chunk_layout.key_of_body stored in
+                if computed = Filename.basename key then
+                  (* Clears a marker an earlier bad copy left, which is the whole of
                how a repair is recorded: the good write is the record.
 
                The unlink happens either way, so asking whether it removed
@@ -121,25 +145,26 @@ let make ?(verify_writes = true) ~root () : (module Backend.S) =
                entry in a listing of the prefix — a chunk reported corrupt that
                is not. Best effort, since a marker landing concurrently just
                recreates it. *)
-            let* cleared =
-              Lwt.catch
-                (fun () ->
-                  let+ () = Lwt_unix_retry.unlink (resolve marker) in
-                  true)
-                (fun _ -> Lwt.return_false)
-            in
-            if cleared then prune_marker_dirs (resolve marker)
-            else Lwt.return_unit
-          else (
-            Log.err "chunk %s hashed to %s: filing %s" (Filename.basename key)
-              computed marker;
-            write_file (resolve marker)
-              (Corruption_marker.to_string
-                 {
-                   computed = Some computed;
-                   size = Some (String.length stored);
-                   at = Some (Unix.gettimeofday ());
-                 }))
+                  let* cleared =
+                    Lwt.catch
+                      (fun () ->
+                        let+ () = Lwt_unix_retry.unlink (resolve marker) in
+                        true)
+                      (fun _ -> Lwt.return_false)
+                  in
+                  if cleared then prune_marker_dirs (resolve marker)
+                  else Lwt.return_unit
+                else (
+                  Log.err "chunk %s hashed to %s: filing %s"
+                    (Filename.basename key) computed marker;
+                  write_file (resolve marker)
+                    (Corruption_marker.to_string
+                       {
+                         computed = Some computed;
+                         size = Some (String.length stored);
+                         at = Some (Unix.gettimeofday ());
+                         reason = None;
+                       })))
   in
   (module struct
     let put ~key ~data () =

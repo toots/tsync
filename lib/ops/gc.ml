@@ -6,6 +6,10 @@ type stats = {
   outcome : outcome;
   roots_marked : int;
   chunks_promoted : int;
+  chunks_verified : int;
+  chunks_corrupt : int;
+  chunks_unreadable : int;
+  chunks_cleared : int;
   chunks_reclaimed : int;
   bytes_reclaimed : int;
 }
@@ -23,6 +27,10 @@ let empty =
     outcome = Completed;
     roots_marked = 0;
     chunks_promoted = 0;
+    chunks_verified = 0;
+    chunks_corrupt = 0;
+    chunks_unreadable = 0;
+    chunks_cleared = 0;
     chunks_reclaimed = 0;
     bytes_reclaimed = 0;
   }
@@ -346,6 +354,7 @@ module Make (C : Conf.S) = struct
     unit_slots : Lwt_bounded.t;
     item_slots : Lwt_bounded.t;
     delete_batch : int;
+    verify : bool;
     (* Consulted between units so a long batch cannot overshoot a caller's time
        limit. Always false unless someone set one. *)
     mutable out_of_time : unit -> bool;
@@ -355,6 +364,10 @@ module Make (C : Conf.S) = struct
     mutable done_ : int;
     mutable roots_marked : int;
     mutable chunks_promoted : int;
+    mutable chunks_verified : int;
+    mutable chunks_corrupt : int;
+    mutable chunks_unreadable : int;
+    mutable chunks_cleared : int;
     mutable chunks_reclaimed : int;
     mutable bytes_reclaimed : int;
     mutable on_mark :
@@ -384,6 +397,10 @@ module Make (C : Conf.S) = struct
          else Suspended { phase = phase s; cursor = cursor s });
       roots_marked = s.roots_marked;
       chunks_promoted = s.chunks_promoted;
+      chunks_verified = s.chunks_verified;
+      chunks_corrupt = s.chunks_corrupt;
+      chunks_unreadable = s.chunks_unreadable;
+      chunks_cleared = s.chunks_cleared;
       chunks_reclaimed = s.chunks_reclaimed;
       bytes_reclaimed = s.bytes_reclaimed;
     }
@@ -393,7 +410,7 @@ module Make (C : Conf.S) = struct
   let save s phase cursor =
     Space.write_run { Chunk_space.phase; started = s.started; cursor }
 
-  let start ?concurrency ?delete_batch ?(keep = false) () =
+  let start ?concurrency ?delete_batch ?(keep = false) ?(verify = false) () =
     let* main, root = collector () in
     (* Under the lock before the marker is read, so the decision to open or resume
        is made by one process. *)
@@ -423,6 +440,7 @@ module Make (C : Conf.S) = struct
         root;
         started;
         targets = deferred_members ();
+        verify;
         lock;
         unit_slots = Lwt_bounded.create ~max:max_slots ();
         item_slots = Lwt_bounded.create ~max:max_slots ();
@@ -437,6 +455,10 @@ module Make (C : Conf.S) = struct
         done_ = 0;
         roots_marked = 0;
         chunks_promoted = 0;
+        chunks_verified = 0;
+        chunks_corrupt = 0;
+        chunks_unreadable = 0;
+        chunks_cleared = 0;
         chunks_reclaimed = 0;
         bytes_reclaimed = 0;
         on_mark = (fun ~namespaces:_ ~total:_ ~roots:_ ~promoted:_ -> ());
@@ -517,6 +539,66 @@ module Make (C : Conf.S) = struct
            s.on_mark ~namespaces:s.done_ ~total:s.total ~roots:s.roots_marked
              ~promoted:s.chunks_promoted))
 
+  (* Called only where [Space.promote] answered [true], which is what makes this
+     once per chunk: opening renamed the whole root aside, so a live chunk is
+     moved back exactly once however many manifests name it.
+
+     Neither outcome may escape as an exception: the read is of the very thing
+     this exists to find fault with, so letting the error out would have the
+     collection die on the fault instead of reporting it. *)
+  let verify_promoted s ck =
+    (* The main, never {!Conf.store}. A collection walks the main's spaces and
+       nothing else, so the main is the only store this can have an opinion
+       about — and the composite would be wrong twice over: a read falls through
+       to a replica, so an unreadable copy here would come back as somebody
+       else's good one, and a write fans out, filing every healthy copy as
+       corrupt alongside the bad one. *)
+    let (module M : Backend.S) = s.main in
+    let backend_key = Space.key ck in
+    match Chunk_layout.marker_key backend_key with
+      | None -> Lwt.return_unit
+      | Some marker -> (
+          let file ~computed ~size ~reason =
+            s.chunks_corrupt <- s.chunks_corrupt + 1;
+            M.put ~key:marker
+              ~data:
+                (Corruption_marker.to_string
+                   { computed; size; at = Some (Unix.gettimeofday ()); reason })
+              ()
+          in
+          let* outcome =
+            Lwt.catch
+              (fun () ->
+                let+ body = M.get_opt ~key:backend_key () in
+                match body with
+                  | Some body -> `Body body
+                  | None ->
+                      (* Promoted, then gone before the read. Whatever removed
+                         it, the manifest still names it. *)
+                      `Unreadable "vanished between promote and read")
+              (fun exn -> Lwt.return (`Unreadable (Backend.reason exn)))
+          in
+          match outcome with
+            | `Body body ->
+                s.chunks_verified <- s.chunks_verified + 1;
+                let computed = Chunk_layout.key_of_body body in
+                if computed = ck then (
+                  (* Clears a marker whose chunk has since been put right; the
+                     store's own delete prunes the shard it empties. *)
+                  s.chunks_cleared <- s.chunks_cleared + 1;
+                  M.delete ~key:marker ())
+                else (
+                  Log.err "gc: chunk %s hashed to %s: filing %s" ck computed
+                    marker;
+                  file ~computed:(Some computed)
+                    ~size:(Some (String.length body))
+                    ~reason:None)
+            | `Unreadable why ->
+                s.chunks_unreadable <- s.chunks_unreadable + 1;
+                Log.err "gc: chunk %s could not be read (%s): filing %s" ck why
+                  marker;
+                file ~computed:None ~size:None ~reason:(Some why))
+
   let mark_root s key =
     let* chunks = referenced_chunks key in
     (* Before the work, so [-v] names the file while it is on it. *)
@@ -525,9 +607,11 @@ module Make (C : Conf.S) = struct
       Lwt_list.iter_p
         (fun ck ->
           Lwt_bounded.use s.item_slots (fun () ->
-              let+ () = Space.promote ck in
+              let* moved = Space.promote ck in
               s.chunks_promoted <- s.chunks_promoted + 1;
-              report_mark s))
+              report_mark s;
+              if s.verify && moved then verify_promoted s ck
+              else Lwt.return_unit))
         chunks
     in
     s.roots_marked <- s.roots_marked + 1;
@@ -979,7 +1063,7 @@ module Make (C : Conf.S) = struct
           Lwt.return `More
 
   let run ?budget ?(units = 256) ?pause ?concurrency ?delete_batch
-      ?(keep = false) ?(on_open = fun () -> ())
+      ?(keep = false) ?(verify = false) ?(on_open = fun () -> ())
       ?(on_mark = fun ~namespaces:_ ~total:_ ~roots:_ ~promoted:_ -> ())
       ?(on_close = fun ~shards:_ ~reclaimed:_ -> ()) () =
     let began = Unix.gettimeofday () in
@@ -989,7 +1073,7 @@ module Make (C : Conf.S) = struct
         | Some seconds -> fun () -> Unix.gettimeofday () -. began >= seconds
     in
     on_open ();
-    let* s = start ?concurrency ?delete_batch ~keep () in
+    let* s = start ?concurrency ?delete_batch ~keep ~verify () in
     s.out_of_time <- deadline;
     s.on_mark <- on_mark;
     s.on_close <- on_close;

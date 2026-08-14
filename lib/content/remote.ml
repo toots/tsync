@@ -73,9 +73,6 @@ module Make_with_layout (C : Conf.S) (L : Layout.S) : S = struct
   (* Chunk writes go where they always went; only presence checks and reads have
      to know that a collection may be in progress ({!Chunk_space}). *)
   module Space = Chunk_space.Make (C)
-
-  (* What the stores found was not what its name said. Consulted before dedup
-     skips a write: see {!put_chunk}. *)
   module Corrupt = Corruption.Make (C)
 
   (* Sized off the configured value, not the resolved one: an oversized chunk

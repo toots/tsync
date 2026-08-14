@@ -98,6 +98,53 @@ let () =
           ];
       };
       {
+        (* The sweep rides the collection that already walks every live chunk,
+           so damage done behind the daemon's back is found without a second
+           pass over the store. *)
+        name = "gc --verify finds damage nothing wrote through the store";
+        steps =
+          [
+            Write { path = "a.txt"; content = "hello tsync" };
+            Drain;
+            ScrambleBackendFile { path = "a.txt"; index = 0 };
+            RescanCorrupted;
+            ListCorrupted;
+            GcVerify;
+            RescanCorrupted;
+            ListCorrupted;
+          ];
+      };
+      {
+        (* The chunk is referenced, so collecting it would take the file's only
+           copy. It is kept where it belongs and filed — the manifest still
+           names it, and repair is what has bytes to fix it with. *)
+        name = "a chunk that fails the check is kept, not reclaimed";
+        steps =
+          [
+            Write { path = "a.txt"; content = "hello tsync" };
+            Drain;
+            ScrambleBackendFile { path = "a.txt"; index = 0 };
+            GcVerify;
+            RescanCorrupted;
+            ListCorrupted;
+            ShowChunks "a.txt";
+          ];
+      };
+      {
+        (* An ordinary collection reads nothing, so it neither finds damage nor
+           claims to have looked. *)
+        name = "a plain collection checks nothing";
+        steps =
+          [
+            Write { path = "a.txt"; content = "hello tsync" };
+            Drain;
+            ScrambleBackendFile { path = "a.txt"; index = 0 };
+            Gc;
+            RescanCorrupted;
+            ListCorrupted;
+          ];
+      };
+      {
         (* A marker names a chunk. Collect the chunk and the marker goes too,
            or it stands as a finding no repair can ever answer. *)
         name = "collecting a chunk takes its marker with it";

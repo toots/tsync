@@ -63,8 +63,14 @@ module Make (C : Conf.S) : sig
 
       A move rather than a copy, so what is left behind in the outgoing space is
       the garbage itself; it also asks nothing of the filesystem beyond
-      [rename]. *)
-  val promote : string -> unit Lwt.t
+      [rename].
+
+      [true] when this call is the one that moved it. A collection opens by
+      renaming the whole chunk root aside, so every chunk that already existed
+      is promoted exactly once — and rename being atomic, exactly one of any
+      racing callers is told so. That is what lets [tsync gc --verify] hash each
+      live chunk once, without keeping a set of what it has seen. *)
+  val promote : string -> bool Lwt.t
 
   (** {!promote} every chunk a manifest names. **Call this immediately before
       publishing that manifest**: it is what makes a run safe, and it is the

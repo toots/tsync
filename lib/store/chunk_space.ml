@@ -203,18 +203,20 @@ module Make (C : Conf.S) = struct
      learn what is almost always already true. *)
   let promote chunk_key =
     match local_root () with
-      | None -> Lwt.return_unit
+      | None -> Lwt.return_false
       | Some root ->
           let src = Filename.concat root (from_key chunk_key)
           and dst = Filename.concat root (key chunk_key) in
           let rec attempt ~parent_made =
             Lwt.catch
-              (fun () -> Lwt_unix_retry.rename src dst)
+              (fun () ->
+                let+ () = Lwt_unix_retry.rename src dst in
+                true)
               (function
                 | Unix.Unix_error (Unix.ENOENT, _, _) when not parent_made ->
                     let* () = Fs_util.ensure_parent dst in
                     attempt ~parent_made:true
-                | Unix.Unix_error (Unix.ENOENT, _, _) -> Lwt.return_unit
+                | Unix.Unix_error (Unix.ENOENT, _, _) -> Lwt.return_false
                 | exn -> Lwt.fail exn)
           in
           attempt ~parent_made:false
@@ -230,7 +232,12 @@ module Make (C : Conf.S) = struct
     let* run = read_run () in
     match run with
       | None -> Lwt.return_unit
-      | Some _ -> Lwt_list.iter_s promote chunk_keys
+      | Some _ ->
+          Lwt_list.iter_s
+            (fun ck ->
+              let+ (_ : bool) = promote ck in
+              ())
+            chunk_keys
 
   (* The two lookups below are spelled out rather than shared through a
      combinator, because they differ in what "not there" is: an option for one, a
