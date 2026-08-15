@@ -175,7 +175,11 @@ let rec make ~(mains : sub list)
 
     (* Fanned out to the mains and the readable targets, and summed: each store
        runs its own check, and one that cannot is not a reason the others should
-       not. [`Unsupported] only when nothing at all could be asked. *)
+       not. [`Unsupported] only when nothing at all could be asked.
+
+       A backfill target is not reached, having no readable module to ask;
+       [tsync data-integrity --verify] asks every configured member instead,
+       which is what covers one that holds chunks nobody reads yet. *)
     let verify_all ~chunk_prefix () =
       let+ answers =
         Lwt_list.map_s

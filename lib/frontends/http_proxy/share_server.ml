@@ -542,8 +542,8 @@ module Make (C : Conf.S) = struct
           | "list" when is_dir -> list_response share (query "path")
           | "f" when is_dir ->
               serve_child share ~token ~path:(query "path")
-                ~as_download:(query "dl" = Some "1")
-                ~want_json:(query "json" = Some "1")
+                ~as_download:(Field_spec.bool ~default:false (query "dl"))
+                ~want_json:(Field_spec.bool ~default:false (query "json"))
                 ~range
           | _ -> fail `Not_found "not found")
       (function
