@@ -38,7 +38,7 @@ val is_shard_name : string -> bool
     it here, so the two cannot drift into naming the same bytes differently. *)
 val key_of_body : string -> string
 
-(** ["corrupted/<domain>/"]. Beside the store rather than inside the domain,
+(** ["tsync/corrupted/<domain>/"]. Beside the domains rather than inside one,
     with the domain as its first segment, so one literal prefix covers every
     domain — see {!corrupted_root}. *)
 val corrupted_prefix : chunk_prefix:string -> string
@@ -46,7 +46,7 @@ val corrupted_prefix : chunk_prefix:string -> string
 (** What every domain's markers share. A store's IAM says where the checker may
     write in terms of this, and Google's conditions offer only [startsWith], so
     a prefix with the domain in the middle could not be expressed at all. *)
-val corrupted_root : string
+val corrupted_root : chunk_prefix:string -> string
 
 (** Where a request to check one shard is filed. The bucket is the queue: a
     client writes one of these per shard, the store's own object-created
@@ -67,7 +67,7 @@ val verify_job_key : chunk_prefix:string -> string -> string
     list to keep in step with the daemon's config, with no safe default and a
     silent failure — a name matching nothing deploys a trigger that never fires,
     which reads exactly like a store with nothing wrong. *)
-val verify_jobs_root : string
+val verify_jobs_root : chunk_prefix:string -> string
 
 val domain_of : chunk_prefix:string -> string
 

@@ -52,7 +52,7 @@ def test_a_good_chunk_leaves_no_marker(store):
     store.put_bytes(path, body)
 
     assert verify.verify_object(store, path) is True
-    assert list(store.list_keys("corrupted/d/")) == []
+    assert list(store.list_keys("tsync/corrupted/d/")) == []
 
 
 def test_a_scrambled_body_is_filed(store):
@@ -61,8 +61,8 @@ def test_a_scrambled_body_is_filed(store):
     store.put_bytes(path, bytes(b ^ 0xFF for b in body))
 
     assert verify.verify_object(store, path) is False
-    marker = f"corrupted/d/{key[:3]}/{key}"
-    assert list(store.list_keys("corrupted/d/")) == [marker]
+    marker = f"tsync/corrupted/d/{key[:3]}/{key}"
+    assert list(store.list_keys("tsync/corrupted/d/")) == [marker]
     recorded = json.loads(store.get_bytes(marker))
     assert recorded["computed"] != key
     assert recorded["computed"] == verify.key_of_body(
@@ -79,11 +79,11 @@ def test_a_good_rewrite_clears_the_marker(store):
 
     store.put_bytes(path, bytes(b ^ 0xFF for b in body))
     verify.verify_object(store, path)
-    assert list(store.list_keys("corrupted/d/")) != []
+    assert list(store.list_keys("tsync/corrupted/d/")) != []
 
     store.put_bytes(path, body)
     assert verify.verify_object(store, path) is True
-    assert list(store.list_keys("corrupted/d/")) == []
+    assert list(store.list_keys("tsync/corrupted/d/")) == []
 
 
 def test_a_manifest_is_never_read(store):
@@ -95,12 +95,12 @@ def test_a_manifest_is_never_read(store):
 
     assert verify.marker_key(manifest_key) is None
     assert verify.verify_object(store, manifest_key) is None
-    assert list(store.list_keys("corrupted/d/")) == []
+    assert list(store.list_keys("tsync/corrupted/d/")) == []
 
 
 def test_delete_of_an_absent_marker_is_not_an_error(store):
     """The verifier clears before it looks, and most chunks never had one."""
-    store.delete("corrupted/d/000/never-existed")
+    store.delete("tsync/corrupted/d/000/never-existed")
 
 
 class _CloudEvent:

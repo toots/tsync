@@ -32,13 +32,13 @@ data "aws_iam_policy_document" "verify" {
   # that fixed the chunk, so delete is as necessary as put.
   statement {
     actions   = ["s3:PutObject", "s3:DeleteObject"]
-    resources = ["${local.bucket_arn}/corrupted/*"]
+    resources = ["${local.bucket_arn}/tsync/corrupted/*"]
   }
   # Sweep requests: listed to walk a shard, deleted once it is done. The client
   # writes them; this only consumes them.
   statement {
     actions   = ["s3:GetObject", "s3:DeleteObject"]
-    resources = ["${local.bucket_arn}/verify-jobs/*"]
+    resources = ["${local.bucket_arn}/tsync/verify-jobs/*"]
   }
   statement {
     actions   = ["s3:ListBucket"]
@@ -110,25 +110,16 @@ resource "aws_s3_bucket_notification" "chunks" {
   count  = var.manage_notifications ? 1 : 0
   bucket = local.bucket_id
 
-  # Every chunk written anywhere in the store. One literal prefix, no list of
-  # domains to keep in step with the daemon's config — the function ignores a key
-  # that is not a chunk, which it has to do anyway: a filter is configuration and
-  # the code cannot lean on it.
+  # One rule, because there can only be one: S3 rejects overlapping prefix
+  # filters for the same event, and both a chunk and a sweep request live under
+  # tsync/. So the filter says "anything of ours" and the function decides what
+  # it was handed — which it does anyway, since a filter is configuration and the
+  # code cannot lean on it.
   lambda_function {
-    id                  = "tsync-verify-chunks"
+    id                  = "tsync-verify"
     lambda_function_arn = aws_lambda_function.verify.arn
     events              = ["s3:ObjectCreated:*"]
     filter_prefix       = "tsync/"
-  }
-
-  # The other way in: `tsync chunks-integrity --verify` writes one request per
-  # shard at verify-jobs/<domain>/<shard>. The domain sits inside the prefix
-  # rather than around it precisely so this one rule reaches every domain.
-  lambda_function {
-    id                  = "tsync-verify-jobs"
-    lambda_function_arn = aws_lambda_function.verify.arn
-    events              = ["s3:ObjectCreated:*"]
-    filter_prefix       = "verify-jobs/"
   }
 
   depends_on = [aws_lambda_permission.verify_s3]

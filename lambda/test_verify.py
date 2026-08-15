@@ -46,7 +46,7 @@ def test_a_good_chunk_leaves_no_marker(store_and_verify):
     st.put_bytes(path, body)
 
     assert verify.verify_object(st, path) is True
-    assert list(st.list_keys("corrupted/d/")) == []
+    assert list(st.list_keys("tsync/corrupted/d/")) == []
 
 
 def test_a_scrambled_body_is_filed(store_and_verify):
@@ -58,8 +58,8 @@ def test_a_scrambled_body_is_filed(store_and_verify):
     st.put_bytes(path, bytes(b ^ 0xFF for b in body))
 
     assert verify.verify_object(st, path) is False
-    marker = f"corrupted/d/{key[:3]}/{key}"
-    assert list(st.list_keys("corrupted/d/")) == [marker]
+    marker = f"tsync/corrupted/d/{key[:3]}/{key}"
+    assert list(st.list_keys("tsync/corrupted/d/")) == [marker]
 
     recorded = json.loads(st.get_bytes(marker))
     assert recorded["computed"] != key
@@ -78,11 +78,11 @@ def test_a_good_rewrite_clears_the_marker(store_and_verify):
 
     st.put_bytes(path, bytes(b ^ 0xFF for b in body))
     verify.verify_object(st, path)
-    assert list(st.list_keys("corrupted/d/")) != []
+    assert list(st.list_keys("tsync/corrupted/d/")) != []
 
     st.put_bytes(path, body)
     assert verify.verify_object(st, path) is True
-    assert list(st.list_keys("corrupted/d/")) == []
+    assert list(st.list_keys("tsync/corrupted/d/")) == []
 
 
 def test_a_manifest_is_never_read(store_and_verify):
@@ -96,7 +96,7 @@ def test_a_manifest_is_never_read(store_and_verify):
 
     assert verify.marker_key(manifest_key) is None
     assert verify.verify_object(st, manifest_key) is None
-    assert list(st.list_keys("corrupted/d/")) == []
+    assert list(st.list_keys("tsync/corrupted/d/")) == []
 
 
 def test_a_marker_never_earns_one_of_its_own(store_and_verify):
@@ -104,7 +104,7 @@ def test_a_marker_never_earns_one_of_its_own(store_and_verify):
     prefix filter: the function writes into the bucket it watches."""
     st, verify = store_and_verify
     key = verify.key_of_body([b"anything"])
-    assert verify.marker_key(f"corrupted/d/{key[:3]}/{key}") is None
+    assert verify.marker_key(f"tsync/corrupted/d/{key[:3]}/{key}") is None
     # And a chunk in the space a collection is moving out of is left alone.
     assert verify.marker_key(f"tsync/d/chunks.from/{key[:3]}/{key}") is None
 
@@ -119,8 +119,8 @@ def test_domains_do_not_share_a_corrupted_prefix(store_and_verify):
         path, key = chunk_path(domain, body, verify)
         st.put_bytes(path, scrambled)
         verify.verify_object(st, path)
-        assert list(st.list_keys(f"corrupted/{domain}/")) == [
-            f"corrupted/{domain}/{key[:3]}/{key}"
+        assert list(st.list_keys(f"tsync/corrupted/{domain}/")) == [
+            f"tsync/corrupted/{domain}/{key[:3]}/{key}"
         ]
 
 
@@ -133,7 +133,7 @@ def test_a_body_larger_than_one_read_slice(store_and_verify):
     st.put_bytes(path, body)
 
     assert verify.verify_object(st, path) is True
-    assert list(st.list_keys("corrupted/d/")) == []
+    assert list(st.list_keys("tsync/corrupted/d/")) == []
 
 
 def test_the_aws_event_shape_is_decoded(store_and_verify):
@@ -159,15 +159,15 @@ def test_a_job_sweeps_its_shard(store_and_verify):
     st.put_bytes(bad_path, bytes(b ^ 0xFF for b in bad))
     # Both chunks land in the same shard only by luck, so drive each one's own.
     for key in (good_key, bad_key):
-        job = f"verify-jobs/d/{key[:3]}"
+        job = f"tsync/verify-jobs/d/{key[:3]}"
         assert verify.job_target(job) == f"tsync/d/chunks/{key[:3]}/"
         st.put_bytes(job, b"")
         verify.verify_key(st, job)
         # The request is gone once the shard is done.
         assert not st.exists(job)
 
-    marked = list(st.list_keys("corrupted/d/"))
-    assert marked == [f"corrupted/d/{bad_key[:3]}/{bad_key}"]
+    marked = list(st.list_keys("tsync/corrupted/d/"))
+    assert marked == [f"tsync/corrupted/d/{bad_key[:3]}/{bad_key}"]
 
 
 def test_a_job_for_an_empty_shard_is_just_dropped(store_and_verify):
@@ -175,21 +175,21 @@ def test_a_job_for_an_empty_shard_is_just_dropped(store_and_verify):
     prefixes are populated — so most requests find nothing and must cost
     nothing but their own deletion."""
     st, verify = store_and_verify
-    job = "verify-jobs/d/fff"
+    job = "tsync/verify-jobs/d/fff"
     st.put_bytes(job, b"")
     assert verify.verify_key(st, job) == {"checked": 0, "corrupt": 0}
     assert not st.exists(job)
-    assert list(st.list_keys("corrupted/d/")) == []
+    assert list(st.list_keys("tsync/corrupted/d/")) == []
 
 
 def test_a_request_never_looks_like_a_chunk(store_and_verify):
     """The two prefixes are told apart by the key alone, so neither entry point
     has to decide what it was handed."""
     st, verify = store_and_verify
-    job = "verify-jobs/d/abc"
+    job = "tsync/verify-jobs/d/abc"
     assert verify.marker_key(job) is None
     key = verify.key_of_body([b"anything"])
     assert verify.job_target(f"tsync/d/chunks/{key[:3]}/{key}") is None
-    assert verify.job_target("verify-jobs/d/not-a-shard") is None
+    assert verify.job_target("tsync/verify-jobs/d/not-a-shard") is None
     # A domain with a space in it, which is a real one.
-    assert verify.job_target("verify-jobs/Jellyfin Media/abc") == "tsync/Jellyfin Media/chunks/abc/"
+    assert verify.job_target("tsync/verify-jobs/Jellyfin Media/abc") == "tsync/Jellyfin Media/chunks/abc/"
