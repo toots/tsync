@@ -86,6 +86,49 @@
   cursor = <entry-1>
   journal <entry-1> = rmdir d/
 
+=== purge drops one trashed folder that expire none leaves
+  mkdir d
+  drain
+  write d/a.txt "purge me"
+  drain
+  write keep.txt "not this one"
+  drain
+  rmdir d
+  drain
+  expire none
+  trash --purge d
+  expire none -> 0 version(s), 0 journal entr(ies)
+  purge d -> 2 object(s)
+--- tree
+  f keep.txt size=12 cached=0/1 uploaded=true etag=b500d7bf771db830
+--- content
+  keep.txt = "not this one"
+--- backend
+  chunk 78bdd50ffdb89f28-110ae84095eebccf size=12
+  chunk cdaea9710618f57b-fe488feaf159bf3d size=8
+  cursor = <entry-4>
+  journal <entry-1> = mkdir d/
+  journal <entry-2> = put d/a.txt 8
+  journal <entry-3> = put keep.txt 12
+  journal <entry-4> = rmdir d/
+  file keep.txt [.tsync-root/18954525e207201b-dcfdae3db302a2bd] = manifest size=12 chunks=1 h1=b500d7bf771db830 h2=c49c64b6f769cf41
+    chunk#0 78bdd50ffdb89f28-110ae84095eebccf size=12
+
+=== purge of an untrashed path is refused
+  write keep.txt "still here"
+  drain
+  trash --purge never-trashed
+  purge never-trashed -> not in trash
+--- tree
+  f keep.txt size=10 cached=0/1 uploaded=true etag=865fa1ed62985da6
+--- content
+  keep.txt = "still here"
+--- backend
+  chunk 999b4f949ab5a43d-7058a91e43596e2e size=10
+  journal <entry-1> = put keep.txt 10
+  file keep.txt [.tsync-root/18954525e207201b-dcfdae3db302a2bd] = manifest size=10 chunks=1 h1=865fa1ed62985da6 h2=ebd72358b57d9f23
+    chunk#0 999b4f949ab5a43d-7058a91e43596e2e size=10
+
 === expire none: nothing removed
   write foo.txt "one"
   drain

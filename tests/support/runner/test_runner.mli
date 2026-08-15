@@ -66,6 +66,10 @@ type step =
           (epoch), or ["mark"] (the time captured by the last [Mark] step — to
           expire across a boundary). Leaves the chunks it orphaned behind;
           collecting those is [Gc]. *)
+  | PurgeTrashed of string
+      (** Run [Expire.purge_trashed]: drop one trashed folder and its subtree
+          now, whatever its age. Leaves the chunks it orphaned behind, as
+          [Expire] does. *)
   | Gc  (** Run [Gc.run]: collect the chunks nothing references any more. *)
   | GcVerify
       (** The same collection with [~verify], which holds each live chunk

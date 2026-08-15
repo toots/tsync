@@ -54,6 +54,7 @@ type step =
   | Mark  (** record the current time, as an [Expire "mark"] cutoff *)
   | Expire of string
       (** Cutoff selector: "all" (now), "none" (epoch), or "mark". *)
+  | PurgeTrashed of string
   | Gc  (** Collect chunks nothing references. *)
   | GcVerify
   | GcMark  (** Collect as far as the end of marking; leave it open. *)
@@ -169,6 +170,7 @@ let rec render_step = function
   | Stat p -> "stat " ^ p
   | Mark -> "mark"
   | Expire s -> "expire " ^ s
+  | PurgeTrashed p -> "trash --purge " ^ p
   | Gc -> "gc"
   | GcVerify -> "gc --verify"
   | GcMark -> "gc (mark only)"
@@ -667,6 +669,12 @@ let setup_client (module C : Conf.S) root staging_prefix =
         let+ s = E.expire ~cutoff () in
         Printf.printf "  expire %s -> %d version(s), %d journal entr(ies)\n"
           selector s.Expire.versions_deleted s.journal_deleted
+    | PurgeTrashed path -> (
+        let module E = Expire.Make (C) in
+        let+ outcome = E.purge_trashed ~path () in
+        match outcome with
+          | `Not_in_trash -> Printf.printf "  purge %s -> not in trash\n" path
+          | `Purged n -> Printf.printf "  purge %s -> %d object(s)\n" path n)
     | Gc ->
         let module G = Gc.Make (C) in
         let+ s = G.run () in

@@ -35,6 +35,40 @@ module Make (C : Conf.S) = struct
       (fun acc _rel entry -> Lwt.return (entry.Inode_tree.bkey :: acc))
       acc
 
+  (* One named folder, now. Reaching a folder trashed today through {!expire}
+     takes a cutoff of now, and that same cutoff governs versions and the
+     journal — so the domain's whole history would go with it. *)
+  let purge_trashed ?(on_delete = fun ~name:_ ~deleted:_ -> ()) ~path () =
+    let* trash =
+      B.list_prefix ~prefix:(C.domain_prefix ^ Folder.trash_id ^ "/") ()
+    in
+    let* found =
+      Lwt_list.filter_map_s
+        (fun (e : Backend.file_entry) ->
+          (* As in {!expire}: an empty trash lists as its own directory key,
+             which holds no marker and cannot be fetched on a filesystem
+             store. *)
+          if Key.is_dir e.Backend.key then Lwt.return_none
+          else
+            let+ data = B.get ~key:e.Backend.key () in
+            match
+              (Folder.trash_path_of_string data, Folder.marker_of_string data)
+            with
+              | Some p, Some m when p = path -> Some (e.Backend.key, m)
+              | _ -> None)
+        trash
+    in
+    match found with
+      | [] -> Lwt.return `Not_in_trash
+      | (trash_key, m) :: _ ->
+          Log.debug "purge: reclaiming trashed folder %s" m.Folder.name;
+          let* subtree = collect_namespace m.Folder.id [] in
+          (* The marker last: it is what names the subtree, so losing it first
+             would strand every key under it with nothing pointing at them. *)
+          let keys = subtree @ [trash_key] in
+          let+ () = delete_all ~name:"trash" ~on_delete keys in
+          `Purged (List.length keys)
+
   let expire ?(on_list = fun ~name:_ -> ())
       ?(on_scan = fun ~name:_ ~objects:_ -> ())
       ?(on_delete = fun ~name:_ ~deleted:_ -> ()) ~cutoff () =
