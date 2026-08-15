@@ -365,30 +365,33 @@ let cache_cmd =
       & info ["fetch"]
           ~doc:"Download these files or directories into the cache.")
   in
-  let act ~verb ~done_ paths =
+  let act ~verb ~done_ ~domain paths =
+    let socket_path path =
+      match domain with
+        | Some _ -> domain_socket ?domain ()
+        | None -> domain_socket_for_path path
+    in
     List.iter
       (fun path ->
-        match
-          ipc_action ~socket_path:(domain_socket_for_path path) ~path verb
-        with
+        match ipc_action ~socket_path:(socket_path path) ~path verb with
           | _ -> Printf.printf "%s: %s\n" done_ path
           | exception Failure msg -> Printf.eprintf "Error: %s\n" msg)
       paths
   in
-  let run paths evict fetch =
+  let run paths domain evict fetch =
     match (evict, fetch) with
-      | true, false -> act ~verb:"evict" ~done_:"Evicted" paths
-      | false, true -> act ~verb:"restore" ~done_:"Fetched" paths
+      | true, false -> act ~verb:"evict" ~done_:"Evicted" ~domain paths
+      | false, true -> act ~verb:"restore" ~done_:"Fetched" ~domain paths
       | true, true ->
           failwith "--evict and --fetch do opposite things; run one."
-      | false, false -> failwith "pass --evict or --fetch."
+      | false, false -> failwith "cache needs --evict or --fetch."
   in
   Cmd.v
     (Cmd.info "cache"
        ~doc:
          "Move files on and off this machine: $(b,--evict) drops them from the \
           cache, $(b,--fetch) downloads them into it.")
-    Term.(const run $ path_arg $ evict_arg $ fetch_arg)
+    Term.(const run $ path_arg $ domain_arg $ evict_arg $ fetch_arg)
 
 let ls_cmd =
   let path_arg =
@@ -544,12 +547,15 @@ let versions_cmd =
             "With $(b,--revert): the version timestamp to restore (default: \
              most recent).")
   in
-  let revert path version =
-    match
-      ipc_action
-        ~socket_path:(domain_socket_for_path path)
-        ~path ?arg:version "revert"
-    with
+  (* The path names its own domain by sitting under that domain's mount, so
+     [--domain] is only consulted when it was given. *)
+  let revert path version domain =
+    let socket_path =
+      match domain with
+        | Some _ -> domain_socket ?domain ()
+        | None -> domain_socket_for_path path
+    in
+    match ipc_action ~socket_path ~path ?arg:version "revert" with
       | _ -> Printf.printf "Reverted: %s\n" path
       | exception Failure msg -> Printf.eprintf "Error: %s\n" msg
   in
@@ -642,7 +648,7 @@ let versions_cmd =
   in
   let run path domain do_revert version =
     match (path, do_revert) with
-      | Some path, true -> revert path version
+      | Some path, true -> revert path version domain
       | _, false -> list path domain
       | None, true -> failwith "--revert needs the PATH to restore."
   in
@@ -758,7 +764,8 @@ let trash_cmd =
       | Some _, true, true ->
           failwith "--restore and --purge do opposite things; run one."
       | Some _, false, false ->
-          failwith "trash lists with no PATH: pass --restore or --purge."
+          failwith
+            "naming a path needs --restore or --purge; trash alone lists."
   in
   Cmd.v
     (Cmd.info "trash"
@@ -1545,18 +1552,13 @@ let mirror_cmd =
              ~default:
                (match C.members with m :: _ -> m.Backend.name | [] -> "")
          in
-         if List.length C.members < 2 then begin
-           Printf.eprintf
-             "mirror requires at least two configured backends (domain %s has \
-              %d)\n"
-             C.domain_name (List.length C.members);
-           Lwt.return 1
-         end
-         else if manifests_only && path <> None then begin
-           prerr_endline
-             "mirror: --manifests and --path select different things; pass one";
-           Lwt.return 1
-         end
+         if List.length C.members < 2 then
+           failwith
+             (Printf.sprintf
+                "mirror needs at least two configured backends; %s has %d."
+                C.domain_name (List.length C.members))
+         else if manifests_only && path <> None then
+           failwith "--manifests and --path select different things; run one."
          else begin
            let scope =
              match (manifests_only, path) with
@@ -2020,8 +2022,7 @@ let default_domain_cmd =
     match (name, clear) with
       | None, false -> show ()
       | None, true -> forget ()
-      | Some _, true ->
-          failwith "--clear takes no domain name: pass one or the other."
+      | Some _, true -> failwith "--clear takes no domain name."
       | Some name, false -> set name
   in
   Cmd.v
