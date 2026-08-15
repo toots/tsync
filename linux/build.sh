@@ -1,5 +1,5 @@
 #!/bin/sh
-# Builds bin/tsync.exe and tray/main.exe in a fresh opam switch. Distro-agnostic:
+# Builds bin/tsync.exe and linux/tray/main.exe in a fresh opam switch. Distro-agnostic:
 # the caller installs the system libraries first, since the package names differ.
 # opam's depexts cover the rest -- conf-dbus pulls the dbus headers the tray
 # needs, the way fuse3 pulls libfuse3's.
@@ -44,4 +44,4 @@ done
 # native is what the endpoints OpenSSL trips over fall back to.
 opam install --deps-only tsync tsync-tls tsync-ssl tsync-s3 tsync-fuse tsync-tray
 
-opam exec -- dune build --profile release bin/tsync.exe tray/main.exe
+opam exec -- dune build --profile release bin/tsync.exe linux/tray/main.exe

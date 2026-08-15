@@ -38,7 +38,7 @@ menu listing the files in flight and a switch that pauses uploads.
 %install
 install -Dm755 %{srcdir}/_build/default/bin/tsync.exe %{buildroot}%{_bindir}/tsync
 strip %{buildroot}%{_bindir}/tsync
-install -Dm755 %{srcdir}/_build/default/tray/main.exe %{buildroot}%{_bindir}/tsync-tray
+install -Dm755 %{srcdir}/_build/default/linux/tray/main.exe %{buildroot}%{_bindir}/tsync-tray
 strip %{buildroot}%{_bindir}/tsync-tray
 install -Dm644 %{srcdir}/linux/tsync@.service %{buildroot}%{_unitdir}/tsync@.service
 install -d %{buildroot}%{_sysconfdir}/xdg/autostart
