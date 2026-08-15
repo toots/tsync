@@ -9,9 +9,9 @@
 
    Sampling runs concurrently and yields with [Lwt.pause] rather than sleeps.
    What is asserted is the shape of the samples — never absent once started,
-   never decreasing, ends complete — which does not depend on how many a given
-   scheduling produces. The count is checked too, so a run that observed nothing
-   fails rather than passing vacuously. *)
+   never decreasing, carried past the end of the fetch — none of which depends
+   on how many a given scheduling produces. The count is checked too, so a run
+   that observed nothing fails rather than passing vacuously. *)
 
 open Lwt.Syntax
 
@@ -166,12 +166,21 @@ let () =
      let seen = List.filter_map Fun.id reported in
      let fetched = List.map fst seen in
      check "progress never goes backwards"
+       ~why:(fun () -> shape samples)
        (fst
           (List.fold_left
              (fun (ok, prev) n -> (ok && n >= prev, n))
              (true, 0) fetched));
-     check "progress reaches the end"
-       (match List.rev seen with (d, total) :: _ -> d = total | [] -> false);
+     (* Not [d = total]: the row is removed when the operation returns, so the
+        completed state exists only between the last credit and that teardown
+        and whether a sampler lands in it is up to the scheduler. What a bar
+        must not do is freeze when the fetch ends, so what is asserted is
+        progress past everything the fetch could account for. *)
+     check "progress advances into the reassembly"
+       ~why:(fun () -> shape samples)
+       (match List.rev seen with
+         | (d, total) :: _ -> d > total - size
+         | [] -> false);
      (* The reassembly is counted too, so the total exceeds what was fetched —
         that is what keeps the bar moving after the last chunk lands. *)
      check "the total covers both phases"
@@ -180,10 +189,17 @@ let () =
      let dst2 = Filename.concat root "out2.bin" in
      let* samples = sampling key (fun () -> D.assemble_to key ~dst_path:dst2) in
      let reported = from_first_report samples in
+     (* The groups are on disk now and credited in full the moment they are
+        found, so a row that stops there is the frozen bar rather than a report
+        of one. *)
      check "a cached file still reports its reassembly"
        ~why:(fun () -> shape samples)
        (List.length (List.filter Option.is_some reported) >= 3
-       && List.for_all Option.is_some reported);
+       && List.for_all Option.is_some reported
+       &&
+         match List.rev (List.filter_map Fun.id reported) with
+         | (d, total) :: _ -> d > total - size
+         | [] -> false);
 
      let staged_key = C.domain_prefix ^ "staged.bin" in
      let staged_src = Filename.concat root "staged.bin" in

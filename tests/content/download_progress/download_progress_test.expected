@@ -2,7 +2,7 @@ the operation was observed while it ran: ok
 progress is reported continuously once it starts: ok
 the file came out whole: ok
 progress never goes backwards: ok
-progress reaches the end: ok
+progress advances into the reassembly: ok
 the total covers both phases: ok
 a cached file still reports its reassembly: ok
 a staged file with nothing to fetch is still reported: ok
