@@ -12,7 +12,7 @@
     up when the link returns rather than needing a resync. A job is retried for
     as long as the failure is {!Backend.Transient} and dropped on a permanent
     one, which marks the target degraded — the one state needing
-    [tsync resync-remote --source <main>] rather than patience.
+    [tsync mirror --source <main>] rather than patience.
 
     A queued job names a key and carries no body, the worker re-reading from the
     mains when it runs: repeated puts to one key converge on the latest, and a

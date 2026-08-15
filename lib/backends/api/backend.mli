@@ -219,9 +219,8 @@ type member = {
   in_flight : (unit -> int) option;
       (** Deferred targets: chunk forwards in flight. *)
   degraded : (unit -> bool) option;
-      (** Deferred targets: writes were dropped and [tsync resync-remote] is
-          needed — unlike a target merely being behind, patience will not fix
-          this. *)
+      (** Deferred targets: writes were dropped and [tsync mirror] is needed —
+          unlike a target merely being behind, patience will not fix this. *)
   local_path : string option;
       (** Where a [local] store keeps its files, so a report can say how much
           room is left. Absent for stores whose capacity is not ours to know. *)

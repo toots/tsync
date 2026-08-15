@@ -205,9 +205,9 @@ let rec render_step = function
   | ReclaimStaged -> "reclaim-staged"
   | ClearCache -> "clear-cache"
   | OnSecondary s -> "on-secondary " ^ render_step s
-  | ResyncRemote -> "resync-remote"
+  | ResyncRemote -> "mirror"
   | ResyncScoped { path; verify } ->
-      "resync-remote"
+      "mirror"
       ^ (match path with Some p -> " --path " ^ p | None -> "")
       ^ if verify then " --verify" else ""
   | LocalWrite { path; content } ->

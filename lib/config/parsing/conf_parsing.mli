@@ -28,8 +28,7 @@ val role_of_string : string -> role option
 
 type backend_config = {
   backend_type : string;
-  name : string;
-      (** Required; selects backends, e.g. [resync-remote --source]. *)
+  name : string;  (** Required; selects backends, e.g. [mirror --source]. *)
   fields : (string * string) list;
   role : role;
       (** Required: ["main"], ["replica"], ["backfill"] or ["readOnly"]. *)

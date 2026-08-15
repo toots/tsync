@@ -160,7 +160,7 @@ Domain statusdom
     UNREACHABLE      Backend.Backend_error("connection refused")
     journal          error: Backend.Backend_error("connection refused")
     corrupted        not checked — no verifier for this store
-    behind           7 queued, 2 in flight — DEGRADED, run tsync resync-remote
+    behind           7 queued, 2 in flight — DEGRADED, run tsync mirror
 ########## /stats with a mount daemon ##########
 Frontend http-proxy on testhost (this process)
   listener         port 8443, https
@@ -210,7 +210,7 @@ Domain statusdom
     UNREACHABLE      Backend.Backend_error("connection refused")
     journal          error: Backend.Backend_error("connection refused")
     corrupted        not checked — no verifier for this store
-    behind           7 queued, 2 in flight — DEGRADED, run tsync resync-remote
+    behind           7 queued, 2 in flight — DEGRADED, run tsync mirror
 ########## /stats?totals=1 ##########
 Frontend http-proxy on testhost (this process)
   listener         port 8443, https
@@ -256,7 +256,7 @@ Domain statusdom
     UNREACHABLE      Backend.Backend_error("connection refused")
     journal          error: Backend.Backend_error("connection refused")
     corrupted        not checked — no verifier for this store
-    behind           7 queued, 2 in flight — DEGRADED, run tsync resync-remote
+    behind           7 queued, 2 in flight — DEGRADED, run tsync mirror
     holds            could not count: Backend.Backend_error("connection refused")
 
 Recent warnings and errors (newest first)
@@ -308,7 +308,7 @@ Domain statusdom
     UNREACHABLE      Backend.Backend_error("connection refused")
     journal          error: Backend.Backend_error("connection refused")
     corrupted        not checked — no verifier for this store
-    behind           7 queued, 2 in flight — DEGRADED, run tsync resync-remote
+    behind           7 queued, 2 in flight — DEGRADED, run tsync mirror
     holds            could not count: Backend.Backend_error("connection refused")
 
 Recent warnings and errors (newest first)

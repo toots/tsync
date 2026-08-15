@@ -1503,7 +1503,7 @@ let chunks_integrity_cmd =
       const run $ domain_arg $ verify_arg $ repair_arg $ detail_arg $ source_arg
       $ dry_run_arg $ verbose_arg)
 
-let resync_remote_cmd =
+let mirror_cmd =
   let source_arg =
     Arg.(
       value
@@ -1558,15 +1558,14 @@ let resync_remote_cmd =
          in
          if List.length C.members < 2 then begin
            Printf.eprintf
-             "resync-remote requires at least two configured backends (domain \
-              %s has %d)\n"
+             "mirror requires at least two configured backends (domain %s has \
+              %d)\n"
              C.domain_name (List.length C.members);
            Lwt.return 1
          end
          else if manifests_only && path <> None then begin
            prerr_endline
-             "resync-remote: --manifests and --path select different things; \
-              pass one";
+             "mirror: --manifests and --path select different things; pass one";
            Lwt.return 1
          end
          else begin
@@ -1628,10 +1627,10 @@ let resync_remote_cmd =
     if code <> 0 then exit code
   in
   Cmd.v
-    (Cmd.info "resync-remote"
+    (Cmd.info "mirror"
        ~doc:
-         "Sync one remote backend from another: copy every object of the \
-          domain (manifests, chunks, journal, versions) that is missing or \
+         "Fill one backend from another: copy every object of the domain \
+          (manifests, chunks, journal, versions) that is missing or \
           size-mismatched on the other configured backends. Pass --manifests \
           to copy only the manifests, --path to copy one folder and the chunks \
           its files name, --verify to check destination chunks by their \
@@ -1932,8 +1931,16 @@ let print_conf_cmd =
        ~doc:"Print the current configuration (sensitive values hidden)")
     Term.(const run $ const ())
 
-let paths_cmd =
-  let run () =
+(* What this binary is and where it keeps things, as against [tsync config],
+   which is what the operator asked of it. Neither answers the other's question
+   and a report usually wants both. *)
+let build_info_cmd =
+  let features () =
+    Printf.printf "frontends: %s\ns3 backend: %b\nlog: %s\n"
+      (String.concat ", " (Frontend.names ()))
+      S3_link.s3_backend_enabled Log.Daemon.implementation
+  in
+  let paths () =
     let p = runtime_paths in
     Printf.printf "config:  %s\n" p.Runtime.config_path;
     Printf.printf "cache:   %s\n" p.Runtime.cache_root;
@@ -1944,8 +1951,16 @@ let paths_cmd =
       (fun (name, socket) -> Printf.printf "socket:  %s (%s)\n" socket name)
       (try domain_targets () with _ -> [])
   in
+  let run () =
+    features ();
+    print_newline ();
+    paths ()
+  in
   Cmd.v
-    (Cmd.info "paths" ~doc:"Show all filesystem paths used by this binary")
+    (Cmd.info "build-info"
+       ~doc:
+         "Show what was compiled into this binary and the filesystem paths it \
+          uses.")
     Term.(const run $ const ())
 
 let restart_cmd =
@@ -1961,67 +1976,60 @@ let restart_cmd =
        ~doc:"Restart the background service so it re-reads the config")
     Term.(const run $ const ())
 
-let set_domain_cmd =
+let default_domain_cmd =
   let name_arg =
     Arg.(value & pos 0 (some string) None & info [] ~docv:"NAME")
   in
   let clear_arg =
-    Arg.(value & flag & info ["clear"] ~doc:"Clear the default domain")
+    Arg.(value & flag & info ["clear"] ~doc:"Forget the default domain")
   in
-  let run name clear =
-    let file = default_domain_file () in
-    if clear || name = None then begin
-      (try Unix.unlink file with Unix.Unix_error (Unix.ENOENT, _, _) -> ());
-      print_endline "Default domain cleared."
-    end
-    else begin
-      let cfg = load_config () in
-      let name = Option.get name in
-      match
-        List.find_opt
-          (fun (d : Conf_parsing.domain) -> d.name = name)
-          cfg.Conf_parsing.domains
-      with
-        | None ->
-            Printf.eprintf "Domain not found: %s\n" name;
-            exit 1
-        | Some _ ->
-            Fs_util.mkdir_p_sync (Filename.dirname file);
-            let oc = open_out file in
-            output_string oc (name ^ "\n");
-            close_out oc;
-            Printf.printf "Default domain set to: %s\n" name
-    end
-  in
-  Cmd.v
-    (Cmd.info "set-domain"
-       ~doc:
-         "Set (or clear) the default domain used when --domain is omitted. \
-          With no arguments, shows the current default.")
-    Term.(const run $ name_arg $ clear_arg)
-
-let default_domain_cmd =
-  let run () =
+  let show () =
     match read_default_domain () with
       | Some name -> print_endline name
       | None ->
           Printf.eprintf "No default domain set.\n";
           exit 1
   in
-  Cmd.v
-    (Cmd.info "default-domain" ~doc:"Print the current default domain")
-    Term.(const run $ const ())
-
-let build_config_cmd =
-  let run () =
-    Printf.printf "frontends: %s\ns3 backend: %b\nlog: %s\n"
-      (String.concat ", " (Frontend.names ()))
-      S3_link.s3_backend_enabled Log.Daemon.implementation
+  let forget () =
+    (try Unix.unlink (default_domain_file ())
+     with Unix.Unix_error (Unix.ENOENT, _, _) -> ());
+    print_endline "Default domain cleared."
+  in
+  let set name =
+    let cfg = load_config () in
+    match
+      List.find_opt
+        (fun (d : Conf_parsing.domain) -> d.name = name)
+        cfg.Conf_parsing.domains
+    with
+      | None ->
+          Printf.eprintf "Domain not found: %s\n" name;
+          exit 1
+      | Some _ ->
+          let file = default_domain_file () in
+          Fs_util.mkdir_p_sync (Filename.dirname file);
+          let oc = open_out file in
+          output_string oc (name ^ "\n");
+          close_out oc;
+          Printf.printf "Default domain set to: %s\n" name
+  in
+  (* Reading is what no arguments means. It used to be what [--clear] meant too,
+     against what the help said, so the way to ask which domain was in force
+     silently dropped it. *)
+  let run name clear =
+    match (name, clear) with
+      | None, false -> show ()
+      | None, true -> forget ()
+      | Some _, true ->
+          failwith "--clear takes no domain name: pass one or the other."
+      | Some name, false -> set name
   in
   Cmd.v
-    (Cmd.info "build-config"
-       ~doc:"Show optional features compiled into this binary")
-    Term.(const run $ const ())
+    (Cmd.info "default-domain"
+       ~doc:
+         "Print the domain used when $(b,--domain) is omitted. Name one to set \
+          it, or $(b,--clear) to forget it.")
+    Term.(const run $ name_arg $ clear_arg)
 
 (* Each registered frontend surfaces its commands as `tsync <cli_group> <verb>`,
    the binary owning [--domain] parsing and checking the frontend is configured
@@ -2066,12 +2074,10 @@ let () =
     Cmd.group
       (Cmd.info "tsync" ~doc:"Cloud-backed filesystem sync")
       ([
-         build_config_cmd;
+         build_info_cmd;
          Configure.cmd;
          print_conf_cmd;
-         paths_cmd;
          restart_cmd;
-         set_domain_cmd;
          default_domain_cmd;
          start_cmd;
          stop_cmd;
@@ -2083,7 +2089,7 @@ let () =
          sync_cmd;
          recheck_cmd;
          chunks_integrity_cmd;
-         resync_remote_cmd;
+         mirror_cmd;
          import_cmd;
          export_cmd;
          evict_cmd;

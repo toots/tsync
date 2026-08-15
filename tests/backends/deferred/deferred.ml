@@ -244,7 +244,7 @@ let () =
      in
      step "put manifest two [c0]";
      let* () = settled ~name:"refuses" stats2 in
-     step "owed: %d (degraded %b — needs tsync resync-remote)" (owed "refuses")
+     step "owed: %d (degraded %b — needs tsync mirror)" (owed "refuses")
        (stats2 ()).Deferred.degraded;
 
      case "a target that was down the whole time a process ran";

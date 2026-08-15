@@ -223,8 +223,7 @@ module Make (J : JOB) = struct
       if not t.degraded then begin
         t.degraded <- true;
         Log.err
-          "%s: %d jobs queued, dropping writes — it will need tsync \
-           resync-remote"
+          "%s: %d jobs queued, dropping writes — it will need tsync mirror"
           t.name t.max_queued
       end;
       Lwt.return_unit
@@ -300,7 +299,7 @@ module Make (J : JOB) = struct
     t.degraded <- true;
     match t.poison with
       | Drop ->
-          Log.err "%s: %s (dropped; run tsync resync-remote)" t.name
+          Log.err "%s: %s (dropped; run tsync mirror)" t.name
             (Backend.reason exn);
           Records.complete t.log e.id
       | Stop ->
