@@ -31,8 +31,6 @@ type report = {
 }
 
 module Make (C : Conf.S) : sig
-  val prefix : string
-
   (** Every member, in role order. Not through {!Conf.S.store}: a composite
       serves a listing from whichever store answers first, so a chunk corrupt on
       one copy only would be reported or not depending on which that was. *)

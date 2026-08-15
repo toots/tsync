@@ -49,7 +49,7 @@ variable "gcs_stores" {
     memory_mb              = optional(number, 2048)
     verify_timeout_seconds = optional(number, 120)
     verify_memory_mb       = optional(number, 512)
-    verify_max_concurrency = optional(number, 32)
+    verify_max_instances   = optional(number, 32)
     max_share_bytes        = optional(number, 10737418240)
   }))
   default = {}
@@ -75,6 +75,7 @@ variable "stores" {
     manage_notifications   = optional(bool, true)
     verify_timeout_seconds = optional(number, 120)
     verify_memory_mb       = optional(number, 512)
+    verify_max_concurrency = optional(number, 32)
     extra_lifecycle_rules = optional(list(object({
       id              = string
       prefix          = optional(string, "")

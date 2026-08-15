@@ -118,6 +118,7 @@ module "store_gcs" {
   project                = var.gcp_project
   verify_timeout_seconds = each.value.verify_timeout_seconds
   verify_memory_mb       = each.value.verify_memory_mb
+  verify_max_instances   = each.value.verify_max_instances
 
   source_bucket = google_storage_bucket.functions_source[0].name
   source_zip    = data.archive_file.handler.output_path

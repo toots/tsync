@@ -115,7 +115,7 @@ module Make (C : Conf.S) : sig
       [verify] holds every live chunk against its own name as marking promotes
       it, filing what fails under {!Corruption}. Opt-in because it reads every
       live byte where the rest of a collection touches only metadata — the same
-      reason [tsync mirror --verify] is.
+      reason [tsync resync-remote --verify] is.
 
       Live chunks only: what marking never reaches is the garbage closing is
       about to delete. A chunk that fails is promoted and marked, never

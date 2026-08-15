@@ -41,9 +41,10 @@ type caps = {
           describes one store's machinery, not the domain's. *)
   verified : bool;
       (** Whether every chunk this store takes is held against its own name —
-          see {!Corruption}. A [local] store does it as it writes; an s3 or gcs
-          store does it in a function the bucket triggers, and answers [true]
-          only once its config says that function is deployed.
+          see {!Corruption}. A [local] store does it as it writes, unless the
+          operator turned that off; an s3 or gcs store does it in a function the
+          bucket's own object-created event triggers, which the same terraform
+          that makes the bucket deploys, so it always answers [true].
 
           Reported, not merely used, because the two ways of finding nothing are
           not the same: a store that checks and finds no corruption is clean,
@@ -116,10 +117,7 @@ module type S = sig
       nothing on its side to run this — a filesystem has no event source, an
       http-proxy peer owns its own store — says so rather than pretending, and
       the command asking for it fails instead of reporting a verification that
-      never happened. An s3 or gcs store answers [`Unsupported] until its config
-      says the function is deployed, for the same reason {!caps.verified}
-      exists: an un-deployed bucket would otherwise queue work nothing consumes
-      and look like it had been checked.
+      never happened. A filesystem's own sweep is [tsync gc --verify].
 
       Reading every byte is what this costs, so it is never implicit. *)
   val verify_all :

@@ -391,7 +391,7 @@ tsync recheck                          # verify the remote against the local cac
 
 A chunk's name *is* the hash of its bytes. So a store can check every chunk it takes with
 nothing but the chunk itself: hash what landed, compare it to the name it arrived under. What
-fails is recorded as an object under `tsync/<domain>/corrupted/`, and reading the list is just
+fails is recorded as an object under `tsync/corrupted/<domain>/`, and reading the list is just
 a listing of that prefix.
 
 This catches what a size comparison cannot. A chunk that is the right length but holds the
@@ -420,9 +420,9 @@ is checking. Both would otherwise report zero, and only one of those is good new
 
 `--verify` is the stores' own work: an s3 or gcs bucket queues one request per shard into
 itself, and its object-created notification hands each to the same function that checks a fresh
-upload — so a whole-store pass needs no queue service and runs the same per-chunk check. It
-returns as soon as the work is queued; read the outcome afterwards with a plain
-`tsync chunks-integrity`. A store with nothing on its side to run a check says so and the
+upload — so a whole-store pass needs no queue service and runs the same per-chunk check. It then
+follows the sweep, reporting how many shard requests are left as the store works through
+them; interrupting stops the watching, not the checking. A store with nothing on its side to run a check says so and the
 command fails, rather than reporting one that never happened.
 
 On a `local` store, `tsync gc --verify` sweeps the whole thing: a collection already walks every

@@ -35,13 +35,6 @@ let is_shard_name name =
 let key_of_body data = Xxhash.hash_hex data 0 ^ "-" ^ Xxhash.hash_hex data 1
 let chunks_seg = "/chunks/"
 
-(* Two namespaces beside the store rather than inside each domain, with the
-   domain as their first segment. One literal prefix then covers every domain —
-   which is what lets a notification be filtered, and a store's IAM say where the
-   checker may write, without either being handed a list of domain names to keep
-   in step with the daemon's config. Google's IAM conditions offer only
-   [startsWith], so a prefix with the domain in the middle cannot be expressed at
-   all. *)
 (* Derived rather than spelled, so the store's own root lives in exactly one
    place ({!Conf_parsing.root_prefix}) and this cannot drift from it.
 
@@ -104,8 +97,12 @@ let marker_key key =
         let start = i + String.length chunks_seg in
         let rest = String.sub key start (String.length key - start) in
         match (String.index_opt rest '/', String.index_opt root '/') with
+          (* [k + 1 < length root] rejects an empty domain: a marker filed under
+             one would sit at a prefix nothing lists, since every reader builds
+             that prefix from a domain name. The Python does the same. *)
           | Some j, Some k
-            when is_shard_name (String.sub rest 0 j)
+            when k + 1 < String.length root
+                 && is_shard_name (String.sub rest 0 j)
                  && is_chunk_key
                       (String.sub rest (j + 1) (String.length rest - j - 1)) ->
               Some

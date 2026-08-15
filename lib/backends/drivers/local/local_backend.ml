@@ -143,15 +143,9 @@ let make ?(verify_writes = true) ~root () : (module Backend.S) =
             | `Body stored ->
                 let computed = Chunk_layout.key_of_body stored in
                 if computed = Filename.basename key then
-                  (* Clears a marker an earlier bad copy left, which is the whole of
-               how a repair is recorded: the good write is the record.
-
-               The unlink happens either way, so asking whether it removed
-               anything is free, and it is worth asking: a shard directory here
-               exists only to hold markers, and an empty one left behind is an
-               entry in a listing of the prefix — a chunk reported corrupt that
-               is not. Best effort, since a marker landing concurrently just
-               recreates it. *)
+                  (* The unlink happens either way, so asking whether it
+                     removed anything is free — and only then is there a
+                     directory worth pruning. *)
                   let* cleared =
                     Lwt.catch
                       (fun () ->
@@ -350,6 +344,11 @@ let make ?(verify_writes = true) ~root () : (module Backend.S) =
        is asked with a request waiting on the answer. *)
     let concurrency = lazy (Device.max_concurrency root)
 
+    (* A filesystem has nothing on its side to wake. Every write is already
+       checked as it lands ({!verify_written}), and [tsync gc --verify] is the
+       sweep over what is already there. *)
+    let verify_all ~chunk_prefix:_ () = Lwt.return `Unsupported
+
     (* [gc]: a filesystem has the one thing collecting chunks takes, which is
        [rename] — of a directory to open a run, and within it to mark. True of
        every filesystem, not only the ones with hard links to give.
@@ -358,11 +357,6 @@ let make ?(verify_writes = true) ~root () : (module Backend.S) =
        [corrupted/] prefix is a live answer rather than an empty prefix nobody
        writes. False when the operator turned that off, since a listing that
        finds nothing would otherwise read as a clean bill of health. *)
-    (* A filesystem has nothing on its side to wake. Every write is already
-       checked as it lands ({!verify_written}), and [tsync gc --verify] is the
-       sweep over what is already there. *)
-    let verify_all ~chunk_prefix:_ () = Lwt.return `Unsupported
-
     let capabilities ~prefix:_ () =
       Lwt.return
         {

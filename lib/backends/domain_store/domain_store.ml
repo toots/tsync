@@ -173,8 +173,6 @@ let rec make ~(mains : sub list)
       in
       Lwt.return (Option.value r ~default:[])
 
-    (* These describe where the domain's own data lives, so the archives have no
-       say — a readable target does, being a full copy. *)
     (* Fanned out to the mains and the readable targets, and summed: each store
        runs its own check, and one that cannot is not a reason the others should
        not. [`Unsupported] only when nothing at all could be asked. *)
@@ -193,6 +191,8 @@ let rec make ~(mains : sub list)
       if List.exists (fun a -> a <> `Unsupported) answers then `Queued queued
       else `Unsupported
 
+    (* These describe where the domain's own data lives, so the archives have no
+       say — a readable target does, being a full copy. *)
     let capabilities ~prefix () =
       let+ answers =
         Lwt_list.map_s
