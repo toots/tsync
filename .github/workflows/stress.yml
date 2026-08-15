@@ -56,6 +56,7 @@ jobs:
           opam pin -ny .
           opam pin add -ny fuse3 git+https://github.com/toots/ocamlfuse.git
           opam pin add -ny git+https://github.com/toots/aws-s3.git#tsync
+          opam pin add -ny git+https://github.com/toots/ocaml-cohttp.git#bigstring-body
       - name: Install OCaml dependencies
         run: opam install --deps-only -y tsync tsync-tls tsync-fuse
       - name: Build

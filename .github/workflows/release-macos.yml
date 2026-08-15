@@ -39,6 +39,7 @@ jobs:
         run: |
           opam pin -ny .
           opam pin add -ny git+https://github.com/toots/aws-s3.git#tsync
+          opam pin add -ny git+https://github.com/toots/ocaml-cohttp.git#bigstring-body
       - name: Install dependencies
         run: |
           brew install xcodegen libev coreutils dylibbundler pkg-config openssl@3
