@@ -46,11 +46,11 @@ jobs:
             ~/.opam
             _opam
           # Bump when the package list below changes.
-          key: opam-android-v3
+          key: opam-android-v4
       - name: Register the cross repository
         run: |
           opam repository remove android --all >/dev/null 2>&1 || true
-          opam repository add android git+https://github.com/ocaml-cross/opam-cross-android.git
+          opam repository add android git+https://github.com/toots/opam-cross-android.git#tsync
           opam update android
       - name: Install OCaml dependencies
         run: |
@@ -61,7 +61,7 @@ jobs:
           # a depopt, and without that one it links a stub that refuses every
           # https connection at runtime.
           opam install -y \
-            conf-libev-android cohttp-lwt-unix-android conduit-lwt-unix-android \
+            conf-libev-android cohttp-lwt-unix-android.6.2.2 conduit-lwt-unix-android \
             digestif-android eqaf-android yojson-android lwt-android \
             ppx_blob-android mem_usage-android base64-android tls-lwt-android \
             x509-android mirage-crypto-pk-android cmdliner-android \
