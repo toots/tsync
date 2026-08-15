@@ -2,7 +2,7 @@ type domain = { name : string; socket : string; mount : string }
 
 let paths = Runtime.default_paths ()
 
-(* Re-read on mtime rather than once at startup: `tsync configure' adding a
+(* Re-read on mtime rather than once at startup: `tsync config --edit' adding a
    domain should show up in the menu, and rather than on every poll because the
    answer changes about once a year. *)
 let cached : (float * domain list) option ref = ref None

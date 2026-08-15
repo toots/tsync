@@ -98,7 +98,7 @@ type step =
           chunk store, keeping only the staged tree. *)
   | OnSecondary of step
   | ResyncRemote
-  | ResyncScoped of { path : string option; verify : bool }
+  | ResyncScoped of { path : string option }
   | LocalWrite of { path : string; content : string }
   | LocalMkdir of string
   | LocalSymlink of { path : string; target : string }
@@ -204,10 +204,8 @@ let rec render_step = function
   | ClearCache -> "clear-cache"
   | OnSecondary s -> "on-secondary " ^ render_step s
   | ResyncRemote -> "mirror"
-  | ResyncScoped { path; verify } ->
-      "mirror"
-      ^ (match path with Some p -> " --path " ^ p | None -> "")
-      ^ if verify then " --verify" else ""
+  | ResyncScoped { path } -> (
+      "mirror" ^ match path with Some p -> " --path " ^ p | None -> "")
   | LocalWrite { path; content } ->
       Printf.sprintf "local-write %s %S" path content
   | LocalMkdir path -> "local-mkdir " ^ path
@@ -867,15 +865,12 @@ let setup_client (module C : Conf.S) root staging_prefix =
         dump ""
     | (ResyncRemote | ResyncScoped _) as s ->
         let module M = Mirror.Make (C) in
-        let verify =
-          match s with ResyncScoped { verify; _ } -> verify | _ -> false
-        in
         let scope =
           match s with
             | ResyncScoped { path = Some rel; _ } -> `Path rel
             | _ -> `All
         in
-        let+ dests = M.resync ~scope ~verify () in
+        let+ dests = M.resync ~scope () in
         List.iteri
           (fun i (d : Mirror.dest_stats) ->
             (* Only counts: copied keys carry non-deterministic folder ids /
@@ -1666,7 +1661,7 @@ let run_ipc_scenario ?versioning ({ name; steps } : scenario) =
   rm_rf root;
   print_newline ()
 
-(* The daemon's own report, which [tsync stats] renders and the http-proxy serves.
+(* The daemon's own report, which [tsync status] renders and the http-proxy serves.
    Only its structure is printed: the rest is pids, uptimes, paths and timings. *)
 let run_stats_scenario ?versioning ({ name; steps } : scenario) =
   reset_ids ();

@@ -16,27 +16,11 @@ module Make (C : Conf.S) = struct
      file-level [max_uploads]. *)
   let copy_pool = Lwt_bounded.create ~max:C.max_chunk_buffers ()
 
-  (* Size says a chunk is the right length, never that it holds the right bytes.
-     Only the chunk namespace can be asked without reading the source back, its
-     key being the hash of its own body; the read of every candidate is what
-     keeps this opt-in.
-
-     Membership is the prefix, never the shape of the name: a manifest is filed
-     under the hash of its own file name, so it is spelled exactly like a chunk
-     key and would fail a hash-of-body check every time. *)
-  let dst_intact ~verify (module Dst : Backend.S) key =
-    if not (verify && String.starts_with ~prefix:C.chunk_prefix key) then
-      Lwt.return_true
-    else
-      let+ data = Dst.get ~key () in
-      Manifest.key_of_body data = Filename.basename key
-
   (* Objects are content-addressed or immutable once written, so a size mismatch
      means the destination copy is corrupt. [None] when it was already correct;
-     otherwise what was wrong with it, which is the whole of what [--verify] buys
-     over a size comparison and so is worth carrying to the caller. *)
-  let sync_entry ?(verify = false) (module Src : Backend.S)
-      (module Dst : Backend.S) (entry : Backend.file_entry) =
+     otherwise what was wrong with it, which is worth carrying to the caller. *)
+  let sync_entry (module Src : Backend.S) (module Dst : Backend.S)
+      (entry : Backend.file_entry) =
     let* head = Dst.head_opt ~key:entry.key () in
     let* reason =
       match head with
@@ -45,9 +29,7 @@ module Make (C : Conf.S) = struct
             if Key.is_dir entry.key then Lwt.return_none
             else if h.Backend.size <> entry.size then
               Lwt.return_some `Wrong_size
-            else
-              let+ intact = dst_intact ~verify (module Dst) entry.key in
-              if intact then None else Some `Wrong_body
+            else Lwt.return_none
     in
     match reason with
       | None -> Lwt.return_none
@@ -163,13 +145,13 @@ module Make (C : Conf.S) = struct
     in
     dedup_entries entries
 
-  let resync_to ?verify ?(on_copy = fun ~name:_ ~key:_ ~reason:_ ~bytes:_ -> ())
-      src dst ~name entries =
+  let resync_to ?(on_copy = fun ~name:_ ~key:_ ~reason:_ ~bytes:_ -> ()) src dst
+      ~name entries =
     let+ results =
       Lwt_list.map_p
         (fun entry ->
           Lwt_bounded.use copy_pool (fun () ->
-              let+ copied = sync_entry ?verify src dst entry in
+              let+ copied = sync_entry src dst entry in
               (match copied with
                 | Some (reason, bytes) ->
                     on_copy ~name ~key:entry.Backend.key ~reason ~bytes
@@ -196,7 +178,7 @@ module Make (C : Conf.S) = struct
   (* Copies between the stores themselves rather than through {!Conf.store}: the
      point is to reach the ones the composite writes off the caller's path, or
      does not write at all. Raises [Failure] when nothing has that name. *)
-  let resync ?source ?verify ?(scope = `All) ?(on_scan = fun ~objects:_ -> ())
+  let resync ?source ?(scope = `All) ?(on_scan = fun ~objects:_ -> ())
       ?(on_list = fun ~name:_ -> ()) ?on_copy () =
     let named name =
       match
@@ -252,6 +234,6 @@ module Make (C : Conf.S) = struct
     C.members
     |> List.filter (fun (m : Backend.member) -> m.Backend.name <> src.name)
     |> Lwt_list.map_s (fun (m : Backend.member) ->
-        resync_to ?verify ?on_copy src.Backend.backend m.Backend.backend
+        resync_to ?on_copy src.Backend.backend m.Backend.backend
           ~name:m.Backend.name entries)
 end

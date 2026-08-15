@@ -38,7 +38,7 @@ val unreachable : string -> status
 
 (** {1 The stats submenu}
 
-    [tsync stats] with most of it left out: the figures someone opens a tray
+    [tsync status] with most of it left out: the figures someone opens a tray
     menu to see, rather than the ones they would run the command for. Fetched
     when the submenu opens, not on the poll -- reaching a backend is a round
     trip, and the poll happens whether anyone is looking or not. *)
@@ -171,7 +171,7 @@ val stats_placeholder : entry list
 val file_icon : string -> string
 
 (** {!Metrics.human_bytes} widened to [int64], so a figure reads the same here
-    as in [tsync stats]. *)
+    as in [tsync status]. *)
 val human_bytes : int64 -> string
 
 (** The two largest non-zero units of a duration, abbreviated, truncated:

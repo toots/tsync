@@ -208,7 +208,7 @@ Done. Next steps:
   terraform plan     # review what will be created/changed
   terraform apply    # provision the store(s)
 
-Then set these on the s3 backend in your tsync config (or let `tsync configure`
+Then set these on the s3 backend in your tsync config (or let `tsync config --edit`
 pull them for you): bucket, accessKeyId, secretAccessKey, shareUrl.
   terraform output stores
   terraform output -json secret_access_keys | jq -r '.["<store>"]'
@@ -220,7 +220,7 @@ Done. Next steps:
   terraform plan     # review what will be created/changed
   terraform apply    # provision the store(s)
 
-Then set these on the gcs backend in your tsync config (or let `tsync configure`
+Then set these on the gcs backend in your tsync config (or let `tsync config --edit`
 pull them for you): bucket, serviceAccountKey, shareUrl.
   terraform output gcs_stores
   terraform output -json gcs_service_account_keys | jq -r '.["<store>"]'

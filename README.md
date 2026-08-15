@@ -54,8 +54,8 @@ They all see the same folder, pick up each other's changes, and none can leak a 
 Some things a folder has no verb for:
 
 ```bash
-tsync revert notes/todo.txt   # undo — versions kept on every change
-tsync evict photos/2019       # free the space, keep the files listed
+tsync versions --revert notes/todo.txt   # undo — versions kept on every change
+tsync cache --evict photos/2019       # free the space, keep the files listed
 tsync share photos/2024       # public link to a file, or a folder as a zip
 tsync import ~/Pictures       # seed a domain from files you already have
 ```
@@ -69,7 +69,7 @@ Files are split into content-addressed chunks, so editing one frame of a video u
 Download [**tsync.pkg**](https://github.com/toots/tsync/releases/download/nightly/tsync.pkg) and open it. It is signed and notarized, installs the app as a login item that runs the background daemon, and puts the `tsync` CLI on your `PATH`. Apple silicon only for now.
 
 ```bash
-tsync configure   # folder name and a storage backend
+tsync config --edit   # folder name and a storage backend
 ```
 
 Uninstalling is `tsync fileprovider purge`.
@@ -84,7 +84,7 @@ Ubuntu 26.04 LTS and Fedora 44, each for x86-64 and arm64.
 sudo apt install ./tsync_*.deb     # Debian / Ubuntu
 sudo dnf install ./tsync-*.rpm     # Fedora
 
-tsync configure                    # folder name and a storage backend
+tsync config --edit                    # folder name and a storage backend
 sudo systemctl enable --now tsync@$USER
 ```
 
@@ -100,7 +100,7 @@ Needs [opam](https://opam.ocaml.org/) and OCaml ≥ 5.5.
 cd linux
 make install-deps
 make install     # builds, installs, starts the background service
-tsync configure  # folder name and a storage backend
+tsync config --edit  # folder name and a storage backend
 make install     # re-run to restart with the new config
 ```
 
@@ -127,7 +127,7 @@ Full walkthrough, from install to multi-machine setups: **[DOCUMENTATION.md](DOC
 ## Good to know
 
 - Two machines editing the **same file** at once resolve last-writer-wins. Concurrent renames and delete/rename races are handled — they leave labeled conflict copies, and nothing is lost.
-- No automatic prefetch: files download on first open. `tsync restore` pulls things down ahead of time, directories included.
+- No automatic prefetch: files download on first open. `tsync cache --fetch` pulls things down ahead of time, directories included.
 - Chunks aren't encrypted by tsync — use your bucket's server-side encryption if you need encryption at rest.
 
 ## License

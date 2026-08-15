@@ -249,8 +249,8 @@ val member :
 
 type factory = (string -> string option) -> (module S)
 
-(** The settings this backend type needs, so [tsync configure] can prompt for
-    them without knowing the backend. See {!Field_spec}. *)
+(** The settings this backend type needs, so [tsync config --edit] can prompt
+    for them without knowing the backend. See {!Field_spec}. *)
 val register : spec:Field_spec.t list -> string -> factory -> unit
 
 val spec_for : string -> Field_spec.t list option

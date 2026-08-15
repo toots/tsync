@@ -1,5 +1,5 @@
 (* A daemon serving several domains answers for the one it was asked about, so
-   [tsync stats] asks once per domain and folds the answers back into the single
+   [tsync status] asks once per domain and folds the answers back into the single
    report that daemon would have given: the domains stack up, the process
    figures above them are stated once. *)
 

@@ -19,7 +19,7 @@ let () =
         (show (Field_spec.bool ~default:false v))
         (show (Field_spec.bool ~default:true v)))
     [
-      (* What [tsync configure] writes and [Conf_parsing] flattens. *)
+      (* What [tsync config --edit] writes and [Conf_parsing] flattens. *)
       Some "true";
       Some "false";
       (* Hand-edited configs. Each of these was read two ways before. *)

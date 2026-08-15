@@ -1,5 +1,5 @@
 #!/bin/sh
-# Append one tsync stats sample per second to an NDJSON log.
+# Append one tsync status sample per second to an NDJSON log.
 # Crash-safe: each line is flushed as it's written, so a machine crash only
 # loses the in-flight second. Graph anytime with scripts/stats-graph.py.
 #
@@ -7,4 +7,4 @@
 #   log defaults to stats.ndjson, appends (does not truncate).
 LOG="${1:-stats.ndjson}"
 TSYNC="${2:-tsync}"
-exec "$TSYNC" stats --json -w 1 >>"$LOG"
+exec "$TSYNC" status --json -w 1 >>"$LOG"

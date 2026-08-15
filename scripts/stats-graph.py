@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Graph a tsync stats NDJSON log (see scripts/stats-collect.sh).
+"""Graph a tsync status NDJSON log (see scripts/stats-collect.sh).
 
 Prereqs (Ubuntu/Debian): sudo apt install python3-matplotlib
 Usage: scripts/stats-graph.py [stats.ndjson] [out.png]

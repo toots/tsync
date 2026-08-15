@@ -22,7 +22,7 @@ import kotlin.concurrent.thread
 
 /**
  * Two states, not two screens: setup when there is no config, status once there
- * is. Everything shown on the status screen is `tsync stats` verbatim, so it
+ * is. Everything shown on the status screen is `tsync status` verbatim, so it
  * cannot drift from what the desktop reports.
  */
 class MainActivity : Activity() {
@@ -107,7 +107,7 @@ class MainActivity : Activity() {
                 Config.save(this@MainActivity, settings)
                 // The daemon is the authority on whether its own config parses;
                 // anything else here would be a second implementation that drifts.
-                val (code, output) = DaemonService.run(this@MainActivity, "print-config")
+                val (code, output) = DaemonService.run(this@MainActivity, "config")
                 if (code != 0) {
                     error.text = "tsync rejected the config:\n$output"
                     return@setOnClickListener
@@ -157,7 +157,7 @@ class MainActivity : Activity() {
                 answering = runCatching { Ipc.send(socket, "status") }.isSuccess
                 if (!answering) Thread.sleep(250)
             }
-            val (_, text) = DaemonService.run(this, "stats")
+            val (_, text) = DaemonService.run(this, "status")
             // A walk creates each folder before fetching what is inside it, so
             // mid-sync a directory that looks empty is not one.
             val syncing =

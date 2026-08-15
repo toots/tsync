@@ -811,175 +811,167 @@ let write_config ~path ~client_name ~max_uploads ~max_chunk_buffers
   close_out oc;
   Unix.chmod path 0o600
 
-let cmd =
-  let run () =
-    Printf.printf "tsync configuration\n-------------------\n";
-    let config_path = runtime_paths.Runtime.config_path in
-    let existing_root =
-      if Sys.file_exists config_path then (
-        match Yojson.Basic.from_file config_path with
-          | j -> Some j
-          | exception _ ->
-              Printf.eprintf
-                "Existing config at %s is not valid JSON; refusing to overwrite.\n"
-                config_path;
-              exit 1)
-      else None
-    in
-    let client_name =
-      ref
-        (Option.value
-           (Option.bind existing_root (fun r -> jstr r "name"))
-           ~default:(Unix.gethostname ()))
-    in
-    let max_uploads =
-      ref
-        (Option.value
-           (Option.bind existing_root (fun r -> jint r "maxUploads"))
-           ~default:Conf_parsing.default_max_uploads)
-    in
-    let max_chunk_buffers =
-      ref
-        (Option.value
-           (Option.bind existing_root (fun r -> jint r "maxChunkBuffers"))
-           ~default:!max_uploads)
-    in
-    let max_downloads =
-      ref
-        (Option.value
-           (Option.bind existing_root (fun r -> jint r "maxDownloads"))
-           ~default:Conf_parsing.default_max_downloads)
-    in
-    let tls = ref (Option.bind existing_root (fun r -> jstr r "tls")) in
-    let domains =
-      ref (match existing_root with Some r -> jlist r "domains" | None -> [])
-    in
-    let edit_globals () =
-      client_name := prompt "Client name" (Some !client_name);
-      max_uploads := prompt_int "Max concurrent uploads" !max_uploads;
-      (* Times the chunk size, this is what uploading costs in memory. *)
-      max_chunk_buffers :=
-        prompt_int "Max chunk buffers held in memory" !max_chunk_buffers;
-      max_downloads := prompt_int "Max concurrent downloads" !max_downloads;
-      (* Only worth asking when the build has more than one backend. "auto"
+let run () =
+  Printf.printf "tsync configuration\n-------------------\n";
+  let config_path = runtime_paths.Runtime.config_path in
+  let existing_root =
+    if Sys.file_exists config_path then (
+      match Yojson.Basic.from_file config_path with
+        | j -> Some j
+        | exception _ ->
+            Printf.eprintf
+              "Existing config at %s is not valid JSON; refusing to overwrite.\n"
+              config_path;
+            exit 1)
+    else None
+  in
+  let client_name =
+    ref
+      (Option.value
+         (Option.bind existing_root (fun r -> jstr r "name"))
+         ~default:(Unix.gethostname ()))
+  in
+  let max_uploads =
+    ref
+      (Option.value
+         (Option.bind existing_root (fun r -> jint r "maxUploads"))
+         ~default:Conf_parsing.default_max_uploads)
+  in
+  let max_chunk_buffers =
+    ref
+      (Option.value
+         (Option.bind existing_root (fun r -> jint r "maxChunkBuffers"))
+         ~default:!max_uploads)
+  in
+  let max_downloads =
+    ref
+      (Option.value
+         (Option.bind existing_root (fun r -> jint r "maxDownloads"))
+         ~default:Conf_parsing.default_max_downloads)
+  in
+  let tls = ref (Option.bind existing_root (fun r -> jstr r "tls")) in
+  let domains =
+    ref (match existing_root with Some r -> jlist r "domains" | None -> [])
+  in
+  let edit_globals () =
+    client_name := prompt "Client name" (Some !client_name);
+    max_uploads := prompt_int "Max concurrent uploads" !max_uploads;
+    (* Times the chunk size, this is what uploading costs in memory. *)
+    max_chunk_buffers :=
+      prompt_int "Max chunk buffers held in memory" !max_chunk_buffers;
+    max_downloads := prompt_int "Max concurrent downloads" !max_downloads;
+    (* Only worth asking when the build has more than one backend. "auto"
          leaves it unset, taking the preferred one at startup, which survives a
          build dropping a backend. *)
-      let available = Tls_conf.available () in
-      if List.length available >= 2 then begin
-        let choice =
-          prompt
-            (Printf.sprintf "TLS backend for S3 (auto/%s)"
-               (String.concat "/" available))
-            (Some (Option.value !tls ~default:"auto"))
-        in
-        tls := if List.mem choice available then Some choice else None
-      end
-    in
-    (* A brand-new config: gather globals and the first domain up front. *)
-    if existing_root = None then begin
-      edit_globals ();
-      Printf.printf "\nDomain 1\n";
-      domains := [edit_domain None]
-    end;
-    (* On entry, select the default domain if one is set, else the first. *)
-    let default_domain = read_default_domain () in
-    let selected =
-      ref
-        (match
-           Option.bind default_domain (fun name ->
-               List.find_index (fun d -> jstr d "name" = Some name) !domains)
-         with
-          | Some i -> i
-          | None -> if !domains = [] then -1 else 0)
-    in
-    let list_domains () =
-      if !domains = [] then Printf.printf "  (no domains)\n"
-      else
-        List.iteri
-          (fun i d ->
-            let name = Option.value (jstr d "name") ~default:"?" in
-            let btype =
-              match jlist d "backends" with
-                | b :: _ -> Option.value (jstr b "type") ~default:"?"
-                | [] -> "none"
-            in
-            let dflt =
-              if default_domain = Some name then " [default]" else ""
-            in
-            Printf.printf "%s %d. %s (%s)%s\n"
-              (if i = !selected then ">" else " ")
-              (i + 1) name btype dflt)
-          !domains
-    in
-    let replace_nth i v = List.mapi (fun j x -> if j = i then v else x) in
-    let remove_nth i = List.filteri (fun j _ -> j <> i) in
-    let selected_name () =
-      if !selected >= 0 && !selected < List.length !domains then
-        Option.value (jstr (List.nth !domains !selected) "name") ~default:"?"
-      else "(none)"
-    in
-    let saved = ref false in
-    let running = ref true in
-    let status = ref "" in
-    while !running do
-      clear_screen ();
-      Printf.printf "tsync configuration\n-------------------\n\nDomains:\n";
-      list_domains ();
-      Printf.printf "\nSelected: %s\n" (selected_name ());
-      if !status <> "" then Printf.printf "\n%s\n" !status;
-      Printf.printf
-        "\n\
-         Enter a domain number to select, or an action:\n\
-        \  [a]dd  [e]dit selected  [r]emove selected  [g]lobals  [w]rite  [q]uit\n\
-         > %!";
-      let action = String.lowercase_ascii (String.trim (read_line ())) in
-      let has_sel = !selected >= 0 && !selected < List.length !domains in
-      status := "";
-      match int_of_string_opt action with
-        | Some n ->
-            if n >= 1 && n <= List.length !domains then selected := n - 1
-            else status := Printf.sprintf "(no domain %d)" n
-        | None -> (
-            match action with
-              | "a" ->
-                  domains := !domains @ [edit_domain None];
-                  selected := List.length !domains - 1
-              | "e" ->
-                  if has_sel then
-                    domains :=
-                      replace_nth !selected
-                        (edit_domain (Some (List.nth !domains !selected)))
-                        !domains
-                  else status := "(select a domain first)"
-              | "r" ->
-                  if has_sel then begin
-                    domains := remove_nth !selected !domains;
-                    if !selected >= List.length !domains then
-                      selected := List.length !domains - 1
-                  end
-                  else status := "(select a domain first)"
-              | "g" -> edit_globals ()
-              | "w" ->
-                  if !domains = [] then
-                    status := "(add at least one domain before writing)"
-                  else begin
-                    running := false;
-                    saved := true
-                  end
-              | "q" ->
-                  if prompt_bool "Quit without saving?" then running := false
-              | "" -> ()
-              | other -> status := Printf.sprintf "(unknown action %S)" other)
-    done;
-    if not !saved then Printf.printf "Aborted; config left untouched.\n"
-    else begin
-      write_config ~path:config_path ~client_name:!client_name
-        ~max_uploads:!max_uploads ~max_chunk_buffers:!max_chunk_buffers
-        ~max_downloads:!max_downloads ~tls:!tls ~domains:!domains;
-      Printf.printf "\nConfig written to %s\n" config_path;
-      print_endline "Run `tsync restart` to apply it."
+    let available = Tls_conf.available () in
+    if List.length available >= 2 then begin
+      let choice =
+        prompt
+          (Printf.sprintf "TLS backend for S3 (auto/%s)"
+             (String.concat "/" available))
+          (Some (Option.value !tls ~default:"auto"))
+      in
+      tls := if List.mem choice available then Some choice else None
     end
   in
-  Cmd.v
-    (Cmd.info "configure" ~doc:"Create or edit the configuration (interactive)")
-    Term.(const run $ const ())
+  (* A brand-new config: gather globals and the first domain up front. *)
+  if existing_root = None then begin
+    edit_globals ();
+    Printf.printf "\nDomain 1\n";
+    domains := [edit_domain None]
+  end;
+  (* On entry, select the default domain if one is set, else the first. *)
+  let default_domain = read_default_domain () in
+  let selected =
+    ref
+      (match
+         Option.bind default_domain (fun name ->
+             List.find_index (fun d -> jstr d "name" = Some name) !domains)
+       with
+        | Some i -> i
+        | None -> if !domains = [] then -1 else 0)
+  in
+  let list_domains () =
+    if !domains = [] then Printf.printf "  (no domains)\n"
+    else
+      List.iteri
+        (fun i d ->
+          let name = Option.value (jstr d "name") ~default:"?" in
+          let btype =
+            match jlist d "backends" with
+              | b :: _ -> Option.value (jstr b "type") ~default:"?"
+              | [] -> "none"
+          in
+          let dflt = if default_domain = Some name then " [default]" else "" in
+          Printf.printf "%s %d. %s (%s)%s\n"
+            (if i = !selected then ">" else " ")
+            (i + 1) name btype dflt)
+        !domains
+  in
+  let replace_nth i v = List.mapi (fun j x -> if j = i then v else x) in
+  let remove_nth i = List.filteri (fun j _ -> j <> i) in
+  let selected_name () =
+    if !selected >= 0 && !selected < List.length !domains then
+      Option.value (jstr (List.nth !domains !selected) "name") ~default:"?"
+    else "(none)"
+  in
+  let saved = ref false in
+  let running = ref true in
+  let status = ref "" in
+  while !running do
+    clear_screen ();
+    Printf.printf "tsync configuration\n-------------------\n\nDomains:\n";
+    list_domains ();
+    Printf.printf "\nSelected: %s\n" (selected_name ());
+    if !status <> "" then Printf.printf "\n%s\n" !status;
+    Printf.printf
+      "\n\
+       Enter a domain number to select, or an action:\n\
+      \  [a]dd  [e]dit selected  [r]emove selected  [g]lobals  [w]rite  [q]uit\n\
+       > %!";
+    let action = String.lowercase_ascii (String.trim (read_line ())) in
+    let has_sel = !selected >= 0 && !selected < List.length !domains in
+    status := "";
+    match int_of_string_opt action with
+      | Some n ->
+          if n >= 1 && n <= List.length !domains then selected := n - 1
+          else status := Printf.sprintf "(no domain %d)" n
+      | None -> (
+          match action with
+            | "a" ->
+                domains := !domains @ [edit_domain None];
+                selected := List.length !domains - 1
+            | "e" ->
+                if has_sel then
+                  domains :=
+                    replace_nth !selected
+                      (edit_domain (Some (List.nth !domains !selected)))
+                      !domains
+                else status := "(select a domain first)"
+            | "r" ->
+                if has_sel then begin
+                  domains := remove_nth !selected !domains;
+                  if !selected >= List.length !domains then
+                    selected := List.length !domains - 1
+                end
+                else status := "(select a domain first)"
+            | "g" -> edit_globals ()
+            | "w" ->
+                if !domains = [] then
+                  status := "(add at least one domain before writing)"
+                else begin
+                  running := false;
+                  saved := true
+                end
+            | "q" -> if prompt_bool "Quit without saving?" then running := false
+            | "" -> ()
+            | other -> status := Printf.sprintf "(unknown action %S)" other)
+  done;
+  if not !saved then Printf.printf "Aborted; config left untouched.\n"
+  else begin
+    write_config ~path:config_path ~client_name:!client_name
+      ~max_uploads:!max_uploads ~max_chunk_buffers:!max_chunk_buffers
+      ~max_downloads:!max_downloads ~tls:!tls ~domains:!domains;
+    Printf.printf "\nConfig written to %s\n" config_path;
+    print_endline "Run `tsync restart` to apply it."
+  end

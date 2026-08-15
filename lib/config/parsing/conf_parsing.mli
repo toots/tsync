@@ -102,8 +102,8 @@ val load : string -> t
 (** {!load}'s parse and validation, over a JSON value already in hand. Raises
     [Failure] with the same message {!load} would.
 
-    Exported so [tsync configure] validates what it is about to write with the
-    reader's own rules rather than a second set of its own. *)
+    Exported so [tsync config --edit] validates what it is about to write with
+    the reader's own rules rather than a second set of its own. *)
 val of_json : Yojson.Basic.t -> t
 
 (** Return the domain matching [domain], or the unique domain when omitted.

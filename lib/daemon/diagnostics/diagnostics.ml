@@ -185,7 +185,7 @@ module Make (C : Conf.S) = struct
      Beside [journal] rather than inside [totals]: one bounded listing of a
      prefix that is empty on a healthy store, where [totals] exists because
      counting chunks walks the whole namespace. It costs a round trip per member
-     per report, and a report is asked for — [tsync stats], the menu's Stats
+     per report, and a report is asked for — [tsync status], the menu's Stats
      submenu when it opens — not polled.
 
      [checked] is the field that matters. A store nothing verifies lists no

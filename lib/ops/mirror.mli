@@ -31,29 +31,24 @@ module Make (C : Conf.S) : sig
         source is missing an object the scope selected: this command copies a
         full backend onto a partial one, so that is the source being wrong.
 
-      [verify] hashes each destination chunk against the key it is filed under
-      instead of trusting its size, so a body that is the right length and the
-      wrong bytes is recopied. Reads every candidate chunk off the destination;
-      pair it with [`Path] unless re-reading the whole chunk store is intended.
-
       [on_list] fires before each step of working out what the source holds,
       [name] being that step phrased for a progress line. [on_scan] fires once
       with the total number of source objects to examine, after listing and
       before copying. [on_copy] fires per object actually copied, with the
       destination's name, the bytes written, and what was wrong with the
-      destination's copy: [`Missing], [`Wrong_size], or — only reachable under
-      [verify] — [`Wrong_body], a body of the right length that does not hash to
-      the key holding it. *)
+      destination's copy: [`Missing] or [`Wrong_size]. A body of the right
+      length holding the wrong bytes is not this command's to find: the store
+      checks that against the key it is filed under, and [tsync data-integrity]
+      reads what it found. *)
   val resync :
     ?source:string ->
-    ?verify:bool ->
     ?scope:[ `All | `Manifests | `Path of string ] ->
     ?on_scan:(objects:int -> unit) ->
     ?on_list:(name:string -> unit) ->
     ?on_copy:
       (name:string ->
       key:string ->
-      reason:[ `Missing | `Wrong_size | `Wrong_body ] ->
+      reason:[ `Missing | `Wrong_size ] ->
       bytes:int ->
       unit) ->
     unit ->

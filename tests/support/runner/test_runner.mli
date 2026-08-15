@@ -160,10 +160,9 @@ type step =
           the copied keys and a per-destination summary. Bytes are omitted:
           manifest objects embed mtimes, so their sizes are not deterministic.
       *)
-  | ResyncScoped of { path : string option; verify : bool }
-      (** [ResyncRemote] with the CLI's two narrowing options: [path] restricts
-          it to one folder and the chunks its files name, [verify] hashes each
-          destination chunk instead of comparing its size. *)
+  | ResyncScoped of { path : string option }
+      (** [ResyncRemote] narrowed to one folder and the chunks its files name.
+      *)
   | LocalWrite of { path : string; content : string }
       (** Write [content] to [path] in the local staging directory (created on
           first use, reset after each [Import]). Parent directories are created
@@ -213,6 +212,6 @@ val run_ipc : ?versioning:bool -> scenario list -> unit
 val run_ipc_changes : ?versioning:bool -> scenario list -> unit
 
 (** Snapshot the structure of the daemon's own report — the [stats] IPC action
-    behind [tsync stats], and the same collection the http-proxy serves. Values
+    behind [tsync status], and the same collection the http-proxy serves. Values
     that move between runs (pids, uptimes, paths, timings) are left out. *)
 val run_stats : ?versioning:bool -> scenario list -> unit

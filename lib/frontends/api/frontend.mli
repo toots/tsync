@@ -50,7 +50,7 @@ end
     domain, before calling [run]. *)
 type command = { verb : string; doc : string; run : (module Conf.S) -> unit }
 
-(** [cli_group] defaults to [name]. [spec] is what [tsync configure] prompts
+(** [cli_group] defaults to [name]. [spec] is what [tsync config --edit] prompts
     for; see {!Field_spec}. *)
 val register :
   ?spec:Field_spec.t list ->

@@ -49,16 +49,17 @@ let () =
           ];
       };
       {
-        (* Same length, different bytes: the size comparison sees nothing, so
-           only --verify recopies it. *)
-        name = "mirror misses a scrambled chunk without --verify";
+        (* Same length, different bytes: a size comparison sees nothing, and
+           this one deliberately looks no further. Holding a chunk against its
+           own name is the store's job, read back through tsync data-integrity.
+        *)
+        name = "mirror leaves a scrambled chunk alone";
         steps =
           [
             Write { path = "file.bin"; content = "hello world" };
             Drain;
             OnSecondary (ScrambleRemoteChunk { path = "file.bin"; index = 0 });
             ResyncRemote;
-            ResyncScoped { path = None; verify = true };
           ];
       };
       {
@@ -72,20 +73,7 @@ let () =
             OnSecondary (DeleteRemoteChunk { path = "outside.bin"; index = 0 });
             OnSecondary
               (DeleteRemoteChunk { path = "keep/inside.bin"; index = 0 });
-            ResyncScoped { path = Some "keep"; verify = false };
-          ];
-      };
-      {
-        name = "mirror --path --verify heals a scrambled chunk";
-        steps =
-          [
-            Mkdir "keep";
-            Write { path = "keep/inside.bin"; content = "this one" };
-            Drain;
-            OnSecondary
-              (ScrambleRemoteChunk { path = "keep/inside.bin"; index = 0 });
-            ResyncScoped { path = Some "keep"; verify = true };
-            ResyncScoped { path = Some "keep"; verify = true };
+            ResyncScoped { path = Some "keep" };
           ];
       };
       {
