@@ -42,8 +42,18 @@ let chunks_seg = "/chunks/"
    in step with the daemon's config. Google's IAM conditions offer only
    [startsWith], so a prefix with the domain in the middle cannot be expressed at
    all. *)
-let corrupted_root = "corrupted/"
-let verify_jobs_root = "verify-jobs/"
+(* Derived rather than spelled, so the store's own root lives in exactly one
+   place ({!Conf_parsing.root_prefix}) and this cannot drift from it.
+
+   A domain named "corrupted" or "verify-jobs" would collide with these. Nothing
+   forbids it; it has simply never been worth a check against two words. *)
+let store_root ~chunk_prefix =
+  match String.index_opt chunk_prefix '/' with
+    | Some i -> String.sub chunk_prefix 0 (i + 1)
+    | None -> ""
+
+let corrupted_root ~chunk_prefix = store_root ~chunk_prefix ^ "corrupted/"
+let verify_jobs_root ~chunk_prefix = store_root ~chunk_prefix ^ "verify-jobs/"
 
 (* The domain a chunk prefix belongs to: ["tsync/<domain>/chunks/"] is the one
    shape this ever sees. *)
@@ -59,10 +69,10 @@ let domain_of ~chunk_prefix =
     | None -> root
 
 let corrupted_prefix ~chunk_prefix =
-  corrupted_root ^ domain_of ~chunk_prefix ^ "/"
+  corrupted_root ~chunk_prefix ^ domain_of ~chunk_prefix ^ "/"
 
 let verify_jobs_prefix ~chunk_prefix =
-  verify_jobs_root ^ domain_of ~chunk_prefix ^ "/"
+  verify_jobs_root ~chunk_prefix ^ domain_of ~chunk_prefix ^ "/"
 
 let verify_job_key ~chunk_prefix shard =
   verify_jobs_prefix ~chunk_prefix ^ shard
@@ -99,7 +109,8 @@ let marker_key key =
                  && is_chunk_key
                       (String.sub rest (j + 1) (String.length rest - j - 1)) ->
               Some
-                (corrupted_root
+                (String.sub root 0 (k + 1)
+                ^ "corrupted/"
                 ^ String.sub root (k + 1) (String.length root - k - 1)
                 ^ "/" ^ rest)
           | _ -> None)
@@ -108,23 +119,29 @@ let marker_key key =
    filesystem store makes one to hold markers and lists it back — so the whole
    shape is asked for, not the prefix. *)
 let is_marker_key key =
-  if not (String.starts_with ~prefix:corrupted_root key) then false
-  else (
-    let rest =
-      String.sub key
-        (String.length corrupted_root)
-        (String.length key - String.length corrupted_root)
-    in
-    match String.rindex_opt rest '/' with
-      | None -> false
-      | Some j -> (
-          let leaf = String.sub rest (j + 1) (String.length rest - j - 1) in
-          let head = String.sub rest 0 j in
-          match String.rindex_opt head '/' with
-            | Some k ->
-                is_shard_name
-                  (String.sub head (k + 1) (String.length head - k - 1))
-                && is_chunk_key leaf
-            | None -> false))
+  match String.index_opt key '/' with
+    | None -> false
+    | Some r ->
+        let after = String.sub key (r + 1) (String.length key - r - 1) in
+        if not (String.starts_with ~prefix:"corrupted/" after) then false
+        else (
+          let rest =
+            String.sub after
+              (String.length "corrupted/")
+              (String.length after - String.length "corrupted/")
+          in
+          match String.rindex_opt rest '/' with
+            | None -> false
+            | Some j -> (
+                let leaf =
+                  String.sub rest (j + 1) (String.length rest - j - 1)
+                in
+                let head = String.sub rest 0 j in
+                match String.rindex_opt head '/' with
+                  | Some k ->
+                      is_shard_name
+                        (String.sub head (k + 1) (String.length head - k - 1))
+                      && is_chunk_key leaf
+                  | None -> false))
 
 let chunk_key_of_marker = Filename.basename

@@ -9,10 +9,8 @@
 #
 # Delivery is a storage notification onto Pub/Sub, NOT an Eventarc storage
 # trigger. Eventarc's google.cloud.storage.object.v1.finalized has no prefix
-# filter, so it would invoke this on every manifest, journal entry and share
-# artifact written to the bucket — and, since the function writes markers into
-# the bucket it watches, on its own writes as well. object_name_prefix is what
-# makes the trigger match only chunks.
+# filter at all, so it would invoke this on everything in the bucket rather than
+# on what tsync owns.
 
 resource "google_service_account" "verify" {
   account_id   = "tsync-verify-${var.name}"
@@ -44,8 +42,8 @@ resource "google_storage_bucket_iam_member" "verify_mark" {
     # and requests are namespaced with the domain inside rather than around
     # them: "tsync/<domain>/corrupted/" could not be expressed here at all.
     expression = join(" || ", [
-      "resource.name.startsWith(\"projects/_/buckets/${local.bucket_name}/objects/corrupted/\")",
-      "resource.name.startsWith(\"projects/_/buckets/${local.bucket_name}/objects/verify-jobs/\")",
+      "resource.name.startsWith(\"projects/_/buckets/${local.bucket_name}/objects/tsync/corrupted/\")",
+      "resource.name.startsWith(\"projects/_/buckets/${local.bucket_name}/objects/tsync/verify-jobs/\")",
     ])
   }
 }
@@ -67,6 +65,13 @@ resource "google_pubsub_topic_iam_member" "gcs_publisher" {
   member = "serviceAccount:${data.google_storage_project_service_account.gcs.email_address}"
 }
 
+# One notification for both: a chunk and a sweep request both live under tsync/,
+# and the function decides which it was handed — which it does anyway, since a
+# filter is configuration and the code cannot lean on it.
+#
+# The function writes markers into the bucket it watches, so its own writes come
+# back to it. That terminates rather than loops: marker_key() returns None for a
+# marker, so the second invocation reads nothing and writes nothing.
 resource "google_storage_notification" "chunks" {
   bucket             = local.bucket_name
   topic              = google_pubsub_topic.chunks.id
@@ -75,19 +80,6 @@ resource "google_storage_notification" "chunks" {
   object_name_prefix = "tsync/"
 
   # The binding must exist first or the notification is rejected.
-  depends_on = [google_pubsub_topic_iam_member.gcs_publisher]
-}
-
-# The other way in: `tsync chunks-integrity --verify` writes one request per
-# shard at verify-jobs/<domain>/<shard>. The domain sits inside the prefix rather
-# than around it precisely so this one notification reaches every domain.
-resource "google_storage_notification" "verify_jobs" {
-  bucket             = local.bucket_name
-  topic              = google_pubsub_topic.chunks.id
-  payload_format     = "JSON_API_V1"
-  event_types        = ["OBJECT_FINALIZE"]
-  object_name_prefix = "verify-jobs/"
-
   depends_on = [google_pubsub_topic_iam_member.gcs_publisher]
 }
 

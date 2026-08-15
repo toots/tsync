@@ -32,10 +32,14 @@ sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), "vendor
 
 import xxhash  # noqa: E402
 
-CHUNKS_SEG = "/chunks/"
-CORRUPTED_ROOT = "corrupted/"
-JOBS_ROOT = "verify-jobs/"
 ROOT = "tsync/"  # lib/config/parsing/conf_parsing.ml
+CHUNKS_SEG = "/chunks/"
+# Beside the domains rather than inside one, with the domain as their first
+# segment: one literal prefix then covers every domain, which is what a
+# notification filter and an IAM condition both need — neither takes a wildcard,
+# and Google's conditions offer only startsWith.
+CORRUPTED_ROOT = ROOT + "corrupted/"
+JOBS_ROOT = ROOT + "verify-jobs/"
 FANOUT = 3  # lib/naming/chunk_layout.ml
 KEY_HEX = 16  # lib/utils/xxhash/xxhash.ml, hex_length
 

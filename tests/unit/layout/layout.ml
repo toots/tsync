@@ -72,13 +72,14 @@ let () =
       check ("domain of " ^ d) (Chunk_layout.domain_of ~chunk_prefix:cp = d);
       check ("marker for " ^ d)
         (Chunk_layout.marker_key (chunk d)
-        = Some ("corrupted/" ^ d ^ "/" ^ String.sub ck 0 3 ^ "/" ^ ck));
+        = Some ("tsync/corrupted/" ^ d ^ "/" ^ String.sub ck 0 3 ^ "/" ^ ck));
       check
         ("corrupted prefix for " ^ d)
-        (Chunk_layout.corrupted_prefix ~chunk_prefix:cp = "corrupted/" ^ d ^ "/");
+        (Chunk_layout.corrupted_prefix ~chunk_prefix:cp
+        = "tsync/corrupted/" ^ d ^ "/");
       check ("job key for " ^ d)
         (Chunk_layout.verify_job_key ~chunk_prefix:cp "abc"
-        = "verify-jobs/" ^ d ^ "/abc"))
+        = "tsync/verify-jobs/" ^ d ^ "/abc"))
     ["dom"; "Jellyfin Media"];
   let marker = Option.get (Chunk_layout.marker_key (chunk "Jellyfin Media")) in
   check "a marker is one" (Chunk_layout.is_marker_key marker);
@@ -96,5 +97,5 @@ let () =
        ("tsync/d/manifests/" ^ String.sub ck 0 3 ^ "/" ^ ck)
     = None);
   check "a shard directory is not a marker"
-    (not (Chunk_layout.is_marker_key "corrupted/dom/abc/"));
+    (not (Chunk_layout.is_marker_key "tsync/corrupted/dom/abc/"));
   print_endline "layout ok"
