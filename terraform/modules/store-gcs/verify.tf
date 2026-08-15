@@ -14,14 +14,7 @@
 # the bucket it watches, on its own writes as well. object_name_prefix is what
 # makes the trigger match only chunks.
 
-locals {
-  # As on the AWS side: no safe default. A prefix matching nothing deploys a
-  # function that never fires, which is indistinguishable from a clean store.
-  verify_enabled = length(var.chunk_domains) > 0
-}
-
 resource "google_service_account" "verify" {
-  count        = local.verify_enabled ? 1 : 0
   account_id   = "tsync-verify-${var.name}"
   display_name = "tsync verify ${var.name}"
 }
@@ -33,75 +26,65 @@ resource "google_service_account" "verify" {
 # cannot read reports no markers, which is indistinguishable from a clean store.
 # Narrow it once there is a real bucket to confirm the grant against.
 resource "google_storage_bucket_iam_member" "verify_read" {
-  count  = local.verify_enabled ? 1 : 0
   bucket = local.bucket_name
   role   = "roles/storage.objectViewer"
-  member = "serviceAccount:${google_service_account.verify[0].email}"
+  member = "serviceAccount:${google_service_account.verify.email}"
 }
 
 # Write and clear markers, and nothing else. Delete matters as much as write: a
 # marker is cleared by the very write that fixed the chunk.
 resource "google_storage_bucket_iam_member" "verify_mark" {
-  count  = local.verify_enabled ? 1 : 0
   bucket = local.bucket_name
   role   = "roles/storage.objectUser"
-  member = "serviceAccount:${google_service_account.verify[0].email}"
+  member = "serviceAccount:${google_service_account.verify.email}"
   condition {
     title = "corrupted-prefix-only"
-    # One condition covering every domain in this bucket: IAM conditions do not
-    # take a list, and a binding per domain would collide on the title.
-    # Markers to file, and sweep requests to consume once their shard is done.
-    expression = join(" || ", flatten([
-      for d in var.chunk_domains : [
-        "resource.name.startsWith(\"projects/_/buckets/${local.bucket_name}/objects/tsync/${d}/corrupted/\")",
-        "resource.name.startsWith(\"projects/_/buckets/${local.bucket_name}/objects/tsync/${d}/verify-jobs/\")",
-      ]
-    ]))
+    # Markers live under each domain; requests at the top, and are deleted as
+    # each shard is finished.
+    expression = join(" || ", [
+      "resource.name.startsWith(\"projects/_/buckets/${local.bucket_name}/objects/verify-jobs/\")",
+      "resource.name.contains(\"/corrupted/\")",
+    ])
   }
 }
 
 # ── The trigger ────────────────────────────────────────────────────────────
 
 resource "google_pubsub_topic" "chunks" {
-  count = local.verify_enabled ? 1 : 0
-  name  = "tsync-chunks-${var.name}"
+  name = "tsync-chunks-${var.name}"
 }
 
 # Cloud Storage publishes as its own per-project service agent, which has no
 # rights on a new topic until granted them.
 data "google_storage_project_service_account" "gcs" {
-  count = local.verify_enabled ? 1 : 0
 }
 
 resource "google_pubsub_topic_iam_member" "gcs_publisher" {
-  count  = local.verify_enabled ? 1 : 0
-  topic  = google_pubsub_topic.chunks[0].id
+  topic  = google_pubsub_topic.chunks.id
   role   = "roles/pubsub.publisher"
-  member = "serviceAccount:${data.google_storage_project_service_account.gcs[0].email_address}"
+  member = "serviceAccount:${data.google_storage_project_service_account.gcs.email_address}"
 }
 
 resource "google_storage_notification" "chunks" {
-  for_each           = local.verify_enabled ? toset(var.chunk_domains) : toset([])
   bucket             = local.bucket_name
-  topic              = google_pubsub_topic.chunks[0].id
+  topic              = google_pubsub_topic.chunks.id
   payload_format     = "JSON_API_V1"
   event_types        = ["OBJECT_FINALIZE"]
-  object_name_prefix = "tsync/${each.key}/chunks/"
+  object_name_prefix = "tsync/"
 
   # The binding must exist first or the notification is rejected.
   depends_on = [google_pubsub_topic_iam_member.gcs_publisher]
 }
 
 # The other way in: `tsync chunks-integrity --verify` writes one request per
-# shard here, and this delivers them to the same function. Its own notification
-# rather than a wider prefix, so a marker still cannot trigger anything.
+# shard at verify-jobs/<domain>/<shard>. The domain sits inside the prefix rather
+# than around it precisely so this one notification reaches every domain.
 resource "google_storage_notification" "verify_jobs" {
-  for_each           = local.verify_enabled ? toset(var.chunk_domains) : toset([])
   bucket             = local.bucket_name
-  topic              = google_pubsub_topic.chunks[0].id
+  topic              = google_pubsub_topic.chunks.id
   payload_format     = "JSON_API_V1"
   event_types        = ["OBJECT_FINALIZE"]
-  object_name_prefix = "tsync/${each.key}/verify-jobs/"
+  object_name_prefix = "verify-jobs/"
 
   depends_on = [google_pubsub_topic_iam_member.gcs_publisher]
 }
@@ -109,14 +92,12 @@ resource "google_storage_notification" "verify_jobs" {
 # The only resource here that needs the project spelled out; the rest take it
 # from the provider.
 resource "google_project_iam_member" "verify_receiver" {
-  count   = local.verify_enabled ? 1 : 0
   project = var.project
   role    = "roles/eventarc.eventReceiver"
-  member  = "serviceAccount:${google_service_account.verify[0].email}"
+  member  = "serviceAccount:${google_service_account.verify.email}"
 }
 
 resource "google_cloudfunctions2_function" "verify" {
-  count    = local.verify_enabled ? 1 : 0
   name     = "tsync-verify-${var.name}"
   location = var.function_region
 
@@ -140,7 +121,7 @@ resource "google_cloudfunctions2_function" "verify" {
   service_config {
     available_memory      = "${var.verify_memory_mb}M"
     timeout_seconds       = var.verify_timeout_seconds
-    service_account_email = google_service_account.verify[0].email
+    service_account_email = google_service_account.verify.email
     environment_variables = {
       BUCKET = local.bucket_name
       STORE  = "gcs"
@@ -150,29 +131,15 @@ resource "google_cloudfunctions2_function" "verify" {
   event_trigger {
     trigger_region = var.function_region
     event_type     = "google.cloud.pubsub.topic.v1.messagePublished"
-    pubsub_topic   = google_pubsub_topic.chunks[0].id
+    pubsub_topic   = google_pubsub_topic.chunks.id
     # A bucket the function cannot read would otherwise retry against every
     # chunk in it, forever. A dropped event costs a missed marker, which is
     # exactly what the store looked like before any of this existed.
     retry_policy          = "RETRY_POLICY_DO_NOT_RETRY"
-    service_account_email = google_service_account.verify[0].email
+    service_account_email = google_service_account.verify.email
   }
 }
 
 # No public invoker binding, unlike the share function: the trigger is the only
 # caller, and a client never invokes this.
 
-# What tells a client anything is checking this bucket at all.
-#
-# A store with no verifier and a store with nothing wrong both list no markers,
-# so that fact has to come from somewhere — and asking an operator to assert it
-# in their config is worse than not knowing: it is a question about
-# infrastructure, and a stale answer reads as a clean bill of health. The
-# deployment writes it instead, so it is true by construction and disappears
-# with the function.
-resource "google_storage_bucket_object" "verifier" {
-  for_each = local.verify_enabled ? toset(var.chunk_domains) : toset([])
-  bucket   = local.bucket_name
-  name     = "tsync/${each.key}/verifier"
-  content  = jsonencode({ function = google_cloudfunctions2_function.verify[0].name })
-}

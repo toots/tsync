@@ -34,7 +34,8 @@ import xxhash  # noqa: E402
 
 CHUNKS_SEG = "/chunks/"
 CORRUPTED_SEG = "/corrupted/"
-JOBS_SEG = "/verify-jobs/"
+JOBS_ROOT = "verify-jobs/"
+ROOT = "tsync/"  # lib/config/parsing/conf_parsing.ml
 FANOUT = 3  # lib/naming/chunk_layout.ml
 KEY_HEX = 16  # lib/utils/xxhash/xxhash.ml, hex_length
 
@@ -117,20 +118,27 @@ def marker_key(key):
     return key[:cut] + CORRUPTED_SEG + rest
 
 
-def job_shard(key):
-    """The shard a whole-store request names, or None when [key] is not one.
+def job_target(key):
+    """The chunk prefix a whole-store request names, or None when [key] is not
+    one.
 
-    A request is an empty object under `verify-jobs/`, written by the client one
-    per shard; the bucket's own notification delivers it here. So a sweep is the
-    same function on the same trigger doing the same per-chunk check — there is
-    no second path to keep in step, and nothing to run but what already runs on
-    every upload.
+    Requests live at `verify-jobs/<domain>/<shard>` — top level, with the domain
+    inside rather than around. One literal prefix therefore reaches every
+    domain's, so the notification that delivers them needs no list of domain
+    names: such a list has no safe default and fails silently, a name matching
+    nothing deploying a trigger that never fires.
+
+    A request is an empty object the client writes; the bucket's own notification
+    delivers it here. So a sweep is the same function on the same trigger doing
+    the same per-chunk check — there is no second path to keep in step.
     """
-    cut = key.rfind(JOBS_SEG)
-    if cut < 0:
+    if not key.startswith(JOBS_ROOT):
         return None
-    shard = key[cut + len(JOBS_SEG):]
-    return shard if is_shard_name(shard) else None
+    rest = key[len(JOBS_ROOT):]
+    domain, sep, shard = rest.rpartition("/")
+    if not sep or not domain or not is_shard_name(shard):
+        return None
+    return f"{ROOT}{domain}{CHUNKS_SEG}{shard}/"
 
 
 def verify_shard(st, key):
@@ -140,10 +148,10 @@ def verify_shard(st, key):
     then visible to whoever asks why the sweep never finished, and re-queueing is
     what retries it. Deleting first would lose that.
     """
-    shard = job_shard(key)
-    if shard is None:
+    prefix = job_target(key)
+    if prefix is None:
         return None
-    prefix = key[: key.rfind(JOBS_SEG)] + CHUNKS_SEG + shard + "/"
+    shard = key.rsplit("/", 1)[-1]
     checked = bad = 0
     for chunk in st.list_keys(prefix):
         result = verify_object(st, chunk)
@@ -189,7 +197,7 @@ def _keys_from_event(event):
 def verify_key(st, key):
     """One object-created event, whichever kind. A chunk is checked; a request
     sweeps the shard it names; anything else is not ours."""
-    if job_shard(key) is not None:
+    if job_target(key) is not None:
         return verify_shard(st, key)
     result = verify_object(st, key)
     if result is None:

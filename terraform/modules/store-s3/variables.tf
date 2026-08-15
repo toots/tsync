@@ -100,23 +100,6 @@ variable "lambda_zip_hash" {
 
 # ── Chunk verification ─────────────────────────────────────────────────────
 
-variable "chunk_domains" {
-  type        = list(string)
-  default     = []
-  description = <<-EOT
-    tsync domain names whose chunks live in this bucket, e.g. ["photos"] for
-    keys under tsync/photos/chunks/. Each gets an object-created trigger that
-    checks the chunk against its own name.
-
-    Empty (the default) deploys nothing. There is no safe guess: the store name
-    and the domain name are only conventionally equal, and a wrong prefix means
-    a function that never fires — which looks exactly like a store with no
-    corruption. Set this to the domain names in the daemon's config; nothing is
-    needed on the client, which reads the object this deployment writes to know
-    a verifier exists.
-  EOT
-}
-
 variable "manage_notifications" {
   type        = bool
   default     = true

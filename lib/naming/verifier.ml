@@ -1,21 +1,5 @@
 open Lwt.Syntax
 
-(* Whether anything is checking this store, asked of the store rather than of the
-   operator. The deployment writes {!Chunk_layout.verifier_key} when it creates
-   the function, so the answer is a fact about what exists and not a claim
-   somebody made in a config file once.
-
-   Not memoised here: a driver holds its own, so a fresh store instance probes
-   again — which is what makes it testable, and what keeps one bucket's answer
-   out of another's. *)
-let deployed ~head_opt ~prefix =
-  Lwt.catch
-    (fun () ->
-      let+ found = head_opt ~key:(Chunk_layout.verifier_key ~prefix) () in
-      Option.is_some found)
-    (* A store we cannot reach has not told us it checks anything. *)
-    (fun _ -> Lwt.return_false)
-
 (* One request per shard, and the store's own object-created notification is what
    delivers them: a bucket that already calls a function on every new chunk will
    call it on these too, so a whole-store check needs no queue service, no second

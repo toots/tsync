@@ -159,8 +159,8 @@ def test_a_job_sweeps_its_shard(store_and_verify):
     st.put_bytes(bad_path, bytes(b ^ 0xFF for b in bad))
     # Both chunks land in the same shard only by luck, so drive each one's own.
     for key in (good_key, bad_key):
-        job = f"tsync/d/verify-jobs/{key[:3]}"
-        assert verify.job_shard(job) == key[:3]
+        job = f"verify-jobs/d/{key[:3]}"
+        assert verify.job_target(job) == f"tsync/d/chunks/{key[:3]}/"
         st.put_bytes(job, b"")
         verify.verify_key(st, job)
         # The request is gone once the shard is done.
@@ -175,7 +175,7 @@ def test_a_job_for_an_empty_shard_is_just_dropped(store_and_verify):
     prefixes are populated — so most requests find nothing and must cost
     nothing but their own deletion."""
     st, verify = store_and_verify
-    job = "tsync/d/verify-jobs/fff"
+    job = "verify-jobs/d/fff"
     st.put_bytes(job, b"")
     assert verify.verify_key(st, job) == {"checked": 0, "corrupt": 0}
     assert not st.exists(job)
@@ -186,8 +186,10 @@ def test_a_request_never_looks_like_a_chunk(store_and_verify):
     """The two prefixes are told apart by the key alone, so neither entry point
     has to decide what it was handed."""
     st, verify = store_and_verify
-    job = "tsync/d/verify-jobs/abc"
+    job = "verify-jobs/d/abc"
     assert verify.marker_key(job) is None
     key = verify.key_of_body([b"anything"])
-    assert verify.job_shard(f"tsync/d/chunks/{key[:3]}/{key}") is None
-    assert verify.job_shard("tsync/d/verify-jobs/not-a-shard") is None
+    assert verify.job_target(f"tsync/d/chunks/{key[:3]}/{key}") is None
+    assert verify.job_target("verify-jobs/d/not-a-shard") is None
+    # A domain with a space in it, which is a real one.
+    assert verify.job_target("verify-jobs/Jellyfin Media/abc") == "tsync/Jellyfin Media/chunks/abc/"
