@@ -197,7 +197,6 @@ module Make (C : Conf.S) : sig
   val prune_staged_dirs : unit -> unit Lwt.t
 
   (** Whether the mirror exists, i.e. this domain has a local cache. *)
-  val mirror_exists : unit -> bool Lwt.t
 
   (** Create the mirror root and drop leftover temp files. *)
   val init : unit -> unit Lwt.t

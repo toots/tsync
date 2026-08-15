@@ -7,19 +7,11 @@ type stats = {
   repaired : int;
   cleared : int;
   unrepairable : int;
-  bytes : int;
   lost : string list;
 }
 
 let empty =
-  {
-    checked = 0;
-    repaired = 0;
-    cleared = 0;
-    unrepairable = 0;
-    bytes = 0;
-    lost = [];
-  }
+  { checked = 0; repaired = 0; cleared = 0; unrepairable = 0; lost = [] }
 
 let describe ~chunk_key ~store = function
   | Repaired { from_store } ->
@@ -71,7 +63,7 @@ module Make (C : Conf.S) = struct
   let repair_one ~source ~dry_run (e : Corruption.entry) =
     let chunk_key = e.Corruption.chunk_key in
     match member_named e.Corruption.store with
-      | None -> Lwt.return (Unrepairable, 0)
+      | None -> Lwt.return Unrepairable
       | Some m -> (
           let (module Dst : Backend.S) = m.Backend.backend in
           let write body =
@@ -83,17 +75,17 @@ module Make (C : Conf.S) = struct
           match mine with
             | Some body ->
                 let+ () = write body in
-                (Cleared, String.length body)
+                Cleared
             | None -> (
                 let* found =
                   first_good chunk_key
                     (sources_for ~source ~bad_store:e.Corruption.store)
                 in
                 match found with
-                  | None -> Lwt.return (Unrepairable, 0)
+                  | None -> Lwt.return Unrepairable
                   | Some (from_store, body) ->
                       let+ () = write body in
-                      (Repaired { from_store }, String.length body)))
+                      Repaired { from_store }))
 
   let run ?source ?(dry_run = false) ?(on_start = fun ~total:_ -> ())
       ?(on_chunk = fun ~done_:_ ~total:_ ~chunk_key:_ ~store:_ _ -> ()) () =
@@ -107,23 +99,13 @@ module Make (C : Conf.S) = struct
     let* stats =
       Lwt_list.fold_left_s
         (fun acc (e : Corruption.entry) ->
-          let+ outcome, bytes = repair_one ~source ~dry_run e in
+          let+ outcome = repair_one ~source ~dry_run e in
           let acc = { acc with checked = acc.checked + 1 } in
           on_chunk ~done_:acc.checked ~total ~chunk_key:e.Corruption.chunk_key
             ~store:e.Corruption.store outcome;
           match outcome with
-            | Repaired _ ->
-                {
-                  acc with
-                  repaired = acc.repaired + 1;
-                  bytes = acc.bytes + bytes;
-                }
-            | Cleared ->
-                {
-                  acc with
-                  cleared = acc.cleared + 1;
-                  bytes = acc.bytes + bytes;
-                }
+            | Repaired _ -> { acc with repaired = acc.repaired + 1 }
+            | Cleared -> { acc with cleared = acc.cleared + 1 }
             | Unrepairable ->
                 {
                   acc with
@@ -132,7 +114,6 @@ module Make (C : Conf.S) = struct
                 })
         empty report.Corruption.entries
     in
-    (* The memo holds a set this has just changed. *)
     if not dry_run then Cor.invalidate ();
     Lwt.return stats
 end

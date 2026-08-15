@@ -31,7 +31,6 @@ type stats = {
   repaired : int;
   cleared : int;
   unrepairable : int;
-  bytes : int;
   lost : string list;  (** the keys nothing could supply *)
 }
 

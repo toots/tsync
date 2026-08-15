@@ -74,9 +74,6 @@ type step =
   | StageWrite of { path : string; content : string }
       (** Replace the file's content locally without uploading: unsynced edits,
           the way a writer leaves a file between write and close. *)
-  | CorruptCachedChunk of { path : string; index : int }
-      (** Overwrite a cached chunk body with garbage, so it no longer hashes to
-          its own name. *)
   | DeleteCachedChunk of { path : string; index : int }
   | ForgetFolderId of string
   | RecoverStaged
@@ -193,8 +190,6 @@ let rec render_step = function
   | DeleteRemoteManifest p -> "delete-remote-manifest " ^ p
   | StageWrite { path; content } ->
       Printf.sprintf "stage-write %s %S" path content
-  | CorruptCachedChunk { path; index } ->
-      Printf.sprintf "corrupt-cached-chunk %s #%d" path index
   | DeleteCachedChunk { path; index } ->
       Printf.sprintf "delete-cached-chunk %s #%d" path index
   | ForgetFolderId rel -> "forget-folder-id " ^ rel
@@ -901,13 +896,6 @@ let setup_client (module C : Conf.S) root staging_prefix =
         String.iteri (fun i c -> Bigarray.Array1.set buf i c) content;
         let* (_ : int) = F.write k (Bigarray.Array1.sub buf 0 len) ~offset:0L in
         Lwt.return_unit
-    | CorruptCachedChunk { path; index } ->
-        (* Pull the body in first: there is nothing to corrupt in a store that
-           never held it (a whole-file write leaves none of its chunks local), and
-           a step that quietly did nothing would read as a passing test. *)
-        let* () = F.ensure_cached (key path) in
-        let+ p = cached_chunk_path (key path) index in
-        write_file p "corrupted chunk body"
     | DeleteCachedChunk { path; index } ->
         let* () = F.ensure_cached (key path) in
         let* p = cached_chunk_path (key path) index in

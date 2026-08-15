@@ -40,7 +40,7 @@ val key_of_body : string -> string
 
 (** ["tsync/corrupted/<domain>/"]. Beside the domains rather than inside one,
     with the domain as its first segment, so one literal prefix covers every
-    domain — see {!corrupted_root}. *)
+    domain. *)
 val corrupted_prefix : chunk_prefix:string -> string
 
 (** Where a request to check one shard is filed. The bucket is the queue: a

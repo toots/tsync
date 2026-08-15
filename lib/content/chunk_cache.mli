@@ -50,7 +50,6 @@ module Make (C : Conf.S) (F : Fetch) : sig
 
   (** One stored chunk's bytes if its group is already here, without fetching.
   *)
-  val member_if_local : group:Chunk_group.t -> index:int -> string option Lwt.t
 
   (** Drop one group body. It is re-fetched on the next read. *)
   val forget : group:Chunk_group.t -> unit Lwt.t
