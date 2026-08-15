@@ -58,7 +58,10 @@ module Make (C : Conf.S) = struct
               | Some file_key when rel <> "" -> R.get_opt ~key:file_key ()
               | _ -> Lwt.return_none
           in
-          let marker = Option.bind obj Folder.marker_of_string in
+          let marker =
+            Option.bind obj (fun obj ->
+                Folder.marker_of_string (Chunk.to_string obj))
+          in
           match (file_key, obj, marker) with
             | Some file_key, Some _, None ->
                 (* Single file: the Lambda fetches the manifest by this key. *)
@@ -119,7 +122,9 @@ module Make (C : Conf.S) = struct
         let token = Option.value token ~default:(Id.token 16) in
         let manifest_key = shares_prefix ^ token in
         let* () =
-          B.put ~key:manifest_key ~data:(Yojson.Basic.to_string manifest) ()
+          B.put ~key:manifest_key
+            ~data:(Chunk.of_string (Yojson.Basic.to_string manifest))
+            ()
         in
         Lwt.return_ok (share_url ^ "/" ^ token))
       (function

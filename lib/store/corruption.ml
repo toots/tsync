@@ -101,7 +101,9 @@ module Make (C : Conf.S) = struct
           Lwt.catch
             (fun () ->
               let+ body = B.get_opt ~key:(key e.chunk_key) () in
-              Option.map Corruption_marker.of_string body)
+              Option.map
+                (fun body -> Corruption_marker.of_string (Chunk.to_string body))
+                body)
             (fun _ -> Lwt.return_none)
 
   let memo () = memo_for C.chunk_prefix

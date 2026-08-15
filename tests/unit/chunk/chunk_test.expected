@@ -1,0 +1,14 @@
+of_string/to_string: ok
+length: ok
+empty: ok
+map empty: ok
+survives unlink: ok
+survives republish: ok
+short file raises: ok
+short file not grown: ok
+write does not reach file: ok
+unaligned offset: ok
+hash matches string: ok
+mapping is a small heap object: ok
+write_to: ok
+checks: 13

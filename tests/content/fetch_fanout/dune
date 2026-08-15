@@ -2,6 +2,8 @@
  (flags
   (:standard
    -open
+   Tsync_chunk
+   -open
    Tsync_backend_register
    -open
    Tsync_content
@@ -11,6 +13,7 @@
    Tsync_conf))
  (name fetch_fanout_test)
  (libraries
+  tsync_chunk
   tsync_backend_register
   tsync_content
   tsync_object

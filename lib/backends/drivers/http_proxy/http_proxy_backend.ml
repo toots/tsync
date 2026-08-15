@@ -58,7 +58,7 @@ let new_cache () = Cache.create ~keep:keep_idle_ns ~parallel:max_parallel ()
    table as permanently failed, so only a new cache redials. It is replaced once
    per generation, so requests that raced into the same dead pool share the one
    redial. *)
-let call t ~meth ?(body = "") uri =
+let call t ~meth ?(body = Chunk.empty) uri =
   let resource = Uri.path_and_query uri in
   let headers =
     Cohttp.Header.of_list
@@ -69,12 +69,13 @@ let call t ~meth ?(body = "") uri =
   let attempt cache =
     Lwt_unix.with_timeout request_timeout (fun () ->
         let* resp, rbody =
+          (* The one place a body crosses into cohttp, and back. *)
           Cache.call cache ~headers
-            ~body:(Cohttp_lwt.Body.of_string body)
+            ~body:(Cohttp_lwt.Body.of_string (Chunk.to_string body))
             meth uri
         in
         let+ s = Cohttp_lwt.Body.to_string rbody in
-        (resp, s))
+        (resp, Chunk.of_string s))
   in
   let used = t.cache in
   Lwt.catch
@@ -107,15 +108,23 @@ let call_retry t ~meth ?body op uri =
   Backend.with_retry ~name:"http-proxy" ~op (fun () ->
       let* resp, rbody = call t ~meth ?body uri in
       if is_transient_code (code resp) then
-        Lwt.fail (backend_error op (code resp) (excerpt rbody))
+        Lwt.fail
+          (backend_error op (code resp) (excerpt (Chunk.to_string rbody)))
       else Lwt.return (resp, rbody))
+
+(* Only the object verbs carry a body worth keeping off the heap; everything
+   below answers with JSON or a sentence, and reads it as one. *)
+let call_text t ~meth ?body op uri =
+  let+ resp, rbody = call_retry t ~meth ?body op uri in
+  (resp, Chunk.to_string rbody)
 
 let obj_uri t key =
   Uri.with_path t.base_uri ("/o/" ^ Http_proxy.Wire.encode_key key)
 
 let put t ~key ~data () =
   let+ resp, body = call_retry t ~meth:`PUT ~body:data "put" (obj_uri t key) in
-  if not (is_ok resp) then raise (backend_error "put" (code resp) body)
+  if not (is_ok resp) then
+    raise (backend_error "put" (code resp) (Chunk.to_string body))
 
 (* The serving side arbitrates, holding the store, and the reply body is
    whatever ended up at the key. A proxy too old to know the parameter would
@@ -125,20 +134,21 @@ let put_if_absent t ~key ~data () =
   let uri = Uri.add_query_param' (obj_uri t key) ("if_absent", "1") in
   let+ resp, body = call_retry t ~meth:`PUT ~body:data "put_if_absent" uri in
   if is_ok resp then body
-  else raise (backend_error "put_if_absent" (code resp) body)
+  else raise (backend_error "put_if_absent" (code resp) (Chunk.to_string body))
 
 let get t ~key () =
   let+ resp, body = call_retry t ~meth:`GET "get" (obj_uri t key) in
-  if is_ok resp then body else raise (backend_error "get" (code resp) body)
+  if is_ok resp then body
+  else raise (backend_error "get" (code resp) (Chunk.to_string body))
 
 let get_opt t ~key () =
   let+ resp, body = call_retry t ~meth:`GET "get_opt" (obj_uri t key) in
   if is_ok resp then Some body
   else if code resp = 404 then None
-  else raise (backend_error "get_opt" (code resp) body)
+  else raise (backend_error "get_opt" (code resp) (Chunk.to_string body))
 
 let head_opt t ~key () =
-  let+ resp, body = call_retry t ~meth:`HEAD "head" (obj_uri t key) in
+  let+ resp, body = call_text t ~meth:`HEAD "head" (obj_uri t key) in
   if is_ok resp then (
     let h = Cohttp.Response.headers resp in
     let size =
@@ -156,7 +166,7 @@ let head_opt t ~key () =
   else raise (backend_error "head" (code resp) body)
 
 let delete t ~key () =
-  let+ resp, body = call_retry t ~meth:`DELETE "delete" (obj_uri t key) in
+  let+ resp, body = call_text t ~meth:`DELETE "delete" (obj_uri t key) in
   if not (is_ok resp) then raise (backend_error "delete" (code resp) body)
 
 let delete_multi t keys =
@@ -164,7 +174,9 @@ let delete_multi t keys =
     Yojson.Safe.to_string (`List (List.map (fun k -> `String k) keys))
   in
   let uri = Uri.with_path t.base_uri "/delete-multi" in
-  let+ resp, rbody = call_retry t ~meth:`POST ~body "delete_multi" uri in
+  let+ resp, rbody =
+    call_text t ~meth:`POST ~body:(Chunk.of_string body) "delete_multi" uri
+  in
   if not (is_ok resp) then
     raise (backend_error "delete_multi" (code resp) rbody)
 
@@ -174,7 +186,7 @@ let copy t ~src_key ~dst_key () =
       (Uri.with_path t.base_uri "/copy")
       [("src", src_key); ("dst", dst_key)]
   in
-  let+ resp, body = call_retry t ~meth:`POST "copy" uri in
+  let+ resp, body = call_text t ~meth:`POST "copy" uri in
   if not (is_ok resp) then raise (backend_error "copy" (code resp) body)
 
 let list_all t ?max_keys ~prefix () =
@@ -186,7 +198,7 @@ let list_all t ?max_keys ~prefix () =
       | None -> []
   in
   let uri = Uri.with_query' (Uri.with_path t.base_uri "/list") query in
-  let+ resp, body = call_retry t ~meth:`GET "list_all" uri in
+  let+ resp, body = call_text t ~meth:`GET "list_all" uri in
   if is_ok resp then Http_proxy.Wire.entries_of_json body
   else raise (backend_error "list_all" (code resp) body)
 
@@ -197,7 +209,7 @@ let query_share_url t ~prefix =
   let uri =
     Uri.with_query' (Uri.with_path t.base_uri "/share-url") [("prefix", prefix)]
   in
-  let+ resp, body = call_retry t ~meth:`GET "share_url" uri in
+  let+ resp, body = call_text t ~meth:`GET "share_url" uri in
   if is_ok resp then (
     match Yojson.Safe.from_string body with
       | exception _ -> None
@@ -223,7 +235,7 @@ let query_chunk_size t ~prefix =
       (Uri.with_path t.base_uri "/chunk-size")
       [("prefix", prefix)]
   in
-  let+ resp, body = call_retry t ~meth:`GET "chunk_size" uri in
+  let+ resp, body = call_text t ~meth:`GET "chunk_size" uri in
   if is_ok resp then (
     match Yojson.Safe.from_string body with
       | exception _ -> None
@@ -244,7 +256,7 @@ let query_max_concurrency t ~prefix =
       (Uri.with_path t.base_uri "/max-concurrency")
       [("prefix", prefix)]
   in
-  let+ resp, body = call_retry t ~meth:`GET "max_concurrency" uri in
+  let+ resp, body = call_text t ~meth:`GET "max_concurrency" uri in
   if is_ok resp then (
     match Yojson.Safe.from_string body with
       | exception _ -> None
@@ -263,7 +275,7 @@ let query_verified t ~prefix =
   let uri =
     Uri.with_query' (Uri.with_path t.base_uri "/verified") [("prefix", prefix)]
   in
-  let+ resp, body = call_retry t ~meth:`GET "verified" uri in
+  let+ resp, body = call_text t ~meth:`GET "verified" uri in
   if is_ok resp then (
     match Yojson.Safe.from_string body with
       | exception _ -> false

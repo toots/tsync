@@ -28,6 +28,8 @@
    -open
    Tsync_conf
    -open
+   Tsync_chunk
+   -open
    Tsync_backend_register
    -open
    Tsync_domain_store
@@ -55,6 +57,7 @@
   tsync_object
   tsync_naming
   tsync_frontend_register
+  tsync_chunk
   tsync_backend_register
   tsync_metrics
   tsync_conf_parsing

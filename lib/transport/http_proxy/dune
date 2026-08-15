@@ -1,5 +1,13 @@
 (library
  (flags
-  (:standard -open Tsync_backend_register))
+  (:standard -open Tsync_chunk -open Tsync_backend_register))
  (name tsync_http_proxy)
- (libraries tsync_backend_register digestif eqaf base64 yojson unix))
+ (libraries
+  tsync_chunk
+  tsync_backend_register
+  digestif
+  eqaf
+  base64
+  yojson
+  unix
+  bigstringaf))

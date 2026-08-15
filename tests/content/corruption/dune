@@ -12,6 +12,8 @@
    -open
    Tsync_content
    -open
+   Tsync_chunk
+   -open
    Tsync_backend_register
    -open
    Tsync_local_backend))
@@ -22,6 +24,7 @@
   tsync_object
   tsync_store
   tsync_content
+  tsync_chunk
   tsync_backend_register
   tsync_local_backend
   unix

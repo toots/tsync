@@ -4,7 +4,12 @@ module Auth = struct
 
   (* Replay window: both clocks are assumed roughly in sync. *)
   let max_skew = 300.
-  let sha256_hex s = Digestif.SHA256.(to_hex (digest_string s))
+
+  (* Over the bytes where they lie: a chunk body is the largest thing signed
+     here, and materialising one as a string to hash it would put the megabytes
+     back on the heap that carrying it as a chunk keeps off. *)
+  let sha256_hex body =
+    Digestif.SHA256.(to_hex (digest_bigstring (Chunk.buffer body)))
 
   (* Sign method + request-target + timestamp + a hash of the body, so a captured
      signature can't be replayed against a different request or body. *)

@@ -28,7 +28,7 @@ let () =
     (fun (name, data) ->
       Printf.printf "%s: %s %s %s\n" name (Xxhash.hash_hex data 0)
         (Xxhash.hash_hex data 1)
-        (Chunk_layout.key_of_body data))
+        (Chunk_layout.key_of_body (Chunk.of_string data)))
     inputs;
   (* XXH3-64 of the empty string is a published reference value. *)
   assert (Xxhash.hash_hex "" 0 = "2d06800538d394c2");
@@ -37,7 +37,7 @@ let () =
   List.iter
     (fun (_, data) ->
       assert (
-        Chunk_layout.key_of_body data
+        Chunk_layout.key_of_body (Chunk.of_string data)
         = Xxhash.hash_hex data 0 ^ "-" ^ Xxhash.hash_hex data 1))
     inputs;
   (* Streaming API: single update must match one-shot hash_hex. *)

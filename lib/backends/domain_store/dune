@@ -10,6 +10,8 @@
    -open
    Tsync_local_io
    -open
+   Tsync_chunk
+   -open
    Tsync_backend_register
    -open
    Tsync_work))
@@ -17,6 +19,7 @@
  (libraries
   tsync_naming
   tsync_work
+  tsync_chunk
   tsync_backend_register
   tsync_local_io
   tsync_lwt_unix

@@ -123,7 +123,7 @@ module Make (C : Conf.S) = struct
     match data with
       | None -> Lwt.return_none
       | Some data -> (
-          match of_string data with
+          match of_string (Chunk.to_string data) with
             | Some run -> Lwt.return_some run
             | None ->
                 (* Written by [put], so it is either absent or whole: garbage
@@ -134,7 +134,7 @@ module Make (C : Conf.S) = struct
 
   let write_run run =
     let (module Mk : Backend.S) = marker_store () in
-    Mk.put ~key:marker_key ~data:(to_string run) ()
+    Mk.put ~key:marker_key ~data:(Chunk.of_string (to_string run)) ()
 
   let clear_run () =
     let (module Mk : Backend.S) = marker_store () in

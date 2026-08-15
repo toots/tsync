@@ -53,7 +53,7 @@ let entry_of_key ~index ~size key =
    body no longer hashes to its own key is exactly what a check cannot then
    tell apart from corruption. *)
 let chunk_entry_of_body ~index data =
-  entry_of_key ~index ~size:(String.length data) (key_of_body data)
+  entry_of_key ~index ~size:(Chunk.length data) (key_of_body data)
 
 (* Derived from the file's {i own} chunk size, so a file uploaded under a
    different setting still groups correctly. *)

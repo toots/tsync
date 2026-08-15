@@ -10,6 +10,8 @@
    -open
    Tsync_xxhash
    -open
+   Tsync_chunk
+   -open
    Tsync_backend_register
    -open
    Tsync_conf))
@@ -20,6 +22,7 @@
   tsync_naming
   tsync_xxhash
   tsync_conf
+  tsync_chunk
   tsync_backend_register
   lwt
   lwt.unix))

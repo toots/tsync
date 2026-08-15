@@ -735,7 +735,7 @@ module Make (C : Conf.S) (R : Remote.S) = struct
     in
     match fd with
       | None ->
-          Bytes.fill buf 0 len '\000';
+          Local_io.zero buf ~pos:0 ~len;
           Lwt.return_unit
       | Some fd ->
           Lwt.finalize
@@ -744,12 +744,12 @@ module Make (C : Conf.S) (R : Remote.S) = struct
                 if pos >= len then Lwt.return_unit
                 else
                   let* n =
-                    Lwt_unix_retry.pread fd buf ~file_offset:(offset + pos) pos
+                    Local_io.pread fd buf ~file_offset:(offset + pos) pos
                       (len - pos)
                   in
                   (* Short of [len]: the rest of the chunk is a hole. *)
                   if n = 0 then (
-                    Bytes.fill buf pos (len - pos) '\000';
+                    Local_io.zero buf ~pos ~len:(len - pos);
                     Lwt.return_unit)
                   else loop (pos + n)
               in
@@ -767,7 +767,7 @@ module Make (C : Conf.S) (R : Remote.S) = struct
     let zeroes =
       `Fill
         (fun buf ->
-          Bytes.fill buf 0 len '\000';
+          Local_io.zero buf ~pos:0 ~len;
           Lwt.return_unit)
     in
     let slots = staged.Manifest.s_slots in
@@ -877,15 +877,15 @@ module Make (C : Conf.S) (R : Remote.S) = struct
           match source with
             | `Reuse _ -> assert false (* [local] ruled this out *)
             | `Fill fill ->
-                (* Its own buffer rather than the upload path's pool: this
-                         runs over a group's members, two at the defaults. *)
+                (* Its own buffer rather than one of the upload path's slots:
+                   this runs over a group's members, two at the defaults. *)
                 let len =
                   Manifest.chunk_len ~size:staged.Manifest.s_size
                     ~chunk_size:staged.Manifest.s_chunk_size i
                 in
-                let buf = Bytes.create len in
+                let buf = Chunk.create len in
                 let+ () = fill buf in
-                Bytes.unsafe_to_string buf)
+                Chunk.of_buffer buf)
     in
     (* An untouched group keeps its key, so whatever body we hold for it is
        still right. *)

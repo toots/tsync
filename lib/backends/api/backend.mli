@@ -60,12 +60,12 @@ val no_caps : caps
 val merge_caps : caps list -> caps
 
 module type S = sig
-  val put : key:string -> data:string -> unit -> unit Lwt.t
-  val get : key:string -> unit -> string Lwt.t
+  val put : key:string -> data:Chunk.t -> unit -> unit Lwt.t
+  val get : key:string -> unit -> Chunk.t Lwt.t
 
   (** [None] when the key does not exist; other failures raise. Saves the HEAD
       round trip of [head_opt] + [get] when the body is wanted. *)
-  val get_opt : key:string -> unit -> string option Lwt.t
+  val get_opt : key:string -> unit -> Chunk.t option Lwt.t
 
   (** Write [data] at [key] only if nothing is there, answering with whatever is
       there afterwards — [data] itself when this call won, the other writer's
@@ -79,7 +79,7 @@ module type S = sig
       A claim is the only thing this is for — content is either
       content-addressed, in which case racing writers agree, or owned by one
       client. *)
-  val put_if_absent : key:string -> data:string -> unit -> string Lwt.t
+  val put_if_absent : key:string -> data:Chunk.t -> unit -> Chunk.t Lwt.t
 
   val head_opt : key:string -> unit -> file_entry option Lwt.t
   val delete : key:string -> unit -> unit Lwt.t

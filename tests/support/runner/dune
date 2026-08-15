@@ -18,6 +18,8 @@
    -open
    Tsync_lwt_unix
    -open
+   Tsync_chunk
+   -open
    Tsync_backend_register
    -open
    Tsync_conf
@@ -39,6 +41,7 @@
   tsync_lwt_unix
   tsync_local_io
   tsync_conf
+  tsync_chunk
   tsync_backend_register
   tsync_domain_store
   tsync_local_backend

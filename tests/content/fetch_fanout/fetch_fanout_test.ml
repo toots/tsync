@@ -75,7 +75,8 @@ module F = struct
   let get_chunk ~chunk_key =
     incr started;
     let+ () = gate in
-    String.make csize (Char.chr (Hashtbl.hash chunk_key land 0x7f))
+    Chunk.of_string
+      (String.make csize (Char.chr (Hashtbl.hash chunk_key land 0x7f)))
 end
 
 module Cc = Chunk_cache.Make (C) (F)

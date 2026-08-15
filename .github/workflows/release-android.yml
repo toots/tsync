@@ -65,7 +65,7 @@ jobs:
             digestif-android eqaf-android yojson-android lwt-android \
             ppx_blob-android mem_usage-android base64-android tls-lwt-android \
             x509-android mirage-crypto-pk-android cmdliner-android \
-            memtrace-android
+            memtrace-android bigstringaf-android
       - name: Cross-build the daemon
         # The context path, not `bin/tsync.exe`: that builds the host context too,
         # which wants FUSE.

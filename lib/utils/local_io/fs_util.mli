@@ -37,7 +37,7 @@ val atomic_write : string -> string -> unit Lwt.t
 val atomic_write_at :
   string ->
   size:int ->
-  ((offset:int -> string -> unit Lwt.t) -> unit Lwt.t) ->
+  ((offset:int -> Local_io.buffer -> unit Lwt.t) -> unit Lwt.t) ->
   unit Lwt.t
 
 (** [copy_file ~src ~dst] copies [src] over [dst], creating or truncating it. *)

@@ -10,6 +10,8 @@
    -open
    Tsync_naming
    -open
+   Tsync_chunk
+   -open
    Tsync_backend_register
    -open
    Tsync_conf
@@ -22,6 +24,7 @@
   tsync_object
   tsync_naming
   tsync_conf
+  tsync_chunk
   tsync_backend_register
   tsync_local_backend
   lwt

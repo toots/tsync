@@ -51,7 +51,7 @@ module Fetch = struct
       (fun () ->
         let* () = Lwt_unix.sleep 0.05 in
         match List.assoc_opt chunk_key bodies with
-          | Some b -> Lwt.return b
+          | Some b -> Lwt.return (Chunk.of_string b)
           | None ->
               Lwt.fail (Backend.Backend_error ("no such chunk: " ^ chunk_key)))
       (fun () ->

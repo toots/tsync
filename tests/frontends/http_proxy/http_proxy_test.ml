@@ -124,7 +124,8 @@ let rec substitute ~values (j : Yojson.Safe.t) =
 
 let signed_request ~secret ~path =
   let headers =
-    Http_proxy.Auth.request_headers ~secret ~meth:"GET" ~path ~body:"" ()
+    Http_proxy.Auth.request_headers ~secret ~meth:"GET" ~path ~body:Chunk.empty
+      ()
   in
   Cohttp.Request.make
     ~headers:(Cohttp.Header.of_list headers)
@@ -140,7 +141,7 @@ let () =
   let secret = "s3cr3t"
   and meth = "GET"
   and path = "/o/abc"
-  and body = "hello" in
+  and body = Chunk.of_string "hello" in
   (* A freshly-signed request verifies. *)
   let headers = Http_proxy.Auth.request_headers ~secret ~meth ~path ~body () in
   let ts = List.assoc Http_proxy.Auth.timestamp_header headers in
@@ -161,7 +162,7 @@ let () =
   assert (
     not
       (Http_proxy.Auth.verify ~secret ~meth ~path ~timestamp:ts ~signature:sig_
-         ~body:"tampered"));
+         ~body:(Chunk.of_string "tampered")));
   assert (
     not
       (Http_proxy.Auth.verify ~secret ~meth ~path ~timestamp:ts
@@ -274,7 +275,9 @@ let () =
      client cannot write through the proxy whatever its own config says. *)
   let status op ~read_only =
     let r = { (route "one") with read_only } in
-    let resp, _ = Lwt_main.run (Http_proxy_frontend.exec r op ~body:"x") in
+    let resp, _ =
+      Lwt_main.run (Http_proxy_frontend.exec r op ~body:(Chunk.of_string "x"))
+    in
     Cohttp.Code.code_of_status (Cohttp.Response.status resp)
   in
   let key = "tsync/one/manifests/x" in
@@ -314,7 +317,7 @@ let () =
          let (module B : Backend.S) = C.store in
          B.put
            ~key:(C.chunk_prefix ^ Chunk_layout.relative_path key)
-           ~data:"chunk" ())
+           ~data:(Chunk.of_string "chunk") ())
        (List.init planted Fun.id));
 
   (* A journal with a cursor set, so "to apply" is counted against something.
@@ -339,7 +342,7 @@ let () =
          let (module B : Backend.S) = C.store in
          B.put
            ~key:(C.journal_prefix ^ Journal.Entry_key.relative_path entry)
-           ~data:"{}" ())
+           ~data:(Chunk.of_string "{}") ())
        [
          entry_key ("1785969965000-" ^ other);
          cursor_entry;
@@ -560,7 +563,7 @@ let () =
     let resp, _ =
       Lwt_main.run
         (Http_proxy_frontend.serve_status ~port:8443 ~tls:true ~json
-           status_routes req "")
+           status_routes req Chunk.empty)
     in
     (status_code resp, content_type resp)
   in
@@ -633,7 +636,8 @@ let () =
      not land in the snapshots above. *)
   let domains req =
     let resp, body =
-      Lwt_main.run (Http_proxy_frontend.serve_domains status_routes req "")
+      Lwt_main.run
+        (Http_proxy_frontend.serve_domains status_routes req Chunk.empty)
     in
     (status_code resp, Lwt_main.run (Cohttp_lwt.Body.to_string body))
   in

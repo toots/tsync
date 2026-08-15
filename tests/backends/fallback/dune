@@ -2,6 +2,8 @@
  (flags
   (:standard
    -open
+   Tsync_chunk
+   -open
    Tsync_backend_register
    -open
    Tsync_local_backend
@@ -9,6 +11,7 @@
    Tsync_domain_store))
  (name fallback)
  (libraries
+  tsync_chunk
   tsync_backend_register
   tsync_domain_store
   tsync_local_backend

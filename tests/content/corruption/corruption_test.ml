@@ -98,7 +98,7 @@ let () =
      let scrambled =
        String.map (fun c -> Char.chr (Char.code c lxor 0xff)) body
      in
-     let* () = B.put ~key:backend_key ~data:scrambled () in
+     let* () = B.put ~key:backend_key ~data:(Chunk.of_string scrambled) () in
      (* The store found it on the way in; nothing here had to look. *)
      Corrupt.invalidate ();
      let* marks = listed () in
@@ -110,7 +110,8 @@ let () =
      check "the marker records what it hashed to instead"
        (match detail with
          | Some { Corruption_marker.computed = Some c; _ } ->
-             c = Chunk_layout.key_of_body scrambled && c <> chunk_key
+             c = Chunk_layout.key_of_body (Chunk.of_string scrambled)
+             && c <> chunk_key
          | _ -> false);
 
      (* The chunk is in [known_chunks] from the first upload, so this is the
@@ -118,10 +119,11 @@ let () =
         instead of before it. *)
      let* (_ : Manifest.t) = upload "b.bin" body in
      let* stored = B.get ~key:backend_key () in
+     let stored = Chunk.to_string stored in
      check "a marked chunk is re-uploaded, not deduped"
        ~why:(fun () ->
          Printf.sprintf "stored body hashes to %s"
-           (Chunk_layout.key_of_body stored))
+           (Chunk_layout.key_of_body (Chunk.of_string stored)))
        (stored = body);
 
      let* marks = listed () in

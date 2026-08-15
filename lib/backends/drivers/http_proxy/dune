@@ -8,12 +8,15 @@
    -open
    Tsync_http_proxy
    -open
+   Tsync_chunk
+   -open
    Tsync_backend_register))
  (name tsync_http_proxy_backend)
  (private_modules http_proxy_backend)
  (library_flags (-linkall))
  (libraries
   tsync_field_spec
+  tsync_chunk
   tsync_backend_register
   tsync_http_proxy
   tsync_log

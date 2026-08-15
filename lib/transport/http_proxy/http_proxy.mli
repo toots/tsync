@@ -18,7 +18,7 @@ module Auth : sig
     secret:string ->
     meth:string ->
     path:string ->
-    body:string ->
+    body:Chunk.t ->
     unit ->
     (string * string) list
 
@@ -34,7 +34,7 @@ module Auth : sig
     path:string ->
     timestamp:string ->
     signature:string ->
-    body:string ->
+    body:Chunk.t ->
     bool
 end
 

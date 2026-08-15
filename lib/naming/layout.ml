@@ -78,7 +78,8 @@ module Inode = struct
                 Lwt.catch
                   (fun () ->
                     B.put_if_absent ~key
-                      ~data:(Folder.marker_to_string candidate)
+                      ~data:
+                        (Chunk.of_string (Folder.marker_to_string candidate))
                       ())
                   (fun exn ->
                     if not !warned_unarbitrated then begin
@@ -90,10 +91,13 @@ module Inode = struct
                          directory can strand files"
                         C.domain_name (Printexc.to_string exn)
                     end;
-                    Lwt.return (Folder.marker_to_string candidate))
+                    Lwt.return
+                      (Chunk.of_string (Folder.marker_to_string candidate)))
               in
               let winner =
-                Option.value (Folder.marker_of_string held) ~default:candidate
+                Option.value
+                  (Folder.marker_of_string (Chunk.to_string held))
+                  ~default:candidate
               in
               let+ () =
                 Folder_ids.write ~cache_root:C.cache_root
