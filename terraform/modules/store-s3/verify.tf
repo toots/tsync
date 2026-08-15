@@ -148,3 +148,18 @@ resource "aws_s3_bucket_notification" "chunks" {
 
   depends_on = [aws_lambda_permission.verify_s3]
 }
+
+# What tells a client anything is checking this bucket at all.
+#
+# A store with no verifier and a store with nothing wrong both list no markers,
+# so that fact has to come from somewhere — and asking an operator to assert it
+# in their config is worse than not knowing: it is a question about
+# infrastructure, and a stale answer reads as a clean bill of health. The
+# deployment writes it instead, so it is true by construction and disappears
+# with the function.
+resource "aws_s3_object" "verifier" {
+  for_each = local.verify_enabled ? toset(var.chunk_domains) : toset([])
+  bucket   = local.bucket_id
+  key      = "tsync/${each.key}/verifier"
+  content  = jsonencode({ function = aws_lambda_function.verify[0].function_name })
+}

@@ -217,11 +217,17 @@ let verify_suite name fields =
   let jobs = run_prefix ^ "verify-jobs/" in
   let (module Off : Backend.S) = backend_of name fields in
   let* answer = Off.verify_all ~chunk_prefix () in
-  check "verify_all refuses when no verifier is configured"
+  check "verify_all refuses a bucket with no verifier deployed"
     (answer = `Unsupported);
-  let (module On : Backend.S) =
-    backend_of name (("verifyChunks", "true") :: fields)
+  (* What a deployment writes. A fresh store instance probes again, which is why
+     this can be arranged after the refusal above rather than in another run. *)
+  let* () =
+    Off.put ~key:(Chunk_layout.verifier_key ~prefix:chunk_prefix) ~data:"{}" ()
   in
+  let (module On : Backend.S) = backend_of name fields in
+  let* caps = On.capabilities ~prefix:chunk_prefix () in
+  check "and reads the deployment's own object rather than being told"
+    caps.Backend.verified;
   let* answer = On.verify_all ~chunk_prefix () in
   check "verify_all queues one request per shard"
     (answer = `Queued Chunk_layout.shards);

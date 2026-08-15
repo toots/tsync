@@ -9,12 +9,13 @@ type t = {
   endpoint : Aws_s3.Region.endpoint;
   unsigned_payload : bool;
   share_url : string option;
-  verify_chunks : bool;
+  (* Probed once per domain, not configured: see {!Verifier.deployed}. Keyed,
+     because one store can front several domains and each deploys its own. *)
+  verifier : (string, bool Lwt.t) Hashtbl.t;
 }
 
-let make_t ?endpoint ?(unsigned_payload = false) ?share_url
-    ?(verify_chunks = false) ~bucket ~region ~access_key_id ~secret_access_key
-    () =
+let make_t ?endpoint ?(unsigned_payload = false) ?share_url ~bucket ~region
+    ~access_key_id ~secret_access_key () =
   let credentials =
     Aws_s3.Credentials.make ~access_key:access_key_id
       ~secret_key:secret_access_key ()
@@ -25,7 +26,14 @@ let make_t ?endpoint ?(unsigned_payload = false) ?share_url
       | None -> Aws_s3.Region.of_string region
   in
   let endpoint = Aws_s3.Region.endpoint ~inet:`V4 ~scheme:`Https region in
-  { bucket; credentials; endpoint; unsigned_payload; share_url; verify_chunks }
+  {
+    bucket;
+    credentials;
+    endpoint;
+    unsigned_payload;
+    share_url;
+    verifier = Hashtbl.create 1;
+  }
 
 let string_of_error = function
   | S3.Redirect _ -> "redirect"
@@ -219,11 +227,11 @@ let list_all t ?max_keys ~prefix () =
         Log.err "s3 ls %s: %s" prefix (string_of_error e);
         Lwt.fail (failed "ls" e)
 
-let make ?endpoint ?unsigned_payload ?share_url ?verify_chunks ~bucket ~region
-    ~access_key_id ~secret_access_key () : (module Backend.S) =
+let make ?endpoint ?unsigned_payload ?share_url ~bucket ~region ~access_key_id
+    ~secret_access_key () : (module Backend.S) =
   let t =
-    make_t ?endpoint ?unsigned_payload ?share_url ?verify_chunks ~bucket ~region
-      ~access_key_id ~secret_access_key ()
+    make_t ?endpoint ?unsigned_payload ?share_url ~bucket ~region ~access_key_id
+      ~secret_access_key ()
   in
   (module struct
     let put ~key ~data () = put t ~key ~data ()
@@ -236,13 +244,31 @@ let make ?endpoint ?unsigned_payload ?share_url ?verify_chunks ~bucket ~region
     let copy ~src_key ~dst_key () = copy t ~src_key ~dst_key ()
     let list_prefix ?max_keys ~prefix () = list_all t ?max_keys ~prefix ()
 
+    (* Asked once per store: the answer is whether a deployment exists, which
+       does not change under a running process. *)
+    let verifier_deployed ~prefix =
+      let key = Chunk_layout.verifier_key ~prefix in
+      match Hashtbl.find_opt t.verifier key with
+        | Some p -> p
+        | None ->
+            let p = Verifier.deployed ~head_opt ~prefix in
+            Hashtbl.replace t.verifier key p;
+            p
+
     (* [`Unsupported] rather than queueing into a bucket with no function
        behind it: the requests would sit unread and the command would report a
        verification that never ran. *)
     let verify_all ~chunk_prefix () =
-      if not t.verify_chunks then Lwt.return `Unsupported
+      let* deployed = verifier_deployed ~prefix:chunk_prefix in
+      if not deployed then Lwt.return `Unsupported
       else
-        let+ n = Verify_queue.queue ~put ~chunk_prefix in
+        let+ n =
+          Verifier.queue
+            ~on_progress:(fun ~done_ ~total ->
+              if done_ mod 256 = 0 || done_ = total then
+                Log.info "verify: queued %d/%d shard request(s)" done_ total)
+            ~put ~chunk_prefix ()
+        in
         `Queued n
 
     (* No chunk size or concurrency opinion: an object store is limited by the
@@ -253,13 +279,9 @@ let make ?endpoint ?unsigned_payload ?share_url ?verify_chunks ~bucket ~region
        whether the terraform was applied, and it is asked for rather than assumed
        because the failure it guards is silent — an un-deployed bucket lists no
        markers, and "no markers" would otherwise read as "no corruption". *)
-    let capabilities ~prefix:_ () =
-      Lwt.return
-        {
-          Backend.no_caps with
-          share_url = t.share_url;
-          verified = t.verify_chunks;
-        }
+    let capabilities ~prefix () =
+      let+ verified = verifier_deployed ~prefix in
+      { Backend.no_caps with share_url = t.share_url; verified }
   end)
 
 let spec =
@@ -314,15 +336,6 @@ let spec =
         default = Some "";
         secret = false;
       };
-      {
-        name = "verifyChunks";
-        label =
-          "Is the chunk-verifier function deployed for this bucket (terraform \
-           chunk_domains)?";
-        typ = `Bool;
-        default = Some "false";
-        secret = false;
-      };
     ]
 
 let () =
@@ -341,9 +354,8 @@ let () =
       let share_url =
         match get "shareUrl" with Some "" | None -> None | s -> s
       in
-      let verify_chunks = Field_spec.bool ~default:false (get "verifyChunks") in
       make ?endpoint:(get "endpoint") ?unsigned_payload ?share_url
-        ~verify_chunks ~bucket:(req get "bucket") ~region:(req get "region")
+        ~bucket:(req get "bucket") ~region:(req get "region")
         ~access_key_id:(req get "accessKeyId")
         ~secret_access_key:(req get "secretAccessKey")
         ())

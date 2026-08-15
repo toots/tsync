@@ -45,6 +45,19 @@ let verify_jobs_prefix ~chunk_prefix = sibling ~chunk_prefix "verify-jobs/"
 let verify_job_key ~chunk_prefix shard =
   verify_jobs_prefix ~chunk_prefix ^ shard
 
+(* Beside the namespaces rather than inside one, and derived from whatever prefix
+   a caller happens to hold: [capabilities] is asked with the manifest prefix,
+   [verify_all] with the chunk prefix, and both mean the same domain. *)
+let verifier_key ~prefix =
+  let trimmed =
+    if String.length prefix > 0 && prefix.[String.length prefix - 1] = '/' then
+      String.sub prefix 0 (String.length prefix - 1)
+    else prefix
+  in
+  match String.rindex_opt trimmed '/' with
+    | Some i -> String.sub trimmed 0 (i + 1) ^ "verifier"
+    | None -> "verifier"
+
 (* The shard a job names, or [None] for anything else under the prefix. *)
 let shard_of_verify_job key =
   let leaf = Filename.basename key in

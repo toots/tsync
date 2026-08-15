@@ -161,3 +161,18 @@ resource "google_cloudfunctions2_function" "verify" {
 
 # No public invoker binding, unlike the share function: the trigger is the only
 # caller, and a client never invokes this.
+
+# What tells a client anything is checking this bucket at all.
+#
+# A store with no verifier and a store with nothing wrong both list no markers,
+# so that fact has to come from somewhere — and asking an operator to assert it
+# in their config is worse than not knowing: it is a question about
+# infrastructure, and a stale answer reads as a clean bill of health. The
+# deployment writes it instead, so it is true by construction and disappears
+# with the function.
+resource "google_storage_bucket_object" "verifier" {
+  for_each = local.verify_enabled ? toset(var.chunk_domains) : toset([])
+  bucket   = local.bucket_name
+  name     = "tsync/${each.key}/verifier"
+  content  = jsonencode({ function = google_cloudfunctions2_function.verify[0].name })
+}

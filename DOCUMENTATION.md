@@ -405,8 +405,9 @@ Who does the checking depends on the store:
   throughput matters more than finding out early.
 - **`s3` and `gcs`** check in a function the bucket itself triggers on each new object, so the
   chunks are never downloaded to be checked. Deploy it by naming your domains in Terraform's
-  `chunk_domains`, then set `verifyChunks: true` on that backend so tsync knows the answer can
-  be trusted.
+  `chunk_domains`. Nothing to set on the client: the deployment writes a small object next to
+  your data saying it exists, and tsync reads that — so a bucket whose function was never
+  deployed reports "not checked" rather than a clean zero, and cannot go stale.
 
 ```bash
 tsync chunks-integrity              # what each store found, and which stores nothing is checking
@@ -765,8 +766,8 @@ Every backend needs a `type`, a `name` (used by `resync-remote --source`) and a
 
 | `type` | Required fields | Optional | Notes |
 |---|---|---|---|
-| `s3` | `bucket`, `accessKeyId`, `secretAccessKey` | `region` (default `us-east-1`), `endpoint`, `shareUrl`, `unsignedPayload`, `verifyChunks` | Also works with S3-compatible services (Backblaze B2, MinIO, …) via `endpoint`. |
-| `gcs` | `bucket`, `serviceAccountKey` | `endpoint`, `shareUrl`, `verifyChunks` | `serviceAccountKey` is the service-account JSON itself, not a path to it. Blank only to reach an emulator anonymously, with `endpoint`. |
+| `s3` | `bucket`, `accessKeyId`, `secretAccessKey` | `region` (default `us-east-1`), `endpoint`, `shareUrl`, `unsignedPayload` | Also works with S3-compatible services (Backblaze B2, MinIO, …) via `endpoint`. |
+| `gcs` | `bucket`, `serviceAccountKey` | `endpoint`, `shareUrl` | `serviceAccountKey` is the service-account JSON itself, not a path to it. Blank only to reach an emulator anonymously, with `endpoint`. |
 | `local` | `path` | `verifyWrites` (default on) | A directory: another disk, a mounted NAS, anything the filesystem reaches. |
 | `http-proxy` | `url`, `secret` | — | Another machine running tsync with the `http-proxy` frontend — [step 7](#7-run-tsync-as-a-server-for-your-network). |
 
