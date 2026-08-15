@@ -9,7 +9,10 @@
  (foreign_stubs
   (language c)
   (names dbus_stubs)
+  ; :standard is what carries -fPIC, and a stub compiled without it cannot go
+  ; into a shared object on x86-64.
   (flags
+   :standard
    (:include dbus_cflags.sexp)))
  (c_library_flags (-ldbus-1)))
 
