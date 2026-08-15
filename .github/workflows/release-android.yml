@@ -46,7 +46,7 @@ jobs:
             ~/.opam
             _opam
           # Bump when the package list below changes.
-          key: opam-android-v2
+          key: opam-android-v3
       - name: Register the cross repository
         run: |
           opam repository remove android --all >/dev/null 2>&1 || true
@@ -64,7 +64,8 @@ jobs:
             conf-libev-android cohttp-lwt-unix-android conduit-lwt-unix-android \
             digestif-android eqaf-android yojson-android lwt-android \
             ppx_blob-android mem_usage-android base64-android tls-lwt-android \
-            x509-android mirage-crypto-pk-android cmdliner-android
+            x509-android mirage-crypto-pk-android cmdliner-android \
+            memtrace-android
       - name: Cross-build the daemon
         # The context path, not `bin/tsync.exe`: that builds the host context too,
         # which wants FUSE.
