@@ -104,6 +104,10 @@ val make :
   unit ->
   (module S)
 
+(** Give up this process's claim on a target's log, so another may take what it
+    left owed without waiting for this one to exit. *)
+val release : root:string -> name:string -> unit
+
 (** A target reads are allowed to fall through to, and which therefore also
     carries the journal and cursor a peer reading it needs. *)
 module Readable (D : S) : S

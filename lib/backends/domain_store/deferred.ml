@@ -91,6 +91,9 @@ let escape name =
     name;
   Buffer.contents buf
 
+let log_dir ~root ~name = Filename.concat root (escape name)
+let release ~root ~name = Durable_queue.release (log_dir ~root ~name)
+
 let make ?(resume = false) ?chunk_from_prefix ~name ~backend ~source
     ~chunk_prefix ~(chunk_keys : string -> string list) ~journal_prefix
     ~cursor_key ~root () : (module S) =
@@ -164,7 +167,7 @@ let make ?(resume = false) ?chunk_from_prefix ~name ~backend ~source
   in
   let queue =
     Q.ordered ~name:("deferred " ^ name)
-      ~log:(Q.Records.create ~dir:(Filename.concat root (escape name)))
+      ~log:(Q.Records.create ~dir:(log_dir ~root ~name))
         (* A permanent failure is dropped: the same request would be refused
            again, and every later rename would queue behind it forever. The
            target is degraded from then on and needs tsync mirror. *)

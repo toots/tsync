@@ -1,0 +1,8 @@
+the holder announced its claim: ok
+a claimed log is left to the process that claimed it: ok
+and the records are still there to be taken: ok
+an unclaimed log is taken over: ok
+a job that ran leaves no record: ok
+a held job keeps its record: ok
+reading the log while it is being worked runs nothing twice: ok
+and leaves nothing owed: ok

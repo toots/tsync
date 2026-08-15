@@ -26,6 +26,73 @@ let default_settle_timeout = 60.
 let registry : (unit -> unit Lwt.t) list ref = ref []
 let register_settle f = registry := !registry @ [f]
 
+(* A record is on disk before the work it names has run, so a process reading
+   another's log takes jobs that other one is about to run itself. A process
+   holding records only in its own memory claims the log for as long as it
+   lives, and one reading the log does so only when that claim is free.
+
+   [lockf] rather than a marker file, because the kernel drops it when the
+   holder dies: a killed command has to leave work claimable, not a directory
+   nobody may touch. It sits beside the directory rather than in it, so a record
+   stays the only thing that directory holds. *)
+let lock_path dir = dir ^ ".owner"
+
+let rec mkdir_p dir =
+  if dir = "" || dir = "/" || Sys.file_exists dir then ()
+  else (
+    mkdir_p (Filename.dirname dir);
+    try Unix.mkdir dir 0o755 with Unix.Unix_error (Unix.EEXIST, _, _) -> ())
+
+(* A record lock merges with one the same process already holds, and closing any
+   descriptor to the file drops every lock this process has on it, so a claim
+   this process made is answered from here rather than from the kernel. *)
+let owned : (string, Unix.file_descr) Hashtbl.t = Hashtbl.create 4
+
+let claim dir =
+  if not (Hashtbl.mem owned dir) then begin
+    mkdir_p dir;
+    let fd = Unix.openfile (lock_path dir) [Unix.O_RDWR; Unix.O_CREAT] 0o644 in
+    match Unix.lockf fd Unix.F_TRLOCK 0 with
+      | () -> Hashtbl.replace owned dir fd
+      | exception _ ->
+          (* Another claim is a second command against one target: both keep
+             their own records and neither reads the log, so sharing it is
+             what is expected. *)
+          Unix.close fd
+  end
+
+(* The kernel does this when the holder exits, which is how a claim is given up;
+   here for a caller standing in for that exit. *)
+let release dir =
+  match Hashtbl.find_opt owned dir with
+    | None -> ()
+    | Some fd ->
+        (try Unix.lockf fd Unix.F_ULOCK 0 with _ -> ());
+        (try Unix.close fd with _ -> ());
+        Hashtbl.remove owned dir
+
+(* [f] runs only if no process claims [dir]. *)
+let with_claim dir f =
+  if Hashtbl.mem owned dir then Lwt.return_unit
+  else if not (Sys.file_exists dir) then Lwt.return_unit
+  else (
+    let fd = Unix.openfile (lock_path dir) [Unix.O_RDWR; Unix.O_CREAT] 0o644 in
+    match Unix.lockf fd Unix.F_TLOCK 0 with
+      | exception _ ->
+          Unix.close fd;
+          Lwt.return_unit
+      | () ->
+          Lwt.finalize f (fun () ->
+              (try Unix.lockf fd Unix.F_ULOCK 0 with _ -> ());
+              Unix.close fd;
+              Lwt.return_unit))
+
+(* Queues that read their log, so a caller can have them look again without
+   knowing who created them. *)
+let rescans : (unit -> unit Lwt.t) list ref = ref []
+let register_rescan f = rescans := !rescans @ [f]
+let rescan_all () = Lwt_list.iter_s (fun f -> f ()) !rescans
+
 let settle_all ?(timeout = default_settle_timeout) () =
   if !registry = [] then Lwt.return_unit
   else
@@ -417,10 +484,17 @@ module Make (J : JOB) = struct
     if records <> [] then
       Log.info "%s: resuming %d queued job(s)" t.name (List.length records)
 
+  (* Whatever the log holds that nobody is running, if that can be established.
+     A process still recording into this directory is running its own records
+     from memory, and they are not this one's to take. *)
+  let rescan t = with_claim t.log.Records.dir (fun () -> resume t)
+
   let start ?(recover = false) t =
+    if recover then register_rescan (fun () -> rescan t)
+    else claim t.log.Records.dir;
     t.running <-
       List.init t.workers (fun _ ->
-          let* () = if recover then resume t else Lwt.return_unit in
+          let* () = if recover then rescan t else Lwt.return_unit in
           loop t)
 
   let stop t =

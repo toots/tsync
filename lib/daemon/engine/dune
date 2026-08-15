@@ -16,7 +16,9 @@
    -open
    Tsync_backend_register
    -open
-   Tsync_ipc_handler))
+   Tsync_ipc_handler
+   -open
+   Tsync_work))
  (name tsync_engine)
  (libraries
   tsync_frontend_register
@@ -27,4 +29,5 @@
   tsync_conf
   tsync_ipc_handler
   tsync_log
+  tsync_work
   lwt))

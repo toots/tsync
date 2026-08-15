@@ -58,6 +58,18 @@ val settle_all : ?timeout:float -> unit -> unit Lwt.t
     caller that has waited for quiet should not have it land afterwards. *)
 val register_settle : (unit -> unit Lwt.t) -> unit
 
+(** Have every recovering queue in this process look at its log again.
+
+    A one-shot command exits with whatever it could not finish inside its settle
+    timeout still on disk, and a daemon that read its log at startup would carry
+    those until it restarts. Each queue reads only a log no live process claims,
+    so records another process is running from memory are left to it. *)
+val rescan_all : unit -> unit Lwt.t
+
+(** Give up this process's claim on a log directory. The kernel does this when
+    the holder exits, so this is for a caller standing in for that exit. *)
+val release : string -> unit
+
 module Make (J : JOB) : sig
   (** {1 The records} *)
 
@@ -122,10 +134,14 @@ module Make (J : JOB) : sig
       run — that is the point. *)
   val post : ?id:string -> t -> J.t -> unit Lwt.t
 
-  (** Run the workers. [recover] picks up what a previous run left in the log
-      first; without it those records are left alone, for a caller that
-      reconciles them itself, or so two processes cannot drain one log at once
-      and reorder a rename's copy and delete. *)
+  (** Run the workers.
+
+      [recover] reads the log first, and again on every {!rescan_all}, so work a
+      process left behind is picked up without waiting for a restart. Without it
+      the log is never read and this queue's records are only ever its own,
+      which is what a one-shot command wants: it claims the directory for as
+      long as it lives, and a recovering queue elsewhere leaves it alone until
+      it exits. *)
   val start : ?recover:bool -> t -> unit
 
   (** Cancel the job running or queued under [key], and drop any replacement
