@@ -126,3 +126,27 @@ def test_the_pubsub_event_shape_is_decoded(store):
         "checked": 0,
         "corrupt": 0,
     }
+
+
+def test_the_background_calling_convention_works_too(store):
+    """The other way the framework may call this: the message as a plain dict,
+    with a second context argument.
+
+    Which convention a deployment gets follows from a signature type nothing sets
+    explicitly, and the wrong one is a TypeError on every single delivery — the
+    function is invoked, raises before reading anything, and the sweep stands
+    still with no marker to show for it. Called the one way only, this file
+    passed while production could not check a single chunk.
+    """
+    body = b"hello world" * 100
+    path, _ = chunk_path("d", body)
+    store.put_bytes(path, bytes(b ^ 0xFF for b in body))
+
+    verify._store = store
+    message = {"attributes": {"objectId": path}, "data": ""}
+    assert verify.gcp_verify(message, object()) == {"checked": 1, "corrupt": 1}
+
+    assert verify.gcp_verify({"attributes": {}}, object()) == {
+        "checked": 0,
+        "corrupt": 0,
+    }

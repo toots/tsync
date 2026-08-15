@@ -232,15 +232,37 @@ def handler(event, context):
     return {"checked": checked, "corrupt": bad}
 
 
-def gcp_verify(cloud_event):
+def pubsub_attributes(event):
+    """The attributes of a Pub/Sub message, however the runtime chose to hand it
+    over.
+
+    Two conventions reach the same function. A CloudEvent one passes an object
+    whose `.data` wraps the message under `message`; the older background one
+    passes the message itself as a plain dict, alongside a context argument. The
+    functions framework picks between them from a signature type nothing in the
+    deployment sets explicitly, so the entry point takes whichever arrives rather
+    than depending on that choice.
+    """
+    data = getattr(event, "data", event)
+    if not isinstance(data, dict):
+        return {}
+    message = data.get("message", data)
+    if not isinstance(message, dict):
+        return {}
+    return message.get("attributes") or {}
+
+
+def gcp_verify(event, context=None):
     """GCP entry point: an OBJECT_FINALIZE notification delivered over Pub/Sub.
 
     Pub/Sub rather than an Eventarc storage trigger, which has no prefix filter
     and would fire this on every manifest and journal write in the bucket.
+
+    [context] is the second argument of the background convention, unused: the
+    message attributes carry the object name, and the delivery's own identifiers
+    say nothing about which chunk to check.
     """
-    message = (cloud_event.data or {}).get("message", {})
-    attributes = message.get("attributes") or {}
-    key = attributes.get("objectId")
+    key = pubsub_attributes(event).get("objectId")
     if not key:
         return {"checked": 0, "corrupt": 0}
     return verify_key(store(), key) or {"checked": 0, "corrupt": 0}
