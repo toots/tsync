@@ -653,8 +653,17 @@ let versions_cmd =
           With $(b,--revert), restore one instead.")
     Term.(const run $ path_arg $ domain_arg $ revert_arg $ version_arg)
 
+(* An empty trash lists as its own directory key, which holds no marker and
+   cannot be fetched on a filesystem store. Dropped here rather than in each
+   reader: every one of them goes on to [get] what this returns. *)
 let trash_markers (module B : Backend.S) domain_prefix =
-  B.list_prefix ~prefix:(domain_prefix ^ Folder.trash_id ^ "/") ()
+  let open Lwt.Syntax in
+  let+ entries =
+    B.list_prefix ~prefix:(domain_prefix ^ Folder.trash_id ^ "/") ()
+  in
+  List.filter
+    (fun (e : Backend.file_entry) -> not (Key.is_dir e.Backend.key))
+    entries
 
 let trash_list domain =
   run_lwt
@@ -725,12 +734,26 @@ let trash_cmd =
       value & flag
       & info ["purge"] ~doc:"Delete every version of $(i,PATH) from the trash.")
   in
-  let purge _path = Printf.eprintf "purge: not yet implemented\n" in
+  let purge path domain =
+    run_lwt
+      (let open Lwt.Syntax in
+       let (module C : Conf.S) = load_conf ?domain () in
+       let module E = Expire.Make (C) in
+       let+ outcome = E.purge_trashed ~path () in
+       match outcome with
+         | `Not_in_trash ->
+             Printf.eprintf "not in trash: %s\n" path;
+             exit 1
+         | `Purged n ->
+             Printf.printf "purged %s (%d object%s) — run tsync gc to reclaim\n"
+               path n
+               (if n = 1 then "" else "s"))
+  in
   let run path domain restore do_purge =
     match (path, restore, do_purge) with
       | None, false, false -> trash_list domain
       | Some path, true, false -> trash_restore path domain
-      | Some path, false, true -> purge path
+      | Some path, false, true -> purge path domain
       | None, _, _ -> failwith "--restore and --purge each need a PATH."
       | Some _, true, true ->
           failwith "--restore and --purge do opposite things; run one."

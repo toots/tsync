@@ -84,6 +84,35 @@ let scenarios : scenario list =
         ];
     };
     {
+      (* What expire cannot do: reach a folder trashed just now without a
+         cutoff of now, which would take every version and journal entry with
+         it. [expire none] leaves it, and the purge drops that one folder. *)
+      name = "purge drops one trashed folder that expire none leaves";
+      steps =
+        [
+          Mkdir "d";
+          Drain;
+          Write { path = "d/a.txt"; content = "purge me" };
+          Drain;
+          Write { path = "keep.txt"; content = "not this one" };
+          Drain;
+          Rmdir "d";
+          Drain;
+          Expire "none";
+          PurgeTrashed "d";
+        ];
+    };
+    {
+      (* A path nothing trashed is reported, not silently taken for done. *)
+      name = "purge of an untrashed path is refused";
+      steps =
+        [
+          Write { path = "keep.txt"; content = "still here" };
+          Drain;
+          PurgeTrashed "never-trashed";
+        ];
+    };
+    {
       name = "expire none: nothing removed";
       steps =
         [
