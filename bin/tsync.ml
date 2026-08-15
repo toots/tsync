@@ -1494,7 +1494,7 @@ let chunks_integrity_cmd =
             "With $(b,--repair): report what would be rewritten, write nothing.")
   in
   Cmd.v
-    (Cmd.info "chunks-integrity"
+    (Cmd.info "data-integrity"
        ~doc:
          "Chunks that are not what their names say: ask for a check \
           ($(b,--verify)), list what was found (the default), or put it right \
