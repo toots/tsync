@@ -43,11 +43,6 @@ val key_of_body : string -> string
     domain — see {!corrupted_root}. *)
 val corrupted_prefix : chunk_prefix:string -> string
 
-(** What every domain's markers share. A store's IAM says where the checker may
-    write in terms of this, and Google's conditions offer only [startsWith], so
-    a prefix with the domain in the middle could not be expressed at all. *)
-val corrupted_root : chunk_prefix:string -> string
-
 (** Where a request to check one shard is filed. The bucket is the queue: a
     client writes one of these per shard, the store's own object-created
     notification carries it to the function that checks chunks, and the function
@@ -55,20 +50,11 @@ val corrupted_root : chunk_prefix:string -> string
     queueing service and no second code path — the same per-chunk check runs,
     reached the same way.
 
-    A sibling of the chunk root, like {!corrupted_prefix}, so nothing walking
-    chunks meets one and a collection renaming the root away leaves them be. *)
+    Beside the domains, like {!corrupted_prefix}, so nothing walking chunks
+    meets one and a collection renaming a chunk root away leaves them be. *)
 val verify_jobs_prefix : chunk_prefix:string -> string
 
 val verify_job_key : chunk_prefix:string -> string -> string
-
-(** What every domain's requests share, and what a notification filters on. The
-    domain sits {i inside} this rather than around it precisely so one literal
-    prefix reaches all of them: a filter that had to name each domain would be a
-    list to keep in step with the daemon's config, with no safe default and a
-    silent failure — a name matching nothing deploys a trigger that never fires,
-    which reads exactly like a store with nothing wrong. *)
-val verify_jobs_root : chunk_prefix:string -> string
-
 val domain_of : chunk_prefix:string -> string
 
 (** The shard a job names, [None] for anything else found under the prefix. *)

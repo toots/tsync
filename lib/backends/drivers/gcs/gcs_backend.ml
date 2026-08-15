@@ -357,16 +357,10 @@ let make ?endpoint ?service_account_key ?share_url ~bucket () :
     (* No chunk size or concurrency opinion: an object store is limited by the
        network and its own concurrency, neither measurable from here.
 
-       [verified] is the operator's word, not something this can observe: what
-       checks the chunks runs beside the bucket, out of reach of any client. It
-       says whether the terraform was applied, and it is asked for rather than
-       assumed because the failure it guards is silent — an un-deployed bucket
-       lists no markers, and "no markers" would otherwise read as "no
-       corruption". *)
-    (* An object store's chunks are checked by a function beside the bucket,
-       which the same terraform that makes the bucket deploys. Taken as given
-       rather than probed or configured: a deployment that is half applied is
-       not a state this reports its way out of. *)
+       [verified] is taken as given rather than probed or configured: the
+       function that checks these chunks is deployed by the same terraform that
+       makes the bucket, and a deployment half applied is not a state this
+       reports its way out of. *)
     let capabilities ~prefix:_ () =
       Lwt.return
         { Backend.no_caps with share_url = t.share_url; verified = true }

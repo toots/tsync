@@ -104,3 +104,9 @@ variable "project" {
   type        = string
   description = "GCP project id. Needed explicitly for the project-level IAM binding the chunk verifier's trigger requires; every other resource here takes it from the provider."
 }
+
+variable "verify_max_instances" {
+  type        = number
+  default     = 32
+  description = "Ceiling on concurrent chunk-verifier instances. A whole-store sweep makes one request per shard (4096) deliverable at once; this is what stops that from being 4096 concurrent readers."
+}

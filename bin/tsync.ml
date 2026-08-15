@@ -864,10 +864,6 @@ let gc_cmd =
              become hours on a large store. A chunk that fails is kept and \
              marked, never discarded.")
   in
-  (* [was_open] is read before the abandonment rather than inferred from its
-     counts: what it moves back is what marking had not reached yet, so a run
-     abandoned after a finished mark moves nothing and a count of zero says
-     nothing about whether there was a run at all. *)
   let verified_line (s : Gc.stats) =
     if s.Gc.chunks_verified = 0 && s.Gc.chunks_unreadable = 0 then ""
     else
@@ -881,6 +877,10 @@ let gc_cmd =
            " Run tsync repair."
          else "")
   in
+  (* [was_open] is read before the abandonment rather than inferred from its
+     counts: what it moves back is what marking had not reached yet, so a run
+     abandoned after a finished mark moves nothing and a count of zero says
+     nothing about whether there was a run at all. *)
   let report ~abort ~was_open ~domain (s : Gc.stats) =
     match s.Gc.outcome with
       | Gc.Completed when abort && not was_open ->

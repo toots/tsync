@@ -203,13 +203,9 @@ let backend_of name fields =
 
    The half that is reachable from here is the client's: whether queueing lands
    real objects a real listing returns. The half that is not is the trigger — a
-   notification exists per configured domain, created by terraform, and this
-   suite works under a CI prefix no notification matches. Nothing here is
-   therefore evidence that the function ever runs; that wants a deployed stack,
-   not a bucket and a key.
-
-   Kept honest by asserting the refusal first: it is what the command leans on
-   to fail rather than report a check that never happened. *)
+   terraform makes one notification per bucket, and this suite works under a CI
+   prefix rather than a deployed stack. Nothing here is therefore evidence that
+   the function ever runs. *)
 let verify_suite name fields =
   let open Lwt.Syntax in
   let chunk_prefix = run_prefix ^ "chunks/" in

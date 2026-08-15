@@ -96,6 +96,12 @@ let () =
     (Chunk_layout.marker_key
        ("tsync/d/manifests/" ^ String.sub ck 0 3 ^ "/" ^ ck)
     = None);
+  (* The one asymmetry a review found between the two implementations: a marker
+     under an empty domain sits at a prefix nothing lists, because every reader
+     builds that prefix from a domain name. Both sides refuse it. *)
+  check "an empty domain is not a chunk key's home"
+    (Chunk_layout.marker_key ("tsync//chunks/" ^ String.sub ck 0 3 ^ "/" ^ ck)
+    = None);
   check "a shard directory is not a marker"
     (not (Chunk_layout.is_marker_key "tsync/corrupted/dom/abc/"));
   print_endline "layout ok"
