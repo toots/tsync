@@ -229,7 +229,10 @@ let parse_op meth uri body =
     | `DELETE, p when is_obj p -> (
         match obj_key () with Some k -> Delete k | None -> Bad)
     | `POST, "/delete-multi" -> (
-        match try Some (Yojson.Safe.from_string body) with _ -> None with
+        match
+          try Some (Yojson.Safe.from_string (Chunk.to_string body))
+          with _ -> None
+        with
           | Some (`List l) ->
               Delete_multi
                 (List.filter_map (function `String x -> Some x | _ -> None) l)
@@ -294,6 +297,13 @@ let respond ?(status = `OK) ?(headers = []) body =
     ~headers:(Cohttp.Header.of_list headers)
     ~body ()
 
+(* The bytes go out as they are, where {!respond} would put a chunk-sized string
+   on the heap first. *)
+let respond_chunk data =
+  Cohttp_lwt_unix.Server.respond ~status:`OK
+    ~body:(Cohttp_lwt.Body.of_bigstring (Chunk.buffer data))
+    ()
+
 let authed route req body =
   let meth = Cohttp.Code.string_of_method (Cohttp.Request.meth req) in
   let path = Uri.path_and_query (Cohttp.Request.uri req) in
@@ -323,7 +333,7 @@ let exec route op ~body =
               (* Once per request, not per backend a write fans out to: this is
                  the volume moved on a client's behalf. *)
               Metrics.add_downloaded (Chunk.length data);
-              respond (Chunk.to_string data)
+              respond_chunk data
           | None -> respond ~status:`Not_found "")
     | Head key -> (
         let module B = (val route.store : Backend.S) in
@@ -346,7 +356,7 @@ let exec route op ~body =
           let* held = B.put_if_absent ~key ~data:body () in
           (* The body that won, so the caller learns whether it was theirs
              without a second round trip. *)
-          respond (Chunk.to_string held)
+          respond_chunk held
     | Put key ->
         if not (writable key) then reject_ro ()
         else
@@ -613,8 +623,8 @@ let callback ~port ~tls routes _conn req body =
         handle ~token ~sub ~query:(Uri.get_query_param uri)
           ~range:(Cohttp.Header.get (Cohttp.Request.headers req) "range")
     | None -> (
-        let* body_str = Cohttp_lwt.Body.to_string body in
-        let body = Chunk.of_string body_str in
+        let* body = Cohttp_lwt.Body.to_bigstring body in
+        let body = Chunk.of_buffer body in
         match (meth, Uri.path uri) with
           | `GET, ("/" | "/index.html") ->
               bump "page";
@@ -627,7 +637,7 @@ let callback ~port ~tls routes _conn req body =
           | `GET, "/api/v1/stats" ->
               serve_status ~port ~tls ~json:true routes req body
           | _ -> (
-              let op = parse_op meth uri body_str in
+              let op = parse_op meth uri body in
               match route_key op with
                 (* A path outside the API is a 404; [badRequest] is reserved for
                    a call that aimed at this API and got it wrong. *)

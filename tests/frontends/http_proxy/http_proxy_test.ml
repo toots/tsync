@@ -233,7 +233,7 @@ let () =
   let chunk_size_op prefix =
     Http_proxy_frontend.parse_op `GET
       (Uri.of_string ("/chunk-size?prefix=" ^ prefix))
-      ""
+      Chunk.empty
   in
   assert (
     chunk_size_op "tsync/one/" = Http_proxy_frontend.Chunk_size "tsync/one/");
@@ -242,7 +242,7 @@ let () =
     = Some "tsync/one/");
   (* No prefix is a bad request, not a silent answer for some other domain. *)
   assert (
-    Http_proxy_frontend.parse_op `GET (Uri.of_string "/chunk-size") ""
+    Http_proxy_frontend.parse_op `GET (Uri.of_string "/chunk-size") Chunk.empty
     = Http_proxy_frontend.Bad);
 
   assert (pick "tsync/two/manifests/x" "one" = Some "two");

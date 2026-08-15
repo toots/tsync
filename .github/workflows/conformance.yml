@@ -46,6 +46,7 @@ jobs:
         run: |
           opam pin -ny .
           opam pin add -ny git+https://github.com/toots/aws-s3.git#tsync
+          opam pin add -ny git+https://github.com/toots/ocaml-cohttp.git#bigstring-body
       # No fuse: this builds one executable over the backend drivers, and the
       # frontends are no part of what it asks.
       - name: Install OCaml dependencies

@@ -69,13 +69,12 @@ let call t ~meth ?(body = Chunk.empty) uri =
   let attempt cache =
     Lwt_unix.with_timeout request_timeout (fun () ->
         let* resp, rbody =
-          (* The one place a body crosses into cohttp, and back. *)
           Cache.call cache ~headers
-            ~body:(Cohttp_lwt.Body.of_string (Chunk.to_string body))
+            ~body:(Cohttp_lwt.Body.of_bigstring (Chunk.buffer body))
             meth uri
         in
-        let+ s = Cohttp_lwt.Body.to_string rbody in
-        (resp, Chunk.of_string s))
+        let+ body = Cohttp_lwt.Body.to_bigstring rbody in
+        (resp, Chunk.of_buffer body))
   in
   let used = t.cache in
   Lwt.catch
