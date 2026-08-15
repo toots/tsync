@@ -1,0 +1,5 @@
+(executable
+ (flags
+  (:standard -open Tsync_work))
+ (name queue_claim_test)
+ (libraries tsync_work lwt lwt.unix unix))

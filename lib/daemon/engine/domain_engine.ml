@@ -13,7 +13,9 @@ module Make (C : Conf.S) = struct
   module Mf = Manifest.Make (C)
   module Fs = File_store.Make (C)
 
-  (* Also nudged after each upload, but downloads grow the store too. *)
+  (* Also nudged after each upload, but downloads grow the store too. The same
+     sweep looks for deferred work a one-shot command left behind, which is
+     bounded by how long that work may sit rather than by the store's growth. *)
   let housekeeping_interval = 60.
 
   (* An upload owes a cursor bump once its journal entry lands, one per file on a
@@ -81,6 +83,7 @@ module Make (C : Conf.S) = struct
         let rec loop () =
           let* () = Lwt_unix.sleep housekeeping_interval in
           let* () = sweep "chunk cap sweep" F.enforce_chunk_cap in
+          let* () = sweep "deferred rescan" Durable_queue.rescan_all in
           loop ()
         in
         loop ());

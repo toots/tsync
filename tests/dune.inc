@@ -672,6 +672,20 @@
   (action
    (diff menu_test.expected menu_test.output))))
 
+(subdir unit/queue_claim
+ (alias
+  (name default)
+  (deps queue_claim_test.exe))
+ (rule
+  (alias runtest)
+  (target queue_claim_test.output)
+  (action
+   (with-stdout-to queue_claim_test.output (ignore-stderr (run ./queue_claim_test.exe)))))
+ (rule
+  (alias runtest)
+  (action
+   (diff queue_claim_test.expected queue_claim_test.output))))
+
 (subdir unit/staged_codec
  (alias
   (name default)

@@ -277,7 +277,10 @@ let () =
 
      case "the next daemon start picks up what it left owed";
      (* A second target over the same log, as a restart is: same name, same
-        directory, and the link is back. *)
+        directory, and the link is back. Letting go of the claim is the part of
+        a restart this process would otherwise skip, and without it the second
+        target reads a log something still alive says is its own. *)
+     Deferred.release ~root:log_dir ~name:"offline";
      let up = ref true in
      let l4, (module T4 : Deferred.S) =
        target_for ~resume:true ~inners:[main]
