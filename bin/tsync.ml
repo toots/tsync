@@ -350,7 +350,7 @@ let status_cmd =
 
 (* Residency, both directions. Evicting and fetching are the same operation
    over the same paths with the wire verb swapped, and naming them apart put
-   [restore] beside [revert] and [untrash], which recover a lost thing --
+   [restore] beside [revert], which recovers a lost thing --
    this one only moves bytes on and off this machine. *)
 let cache_cmd =
   let path_arg = Arg.(non_empty & pos_all string [] & info [] ~docv:"PATH") in
@@ -901,10 +901,10 @@ let gc_cmd =
       & info ["verify"]
           ~doc:
             "Also hold each live chunk against its own name as it is kept, and \
-             record what fails for $(b,tsync repair). Reads every live byte, \
-             where a collection otherwise touches only metadata — minutes \
-             become hours on a large store. A chunk that fails is kept and \
-             marked, never discarded.")
+             record what fails for $(b,tsync data-integrity --repair). Reads \
+             every live byte, where a collection otherwise touches only \
+             metadata — minutes become hours on a large store. A chunk that \
+             fails is kept and marked, never discarded.")
   in
   let verified_line (s : Gc.stats) =
     if s.Gc.chunks_verified = 0 && s.Gc.chunks_unreadable = 0 then ""
@@ -916,7 +916,7 @@ let gc_cmd =
         s.Gc.chunks_verified s.Gc.chunks_corrupt s.Gc.chunks_unreadable
         s.Gc.chunks_cleared
         (if s.Gc.chunks_corrupt + s.Gc.chunks_unreadable > 0 then
-           " Run tsync repair."
+           " Run tsync data-integrity --repair."
          else "")
   in
   (* [was_open] is read before the abandonment rather than inferred from its

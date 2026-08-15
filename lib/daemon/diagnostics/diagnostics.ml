@@ -879,7 +879,8 @@ let text json =
              | _, _, 0 -> ()
              | _, _, n ->
                  row 4 "corrupted"
-                   (Printf.sprintf "%d chunk%s%s — run tsync repair" n
+                   (Printf.sprintf
+                      "%d chunk%s%s — run tsync data-integrity --repair" n
                       (if n = 1 then "" else "s")
                       (if bool_of (mem c "truncated") then "+" else "")));
           (match mem m "deferred" with

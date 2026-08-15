@@ -337,7 +337,7 @@ let backend_row (b : backend_stats) =
       | `Failed, _ -> ["corruption check failed"]
       | `Unchecked, _ -> ["not checked"]
       | `Checked, Some n when n > 0 ->
-          [Printf.sprintf "%d corrupt — run tsync repair" n]
+          [Printf.sprintf "%d corrupt — run tsync data-integrity" n]
       | `Checked, _ -> []
   in
   info ~indent:1
