@@ -42,6 +42,7 @@ let fsync fd = retry_eintr (fun () -> Lwt_unix.fsync fd)
 
 module LargeFile = struct
   let stat path = retry_eintr (fun () -> Lwt_unix.LargeFile.stat path)
+  let fstat fd = retry_eintr (fun () -> Lwt_unix.LargeFile.fstat fd)
 
   let ftruncate fd size =
     retry_eintr (fun () -> Lwt_unix.LargeFile.ftruncate fd size)

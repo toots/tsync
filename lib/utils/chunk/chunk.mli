@@ -41,6 +41,11 @@ val create : int -> Local_io.buffer
     read-only descriptor that write fails instead. *)
 val map_file : path:string -> offset:int -> len:int -> t
 
+(** {!map_file} against a descriptor already open, which holds the inode the
+    mapping is of and spares an open per range. Read-only, and subject to the
+    same restriction. *)
+val map_fd : Unix.file_descr -> offset:int -> len:int -> t
+
 val write_to : path:string -> t -> offset:int -> unit Lwt.t
 
 (** XXH3-64 of the whole chunk, as {!Xxhash.hash_hex} spells it. Here rather

@@ -11,18 +11,22 @@ let of_string s = Bigstringaf.of_string s ~off:0 ~len:(String.length s)
 let to_string = Bigstringaf.to_string
 let hash_hex t seed = Xxhash.hash_bigstring_hex t seed
 
-(* Synchronous because [mmap] moves no data: this costs an open and a close, and
-   the reads happen later on the pages actually touched. *)
+(* Synchronous because [mmap] moves no data: the reads happen later, on the pages
+   actually touched. *)
+let map_fd fd ~offset ~len =
+  if len = 0 then empty
+  else
+    Bigarray.array1_of_genarray
+      (Unix.map_file fd ~pos:(Int64.of_int offset) Bigarray.char
+         Bigarray.c_layout false [| len |])
+
 let map_file ~path ~offset ~len =
   if len = 0 then empty
   else (
     let fd = Unix.openfile path [Unix.O_RDONLY] 0 in
     Fun.protect
       ~finally:(fun () -> Unix.close fd)
-      (fun () ->
-        Bigarray.array1_of_genarray
-          (Unix.map_file fd ~pos:(Int64.of_int offset) Bigarray.char
-             Bigarray.c_layout false [| len |])))
+      (fun () -> map_fd fd ~offset ~len))
 
 (* An empty body still has to make the name appear, and a write that moves no
    bytes creates nothing. *)

@@ -47,6 +47,36 @@ module D = Data.Make (C) (R)
    backend recommends (an http-proxy answers with the serving domain's own, so the
    setting lives in one config), else the built-in default. *)
 
+(* Appends to whatever [moving] names as the first chunk is stored, so a source
+   changing mid-upload is the store's doing rather than a race with the clock. *)
+let moving = ref ""
+
+module Mutating = struct
+  include
+    (val Backend.make ~backend_type:"local" ~get_field:(fun _ ->
+             Some backend_root)
+        : Backend.S)
+
+  let put ~key ~data () =
+    if !moving <> "" then begin
+      let path = !moving in
+      moving := "";
+      let oc = open_out_gen [Open_append; Open_binary] 0o644 path in
+      output_string oc "!";
+      close_out oc
+    end;
+    put ~key ~data ()
+end
+
+module Cm = struct
+  include C
+
+  let store = (module Mutating : Backend.S)
+  let members = [Backend.member ~name:"local" store]
+end
+
+module Rm = Remote.Make (Cm)
+
 let opinionated n : (module Backend.S) =
   (module struct
     include
@@ -169,6 +199,29 @@ let () =
      assert (n = 4096);
      let* n = No_opinion.chunk_size () in
      assert (n = Conf.default_chunk_size);
+
+     (* A source that moves under the upload publishes nothing: its chunks would
+        otherwise describe a file that never existed. *)
+     let moving_src = Filename.concat root "moving.bin" in
+     (* Content of its own, or every chunk dedups and no put ever runs. *)
+     write_file moving_src
+       (String.init size (fun i -> Char.chr (((i * 7) + 3) land 0xff)));
+     moving := moving_src;
+     let mkey = C.domain_prefix ^ "moving.bin" in
+     let* outcome =
+       Lwt.catch
+         (fun () ->
+           let+ (_ : Manifest.t) =
+             Rm.upload ~key:mkey ~src_path:moving_src ~mtime:0. ~chunk_size ()
+           in
+           "published")
+         (function
+           | Remote.Source_changed _ -> Lwt.return "rejected"
+           | exn -> Lwt.fail exn)
+     in
+     assert (outcome = "rejected");
+     let* published = Rm.fetch_manifest ~key:mkey () in
+     assert (published = None);
 
      print_endline "ok";
      Lwt.return_unit)
