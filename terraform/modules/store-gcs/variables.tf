@@ -99,9 +99,9 @@ variable "chunk_domains" {
     Empty (the default) deploys nothing. There is no safe guess: the store name
     and the domain name are only conventionally equal, and a prefix that matches
     nothing means a function that never fires — indistinguishable from a store
-    with no corruption. Set this to the domain names in the daemon's config, and
-    set each backend's verifyChunks accordingly so `tsync verify` knows whether
-    to trust the answer.
+    with no corruption. Set this to the domain names in the daemon's config;
+    nothing is needed on the client, which reads the object this deployment
+    writes to know a verifier exists.
   EOT
 }
 

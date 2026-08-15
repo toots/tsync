@@ -57,6 +57,19 @@ val verify_jobs_prefix : chunk_prefix:string -> string
 
 val verify_job_key : chunk_prefix:string -> string -> string
 
+(** Where a deployment says it exists. Terraform writes this when it creates the
+    function; the client reads it to know whether anything is checking at all.
+
+    That fact has to come from somewhere, because a store with no verifier and a
+    store with nothing wrong both list no markers — and asking an operator to
+    assert it is worse than not knowing: it is a question about infrastructure
+    they may not have deployed, and a stale answer is exactly the false clean
+    bill of health the distinction exists to prevent.
+
+    Derived from whichever of the domain's prefixes the caller holds, since
+    [capabilities] is asked with one and [verify_all] with another. *)
+val verifier_key : prefix:string -> string
+
 (** The shard a job names, [None] for anything else found under the prefix. *)
 val shard_of_verify_job : string -> string option
 

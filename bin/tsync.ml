@@ -1306,12 +1306,60 @@ let chunks_integrity_cmd =
             Printf.sprintf ", and nothing checked %s" (String.concat ", " names));
     Lwt.return (if n > 0 || silent <> [] then 1 else 0)
   in
+  (* What the sweep is doing, from outside it. The requests delete themselves as
+     each shard finishes, so counting what is left is the progress bar — and
+     markers accumulate as they are found, so a run that is turning things up
+     says so while it runs rather than at the end.
+
+     Both are plain listings of prefixes the client already reads. Nothing here
+     talks to a function. *)
+  let follow (module C : Conf.S) (m : Backend.member) =
+    let open Lwt.Syntax in
+    let (module B : Backend.S) = m.Backend.backend in
+    let jobs = Chunk_layout.verify_jobs_prefix ~chunk_prefix:C.chunk_prefix in
+    let corrupted =
+      Chunk_layout.corrupted_prefix ~chunk_prefix:C.chunk_prefix
+    in
+    let count prefix =
+      Lwt.catch
+        (fun () ->
+          let+ es = B.list_prefix ~prefix () in
+          List.length es)
+        (fun _ -> Lwt.return 0)
+    in
+    let rec loop stalled last =
+      let* left = count jobs in
+      let* found = count corrupted in
+      if left = 0 then (
+        Printf.eprintf "%s: done — %d corrupt chunk(s)\n%!" m.Backend.name found;
+        Lwt.return_unit)
+      else (
+        Printf.eprintf "%s: %d shard request(s) left, %d corrupt so far\n%!"
+          m.Backend.name left found;
+        (* A store whose requests are not draining is not a store that is slow:
+           nothing is consuming them, which is what an undeployed or misfiltered
+           notification looks like from here. Said out loud rather than waited
+           on forever. *)
+        let stalled = if left = last then stalled + 1 else 0 in
+        if stalled >= 5 then (
+          Printf.eprintf
+            "%s: nothing has been picked up in a while — check the bucket's \
+             notification and the function's logs\n\
+             %!"
+            m.Backend.name;
+          Lwt.return_unit)
+        else
+          let* () = Lwt_unix.sleep 3. in
+          loop stalled left)
+    in
+    loop 0 (-1)
+  in
   (* Fails rather than reporting a check that did not happen: a store with
      nothing on its side to run one says so, and saying "queued" anyway would be
      the same lie as printing zero for a store nobody looks at. *)
   let verify (module C : Conf.S) =
     let open Lwt.Syntax in
-    let+ answers =
+    let* answers =
       Lwt_list.map_s
         (fun (m : Backend.member) ->
           let (module B : Backend.S) = m.Backend.backend in
@@ -1326,7 +1374,7 @@ let chunks_integrity_cmd =
     in
     List.iter
       (fun (name, n) ->
-        Printf.printf "%s: queued %d shard(s) to check\n" name n)
+        Printf.eprintf "%s: queued %d shard request(s)\n%!" name n)
       queued;
     List.iter
       (function
@@ -1339,12 +1387,16 @@ let chunks_integrity_cmd =
       Printf.eprintf
         "Nothing was asked to check anything. A local store is swept by tsync \
          gc --verify instead.\n";
-      1)
-    else (
-      Printf.printf
-        "The stores check in the background; read the result with tsync \
-         chunks-integrity --report.\n";
-      0)
+      Lwt.return 1)
+    else
+      let+ () =
+        Lwt_list.iter_p
+          (fun (m : Backend.member) ->
+            if List.mem_assoc m.Backend.name queued then follow (module C) m
+            else Lwt.return_unit)
+          C.members
+      in
+      0
   in
   let repair (module C : Conf.S) source dry_run verbose =
     let open Lwt.Syntax in
@@ -1392,9 +1444,12 @@ let chunks_integrity_cmd =
       value & flag
       & info ["verify"]
           ~doc:
-            "Ask every store that can to check all of its chunks, and return. \
-             Fails if no store can — a local store is swept by $(b,tsync gc \
-             --verify) instead. Reads every byte, on the store's side.")
+            "Ask every store that can to check all of its chunks, then follow \
+             it: one request per shard is queued, and the count left is \
+             reported as the store works through them. Interrupting stops the \
+             watching, not the checking. Fails if no store can — a local store \
+             is swept by $(b,tsync gc --verify) instead. Reads every byte, on \
+             the store's side.")
   in
   let repair_arg =
     Arg.(

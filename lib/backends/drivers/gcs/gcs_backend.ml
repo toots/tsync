@@ -13,7 +13,9 @@ type t = {
   auth : Auth.t option;
       (* [None] is anonymous, for emulators on a custom endpoint. *)
   share_url : string option;
-  verify_chunks : bool;
+  (* Probed once per domain, not configured: see {!Verifier.deployed}. Keyed,
+     because one store can front several domains and each deploys its own. *)
+  verifier : (string, bool Lwt.t) Hashtbl.t;
 }
 
 (* 5xx and 429 clear on their own; a 4xx is the bucket's answer. *)
@@ -321,8 +323,8 @@ let list_all t ?max_keys ~prefix () =
   in
   collect [] None
 
-let make ?endpoint ?service_account_key ?share_url ?(verify_chunks = false)
-    ~bucket () : (module Backend.S) =
+let make ?endpoint ?service_account_key ?share_url ~bucket () :
+    (module Backend.S) =
   let base =
     match endpoint with
       | Some e when e <> "" -> e
@@ -333,7 +335,7 @@ let make ?endpoint ?service_account_key ?share_url ?(verify_chunks = false)
     if n > 0 && base.[n - 1] = '/' then String.sub base 0 (n - 1) else base
   in
   let auth = Option.map Auth.of_service_account_json service_account_key in
-  let t = { bucket; base; auth; share_url; verify_chunks } in
+  let t = { bucket; base; auth; share_url; verifier = Hashtbl.create 1 } in
   (module struct
     let put ~key ~data () = put t ~key ~data ()
     let put_if_absent ~key ~data () = put_if_absent t ~key ~data ()
@@ -345,13 +347,31 @@ let make ?endpoint ?service_account_key ?share_url ?(verify_chunks = false)
     let copy ~src_key ~dst_key () = copy t ~src_key ~dst_key ()
     let list_prefix ?max_keys ~prefix () = list_all t ?max_keys ~prefix ()
 
+    (* Asked once per store: the answer is whether a deployment exists, which
+       does not change under a running process. *)
+    let verifier_deployed ~prefix =
+      let key = Chunk_layout.verifier_key ~prefix in
+      match Hashtbl.find_opt t.verifier key with
+        | Some p -> p
+        | None ->
+            let p = Verifier.deployed ~head_opt ~prefix in
+            Hashtbl.replace t.verifier key p;
+            p
+
     (* [`Unsupported] rather than queueing into a bucket with no function
        behind it: the requests would sit unread and the command would report a
        verification that never ran. *)
     let verify_all ~chunk_prefix () =
-      if not t.verify_chunks then Lwt.return `Unsupported
+      let* deployed = verifier_deployed ~prefix:chunk_prefix in
+      if not deployed then Lwt.return `Unsupported
       else
-        let+ n = Verify_queue.queue ~put ~chunk_prefix in
+        let+ n =
+          Verifier.queue
+            ~on_progress:(fun ~done_ ~total ->
+              if done_ mod 256 = 0 || done_ = total then
+                Log.info "verify: queued %d/%d shard request(s)" done_ total)
+            ~put ~chunk_prefix ()
+        in
         `Queued n
 
     (* No chunk size or concurrency opinion: an object store is limited by the
@@ -363,13 +383,9 @@ let make ?endpoint ?service_account_key ?share_url ?(verify_chunks = false)
        assumed because the failure it guards is silent — an un-deployed bucket
        lists no markers, and "no markers" would otherwise read as "no
        corruption". *)
-    let capabilities ~prefix:_ () =
-      Lwt.return
-        {
-          Backend.no_caps with
-          share_url = t.share_url;
-          verified = t.verify_chunks;
-        }
+    let capabilities ~prefix () =
+      let+ verified = verifier_deployed ~prefix in
+      { Backend.no_caps with share_url = t.share_url; verified }
   end)
 
 let spec =
@@ -404,15 +420,6 @@ let spec =
         default = Some "";
         secret = false;
       };
-      {
-        name = "verifyChunks";
-        label =
-          "Is the chunk-verifier function deployed for this bucket (terraform \
-           chunk_domains)?";
-        typ = `Bool;
-        default = Some "false";
-        secret = false;
-      };
     ]
 
 let () =
@@ -425,6 +432,4 @@ let () =
   Backend.register ~spec "gcs" (fun get ->
       make ?endpoint:(opt get "endpoint")
         ?service_account_key:(opt get "serviceAccountKey")
-        ?share_url:(opt get "shareUrl")
-        ~verify_chunks:(Field_spec.bool ~default:false (get "verifyChunks"))
-        ~bucket:(req get "bucket") ())
+        ?share_url:(opt get "shareUrl") ~bucket:(req get "bucket") ())
