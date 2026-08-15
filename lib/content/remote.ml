@@ -2,21 +2,14 @@ open Lwt.Syntax
 
 exception Cancelled = Backend.Cancelled
 
-(* Positioned reads rather than lseek+read: chunks of one file are read
-   concurrently and a shared fd's seek position would race, so one fd serves a
-   whole file instead of one per chunk.
+(* Raised when the file an upload is reading moves under it, so its chunks would
+   describe bytes the file never held together. *)
+exception Source_changed of string
 
-   A short read means the file was truncated under us: abort. *)
-let read_chunk_into fd offset len buf =
-  let rec loop pos =
-    if pos >= len then Lwt.return_unit
-    else
-      let* n =
-        Local_io.pread fd buf ~file_offset:(offset + pos) pos (len - pos)
-      in
-      if n = 0 then raise Cancelled else loop (pos + n)
-  in
-  loop 0
+let () =
+  Printexc.register_printer (function
+    | Source_changed p -> Some (p ^ ": changed while it was being read")
+    | _ -> None)
 
 module type S = sig
   val upload :
@@ -93,8 +86,8 @@ module Make_with_layout (C : Conf.S) (L : Layout.S) : S = struct
      A chunk larger than the configured size — only reachable re-chunking a file
      whose manifest used a larger one — takes a single slot regardless, and so
      costs more than a slot is reckoned to. *)
-  let with_chunk_buffer ~size f =
-    Lwt_bounded.use chunk_slots (fun () -> f (Chunk.create size))
+  let with_slot f = Lwt_bounded.use chunk_slots f
+  let with_chunk_buffer ~size f = with_slot (fun () -> f (Chunk.create size))
 
   (* Chunk keys known present on the domain's stores, this session only. Not
      pre-populated by listing the chunk prefix: that cost scales with the whole
@@ -148,13 +141,23 @@ module Make_with_layout (C : Conf.S) (L : Layout.S) : S = struct
     in
     entry
 
+  (* Mapped from the descriptor the upload holds, so the pages reach the store
+     without being copied into a buffer first and no rename swaps the inode out
+     from under the run.
+
+     An import takes its sources as settled: one that shrank past this chunk
+     cannot be mapped and aborts, and one truncated after the mapping is taken
+     is [SIGBUS]. *)
   let upload_chunk fd ~cancel ~file_size ~chunk_size index =
     if !cancel then raise Cancelled;
     let offset = index * chunk_size in
-    let size = min chunk_size (file_size - offset) in
-    with_chunk_buffer ~size (fun buf ->
-        let* () = read_chunk_into fd offset size buf in
-        put_chunk ~index ~data:(Chunk.of_buffer buf))
+    let len = min chunk_size (file_size - offset) in
+    with_slot (fun () ->
+        let data =
+          try Chunk.map_fd (Lwt_unix.unix_file_descr fd) ~offset ~len
+          with Unix.Unix_error _ -> raise Cancelled
+        in
+        put_chunk ~index ~data)
 
   (* A cancellation landing while the put is in flight unpublishes it again, or
      a ghost object survives under a name that may no longer exist locally.
@@ -188,24 +191,39 @@ module Make_with_layout (C : Conf.S) (L : Layout.S) : S = struct
       raise Cancelled
     else Lwt.return state
 
-  (* For a file handed over whole: import, and the FileProvider's re-import. *)
+  (* For a file handed over whole: import, and the FileProvider's re-import.
+
+     Sized from the descriptor the chunks are mapped through, so the length the
+     chunking is laid out for and the bytes that reach the store come from one
+     file however the name is reused meanwhile. *)
   let upload ~key ~src_path ~mtime ~chunk_size ?(cancel = ref false) () =
-    let* st = Lwt_unix_retry.stat src_path in
-    let file_size = st.Unix.st_size in
-    Log.debug "upload %s: file_size=%d" key file_size;
-    let num_chunks =
-      if file_size = 0 then 1 else (file_size + chunk_size - 1) / chunk_size
-    in
     let* fd = Lwt_unix_retry.openfile src_path [Unix.O_RDONLY] 0 in
-    let* entries =
+    let* entries, file_size =
       Lwt.finalize
         (fun () ->
+          let* before = Lwt_unix_retry.LargeFile.fstat fd in
+          let file_size = Int64.to_int before.Unix.LargeFile.st_size in
+          Log.debug "upload %s: file_size=%d" key file_size;
+          let num_chunks =
+            if file_size = 0 then 1
+            else (file_size + chunk_size - 1) / chunk_size
+          in
           (* Safe to launch every chunk's task up front: each blocks on
              [chunk_slots] until one frees, so concurrency stays capped at
              [max_chunk_buffers] however many chunks contend. *)
-          Lwt_list.map_p
-            (upload_chunk fd ~cancel ~file_size ~chunk_size)
-            (List.init num_chunks Fun.id))
+          let* entries =
+            Lwt_list.map_p
+              (upload_chunk fd ~cancel ~file_size ~chunk_size)
+              (List.init num_chunks Fun.id)
+          in
+          (* A write landing mid-read leaves the chunks describing a file that
+             never existed, and the manifest is what would make that permanent. *)
+          let+ after = Lwt_unix_retry.LargeFile.fstat fd in
+          if
+            after.Unix.LargeFile.st_size <> before.Unix.LargeFile.st_size
+            || after.Unix.LargeFile.st_mtime <> before.Unix.LargeFile.st_mtime
+          then raise (Source_changed src_path);
+          (entries, file_size))
         (fun () -> Lwt_unix_retry.close fd)
     in
     publish ~key ~size:(Int64.of_int file_size) ~chunk_size ~mtime ~cancel

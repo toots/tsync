@@ -1,10 +1,16 @@
 exception Cancelled
 
+(** The file an upload was reading changed under it, so nothing is published:
+    its chunks would otherwise describe bytes the file never held together. The
+    caller re-imports to pick up what it now holds. *)
+exception Source_changed of string
+
 module type S = sig
   (** Upload [src_path] as chunks under [key]: each chunk is read, hashed (chunk
       key) and uploaded if absent, then the manifest is written. For a file
       handed over whole — import, and the FileProvider's re-import. Setting
-      [cancel] aborts at the next chunk boundary with {!Cancelled}. *)
+      [cancel] aborts at the next chunk boundary with {!Cancelled}, and a source
+      that moves while it is being read raises {!Source_changed}. *)
   val upload :
     key:string ->
     src_path:string ->
