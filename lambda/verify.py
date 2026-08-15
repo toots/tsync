@@ -104,9 +104,7 @@ def marker_key(key):
 
     Matching `/chunks/` exactly is what keeps a marker from earning one of its
     own, and leaves alone a chunk in the space a collection is moving out of:
-    `chunks.from/` does not spell that segment, and a marker is not under
-    `tsync/` at all. The bucket notification's prefix filter says the same thing;
-    both are kept because a filter is configuration and this is not.
+    neither `tsync/corrupted/` nor `chunks.from/` spells that segment.
 
     Membership is the prefix and never the shape of the name. A manifest is filed
     under the hash of its own file name, so it is spelled exactly like a chunk

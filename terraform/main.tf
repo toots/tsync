@@ -38,9 +38,10 @@ provider "google" {
 # both functions in a store are entry points into it (handler.handler for
 # shares, verify.handler for the chunk check).
 #
-# Excludes are exact paths, not globs, so each test file has to be named. A
-# missed one ships harmlessly — nothing imports it — but it also ships its
-# import of moto, so keep the list current.
+# Excludes are exact paths, not globs, so every file has to be named. This packs
+# the working tree, not the index, so a gitignored directory is packed too: the
+# .pytest_cache entries below are what keeps a local test run out of the
+# deployed artifact.
 data "archive_file" "handler" {
   type       = "zip"
   source_dir = "${path.module}/../lambda"
@@ -53,6 +54,13 @@ data "archive_file" "handler" {
     "vendor/README.md",
     "__pycache__",
     "vendor/xxhash/__pycache__",
+    ".pytest_cache",
+    ".pytest_cache/.gitignore",
+    ".pytest_cache/CACHEDIR.TAG",
+    ".pytest_cache/README.md",
+    ".pytest_cache/v/cache/lastfailed",
+    ".pytest_cache/v/cache/nodeids",
+    ".pytest_cache/v/cache/stepwise",
   ]
   output_path = "${path.module}/build/lambda.zip"
 }
