@@ -77,7 +77,7 @@ emit tsync "$root" "$deps, fuse3" 'Cloud-backed filesystem sync tool
 # over the IPC socket, and a mismatched pair is not something to discover at
 # runtime.
 tray=$(mktemp -d)
-install -Dm755 _build/default/tray/main.exe "$tray/usr/bin/tsync-tray"
+install -Dm755 _build/default/linux/tray/main.exe "$tray/usr/bin/tsync-tray"
 strip "$tray/usr/bin/tsync-tray"
 mkdir -p "$tray/etc/xdg/autostart"
 sed 's|@BIN@|/usr/bin/tsync-tray|' linux/tsync-tray.desktop.in \
