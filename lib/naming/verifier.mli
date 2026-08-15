@@ -1,5 +1,4 @@
-(** The store-side verifier: whether one is deployed, and asking it to check
-    everything.
+(** Asking an object store to check everything it holds.
 
     The bucket is the queue. A request is an empty object under
     {!Chunk_layout.verify_jobs_prefix}, one per shard, and the store's own
@@ -10,19 +9,6 @@
     So this is only [put], and only the object stores implement
     {!Backend.S.verify_all} with it: a filesystem has no event source to deliver
     anything, and [tsync gc --verify] is its sweep. *)
-
-(** Whether a verifier is deployed for this domain, by reading the object its
-    deployment writes. Asked of the store because the alternative — asking the
-    operator — is a question about infrastructure they may not have deployed,
-    and a stale answer reads as a clean bill of health for a store nothing is
-    checking.
-
-    Unreachable answers [false]: a store that did not respond has not told us it
-    checks anything. *)
-val deployed :
-  head_opt:(key:string -> unit -> Backend.file_entry option Lwt.t) ->
-  prefix:string ->
-  bool Lwt.t
 
 (** Queue one request per shard. Answers how many, which is work started rather
     than work done: what came of it is read afterwards by listing

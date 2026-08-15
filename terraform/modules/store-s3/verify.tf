@@ -11,23 +11,13 @@
 
 data "aws_caller_identity" "current" {}
 
-locals {
-  # No safe default: the store's name and the domain's are only conventionally
-  # the same, and a prefix that matches nothing deploys a function that is never
-  # invoked. That failure is silent and reads exactly like a healthy store, so
-  # verification is off until someone names the domains.
-  verify_enabled = length(var.chunk_domains) > 0
-}
-
 resource "aws_iam_role" "verify" {
-  count              = local.verify_enabled ? 1 : 0
   name               = "tsync-verify-${var.name}"
   assume_role_policy = data.aws_iam_policy_document.assume.json
 }
 
 resource "aws_iam_role_policy_attachment" "verify_logs" {
-  count      = local.verify_enabled ? 1 : 0
-  role       = aws_iam_role.verify[0].name
+  role       = aws_iam_role.verify.name
   policy_arn = "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
 }
 
@@ -48,7 +38,7 @@ data "aws_iam_policy_document" "verify" {
   # writes them; this only consumes them.
   statement {
     actions   = ["s3:GetObject", "s3:DeleteObject"]
-    resources = ["${local.bucket_arn}/tsync/*/verify-jobs/*"]
+    resources = ["${local.bucket_arn}/verify-jobs/*"]
   }
   statement {
     actions   = ["s3:ListBucket"]
@@ -57,16 +47,14 @@ data "aws_iam_policy_document" "verify" {
 }
 
 resource "aws_iam_role_policy" "verify" {
-  count  = local.verify_enabled ? 1 : 0
   name   = "tsync-verify-s3"
-  role   = aws_iam_role.verify[0].id
+  role   = aws_iam_role.verify.id
   policy = data.aws_iam_policy_document.verify.json
 }
 
 resource "aws_lambda_function" "verify" {
-  count            = local.verify_enabled ? 1 : 0
   function_name    = "tsync-verify-${var.name}"
-  role             = aws_iam_role.verify[0].arn
+  role             = aws_iam_role.verify.arn
   runtime          = "python3.13"
   handler          = "verify.handler"
   filename         = var.lambda_zip
@@ -97,10 +85,9 @@ resource "aws_lambda_function" "verify" {
 }
 
 resource "aws_lambda_permission" "verify_s3" {
-  count         = local.verify_enabled ? 1 : 0
   statement_id  = "AllowExecutionFromS3"
   action        = "lambda:InvokeFunction"
-  function_name = aws_lambda_function.verify[0].function_name
+  function_name = aws_lambda_function.verify.function_name
   principal     = "s3.amazonaws.com"
   source_arn    = local.bucket_arn
   # Without this a bucket in another account could invoke it.
@@ -120,46 +107,30 @@ resource "aws_lambda_permission" "verify_s3" {
 # writes cannot re-invoke it. verify.py's marker_key() refuses the same keys
 # independently, because a filter is configuration and that is not.
 resource "aws_s3_bucket_notification" "chunks" {
-  count  = local.verify_enabled && var.manage_notifications ? 1 : 0
+  count  = var.manage_notifications ? 1 : 0
   bucket = local.bucket_id
 
-  dynamic "lambda_function" {
-    for_each = toset(var.chunk_domains)
-    content {
-      id                  = "tsync-verify-${lambda_function.value}"
-      lambda_function_arn = aws_lambda_function.verify[0].arn
-      events              = ["s3:ObjectCreated:*"]
-      filter_prefix       = "tsync/${lambda_function.value}/chunks/"
-    }
+  # Every chunk written anywhere in the store. One literal prefix, no list of
+  # domains to keep in step with the daemon's config — the function ignores a key
+  # that is not a chunk, which it has to do anyway: a filter is configuration and
+  # the code cannot lean on it.
+  lambda_function {
+    id                  = "tsync-verify-chunks"
+    lambda_function_arn = aws_lambda_function.verify.arn
+    events              = ["s3:ObjectCreated:*"]
+    filter_prefix       = "tsync/"
   }
 
   # The other way in: `tsync chunks-integrity --verify` writes one request per
-  # shard here, and this delivers them to the same function. A separate rule
-  # rather than a wider prefix, so a marker still cannot trigger anything.
-  dynamic "lambda_function" {
-    for_each = toset(var.chunk_domains)
-    content {
-      id                  = "tsync-verify-jobs-${lambda_function.value}"
-      lambda_function_arn = aws_lambda_function.verify[0].arn
-      events              = ["s3:ObjectCreated:*"]
-      filter_prefix       = "tsync/${lambda_function.value}/verify-jobs/"
-    }
+  # shard at verify-jobs/<domain>/<shard>. The domain sits inside the prefix
+  # rather than around it precisely so this one rule reaches every domain.
+  lambda_function {
+    id                  = "tsync-verify-jobs"
+    lambda_function_arn = aws_lambda_function.verify.arn
+    events              = ["s3:ObjectCreated:*"]
+    filter_prefix       = "verify-jobs/"
   }
 
   depends_on = [aws_lambda_permission.verify_s3]
 }
 
-# What tells a client anything is checking this bucket at all.
-#
-# A store with no verifier and a store with nothing wrong both list no markers,
-# so that fact has to come from somewhere — and asking an operator to assert it
-# in their config is worse than not knowing: it is a question about
-# infrastructure, and a stale answer reads as a clean bill of health. The
-# deployment writes it instead, so it is true by construction and disappears
-# with the function.
-resource "aws_s3_object" "verifier" {
-  for_each = local.verify_enabled ? toset(var.chunk_domains) : toset([])
-  bucket   = local.bucket_id
-  key      = "tsync/${each.key}/verifier"
-  content  = jsonencode({ function = aws_lambda_function.verify[0].function_name })
-}

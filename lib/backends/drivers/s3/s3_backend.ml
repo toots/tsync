@@ -9,9 +9,6 @@ type t = {
   endpoint : Aws_s3.Region.endpoint;
   unsigned_payload : bool;
   share_url : string option;
-  (* Probed once per domain, not configured: see {!Verifier.deployed}. Keyed,
-     because one store can front several domains and each deploys its own. *)
-  verifier : (string, bool Lwt.t) Hashtbl.t;
 }
 
 let make_t ?endpoint ?(unsigned_payload = false) ?share_url ~bucket ~region
@@ -26,14 +23,7 @@ let make_t ?endpoint ?(unsigned_payload = false) ?share_url ~bucket ~region
       | None -> Aws_s3.Region.of_string region
   in
   let endpoint = Aws_s3.Region.endpoint ~inet:`V4 ~scheme:`Https region in
-  {
-    bucket;
-    credentials;
-    endpoint;
-    unsigned_payload;
-    share_url;
-    verifier = Hashtbl.create 1;
-  }
+  { bucket; credentials; endpoint; unsigned_payload; share_url }
 
 let string_of_error = function
   | S3.Redirect _ -> "redirect"
@@ -244,32 +234,15 @@ let make ?endpoint ?unsigned_payload ?share_url ~bucket ~region ~access_key_id
     let copy ~src_key ~dst_key () = copy t ~src_key ~dst_key ()
     let list_prefix ?max_keys ~prefix () = list_all t ?max_keys ~prefix ()
 
-    (* Asked once per store: the answer is whether a deployment exists, which
-       does not change under a running process. *)
-    let verifier_deployed ~prefix =
-      let key = Chunk_layout.verifier_key ~prefix in
-      match Hashtbl.find_opt t.verifier key with
-        | Some p -> p
-        | None ->
-            let p = Verifier.deployed ~head_opt ~prefix in
-            Hashtbl.replace t.verifier key p;
-            p
-
-    (* [`Unsupported] rather than queueing into a bucket with no function
-       behind it: the requests would sit unread and the command would report a
-       verification that never ran. *)
     let verify_all ~chunk_prefix () =
-      let* deployed = verifier_deployed ~prefix:chunk_prefix in
-      if not deployed then Lwt.return `Unsupported
-      else
-        let+ n =
-          Verifier.queue
-            ~on_progress:(fun ~done_ ~total ->
-              if done_ mod 256 = 0 || done_ = total then
-                Log.info "verify: queued %d/%d shard request(s)" done_ total)
-            ~put ~chunk_prefix ()
-        in
-        `Queued n
+      let+ n =
+        Verifier.queue
+          ~on_progress:(fun ~done_ ~total ->
+            if done_ mod 256 = 0 || done_ = total then
+              Log.info "verify: queued %d/%d shard request(s)" done_ total)
+          ~put ~chunk_prefix ()
+      in
+      `Queued n
 
     (* No chunk size or concurrency opinion: an object store is limited by the
        network and its own concurrency, neither measurable from here.
@@ -279,9 +252,13 @@ let make ?endpoint ?unsigned_payload ?share_url ~bucket ~region ~access_key_id
        whether the terraform was applied, and it is asked for rather than assumed
        because the failure it guards is silent — an un-deployed bucket lists no
        markers, and "no markers" would otherwise read as "no corruption". *)
-    let capabilities ~prefix () =
-      let+ verified = verifier_deployed ~prefix in
-      { Backend.no_caps with share_url = t.share_url; verified }
+    (* An object store's chunks are checked by a function beside the bucket,
+       which the same terraform that makes the bucket deploys. Taken as given
+       rather than probed or configured: a deployment that is half applied is
+       not a state this reports its way out of. *)
+    let capabilities ~prefix:_ () =
+      Lwt.return
+        { Backend.no_caps with share_url = t.share_url; verified = true }
   end)
 
 let spec =

@@ -40,23 +40,27 @@ let sibling ~chunk_prefix name =
   Filename.chop_suffix chunk_prefix "chunks/" ^ name
 
 let corrupted_prefix ~chunk_prefix = sibling ~chunk_prefix "corrupted/"
-let verify_jobs_prefix ~chunk_prefix = sibling ~chunk_prefix "verify-jobs/"
+
+(* The domain a chunk prefix belongs to: ["tsync/<domain>/chunks/"] is the one
+   shape this ever sees. *)
+let domain_of ~chunk_prefix =
+  let root = Filename.chop_suffix chunk_prefix "chunks/" in
+  let root =
+    if root <> "" && root.[String.length root - 1] = '/' then
+      String.sub root 0 (String.length root - 1)
+    else root
+  in
+  match String.index_opt root '/' with
+    | Some i -> String.sub root (i + 1) (String.length root - i - 1)
+    | None -> root
+
+let verify_jobs_root = "verify-jobs/"
+
+let verify_jobs_prefix ~chunk_prefix =
+  verify_jobs_root ^ domain_of ~chunk_prefix ^ "/"
 
 let verify_job_key ~chunk_prefix shard =
   verify_jobs_prefix ~chunk_prefix ^ shard
-
-(* Beside the namespaces rather than inside one, and derived from whatever prefix
-   a caller happens to hold: [capabilities] is asked with the manifest prefix,
-   [verify_all] with the chunk prefix, and both mean the same domain. *)
-let verifier_key ~prefix =
-  let trimmed =
-    if String.length prefix > 0 && prefix.[String.length prefix - 1] = '/' then
-      String.sub prefix 0 (String.length prefix - 1)
-    else prefix
-  in
-  match String.rindex_opt trimmed '/' with
-    | Some i -> String.sub trimmed 0 (i + 1) ^ "verifier"
-    | None -> "verifier"
 
 (* The shard a job names, or [None] for anything else under the prefix. *)
 let shard_of_verify_job key =

@@ -77,7 +77,6 @@ module "store" {
   lambda_memory_mb      = each.value.lambda_memory_mb
   ephemeral_storage_mb  = each.value.ephemeral_storage_mb
 
-  chunk_domains          = each.value.chunk_domains
   manage_notifications   = each.value.manage_notifications
   verify_timeout_seconds = each.value.verify_timeout_seconds
   verify_memory_mb       = each.value.verify_memory_mb
@@ -117,7 +116,6 @@ module "store_gcs" {
   max_share_bytes    = each.value.max_share_bytes
 
   project                = var.gcp_project
-  chunk_domains          = each.value.chunk_domains
   verify_timeout_seconds = each.value.verify_timeout_seconds
   verify_memory_mb       = each.value.verify_memory_mb
 

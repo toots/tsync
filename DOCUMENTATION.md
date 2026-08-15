@@ -404,10 +404,8 @@ Who does the checking depends on the store:
   read back per chunk written, usually from the page cache; turn it off for a store where
   throughput matters more than finding out early.
 - **`s3` and `gcs`** check in a function the bucket itself triggers on each new object, so the
-  chunks are never downloaded to be checked. Deploy it by naming your domains in Terraform's
-  `chunk_domains`. Nothing to set on the client: the deployment writes a small object next to
-  your data saying it exists, and tsync reads that — so a bucket whose function was never
-  deployed reports "not checked" rather than a clean zero, and cannot go stale.
+  chunks are never downloaded to be checked. It comes with the Terraform module — nothing to
+  name, nothing to set on the client.
 
 ```bash
 tsync chunks-integrity              # what each store found, and which stores nothing is checking
