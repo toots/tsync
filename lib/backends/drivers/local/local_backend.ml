@@ -101,7 +101,7 @@ let make ?(verify_writes = true) ~root () : (module Backend.S) =
   (* What the bucket's object-created function does for s3 and gcs, done here
      because a filesystem has no event source to hang it on. In the driver rather
      than in the uploader so that it covers every way a chunk lands — a client
-     PUTting through the http-proxy frontend, a resync, a recheck's re-upload, a
+     PUTting through the http-proxy frontend, a mirror, a repair's rewrite, a
      deferred forward — none of which go through {!Remote.put_chunk}.
 
      Read back, never hashed from [data]: what this catches is a body that did

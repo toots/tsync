@@ -55,13 +55,6 @@ module Make (C : Conf.S) (F : Fetch) : sig
   (** Drop one group body. It is re-fetched on the next read. *)
   val forget : group:Chunk_group.t -> unit Lwt.t
 
-  (** Re-hash every member segment of a group already on disk against the key it
-      was published under, deleting the body on a mismatch. [true] if the group
-      survived (or was never here). Driven from {!Recheck}, which supplies the
-      groups: unlike a lone chunk, a group body cannot be checked against its
-      own name. *)
-  val verify_group : group:Chunk_group.t -> bool Lwt.t
-
   (** {2 Staged bodies}
 
       A chunk being written has no content key yet, its bytes still changing, so

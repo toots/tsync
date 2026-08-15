@@ -208,35 +208,6 @@ module Make (C : Conf.S) (F : Fetch) = struct
 
   (* Every member segment must hash to the key the manifest published it under;
      the repair is a deletion, the bytes coming back on the next read. *)
-  let verify_group ~group =
-    let* present = exists group in
-    if not present then Lwt.return_true
-    else
-      let* ok =
-        Lwt_list.fold_left_s
-          (fun ok index ->
-            if not ok then Lwt.return_false
-            else
-              let+ body = member_if_local ~group ~index in
-              match body with
-                | None -> false
-                | Some body ->
-                    Manifest.key_of_body body
-                    = Chunk_group.member_key group index)
-          true
-          (Chunk_group.indices group)
-      in
-      if ok then Lwt.return_true
-      else (
-        Log.info "chunk cache: dropping corrupt %s" (Chunk_group.key group);
-        let+ () = forget ~group in
-        false)
-
-  (* A chunk being written cannot live under a content key, its content still
-     changing, so it gets a uuid until the upload that hashes it succeeds
-     ({!promote}). Staged bodies are unsynced data and are never deleted behind
-     the writer. *)
-
   let staged_path uuid =
     Filename.concat
       (Cache_layout.staged_chunks_dir ~cache_root:C.cache_root C.domain_name)

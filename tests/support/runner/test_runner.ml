@@ -78,7 +78,6 @@ type step =
           its own name. *)
   | DeleteCachedChunk of { path : string; index : int }
   | ForgetFolderId of string
-  | Recheck
   | RecoverStaged
       (** Finish or discard every unfinished record, and adopt staged data no
           record names, exactly as a restart does. *)
@@ -197,7 +196,6 @@ let rec render_step = function
   | DeleteCachedChunk { path; index } ->
       Printf.sprintf "delete-cached-chunk %s #%d" path index
   | ForgetFolderId rel -> "forget-folder-id " ^ rel
-  | Recheck -> "recheck"
   | RecoverStaged -> "recover-staged"
   | CrashBeforeCommit p -> "crash-before-commit " ^ p
   | StaleRecord -> "stale-record"
@@ -441,7 +439,7 @@ let setup_client (module C : Conf.S) root staging_prefix =
     let+ obj = action ?src ?staging ?arg ?target act path in
     must obj
   in
-  (* Backend damage for recheck scenarios: resolve a chunk key from the local
+  (* Backend damage for integrity scenarios: resolve a chunk key from the local
      sidecar, then delete or overwrite the remote object behind the daemon's
      back. *)
   let remote_chunk_key path index =
@@ -956,26 +954,6 @@ let setup_client (module C : Conf.S) root staging_prefix =
     | ReclaimStaged -> F.reclaim_staged_orphans ()
     | ClearCache ->
         Cache_layout.clear ~cache_root:C.cache_root ~domain_name:C.domain_name
-    | Recheck ->
-        let module Rc = Recheck.Make (C) in
-        let* summary =
-          Rc.run
-            ~on_file:(fun ~rel status ->
-              Printf.printf "  %s\n" (Recheck.describe rel status))
-            ()
-        in
-        (match summary with
-          | Some s ->
-              Printf.printf
-                "  recheck: %d checked, %d repaired, %d unrepairable, %d skipped\n"
-                s.Recheck.checked s.Recheck.repaired s.Recheck.unrepairable
-                s.Recheck.skipped
-          | None -> Printf.printf "  recheck: no local cache\n");
-        (* The local half, as the CLI runs it: a body that no longer hashes to its
-           own name is dropped and re-fetched on the next read. *)
-        let* checked, dropped = Rc.verify_chunk_cache () in
-        Printf.printf "  chunk-cache: %d verified, %d dropped\n" checked dropped;
-        Lwt.return_unit
   in
   let drain () = Sq.drain () in
   let stop () = Lwt.return_unit in
@@ -1470,7 +1448,7 @@ let run_scenario ?(versioning = false) ?(symlink_policy = `Keep)
            Lwt.return_unit)
      in
      (* Outside the catch: the bucket snapshot must appear even when a step or
-        content fetch fails (e.g. rechecking an unrepairable evicted file). *)
+        content fetch fails (e.g. an unrepairable evicted file). *)
      print_endline "--- backend";
      let* () =
        dump_backend_at ~backend_root ~domain_prefix:C.domain_prefix

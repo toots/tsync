@@ -384,7 +384,6 @@ Repairing a backend that was offline or has drifted:
 ```bash
 tsync mirror                    # copy what's missing between backends
 tsync mirror --source cloud     # ...copying *from* the named one
-tsync recheck                          # verify the remote against the local cache
 ```
 
 ### Chunks that are not what their names say
@@ -436,8 +435,8 @@ wrong one and is recorded the same way.
 `--repair` hashes a candidate copy before trusting it — a second copy can be wrong too, and
 writing one bad chunk over another would spread the damage while reporting a repair. It writes
 only to the damaged store. Where no store holds good bytes, it names the chunks rather than
-reporting success; `tsync recheck` may still fix those from a machine whose cache holds the
-files that use them.
+reporting success: re-upload the files that use them, or fill this backend from one that still
+has them (`tsync mirror`).
 
 Nothing deletes a marker directly. It is cleared by the store re-checking the object as it
 takes the next write — which is also why simply saving the file again repairs it, and why a
@@ -701,7 +700,6 @@ tsync gc              # reclaim unreferenced blocks (local main stores only)
 tsync gc --verify     # ...and check each chunk it keeps against its own name
 tsync sync            # apply changes from other machines (incremental)
 tsync sync --full     # clear local cache and re-download all manifests
-tsync recheck         # verify the remote against the local cache, repair what's possible
 tsync data-integrity  # list chunks a store found were not what their names say
                       # --verify asks the stores to check everything; --repair fixes it
 tsync mirror   # copy missing/damaged objects from one backend to the others
@@ -748,7 +746,7 @@ point at — explains itself.
 ### Multiple domains
 
 With more than one domain, pass `--domain <name>` to commands that act on a specific one
-(`ls`, `versions`, `expire`, `gc`, `sync`, `recheck`, `mirror`, `import`, `export`,
+(`ls`, `versions`, `expire`, `gc`, `sync`, `mirror`, `import`, `export`,
 `share`). `tsync set-domain <name>` persists a default; an explicit `--domain` always wins.
 
 `tsync stats` is the exception: it always reports on every configured domain, and takes no
@@ -887,7 +885,7 @@ what stops syncing.
 | Config rejected at startup | The message names the domain, backend and reason. Roles are checked at parse time, so `tsync print-config` catches them too. |
 | Finder disagrees with `tsync ls` (macOS) | `tsync fileprovider reimport`. |
 | A backend was offline and has fallen behind | `tsync mirror --source <name>`. |
-| Local cache and remote disagree | `tsync recheck`, then `tsync sync --full` if it persists. |
+| Local cache and remote disagree | `tsync sync --full`. |
 | Daemon state unclear | `tsync status`, `tsync stats`, and `tsync logs -f` — [reading the log](#reading-the-log). |
 | One backend of several is misbehaving | `tsync stats` — each backend reports its own reachability, journal backlog and how far behind it is. |
 | A `replica` or `backfill` target is behind | Normal: it catches up on its own, and what it owes survives a restart. `tsync stats` says by how much. |

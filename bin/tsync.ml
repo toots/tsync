@@ -1200,55 +1200,13 @@ let sync_cmd =
       const run $ domain_arg $ source_arg $ full_arg $ parallelism_arg
       $ verbose_arg)
 
-let recheck_cmd =
-  let run domain =
-    let code =
-      run_lwt
-        (let open Lwt.Syntax in
-         let (module C : Conf.S) = load_conf ?domain () in
-         let module Rc = Recheck.Make (C) in
-         let* summary =
-           Rc.run
-             ~on_file:(fun ~rel status ->
-               Printf.printf "%s\n%!" (Recheck.describe rel status))
-             ()
-         in
-         match summary with
-           | None ->
-               Printf.eprintf "No local cache for domain %s\n" C.domain_name;
-               Lwt.return 1
-           | Some s ->
-               Printf.printf
-                 "\n\
-                  %d file%s checked: %d repaired, %d unrepairable, %d skipped\n"
-                 s.Recheck.checked
-                 (if s.Recheck.checked = 1 then "" else "s")
-                 s.Recheck.repaired s.Recheck.unrepairable s.Recheck.skipped;
-               (* Bodies are content-addressed: one that no longer hashes to its
-                  own name is corrupt, and is dropped to be re-fetched. *)
-               let+ checked, dropped = Rc.verify_chunk_cache () in
-               Printf.printf "%d chunk%s verified, %d dropped as corrupt\n"
-                 checked
-                 (if checked = 1 then "" else "s")
-                 dropped;
-               if s.Recheck.unrepairable > 0 then 1 else 0)
-    in
-    if code <> 0 then exit code
-  in
-  Cmd.v
-    (Cmd.info "recheck"
-       ~doc:
-         "Verify all remote chunks and manifests against the local cache, \
-          repairing what can be repaired")
-    Term.(const run $ domain_arg)
-
 (* One command for the three things anyone does about a chunk that is not what
    its name says: ask for a check, read what was found, put it right.
 
-   Separate from [recheck], which walks the local mirror and so sees only chunks
-   some manifest here names — and answers nothing at all on a machine with no
-   cache. This walks the stores. *)
-let chunks_integrity_cmd =
+   The stores are what it walks, not this machine's manifests: a chunk is
+   checkable wherever it sits, and what a client happens to have cached says
+   nothing about the copy a store is keeping. *)
+let data_integrity_cmd =
   let report (module C : Conf.S) detail =
     let open Lwt.Syntax in
     let module Cor = Corruption.Make (C) in
@@ -1433,8 +1391,8 @@ let chunks_integrity_cmd =
         "\nNo copy of these chunks hashes to its own key anywhere:\n";
       List.iter (fun k -> Printf.eprintf "  %s\n" k) s.Repair.lost;
       Printf.eprintf
-        "Run tsync recheck on a machine whose cache still holds the files that \
-         use them.\n";
+        "Nothing here can supply them: re-upload the files that use them, or \
+         fill this backend from one that still has them (tsync mirror).\n";
       1)
     else 0
   in
@@ -2087,8 +2045,7 @@ let () =
          resume_uploads_cmd;
          stats_cmd;
          sync_cmd;
-         recheck_cmd;
-         chunks_integrity_cmd;
+         data_integrity_cmd;
          mirror_cmd;
          import_cmd;
          export_cmd;
