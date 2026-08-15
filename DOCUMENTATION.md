@@ -408,14 +408,14 @@ Who does the checking depends on the store:
   name, nothing to set on the client.
 
 ```bash
-tsync chunks-integrity              # what each store found, and which stores nothing is checking
-tsync chunks-integrity --detail     # ...and what each bad chunk hashed to instead
-tsync chunks-integrity --verify     # ask every store that can to check all of its chunks
-tsync chunks-integrity --repair     # rewrite them from a copy that hashes to the right key
-tsync chunks-integrity --repair --dry-run   # ...say what would be rewritten, write nothing
+tsync data-integrity              # what each store found, and which stores nothing is checking
+tsync data-integrity --detail     # ...and what each bad chunk hashed to instead
+tsync data-integrity --verify     # ask every store that can to check all of its chunks
+tsync data-integrity --repair     # rewrite them from a copy that hashes to the right key
+tsync data-integrity --repair --dry-run   # ...say what would be rewritten, write nothing
 ```
 
-`tsync chunks-integrity` distinguishes a store that looked and found nothing from a store nothing
+`tsync data-integrity` distinguishes a store that looked and found nothing from a store nothing
 is checking. Both would otherwise report zero, and only one of those is good news.
 
 `--verify` is the stores' own work: an s3 or gcs bucket queues one request per shard into
@@ -702,8 +702,8 @@ tsync gc --verify     # ...and check each chunk it keeps against its own name
 tsync sync            # apply changes from other machines (incremental)
 tsync sync --full     # clear local cache and re-download all manifests
 tsync recheck         # verify the remote against the local cache, repair what's possible
-tsync chunks-integrity  # list chunks a store found were not what their names say
-                        # --verify asks the stores to check everything; --repair fixes it
+tsync data-integrity  # list chunks a store found were not what their names say
+                      # --verify asks the stores to check everything; --repair fixes it
 tsync resync-remote   # copy missing/damaged objects from one backend to the others
 tsync import <dir>    # seed the domain from an existing folder
 tsync export <dir>    # write every file of the domain to a plain folder
