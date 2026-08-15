@@ -740,8 +740,6 @@ module Make (C : Conf.S) = struct
           let+ m = read key in
           match m with Some m -> Some (`Published m) | None -> None)
 
-  let mirror_exists () = Fs_util.is_directory (root ())
-
   let init () =
     let* () = Fs_util.mkdir_p (root ()) in
     clean_tmp (root ())

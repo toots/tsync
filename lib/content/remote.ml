@@ -2,11 +2,6 @@ open Lwt.Syntax
 
 exception Cancelled = Backend.Cancelled
 
-let manifest_matches (a : Manifest.t) (b : Manifest.t) =
-  a.Manifest.h1 = b.Manifest.h1
-  && a.Manifest.h2 = b.Manifest.h2
-  && a.Manifest.size = b.Manifest.size
-
 (* Positioned reads rather than lseek+read: chunks of one file are read
    concurrently and a shared fd's seek position would race, so one fd serves a
    whole file instead of one per chunk.
@@ -260,20 +255,6 @@ module Make_with_layout (C : Conf.S) (L : Layout.S) : S = struct
             | m -> Some m
             | exception _ -> None)
 
-  (* Chunk keys are content-addressed, so a size mismatch means the remote object
-     is corrupt — and a size {i match} means very little, the bug this most has
-     to catch being a whole chunk landing under another one's name. A marker is
-     the only thing that can tell those apart without reading the body back, so
-     it is asked first. *)
-  let chunk_remote_ok ~chunk_key ~size =
-    let* marked = Corrupt.is_marked chunk_key in
-    if marked then Lwt.return_false
-    else
-      let+ head = Space.head chunk_key in
-      match head with Some h -> h.Backend.size = size | None -> false
-
-  (* Republishes [expected] when the remote manifest is missing or differs;
-     [true] when a repair was made. *)
   let chunk_download_pool = Lwt_bounded.create ~max:C.max_downloads ()
 
   let get_chunk ~chunk_key =

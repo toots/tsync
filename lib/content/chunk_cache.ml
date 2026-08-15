@@ -191,23 +191,6 @@ module Make (C : Conf.S) (F : Fetch) = struct
 
   let forget ~group = Fs_util.unlink_quiet (path group)
 
-  (* Without fetching: for a repair asking whether the local copy can stand
-     in. *)
-  let member_if_local ~group ~index =
-    let len = Chunk_group.size group index in
-    Lwt.catch
-      (fun () ->
-        Lwt_io.with_file ~mode:Lwt_io.Input (path group) (fun ic ->
-            let* () =
-              Lwt_io.set_position ic
-                (Int64.of_int (Chunk_group.offset group index))
-            in
-            let+ body = Lwt_io.read ~count:len ic in
-            if String.length body = len then Some body else None))
-      (fun _ -> Lwt.return_none)
-
-  (* Every member segment must hash to the key the manifest published it under;
-     the repair is a deletion, the bytes coming back on the next read. *)
   let staged_path uuid =
     Filename.concat
       (Cache_layout.staged_chunks_dir ~cache_root:C.cache_root C.domain_name)

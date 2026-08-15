@@ -1,4 +1,3 @@
-open Cmdliner
 open Cli
 
 (* Read a JSON value's field, tolerating non-objects and missing keys. *)

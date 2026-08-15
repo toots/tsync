@@ -127,9 +127,6 @@ type step =
   | StageWrite of { path : string; content : string }
       (** Replace the file's content locally with no upload queued — unsynced
           edits, the way a writer leaves a file between write and close. *)
-  | CorruptCachedChunk of { path : string; index : int }
-      (** Overwrite a cached chunk body with garbage behind the daemon's back,
-          so it no longer hashes to its own name. *)
   | DeleteCachedChunk of { path : string; index : int }
       (** Delete a cached chunk body behind the daemon's back, as the cache cap
           may at any moment. *)
