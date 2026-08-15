@@ -32,7 +32,7 @@ data "aws_iam_policy_document" "verify" {
   # that fixed the chunk, so delete is as necessary as put.
   statement {
     actions   = ["s3:PutObject", "s3:DeleteObject"]
-    resources = ["${local.bucket_arn}/tsync/*/corrupted/*"]
+    resources = ["${local.bucket_arn}/corrupted/*"]
   }
   # Sweep requests: listed to walk a shard, deleted once it is done. The client
   # writes them; this only consumes them.

@@ -33,7 +33,7 @@ sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), "vendor
 import xxhash  # noqa: E402
 
 CHUNKS_SEG = "/chunks/"
-CORRUPTED_SEG = "/corrupted/"
+CORRUPTED_ROOT = "corrupted/"
 JOBS_ROOT = "verify-jobs/"
 ROOT = "tsync/"  # lib/config/parsing/conf_parsing.ml
 FANOUT = 3  # lib/naming/chunk_layout.ml
@@ -100,9 +100,9 @@ def marker_key(key):
 
     Matching `/chunks/` exactly is what keeps a marker from earning one of its
     own, and leaves alone a chunk in the space a collection is moving out of:
-    neither `corrupted/` nor `chunks.from/` spells that segment. The bucket
-    notification's prefix filter says the same thing; both are kept because a
-    filter is configuration and this is not.
+    `chunks.from/` does not spell that segment, and a marker is not under
+    `tsync/` at all. The bucket notification's prefix filter says the same thing;
+    both are kept because a filter is configuration and this is not.
 
     Membership is the prefix and never the shape of the name. A manifest is filed
     under the hash of its own file name, so it is spelled exactly like a chunk
@@ -115,7 +115,11 @@ def marker_key(key):
     shard, sep, leaf = rest.partition("/")
     if not sep or not is_shard_name(shard) or not is_chunk_key(leaf):
         return None
-    return key[:cut] + CORRUPTED_SEG + rest
+    root = key[:cut]                       # tsync/<domain>
+    _, sep, domain = root.partition("/")
+    if not sep or not domain:
+        return None
+    return f"{CORRUPTED_ROOT}{domain}/{rest}"
 
 
 def job_target(key):

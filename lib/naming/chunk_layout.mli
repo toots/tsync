@@ -38,11 +38,15 @@ val is_shard_name : string -> bool
     it here, so the two cannot drift into naming the same bytes differently. *)
 val key_of_body : string -> string
 
-(** ["<root>chunks/"] becomes ["<root>corrupted/"]: a sibling of the chunk root,
-    the same construction as {!Chunk_space.from_prefix}. Sibling rather than
-    child so a collection renaming the chunk root away leaves markers alone, and
-    so nothing walking chunks meets one. *)
+(** ["corrupted/<domain>/"]. Beside the store rather than inside the domain,
+    with the domain as its first segment, so one literal prefix covers every
+    domain — see {!corrupted_root}. *)
 val corrupted_prefix : chunk_prefix:string -> string
+
+(** What every domain's markers share. A store's IAM says where the checker may
+    write in terms of this, and Google's conditions offer only [startsWith], so
+    a prefix with the domain in the middle could not be expressed at all. *)
+val corrupted_root : string
 
 (** Where a request to check one shard is filed. The bucket is the queue: a
     client writes one of these per shard, the store's own object-created
