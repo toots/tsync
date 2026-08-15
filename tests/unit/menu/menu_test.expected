@@ -182,7 +182,7 @@ tooltip tsync — No domains configured
         docs
             wal 3 pending · 1 stuck
             disk (main) — reachable
-            cloud (replica) — reachable · 3 corrupt — run tsync repair
+            cloud (replica) — reachable · 3 corrupt — run tsync data-integrity
             archive (readOnly) — reachable · not checked
             flaky (replica) — reachable · corruption check failed
 
