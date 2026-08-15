@@ -249,7 +249,7 @@ let () =
   assert (pick "tsync/shares/deadbeef" "nobody" = None);
   assert (pick "elsewhere/x" "one" = None);
 
-  (* Specs are what [tsync configure] prompts from, so a field missing here is
+  (* Specs are what [tsync config --edit] prompts from, so a field missing here is
      silently unconfigurable. [shares] is on the frontend only: the client asks
      over /share-url rather than mirroring the setting. *)
   let has_field name specs =

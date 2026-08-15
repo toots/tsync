@@ -85,8 +85,7 @@ systemd only keeps alive while you have a session, so `make install` also
 enables lingering. `make uninstall` reverses it.
 
 ```bash
-tsync build-info   # which optional features this binary has
-tsync build-info        # where config, cache, data and socket live
+tsync build-info   # compiled-in features, and where config, cache, data and socket live
 ```
 
 `build-info` matters: the S3 backend and each frontend are only compiled in if their
@@ -94,7 +93,7 @@ dependencies were available at build time. Naming one that isn't fails at startu
 
 ## 2. Create your first domain
 
-A *domain* is one synced folder with its own storage and settings. `tsync configure` asks,
+A *domain* is one synced folder with its own storage and settings. `tsync config --edit` asks,
 in this order:
 
 | Prompt | What to say |
@@ -133,11 +132,11 @@ The simplest result — a folder backed by another disk:
 }
 ```
 
-Edit the file by hand any time; re-running `tsync configure` on an existing config becomes
+Edit the file by hand any time; re-running `tsync config --edit` on an existing config becomes
 an editor. Then check it:
 
 ```bash
-tsync print-config   # what the daemon parsed, secrets masked
+tsync config   # what the daemon parsed, secrets masked
 ```
 
 Reach for that whenever behaviour doesn't match what you configured: unrecognised fields
@@ -201,13 +200,13 @@ The commands exist to inspect what's there, and for the few things a filesystem 
 for — freeing space without deleting, reaching a previous version, handing out a link:
 
 ```bash
-tsync ls <path>        # inspect, --deleted included
-tsync evict <path>…    # drop local copies; files stay listed
-tsync restore <path>…  # pull files or whole directories back down
-tsync stats            # transfers in flight, bandwidth, hashing rate
+tsync ls <path>              # inspect, --deleted included
+tsync cache --evict <path>…  # drop local copies; files stay listed
+tsync cache --fetch <path>…  # pull files or whole directories back down
+tsync status                 # transfers in flight, bandwidth, hashing rate
 ```
 
-Both `evict` and `restore` take directories, so `tsync restore trip-2024/` is how you prepare
+Both `evict` and `restore` take directories, so `tsync cache --fetch trip-2024/` is how you prepare
 for a flight. `--verbose` (or `-v`) works on any command.
 
 ## 6. Add a second machine
@@ -298,13 +297,13 @@ domain, so `["fuse", {"type": "http-proxy", …}]` does both.
 
 ### Checking on the server
 
-A server has no IPC socket, so `tsync stats` cannot reach it. It reports on itself over HTTP
+A server has no IPC socket, so `tsync status` cannot reach it. It reports on itself over HTTP
 instead, on the same port and behind the same signature as the object API:
 
 | Route | Returns |
 |---|---|
 | `/` | A page that asks for the shared secret and shows the report |
-| `/stats` | The report as plain text — the same thing `tsync stats` prints for a mount |
+| `/stats` | The report as plain text — the same thing `tsync status` prints for a mount |
 | `/api/v1/stats` | The same data as JSON |
 | `/domains` | The domains this server serves to holders of the signing secret, as JSON |
 
@@ -452,7 +451,7 @@ and a cloud copy behind it costs nothing but time it spends on its own.
 What each target still owes is kept on disk, under `<data dir>/deferred-pending/<domain>/`, and is
 recorded before the write is reported done. Losing the network, or the machine, does not lose
 it: a failure that can clear (a dropped link, a throttling store) is waited out and retried,
-and anything still queued when the daemon stops is picked up when it next starts. `tsync stats`
+and anything still queued when the daemon stops is picked up when it next starts. `tsync status`
 shows how far behind each target is.
 
 Two things are not waited out. A failure that cannot clear — a wrong credential, a bucket that
@@ -506,10 +505,10 @@ backend that could have held the file was reachable — otherwise you get its er
 With `"versioning": true`, every modify, rename and delete keeps the previous version.
 
 ```bash
-tsync versions                              # every file that's been deleted
-tsync versions notes/todo.txt               # timestamps for one file
-tsync revert notes/todo.txt                 # restore the most recent version
-tsync revert notes/todo.txt --version <ts>  # restore a specific one
+tsync versions                                         # every file that's been deleted
+tsync versions notes/todo.txt                          # timestamps for one file
+tsync versions --revert notes/todo.txt                 # restore the most recent version
+tsync versions --revert notes/todo.txt --version <ts>  # restore a specific one
 ```
 
 A version is just the file's small manifest — blocks are shared — so `revert` is instant and
@@ -519,9 +518,9 @@ Deleting a *folder* goes to a trash area instead of expanding into per-file dele
 what makes it recoverable:
 
 ```bash
-tsync trash            # list trashed folders
-tsync untrash <path>   # bring one back, then run tsync sync
-tsync purge <path>     # drop one for good, with all its versions
+tsync trash                  # list trashed folders
+tsync trash --restore <path> # bring one back, then run tsync sync
+tsync trash --purge <path>   # drop one for good, with all its versions
 ```
 
 History grows until you trim it, in two steps:
@@ -563,7 +562,7 @@ tsync gc --abort             # abandon an open one, keeping every block
 
 Leaving a collection open is safe indefinitely: reads look in both places and writes were
 never redirected. While one is open the block prefix holds only part of the store, so
-`tsync stats` says so and `tsync mirror` refuses until it finishes.
+`tsync status` says so and `tsync mirror` refuses until it finishes.
 
 ## 10. Share public download links
 
@@ -588,7 +587,7 @@ on the fly. Nothing in the cloud.
 
 The Lambda assembles the file (or zips the folder) on first fetch and caches it. It, its
 bucket, IAM keys and lifecycle come from the Terraform config under
-[`terraform/`](terraform/README.md), and `tsync configure`'s **Sync from Terraform** fills in
+[`terraform/`](terraform/README.md), and `tsync config --edit`'s **Sync from Terraform** fills in
 `shareUrl`, bucket and credentials — no Terraform details are stored in your config. With
 several S3 backends, the first with a `shareUrl` serves shares.
 
@@ -596,7 +595,7 @@ Those assembled copies pile up under `shares/cache/` in the bucket, and nothing 
 To reclaim the space:
 
 ```
-tsync clear-share-cache
+tsync share --clear-cache
 ```
 
 Published links are untouched and keep working — the next download assembles again.
@@ -687,37 +686,39 @@ Per domain:
 ## Command reference
 
 ```bash
-tsync ls <path>       # list files (add --deleted to include deleted ones)
-tsync evict <path>…   # drop the local copy of files or whole directories
-tsync restore <path>… # pull files or whole directories back down
-tsync versions <path> # a file's version history, or all deleted files
-tsync revert <path>   # bring back a previous version (or an undeleted file)
-tsync trash           # list deleted folders
-tsync untrash <path>  # restore a deleted folder, then run tsync sync
-tsync purge <path>    # drop a trashed folder for good, with all its versions
-tsync expire <date>   # drop versions, trashed folders and journal entries older than a date
-tsync gc              # reclaim unreferenced blocks (local main stores only)
-tsync gc --verify     # ...and check each chunk it keeps against its own name
-tsync sync            # apply changes from other machines (incremental)
-tsync sync --full     # clear local cache and re-download all manifests
-tsync data-integrity  # list chunks a store found were not what their names say
-                      # --verify asks the stores to check everything; --repair fixes it
-tsync mirror   # copy missing/damaged objects from one backend to the others
-tsync import <dir>    # seed the domain from an existing folder
-tsync export <dir>    # write every file of the domain to a plain folder
-tsync share <path>    # print a public download URL for a file or folder (as a zip)
-tsync status          # show daemon state
-tsync stats           # full report: metrics, resolved config, cache, per-backend health
-tsync stats --totals  # also count what each backend holds (a full listing per backend)
-tsync logs            # show the daemon log (-f to follow, -n N for how far back)
-tsync print-config    # show the config as parsed, with secrets masked
-tsync build-info         # show the config, cache, data and socket paths in use
-tsync build-info    # show which optional features this binary was built with
-tsync configure       # interactive setup / editor
-tsync set-domain <n>  # persist a default domain for this machine (--clear to remove)
-tsync default-domain  # print the default currently in effect
-tsync start           # mount in the foreground (the installed service runs this)
-tsync stop            # unmount
+tsync ls <path>                # list files (add --deleted to include deleted ones)
+tsync cache --evict <path>…    # drop the local copy of files or whole directories
+tsync cache --fetch <path>…    # pull files or whole directories back down
+tsync versions <path>          # a file's version history, or all deleted files
+tsync versions --revert <path> # bring back a previous version (or an undeleted file)
+tsync trash                    # list deleted folders
+tsync trash --restore <path>   # restore a deleted folder, then run tsync sync
+tsync trash --purge <path>     # drop a trashed folder for good, with all its versions
+tsync expire <date>            # drop versions, trashed folders and journal entries older than a date
+tsync gc                       # reclaim unreferenced blocks (local main stores only)
+tsync gc --verify              # ...and check each chunk it keeps against its own name
+tsync sync                     # apply changes from other machines (incremental)
+tsync sync --full              # clear local cache and re-download all manifests
+tsync data-integrity           # list chunks a store found were not what their names say
+                               # --verify asks the stores to check everything; --repair fixes it
+tsync mirror                   # copy missing/damaged objects from one backend to the others
+tsync import <dir>             # seed the domain from an existing folder
+tsync export <dir>             # write every file of the domain to a plain folder
+tsync share <path>             # print a public download URL for a file or folder (as a zip)
+tsync share --clear-cache      # drop what the share server has assembled and cached
+tsync status                   # full report: metrics, resolved config, cache, per-backend health
+tsync status --totals          # also count what each backend holds (a full listing per backend)
+tsync logs                     # show the daemon log (-f to follow, -n N for how far back)
+tsync config                   # show the config as parsed, with secrets masked
+tsync config --edit            # interactive setup / editor
+tsync build-info               # compiled-in features, and the paths this binary uses
+tsync default-domain           # print the default currently in effect
+tsync default-domain <name>    # persist it for this machine (--clear to forget)
+tsync pause-uploads            # stop uploading; queued work is kept
+tsync resume-uploads           # start again
+tsync restart                  # restart the service so it re-reads the config
+tsync start                    # mount in the foreground (the installed service runs this)
+tsync stop                     # unmount
 ```
 
 `--verbose` / `-v` works on all of them.
@@ -740,16 +741,16 @@ it. Nothing rotates the macOS log file.
 Only the daemon's log. On macOS the File Provider extension is started by the OS, so its
 output goes to the unified log — `log show --predicate 'subsystem == "org.feverdreamtv.tsync"'`.
 Separately, the daemon keeps its last 50 warnings and errors in memory and reports them as
-`recentErrors` in `tsync stats`, which is how an http-proxy server — no journal of its own to
+`recentErrors` in `tsync status`, which is how an http-proxy server — no journal of its own to
 point at — explains itself.
 
 ### Multiple domains
 
 With more than one domain, pass `--domain <name>` to commands that act on a specific one
 (`ls`, `versions`, `expire`, `gc`, `sync`, `mirror`, `import`, `export`,
-`share`). `tsync set-domain <name>` persists a default; an explicit `--domain` always wins.
+`share`). `tsync default-domain <name>` persists a default; an explicit `--domain` always wins.
 
-`tsync stats` is the exception: it always reports on every configured domain, and takes no
+`tsync status` is the exception: it always reports on every configured domain, and takes no
 `--domain`. A report answers for the machine, so narrowing it — by the flag or by the default
 — would leave the rest of what runs here unaccounted for. Each domain that has a daemon of its
 own gets its own report, and a domain whose daemon is not answering is named on stderr without
@@ -833,23 +834,23 @@ wire.
 bluetooth and wifi: an icon whose glyph says idle, transferring, paused or
 unreachable, and a menu listing the files currently in flight. Clicking a domain
 opens its folder, clicking a file selects it in the file manager, and *Pause
-uploads* is the same switch as `tsync pause` — it applies to every domain, and
+uploads* is the same switch as `tsync pause-uploads` — it applies to every domain, and
 the checkmark shows what the daemon actually did rather than what it was asked.
 
 Under each domain sit the files moving right now, uploads and downloads alike
 and drawn the same way. A download appears when something reads a file whose
 content is not cached and has to come from a backend; the ones too small or too
 brief to notice are left out, so a thumbnailer walking a folder does not fill
-the menu. `tsync stats` lists them all, unfiltered.
+the menu. `tsync status` lists them all, unfiltered.
 
-*Stats* opens a submenu with the short version of `tsync stats`: the daemon's
+*Stats* opens a submenu with the short version of `tsync status`: the daemon's
 pid and uptime, its cpu and memory, what it has moved and how fast, then per
 domain the mount, the cache, what is queued, what has been read and written,
 anything the journal still owes, and each backend's role, reachability and
 backlog. Figures the daemon does not report are left out rather than drawn as
 zero. It is read when the menu opens rather than on the tray's poll — answering
 it means reaching every backend — so it is current as of the moment you opened
-it, not live. `tsync stats` remains the full report, and the only one carrying
+it, not live. `tsync status` remains the full report, and the only one carrying
 recent warnings.
 
 The `tsync-tray` package installs an autostart entry, so it comes up with the
@@ -880,16 +881,16 @@ what stops syncing.
 
 | Symptom | Try |
 |---|---|
-| Behaviour doesn't match the config | `tsync print-config` — unrecognised fields pass through, so a typo can look set. |
+| Behaviour doesn't match the config | `tsync config` — unrecognised fields pass through, so a typo can look set. |
 | "frontend X is configured but not compiled into this binary" | `tsync build-info`; rebuild with the dependency available. |
-| Config rejected at startup | The message names the domain, backend and reason. Roles are checked at parse time, so `tsync print-config` catches them too. |
+| Config rejected at startup | The message names the domain, backend and reason. Roles are checked at parse time, so `tsync config` catches them too. |
 | Finder disagrees with `tsync ls` (macOS) | `tsync fileprovider reimport`. |
 | A backend was offline and has fallen behind | `tsync mirror --source <name>`. |
 | Local cache and remote disagree | `tsync sync --full`. |
-| Daemon state unclear | `tsync status`, `tsync stats`, and `tsync logs -f` — [reading the log](#reading-the-log). |
-| One backend of several is misbehaving | `tsync stats` — each backend reports its own reachability, journal backlog and how far behind it is. |
-| A `replica` or `backfill` target is behind | Normal: it catches up on its own, and what it owes survives a restart. `tsync stats` says by how much. |
+| Daemon state unclear | `tsync status`, `tsync status`, and `tsync logs -f` — [reading the log](#reading-the-log). |
+| One backend of several is misbehaving | `tsync status` — each backend reports its own reachability, journal backlog and how far behind it is. |
+| A `replica` or `backfill` target is behind | Normal: it catches up on its own, and what it owes survives a restart. `tsync status` says by how much. |
 | A target says `DEGRADED` | Writes were dropped — refused, or queued past all reason: `tsync mirror --source <main>`. |
 | No tray icon on GNOME | Install `gnome-shell-extension-appindicator` and log back in — GNOME has no built-in host. |
 | No tray icon elsewhere | Run `tsync-tray -v` in a terminal; it says whether it found a host, and stays running if it did not. |
-| A domain served over http-proxy misbehaves | Open the server's `/` page, or `curl` its `/stats` — [step 7](#checking-on-the-server). The server has no IPC socket, so `tsync stats` cannot reach it. |
+| A domain served over http-proxy misbehaves | Open the server's `/` page, or `curl` its `/stats` — [step 7](#checking-on-the-server). The server has no IPC socket, so `tsync status` cannot reach it. |

@@ -140,7 +140,7 @@ let make_route bindings (b : Frontend.binding) =
     C.read_only
     || Field_spec.bool ~default:false (inherited bindings b "readOnly")
   in
-  (* Secrets masked, as [tsync print-config] does: this gets pasted into bug
+  (* Secrets masked, as [tsync config] does: this gets pasted into bug
      reports. *)
   let options =
     List.map
@@ -547,7 +547,7 @@ let status_json ~port ~tls ~totals ~exact ~reload routes =
 
 (* Listener-wide, not domain-scoped, so any secret signing for this listener
    authorizes it: there is no key to route on. Text and JSON render the same
-   collection, so a browser, [curl] and [tsync stats] cannot disagree. *)
+   collection, so a browser, [curl] and [tsync status] cannot disagree. *)
 let serve_status ~port ~tls ~json routes req body_str =
   if not (List.exists (fun r -> authed r req body_str) routes) then begin
     bump "unauthorized";

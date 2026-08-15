@@ -96,7 +96,7 @@ let changes_scenarios : scenario list =
     };
   ]
 
-(* The daemon reporting on itself: what [tsync stats] renders and what the
+(* The daemon reporting on itself: what [tsync status] renders and what the
    http-proxy serves over /stats. *)
 let stats_scenarios : scenario list =
   [

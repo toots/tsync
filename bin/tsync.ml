@@ -27,7 +27,7 @@ let start_cmd =
        configured anything. Exit 0 so launchd/systemd does not respawn. *)
     if not (Sys.file_exists runtime_paths.Runtime.config_path) then begin
       Printf.eprintf
-        "No config at %s. Run `tsync configure`, then `tsync restart`.\n"
+        "No config at %s. Run `tsync config --edit`, then `tsync restart`.\n"
         runtime_paths.Runtime.config_path;
       exit 0
     end;
@@ -38,7 +38,8 @@ let start_cmd =
     if tls <> None then Tls_conf.apply tls;
     let domains =
       if cfg.Conf_parsing.domains = [] then begin
-        Printf.eprintf "No domains configured in %s. Run `tsync configure`.\n"
+        Printf.eprintf
+          "No domains configured in %s. Run `tsync config --edit`.\n"
           runtime_paths.Runtime.config_path;
         exit 0
       end;
@@ -166,21 +167,6 @@ let stop_cmd =
     (Cmd.info "stop" ~doc:"Stop the sync daemon")
     Term.(const run $ const ())
 
-let status_cmd =
-  let run domain =
-    try
-      let name, socket_path = domain_target ?domain () in
-      match ipc_action ~socket_path ~domain:name "status" with
-        | obj -> print_endline (Yojson.Safe.to_string (`Assoc obj))
-        | exception _ -> Printf.printf "No daemon answering on %s\n" socket_path
-    with e ->
-      Printf.eprintf "Error: %s\n" (Printexc.to_string e);
-      exit 1
-  in
-  Cmd.v
-    (Cmd.info "status" ~doc:"Show daemon status")
-    Term.(const run $ domain_arg)
-
 (* The service manager already keeps and rotates the log, so this hands the
    terminal to the reader it provides rather than shipping lines over IPC. Only
    the daemon's own log — a frontend the OS starts elsewhere (the macOS
@@ -232,16 +218,16 @@ let pause_cmd ~verb ~arg ~done_ ~doc =
   Cmd.v (Cmd.info verb ~doc) Term.(const run $ domain_arg)
 
 let pause_uploads_cmd =
-  pause_cmd ~verb:"pause" ~arg:"on" ~done_:"paused"
+  pause_cmd ~verb:"pause-uploads" ~arg:"on" ~done_:"paused"
     ~doc:"Pause uploads (queued work is kept)"
 
 let resume_uploads_cmd =
-  pause_cmd ~verb:"resume" ~arg:"off" ~done_:"resumed"
+  pause_cmd ~verb:"resume-uploads" ~arg:"off" ~done_:"resumed"
     ~doc:"Resume paused uploads"
 
 let human_bytes = Metrics.human_bytes
 
-let stats_cmd =
+let status_cmd =
   let watch_arg =
     Arg.(
       value
@@ -354,7 +340,7 @@ let stats_cmd =
           done
   in
   Cmd.v
-    (Cmd.info "stats"
+    (Cmd.info "status"
        ~doc:
          "Report on the running daemons: transfer metrics, config as resolved, \
           cache, journal backlog and each backend's health. Covers every \
@@ -362,37 +348,47 @@ let stats_cmd =
     Term.(
       const run $ json_arg $ totals_arg $ exact_arg $ reload_arg $ watch_arg)
 
-let evict_cmd =
+(* Residency, both directions. Evicting and fetching are the same operation
+   over the same paths with the wire verb swapped, and naming them apart put
+   [restore] beside [revert] and [untrash], which recover a lost thing --
+   this one only moves bytes on and off this machine. *)
+let cache_cmd =
   let path_arg = Arg.(non_empty & pos_all string [] & info [] ~docv:"PATH") in
-  let run paths =
+  let evict_arg =
+    Arg.(
+      value & flag
+      & info ["evict"] ~doc:"Drop these files or directories from the cache.")
+  in
+  let fetch_arg =
+    Arg.(
+      value & flag
+      & info ["fetch"]
+          ~doc:"Download these files or directories into the cache.")
+  in
+  let act ~verb ~done_ paths =
     List.iter
       (fun path ->
         match
-          ipc_action ~socket_path:(domain_socket_for_path path) ~path "evict"
+          ipc_action ~socket_path:(domain_socket_for_path path) ~path verb
         with
-          | _ -> Printf.printf "Evicted: %s\n" path
+          | _ -> Printf.printf "%s: %s\n" done_ path
           | exception Failure msg -> Printf.eprintf "Error: %s\n" msg)
       paths
   in
-  Cmd.v
-    (Cmd.info "evict" ~doc:"Evict files or directories from local cache")
-    Term.(const run $ path_arg)
-
-let restore_cmd =
-  let path_arg = Arg.(non_empty & pos_all string [] & info [] ~docv:"PATH") in
-  let run paths =
-    List.iter
-      (fun path ->
-        match
-          ipc_action ~socket_path:(domain_socket_for_path path) ~path "restore"
-        with
-          | _ -> Printf.printf "Restored: %s\n" path
-          | exception Failure msg -> Printf.eprintf "Error: %s\n" msg)
-      paths
+  let run paths evict fetch =
+    match (evict, fetch) with
+      | true, false -> act ~verb:"evict" ~done_:"Evicted" paths
+      | false, true -> act ~verb:"restore" ~done_:"Fetched" paths
+      | true, true ->
+          failwith "--evict and --fetch do opposite things; run one."
+      | false, false -> failwith "pass --evict or --fetch."
   in
   Cmd.v
-    (Cmd.info "restore" ~doc:"Download evicted files or directories")
-    Term.(const run $ path_arg)
+    (Cmd.info "cache"
+       ~doc:
+         "Move files on and off this machine: $(b,--evict) drops them from the \
+          cache, $(b,--fetch) downloads them into it.")
+    Term.(const run $ path_arg $ evict_arg $ fetch_arg)
 
 let ls_cmd =
   let path_arg =
@@ -531,7 +527,33 @@ let versions_cmd =
   let path_arg =
     Arg.(value & pos 0 (some string) None & info [] ~docv:"PATH")
   in
-  let run path domain =
+  let revert_arg =
+    Arg.(
+      value & flag
+      & info ["revert"]
+          ~doc:
+            "Restore a previous version of $(i,PATH) instead of listing them. \
+             Metadata only, nothing is downloaded.")
+  in
+  let version_arg =
+    Arg.(
+      value
+      & opt (some string) None
+      & info ["version"] ~docv:"TS"
+          ~doc:
+            "With $(b,--revert): the version timestamp to restore (default: \
+             most recent).")
+  in
+  let revert path version =
+    match
+      ipc_action
+        ~socket_path:(domain_socket_for_path path)
+        ~path ?arg:version "revert"
+    with
+      | _ -> Printf.printf "Reverted: %s\n" path
+      | exception Failure msg -> Printf.eprintf "Error: %s\n" msg
+  in
+  let list path domain =
     run_lwt
       (let open Lwt.Syntax in
        let (module C : Conf.S) = load_conf ?domain () in
@@ -618,112 +640,109 @@ let versions_cmd =
                  deleted;
              Lwt.return_unit)
   in
+  let run path domain do_revert version =
+    match (path, do_revert) with
+      | Some path, true -> revert path version
+      | _, false -> list path domain
+      | None, true -> failwith "--revert needs the PATH to restore."
+  in
   Cmd.v
     (Cmd.info "versions"
-       ~doc:"List a file's versions, or all deleted files when no PATH is given")
-    Term.(const run $ path_arg $ domain_arg)
-
-let revert_cmd =
-  let path_arg =
-    Arg.(required & pos 0 (some string) None & info [] ~docv:"PATH")
-  in
-  let version_arg =
-    Arg.(
-      value
-      & opt (some string) None
-      & info ["version"] ~docv:"TS"
-          ~doc:"Version timestamp to restore (default: most recent)")
-  in
-  let run path version =
-    match
-      ipc_action
-        ~socket_path:(domain_socket_for_path path)
-        ~path ?arg:version "revert"
-    with
-      | _ -> Printf.printf "Reverted: %s\n" path
-      | exception Failure msg -> Printf.eprintf "Error: %s\n" msg
-  in
-  Cmd.v
-    (Cmd.info "revert"
-       ~doc:"Restore a previous version of a file (metadata only, no download)")
-    Term.(const run $ path_arg $ version_arg)
-
-let purge_cmd =
-  let path_arg =
-    Arg.(required & pos 0 (some string) None & info [] ~docv:"PATH")
-  in
-  let run _path = Printf.eprintf "purge: not yet implemented\n" in
-  Cmd.v
-    (Cmd.info "purge" ~doc:"Delete all versions from trash")
-    Term.(const run $ path_arg)
+       ~doc:
+         "List a file's versions, or all deleted files when no PATH is given. \
+          With $(b,--revert), restore one instead.")
+    Term.(const run $ path_arg $ domain_arg $ revert_arg $ version_arg)
 
 let trash_markers (module B : Backend.S) domain_prefix =
   B.list_prefix ~prefix:(domain_prefix ^ Folder.trash_id ^ "/") ()
 
-let trash_cmd =
-  let run domain =
-    run_lwt
-      (let open Lwt.Syntax in
-       let (module C : Conf.S) = load_conf ?domain () in
-       let module B = (val C.store : Backend.S) in
-       let* markers = trash_markers (module B) C.domain_prefix in
-       Lwt_list.iter_s
+let trash_list domain =
+  run_lwt
+    (let open Lwt.Syntax in
+     let (module C : Conf.S) = load_conf ?domain () in
+     let module B = (val C.store : Backend.S) in
+     let* markers = trash_markers (module B) C.domain_prefix in
+     Lwt_list.iter_s
+       (fun (e : Backend.file_entry) ->
+         let+ data = B.get ~key:e.key () in
+         match Folder.trash_path_of_string data with
+           | Some p -> Printf.printf "%s\n" p
+           | None -> ())
+       markers)
+
+let trash_restore path domain =
+  run_lwt
+    (let open Lwt.Syntax in
+     let (module C : Conf.S) = load_conf ?domain () in
+     let module L = Layout.Inode.Make (C) in
+     let module St = Store.Make (C) (L) in
+     let module B = (val C.store : Backend.S) in
+     let* markers = trash_markers (module B) C.domain_prefix in
+     let* found =
+       Lwt_list.filter_map_s
          (fun (e : Backend.file_entry) ->
            let+ data = B.get ~key:e.key () in
-           match Folder.trash_path_of_string data with
-             | Some p -> Printf.printf "%s\n" p
-             | None -> ())
-         markers)
-  in
-  Cmd.v
-    (Cmd.info "trash" ~doc:"List trashed folders")
-    Term.(const run $ domain_arg)
-
-let untrash_cmd =
-  let path_arg =
-    Arg.(required & pos 0 (some string) None & info [] ~docv:"PATH")
-  in
-  let run path domain =
-    run_lwt
-      (let open Lwt.Syntax in
-       let (module C : Conf.S) = load_conf ?domain () in
-       let module L = Layout.Inode.Make (C) in
-       let module St = Store.Make (C) (L) in
-       let module B = (val C.store : Backend.S) in
-       let* markers = trash_markers (module B) C.domain_prefix in
-       let* found =
-         Lwt_list.filter_map_s
-           (fun (e : Backend.file_entry) ->
-             let+ data = B.get ~key:e.key () in
-             match
-               (Folder.trash_path_of_string data, Folder.marker_of_string data)
-             with
-               | Some p, Some m when p = path -> Some (e.key, m)
-               | _ -> None)
-           markers
-       in
-       match found with
-         | [] ->
-             Printf.eprintf "not in trash: %s\n" path;
-             Lwt.return_unit
-         | (trash_key, m) :: _ ->
-             (* O(1): the subtree is untouched. The local mirror copy is rebuilt
+           match
+             (Folder.trash_path_of_string data, Folder.marker_of_string data)
+           with
+             | Some p, Some m when p = path -> Some (e.key, m)
+             | _ -> None)
+         markers
+     in
+     match found with
+       | [] ->
+           Printf.eprintf "not in trash: %s\n" path;
+           Lwt.return_unit
+       | (trash_key, m) :: _ ->
+           (* O(1): the subtree is untouched. The local mirror copy is rebuilt
                 by a later full sync. *)
-             let* new_key = L.folder_marker_key (C.domain_prefix ^ path) in
-             let new_key = Option.get new_key in
-             let marker =
-               Folder.marker_to_string
-                 { Folder.name = m.Folder.name; id = m.Folder.id }
-             in
-             let* () = St.put_raw ~bkey:new_key ~data:marker in
-             let* () = St.delete_raw ~bkey:trash_key in
-             Printf.printf
-               "restored %s — run 'tsync sync' to rebuild it locally\n" path;
-             Lwt.return_unit)
+           let* new_key = L.folder_marker_key (C.domain_prefix ^ path) in
+           let new_key = Option.get new_key in
+           let marker =
+             Folder.marker_to_string
+               { Folder.name = m.Folder.name; id = m.Folder.id }
+           in
+           let* () = St.put_raw ~bkey:new_key ~data:marker in
+           let* () = St.delete_raw ~bkey:trash_key in
+           Printf.printf
+             "restored %s — run 'tsync sync' to rebuild it locally\n" path;
+           Lwt.return_unit)
+
+let trash_cmd =
+  let path_arg =
+    Arg.(value & pos 0 (some string) None & info [] ~docv:"PATH")
+  in
+  let restore_arg =
+    Arg.(
+      value & flag
+      & info ["restore"]
+          ~doc:
+            "Put $(i,PATH) back where it was. The subtree is untouched, so \
+             this is O(1); run $(b,tsync sync) to rebuild it locally.")
+  in
+  let purge_arg =
+    Arg.(
+      value & flag
+      & info ["purge"] ~doc:"Delete every version of $(i,PATH) from the trash.")
+  in
+  let purge _path = Printf.eprintf "purge: not yet implemented\n" in
+  let run path domain restore do_purge =
+    match (path, restore, do_purge) with
+      | None, false, false -> trash_list domain
+      | Some path, true, false -> trash_restore path domain
+      | Some path, false, true -> purge path
+      | None, _, _ -> failwith "--restore and --purge each need a PATH."
+      | Some _, true, true ->
+          failwith "--restore and --purge do opposite things; run one."
+      | Some _, false, false ->
+          failwith "trash lists with no PATH: pass --restore or --purge."
   in
   Cmd.v
-    (Cmd.info "untrash" ~doc:"Restore a trashed folder (see: tsync trash)")
-    Term.(const run $ path_arg $ domain_arg)
+    (Cmd.info "trash"
+       ~doc:
+         "List trashed folders, or act on one: $(b,--restore) puts it back, \
+          $(b,--purge) deletes its versions for good.")
+    Term.(const run $ path_arg $ domain_arg $ restore_arg $ purge_arg)
 
 let parse_duration s =
   let n = String.length s in
@@ -1490,18 +1509,7 @@ let mirror_cmd =
              and the chunks their manifests name. Journal, versions and cursor \
              are skipped — they describe the whole domain, not a subtree.")
   in
-  let verify_arg =
-    Arg.(
-      value & flag
-      & info ["verify"]
-          ~doc:
-            "Hash each destination chunk against the key it is filed under \
-             rather than trusting its size, so a chunk of the right length \
-             holding the wrong bytes is recopied. Reads every candidate chunk \
-             off the destination: pair it with --path unless re-reading the \
-             whole chunk store is intended.")
-  in
-  let run domain source manifests_only path verify v =
+  let run domain source manifests_only path v =
     set_verbose v;
     let code =
       run_lwt
@@ -1545,21 +1553,15 @@ let mirror_cmd =
              vprintf "scanned %s: %d object%s to check" src objects
                (if objects = 1 then "" else "s")
            in
-           (* A body of the right length that hashes to something else is the one
-              outcome a reader cannot infer, so it is counted and reported even
-              without -v. *)
-           let corrupt = ref 0 in
            let on_copy ~name ~key ~reason ~bytes =
-             if reason = `Wrong_body then incr corrupt;
              vprintf "  copied %s (%d bytes, %s) -> %s" key bytes
                (match reason with
                  | `Missing -> "missing"
-                 | `Wrong_size -> "wrong size"
-                 | `Wrong_body -> "wrong contents")
+                 | `Wrong_size -> "wrong size")
                name
            in
            let+ dests =
-             M.resync ~source:src ~scope ~verify ~on_scan ~on_list ~on_copy ()
+             M.resync ~source:src ~scope ~on_scan ~on_list ~on_copy ()
            in
            List.iter
              (fun (dst : Mirror.dest_stats) ->
@@ -1573,12 +1575,6 @@ let mirror_cmd =
                  (List.length dst.Mirror.copied)
                  dst.Mirror.copied_bytes)
              dests;
-           if !corrupt > 0 then
-             Printf.printf
-               "%d chunk%s held the wrong contents at the right size; only \
-                --verify finds those\n"
-               !corrupt
-               (if !corrupt = 1 then "" else "s");
            0
          end)
     in
@@ -1591,11 +1587,11 @@ let mirror_cmd =
           (manifests, chunks, journal, versions) that is missing or \
           size-mismatched on the other configured backends. Pass --manifests \
           to copy only the manifests, --path to copy one folder and the chunks \
-          its files name, --verify to check destination chunks by their \
-          contents rather than their size.")
+          its files name. A chunk of the right size holding the wrong bytes is \
+          data-integrity's to find, not this one's.")
     Term.(
       const run $ domain_arg $ source_arg $ manifests_arg $ path_arg
-      $ verify_arg $ verbose_arg)
+      $ verbose_arg)
 
 let import_cmd =
   let src_arg =
@@ -1718,7 +1714,16 @@ let export_cmd =
 (* "<N>d" / "<N>h" -> seconds *)
 let share_cmd =
   let path_arg =
-    Arg.(required & pos 0 (some string) None & info [] ~docv:"PATH")
+    Arg.(value & pos 0 (some string) None & info [] ~docv:"PATH")
+  in
+  let clear_cache_arg =
+    Arg.(
+      value & flag
+      & info ["clear-cache"]
+          ~doc:
+            "Delete the files the share server has assembled and cached, \
+             instead of publishing a link. Published links are not touched and \
+             keep working: the next download rebuilds what it needs.")
   in
   let expires_arg =
     Arg.(
@@ -1736,7 +1741,24 @@ let share_cmd =
              an existing link stable. Overwrites any share already at that id. \
              Must be lowercase hex.")
   in
-  let run path expires domain token =
+  let clear_cache domain =
+    let cfg = load_config () in
+    let domain =
+      match domain with Some _ -> domain | None -> read_default_domain ()
+    in
+    let (module C : Conf.S) = make_conf ?domain cfg in
+    let module S = Share.Make (C) in
+    match run_lwt (S.clear_cache ()) with
+      | Error msg ->
+          Printf.eprintf "%s\n" msg;
+          exit 1
+      | Ok (0, _) -> print_endline "Nothing cached."
+      | Ok (n, bytes) ->
+          Printf.printf "Deleted %d cached object%s (%s).\n" n
+            (if n = 1 then "" else "s")
+            (human_bytes bytes)
+  in
+  let publish path expires domain token =
     (match token with
       | Some t
         when t = ""
@@ -1783,37 +1805,23 @@ let share_cmd =
             tm.Unix.tm_hour tm.Unix.tm_min;
           print_endline url
   in
-  Cmd.v
-    (Cmd.info "share" ~doc:"Print a shareable download URL for a file or folder")
-    Term.(const run $ path_arg $ expires_arg $ domain_arg $ token_arg)
-
-let clear_share_cache_cmd =
-  let run domain =
-    let cfg = load_config () in
-    let domain =
-      match domain with Some _ -> domain | None -> read_default_domain ()
-    in
-    let (module C : Conf.S) = make_conf ?domain cfg in
-    let module S = Share.Make (C) in
-    match run_lwt (S.clear_cache ()) with
-      | Error msg ->
-          Printf.eprintf "%s\n" msg;
-          exit 1
-      | Ok (0, _) -> print_endline "Nothing cached."
-      | Ok (n, bytes) ->
-          Printf.printf "Deleted %d cached object%s (%s).\n" n
-            (if n = 1 then "" else "s")
-            (human_bytes bytes)
+  let run path expires domain token clear =
+    match (path, clear) with
+      | Some path, false -> publish path expires domain token
+      | None, true -> clear_cache domain
+      | None, false -> failwith "share needs a PATH, or --clear-cache."
+      | Some _, true -> failwith "--clear-cache takes no PATH."
   in
   Cmd.v
-    (Cmd.info "clear-share-cache"
+    (Cmd.info "share"
        ~doc:
-         "Delete the files the share server has assembled and cached. \
-          Published links are not touched and keep working: the next download \
-          rebuilds what it needs.")
-    Term.(const run $ domain_arg)
+         "Print a shareable download URL for a file or folder, or with \
+          $(b,--clear-cache), drop what the share server has assembled.")
+    Term.(
+      const run $ path_arg $ expires_arg $ domain_arg $ token_arg
+      $ clear_cache_arg)
 
-let print_conf_cmd =
+let config_cmd =
   let mask (b : Conf_parsing.backend_config) k v =
     match Backend.spec_for b.backend_type with
       | None -> v
@@ -1884,10 +1892,21 @@ let print_conf_cmd =
           d.backends)
       cfg.Conf_parsing.domains
   in
+  let edit_arg =
+    Arg.(
+      value & flag
+      & info ["edit"]
+          ~doc:
+            "Create or edit the configuration interactively instead of \
+             printing it.")
+  in
+  let run edit = if edit then Configure.run () else run () in
   Cmd.v
-    (Cmd.info "print-config"
-       ~doc:"Print the current configuration (sensitive values hidden)")
-    Term.(const run $ const ())
+    (Cmd.info "config"
+       ~doc:
+         "Print the configuration as the daemon parsed it, secrets hidden. \
+          With $(b,--edit), change it interactively.")
+    Term.(const run $ edit_arg)
 
 (* What this binary is and where it keeps things, as against [tsync config],
    which is what the operator asked of it. Neither answers the other's question
@@ -2033,32 +2052,25 @@ let () =
       (Cmd.info "tsync" ~doc:"Cloud-backed filesystem sync")
       ([
          build_info_cmd;
-         Configure.cmd;
-         print_conf_cmd;
+         config_cmd;
          restart_cmd;
          default_domain_cmd;
          start_cmd;
          stop_cmd;
-         status_cmd;
          logs_cmd;
          pause_uploads_cmd;
          resume_uploads_cmd;
-         stats_cmd;
+         status_cmd;
          sync_cmd;
          data_integrity_cmd;
          mirror_cmd;
          import_cmd;
          export_cmd;
-         evict_cmd;
-         restore_cmd;
+         cache_cmd;
          ls_cmd;
          share_cmd;
-         clear_share_cache_cmd;
          versions_cmd;
-         revert_cmd;
          trash_cmd;
-         untrash_cmd;
-         purge_cmd;
          expire_cmd;
          gc_cmd;
        ]

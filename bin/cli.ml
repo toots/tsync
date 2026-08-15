@@ -165,7 +165,7 @@ let build_backends ~resume (d : Conf_parsing.domain) :
               | Some (module D : Deferred.S) -> D.readable <> None
               | None -> true)
           ~backend_type:bc.backend_type
-            (* Masked as [tsync print-config] does, so a report names the
+            (* Masked as [tsync config] does, so a report names the
                 bucket without carrying a credential. *)
           ~config:
             (List.map

@@ -17,7 +17,7 @@ module Make (C : Conf.S) (F : File_ops.S) = struct
   }
 
   (* Facts, not a filtered view: which of these is worth a menu row is a
-     question for whatever draws the menu, and `tsync stats' wants all of them. *)
+     question for whatever draws the menu, and `tsync status' wants all of them. *)
   let downloading_json () =
     List.map
       (fun (d : File_ops.downloading) ->

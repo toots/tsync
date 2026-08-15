@@ -2,7 +2,7 @@
 
     A backend or frontend declares what it needs alongside its factory, so
     adding a setting is a line in a driver rather than an edit to the
-    [tsync configure] UI, which knows nothing of buckets or listen ports. *)
+    [tsync config --edit] UI, which knows nothing of buckets or listen ports. *)
 
 type typ = [ `String | `Bool | `Int ]
 
@@ -19,8 +19,8 @@ type t = {
 }
 
 (** Read a [`Bool] field's value, as a driver or frontend receives it: a string,
-    since [tsync configure] writes a JSON boolean that {!Conf_parsing} flattens
-    and a hand-edited config holds whatever was typed.
+    since [tsync config --edit] writes a JSON boolean that {!Conf_parsing}
+    flattens and a hand-edited config holds whatever was typed.
 
     [default] is what an absent or unrecognised value means, and is the whole
     reason this is shared. Spelling the test at each reader had them disagreeing

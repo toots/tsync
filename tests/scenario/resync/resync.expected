@@ -83,14 +83,12 @@
   file file.bin [.tsync-root/5364ca580b2eed57-b0140ab2eda14287] = manifest size=11 chunks=1 h1=d94b4e9626fdc9c1 h2=f3f6d793ca1ea424
     chunk#0 d447b1ea40e6988b-b7aeb52a10fdaf2d size=11
 
-=== mirror misses a scrambled chunk without --verify
+=== mirror leaves a scrambled chunk alone
   write file.bin "hello world"
   drain
   on-secondary scramble-remote-chunk file.bin #0
   mirror
-  mirror --verify
   resync backend #2: 3 checked, 0 copied
-  resync backend #2: 3 checked, 1 copied
 --- tree
   f file.bin size=11 cached=0/1 uploaded=true etag=d94b4e9626fdc9c1
 --- content
@@ -101,6 +99,7 @@
   file file.bin [.tsync-root/5364ca580b2eed57-b0140ab2eda14287] = manifest size=11 chunks=1 h1=d94b4e9626fdc9c1 h2=f3f6d793ca1ea424
     chunk#0 d447b1ea40e6988b-b7aeb52a10fdaf2d size=11
 --- backend 2
+  corrupted d447b1ea40e6988b-b7aeb52a10fdaf2d
   chunk d447b1ea40e6988b-b7aeb52a10fdaf2d size=11
   journal <entry-1> = put file.bin 11
   file file.bin [.tsync-root/5364ca580b2eed57-b0140ab2eda14287] = manifest size=11 chunks=1 h1=d94b4e9626fdc9c1 h2=f3f6d793ca1ea424
@@ -143,37 +142,6 @@
   folder keep [.tsync-root/5af16eb25f0f29f5-46117405e5f6bd85] -> <folder-1>
   file outside.bin [.tsync-root/b01e15e64c256ab6-1f96600a8f673bd5] = manifest size=12 chunks=1 h1=b500d7bf771db830 h2=c49c64b6f769cf41
     chunk#0 78bdd50ffdb89f28-110ae84095eebccf size=12
-  file inside.bin [<folder-1>/395d52333e1982bb-f3afad5a5b4c4eda] = manifest size=8 chunks=1 h1=269ee2e0bf23feba h2=0fa8b80b1a0c56ef
-    chunk#0 3165358206e16abf-241df034ca91c411 size=8
-
-=== mirror --path --verify heals a scrambled chunk
-  mkdir keep
-  write keep/inside.bin "this one"
-  drain
-  on-secondary scramble-remote-chunk keep/inside.bin #0
-  mirror --path keep --verify
-  mirror --path keep --verify
-  resync backend #2: 3 checked, 1 copied
-  resync backend #2: 3 checked, 0 copied
---- tree
-  d keep/
-  f keep/inside.bin size=8 cached=0/1 uploaded=true etag=269ee2e0bf23feba
---- content
-  keep/inside.bin = "this one"
---- backend
-  chunk 3165358206e16abf-241df034ca91c411 size=8
-  cursor = <entry-1>
-  journal <entry-1> = mkdir keep/
-  journal <entry-2> = put keep/inside.bin 8
-  folder keep [.tsync-root/5af16eb25f0f29f5-46117405e5f6bd85] -> <folder-1>
-  file inside.bin [<folder-1>/395d52333e1982bb-f3afad5a5b4c4eda] = manifest size=8 chunks=1 h1=269ee2e0bf23feba h2=0fa8b80b1a0c56ef
-    chunk#0 3165358206e16abf-241df034ca91c411 size=8
---- backend 2
-  chunk 3165358206e16abf-241df034ca91c411 size=8
-  cursor = <entry-1>
-  journal <entry-1> = mkdir keep/
-  journal <entry-2> = put keep/inside.bin 8
-  folder keep [.tsync-root/5af16eb25f0f29f5-46117405e5f6bd85] -> <folder-1>
   file inside.bin [<folder-1>/395d52333e1982bb-f3afad5a5b4c4eda] = manifest size=8 chunks=1 h1=269ee2e0bf23feba h2=0fa8b80b1a0c56ef
     chunk#0 3165358206e16abf-241df034ca91c411 size=8
 

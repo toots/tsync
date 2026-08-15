@@ -25,7 +25,7 @@ terraform apply
 ```
 
 Then wire each store into the matching tsync domain. The easy path is
-`tsync configure`: edit the s3 or gcs domain, choose **Sync from Terraform**, and
+`tsync config --edit`: edit the s3 or gcs domain, choose **Sync from Terraform**, and
 it pulls the values from `terraform output` (or `tofu output`, whichever of the two
 is installed) and writes them onto the backend — for
 s3 `bucket`/`region`/`accessKeyId`/`secretAccessKey`/`shareUrl`, for gcs

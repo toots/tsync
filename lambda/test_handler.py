@@ -318,7 +318,7 @@ def test_dir_download_cached(s3):
 def test_cached_artifacts_live_under_the_cache_prefix(s3):
     # Everything the Lambda assembles goes in one droppable subtree, and nothing
     # but the share manifest itself sits directly under SHARES_PREFIX — which is
-    # what lets `tsync clear-share-cache` delete by prefix.
+    # what lets `tsync share --clear-cache` delete by prefix.
     h = load_handler()
     tok = _folder_share(s3)
     _, zip_key = follow(s3, h.handler(event(tok, "download"), None))

@@ -16,7 +16,7 @@ at a time via ``/list``, so ``tsync share`` and page load stay O(1) regardless o
 how many files the directory holds. Assembled artifacts are cached under
 ``SHARES_PREFIX + "cache/"`` and served via a short-lived presigned GET (responses
 are size-capped, so we never stream bodies ourselves). Everything in that subtree
-is rebuildable, which is what makes ``tsync clear-share-cache`` safe.
+is rebuildable, which is what makes ``tsync share --clear-cache`` safe.
 
 Size guard: a single file (or per-file preview) and the running total of a folder
 zip are both capped at MAX_BYTES (default 10 GiB) -> 413, so a build can't blow

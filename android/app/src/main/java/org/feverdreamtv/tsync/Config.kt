@@ -10,7 +10,7 @@ import java.io.File
  * it (lib/runtime/linux_runtime.ml).
  *
  * Deliberately not a general editor: v1 configures one domain backed by one
- * http-proxy server. `tsync configure` already covers the general case on
+ * http-proxy server. `tsync config --edit` already covers the general case on
  * desktop, and its field_spec registry is what a generated form would be built
  * from if a second backend type ever shows up here.
  */

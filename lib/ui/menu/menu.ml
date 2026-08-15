@@ -31,7 +31,7 @@ let unreachable name =
     upload_rate = None;
   }
 
-(* What the submenu draws, which is `tsync stats' with most of it left out: the
+(* What the submenu draws, which is `tsync status' with most of it left out: the
    figures someone opens a tray menu to see, rather than the ones they would run
    the command for. *)
 type backend_stats = {
@@ -154,7 +154,7 @@ let first_some f statuses = List.find_map f statuses
 let bytes_uploaded statuses = first_some (fun s -> s.bytes_uploaded) statuses
 let upload_rate statuses = first_some (fun s -> s.upload_rate) statuses
 
-(* The same formatter `tsync stats' prints with, so one byte count does not read
+(* The same formatter `tsync status' prints with, so one byte count does not read
    two ways depending on where you looked. *)
 let human_bytes n = Metrics.human_bytes (Int64.to_int n)
 
@@ -278,7 +278,7 @@ let file_icon name =
     | _ -> "text-x-generic"
 
 (* Up to three, newest first: enough to see that something is wrong and roughly
-   what, which is all a menu row can carry. The rest is what `tsync stats' is
+   what, which is all a menu row can carry. The rest is what `tsync status' is
    for. *)
 (* A mount path or a backend's complaint can run to any length, and a menu that
    wide is one that covers the screen it is meant to sit beside. Cut at the last

@@ -3,7 +3,7 @@
    Backend calls carry a retry ladder — eight attempts backing off to 20s — which
    is right for work that has to land eventually and wrong for a health check.
    Worse, a peer that goes away without a FIN never fails at all, so the ladder
-   never even starts and the call simply hangs: [tsync stats] printed nothing
+   never even starts and the call simply hangs: [tsync status] printed nothing
    while a wedged store sat there. The probe carries its own deadline, and this
    is what proves it — without one, [domain_json] below never returns and the
    bound in [main] is what fails the test. *)

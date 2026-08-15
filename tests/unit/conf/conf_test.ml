@@ -138,7 +138,7 @@ let () =
   let d = domain (with_sizes {|"cacheChunkSize": 4096,|}) in
   assert (d.Conf_parsing.cache_chunk_size = Some 4096);
   (* An absent size stays absent rather than resolving to a default, so
-     `tsync print-config` shows only what the config says and a domain that does
+     `tsync config` shows only what the config says and a domain that does
      not care can leave both out. *)
   assert (d.Conf_parsing.chunk_size = None);
   let d = domain (with_sizes "") in

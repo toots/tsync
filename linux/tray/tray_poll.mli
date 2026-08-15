@@ -8,7 +8,7 @@
 type domain = { name : string; socket : string; mount : string }
 
 (** The configured domains, re-read when the config file's mtime moves so one
-    added by [tsync configure] appears without a restart. A missing or
+    added by [tsync config --edit] appears without a restart. A missing or
     unparseable config is an empty list -- the tray says so and keeps running,
     since a config someone is in the middle of editing is not a crash. *)
 val domains : unit -> domain list

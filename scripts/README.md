@@ -2,7 +2,7 @@
 
 ## Performance
 
-Collect `tsync stats` once per second and graph it. Collection and graphing are
+Collect `tsync status` once per second and graph it. Collection and graphing are
 separate so a crash never loses data and you can graph mid-run.
 
 ## Prerequisites
@@ -34,7 +34,7 @@ Both scripts take optional args:
 - `stats-collect.sh [log-file] [tsync-binary]` — defaults `stats.ndjson`, `tsync`. Appends, never truncates.
 - `stats-graph.py [log-file] [out.png]` — defaults `stats.ndjson`, `stats-graph.png`.
 
-The log is NDJSON (one `tsync stats --json` object per line, with a `t`
+The log is NDJSON (one `tsync status --json` object per line, with a `t`
 timestamp), so you can also process it with `jq` or anything else.
 
 
