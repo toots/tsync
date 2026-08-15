@@ -246,6 +246,7 @@ module Make (C : Conf.S) = struct
     if Key.is_dir key then Lwt.return []
     else
       let+ data = B.get ~key () in
+      let data = Chunk.to_string data in
       match Folder.marker_of_string data with
         | Some _ -> []
         | None -> (
@@ -562,8 +563,14 @@ module Make (C : Conf.S) = struct
             s.chunks_corrupt <- s.chunks_corrupt + 1;
             M.put ~key:marker
               ~data:
-                (Corruption_marker.to_string
-                   { computed; size; at = Some (Unix.gettimeofday ()); reason })
+                (Chunk.of_string
+                   (Corruption_marker.to_string
+                      {
+                        computed;
+                        size;
+                        at = Some (Unix.gettimeofday ());
+                        reason;
+                      }))
               ()
           in
           let* outcome =
@@ -591,7 +598,7 @@ module Make (C : Conf.S) = struct
                   Log.err "gc: chunk %s hashed to %s: filing %s" ck computed
                     marker;
                   file ~computed:(Some computed)
-                    ~size:(Some (String.length body))
+                    ~size:(Some (Chunk.length body))
                     ~reason:None)
             | `Unreadable why ->
                 s.chunks_unreadable <- s.chunks_unreadable + 1;

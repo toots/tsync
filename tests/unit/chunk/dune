@@ -1,0 +1,5 @@
+(executable
+ (flags
+  (:standard -open Tsync_chunk -open Tsync_xxhash))
+ (name chunk_test)
+ (libraries unix lwt lwt.unix bigstringaf tsync_chunk tsync_xxhash))

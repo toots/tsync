@@ -162,7 +162,8 @@ let () =
            let* () =
              Main.put
                ~key:(chunk_prefix ^ Chunk_layout.relative_path (ck n))
-               ~data:"a chunk!" ()
+               ~data:(Chunk.of_string "a chunk!")
+               ()
            in
            let m =
              Manifest.make ~name:"f" ~h1:(String.make 16 '0')
@@ -173,7 +174,7 @@ let () =
            Main.put
              ~key:
                (Printf.sprintf "%sfolder%02d/deadbeefdeadbeef" domain_prefix n)
-             ~data:(Manifest.to_string ~name:"f" m)
+             ~data:(Chunk.of_string (Manifest.to_string ~name:"f" m))
              ())
          (List.init folders (fun i -> i + 1))
      in
@@ -393,7 +394,8 @@ let () =
                (fun k ->
                  Main.put
                    ~key:(chunk_prefix ^ Chunk_layout.relative_path k)
-                   ~data:"a chunk!" ())
+                   ~data:(Chunk.of_string "a chunk!")
+                   ())
                chunks
            in
            let m =
@@ -409,7 +411,7 @@ let () =
            in
            Main.put
              ~key:(Printf.sprintf "%swide/%016x" domain_prefix f)
-             ~data:(Manifest.to_string ~name:"f" m)
+             ~data:(Chunk.of_string (Manifest.to_string ~name:"f" m))
              ())
          (List.init wide (fun i -> i))
      in

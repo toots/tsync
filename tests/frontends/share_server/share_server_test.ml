@@ -85,12 +85,16 @@ let build_fixture () =
   let* () =
     B.put
       ~key:(C.domain_prefix ^ Folder.child_key ~folder_id:Folder.root_id "sub")
-      ~data:(Folder.marker_to_string { Folder.name = "sub"; id = "subid" })
+      ~data:
+        (Chunk.of_string
+           (Folder.marker_to_string { Folder.name = "sub"; id = "subid" }))
       ()
   in
   (* Share manifests, written the way [tsync share] writes them. *)
   let share token json =
-    B.put ~key:(C.shares_prefix ^ token) ~data:(Yojson.Safe.to_string json) ()
+    B.put ~key:(C.shares_prefix ^ token)
+      ~data:(Chunk.of_string (Yojson.Safe.to_string json))
+      ()
   in
   let* () =
     share "aa"

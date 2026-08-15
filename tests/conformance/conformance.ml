@@ -39,11 +39,11 @@ let suite name (module B : Backend.S) =
   Printf.printf "\n  %s\n%!" name;
   let key s = run_prefix ^ s in
   let* () =
-    let* () = B.put ~key:(key "a") ~data:"alpha" () in
+    let* () = B.put ~key:(key "a") ~data:(Chunk.of_string "alpha") () in
     let* got = B.get ~key:(key "a") () in
-    check "put then get returns what was written" (got = "alpha");
+    check "put then get returns what was written" (Chunk.to_string got = "alpha");
     let* got = B.get_opt ~key:(key "a") () in
-    check "get_opt finds it" (got = Some "alpha");
+    check "get_opt finds it" (Option.map Chunk.to_string got = Some "alpha");
     let* missing = B.get_opt ~key:(key "nope") () in
     check "get_opt of an absent key is None" (missing = None);
     let* head = B.head_opt ~key:(key "a") () in
@@ -56,7 +56,7 @@ let suite name (module B : Backend.S) =
   let* () =
     let* () = B.copy ~src_key:(key "a") ~dst_key:(key "b") () in
     let* got = B.get ~key:(key "b") () in
-    check "copy duplicates the body" (got = "alpha");
+    check "copy duplicates the body" (Chunk.to_string got = "alpha");
     Lwt.return_unit
   in
   let* () =
@@ -77,21 +77,30 @@ let suite name (module B : Backend.S) =
     let claim = key "claimed" in
     let* answers =
       Lwt_list.map_p
-        (fun i -> B.put_if_absent ~key:claim ~data:(Printf.sprintf "c%d" i) ())
+        (fun i ->
+          B.put_if_absent ~key:claim
+            ~data:(Chunk.of_string (Printf.sprintf "c%d" i))
+            ())
         [1; 2; 3; 4; 5]
     in
+    let answers = List.map Chunk.to_string answers in
     let* stored = B.get ~key:claim () in
+    let stored = Chunk.to_string stored in
     check "five racing claims leave one body"
       (List.length (List.sort_uniq compare answers) = 1);
     check "every claimant is told what actually holds it"
       (List.for_all (fun a -> a = stored) answers);
-    let* late = B.put_if_absent ~key:claim ~data:"late" () in
+    let* late = B.put_if_absent ~key:claim ~data:(Chunk.of_string "late") () in
+    let late = Chunk.to_string late in
     check "a later claim is refused and told the holder"
       (late = stored && late <> "late");
     let* after = B.get ~key:claim () in
-    check "and the holder is untouched" (after = stored);
-    let* mine = B.put_if_absent ~key:(key "free") ~data:"mine" () in
-    check "an unclaimed name answers with its own body" (mine = "mine");
+    check "and the holder is untouched" (Chunk.to_string after = stored);
+    let* mine =
+      B.put_if_absent ~key:(key "free") ~data:(Chunk.of_string "mine") ()
+    in
+    check "an unclaimed name answers with its own body"
+      (Chunk.to_string mine = "mine");
     Lwt.return_unit
   in
   let* () =
@@ -141,9 +150,11 @@ let suite name (module B : Backend.S) =
       (fun n ->
         Lwt.catch
           (fun () ->
-            let* () = B.put ~key:(key ("bulk/" ^ n)) ~data:n () in
+            let* () =
+              B.put ~key:(key ("bulk/" ^ n)) ~data:(Chunk.of_string n) ()
+            in
             let+ got = B.get_opt ~key:(key ("bulk/" ^ n)) () in
-            let ok = got = Some n in
+            let ok = Option.map Chunk.to_string got = Some n in
             check (Printf.sprintf "key %S round-trips" n) ok;
             ok)
           (fun exn ->
@@ -171,7 +182,11 @@ let suite name (module B : Backend.S) =
     let over = 1000 in
     let pad i = key (Printf.sprintf "bulk/absent-%04d" i) in
     let live = [key "bulk/first"; key "bulk/at-cap"; key "bulk/past-cap"] in
-    let* () = Lwt_list.iter_s (fun k -> B.put ~key:k ~data:"x" ()) live in
+    let* () =
+      Lwt_list.iter_s
+        (fun k -> B.put ~key:k ~data:(Chunk.of_string "x") ())
+        live
+    in
     (* Only the spellings the store actually accepted: a name it refused above is
        not there to delete, and demanding it be gone would report the same defect
        twice under a name that does not describe it. *)

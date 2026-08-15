@@ -6,6 +6,8 @@
    -open
    Tsync_log
    -open
+   Tsync_chunk
+   -open
    Tsync_backend_register
    -open
    Tsync_naming))
@@ -15,6 +17,7 @@
  (library_flags (-linkall))
  (libraries
   tsync_field_spec
+  tsync_chunk
   tsync_backend_register
   tsync_naming
   tsync_log

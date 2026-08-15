@@ -499,7 +499,7 @@ let ls_cmd =
                | Some (hrel, _) when not (Hashtbl.mem seen hrel) -> (
                    Hashtbl.add seen hrel ();
                    let* data = B.get ~key:e.key () in
-                   match Manifest.of_string data with
+                   match Manifest.of_string (Chunk.to_string data) with
                      | m ->
                          (* A missing live manifest means the file was deleted;
                             the leaf name comes from the version body. *)
@@ -616,6 +616,7 @@ let versions_cmd =
                Lwt.catch
                  (fun () ->
                    let+ data = B.get ~key:(Hashtbl.find sample hrel) () in
+                   let data = Chunk.to_string data in
                    match Manifest.of_string data with
                      | m -> Manifest.recorded_name m
                      | exception _ -> hrel)
@@ -680,6 +681,7 @@ let trash_list domain =
      Lwt_list.iter_s
        (fun (e : Backend.file_entry) ->
          let+ data = B.get ~key:e.key () in
+         let data = Chunk.to_string data in
          match Folder.trash_path_of_string data with
            | Some p -> Printf.printf "%s\n" p
            | None -> ())
@@ -697,6 +699,7 @@ let trash_restore path domain =
        Lwt_list.filter_map_s
          (fun (e : Backend.file_entry) ->
            let+ data = B.get ~key:e.key () in
+           let data = Chunk.to_string data in
            match
              (Folder.trash_path_of_string data, Folder.marker_of_string data)
            with

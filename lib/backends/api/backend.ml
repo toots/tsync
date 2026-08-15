@@ -107,14 +107,14 @@ let merge_caps cs =
   { merged with verified = cs <> [] && List.for_all (fun c -> c.verified) cs }
 
 module type S = sig
-  val put : key:string -> data:string -> unit -> unit Lwt.t
-  val get : key:string -> unit -> string Lwt.t
+  val put : key:string -> data:Chunk.t -> unit -> unit Lwt.t
+  val get : key:string -> unit -> Chunk.t Lwt.t
 
   (** [None] when the key does not exist; other failures raise. Saves the HEAD
       round trip of [head_opt] + [get] when the body is wanted. *)
-  val get_opt : key:string -> unit -> string option Lwt.t
+  val get_opt : key:string -> unit -> Chunk.t option Lwt.t
 
-  val put_if_absent : key:string -> data:string -> unit -> string Lwt.t
+  val put_if_absent : key:string -> data:Chunk.t -> unit -> Chunk.t Lwt.t
   val head_opt : key:string -> unit -> file_entry option Lwt.t
   val delete : key:string -> unit -> unit Lwt.t
   val delete_multi : string list -> unit Lwt.t

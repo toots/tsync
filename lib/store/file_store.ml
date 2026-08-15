@@ -15,11 +15,15 @@ module Make (C : Conf.S) = struct
 
   let write_journal_entry ?entry_key ops =
     let ek = match entry_key with Some k -> k | None -> J.entry_key () in
-    let+ () = B.put ~key:(journal_key ek) ~data:(Journal.encode ops) () in
+    let+ () =
+      B.put ~key:(journal_key ek)
+        ~data:(Chunk.of_string (Journal.encode ops))
+        ()
+    in
     ek
 
   let bump_cursor entry_key =
-    B.put ~key:C.cursor_key ~data:(Ek.to_string entry_key) ()
+    B.put ~key:C.cursor_key ~data:(Chunk.of_string (Ek.to_string entry_key)) ()
 
   (* How far this client has applied the shared journal. Local, because it says
      what *we* have caught up to, not what was published. *)
@@ -45,7 +49,7 @@ module Make (C : Conf.S) = struct
 
   let fetch_cursor () =
     let+ body = B.get_opt ~key:C.cursor_key () in
-    Option.bind body (fun b -> Ek.of_string (String.trim b))
+    Option.bind body (fun b -> Ek.of_string (String.trim (Chunk.to_string b)))
 
   let list_journal_keys ?start_after () =
     let+ all = B.list_prefix ~prefix:C.journal_prefix () in
@@ -71,7 +75,7 @@ module Make (C : Conf.S) = struct
     Lwt.catch
       (fun () ->
         let+ d = B.get ~key () in
-        Some (Journal.decode d))
+        Some (Journal.decode (Chunk.to_string d)))
       (fun _ -> Lwt.return_none)
 
   let journal_entry_published entry_key =

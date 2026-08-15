@@ -1,9 +1,9 @@
 (* How many staged chunk bodies a chunked upload holds at once.
 
-   Fillers write into the [chunk_buffers] pool, so the fan-out may be as wide as
-   it likes and what is measured here is bodies live at once, not parallelism.
+   Fillers take a [chunk_slots] slot, so the fan-out may be as wide as it likes
+   and what is measured here is bodies live at once, not parallelism.
 
-   The pool is load-bearing rather than an allocation cache: bypass it and a
+   The bound is load-bearing rather than an allocation cache: bypass it and a
    730 MB staged file holds all 88 of its 8 MB chunks, which OOM-kills a 415 MB
    machine set to maxChunkBuffers 4. *)
 
@@ -72,7 +72,7 @@ let source index =
            else Lwt.bind (Lwt.pause ()) (fun () -> settle (n - 1))
          in
          let+ () = settle 5 in
-         Bytes.fill buf 0 csize (Char.chr (index land 0x7f));
+         Bigarray.Array1.fill buf (Char.chr (index land 0x7f));
          decr live))
 
 let () =

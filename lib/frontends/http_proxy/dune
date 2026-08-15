@@ -24,6 +24,8 @@
    -open
    Tsync_http_proxy
    -open
+   Tsync_chunk
+   -open
    Tsync_backend_register
    -open
    Tsync_conf
@@ -52,11 +54,13 @@
   tsync_ipc
   tsync_diagnostics
   tsync_metrics
+  tsync_chunk
   tsync_backend_register
   tsync_conf
   tsync_zip
   tsync_log
   cohttp-lwt-unix
+  bigstringaf
   conduit-lwt-unix
   uri
   yojson

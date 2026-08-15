@@ -34,7 +34,7 @@
     rather than a different code path. *)
 
 type op =
-  | Put of { key : string; data : string }
+  | Put of { key : string; data : Chunk.t }
   | Copy of { src_key : string; dst_key : string }
   | Delete of string
   | Delete_multi of string list

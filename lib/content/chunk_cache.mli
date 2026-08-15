@@ -11,7 +11,7 @@
 (** What the store needs from the backend layer. {!Remote.S} satisfies it.
     Grouping is invisible here: a cache chunk is fetched as its members. *)
 module type Fetch = sig
-  val get_chunk : chunk_key:string -> string Lwt.t
+  val get_chunk : chunk_key:string -> Chunk.t Lwt.t
 end
 
 module Make (C : Conf.S) (F : Fetch) : sig
@@ -36,7 +36,7 @@ module Make (C : Conf.S) (F : Fetch) : sig
       the tail of a promotion, where every member is a local staged body. No-op
       when the body is already here. *)
   val put_group :
-    group:Chunk_group.t -> member:(int -> string Lwt.t) -> unit Lwt.t
+    group:Chunk_group.t -> member:(int -> Chunk.t Lwt.t) -> unit Lwt.t
 
   (** Fill [buf] from stored chunk [index], starting [chunk_off] bytes into that
       chunk and fetching the group if absent. A body that vanishes (or is
@@ -47,9 +47,6 @@ module Make (C : Conf.S) (F : Fetch) : sig
     Local_io.buffer ->
     chunk_off:int ->
     served Lwt.t
-
-  (** One stored chunk's bytes if its group is already here, without fetching.
-  *)
 
   (** Drop one group body. It is re-fetched on the next read. *)
   val forget : group:Chunk_group.t -> unit Lwt.t

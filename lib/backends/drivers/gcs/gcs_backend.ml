@@ -333,11 +333,25 @@ let make ?endpoint ?service_account_key ?share_url ~bucket () :
   in
   let auth = Option.map Auth.of_service_account_json service_account_key in
   let t = { bucket; base; auth; share_url } in
+  (* The verifier's job bodies are JSON, and it is handed this rather than the
+     module's [put] below, which speaks in chunks. *)
+  let put_text ~key ~data () = put t ~key ~data () in
   (module struct
-    let put ~key ~data () = put t ~key ~data ()
-    let put_if_absent ~key ~data () = put_if_absent t ~key ~data ()
-    let get ~key () = get t ~key ()
-    let get_opt ~key () = get_opt t ~key ()
+    (* Where a body becomes a string, the JSON API speaking in them. *)
+    let put ~key ~data () = put t ~key ~data:(Chunk.to_string data) ()
+
+    let put_if_absent ~key ~data () =
+      let+ held = put_if_absent t ~key ~data:(Chunk.to_string data) () in
+      Chunk.of_string held
+
+    let get ~key () =
+      let+ body = get t ~key () in
+      Chunk.of_string body
+
+    let get_opt ~key () =
+      let+ body = get_opt t ~key () in
+      Option.map Chunk.of_string body
+
     let head_opt ~key () = head_opt t ~key ()
     let delete ~key () = delete t ~key ()
     let delete_multi keys = delete_multi t keys
@@ -350,7 +364,7 @@ let make ?endpoint ?service_account_key ?share_url ~bucket () :
           ~on_progress:(fun ~done_ ~total ->
             if done_ mod 256 = 0 || done_ = total then
               Log.info "verify: queued %d/%d shard request(s)" done_ total)
-          ~put ~chunk_prefix ()
+          ~put:put_text ~chunk_prefix ()
       in
       `Queued n
 

@@ -18,6 +18,8 @@
    -open
    Tsync_local_io
    -open
+   Tsync_chunk
+   -open
    Tsync_backend_register
    -open
    Tsync_conf))
@@ -30,6 +32,7 @@
   tsync_naming
   tsync_local_io
   tsync_conf
+  tsync_chunk
   tsync_backend_register
   tsync_metrics
   tsync_log

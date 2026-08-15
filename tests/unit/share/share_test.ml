@@ -63,25 +63,29 @@ let () =
     (let open Lwt.Syntax in
      (* File: put a (non-marker) manifest, share it. *)
      let* file_key = L.ensure_manifest_key (C.domain_prefix ^ "foo") in
-     let* () = B.put ~key:file_key ~data:"{\"chunks\":[]}" () in
+     let* () =
+       B.put ~key:file_key ~data:(Chunk.of_string "{\"chunks\":[]}") ()
+     in
      let* url = S.create ~token:"aa" ~expires:123 ~rel:"foo" () in
      let url = match url with Ok u -> u | Error e -> failwith e in
      assert (url = share_base ^ "/aa");
      let* body = B.get ~key:(shares_prefix ^ "aa") () in
-     let m = Yojson.Basic.from_string body in
+     let m = Yojson.Basic.from_string (Chunk.to_string body) in
      assert (member "type" m = `String "file");
      assert (member "key" m = `String file_key);
      assert (member "filename" m = `String "foo");
      assert (member "expires" m = `Int 123);
 
      let* () =
-       B.put ~key:(C.domain_prefix ^ Folder.root_id ^ "/x") ~data:"x" ()
+       B.put
+         ~key:(C.domain_prefix ^ Folder.root_id ^ "/x")
+         ~data:(Chunk.of_string "x") ()
      in
      let* url = S.create ~token:"bb" ~expires:123 ~rel:"" () in
      let url = match url with Ok u -> u | Error e -> failwith e in
      assert (url = share_base ^ "/bb");
      let* body = B.get ~key:(shares_prefix ^ "bb") () in
-     let m = Yojson.Basic.from_string body in
+     let m = Yojson.Basic.from_string (Chunk.to_string body) in
      assert (member "type" m = `String "dir");
      assert (member "filename" m = `String "testdom.zip");
      assert (
@@ -123,7 +127,10 @@ let () =
   let module S3 = Share.Make (ReadOnlyDomain) in
   (* The composite really does refuse writes: without that, this proves nothing. *)
   let (module Composite : Backend.S) = ReadOnlyDomain.store in
-  (match Lwt_main.run (Composite.put ~key:"tsync/shares/zz" ~data:"x" ()) with
+  (match
+     Lwt_main.run
+       (Composite.put ~key:"tsync/shares/zz" ~data:(Chunk.of_string "x") ())
+   with
     | exception Backend.Not_writable -> ()
     | _ -> assert false);
   (match Lwt_main.run (S3.create ~token:"cc" ~expires:123 ~rel:"foo" ()) with
@@ -165,7 +172,11 @@ let () =
          shares_prefix ^ "3333333333333333-4444444444444444.data";
        ]
      in
-     let* () = Lwt_list.iter_s (fun key -> B.put ~key ~data:"1234" ()) cached in
+     let* () =
+       Lwt_list.iter_s
+         (fun key -> B.put ~key ~data:(Chunk.of_string "1234") ())
+         cached
+     in
      let* result = S.clear_cache () in
      let n, bytes = match result with Ok v -> v | Error e -> failwith e in
      assert (n = List.length cached);

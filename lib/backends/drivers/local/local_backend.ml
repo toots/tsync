@@ -13,14 +13,17 @@ let readdir_list = Fs_util.readdir_list
 let write_file path data =
   let* () = Fs_util.ensure_parent path in
   let tmp = Fs_util.temp_path path in
-  let* () =
-    Lwt_unix_retry.with_file ~mode:Lwt_io.Output tmp (fun oc ->
-        Lwt_io.write oc data)
-  in
+  let* () = Chunk.write_to ~path:tmp data ~offset:0 in
   Lwt_unix_retry.rename tmp path
 
+let write_string path data = write_file path (Chunk.of_string data)
+
+(* Mapped, not read: a name here is only ever replaced by {!write_file}'s
+   rename, so a mapping keeps serving the bytes it was made from however the
+   name is reused afterwards, and a chunk body never lands on the heap. *)
 let read_file path =
-  Lwt_unix_retry.with_file ~mode:Lwt_io.Input path Lwt_io.read
+  let+ st = Lwt_unix_retry.LargeFile.stat path in
+  Chunk.map_file ~path ~offset:0 ~len:(Int64.to_int st.Unix.LargeFile.st_size)
 
 (* [link] rather than [rename]: rename replaces silently, link fails with EEXIST
    when the destination is taken, which is the whole point.
@@ -30,10 +33,7 @@ let read_file path =
 let create_exclusive path data =
   let* () = Fs_util.ensure_parent path in
   let tmp = Fs_util.temp_path path in
-  let* () =
-    Lwt_unix_retry.with_file ~mode:Lwt_io.Output tmp (fun oc ->
-        Lwt_io.write oc data)
-  in
+  let* () = Chunk.write_to ~path:tmp data ~offset:0 in
   Lwt.finalize
     (fun () ->
       Lwt.catch
@@ -132,7 +132,7 @@ let make ?(verify_writes = true) ~root () : (module Backend.S) =
             | `Unreadable why ->
                 Log.err "chunk %s could not be read back (%s): filing %s"
                   (Filename.basename key) why marker;
-                write_file (resolve marker)
+                write_string (resolve marker)
                   (Corruption_marker.to_string
                      {
                        computed = None;
@@ -158,11 +158,11 @@ let make ?(verify_writes = true) ~root () : (module Backend.S) =
                 else (
                   Log.err "chunk %s hashed to %s: filing %s"
                     (Filename.basename key) computed marker;
-                  write_file (resolve marker)
+                  write_string (resolve marker)
                     (Corruption_marker.to_string
                        {
                          computed = Some computed;
-                         size = Some (String.length stored);
+                         size = Some (Chunk.length stored);
                          at = Some (Unix.gettimeofday ());
                          reason = None;
                        })))

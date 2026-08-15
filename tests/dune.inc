@@ -536,6 +536,20 @@
   (action
    (diff bounded_test.expected bounded_test.output))))
 
+(subdir unit/chunk
+ (alias
+  (name default)
+  (deps chunk_test.exe))
+ (rule
+  (alias runtest)
+  (target chunk_test.output)
+  (action
+   (with-stdout-to chunk_test.output (ignore-stderr (run ./chunk_test.exe)))))
+ (rule
+  (alias runtest)
+  (action
+   (diff chunk_test.expected chunk_test.output))))
+
 (subdir unit/chunk_space
  (alias
   (name default)

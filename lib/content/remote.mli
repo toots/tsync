@@ -16,7 +16,7 @@ module type S = sig
 
   (** Fetch one chunk body from the domain's stores by its content key
       ([Manifest.chunk_key], without the domain's chunk prefix). *)
-  val get_chunk : chunk_key:string -> string Lwt.t
+  val get_chunk : chunk_key:string -> Chunk.t Lwt.t
 
   (** Chunk size for files this client creates: [Conf.S.chunk_size] when the
       config says, else what the domain's stores recommend — an http-proxy
@@ -33,9 +33,8 @@ module type S = sig
       the next chunk boundary with {!Cancelled}, unpublishing the manifest if it
       already went.
 
-      [buf] is pooled and arrives holding whatever the last chunk left there, so
-      [f] writes every byte it claims and a short read pads rather than
-      returning early.
+      [buf] arrives uninitialised, so [f] writes every byte it claims and a
+      short read pads rather than returning early.
 
       [source] itself does no I/O, deciding only which case a chunk is: one that
       reads up front puts the whole file in memory before anything queues for a
@@ -56,7 +55,9 @@ module type S = sig
     size:int64 ->
     chunk_size:int ->
     mtime:float ->
-    source:(int -> [ `Reuse of string | `Fill of bytes -> unit Lwt.t ] Lwt.t) ->
+    source:
+      (int ->
+      [ `Reuse of string | `Fill of Local_io.buffer -> unit Lwt.t ] Lwt.t) ->
     ?cancel:bool ref ->
     unit ->
     Manifest.t Lwt.t

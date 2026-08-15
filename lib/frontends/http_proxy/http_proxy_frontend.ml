@@ -322,8 +322,8 @@ let exec route op ~body =
           | Some data ->
               (* Once per request, not per backend a write fans out to: this is
                  the volume moved on a client's behalf. *)
-              Metrics.add_downloaded (String.length data);
-              respond data
+              Metrics.add_downloaded (Chunk.length data);
+              respond (Chunk.to_string data)
           | None -> respond ~status:`Not_found "")
     | Head key -> (
         let module B = (val route.store : Backend.S) in
@@ -346,7 +346,7 @@ let exec route op ~body =
           let* held = B.put_if_absent ~key ~data:body () in
           (* The body that won, so the caller learns whether it was theirs
              without a second round trip. *)
-          respond held
+          respond (Chunk.to_string held)
     | Put key ->
         if not (writable key) then reject_ro ()
         else
@@ -354,7 +354,7 @@ let exec route op ~body =
             let module B = (val route.store : Backend.S) in
             B.put ~key ~data:body ()
           in
-          Metrics.add_uploaded (String.length body);
+          Metrics.add_uploaded (Chunk.length body);
           respond ""
     | Delete key ->
         if not (writable key) then reject_ro ()
@@ -550,8 +550,8 @@ let status_json ~port ~tls ~totals ~exact ~reload routes =
 (* Listener-wide, not domain-scoped, so any secret signing for this listener
    authorizes it: there is no key to route on. Text and JSON render the same
    collection, so a browser, [curl] and [tsync status] cannot disagree. *)
-let serve_status ~port ~tls ~json routes req body_str =
-  if not (List.exists (fun r -> authed r req body_str) routes) then begin
+let serve_status ~port ~tls ~json routes req body =
+  if not (List.exists (fun r -> authed r req body) routes) then begin
     bump "unauthorized";
     respond ~status:`Unauthorized "unauthorized"
   end
@@ -580,8 +580,8 @@ let serve_status ~port ~tls ~json routes req body_str =
    object API there is no key to route on, so the secret is the selector: a
    listener fronting several domains under different secrets answers each caller
    with its own, not the whole listing. *)
-let serve_domains routes req body_str =
-  match List.filter (fun r -> authed r req body_str) routes with
+let serve_domains routes req body =
+  match List.filter (fun r -> authed r req body) routes with
     | [] ->
         bump "unauthorized";
         respond ~status:`Unauthorized "unauthorized"
@@ -614,17 +614,18 @@ let callback ~port ~tls routes _conn req body =
           ~range:(Cohttp.Header.get (Cohttp.Request.headers req) "range")
     | None -> (
         let* body_str = Cohttp_lwt.Body.to_string body in
+        let body = Chunk.of_string body_str in
         match (meth, Uri.path uri) with
           | `GET, ("/" | "/index.html") ->
               bump "page";
               respond
                 ~headers:[("content-type", "text/html; charset=utf-8")]
                 stats_html
-          | `GET, "/domains" -> serve_domains routes req body_str
+          | `GET, "/domains" -> serve_domains routes req body
           | `GET, "/stats" ->
-              serve_status ~port ~tls ~json:false routes req body_str
+              serve_status ~port ~tls ~json:false routes req body
           | `GET, "/api/v1/stats" ->
-              serve_status ~port ~tls ~json:true routes req body_str
+              serve_status ~port ~tls ~json:true routes req body
           | _ -> (
               let op = parse_op meth uri body_str in
               match route_key op with
@@ -638,12 +639,11 @@ let callback ~port ~tls routes _conn req body =
                     respond ~status:`Bad_request "bad request"
                 | Some key -> (
                     match
-                      route_for routes ~key ~authed:(fun r ->
-                          authed r req body_str)
+                      route_for routes ~key ~authed:(fun r -> authed r req body)
                     with
                       | None -> respond ~status:`Not_found "unknown domain"
                       | Some route ->
-                          if not (authed route req body_str) then begin
+                          if not (authed route req body) then begin
                             bump "unauthorized";
                             respond ~status:`Unauthorized "unauthorized"
                           end
@@ -661,7 +661,7 @@ let callback ~port ~tls routes _conn req body =
                                         bump "busy";
                                         respond ~status:`Service_unavailable
                                           "busy")
-                                      (fun () -> exec route op ~body:body_str))
+                                      (fun () -> exec route op ~body))
                                   (fun exn ->
                                     bump "error";
                                     Log.err "http-proxy: %s"

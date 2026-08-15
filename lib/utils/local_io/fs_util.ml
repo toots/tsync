@@ -82,13 +82,13 @@ let atomic_write_at path ~size write =
              the bytes are paid for. *)
           let* () = Lwt_unix_retry.LargeFile.ftruncate fd (Int64.of_int size) in
           let put ~offset data =
-            let total = String.length data in
+            let total = Bigstringaf.length data in
             let rec go written =
               if written >= total then Lwt.return_unit
               else
                 let* n =
-                  Lwt_unix_retry.pwrite_string fd data
-                    ~file_offset:(offset + written) written (total - written)
+                  Local_io.pwrite fd data ~file_offset:(offset + written)
+                    written (total - written)
                 in
                 if n = 0 then
                   Lwt.fail

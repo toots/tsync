@@ -86,11 +86,13 @@ let () =
      let live = ck 1 and going = ck 2 and absent = ck 3 in
      (* [live] in the surviving space, [going] only in the space on its way out —
         the state a half-marked collection is in. *)
-     let* () = Store.put ~key:(Space.key live) ~data:"live" () in
+     let* () =
+       Store.put ~key:(Space.key live) ~data:(Chunk.of_string "live") ()
+     in
      let* () =
        Store.put
          ~key:(from_prefix ^ Chunk_layout.relative_path going)
-         ~data:"going" ()
+         ~data:(Chunk.of_string "going") ()
      in
 
      case "idle: one space, and the other is never consulted";
@@ -100,7 +102,7 @@ let () =
      step "head(in the discarded space) = %b  <- no run, so not looked for"
        (head <> None);
      let* body = Space.get live in
-     step "get(live) = %S" body;
+     step "get(live) = %S" (Chunk.to_string body);
 
      case "a store that cannot collect never grows a second lookup";
      let* head = Frozen_space.head going in
@@ -121,7 +123,7 @@ let () =
      let* head = Space.head going in
      step "head(discarded) = %b  <- cache still says idle" (head <> None);
      let* body = Space.get going in
-     step "get(discarded) = %S" body;
+     step "get(discarded) = %S" (Chunk.to_string body);
      let* head = Space.head absent in
      step "head(in neither) = %b" (head <> None);
 
@@ -130,7 +132,7 @@ let () =
      let* still = Store.head_opt ~key:(Space.key going) () in
      step "promote gives it a name in the surviving space: %b" (still <> None);
      let* body = Store.get ~key:(Space.key going) () in
-     step "and the same bytes: %S" body;
+     step "and the same bytes: %S" (Chunk.to_string body);
      (* The load-bearing property of the whole scheme: the chunk is *moved*, not
         copied. It is what leaves the space on its way out holding the garbage and
         nothing else, so closing deletes by name instead of working the difference
@@ -161,7 +163,7 @@ let () =
      let* () = Space.clear_run () in
      ignore (Sys.command (Printf.sprintf "rm -rf %s/%s" store_dir from_prefix));
      let* body = Space.get going in
-     step "get(promoted) = %S" body;
+     step "get(promoted) = %S" (Chunk.to_string body);
      let* run = Space.read_run () in
      step "run marker cleared: %b" (run = None);
      step "marker key = %s" marker_key;

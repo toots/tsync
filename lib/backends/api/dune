@@ -1,5 +1,19 @@
 (library
  (flags
-  (:standard -open Tsync_log -open Tsync_local_io -open Tsync_field_spec))
+  (:standard
+   -open
+   Tsync_log
+   -open
+   Tsync_chunk
+   -open
+   Tsync_local_io
+   -open
+   Tsync_field_spec))
  (name tsync_backend_register)
- (libraries tsync_field_spec tsync_local_io tsync_log lwt lwt.unix))
+ (libraries
+  tsync_field_spec
+  tsync_chunk
+  tsync_local_io
+  tsync_log
+  lwt
+  lwt.unix))

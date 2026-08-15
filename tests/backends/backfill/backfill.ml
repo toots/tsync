@@ -149,12 +149,14 @@ let () =
      let c6 = chunk 6 and c8 = chunk 8 in
 
      case "chunks written through the wrapper, then the manifest naming them";
-     let* () = B.put ~key:c0 ~data:"aaaa" () in
+     let* () = B.put ~key:c0 ~data:(Chunk.of_string "aaaa") () in
      step "put chunk c0";
-     let* () = B.put ~key:c2 ~data:"bbbb" () in
+     let* () = B.put ~key:c2 ~data:(Chunk.of_string "bbbb") () in
      step "put chunk c2";
      let* () =
-       B.put ~key:(manifest_key "one") ~data:(manifest ~name:"one" [c0; c2]) ()
+       B.put ~key:(manifest_key "one")
+         ~data:(Chunk.of_string (manifest ~name:"one" [c0; c2]))
+         ()
      in
      step "put manifest one [c0 c2]";
      let* () = drain () in
@@ -164,11 +166,11 @@ let () =
      (* [Remote.chunk_exists] skips a chunk PUT when the source of truth already
         has it, so a copied file reaches the wrapper as a manifest alone. The
         manifest step must fetch c4 itself. *)
-     let* () = M.put ~key:c4 ~data:"cccc" () in
+     let* () = M.put ~key:c4 ~data:(Chunk.of_string "cccc") () in
      step "put chunk c4 straight to main, bypassing the wrapper";
      let* () =
        B.put ~key:(manifest_key "copy")
-         ~data:(manifest ~name:"copy" [c0; c4])
+         ~data:(Chunk.of_string (manifest ~name:"copy" [c0; c4]))
          ()
      in
      step "put manifest copy [c0 c4]";
@@ -178,7 +180,7 @@ let () =
      case "a symlink names no chunks";
      let* () =
        B.put ~key:(manifest_key "link")
-         ~data:(manifest ~symlink:"../one" ~name:"link" [])
+         ~data:(Chunk.of_string (manifest ~symlink:"../one" ~name:"link" []))
          ()
      in
      step "put manifest link -> ../one";
@@ -199,10 +201,10 @@ let () =
      (* Rebuilt from the authoritative copy of the destination rather than lost. *)
      let* () =
        M.put ~key:(manifest_key "orphan")
-         ~data:(manifest ~name:"orphan" [c6])
+         ~data:(Chunk.of_string (manifest ~name:"orphan" [c6]))
          ()
      in
-     let* () = M.put ~key:c6 ~data:"dddd" () in
+     let* () = M.put ~key:c6 ~data:(Chunk.of_string "dddd") () in
      step "put manifest orphan [c6] and chunk c6 straight to main";
      let* () =
        B.copy ~src_key:(manifest_key "orphan") ~dst_key:(manifest_key "orphan2")
@@ -213,9 +215,11 @@ let () =
      dump_target ();
 
      case "sync bookkeeping is not a target's business";
-     let* () = B.put ~key:(journal_prefix ^ "e1") ~data:"{}" () in
+     let* () =
+       B.put ~key:(journal_prefix ^ "e1") ~data:(Chunk.of_string "{}") ()
+     in
      step "put journal entry";
-     let* () = B.put ~key:cursor_key ~data:"e1" () in
+     let* () = B.put ~key:cursor_key ~data:(Chunk.of_string "e1") () in
      step "put cursor";
      let* () = drain () in
      let on r k = match keys_under r with ks -> List.mem k ks in
@@ -232,14 +236,16 @@ let () =
      step "delete chunk c0";
      let* () = drain () in
      dump_target ();
-     let* () = B.put ~key:c0 ~data:"aaaa" () in
+     let* () = B.put ~key:c0 ~data:(Chunk.of_string "aaaa") () in
      step "put chunk c0 again";
      let* () = drain () in
      dump_target ();
 
      case "how far behind the target is, as reported for diagnosis";
      let* () =
-       B.put ~key:(manifest_key "two") ~data:(manifest ~name:"two" [c0]) ()
+       B.put ~key:(manifest_key "two")
+         ~data:(Chunk.of_string (manifest ~name:"two" [c0]))
+         ()
      in
      let queued = owed () in
      step "queued right after a manifest put: %d (degraded %b)"
@@ -253,9 +259,11 @@ let () =
      case "an unreachable target is logged, never fatal";
      let down, _ = wrap ~inners:[main] ~target:(module Down) ~name:"down" in
      let (module D : Backend.S) = down in
-     let* () = D.put ~key:c8 ~data:"eeee" () in
+     let* () = D.put ~key:c8 ~data:(Chunk.of_string "eeee") () in
      let* () =
-       D.put ~key:(manifest_key "safe") ~data:(manifest ~name:"safe" [c8]) ()
+       D.put ~key:(manifest_key "safe")
+         ~data:(Chunk.of_string (manifest ~name:"safe" [c8]))
+         ()
      in
      let* () =
        D.copy ~src_key:(manifest_key "safe") ~dst_key:(manifest_key "safe2") ()
@@ -270,7 +278,7 @@ let () =
 
      case "reads never consult a target";
      let* d = B.get ~key:c2 () in
-     step "get chunk c2 = %S" d;
+     step "get chunk c2 = %S" (Chunk.to_string d);
      let* none = B.get_opt ~key:(chunk 98) () in
      step "get_opt an absent chunk = %s"
        (match none with Some _ -> "some" | None -> "none");

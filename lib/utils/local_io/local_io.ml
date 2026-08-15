@@ -1,7 +1,6 @@
 open Lwt.Syntax
 
-type buffer =
-  (char, Bigarray.int8_unsigned_elt, Bigarray.c_layout) Bigarray.Array1.t
+type buffer = Bigstringaf.t
 
 let rw op lp flags buf ~offset =
   let size = Bigarray.Array1.dim buf in
@@ -20,7 +19,25 @@ let rw op lp flags buf ~offset =
         loop 0)
       (fun () -> Lwt_unix_retry.close fd)
 
+let zero buf ~pos ~len =
+  Bigarray.Array1.fill (Bigarray.Array1.sub buf pos len) '\000'
+
 let read lp buf ~offset = rw Lwt_bytes.read lp [Unix.O_RDONLY] buf ~offset
 
 let write lp buf ~offset =
   rw Lwt_bytes.write lp [Unix.O_RDWR; Unix.O_CREAT] buf ~offset
+
+external unix_pread : Unix.file_descr -> buffer -> int -> int -> int -> int
+  = "caml_tsync_pread_bytecode" "caml_tsync_pread"
+
+external unix_pwrite : Unix.file_descr -> buffer -> int -> int -> int -> int
+  = "caml_tsync_pwrite_bytecode" "caml_tsync_pwrite"
+
+let positioned op fd buf ~file_offset pos len =
+  Lwt.return (op (Lwt_unix.unix_file_descr fd) buf file_offset pos len)
+
+let pread fd buf ~file_offset pos len =
+  positioned unix_pread fd buf ~file_offset pos len
+
+let pwrite fd buf ~file_offset pos len =
+  positioned unix_pwrite fd buf ~file_offset pos len

@@ -124,7 +124,7 @@ module Make (C : Conf.S) = struct
       | None -> fail `Not_found "not found"
       | Some body ->
           let j =
-            try Yojson.Safe.from_string body
+            try Yojson.Safe.from_string (Chunk.to_string body)
             with _ -> fail `Bad_gateway "corrupt share manifest"
           in
           let expires =
@@ -216,7 +216,7 @@ module Make (C : Conf.S) = struct
           else (
             pos := Int64.add !pos (Int64.of_int got);
             left := Int64.sub !left (Int64.of_int got);
-            Lwt.return_some (String.init got (Bigarray.Array1.get buf)))))
+            Lwt.return_some (Bigstringaf.substring buf ~off:0 ~len:got))))
 
   (* Depth first. Directories are emitted too, so empty ones survive the round
      trip. *)
@@ -260,7 +260,7 @@ module Make (C : Conf.S) = struct
                 m.s_pos <- m.s_size;
                 Lwt.return_some "")
               else (
-                let s = String.init got (Bigarray.Array1.get buf) in
+                let s = Bigstringaf.substring buf ~off:0 ~len:got in
                 m.s_pos <- Int64.add m.s_pos (Int64.of_int got);
                 Zip_stream.feed z s;
                 Lwt.return_some s)

@@ -12,6 +12,7 @@ depends: [
   "conf-libev"
   "conduit-lwt-unix"
   "cohttp-lwt-unix"
+  "bigstringaf"
   "digestif"
   "eqaf"
   "yojson"

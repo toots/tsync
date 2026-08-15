@@ -35,12 +35,12 @@ module Make (C : Conf.S) = struct
       | None -> Lwt.return_none
       | Some reason ->
           if Key.is_dir entry.key then
-            let+ () = Dst.put ~key:entry.key ~data:"" () in
+            let+ () = Dst.put ~key:entry.key ~data:Chunk.empty () in
             Some (reason, 0)
           else
             let* data = Src.get ~key:entry.key () in
             let+ () = Dst.put ~key:entry.key ~data () in
-            Some (reason, String.length data)
+            Some (reason, Chunk.length data)
 
   let dedup_entries entries =
     (* Listing order is backend-dependent. *)
