@@ -134,6 +134,9 @@ module Make (J : JOB) = struct
     workers : int;
     run : id:string -> J.t -> cancel:bool ref -> unit Lwt.t;
     jobs : entry Queue.t;
+    (* Record ids this process holds in memory, so reading the log again adds
+       only what nothing here is already going to run. *)
+    loaded : (string, unit) Hashtbl.t;
     wake : unit Lwt_condition.t;
     settled : unit Lwt_condition.t;
     (* Held across recording one job, so the queue ends up in the order the ids
@@ -158,6 +161,7 @@ module Make (J : JOB) = struct
       workers = 1;
       run = (fun ~id:_ _ ~cancel:_ -> Lwt.return_unit);
       jobs = Queue.create ();
+      loaded = Hashtbl.create 64;
       wake = Lwt_condition.create ();
       settled = Lwt_condition.create ();
       recording = Lwt_mutex.create ();
@@ -206,13 +210,18 @@ module Make (J : JOB) = struct
   let announce t = Lwt_condition.broadcast t.settled ()
 
   let enqueue t e =
+    Hashtbl.replace t.loaded e.id ();
     Queue.push e t.jobs;
     Lwt_condition.signal t.wake ()
+
+  let complete t id =
+    Hashtbl.remove t.loaded id;
+    Records.complete t.log id
 
   (* Dropped without waiting: the record names work whose data is no longer
      staged, which is exactly what a reconcile discards on the next start. *)
   let forget_pending t = function
-    | Some e -> Lwt.async (fun () -> Records.complete t.log e.id)
+    | Some e -> Lwt.async (fun () -> complete t e.id)
     | None -> ()
 
   (* The job is on disk before the caller is told the write is done. Recorded in
@@ -234,6 +243,7 @@ module Make (J : JOB) = struct
             match id with Some id -> id | None -> Records.mint_id t.log
           in
           let+ () = Records.write t.log ~id job in
+          Hashtbl.replace t.loaded id ();
           let e = { id; job } in
           match t.topo with
             | Ordered -> enqueue t e
@@ -301,7 +311,7 @@ module Make (J : JOB) = struct
       | Drop ->
           Log.err "%s: %s (dropped; run tsync mirror)" t.name
             (Backend.reason exn);
-          Records.complete t.log e.id
+          complete t e.id
       | Stop ->
           (* The record stays: it names work still owed, and something outside
              the queue is expected to report or repair it. *)
@@ -346,7 +356,7 @@ module Make (J : JOB) = struct
                  completes it as part of its own ordering — publishing an entry
                  before dropping the record — has already unlinked it, and this
                  is then a no-op. *)
-              let+ () = Records.complete t.log e.id in
+              let+ () = complete t e.id in
               false
           | `Failed exn when Backend.classify exn = Backend.Transient ->
               let n = note_failure t e in
@@ -382,12 +392,17 @@ module Make (J : JOB) = struct
       loop t
     end
 
-  (* Everything a previous run left owed, in the order it was recorded. Under
-     the same lock as {!post}, so a write arriving while this runs queues behind
-     what it finds rather than ahead of it. *)
+  (* Everything a previous run left owed, in the order it was recorded, minus
+     what this process already holds: the log is read more than once, and a
+     record enqueued twice is a job run twice. Under the same lock as {!post},
+     so a write arriving while this runs queues behind what it finds rather than
+     ahead of it. *)
   let resume t =
     Lwt_mutex.with_lock t.recording @@ fun () ->
     let+ records = Records.list t.log in
+    let records =
+      List.filter (fun (id, _) -> not (Hashtbl.mem t.loaded id)) records
+    in
     List.iter
       (fun (id, job) ->
         (match t.topo with
