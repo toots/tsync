@@ -58,4 +58,43 @@ let () =
   check "rejects a non-numeric timestamp" (Ek.of_string "notatime-abc" = None);
   check "rejects a missing uuid" (Ek.of_string "1801483200000-" = None);
   check "rejects a bare prefix" (Ek.of_string "tsync/dom/journal/" = None);
+
+  (* Markers and sweep requests carry the domain as their first segment, not
+     inside a per-domain root. That is what lets one literal prefix cover every
+     domain — a notification filter takes no wildcard, and Google's IAM
+     conditions offer only [startsWith], so "tsync/<domain>/corrupted/" could
+     not be expressed at either. A domain with a space in it is a real one. *)
+  let ck = "cba685e06d3e500f-293331628d03f29b" in
+  let chunk d = "tsync/" ^ d ^ "/chunks/" ^ String.sub ck 0 3 ^ "/" ^ ck in
+  List.iter
+    (fun d ->
+      let cp = "tsync/" ^ d ^ "/chunks/" in
+      check ("domain of " ^ d) (Chunk_layout.domain_of ~chunk_prefix:cp = d);
+      check ("marker for " ^ d)
+        (Chunk_layout.marker_key (chunk d)
+        = Some ("corrupted/" ^ d ^ "/" ^ String.sub ck 0 3 ^ "/" ^ ck));
+      check
+        ("corrupted prefix for " ^ d)
+        (Chunk_layout.corrupted_prefix ~chunk_prefix:cp = "corrupted/" ^ d ^ "/");
+      check ("job key for " ^ d)
+        (Chunk_layout.verify_job_key ~chunk_prefix:cp "abc"
+        = "verify-jobs/" ^ d ^ "/abc"))
+    ["dom"; "Jellyfin Media"];
+  let marker = Option.get (Chunk_layout.marker_key (chunk "Jellyfin Media")) in
+  check "a marker is one" (Chunk_layout.is_marker_key marker);
+  check "and names its chunk" (Chunk_layout.chunk_key_of_marker marker = ck);
+  (* The non-recursion guard, in code rather than only in a filter. *)
+  check "a marker earns none of its own" (Chunk_layout.marker_key marker = None);
+  check "nor does the space a collection empties"
+    (Chunk_layout.marker_key
+       ("tsync/d/chunks.from/" ^ String.sub ck 0 3 ^ "/" ^ ck)
+    = None);
+  (* A manifest is filed under the hash of its own name, so it is spelled
+     exactly like a chunk key: membership is the prefix, never the shape. *)
+  check "nor a manifest"
+    (Chunk_layout.marker_key
+       ("tsync/d/manifests/" ^ String.sub ck 0 3 ^ "/" ^ ck)
+    = None);
+  check "a shard directory is not a marker"
+    (not (Chunk_layout.is_marker_key "corrupted/dom/abc/"));
   print_endline "layout ok"

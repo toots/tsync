@@ -56,9 +56,16 @@ let prune_marker_dirs marker_path =
   let rmdir path =
     Lwt.catch (fun () -> Lwt_unix_retry.rmdir path) (fun _ -> Lwt.return_unit)
   in
-  let shard = Filename.dirname marker_path in
-  let* () = rmdir shard in
-  rmdir (Filename.dirname shard)
+  (* Up as far as the namespace root: a marker sits at
+     [corrupted/<domain>/<shard>/<key>], so three levels exist only to hold it.
+     Each rmdir fails harmlessly while anything is still filed below. *)
+  let rec up n path =
+    if n = 0 then Lwt.return_unit
+    else
+      let* () = rmdir path in
+      up (n - 1) (Filename.dirname path)
+  in
+  up 3 (Filename.dirname marker_path)
 
 (* Shared by every walk on this store: a per-call bound limits one walk, not how
    many run at once, and what is protected is the one device under the store.

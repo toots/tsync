@@ -34,12 +34,16 @@ let is_shard_name name =
    body against its own name without depending on the shapes that reference it. *)
 let key_of_body data = Xxhash.hash_hex data 0 ^ "-" ^ Xxhash.hash_hex data 1
 let chunks_seg = "/chunks/"
-let corrupted_seg = "/corrupted/"
 
-let sibling ~chunk_prefix name =
-  Filename.chop_suffix chunk_prefix "chunks/" ^ name
-
-let corrupted_prefix ~chunk_prefix = sibling ~chunk_prefix "corrupted/"
+(* Two namespaces beside the store rather than inside each domain, with the
+   domain as their first segment. One literal prefix then covers every domain —
+   which is what lets a notification be filtered, and a store's IAM say where the
+   checker may write, without either being handed a list of domain names to keep
+   in step with the daemon's config. Google's IAM conditions offer only
+   [startsWith], so a prefix with the domain in the middle cannot be expressed at
+   all. *)
+let corrupted_root = "corrupted/"
+let verify_jobs_root = "verify-jobs/"
 
 (* The domain a chunk prefix belongs to: ["tsync/<domain>/chunks/"] is the one
    shape this ever sees. *)
@@ -54,7 +58,8 @@ let domain_of ~chunk_prefix =
     | Some i -> String.sub root (i + 1) (String.length root - i - 1)
     | None -> root
 
-let verify_jobs_root = "verify-jobs/"
+let corrupted_prefix ~chunk_prefix =
+  corrupted_root ^ domain_of ~chunk_prefix ^ "/"
 
 let verify_jobs_prefix ~chunk_prefix =
   verify_jobs_root ^ domain_of ~chunk_prefix ^ "/"
@@ -75,6 +80,12 @@ let rfind_seg s seg =
   in
   if m > n then None else go (n - m)
 
+(* ["tsync/<domain>/chunks/<shard>/<key>"] becomes
+   ["corrupted/<domain>/<shard>/<key>"].
+
+   [None] for a marker key, for anything under [chunks.from/], and for a manifest
+   — which is filed under the hash of its own file name and so is spelled exactly
+   like a chunk key. Membership is the prefix, never the shape of the name. *)
 let marker_key key =
   match rfind_seg key chunks_seg with
     | None -> None
@@ -82,25 +93,38 @@ let marker_key key =
         let root = String.sub key 0 i in
         let start = i + String.length chunks_seg in
         let rest = String.sub key start (String.length key - start) in
-        match String.index_opt rest '/' with
-          | Some j
+        match (String.index_opt rest '/', String.index_opt root '/') with
+          | Some j, Some k
             when is_shard_name (String.sub rest 0 j)
                  && is_chunk_key
                       (String.sub rest (j + 1) (String.length rest - j - 1)) ->
-              Some (root ^ corrupted_seg ^ rest)
+              Some
+                (corrupted_root
+                ^ String.sub root (k + 1) (String.length root - k - 1)
+                ^ "/" ^ rest)
           | _ -> None)
 
+(* True for exactly what {!marker_key} produces. A directory is not a marker — a
+   filesystem store makes one to hold markers and lists it back — so the whole
+   shape is asked for, not the prefix. *)
 let is_marker_key key =
-  match rfind_seg key corrupted_seg with
-    | None -> false
-    | Some i -> (
-        let start = i + String.length corrupted_seg in
-        let rest = String.sub key start (String.length key - start) in
-        match String.index_opt rest '/' with
-          | Some j ->
-              is_shard_name (String.sub rest 0 j)
-              && is_chunk_key
-                   (String.sub rest (j + 1) (String.length rest - j - 1))
-          | None -> false)
+  if not (String.starts_with ~prefix:corrupted_root key) then false
+  else (
+    let rest =
+      String.sub key
+        (String.length corrupted_root)
+        (String.length key - String.length corrupted_root)
+    in
+    match String.rindex_opt rest '/' with
+      | None -> false
+      | Some j -> (
+          let leaf = String.sub rest (j + 1) (String.length rest - j - 1) in
+          let head = String.sub rest 0 j in
+          match String.rindex_opt head '/' with
+            | Some k ->
+                is_shard_name
+                  (String.sub head (k + 1) (String.length head - k - 1))
+                && is_chunk_key leaf
+            | None -> false))
 
 let chunk_key_of_marker = Filename.basename

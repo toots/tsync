@@ -26,8 +26,8 @@
 --- content
   a.txt = "ifmmp!utzod"
 --- backend
-  chunk cba685e06d3e500f-293331628d03f29b size=11
   corrupted cba685e06d3e500f-293331628d03f29b
+  chunk cba685e06d3e500f-293331628d03f29b size=11
   journal <entry-1> = put a.txt 11
   file a.txt [.tsync-root/f01e5cbbc09d4fc4-9a0fcd66f030de75] = manifest size=11 chunks=1 h1=1b5eab7935b34700 h2=72dfaa8cad2e9a42
     chunk#0 cba685e06d3e500f-293331628d03f29b size=11
@@ -77,8 +77,8 @@
   file a.txt [.tsync-root/f01e5cbbc09d4fc4-9a0fcd66f030de75] = manifest size=11 chunks=1 h1=1b5eab7935b34700 h2=72dfaa8cad2e9a42
     chunk#0 cba685e06d3e500f-293331628d03f29b size=11
 --- backend 2
-  chunk cba685e06d3e500f-293331628d03f29b size=11
   corrupted cba685e06d3e500f-293331628d03f29b
+  chunk cba685e06d3e500f-293331628d03f29b size=11
   journal <entry-1> = put a.txt 11
   file a.txt [.tsync-root/f01e5cbbc09d4fc4-9a0fcd66f030de75] = manifest size=11 chunks=1 h1=1b5eab7935b34700 h2=72dfaa8cad2e9a42
     chunk#0 cba685e06d3e500f-293331628d03f29b size=11
@@ -132,14 +132,14 @@
 --- content
   a.txt = "ifmmp!utzod"
 --- backend
-  chunk cba685e06d3e500f-293331628d03f29b size=11
   corrupted cba685e06d3e500f-293331628d03f29b
+  chunk cba685e06d3e500f-293331628d03f29b size=11
   journal <entry-1> = put a.txt 11
   file a.txt [.tsync-root/f01e5cbbc09d4fc4-9a0fcd66f030de75] = manifest size=11 chunks=1 h1=1b5eab7935b34700 h2=72dfaa8cad2e9a42
     chunk#0 cba685e06d3e500f-293331628d03f29b size=11
 --- backend 2
-  chunk cba685e06d3e500f-293331628d03f29b size=11
   corrupted cba685e06d3e500f-293331628d03f29b
+  chunk cba685e06d3e500f-293331628d03f29b size=11
   journal <entry-1> = put a.txt 11
   file a.txt [.tsync-root/f01e5cbbc09d4fc4-9a0fcd66f030de75] = manifest size=11 chunks=1 h1=1b5eab7935b34700 h2=72dfaa8cad2e9a42
     chunk#0 cba685e06d3e500f-293331628d03f29b size=11
@@ -179,8 +179,8 @@
 --- content
   a.txt = "ifmmp!utzod"
 --- backend
-  chunk cba685e06d3e500f-293331628d03f29b size=11
   corrupted cba685e06d3e500f-293331628d03f29b
+  chunk cba685e06d3e500f-293331628d03f29b size=11
   journal <entry-1> = put a.txt 11
   file a.txt [.tsync-root/f01e5cbbc09d4fc4-9a0fcd66f030de75] = manifest size=11 chunks=1 h1=1b5eab7935b34700 h2=72dfaa8cad2e9a42
     chunk#0 cba685e06d3e500f-293331628d03f29b size=11
@@ -203,8 +203,8 @@
 --- content
   a.txt = "ifmmp!utzod"
 --- backend
-  chunk cba685e06d3e500f-293331628d03f29b size=11
   corrupted cba685e06d3e500f-293331628d03f29b
+  chunk cba685e06d3e500f-293331628d03f29b size=11
   journal <entry-1> = put a.txt 11
   file a.txt [.tsync-root/f01e5cbbc09d4fc4-9a0fcd66f030de75] = manifest size=11 chunks=1 h1=1b5eab7935b34700 h2=72dfaa8cad2e9a42
     chunk#0 cba685e06d3e500f-293331628d03f29b size=11

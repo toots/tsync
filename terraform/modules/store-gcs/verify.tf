@@ -39,11 +39,13 @@ resource "google_storage_bucket_iam_member" "verify_mark" {
   member = "serviceAccount:${google_service_account.verify.email}"
   condition {
     title = "corrupted-prefix-only"
-    # Markers live under each domain; requests at the top, and are deleted as
-    # each shard is finished.
+    # Two literal prefixes. IAM conditions offer only startsWith on
+    # resource.name — no contains, no wildcard — which is exactly why markers
+    # and requests are namespaced with the domain inside rather than around
+    # them: "tsync/<domain>/corrupted/" could not be expressed here at all.
     expression = join(" || ", [
+      "resource.name.startsWith(\"projects/_/buckets/${local.bucket_name}/objects/corrupted/\")",
       "resource.name.startsWith(\"projects/_/buckets/${local.bucket_name}/objects/verify-jobs/\")",
-      "resource.name.contains(\"/corrupted/\")",
     ])
   }
 }
