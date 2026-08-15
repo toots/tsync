@@ -220,8 +220,10 @@ let parse_op meth uri body =
     | `PUT, p when is_obj p -> (
         match obj_key () with
           | Some k ->
-              if Uri.get_query_param uri "if_absent" = Some "1" then
-                Put_if_absent k
+              if
+                Field_spec.bool ~default:false
+                  (Uri.get_query_param uri "if_absent")
+              then Put_if_absent k
               else Put k
           | None -> Bad)
     | `DELETE, p when is_obj p -> (
@@ -561,8 +563,8 @@ let serve_status ~port ~tls ~json routes req body_str =
     let param name = Uri.get_query_param (Cohttp.Request.uri req) name in
     let totals_param = param "totals" in
     let exact = totals_param = Some "exact" in
-    let totals = exact || totals_param = Some "1" in
-    let reload = totals && param "reload" = Some "1" in
+    let totals = exact || Field_spec.bool ~default:false totals_param in
+    let reload = totals && Field_spec.bool ~default:false (param "reload") in
     let* report = status_json ~port ~tls ~totals ~exact ~reload routes in
     if json then
       respond
