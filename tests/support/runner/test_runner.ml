@@ -771,8 +771,10 @@ let setup_client (module C : Conf.S) root staging_prefix =
         let module Rp = Repair.Make (C) in
         let+ s =
           Rp.run
-            ~on_chunk:(fun ~chunk_key ~store outcome ->
-              Printf.printf "  %s\n%!"
+            ~on_start:(fun ~total ->
+              Printf.printf "  repair: %d marked\n%!" total)
+            ~on_chunk:(fun ~done_ ~total ~chunk_key ~store outcome ->
+              Printf.printf "  [%d/%d] %s\n%!" done_ total
                 (Repair.describe ~chunk_key ~store outcome))
             ()
         in

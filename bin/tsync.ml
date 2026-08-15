@@ -1401,11 +1401,23 @@ let chunks_integrity_cmd =
   let repair (module C : Conf.S) source dry_run verbose =
     let open Lwt.Syntax in
     let module Rp = Repair.Make (C) in
+    (* Verbose says every chunk and where it has got to; quiet says only what it
+       changed. A stale marker is the one outcome quiet leaves out: it is the
+       common case on a store whose events arrived out of order, and it means
+       nothing was wrong. *)
     let+ s =
       Rp.run ?source ~dry_run
-        ~on_chunk:(fun ~chunk_key ~store outcome ->
-          if verbose || outcome <> Repair.Cleared then
-            Printf.printf "%s\n%!" (Repair.describe ~chunk_key ~store outcome))
+        ~on_start:(fun ~total ->
+          if verbose then
+            Printf.eprintf "%d marked chunk%s to work through\n%!" total
+              (if total = 1 then "" else "s"))
+        ~on_chunk:(fun ~done_ ~total ~chunk_key ~store outcome ->
+          let line = Repair.describe ~chunk_key ~store outcome in
+          if verbose then
+            Printf.printf "[%*d/%d] %s\n%!"
+              (String.length (string_of_int total))
+              done_ total line
+          else if outcome <> Repair.Cleared then Printf.printf "%s\n%!" line)
         ()
     in
     Printf.printf
@@ -1456,7 +1468,9 @@ let chunks_integrity_cmd =
       value & flag
       & info ["repair"]
           ~doc:
-            "Rewrite what was found, from a copy that hashes to the right key.")
+            "Rewrite what was found, from a copy that hashes to the right key. \
+             With $(b,--verbose), every chunk is reported as it is done, with \
+             its position in the total.")
   in
   let detail_arg =
     Arg.(
