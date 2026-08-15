@@ -213,7 +213,7 @@ let backend_of name fields =
 let verify_suite name fields =
   let open Lwt.Syntax in
   let chunk_prefix = run_prefix ^ "chunks/" in
-  let jobs = run_prefix ^ "verify-jobs/" in
+  let jobs = Chunk_layout.verify_jobs_prefix ~chunk_prefix in
   let (module On : Backend.S) = backend_of name fields in
   let* caps = On.capabilities ~prefix:chunk_prefix () in
   check "an object store reports that its chunks are checked"
@@ -230,18 +230,28 @@ let verify_suite name fields =
          Chunk_layout.shard_of_verify_job e.Backend.key <> None)
        queued)
 
-(* Cleans up whatever the suite did not, including after a failure. *)
+(* Cleans up whatever the suite did not, including after a failure.
+
+   Two prefixes, because sweep requests and markers are namespaced beside the
+   store rather than under the domain: a run that only cleared [run_prefix]
+   would leave one per shard behind in a real bucket, every time. *)
 let sweep (module B : Backend.S) =
   let open Lwt.Syntax in
-  Lwt.catch
-    (fun () ->
-      let* entries = B.list_prefix ~prefix:run_prefix () in
-      match
-        List.map (fun (e : Backend.file_entry) -> e.Backend.key) entries
-      with
-        | [] -> Lwt.return_unit
-        | keys -> B.delete_multi keys)
-    (fun _ -> Lwt.return_unit)
+  let clear prefix =
+    Lwt.catch
+      (fun () ->
+        let* entries = B.list_prefix ~prefix () in
+        match
+          List.map (fun (e : Backend.file_entry) -> e.Backend.key) entries
+        with
+          | [] -> Lwt.return_unit
+          | keys -> B.delete_multi keys)
+      (fun _ -> Lwt.return_unit)
+  in
+  let chunk_prefix = run_prefix ^ "chunks/" in
+  let* () = clear run_prefix in
+  let* () = clear (Chunk_layout.verify_jobs_prefix ~chunk_prefix) in
+  clear (Chunk_layout.corrupted_prefix ~chunk_prefix)
 
 let () =
   let linked = Backend.types () in
