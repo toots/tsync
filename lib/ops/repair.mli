@@ -11,9 +11,11 @@
     cannot be told apart by anything it writes. Removing the marker itself would
     report health on the strength of an intention.
 
-    {b Where it is not the answer.} A chunk still whole in the local cache is
-    cheaper to repair with [tsync recheck], which re-uploads from bytes already
-    on this machine and needs no other store to be holding a copy. *)
+    {b What it needs.} Another store holding the chunk. Nothing reads this
+    machine's cache for it: a cached body is filed under a group key covering
+    several stored chunks, so finding one there means walking manifests, and a
+    cache is disposable in a way a backend is not. A chunk corrupt on every
+    backend is reported lost, not recovered. *)
 
 type outcome =
   | Repaired of { from_store : string }

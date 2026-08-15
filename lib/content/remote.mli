@@ -1,14 +1,5 @@
 exception Cancelled
 
-(** Outcome of rechecking one file's remote state. *)
-type recheck_report = {
-  chunks_total : int;
-  chunks_repaired : int;  (** re-uploaded from local data *)
-  chunks_unrepairable : int;  (** missing/bad remotely, no local data *)
-  manifest_repaired : bool;  (** remote manifest re-published *)
-  manifest_bad : bool;  (** remote manifest wrong but not repairable *)
-}
-
 module type S = sig
   (** Upload [src_path] as chunks under [key]: each chunk is read, hashed (chunk
       key) and uploaded if absent, then the manifest is written. For a file
@@ -57,9 +48,9 @@ module type S = sig
       therefore stays marked and stays bad.
 
       Deliberate: the alternative is fetching a chunk the caller never asked
-      for, on a path that must stay free of I/O to decide a case. [tsync repair]
-      takes the bytes from another store and [tsync recheck] from the local
-      cache, both of which have some to work with. *)
+      for, on a path that must stay free of I/O to decide a case.
+      [tsync data-integrity --repair] takes the bytes from another store, which
+      has some to work with. *)
   val upload_chunks :
     key:string ->
     size:int64 ->
@@ -73,18 +64,6 @@ module type S = sig
   (** Fetch only the manifest for [key] from the primary backend. Returns [None]
       if the key does not exist or is not a manifest. *)
   val fetch_manifest : key:string -> unit -> Manifest.t option Lwt.t
-
-  (** Recheck a file from its manifest: verify every chunk it names remotely
-      (HEAD + size), re-uploading the wrong ones from [local_body] when the
-      local chunk store has them, then republish a missing or wrong remote
-      manifest when every chunk checks out.
-
-      Local integrity is a separate matter — see {!Chunk_cache.verify_group}. *)
-  val recheck_from_manifest :
-    key:string ->
-    local_body:(int -> string option Lwt.t) ->
-    Manifest.t ->
-    recheck_report Lwt.t
 end
 
 (** Keys are mapped to backend keys through [L]. Callers holding real paths want

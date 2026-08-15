@@ -2,14 +2,6 @@ open Lwt.Syntax
 
 exception Cancelled = Backend.Cancelled
 
-type recheck_report = {
-  chunks_total : int;
-  chunks_repaired : int;
-  chunks_unrepairable : int;
-  manifest_repaired : bool;
-  manifest_bad : bool;
-}
-
 let manifest_matches (a : Manifest.t) (b : Manifest.t) =
   a.Manifest.h1 = b.Manifest.h1
   && a.Manifest.h2 = b.Manifest.h2
@@ -57,12 +49,6 @@ module type S = sig
     Manifest.t Lwt.t
 
   val fetch_manifest : key:string -> unit -> Manifest.t option Lwt.t
-
-  val recheck_from_manifest :
-    key:string ->
-    local_body:(int -> string option Lwt.t) ->
-    Manifest.t ->
-    recheck_report Lwt.t
 end
 
 module Make_with_layout (C : Conf.S) (L : Layout.S) : S = struct
@@ -288,83 +274,6 @@ module Make_with_layout (C : Conf.S) (L : Layout.S) : S = struct
 
   (* Republishes [expected] when the remote manifest is missing or differs;
      [true] when a repair was made. *)
-  let recheck_manifest ~key (expected : Manifest.t) =
-    let* remote = fetch_manifest ~key () in
-    let ok =
-      match remote with Some r -> manifest_matches r expected | _ -> false
-    in
-    if ok then Lwt.return_false
-    else (
-      Log.info "recheck: republishing manifest %s" key;
-      let name = Key.leaf ~domain_prefix:C.domain_prefix key in
-      (* Same rule as a fresh publish: a chunk this recheck verified rather than
-         re-uploaded may only have a name in a space about to be discarded. *)
-      let table = expected.Manifest.chunks in
-      let* () =
-        Space.promote_all
-          (List.init (Chunk_table.count table) (Chunk_table.key table))
-      in
-      let+ () =
-        St.put_manifest ~key ~data:(Manifest.to_string ~name expected)
-      in
-      true)
-
-  (* One bound for the whole check rather than one for the HEAD inside it: a
-     chunk the backend is missing goes on to read the local body and re-upload
-     it, and those cost what the HEAD does not.
-
-     Static, like every bound here: a per-call budget would limit one recheck
-     while saying nothing about how many run at once. *)
-  let recheck_chunks = Lwt_bounded.create ~max:C.max_chunk_buffers ()
-
-  let recheck_from_manifest ~key ~local_body (m : Manifest.t) =
-    (* A chunk missing or corrupt on the backend can still be restored from the
-       local chunk store: content addressing means a body found under that key is
-       the right bytes by construction. *)
-    let table = m.Manifest.chunks in
-    let check index =
-      let chunk_key = Chunk_table.key table index in
-      let* ok =
-        chunk_remote_ok ~chunk_key ~size:(Chunk_table.len table index)
-      in
-      if ok then Lwt.return `Ok
-      else
-        let* body = local_body index in
-        match body with
-          | None -> Lwt.return `Missing
-          | Some data ->
-              Log.info "recheck: re-uploading chunk %s" chunk_key;
-              let+ () = B.put ~key:(chunk_backend_key chunk_key) ~data () in
-              `Repaired
-    in
-    let* results =
-      Lwt_bounded.map_with recheck_chunks check
-        (List.init (Chunk_table.count table) Fun.id)
-    in
-    let count what = List.length (List.filter (fun r -> r = what) results) in
-    let chunks_unrepairable = count `Missing in
-    let+ manifest_repaired, manifest_bad =
-      if chunks_unrepairable > 0 then
-        let* remote = fetch_manifest ~key () in
-        let ok =
-          match remote with Some r -> manifest_matches r m | _ -> false
-        in
-        Lwt.return (false, not ok)
-      else
-        let+ repaired = recheck_manifest ~key m in
-        (repaired, false)
-    in
-    {
-      chunks_total = Chunk_table.count table;
-      chunks_repaired = count `Repaired;
-      chunks_unrepairable;
-      manifest_repaired;
-      manifest_bad;
-    }
-
-  (* Every chunk of every file contends for the same [max_downloads] slots, so
-     launching all of a file's chunk tasks up front cannot exceed the global
-     ceiling. *)
   let chunk_download_pool = Lwt_bounded.create ~max:C.max_downloads ()
 
   let get_chunk ~chunk_key =

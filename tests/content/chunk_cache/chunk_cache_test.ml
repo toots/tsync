@@ -274,20 +274,6 @@ let () =
            Lwt.return_unit)
      in
 
-     (* A group body cannot be checked against its own name, so each member
-        segment is hashed against the key it was published under. *)
-     let* ok = Cc.verify_group ~group:trio in
-     Printf.printf "%-28s ok=%b\n" "verify intact group" ok;
-     let* () =
-       Lwt_io.with_file ~mode:Lwt_io.Output ~flags:[Unix.O_WRONLY] (path trio)
-         (fun oc ->
-           let* () = Lwt_io.set_position oc 5L in
-           Lwt_io.write oc "X")
-     in
-     let* ok = Cc.verify_group ~group:trio in
-     Printf.printf "%-28s ok=%-5b present=%b\n" "verify corrupt member" ok
-       (Sys.file_exists (path trio));
-
      (* Explicit mtimes: ordering must not depend on filesystem timestamp
         resolution. *)
      Unix.utimes (path g1) 1000. 1000.;

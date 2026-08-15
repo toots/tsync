@@ -410,20 +410,6 @@
   (action
    (diff queue_bytes_test.expected queue_bytes_test.output))))
 
-(subdir scenario/recheck
- (alias
-  (name default)
-  (deps recheck.exe))
- (rule
-  (alias runtest)
-  (target recheck.output)
-  (action
-   (with-stdout-to recheck.output (ignore-stderr (run ./recheck.exe)))))
- (rule
-  (alias runtest)
-  (action
-   (diff recheck.expected recheck.output))))
-
 (subdir scenario/rename_listing
  (alias
   (name default)

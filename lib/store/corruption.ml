@@ -19,8 +19,8 @@ type memo = {
 }
 
 (* Keyed by the chunk prefix and not held in the functor: {!Remote.Make} is
-   applied in half a dozen places — the uploader, diagnostics, recheck, export,
-   import, the share server — and per-application state would have each of them
+   applied in half a dozen places — the uploader, diagnostics, export, import,
+   the share server — and per-application state would have each of them
    listing separately and believing something different about the same store. *)
 let memos : (string, memo) Hashtbl.t = Hashtbl.create 4
 
