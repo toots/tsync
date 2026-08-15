@@ -134,7 +134,7 @@ let () =
              let out = Filename.concat root "evict.out" in
              let status =
                Sys.command
-                 (Printf.sprintf "HOME=%s %s evict %s >%s 2>&1"
+                 (Printf.sprintf "HOME=%s %s cache --evict %s >%s 2>&1"
                     (Filename.quote mount_home)
                     (Filename.quote exe) (Filename.quote target)
                     (Filename.quote out))
