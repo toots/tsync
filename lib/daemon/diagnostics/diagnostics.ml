@@ -890,7 +890,7 @@ let text json =
                      (int_of (mem bf "queued"))
                      (int_of (mem bf "inFlight"))
                      (if bool_of (mem bf "degraded") then
-                        " — DEGRADED, run tsync resync-remote"
+                        " — DEGRADED, run tsync mirror"
                       else "")));
           (* One syscall, so unlike the counts below this is on every request. *)
           (match mem m "disk" with

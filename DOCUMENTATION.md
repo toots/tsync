@@ -85,11 +85,11 @@ systemd only keeps alive while you have a session, so `make install` also
 enables lingering. `make uninstall` reverses it.
 
 ```bash
-tsync build-config   # which optional features this binary has
-tsync paths          # where config, cache, data and socket live
+tsync build-info   # which optional features this binary has
+tsync build-info        # where config, cache, data and socket live
 ```
 
-`build-config` matters: the S3 backend and each frontend are only compiled in if their
+`build-info` matters: the S3 backend and each frontend are only compiled in if their
 dependencies were available at build time. Naming one that isn't fails at startup, saying so.
 
 ## 2. Create your first domain
@@ -107,7 +107,7 @@ in this order:
 | Read-only mount? | No, for now — [step 6](#6-add-a-second-machine). |
 | Chunk size / cache chunk size / max local cache | `default` / `none` — [tuning](#11-tuning). |
 | Backend type | `s3`, `gcs`, `local` or `http-proxy`; defaults to `local`, the one type that needs no bucket or credentials. See [backend types](#backend-type-reference). |
-| Backend name | A label, used by `resync-remote --source`. |
+| Backend name | A label, used by `mirror --source`. |
 | *(s3/gcs)* Fill from Terraform? | Only with the [bundled Terraform](terraform/README.md), applied with either `terraform` or `tofu`; otherwise `n` and type the bucket and keys. |
 | Role | `main` for the first backend; a cloud backend added after one defaults to `replica`. The others in [step 8](#8-add-a-second-backend). |
 | Add another backend? | No, for now. |
@@ -382,8 +382,8 @@ A bucket plus a local copy that fills in over time:
 Repairing a backend that was offline or has drifted:
 
 ```bash
-tsync resync-remote                    # copy what's missing between backends
-tsync resync-remote --source cloud     # ...copying *from* the named one
+tsync mirror                    # copy what's missing between backends
+tsync mirror --source cloud     # ...copying *from* the named one
 tsync recheck                          # verify the remote against the local cache
 ```
 
@@ -459,7 +459,7 @@ shows how far behind each target is.
 Two things are not waited out. A failure that cannot clear — a wrong credential, a bucket that
 refuses writes — drops the job rather than blocking everything queued behind it, and the target
 is reported `DEGRADED` from then on. So is a queue that has grown absurd. Both mean the target
-is missing data that patience will not supply: `tsync resync-remote --source <main>`.
+is missing data that patience will not supply: `tsync mirror --source <main>`.
 
 Between a write and its target catching up, that write exists only on the mains. With a single
 local `main`, that means only on that machine — which is the trade being made.
@@ -479,7 +479,7 @@ confirmed present. What's missing is entire files — never half of one, never a
 pointing at blocks that were never copied. Coverage only grows; cold data nothing touches
 again is never copied.
 
-`tsync resync-remote --source <main>` is how a target added to an existing domain gets filled,
+`tsync mirror --source <main>` is how a target added to an existing domain gets filled,
 and the repair path after one has been reported `DEGRADED`. A target that is merely behind
 needs no help.
 
@@ -564,7 +564,7 @@ tsync gc --abort             # abandon an open one, keeping every block
 
 Leaving a collection open is safe indefinitely: reads look in both places and writes were
 never redirected. While one is open the block prefix holds only part of the store, so
-`tsync stats` says so and `tsync resync-remote` refuses until it finishes.
+`tsync stats` says so and `tsync mirror` refuses until it finishes.
 
 ## 10. Share public download links
 
@@ -658,7 +658,7 @@ both `8388608` and `"8M"` work.
 
 ## Config file reference
 
-`tsync paths` says where it lives.
+`tsync build-info` says where it lives.
 
 Top level:
 
@@ -704,7 +704,7 @@ tsync sync --full     # clear local cache and re-download all manifests
 tsync recheck         # verify the remote against the local cache, repair what's possible
 tsync data-integrity  # list chunks a store found were not what their names say
                       # --verify asks the stores to check everything; --repair fixes it
-tsync resync-remote   # copy missing/damaged objects from one backend to the others
+tsync mirror   # copy missing/damaged objects from one backend to the others
 tsync import <dir>    # seed the domain from an existing folder
 tsync export <dir>    # write every file of the domain to a plain folder
 tsync share <path>    # print a public download URL for a file or folder (as a zip)
@@ -713,8 +713,8 @@ tsync stats           # full report: metrics, resolved config, cache, per-backen
 tsync stats --totals  # also count what each backend holds (a full listing per backend)
 tsync logs            # show the daemon log (-f to follow, -n N for how far back)
 tsync print-config    # show the config as parsed, with secrets masked
-tsync paths           # show the config, cache, data and socket paths in use
-tsync build-config    # show which optional features this binary was built with
+tsync build-info         # show the config, cache, data and socket paths in use
+tsync build-info    # show which optional features this binary was built with
 tsync configure       # interactive setup / editor
 tsync set-domain <n>  # persist a default domain for this machine (--clear to remove)
 tsync default-domain  # print the default currently in effect
@@ -748,7 +748,7 @@ point at — explains itself.
 ### Multiple domains
 
 With more than one domain, pass `--domain <name>` to commands that act on a specific one
-(`ls`, `versions`, `expire`, `gc`, `sync`, `recheck`, `resync-remote`, `import`, `export`,
+(`ls`, `versions`, `expire`, `gc`, `sync`, `recheck`, `mirror`, `import`, `export`,
 `share`). `tsync set-domain <name>` persists a default; an explicit `--domain` always wins.
 
 `tsync stats` is the exception: it always reports on every configured domain, and takes no
@@ -759,7 +759,7 @@ costing the others theirs.
 
 ## Backend type reference
 
-Every backend needs a `type`, a `name` (used by `resync-remote --source`) and a
+Every backend needs a `type`, a `name` (used by `mirror --source`) and a
 [`role`](#backend-role-reference).
 
 | `type` | Required fields | Optional | Notes |
@@ -883,15 +883,15 @@ what stops syncing.
 | Symptom | Try |
 |---|---|
 | Behaviour doesn't match the config | `tsync print-config` — unrecognised fields pass through, so a typo can look set. |
-| "frontend X is configured but not compiled into this binary" | `tsync build-config`; rebuild with the dependency available. |
+| "frontend X is configured but not compiled into this binary" | `tsync build-info`; rebuild with the dependency available. |
 | Config rejected at startup | The message names the domain, backend and reason. Roles are checked at parse time, so `tsync print-config` catches them too. |
 | Finder disagrees with `tsync ls` (macOS) | `tsync fileprovider reimport`. |
-| A backend was offline and has fallen behind | `tsync resync-remote --source <name>`. |
+| A backend was offline and has fallen behind | `tsync mirror --source <name>`. |
 | Local cache and remote disagree | `tsync recheck`, then `tsync sync --full` if it persists. |
 | Daemon state unclear | `tsync status`, `tsync stats`, and `tsync logs -f` — [reading the log](#reading-the-log). |
 | One backend of several is misbehaving | `tsync stats` — each backend reports its own reachability, journal backlog and how far behind it is. |
 | A `replica` or `backfill` target is behind | Normal: it catches up on its own, and what it owes survives a restart. `tsync stats` says by how much. |
-| A target says `DEGRADED` | Writes were dropped — refused, or queued past all reason: `tsync resync-remote --source <main>`. |
+| A target says `DEGRADED` | Writes were dropped — refused, or queued past all reason: `tsync mirror --source <main>`. |
 | No tray icon on GNOME | Install `gnome-shell-extension-appindicator` and log back in — GNOME has no built-in host. |
 | No tray icon elsewhere | Run `tsync-tray -v` in a terminal; it says whether it found a host, and stays running if it did not. |
 | A domain served over http-proxy misbehaves | Open the server's `/` page, or `curl` its `/stats` — [step 7](#checking-on-the-server). The server has no IPC socket, so `tsync stats` cannot reach it. |

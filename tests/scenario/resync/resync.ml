@@ -9,7 +9,7 @@ let () =
   run
     [
       {
-        name = "resync-remote in sync";
+        name = "mirror in sync";
         steps =
           [
             Write { path = "file.bin"; content = "hello world" };
@@ -18,7 +18,7 @@ let () =
           ];
       };
       {
-        name = "resync-remote heals missing chunk on secondary";
+        name = "mirror heals missing chunk on secondary";
         steps =
           [
             Write { path = "file.bin"; content = "hello world" };
@@ -29,7 +29,7 @@ let () =
           ];
       };
       {
-        name = "resync-remote heals corrupt chunk on secondary";
+        name = "mirror heals corrupt chunk on secondary";
         steps =
           [
             Write { path = "file.bin"; content = "hello world" };
@@ -39,7 +39,7 @@ let () =
           ];
       };
       {
-        name = "resync-remote heals missing manifest on secondary";
+        name = "mirror heals missing manifest on secondary";
         steps =
           [
             Write { path = "file.bin"; content = "hello world" };
@@ -51,7 +51,7 @@ let () =
       {
         (* Same length, different bytes: the size comparison sees nothing, so
            only --verify recopies it. *)
-        name = "resync-remote misses a scrambled chunk without --verify";
+        name = "mirror misses a scrambled chunk without --verify";
         steps =
           [
             Write { path = "file.bin"; content = "hello world" };
@@ -62,7 +62,7 @@ let () =
           ];
       };
       {
-        name = "resync-remote --path copies one folder and its chunks";
+        name = "mirror --path copies one folder and its chunks";
         steps =
           [
             Write { path = "outside.bin"; content = "not this one" };
@@ -76,7 +76,7 @@ let () =
           ];
       };
       {
-        name = "resync-remote --path --verify heals a scrambled chunk";
+        name = "mirror --path --verify heals a scrambled chunk";
         steps =
           [
             Mkdir "keep";
@@ -89,7 +89,7 @@ let () =
           ];
       };
       {
-        name = "resync-remote heals mixed tree on secondary";
+        name = "mirror heals mixed tree on secondary";
         steps =
           [
             Write { path = "ok.bin"; content = "fine" };

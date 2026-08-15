@@ -164,7 +164,7 @@ let make ?(resume = false) ?chunk_from_prefix ~name ~backend ~source
       ~log:(Q.Records.create ~dir:(Filename.concat root (escape name)))
         (* A permanent failure is dropped: the same request would be refused
            again, and every later rename would queue behind it forever. The
-           target is degraded from then on and needs resync-remote. *)
+           target is degraded from then on and needs tsync mirror. *)
       ~poison:Durable_queue.Drop ~run ()
   in
   Q.start ~recover:resume queue;

@@ -9,7 +9,7 @@
 
 === a failure that cannot clear is dropped, and the target says so
   put manifest two [c0]
-  owed: 0 (degraded true — needs tsync resync-remote)
+  owed: 0 (degraded true — needs tsync mirror)
 
 === a target that was down the whole time a process ran
   put chunk c2, put manifest three [c2], copy three -> four, delete three
