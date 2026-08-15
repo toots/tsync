@@ -1,12 +1,7 @@
 (* Every driver and frontend reads its [`Bool] settings through one function.
-   The spelling used to live at each reader and they had drifted: ["1"] meant
-   true for one field and false for another, and a field defaulting on answered
-   the question the opposite way round from one defaulting off — so ["no"]
-   turned a setting on.
 
-   A table rather than assertions, because what matters is that both columns
-   agree everywhere except where the value says nothing: the two defaults are
-   what the readers used to disagree about. *)
+   A table rather than assertions, because what matters is that both defaults
+   agree everywhere except where the value itself says nothing. *)
 
 let show = function true -> "true " | false -> "false"
 
@@ -22,7 +17,7 @@ let () =
       (* What [tsync config --edit] writes and [Conf_parsing] flattens. *)
       Some "true";
       Some "false";
-      (* Hand-edited configs. Each of these was read two ways before. *)
+      (* Hand-edited configs. *)
       Some "1";
       Some "0";
       Some "yes";

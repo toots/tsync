@@ -1,29 +1,21 @@
 (** Chunks a store found were not what their names say.
 
-    A chunk's key is the hash of its bytes, so a store can hold every object it
-    takes against the name it arrived under and needs nothing else to do it.
     What fails is filed under {!Chunk_layout.corrupted_prefix}, and that object
-    {i is} the record: reading the list is a listing of a prefix, which every
+    {i is} the record, so reading the list is a listing of a prefix every
     backend already serves.
 
-    Who writes them differs and nothing here cares: a [local] store checks as it
-    takes the write, an s3 or gcs bucket in a function its own object-created
-    event triggers. There is no clearing operation, and deliberately so — a
-    marker is removed by whoever re-verifies the object, which happens on every
-    re-upload, so a chunk that has been put right cannot stay accused and a
-    chunk nobody fixed cannot be marked clean by a client that merely believes
-    it. *)
+    There is no clearing operation: a marker is removed by whoever re-verifies
+    the object, so a chunk nobody fixed cannot be marked clean by a client that
+    merely believes it was. *)
 
 type entry = {
   chunk_key : string;
   store : string;  (** the member holding the bad copy *)
 }
 
-(** [unverified] and [unreachable] are why this is not a bare list. "No corrupt
-    chunks" out of a store nothing checks, or one nothing could reach, is not
-    the same answer as "no corrupt chunks" out of a store that looked — and a
-    report that prints them the same way is worse than one that says nothing,
-    because it reads as a clean bill of health. *)
+(** [unverified] and [unreachable] are why this is not a bare list: zero markers
+    out of a store nothing checked reads as a clean bill of health and is not
+    one. *)
 type report = {
   entries : entry list;
   unverified : string list;  (** members whose caps say nothing checks them *)

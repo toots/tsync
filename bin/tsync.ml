@@ -2015,9 +2015,6 @@ let default_domain_cmd =
           close_out oc;
           Printf.printf "Default domain set to: %s\n" name
   in
-  (* Reading is what no arguments means. It used to be what [--clear] meant too,
-     against what the help said, so the way to ask which domain was in force
-     silently dropped it. *)
   let run name clear =
     match (name, clear) with
       | None, false -> show ()

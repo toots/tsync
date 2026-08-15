@@ -106,8 +106,8 @@ let make ?(verify_writes = true) ~root () : (module Backend.S) =
 
      Read back, never hashed from [data]: what this catches is a body that did
      not survive the write, and [data] may alias a buffer its owner has already
-     moved on from. Hashing the argument would agree with itself and see nothing,
-     which is precisely the write-after-use this exists to catch.
+     moved on from, so hashing the argument would agree with itself and see
+     nothing.
 
      Verify then act, where the cloud side deletes the marker first: there the
      events are at-least-once and unordered, here we are the writer and the

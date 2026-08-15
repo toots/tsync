@@ -1,21 +1,15 @@
 """Hold each stored chunk against its own name.
 
-A chunk's key is the hash of its bytes -- XXH3-64 seeded 0 and 1, sixteen
-lowercase hex each, joined by a dash (lib/naming/chunk_layout.ml). Bodies are
-stored raw, so a chunk object can be checked with nothing but itself: hash what
-is there and compare it to the name it arrived under. What fails is filed under
-the domain's `corrupted/` prefix, where any client lists it.
+The key is XXH3-64 seeded 0 and 1, sixteen lowercase hex each joined by a dash,
+over bodies stored raw (lib/naming/chunk_layout.ml).
 
-The bucket's own object-created event runs this, one object per invocation, so
-there is no cursor and no pagination. The client never calls it, and never
-downloads a body to check one: only marker keys ever leave the cloud.
+The bucket's object-created event runs this one object at a time, so there is
+no cursor and no pagination, and only marker keys ever leave the cloud.
 
-Order is delete-then-check, unlike the OCaml side which checks first. Object
-events are at-least-once and unordered, so a marker must never outlive the write
-that fixed the chunk; clearing first means the worst a reordered pair can do is
-leave a marker on a good object, which costs exactly one extra upload -- the
-client reads it as absent, re-uploads, and that event clears it. The reverse
-mistake, a good-looking marker on bad bytes, is not recoverable by anything.
+A marker is deleted before the body is read, unlike the OCaml side which checks
+first: object events are at-least-once and unordered, and a marker left on a
+good object costs one extra upload where a good-looking marker on bad bytes is
+recoverable by nothing.
 """
 
 import json

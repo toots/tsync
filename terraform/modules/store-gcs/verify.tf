@@ -1,9 +1,8 @@
 # ── Chunk verification ─────────────────────────────────────────────────────
 #
-# Mirrors modules/store-s3/verify.tf on the google provider. A chunk's key is
-# the hash of its bytes, so a stored chunk can be checked against nothing but
-# itself; this runs on the bucket's own object-created event, one object per
-# invocation, and files what fails under the domain's corrupted/ prefix.
+# Mirrors modules/store-s3/verify.tf on the google provider: each stored chunk
+# held against its own name, on the bucket's object-created event, one object
+# per invocation, filing what fails under tsync/corrupted/.
 #
 # Same source zip as the share function, different entry point (gcp_verify).
 #
@@ -131,8 +130,7 @@ resource "google_cloudfunctions2_function" "verify" {
     event_type     = "google.cloud.pubsub.topic.v1.messagePublished"
     pubsub_topic   = google_pubsub_topic.chunks.id
     # A bucket the function cannot read would otherwise retry against every
-    # chunk in it, forever. A dropped event costs a missed marker, which is
-    # exactly what the store looked like before any of this existed.
+    # chunk in it forever, where a dropped event costs only a missed marker.
     retry_policy          = "RETRY_POLICY_DO_NOT_RETRY"
     service_account_email = google_service_account.verify.email
   }

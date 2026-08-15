@@ -11,13 +11,13 @@ open Lwt.Syntax
    the empty jobs cost invocations. An empty shard is one listing that finds
    nothing and a job object deleted. *)
 
-(* Wide enough that queueing is seconds rather than minutes, narrow enough not to
-   be the reason a bucket starts throttling. *)
+(* Requests in flight, unrelated to {!Chunk_layout.fanout}: wide enough that
+   queueing is seconds rather than minutes, narrow enough not to be the reason a
+   bucket starts throttling. *)
 let fanout = 32
 
-(* Not batched, and not for want of trying: [delete_multi] exists because both
-   stores have a bulk delete, and neither has a bulk put. 4096 round trips it is,
-   which is why they go out [fanout] at a time. *)
+(* Not batched: both stores have a bulk delete and neither has a bulk put, so
+   this is one round trip per shard, [fanout] of them at a time. *)
 let queue ?(on_progress = fun ~done_:_ ~total:_ -> ()) ~put ~chunk_prefix () =
   let slots = Lwt_bounded.create ~max:fanout () in
   let shards = List.init Chunk_layout.shards Chunk_layout.shard_name in

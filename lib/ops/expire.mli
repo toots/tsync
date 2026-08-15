@@ -19,10 +19,8 @@ module Make (C : Conf.S) : sig
   (** Delete one trashed folder and everything under it, now, answering how many
       objects went. [`Not_in_trash] when [path] names nothing there.
 
-      Separate from {!expire} because age is the only handle that one has: to
-      reach a folder trashed today it needs a cutoff of now, and that cutoff
-      governs versions and the journal too, so the domain's whole history would
-      go with it.
+      Separate from {!expire} because age is the only handle that one has, and
+      one cutoff governs versions and the journal alongside the trash.
 
       Leaves chunks nothing points at any more, which is {!Gc}'s job. *)
   val purge_trashed :

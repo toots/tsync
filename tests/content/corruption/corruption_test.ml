@@ -1,17 +1,9 @@
-(* A chunk's key is the hash of its bytes, so a store can hold every object it
-   takes against the name it arrived under. What is asserted here is the loop
-   that makes finding one worth anything.
+(* The loop a marker has to close: dedup skips a write when the store already
+   holds the key, a corrupt chunk is the right size so a presence check answers
+   yes, and every later file naming that chunk would inherit the bad bytes.
 
-   The case that matters is the third. Dedup skips a write when the store
-   already holds the key, and a corrupt chunk is the {i right size} — so a
-   presence check answers yes and the upload is skipped, the marker is left with
-   nothing to clear it, and, because dedup is what makes a chunk shared, every
-   later file containing that chunk inherits the bad bytes. The write-after-use
-   bug in 82abb72 produced exactly this: a whole chunk landing under another
-   one's name, same length, invisible to every check that existed.
-
-   Damage is done by writing through the store's own [put], which is how a real
-   bad write arrives and is what makes the marker appear at all. *)
+   Damage is written through the store's own [put], which is what makes the
+   marker appear at all. *)
 
 open Lwt.Syntax
 
