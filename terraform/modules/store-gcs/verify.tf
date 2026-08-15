@@ -138,6 +138,18 @@ resource "google_cloudfunctions2_function" "verify" {
   }
 }
 
-# No public invoker binding, unlike the share function: the trigger is the only
+# A gen2 function is a Cloud Run service, and Eventarc invokes it as one — so the
+# trigger's own service account has to be allowed to invoke it. Without this the
+# events arrive and every one is rejected with "The IAM principal lacks
+# run.routes.invoke", which looks from the client's side exactly like a trigger
+# that was never wired: requests queue up and nothing consumes them.
+#
+# The account, not allUsers as the share function needs: the trigger is the only
 # caller, and a client never invokes this.
+resource "google_cloud_run_v2_service_iam_member" "verify_invoker" {
+  location = google_cloudfunctions2_function.verify.location
+  name     = google_cloudfunctions2_function.verify.name
+  role     = "roles/run.invoker"
+  member   = "serviceAccount:${google_service_account.verify.email}"
+}
 
