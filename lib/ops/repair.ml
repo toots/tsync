@@ -95,20 +95,22 @@ module Make (C : Conf.S) = struct
                       let+ () = write body in
                       (Repaired { from_store }, String.length body)))
 
-  let run ?source ?(dry_run = false)
-      ?(on_chunk = fun ~chunk_key:_ ~store:_ _ -> ()) () =
+  let run ?source ?(dry_run = false) ?(on_start = fun ~total:_ -> ())
+      ?(on_chunk = fun ~done_:_ ~total:_ ~chunk_key:_ ~store:_ _ -> ()) () =
     if C.read_only && not dry_run then
       failwith
         (Printf.sprintf "%s is read-only, so nothing here may be rewritten."
            C.domain_name);
     let* report = Cor.list () in
+    let total = List.length report.Corruption.entries in
+    on_start ~total;
     let* stats =
       Lwt_list.fold_left_s
         (fun acc (e : Corruption.entry) ->
           let+ outcome, bytes = repair_one ~source ~dry_run e in
-          on_chunk ~chunk_key:e.Corruption.chunk_key ~store:e.Corruption.store
-            outcome;
           let acc = { acc with checked = acc.checked + 1 } in
+          on_chunk ~done_:acc.checked ~total ~chunk_key:e.Corruption.chunk_key
+            ~store:e.Corruption.store outcome;
           match outcome with
             | Repaired _ ->
                 {

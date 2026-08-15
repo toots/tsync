@@ -94,7 +94,8 @@
   list-corrupted
   corrupted: 1
     cba685e06d3e500f-293331628d03f29b on backend2
-  FIXED cba685e06d3e500f-293331628d03f29b on backend2 (from backend)
+  repair: 1 marked
+  [1/1] FIXED cba685e06d3e500f-293331628d03f29b on backend2 (from backend)
   repair: 1 checked, 1 repaired, 0 cleared, 0 lost
   corrupted: 0
 --- tree
@@ -121,8 +122,9 @@
   repair
   rescan-corrupted
   list-corrupted
-  LOST  cba685e06d3e500f-293331628d03f29b on backend (no store holds these bytes)
-  LOST  cba685e06d3e500f-293331628d03f29b on backend2 (no store holds these bytes)
+  repair: 2 marked
+  [1/2] LOST  cba685e06d3e500f-293331628d03f29b on backend (no store holds these bytes)
+  [2/2] LOST  cba685e06d3e500f-293331628d03f29b on backend2 (no store holds these bytes)
   repair: 2 checked, 0 repaired, 0 cleared, 2 lost
   corrupted: 2
     cba685e06d3e500f-293331628d03f29b on backend

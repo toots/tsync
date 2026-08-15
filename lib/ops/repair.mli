@@ -49,11 +49,25 @@ module Make (C : Conf.S) : sig
       one store is wrong, and a fan-out write would re-send the chunk to healthy
       ones and queue deferred jobs for them.
 
+      [on_start] fires once the marked chunks are known and before the first is
+      read, and [on_chunk] carries the position within that total. A repair is a
+      chunk-sized read and write apiece against a remote store, so a run over a
+      store that took real damage is long and almost entirely waiting: without a
+      count, a caller has no way to tell work in progress from a stall, which is
+      the same thing it could not tell about the sweep that found the damage.
+
       Raises [Failure] on a read-only domain. *)
   val run :
     ?source:string ->
     ?dry_run:bool ->
-    ?on_chunk:(chunk_key:string -> store:string -> outcome -> unit) ->
+    ?on_start:(total:int -> unit) ->
+    ?on_chunk:
+      (done_:int ->
+      total:int ->
+      chunk_key:string ->
+      store:string ->
+      outcome ->
+      unit) ->
     unit ->
     stats Lwt.t
 end
