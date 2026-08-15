@@ -53,8 +53,7 @@ def test_a_scrambled_body_is_filed(store_and_verify):
     st, verify = store_and_verify
     body = b"hello world" * 100
     path, key = chunk_path("d", body, verify)
-    # Same length, different bytes: what a size comparison cannot see, and what
-    # the write-after-use bug in 82abb72 actually produced.
+    # Same length, different bytes: what a size comparison cannot see.
     st.put_bytes(path, bytes(b ^ 0xFF for b in body))
 
     assert verify.verify_object(st, path) is False
@@ -163,7 +162,6 @@ def test_a_job_sweeps_its_shard(store_and_verify):
         assert verify.job_target(job) == f"tsync/d/chunks/{key[:3]}/"
         st.put_bytes(job, b"")
         verify.verify_key(st, job)
-        # The request is gone once the shard is done.
         assert not st.exists(job)
 
     marked = list(st.list_keys("tsync/corrupted/d/"))

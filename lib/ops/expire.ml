@@ -35,9 +35,8 @@ module Make (C : Conf.S) = struct
       (fun acc _rel entry -> Lwt.return (entry.Inode_tree.bkey :: acc))
       acc
 
-  (* One named folder, now. Reaching a folder trashed today through {!expire}
-     takes a cutoff of now, and that same cutoff governs versions and the
-     journal — so the domain's whole history would go with it. *)
+  (* One named folder whatever its age: {!expire} selects by cutoff, and that
+     one cutoff governs versions and the journal too. *)
   let purge_trashed ?(on_delete = fun ~name:_ ~deleted:_ -> ()) ~path () =
     let* trash =
       B.list_prefix ~prefix:(C.domain_prefix ^ Folder.trash_id ^ "/") ()

@@ -1,11 +1,11 @@
 # ── Chunk verification ─────────────────────────────────────────────────────
 #
-# A chunk's key is the hash of its bytes, so a stored chunk can be checked
-# against nothing but itself. This runs on the bucket's own object-created
-# event, one object per invocation, and files what fails under the domain's
-# corrupted/ prefix. Clients list that prefix with the credentials they already
-# have; no client ever calls this function, and no chunk body leaves the region
-# to be checked.
+# Holds each stored chunk against its own name, on the bucket's own
+# object-created event, one object per invocation, filing what fails under
+# tsync/corrupted/.
+#
+# No client calls this and no chunk body leaves the region to be checked:
+# clients list that prefix with the credentials they already have.
 #
 # Same zip as the share function, different entry point (verify.handler).
 

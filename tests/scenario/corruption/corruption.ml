@@ -1,11 +1,8 @@
-(* A stored chunk is named by the hash of its bytes, so every store can hold what
-   it takes against the name it arrived under. These are the daemon-level cases:
-   a real socket, a real backend, and damage done the way a bad write actually
-   arrives — through the store's own [put].
+(* The daemon-level cases: a real socket, a real backend, and damage written
+   through the store's own [put].
 
-   [scramble-remote-chunk] is same-length damage, which is the shape that
-   matters: the write-after-use bug in 82abb72 put a whole chunk under another
-   one's name, and every check that existed compared sizes. *)
+   [scramble-remote-chunk] is same-length damage, which is what a size
+   comparison cannot see. *)
 
 open Test_runner
 

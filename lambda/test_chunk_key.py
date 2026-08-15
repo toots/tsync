@@ -84,9 +84,8 @@ def test_streamed_matches_one_shot(name, h1, h2, key):
     so a hash that only agreed when fed in one piece would agree in the test and
     condemn the whole bucket in production."""
     body = body_for(name)
-    # Tiny steps only on small bodies: slicing 8 MiB one byte at a time is eight
-    # million slices for no coverage the boundary steps do not already give, and
-    # it dominated the CI job.
+    # Tiny steps only on small bodies: slicing 8 MiB one byte at a time adds no
+    # coverage the boundary steps do not already give.
     steps = [s for s in (1, 16, 240) if len(body) <= 4096] + [4096, 1048576]
     for step in steps:
         parts = [body[i:i + step] for i in range(0, len(body), step)] or [b""]

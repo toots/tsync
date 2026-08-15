@@ -40,16 +40,13 @@ type caps = {
           Asked of a domain's main directly rather than of the composite: it
           describes one store's machinery, not the domain's. *)
   verified : bool;
-      (** Whether every chunk this store takes is held against its own name —
-          see {!Corruption}. A [local] store does it as it writes, unless the
-          operator turned that off; an s3 or gcs store does it in a function the
-          bucket's own object-created event triggers, which the same terraform
-          that makes the bucket deploys, so it always answers [true].
+      (** Whether every chunk this store takes is held against its own name
+          ({!Corruption}): a [local] store as it writes unless that was turned
+          off, an s3 or gcs store in the function its bucket's object-created
+          event triggers.
 
-          Reported, not merely used, because the two ways of finding nothing are
-          not the same: a store that checks and finds no corruption is clean,
-          and one that never looked is unknown. A report that renders both as "0
-          corrupt" is the more dangerous of the two, having no way to say so. *)
+          Reported rather than merely used, because a store that looked and
+          found nothing and a store that never looked both list zero markers. *)
 }
 
 val no_caps : caps
@@ -107,19 +104,14 @@ module type S = sig
   val list_prefix :
     ?max_keys:int -> prefix:string -> unit -> file_entry list Lwt.t
 
-  (** Ask the store to check every chunk it holds against its own name, on its
-      own side, and file what fails under {!Chunk_layout.corrupted_prefix}. The
-      answer is how many units of work were queued, not a result: the checking
-      happens where the bytes are, and a client learns what came of it by
-      listing markers afterwards.
+  (** Ask the store to check every chunk it holds against its own name and file
+      what fails under {!Chunk_layout.corrupted_prefix}, answering how many
+      units of work were queued rather than what they found.
 
-      Optional, and [`Unsupported] is the useful half of that. A store with
-      nothing on its side to run this — a filesystem has no event source, an
-      http-proxy peer owns its own store — says so rather than pretending, and
-      the command asking for it fails instead of reporting a verification that
-      never happened. A filesystem's own sweep is [tsync gc --verify].
-
-      Reading every byte is what this costs, so it is never implicit. *)
+      A store with nothing on its side to run one — a filesystem has no event
+      source, an http-proxy peer owns its own store — answers [`Unsupported] so
+      the caller can fail rather than report a check that never happened; a
+      filesystem's own sweep is [tsync gc --verify]. *)
   val verify_all :
     chunk_prefix:string -> unit -> [ `Queued of int | `Unsupported ] Lwt.t
 

@@ -96,9 +96,8 @@ let () =
     (Chunk_layout.marker_key
        ("tsync/d/manifests/" ^ String.sub ck 0 3 ^ "/" ^ ck)
     = None);
-  (* The one asymmetry a review found between the two implementations: a marker
-     under an empty domain sits at a prefix nothing lists, because every reader
-     builds that prefix from a domain name. Both sides refuse it. *)
+  (* A marker under an empty domain would sit at a prefix nothing lists, every
+     reader building that prefix from a domain name; both sides refuse it. *)
   check "an empty domain is not a chunk key's home"
     (Chunk_layout.marker_key ("tsync//chunks/" ^ String.sub ck 0 3 ^ "/" ^ ck)
     = None);
