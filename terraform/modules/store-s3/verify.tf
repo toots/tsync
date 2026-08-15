@@ -102,10 +102,10 @@ resource "aws_lambda_permission" "verify_s3" {
 # including one another tool put there. Set manage_notifications = false to
 # leave the bucket's notifications alone, and wire verify_chunks yourself.
 #
-# The filter is what keeps this from recursing: markers land under
-# tsync/<domain>/corrupted/, outside every prefix below, so the function's own
-# writes cannot re-invoke it. verify.py's marker_key() refuses the same keys
-# independently, because a filter is configuration and that is not.
+# Markers land under tsync/corrupted/, inside the prefix below, so the function's
+# own writes come back to it. That terminates rather than loops: marker_key()
+# returns None for a marker, so the second invocation reads nothing and writes
+# nothing.
 resource "aws_s3_bucket_notification" "chunks" {
   count  = var.manage_notifications ? 1 : 0
   bucket = local.bucket_id
