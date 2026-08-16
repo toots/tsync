@@ -127,6 +127,7 @@
     chunk#1 b83135dd1a4fbfc7-decd6d509213b8a8 size=4
 
 === a partial write into a member the group has not staged
+  uploads paused
   write piece.txt "AAAAAAAA"
   chunks piece.txt
   write-at piece.txt @8 "bb"
@@ -135,6 +136,7 @@
   write-at piece.txt @18 "cc"
   chunks piece.txt
   read piece.txt [0,24)
+  uploads running
   drain
   chunks piece.txt
   chunks piece.txt staged size=8 slots=[] cached=1/1
@@ -148,7 +150,6 @@
 --- content
   piece.txt = "AAAAAAAAbb\000\000\000\000\000\000\000\000cc"
 --- backend
-  chunk 24fd18b0b1197417-02b6ce49b5452893 size=8
 
 === a truncate drops chunks from a group
   write cut.txt "AAAAAAAABBBBBBBBCCCCCCCCDDDDDDDDEEEEEEEEFFFFFFFF"

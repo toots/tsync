@@ -61,6 +61,7 @@ type step =
   | GcClose  (** Finish what [GcMark] left open. *)
   | GcAbort  (** Abandon an open collection, keeping everything. *)
   | Drain
+  | Uploads of [ `Paused | `Running ]
   | Sync
   | DeleteRemoteChunk of { path : string; index : int }
   | CorruptRemoteChunk of { path : string; index : int }
@@ -174,6 +175,8 @@ let rec render_step = function
   | GcClose -> "gc (close)"
   | GcAbort -> "gc --abort"
   | Drain -> "drain"
+  | Uploads `Paused -> "uploads paused"
+  | Uploads `Running -> "uploads running"
   | Sync -> "sync"
   | DeleteRemoteChunk { path; index } ->
       Printf.sprintf "delete-remote-chunk %s #%d" path index
@@ -725,6 +728,9 @@ let setup_client (module C : Conf.S) root staging_prefix =
         let* () = wait () in
         (* Move past the current ms so the next journal entry key is distinct. *)
         Lwt_unix.sleep 0.002
+    | Uploads state ->
+        Sq.set_paused (state = `Paused);
+        Lwt.return_unit
     (* One pass of the poller's algorithm without its timer. Nothing here is
        presenting a mount, so no changed key has anywhere to go. *)
     | Sync ->
