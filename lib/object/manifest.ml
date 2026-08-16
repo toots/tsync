@@ -424,8 +424,28 @@ module Make (C : Conf.S) = struct
      no in-process invalidation could catch. *)
   type memo_entry = { ino : int; size : int; mtime : float; manifest : t }
 
+  (* A memoised manifest holds the mapping it was read through, so the table
+     bounds live mappings rather than merely bytes: an import reads one sidecar
+     per file, and unbounded that is one mapping per file held for the life of
+     the process — 19,261 of them, 75 MB of pinned page cache, in the run that
+     found this.
+
+     Eviction is by insertion rather than by use, which costs nothing worth
+     measuring here: the walks that fill it touch each key once, and a dropped
+     entry is a re-read of a page the kernel still has. *)
+  let memo_capacity = 1024
   let memo : (string, memo_entry) Hashtbl.t = Hashtbl.create 256
+  let memo_order : string Queue.t = Queue.create ()
   let invalidate key = Hashtbl.remove memo key
+
+  let memoize key entry =
+    Hashtbl.replace memo key entry;
+    Queue.add key memo_order;
+    while Queue.length memo_order > memo_capacity do
+      Hashtbl.remove memo (Queue.pop memo_order)
+    done
+
+  let memo_size () = Hashtbl.length memo
 
   let read key =
     let p = path key in
@@ -444,7 +464,7 @@ module Make (C : Conf.S) = struct
             | _ -> (
                 match of_file p with
                   | manifest ->
-                      Hashtbl.replace memo key { ino; size; mtime; manifest };
+                      memoize key { ino; size; mtime; manifest };
                       Lwt.return_some manifest
                   | exception _ -> Lwt.return_none))
 

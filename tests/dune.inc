@@ -636,6 +636,14 @@
   (alias runtest)
   (action (run ./layout.exe))))
 
+(subdir unit/manifest_memo
+ (alias
+  (name default)
+  (deps manifest_memo_test.exe))
+ (rule
+  (alias runtest)
+  (action (run ./manifest_memo_test.exe))))
+
 (subdir unit/manifest_naming
  (alias
   (name default)

@@ -149,6 +149,12 @@ module Make (C : Conf.S) : sig
   (** [key]'s manifest, parsed and cached. [None] when absent or unparseable. *)
   val read : string -> t option Lwt.t
 
+  (** Manifests held from earlier reads. A cached one keeps the mapping it was
+      read through, so this counts live mappings rather than bytes, and it is
+      bounded. Exposed because that bound is invisible from {!read}, which
+      answers the same whether it was served from the cache or the file. *)
+  val memo_size : unit -> int
+
   (** Writes [t] under [key], recording the name [key] encodes. A caller cannot
       file a manifest under one name and have it record another. *)
   val write : string -> t -> unit Lwt.t
