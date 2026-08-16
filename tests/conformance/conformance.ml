@@ -72,6 +72,40 @@ let suite name (module B : Backend.S) =
     check "max_keys caps the listing" (List.length capped <= 1);
     Lwt.return_unit
   in
+  (* A body the size the product actually moves. Every other one here fits in a
+     single socket read, which is the one size at which framing, content-length
+     and reassembly cannot be wrong.
+
+     Compared by hash rather than as strings, because the point of a chunk is
+     that it never becomes one. *)
+  let* () =
+    let size = Conf.default_chunk_size in
+    let body =
+      let buffer = Chunk.create size in
+      (* Position-dependent, so a slice arriving twice, out of order or not at
+         all shows up; a constant fill survives all three. *)
+      for i = 0 to size - 1 do
+        Bigstringaf.unsafe_set buffer i (Char.chr (i * 31 land 0xff))
+      done;
+      Chunk.of_buffer buffer
+    in
+    let digest = Chunk.hash_hex body 0 in
+    let big = key "big" in
+    let* () = B.put ~key:big ~data:body () in
+    let* got = B.get ~key:big () in
+    check "a chunk-sized body comes back whole"
+      (Chunk.length got = size && Chunk.hash_hex got 0 = digest);
+    let* head = B.head_opt ~key:big () in
+    check "head_opt reports a chunk-sized object's size"
+      (match head with Some e -> e.Backend.size = size | None -> false);
+    (* A refused claim answers with the holder's body, so a chunk-sized one
+       comes back down the same path a get does. *)
+    let* held = B.put_if_absent ~key:big ~data:(Chunk.of_string "small") () in
+    check "a refused claim answers with the chunk-sized holder"
+      (Chunk.length held = size && Chunk.hash_hex held 0 = digest);
+    let* () = B.delete ~key:big () in
+    Lwt.return_unit
+  in
   (* The reason this file exists. *)
   let* () =
     let claim = key "claimed" in
