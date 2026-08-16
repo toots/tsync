@@ -115,6 +115,36 @@ module type S = sig
   val verify_all :
     chunk_prefix:string -> unit -> [ `Queued of int | `Unsupported ] Lwt.t
 
+  (** Hand a collection's unreferenced chunks to whatever this store has on its
+      side to delete them, rather than deleting them from here. Answers
+      [`Queued] having written a request its bucket's own notification delivers
+      — the function drops the chunks and derives the markers naming them, so
+      {!Gc} sends only the chunk keys.
+
+      [`Unsupported] from a store with no such function, which is every store
+      unless its bucket was deployed with one; {!Gc} then falls back to
+      {!delete_multi} and nothing about the collection changes. The gap between
+      "no opinion" and "cannot" matters more here than for {!verify_all}: a
+      store wrongly claiming this would leave keys on a copy for good, since
+      nothing walks a copy's own shards afterwards.
+
+      What lets {!Gc} discard the main straight after [`Queued] is that the
+      request is durably stored before this returns. Awaited, never detached —
+      a request that had not landed yet would put the collection back to
+      deleting the evidence before recording the instruction.
+
+      [run] and [name] identify the batch: {!Gc} passes the collection it
+      belongs to and the cursor it is about to save, so a re-run of an
+      interrupted flush overwrites its own request while a later collection
+      cannot overwrite one this collection left behind. *)
+  val discard :
+    chunk_prefix:string ->
+    run:string ->
+    name:string ->
+    keys:string list ->
+    unit ->
+    [ `Queued | `Unsupported ] Lwt.t
+
   (** What this store can tell a client about [prefix]'s domain. [prefix]
       identifies the domain, for backends that front several. *)
   val capabilities : prefix:string -> unit -> caps Lwt.t

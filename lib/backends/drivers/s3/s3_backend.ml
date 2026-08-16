@@ -9,10 +9,12 @@ type t = {
   endpoint : Aws_s3.Region.endpoint;
   unsigned_payload : bool;
   share_url : string option;
+  delete_function : bool;
 }
 
-let make_t ?endpoint ?(unsigned_payload = false) ?share_url ~bucket ~region
-    ~access_key_id ~secret_access_key () =
+let make_t ?endpoint ?(unsigned_payload = false) ?share_url
+    ?(delete_function = false) ~bucket ~region ~access_key_id
+    ~secret_access_key () =
   let credentials =
     Aws_s3.Credentials.make ~access_key:access_key_id
       ~secret_key:secret_access_key ()
@@ -23,7 +25,7 @@ let make_t ?endpoint ?(unsigned_payload = false) ?share_url ~bucket ~region
       | None -> Aws_s3.Region.of_string region
   in
   let endpoint = Aws_s3.Region.endpoint ~inet:`V4 ~scheme:`Https region in
-  { bucket; credentials; endpoint; unsigned_payload; share_url }
+  { bucket; credentials; endpoint; unsigned_payload; share_url; delete_function }
 
 let string_of_error = function
   | S3.Redirect _ -> "redirect"
@@ -230,11 +232,11 @@ let list_all t ?max_keys ~prefix () =
         Log.err "s3 ls %s: %s" prefix (string_of_error e);
         Lwt.fail (failed "ls" e)
 
-let make ?endpoint ?unsigned_payload ?share_url ~bucket ~region ~access_key_id
-    ~secret_access_key () : (module Backend.S) =
+let make ?endpoint ?unsigned_payload ?share_url ?delete_function ~bucket ~region
+    ~access_key_id ~secret_access_key () : (module Backend.S) =
   let t =
-    make_t ?endpoint ?unsigned_payload ?share_url ~bucket ~region ~access_key_id
-      ~secret_access_key ()
+    make_t ?endpoint ?unsigned_payload ?share_url ?delete_function ~bucket
+      ~region ~access_key_id ~secret_access_key ()
   in
   let put_text ~key ~data () = put_text t ~key ~data () in
   (module struct
@@ -257,6 +259,17 @@ let make ?endpoint ?unsigned_payload ?share_url ~bucket ~region ~access_key_id
           ~put:put_text ~chunk_prefix ()
       in
       `Queued n
+
+    (* Configured rather than assumed, unlike [verified] above: a bucket without
+       the function would take these requests and never act on them, and a
+       collection discards the main straight after. *)
+    let discard ~chunk_prefix ~run ~name ~keys () =
+      if not t.delete_function then Lwt.return `Unsupported
+      else
+        let+ () =
+          Discard_job.queue ~put:put_text ~chunk_prefix ~run ~name ~keys ()
+        in
+        `Queued
 
     (* No chunk size or concurrency opinion: an object store is limited by the
        network and its own concurrency, neither measurable from here.
@@ -322,6 +335,14 @@ let spec =
         default = Some "";
         secret = false;
       };
+      {
+        name = "deleteFunction";
+        label =
+          "Bucket runs the tsync function that consumes chunk-delete jobs?";
+        typ = `Bool;
+        default = Some "false";
+        secret = false;
+      };
     ]
 
 let () =
@@ -340,8 +361,11 @@ let () =
       let share_url =
         match get "shareUrl" with Some "" | None -> None | s -> s
       in
+      let delete_function =
+        Field_spec.bool ~default:false (get "deleteFunction")
+      in
       make ?endpoint:(get "endpoint") ?unsigned_payload ?share_url
-        ~bucket:(req get "bucket") ~region:(req get "region")
+        ~delete_function ~bucket:(req get "bucket") ~region:(req get "region")
         ~access_key_id:(req get "accessKeyId")
         ~secret_access_key:(req get "secretAccessKey")
         ())

@@ -126,6 +126,14 @@ module type S = sig
   val verify_all :
     chunk_prefix:string -> unit -> [ `Queued of int | `Unsupported ] Lwt.t
 
+  val discard :
+    chunk_prefix:string ->
+    run:string ->
+    name:string ->
+    keys:string list ->
+    unit ->
+    [ `Queued | `Unsupported ] Lwt.t
+
   (** What this store can tell a client about [prefix]'s domain beyond holding
       its bytes. See {!caps}; [no_caps] is the honest answer for every store
       that only holds bytes. *)
