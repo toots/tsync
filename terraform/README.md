@@ -8,7 +8,10 @@ Single point of entry for provisioning tsync S3 storage. Each **store** is:
 - the **share Lambda** behind a public Function URL that serves `tsync share`
   download links (assembles the file, or zips the folder, on first request and
   caches the result),
-- a **lifecycle rule** that expires cached share artifacts.
+- a **lifecycle rule** that expires cached share artifacts,
+- the **verify function**, triggered by the bucket's own object-created
+  notification, which holds each stored chunk against its own name and also
+  carries out the deletes a `tsync gc` hands it (see below).
 
 You can provision **several stores** — for multiple domains or redundant storage —
 from one `stores` map.
@@ -99,6 +102,46 @@ what the write IAM is scoped to, and what the lifecycle rule expires.
 When `create_bucket = true` the bucket is locked down (public access blocked,
 TLS-only bucket policy). When `false`, Terraform only reads the bucket and leaves
 its access settings alone.
+
+## The verify function, and chunk deletes
+
+One function serves three kinds of object, told apart by the key alone, because
+one notification is all a bucket gets: S3 rejects overlapping prefix filters, so
+the filter says `tsync/` and the code decides what it was handed.
+
+- a **chunk** is hashed and, if it is not what its name says, a marker is filed
+  under `tsync/corrupted/<domain>/`;
+- a **sweep request** under `tsync/verify-jobs/<domain>/<shard>`, written by
+  `tsync data-integrity --verify`, checks a whole shard;
+- a **delete request** under `tsync/gc-jobs/<domain>/<run>/<shard>`, written by
+  `tsync gc`, drops the chunks it names and the markers accusing them.
+
+The third is why the function's role can delete chunks. That grant is the
+ceiling on how wrong a malformed request can go, so it is as narrow as each
+cloud allows — `tsync/*/chunks/*` on AWS; on GCS an IAM condition, which offers
+no wildcard, matched with `extract` on the same shape. Narrower still is the
+function's own check: a request may only name keys under its *own* domain's
+chunk prefix, and anything else is logged and left alone.
+
+A request is deleted last and only when every key went, so a partial or failed
+run leaves it in the bucket. `tsync gc --status` lists what is outstanding.
+Nothing retries on its own — GCS runs the function with `DO_NOT_RETRY` and the
+Lambda has no dead-letter queue — so an outstanding request means a copy holding
+chunks nothing references, which is wasted space rather than lost data.
+
+Two things to keep in mind if you manage the bucket yourself:
+
+- with `manage_notifications = false` (AWS) the trigger is yours to wire, and it
+  must cover `tsync/gc-jobs/` as well as chunks and sweep requests. The
+  `delete_function` output reports `false` in that case, which is what tells a
+  client not to hand its deletes over;
+- no lifecycle rule you add through `extra_lifecycle_rules` may expire anything
+  under `tsync/gc-jobs/`: a request is the record of a delete that has been
+  promised and not yet made.
+
+Set `deleteFunction` on the tsync backend to opt in; `tsync config --edit`'s
+**Sync from Terraform** reads it from the `delete_function` output. Left off,
+`gc` deletes from the client exactly as it does for an unmanaged bucket.
 
 ## Custom domain (optional)
 

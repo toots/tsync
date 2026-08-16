@@ -403,7 +403,8 @@ Who does the checking depends on the store:
   throughput matters more than finding out early.
 - **`s3` and `gcs`** check in a function the bucket itself triggers on each new object, so the
   chunks are never downloaded to be checked. It comes with the Terraform module — nothing to
-  name, nothing to set on the client.
+  name, nothing to set on the client. The same function also carries out the deletes a `gc`
+  hands it; that half is opt-in, see `deleteFunction` in [§9](#9-versions-trash-and-cleanup).
 
 ```bash
 tsync data-integrity              # what each store found, and which stores nothing is checking
@@ -535,19 +536,32 @@ is what stops old blocks being referenced, but it does not remove them — `gc` 
 goes purely by whether anything still points at a block, with no notion of a date.
 
 They are separate commands because only some stores can do the second. `gc` reclaims by
-renaming the block directory aside, giving every block a live file still names a second hard
-link under the original name, and deleting what is left; the inodes nothing linked go with
-it. That needs a rename and a link inside the store, which a filesystem has and an object
-store does not — so `gc` runs on a **local main store** and says so plainly otherwise.
-`expire` works on every backend.
+renaming the block directory aside and moving every block a live file still names back under
+the original name; what is left behind is the garbage, named rather than worked out, and
+deleting it is the last step. That needs a rename inside the store, which a filesystem has
+and an object store does not — so `gc` runs on a **local main store** and says so plainly
+otherwise. `expire` works on every backend.
 
 Unlike the older single-command version, this is safe to run while machines are working. A
 client uploading a file whose blocks already exist promotes them before publishing, so a
 block cannot be reclaimed out from under an upload that deduplicated onto it. Replicas and
-backfill targets are never renamed: once the main is settled, each is walked shard by shard
-and whatever the main no longer has is deleted — so a remote store on cold storage sees
-deletes and nothing else. A replica is additionally filled where it falls short, being meant
-to be a complete copy.
+backfill targets are never renamed and never walked: each is simply sent the same keys the
+main is discarding, so a remote store on cold storage sees deletes and nothing else, and the
+cost is the garbage's rather than the layout's. Filling a copy that has fallen behind is
+`tsync mirror`'s job, not this one's.
+
+An `s3` or `gcs` copy deployed with the terraform in `terraform/` takes those deletes rather
+than performing them: `gc` writes the batch as a small request object, the bucket's own
+notification hands it to the same function that checks blocks, and the collection moves on
+without waiting. Set `deleteFunction` on that backend to turn it on — left off, the deletes
+are issued from the client exactly as they are for any other store, which is what a bucket
+you manage yourself should keep.
+
+A request only clears when the function runs. If one does not — no notification wired, the
+function failing — the copy keeps blocks nothing references: wasted space, not lost data, and
+`tsync mirror` clears it. `tsync gc` says so when it starts and `tsync gc --status` lists
+them, which is the only thing that will: the keys are already gone from the main, so no later
+collection meets them again.
 
 A collection over a large store takes a while, and can be spread over several sittings or
 paced to stay out of the way:
@@ -763,8 +777,8 @@ Every backend needs a `type`, a `name` (used by `mirror --source`) and a
 
 | `type` | Required fields | Optional | Notes |
 |---|---|---|---|
-| `s3` | `bucket`, `accessKeyId`, `secretAccessKey` | `region` (default `us-east-1`), `endpoint`, `shareUrl`, `unsignedPayload` | Also works with S3-compatible services (Backblaze B2, MinIO, …) via `endpoint`. |
-| `gcs` | `bucket`, `serviceAccountKey` | `endpoint`, `shareUrl` | `serviceAccountKey` is the service-account JSON itself, not a path to it. Blank only to reach an emulator anonymously, with `endpoint`. |
+| `s3` | `bucket`, `accessKeyId`, `secretAccessKey` | `region` (default `us-east-1`), `endpoint`, `shareUrl`, `unsignedPayload`, `deleteFunction` | Also works with S3-compatible services (Backblaze B2, MinIO, …) via `endpoint`. |
+| `gcs` | `bucket`, `serviceAccountKey` | `endpoint`, `shareUrl`, `deleteFunction` | `serviceAccountKey` is the service-account JSON itself, not a path to it. Blank only to reach an emulator anonymously, with `endpoint`. |
 | `local` | `path` | `verifyWrites` (default on) | A directory: another disk, a mounted NAS, anything the filesystem reaches. |
 | `http-proxy` | `url`, `secret` | — | Another machine running tsync with the `http-proxy` frontend — [step 7](#7-run-tsync-as-a-server-for-your-network). |
 
