@@ -58,6 +58,29 @@ class Store:
         and most chunks never had one."""
         self.s3.delete_object(Bucket=self.bucket, Key=key)
 
+    def delete_many(self, keys):
+        """Delete [keys], answering with the ones that refused.
+
+        A bulk delete answers 200 and reports per-key failures in the body, so
+        the request succeeding says nothing about the objects — the same trap
+        the OCaml driver documents. Absent is a success (the request may be a
+        redelivery, or a resumed collection repeating itself); anything else is
+        returned so the caller can leave the request in place.
+        """
+        refused = []
+        for i in range(0, len(keys), 1000):
+            batch = keys[i:i + 1000]
+            reply = self.s3.delete_objects(
+                Bucket=self.bucket,
+                Delete={"Objects": [{"Key": k} for k in batch], "Quiet": True},
+            )
+            refused += [
+                (e["Key"], e.get("Code", ""))
+                for e in reply.get("Errors", [])
+                if e.get("Code") not in ("NoSuchKey", "NotFound")
+            ]
+        return refused
+
     def list_keys(self, prefix):
         paginator = self.s3.get_paginator("list_objects_v2")
         for page in paginator.paginate(Bucket=self.bucket, Prefix=prefix):

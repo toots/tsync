@@ -191,3 +191,94 @@ def test_a_request_never_looks_like_a_chunk(store_and_verify):
     assert verify.job_target("tsync/verify-jobs/d/not-a-shard") is None
     # A domain with a space in it, which is a real one.
     assert verify.job_target("tsync/verify-jobs/Jellyfin Media/abc") == "tsync/Jellyfin Media/chunks/abc/"
+
+
+def gc_job(domain, run, shard):
+    return f"tsync/gc-jobs/{domain}/{run}/{shard}"
+
+
+def test_a_delete_request_drops_its_chunks_and_their_markers(store_and_verify):
+    """What closing a collection hands over: the chunk keys alone, with the
+    markers accusing them derived here rather than listed in the body."""
+    st, verify = store_and_verify
+    doomed = b"garbage" * 100
+    kept = b"still referenced" * 100
+    doomed_path, doomed_key = chunk_path("d", doomed, verify)
+    kept_path, _ = chunk_path("d", kept, verify)
+    st.put_bytes(doomed_path, doomed)
+    st.put_bytes(kept_path, kept)
+    marker = f"tsync/corrupted/d/{doomed_key[:3]}/{doomed_key}"
+    st.put_bytes(marker, b"{}")
+
+    job = gc_job("d", "1755300000000", doomed_key[:3])
+    st.put_bytes(job, doomed_path.encode())
+    assert verify.verify_key(st, job)["deleted"] == 1
+
+    assert not st.exists(doomed_path)
+    assert not st.exists(marker)
+    assert st.exists(kept_path)
+    # Deleted last, so a run that died partway would have left it behind.
+    assert not st.exists(job)
+
+
+def test_a_delete_request_may_not_name_another_domain(store_and_verify):
+    """The body is the only thing choosing what this deletes, so it is checked
+    against the requesting domain rather than trusted."""
+    st, verify = store_and_verify
+    body = b"someone else's chunk" * 10
+    theirs, _ = chunk_path("other", body, verify)
+    st.put_bytes(theirs, body)
+
+    job = gc_job("d", "1755300000000", "0ab")
+    st.put_bytes(job, theirs.encode())
+    assert verify.verify_key(st, job)["deleted"] == 0
+    assert st.exists(theirs)
+
+
+def test_a_delete_request_may_name_only_chunks(store_and_verify):
+    """A manifest is filed under the hash of its own name, so it is spelled
+    exactly like a chunk key: membership is the prefix, never the shape."""
+    st, verify = store_and_verify
+    key = verify.key_of_body([b"anything"])
+    off_limits = [
+        f"tsync/d/manifests/{key[:3]}/{key}",
+        f"tsync/d/chunks.from/{key[:3]}/{key}",
+        f"tsync/corrupted/d/{key[:3]}/{key}",
+        f"tsync/d/chunks/{key[:3]}/not-a-chunk-key",
+        "tsync/d/journal",
+    ]
+    for path in off_limits:
+        st.put_bytes(path, b"x")
+
+    job = gc_job("d", "1755300000000", "0ab")
+    st.put_bytes(job, "\n".join(off_limits).encode())
+    assert verify.verify_key(st, job)["deleted"] == 0
+    for path in off_limits:
+        assert st.exists(path), path
+
+
+def test_a_redelivered_delete_request_is_a_no_op(store_and_verify):
+    """Object events are at-least-once, so the same request arrives twice and
+    the second must not raise — a raise has S3 redeliver the whole batch."""
+    st, verify = store_and_verify
+    job = gc_job("d", "1755300000000", "0ab")
+    st.put_bytes(job, b"")
+    assert verify.verify_key(st, job)["deleted"] == 0
+    assert not st.exists(job)
+    assert verify.verify_key(st, job) == {"checked": 0, "corrupt": 0, "deleted": 0}
+
+
+def test_a_delete_request_never_looks_like_anything_else(store_and_verify):
+    """Three kinds of object reach one function, told apart by the key alone."""
+    st, verify = store_and_verify
+    key = verify.key_of_body([b"anything"])
+    job = gc_job("d", "1755300000000", "0ab")
+    assert verify.marker_key(job) is None
+    assert verify.job_target(job) is None
+    assert verify.gc_job_domain(f"tsync/d/chunks/{key[:3]}/{key}") is None
+    assert verify.gc_job_domain("tsync/verify-jobs/d/0ab") is None
+    # Without the run segment it is not one: a bare shard name would let a later
+    # collection overwrite a request an earlier one left unconsumed.
+    assert verify.gc_job_domain("tsync/gc-jobs/d/0ab") is None
+    assert verify.gc_job_domain("tsync/gc-jobs/d/1755300000000/zz") is None
+    assert verify.gc_job_domain(gc_job("Jellyfin Media", "1", "abc")) == "Jellyfin Media"

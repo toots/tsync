@@ -53,6 +53,27 @@ class Store:
         except NotFound:
             pass
 
+    def delete_many(self, keys):
+        """Delete [keys], answering with the ones that refused.
+
+        Concurrent single deletes rather than the batch API, whose size limits
+        and per-key error reporting are fiddlier than the pool already proven
+        here. Absent is a success, as it is for `delete`; anything else is
+        returned so the caller can leave the request in place.
+        """
+        refused = []
+
+        def drop(key):
+            try:
+                self.bucket.blob(key).delete()
+            except NotFound:
+                pass
+            except Exception as e:  # noqa: BLE001 - reported, not swallowed
+                refused.append((key, type(e).__name__))
+
+        self._parallel(drop, keys)
+        return refused
+
     def list_keys(self, prefix):
         for blob in self.client.list_blobs(self.bucket_name, prefix=prefix):
             yield blob.name
