@@ -41,6 +41,7 @@
   tsync_chunk
   tsync_backend_register
   tsync_log
+  bigstringaf
   yojson
   unix
   lwt

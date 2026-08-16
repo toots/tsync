@@ -39,11 +39,7 @@ module Make (C : Conf.S) = struct
   module Space = Chunk_space.Make (C)
   module B = (val C.store : Backend.S)
 
-  (* Asked per item: a clock read against a rename is nothing, and every coarser
-     unit here can take minutes. Returns whether it fired, so other once-a-second
-     work can hang off the same clock. *)
-  let report_interval = 1.
-  let last_report = ref neg_infinity
+  let pace = Pace.create ()
 
   (* How long the closing phase may go without recording where it got to. Longer
      than the reporting interval, a checkpoint costing a delete against every
@@ -51,14 +47,14 @@ module Make (C : Conf.S) = struct
      repeats is seconds of scanning. *)
   let checkpoint_interval = 5.
 
+  (* Answers whether it fired, so other once-a-second work can hang off the same
+     clock. *)
   let throttled f =
-    let now = Unix.gettimeofday () in
-    if now -. !last_report >= report_interval then begin
-      last_report := now;
-      f ();
-      true
-    end
-    else false
+    let fired = ref false in
+    Pace.fire pace (fun () ->
+        fired := true;
+        f ());
+    !fired
 
   (* Opening and closing a run are a rename and an [rm -rf] within the main's own
      directory, which is exactly what {!Backend.caps.gc} claims. *)
@@ -349,9 +345,9 @@ module Make (C : Conf.S) = struct
        per-object work inside one of those from [item_slots].
 
        One shared pool deadlocks the moment every slot is held by an outer unit
-       waiting for an inner one — the trap [Local_backend.list_prefix] documents,
-       and one this has fallen into more than once by naming pools after the
-       phase that happened to use them. *)
+       waiting for an inner one — the trap [Local_backend]'s walk bound
+       documents, and one this has fallen into more than once by naming pools
+       after the phase that happened to use them. *)
     unit_slots : Lwt_bounded.t;
     item_slots : Lwt_bounded.t;
     delete_batch : int;
@@ -988,14 +984,6 @@ module Make (C : Conf.S) = struct
     in
     go batch
 
-  let take n l =
-    let rec go acc n = function
-      | rest when n <= 0 -> (List.rev acc, rest)
-      | [] -> (List.rev acc, [])
-      | x :: rest -> go (x :: acc) (n - 1) rest
-    in
-    go [] n l
-
   (* Switching phases is a step of its own rather than something folded into the
      first shard, so a caller driving this can stop between marking and
      discarding and the boundary is observable. *)
@@ -1036,12 +1024,12 @@ module Make (C : Conf.S) = struct
          steps: a namespace is a listing plus every manifest in it, so a batch of
          them can run for minutes and overshoot a budget by that much. *)
       | Keep shards ->
-          let batch, rest = take (max 1 units) shards in
+          let batch, rest = Batch.take (max 1 units) shards in
           let* remaining = each s keep_one batch in
           s.work <- Keep (remaining @ rest);
           Lwt.return `More
       | Mark namespaces ->
-          let batch, rest = take (max 1 units) namespaces in
+          let batch, rest = Batch.take (max 1 units) namespaces in
           (* The cursor advances per namespace, not per batch: a namespace can be
              a folder's worth of manifests, so saving at the end of a batch means
              an interruption throws away hours of promoting.
@@ -1064,7 +1052,7 @@ module Make (C : Conf.S) = struct
          many shards the batch pools, so overlapping them buys little and makes
          the cursor mean less. *)
       | Close shards ->
-          let batch, rest = take (max 1 units) shards in
+          let batch, rest = Batch.take (max 1 units) shards in
           let* remaining = close_batch s batch in
           s.work <- Close (remaining @ rest);
           Lwt.return `More

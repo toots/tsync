@@ -112,37 +112,26 @@ module Make (C : Conf.S) = struct
      where they are already in that form. Held in a list until the end, they and
      the string they encode to grow with the tree rather than with what is in
      flight, which on a small machine is the largest thing the run keeps. *)
+  (* A journal entry is one JSON object per line, so an import records its ops
+     where they are already in that form. Held in a list until the end, they and
+     the string they encode to grow with the tree rather than with what is in
+     flight, which on a small machine is the largest thing the run keeps. *)
   module Spool = struct
-    type t = { path : string; out : Lwt_io.output_channel }
-
-    let create () =
-      let dir = Filename.concat C.cache_root "import" in
-      let* () = Fs_util.mkdir_p dir in
-      let path = Fs_util.temp_path (Filename.concat dir "journal") in
-      let+ out = Lwt_io.open_file ~mode:Lwt_io.Output path in
-      { path; out }
-
-    let add t ops = Lwt_io.write t.out (Journal.encode ops)
+    let dir = Filename.concat C.cache_root "import"
+    let create () = Spool.create ~dir ~name:"journal"
+    let add t ops = Spool.append t (Journal.encode ops)
 
     (* [src] is taken as finished: what it holds is only all of it once its own
        channel has been flushed. *)
     let append t src =
-      let* () = Lwt_io.close src.out in
-      Lwt_io.with_file ~mode:Lwt_io.Input src.path (fun ic ->
-          Lwt_io.write_chars t.out (Lwt_io.read_chars ic))
+      let* () = Spool.close src in
+      Spool.append_file t ~src:(Spool.path src)
 
-    let remove t =
-      let* () =
-        Lwt.catch (fun () -> Lwt_io.close t.out) (fun _ -> Lwt.return_unit)
-      in
-      Fs_util.unlink_quiet t.path
+    let remove t = Spool.drop t
+    let body t = Spool.seal t
 
-    (* [map_file] asks for a file nothing rewrites in place, which is what this
-       is once the channel behind it is closed. *)
-    let body t =
-      let* () = Lwt_io.close t.out in
-      let+ st = Lwt_unix.stat t.path in
-      Chunk.map_file ~path:t.path ~offset:0 ~len:st.Unix.st_size
+    (* A killed import leaves its spool behind with nothing else to reap it. *)
+    let reap () = Spool.reap ~dir
   end
 
   let tally summary = function
@@ -206,6 +195,7 @@ module Make (C : Conf.S) = struct
     let counts =
       ref { imported = 0; skipped = 0; skipped_symlinks = 0; failed = 0 }
     in
+    let* () = Spool.reap () in
     let* puts = Spool.create () in
     Lwt.finalize
       (fun () ->
