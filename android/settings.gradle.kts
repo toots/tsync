@@ -6,3 +6,4 @@ dependencyResolutionManagement {
 }
 rootProject.name = "tsync"
 include(":app")
+include(":core")
