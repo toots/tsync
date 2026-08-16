@@ -25,7 +25,7 @@ import java.util.UUID
  * documentId *is* the tsync storage key, verbatim and opaque — the same
  * identity the macOS File Provider uses, so it is stable across restarts with
  * no mapping table. Directories carry a trailing slash, matching
- * lib/ipc_handler/ipc_handler.ml.
+ * lib/daemon/ipc_handler/ipc_handler.ml.
  */
 class TsyncProvider : DocumentsProvider() {
 
@@ -34,8 +34,7 @@ class TsyncProvider : DocumentsProvider() {
     private val domain: String
         get() = Config.load(context!!)?.domain ?: "media"
 
-    /** tsync/<domain>/manifests/ — see Conf.domain_prefix. */
-    private val rootDocumentId get() = "tsync/$domain/manifests/"
+    private val rootDocumentId get() = Keys.root(domain)
 
     private lateinit var callbackThread: HandlerThread
     private lateinit var callbackHandler: Handler
@@ -185,8 +184,7 @@ class TsyncProvider : DocumentsProvider() {
             )
         }
 
-        val staging = File(context!!.filesDir, "staging").apply { mkdirs() }
-            .resolve(UUID.randomUUID().toString())
+        val staging = Ingest.newStaging(context!!)
         if (mode.contains("r")) {
             // Edit in place: start from the current contents, assembled straight
             // into the file the write will hand back.
@@ -207,12 +205,8 @@ class TsyncProvider : DocumentsProvider() {
                 Log.w(TAG, "write $documentId aborted: $error")
                 staging.delete()
             } else {
-                runCatching {
-                    // The daemon *renames* the staging file into the chunk store,
-                    // so it is gone afterwards — do not delete it here.
-                    Ipc.send(socket, "write",
-                        mapOf("path" to documentId, "staging" to staging.absolutePath))
-                }.onFailure { Log.w(TAG, "write $documentId: ${it.message}") }
+                runCatching { Ingest.commit(socket, documentId, staging) }
+                    .onFailure { Log.w(TAG, "write $documentId: ${it.message}") }
             }
         }
     }

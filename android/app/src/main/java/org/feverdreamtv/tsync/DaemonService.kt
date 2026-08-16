@@ -9,6 +9,7 @@ import android.content.Intent
 import android.os.IBinder
 import android.os.SystemClock
 import android.util.Log
+import org.feverdreamtv.tsync.backup.NetworkGate
 import java.io.File
 
 /**
@@ -26,6 +27,11 @@ class DaemonService : Service() {
         const val SETTLED_MS = 60_000L
         const val RESTART_DELAY_MS = 5_000L
         const val MAX_RESTARTS = 5
+
+        /** Android 15 stops a dataSync foreground service after roughly six
+         *  hours a day and refuses to start another until the next window, so
+         *  the service gives up the budget as soon as nothing is owed. */
+        const val IDLE_CHECK_MS = 60_000L
         private const val CHANNEL = "tsync-daemon"
         private const val NOTIFICATION_ID = 1
 
@@ -148,6 +154,20 @@ class DaemonService : Service() {
         return START_STICKY
     }
 
+    /**
+     * The platform's warning that this service's foreground budget is spent; it
+     * has seconds to comply before the process is killed as if it had crashed.
+     */
+    override fun onTimeout(startId: Int) = surrenderForeground()
+
+    override fun onTimeout(startId: Int, fgsType: Int) = surrenderForeground()
+
+    private fun surrenderForeground() {
+        Log.w(TAG, "foreground service timed out; stopping")
+        stopForeground(STOP_FOREGROUND_REMOVE)
+        stopSelf()
+    }
+
     private fun start() {
         val process = Runtime.getRuntime().exec(
             arrayOf(binary(this).absolutePath, "start"),
@@ -181,6 +201,34 @@ class DaemonService : Service() {
         Thread {
             process.errorStream.bufferedReader().forEachLine { Log.w(TAG, it) }
         }.start()
+        // The pause flag lives in the daemon's memory, so a restart forgets that
+        // uploads were being held back for a metered network.
+        Thread {
+            if (Daemon.awaitReady(this)) {
+                NetworkGate.apply(this)
+                watchForIdle()
+            }
+        }.start()
+    }
+
+    /**
+     * Gives the foreground budget back once nothing is owed.
+     *
+     * Android 15 stops a dataSync service after about six hours a day and
+     * refuses to start another until the window rolls over, so holding one open
+     * on an idle daemon spends the allowance that the next backup needs.
+     */
+    private fun watchForIdle() {
+        while (!stopping) {
+            Thread.sleep(IDLE_CHECK_MS)
+            val status = runCatching { Daemon.status(this) }.getOrNull() ?: continue
+            if (Daemon.isIdle(status)) {
+                Log.i(TAG, "queues are empty; releasing the foreground service")
+                stopForeground(STOP_FOREGROUND_REMOVE)
+                stopSelf()
+                return
+            }
+        }
     }
 
     override fun onDestroy() {

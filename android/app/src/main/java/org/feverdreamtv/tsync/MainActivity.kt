@@ -1,6 +1,7 @@
 package org.feverdreamtv.tsync
 
 import android.app.Activity
+import android.app.AlertDialog
 import android.content.Intent
 import android.graphics.Typeface
 import android.os.Build
@@ -13,11 +14,18 @@ import android.view.ViewGroup.LayoutParams.WRAP_CONTENT
 import android.widget.ArrayAdapter
 import android.widget.AutoCompleteTextView
 import android.widget.Button
+import android.widget.CheckBox
 import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
 import android.widget.Toast
+import org.feverdreamtv.tsync.backup.BackupPrefs
+import org.feverdreamtv.tsync.backup.BackupSchedule
+import org.feverdreamtv.tsync.backup.MediaAccess
+import org.feverdreamtv.tsync.backup.NetworkGate
+import org.feverdreamtv.tsync.backup.UploadRecords
+import org.feverdreamtv.tsync.backup.UploadState
 import kotlin.concurrent.thread
 
 /**
@@ -26,6 +34,10 @@ import kotlin.concurrent.thread
  * cannot drift from what the desktop reports.
  */
 class MainActivity : Activity() {
+
+    private companion object {
+        const val MEDIA_PERMISSIONS = 1
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -130,9 +142,129 @@ class MainActivity : Activity() {
                 addView(label("Cache limit"));   addView(cache)
                 addView(error)
                 addView(save)
+                addView(heading("Camera backup"))
+                backupControls().forEach { addView(it) }
             })
         })
     }
+
+    // ── Camera backup ────────────────────────────────────────────────────────
+
+    /**
+     * Says why nothing is moving as well as how much is left: a backup that has
+     * stalled and one that has finished look identical from a count alone.
+     */
+    private fun backupLine(): String {
+        val prefs = BackupPrefs(this)
+        if (!prefs.enabled) return "camera backup: off\n\n"
+
+        // Two different backlogs: what the daemon still owes the server, and
+        // what this device could not hand over and will try again.
+        val queued = runCatching { Daemon.pendingUploads(Daemon.status(this)) }.getOrDefault(0)
+        val stuck = UploadRecords(this).let { records ->
+            try {
+                records.countInState(UploadState.FAILED)
+            } finally {
+                records.close()
+            }
+        }
+        val owed = queued + stuck
+        // Selected-only is not a stall: the sweep runs and covers what it can
+        // see, so it is said as a limit on the backup rather than a reason it
+        // is not moving.
+        val holding = NetworkGate.blockedBecause(this)
+            ?: if (MediaAccess.level(this) == MediaAccess.Level.DENIED) {
+                "no access to photos"
+            } else null
+        val partial = MediaAccess.level(this) == MediaAccess.Level.SELECTED_ONLY
+
+        return buildString {
+            append("camera backup: ")
+            append(if (owed == 0) "up to date" else "$owed to upload")
+            holding?.let { append(" — $it") }
+            if (partial) append(" (only the photos you selected)")
+            prefs.lastOutcome?.let { append("\nlast sweep: $it") }
+            append("\n\n")
+        }
+    }
+
+    private fun backupControls(): List<View> {
+        val prefs = BackupPrefs(this)
+
+        val unmetered = checkBox("Only over wifi", prefs.unmeteredOnly) {
+            prefs.unmeteredOnly = it
+            if (prefs.enabled) BackupSchedule.enable(this)
+        }
+        val battery = checkBox("Not when the battery is low", prefs.whenBatteryOk) {
+            prefs.whenBatteryOk = it
+            if (prefs.enabled) BackupSchedule.enable(this)
+        }
+
+        val enabled = checkBox("Back up camera photos and videos", prefs.enabled) { on ->
+            prefs.enabled = on
+            if (on) askAboutExistingRoll(prefs) else BackupSchedule.disable(this)
+        }
+
+        val now = Button(this).apply {
+            text = "Back up now"
+            setOnClickListener {
+                if (!prefs.enabled) {
+                    toast("Turn camera backup on first")
+                } else {
+                    BackupSchedule.runNow(this@MainActivity)
+                    toast("Backing up…")
+                }
+            }
+        }
+
+        return listOf(enabled, unmetered, battery, now)
+    }
+
+    /**
+     * Asked once, when backup is switched on: a roll already on the phone is
+     * what someone enabling a backup usually means, and it is also the one run
+     * large enough to matter.
+     */
+    private fun askAboutExistingRoll(prefs: BackupPrefs) {
+        AlertDialog.Builder(this)
+            .setTitle("Photos already on this phone")
+            .setMessage("Back up the photos and videos already here, or only ones taken from now on?")
+            .setPositiveButton("Everything") { _, _ -> startBackup(prefs, backfill = true) }
+            .setNegativeButton("From now on") { _, _ -> startBackup(prefs, backfill = false) }
+            .setCancelable(false)
+            .show()
+    }
+
+    private fun startBackup(prefs: BackupPrefs, backfill: Boolean) {
+        if (!backfill) BackupSchedule.skipExistingRoll(this)
+        requestPermissions(MediaAccess.requested(), MEDIA_PERMISSIONS)
+    }
+
+    override fun onRequestPermissionsResult(
+        requestCode: Int,
+        permissions: Array<out String>,
+        grantResults: IntArray
+    ) {
+        if (requestCode != MEDIA_PERMISSIONS) return
+        when (MediaAccess.level(this)) {
+            MediaAccess.Level.DENIED ->
+                toast("tsync cannot back up photos without access to them")
+            MediaAccess.Level.SELECTED_ONLY ->
+                toast("Only the photos you selected will be backed up")
+            MediaAccess.Level.FULL -> Unit
+        }
+        if (MediaAccess.canRead(this)) BackupSchedule.enable(this)
+    }
+
+    private fun checkBox(text: String, checked: Boolean, onChange: (Boolean) -> Unit) =
+        CheckBox(this).apply {
+            this.text = text
+            isChecked = checked
+            setOnCheckedChangeListener { _, value -> onChange(value) }
+        }
+
+    private fun toast(text: String) =
+        Toast.makeText(this, text, Toast.LENGTH_LONG).show()
 
     // ── Status ───────────────────────────────────────────────────────────────
 
@@ -164,8 +296,9 @@ class MainActivity : Activity() {
                 if (DaemonService.syncRunning)
                     "full sync running — folders fill in as it walks\n\n"
                 else ""
+            val backup = backupLine()
             runOnUiThread {
-                output.text = syncing + text.ifBlank {
+                output.text = syncing + backup + text.ifBlank {
                     if (answering) "daemon is up but returned nothing"
                     else "daemon did not start — check `adb logcat -s tsyncd`"
                 }
