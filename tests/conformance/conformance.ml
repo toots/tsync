@@ -301,6 +301,64 @@ let verify_suite name fields =
           (Option.map (fun b -> Discard_job.decode (Chunk.to_string b)) body
           = Some doomed)
 
+(* The half a client cannot prove on its own: that something is listening.
+   Everything above shows a request object lands and reads back; only the
+   store's own notification and the function behind it turn one into a delete,
+   and neither is reachable from here except by writing one and watching.
+
+   Run only when the bucket is known to have a function deployed on it, because
+   a bucket without one would have this wait out its timeout and report a fault
+   where there is merely an absence. Told rather than probed: nothing a client
+   can ask distinguishes "no function" from "function is broken", which is the
+   whole reason this is worth having. *)
+let live_delete_suite name (module B : Backend.S) =
+  let open Lwt.Syntax in
+  match env (Printf.sprintf "TSYNC_CI_%s_VERIFY_FUNCTION" (String.uppercase_ascii name)) with
+    | None ->
+        Printf.printf
+          "    NOT RUN  the deployed function is not exercised\n\
+          \             (TSYNC_CI_%s_VERIFY_FUNCTION unset -- see \
+           scripts/setup_ci_secrets.sh)\n%!"
+          (String.uppercase_ascii name);
+        Lwt.return_unit
+    | Some fn ->
+        Printf.printf "    against the deployed function %s\n%!" fn;
+        let chunk_prefix = run_prefix ^ "chunks/" in
+        (* A real chunk, named the way one is: the function refuses anything
+           that is not shaped like a chunk key under the requesting domain, so a
+           made-up name would test the refusal rather than the delete. *)
+        let body = Chunk.of_string "conformance: a chunk to be collected" in
+        let key = Chunk_layout.key_of_body body in
+        let shard = String.sub key 0 Chunk_layout.fanout in
+        let doomed = chunk_prefix ^ shard ^ "/" ^ key in
+        let* () = B.put ~key:doomed ~data:body () in
+        let* here = B.head_opt ~key:doomed () in
+        check "the chunk to be collected is there to begin with" (here <> None);
+        let* answer =
+          B.discard ~chunk_prefix ~run:"0000000000001" ~name:shard
+            ~keys:[doomed] ()
+        in
+        check "the store took the request" (answer = `Queued);
+        (* Delivery is asynchronous and a cold function is slow, so this waits
+           rather than checks once -- and fails on expiry, a poll that gave up
+           quietly being worth nothing. *)
+        let deadline = Unix.gettimeofday () +. 180. in
+        let rec wait () =
+          let* still = B.head_opt ~key:doomed () in
+          if still = None then Lwt.return true
+          else if Unix.gettimeofday () > deadline then Lwt.return false
+          else
+            let* () = Lwt_unix.sleep 5. in
+            wait ()
+        in
+        let* gone = wait () in
+        check "the function dropped the chunk the request named" gone;
+        if not gone then
+          Printf.printf
+            "             nothing consumed it in 180s -- check the bucket's \
+             notification and the function's logs\n%!";
+        Lwt.return_unit
+
 (* Cleans up whatever the suite did not, including after a failure.
 
    Three prefixes beside [run_prefix], because sweep requests, delete requests
@@ -375,7 +433,8 @@ let () =
                    Lwt.catch
                      (fun () ->
                        Lwt.bind (suite name b) (fun () ->
-                           verify_suite name fields))
+                           Lwt.bind (verify_suite name fields) (fun () ->
+                               live_delete_suite name b)))
                      (fun exn ->
                        incr failures;
                        Printf.printf "    FAIL  %s raised: %s\n%!" name

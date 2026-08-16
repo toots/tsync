@@ -293,7 +293,46 @@ if [ $DRY_RUN = 0 ]; then
   fi
 fi
 
-# ----------------------------------------------------------------- secrets --
+# What makes the serverless half testable at all: without a function on the
+# bucket, a conformance run can prove a request object lands and nothing more.
+DEPLOYED_S3=0
+DEPLOYED_GCS=0
+if [ "$DEPLOY_FUNCTIONS" = 1 ]; then
+  say "Chunk verifier on the CI bucket(s)"
+
+  # The state bucket the real stack already uses, unless told otherwise -- a
+  # different prefix in it, never a different one of these.
+  if [ -z "$TF_STATE_BUCKET" ] && [ -f terraform/backend.hcl ]; then
+    TF_STATE_BUCKET=$(sed -n 's/^ *bucket *= *"\(.*\)"/\1/p' terraform/backend.hcl)
+  fi
+  [ -n "$TF_STATE_BUCKET" ] \
+    || die "no terraform state bucket: set TF_STATE_BUCKET, or run ./terraform/init.sh first"
+  info "state gs://$TF_STATE_BUCKET/$TF_STATE_PREFIX (never the deployment's own prefix)"
+
+  TF_ARGS="-var=gcs_bucket=$GCS_BUCKET -var=gcp_project=$GCP_PROJECT"
+  TF_ARGS="$TF_ARGS -var=gcp_region=$GCS_LOCATION -var=gcp_function_region=$GCS_LOCATION"
+  if [ $WANT_S3 = 1 ]; then
+    TF_ARGS="$TF_ARGS -var=s3_bucket=$S3_BUCKET -var=aws_region=$AWS_REGION"
+  fi
+
+  run "(cd terraform/ci && $TF init -input=false -reconfigure \
+        -backend-config=bucket=$TF_STATE_BUCKET \
+        -backend-config=prefix=$TF_STATE_PREFIX >/dev/null)"
+  run "(cd terraform/ci && $TF apply -input=false -auto-approve $TF_ARGS >/dev/null)"
+
+  if [ $DRY_RUN = 0 ]; then
+    # Read back rather than assumed: an apply that half succeeded would
+    # otherwise have CI told the function is there and every run fail on a
+    # timeout, which reads as the function being broken rather than absent.
+    out=$(cd terraform/ci && $TF output -json 2>/dev/null || echo '{}')
+    getout() { printf '%s' "$out" | python3 -c \
+      'import json,sys;d=json.load(sys.stdin);v=d.get(sys.argv[1],{}).get("value");print(v if v else "")' "$1"; }
+    [ -n "$(getout gcs_verify_function)" ] && DEPLOYED_GCS=1
+    [ -n "$(getout s3_verify_function)" ] && DEPLOYED_S3=1
+    info "gcs verifier: $([ $DEPLOYED_GCS = 1 ] && echo deployed || echo 'not deployed')"
+    info "s3 verifier:  $([ $DEPLOYED_S3 = 1 ] && echo deployed || echo 'not deployed')"
+  fi
+fi
 
 say "GitHub secrets on $REPO"
 if [ $DRY_RUN = 1 ]; then
@@ -303,12 +342,30 @@ else
   gh secret set TSYNC_CI_GCS_BUCKET -R "$REPO" --body "$GCS_BUCKET"
   gh secret set TSYNC_CI_GCS_SERVICE_ACCOUNT_KEY -R "$REPO" < "$WORK/gcs-key.json"
   info "TSYNC_CI_GCS_BUCKET, TSYNC_CI_GCS_SERVICE_ACCOUNT_KEY"
+  # Set from what the apply actually reported, and cleared when it reported
+  # nothing: a run that finds this set and the function absent fails on a
+  # timeout, which is the one failure that looks like a code fault and is not.
+  if [ $DEPLOYED_GCS = 1 ]; then
+    gh secret set TSYNC_CI_GCS_VERIFY_FUNCTION -R "$REPO" --body "tsync-verify-ci"
+    gh secret set TSYNC_CI_GCS_FUNCTION_REGION -R "$REPO" --body "$GCS_LOCATION"
+    info "TSYNC_CI_GCS_VERIFY_FUNCTION, TSYNC_CI_GCS_FUNCTION_REGION"
+  else
+    gh secret delete TSYNC_CI_GCS_VERIFY_FUNCTION -R "$REPO" >/dev/null 2>&1 || true
+    info "no gcs verifier deployed -- conformance will report that half not run"
+  fi
   if [ $WANT_S3 = 1 ]; then
     gh secret set TSYNC_CI_S3_BUCKET -R "$REPO" --body "$S3_BUCKET"
     gh secret set TSYNC_CI_S3_REGION -R "$REPO" --body "$AWS_REGION"
     gh secret set TSYNC_CI_S3_ACCESS_KEY_ID -R "$REPO" --body "$AK"
     gh secret set TSYNC_CI_S3_SECRET_ACCESS_KEY -R "$REPO" --body "$SK"
     info "TSYNC_CI_S3_BUCKET, _REGION, _ACCESS_KEY_ID, _SECRET_ACCESS_KEY"
+    if [ $DEPLOYED_S3 = 1 ]; then
+      gh secret set TSYNC_CI_S3_VERIFY_FUNCTION -R "$REPO" --body "tsync-verify-ci"
+      info "TSYNC_CI_S3_VERIFY_FUNCTION"
+    else
+      gh secret delete TSYNC_CI_S3_VERIFY_FUNCTION -R "$REPO" >/dev/null 2>&1 || true
+      info "no s3 verifier deployed -- conformance will report that half not run"
+    fi
   fi
 fi
 
@@ -339,6 +396,7 @@ if [ $WANT_S3 = 1 ]; then
   info "  TSYNC_CI_S3_REGION"
   info "  TSYNC_CI_S3_ACCESS_KEY_ID"
   info "  TSYNC_CI_S3_SECRET_ACCESS_KEY"
+  [ $DEPLOYED_S3 = 1 ] && info "  TSYNC_CI_S3_VERIFY_FUNCTION"
 else
   info "  (no S3 secrets -- set up the aws cli and re-run to add them)"
 fi

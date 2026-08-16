@@ -139,6 +139,12 @@ Two things to keep in mind if you manage the bucket yourself:
   under `tsync/gc-jobs/`: a request is the record of a delete that has been
   promised and not yet made.
 
+`deploy_share = false` deploys the verification half alone -- the verifier, its
+trigger and the client credentials, with no share function and no public
+endpoint. That is what `terraform/ci/` uses to give the conformance suite
+something real to trigger without standing up an unauthenticated URL over a
+test bucket.
+
 Set `deleteFunction` on the tsync backend to opt in; `tsync config --edit`'s
 **Sync from Terraform** reads it from the `delete_function` output. Left off,
 `gc` deletes from the client exactly as it does for an unmanaged bucket.

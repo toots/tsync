@@ -56,3 +56,25 @@ bucket and stored, so a failure part-way never leaves CI holding a revoked key.
 
 Needs `gh`, `gcloud` and `aws` logged in. Without the aws cli it does the GCS
 half and says so.
+
+## The chunk verifier on the CI buckets
+
+`setup_ci_secrets.sh` also deploys the chunk verifier onto the buckets it
+provisions, into terraform state of its own (`terraform/ci/`, prefix
+`tsync-ci`). Two of the things tsync leans on -- the whole-store sweep and the
+deletes `gc` hands over -- are a client writing an object and trusting a
+function to act on it, and nothing but a deployed function proves that wiring
+is there.
+
+It deploys the verification half alone (`deploy_share = false`), so no
+unauthenticated endpoint is stood up over a bucket whose credentials live in
+CI. The state prefix is never the deployment's own: an apply pointed at CI
+buckets with the real state is how real stores would be reached.
+
+`DEPLOY_FUNCTIONS=0` skips it, and so does having neither `tofu` nor
+`terraform` on the PATH. Conformance then reports that half as not run rather
+than failing, since a bucket with no stack is a legitimate setup.
+
+The function's code is whatever the last run of this script applied. After
+changing anything under `lambda/`, re-run it -- otherwise conformance exercises
+the previous code against the current wiring.
