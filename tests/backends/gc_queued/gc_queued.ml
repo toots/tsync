@@ -38,18 +38,18 @@ module Replica : Backend.S = struct
     `Queued
 end
 
-module C = (val Fixture.conf ~domain:"testdom" ~root ~verify_writes:false
-                  ~store:(module Main)
-                  ~members:
-                    [
-                      Backend.member ~role:"main" ~backend_type:"local"
-                        ~local_path:main_dir ~name:"main"
-                        (module Main);
-                      Backend.member ~role:"replica" ~backend_type:"s3"
-                        ~name:"replica"
-                        (module Replica);
-                    ]
-                  ())
+module C =
+  (val Fixture.conf ~domain:"testdom" ~root ~verify_writes:false
+         ~store:(module Main)
+         ~members:
+           [
+             Backend.member ~role:"main" ~backend_type:"local"
+               ~local_path:main_dir ~name:"main"
+               (module Main);
+             Backend.member ~role:"replica" ~backend_type:"s3" ~name:"replica"
+               (module Replica);
+           ]
+         ())
 
 module G = Gc.Make (C)
 
@@ -122,8 +122,7 @@ let () =
      check "the main is done with it" (not (List.mem (ck 2) main));
      (* The trade, stated rather than commented: the copy is still holding the
         garbage, and will until something consumes the request. *)
-     check "the copy still holds the reclaimed chunk"
-       (List.mem (ck 2) replica);
+     check "the copy still holds the reclaimed chunk" (List.mem (ck 2) replica);
      let* jobs = Disk.list_prefix ~prefix:jobs_prefix () in
      check "because the delete was handed over, not done" (jobs <> []);
 

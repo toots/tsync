@@ -37,6 +37,7 @@ type tally = {
 
 let counted () =
   { lists = 0; jobs = 0; puts = 0; markers = 0; heads = 0; copies = 0 }
+
 let main_ops = counted ()
 let replica_ops = counted ()
 

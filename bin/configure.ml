@@ -91,7 +91,7 @@ let tf_lookup root which store =
               let fields =
                 delete_function
                 @
-                match which with
+                  match which with
                   | `S3 -> (
                       let region = str "region" in
                       (if region = "" then [] else [("region", region)])

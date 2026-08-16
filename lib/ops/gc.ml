@@ -409,8 +409,7 @@ module Make (C : Conf.S) = struct
      not. Here rather than at each place that prints one, so the log line and
      [--status] cannot answer the same question differently. *)
   let show_age seconds =
-    if seconds < 3600. then
-      Printf.sprintf "%.0f minute(s) ago" (seconds /. 60.)
+    if seconds < 3600. then Printf.sprintf "%.0f minute(s) ago" (seconds /. 60.)
     else Printf.sprintf "%.0f hour(s) ago" (seconds /. 3600.)
 
   (* One listing per copy, off the collection path: a request still sitting here
@@ -436,7 +435,7 @@ module Make (C : Conf.S) = struct
             entries
         in
         if jobs = [] then None
-        else
+        else (
           let now = Unix.gettimeofday () in
           let oldest =
             List.fold_left
@@ -444,7 +443,7 @@ module Make (C : Conf.S) = struct
                 max acc (now -. e.Backend.last_modified))
               0. jobs
           in
-          Some (m.Backend.name, List.length jobs, oldest))
+          Some (m.Backend.name, List.length jobs, oldest)))
       (deferred_members ())
 
   let save s phase cursor =
@@ -520,7 +519,7 @@ module Make (C : Conf.S) = struct
        store is in continues from there: an interrupted rename is redone, an
        interrupted mark resumes at its cursor, an interrupted close at its
        shard. *)
-    match phase with
+      match phase with
       (* Abandoning first, and its override before any phase it overrides: a
          guard placed after the constructors it is meant to take precedence over
          never fires for them. *)

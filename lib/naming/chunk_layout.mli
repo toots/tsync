@@ -73,11 +73,10 @@ val gc_run_name : float -> string
     ["tsync/<domain>/chunks/"] yields [<domain>]. *)
 val domain_of : chunk_prefix:string -> string
 
-(** The shard a request names — either kind — and [None] for anything else
-    found under the prefix, which on a filesystem store means the directory it
-    filed one under and lists back. Counting one of those as a request
-    outstanding is a false alarm about the one thing that reports a copy nobody
-    is emptying. *)
+(** The shard a request names — either kind — and [None] for anything else found
+    under the prefix, which on a filesystem store means the directory it filed
+    one under and lists back. Counting one of those as a request outstanding is
+    a false alarm about the one thing that reports a copy nobody is emptying. *)
 val shard_of_job : string -> string option
 
 (** Where a marker for the chunk object at [key] belongs, [None] when [key]

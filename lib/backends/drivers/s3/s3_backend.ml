@@ -13,8 +13,8 @@ type t = {
 }
 
 let make_t ?endpoint ?(unsigned_payload = false) ?share_url
-    ?(delete_function = false) ~bucket ~region ~access_key_id
-    ~secret_access_key () =
+    ?(delete_function = false) ~bucket ~region ~access_key_id ~secret_access_key
+    () =
   let credentials =
     Aws_s3.Credentials.make ~access_key:access_key_id
       ~secret_key:secret_access_key ()
@@ -25,7 +25,14 @@ let make_t ?endpoint ?(unsigned_payload = false) ?share_url
       | None -> Aws_s3.Region.of_string region
   in
   let endpoint = Aws_s3.Region.endpoint ~inet:`V4 ~scheme:`Https region in
-  { bucket; credentials; endpoint; unsigned_payload; share_url; delete_function }
+  {
+    bucket;
+    credentials;
+    endpoint;
+    unsigned_payload;
+    share_url;
+    delete_function;
+  }
 
 let string_of_error = function
   | S3.Redirect _ -> "redirect"

@@ -129,9 +129,9 @@ module type S = sig
       nothing walks a copy's own shards afterwards.
 
       What lets {!Gc} discard the main straight after [`Queued] is that the
-      request is durably stored before this returns. Awaited, never detached —
-      a request that had not landed yet would put the collection back to
-      deleting the evidence before recording the instruction.
+      request is durably stored before this returns. Awaited, never detached — a
+      request that had not landed yet would put the collection back to deleting
+      the evidence before recording the instruction.
 
       [run] and [name] identify the batch: {!Gc} passes the collection it
       belongs to and the cursor it is about to save, so a re-run of an

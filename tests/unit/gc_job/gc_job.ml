@@ -26,7 +26,8 @@ let () =
   List.iter
     (fun domain ->
       let cp = chunk_prefix domain in
-      Printf.printf "prefix|%s|%s\n" domain (Chunk_layout.gc_jobs_prefix ~chunk_prefix:cp);
+      Printf.printf "prefix|%s|%s\n" domain
+        (Chunk_layout.gc_jobs_prefix ~chunk_prefix:cp);
       List.iter
         (fun started ->
           let run = Chunk_layout.gc_run_name started in
@@ -60,8 +61,7 @@ let () =
   List.iter
     (fun domain ->
       let key =
-        Chunk_layout.gc_job_key
-          ~chunk_prefix:(chunk_prefix domain)
+        Chunk_layout.gc_job_key ~chunk_prefix:(chunk_prefix domain)
           ~run:"1755300000000" "abb"
       in
       assert (Chunk_layout.marker_key key = None);
