@@ -85,6 +85,14 @@ type step =
       (** Wait for queued uploads to finish. Also puts the next journal entry in
           a later millisecond, keeping snapshots deterministic: entry keys are
           ms-timestamped and collide within one ms. *)
+  | Uploads of [ `Paused | `Running ]
+      (** Park the upload workers, or let them go again. A scenario that leaves
+          a write unsynced has to hold the queue rather than outrun it: how far
+          an upload got before a later write cancelled it is otherwise decided
+          by how fast the disk is, and the backend snapshot says so.
+
+          A paused queue still owes what is on it, so [Drain] only returns once
+          the scenario has let it run. *)
   | Sync
       (** Call [Sync_poller.sync_once]: read the journal, skip our own entries,
           apply any foreign entries — the same path the background poller takes.

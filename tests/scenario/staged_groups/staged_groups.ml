@@ -85,9 +85,10 @@ let scenarios : scenario list =
       name = "a partial write into a member the group has not staged";
       steps =
         [
-          (* No drain: the first chunk stays staged rather than becoming
-             inherited, so the group is one this file already owns a body for
-             and the second chunk is a hole inside it. *)
+          (* Held rather than drained: the first chunk stays staged rather than
+             becoming inherited, so the group is one this file already owns a
+             body for and the second chunk is a hole inside it. *)
+          Uploads `Paused;
           Write { path = "piece.txt"; content = "AAAAAAAA" };
           ShowChunks "piece.txt";
           (* Into the second chunk, but not all of it. *)
@@ -98,6 +99,7 @@ let scenarios : scenario list =
           WriteAt { path = "piece.txt"; offset = 18; content = "cc" };
           ShowChunks "piece.txt";
           ReadRange { path = "piece.txt"; offset = 0; len = 24 };
+          Uploads `Running;
           Drain;
           ShowChunks "piece.txt";
         ];
