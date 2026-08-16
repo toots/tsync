@@ -272,7 +272,7 @@ let verify_suite name fields =
   check "and each names a shard"
     (List.for_all
        (fun (e : Backend.file_entry) ->
-         Chunk_layout.shard_of_verify_job e.Backend.key <> None)
+         Chunk_layout.shard_of_job e.Backend.key <> None)
        queued)
 
 (* Cleans up whatever the suite did not, including after a failure.

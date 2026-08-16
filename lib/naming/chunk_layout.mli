@@ -53,12 +53,32 @@ val verify_jobs_prefix : chunk_prefix:string -> string
     shard is done. *)
 val verify_job_key : chunk_prefix:string -> string -> string
 
+(** Where a domain's discard requests are filed, beside {!verify_jobs_prefix}
+    and for the same reason. *)
+val gc_jobs_prefix : chunk_prefix:string -> string
+
+(** The request to drop one batch of chunks. Like {!verify_job_key} the bucket
+    is the queue, but the body carries the keys: a copy has no from-space of its
+    own to be pointed at, so the request has to say which ones.
+
+    Named by collection and then by cursor, so a repeated flush overwrites its
+    own request while a later collection reaching the same shard cannot
+    overwrite one an earlier collection left unconsumed. *)
+val gc_job_key : chunk_prefix:string -> run:string -> string -> string
+
+(** What a collection calls itself in {!gc_job_key}, from its start time. *)
+val gc_run_name : float -> string
+
 (** The domain a chunk prefix belongs to: its second path segment, so
     ["tsync/<domain>/chunks/"] yields [<domain>]. *)
 val domain_of : chunk_prefix:string -> string
 
-(** The shard a job names, [None] for anything else found under the prefix. *)
-val shard_of_verify_job : string -> string option
+(** The shard a request names — either kind — and [None] for anything else
+    found under the prefix, which on a filesystem store means the directory it
+    filed one under and lists back. Counting one of those as a request
+    outstanding is a false alarm about the one thing that reports a copy nobody
+    is emptying. *)
+val shard_of_job : string -> string option
 
 (** Where a marker for the chunk object at [key] belongs, [None] when [key]
     names something else. Pure surgery on a backend key: ["…/chunks/abb/<k>"]

@@ -592,6 +592,20 @@
   (action
    (diff folder_ids_test.expected folder_ids_test.output))))
 
+(subdir unit/gc_job
+ (alias
+  (name default)
+  (deps gc_job.exe))
+ (rule
+  (alias runtest)
+  (target gc_job.output)
+  (action
+   (with-stdout-to gc_job.output (ignore-stderr (run ./gc_job.exe)))))
+ (rule
+  (alias runtest)
+  (action
+   (diff gc_job.expected gc_job.output))))
+
 (subdir unit/glob
  (alias
   (name default)

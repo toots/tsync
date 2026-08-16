@@ -38,8 +38,9 @@ let chunks_seg = "/chunks/"
 (* Derived rather than spelled, so the store's own root lives in exactly one
    place ({!Conf_parsing.root_prefix}) and this cannot drift from it.
 
-   A domain named "corrupted" or "verify-jobs" would collide with these. Nothing
-   forbids it; it has simply never been worth a check against two words. *)
+   A domain named "corrupted", "verify-jobs" or "gc-jobs" would collide with
+   these. Nothing forbids it; it has simply never been worth a check against
+   three words. *)
 let store_root ~chunk_prefix =
   match String.index_opt chunk_prefix '/' with
     | Some i -> String.sub chunk_prefix 0 (i + 1)
@@ -47,6 +48,7 @@ let store_root ~chunk_prefix =
 
 let corrupted_root ~chunk_prefix = store_root ~chunk_prefix ^ "corrupted/"
 let verify_jobs_root ~chunk_prefix = store_root ~chunk_prefix ^ "verify-jobs/"
+let gc_jobs_root ~chunk_prefix = store_root ~chunk_prefix ^ "gc-jobs/"
 
 (* The domain a chunk prefix belongs to: ["tsync/<domain>/chunks/"] is the one
    shape this ever sees. *)
@@ -70,8 +72,23 @@ let verify_jobs_prefix ~chunk_prefix =
 let verify_job_key ~chunk_prefix shard =
   verify_jobs_prefix ~chunk_prefix ^ shard
 
-(* The shard a job names, or [None] for anything else under the prefix. *)
-let shard_of_verify_job key =
+let gc_jobs_prefix ~chunk_prefix =
+  gc_jobs_root ~chunk_prefix ^ domain_of ~chunk_prefix ^ "/"
+
+(* The collection is in the name, not only the cursor: a later collection
+   reaching the same shard would otherwise overwrite a request an earlier one
+   left unconsumed, losing both its keys and the evidence that it stuck. *)
+let gc_job_key ~chunk_prefix ~run name =
+  gc_jobs_prefix ~chunk_prefix ^ run ^ "/" ^ name
+
+(* Milliseconds, because a whole collection can begin and end inside one
+   second. *)
+let gc_run_name started = Printf.sprintf "%013.0f" (started *. 1000.)
+
+(* A filesystem store keeps the directory a consumed request was filed under and
+   lists it back, so what is asked is whether the leaf names a shard, not
+   whether the key sits under the prefix. *)
+let shard_of_job key =
   let leaf = Filename.basename key in
   if is_shard_name leaf then Some leaf else None
 
