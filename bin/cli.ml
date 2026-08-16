@@ -352,12 +352,36 @@ let reading_from name (module C : Conf.S) : (module Conf.S) =
       end : Backend.S)
   end : Conf.S)
 
+(* MEMTRACE names a directory, one file per process inside it: a daemon's
+   frontends and a command are several processes, and two of them inheriting one
+   trace fd drop about half their samples into a file that still reads clean,
+   neither saying which process allocated. Sampling defaults to 1e-6;
+   MEMTRACE_RATE raises it. *)
+let trace_process ~name =
+  match Sys.getenv_opt "MEMTRACE" with
+    | None | Some "" -> ()
+    | Some dir ->
+        if not (Sys.file_exists dir && Sys.is_directory dir) then
+          failwith (Printf.sprintf "MEMTRACE=%s is not a directory" dir);
+        let filename = Filename.concat dir (name ^ ".ctf") in
+        Unix.putenv "MEMTRACE" filename;
+        Memtrace.trace_if_requested ~context:name ();
+        Log.info "memory trace: %s" filename
+
 (* [Lwt_main.run] plus a drain: a command returns as soon as its work is posted
    and a deferred target fills in the background, so without this a short-lived
    command exits leaving copies for the daemon it may not be running alongside.
 *)
 let run_lwt p =
   let open Lwt.Syntax in
+  (* Named for the subcommand and the pid, so a folder imported one call at a
+     time leaves a trace per run rather than overwriting the last. *)
+  trace_process
+    ~name:
+      (Printf.sprintf "%s-%d"
+         (if Array.length Sys.argv > 1 then Filename.basename Sys.argv.(1)
+          else "tsync")
+         (Unix.getpid ()));
   Lwt_main.run
     (let* r = p in
      let+ () = Backend.drain () in
