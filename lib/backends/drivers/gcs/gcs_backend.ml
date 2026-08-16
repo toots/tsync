@@ -44,9 +44,12 @@ let upload_uri t key =
    for the life of the process. The deferred queue runs one worker, so that is
    every job behind it waiting, with nothing logged and no traffic to see.
 
-   [Lwt_unix.Timeout] classifies as transient, so it returns through the retry
-   below and says so in the log. *)
-let request_timeout = 300.
+   Measured against the connections that go this way: every one of them is
+   answered on the first retry, so waiting longer buys a caller nothing — the
+   connection is already gone by the second the request is made. Sixty seconds
+   against a link that answers in 150ms and would take about eight for a chunk
+   at its worst observed rate. *)
+let request_timeout = 60.
 
 let call t ~meth ?ctype ?(extra_headers = []) ?(body = Chunk.empty) uri =
   Lwt_unix.with_timeout request_timeout @@ fun () ->
