@@ -39,7 +39,17 @@ let upload_uri t key =
     (t.base ^ "/upload/storage/v1/b/" ^ t.bucket ^ "/o?uploadType=media&name="
    ^ enc_key key)
 
+(* Nothing below this bounds itself, and a response that never arrives — a
+   connection dropped without an EOF reaching us — otherwise parks its caller
+   for the life of the process. The deferred queue runs one worker, so that is
+   every job behind it waiting, with nothing logged and no traffic to see.
+
+   [Lwt_unix.Timeout] classifies as transient, so it returns through the retry
+   below and says so in the log. *)
+let request_timeout = 300.
+
 let call t ~meth ?ctype ?(extra_headers = []) ?(body = Chunk.empty) uri =
+  Lwt_unix.with_timeout request_timeout @@ fun () ->
   let* auth_header =
     match t.auth with
       | None -> Lwt.return []
