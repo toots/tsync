@@ -1,5 +1,5 @@
 (executable
  (flags
-  (:standard -open Tsync_naming))
+  (:standard -open Tsync_naming -open Tsync_test_harness))
  (name item_ref_test)
- (libraries tsync_naming))
+ (libraries tsync_test_harness tsync_naming))

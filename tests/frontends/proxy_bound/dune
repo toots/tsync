@@ -1,5 +1,16 @@
 (executable
  (flags
-  (:standard -open Tsync_backend_register -open Tsync_http_proxy_frontend))
+  (:standard
+   -open
+   Tsync_backend_register
+   -open
+   Tsync_http_proxy_frontend
+   -open
+   Tsync_test_harness))
  (name proxy_bound_test)
- (libraries tsync_backend_register tsync_http_proxy_frontend lwt lwt.unix))
+ (libraries
+  tsync_test_harness
+  tsync_backend_register
+  tsync_http_proxy_frontend
+  lwt
+  lwt.unix))

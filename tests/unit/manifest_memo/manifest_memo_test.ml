@@ -9,46 +9,22 @@
    nothing would satisfy a bound just as well as one that works. *)
 
 open Lwt.Syntax
+open Check
 
 let root = Filename.temp_dir "tsync-manifest-memo" ""
 let domain = "testdom"
-let failures = ref 0
-
-let check name ok =
-  if ok then Printf.printf "%s: ok\n%!" name
-  else begin
-    incr failures;
-    Printf.printf "%s: FAILED\n%!" name
-  end
 
 module Store =
   (val Backend.make ~backend_type:"local" ~get_field:(fun _ ->
            Some (Filename.concat root "store")))
 
-module C : Conf.S = struct
-  let versioning = false
-  let client_name = "test"
-  let domain_name = domain
-  let domain_prefix = "tsync/" ^ domain ^ "/manifests/"
-  let chunk_prefix = "tsync/" ^ domain ^ "/chunks/"
-  let versions_prefix = "tsync/" ^ domain ^ "/versions/"
-  let journal_prefix = "tsync/" ^ domain ^ "/journal/"
-  let cursor_key = "tsync/" ^ domain ^ "/cursor"
-  let shares_prefix = "tsync/shares/"
-  let store = (module Store : Backend.S)
-  let members = [Backend.member ~name:"local" store]
-  let cache_root = root
-  let data_dir = root
-  let socket_path = ""
-  let max_uploads = 1
-  let max_chunk_buffers = 1
-  let max_downloads = 1
-  let chunk_size = Some (8 * 1024 * 1024)
-  let cache_chunk_size = Some (8 * 1024 * 1024)
-  let max_cache = None
-  let symlink_policy = `Keep
-  let read_only = false
-end
+module C =
+  (val Fixture.conf ~domain
+         ~chunk_size:(8 * 1024 * 1024)
+         ~cache_chunk_size:(8 * 1024 * 1024)
+         ~store:(module Store : Backend.S)
+         ~cache_root:root ~data_dir:root ~root ()
+      : Conf.S)
 
 module Mf = Manifest.Make (C)
 
@@ -98,5 +74,5 @@ let () =
      check "an evicted key still reads"
        (match m with Some m -> m.Manifest.size = 5L | None -> false);
 
-     if !failures > 0 then exit 1;
+     report ();
      Lwt.return_unit)

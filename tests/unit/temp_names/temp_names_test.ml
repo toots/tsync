@@ -14,7 +14,7 @@
    A recogniser that is too narrow leaves scratch files lying around, which
    costs disk. One that is too wide eats user data. *)
 
-let case name = Printf.printf "\n=== %s\n" name
+open Check
 
 let show name =
   Printf.printf "  %-34s %s\n" name

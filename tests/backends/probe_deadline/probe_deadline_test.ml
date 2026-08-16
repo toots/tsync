@@ -15,20 +15,7 @@ let root = "/tmp/tsync-probe-deadline-test"
 (* Every call parks forever, so nothing here raises: a store that refuses is
    already covered elsewhere, and what is under test is the answer that never
    comes. *)
-module Hung : Backend.S = struct
-  let never () = fst (Lwt.wait ())
-  let put ~key:_ ~data:_ () = never ()
-  let put_if_absent ~key:_ ~data:_ () = never ()
-  let get ~key:_ () = never ()
-  let get_opt ~key:_ () = never ()
-  let head_opt ~key:_ () = never ()
-  let delete ~key:_ () = never ()
-  let delete_multi _ = never ()
-  let copy ~src_key:_ ~dst_key:_ () = never ()
-  let list_prefix ?max_keys:_ ~prefix:_ () = never ()
-  let verify_all ~chunk_prefix:_ () = Lwt.return `Unsupported
-  let capabilities ~prefix:_ () = Lwt.return Backend.no_caps
-end
+module Hung = Doubles.Hung
 
 module C : Conf.S = struct
   let versioning = false

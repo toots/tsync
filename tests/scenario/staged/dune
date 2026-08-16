@@ -14,9 +14,12 @@
    -open
    Tsync_conf
    -open
-   Tsync_local_backend))
+   Tsync_local_backend
+   -open
+   Tsync_test_harness))
  (name staged_test)
  (libraries
+  tsync_test_harness
   tsync_content
   tsync_object
   tsync_naming

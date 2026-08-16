@@ -4,14 +4,7 @@
    must come back as an error rather than take down the request. The forms also
    stay distinguishable from a logical key, both travelling in one protocol. *)
 
-let failures = ref 0
-
-let check name ok =
-  if ok then Printf.printf "%s: ok\n%!" name
-  else begin
-    incr failures;
-    Printf.printf "%s: FAILED\n%!" name
-  end
+open Check
 
 let () =
   check "the root has its own spelling" (Item_ref.parse "root" = `Root);

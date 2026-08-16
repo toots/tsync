@@ -1,5 +1,5 @@
 (executable
  (flags
-  (:standard -open Tsync_lwt_unix))
+  (:standard -open Tsync_lwt_unix -open Tsync_test_harness))
  (name bounded_test)
- (libraries tsync_lwt_unix lwt lwt.unix))
+ (libraries tsync_test_harness tsync_lwt_unix lwt lwt.unix))

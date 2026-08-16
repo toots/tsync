@@ -30,9 +30,12 @@
    -open
    Tsync_frontend
    -open
-   Tsync_http_proxy_frontend))
+   Tsync_http_proxy_frontend
+   -open
+   Tsync_test_harness))
  (name http_proxy_test)
  (libraries
+  tsync_test_harness
   tsync_field_spec
   tsync_store
   tsync_object
