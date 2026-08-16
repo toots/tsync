@@ -13,23 +13,15 @@
    large file, in bytes. *)
 
 open Lwt.Syntax
+open Check
 
 let chunk_size = 4096
 let cache_chunk_size = 4 * chunk_size
 let root = Filename.temp_dir "tsync-pulling" ""
 let backend_root = Filename.concat root "backend"
-let failures = ref 0
 
 (* [why] runs only on failure, so a passing run prints what the snapshot
    records. *)
-let check ?why name ok =
-  if ok then Printf.printf "%s: ok\n%!" name
-  else begin
-    incr failures;
-    match why with
-      | Some why -> Printf.printf "%s: FAILED -- %s\n%!" name (why ())
-      | None -> Printf.printf "%s: FAILED\n%!" name
-  end
 
 module C = struct
   let versioning = false
@@ -193,5 +185,7 @@ let () =
              (row.D.size = size));
 
      Printf.printf "\n%s\n"
-       (if !failures = 0 then "all ok" else Printf.sprintf "%d FAILED" !failures);
-     exit (if !failures = 0 then 0 else 1))
+       (if failures () = 0 then "all ok"
+        else Printf.sprintf "%d FAILED" (failures ()));
+     report ();
+     Lwt.return_unit)

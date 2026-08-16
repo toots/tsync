@@ -9,6 +9,7 @@
    look" must not reach a caller as "not there". *)
 
 open Lwt.Syntax
+open Check
 
 let root = Filename.temp_dir "tsync-fallback" ""
 let main_root = Filename.concat root "main"
@@ -16,20 +17,15 @@ let replica_root = Filename.concat root "replica"
 let archive_root = Filename.concat root "archive"
 let k name = "tsync/d/manifests/" ^ name
 
-module Down : Backend.S = struct
-  let fail () = Lwt.fail (Backend.Backend_error "down")
-  let put ~key:_ ~data:_ () = fail ()
-  let put_if_absent ~key:_ ~data:_ () = fail ()
-  let get ~key:_ () = fail ()
-  let get_opt ~key:_ () = fail ()
-  let head_opt ~key:_ () = fail ()
-  let delete ~key:_ () = fail ()
-  let delete_multi _ = fail ()
-  let copy ~src_key:_ ~dst_key:_ () = fail ()
-  let list_prefix ?max_keys:_ ~prefix:_ () = fail ()
-  let verify_all ~chunk_prefix:_ () = Lwt.return `Unsupported
-  let capabilities ~prefix:_ () = Lwt.return Backend.no_caps
-end
+module Down = Doubles.Down (struct
+  let why = "down"
+end)
+
+(* Distinguishable from [Down], so a report that names the wrong store is
+   visible rather than merely wrong. *)
+module Archive_down = Doubles.Down (struct
+  let why = "archive down"
+end)
 
 let sub name backend = { Domain_store.name; backend }
 
@@ -44,9 +40,6 @@ let readable name backend ~source:_ : (module Deferred.S) =
     let skip _ = false
     let stats () = { Deferred.queued = 0; in_flight = 0; degraded = false }
   end)
-
-let case name = Printf.printf "\n=== %s\n" name
-let step fmt = Printf.printf ("  " ^^ fmt ^^ "\n")
 
 (* One reporting shape for every read: which of the three outcomes a caller gets
    is the subject of this suite. *)
@@ -259,4 +252,19 @@ let () =
      step "list nothing/ on main = %s" r;
      let* r = listing dead_to_arc "tsync/d/manifests/" in
      step "list manifests/ with main unreachable = %s" r;
+
+     (* Which store the report names, when none of them could answer. The source
+        of truth is the one that should have held it, so its failure is the one
+        worth acting on; an archive's would send someone to the wrong machine. *)
+     case "every store unreachable: the main's failure is the one reported";
+     let all_dead =
+       Domain_store.make
+         ~mains:[sub "main" (module Down)]
+         ~targets:[]
+         ~archives:[sub "archive" (module Archive_down)]
+     in
+     let* r = get all_dead (k "nowhere") in
+     step "get nowhere = %s" r;
+     let* r = listing all_dead "tsync/d/manifests/" in
+     step "list manifests/ = %s" r;
      Lwt.return_unit)

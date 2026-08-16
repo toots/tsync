@@ -6,33 +6,11 @@ open Lwt.Syntax
 let root = "/tmp/tsync-pause-test"
 let store_dir = root ^ "/store"
 
-module C : Conf.S = struct
-  let versioning = false
-  let client_name = "test"
-  let domain_name = "testdom"
-  let domain_prefix = "tsync/testdom/manifests/"
-  let chunk_prefix = "tsync/testdom/chunks/"
-  let versions_prefix = "tsync/testdom/versions/"
-  let journal_prefix = "tsync/testdom/journal/"
-  let cursor_key = "tsync/testdom/cursor"
-  let shares_prefix = "tsync/shares/"
-
-  let store =
-    Backend.make ~backend_type:"local" ~get_field:(fun _ -> Some store_dir)
-
-  let members = [Backend.member ~name:"local" store]
-  let cache_root = root ^ "/cache"
-  let data_dir = root ^ "/data"
-  let socket_path = ""
-  let max_uploads = 2
-  let max_chunk_buffers = 2
-  let max_downloads = 2
-  let chunk_size = Some 8
-  let cache_chunk_size = Some 8
-  let max_cache = None
-  let symlink_policy = `Keep
-  let read_only = false
-end
+module C =
+  (val Fixture.conf ~max_uploads:2 ~max_downloads:2
+         ~store:(Fixture.local_store store_dir)
+         ~root ()
+      : Conf.S)
 
 module Sq = Sync_queue.Make (C)
 module J = Journal.Make (C)

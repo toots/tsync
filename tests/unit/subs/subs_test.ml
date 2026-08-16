@@ -7,17 +7,10 @@
    inspecting [Subs]. *)
 
 open Lwt.Syntax
+open Check
 
 let root = Filename.temp_dir "tsync-subs" ""
 let socket_path = Filename.concat root "tsync.sock"
-let failures = ref 0
-
-let check name ok =
-  if ok then Printf.printf "%s: ok\n%!" name
-  else begin
-    incr failures;
-    Printf.printf "%s: FAILED\n%!" name
-  end
 
 (* Answers "ping" and takes "subscribe <topic>" as the handover. *)
 let handler line =

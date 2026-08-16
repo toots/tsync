@@ -12,6 +12,7 @@
    "a shard the main never had" a case at all. *)
 
 open Lwt.Syntax
+open Check
 
 let root = "/tmp/tsync-gc-targets-test"
 let main_dir = root ^ "/main"
@@ -76,9 +77,6 @@ module C : Conf.S = struct
 end
 
 module G = Gc.Make (C)
-
-let step fmt = Printf.printf ("  " ^^ fmt ^^ "\n")
-let case name = Printf.printf "\n=== %s\n" name
 
 (* "<h1>-<h2>", 16 hex each. Built so that [n] is the leading three characters,
    which is the shard ({!Chunk_layout.relative_path}). Numbering the low bits

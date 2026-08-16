@@ -17,6 +17,7 @@
    All three are about counts, not outcomes, so they are what this counts. *)
 
 open Lwt.Syntax
+open Check
 
 let root = "/tmp/tsync-gc-cost-test"
 let main_dir = root ^ "/main"
@@ -133,8 +134,6 @@ end
 module G = Gc.Make (C)
 module Space = Chunk_space.Make (C)
 
-let step fmt = Printf.printf ("  " ^^ fmt ^^ "\n")
-let case name = Printf.printf "\n=== %s\n" name
 let ck n = Printf.sprintf "%03x%013x-%016x" n n n
 let folders = 12
 

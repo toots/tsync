@@ -8,6 +8,8 @@
    called for every chunk a manifest names, and most of those were just written to
    the surviving space. *)
 
+open Check
+
 let root = "/tmp/tsync-chunk-space-test"
 let store_dir = root ^ "/store"
 let chunk_prefix = "tsync/testdom/chunks/"
@@ -64,9 +66,6 @@ module Collectable =
 module Space = Chunk_space.Make (Collectable)
 module Frozen = Conf_of (Uncollectable)
 module Frozen_space = Chunk_space.Make (Frozen)
-
-let case name = Printf.printf "\n=== %s\n" name
-let step fmt = Printf.printf ("  " ^^ fmt ^^ "\n")
 
 (* A chunk key is "<h1>-<h2>", 16 hex each. Every one of these lands in shard
    [000], which is what this file wants: it is about the two spaces, and keeping

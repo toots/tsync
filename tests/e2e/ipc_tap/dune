@@ -1,5 +1,5 @@
 (executable
  (flags
-  (:standard -open Tsync_e2e))
+  (:standard -open Tsync_e2e -open Tsync_test_harness))
  (name ipc_tap_test)
- (libraries tsync_e2e yojson unix threads.posix))
+ (libraries tsync_test_harness tsync_e2e yojson unix threads.posix))

@@ -1,7 +1,9 @@
-a good upload is marked by nothing             ok
-and the store says it is checking              ok
-a scrambled body is filed under its key        ok
-the marker records what it hashed to instead   ok
-a marked chunk is re-uploaded, not deduped     ok
-and the good write clears the marker           ok
-no marker survives as an empty shard           ok
+a good upload is marked by nothing: ok
+and the store says it is checking: ok
+a scrambled body is filed under its key: ok
+the marker records what it hashed to instead: ok
+a marked chunk is re-uploaded, not deduped: ok
+and the good write clears the marker: ok
+no marker survives as an empty shard: ok
+
+7 check(s), 0 failure(s)

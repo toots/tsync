@@ -8,9 +8,12 @@
    -open
    Tsync_local_backend
    -open
-   Tsync_local_io))
+   Tsync_local_io
+   -open
+   Tsync_test_harness))
  (name claim)
  (libraries
+  tsync_test_harness
   tsync_chunk
   tsync_backend_register
   tsync_local_backend

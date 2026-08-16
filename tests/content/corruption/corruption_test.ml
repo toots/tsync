@@ -6,23 +6,12 @@
    marker appear at all. *)
 
 open Lwt.Syntax
+open Check
 
 let chunk_size = 4096
 let cache_chunk_size = chunk_size
 let root = Filename.temp_dir "tsync-corruption" ""
 let backend_root = Filename.concat root "backend"
-let failures = ref 0
-let ran = ref 0
-
-let check ?why name ok =
-  incr ran;
-  if ok then Printf.printf "%-46s ok\n%!" name
-  else begin
-    incr failures;
-    match why with
-      | Some why -> Printf.printf "%-46s FAILED -- %s\n%!" name (why ())
-      | None -> Printf.printf "%-46s FAILED\n%!" name
-  end
 
 (* Exit status is the whole assertion for a test with no snapshot, so a run that
    fell out early — an exception inside the Lwt chain, a fixture that never
@@ -135,8 +124,8 @@ let () =
      check "no marker survives as an empty shard"
        ~why:(fun () -> string_of_int (List.length report.Corruption.entries))
        (report.Corruption.entries = []));
-  if !ran <> expected_checks then begin
-    Printf.printf "only %d of %d checks ran\n" !ran expected_checks;
+  if checks () <> expected_checks then begin
+    Printf.printf "only %d of %d checks ran\n" (checks ()) expected_checks;
     exit 1
   end;
-  if !failures > 0 then exit 1
+  report ()

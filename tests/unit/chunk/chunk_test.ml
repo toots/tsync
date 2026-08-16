@@ -10,12 +10,7 @@
    The count printed at the end is what stops this file from passing while
    testing nothing: a case that stops running takes the total with it. *)
 
-let checks = ref 0
-
-let check name cond =
-  incr checks;
-  Printf.printf "%s: %s\n" name (if cond then "ok" else "FAIL");
-  if not cond then exit 1
+open Check
 
 let root = Filename.temp_dir "tsync-chunk" ""
 let path name = Filename.concat root name
@@ -127,6 +122,6 @@ let () =
   Lwt_main.run (Chunk.write_to ~path:p (Chunk.of_string body) ~offset:0);
   check "write_to" (read_file p = body);
 
-  Printf.printf "checks: %d\n" !checks;
+  Printf.printf "checks: %d\n" (checks ());
   (* A suite that stopped running its cases would otherwise report a clean pass. *)
-  assert (!checks = 13)
+  assert (checks () = 13)

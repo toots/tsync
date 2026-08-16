@@ -7,6 +7,7 @@
    that say nothing here. *)
 
 open Lwt.Syntax
+open Check
 
 let root = Filename.temp_dir "tsync-backfill" ""
 let main_root = Filename.concat root "main"
@@ -53,9 +54,6 @@ let chunk_keys data =
     | t -> List.init (Chunk_table.count t) (Chunk_table.key t)
     | exception _ -> []
 
-let case name = Printf.printf "\n=== %s\n" name
-let step fmt = Printf.printf ("  " ^^ fmt ^^ "\n")
-
 let keys_under root =
   let rec walk dir =
     Sys.readdir dir |> Array.to_list
@@ -79,20 +77,9 @@ let dump_target () =
     | [] -> print_endline "  (empty)"
     | ks -> List.iter (fun k -> Printf.printf "  %s\n" (label k)) ks
 
-module Down : Backend.S = struct
-  let fail () = Lwt.fail (Backend.Backend_error "down")
-  let put ~key:_ ~data:_ () = fail ()
-  let put_if_absent ~key:_ ~data:_ () = fail ()
-  let get ~key:_ () = fail ()
-  let get_opt ~key:_ () = fail ()
-  let head_opt ~key:_ () = fail ()
-  let delete ~key:_ () = fail ()
-  let delete_multi _ = fail ()
-  let copy ~src_key:_ ~dst_key:_ () = fail ()
-  let list_prefix ?max_keys:_ ~prefix:_ () = fail ()
-  let verify_all ~chunk_prefix:_ () = Lwt.return `Unsupported
-  let capabilities ~prefix:_ () = Lwt.return Backend.no_caps
-end
+module Down = Doubles.Down (struct
+  let why = "down"
+end)
 
 (* A plain {!Deferred.make}: a backfill target is the one reads never reach, and
    so has no use for the journal or cursor either. The composite and the target

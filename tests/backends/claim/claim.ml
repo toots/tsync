@@ -10,10 +10,9 @@
    the store. What is asserted is the contract they share. *)
 
 open Lwt.Syntax
+open Check
 
 let root = Filename.temp_dir "tsync-claim" ""
-let step fmt = Printf.printf ("  " ^^ fmt ^^ "\n")
-let case name = Printf.printf "\n=== %s\n" name
 
 let () =
   let (module B : Backend.S) =

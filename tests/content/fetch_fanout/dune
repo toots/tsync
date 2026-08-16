@@ -10,9 +10,12 @@
    -open
    Tsync_object
    -open
-   Tsync_conf))
+   Tsync_conf
+   -open
+   Tsync_test_harness))
  (name fetch_fanout_test)
  (libraries
+  tsync_test_harness
   tsync_chunk
   tsync_backend_register
   tsync_content

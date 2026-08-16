@@ -20,9 +20,12 @@
    -open
    Tsync_domain_store
    -open
-   Tsync_local_io))
+   Tsync_local_io
+   -open
+   Tsync_test_harness))
  (name gc_cost)
  (libraries
+  tsync_test_harness
   tsync_ops
   tsync_store
   tsync_object

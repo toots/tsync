@@ -14,15 +14,7 @@
    controlled rather than raced for. *)
 
 open Lwt.Syntax
-
-let failures = ref 0
-
-let check name ok =
-  if ok then Printf.printf "%s: ok\n%!" name
-  else begin
-    incr failures;
-    Printf.printf "%s: FAILED\n%!" name
-  end
+open Check
 
 let limit = 4
 

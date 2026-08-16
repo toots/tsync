@@ -12,9 +12,12 @@
    -open
    Tsync_local_backend
    -open
-   Tsync_local_io))
+   Tsync_local_io
+   -open
+   Tsync_test_harness))
  (name rename_listing_test)
  (libraries
+  tsync_test_harness
   tsync_object
   tsync_naming
   tsync_conf

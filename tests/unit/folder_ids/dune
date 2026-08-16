@@ -1,5 +1,20 @@
 (executable
  (flags
-  (:standard -open Tsync_naming -open Tsync_local_io -open Tsync_lwt_unix))
+  (:standard
+   -open
+   Tsync_naming
+   -open
+   Tsync_local_io
+   -open
+   Tsync_lwt_unix
+   -open
+   Tsync_test_harness))
  (name folder_ids_test)
- (libraries tsync_naming tsync_lwt_unix tsync_local_io lwt lwt.unix unix))
+ (libraries
+  tsync_test_harness
+  tsync_naming
+  tsync_lwt_unix
+  tsync_local_io
+  lwt
+  lwt.unix
+  unix))
