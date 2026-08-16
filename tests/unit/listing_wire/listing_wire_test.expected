@@ -1,0 +1,29 @@
+=== whatever the network does to the boundaries
+pieces of 1 byte(s) yield the same pages: ok
+pieces of 3 byte(s) yield the same pages: ok
+pieces of 7 byte(s) yield the same pages: ok
+pieces of 17 byte(s) yield the same pages: ok
+pieces of 64 byte(s) yield the same pages: ok
+pieces of 284 byte(s) yield the same pages: ok
+
+=== a blank line is not a page
+and is dropped rather than parsed: ok
+
+=== a stream that stops early
+is not mistaken for one that finished: ok
+
+=== a body that ends exactly on its terminator
+terminates: ok
+and leaves nothing buffered: ok
+
+=== a failure the status line could not carry
+the pages before it still arrive: ok
+the failure arrives as a line: ok
+and the stream is not terminated: ok
+
+=== a key that would break the framing if it could
+survives a key holding a newline, a tab and a quote: ok
+
+14 check(s), 0 failure(s)
+
+14 check(s), 0 failure(s)

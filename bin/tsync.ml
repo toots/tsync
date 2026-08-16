@@ -1102,59 +1102,65 @@ let sync_cmd =
          let use f = Lwt_pool.use pool f in
          let join rel name = if rel = "" then name else rel ^ "/" ^ name in
          let count = ref 0 and failed = ref 0 in
+         (* Entries of one folder, bounded; the descent below is sequential.
+            Recursing inside the fan-out instead would keep every level live at
+            once, so the peak is the whole tree rather than one directory — and
+            a second bound here would deadlock against this one. *)
+         let entry_slots = Lwt_bounded.create ~max:(max 1 parallelism) () in
          let rec walk folder_id rel =
            let* entries = use (fun () -> St.list_namespace ~folder_id) in
-           Lwt_list.iter_p
-             (fun (e : Backend.file_entry) ->
-               Lwt.catch
-                 (fun () ->
-                   let* next =
-                     use (fun () ->
-                         let* data = St.get_object ~bkey:e.key in
-                         match Folder.marker_of_string data with
-                           | Some m ->
-                               let child = join rel m.Folder.name in
-                               let+ () =
-                                 Folder_ids.write ~cache_root:C.cache_root
-                                   ~domain_name:C.domain_name child m
-                               in
-                               Some (m.Folder.id, child)
-                           | None -> (
-                               match Manifest.of_string data with
-                                 | man ->
-                                     incr count;
-                                     (* Read by backend key, which is hashed:
+           let* children =
+             Lwt_bounded.filter_map_with entry_slots
+               (fun (e : Backend.file_entry) ->
+                 Lwt.catch
+                   (fun () ->
+                     let* next =
+                       use (fun () ->
+                           let* data = St.get_object ~bkey:e.key in
+                           match Folder.marker_of_string data with
+                             | Some m ->
+                                 let child = join rel m.Folder.name in
+                                 let+ () =
+                                   Folder_ids.write ~cache_root:C.cache_root
+                                     ~domain_name:C.domain_name child m
+                                 in
+                                 Some (m.Folder.id, child)
+                             | None -> (
+                                 match Manifest.of_string data with
+                                   | man ->
+                                       incr count;
+                                       (* Read by backend key, which is hashed:
                                         the body is what names it. *)
-                                     let leaf = Manifest.recorded_name man in
-                                     if !verbose then
-                                       Log.info "manifest %s" (join rel leaf);
-                                     let+ () =
-                                       F.write_manifest
-                                         (C.domain_prefix ^ join rel leaf)
-                                         man
-                                     in
-                                     None
-                                 | exception parse_exn ->
-                                     (* Counted, so a store whose manifests all
+                                       let leaf = Manifest.recorded_name man in
+                                       if !verbose then
+                                         Log.info "manifest %s" (join rel leaf);
+                                       let+ () =
+                                         F.write_manifest
+                                           (C.domain_prefix ^ join rel leaf)
+                                           man
+                                       in
+                                       None
+                                   | exception parse_exn ->
+                                       (* Counted, so a store whose manifests all
                                         fail to parse cannot resync
                                         "successfully" writing nothing. *)
-                                     incr failed;
-                                     Log.warn
-                                       "resync %s: unreadable manifest: %s"
-                                       e.key
-                                       (match parse_exn with
-                                         | Chunk_table.Malformed m -> m
-                                         | ex -> Printexc.to_string ex);
-                                     Lwt.return_none))
-                   in
-                   match next with
-                     | Some (id, child) -> walk id child
-                     | None -> Lwt.return_unit)
-                 (fun exn ->
-                   incr failed;
-                   Log.warn "resync %s: %s" e.key (Printexc.to_string exn);
-                   Lwt.return_unit))
-             entries
+                                       incr failed;
+                                       Log.warn
+                                         "resync %s: unreadable manifest: %s"
+                                         e.key
+                                         (match parse_exn with
+                                           | Chunk_table.Malformed m -> m
+                                           | ex -> Printexc.to_string ex);
+                                       Lwt.return_none))
+                     in
+                     Lwt.return next)
+                   (fun exn ->
+                     incr failed;
+                     Log.warn "resync %s: %s" e.key (Printexc.to_string exn);
+                     Lwt.return_none))
+               entries
+           in
+           Lwt_list.iter_s (fun (id, child) -> walk id child) children
          in
          let+ () = walk Folder.root_id "" in
          (!count, !failed)
@@ -1570,27 +1576,43 @@ let mirror_cmd =
              vprintf "scanned %s: %d object%s to check" src objects
                (if objects = 1 then "" else "s")
            in
+           (* Every phase of a resync can run for minutes without a line of its
+              own — a namespace listing answers nothing until it is done — so
+              these go out by default rather than under -v, and to stderr, which
+              leaves stdout the copied keys and the summary. *)
+           let on_progress (p : Mirror.progress) =
+             let where =
+               match p.Mirror.total with
+                 | Some total when total > 0 ->
+                     Printf.sprintf "%d/%d (%d%%)" p.Mirror.done_ total
+                       (p.Mirror.done_ * 100 / total)
+                 | _ -> string_of_int p.Mirror.done_
+             in
+             Printf.eprintf "  %s %s: %s\n%!"
+               (Mirror.string_of_phase p.Mirror.phase)
+               p.Mirror.store where
+           in
            let on_copy ~name ~key ~reason ~bytes =
-             vprintf "  copied %s (%d bytes, %s) -> %s" key bytes
-               (match reason with
+             let why =
+               match reason with
                  | `Missing -> "missing"
-                 | `Wrong_size -> "wrong size")
-               name
+                 | `Wrong_size -> "wrong size"
+             in
+             if !verbose then
+               vprintf "  copied %s (%d bytes, %s) -> %s" key bytes why name
+             else Printf.printf "copied %s\n%!" key
            in
            let+ dests =
-             M.resync ~source:src ~scope ~on_scan ~on_list ~on_copy ()
+             M.resync ~source:src ~scope ~on_scan ~on_list ~on_progress ~on_copy
+               ()
            in
            List.iter
              (fun (dst : Mirror.dest_stats) ->
-               (* Under -v they are already logged live. *)
-               if not !verbose then
-                 List.iter (Printf.printf "copied %s\n") dst.Mirror.copied;
                Printf.printf
                  "%s -> %s: %d object%s checked, %d copied (%d bytes)\n" src
                  dst.Mirror.name dst.Mirror.checked
                  (if dst.Mirror.checked = 1 then "" else "s")
-                 (List.length dst.Mirror.copied)
-                 dst.Mirror.copied_bytes)
+                 dst.Mirror.copied dst.Mirror.copied_bytes)
              dests;
            0
          end)
@@ -2043,12 +2065,15 @@ let frontend_cmds () =
       match commands with
         | [] -> None
         | _ ->
+            (* [Term.(...)] opens a module with a [name] of its own, which would
+               otherwise shadow the frontend's. *)
+            let frontend_name = name in
             let subs =
               List.map
                 (fun (command : Frontend.command) ->
                   Cmd.v
                     (Cmd.info command.Frontend.verb ~doc:command.Frontend.doc)
-                    Term.(const (run name command) $ domain_arg))
+                    Term.(const (run frontend_name command) $ domain_arg))
                 commands
             in
             Some

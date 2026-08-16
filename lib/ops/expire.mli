@@ -36,8 +36,7 @@ module Make (C : Conf.S) : sig
 
       [name] is the namespace being worked on — "trash", "versions" or
       "journal". [on_list] fires before listing one, [on_scan] once its size is
-      known, and [on_delete] per batch of deletions with the running total,
-      listing being the part that cannot report progress from inside. *)
+      known, and [on_delete] per batch of deletions with the running total. *)
   val expire :
     ?on_list:(name:string -> unit) ->
     ?on_scan:(name:string -> objects:int -> unit) ->

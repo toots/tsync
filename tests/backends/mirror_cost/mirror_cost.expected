@@ -1,0 +1,42 @@
+
+=== filling two empty replicas
+  objects on the main: 64 chunks + 64 manifests
+  replica_a: 129 checked, 129 copied
+  replica_b: 129 checked, 129 copied
+  HEADs asked of replica_a: 1  <- one per object would be 128
+  HEADs asked of replica_b: 1  <- the cursor, and nothing else
+  listings of the main: 4 fold(s) over 65 page(s), 0 whole-namespace call(s)
+  listings of replica_a: 4 fold(s), 0 whole-namespace call(s)
+  bodies fetched from the main: 129  <- both replicas want all 128
+  objects written to replica_a: 129, to replica_b: 129
+
+=== a second run, with nothing to do
+  replica_a: 129 checked, 0 copied
+  replica_b: 129 checked, 0 copied
+  bodies fetched from the main: 0
+  objects written to the replicas: 0 and 0
+  HEADs asked of the replicas: 1 and 1  <- the diff decides, not the copies
+
+=== one chunk missing on replica_a alone
+  replica_a: 1 copied
+  replica_b: 0 copied
+  bodies fetched from the main: 1
+  written to replica_a: 1, to replica_b: 0  <- b was not behind
+
+=== an object of the wrong size on replica_b alone
+  replica_a: 0 copied
+  replica_b: 1 copied
+  bodies fetched from the main: 1
+  written to replica_a: 0, to replica_b: 1
+
+=== every phase says it is running
+  phases that reported: comparing, copying, listing
+  reports in total: 18
+  reports carrying a total: 5  <- listing has none to carry
+
+=== a scoped resync is not a namespace sweep
+  replica_a: 0 checked, 0 copied
+  replica_b: 0 checked, 0 copied
+  listings of the main during --path: 0 fold(s), 1 call(s)
+  listings of the replicas during --path: 0 and 0  <- a folder is not a namespace
+

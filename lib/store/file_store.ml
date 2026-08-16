@@ -65,8 +65,10 @@ module Make (C : Conf.S) = struct
           | Some _ | None -> None)
       all
     (* Callers apply entries in the order returned, and applying two ops out of
-       order diverges local state. Sorted here rather than trusted from the
-       backend: a filesystem backend lists in readdir order, which is arbitrary. *)
+       order diverges local state. {!Backend.S.list_prefix} already answers in
+       key order, which for these keys is {!Ek.compare} order — the month
+       directory is derived from the timestamp, and the timestamp is zero-padded
+       — so this only restates the guarantee against a store that broke it. *)
     |> List.sort Ek.compare
 
   let get_journal_entry entry_key =

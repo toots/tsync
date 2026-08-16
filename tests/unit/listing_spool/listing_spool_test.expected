@@ -1,0 +1,31 @@
+=== three pages in, one walk out
+  count 3000, first tsync/dom/chunks/000000, last tsync/dom/chunks/002999
+every record comes back: ok
+the walk agrees with the count: ok
+keys and sizes come back as written: ok
+
+=== a key repeated across a page boundary
+  a b c
+the repeat is dropped rather than counted twice: ok
+
+=== a key below its predecessor
+  Out_of_order spool=chunks on replica previous=c next=b
+a descending key raises rather than producing a wrong diff: ok
+
+=== an empty listing
+holds nothing: ok
+and is at its end immediately: ok
+
+=== comparison agrees with the order stores list in
+the spool took them as already ascending: ok
+compare matches String.compare on every pair: ok
+
+=== directory markers
+  b/
+a trailing slash is read off the mapping: ok
+
+=== the file is gone, the mapping is not
+  3000 record(s) still readable, last tsync/dom/chunks/002999
+an unlinked spool still serves the bytes it was mapped from: ok
+
+11 check(s), 0 failure(s)
