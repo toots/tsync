@@ -77,7 +77,7 @@ jobs:
       - name: Build the APK
         env:
           BUILD_NUMBER: ${{ github.run_number }}
-        run: ./gradlew assembleDebug
+        run: ./gradlew assembleDebug -PrequireDaemon
         working-directory: android
       - name: Name the artifact
         run: |
