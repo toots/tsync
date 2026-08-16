@@ -9,16 +9,9 @@
    quiet, or the warning would mean nothing. *)
 
 open Lwt.Syntax
+open Check
 
-let root = Filename.temp_dir "tsync-queue-stall" ""
-let failures = ref 0
-
-let check name ok =
-  if ok then Printf.printf "%s: ok\n%!" name
-  else begin
-    incr failures;
-    Printf.printf "%s: FAILED\n%!" name
-  end
+let root = Scratch.dir "queue-stall"
 
 module Q = Durable_queue.Make (struct
   type t = string
@@ -74,5 +67,5 @@ let () =
      check "and still reports them as merely queued"
        ((Q.stats stuck_q).Durable_queue.queued > 0);
 
-     if !failures > 0 then exit 1;
+     report ();
      Lwt.return_unit)

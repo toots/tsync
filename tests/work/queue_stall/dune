@@ -1,5 +1,20 @@
 (executable
  (flags
-  (:standard -open Tsync_work -open Tsync_log -open Tsync_local_io))
+  (:standard
+   -open
+   Tsync_work
+   -open
+   Tsync_log
+   -open
+   Tsync_local_io
+   -open
+   Tsync_test_harness))
  (name queue_stall)
- (libraries tsync_work tsync_log tsync_local_io lwt lwt.unix unix))
+ (libraries
+  tsync_test_harness
+  tsync_work
+  tsync_log
+  tsync_local_io
+  lwt
+  lwt.unix
+  unix))

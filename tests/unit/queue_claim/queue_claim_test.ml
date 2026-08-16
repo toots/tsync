@@ -21,8 +21,9 @@ module Q = Durable_queue.Make (J)
 (* The snapshot carries the verdict, so everything that decides one is a line on
    stdout: a status the rule reads instead would fail the run before the diff,
    with whatever it was about on the stderr the rule discards. *)
-let check name ok =
-  Printf.printf "%s: %s\n%!" name (if ok then "ok" else "FAILED")
+(* [Check.report] is deliberately not called: the exit status must stay zero so
+   the diff is what fails, carrying what it was about. *)
+open Check
 
 (* Waits for the state, not for a duration: a fixed sleep is a race a loaded
    machine loses, and the snapshot then differs for reasons that have nothing to
@@ -37,16 +38,6 @@ let await ?(timeout = 10.) cond =
       loop ()
   in
   loop ()
-
-let rec rm_rf path =
-  match Sys.is_directory path with
-    | true ->
-        Array.iter
-          (fun name -> rm_rf (Filename.concat path name))
-          (Sys.readdir path);
-        Unix.rmdir path
-    | false -> Sys.remove path
-    | exception _ -> ()
 
 let held_marker dir = Filename.concat dir ".held"
 
@@ -146,9 +137,10 @@ let () =
             try ignore (Unix.waitpid [] child) with _ -> ()
           end
         in
-        (try Fun.protect ~finally:kill_child (fun () ->
-                 Lwt_main.run (run ~dir ~kill_child ()))
+        (try
+           Fun.protect ~finally:kill_child (fun () ->
+               Lwt_main.run (run ~dir ~kill_child ()))
          with exn ->
            Printf.printf "unexpected error: %s\n%s%!" (Printexc.to_string exn)
              (Printexc.get_backtrace ()));
-        rm_rf root
+        Scratch.cleanup root
