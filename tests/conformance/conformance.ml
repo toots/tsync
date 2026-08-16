@@ -15,16 +15,7 @@
    of its own, so concurrent runs cannot collide and a run cleans up after
    itself. Nothing here touches a domain. *)
 
-let failures = ref 0
-let checks = ref 0
-
-let check name ok =
-  incr checks;
-  if ok then Printf.printf "    ok    %s\n%!" name
-  else begin
-    incr failures;
-    Printf.printf "    FAIL  %s\n%!" name
-  end
+open Check
 
 let env name = match Sys.getenv_opt name with Some "" | None -> None | v -> v
 
@@ -36,9 +27,8 @@ let run_prefix =
 
 let suite name (module B : Backend.S) =
   let open Lwt.Syntax in
-  Printf.printf "\n  %s\n%!" name;
   let key s = run_prefix ^ s in
-  let* () =
+  let round_trip () =
     let* () = B.put ~key:(key "a") ~data:(Chunk.of_string "alpha") () in
     let* got = B.get ~key:(key "a") () in
     check "put then get returns what was written" (Chunk.to_string got = "alpha");
@@ -53,13 +43,13 @@ let suite name (module B : Backend.S) =
     check "head_opt of an absent key is None" (head = None);
     Lwt.return_unit
   in
-  let* () =
+  let copying () =
     let* () = B.copy ~src_key:(key "a") ~dst_key:(key "b") () in
     let* got = B.get ~key:(key "b") () in
     check "copy duplicates the body" (Chunk.to_string got = "alpha");
     Lwt.return_unit
   in
-  let* () =
+  let listing () =
     let* entries = B.list_prefix ~prefix:run_prefix () in
     let keys =
       List.map (fun (e : Backend.file_entry) -> e.Backend.key) entries
@@ -78,7 +68,7 @@ let suite name (module B : Backend.S) =
 
      Compared by hash rather than as strings, because the point of a chunk is
      that it never becomes one. *)
-  let* () =
+  let chunk_sized_body () =
     let size = Conf.default_chunk_size in
     let body =
       let buffer = Chunk.create size in
@@ -107,7 +97,7 @@ let suite name (module B : Backend.S) =
     Lwt.return_unit
   in
   (* The reason this file exists. *)
-  let* () =
+  let racing_claims () =
     let claim = key "claimed" in
     let* answers =
       Lwt_list.map_p
@@ -137,14 +127,14 @@ let suite name (module B : Backend.S) =
       (Chunk.to_string mine = "mine");
     Lwt.return_unit
   in
-  let* () =
+  let capabilities () =
     let+ caps = B.capabilities ~prefix:run_prefix () in
     (* Nothing is asserted about the values: a bucket may or may not serve
        shares. What matters is that asking works against the real service. *)
     ignore caps;
     check "capabilities answers" true
   in
-  let* () =
+  let deleting () =
     let* () = B.delete ~key:(key "a") () in
     let* got = B.get_opt ~key:(key "a") () in
     check "delete removes it" (got = None);
@@ -163,23 +153,23 @@ let suite name (module B : Backend.S) =
      raw, [%] was signed as a literal and sent as the escape it looked like, so a
      key holding either answered 403. Both fixes are in the pinned aws-s3 fork
      and this is what holds them there. *)
-  let special =
-    [
-      "amp-&-key";
-      "angle-<tag>-key";
-      "quotes-\"double\"-'single'";
-      "plus+key";
-      "percent-%2F-key";
-      "hash#and?query";
-      "space in key";
-      "unicode-é-å-日本";
-    ]
-  in
-  (* One check per name, and a raise caught per name: a store that refuses one
-     spelling must say which, not take the rest of the suite down with it. The
-     first version of this let the exception out, and a single 403 hid both the
-     character that caused it and every check after it. *)
-  let* survived =
+  let awkward_names () =
+    let special =
+      [
+        "amp-&-key";
+        "angle-<tag>-key";
+        "quotes-\"double\"-'single'";
+        "plus+key";
+        "percent-%2F-key";
+        "hash#and?query";
+        "space in key";
+        "unicode-é-å-日本";
+      ]
+    in
+    (* One check per name, and a raise caught per name: a store that refuses one
+       spelling must say which, not take the rest of the suite down with it. The
+       first version of this let the exception out, and a single 403 hid both the
+       character that caused it and every check after it. *)
     Lwt_list.filter_s
       (fun n ->
         Lwt.catch
@@ -212,7 +202,7 @@ let suite name (module B : Backend.S) =
      Done with a mostly-absent list, so pinning the paging costs a handful of
      writes rather than a thousand: the survivors sit at the front, on the
      boundary and past it, with the awkward names among them. *)
-  let* () =
+  let bulk_delete survived =
     let over = 1000 in
     let pad i = key (Printf.sprintf "bulk/absent-%04d" i) in
     let live = [key "bulk/first"; key "bulk/at-cap"; key "bulk/past-cap"] in
@@ -243,7 +233,16 @@ let suite name (module B : Backend.S) =
          (List.length batch))
       (left = [])
   in
-  Lwt.return_unit
+  case name;
+  let* () = round_trip () in
+  let* () = copying () in
+  let* () = listing () in
+  let* () = chunk_sized_body () in
+  let* () = racing_claims () in
+  let* () = capabilities () in
+  let* () = deleting () in
+  let* survived = awkward_names () in
+  bulk_delete survived
 
 let backend_of name fields =
   Backend.make ~backend_type:name ~get_field:(fun k -> List.assoc_opt k fields)
@@ -281,7 +280,9 @@ let verify_suite name fields =
      [`Unsupported] unless the store is configured as running the function,
      which is what keeps a bucket with no deployment being handed deletes that
      nothing would ever act on. *)
-  let doomed = [chunk_prefix ^ "abb/" ^ String.make 16 'a' ^ "-" ^ String.make 16 'b'] in
+  let doomed =
+    [chunk_prefix ^ "abb/" ^ String.make 16 'a' ^ "-" ^ String.make 16 'b']
+  in
   let* answer =
     On.discard ~chunk_prefix ~run:"0001755300000000" ~name:"abb" ~keys:doomed ()
   in
@@ -313,16 +314,19 @@ let verify_suite name fields =
    whole reason this is worth having. *)
 let live_delete_suite name (module B : Backend.S) =
   let open Lwt.Syntax in
-  match env (Printf.sprintf "TSYNC_CI_%s_VERIFY_FUNCTION" (String.uppercase_ascii name)) with
+  match
+    env
+      (Printf.sprintf "TSYNC_CI_%s_VERIFY_FUNCTION"
+         (String.uppercase_ascii name))
+  with
     | None ->
-        Printf.printf
-          "    NOT RUN  the deployed function is not exercised\n\
-          \             (TSYNC_CI_%s_VERIFY_FUNCTION unset -- see \
-           scripts/setup_ci_secrets.sh)\n%!"
+        step
+          "NOT RUN: no function is deployed on this bucket \
+           (TSYNC_CI_%s_VERIFY_FUNCTION unset -- scripts/setup_ci_secrets.sh)"
           (String.uppercase_ascii name);
         Lwt.return_unit
     | Some fn ->
-        Printf.printf "    against the deployed function %s\n%!" fn;
+        step "against the deployed function %s" fn;
         let chunk_prefix = run_prefix ^ "chunks/" in
         (* A real chunk, named the way one is: the function refuses anything
            that is not shaped like a chunk key under the requesting domain, so a
@@ -354,9 +358,9 @@ let live_delete_suite name (module B : Backend.S) =
         let* gone = wait () in
         check "the function dropped the chunk the request named" gone;
         if not gone then
-          Printf.printf
-            "             nothing consumed it in 180s -- check the bucket's \
-             notification and the function's logs\n%!";
+          step
+            "nothing consumed it in 180s -- check the bucket's notification \
+             and the function's logs";
         Lwt.return_unit
 
 (* Cleans up whatever the suite did not, including after a failure.
@@ -420,10 +424,8 @@ let () =
   List.iter
     (fun (name, config) ->
       match (List.mem name linked, config ()) with
-        | false, _ ->
-            Printf.printf "\n  %s: not linked into this binary\n%!" name
-        | true, None ->
-            Printf.printf "\n  %s: no credentials in the environment\n%!" name
+        | false, _ -> step "%s: not linked into this binary" name
+        | true, None -> step "%s: no credentials in the environment" name
         | true, Some fields ->
             incr ran;
             let b = backend_of name fields in
@@ -436,9 +438,10 @@ let () =
                            Lwt.bind (verify_suite name fields) (fun () ->
                                live_delete_suite name b)))
                      (fun exn ->
-                       incr failures;
-                       Printf.printf "    FAIL  %s raised: %s\n%!" name
-                         (Printexc.to_string exn);
+                       check
+                         ~why:(fun () -> Printexc.to_string exn)
+                         (name ^ " ran to completion")
+                         false;
                        Lwt.return_unit))
                  (fun () -> sweep b)))
     candidates
@@ -450,6 +453,5 @@ let () =
       "\nno store was both linked and configured -- nothing verified\n";
     exit 2
   end;
-  Printf.printf "\n%d check(s), %d failure(s) across %d store(s)\n" !checks
-    !failures !ran;
-  exit (if !failures = 0 then 0 else 1)
+  step "across %d store(s)" !ran;
+  report ()

@@ -14,7 +14,11 @@ let check ?why name ok =
 let checks () = !checks_ran
 let failures () = !failed
 let case name = Printf.printf "\n=== %s\n" name
-let step fmt = Printf.printf ("  " ^^ fmt ^^ "\n")
+
+(* Flushed like {!check}: a suite that waits on something slow prints where it
+   got to before it waits, and a line still sitting in the buffer reads as a
+   hang. *)
+let step fmt = Printf.printf ("  " ^^ fmt ^^ "\n%!")
 
 let report ?expected () =
   (match expected with
