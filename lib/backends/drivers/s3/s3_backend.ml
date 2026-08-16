@@ -64,7 +64,20 @@ let entry_of c =
   Backend.
     { key = c.S3.key; size = c.S3.size; last_modified = c.S3.last_modified }
 
+(* A chunk is handed to aws-s3 as it stands rather than copied into a string,
+   so its bytes are read for as long as the request runs and must stay valid
+   until it answers -- a retry sends the same buffer again. *)
 let put t ~key ~data () =
+  let+ res =
+    with_retry "put" (fun () ->
+        S3.put_bigstring ~credentials:t.credentials ~endpoint:t.endpoint
+          ~bucket:t.bucket ~unsigned_payload:t.unsigned_payload ~key
+          ~data:(Chunk.buffer data) ())
+  in
+  ignore (unwrap "put" res)
+
+(* The verifier's job bodies are JSON and small enough to stay on the heap. *)
+let put_text t ~key ~data () =
   let+ res =
     with_retry "put" (fun () ->
         S3.put ~credentials:t.credentials ~endpoint:t.endpoint ~bucket:t.bucket
@@ -75,10 +88,10 @@ let put t ~key ~data () =
 let get t ~key () =
   let+ res =
     with_retry "get" (fun () ->
-        S3.get ~credentials:t.credentials ~endpoint:t.endpoint ~bucket:t.bucket
-          ~key ())
+        S3.get_bigstring ~credentials:t.credentials ~endpoint:t.endpoint
+          ~bucket:t.bucket ~key ())
   in
-  unwrap "get" res
+  Chunk.of_buffer (unwrap "get" res)
 
 (* [`If_none_match] is s3's own "only if this key is free": it decides, and
    answers 412 when it declines, so the object is never replaced and the loser
@@ -87,9 +100,9 @@ let get t ~key () =
 let put_if_absent t ~key ~data () =
   let* res =
     with_retry "put_if_absent" (fun () ->
-        S3.put ~credentials:t.credentials ~endpoint:t.endpoint ~bucket:t.bucket
-          ~unsigned_payload:t.unsigned_payload ~precondition:`If_none_match ~key
-          ~data ())
+        S3.put_bigstring ~credentials:t.credentials ~endpoint:t.endpoint
+          ~bucket:t.bucket ~unsigned_payload:t.unsigned_payload
+          ~precondition:`If_none_match ~key ~data:(Chunk.buffer data) ())
   in
   match res with
     | Ok _ -> Lwt.return data
@@ -101,11 +114,11 @@ let put_if_absent t ~key ~data () =
 let get_opt t ~key () =
   let+ res =
     with_retry "get" (fun () ->
-        S3.get ~credentials:t.credentials ~endpoint:t.endpoint ~bucket:t.bucket
-          ~key ())
+        S3.get_bigstring ~credentials:t.credentials ~endpoint:t.endpoint
+          ~bucket:t.bucket ~key ())
   in
   match res with
-    | Ok body -> Some body
+    | Ok body -> Some (Chunk.of_buffer body)
     | Error S3.Not_found -> None
     | Error e ->
         Log.err "s3 get %s: %s" key (string_of_error e);
@@ -223,26 +236,12 @@ let make ?endpoint ?unsigned_payload ?share_url ~bucket ~region ~access_key_id
     make_t ?endpoint ?unsigned_payload ?share_url ~bucket ~region ~access_key_id
       ~secret_access_key ()
   in
-  (* The verifier's job bodies are JSON, and it is handed this rather than the
-     module's [put] below, which speaks in chunks. *)
-  let put_text ~key ~data () = put t ~key ~data () in
+  let put_text ~key ~data () = put_text t ~key ~data () in
   (module struct
-    (* Where a body becomes a string, aws-s3 speaking in them: everything below
-       this line is string-typed, [verify_all]'s job bodies included. *)
-    let put ~key ~data () = put t ~key ~data:(Chunk.to_string data) ()
-
-    let put_if_absent ~key ~data () =
-      let+ held = put_if_absent t ~key ~data:(Chunk.to_string data) () in
-      Chunk.of_string held
-
-    let get ~key () =
-      let+ body = get t ~key () in
-      Chunk.of_string body
-
-    let get_opt ~key () =
-      let+ body = get_opt t ~key () in
-      Option.map Chunk.of_string body
-
+    let put ~key ~data () = put t ~key ~data ()
+    let put_if_absent ~key ~data () = put_if_absent t ~key ~data ()
+    let get ~key () = get t ~key ()
+    let get_opt ~key () = get_opt t ~key ()
     let head_opt ~key () = head_opt t ~key ()
     let delete ~key () = delete t ~key ()
     let delete_multi keys = delete_multi t keys
