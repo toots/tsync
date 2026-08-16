@@ -755,3 +755,11 @@
   (alias runtest)
   (action
    (diff zip_test.expected zip_test.output))))
+
+(subdir work/queue_stall
+ (alias
+  (name default)
+  (deps queue_stall.exe))
+ (rule
+  (alias runtest)
+  (action (run ./queue_stall.exe))))

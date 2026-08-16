@@ -15,6 +15,10 @@ end
    reaching it means the target has not kept up for a very long time. *)
 let default_max_queued = 100_000
 
+(* Settable so a test need not wait the default minute to see a warning. *)
+let stall_warning_interval = ref 60.
+let set_stall_warning_interval s = stall_warning_interval := s
+
 (* A queue that is merely slow must not hold a command open forever. What is
    queued is on disk, so the next start picks it up. *)
 let default_settle_timeout = 60.
@@ -211,6 +215,7 @@ module Make (J : JOB) = struct
        queued in the other, and a rename replayed backwards loses the file. *)
     recording : Lwt_mutex.t;
     mutable parked : int;  (** workers waiting for work *)
+    mutable outcomes : int;  (** jobs run to an outcome, retries included *)
     mutable failures : int;  (** {!Ordered} only; {!Keyed} counts per slot *)
     mutable degraded : bool;
     paused : bool ref;
@@ -233,6 +238,7 @@ module Make (J : JOB) = struct
       settled = Lwt_condition.create ();
       recording = Lwt_mutex.create ();
       parked = 0;
+      outcomes = 0;
       failures = 0;
       degraded = false;
       paused = ref false;
@@ -415,6 +421,8 @@ module Make (J : JOB) = struct
       (match t.topo with
         | Keyed k -> Hashtbl.remove k.active (k.key e.job)
         | Ordered -> ());
+      (* A job that failed and will be tried again still moved, so it counts. *)
+      t.outcomes <- t.outcomes + 1;
       let* requeue =
         match outcome with
           | `Done ->
@@ -489,13 +497,36 @@ module Make (J : JOB) = struct
      from memory, and they are not this one's to take. *)
   let rescan t = with_claim t.log.Records.dir (fun () -> resume t)
 
+  (* None of the ways a queue goes quiet raise, return or log, so what is
+     reported is the absence: work owed and nothing finishing it. *)
+  let rec watch_stalls t last =
+    let* () = Lwt_unix.sleep !stall_warning_interval in
+    if !(t.stopping) then Lwt.return_unit
+    else begin
+      let now = t.outcomes in
+      if Queue.length t.jobs > 0 && now = last then
+        Log.warn "%s: %d job(s) queued, none finished in %gs (%d/%d parked)"
+          t.name (Queue.length t.jobs) !stall_warning_interval t.parked
+          t.workers;
+      watch_stalls t now
+    end
+
   let start ?(recover = false) t =
     if recover then register_rescan (fun () -> rescan t)
     else claim t.log.Records.dir;
     t.running <-
       List.init t.workers (fun _ ->
-          let* () = if recover then rescan t else Lwt.return_unit in
-          loop t)
+          let p =
+            let* () = if recover then rescan t else Lwt.return_unit in
+            loop t
+          in
+          (* Awaited only by [stop], so a worker that failed is otherwise
+             captured and never looked at. *)
+          Lwt.on_failure p (fun exn ->
+              Log.err "%s: worker stopped on %s; %d job(s) left queued" t.name
+                (Printexc.to_string exn) (Queue.length t.jobs));
+          p);
+    Lwt.async (fun () -> watch_stalls t t.outcomes)
 
   let stop t =
     t.stopping := true;
