@@ -16,9 +16,12 @@
    -open
    Tsync_backend_register
    -open
-   Tsync_local_backend))
+   Tsync_local_backend
+   -open
+   Tsync_test_harness))
  (name corruption_test)
  (libraries
+  tsync_test_harness
   tsync_conf
   tsync_naming
   tsync_object

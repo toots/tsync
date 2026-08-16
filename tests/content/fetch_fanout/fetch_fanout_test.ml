@@ -10,15 +10,7 @@
    until released, holding every started fetch in its destination-open state. *)
 
 open Lwt.Syntax
-
-let failures = ref 0
-
-let check name ok =
-  if ok then Printf.printf "%s: ok\n%!" name
-  else begin
-    incr failures;
-    Printf.printf "%s: FAILED\n%!" name
-  end
+open Check
 
 let root = Filename.temp_dir "tsync-fanout" ""
 let csize = 64
@@ -27,20 +19,9 @@ let slots = 4
 (* Nothing here reaches a store: the fetch function is supplied directly. A
    backend that raises makes that explicit rather than quietly succeeding. *)
 let unused_store : (module Backend.S) =
-  (module struct
-    let fail () = Lwt.fail (Backend.Backend_error "no backend in this test")
-    let put ~key:_ ~data:_ () = fail ()
-    let put_if_absent ~key:_ ~data:_ () = fail ()
-    let get ~key:_ () = fail ()
-    let get_opt ~key:_ () = fail ()
-    let head_opt ~key:_ () = fail ()
-    let delete ~key:_ () = fail ()
-    let delete_multi _ = fail ()
-    let copy ~src_key:_ ~dst_key:_ () = fail ()
-    let list_prefix ?max_keys:_ ~prefix:_ () = fail ()
-    let verify_all ~chunk_prefix:_ () = Lwt.return `Unsupported
-    let capabilities ~prefix:_ () = Lwt.return Backend.no_caps
-  end)
+  (module Doubles.Down (struct
+    let why = "no backend in this test"
+  end))
 
 module C : Conf.S = struct
   let versioning = false
@@ -140,4 +121,4 @@ let () =
      let+ () = all in
      check "every group still arrives" true);
   ignore (Sys.command (Printf.sprintf "rm -rf %s" (Filename.quote root)));
-  exit (if !failures = 0 then 0 else 1)
+  report ()

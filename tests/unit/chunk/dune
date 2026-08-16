@@ -1,5 +1,12 @@
 (executable
  (flags
-  (:standard -open Tsync_chunk -open Tsync_xxhash))
+  (:standard -open Tsync_chunk -open Tsync_xxhash -open Tsync_test_harness))
  (name chunk_test)
- (libraries unix lwt lwt.unix bigstringaf tsync_chunk tsync_xxhash))
+ (libraries
+  tsync_test_harness
+  unix
+  lwt
+  lwt.unix
+  bigstringaf
+  tsync_chunk
+  tsync_xxhash))

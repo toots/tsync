@@ -12,6 +12,7 @@
    that say nothing here. *)
 
 open Lwt.Syntax
+open Check
 
 let root = Filename.temp_dir "tsync-deferred" ""
 let main_root = Filename.concat root "main"
@@ -55,9 +56,6 @@ let chunk_keys data =
   match Chunk_table.of_string data with
     | t -> List.init (Chunk_table.count t) (Chunk_table.key t)
     | exception _ -> []
-
-let case name = Printf.printf "\n=== %s\n" name
-let step fmt = Printf.printf ("  " ^^ fmt ^^ "\n")
 
 let keys_under dir =
   let rec walk d =
@@ -112,20 +110,7 @@ let flaky ~fails ~root : (module Backend.S) * (unit -> int) =
 
 (* A store nobody can write to, ever: the credential is wrong, the bucket is
    read-only. *)
-module Refuses : Backend.S = struct
-  let fail () = Lwt.fail Backend.Not_writable
-  let put ~key:_ ~data:_ () = fail ()
-  let put_if_absent ~key:_ ~data:_ () = fail ()
-  let get ~key:_ () = fail ()
-  let get_opt ~key:_ () = fail ()
-  let head_opt ~key:_ () = Lwt.return_none
-  let delete ~key:_ () = fail ()
-  let delete_multi _ = fail ()
-  let copy ~src_key:_ ~dst_key:_ () = fail ()
-  let list_prefix ?max_keys:_ ~prefix:_ () = Lwt.return_nil
-  let verify_all ~chunk_prefix:_ () = Lwt.return `Unsupported
-  let capabilities ~prefix:_ () = Lwt.return Backend.no_caps
-end
+module Refuses = Doubles.Refuses
 
 (* Reachable only while [up]. *)
 let switchable ~up ~root : (module Backend.S) =

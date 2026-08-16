@@ -7,15 +7,7 @@
    wider than asked, and that a full queue refuses rather than accumulating. *)
 
 open Lwt.Syntax
-
-let failures = ref 0
-
-let check name ok =
-  if ok then Printf.printf "%s: ok\n%!" name
-  else begin
-    incr failures;
-    Printf.printf "%s: FAILED\n%!" name
-  end
+open Check
 
 (* Runs [jobs] through [t], recording how wide the bodies ever ran. *)
 let peak t ~jobs f =

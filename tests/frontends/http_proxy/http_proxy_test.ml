@@ -1,19 +1,8 @@
 let status_root = "/tmp/tsync-http-proxy-status-test"
 
-module Down : Backend.S = struct
-  let fail () = Lwt.fail (Backend.Backend_error "connection refused")
-  let put ~key:_ ~data:_ () = fail ()
-  let put_if_absent ~key:_ ~data:_ () = fail ()
-  let get ~key:_ () = fail ()
-  let get_opt ~key:_ () = fail ()
-  let head_opt ~key:_ () = fail ()
-  let delete ~key:_ () = fail ()
-  let delete_multi _ = fail ()
-  let copy ~src_key:_ ~dst_key:_ () = fail ()
-  let list_prefix ?max_keys:_ ~prefix:_ () = fail ()
-  let verify_all ~chunk_prefix:_ () = Lwt.return `Unsupported
-  let capabilities ~prefix:_ () = Lwt.return Backend.no_caps
-end
+module Down = Doubles.Down (struct
+  let why = "connection refused"
+end)
 
 module C : Conf.S = struct
   let versioning = false
@@ -68,8 +57,6 @@ module C : Conf.S = struct
   let symlink_policy = `Keep
   let read_only = false
 end
-
-(* A store that cannot be reached, so the report has a failure to point at. *)
 
 let json_member name j = Yojson.Safe.Util.member name j
 

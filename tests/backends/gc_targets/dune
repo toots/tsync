@@ -16,9 +16,12 @@
    -open
    Tsync_conf
    -open
-   Tsync_local_backend))
+   Tsync_local_backend
+   -open
+   Tsync_test_harness))
  (name gc_targets)
  (libraries
+  tsync_test_harness
   tsync_ops
   tsync_store
   tsync_object

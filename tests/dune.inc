@@ -107,6 +107,34 @@
   (alias runtest)
   (action (run ./gcs.exe))))
 
+(subdir backends/list_order
+ (alias
+  (name default)
+  (deps list_order.exe))
+ (rule
+  (alias runtest)
+  (target list_order.output)
+  (action
+   (with-stdout-to list_order.output (ignore-stderr (run ./list_order.exe)))))
+ (rule
+  (alias runtest)
+  (action
+   (diff list_order.expected list_order.output))))
+
+(subdir backends/mirror_cost
+ (alias
+  (name default)
+  (deps mirror_cost.exe))
+ (rule
+  (alias runtest)
+  (target mirror_cost.output)
+  (action
+   (with-stdout-to mirror_cost.output (ignore-stderr (run ./mirror_cost.exe)))))
+ (rule
+  (alias runtest)
+  (action
+   (diff mirror_cost.expected mirror_cost.output))))
+
 (subdir backends/probe_deadline
  (alias
   (name default)
@@ -635,6 +663,34 @@
  (rule
   (alias runtest)
   (action (run ./layout.exe))))
+
+(subdir unit/listing_spool
+ (alias
+  (name default)
+  (deps listing_spool_test.exe))
+ (rule
+  (alias runtest)
+  (target listing_spool_test.output)
+  (action
+   (with-stdout-to listing_spool_test.output (ignore-stderr (run ./listing_spool_test.exe)))))
+ (rule
+  (alias runtest)
+  (action
+   (diff listing_spool_test.expected listing_spool_test.output))))
+
+(subdir unit/listing_wire
+ (alias
+  (name default)
+  (deps listing_wire_test.exe))
+ (rule
+  (alias runtest)
+  (target listing_wire_test.output)
+  (action
+   (with-stdout-to listing_wire_test.output (ignore-stderr (run ./listing_wire_test.exe)))))
+ (rule
+  (alias runtest)
+  (action
+   (diff listing_wire_test.expected listing_wire_test.output))))
 
 (subdir unit/manifest_memo
  (alias

@@ -8,9 +8,12 @@
    -open
    Tsync_local_backend
    -open
-   Tsync_diagnostics))
+   Tsync_diagnostics
+   -open
+   Tsync_test_harness))
  (name probe_deadline_test)
  (libraries
+  tsync_test_harness
   tsync_backend_register
   tsync_local_backend
   tsync_diagnostics

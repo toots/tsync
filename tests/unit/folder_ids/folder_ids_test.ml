@@ -6,19 +6,11 @@
    markers, so it is also damaged deliberately here and checked to heal. *)
 
 open Lwt.Syntax
+open Check
 
 let root = Filename.temp_dir "tsync-folder-ids" ""
 let cache_root = Filename.concat root "cache"
 let domain_name = "testdom"
-let failures = ref 0
-
-let check name ok =
-  if ok then Printf.printf "%s: ok\n%!" name
-  else begin
-    incr failures;
-    Printf.printf "%s: FAILED\n%!" name
-  end
-
 let ensure rel = Folder_ids.ensure_id ~cache_root ~domain_name rel
 let lookup rel = Folder_ids.lookup_id ~cache_root ~domain_name rel
 let rel_of id = Folder_ids.rel_of_id ~cache_root ~domain_name id

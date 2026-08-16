@@ -9,14 +9,7 @@
    what lets the daemon be observed without test-only code inside it. A toy server
    stands in for it: the relay is what is under test. *)
 
-let failures = ref 0
-
-let check name ok =
-  if ok then Printf.printf "%s: ok\n%!" name
-  else begin
-    incr failures;
-    Printf.printf "%s: FAILED\n%!" name
-  end
+open Check
 
 let root = Filename.temp_dir "tsync-tap" ""
 let socket_path = Filename.concat root "s.sock"

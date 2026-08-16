@@ -14,9 +14,12 @@
    -open
    Tsync_backend_register
    -open
-   Tsync_conf))
+   Tsync_conf
+   -open
+   Tsync_test_harness))
  (name chunk_cache_test)
  (libraries
+  tsync_test_harness
   tsync_content
   tsync_object
   tsync_naming

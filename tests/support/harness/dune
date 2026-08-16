@@ -1,0 +1,22 @@
+; Shared test scaffolding: assertions and their tally, the badly-behaved
+; backend doubles, a domain fixture, and a scratch directory. A (library ...)
+; stanza, so tests/gen-dune.sh leaves this directory alone.
+
+(library
+ (flags
+  (:standard
+   -open
+   Tsync_conf
+   -open
+   Tsync_backend_register
+   -open
+   Tsync_local_io))
+ (name tsync_test_harness)
+ (libraries
+  tsync_conf
+  tsync_backend_register
+  tsync_chunk
+  tsync_local_io
+  lwt
+  lwt.unix
+  unix))

@@ -1,0 +1,49 @@
+module Down (M : sig
+  val why : string
+end) : Backend.S = struct
+  let fail () = Lwt.fail (Backend.Backend_error M.why)
+  let put ~key:_ ~data:_ () = fail ()
+  let put_if_absent ~key:_ ~data:_ () = fail ()
+  let get ~key:_ () = fail ()
+  let get_opt ~key:_ () = fail ()
+  let head_opt ~key:_ () = fail ()
+  let delete ~key:_ () = fail ()
+  let delete_multi _ = fail ()
+  let copy ~src_key:_ ~dst_key:_ () = fail ()
+  let list_prefix ?max_keys:_ ~prefix:_ () = fail ()
+  let fold_prefix ?max_keys:_ ~prefix:_ ~f:_ () = fail ()
+  let verify_all ~chunk_prefix:_ () = Lwt.return `Unsupported
+  let capabilities ~prefix:_ () = Lwt.return Backend.no_caps
+end
+
+module Hung : Backend.S = struct
+  let never () = fst (Lwt.wait ())
+  let put ~key:_ ~data:_ () = never ()
+  let put_if_absent ~key:_ ~data:_ () = never ()
+  let get ~key:_ () = never ()
+  let get_opt ~key:_ () = never ()
+  let head_opt ~key:_ () = never ()
+  let delete ~key:_ () = never ()
+  let delete_multi _ = never ()
+  let copy ~src_key:_ ~dst_key:_ () = never ()
+  let list_prefix ?max_keys:_ ~prefix:_ () = never ()
+  let fold_prefix ?max_keys:_ ~prefix:_ ~f:_ () = never ()
+  let verify_all ~chunk_prefix:_ () = Lwt.return `Unsupported
+  let capabilities ~prefix:_ () = Lwt.return Backend.no_caps
+end
+
+module Refuses : Backend.S = struct
+  let fail () = Lwt.fail Backend.Not_writable
+  let put ~key:_ ~data:_ () = fail ()
+  let put_if_absent ~key:_ ~data:_ () = fail ()
+  let get ~key:_ () = fail ()
+  let get_opt ~key:_ () = fail ()
+  let head_opt ~key:_ () = Lwt.return_none
+  let delete ~key:_ () = fail ()
+  let delete_multi _ = fail ()
+  let copy ~src_key:_ ~dst_key:_ () = fail ()
+  let list_prefix ?max_keys:_ ~prefix:_ () = Lwt.return_nil
+  let fold_prefix ?max_keys:_ ~prefix:_ ~f:_ () = Lwt.return_unit
+  let verify_all ~chunk_prefix:_ () = Lwt.return `Unsupported
+  let capabilities ~prefix:_ () = Lwt.return Backend.no_caps
+end

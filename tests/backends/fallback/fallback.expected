@@ -43,3 +43,12 @@
 === listings: an empty one is an answer, an unreachable backend is not
   list nothing/ on main = (empty)
   list manifests/ with main unreachable = tsync/d/manifests/on-archive
+
+=== every store unreachable: the main's failure is the one reported
+  get nowhere = error: down
+  list manifests/ = error: down
+  fold manifests/ = error: down
+
+=== a store that dies mid-listing is not retried against the next
+  fold manifests/ = error: died mid-listing
+  pages delivered: 1  <- the archive did not replay them

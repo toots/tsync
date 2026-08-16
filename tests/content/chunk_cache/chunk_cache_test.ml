@@ -62,20 +62,9 @@ end
 (* Nothing here reaches a store: the fetch function is supplied directly. A
    backend that raises makes that explicit rather than quietly succeeding. *)
 let unused_store : (module Backend.S) =
-  (module struct
-    let fail () = Lwt.fail (Backend.Backend_error "no backend in this test")
-    let put ~key:_ ~data:_ () = fail ()
-    let put_if_absent ~key:_ ~data:_ () = fail ()
-    let get ~key:_ () = fail ()
-    let get_opt ~key:_ () = fail ()
-    let head_opt ~key:_ () = fail ()
-    let delete ~key:_ () = fail ()
-    let delete_multi _ = fail ()
-    let copy ~src_key:_ ~dst_key:_ () = fail ()
-    let list_prefix ?max_keys:_ ~prefix:_ () = fail ()
-    let verify_all ~chunk_prefix:_ () = Lwt.return `Unsupported
-    let capabilities ~prefix:_ () = Lwt.return Backend.no_caps
-  end)
+  (module Doubles.Down (struct
+    let why = "no backend in this test"
+  end))
 
 module C : Conf.S = struct
   let versioning = false

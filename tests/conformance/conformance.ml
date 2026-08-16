@@ -70,6 +70,36 @@ let suite name (module B : Backend.S) =
        to write them -- but it does prove the cap reaches the request. *)
     let* capped = B.list_prefix ~max_keys:1 ~prefix:run_prefix () in
     check "max_keys caps the listing" (List.length capped <= 1);
+    (* A resync diffs a source listing against a destination's by walking the
+       two in step, so an ascending order is not a nicety here. It is documented
+       for s3 and gcs and structural for a local store; against the real service
+       is the only place it is checked rather than taken on trust. *)
+    let ascending ks =
+      let rec go = function
+        | a :: (b :: _ as rest) -> String.compare a b < 0 && go rest
+        | _ -> true
+      in
+      go ks
+    in
+    check "list_prefix comes back ascending" (ascending keys);
+    let pages = ref [] in
+    let* () =
+      B.fold_prefix ~prefix:run_prefix
+        ~f:(fun page ->
+          pages := page :: !pages;
+          Lwt.return_unit)
+        ()
+    in
+    let folded =
+      List.concat_map
+        (List.map (fun (e : Backend.file_entry) -> e.Backend.key))
+        (List.rev !pages)
+    in
+    (* For an http-proxy this is also the page-per-line wire, terminator
+       included, over a real socket -- the one place that framing meets a
+       network rather than a test's own byte splitting. *)
+    check "fold_prefix yields the same keys as list_prefix" (folded = keys);
+    check "and yields them ascending across page boundaries" (ascending folded);
     Lwt.return_unit
   in
   (* The reason this file exists. *)
