@@ -31,6 +31,19 @@ AWS_IAM_USER="${AWS_IAM_USER:-tsync-ci}"
 # forgotten run cannot accrue cost indefinitely.
 EXPIRE_DAYS="${EXPIRE_DAYS:-2}"
 
+# The chunk verifier is deployed onto the CI buckets so conformance has
+# something real to trigger: two of the things this project leans on -- the
+# whole-store sweep and the deletes a collection hands over -- are a client
+# writing an object and trusting a function to act on it, and nothing else
+# proves that wiring exists.
+#
+# Its own terraform state, and never the one next door: that one holds real
+# stores, and an apply pointed at CI buckets with the wrong state is how they
+# would be reached. The bucket is the same, the prefix is not.
+DEPLOY_FUNCTIONS="${DEPLOY_FUNCTIONS:-1}"
+TF_STATE_PREFIX="${TF_STATE_PREFIX:-tsync-ci}"
+TF_STATE_BUCKET="${TF_STATE_BUCKET:-}"
+
 DRY_RUN=0
 [ "${1:-}" = "--dry-run" ] && DRY_RUN=1
 
@@ -74,6 +87,22 @@ if ! command -v aws >/dev/null || ! aws sts get-caller-identity >/dev/null 2>&1;
   WANT_S3=0
   warn "aws cli missing or not configured -- skipping the S3 half."
   warn "The s3 backend's put_if_absent stays unverified until it is set up."
+fi
+
+# Either binary drives the same configuration; the README says as much for a
+# real deployment, so the test stack is no different.
+TF=""
+if [ "$DEPLOY_FUNCTIONS" = 1 ]; then
+  for candidate in tofu terraform; do
+    command -v "$candidate" >/dev/null && { TF="$candidate"; break; }
+  done
+  if [ -z "$TF" ]; then
+    DEPLOY_FUNCTIONS=0
+    warn "neither tofu nor terraform found -- not deploying the chunk verifier."
+    warn "Conformance will report the serverless half as not run."
+  else
+    info "$TF: ok, will deploy the chunk verifier onto the CI bucket(s)"
+  fi
 fi
 
 if [ $DRY_RUN = 0 ]; then
