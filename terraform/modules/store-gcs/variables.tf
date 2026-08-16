@@ -27,7 +27,7 @@ variable "function_region" {
 variable "custom_domain" {
   type        = string
   default     = null
-  description = "Vanity domain for share links (e.g. share.example.org). null = raw function URL, no load balancer. See domain.tf."
+  description = "Vanity domain for share links (e.g. share.example.org). null = raw function URL. Requires the parent domain to be verified for the deploying account; see domain.tf."
 }
 
 variable "manage_lifecycle" {

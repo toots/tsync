@@ -13,11 +13,11 @@ output "custom_domain" {
   value       = var.custom_domain
 }
 
-# A-record value for the custom domain (point custom_domain here). null when no
-# custom_domain. The managed cert provisions once this A record resolves.
-output "custom_domain_ip" {
-  description = "Load balancer IP to add as an A record for custom_domain."
-  value       = local.domain_enabled == 1 ? google_compute_global_address.share[0].address : null
+# Records Cloud Run wants published for the mapped domain; empty when there is no
+# custom_domain, and unpopulated until the mapping leaves PENDING.
+output "custom_domain_dns_records" {
+  description = "DNS records to create for custom_domain (name/type/rrdata)."
+  value       = local.domain_enabled == 1 ? google_cloud_run_domain_mapping.share[0].status[0].resource_records : []
 }
 
 # The service-account JSON key the daemon consumes as `serviceAccountKey`.

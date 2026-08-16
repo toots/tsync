@@ -52,12 +52,15 @@ output "gcs_service_account_keys" {
   value       = { for k, m in module.store_gcs : k => m.service_account_key }
 }
 
-# A record to add per GCS store with a custom_domain: point the domain at a_record.
-# Only populated for those stores; empty otherwise.
+# Records to publish per GCS store with a custom_domain; only populated for those
+# stores.
 output "gcs_custom_domain_dns" {
-  description = "Per-GCS-store A record for the custom domain (domain -> load balancer IP)."
+  description = "Per-GCS-store DNS records for the custom domain, as Cloud Run reports them."
   value = {
-    for k, m in module.store_gcs : k => { domain = m.custom_domain, a_record = m.custom_domain_ip }
+    for k, m in module.store_gcs : k => {
+      domain  = m.custom_domain
+      records = m.custom_domain_dns_records
+    }
     if m.custom_domain != null
   }
 }

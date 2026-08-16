@@ -155,25 +155,35 @@ gcs_stores = {
 }
 ```
 
-This provisions an external HTTPS load balancer + a Google-managed cert in front
-of the share Cloud Function. It requires the Compute Engine API
-(`gcloud services enable compute.googleapis.com`), and the load balancer carries an
-hourly cost. Add **one** `A` record:
+This maps the domain onto the share Cloud Function's Cloud Run service, which
+serves it and renews its own cert — no load balancer, so no hourly forwarding-rule
+charge. Two things it does not do: path routing, CDN and Cloud Armor are not
+available, and domain mapping is offered only in a subset of Cloud Run regions.
+
+The parent domain must be verified for the deploying account **before** `apply`,
+or the mapping is rejected:
+
+```
+gcloud domains verify example.org
+```
+
+Then publish whatever Cloud Run asks for — a `CNAME` for a subdomain, `A`/`AAAA`
+sets for an apex:
 
 ```
 terraform apply
-terraform output -json gcs_custom_domain_dns   # { "media": { domain, a_record } }
+terraform output -json gcs_custom_domain_dns   # { "media": { domain, records } }
 ```
 
-Point `custom_domain` at `a_record` with an `A` record. Unlike ACM, `apply` does
-not block on the cert — the Google-managed cert provisions on its own once DNS
-resolves (~15–60 min). Check status with:
+`records` stays empty until the mapping leaves `PENDING`; re-run `terraform
+refresh` if the first apply returns nothing. `apply` does not block on the cert —
+it provisions on its own once DNS resolves (~15–60 min). Check status with:
 
 ```
-gcloud compute ssl-certificates describe tsync-share-<store>-cert --global
+gcloud beta run domain-mappings describe --domain=share.example.org --region=<region>
 ```
 
-On Cloudflare, set the `A` record to **DNS only** (grey cloud). Then copy the
+On Cloudflare, set the records to **DNS only** (grey cloud). Then copy the
 store's `share_url` into your gcs backend's `shareUrl`.
 
 ## Remote state
