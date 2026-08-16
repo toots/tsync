@@ -39,7 +39,7 @@ let upload_uri t key =
     (t.base ^ "/upload/storage/v1/b/" ^ t.bucket ^ "/o?uploadType=media&name="
    ^ enc_key key)
 
-let call t ~meth ?ctype ?(extra_headers = []) ?(body = "") uri =
+let call t ~meth ?ctype ?(extra_headers = []) ?(body = Chunk.empty) uri =
   let* auth_header =
     match t.auth with
       | None -> Lwt.return []
@@ -57,11 +57,11 @@ let call t ~meth ?ctype ?(extra_headers = []) ?(body = "") uri =
   in
   let* resp, rbody =
     Cohttp_lwt_unix.Client.call ~headers
-      ~body:(Cohttp_lwt.Body.of_string body)
+      ~body:(Cohttp_lwt.Body.of_bigstring (Chunk.buffer body))
       meth uri
   in
-  let+ s = Cohttp_lwt.Body.to_string rbody in
-  (resp, s)
+  let+ rbody = Cohttp_lwt.Body.to_bigstring rbody in
+  (resp, Chunk.of_buffer rbody)
 
 (* Raises on a transient status so the shared loop retries it; every other
    response comes back for the verb to interpret, 404 included. *)
@@ -69,8 +69,16 @@ let call_retry t ~meth ?ctype ?extra_headers ?body op uri =
   Backend.with_retry ~name:"gcs" ~op (fun () ->
       let* resp, rbody = call t ~meth ?ctype ?extra_headers ?body uri in
       if is_transient_code (code resp) then
-        Lwt.fail (backend_error op (code resp) rbody)
+        Lwt.fail (backend_error op (code resp) (Chunk.to_string rbody))
       else Lwt.return (resp, rbody))
+
+(* Only an object's own bytes are worth keeping off the heap; the JSON and XML
+   verbs below carry a body small enough to read as a string, and one they have
+   to parse anyway. *)
+let call_text t ~meth ?ctype ?extra_headers ?body op uri =
+  let body = Option.map Chunk.of_string body in
+  let+ resp, rbody = call_retry t ~meth ?ctype ?extra_headers ?body op uri in
+  (resp, Chunk.to_string rbody)
 
 let str_member key j =
   match Yojson.Safe.Util.member key j with `String s -> s | _ -> ""
@@ -111,19 +119,21 @@ let put t ~key ~data () =
     call_retry t ~meth:`POST ~ctype:"application/octet-stream" ~body:data "put"
       (upload_uri t key)
   in
-  if not (is_ok resp) then raise (backend_error "put" (code resp) body)
+  if not (is_ok resp) then
+    raise (backend_error "put" (code resp) (Chunk.to_string body))
 
 let get t ~key () =
   let uri = Uri.of_string (obj_path t key ^ "?alt=media") in
   let+ resp, body = call_retry t ~meth:`GET "get" uri in
-  if is_ok resp then body else raise (backend_error "get" (code resp) body)
+  if is_ok resp then body
+  else raise (backend_error "get" (code resp) (Chunk.to_string body))
 
 let get_opt t ~key () =
   let uri = Uri.of_string (obj_path t key ^ "?alt=media") in
   let+ resp, body = call_retry t ~meth:`GET "get_opt" uri in
   if is_ok resp then Some body
   else if code resp = 404 then None
-  else raise (backend_error "get_opt" (code resp) body)
+  else raise (backend_error "get_opt" (code resp) (Chunk.to_string body))
 
 (* [ifGenerationMatch=0] means "only if this object does not exist", and the 412
    GCS answers when it already does is the claim being lost, not an error. *)
@@ -137,18 +147,18 @@ let put_if_absent t ~key ~data () =
   in
   if is_ok resp then Lwt.return data
   else if code resp = 412 then get t ~key ()
-  else raise (backend_error "put_if_absent" (code resp) body)
+  else raise (backend_error "put_if_absent" (code resp) (Chunk.to_string body))
 
 let head_opt t ~key () =
   let uri = Uri.of_string (obj_path t key) in
-  let+ resp, body = call_retry t ~meth:`GET "head" uri in
+  let+ resp, body = call_text t ~meth:`GET "head" uri in
   if is_ok resp then Some (entry_of_json key (Yojson.Safe.from_string body))
   else if code resp = 404 then None
   else raise (backend_error "head" (code resp) body)
 
 let delete t ~key () =
   let uri = Uri.of_string (obj_path t key) in
-  let+ resp, body = call_retry t ~meth:`DELETE "delete" uri in
+  let+ resp, body = call_text t ~meth:`DELETE "delete" uri in
   if is_ok resp || code resp = 404 then ()
   else raise (backend_error "delete" (code resp) body)
 
@@ -232,7 +242,7 @@ let delete_multi t keys =
            truncated list of keys to delete being worse than no list at all.
            [Stdlib.Digest] is MD5, which is all this is. *)
         let* resp, body =
-          call_retry t ~meth:`POST ~ctype:"application/xml"
+          call_text t ~meth:`POST ~ctype:"application/xml"
             ~extra_headers:
               [("Content-MD5", Base64.encode_string (Digest.string request))]
             ~body:request "delete_multi" (delete_uri t)
@@ -308,7 +318,7 @@ let list_all t ?max_keys ~prefix () =
     if enough acc then Lwt.return (List.concat (List.rev acc))
     else (
       let uri = list_uri t ?max_keys ~prefix ~page_token () in
-      let* resp, body = call_retry t ~meth:`GET "ls" uri in
+      let* resp, body = call_text t ~meth:`GET "ls" uri in
       if not (is_ok resp) then Lwt.fail (backend_error "ls" (code resp) body)
       else begin
         let items, next = parse_list body in
@@ -335,23 +345,12 @@ let make ?endpoint ?service_account_key ?share_url ~bucket () :
   let t = { bucket; base; auth; share_url } in
   (* The verifier's job bodies are JSON, and it is handed this rather than the
      module's [put] below, which speaks in chunks. *)
-  let put_text ~key ~data () = put t ~key ~data () in
+  let put_text ~key ~data () = put t ~key ~data:(Chunk.of_string data) () in
   (module struct
-    (* Where a body becomes a string, the JSON API speaking in them. *)
-    let put ~key ~data () = put t ~key ~data:(Chunk.to_string data) ()
-
-    let put_if_absent ~key ~data () =
-      let+ held = put_if_absent t ~key ~data:(Chunk.to_string data) () in
-      Chunk.of_string held
-
-    let get ~key () =
-      let+ body = get t ~key () in
-      Chunk.of_string body
-
-    let get_opt ~key () =
-      let+ body = get_opt t ~key () in
-      Option.map Chunk.of_string body
-
+    let put ~key ~data () = put t ~key ~data ()
+    let put_if_absent ~key ~data () = put_if_absent t ~key ~data ()
+    let get ~key () = get t ~key ()
+    let get_opt ~key () = get_opt t ~key ()
     let head_opt ~key () = head_opt t ~key ()
     let delete ~key () = delete t ~key ()
     let delete_multi keys = delete_multi t keys
