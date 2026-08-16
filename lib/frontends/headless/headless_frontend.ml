@@ -41,6 +41,11 @@ module Make (C : Conf.S) = struct
 
   let start () =
     let open Lwt.Syntax in
+    (* Detached work has no caller to fail, and the default hook ends the
+       process over a background error the log would have carried. *)
+    (Lwt.async_exception_hook :=
+       fun exn ->
+         Log.err "%s: async exception: %s" "headless" (Printexc.to_string exn));
     Lwt_main.run
       (let* () =
          E.start

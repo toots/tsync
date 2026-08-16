@@ -44,12 +44,15 @@
    -open
    Tsync_device
    -open
-   Tsync_runtime))
+   Tsync_runtime
+   -open
+   Tsync_lwt_unix))
  (name tsync)
  (modules cli configure tsync)
  (public_name tsync)
  (package tsync)
  (libraries
+  tsync_lwt_unix
   tsync_field_spec
   tsync_sync
   tsync_ops
