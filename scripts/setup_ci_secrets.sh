@@ -12,6 +12,7 @@
 #
 #   bash scripts/setup_ci_secrets.sh            # do it
 #   bash scripts/setup_ci_secrets.sh --dry-run  # print what it would do
+#   bash scripts/setup_ci_secrets.sh --help     # this
 #
 set -euo pipefail
 
@@ -44,8 +45,18 @@ DEPLOY_FUNCTIONS="${DEPLOY_FUNCTIONS:-1}"
 TF_STATE_PREFIX="${TF_STATE_PREFIX:-tsync-ci}"
 TF_STATE_BUCKET="${TF_STATE_BUCKET:-}"
 
+usage() {
+  sed -n '3,15p' "$0" | sed 's/^#\{0,1\} \{0,1\}//'
+  exit "${1:-0}"
+}
+
 DRY_RUN=0
-[ "${1:-}" = "--dry-run" ] && DRY_RUN=1
+case "${1:-}" in
+  --dry-run) DRY_RUN=1 ;;
+  -h | --help) usage ;;
+  "") ;;
+  *) printf 'unknown argument: %s\n\n' "$1" >&2; usage 2 ;;
+esac
 
 say()  { printf '\n\033[1m%s\033[0m\n' "$*"; }
 info() { printf '  %s\n' "$*"; }
@@ -59,13 +70,13 @@ run()  { if [ $DRY_RUN = 1 ]; then printf '  + %s\n' "$*"; else eval "$@"; fi; }
 # key below.
 retry() {
   local what=$1; shift
-  local attempt
+  local attempt err
   for attempt in 1 2 3 4 5 6 7 8 9 10; do
     if [ $DRY_RUN = 1 ]; then printf '  + %s\n' "$*"; return 0; fi
-    if eval "$@" 2>/dev/null; then return 0; fi
+    if err=$(eval "$@" 2>&1); then return 0; fi
     sleep 5
   done
-  die "$what did not succeed after 10 attempts"
+  die "$what did not succeed after 10 attempts: $(printf '%s' "$err" | tail -1)"
 }
 
 WORK="$(mktemp -d)"
@@ -155,10 +166,13 @@ fi
 
 # Bound on the bucket, not the project: this identity must not be able to touch
 # anything else in tsync-503522.
+# --condition=None because the verifier's own grants are conditional, and gcloud
+# refuses to guess which kind of binding an unconditional add means once a policy
+# contains any: this one is meant to apply everywhere in the bucket.
 retry "granting objectAdmin" \
   gcloud storage buckets add-iam-policy-binding "gs://$GCS_BUCKET" \
   --member "serviceAccount:$GCS_SA_EMAIL" --role roles/storage.objectAdmin \
-  --project "$GCP_PROJECT" '>/dev/null'
+  --condition=None --project "$GCP_PROJECT" '>/dev/null'
 info "granted objectAdmin on gs://$GCS_BUCKET only"
 
 say "GCS key"
