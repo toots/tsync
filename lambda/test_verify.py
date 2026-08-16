@@ -143,7 +143,7 @@ def test_the_aws_event_shape_is_decoded(store_and_verify):
     st.put_bytes(path, bytes(b ^ 0xFF for b in body))
 
     event = {"Records": [{"s3": {"object": {"key": path.replace("/", "%2F")}}}]}
-    assert verify.handler(event, None) == {"checked": 1, "corrupt": 1}
+    assert verify.handler(event, None) == {"checked": 1, "corrupt": 1, "deleted": 0}
 
 
 def test_a_job_sweeps_its_shard(store_and_verify):
