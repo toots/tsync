@@ -19,6 +19,41 @@ open Check
 
 let env name = match Sys.getenv_opt name with Some "" | None -> None | v -> v
 
+(* Whether a verifier is deployed on this store's bucket, which decides both
+   what the client may hand over and what the suite may expect to still be
+   there. Read once so the backend field and the expectations cannot disagree. *)
+let verify_function name =
+  env
+    (Printf.sprintf "TSYNC_CI_%s_VERIFY_FUNCTION" (String.uppercase_ascii name))
+
+(* Folded by the runner; anywhere else they are noise, so they are emitted only
+   where something reads them. A failure is annotated as well as printed: a
+   group is collapsed by default, and a FAILED line inside one is easy to miss.
+*)
+let in_actions = Sys.getenv_opt "GITHUB_ACTIONS" = Some "true"
+let grouped = ref false
+
+let group name =
+  if in_actions then begin
+    if !grouped then print_string "::endgroup::\n";
+    Printf.printf "::group::%s\n%!" name;
+    grouped := true
+  end
+  else Check.case name
+
+let group_end () =
+  if in_actions && !grouped then begin
+    Printf.printf "::endgroup::\n%!";
+    grouped := false
+  end
+
+let check ?why name ok =
+  let detail = if ok then None else Option.map (fun w -> w ()) why in
+  Check.check ?why:(Option.map (fun d () -> d) detail) name ok;
+  if (not ok) && in_actions then
+    Printf.printf "::error::%s%s\n%!" name
+      (match detail with None -> "" | Some d -> " -- " ^ d)
+
 (* One prefix per run, so two runs -- or a run and a human -- never meet. *)
 let run_prefix =
   Printf.sprintf "tsync/ci-%s/"
@@ -233,16 +268,27 @@ let suite name (module B : Backend.S) =
          (List.length batch))
       (left = [])
   in
-  case name;
-  let* () = round_trip () in
-  let* () = copying () in
-  let* () = listing () in
-  let* () = chunk_sized_body () in
-  let* () = racing_claims () in
-  let* () = capabilities () in
-  let* () = deleting () in
-  let* survived = awkward_names () in
-  bulk_delete survived
+  let section label f =
+    group (Printf.sprintf "%s: %s" name label);
+    f ()
+  in
+  let* () = section "round trips, heads and copies" round_trip in
+  let* () = section "copying" copying in
+  let* () = section "listing" listing in
+  let* () = section "a chunk-sized body" chunk_sized_body in
+  let* () = section "racing claims" racing_claims in
+  let* () = section "capabilities" capabilities in
+  let* () = section "deleting" deleting in
+  let* survived = section "awkward key names" awkward_names in
+  section "bulk delete past the cap" (fun () -> bulk_delete survived)
+
+(* Set only for a bucket that has somewhere to hand a delete, so a store with no
+   function keeps answering [`Unsupported] and the collection deletes from the
+   client, exactly as an unmanaged bucket does. *)
+let deletes_here name =
+  match verify_function name with
+    | None -> []
+    | Some _ -> [("deleteFunction", "true")]
 
 let backend_of name fields =
   Backend.make ~backend_type:name ~get_field:(fun k -> List.assoc_opt k fields)
@@ -256,6 +302,7 @@ let backend_of name fields =
    the function ever runs. *)
 let verify_suite name fields =
   let open Lwt.Syntax in
+  group (Printf.sprintf "%s: whole-store verification requests" name);
   let chunk_prefix = run_prefix ^ "chunks/" in
   let jobs = Chunk_layout.verify_jobs_prefix ~chunk_prefix in
   let (module On : Backend.S) = backend_of name fields in
@@ -266,8 +313,16 @@ let verify_suite name fields =
   check "verify_all queues one request per shard"
     (answer = `Queued Chunk_layout.shards);
   let* queued = On.list_prefix ~prefix:jobs () in
-  check "the requests are objects the store lists back"
-    (List.length queued = Chunk_layout.shards);
+  (* A deployed function eats these as they arrive, so a complete listing is
+     only the answer when nothing is listening. Asking for all of them against a
+     live bucket is asking the function not to have run. *)
+  (match verify_function name with
+    | None ->
+        check "the requests are objects the store lists back"
+          (List.length queued = Chunk_layout.shards)
+    | Some _ ->
+        check "the requests are objects the store lists back, or already taken"
+          (List.length queued <= Chunk_layout.shards));
   check "and each names a shard"
     (List.for_all
        (fun (e : Backend.file_entry) ->
@@ -314,6 +369,7 @@ let verify_suite name fields =
    whole reason this is worth having. *)
 let live_delete_suite name (module B : Backend.S) =
   let open Lwt.Syntax in
+  group (Printf.sprintf "%s: the deployed function" name);
   match
     env
       (Printf.sprintf "TSYNC_CI_%s_VERIFY_FUNCTION"
@@ -398,7 +454,9 @@ let () =
             (env "TSYNC_CI_GCS_BUCKET", env "TSYNC_CI_GCS_SERVICE_ACCOUNT_KEY")
           with
             | Some bucket, Some key ->
-                Some [("bucket", bucket); ("serviceAccountKey", key)]
+                Some
+                  (("bucket", bucket) :: ("serviceAccountKey", key)
+                 :: deletes_here "gcs")
             | _ -> None );
       ( "s3",
         fun () ->
@@ -410,12 +468,10 @@ let () =
           with
             | Some bucket, Some region, Some id, Some secret ->
                 Some
-                  [
-                    ("bucket", bucket);
-                    ("region", region);
-                    ("accessKeyId", id);
-                    ("secretAccessKey", secret);
-                  ]
+                  (("bucket", bucket) :: ("region", region)
+                 :: ("accessKeyId", id)
+                  :: ("secretAccessKey", secret)
+                  :: deletes_here "s3")
             | _ -> None );
     ]
   in
@@ -449,9 +505,11 @@ let () =
   (* A run that verified nothing must not look like a run that passed: that is
      how a job goes green while testing an empty set. *)
   if !ran = 0 then begin
+    group_end ();
     Printf.printf
       "\nno store was both linked and configured -- nothing verified\n";
     exit 2
   end;
+  group_end ();
   step "across %d store(s)" !ran;
   report ()
