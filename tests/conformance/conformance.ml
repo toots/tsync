@@ -266,20 +266,47 @@ let verify_suite name fields =
   let* answer = On.verify_all ~chunk_prefix () in
   check "verify_all queues one request per shard"
     (answer = `Queued Chunk_layout.shards);
-  let+ queued = On.list_prefix ~prefix:jobs () in
+  let* queued = On.list_prefix ~prefix:jobs () in
   check "the requests are objects the store lists back"
     (List.length queued = Chunk_layout.shards);
   check "and each names a shard"
     (List.for_all
        (fun (e : Backend.file_entry) ->
          Chunk_layout.shard_of_job e.Backend.key <> None)
-       queued)
+       queued);
+  (* A collection's deletes go the same way, and the request carrying the keys
+     is what stands in for the delete having happened — so that it lands, and
+     reads back byte for byte, is the half of the contract reachable from here.
+
+     [`Unsupported] unless the store is configured as running the function,
+     which is what keeps a bucket with no deployment being handed deletes that
+     nothing would ever act on. *)
+  let doomed = [chunk_prefix ^ "abb/" ^ String.make 16 'a' ^ "-" ^ String.make 16 'b'] in
+  let* answer =
+    On.discard ~chunk_prefix ~run:"0001755300000000" ~name:"abb" ~keys:doomed ()
+  in
+  match answer with
+    | `Unsupported ->
+        check "a store with no delete function says so rather than queueing"
+          true;
+        Lwt.return_unit
+    | `Queued ->
+        let key =
+          Chunk_layout.gc_job_key ~chunk_prefix ~run:"0001755300000000" "abb"
+        in
+        let+ body = On.get_opt ~key () in
+        check "the delete request is an object the store hands back"
+          (body <> None);
+        check "carrying exactly the keys it was given"
+          (Option.map (fun b -> Discard_job.decode (Chunk.to_string b)) body
+          = Some doomed)
 
 (* Cleans up whatever the suite did not, including after a failure.
 
-   Two prefixes, because sweep requests and markers are namespaced beside the
-   store rather than under the domain: a run that only cleared [run_prefix]
-   would leave one per shard behind in a real bucket, every time. *)
+   Three prefixes beside [run_prefix], because sweep requests, delete requests
+   and markers are namespaced beside the store rather than under the domain: a
+   run that only cleared [run_prefix] would leave one per shard behind in a real
+   bucket, every time. *)
 let sweep (module B : Backend.S) =
   let open Lwt.Syntax in
   let clear prefix =
@@ -296,6 +323,7 @@ let sweep (module B : Backend.S) =
   let chunk_prefix = run_prefix ^ "chunks/" in
   let* () = clear run_prefix in
   let* () = clear (Chunk_layout.verify_jobs_prefix ~chunk_prefix) in
+  let* () = clear (Chunk_layout.gc_jobs_prefix ~chunk_prefix) in
   clear (Chunk_layout.corrupted_prefix ~chunk_prefix)
 
 let () =
