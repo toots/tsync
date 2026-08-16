@@ -13,14 +13,13 @@ module Make (C : Conf.S) = struct
      onto a bare entry key skips the month directory and silently misses. *)
   let journal_key entry_key = C.journal_prefix ^ Ek.relative_path entry_key
 
-  let write_journal_entry ?entry_key ops =
+  let write_journal_entry_body ?entry_key body =
     let ek = match entry_key with Some k -> k | None -> J.entry_key () in
-    let+ () =
-      B.put ~key:(journal_key ek)
-        ~data:(Chunk.of_string (Journal.encode ops))
-        ()
-    in
+    let+ () = B.put ~key:(journal_key ek) ~data:body () in
     ek
+
+  let write_journal_entry ?entry_key ops =
+    write_journal_entry_body ?entry_key (Chunk.of_string (Journal.encode ops))
 
   let bump_cursor entry_key =
     B.put ~key:C.cursor_key ~data:(Chunk.of_string (Ek.to_string entry_key)) ()

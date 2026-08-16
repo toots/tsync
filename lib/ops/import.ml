@@ -108,6 +108,50 @@ module Make (C : Conf.S) = struct
       let* () = Mf.write key state in
       Lwt.return (Imported state.Manifest.size))
 
+  (* A journal entry is one JSON object per line, so an import records its ops
+     where they are already in that form. Held in a list until the end, they and
+     the string they encode to grow with the tree rather than with what is in
+     flight, which on a small machine is the largest thing the run keeps. *)
+  module Spool = struct
+    type t = { path : string; out : Lwt_io.output_channel }
+
+    let create () =
+      let dir = Filename.concat C.cache_root "import" in
+      let* () = Fs_util.mkdir_p dir in
+      let path = Fs_util.temp_path (Filename.concat dir "journal") in
+      let+ out = Lwt_io.open_file ~mode:Lwt_io.Output path in
+      { path; out }
+
+    let add t ops = Lwt_io.write t.out (Journal.encode ops)
+
+    (* [src] is taken as finished: what it holds is only all of it once its own
+       channel has been flushed. *)
+    let append t src =
+      let* () = Lwt_io.close src.out in
+      Lwt_io.with_file ~mode:Lwt_io.Input src.path (fun ic ->
+          Lwt_io.write_chars t.out (Lwt_io.read_chars ic))
+
+    let remove t =
+      let* () =
+        Lwt.catch (fun () -> Lwt_io.close t.out) (fun _ -> Lwt.return_unit)
+      in
+      Fs_util.unlink_quiet t.path
+
+    (* [map_file] asks for a file nothing rewrites in place, which is what this
+       is once the channel behind it is closed. *)
+    let body t =
+      let* () = Lwt_io.close t.out in
+      let+ st = Lwt_unix.stat t.path in
+      Chunk.map_file ~path:t.path ~offset:0 ~len:st.Unix.st_size
+  end
+
+  let tally summary = function
+    | Imported _ -> { summary with imported = summary.imported + 1 }
+    | Skipped_exists -> { summary with skipped = summary.skipped + 1 }
+    | Skipped_symlink ->
+        { summary with skipped_symlinks = summary.skipped_symlinks + 1 }
+    | Failed _ -> { summary with failed = summary.failed + 1 }
+
   (* Ancestor directory rels, root first ("a/b/c" → ["a"; "a/b"]). *)
   let ancestors rel =
     let rec go acc d =
@@ -159,96 +203,95 @@ module Make (C : Conf.S) = struct
           Log.err "import %s: %s" rel msg;
           Lwt.return (Failed msg))
     in
-    let* file_statuses =
-      Lwt_list.map_s
-        (fun rel ->
-          let+ status =
-            guard rel (fun () -> import_file ~force_rehash ~src_root:src rel)
-          in
+    let counts =
+      ref { imported = 0; skipped = 0; skipped_symlinks = 0; failed = 0 }
+    in
+    let* puts = Spool.create () in
+    Lwt.finalize
+      (fun () ->
+        let record ~rel status =
           on_file ~rel status;
-          (rel, status))
-        files
-    in
-    let* symlink_statuses =
-      Lwt_list.map_s
-        (fun (rel, target) ->
-          let* status =
-            guard rel (fun () ->
-                match C.symlink_policy with
-                  | `Keep ->
-                      import_symlink ~force_rehash ~src_root:src rel target
-                  | `Follow -> (
-                      let abs_target =
-                        if Filename.is_relative target then
-                          Filename.concat
-                            (Filename.dirname (Filename.concat src rel))
-                            target
-                        else target
-                      in
-                      let* kind = Fs_util.lstat_kind abs_target in
-                      match kind with
-                        | `Missing -> Lwt.return Skipped_symlink
-                        | _ -> import_file ~force_rehash ~src_root:src rel)
-                  | `Skip -> Lwt.return Skipped_symlink)
-          in
-          on_file ~rel status;
-          Lwt.return (rel, status))
-        symlinks
-    in
-    let all_statuses = file_statuses @ symlink_statuses in
-    (* Every folder needs its own marker under the inode layout, files not
-       encoding their path. [dirs] is sorted, so parents precede children and id
-       resolution finds them. *)
-    let* dir_ids =
-      Lwt_list.map_s
-        (fun rel ->
-          let key = C.domain_prefix ^ rel ^ "/" in
-          let* () = Mf.create_dir key in
-          let* () = St.put_folder_marker ~key in
-          (* Minted by the marker above; read back so the journal entry carries
-             the id a peer resolves the folder by. *)
-          let* id =
-            Folder_ids.ensure_id ~cache_root:C.cache_root
-              ~domain_name:C.domain_name rel
-          in
-          on_dir ~rel;
-          Lwt.return (rel, id))
-        dirs
-    in
-    let ops =
-      List.map (fun (d, id) -> `Mkdir (d ^ "/", Some id)) dir_ids
-      @ List.filter_map
-          (function
-            | rel, Imported size -> Some (`Put (rel, size))
-            | _, (Skipped_exists | Skipped_symlink | Failed _) -> None)
-          all_statuses
-    in
-    let+ () =
-      if ops = [] then Lwt.return_unit
-      else
-        let* entry_key = Fs.write_journal_entry ops in
-        Fs.bump_cursor entry_key
-    in
-    {
-      imported =
-        List.length
-          (List.filter
-             (function _, Imported _ -> true | _ -> false)
-             all_statuses);
-      skipped =
-        List.length
-          (List.filter
-             (function _, Skipped_exists -> true | _ -> false)
-             all_statuses);
-      skipped_symlinks =
-        List.length
-          (List.filter
-             (function _, Skipped_symlink -> true | _ -> false)
-             all_statuses);
-      failed =
-        List.length
-          (List.filter
-             (function _, Failed _ -> true | _ -> false)
-             all_statuses);
-    }
+          counts := tally !counts status;
+          match status with
+            | Imported size -> Spool.add puts [`Put (rel, size)]
+            | Skipped_exists | Skipped_symlink | Failed _ -> Lwt.return_unit
+        in
+        let* () =
+          Lwt_list.iter_s
+            (fun rel ->
+              let* status =
+                guard rel (fun () ->
+                    import_file ~force_rehash ~src_root:src rel)
+              in
+              record ~rel status)
+            files
+        in
+        let* () =
+          Lwt_list.iter_s
+            (fun (rel, target) ->
+              let* status =
+                guard rel (fun () ->
+                    match C.symlink_policy with
+                      | `Keep ->
+                          import_symlink ~force_rehash ~src_root:src rel target
+                      | `Follow -> (
+                          let abs_target =
+                            if Filename.is_relative target then
+                              Filename.concat
+                                (Filename.dirname (Filename.concat src rel))
+                                target
+                            else target
+                          in
+                          let* kind = Fs_util.lstat_kind abs_target in
+                          match kind with
+                            | `Missing -> Lwt.return Skipped_symlink
+                            | _ -> import_file ~force_rehash ~src_root:src rel)
+                      | `Skip -> Lwt.return Skipped_symlink)
+              in
+              record ~rel status)
+            symlinks
+        in
+        (* Every folder needs its own marker under the inode layout, files not
+           encoding their path. [dirs] is sorted, so parents precede children
+           and id resolution finds them. *)
+        let* dir_ids =
+          Lwt_list.map_s
+            (fun rel ->
+              let key = C.domain_prefix ^ rel ^ "/" in
+              let* () = Mf.create_dir key in
+              let* () = St.put_folder_marker ~key in
+              (* Minted by the marker above; read back so the journal entry
+                 carries the id a peer resolves the folder by. *)
+              let* id =
+                Folder_ids.ensure_id ~cache_root:C.cache_root
+                  ~domain_name:C.domain_name rel
+              in
+              on_dir ~rel;
+              Lwt.return (rel, id))
+            dirs
+        in
+        let mkdirs =
+          List.map (fun (d, id) -> `Mkdir (d ^ "/", Some id)) dir_ids
+        in
+        (* A peer replays the entry in order and resolves a file's folder by the
+           id its marker carries, so the markers go ahead of the puts the passes
+           above recorded. *)
+        let+ () =
+          if mkdirs = [] && !counts.imported = 0 then Lwt.return_unit
+          else
+            let* entry = Spool.create () in
+            Lwt.finalize
+              (fun () ->
+                let* () =
+                  if mkdirs = [] then Lwt.return_unit
+                  else Spool.add entry mkdirs
+                in
+                let* () = Spool.append entry puts in
+                let* body = Spool.body entry in
+                let* entry_key = Fs.write_journal_entry_body body in
+                Fs.bump_cursor entry_key)
+              (fun () -> Spool.remove entry)
+        in
+        !counts)
+      (fun () -> Spool.remove puts)
 end

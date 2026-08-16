@@ -12,6 +12,12 @@ module Make (C : Conf.S) : sig
     Journal.op list ->
     Journal.Entry_key.t Lwt.t
 
+  (** {!write_journal_entry} for a body already encoded, and for the caller that
+      assembled it somewhere other than the heap: an import records one op per
+      file, and their encoding is the largest string it would otherwise hold. *)
+  val write_journal_entry_body :
+    ?entry_key:Journal.Entry_key.t -> Chunk.t -> Journal.Entry_key.t Lwt.t
+
   val bump_cursor : Journal.Entry_key.t -> unit Lwt.t
   val fetch_cursor : unit -> Journal.Entry_key.t option Lwt.t
 
