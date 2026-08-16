@@ -212,7 +212,17 @@ module Make (J : JOB) = struct
   (* Dropped without waiting: the record names work whose data is no longer
      staged, which is exactly what a reconcile discards on the next start. *)
   let forget_pending t = function
-    | Some e -> Lwt.async (fun () -> Records.complete t.log e.id)
+    | Some e ->
+        Lwt.async (fun () ->
+            Lwt.catch
+              (fun () -> Records.complete t.log e.id)
+              (fun exn ->
+                (* Detached, so nothing else would report it, and in a process
+                   with no async hook installed it would end the process over a
+                   record a reconcile discards anyway. *)
+                Log.err "durable queue: dropping %s: %s" e.id
+                  (Printexc.to_string exn);
+                Lwt.return_unit))
     | None -> ()
 
   (* The job is on disk before the caller is told the write is done. Recorded in

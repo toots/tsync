@@ -138,6 +138,14 @@ module Make (C : Conf.S) (R : Remote.S) = struct
   (* Credits {!pulls} as a foreground read does: prefetch is what pulls the bytes
      during sequential streaming, so leaving it out would empty the display
      exactly when a large file is downloading well. *)
+  (* One loop per sequential read, and a FUSE read is 128 KiB, so streaming a
+     gigabyte fires thousands of these. They are mostly redundant —
+     {!Chunk_cache.ensure_fetched} hands a second caller the in-flight promise —
+     but the spawn rate is the reader's, not ours, so the count in flight is
+     ours to hold down. *)
+  let readahead_in_flight = ref 0
+  let max_readahead_loops = 4
+
   let read_ahead ~id ~size ~table ~per ~chunk_size ~last =
     let n = Chunk_table.count table in
     let window =
@@ -146,25 +154,31 @@ module Make (C : Conf.S) (R : Remote.S) = struct
     in
     let first = (Chunk_group.index_of ~per last + 1) * per in
     let hi = min (n - 1) (first + (window * per) - 1) in
-    if first <= hi then
+    if first <= hi && !readahead_in_flight < max_readahead_loops then (
+      incr readahead_in_flight;
       Lwt.async (fun () ->
-          Lwt.catch
+          Lwt.finalize
             (fun () ->
-              let rec go i =
-                if i > hi then Lwt.return_unit
-                else
-                  let* () =
-                    match Chunk_group.of_table ~table ~per i with
-                      | Some group ->
-                          let+ fetched = Cc.ensure_fetched ~group () in
-                          if fetched then
-                            credit_pull id ~size (Chunk_group.bytes group)
-                      | None -> Lwt.return_unit
+              Lwt.catch
+                (fun () ->
+                  let rec go i =
+                    if i > hi then Lwt.return_unit
+                    else
+                      let* () =
+                        match Chunk_group.of_table ~table ~per i with
+                          | Some group ->
+                              let+ fetched = Cc.ensure_fetched ~group () in
+                              if fetched then
+                                credit_pull id ~size (Chunk_group.bytes group)
+                          | None -> Lwt.return_unit
+                      in
+                      go (i + per)
                   in
-                  go (i + per)
-              in
-              go first)
-            (fun _ -> Lwt.return_unit))
+                  go first)
+                (fun _ -> Lwt.return_unit))
+            (fun () ->
+              decr readahead_in_flight;
+              Lwt.return_unit)))
 
   (* [id] names the file for the read-ahead heuristic and for {!pulling}, which
      is how a byte fetched here is attributed to the file someone is reading. *)
@@ -1041,10 +1055,14 @@ module Make (C : Conf.S) (R : Remote.S) = struct
   let groups_bytes groups =
     List.fold_left (fun acc g -> acc + Chunk_group.bytes g) 0 groups
 
-  (* Every group is asked for at once; the bound lives in
-     {!Chunk_cache.ensure}, which limits what a request goes on to do.
+  (* Wide enough to keep {!Chunk_cache}'s own download bound saturated, and no
+     wider: a whole-file materialization is one element per group, so a 250 GB
+     archive is sixteen thousand of them and each does a stat and a table insert
+     before it ever queues for a download slot. Its own pool, the one inside
+     [ensure_fetched] being what the work then waits on. *)
+  let group_slots = Lwt_bounded.create ~max:(4 * max 1 C.max_downloads) ()
 
-     ponytail: credit is per group — 16 MB at the defaults, so a file smaller
+  (* ponytail: credit is per group — 16 MB at the defaults, so a file smaller
      than one group only moves when it finishes; doing it per stored chunk needs
      a listener registry, since {!Chunk_cache.ensure} hands a second caller the
      in-flight promise without its callback. *)
@@ -1052,7 +1070,7 @@ module Make (C : Conf.S) (R : Remote.S) = struct
     (* What is owed the network, not the size of the file: a partly cached file
        finishes sooner, and an ETA is against what is left to come down. *)
     let owed = groups_bytes groups in
-    Lwt_list.iter_p
+    Lwt_bounded.iter_with group_slots
       (fun group ->
         let+ fetched = Cc.ensure_fetched ~group () in
         let bytes = Chunk_group.bytes group in

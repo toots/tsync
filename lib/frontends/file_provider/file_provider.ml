@@ -253,6 +253,13 @@ type domain_runtime = {
 
 let start ~confs ~socket_path =
   let open Lwt.Syntax in
+  (* Detached work has no caller to fail, and the default hook ends the
+     process over a background error the log would have carried. *)
+  (Lwt.async_exception_hook :=
+     fun exn ->
+       Log.err "%s: async exception: %s" "file-provider"
+         (Printexc.to_string exn));
+
   let error_json msg =
     Yojson.Safe.to_string (`Assoc [("ok", `Bool false); ("error", `String msg)])
   in

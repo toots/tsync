@@ -128,17 +128,24 @@ module Make (C : Conf.S) (F : Fetch) = struct
      request, so a per-call bound would limit each sweep and none of them
      together.
 
-     Held around a stat only — the fanout directories are walked with a plain
-     [map_p] — because holding a slot per directory while its entries queue for
-     the same budget deadlocks. *)
+     Held around a stat only, the directory holding it being {!dir_slots}'s to
+     bound: one pool across both levels deadlocks, every slot held by a
+     directory whose entries are waiting for one. *)
   let metadata_slots = Lwt_bounded.create ~max:64 ()
+
+  (* The shard directories, which is a caller-sized fan-out of its own: the
+     cache is split {!Chunk_layout.shards} ways, and [readdir_list] holds an
+     open directory and its whole name list. Its own pool rather than
+     [metadata_slots], which the entries inside each directory take from —
+     nesting one pool inside itself deadlocks. *)
+  let dir_slots = Lwt_bounded.create ~max:16 ()
 
   (* (path, bytes, mtime) per chunk body. Stat'd in parallel: one at a time is a
      round trip each, milliseconds against seconds on a few thousand chunks. *)
   let entries () =
     let* dirs = Fs_util.readdir_list (root ()) in
     let+ per_dir =
-      Lwt_list.map_p
+      Lwt_bounded.map_with dir_slots
         (fun dir ->
           let dir = Filename.concat (root ()) dir in
           let* names = Fs_util.readdir_list dir in
