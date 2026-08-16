@@ -40,6 +40,22 @@ data "aws_iam_policy_document" "verify" {
     actions   = ["s3:GetObject", "s3:DeleteObject"]
     resources = ["${local.bucket_arn}/tsync/verify-jobs/*"]
   }
+  # Delete requests, the same way. Read to learn which chunks a collection
+  # decided were unreferenced, deleted once every one of them is gone.
+  statement {
+    actions   = ["s3:GetObject", "s3:DeleteObject"]
+    resources = ["${local.bucket_arn}/tsync/gc-jobs/*"]
+  }
+  # Drop chunks on a collection's behalf. Delete and nothing else — this reads
+  # chunks above and must never write one — and scoped to the chunk namespace,
+  # which is as narrow as a resource ARN goes when the domain sits in the middle
+  # of the key. The request body decides which chunks, so it is validated
+  # against the requesting domain in verify.py rather than trusted; this grant
+  # is the ceiling on how wrong that can go.
+  statement {
+    actions   = ["s3:DeleteObject"]
+    resources = ["${local.bucket_arn}/tsync/*/chunks/*"]
+  }
   statement {
     actions   = ["s3:ListBucket"]
     resources = [local.bucket_arn]
@@ -66,8 +82,11 @@ resource "aws_lambda_function" "verify" {
   # migrated (store-s3/main.tf).
   architectures = ["arm64"]
 
-  # One chunk per invocation — 8 MiB by default — so this is a stall guard, not
-  # a budget. No ephemeral storage: nothing here touches /tmp.
+  # One chunk per upload event, or one gc request: its keys plus the marker each
+  # could carry, so twice whatever --delete-batch was set to, in DeleteObjects
+  # calls of a thousand. A stall guard rather than a budget, which is why a
+  # raised --delete-batch is the operator's to keep in step with this. No
+  # ephemeral storage: nothing here touches /tmp.
   timeout     = var.verify_timeout_seconds
   memory_size = var.verify_memory_mb
 
@@ -111,10 +130,10 @@ resource "aws_s3_bucket_notification" "chunks" {
   bucket = local.bucket_id
 
   # One rule, because there can only be one: S3 rejects overlapping prefix
-  # filters for the same event, and both a chunk and a sweep request live under
-  # tsync/. So the filter says "anything of ours" and the function decides what
-  # it was handed — which it does anyway, since a filter is configuration and the
-  # code cannot lean on it.
+  # filters for the same event, and a chunk, a sweep request and a delete
+  # request all live under tsync/. So the filter says "anything of ours" and the
+  # function decides what it was handed — which it does anyway, since a filter
+  # is configuration and the code cannot lean on it.
   lambda_function {
     id                  = "tsync-verify"
     lambda_function_arn = aws_lambda_function.verify.arn

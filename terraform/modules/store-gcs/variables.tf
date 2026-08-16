@@ -91,7 +91,7 @@ variable "source_hash" {
 variable "verify_timeout_seconds" {
   type        = number
   default     = 120
-  description = "Per-object timeout for the chunk verifier. One chunk per invocation, so this is a stall guard rather than a budget."
+  description = "Timeout for the chunk verifier. One chunk per upload event, or one batch of chunk deletes per gc request, so this is a stall guard rather than a budget."
 }
 
 variable "verify_memory_mb" {

@@ -27,3 +27,11 @@ output "service_account_key" {
   sensitive   = true
   value       = base64decode(google_service_account_key.client.private_key)
 }
+
+# This module always wires the notification, so the function is always there to
+# consume chunk-delete requests. Constant rather than absent: a client reads the
+# same field for either cloud.
+output "delete_function" {
+  description = "Whether a tsync client may set deleteFunction on this store."
+  value       = true
+}
