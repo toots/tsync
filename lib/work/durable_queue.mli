@@ -70,6 +70,12 @@ val rescan_all : unit -> unit Lwt.t
     the holder exits, so this is for a caller standing in for that exit. *)
 val release : string -> unit
 
+(** How long a started queue may hold jobs without finishing one before it says
+    so at [warn]. A queue that has gone quiet neither raises nor returns nor
+    logs, so what is reported is the absence. Settable so a test need not wait
+    the default minute. *)
+val set_stall_warning_interval : float -> unit
+
 module Make (J : JOB) : sig
   (** {1 The records} *)
 
