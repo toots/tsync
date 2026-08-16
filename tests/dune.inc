@@ -85,6 +85,14 @@
   (action
    (diff gc_cost.expected gc_cost.output))))
 
+(subdir backends/gc_queued
+ (alias
+  (name default)
+  (deps gc_queued.exe))
+ (rule
+  (alias runtest)
+  (action (run ./gc_queued.exe))))
+
 (subdir backends/gc_targets
  (alias
   (name default)
