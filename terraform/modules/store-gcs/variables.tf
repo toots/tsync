@@ -110,3 +110,14 @@ variable "verify_max_instances" {
   default     = 32
   description = "Ceiling on concurrent chunk-verifier instances. A whole-store sweep makes one request per shard (4096) deliverable at once; this is what stops that from being 4096 concurrent readers."
 }
+
+variable "deploy_share" {
+  type    = bool
+  default = true
+  # False deploys the verification half alone: the chunk verifier, its trigger
+  # and the client credentials, without the share function or the public
+  # endpoint that fronts it. That is what a bucket used only for testing wants —
+  # nothing there serves links, and an unauthenticated URL over it would be
+  # surface for no purpose.
+  description = "Deploy the share function and its public endpoint. False = verification half only."
+}
