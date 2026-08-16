@@ -968,13 +968,24 @@ let gc_cmd =
     let (module C : Conf.S) = load_conf ?domain () in
     let module G = Gc.Make (C) in
     if status then (
-      match run_lwt (G.status ()) with
+      (match run_lwt (G.status ()) with
         | None -> Printf.printf "No collection is open for %s.\n" C.domain_name
         | Some r ->
             Printf.printf "Collection of %s open: %s, %.0fs so far.\n"
               C.domain_name
               (Chunk_space.string_of_phase r.Chunk_space.phase)
-              (Unix.gettimeofday () -. r.Chunk_space.started))
+              (Unix.gettimeofday () -. r.Chunk_space.started));
+      (* Printed whether or not one is open: a request outlives the collection
+         that queued it, and a copy sitting on one is the case this exists to
+         show. *)
+      List.iter
+        (fun (name, count, oldest) ->
+          Printf.printf
+            "  %s: %d delete request(s) outstanding, oldest %s.\n\
+            \    Nothing has picked them up — check the bucket's notification \
+             and the function's logs.\n"
+            name count (G.show_age oldest))
+        (run_lwt (G.outstanding ())))
     else (
       (* Abandoning is the same machinery with everything treated as live, so it
          takes the same pacing and reports the same way — whoever reaches for
