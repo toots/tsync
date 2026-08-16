@@ -58,23 +58,25 @@ let new_cache () = Cache.create ~keep:keep_idle_ns ~parallel:max_parallel ()
    table as permanently failed, so only a new cache redials. It is replaced once
    per generation, so requests that raced into the same dead pool share the one
    redial. *)
-let call t ~meth ?(body = Chunk.empty) uri =
-  let resource = Uri.path_and_query uri in
-  let headers =
-    Cohttp.Header.of_list
-      (Http_proxy.Auth.request_headers ~secret:t.secret
-         ~meth:(Cohttp.Code.string_of_method meth)
-         ~path:resource ~body ())
-  in
+let call_headers t ~meth ~body uri =
+  Cohttp.Header.of_list
+    (Http_proxy.Auth.request_headers ~secret:t.secret
+       ~meth:(Cohttp.Code.string_of_method meth)
+       ~path:(Uri.path_and_query uri) ~body ())
+
+(* The response body is left as it arrives, so a listing can be read page by
+   page; {!call} buffers it for everything whose answer is one value.
+
+   [request_timeout] covers reaching the peer and its status line, not the
+   body: a namespace-sized listing legitimately outlasts it, while a body
+   arriving in pieces cannot stall without the connection saying so. *)
+let call_stream t ~meth ?(body = Chunk.empty) uri =
+  let headers = call_headers t ~meth ~body uri in
   let attempt cache =
     Lwt_unix.with_timeout request_timeout (fun () ->
-        let* resp, rbody =
-          Cache.call cache ~headers
-            ~body:(Cohttp_lwt.Body.of_bigstring (Chunk.buffer body))
-            meth uri
-        in
-        let+ body = Cohttp_lwt.Body.to_bigstring rbody in
-        (resp, Chunk.of_buffer body))
+        Cache.call cache ~headers
+          ~body:(Cohttp_lwt.Body.of_bigstring (Chunk.buffer body))
+          meth uri)
   in
   let used = t.cache in
   Lwt.catch
@@ -84,6 +86,11 @@ let call t ~meth ?(body = Chunk.empty) uri =
           if t.cache == used then t.cache <- new_cache ();
           attempt t.cache
       | exn -> Lwt.fail exn)
+
+let call t ~meth ?(body = Chunk.empty) uri =
+  let* resp, rbody = call_stream t ~meth ~body uri in
+  let+ buffered = Cohttp_lwt.Body.to_bigstring rbody in
+  (resp, Chunk.of_buffer buffered)
 
 let code resp = Cohttp.Code.code_of_status (Cohttp.Response.status resp)
 let is_ok resp = code resp >= 200 && code resp < 300
@@ -188,18 +195,75 @@ let copy t ~src_key ~dst_key () =
   let+ resp, body = call_text t ~meth:`POST "copy" uri in
   if not (is_ok resp) then raise (backend_error "copy" (code resp) body)
 
+let list_query ?max_keys ~prefix extra =
+  [("mode", "all"); ("prefix", prefix)]
+  @ extra
+  @ match max_keys with Some n -> [("max_keys", string_of_int n)] | None -> []
+
 let list_all t ?max_keys ~prefix () =
-  let query =
-    [("mode", "all"); ("prefix", prefix)]
-    @
-      match max_keys with
-      | Some n -> [("max_keys", string_of_int n)]
-      | None -> []
+  let uri =
+    Uri.with_query'
+      (Uri.with_path t.base_uri "/list")
+      (list_query ?max_keys ~prefix [])
   in
-  let uri = Uri.with_query' (Uri.with_path t.base_uri "/list") query in
   let+ resp, body = call_text t ~meth:`GET "list_all" uri in
   if is_ok resp then Http_proxy.Wire.entries_of_json body
   else raise (backend_error "list_all" (code resp) body)
+
+(* Retried only up to the first page: past that the caller has taken keys, and
+   replaying them from the start hands it a key below the one it just saw.
+
+   The listing is finished when its terminator says so, never when the body ends
+   — a connection dropped mid-listing would otherwise read as a namespace that
+   simply holds less than it does, and a resync would copy nothing for the
+   remainder and report success. *)
+let fold_all t ?max_keys ~prefix ~f () =
+  let uri =
+    Uri.with_query'
+      (Uri.with_path t.base_uri "/list")
+      (list_query ?max_keys ~prefix [("stream", "1")])
+  in
+  let fail_with_body op resp body =
+    let* text = Cohttp_lwt.Body.to_string body in
+    Lwt.fail (backend_error op (code resp) (excerpt text))
+  in
+  let* resp, body =
+    Backend.with_retry ~name:"http-proxy" ~op:"fold_prefix" (fun () ->
+        let* resp, body = call_stream t ~meth:`GET uri in
+        if is_transient_code (code resp) then
+          fail_with_body "fold_prefix" resp body
+        else Lwt.return (resp, body))
+  in
+  if not (is_ok resp) then fail_with_body "fold_prefix" resp body
+  else begin
+    let reader = Http_proxy.Wire.reader () in
+    let terminated = ref false in
+    let handle line =
+      match Http_proxy.Wire.parse_line line with
+        | `Page page -> f page
+        | `Done ->
+            terminated := true;
+            Lwt.return_unit
+        | `Error msg ->
+            Lwt.fail
+              (Backend.failed ~kind:Backend.Transient ~op:"fold_prefix" msg)
+    in
+    let* () =
+      Lwt_stream.iter_s
+        (fun part -> Lwt_list.iter_s handle (Http_proxy.Wire.feed reader part))
+        (Cohttp_lwt.Body.to_stream body)
+    in
+    let* () =
+      match String.trim (Http_proxy.Wire.rest reader) with
+        | "" -> Lwt.return_unit
+        | line -> handle line
+    in
+    if !terminated then Lwt.return_unit
+    else
+      Lwt.fail
+        (Backend.failed ~kind:Backend.Transient ~op:"fold_prefix"
+           (Printf.sprintf "listing of %s ended without its terminator" prefix))
+  end
 
 (* The proxy answers yes/no only: behind TLS termination it does not reliably
    know its own public URL, while [base_uri] is exactly the URL this client
@@ -338,6 +402,7 @@ let make ~url ~secret : (module Backend.S) =
     let delete_multi keys = delete_multi t keys
     let copy ~src_key ~dst_key () = copy t ~src_key ~dst_key ()
     let list_prefix ?max_keys ~prefix () = list_all t ?max_keys ~prefix ()
+    let fold_prefix ?max_keys ~prefix ~f () = fold_all t ?max_keys ~prefix ~f ()
 
     (* The peer owns that store and whatever checks it; asking it to start a
        sweep on our behalf is a decision for whoever administers it. *)

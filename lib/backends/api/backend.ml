@@ -1,3 +1,5 @@
+open Lwt.Syntax
+
 type file_entry = { key : string; size : int; last_modified : float }
 
 exception Backend_error of string
@@ -123,6 +125,13 @@ module type S = sig
   val list_prefix :
     ?max_keys:int -> prefix:string -> unit -> file_entry list Lwt.t
 
+  val fold_prefix :
+    ?max_keys:int ->
+    prefix:string ->
+    f:(file_entry list -> unit Lwt.t) ->
+    unit ->
+    unit Lwt.t
+
   val verify_all :
     chunk_prefix:string -> unit -> [ `Queued of int | `Unsupported ] Lwt.t
 
@@ -131,6 +140,19 @@ module type S = sig
       that only holds bytes. *)
   val capabilities : prefix:string -> unit -> caps Lwt.t
 end
+
+(* Reverse accumulation for O(1) prepend: appending each page onto a growing
+   list is O(n^2) over however many objects share a prefix. *)
+let accumulate fold ?max_keys ~prefix () =
+  let acc = ref [] in
+  let+ () =
+    fold ?max_keys ~prefix
+      ~f:(fun page ->
+        acc := page :: !acc;
+        Lwt.return_unit)
+      ()
+  in
+  List.concat (List.rev !acc)
 
 type factory = (string -> string option) -> (module S)
 

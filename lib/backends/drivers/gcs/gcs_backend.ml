@@ -306,29 +306,28 @@ let parse_list body =
   in
   (items, next)
 
-(* Reverse accumulation for O(1) prepend, as the s3 backend does. [max_keys] caps
-   the total and stops paging once reached. *)
-let list_all t ?max_keys ~prefix () =
-  let enough acc =
-    match max_keys with
-      | None -> false
-      | Some n -> List.length (List.concat acc) >= n
-  in
-  let rec collect acc page_token =
-    if enough acc then Lwt.return (List.concat (List.rev acc))
+(* GCS lists a prefix in ascending key order, which {!Backend.fold_prefix} owes
+   its caller. [max_keys] caps the total and stops paging once reached. *)
+let fold_all t ?max_keys ~prefix ~f () =
+  let seen = ref 0 in
+  let enough () = match max_keys with None -> false | Some n -> !seen >= n in
+  let rec collect page_token =
+    if enough () then Lwt.return_unit
     else (
       let uri = list_uri t ?max_keys ~prefix ~page_token () in
       let* resp, body = call_text t ~meth:`GET "ls" uri in
       if not (is_ok resp) then Lwt.fail (backend_error "ls" (code resp) body)
       else begin
         let items, next = parse_list body in
-        let acc = items :: acc in
-        match next with
-          | Some _ -> collect acc next
-          | None -> Lwt.return (List.concat (List.rev acc))
+        seen := !seen + List.length items;
+        let* () = if items = [] then Lwt.return_unit else f items in
+        match next with Some _ -> collect next | None -> Lwt.return_unit
       end)
   in
-  collect [] None
+  collect None
+
+let list_all t ?max_keys ~prefix () =
+  Backend.accumulate (fold_all t) ?max_keys ~prefix ()
 
 let make ?endpoint ?service_account_key ?share_url ~bucket () :
     (module Backend.S) =
@@ -356,6 +355,7 @@ let make ?endpoint ?service_account_key ?share_url ~bucket () :
     let delete_multi keys = delete_multi t keys
     let copy ~src_key ~dst_key () = copy t ~src_key ~dst_key ()
     let list_prefix ?max_keys ~prefix () = list_all t ?max_keys ~prefix ()
+    let fold_prefix ?max_keys ~prefix ~f () = fold_all t ?max_keys ~prefix ~f ()
 
     let verify_all ~chunk_prefix () =
       let+ n =

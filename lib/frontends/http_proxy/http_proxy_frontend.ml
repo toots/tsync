@@ -36,9 +36,17 @@ let make_gate limit = Lwt_bounded.create ~max:limit ~max_waiting:(limit * 16) ()
 (* Published to clients so they hold their own excess. *)
 let effective_max_concurrent : int option ref = ref None
 
+(* A streamed listing is metadata, so it does not belong behind the data gate —
+   but it is not free either: it holds a connection and walks a whole namespace
+   for as long as its client reads, so a handful of clients is a handful of
+   concurrent full-store walks. Its own bound, refusing past the queue as the
+   data gate does, rather than nothing at all. *)
+let listing_gate = Lwt_bounded.create ~max:4 ~max_waiting:64 ()
+
 let bounded op ~busy run =
   match (!gate, op) with
     | Some g, (`Get | `Put) -> Lwt_bounded.use_or g ~busy run
+    | _, `Listing -> Lwt_bounded.use_or listing_gate ~busy run
     | _ -> run ()
 
 let bump name =
@@ -192,7 +200,10 @@ type op =
   | Delete of string
   | Delete_multi of string list
   | Copy of string * string
-  | List_all of string * int option
+  | List_all of { prefix : string; max_keys : int option; stream : bool }
+      (** [stream] asks for the listing a page at a time; without it the whole
+          thing comes back as one array, which is what a client too old to ask
+          expects. *)
   | Share_url of string
   | Chunk_size of string
   | Max_concurrency of string
@@ -244,7 +255,12 @@ let parse_op meth uri body =
     | `GET, "/list" -> (
         match (q "mode", q "prefix") with
           | Some "all", Some prefix ->
-              List_all (prefix, Option.bind (q "max_keys") int_of_string_opt)
+              List_all
+                {
+                  prefix;
+                  max_keys = Option.bind (q "max_keys") int_of_string_opt;
+                  stream = q "stream" = Some "1";
+                }
           | _ -> Bad)
     | `GET, "/chunk-size" -> (
         match q "prefix" with Some prefix -> Chunk_size prefix | None -> Bad)
@@ -260,7 +276,11 @@ let parse_op meth uri body =
 
 (* [Head] is metadata only; [Copy] is settled by the backend without the bytes
    passing through here. *)
-let data_kind = function Get _ -> `Get | Put _ -> `Put | _ -> `Meta
+let data_kind = function
+  | Get _ -> `Get
+  | Put _ -> `Put
+  | List_all { stream = true; _ } -> `Listing
+  | _ -> `Meta
 
 let op_name = function
   | Get _ -> "get"
@@ -284,7 +304,7 @@ let route_key = function
   | Delete_multi (k :: _) -> Some k
   | Delete_multi [] -> None
   | Copy (src, _) -> Some src
-  | List_all (p, _)
+  | List_all { prefix = p; _ }
   | Share_url p
   | Chunk_size p
   | Max_concurrency p
@@ -390,10 +410,41 @@ let exec route op ~body =
             B.copy ~src_key ~dst_key ()
           in
           respond ""
-    | List_all (prefix, max_keys) ->
+    | List_all { prefix; max_keys; stream = false } ->
         let module B = (val route.store : Backend.S) in
         let* entries = B.list_prefix ?max_keys ~prefix () in
         respond (Http_proxy.Wire.entries_to_json entries)
+    | List_all { prefix; max_keys; stream = true } ->
+        let module B = (val route.store : Backend.S) in
+        (* Bounded at one page: the push blocks while the client is slow, which
+           is what keeps a namespace-sized listing from accumulating here.
+
+           A failure part-way cannot become a status code, the status having
+           gone out with the first page, so it goes out as a line the reader
+           raises on. *)
+        let stream, push = Lwt_stream.create_bounded 1 in
+        Lwt.async (fun () ->
+            Lwt.finalize
+              (fun () ->
+                Lwt.catch
+                  (fun () ->
+                    let* () =
+                      B.fold_prefix ?max_keys ~prefix
+                        ~f:(fun page ->
+                          push#push (Http_proxy.Wire.page_line page))
+                        ()
+                    in
+                    push#push Http_proxy.Wire.done_line)
+                  (fun exn ->
+                    push#push (Http_proxy.Wire.error_line (Backend.reason exn))))
+              (fun () ->
+                push#close;
+                Lwt.return_unit));
+        Cohttp_lwt_unix.Server.respond ~status:`OK
+          ~headers:
+            (Cohttp.Header.of_list [("content-type", "application/x-ndjson")])
+          ~body:(Cohttp_lwt.Body.of_stream stream)
+          ()
     | Share_url prefix -> (
         if route.serve_share <> None then
           (* The client composes the URL from the address it already reaches us

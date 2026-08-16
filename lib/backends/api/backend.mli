@@ -101,8 +101,26 @@ module type S = sig
 
   val copy : src_key:string -> dst_key:string -> unit -> unit Lwt.t
 
+  (** Every key under [prefix], in ascending lexicographic order. See
+      {!fold_prefix}, which this accumulates. *)
   val list_prefix :
     ?max_keys:int -> prefix:string -> unit -> file_entry list Lwt.t
+
+  (** The same listing handed to [f] one page at a time, as each page arrives,
+      so neither the driver nor its caller holds the whole thing — a resync
+      lists a whole namespace, which on a real domain is millions of keys.
+
+      {b Keys arrive in ascending lexicographic order within a prefix}, which is
+      what lets two listings be diffed by walking them in step rather than by a
+      HEAD per object; a driver that broke it would turn a resync into a wrong
+      diff, so the spool that consumes one raises on a key that does not exceed
+      its predecessor. *)
+  val fold_prefix :
+    ?max_keys:int ->
+    prefix:string ->
+    f:(file_entry list -> unit Lwt.t) ->
+    unit ->
+    unit Lwt.t
 
   (** Ask the store to check every chunk it holds against its own name and file
       what fails under {!Chunk_layout.corrupted_prefix}, answering how many
@@ -119,6 +137,20 @@ module type S = sig
       identifies the domain, for backends that front several. *)
   val capabilities : prefix:string -> unit -> caps Lwt.t
 end
+
+(** {!S.list_prefix} derived from a driver's own {!S.fold_prefix}: the
+    accumulation is the same for every store, and a driver spelling it itself is
+    one that can get the reversal wrong. *)
+val accumulate :
+  (?max_keys:int ->
+  prefix:string ->
+  f:(file_entry list -> unit Lwt.t) ->
+  unit ->
+  unit Lwt.t) ->
+  ?max_keys:int ->
+  prefix:string ->
+  unit ->
+  file_entry list Lwt.t
 
 (** {1 Failure} *)
 

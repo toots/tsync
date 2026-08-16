@@ -75,6 +75,11 @@ let prune_marker_dirs marker_path =
    one. *)
 let walk_fanout = 64
 
+(* What a walk hands its caller at a time, matching the page an object store
+   answers a listing with so that a caller sees the same granularity whichever
+   store is under it. *)
+let page_size = 1000
+
 (* A device error, a full disk or an exhausted descriptor table clears once the
    condition does; a permissions or read-only-mount problem needs someone to act
    before the same write can succeed. *)
@@ -265,80 +270,114 @@ let make ?(verify_writes = true) ~root () : (module Backend.S) =
         in
         attempt ~parent_made:false)
 
-    let list_prefix ?max_keys ~prefix () =
+    let fold_prefix ?max_keys ~prefix ~f () =
       let base = resolve prefix in
-      (* Entries are stat'd and subdirs recursed in parallel, so on high-latency
-         storage the walk costs a few round trips per level rather than one per
-         entry. *)
+      let entry_of key (st : Unix.stats) =
+        Backend.
+          { key; size = st.Unix.st_size; last_modified = st.Unix.st_mtime }
+      in
+      let remaining = ref (Option.value max_keys ~default:max_int) in
+      let pending = ref [] and pending_len = ref 0 in
+      let emit page =
+        let page =
+          if List.compare_length_with page !remaining <= 0 then page
+          else List.filteri (fun i _ -> i < !remaining) page
+        in
+        if page = [] then Lwt.return_unit
+        else begin
+          remaining := !remaining - List.length page;
+          f page
+        end
+      in
+      let flush () =
+        let page = List.rev !pending in
+        pending := [];
+        pending_len := 0;
+        emit page
+      in
+      (* Children are ordered by the key each of them yields rather than by
+         name, a directory's keys all starting with its name and a slash: that
+         is what puts "a.txt" before "a/b" and "a/b" before "ab", and it is why
+         a subtree is descended into where its name sorts rather than after the
+         files beside it. *)
+      let sort_key (name, kind) =
+        match kind with `Dir -> name ^ "/" | `File _ -> name
+      in
       let rec walk path key_prefix =
         Lwt.catch
           (fun () ->
             let* names = readdir_list path in
-            let+ nested =
-              Lwt_list.map_p
-                (fun entry ->
-                  let full_path = Filename.concat path entry in
-                  let full_key = key_prefix ^ entry in
-                  Lwt.catch
-                    (fun () ->
-                      (* The slot covers the stat only: held across the recursion
-                         below, a deep tree parks every slot in an outer level
-                         while inner levels wait for the same budget. *)
-                      let* st =
-                        Lwt_bounded.use walk_slots (fun () ->
-                            Lwt_unix_retry.stat full_path)
-                      in
-                      match st.Unix.st_kind with
-                        | Unix.S_REG ->
-                            Lwt.return
-                              [
-                                Backend.
-                                  {
-                                    key = full_key;
-                                    size = st.Unix.st_size;
-                                    last_modified = st.Unix.st_mtime;
-                                  };
-                              ]
-                        | Unix.S_DIR -> walk full_path (full_key ^ "/")
-                        | _ -> Lwt.return [])
-                    (function
-                      | Unix.Unix_error (Unix.ENOENT, _, _) -> Lwt.return []
-                      | exn -> Lwt.fail exn))
-                names
-            in
-            let entries = List.concat nested in
-            (* Empty directories surface as their marker key, matching the
-               zero-byte object S3 lists. *)
-            if names = [] && is_dir_key key_prefix then
-              [Backend.{ key = key_prefix; size = 0; last_modified = 0. }]
-            else entries)
+            if names = [] then
+              (* Empty directories surface as their marker key, matching the
+                 zero-byte object S3 lists. *)
+              if is_dir_key key_prefix then
+                emit
+                  [Backend.{ key = key_prefix; size = 0; last_modified = 0. }]
+              else Lwt.return_unit
+            else
+              (* Entries are stat'd in parallel, so on high-latency storage the
+                 walk costs a few round trips per level rather than one per
+                 entry. *)
+              let* children =
+                Lwt_list.map_p
+                  (fun name ->
+                    Lwt.catch
+                      (fun () ->
+                        let+ st =
+                          Lwt_bounded.use walk_slots (fun () ->
+                              Lwt_unix_retry.stat (Filename.concat path name))
+                        in
+                        match st.Unix.st_kind with
+                          | Unix.S_REG -> Some (name, `File st)
+                          | Unix.S_DIR -> Some (name, `Dir)
+                          | _ -> None)
+                      (function
+                        | Unix.Unix_error (Unix.ENOENT, _, _) -> Lwt.return_none
+                        | exn -> Lwt.fail exn))
+                  names
+              in
+              let children =
+                List.sort
+                  (fun a b -> String.compare (sort_key a) (sort_key b))
+                  (List.filter_map Fun.id children)
+              in
+              Lwt_list.iter_s
+                (fun (name, kind) ->
+                  if !remaining <= 0 then Lwt.return_unit
+                  else (
+                    match kind with
+                      | `File st ->
+                          pending := entry_of (key_prefix ^ name) st :: !pending;
+                          incr pending_len;
+                          if !pending_len >= page_size then flush ()
+                          else Lwt.return_unit
+                      | `Dir ->
+                          let* () = flush () in
+                          walk
+                            (Filename.concat path name)
+                            (key_prefix ^ name ^ "/")))
+                children)
           (function
-            | Unix.Unix_error (Unix.ENOENT, _, _) -> Lwt.return_nil
-            | Unix.Unix_error (Unix.ENOTDIR, _, _) ->
-                Lwt.catch
-                  (fun () ->
-                    let+ st = Lwt_unix_retry.stat base in
-                    [
-                      Backend.
-                        {
-                          key = prefix;
-                          size = st.Unix.st_size;
-                          last_modified = st.Unix.st_mtime;
-                        };
-                    ])
-                  (fun _ -> Lwt.return_nil)
+            | Unix.Unix_error (Unix.ENOENT, _, _) -> Lwt.return_unit
             | exn -> Lwt.fail exn)
       in
-      let+ entries = walk base prefix in
-      let entries =
-        List.sort
-          (fun a b -> String.compare a.Backend.key b.Backend.key)
-          entries
-      in
-      match max_keys with
-        | Some n when List.length entries > n ->
-            List.filteri (fun i _ -> i < n) entries
-        | _ -> entries
+      Lwt.catch
+        (fun () ->
+          let* () = walk base prefix in
+          flush ())
+        (function
+          (* Only the root can be a plain file: nothing below is descended into
+             unless it stat'd as a directory. *)
+          | Unix.Unix_error (Unix.ENOTDIR, _, _) ->
+              Lwt.catch
+                (fun () ->
+                  let* st = Lwt_unix_retry.stat base in
+                  emit [entry_of prefix st])
+                (fun _ -> Lwt.return_unit)
+          | exn -> Lwt.fail exn)
+
+    let list_prefix ?max_keys ~prefix () =
+      Backend.accumulate fold_prefix ?max_keys ~prefix ()
 
     (* Probed once: the device under a configured root does not change, and this
        is asked with a request waiting on the answer. *)

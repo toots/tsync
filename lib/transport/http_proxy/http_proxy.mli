@@ -49,4 +49,39 @@ module Wire : sig
   val entries_of_json : string -> Backend.file_entry list
 
   val entries_to_json : Backend.file_entry list -> string
+
+  (** {1 A listing, a page per line}
+
+      So that neither end holds a whole namespace to write or parse it. The last
+      line is {!done_line}: a chunked body that stops early looks exactly like
+      one that finished, and a source listing cut short is objects a resync
+      never copies and never reports, so a reader checks for the terminator
+      rather than trusting end-of-body.
+
+      Both ends must be of a version, as for {!Backend.S.put_if_absent}: a
+      client too old to know the framing fails on the terminator line, and a
+      client too new fails on its absence. Neither reads as success. *)
+
+  val page_line : Backend.file_entry list -> string
+  val done_line : string
+  val error_line : string -> string
+
+  (** Raises [Failure] on a line that is none of the three. *)
+  val parse_line :
+    string -> [ `Page of Backend.file_entry list | `Done | `Error of string ]
+
+  (** Reassembly, which belongs with the framing rather than with whoever reads:
+      a body arrives in whatever pieces the network chose, and a page split
+      across two of them is the ordinary case rather than the odd one. *)
+  type reader
+
+  val reader : unit -> reader
+
+  (** The complete lines in [chunk] together with what earlier feeds left over;
+      an incomplete trailing line is kept for the next call. *)
+  val feed : reader -> string -> string list
+
+  (** What is still buffered, which after the last chunk of a well-formed stream
+      is nothing. *)
+  val rest : reader -> string
 end

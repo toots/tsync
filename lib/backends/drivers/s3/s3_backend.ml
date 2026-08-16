@@ -182,28 +182,28 @@ let copy t ~src_key ~dst_key () =
   let* data = get t ~key:src_key () in
   put t ~key:dst_key ~data ()
 
-let list_all t ?max_keys ~prefix () =
-  (* Reverse accumulation for O(1) prepend: appending each page onto a growing
-     list is O(n^2), and this runs over however many objects share the prefix (a
-     whole namespace during a resync).
-
-     [max_keys] stops pagination once reached, so a bounded existence check
-     costs one small request rather than a full listing. *)
-  let enough acc =
-    match max_keys with
-      | None -> false
-      | Some n -> List.length (List.concat acc) >= n
+(* S3 lists a prefix in ascending key order, which {!Backend.fold_prefix} owes
+   its caller. [max_keys] stops pagination once reached, so a bounded existence
+   check costs one small request rather than a full listing. *)
+let fold_all t ?max_keys ~prefix ~f () =
+  let seen = ref 0 in
+  let page items =
+    let page = List.map entry_of items in
+    seen := !seen + List.length page;
+    if page = [] then Lwt.return_unit else f page
   in
-  let rec collect acc cont =
-    if enough acc then Lwt.return (List.concat (List.rev acc))
+  let enough () = match max_keys with None -> false | Some n -> !seen >= n in
+  let rec collect cont =
+    if enough () then Lwt.return_unit
     else (
       match cont with
-        | S3.Ls.Done -> Lwt.return (List.concat (List.rev acc))
-        | S3.Ls.More f -> (
-            let* res = with_retry "ls-cont" (fun () -> f ?max_keys ()) in
+        | S3.Ls.Done -> Lwt.return_unit
+        | S3.Ls.More more -> (
+            let* res = with_retry "ls-cont" (fun () -> more ?max_keys ()) in
             match res with
               | Ok (items, next) ->
-                  collect (List.map entry_of items :: acc) next
+                  let* () = page items in
+                  collect next
               | Error e -> Lwt.fail (failed "ls-cont" e)))
   in
   let* res =
@@ -212,10 +212,15 @@ let list_all t ?max_keys ~prefix () =
           ?max_keys ~prefix ())
   in
   match res with
-    | Ok (items, cont) -> collect [List.map entry_of items] cont
+    | Ok (items, cont) ->
+        let* () = page items in
+        collect cont
     | Error e ->
         Log.err "s3 ls %s: %s" prefix (string_of_error e);
         Lwt.fail (failed "ls" e)
+
+let list_all t ?max_keys ~prefix () =
+  Backend.accumulate (fold_all t) ?max_keys ~prefix ()
 
 let make ?endpoint ?unsigned_payload ?share_url ~bucket ~region ~access_key_id
     ~secret_access_key () : (module Backend.S) =
@@ -248,6 +253,7 @@ let make ?endpoint ?unsigned_payload ?share_url ~bucket ~region ~access_key_id
     let delete_multi keys = delete_multi t keys
     let copy ~src_key ~dst_key () = copy t ~src_key ~dst_key ()
     let list_prefix ?max_keys ~prefix () = list_all t ?max_keys ~prefix ()
+    let fold_prefix ?max_keys ~prefix ~f () = fold_all t ?max_keys ~prefix ~f ()
 
     let verify_all ~chunk_prefix () =
       let+ n =

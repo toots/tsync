@@ -1,0 +1,20 @@
+(executable
+ (flags
+  (:standard
+   -open
+   Tsync_local_io
+   -open
+   Tsync_backend_register
+   -open
+   Tsync_local_backend
+   -open
+   Tsync_test_harness))
+ (name list_order)
+ (libraries
+  tsync_local_io
+  tsync_test_harness
+  tsync_backend_register
+  tsync_local_backend
+  lwt
+  lwt.unix
+  unix))

@@ -71,4 +71,52 @@ module Wire = struct
     match Yojson.Safe.from_string s with
       | `List l -> List.map file_entry_of_json l
       | _ -> failwith "expected a JSON array of entries"
+
+  (* A page is the array [entries_to_json] already writes, and the newline
+     separates two of them, which is sound because Yojson escapes a newline
+     inside a key rather than emitting one. *)
+  let page_line entries = entries_to_json entries ^ "\n"
+
+  (* A chunked response that stops early is indistinguishable from one that
+     finished, and a source listing silently cut short means objects the resync
+     never copies and never mentions. The terminator is what a reader checks for
+     instead of trusting end-of-body. *)
+  let done_line = "{\"done\":true}\n"
+
+  let error_line msg =
+    Yojson.Safe.to_string (`Assoc [("error", `String msg)]) ^ "\n"
+
+  (* The network splits a body wherever it likes, so reassembly belongs with the
+     framing rather than in whoever happens to be reading. *)
+  type reader = { mutable rest : string }
+
+  let reader () = { rest = "" }
+  let rest r = r.rest
+
+  let feed r chunk =
+    let s = r.rest ^ chunk in
+    let len = String.length s in
+    let rec go start acc =
+      match String.index_from_opt s start '\n' with
+        | None ->
+            r.rest <- String.sub s start (len - start);
+            List.rev acc
+        | Some i ->
+            let line = String.sub s start (i - start) in
+            go (i + 1) (if line = "" then acc else line :: acc)
+    in
+    go 0 []
+
+  let parse_line line =
+    match Yojson.Safe.from_string line with
+      | `List _ -> `Page (entries_of_json line)
+      | `Assoc _ as j -> (
+          let open Yojson.Safe.Util in
+          match j |> member "error" with
+            | `String msg -> `Error msg
+            | _ -> (
+                match j |> member "done" with
+                  | `Bool true -> `Done
+                  | _ -> failwith "unrecognised listing line"))
+      | _ -> failwith "unrecognised listing line"
 end

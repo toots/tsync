@@ -349,6 +349,7 @@ let reading_from name (module C : Conf.S) : (module Conf.S) =
         let get_opt = Src.get_opt
         let head_opt = Src.head_opt
         let list_prefix = Src.list_prefix
+        let fold_prefix = Src.fold_prefix
       end : Backend.S)
   end : Conf.S)
 

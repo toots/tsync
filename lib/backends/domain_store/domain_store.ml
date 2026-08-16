@@ -52,8 +52,12 @@ let rec make ~(mains : sub list)
       targets
   in
   (* [stop_on_miss] takes the first reachable store's [None] as the answer;
-     otherwise a miss moves on. [`Unreachable exn] when every store raised. *)
-  let walk ~stop_on_miss label chain f =
+     otherwise a miss moves on. [`Unreachable exn] when every store raised.
+
+     [committed] is asked before moving on: an operation that has already handed
+     the caller part of its answer cannot be retried against another store,
+     which would deliver the beginning of it a second time. *)
+  let walk ~stop_on_miss ~committed label chain f =
     let rec go last = function
       | [] -> (
           match last with
@@ -66,31 +70,33 @@ let rec make ~(mains : sub list)
                 let module B = (val s.backend : Backend.S) in
                 let+ v = f (module B : Backend.S) in
                 `Got v)
-              (fun exn ->
-                Log.warn "domain store %s: %s unavailable (%s); trying next"
-                  label s.name (Printexc.to_string exn);
-                Lwt.return (`Err exn))
+              (fun exn -> Lwt.return (`Err exn))
           in
           match outcome with
             | `Got (Some v) -> Lwt.return (`Answer v)
             | `Got None ->
                 if stop_on_miss then Lwt.return `Miss else go last rest
-            | `Err exn -> go (Some exn) rest)
+            | `Err exn when committed () -> Lwt.fail exn
+            | `Err exn ->
+                Log.warn "domain store %s: %s unavailable (%s); trying next"
+                  label s.name (Printexc.to_string exn);
+                go (Some exn) rest)
     in
     go None chain
   in
   (* A miss is reported only when every store that could hold the key was
      actually asked: an unreachable one surfaces its error, since "could not
-     look" must not read as "not there". *)
-  let read label f =
-    let* first = walk ~stop_on_miss:true label readable f in
+     look" must not read as "not there". That is also why the readable phase's
+     error wins over an archive's — it names the store that should have had it. *)
+  let read ?(committed = fun () -> false) label f =
+    let* first = walk ~stop_on_miss:true ~committed label readable f in
     match first with
       | `Answer v -> Lwt.return (Some v)
       | _ -> (
           let unasked =
             match first with `Unreachable exn -> Some exn | _ -> None
           in
-          let* second = walk ~stop_on_miss:false label archives f in
+          let* second = walk ~stop_on_miss:false ~committed label archives f in
           match second with
             | `Answer v -> Lwt.return (Some v)
             | `Unreachable exn -> Lwt.fail (Option.value unasked ~default:exn)
@@ -172,6 +178,26 @@ let rec make ~(mains : sub list)
             Some l)
       in
       Lwt.return (Option.value r ~default:[])
+
+    (* One store's view wins here too, so the order it lists in is the order the
+       caller sees. Once a page has reached [f] the listing is committed: another
+       store would restart it and hand the caller the same keys twice, out of
+       order, which is worse than the failure it was covering for. *)
+    let fold_prefix ?max_keys ~prefix ~f () =
+      let delivered = ref false in
+      let f page =
+        delivered := true;
+        f page
+      in
+      let+ (_ : unit option) =
+        read
+          ~committed:(fun () -> !delivered)
+          "fold_prefix"
+          (fun (module B : Backend.S) ->
+            let+ () = B.fold_prefix ?max_keys ~prefix ~f () in
+            Some ())
+      in
+      ()
 
     (* Fanned out to the mains and the readable targets, and summed: each store
        runs its own check, and one that cannot is not a reason the others should

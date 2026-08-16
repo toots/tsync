@@ -1,0 +1,33 @@
+=== the whole store, listed
+  a-
+  a/z
+  a0
+  aa
+  b/
+  b0
+  deep/x/y/f
+list_prefix comes back ascending: ok
+the subtree sorts between the files it belongs between: ok
+an empty directory surfaces as its marker, in position: ok
+
+=== the same store, a page at a time
+  page 0: a-
+  page 1: a/z a0 aa
+  page 2: b/
+  page 3: b0
+  page 4: deep/x/y/f
+every page is ascending within itself: ok
+and each page starts above where the last one ended: ok
+the pages concatenate to exactly what list_prefix answered: ok
+no page is empty: ok
+
+=== bounds and edges
+  max_keys:3 -> a- a/z a0
+max_keys takes the first three in that order: ok
+  a plain file as the prefix -> a0
+a prefix that names a file answers with that one object: ok
+a prefix that names nothing answers with nothing: ok
+  under deep/ -> deep/x/y/f
+a scoped prefix walks only its own subtree: ok
+
+11 check(s), 0 failure(s)
