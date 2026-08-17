@@ -1628,17 +1628,34 @@ let mirror_cmd =
   in
   let run domain source manifests_only path v =
     set_verbose v;
+    (* Mirror copies between the stores themselves, so it reads [C.members]
+       rather than going through the composite. *)
+    let (module C : Conf.S) = load_conf ?domain () in
+    let socket_path = snd (reporting_target ?domain ()) in
+    let src =
+      Option.value source
+        ~default:(match C.members with m :: _ -> m.Backend.name | [] -> "")
+    in
+    let current = ref None and planned = ref 0 in
+    let copied = ref 0 and checked = ref 0 in
     let code =
       run_lwt
+        ~report:(fun () ->
+          Job_report.start ~socket_path ~domain:C.domain_name
+            ~kind:
+              (match (manifests_only, path) with
+                | _, Some _ -> "mirror --path"
+                | true, None -> "mirror --manifests"
+                | false, None -> "mirror")
+            ~target:src
+            ~current:(fun () -> !current)
+            ~deferred:(fun () -> deferred_totals C.members)
+            ~counters:(fun () ->
+              [
+                ("objects", !checked); ("planned", !planned); ("copied", !copied);
+              ])
+            ())
         (let open Lwt.Syntax in
-         let (module C : Conf.S) = load_conf ?domain () in
-         (* Mirror copies between the stores themselves, so it reads
-            [C.members] rather than going through the composite. *)
-         let src =
-           Option.value source
-             ~default:
-               (match C.members with m :: _ -> m.Backend.name | [] -> "")
-         in
          if List.length C.members < 2 then
            failwith
              (Printf.sprintf
@@ -1660,32 +1677,48 @@ let mirror_cmd =
                | `Path rel -> Printf.sprintf "%s and its chunks" rel)
              src;
            let module M = Mirror.Make (C) in
-           let on_list ~name = vprintf "  %s..." name in
+           let on_list ~name =
+             current := Some name;
+             vprintf "  %s..." name
+           in
+           (* Every destination is examined for every source object, and they go
+              one after another, so the run's own total is the product. *)
+           let destinations =
+             List.length
+               (List.filter
+                  (fun (m : Backend.member) -> m.Backend.name <> src)
+                  C.members)
+           in
            let on_scan ~objects =
+             planned := objects * destinations;
              vprintf "scanned %s: %d object%s to check" src objects
                (if objects = 1 then "" else "s")
            in
+           let on_start ~name ~key =
+             incr checked;
+             current := Some (name ^ " · " ^ key)
+           in
            let on_copy ~name ~key ~reason ~bytes =
-             vprintf "  copied %s (%d bytes, %s) -> %s" key bytes
+             incr copied;
+             vprintf "  copied %s (%s, %s) -> %s" key (human_bytes bytes)
                (match reason with
                  | `Missing -> "missing"
                  | `Wrong_size -> "wrong size")
                name
            in
            let+ dests =
-             M.resync ~source:src ~scope ~on_scan ~on_list ~on_copy ()
+             M.resync ~source:src ~scope ~on_scan ~on_list ~on_start ~on_copy ()
            in
            List.iter
              (fun (dst : Mirror.dest_stats) ->
                (* Under -v they are already logged live. *)
                if not !verbose then
                  List.iter (Printf.printf "copied %s\n") dst.Mirror.copied;
-               Printf.printf
-                 "%s -> %s: %d object%s checked, %d copied (%d bytes)\n" src
-                 dst.Mirror.name dst.Mirror.checked
+               Printf.printf "%s -> %s: %d object%s checked, %d copied (%s)\n"
+                 src dst.Mirror.name dst.Mirror.checked
                  (if dst.Mirror.checked = 1 then "" else "s")
                  (List.length dst.Mirror.copied)
-                 dst.Mirror.copied_bytes)
+                 (human_bytes dst.Mirror.copied_bytes))
              dests;
            0
          end)

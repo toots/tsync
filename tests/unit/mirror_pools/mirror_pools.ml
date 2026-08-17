@@ -1,0 +1,138 @@
+(* The two bounds a mirror runs under, and the hook that says where it is.
+
+   A copy holds a whole object body and a HEAD holds none, so one bound cannot
+   stand for both: sizing a subtree behind the body budget queues round trips
+   against memory they never use, and the [slots] row in [tsync status] would be
+   naming a resource that is not the one filling up.
+
+   [on_copy] fires once an object is done, so it cannot answer "what is it on
+   right now" for an object still being fetched — which is every large chunk,
+   for as long as it takes. *)
+
+open Lwt.Syntax
+open Check
+
+let root = "/tmp/tsync-mirror-pools-test"
+let src_dir = root ^ "/src"
+let dst_dir = root ^ "/dst"
+let domain_prefix = "tsync/testdom/manifests/"
+
+module Src =
+  (val Backend.make ~backend_type:"local" ~get_field:(fun _ -> Some src_dir)
+      : Backend.S)
+
+module Dst =
+  (val Backend.make ~backend_type:"local" ~get_field:(fun _ -> Some dst_dir)
+      : Backend.S)
+
+module C : Conf.S = struct
+  let versioning = false
+  let client_name = "test"
+  let domain_name = "testdom"
+  let domain_prefix = domain_prefix
+  let chunk_prefix = "tsync/testdom/chunks/"
+  let versions_prefix = "tsync/testdom/versions/"
+  let journal_prefix = "tsync/testdom/journal/"
+  let cursor_key = "tsync/testdom/cursor"
+  let shares_prefix = "tsync/shares/"
+
+  let members =
+    [
+      Backend.member ~role:"main" ~backend_type:"local" ~local_path:src_dir
+        ~name:"source"
+        (module Src);
+      Backend.member ~role:"replica" ~backend_type:"local" ~local_path:dst_dir
+        ~name:"copy"
+        (module Dst);
+    ]
+
+  let store =
+    Domain_store.make
+      ~mains:[{ Domain_store.name = "source"; backend = (module Src) }]
+      ~targets:[]
+      ~archives:[{ Domain_store.name = "copy"; backend = (module Dst) }]
+
+  let cache_root = root ^ "/cache"
+  let data_dir = root ^ "/data"
+  let socket_path = ""
+  let max_uploads = 1
+  let max_chunk_buffers = 2
+  let max_downloads = 1
+  let chunk_size = Some 8
+  let cache_chunk_size = Some 8
+  let max_cache = None
+  let symlink_policy = `Keep
+  let read_only = false
+end
+
+module M = Mirror.Make (C)
+
+let pool name = List.assoc_opt name (Lwt_bounded.registered ())
+
+let () =
+  ignore
+    (Sys.command
+       (Printf.sprintf "rm -rf %s && mkdir -p %s %s" root src_dir dst_dir));
+  Lwt_main.run
+    (case "a bound names the resource it protects";
+     (* Unnamed, they are absent from every report: the row that tells work
+        queued behind a bound from work merely slow is built from this list. *)
+     check "the body bound is registered" (pool "copy" <> None);
+     check "the round-trip bound is registered" (pool "probe" <> None);
+     (match (pool "copy", pool "probe") with
+       | Some c, Some p ->
+           step "copy admits %d, probe %d" (Lwt_bounded.limit c)
+             (Lwt_bounded.limit p);
+           check "a HEAD holds no body, so the two are not one number"
+             (Lwt_bounded.limit p > Lwt_bounded.limit c)
+       | _ -> check "both bounds exist to compare" false);
+
+     case "what a copy is on, before it is done";
+     let* () =
+       Lwt_list.iter_s
+         (fun n ->
+           Src.put
+             ~key:(Printf.sprintf "%sfolder/%04d" domain_prefix n)
+             ~data:(Chunk.of_string (String.make (8 + n) 'x'))
+             ())
+         (List.init 6 (fun i -> i))
+     in
+     let started = ref [] and finished = ref [] in
+     let* dests =
+       M.resync ~source:"source" ~scope:`Manifests
+         ~on_start:(fun ~name:_ ~key -> started := key :: !started)
+         ~on_copy:(fun ~name:_ ~key ~reason:_ ~bytes:_ ->
+           finished := key :: !finished)
+         ()
+     in
+     let copied = List.concat_map (fun d -> d.Mirror.copied) dests in
+     step "%d object(s) picked up, %d copied" (List.length !started)
+       (List.length copied);
+     check "every object was announced before the run ended"
+       (List.length !started = List.length copied);
+     (* Announced and finished must be the same set, or a caller shows a key
+        that was never worked on. *)
+     check "and the two accounts name the same objects"
+       (List.sort compare !started = List.sort compare !finished);
+     check "each object was announced once"
+       (List.length (List.sort_uniq compare !started) = List.length !started);
+
+     (* A second pass has nothing to do, so nothing may be announced as picked
+        up: [on_start] fires per object examined, and every one is already
+        right. *)
+     let started = ref [] and copies = ref 0 in
+     let* dests =
+       M.resync ~source:"source" ~scope:`Manifests
+         ~on_start:(fun ~name:_ ~key -> started := key :: !started)
+         ~on_copy:(fun ~name:_ ~key:_ ~reason:_ ~bytes:_ -> incr copies)
+         ()
+     in
+     step "second pass: %d examined, %d copied" (List.length !started) !copies;
+     check "a settled destination is still examined"
+       (List.length !started = List.length copied);
+     check "and nothing is copied twice" (!copies = 0);
+     check "which the stats agree with"
+       (List.for_all (fun d -> d.Mirror.copied = []) dests);
+
+     report ~expected:9 ();
+     Lwt.return_unit)

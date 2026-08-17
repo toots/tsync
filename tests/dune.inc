@@ -734,6 +734,14 @@
   (action
    (diff menu_test.expected menu_test.output))))
 
+(subdir unit/mirror_pools
+ (alias
+  (name default)
+  (deps mirror_pools.exe))
+ (rule
+  (alias runtest)
+  (action (run ./mirror_pools.exe))))
+
 (subdir unit/queue_claim
  (alias
   (name default)

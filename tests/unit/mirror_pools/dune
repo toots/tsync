@@ -1,0 +1,32 @@
+(executable
+ (flags
+  (:standard
+   -open
+   Tsync_ops
+   -open
+   Tsync_chunk
+   -open
+   Tsync_lwt_unix
+   -open
+   Tsync_backend_register
+   -open
+   Tsync_conf
+   -open
+   Tsync_local_backend
+   -open
+   Tsync_domain_store
+   -open
+   Tsync_test_harness))
+ (name mirror_pools)
+ (libraries
+  tsync_test_harness
+  tsync_ops
+  tsync_chunk
+  tsync_lwt_unix
+  tsync_backend_register
+  tsync_conf
+  tsync_local_backend
+  tsync_domain_store
+  lwt
+  lwt.unix
+  unix))
