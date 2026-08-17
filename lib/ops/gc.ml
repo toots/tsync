@@ -757,12 +757,12 @@ module Make (C : Conf.S) = struct
             in
             match queued with
               | `Queued ->
-                  Log.debug "gc: %s: queued %d chunk(s) for deletion"
+                  Log.info "gc: %s: queued %d chunk(s) for deletion"
                     m.Backend.name reclaimed;
                   Lwt.return_none
               | `Unsupported ->
                   let+ () = T.delete_multi doomed in
-                  Log.debug "gc: %s: deleted %d chunk(s)" m.Backend.name
+                  Log.info "gc: %s: deleted %d chunk(s)" m.Backend.name
                     reclaimed;
                   Some m.Backend.backend)
           s.targets

@@ -957,7 +957,9 @@ let gc_cmd =
             phase s.roots_marked s.chunks_promoted s.chunks_reclaimed
             (verified_line s)
   in
-  let run budget pause concurrency delete_batch abort status verify domain =
+  let run budget pause concurrency delete_batch abort status verify verbose
+      domain =
+    set_verbose verbose;
     (* Reported as [Failure], which the top level prints as "tsync: <sentence>"
        and exits nonzero on. Both carry prose written for whoever typed this. *)
     let translate f =
@@ -1048,7 +1050,7 @@ let gc_cmd =
           mirror's job, not this one's.")
     Term.(
       const run $ budget_arg $ pause_arg $ concurrency_arg $ delete_batch_arg
-      $ abort_arg $ status_arg $ verify_arg $ domain_arg)
+      $ abort_arg $ status_arg $ verify_arg $ verbose_arg $ domain_arg)
 
 let sync_cmd =
   let source_arg =
