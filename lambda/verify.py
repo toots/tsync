@@ -187,12 +187,26 @@ def may_delete(key, domain):
     return marker_key(key) is not None and key.startswith(chunk_prefix(domain))
 
 
+def existing_markers(st, domain, keys):
+    """The markers actually accusing [keys], of the ones that could.
+
+    Deleting a derived marker unseen doubles what a request costs, to remove
+    something a healthy store has none of -- and it was a thousand pointless
+    deletes a batch that rate-limited a real bucket. One listing answers for the
+    whole request instead.
+    """
+    wanted = {m for m in (marker_key(k) for k in keys) if m}
+    if not wanted:
+        return []
+    return [k for k in st.list_keys(f"{CORRUPTED_ROOT}{domain}/") if k in wanted]
+
+
 def run_gc_job(st, key):
     """Drop the chunks a request names, and the markers accusing them.
 
-    The markers are derived rather than listed in the body, so the request stays
-    the size the collection meant it to be, and the rule for where one lives is
-    read off the chunk key here exactly as it is on the client.
+    A marker is not named in the request: where one lives is read off the chunk
+    key here, exactly as it is on the client, so the request stays the size the
+    collection meant it to be.
 
     Deleted last, and only when every key the store was asked for went: a bulk
     delete answers success while refusing keys inside the body, and dropping the
@@ -214,7 +228,7 @@ def run_gc_job(st, key):
     for k in wanted:
         if k not in keys:
             print(f"gc job {key}: refused {k!r}")
-    refused = st.delete_many(keys + [marker_key(k) for k in keys])
+    refused = st.delete_many(keys + existing_markers(st, domain, keys))
     if refused:
         print(
             f"gc job {key}: {len(refused)} object(s) not deleted, first "

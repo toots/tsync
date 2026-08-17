@@ -198,8 +198,14 @@ def test_delete_many_reports_nothing_for_keys_that_were_never_there():
 
 
 def test_delete_many_drops_every_key_it_is_given(store):
-    """More keys than the pool is wide, so the threading is actually exercised
-    rather than the one-key case standing in for it."""
+    """More keys than one batch holds, so the grouping is exercised rather than
+    the one-key case standing in for it.
+
+    What this cannot see is which path ran: fake-gcs-server answers the batch
+    endpoint with something that is "not multi-part", so every group falls back
+    to deleting key by key here and the batch itself is only reachable against
+    a real bucket. Both paths must leave the same result, which is what this
+    holds; that batching happens at all was checked by hand against GCS."""
     keys = []
     for i in range(40):
         key = f"tsync/d/chunks/{i % 16:03x}/bulk-{i}"
