@@ -32,11 +32,8 @@ let create ?max_waiting ?name ~max () =
 
 let in_flight t = t.held
 let waiting t = t.waiting
-let limit t = t.limit
-let registered () = !named
 
-(* Creation order, like {!registered}, so one run's report can be read against
-   another's. *)
+(* Creation order, so one run's report can be read against another's. *)
 let totals () =
   List.fold_left
     (fun acc (name, t) ->

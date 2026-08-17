@@ -1047,7 +1047,6 @@ let gc_cmd =
       let phase = ref (Chunk_space.string_of_phase Chunk_space.Opening) in
       let at_ = ref "" in
       let marked = ref [] and closed = ref [] in
-      let socket_path = snd (reporting_target ?domain ()) in
       let emit ending line =
         if watching then Printf.eprintf "%s%s%!" line ending
         else vprintf "%s" line
@@ -1095,13 +1094,11 @@ let gc_cmd =
           let s =
             run_lwt
               ~report:(fun () ->
-                Job_report.start ~socket_path ~domain:C.domain_name
+                report_job ?domain
+                  (module C)
                   ~kind:(if abort then "gc --abort" else "gc")
                   ~current:(fun () ->
-                    Some
-                      (if !at_ = "" then !phase
-                       else !phase ^ " \xc2\xb7 " ^ !at_))
-                  ~deferred:(fun () -> deferred_totals C.members)
+                    Some (if !at_ = "" then !phase else doing !phase !at_))
                   ~counters:(fun () -> !marked @ !closed)
                   ())
               (if abort then
@@ -1161,19 +1158,18 @@ let sync_cmd =
       let conf = load_conf ?domain () in
       match source with Some name -> reading_from name conf | None -> conf
     in
-    let socket_path = snd (reporting_target ?domain ()) in
     let phase = ref "starting" and current = ref None in
     let manifests = ref 0 and failures = ref 0 in
     let code =
       run_lwt
         ~report:(fun () ->
-          Job_report.start ~socket_path ~domain:C.domain_name
+          report_job ?domain
+            (module C)
             ~kind:(if full then "sync --full" else "sync")
             ~current:(fun () ->
               match !current with
-                | Some at -> Some (!phase ^ " · " ^ at)
+                | Some at -> Some (doing !phase at)
                 | None -> Some !phase)
-            ~deferred:(fun () -> deferred_totals C.members)
               (* No total for a resync: the inode tree is discovered as it is
                walked, so a denominator here would be one this cannot know. *)
             ~counters:(fun () ->
@@ -1468,7 +1464,7 @@ let data_integrity_cmd =
       let* left = count jobs in
       let* found = count corrupted in
       Hashtbl.replace per_store m.Backend.name (left, found);
-      current := Some (m.Backend.name ^ " · waiting on the bucket");
+      current := Some (doing m.Backend.name "waiting on the bucket");
       if left = 0 then (
         Printf.eprintf "%s: done — %d corrupt chunk(s)\n%!" m.Backend.name found;
         Lwt.return_unit)
@@ -1554,7 +1550,7 @@ let data_integrity_cmd =
         ~on_chunk:(fun ~done_ ~total ~chunk_key ~store outcome ->
           checked := done_;
           if outcome = Repair.Unrepairable then incr unrepairable;
-          current := Some (store ^ " · " ^ chunk_key);
+          current := Some (doing store chunk_key);
           let line = Repair.describe ~chunk_key ~store outcome in
           if verbose then
             Printf.printf "[%*d/%d] %s\n%!"
@@ -1584,17 +1580,16 @@ let data_integrity_cmd =
   let run domain do_verify do_repair detail source dry_run verbose =
     set_verbose verbose;
     let (module C : Conf.S) = load_conf ?domain () in
-    let socket_path = snd (reporting_target ?domain ()) in
     let code =
       run_lwt
         ~report:(fun () ->
-          Job_report.start ~socket_path ~domain:C.domain_name
+          report_job ?domain
+            (module C)
             ~kind:
               (if do_verify then "data-integrity --verify"
                else if do_repair then "data-integrity --repair"
                else "data-integrity")
             ~current:(fun () -> !current)
-            ~deferred:(fun () -> deferred_totals C.members)
             ~counters:(fun () ->
               if do_verify then
                 [("requests left", sum_stores fst); ("corrupt", sum_stores snd)]
@@ -1700,7 +1695,6 @@ let mirror_cmd =
     (* Mirror copies between the stores themselves, so it reads [C.members]
        rather than going through the composite. *)
     let (module C : Conf.S) = load_conf ?domain () in
-    let socket_path = snd (reporting_target ?domain ()) in
     let src =
       Option.value source
         ~default:(match C.members with m :: _ -> m.Backend.name | [] -> "")
@@ -1710,7 +1704,8 @@ let mirror_cmd =
     let code =
       run_lwt
         ~report:(fun () ->
-          Job_report.start ~socket_path ~domain:C.domain_name
+          report_job ?domain
+            (module C)
             ~kind:
               (match (manifests_only, path) with
                 | _, Some _ -> "mirror --path"
@@ -1718,7 +1713,6 @@ let mirror_cmd =
                 | false, None -> "mirror")
             ~target:src
             ~current:(fun () -> !current)
-            ~deferred:(fun () -> deferred_totals C.members)
             ~counters:(fun () ->
               [
                 ("objects", !checked); ("planned", !planned); ("copied", !copied);
@@ -1765,7 +1759,7 @@ let mirror_cmd =
            in
            let on_start ~name ~key =
              incr checked;
-             current := Some (name ^ " · " ^ key)
+             current := Some (doing name key)
            in
            let on_copy ~name ~key ~reason ~bytes =
              incr copied;
@@ -1844,7 +1838,6 @@ let import_cmd =
   let run domain src only exclude force_rehash v =
     set_verbose v;
     let (module C : Conf.S) = load_conf ?domain () in
-    let socket_path = snd (reporting_target ?domain ()) in
     let current = ref None and planned = ref 0 in
     (* The same buckets {!Import.tally} keeps, so the row in [tsync status] and
        the summary this prints cannot disagree about one run. *)
@@ -1855,10 +1848,10 @@ let import_cmd =
     let failures =
       run_lwt
         ~report:(fun () ->
-          Job_report.start ~socket_path ~domain:C.domain_name ~kind:"import"
-            ~target:src
+          report_job ?domain
+            (module C)
+            ~kind:"import" ~target:src
             ~current:(fun () -> !current)
-            ~deferred:(fun () -> deferred_totals C.members)
             ~counters:(fun () ->
               [
                 ("files", !imported);
@@ -1927,7 +1920,6 @@ let export_cmd =
   let run domain dst v =
     set_verbose v;
     let (module C : Conf.S) = load_conf ?domain () in
-    let socket_path = snd (reporting_target ?domain ()) in
     let current = ref None and planned = ref 0 in
     (* The same buckets the summary below prints, so the row in [tsync status]
        and that line cannot disagree about one run. *)
@@ -1935,10 +1927,10 @@ let export_cmd =
     let code =
       run_lwt
         ~report:(fun () ->
-          Job_report.start ~socket_path ~domain:C.domain_name ~kind:"export"
-            ~target:dst
+          report_job ?domain
+            (module C)
+            ~kind:"export" ~target:dst
             ~current:(fun () -> !current)
-            ~deferred:(fun () -> deferred_totals C.members)
             ~counters:(fun () ->
               [
                 ("files", !exported);

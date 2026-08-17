@@ -302,6 +302,21 @@ let deferred_totals members =
             match m.Backend.degraded with Some g -> g () | None -> false)
           members )
 
+(* The half of a job report that is every command's alike: where to send it,
+   which domain it belongs to, and what that domain's targets still owe. A
+   command passes only what is its own.
+
+   [current] joins a phase to the thing within it, so six commands do not each
+   pick a separator. *)
+let report_job ?domain ?target ?current ~kind (module C : Conf.S) ~counters () =
+  Job_report.start
+    ~socket_path:(snd (reporting_target ?domain ()))
+    ~domain:C.domain_name ~kind ?target ?current
+    ~deferred:(fun () -> deferred_totals C.members)
+    ~counters ()
+
+let doing phase detail = phase ^ " · " ^ detail
+
 (* A path names its own domain by sitting under that domain's mount, which is
    how the macOS router resolves one as well. A path under none of them falls
    back to the default domain, so the answer is a daemon saying it does not know

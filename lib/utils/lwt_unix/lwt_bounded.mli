@@ -55,15 +55,13 @@ val in_flight : t -> int
     waiting on the bound rather than the work. *)
 val waiting : t -> int
 
-(** What [max] was admitted as, so a report can say 4/4 rather than 4. *)
-val limit : t -> int
+(** Every pool {!create}d with a [name], summed by name and in creation order:
+    name, in flight, waiting, and what [max] was admitted as, so a report can
+    say 4/4 rather than 4.
 
-(** Every pool {!create}d with a [name], in creation order. *)
-val registered : unit -> (string * t) list
-
-(** {!registered} summed by name — in flight, waiting, limit — because the pools
-    live inside functors applied once per domain and per role, so a process
-    holds several under one name and what bounds it is their total. *)
+    Summed because the pools live inside functors applied once per domain and
+    per role, so a process holds several under one name and what bounds it is
+    their total. *)
 val totals : unit -> (string * int * int * int) list
 
 (** {1 Fanning a list out under a bound}

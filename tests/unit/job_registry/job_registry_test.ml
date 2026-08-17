@@ -157,6 +157,9 @@ let () =
                           [
                             ("bytesUploaded", `Int 756640839270);
                             ("uploadBytesPerSec", `Int 8178892);
+                            ("bytesDownloaded", `Int 41231872);
+                            ("downloadBytesPerSec", `Int 2097152);
+                            ("chunksHashed", `Int 2500);
                           ] );
                       ( "deferred",
                         `Assoc
@@ -222,6 +225,12 @@ let () =
   check "retries, with timeouts counted apart"
     ~why:(fun () -> running)
     (has "91 retries (87 timeouts)");
+  (* A rate in both directions: a total alone cannot tell a transfer that is
+     moving from one that has stopped, which is the question asked of a mirror
+     whose direction is down. *)
+  check "traffic, each direction with its own rate"
+    ~why:(fun () -> running)
+    (has "up 704.7 GB (7.8 MB/s), down 39.3 MB (2.0 MB/s), 2500 chunks hashed");
 
   (* The elapsed figure is the same either way, so a job that has stopped must
      not leave it reading as an age. *)
@@ -232,4 +241,4 @@ let () =
 
   (* Counted, so a suite that stopped exercising anything fails rather than
      passing quietly. *)
-  report ~expected:19 ()
+  report ~expected:20 ()

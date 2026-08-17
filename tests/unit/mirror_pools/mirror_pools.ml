@@ -67,7 +67,8 @@ end
 
 module M = Mirror.Make (C)
 
-let pool name = List.assoc_opt name (Lwt_bounded.registered ())
+let pool name =
+  List.find_opt (fun (n, _, _, _) -> n = name) (Lwt_bounded.totals ())
 
 let () =
   ignore
@@ -80,11 +81,10 @@ let () =
      check "the body bound is registered" (pool "copy" <> None);
      check "the round-trip bound is registered" (pool "probe" <> None);
      (match (pool "copy", pool "probe") with
-       | Some c, Some p ->
-           step "copy admits %d, probe %d" (Lwt_bounded.limit c)
-             (Lwt_bounded.limit p);
+       | Some (_, _, _, copy), Some (_, _, _, probe) ->
+           step "copy admits %d, probe %d" copy probe;
            check "a HEAD holds no body, so the two are not one number"
-             (Lwt_bounded.limit p > Lwt_bounded.limit c)
+             (probe > copy)
        | _ -> check "both bounds exist to compare" false);
 
      case "what a copy is on, before it is done";
