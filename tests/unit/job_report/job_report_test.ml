@@ -11,15 +11,7 @@
    this exits non-zero of its own accord. *)
 
 open Lwt.Syntax
-
-let failures = ref 0
-
-let check name ok =
-  if ok then Printf.printf "%s: ok\n%!" name
-  else begin
-    incr failures;
-    Printf.printf "%s: FAILED\n%!" name
-  end
+open Check
 
 let root = Filename.temp_dir "tsync-job-report" ""
 
@@ -94,5 +86,7 @@ let () =
        (let final = Yojson.Safe.from_string (List.hd !seen) in
         Yojson.Safe.Util.member "state" final = `String "done");
 
-     if !failures > 0 then exit 1;
+     (* Counted, so a suite that stopped exercising anything fails rather than
+        passing quietly. *)
+     report ~expected:11 ();
      Lwt.return_unit)

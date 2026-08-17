@@ -658,6 +658,14 @@
   (action
    (diff item_ref_test.expected item_ref_test.output))))
 
+(subdir unit/job_registry
+ (alias
+  (name default)
+  (deps job_registry_test.exe))
+ (rule
+  (alias runtest)
+  (action (run ./job_registry_test.exe))))
+
 (subdir unit/job_report
  (alias
   (name default)

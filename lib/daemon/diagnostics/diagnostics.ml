@@ -553,6 +553,24 @@ let merge reports =
       (fun r -> match mem r "domains" with `List l -> l | _ -> [])
       reports
   in
+  (* Deduplicated by pid, because where one process answers for several domains
+     each answer carries that process's whole job table: concatenating alone
+     would list one import once per domain it is not running against. *)
+  let jobs =
+    List.fold_left
+      (fun acc r ->
+        match mem r "jobs" with
+          | `List l ->
+              List.fold_left
+                (fun acc j ->
+                  if List.exists (fun k -> mem k "pid" = mem j "pid") acc then
+                    acc
+                  else j :: acc)
+                acc l
+          | _ -> acc)
+      [] reports
+    |> List.rev
+  in
   let served =
     List.filter_map
       (fun d ->
@@ -568,14 +586,20 @@ let merge reports =
                 `Assoc (("serves", `List served) :: List.remove_assoc "serves" s)
             | s, _ -> s
         in
+        let fields = match first with `Assoc fields -> fields | _ -> [] in
         `Assoc
           (List.map
              (fun (k, v) ->
                match k with
                  | "server" -> (k, server)
                  | "domains" -> (k, `List domains)
+                 | "jobs" -> (k, `List jobs)
                  | _ -> (k, v))
-             (match first with `Assoc fields -> fields | _ -> []))
+             fields
+          @
+          if jobs <> [] && not (List.mem_assoc "jobs" fields) then
+            [("jobs", `List jobs)]
+          else [])
 
 let text json =
   let b = Buffer.create 4096 in
@@ -933,6 +957,101 @@ let text json =
                                    (duration (num age))))))
         (match mem d "backends" with `List l -> l | _ -> []))
     domains;
+  (match mem json "jobs" with
+    | `List [] | `Null -> ()
+    | `List jobs ->
+        line 0 "";
+        line 0 "Jobs";
+        List.iter
+          (fun j ->
+            let sub k f = match mem j k with `Null -> () | v -> f v in
+            let age =
+              duration (Unix.gettimeofday () -. num (mem j "startedAt"))
+            in
+            (* The same figure either way, so a finished job says which it is:
+               time since it started reads as an age once it has stopped. *)
+            let state = str (mem j "state") in
+            line 2 "%s  pid %d  %s%s%s"
+              (str (mem j "kind"))
+              (int_of (mem j "pid"))
+              (if state = "running" then Printf.sprintf "running %s" age
+               else Printf.sprintf "%s, ran %s" state age)
+              (match mem j "target" with `Null -> "" | t -> "  " ^ str t)
+              (match mem j "error" with `Null -> "" | e -> ": " ^ str e);
+            sub "current" (fun c -> row 4 "current" (str c));
+            (match mem j "counters" with
+              | `List (_ :: _ as counters) ->
+                  row 4 "counted"
+                    (String.concat ", "
+                       (List.map
+                          (function
+                            | `List [`String k; v] ->
+                                Printf.sprintf "%d %s" (int_of v) k
+                            | _ -> "?")
+                          counters))
+              | _ -> ());
+            sub "traffic" (fun t ->
+                row 4 "traffic"
+                  (Printf.sprintf "up %s (%s/s), down %s, %d chunks hashed"
+                     (Metrics.human_bytes (int_of (mem t "bytesUploaded")))
+                     (Metrics.human_bytes (int_of (mem t "uploadBytesPerSec")))
+                     (Metrics.human_bytes (int_of (mem t "bytesDownloaded")))
+                     (int_of (mem t "chunksHashed"))));
+            (* Live words beside the heap the process holds: the heap grows in
+               steps and shrinks never, so the two together are the difference
+               between something retained and an allocator that has not given
+               anything back. *)
+            sub "memory" (fun m ->
+                let gc = mem j "gc" in
+                let swapped = int_of (mem m "swappedBytes") in
+                row 4 "memory"
+                  (Printf.sprintf "%s rss%s, %s heap%s"
+                     (Metrics.human_bytes (int_of (mem m "rssBytes")))
+                     (if swapped > 0 then
+                        Printf.sprintf " + %s swapped"
+                          (Metrics.human_bytes swapped)
+                      else "")
+                     (Metrics.human_bytes (int_of (mem gc "heapBytes")))
+                     (match mem gc "liveBytes" with
+                       | `Null -> ""
+                       | b ->
+                           Printf.sprintf ", %s live"
+                             (Metrics.human_bytes (int_of b)))));
+            sub "deferred" (fun d ->
+                row 4 "deferred"
+                  (Printf.sprintf "%d queued, %d in flight"
+                     (int_of (mem d "queued"))
+                     (int_of (mem d "inFlight")));
+                if bool_of (mem d "degraded") then
+                  row 4 "" "writes were dropped: run tsync mirror");
+            (match mem j "pools" with
+              | `List (_ :: _ as pools) ->
+                  row 4 "slots"
+                    (String.concat ", "
+                       (List.map
+                          (fun p ->
+                            Printf.sprintf "%s %d/%d%s"
+                              (str (mem p "name"))
+                              (int_of (mem p "inFlight"))
+                              (int_of (mem p "max"))
+                              (match int_of (mem p "waiting") with
+                                | 0 -> ""
+                                | w -> Printf.sprintf " (%d waiting)" w))
+                          pools))
+              | _ -> ());
+            sub "backend" (fun bk ->
+                match
+                  (int_of (mem bk "retries"), int_of (mem bk "failures"))
+                with
+                  | 0, 0 -> ()
+                  | retries, failures ->
+                      row 4 "backend"
+                        (Printf.sprintf "%d retries (%d timeouts), %d failed"
+                           retries
+                           (int_of (mem bk "timeouts"))
+                           failures)))
+          jobs
+    | _ -> ());
   (match mem json "recentErrors" with
     | `List [] | `Null -> ()
     | `List errs ->

@@ -55,7 +55,7 @@ let pools_json () =
          :: acc)
        by_name [])
 
-let payload t ~state =
+let payload t ~state ~extra =
   let m = Metrics.mem_stats () in
   let g = Metrics.gc_stats () in
   let gc =
@@ -103,6 +103,7 @@ let payload t ~state =
     ("pools", pools_json ());
     ("counters", ints (t.counters ()));
   ]
+  @ extra
   @ (match t.target with None -> [] | Some s -> [("target", `String s)])
   @ (match t.current () with None -> [] | Some s -> [("current", `String s)])
   @
@@ -123,10 +124,10 @@ let payload t ~state =
    command must not die because nothing was listening, and the daemon being
    absent is the ordinary case rather than an error. Said once, so a run without
    a daemon does not print a line a minute. *)
-let send t ~state =
+let send t ~state ?(extra = []) () =
   Lwt.catch
     (fun () ->
-      let line = Yojson.Safe.to_string (`Assoc (payload t ~state)) in
+      let line = Yojson.Safe.to_string (`Assoc (payload t ~state ~extra)) in
       let+ (_ : string) = Ipc.send_lwt ~socket_path:t.socket_path line in
       ())
     (fun exn ->
@@ -143,7 +144,7 @@ let rec loop t =
   else begin
     t.ticks <- t.ticks + 1;
     if t.ticks mod deep_every = 1 then t.live <- Some (Metrics.live_bytes ());
-    let* () = send t ~state:"running" in
+    let* () = send t ~state:"running" () in
     loop t
   end
 
@@ -171,10 +172,15 @@ let start ~socket_path ~domain ~kind ?target ?(current = fun () -> None)
      [Lwt.async_exception_hook] — which would take the command down with it. *)
   Lwt.async (fun () -> loop t)
 
-let finish ?(summary = []) () =
+let finish ?error ?(summary = []) () =
   match !job with
     | None -> Lwt.return_unit
     | Some t ->
         t.stop <- true;
+        job := None;
         let t = { t with counters = (fun () -> summary @ t.counters ()) } in
-        send t ~state:"done"
+        let state = match error with None -> "done" | Some _ -> "failed" in
+        let extra =
+          Option.to_list (Option.map (fun e -> ("error", `String e)) error)
+        in
+        send t ~state ~extra ()

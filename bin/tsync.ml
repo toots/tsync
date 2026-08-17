@@ -1029,6 +1029,8 @@ let gc_cmd =
          collection run under screen and teed to a file is the case that wants
          it, and the one where stderr is not a terminal. *)
       let watching = Unix.isatty Unix.stderr in
+      let phase = ref "starting" and counted = ref [] in
+      let socket_path = snd (reporting_target ?domain ()) in
       let emit ending line =
         if watching then Printf.eprintf "%s%s%!" line ending
         else vprintf "%s" line
@@ -1036,6 +1038,7 @@ let gc_cmd =
       let header fmt = Printf.ksprintf (emit "\n") fmt in
       let progress fmt = Printf.ksprintf (emit "\r") fmt in
       let on_open () =
+        phase := "opening";
         header "%s %s..."
           (if abort then "Abandoning the collection of" else "Collecting")
           C.domain_name
@@ -1044,6 +1047,14 @@ let gc_cmd =
          folders and counts the files in them, so the two get different lines
          rather than one with a field that means nothing in half the runs. *)
       let on_mark ~namespaces ~total ~roots ~promoted =
+        phase := if abort then "keeping" else "marking";
+        counted :=
+          [
+            ("shards", namespaces);
+            ("of", total);
+            ("files", roots);
+            ("kept", promoted);
+          ];
         if abort then
           progress "  kept %d/%d shard(s), %d chunk(s)" namespaces total
             promoted
@@ -1052,12 +1063,20 @@ let gc_cmd =
             namespaces total roots promoted
       in
       let on_close ~shards ~reclaimed =
+        counted := [("shards", shards); ("reclaimed", reclaimed)];
         progress "  closed %d shard(s), %d chunk(s) reclaimed" shards reclaimed
       in
       translate (fun () ->
           let was_open = abort && run_lwt (G.status ()) <> None in
           let s =
             run_lwt
+              ~report:(fun () ->
+                Job_report.start ~socket_path ~domain:C.domain_name
+                  ~kind:(if abort then "gc --abort" else "gc")
+                  ~current:(fun () -> Some !phase)
+                  ~deferred:(fun () -> deferred_totals C.members)
+                  ~counters:(fun () -> !counted)
+                  ())
               (if abort then
                  G.abort ?budget ?pause ?concurrency ~on_open ~on_mark ~on_close
                    ()
@@ -1696,23 +1715,45 @@ let import_cmd =
   in
   let run domain src only exclude force_rehash v =
     set_verbose v;
+    let name, socket_path = reporting_target ?domain () in
+    let current = ref None and planned = ref 0 and members = ref [] in
+    let imported = ref 0 and skipped = ref 0 and failed = ref 0 in
     run_lwt
+      ~report:(fun () ->
+        Job_report.start ~socket_path ~domain:name ~kind:"import" ~target:src
+          ~current:(fun () -> !current)
+          ~deferred:(fun () -> deferred_totals !members)
+          ~counters:(fun () ->
+            [
+              ("files", !imported);
+              ("skipped", !skipped);
+              ("failed", !failed);
+              ("of", !planned);
+            ])
+          ())
       (let open Lwt.Syntax in
        let (module C : Conf.S) = load_conf ?domain () in
        let module I = Import.Make (C) in
+       members := C.members;
        vprintf "importing from %s into domain %s" src C.domain_name;
        let+ summary =
          I.run ~only ~exclude ~force_rehash ~src
            ~on_dir:(fun ~rel -> Printf.printf "mkdir    %s\n%!" rel)
+           ~on_plan:(fun ~files -> planned := files)
+           ~on_start:(fun ~rel -> current := Some rel)
            ~on_file:(fun ~rel status ->
              match status with
                | Import.Imported size ->
+                   incr imported;
                    Printf.printf "imported %s (%Ld bytes)\n%!" rel size
                | Import.Skipped_exists ->
+                   incr skipped;
                    Printf.printf "skip     %s (already in domain)\n%!" rel
                | Import.Skipped_symlink ->
+                   incr skipped;
                    Printf.printf "skip     %s (symlink)\n%!" rel
                | Import.Failed msg ->
+                   incr failed;
                    Printf.printf "failed   %s: %s\n%!" rel msg)
            ()
        in

@@ -31,6 +31,9 @@ val start :
 val set_interval : float -> unit
 
 (** A last report marked done, so a finished job is visible for a while rather
-    than vanishing the instant it exits. Returns once the send has been
-    attempted; a failure is swallowed like any other. *)
-val finish : ?summary:(string * int) list -> unit -> unit Lwt.t
+    than vanishing the instant it exits. [error] marks it failed instead, which
+    is the only trace a crashed command leaves once its process is gone.
+
+    Returns once the send has been attempted; a failure is swallowed like any
+    other, and a second call reports nothing. *)
+val finish : ?error:string -> ?summary:(string * int) list -> unit -> unit Lwt.t

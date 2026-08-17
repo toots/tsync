@@ -839,7 +839,17 @@ module Make (C : Conf.S) (F : File_ops.S) = struct
                                  ("serves", `List [`String C.domain_name]);
                                ]
                              ()
-                          @ [("domains", `List [domain])])
+                          @ [
+                              ("domains", `List [domain]);
+                              ("jobs", `List (Job_registry.live ()));
+                            ])
+                    (* A command running beside this daemon, describing itself.
+                       Advisory, so it is acknowledged even when the payload
+                       says little: a report is never worth failing a command
+                       over. *)
+                    | "report" ->
+                        Job_registry.record (`Assoc obj);
+                        Lwt.return (ok_json [])
                     | "download_progress" ->
                         with_target (fun key ->
                             Lwt.return

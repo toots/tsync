@@ -29,9 +29,9 @@ val upload_rate : unit -> float
 val download_rate : unit -> float
 val hash_rate : unit -> float
 
-(** Backend requests retried, requests that timed out (a subset of the
-    retried), and requests that reached their caller as a failure. A run that
-    recovered from everything still reports what it recovered from. *)
+(** Backend requests retried, requests that timed out (a subset of the retried),
+    and requests that reached their caller as a failure. A run that recovered
+    from everything still reports what it recovered from. *)
 val add_retry : int -> unit
 
 val add_timeout : int -> unit
@@ -43,11 +43,11 @@ val failures : unit -> int
 (** Cumulative CPU seconds (user + system) used by this process. *)
 val cpu_seconds : unit -> float
 
-(** Current resident set size in bytes. *)
 (** [private_] plus [swapped] is what a process actually holds: swapped-out
     anonymous pages are still its own, compressed rather than gone, so [rss]
-    alone understates it by however much the kernel has pushed out. [system_used]
-    and [system_total] are the headroom that decides whether that matters. *)
+    alone understates it by however much the kernel has pushed out.
+    [system_used] and [system_total] are the headroom that decides whether that
+    matters. *)
 type mem = {
   rss : int;
   private_ : int;

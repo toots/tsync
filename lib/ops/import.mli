@@ -28,12 +28,19 @@ module Make (C : Conf.S) : sig
       When [force_rehash] is true, existing keys are not skipped: every file is
       re-hashed, missing or changed chunks are re-uploaded, and the manifest is
       republished. When [only] is non-empty, only entries matching one of its
-      globs are imported; [exclude] is then applied on top of that set. *)
+      globs are imported; [exclude] is then applied on top of that set.
+
+      [on_plan] fires once the set to import is known, [on_start] as each entry
+      is picked up, and [on_file] once it is done. A caller wanting to say what
+      the import is working on wants [on_start]: an entry spends its whole life
+      between the two, and a large file spends hours there. *)
   val run :
     ?only:string list ->
     ?exclude:string list ->
     ?force_rehash:bool ->
     ?on_dir:(rel:string -> unit) ->
+    ?on_plan:(files:int -> unit) ->
+    ?on_start:(rel:string -> unit) ->
     src:string ->
     on_file:(rel:string -> status -> unit) ->
     unit ->
