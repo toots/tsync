@@ -13,7 +13,6 @@ type t = {
   auth : Auth.t option;
       (* [None] is anonymous, for emulators on a custom endpoint. *)
   share_url : string option;
-  delete_function : bool;
 }
 
 (* 5xx and 429 clear on their own; a 4xx is the bucket's answer. *)
@@ -344,8 +343,8 @@ let list_all t ?max_keys ~prefix () =
   in
   collect [] None
 
-let make ?endpoint ?service_account_key ?share_url ?(delete_function = false)
-    ~bucket () : (module Backend.S) =
+let make ?endpoint ?service_account_key ?share_url ~bucket () :
+    (module Backend.S) =
   let base =
     match endpoint with
       | Some e when e <> "" -> e
@@ -356,7 +355,7 @@ let make ?endpoint ?service_account_key ?share_url ?(delete_function = false)
     if n > 0 && base.[n - 1] = '/' then String.sub base 0 (n - 1) else base
   in
   let auth = Option.map Auth.of_service_account_json service_account_key in
-  let t = { bucket; base; auth; share_url; delete_function } in
+  let t = { bucket; base; auth; share_url } in
   (* The verifier's job bodies are JSON, and it is handed this rather than the
      module's [put] below, which speaks in chunks. *)
   let put_text ~key ~data () = put t ~key ~data:(Chunk.of_string data) () in
@@ -381,16 +380,16 @@ let make ?endpoint ?service_account_key ?share_url ?(delete_function = false)
       in
       `Queued n
 
-    (* Configured rather than assumed, unlike [verified] below: a bucket without
-       the function would take these requests and never act on them, and a
-       collection discards the main straight after. *)
+    (* Taken as given, as [verified] is and for the same reason: the function
+       that consumes these is deployed by the terraform that makes the bucket,
+       and a deployment half applied is not a state this reports its way out of.
+       A request nothing picks up is reported by [tsync gc --status] and
+       re-delivered by [tsync gc --retry-jobs]. *)
     let discard ~chunk_prefix ~run ~name ~keys () =
-      if not t.delete_function then Lwt.return `Unsupported
-      else
-        let+ () =
-          Discard_job.queue ~put:put_text ~chunk_prefix ~run ~name ~keys ()
-        in
-        `Queued
+      let+ () =
+        Discard_job.queue ~put:put_text ~chunk_prefix ~run ~name ~keys ()
+      in
+      `Queued
 
     (* No chunk size or concurrency opinion: an object store is limited by the
        network and its own concurrency, neither measurable from here.
@@ -436,14 +435,6 @@ let spec =
         default = Some "";
         secret = false;
       };
-      {
-        name = "deleteFunction";
-        label =
-          "Bucket runs the tsync function that consumes chunk-delete jobs?";
-        typ = `Bool;
-        default = Some "false";
-        secret = false;
-      };
     ]
 
 let () =
@@ -456,6 +447,4 @@ let () =
   Backend.register ~spec "gcs" (fun get ->
       make ?endpoint:(opt get "endpoint")
         ?service_account_key:(opt get "serviceAccountKey")
-        ?share_url:(opt get "shareUrl")
-        ~delete_function:(Field_spec.bool ~default:false (get "deleteFunction"))
-        ~bucket:(req get "bucket") ())
+        ?share_url:(opt get "shareUrl") ~bucket:(req get "bucket") ())

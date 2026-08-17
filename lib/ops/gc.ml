@@ -446,6 +446,45 @@ module Make (C : Conf.S) = struct
           Some (m.Backend.name, List.length jobs, oldest)))
       (deferred_members ())
 
+  (* Writing a request back where it already is re-fires the store's
+     object-created notification, which is the only way to reach a function that
+     was not listening the first time: the original delivery is spent, and no
+     amount of waiting brings it back.
+
+     Sequential, and the list is however many are stuck rather than a length
+     this code chose. *)
+  let retry_outstanding () =
+    Lwt_list.map_s
+      (fun (m : Backend.member) ->
+        let (module T : Backend.S) = m.Backend.backend in
+        let* entries =
+          T.list_prefix
+            ~prefix:(Chunk_layout.gc_jobs_prefix ~chunk_prefix:C.chunk_prefix)
+            ()
+        in
+        let jobs =
+          List.filter
+            (fun (e : Backend.file_entry) ->
+              Chunk_layout.shard_of_job e.Backend.key <> None)
+            entries
+        in
+        let+ n =
+          Lwt_list.fold_left_s
+            (fun n (e : Backend.file_entry) ->
+              (* Read back rather than composed afresh: what a request names is
+                 knowable only from the request, the main having discarded the
+                 space those keys were listed from. *)
+              let* body = T.get_opt ~key:e.Backend.key () in
+              match body with
+                | None -> Lwt.return n
+                | Some body ->
+                    let+ () = T.put ~key:e.Backend.key ~data:body () in
+                    n + 1)
+            0 jobs
+        in
+        (m.Backend.name, n))
+      (deferred_members ())
+
   let save s phase cursor =
     Space.write_run { Chunk_space.phase; started = s.started; cursor }
 

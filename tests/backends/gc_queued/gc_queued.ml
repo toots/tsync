@@ -134,6 +134,24 @@ let () =
      check "the replica is named"
        (List.map (fun (name, _, _) -> name) stuck = ["replica"]);
 
+     (* The notification a request fires is spent once, so a function that was
+        not listening then does not pick it up by being fixed. Re-delivery is
+        writing the request back where it already is. *)
+     case "a request can be handed over again";
+     let* again = G.retry_outstanding () in
+     step "copies re-sent: %s"
+       (String.concat ", "
+          (List.map (fun (n, c) -> Printf.sprintf "%s (%d)" n c) again));
+     check "the replica's request was sent again"
+       (List.assoc_opt "replica" again = Some 1);
+     let* stuck = G.outstanding () in
+     check "and it is still outstanding until something consumes it"
+       (List.map (fun (n, _, _) -> n) stuck = ["replica"]);
+     let* body = Disk.get_opt ~key:(List.hd jobs).Backend.key () in
+     check "with the keys it named intact"
+       (Option.map (fun b -> Discard_job.decode (Chunk.to_string b)) body
+       = Some [key 2]);
+
      case "once the function runs";
      let* dropped = consume_requests (module Disk) in
      step "the request named %d chunk(s)" dropped;
@@ -155,5 +173,5 @@ let () =
      check "and the main still has what it kept"
        (List.mem (ck 1) main && List.mem (ck 3) main);
 
-     report ~expected:10 ();
+     report ~expected:13 ();
      Lwt.return_unit)

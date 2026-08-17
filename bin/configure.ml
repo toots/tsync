@@ -80,18 +80,8 @@ let tf_lookup root which store =
               let secret_from out =
                 Option.bind (tf_value root out) (fun m -> jstr m store)
               in
-              (* A bool rather than a string, and absent from an older stack:
-                 taken as false either way, which is the answer that leaves a
-                 collection deleting from the client. *)
-              let delete_function =
-                match jfield s "delete_function" with
-                  | Some (`Bool b) -> [("deleteFunction", string_of_bool b)]
-                  | _ -> []
-              in
               let fields =
-                delete_function
-                @
-                  match which with
+                match which with
                   | `S3 -> (
                       let region = str "region" in
                       (if region = "" then [] else [("region", region)])

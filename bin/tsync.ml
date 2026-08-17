@@ -889,6 +889,16 @@ let gc_cmd =
              collection does, and resumes the same way — a second $(b,--abort) \
              continues abandoning rather than starting over.")
   in
+  let retry_arg =
+    Arg.(
+      value & flag
+      & info ["retry-jobs"]
+          ~doc:
+            "Deliver outstanding delete requests again. A request is handed to \
+             a copy's bucket once, by the notification its own write fires; a \
+             function that was absent or broken then does not pick one up by \
+             being fixed. Safe to repeat.")
+  in
   let status_arg =
     Arg.(
       value & flag
@@ -957,8 +967,8 @@ let gc_cmd =
             phase s.roots_marked s.chunks_promoted s.chunks_reclaimed
             (verified_line s)
   in
-  let run budget pause concurrency delete_batch abort status verify verbose
-      domain =
+  let run budget pause concurrency delete_batch abort status retry verify
+      verbose domain =
     set_verbose verbose;
     (* Reported as [Failure], which the top level prints as "tsync: <sentence>"
        and exits nonzero on. Both carry prose written for whoever typed this. *)
@@ -969,7 +979,23 @@ let gc_cmd =
     in
     let (module C : Conf.S) = load_conf ?domain () in
     let module G = Gc.Make (C) in
-    if status then (
+    if retry then (
+      (* Re-delivery, not a fresh decision: what each request names is in the
+         request, the space those keys came from having been discarded. *)
+      let sent = run_lwt (G.retry_outstanding ()) in
+      let total = List.fold_left (fun n (_, c) -> n + c) 0 sent in
+      if total = 0 then
+        Printf.printf "No delete request is outstanding for %s.\n" C.domain_name
+      else
+        List.iter
+          (fun (name, n) ->
+            if n > 0 then
+              Printf.printf
+                "%s: %d delete request(s) sent again. Watch tsync gc --status: \
+                 they clear as the function consumes them.\n"
+                name n)
+          sent)
+    else if status then (
       (match run_lwt (G.status ()) with
         | None -> Printf.printf "No collection is open for %s.\n" C.domain_name
         | Some r ->
@@ -1054,7 +1080,8 @@ let gc_cmd =
           mirror's job, not this one's.")
     Term.(
       const run $ budget_arg $ pause_arg $ concurrency_arg $ delete_batch_arg
-      $ abort_arg $ status_arg $ verify_arg $ verbose_arg $ domain_arg)
+      $ abort_arg $ status_arg $ retry_arg $ verify_arg $ verbose_arg
+      $ domain_arg)
 
 let sync_cmd =
   let source_arg =

@@ -132,9 +132,10 @@ chunks nothing references, which is wasted space rather than lost data.
 Two things to keep in mind if you manage the bucket yourself:
 
 - with `manage_notifications = false` (AWS) the trigger is yours to wire, and it
-  must cover `tsync/gc-jobs/` as well as chunks and sweep requests. The
-  `delete_function` output reports `false` in that case, which is what tells a
-  client not to hand its deletes over;
+  must cover `tsync/gc-jobs/` as well as chunks and sweep requests. A collection
+  hands its deletes to any s3 or gcs copy, so a trigger that misses that prefix
+  leaves requests nobody consumes — `tsync gc --status` lists them and `tsync gc
+  --retry-jobs` re-delivers once it is wired;
 - no lifecycle rule you add through `extra_lifecycle_rules` may expire anything
   under `tsync/gc-jobs/`: a request is the record of a delete that has been
   promised and not yet made.
@@ -145,9 +146,8 @@ endpoint. That is what `terraform/ci/` uses to give the conformance suite
 something real to trigger without standing up an unauthenticated URL over a
 test bucket.
 
-Set `deleteFunction` on the tsync backend to opt in; `tsync config --edit`'s
-**Sync from Terraform** reads it from the `delete_function` output. Left off,
-`gc` deletes from the client exactly as it does for an unmanaged bucket.
+There is nothing to set on the client: an s3 or gcs bucket is assumed to carry
+the function that made it, the same assumption `verified` already rests on.
 
 ## Custom domain (optional)
 

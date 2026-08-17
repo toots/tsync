@@ -282,14 +282,6 @@ let suite name (module B : Backend.S) =
   let* survived = section "awkward key names" awkward_names in
   section "bulk delete past the cap" (fun () -> bulk_delete survived)
 
-(* Set only for a bucket that has somewhere to hand a delete, so a store with no
-   function keeps answering [`Unsupported] and the collection deletes from the
-   client, exactly as an unmanaged bucket does. *)
-let deletes_here name =
-  match verify_function name with
-    | None -> []
-    | Some _ -> [("deleteFunction", "true")]
-
 let backend_of name fields =
   Backend.make ~backend_type:name ~get_field:(fun k -> List.assoc_opt k fields)
 
@@ -332,30 +324,23 @@ let verify_suite name fields =
      is what stands in for the delete having happened — so that it lands, and
      reads back byte for byte, is the half of the contract reachable from here.
 
-     [`Unsupported] unless the store is configured as running the function,
-     which is what keeps a bucket with no deployment being handed deletes that
-     nothing would ever act on. *)
+     An object store always takes one: the function that consumes them comes
+     with the bucket, as the one that checks chunks does. *)
   let doomed =
     [chunk_prefix ^ "abb/" ^ String.make 16 'a' ^ "-" ^ String.make 16 'b']
   in
   let* answer =
     On.discard ~chunk_prefix ~run:"0001755300000000" ~name:"abb" ~keys:doomed ()
   in
-  match answer with
-    | `Unsupported ->
-        check "a store with no delete function says so rather than queueing"
-          true;
-        Lwt.return_unit
-    | `Queued ->
-        let key =
-          Chunk_layout.gc_job_key ~chunk_prefix ~run:"0001755300000000" "abb"
-        in
-        let+ body = On.get_opt ~key () in
-        check "the delete request is an object the store hands back"
-          (body <> None);
-        check "carrying exactly the keys it was given"
-          (Option.map (fun b -> Discard_job.decode (Chunk.to_string b)) body
-          = Some doomed)
+  check "an object store takes a delete request" (answer = `Queued);
+  let key =
+    Chunk_layout.gc_job_key ~chunk_prefix ~run:"0001755300000000" "abb"
+  in
+  let+ body = On.get_opt ~key () in
+  check "the delete request is an object the store hands back" (body <> None);
+  check "carrying exactly the keys it was given"
+    (Option.map (fun b -> Discard_job.decode (Chunk.to_string b)) body
+    = Some doomed)
 
 (* The half a client cannot prove on its own: that something is listening.
    Everything above shows a request object lands and reads back; only the
@@ -454,9 +439,7 @@ let () =
             (env "TSYNC_CI_GCS_BUCKET", env "TSYNC_CI_GCS_SERVICE_ACCOUNT_KEY")
           with
             | Some bucket, Some key ->
-                Some
-                  (("bucket", bucket) :: ("serviceAccountKey", key)
-                 :: deletes_here "gcs")
+                Some [("bucket", bucket); ("serviceAccountKey", key)]
             | _ -> None );
       ( "s3",
         fun () ->
@@ -468,10 +451,12 @@ let () =
           with
             | Some bucket, Some region, Some id, Some secret ->
                 Some
-                  (("bucket", bucket) :: ("region", region)
-                 :: ("accessKeyId", id)
-                  :: ("secretAccessKey", secret)
-                  :: deletes_here "s3")
+                  [
+                    ("bucket", bucket);
+                    ("region", region);
+                    ("accessKeyId", id);
+                    ("secretAccessKey", secret);
+                  ]
             | _ -> None );
     ]
   in

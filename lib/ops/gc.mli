@@ -227,6 +227,15 @@ module Make (C : Conf.S) : sig
       whether or not {!status} found one open. *)
   val outstanding : unit -> (string * int * float) list Lwt.t
 
+  (** Deliver every outstanding request again, by copy name and count. The
+      store's notification fired once when the request was written and will not
+      fire again on its own, so a function that was absent or broken then does
+      not pick one up by being fixed — this is what gives it a second delivery.
+
+      Safe to repeat: a request the function has already consumed is gone, and
+      one it consumes twice deletes keys that are already deleted. *)
+  val retry_outstanding : unit -> (string * int) list Lwt.t
+
   (** An age from {!outstanding} as the report says it. Shared so a log line and
       [--status] cannot answer the same question differently. *)
   val show_age : float -> string

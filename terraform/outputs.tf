@@ -1,19 +1,13 @@
 # Non-secret config per store. Wire each onto the matching tsync s3 backend:
-#   bucket / region / accessKeyId, shareUrl = share_url, and
-#   deleteFunction = delete_function.
-#
-# deleteFunction is what tells a collection it may hand its deletes to this
-# bucket instead of issuing them; left false, a copy is deleted from the client
-# exactly as an unmanaged bucket is.
+#   bucket / region / accessKeyId, and shareUrl = share_url.
 output "stores" {
-  description = "Per-store bucket, share_url, access_key_id, and delete_function."
+  description = "Per-store bucket, share_url, and access_key_id."
   value = {
     for k, m in module.store : k => {
-      bucket          = m.bucket
-      region          = var.region
-      share_url       = m.share_url
-      access_key_id   = m.access_key_id
-      delete_function = m.delete_function
+      bucket        = m.bucket
+      region        = var.region
+      share_url     = m.share_url
+      access_key_id = m.access_key_id
     }
   }
 }
@@ -39,15 +33,13 @@ output "secret_access_keys" {
 }
 
 # ── GCS stores ─────────────────────────────────────────────────────────────
-# Wire each onto the matching tsync gcs backend: bucket / shareUrl /
-# deleteFunction.
+# Wire each onto the matching tsync gcs backend: bucket / shareUrl.
 output "gcs_stores" {
-  description = "Per-GCS-store bucket, share_url, and delete_function."
+  description = "Per-GCS-store bucket and share_url."
   value = {
     for k, m in module.store_gcs : k => {
-      bucket          = m.bucket
-      share_url       = m.share_url
-      delete_function = m.delete_function
+      bucket    = m.bucket
+      share_url = m.share_url
     }
   }
 }

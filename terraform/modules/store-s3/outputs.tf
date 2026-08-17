@@ -57,11 +57,3 @@ output "secret_access_key" {
   sensitive   = true
 }
 
-# True when this bucket runs the function that consumes chunk-delete requests,
-# which is exactly when the notification is managed here: an unmanaged bucket
-# may have no trigger wired, and a collection handing its deletes to one would
-# leave them unconsumed.
-output "delete_function" {
-  description = "Whether a tsync client may set deleteFunction on this store."
-  value       = var.manage_notifications
-}

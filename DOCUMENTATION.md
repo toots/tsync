@@ -404,7 +404,7 @@ Who does the checking depends on the store:
 - **`s3` and `gcs`** check in a function the bucket itself triggers on each new object, so the
   chunks are never downloaded to be checked. It comes with the Terraform module — nothing to
   name, nothing to set on the client. The same function also carries out the deletes a `gc`
-  hands it; that half is opt-in, see `deleteFunction` in [§9](#9-versions-trash-and-cleanup).
+  hands it — see [§9](#9-versions-trash-and-cleanup).
 
 ```bash
 tsync data-integrity              # what each store found, and which stores nothing is checking
@@ -550,18 +550,21 @@ main is discarding, so a remote store on cold storage sees deletes and nothing e
 cost is the garbage's rather than the layout's. Filling a copy that has fallen behind is
 `tsync mirror`'s job, not this one's.
 
-An `s3` or `gcs` copy deployed with the terraform in `terraform/` takes those deletes rather
-than performing them: `gc` writes the batch as a small request object, the bucket's own
-notification hands it to the same function that checks blocks, and the collection moves on
-without waiting. Set `deleteFunction` on that backend to turn it on — left off, the deletes
-are issued from the client exactly as they are for any other store, which is what a bucket
-you manage yourself should keep.
+An `s3` or `gcs` copy takes those deletes rather than performing them: `gc` writes the batch
+as a small request object, the bucket's own notification hands it to the same function that
+checks blocks, and the collection moves on without waiting. Nothing to configure — the
+function comes with the bucket, the same terraform deploying both halves of it.
 
-A request only clears when the function runs. If one does not — no notification wired, the
-function failing — the copy keeps blocks nothing references: wasted space, not lost data, and
-`tsync mirror` clears it. `tsync gc` says so when it starts and `tsync gc --status` lists
-them, which is the only thing that will: the keys are already gone from the main, so no later
-collection meets them again.
+A request only clears when the function runs. If one does not — a bucket whose stack predates
+this, a notification you wire yourself and have not — the copy keeps blocks nothing
+references: wasted space, not lost data. `tsync gc` says so when it starts and `tsync gc
+--status` lists what is outstanding, which is the only thing that will, since those keys are
+already gone from the main and no later collection meets them again.
+
+The notification fires once, when the request is written, so fixing the function afterwards
+does not make it pick up what it missed. `tsync gc --retry-jobs` hands those requests over
+again; it is safe to repeat, and `tsync mirror` remains the way to reconcile a copy whose
+requests are long gone.
 
 A collection over a large store takes a while, and can be spread over several sittings or
 paced to stay out of the way:
@@ -570,7 +573,8 @@ paced to stay out of the way:
 tsync gc --budget 30m        # stop after about half an hour, resume next time
 tsync gc --pause 1s          # idle between batches
 tsync gc --concurrency 1     # one operation at a time
-tsync gc --status            # is one open, and how far along
+tsync gc --status            # is one open, how far along, what is outstanding
+tsync gc --retry-jobs        # hand outstanding delete requests over again
 tsync gc --abort             # abandon an open one, keeping every block
 ```
 
@@ -777,8 +781,8 @@ Every backend needs a `type`, a `name` (used by `mirror --source`) and a
 
 | `type` | Required fields | Optional | Notes |
 |---|---|---|---|
-| `s3` | `bucket`, `accessKeyId`, `secretAccessKey` | `region` (default `us-east-1`), `endpoint`, `shareUrl`, `unsignedPayload`, `deleteFunction` | Also works with S3-compatible services (Backblaze B2, MinIO, …) via `endpoint`. |
-| `gcs` | `bucket`, `serviceAccountKey` | `endpoint`, `shareUrl`, `deleteFunction` | `serviceAccountKey` is the service-account JSON itself, not a path to it. Blank only to reach an emulator anonymously, with `endpoint`. |
+| `s3` | `bucket`, `accessKeyId`, `secretAccessKey` | `region` (default `us-east-1`), `endpoint`, `shareUrl`, `unsignedPayload` | Also works with S3-compatible services (Backblaze B2, MinIO, …) via `endpoint`. |
+| `gcs` | `bucket`, `serviceAccountKey` | `endpoint`, `shareUrl` | `serviceAccountKey` is the service-account JSON itself, not a path to it. Blank only to reach an emulator anonymously, with `endpoint`. |
 | `local` | `path` | `verifyWrites` (default on) | A directory: another disk, a mounted NAS, anything the filesystem reaches. |
 | `http-proxy` | `url`, `secret` | — | Another machine running tsync with the `http-proxy` frontend — [step 7](#7-run-tsync-as-a-server-for-your-network). |
 
