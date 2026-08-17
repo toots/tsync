@@ -1775,26 +1775,29 @@ let mirror_cmd =
              incr checked;
              current := Some (doing name key)
            in
+           (* As each object lands rather than as a list at the end: the list
+              was the whole keyspace of a first resync, held to print it. *)
            let on_copy ~name ~key ~reason ~bytes =
              incr copied;
-             vprintf "  copied %s (%s, %s) -> %s" key (human_bytes bytes)
-               (match reason with
+             let why =
+               match reason with
                  | `Missing -> "missing"
-                 | `Wrong_size -> "wrong size")
-               name
+                 | `Wrong_size -> "wrong size"
+             in
+             if !verbose then
+               vprintf "  copied %s (%s, %s) -> %s" key (human_bytes bytes) why
+                 name
+             else Printf.printf "copied %s -> %s\n%!" key name
            in
            let+ dests =
              M.resync ~source:src ~scope ~on_scan ~on_list ~on_start ~on_copy ()
            in
            List.iter
              (fun (dst : Mirror.dest_stats) ->
-               (* Under -v they are already logged live. *)
-               if not !verbose then
-                 List.iter (Printf.printf "copied %s\n") dst.Mirror.copied;
                Printf.printf "%s -> %s: %d object%s checked, %d copied (%s)\n"
                  src dst.Mirror.name dst.Mirror.checked
                  (if dst.Mirror.checked = 1 then "" else "s")
-                 (List.length dst.Mirror.copied)
+                 dst.Mirror.copied
                  (human_bytes dst.Mirror.copied_bytes))
              dests;
            0
