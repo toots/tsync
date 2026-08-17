@@ -26,6 +26,8 @@ module type S = sig
   (** Chunk size for files this client creates; see the .mli. *)
   val chunk_size : unit -> int Lwt.t
 
+  val known_chunk_count : unit -> int
+
   val upload_chunks :
     key:string ->
     size:int64 ->
@@ -40,6 +42,10 @@ module type S = sig
 
   val fetch_manifest : key:string -> unit -> Manifest.t option Lwt.t
 end
+
+(* Settable so a test can reach the cap without uploading a terabyte. *)
+let max_known = ref 100_000
+let set_max_known n = max_known := n
 
 module Make_with_layout (C : Conf.S) (L : Layout.S) : S = struct
   (* [St] maps logical keys to backend keys through the layout scheme. *)
@@ -91,8 +97,18 @@ module Make_with_layout (C : Conf.S) (L : Layout.S) : S = struct
 
   (* Chunk keys known present on the domain's stores, this session only. Not
      pre-populated by listing the chunk prefix: that cost scales with the whole
-     historical archive rather than the upload at hand. *)
+     historical archive rather than the upload at hand.
+
+     Capped the same crude way {!Deferred} caps its own: a session is a command,
+     and one that runs for days over a terabyte holds an entry per distinct
+     chunk with nothing to evict it. Overflowing costs a HEAD per chunk again,
+     which is what the memo was saving. *)
   let known_chunks : (string, unit) Hashtbl.t = Hashtbl.create 4096
+  let known_chunk_count () = Hashtbl.length known_chunks
+
+  let remember_chunk ck_rel =
+    if Hashtbl.length known_chunks >= !max_known then Hashtbl.reset known_chunks;
+    Hashtbl.replace known_chunks ck_rel ()
 
   (* Where a chunk is written; where it can be *read* is
      {!Chunk_space.read_key}'s business, a collection in progress being the one
@@ -128,7 +144,7 @@ module Make_with_layout (C : Conf.S) (L : Layout.S) : S = struct
     in
     let+ () =
       if known then (
-        Hashtbl.replace known_chunks ck_rel ();
+        remember_chunk ck_rel;
         Lwt.return_unit)
       else (
         Metrics.add_uploaded size;
@@ -137,7 +153,7 @@ module Make_with_layout (C : Conf.S) (L : Layout.S) : S = struct
            as it took it — so stop holding this key against the rest of the
            session. *)
         Corrupt.forget ck_rel;
-        Hashtbl.replace known_chunks ck_rel ())
+        remember_chunk ck_rel)
     in
     entry
 
