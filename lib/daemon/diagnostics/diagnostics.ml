@@ -563,8 +563,13 @@ let merge reports =
           | `List l ->
               List.fold_left
                 (fun acc j ->
-                  if List.exists (fun k -> mem k "pid" = mem j "pid") acc then
-                    acc
+                  (* Absent is not equal to absent: two jobs naming no pid are
+                     two jobs, and [merge] is public enough to be handed JSON
+                     this daemon never wrote. *)
+                  if
+                    mem j "pid" <> `Null
+                    && List.exists (fun k -> mem k "pid" = mem j "pid") acc
+                  then acc
                   else j :: acc)
                 acc l
           | _ -> acc)
@@ -965,9 +970,7 @@ let text json =
         List.iter
           (fun j ->
             let sub k f = match mem j k with `Null -> () | v -> f v in
-            let age =
-              duration (Unix.gettimeofday () -. num (mem j "startedAt"))
-            in
+            let age = duration (num (mem j "uptimeSeconds")) in
             (* The same figure either way, so a finished job says which it is:
                time since it started reads as an age once it has stopped. *)
             let state = str (mem j "state") in
@@ -1023,7 +1026,7 @@ let text json =
                      (int_of (mem d "queued"))
                      (int_of (mem d "inFlight")));
                 if bool_of (mem d "degraded") then
-                  row 4 "" "writes were dropped: run tsync mirror");
+                  row 4 "" "DEGRADED, run tsync mirror");
             (match mem j "pools" with
               | `List (_ :: _ as pools) ->
                   row 4 "slots"

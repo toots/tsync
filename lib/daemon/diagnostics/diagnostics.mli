@@ -31,8 +31,10 @@ module Make (C : Conf.S) : sig
 end
 
 (** Fold reports from one process into a single report: the domains are
-    concatenated, everything else comes from the first. For a caller that had to
-    ask a multi-domain daemon once per domain. *)
+    concatenated, the jobs concatenated and deduplicated by pid, everything else
+    taken from the first. For a caller that had to ask a multi-domain daemon
+    once per domain — where one process answers for several, each answer carries
+    that process's whole job table. *)
 val merge : Yojson.Safe.t list -> Yojson.Safe.t
 
 (** Render a report for a human. *)

@@ -36,10 +36,8 @@ let stub_server ~path ~seen =
 
 let () =
   Lwt_main.run
-    (Job_report.set_interval 0.1;
-
-     (* No listener at all: the path does not exist. *)
-     Job_report.start
+    ((* No listener at all: the path does not exist. *)
+     Job_report.start ~interval:0.1
        ~socket_path:(Filename.concat root "absent.sock")
        ~domain:"d" ~kind:"import"
        ~counters:(fun () -> [("files", 3)])
@@ -53,14 +51,14 @@ let () =
      let path = Filename.concat root "live.sock" in
      let seen = ref [] in
      let* () = stub_server ~path ~seen in
-     Job_report.start ~socket_path:path ~domain:"d" ~kind:"import"
+     Job_report.start ~socket_path:path ~domain:"d" ~kind:"import" ~interval:0.1
        ~target:"/media/files/stage"
        ~current:(fun () -> Some "big.mov")
        ~deferred:(fun () -> Some (207, 3, false))
        ~counters:(fun () -> [("files", 30433); ("failed", 0)])
        ();
      let* () = Lwt_unix.sleep 0.45 in
-     let* () = Job_report.finish ~summary:[("files", 30434)] () in
+     let* () = Job_report.finish () in
      check "a listening daemon receives reports" (!seen <> []);
 
      let last = List.hd (List.rev !seen) in

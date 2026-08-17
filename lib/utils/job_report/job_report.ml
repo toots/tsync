@@ -1,14 +1,12 @@
 open Lwt.Syntax
 
-let interval = ref 10.
-let set_interval s = interval := s
-
 (* The heap walk behind [live_bytes] is the only expensive thing here, so it
    rides a slower cycle than the rest. *)
 let deep_every = 6
 
 type t = {
   socket_path : string;
+  interval : float;
   domain : string;
   kind : string;
   target : string option;
@@ -73,6 +71,12 @@ let payload t ~state ~extra =
     ("domain", `String t.domain);
     ("pid", `Int (Unix.getpid ()));
     ("startedAt", `Float t.started);
+    (* Elapsed is computed here and not by the reader: a report is rendered on
+       whatever host asked for it, whose clock is not this one. *)
+    ("uptimeSeconds", `Float (Unix.gettimeofday () -. t.started));
+    (* So a reader can tell silence from a slow cadence without knowing what
+       this process was built with. *)
+    ("intervalSeconds", `Float t.interval);
     ("state", `String state);
     ( "memory",
       `Assoc
@@ -139,7 +143,7 @@ let send t ~state ?(extra = []) () =
       Lwt.return_unit)
 
 let rec loop t =
-  let* () = Lwt_unix.sleep !interval in
+  let* () = Lwt_unix.sleep t.interval in
   if t.stop then Lwt.return_unit
   else begin
     t.ticks <- t.ticks + 1;
@@ -148,11 +152,12 @@ let rec loop t =
     loop t
   end
 
-let start ~socket_path ~domain ~kind ?target ?(current = fun () -> None)
-    ?(deferred = fun () -> None) ~counters () =
+let start ~socket_path ~domain ~kind ?target ?(interval = 10.)
+    ?(current = fun () -> None) ?(deferred = fun () -> None) ~counters () =
   let t =
     {
       socket_path;
+      interval;
       domain;
       kind;
       target;
@@ -172,13 +177,12 @@ let start ~socket_path ~domain ~kind ?target ?(current = fun () -> None)
      [Lwt.async_exception_hook] — which would take the command down with it. *)
   Lwt.async (fun () -> loop t)
 
-let finish ?error ?(summary = []) () =
+let finish ?error () =
   match !job with
     | None -> Lwt.return_unit
     | Some t ->
         t.stop <- true;
         job := None;
-        let t = { t with counters = (fun () -> summary @ t.counters ()) } in
         let state = match error with None -> "done" | Some _ -> "failed" in
         let extra =
           Option.to_list (Option.map (fun e -> ("error", `String e)) error)

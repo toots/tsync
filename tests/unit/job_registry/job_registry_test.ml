@@ -19,12 +19,21 @@ open Check
 let job_json ?(state = "running") ?(started = 1000.) ~kind pid =
   `Assoc
     [
-      ("action", `String "report");
       ("kind", `String kind);
       ("pid", `Int pid);
       ("startedAt", `Float started);
       ("state", `String state);
     ]
+
+(* As the IPC arm does: what the registry decides with is passed apart from the
+   payload it merely stores. *)
+let record ?state ?started ~kind pid =
+  let report = job_json ?state ?started ~kind pid in
+  Job_registry.record ~pid
+    ~started:(Option.value started ~default:1000.)
+    ~interval:10.
+    ~finished:(Option.value state ~default:"running" <> "running")
+    report
 
 let pids () =
   List.map
@@ -48,31 +57,29 @@ let kill_and_reap pid =
 
 let () =
   case "a live process is listed, a dead one is not";
-  Job_registry.forget_all ();
   let live_pid = spawn_sleeper () and dead_pid = spawn_sleeper () in
-  Job_registry.record (job_json ~kind:"import" live_pid);
-  Job_registry.record (job_json ~kind:"gc" dead_pid);
+  record ~kind:"import" live_pid;
+  record ~kind:"gc" dead_pid;
   check "both are listed while both are running"
-    (List.sort compare (pids ()) = List.sort compare [live_pid; dead_pid]);
+    (List.mem live_pid (pids ()) && List.mem dead_pid (pids ()));
   kill_and_reap dead_pid;
   check "the killed job is dropped" (not (List.mem dead_pid (pids ())));
   check "the surviving job is kept" (List.mem live_pid (pids ()));
 
   case "a finished job outlives its process";
-  Job_registry.forget_all ();
   let done_pid = spawn_sleeper () in
-  Job_registry.record (job_json ~kind:"gc" ~state:"done" done_pid);
+  record ~kind:"gc" ~state:"done" done_pid;
   kill_and_reap done_pid;
   check "a job that said it was done stays visible"
     (List.mem done_pid (pids ()));
-  Job_registry.record (job_json ~kind:"gc" ~state:"failed" live_pid);
+  record ~kind:"gc" ~state:"failed" live_pid;
   check "and so does one that said it failed" (List.mem live_pid (pids ()));
 
   case "a second report replaces the first";
-  Job_registry.forget_all ();
-  Job_registry.record (job_json ~kind:"import" live_pid);
-  Job_registry.record (job_json ~kind:"import" ~started:2000. live_pid);
-  check "one row per process" (List.length (Job_registry.live ()) = 1);
+  record ~kind:"import" live_pid;
+  record ~kind:"import" ~started:2000. live_pid;
+  check "one row per process"
+    (List.length (List.filter (fun p -> p = live_pid) (pids ())) = 1);
   kill_and_reap live_pid;
 
   case "merging reports from one process answering for several domains";
@@ -122,13 +129,16 @@ let () =
                       ("pid", `Int 4242);
                       ("state", `String state);
                       ("startedAt", `Float (Unix.gettimeofday () -. 3720.));
+                      (* Elapsed comes from the reporting process, whose clock
+                         is not the clock of whoever renders this. *)
+                      ("uptimeSeconds", `Float 3720.);
                       ("target", `String "/media/stage");
                       ("current", `String "big.mov");
                       ( "counters",
                         `List
                           [
                             `List [`String "files"; `Int 30433];
-                            `List [`String "of"; `Int 61956];
+                            `List [`String "planned"; `Int 61956];
                           ] );
                       ( "memory",
                         `Assoc
@@ -196,7 +206,7 @@ let () =
   check "what it is on right now" ~why:(fun () -> running) (has "big.mov");
   check "its counters, in the order it published them"
     ~why:(fun () -> running)
-    (has "30433 files, 61956 of");
+    (has "30433 files, 61956 planned");
   check "live words beside the heap, which is the pair that answers retention"
     ~why:(fun () -> running)
     (has "108.0 MB rss + 40.0 MB swapped, 75.0 MB heap, 41.0 MB live");

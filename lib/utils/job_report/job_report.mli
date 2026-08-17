@@ -10,25 +10,22 @@
     daemon, a socket that vanished mid-run — every one of those is silence in
     [tsync status], never a failure in the command.
 
-    [start] begins reporting until [finish] or process exit. [counters] and
-    [current] are what only the command knows; everything else — memory, GC,
-    transfer totals, the deferred queue, pool saturation, backend retries — is
-    process-wide and gathered here, so a command threads nothing through for it.
-    Both are sampled on the reporting thread and must not block. *)
+    [start] begins reporting until [finish] or process exit. [counters],
+    [current] and [deferred] are what the command supplies; memory, GC, transfer
+    totals, pool saturation and backend retries are process-wide and gathered
+    here, so a command threads nothing through for those. Every closure is
+    sampled on the reporting thread and must not block. *)
 val start :
   socket_path:string ->
   domain:string ->
   kind:string ->
   ?target:string ->
+  ?interval:float ->
   ?current:(unit -> string option) ->
   ?deferred:(unit -> (int * int * bool) option) ->
   counters:(unit -> (string * int) list) ->
   unit ->
   unit
-
-(** Seconds between reports. Settable so a test need not wait the default ten.
-*)
-val set_interval : float -> unit
 
 (** A last report marked done, so a finished job is visible for a while rather
     than vanishing the instant it exits. [error] marks it failed instead, which
@@ -36,4 +33,4 @@ val set_interval : float -> unit
 
     Returns once the send has been attempted; a failure is swallowed like any
     other, and a second call reports nothing. *)
-val finish : ?error:string -> ?summary:(string * int) list -> unit -> unit Lwt.t
+val finish : ?error:string -> unit -> unit Lwt.t

@@ -844,11 +844,21 @@ module Make (C : Conf.S) (F : File_ops.S) = struct
                               ("jobs", `List (Job_registry.live ()));
                             ])
                     (* A command running beside this daemon, describing itself.
-                       Advisory, so it is acknowledged even when the payload
-                       says little: a report is never worth failing a command
-                       over. *)
+                       Advisory, so it is acknowledged whatever the payload
+                       says: a report is never worth failing a command over. *)
                     | "report" ->
-                        Job_registry.record (`Assoc obj);
+                        let num key =
+                          match List.assoc_opt key obj with
+                            | Some (`Float f) -> f
+                            | Some (`Int n) -> float_of_int n
+                            | _ -> 0.
+                        in
+                        Job_registry.record
+                          ~pid:(Option.value ~default:0 (get_int obj "pid"))
+                          ~started:(num "startedAt")
+                          ~interval:(num "intervalSeconds")
+                          ~finished:(get_str obj "state" <> "running")
+                          (`Assoc (List.remove_assoc "action" obj));
                         Lwt.return (ok_json [])
                     | "download_progress" ->
                         with_target (fun key ->

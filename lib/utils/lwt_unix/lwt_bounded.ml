@@ -11,7 +11,10 @@ type t = {
 (* A pool stands for a resource, so a named one is registered for the life of
    the process and reported on: [waiting] above zero is the difference between
    work that is slow and work that is queued behind a bound, and nothing could
-   tell those apart from outside. *)
+   tell those apart from outside.
+
+   Name only a pool created once at startup: nothing is ever pruned, so naming
+   one built per request would grow this with the request count. *)
 let named : (string * t) list ref = ref []
 
 let create ?max_waiting ?name ~max () =

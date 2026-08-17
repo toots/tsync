@@ -434,6 +434,11 @@ module Make (J : JOB) = struct
               let+ () = complete t e.id in
               false
           | `Failed exn when Backend.classify exn = Backend.Transient ->
+              (* Counted the same as a backend's own ladder: retries a queue
+                 absorbs are still the link struggling, and a report that showed
+                 only one of the two would understate it. *)
+              Metrics.add_retry 1;
+              if exn = Lwt_unix.Timeout then Metrics.add_timeout 1;
               let n = note_failure t e in
               (* The shared curve, with a cap measured against an outage rather
                  than a request: a queue has nobody waiting. *)
@@ -446,6 +451,7 @@ module Make (J : JOB) = struct
               let+ () = Lwt_unix.sleep delay in
               true
           | `Failed exn ->
+              Metrics.add_failure 1;
               let+ () = poison_record t e exn in
               false
       in
