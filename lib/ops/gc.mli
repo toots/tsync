@@ -177,8 +177,14 @@ module Make (C : Conf.S) : sig
       steps: a unit can run for a while, and a limit only honoured at the end of
       a batch of them is not much of a limit.
 
-      Both progress callbacks are throttled to about one call a second and carry
-      running totals rather than per-item deltas. *)
+      Both progress callbacks are throttled to about one call a second, per
+      phase, and carry running totals rather than per-item deltas. The last call
+      of a phase is not throttled, so a phase shorter than the interval still
+      reports where it ended.
+
+      [at] is the namespace or shard being worked on, set as it is picked up
+      rather than once it is done, which is what a caller saying where a
+      collection has got to wants. *)
   val run :
     ?budget:float ->
     ?units:int ->
@@ -188,8 +194,14 @@ module Make (C : Conf.S) : sig
     ?keep:bool ->
     ?verify:bool ->
     ?on_open:(unit -> unit) ->
-    ?on_mark:(namespaces:int -> total:int -> roots:int -> promoted:int -> unit) ->
-    ?on_close:(shards:int -> reclaimed:int -> unit) ->
+    ?on_mark:
+      (namespaces:int ->
+      total:int ->
+      roots:int ->
+      promoted:int ->
+      at:string ->
+      unit) ->
+    ?on_close:(shards:int -> reclaimed:int -> at:string -> unit) ->
     unit ->
     stats Lwt.t
 
@@ -209,8 +221,14 @@ module Make (C : Conf.S) : sig
     ?pause:float ->
     ?concurrency:int ->
     ?on_open:(unit -> unit) ->
-    ?on_mark:(namespaces:int -> total:int -> roots:int -> promoted:int -> unit) ->
-    ?on_close:(shards:int -> reclaimed:int -> unit) ->
+    ?on_mark:
+      (namespaces:int ->
+      total:int ->
+      roots:int ->
+      promoted:int ->
+      at:string ->
+      unit) ->
+    ?on_close:(shards:int -> reclaimed:int -> at:string -> unit) ->
     unit ->
     stats Lwt.t
 

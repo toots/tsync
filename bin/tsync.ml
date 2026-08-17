@@ -1039,6 +1039,7 @@ let gc_cmd =
       (* Spelled as {!Chunk_space.string_of_phase} does, so a phase named here
          and one read off an open run are the same word. *)
       let phase = ref (Chunk_space.string_of_phase Chunk_space.Opening) in
+      let at_ = ref "" in
       let marked = ref [] and closed = ref [] in
       let socket_path = snd (reporting_target ?domain ()) in
       let emit ending line =
@@ -1056,10 +1057,11 @@ let gc_cmd =
       (* Abandoning walks shards and has no notion of a file; marking walks
          folders and counts the files in them, so the two get different lines
          rather than one with a field that means nothing in half the runs. *)
-      let on_mark ~namespaces ~total ~roots ~promoted =
+      let on_mark ~namespaces ~total ~roots ~promoted ~at =
         phase :=
           Chunk_space.string_of_phase
             (if abort then Chunk_space.Abandoning else Chunk_space.Marking);
+        at_ := at;
         marked :=
           [
             ("shards", namespaces);
@@ -1076,8 +1078,9 @@ let gc_cmd =
       in
       (* Added to rather than replacing what marking counted: a job whose set of
          counters changes halfway through reads as one that lost them. *)
-      let on_close ~shards ~reclaimed =
+      let on_close ~shards ~reclaimed ~at =
         phase := Chunk_space.string_of_phase Chunk_space.Closing;
+        at_ := at;
         closed := [("closed", shards); ("reclaimed", reclaimed)];
         progress "  closed %d shard(s), %d chunk(s) reclaimed" shards reclaimed
       in
@@ -1088,7 +1091,10 @@ let gc_cmd =
               ~report:(fun () ->
                 Job_report.start ~socket_path ~domain:C.domain_name
                   ~kind:(if abort then "gc --abort" else "gc")
-                  ~current:(fun () -> Some !phase)
+                  ~current:(fun () ->
+                    Some
+                      (if !at_ = "" then !phase
+                       else !phase ^ " \xc2\xb7 " ^ !at_))
                   ~deferred:(fun () -> deferred_totals C.members)
                   ~counters:(fun () -> !marked @ !closed)
                   ())

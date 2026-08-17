@@ -363,6 +363,9 @@ module Make (C : Conf.S) = struct
     mutable work : work;
     mutable total : int;
     mutable done_ : int;
+    (* Set as a unit is picked up, not taken from the head of [work], which is
+       what is left to do and so names the wrong item mid-batch. *)
+    mutable at : string;
     mutable roots_marked : int;
     mutable chunks_promoted : int;
     mutable chunks_verified : int;
@@ -372,8 +375,13 @@ module Make (C : Conf.S) = struct
     mutable chunks_reclaimed : int;
     mutable bytes_reclaimed : int;
     mutable on_mark :
-      namespaces:int -> total:int -> roots:int -> promoted:int -> unit;
-    mutable on_close : shards:int -> reclaimed:int -> unit;
+      namespaces:int ->
+      total:int ->
+      roots:int ->
+      promoted:int ->
+      at:string ->
+      unit;
+    mutable on_close : shards:int -> reclaimed:int -> at:string -> unit;
   }
 
   let phase s =
@@ -535,6 +543,7 @@ module Make (C : Conf.S) = struct
         work;
         total;
         done_ = 0;
+        at = "";
         roots_marked = 0;
         chunks_promoted = 0;
         chunks_verified = 0;
@@ -543,8 +552,8 @@ module Make (C : Conf.S) = struct
         chunks_cleared = 0;
         chunks_reclaimed = 0;
         bytes_reclaimed = 0;
-        on_mark = (fun ~namespaces:_ ~total:_ ~roots:_ ~promoted:_ -> ());
-        on_close = (fun ~shards:_ ~reclaimed:_ -> ());
+        on_mark = (fun ~namespaces:_ ~total:_ ~roots:_ ~promoted:_ ~at:_ -> ());
+        on_close = (fun ~shards:_ ~reclaimed:_ ~at:_ -> ());
       }
     in
     (* Said once at the top rather than left for [--status] to be asked: what
@@ -630,7 +639,7 @@ module Make (C : Conf.S) = struct
              "gc: marked %d/%d namespace(s), %d root(s), %d chunk(s) kept"
              s.done_ s.total s.roots_marked s.chunks_promoted;
            s.on_mark ~namespaces:s.done_ ~total:s.total ~roots:s.roots_marked
-             ~promoted:s.chunks_promoted))
+             ~promoted:s.chunks_promoted ~at:s.at))
 
   (* [roots:0]: there are no files here, only shards. What the caller prints for
      a collection would read as a second, wrong count of them. *)
@@ -640,14 +649,14 @@ module Make (C : Conf.S) = struct
            Log.debug "gc: kept %d/%d shard(s), %d chunk(s)" s.done_ s.total
              s.chunks_promoted;
            s.on_mark ~namespaces:s.done_ ~total:s.total ~roots:0
-             ~promoted:s.chunks_promoted))
+             ~promoted:s.chunks_promoted ~at:s.at))
 
   let report_close ?force s =
     ignore
       (throttled ?force ~key:"close" (fun () ->
            Log.debug "gc: %d/%d shard(s) closed, %d chunk(s) reclaimed" s.done_
              s.total s.chunks_reclaimed;
-           s.on_close ~shards:s.done_ ~reclaimed:s.chunks_reclaimed))
+           s.on_close ~shards:s.done_ ~reclaimed:s.chunks_reclaimed ~at:s.at))
 
   (* Called only where [Space.promote] answered [true], which is what makes this
      once per chunk: opening renamed the whole root aside, so a live chunk is
@@ -738,6 +747,7 @@ module Make (C : Conf.S) = struct
      the caller must not also hold a [unit_slots] slot for the whole namespace,
      or every slot parks on a root waiting for a chunk. *)
   let mark_one s ns =
+    s.at <- ns;
     let* prefix = prefix_of_namespace s.root ns in
     let* entries = B.list_prefix ~prefix () in
     (* Only what is positively a write in flight is skipped, not everything
@@ -893,6 +903,7 @@ module Make (C : Conf.S) = struct
     in
     let rec go = function
       | shard :: more when not (s.out_of_time ()) ->
+          s.at <- shard;
           let* keys, size =
             orphans_in_shard ~main:s.main ~slots:s.item_slots shard
           in
@@ -910,7 +921,8 @@ module Make (C : Conf.S) = struct
                    scanned s.total
                    (s.chunks_reclaimed + !count);
                  s.on_close ~shards:scanned
-                   ~reclaimed:(s.chunks_reclaimed + !count)));
+                   ~reclaimed:(s.chunks_reclaimed + !count)
+                   ~at:s.at));
           let* () = if ready () then flush () else Lwt.return_unit in
           go more
       | remaining ->
@@ -1031,6 +1043,7 @@ module Make (C : Conf.S) = struct
      missing ones across costs [m - k], so the directory rename wins while the
      surviving space holds less than about half the shard. *)
   let keep_one s shard =
+    s.at <- shard;
     let src_dir, dst_dir = shard_dirs s shard in
     let* kept =
       let* carried = carry_over s shard in
@@ -1183,8 +1196,8 @@ module Make (C : Conf.S) = struct
 
   let run ?budget ?(units = 256) ?pause ?concurrency ?delete_batch
       ?(keep = false) ?(verify = false) ?(on_open = fun () -> ())
-      ?(on_mark = fun ~namespaces:_ ~total:_ ~roots:_ ~promoted:_ -> ())
-      ?(on_close = fun ~shards:_ ~reclaimed:_ -> ()) () =
+      ?(on_mark = fun ~namespaces:_ ~total:_ ~roots:_ ~promoted:_ ~at:_ -> ())
+      ?(on_close = fun ~shards:_ ~reclaimed:_ ~at:_ -> ()) () =
     let began = Unix.gettimeofday () in
     let deadline =
       match budget with

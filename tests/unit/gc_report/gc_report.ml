@@ -72,9 +72,13 @@ type seen = {
   mutable roots : int;
   mutable promoted : int;
   mutable reclaimed : int;
+  mutable named : string list;
 }
 
-let fresh () = { marks = 0; closes = 0; roots = 0; promoted = 0; reclaimed = 0 }
+let fresh () =
+  { marks = 0; closes = 0; roots = 0; promoted = 0; reclaimed = 0; named = [] }
+
+let note seen at = if at <> "" then seen.named <- at :: seen.named
 
 let put_chunk n =
   Main.put
@@ -110,13 +114,15 @@ let () =
      case "a collection that finishes inside one throttle interval";
      let* stats =
        G.run
-         ~on_mark:(fun ~namespaces:_ ~total:_ ~roots ~promoted ->
+         ~on_mark:(fun ~namespaces:_ ~total:_ ~roots ~promoted ~at ->
            seen.marks <- seen.marks + 1;
            seen.roots <- roots;
-           seen.promoted <- promoted)
-         ~on_close:(fun ~shards:_ ~reclaimed ->
+           seen.promoted <- promoted;
+           note seen at)
+         ~on_close:(fun ~shards:_ ~reclaimed ~at ->
            seen.closes <- seen.closes + 1;
-           seen.reclaimed <- reclaimed)
+           seen.reclaimed <- reclaimed;
+           note seen at)
          ()
      in
      step "on_mark fired %d time(s), on_close %d" seen.marks seen.closes;
@@ -129,6 +135,9 @@ let () =
         phase that never reported is a phase a reader never saw happen. *)
      check "marking reported at all" (seen.marks > 0);
      check "closing reported at all" (seen.closes > 0);
+     (* Set as a unit is picked up, so a caller can say which folder or shard a
+        long phase is sitting on rather than only that it is in one. *)
+     check "and the run named what it was working on" (seen.named <> []);
 
      check "the run reclaimed something to disagree about"
        (stats.Gc.chunks_reclaimed > 0);
@@ -154,21 +163,23 @@ let () =
      let* () = G.release s in
      let* stats =
        G.abort
-         ~on_mark:(fun ~namespaces:_ ~total:_ ~roots:_ ~promoted ->
+         ~on_mark:(fun ~namespaces:_ ~total:_ ~roots:_ ~promoted ~at ->
            seen.marks <- seen.marks + 1;
-           seen.promoted <- promoted)
-         ~on_close:(fun ~shards:_ ~reclaimed:_ ->
+           seen.promoted <- promoted;
+           note seen at)
+         ~on_close:(fun ~shards:_ ~reclaimed:_ ~at:_ ->
            seen.closes <- seen.closes + 1)
          ()
      in
      step "on_mark fired %d time(s); %d chunk(s) moved back" seen.marks
        seen.promoted;
      check "abandoning reported at all" (seen.marks > 0);
+     check "and it named a shard it was on" (seen.named <> []);
      check "chunks moved back agree"
        ~why:(fun () ->
          Printf.sprintf "callback %d, stats %d" seen.promoted
            stats.Gc.chunks_promoted)
        (seen.promoted = stats.Gc.chunks_promoted);
 
-     report ~expected:8 ();
+     report ~expected:10 ();
      Lwt.return_unit)
