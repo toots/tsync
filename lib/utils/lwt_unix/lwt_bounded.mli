@@ -30,8 +30,12 @@ type t
     [max_waiting] caps that queue. Unbounded, it turns a busy resource into a
     growing list of promises whose callers time out with nothing to say why;
     capped, {!use_or} refuses instead, which is how a client is told to slow
-    down. *)
-val create : ?max_waiting:int -> max:int -> unit -> t
+    down.
+
+    [name] registers the pool so it can be reported on. Name the ones that stand
+    for a scarce resource — a per-call pool is not one, and an unnamed pool is
+    simply left out. *)
+val create : ?max_waiting:int -> ?name:string -> max:int -> unit -> t
 
 (** Run [f] under [t], waiting for a slot. Raises {!Busy} if [t] has a
     [max_waiting] and its queue is full. *)
@@ -50,6 +54,12 @@ val in_flight : t -> int
 (** Jobs holding a queue slot, waiting to start. Above zero means callers are
     waiting on the bound rather than the work. *)
 val waiting : t -> int
+
+(** What [max] was admitted as, so a report can say 4/4 rather than 4. *)
+val limit : t -> int
+
+(** Every pool {!create}d with a [name], in creation order. *)
+val registered : unit -> (string * t) list
 
 (** {1 Fanning a list out under a bound}
 

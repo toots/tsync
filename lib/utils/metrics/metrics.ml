@@ -52,14 +52,49 @@ let upload_rate () = rate uploaded_c
 let download_rate () = rate downloaded_c
 let hash_rate () = rate hashed_c
 
+(* Counted where the retry happens rather than where a caller notices, so a run
+   that recovered every time still says how hard it worked to. *)
+let retries_c = make ()
+let timeouts_c = make ()
+let failures_c = make ()
+let add_retry n = add retries_c n
+let add_timeout n = add timeouts_c n
+let add_failure n = add failures_c n
+let retries () = retries_c.total
+let timeouts () = timeouts_c.total
+let failures () = failures_c.total
+
 (* Cumulative CPU seconds (user + system); callers diff consecutive samples for a
    percentage. *)
 let cpu_seconds () =
   let t = Unix.times () in
   t.Unix.tms_utime +. t.Unix.tms_stime
 
-(* Current resident set size in bytes. *)
-let rss_bytes () = (Mem_usage.info ()).Mem_usage.process_physical_memory
+(* Anonymous pages are what an out-of-memory kill has to take, and swapped ones
+   are still anonymous — under zram they are the same pages compressed, so
+   resident alone understates what a process is holding by whatever the kernel
+   has pushed out. *)
+type mem = {
+  rss : int;
+  private_ : int;
+  swapped : int;
+  virt : int;
+  system_used : int;
+  system_total : int;
+}
+
+let mem_stats () =
+  let m = Mem_usage.info () in
+  {
+    rss = m.Mem_usage.process_physical_memory;
+    private_ = m.Mem_usage.process_private_memory;
+    swapped = m.Mem_usage.process_swapped_memory;
+    virt = m.Mem_usage.process_virtual_memory;
+    system_used = m.Mem_usage.total_used_physical_memory;
+    system_total = m.Mem_usage.total_physical_memory;
+  }
+
+let rss_bytes () = (mem_stats ()).rss
 
 (* Read next to the RSS above: a large RSS over a small heap is buffers and
    mapped cache reads, not an OCaml leak. *)
@@ -70,15 +105,22 @@ type gc = {
   major_collections : int;
 }
 
+let bytes_of_words w = w * (Sys.word_size / 8)
+
 let gc_stats () =
   let s = Gc.quick_stat () in
-  let bytes w = w * (Sys.word_size / 8) in
   {
-    heap_bytes = bytes s.Gc.heap_words;
-    top_heap_bytes = bytes s.Gc.top_heap_words;
+    heap_bytes = bytes_of_words s.Gc.heap_words;
+    top_heap_bytes = bytes_of_words s.Gc.top_heap_words;
     minor_collections = s.Gc.minor_collections;
     major_collections = s.Gc.major_collections;
   }
+
+(* Separate from {!gc_stats} because it walks the heap: the heap a process holds
+   grows in steps and shrinks never, so it says nothing about what is retained,
+   and the difference between the two is the difference between a leak and an
+   allocator that has not given anything back. *)
+let live_bytes () = bytes_of_words (Gc.stat ()).Gc.live_words
 
 (* The event loop's load. A server that stopped answering while its CPU is idle
    shows up here as watched descriptors that never drain. *)

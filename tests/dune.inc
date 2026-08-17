@@ -658,6 +658,14 @@
   (action
    (diff item_ref_test.expected item_ref_test.output))))
 
+(subdir unit/job_report
+ (alias
+  (name default)
+  (deps job_report_test.exe))
+ (rule
+  (alias runtest)
+  (action (run ./job_report_test.exe))))
+
 (subdir unit/layout
  (alias
   (name default)

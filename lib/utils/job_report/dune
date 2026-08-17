@@ -1,0 +1,21 @@
+(library
+ (flags
+  (:standard
+   -open
+   Tsync_log
+   -open
+   Tsync_metrics
+   -open
+   Tsync_ipc
+   -open
+   Tsync_lwt_unix))
+ (name tsync_job_report)
+ (libraries
+  tsync_log
+  tsync_metrics
+  tsync_ipc
+  tsync_lwt_unix
+  yojson
+  unix
+  lwt
+  lwt.unix))

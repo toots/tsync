@@ -61,7 +61,8 @@ module Make_with_layout (C : Conf.S) (L : Layout.S) : S = struct
      chunk read blocks until one frees, whatever file it belongs to, so
      [max_chunk_buffers] times the chunk size is what the upload path costs in
      memory however many files [max_uploads] admits. *)
-  let chunk_slots = Lwt_bounded.create ~max:(max 1 C.max_chunk_buffers) ()
+  let chunk_slots =
+    Lwt_bounded.create ~name:"chunk buffers" ~max:(max 1 C.max_chunk_buffers) ()
 
   (* Config, else what the domain's stores recommend (an http-proxy answers with
      the serving domain's own, so the setting need not live in two configs),
@@ -282,7 +283,8 @@ module Make_with_layout (C : Conf.S) (L : Layout.S) : S = struct
             | m -> Some m
             | exception _ -> None)
 
-  let chunk_download_pool = Lwt_bounded.create ~max:C.max_downloads ()
+  let chunk_download_pool =
+    Lwt_bounded.create ~name:"downloads" ~max:C.max_downloads ()
 
   let get_chunk ~chunk_key =
     Lwt_bounded.use chunk_download_pool (fun () ->

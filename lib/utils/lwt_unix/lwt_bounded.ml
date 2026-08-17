@@ -8,17 +8,29 @@ type t = {
   waiters : unit Lwt.u Queue.t;
 }
 
-let create ?max_waiting ~max () =
-  {
-    limit = (if max < 1 then 1 else max);
-    max_waiting;
-    held = 0;
-    waiting = 0;
-    waiters = Queue.create ();
-  }
+(* A pool stands for a resource, so a named one is registered for the life of
+   the process and reported on: [waiting] above zero is the difference between
+   work that is slow and work that is queued behind a bound, and nothing could
+   tell those apart from outside. *)
+let named : (string * t) list ref = ref []
+
+let create ?max_waiting ?name ~max () =
+  let t =
+    {
+      limit = (if max < 1 then 1 else max);
+      max_waiting;
+      held = 0;
+      waiting = 0;
+      waiters = Queue.create ();
+    }
+  in
+  (match name with None -> () | Some n -> named := !named @ [(n, t)]);
+  t
 
 let in_flight t = t.held
 let waiting t = t.waiting
+let limit t = t.limit
+let registered () = !named
 let full t = match t.max_waiting with Some n -> t.waiting >= n | None -> false
 
 let acquire t =

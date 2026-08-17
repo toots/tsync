@@ -29,10 +29,37 @@ val upload_rate : unit -> float
 val download_rate : unit -> float
 val hash_rate : unit -> float
 
+(** Backend requests retried, requests that timed out (a subset of the
+    retried), and requests that reached their caller as a failure. A run that
+    recovered from everything still reports what it recovered from. *)
+val add_retry : int -> unit
+
+val add_timeout : int -> unit
+val add_failure : int -> unit
+val retries : unit -> int
+val timeouts : unit -> int
+val failures : unit -> int
+
 (** Cumulative CPU seconds (user + system) used by this process. *)
 val cpu_seconds : unit -> float
 
 (** Current resident set size in bytes. *)
+(** [private_] plus [swapped] is what a process actually holds: swapped-out
+    anonymous pages are still its own, compressed rather than gone, so [rss]
+    alone understates it by however much the kernel has pushed out. [system_used]
+    and [system_total] are the headroom that decides whether that matters. *)
+type mem = {
+  rss : int;
+  private_ : int;
+  swapped : int;
+  virt : int;
+  system_used : int;
+  system_total : int;
+}
+
+val mem_stats : unit -> mem
+
+(** [(mem_stats ()).rss]. *)
 val rss_bytes : unit -> int
 
 (** OCaml heap figures, to read next to {!rss_bytes}: a large RSS over a small
@@ -45,6 +72,12 @@ type gc = {
 }
 
 val gc_stats : unit -> gc
+
+(** Words actually reachable, which {!gc_stats} cannot tell you: the heap grows
+    in steps and never shrinks, so it answers "how much has been asked for"
+    rather than "how much is held". Walks the heap, so sample it on a slow cycle
+    rather than beside {!gc_stats}. *)
+val live_bytes : unit -> int
 
 (** The Lwt event loop's load: descriptors watched, timers pending, and the
     blocking-syscall pool ceiling. *)
