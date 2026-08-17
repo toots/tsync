@@ -22,6 +22,8 @@
    -open
    Tsync_backend_register
    -open
+   Tsync_lwt_unix
+   -open
    Tsync_conf))
  (name tsync_diagnostics)
  (libraries
@@ -32,6 +34,7 @@
   tsync_naming
   tsync_local_io
   tsync_conf
+  tsync_lwt_unix
   tsync_chunk
   tsync_backend_register
   tsync_metrics

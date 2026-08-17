@@ -150,7 +150,8 @@ module Make (C : Conf.S) = struct
     go [] (Filename.dirname rel)
 
   let run ?(only = []) ?(exclude = []) ?(force_rehash = false)
-      ?(on_dir = fun ~rel:_ -> ()) ~src ~on_file () =
+      ?(on_dir = fun ~rel:_ -> ()) ?(on_plan = fun ~files:_ -> ())
+      ?(on_start = fun ~rel:_ -> ()) ~src ~on_file () =
     let src =
       let p =
         if Filename.is_relative src then Filename.concat (Sys.getcwd ()) src
@@ -186,7 +187,13 @@ module Make (C : Conf.S) = struct
           symlinks;
         List.filter (Hashtbl.mem keep) dirs)
     in
+    on_plan ~files:(List.length files + List.length symlinks);
+    (* Around every per-entry unit of work in both loops, which is what makes it
+       the one place that knows what the import is on right now: [on_file] fires
+       once an entry is done, and a large file spends its whole life between the
+       two. *)
     let guard rel f =
+      on_start ~rel;
       Lwt.catch f (fun exn ->
           let msg = Printexc.to_string exn in
           Log.err "import %s: %s" rel msg;

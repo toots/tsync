@@ -733,19 +733,25 @@ let trash_cmd =
       & info ["purge"] ~doc:"Delete every version of $(i,PATH) from the trash.")
   in
   let purge path domain =
-    run_lwt
-      (let open Lwt.Syntax in
-       let (module C : Conf.S) = load_conf ?domain () in
-       let module E = Expire.Make (C) in
-       let+ outcome = E.purge_trashed ~path () in
-       match outcome with
-         | `Not_in_trash ->
-             Printf.eprintf "not in trash: %s\n" path;
-             exit 1
-         | `Purged n ->
-             Printf.printf "purged %s (%d object%s) — run tsync gc to reclaim\n"
-               path n
-               (if n = 1 then "" else "s"))
+    let code =
+      run_lwt
+        (let open Lwt.Syntax in
+         let (module C : Conf.S) = load_conf ?domain () in
+         let module E = Expire.Make (C) in
+         let+ outcome = E.purge_trashed ~path () in
+         match outcome with
+           | `Not_in_trash ->
+               Printf.eprintf "not in trash: %s\n" path;
+               1
+           | `Purged n ->
+               Printf.printf
+                 "purged %s (%d object%s) — run tsync gc to reclaim\n" path n
+                 (if n = 1 then "" else "s");
+               0)
+    in
+    (* Outside {!run_lwt}: exiting from inside its promise would skip the
+       deferred drain it exists for. *)
+    if code <> 0 then exit code
   in
   let run path domain restore do_purge =
     match (path, restore, do_purge) with
@@ -807,7 +813,10 @@ let expire_cmd =
     with _ -> failwith ("invalid date (expected YYYY-MM-DD): " ^ s)
   in
   let run date domain =
-    match
+    (* Carriage-return progress belongs on a terminal, where one line rewrites
+       itself; down a pipe it is padding in front of the summary. *)
+    let watching = Unix.isatty Unix.stderr in
+    let s =
       run_lwt
         (let cutoff = parse_date date in
          let (module C : Conf.S) = load_conf ?domain () in
@@ -821,13 +830,17 @@ let expire_cmd =
            ~on_scan:(fun ~name ~objects ->
              Printf.eprintf "  %s: %d object(s)\n%!" name objects)
            ~on_delete:(fun ~name ~deleted ->
-             Printf.eprintf "  %s: %d deleted\r%!" name deleted)
+             if watching then Printf.eprintf "  %s: %d deleted\r%!" name deleted)
            ~cutoff ())
-    with
-      | s ->
-          Printf.printf "Removed %d version(s), %d journal entr(ies)\n"
-            s.Expire.versions_deleted s.journal_deleted
-      | exception Failure msg -> Printf.eprintf "Error: %s\n" msg
+    in
+    (* The last progress line is still sitting on the terminal's current line,
+       and the summary below would land on top of it. *)
+    if watching then Printf.eprintf "\r%*s\r%!" 72 "";
+    (* [Failure] is left to the top level, which prints it as a sentence and
+       exits nonzero: a run that could not reach a backend must not tell a
+       script it expired anything. *)
+    Printf.printf "Removed %d version(s), %d journal entr(ies)\n"
+      s.Expire.versions_deleted s.journal_deleted
   in
   Cmd.v
     (Cmd.info "expire"
@@ -1029,6 +1042,11 @@ let gc_cmd =
          collection run under screen and teed to a file is the case that wants
          it, and the one where stderr is not a terminal. *)
       let watching = Unix.isatty Unix.stderr in
+      (* Spelled as {!Chunk_space.string_of_phase} does, so a phase named here
+         and one read off an open run are the same word. *)
+      let phase = ref (Chunk_space.string_of_phase Chunk_space.Opening) in
+      let at_ = ref "" in
+      let marked = ref [] and closed = ref [] in
       let emit ending line =
         if watching then Printf.eprintf "%s%s%!" line ending
         else vprintf "%s" line
@@ -1036,6 +1054,7 @@ let gc_cmd =
       let header fmt = Printf.ksprintf (emit "\n") fmt in
       let progress fmt = Printf.ksprintf (emit "\r") fmt in
       let on_open () =
+        phase := Chunk_space.string_of_phase Chunk_space.Opening;
         header "%s %s..."
           (if abort then "Abandoning the collection of" else "Collecting")
           C.domain_name
@@ -1043,7 +1062,21 @@ let gc_cmd =
       (* Abandoning walks shards and has no notion of a file; marking walks
          folders and counts the files in them, so the two get different lines
          rather than one with a field that means nothing in half the runs. *)
-      let on_mark ~namespaces ~total ~roots ~promoted =
+      let on_mark ~namespaces ~total ~roots ~promoted ~at =
+        phase :=
+          Chunk_space.string_of_phase
+            (if abort then Chunk_space.Abandoning else Chunk_space.Marking);
+        at_ := at;
+        marked :=
+          if abort then
+            [("shards", namespaces); ("planned", total); ("kept", promoted)]
+          else
+            [
+              ("folders", namespaces);
+              ("planned", total);
+              ("files", roots);
+              ("kept", promoted);
+            ];
         if abort then
           progress "  kept %d/%d shard(s), %d chunk(s)" namespaces total
             promoted
@@ -1051,13 +1084,26 @@ let gc_cmd =
           progress "  marked %d/%d folder(s), %d file(s), %d chunk(s) kept"
             namespaces total roots promoted
       in
-      let on_close ~shards ~reclaimed =
+      (* Added to rather than replacing what marking counted: a job whose set of
+         counters changes halfway through reads as one that lost them. *)
+      let on_close ~shards ~reclaimed ~at =
+        phase := Chunk_space.string_of_phase Chunk_space.Closing;
+        at_ := at;
+        closed := [("closed", shards); ("reclaimed", reclaimed)];
         progress "  closed %d shard(s), %d chunk(s) reclaimed" shards reclaimed
       in
       translate (fun () ->
           let was_open = abort && run_lwt (G.status ()) <> None in
           let s =
             run_lwt
+              ~report:(fun () ->
+                report_job ?domain
+                  (module C)
+                  ~kind:(if abort then "gc --abort" else "gc")
+                  ~current:(fun () ->
+                    Some (if !at_ = "" then !phase else doing !phase !at_))
+                  ~counters:(fun () -> !marked @ !closed)
+                  ())
               (if abort then
                  G.abort ?budget ?pause ?concurrency ~on_open ~on_mark ~on_close
                    ()
@@ -1111,173 +1157,213 @@ let sync_cmd =
   in
   let run domain source full parallelism v =
     set_verbose v;
-    run_lwt
-      (let open Lwt.Syntax in
-       let (module C : Conf.S) =
-         let conf = load_conf ?domain () in
-         match source with Some name -> reading_from name conf | None -> conf
-       in
-       let module J = Journal.Make (C) in
-       let module W = Wal.Make (C) in
-       let module Fs = File_store.Make (C) in
-       let module St = Store.Make (C) (Layout.Inode.Make (C)) in
-       let module Sq = Sync_queue.Make (C) in
-       let module F = File.Make (C) (Sq) in
-       let module Rp = Replay.Make (C) (F) in
-       Sq.start
-         ~upload:(fun ~key ~cancel -> F.upload ~cancel key)
-         ~on_cursor:(fun ~entry_key:_ -> ())
-         ~on_upload_done:(fun ~key:_ -> Lwt.return_unit);
-       let my_uuid = J.client_uuid () in
-       if !verbose then
-         Log.info "syncing domain %s (client %s, uuid %s)" C.domain_name
-           C.client_name my_uuid;
-       (* Walks the inode tree from the root, a folder marker giving a
+    let (module C : Conf.S) =
+      let conf = load_conf ?domain () in
+      match source with Some name -> reading_from name conf | None -> conf
+    in
+    let phase = ref "starting" and current = ref None in
+    let manifests = ref 0 and failures = ref 0 in
+    (* An incremental pass counts no manifests, and a fixed set of counters
+       would print zeroes reading as "nothing happened" rather than as "this
+       pass does not count that". *)
+    let rebuilding = ref false in
+    let code =
+      run_lwt
+        ~report:(fun () ->
+          report_job ?domain
+            (module C)
+            ~kind:(if full then "sync --full" else "sync")
+            ~current:(fun () ->
+              match !current with
+                | Some at -> Some (doing !phase at)
+                | None -> Some !phase)
+              (* No total for a resync: the inode tree is discovered as it is
+               walked, so a denominator here would be one this cannot know. *)
+            ~counters:(fun () ->
+              if !rebuilding then
+                [("manifests", !manifests); ("failed", !failures)]
+              else [])
+            ())
+        (let open Lwt.Syntax in
+         let module J = Journal.Make (C) in
+         let module W = Wal.Make (C) in
+         let module Fs = File_store.Make (C) in
+         let module St = Store.Make (C) (Layout.Inode.Make (C)) in
+         let module Sq = Sync_queue.Make (C) in
+         let module F = File.Make (C) (Sq) in
+         let module Rp = Replay.Make (C) (F) in
+         Sq.start
+           ~upload:(fun ~key ~cancel -> F.upload ~cancel key)
+           ~on_cursor:(fun ~entry_key:_ -> ())
+           ~on_upload_done:(fun ~key:_ -> Lwt.return_unit);
+         let my_uuid = J.client_uuid () in
+         if !verbose then
+           Log.info "syncing domain %s (client %s, uuid %s)" C.domain_name
+             C.client_name my_uuid;
+         (* Walks the inode tree from the root, a folder marker giving a
           subfolder's name+id plus the namespace to recurse into.
 
           One [pool] is shared across the whole recursion, a per-namespace bound
           multiplying with depth until it exhausts DNS / descriptors; a slot
           covers only a fetch and its local write, so a deep tree cannot
           deadlock. *)
-       let rebuild_mirror () =
-         let pool =
-           Lwt_pool.create (max 1 parallelism) (fun () -> Lwt.return_unit)
-         in
-         let use f = Lwt_pool.use pool f in
-         let join rel name = if rel = "" then name else rel ^ "/" ^ name in
-         let count = ref 0 and failed = ref 0 in
-         (* Entries of one folder, bounded; the descent below is sequential.
+         let rebuild_mirror () =
+           let pool =
+             Lwt_pool.create (max 1 parallelism) (fun () -> Lwt.return_unit)
+           in
+           let use f = Lwt_pool.use pool f in
+           let join rel name = if rel = "" then name else rel ^ "/" ^ name in
+           let count = manifests and failed = failures in
+           (* Entries of one folder, bounded; the descent below is sequential.
             Recursing inside the fan-out instead would keep every level live at
             once, so the peak is the whole tree rather than one directory — and
             a second bound here would deadlock against this one. *)
-         let entry_slots = Lwt_bounded.create ~max:(max 1 parallelism) () in
-         let rec walk folder_id rel =
-           let* entries = use (fun () -> St.list_namespace ~folder_id) in
-           let* children =
-             Lwt_bounded.filter_map_with entry_slots
-               (fun (e : Backend.file_entry) ->
-                 Lwt.catch
-                   (fun () ->
-                     let* next =
-                       use (fun () ->
-                           let* data = St.get_object ~bkey:e.key in
-                           match Folder.marker_of_string data with
-                             | Some m ->
-                                 let child = join rel m.Folder.name in
-                                 let+ () =
-                                   Folder_ids.write ~cache_root:C.cache_root
-                                     ~domain_name:C.domain_name child m
-                                 in
-                                 Some (m.Folder.id, child)
-                             | None -> (
-                                 match Manifest.of_string data with
-                                   | man ->
-                                       incr count;
-                                       (* Read by backend key, which is hashed:
+           let entry_slots = Lwt_bounded.create ~max:(max 1 parallelism) () in
+           let rec walk folder_id rel =
+             current := Some (if rel = "" then "/" else rel);
+             let* entries = use (fun () -> St.list_namespace ~folder_id) in
+             let* children =
+               Lwt_bounded.filter_map_with entry_slots
+                 (fun (e : Backend.file_entry) ->
+                   Lwt.catch
+                     (fun () ->
+                       let* next =
+                         use (fun () ->
+                             let* data = St.get_object ~bkey:e.key in
+                             match Folder.marker_of_string data with
+                               | Some m ->
+                                   let child = join rel m.Folder.name in
+                                   let+ () =
+                                     Folder_ids.write ~cache_root:C.cache_root
+                                       ~domain_name:C.domain_name child m
+                                   in
+                                   Some (m.Folder.id, child)
+                               | None -> (
+                                   match Manifest.of_string data with
+                                     | man ->
+                                         incr count;
+                                         (* Read by backend key, which is hashed:
                                         the body is what names it. *)
-                                       let leaf = Manifest.recorded_name man in
-                                       if !verbose then
-                                         Log.info "manifest %s" (join rel leaf);
-                                       let+ () =
-                                         F.write_manifest
-                                           (C.domain_prefix ^ join rel leaf)
-                                           man
-                                       in
-                                       None
-                                   | exception parse_exn ->
-                                       (* Counted, so a store whose manifests all
+                                         let leaf =
+                                           Manifest.recorded_name man
+                                         in
+                                         if !verbose then
+                                           Log.info "manifest %s"
+                                             (join rel leaf);
+                                         let+ () =
+                                           F.write_manifest
+                                             (C.domain_prefix ^ join rel leaf)
+                                             man
+                                         in
+                                         None
+                                     | exception parse_exn ->
+                                         (* Counted, so a store whose manifests all
                                         fail to parse cannot resync
                                         "successfully" writing nothing. *)
-                                       incr failed;
-                                       Log.warn
-                                         "resync %s: unreadable manifest: %s"
-                                         e.key
-                                         (match parse_exn with
-                                           | Chunk_table.Malformed m -> m
-                                           | ex -> Printexc.to_string ex);
-                                       Lwt.return_none))
-                     in
-                     Lwt.return next)
-                   (fun exn ->
-                     incr failed;
-                     Log.warn "resync %s: %s" e.key (Printexc.to_string exn);
-                     Lwt.return_none))
-               entries
+                                         incr failed;
+                                         Log.warn
+                                           "resync %s: unreadable manifest: %s"
+                                           e.key
+                                           (match parse_exn with
+                                             | Chunk_table.Malformed m -> m
+                                             | ex -> Printexc.to_string ex);
+                                         Lwt.return_none))
+                       in
+                       Lwt.return next)
+                     (fun exn ->
+                       incr failed;
+                       Log.warn "resync %s: %s" e.key (Printexc.to_string exn);
+                       Lwt.return_none))
+                 entries
+             in
+             Lwt_list.iter_s (fun (id, child) -> walk id child) children
            in
-           Lwt_list.iter_s (fun (id, child) -> walk id child) children
+           let+ () = walk Folder.root_id "" in
+           (!count, !failed)
          in
-         let+ () = walk Folder.root_id "" in
-         (!count, !failed)
-       in
-       let full_resync reason =
-         if !verbose then Log.info "full resync: %s" reason;
-         (* Notify the daemon only once the rebuild is complete, or it re-reads
+         let full_resync reason =
+           rebuilding := true;
+           phase := "clearing the cache";
+           if !verbose then Log.info "full resync: %s" reason;
+           (* Notify the daemon only once the rebuild is complete, or it re-reads
             an empty mirror mid-rebuild. Unsynced edits are kept: nothing else
             holds those bytes. *)
-         let* () =
-           Cache_layout.clear ~cache_root:C.cache_root
-             ~domain_name:C.domain_name
-         in
-         let* n, failed = rebuild_mirror () in
-         (* Only a rebuild that reached everything may say so. Recording the
+           let* () =
+             Cache_layout.clear ~cache_root:C.cache_root
+               ~domain_name:C.domain_name
+           in
+           phase := "rebuilding";
+           let* n, failed = rebuild_mirror () in
+           current := None;
+           phase := "notifying the daemon";
+           (* Only a rebuild that reached everything may say so. Recording the
             mark after a partial walk moves the cursor past folders that were
             never fetched, and nothing revisits them: their files arrive later
             as journal puts, into directories no id names. *)
-         if failed = 0 then Fs.write_last_sync_key (J.entry_key ());
-         (try
-            if !verbose then Log.info "notifying daemon of completed resync";
-            ignore
-              (ipc_action ~socket_path:C.socket_path ~domain:C.domain_name
-                 "full_resync")
-          with
-           | Failure msg -> Printf.eprintf "Warning: full_resync: %s\n" msg
-           | _ -> ());
-         Printf.printf "full resync: %d manifest%s downloaded%s\n" n
-           (if n = 1 then "" else "s")
-           (if failed > 0 then
-              Printf.sprintf
-                " (%d failed — re-run 'tsync sync --full' to complete)" failed
-            else "");
-         if failed > 0 then exit 1;
-         Lwt.return_unit
-       in
-       (* One pass of the same engine the daemon polls with, so the two cannot
+           if failed = 0 then Fs.write_last_sync_key (J.entry_key ());
+           (try
+              if !verbose then Log.info "notifying daemon of completed resync";
+              ignore
+                (ipc_action ~socket_path:C.socket_path ~domain:C.domain_name
+                   "full_resync")
+            with
+             | Failure msg -> Printf.eprintf "Warning: full_resync: %s\n" msg
+             | _ -> ());
+           Printf.printf "full resync: %d manifest%s downloaded%s\n" n
+             (if n = 1 then "" else "s")
+             (if failed > 0 then
+                Printf.sprintf
+                  " (%d failed — re-run 'tsync sync --full' to complete)" failed
+              else "");
+           Lwt.return (if failed > 0 then 1 else 0)
+         in
+         (* One pass of the same engine the daemon polls with, so the two cannot
           drift apart. *)
-       let incremental () =
-         (* A one-shot command: no mount of ours is running to refresh. *)
-         let+ n = Rp.apply_foreign ~on_changed:(fun _ -> ()) () in
-         (match Fs.read_last_sync_key () with
-           | Some k when !verbose ->
-               Log.info "applied through %s" (Journal.Entry_key.to_string k)
-           | _ -> ());
-         Printf.printf "%d journal entr%s from other clients\n" n
-           (if n = 1 then "y" else "ies")
-       in
-       let* () = Rp.reconcile () in
-       if !verbose then Log.info "draining upload queue";
-       let* () = Sq.drain () in
-       let last_sync_key = Fs.read_last_sync_key () in
-       if !verbose then
-         Log.info "last sync bookmark: %s"
-           (match last_sync_key with
-             | None -> "none (first run)"
-             | Some k -> Journal.Entry_key.to_string k);
-       let* all_keys = Fs.list_journal_keys () in
-       if !verbose then
-         Log.info "journal: %d entr%s" (List.length all_keys)
-           (if List.length all_keys = 1 then "y" else "ies");
-       let resync_reason =
-         match last_sync_key with
-           | _ when full -> Some "--full flag"
-           | None -> Some "no bookmark (first run)"
-           | Some last ->
-               if Journal.Entry_key.cannot_bridge last all_keys then
-                 Some "bookmark older than oldest journal entry"
-               else None
-       in
-       match resync_reason with
-         | Some reason -> full_resync reason
-         | None -> incremental ())
+         let incremental () =
+           phase := "applying other clients' entries";
+           (* A one-shot command: no mount of ours is running to refresh. *)
+           let+ n = Rp.apply_foreign ~on_changed:(fun _ -> ()) () in
+           (match Fs.read_last_sync_key () with
+             | Some k when !verbose ->
+                 Log.info "applied through %s" (Journal.Entry_key.to_string k)
+             | _ -> ());
+           Printf.printf "%d journal entr%s from other clients\n" n
+             (if n = 1 then "y" else "ies");
+           0
+         in
+         phase := "replaying local records";
+         let* () = Rp.reconcile () in
+         phase := "draining uploads";
+         if !verbose then Log.info "draining upload queue";
+         let* () = Sq.drain () in
+         phase := "reading the journal";
+         let last_sync_key = Fs.read_last_sync_key () in
+         if !verbose then
+           Log.info "last sync bookmark: %s"
+             (match last_sync_key with
+               | None -> "none (first run)"
+               | Some k -> Journal.Entry_key.to_string k);
+         let* all_keys = Fs.list_journal_keys () in
+         if !verbose then
+           Log.info "journal: %d entr%s" (List.length all_keys)
+             (if List.length all_keys = 1 then "y" else "ies");
+         let resync_reason =
+           match last_sync_key with
+             | _ when full -> Some "--full flag"
+             | None -> Some "no bookmark (first run)"
+             | Some last ->
+                 if Journal.Entry_key.cannot_bridge last all_keys then
+                   Some "bookmark older than oldest journal entry"
+                 else None
+         in
+         match resync_reason with
+           | Some reason -> full_resync reason
+           | None -> incremental ())
+    in
+    (* Outside {!run_lwt}: exiting from inside its promise would skip the
+       deferred drain it exists for, and a resync that failed part way is
+       exactly the run with copies still queued. *)
+    if code <> 0 then exit code
   in
   Cmd.v
     (Cmd.info "sync"
@@ -1298,6 +1384,14 @@ let sync_cmd =
    checkable wherever it sits, and what a client happens to have cached says
    nothing about the copy a store is keeping. *)
 let data_integrity_cmd =
+  let current = ref None and planned = ref 0 in
+  let checked = ref 0 and unrepairable = ref 0 and corrupt = ref 0 in
+  (* [--verify] polls every store at once, so what a reader wants is the run's
+     totals rather than whichever member answered last. *)
+  let per_store : (string, int * int) Hashtbl.t = Hashtbl.create 4 in
+  let sum_stores which =
+    Hashtbl.fold (fun _ v acc -> acc + which v) per_store 0
+  in
   let report (module C : Conf.S) detail =
     let open Lwt.Syntax in
     let module Cor = Corruption.Make (C) in
@@ -1310,6 +1404,7 @@ let data_integrity_cmd =
             (b.Corruption.store, b.Corruption.chunk_key))
         r.Corruption.entries
     in
+    corrupt := List.length entries;
     let* () =
       Lwt_list.iter_s
         (fun (e : Corruption.entry) ->
@@ -1379,6 +1474,8 @@ let data_integrity_cmd =
     let rec loop stalled last =
       let* left = count jobs in
       let* found = count corrupted in
+      Hashtbl.replace per_store m.Backend.name (left, found);
+      current := Some (doing m.Backend.name "waiting on the bucket");
       if left = 0 then (
         Printf.eprintf "%s: done — %d corrupt chunk(s)\n%!" m.Backend.name found;
         Lwt.return_unit)
@@ -1457,10 +1554,14 @@ let data_integrity_cmd =
     let+ s =
       Rp.run ?source ~dry_run
         ~on_start:(fun ~total ->
+          planned := total;
           if verbose then
             Printf.eprintf "%d marked chunk%s to work through\n%!" total
               (if total = 1 then "" else "s"))
         ~on_chunk:(fun ~done_ ~total ~chunk_key ~store outcome ->
+          checked := done_;
+          if outcome = Repair.Unrepairable then incr unrepairable;
+          current := Some (doing store chunk_key);
           let line = Repair.describe ~chunk_key ~store outcome in
           if verbose then
             Printf.printf "[%*d/%d] %s\n%!"
@@ -1488,15 +1589,34 @@ let data_integrity_cmd =
     else 0
   in
   let run domain do_verify do_repair detail source dry_run verbose =
+    set_verbose verbose;
     let (module C : Conf.S) = load_conf ?domain () in
+    if do_verify && do_repair then
+      failwith "--verify and --repair are separate steps; run one.";
     let code =
       run_lwt
-        (match (do_verify, do_repair) with
-          | true, true ->
-              failwith "--verify and --repair are separate steps; run one."
-          | true, false -> verify (module C)
-          | false, true -> repair (module C) source dry_run verbose
-          | false, false -> report (module C) detail)
+        ~report:(fun () ->
+          report_job ?domain
+            (module C)
+            ~kind:
+              (if do_verify then "data-integrity --verify"
+               else if do_repair then "data-integrity --repair"
+               else "data-integrity")
+            ~current:(fun () -> !current)
+            ~counters:(fun () ->
+              if do_verify then
+                [("requests left", sum_stores fst); ("corrupt", sum_stores snd)]
+              else if do_repair then
+                [
+                  ("chunks", !checked);
+                  ("planned", !planned);
+                  ("unrepairable", !unrepairable);
+                ]
+              else [("corrupt", !corrupt)])
+            ())
+        (if do_verify then verify (module C)
+         else if do_repair then repair (module C) source dry_run verbose
+         else report (module C) detail)
     in
     if code <> 0 then exit code
   in
@@ -1583,25 +1703,44 @@ let mirror_cmd =
   in
   let run domain source manifests_only path v =
     set_verbose v;
+    (* Mirror copies between the stores themselves, so it reads [C.members]
+       rather than going through the composite. *)
+    let (module C : Conf.S) = load_conf ?domain () in
+    let src =
+      Option.value source
+        ~default:(match C.members with m :: _ -> m.Backend.name | [] -> "")
+    in
+    let current = ref None and planned = ref 0 in
+    let copied = ref 0 and checked = ref 0 in
+    (* Ahead of {!run_lwt} rather than inside the promise it is handed: that
+       argument is evaluated before reporting starts, so a raise there is a
+       command with no row and no failed state to show. *)
+    if List.length C.members < 2 then
+      failwith
+        (Printf.sprintf
+           "mirror needs at least two configured backends; %s has %d."
+           C.domain_name (List.length C.members));
+    if manifests_only && path <> None then
+      failwith "--manifests and --path select different things; run one.";
     let code =
       run_lwt
+        ~report:(fun () ->
+          report_job ?domain
+            (module C)
+            ~kind:
+              (match (manifests_only, path) with
+                | _, Some _ -> "mirror --path"
+                | true, None -> "mirror --manifests"
+                | false, None -> "mirror")
+            ~target:src
+            ~current:(fun () -> !current)
+            ~counters:(fun () ->
+              [
+                ("objects", !checked); ("planned", !planned); ("copied", !copied);
+              ])
+            ())
         (let open Lwt.Syntax in
-         let (module C : Conf.S) = load_conf ?domain () in
-         (* Mirror copies between the stores themselves, so it reads
-            [C.members] rather than going through the composite. *)
-         let src =
-           Option.value source
-             ~default:
-               (match C.members with m :: _ -> m.Backend.name | [] -> "")
-         in
-         if List.length C.members < 2 then
-           failwith
-             (Printf.sprintf
-                "mirror needs at least two configured backends; %s has %d."
-                C.domain_name (List.length C.members))
-         else if manifests_only && path <> None then
-           failwith "--manifests and --path select different things; run one."
-         else begin
+         begin
            let scope =
              match (manifests_only, path) with
                | _, Some rel -> `Path rel
@@ -1615,32 +1754,48 @@ let mirror_cmd =
                | `Path rel -> Printf.sprintf "%s and its chunks" rel)
              src;
            let module M = Mirror.Make (C) in
-           let on_list ~name = vprintf "  %s..." name in
+           let on_list ~name =
+             current := Some name;
+             vprintf "  %s..." name
+           in
+           (* Every destination is examined for every source object, and they go
+              one after another, so the run's own total is the product. *)
+           let destinations =
+             List.length
+               (List.filter
+                  (fun (m : Backend.member) -> m.Backend.name <> src)
+                  C.members)
+           in
            let on_scan ~objects =
+             planned := objects * destinations;
              vprintf "scanned %s: %d object%s to check" src objects
                (if objects = 1 then "" else "s")
            in
+           let on_start ~name ~key =
+             incr checked;
+             current := Some (doing name key)
+           in
            let on_copy ~name ~key ~reason ~bytes =
-             vprintf "  copied %s (%d bytes, %s) -> %s" key bytes
+             incr copied;
+             vprintf "  copied %s (%s, %s) -> %s" key (human_bytes bytes)
                (match reason with
                  | `Missing -> "missing"
                  | `Wrong_size -> "wrong size")
                name
            in
            let+ dests =
-             M.resync ~source:src ~scope ~on_scan ~on_list ~on_copy ()
+             M.resync ~source:src ~scope ~on_scan ~on_list ~on_start ~on_copy ()
            in
            List.iter
              (fun (dst : Mirror.dest_stats) ->
                (* Under -v they are already logged live. *)
                if not !verbose then
                  List.iter (Printf.printf "copied %s\n") dst.Mirror.copied;
-               Printf.printf
-                 "%s -> %s: %d object%s checked, %d copied (%d bytes)\n" src
-                 dst.Mirror.name dst.Mirror.checked
+               Printf.printf "%s -> %s: %d object%s checked, %d copied (%s)\n"
+                 src dst.Mirror.name dst.Mirror.checked
                  (if dst.Mirror.checked = 1 then "" else "s")
                  (List.length dst.Mirror.copied)
-                 dst.Mirror.copied_bytes)
+                 (human_bytes dst.Mirror.copied_bytes))
              dests;
            0
          end)
@@ -1696,33 +1851,67 @@ let import_cmd =
   in
   let run domain src only exclude force_rehash v =
     set_verbose v;
-    run_lwt
-      (let open Lwt.Syntax in
-       let (module C : Conf.S) = load_conf ?domain () in
-       let module I = Import.Make (C) in
-       vprintf "importing from %s into domain %s" src C.domain_name;
-       let+ summary =
-         I.run ~only ~exclude ~force_rehash ~src
-           ~on_dir:(fun ~rel -> Printf.printf "mkdir    %s\n%!" rel)
-           ~on_file:(fun ~rel status ->
-             match status with
-               | Import.Imported size ->
-                   Printf.printf "imported %s (%Ld bytes)\n%!" rel size
-               | Import.Skipped_exists ->
-                   Printf.printf "skip     %s (already in domain)\n%!" rel
-               | Import.Skipped_symlink ->
-                   Printf.printf "skip     %s (symlink)\n%!" rel
-               | Import.Failed msg ->
-                   Printf.printf "failed   %s: %s\n%!" rel msg)
-           ()
-       in
-       Printf.printf
-         "\n%d file%s imported, %d skipped, %d symlinks skipped, %d failed\n"
-         summary.Import.imported
-         (if summary.Import.imported = 1 then "" else "s")
-         summary.Import.skipped summary.Import.skipped_symlinks
-         summary.Import.failed;
-       if summary.Import.failed > 0 then exit 1)
+    let (module C : Conf.S) = load_conf ?domain () in
+    let current = ref None and planned = ref 0 in
+    (* The same buckets {!Import.tally} keeps, so the row in [tsync status] and
+       the summary this prints cannot disagree about one run. *)
+    let imported = ref 0
+    and skipped = ref 0
+    and symlinks = ref 0
+    and failed = ref 0 in
+    let failures =
+      run_lwt
+        ~report:(fun () ->
+          report_job ?domain
+            (module C)
+            ~kind:"import" ~target:src
+            ~current:(fun () -> !current)
+            ~counters:(fun () ->
+              [
+                ("files", !imported);
+                ("planned", !planned);
+                ("skipped", !skipped);
+                ("symlinks", !symlinks);
+                ("failed", !failed);
+              ])
+            ())
+        (let open Lwt.Syntax in
+         let module I = Import.Make (C) in
+         vprintf "importing from %s into domain %s" src C.domain_name;
+         let+ summary =
+           I.run ~only ~exclude ~force_rehash ~src
+             ~on_dir:(fun ~rel ->
+               current := Some rel;
+               Printf.printf "mkdir    %s\n%!" rel)
+             ~on_plan:(fun ~files -> planned := files)
+             ~on_start:(fun ~rel -> current := Some rel)
+             ~on_file:(fun ~rel status ->
+               match status with
+                 | Import.Imported size ->
+                     incr imported;
+                     Printf.printf "imported %s (%Ld bytes)\n%!" rel size
+                 | Import.Skipped_exists ->
+                     incr skipped;
+                     Printf.printf "skip     %s (already in domain)\n%!" rel
+                 | Import.Skipped_symlink ->
+                     incr symlinks;
+                     Printf.printf "skip     %s (symlink)\n%!" rel
+                 | Import.Failed msg ->
+                     incr failed;
+                     Printf.printf "failed   %s: %s\n%!" rel msg)
+             ()
+         in
+         Printf.printf
+           "\n%d file%s imported, %d skipped, %d symlinks skipped, %d failed\n"
+           summary.Import.imported
+           (if summary.Import.imported = 1 then "" else "s")
+           summary.Import.skipped summary.Import.skipped_symlinks
+           summary.Import.failed;
+         summary.Import.failed)
+    in
+    (* Outside {!run_lwt}: exiting from inside its promise would skip both the
+       deferred drain it exists for and the job's own last report. *)
+    if failures > 0 then exit 1
   in
   Cmd.v
     (Cmd.info "import"
@@ -1744,20 +1933,44 @@ let export_cmd =
   in
   let run domain dst v =
     set_verbose v;
+    let (module C : Conf.S) = load_conf ?domain () in
+    let current = ref None and planned = ref 0 in
+    (* The same buckets the summary below prints, so the row in [tsync status]
+       and that line cannot disagree about one run. *)
+    let exported = ref 0 and symlinks = ref 0 and missing = ref 0 in
     let code =
       run_lwt
+        ~report:(fun () ->
+          report_job ?domain
+            (module C)
+            ~kind:"export" ~target:dst
+            ~current:(fun () -> !current)
+            ~counters:(fun () ->
+              [
+                ("files", !exported);
+                ("planned", !planned);
+                ("symlinks", !symlinks);
+                ("missing", !missing);
+              ])
+            ())
         (let open Lwt.Syntax in
-         let (module C : Conf.S) = load_conf ?domain () in
          let module E = Export.Make (C) in
          vprintf "exporting domain %s to %s" C.domain_name dst;
          let+ summary =
            E.run ~dst
+             ~on_plan:(fun ~files -> planned := files)
+             ~on_start:(fun ~rel -> current := Some rel)
              ~on_file:(fun ~rel status ->
                match status with
-                 | Export.Exported -> Printf.printf "exported %s\n%!" rel
+                 | Export.Exported ->
+                     incr exported;
+                     Printf.printf "exported %s\n%!" rel
                  | Export.Exported_symlink ->
+                     incr exported;
+                     incr symlinks;
                      Printf.printf "exported %s (symlink)\n%!" rel
                  | Export.Missing_data ->
+                     incr missing;
                      Printf.printf
                        "MISSING  %s (no local data or remote manifest)\n%!" rel)
              ()

@@ -36,6 +36,7 @@ let self_json ?(extra = []) () =
   let cpu = Metrics.cpu_seconds () in
   let gc = Metrics.gc_stats () in
   let lwt = Metrics.lwt_stats () in
+  let mem = Metrics.mem_stats () in
   [
     ( "server",
       `Assoc
@@ -52,12 +53,35 @@ let self_json ?(extra = []) () =
           ("cpuSeconds", `Float cpu);
           ( "cpuPercentAvg",
             `Float (if uptime > 0. then 100. *. cpu /. uptime else 0.) );
-          ("rssBytes", `Int (Metrics.rss_bytes ()));
+          ("rssBytes", `Int mem.Metrics.rss);
+          (* Swapped-out anonymous pages are still this process's own, so
+             resident alone understates it by whatever the kernel pushed out. *)
+          ("privateBytes", `Int mem.Metrics.private_);
+          ("swappedBytes", `Int mem.Metrics.swapped);
           ("heapBytes", `Int gc.Metrics.heap_bytes);
           ("topHeapBytes", `Int gc.Metrics.top_heap_bytes);
           ("minorCollections", `Int gc.Metrics.minor_collections);
           ("majorCollections", `Int gc.Metrics.major_collections);
         ] );
+    ( "backend",
+      `Assoc
+        [
+          ("retries", `Int (Metrics.retries ()));
+          ("timeouts", `Int (Metrics.timeouts ()));
+          ("failures", `Int (Metrics.failures ()));
+        ] );
+    ( "pools",
+      `List
+        (List.map
+           (fun (name, in_flight, waiting, limit) ->
+             `Assoc
+               [
+                 ("name", `String name);
+                 ("inFlight", `Int in_flight);
+                 ("waiting", `Int waiting);
+                 ("max", `Int limit);
+               ])
+           (Lwt_bounded.totals ())) );
     ( "lwt",
       `Assoc
         [
@@ -553,6 +577,29 @@ let merge reports =
       (fun r -> match mem r "domains" with `List l -> l | _ -> [])
       reports
   in
+  (* Deduplicated by pid, because where one process answers for several domains
+     each answer carries that process's whole job table: concatenating alone
+     would list one import once per domain it is not running against. *)
+  let jobs =
+    List.fold_left
+      (fun acc r ->
+        match mem r "jobs" with
+          | `List l ->
+              List.fold_left
+                (fun acc j ->
+                  (* Absent is not equal to absent: two jobs naming no pid are
+                     two jobs, and [merge] is public enough to be handed JSON
+                     this daemon never wrote. *)
+                  if
+                    mem j "pid" <> `Null
+                    && List.exists (fun k -> mem k "pid" = mem j "pid") acc
+                  then acc
+                  else j :: acc)
+                acc l
+          | _ -> acc)
+      [] reports
+    |> List.rev
+  in
   let served =
     List.filter_map
       (fun d ->
@@ -568,14 +615,20 @@ let merge reports =
                 `Assoc (("serves", `List served) :: List.remove_assoc "serves" s)
             | s, _ -> s
         in
+        let fields = match first with `Assoc fields -> fields | _ -> [] in
         `Assoc
           (List.map
              (fun (k, v) ->
                match k with
                  | "server" -> (k, server)
                  | "domains" -> (k, `List domains)
+                 | "jobs" -> (k, `List jobs)
                  | _ -> (k, v))
-             (match first with `Assoc fields -> fields | _ -> []))
+             fields
+          @
+          if jobs <> [] && not (List.mem_assoc "jobs" fields) then
+            [("jobs", `List jobs)]
+          else [])
 
 let text json =
   let b = Buffer.create 4096 in
@@ -616,8 +669,11 @@ let text json =
        (num (mem proc "cpuSeconds"))
        (num (mem proc "cpuPercentAvg")));
   row 2 "memory"
-    (Printf.sprintf "%s rss, %s heap (peak %s)"
+    (Printf.sprintf "%s rss%s, %s heap (peak %s)"
        (Metrics.human_bytes (int_of (mem proc "rssBytes")))
+       (match int_of (mem proc "swappedBytes") with
+         | 0 -> ""
+         | n -> Printf.sprintf " + %s swapped" (Metrics.human_bytes n))
        (Metrics.human_bytes (int_of (mem proc "heapBytes")))
        (Metrics.human_bytes (int_of (mem proc "topHeapBytes"))));
   row 2 "gc"
@@ -640,6 +696,48 @@ let text json =
     (Printf.sprintf "%d chunks (%d/s)"
        (int_of (mem traffic "chunksHashed"))
        (int_of (mem traffic "hashesPerSec")));
+  (match mem json "pools" with
+    | `List (_ :: _ as pools) ->
+        row 2 "slots"
+          (String.concat ", "
+             (List.map
+                (fun p ->
+                  Printf.sprintf "%s %d/%d%s"
+                    (str (mem p "name"))
+                    (int_of (mem p "inFlight"))
+                    (int_of (mem p "max"))
+                    (match int_of (mem p "waiting") with
+                      | 0 -> ""
+                      | w -> Printf.sprintf " (%d waiting)" w))
+                pools))
+    | _ -> ());
+  (* Silent when clean, so the line appearing at all is the signal. *)
+  (match mem json "backend" with
+    | `Null -> ()
+    | bk -> (
+        match (int_of (mem bk "retries"), int_of (mem bk "failures")) with
+          | 0, 0 -> ()
+          | retries, failures ->
+              row 2 "backend"
+                (Printf.sprintf "%d retries (%d timeouts), %d failed" retries
+                   (int_of (mem bk "timeouts"))
+                   failures)));
+  (* Beside [traffic], which is what this process moved to its own stores: what
+     it served a client is the other half, and a server reading only one of them
+     cannot tell a busy proxy from a busy backend. *)
+  List.iter
+    (fun (label, total_key, rate_key) ->
+      match mem server total_key with
+        | `Null -> ()
+        | v ->
+            row 2 label
+              (Printf.sprintf "%s (%s/s)"
+                 (Metrics.human_bytes (int_of v))
+                 (Metrics.human_bytes (int_of (mem server rate_key)))))
+    [
+      ("served read", "bytesRead", "bytesReadPerSec");
+      ("served written", "bytesWritten", "bytesWrittenPerSec");
+    ];
   (match mem server "requests" with
     | `Assoc fields ->
         (* Counters and gauges are kept apart: a gauge of zero is an idle
@@ -933,6 +1031,102 @@ let text json =
                                    (duration (num age))))))
         (match mem d "backends" with `List l -> l | _ -> []))
     domains;
+  (match mem json "jobs" with
+    | `List [] | `Null -> ()
+    | `List jobs ->
+        line 0 "";
+        line 0 "Jobs";
+        List.iter
+          (fun j ->
+            let sub k f = match mem j k with `Null -> () | v -> f v in
+            let age = duration (num (mem j "uptimeSeconds")) in
+            (* The same figure either way, so a finished job says which it is:
+               time since it started reads as an age once it has stopped. *)
+            let state = str (mem j "state") in
+            line 2 "%s  pid %d  %s%s%s"
+              (str (mem j "kind"))
+              (int_of (mem j "pid"))
+              (if state = "running" then Printf.sprintf "running %s" age
+               else Printf.sprintf "%s, ran %s" state age)
+              (match mem j "target" with `Null -> "" | t -> "  " ^ str t)
+              (match mem j "error" with `Null -> "" | e -> ": " ^ str e);
+            sub "current" (fun c -> row 4 "current" (str c));
+            (match mem j "counters" with
+              | `List (_ :: _ as counters) ->
+                  row 4 "counted"
+                    (String.concat ", "
+                       (List.map
+                          (function
+                            | `List [`String k; v] ->
+                                Printf.sprintf "%d %s" (int_of v) k
+                            | _ -> "?")
+                          counters))
+              | _ -> ());
+            sub "traffic" (fun t ->
+                row 4 "traffic"
+                  (Printf.sprintf
+                     "up %s (%s/s), down %s (%s/s), %d chunks hashed"
+                     (Metrics.human_bytes (int_of (mem t "bytesUploaded")))
+                     (Metrics.human_bytes (int_of (mem t "uploadBytesPerSec")))
+                     (Metrics.human_bytes (int_of (mem t "bytesDownloaded")))
+                     (Metrics.human_bytes
+                        (int_of (mem t "downloadBytesPerSec")))
+                     (int_of (mem t "chunksHashed"))));
+            (* Live words beside the heap the process holds: the heap grows in
+               steps and shrinks never, so the two together are the difference
+               between something retained and an allocator that has not given
+               anything back. *)
+            sub "memory" (fun m ->
+                let gc = mem j "gc" in
+                let swapped = int_of (mem m "swappedBytes") in
+                row 4 "memory"
+                  (Printf.sprintf "%s rss%s, %s heap%s"
+                     (Metrics.human_bytes (int_of (mem m "rssBytes")))
+                     (if swapped > 0 then
+                        Printf.sprintf " + %s swapped"
+                          (Metrics.human_bytes swapped)
+                      else "")
+                     (Metrics.human_bytes (int_of (mem gc "heapBytes")))
+                     (match mem gc "liveBytes" with
+                       | `Null -> ""
+                       | b ->
+                           Printf.sprintf ", %s live"
+                             (Metrics.human_bytes (int_of b)))));
+            sub "deferred" (fun d ->
+                row 4 "deferred"
+                  (Printf.sprintf "%d queued, %d in flight"
+                     (int_of (mem d "queued"))
+                     (int_of (mem d "inFlight")));
+                if bool_of (mem d "degraded") then
+                  row 4 "" "DEGRADED, run tsync mirror");
+            (match mem j "pools" with
+              | `List (_ :: _ as pools) ->
+                  row 4 "slots"
+                    (String.concat ", "
+                       (List.map
+                          (fun p ->
+                            Printf.sprintf "%s %d/%d%s"
+                              (str (mem p "name"))
+                              (int_of (mem p "inFlight"))
+                              (int_of (mem p "max"))
+                              (match int_of (mem p "waiting") with
+                                | 0 -> ""
+                                | w -> Printf.sprintf " (%d waiting)" w))
+                          pools))
+              | _ -> ());
+            sub "backend" (fun bk ->
+                match
+                  (int_of (mem bk "retries"), int_of (mem bk "failures"))
+                with
+                  | 0, 0 -> ()
+                  | retries, failures ->
+                      row 4 "backend"
+                        (Printf.sprintf "%d retries (%d timeouts), %d failed"
+                           retries
+                           (int_of (mem bk "timeouts"))
+                           failures)))
+          jobs
+    | _ -> ());
   (match mem json "recentErrors" with
     | `List [] | `Null -> ()
     | `List errs ->

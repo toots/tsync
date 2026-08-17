@@ -538,6 +538,14 @@
   (action
    (diff versioning.expected versioning.output))))
 
+(subdir unit/backend_traffic
+ (alias
+  (name default)
+  (deps backend_traffic.exe))
+ (rule
+  (alias runtest)
+  (action (run ./backend_traffic.exe))))
+
 (subdir unit/bounded
  (alias
   (name default)
@@ -622,6 +630,14 @@
   (action
    (diff gc_job.expected gc_job.output))))
 
+(subdir unit/gc_report
+ (alias
+  (name default)
+  (deps gc_report.exe))
+ (rule
+  (alias runtest)
+  (action (run ./gc_report.exe))))
+
 (subdir unit/glob
  (alias
   (name default)
@@ -657,6 +673,22 @@
   (alias runtest)
   (action
    (diff item_ref_test.expected item_ref_test.output))))
+
+(subdir unit/job_registry
+ (alias
+  (name default)
+  (deps job_registry_test.exe))
+ (rule
+  (alias runtest)
+  (action (run ./job_registry_test.exe))))
+
+(subdir unit/job_report
+ (alias
+  (name default)
+  (deps job_report_test.exe))
+ (rule
+  (alias runtest)
+  (action (run ./job_report_test.exe))))
 
 (subdir unit/layout
  (alias
@@ -701,6 +733,14 @@
   (alias runtest)
   (action
    (diff menu_test.expected menu_test.output))))
+
+(subdir unit/mirror_pools
+ (alias
+  (name default)
+  (deps mirror_pools.exe))
+ (rule
+  (alias runtest)
+  (action (run ./mirror_pools.exe))))
 
 (subdir unit/queue_claim
  (alias

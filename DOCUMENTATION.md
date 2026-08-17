@@ -724,7 +724,7 @@ tsync import <dir>             # seed the domain from an existing folder
 tsync export <dir>             # write every file of the domain to a plain folder
 tsync share <path>             # print a public download URL for a file or folder (as a zip)
 tsync share --clear-cache      # drop what the share server has assembled and cached
-tsync status                   # full report: metrics, resolved config, cache, per-backend health
+tsync status                   # full report: metrics, running commands, config, cache, backends
 tsync status --totals          # also count what each backend holds (a full listing per backend)
 tsync logs                     # show the daemon log (-f to follow, -n N for how far back)
 tsync config                   # show the config as parsed, with secrets masked
@@ -773,6 +773,41 @@ With more than one domain, pass `--domain <name>` to commands that act on a spec
 — would leave the rest of what runs here unaccounted for. Each domain that has a daemon of its
 own gets its own report, and a domain whose daemon is not answering is named on stderr without
 costing the others theirs.
+
+### Running commands
+
+`gc`, `mirror`, `import`, `export`, `sync` and `data-integrity` can run for hours, and a
+one-shot command is otherwise invisible to everything else on the machine: its own stdout is
+the only account of it, and only whoever started it is reading that. Each pushes a summary to
+its domain's daemon every ten seconds, and `tsync status` grows a `Jobs` block:
+
+```
+Jobs
+  import  pid 979109  running 0m 10s  /media/files/stage
+    current          Music Production/…/freedia0272.MXF
+    counted          2499 files, 6000 planned, 0 skipped, 0 symlinks, 0 failed
+    traffic          up 1.6 GB (159.1 MB/s), down 0 B (0 B/s), 2500 chunks hashed
+    memory           108.0 MB rss + 40.0 MB swapped, 75.0 MB heap, 41.0 MB live
+    deferred         207 queued, 3 in flight
+                     DEGRADED, run tsync mirror
+    slots            chunk buffers 4/4 (12 waiting)
+    backend          91 retries (87 timeouts), 0 failed
+```
+
+`current` is what the command is on right now — the file being imported, the folder being
+marked, the object being copied — rather than the last one it finished, which for a large file
+is a name from hours ago. `slots` above zero waiting is the difference between work that is
+slow and work that is queued behind a bound; `backend` appears only when something was retried.
+`memory` reads resident beside live words, which is what separates something retained from an
+allocator that has not given anything back.
+
+Reporting is advisory. A command run with no daemon — the ordinary case — reports nothing and
+runs exactly the same; nothing here can fail a command. A row disappears once its process is
+gone, so a killed command leaves none, and a finished one lingers a few minutes marked `done`
+or `failed`.
+
+The daemon reports the same `traffic`, `slots`, `memory` and `backend` figures for itself, at
+the top of `tsync status`.
 
 ## Backend type reference
 

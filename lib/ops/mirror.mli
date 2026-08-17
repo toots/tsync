@@ -39,12 +39,17 @@ module Make (C : Conf.S) : sig
       destination's copy: [`Missing] or [`Wrong_size]. A body of the right
       length holding the wrong bytes is not this command's to find: the store
       checks that against the key it is filed under, and [tsync data-integrity]
-      reads what it found. *)
+      reads what it found.
+
+      [on_start] fires as each object is picked up, which is what a caller
+      saying where the copy has got to wants: [on_copy] fires once an object is
+      done, and a chunk spends its whole life between the two. *)
   val resync :
     ?source:string ->
     ?scope:[ `All | `Manifests | `Path of string ] ->
     ?on_scan:(objects:int -> unit) ->
     ?on_list:(name:string -> unit) ->
+    ?on_start:(name:string -> key:string -> unit) ->
     ?on_copy:
       (name:string ->
       key:string ->

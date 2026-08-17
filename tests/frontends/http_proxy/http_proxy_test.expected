@@ -9,17 +9,28 @@
     "port": 8443,
     "tls": true,
     "serves": [ "statusdom" ],
-    "requests": { "inFlight": 0, "dataInFlight": 0, "dataWaiting": 0 }
+    "requests": { "inFlight": 0, "dataInFlight": 0, "dataWaiting": 0 },
+    "bytesRead": 0,
+    "bytesWritten": 2,
+    "bytesReadPerSec": 0,
+    "bytesWrittenPerSec": 0
   },
   "process": {
     "cpuSeconds": 12.5,
     "cpuPercentAvg": 0.3,
     "rssBytes": 41943040,
+    "privateBytes": 39845888,
+    "swappedBytes": 0,
     "heapBytes": 8388608,
     "topHeapBytes": 12582912,
     "minorCollections": 100,
     "majorCollections": 10
   },
+  "backend": { "retries": 0, "timeouts": 0, "failures": 0 },
+  "pools": [
+    { "name": "chunk buffers", "inFlight": 0, "waiting": 0, "max": 2 },
+    { "name": "downloads", "inFlight": 0, "waiting": 0, "max": 3 }
+  ],
   "lwt": {
     "readableFds": 2,
     "writableFds": 0,
@@ -128,6 +139,9 @@ Frontend http-proxy on testhost (this process)
   event loop       2 readable, 0 writable, 0 timers, pool 1000
   traffic          up 4.0 KB (0 B/s), down 2.0 KB (0 B/s)
   hashed           0 chunks (0/s)
+  slots            chunk buffers 0/2, downloads 0/3
+  served read      0 B (0 B/s)
+  served written   2 B (0 B/s)
   requests         none served
 
 Domain statusdom
@@ -172,6 +186,9 @@ Frontend http-proxy on testhost (this process)
   event loop       2 readable, 0 writable, 0 timers, pool 1000
   traffic          up 4.0 KB (0 B/s), down 2.0 KB (0 B/s)
   hashed           0 chunks (0/s)
+  slots            chunk buffers 0/2, downloads 0/3
+  served read      0 B (0 B/s)
+  served written   2 B (0 B/s)
   requests         none served
 
 Domain statusdom
@@ -222,6 +239,9 @@ Frontend http-proxy on testhost (this process)
   event loop       2 readable, 0 writable, 0 timers, pool 1000
   traffic          up 4.0 KB (0 B/s), down 2.0 KB (0 B/s)
   hashed           0 chunks (0/s)
+  slots            chunk buffers 0/2, downloads 0/3
+  served read      0 B (0 B/s)
+  served written   2 B (0 B/s)
   requests         2 stats, 2 unauthorized
 
 Domain statusdom
@@ -274,6 +294,9 @@ Frontend http-proxy on testhost (this process)
   event loop       2 readable, 0 writable, 0 timers, pool 1000
   traffic          up 4.0 KB (0 B/s), down 2.0 KB (0 B/s)
   hashed           0 chunks (0/s)
+  slots            chunk buffers 0/2, downloads 0/3
+  served read      0 B (0 B/s)
+  served written   2 B (0 B/s)
   requests         2 stats, 2 unauthorized
 
 Domain statusdom

@@ -48,10 +48,14 @@ module Make (C : Conf.S) = struct
   let checkpoint_interval = 5.
 
   (* Answers whether it fired, so other once-a-second work can hang off the same
-     clock. *)
-  let throttled f =
+     clock.
+
+     [key] gives a phase its own: on one clock, a phase whose first item lands
+     inside another's interval reports nothing until a second has gone by, and
+     one shorter than the interval reports nothing at all. *)
+  let throttled ?force ~key f =
     let fired = ref false in
-    Pace.fire pace (fun () ->
+    Pace.fire pace ~key ?force (fun () ->
         fired := true;
         f ());
     !fired
@@ -359,6 +363,9 @@ module Make (C : Conf.S) = struct
     mutable work : work;
     mutable total : int;
     mutable done_ : int;
+    (* Set as a unit is picked up, not taken from the head of [work], which is
+       what is left to do and so names the wrong item mid-batch. *)
+    mutable at : string;
     mutable roots_marked : int;
     mutable chunks_promoted : int;
     mutable chunks_verified : int;
@@ -368,8 +375,13 @@ module Make (C : Conf.S) = struct
     mutable chunks_reclaimed : int;
     mutable bytes_reclaimed : int;
     mutable on_mark :
-      namespaces:int -> total:int -> roots:int -> promoted:int -> unit;
-    mutable on_close : shards:int -> reclaimed:int -> unit;
+      namespaces:int ->
+      total:int ->
+      roots:int ->
+      promoted:int ->
+      at:string ->
+      unit;
+    mutable on_close : shards:int -> reclaimed:int -> at:string -> unit;
   }
 
   let phase s =
@@ -531,6 +543,7 @@ module Make (C : Conf.S) = struct
         work;
         total;
         done_ = 0;
+        at = "";
         roots_marked = 0;
         chunks_promoted = 0;
         chunks_verified = 0;
@@ -539,8 +552,8 @@ module Make (C : Conf.S) = struct
         chunks_cleared = 0;
         chunks_reclaimed = 0;
         bytes_reclaimed = 0;
-        on_mark = (fun ~namespaces:_ ~total:_ ~roots:_ ~promoted:_ -> ());
-        on_close = (fun ~shards:_ ~reclaimed:_ -> ());
+        on_mark = (fun ~namespaces:_ ~total:_ ~roots:_ ~promoted:_ ~at:_ -> ());
+        on_close = (fun ~shards:_ ~reclaimed:_ ~at:_ -> ());
       }
     in
     (* Said once at the top rather than left for [--status] to be asked: what
@@ -619,14 +632,31 @@ module Make (C : Conf.S) = struct
   (* Per chunk, not per root: one video's manifest names a hundred thousand of
      them, and reporting after the root left the line reading "1 file, 0 chunks"
      for minutes, which reads as wedged. *)
-  let report_mark s =
+  let report_mark ?force s =
     ignore
-      (throttled (fun () ->
+      (throttled ?force ~key:"mark" (fun () ->
            Log.debug
              "gc: marked %d/%d namespace(s), %d root(s), %d chunk(s) kept"
              s.done_ s.total s.roots_marked s.chunks_promoted;
            s.on_mark ~namespaces:s.done_ ~total:s.total ~roots:s.roots_marked
-             ~promoted:s.chunks_promoted))
+             ~promoted:s.chunks_promoted ~at:s.at))
+
+  (* [roots:0]: there are no files here, only shards. What the caller prints for
+     a collection would read as a second, wrong count of them. *)
+  let report_keep ?force s =
+    ignore
+      (throttled ?force ~key:"keep" (fun () ->
+           Log.debug "gc: kept %d/%d shard(s), %d chunk(s)" s.done_ s.total
+             s.chunks_promoted;
+           s.on_mark ~namespaces:s.done_ ~total:s.total ~roots:0
+             ~promoted:s.chunks_promoted ~at:s.at))
+
+  let report_close ?force s =
+    ignore
+      (throttled ?force ~key:"close" (fun () ->
+           Log.debug "gc: %d/%d shard(s) closed, %d chunk(s) reclaimed" s.done_
+             s.total s.chunks_reclaimed;
+           s.on_close ~shards:s.done_ ~reclaimed:s.chunks_reclaimed ~at:s.at))
 
   (* Called only where [Space.promote] answered [true], which is what makes this
      once per chunk: opening renamed the whole root aside, so a live chunk is
@@ -717,6 +747,7 @@ module Make (C : Conf.S) = struct
      the caller must not also hold a [unit_slots] slot for the whole namespace,
      or every slot parks on a root waiting for a chunk. *)
   let mark_one s ns =
+    s.at <- ns;
     let* prefix = prefix_of_namespace s.root ns in
     let* entries = B.list_prefix ~prefix () in
     (* Only what is positively a write in flight is skipped, not everything
@@ -831,11 +862,7 @@ module Make (C : Conf.S) = struct
     s.bytes_reclaimed <- s.bytes_reclaimed + bytes;
     s.done_ <- s.done_ + List.length shards;
     let* () = save s Chunk_space.Closing (last_of shards) in
-    ignore
-      (throttled (fun () ->
-           Log.debug "gc: %d/%d shard(s) closed, %d chunk(s) reclaimed" s.done_
-             s.total s.chunks_reclaimed;
-           s.on_close ~shards:s.done_ ~reclaimed:s.chunks_reclaimed));
+    report_close s;
     Lwt.return_unit
 
   (* Shards are scanned in order and their doomed keys pooled, so a store holding
@@ -876,6 +903,7 @@ module Make (C : Conf.S) = struct
     in
     let rec go = function
       | shard :: more when not (s.out_of_time ()) ->
+          s.at <- shard;
           let* keys, size =
             orphans_in_shard ~main:s.main ~slots:s.item_slots shard
           in
@@ -887,13 +915,14 @@ module Make (C : Conf.S) = struct
              a store with little garbage is the whole phase. Counts include what
              is pooled and not yet deleted. *)
           ignore
-            (throttled (fun () ->
+            (throttled ~key:"close" (fun () ->
                  let scanned = s.done_ + List.length !pending in
                  Log.debug "gc: %d/%d shard(s) scanned, %d chunk(s) to delete"
                    scanned s.total
                    (s.chunks_reclaimed + !count);
                  s.on_close ~shards:scanned
-                   ~reclaimed:(s.chunks_reclaimed + !count)));
+                   ~reclaimed:(s.chunks_reclaimed + !count)
+                   ~at:s.at));
           let* () = if ready () then flush () else Lwt.return_unit in
           go more
       | remaining ->
@@ -1014,6 +1043,7 @@ module Make (C : Conf.S) = struct
      missing ones across costs [m - k], so the directory rename wins while the
      surviving space holds less than about half the shard. *)
   let keep_one s shard =
+    s.at <- shard;
     let src_dir, dst_dir = shard_dirs s shard in
     let* kept =
       let* carried = carry_over s shard in
@@ -1040,19 +1070,13 @@ module Make (C : Conf.S) = struct
     let* () = discard_shard s shard in
     s.done_ <- s.done_ + 1;
     let* () = save s Chunk_space.Abandoning shard in
-    (* [roots:0]: there are no files here, only shards. What the caller prints for
-       a collection would read as a second, wrong count of them. *)
-    ignore
-      (throttled (fun () ->
-           Log.debug "gc: kept %d/%d shard(s), %d chunk(s)" s.done_ s.total
-             s.chunks_promoted;
-           s.on_mark ~namespaces:s.done_ ~total:s.total ~roots:0
-             ~promoted:s.chunks_promoted));
+    report_keep s;
     Lwt.return_unit
 
   (* What is left in the old space is now garbage; the phase is recorded before
      the first shard is touched. *)
   let begin_closing s =
+    report_mark ~force:true s;
     let* shards = live_shards s.root in
     let* () = save s Chunk_space.Closing "" in
     (* The copies are named here rather than counted per flush: every one of them
@@ -1071,9 +1095,15 @@ module Make (C : Conf.S) = struct
     s.done_ <- 0;
     Lwt.return_unit
 
+  (* Forced, because the counters a phase ends on are the ones the throttle is
+     most likely to have swallowed, and a caller left holding the second-to-last
+     figures reports a different run from the one the summary describes. *)
   let finish s =
     let+ () = Space.clear_run () in
     s.finished <- true;
+    (match s.work with
+      | Keep _ -> report_keep ~force:true s
+      | Mark _ | Close _ -> report_close ~force:true s);
     Log.info "gc: done, %d chunk(s) reclaimed (%d byte(s))" s.chunks_reclaimed
       s.bytes_reclaimed
 
@@ -1166,8 +1196,8 @@ module Make (C : Conf.S) = struct
 
   let run ?budget ?(units = 256) ?pause ?concurrency ?delete_batch
       ?(keep = false) ?(verify = false) ?(on_open = fun () -> ())
-      ?(on_mark = fun ~namespaces:_ ~total:_ ~roots:_ ~promoted:_ -> ())
-      ?(on_close = fun ~shards:_ ~reclaimed:_ -> ()) () =
+      ?(on_mark = fun ~namespaces:_ ~total:_ ~roots:_ ~promoted:_ ~at:_ -> ())
+      ?(on_close = fun ~shards:_ ~reclaimed:_ ~at:_ -> ()) () =
     let began = Unix.gettimeofday () in
     let deadline =
       match budget with

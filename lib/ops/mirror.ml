@@ -11,17 +11,29 @@ module Make (C : Conf.S) = struct
   module Space = Chunk_space.Make (C)
   module Tree = Inode_tree.Make (C)
 
-  (* Bounds concurrent HEAD/copy operations per destination. A copy holds the
-     whole object body, so this follows [max_chunk_buffers] rather than the
-     file-level [max_uploads]. *)
-  let copy_pool = Lwt_bounded.create ~max:C.max_chunk_buffers ()
+  (* Bodies in memory: a copy holds a whole object, so this follows
+     [max_chunk_buffers] rather than the file-level [max_uploads]. *)
+  let copy_pool = Lwt_bounded.create ~name:"copy" ~max:C.max_chunk_buffers ()
+
+  (* Round trips, which hold no body and so are not the same number: sizing a
+     subtree is one HEAD an object and would otherwise queue behind a bound that
+     stands for memory it does not use. *)
+  let probe_pool =
+    Lwt_bounded.create ~name:"probe" ~max:(max 8 (4 * C.max_chunk_buffers)) ()
 
   (* Objects are content-addressed or immutable once written, so a size mismatch
      means the destination copy is corrupt. [None] when it was already correct;
      otherwise what was wrong with it, which is worth carrying to the caller. *)
-  let sync_entry (module Src : Backend.S) (module Dst : Backend.S)
-      (entry : Backend.file_entry) =
-    let* head = Dst.head_opt ~key:entry.key () in
+  let sync_entry ?(on_start = fun () -> ()) (module Src : Backend.S)
+      (module Dst : Backend.S) (entry : Backend.file_entry) =
+    (* Inside the slot, not before it: [Lwt_list.map_p] applies its function to
+       every element up front, so announcing there would name the last entry of
+       the listing within milliseconds and never move again. *)
+    let* head =
+      Lwt_bounded.use probe_pool (fun () ->
+          on_start ();
+          Dst.head_opt ~key:entry.key ())
+    in
     let* reason =
       match head with
         | None -> Lwt.return_some `Missing
@@ -34,13 +46,16 @@ module Make (C : Conf.S) = struct
     match reason with
       | None -> Lwt.return_none
       | Some reason ->
-          if Key.is_dir entry.key then
-            let+ () = Dst.put ~key:entry.key ~data:Chunk.empty () in
-            Some (reason, 0)
-          else
-            let* data = Src.get ~key:entry.key () in
-            let+ () = Dst.put ~key:entry.key ~data () in
-            Some (reason, Chunk.length data)
+          (* Taken here rather than around the whole entry, so the body budget is
+             held only while a body exists. *)
+          Lwt_bounded.use copy_pool (fun () ->
+              if Key.is_dir entry.key then
+                let+ () = Dst.put ~key:entry.key ~data:Chunk.empty () in
+                Some (reason, 0)
+              else
+                let* data = Src.get ~key:entry.key () in
+                let+ () = Dst.put ~key:entry.key ~data () in
+                Some (reason, Chunk.length data))
 
   let dedup_entries entries =
     (* Listing order is backend-dependent. *)
@@ -131,32 +146,38 @@ module Make (C : Conf.S) = struct
            (if List.length keys = 1 then "" else "s")
            src_name);
     let+ entries =
-      Lwt_list.map_p
+      Lwt_bounded.map_with probe_pool
         (fun key ->
-          Lwt_bounded.use copy_pool (fun () ->
-              let+ head = Src.head_opt ~key () in
-              match head with
-                | Some e -> e
-                | None ->
-                    failwith
-                      (Printf.sprintf "%s is missing from source %s" key
-                         src_name)))
+          let+ head = Src.head_opt ~key () in
+          match head with
+            | Some e -> e
+            | None ->
+                failwith
+                  (Printf.sprintf "%s is missing from source %s" key src_name))
         keys
     in
     dedup_entries entries
 
-  let resync_to ?(on_copy = fun ~name:_ ~key:_ ~reason:_ ~bytes:_ -> ()) src dst
-      ~name entries =
+  let resync_to ?(on_start = fun ~name:_ ~key:_ -> ())
+      ?(on_copy = fun ~name:_ ~key:_ ~reason:_ ~bytes:_ -> ()) src dst ~name
+      entries =
+    (* Unbounded here on purpose: {!sync_entry} takes a probe slot and then a
+       copy slot, one after the other, and a bound around the whole entry would
+       be the same pool nested inside itself — outer entries holding every slot
+       while the work inside them waits for one. *)
     let+ results =
       Lwt_list.map_p
         (fun entry ->
-          Lwt_bounded.use copy_pool (fun () ->
-              let+ copied = sync_entry src dst entry in
-              (match copied with
-                | Some (reason, bytes) ->
-                    on_copy ~name ~key:entry.Backend.key ~reason ~bytes
-                | None -> ());
-              (entry.Backend.key, copied)))
+          let+ copied =
+            sync_entry
+              ~on_start:(fun () -> on_start ~name ~key:entry.Backend.key)
+              src dst entry
+          in
+          (match copied with
+            | Some (reason, bytes) ->
+                on_copy ~name ~key:entry.Backend.key ~reason ~bytes
+            | None -> ());
+          (entry.Backend.key, copied))
         entries
     in
     let stats =
@@ -179,7 +200,7 @@ module Make (C : Conf.S) = struct
      point is to reach the ones the composite writes off the caller's path, or
      does not write at all. Raises [Failure] when nothing has that name. *)
   let resync ?source ?(scope = `All) ?(on_scan = fun ~objects:_ -> ())
-      ?(on_list = fun ~name:_ -> ()) ?on_copy () =
+      ?(on_list = fun ~name:_ -> ()) ?on_start ?on_copy () =
     let named name =
       match
         List.filter
@@ -234,6 +255,6 @@ module Make (C : Conf.S) = struct
     C.members
     |> List.filter (fun (m : Backend.member) -> m.Backend.name <> src.name)
     |> Lwt_list.map_s (fun (m : Backend.member) ->
-        resync_to ?on_copy src.Backend.backend m.Backend.backend
+        resync_to ?on_start ?on_copy src.Backend.backend m.Backend.backend
           ~name:m.Backend.name entries)
 end

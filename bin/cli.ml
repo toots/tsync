@@ -276,6 +276,47 @@ let domain_target ?domain () =
 
 let domain_socket ?domain () = snd (domain_target ?domain ())
 
+(* Reporting must never decide whether a command runs, so a domain that cannot
+   be resolved here is silence in [tsync status] rather than a failure — the
+   command itself resolves one again and says so properly. *)
+let reporting_target ?domain () =
+  try domain_target ?domain () with _ -> ("", "")
+
+(* What the deferred targets still owe, summed: whether work is outstanding is
+   the question, and which target holds it is answered by [tsync status]'s own
+   per-backend listing. [None] where no target defers at all, so a domain
+   writing straight through reports no queue rather than an empty one. *)
+let deferred_totals members =
+  let sum f =
+    List.fold_left
+      (fun acc m -> acc + match f m with Some g -> g () | None -> 0)
+      0 members
+  in
+  if not (List.exists (fun m -> m.Backend.pending <> None) members) then None
+  else
+    Some
+      ( sum (fun m -> m.Backend.pending),
+        sum (fun m -> m.Backend.in_flight),
+        List.exists
+          (fun m ->
+            match m.Backend.degraded with Some g -> g () | None -> false)
+          members )
+
+(* The half of a job report that is every command's alike: where to send it,
+   which domain it belongs to, and what that domain's targets still owe. A
+   command passes only what is its own.
+
+   [current] joins a phase to the thing within it, so six commands do not each
+   pick a separator. *)
+let report_job ?domain ?target ?current ~kind (module C : Conf.S) ~counters () =
+  Job_report.start
+    ~socket_path:(snd (reporting_target ?domain ()))
+    ~domain:C.domain_name ~kind ?target ?current
+    ~deferred:(fun () -> deferred_totals C.members)
+    ~counters ()
+
+let doing phase detail = phase ^ " · " ^ detail
+
 (* A path names its own domain by sitting under that domain's mount, which is
    how the macOS router resolves one as well. A path under none of them falls
    back to the default domain, so the answer is a daemon saying it does not know
@@ -371,8 +412,11 @@ let trace_process ~name =
 (* [Lwt_main.run] plus a drain: a command returns as soon as its work is posted
    and a deferred target fills in the background, so without this a short-lived
    command exits leaving copies for the daemon it may not be running alongside.
-*)
-let run_lwt p =
+
+   [report] is a thunk calling {!Job_report.start}, run here so a long command
+   reports for as long as it runs — the drain included, which is work a caller
+   would otherwise see as a command that had finished. *)
+let run_lwt ?report p =
   let open Lwt.Syntax in
   (* Named for the subcommand and the pid, so a folder imported one call at a
      time leaves a trace per run rather than overwriting the last. *)
@@ -383,6 +427,16 @@ let run_lwt p =
           else "tsync")
          (Unix.getpid ()));
   Lwt_main.run
-    (let* r = p in
-     let+ () = Backend.drain () in
+    (Option.iter (fun start -> start ()) report;
+     (* A command that raised still says so, since its process is about to go
+        and nothing else will ever answer for it. *)
+     let* r =
+       Lwt.catch
+         (fun () -> p)
+         (fun exn ->
+           let* () = Job_report.finish ~error:(Printexc.to_string exn) () in
+           Lwt.fail exn)
+     in
+     let* () = Backend.drain () in
+     let+ () = Job_report.finish () in
      r)

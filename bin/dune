@@ -24,6 +24,8 @@
    -open
    Tsync_metrics
    -open
+   Tsync_job_report
+   -open
    Tsync_tls
    -open
    Tsync_conf
@@ -63,6 +65,7 @@
   tsync_chunk
   tsync_backend_register
   tsync_metrics
+  tsync_job_report
   tsync_conf_parsing
   tsync_ipc
   tsync_conf
