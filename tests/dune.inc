@@ -622,6 +622,14 @@
   (action
    (diff gc_job.expected gc_job.output))))
 
+(subdir unit/gc_report
+ (alias
+  (name default)
+  (deps gc_report.exe))
+ (rule
+  (alias runtest)
+  (action (run ./gc_report.exe))))
+
 (subdir unit/glob
  (alias
   (name default)
