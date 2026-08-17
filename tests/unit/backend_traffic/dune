@@ -1,0 +1,26 @@
+(executable
+ (flags
+  (:standard
+   -open
+   Tsync_metrics
+   -open
+   Tsync_chunk
+   -open
+   Tsync_backend_register
+   -open
+   Tsync_local_backend
+   -open
+   Tsync_domain_store
+   -open
+   Tsync_test_harness))
+ (name backend_traffic)
+ (libraries
+  tsync_test_harness
+  tsync_metrics
+  tsync_chunk
+  tsync_backend_register
+  tsync_local_backend
+  tsync_domain_store
+  lwt
+  lwt.unix
+  unix))

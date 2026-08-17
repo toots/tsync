@@ -123,7 +123,6 @@ module Make_with_layout (C : Conf.S) (L : Layout.S) : S = struct
   (* [data] must own its bytes: a store is free to keep sending after this
      returns, and the key is the hash of what was passed, not of what lands. *)
   let put_chunk ~index ~data =
-    let size = Chunk.length data in
     let entry = Manifest.chunk_entry_of_body ~index data in
     Metrics.add_hashed 1;
     let ck_rel = Manifest.chunk_key entry in
@@ -147,14 +146,13 @@ module Make_with_layout (C : Conf.S) (L : Layout.S) : S = struct
       if known then (
         remember_chunk ck_rel;
         Lwt.return_unit)
-      else (
-        Metrics.add_uploaded size;
+      else
         let+ () = B.put ~key:ck ~data () in
         (* The write is what clears the marker — the store re-verified the object
            as it took it — so stop holding this key against the rest of the
            session. *)
         Corrupt.forget ck_rel;
-        remember_chunk ck_rel)
+        remember_chunk ck_rel
     in
     entry
 
@@ -287,10 +285,7 @@ module Make_with_layout (C : Conf.S) (L : Layout.S) : S = struct
     Lwt_bounded.create ~name:"downloads" ~max:C.max_downloads ()
 
   let get_chunk ~chunk_key =
-    Lwt_bounded.use chunk_download_pool (fun () ->
-        let+ data = Space.get chunk_key in
-        Metrics.add_downloaded (Chunk.length data);
-        data)
+    Lwt_bounded.use chunk_download_pool (fun () -> Space.get chunk_key)
 end
 
 (* The inode layout is what every path-keyed caller wants. *)

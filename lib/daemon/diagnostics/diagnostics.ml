@@ -669,6 +669,22 @@ let text json =
     (Printf.sprintf "%d chunks (%d/s)"
        (int_of (mem traffic "chunksHashed"))
        (int_of (mem traffic "hashesPerSec")));
+  (* Beside [traffic], which is what this process moved to its own stores: what
+     it served a client is the other half, and a server reading only one of them
+     cannot tell a busy proxy from a busy backend. *)
+  List.iter
+    (fun (label, total_key, rate_key) ->
+      match mem server total_key with
+        | `Null -> ()
+        | v ->
+            row 2 label
+              (Printf.sprintf "%s (%s/s)"
+                 (Metrics.human_bytes (int_of v))
+                 (Metrics.human_bytes (int_of (mem server rate_key)))))
+    [
+      ("served read", "bytesRead", "bytesReadPerSec");
+      ("served written", "bytesWritten", "bytesWrittenPerSec");
+    ];
   (match mem server "requests" with
     | `Assoc fields ->
         (* Counters and gauges are kept apart: a gauge of zero is an idle
@@ -995,10 +1011,13 @@ let text json =
               | _ -> ());
             sub "traffic" (fun t ->
                 row 4 "traffic"
-                  (Printf.sprintf "up %s (%s/s), down %s, %d chunks hashed"
+                  (Printf.sprintf
+                     "up %s (%s/s), down %s (%s/s), %d chunks hashed"
                      (Metrics.human_bytes (int_of (mem t "bytesUploaded")))
                      (Metrics.human_bytes (int_of (mem t "uploadBytesPerSec")))
                      (Metrics.human_bytes (int_of (mem t "bytesDownloaded")))
+                     (Metrics.human_bytes
+                        (int_of (mem t "downloadBytesPerSec")))
                      (int_of (mem t "chunksHashed"))));
             (* Live words beside the heap the process holds: the heap grows in
                steps and shrinks never, so the two together are the difference

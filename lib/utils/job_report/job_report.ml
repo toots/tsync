@@ -95,6 +95,7 @@ let payload t ~state ~extra =
           ("bytesUploaded", `Int (Metrics.uploaded ()));
           ("uploadBytesPerSec", `Int (int_of_float (Metrics.upload_rate ())));
           ("bytesDownloaded", `Int (Metrics.downloaded ()));
+          ("downloadBytesPerSec", `Int (int_of_float (Metrics.download_rate ())));
           ("chunksHashed", `Int (Metrics.hashed ()));
         ] );
     ( "backend",

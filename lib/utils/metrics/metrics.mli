@@ -10,7 +10,14 @@ val count : counter -> int -> unit
 val total : counter -> int
 val rate : counter -> float
 
-(** Record bytes sent to / received from the backend, and chunks hashed. *)
+(** Record bytes sent to / received from the backend, and chunks hashed.
+
+    Counted in {!Backend.make}'s wrapper, where a body crosses a link, so a
+    write that fans out to three remote stores is three times its size and a
+    command going to a store directly is counted like any other. A local store
+    is a filesystem and adds nothing. A frontend measuring what it moved on a
+    client's behalf is asking a different question and makes its own {!counter}.
+*)
 val add_uploaded : int -> unit
 
 val add_downloaded : int -> unit

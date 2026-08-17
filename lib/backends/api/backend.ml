@@ -203,7 +203,47 @@ let spec_for name =
 let types () =
   List.sort compare (Hashtbl.fold (fun name _ acc -> name :: acc) registry [])
 
+(* Bytes are counted here rather than at the content layer, which is the only
+   place that reached: a collection, a mirror and a repair go to a store
+   directly, so the figure a report showed was the chunk path's traffic under a
+   name that claimed to be the backend's.
+
+   Only the verbs that carry a body, and only where a body crosses a link: a
+   local store is a filesystem, and counting its reads as traffic would bury the
+   remote ones it exists to be read instead of. *)
+let counted m =
+  let module Inner = (val m : S) in
+  (module struct
+    open Lwt.Syntax
+    include Inner
+
+    let put ~key ~data () =
+      let+ () = Inner.put ~key ~data () in
+      Metrics.add_uploaded (Chunk.length data)
+
+    (* A loser gets the winning body back, which came down the link; the winner
+       is handed its own [data] again, so physical identity tells them apart
+       without comparing bodies that are equal by construction. *)
+    let put_if_absent ~key ~data () =
+      let+ held = Inner.put_if_absent ~key ~data () in
+      Metrics.add_uploaded (Chunk.length data);
+      if held != data then Metrics.add_downloaded (Chunk.length held);
+      held
+
+    let get ~key () =
+      let+ data = Inner.get ~key () in
+      Metrics.add_downloaded (Chunk.length data);
+      data
+
+    let get_opt ~key () =
+      let+ data = Inner.get_opt ~key () in
+      Option.iter (fun d -> Metrics.add_downloaded (Chunk.length d)) data;
+      data
+  end : S)
+
 let make ~backend_type ~get_field =
   match Hashtbl.find_opt registry backend_type with
-    | Some { factory; _ } -> factory get_field
+    | Some { factory; _ } ->
+        let store = factory get_field in
+        if backend_type = "local" then store else counted store
     | None -> failwith ("unknown backend type: " ^ backend_type)

@@ -538,6 +538,14 @@
   (action
    (diff versioning.expected versioning.output))))
 
+(subdir unit/backend_traffic
+ (alias
+  (name default)
+  (deps backend_traffic.exe))
+ (rule
+  (alias runtest)
+  (action (run ./backend_traffic.exe))))
+
 (subdir unit/bounded
  (alias
   (name default)

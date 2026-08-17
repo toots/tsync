@@ -45,6 +45,12 @@ let bump name =
   Hashtbl.replace counters name
     (1 + Option.value ~default:0 (Hashtbl.find_opt counters name))
 
+(* This server's own, not the backend counters: volume moved on a client's
+   behalf is once per request, where a store's is once per link a write reaches,
+   and one process here answers for both. *)
+let read_bytes = Metrics.counter ()
+let written_bytes = Metrics.counter ()
+
 let counters_json () =
   let held, waiting =
     match !gate with
@@ -330,9 +336,7 @@ let exec route op ~body =
         let* data = B.get_opt ~key () in
         match data with
           | Some data ->
-              (* Once per request, not per backend a write fans out to: this is
-                 the volume moved on a client's behalf. *)
-              Metrics.add_downloaded (Chunk.length data);
+              Metrics.count read_bytes (Chunk.length data);
               respond_chunk data
           | None -> respond ~status:`Not_found "")
     | Head key -> (
@@ -354,6 +358,8 @@ let exec route op ~body =
         else
           let module B = (val route.store : Backend.S) in
           let* held = B.put_if_absent ~key ~data:body () in
+          Metrics.count written_bytes (Chunk.length body);
+          Metrics.count read_bytes (Chunk.length held);
           (* The body that won, so the caller learns whether it was theirs
              without a second round trip. *)
           respond_chunk held
@@ -364,7 +370,7 @@ let exec route op ~body =
             let module B = (val route.store : Backend.S) in
             B.put ~key ~data:body ()
           in
-          Metrics.add_uploaded (Chunk.length body);
+          Metrics.count written_bytes (Chunk.length body);
           respond ""
     | Delete key ->
         if not (writable key) then reject_ro ()
@@ -553,6 +559,11 @@ let status_json ~port ~tls ~totals ~exact ~reload routes =
            ("tls", `Bool tls);
            ("serves", `List (List.map (fun r -> `String r.domain_name) routes));
            ("requests", counters_json ());
+           ("bytesRead", `Int (Metrics.total read_bytes));
+           ("bytesWritten", `Int (Metrics.total written_bytes));
+           ("bytesReadPerSec", `Int (int_of_float (Metrics.rate read_bytes)));
+           ( "bytesWrittenPerSec",
+             `Int (int_of_float (Metrics.rate written_bytes)) );
          ]
        ()
     @ [("domains", `List domains)])
