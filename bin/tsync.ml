@@ -997,15 +997,20 @@ let gc_cmd =
          read. *)
       let budget = Option.map parse_duration budget
       and pause = Option.map parse_duration pause in
-      (* Carriage-return progress belongs on a terminal. Down a pipe it is a line
-         of padding in front of the summary, so a non-interactive run gets the
-         summary alone -- and the logs, which is what [-v] is for. *)
+      (* Carriage-return progress belongs on a terminal, where one line rewrites
+         itself; down a pipe it is padding in front of the summary. The same
+         text goes to the log there instead, which is what [-v] reaches -- a
+         collection run under screen and teed to a file is the case that wants
+         it, and the one where stderr is not a terminal. *)
       let watching = Unix.isatty Unix.stderr in
-      let progress fmt =
-        if watching then Printf.eprintf fmt else Printf.ifprintf stderr fmt
+      let emit ending line =
+        if watching then Printf.eprintf "%s%s%!" line ending
+        else vprintf "%s" line
       in
+      let header fmt = Printf.ksprintf (emit "\n") fmt in
+      let progress fmt = Printf.ksprintf (emit "\r") fmt in
       let on_open () =
-        progress "%s %s...\n%!"
+        header "%s %s..."
           (if abort then "Abandoning the collection of" else "Collecting")
           C.domain_name
       in
@@ -1014,15 +1019,14 @@ let gc_cmd =
          rather than one with a field that means nothing in half the runs. *)
       let on_mark ~namespaces ~total ~roots ~promoted =
         if abort then
-          progress "  kept %d/%d shard(s), %d chunk(s)\r%!" namespaces total
+          progress "  kept %d/%d shard(s), %d chunk(s)" namespaces total
             promoted
         else
-          progress "  marked %d/%d folder(s), %d file(s), %d chunk(s) kept\r%!"
+          progress "  marked %d/%d folder(s), %d file(s), %d chunk(s) kept"
             namespaces total roots promoted
       in
       let on_close ~shards ~reclaimed =
-        progress "  closed %d shard(s), %d chunk(s) reclaimed\r%!" shards
-          reclaimed
+        progress "  closed %d shard(s), %d chunk(s) reclaimed" shards reclaimed
       in
       translate (fun () ->
           let was_open = abort && run_lwt (G.status ()) <> None in
