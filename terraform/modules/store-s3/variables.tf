@@ -109,7 +109,7 @@ variable "manage_notifications" {
 variable "verify_timeout_seconds" {
   type        = number
   default     = 120
-  description = "Per-object timeout for the chunk verifier. One chunk per invocation, so this is a stall guard rather than a budget."
+  description = "Timeout for the chunk verifier. One chunk per upload event, or one batch of chunk deletes per gc request, so this is a stall guard rather than a budget."
 }
 
 variable "verify_memory_mb" {
@@ -122,4 +122,15 @@ variable "verify_max_concurrency" {
   type        = number
   default     = 32
   description = "Ceiling on concurrent chunk-verifier invocations. A whole-store sweep queues one request per shard (4096) and they become deliverable at once; this is what stops that from being 4096 concurrent readers. -1 removes the ceiling."
+}
+
+variable "deploy_share" {
+  type    = bool
+  default = true
+  # False deploys the verification half alone: the chunk verifier, its trigger
+  # and the client credentials, without the share Lambda or the unauthenticated
+  # function URL that fronts it. That is what a bucket used only for testing
+  # wants -- nothing there serves links, and a public URL over it would be
+  # surface for no purpose.
+  description = "Deploy the share Lambda and its public function URL. False = verification half only."
 }

@@ -342,6 +342,12 @@ let make ~url ~secret : (module Backend.S) =
     (* The peer owns that store and whatever checks it; asking it to start a
        sweep on our behalf is a decision for whoever administers it. *)
     let verify_all ~chunk_prefix:_ () = Lwt.return `Unsupported
+
+    (* Enqueueing work in the peer's own bucket is not this client's to decide,
+       and the peer's store is reached through the bulk delete either way. *)
+    let discard ~chunk_prefix:_ ~run:_ ~name:_ ~keys:_ () =
+      Lwt.return `Unsupported
+
     let capabilities ~prefix () = capabilities t ~prefix ()
   end)
 

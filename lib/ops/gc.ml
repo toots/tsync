@@ -404,6 +404,87 @@ module Make (C : Conf.S) = struct
 
   let status () = Space.read_run ()
 
+  (* How old a request is, which is the whole of what the report says beyond a
+     count: minutes while it could still be in flight, hours once it plainly is
+     not. Here rather than at each place that prints one, so the log line and
+     [--status] cannot answer the same question differently. *)
+  let show_age seconds =
+    if seconds < 3600. then Printf.sprintf "%.0f minute(s) ago" (seconds /. 60.)
+    else Printf.sprintf "%.0f hour(s) ago" (seconds /. 3600.)
+
+  (* One listing per copy, off the collection path: a request still sitting here
+     is a copy whose function did not run, and nothing else would ever say so —
+     the keys it names are gone from the main, so no later collection meets them
+     again.
+
+     No fan-out over what comes back. The list is however many requests are
+     stuck, which is the data's length and not ours. *)
+  let outstanding () =
+    Lwt_list.filter_map_s
+      (fun (m : Backend.member) ->
+        let (module T : Backend.S) = m.Backend.backend in
+        let+ entries =
+          T.list_prefix
+            ~prefix:(Chunk_layout.gc_jobs_prefix ~chunk_prefix:C.chunk_prefix)
+            ()
+        in
+        let jobs =
+          List.filter
+            (fun (e : Backend.file_entry) ->
+              Chunk_layout.shard_of_job e.Backend.key <> None)
+            entries
+        in
+        if jobs = [] then None
+        else (
+          let now = Unix.gettimeofday () in
+          let oldest =
+            List.fold_left
+              (fun acc (e : Backend.file_entry) ->
+                max acc (now -. e.Backend.last_modified))
+              0. jobs
+          in
+          Some (m.Backend.name, List.length jobs, oldest)))
+      (deferred_members ())
+
+  (* Writing a request back where it already is re-fires the store's
+     object-created notification, which is the only way to reach a function that
+     was not listening the first time: the original delivery is spent, and no
+     amount of waiting brings it back.
+
+     Sequential, and the list is however many are stuck rather than a length
+     this code chose. *)
+  let retry_outstanding () =
+    Lwt_list.map_s
+      (fun (m : Backend.member) ->
+        let (module T : Backend.S) = m.Backend.backend in
+        let* entries =
+          T.list_prefix
+            ~prefix:(Chunk_layout.gc_jobs_prefix ~chunk_prefix:C.chunk_prefix)
+            ()
+        in
+        let jobs =
+          List.filter
+            (fun (e : Backend.file_entry) ->
+              Chunk_layout.shard_of_job e.Backend.key <> None)
+            entries
+        in
+        let+ n =
+          Lwt_list.fold_left_s
+            (fun n (e : Backend.file_entry) ->
+              (* Read back rather than composed afresh: what a request names is
+                 knowable only from the request, the main having discarded the
+                 space those keys were listed from. *)
+              let* body = T.get_opt ~key:e.Backend.key () in
+              match body with
+                | None -> Lwt.return n
+                | Some body ->
+                    let+ () = T.put ~key:e.Backend.key ~data:body () in
+                    n + 1)
+            0 jobs
+        in
+        (m.Backend.name, n))
+      (deferred_members ())
+
   let save s phase cursor =
     Space.write_run { Chunk_space.phase; started = s.started; cursor }
 
@@ -462,6 +543,17 @@ module Make (C : Conf.S) = struct
         on_close = (fun ~shards:_ ~reclaimed:_ -> ());
       }
     in
+    (* Said once at the top rather than left for [--status] to be asked: what
+       these name is already gone from the main, so a run that stayed quiet
+       about them would be the last thing ever to mention them. *)
+    let* stuck = outstanding () in
+    List.iter
+      (fun (name, count, oldest) ->
+        Log.warn
+          "gc: %s has %d delete request(s) outstanding, oldest %s — check the \
+           bucket's notification and the function's logs"
+          name count (show_age oldest))
+      stuck;
     (* Each phase is recorded before the step it names, so whatever state the
        store is in continues from there: an interrupted rename is redone, an
        interrupted mark resumes at its cursor, an interrupted close at its
@@ -689,14 +781,29 @@ module Make (C : Conf.S) = struct
      the cursor is only moved once everything before it is gone from every
      store. *)
   let flush_close s ~shards ~doomed ~reclaimed ~bytes =
-    let* () =
-      if doomed = [] then Lwt.return_unit
+    (* Hands back the copies that had nothing to enqueue on, since those are the
+       ones whose markers are still ours to delete below. *)
+    let* direct =
+      if doomed = [] then Lwt.return []
       else
-        Lwt_list.iter_s
+        Lwt_list.filter_map_s
           (fun (m : Backend.member) ->
             let (module T : Backend.S) = m.Backend.backend in
-            let+ () = T.delete_multi doomed in
-            Log.debug "gc: %s: deleted %d chunk(s)" m.Backend.name reclaimed)
+            let* queued =
+              T.discard ~chunk_prefix:C.chunk_prefix
+                ~run:(Chunk_layout.gc_run_name s.started)
+                ~name:(last_of shards) ~keys:doomed ()
+            in
+            match queued with
+              | `Queued ->
+                  Log.info "gc: %s: queued %d chunk(s) for deletion"
+                    m.Backend.name reclaimed;
+                  Lwt.return_none
+              | `Unsupported ->
+                  let+ () = T.delete_multi doomed in
+                  Log.info "gc: %s: deleted %d chunk(s)" m.Backend.name
+                    reclaimed;
+                  Some m.Backend.backend)
           s.targets
     in
     (* A marker accuses a chunk by naming it ({!Corruption}); once the chunk is
@@ -705,19 +812,19 @@ module Make (C : Conf.S) = struct
        no object left to re-verify. Left alone they accumulate as permanent
        findings that no repair can answer.
 
-       The main as well as the copies: [discard_shard] unlinks inside the space
-       on its way out, which is not where markers live. A separate call rather
-       than keys appended to [doomed], so the batch stays the size the operator
-       asked for, and absent keys are already a success ({!Backend.S.delete_multi}). *)
+       The main as well as the copies that deleted in the call: [discard_shard]
+       unlinks inside the space on its way out, which is not where markers live,
+       and a copy that enqueued has these derived for it by the same function
+       that does the deleting. A separate call rather than keys appended to
+       [doomed], so the batch stays the size the operator asked for, and absent
+       keys are already a success ({!Backend.S.delete_multi}). *)
     let markers = List.filter_map Chunk_layout.marker_key doomed in
     let* () =
       if markers = [] then Lwt.return_unit
       else
         Lwt_list.iter_s
           (fun (module T : Backend.S) -> T.delete_multi markers)
-          (s.main
-          :: List.map (fun (m : Backend.member) -> m.Backend.backend) s.targets
-          )
+          (s.main :: direct)
     in
     let* () = Lwt_list.iter_s (discard_shard s) shards in
     s.chunks_reclaimed <- s.chunks_reclaimed + reclaimed;

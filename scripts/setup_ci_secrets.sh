@@ -12,6 +12,7 @@
 #
 #   bash scripts/setup_ci_secrets.sh            # do it
 #   bash scripts/setup_ci_secrets.sh --dry-run  # print what it would do
+#   bash scripts/setup_ci_secrets.sh --help     # this
 #
 set -euo pipefail
 
@@ -31,8 +32,31 @@ AWS_IAM_USER="${AWS_IAM_USER:-tsync-ci}"
 # forgotten run cannot accrue cost indefinitely.
 EXPIRE_DAYS="${EXPIRE_DAYS:-2}"
 
+# The chunk verifier is deployed onto the CI buckets so conformance has
+# something real to trigger: two of the things this project leans on -- the
+# whole-store sweep and the deletes a collection hands over -- are a client
+# writing an object and trusting a function to act on it, and nothing else
+# proves that wiring exists.
+#
+# Its own terraform state, and never the one next door: that one holds real
+# stores, and an apply pointed at CI buckets with the wrong state is how they
+# would be reached. The bucket is the same, the prefix is not.
+DEPLOY_FUNCTIONS="${DEPLOY_FUNCTIONS:-1}"
+TF_STATE_PREFIX="${TF_STATE_PREFIX:-tsync-ci}"
+TF_STATE_BUCKET="${TF_STATE_BUCKET:-}"
+
+usage() {
+  sed -n '3,15p' "$0" | sed 's/^#\{0,1\} \{0,1\}//'
+  exit "${1:-0}"
+}
+
 DRY_RUN=0
-[ "${1:-}" = "--dry-run" ] && DRY_RUN=1
+case "${1:-}" in
+  --dry-run) DRY_RUN=1 ;;
+  -h | --help) usage ;;
+  "") ;;
+  *) printf 'unknown argument: %s\n\n' "$1" >&2; usage 2 ;;
+esac
 
 say()  { printf '\n\033[1m%s\033[0m\n' "$*"; }
 info() { printf '  %s\n' "$*"; }
@@ -46,13 +70,13 @@ run()  { if [ $DRY_RUN = 1 ]; then printf '  + %s\n' "$*"; else eval "$@"; fi; }
 # key below.
 retry() {
   local what=$1; shift
-  local attempt
+  local attempt err
   for attempt in 1 2 3 4 5 6 7 8 9 10; do
     if [ $DRY_RUN = 1 ]; then printf '  + %s\n' "$*"; return 0; fi
-    if eval "$@" 2>/dev/null; then return 0; fi
+    if err=$(eval "$@" 2>&1); then return 0; fi
     sleep 5
   done
-  die "$what did not succeed after 10 attempts"
+  die "$what did not succeed after 10 attempts: $(printf '%s' "$err" | tail -1)"
 }
 
 WORK="$(mktemp -d)"
@@ -74,6 +98,22 @@ if ! command -v aws >/dev/null || ! aws sts get-caller-identity >/dev/null 2>&1;
   WANT_S3=0
   warn "aws cli missing or not configured -- skipping the S3 half."
   warn "The s3 backend's put_if_absent stays unverified until it is set up."
+fi
+
+# Either binary drives the same configuration; the README says as much for a
+# real deployment, so the test stack is no different.
+TF=""
+if [ "$DEPLOY_FUNCTIONS" = 1 ]; then
+  for candidate in tofu terraform; do
+    command -v "$candidate" >/dev/null && { TF="$candidate"; break; }
+  done
+  if [ -z "$TF" ]; then
+    DEPLOY_FUNCTIONS=0
+    warn "neither tofu nor terraform found -- not deploying the chunk verifier."
+    warn "Conformance will report the serverless half as not run."
+  else
+    info "$TF: ok, will deploy the chunk verifier onto the CI bucket(s)"
+  fi
 fi
 
 if [ $DRY_RUN = 0 ]; then
@@ -126,10 +166,13 @@ fi
 
 # Bound on the bucket, not the project: this identity must not be able to touch
 # anything else in tsync-503522.
+# --condition=None because the verifier's own grants are conditional, and gcloud
+# refuses to guess which kind of binding an unconditional add means once a policy
+# contains any: this one is meant to apply everywhere in the bucket.
 retry "granting objectAdmin" \
   gcloud storage buckets add-iam-policy-binding "gs://$GCS_BUCKET" \
   --member "serviceAccount:$GCS_SA_EMAIL" --role roles/storage.objectAdmin \
-  --project "$GCP_PROJECT" '>/dev/null'
+  --condition=None --project "$GCP_PROJECT" '>/dev/null'
 info "granted objectAdmin on gs://$GCS_BUCKET only"
 
 say "GCS key"
@@ -264,7 +307,46 @@ if [ $DRY_RUN = 0 ]; then
   fi
 fi
 
-# ----------------------------------------------------------------- secrets --
+# What makes the serverless half testable at all: without a function on the
+# bucket, a conformance run can prove a request object lands and nothing more.
+DEPLOYED_S3=0
+DEPLOYED_GCS=0
+if [ "$DEPLOY_FUNCTIONS" = 1 ]; then
+  say "Chunk verifier on the CI bucket(s)"
+
+  # The state bucket the real stack already uses, unless told otherwise -- a
+  # different prefix in it, never a different one of these.
+  if [ -z "$TF_STATE_BUCKET" ] && [ -f terraform/backend.hcl ]; then
+    TF_STATE_BUCKET=$(sed -n 's/^ *bucket *= *"\(.*\)"/\1/p' terraform/backend.hcl)
+  fi
+  [ -n "$TF_STATE_BUCKET" ] \
+    || die "no terraform state bucket: set TF_STATE_BUCKET, or run ./terraform/init.sh first"
+  info "state gs://$TF_STATE_BUCKET/$TF_STATE_PREFIX (never the deployment's own prefix)"
+
+  TF_ARGS="-var=gcs_bucket=$GCS_BUCKET -var=gcp_project=$GCP_PROJECT"
+  TF_ARGS="$TF_ARGS -var=gcp_region=$GCS_LOCATION -var=gcp_function_region=$GCS_LOCATION"
+  if [ $WANT_S3 = 1 ]; then
+    TF_ARGS="$TF_ARGS -var=s3_bucket=$S3_BUCKET -var=aws_region=$AWS_REGION"
+  fi
+
+  run "(cd terraform/ci && $TF init -input=false -reconfigure \
+        -backend-config=bucket=$TF_STATE_BUCKET \
+        -backend-config=prefix=$TF_STATE_PREFIX >/dev/null)"
+  run "(cd terraform/ci && $TF apply -input=false -auto-approve $TF_ARGS >/dev/null)"
+
+  if [ $DRY_RUN = 0 ]; then
+    # Read back rather than assumed: an apply that half succeeded would
+    # otherwise have CI told the function is there and every run fail on a
+    # timeout, which reads as the function being broken rather than absent.
+    out=$(cd terraform/ci && $TF output -json 2>/dev/null || echo '{}')
+    getout() { printf '%s' "$out" | python3 -c \
+      'import json,sys;d=json.load(sys.stdin);v=d.get(sys.argv[1],{}).get("value");print(v if v else "")' "$1"; }
+    [ -n "$(getout gcs_verify_function)" ] && DEPLOYED_GCS=1
+    [ -n "$(getout s3_verify_function)" ] && DEPLOYED_S3=1
+    info "gcs verifier: $([ $DEPLOYED_GCS = 1 ] && echo deployed || echo 'not deployed')"
+    info "s3 verifier:  $([ $DEPLOYED_S3 = 1 ] && echo deployed || echo 'not deployed')"
+  fi
+fi
 
 say "GitHub secrets on $REPO"
 if [ $DRY_RUN = 1 ]; then
@@ -274,12 +356,30 @@ else
   gh secret set TSYNC_CI_GCS_BUCKET -R "$REPO" --body "$GCS_BUCKET"
   gh secret set TSYNC_CI_GCS_SERVICE_ACCOUNT_KEY -R "$REPO" < "$WORK/gcs-key.json"
   info "TSYNC_CI_GCS_BUCKET, TSYNC_CI_GCS_SERVICE_ACCOUNT_KEY"
+  # Set from what the apply actually reported, and cleared when it reported
+  # nothing: a run that finds this set and the function absent fails on a
+  # timeout, which is the one failure that looks like a code fault and is not.
+  if [ $DEPLOYED_GCS = 1 ]; then
+    gh secret set TSYNC_CI_GCS_VERIFY_FUNCTION -R "$REPO" --body "tsync-verify-ci"
+    gh secret set TSYNC_CI_GCS_FUNCTION_REGION -R "$REPO" --body "$GCS_LOCATION"
+    info "TSYNC_CI_GCS_VERIFY_FUNCTION, TSYNC_CI_GCS_FUNCTION_REGION"
+  else
+    gh secret delete TSYNC_CI_GCS_VERIFY_FUNCTION -R "$REPO" >/dev/null 2>&1 || true
+    info "no gcs verifier deployed -- conformance will report that half not run"
+  fi
   if [ $WANT_S3 = 1 ]; then
     gh secret set TSYNC_CI_S3_BUCKET -R "$REPO" --body "$S3_BUCKET"
     gh secret set TSYNC_CI_S3_REGION -R "$REPO" --body "$AWS_REGION"
     gh secret set TSYNC_CI_S3_ACCESS_KEY_ID -R "$REPO" --body "$AK"
     gh secret set TSYNC_CI_S3_SECRET_ACCESS_KEY -R "$REPO" --body "$SK"
     info "TSYNC_CI_S3_BUCKET, _REGION, _ACCESS_KEY_ID, _SECRET_ACCESS_KEY"
+    if [ $DEPLOYED_S3 = 1 ]; then
+      gh secret set TSYNC_CI_S3_VERIFY_FUNCTION -R "$REPO" --body "tsync-verify-ci"
+      info "TSYNC_CI_S3_VERIFY_FUNCTION"
+    else
+      gh secret delete TSYNC_CI_S3_VERIFY_FUNCTION -R "$REPO" >/dev/null 2>&1 || true
+      info "no s3 verifier deployed -- conformance will report that half not run"
+    fi
   fi
 fi
 
@@ -310,6 +410,7 @@ if [ $WANT_S3 = 1 ]; then
   info "  TSYNC_CI_S3_REGION"
   info "  TSYNC_CI_S3_ACCESS_KEY_ID"
   info "  TSYNC_CI_S3_SECRET_ACCESS_KEY"
+  [ $DEPLOYED_S3 = 1 ] && info "  TSYNC_CI_S3_VERIFY_FUNCTION"
 else
   info "  (no S3 secrets -- set up the aws cli and re-run to add them)"
 fi

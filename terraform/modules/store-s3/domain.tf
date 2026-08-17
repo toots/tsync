@@ -41,7 +41,7 @@ resource "aws_apigatewayv2_integration" "share" {
   count                  = local.domain_enabled
   api_id                 = aws_apigatewayv2_api.share[0].id
   integration_type       = "AWS_PROXY"
-  integration_uri        = aws_lambda_function.share.arn
+  integration_uri        = aws_lambda_function.share[0].arn
   payload_format_version = "2.0"
 }
 
@@ -63,7 +63,7 @@ resource "aws_lambda_permission" "apigw" {
   count         = local.domain_enabled
   statement_id  = "AllowApiGatewayInvoke"
   action        = "lambda:InvokeFunction"
-  function_name = aws_lambda_function.share.function_name
+  function_name = aws_lambda_function.share[0].function_name
   principal     = "apigateway.amazonaws.com"
   source_arn    = "${aws_apigatewayv2_api.share[0].execution_arn}/*/*"
 }

@@ -28,13 +28,16 @@ let marker_key = Chunk_space.marker_key ~chunk_prefix
 
 type tally = {
   mutable lists : int;
+  mutable jobs : int;
   mutable puts : int;
   mutable markers : int;
   mutable heads : int;
   mutable copies : int;
 }
 
-let counted () = { lists = 0; puts = 0; markers = 0; heads = 0; copies = 0 }
+let counted () =
+  { lists = 0; jobs = 0; puts = 0; markers = 0; heads = 0; copies = 0 }
+
 let main_ops = counted ()
 let replica_ops = counted ()
 
@@ -47,8 +50,13 @@ module Count
     end) : Backend.S = struct
   include B
 
+  (* Counted apart from [lists], which stands for walking a copy's chunk space:
+     asking whether any delete request is still sitting there is one round trip
+     a run, not one a shard, and conflating the two would hide either. *)
   let list_prefix ?max_keys ~prefix () =
-    T.t.lists <- T.t.lists + 1;
+    if prefix = Chunk_layout.gc_jobs_prefix ~chunk_prefix then
+      T.t.jobs <- T.t.jobs + 1
+    else T.t.lists <- T.t.lists + 1;
     B.list_prefix ?max_keys ~prefix ()
 
   let put ~key ~data () =
@@ -336,9 +344,15 @@ let () =
         each about all 4096 shards — over a network, for a target on one — to find
         orphans that cannot exist is a long detour bolted onto a recovery. *)
      replica_ops.lists <- 0;
+     replica_ops.jobs <- 0;
      let* kept = G.abort () in
      step "finished abandoning: %d chunk(s) kept" kept.Gc.chunks_promoted;
      step "listings of the replica during the abandonment: %d" replica_ops.lists;
+     (* Once, when the run opens. What it looks for is a request an earlier
+        collection left unconsumed, which nothing else would ever mention: the
+        keys it names are already gone from the main. *)
+     step "asked whether the replica has delete requests outstanding: %d"
+       replica_ops.jobs;
      let* left = Main.list_prefix ~prefix:chunk_prefix () in
      step "chunks still on the main: %d of %d" (count_chunks left) folders;
      (* A shard renamed as a directory brings whatever else was in it, the writes in

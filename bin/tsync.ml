@@ -889,6 +889,16 @@ let gc_cmd =
              collection does, and resumes the same way — a second $(b,--abort) \
              continues abandoning rather than starting over.")
   in
+  let retry_arg =
+    Arg.(
+      value & flag
+      & info ["retry-jobs"]
+          ~doc:
+            "Deliver outstanding delete requests again. A request is handed to \
+             a copy's bucket once, by the notification its own write fires; a \
+             function that was absent or broken then does not pick one up by \
+             being fixed. Safe to repeat.")
+  in
   let status_arg =
     Arg.(
       value & flag
@@ -957,7 +967,9 @@ let gc_cmd =
             phase s.roots_marked s.chunks_promoted s.chunks_reclaimed
             (verified_line s)
   in
-  let run budget pause concurrency delete_batch abort status verify domain =
+  let run budget pause concurrency delete_batch abort status retry verify
+      verbose domain =
+    set_verbose verbose;
     (* Reported as [Failure], which the top level prints as "tsync: <sentence>"
        and exits nonzero on. Both carry prose written for whoever typed this. *)
     let translate f =
@@ -967,14 +979,41 @@ let gc_cmd =
     in
     let (module C : Conf.S) = load_conf ?domain () in
     let module G = Gc.Make (C) in
-    if status then (
-      match run_lwt (G.status ()) with
+    if retry then (
+      (* Re-delivery, not a fresh decision: what each request names is in the
+         request, the space those keys came from having been discarded. *)
+      let sent = run_lwt (G.retry_outstanding ()) in
+      let total = List.fold_left (fun n (_, c) -> n + c) 0 sent in
+      if total = 0 then
+        Printf.printf "No delete request is outstanding for %s.\n" C.domain_name
+      else
+        List.iter
+          (fun (name, n) ->
+            if n > 0 then
+              Printf.printf
+                "%s: %d delete request(s) sent again. Watch tsync gc --status: \
+                 they clear as the function consumes them.\n"
+                name n)
+          sent)
+    else if status then (
+      (match run_lwt (G.status ()) with
         | None -> Printf.printf "No collection is open for %s.\n" C.domain_name
         | Some r ->
             Printf.printf "Collection of %s open: %s, %.0fs so far.\n"
               C.domain_name
               (Chunk_space.string_of_phase r.Chunk_space.phase)
-              (Unix.gettimeofday () -. r.Chunk_space.started))
+              (Unix.gettimeofday () -. r.Chunk_space.started));
+      (* Printed whether or not one is open: a request outlives the collection
+         that queued it, and a copy sitting on one is the case this exists to
+         show. *)
+      List.iter
+        (fun (name, count, oldest) ->
+          Printf.printf
+            "  %s: %d delete request(s) outstanding, oldest %s.\n\
+            \    Nothing has picked them up — check the bucket's notification \
+             and the function's logs.\n"
+            name count (G.show_age oldest))
+        (run_lwt (G.outstanding ())))
     else (
       (* Abandoning is the same machinery with everything treated as live, so it
          takes the same pacing and reports the same way — whoever reaches for
@@ -984,15 +1023,20 @@ let gc_cmd =
          read. *)
       let budget = Option.map parse_duration budget
       and pause = Option.map parse_duration pause in
-      (* Carriage-return progress belongs on a terminal. Down a pipe it is a line
-         of padding in front of the summary, so a non-interactive run gets the
-         summary alone -- and the logs, which is what [-v] is for. *)
+      (* Carriage-return progress belongs on a terminal, where one line rewrites
+         itself; down a pipe it is padding in front of the summary. The same
+         text goes to the log there instead, which is what [-v] reaches -- a
+         collection run under screen and teed to a file is the case that wants
+         it, and the one where stderr is not a terminal. *)
       let watching = Unix.isatty Unix.stderr in
-      let progress fmt =
-        if watching then Printf.eprintf fmt else Printf.ifprintf stderr fmt
+      let emit ending line =
+        if watching then Printf.eprintf "%s%s%!" line ending
+        else vprintf "%s" line
       in
+      let header fmt = Printf.ksprintf (emit "\n") fmt in
+      let progress fmt = Printf.ksprintf (emit "\r") fmt in
       let on_open () =
-        progress "%s %s...\n%!"
+        header "%s %s..."
           (if abort then "Abandoning the collection of" else "Collecting")
           C.domain_name
       in
@@ -1001,15 +1045,14 @@ let gc_cmd =
          rather than one with a field that means nothing in half the runs. *)
       let on_mark ~namespaces ~total ~roots ~promoted =
         if abort then
-          progress "  kept %d/%d shard(s), %d chunk(s)\r%!" namespaces total
+          progress "  kept %d/%d shard(s), %d chunk(s)" namespaces total
             promoted
         else
-          progress "  marked %d/%d folder(s), %d file(s), %d chunk(s) kept\r%!"
+          progress "  marked %d/%d folder(s), %d file(s), %d chunk(s) kept"
             namespaces total roots promoted
       in
       let on_close ~shards ~reclaimed =
-        progress "  closed %d shard(s), %d chunk(s) reclaimed\r%!" shards
-          reclaimed
+        progress "  closed %d shard(s), %d chunk(s) reclaimed" shards reclaimed
       in
       translate (fun () ->
           let was_open = abort && run_lwt (G.status ()) <> None in
@@ -1037,7 +1080,8 @@ let gc_cmd =
           mirror's job, not this one's.")
     Term.(
       const run $ budget_arg $ pause_arg $ concurrency_arg $ delete_batch_arg
-      $ abort_arg $ status_arg $ verify_arg $ domain_arg)
+      $ abort_arg $ status_arg $ retry_arg $ verify_arg $ verbose_arg
+      $ domain_arg)
 
 let sync_cmd =
   let source_arg =

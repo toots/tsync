@@ -125,6 +125,7 @@ def test_the_pubsub_event_shape_is_decoded(store):
     assert verify.gcp_verify(_CloudEvent({"message": {}})) == {
         "checked": 0,
         "corrupt": 0,
+        "deleted": 0,
     }
 
 
@@ -149,4 +150,67 @@ def test_the_background_calling_convention_works_too(store):
     assert verify.gcp_verify({"attributes": {}}, object()) == {
         "checked": 0,
         "corrupt": 0,
+        "deleted": 0,
     }
+
+
+def test_a_delete_request_drops_its_chunks_and_their_markers(store):
+    """The GCS half of the delete path: the bulk delete is a thread pool here
+    rather than one batched call, and swallowing NotFound is its own code."""
+    doomed = b"garbage" * 100
+    kept = b"still referenced" * 100
+    doomed_path, doomed_key = chunk_path("d", doomed)
+    kept_path, _ = chunk_path("d", kept)
+    store.put_bytes(doomed_path, doomed)
+    store.put_bytes(kept_path, kept)
+    marker = f"tsync/corrupted/d/{doomed_key[:3]}/{doomed_key}"
+    store.put_bytes(marker, b"{}")
+
+    job = "tsync/gc-jobs/d/1755300000000/" + doomed_key[:3]
+    store.put_bytes(job, doomed_path.encode())
+    assert verify.verify_key(store, job)["deleted"] == 1
+
+    assert not store.exists(doomed_path)
+    assert not store.exists(marker)
+    assert store.exists(kept_path)
+    assert not store.exists(job)
+
+
+def test_a_delete_request_may_not_name_another_domain(store):
+    """The body is client-written and this function can delete any chunk in the
+    bucket, so the check is against the requesting domain, not the key alone."""
+    body = b"someone else's chunk" * 10
+    theirs, _ = chunk_path("other", body)
+    store.put_bytes(theirs, body)
+
+    job = "tsync/gc-jobs/d/1755300000000/0ab"
+    store.put_bytes(job, theirs.encode())
+    assert verify.verify_key(store, job)["deleted"] == 0
+    assert store.exists(theirs)
+
+
+def test_delete_many_reports_nothing_for_keys_that_were_never_there():
+    """Absent is a success: a resumed collection sends a batch it may already
+    have deleted, and a redelivered request repeats itself."""
+    st = Store()
+    assert st.delete_many([]) == []
+    assert st.delete_many(["tsync/d/chunks/000/nothing-here"]) == []
+
+
+def test_delete_many_drops_every_key_it_is_given(store):
+    """More keys than one batch holds, so the grouping is exercised rather than
+    the one-key case standing in for it.
+
+    What this cannot see is which path ran: fake-gcs-server answers the batch
+    endpoint with something that is "not multi-part", so every group falls back
+    to deleting key by key here and the batch itself is only reachable against
+    a real bucket. Both paths must leave the same result, which is what this
+    holds; that batching happens at all was checked by hand against GCS."""
+    keys = []
+    for i in range(40):
+        key = f"tsync/d/chunks/{i % 16:03x}/bulk-{i}"
+        store.put_bytes(key, b"x")
+        keys.append(key)
+
+    assert store.delete_many(keys) == []
+    assert [k for k in keys if store.exists(k)] == []

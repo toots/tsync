@@ -36,6 +36,7 @@
   resumed with a plain start, phase: abandoning  <- not "marking"
   finished abandoning: 11 chunk(s) kept
   listings of the replica during the abandonment: 0
+  asked whether the replica has delete requests outstanding: 1
   chunks still on the main: 17 of 12
   writes in flight carried along by a renamed shard: 12 of 12
   chunks only the old space had, now in the new one: 5 of 5

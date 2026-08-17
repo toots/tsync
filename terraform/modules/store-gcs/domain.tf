@@ -13,7 +13,9 @@
 # on its own once they resolve (apply does not block on it).
 
 locals {
-  domain_enabled = var.custom_domain == null ? 0 : 1
+  # A vanity domain maps onto the share service, so there is nothing to map when
+  # the store was deployed without one.
+  domain_enabled = var.custom_domain == null || !var.deploy_share ? 0 : 1
 }
 
 # status.resource_records carries the DNS to publish — a CNAME for a subdomain,
@@ -28,6 +30,6 @@ resource "google_cloud_run_domain_mapping" "share" {
   }
 
   spec {
-    route_name = google_cloudfunctions2_function.share.name
+    route_name = google_cloudfunctions2_function.share[0].name
   }
 }

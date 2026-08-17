@@ -3,9 +3,15 @@ output "bucket" {
   value       = local.bucket_name
 }
 
+# Null when the store was deployed without the share function, which is what
+# tells a client this bucket serves no links.
 output "share_url" {
   description = "Base URL for share links (gcs backend `shareUrl`), no trailing slash."
-  value       = var.custom_domain == null ? trimsuffix(google_cloudfunctions2_function.share.url, "/") : "https://${var.custom_domain}"
+  value = (var.deploy_share
+    ? (var.custom_domain == null
+      ? trimsuffix(google_cloudfunctions2_function.share[0].url, "/")
+    : "https://${var.custom_domain}")
+  : null)
 }
 
 output "custom_domain" {
@@ -27,3 +33,4 @@ output "service_account_key" {
   sensitive   = true
   value       = base64decode(google_service_account_key.client.private_key)
 }
+

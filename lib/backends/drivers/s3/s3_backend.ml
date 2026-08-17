@@ -258,6 +258,17 @@ let make ?endpoint ?unsigned_payload ?share_url ~bucket ~region ~access_key_id
       in
       `Queued n
 
+    (* Taken as given, as [verified] is and for the same reason: the function
+       that consumes these is deployed by the terraform that makes the bucket,
+       and a deployment half applied is not a state this reports its way out of.
+       A request nothing picks up is reported by [tsync gc --status] and
+       re-delivered by [tsync gc --retry-jobs]. *)
+    let discard ~chunk_prefix ~run ~name ~keys () =
+      let+ () =
+        Discard_job.queue ~put:put_text ~chunk_prefix ~run ~name ~keys ()
+      in
+      `Queued
+
     (* No chunk size or concurrency opinion: an object store is limited by the
        network and its own concurrency, neither measurable from here.
 

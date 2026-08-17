@@ -1,0 +1,5 @@
+(executable
+ (flags
+  (:standard -open Tsync_naming))
+ (name gc_job)
+ (libraries tsync_naming unix))

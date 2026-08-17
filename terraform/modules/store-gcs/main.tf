@@ -62,6 +62,11 @@ locals {
   # Fixed, domain-independent shares root (matches Conf_parsing.shares_prefix in
   # the daemon). Share manifests + cached artifacts live under tsync/shares/.
   shares_prefix = "tsync/shares/"
+
+  # A store deployed without the share function has nothing serving links and no
+  # artifacts to expire; a CI stack wants the verification half alone, not a
+  # public endpoint over its bucket.
+  share_enabled = var.deploy_share ? 1 : 0
 }
 
 # ── tsync client credentials ───────────────────────────────────────────────
@@ -90,6 +95,7 @@ resource "google_service_account_key" "client" {
 # ── Share Cloud Function (gen2) ────────────────────────────────────────────
 
 resource "google_service_account" "share" {
+  count        = local.share_enabled
   account_id   = "tsync-share-${var.name}"
   display_name = "tsync share ${var.name}"
 }
@@ -97,17 +103,19 @@ resource "google_service_account" "share" {
 # Read manifests + chunks anywhere in the store (this also grants object list,
 # which an IAM Condition can't scope by prefix).
 resource "google_storage_bucket_iam_member" "share_read" {
+  count  = local.share_enabled
   bucket = local.bucket_name
   role   = "roles/storage.objectViewer"
-  member = "serviceAccount:${google_service_account.share.email}"
+  member = "serviceAccount:${google_service_account.share[0].email}"
 }
 
 # Write (and delete temp compose objects) only under the shares prefix. GCS IAM
 # is bucket-granular, so the prefix scope is expressed as an IAM Condition.
 resource "google_storage_bucket_iam_member" "share_write" {
+  count  = local.share_enabled
   bucket = local.bucket_name
   role   = "roles/storage.objectUser"
-  member = "serviceAccount:${google_service_account.share.email}"
+  member = "serviceAccount:${google_service_account.share[0].email}"
   condition {
     title      = "shares-prefix-only"
     expression = "resource.name.startsWith(\"projects/_/buckets/${local.bucket_name}/objects/${local.shares_prefix}\")"
@@ -117,9 +125,10 @@ resource "google_storage_bucket_iam_member" "share_write" {
 # Sign V4 URLs from inside the function (no raw private key at runtime): the SA
 # must be able to call the IAM SignBlob API on itself.
 resource "google_service_account_iam_member" "share_signer" {
-  service_account_id = google_service_account.share.name
+  count              = local.share_enabled
+  service_account_id = google_service_account.share[0].name
   role               = "roles/iam.serviceAccountTokenCreator"
-  member             = "serviceAccount:${google_service_account.share.email}"
+  member             = "serviceAccount:${google_service_account.share[0].email}"
 }
 
 resource "google_storage_bucket_object" "source" {
@@ -129,6 +138,7 @@ resource "google_storage_bucket_object" "source" {
 }
 
 resource "google_cloudfunctions2_function" "share" {
+  count    = local.share_enabled
   name     = "tsync-share-${var.name}"
   location = var.function_region
 
@@ -151,7 +161,7 @@ resource "google_cloudfunctions2_function" "share" {
   service_config {
     available_memory      = "${var.memory_mb}M"
     timeout_seconds       = var.timeout_seconds
-    service_account_email = google_service_account.share.email
+    service_account_email = google_service_account.share[0].email
     environment_variables = {
       BUCKET      = local.bucket_name
       PRESIGN_TTL = tostring(var.presign_ttl)
@@ -164,8 +174,9 @@ resource "google_cloudfunctions2_function" "share" {
 # Public, unauthenticated access — the GCP equal of the Lambda function-URL NONE
 # auth. A gen2 function is backed by a Cloud Run service of the same name.
 resource "google_cloud_run_v2_service_iam_member" "public" {
-  location = google_cloudfunctions2_function.share.location
-  name     = google_cloudfunctions2_function.share.name
+  count    = local.share_enabled
+  location = google_cloudfunctions2_function.share[0].location
+  name     = google_cloudfunctions2_function.share[0].name
   role     = "roles/run.invoker"
   member   = "allUsers"
 }

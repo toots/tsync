@@ -12,6 +12,10 @@ end) : Backend.S = struct
   let copy ~src_key:_ ~dst_key:_ () = fail ()
   let list_prefix ?max_keys:_ ~prefix:_ () = fail ()
   let verify_all ~chunk_prefix:_ () = Lwt.return `Unsupported
+
+  let discard ~chunk_prefix:_ ~run:_ ~name:_ ~keys:_ () =
+    Lwt.return `Unsupported
+
   let capabilities ~prefix:_ () = Lwt.return Backend.no_caps
 end
 
@@ -27,6 +31,10 @@ module Hung : Backend.S = struct
   let copy ~src_key:_ ~dst_key:_ () = never ()
   let list_prefix ?max_keys:_ ~prefix:_ () = never ()
   let verify_all ~chunk_prefix:_ () = Lwt.return `Unsupported
+
+  let discard ~chunk_prefix:_ ~run:_ ~name:_ ~keys:_ () =
+    Lwt.return `Unsupported
+
   let capabilities ~prefix:_ () = Lwt.return Backend.no_caps
 end
 
@@ -42,5 +50,9 @@ module Refuses : Backend.S = struct
   let copy ~src_key:_ ~dst_key:_ () = fail ()
   let list_prefix ?max_keys:_ ~prefix:_ () = Lwt.return_nil
   let verify_all ~chunk_prefix:_ () = Lwt.return `Unsupported
+
+  let discard ~chunk_prefix:_ ~run:_ ~name:_ ~keys:_ () =
+    Lwt.return `Unsupported
+
   let capabilities ~prefix:_ () = Lwt.return Backend.no_caps
 end

@@ -349,6 +349,11 @@ let make ?(verify_writes = true) ~root () : (module Backend.S) =
        sweep over what is already there. *)
     let verify_all ~chunk_prefix:_ () = Lwt.return `Unsupported
 
+    (* Nothing to wake here either, and a collection deleting on a filesystem is
+       already deleting on the machine it runs on. *)
+    let discard ~chunk_prefix:_ ~run:_ ~name:_ ~keys:_ () =
+      Lwt.return `Unsupported
+
     (* [gc]: a filesystem has the one thing collecting chunks takes, which is
        [rename] — of a directory to open a run, and within it to mark. True of
        every filesystem, not only the ones with hard links to give.

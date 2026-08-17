@@ -26,6 +26,13 @@
     main, so an interruption leaves keys to delete again rather than keys
     nothing will ever name.
 
+    A copy whose bucket runs the delete function is {i told} rather than
+    deleted: {!Backend.S.discard} writes the batch as a request the bucket's own
+    notification delivers, and the request being durably stored is what stands
+    in for the delete having happened. So the ordering above holds either way,
+    but a copy whose function never runs keeps its garbage — see
+    {!Make.outstanding}, which is the only thing that will ever say so.
+
     What this does {i not} do is fill a copy that has fallen behind, or find
     chunks a copy holds that the main never had. That is {!Mirror.resync} —
     [tsync mirror] — and asking for it here meant walking every shard there
@@ -210,4 +217,26 @@ module Make (C : Conf.S) : sig
   (** The run in progress, for a caller that wants to report one rather than
       continue it. *)
   val status : unit -> Chunk_space.run option Lwt.t
+
+  (** Delete requests a copy has not consumed: its name, how many, and how long
+      the oldest has been sitting there. Anything here is a copy holding chunks
+      nothing references — the keys are already gone from the main, so no later
+      collection meets them again and only {!Mirror.resync} would find them.
+
+      Outlives the run that queued them, so a caller reporting this must do so
+      whether or not {!status} found one open. *)
+  val outstanding : unit -> (string * int * float) list Lwt.t
+
+  (** Deliver every outstanding request again, by copy name and count. The
+      store's notification fired once when the request was written and will not
+      fire again on its own, so a function that was absent or broken then does
+      not pick one up by being fixed — this is what gives it a second delivery.
+
+      Safe to repeat: a request the function has already consumed is gone, and
+      one it consumes twice deletes keys that are already deleted. *)
+  val retry_outstanding : unit -> (string * int) list Lwt.t
+
+  (** An age from {!outstanding} as the report says it. Shared so a log line and
+      [--status] cannot answer the same question differently. *)
+  val show_age : float -> string
 end

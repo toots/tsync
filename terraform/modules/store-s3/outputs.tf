@@ -5,14 +5,18 @@ output "bucket" {
 
 output "function_url" {
   description = "Raw share Lambda Function URL, no trailing slash."
-  value       = trimsuffix(aws_lambda_function_url.share.function_url, "/")
+  value       = var.deploy_share ? trimsuffix(aws_lambda_function_url.share[0].function_url, "/") : null
 }
 
 # What to wire onto the tsync s3 backend as `shareUrl`: the custom domain when
 # configured, otherwise the raw Function URL.
 output "share_url" {
   description = "Base URL for share links (s3 backend `shareUrl`), no trailing slash."
-  value       = var.custom_domain == null ? trimsuffix(aws_lambda_function_url.share.function_url, "/") : "https://${var.custom_domain}"
+  value = (var.deploy_share
+    ? (var.custom_domain == null
+      ? trimsuffix(aws_lambda_function_url.share[0].function_url, "/")
+    : "https://${var.custom_domain}")
+  : null)
 }
 
 # Add this CNAME at your DNS provider so ACM can issue the cert.
@@ -52,3 +56,4 @@ output "secret_access_key" {
   value       = aws_iam_access_key.client.secret
   sensitive   = true
 }
+

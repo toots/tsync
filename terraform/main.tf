@@ -50,6 +50,7 @@ data "archive_file" "handler" {
     "test_store_gcs.py",
     "test_verify.py",
     "test_chunk_key.py",
+    "test_gc_job_key.py",
     "test_verify_gcs.py",
     "vendor/README.md",
     "__pycache__",

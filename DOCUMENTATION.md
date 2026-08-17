@@ -403,7 +403,8 @@ Who does the checking depends on the store:
   throughput matters more than finding out early.
 - **`s3` and `gcs`** check in a function the bucket itself triggers on each new object, so the
   chunks are never downloaded to be checked. It comes with the Terraform module — nothing to
-  name, nothing to set on the client.
+  name, nothing to set on the client. The same function also carries out the deletes a `gc`
+  hands it — see [§9](#9-versions-trash-and-cleanup).
 
 ```bash
 tsync data-integrity              # what each store found, and which stores nothing is checking
@@ -535,19 +536,35 @@ is what stops old blocks being referenced, but it does not remove them — `gc` 
 goes purely by whether anything still points at a block, with no notion of a date.
 
 They are separate commands because only some stores can do the second. `gc` reclaims by
-renaming the block directory aside, giving every block a live file still names a second hard
-link under the original name, and deleting what is left; the inodes nothing linked go with
-it. That needs a rename and a link inside the store, which a filesystem has and an object
-store does not — so `gc` runs on a **local main store** and says so plainly otherwise.
-`expire` works on every backend.
+renaming the block directory aside and moving every block a live file still names back under
+the original name; what is left behind is the garbage, named rather than worked out, and
+deleting it is the last step. That needs a rename inside the store, which a filesystem has
+and an object store does not — so `gc` runs on a **local main store** and says so plainly
+otherwise. `expire` works on every backend.
 
 Unlike the older single-command version, this is safe to run while machines are working. A
 client uploading a file whose blocks already exist promotes them before publishing, so a
 block cannot be reclaimed out from under an upload that deduplicated onto it. Replicas and
-backfill targets are never renamed: once the main is settled, each is walked shard by shard
-and whatever the main no longer has is deleted — so a remote store on cold storage sees
-deletes and nothing else. A replica is additionally filled where it falls short, being meant
-to be a complete copy.
+backfill targets are never renamed and never walked: each is simply sent the same keys the
+main is discarding, so a remote store on cold storage sees deletes and nothing else, and the
+cost is the garbage's rather than the layout's. Filling a copy that has fallen behind is
+`tsync mirror`'s job, not this one's.
+
+An `s3` or `gcs` copy takes those deletes rather than performing them: `gc` writes the batch
+as a small request object, the bucket's own notification hands it to the same function that
+checks blocks, and the collection moves on without waiting. Nothing to configure — the
+function comes with the bucket, the same terraform deploying both halves of it.
+
+A request only clears when the function runs. If one does not — a bucket whose stack predates
+this, a notification you wire yourself and have not — the copy keeps blocks nothing
+references: wasted space, not lost data. `tsync gc` says so when it starts and `tsync gc
+--status` lists what is outstanding, which is the only thing that will, since those keys are
+already gone from the main and no later collection meets them again.
+
+The notification fires once, when the request is written, so fixing the function afterwards
+does not make it pick up what it missed. `tsync gc --retry-jobs` hands those requests over
+again; it is safe to repeat, and `tsync mirror` remains the way to reconcile a copy whose
+requests are long gone.
 
 A collection over a large store takes a while, and can be spread over several sittings or
 paced to stay out of the way:
@@ -556,7 +573,8 @@ paced to stay out of the way:
 tsync gc --budget 30m        # stop after about half an hour, resume next time
 tsync gc --pause 1s          # idle between batches
 tsync gc --concurrency 1     # one operation at a time
-tsync gc --status            # is one open, and how far along
+tsync gc --status            # is one open, how far along, what is outstanding
+tsync gc --retry-jobs        # hand outstanding delete requests over again
 tsync gc --abort             # abandon an open one, keeping every block
 ```
 

@@ -10,7 +10,9 @@
    -open
    Tsync_naming
    -open
-   Tsync_conf))
+   Tsync_conf
+   -open
+   Tsync_test_harness))
  (name conformance)
  (libraries
   tsync_chunk
@@ -18,6 +20,7 @@
   tsync_backend_register
   tsync_backend
   tsync_naming
+  tsync_test_harness
   bigstringaf
   lwt
   lwt.unix

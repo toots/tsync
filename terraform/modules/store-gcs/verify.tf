@@ -35,15 +35,45 @@ resource "google_storage_bucket_iam_member" "verify_mark" {
   role   = "roles/storage.objectUser"
   member = "serviceAccount:${google_service_account.verify.email}"
   condition {
-    title = "corrupted-prefix-only"
-    # Two literal prefixes. IAM conditions offer only startsWith on
-    # resource.name — no contains, no wildcard — which is exactly why markers
-    # and requests are namespaced with the domain inside rather than around
-    # them: "tsync/<domain>/corrupted/" could not be expressed here at all.
+    title = "markers-and-requests-only"
+    # Literal prefixes. IAM conditions offer only startsWith on resource.name —
+    # no contains, no wildcard — which is exactly why markers and requests are
+    # namespaced with the domain inside rather than around them:
+    # "tsync/<domain>/corrupted/" could not be expressed here at all.
     expression = join(" || ", [
       "resource.name.startsWith(\"projects/_/buckets/${local.bucket_name}/objects/tsync/corrupted/\")",
       "resource.name.startsWith(\"projects/_/buckets/${local.bucket_name}/objects/tsync/verify-jobs/\")",
+      "resource.name.startsWith(\"projects/_/buckets/${local.bucket_name}/objects/tsync/gc-jobs/\")",
     ])
+  }
+}
+
+# Drop chunks on a collection's behalf: delete alone, in its own role, because
+# objectUser above also carries create and this function must never write a
+# chunk — a wrong body would be silent where a wrong delete is at least visible.
+resource "google_project_iam_custom_role" "chunk_deleter" {
+  role_id     = replace("tsyncChunkDeleter_${var.name}", "-", "_")
+  title       = "tsync chunk deleter (${var.name})"
+  description = "Delete chunks a tsync collection found unreferenced."
+  permissions = ["storage.objects.delete"]
+  project     = var.project
+}
+
+# `extract` rather than startsWith, the one shape a condition cannot spell:
+# chunks are "tsync/<domain>/chunks/" with the domain in the middle, which is
+# why markers and requests are namespaced the other way round. A non-empty
+# extraction means the object is some domain's chunk.
+#
+# If this expression is ever rejected, it fails at apply and — were it to fail
+# quietly instead — the function's deletes are refused, which leaves the request
+# in the bucket for `tsync gc --status` to report. Fail-closed either way.
+resource "google_storage_bucket_iam_member" "verify_drop_chunks" {
+  bucket = local.bucket_name
+  role   = google_project_iam_custom_role.chunk_deleter.id
+  member = "serviceAccount:${google_service_account.verify.email}"
+  condition {
+    title      = "chunk-namespace-only"
+    expression = "resource.name.extract(\"projects/_/buckets/${local.bucket_name}/objects/tsync/{domain}/chunks/\") != \"\""
   }
 }
 
@@ -64,9 +94,9 @@ resource "google_pubsub_topic_iam_member" "gcs_publisher" {
   member = "serviceAccount:${data.google_storage_project_service_account.gcs.email_address}"
 }
 
-# One notification for both: a chunk and a sweep request both live under tsync/,
-# and the function decides which it was handed — which it does anyway, since a
-# filter is configuration and the code cannot lean on it.
+# One notification for all three: a chunk, a sweep request and a delete request
+# all live under tsync/, and the function decides which it was handed — which it
+# does anyway, since a filter is configuration and the code cannot lean on it.
 #
 # The function writes markers into the bucket it watches, so its own writes come
 # back to it. That terminates rather than loops: marker_key() returns None for a

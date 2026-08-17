@@ -18,7 +18,9 @@ from google.cloud.exceptions import NotFound
 
 from share_common import ShareError, cache_prefix, content_disposition
 
-COMPOSE_MAX = 32  # GCS caps a single compose at 32 source objects
+COMPOSE_MAX = 32
+# Google documents a hundred sub-requests as the ceiling for one batch call.
+BATCH_DELETES = 100  # GCS caps a single compose at 32 source objects
 
 
 class Store:
@@ -52,6 +54,44 @@ class Store:
             self.bucket.blob(key).delete()
         except NotFound:
             pass
+
+    def delete_many(self, keys):
+        """Delete [keys], answering with the ones that refused.
+
+        Batched, because a request per key is what exhausted this function's
+        retries against a real bucket: a collection hands over a thousand at a
+        time, and GCS rate-limits long before a thread pool tires. The XML bulk
+        delete the OCaml driver uses has no equivalent here, so this is the
+        HTTP batch endpoint, a hundred sub-requests to a call.
+
+        A batch reports failure as a whole, so one that does is redone key by
+        key -- the only way to learn which, bounded to a group, and rare once
+        absent markers are no longer deleted unseen.
+        """
+        refused = []
+        for i in range(0, len(keys), BATCH_DELETES):
+            group = keys[i:i + BATCH_DELETES]
+            try:
+                with self.client.batch():
+                    for key in group:
+                        self.bucket.blob(key).delete()
+            except Exception:  # noqa: BLE001 - narrowed by the retry below
+                refused += self._delete_each(group)
+        return refused
+
+    def _delete_each(self, keys):
+        refused = []
+
+        def drop(key):
+            try:
+                self.bucket.blob(key).delete()
+            except NotFound:
+                pass
+            except Exception as e:  # noqa: BLE001 - reported, not swallowed
+                refused.append((key, type(e).__name__))
+
+        self._parallel(drop, keys)
+        return refused
 
     def list_keys(self, prefix):
         for blob in self.client.list_blobs(self.bucket_name, prefix=prefix):

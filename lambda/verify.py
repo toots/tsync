@@ -34,10 +34,17 @@ CHUNKS_SEG = "/chunks/"
 # and Google's conditions offer only startsWith.
 CORRUPTED_ROOT = ROOT + "corrupted/"
 JOBS_ROOT = ROOT + "verify-jobs/"
+GC_JOBS_ROOT = ROOT + "gc-jobs/"
 FANOUT = 3  # lib/naming/chunk_layout.ml
 KEY_HEX = 16  # lib/utils/xxhash/xxhash.ml, hex_length
 
 _store = None
+
+
+def empty_result():
+    """What every entry point answers with when there was nothing to do. One
+    shape, so a caller adding the counts needs no default for a missing key."""
+    return {"checked": 0, "corrupt": 0, "deleted": 0}
 
 
 def store():
@@ -118,6 +125,12 @@ def marker_key(key):
     return f"{CORRUPTED_ROOT}{domain}/{rest}"
 
 
+def chunk_prefix(domain):
+    """Where a domain's chunks live. Composed here rather than at each place
+    that needs it, matching Conf_parsing.chunk_prefix on the client."""
+    return f"{ROOT}{domain}{CHUNKS_SEG}"
+
+
 def job_target(key):
     """The chunk prefix a whole-store request names, or None when [key] is not
     one.
@@ -138,7 +151,93 @@ def job_target(key):
     domain, sep, shard = rest.rpartition("/")
     if not sep or not domain or not is_shard_name(shard):
         return None
-    return f"{ROOT}{domain}{CHUNKS_SEG}{shard}/"
+    return f"{chunk_prefix(domain)}{shard}/"
+
+
+def gc_job_domain(key):
+    """The domain a delete request belongs to, or None when [key] is not one.
+
+    Requests live at `gc-jobs/<domain>/<run>/<shard>`, top level with the domain
+    inside, so one literal prefix reaches every domain the way JOBS_ROOT does.
+    The run is in the name because a later collection reaching the same shard
+    would otherwise overwrite one an earlier collection left unconsumed, losing
+    both its keys and the evidence that it stuck.
+    """
+    if not key.startswith(GC_JOBS_ROOT):
+        return None
+    head, sep, shard = key[len(GC_JOBS_ROOT):].rpartition("/")
+    if not sep or not is_shard_name(shard):
+        return None
+    domain, sep, run = head.rpartition("/")
+    if not sep or not domain or not run:
+        return None
+    return domain
+
+
+def may_delete(key, domain):
+    """Whether a request from [domain] may name [key].
+
+    This function can delete any chunk in the bucket, so a request body is the
+    only thing choosing what goes — it is checked here rather than trusted, and
+    against the requesting domain, so one domain's collection cannot reach into
+    another's. `marker_key` is the shape test: it answers for exactly
+    `<root>/chunks/<shard>/<chunk-key>` and for nothing else, which is why a
+    marker, a manifest and anything under `chunks.from/` all fail it.
+    """
+    return marker_key(key) is not None and key.startswith(chunk_prefix(domain))
+
+
+def existing_markers(st, domain, keys):
+    """The markers actually accusing [keys], of the ones that could.
+
+    Deleting a derived marker unseen doubles what a request costs, to remove
+    something a healthy store has none of -- and it was a thousand pointless
+    deletes a batch that rate-limited a real bucket. One listing answers for the
+    whole request instead.
+    """
+    wanted = {m for m in (marker_key(k) for k in keys) if m}
+    if not wanted:
+        return []
+    return [k for k in st.list_keys(f"{CORRUPTED_ROOT}{domain}/") if k in wanted]
+
+
+def run_gc_job(st, key):
+    """Drop the chunks a request names, and the markers accusing them.
+
+    A marker is not named in the request: where one lives is read off the chunk
+    key here, exactly as it is on the client, so the request stays the size the
+    collection meant it to be.
+
+    Deleted last, and only when every key the store was asked for went: a bulk
+    delete answers success while refusing keys inside the body, and dropping the
+    request on one of those would strand chunks nothing will ever name again. A
+    key this refuses on sight is not that case — no retry would make it
+    permitted — so it is logged and the request still goes.
+    """
+    domain = gc_job_domain(key)
+    if domain is None:
+        return None
+    try:
+        body = st.get_bytes(key).decode()
+    except FileNotFoundError:
+        # Object events are at-least-once: a redelivery of a consumed request.
+        return empty_result()
+    wanted = [line.strip() for line in body.split("\n")]
+    wanted = [k for k in wanted if k]
+    keys = [k for k in wanted if may_delete(k, domain)]
+    for k in wanted:
+        if k not in keys:
+            print(f"gc job {key}: refused {k!r}")
+    refused = st.delete_many(keys + existing_markers(st, domain, keys))
+    if refused:
+        print(
+            f"gc job {key}: {len(refused)} object(s) not deleted, first "
+            f"{refused[0]}: leaving the request in place"
+        )
+        return empty_result()
+    st.delete(key)
+    print(f"gc job {key}: {len(keys)} chunk(s) dropped")
+    return {"checked": 0, "corrupt": 0, "deleted": len(keys)}
 
 
 def verify_shard(st, key):
@@ -195,8 +294,11 @@ def _keys_from_event(event):
 
 
 def verify_key(st, key):
-    """One object-created event, whichever kind. A chunk is checked; a request
-    sweeps the shard it names; anything else is not ours."""
+    """One object-created event, whichever kind. A chunk is checked; a sweep
+    request checks the shard it names; a delete request drops the chunks it
+    names; anything else is not ours."""
+    if gc_job_domain(key) is not None:
+        return run_gc_job(st, key)
     if job_target(key) is not None:
         return verify_shard(st, key)
     result = verify_object(st, key)
@@ -209,6 +311,7 @@ def handler(event, context):
     """AWS entry point: an s3:ObjectCreated:* notification."""
     checked = 0
     bad = 0
+    dropped = 0
     for key in _keys_from_event(event):
         try:
             result = verify_key(store(), key)
@@ -221,7 +324,8 @@ def handler(event, context):
             continue
         checked += result["checked"]
         bad += result["corrupt"]
-    return {"checked": checked, "corrupt": bad}
+        dropped += result.get("deleted", 0)
+    return {"checked": checked, "corrupt": bad, "deleted": dropped}
 
 
 def pubsub_attributes(event):
@@ -256,5 +360,5 @@ def gcp_verify(event, context=None):
     """
     key = pubsub_attributes(event).get("objectId")
     if not key:
-        return {"checked": 0, "corrupt": 0}
-    return verify_key(store(), key) or {"checked": 0, "corrupt": 0}
+        return empty_result()
+    return verify_key(store(), key) or empty_result()

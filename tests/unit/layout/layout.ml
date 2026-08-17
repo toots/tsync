@@ -103,4 +103,12 @@ let () =
     = None);
   check "a shard directory is not a marker"
     (not (Chunk_layout.is_marker_key "tsync/corrupted/dom/abc/"));
+  (* The keys a delete request is filed under are pinned against the Python that
+     parses them in {!tests/unit/gc_job}; here only the body, whose two spellings
+     never meet on real input — OCaml writes it and the function reads it. *)
+  let keys = [chunk "dom"; chunk "Jellyfin Media"] in
+  check "a request body round trips"
+    (Discard_job.decode (Discard_job.encode keys) = keys);
+  check "and an empty one carries nothing"
+    (Discard_job.decode (Discard_job.encode []) = []);
   print_endline "layout ok"

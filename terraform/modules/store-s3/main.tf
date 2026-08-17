@@ -3,6 +3,11 @@ locals {
   # Fixed, domain-independent shares root (matches Conf_parsing.shares_prefix in
   # the daemon). Share manifests + cached artifacts live under tsync/shares/.
   shares_prefix = "tsync/shares/"
+
+  # A store deployed without the share function has nothing serving links and no
+  # artifacts to expire; a CI stack wants the verification half alone, not a
+  # public endpoint over its bucket.
+  share_enabled = var.deploy_share ? 1 : 0
 }
 
 # ── Store bucket ───────────────────────────────────────────────────────────
@@ -106,12 +111,14 @@ data "aws_iam_policy_document" "assume" {
 }
 
 resource "aws_iam_role" "share" {
+  count              = local.share_enabled
   name               = "tsync-share-${var.name}"
   assume_role_policy = data.aws_iam_policy_document.assume.json
 }
 
 resource "aws_iam_role_policy_attachment" "logs" {
-  role       = aws_iam_role.share.name
+  count      = local.share_enabled
+  role       = aws_iam_role.share[0].name
   policy_arn = "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
 }
 
@@ -133,14 +140,16 @@ data "aws_iam_policy_document" "share" {
 }
 
 resource "aws_iam_role_policy" "share" {
+  count  = local.share_enabled
   name   = "tsync-share-s3"
-  role   = aws_iam_role.share.id
+  role   = aws_iam_role.share[0].id
   policy = data.aws_iam_policy_document.share.json
 }
 
 resource "aws_lambda_function" "share" {
+  count            = local.share_enabled
   function_name    = "tsync-share-${var.name}"
-  role             = aws_iam_role.share.arn
+  role             = aws_iam_role.share[0].arn
   runtime          = "python3.13"
   handler          = "handler.handler"
   filename         = var.lambda_zip
@@ -167,15 +176,17 @@ resource "aws_lambda_function" "share" {
 }
 
 resource "aws_lambda_function_url" "share" {
-  function_name      = aws_lambda_function.share.function_name
+  count              = local.share_enabled
+  function_name      = aws_lambda_function.share[0].function_name
   authorization_type = "NONE"
 }
 
 # NONE auth still needs an explicit public invoke permission or it 403s.
 resource "aws_lambda_permission" "url" {
+  count                  = local.share_enabled
   statement_id           = "AllowPublicFunctionUrl"
   action                 = "lambda:InvokeFunctionUrl"
-  function_name          = aws_lambda_function.share.function_name
+  function_name          = aws_lambda_function.share[0].function_name
   principal              = "*"
   function_url_auth_type = "NONE"
 }

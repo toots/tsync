@@ -60,6 +60,13 @@ jobs:
           TSYNC_CI_S3_REGION: ${{ secrets.TSYNC_CI_S3_REGION }}
           TSYNC_CI_S3_ACCESS_KEY_ID: ${{ secrets.TSYNC_CI_S3_ACCESS_KEY_ID }}
           TSYNC_CI_S3_SECRET_ACCESS_KEY: ${{ secrets.TSYNC_CI_S3_SECRET_ACCESS_KEY }}
+          # Absent unless a verifier is deployed on that bucket, which is what
+          # decides whether the suite exercises the function or reports that
+          # half not run. Deliberately not in the required list below: a store
+          # with no deployed stack is a legitimate setup, and failing on it
+          # would make the common case red.
+          TSYNC_CI_GCS_VERIFY_FUNCTION: ${{ secrets.TSYNC_CI_GCS_VERIFY_FUNCTION }}
+          TSYNC_CI_S3_VERIFY_FUNCTION: ${{ secrets.TSYNC_CI_S3_VERIFY_FUNCTION }}
         run: |
           # A secret that is absent arrives as the empty string, and the test
           # would then report "no credentials" and exit 2. Say which one is

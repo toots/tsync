@@ -1,0 +1,36 @@
+prefix|dom|tsync/gc-jobs/dom/
+job|dom|1755300000000|000|tsync/gc-jobs/dom/1755300000000/000
+job|dom|1755300000000|abb|tsync/gc-jobs/dom/1755300000000/abb
+job|dom|1755300000000|fff|tsync/gc-jobs/dom/1755300000000/fff
+job|dom|1755300000500|000|tsync/gc-jobs/dom/1755300000500/000
+job|dom|1755300000500|abb|tsync/gc-jobs/dom/1755300000500/abb
+job|dom|1755300000500|fff|tsync/gc-jobs/dom/1755300000500/fff
+prefix|Jellyfin Media|tsync/gc-jobs/Jellyfin Media/
+job|Jellyfin Media|1755300000000|000|tsync/gc-jobs/Jellyfin Media/1755300000000/000
+job|Jellyfin Media|1755300000000|abb|tsync/gc-jobs/Jellyfin Media/1755300000000/abb
+job|Jellyfin Media|1755300000000|fff|tsync/gc-jobs/Jellyfin Media/1755300000000/fff
+job|Jellyfin Media|1755300000500|000|tsync/gc-jobs/Jellyfin Media/1755300000500/000
+job|Jellyfin Media|1755300000500|abb|tsync/gc-jobs/Jellyfin Media/1755300000500/abb
+job|Jellyfin Media|1755300000500|fff|tsync/gc-jobs/Jellyfin Media/1755300000500/fff
+prefix|chunks|tsync/gc-jobs/chunks/
+job|chunks|1755300000000|000|tsync/gc-jobs/chunks/1755300000000/000
+job|chunks|1755300000000|abb|tsync/gc-jobs/chunks/1755300000000/abb
+job|chunks|1755300000000|fff|tsync/gc-jobs/chunks/1755300000000/fff
+job|chunks|1755300000500|000|tsync/gc-jobs/chunks/1755300000500/000
+job|chunks|1755300000500|abb|tsync/gc-jobs/chunks/1755300000500/abb
+job|chunks|1755300000500|fff|tsync/gc-jobs/chunks/1755300000500/fff
+prefix|gc-jobs|tsync/gc-jobs/gc-jobs/
+job|gc-jobs|1755300000000|000|tsync/gc-jobs/gc-jobs/1755300000000/000
+job|gc-jobs|1755300000000|abb|tsync/gc-jobs/gc-jobs/1755300000000/abb
+job|gc-jobs|1755300000000|fff|tsync/gc-jobs/gc-jobs/1755300000000/fff
+job|gc-jobs|1755300000500|000|tsync/gc-jobs/gc-jobs/1755300000500/000
+job|gc-jobs|1755300000500|abb|tsync/gc-jobs/gc-jobs/1755300000500/abb
+job|gc-jobs|1755300000500|fff|tsync/gc-jobs/gc-jobs/1755300000500/fff
+not-a-job|tsync/dom/chunks/abb/cba685e06d3e500f-293331628d03f29b
+not-a-job|tsync/verify-jobs/dom/abb
+not-a-job|tsync/corrupted/dom/abb/cba685e06d3e500f-293331628d03f29b
+not-a-job|tsync/gc-jobs/dom/abb
+not-a-job|tsync/gc-jobs/dom/1755300000000/zz
+not-a-job|tsync/gc-jobs/dom/1755300000000/
+not-a-job|tsync/gc-jobs//1755300000000/abb
+ok

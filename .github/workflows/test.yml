@@ -30,6 +30,13 @@ jobs:
       # tests/unit/hash/hash.expected, which the OCaml side generates.
       - name: Check chunk keys agree with the OCaml implementation
         run: pytest lambda/test_chunk_key.py
+      # Same shape, and quieter when it breaks: OCaml composes the key a delete
+      # request is filed under and this parses it back to decide which domain
+      # may have its chunks dropped. Disagree and every request is ignored, the
+      # copy is never emptied, and only a later `tsync gc --status` says so.
+      # Checked against tests/unit/gc_job/gc_job.expected, which OCaml generates.
+      - name: Check delete-request keys agree with the OCaml implementation
+        run: pytest lambda/test_gc_job_key.py
 
   lambda-gcs:
     runs-on: ubuntu-latest

@@ -195,6 +195,13 @@ let rec make ~(mains : sub list)
       if List.exists (fun a -> a <> `Unsupported) answers then `Queued queued
       else `Unsupported
 
+    (* Not the fan-out above it: {!Gc} asks each member itself, precisely so a
+       store with a delete function and one without are handled differently, and
+       the composite's own {!delete_multi} is what a caller wanting every member
+       already has. *)
+    let discard ~chunk_prefix:_ ~run:_ ~name:_ ~keys:_ () =
+      Lwt.return `Unsupported
+
     (* These describe where the domain's own data lives, so the archives have no
        say — a readable target does, being a full copy. *)
     let capabilities ~prefix () =
