@@ -61,6 +61,11 @@ val limit : t -> int
 (** Every pool {!create}d with a [name], in creation order. *)
 val registered : unit -> (string * t) list
 
+(** {!registered} summed by name — in flight, waiting, limit — because the pools
+    live inside functors applied once per domain and per role, so a process
+    holds several under one name and what bounds it is their total. *)
+val totals : unit -> (string * int * int * int) list
+
 (** {1 Fanning a list out under a bound}
 
     Both take a {!t} explicitly, and it should outlive the call: a bound stands

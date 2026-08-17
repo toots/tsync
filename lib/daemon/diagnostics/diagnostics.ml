@@ -36,6 +36,7 @@ let self_json ?(extra = []) () =
   let cpu = Metrics.cpu_seconds () in
   let gc = Metrics.gc_stats () in
   let lwt = Metrics.lwt_stats () in
+  let mem = Metrics.mem_stats () in
   [
     ( "server",
       `Assoc
@@ -52,12 +53,35 @@ let self_json ?(extra = []) () =
           ("cpuSeconds", `Float cpu);
           ( "cpuPercentAvg",
             `Float (if uptime > 0. then 100. *. cpu /. uptime else 0.) );
-          ("rssBytes", `Int (Metrics.rss_bytes ()));
+          ("rssBytes", `Int mem.Metrics.rss);
+          (* Swapped-out anonymous pages are still this process's own, so
+             resident alone understates it by whatever the kernel pushed out. *)
+          ("privateBytes", `Int mem.Metrics.private_);
+          ("swappedBytes", `Int mem.Metrics.swapped);
           ("heapBytes", `Int gc.Metrics.heap_bytes);
           ("topHeapBytes", `Int gc.Metrics.top_heap_bytes);
           ("minorCollections", `Int gc.Metrics.minor_collections);
           ("majorCollections", `Int gc.Metrics.major_collections);
         ] );
+    ( "backend",
+      `Assoc
+        [
+          ("retries", `Int (Metrics.retries ()));
+          ("timeouts", `Int (Metrics.timeouts ()));
+          ("failures", `Int (Metrics.failures ()));
+        ] );
+    ( "pools",
+      `List
+        (List.map
+           (fun (name, in_flight, waiting, limit) ->
+             `Assoc
+               [
+                 ("name", `String name);
+                 ("inFlight", `Int in_flight);
+                 ("waiting", `Int waiting);
+                 ("max", `Int limit);
+               ])
+           (Lwt_bounded.totals ())) );
     ( "lwt",
       `Assoc
         [
@@ -645,8 +669,11 @@ let text json =
        (num (mem proc "cpuSeconds"))
        (num (mem proc "cpuPercentAvg")));
   row 2 "memory"
-    (Printf.sprintf "%s rss, %s heap (peak %s)"
+    (Printf.sprintf "%s rss%s, %s heap (peak %s)"
        (Metrics.human_bytes (int_of (mem proc "rssBytes")))
+       (match int_of (mem proc "swappedBytes") with
+         | 0 -> ""
+         | n -> Printf.sprintf " + %s swapped" (Metrics.human_bytes n))
        (Metrics.human_bytes (int_of (mem proc "heapBytes")))
        (Metrics.human_bytes (int_of (mem proc "topHeapBytes"))));
   row 2 "gc"
@@ -669,6 +696,32 @@ let text json =
     (Printf.sprintf "%d chunks (%d/s)"
        (int_of (mem traffic "chunksHashed"))
        (int_of (mem traffic "hashesPerSec")));
+  (match mem json "pools" with
+    | `List (_ :: _ as pools) ->
+        row 2 "slots"
+          (String.concat ", "
+             (List.map
+                (fun p ->
+                  Printf.sprintf "%s %d/%d%s"
+                    (str (mem p "name"))
+                    (int_of (mem p "inFlight"))
+                    (int_of (mem p "max"))
+                    (match int_of (mem p "waiting") with
+                      | 0 -> ""
+                      | w -> Printf.sprintf " (%d waiting)" w))
+                pools))
+    | _ -> ());
+  (* Silent when clean, so the line appearing at all is the signal. *)
+  (match mem json "backend" with
+    | `Null -> ()
+    | bk -> (
+        match (int_of (mem bk "retries"), int_of (mem bk "failures")) with
+          | 0, 0 -> ()
+          | retries, failures ->
+              row 2 "backend"
+                (Printf.sprintf "%d retries (%d timeouts), %d failed" retries
+                   (int_of (mem bk "timeouts"))
+                   failures)));
   (* Beside [traffic], which is what this process moved to its own stores: what
      it served a client is the other half, and a server reading only one of them
      cannot tell a busy proxy from a busy backend. *)

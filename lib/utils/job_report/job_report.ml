@@ -23,35 +23,18 @@ type t = {
 let job : t option ref = ref None
 let ints l = `List (List.map (fun (k, v) -> `List [`String k; `Int v]) l)
 
-(* Summed across instances rather than listed: the pools live inside functors
-   applied once per domain and per role, so a process holds several under one
-   name and what bounds it is their total. *)
 let pools_json () =
-  let by_name = Hashtbl.create 4 in
-  List.iter
-    (fun (name, p) ->
-      let f, w, l =
-        match Hashtbl.find_opt by_name name with
-          | Some (f, w, l) -> (f, w, l)
-          | None -> (0, 0, 0)
-      in
-      Hashtbl.replace by_name name
-        ( f + Lwt_bounded.in_flight p,
-          w + Lwt_bounded.waiting p,
-          l + Lwt_bounded.limit p ))
-    (Lwt_bounded.registered ());
   `List
-    (Hashtbl.fold
-       (fun name (f, w, l) acc ->
+    (List.map
+       (fun (name, in_flight, waiting, limit) ->
          `Assoc
            [
              ("name", `String name);
-             ("inFlight", `Int f);
-             ("waiting", `Int w);
-             ("max", `Int l);
-           ]
-         :: acc)
-       by_name [])
+             ("inFlight", `Int in_flight);
+             ("waiting", `Int waiting);
+             ("max", `Int limit);
+           ])
+       (Lwt_bounded.totals ()))
 
 let payload t ~state ~extra =
   let m = Metrics.mem_stats () in

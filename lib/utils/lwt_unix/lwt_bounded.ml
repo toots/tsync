@@ -34,6 +34,21 @@ let in_flight t = t.held
 let waiting t = t.waiting
 let limit t = t.limit
 let registered () = !named
+
+(* Creation order, like {!registered}, so one run's report can be read against
+   another's. *)
+let totals () =
+  List.fold_left
+    (fun acc (name, t) ->
+      if List.exists (fun (n, _, _, _) -> n = name) acc then
+        List.map
+          (fun (n, f, w, l) ->
+            if n = name then (n, f + t.held, w + t.waiting, l + t.limit)
+            else (n, f, w, l))
+          acc
+      else acc @ [(name, t.held, t.waiting, t.limit)])
+    [] !named
+
 let full t = match t.max_waiting with Some n -> t.waiting >= n | None -> false
 
 let acquire t =

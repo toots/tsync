@@ -73,6 +73,8 @@ let stable_values =
     ("cpuSeconds", `Float 12.5);
     ("cpuPercentAvg", `Float 0.3);
     ("rssBytes", `Int 41943040);
+    ("privateBytes", `Int 39845888);
+    ("swappedBytes", `Int 0);
     ("heapBytes", `Int 8388608);
     ("topHeapBytes", `Int 12582912);
     ("minorCollections", `Int 100);
