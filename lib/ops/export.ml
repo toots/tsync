@@ -47,14 +47,17 @@ module Make (C : Conf.S) = struct
           | Inode_tree.Dir _ -> Lwt.return acc)
       []
 
-  let run ~dst ~on_file () =
+  let run ?(on_plan = fun ~files:_ -> ()) ?(on_start = fun ~rel:_ -> ()) ~dst
+      ~on_file () =
     let* remote_rels = remote_rels () in
     let* local_rels = Mf.walk () in
     let files = List.sort_uniq compare (remote_rels @ local_rels) in
+    on_plan ~files:(List.length files);
     let* () = Fs_util.mkdir_p dst in
     let+ statuses =
       Lwt_list.map_s
         (fun rel ->
+          on_start ~rel;
           let+ status = export_file ~dst rel in
           on_file ~rel status;
           status)

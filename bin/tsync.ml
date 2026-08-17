@@ -1151,15 +1151,29 @@ let sync_cmd =
   in
   let run domain source full parallelism v =
     set_verbose v;
+    let (module C : Conf.S) =
+      let conf = load_conf ?domain () in
+      match source with Some name -> reading_from name conf | None -> conf
+    in
+    let socket_path = snd (reporting_target ?domain ()) in
+    let phase = ref "starting" and current = ref None in
+    let manifests = ref 0 and failures = ref 0 in
     let code =
       run_lwt
+        ~report:(fun () ->
+          Job_report.start ~socket_path ~domain:C.domain_name
+            ~kind:(if full then "sync --full" else "sync")
+            ~current:(fun () ->
+              match !current with
+                | Some at -> Some (!phase ^ " · " ^ at)
+                | None -> Some !phase)
+            ~deferred:(fun () -> deferred_totals C.members)
+              (* No total for a resync: the inode tree is discovered as it is
+               walked, so a denominator here would be one this cannot know. *)
+            ~counters:(fun () ->
+              [("manifests", !manifests); ("failed", !failures)])
+            ())
         (let open Lwt.Syntax in
-         let (module C : Conf.S) =
-           let conf = load_conf ?domain () in
-           match source with
-             | Some name -> reading_from name conf
-             | None -> conf
-         in
          let module J = Journal.Make (C) in
          let module W = Wal.Make (C) in
          let module Fs = File_store.Make (C) in
@@ -1188,13 +1202,14 @@ let sync_cmd =
            in
            let use f = Lwt_pool.use pool f in
            let join rel name = if rel = "" then name else rel ^ "/" ^ name in
-           let count = ref 0 and failed = ref 0 in
+           let count = manifests and failed = failures in
            (* Entries of one folder, bounded; the descent below is sequential.
             Recursing inside the fan-out instead would keep every level live at
             once, so the peak is the whole tree rather than one directory — and
             a second bound here would deadlock against this one. *)
            let entry_slots = Lwt_bounded.create ~max:(max 1 parallelism) () in
            let rec walk folder_id rel =
+             current := Some (if rel = "" then "/" else rel);
              let* entries = use (fun () -> St.list_namespace ~folder_id) in
              let* children =
                Lwt_bounded.filter_map_with entry_slots
@@ -1256,6 +1271,7 @@ let sync_cmd =
            (!count, !failed)
          in
          let full_resync reason =
+           phase := "clearing the cache";
            if !verbose then Log.info "full resync: %s" reason;
            (* Notify the daemon only once the rebuild is complete, or it re-reads
             an empty mirror mid-rebuild. Unsynced edits are kept: nothing else
@@ -1264,7 +1280,10 @@ let sync_cmd =
              Cache_layout.clear ~cache_root:C.cache_root
                ~domain_name:C.domain_name
            in
+           phase := "rebuilding";
            let* n, failed = rebuild_mirror () in
+           current := None;
+           phase := "notifying the daemon";
            (* Only a rebuild that reached everything may say so. Recording the
             mark after a partial walk moves the cursor past folders that were
             never fetched, and nothing revisits them: their files arrive later
@@ -1289,6 +1308,7 @@ let sync_cmd =
          (* One pass of the same engine the daemon polls with, so the two cannot
           drift apart. *)
          let incremental () =
+           phase := "applying other clients' entries";
            (* A one-shot command: no mount of ours is running to refresh. *)
            let+ n = Rp.apply_foreign ~on_changed:(fun _ -> ()) () in
            (match Fs.read_last_sync_key () with
@@ -1299,9 +1319,12 @@ let sync_cmd =
              (if n = 1 then "y" else "ies");
            0
          in
+         phase := "replaying local records";
          let* () = Rp.reconcile () in
+         phase := "draining uploads";
          if !verbose then Log.info "draining upload queue";
          let* () = Sq.drain () in
+         phase := "reading the journal";
          let last_sync_key = Fs.read_last_sync_key () in
          if !verbose then
            Log.info "last sync bookmark: %s"
@@ -1349,6 +1372,14 @@ let sync_cmd =
    checkable wherever it sits, and what a client happens to have cached says
    nothing about the copy a store is keeping. *)
 let data_integrity_cmd =
+  let current = ref None and planned = ref 0 in
+  let checked = ref 0 and unrepairable = ref 0 in
+  (* [--verify] polls every store at once, so what a reader wants is the run's
+     totals rather than whichever member answered last. *)
+  let per_store : (string, int * int) Hashtbl.t = Hashtbl.create 4 in
+  let sum_stores which =
+    Hashtbl.fold (fun _ v acc -> acc + which v) per_store 0
+  in
   let report (module C : Conf.S) detail =
     let open Lwt.Syntax in
     let module Cor = Corruption.Make (C) in
@@ -1430,6 +1461,8 @@ let data_integrity_cmd =
     let rec loop stalled last =
       let* left = count jobs in
       let* found = count corrupted in
+      Hashtbl.replace per_store m.Backend.name (left, found);
+      current := Some (m.Backend.name ^ " · waiting on the bucket");
       if left = 0 then (
         Printf.eprintf "%s: done — %d corrupt chunk(s)\n%!" m.Backend.name found;
         Lwt.return_unit)
@@ -1508,10 +1541,14 @@ let data_integrity_cmd =
     let+ s =
       Rp.run ?source ~dry_run
         ~on_start:(fun ~total ->
+          planned := total;
           if verbose then
             Printf.eprintf "%d marked chunk%s to work through\n%!" total
               (if total = 1 then "" else "s"))
         ~on_chunk:(fun ~done_ ~total ~chunk_key ~store outcome ->
+          checked := done_;
+          if outcome = Repair.Unrepairable then incr unrepairable;
+          current := Some (store ^ " · " ^ chunk_key);
           let line = Repair.describe ~chunk_key ~store outcome in
           if verbose then
             Printf.printf "[%*d/%d] %s\n%!"
@@ -1539,9 +1576,29 @@ let data_integrity_cmd =
     else 0
   in
   let run domain do_verify do_repair detail source dry_run verbose =
+    set_verbose verbose;
     let (module C : Conf.S) = load_conf ?domain () in
+    let socket_path = snd (reporting_target ?domain ()) in
     let code =
       run_lwt
+        ~report:(fun () ->
+          Job_report.start ~socket_path ~domain:C.domain_name
+            ~kind:
+              (if do_verify then "data-integrity --verify"
+               else if do_repair then "data-integrity --repair"
+               else "data-integrity")
+            ~current:(fun () -> !current)
+            ~deferred:(fun () -> deferred_totals C.members)
+            ~counters:(fun () ->
+              if do_verify then
+                [("requests left", sum_stores fst); ("corrupt", sum_stores snd)]
+              else
+                [
+                  ("chunks", !checked);
+                  ("planned", !planned);
+                  ("unrepairable", !unrepairable);
+                ])
+            ())
         (match (do_verify, do_repair) with
           | true, true ->
               failwith "--verify and --repair are separate steps; run one."
@@ -1863,20 +1920,45 @@ let export_cmd =
   in
   let run domain dst v =
     set_verbose v;
+    let (module C : Conf.S) = load_conf ?domain () in
+    let socket_path = snd (reporting_target ?domain ()) in
+    let current = ref None and planned = ref 0 in
+    (* The same buckets the summary below prints, so the row in [tsync status]
+       and that line cannot disagree about one run. *)
+    let exported = ref 0 and symlinks = ref 0 and missing = ref 0 in
     let code =
       run_lwt
+        ~report:(fun () ->
+          Job_report.start ~socket_path ~domain:C.domain_name ~kind:"export"
+            ~target:dst
+            ~current:(fun () -> !current)
+            ~deferred:(fun () -> deferred_totals C.members)
+            ~counters:(fun () ->
+              [
+                ("files", !exported);
+                ("planned", !planned);
+                ("symlinks", !symlinks);
+                ("missing", !missing);
+              ])
+            ())
         (let open Lwt.Syntax in
-         let (module C : Conf.S) = load_conf ?domain () in
          let module E = Export.Make (C) in
          vprintf "exporting domain %s to %s" C.domain_name dst;
          let+ summary =
            E.run ~dst
+             ~on_plan:(fun ~files -> planned := files)
+             ~on_start:(fun ~rel -> current := Some rel)
              ~on_file:(fun ~rel status ->
                match status with
-                 | Export.Exported -> Printf.printf "exported %s\n%!" rel
+                 | Export.Exported ->
+                     incr exported;
+                     Printf.printf "exported %s\n%!" rel
                  | Export.Exported_symlink ->
+                     incr exported;
+                     incr symlinks;
                      Printf.printf "exported %s (symlink)\n%!" rel
                  | Export.Missing_data ->
+                     incr missing;
                      Printf.printf
                        "MISSING  %s (no local data or remote manifest)\n%!" rel)
              ()
