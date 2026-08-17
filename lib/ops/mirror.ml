@@ -3,7 +3,7 @@ open Lwt.Syntax
 type dest_stats = {
   name : string;
   checked : int;
-  copied : string list;
+  copied : int;
   copied_bytes : int;
 }
 
@@ -18,8 +18,13 @@ module Make (C : Conf.S) = struct
   (* Round trips, which hold no body and so are not the same number: sizing a
      subtree is one HEAD an object and would otherwise queue behind a bound that
      stands for memory it does not use. *)
-  let probe_pool =
-    Lwt_bounded.create ~name:"probe" ~max:(max 8 (4 * C.max_chunk_buffers)) ()
+  let probe_max = max 8 (4 * C.max_chunk_buffers)
+  let probe_pool = Lwt_bounded.create ~name:"probe" ~max:probe_max ()
+
+  (* Objects a destination has in hand at once. A multiple of the wider bound,
+     so both pools stay fed and [waiting] still means something, and a constant
+     rather than the listing's length, which is the domain's. *)
+  let entries_in_flight = 4 * probe_max
 
   (* Objects are content-addressed or immutable once written, so a size mismatch
      means the destination copy is corrupt. [None] when it was already correct;
@@ -161,40 +166,52 @@ module Make (C : Conf.S) = struct
   let resync_to ?(on_start = fun ~name:_ ~key:_ -> ())
       ?(on_copy = fun ~name:_ ~key:_ ~reason:_ ~bytes:_ -> ()) src dst ~name
       entries =
-    (* Unbounded here on purpose: {!sync_entry} takes a probe slot and then a
-       copy slot, one after the other, and a bound around the whole entry would
-       be the same pool nested inside itself — outer entries holding every slot
-       while the work inside them waits for one. *)
-    let+ results =
+    (* A fixed set of workers taking the next entry each, rather than a promise
+       per entry: the listing is the domain's length, and fanning out over it
+       builds a closure and a pool queue cell for every object in it before the
+       first copy runs.
+
+       Taking the head and moving the cursor happens between binds, so no worker
+       can see the list part-way through another's turn. *)
+    let remaining = ref entries in
+    let checked = ref 0 in
+    let next () =
+      match !remaining with
+        | [] -> None
+        | entry :: rest ->
+            remaining := rest;
+            incr checked;
+            Some entry
+    in
+    let rec worker acc =
+      match next () with
+        | None -> Lwt.return acc
+        | Some entry ->
+            let key = entry.Backend.key in
+            let* copied =
+              sync_entry ~on_start:(fun () -> on_start ~name ~key) src dst entry
+            in
+            worker
+              (match copied with
+                | None -> acc
+                | Some (reason, bytes) ->
+                    on_copy ~name ~key ~reason ~bytes;
+                    let n, total = acc in
+                    (n + 1, total + bytes))
+    in
+    (* The code chose this length, not the listing: a worker apiece, never more
+       than there is work for. Each takes a probe slot and then a copy slot
+       inside {!sync_entry}, one after the other, so nothing here holds a slot
+       across the acquisition of another. *)
+    let+ folded =
       Lwt_list.map_p
-        (fun entry ->
-          let+ copied =
-            sync_entry
-              ~on_start:(fun () -> on_start ~name ~key:entry.Backend.key)
-              src dst entry
-          in
-          (match copied with
-            | Some (reason, bytes) ->
-                on_copy ~name ~key:entry.Backend.key ~reason ~bytes
-            | None -> ());
-          (entry.Backend.key, copied))
-        entries
+        (fun _ -> worker (0, 0))
+        (List.init (min entries_in_flight (List.length entries)) Fun.id)
     in
-    let stats =
-      List.fold_left
-        (fun acc (key, copied) ->
-          match copied with
-            | None -> acc
-            | Some (_, bytes) ->
-                {
-                  acc with
-                  copied = key :: acc.copied;
-                  copied_bytes = acc.copied_bytes + bytes;
-                })
-        { name; checked = List.length entries; copied = []; copied_bytes = 0 }
-        results
+    let copied, copied_bytes =
+      List.fold_left (fun (n, b) (dn, db) -> (n + dn, b + db)) (0, 0) folded
     in
-    { stats with copied = List.rev stats.copied }
+    { name; checked = !checked; copied; copied_bytes }
 
   (* Copies between the stores themselves rather than through {!Conf.store}: the
      point is to reach the ones the composite writes off the caller's path, or

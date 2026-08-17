@@ -889,8 +889,7 @@ let setup_client (module C : Conf.S) root staging_prefix =
                resulting state. Bytes are omitted (manifests embed mtimes). *)
             (* Numbered from the source, which is destination zero. *)
             Printf.printf "  resync backend #%d: %d checked, %d copied\n"
-              (i + 2) d.Mirror.checked
-              (List.length d.Mirror.copied))
+              (i + 2) d.Mirror.checked d.Mirror.copied)
           dests
     | StageWrite { path; content } ->
         (* Staged edits with no upload queued, the way a writer leaves a file

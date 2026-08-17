@@ -5,7 +5,11 @@
 type dest_stats = {
   name : string;  (** the destination member's configured name *)
   checked : int;  (** source objects examined *)
-  copied : string list;  (** keys copied, sorted *)
+  copied : int;
+      (** Objects copied. A count rather than the keys: a first resync onto an
+          empty destination copies the whole domain, and holding its keyspace as
+          strings to print at the end is the resync's own memory. [on_copy]
+          carries each key as it lands. *)
   copied_bytes : int;
 }
 

@@ -95,27 +95,33 @@ let () =
              ~key:(Printf.sprintf "%sfolder/%04d" domain_prefix n)
              ~data:(Chunk.of_string (String.make (8 + n) 'x'))
              ())
-         (List.init 200 (fun i -> i))
+         (List.init 2000 (fun i -> i))
      in
      (* The order events arrive in, which is the whole question: announcing
         before the bound is announcing every object at once. *)
      let events = ref [] in
      let started = ref [] and finished = ref [] in
+     (* Sampled once, when the first object finishes: that is the moment a
+        promise-per-entry shape is holding the whole listing's worth at once. *)
+     let live_at_first_copy = ref 0 in
+     let baseline = (Stdlib.Gc.stat ()).Stdlib.Gc.live_words in
      let* dests =
        M.resync ~source:"source" ~scope:`Manifests
          ~on_start:(fun ~name:_ ~key ->
            events := `Start :: !events;
            started := key :: !started)
          ~on_copy:(fun ~name:_ ~key ~reason:_ ~bytes:_ ->
+           if !live_at_first_copy = 0 then
+             live_at_first_copy :=
+               (Stdlib.Gc.stat ()).Stdlib.Gc.live_words - baseline;
            events := `Copy :: !events;
            finished := key :: !finished)
          ()
      in
-     let copied = List.concat_map (fun d -> d.Mirror.copied) dests in
-     step "%d object(s) picked up, %d copied" (List.length !started)
-       (List.length copied);
+     let copied = List.fold_left (fun n d -> n + d.Mirror.copied) 0 dests in
+     step "%d object(s) picked up, %d copied" (List.length !started) copied;
      check "every object was announced before the run ended"
-       (List.length !started = List.length copied);
+       (List.length !started = copied);
      (* Announced and finished must be the same set, or a caller shows a key
         that was never worked on. *)
      check "and the two accounts name the same objects"
@@ -134,6 +140,18 @@ let () =
      in
      step "announced before the first object finished: %d of %d"
        announced_before_first_copy (List.length !started);
+     (* The listing itself is unavoidably live, at roughly fourteen words an
+        object; what must not be is a promise, a closure and a queue cell apiece,
+        which measured about a hundred and twenty-six more. The threshold sits
+        between the two. *)
+     let per_object = !live_at_first_copy / List.length !started in
+     step "live words held per object when the first one finished: %d"
+       per_object;
+     check "what is held does not grow with the length of the listing"
+       ~why:(fun () ->
+         Printf.sprintf "%d words for %d objects, %d each" !live_at_first_copy
+           (List.length !started) per_object)
+       (per_object < 50);
      check "an object is announced when it is picked up, not when the list is"
        ~why:(fun () ->
          Printf.sprintf "%d of %d announced before any work finished"
@@ -152,10 +170,10 @@ let () =
      in
      step "second pass: %d examined, %d copied" (List.length !started) !copies;
      check "a settled destination is still examined"
-       (List.length !started = List.length copied);
+       (List.length !started = copied);
      check "and nothing is copied twice" (!copies = 0);
      check "which the stats agree with"
-       (List.for_all (fun d -> d.Mirror.copied = []) dests);
+       (List.for_all (fun d -> d.Mirror.copied = 0) dests);
 
-     report ~expected:10 ();
+     report ~expected:11 ();
      Lwt.return_unit)
