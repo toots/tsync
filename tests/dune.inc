@@ -213,6 +213,14 @@
   (action
    (diff fetch_range.expected fetch_range.output))))
 
+(subdir content/known_chunks
+ (alias
+  (name default)
+  (deps known_chunks.exe))
+ (rule
+  (alias runtest)
+  (action (run ./known_chunks.exe))))
+
 (subdir content/promote_race
  (alias
   (name default)

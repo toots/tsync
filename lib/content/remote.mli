@@ -5,6 +5,11 @@ exception Cancelled
     caller re-imports to pick up what it now holds. *)
 exception Source_changed of string
 
+(** Cap on the per-session memo of chunk keys known present. Reaching it clears
+    the memo, which costs a HEAD per chunk again. Settable so a test can reach
+    it without uploading a terabyte. *)
+val set_max_known : int -> unit
+
 module type S = sig
   (** Upload [src_path] as chunks under [key]: each chunk is read, hashed (chunk
       key) and uploaded if absent, then the manifest is written. For a file
@@ -30,6 +35,12 @@ module type S = sig
       in two configs — else [Conf.default_chunk_size]. Existing files always use
       the size recorded in their own manifest and never come near this. *)
   val chunk_size : unit -> int Lwt.t
+
+  (** Chunk keys this session has seen present on the stores. Bounded, so it
+      counts what the memo holds rather than what the session has uploaded;
+      exposed because that bound is invisible from {!upload}, which behaves the
+      same either way. *)
+  val known_chunk_count : unit -> int
 
   (** Upload a file whose bytes the caller supplies per chunk, then publish its
       manifest. [source index] is either [`Reuse key] — an unchanged chunk,
