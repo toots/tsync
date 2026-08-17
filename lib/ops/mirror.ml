@@ -24,10 +24,15 @@ module Make (C : Conf.S) = struct
   (* Objects are content-addressed or immutable once written, so a size mismatch
      means the destination copy is corrupt. [None] when it was already correct;
      otherwise what was wrong with it, which is worth carrying to the caller. *)
-  let sync_entry (module Src : Backend.S) (module Dst : Backend.S)
-      (entry : Backend.file_entry) =
+  let sync_entry ?(on_start = fun () -> ()) (module Src : Backend.S)
+      (module Dst : Backend.S) (entry : Backend.file_entry) =
+    (* Inside the slot, not before it: [Lwt_list.map_p] applies its function to
+       every element up front, so announcing there would name the last entry of
+       the listing within milliseconds and never move again. *)
     let* head =
-      Lwt_bounded.use probe_pool (fun () -> Dst.head_opt ~key:entry.key ())
+      Lwt_bounded.use probe_pool (fun () ->
+          on_start ();
+          Dst.head_opt ~key:entry.key ())
     in
     let* reason =
       match head with
@@ -163,8 +168,11 @@ module Make (C : Conf.S) = struct
     let+ results =
       Lwt_list.map_p
         (fun entry ->
-          on_start ~name ~key:entry.Backend.key;
-          let+ copied = sync_entry src dst entry in
+          let+ copied =
+            sync_entry
+              ~on_start:(fun () -> on_start ~name ~key:entry.Backend.key)
+              src dst entry
+          in
           (match copied with
             | Some (reason, bytes) ->
                 on_copy ~name ~key:entry.Backend.key ~reason ~bytes

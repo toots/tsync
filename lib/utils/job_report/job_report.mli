@@ -10,6 +10,10 @@
     daemon, a socket that vanished mid-run — every one of those is silence in
     [tsync status], never a failure in the command.
 
+    [target] is what the command was pointed at, as the person who typed it
+    would recognise it: a folder for an import or an export, the backend being
+    copied from for a mirror.
+
     [start] begins reporting until [finish] or process exit. [counters],
     [current] and [deferred] are what the command supplies; memory, GC, transfer
     totals, pool saturation and backend retries are process-wide and gathered

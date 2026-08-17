@@ -95,13 +95,19 @@ let () =
              ~key:(Printf.sprintf "%sfolder/%04d" domain_prefix n)
              ~data:(Chunk.of_string (String.make (8 + n) 'x'))
              ())
-         (List.init 6 (fun i -> i))
+         (List.init 200 (fun i -> i))
      in
+     (* The order events arrive in, which is the whole question: announcing
+        before the bound is announcing every object at once. *)
+     let events = ref [] in
      let started = ref [] and finished = ref [] in
      let* dests =
        M.resync ~source:"source" ~scope:`Manifests
-         ~on_start:(fun ~name:_ ~key -> started := key :: !started)
+         ~on_start:(fun ~name:_ ~key ->
+           events := `Start :: !events;
+           started := key :: !started)
          ~on_copy:(fun ~name:_ ~key ~reason:_ ~bytes:_ ->
+           events := `Copy :: !events;
            finished := key :: !finished)
          ()
      in
@@ -116,6 +122,23 @@ let () =
        (List.sort compare !started = List.sort compare !finished);
      check "each object was announced once"
        (List.length (List.sort_uniq compare !started) = List.length !started);
+     (* An announcement made from inside the bound cannot outrun the bound, so
+        only what is in flight can have been announced before the first object
+        finishes; one made as the list is laid out announces all of it. *)
+     let announced_before_first_copy =
+       let rec go n = function
+         | `Copy :: _ | [] -> n
+         | `Start :: rest -> go (n + 1) rest
+       in
+       go 0 (List.rev !events)
+     in
+     step "announced before the first object finished: %d of %d"
+       announced_before_first_copy (List.length !started);
+     check "an object is announced when it is picked up, not when the list is"
+       ~why:(fun () ->
+         Printf.sprintf "%d of %d announced before any work finished"
+           announced_before_first_copy (List.length !started))
+       (announced_before_first_copy < List.length !started);
 
      (* A second pass has nothing to do, so nothing may be announced as picked
         up: [on_start] fires per object examined, and every one is already
@@ -134,5 +157,5 @@ let () =
      check "which the stats agree with"
        (List.for_all (fun d -> d.Mirror.copied = []) dests);
 
-     report ~expected:9 ();
+     report ~expected:10 ();
      Lwt.return_unit)

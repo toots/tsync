@@ -1068,12 +1068,15 @@ let gc_cmd =
             (if abort then Chunk_space.Abandoning else Chunk_space.Marking);
         at_ := at;
         marked :=
-          [
-            ("shards", namespaces);
-            ("planned", total);
-            ("files", roots);
-            ("kept", promoted);
-          ];
+          if abort then
+            [("shards", namespaces); ("planned", total); ("kept", promoted)]
+          else
+            [
+              ("folders", namespaces);
+              ("planned", total);
+              ("files", roots);
+              ("kept", promoted);
+            ];
         if abort then
           progress "  kept %d/%d shard(s), %d chunk(s)" namespaces total
             promoted
@@ -1160,6 +1163,10 @@ let sync_cmd =
     in
     let phase = ref "starting" and current = ref None in
     let manifests = ref 0 and failures = ref 0 in
+    (* An incremental pass counts no manifests, and a fixed set of counters
+       would print zeroes reading as "nothing happened" rather than as "this
+       pass does not count that". *)
+    let rebuilding = ref false in
     let code =
       run_lwt
         ~report:(fun () ->
@@ -1173,7 +1180,9 @@ let sync_cmd =
               (* No total for a resync: the inode tree is discovered as it is
                walked, so a denominator here would be one this cannot know. *)
             ~counters:(fun () ->
-              [("manifests", !manifests); ("failed", !failures)])
+              if !rebuilding then
+                [("manifests", !manifests); ("failed", !failures)]
+              else [])
             ())
         (let open Lwt.Syntax in
          let module J = Journal.Make (C) in
@@ -1273,6 +1282,7 @@ let sync_cmd =
            (!count, !failed)
          in
          let full_resync reason =
+           rebuilding := true;
            phase := "clearing the cache";
            if !verbose then Log.info "full resync: %s" reason;
            (* Notify the daemon only once the rebuild is complete, or it re-reads
@@ -1375,7 +1385,7 @@ let sync_cmd =
    nothing about the copy a store is keeping. *)
 let data_integrity_cmd =
   let current = ref None and planned = ref 0 in
-  let checked = ref 0 and unrepairable = ref 0 in
+  let checked = ref 0 and unrepairable = ref 0 and corrupt = ref 0 in
   (* [--verify] polls every store at once, so what a reader wants is the run's
      totals rather than whichever member answered last. *)
   let per_store : (string, int * int) Hashtbl.t = Hashtbl.create 4 in
@@ -1394,6 +1404,7 @@ let data_integrity_cmd =
             (b.Corruption.store, b.Corruption.chunk_key))
         r.Corruption.entries
     in
+    corrupt := List.length entries;
     let* () =
       Lwt_list.iter_s
         (fun (e : Corruption.entry) ->
@@ -1580,6 +1591,8 @@ let data_integrity_cmd =
   let run domain do_verify do_repair detail source dry_run verbose =
     set_verbose verbose;
     let (module C : Conf.S) = load_conf ?domain () in
+    if do_verify && do_repair then
+      failwith "--verify and --repair are separate steps; run one.";
     let code =
       run_lwt
         ~report:(fun () ->
@@ -1593,19 +1606,17 @@ let data_integrity_cmd =
             ~counters:(fun () ->
               if do_verify then
                 [("requests left", sum_stores fst); ("corrupt", sum_stores snd)]
-              else
+              else if do_repair then
                 [
                   ("chunks", !checked);
                   ("planned", !planned);
                   ("unrepairable", !unrepairable);
-                ])
+                ]
+              else [("corrupt", !corrupt)])
             ())
-        (match (do_verify, do_repair) with
-          | true, true ->
-              failwith "--verify and --repair are separate steps; run one."
-          | true, false -> verify (module C)
-          | false, true -> repair (module C) source dry_run verbose
-          | false, false -> report (module C) detail)
+        (if do_verify then verify (module C)
+         else if do_repair then repair (module C) source dry_run verbose
+         else report (module C) detail)
     in
     if code <> 0 then exit code
   in
@@ -1701,6 +1712,16 @@ let mirror_cmd =
     in
     let current = ref None and planned = ref 0 in
     let copied = ref 0 and checked = ref 0 in
+    (* Ahead of {!run_lwt} rather than inside the promise it is handed: that
+       argument is evaluated before reporting starts, so a raise there is a
+       command with no row and no failed state to show. *)
+    if List.length C.members < 2 then
+      failwith
+        (Printf.sprintf
+           "mirror needs at least two configured backends; %s has %d."
+           C.domain_name (List.length C.members));
+    if manifests_only && path <> None then
+      failwith "--manifests and --path select different things; run one.";
     let code =
       run_lwt
         ~report:(fun () ->
@@ -1719,14 +1740,7 @@ let mirror_cmd =
               ])
             ())
         (let open Lwt.Syntax in
-         if List.length C.members < 2 then
-           failwith
-             (Printf.sprintf
-                "mirror needs at least two configured backends; %s has %d."
-                C.domain_name (List.length C.members))
-         else if manifests_only && path <> None then
-           failwith "--manifests and --path select different things; run one."
-         else begin
+         begin
            let scope =
              match (manifests_only, path) with
                | _, Some rel -> `Path rel
