@@ -91,9 +91,12 @@ let () =
      check "it carries the bytes the command recorded"
        (progress "bytesTotal" = `Int 1000
        && progress "bytesSkipped" = `Int 400
-       && progress "bytesDone" = `Int 0);
-     check "what an entry needing no work took is not left to do"
-       (progress "bytesRemaining" = `Int 600);
+       && progress "bytesDone" = `Int 300);
+     (* Counting only finished entries would report nothing done for as long as
+        the entry in flight takes, which on a large file is hours. *)
+     check "the entry in flight counts toward what is done and what is left"
+       (progress "bytesHandled" = `Int 700
+       && progress "bytesRemaining" = `Int 300);
      check "and the entry in flight says how far into it the run is"
        (Yojson.Safe.Util.member "bytesDone" (progress "current") = `Int 300
        && Yojson.Safe.Util.member "bytesTotal" (progress "current") = `Int 600);

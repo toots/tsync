@@ -698,6 +698,20 @@
   (alias runtest)
   (action (run ./job_registry_test.exe))))
 
+(subdir unit/job_render
+ (alias
+  (name default)
+  (deps job_render.exe))
+ (rule
+  (alias runtest)
+  (target job_render.output)
+  (action
+   (with-stdout-to job_render.output (ignore-stderr (run ./job_render.exe)))))
+ (rule
+  (alias runtest)
+  (action
+   (diff job_render.expected job_render.output))))
+
 (subdir unit/layout
  (alias
   (name default)

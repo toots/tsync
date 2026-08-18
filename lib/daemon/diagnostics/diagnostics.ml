@@ -558,6 +558,18 @@ let bytes_or_default j =
           (Metrics.human_bytes Conf.default_chunk_size)
     | j -> Metrics.human_bytes (int_of j)
 
+(* A file deep in a tree is mostly path, and the row it sits on has figures to
+   its right: the first folder and the name say which file, which is what a
+   reader is looking for. *)
+let elide path =
+  if String.length path <= 48 then path
+  else (
+    let base = Filename.basename path in
+    match String.index_opt path '/' with
+      | Some i when i + 1 < String.length path - String.length base ->
+          String.sub path 0 i ^ "/…/" ^ base
+      | _ -> "…/" ^ base)
+
 let duration s =
   let s = int_of_float s in
   let d = s / 86400 and h = s mod 86400 / 3600 in
@@ -1051,58 +1063,87 @@ let text json =
               (match mem j "target" with `Null -> "" | t -> "  " ^ str t)
               (match mem j "error" with `Null -> "" | e -> ": " ^ str e);
             let progress = mem j "progress" in
-            let pct part whole =
-              if whole > 0 then Printf.sprintf " (%d%%)" (100 * part / whole)
-              else ""
-            in
             (* Under the name it belongs to rather than on a row of its own: a
                file the run has been on for hours is one thing, and how far into
                it the run is is the rest of that thing. *)
             sub "current" (fun c ->
                 row 4 "current"
-                  (str c
+                  (elide (str c)
                   ^
                     match mem progress "current" with
                     | `Null -> ""
                     | cur ->
                         let done_ = int_of (mem cur "bytesDone")
                         and total = int_of (mem cur "bytesTotal") in
-                        Printf.sprintf " — %s of %s%s"
+                        Printf.sprintf " · %s of %s%s"
                           (Metrics.human_bytes done_)
                           (Metrics.human_bytes total)
-                          (pct done_ total)));
-            (match progress with
+                          (if total > 0 then
+                             Printf.sprintf " (%d%%)" (100 * done_ / total)
+                           else "")));
+            (* The fraction leads, and is of everything the run has behind it
+               rather than of what it uploaded: a resumed import that found most
+               of its tree in place is nearly through it with next to nothing
+               sent. *)
+              (match progress with
               | `Null -> ()
               | p ->
-                  let done_ = int_of (mem p "bytesDone")
-                  and total = int_of (mem p "bytesTotal")
-                  and left = int_of (mem p "bytesRemaining")
+                  let total = int_of (mem p "bytesTotal")
                   and skipped = int_of (mem p "bytesSkipped") in
                   row 4 "progress"
-                    (Printf.sprintf "%s of %s%s, %s left at %s/s%s%s"
-                       (Metrics.human_bytes done_)
-                       (Metrics.human_bytes total)
-                       (pct done_ total) (Metrics.human_bytes left)
-                       (Metrics.human_bytes (int_of (mem p "bytesPerSec")))
-                       (* A rate too new or too slow to divide by leaves the
-                          estimate off rather than inventing one. *)
-                         (match mem p "etaSeconds" with
-                         | `Null -> ""
-                         | e -> ", ~" ^ duration (num e))
-                       (if skipped > 0 then
-                          Printf.sprintf " — %s already in the domain"
-                            (Metrics.human_bytes skipped)
-                        else "")));
+                    (String.concat " · "
+                       ([
+                          Printf.sprintf "%d%% of %s"
+                            (if total > 0 then
+                               100 * int_of (mem p "bytesHandled") / total
+                             else 0)
+                            (Metrics.human_bytes total);
+                        ]
+                       @ (if skipped > 0 then
+                            [
+                              Printf.sprintf "%s already there"
+                                (Metrics.human_bytes skipped);
+                            ]
+                          else [])
+                       @ [
+                           Printf.sprintf "%s left"
+                             (Metrics.human_bytes
+                                (int_of (mem p "bytesRemaining")));
+                         ]
+                       @
+                       (* A run too young or too slow to divide by leaves the
+                            estimate off rather than inventing one. *)
+                       match mem p "etaSeconds" with
+                         | `Null -> []
+                         | e ->
+                             [
+                               Printf.sprintf "~%s at %s/s avg"
+                                 (duration (num e))
+                                 (Metrics.human_bytes
+                                    (int_of (mem p "bytesPerSecAvg")));
+                             ])));
             (match mem j "counters" with
               | `List (_ :: _ as counters) ->
+                  let pairs =
+                    List.filter_map
+                      (function
+                        | `List [`String k; v] -> Some (k, int_of v) | _ -> None)
+                      counters
+                  in
+                  (* A command that publishes what it planned is saying what its
+                     first count is out of, so the two read as the one figure
+                     they are. *)
+                  let planned = List.assoc_opt "planned" pairs in
                   row 4 "counted"
                     (String.concat ", "
-                       (List.map
-                          (function
-                            | `List [`String k; v] ->
-                                Printf.sprintf "%d %s" (int_of v) k
-                            | _ -> "?")
-                          counters))
+                       (List.filteri
+                          (fun i (k, _) -> k <> "planned" || i = 0)
+                          pairs
+                       |> List.mapi (fun i (k, v) ->
+                           match (i, planned) with
+                             | 0, Some total ->
+                                 Printf.sprintf "%d of %d %s" v total k
+                             | _ -> Printf.sprintf "%d %s" v k)))
               | _ -> ());
             sub "traffic" (fun t ->
                 row 4 "traffic"

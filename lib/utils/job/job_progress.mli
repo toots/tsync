@@ -20,11 +20,23 @@ val advance : bytes:int64 -> unit
     [`Done] carries the size actually handled, which is not always the size
     planned for.
 
-    Only [`Done] bytes feed the rate: an entry needing no work finishes at once
-    and would otherwise report a throughput nothing can sustain. *)
+    Only [`Done] bytes are throughput: an entry needing no work finishes at once
+    and would otherwise report a rate nothing can sustain. *)
 val finish_entry : [ `Done of int64 | `Skipped | `Failed ] -> unit
 
 (** What {!Job_report} puts in its payload, empty where nothing was recorded.
     Absent figures are absent keys: an unknown estimate is not zero seconds, and
-    no entry in flight is not an empty one. *)
+    no entry in flight is not an empty one.
+
+    [bytesDone] counts the entry in flight, and [bytesHandled] counts everything
+    behind the run whatever became of it — which is what a fraction of the plan
+    means, a resumed import being most of the way through its tree with nothing
+    uploaded.
+
+    [bytesPerSecAvg] is [bytesDone] over the time since the first byte was
+    handled rather than over a recent window, and [etaSeconds] follows from it:
+    an estimate divided by the last few seconds swings by hours between reports,
+    and a rolling rate is what the report's [traffic] figures already are. The
+    clock starts at that first byte because a resumed run opens by finding files
+    already in the domain, which is time no upload spent. *)
 val json : unit -> (string * Yojson.Safe.t) list
