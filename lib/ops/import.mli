@@ -43,7 +43,9 @@ module Make (C : Conf.S) : sig
 
       [on_progress] fires within an entry, carrying the bytes another chunk of
       it accounts for — deduplicated chunks included, and out of order, so only
-      the running sum since [on_start] means anything. *)
+      the running sum since [on_start] means anything. [sent] is false where the
+      store already had the chunk, which is what separates what the run
+      transferred from what it merely hashed. *)
   val run :
     ?only:string list ->
     ?exclude:string list ->
@@ -51,7 +53,7 @@ module Make (C : Conf.S) : sig
     ?on_dir:(rel:string -> unit) ->
     ?on_plan:(files:int -> bytes:int64 -> unit) ->
     ?on_start:(rel:string -> size:int64 -> unit) ->
-    ?on_progress:(bytes:int64 -> unit) ->
+    ?on_progress:(bytes:int64 -> sent:bool -> unit) ->
     src:string ->
     on_file:(rel:string -> status -> unit) ->
     unit ->

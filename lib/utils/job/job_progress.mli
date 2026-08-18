@@ -13,8 +13,9 @@ val plan : bytes:int64 -> unit
 (** An entry is picked up, at the size the plan counted it as. *)
 val start_entry : size:int64 -> unit
 
-(** Another [bytes] of the entry in flight are done. Ignored between entries. *)
-val advance : bytes:int64 -> unit
+(** Another [bytes] of the entry in flight are done, [sent] saying whether they
+    reached a store or were already there. Ignored between entries. *)
+val advance : bytes:int64 -> sent:bool -> unit
 
 (** The entry in flight is finished, its bytes routed by what became of it.
     [`Done] carries the size actually handled, which is not always the size
@@ -33,10 +34,15 @@ val finish_entry : [ `Done of int64 | `Skipped | `Failed ] -> unit
     means, a resumed import being most of the way through its tree with nothing
     uploaded.
 
-    [bytesPerSecAvg] is [bytesDone] over the time since the first byte was
-    handled rather than over a recent window, and [etaSeconds] follows from it:
-    an estimate divided by the last few seconds swings by hours between reports,
-    and a rolling rate is what the report's [traffic] figures already are. The
-    clock starts at that first byte because a resumed run opens by finding files
-    already in the domain, which is time no upload spent. *)
+    [bytesPerSecAvg] is [bytesSent] over the time since the first byte was sent,
+    and [etaSeconds] follows from it. Deliberately not [bytesDone] over the
+    whole run: a resumed import opens by finding files and chunks it already
+    has, and dividing by that answers with a rate no transfer ran at — the
+    estimate would promise hours for work that has not started. A rolling window
+    is not it either, since an estimate divided by the last few seconds swings
+    by hours between reports and the report's [traffic] figures are already
+    rolling.
+
+    So a run that sends nothing shows no estimate: what it is doing costs
+    hashing rather than transfer, and there is no throughput to extrapolate. *)
 val json : unit -> (string * Yojson.Safe.t) list

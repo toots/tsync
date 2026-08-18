@@ -116,7 +116,8 @@ module Make (C : Conf.S) = struct
       let* chunk_size = R.chunk_size () in
       let* state =
         R.upload ~key ~src_path ~mtime:st.Unix.st_mtime ~chunk_size
-          ~on_progress:(fun ~bytes -> on_progress ~bytes:(Int64.of_int bytes))
+          ~on_progress:(fun ~bytes ~sent ->
+            on_progress ~bytes:(Int64.of_int bytes) ~sent)
           ()
       in
       let+ () = Mf.write key state in
@@ -176,8 +177,8 @@ module Make (C : Conf.S) = struct
 
   let run ?(only = []) ?(exclude = []) ?(force_rehash = false)
       ?(on_dir = fun ~rel:_ -> ()) ?(on_plan = fun ~files:_ ~bytes:_ -> ())
-      ?(on_start = fun ~rel:_ ~size:_ -> ()) ?(on_progress = fun ~bytes:_ -> ())
-      ~src ~on_file () =
+      ?(on_start = fun ~rel:_ ~size:_ -> ())
+      ?(on_progress = fun ~bytes:_ ~sent:_ -> ()) ~src ~on_file () =
     let src =
       let p =
         if Filename.is_relative src then Filename.concat (Sys.getcwd ()) src

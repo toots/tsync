@@ -1892,7 +1892,8 @@ let import_cmd =
              ~on_start:(fun ~rel ~size ->
                current := Some rel;
                Job.Progress.start_entry ~size)
-             ~on_progress:(fun ~bytes -> Job.Progress.advance ~bytes)
+             ~on_progress:(fun ~bytes ~sent ->
+               Job.Progress.advance ~bytes ~sent)
              ~on_file:(fun ~rel status ->
                match status with
                  | Import.Imported size ->

@@ -63,7 +63,7 @@ let () =
      Job.Progress.start_entry ~size:400L;
      Job.Progress.finish_entry `Skipped;
      Job.Progress.start_entry ~size:600L;
-     Job.Progress.advance ~bytes:300L;
+     Job.Progress.advance ~bytes:300L ~sent:true;
      let* () = Lwt_unix.sleep 0.45 in
      let* () = Job.Report.finish () in
      check "a listening daemon receives reports" (!seen <> []);

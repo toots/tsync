@@ -121,6 +121,28 @@ let jobs_block text =
   in
   String.concat "\n" (drop (String.split_on_char '\n' text))
 
+(* A restart re-hashing what it already stored: every chunk deduplicates, so
+   nothing is transferred and there is no throughput to extrapolate from. *)
+let deduplicating =
+  [
+    ( "progress",
+      `Assoc
+        [
+          ("bytesTotal", `Int 9019431322);
+          ("bytesDone", `Int 536870912);
+          ("bytesSkipped", `Int 2254857830);
+          ("bytesFailed", `Int 0);
+          ("bytesHandled", `Int 2791728742);
+          ("bytesRemaining", `Int 6227702580);
+          ("bytesSent", `Int 0);
+          ("bytesPerSecAvg", `Int 0);
+          ( "current",
+            `Assoc
+              [("bytesDone", `Int 536870912); ("bytesTotal", `Int 4294967296)]
+          );
+        ] );
+  ]
+
 let show title json =
   Printf.printf "=== %s\n%s\n" title (jobs_block (Diagnostics.text json))
 
@@ -130,6 +152,8 @@ let () =
   (* A command that counts entries and not bytes reports no progress at all,
      which must render as a job without that row rather than as an empty one. *)
   show "a command that counts entries and not bytes" (job ~state:"running" ());
+  show "a run that has hashed its way through stored chunks, sending nothing"
+    (job ~state:"running" ~progress:deduplicating ());
   (* The elapsed figure is the same either way, so a job that has stopped must
      not leave it reading as an age. *)
   show "a job that died, which is the only trace its process leaves"

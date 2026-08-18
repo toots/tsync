@@ -20,16 +20,20 @@ module type S = sig
       [on_progress] fires per chunk with that chunk's length, deduplicated
       chunks included: it says how much of the file is on the store, which is
       what a caller reporting a multi-hour upload wants, rather than how much
-      crossed the wire. Chunks complete out of order, so only the running sum
-      means anything, and it runs while the chunk holds its buffer slot, so it
-      must return at once. {!upload_chunks} reports nothing. *)
+      crossed the wire. [sent] is false for a chunk the store already had, so a
+      caller measuring throughput divides by what it actually transferred rather
+      than by what it hashed.
+
+      Chunks complete out of order, so only the running sum means anything, and
+      it runs while the chunk holds its buffer slot, so it must return at once.
+      {!upload_chunks} reports nothing. *)
   val upload :
     key:string ->
     src_path:string ->
     mtime:float ->
     chunk_size:int ->
     ?cancel:bool ref ->
-    ?on_progress:(bytes:int -> unit) ->
+    ?on_progress:(bytes:int -> sent:bool -> unit) ->
     unit ->
     Manifest.t Lwt.t
 

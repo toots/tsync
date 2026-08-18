@@ -63,11 +63,15 @@ end
 
 module I = Import.Make (C)
 
+(* Seeded by name, so no two files share a chunk: content repeated across the
+   tree deduplicates within the first run, and the re-hash below would then be
+   comparing dedup against dedup. *)
 let write rel bytes =
   let path = Filename.concat src rel in
   ignore (Sys.command (Printf.sprintf "mkdir -p %s" (Filename.dirname path)));
+  let seed = String.fold_left (fun acc c -> acc + Char.code c) 0 rel in
   let oc = open_out_bin path in
-  output_string oc (String.init bytes (fun i -> Char.chr (i mod 251)));
+  output_string oc (String.init bytes (fun i -> Char.chr ((i + seed) mod 251)));
   close_out oc;
   (rel, bytes)
 
@@ -78,37 +82,39 @@ type seen = {
   mutable planned_bytes : int64;
   mutable started : (string * int64) list;
   mutable chunked : (string * int64) list;  (** summed per entry *)
+  mutable sent : (string * int64) list;  (** of those, what reached the store *)
   mutable done_ : (string * int64) list;
   mutable skipped : string list;
 }
 
-let run () =
+let run ?(force_rehash = false) () =
   let seen =
     {
       planned_files = 0;
       planned_bytes = 0L;
       started = [];
       chunked = [];
+      sent = [];
       done_ = [];
       skipped = [];
     }
   in
   let current = ref "" in
   let+ (_ : Import.summary) =
-    I.run ~src
+    I.run ~force_rehash ~src
       ~on_plan:(fun ~files ~bytes ->
         seen.planned_files <- files;
         seen.planned_bytes <- bytes)
       ~on_start:(fun ~rel ~size ->
         current := rel;
         seen.started <- (rel, size) :: seen.started)
-      ~on_progress:(fun ~bytes ->
-        let so_far =
-          Option.value ~default:0L (List.assoc_opt !current seen.chunked)
+      ~on_progress:(fun ~bytes ~sent ->
+        let add l =
+          let so_far = Option.value ~default:0L (List.assoc_opt !current l) in
+          (!current, Int64.add so_far bytes) :: List.remove_assoc !current l
         in
-        seen.chunked <-
-          (!current, Int64.add so_far bytes)
-          :: List.remove_assoc !current seen.chunked)
+        seen.chunked <- add seen.chunked;
+        if sent then seen.sent <- add seen.sent)
       ~on_file:(fun ~rel status ->
         match status with
           | Import.Imported size -> seen.done_ <- (rel, size) :: seen.done_
@@ -162,13 +168,30 @@ let () =
            (reported = Int64.of_int n))
        files;
 
+     (* A first import of new data transfers everything it hashes, which is
+        what makes the re-import below a comparison rather than an assertion
+        about nothing. *)
+     check "and every chunk of a new file reached the store"
+       (List.sort compare first.sent = List.sort compare first.chunked);
+
      case "a second run over the same tree";
      let* again = run () in
      check "plans the same bytes" (again.planned_bytes = total);
      check "and finds every one of them already in the domain"
        (List.length again.skipped = List.length files && again.done_ = []);
 
+     (* The case a restart lands in: the entries are re-hashed, every chunk is
+        found already stored, and a rate that counted them would answer with a
+        throughput no transfer ran at. *)
+     case "a re-hash of a tree whose chunks are all stored";
+     let* rehashed = run ~force_rehash:true () in
+     check "reports each file's chunks as progress"
+       (List.sort compare rehashed.chunked
+       = List.sort compare (List.map (fun (r, n) -> (r, Int64.of_int n)) files)
+       );
+     check "and reports none of them as sent" (rehashed.sent = []);
+
      (* Counted, so a fixture that stopped importing anything fails rather than
         passing quietly. *)
-     report ~expected:9 ();
+     report ~expected:12 ();
      Lwt.return_unit)

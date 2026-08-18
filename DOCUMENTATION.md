@@ -811,10 +811,14 @@ done once they are on the stores, so a chunk that was deduplicated rather than s
 all the same — what crossed the wire is `traffic`, and with several backends that figure is
 every copy summed.
 
-The rate is the average across the whole run, not a recent window, and the estimate follows
-from it: divided by the last few seconds, an ETA swings by hours between reports, and the
-rolling figure is what `traffic` already shows. A run too young or too slow to divide by shows
-no estimate rather than a made-up one. Only `import` reports bytes for now.
+The rate is the average across what the run has actually transferred, and the estimate follows
+from it. Two things it deliberately is not: a recent window, since an ETA divided by the last
+few seconds swings by hours between reports and the rolling figure is what `traffic` already
+shows; and a rate over everything counted as done, since a restart spends its first stretch
+re-hashing chunks the stores already have — that runs at disk speed and would promise hours for
+work that has not begun. A run that has sent nothing yet shows no estimate rather than a
+made-up one, which is what a restart looks like until it reaches data the domain does not have.
+Only `import` reports bytes for now.
 
 Reporting is advisory. A command run with no daemon — the ordinary case — reports nothing and
 runs exactly the same; nothing here can fail a command. A row disappears once its process is

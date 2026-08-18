@@ -18,7 +18,7 @@ module type S = sig
     mtime:float ->
     chunk_size:int ->
     ?cancel:bool ref ->
-    ?on_progress:(bytes:int -> unit) ->
+    ?on_progress:(bytes:int -> sent:bool -> unit) ->
     unit ->
     Manifest.t Lwt.t
 
@@ -155,7 +155,7 @@ module Make_with_layout (C : Conf.S) (L : Layout.S) : S = struct
         Corrupt.forget ck_rel;
         remember_chunk ck_rel
     in
-    entry
+    (entry, not known)
 
   (* Mapped from the descriptor the upload holds, so the pages reach the store
      without being copied into a buffer first and no rename swaps the inode out
@@ -173,10 +173,10 @@ module Make_with_layout (C : Conf.S) (L : Layout.S) : S = struct
           try Chunk.map_fd (Lwt_unix.unix_file_descr fd) ~offset ~len
           with Unix.Unix_error _ -> raise Cancelled
         in
-        let+ entry = put_chunk ~index ~data in
-        (* Whether the chunk was written or deduplicated: what this says is how
-           much of the file is on the store, not how much crossed the wire. *)
-        on_progress ~bytes:len;
+        let+ entry, sent = put_chunk ~index ~data in
+        (* A deduplicated chunk is as done as a written one and cost no
+           transfer, which is why the two are told apart rather than summed. *)
+        on_progress ~bytes:len ~sent;
         entry)
 
   (* A cancellation landing while the put is in flight unpublishes it again, or
@@ -217,7 +217,7 @@ module Make_with_layout (C : Conf.S) (L : Layout.S) : S = struct
      chunking is laid out for and the bytes that reach the store come from one
      file however the name is reused meanwhile. *)
   let upload ~key ~src_path ~mtime ~chunk_size ?(cancel = ref false)
-      ?(on_progress = fun ~bytes:_ -> ()) () =
+      ?(on_progress = fun ~bytes:_ ~sent:_ -> ()) () =
     let* fd = Lwt_unix_retry.openfile src_path [Unix.O_RDONLY] 0 in
     let* entries, file_size =
       Lwt.finalize
@@ -271,7 +271,8 @@ module Make_with_layout (C : Conf.S) (L : Layout.S) : S = struct
         | `Fill fill ->
             with_chunk_buffer ~size:len (fun buf ->
                 let* () = fill buf in
-                put_chunk ~index ~data:(Chunk.of_buffer buf))
+                let+ entry, _ = put_chunk ~index ~data:(Chunk.of_buffer buf) in
+                entry)
     in
     let* entries = Lwt_list.map_p one (List.init n Fun.id) in
     publish ~key ~size ~chunk_size ~mtime ~cancel entries
