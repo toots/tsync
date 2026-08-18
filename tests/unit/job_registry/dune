@@ -2,11 +2,4 @@
  (flags
   (:standard -open Tsync_diagnostics -open Tsync_test_harness))
  (name job_registry_test)
- (libraries
-  tsync_test_harness
-  tsync_diagnostics
-  yojson
-  str
-  unix
-  lwt
-  lwt.unix))
+ (libraries tsync_test_harness tsync_diagnostics yojson unix lwt lwt.unix))

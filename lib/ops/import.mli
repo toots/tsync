@@ -33,14 +33,27 @@ module Make (C : Conf.S) : sig
       [on_plan] fires once the set to import is known, [on_start] as each entry
       is picked up, and [on_file] once it is done. A caller wanting to say what
       the import is working on wants [on_start]: an entry spends its whole life
-      between the two, and a large file spends hours there. *)
+      between the two, and a large file spends hours there.
+
+      The byte figures are what each entry will report as its size, so what
+      [on_plan] promises is what [on_file] delivers: a symlink counts as the
+      target string it stores, or as the target's own bytes under [`Follow], or
+      as nothing under [`Skip]. A tree that changes under the run makes them an
+      estimate again.
+
+      [on_progress] fires within an entry, carrying the bytes another chunk of
+      it accounts for — deduplicated chunks included, and out of order, so only
+      the running sum since [on_start] means anything. [sent] is false where the
+      store already had the chunk, which is what separates what the run
+      transferred from what it merely hashed. *)
   val run :
     ?only:string list ->
     ?exclude:string list ->
     ?force_rehash:bool ->
     ?on_dir:(rel:string -> unit) ->
-    ?on_plan:(files:int -> unit) ->
-    ?on_start:(rel:string -> unit) ->
+    ?on_plan:(files:int -> bytes:int64 -> unit) ->
+    ?on_start:(rel:string -> size:int64 -> unit) ->
+    ?on_progress:(bytes:int64 -> sent:bool -> unit) ->
     src:string ->
     on_file:(rel:string -> status -> unit) ->
     unit ->

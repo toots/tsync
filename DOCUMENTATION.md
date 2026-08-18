@@ -784,8 +784,9 @@ its domain's daemon every ten seconds, and `tsync status` grows a `Jobs` block:
 ```
 Jobs
   import  pid 979109  running 0m 10s  /media/files/stage
-    current          Music Production/…/freedia0272.MXF
-    counted          2499 files, 6000 planned, 0 skipped, 0 symlinks, 0 failed
+    current          Music Production/…/freedia0272.MXF · 512.0 MB of 4.0 GB (12%)
+    progress         39% of 8.4 GB · 2.1 GB already there · 5.1 GB left · ~11m 9s at 7.8 MB/s avg
+    counted          2499 of 6000 files, 0 skipped, 0 symlinks, 0 failed
     traffic          up 1.6 GB (159.1 MB/s), down 0 B (0 B/s), 2500 chunks hashed
     memory           108.0 MB rss + 40.0 MB swapped, 75.0 MB heap, 41.0 MB live
     deferred         207 queued, 3 in flight
@@ -796,10 +797,28 @@ Jobs
 
 `current` is what the command is on right now — the file being imported, the folder being
 marked, the object being copied — rather than the last one it finished, which for a large file
-is a name from hours ago. `slots` above zero waiting is the difference between work that is
-slow and work that is queued behind a bound; `backend` appears only when something was retried.
-`memory` reads resident beside live words, which is what separates something retained from an
-allocator that has not given anything back.
+is a name from hours ago, and it carries how far into that file the run has got. `slots` above
+zero waiting is the difference between work that is slow and work that is queued behind a
+bound; `backend` appears only when something was retried. `memory` reads resident beside live
+words, which is what separates something retained from an allocator that has not given anything
+back.
+
+`progress` is bytes rather than files, which is the only form the question "how much is left"
+has an answer in. Its percentage is of everything the run has behind it, the file in flight
+included: an import restarted over a tree it mostly imported already is nearly through it
+having sent almost nothing, and a fraction of what it uploaded would read zero. Bytes count as
+done once they are on the stores, so a chunk that was deduplicated rather than sent is progress
+all the same — what crossed the wire is `traffic`, and with several backends that figure is
+every copy summed.
+
+The rate is the average across what the run has actually transferred, and the estimate follows
+from it. Two things it deliberately is not: a recent window, since an ETA divided by the last
+few seconds swings by hours between reports and the rolling figure is what `traffic` already
+shows; and a rate over everything counted as done, since a restart spends its first stretch
+re-hashing chunks the stores already have — that runs at disk speed and would promise hours for
+work that has not begun. A run that has sent nothing yet shows no estimate rather than a
+made-up one, which is what a restart looks like until it reaches data the domain does not have.
+Only `import` reports bytes for now.
 
 Reporting is advisory. A command run with no daemon — the ordinary case — reports nothing and
 runs exactly the same; nothing here can fail a command. A row disappears once its process is

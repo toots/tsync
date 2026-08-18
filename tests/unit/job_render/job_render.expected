@@ -1,0 +1,46 @@
+=== a running import, with the bytes it has behind and ahead of it
+  import  pid 4242  running 1h 2m  /media/stage
+    current          Music Production/…/freedia0272.MXF · 512.0 MB of 4.0 GB (12%)
+    progress         39% of 8.4 GB · 2.1 GB already there · 5.1 GB left · ~11m 9s at 7.8 MB/s avg
+    counted          30433 of 61956 files, 4 skipped, 0 failed
+    traffic          up 704.7 GB (7.8 MB/s), down 39.3 MB (2.0 MB/s), 2500 chunks hashed
+    memory           108.0 MB rss + 40.0 MB swapped, 75.0 MB heap, 41.0 MB live
+    deferred         207 queued, 3 in flight
+                     DEGRADED, run tsync mirror
+    slots            chunk buffers 4/4 (12 waiting)
+    backend          91 retries (87 timeouts), 0 failed
+
+=== a command that counts entries and not bytes
+  import  pid 4242  running 1h 2m  /media/stage
+    current          Music Production/…/freedia0272.MXF
+    counted          30433 of 61956 files, 4 skipped, 0 failed
+    traffic          up 704.7 GB (7.8 MB/s), down 39.3 MB (2.0 MB/s), 2500 chunks hashed
+    memory           108.0 MB rss + 40.0 MB swapped, 75.0 MB heap, 41.0 MB live
+    deferred         207 queued, 3 in flight
+                     DEGRADED, run tsync mirror
+    slots            chunk buffers 4/4 (12 waiting)
+    backend          91 retries (87 timeouts), 0 failed
+
+=== a run that has hashed its way through stored chunks, sending nothing
+  import  pid 4242  running 1h 2m  /media/stage
+    current          Music Production/…/freedia0272.MXF · 512.0 MB of 4.0 GB (12%)
+    progress         30% of 8.4 GB · 2.1 GB already there · 5.8 GB left
+    counted          30433 of 61956 files, 4 skipped, 0 failed
+    traffic          up 704.7 GB (7.8 MB/s), down 39.3 MB (2.0 MB/s), 2500 chunks hashed
+    memory           108.0 MB rss + 40.0 MB swapped, 75.0 MB heap, 41.0 MB live
+    deferred         207 queued, 3 in flight
+                     DEGRADED, run tsync mirror
+    slots            chunk buffers 4/4 (12 waiting)
+    backend          91 retries (87 timeouts), 0 failed
+
+=== a job that died, which is the only trace its process leaves
+  import  pid 4242  failed, ran 1h 2m  /media/stage: disk full
+    current          Music Production/…/freedia0272.MXF
+    counted          30433 of 61956 files, 4 skipped, 0 failed
+    traffic          up 704.7 GB (7.8 MB/s), down 39.3 MB (2.0 MB/s), 2500 chunks hashed
+    memory           108.0 MB rss + 40.0 MB swapped, 75.0 MB heap, 41.0 MB live
+    deferred         207 queued, 3 in flight
+                     DEGRADED, run tsync mirror
+    slots            chunk buffers 4/4 (12 waiting)
+    backend          91 retries (87 timeouts), 0 failed
+

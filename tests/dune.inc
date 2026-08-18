@@ -660,6 +660,14 @@
   (action
    (diff hash.expected hash.output))))
 
+(subdir unit/import_progress
+ (alias
+  (name default)
+  (deps import_progress.exe))
+ (rule
+  (alias runtest)
+  (action (run ./import_progress.exe))))
+
 (subdir unit/item_ref
  (alias
   (name default)
@@ -674,6 +682,14 @@
   (action
    (diff item_ref_test.expected item_ref_test.output))))
 
+(subdir unit/job
+ (alias
+  (name default)
+  (deps job_test.exe))
+ (rule
+  (alias runtest)
+  (action (run ./job_test.exe))))
+
 (subdir unit/job_registry
  (alias
   (name default)
@@ -682,13 +698,19 @@
   (alias runtest)
   (action (run ./job_registry_test.exe))))
 
-(subdir unit/job_report
+(subdir unit/job_render
  (alias
   (name default)
-  (deps job_report_test.exe))
+  (deps job_render.exe))
  (rule
   (alias runtest)
-  (action (run ./job_report_test.exe))))
+  (target job_render.output)
+  (action
+   (with-stdout-to job_render.output (ignore-stderr (run ./job_render.exe)))))
+ (rule
+  (alias runtest)
+  (action
+   (diff job_render.expected job_render.output))))
 
 (subdir unit/layout
  (alias

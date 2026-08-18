@@ -9,7 +9,7 @@
    Tsync_ipc
    -open
    Tsync_lwt_unix))
- (name tsync_job_report)
+ (name tsync_job)
  (libraries
   tsync_log
   tsync_metrics

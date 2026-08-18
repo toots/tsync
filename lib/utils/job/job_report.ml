@@ -94,6 +94,7 @@ let payload t ~state ~extra =
   @ extra
   @ (match t.target with None -> [] | Some s -> [("target", `String s)])
   @ (match t.current () with None -> [] | Some s -> [("current", `String s)])
+  @ Job_progress.json ()
   @
     match t.deferred () with
     | None -> []

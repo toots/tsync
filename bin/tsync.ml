@@ -1886,20 +1886,30 @@ let import_cmd =
              ~on_dir:(fun ~rel ->
                current := Some rel;
                Printf.printf "mkdir    %s\n%!" rel)
-             ~on_plan:(fun ~files -> planned := files)
-             ~on_start:(fun ~rel -> current := Some rel)
+             ~on_plan:(fun ~files ~bytes ->
+               planned := files;
+               Job.Progress.plan ~bytes)
+             ~on_start:(fun ~rel ~size ->
+               current := Some rel;
+               Job.Progress.start_entry ~size)
+             ~on_progress:(fun ~bytes ~sent ->
+               Job.Progress.advance ~bytes ~sent)
              ~on_file:(fun ~rel status ->
                match status with
                  | Import.Imported size ->
+                     Job.Progress.finish_entry (`Done size);
                      incr imported;
                      Printf.printf "imported %s (%Ld bytes)\n%!" rel size
                  | Import.Skipped_exists ->
+                     Job.Progress.finish_entry `Skipped;
                      incr skipped;
                      Printf.printf "skip     %s (already in domain)\n%!" rel
                  | Import.Skipped_symlink ->
+                     Job.Progress.finish_entry `Skipped;
                      incr symlinks;
                      Printf.printf "skip     %s (symlink)\n%!" rel
                  | Import.Failed msg ->
+                     Job.Progress.finish_entry `Failed;
                      incr failed;
                      Printf.printf "failed   %s: %s\n%!" rel msg)
              ()

@@ -27,9 +27,35 @@ module Make (C : Conf.S) = struct
       (fun g -> Glob.matches g rel || Glob.matches g (Filename.basename rel))
       globs
 
+  (* Where a symlink points, as a path this process can stat. *)
+  let target_path ~src rel target =
+    if Filename.is_relative target then
+      Filename.concat (Filename.dirname (Filename.concat src rel)) target
+    else target
+
+  (* What importing this symlink will report as its size, which is what makes
+     the plan and the run agree: [`Keep] stores the target string, whose length
+     is the lstat size {!Manifest.make_symlink} records; [`Follow] stores the
+     target's own bytes; [`Skip] imports nothing. A broken link is skipped
+     either way. *)
+  let symlink_bytes ~src rel target =
+    match C.symlink_policy with
+      | `Skip -> Lwt.return 0L
+      | `Keep -> Lwt.return (Int64.of_int (String.length target))
+      | `Follow -> (
+          (* [stat], not [lstat]: a link to a link is followed by the upload
+             too, and a broken chain is imported as nothing. *)
+          let+ st = Fs_util.stat_opt_large (target_path ~src rel target) in
+          match st with Some st -> st.Unix.LargeFile.st_size | None -> 0L)
+
   (* An excluded directory is not descended into, and neither is a dir-symlink
      whatever the policy: the caller handles those. [seen] guards against
-     cycles. *)
+     cycles.
+
+     Entries carry the size their import will report, taken from the lstat the
+     walk already does: an import holds its whole listing, so this is a word
+     beside a path it is keeping anyway, and the alternative is stat'ing the
+     tree a second time to say how big it is. *)
   let walk_source ~exclude src =
     let globs = List.map Glob.of_pattern exclude in
     let seen = Hashtbl.create 16 in
@@ -58,16 +84,17 @@ module Make (C : Conf.S) = struct
                   else (
                     Hashtbl.replace seen realp ();
                     walk r (r :: dirs, files, symlinks))
-              | `File -> Lwt.return (dirs, r :: files, symlinks)
+              | `File size -> Lwt.return (dirs, (r, size) :: files, symlinks)
               | `Symlink target ->
-                  Lwt.return (dirs, files, (r, target) :: symlinks)
+                  let+ bytes = symlink_bytes ~src r target in
+                  (dirs, files, (r, target, bytes) :: symlinks)
               | `Missing -> Lwt.return (dirs, files, symlinks)))
         acc names
     in
     let+ dirs, files, symlinks = walk "" ([], [], []) in
     ( List.sort compare dirs,
-      List.sort compare files,
-      List.sort (fun (a, _) (b, _) -> compare a b) symlinks )
+      List.sort (fun (a, _) (b, _) -> compare a b) files,
+      List.sort (fun (a, _, _) (b, _, _) -> compare a b) symlinks )
 
   (* A key already in the domain (local sidecar or remote manifest) is never
      overwritten by an import. *)
@@ -79,7 +106,7 @@ module Make (C : Conf.S) = struct
           let+ head = Fs.head_manifest_opt ~key in
           Option.is_some head
 
-  let import_file ~force_rehash ~src_root rel =
+  let import_file ~force_rehash ~on_progress ~src_root rel =
     let key = C.domain_prefix ^ rel in
     let* skip = if force_rehash then Lwt.return_false else exists key in
     if skip then Lwt.return Skipped_exists
@@ -88,7 +115,10 @@ module Make (C : Conf.S) = struct
       let* st = Lwt_unix_retry.stat src_path in
       let* chunk_size = R.chunk_size () in
       let* state =
-        R.upload ~key ~src_path ~mtime:st.Unix.st_mtime ~chunk_size ()
+        R.upload ~key ~src_path ~mtime:st.Unix.st_mtime ~chunk_size
+          ~on_progress:(fun ~bytes ~sent ->
+            on_progress ~bytes:(Int64.of_int bytes) ~sent)
+          ()
       in
       let+ () = Mf.write key state in
       Imported state.Manifest.size)
@@ -108,10 +138,6 @@ module Make (C : Conf.S) = struct
       let* () = Mf.write key state in
       Lwt.return (Imported state.Manifest.size))
 
-  (* A journal entry is one JSON object per line, so an import records its ops
-     where they are already in that form. Held in a list until the end, they and
-     the string they encode to grow with the tree rather than with what is in
-     flight, which on a small machine is the largest thing the run keeps. *)
   (* A journal entry is one JSON object per line, so an import records its ops
      where they are already in that form. Held in a list until the end, they and
      the string they encode to grow with the tree rather than with what is in
@@ -150,8 +176,9 @@ module Make (C : Conf.S) = struct
     go [] (Filename.dirname rel)
 
   let run ?(only = []) ?(exclude = []) ?(force_rehash = false)
-      ?(on_dir = fun ~rel:_ -> ()) ?(on_plan = fun ~files:_ -> ())
-      ?(on_start = fun ~rel:_ -> ()) ~src ~on_file () =
+      ?(on_dir = fun ~rel:_ -> ()) ?(on_plan = fun ~files:_ ~bytes:_ -> ())
+      ?(on_start = fun ~rel:_ ~size:_ -> ())
+      ?(on_progress = fun ~bytes:_ ~sent:_ -> ()) ~src ~on_file () =
     let src =
       let p =
         if Filename.is_relative src then Filename.concat (Sys.getcwd ()) src
@@ -169,8 +196,8 @@ module Make (C : Conf.S) = struct
       only = [] || excluded only_globs rel
       || List.exists (excluded only_globs) (ancestors rel)
     in
-    let files = List.filter kept files in
-    let symlinks = List.filter (fun (rel, _) -> kept rel) symlinks in
+    let files = List.filter (fun (rel, _) -> kept rel) files in
+    let symlinks = List.filter (fun (rel, _, _) -> kept rel) symlinks in
     (* Under [only], markers are kept for ancestors of kept entries alone, so
        non-matching branches leave no empty folders. *)
     let dirs =
@@ -178,22 +205,32 @@ module Make (C : Conf.S) = struct
       else (
         let keep = Hashtbl.create 64 in
         List.iter
-          (fun rel ->
+          (fun (rel, _) ->
             List.iter (fun d -> Hashtbl.replace keep d ()) (ancestors rel))
           files;
         List.iter
-          (fun (rel, _) ->
+          (fun (rel, _, _) ->
             List.iter (fun d -> Hashtbl.replace keep d ()) (ancestors rel))
           symlinks;
         List.filter (Hashtbl.mem keep) dirs)
     in
-    on_plan ~files:(List.length files + List.length symlinks);
+    let planned_bytes =
+      List.fold_left
+        (fun acc (_, size) -> Int64.add acc size)
+        (List.fold_left
+           (fun acc (_, _, bytes) -> Int64.add acc bytes)
+           0L symlinks)
+        files
+    in
+    on_plan
+      ~files:(List.length files + List.length symlinks)
+      ~bytes:planned_bytes;
     (* Around every per-entry unit of work in both loops, which is what makes it
        the one place that knows what the import is on right now: [on_file] fires
        once an entry is done, and a large file spends its whole life between the
        two. *)
-    let guard rel f =
-      on_start ~rel;
+    let guard rel ~size f =
+      on_start ~rel ~size;
       Lwt.catch f (fun exn ->
           let msg = Printexc.to_string exn in
           Log.err "import %s: %s" rel msg;
@@ -215,34 +252,31 @@ module Make (C : Conf.S) = struct
         in
         let* () =
           Lwt_list.iter_s
-            (fun rel ->
+            (fun (rel, size) ->
               let* status =
-                guard rel (fun () ->
-                    import_file ~force_rehash ~src_root:src rel)
+                guard rel ~size (fun () ->
+                    import_file ~force_rehash ~on_progress ~src_root:src rel)
               in
               record ~rel status)
             files
         in
         let* () =
           Lwt_list.iter_s
-            (fun (rel, target) ->
+            (fun (rel, target, bytes) ->
               let* status =
-                guard rel (fun () ->
+                guard rel ~size:bytes (fun () ->
                     match C.symlink_policy with
                       | `Keep ->
                           import_symlink ~force_rehash ~src_root:src rel target
                       | `Follow -> (
-                          let abs_target =
-                            if Filename.is_relative target then
-                              Filename.concat
-                                (Filename.dirname (Filename.concat src rel))
-                                target
-                            else target
+                          let* kind =
+                            Fs_util.lstat_kind (target_path ~src rel target)
                           in
-                          let* kind = Fs_util.lstat_kind abs_target in
                           match kind with
                             | `Missing -> Lwt.return Skipped_symlink
-                            | _ -> import_file ~force_rehash ~src_root:src rel)
+                            | _ ->
+                                import_file ~force_rehash ~on_progress
+                                  ~src_root:src rel)
                       | `Skip -> Lwt.return Skipped_symlink)
               in
               record ~rel status)

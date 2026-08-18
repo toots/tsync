@@ -10,9 +10,7 @@
    The merge half guards a trap of its own: on macOS one daemon answers for
    every domain it serves, so a caller collects several reports carrying the
    same job table, and merging them naively lists one import once per domain it
-   is not running against. What a reader finally sees is asserted last, since
-   every field above reaches them through a format string that reads a name and
-   a type it is given rather than one it checks. *)
+   is not running against. *)
 
 open Check
 
@@ -113,132 +111,7 @@ let () =
   check "and no jobs is an empty list, not a missing key"
     (Yojson.Safe.Util.member "jobs" none = `List []);
 
-  case "what a reader is shown";
-  let rendered ?error ~state () =
-    Diagnostics.text
-      (`Assoc
-         [
-           ("server", `Assoc [("frontend", `String "fuse")]);
-           ("domains", `List []);
-           ( "jobs",
-             `List
-               [
-                 `Assoc
-                   ([
-                      ("kind", `String "import");
-                      ("pid", `Int 4242);
-                      ("state", `String state);
-                      ("startedAt", `Float (Unix.gettimeofday () -. 3720.));
-                      (* Elapsed comes from the reporting process, whose clock
-                         is not the clock of whoever renders this. *)
-                      ("uptimeSeconds", `Float 3720.);
-                      ("target", `String "/media/stage");
-                      ("current", `String "big.mov");
-                      ( "counters",
-                        `List
-                          [
-                            `List [`String "files"; `Int 30433];
-                            `List [`String "planned"; `Int 61956];
-                          ] );
-                      ( "memory",
-                        `Assoc
-                          [
-                            ("rssBytes", `Int 113246208);
-                            ("swappedBytes", `Int 41943040);
-                          ] );
-                      ( "gc",
-                        `Assoc
-                          [
-                            ("heapBytes", `Int 78643200);
-                            ("liveBytes", `Int 43008000);
-                          ] );
-                      ( "traffic",
-                        `Assoc
-                          [
-                            ("bytesUploaded", `Int 756640839270);
-                            ("uploadBytesPerSec", `Int 8178892);
-                            ("bytesDownloaded", `Int 41231872);
-                            ("downloadBytesPerSec", `Int 2097152);
-                            ("chunksHashed", `Int 2500);
-                          ] );
-                      ( "deferred",
-                        `Assoc
-                          [
-                            ("queued", `Int 207);
-                            ("inFlight", `Int 3);
-                            ("degraded", `Bool true);
-                          ] );
-                      ( "pools",
-                        `List
-                          [
-                            `Assoc
-                              [
-                                ("name", `String "chunk buffers");
-                                ("inFlight", `Int 4);
-                                ("max", `Int 4);
-                                ("waiting", `Int 12);
-                              ];
-                          ] );
-                      ( "backend",
-                        `Assoc
-                          [
-                            ("retries", `Int 91);
-                            ("timeouts", `Int 87);
-                            ("failures", `Int 0);
-                          ] );
-                    ]
-                   @
-                     match error with
-                     | None -> []
-                     | Some e -> [("error", `String e)]);
-               ] );
-         ])
-  in
-  let running = rendered ~state:"running" () in
-  let has_in text s =
-    let re = Str.regexp_string s in
-    try
-      ignore (Str.search_forward re text 0);
-      true
-    with Not_found -> false
-  in
-  let has s = has_in running s in
-  check "the job is named, with its pid and how long it has run"
-    ~why:(fun () -> running)
-    (has "import  pid 4242  running 1h 2m  /media/stage");
-  check "what it is on right now" ~why:(fun () -> running) (has "big.mov");
-  check "its counters, in the order it published them"
-    ~why:(fun () -> running)
-    (has "30433 files, 61956 planned");
-  check "live words beside the heap, which is the pair that answers retention"
-    ~why:(fun () -> running)
-    (has "108.0 MB rss + 40.0 MB swapped, 75.0 MB heap, 41.0 MB live");
-  check "the deferred queue"
-    ~why:(fun () -> running)
-    (has "207 queued, 3 in flight");
-  check "a dropped write, which is a call to action rather than a figure"
-    ~why:(fun () -> running)
-    (has "run tsync mirror");
-  check "a pool that is full, and what is queued behind it"
-    ~why:(fun () -> running)
-    (has "chunk buffers 4/4 (12 waiting)");
-  check "retries, with timeouts counted apart"
-    ~why:(fun () -> running)
-    (has "91 retries (87 timeouts)");
-  (* A rate in both directions: a total alone cannot tell a transfer that is
-     moving from one that has stopped, which is the question asked of a mirror
-     whose direction is down. *)
-  check "traffic, each direction with its own rate"
-    ~why:(fun () -> running)
-    (has "up 704.7 GB (7.8 MB/s), down 39.3 MB (2.0 MB/s), 2500 chunks hashed");
-
-  (* The elapsed figure is the same either way, so a job that has stopped must
-     not leave it reading as an age. *)
-  let dead = rendered ~state:"failed" ~error:"disk full" () in
-  check "a job that died says so, and what killed it"
-    ~why:(fun () -> dead)
-    (has_in dead "import  pid 4242  failed, ran 1h 2m  /media/stage: disk full");
-
   (* Counted, so a suite that stopped exercising anything fails rather than
-     passing quietly. *)
-  report ~expected:20 ()
+     passing quietly. What a reader is finally shown is tests/unit/job_render,
+     a snapshot: a row is prose, and prose is reviewed whole. *)
+  report ~expected:10 ()

@@ -1,0 +1,5 @@
+(executable
+ (flags
+  (:standard -open Tsync_job -open Tsync_test_harness))
+ (name job_test)
+ (libraries tsync_test_harness tsync_job yojson unix lwt lwt.unix))
