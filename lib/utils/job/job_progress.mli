@@ -7,8 +7,12 @@
     place however many commands come to want them. Recording works before a
     report is started and with no daemon to send one to, and a command that
     counts entries rather than bytes records nothing and reports no progress at
-    all. *)
-val plan : bytes:int64 -> unit
+    all.
+
+    [basis] is which figure the estimate extrapolates from: [`Sent] for a
+    transfer, [`Handled] for a run whose entries are mostly in place already and
+    which therefore has no throughput to divide by — see {!json}. *)
+val plan : basis:[ `Sent | `Handled ] -> bytes:int64 -> unit
 
 (** An entry is picked up, at the size the plan counted it as. *)
 val start_entry : size:int64 -> unit
@@ -17,12 +21,21 @@ val start_entry : size:int64 -> unit
     reached a store or were already there. Ignored between entries. *)
 val advance : bytes:int64 -> sent:bool -> unit
 
-(** The entry in flight is finished, its bytes routed by what became of it.
+(** An entry a run is done with, [bytes] of the plan behind it and [sent] of
+    them having reached a store.
+
+    For a run holding several entries at once, where {!start_entry} would name
+    whichever of them started last and {!finish_entry} would charge its size to
+    that one. A mirror examines objects by the dozen. *)
+val settle : bytes:int64 -> sent:int64 -> [ `Done | `Skipped | `Failed ] -> unit
+
+(** {!settle} for the entry in flight, its bytes routed by what became of it.
     [`Done] carries the size actually handled, which is not always the size
     planned for.
 
-    Only [`Done] bytes are throughput: an entry needing no work finishes at once
-    and would otherwise report a rate nothing can sustain. *)
+    [`Skipped] is behind the run without being throughput: an entry needing no
+    work finishes at once, and a [`Sent] estimate counting it would report a
+    rate nothing can sustain. *)
 val finish_entry : [ `Done of int64 | `Skipped | `Failed ] -> unit
 
 (** What {!Job_report} puts in its payload, empty where nothing was recorded.
@@ -34,15 +47,22 @@ val finish_entry : [ `Done of int64 | `Skipped | `Failed ] -> unit
     means, a resumed import being most of the way through its tree with nothing
     uploaded.
 
-    [bytesPerSecAvg] is [bytesSent] over the time since the first byte was sent,
-    and [etaSeconds] follows from it. Deliberately not [bytesDone] over the
-    whole run: a resumed import opens by finding files and chunks it already
-    has, and dividing by that answers with a rate no transfer ran at — the
-    estimate would promise hours for work that has not started. A rolling window
-    is not it either, since an estimate divided by the last few seconds swings
-    by hours between reports and the report's [traffic] figures are already
-    rolling.
+    [bytesPerSecAvg] is what the run's [basis] got through over the time it has
+    been getting through it, [ratedOn] names which of the two it is, and
+    [etaSeconds] is [bytesRemaining] at that rate. A rolling window is not it,
+    since an estimate divided by the last few seconds swings by hours between
+    reports and the report's [traffic] figures are already rolling.
 
-    So a run that sends nothing shows no estimate: what it is doing costs
-    hashing rather than transfer, and there is no throughput to extrapolate. *)
+    Under [`Sent] that is bytes that reached a store, timed from the first of
+    them, and deliberately not [bytesDone] over the whole run: a resumed import
+    opens by finding files and chunks it already has, and dividing by that
+    answers with a rate no transfer ran at — the estimate would promise hours
+    for work that has not started. So a [`Sent] run that sends nothing shows no
+    estimate at all: what it is doing costs hashing rather than transfer.
+
+    Under [`Handled] it is the plan itself over the time since {!plan}, which is
+    what a run examining what a store already holds is spending its time on —
+    round trips, not bytes. A mirror mostly finds objects in place, and an
+    estimate against what it happened to copy would answer with hours of
+    transfer for a run that has minutes of checking left. *)
 val json : unit -> (string * Yojson.Safe.t) list

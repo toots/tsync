@@ -1117,10 +1117,13 @@ let text json =
                          | `Null -> []
                          | e ->
                              [
-                               Printf.sprintf "~%s at %s/s avg"
+                               Printf.sprintf "~%s at %s/s%s"
                                  (duration (num e))
                                  (Metrics.human_bytes
-                                    (int_of (mem p "bytesPerSecAvg")));
+                                    (int_of (mem p "bytesPerSecAvg")))
+                                 (match mem p "ratedOn" with
+                                   | `Null -> ""
+                                   | r -> " " ^ str r);
                              ])));
             (match mem j "counters" with
               | `List (_ :: _ as counters) ->

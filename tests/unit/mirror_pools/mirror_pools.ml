@@ -110,7 +110,7 @@ let () =
          ~on_start:(fun ~name:_ ~key ->
            events := `Start :: !events;
            started := key :: !started)
-         ~on_copy:(fun ~name:_ ~key ~reason:_ ~bytes:_ ->
+         ~on_entry:(fun ~name:_ ~key ~size:_ ~outcome:_ ->
            if !live_at_first_copy = 0 then
              live_at_first_copy :=
                (Stdlib.Gc.stat ()).Stdlib.Gc.live_words - baseline;
@@ -161,19 +161,27 @@ let () =
      (* A second pass has nothing to do, so nothing may be announced as picked
         up: [on_start] fires per object examined, and every one is already
         right. *)
-     let started = ref [] and copies = ref 0 in
+     let started = ref [] and copies = ref 0 and present = ref 0 in
      let* dests =
        M.resync ~source:"source" ~scope:`Manifests
          ~on_start:(fun ~name:_ ~key -> started := key :: !started)
-         ~on_copy:(fun ~name:_ ~key:_ ~reason:_ ~bytes:_ -> incr copies)
+         ~on_entry:(fun ~name:_ ~key:_ ~size:_ ~outcome ->
+           match outcome with
+             | `Copied _ -> incr copies
+             | `Present -> incr present)
          ()
      in
      step "second pass: %d examined, %d copied" (List.length !started) !copies;
      check "a settled destination is still examined"
        (List.length !started = copied);
      check "and nothing is copied twice" (!copies = 0);
+     (* An object found in place is what the run got through, and a caller told
+        only about copies would have a second pass report no progress at all. *)
+     check "an object already right is still accounted for"
+       ~why:(fun () -> Printf.sprintf "%d of %d" !present copied)
+       (!present = copied);
      check "which the stats agree with"
        (List.for_all (fun d -> d.Mirror.copied = 0) dests);
 
-     report ~expected:11 ();
+     report ~expected:12 ();
      Lwt.return_unit)
