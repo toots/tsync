@@ -53,9 +53,10 @@ let () =
   check "and is the remainder at the rate the run has been going"
     ~why:(fun () -> Printf.sprintf "%.3fs estimated, %.3fs elapsed" eta elapsed)
     (eta <= 1.5 *. elapsed && eta >= 1.5 *. (elapsed -. 0.1));
-  check "the rate is what it got through, not what it moved"
-    ~why:(fun () -> Printf.sprintf "%.0f/s" (num "bytesPerSecAvg"))
-    (num "bytesPerSecAvg" > 0.);
+  (* The figure the estimate divides is not a throughput anybody could watch:
+     the report's traffic row is what moved, and it is zero. *)
+  check "and no rate is published, nothing having moved at that one"
+    (not (present "bytesPerSecAvg"));
   check "and the fraction counts what was already there"
     (num "bytesHandled" = 400. && num "bytesSkipped" = 400.);
 

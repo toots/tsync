@@ -47,11 +47,13 @@ val finish_entry : [ `Done of int64 | `Skipped | `Failed ] -> unit
     means, a resumed import being most of the way through its tree with nothing
     uploaded.
 
-    [bytesPerSecAvg] is what the run's [basis] got through over the time it has
-    been getting through it, [ratedOn] names which of the two it is, and
-    [etaSeconds] is [bytesRemaining] at that rate. A rolling window is not it,
-    since an estimate divided by the last few seconds swings by hours between
-    reports and the report's [traffic] figures are already rolling.
+    [etaSeconds] is [bytesRemaining] at the rate the run's [basis] has been
+    going, and [bytesPerSecAvg] is that rate where it is one anybody transferred
+    at — a [`Handled] run moved nothing at the figure it divides by, and a rate
+    printed beside the report's [traffic] row would state a throughput that
+    never happened. A rolling window is not it, since an estimate divided by the
+    last few seconds swings by hours between reports and the report's [traffic]
+    figures are already rolling.
 
     Under [`Sent] that is bytes that reached a store, timed from the first of
     them, and deliberately not [bytesDone] over the whole run: a resumed import

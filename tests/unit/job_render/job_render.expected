@@ -1,7 +1,7 @@
 === a running import, with the bytes it has behind and ahead of it
   import  pid 4242  running 1h 2m  /media/stage
     current          Music Production/…/freedia0272.MXF · 512.0 MB of 4.0 GB (12%)
-    progress         39% of 8.4 GB · 2.1 GB already there · 5.1 GB left · ~11m 9s at 7.8 MB/s sent
+    progress         39% of 8.4 GB · 2.1 GB already there · 5.1 GB left · ~11m 9s at 7.8 MB/s avg
     counted          30433 of 61956 files, 4 skipped, 0 failed
     traffic          up 704.7 GB (7.8 MB/s), down 39.3 MB (2.0 MB/s), 2500 chunks hashed
     memory           108.0 MB rss + 40.0 MB swapped, 75.0 MB heap, 41.0 MB live
@@ -34,16 +34,15 @@
     backend          91 retries (87 timeouts), 0 failed
 
 === a mirror, whose estimate is against what it got through
-  mirror  pid 4242  running 1h 2m  backblaze
-    current          backblaze · tsync/…/a3f1c0d2e4b58967-2455c129acbb7e9b
-    progress         78% of 8.4 GB · 6.5 GB already there · 1.8 GB left · ~9m 41s at 3.2 MB/s handled
-    counted          481022 of 622110 objects, 3172 copied
-    traffic          up 704.7 GB (7.8 MB/s), down 39.3 MB (2.0 MB/s), 2500 chunks hashed
-    memory           108.0 MB rss + 40.0 MB swapped, 75.0 MB heap, 41.0 MB live
-    deferred         207 queued, 3 in flight
-                     DEGRADED, run tsync mirror
-    slots            chunk buffers 4/4 (12 waiting)
-    backend          91 retries (87 timeouts), 0 failed
+  mirror  pid 112736  running 1h 19m  local
+    current          gcs · tsync/…/41a208a23b9e3d2a-21db2925f6924887
+    progress         91% of 900.0 GB · 820.7 GB already there · 79.2 GB left · ~7m 37s
+    counted          205432 of 225258 objects, 11 copied
+    traffic          up 56.5 MB (0 B/s), down 0 B (0 B/s), 0 chunks hashed
+    memory           182.5 MB rss + 241.8 MB swapped, 114.7 MB heap, 33.1 MB live
+    deferred         0 queued, 0 in flight
+    slots            copy 0/4, probe 16/16 (48 waiting)
+    backend          146 retries (146 timeouts), 0 failed
 
 === a job that died, which is the only trace its process leaves
   import  pid 4242  failed, ran 1h 2m  /media/stage: disk full
