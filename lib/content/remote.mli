@@ -15,13 +15,21 @@ module type S = sig
       key) and uploaded if absent, then the manifest is written. For a file
       handed over whole — import, and the FileProvider's re-import. Setting
       [cancel] aborts at the next chunk boundary with {!Cancelled}, and a source
-      that moves while it is being read raises {!Source_changed}. *)
+      that moves while it is being read raises {!Source_changed}.
+
+      [on_progress] fires per chunk with that chunk's length, deduplicated
+      chunks included: it says how much of the file is on the store, which is
+      what a caller reporting a multi-hour upload wants, rather than how much
+      crossed the wire. Chunks complete out of order, so only the running sum
+      means anything, and it runs while the chunk holds its buffer slot, so it
+      must return at once. {!upload_chunks} reports nothing. *)
   val upload :
     key:string ->
     src_path:string ->
     mtime:float ->
     chunk_size:int ->
     ?cancel:bool ref ->
+    ?on_progress:(bytes:int -> unit) ->
     unit ->
     Manifest.t Lwt.t
 

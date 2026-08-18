@@ -37,28 +37,35 @@ let stub_server ~path ~seen =
 let () =
   Lwt_main.run
     ((* No listener at all: the path does not exist. *)
-     Job_report.start ~interval:0.1
+     Job.Report.start ~interval:0.1
        ~socket_path:(Filename.concat root "absent.sock")
        ~domain:"d" ~kind:"import"
        ~counters:(fun () -> [("files", 3)])
        ();
      let* () = Lwt_unix.sleep 0.45 in
      check "reporting to a socket nobody is listening on does not raise" true;
-     let* () = Job_report.finish () in
+     let* () = Job.Report.finish () in
      check "and finishing against it does not raise either" true;
 
      (* A listener that answers, so the payload can be inspected. *)
      let path = Filename.concat root "live.sock" in
      let seen = ref [] in
      let* () = stub_server ~path ~seen in
-     Job_report.start ~socket_path:path ~domain:"d" ~kind:"import" ~interval:0.1
+     Job.Report.start ~socket_path:path ~domain:"d" ~kind:"import" ~interval:0.1
        ~target:"/media/files/stage"
        ~current:(fun () -> Some "big.mov")
        ~deferred:(fun () -> Some (207, 3, false))
        ~counters:(fun () -> [("files", 30433); ("failed", 0)])
        ();
+     (* A run whose plan is 1000 bytes: one entry of 400 already in the domain,
+        one of 600 half sent. *)
+     Job.Progress.plan ~bytes:1000L;
+     Job.Progress.start_entry ~size:400L;
+     Job.Progress.finish_entry `Skipped;
+     Job.Progress.start_entry ~size:600L;
+     Job.Progress.advance ~bytes:300L;
      let* () = Lwt_unix.sleep 0.45 in
-     let* () = Job_report.finish () in
+     let* () = Job.Report.finish () in
      check "a listening daemon receives reports" (!seen <> []);
 
      let last = List.hd (List.rev !seen) in
@@ -80,11 +87,21 @@ let () =
            ]);
      check "it carries memory the command never supplied"
        (Yojson.Safe.Util.member "rssBytes" (mem "memory") <> `Null);
+     let progress k = Yojson.Safe.Util.member k (mem "progress") in
+     check "it carries the bytes the command recorded"
+       (progress "bytesTotal" = `Int 1000
+       && progress "bytesSkipped" = `Int 400
+       && progress "bytesDone" = `Int 0);
+     check "what an entry needing no work took is not left to do"
+       (progress "bytesRemaining" = `Int 600);
+     check "and the entry in flight says how far into it the run is"
+       (Yojson.Safe.Util.member "bytesDone" (progress "current") = `Int 300
+       && Yojson.Safe.Util.member "bytesTotal" (progress "current") = `Int 600);
      check "and a done report is sent last"
        (let final = Yojson.Safe.from_string (List.hd !seen) in
         Yojson.Safe.Util.member "state" final = `String "done");
 
      (* Counted, so a suite that stopped exercising anything fails rather than
         passing quietly. *)
-     report ~expected:11 ();
+     report ~expected:14 ();
      Lwt.return_unit)

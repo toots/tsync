@@ -1050,7 +1050,49 @@ let text json =
                else Printf.sprintf "%s, ran %s" state age)
               (match mem j "target" with `Null -> "" | t -> "  " ^ str t)
               (match mem j "error" with `Null -> "" | e -> ": " ^ str e);
-            sub "current" (fun c -> row 4 "current" (str c));
+            let progress = mem j "progress" in
+            let pct part whole =
+              if whole > 0 then Printf.sprintf " (%d%%)" (100 * part / whole)
+              else ""
+            in
+            (* Under the name it belongs to rather than on a row of its own: a
+               file the run has been on for hours is one thing, and how far into
+               it the run is is the rest of that thing. *)
+            sub "current" (fun c ->
+                row 4 "current"
+                  (str c
+                  ^
+                    match mem progress "current" with
+                    | `Null -> ""
+                    | cur ->
+                        let done_ = int_of (mem cur "bytesDone")
+                        and total = int_of (mem cur "bytesTotal") in
+                        Printf.sprintf " — %s of %s%s"
+                          (Metrics.human_bytes done_)
+                          (Metrics.human_bytes total)
+                          (pct done_ total)));
+            (match progress with
+              | `Null -> ()
+              | p ->
+                  let done_ = int_of (mem p "bytesDone")
+                  and total = int_of (mem p "bytesTotal")
+                  and left = int_of (mem p "bytesRemaining")
+                  and skipped = int_of (mem p "bytesSkipped") in
+                  row 4 "progress"
+                    (Printf.sprintf "%s of %s%s, %s left at %s/s%s%s"
+                       (Metrics.human_bytes done_)
+                       (Metrics.human_bytes total)
+                       (pct done_ total) (Metrics.human_bytes left)
+                       (Metrics.human_bytes (int_of (mem p "bytesPerSec")))
+                       (* A rate too new or too slow to divide by leaves the
+                          estimate off rather than inventing one. *)
+                         (match mem p "etaSeconds" with
+                         | `Null -> ""
+                         | e -> ", ~" ^ duration (num e))
+                       (if skipped > 0 then
+                          Printf.sprintf " — %s already in the domain"
+                            (Metrics.human_bytes skipped)
+                        else "")));
             (match mem j "counters" with
               | `List (_ :: _ as counters) ->
                   row 4 "counted"

@@ -309,7 +309,7 @@ let deferred_totals members =
    [current] joins a phase to the thing within it, so six commands do not each
    pick a separator. *)
 let report_job ?domain ?target ?current ~kind (module C : Conf.S) ~counters () =
-  Job_report.start
+  Job.Report.start
     ~socket_path:(snd (reporting_target ?domain ()))
     ~domain:C.domain_name ~kind ?target ?current
     ~deferred:(fun () -> deferred_totals C.members)
@@ -413,7 +413,7 @@ let trace_process ~name =
    and a deferred target fills in the background, so without this a short-lived
    command exits leaving copies for the daemon it may not be running alongside.
 
-   [report] is a thunk calling {!Job_report.start}, run here so a long command
+   [report] is a thunk calling {!Job.Report.start}, run here so a long command
    reports for as long as it runs — the drain included, which is work a caller
    would otherwise see as a command that had finished. *)
 let run_lwt ?report p =
@@ -434,9 +434,9 @@ let run_lwt ?report p =
        Lwt.catch
          (fun () -> p)
          (fun exn ->
-           let* () = Job_report.finish ~error:(Printexc.to_string exn) () in
+           let* () = Job.Report.finish ~error:(Printexc.to_string exn) () in
            Lwt.fail exn)
      in
      let* () = Backend.drain () in
-     let+ () = Job_report.finish () in
+     let+ () = Job.Report.finish () in
      r)

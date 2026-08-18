@@ -18,6 +18,7 @@ module type S = sig
     mtime:float ->
     chunk_size:int ->
     ?cancel:bool ref ->
+    ?on_progress:(bytes:int -> unit) ->
     unit ->
     Manifest.t Lwt.t
 
@@ -163,7 +164,7 @@ module Make_with_layout (C : Conf.S) (L : Layout.S) : S = struct
      An import takes its sources as settled: one that shrank past this chunk
      cannot be mapped and aborts, and one truncated after the mapping is taken
      is [SIGBUS]. *)
-  let upload_chunk fd ~cancel ~file_size ~chunk_size index =
+  let upload_chunk fd ~cancel ~on_progress ~file_size ~chunk_size index =
     if !cancel then raise Cancelled;
     let offset = index * chunk_size in
     let len = min chunk_size (file_size - offset) in
@@ -172,7 +173,11 @@ module Make_with_layout (C : Conf.S) (L : Layout.S) : S = struct
           try Chunk.map_fd (Lwt_unix.unix_file_descr fd) ~offset ~len
           with Unix.Unix_error _ -> raise Cancelled
         in
-        put_chunk ~index ~data)
+        let+ entry = put_chunk ~index ~data in
+        (* Whether the chunk was written or deduplicated: what this says is how
+           much of the file is on the store, not how much crossed the wire. *)
+        on_progress ~bytes:len;
+        entry)
 
   (* A cancellation landing while the put is in flight unpublishes it again, or
      a ghost object survives under a name that may no longer exist locally.
@@ -211,7 +216,8 @@ module Make_with_layout (C : Conf.S) (L : Layout.S) : S = struct
      Sized from the descriptor the chunks are mapped through, so the length the
      chunking is laid out for and the bytes that reach the store come from one
      file however the name is reused meanwhile. *)
-  let upload ~key ~src_path ~mtime ~chunk_size ?(cancel = ref false) () =
+  let upload ~key ~src_path ~mtime ~chunk_size ?(cancel = ref false)
+      ?(on_progress = fun ~bytes:_ -> ()) () =
     let* fd = Lwt_unix_retry.openfile src_path [Unix.O_RDONLY] 0 in
     let* entries, file_size =
       Lwt.finalize
@@ -228,7 +234,7 @@ module Make_with_layout (C : Conf.S) (L : Layout.S) : S = struct
              [max_chunk_buffers] however many chunks contend. *)
           let* entries =
             Lwt_list.map_p
-              (upload_chunk fd ~cancel ~file_size ~chunk_size)
+              (upload_chunk fd ~cancel ~on_progress ~file_size ~chunk_size)
               (List.init num_chunks Fun.id)
           in
           (* A write landing mid-read leaves the chunks describing a file that

@@ -63,10 +63,11 @@ val stat_opt_large : string -> Unix.LargeFile.stats option Lwt.t
 (** Delete [path], ignoring a missing file or any other [Unix_error]. *)
 val unlink_quiet : string -> unit Lwt.t
 
-(** lstat-based classifier. Returns [`Dir], [`File], [`Symlink target], or
-    [`Missing] on any error (dangling link, ENOENT, EACCES, …). *)
+(** lstat-based classifier. Returns [`Dir], [`File size], [`Symlink target], or
+    [`Missing] on any error (dangling link, ENOENT, EACCES, …). A symlink's own
+    size is its target's length and is read with the target instead. *)
 val lstat_kind :
-  string -> [ `Dir | `File | `Symlink of string | `Missing ] Lwt.t
+  string -> [ `Dir | `File of int64 | `Symlink of string | `Missing ] Lwt.t
 
 (** Recursively delete [path]; missing paths and unlink/rmdir errors are
     ignored. Symlinks are removed, not followed. *)

@@ -172,18 +172,19 @@ let stat_opt_large path =
       Some st)
     (fun _ -> Lwt.return_none)
 
-(** lstat-based kind: [`Dir], [`File], or [`Symlink target]. [`Missing] for any
-    error (dangling link, permission denied, etc.). *)
+(* [LargeFile], so a size past 2 GB is a number rather than [EOVERFLOW]. The
+   size rides along because the lstat already has it: a caller sizing a walk
+   would otherwise stat every entry a second time. *)
 let lstat_kind path =
   Lwt.catch
     (fun () ->
-      let* st = Lwt_unix_retry.lstat path in
-      match st.Unix.st_kind with
+      let* st = Lwt_unix_retry.LargeFile.lstat path in
+      match st.Unix.LargeFile.st_kind with
         | Unix.S_DIR -> Lwt.return `Dir
         | Unix.S_LNK ->
             let+ target = Lwt_unix_retry.readlink path in
             `Symlink target
-        | _ -> Lwt.return `File)
+        | _ -> Lwt.return (`File st.Unix.LargeFile.st_size))
     (fun _ -> Lwt.return `Missing)
 
 (* Missing paths and unlink/rmdir failures are ignored. [lstat], so a symlink is
