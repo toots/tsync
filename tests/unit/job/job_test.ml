@@ -59,7 +59,7 @@ let () =
        ();
      (* A run whose plan is 1000 bytes: one entry of 400 already in the domain,
         one of 600 half sent. *)
-     Job.Progress.plan ~bytes:1000L;
+     Job.Progress.plan ~basis:`Sent ~bytes:1000L;
      Job.Progress.start_entry ~size:400L;
      Job.Progress.finish_entry `Skipped;
      Job.Progress.start_entry ~size:600L;
@@ -100,11 +100,15 @@ let () =
      check "and the entry in flight says how far into it the run is"
        (Yojson.Safe.Util.member "bytesDone" (progress "current") = `Int 300
        && Yojson.Safe.Util.member "bytesTotal" (progress "current") = `Int 600);
+     (* Transfer-bound: 300 of the 1000 moved, so what is left has a rate to be
+        measured against. *)
+     check "a run that transferred carries an estimate"
+       (progress "etaSeconds" <> `Null && progress "bytesPerSecAvg" <> `Int 0);
      check "and a done report is sent last"
        (let final = Yojson.Safe.from_string (List.hd !seen) in
         Yojson.Safe.Util.member "state" final = `String "done");
 
      (* Counted, so a suite that stopped exercising anything fails rather than
         passing quietly. *)
-     report ~expected:14 ();
+     report ~expected:15 ();
      Lwt.return_unit)

@@ -10,7 +10,15 @@
    Nothing here reads a clock — elapsed comes from the reporting process, whose
    clock is not the renderer's — so the output is the same on any machine. *)
 
-let job ?error ?(progress = []) ~state () =
+let job ?error ?(progress = []) ?(kind = "import") ?(target = "/media/stage")
+    ?(current = "Music Production/2024/sessions/live-takes/freedia0272.MXF")
+    ?(counters =
+      [
+        `List [`String "files"; `Int 30433];
+        `List [`String "planned"; `Int 61956];
+        `List [`String "skipped"; `Int 4];
+        `List [`String "failed"; `Int 0];
+      ]) ~state () =
   `Assoc
     [
       ("server", `Assoc [("frontend", `String "fuse")]);
@@ -20,24 +28,14 @@ let job ?error ?(progress = []) ~state () =
           [
             `Assoc
               ([
-                 ("kind", `String "import");
+                 ("kind", `String kind);
                  ("pid", `Int 4242);
                  ("state", `String state);
                  ("startedAt", `Float 1000.);
                  ("uptimeSeconds", `Float 3720.);
-                 ("target", `String "/media/stage");
-                 ( "current",
-                   `String
-                     "Music Production/2024/sessions/live-takes/freedia0272.MXF"
-                 );
-                 ( "counters",
-                   `List
-                     [
-                       `List [`String "files"; `Int 30433];
-                       `List [`String "planned"; `Int 61956];
-                       `List [`String "skipped"; `Int 4];
-                       `List [`String "failed"; `Int 0];
-                     ] );
+                 ("target", `String target);
+                 ("current", `String current);
+                 ("counters", `List counters);
                  ( "memory",
                    `Assoc
                      [
@@ -103,6 +101,7 @@ let resumed =
           ("bytesHandled", `Int 3543348018);
           ("bytesRemaining", `Int 5476083304);
           ("bytesPerSecAvg", `Int 8178892);
+          ("ratedOn", `String "sent");
           ("etaSeconds", `Float 669.5);
           ( "current",
             `Assoc
@@ -136,10 +135,32 @@ let deduplicating =
           ("bytesRemaining", `Int 6227702580);
           ("bytesSent", `Int 0);
           ("bytesPerSecAvg", `Int 0);
+          ("ratedOn", `String "sent");
           ( "current",
             `Assoc
               [("bytesDone", `Int 536870912); ("bytesTotal", `Int 4294967296)]
           );
+        ] );
+  ]
+
+(* A mirror well into a domain the destination mostly holds already: it has
+   examined 6.5 GB of the plan and moved 84 MB of it, so an estimate against
+   what it transferred would promise hours the run does not need. *)
+let mirroring =
+  [
+    ( "progress",
+      `Assoc
+        [
+          ("bytesTotal", `Int 9019431322);
+          ("bytesDone", `Int 88080384);
+          ("bytesSkipped", `Int 6979321856);
+          ("bytesFailed", `Int 0);
+          ("bytesHandled", `Int 7067402240);
+          ("bytesRemaining", `Int 1952029082);
+          ("bytesSent", `Int 88080384);
+          ("bytesPerSecAvg", `Int 3355443);
+          ("ratedOn", `String "handled");
+          ("etaSeconds", `Float 581.7);
         ] );
   ]
 
@@ -156,5 +177,16 @@ let () =
     (job ~state:"running" ~progress:deduplicating ());
   (* The elapsed figure is the same either way, so a job that has stopped must
      not leave it reading as an age. *)
+  show "a mirror, whose estimate is against what it got through"
+    (job ~state:"running" ~kind:"mirror" ~target:"backblaze"
+       ~current:
+         "backblaze · tsync/Files/chunks/2e2/a3f1c0d2e4b58967-2455c129acbb7e9b"
+       ~counters:
+         [
+           `List [`String "objects"; `Int 481022];
+           `List [`String "planned"; `Int 622110];
+           `List [`String "copied"; `Int 3172];
+         ]
+       ~progress:mirroring ());
   show "a job that died, which is the only trace its process leaves"
     (job ~state:"failed" ~error:"disk full" ())

@@ -778,6 +778,14 @@
   (alias runtest)
   (action (run ./mirror_pools.exe))))
 
+(subdir unit/progress_eta
+ (alias
+  (name default)
+  (deps progress_eta.exe))
+ (rule
+  (alias runtest)
+  (action (run ./progress_eta.exe))))
+
 (subdir unit/queue_claim
  (alias
   (name default)

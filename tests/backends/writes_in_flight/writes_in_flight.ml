@@ -161,8 +161,10 @@ let () =
      let copied = ref [] in
      let* dests =
        M.resync ~source:"source"
-         ~on_copy:(fun ~name:_ ~key ~reason:_ ~bytes:_ ->
-           copied := key :: !copied)
+         ~on_entry:(fun ~name:_ ~key ~size:_ ~outcome ->
+           match outcome with
+             | `Copied _ -> copied := key :: !copied
+             | `Present -> ())
          ()
      in
      show "copied" (List.sort compare (List.map Filename.basename !copied));

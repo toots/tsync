@@ -171,8 +171,12 @@ module Make (C : Conf.S) = struct
     in
     dedup_entries entries
 
+  (* One call per object examined rather than one per object copied: what a run
+     has behind it is the objects it found in place as much as the ones it
+     moved, and a caller given only the copies cannot tell a mirror that is
+     nearly done from one that has barely started. *)
   let resync_to ?(on_start = fun ~name:_ ~key:_ -> ())
-      ?(on_copy = fun ~name:_ ~key:_ ~reason:_ ~bytes:_ -> ()) src dst ~name
+      ?(on_entry = fun ~name:_ ~key:_ ~size:_ ~outcome:_ -> ()) src dst ~name
       entries =
     (* A fixed set of workers taking the next entry each, rather than a promise
        per entry: the listing is the domain's length, and fanning out over it
@@ -196,14 +200,17 @@ module Make (C : Conf.S) = struct
         | None -> Lwt.return acc
         | Some entry ->
             let key = entry.Backend.key in
+            let size = entry.Backend.size in
             let* copied =
               sync_entry ~on_start:(fun () -> on_start ~name ~key) src dst entry
             in
             worker
               (match copied with
-                | None -> acc
+                | None ->
+                    on_entry ~name ~key ~size ~outcome:`Present;
+                    acc
                 | Some (reason, bytes) ->
-                    on_copy ~name ~key ~reason ~bytes;
+                    on_entry ~name ~key ~size ~outcome:(`Copied (reason, bytes));
                     let n, total = acc in
                     (n + 1, total + bytes))
     in
@@ -224,8 +231,8 @@ module Make (C : Conf.S) = struct
   (* Copies between the stores themselves rather than through {!Conf.store}: the
      point is to reach the ones the composite writes off the caller's path, or
      does not write at all. Raises [Failure] when nothing has that name. *)
-  let resync ?source ?(scope = `All) ?(on_scan = fun ~objects:_ -> ())
-      ?(on_list = fun ~name:_ -> ()) ?on_start ?on_copy () =
+  let resync ?source ?(scope = `All) ?(on_scan = fun ~objects:_ ~bytes:_ -> ())
+      ?(on_list = fun ~name:_ -> ()) ?on_start ?on_entry () =
     let named name =
       match
         List.filter
@@ -276,10 +283,15 @@ module Make (C : Conf.S) = struct
         | `Path rel ->
             path_entries ~rel ~src_name:src.name ~on_list src.Backend.backend
     in
-    on_scan ~objects:(List.length entries);
+    on_scan ~objects:(List.length entries)
+      ~bytes:
+        (List.fold_left
+           (fun acc (e : Backend.file_entry) ->
+             Int64.add acc (Int64.of_int e.Backend.size))
+           0L entries);
     C.members
     |> List.filter (fun (m : Backend.member) -> m.Backend.name <> src.name)
     |> Lwt_list.map_s (fun (m : Backend.member) ->
-        resync_to ?on_start ?on_copy src.Backend.backend m.Backend.backend
+        resync_to ?on_start ?on_entry src.Backend.backend m.Backend.backend
           ~name:m.Backend.name entries)
 end
