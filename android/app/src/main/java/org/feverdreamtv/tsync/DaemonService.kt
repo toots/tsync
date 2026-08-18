@@ -180,7 +180,12 @@ class DaemonService : Service() {
         // Without syslog compiled in, Log.Daemon falls through to stdout, so this
         // pump is the only way to see anything the daemon says.
         Thread {
-            process.inputStream.bufferedReader().forEachLine { Log.i(TAG, it) }
+            // Stopping the daemon closes this stream under the pump, which
+            // surfaces as a read error rather than EOF and would otherwise reach
+            // no handler and take the process down.
+            runCatching {
+                process.inputStream.bufferedReader().forEachLine { Log.i(TAG, it) }
+            }
             // EOF means it exited: Android reaps this child on its own, and a
             // picker in another app needs it back without anyone opening ours.
             val lived = SystemClock.elapsedRealtime() - launchedAt
@@ -199,7 +204,9 @@ class DaemonService : Service() {
             }
         }.start()
         Thread {
-            process.errorStream.bufferedReader().forEachLine { Log.w(TAG, it) }
+            runCatching {
+                process.errorStream.bufferedReader().forEachLine { Log.w(TAG, it) }
+            }
         }.start()
         // The pause flag lives in the daemon's memory, so a restart forgets that
         // uploads were being held back for a metered network.
