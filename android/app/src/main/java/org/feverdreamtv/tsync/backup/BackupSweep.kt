@@ -163,7 +163,10 @@ class BackupSweep(
         val key = root + action.relativePath
         val staging = Ingest.newStaging(context)
         return try {
-            if (staging.usableSpace < row.sizeBytes * FREE_SPACE_FACTOR) {
+            // The staging file is a name that nothing has created yet, and
+            // usableSpace answers 0 for a path that does not exist, so this asks
+            // the directory holding it instead.
+            if (staging.parentFile.usableSpace < row.sizeBytes * FREE_SPACE_FACTOR) {
                 throw IllegalStateException("not enough free space for ${row.displayName}")
             }
             // The folder has to exist before the file lands in it: an upload
