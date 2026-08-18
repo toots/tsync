@@ -274,6 +274,13 @@ let make ?(verify_writes = true) ~root () : (module Backend.S) =
         Lwt.catch
           (fun () ->
             let* names = readdir_list path in
+            (* A write in flight is not an object: {!write_file} stages under a
+               name of its own and renames, so listing one hands out a key that
+               is gone by the time anybody asks for it, and a mirror copies the
+               half-written body to every other backend under that name. *)
+            let names =
+              List.filter (fun n -> not (Fs_util.is_temp_name n)) names
+            in
             let+ nested =
               Lwt_list.map_p
                 (fun entry ->

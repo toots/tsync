@@ -129,6 +129,20 @@
   (action
    (diff probe_deadline_test.expected probe_deadline_test.output))))
 
+(subdir backends/writes_in_flight
+ (alias
+  (name default)
+  (deps writes_in_flight.exe))
+ (rule
+  (alias runtest)
+  (target writes_in_flight.output)
+  (action
+   (with-stdout-to writes_in_flight.output (ignore-stderr (run ./writes_in_flight.exe)))))
+ (rule
+  (alias runtest)
+  (action
+   (diff writes_in_flight.expected writes_in_flight.output))))
+
 (subdir content/cache_cap
  (alias
   (name default)

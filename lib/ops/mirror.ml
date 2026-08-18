@@ -94,8 +94,16 @@ module Make (C : Conf.S) = struct
       if manifests_only then Lwt.return_none
       else Src.head_opt ~key:C.cursor_key ()
     in
-    dedup_entries
-      (List.concat per_prefix @ match cursor with Some e -> [e] | None -> [])
+    (* A stray temp name is a write another client left in flight, or one an
+       older tsync copied here before its listings hid them. Either way it is
+       not an object this domain refers to, so it is not spread further. *)
+    let listed =
+      List.filter
+        (fun (e : Backend.file_entry) ->
+          not (Fs_util.is_temp_key e.Backend.key))
+        (List.concat per_prefix)
+    in
+    dedup_entries (listed @ match cursor with Some e -> [e] | None -> [])
 
   (* [rel] itself and everything under it. *)
   let within ~rel path =
