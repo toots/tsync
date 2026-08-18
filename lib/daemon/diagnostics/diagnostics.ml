@@ -1117,13 +1117,16 @@ let text json =
                          | `Null -> []
                          | e ->
                              [
-                               Printf.sprintf "~%s at %s/s%s"
-                                 (duration (num e))
-                                 (Metrics.human_bytes
-                                    (int_of (mem p "bytesPerSecAvg")))
-                                 (match mem p "ratedOn" with
-                                   | `Null -> ""
-                                   | r -> " " ^ str r);
+                               (* A run whose estimate is against work rather
+                                  than transfer publishes no rate, and the
+                                  estimate stands on its own. *)
+                               (match mem p "bytesPerSecAvg" with
+                                 | `Null ->
+                                     Printf.sprintf "~%s" (duration (num e))
+                                 | r ->
+                                     Printf.sprintf "~%s at %s/s avg"
+                                       (duration (num e))
+                                       (Metrics.human_bytes (int_of r)));
                              ])));
             (match mem j "counters" with
               | `List (_ :: _ as counters) ->

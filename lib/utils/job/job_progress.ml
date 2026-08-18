@@ -102,8 +102,13 @@ let json () =
     let per_sec =
       if elapsed > 0. then Int64.to_float moved /. elapsed else 0.
     in
-    let rated_on =
-      match state.basis with `Sent -> "sent" | `Handled -> "handled"
+    (* Published only where it is a transfer rate: a run rated on what it got
+       through moved nothing at the figure its estimate divides, and printing it
+       beside the traffic row states a throughput that never happened. *)
+    let rate =
+      match state.basis with
+        | `Sent -> [("bytesPerSecAvg", `Int (int_of_float per_sec))]
+        | `Handled -> []
     in
     let eta =
       if per_sec > 0. && remaining > 0L then
@@ -137,10 +142,6 @@ let json () =
              (* What the run transferred, which is not what it got through:
                 a copy of what a store already holds moves nothing. *)
              ("bytesSent", int64 state.sent);
-             ("bytesPerSecAvg", `Int (int_of_float per_sec));
-             (* Which figure that rate is of, so a reader is not left to take it
-                for the transfer the [traffic] row reports. *)
-             ("ratedOn", `String rated_on);
            ]
-          @ eta @ entry) );
+          @ rate @ eta @ entry) );
     ])
