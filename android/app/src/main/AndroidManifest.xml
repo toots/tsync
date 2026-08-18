@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
 
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
@@ -48,6 +49,15 @@
             android:name=".DaemonService"
             android:exported="false"
             android:foregroundServiceType="dataSync" />
+
+        <!-- work-runtime declares this service without a foregroundServiceType,
+             so BackupWorker asking for dataSync is not a subset of it and the
+             platform throws on the service's own thread, past any catch the
+             worker can hold. -->
+        <service
+            android:name="androidx.work.impl.foreground.SystemForegroundService"
+            android:foregroundServiceType="dataSync"
+            tools:node="merge" />
 
         <!-- MANAGE_DOCUMENTS is held by the system only, so this is reachable
              through the picker rather than by arbitrary apps. -->
