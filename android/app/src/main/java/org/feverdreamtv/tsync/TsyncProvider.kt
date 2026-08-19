@@ -139,28 +139,52 @@ class TsyncProvider : DocumentsProvider() {
             return storage.openProxyFileDescriptor(
                 ParcelFileDescriptor.MODE_READ_ONLY,
                 object : ProxyFileDescriptorCallback() {
+                    /**
+                     * Read ahead, because the platform asks in 128 KB and each
+                     * ask is a process: on a Pixel 9a one costs about 100ms
+                     * whatever its size, so 128 KB at a time is a megabyte a
+                     * second and four at a time is twenty-three.
+                     *
+                     * Aligned to the window rather than started at the offset,
+                     * so a sequential reader hits the same window until it is
+                     * exhausted instead of missing on every call.
+                     */
+                    private var windowStart = -1L
+                    private var window = ByteArray(0)
+
                     override fun onGetSize(): Long = size
 
-                    // Demand-paged: the platform services each read here, so a
-                    // player starts on the first frame instead of waiting for a
-                    // whole film to land. Only the chunks a range covers are
-                    // fetched, and they stay in the cache for the reads after it.
                     override fun onRead(offset: Long, size: Int, data: ByteArray): Int {
-                        val served = try {
-                            Tsync.bytes(context!!, Cli.read(documentId, offset, size))
-                        } catch (e: Exception) {
-                            Log.w(TAG, "read $documentId @$offset: ${e.message}")
-                            throw ErrnoException("onRead", OsConstants.EIO)
+                        var done = 0
+                        while (done < size) {
+                            val at = offset + done
+                            val aligned = at / WINDOW * WINDOW
+                            if (windowStart != aligned) {
+                                window = try {
+                                    Tsync.bytes(
+                                        context!!, Cli.read(documentId, aligned, WINDOW)
+                                    )
+                                } catch (e: Exception) {
+                                    Log.w(TAG, "read $documentId @$aligned: ${e.message}")
+                                    throw ErrnoException("onRead", OsConstants.EIO)
+                                }
+                                windowStart = aligned
+                            }
+                            val from = (at - windowStart).toInt()
+                            // Short only here, at the end of the content, which
+                            // is what tells the caller it has all of it.
+                            if (from >= window.size) break
+                            val n = minOf(size - done, window.size - from)
+                            window.copyInto(data, done, from, from + n)
+                            done += n
                         }
-                        // Short at end of file, and the caller is told so rather
-                        // than handed the zeros a padded buffer would read as.
-                        served.copyInto(data)
-                        return served.size
+                        return done
                     }
 
-                    // Nothing is held open between reads, so there is nothing
-                    // to release.
-                    override fun onRelease() = Unit
+                    override fun onRelease() {
+                        window = ByteArray(0)
+                        windowStart = -1L
+                    }
                 },
                 callbackHandler
             )
@@ -256,6 +280,10 @@ class TsyncProvider : DocumentsProvider() {
 
     companion object {
         const val TAG = "tsyncsaf"
+
+        /** Half a chunk at the default chunkSize, so a cold window pulls one
+         *  chunk and the next is already local. */
+        private const val WINDOW = 4 * 1024 * 1024
         const val AUTHORITY = "org.feverdreamtv.tsync.documents"
 
         /** DocumentsUI caches the root list and only re-queries when told, so a
