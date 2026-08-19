@@ -26,9 +26,10 @@ object Tsync {
      * pool are per process, so they cap what one call does and say nothing about
      * how many there are.
      *
-     * [batch] is what keeps a sync or an upload from being one of them. Those
-     * run for minutes, and sharing a bound with a stat means the stat waits out
-     * a whole domain walk — a picker that never answers, which is what a single
+     * [batch] holds everything that changes a domain or walks one: those order
+     * each other through locks that live inside a single process, and they run
+     * for minutes, so sharing a bound with a stat means the stat waits out a
+     * whole domain walk — a picker that never answers, which is what a single
      * pool of four produced with two syncs and two uploads in it.
      */
     private const val MAX_INTERACTIVE = 4
@@ -110,8 +111,10 @@ object Tsync {
      * protect. stderr is drained on its own thread, a child that fills that pipe
      * blocking on the write and never reaching the exit this waits for.
      */
-    fun run(context: Context, args: List<String>, batched: Boolean = false): Result {
-        val slots = if (batched) batch else interactive
+    fun run(context: Context, args: List<String>): Result {
+        // Asked of the argv rather than of the caller: a call site that has to
+        // remember which pool it belongs in is a call site that will forget.
+        val slots = if (Cli.isExclusive(args)) batch else interactive
         slots.acquire()
         try {
             val process = Runtime.getRuntime().exec(
@@ -142,8 +145,8 @@ object Tsync {
     }
 
     /** A verb that answers in JSON. Throws [Cli.Error] on a refusal. */
-    fun json(context: Context, args: List<String>, batched: Boolean = false): JSONObject =
-        Cli.reply(run(context, args, batched).text)
+    fun json(context: Context, args: List<String>): JSONObject =
+        Cli.reply(run(context, args).text)
 
     /** A verb that answers in bytes. */
     fun bytes(context: Context, args: List<String>): ByteArray {
@@ -153,19 +156,11 @@ object Tsync {
     }
 
     /** A subcommand whose output a person reads: config, status, sync. */
-    fun plain(
-        context: Context,
-        args: List<String>,
-        batched: Boolean = false
-    ): Pair<Int, String> {
-        val result = run(context, args, batched)
+    fun plain(context: Context, args: List<String>): Pair<Int, String> {
+        val result = run(context, args)
         return result.code to (result.text + result.err)
     }
 
     fun plain(context: Context, vararg args: String): Pair<Int, String> =
         plain(context, args.toList())
-
-    /** A whole-domain walk: minutes of work, and never in the way of a read. */
-    fun batchPlain(context: Context, vararg args: String): Pair<Int, String> =
-        plain(context, args.toList(), batched = true)
 }

@@ -41,7 +41,7 @@ object Ingest {
         FileOutputStream(staging, true).use { it.fd.sync() }
         if (modified != null) staging.setLastModified(modified)
         try {
-            Tsync.json(context, Cli.writeWhole(key, staging.absolutePath), batched = true)
+            Tsync.json(context, Cli.writeWhole(key, staging.absolutePath))
         } catch (failure: Exception) {
             staging.delete()
             throw failure

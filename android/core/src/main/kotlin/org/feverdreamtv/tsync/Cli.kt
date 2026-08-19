@@ -45,6 +45,22 @@ object Cli {
     fun status() = listOf("android", "status")
 
     /**
+     * Verbs that change a domain, and the whole-domain walks.
+     *
+     * These must not run beside each other. The metadata lock and the per-key
+     * locks that order them are Lwt mutexes held inside one process
+     * (lib/sync/file.ml with_meta, lib/content/data.ml key_locks), which was
+     * enough while a domain had exactly one; nothing orders two invocations.
+     * Reads take neither lock and are free to run together.
+     */
+    private val EXCLUSIVE =
+        setOf("create", "mkdir", "delete", "rmdir", "rename", "write-whole", "sync")
+
+    /** Whether [args] names one of them, given argv as it will be passed. */
+    fun isExclusive(args: List<String>): Boolean =
+        args.any { it in EXCLUSIVE }
+
+    /**
      * A refusal is a reply, not an exit code: `ok: false` with a code is how a
      * missing key arrives.
      */

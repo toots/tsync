@@ -47,7 +47,7 @@ class MainActivity : Activity() {
     private fun runFullSync(): Pair<Int, String> {
         syncRunning = true
         return try {
-            Tsync.batchPlain(this, "sync", "--full")
+            Tsync.plain(this, "sync", "--full")
         } finally {
             syncRunning = false
         }

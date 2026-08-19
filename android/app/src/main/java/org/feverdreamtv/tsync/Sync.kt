@@ -34,7 +34,7 @@ class SyncWorker(
     }
 
     private fun sync(): Result {
-        val (code, output) = Tsync.batchPlain(applicationContext, "sync")
+        val (code, output) = Tsync.plain(applicationContext, "sync")
         return if (code == 0) {
             Result.success()
         } else {
