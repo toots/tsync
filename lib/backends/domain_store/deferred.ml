@@ -99,11 +99,26 @@ let make ?(resume = false) ?chunk_from_prefix ~name ~backend ~source
     ~cursor_key ~root () : (module S) =
   let (module Target : Backend.S) = backend in
   let (module Source : Backend.S) = source in
-  (* Skips a HEAD per chunk, which is what makes a copy of an already-filled
-     file nearly free. *)
+  (* Chunk keys the target is known to hold, so a copy of an already-filled
+     file costs nothing per chunk. *)
   let ensured : (string, unit) Hashtbl.t = Hashtbl.create 1024 in
+
+  (* Shards whose listing has been folded into [ensured]. A manifest's chunks
+     hash across as many shards as it has members, so this pays off across jobs
+     rather than within one: a run works through manifests in the tens of
+     thousands and keeps meeting shards it has already listed. *)
+  let known_shards : (string, unit) Hashtbl.t = Hashtbl.create 256 in
+
+  (* Past the cap both go: a key forgotten while its shard stayed known would
+     never be learned again, the listing being what fills [ensured]. *)
+  let forget_if_full () =
+    if Hashtbl.length ensured >= max_ensured then begin
+      Hashtbl.reset ensured;
+      Hashtbl.reset known_shards
+    end
+  in
   let remember key =
-    if Hashtbl.length ensured >= max_ensured then Hashtbl.reset ensured;
+    forget_if_full ();
     Hashtbl.replace ensured key ()
   in
   let chunks_in_flight = ref 0 in
@@ -121,20 +136,32 @@ let make ?(resume = false) ?chunk_from_prefix ~name ~backend ~source
       | None, Some prefix ->
           Source.get ~key:(prefix ^ Chunk_layout.relative_path chunk_key) ()
   in
+  (* A shard listing reaches the same keys a HEAD under that prefix does: a
+     chunk still in the from-space of an open collection is under neither. *)
+  let learn_shard shard =
+    if Hashtbl.mem known_shards shard then Lwt.return_unit
+    else
+      let+ entries =
+        Target.list_prefix ~prefix:(chunk_prefix ^ shard ^ "/") ()
+      in
+      forget_if_full ();
+      List.iter
+        (fun (e : Backend.file_entry) ->
+          Hashtbl.replace ensured e.Backend.key ())
+        entries;
+      Hashtbl.replace known_shards shard ()
+  in
   let ensure_chunk chunk_key =
-    let key = chunk_prefix ^ Chunk_layout.relative_path chunk_key in
+    let relative = Chunk_layout.relative_path chunk_key in
+    let key = chunk_prefix ^ relative in
     if Hashtbl.mem ensured key then Lwt.return_unit
     else
-      let* head = Target.head_opt ~key () in
-      let* () =
-        match head with
-          | Some _ -> Lwt.return_unit
-          | None ->
-              let* data = source_body key chunk_key in
-              Target.put ~key ~data ()
-      in
-      remember key;
-      Lwt.return_unit
+      let* () = learn_shard (Chunk_layout.shard_of chunk_key) in
+      if Hashtbl.mem ensured key then Lwt.return_unit
+      else
+        let* data = source_body key chunk_key in
+        let+ () = Target.put ~key ~data () in
+        remember key
   in
   let rec run job =
     match job with

@@ -57,6 +57,20 @@
   (action
    (diff deferred.expected deferred.output))))
 
+(subdir backends/deferred_shards
+ (alias
+  (name default)
+  (deps deferred_shards.exe))
+ (rule
+  (alias runtest)
+  (target deferred_shards.output)
+  (action
+   (with-stdout-to deferred_shards.output (ignore-stderr (run ./deferred_shards.exe)))))
+ (rule
+  (alias runtest)
+  (action
+   (diff deferred_shards.expected deferred_shards.output))))
+
 (subdir backends/fallback
  (alias
   (name default)
@@ -114,6 +128,20 @@
  (rule
   (alias runtest)
   (action (run ./gcs.exe))))
+
+(subdir backends/http_reuse
+ (alias
+  (name default)
+  (deps http_reuse.exe))
+ (rule
+  (alias runtest)
+  (target http_reuse.output)
+  (action
+   (with-stdout-to http_reuse.output (ignore-stderr (run ./http_reuse.exe)))))
+ (rule
+  (alias runtest)
+  (action
+   (diff http_reuse.expected http_reuse.output))))
 
 (subdir backends/probe_deadline
  (alias
@@ -792,6 +820,20 @@
   (alias runtest)
   (action (run ./mirror_pools.exe))))
 
+(subdir unit/mirror_probe
+ (alias
+  (name default)
+  (deps mirror_probe.exe))
+ (rule
+  (alias runtest)
+  (target mirror_probe.output)
+  (action
+   (with-stdout-to mirror_probe.output (ignore-stderr (run ./mirror_probe.exe)))))
+ (rule
+  (alias runtest)
+  (action
+   (diff mirror_probe.expected mirror_probe.output))))
+
 (subdir unit/progress_eta
  (alias
   (name default)
@@ -883,6 +925,20 @@
   (alias runtest)
   (action
    (diff zip_test.expected zip_test.output))))
+
+(subdir work/queue_records
+ (alias
+  (name default)
+  (deps queue_records.exe))
+ (rule
+  (alias runtest)
+  (target queue_records.output)
+  (action
+   (with-stdout-to queue_records.output (ignore-stderr (run ./queue_records.exe)))))
+ (rule
+  (alias runtest)
+  (action
+   (diff queue_records.expected queue_records.output))))
 
 (subdir work/queue_stall
  (alias
