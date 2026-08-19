@@ -150,8 +150,13 @@ module Make (J : JOB) = struct
     (* A record id leads with its timestamp; anything else is somebody's temp
        file, possibly a live one in another process, and is not ours to read or
        remove. An unreadable body is discarded: nothing can replay it, and
-       leaving it would stall a queue on every start. *)
-    let list t =
+       leaving it would stall a queue on every start.
+
+       [wanted] decides from the id alone, before the body is opened: a sweep
+       looking for what a queue has not already got is otherwise a read of every
+       record it holds, which on a large backlog is tens of thousands of opens
+       that end in the caller discarding all of them. *)
+    let list ?(wanted = fun _ -> true) t =
       let* exists = Lwt_unix_retry.file_exists t.dir in
       if not exists then Lwt.return_nil
       else
@@ -159,7 +164,7 @@ module Make (J : JOB) = struct
         let names =
           List.sort compare
             (List.filter
-               (fun n -> n <> "" && n.[0] >= '0' && n.[0] <= '9')
+               (fun n -> n <> "" && n.[0] >= '0' && n.[0] <= '9' && wanted n)
                names)
         in
         let+ read_one =
@@ -480,9 +485,8 @@ module Make (J : JOB) = struct
      ahead of it. *)
   let resume t =
     Lwt_mutex.with_lock t.recording @@ fun () ->
-    let+ records = Records.list t.log in
-    let records =
-      List.filter (fun (id, _) -> not (Hashtbl.mem t.loaded id)) records
+    let+ records =
+      Records.list ~wanted:(fun id -> not (Hashtbl.mem t.loaded id)) t.log
     in
     List.iter
       (fun (id, job) ->

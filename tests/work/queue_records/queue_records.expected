@@ -1,0 +1,12 @@
+=== a record the caller does not want is not opened
+  returned         (nothing)
+  record 1         on disk
+  record 2         on disk
+  record 3         on disk
+  log              (nothing)
+=== and one it does want is read, and judged
+  returned         one, three
+  record 1         on disk
+  record 2         gone
+  record 3         on disk
+  log              err durable queue: unreadable record 00000000000000000002-00000002-1, discarding

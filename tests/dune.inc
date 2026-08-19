@@ -892,6 +892,20 @@
   (action
    (diff zip_test.expected zip_test.output))))
 
+(subdir work/queue_records
+ (alias
+  (name default)
+  (deps queue_records.exe))
+ (rule
+  (alias runtest)
+  (target queue_records.output)
+  (action
+   (with-stdout-to queue_records.output (ignore-stderr (run ./queue_records.exe)))))
+ (rule
+  (alias runtest)
+  (action
+   (diff queue_records.expected queue_records.output))))
+
 (subdir work/queue_stall
  (alias
   (name default)
