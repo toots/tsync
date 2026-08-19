@@ -399,6 +399,26 @@ module Make (C : Conf.S) = struct
         | `Null -> []
         | counts -> [("totals", counts)]
     in
+    (* Same keys and same units as the process-wide [traffic] row, so a reader
+       comparing one store against the whole moves between figures that mean the
+       same thing. Absent for a store with no link, rather than zeroed. *)
+    let traffic =
+      match m.Backend.traffic with
+        | None -> []
+        | Some { Backend.uploaded; downloaded } ->
+            [
+              ( "traffic",
+                `Assoc
+                  [
+                    ("bytesUploaded", `Int (Metrics.total uploaded));
+                    ("bytesDownloaded", `Int (Metrics.total downloaded));
+                    ( "uploadBytesPerSec",
+                      `Int (int_of_float (Metrics.rate uploaded)) );
+                    ( "downloadBytesPerSec",
+                      `Int (int_of_float (Metrics.rate downloaded)) );
+                  ] );
+            ]
+    in
     let deferred =
       match (m.Backend.pending, m.in_flight, m.degraded) with
         | Some queued, Some in_flight, Some degraded ->
@@ -421,7 +441,7 @@ module Make (C : Conf.S) = struct
             `Assoc (List.map (fun (k, v) -> (k, `String v)) m.Backend.config) )
        :: probed
       @ [("journal", jrnl); ("corrupted", corrupt)]
-      @ disk_json m @ deferred @ tot)
+      @ disk_json m @ traffic @ deferred @ tot)
 
   let symlink_policy =
     match C.symlink_policy with
@@ -570,6 +590,16 @@ let elide path =
           String.sub path 0 i ^ "/…/" ^ base
       | _ -> "…/" ^ base)
 
+(* The one spelling of a traffic row. The process, a frontend, a store and a job
+   each report the same four figures, and four copies of the format is how two of
+   them come to disagree about what "up" means. *)
+let traffic_row t =
+  Printf.sprintf "up %s (%s/s), down %s (%s/s)"
+    (Metrics.human_bytes (int_of (mem t "bytesUploaded")))
+    (Metrics.human_bytes (int_of (mem t "uploadBytesPerSec")))
+    (Metrics.human_bytes (int_of (mem t "bytesDownloaded")))
+    (Metrics.human_bytes (int_of (mem t "downloadBytesPerSec")))
+
 let duration s =
   let s = int_of_float s in
   let d = s / 86400 and h = s mod 86400 / 3600 in
@@ -698,12 +728,7 @@ let text json =
        (int_of (mem lwt "writableFds"))
        (int_of (mem lwt "timers"))
        (int_of (mem lwt "poolSize")));
-  row 2 "traffic"
-    (Printf.sprintf "up %s (%s/s), down %s (%s/s)"
-       (Metrics.human_bytes (int_of (mem traffic "bytesUploaded")))
-       (Metrics.human_bytes (int_of (mem traffic "uploadBytesPerSec")))
-       (Metrics.human_bytes (int_of (mem traffic "bytesDownloaded")))
-       (Metrics.human_bytes (int_of (mem traffic "downloadBytesPerSec"))));
+  row 2 "traffic" (traffic_row traffic);
   row 2 "hashed"
     (Printf.sprintf "%d chunks (%d/s)"
        (int_of (mem traffic "chunksHashed"))
@@ -863,15 +888,7 @@ let text json =
                        (Metrics.human_bytes (int_of (mem f "rssBytes")))));
             (match mem f "traffic" with
               | `Null -> ()
-              | t ->
-                  row 4 "traffic"
-                    (Printf.sprintf "up %s (%s/s), down %s (%s/s)"
-                       (Metrics.human_bytes (int_of (mem t "bytesUploaded")))
-                       (Metrics.human_bytes
-                          (int_of (mem t "uploadBytesPerSec")))
-                       (Metrics.human_bytes (int_of (mem t "bytesDownloaded")))
-                       (Metrics.human_bytes
-                          (int_of (mem t "downloadBytesPerSec")))));
+              | t -> row 4 "traffic" (traffic_row t));
             List.iter
               (fun (label, total_key, rate_key) ->
                 match mem f total_key with
@@ -994,6 +1011,11 @@ let text json =
                       "%d chunk%s%s — run tsync data-integrity --repair" n
                       (if n = 1 then "" else "s")
                       (if bool_of (mem c "truncated") then "+" else "")));
+          (* A store with no link prints no row: a filesystem's zeros would
+             read as an idle store rather than one that never had traffic. *)
+          (match mem m "traffic" with
+            | `Null -> ()
+            | t -> row 4 "traffic" (traffic_row t));
           (match mem m "deferred" with
             | `Null -> ()
             | bf ->
@@ -1153,13 +1175,7 @@ let text json =
               | _ -> ());
             sub "traffic" (fun t ->
                 row 4 "traffic"
-                  (Printf.sprintf
-                     "up %s (%s/s), down %s (%s/s), %d chunks hashed"
-                     (Metrics.human_bytes (int_of (mem t "bytesUploaded")))
-                     (Metrics.human_bytes (int_of (mem t "uploadBytesPerSec")))
-                     (Metrics.human_bytes (int_of (mem t "bytesDownloaded")))
-                     (Metrics.human_bytes
-                        (int_of (mem t "downloadBytesPerSec")))
+                  (Printf.sprintf "%s, %d chunks hashed" (traffic_row t)
                      (int_of (mem t "chunksHashed"))));
             (* Live words beside the heap the process holds: the heap grows in
                steps and shrinks never, so the two together are the difference

@@ -24,7 +24,9 @@ module C = struct
   let shares_prefix = "tsync/shares/"
 
   let store =
-    Backend.make ~backend_type:"local" ~get_field:(fun _ -> Some backend_root)
+    Backend.make ~backend_type:"local"
+      ~get_field:(fun _ -> Some backend_root)
+      ()
 
   let members = [Backend.member ~name:"local" store]
   let cache_root = Filename.concat root "cache"
@@ -53,8 +55,9 @@ let moving = ref ""
 
 module Mutating = struct
   include
-    (val Backend.make ~backend_type:"local" ~get_field:(fun _ ->
-             Some backend_root)
+    (val Backend.make ~backend_type:"local"
+           ~get_field:(fun _ -> Some backend_root)
+           ()
         : Backend.S)
 
   let put ~key ~data () =
@@ -80,8 +83,9 @@ module Rm = Remote.Make (Cm)
 let opinionated n : (module Backend.S) =
   (module struct
     include
-      (val Backend.make ~backend_type:"local" ~get_field:(fun _ ->
-               Some backend_root)
+      (val Backend.make ~backend_type:"local"
+             ~get_field:(fun _ -> Some backend_root)
+             ()
           : Backend.S)
 
     let capabilities ~prefix:_ () =
@@ -124,7 +128,9 @@ let read_file path =
 
 let count_chunks () =
   let (module B : Backend.S) =
-    Backend.make ~backend_type:"local" ~get_field:(fun _ -> Some backend_root)
+    Backend.make ~backend_type:"local"
+      ~get_field:(fun _ -> Some backend_root)
+      ()
   in
   let+ entries = B.list_prefix ~prefix:C.chunk_prefix () in
   List.length

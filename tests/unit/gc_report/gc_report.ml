@@ -21,7 +21,7 @@ let chunk_prefix = "tsync/testdom/chunks/"
 let domain_prefix = "tsync/testdom/manifests/"
 
 module Main =
-  (val Backend.make ~backend_type:"local" ~get_field:(fun _ -> Some main_dir)
+  (val Backend.make ~backend_type:"local" ~get_field:(fun _ -> Some main_dir) ()
       : Backend.S)
 
 module C : Conf.S = struct

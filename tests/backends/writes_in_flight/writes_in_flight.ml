@@ -20,11 +20,11 @@ let chunk_prefix = "tsync/d/chunks/"
 let shard = "2e2/"
 
 module Local =
-  (val Backend.make ~backend_type:"local" ~get_field:(fun _ -> Some src_dir)
+  (val Backend.make ~backend_type:"local" ~get_field:(fun _ -> Some src_dir) ()
       : Backend.S)
 
 module Dst =
-  (val Backend.make ~backend_type:"local" ~get_field:(fun _ -> Some dst_dir)
+  (val Backend.make ~backend_type:"local" ~get_field:(fun _ -> Some dst_dir) ()
       : Backend.S)
 
 (* The staged file is planted on disk rather than caught mid-write: what is

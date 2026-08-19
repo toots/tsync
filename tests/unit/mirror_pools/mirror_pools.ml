@@ -18,11 +18,11 @@ let dst_dir = root ^ "/dst"
 let domain_prefix = "tsync/testdom/manifests/"
 
 module Src =
-  (val Backend.make ~backend_type:"local" ~get_field:(fun _ -> Some src_dir)
+  (val Backend.make ~backend_type:"local" ~get_field:(fun _ -> Some src_dir) ()
       : Backend.S)
 
 module Dst =
-  (val Backend.make ~backend_type:"local" ~get_field:(fun _ -> Some dst_dir)
+  (val Backend.make ~backend_type:"local" ~get_field:(fun _ -> Some dst_dir) ()
       : Backend.S)
 
 module C : Conf.S = struct

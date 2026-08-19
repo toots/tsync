@@ -29,8 +29,9 @@ module C : Conf.S = struct
   let shares_prefix = "tsync/shares/"
 
   let store =
-    Backend.make ~backend_type:"local" ~get_field:(fun _ ->
-        Some (root ^ "/store"))
+    Backend.make ~backend_type:"local"
+      ~get_field:(fun _ -> Some (root ^ "/store"))
+      ()
 
   (* The store that never answers, declared as the daemon would. *)
   let members =

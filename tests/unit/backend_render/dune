@@ -1,0 +1,5 @@
+(executable
+ (flags
+  (:standard -open Tsync_diagnostics))
+ (name backend_render)
+ (libraries tsync_diagnostics yojson unix lwt lwt.unix))

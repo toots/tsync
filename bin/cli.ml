@@ -74,9 +74,10 @@ let ipc_action ~socket_path ?path ?arg ?domain action =
     @ (match domain with Some d -> [("domain", `String d)] | None -> [])
     @ match arg with Some a -> [("arg", `String a)] | None -> [])
 
-let make_backend (bc : Conf_parsing.backend_config) =
-  Backend.make ~backend_type:bc.backend_type ~get_field:(fun k ->
-      List.assoc_opt k bc.fields)
+let make_backend ~traffic (bc : Conf_parsing.backend_config) =
+  Backend.make ~traffic ~backend_type:bc.backend_type
+    ~get_field:(fun k -> List.assoc_opt k bc.fields)
+    ()
 
 (* Empty for a body that is not a manifest: a folder marker, a trash marker, a
    share. *)
@@ -98,12 +99,18 @@ let deferred_root (d : Conf_parsing.domain) =
    so a resynced backfill is promoted by editing one word. *)
 let build_backends ~resume (d : Conf_parsing.domain) :
     (module Backend.S) * Backend.member list =
+  (* One counter pair per configured store, kept by name so the member built
+     below reports the very counters that store's wrapper adds to. *)
+  let traffic : (string, Backend.traffic) Hashtbl.t = Hashtbl.create 4 in
   (* Shared by every layer below: a second [make_backend] for the same config is
      a second client against the same store. Order comes from
      {!Conf_parsing.order_backends}, so a main answers first. *)
   let leaves =
     List.map
-      (fun (bc : Conf_parsing.backend_config) -> (bc, make_backend bc))
+      (fun (bc : Conf_parsing.backend_config) ->
+        let t = Backend.new_traffic () in
+        Hashtbl.replace traffic bc.Conf_parsing.name t;
+        (bc, make_backend ~traffic:t bc))
       (Conf_parsing.order_backends d.Conf_parsing.backends)
   in
   let of_roles rs =
@@ -181,6 +188,10 @@ let build_backends ~resume (d : Conf_parsing.domain) :
           ?pending:(stat (fun s -> s.Deferred.queued))
           ?in_flight:(stat (fun s -> s.Deferred.in_flight))
           ?degraded:(stat (fun s -> s.Deferred.degraded))
+          ?traffic:
+            (if Backend.counts_traffic ~backend_type:bc.backend_type then
+               Hashtbl.find_opt traffic bc.name
+             else None)
             (* Only a local store sits on a filesystem we can measure. *)
           ?local_path:
             (if bc.backend_type = "local" then List.assoc_opt "path" bc.fields

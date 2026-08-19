@@ -552,6 +552,20 @@
   (action
    (diff versioning.expected versioning.output))))
 
+(subdir unit/backend_render
+ (alias
+  (name default)
+  (deps backend_render.exe))
+ (rule
+  (alias runtest)
+  (target backend_render.output)
+  (action
+   (with-stdout-to backend_render.output (ignore-stderr (run ./backend_render.exe)))))
+ (rule
+  (alias runtest)
+  (action
+   (diff backend_render.expected backend_render.output))))
+
 (subdir unit/backend_traffic
  (alias
   (name default)
