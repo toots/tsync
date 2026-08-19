@@ -1,5 +1,12 @@
+; Links the frontend so the registry can be asked which verbs exist: a test that
+; kept its own list would go stale the moment one was added.
+
 (executable
  (flags
-  (:standard -open Tsync_test_harness))
+  (:standard -open Tsync_test_harness -open Tsync_frontend_register))
  (name android_test)
- (libraries tsync_test_harness unix))
+ (libraries
+  tsync_test_harness
+  tsync_android_frontend
+  tsync-libs.frontend_register
+  unix))

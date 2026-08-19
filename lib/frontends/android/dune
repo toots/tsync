@@ -14,8 +14,6 @@
    -open
    Tsync_engine
    -open
-   Tsync_ipc
-   -open
    Tsync_ipc_handler
    -open
    Tsync_diagnostics
@@ -31,7 +29,6 @@
   tsync-libs.conf
   tsync-libs.sync
   tsync-libs.engine
-  tsync-libs.ipc
   tsync-libs.ipc_handler
   tsync-libs.diagnostics
   tsync-libs.frontend_register

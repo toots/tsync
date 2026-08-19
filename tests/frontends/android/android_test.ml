@@ -39,9 +39,14 @@ let read_file path =
 let mkdir_p path =
   ignore (Sys.command (Printf.sprintf "mkdir -p %s" (Filename.quote path)))
 
+let exercised : (string, unit) Hashtbl.t = Hashtbl.create 16
+
 (* stderr carries the log, which the snapshot rule discards: what a caller
    parses is stdout and nothing else. *)
 let run args =
+  (match args with
+    | "android" :: verb :: _ -> Hashtbl.replace exercised verb ()
+    | _ -> ());
   let exe = Option.get binary in
   let out = Filename.concat root "out.bin" in
   let quoted = List.map Filename.quote (exe :: args) in
@@ -158,6 +163,20 @@ let () =
           (json_field "ok" missing = Some "false"
           && json_field "code" missing = Some "\"not_found\"");
 
+        case "a file is created empty, and read back whole";
+        check "create answers ok"
+          (json_field "ok" (run ["android"; "create"; "media/photos/new.txt"])
+          = Some "true");
+        let created = run ["android"; "stat"; "media/photos/new.txt"] in
+        check "a created file is empty"
+          ~why:(fun () -> created)
+          (json_field "size" created = Some "0");
+        let dest = Filename.concat root "fetched.bin" in
+        ignore (run ["android"; "fetch"; "media/photos/big.txt"; dest]);
+        check "fetch assembles the whole content into a file"
+          ~why:(fun () -> string_of_int (String.length (read_file dest)))
+          (read_file dest = fixture);
+
         case "the namespace verbs move and remove";
         ignore
           (run
@@ -191,4 +210,25 @@ let () =
           ~why:(fun () -> status)
           (mentions "Frontend android" && mentions "Domain media");
 
-        report ~expected:15 ()
+        (* A verb nobody drives here is a verb nothing proves, and the list is
+           the frontend's own rather than one kept in step by hand. *)
+        let registered =
+          List.concat_map
+            (fun (name, _group, commands) ->
+              if name = "android" then
+                List.map
+                  (fun (c : Frontend.command) -> c.Frontend.verb)
+                  commands
+              else [])
+            (Frontend.entries ())
+        in
+        let missing =
+          List.filter (fun v -> not (Hashtbl.mem exercised v)) registered
+        in
+        check "every registered android verb is exercised here"
+          ~why:(fun () ->
+            Printf.sprintf "%d verb(s) untested: %s" (List.length missing)
+              (String.concat ", " missing))
+          (registered <> [] && missing = []);
+
+        report ~expected:19 ()

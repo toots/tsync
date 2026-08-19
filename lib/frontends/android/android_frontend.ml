@@ -115,39 +115,16 @@ module Make (C : Conf.S) = struct
                        ()
                     @ [("domains", `List [json])]);
                 ])))
-
-  let start () =
-    let open Lwt.Syntax in
-    (Lwt.async_exception_hook :=
-       fun exn ->
-         Log.err "%s: async exception: %s" implementation
-           (Printexc.to_string exn));
-    Lwt_main.run
-      (let* () =
-         E.start
-           ~freshness:
-             (* The client holds no view to invalidate: a DocumentsProvider is
-                asked to list again on every access. *)
-             Frontend.Revalidates
-           ~on_upload_done:(fun ~key:_ -> Lwt.return_unit)
-           ()
-       in
-       (* [Ipc.serve] returns when a client sends [stop]. *)
-       let* () = Ipc.serve ~path:C.socket_path (Ih.handler hooks) in
-       E.drain ())
 end
 
-let start_binding (b : Frontend.binding) =
-  (* Leaf process (post-fork): safe to initialize Lwt now. *)
-  Frontend.cap_blocking_pool ~concurrency:(Frontend.binding_concurrency [b]);
-  let module C = (val b.Frontend.conf : Conf.S) in
-  Log.set_prefix (Printf.sprintf "[%s] " C.domain_name);
-  let module R = Make (C) in
-  R.start ()
-
-(* One process per domain, each with its own socket, as FUSE does — the last
-   runs in this process, so the common single-domain case never forks. *)
-let start bindings = Frontend.run_forked start_binding bindings
+(* There is nothing to start. Serving a socket here would put a second way to
+   reach a domain beside the commands, and the two would answer differently the
+   moment one of them grew a feature — so `tsync start' on a domain configured
+   this way says so rather than sitting there. *)
+let start (_ : Frontend.binding list) =
+  failwith
+    "the android frontend is driven by commands, not by a daemon: see `tsync \
+     android --help'"
 
 (* Positional arguments: the caller is an app, and a flag grammar would have to
    be parsed by the binary, which does not know this frontend's verbs. *)

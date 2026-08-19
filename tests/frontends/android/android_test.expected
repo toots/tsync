@@ -23,11 +23,17 @@ stat names the item by reference: ok
 stat reports it published: ok
 a missing key is a coded refusal, not a hang: ok
 
+=== a file is created empty, and read back whole
+create answers ok: ok
+a created file is empty: ok
+fetch assembles the whole content into a file: ok
+
 === the namespace verbs move and remove
 a renamed file is listed under its new name: ok
 the domain is empty again: ok
 
 === the report needs no daemon to answer
 status names this frontend and its domain: ok
+every registered android verb is exercised here: ok
 
-15 check(s), 0 failure(s)
+19 check(s), 0 failure(s)
