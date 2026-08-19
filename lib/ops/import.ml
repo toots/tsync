@@ -139,26 +139,24 @@ module Make (C : Conf.S) = struct
       Lwt.return (Imported state.Manifest.size))
 
   (* A journal entry is one JSON object per line, so an import records its ops
-     where they are already in that form. Held in a list until the end, they and
-     the string they encode to grow with the tree rather than with what is in
-     flight, which on a small machine is the largest thing the run keeps. *)
+     where they are already in that form. Spooled to disk rather than held in
+     memory, where they and the string they encode grow with the tree rather
+     than with what is in flight. *)
   module Spool = struct
     let dir = Filename.concat C.cache_root "import"
     let create () = Spool.create ~dir ~name:"journal"
     let add t ops = Spool.append t (Journal.encode ops)
-
-    (* [src] is taken as finished: what it holds is only all of it once its own
-       channel has been flushed. *)
-    let append t src =
-      let* () = Spool.close src in
-      Spool.append_file t ~src:(Spool.path src)
-
     let remove t = Spool.drop t
     let body t = Spool.seal t
 
     (* A killed import leaves its spool behind with nothing else to reap it. *)
     let reap () = Spool.reap ~dir
   end
+
+  (* A deferred replica queues an entry behind the objects it names, so
+     covering a whole run with one entry hides everything the run imported from
+     that replica's readers until its backlog drains. *)
+  let entry_ops = 2000
 
   let tally summary = function
     | Imported _ -> { summary with imported = summary.imported + 1 }
@@ -176,7 +174,8 @@ module Make (C : Conf.S) = struct
     go [] (Filename.dirname rel)
 
   let run ?(only = []) ?(exclude = []) ?(force_rehash = false)
-      ?(on_dir = fun ~rel:_ -> ()) ?(on_plan = fun ~files:_ ~bytes:_ -> ())
+      ?(entry_ops = entry_ops) ?(on_dir = fun ~rel:_ -> ())
+      ?(on_plan = fun ~files:_ ~bytes:_ -> ())
       ?(on_start = fun ~rel:_ ~size:_ -> ())
       ?(on_progress = fun ~bytes:_ ~sent:_ -> ()) ~src ~on_file () =
     let src =
@@ -240,16 +239,71 @@ module Make (C : Conf.S) = struct
       ref { imported = 0; skipped = 0; skipped_symlinks = 0; failed = 0 }
     in
     let* () = Spool.reap () in
-    let* puts = Spool.create () in
+    let* spool = Spool.create () in
+    let spool = ref spool in
+    let batched = ref 0 in
+    (* The spool is sealed to be read back, so what is published is replaced
+       rather than reused. Every pass below adds in sequence: an op appended
+       in parallel with this would land in a spool already sealed. *)
+    let publish () =
+      if !batched = 0 then Lwt.return_unit
+      else (
+        let full = !spool in
+        let* fresh = Spool.create () in
+        spool := fresh;
+        batched := 0;
+        Lwt.finalize
+          (fun () ->
+            let* body = Spool.body full in
+            let* entry_key = Fs.write_journal_entry_body body in
+            Fs.bump_cursor entry_key)
+          (fun () -> Spool.remove full))
+    in
+    (* One op at a time, so a caller handing over a whole tree's worth at once
+       is split the same as a file arriving per call. *)
+    let add ops =
+      Lwt_list.iter_s
+        (fun op ->
+          let* () = Spool.add !spool [op] in
+          incr batched;
+          if !batched >= entry_ops then publish () else Lwt.return_unit)
+        ops
+    in
     Lwt.finalize
       (fun () ->
         let record ~rel status =
           on_file ~rel status;
           counts := tally !counts status;
           match status with
-            | Imported size -> Spool.add puts [`Put (rel, size)]
+            | Imported size -> add [`Put (rel, size)]
             | Skipped_exists | Skipped_symlink | Failed _ -> Lwt.return_unit
         in
+        (* Every folder needs its own marker under the inode layout, files not
+           encoding their path. [dirs] is sorted, so parents precede children
+           and id resolution finds them. *)
+        let* dir_ids =
+          Lwt_list.map_s
+            (fun rel ->
+              let key = C.domain_prefix ^ rel ^ "/" in
+              let* () = Mf.create_dir key in
+              let* () = St.put_folder_marker ~key in
+              (* Minted by the marker above; read back so the journal entry
+                 carries the id a peer resolves the folder by. *)
+              let* id =
+                Folder_ids.ensure_id ~cache_root:C.cache_root
+                  ~domain_name:C.domain_name rel
+              in
+              on_dir ~rel;
+              Lwt.return (rel, id))
+            dirs
+        in
+        let mkdirs =
+          List.map (fun (d, id) -> `Mkdir (d ^ "/", Some id)) dir_ids
+        in
+        (* A peer resolves a file's folder by the id its marker carries, so
+           every mkdir is published before a put can name the folder. *)
+        let* () = if mkdirs = [] then Lwt.return_unit else add mkdirs in
+        let* () = publish () in
         let* () =
           Lwt_list.iter_s
             (fun (rel, size) ->
@@ -282,47 +336,7 @@ module Make (C : Conf.S) = struct
               record ~rel status)
             symlinks
         in
-        (* Every folder needs its own marker under the inode layout, files not
-           encoding their path. [dirs] is sorted, so parents precede children
-           and id resolution finds them. *)
-        let* dir_ids =
-          Lwt_list.map_s
-            (fun rel ->
-              let key = C.domain_prefix ^ rel ^ "/" in
-              let* () = Mf.create_dir key in
-              let* () = St.put_folder_marker ~key in
-              (* Minted by the marker above; read back so the journal entry
-                 carries the id a peer resolves the folder by. *)
-              let* id =
-                Folder_ids.ensure_id ~cache_root:C.cache_root
-                  ~domain_name:C.domain_name rel
-              in
-              on_dir ~rel;
-              Lwt.return (rel, id))
-            dirs
-        in
-        let mkdirs =
-          List.map (fun (d, id) -> `Mkdir (d ^ "/", Some id)) dir_ids
-        in
-        (* A peer replays the entry in order and resolves a file's folder by the
-           id its marker carries, so the markers go ahead of the puts the passes
-           above recorded. *)
-        let+ () =
-          if mkdirs = [] && !counts.imported = 0 then Lwt.return_unit
-          else
-            let* entry = Spool.create () in
-            Lwt.finalize
-              (fun () ->
-                let* () =
-                  if mkdirs = [] then Lwt.return_unit
-                  else Spool.add entry mkdirs
-                in
-                let* () = Spool.append entry puts in
-                let* body = Spool.body entry in
-                let* entry_key = Fs.write_journal_entry_body body in
-                Fs.bump_cursor entry_key)
-              (fun () -> Spool.remove entry)
-        in
+        let+ () = publish () in
         !counts)
-      (fun () -> Spool.remove puts)
+      (fun () -> Spool.remove !spool)
 end

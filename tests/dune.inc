@@ -688,6 +688,14 @@
   (action
    (diff hash.expected hash.output))))
 
+(subdir unit/import_batching
+ (alias
+  (name default)
+  (deps import_batching.exe))
+ (rule
+  (alias runtest)
+  (action (run ./import_batching.exe))))
+
 (subdir unit/import_progress
  (alias
   (name default)
@@ -813,6 +821,14 @@
   (alias runtest)
   (action
    (diff queue_claim_test.expected queue_claim_test.output))))
+
+(subdir unit/queue_unreadable
+ (alias
+  (name default)
+  (deps queue_unreadable.exe))
+ (rule
+  (alias runtest)
+  (action (run ./queue_unreadable.exe))))
 
 (subdir unit/staged_codec
  (alias
