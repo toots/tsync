@@ -13,7 +13,9 @@ let share_base = "https://share.example"
    never serves shares). *)
 module Shareable : Backend.S = struct
   include
-    (val Backend.make ~backend_type:"local" ~get_field:(fun _ -> Some store_dir)
+    (val Backend.make ~backend_type:"local"
+           ~get_field:(fun _ -> Some store_dir)
+           ()
         : Backend.S)
 
   let capabilities ~prefix:_ () =
@@ -94,8 +96,9 @@ let () =
 
   let module NoShare : Backend.S = struct
     include
-      (val Backend.make ~backend_type:"local" ~get_field:(fun _ ->
-               Some store_dir)
+      (val Backend.make ~backend_type:"local"
+             ~get_field:(fun _ -> Some store_dir)
+             ()
           : Backend.S)
   end in
   let module C2 : Conf.S = struct

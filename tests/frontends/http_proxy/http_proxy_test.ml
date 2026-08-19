@@ -19,9 +19,10 @@ module C : Conf.S = struct
     (* [verifyWrites] off: the chunks planted here are named to land one per
        shard, which a real content key cannot be made to do, so the store would
        rightly file every one of them as corrupt. *)
-    Backend.make ~backend_type:"local" ~get_field:(function
-      | "verifyWrites" -> Some "false"
-      | _ -> Some (status_root ^ "/store"))
+    Backend.make ~backend_type:"local"
+      ~get_field:(function
+        | "verifyWrites" -> Some "false" | _ -> Some (status_root ^ "/store"))
+      ()
 
   (* Two stores, one of them down, so the report has to name which. *)
   let members =
@@ -199,8 +200,9 @@ let () =
          now, so a leftover object would answer the read this asserts is a
          miss. *)
       store =
-        Backend.make ~backend_type:"local" ~get_field:(fun _ ->
-            Some (Filename.temp_dir "tsync-route-test" ""));
+        Backend.make ~backend_type:"local"
+          ~get_field:(fun _ -> Some (Filename.temp_dir "tsync-route-test" ""))
+          ();
       serve_share = None;
       socket_path = "/nonexistent/tsync.sock";
       domain_name = "one";

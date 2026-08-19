@@ -15,8 +15,9 @@ let root = Filename.temp_dir "tsync-manifest-memo" ""
 let domain = "testdom"
 
 module Store =
-  (val Backend.make ~backend_type:"local" ~get_field:(fun _ ->
-           Some (Filename.concat root "store")))
+  (val Backend.make ~backend_type:"local"
+         ~get_field:(fun _ -> Some (Filename.concat root "store"))
+         ())
 
 module C =
   (val Fixture.conf ~domain

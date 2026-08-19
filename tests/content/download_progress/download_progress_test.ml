@@ -38,7 +38,9 @@ module C = struct
   let shares_prefix = "tsync/shares/"
 
   let store =
-    Backend.make ~backend_type:"local" ~get_field:(fun _ -> Some backend_root)
+    Backend.make ~backend_type:"local"
+      ~get_field:(fun _ -> Some backend_root)
+      ()
 
   let members = [Backend.member ~name:"local" store]
   let cache_root = Filename.concat root "cache"

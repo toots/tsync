@@ -224,6 +224,21 @@ val drain : unit -> unit Lwt.t
     than the domain finds it: a report naming each, a resync copying between
     two, a share link choosing where to point. *)
 
+(** One store's own share of what {!Metrics} counts for the whole process. A
+    report summing its members would get the process figure back; what it cannot
+    get back is which link the bytes crossed, which is the question a domain
+    with a fast main and a slow replica actually raises. *)
+type traffic = { uploaded : Metrics.counter; downloaded : Metrics.counter }
+
+val new_traffic : unit -> traffic
+
+(** Whether bytes to a store of this type cross a link, and so are counted. A
+    [local] store is a filesystem and answers [false]; every remote driver
+    answers [true]. Shared by {!make} and by whoever builds a {!member}, so the
+    wrapper that counts and the report that prints cannot disagree about which
+    stores have a figure. *)
+val counts_traffic : backend_type:string -> bool
+
 type member = {
   name : string;
   role : string;  (** main | replica | backfill | readOnly *)
@@ -240,6 +255,10 @@ type member = {
       (** Deferred targets: jobs this one still owes, kept on disk. *)
   in_flight : (unit -> int) option;
       (** Deferred targets: chunk forwards in flight. *)
+  traffic : traffic option;
+      (** What crossed the link to this store. [None] where there is no link to
+          cross — a [local] store — rather than a pair of zeros, which would
+          read as a store that is idle rather than one that is a filesystem. *)
   degraded : (unit -> bool) option;
       (** Deferred targets: writes were dropped and [tsync mirror] is needed —
           unlike a target merely being behind, patience will not fix this. *)
@@ -260,6 +279,7 @@ val member :
   ?pending:(unit -> int) ->
   ?in_flight:(unit -> int) ->
   ?degraded:(unit -> bool) ->
+  ?traffic:traffic ->
   name:string ->
   (module S) ->
   member
@@ -281,6 +301,15 @@ val spec_for : string -> Field_spec.t list option
     depends on how the binary was linked, since s3 is optional. *)
 val types : unit -> string list
 
-(** Raises [Failure] for a type name nothing registered. *)
+(** Raises [Failure] for a type name nothing registered.
+
+    [traffic] is the store's own counter pair, which the returned module adds to
+    alongside the process-wide ones. Omitted, a counted store still counts —
+    into a pair nobody holds — so a caller wanting the figure passes one and
+    keeps it on the store's {!member}. *)
 val make :
-  backend_type:string -> get_field:(string -> string option) -> (module S)
+  ?traffic:traffic ->
+  backend_type:string ->
+  get_field:(string -> string option) ->
+  unit ->
+  (module S)

@@ -1,7 +1,8 @@
 let local_store ?(verify_writes = true) path =
-  Backend.make ~backend_type:"local" ~get_field:(function
-    | "verifyWrites" -> Some (string_of_bool verify_writes)
-    | _ -> Some path)
+  Backend.make ~backend_type:"local"
+    ~get_field:(function
+      | "verifyWrites" -> Some (string_of_bool verify_writes) | _ -> Some path)
+    ()
 
 let conf ?(domain = "testdom") ?(client_name = "test") ?(versioning = false)
     ?store ?members ?(verify_writes = true) ?(max_uploads = 1)

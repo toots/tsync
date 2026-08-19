@@ -20,7 +20,9 @@ let marker_key = Chunk_space.marker_key ~chunk_prefix
    is what every non-filesystem driver answers. *)
 module Uncollectable : Backend.S = struct
   include
-    (val Backend.make ~backend_type:"local" ~get_field:(fun _ -> Some store_dir)
+    (val Backend.make ~backend_type:"local"
+           ~get_field:(fun _ -> Some store_dir)
+           ()
         : Backend.S)
 
   let capabilities ~prefix:_ () = Lwt.return Backend.no_caps
@@ -59,8 +61,9 @@ end
 
 module Collectable =
   Conf_of
-    ((val Backend.make ~backend_type:"local" ~get_field:(fun _ ->
-              Some store_dir)
+    ((val Backend.make ~backend_type:"local"
+            ~get_field:(fun _ -> Some store_dir)
+            ()
          : Backend.S))
 
 module Space = Chunk_space.Make (Collectable)
@@ -74,7 +77,9 @@ module Frozen_space = Chunk_space.Make (Frozen)
 let ck n = Printf.sprintf "%016x-%016x" n n
 
 module Store =
-  (val Backend.make ~backend_type:"local" ~get_field:(fun _ -> Some store_dir)
+  (val Backend.make ~backend_type:"local"
+         ~get_field:(fun _ -> Some store_dir)
+         ()
       : Backend.S)
 
 let () =

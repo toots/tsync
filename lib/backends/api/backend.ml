@@ -153,6 +153,20 @@ let drain_hooks : (unit -> unit Lwt.t) list ref = ref []
 let on_drain f = drain_hooks := f :: !drain_hooks
 let drain () = Lwt_list.iter_p (fun f -> f ()) !drain_hooks
 
+(* One store's own share of what {!Metrics} counts globally. Separate counters
+   rather than a total each, so a rate comes off the same ring the process-wide
+   figures do and nothing reimplements the window. *)
+type traffic = { uploaded : Metrics.counter; downloaded : Metrics.counter }
+
+let new_traffic () =
+  { uploaded = Metrics.counter (); downloaded = Metrics.counter () }
+
+(* A local store is a filesystem, so nothing it reads or writes crossed a link.
+   Asked here by both the wrapper that counts and the caller that decides
+   whether a store has a figure worth reporting, so the two cannot drift into
+   disagreeing about which stores have traffic. *)
+let counts_traffic ~backend_type = backend_type <> "local"
+
 type member = {
   name : string;
   role : string;  (** main | replica | backfill | readOnly *)
@@ -167,6 +181,9 @@ type member = {
       (** Replica and backfill: jobs this target still owes, kept on disk. *)
   in_flight : (unit -> int) option;
       (** Replica and backfill: chunk forwards in flight. *)
+  traffic : traffic option;
+      (** What crossed the link to this store, for the stores that have a link:
+          absent for a [local] one, which {!counts_traffic} excludes. *)
   degraded : (unit -> bool) option;
       (** Replica and backfill: writes were dropped, [tsync mirror] is needed —
           unlike a target merely being behind, patience will not fix this. *)
@@ -176,7 +193,8 @@ type member = {
 }
 
 let member ?(role = "main") ?(readable = true) ?(backend_type = "local")
-    ?(config = []) ?local_path ?pending ?in_flight ?degraded ~name backend =
+    ?(config = []) ?local_path ?pending ?in_flight ?degraded ?traffic ~name
+    backend =
   {
     name;
     role;
@@ -187,6 +205,7 @@ let member ?(role = "main") ?(readable = true) ?(backend_type = "local")
     pending;
     in_flight;
     degraded;
+    traffic;
     local_path;
   }
 
@@ -211,39 +230,53 @@ let types () =
    Only the verbs that carry a body, and only where a body crosses a link: a
    local store is a filesystem, and counting its reads as traffic would bury the
    remote ones it exists to be read instead of. *)
-let counted m =
+let counted ~traffic m =
   let module Inner = (val m : S) in
+  (* Every body is counted twice over: once for the process, once for the store
+     it went to. The per-store figure is what says which link a stalled transfer
+     is stalled on, which the sum cannot. *)
+  let up n =
+    Metrics.add_uploaded n;
+    Metrics.count traffic.uploaded n
+  and down n =
+    Metrics.add_downloaded n;
+    Metrics.count traffic.downloaded n
+  in
   (module struct
     open Lwt.Syntax
     include Inner
 
     let put ~key ~data () =
       let+ () = Inner.put ~key ~data () in
-      Metrics.add_uploaded (Chunk.length data)
+      up (Chunk.length data)
 
     (* A loser gets the winning body back, which came down the link; the winner
        is handed its own [data] again, so physical identity tells them apart
        without comparing bodies that are equal by construction. *)
     let put_if_absent ~key ~data () =
       let+ held = Inner.put_if_absent ~key ~data () in
-      Metrics.add_uploaded (Chunk.length data);
-      if held != data then Metrics.add_downloaded (Chunk.length held);
+      up (Chunk.length data);
+      if held != data then down (Chunk.length held);
       held
 
     let get ~key () =
       let+ data = Inner.get ~key () in
-      Metrics.add_downloaded (Chunk.length data);
+      down (Chunk.length data);
       data
 
     let get_opt ~key () =
       let+ data = Inner.get_opt ~key () in
-      Option.iter (fun d -> Metrics.add_downloaded (Chunk.length d)) data;
+      Option.iter (fun d -> down (Chunk.length d)) data;
       data
   end : S)
 
-let make ~backend_type ~get_field =
+let make ?traffic ~backend_type ~get_field () =
   match Hashtbl.find_opt registry backend_type with
     | Some { factory; _ } ->
         let store = factory get_field in
-        if backend_type = "local" then store else counted store
+        if not (counts_traffic ~backend_type) then store
+        else
+          counted
+            ~traffic:(match traffic with Some t -> t | None -> new_traffic ())
+            store
     | None -> failwith ("unknown backend type: " ^ backend_type)

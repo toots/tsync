@@ -283,7 +283,9 @@ let suite name (module B : Backend.S) =
   section "bulk delete past the cap" (fun () -> bulk_delete survived)
 
 let backend_of name fields =
-  Backend.make ~backend_type:name ~get_field:(fun k -> List.assoc_opt k fields)
+  Backend.make ~backend_type:name
+    ~get_field:(fun k -> List.assoc_opt k fields)
+    ()
 
 (* What a real store does with a request to check everything it holds.
 
