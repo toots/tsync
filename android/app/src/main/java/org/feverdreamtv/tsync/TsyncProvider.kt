@@ -16,6 +16,9 @@ import android.provider.DocumentsProvider
 import android.util.Log
 import android.webkit.MimeTypeMap
 import java.io.File
+import java.util.concurrent.ExecutorService
+import java.util.concurrent.Executors
+import java.util.concurrent.Future
 
 /**
  * Exposes a tsync domain through the Storage Access Framework.
@@ -140,48 +143,80 @@ class TsyncProvider : DocumentsProvider() {
                 ParcelFileDescriptor.MODE_READ_ONLY,
                 object : ProxyFileDescriptorCallback() {
                     /**
-                     * Read ahead, because the platform asks in 128 KB and each
-                     * ask is a process: on a Pixel 9a one costs about 100ms
-                     * whatever its size, so 128 KB at a time is a megabyte a
-                     * second and four at a time is twenty-three.
+                     * A window of read-ahead, and the next one already on its
+                     * way.
                      *
-                     * Aligned to the window rather than started at the offset,
-                     * so a sequential reader hits the same window until it is
-                     * exhausted instead of missing on every call.
+                     * The platform asks in 128 KB and each ask is a process,
+                     * which on a Pixel 9a costs about 100ms whatever it reads:
+                     * a window turns 32 of those into one. The window alone
+                     * still stalls the reader at every boundary, so the next is
+                     * fetched while this one is being served — the same overlap
+                     * Data.read_ahead gives a daemon, which is what made one
+                     * feel fast (lib/content/data.ml).
                      */
                     private var windowStart = -1L
                     private var window = ByteArray(0)
+                    private var aheadStart = -1L
+                    private var ahead: Future<ByteArray>? = null
+
+                    /** Where the last read ended, to tell a stream from a seek.
+                     *  Prefetching a seek would spend a window nobody wants. */
+                    private var lastEnd = -1L
 
                     override fun onGetSize(): Long = size
 
-                    override fun onRead(offset: Long, size: Int, data: ByteArray): Int {
-                        var done = 0
-                        while (done < size) {
-                            val at = offset + done
-                            val aligned = at / WINDOW * WINDOW
-                            if (windowStart != aligned) {
-                                window = try {
-                                    Tsync.bytes(
-                                        context!!, Cli.read(documentId, aligned, WINDOW)
-                                    )
-                                } catch (e: Exception) {
-                                    Log.w(TAG, "read $documentId @$aligned: ${e.message}")
-                                    throw ErrnoException("onRead", OsConstants.EIO)
-                                }
-                                windowStart = aligned
+                    private fun fetch(at: Long): ByteArray =
+                        Tsync.bytes(context!!, Cli.read(documentId, at, WINDOW))
+
+                    private fun take(aligned: Long) {
+                        val waiting = ahead
+                        window =
+                            if (waiting != null && aheadStart == aligned) {
+                                runCatching { waiting.get() }.getOrElse { fetch(aligned) }
+                            } else {
+                                waiting?.cancel(true)
+                                fetch(aligned)
                             }
-                            val from = (at - windowStart).toInt()
-                            // Short only here, at the end of the content, which
-                            // is what tells the caller it has all of it.
-                            if (from >= window.size) break
-                            val n = minOf(size - done, window.size - from)
-                            window.copyInto(data, done, from, from + n)
-                            done += n
+                        windowStart = aligned
+                        ahead = null
+                        aheadStart = -1L
+                    }
+
+                    private fun readAhead(after: Long) {
+                        val next = after + WINDOW
+                        if (ahead != null || next >= size) return
+                        aheadStart = next
+                        ahead = readers.submit<ByteArray> { fetch(next) }
+                    }
+
+                    override fun onRead(offset: Long, size: Int, data: ByteArray): Int {
+                        val sequential = offset == lastEnd
+                        var done = 0
+                        try {
+                            while (done < size) {
+                                val at = offset + done
+                                val aligned = at / WINDOW * WINDOW
+                                if (windowStart != aligned) take(aligned)
+                                val from = (at - windowStart).toInt()
+                                // Short only here, at the end of the content,
+                                // which is what tells the caller it has all of it.
+                                if (from >= window.size) break
+                                val n = minOf(size - done, window.size - from)
+                                window.copyInto(data, done, from, from + n)
+                                done += n
+                            }
+                        } catch (e: Exception) {
+                            Log.w(TAG, "read $documentId @$offset: ${e.message}")
+                            throw ErrnoException("onRead", OsConstants.EIO)
                         }
+                        if (sequential || offset == 0L) readAhead(windowStart)
+                        lastEnd = offset + done
                         return done
                     }
 
                     override fun onRelease() {
+                        ahead?.cancel(true)
+                        ahead = null
                         window = ByteArray(0)
                         windowStart = -1L
                     }
@@ -284,6 +319,10 @@ class TsyncProvider : DocumentsProvider() {
         /** Half a chunk at the default chunkSize, so a cold window pulls one
          *  chunk and the next is already local. */
         private const val WINDOW = 4 * 1024 * 1024
+
+        /** Read-ahead runs off the callback thread so the reader is not waiting
+         *  on it. Two, because a window is served while at most one is coming. */
+        private val readers: ExecutorService = Executors.newFixedThreadPool(2)
         const val AUTHORITY = "org.feverdreamtv.tsync.documents"
 
         /** DocumentsUI caches the root list and only re-queries when told, so a
