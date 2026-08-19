@@ -29,24 +29,30 @@ module Make (C : Conf.S) = struct
   (* Objects are content-addressed or immutable once written, so a size mismatch
      means the destination copy is corrupt. [None] when it was already correct;
      otherwise what was wrong with it, which is worth carrying to the caller. *)
-  let sync_entry ?(on_start = fun () -> ()) (module Src : Backend.S)
+  let sync_entry ?(on_start = fun () -> ()) ?held (module Src : Backend.S)
       (module Dst : Backend.S) (entry : Backend.file_entry) =
-    (* Inside the slot, not before it: [Lwt_list.map_p] applies its function to
-       every element up front, so announcing there would name the last entry of
-       the listing within milliseconds and never move again. *)
-    let* head =
-      Lwt_bounded.use probe_pool (fun () ->
-          on_start ();
-          Dst.head_opt ~key:entry.key ())
+    let* size_there =
+      match held with
+        | Some held ->
+            on_start ();
+            Lwt.return (Hashtbl.find_opt held entry.key)
+        | None ->
+            (* Inside the slot, not before it: [Lwt_list.map_p] applies its
+               function to every element up front, so announcing there would
+               name the last entry of the listing within milliseconds and never
+               move again. *)
+            Lwt_bounded.use probe_pool (fun () ->
+                on_start ();
+                let+ h = Dst.head_opt ~key:entry.key () in
+                Option.map (fun (h : Backend.file_entry) -> h.Backend.size) h)
     in
-    let* reason =
-      match head with
-        | None -> Lwt.return_some `Missing
-        | Some h ->
-            if Key.is_dir entry.key then Lwt.return_none
-            else if h.Backend.size <> entry.size then
-              Lwt.return_some `Wrong_size
-            else Lwt.return_none
+    let reason =
+      match size_there with
+        | None -> Some `Missing
+        | Some size ->
+            if Key.is_dir entry.key then None
+            else if size <> entry.size then Some `Wrong_size
+            else None
     in
     match reason with
       | None -> Lwt.return_none
@@ -104,6 +110,23 @@ module Make (C : Conf.S) = struct
         (List.concat per_prefix)
     in
     dedup_entries (listed @ match cursor with Some e -> [e] | None -> [])
+
+  (* Where the source was enumerated by listing, the destination is too: a HEAD
+     an object, against a namespace that answers a thousand keys a request, is
+     the same question asked a thousand times over.
+
+     A listing is a snapshot where a HEAD was fresh. That is the trade a resync
+     already makes on the source side, and a collection cannot be open while
+     this runs, so what can change underneath is another client's write — which
+     the next run copies. *)
+  let destination_view ~manifests_only ~on_list dst =
+    let+ entries = namespace_entries ~manifests_only ~on_list dst in
+    let held = Hashtbl.create (List.length entries) in
+    List.iter
+      (fun (e : Backend.file_entry) ->
+        Hashtbl.replace held e.Backend.key e.Backend.size)
+      entries;
+    held
 
   (* [rel] itself and everything under it. *)
   let within ~rel path =
@@ -176,8 +199,8 @@ module Make (C : Conf.S) = struct
      moved, and a caller given only the copies cannot tell a mirror that is
      nearly done from one that has barely started. *)
   let resync_to ?(on_start = fun ~name:_ ~key:_ -> ())
-      ?(on_entry = fun ~name:_ ~key:_ ~size:_ ~outcome:_ -> ()) src dst ~name
-      entries =
+      ?(on_entry = fun ~name:_ ~key:_ ~size:_ ~outcome:_ -> ()) ?held src dst
+      ~name entries =
     (* A fixed set of workers taking the next entry each, rather than a promise
        per entry: the listing is the domain's length, and fanning out over it
        builds a closure and a pool queue cell for every object in it before the
@@ -202,7 +225,9 @@ module Make (C : Conf.S) = struct
             let key = entry.Backend.key in
             let size = entry.Backend.size in
             let* copied =
-              sync_entry ~on_start:(fun () -> on_start ~name ~key) src dst entry
+              sync_entry
+                ~on_start:(fun () -> on_start ~name ~key)
+                ?held src dst entry
             in
             worker
               (match copied with
@@ -289,9 +314,29 @@ module Make (C : Conf.S) = struct
            (fun acc (e : Backend.file_entry) ->
              Int64.add acc (Int64.of_int e.Backend.size))
            0L entries);
+    (* A path scope names its objects one at a time on the source too, so there
+       is no listing to be symmetric with and the HEAD stays. *)
+    let listed_scope =
+      match scope with
+        | `All -> Some false
+        | `Manifests -> Some true
+        | `Path _ -> None
+    in
     C.members
     |> List.filter (fun (m : Backend.member) -> m.Backend.name <> src.name)
     |> Lwt_list.map_s (fun (m : Backend.member) ->
-        resync_to ?on_start ?on_entry src.Backend.backend m.Backend.backend
-          ~name:m.Backend.name entries)
+        let* held =
+          match listed_scope with
+            | None -> Lwt.return_none
+            | Some manifests_only ->
+                let+ held =
+                  destination_view ~manifests_only
+                    ~on_list:(fun ~name ->
+                      on_list ~name:(name ^ " on " ^ m.Backend.name))
+                    m.Backend.backend
+                in
+                Some held
+        in
+        resync_to ?on_start ?on_entry ?held src.Backend.backend
+          m.Backend.backend ~name:m.Backend.name entries)
 end
