@@ -8,10 +8,12 @@
    So the server here is a raw socket that counts accepts and speaks the least
    HTTP that keep-alive needs. Cohttp's own stateless client is measured beside
    the pooled one, because "one connection" only means something against a
-   number that is not one. *)
+   number that is not one.
+
+   Nothing here reads a clock and the port is the kernel's choice, so the
+   output is the same on any machine. *)
 
 open Lwt.Syntax
-open Check
 
 let response = "HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nok"
 
@@ -62,6 +64,8 @@ let listener () =
   Lwt.return (sock, port)
 
 let requests = 10
+let row label v = Printf.printf "  %-16s %d\n" label v
+let case title = Printf.printf "=== %s\n" title
 
 let () =
   Lwt_main.run
@@ -74,28 +78,24 @@ let () =
 
      case "the pooled client";
      let client = Http_client.create ~name:"test" ~timeout:10. () in
-     let* oks = ref 0 |> Lwt.return in
+     let answered = ref 0 in
      let rec go n =
        if n = 0 then Lwt.return_unit
        else
          let* resp, body =
            Http_client.call client ~headers:no_headers ~meth:`GET uri
          in
-         if Http_client.is_ok resp && Chunk.to_string body = "ok" then incr oks;
+         if Http_client.is_ok resp && Chunk.to_string body = "ok" then
+           incr answered;
          go (n - 1)
      in
      let* () = go requests in
-     check "every request was answered"
-       ~why:(fun () -> Printf.sprintf "%d of %d" !oks requests)
-       (!oks = requests);
-     let pooled = !accepts in
-     check "and they shared one connection"
-       ~why:(fun () ->
-         Printf.sprintf "%d accepts for %d requests" pooled requests)
-       (pooled = 1);
+     row "requests" requests;
+     row "answered" !answered;
+     row "accepts" !accepts;
 
-     (* Without this the assertion above would also hold for a client that never
-        got the chance to reuse anything. *)
+     (* Without this the count above would also hold for a client that never got
+        the chance to reuse anything. *)
      case "cohttp's stateless client, for contrast";
      accepts := 0;
      let rec go n =
@@ -106,10 +106,7 @@ let () =
          go (n - 1)
      in
      let* () = go requests in
-     check "opens one per request"
-       ~why:(fun () ->
-         Printf.sprintf "%d accepts for %d requests" !accepts requests)
-       (!accepts = requests);
+     row "requests" requests;
+     row "accepts" !accepts;
 
-     report ~expected:3 ();
      Lwt.return_unit)

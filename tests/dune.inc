@@ -121,7 +121,13 @@
   (deps http_reuse.exe))
  (rule
   (alias runtest)
-  (action (run ./http_reuse.exe))))
+  (target http_reuse.output)
+  (action
+   (with-stdout-to http_reuse.output (ignore-stderr (run ./http_reuse.exe)))))
+ (rule
+  (alias runtest)
+  (action
+   (diff http_reuse.expected http_reuse.output))))
 
 (subdir backends/probe_deadline
  (alias
