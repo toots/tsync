@@ -22,8 +22,15 @@ object Cli {
 
     fun list(key: String) = listOf("android", "list", key)
 
-    fun read(key: String, offset: Long, length: Int) =
-        listOf("android", "read", key, offset.toString(), length.toString())
+    fun read(key: String, dest: String, offset: Long, length: Int) =
+        listOf("android", "read", key, dest, offset.toString(), length.toString())
+
+    /** How many of the file's chunks are on this device, against how many
+     *  there are. */
+    fun residency(key: String) = listOf("android", "residency", key)
+
+    /** Serves ranges until stdin closes; see ReadSession. */
+    fun open(key: String) = listOf("android", "open", key)
 
     /** The whole content into [dest], for editing in place. */
     fun fetch(key: String, dest: String) = listOf("android", "fetch", key, dest)

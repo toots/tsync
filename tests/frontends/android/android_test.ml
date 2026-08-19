@@ -180,12 +180,59 @@ let json args =
   line "  %s" (scrub reply);
   reply
 
-(* A verb answering in bytes: how many came back, and what they were. *)
-let bytes args =
-  line "%s" (String.concat " " (List.tl args));
-  let out = invoke args in
-  line "  %d bytes = %S" (String.length out) out;
-  out
+(* A ranged read, shown as what landed in the destination. *)
+let ranged args ~dest ~offset ~length =
+  ignore (json (args @ [dest; string_of_int offset; string_of_int length]));
+  let all = read_file dest in
+  let got =
+    if offset >= String.length all then ""
+    else String.sub all offset (min length (String.length all - offset))
+  in
+  line "  dest[%d,%d) = %S" offset (offset + String.length got) got
+
+(* The one number a caller has to read rather than display: how many bytes
+   follow the header. *)
+let framed_length reply =
+  let field = "\"length\":" in
+  let n = String.length field and h = String.length reply in
+  let rec at i =
+    if i + n > h then 0
+    else if String.sub reply i n = field then (
+      let stop = ref (i + n) in
+      while !stop < h && reply.[!stop] >= '0' && reply.[!stop] <= '9' do
+        incr stop
+      done;
+      int_of_string (String.sub reply (i + n) (!stop - i - n)))
+    else at (i + 1)
+  in
+  at 0
+
+(* Drives the session the way the provider does: one process, a size line, then
+   a header and that many bytes per request. *)
+let session_ranges key ranges =
+  Hashtbl.replace exercised "open" ();
+  let exe = Option.get binary in
+  let cmd =
+    Printf.sprintf "HOME=%s %s android open %s" (Filename.quote home)
+      (Filename.quote exe) (Filename.quote key)
+  in
+  let out, inp = Unix.open_process cmd in
+  let header = input_line out in
+  line "open %s" (scrub header);
+  let served =
+    List.map
+      (fun (offset, length) ->
+        Printf.fprintf inp "%d %d\n" offset length;
+        flush inp;
+        let reply = input_line out in
+        let count = framed_length reply in
+        let body = really_input_string out count in
+        (offset, length, body))
+      ranges
+  in
+  close_out inp;
+  ignore (Unix.close_process (out, inp));
+  served
 
 let staged contents =
   let path = Filename.concat root "staged.bin" in
@@ -224,17 +271,30 @@ let () =
         ignore (json ["android"; "stat"; photos ^ "big.txt"]);
 
         case "ranges, each served by its own process, reassemble the file";
-        (* Nothing is held between calls, so three processes reading a range
-           each is the same as one reading all of it. *)
-        let a = bytes ["android"; "read"; photos ^ "big.txt"; "0"; "8"] in
-        let b = bytes ["android"; "read"; photos ^ "big.txt"; "8"; "8"] in
-        let c = bytes ["android"; "read"; photos ^ "big.txt"; "16"; "8"] in
-        line "reassembled = %S" (a ^ b ^ c);
-        ignore (bytes ["android"; "read"; photos ^ "big.txt"; "4"; "12"]);
+        (* Nothing is held between calls, so three processes writing a range
+           each into one file leave it whole. *)
+        let dest = Filename.concat root "ranges.bin" in
+        List.iter
+          (fun offset ->
+            ranged
+              ["android"; "read"; photos ^ "big.txt"]
+              ~dest ~offset ~length:8)
+          [0; 8; 16];
+        line "reassembled = %S" (read_file dest);
+        ranged
+          ["android"; "read"; photos ^ "big.txt"]
+          ~dest:(Filename.concat root "mid.bin")
+          ~offset:4 ~length:12;
 
         case "a read past the content is short, never padded";
-        ignore (bytes ["android"; "read"; photos ^ "big.txt"; "16"; "64"]);
-        ignore (bytes ["android"; "read"; photos ^ "big.txt"; "99"; "8"]);
+        ranged
+          ["android"; "read"; photos ^ "big.txt"]
+          ~dest:(Filename.concat root "tail.bin")
+          ~offset:16 ~length:64;
+        ranged
+          ["android"; "read"; photos ^ "big.txt"]
+          ~dest:(Filename.concat root "past.bin")
+          ~offset:99 ~length:8;
 
         case "a key that is not there is a coded refusal";
         ignore (json ["android"; "stat"; photos ^ "nope.txt"]);
@@ -248,6 +308,20 @@ let () =
         let dest = Filename.concat root "fetched.bin" in
         ignore (json ["android"; "fetch"; photos ^ "big.txt"; dest]);
         line "fetched = %S" (read_file dest);
+
+        case "what of the file is on this device";
+        ignore (json ["android"; "residency"; photos ^ "big.txt"]);
+
+        case "one process serves every range of an open file";
+        (* The reason it exists: reads in one process are sequential to
+           lib/content/data.ml, which is what lets it fetch ahead of them. *)
+        let served =
+          session_ranges (photos ^ "big.txt") [(0, 8); (8, 8); (16, 8); (99, 8)]
+        in
+        List.iter
+          (fun (o, l, body) ->
+            line "range %d+%d -> %d %S" o l (String.length body) body)
+          served;
 
         case "the namespace verbs move and remove";
         ignore

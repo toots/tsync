@@ -85,18 +85,97 @@ module Make (C : Conf.S) = struct
         print_string reply;
         print_newline ())
 
-  (* Bytes on stdout rather than into a file the caller reads back: the range a
-     ProxyFileDescriptorCallback asks for goes straight into the ByteArray it
-     was handed. *)
-  let read key ~offset ~length =
+  (* One process for the whole of an open file, reading ranges until its caller
+     closes stdin.
+
+     The ranges are no different from what {!read} serves one at a time; what
+     the process buys is what only exists while it lives. [Data.pread] records
+     where each read ended and fetches the chunks after it when the next one
+     continues there (lib/content/data.ml read_ahead), so a reader is served out
+     of the cache while the network runs ahead of it. An invocation per range
+     cannot: the table it consults is empty at every start, and the fetch it
+     would launch dies with it.
+
+     A request is "OFFSET LENGTH" on a line. Each answer is a JSON line carrying
+     the count, then that many bytes, so a caller frames on the count rather
+     than looking for a delimiter in binary. *)
+  let session key =
     run ~staging:false (fun () ->
         let open Lwt.Syntax in
-        let buf = Bigstringaf.create length in
-        let+ n = F.read key buf ~offset:(Int64.of_int offset) in
-        (* The count is what the caller reads, not something it is told: stdout
-           carries exactly [n] bytes, short only at end of file. Saying it again
-           on stderr would put it in the stream the log already uses. *)
-        print_string (Bigstringaf.substring buf ~off:0 ~len:n))
+        let reply fields =
+          let* () =
+            Lwt_io.write_line Lwt_io.stdout
+              (Yojson.Safe.to_string (`Assoc (("ok", `Bool true) :: fields)))
+          in
+          Lwt_io.flush Lwt_io.stdout
+        in
+        let refuse code msg =
+          let* () =
+            Lwt_io.write_line Lwt_io.stdout
+              (Yojson.Safe.to_string
+                 (`Assoc
+                    [
+                      ("ok", `Bool false);
+                      ("code", `String code);
+                      ("error", `String msg);
+                    ]))
+          in
+          Lwt_io.flush Lwt_io.stdout
+        in
+        let* resolved = F.resolve key in
+        match resolved with
+          | None -> refuse "not_found" ("not found: " ^ key)
+          | Some published ->
+              let size =
+                match published with
+                  | `Staged (st, _) -> Int64.to_int st.Manifest.s_size
+                  | `Published m -> Int64.to_int m.Manifest.size
+              in
+              let* () = reply [("size", `Int size)] in
+              let rec serve () =
+                let* line = Lwt_io.read_line_opt Lwt_io.stdin in
+                match line with
+                  (* The caller is gone; so is any reason to be here. *)
+                  | None -> Lwt.return_unit
+                  | Some line -> (
+                      match
+                        List.filter_map int_of_string_opt
+                          (String.split_on_char ' ' (String.trim line))
+                      with
+                        | [offset; length] when offset >= 0 && length > 0 ->
+                            let buf = Bigstringaf.create length in
+                            let* n =
+                              F.read key buf ~offset:(Int64.of_int offset)
+                            in
+                            let* () = reply [("length", `Int n)] in
+                            let* () =
+                              Lwt_io.write Lwt_io.stdout
+                                (Bigstringaf.substring buf ~off:0 ~len:n)
+                            in
+                            let* () = Lwt_io.flush Lwt_io.stdout in
+                            serve ()
+                        | _ ->
+                            let* () =
+                              refuse "invalid" "expected \"OFFSET LENGTH\""
+                            in
+                            serve ())
+              in
+              serve ())
+
+  (* What of [key] is already on this device, for a caller deciding whether to
+     assemble the whole thing rather than page through it. *)
+  let residency key =
+    run ~staging:false (fun () ->
+        let open Lwt.Syntax in
+        let+ cached, total = F.chunk_residency key in
+        print_endline
+          (Yojson.Safe.to_string
+             (`Assoc
+                [
+                  ("ok", `Bool true);
+                  ("cached", `Int cached);
+                  ("total", `Int total);
+                ])))
 
   (* No daemon to describe, so this reports the domain alone. [Diagnostics.text]
      is the one renderer, so a report from a phone reads like any other. *)
@@ -148,15 +227,32 @@ let commands =
                 (request "list_dir" [("path", `String key)])
           | _ -> usage "list" "KEY");
     command "read"
-      "Write to stdout the LENGTH bytes of KEY at OFFSET, fewer only at end of \
-       file." (fun (module C : Conf.S) args ->
+      "Write LENGTH bytes of KEY from OFFSET into DEST at that same offset, \
+       leaving the rest of DEST sparse." (fun (module C : Conf.S) args ->
         let module R = Make (C) in
         match args with
-          | [key; offset; length] ->
-              R.read key
-                ~offset:(int_arg "read" "OFFSET" offset)
-                ~length:(int_arg "read" "LENGTH" length)
-          | _ -> usage "read" "KEY OFFSET LENGTH");
+          | [key; dest; offset; length] ->
+              R.answer ~staging:false
+                (request "fetch_range"
+                   [
+                     ("path", `String key);
+                     ("dest", `String dest);
+                     ("offset", `Int (int_arg "read" "OFFSET" offset));
+                     ("length", `Int (int_arg "read" "LENGTH" length));
+                   ])
+          | _ -> usage "read" "KEY DEST OFFSET LENGTH");
+    command "open"
+      "Serve ranges of KEY until stdin closes: a size line, then one JSON \
+       length line and that many bytes per \"OFFSET LENGTH\" request."
+      (fun (module C : Conf.S) args ->
+        let module R = Make (C) in
+        match args with [key] -> R.session key | _ -> usage "open" "KEY");
+    command "residency" "Report how many of KEY's chunks are on this device."
+      (fun (module C : Conf.S) args ->
+        let module R = Make (C) in
+        match args with
+          | [key] -> R.residency key
+          | _ -> usage "residency" "KEY");
     command "fetch"
       "Assemble the whole content of KEY into DEST, fetching what is missing."
       (fun (module C : Conf.S) args ->

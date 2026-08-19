@@ -111,6 +111,16 @@ object Tsync {
      * protect. stderr is drained on its own thread, a child that fills that pipe
      * blocking on the write and never reaching the exit this waits for.
      */
+    /**
+     * A process to talk to rather than wait on, for a caller that holds it for
+     * an open file's lifetime and so must not take one of the bounds above.
+     */
+    fun spawn(context: Context, args: List<String>): Process =
+        Runtime.getRuntime().exec(
+            (listOf(binary(context).absolutePath) + args).toTypedArray(),
+            env(context)
+        )
+
     fun run(context: Context, args: List<String>): Result {
         // Asked of the argv rather than of the caller: a call site that has to
         // remember which pool it belongs in is a call site that will forget.
