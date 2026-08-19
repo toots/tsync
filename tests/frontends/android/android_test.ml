@@ -221,11 +221,39 @@ let config_path () =
     | path :: _ -> path
     | [] -> Filename.concat home ".config/tsync/config.json"
 
+(* Entries come back in readdir order, which is the filesystem's and differs
+   between one and another; sorting is what makes a listing something a snapshot
+   can hold. Everything else about the reply is left exactly as it arrived. *)
+let sort_items reply =
+  match Yojson.Safe.from_string reply with
+    | `Assoc fields when List.mem_assoc "items" fields ->
+        let name = function
+          | `Assoc entry -> (
+              match List.assoc_opt "name" entry with
+                | Some (`String n) -> n
+                | _ -> "")
+          | _ -> ""
+        in
+        Yojson.Safe.to_string
+          (`Assoc
+             (List.map
+                (fun (k, v) ->
+                  match (k, v) with
+                    | "items", `List items ->
+                        ( k,
+                          `List
+                            (List.stable_sort
+                               (fun a b -> compare (name a) (name b))
+                               items) )
+                    | _ -> (k, v))
+                fields))
+    | _ | (exception _) -> reply
+
 (* A verb answering in JSON: the call, then the whole reply. *)
 let json args =
   line "%s" (scrub (String.concat " " (List.tl args)));
   let reply = String.trim (invoke args) in
-  line "  %s" (scrub reply);
+  line "  %s" (scrub (sort_items reply));
   reply
 
 (* A ranged read, shown as what landed in the destination. *)
