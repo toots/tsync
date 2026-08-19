@@ -279,8 +279,7 @@ let () =
             if keep then line "%s" (scrub (String.trim l)));
 
         case "every verb the frontend registers is driven above";
-        (* Asked of the registry rather than kept in step by hand: a verb added
-           without a case here changes this line. *)
+        Tsync_android_frontend.Android_frontend.register ();
         let registered =
           List.concat_map
             (fun (name, _group, commands) ->

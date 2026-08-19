@@ -1,9 +1,9 @@
 (** What a frontend is, and the process it runs in.
 
     A frontend is one way of presenting a domain to a user — a mounted
-    filesystem, a macOS File Provider, an HTTP server. Each registers itself
-    from its own initialiser and is kept in the link by [-linkall], so adding
-    one is a matter of linking its library. *)
+    filesystem, a macOS File Provider, an HTTP server. Each exposes a [register]
+    that lib/frontends calls, one line per frontend, so which ones a binary has
+    is a question the source answers. *)
 
 (** One domain's binding: the domain conf, this frontend's options (from the
     config's [frontend_config.options]), and the mount point, which only fuse

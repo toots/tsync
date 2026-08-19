@@ -34,7 +34,6 @@
    -open
    Tsync_diagnostics))
  (name tsync_http_proxy_frontend)
- (library_flags (-linkall))
  (preprocess
   (pps ppx_blob))
  (preprocessor_deps

@@ -215,7 +215,7 @@ let commands =
         match args with [] -> R.status () | _ -> usage "status" "");
   ]
 
-let () =
+let register () =
   Frontend.register implementation ~cli_group:"android" ~commands
     (module struct
       let is_local = is_local

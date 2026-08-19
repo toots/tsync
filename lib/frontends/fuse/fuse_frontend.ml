@@ -48,7 +48,7 @@ let spec =
       };
     ]
 
-let () =
+let register () =
   Frontend.register ~spec implementation
     (module struct
       let is_local = is_local

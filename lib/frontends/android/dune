@@ -1,7 +1,3 @@
-; Its own opam package so a release `dune build -p tsync' on Linux and macOS
-; carries none of it: both platforms mount, and lib/frontends/dune selects on
-; this library, so its absence from the build is the whole mechanism.
-
 (library
  (flags
   (:standard
@@ -23,7 +19,6 @@
    Tsync_log))
  (name tsync_android_frontend)
  (public_name tsync-android)
- (library_flags (-linkall))
  (libraries
   tsync-libs.object
   tsync-libs.conf
