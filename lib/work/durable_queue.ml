@@ -132,18 +132,31 @@ module Make (J : JOB) = struct
       let* () = Fs_util.mkdir_p t.dir in
       Fs_util.atomic_write (path t id) (J.to_string job)
 
+    (* Three answers, not two. A record that is simply gone was completed
+       between the directory being read and this opening it, which is ordinary
+       on a queue that is working; a body that will not parse is one nothing can
+       replay; a read that failed for any other reason says nothing about the
+       record at all.
+
+       Only the middle one may be dropped. Collapsing the three loses work to a
+       full descriptor table or a bad sector, and prints the ordinary case as an
+       error. *)
     let read t id =
       Lwt.catch
         (fun () ->
           let+ body =
             Lwt_io.with_file ~mode:Lwt_io.Input (path t id) Lwt_io.read
           in
-          J.of_string body)
-        (fun _ -> Lwt.return_none)
+          match J.of_string body with
+            | Some job -> `Job job
+            | None -> `Unreadable)
+        (function
+          | Unix.Unix_error (Unix.ENOENT, _, _) -> Lwt.return `Gone
+          | exn -> Lwt.return (`Failed exn))
 
     let update t id f =
       let* r = read t id in
-      match r with None -> Lwt.return_unit | Some r -> write t ~id (f r)
+      match r with `Job r -> write t ~id (f r) | _ -> Lwt.return_unit
 
     let complete t id = Fs_util.unlink_quiet (path t id)
 
@@ -172,11 +185,18 @@ module Make (J : JOB) = struct
             (fun id ->
               let* job = read t id in
               match job with
-                | Some job -> Lwt.return_some (id, job)
-                | None ->
+                | `Job job -> Lwt.return_some (id, job)
+                | `Gone -> Lwt.return_none
+                | `Unreadable ->
                     Log.err "durable queue: unreadable record %s, discarding" id;
                     let+ () = complete t id in
-                    None)
+                    None
+                | `Failed exn ->
+                    (* Left where it is: the record still names work that is
+                       owed, and the next sweep may read it. *)
+                    Log.warn "durable queue: cannot read record %s: %s; leaving"
+                      id (Printexc.to_string exn);
+                    Lwt.return_none)
             names
         in
         List.filter_map Fun.id read_one

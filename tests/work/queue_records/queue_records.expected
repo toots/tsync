@@ -10,3 +10,15 @@
   record 2         gone
   record 3         on disk
   log              err durable queue: unreadable record 00000000000000000002-00000002-1, discarding
+=== a record completed between the listing and the read
+  returned         one, three
+  record 1         on disk
+  record 2         gone
+  record 3         on disk
+  log              (nothing)
+=== a record that will not open for some other reason
+  returned         one, three
+  record 1         on disk
+  record 2         on disk
+  record 3         on disk
+  log              warn durable queue: cannot read record 00000000000000000002-00000002-1: <exn>; leaving

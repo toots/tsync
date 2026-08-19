@@ -1,9 +1,15 @@
-(* What a sweep of the record directory reads, and what it deletes.
+(* What a sweep of the record directory reads, what it deletes, and what it
+   says.
 
-   Both are asked with a deliberately corrupt record, because it is the one
-   whose fate says whether its body was opened at all: a sweep that reads it
+   The first two are asked with a deliberately corrupt record, because it is the
+   one whose fate says whether its body was opened at all: a sweep that reads it
    discards it, and a sweep that skipped it on its id alone leaves it where it
    was.
+
+   The rest are the three ways a read can end, which have three different right
+   answers: a job, a record another worker completed first, and a record that
+   would not open at all. Only the middle of those is silent and only the
+   corrupt one may be dropped.
 
    Nothing here reads a clock, and log lines are printed without their
    timestamps, so the output is the same on any machine. *)
@@ -34,6 +40,18 @@ let level = function
   | `err -> "err"
   | `critical -> "critical"
 
+(* The exception's own spelling is the platform's, so what is asserted is that a
+   record could not be read and which one, not how the OS phrased it. *)
+let scrub msg =
+  let tail = "; leaving" in
+  let n = String.length msg and m = String.length tail in
+  if n < m || String.sub msg (n - m) m <> tail then msg
+  else (
+    let head = String.sub msg 0 (n - m) in
+    match String.rindex_opt head ':' with
+      | Some i -> String.sub head 0 i ^ ": <exn>" ^ tail
+      | None -> msg)
+
 (* Only what this case logged: the buffer is process-wide and keeps everything.
    [Log.recent] answers newest first, so what is new is the front of it. *)
 let seen = ref 0
@@ -49,7 +67,7 @@ let show_log () =
     | lines ->
         List.iter
           (fun (_, l, msg) ->
-            Printf.printf "  log              %s %s\n" (level l) msg)
+            Printf.printf "  log              %s %s\n" (level l) (scrub msg))
           lines
 
 let show name got =
@@ -85,5 +103,27 @@ let () =
      case "and one it does want is read, and judged";
      let* got = Q.Records.list t in
      show "skipped" got;
+
+     (* [wanted] runs before the body is opened, so completing the record there
+        is the interleaving a working queue produces on every sweep. *)
+     case "a record completed between the listing and the read";
+     let* t = plant "raced" in
+     let* got =
+       Q.Records.list
+         ~wanted:(fun i ->
+           if i = id 2 then Sys.remove (path "raced" i);
+           true)
+         t
+     in
+     show "raced" got;
+
+     (* A directory stands in for whatever else can refuse to be read — a full
+        descriptor table, a bad sector — none of which say the work is not owed. *)
+     case "a record that will not open for some other reason";
+     let* t = plant "unreadable" in
+     Sys.remove (path "unreadable" (id 2));
+     Unix.mkdir (path "unreadable" (id 2)) 0o755;
+     let* got = Q.Records.list t in
+     show "unreadable" got;
 
      Lwt.return_unit)
