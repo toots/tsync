@@ -3,10 +3,6 @@
 
 (executable
  (flags
-  (:standard -open Tsync_test_harness -open Tsync_frontend_register))
+  (:standard -open Tsync_frontend_register))
  (name android_test)
- (libraries
-  tsync_test_harness
-  tsync_android_frontend
-  tsync-libs.frontend_register
-  unix))
+ (libraries tsync_android_frontend tsync-libs.frontend_register unix))

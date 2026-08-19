@@ -1,39 +1,71 @@
 
 === a directory is made, then seen
-  mkdir media/photos/
-mkdir answers ok: ok
-the new directory is listed: ok
+  mkdir tsync/media/manifests/photos/
+    {"ok":true}
+  list tsync/media/manifests/
+    {"ok":true,"items":[{"ref":"d:<id1>","parentRef":"root","name":"photos","key":"tsync/media/manifests/photos/","kind":"dir","size":0,"mtime":0.0,"etag":"<id1>","isUploaded":true}]}
 
-=== a whole body is adopted, and read back byte for byte
-  write-whole media/photos/big.txt
-write-whole reports the size: ok
-the staging file was adopted by rename, not copied: ok
-a whole read returns the content: ok
+=== a whole body is adopted by rename
+  write-whole tsync/media/manifests/photos/big.txt <root>/staged.bin
+    {"ok":true,"size":24,"mtime":1400000000.0}
+  staging file still there: false
+  stat tsync/media/manifests/photos/big.txt
+    {"ok":true,"ref":"f:<id1>/big.txt","parentRef":"d:<id1>","name":"big.txt","key":"tsync/media/manifests/photos/big.txt","kind":"file","size":24,"mtime":1400000000.0,"etag":"1294bbe85c2f380b","isUploaded":true}
 
 === ranges, each served by its own process, reassemble the file
-three separate processes reassemble the file: ok
-a range starting mid-chunk is served from its own offset: ok
+  read tsync/media/manifests/photos/big.txt 0 8
+    8 bytes = "01234567"
+  read tsync/media/manifests/photos/big.txt 8 8
+    8 bytes = "89ABCDEF"
+  read tsync/media/manifests/photos/big.txt 16 8
+    8 bytes = "ghijklmn"
+  reassembled = "0123456789ABCDEFghijklmn"
+  read tsync/media/manifests/photos/big.txt 4 12
+    12 bytes = "456789ABCDEF"
 
 === a read past the content is short, never padded
-a range straddling the end stops at it: ok
-a range wholly past the end is empty: ok
+  read tsync/media/manifests/photos/big.txt 16 64
+    8 bytes = "ghijklmn"
+  read tsync/media/manifests/photos/big.txt 99 8
+    0 bytes = ""
 
-=== metadata answers the way the socket did
-stat names the item by reference: ok
-stat reports it published: ok
-a missing key is a coded refusal, not a hang: ok
+=== a key that is not there is a coded refusal
+  stat tsync/media/manifests/photos/nope.txt
+    {"ok":false,"code":"not_found","error":"not found: tsync/media/manifests/photos/nope.txt"}
+  list tsync/media/manifests/nowhere/
+    {"ok":false,"code":"not_found","error":"not found: tsync/media/manifests/nowhere/"}
 
-=== a file is created empty, and read back whole
-create answers ok: ok
-a created file is empty: ok
-fetch assembles the whole content into a file: ok
+=== a created file is empty until something is written to it
+  create tsync/media/manifests/photos/new.txt
+    {"ok":true}
+  stat tsync/media/manifests/photos/new.txt
+    {"ok":true,"ref":"f:<id1>/new.txt","parentRef":"d:<id1>","name":"new.txt","key":"tsync/media/manifests/photos/new.txt","kind":"file","size":0,"mtime":<clock>,"etag":"","isUploaded":false}
+
+=== the whole content, assembled into a file for editing in place
+  fetch tsync/media/manifests/photos/big.txt <root>/fetched.bin
+    {"ok":true,"localPath":"<root>/fetched.bin"}
+  fetched = "0123456789ABCDEFghijklmn"
 
 === the namespace verbs move and remove
-a renamed file is listed under its new name: ok
-the domain is empty again: ok
+  rename tsync/media/manifests/photos/big.txt tsync/media/manifests/photos/moved.txt
+    {"ok":true}
+  list tsync/media/manifests/photos/
+    {"ok":true,"items":[{"ref":"f:<id1>/moved.txt","parentRef":"d:<id1>","name":"moved.txt","key":"tsync/media/manifests/photos/moved.txt","kind":"file","size":24,"mtime":1400000000.0,"etag":"1294bbe85c2f380b","isUploaded":true},{"ref":"f:<id1>/new.txt","parentRef":"d:<id1>","name":"new.txt","key":"tsync/media/manifests/photos/new.txt","kind":"file","size":0,"mtime":<clock>,"etag":"06b4b04bae2346bf","isUploaded":true}]}
+  delete tsync/media/manifests/photos/moved.txt
+    {"ok":true}
+  delete tsync/media/manifests/photos/new.txt
+    {"ok":true}
+  rmdir tsync/media/manifests/photos/
+    {"ok":true}
+  list tsync/media/manifests/
+    {"ok":true,"items":[]}
 
-=== the report needs no daemon to answer
-status names this frontend and its domain: ok
-every registered android verb is exercised here: ok
+=== the report answers with no daemon to ask
+  Frontend android on <host> (this process)
+  Domain media
+  read-only        no
+  versioning       on
 
-19 check(s), 0 failure(s)
+=== every verb the frontend registers is driven above
+  registered: create delete fetch list mkdir read rename rmdir stat status write-whole
+  untested:   (none)
