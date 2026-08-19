@@ -47,7 +47,7 @@ class MainActivity : Activity() {
     private fun runFullSync(): Pair<Int, String> {
         syncRunning = true
         return try {
-            Tsync.plain(this, "sync", "--full")
+            Tsync.batchPlain(this, "sync", "--full")
         } finally {
             syncRunning = false
         }
@@ -177,16 +177,16 @@ class MainActivity : Activity() {
         val prefs = BackupPrefs(this)
         if (!prefs.enabled) return "camera backup: off\n\n"
 
-        // What this device could not hand over and will try again. There is no
-        // second backlog to add: a commit does not return until it has drained.
-        val stuck = UploadRecords(this).let { records ->
-            try {
-                records.countInState(UploadState.FAILED)
-            } finally {
-                records.close()
-            }
+        val records = UploadRecords(this)
+        val failed: Int
+        val reason: String?
+        try {
+            failed = records.countInState(UploadState.FAILED)
+            reason = if (failed > 0) records.lastError() else null
+        } finally {
+            records.close()
         }
-        val owed = stuck
+
         // Selected-only is not a stall: the sweep runs and covers what it can
         // see, so it is said as a limit on the backup rather than a reason it
         // is not moving.
@@ -196,9 +196,20 @@ class MainActivity : Activity() {
             } else null
         val partial = MediaAccess.level(this) == MediaAccess.Level.SELECTED_ONLY
 
+        // "up to date" is a claim about the whole roll, and only a sweep that
+        // reached the end of it can make one: an upload is no longer held in a
+        // queue anyone can count, so a quiet moment says nothing by itself.
+        val state = when {
+            failed > 0 -> "$failed failed"
+            prefs.settled == null -> "not started yet"
+            prefs.settled == false -> "more to upload"
+            else -> "up to date"
+        }
+
         return buildString {
             append("camera backup: ")
-            append(if (owed == 0) "up to date" else "$owed to upload")
+            append(state)
+            reason?.let { append(" — ${it.take(80)}") }
             holding?.let { append(" — $it") }
             if (partial) append(" (only the photos you selected)")
             prefs.lastOutcome?.let { append("\nlast sweep: $it") }

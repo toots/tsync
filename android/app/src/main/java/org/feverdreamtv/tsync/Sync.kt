@@ -30,8 +30,12 @@ class SyncWorker(
 
     override suspend fun doWork(): Result = withContext(Dispatchers.IO) {
         if (!Config.exists(applicationContext)) return@withContext Result.success()
-        val (code, output) = Tsync.plain(applicationContext, "sync")
-        if (code == 0) {
+        SyncSchedule.exclusive(Result.success()) { sync() }
+    }
+
+    private fun sync(): Result {
+        val (code, output) = Tsync.batchPlain(applicationContext, "sync")
+        return if (code == 0) {
             Result.success()
         } else {
             // Retried rather than failed: an unreachable server is the ordinary
@@ -44,6 +48,24 @@ class SyncWorker(
 
 object SyncSchedule {
     const val TAG = "tsync-sync"
+
+    /**
+     * Only one walk at a time, across every way of asking for one.
+     *
+     * WorkManager's uniqueness is per name, and the periodic job and the one an
+     * app launch asks for are two names, so nothing there stops both running --
+     * which is two of everything: two enumerations, two of each transfer.
+     */
+    private val running = java.util.concurrent.Semaphore(1)
+
+    fun <T> exclusive(otherwise: T, body: () -> T): T =
+        if (!running.tryAcquire()) otherwise
+        else
+            try {
+                body()
+            } finally {
+                running.release()
+            }
 
     private const val PERIODIC = "mirror-sync-periodic"
     private const val NOW = "mirror-sync-now"

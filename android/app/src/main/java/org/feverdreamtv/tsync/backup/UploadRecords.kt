@@ -91,6 +91,15 @@ class UploadRecords(context: Context) :
         )
     }
 
+    /** The most recently recorded failure, which for a whole roll refused the
+     *  same way is the reason for all of them. */
+    fun lastError(): String? =
+        readableDatabase.rawQuery(
+            "SELECT last_error FROM media WHERE last_error IS NOT NULL " +
+                "ORDER BY updated_at DESC LIMIT 1",
+            null
+        ).use { if (it.moveToFirst()) it.getString(0) else null }
+
     fun countInState(state: UploadState): Int =
         readableDatabase.rawQuery(
             "SELECT COUNT(*) FROM media WHERE state = ?", arrayOf(state.name)

@@ -32,10 +32,25 @@ class BackupPrefs(context: Context) {
         get() = prefs.getString(LAST_OUTCOME, null)
         set(value) = prefs.edit().putString(LAST_OUTCOME, value).apply()
 
+    /**
+     * Whether the last sweep reached the end of the roll with nothing left.
+     *
+     * The only honest source for "up to date": an upload no longer sits in a
+     * queue anyone can measure, so between sweeps nothing else distinguishes a
+     * finished backup from one that has not started. Null until a sweep has run.
+     */
+    var settled: Boolean?
+        get() = if (prefs.contains(SETTLED)) prefs.getBoolean(SETTLED, false) else null
+        set(value) =
+            prefs.edit().apply {
+                if (value == null) remove(SETTLED) else putBoolean(SETTLED, value)
+            }.apply()
+
     private companion object {
         const val ENABLED = "enabled"
         const val UNMETERED_ONLY = "unmeteredOnly"
         const val BATTERY_OK = "whenBatteryOk"
         const val LAST_OUTCOME = "lastOutcome"
+        const val SETTLED = "settled"
     }
 }

@@ -38,9 +38,21 @@ class BackupWorker(
 
         /** Staged bodies a crash left behind, which nothing else removes. */
         private const val ORPHAN_AGE_MS = 24L * 3600 * 1000
+
+        private val running = java.util.concurrent.Semaphore(1)
     }
 
-    override suspend fun doWork(): Result = withContext(Dispatchers.IO) { sweep() }
+    override suspend fun doWork(): Result = withContext(Dispatchers.IO) {
+        // The watch trigger, the periodic job and the button are three unique
+        // names, so WorkManager will run them together: two sweeps plan from the
+        // same records and upload the same photo twice.
+        if (!running.tryAcquire()) return@withContext Result.success()
+        try {
+            sweep()
+        } finally {
+            running.release()
+        }
+    }
 
     private suspend fun sweep(): Result {
         val prefs = BackupPrefs(applicationContext)
@@ -72,6 +84,7 @@ class BackupWorker(
                     userInitiated = inputData.getBoolean(USER_INITIATED, false)
                 ).execute { isStopped }
             prefs.lastOutcome = describe(outcome)
+            prefs.settled = !outcome.more && outcome.failed == 0
             Log.i(TAG, "sweep: ${prefs.lastOutcome}")
             if (outcome.more) Result.retry() else Result.success()
         } catch (failure: Exception) {

@@ -19,15 +19,24 @@ object Tsync {
     const val TAG = "tsync"
 
     /**
-     * How many invocations may run at once.
+     * Two bounds, because two different resources are at stake.
      *
-     * The process is the unit of concurrency, and nothing else bounds it:
-     * maxDownloads and the blocking pool are per process, so they cap what one
-     * call does and say nothing about how many calls a picker starts. Each one
-     * holds memory, descriptors and its own connections to the backends.
+     * [interactive] protects the device from a picker starting a call per row:
+     * the process is the unit of concurrency, and maxDownloads and the blocking
+     * pool are per process, so they cap what one call does and say nothing about
+     * how many there are.
+     *
+     * [batch] is what keeps a sync or an upload from being one of them. Those
+     * run for minutes, and sharing a bound with a stat means the stat waits out
+     * a whole domain walk — a picker that never answers, which is what a single
+     * pool of four produced with two syncs and two uploads in it.
      */
-    private const val MAX_CONCURRENT = 4
-    private val slots = Semaphore(MAX_CONCURRENT, true)
+    private const val MAX_INTERACTIVE = 4
+    private val interactive = Semaphore(MAX_INTERACTIVE, true)
+
+    /** One at a time: two walks of the same domain duplicate every transfer,
+     *  and two uploads of one key race on its staged manifest. */
+    private val batch = Semaphore(1, true)
 
     fun binary(context: Context): File =
         File(context.applicationInfo.nativeLibraryDir, "libtsync.so")
@@ -101,7 +110,8 @@ object Tsync {
      * protect. stderr is drained on its own thread, a child that fills that pipe
      * blocking on the write and never reaching the exit this waits for.
      */
-    fun run(context: Context, args: List<String>): Result {
+    fun run(context: Context, args: List<String>, batched: Boolean = false): Result {
+        val slots = if (batched) batch else interactive
         slots.acquire()
         try {
             val process = Runtime.getRuntime().exec(
@@ -132,8 +142,8 @@ object Tsync {
     }
 
     /** A verb that answers in JSON. Throws [Cli.Error] on a refusal. */
-    fun json(context: Context, args: List<String>): JSONObject =
-        Cli.reply(run(context, args).text)
+    fun json(context: Context, args: List<String>, batched: Boolean = false): JSONObject =
+        Cli.reply(run(context, args, batched).text)
 
     /** A verb that answers in bytes. */
     fun bytes(context: Context, args: List<String>): ByteArray {
@@ -143,11 +153,19 @@ object Tsync {
     }
 
     /** A subcommand whose output a person reads: config, status, sync. */
-    fun plain(context: Context, args: List<String>): Pair<Int, String> {
-        val result = run(context, args)
+    fun plain(
+        context: Context,
+        args: List<String>,
+        batched: Boolean = false
+    ): Pair<Int, String> {
+        val result = run(context, args, batched)
         return result.code to (result.text + result.err)
     }
 
     fun plain(context: Context, vararg args: String): Pair<Int, String> =
         plain(context, args.toList())
+
+    /** A whole-domain walk: minutes of work, and never in the way of a read. */
+    fun batchPlain(context: Context, vararg args: String): Pair<Int, String> =
+        plain(context, args.toList(), batched = true)
 }
