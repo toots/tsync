@@ -45,11 +45,6 @@
             </intent-filter>
         </activity>
 
-        <service
-            android:name=".DaemonService"
-            android:exported="false"
-            android:foregroundServiceType="dataSync" />
-
         <!-- work-runtime declares this service without a foregroundServiceType,
              so BackupWorker asking for dataSync is not a subset of it and the
              platform throws on the service's own thread, past any catch the

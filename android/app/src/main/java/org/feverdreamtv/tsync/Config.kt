@@ -83,7 +83,7 @@ object Config {
             // SAF has no symlink concept, so there is nothing to represent one as.
             .put("symlinks", "skip")
             .put("maxCache", settings.maxCache)
-            .put("frontends", JSONArray().put("headless"))
+            .put("frontends", JSONArray().put("android"))
             .put("backends", JSONArray().put(backend))
 
         val config = JSONObject()

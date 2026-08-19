@@ -59,7 +59,7 @@ jobs:
           opam pin add -ny git+https://github.com/toots/ocaml-cohttp.git#bigstring-body
           opam pin add -ny git+https://github.com/janestreet/memtrace.git#master
       - name: Install OCaml dependencies
-        run: opam install --deps-only -y tsync tsync-tls tsync-fuse
+        run: opam install --deps-only -y tsync tsync-libs tsync-tls tsync-fuse
       - name: Build
         run: opam exec -- dune build bin/tsync.exe tests/e2e/stress/stress.exe
 

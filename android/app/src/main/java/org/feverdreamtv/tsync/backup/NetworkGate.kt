@@ -6,33 +6,24 @@ import android.content.IntentFilter
 import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
 import android.os.BatteryManager
-import android.util.Log
-import org.feverdreamtv.tsync.Daemon
 
 /**
- * Holds the daemon's upload queue to the conditions the user asked for.
+ * The conditions the user asked a backup to keep to.
  *
- * A job constraint only decides whether the job runs: once photos are handed
- * over, Sync_queue uploads them on whatever network is there (lib/sync/file.ml
- * queue_put), so a batch staged on wifi would otherwise finish over cellular.
+ * A job constraint decides whether the job starts; this is checked again inside
+ * it, since a sweep runs for minutes and the network it began on is not
+ * necessarily the one it finishes on.
  */
 object NetworkGate {
 
-    private const val TAG = "tsync-backup"
     private const val LOW_BATTERY_PERCENT = 15
 
-    /** Null when uploads may run, else why they are being held. */
+    /** Null when a backup may run, else why it is being held. */
     fun blockedBecause(context: Context): String? {
         val prefs = BackupPrefs(context)
         if (prefs.unmeteredOnly && isMetered(context)) return "waiting for wifi"
         if (prefs.whenBatteryOk && isBatteryLow(context)) return "battery low"
         return null
-    }
-
-    fun apply(context: Context) {
-        val blocked = blockedBecause(context)
-        runCatching { Daemon.setPaused(context, blocked != null) }
-            .onFailure { Log.w(TAG, "pause: ${it.message}") }
     }
 
     private fun isMetered(context: Context): Boolean {

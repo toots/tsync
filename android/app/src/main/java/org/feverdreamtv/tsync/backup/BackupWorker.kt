@@ -12,16 +12,15 @@ import androidx.work.ForegroundInfo
 import androidx.work.WorkerParameters
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
-import org.feverdreamtv.tsync.Daemon
 import org.feverdreamtv.tsync.Ingest
 
 /**
  * One bounded pass over the camera roll, rescheduled while anything is still
  * owed.
  *
- * Partial progress is safe to abandon: what has been handed to the daemon is
- * recorded in its write-ahead log and resumes on the next start, which is the
- * whole reason this reuses the upload queue instead of driving transfers itself.
+ * Partial progress is safe to abandon: each commit drains before it returns, and
+ * anything a killed process left half-done is in the write-ahead log, which the
+ * next invocation replays before it stages anything of its own.
  */
 class BackupWorker(
     context: Context,
@@ -62,24 +61,16 @@ class BackupWorker(
         }
 
         promoteIfAllowed()
-
-        if (!Daemon.ensureRunning(applicationContext)) {
-            prefs.lastOutcome = "daemon did not start"
-            return Result.retry()
-        }
-        // Staging photos the daemon has been told to hold would fill the disk
-        // and upload nothing.
-        if (inputData.getBoolean(USER_INITIATED, false)) {
-            runCatching { Daemon.setPaused(applicationContext, false) }
-        } else {
-            NetworkGate.apply(applicationContext)
-        }
         Ingest.sweepOrphans(applicationContext, ORPHAN_AGE_MS)
 
         val records = UploadRecords(applicationContext)
         return try {
-            val outcome = BackupSweep(applicationContext, records)
-                .execute { isStopped }
+            val outcome =
+                BackupSweep(
+                    applicationContext,
+                    records,
+                    userInitiated = inputData.getBoolean(USER_INITIATED, false)
+                ).execute { isStopped }
             prefs.lastOutcome = describe(outcome)
             Log.i(TAG, "sweep: ${prefs.lastOutcome}")
             if (outcome.more) Result.retry() else Result.success()

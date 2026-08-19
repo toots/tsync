@@ -23,15 +23,15 @@ jobs:
           distribution: temurin
           java-version: "17"
 
-      # The daemon is cross-built for arm64 only, and an APK carrying arm64
+      # The binary is cross-built for arm64 only, and an APK carrying arm64
       # libraries will not install on an x86_64 emulator
-      # (INSTALL_FAILED_NO_MATCHING_ABIS). These tests drive a fake daemon over
-      # the same socket, so the real one is not wanted here — but its absence
-      # has to be deliberate rather than a checkout that happened to lack it.
-      - name: Refuse a daemon in the test APK
+      # (INSTALL_FAILED_NO_MATCHING_ABIS). What is left here reads MediaStore and
+      # never invokes it — but its absence has to be deliberate rather than a
+      # checkout that happened to lack it.
+      - name: Refuse a binary in the test APK
         run: |
           test ! -e android/app/src/main/jniLibs/arm64-v8a/libtsync.so \
-            || { echo "a staged daemon would make this APK uninstallable here"; exit 1; }
+            || { echo "a staged binary would make this APK uninstallable here"; exit 1; }
 
       - name: Enable KVM
         run: |

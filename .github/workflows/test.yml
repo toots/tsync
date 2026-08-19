@@ -84,7 +84,7 @@ jobs:
           opam pin add -ny git+https://github.com/toots/ocaml-cohttp.git#bigstring-body
           opam pin add -ny git+https://github.com/janestreet/memtrace.git#master
       - name: Install OCaml dependencies
-        run: opam install --deps-only -y tsync tsync-tls tsync-s3 tsync-fuse tsync-tray
+        run: opam install --deps-only -y tsync tsync-libs tsync-android tsync-tls tsync-s3 tsync-fuse tsync-tray
       - name: Build OCaml daemon
         run: opam exec -- dune build
       - name: Run tests
@@ -118,7 +118,7 @@ jobs:
           import glob, sys, xml.etree.ElementTree as ET
           # What each module has today. A floor well under the real count would
           # let a whole class vanish from discovery and still pass.
-          floors = {"android/core": 38, "android/app": 7}
+          floors = {"android/core": 40, "android/app": 7}
           failed = False
           for module, floor in floors.items():
               reports = glob.glob(f"{module}/build/test-results/**/TEST-*.xml", recursive=True)
@@ -155,7 +155,7 @@ jobs:
       - name: Install OCaml dependencies
         # Both TLS backends: tsync alone would pull tsync-tls, and a released
         # build should also carry tsync-ssl, the faster one.
-        run: opam install --deps-only -y tsync tsync-tls tsync-ssl tsync-s3
+        run: opam install --deps-only -y tsync tsync-libs tsync-tls tsync-ssl tsync-s3
       - name: Build OCaml daemon
         run: opam exec -- dune build
       - name: Run tests

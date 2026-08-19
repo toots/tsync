@@ -4,7 +4,6 @@ import android.content.Context
 import android.net.Uri
 import android.util.Log
 import org.feverdreamtv.tsync.Config
-import org.feverdreamtv.tsync.Daemon
 import org.feverdreamtv.tsync.Ingest
 import org.feverdreamtv.tsync.Keys
 import java.io.File
@@ -22,21 +21,24 @@ import java.time.ZoneId
 class BackupSweep(
     private val context: Context,
     private val records: UploadRecords,
+    /** A run the user asked for goes ahead on whatever network is there. */
+    private val userInitiated: Boolean = false,
     private val zone: ZoneId = ZoneId.systemDefault()
 ) {
     companion object {
         const val TAG = "tsync-backup"
 
-        /** Staged but not yet published, across the whole sweep. */
+        /** Staged but not yet published, across the whole sweep. Each commit
+         *  drains before it returns, so this bounds what one failure can leave
+         *  behind rather than a queue depth. */
         const val STAGED_BYTES_BUDGET = 512L * 1024 * 1024
-        const val QUEUE_DEPTH_LIMIT = 32
 
         /** A platform job is stopped around ten minutes in; leave room to record
          *  what was done rather than being killed mid-write. */
         const val TIME_BUDGET_MILLIS = 8L * 60 * 1000
 
-        /** Headroom over the file itself, since the daemon's rename lands the
-         *  body on this same filesystem. */
+        /** Headroom over the file itself, since the rename lands the body on
+         *  this same filesystem. */
         const val FREE_SPACE_FACTOR = 2
 
         const val LOOKBACK_SECONDS = 24L * 3600
@@ -53,7 +55,6 @@ class BackupSweep(
 
     fun execute(cancelled: Cancelled): Outcome {
         val domain = Config.load(context)?.domain ?: return Outcome(0, 0, 0, more = false)
-        val socket = Daemon.socket(context)
         val root = Keys.root(domain)
         val knownDirs = records.knownDirs()
 
@@ -78,13 +79,17 @@ class BackupSweep(
                 )
 
                 for (action in plan) {
+                    // The network is re-read per file, not once at the start: a
+                    // sweep runs for minutes, and an upload begun on wifi would
+                    // otherwise be free to finish over cellular.
                     if (cancelled.check() ||
+                        (!userInitiated && NetworkGate.blockedBecause(context) != null) ||
                         stagedBytes >= STAGED_BYTES_BUDGET ||
                         System.currentTimeMillis() - startedAt >= TIME_BUDGET_MILLIS
                     ) {
                         // The folders made so far are made whether or not this
-                        // pass finished, and re-stat'ing them costs the daemon a
-                        // lookup each.
+                        // pass finished, and re-stat'ing them costs an
+                        // invocation each.
                         records.rememberDirs(knownDirs)
                         return Outcome(uploaded, skipped, failed, more = true)
                     }
@@ -112,8 +117,7 @@ class BackupSweep(
                         }
 
                         is BackupAction.Upload -> {
-                            waitForQueue(cancelled)
-                            val outcome = upload(socket, root, action, knownDirs, collection, volume)
+                            val outcome = upload(context, root, action, knownDirs, collection, volume)
                             if (outcome) {
                                 uploaded++
                                 stagedBytes += action.row.sizeBytes
@@ -136,23 +140,8 @@ class BackupSweep(
         return Outcome(uploaded, skipped, failed, more)
     }
 
-    /** Lets the daemon's queue drain before handing it more, the staged bodies
-     *  being what occupies the disk until each upload publishes. */
-    private fun waitForQueue(cancelled: Cancelled) {
-        repeat(120) {
-            if (cancelled.check()) return
-            val status = runCatching { Daemon.status(context) }.getOrNull() ?: return
-            if (Daemon.pendingUploads(status) < QUEUE_DEPTH_LIMIT &&
-                Daemon.pendingBytes(status) < STAGED_BYTES_BUDGET
-            ) {
-                return
-            }
-            Thread.sleep(1_000)
-        }
-    }
-
     private fun upload(
-        socket: File,
+        context: Context,
         root: String,
         action: BackupAction.Upload,
         knownDirs: MutableSet<String>,
@@ -172,7 +161,7 @@ class BackupSweep(
             // The folder has to exist before the file lands in it: an upload
             // mints a folder id but writes no Mkdir entry, leaving the tree
             // unlistable (ipc_handler.ml handle_list_dir).
-            Ingest.ensureDirs(socket, root, key, knownDirs)
+            Ingest.ensureDirs(context, root, key, knownDirs)
 
             val uri = MediaScan.originalUri(MediaScan.contentUri(collection, row.mediaId))
             val copied = copy(uri, staging)
@@ -182,7 +171,7 @@ class BackupSweep(
                 )
             }
 
-            Ingest.commit(socket, key, staging, modified = row.captureMillis)
+            Ingest.commit(context, key, staging, modified = row.captureMillis)
             records.put(
                 UploadRecord(
                     row.mediaId, action.relativePath, row.sizeBytes,

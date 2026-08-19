@@ -16,8 +16,6 @@ import android.provider.DocumentsProvider
 import android.util.Log
 import android.webkit.MimeTypeMap
 import java.io.File
-import java.io.RandomAccessFile
-import java.util.UUID
 
 /**
  * Exposes a tsync domain through the Storage Access Framework.
@@ -30,7 +28,7 @@ import java.util.UUID
 class TsyncProvider : DocumentsProvider() {
 
     /** Read per call rather than cached: the provider outlives a trip through
-     *  the settings screen, and a stale domain would point at a dead socket. */
+     *  the settings screen, and a stale domain would name the wrong root. */
     private val domain: String
         get() = Config.load(context!!)?.domain ?: "media"
 
@@ -38,9 +36,6 @@ class TsyncProvider : DocumentsProvider() {
 
     private lateinit var callbackThread: HandlerThread
     private lateinit var callbackHandler: Handler
-
-    private val socket: File
-        get() = Ipc.socketPath(context!!.filesDir, domain)
 
     override fun onCreate(): Boolean {
         callbackThread = HandlerThread("tsync-pfd").apply { start() }
@@ -86,7 +81,7 @@ class TsyncProvider : DocumentsProvider() {
         } else if (documentId.endsWith("/")) {
             addDirectory(cursor, documentId)
         } else {
-            val response = Ipc.send(socket, "stat", mapOf("path" to documentId))
+            val response = Tsync.json(context!!, Cli.stat(documentId))
             addFile(
                 cursor, documentId,
                 response.optLong("size"),
@@ -103,8 +98,8 @@ class TsyncProvider : DocumentsProvider() {
     ): Cursor {
         val cursor = MatrixCursor(projection ?: defaultDocumentColumns)
         try {
-            val response = Ipc.send(socket, "list_dir", mapOf("path" to parentDocumentId))
-            // One list, each entry tagged by kind. The daemon also names each
+            val response = Tsync.json(context!!, Cli.list(parentDocumentId))
+            // One list, each entry tagged by kind. The reply also names each
             // item by reference, but documentId is the key here, so `key` is
             // what this reads.
             val items = response.getJSONArray("items")
@@ -119,7 +114,7 @@ class TsyncProvider : DocumentsProvider() {
             // A banner in the picker beats an empty folder that looks like truth.
             cursor.extras = android.os.Bundle().apply {
                 putString(android.provider.DocumentsContract.EXTRA_ERROR,
-                    "tsync is not running — open the tsync app")
+                    "tsync could not read this folder — open the tsync app")
             }
             Log.w(TAG, "list_dir $parentDocumentId: ${e.message}")
         }
@@ -136,49 +131,36 @@ class TsyncProvider : DocumentsProvider() {
         mode: String,
         signal: CancellationSignal?
     ): ParcelFileDescriptor {
-        // Demand-paged: the platform services each read through the callback
-        // below, so a player starts on the first frame instead of waiting for a
-        // whole film to land. The descriptor is seekable like any file, which is
-        // what container probing needs.
+        // The descriptor is seekable like any file, which is what container
+        // probing needs.
         if (!mode.contains("w")) {
-            val size = Ipc.send(socket, "stat", mapOf("path" to documentId)).getLong("size")
-            // Ranges land at their own offset, so this is a sparse partial mirror
-            // of the file rather than a buffer, and one open never sees another's
-            // bytes.
-            val scratch = File(context!!.cacheDir, "ranges").apply { mkdirs() }
-                .resolve(UUID.randomUUID().toString())
+            val size = Tsync.json(context!!, Cli.stat(documentId)).getLong("size")
             val storage = context!!.getSystemService(StorageManager::class.java)
             return storage.openProxyFileDescriptor(
                 ParcelFileDescriptor.MODE_READ_ONLY,
                 object : ProxyFileDescriptorCallback() {
                     override fun onGetSize(): Long = size
 
+                    // Demand-paged: the platform services each read here, so a
+                    // player starts on the first frame instead of waiting for a
+                    // whole film to land. Only the chunks a range covers are
+                    // fetched, and they stay in the cache for the reads after it.
                     override fun onRead(offset: Long, size: Int, data: ByteArray): Int {
                         val served = try {
-                            val response = Ipc.send(socket, "fetch_range", mapOf(
-                                "path" to documentId,
-                                "dest" to scratch.absolutePath,
-                                "offset" to offset,
-                                "length" to size
-                            ))
-                            response.getInt("length")
+                            Tsync.bytes(context!!, Cli.read(documentId, offset, size))
                         } catch (e: Exception) {
-                            Log.w(TAG, "fetch_range $documentId @$offset: ${e.message}")
+                            Log.w(TAG, "read $documentId @$offset: ${e.message}")
                             throw ErrnoException("onRead", OsConstants.EIO)
                         }
                         // Short at end of file, and the caller is told so rather
-                        // than handed the zeros the sparse hole would read as.
-                        if (served <= 0) return 0
-                        RandomAccessFile(scratch, "r").use { file ->
-                            file.seek(offset)
-                            file.readFully(data, 0, served)
-                        }
-                        return served
+                        // than handed the zeros a padded buffer would read as.
+                        served.copyInto(data)
+                        return served.size
                     }
 
-                    override fun onRelease() {
-                        scratch.delete()
-                    }
+                    // Nothing is held open between reads, so there is nothing
+                    // to release.
+                    override fun onRelease() = Unit
                 },
                 callbackHandler
             )
@@ -189,8 +171,7 @@ class TsyncProvider : DocumentsProvider() {
             // Edit in place: start from the current contents, assembled straight
             // into the file the write will hand back.
             runCatching {
-                Ipc.send(socket, "ensure_cached",
-                    mapOf("path" to documentId, "dest" to staging.absolutePath))
+                Tsync.json(context!!, Cli.fetch(documentId, staging.absolutePath))
             }
         }
         if (!staging.exists()) staging.createNewFile()
@@ -205,7 +186,7 @@ class TsyncProvider : DocumentsProvider() {
                 Log.w(TAG, "write $documentId aborted: $error")
                 staging.delete()
             } else {
-                runCatching { Ingest.commit(socket, documentId, staging) }
+                runCatching { Ingest.commit(context!!, documentId, staging) }
                     .onFailure { Log.w(TAG, "write $documentId: ${it.message}") }
             }
         }
@@ -220,19 +201,21 @@ class TsyncProvider : DocumentsProvider() {
     ): String {
         val isDirectory = mimeType == Document.MIME_TYPE_DIR
         val documentId = parentDocumentId + displayName + if (isDirectory) "/" else ""
-        Ipc.send(socket, if (isDirectory) "mkdir" else "create", mapOf("path" to documentId))
+        Tsync.json(context!!, if (isDirectory) Cli.mkdir(documentId) else Cli.create(documentId))
         return documentId
     }
 
     override fun deleteDocument(documentId: String) {
-        Ipc.send(socket, if (documentId.endsWith("/")) "rmdir" else "delete",
-            mapOf("path" to documentId))
+        Tsync.json(
+            context!!,
+            if (documentId.endsWith("/")) Cli.rmdir(documentId) else Cli.delete(documentId)
+        )
     }
 
     override fun renameDocument(documentId: String, displayName: String): String {
         val parent = documentId.trimEnd('/').substringBeforeLast('/', "") + "/"
         val renamed = parent + displayName + if (documentId.endsWith("/")) "/" else ""
-        Ipc.send(socket, "rename", mapOf("src" to documentId, "path" to renamed))
+        Tsync.json(context!!, Cli.rename(documentId, renamed))
         return renamed
     }
 

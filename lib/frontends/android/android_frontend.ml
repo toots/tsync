@@ -60,8 +60,9 @@ module Make (C : Conf.S) = struct
       }
 
   (* [staging] says whether the verb may leave work owed, which is what needs
-     the upload queue running. Draining is unconditional: with no daemon holding
-     a queue, this returning is the only backpressure a caller gets. *)
+     the upload queue running; every verb needs the manifest tree either way.
+     Draining is unconditional: with no daemon holding a queue, this returning is
+     the only backpressure a caller gets. *)
   let run ~staging f =
     let open Lwt.Syntax in
     (* Detached work has no caller to fail, and the default hook ends the
@@ -71,7 +72,7 @@ module Make (C : Conf.S) = struct
          Log.err "%s: async exception: %s" implementation
            (Printexc.to_string exn));
     Lwt_main.run
-      (let* () = if staging then E.start_queue () else Lwt.return_unit in
+      (let* () = if staging then E.start_queue () else E.init () in
        let* () = f () in
        E.drain ())
 
@@ -179,6 +180,16 @@ let commands =
                 ~offset:(int_arg "read" "OFFSET" offset)
                 ~length:(int_arg "read" "LENGTH" length)
           | _ -> usage "read" "KEY OFFSET LENGTH");
+    command "fetch"
+      "Assemble the whole content of KEY into DEST, fetching what is missing."
+      (fun (module C : Conf.S) args ->
+        let module R = Make (C) in
+        match args with
+          | [key; dest] ->
+              R.answer ~staging:false
+                (request "ensure_cached"
+                   [("path", `String key); ("dest", `String dest)])
+          | _ -> usage "fetch" "KEY DEST");
     command "write-whole"
       "Make STAGING the whole content of KEY. The file is adopted by rename, \
        so it is gone on success." (fun (module C : Conf.S) args ->

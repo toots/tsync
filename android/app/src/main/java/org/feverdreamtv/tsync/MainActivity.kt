@@ -2,7 +2,6 @@ package org.feverdreamtv.tsync
 
 import android.app.Activity
 import android.app.AlertDialog
-import android.content.Intent
 import android.graphics.Typeface
 import android.os.Build
 import android.os.Bundle
@@ -39,10 +38,29 @@ class MainActivity : Activity() {
         const val MEDIA_PERMISSIONS = 1
     }
 
+    /** Whether a full sync this screen started is still going: minutes of work
+     *  on a large domain, so it runs off the main thread and its exit code is
+     *  read rather than assumed. */
+    @Volatile
+    private var syncRunning: Boolean = false
+
+    private fun runFullSync(): Pair<Int, String> {
+        syncRunning = true
+        return try {
+            Tsync.plain(this, "sync", "--full")
+        } finally {
+            syncRunning = false
+        }
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         if (Config.exists(this)) {
             TsyncProvider.notifyRootsChanged(this)
+            // Nothing polls for foreign writes, so opening the app is one of the
+            // moments the mirror is brought up to date.
+            SyncSchedule.enable(this)
+            SyncSchedule.runNow(this)
             showStatus()
         } else showSetup()
     }
@@ -117,14 +135,15 @@ class MainActivity : Activity() {
                 }
 
                 Config.save(this@MainActivity, settings)
-                // The daemon is the authority on whether its own config parses;
+                // The binary is the authority on whether its own config parses;
                 // anything else here would be a second implementation that drifts.
-                val (code, output) = DaemonService.run(this@MainActivity, "config")
+                val (code, output) = Tsync.plain(this@MainActivity, "config")
                 if (code != 0) {
                     error.text = "tsync rejected the config:\n$output"
                     return@setOnClickListener
                 }
-                startForegroundService(Intent(this@MainActivity, DaemonService::class.java))
+                SyncSchedule.enable(this@MainActivity)
+                SyncSchedule.runNow(this@MainActivity)
                 // The root's id and title come from the config, so the picker
                 // is holding a stale answer until it re-queries.
                 TsyncProvider.notifyRootsChanged(this@MainActivity)
@@ -158,9 +177,8 @@ class MainActivity : Activity() {
         val prefs = BackupPrefs(this)
         if (!prefs.enabled) return "camera backup: off\n\n"
 
-        // Two different backlogs: what the daemon still owes the server, and
-        // what this device could not hand over and will try again.
-        val queued = runCatching { Daemon.pendingUploads(Daemon.status(this)) }.getOrDefault(0)
+        // What this device could not hand over and will try again. There is no
+        // second backlog to add: a commit does not return until it has drained.
         val stuck = UploadRecords(this).let { records ->
             try {
                 records.countInState(UploadState.FAILED)
@@ -168,7 +186,7 @@ class MainActivity : Activity() {
                 records.close()
             }
         }
-        val owed = queued + stuck
+        val owed = stuck
         // Selected-only is not a stall: the sweep runs and covers what it can
         // see, so it is said as a limit on the backup rather than a reason it
         // is not moving.
@@ -274,33 +292,18 @@ class MainActivity : Activity() {
             textSize = 10f
         }
 
-        // Wait until the daemon answers, not until its socket file is there:
-        // the socket lives on the filesystem, so the file outlives the process
-        // that bound it. Android kills this app's process while it is away and
-        // the daemon, its child, goes too — leaving a path that exists and
-        // listens to nothing, which is what made a restarting daemon report as
-        // absent.
         fun refresh() = thread {
-            runOnUiThread { output.text = "starting…" }
-            val socket = Ipc.socketPath(filesDir, Config.load(this)?.domain ?: "")
-            var waited = 0
-            var answering = false
-            while (waited++ < 40 && !answering) {
-                answering = runCatching { Ipc.send(socket, "status") }.isSuccess
-                if (!answering) Thread.sleep(250)
-            }
-            val (_, text) = DaemonService.run(this, "status")
+            runOnUiThread { output.text = "reading…" }
+            val (code, text) = Tsync.plain(this, Cli.status())
             // A walk creates each folder before fetching what is inside it, so
             // mid-sync a directory that looks empty is not one.
             val syncing =
-                if (DaemonService.syncRunning)
-                    "full sync running — folders fill in as it walks\n\n"
+                if (syncRunning) "full sync running — folders fill in as it walks\n\n"
                 else ""
             val backup = backupLine()
             runOnUiThread {
                 output.text = syncing + backup + text.ifBlank {
-                    if (answering) "daemon is up but returned nothing"
-                    else "daemon did not start — check `adb logcat -s tsyncd`"
+                    "tsync reported nothing (exit $code) — check `adb logcat -s tsync`"
                 }
             }
         }
@@ -318,7 +321,7 @@ class MainActivity : Activity() {
                         sync.text = "Syncing…"
                         refresh()
                         thread {
-                            val (code, out) = DaemonService.runFullSync(this@MainActivity)
+                            val (code, out) = runFullSync()
                             runOnUiThread {
                                 sync.isEnabled = true
                                 sync.text = "Sync"
@@ -342,8 +345,6 @@ class MainActivity : Activity() {
             addView(ScrollView(this@MainActivity).apply { addView(output) })
         })
 
-        // Idempotent: the service only spawns a daemon if it has none.
-        startForegroundService(Intent(this, DaemonService::class.java))
         refresh()
     }
 

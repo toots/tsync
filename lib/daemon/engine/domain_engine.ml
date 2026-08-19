@@ -52,6 +52,11 @@ module Make (C : Conf.S) = struct
     in
     loop ()
 
+  (* The manifest tree, which a caller needs before it can resolve a key at all.
+     Separate from {!start_queue} because a read-only command needs this and
+     nothing else. *)
+  let init () = Mf.init ()
+
   (* Everything needed before a caller may stage or publish, and nothing that
      outlives the call: a one-shot command starts here and drains, where a
      daemon goes on to {!start}.
@@ -61,7 +66,7 @@ module Make (C : Conf.S) = struct
      recovery goes through it, for the journal entry and cursor bump an upload
      owes. *)
   let start_queue ?(on_upload_done = fun ~key:_ -> Lwt.return_unit) () =
-    let* () = Mf.init () in
+    let* () = init () in
     Sq.start
       ~upload:(fun ~key ~cancel -> F.upload ~cancel key)
       ~on_cursor:set_pending_cursor
