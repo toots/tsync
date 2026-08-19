@@ -62,7 +62,7 @@ val code : Cohttp.Response.t -> int
 val is_ok : Cohttp.Response.t -> bool
 
 (** Whether a status clears on its own. One answer, so two drivers cannot drift
-    into retrying different things — which they had, over 429. *)
+    into retrying different things. *)
 val is_transient_code : int -> bool
 
 (** A {!Backend.Failed} carrying the status and a bounded excerpt of the body,

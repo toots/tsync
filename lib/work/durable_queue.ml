@@ -132,14 +132,13 @@ module Make (J : JOB) = struct
       let* () = Fs_util.mkdir_p t.dir in
       Fs_util.atomic_write (path t id) (J.to_string job)
 
-    (* Three answers, not two. A record that is simply gone was completed
-       between the directory being read and this opening it, which is ordinary
-       on a queue that is working; a body that will not parse is one nothing can
-       replay; a read that failed for any other reason says nothing about the
-       record at all.
+    (* A record that is simply gone was completed between the directory being
+       read and this opening it, which is ordinary on a queue that is working; a
+       body that will not parse is one nothing can replay; a read that failed for
+       any other reason says nothing about the record at all.
 
-       Only the middle one may be dropped. Collapsing the three loses work to a
-       full descriptor table or a bad sector, and prints the ordinary case as an
+       Only the middle may be dropped: collapsing them loses work to a full
+       descriptor table or a bad sector, and prints the ordinary case as an
        error. *)
     let read t id =
       Lwt.catch

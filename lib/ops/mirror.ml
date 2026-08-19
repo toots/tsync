@@ -115,10 +115,10 @@ module Make (C : Conf.S) = struct
      an object, against a namespace that answers a thousand keys a request, is
      the same question asked a thousand times over.
 
-     A listing is a snapshot where a HEAD was fresh. That is the trade a resync
-     already makes on the source side, and a collection cannot be open while
-     this runs, so what can change underneath is another client's write — which
-     the next run copies. *)
+     A listing is a snapshot where a HEAD is fresh, which is the trade the
+     source side already makes: a collection cannot be open while this runs, so
+     what changes underneath is another client's write, and the next run copies
+     it. *)
   let destination_view ~manifests_only ~on_list dst =
     let+ entries = namespace_entries ~manifests_only ~on_list dst in
     let held = Hashtbl.create (List.length entries) in
