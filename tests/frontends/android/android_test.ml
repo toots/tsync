@@ -171,12 +171,20 @@ let invoke args =
     | _ -> ());
   let out = Filename.concat root "out.bin" in
   let quoted = List.map Filename.quote (Option.get binary :: args) in
+  let errors = Filename.concat root "err.txt" in
   let status =
     Sys.command
-      (Printf.sprintf "HOME=%s %s > %s 2>/dev/null" (Filename.quote home)
-         (String.concat " " quoted) (Filename.quote out))
+      (Printf.sprintf "HOME=%s %s > %s 2> %s" (Filename.quote home)
+         (String.concat " " quoted) (Filename.quote out) (Filename.quote errors))
   in
-  if status <> 0 then line "exited %d" status;
+  (* Only when something went wrong: a backtrace names paths and line numbers,
+     which no snapshot could hold, and on a good run there is nothing to say. *)
+  if status <> 0 then begin
+    line "exited %d" status;
+    List.iter
+      (fun l -> line "  ! %s" (scrub l))
+      (String.split_on_char '\n' (String.trim (read_file errors)))
+  end;
   read_file out
 
 (* A verb answering in JSON: the call, then the whole reply. *)
