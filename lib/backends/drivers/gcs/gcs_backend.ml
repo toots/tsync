@@ -8,6 +8,7 @@ module Auth = Gcs_auth
 exception Cancelled = Backend.Cancelled
 
 type t = {
+  client : Http_client.t;
   bucket : string;
   base : string; (* scheme + host, no trailing slash *)
   auth : Auth.t option;
@@ -15,18 +16,9 @@ type t = {
   share_url : string option;
 }
 
-(* 5xx and 429 clear on their own; a 4xx is the bucket's answer. *)
-let is_transient_code c = c >= 500 || c = 429
-
-let backend_error op code body =
-  Backend.failed
-    ~kind:
-      (if is_transient_code code then Backend.Transient else Backend.Permanent)
-    ~op
-    (Printf.sprintf "HTTP %d: %s" code body)
-
-let code resp = Cohttp.Code.code_of_status (Cohttp.Response.status resp)
-let is_ok resp = code resp >= 200 && code resp < 300
+let code = Http_client.code
+let is_ok = Http_client.is_ok
+let backend_error = Http_client.backend_error
 
 (* An object name is a single path segment, so [/] and other reserved characters
    must be percent-encoded; the escaped form survives
@@ -39,10 +31,10 @@ let upload_uri t key =
     (t.base ^ "/upload/storage/v1/b/" ^ t.bucket ^ "/o?uploadType=media&name="
    ^ enc_key key)
 
-(* Nothing below this bounds itself, and a response that never arrives — a
-   connection dropped without an EOF reaching us — otherwise parks its caller
-   for the life of the process. The deferred queue runs one worker, so that is
-   every job behind it waiting, with nothing logged and no traffic to see.
+(* A response that never arrives — a connection dropped without an EOF reaching
+   us — otherwise parks its caller for the life of the process. The deferred
+   queue runs one worker, so that is every job behind it waiting, with nothing
+   logged and no traffic to see.
 
    Measured against the connections that go this way: every one of them is
    answered on the first retry, so waiting longer buys a caller nothing — the
@@ -51,47 +43,36 @@ let upload_uri t key =
    at its worst observed rate. *)
 let request_timeout = 60.
 
-let call t ~meth ?ctype ?(extra_headers = []) ?(body = Chunk.empty) uri =
-  Lwt_unix.with_timeout request_timeout @@ fun () ->
-  let* auth_header =
+(* Minting a token reaches the network, which is why the pool takes these as a
+   thunk: it belongs inside the request's deadline rather than before it. *)
+let headers t ~ctype ~extra_headers () =
+  let+ auth_header =
     match t.auth with
       | None -> Lwt.return []
       | Some a ->
           let+ tok = Auth.token a in
           [("Authorization", "Bearer " ^ tok)]
   in
-  let headers =
-    Cohttp.Header.of_list
-      (extra_headers
-      @
-        match ctype with
-        | Some c -> ("Content-Type", c) :: auth_header
-        | None -> auth_header)
-  in
-  let* resp, rbody =
-    Cohttp_lwt_unix.Client.call ~headers
-      ~body:(Cohttp_lwt.Body.of_bigstring (Chunk.buffer body))
-      meth uri
-  in
-  let+ rbody = Cohttp_lwt.Body.to_bigstring rbody in
-  (resp, Chunk.of_buffer rbody)
+  Cohttp.Header.of_list
+    (extra_headers
+    @
+      match ctype with
+      | Some c -> ("Content-Type", c) :: auth_header
+      | None -> auth_header)
 
-(* Raises on a transient status so the shared loop retries it; every other
-   response comes back for the verb to interpret, 404 included. *)
-let call_retry t ~meth ?ctype ?extra_headers ?body op uri =
-  Backend.with_retry ~name:"gcs" ~op (fun () ->
-      let* resp, rbody = call t ~meth ?ctype ?extra_headers ?body uri in
-      if is_transient_code (code resp) then
-        Lwt.fail (backend_error op (code resp) (Chunk.to_string rbody))
-      else Lwt.return (resp, rbody))
+let call_retry t ~meth ?ctype ?(extra_headers = []) ?body op uri =
+  Http_client.call_retry t.client
+    ~headers:(headers t ~ctype ~extra_headers)
+    ~meth ?body op uri
 
 (* Only an object's own bytes are worth keeping off the heap; the JSON and XML
    verbs below carry a body small enough to read as a string, and one they have
    to parse anyway. *)
-let call_text t ~meth ?ctype ?extra_headers ?body op uri =
+let call_text t ~meth ?ctype ?(extra_headers = []) ?body op uri =
   let body = Option.map Chunk.of_string body in
-  let+ resp, rbody = call_retry t ~meth ?ctype ?extra_headers ?body op uri in
-  (resp, Chunk.to_string rbody)
+  Http_client.call_text t.client
+    ~headers:(headers t ~ctype ~extra_headers)
+    ~meth ?body op uri
 
 let str_member key j =
   match Yojson.Safe.Util.member key j with `String s -> s | _ -> ""
@@ -355,7 +336,15 @@ let make ?endpoint ?service_account_key ?share_url ~bucket () :
     if n > 0 && base.[n - 1] = '/' then String.sub base 0 (n - 1) else base
   in
   let auth = Option.map Auth.of_service_account_json service_account_key in
-  let t = { bucket; base; auth; share_url } in
+  let t =
+    {
+      client = Http_client.create ~name:"gcs" ~timeout:request_timeout ();
+      bucket;
+      base;
+      auth;
+      share_url;
+    }
+  in
   (* The verifier's job bodies are JSON, and it is handed this rather than the
      module's [put] below, which speaks in chunks. *)
   let put_text ~key ~data () = put t ~key ~data:(Chunk.of_string data) () in

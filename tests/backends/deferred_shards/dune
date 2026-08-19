@@ -1,0 +1,26 @@
+(executable
+ (flags
+  (:standard
+   -open
+   Tsync_chunk
+   -open
+   Tsync_naming
+   -open
+   Tsync_backend_register
+   -open
+   Tsync_domain_store
+   -open
+   Tsync_local_backend
+   -open
+   Tsync_test_harness))
+ (name deferred_shards)
+ (libraries
+  tsync_test_harness
+  tsync_chunk
+  tsync_naming
+  tsync_backend_register
+  tsync_domain_store
+  tsync_local_backend
+  lwt
+  lwt.unix
+  unix))

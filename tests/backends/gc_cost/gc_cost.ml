@@ -81,7 +81,9 @@ end
 
 module Main =
   Count
-    ((val Backend.make ~backend_type:"local" ~get_field:(fun _ -> Some main_dir)
+    ((val Backend.make ~backend_type:"local"
+            ~get_field:(fun _ -> Some main_dir)
+            ()
          : Backend.S))
     (struct
       let t = main_ops
@@ -89,8 +91,9 @@ module Main =
 
 module Replica =
   Count
-    ((val Backend.make ~backend_type:"local" ~get_field:(fun _ ->
-              Some replica_dir)
+    ((val Backend.make ~backend_type:"local"
+            ~get_field:(fun _ -> Some replica_dir)
+            ()
          : Backend.S))
     (struct
       let t = replica_ops

@@ -21,6 +21,10 @@ val temp_path : string -> string
     hide and delete. *)
 val is_temp_name : string -> bool
 
+(** {!is_temp_name} of a backend key's last component, for the callers walking a
+    store's listing rather than a directory. *)
+val is_temp_key : string -> bool
+
 (** [atomic_write path data] writes [data] to a uniquely named temp file in
     [path]'s directory, then renames it over [path]. Safe against concurrent
     writers of the same path, in this process or another. *)

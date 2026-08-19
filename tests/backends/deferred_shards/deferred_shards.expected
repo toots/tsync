@@ -1,0 +1,8 @@
+=== 40 manifests naming 4 chunks each, over 4 shards
+  head_opt         0
+  list_prefix      4
+  chunk puts       160
+=== the same chunks again, under new manifest names
+  head_opt         0
+  list_prefix      0
+  chunk puts       0

@@ -80,13 +80,17 @@ let holds root key = Sys.file_exists (Filename.concat root key)
 
 let () =
   let main =
-    Backend.make ~backend_type:"local" ~get_field:(fun _ -> Some main_root)
+    Backend.make ~backend_type:"local" ~get_field:(fun _ -> Some main_root) ()
   in
   let replica =
-    Backend.make ~backend_type:"local" ~get_field:(fun _ -> Some replica_root)
+    Backend.make ~backend_type:"local"
+      ~get_field:(fun _ -> Some replica_root)
+      ()
   in
   let archive =
-    Backend.make ~backend_type:"local" ~get_field:(fun _ -> Some archive_root)
+    Backend.make ~backend_type:"local"
+      ~get_field:(fun _ -> Some archive_root)
+      ()
   in
   let (module Rep : Backend.S) = replica in
   let (module Arc : Backend.S) = archive in

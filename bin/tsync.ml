@@ -1766,8 +1766,14 @@ let mirror_cmd =
                   (fun (m : Backend.member) -> m.Backend.name <> src)
                   C.members)
            in
-           let on_scan ~objects =
+           let on_scan ~objects ~bytes =
              planned := objects * destinations;
+             (* A mirror spends its time asking destinations what they hold, and
+                mostly they hold it: an estimate against what it happened to
+                copy would answer with hours of transfer for a run that has
+                minutes of checking left. *)
+             Job.Progress.plan ~basis:`Handled
+               ~bytes:(Int64.mul bytes (Int64.of_int destinations));
              vprintf "scanned %s: %d object%s to check" src objects
                (if objects = 1 then "" else "s")
            in
@@ -1777,20 +1783,27 @@ let mirror_cmd =
            in
            (* As each object lands rather than as a list at the end: the list
               was the whole keyspace of a first resync, held to print it. *)
-           let on_copy ~name ~key ~reason ~bytes =
-             incr copied;
-             let why =
-               match reason with
-                 | `Missing -> "missing"
-                 | `Wrong_size -> "wrong size"
-             in
-             if !verbose then
-               vprintf "  copied %s (%s, %s) -> %s" key (human_bytes bytes) why
-                 name
-             else Printf.printf "copied %s -> %s\n%!" key name
+           let on_entry ~name ~key ~size ~outcome =
+             let size = Int64.of_int size in
+             match outcome with
+               | `Present -> Job.Progress.settle ~bytes:size ~sent:0L `Skipped
+               | `Copied (reason, bytes) ->
+                   Job.Progress.settle ~bytes:size ~sent:(Int64.of_int bytes)
+                     `Done;
+                   incr copied;
+                   let why =
+                     match reason with
+                       | `Missing -> "missing"
+                       | `Wrong_size -> "wrong size"
+                   in
+                   if !verbose then
+                     vprintf "  copied %s (%s, %s) -> %s" key
+                       (human_bytes bytes) why name
+                   else Printf.printf "copied %s -> %s\n%!" key name
            in
            let+ dests =
-             M.resync ~source:src ~scope ~on_scan ~on_list ~on_start ~on_copy ()
+             M.resync ~source:src ~scope ~on_scan ~on_list ~on_start ~on_entry
+               ()
            in
            List.iter
              (fun (dst : Mirror.dest_stats) ->
@@ -1888,7 +1901,9 @@ let import_cmd =
                Printf.printf "mkdir    %s\n%!" rel)
              ~on_plan:(fun ~files ~bytes ->
                planned := files;
-               Job.Progress.plan ~bytes)
+               (* An import is transfer-bound: what is left is uploads, and the
+                  rate that predicts them is the one they ran at. *)
+               Job.Progress.plan ~basis:`Sent ~bytes)
              ~on_start:(fun ~rel ~size ->
                current := Some rel;
                Job.Progress.start_entry ~size)

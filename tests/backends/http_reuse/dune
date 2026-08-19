@@ -1,0 +1,19 @@
+(executable
+ (flags
+  (:standard
+   -open
+   Tsync_chunk
+   -open
+   Tsync_http_client
+   -open
+   Tsync_test_harness))
+ (name http_reuse)
+ (libraries
+  tsync_test_harness
+  tsync_chunk
+  tsync_http_client
+  cohttp-lwt-unix
+  uri
+  lwt
+  lwt.unix
+  unix))

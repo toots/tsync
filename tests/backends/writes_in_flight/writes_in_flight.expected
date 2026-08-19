@@ -1,0 +1,25 @@
+
+=== what a listing of the shard yields
+  listed
+    .syncthing.Big.Buck.Bunny.mkv.tmp
+    bbc1819db45dd012-2455c129acbb7e9b
+the object is there: ok
+the write in flight is not: ok
+and a user's own ".tmp" still is: ok
+  on disk, though: 3 file(s)
+the staged file was not deleted, only hidden: ok
+
+=== and a mirror asked to copy a store that lists one anyway
+the source does offer it: ok
+  copied
+    .syncthing.Big.Buck.Bunny.mkv.tmp
+    bbc1819db45dd012-2455c129acbb7e9b
+  on the replica
+    tsync/d/chunks/2e2/.syncthing.Big.Buck.Bunny.mkv.tmp
+    tsync/d/chunks/2e2/bbc1819db45dd012-2455c129acbb7e9b
+the object was copied: ok
+the write in flight was not: ok
+so the replica holds nothing staged: ok
+and the accounts agree: ok
+
+9 check(s), 0 failure(s)

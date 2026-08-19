@@ -1,0 +1,32 @@
+=== a store with a link, whose bytes and rates are its own
+  Backend gcs (gcs, replica)
+    bucket           tsync-gcs
+    reachable        yes (138 ms)
+    journal          135 entries, 0 to apply
+    traffic          up 453.7 GB (24.5 KB/s), down 1.0 MB (45.1 KB/s)
+
+=== a local store, which is a filesystem rather than a link
+  Backend local (local, main)
+    bucket           tsync-local
+    reachable        yes (138 ms)
+    journal          135 entries, 0 to apply
+
+=== two stores, each with its own
+  Backend local (local, main)
+    bucket           tsync-local
+    reachable        yes (138 ms)
+    journal          135 entries, 0 to apply
+  Backend gcs (gcs, replica)
+    bucket           tsync-gcs
+    reachable        yes (138 ms)
+    journal          135 entries, 0 to apply
+    traffic          up 453.7 GB (24.5 KB/s), down 1.0 MB (45.1 KB/s)
+    behind           99100 queued, 0 in flight — DEGRADED, run tsync mirror
+
+=== a store that has a link and has used none of it
+  Backend gcs (gcs, replica)
+    bucket           tsync-gcs
+    reachable        yes (138 ms)
+    journal          135 entries, 0 to apply
+    traffic          up 0 B (0 B/s), down 0 B (0 B/s)
+

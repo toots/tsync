@@ -76,7 +76,24 @@ end
 let () =
   Backend.register ~spec:[] "memory" (fun _ -> (module Memory () : Backend.S))
 
-let remote () = Backend.make ~backend_type:"memory" ~get_field:(fun _ -> None)
+let remote () =
+  Backend.make ~backend_type:"memory" ~get_field:(fun _ -> None) ()
+
+(* A store holding its own counters, which is what a [member] carries so a
+   report can name the link a transfer is on. *)
+let remote_counted () =
+  let traffic = Backend.new_traffic () in
+  ( Backend.make ~traffic ~backend_type:"memory" ~get_field:(fun _ -> None) (),
+    traffic )
+
+(* What one store's own counters moved by, the same shape as [moved] so the two
+   are read side by side. *)
+let moved_on (t : Backend.traffic) f =
+  let up = Metrics.total t.Backend.uploaded
+  and down = Metrics.total t.Backend.downloaded in
+  let+ () = f () in
+  ( Metrics.total t.Backend.uploaded - up,
+    Metrics.total t.Backend.downloaded - down )
 
 (* Runs [f] and answers what it moved, so every assertion below is a number
    rather than the absence of one. *)
@@ -100,7 +117,7 @@ let () =
   Lwt_main.run
     (let (module R : Backend.S) = remote () in
      let (module L : Backend.S) =
-       Backend.make ~backend_type:"local" ~get_field:(fun _ -> Some scratch)
+       Backend.make ~backend_type:"local" ~get_field:(fun _ -> Some scratch) ()
      in
 
      case "a body crossing a link is counted, once, for its own length";
@@ -161,5 +178,25 @@ let () =
      let* r = moved (fun () -> Lwt.map ignore (Composite.get ~key:"fan" ())) in
      expect "a read is counted once" ~up:0 ~down:70 r;
 
-     report ~expected:14 ();
+     case "a store counts its own bytes as well as the process's";
+     let (module One : Backend.S), t1 = remote_counted () in
+     let (module Two : Backend.S), t2 = remote_counted () in
+     let* r = moved_on t1 (fun () -> One.put ~key:"a" ~data:(body 25) ()) in
+     expect "a put reaches the store's own counter" ~up:25 ~down:0 r;
+     let* r = moved_on t1 (fun () -> Lwt.map ignore (One.get ~key:"a" ())) in
+     expect "so does a get" ~up:0 ~down:25 r;
+     (* The figure exists to say which link the bytes crossed, so a second store
+        seeing the first's traffic would be the whole point missed. *)
+     let* r = moved_on t2 (fun () -> One.put ~key:"b" ~data:(body 60) ()) in
+     expect "one store's bytes are not another's" ~up:0 ~down:0 r;
+     let* r = moved (fun () -> Two.put ~key:"b" ~data:(body 60) ()) in
+     expect "and the process-wide count still takes every store's" ~up:60
+       ~down:0 r;
+
+     case "which stores have a link to count";
+     check "a local store is a filesystem"
+       (not (Backend.counts_traffic ~backend_type:"local"));
+     check "a remote one is not" (Backend.counts_traffic ~backend_type:"memory");
+
+     report ~expected:20 ();
      Lwt.return_unit)

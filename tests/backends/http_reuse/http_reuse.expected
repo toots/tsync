@@ -1,0 +1,7 @@
+=== the pooled client
+  requests         10
+  answered         10
+  accepts          1
+=== cohttp's stateless client, for contrast
+  requests         10
+  accepts          10

@@ -8,7 +8,7 @@ type dest_stats = {
   copied : int;
       (** Objects copied. A count rather than the keys: a first resync onto an
           empty destination copies the whole domain, and holding its keyspace as
-          strings to print at the end is the resync's own memory. [on_copy]
+          strings to print at the end is the resync's own memory. [on_entry]
           carries each key as it lands. *)
   copied_bytes : int;
 }
@@ -37,28 +37,35 @@ module Make (C : Conf.S) : sig
 
       [on_list] fires before each step of working out what the source holds,
       [name] being that step phrased for a progress line. [on_scan] fires once
-      with the total number of source objects to examine, after listing and
-      before copying. [on_copy] fires per object actually copied, with the
-      destination's name, the bytes written, and what was wrong with the
-      destination's copy: [`Missing] or [`Wrong_size]. A body of the right
-      length holding the wrong bytes is not this command's to find: the store
-      checks that against the key it is filed under, and [tsync data-integrity]
-      reads what it found.
+      after listing and before copying, with how many source objects are to be
+      examined and how many bytes they come to — one destination's worth, the
+      run being that times the number of destinations.
+
+      [on_entry] fires once per object examined, per destination: [`Copied] with
+      the bytes written and what was wrong with the destination's copy
+      ([`Missing] or [`Wrong_size]), or [`Present] for one already right, which
+      is most of them on any resync after the first. [size] is what the source
+      listing said, and so what a plan counted the object as, which is not the
+      bytes a copy moved should the object have changed since. A body of the
+      right length holding the wrong bytes is not this command's to find: the
+      store checks that against the key it is filed under, and
+      [tsync data-integrity] reads what it found.
 
       [on_start] fires as each object is picked up, which is what a caller
-      saying where the copy has got to wants: [on_copy] fires once an object is
-      done, and a chunk spends its whole life between the two. *)
+      saying where the copy has got to wants: [on_entry] fires once an object is
+      done, and a chunk spends its whole life between the two. Several objects
+      are in flight at once, so the two do not pair up. *)
   val resync :
     ?source:string ->
     ?scope:[ `All | `Manifests | `Path of string ] ->
-    ?on_scan:(objects:int -> unit) ->
+    ?on_scan:(objects:int -> bytes:int64 -> unit) ->
     ?on_list:(name:string -> unit) ->
     ?on_start:(name:string -> key:string -> unit) ->
-    ?on_copy:
+    ?on_entry:
       (name:string ->
       key:string ->
-      reason:[ `Missing | `Wrong_size ] ->
-      bytes:int ->
+      size:int ->
+      outcome:[ `Copied of [ `Missing | `Wrong_size ] * int | `Present ] ->
       unit) ->
     unit ->
     dest_stats list Lwt.t
