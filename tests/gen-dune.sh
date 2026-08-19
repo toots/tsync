@@ -32,6 +32,16 @@ env_for() {
   esac
 }
 
+# A test that spawns the tsync binary has to depend on it, or `dune build
+# @runtest' is free to run it before the binary exists. Named here with the
+# other per-test knobs so the exceptions stay countable.
+deps_for() {
+  case "$1" in
+    frontends/android) echo "%{exe:../../../bin/tsync.exe}" ;;
+    *) echo "" ;;
+  esac
+}
+
 platform_for() {
   case "$1" in
     frontends/preview) echo "macosx" ;;
@@ -84,14 +94,22 @@ for dune in $(find . -mindepth 2 -name dune | sed 's|^\./||' | sort); do
     printf '\n (alias\n  (name default)\n  (deps %s.exe))' "$exe"
   fi
 
+  extra=$(deps_for "$dir")
+  if [ -n "$extra" ]; then
+    deps="
+  (deps $extra)"
+  else
+    deps=""
+  fi
+
   if [ -f "$dir/$exe.expected" ]; then
     action=$(wrap_env "(run ./$exe.exe)" "$dir")
-    printf '\n (rule\n  (alias runtest)%s\n  (target %s.output)\n  (action\n   (with-stdout-to %s.output (ignore-stderr %s))))' \
-      "$guard" "$exe" "$exe" "$action"
+    printf '\n (rule\n  (alias runtest)%s%s\n  (target %s.output)\n  (action\n   (with-stdout-to %s.output (ignore-stderr %s))))' \
+      "$guard" "$deps" "$exe" "$exe" "$action"
     printf '\n (rule\n  (alias runtest)%s\n  (action\n   (diff %s.expected %s.output))))\n' \
       "$guard" "$exe" "$exe"
   else
     action=$(wrap_env "(run ./$exe.exe)" "$dir")
-    printf '\n (rule\n  (alias runtest)%s\n  (action %s)))\n' "$guard" "$action"
+    printf '\n (rule\n  (alias runtest)%s%s\n  (action %s)))\n' "$guard" "$deps" "$action"
   fi
 done

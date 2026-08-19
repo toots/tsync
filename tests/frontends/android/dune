@@ -1,0 +1,5 @@
+(executable
+ (flags
+  (:standard -open Tsync_test_harness))
+ (name android_test)
+ (libraries tsync_test_harness unix))

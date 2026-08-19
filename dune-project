@@ -10,6 +10,14 @@
 (package
  (name tsync))
 
+; The libraries, public so a frontend in a package of its own can depend on
+; them. The frontend and backend aggregators deliberately stay in tsync: their
+; (select ...) has to be re-asked when the binary is built, which is what makes
+; tsync-s3, tsync-fuse and tsync-android take effect on a rebuild.
+
+(package
+ (name tsync-libs))
+
 (package
  (name tsync-tls)
  (version 1)
@@ -27,6 +35,11 @@
 
 (package
  (name tsync-fuse)
+ (version 1)
+ (allow_empty))
+
+(package
+ (name tsync-android)
  (version 1)
  (allow_empty))
 

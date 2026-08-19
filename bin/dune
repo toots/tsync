@@ -54,30 +54,30 @@
  (public_name tsync)
  (package tsync)
  (libraries
-  tsync_lwt_unix
-  tsync_field_spec
-  tsync_sync
-  tsync_ops
-  tsync_store
-  tsync_object
-  tsync_naming
-  tsync_frontend_register
-  tsync_chunk
-  tsync_backend_register
-  tsync_metrics
-  tsync_job
-  tsync_conf_parsing
-  tsync_ipc
-  tsync_conf
+  tsync-libs.lwt_unix
+  tsync-libs.field_spec
+  tsync-libs.sync
+  tsync-libs.ops
+  tsync-libs.store
+  tsync-libs.object
+  tsync-libs.naming
+  tsync-libs.frontend_register
+  tsync-libs.chunk
+  tsync-libs.backend_register
+  tsync-libs.metrics
+  tsync-libs.job
+  tsync-libs.conf_parsing
+  tsync-libs.ipc
+  tsync-libs.conf
   tsync_backend
-  tsync_diagnostics
-  tsync_domain_store
-  tsync_local_io
-  tsync_log
+  tsync-libs.diagnostics
+  tsync-libs.domain_store
+  tsync-libs.local_io
+  tsync-libs.log
   tsync_runtime
   tsync_device
   tsync_frontend
-  tsync_tls
+  tsync-libs.tls
   cmdliner
   memtrace
   yojson

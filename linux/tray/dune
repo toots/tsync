@@ -23,11 +23,11 @@
   (= %{system} linux))
  (libraries
   tsync_dbus
-  tsync_menu
-  tsync_ipc
-  tsync_conf_parsing
+  tsync-libs.menu
+  tsync-libs.ipc
+  tsync-libs.conf_parsing
   tsync_runtime
-  tsync_log
+  tsync-libs.log
   yojson
   lwt
   lwt.unix
@@ -42,4 +42,4 @@
  (package tsync-tray)
  (enabled_if
   (= %{system} linux))
- (libraries tsync_tray tsync_log cmdliner))
+ (libraries tsync_tray tsync-libs.log cmdliner))

@@ -1,2 +1,3 @@
 (library
- (name tsync_glob))
+ (name tsync_glob)
+ (public_name tsync-libs.glob))

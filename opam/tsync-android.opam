@@ -1,5 +1,5 @@
 opam-version: "2.0"
-synopsis: "Cloud-backed filesystem sync tool"
+synopsis: "Android frontend for tsync, driven by directed commands"
 maintainer: ["Romain Beauxis <toots@rastageeks.org>"]
 authors: ["Romain Beauxis <toots@rastageeks.org>"]
 license: "MIT"
@@ -7,16 +7,12 @@ homepage: "https://github.com/toots/tsync"
 bug-reports: "https://github.com/toots/tsync/issues"
 depends: [
   "ocaml" {>= "5.1"}
-  "tsync-libs" {= version}
-  "tsync-fuse" {os = "linux"}
   "dune" {>= "3.23"}
-  "cmdliner"
+  "tsync-libs" {= version}
+  "yojson"
+  "lwt"
   "odoc" {with-doc}
 ]
-# The frontend and backend aggregators are built here, so their (select ...) is
-# re-asked on every build of this package: installing one of these and
-# rebuilding tsync is what links it in.
-depopts: ["tsync-s3" "tsync-android"]
 build: [
   ["dune" "subst"] {dev}
   [
@@ -32,4 +28,3 @@ build: [
   ]
 ]
 x-maintenance-intent: ["(latest)"]
-available: os = "linux" | os = "macos"

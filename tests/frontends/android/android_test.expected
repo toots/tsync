@@ -1,0 +1,33 @@
+
+=== a directory is made, then seen
+  mkdir media/photos/
+mkdir answers ok: ok
+the new directory is listed: ok
+
+=== a whole body is adopted, and read back byte for byte
+  write-whole media/photos/big.txt
+write-whole reports the size: ok
+the staging file was adopted by rename, not copied: ok
+a whole read returns the content: ok
+
+=== ranges, each served by its own process, reassemble the file
+three separate processes reassemble the file: ok
+a range starting mid-chunk is served from its own offset: ok
+
+=== a read past the content is short, never padded
+a range straddling the end stops at it: ok
+a range wholly past the end is empty: ok
+
+=== metadata answers the way the socket did
+stat names the item by reference: ok
+stat reports it published: ok
+a missing key is a coded refusal, not a hang: ok
+
+=== the namespace verbs move and remove
+a renamed file is listed under its new name: ok
+the domain is empty again: ok
+
+=== the report needs no daemon to answer
+status names this frontend and its domain: ok
+
+15 check(s), 0 failure(s)

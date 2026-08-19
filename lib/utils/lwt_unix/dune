@@ -1,3 +1,4 @@
 (library
  (name tsync_lwt_unix)
+ (public_name tsync-libs.lwt_unix)
  (libraries unix lwt lwt.unix))

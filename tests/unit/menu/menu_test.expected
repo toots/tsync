@@ -174,7 +174,7 @@ tooltip tsync — No domains configured
             cold (replica) — unreachable: connection refused · journal 88 entries, 12 behind
 
 == stats, sparse
-        server — headless
+        server — android
         pid 7 · just started
         cpu 0.0% · 39.3 MB rss · 7.6 MB heap
         up 212.9 MB (1.5 MB/s) · down 0 B

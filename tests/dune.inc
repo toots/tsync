@@ -257,6 +257,21 @@
   (action
    (diff ipc_tap_test.expected ipc_tap_test.output))))
 
+(subdir frontends/android
+ (alias
+  (name default)
+  (deps android_test.exe))
+ (rule
+  (alias runtest)
+  (deps %{exe:../../../bin/tsync.exe})
+  (target android_test.output)
+  (action
+   (with-stdout-to android_test.output (ignore-stderr (run ./android_test.exe)))))
+ (rule
+  (alias runtest)
+  (action
+   (diff android_test.expected android_test.output))))
+
 (subdir frontends/http_proxy
  (alias
   (name default)

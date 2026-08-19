@@ -50,16 +50,16 @@
    -framework
    Foundation))
  (libraries
-  tsync_menu
-  tsync_sync
-  tsync_naming
-  tsync_conf
-  tsync_ipc
-  tsync_engine
-  tsync_ipc_handler
+  tsync-libs.menu
+  tsync-libs.sync
+  tsync-libs.naming
+  tsync-libs.conf
+  tsync-libs.ipc
+  tsync-libs.engine
+  tsync-libs.ipc_handler
   tsync_runtime
-  tsync_frontend_register
-  tsync_log
+  tsync-libs.frontend_register
+  tsync-libs.log
   yojson
   base64
   unix

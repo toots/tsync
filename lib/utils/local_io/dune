@@ -2,6 +2,7 @@
  (flags
   (:standard -open Tsync_lwt_unix))
  (name tsync_local_io)
+ (public_name tsync-libs.local_io)
  (foreign_stubs
   (language c)
   (names statvfs_stubs positioned_stubs))

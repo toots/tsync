@@ -27,6 +27,7 @@
    -open
    Tsync_work))
  (name tsync_sync)
+ (public_name tsync-libs.sync)
  (libraries
   tsync_work
   tsync_conf

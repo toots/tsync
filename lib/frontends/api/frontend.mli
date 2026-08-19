@@ -47,8 +47,17 @@ end
 (** A CLI subcommand a frontend contributes, surfaced as
     [tsync <cli_group> <verb>]. The binary parses the arguments and resolves
     [--domain] to a {!Conf.S}, checking this frontend is configured for that
-    domain, before calling [run]. *)
-type command = { verb : string; doc : string; run : (module Conf.S) -> unit }
+    domain, before calling [run] with whatever positional arguments followed the
+    verb.
+
+    The binary does not interpret those arguments: teaching {!Cmdliner} every
+    frontend's flags would put each one's argument grammar somewhere the
+    frontend that owns it cannot see. *)
+type command = {
+  verb : string;
+  doc : string;
+  run : (module Conf.S) -> string list -> unit;
+}
 
 (** [cli_group] defaults to [name]. [spec] is what [tsync config --edit] prompts
     for; see {!Field_spec}. *)

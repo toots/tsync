@@ -13,7 +13,12 @@ module type S = sig
 end
 
 type freshness = Notify of (string -> unit) | Revalidates
-type command = { verb : string; doc : string; run : (module Conf.S) -> unit }
+
+type command = {
+  verb : string;
+  doc : string;
+  run : (module Conf.S) -> string list -> unit;
+}
 
 type entry = {
   modl : (module S);
