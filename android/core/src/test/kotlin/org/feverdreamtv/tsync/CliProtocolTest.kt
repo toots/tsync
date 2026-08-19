@@ -51,6 +51,17 @@ class CliProtocolTest {
         }
     }
 
+    /** Asked rather than assumed: Linux keeps it under XDG, macOS in a group
+     *  container, and a test that spells one out is a test for one platform. */
+    private fun configPath(): String {
+        val out = String(raw(listOf("build-info")).second)
+        return out.lineSequence()
+            .firstOrNull { it.startsWith("config:") }
+            ?.substringAfter("config:")
+            ?.trim()
+            ?: File(home, ".config/tsync/config.json").absolutePath
+    }
+
     @Before
     fun writeConfig() {
         val binary = executable()
@@ -69,8 +80,9 @@ class CliProtocolTest {
         root = File("/tmp/ts-" + UUID.randomUUID().toString().take(8))
         home = File(root, "h")
         val store = File(root, "store")
-        val config = File(home, ".config/tsync/config.json")
-        listOf(store, config.parentFile).forEach { it.mkdirs() }
+        listOf(store, home).forEach { it.mkdirs() }
+        val config = File(configPath())
+        config.parentFile.mkdirs()
 
         config.writeText(
             JSONObject()
@@ -106,12 +118,24 @@ class CliProtocolTest {
 
     // ── The contract under test ──────────────────────────────────────────────
 
-    private fun raw(args: List<String>): Pair<Int, ByteArray> {
-        val process = ProcessBuilder(listOf(executable().absolutePath) + args)
-            .apply {
-                environment()["HOME"] = home.absolutePath
-                redirectError(ProcessBuilder.Redirect.DISCARD)
+    /**
+     * HOME alone does not decide where the binary looks: XDG_CONFIG_HOME and its
+     * neighbours take precedence, and a CI runner sets them, so a launch that
+     * only exported HOME read the runner's config rather than this test's.
+     */
+    private fun launcher(args: List<String>) =
+        ProcessBuilder(listOf(executable().absolutePath) + args).apply {
+            environment().apply {
+                put("HOME", home.absolutePath)
+                remove("XDG_CONFIG_HOME")
+                remove("XDG_CACHE_HOME")
+                remove("XDG_DATA_HOME")
             }
+        }
+
+    private fun raw(args: List<String>): Pair<Int, ByteArray> {
+        val process = launcher(args)
+            .apply { redirectError(ProcessBuilder.Redirect.DISCARD) }
             .start()
         val out = process.inputStream.readBytes()
         if (!process.waitFor(CALL_TIMEOUT_SECONDS, TimeUnit.SECONDS)) {
@@ -295,11 +319,8 @@ class CliProtocolTest {
         val key = root_ + "session.txt"
         send(Cli.writeWhole(key, staged("0123456789".toByteArray()).absolutePath))
 
-        val process = ProcessBuilder(listOf(executable().absolutePath) + Cli.open(key))
-            .apply {
-                environment()["HOME"] = home.absolutePath
-                redirectError(ProcessBuilder.Redirect.DISCARD)
-            }
+        val process = launcher(Cli.open(key))
+            .apply { redirectError(ProcessBuilder.Redirect.DISCARD) }
             .start()
         try {
             val input = java.io.BufferedInputStream(process.inputStream)
