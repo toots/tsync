@@ -62,7 +62,7 @@ class TsyncProvider : DocumentsProvider() {
             .add(Root.COLUMN_TITLE, "tsync")
             .add(Root.COLUMN_SUMMARY, domain)
             .add(Root.COLUMN_FLAGS, Root.FLAG_SUPPORTS_CREATE or Root.FLAG_SUPPORTS_IS_CHILD)
-            .add(Root.COLUMN_ICON, android.R.drawable.stat_notify_sync)
+            .add(Root.COLUMN_ICON, R.mipmap.ic_launcher)
         return cursor
     }
 

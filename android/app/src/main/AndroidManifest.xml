@@ -34,7 +34,8 @@
         android:theme="@android:style/Theme.Material.Light.NoActionBar"
         android:extractNativeLibs="true"
         android:usesCleartextTraffic="true"
-        android:icon="@android:drawable/stat_notify_sync">
+        android:icon="@mipmap/ic_launcher"
+        android:roundIcon="@mipmap/ic_launcher">
 
         <activity
             android:name=".MainActivity"

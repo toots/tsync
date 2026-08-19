@@ -13,6 +13,7 @@ import androidx.work.WorkerParameters
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.feverdreamtv.tsync.Ingest
+import org.feverdreamtv.tsync.R
 
 /**
  * One bounded pass over the camera roll, rescheduled while anything is still
@@ -123,7 +124,7 @@ class BackupWorker(
         val notification = Notification.Builder(applicationContext, CHANNEL)
             .setContentTitle("tsync")
             .setContentText("Backing up camera photos")
-            .setSmallIcon(android.R.drawable.stat_notify_sync)
+            .setSmallIcon(R.drawable.ic_notification)
             .build()
 
         return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
