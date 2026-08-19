@@ -26,6 +26,7 @@
    -open
    Tsync_conf))
  (name tsync_diagnostics)
+ (public_name tsync-libs.diagnostics)
  (libraries
   tsync_sync
   tsync_content

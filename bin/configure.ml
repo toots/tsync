@@ -556,8 +556,8 @@ let frontend_entry name opts =
 let frontend_types () = List.sort compare (Frontend.names ())
 
 (* The frontend a fresh domain most likely wants: the platform's own mount if
-   one is compiled in, else headless, which is what is left to serve IPC when
-   there is nothing to mount. *)
+   one is compiled in, else whatever is — on Android that is the command-driven
+   frontend, which is the only one there. *)
 let preferred_frontend types =
   match List.find_opt (fun n -> List.mem n types) ["fuse"; "file_provider"] with
     | Some n -> Some n
@@ -647,7 +647,7 @@ let edit_frontends frontends =
       end)
     ~edit:(fun f ->
       let ftype = Option.value (frontend_type_of f) ~default:"" in
-      (* headless has no options, so there is no editor to open. *)
+      (* A frontend with no options — android — has no editor to open. *)
       if Frontend.spec_for ftype = [] then
         Error (Printf.sprintf "(%s has no options)" ftype)
       else Ok (edit_frontend f))

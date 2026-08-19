@@ -1,0 +1,48 @@
+opam-version: "2.0"
+synopsis: "Libraries behind the tsync filesystem sync tool"
+maintainer: ["Romain Beauxis <toots@rastageeks.org>"]
+authors: ["Romain Beauxis <toots@rastageeks.org>"]
+license: "MIT"
+homepage: "https://github.com/toots/tsync"
+bug-reports: "https://github.com/toots/tsync/issues"
+depends: [
+  "ocaml" {>= "5.1"}
+  "dune" {>= "3.23"}
+  "conf-libev"
+  "conduit-lwt-unix"
+  "cohttp-lwt-unix"
+  "bigstringaf"
+  "digestif"
+  "eqaf"
+  "yojson"
+  "lwt"
+  "ppx_blob"
+  "mem_usage"
+  "memtrace"
+  "base64"
+  "x509"
+  "mirage-crypto-pk"
+  "odoc" {with-doc}
+  # Conduit compiles its TLS backend in from one of its own optional
+  # dependencies, and links a stub that refuses every https connection when it
+  # is built without either. So one of these has to be in the switch. Native
+  # comes first: it builds anywhere, where OpenSSL is faster but wants a system
+  # libssl. Installing both leaves the choice to `tsync start --tls`.
+  ( "tsync-tls" | "tsync-ssl" )
+]
+depopts: ["syslog"]
+build: [
+  ["dune" "subst"] {dev}
+  [
+    "dune"
+    "build"
+    "-p"
+    name
+    "-j"
+    jobs
+    "@install"
+    "@runtest" {with-test}
+    "@doc" {with-doc}
+  ]
+]
+x-maintenance-intent: ["(latest)"]

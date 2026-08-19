@@ -1,3 +1,4 @@
 (library
  (name tsync_conf_parsing)
+ (public_name tsync-libs.conf_parsing)
  (libraries unix yojson))

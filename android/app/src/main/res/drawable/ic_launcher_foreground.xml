@@ -1,0 +1,25 @@
+<!-- The mark from assets/tsync-app.svg. An adaptive icon draws its foreground
+     on a 108 grid and may mask everything outside the middle 72, so the mark is
+     scaled to sit inside that rather than filling the field as it does in the
+     SVG, where the rounded rect is part of the asset. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <group
+        android:scaleX="3"
+        android:scaleY="3"
+        android:translateX="15.6"
+        android:translateY="18.6">
+        <path
+            android:fillColor="#FFFFFF"
+            android:pathData="M9 5 11 3V15a2 2 0 0 0 2 2h2v2h-2a4 4 0 0 1-4-4Z" />
+        <path
+            android:fillColor="#FFFFFF"
+            android:pathData="M6 7h8v2H6Z" />
+        <path
+            android:fillColor="#FFFFFF"
+            android:pathData="M15 15.4 19.6 18 15 20.6Z" />
+    </group>
+</vector>

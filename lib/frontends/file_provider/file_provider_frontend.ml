@@ -28,7 +28,7 @@ let start bindings =
 
 (* Reuses the [full_resync] IPC action, routed to the domain's runtime by the
    [domain] field. *)
-let reimport (module C : Conf.S) =
+let reimport (module C : Conf.S) _args =
   let req =
     `Assoc
       [("action", `String "full_resync"); ("domain", `String C.domain_name)]
@@ -70,7 +70,7 @@ let write_marker ?contents name =
 
 (* Only the app owning the extension may remove a File Provider domain, and it
    reconciles at launch: name the domain in a marker, then bounce the app. *)
-let reset (module C : Conf.S) =
+let reset (module C : Conf.S) _args =
   let marker =
     write_marker "fileprovider-reset" ~contents:(C.domain_name ^ "\n")
   in
@@ -83,7 +83,7 @@ let reset (module C : Conf.S) =
 (* Only the app can unregister the domains, so that goes first. [config.json]
    lives outside [data_dir] and survives, so `make install` restores
    everything. *)
-let purge (_ : (module Conf.S)) =
+let purge (_ : (module Conf.S)) _args =
   let paths = Runtime.default_paths () in
   let marker = write_marker "fileprovider-purge" in
   let rec wait attempts =
@@ -135,7 +135,7 @@ let purge (_ : (module Conf.S)) =
     with Sys_error _ ->
       Printf.printf "remaining: %s\n  sudo rm %s\n" cli_symlink cli_symlink)
 
-let () =
+let register () =
   Frontend.register implementation ~cli_group:"fileprovider"
     ~commands:
       [

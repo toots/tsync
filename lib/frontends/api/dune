@@ -2,4 +2,5 @@
  (flags
   (:standard -open Tsync_log -open Tsync_conf -open Tsync_field_spec))
  (name tsync_frontend_register)
+ (public_name tsync-libs.frontend_register)
  (libraries tsync_field_spec tsync_conf tsync_log unix lwt.unix))

@@ -110,7 +110,7 @@ in this order:
 | *(s3/gcs)* Fill from Terraform? | Only with the [bundled Terraform](terraform/README.md), applied with either `terraform` or `tofu`; otherwise `n` and type the bucket and keys. |
 | Role | `main` for the first backend; a cloud backend added after one defaults to `replica`. The others in [step 8](#8-add-a-second-backend). |
 | Add another backend? | No, for now. |
-| Frontend type | `fuse` on Linux, `file_provider` on macOS — both offered as the default. `headless` is for a domain driven over IPC with nothing to mount. |
+| Frontend type | `fuse` on Linux, `file_provider` on macOS — both offered as the default. `android` is for a domain the Android app drives one command at a time, with nothing to mount; it ships in its own `tsync-android` opam package, so a desktop build does not carry it. |
 | Add another frontend? | No — skip `http-proxy` until [step 7](#7-run-tsync-as-a-server-for-your-network). Only the types not already configured are offered. |
 
 The simplest result — a folder backed by another disk:

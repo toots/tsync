@@ -51,7 +51,7 @@ jobs:
       # No fuse: this builds one executable over the backend drivers, and the
       # frontends are no part of what it asks.
       - name: Install OCaml dependencies
-        run: opam install --deps-only -y tsync tsync-tls tsync-s3
+        run: opam install --deps-only -y tsync tsync-libs tsync-tls tsync-s3
       - name: Backend conformance (real GCS and S3)
         env:
           TSYNC_CI_GCS_BUCKET: ${{ secrets.TSYNC_CI_GCS_BUCKET }}

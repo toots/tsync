@@ -2317,7 +2317,12 @@ let default_domain_cmd =
    for that domain before handing over. Groups exist only for frontends linked
    into this binary, so `fileprovider` appears on macOS but not Linux. *)
 let frontend_cmds () =
-  let run name (command : Frontend.command) domain =
+  let args_arg =
+    Arg.(
+      value & pos_all string []
+      & info [] ~docv:"ARG" ~doc:"Arguments for the verb, passed through as-is.")
+  in
+  let run name (command : Frontend.command) domain args =
     let cfg = load_config () in
     let domain =
       match domain with Some _ -> domain | None -> read_default_domain ()
@@ -2327,7 +2332,7 @@ let frontend_cmds () =
       Printf.eprintf "domain %s has no %s frontend\n" d.Conf_parsing.name name;
       exit 1);
     let (module C : Conf.S) = make_conf ?domain cfg in
-    command.Frontend.run (module C)
+    command.Frontend.run (module C) args
   in
   List.filter_map
     (fun (name, cli_group, commands) ->
@@ -2342,7 +2347,8 @@ let frontend_cmds () =
                 (fun (command : Frontend.command) ->
                   Cmd.v
                     (Cmd.info command.Frontend.verb ~doc:command.Frontend.doc)
-                    Term.(const (run frontend_name command) $ domain_arg))
+                    Term.(
+                      const (run frontend_name command) $ domain_arg $ args_arg))
                 commands
             in
             Some

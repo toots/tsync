@@ -16,6 +16,7 @@
    -open
    Tsync_work))
  (name tsync_domain_store)
+ (public_name tsync-libs.domain_store)
  (libraries
   tsync_naming
   tsync_work

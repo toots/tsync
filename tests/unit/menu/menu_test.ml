@@ -214,7 +214,7 @@ let () =
     [
       {
         Menu.host = "server";
-        frontend = "headless";
+        frontend = "android";
         pid = 7;
         uptime = 12.;
         cpu_percent = 0.;

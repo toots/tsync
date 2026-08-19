@@ -1,3 +1,4 @@
 (library
  (name tsync_zip)
+ (public_name tsync-libs.zip)
  (libraries unix))

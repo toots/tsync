@@ -28,6 +28,7 @@
    -open
    Tsync_diagnostics))
  (name tsync_ipc_handler)
+ (public_name tsync-libs.ipc_handler)
  (private_modules ipc_error)
  (libraries
   tsync_ops

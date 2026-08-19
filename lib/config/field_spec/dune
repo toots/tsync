@@ -1,2 +1,3 @@
 (library
- (name tsync_field_spec))
+ (name tsync_field_spec)
+ (public_name tsync-libs.field_spec))

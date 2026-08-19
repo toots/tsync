@@ -52,21 +52,34 @@ module Make (C : Conf.S) = struct
     in
     loop ()
 
-  (* [freshness] is required, not optional: a frontend that says nothing here
-     leaves its users looking at a stale view, and an omitted argument is
-     indistinguishable from a considered "nothing to do". *)
-  let start ~freshness ~on_upload_done () =
-    let* () = Mf.init () in
+  (* The manifest tree, which a caller needs before it can resolve a key at all.
+     Separate from {!start_queue} because a read-only command needs this and
+     nothing else. *)
+  let init () = Mf.init ()
+
+  (* Everything needed before a caller may stage or publish, and nothing that
+     outlives the call: a one-shot command starts here and drains, where a
+     daemon goes on to {!start}.
+
+     [Rp.reconcile] is queued before anything is served, so a file edited before
+     a crash is not left looking unsynced. The queue must be running first:
+     recovery goes through it, for the journal entry and cursor bump an upload
+     owes. *)
+  let start_queue ?(on_upload_done = fun ~key:_ -> Lwt.return_unit) () =
+    let* () = init () in
     Sq.start
       ~upload:(fun ~key ~cancel -> F.upload ~cancel key)
       ~on_cursor:set_pending_cursor
       ~on_upload_done:(fun ~key ->
         let* () = on_upload_done ~key in
         F.enforce_chunk_cap ());
-    (* Queued before serving, so a file edited before a crash is not left looking
-       unsynced. The queue must be running first: recovery goes through it, for
-       the journal entry and cursor bump an upload owes. *)
-    let* () = Rp.reconcile () in
+    Rp.reconcile ()
+
+  (* [freshness] is required, not optional: a frontend that says nothing here
+     leaves its users looking at a stale view, and an omitted argument is
+     indistinguishable from a considered "nothing to do". *)
+  let start ~freshness ~on_upload_done () =
+    let* () = start_queue ~on_upload_done () in
     Sp.start
       ~on_changed:
         (match freshness with

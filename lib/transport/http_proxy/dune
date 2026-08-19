@@ -2,6 +2,7 @@
  (flags
   (:standard -open Tsync_chunk -open Tsync_backend_register))
  (name tsync_http_proxy)
+ (public_name tsync-libs.http_proxy)
  (libraries
   tsync_chunk
   tsync_backend_register

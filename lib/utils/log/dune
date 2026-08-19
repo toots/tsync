@@ -1,5 +1,6 @@
 (library
  (name tsync_log)
+ (public_name tsync-libs.log)
  (modules log log_printf log_syslog_provider)
  (private_modules log_printf log_syslog_provider)
  (libraries

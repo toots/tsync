@@ -1,7 +1,7 @@
 package org.feverdreamtv.tsync
 
 import android.app.Activity
-import android.content.Intent
+import android.app.AlertDialog
 import android.graphics.Typeface
 import android.os.Build
 import android.os.Bundle
@@ -13,11 +13,18 @@ import android.view.ViewGroup.LayoutParams.WRAP_CONTENT
 import android.widget.ArrayAdapter
 import android.widget.AutoCompleteTextView
 import android.widget.Button
+import android.widget.CheckBox
 import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
 import android.widget.Toast
+import org.feverdreamtv.tsync.backup.BackupPrefs
+import org.feverdreamtv.tsync.backup.BackupSchedule
+import org.feverdreamtv.tsync.backup.MediaAccess
+import org.feverdreamtv.tsync.backup.NetworkGate
+import org.feverdreamtv.tsync.backup.UploadRecords
+import org.feverdreamtv.tsync.backup.UploadState
 import kotlin.concurrent.thread
 
 /**
@@ -27,10 +34,33 @@ import kotlin.concurrent.thread
  */
 class MainActivity : Activity() {
 
+    private companion object {
+        const val MEDIA_PERMISSIONS = 1
+    }
+
+    /** Whether a full sync this screen started is still going: minutes of work
+     *  on a large domain, so it runs off the main thread and its exit code is
+     *  read rather than assumed. */
+    @Volatile
+    private var syncRunning: Boolean = false
+
+    private fun runFullSync(): Pair<Int, String> {
+        syncRunning = true
+        return try {
+            Tsync.plain(this, "sync", "--full")
+        } finally {
+            syncRunning = false
+        }
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         if (Config.exists(this)) {
             TsyncProvider.notifyRootsChanged(this)
+            // Nothing polls for foreign writes, so opening the app is one of the
+            // moments the mirror is brought up to date.
+            SyncSchedule.enable(this)
+            SyncSchedule.runNow(this)
             showStatus()
         } else showSetup()
     }
@@ -105,14 +135,15 @@ class MainActivity : Activity() {
                 }
 
                 Config.save(this@MainActivity, settings)
-                // The daemon is the authority on whether its own config parses;
+                // The binary is the authority on whether its own config parses;
                 // anything else here would be a second implementation that drifts.
-                val (code, output) = DaemonService.run(this@MainActivity, "config")
+                val (code, output) = Tsync.plain(this@MainActivity, "config")
                 if (code != 0) {
                     error.text = "tsync rejected the config:\n$output"
                     return@setOnClickListener
                 }
-                startForegroundService(Intent(this@MainActivity, DaemonService::class.java))
+                SyncSchedule.enable(this@MainActivity)
+                SyncSchedule.runNow(this@MainActivity)
                 // The root's id and title come from the config, so the picker
                 // is holding a stale answer until it re-queries.
                 TsyncProvider.notifyRootsChanged(this@MainActivity)
@@ -130,9 +161,139 @@ class MainActivity : Activity() {
                 addView(label("Cache limit"));   addView(cache)
                 addView(error)
                 addView(save)
+                addView(heading("Camera backup"))
+                backupControls().forEach { addView(it) }
             })
         })
     }
+
+    // ── Camera backup ────────────────────────────────────────────────────────
+
+    /**
+     * Says why nothing is moving as well as how much is left: a backup that has
+     * stalled and one that has finished look identical from a count alone.
+     */
+    private fun backupLine(): String {
+        val prefs = BackupPrefs(this)
+        if (!prefs.enabled) return "camera backup: off\n\n"
+
+        val records = UploadRecords(this)
+        val failed: Int
+        val reason: String?
+        try {
+            failed = records.countInState(UploadState.FAILED)
+            reason = if (failed > 0) records.lastError() else null
+        } finally {
+            records.close()
+        }
+
+        // Selected-only is not a stall: the sweep runs and covers what it can
+        // see, so it is said as a limit on the backup rather than a reason it
+        // is not moving.
+        val holding = NetworkGate.blockedBecause(this)
+            ?: if (MediaAccess.level(this) == MediaAccess.Level.DENIED) {
+                "no access to photos"
+            } else null
+        val partial = MediaAccess.level(this) == MediaAccess.Level.SELECTED_ONLY
+
+        // "up to date" is a claim about the whole roll, and only a sweep that
+        // reached the end of it can make one: an upload is no longer held in a
+        // queue anyone can count, so a quiet moment says nothing by itself.
+        val state = when {
+            failed > 0 -> "$failed failed"
+            prefs.settled == null -> "not started yet"
+            prefs.settled == false -> "more to upload"
+            else -> "up to date"
+        }
+
+        return buildString {
+            append("camera backup: ")
+            append(state)
+            reason?.let { append(" — ${it.take(80)}") }
+            holding?.let { append(" — $it") }
+            if (partial) append(" (only the photos you selected)")
+            prefs.lastOutcome?.let { append("\nlast sweep: $it") }
+            append("\n\n")
+        }
+    }
+
+    private fun backupControls(): List<View> {
+        val prefs = BackupPrefs(this)
+
+        val unmetered = checkBox("Only over wifi", prefs.unmeteredOnly) {
+            prefs.unmeteredOnly = it
+            if (prefs.enabled) BackupSchedule.enable(this)
+        }
+        val battery = checkBox("Not when the battery is low", prefs.whenBatteryOk) {
+            prefs.whenBatteryOk = it
+            if (prefs.enabled) BackupSchedule.enable(this)
+        }
+
+        val enabled = checkBox("Back up camera photos and videos", prefs.enabled) { on ->
+            prefs.enabled = on
+            if (on) askAboutExistingRoll(prefs) else BackupSchedule.disable(this)
+        }
+
+        val now = Button(this).apply {
+            text = "Back up now"
+            setOnClickListener {
+                if (!prefs.enabled) {
+                    toast("Turn camera backup on first")
+                } else {
+                    BackupSchedule.runNow(this@MainActivity)
+                    toast("Backing up…")
+                }
+            }
+        }
+
+        return listOf(enabled, unmetered, battery, now)
+    }
+
+    /**
+     * Asked once, when backup is switched on: a roll already on the phone is
+     * what someone enabling a backup usually means, and it is also the one run
+     * large enough to matter.
+     */
+    private fun askAboutExistingRoll(prefs: BackupPrefs) {
+        AlertDialog.Builder(this)
+            .setTitle("Photos already on this phone")
+            .setMessage("Back up the photos and videos already here, or only ones taken from now on?")
+            .setPositiveButton("Everything") { _, _ -> startBackup(prefs, backfill = true) }
+            .setNegativeButton("From now on") { _, _ -> startBackup(prefs, backfill = false) }
+            .setCancelable(false)
+            .show()
+    }
+
+    private fun startBackup(prefs: BackupPrefs, backfill: Boolean) {
+        if (!backfill) BackupSchedule.skipExistingRoll(this)
+        requestPermissions(MediaAccess.requested(), MEDIA_PERMISSIONS)
+    }
+
+    override fun onRequestPermissionsResult(
+        requestCode: Int,
+        permissions: Array<out String>,
+        grantResults: IntArray
+    ) {
+        if (requestCode != MEDIA_PERMISSIONS) return
+        when (MediaAccess.level(this)) {
+            MediaAccess.Level.DENIED ->
+                toast("tsync cannot back up photos without access to them")
+            MediaAccess.Level.SELECTED_ONLY ->
+                toast("Only the photos you selected will be backed up")
+            MediaAccess.Level.FULL -> Unit
+        }
+        if (MediaAccess.canRead(this)) BackupSchedule.enable(this)
+    }
+
+    private fun checkBox(text: String, checked: Boolean, onChange: (Boolean) -> Unit) =
+        CheckBox(this).apply {
+            this.text = text
+            isChecked = checked
+            setOnCheckedChangeListener { _, value -> onChange(value) }
+        }
+
+    private fun toast(text: String) =
+        Toast.makeText(this, text, Toast.LENGTH_LONG).show()
 
     // ── Status ───────────────────────────────────────────────────────────────
 
@@ -142,32 +303,18 @@ class MainActivity : Activity() {
             textSize = 10f
         }
 
-        // Wait until the daemon answers, not until its socket file is there:
-        // the socket lives on the filesystem, so the file outlives the process
-        // that bound it. Android kills this app's process while it is away and
-        // the daemon, its child, goes too — leaving a path that exists and
-        // listens to nothing, which is what made a restarting daemon report as
-        // absent.
         fun refresh() = thread {
-            runOnUiThread { output.text = "starting…" }
-            val socket = Ipc.socketPath(filesDir, Config.load(this)?.domain ?: "")
-            var waited = 0
-            var answering = false
-            while (waited++ < 40 && !answering) {
-                answering = runCatching { Ipc.send(socket, "status") }.isSuccess
-                if (!answering) Thread.sleep(250)
-            }
-            val (_, text) = DaemonService.run(this, "status")
+            runOnUiThread { output.text = "reading…" }
+            val (code, text) = Tsync.plain(this, Cli.status())
             // A walk creates each folder before fetching what is inside it, so
             // mid-sync a directory that looks empty is not one.
             val syncing =
-                if (DaemonService.syncRunning)
-                    "full sync running — folders fill in as it walks\n\n"
+                if (syncRunning) "full sync running — folders fill in as it walks\n\n"
                 else ""
+            val backup = backupLine()
             runOnUiThread {
-                output.text = syncing + text.ifBlank {
-                    if (answering) "daemon is up but returned nothing"
-                    else "daemon did not start — check `adb logcat -s tsyncd`"
+                output.text = syncing + backup + text.ifBlank {
+                    "tsync reported nothing (exit $code) — check `adb logcat -s tsync`"
                 }
             }
         }
@@ -185,7 +332,7 @@ class MainActivity : Activity() {
                         sync.text = "Syncing…"
                         refresh()
                         thread {
-                            val (code, out) = DaemonService.runFullSync(this@MainActivity)
+                            val (code, out) = runFullSync()
                             runOnUiThread {
                                 sync.isEnabled = true
                                 sync.text = "Sync"
@@ -209,8 +356,6 @@ class MainActivity : Activity() {
             addView(ScrollView(this@MainActivity).apply { addView(output) })
         })
 
-        // Idempotent: the service only spawns a daemon if it has none.
-        startForegroundService(Intent(this, DaemonService::class.java))
         refresh()
     }
 

@@ -1,10 +1,26 @@
 <?xml version="1.0" encoding="utf-8"?>
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
 
     <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+
+    <!-- Camera backup reads the roll. READ_MEDIA_VISUAL_USER_SELECTED is
+         declared so "Select photos" is a state the app can recognise and say
+         out loud, rather than a camera roll that silently looks nearly empty.
+
+         ACCESS_MEDIA_LOCATION only permits the GPS tags; keeping them also
+         needs MediaStore.setRequireOriginal on the URI being opened. -->
+    <uses-permission android:name="android.permission.READ_MEDIA_IMAGES" />
+    <uses-permission android:name="android.permission.READ_MEDIA_VIDEO" />
+    <uses-permission android:name="android.permission.READ_MEDIA_VISUAL_USER_SELECTED" />
+    <uses-permission
+        android:name="android.permission.READ_EXTERNAL_STORAGE"
+        android:maxSdkVersion="32" />
+    <uses-permission android:name="android.permission.ACCESS_MEDIA_LOCATION" />
 
     <!-- extractNativeLibs: without it nativeLibraryDir points inside the APK and
          there is no file on disk to exec. Pairs with useLegacyPackaging in the
@@ -18,7 +34,8 @@
         android:theme="@android:style/Theme.Material.Light.NoActionBar"
         android:extractNativeLibs="true"
         android:usesCleartextTraffic="true"
-        android:icon="@android:drawable/stat_notify_sync">
+        android:icon="@mipmap/ic_launcher"
+        android:roundIcon="@mipmap/ic_launcher">
 
         <activity
             android:name=".MainActivity"
@@ -29,10 +46,14 @@
             </intent-filter>
         </activity>
 
+        <!-- work-runtime declares this service without a foregroundServiceType,
+             so BackupWorker asking for dataSync is not a subset of it and the
+             platform throws on the service's own thread, past any catch the
+             worker can hold. -->
         <service
-            android:name=".DaemonService"
-            android:exported="false"
-            android:foregroundServiceType="dataSync" />
+            android:name="androidx.work.impl.foreground.SystemForegroundService"
+            android:foregroundServiceType="dataSync"
+            tools:node="merge" />
 
         <!-- MANAGE_DOCUMENTS is held by the system only, so this is reachable
              through the picker rather than by arbitrary apps. -->

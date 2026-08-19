@@ -20,14 +20,14 @@
  (name tsync_local_backend)
  (library_flags (-linkall))
  (libraries
-  tsync_field_spec
-  tsync_chunk
-  tsync_backend_register
-  tsync_naming
-  tsync_log
+  tsync-libs.field_spec
+  tsync-libs.chunk
+  tsync-libs.backend_register
+  tsync-libs.naming
+  tsync-libs.log
   tsync_device
-  tsync_local_io
-  tsync_lwt_unix
+  tsync-libs.local_io
+  tsync-libs.lwt_unix
   unix
   lwt
   lwt.unix))

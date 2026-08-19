@@ -10,6 +10,7 @@
    -open
    Tsync_lwt_unix))
  (name tsync_job)
+ (public_name tsync-libs.job)
  (libraries
   tsync_log
   tsync_metrics

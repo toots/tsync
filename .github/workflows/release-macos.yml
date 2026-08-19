@@ -51,7 +51,7 @@ jobs:
       - name: Install OCaml dependencies
         # Both TLS backends: tsync alone would pull tsync-tls, and a released
         # build should also carry tsync-ssl, the faster one.
-        run: opam install --deps-only -y tsync tsync-tls tsync-ssl tsync-s3
+        run: opam install --deps-only -y tsync tsync-libs tsync-tls tsync-ssl tsync-s3
 
       - name: Import signing assets
         env:

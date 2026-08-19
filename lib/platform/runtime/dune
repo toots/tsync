@@ -1,5 +1,6 @@
 (library
  (name tsync_linux_runtime)
+ (public_name tsync-libs.linux_runtime)
  (enabled_if
   (= %{system} linux))
  (modules linux_runtime))

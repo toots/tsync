@@ -2,4 +2,5 @@
  (flags
   (:standard -open Tsync_local_io -open Tsync_lwt_unix -open Tsync_xxhash))
  (name tsync_chunk)
+ (public_name tsync-libs.chunk)
  (libraries unix lwt lwt.unix bigstringaf tsync_local_io tsync_xxhash))

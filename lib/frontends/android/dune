@@ -1,0 +1,33 @@
+(library
+ (flags
+  (:standard
+   -open
+   Tsync_object
+   -open
+   Tsync_conf
+   -open
+   Tsync_sync
+   -open
+   Tsync_engine
+   -open
+   Tsync_ipc_handler
+   -open
+   Tsync_diagnostics
+   -open
+   Tsync_frontend_register
+   -open
+   Tsync_log))
+ (name tsync_android_frontend)
+ (public_name tsync-android)
+ (libraries
+  tsync-libs.object
+  tsync-libs.conf
+  tsync-libs.sync
+  tsync-libs.engine
+  tsync-libs.ipc_handler
+  tsync-libs.diagnostics
+  tsync-libs.frontend_register
+  tsync-libs.log
+  yojson
+  lwt
+  lwt.unix))

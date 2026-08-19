@@ -34,7 +34,6 @@
    -open
    Tsync_diagnostics))
  (name tsync_http_proxy_frontend)
- (library_flags (-linkall))
  (preprocess
   (pps ppx_blob))
  (preprocessor_deps
@@ -43,22 +42,22 @@
   %{project_root}/lambda/mime.json
   stats.html)
  (libraries
-  tsync_field_spec
-  tsync_content
-  tsync_store
-  tsync_object
-  tsync_naming
-  tsync_lwt_unix
-  tsync_frontend_register
-  tsync_http_proxy
-  tsync_ipc
-  tsync_diagnostics
-  tsync_metrics
-  tsync_chunk
-  tsync_backend_register
-  tsync_conf
-  tsync_zip
-  tsync_log
+  tsync-libs.field_spec
+  tsync-libs.content
+  tsync-libs.store
+  tsync-libs.object
+  tsync-libs.naming
+  tsync-libs.lwt_unix
+  tsync-libs.frontend_register
+  tsync-libs.http_proxy
+  tsync-libs.ipc
+  tsync-libs.diagnostics
+  tsync-libs.metrics
+  tsync-libs.chunk
+  tsync-libs.backend_register
+  tsync-libs.conf
+  tsync-libs.zip
+  tsync-libs.log
   cohttp-lwt-unix
   bigstringaf
   conduit-lwt-unix

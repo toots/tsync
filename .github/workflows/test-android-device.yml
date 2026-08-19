@@ -1,0 +1,69 @@
+name: test-android-device
+
+# The parts of the app that only exist on a device: the real MediaStore, and
+# Ipc's LocalSocket. Opt-in rather than on every push — an emulator boot costs
+# several minutes, and everything that can be decided without one is covered by
+# :core:test and :app:testDebugUnitTest in the `test` workflow.
+on:
+  workflow_dispatch:
+  pull_request:
+    types: [labeled]
+
+jobs:
+  emulator:
+    # Only when asked for, so a label on an unrelated PR does not boot one.
+    if: >
+      github.event_name == 'workflow_dispatch' ||
+      github.event.label.name == 'android-device'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      # The binary is cross-built for arm64 only, and an APK carrying arm64
+      # libraries will not install on an x86_64 emulator
+      # (INSTALL_FAILED_NO_MATCHING_ABIS). What is left here reads MediaStore and
+      # never invokes it — but its absence has to be deliberate rather than a
+      # checkout that happened to lack it.
+      - name: Refuse a binary in the test APK
+        run: |
+          test ! -e android/app/src/main/jniLibs/arm64-v8a/libtsync.so \
+            || { echo "a staged binary would make this APK uninstallable here"; exit 1; }
+
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' \
+            | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+
+      - name: Instrumented tests
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 34
+          target: google_apis
+          arch: x86_64
+          # Media permissions are decided by the test, not by a dialog nobody
+          # can tap.
+          script: >
+            adb shell pm grant org.feverdreamtv.tsync android.permission.READ_MEDIA_IMAGES ;
+            adb shell pm grant org.feverdreamtv.tsync android.permission.READ_MEDIA_VIDEO ;
+            ./gradlew --no-daemon :app:connectedDebugAndroidTest
+          working-directory: android
+
+      # connectedAndroidTest is green when no device matched and nothing ran.
+      - name: Check the device suite ran something
+        if: always()
+        run: |
+          python3 - <<'PY'
+          import glob, sys, xml.etree.ElementTree as ET
+          reports = glob.glob(
+              "android/app/build/outputs/androidTest-results/**/*.xml", recursive=True)
+          total = sum(int(ET.parse(p).getroot().get("tests", 0)) for p in reports)
+          print(f"{len(reports)} report(s), {total} test(s)")
+          if total == 0:
+              sys.exit("the device suite reported success having run nothing")
+          PY

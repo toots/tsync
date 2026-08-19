@@ -2,4 +2,5 @@
  (flags
   (:standard -open Tsync_log))
  (name tsync_tls)
+ (public_name tsync-libs.tls)
  (libraries conduit-lwt-unix tsync_log))

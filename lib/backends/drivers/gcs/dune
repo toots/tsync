@@ -17,12 +17,12 @@
  (private_modules gcs_auth)
  (library_flags (-linkall))
  (libraries
-  tsync_field_spec
-  tsync_chunk
-  tsync_backend_register
+  tsync-libs.field_spec
+  tsync-libs.chunk
+  tsync-libs.backend_register
   tsync_http_client
-  tsync_naming
-  tsync_log
+  tsync-libs.naming
+  tsync-libs.log
   cohttp-lwt-unix
   uri
   yojson

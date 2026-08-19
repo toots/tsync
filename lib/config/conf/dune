@@ -2,4 +2,5 @@
  (flags
   (:standard -open Tsync_backend_register))
  (name tsync_conf)
+ (public_name tsync-libs.conf)
  (libraries tsync_backend_register))

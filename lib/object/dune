@@ -23,6 +23,7 @@
    -open
    Tsync_log))
  (name tsync_object)
+ (public_name tsync-libs.object)
  (libraries
   tsync_conf
   tsync_naming

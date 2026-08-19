@@ -1,7 +1,3 @@
-; The macOS File Provider frontend, whole: the extension-facing operations, the
-; QuickLook thumbnailer, and the registration that offers them as a frontend.
-; File_provider and Preview stay public -- tests drive them without a frontend.
-
 (library
  (flags
   (:standard
@@ -26,10 +22,8 @@
    -open
    Tsync_menu))
  (name tsync_file_provider_frontend)
- (private_modules file_provider_frontend)
  (enabled_if
   (= %{system} macosx))
- (library_flags (-linkall))
  (foreign_stubs
   (language c)
   (names platform_stubs))
@@ -50,16 +44,16 @@
    -framework
    Foundation))
  (libraries
-  tsync_menu
-  tsync_sync
-  tsync_naming
-  tsync_conf
-  tsync_ipc
-  tsync_engine
-  tsync_ipc_handler
+  tsync-libs.menu
+  tsync-libs.sync
+  tsync-libs.naming
+  tsync-libs.conf
+  tsync-libs.ipc
+  tsync-libs.engine
+  tsync-libs.ipc_handler
   tsync_runtime
-  tsync_frontend_register
-  tsync_log
+  tsync-libs.frontend_register
+  tsync-libs.log
   yojson
   base64
   unix

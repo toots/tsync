@@ -1,1 +1,1 @@
-let fuse_frontend_enabled = true
+let () = Tsync_fuse_frontend.Fuse_frontend.register ()
