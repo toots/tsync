@@ -115,6 +115,14 @@
   (alias runtest)
   (action (run ./gcs.exe))))
 
+(subdir backends/http_reuse
+ (alias
+  (name default)
+  (deps http_reuse.exe))
+ (rule
+  (alias runtest)
+  (action (run ./http_reuse.exe))))
+
 (subdir backends/probe_deadline
  (alias
   (name default)
