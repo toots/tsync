@@ -98,6 +98,12 @@ module Make (J : JOB) : sig
 
     (** Everything on disk, in the order it was recorded. *)
     val list : t -> (string * J.t) list Lwt.t
+
+    (** Records {!list} discarded for being unreadable: work this log's owner
+        owes that no replay puts back, which is what a mirror repairs. Counted
+        on the log rather than returned, since the reader that discards one need
+        not be the one that reports on it. *)
+    val dropped : t -> int
   end
 
   (** {1 Draining it} *)
