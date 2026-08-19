@@ -163,6 +163,14 @@ let scrub s =
 
 let exercised : (string, unit) Hashtbl.t = Hashtbl.create 16
 
+(* HOME alone does not decide where the binary looks: XDG_CONFIG_HOME and its
+   neighbours take precedence on Linux and a CI runner sets them, so a test that
+   only exported HOME read the runner's own config and not its own. *)
+let with_home =
+  Printf.sprintf
+    "env -u XDG_CONFIG_HOME -u XDG_CACHE_HOME -u XDG_DATA_HOME HOME=%s"
+    (Filename.quote home)
+
 (* stderr carries the log, which the snapshot rule discards: what a caller parses
    is stdout and nothing else. *)
 let invoke args =
@@ -170,12 +178,12 @@ let invoke args =
     | "android" :: verb :: _ -> Hashtbl.replace exercised verb ()
     | _ -> ());
   let out = Filename.concat root "out.bin" in
-  let quoted = List.map Filename.quote (Option.get binary :: args) in
   let errors = Filename.concat root "err.txt" in
+  let quoted = List.map Filename.quote (Option.get binary :: args) in
   let status =
     Sys.command
-      (Printf.sprintf "HOME=%s %s > %s 2> %s" (Filename.quote home)
-         (String.concat " " quoted) (Filename.quote out) (Filename.quote errors))
+      (Printf.sprintf "%s %s > %s 2> %s" with_home (String.concat " " quoted)
+         (Filename.quote out) (Filename.quote errors))
   in
   (* Only when something went wrong: a backtrace names paths and line numbers,
      which no snapshot could hold, and on a good run there is nothing to say. *)
@@ -186,6 +194,32 @@ let invoke args =
       (String.split_on_char '\n' (String.trim (read_file errors)))
   end;
   read_file out
+
+(* Asked rather than assumed: the layout is the platform's -- XDG on Linux, a
+   group container on macOS -- and a test that spells one of them out is a test
+   for one platform. *)
+let config_path () =
+  let out = Filename.concat root "paths.txt" in
+  ignore
+    (Sys.command
+       (Printf.sprintf "%s %s build-info > %s 2>/dev/null" with_home
+          (Filename.quote (Option.get binary))
+          (Filename.quote out)));
+  let field = "config:" in
+  let of_line l =
+    if
+      String.length l > String.length field
+      && String.sub l 0 (String.length field) = field
+    then
+      Some
+        (String.trim
+           (String.sub l (String.length field)
+              (String.length l - String.length field)))
+    else None
+  in
+  match List.filter_map of_line (String.split_on_char '\n' (read_file out)) with
+    | path :: _ -> path
+    | [] -> Filename.concat home ".config/tsync/config.json"
 
 (* A verb answering in JSON: the call, then the whole reply. *)
 let json args =
@@ -227,8 +261,8 @@ let session_ranges key ranges =
   Hashtbl.replace exercised "open" ();
   let exe = Option.get binary in
   let cmd =
-    Printf.sprintf "HOME=%s %s android open %s" (Filename.quote home)
-      (Filename.quote exe) (Filename.quote key)
+    Printf.sprintf "%s %s android open %s" with_home (Filename.quote exe)
+      (Filename.quote key)
   in
   let out, inp = Unix.open_process cmd in
   let header = input_line out in
@@ -261,11 +295,10 @@ let snapshot () =
           "no tsync binary found; the generated rule should depend on it";
         exit 1
     | Some _ ->
-        sh "mkdir -p %s %s"
-          (Filename.quote (Filename.concat home ".config/tsync"))
-          (Filename.quote store);
-        write_file
-          (Filename.concat home ".config/tsync/config.json")
+        sh "mkdir -p %s %s" (Filename.quote home) (Filename.quote store);
+        let config = config_path () in
+        sh "mkdir -p %s" (Filename.quote (Filename.dirname config));
+        write_file config
           (Printf.sprintf
              {|{ "name": "test",
   "domains": [ { "name": "media", "versioning": true, "symlinks": "skip",
