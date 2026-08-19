@@ -1,10 +1,10 @@
 (* What a record nobody can parse costs the target it was owed to.
 
-   The body is discarded — nothing can replay it, and leaving it would stall the
-   queue at every start — so the write it named is lost for good and only a
-   mirror puts it back. Patience does not fix that, which is what [degraded]
-   means, so the assertion here is that dropping one raises the flag rather than
-   leaving the target reported as merely behind. *)
+   Which records a sweep drops and what it logs is {!queue_records}; this is the
+   consequence, since the write a dropped record named is lost for good and only
+   a mirror puts it back. Patience does not fix that, which is what [degraded]
+   means, so what is asserted here is that dropping one raises the flag rather
+   than leaving the target reported as merely behind. *)
 
 open Lwt.Syntax
 open Check
@@ -18,7 +18,7 @@ end
 
 module Q = Durable_queue.Make (J)
 
-let dir = Filename.concat (Filename.temp_dir "tsync-queue-unreadable" "") "log"
+let dir = Filename.concat (Filename.temp_dir "tsync-queue-degraded" "") "log"
 
 (* Written past {!Records.write}, which would encode a body that parses. *)
 let plant_unreadable id =
@@ -32,18 +32,14 @@ let () =
      plant_unreadable "00000000000000000002-b";
      let* () = Q.Records.write log ~id:"00000000000000000003-c" "keep-me-too" in
 
-     case "the log reports what it could not read";
-     let* records = Q.Records.list log in
-     check "the readable records come back" (List.length records = 2);
-     check "and the unreadable one is counted on the log"
-       (Q.Records.dropped log = 1);
-     check "which leaves nothing behind to stall the next start"
-       (not (Sys.file_exists (Filename.concat dir "00000000000000000002-b")));
+     case "the log counts what it could not read";
+     let* (_ : (string * string) list) = Q.Records.list log in
+     check "a discarded record is counted on the log" (Q.Records.dropped log = 1);
 
      case "a queue that resumed over one is degraded";
      let ran = ref [] in
      let q =
-       Q.ordered ~name:"unreadable" ~log ~poison:Durable_queue.Drop
+       Q.ordered ~name:"degraded" ~log ~poison:Durable_queue.Drop
          ~run:(fun job ->
            ran := job :: !ran;
            Lwt.return_unit)
@@ -56,5 +52,5 @@ let () =
        (List.sort compare !ran = ["keep-me"; "keep-me-too"]);
      check "and the queue says a mirror is needed"
        (Q.stats q).Durable_queue.degraded;
-     report ~expected:5 ();
+     report ~expected:3 ();
      Lwt.return_unit)

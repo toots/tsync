@@ -1,0 +1,7 @@
+=== a mirror over a namespace
+  objects          200
+  checked          200
+  already there    100
+  copied           100
+  head_opt         0
+  list_prefix      1

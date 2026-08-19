@@ -133,26 +133,43 @@ module Make (J : JOB) = struct
       let* () = Fs_util.mkdir_p t.dir in
       Fs_util.atomic_write (path t id) (J.to_string job)
 
+    (* A record that is simply gone was completed between the directory being
+       read and this opening it, which is ordinary on a queue that is working; a
+       body that will not parse is one nothing can replay; a read that failed for
+       any other reason says nothing about the record at all.
+
+       Only the middle may be dropped: collapsing them loses work to a full
+       descriptor table or a bad sector, and prints the ordinary case as an
+       error. *)
     let read t id =
       Lwt.catch
         (fun () ->
           let+ body =
             Lwt_io.with_file ~mode:Lwt_io.Input (path t id) Lwt_io.read
           in
-          J.of_string body)
-        (fun _ -> Lwt.return_none)
+          match J.of_string body with
+            | Some job -> `Job job
+            | None -> `Unreadable)
+        (function
+          | Unix.Unix_error (Unix.ENOENT, _, _) -> Lwt.return `Gone
+          | exn -> Lwt.return (`Failed exn))
 
     let update t id f =
       let* r = read t id in
-      match r with None -> Lwt.return_unit | Some r -> write t ~id (f r)
+      match r with `Job r -> write t ~id (f r) | _ -> Lwt.return_unit
 
     let complete t id = Fs_util.unlink_quiet (path t id)
 
     (* A record id leads with its timestamp; anything else is somebody's temp
        file, possibly a live one in another process, and is not ours to read or
        remove. An unreadable body is discarded: nothing can replay it, and
-       leaving it would stall a queue on every start. *)
-    let list t =
+       leaving it would stall a queue on every start.
+
+       [wanted] decides from the id alone, before the body is opened: a sweep
+       looking for what a queue has not already got is otherwise a read of every
+       record it holds, which on a large backlog is tens of thousands of opens
+       that end in the caller discarding all of them. *)
+    let list ?(wanted = fun _ -> true) t =
       let* exists = Lwt_unix_retry.file_exists t.dir in
       if not exists then Lwt.return_nil
       else
@@ -160,7 +177,7 @@ module Make (J : JOB) = struct
         let names =
           List.sort compare
             (List.filter
-               (fun n -> n <> "" && n.[0] >= '0' && n.[0] <= '9')
+               (fun n -> n <> "" && n.[0] >= '0' && n.[0] <= '9' && wanted n)
                names)
         in
         let+ read_one =
@@ -168,12 +185,19 @@ module Make (J : JOB) = struct
             (fun id ->
               let* job = read t id in
               match job with
-                | Some job -> Lwt.return_some (id, job)
-                | None ->
+                | `Job job -> Lwt.return_some (id, job)
+                | `Gone -> Lwt.return_none
+                | `Unreadable ->
                     t.dropped <- t.dropped + 1;
                     Log.err "durable queue: unreadable record %s, discarding" id;
                     let+ () = complete t id in
-                    None)
+                    None
+                | `Failed exn ->
+                    (* Left where it is: the record still names work that is
+                       owed, and the next sweep may read it. *)
+                    Log.warn "durable queue: cannot read record %s: %s; leaving"
+                      id (Printexc.to_string exn);
+                    Lwt.return_none)
             names
         in
         List.filter_map Fun.id read_one
@@ -484,7 +508,9 @@ module Make (J : JOB) = struct
      ahead of it. *)
   let resume t =
     Lwt_mutex.with_lock t.recording @@ fun () ->
-    let+ records = Records.list t.log in
+    let+ records =
+      Records.list ~wanted:(fun id -> not (Hashtbl.mem t.loaded id)) t.log
+    in
     (* A record nothing can replay is a write this target owes and will never
        make, which only a mirror puts back. *)
     if Records.dropped t.log > 0 && not t.degraded then begin
@@ -492,9 +518,6 @@ module Make (J : JOB) = struct
       Log.err "%s: %d unreadable record(s) dropped — it will need tsync mirror"
         t.name (Records.dropped t.log)
     end;
-    let records =
-      List.filter (fun (id, _) -> not (Hashtbl.mem t.loaded id)) records
-    in
     List.iter
       (fun (id, job) ->
         (match t.topo with

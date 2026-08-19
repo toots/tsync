@@ -2,120 +2,43 @@ open Lwt.Syntax
 
 exception Cancelled = Backend.Cancelled
 
-(* Pooled per endpoint rather than per request: a full resync fetches tens of
-   thousands of objects, and a handshake each caps throughput at a few dozen a
-   second while leaving thousands of sockets in TIME_WAIT. *)
-module Connection = Cohttp_lwt.Connection.Make (Cohttp_lwt_unix.Net)
-
-module Cache =
-  Cohttp_lwt.Connection_cache.Make
-    (Connection)
-    (struct
-      let sleep_ns ns = Lwt_unix.sleep (Int64.to_float ns /. 1e9)
-    end)
-
-(* Long enough to span the gaps between the bursts a sync or a demand-paged read
-   arrives in, short enough not to hold proxy sockets open indefinitely. *)
-let keep_idle_ns = 60_000_000_000L
-
-(* The caller's own parallelism (the resync pool, the download pool) is what
-   bounds work; this only has to be wide enough not to become the narrower
-   limit. *)
-let max_parallel = 32
+(* A stall detector, not a latency budget: a pooled connection whose peer went
+   away without a FIN leaves its request pending forever, and [call_retry] only
+   ever sees failures, never stalls. Generous enough for a chunk over a slow
+   link. *)
+let request_timeout = 300.
 
 type t = {
   base_uri : Uri.t;
   secret : string;
-  mutable cache : Cache.t;
+  client : Http_client.t;
   mutable caps_cache : Backend.caps Lwt.t option;
 }
 
-(* The connection cache has no deadline of its own: a pooled connection whose
-   peer went away without a FIN leaves its request pending forever, and
-   [call_retry] only ever sees failures, never stalls.
-
-   A stall detector, not a latency budget, hence generous enough for a chunk
-   over a slow link. *)
-let request_timeout = 300.
-
-(* A 5xx is the serving side struggling; a 4xx is its answer. *)
-let is_transient_code c = c >= 500
-
-let backend_error op code body =
-  Backend.failed
-    ~kind:
-      (if is_transient_code code then Backend.Transient else Backend.Permanent)
-    ~op
-    (Printf.sprintf "HTTP %d: %s" code body)
-
-let new_cache () = Cache.create ~keep:keep_idle_ns ~parallel:max_parallel ()
+let code = Http_client.code
+let is_ok = Http_client.is_ok
+let backend_error = Http_client.backend_error
 
 (* Signs method + request-target + body with the shared secret; TLS is
-   conduit's, per the global [Tls_conf].
+   conduit's, per the global [Tls_conf]. Nothing here reaches the network, but
+   the pool takes a thunk because another driver's does. *)
+let headers t ~meth ~uri ~body () =
+  Lwt.return
+    (Cohttp.Header.of_list
+       (Http_proxy.Auth.request_headers ~secret:t.secret
+          ~meth:(Cohttp.Code.string_of_method meth)
+          ~path:(Uri.path_and_query uri) ~body ()))
 
-   [Connection.Retry] means the pooled connection was unusable and the request
-   never left, and one torn down by [request_timeout] above stays in the cache's
-   table as permanently failed, so only a new cache redials. It is replaced once
-   per generation, so requests that raced into the same dead pool share the one
-   redial. *)
-let call t ~meth ?(body = Chunk.empty) uri =
-  let resource = Uri.path_and_query uri in
-  let headers =
-    Cohttp.Header.of_list
-      (Http_proxy.Auth.request_headers ~secret:t.secret
-         ~meth:(Cohttp.Code.string_of_method meth)
-         ~path:resource ~body ())
-  in
-  let attempt cache =
-    Lwt_unix.with_timeout request_timeout (fun () ->
-        let* resp, rbody =
-          Cache.call cache ~headers
-            ~body:(Cohttp_lwt.Body.of_bigstring (Chunk.buffer body))
-            meth uri
-        in
-        let+ body = Cohttp_lwt.Body.to_bigstring rbody in
-        (resp, Chunk.of_buffer body))
-  in
-  let used = t.cache in
-  Lwt.catch
-    (fun () -> attempt used)
-    (function
-      | Connection.Retry ->
-          if t.cache == used then t.cache <- new_cache ();
-          attempt t.cache
-      | exn -> Lwt.fail exn)
+(* Every proxied operation is idempotent, so retrying is safe. *)
+let call_retry t ~meth ?(body = Chunk.empty) op uri =
+  Http_client.call_retry t.client
+    ~headers:(headers t ~meth ~uri ~body)
+    ~meth ~body op uri
 
-let code resp = Cohttp.Code.code_of_status (Cohttp.Response.status resp)
-let is_ok resp = code resp >= 200 && code resp < 300
-
-(* A proxy in front of us answers failures with a full HTML page, and one stalled
-   fetch can put thousands of lines of nginx markup in the log; the status
-   carries the meaning, one line of body only tells an upstream apart from our
-   own answer. *)
-let excerpt body =
-  let body = String.trim body in
-  match String.index_opt body '\n' with
-    | _ when String.length body = 0 -> "(empty)"
-    | Some i when i < 200 -> String.sub body 0 i ^ " ..."
-    | _ when String.length body > 200 -> String.sub body 0 200 ^ " ..."
-    | _ -> body
-
-(* Raises on a transient status so the shared loop retries it; every other
-   response comes back for the verb to interpret. Every proxied operation is
-   idempotent, so retrying is safe. *)
-let call_retry t ~meth ?body op uri =
-  Backend.with_retry ~name:"http-proxy" ~op (fun () ->
-      let* resp, rbody = call t ~meth ?body uri in
-      if is_transient_code (code resp) then
-        Lwt.fail
-          (backend_error op (code resp) (excerpt (Chunk.to_string rbody)))
-      else Lwt.return (resp, rbody))
-
-(* Only the object verbs carry a body worth keeping off the heap; everything
-   below answers with JSON or a sentence, and reads it as one. *)
-let call_text t ~meth ?body op uri =
-  let+ resp, rbody = call_retry t ~meth ?body op uri in
-  (resp, Chunk.to_string rbody)
+let call_text t ~meth ?(body = Chunk.empty) op uri =
+  Http_client.call_text t.client
+    ~headers:(headers t ~meth ~uri ~body)
+    ~meth ~body op uri
 
 let obj_uri t key =
   Uri.with_path t.base_uri ("/o/" ^ Http_proxy.Wire.encode_key key)
@@ -324,7 +247,7 @@ let make ~url ~secret : (module Backend.S) =
     {
       base_uri = Uri.of_string url;
       secret;
-      cache = new_cache ();
+      client = Http_client.create ~name:"http-proxy" ~timeout:request_timeout ();
       caps_cache = None;
     }
   in

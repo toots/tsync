@@ -96,8 +96,13 @@ module Make (J : JOB) : sig
     (** The work is done and the record is no longer owed. *)
     val complete : t -> string -> unit Lwt.t
 
-    (** Everything on disk, in the order it was recorded. *)
-    val list : t -> (string * J.t) list Lwt.t
+    (** Everything on disk, in the order it was recorded.
+
+        [wanted] is asked of each id before its body is opened, so a caller that
+        will discard most of what it finds says so here rather than after: a
+        sweep over a large backlog is otherwise one open per record, all but a
+        few of them wasted. *)
+    val list : ?wanted:(string -> bool) -> t -> (string * J.t) list Lwt.t
 
     (** Records {!list} discarded for being unreadable: work this log's owner
         owes that no replay puts back, which is what a mirror repairs. Counted

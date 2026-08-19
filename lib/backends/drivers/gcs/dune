@@ -10,7 +10,9 @@
    -open
    Tsync_backend_register
    -open
-   Tsync_naming))
+   Tsync_naming
+   -open
+   Tsync_http_client))
  (name tsync_gcs_backend)
  (private_modules gcs_auth)
  (library_flags (-linkall))
@@ -18,6 +20,7 @@
   tsync_field_spec
   tsync_chunk
   tsync_backend_register
+  tsync_http_client
   tsync_naming
   tsync_log
   cohttp-lwt-unix
