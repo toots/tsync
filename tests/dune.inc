@@ -57,6 +57,20 @@
   (action
    (diff deferred.expected deferred.output))))
 
+(subdir backends/deferred_shards
+ (alias
+  (name default)
+  (deps deferred_shards.exe))
+ (rule
+  (alias runtest)
+  (target deferred_shards.output)
+  (action
+   (with-stdout-to deferred_shards.output (ignore-stderr (run ./deferred_shards.exe)))))
+ (rule
+  (alias runtest)
+  (action
+   (diff deferred_shards.expected deferred_shards.output))))
+
 (subdir backends/fallback
  (alias
   (name default)

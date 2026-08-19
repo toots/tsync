@@ -13,6 +13,12 @@ val shards : int
     [0 <= n < {!shards}]. *)
 val shard_name : int -> string
 
+(** [shard_of key] is the shard the key lives in, which is the first segment of
+    {!relative_path}. Asked of this module rather than recovered from that path,
+    so a caller wanting the shard alone does not have to know how deep the
+    layout goes. *)
+val shard_of : string -> string
+
 (** [relative_path key] is ["<shard>/<key>"], the chunk's path relative to the
     store root. The key itself is unchanged: {!Filename.basename} recovers it
     from a listing entry. A key shorter than {!fanout} lands under ["_"]. *)

@@ -8,11 +8,10 @@ let fanout = 3
 let shards = 1 lsl (4 * fanout)
 let shard_name n = Printf.sprintf "%0*x" fanout n
 
-let relative_path key =
-  let shard =
-    if String.length key >= fanout then String.sub key 0 fanout else "_"
-  in
-  Filename.concat shard key
+let shard_of key =
+  if String.length key >= fanout then String.sub key 0 fanout else "_"
+
+let relative_path key = Filename.concat (shard_of key) key
 
 (* Both are asked while walking a directory, where the answer decides whether
    something gets copied or deleted, so both state what the name is rather than
