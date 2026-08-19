@@ -47,11 +47,13 @@ let write_file path contents =
   close_out oc
 
 let read_file path =
-  let ic = open_in_bin path in
-  let n = in_channel_length ic in
-  let s = really_input_string ic n in
-  close_in ic;
-  s
+  match open_in_bin path with
+    | exception Sys_error _ -> "<no such file>"
+    | ic ->
+        let n = in_channel_length ic in
+        let s = really_input_string ic n in
+        close_in ic;
+        s
 
 let sh fmt = Printf.ksprintf (fun cmd -> ignore (Sys.command cmd)) fmt
 let case name = Printf.printf "\n=== %s\n" name
@@ -169,8 +171,12 @@ let invoke args =
     | _ -> ());
   let out = Filename.concat root "out.bin" in
   let quoted = List.map Filename.quote (Option.get binary :: args) in
-  sh "HOME=%s %s > %s 2>/dev/null" (Filename.quote home)
-    (String.concat " " quoted) (Filename.quote out);
+  let status =
+    Sys.command
+      (Printf.sprintf "HOME=%s %s > %s 2>/dev/null" (Filename.quote home)
+         (String.concat " " quoted) (Filename.quote out))
+  in
+  if status <> 0 then line "exited %d" status;
   read_file out
 
 (* A verb answering in JSON: the call, then the whole reply. *)
@@ -240,7 +246,7 @@ let staged contents =
   Unix.utimes path fixed_mtime fixed_mtime;
   path
 
-let () =
+let snapshot () =
   match binary with
     | None ->
         print_endline
@@ -373,3 +379,13 @@ let () =
             | [] -> "(none)"
             | missing -> String.concat " " missing);
         sh "rm -rf %s" (Filename.quote root)
+
+(* Printed rather than raised: the rule discards stderr and keeps stdout, so an
+   exception that escapes here leaves no output at all and a build that says
+   only "exited 2". Exiting zero puts it in the diff instead, where it can be
+   read. *)
+let () =
+  try snapshot ()
+  with e ->
+    Printf.printf "\nuncaught: %s\n" (Printexc.to_string e);
+    exit 0
