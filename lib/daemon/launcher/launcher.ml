@@ -1,8 +1,4 @@
-type domain = {
-  frontends : Conf_parsing.frontend_config list;
-  conf : (module Conf.S);
-  mount_point : string;
-}
+type domain = (string * Frontend.binding) list
 
 (* Do NOT touch Lwt here: any Lwt_unix/Lwt_preemptive call initializes the
    shared notification eventfd, and a child inheriting it across the fork below
@@ -15,27 +11,13 @@ type domain = {
    The flag marks the one process that keeps each domain converging with the
    store. At most one may: they share a cache root and a bookmark with no
    arbitration between them, and the same client uuid, so neither could tell the
-   other's work from its own. The domain's first frontend, which is how a domain
-   resolves a frontend everywhere else. *)
+   other's work from its own. It goes to the first frontend listed, by position —
+   naming the frontend type would hand it to both halves of a domain that listed
+   one type twice. *)
 let bindings_by_frontend domains =
   let all =
     List.concat_map
-      (fun d ->
-        let owner =
-          match d.frontends with
-            | f :: _ -> f.Conf_parsing.frontend_type
-            | [] -> ""
-        in
-        List.map
-          (fun (f : Conf_parsing.frontend_config) ->
-            ( f.Conf_parsing.frontend_type,
-              ( {
-                  Frontend.conf = d.conf;
-                  options = f.Conf_parsing.options;
-                  mount_point = d.mount_point;
-                },
-                f.Conf_parsing.frontend_type = owner ) ))
-          d.frontends)
+      (fun d -> List.mapi (fun i (name, b) -> (name, (b, i = 0))) d)
       domains
   in
   let order =
