@@ -40,6 +40,18 @@ let str name j =
 
 let block_size = 256 * 1024
 
+(* Share routes carry no credential, so how many run at once is chosen by the
+   public rather than by a client we configured. Each pull allocates a
+   [block_size] buffer, so bounding the pull is what bounds bytes held here.
+
+   Its own pool, not the signed API's: a burst of downloads must not starve a
+   replica's writes. Module level, so the bound is the process rather than one
+   domain. *)
+let read_slots_max = 16
+
+let read_slots =
+  Lwt_bounded.create ~name:"share reads" ~max:read_slots_max ~max_waiting:256 ()
+
 (* Embedded from the files the share Lambda loads at runtime, so the table and
    the browser UI have one definition across both deployments. *)
 let mime_json = [%blob "../../../lambda/mime.json"]
@@ -208,7 +220,9 @@ module Make (C : Conf.S) = struct
     Lwt_stream.from (fun () ->
         logged key @@ fun () ->
         if Int64.compare !left 0L <= 0 then Lwt.return_none
-        else (
+        else
+          (* Slot before the buffer, not after. *)
+          Lwt_bounded.use read_slots @@ fun () ->
           let n = Int64.to_int (min (Int64.of_int block_size) !left) in
           let buf = Bigarray.Array1.create Bigarray.char Bigarray.c_layout n in
           let* got = D.pread ~id:key ~manifest buf ~offset:!pos in
@@ -216,7 +230,7 @@ module Make (C : Conf.S) = struct
           else (
             pos := Int64.add !pos (Int64.of_int got);
             left := Int64.sub !left (Int64.of_int got);
-            Lwt.return_some (Bigstringaf.substring buf ~off:0 ~len:got))))
+            Lwt.return_some (Bigstringaf.substring buf ~off:0 ~len:got)))
 
   (* Depth first. Directories are emitted too, so empty ones survive the round
      trip. *)
@@ -245,6 +259,8 @@ module Make (C : Conf.S) = struct
         logged "zip" @@ fun () ->
         match !cur with
           | Some m when Int64.compare m.s_pos m.s_size < 0 ->
+              (* Slot before the buffer, not after. *)
+              Lwt_bounded.use read_slots @@ fun () ->
               let n =
                 Int64.to_int
                   (min (Int64.of_int block_size) (Int64.sub m.s_size m.s_pos))

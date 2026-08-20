@@ -28,6 +28,7 @@
   },
   "backend": { "retries": 0, "timeouts": 0, "failures": 0 },
   "pools": [
+    { "name": "share reads", "inFlight": 0, "waiting": 0, "max": 16 },
     { "name": "chunk buffers", "inFlight": 0, "waiting": 0, "max": 2 },
     { "name": "downloads", "inFlight": 0, "waiting": 0, "max": 3 }
   ],
@@ -139,7 +140,7 @@ Frontend http-proxy on testhost (this process)
   event loop       2 readable, 0 writable, 0 timers, pool 1000
   traffic          up 4.0 KB (0 B/s), down 2.0 KB (0 B/s)
   hashed           0 chunks (0/s)
-  slots            chunk buffers 0/2, downloads 0/3
+  slots            share reads 0/16, chunk buffers 0/2, downloads 0/3
   served read      0 B (0 B/s)
   served written   2 B (0 B/s)
   requests         none served
@@ -186,7 +187,7 @@ Frontend http-proxy on testhost (this process)
   event loop       2 readable, 0 writable, 0 timers, pool 1000
   traffic          up 4.0 KB (0 B/s), down 2.0 KB (0 B/s)
   hashed           0 chunks (0/s)
-  slots            chunk buffers 0/2, downloads 0/3
+  slots            share reads 0/16, chunk buffers 0/2, downloads 0/3
   served read      0 B (0 B/s)
   served written   2 B (0 B/s)
   requests         none served
@@ -239,7 +240,7 @@ Frontend http-proxy on testhost (this process)
   event loop       2 readable, 0 writable, 0 timers, pool 1000
   traffic          up 4.0 KB (0 B/s), down 2.0 KB (0 B/s)
   hashed           0 chunks (0/s)
-  slots            chunk buffers 0/2, downloads 0/3
+  slots            share reads 0/16, chunk buffers 0/2, downloads 0/3
   served read      0 B (0 B/s)
   served written   2 B (0 B/s)
   requests         2 stats, 2 unauthorized
@@ -294,7 +295,7 @@ Frontend http-proxy on testhost (this process)
   event loop       2 readable, 0 writable, 0 timers, pool 1000
   traffic          up 4.0 KB (0 B/s), down 2.0 KB (0 B/s)
   hashed           0 chunks (0/s)
-  slots            chunk buffers 0/2, downloads 0/3
+  slots            share reads 0/16, chunk buffers 0/2, downloads 0/3
   served read      0 B (0 B/s)
   served written   2 B (0 B/s)
   requests         2 stats, 2 unauthorized
