@@ -101,29 +101,33 @@ let size_blocking_pool ~concurrency =
     Log.debug "blocking thread pool: narrowed to %d" n
   end
 
-let run_forked f items =
-  let child_pids = ref [] in
-  let rec go = function
-    | [] -> ()
-    | [x] -> f x
-    | x :: rest ->
+(* Explicitly in order: [List.map]'s is unspecified, and these are forks. A
+   child runs [f] and exits without ever reaching the reaper below, so its
+   siblings stay the parent's to signal. *)
+let fork_each f items =
+  let child_pids =
+    List.fold_left
+      (fun acc x ->
         let pid = Lwt_unix.fork () in
         if pid = 0 then (
-          (* Its siblings are the parent's to reap, and this copy of the list
-             would have it signalling them on the way out. *)
-          child_pids := [];
           f x;
           exit 0);
-        child_pids := pid :: !child_pids;
-        go rest
+        pid :: acc)
+      [] items
+    |> List.rev
   in
-  let reap () =
+  fun () ->
     List.iter
       (fun pid ->
         (try Unix.kill pid Sys.sigterm with _ -> ());
         try ignore (Unix.waitpid [] pid) with _ -> ())
-      (List.rev !child_pids)
-  in
-  (* The last item runs here rather than in a child, so its failure would
-     otherwise leave every sibling already forked behind it. *)
-  Fun.protect ~finally:reap (fun () -> go items)
+      child_pids
+
+let run_forked f items =
+  match List.rev items with
+    | [] -> ()
+    | last :: rest ->
+        (* The last item runs here rather than in a child, so its failure would
+         otherwise leave every sibling already forked behind it. *)
+        let reap = fork_each f (List.rev rest) in
+        Fun.protect ~finally:reap (fun () -> f last)

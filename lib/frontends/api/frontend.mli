@@ -126,11 +126,16 @@ val size_blocking_pool : concurrency:int -> unit
     {!cap_blocking_pool}. *)
 val binding_concurrency : binding list -> int
 
-(** Run [f] on every item, each in its own child process except the last, which
-    runs here and blocks — a frontend's [start] blocks. On return, SIGTERM and
-    reap the children.
+(** Run [f] on every item, each in its own child process. Returns at once, with
+    the function that SIGTERMs and reaps those children — for a caller with work
+    of its own to do while they run.
 
     Forks with [Lwt_unix.fork], not [Unix.fork]: Lwt's notification eventfd is
     created at module init, so a plain fork leaves parent and child sharing one
     and the child's worker wakeups go to the wrong process. *)
+val fork_each : ('a -> unit) -> 'a list -> unit -> unit
+
+(** {!fork_each} for a caller with nothing else to do: the last item runs here
+    and blocks — a frontend's [start] blocks — and the children are reaped when
+    it returns. *)
 val run_forked : ('a -> unit) -> 'a list -> unit

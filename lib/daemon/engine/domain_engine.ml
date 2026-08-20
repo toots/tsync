@@ -1,55 +1,51 @@
 open Lwt.Syntax
 
-(* How a frontend lets a user see a change another client made. Required rather
-   than optional because a frontend with no answer looks like one with nothing to
-   do: that is how the FUSE mount came to serve a file under its name from before
-   another client renamed it, unopenable, until the mount was taken down. *)
-type freshness =
-  | Notify of (string -> unit)
-    (* Hand each changed key to the presentation layer as it happens, for a
-         layer that keeps its own state and has to be told. *)
-  | Revalidates
-(* Nothing has to be pushed, because the layer asks again on every
-         access. *)
-
 (* What a frontend is given for one domain: its file operations, the request
-   handler built over them, and the background work that keeps it converging
-   with the store.
+   handler built over them, and the queue that sends what it accepts.
 
-   Whether this process is the one doing that work was decided before the
-   frontend was handed this, so [start] is called unconditionally and there is
-   nothing here to ask about. *)
+   Every process serving the domain gets the same thing, so there is nothing
+   here to ask about and no way to hold a lesser one. Keeping the domain
+   converging with the store is {!Converging}, and it runs somewhere else. *)
 module type Domain = sig
   module F : File_ops.S
   module Ih : Ipc_handler.S
 
-  val start :
-    freshness:freshness ->
-    ?on_upload_done:(key:string -> unit Lwt.t) ->
-    unit ->
-    unit Lwt.t
-
+  val start : ?on_upload_done:(key:string -> unit Lwt.t) -> unit -> unit Lwt.t
   val drain : unit -> unit Lwt.t
   val stats_fields : unit -> (string * Yojson.Safe.t) list
 end
+
+(* The work a domain needs done once per machine, whoever is presenting it.
+
+   Reconcile, the poller and the sweeps write the mirror, the applied-through
+   bookmark and the staged tree, which are shared between every process serving
+   the domain and arbitrated between none of them. [on_changed] is how what the
+   poller applied reaches the frontends, which are elsewhere and have no other
+   way to hear it. *)
+module type Converging = sig
+  val recover : unit -> unit Lwt.t
+  val start : on_changed:(string -> unit) -> unit -> unit Lwt.t
+  val drain : unit -> unit Lwt.t
+  val stats_fields : unit -> (string * Yojson.Safe.t) list
+end
+
+(* How long an upload's cursor bump may wait to be collected with others.
+   Settable so a test observing the flush need not sleep it out. *)
+let cursor_flush_interval = ref 2.
+let set_cursor_flush_interval s = cursor_flush_interval := s
 
 module type S = sig
   include Domain
 
   val init : unit -> unit Lwt.t
-
-  (* Collect what a crash left behind. Once per machine, before anything serves
-     this domain: what it collects is named by an absence a live write also
-     produces. *)
   val recover : unit -> unit Lwt.t
 
+  (* Presenting, plus the records this client left behind. For a one-shot
+     command, which is alone and so owes both. *)
   val start_queue :
     ?on_upload_done:(key:string -> unit Lwt.t) -> unit -> unit Lwt.t
 
-  (* The half every process serving the domain runs. {!Passive} is what a
-     process that is not keeping the domain fresh gets. *)
-  val start_local :
-    ?on_upload_done:(key:string -> unit Lwt.t) -> unit -> unit Lwt.t
+  val converge : on_changed:(string -> unit) -> unit -> unit Lwt.t
 end
 
 module Make (C : Conf.S) : S = struct
@@ -72,7 +68,6 @@ module Make (C : Conf.S) : S = struct
      PUT per upload. Metadata ops bypass this — [File.with_journal] bumps
      synchronously, since a peer waiting on a rename should not wait out the
      interval. *)
-  let cursor_flush_interval = 2.
   let pending_cursor : Journal.Entry_key.t option ref = ref None
 
   let set_pending_cursor ~entry_key =
@@ -94,7 +89,7 @@ module Make (C : Conf.S) : S = struct
 
   let cursor_flusher () =
     let rec loop () =
-      let* () = Lwt_unix.sleep cursor_flush_interval in
+      let* () = Lwt_unix.sleep !cursor_flush_interval in
       let* () = flush_cursor () in
       loop ()
     in
@@ -111,23 +106,16 @@ module Make (C : Conf.S) : S = struct
     let* () = Mf.reap_leftovers () in
     F.reclaim_staged_orphans ()
 
-  (* Everything needed before a caller may stage or publish, and nothing that
-     outlives the call: a one-shot command starts here and drains, where a
-     daemon goes on to {!start}.
-
-     [Rp.reconcile] is queued before anything is served, so a file edited before
-     a crash is not left looking unsynced. The queue must be running first:
-     recovery goes through it, for the journal entry and cursor bump an upload
-     owes. *)
   (* Every process serving this domain runs its own upload queue: the workers
      are in-memory and each posts only what it was handed, which is why
      {!Sync_queue} starts without [recover] and neither reads the other's log.
      A process without one accepts writes it will never send.
 
-     What at most one may run is below — reconcile, the poller, the cursor and
-     the sweeps all touch the mirror, the bookmark and the cursor, which are
-     shared and unarbitrated. *)
-  let start_local ?(on_upload_done = fun ~key:_ -> Lwt.return_unit) () =
+     The cursor flusher belongs with the queue for the same reason. An upload
+     publishes its journal entry here and owes a bump; a peer polls the cursor to
+     decide whether to read the journal at all, so an entry whose bump never
+     lands is one no other client goes looking for. *)
+  let start ?(on_upload_done = fun ~key:_ -> Lwt.return_unit) () =
     let* () = init () in
     Sq.start
       ~upload:(fun ~key ~cancel -> F.upload ~cancel key)
@@ -135,22 +123,18 @@ module Make (C : Conf.S) : S = struct
       ~on_upload_done:(fun ~key ->
         let* () = on_upload_done ~key in
         F.enforce_chunk_cap ());
+    Lwt.async cursor_flusher;
     Lwt.return_unit
 
+  (* The queue must be running first: recovery goes through it, for the journal
+     entry and cursor bump an upload owes. *)
   let start_queue ?(on_upload_done = fun ~key:_ -> Lwt.return_unit) () =
-    let* () = start_local ~on_upload_done () in
+    let* () = start ~on_upload_done () in
     Rp.reconcile ()
 
-  (* [freshness] is required, not optional: a frontend that says nothing here
-     leaves its users looking at a stale view, and an omitted argument is
-     indistinguishable from a considered "nothing to do". *)
-  let start ~freshness ?(on_upload_done = fun ~key:_ -> Lwt.return_unit) () =
-    let* () = start_queue ~on_upload_done () in
-    Sp.start
-      ~on_changed:
-        (match freshness with Notify f -> f | Revalidates -> fun _ -> ())
-      ();
-    Lwt.async cursor_flusher;
+  let converge ~on_changed () =
+    let* () = start_queue () in
+    Sp.start ~on_changed ();
     Lwt.async (fun () ->
         let sweep what f =
           Lwt.catch f (fun exn ->
@@ -182,11 +166,13 @@ module Make (C : Conf.S) : S = struct
     ]
 end
 
-(* Another process keeps this domain fresh; this one only presents it. *)
-module Passive (E : S) : Domain = struct
-  include E
-
-  let start ~freshness:_ ?on_upload_done () = E.start_local ?on_upload_done ()
+(* The convergence half of an engine, for a caller holding several domains and
+   presenting none of them. *)
+module Converge (E : S) : Converging = struct
+  let recover = E.recover
+  let start = E.converge
+  let drain = E.drain
+  let stats_fields = E.stats_fields
 end
 
 (* The process's loops, not a domain's: one Lwt loop however many domains are

@@ -31,6 +31,8 @@ let domain_socket_path paths domain_name =
 let proxy_socket_path paths =
   Filename.concat paths.data_dir "tsync-http-proxy.sock"
 
+let sync_socket_path paths = Filename.concat paths.data_dir "tsync-sync.sock"
+
 let restart_service () =
   Sys.command "systemctl --user restart tsync 2>/dev/null" = 0
 

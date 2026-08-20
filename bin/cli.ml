@@ -384,6 +384,9 @@ let domain_targets () =
                                 Runtime.proxy_socket_path runtime_paths )))
               d.Conf_parsing.frontends)
           domains
+        (* The process converging every domain, which presents none of them and
+           so is named for the work rather than for a domain or a frontend. *)
+        @ [("sync", Runtime.sync_socket_path runtime_paths)]
         |> List.sort_uniq compare
 
 let load_conf ?domain () = make_conf ?domain (load_config ())

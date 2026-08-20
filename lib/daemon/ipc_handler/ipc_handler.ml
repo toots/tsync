@@ -892,6 +892,20 @@ module Make (C : Conf.S) (F : File_ops.S) : S = struct
                                         ("bytesDownloaded", `Int done_);
                                         ("totalBytes", `Int total);
                                       ]))
+                    (* From whoever converges this domain, which is another
+                       process and has no other way to reach the view a frontend
+                       keeps. Not mutating: the ops are already applied and the
+                       mirror already says so, and what this buys is only that
+                       the frontend looks again. *)
+                    | "changed" ->
+                        List.iter hooks.changed
+                          (match List.assoc_opt "keys" obj with
+                            | Some (`List l) ->
+                                List.filter_map
+                                  (function `String k -> Some k | _ -> None)
+                                  l
+                            | _ -> []);
+                        Lwt.return (ok_json [])
                     | "stop" ->
                         hooks.on_stop ();
                         Lwt.return (ok_json [])

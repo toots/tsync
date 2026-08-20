@@ -610,6 +610,10 @@ let ipc_handler ~port ~tls ~request_stop routes line =
               in
               let fields = match report with `Assoc f -> f | _ -> [] in
               reply (("ok", `Bool true) :: fields)
+          (* Accepted and dropped: a proxy client asks again on every request, so
+             there is no view here to refresh. Answering rather than refusing
+             keeps the sender from having to know which frontend it is telling. *)
+          | Some (`String "changed") -> reply [("ok", `Bool true)]
           | Some (`String "stop") ->
               (* Answered before the listener winds down, so the caller hears
                  that it was asked rather than losing the connection. *)
@@ -845,13 +849,11 @@ let start served =
         | Some n -> Frontend.size_blocking_pool ~concurrency:n
         | None -> ());
       effective_max_concurrent := Some max_concurrent;
-      (* A proxy client asks again on every request, so there is nothing to push
-        at it when another client changes something. *)
       let* () =
         Lwt_list.iter_s
           (fun (sv : Frontend.served) ->
             let module D = (val sv.Frontend.domain : Domain_engine.Domain) in
-            D.start ~freshness:Domain_engine.Revalidates ())
+            D.start ())
           served
       in
       let socket_path = Runtime.proxy_socket_path (Runtime.default_paths ()) in

@@ -1,16 +1,22 @@
-(* A domain served by more than one frontend: only one process keeps it
-   converging with the store, and the others are handed {!Domain_engine.Passive}.
+(* What a process presenting a domain owes, without the convergence half.
 
-   What has to hold is that passive means "not the one polling", not "not
-   uploading". A passive process's file ops stay writable — a FUSE mount that is
-   not its domain's first frontend still accepts writes — so it needs its own
-   queue or it records bytes nobody will ever send, while metadata ops keep
-   landing on the store. Nothing reports that: the loop that watches for a queue
-   gone quiet is started by the very call being withheld. *)
+   Presenting is every frontend's half; converging runs in the launcher. So what
+   {!Domain_engine.Domain.start} leaves out must be only the shared-state work,
+   and everything a write depends on must survive the split:
+
+   - the upload queue, or the process records bytes nobody will ever send while
+     metadata ops keep landing on the store;
+   - the cursor bump, which is what tells a peer to read the journal at all. An
+     upload publishes its entry and owes one, and an entry no peer goes looking
+     for is a file nobody else can see.
+
+   Neither reports itself. The loop that watches for a queue gone quiet is
+   started by the queue, and a cursor that never moves reads exactly like one
+   nothing has changed under. *)
 
 open Lwt.Syntax
 
-let root = Filename.temp_dir "tsync-passive" ""
+let root = Filename.temp_dir "tsync-presenting" ""
 let backend_root = Filename.concat root "backend"
 let src = Filename.concat root "hello.txt"
 let body = "passive frontends still upload\n"
@@ -45,8 +51,9 @@ module C = struct
   let read_only = false
 end
 
-module E = Domain_engine.Make (C)
-module P = Domain_engine.Passive (E)
+(* Held as the narrow view a frontend gets, so anything the convergence half
+   provides is out of reach here rather than merely unused. *)
+module P : Domain_engine.Domain = Domain_engine.Make (C)
 
 let write_local path content =
   let oc = open_out_bin path in
@@ -66,12 +73,15 @@ let settle () =
   go 50
 
 let () =
+  (* Short enough to observe inside [settle]. The default would have this
+     reporting "not flushed yet" whether or not the flusher was ever started. *)
+  Domain_engine.set_cursor_flush_interval 0.05;
   ignore
     (Sys.command
        (Printf.sprintf "rm -rf %s && mkdir -p %s %s" root root backend_root));
   write_local src body;
   Lwt_main.run
-    (let* () = P.start ~freshness:Domain_engine.Revalidates () in
+    (let* () = P.start () in
      let key = C.domain_prefix ^ "hello.txt" in
      let* () = P.F.create key in
      let* () = P.F.write_whole key ~src_path:src in
@@ -86,5 +96,10 @@ let () =
      let module L = Layout.Inode.Make (C) in
      let* bkey = L.ensure_manifest_key key in
      let module B = (val C.store : Backend.S) in
-     let+ head = B.head_opt ~key:bkey () in
-     Printf.printf "manifest in the store: %b\n" (head <> None))
+     let* head = B.head_opt ~key:bkey () in
+     Printf.printf "manifest in the store: %b\n" (head <> None);
+     (* What a peer polls. The upload published a journal entry, and an entry
+        the cursor does not point past is one no other client reads. *)
+     let module Fs = File_store.Make (C) in
+     let+ cursor = Fs.fetch_cursor () in
+     Printf.printf "cursor published: %b\n" (cursor <> None))

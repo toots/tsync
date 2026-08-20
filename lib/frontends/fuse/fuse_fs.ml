@@ -257,13 +257,33 @@ module Make (C : Conf.S) (D : Domain_engine.Domain) = struct
             }
       | first :: rest -> List.fold_left tighter first rest
 
+  (* This mount has to be told a key changed: [cache_opts] turns off the
+     attribute and entry timeouts, but that does not stop the kernel answering a
+     lookup from a dentry it already holds, so a name another client renamed away
+     stays resolvable in a directory already open. *)
+  let invalidate key =
+    (* Backend key to the path this mount shows. A key outside the domain is not
+       ours to invalidate. *)
+    let rel =
+      Key.chop_slash (Key.strip_prefix ~domain_prefix:C.domain_prefix key)
+    in
+    (* Never from inside an operation on this path: the kernel waits on the
+       request, and the invalidation waits on the kernel. Every caller is on the
+       event loop, which is not a FUSE thread. *)
+    try Fuse.invalidate_path ("/" ^ rel)
+    with Unix.Unix_error (e, _, _) ->
+      (* The kernel not holding it is the state we wanted; anything else the
+         mount cannot fix, and silence here is a stale name nobody can account
+         for. *)
+      Log.debug "invalidate %s: %s" rel (Unix.error_message e)
+
   let ipc_hooks mount_point =
     Ih.
       {
         path_to_key = key_of_path mount_point;
         evict = evict_key;
         restore = restore_key;
-        changed = (fun _ -> ());
+        changed = invalidate;
         full_resync;
         status_fields = (fun () -> [("mount", `String mount_point)]);
         (* A domain can run several frontends, each its own process with its own
@@ -517,33 +537,7 @@ module Make (C : Conf.S) (D : Domain_engine.Domain) = struct
         let* () =
           (* A FUSE mount is the filesystem, so a finished upload changes
              nothing a reader can observe. *)
-          D.start
-            ~freshness:
-              (* This mount has to be told: [cache_opts] turns off the attribute
-                 and entry timeouts, but that does not stop the kernel answering
-                 a lookup from a dentry it already holds, so a name another
-                 client renamed away stays resolvable in a directory already
-                 open. *)
-              (Domain_engine.Notify
-                 (fun key ->
-                   (* Backend key to the path this mount shows. A key outside the
-                      domain is not ours to invalidate. *)
-                   let rel =
-                     Key.chop_slash
-                       (Key.strip_prefix ~domain_prefix:C.domain_prefix key)
-                   in
-                   (* Never from inside an operation on this path: the kernel
-                      waits on the request, and the invalidation waits on the
-                      kernel. This runs on the event loop, which is not a FUSE
-                      thread. *)
-                   try Fuse.invalidate_path ("/" ^ rel)
-                   with Unix.Unix_error (e, _, _) ->
-                     (* The kernel not holding it is the state we wanted;
-                        anything else the mount cannot fix, and silence here is a
-                        stale name nobody can account for. *)
-                     Log.debug "invalidate %s: %s" rel (Unix.error_message e)))
-            ~on_upload_done:(fun ~key:_ -> Lwt.return_unit)
-            ()
+          D.start ~on_upload_done:(fun ~key:_ -> Lwt.return_unit) ()
         in
         Log.debug "starting IPC server at %s" C.socket_path;
         Lwt.async (fun () ->
