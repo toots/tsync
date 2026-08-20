@@ -230,6 +230,35 @@ let () =
         done
       with End_of_file -> close_in ic);
 
+     (* Share routes carry no credential, so the read bound is all that stands
+        between a public burst and one buffer per concurrent block. With every
+        slot held, a download must not produce a byte. *)
+     Printf.printf "\n=== read bound\n";
+     let held, release = Lwt.wait () in
+     let occupied =
+       List.init Share_server.read_slots_max (fun _ ->
+           Lwt_bounded.use Share_server.read_slots (fun () -> held))
+     in
+     let* _, body =
+       Sh.handle ~token:"aa" ~sub:"" ~query:(fun _ -> None) ~range:None
+     in
+     let download = Cohttp_lwt.Body.to_string body in
+     let rec settle n =
+       if n = 0 then Lwt.return_unit
+       else
+         let* () = Lwt.pause () in
+         settle (n - 1)
+     in
+     let* () = settle 20 in
+     (* Queued on the bound, not merely unfinished: without the slot the read
+        would run straight through and nothing would be waiting here. *)
+     Printf.printf "queued on the read bound: %b\n"
+       (Lwt_bounded.waiting Share_server.read_slots > 0);
+     Lwt.wakeup_later release ();
+     let* s = download in
+     let* () = Lwt.join occupied in
+     Printf.printf "served once slots freed: %d bytes\n" (String.length s);
+
      (* Serving a share writes nothing into the manifest mirror and assembles
         nothing: the bytes it fetched are in the domain's chunk cache, which the
         mount shares. *)

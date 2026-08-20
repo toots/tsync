@@ -105,5 +105,9 @@ member: testdom/hello.txt
 member: testdom/sub/
 member: testdom/sub/inner.txt
 
+=== read bound
+queued on the read bound: true
+served once slots freed: 39 bytes
+
 === local footprint
 chunk cache: 5 chunks
