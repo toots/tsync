@@ -272,6 +272,8 @@ let () =
            0 (Sys.readdir dir)
      in
      Printf.printf "\n=== local footprint\n";
+     Printf.printf "bytes served: %d\n"
+       (Metrics.total Share_server.served_bytes);
      Printf.printf "chunk cache: %d chunks\n"
        (count (Cache_layout.chunks_dir ~cache_root:C.cache_root C.domain_name));
      Lwt.return_unit)

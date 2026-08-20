@@ -18,7 +18,9 @@
    -open
    Tsync_http_proxy_frontend
    -open
-   Tsync_lwt_unix))
+   Tsync_lwt_unix
+   -open
+   Tsync_metrics))
  (name share_server_test)
  (libraries
   tsync_content
@@ -28,6 +30,7 @@
   tsync_backend_register
   tsync_http_proxy_frontend
   tsync-libs.lwt_unix
+  tsync-libs.metrics
   tsync_local_backend
   tsync_conf
   cohttp-lwt-unix

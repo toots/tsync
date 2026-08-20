@@ -110,4 +110,5 @@ queued on the read bound: true
 served once slots freed: 39 bytes
 
 === local footprint
+bytes served: 208
 chunk cache: 5 chunks
