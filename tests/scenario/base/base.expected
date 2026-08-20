@@ -7,6 +7,7 @@
   a.txt = "hello tsync"
 --- backend
   chunk cba685e06d3e500f-293331628d03f29b size=11
+  cursor = <entry-1>
   journal <entry-1> = put a.txt 11
   file a.txt [.tsync-root/f01e5cbbc09d4fc4-9a0fcd66f030de75] = manifest size=11 chunks=1 h1=1b5eab7935b34700 h2=72dfaa8cad2e9a42
     chunk#0 cba685e06d3e500f-293331628d03f29b size=11
@@ -24,6 +25,7 @@
   b.txt = "same content"
 --- backend
   chunk 70c096db7a2b03dc-ebb5c33424e783da size=12
+  cursor = <entry-2>
   journal <entry-1> = put a.txt 12
   journal <entry-2> = put b.txt 12
   file b.txt [.tsync-root/3c697ec236bbf61f-698ad1290042cc94] = manifest size=12 chunks=1 h1=bf61b659e8029068 h2=aef71572348b1d2e
@@ -77,6 +79,7 @@
   a.txt = "evicted"
 --- backend
   chunk b25629393d3da6f1-b6252d5b8a6e08d1 size=7
+  cursor = <entry-1>
   journal <entry-1> = put a.txt 7
   file a.txt [.tsync-root/f01e5cbbc09d4fc4-9a0fcd66f030de75] = manifest size=7 chunks=1 h1=b47ce307fe11d3b3 h2=f5aa61e5aa7f6c35
     chunk#0 b25629393d3da6f1-b6252d5b8a6e08d1 size=7
@@ -96,6 +99,7 @@
   a.txt = "round trip"
 --- backend
   chunk 6bee7502b94912b4-8513b792d20a75a2 size=10
+  cursor = <entry-1>
   journal <entry-1> = put a.txt 10
   file a.txt [.tsync-root/f01e5cbbc09d4fc4-9a0fcd66f030de75] = manifest size=10 chunks=1 h1=dd2535fa58fe8ca9 h2=695d88c06cf07434
     chunk#0 6bee7502b94912b4-8513b792d20a75a2 size=10
@@ -122,6 +126,7 @@
 --- backend
   chunk 049b50dd364dcae9-6f20090ec5c663a9 size=9
   chunk bc6ece615ce2b70e-d07697eb1fc3e43e size=20
+  cursor = <entry-2>
   journal <entry-1> = put kept.txt 9
   journal <entry-2> = put kept.txt 20
   file kept.txt [.tsync-root/2af84fa98a68a9b1-19465e194feef43e] = manifest size=20 chunks=1 h1=c28eb646647717df h2=3aa7df8d1f659304
@@ -162,6 +167,7 @@
   kept.txt = "edited, not uploaded"
 --- backend
   chunk 049b50dd364dcae9-6f20090ec5c663a9 size=9
+  cursor = <entry-1>
   journal <entry-1> = put kept.txt 9
   file kept.txt [.tsync-root/2af84fa98a68a9b1-19465e194feef43e] = manifest size=9 chunks=1 h1=a8329a6950d36ba5 h2=7d97004ddaf6ae9a
     chunk#0 049b50dd364dcae9-6f20090ec5c663a9 size=9
@@ -180,7 +186,7 @@
   sub/a.txt = "nested"
 --- backend
   chunk fa87ee5fc199e332-c7156c4359a54f81 size=6
-  cursor = <entry-1>
+  cursor = <entry-2>
   journal <entry-1> = mkdir sub/
   journal <entry-2> = put sub/a.txt 6
   folder sub [.tsync-root/4f7b4244079f8bf6-67a7ed7af26470c3] -> <folder-1>

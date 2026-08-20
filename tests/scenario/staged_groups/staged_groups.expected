@@ -20,6 +20,7 @@
   chunk 7102aa676ece60f4-81fefb32a96a9c49 size=8
   chunk b42f3c030c14d901-12f642311958ac8b size=8
   chunk c8053270bb6d59dd-bb6ad2b1c53900f3 size=8
+  cursor = <entry-1>
   journal <entry-1> = put whole.txt 48
   file whole.txt [.tsync-root/049debf9b3bcb8f3-0c8b9d1e3b7837da] = manifest size=48 chunks=6 h1=58e96e1e8013e967 h2=a44d968152627397
     chunk#0 24fd18b0b1197417-02b6ce49b5452893 size=8
@@ -53,6 +54,7 @@
   chunk 7102aa676ece60f4-81fefb32a96a9c49 size=8
   chunk b42f3c030c14d901-12f642311958ac8b size=8
   chunk c8053270bb6d59dd-bb6ad2b1c53900f3 size=8
+  cursor = <entry-1>
   journal <entry-1> = put part.txt 48
   file part.txt [.tsync-root/96988e11fbd602f9-4953ea21cb246e32] = manifest size=48 chunks=6 h1=58e96e1e8013e967 h2=a44d968152627397
     chunk#0 24fd18b0b1197417-02b6ce49b5452893 size=8
@@ -87,6 +89,7 @@
   chunk 7102aa676ece60f4-81fefb32a96a9c49 size=8
   chunk b42f3c030c14d901-12f642311958ac8b size=8
   chunk c8053270bb6d59dd-bb6ad2b1c53900f3 size=8
+  cursor = <entry-1>
   journal <entry-1> = put twice.txt 48
   file twice.txt [.tsync-root/a2d6a5e7b3c0ad87-681387cebfce1800] = manifest size=48 chunks=6 h1=58e96e1e8013e967 h2=a44d968152627397
     chunk#0 24fd18b0b1197417-02b6ce49b5452893 size=8
@@ -121,6 +124,7 @@
 --- backend
   chunk 24fd18b0b1197417-02b6ce49b5452893 size=8
   chunk b83135dd1a4fbfc7-decd6d509213b8a8 size=4
+  cursor = <entry-1>
   journal <entry-1> = put grow.txt 12
   file grow.txt [.tsync-root/4b4935f2bac532c5-7041cc2cafde9c73] = manifest size=12 chunks=2 h1=00e7c9a6486b3fa7 h2=6c3858f9b77eaa2e
     chunk#0 24fd18b0b1197417-02b6ce49b5452893 size=8
@@ -177,6 +181,7 @@
   chunk 7102aa676ece60f4-81fefb32a96a9c49 size=8
   chunk b42f3c030c14d901-12f642311958ac8b size=8
   chunk c8053270bb6d59dd-bb6ad2b1c53900f3 size=8
+  cursor = <entry-1>
   journal <entry-1> = put cut.txt 48
   file cut.txt [.tsync-root/c690fcd1b8f0c512-35d16da951e35388] = manifest size=48 chunks=6 h1=58e96e1e8013e967 h2=a44d968152627397
     chunk#0 24fd18b0b1197417-02b6ce49b5452893 size=8

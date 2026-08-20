@@ -362,6 +362,8 @@ let setup_client (module C : Conf.S) root staging_prefix =
   let module Mf = Manifest.Make (C) in
   let module H = Ipc_handler.Make (C) (F) in
   let module Rp = Replay.Make (C) (F) in
+  let module Sp = Sync_poller.Make (C) (F) in
+  let module Fs = File_store.Make (C) in
   let module J = Journal.Make (C) in
   let module W = Wal.Make (C) in
   let module L = Layout.Inode.Make (C) in
@@ -388,7 +390,12 @@ let setup_client (module C : Conf.S) root staging_prefix =
   in
   Sq.start
     ~upload:(fun ~key ~cancel -> F.upload ~cancel key)
-    ~on_cursor:(fun ~entry_key:_ -> ())
+    (* Bumped here rather than dropped: the cursor is what a peer polls to decide
+       whether to read the journal at all, so a scenario whose uploads never move
+       it exercises [Sync] against a gate that is always open. Synchronous, where
+       a daemon batches on a timer, because a step must have finished when it
+       returns. *)
+    ~on_cursor:(fun ~entry_key -> Lwt.async (fun () -> Fs.bump_cursor entry_key))
     ~on_upload_done:(fun ~key:_ ->
       (* Mirror the daemons: nudge cache-cap enforcement after each upload. *)
       F.enforce_chunk_cap ());
@@ -731,10 +738,11 @@ let setup_client (module C : Conf.S) root staging_prefix =
     | Uploads state ->
         Sq.set_paused (state = `Paused);
         Lwt.return_unit
-    (* One pass of the poller's algorithm without its timer. Nothing here is
-       presenting a mount, so no changed key has anywhere to go. *)
+    (* One pass of the poller's algorithm without its timer, cursor gate
+       included. Nothing here is presenting a mount, so no changed key has
+       anywhere to go. *)
     | Sync ->
-        let+ (_ : int) = Rp.apply_foreign ~on_changed:(fun _ -> ()) () in
+        let+ (_ : int) = Sp.sync_once ~on_changed:(fun _ -> ()) () in
         ()
     | ( DeleteRemoteChunk _ | CorruptRemoteChunk _ | ScrambleRemoteChunk _
       | ScrambleBackendFile _ | DeleteRemoteManifest _ ) as s ->

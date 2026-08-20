@@ -2,18 +2,20 @@
   write file.bin "hello world"
   drain
   mirror
-  resync backend #2: 3 checked, 0 copied
+  resync backend #2: 4 checked, 0 copied
 --- tree
   f file.bin size=11 cached=0/1 uploaded=true etag=d94b4e9626fdc9c1
 --- content
   file.bin = "hello world"
 --- backend
   chunk d447b1ea40e6988b-b7aeb52a10fdaf2d size=11
+  cursor = <entry-1>
   journal <entry-1> = put file.bin 11
   file file.bin [.tsync-root/5364ca580b2eed57-b0140ab2eda14287] = manifest size=11 chunks=1 h1=d94b4e9626fdc9c1 h2=f3f6d793ca1ea424
     chunk#0 d447b1ea40e6988b-b7aeb52a10fdaf2d size=11
 --- backend 2
   chunk d447b1ea40e6988b-b7aeb52a10fdaf2d size=11
+  cursor = <entry-1>
   journal <entry-1> = put file.bin 11
   file file.bin [.tsync-root/5364ca580b2eed57-b0140ab2eda14287] = manifest size=11 chunks=1 h1=d94b4e9626fdc9c1 h2=f3f6d793ca1ea424
     chunk#0 d447b1ea40e6988b-b7aeb52a10fdaf2d size=11
@@ -24,19 +26,21 @@
   on-secondary delete-remote-chunk file.bin #0
   mirror
   mirror
-  resync backend #2: 3 checked, 1 copied
-  resync backend #2: 3 checked, 0 copied
+  resync backend #2: 4 checked, 1 copied
+  resync backend #2: 4 checked, 0 copied
 --- tree
   f file.bin size=11 cached=0/1 uploaded=true etag=d94b4e9626fdc9c1
 --- content
   file.bin = "hello world"
 --- backend
   chunk d447b1ea40e6988b-b7aeb52a10fdaf2d size=11
+  cursor = <entry-1>
   journal <entry-1> = put file.bin 11
   file file.bin [.tsync-root/5364ca580b2eed57-b0140ab2eda14287] = manifest size=11 chunks=1 h1=d94b4e9626fdc9c1 h2=f3f6d793ca1ea424
     chunk#0 d447b1ea40e6988b-b7aeb52a10fdaf2d size=11
 --- backend 2
   chunk d447b1ea40e6988b-b7aeb52a10fdaf2d size=11
+  cursor = <entry-1>
   journal <entry-1> = put file.bin 11
   file file.bin [.tsync-root/5364ca580b2eed57-b0140ab2eda14287] = manifest size=11 chunks=1 h1=d94b4e9626fdc9c1 h2=f3f6d793ca1ea424
     chunk#0 d447b1ea40e6988b-b7aeb52a10fdaf2d size=11
@@ -46,18 +50,20 @@
   drain
   on-secondary corrupt-remote-chunk file.bin #0
   mirror
-  resync backend #2: 3 checked, 1 copied
+  resync backend #2: 4 checked, 1 copied
 --- tree
   f file.bin size=11 cached=0/1 uploaded=true etag=d94b4e9626fdc9c1
 --- content
   file.bin = "hello world"
 --- backend
   chunk d447b1ea40e6988b-b7aeb52a10fdaf2d size=11
+  cursor = <entry-1>
   journal <entry-1> = put file.bin 11
   file file.bin [.tsync-root/5364ca580b2eed57-b0140ab2eda14287] = manifest size=11 chunks=1 h1=d94b4e9626fdc9c1 h2=f3f6d793ca1ea424
     chunk#0 d447b1ea40e6988b-b7aeb52a10fdaf2d size=11
 --- backend 2
   chunk d447b1ea40e6988b-b7aeb52a10fdaf2d size=11
+  cursor = <entry-1>
   journal <entry-1> = put file.bin 11
   file file.bin [.tsync-root/5364ca580b2eed57-b0140ab2eda14287] = manifest size=11 chunks=1 h1=d94b4e9626fdc9c1 h2=f3f6d793ca1ea424
     chunk#0 d447b1ea40e6988b-b7aeb52a10fdaf2d size=11
@@ -67,18 +73,20 @@
   drain
   on-secondary delete-remote-manifest file.bin
   mirror
-  resync backend #2: 3 checked, 1 copied
+  resync backend #2: 4 checked, 1 copied
 --- tree
   f file.bin size=11 cached=0/1 uploaded=true etag=d94b4e9626fdc9c1
 --- content
   file.bin = "hello world"
 --- backend
   chunk d447b1ea40e6988b-b7aeb52a10fdaf2d size=11
+  cursor = <entry-1>
   journal <entry-1> = put file.bin 11
   file file.bin [.tsync-root/5364ca580b2eed57-b0140ab2eda14287] = manifest size=11 chunks=1 h1=d94b4e9626fdc9c1 h2=f3f6d793ca1ea424
     chunk#0 d447b1ea40e6988b-b7aeb52a10fdaf2d size=11
 --- backend 2
   chunk d447b1ea40e6988b-b7aeb52a10fdaf2d size=11
+  cursor = <entry-1>
   journal <entry-1> = put file.bin 11
   file file.bin [.tsync-root/5364ca580b2eed57-b0140ab2eda14287] = manifest size=11 chunks=1 h1=d94b4e9626fdc9c1 h2=f3f6d793ca1ea424
     chunk#0 d447b1ea40e6988b-b7aeb52a10fdaf2d size=11
@@ -88,19 +96,21 @@
   drain
   on-secondary scramble-remote-chunk file.bin #0
   mirror
-  resync backend #2: 3 checked, 0 copied
+  resync backend #2: 4 checked, 0 copied
 --- tree
   f file.bin size=11 cached=0/1 uploaded=true etag=d94b4e9626fdc9c1
 --- content
   file.bin = "hello world"
 --- backend
   chunk d447b1ea40e6988b-b7aeb52a10fdaf2d size=11
+  cursor = <entry-1>
   journal <entry-1> = put file.bin 11
   file file.bin [.tsync-root/5364ca580b2eed57-b0140ab2eda14287] = manifest size=11 chunks=1 h1=d94b4e9626fdc9c1 h2=f3f6d793ca1ea424
     chunk#0 d447b1ea40e6988b-b7aeb52a10fdaf2d size=11
 --- backend 2
   corrupted d447b1ea40e6988b-b7aeb52a10fdaf2d
   chunk d447b1ea40e6988b-b7aeb52a10fdaf2d size=11
+  cursor = <entry-1>
   journal <entry-1> = put file.bin 11
   file file.bin [.tsync-root/5364ca580b2eed57-b0140ab2eda14287] = manifest size=11 chunks=1 h1=d94b4e9626fdc9c1 h2=f3f6d793ca1ea424
     chunk#0 d447b1ea40e6988b-b7aeb52a10fdaf2d size=11
@@ -124,7 +134,7 @@
 --- backend
   chunk 3165358206e16abf-241df034ca91c411 size=8
   chunk 78bdd50ffdb89f28-110ae84095eebccf size=12
-  cursor = <entry-2>
+  cursor = <entry-3>
   journal <entry-1> = put outside.bin 12
   journal <entry-2> = mkdir keep/
   journal <entry-3> = put keep/inside.bin 8
@@ -135,7 +145,7 @@
     chunk#0 3165358206e16abf-241df034ca91c411 size=8
 --- backend 2
   chunk 3165358206e16abf-241df034ca91c411 size=8
-  cursor = <entry-2>
+  cursor = <entry-3>
   journal <entry-1> = put outside.bin 12
   journal <entry-2> = mkdir keep/
   journal <entry-3> = put keep/inside.bin 8
@@ -165,7 +175,7 @@
 --- backend
   chunk 002783db772ad77d-0760f49141bb4bb5 size=4
   chunk fa87ee5fc199e332-c7156c4359a54f81 size=6
-  cursor = <entry-2>
+  cursor = <entry-3>
   journal <entry-1> = put ok.bin 4
   journal <entry-2> = mkdir sub/
   journal <entry-3> = put sub/nested.bin 6
@@ -177,7 +187,7 @@
 --- backend 2
   chunk 002783db772ad77d-0760f49141bb4bb5 size=4
   chunk fa87ee5fc199e332-c7156c4359a54f81 size=6
-  cursor = <entry-2>
+  cursor = <entry-3>
   journal <entry-1> = put ok.bin 4
   journal <entry-2> = mkdir sub/
   journal <entry-3> = put sub/nested.bin 6
