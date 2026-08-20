@@ -4,7 +4,7 @@ type binding = {
   mount_point : string;
 }
 
-type topology = [ `One_process | `Process_per_binding ]
+type topology = [ `One_process | `Process_per_binding | `Not_a_daemon ]
 type served = { binding : binding; domain : (module Domain_engine.Domain) }
 type socket = [ `Domain_socket | `Proxy_socket ]
 
@@ -102,21 +102,28 @@ let size_blocking_pool ~concurrency =
   end
 
 let run_forked f items =
-  let rec go child_pids = function
-    | [] -> List.rev child_pids
-    | [x] ->
-        f x;
-        List.rev child_pids
+  let child_pids = ref [] in
+  let rec go = function
+    | [] -> ()
+    | [x] -> f x
     | x :: rest ->
         let pid = Lwt_unix.fork () in
         if pid = 0 then (
+          (* Its siblings are the parent's to reap, and this copy of the list
+             would have it signalling them on the way out. *)
+          child_pids := [];
           f x;
           exit 0);
-        go (pid :: child_pids) rest
+        child_pids := pid :: !child_pids;
+        go rest
   in
-  let child_pids = go [] items in
-  List.iter
-    (fun pid ->
-      (try Unix.kill pid Sys.sigterm with _ -> ());
-      try ignore (Unix.waitpid [] pid) with _ -> ())
-    child_pids
+  let reap () =
+    List.iter
+      (fun pid ->
+        (try Unix.kill pid Sys.sigterm with _ -> ());
+        try ignore (Unix.waitpid [] pid) with _ -> ())
+      (List.rev !child_pids)
+  in
+  (* The last item runs here rather than in a child, so its failure would
+     otherwise leave every sibling already forked behind it. *)
+  Fun.protect ~finally:reap (fun () -> go items)
