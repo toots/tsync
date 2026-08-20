@@ -6,12 +6,9 @@ open Lwt.Syntax
    that crosses, so the backtrace travels inside it. *)
 exception With_backtrace of exn * Printexc.raw_backtrace
 
-module Make (C : Conf.S) = struct
-  module E = Domain_engine.Make (C)
-  module Sq = E.Sq
-  module F = E.F
-  module Ih = E.Ih
-  module Sp = E.Sp
+module Make (C : Conf.S) (D : Domain_engine.Domain) = struct
+  module F = D.F
+  module Ih = D.Ih
   module Fs = File_store.Make (C)
   module H = Hidden_ops.Make (C)
   module I = Internal_ops.Make (F)
@@ -276,7 +273,7 @@ module Make (C : Conf.S) = struct
             ("frontend", `String "fuse")
             :: ("mountPoint", `String mount_point)
             :: fuse_stats_fields ()
-            @ E.stats_fields ());
+            @ D.stats_fields ());
         on_stop = (fun () -> request_stop ());
       }
 
@@ -446,23 +443,6 @@ module Make (C : Conf.S) = struct
       fsync = (fun _path _datasync _fi -> ());
     }
 
-  (* An exception escaping [Lwt_main.run] does not stop the process: it leaves
-     one with no loop, in which every filesystem call blocks on a thread that is
-     gone, and nothing reports it until a stop is attempted and hangs -- one of
-     these sat silent for 47 minutes after an SSL read raised inside libev's
-     dispatch, outside any promise and so invisible to both [Lwt.catch] and
-     {!Lwt.async_exception_hook}.
-
-     There is nothing to recover to, so the process ends at once and says why.
-     [Unix._exit], because at_exit handlers would drain through the loop that
-     just died, which is the wedge again. *)
-  let loop_died exn =
-    Log.err "event loop stopped: %s\n%s" (Printexc.to_string exn)
-      (Printexc.get_backtrace ());
-    flush stdout;
-    flush stderr;
-    Unix._exit 1
-
   (* The main thread cannot be waited on here: [Fuse.main] returns when the
      kernel drops the connection, and the session outlives the mount point for as
      long as another process holds a descriptor on it, which a reader need never
@@ -470,8 +450,7 @@ module Make (C : Conf.S) = struct
 
      By this point everything this process owed is done, and exiting is what
      closes /dev/fuse and turns the reader's descriptor into ESTALE; waiting
-     instead is the 90-second stop that ends in SIGABRT. [Unix._exit], as in
-     {!loop_died}. *)
+     instead is the 90-second stop that ends in SIGABRT. *)
   let finish_stop () =
     Log.debug "stop complete, exiting";
     (try Unix.unlink C.socket_path with _ -> ());
@@ -489,127 +468,104 @@ module Make (C : Conf.S) = struct
        background loop) must not take down the daemon or leave it half-dead. *)
     (Lwt.async_exception_hook :=
        fun exn -> Log.err "async exception: %s" (Printexc.to_string exn));
-    let started = Mutex.create () in
-    let started_cond = Condition.create () in
-    let ready = ref false in
-    let signal_ready () =
-      Mutex.lock started;
-      ready := true;
-      Condition.broadcast started_cond;
-      Mutex.unlock started
-    in
-    let wait_ready () =
-      Mutex.lock started;
-      while not !ready do
-        Condition.wait started_cond started
-      done;
-      Mutex.unlock started
-    in
-    let lwt_thread =
-      Thread.create
-        (fun () ->
-          match
-            Lwt_main.run
-              (let* () =
-                 (* A FUSE mount is the filesystem, so a finished upload changes
-                  nothing a reader can observe. *)
-                 E.start
-                   ~freshness:
-                     (* This mount has to be told: [cache_opts] turns off the
-                      attribute and entry timeouts, but that does not stop the
-                      kernel answering a lookup from a dentry it already holds,
-                      so a name another client renamed away stays resolvable in
-                      a directory already open. *)
-                     (Frontend.Notify
-                        (fun key ->
-                          (* Backend key to the path this mount shows. A key
-                           outside the domain is not ours to invalidate. *)
-                          let rel =
-                            Key.chop_slash
-                              (Key.strip_prefix ~domain_prefix:C.domain_prefix
-                                 key)
-                          in
-                          (* Never from inside an operation on this path: the
-                           kernel waits on the request, and the invalidation
-                           waits on the kernel. This runs on the event loop,
-                           which is not a FUSE thread. *)
-                          try Fuse.invalidate_path ("/" ^ rel)
-                          with Unix.Unix_error (e, _, _) ->
-                            (* The kernel not holding it is the state we wanted;
-                             anything else the mount cannot fix, and silence
-                             here is a stale name nobody can account for. *)
-                            Log.debug "invalidate %s: %s" rel
-                              (Unix.error_message e)))
-                   ~on_upload_done:(fun ~key:_ -> Lwt.return_unit)
-                   ()
-               in
-               Log.debug "starting IPC server at %s" C.socket_path;
-               Lwt.async (fun () ->
-                   Ipc.serve ~path:C.socket_path
-                     (Ih.handler (ipc_hooks mount_point)));
-               Lwt.async (fun () -> report_recorded_failures 0);
-               (* A plain SIGTERM reaches this group too, from a supervisor that
-                only signals and always from the parent when this frontend was
-                forked. libfuse may install its own handlers in [Fuse.main] and
-                override these; this covers the case where it installs none, in
-                which the default action would kill the process mid-queue. *)
-               List.iter
-                 (fun s ->
-                   ignore (Lwt_unix.on_signal s (fun _ -> request_stop ())))
-                 [Sys.sigterm; Sys.sigint];
-               (* Before [signal_ready], so the main thread sees it once past
-                [wait_ready]. *)
-               stop_notification := Some (Lwt_unix.make_notification do_stop);
-               signal_ready ();
-               let* () = stop_t in
-               (* Concurrent: the unmount is what lets the main thread out of
-                [Fuse.main] to join this one, so it must not wait behind the
-                drain. *)
-               let unmount_t = unmount mount_point in
-               Log.debug "draining upload queue and backends";
-               let* () = E.drain () in
-               unmount_t)
-          with
-            (* Only for a stop we asked for. When the FUSE loop exits on its own
-               -- someone unmounted from outside -- the main thread is already on
-               its way out and does the same cleanup in order. *)
-            | () -> if !unmount_needed then finish_stop ()
-            | exception exn -> loop_died exn)
-        ()
-    in
-    wait_ready ();
-    Log.info "mounting FUSE at %s" mount_point;
-    (* [allow_other] lets other users reach the mount; it also needs
-       [user_allow_other] in /etc/fuse.conf. *)
-    (* The kernel's own caches, turned off: they assume this filesystem changes
-       only through the kernel's own calls, which is false the moment a second
-       client shares the domain, and freshness is bought instead by a LOOKUP per
-       path access.
+    Domain_engine.run
+      ~after:(fun () ->
+        (* Only for a stop we asked for. When the FUSE loop exits on its own --
+           someone unmounted from outside -- the main thread is already on its
+           way out and does the same cleanup in order. *)
+        if !unmount_needed then finish_stop ())
+      ~main_thread:(fun () ->
+        Log.info "mounting FUSE at %s" mount_point;
+        (* [allow_other] lets other users reach the mount; it also needs
+           [user_allow_other] in /etc/fuse.conf. *)
+        (* The kernel's own caches, turned off: they assume this filesystem
+           changes only through the kernel's own calls, which is false the moment
+           a second client shares the domain, and freshness is bought instead by
+           a LOOKUP per path access.
 
-       That buys resolution, not enumeration -- a directory's cached listing is
-       not covered by these timeouts and this API cannot invalidate it either, so
-       a stale readdir survives until the directory is opened afresh. Closing
-       that needs [fuse_lowlevel_notify_inval_entry], hence a lowlevel binding. *)
-    let cache_opts =
-      ["entry_timeout=0"; "attr_timeout=0"; "negative_timeout=0"; "auto_cache"]
-    in
-    let opts =
-      (if C.read_only then ["ro"] else [])
-      @ (if allow_other then ["allow_other"] else [])
-      @ cache_opts
-    in
-    let mount_args =
-      Array.of_list
-        (["tsync"; mount_point]
-        @ match opts with [] -> [] | _ -> ["-o"; String.concat "," opts])
-    in
-    Fuse.main ~loop_mode:Fuse.Multi_threaded mount_args
-      (make_operations mount_point);
-    Log.debug "FUSE loop exited, stopping services";
-    (* The loop may have exited on request or on its own (a manual unmount).
-       Either way this releases the Lwt side; in the first case it already
-       happened. *)
-    notify_stop_from_main ();
-    Thread.join lwt_thread;
+           That buys resolution, not enumeration -- a directory's cached listing
+           is not covered by these timeouts and this API cannot invalidate it
+           either, so a stale readdir survives until the directory is opened
+           afresh. Closing that needs [fuse_lowlevel_notify_inval_entry], hence a
+           lowlevel binding. *)
+        let cache_opts =
+          [
+            "entry_timeout=0";
+            "attr_timeout=0";
+            "negative_timeout=0";
+            "auto_cache";
+          ]
+        in
+        let opts =
+          (if C.read_only then ["ro"] else [])
+          @ (if allow_other then ["allow_other"] else [])
+          @ cache_opts
+        in
+        let mount_args =
+          Array.of_list
+            (["tsync"; mount_point]
+            @ match opts with [] -> [] | _ -> ["-o"; String.concat "," opts])
+        in
+        Fuse.main ~loop_mode:Fuse.Multi_threaded mount_args
+          (make_operations mount_point);
+        Log.debug "FUSE loop exited, stopping services";
+        (* The loop may have exited on request or on its own (a manual unmount).
+           Either way this releases the Lwt side; in the first case it already
+           happened. *)
+        notify_stop_from_main ())
+      (fun ~ready ->
+        let* () =
+          (* A FUSE mount is the filesystem, so a finished upload changes
+             nothing a reader can observe. *)
+          D.start
+            ~freshness:
+              (* This mount has to be told: [cache_opts] turns off the attribute
+                 and entry timeouts, but that does not stop the kernel answering
+                 a lookup from a dentry it already holds, so a name another
+                 client renamed away stays resolvable in a directory already
+                 open. *)
+              (Domain_engine.Notify
+                 (fun key ->
+                   (* Backend key to the path this mount shows. A key outside the
+                      domain is not ours to invalidate. *)
+                   let rel =
+                     Key.chop_slash
+                       (Key.strip_prefix ~domain_prefix:C.domain_prefix key)
+                   in
+                   (* Never from inside an operation on this path: the kernel
+                      waits on the request, and the invalidation waits on the
+                      kernel. This runs on the event loop, which is not a FUSE
+                      thread. *)
+                   try Fuse.invalidate_path ("/" ^ rel)
+                   with Unix.Unix_error (e, _, _) ->
+                     (* The kernel not holding it is the state we wanted;
+                        anything else the mount cannot fix, and silence here is a
+                        stale name nobody can account for. *)
+                     Log.debug "invalidate %s: %s" rel (Unix.error_message e)))
+            ~on_upload_done:(fun ~key:_ -> Lwt.return_unit)
+            ()
+        in
+        Log.debug "starting IPC server at %s" C.socket_path;
+        Lwt.async (fun () ->
+            Ipc.serve ~path:C.socket_path (Ih.handler (ipc_hooks mount_point)));
+        Lwt.async (fun () -> report_recorded_failures 0);
+        (* A plain SIGTERM reaches this group too, from a supervisor that only
+           signals and always from the parent when this frontend was forked.
+           libfuse may install its own handlers in [Fuse.main] and override
+           these; this covers the case where it installs none, in which the
+           default action would kill the process mid-queue. *)
+        List.iter
+          (fun s -> ignore (Lwt_unix.on_signal s (fun _ -> request_stop ())))
+          [Sys.sigterm; Sys.sigint];
+        (* Before [ready], so the main thread sees it once it starts. *)
+        stop_notification := Some (Lwt_unix.make_notification do_stop);
+        ready ();
+        let* () = stop_t in
+        (* Concurrent: the unmount is what lets the main thread out of
+           [Fuse.main], so it must not wait behind the drain. *)
+        let unmount_t = unmount mount_point in
+        Log.debug "draining upload queue and backends";
+        let* () = D.drain () in
+        unmount_t);
     try Unix.unlink C.socket_path with _ -> ()
 end

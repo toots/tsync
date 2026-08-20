@@ -744,7 +744,10 @@ let callback ~port ~tls routes _conn req body =
                                 Lwt.return_unit)
                           end)))
 
-let start bindings =
+let start served =
+  let bindings =
+    List.map (fun (s : Frontend.served) -> s.Frontend.binding) served
+  in
   (Lwt.async_exception_hook :=
      fun exn ->
        Log.err "http-proxy async exception: %s" (Printexc.to_string exn));
@@ -781,71 +784,87 @@ let start bindings =
   Log.info "http-proxy listening on port %d (%s), %d domains" port
     (if tls then "https" else "http")
     (List.length routes);
-  Lwt_main.run
-    (let open Lwt.Syntax in
-     (* Reached by [tsync stop] over the socket below, and by a signal from a
+  Domain_engine.run (fun ~ready ->
+      let open Lwt.Syntax in
+      (* Reached by [tsync stop] over the socket below, and by a signal from a
         supervisor. It serves writes for proxy clients, so the default action
         would drop what those still owe a backfill target. *)
-     let stop, wake = Lwt.wait () in
-     let request_stop () =
-       match Lwt.state stop with
-         | Lwt.Sleep -> Lwt.wakeup_later wake ()
-         | _ -> ()
-     in
-     List.iter
-       (fun s -> ignore (Lwt_unix.on_signal s (fun _ -> request_stop ())))
-       [Sys.sigterm; Sys.sigint];
-     (* An explicit setting wins, knowing things about the deployment a probe
+      let stop, wake = Lwt.wait () in
+      let request_stop () =
+        match Lwt.state stop with
+          | Lwt.Sleep -> Lwt.wakeup_later wake ()
+          | _ -> ()
+      in
+      List.iter
+        (fun s -> ignore (Lwt_unix.on_signal s (fun _ -> request_stop ())))
+        [Sys.sigterm; Sys.sigint];
+      (* An explicit setting wins, knowing things about the deployment a probe
         cannot see; otherwise the storage's lowest answer, a bound ignoring the
         slowest participant not being a bound. With no opinion anywhere, the
         fallback exists only to stop an unbounded pile-up. *)
-     let* derived =
-       match configured_max_concurrent with
-         | Some _ -> Lwt.return_none
-         | None ->
-             let+ answers =
-               Lwt_list.map_s
-                 (fun r ->
-                   let module B = (val r.store : Backend.S) in
-                   Lwt.catch
-                     (fun () -> B.capabilities ~prefix:"" ())
-                     (fun _ -> Lwt.return Backend.no_caps))
-                 routes
-             in
-             (Backend.merge_caps answers).Backend.max_concurrency
-     in
-     let max_concurrent =
-       match (configured_max_concurrent, derived) with
-         | Some n, _ -> n
-         | None, Some n -> n
-         | None, None -> default_max_concurrent
-     in
-     Log.info "http-proxy serving at most %d object reads/writes at once (%s)"
-       max_concurrent
-       (match (configured_max_concurrent, derived) with
-         | Some _, _ -> "configured"
-         | None, Some _ -> "from the storage"
-         | None, None -> "default");
-     gate := Some (make_gate max_concurrent);
-     (* The gate holds callers at the door; this keeps the threads behind it from
+      let* derived =
+        match configured_max_concurrent with
+          | Some _ -> Lwt.return_none
+          | None ->
+              let+ answers =
+                Lwt_list.map_s
+                  (fun r ->
+                    let module B = (val r.store : Backend.S) in
+                    Lwt.catch
+                      (fun () -> B.capabilities ~prefix:"" ())
+                      (fun _ -> Lwt.return Backend.no_caps))
+                  routes
+              in
+              (Backend.merge_caps answers).Backend.max_concurrency
+      in
+      let max_concurrent =
+        match (configured_max_concurrent, derived) with
+          | Some n, _ -> n
+          | None, Some n -> n
+          | None, None -> default_max_concurrent
+      in
+      Log.info "http-proxy serving at most %d object reads/writes at once (%s)"
+        max_concurrent
+        (match (configured_max_concurrent, derived) with
+          | Some _, _ -> "configured"
+          | None, Some _ -> "from the storage"
+          | None, None -> "default");
+      gate := Some (make_gate max_concurrent);
+      (* The gate holds callers at the door; this keeps the threads behind it from
         outnumbering what the device takes. Narrowed only when the storage said
         something: a purely network-backed domain keeps the generous default. *)
-       (match derived with
-       | Some n -> Frontend.size_blocking_pool ~concurrency:n
-       | None -> ());
-     effective_max_concurrent := Some max_concurrent;
-     let socket_path = Runtime.proxy_socket_path (Runtime.default_paths ()) in
-     Log.debug "starting IPC server at %s" socket_path;
-     Lwt.async (fun () ->
-         Ipc.serve ~path:socket_path
-           (ipc_handler ~port ~tls ~request_stop routes));
-     let* () =
-       Cohttp_lwt_unix.Server.create ~stop ~mode
-         (Cohttp_lwt_unix.Server.make ~callback:(callback ~port ~tls routes) ())
-     in
-     Log.info "http-proxy stopping, letting backends catch up";
-     (try Unix.unlink socket_path with _ -> ());
-     Backend.drain ())
+        (match derived with
+        | Some n -> Frontend.size_blocking_pool ~concurrency:n
+        | None -> ());
+      effective_max_concurrent := Some max_concurrent;
+      (* A proxy client asks again on every request, so there is nothing to push
+        at it when another client changes something. *)
+      let* () =
+        Lwt_list.iter_s
+          (fun (sv : Frontend.served) ->
+            let module D = (val sv.Frontend.domain : Domain_engine.Domain) in
+            D.start ~freshness:Domain_engine.Revalidates ())
+          served
+      in
+      let socket_path = Runtime.proxy_socket_path (Runtime.default_paths ()) in
+      Log.debug "starting IPC server at %s" socket_path;
+      Lwt.async (fun () ->
+          Ipc.serve ~path:socket_path
+            (ipc_handler ~port ~tls ~request_stop routes));
+      ready ();
+      let* () =
+        Cohttp_lwt_unix.Server.create ~stop ~mode
+          (Cohttp_lwt_unix.Server.make
+             ~callback:(callback ~port ~tls routes)
+             ())
+      in
+      Log.info "http-proxy stopping, letting backends catch up";
+      (try Unix.unlink socket_path with _ -> ());
+      Lwt_list.iter_s
+        (fun (sv : Frontend.served) ->
+          let module D = (val sv.Frontend.domain : Domain_engine.Domain) in
+          D.drain ())
+        served)
 
 let spec =
   Field_spec.

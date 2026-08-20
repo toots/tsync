@@ -25,12 +25,9 @@ let domain_dir ~domain_name =
         Array.find_opt (is_domain_dir ~domain_name) dirs
         |> Option.map (Filename.concat root)
 
-module Make (C : Conf.S) = struct
-  module E = Domain_engine.Make (C)
-  module Sq = E.Sq
-  module F = E.F
-  module H = E.Ih
-  module Sp = E.Sp
+module Make (C : Conf.S) (D : Domain_engine.Domain) = struct
+  module F = D.F
+  module H = D.Ih
 
   let expand_home path =
     if String.length path >= 2 && path.[0] = '~' && path.[1] = '/' then
@@ -167,7 +164,7 @@ module Make (C : Conf.S) = struct
           (fun () ->
             [("subscribers", `Int (Ipc.Subs.count subs ~topic:C.domain_name))]);
         stats_fields =
-          (fun () -> ("frontend", `String "file_provider") :: E.stats_fields ());
+          (fun () -> ("frontend", `String "file_provider") :: D.stats_fields ());
         on_stop = (fun () -> ());
       }
 
@@ -224,10 +221,10 @@ module Make (C : Conf.S) = struct
             (resp, `Continue)
         | _ | (exception _) -> core line
 
-  let drain = Sq.drain
+  let drain = D.drain
 
   let init ~subs () =
-    E.start
+    D.start
       ~on_upload_done:(fun ~key ->
         (* Nothing to drop, the replica keeping the file and the daemon only the
            promoted chunks: upload state is part of the item's version, so a
@@ -237,7 +234,7 @@ module Make (C : Conf.S) = struct
       ~freshness:
         (* The extension keeps its own view of the tree, so it has to be told;
            it will not ask again on its own. *)
-        (Frontend.Notify
+        (Domain_engine.Notify
            (fun key -> ignore (publish ~subs "changed" [("key", `String key)])))
       ()
 end
@@ -251,7 +248,7 @@ type domain_runtime = {
   drain : unit -> unit Lwt.t;
 }
 
-let start ~confs ~socket_path =
+let start ~served ~socket_path =
   let open Lwt.Syntax in
   (* Detached work has no caller to fail, and the default hook ends the
      process over a background error the log would have carried. *)
@@ -265,119 +262,125 @@ let start ~confs ~socket_path =
   in
   (* Subscribers name the domain they want, and events carry it too. *)
   let subs = Ipc.Subs.create () in
-  Lwt_main.run
-    (let* domain_runtimes =
-       Lwt_list.map_s
-         (fun (module C : Conf.S) ->
-           let module R = Make (C) in
-           let* () = R.init ~subs () in
-           Lwt.return
-             {
-               prefix = C.domain_prefix;
-               name = C.domain_name;
-               claims_path = R.claims_path;
-               handler = R.handler ~subs;
-               drain = R.drain;
-             })
-         confs
-     in
-     (* The whole menu, for a client that cannot link {!Menu}. Answered here
+  Domain_engine.run (fun ~ready ->
+      let* domain_runtimes =
+        Lwt_list.map_s
+          (fun (sv : Frontend.served) ->
+            let module C = (val sv.Frontend.binding.Frontend.conf : Conf.S) in
+            let module D = (val sv.Frontend.domain : Domain_engine.Domain) in
+            let module R = Make (C) (D) in
+            let* () = R.init ~subs () in
+            Lwt.return
+              {
+                prefix = C.domain_prefix;
+                name = C.domain_name;
+                claims_path = R.claims_path;
+                handler = R.handler ~subs;
+                drain = R.drain;
+              })
+          served
+      in
+      (* The whole menu, for a client that cannot link {!Menu}. Answered here
         rather than by a domain's handler because it spans them: this process
         holds every domain, which is what lets one reply carry the summary and
         the icon as well as the rows. *)
-     let menu_reply runtimes =
-       let+ statuses =
-         Lwt_list.map_s
-           (fun r ->
-             let+ reply, _ = r.handler {|{"action":"status"}|} in
-             Menu.of_status_json ~name:r.name (Yojson.Safe.from_string reply))
-           runtimes
-       in
-       ( Yojson.Safe.to_string
-           (`Assoc
-              [
-                ("ok", `Bool true);
-                ( "menu",
-                  Menu.to_json
-                    (Menu.render ~quit_label:"Quit tsync menu bar" statuses) );
-              ]),
-         `Continue )
-     in
-     (* The stats submenu's rows, on the same terms: rendered here because the
+      let menu_reply runtimes =
+        let+ statuses =
+          Lwt_list.map_s
+            (fun r ->
+              let+ reply, _ = r.handler {|{"action":"status"}|} in
+              Menu.of_status_json ~name:r.name (Yojson.Safe.from_string reply))
+            runtimes
+        in
+        ( Yojson.Safe.to_string
+            (`Assoc
+               [
+                 ("ok", `Bool true);
+                 ( "menu",
+                   Menu.to_json
+                     (Menu.render ~quit_label:"Quit tsync menu bar" statuses) );
+               ]),
+          `Continue )
+      in
+      (* The stats submenu's rows, on the same terms: rendered here because the
         client cannot link {!Menu}, and asked for separately because a [stats]
         call reaches every backend -- a round trip nobody wants on the poll that
         runs whether or not the menu is open. *)
-     let menu_stats_reply runtimes =
-       let+ stats =
-         Lwt_list.map_s
-           (fun r ->
-             let+ reply, _ = r.handler {|{"action":"stats"}|} in
-             Menu.of_stats_json (Yojson.Safe.from_string reply))
-           runtimes
-       in
-       ( Yojson.Safe.to_string
-           (`Assoc
-              [
-                ("ok", `Bool true);
-                ( "rows",
-                  Menu.entries_to_json
-                    (Menu.stats_entries (List.filter_map Fun.id stats)) );
-              ]),
-         `Continue )
-     in
-     let router line =
-       match Yojson.Safe.from_string line with
-         | exception _ -> Lwt.return (error_json "invalid JSON", `Continue)
-         | `Assoc obj ->
-             let get_str k =
-               match List.assoc_opt k obj with Some (`String s) -> s | _ -> ""
-             in
-             let action = get_str "action" in
-             let path = get_str "path" in
-             let domain = get_str "domain" in
-             if action = "menu" then menu_reply domain_runtimes
-             else if action = "menu_stats" then menu_stats_reply domain_runtimes
-             else (
-               let runtime_opt =
-                 if domain <> "" then
-                   List.find_opt (fun r -> r.name = domain) domain_runtimes
-                 else (
-                   match action with
-                     | "evict" | "restore" | "revert" ->
-                         (* A filesystem path, not a storage key: resolve it to the
+      let menu_stats_reply runtimes =
+        let+ stats =
+          Lwt_list.map_s
+            (fun r ->
+              let+ reply, _ = r.handler {|{"action":"stats"}|} in
+              Menu.of_stats_json (Yojson.Safe.from_string reply))
+            runtimes
+        in
+        ( Yojson.Safe.to_string
+            (`Assoc
+               [
+                 ("ok", `Bool true);
+                 ( "rows",
+                   Menu.entries_to_json
+                     (Menu.stats_entries (List.filter_map Fun.id stats)) );
+               ]),
+          `Continue )
+      in
+      let router line =
+        match Yojson.Safe.from_string line with
+          | exception _ -> Lwt.return (error_json "invalid JSON", `Continue)
+          | `Assoc obj ->
+              let get_str k =
+                match List.assoc_opt k obj with
+                  | Some (`String s) -> s
+                  | _ -> ""
+              in
+              let action = get_str "action" in
+              let path = get_str "path" in
+              let domain = get_str "domain" in
+              if action = "menu" then menu_reply domain_runtimes
+              else if action = "menu_stats" then
+                menu_stats_reply domain_runtimes
+              else (
+                let runtime_opt =
+                  if domain <> "" then
+                    List.find_opt (fun r -> r.name = domain) domain_runtimes
+                  else (
+                    match action with
+                      | "evict" | "restore" | "revert" ->
+                          (* A filesystem path, not a storage key: resolve it to the
                           domain whose CloudStorage folder contains it. *)
-                         List.find_opt
-                           (fun r -> r.claims_path path)
-                           domain_runtimes
-                     | _ ->
-                         List.find_opt
-                           (fun r ->
-                             let n = String.length r.prefix in
-                             String.length path >= n
-                             && String.sub path 0 n = r.prefix)
-                           domain_runtimes)
-               in
-               (* A reference carries no domain and folder ids are unique only
+                          List.find_opt
+                            (fun r -> r.claims_path path)
+                            domain_runtimes
+                      | _ ->
+                          List.find_opt
+                            (fun r ->
+                              let n = String.length r.prefix in
+                              String.length path >= n
+                              && String.sub path 0 n = r.prefix)
+                            domain_runtimes)
+                in
+                (* A reference carries no domain and folder ids are unique only
                 within one, so guessing would resolve a request against a store
                 that was never asked. *)
-               let runtime =
-                 match (runtime_opt, domain_runtimes) with
-                   | Some r, _ -> Some r
-                   | None, [only] -> Some only
-                   | None, _ -> None
-               in
-               begin match runtime with
-                 | Some runtime -> runtime.handler line
-                 | None ->
-                     Lwt.return
-                       ( error_json
-                           (Printf.sprintf
-                              "cannot tell which domain '%s' is for: name it \
-                               with \"domain\""
-                              action),
-                         `Continue )
-               end)
-         | _ -> Lwt.return (error_json "expected JSON object", `Continue)
-     in
-     let* () = Ipc.serve ~subs ~path:socket_path router in
-     Lwt_list.iter_s (fun r -> r.drain ()) domain_runtimes)
+                let runtime =
+                  match (runtime_opt, domain_runtimes) with
+                    | Some r, _ -> Some r
+                    | None, [only] -> Some only
+                    | None, _ -> None
+                in
+                begin match runtime with
+                  | Some runtime -> runtime.handler line
+                  | None ->
+                      Lwt.return
+                        ( error_json
+                            (Printf.sprintf
+                               "cannot tell which domain '%s' is for: name it \
+                                with \"domain\""
+                               action),
+                          `Continue )
+                end)
+          | _ -> Lwt.return (error_json "expected JSON object", `Continue)
+      in
+      ready ();
+      let* () = Ipc.serve ~subs ~path:socket_path router in
+      Lwt_list.iter_s (fun r -> r.drain ()) domain_runtimes)

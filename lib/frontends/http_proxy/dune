@@ -32,6 +32,8 @@
    -open
    Tsync_frontend_register
    -open
+   Tsync_engine
+   -open
    Tsync_diagnostics
    -open
    Tsync_runtime))
@@ -51,6 +53,7 @@
   tsync-libs.naming
   tsync-libs.lwt_unix
   tsync-libs.frontend_register
+  tsync-libs.engine
   tsync-libs.http_proxy
   tsync-libs.ipc
   tsync-libs.diagnostics

@@ -2,8 +2,6 @@
  (flags
   (:standard
    -open
-   Tsync_frontend_register
-   -open
    Tsync_sync
    -open
    Tsync_store
@@ -22,7 +20,6 @@
  (name tsync_engine)
  (public_name tsync-libs.engine)
  (libraries
-  tsync_frontend_register
   tsync_sync
   tsync_store
   tsync_object
@@ -31,4 +28,5 @@
   tsync_ipc_handler
   tsync_log
   tsync_work
-  lwt))
+  lwt
+  threads.posix))

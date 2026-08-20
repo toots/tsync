@@ -5,7 +5,8 @@
     arrives as {!Make.hooks}, so the handler serves fuse, the FileProvider and
     the http proxy without knowing which it is talking for. *)
 
-module Make (C : Conf.S) (F : File_ops.S) : sig
+(** Named so a domain's wiring can be handed to a frontend as one signature. *)
+module type S = sig
   type hooks = {
     path_to_key : string -> string;
     evict : string -> unit Lwt.t;
@@ -25,3 +26,5 @@ module Make (C : Conf.S) (F : File_ops.S) : sig
     string ->
     (string * [ `Continue | `Stop | `Subscribe of string ]) Lwt.t
 end
+
+module Make (_ : Conf.S) (_ : File_ops.S) : S

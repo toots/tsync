@@ -5,6 +5,7 @@ type binding = {
 }
 
 type topology = [ `One_process | `Process_per_binding ]
+type served = { binding : binding; domain : (module Domain_engine.Domain) }
 
 module type S = sig
   (* Whether every byte of [key] is on this machine, for `tsync ls`. *)
@@ -12,10 +13,8 @@ module type S = sig
   val topology : topology
 
   (* Blocks until shutdown. *)
-  val start : binding list -> unit
+  val start : served list -> unit
 end
-
-type freshness = Notify of (string -> unit) | Revalidates
 
 type command = {
   verb : string;

@@ -10,19 +10,31 @@ type domain = {
 
 (* One binding per (domain × frontend), grouped by frontend. Each group is its
    own process (all but the last forked), so distinct frontends on one domain
-   run concurrently. *)
+   run concurrently.
+
+   The flag marks the one process that keeps each domain converging with the
+   store. At most one may: they share a cache root and a bookmark with no
+   arbitration between them, and the same client uuid, so neither could tell the
+   other's work from its own. The domain's first frontend, which is how a domain
+   resolves a frontend everywhere else. *)
 let bindings_by_frontend domains =
   let all =
     List.concat_map
       (fun d ->
+        let owner =
+          match d.frontends with
+            | f :: _ -> f.Conf_parsing.frontend_type
+            | [] -> ""
+        in
         List.map
           (fun (f : Conf_parsing.frontend_config) ->
             ( f.Conf_parsing.frontend_type,
-              {
-                Frontend.conf = d.conf;
-                options = f.Conf_parsing.options;
-                mount_point = d.mount_point;
-              } ))
+              ( {
+                  Frontend.conf = d.conf;
+                  options = f.Conf_parsing.options;
+                  mount_point = d.mount_point;
+                },
+                f.Conf_parsing.frontend_type = owner ) ))
           d.frontends)
       domains
   in
@@ -53,9 +65,22 @@ let run ?(on_leaf = fun ~name:_ -> ()) domains =
     on_leaf ~name;
     (* Sized here because only this side knows what else shares the leaf, and
        after the fork because it is the first thing to touch Lwt. *)
-    let serve bs =
-      Frontend.cap_blocking_pool ~concurrency:(Frontend.binding_concurrency bs);
-      F.start bs
+    let serve items =
+      Frontend.cap_blocking_pool
+        ~concurrency:(Frontend.binding_concurrency (List.map fst items));
+      F.start
+        (List.map
+           (fun (binding, owns) ->
+             let module C = (val binding.Frontend.conf : Conf.S) in
+             let module E = Domain_engine.Make (C) in
+             let module P = Domain_engine.Passive (E) in
+             {
+               Frontend.binding;
+               domain =
+                 (if owns then (module E : Domain_engine.Domain)
+                  else (module P : Domain_engine.Domain));
+             })
+           items)
     in
     match F.topology with
       | `One_process -> serve bindings
