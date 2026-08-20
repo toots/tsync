@@ -6,8 +6,6 @@
    -open
    Tsync_engine
    -open
-   Tsync_conf_parsing
-   -open
    Tsync_conf
    -open
    Tsync_log
@@ -18,7 +16,6 @@
  (libraries
   tsync_frontend_register
   tsync-libs.engine
-  tsync-libs.conf_parsing
   tsync-libs.conf
   tsync-libs.log
   tsync-libs.lwt_unix))

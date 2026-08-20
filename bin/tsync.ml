@@ -74,7 +74,15 @@ let start_cmd =
       ~on_leaf:(fun ~name -> trace_process ~name)
       (List.map
          (fun ((d : Conf_parsing.domain), conf, mount_point) ->
-           { Launcher.frontends = d.Conf_parsing.frontends; conf; mount_point })
+           List.map
+             (fun (f : Conf_parsing.frontend_config) ->
+               ( f.Conf_parsing.frontend_type,
+                 {
+                   Frontend.conf;
+                   options = f.Conf_parsing.options;
+                   mount_point;
+                 } ))
+             d.Conf_parsing.frontends)
          per_domain)
   in
   Cmd.v
