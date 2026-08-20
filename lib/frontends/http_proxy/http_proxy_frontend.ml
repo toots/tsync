@@ -588,9 +588,13 @@ let ipc_handler ~port ~tls ~request_stop routes line =
   let reply fields =
     Lwt.return (Yojson.Safe.to_string (`Assoc fields), `Continue)
   in
+  (* Through {!Ipc_handler.error_reply}, so this socket refuses in the same
+     vocabulary the mount daemon's does and a client can match on the code. *)
+  let fail code msg =
+    Lwt.return (Ipc_handler.error_reply code msg, `Continue)
+  in
   match Yojson.Safe.from_string line with
-    | exception _ ->
-        reply [("ok", `Bool false); ("error", `String "invalid JSON")]
+    | exception _ -> fail `Invalid "invalid JSON"
     | `Assoc obj -> (
         let arg =
           match List.assoc_opt "arg" obj with Some (`String s) -> s | _ -> ""
@@ -612,13 +616,9 @@ let ipc_handler ~port ~tls ~request_stop routes line =
               request_stop ();
               Lwt.return
                 (Yojson.Safe.to_string (`Assoc [("ok", `Bool true)]), `Stop)
-          | Some (`String a) ->
-              reply
-                [
-                  ("ok", `Bool false); ("error", `String ("unknown action " ^ a));
-                ]
-          | _ -> reply [("ok", `Bool false); ("error", `String "no action")])
-    | _ -> reply [("ok", `Bool false); ("error", `String "invalid request")]
+          | Some (`String a) -> fail `Invalid ("unknown action: " ^ a)
+          | _ -> fail `Invalid "unknown action: ")
+    | _ -> fail `Internal "expected JSON object"
 
 (* Listener-wide, not domain-scoped, so any secret signing for this listener
    authorizes it: there is no key to route on. Text and JSON render the same

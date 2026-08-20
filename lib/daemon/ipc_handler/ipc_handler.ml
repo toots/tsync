@@ -1,5 +1,16 @@
 open Lwt.Syntax
 
+(* The one place that knows the shape of a failure on this wire: a code the
+   caller acts on, and prose for whoever reads the log. *)
+let error_reply code msg =
+  Yojson.Safe.to_string
+    (`Assoc
+       [
+         ("ok", `Bool false);
+         ("code", `String (Ipc_error.to_string code));
+         ("error", `String msg);
+       ])
+
 module type S = sig
   type hooks = {
     path_to_key : string -> string;
@@ -53,16 +64,7 @@ module Make (C : Conf.S) (F : File_ops.S) : S = struct
   let ok_json fields =
     Yojson.Safe.to_string (`Assoc (("ok", `Bool true) :: fields))
 
-  (* The code is what a caller acts on; the prose is for a log reader. *)
-  let error_code_json code msg =
-    Yojson.Safe.to_string
-      (`Assoc
-         [
-           ("ok", `Bool false);
-           ("code", `String (Ipc_error.to_string code));
-           ("error", `String msg);
-         ])
-
+  let error_code_json = error_reply
   let error_json msg = error_code_json `Internal msg
   let fail code msg = Lwt.return (error_code_json code msg)
   let not_found what = fail `Not_found ("not found: " ^ what)
