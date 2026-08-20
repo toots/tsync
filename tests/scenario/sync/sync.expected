@@ -14,6 +14,7 @@
 --- pending B
 --- backend
   chunk 9555e8555c62dcfd-74b07ed397a89e92 size=5
+  cursor = <entry-1>
   journal <entry-1> = put foo.txt 5
   file foo.txt [.tsync-root/b306717ed3feaa3f-615fce859cf8a12f] = manifest size=5 chunks=1 h1=650e58ac64da6e0a h2=2edbeded005becfe
     chunk#0 9555e8555c62dcfd-74b07ed397a89e92 size=5
@@ -58,6 +59,7 @@
 --- backend
   chunk 37d0952b447ba6cc-f3cf2ed32de60965 size=13
   chunk 9555e8555c62dcfd-74b07ed397a89e92 size=5
+  cursor = <entry-2>
   journal <entry-1> = put foo.txt 5
   journal <entry-2> = put foo.txt 13
   file foo.txt [.tsync-root/b306717ed3feaa3f-615fce859cf8a12f] = manifest size=13 chunks=1 h1=e52cfb68e77fc491 h2=97c24e53f8305a27
@@ -137,7 +139,7 @@
 --- pending B
 --- backend
   chunk fa87ee5fc199e332-c7156c4359a54f81 size=6
-  cursor = <entry-1>
+  cursor = <entry-2>
   journal <entry-1> = mkdir sub/
   journal <entry-2> = put sub/a.txt 6
   folder sub [.tsync-root/4f7b4244079f8bf6-67a7ed7af26470c3] -> <folder-1>
@@ -232,7 +234,7 @@
 --- backend
   chunk 575a0b1c44d8843f-99009138a3452320 size=1
   chunk e6c632b61e964e1f-d2f6d0996f37a720 size=1
-  cursor = <entry-2>
+  cursor = <entry-4>
   journal <entry-1> = mkdir sub/
   journal <entry-2> = mkdir sub/
   journal <entry-3> = put sub/from-a.txt 1
@@ -285,6 +287,7 @@
 --- backend
   chunk 09f85c812b60aedb-57817316f91d176e size=13
   chunk 2ddcd7df4a530027-b16926580286588d size=6
+  cursor = <entry-2>
   journal <entry-1> = put foo.txt 6
   journal <entry-2> = put foo.txt 13
   file foo.txt [.tsync-root/b306717ed3feaa3f-615fce859cf8a12f] = manifest size=13 chunks=1 h1=c5b6c5af6312a541 h2=38e00a1744caa62f
@@ -310,6 +313,7 @@
 --- backend
   chunk 28c76e4dce03a3c4-40c12ae687c32ec4 size=24
   chunk bad02738adfbeba0-e2449384da60a0ea size=11
+  cursor = <entry-2>
   journal <entry-1> = put foo.txt 11
   journal <entry-2> = put foo.txt 24
   file foo.txt [.tsync-root/b306717ed3feaa3f-615fce859cf8a12f] = manifest size=24 chunks=1 h1=3058ab1111417f8b h2=480cc089205d7329
@@ -335,6 +339,7 @@
 --- backend
   chunk 28c76e4dce03a3c4-40c12ae687c32ec4 size=24
   chunk bad02738adfbeba0-e2449384da60a0ea size=11
+  cursor = <entry-2>
   journal <entry-1> = put foo.txt 11
   journal <entry-2> = put foo.txt 24
   file foo.txt [.tsync-root/b306717ed3feaa3f-615fce859cf8a12f] = manifest size=24 chunks=1 h1=3058ab1111417f8b h2=480cc089205d7329
@@ -463,6 +468,7 @@
 --- pending B
 --- backend
   chunk 2fbef8c1952e19fd-2277f2bac962dc19 size=4
+  cursor = <entry-1>
   journal <entry-1> = put kept.txt 4
   file kept.txt [.tsync-root/2af84fa98a68a9b1-19465e194feef43e] = manifest size=4 chunks=1 h1=d919e86de687ce50 h2=05cef325b63712c0
     chunk#0 2fbef8c1952e19fd-2277f2bac962dc19 size=4
@@ -496,7 +502,7 @@
 --- backend
   chunk 6c0560bdcb29998b-8f653076428650aa size=3
   chunk 911faba7321fe1a0-a3cf92cbf55153da size=3
-  cursor = <entry-1>
+  cursor = <entry-3>
   journal <entry-1> = mkdir sub/
   journal <entry-2> = put sub/first.txt 3
   journal <entry-3> = put sub/second.txt 3

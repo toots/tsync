@@ -6,7 +6,7 @@
   expire all
   gc
   evict foo.txt
-  expire all -> 1 version(s), 2 journal entr(ies)
+  expire all -> 1 version(s), 1 journal entr(ies)
   gc kept 1 chunk(s), reclaimed 1
 --- tree
   f foo.txt size=7 cached=0/1 uploaded=true etag=46316ec1c85082b9
@@ -14,6 +14,8 @@
   foo.txt = "two two"
 --- backend
   chunk 3ab8997bc73098ac-74d584d55f333769 size=7
+  cursor = <entry-1>
+  journal <entry-1> = put foo.txt 7
   file foo.txt [.tsync-root/b306717ed3feaa3f-615fce859cf8a12f] = manifest size=7 chunks=1 h1=46316ec1c85082b9 h2=8f37316767529460
     chunk#0 3ab8997bc73098ac-74d584d55f333769 size=7
 
@@ -63,6 +65,7 @@
 --- backend
   chunk 3ab8997bc73098ac-74d584d55f333769 size=7
   chunk 911faba7321fe1a0-a3cf92cbf55153da size=3
+  cursor = <entry-2>
   journal <entry-1> = put foo.txt 3
   journal <entry-2> = put foo.txt 7
   file foo.txt [.tsync-root/b306717ed3feaa3f-615fce859cf8a12f] = manifest size=7 chunks=1 h1=46316ec1c85082b9 h2=8f37316767529460
@@ -78,7 +81,7 @@
   gc
   gc
   evict foo.txt
-  expire all -> 1 version(s), 2 journal entr(ies)
+  expire all -> 1 version(s), 1 journal entr(ies)
   gc kept 1 chunk(s), reclaimed 1
   gc kept 1 chunk(s), reclaimed 0
 --- tree
@@ -87,6 +90,8 @@
   foo.txt = "two two"
 --- backend
   chunk 3ab8997bc73098ac-74d584d55f333769 size=7
+  cursor = <entry-1>
+  journal <entry-1> = put foo.txt 7
   file foo.txt [.tsync-root/b306717ed3feaa3f-615fce859cf8a12f] = manifest size=7 chunks=1 h1=46316ec1c85082b9 h2=8f37316767529460
     chunk#0 3ab8997bc73098ac-74d584d55f333769 size=7
 
@@ -109,7 +114,7 @@
   bar.txt = "shared body"
 --- backend
   chunk 27ac63072596f9a2-9fd6c7a1f6a084c0 size=11
-  cursor = <entry-1>
+  cursor = <entry-2>
   journal <entry-1> = delete foo.txt
   journal <entry-2> = put bar.txt 11
   file bar.txt [.tsync-root/5dfde940d8f8f5f8-5b620c0acd6130ed] = manifest size=11 chunks=1 h1=34c32a865edce724 h2=c8e2b441a34d972c
@@ -125,7 +130,7 @@
   gc (close)
   evict foo.txt
   evict new.txt
-  expire all -> 0 version(s), 1 journal entr(ies)
+  expire all -> 0 version(s), 0 journal entr(ies)
   gc marked 1 root(s), 1 chunk(s) kept
   gc kept 0 chunk(s), reclaimed 0
 --- tree
@@ -137,7 +142,9 @@
 --- backend
   chunk 911faba7321fe1a0-a3cf92cbf55153da size=3
   chunk 96f2525771fa4677-9f336e0164d34b2e size=22
-  journal <entry-1> = put new.txt 22
+  cursor = <entry-2>
+  journal <entry-1> = put foo.txt 3
+  journal <entry-2> = put new.txt 22
   file foo.txt [.tsync-root/b306717ed3feaa3f-615fce859cf8a12f] = manifest size=3 chunks=1 h1=927288390658e64d h2=b8b5ebbd37156bca
     chunk#0 911faba7321fe1a0-a3cf92cbf55153da size=3
   file new.txt [.tsync-root/b59935cd14669343-aa862ad44c39f8b1] = manifest size=22 chunks=1 h1=face442f19fc3045 h2=a0912eb2fdaac3c7
@@ -160,6 +167,7 @@
   foo.txt = "read me while collecting"
 --- backend
   chunk c962a0f7838965a4-c11a23e6599db4fb size=24
+  cursor = <entry-1>
   journal <entry-1> = put foo.txt 24
   file foo.txt [.tsync-root/b306717ed3feaa3f-615fce859cf8a12f] = manifest size=24 chunks=1 h1=2573ad0005264c36 h2=b08b364ef0c5e59e
     chunk#0 c962a0f7838965a4-c11a23e6599db4fb size=24
@@ -172,7 +180,7 @@
   expire all
   gc (mark only)
   evict foo.txt
-  expire all -> 1 version(s), 2 journal entr(ies)
+  expire all -> 1 version(s), 1 journal entr(ies)
   gc marked 1 root(s), 1 chunk(s) kept
 --- tree
   f foo.txt size=7 cached=0/1 uploaded=true etag=46316ec1c85082b9
@@ -181,7 +189,9 @@
 --- backend
   chunk(going) 911faba7321fe1a0-a3cf92cbf55153da size=3
   chunk 3ab8997bc73098ac-74d584d55f333769 size=7
+  cursor = <entry-1>
   collecting: closing
+  journal <entry-1> = put foo.txt 7
   file foo.txt [.tsync-root/b306717ed3feaa3f-615fce859cf8a12f] = manifest size=7 chunks=1 h1=46316ec1c85082b9 h2=8f37316767529460
     chunk#0 3ab8997bc73098ac-74d584d55f333769 size=7
 
@@ -194,7 +204,7 @@
   gc (mark only)
   gc --abort
   evict foo.txt
-  expire all -> 1 version(s), 2 journal entr(ies)
+  expire all -> 1 version(s), 1 journal entr(ies)
   gc marked 1 root(s), 1 chunk(s) kept
   gc abandoned, 1 chunk(s) moved back
 --- tree
@@ -204,6 +214,8 @@
 --- backend
   chunk 3ab8997bc73098ac-74d584d55f333769 size=7
   chunk 911faba7321fe1a0-a3cf92cbf55153da size=3
+  cursor = <entry-1>
+  journal <entry-1> = put foo.txt 7
   file foo.txt [.tsync-root/b306717ed3feaa3f-615fce859cf8a12f] = manifest size=7 chunks=1 h1=46316ec1c85082b9 h2=8f37316767529460
     chunk#0 3ab8997bc73098ac-74d584d55f333769 size=7
 

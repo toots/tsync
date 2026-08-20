@@ -16,6 +16,7 @@
   chunk 1808e40d6723f646-e7bf74a2eb7a5a23 size=8
   chunk 1ba95805d6ae106a-87537fcfd250fddb size=8
   chunk b759bff1a75c54a7-53cd28ced10cf0e3 size=8
+  cursor = <entry-1>
   journal <entry-1> = put big.txt 24
   file big.txt [.tsync-root/04e776271d85dfc0-0127ed186e2930a6] = manifest size=24 chunks=3 h1=1294bbe85c2f380b h2=4db8b5a354576e8e
     chunk#0 1808e40d6723f646-e7bf74a2eb7a5a23 size=8
@@ -42,6 +43,7 @@
   chunk 1808e40d6723f646-e7bf74a2eb7a5a23 size=8
   chunk 1ba95805d6ae106a-87537fcfd250fddb size=8
   chunk b759bff1a75c54a7-53cd28ced10cf0e3 size=8
+  cursor = <entry-1>
   journal <entry-1> = put cover.txt 24
   file cover.txt [.tsync-root/1a3e675dae8f22c9-023c1a35b0ecd352] = manifest size=24 chunks=3 h1=1294bbe85c2f380b h2=4db8b5a354576e8e
     chunk#0 1808e40d6723f646-e7bf74a2eb7a5a23 size=8
@@ -66,6 +68,7 @@
   chunk 1808e40d6723f646-e7bf74a2eb7a5a23 size=8
   chunk 1ba95805d6ae106a-87537fcfd250fddb size=8
   chunk b759bff1a75c54a7-53cd28ced10cf0e3 size=8
+  cursor = <entry-1>
   journal <entry-1> = put tail.txt 24
   file tail.txt [.tsync-root/2eaea5d53a840305-e3205d6d2424d9db] = manifest size=24 chunks=3 h1=1294bbe85c2f380b h2=4db8b5a354576e8e
     chunk#0 1808e40d6723f646-e7bf74a2eb7a5a23 size=8
@@ -88,6 +91,7 @@
   chunk 1808e40d6723f646-e7bf74a2eb7a5a23 size=8
   chunk 1ba95805d6ae106a-87537fcfd250fddb size=8
   chunk b759bff1a75c54a7-53cd28ced10cf0e3 size=8
+  cursor = <entry-1>
   journal <entry-1> = put span.txt 24
   file span.txt [.tsync-root/2cc860e1ece8e534-e495d528774c098c] = manifest size=24 chunks=3 h1=1294bbe85c2f380b h2=4db8b5a354576e8e
     chunk#0 1808e40d6723f646-e7bf74a2eb7a5a23 size=8
@@ -111,6 +115,7 @@
   chunk 1808e40d6723f646-e7bf74a2eb7a5a23 size=8
   chunk 1ba95805d6ae106a-87537fcfd250fddb size=8
   chunk b759bff1a75c54a7-53cd28ced10cf0e3 size=8
+  cursor = <entry-1>
   journal <entry-1> = put edit.txt 24
   file edit.txt [.tsync-root/997b913b09e424ad-cd66dfb8418deaa0] = manifest size=24 chunks=3 h1=1294bbe85c2f380b h2=4db8b5a354576e8e
     chunk#0 1808e40d6723f646-e7bf74a2eb7a5a23 size=8
@@ -131,6 +136,7 @@
   grow.txt = "01234567\000\000\000\000\000\000\000\000\000\000\000\000\000\000\000\000"
 --- backend
   chunk 1808e40d6723f646-e7bf74a2eb7a5a23 size=8
+  cursor = <entry-1>
   journal <entry-1> = put grow.txt 8
   file grow.txt [.tsync-root/4b4935f2bac532c5-7041cc2cafde9c73] = manifest size=8 chunks=1 h1=e9ca20cb6c2712df h2=d5a10ca81bb5d659
     chunk#0 1808e40d6723f646-e7bf74a2eb7a5a23 size=8

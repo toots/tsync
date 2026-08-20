@@ -4,7 +4,7 @@
   write foo.txt "two two"
   drain
   expire all
-  expire all -> 1 version(s), 2 journal entr(ies)
+  expire all -> 1 version(s), 1 journal entr(ies)
 --- tree
   f foo.txt size=7 cached=0/1 uploaded=true etag=46316ec1c85082b9
 --- content
@@ -12,6 +12,8 @@
 --- backend
   chunk 3ab8997bc73098ac-74d584d55f333769 size=7
   chunk 911faba7321fe1a0-a3cf92cbf55153da size=3
+  cursor = <entry-1>
+  journal <entry-1> = put foo.txt 7
   file foo.txt [.tsync-root/b306717ed3feaa3f-615fce859cf8a12f] = manifest size=7 chunks=1 h1=46316ec1c85082b9 h2=8f37316767529460
     chunk#0 3ab8997bc73098ac-74d584d55f333769 size=7
 
@@ -47,6 +49,7 @@
   chunk 3ab8997bc73098ac-74d584d55f333769 size=7
   chunk 911faba7321fe1a0-a3cf92cbf55153da size=3
   chunk faf60158c5948cd2-60f690e9588d51bd size=17
+  cursor = <entry-1>
   journal <entry-1> = put foo.txt 17
   file foo.txt [.tsync-root/b306717ed3feaa3f-615fce859cf8a12f] = manifest size=17 chunks=1 h1=bc4fe9e67f44fd6f h2=6fd12d97f02740c8
     chunk#0 faf60158c5948cd2-60f690e9588d51bd size=17
@@ -125,6 +128,7 @@
   keep.txt = "still here"
 --- backend
   chunk 999b4f949ab5a43d-7058a91e43596e2e size=10
+  cursor = <entry-1>
   journal <entry-1> = put keep.txt 10
   file keep.txt [.tsync-root/18954525e207201b-dcfdae3db302a2bd] = manifest size=10 chunks=1 h1=865fa1ed62985da6 h2=ebd72358b57d9f23
     chunk#0 999b4f949ab5a43d-7058a91e43596e2e size=10
@@ -143,6 +147,7 @@
 --- backend
   chunk 3ab8997bc73098ac-74d584d55f333769 size=7
   chunk 911faba7321fe1a0-a3cf92cbf55153da size=3
+  cursor = <entry-2>
   journal <entry-1> = put foo.txt 3
   journal <entry-2> = put foo.txt 7
   file foo.txt [.tsync-root/b306717ed3feaa3f-615fce859cf8a12f] = manifest size=7 chunks=1 h1=46316ec1c85082b9 h2=8f37316767529460

@@ -105,6 +105,7 @@
 --- backend
   chunk 3e43a8f49a428d13-fe0ef22b3a6614b2 size=12
   chunk cbfce414fed46927-30ae70c4d0cb32ce size=11
+  cursor = <entry-2>
   journal <entry-1> = put cached.bin 12
   journal <entry-2> = put evicted.bin 11
   file evicted.bin [.tsync-root/40bb953b4fce2d6c-ec6c97db817fa9bb] = manifest size=11 chunks=1 h1=a1e40b6869044988 h2=a5ae6a63f89fceb0
@@ -126,6 +127,7 @@
   file.bin = "modified locally"
 --- backend
   chunk 3ec7a63f2d48ce00-16e5e4870c3ecb65 size=8
+  cursor = <entry-1>
   journal <entry-1> = put file.bin 8
   file file.bin [.tsync-root/5364ca580b2eed57-b0140ab2eda14287] = manifest size=8 chunks=1 h1=729d9a46451cef89 h2=fb57958fd54e4e59
     chunk#0 3ec7a63f2d48ce00-16e5e4870c3ecb65 size=8

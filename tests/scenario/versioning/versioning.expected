@@ -13,6 +13,7 @@
   chunk 3ab8997bc73098ac-74d584d55f333769 size=7
   chunk 911faba7321fe1a0-a3cf92cbf55153da size=3
   chunk faf60158c5948cd2-60f690e9588d51bd size=17
+  cursor = <entry-3>
   journal <entry-1> = put foo.txt 3
   journal <entry-2> = put foo.txt 7
   journal <entry-3> = put foo.txt 17

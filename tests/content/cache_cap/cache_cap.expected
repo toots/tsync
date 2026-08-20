@@ -44,6 +44,7 @@
   chunk 1cfa5c47cb2f402e-c44f3339ad38b68a size=8
   chunk 304cf5ff4443b25a-986de89e32d20631 size=8
   chunk c9dbc05573cd5d9a-1ae64e03afa5a78e size=8
+  cursor = <entry-3>
   journal <entry-1> = put a.txt 8
   journal <entry-2> = put b.txt 8
   journal <entry-3> = put c.txt 8
@@ -77,6 +78,7 @@
   z.txt = "zzzzzzzz"
 --- backend
   chunk 4267e87c9cb0bc97-3ffc27d07b585304 size=8
+  cursor = <entry-1>
   journal <entry-1> = put x.txt 8
   file x.txt [.tsync-root/fecd6e94d21b3dc7-d6d12967f4c00d3d] = manifest size=8 chunks=1 h1=c000da6ed59e60d5 h2=f16a0981a4898b6a
     chunk#0 4267e87c9cb0bc97-3ffc27d07b585304 size=8
