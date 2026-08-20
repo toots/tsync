@@ -328,6 +328,20 @@
   (action
    (diff http_proxy_test.expected http_proxy_test.output))))
 
+(subdir frontends/passive_domain
+ (alias
+  (name default)
+  (deps passive_domain.exe))
+ (rule
+  (alias runtest)
+  (target passive_domain.output)
+  (action
+   (with-stdout-to passive_domain.output (ignore-stderr (run ./passive_domain.exe)))))
+ (rule
+  (alias runtest)
+  (action
+   (diff passive_domain.expected passive_domain.output))))
+
 (subdir frontends/preview
  (rule
   (alias runtest)
