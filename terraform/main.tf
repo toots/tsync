@@ -79,8 +79,7 @@ module "store" {
   iam_user_name         = each.value.iam_user_name
   custom_domain         = each.value.custom_domain
   manage_lifecycle      = each.value.manage_lifecycle
-  share_expiry_days     = each.value.share_expiry_days
-  archive_after_days    = each.value.archive_after_days
+  archive_domains       = each.value.archive_domains
   extra_lifecycle_rules = each.value.extra_lifecycle_rules
   presign_ttl           = each.value.presign_ttl
   lambda_memory_mb      = each.value.lambda_memory_mb
@@ -111,18 +110,17 @@ module "store_gcs" {
   source   = "./modules/store-gcs"
   for_each = var.gcs_stores
 
-  name               = each.key
-  bucket             = each.value.bucket
-  create_bucket      = each.value.create_bucket
-  location           = coalesce(each.value.location, var.gcp_region)
-  function_region    = coalesce(each.value.function_region, var.gcp_function_region)
-  custom_domain      = each.value.custom_domain
-  manage_lifecycle   = each.value.manage_lifecycle
-  share_expiry_days  = each.value.share_expiry_days
-  archive_after_days = each.value.archive_after_days
-  presign_ttl        = each.value.presign_ttl
-  memory_mb          = each.value.memory_mb
-  max_share_bytes    = each.value.max_share_bytes
+  name             = each.key
+  bucket           = each.value.bucket
+  create_bucket    = each.value.create_bucket
+  location         = coalesce(each.value.location, var.gcp_region)
+  function_region  = coalesce(each.value.function_region, var.gcp_function_region)
+  custom_domain    = each.value.custom_domain
+  manage_lifecycle = each.value.manage_lifecycle
+  archive_domains  = each.value.archive_domains
+  presign_ttl      = each.value.presign_ttl
+  memory_mb        = each.value.memory_mb
+  max_share_bytes  = each.value.max_share_bytes
 
   project                = var.gcp_project
   verify_timeout_seconds = each.value.verify_timeout_seconds

@@ -112,9 +112,9 @@ gcs_stores = {
     bucket        = "$BUCKET"
     create_bucket = $CREATE_BUCKET
 
-    # Opt-in: transition ALL objects to the ARCHIVE (cold) storage class after
-    # this many days.
-    # archive_after_days = 30
+    # Opt-in: transition one domain's chunks to the ARCHIVE (cold) storage
+    # class after N days. Keyed by tsync domain name; nothing else is archived.
+    # archive_domains = { "My Domain" = { after_days = 30 } }
   }
 }
 EOF

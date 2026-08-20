@@ -23,19 +23,65 @@ variable "iam_user_name" {
 variable "manage_lifecycle" {
   type        = bool
   default     = true
-  description = "Manage the bucket lifecycle config. False = leave it untouched (add your own shares-prefix expiry)."
+  description = "Manage the bucket lifecycle config. aws_s3_bucket_lifecycle_configuration owns it entirely, so this REPLACES any rules already on the bucket. False = leave it untouched, and nothing aborts abandoned multipart uploads."
 }
 
-variable "share_expiry_days" {
-  type        = number
-  default     = 30
-  description = "Days before share manifests + cached artifacts are deleted. Keep >= longest `tsync share --expires`, and below archive_after_days if that's set — otherwise share caches could transition to GLACIER_IR before they're deleted."
-}
+variable "archive_domains" {
+  type = map(object({
+    after_days    = number
+    storage_class = optional(string)
+  }))
+  default     = {}
+  description = <<-EOT
+    Cold-storage transition per tsync domain, keyed by domain name: chunks under
+    tsync/<domain>/chunks/ move to storage_class after after_days. Off by
+    default, and it reaches nothing else — manifests, versions, the journal, the
+    cursor and tsync/shares/ are read far too often to archive.
 
-variable "archive_after_days" {
-  type        = number
-  default     = null
-  description = "When set, transition ALL objects to the GLACIER_IR (cold, instant-retrieval) storage class after this many days. Opt-in per store; left null (off) by default. Keep above share_expiry_days — shares are deleted, not meant to archive."
+    The domain has to be named because it sits in the middle of a chunk key and
+    an S3 rule filter holds one literal prefix: no wildcard spans domains, and a
+    domain left out simply never archives.
+
+    storage_class defaults to GLACIER_IR (cold, instant retrieval).
+  EOT
+
+  # Deliberately only "not a path": a domain name is free-form and may well
+  # carry spaces and capitals, so anything stricter would reject real domains.
+  validation {
+    condition     = alltrue([for domain in keys(var.archive_domains) : domain != "" && !strcontains(domain, "/")])
+    error_message = "archive_domains keys are tsync domain names, not paths: a key with a slash would silently retarget the prefix."
+  }
+
+  # Siblings of the domain folders under tsync/, not domains. Naming one builds
+  # a prefix like "tsync/shares/chunks/" that matches nothing, silently.
+  validation {
+    condition     = length(setintersection(keys(var.archive_domains), ["shares", "corrupted", "verify-jobs", "gc-jobs"])) == 0
+    error_message = "archive_domains: shares, corrupted, verify-jobs and gc-jobs are store-level prefixes, not domains."
+  }
+
+  validation {
+    condition     = alltrue([for cfg in values(var.archive_domains) : cfg.after_days > 0])
+    error_message = "archive_domains after_days must be positive."
+  }
+
+  validation {
+    condition = alltrue([
+      for cfg in values(var.archive_domains) : cfg.storage_class == null || contains(
+        ["STANDARD_IA", "ONEZONE_IA", "INTELLIGENT_TIERING", "GLACIER_IR", "GLACIER", "DEEP_ARCHIVE"],
+      cfg.storage_class)
+    ])
+    error_message = "archive_domains storage_class must be one of STANDARD_IA, ONEZONE_IA, INTELLIGENT_TIERING, GLACIER_IR, GLACIER, DEEP_ARCHIVE."
+  }
+
+  # AWS rejects the whole configuration if either IA class is asked for sooner.
+  validation {
+    condition = alltrue([
+      for cfg in values(var.archive_domains) :
+      cfg.after_days >= 30
+      if contains(["STANDARD_IA", "ONEZONE_IA"], coalesce(cfg.storage_class, "GLACIER_IR"))
+    ])
+    error_message = "archive_domains: STANDARD_IA and ONEZONE_IA require after_days >= 30."
+  }
 }
 
 variable "extra_lifecycle_rules" {
@@ -49,7 +95,7 @@ variable "extra_lifecycle_rules" {
     })), [])
   }))
   default     = []
-  description = "Existing bucket lifecycle rules to preserve alongside the shares rule."
+  description = "Existing bucket lifecycle rules to preserve alongside the module's own."
 }
 
 variable "presign_ttl" {

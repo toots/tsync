@@ -1,49 +1,199 @@
 # tsync stores (Terraform)
 
-Single point of entry for provisioning tsync S3 storage. Each **store** is:
+Single point of entry for provisioning the cloud storage behind a tsync domain, on
+**AWS (S3)** or **Google Cloud (GCS)**.
 
-- an **S3 bucket** (created, or an existing one you point at),
-- an **IAM user + access key** scoped to that bucket, for the tsync client
-  (`accessKeyId` / `secretAccessKey` in your config),
-- the **share Lambda** behind a public Function URL that serves `tsync share`
-  download links (assembles the file, or zips the folder, on first request and
-  caches the result),
-- a **lifecycle rule** that expires cached share artifacts,
-- the **verify function**, triggered by the bucket's own object-created
-  notification, which holds each stored chunk against its own name and also
-  carries out the deletes a `tsync gc` hands it (see below).
+The two are equal citizens: same capabilities, same options, same outputs. Pick one
+per store, or run both.
 
-You can provision **several stores** — for multiple domains or redundant storage —
-from one `stores` map.
+A **store** is one bucket and everything that has to exist around it:
+
+- the **bucket** — created and locked down, or an existing one you point at;
+- **client credentials** scoped to that bucket, for the tsync daemon (an IAM user +
+  access key on AWS, a service-account key on GCP);
+- a **share endpoint** on a public URL, serving `tsync share` links — a folder is
+  zipped on first request, then cached, so a repeat download is immediate;
+- **automatic data-integrity checking** of everything the store holds, and the
+  server-side deletes `tsync gc` asks for;
+- a **lifecycle rule set** that cleans up abandoned uploads and, if you ask for it,
+  moves a domain's chunks to cold storage.
+
+Provision **several stores** — for several domains, or for redundant copies of one —
+by adding entries to the `stores` (S3) or `gcs_stores` (GCS) map.
+
+---
+
+## Contents
+
+- [Quick start](#quick-start)
+- [A complete store](#a-complete-store)
+  - [S3](#s3)
+  - [GCS](#gcs)
+  - [Store options](#store-options)
+- [Wiring a store into tsync](#wiring-a-store-into-tsync)
+- [Share links](#share-links)
+  - [A vanity domain for share links](#a-vanity-domain-for-share-links)
+- [Cold storage (`archive_domains`)](#cold-storage-archive_domains)
+  - [Why you have to name the domains](#why-you-have-to-name-the-domains)
+  - [What it costs](#what-it-costs)
+- [Working with an existing bucket](#working-with-an-existing-bucket)
+  - [Option A — carry rules in `extra_lifecycle_rules` (recommended)](#option-a--carry-rules-in-extra_lifecycle_rules-recommended)
+  - [Option B — manage lifecycle yourself](#option-b--manage-lifecycle-yourself)
+- [Data integrity, and server-side deletes](#data-integrity-and-server-side-deletes)
+  - [When a delete is outstanding](#when-a-delete-is-outstanding)
+  - [If you wire the trigger yourself](#if-you-wire-the-trigger-yourself)
+- [Remote state](#remote-state)
+  - [S3](#s3-2)
+  - [GCS](#gcs-2)
+  - [Credentials are in Terraform state](#credentials-are-in-terraform-state)
+- [Multi-region](#multi-region)
+- [The function source](#the-function-source)
+
+---
 
 ## Quick start
 
-Interactive setup — asks which cloud (S3 or GCS), defines your first store in
-`terraform.tfvars`, creates the bucket that holds Terraform state, activates the
-matching backend, and runs `terraform init` against it:
+Interactive setup — asks which cloud, defines your first store in `terraform.tfvars`,
+creates the bucket that holds Terraform state, activates the matching backend, and
+runs `terraform init` against it:
 
 ```
 ./init.sh
 terraform apply
 ```
 
-Then wire each store into the matching tsync domain. The easy path is
-`tsync config --edit`: edit the s3 or gcs domain, choose **Sync from Terraform**, and
-it pulls the values from `terraform output` (or `tofu output`, whichever of the two
-is installed) and writes them onto the backend — for
-s3 `bucket`/`region`/`accessKeyId`/`secretAccessKey`/`shareUrl`, for gcs
-`bucket`/`serviceAccountKey`/`shareUrl`. Nothing Terraform-specific is stored in
-the config.
+Then wire the store into a tsync domain. The easy path is `tsync config --edit`: edit
+the s3 or gcs domain and choose **Sync from Terraform**.
 
-To wire it by hand instead, read the outputs:
+That pulls the values from `terraform output` (or `tofu output`, whichever you have
+installed) and writes them onto the backend. Nothing Terraform-specific ends up in
+your tsync config.
+
+---
+
+## A complete store
+
+Each block below is a whole `terraform.tfvars`. The two clouds take the same shape —
+a map of stores, keyed by a short logical name — and differ only in the top-level
+settings and a handful of per-store options.
+
+### S3
+
+```hcl
+region = "us-east-1"
+
+stores = {
+  # Map key = short logical name. It suffixes IAM and Lambda resource names, so
+  # keep it short and unique — it is not the tsync domain name.
+  files = {
+    bucket = "my-tsync-files"
+  }
+
+  media = {
+    bucket = "my-tsync-media"
+
+    # Serve share links from a vanity host instead of the raw Lambda URL.
+    custom_domain = "tsync.example.org"
+
+    # Move this domain's chunks to cold storage. Keyed by tsync DOMAIN name.
+    archive_domains = {
+      "Movies" = { after_days = 60 }
+      "Photos" = { after_days = 180, storage_class = "DEEP_ARCHIVE" }
+    }
+  }
+
+  # Point at a pre-existing bucket instead of creating one. Terraform reads it and
+  # leaves its access settings alone — but still owns its lifecycle unless told
+  # otherwise, so see "Working with an existing bucket" below.
+  legacy = {
+    bucket        = "already-there"
+    create_bucket = false
+
+    extra_lifecycle_rules = [{
+      id          = "glacier-ir"
+      transitions = [{ days = 30, storage_class = "GLACIER_IR" }]
+    }]
+  }
+}
+```
+
+### GCS
+
+```hcl
+gcp_project         = "my-gcp-project"
+gcp_region          = "us-east1"
+gcp_function_region = "us-east1" # must be a region, not a multi-region like US
+
+gcs_stores = {
+  files = {
+    bucket = "my-tsync-files"
+  }
+
+  media = {
+    bucket = "my-tsync-media"
+
+    custom_domain = "share.example.org"
+
+    archive_domains = {
+      "Jellyfin Media" = { after_days = 60 }
+      "Files"          = { after_days = 30, storage_class = "NEARLINE" }
+    }
+  }
+
+  legacy = {
+    bucket        = "already-there"
+    create_bucket = false
+  }
+}
+```
+
+GCS uses native OAuth (a service-account key), not S3 interop.
+
+`gcs_stores` has no `extra_lifecycle_rules` — on GCS, lifecycle is only ever managed
+on a bucket the module created.
+
+### Store options
+
+`bucket` is the only required one; everything else has a default. These work on both
+clouds:
+
+| Option | Default | |
+| --- | --- | --- |
+| `bucket` | — | required |
+| `create_bucket` | `true` | false = use a bucket that already exists |
+| `custom_domain` | none | vanity host for share links |
+| `archive_domains` | `{}` | per-domain cold storage |
+| `manage_lifecycle` | `true` | false = don't touch the bucket's lifecycle at all |
+| `presign_ttl` | `600` | lifetime (s) of a signed download URL |
+| `verify_timeout_seconds` | `120` | stall guard on an integrity check |
+| `verify_memory_mb` | `512` | memory for one integrity check |
+
+S3 only: `iam_user_name`, `extra_lifecycle_rules`, `lambda_memory_mb`,
+`ephemeral_storage_mb`, `manage_notifications`, `verify_max_concurrency`.
+
+GCS only: `location`, `function_region`, `memory_mb`, `max_share_bytes`,
+`verify_max_instances`.
+
+---
+
+## Wiring a store into tsync
+
+`tsync config --edit` → **Sync from Terraform** does this for you. By hand, read the
+outputs:
 
 ```
 terraform output stores
 terraform output -json secret_access_keys | jq -r '.["files"]'
 ```
 
-and set those fields on the store's s3 backend, including `shareUrl` (the
-`share_url`) to enable sharing for that bucket:
+```
+terraform output gcs_stores
+terraform output -json gcs_service_account_keys | jq -r '.["files"]'
+```
+
+and set them on the domain's backend — for s3
+`bucket`/`region`/`accessKeyId`/`secretAccessKey`/`shareUrl`, for gcs
+`bucket`/`serviceAccountKey`/`shareUrl`:
 
 ```json
 {
@@ -58,107 +208,45 @@ and set those fields on the store's s3 backend, including `shareUrl` (the
 ```
 
 `shareUrl` lives on the **backend**, not the domain: `tsync share` uses the first
-backend that has one, and writes the share manifest to that bucket. With several
-s3 backends (redundant storage), put `shareUrl` only on the one whose Lambda
-should serve shares.
+backend that has one, and writes the share manifest to that bucket.
 
-## Defining stores
+With several backends (redundant storage), put `shareUrl` only on the one whose
+function should serve shares.
 
-`terraform.tfvars`:
+There is nothing else to set on the client.
 
-```hcl
-region = "us-east-1"
+---
 
-stores = {
-  # key = short logical name; suffixes IAM/Lambda resource names.
-  files = {
-    bucket = "my-tsync-files"
-  }
+## Share links
 
-  # Another domain, and/or a redundant bucket — just add entries.
-  media = {
-    bucket = "my-tsync-media"
-  }
+`tsync share` publishes a link to a file or a folder. There is nothing to configure
+here — every store serves them out of the box.
 
-  # Point at a pre-existing bucket instead of creating one.
-  legacy = {
-    bucket        = "already-there"
-    create_bucket = false
-  }
-}
-```
+Each link carries **its own expiration**, set per share when it is created and
+enforced on every request. Nothing in the bucket expires them on a shared clock, so
+`--expires` means what it says.
 
-Per-store options (`bucket` required): `create_bucket` (default true),
-`iam_user_name` (default `tsync-client-<key>`), `manage_lifecycle` (default true),
-`share_expiry_days` (default 30), `archive_after_days` (see below),
-`extra_lifecycle_rules` (see below), `custom_domain` (see below), plus
-`presign_ttl`, `lambda_memory_mb`, `ephemeral_storage_mb`.
+The link is guarded only by the unguessable token in it. To revoke one early, delete
+its manifest object under `tsync/shares/`.
 
-Shares live under a single fixed prefix, `tsync/shares/` (domain-independent — a
-share manifest records its own domain in its body). The module hardcodes it to
-match the daemon, so there's nothing to configure: it's what the Lambda serves,
-what the write IAM is scoped to, and what the lifecycle rule expires.
+A share is refused with a 413 above `max_share_bytes` — 10 GiB by default, for a
+single file or a whole folder alike — and the build has to finish within 15 minutes.
 
-When `create_bucket = true` the bucket is locked down (public access blocked,
-TLS-only bucket policy). When `false`, Terraform only reads the bucket and leaves
-its access settings alone.
+On GCS a folder zip is assembled in memory, so it is bounded by the function's
+`memory_mb` (2 GB by default) well before that ceiling. Raise the two together.
 
-## The verify function, and chunk deletes
-
-One function serves three kinds of object, told apart by the key alone, because
-one notification is all a bucket gets: S3 rejects overlapping prefix filters, so
-the filter says `tsync/` and the code decides what it was handed.
-
-- a **chunk** is hashed and, if it is not what its name says, a marker is filed
-  under `tsync/corrupted/<domain>/`;
-- a **sweep request** under `tsync/verify-jobs/<domain>/<shard>`, written by
-  `tsync data-integrity --verify`, checks a whole shard;
-- a **delete request** under `tsync/gc-jobs/<domain>/<run>/<shard>`, written by
-  `tsync gc`, drops the chunks it names and the markers accusing them.
-
-The third is why the function's role can delete chunks. That grant is the
-ceiling on how wrong a malformed request can go, so it is as narrow as each
-cloud allows — `tsync/*/chunks/*` on AWS; on GCS an IAM condition, which offers
-no wildcard, matched with `extract` on the same shape. Narrower still is the
-function's own check: a request may only name keys under its *own* domain's
-chunk prefix, and anything else is logged and left alone.
-
-A request is deleted last and only when every key went, so a partial or failed
-run leaves it in the bucket. `tsync gc --status` lists what is outstanding.
-Nothing retries on its own — GCS runs the function with `DO_NOT_RETRY` and the
-Lambda has no dead-letter queue — so an outstanding request means a copy holding
-chunks nothing references, which is wasted space rather than lost data.
-
-Two things to keep in mind if you manage the bucket yourself:
-
-- with `manage_notifications = false` (AWS) the trigger is yours to wire, and it
-  must cover `tsync/gc-jobs/` as well as chunks and sweep requests. A collection
-  hands its deletes to any s3 or gcs copy, so a trigger that misses that prefix
-  leaves requests nobody consumes — `tsync gc --status` lists them and `tsync gc
-  --retry-jobs` re-delivers once it is wired;
-- no lifecycle rule you add through `extra_lifecycle_rules` may expire anything
-  under `tsync/gc-jobs/`: a request is the record of a delete that has been
-  promised and not yet made.
-
-`deploy_share = false` deploys the verification half alone -- the verifier, its
-trigger and the client credentials, with no share function and no public
-endpoint. That is what `terraform/ci/` uses to give the conformance suite
-something real to trigger without standing up an unauthenticated URL over a
-test bucket.
-
-There is nothing to set on the client: an s3 or gcs bucket is assumed to carry
-the function that made it, the same assumption `verified` already rests on.
-
-## Custom domain (optional)
+### A vanity domain for share links
 
 By default share links use the raw function URL. Set `custom_domain` on a store to
-serve them from a vanity host instead (`https://tsync.example.org/<token>`); the
-store's `share_url` output then points at the domain. Stores without
-`custom_domain` are unchanged — no extra infrastructure, cert, or DNS needed. DNS
-is not managed here (works with any provider — Route 53, Cloudflare, a registrar);
-you add the records by hand.
+serve them from your own host instead (`https://tsync.example.org/<token>`); that
+store's `share_url` output then points at the domain.
 
-### S3
+Stores without `custom_domain` are unchanged — no extra infrastructure, cert, or DNS.
+
+DNS is never managed here. Any provider works — Route 53, Cloudflare, a registrar —
+and you add the records by hand.
+
+#### S3
 
 ```hcl
 stores = {
@@ -169,9 +257,10 @@ stores = {
 }
 ```
 
-This provisions an API Gateway HTTP API + a regional ACM cert in front of the
-Lambda. You add two `CNAME` records by hand. Create the cert first so apply never
-hangs waiting on validation:
+This provisions an API Gateway HTTP API + a regional ACM cert in front of the Lambda,
+and needs two `CNAME` records from you.
+
+Create the cert first, so apply never hangs waiting on validation:
 
 ```
 # 1. Create just the ACM cert (adjust the store key).
@@ -181,215 +270,131 @@ terraform apply -target='module.store["files"].aws_acm_certificate.share[0]'
 terraform output -json custom_domain_dns
 ```
 
-Add the `acm_validation` record as a CNAME, then run the full `terraform apply`.
-It waits for ACM to issue the cert (usually a minute or two once the record
-resolves) and completes.
+Add the `acm_validation` record as a CNAME, then run the full `terraform apply`. It
+waits for ACM to issue the cert — usually a minute or two once the record resolves.
 
-Once apply completes, add a second CNAME from your domain (`tsync.example.org`)
-to the `cname_target` in `terraform output -json custom_domain_dns`.
 
-On Cloudflare, set both CNAMEs to **DNS only** (grey cloud) — a proxied record
-hides the CNAME and ACM validation / routing won't work.
+Once apply completes, add a second CNAME from your domain (`tsync.example.org`) to the
+`cname_target` in `terraform output -json custom_domain_dns`.
 
-Then copy the store's `share_url` into your s3 backend's `shareUrl`.
+On Cloudflare, set both CNAMEs to **DNS only** (grey cloud) — a proxied record hides
+the CNAME and ACM validation / routing won't work.
 
-### GCS
+#### GCS
 
 ```hcl
 gcs_stores = {
   media = {
-    bucket        = "tsync-media"
+    bucket        = "my-tsync-media"
     custom_domain = "share.example.org"
   }
 }
 ```
 
-This maps the domain onto the share Cloud Function's Cloud Run service, which
-serves it and renews its own cert — no load balancer, so no hourly forwarding-rule
-charge. Two things it does not do: path routing, CDN and Cloud Armor are not
-available, and domain mapping is offered only in a subset of Cloud Run regions.
+This maps the domain onto the share Cloud Function's Cloud Run service, which serves
+it and renews its own cert — no load balancer, so no hourly forwarding-rule charge.
 
-The parent domain must be verified for the deploying account **before** `apply`,
-or the mapping is rejected:
+Two things it does not do: path routing, and CDN / Cloud Armor. Domain mapping is also
+offered only in a subset of Cloud Run regions.
+
+The parent domain must be verified for the deploying account **before** apply, or the
+mapping is rejected:
 
 ```
 gcloud domains verify example.org
 ```
 
-Then publish whatever Cloud Run asks for — a `CNAME` for a subdomain, `A`/`AAAA`
-sets for an apex:
+Then publish whatever Cloud Run asks for — a `CNAME` for a subdomain, `A`/`AAAA` sets
+for an apex:
 
 ```
 terraform apply
 terraform output -json gcs_custom_domain_dns   # { "media": { domain, records } }
 ```
 
-`records` stays empty until the mapping leaves `PENDING`; re-run `terraform
-refresh` if the first apply returns nothing. `apply` does not block on the cert —
-it provisions on its own once DNS resolves (~15–60 min). Check status with:
+`records` stays empty until the mapping leaves `PENDING`; re-run `terraform refresh` if
+the first apply returns nothing.
+
+Apply does not block on the cert — it provisions on its own once DNS resolves
+(~15–60 min). Check status with:
 
 ```
 gcloud beta run domain-mappings describe --domain=share.example.org --region=<region>
 ```
 
-On Cloudflare, set the records to **DNS only** (grey cloud). Then copy the
-store's `share_url` into your gcs backend's `shareUrl`.
+On Cloudflare, set the records to **DNS only** (grey cloud).
 
-## Remote state
+---
 
-State lives in a remote bucket — **either** S3 **or** GCS, whichever cloud you're
-on. The two are independent alternatives (a config may have only one backend
-block); pick one, and it's unrelated to which *store* backends you provision. The
-repo ships both as `backend-*.tf.example`; you activate exactly one. Because the
-state bucket must exist first, a tiny `bootstrap-*` config creates it, keeping its
-own state locally.
+## Cold storage (`archive_domains`)
 
-Follow the section for your cloud — neither assumes you did the other. `init.sh`
-automates whichever one you pick.
-
-### S3
-
-```
-# 1. Activate the S3 backend.
-mv backend-s3.tf.example backend-s3.tf
-
-# 2. Create the state bucket (versioned, encrypted, private).
-terraform -chdir=bootstrap-s3 init
-terraform -chdir=bootstrap-s3 apply -var state_bucket=my-tsync-tfstate -var region=us-east-1
-
-# 3. Point the main config at it and initialize.
-cp backend-s3.hcl.example backend.hcl   # then edit bucket/region
-terraform init -backend-config=backend.hcl
-```
-
-Locking uses S3 natively (`use_lockfile`, Terraform ≥ 1.10) — no DynamoDB table.
-
-### GCS
-
-```
-# 1. Activate the GCS backend.
-mv backend-gcs.tf.example backend-gcs.tf
-
-# 2. Create the state bucket (versioned, uniform access, private).
-terraform -chdir=bootstrap-gcs init
-terraform -chdir=bootstrap-gcs apply -var project=my-gcp-project -var location=US -var state_bucket=my-tsync-tfstate
-
-# 3. Point the main config at it and initialize.
-cp backend-gcs.hcl.example backend.hcl  # then edit bucket
-terraform init -backend-config=backend.hcl
-```
-
-The gcs backend locks state on its own (via the object's generation) — no lock
-table needed.
-
-`backend.hcl` and the activated `backend-*.tf` are git-ignored so your choice
-stays local; only the `.example` templates are committed. If you'd rather not use
-remote state at all, don't activate either — `terraform init` uses local state.
-
-## Credentials are in Terraform state
-
-The client credentials are generated by Terraform, so the secrets live in your
-state: S3 access keys for s3 stores, service-account JSON keys for GCS stores.
-Keep state in the remote bucket (see Remote state above) — encrypted for S3,
-private/UBLA for GCS — treat that bucket as sensitive and restrict access to it.
-Rotate a key by replacing it:
-`terraform apply -replace='module.store["files"].aws_iam_access_key.client'`
-(or `module.store_gcs["files"].google_service_account_key.client` for GCS).
-
-## Multi-region
-
-All stores use `var.region`. S3 bucket region comes from the provider, so buckets
-in **different** regions need a provider per region. Add an aliased provider and a
-second module call (or a second root/workspace). Sketch:
+Both `stores` and `gcs_stores` take `archive_domains`, a map keyed by **tsync domain
+name**. Each entry moves that domain's chunks — its file data — to a cold storage
+class once they are `after_days` old:
 
 ```hcl
-provider "aws" { alias = "eu", region = "eu-west-1" }
-
-module "store_eu" {
-  source    = "./modules/store-s3"
-  providers = { aws = aws.eu }
-  name      = "files-eu"
-  bucket    = "my-tsync-files-eu"
-  # ...same inputs as a stores entry...
-  lambda_zip      = data.archive_file.handler.output_path
-  lambda_zip_hash = data.archive_file.handler.output_base64sha256
+archive_domains = {
+  "Movies" = { after_days = 60 }
+  "Photos" = { after_days = 180, storage_class = "DEEP_ARCHIVE" }
 }
 ```
 
-(Same-region redundant buckets are just extra `stores` entries — no provider
-needed.)
+`storage_class` defaults per cloud: `GLACIER_IR` on S3, `ARCHIVE` on GCS. An empty
+`archive_domains` (the default) transitions nothing. Keys are domain names exactly as
+the daemon spells them — capitals and spaces included, so quote them.
 
-## Bucket lifecycle
+### Why you have to name the domains
 
-Each store installs one rule that expires everything under `tsync/shares/`
-after `share_expiry_days` (default 30), so cached artifacts and their manifests
-don't accumulate. Keep `share_expiry_days` **≥ the longest `tsync share --expires`
-you hand out** — expiring a manifest revokes its link, so a short lifecycle window
-kills links that should still be live.
+Only chunks are archived. The bookkeeping a store keeps beside them is read on every
+sync and stays in the standard class, so archiving is never all-or-nothing.
 
-### Cold storage (`archive_after_days`)
+Telling the two apart takes the domain name, and neither cloud offers a wildcard that
+would let one rule stand for every domain — hence the map.
 
-Both `stores` (S3) and `gcs_stores` (GCS) take an opt-in `archive_after_days`,
-`null` (off) by default. When set, it transitions **every** object in the
-bucket — including `tsync/shares/` — to a cold storage class after N days:
-`GLACIER_IR` on S3, `ARCHIVE` on GCS.
+A domain you don't list is never archived. A name that doesn't match a real domain
+does nothing at all: no error, no effect. Check it against your tsync config.
 
-```hcl
-stores = {
-  media = {
-    bucket             = "my-tsync-media"
-    archive_after_days = 60
-  }
-}
+### What it costs
 
-gcs_stores = {
-  media = {
-    bucket             = "tsync-media"
-    archive_after_days = 60
-  }
-}
-```
+`tsync gc` deletes chunks, and a chunk deleted before its class's **minimum storage
+duration** is billed for the unused remainder anyway: 30 days for `STANDARD_IA` /
+`NEARLINE`, 90 for `GLACIER_IR` / `COLDLINE`, **365 for `ARCHIVE`**.
 
-Shares are meant to be deleted, not archived — so **keep `archive_after_days`
-strictly greater than `share_expiry_days`**. That ordering is your
-responsibility; the module doesn't enforce it, and the two clouds fail
-differently if you get it backwards:
+Archive a domain that churns and those early-deletion charges can outweigh what the
+cold class saves. Pick the class for how long chunks actually live, not just for how
+cold you want them.
 
-- **S3** rejects the whole lifecycle config at apply time: it requires a
-  transition's `days` to be strictly less than any expiration on the same
-  object, so `archive_after_days <= share_expiry_days` is a hard error.
-- **GCS** applies Delete over SetStorageClass whenever both match the same
-  object at the same age, so `archive_after_days == share_expiry_days` silently
-  never archives shares (harmless but pointless). Set it *below*
-  `share_expiry_days` and shares really would reach the cold class before
-  deletion — but `ARCHIVE` carries a 365-day minimum storage duration, so
-  anything deleted sooner incurs an early-deletion charge for the unused
-  remainder.
+Two smaller edges: S3 will not transition an object under 128 KiB at all, so a small
+file's only chunk stays hot; and `STANDARD_IA` / `ONEZONE_IA` reject `after_days` below
+30, which the module catches at plan time.
 
-For anything beyond a single flat cutoff on S3 (a different storage class,
-scoping to one prefix, tiering through multiple classes) use
-`extra_lifecycle_rules` instead — see below.
+Rule counts: S3 allows 1000 lifecycle rules per bucket, GCS 100 — one per domain, plus
+the abort rule, plus any `extra_lifecycle_rules`.
 
-### Why you have to care about existing rules
+---
 
-AWS models bucket lifecycle as a **single** object
-(`aws_s3_bucket_lifecycle_configuration`) that owns *all* rules on the bucket —
-there is no per-rule resource. So when a store manages lifecycle, `terraform apply`
-**replaces** whatever lifecycle that bucket already had (relevant mainly for
-`create_bucket = false`). Any rule you don't carry over is silently dropped.
+## Working with an existing bucket
 
-Check a pre-existing bucket before your first apply:
+`create_bucket = false` adopts a bucket instead of creating one. Terraform reads it and
+leaves its access settings alone.
+
+On AWS it does still take over the bucket's **lifecycle**, and there is no partial
+version of that: `terraform apply` **replaces** whatever lifecycle the bucket already
+had, and any rule you don't carry over is silently dropped.
+
+Check before your first apply:
 
 ```
 aws s3api get-bucket-lifecycle-configuration --bucket YOUR_BUCKET
 ```
 
-If that returns rules, use one of the two options below.
+If that returns rules, use one of the two options below. GCS is unaffected — an
+adopted bucket's lifecycle is never touched there.
 
 ### Option A — carry rules in `extra_lifecycle_rules` (recommended)
 
 List the bucket's current rules in the store entry and the module emits them
-**alongside** its shares-expiry rule, so nothing is lost:
+**alongside** its own, so nothing is lost:
 
 ```hcl
 stores = {
@@ -442,44 +447,189 @@ extra_lifecycle_rules = [
 ]
 ```
 
-**Interaction with the shares rule.** A whole-bucket (empty-prefix) rule like the
-Glacier one above *also* matches the `tsync/shares/` cache objects. Usually
-harmless — Glacier IR objects are still downloaded instantly — but two edges are
-worth knowing:
+**Interaction with the module's own rules.** A whole-bucket (empty-prefix) rule like
+the Glacier one above sweeps up a store's bookkeeping and its share cache too —
+precisely what `archive_domains` is careful to leave in the standard class.
 
-- Glacier IR bills a 90-day minimum storage duration. Since share caches are
-  deleted at `share_expiry_days` (30 by default), any that got transitioned incur
-  an early-deletion charge for the unused ~60 days. Small, but not zero.
-- To keep short-lived shares in Standard, give your transition rule a `prefix` that
-  doesn't cover `tsync/shares/` (as in the scoped example), or raise
-  `share_expiry_days` past 90.
+If chunks are what you want archived, reach for `archive_domains`. Use a whole-bucket
+transition only when you really do mean everything, and price the minimum storage
+duration against how fast `tsync gc` turns chunks over.
 
-Rule ordering doesn't matter to S3 — each rule is evaluated independently. Just
-keep every `id` unique.
+Nothing you add here may expire anything under `tsync/gc-jobs/`: a request there is the
+record of a delete that has been promised and not yet made.
+
+Rule ordering doesn't matter to S3 — each rule is evaluated independently. Just keep
+every `id` unique, and clear of the module's own (`tsync-abort-incomplete`,
+`tsync-archive-<domain>`).
 
 ### Option B — manage lifecycle yourself
 
-Set `manage_lifecycle = false` on the store and the module won't touch that
-bucket's lifecycle at all (no clobber, no shares-expiry rule). You then own it
-entirely — remember to add your own rule expiring `tsync/shares/`, or share caches
-pile up forever. Useful when lifecycle is managed by a separate stack, an SCP, or
-by hand.
+Set `manage_lifecycle = false` and the module won't touch that bucket's lifecycle at
+all — no clobber, and none of its own rules.
 
-## Notes
+You then own it entirely: nothing aborts abandoned uploads and nothing archives
+anything unless you write the rules. There is no shares-expiry rule to reproduce —
+a link's expiration is enforced per share, not by a bucket rule.
 
-- **Auth**: each Function URL is public. The unguessable manifest id in the URL is
-  the only gate; delete the share manifest object (under `tsync/shares/`) to
-  revoke a link.
-- **Limits**: folder zips build in `/tmp` (10 GB) within the 900 s Lambda timeout;
-  single files cap at ~80 GB (10,000 multipart parts).
+Useful when lifecycle is managed by a separate stack, an SCP, or by hand.
 
-## The share Lambda
+---
 
-The Lambda source lives at the repo top level in [`../lambda/`](../lambda/); this
-config packages and deploys it. Test it locally from the repo root:
+## Data integrity, and server-side deletes
+
+Every store deploys a verify function that the bucket triggers itself. Two things
+come out of it, and neither needs anything set on the client.
+
+**Chunks are checked automatically as they are written.** Corruption is caught in the
+store rather than on some later read, and `tsync data-integrity` reports and repairs
+what was found. The same command can ask for a full re-check of everything already
+there.
+
+**`tsync gc` deletes happen in the cloud.** Collection decides what is unreferenced
+on the client, but the removal runs next to the data. The function can only ever
+delete chunks, and only in the domain that asked.
+
+No chunk leaves the region to be checked.
+
+### When a delete is outstanding
+
+A delete request is cleared only once every chunk it names is gone, so a partial or
+failed run leaves it behind. Nothing retries on its own.
+
+`tsync gc --status` lists what is outstanding, and `tsync gc --retry-jobs`
+re-delivers it.
+
+An outstanding request means a copy is still holding chunks nothing references —
+wasted space rather than lost data.
+
+### If you wire the trigger yourself
+
+With `manage_notifications = false` (AWS) the notification is yours to set up, and it
+has to cover deletes as well as chunk writes.
+
+A collection hands its work to any s3 or gcs copy, so a trigger that misses
+`tsync/gc-jobs/` leaves requests nobody consumes.
+
+For the same reason, no lifecycle rule may expire anything under `tsync/gc-jobs/`: a
+request there is a delete that has been promised and not yet made.
+
+A store can also be deployed with `deploy_share = false`: this half alone, with no
+share endpoint and no public URL. That is a module-level option rather than a
+`tfvars` one — `terraform/ci/` uses it, so the conformance suite has something real
+to trigger without an unauthenticated URL over a test bucket.
+
+---
+
+## Remote state
+
+State lives in a remote bucket — **either** S3 **or** GCS, whichever cloud you're on.
+The two are independent alternatives, and unrelated to which *store* backends you
+provision.
+
+The repo ships both as `backend-*.tf.example`; you activate exactly one.
+
+Because the state bucket must exist first, a tiny `bootstrap-*` config creates it,
+keeping its own state locally.
+
+`init.sh` automates whichever one you pick. By hand:
+
+### S3
+
+```
+# 1. Activate the S3 backend.
+mv backend-s3.tf.example backend-s3.tf
+
+# 2. Create the state bucket (versioned, encrypted, private).
+terraform -chdir=bootstrap-s3 init
+terraform -chdir=bootstrap-s3 apply -var state_bucket=my-tsync-tfstate -var region=us-east-1
+
+# 3. Point the main config at it and initialize.
+cp backend-s3.hcl.example backend.hcl   # then edit bucket/region
+terraform init -backend-config=backend.hcl
+```
+
+Locking uses S3 natively (`use_lockfile`, Terraform ≥ 1.10) — no DynamoDB table.
+
+### GCS
+
+```
+# 1. Activate the GCS backend.
+mv backend-gcs.tf.example backend-gcs.tf
+
+# 2. Create the state bucket (versioned, uniform access, private).
+terraform -chdir=bootstrap-gcs init
+terraform -chdir=bootstrap-gcs apply -var project=my-gcp-project -var location=US -var state_bucket=my-tsync-tfstate
+
+# 3. Point the main config at it and initialize.
+cp backend-gcs.hcl.example backend.hcl  # then edit bucket
+terraform init -backend-config=backend.hcl
+```
+
+The gcs backend locks state on its own (via the object's generation) — no lock table
+needed.
+
+`backend.hcl` and the activated `backend-*.tf` are git-ignored so your choice stays
+local; only the `.example` templates are committed.
+
+If you'd rather not use remote state at all, don't activate either — `terraform init`
+uses local state.
+
+### Credentials are in Terraform state
+
+The client credentials are generated by Terraform, so the secrets live in your state:
+S3 access keys for s3 stores, service-account JSON keys for GCS stores.
+
+Keep state in the remote bucket above — encrypted for S3, private/UBLA for GCS. Treat
+that bucket as sensitive and restrict access to it.
+
+Rotate a key by replacing it:
+
+```
+terraform apply -replace='module.store["files"].aws_iam_access_key.client'
+terraform apply -replace='module.store_gcs["files"].google_service_account_key.client'
+```
+
+---
+
+## Multi-region
+
+All S3 stores use `var.region`. Bucket region comes from the provider, so buckets in
+**different** regions need a provider per region.
+
+Add an aliased provider and a second module call, or a second root/workspace. Sketch:
+
+```hcl
+provider "aws" { alias = "eu", region = "eu-west-1" }
+
+module "store_eu" {
+  source    = "./modules/store-s3"
+  providers = { aws = aws.eu }
+  name      = "files-eu"
+  bucket    = "my-tsync-files-eu"
+  # ...same inputs as a stores entry...
+  lambda_zip      = data.archive_file.handler.output_path
+  lambda_zip_hash = data.archive_file.handler.output_base64sha256
+}
+```
+
+Same-region redundant buckets are just extra `stores` entries — no provider needed. On
+GCS, `location` is per store, so nothing special is required.
+
+---
+
+## The function source
+
+Both functions live at the repo top level in [`../lambda/`](../lambda/); this config
+packages and deploys them. One zip serves both clouds and both roles — the entry
+point and a `STORE` environment variable pick which.
+
+Test them locally from the repo root:
 
 ```
 python3 -m venv .venv && . .venv/bin/activate
 pip install boto3 moto pytest
 pytest lambda/test_handler.py
 ```
+
+The GCS-side tests (`test_store_gcs.py`, `test_verify_gcs.py`) additionally need
+`google-cloud-storage`.

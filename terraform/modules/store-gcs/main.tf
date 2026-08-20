@@ -14,18 +14,6 @@ resource "google_storage_bucket" "store" {
   uniform_bucket_level_access = true
   public_access_prevention    = "enforced"
 
-  # Expire cached share artifacts + their manifests.
-  dynamic "lifecycle_rule" {
-    for_each = var.manage_lifecycle ? [1] : []
-    content {
-      condition {
-        age            = var.share_expiry_days
-        matches_prefix = [local.shares_prefix]
-      }
-      action { type = "Delete" }
-    }
-  }
-
   # Abort dangling resumable uploads.
   dynamic "lifecycle_rule" {
     for_each = var.manage_lifecycle ? [1] : []
@@ -35,18 +23,23 @@ resource "google_storage_bucket" "store" {
     }
   }
 
-  # Opt-in cold-storage transition for ALL objects (the "glacier" ask), including
-  # the shares prefix — GCS applies Delete over SetStorageClass at equal age, so
-  # keep archive_after_days > share_expiry_days (the operator's responsibility;
-  # not enforced here) if shares should never actually reach ARCHIVE. Off by
-  # default; the operator sets archive_after_days per store.
+  # One rule per archived domain, over that domain's chunks and nothing else. A
+  # chunk is "tsync/<domain>/chunks/<shard>/<key>" — the domain sits in the
+  # middle, so no wildcard spans domains and a domain nobody named never
+  # archives. matches_prefix takes a list, but each domain carries its own age,
+  # so they cannot be collapsed into one rule. Everything outside these prefixes
+  # stays STANDARD: manifests, versions, the journal and the cursor are read on
+  # every sync, and shares are the application's to expire.
   dynamic "lifecycle_rule" {
-    for_each = var.archive_after_days == null ? [] : [var.archive_after_days]
+    for_each = { for domain, cfg in var.archive_domains : domain => cfg if var.manage_lifecycle }
     content {
-      condition { age = lifecycle_rule.value }
+      condition {
+        age            = lifecycle_rule.value.after_days
+        matches_prefix = ["tsync/${lifecycle_rule.key}/chunks/"]
+      }
       action {
         type          = "SetStorageClass"
-        storage_class = "ARCHIVE"
+        storage_class = coalesce(lifecycle_rule.value.storage_class, "ARCHIVE")
       }
     }
   }
@@ -61,11 +54,13 @@ locals {
   bucket_name = var.create_bucket ? google_storage_bucket.store[0].name : data.google_storage_bucket.store[0].name
   # Fixed, domain-independent shares root (matches Conf_parsing.shares_prefix in
   # the daemon). Share manifests + cached artifacts live under tsync/shares/.
+  # This is the write scope for the share function and nothing else: a share
+  # carries its own expiration, granted per link, and no rule here expires them.
   shares_prefix = "tsync/shares/"
 
-  # A store deployed without the share function has nothing serving links and no
-  # artifacts to expire; a CI stack wants the verification half alone, not a
-  # public endpoint over its bucket.
+  # A store deployed without the share function has nothing serving links and
+  # nothing writing cached artifacts; a CI stack wants the verification half
+  # alone, not a public endpoint over its bucket.
   share_enabled = var.deploy_share ? 1 : 0
 }
 

@@ -33,19 +33,60 @@ variable "custom_domain" {
 variable "manage_lifecycle" {
   type        = bool
   default     = true
-  description = "Manage the bucket lifecycle (shares-prefix expiry). Only applies when create_bucket = true — GCS lifecycle is a property of the bucket, not a separate resource."
+  description = "Manage the bucket lifecycle (abandoned-upload cleanup + archive_domains). Only applies when create_bucket = true — GCS lifecycle is a property of the bucket, not a separate resource."
 }
 
-variable "share_expiry_days" {
-  type        = number
-  default     = 30
-  description = "Days before share manifests + cached artifacts are deleted. Keep >= longest `tsync share --expires`, and below archive_after_days if that's set — otherwise share caches could transition to ARCHIVE before they're deleted."
-}
+variable "archive_domains" {
+  type = map(object({
+    after_days    = number
+    storage_class = optional(string)
+  }))
+  default     = {}
+  description = <<-EOT
+    Cold-storage transition per tsync domain, keyed by domain name: chunks under
+    tsync/<domain>/chunks/ move to storage_class after after_days. Off by
+    default, and it reaches nothing else — manifests, versions, the journal, the
+    cursor and tsync/shares/ are read far too often to archive.
 
-variable "archive_after_days" {
-  type        = number
-  default     = null
-  description = "When set, transition ALL objects to the ARCHIVE (cold) storage class after this many days. Opt-in per store; left null (off) by default. Only applies when create_bucket = true. Keep above share_expiry_days — shares are deleted, not meant to archive."
+    The domain has to be named because it sits in the middle of a chunk key and
+    matches_prefix holds literal prefixes: no wildcard spans domains, and a
+    domain left out simply never archives.
+
+    storage_class defaults to ARCHIVE. Only applies when create_bucket = true.
+  EOT
+
+  # Deliberately only "not a path": a domain name is free-form and may well
+  # carry spaces and capitals, so anything stricter would reject real domains.
+  validation {
+    condition     = alltrue([for domain in keys(var.archive_domains) : domain != "" && !strcontains(domain, "/")])
+    error_message = "archive_domains keys are tsync domain names, not paths: a key with a slash would silently retarget the prefix."
+  }
+
+  # Siblings of the domain folders under tsync/, not domains. Naming one builds
+  # a prefix like "tsync/shares/chunks/" that matches nothing, silently.
+  validation {
+    condition     = length(setintersection(keys(var.archive_domains), ["shares", "corrupted", "verify-jobs", "gc-jobs"])) == 0
+    error_message = "archive_domains: shares, corrupted, verify-jobs and gc-jobs are store-level prefixes, not domains."
+  }
+
+  validation {
+    condition     = alltrue([for cfg in values(var.archive_domains) : cfg.after_days > 0])
+    error_message = "archive_domains after_days must be positive."
+  }
+
+  validation {
+    condition = alltrue([
+      for cfg in values(var.archive_domains) : cfg.storage_class == null || contains(
+      ["NEARLINE", "COLDLINE", "ARCHIVE"], cfg.storage_class)
+    ])
+    error_message = "archive_domains storage_class must be one of NEARLINE, COLDLINE, ARCHIVE."
+  }
+
+  # A bucket takes 100 lifecycle rules; the abort rule is one of them.
+  validation {
+    condition     = length(var.archive_domains) <= 99
+    error_message = "archive_domains: a GCS bucket accepts at most 100 lifecycle rules."
+  }
 }
 
 variable "presign_ttl" {

@@ -2,11 +2,13 @@ locals {
   iam_user_name = coalesce(var.iam_user_name, "tsync-client-${var.name}")
   # Fixed, domain-independent shares root (matches Conf_parsing.shares_prefix in
   # the daemon). Share manifests + cached artifacts live under tsync/shares/.
+  # This is the write scope for the share function and nothing else: a share
+  # carries its own expiration, granted per link, and no rule here expires them.
   shares_prefix = "tsync/shares/"
 
-  # A store deployed without the share function has nothing serving links and no
-  # artifacts to expire; a CI stack wants the verification half alone, not a
-  # public endpoint over its bucket.
+  # A store deployed without the share function has nothing serving links and
+  # nothing writing cached artifacts; a CI stack wants the verification half
+  # alone, not a public endpoint over its bucket.
   share_enabled = var.deploy_share ? 1 : 0
 }
 
@@ -197,45 +199,50 @@ resource "aws_lambda_permission" "url" {
 # configuration, so this replaces any rules already on the bucket. Declare
 # existing rules in extra_lifecycle_rules to keep them, or set
 # manage_lifecycle = false to leave the bucket's lifecycle untouched.
-resource "aws_s3_bucket_lifecycle_configuration" "shares" {
+
+moved {
+  from = aws_s3_bucket_lifecycle_configuration.shares
+  to   = aws_s3_bucket_lifecycle_configuration.store
+}
+
+resource "aws_s3_bucket_lifecycle_configuration" "store" {
   count  = var.manage_lifecycle ? 1 : 0
   bucket = local.bucket_id
 
-  # Expire cached share artifacts + their manifests.
+  # Abort dangling multipart uploads anywhere in the bucket — a chunk write that
+  # died mid-flight bills for its parts until something reaps them. Unconditional,
+  # which is also what keeps the configuration from ever being empty: S3 rejects
+  # one with no rules, and every other rule here is opt-in.
   rule {
-    id     = "tsync-shares-expiry"
+    id     = "tsync-abort-incomplete"
     status = "Enabled"
 
-    filter {
-      prefix = local.shares_prefix
-    }
-
-    expiration {
-      days = var.share_expiry_days
-    }
+    filter {}
 
     abort_incomplete_multipart_upload {
       days_after_initiation = 1
     }
   }
 
-  # Opt-in cold-storage transition for ALL objects (the "glacier" ask), including
-  # the shares prefix — AWS requires a transition's days be strictly less than any
-  # expiration on the same object, so keep archive_after_days > share_expiry_days
-  # (the operator's responsibility; not enforced here) if shares should never
-  # actually reach GLACIER_IR. Off by default; the operator sets archive_after_days
-  # per store.
+  # One rule per archived domain, over that domain's chunks and nothing else. A
+  # chunk is "tsync/<domain>/chunks/<shard>/<key>" — the domain sits in the
+  # middle, and a rule filter holds one literal prefix, so each domain needs its
+  # own rule and a domain nobody named never archives. Everything outside these
+  # prefixes stays in STANDARD: manifests, versions, the journal and the cursor
+  # are read on every sync, and shares are the application's to expire.
   dynamic "rule" {
-    for_each = var.archive_after_days == null ? [] : [var.archive_after_days]
+    for_each = var.archive_domains
     content {
-      id     = "tsync-archive"
+      id     = "tsync-archive-${rule.key}"
       status = "Enabled"
 
-      filter {}
+      filter {
+        prefix = "tsync/${rule.key}/chunks/"
+      }
 
       transition {
-        days          = rule.value
-        storage_class = "GLACIER_IR"
+        days          = rule.value.after_days
+        storage_class = coalesce(rule.value.storage_class, "GLACIER_IR")
       }
     }
   }
