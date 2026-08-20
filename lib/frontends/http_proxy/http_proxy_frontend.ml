@@ -579,6 +579,39 @@ let status_json ~port ~tls ~totals ~exact ~reload routes =
        ()
     @ [("domains", `List domains)])
 
+(* [tsync status] reaches every frontend over its own socket and merges the
+   answers by socket path, so this reports for the listener and its domains and
+   nothing else. Same report the HTTP endpoints render. *)
+let ipc_handler ~port ~tls routes line =
+  let reply fields =
+    Lwt.return (Yojson.Safe.to_string (`Assoc fields), `Continue)
+  in
+  match Yojson.Safe.from_string line with
+    | exception _ ->
+        reply [("ok", `Bool false); ("error", `String "invalid JSON")]
+    | `Assoc obj -> (
+        let arg =
+          match List.assoc_opt "arg" obj with Some (`String s) -> s | _ -> ""
+        in
+        let asked name = List.mem name (String.split_on_char ',' arg) in
+        match List.assoc_opt "action" obj with
+          | Some (`String "stats") ->
+              let exact = asked "exact" in
+              let totals = exact || asked "totals" in
+              let reload = totals && asked "reload" in
+              let* report =
+                status_json ~port ~tls ~totals ~exact ~reload routes
+              in
+              let fields = match report with `Assoc f -> f | _ -> [] in
+              reply (("ok", `Bool true) :: fields)
+          | Some (`String a) ->
+              reply
+                [
+                  ("ok", `Bool false); ("error", `String ("unknown action " ^ a));
+                ]
+          | _ -> reply [("ok", `Bool false); ("error", `String "no action")])
+    | _ -> reply [("ok", `Bool false); ("error", `String "invalid request")]
+
 (* Listener-wide, not domain-scoped, so any secret signing for this listener
    authorizes it: there is no key to route on. Text and JSON render the same
    collection, so a browser, [curl] and [tsync status] cannot disagree. *)
@@ -799,11 +832,16 @@ let start bindings =
        | Some n -> Frontend.size_blocking_pool ~concurrency:n
        | None -> ());
      effective_max_concurrent := Some max_concurrent;
+     let socket_path = Runtime.proxy_socket_path (Runtime.default_paths ()) in
+     Log.debug "starting IPC server at %s" socket_path;
+     Lwt.async (fun () ->
+         Ipc.serve ~path:socket_path (ipc_handler ~port ~tls routes));
      let* () =
        Cohttp_lwt_unix.Server.create ~stop ~mode
          (Cohttp_lwt_unix.Server.make ~callback:(callback ~port ~tls routes) ())
      in
      Log.info "http-proxy stopping, letting backends catch up";
+     (try Unix.unlink socket_path with _ -> ());
      Backend.drain ())
 
 let spec =

@@ -358,6 +358,17 @@ let () =
          ~reload status_routes)
   in
   let r = report () in
+  (* Taken here, beside [r], so nothing counted in between can explain a
+     difference: what [tsync status] reads over IPC has to be the collection the
+     HTTP endpoints render, or the two surfaces drift. *)
+  let ipc line =
+    let reply, _ =
+      Lwt_main.run
+        (Http_proxy_frontend.ipc_handler ~port:8443 ~tls:true status_routes line)
+    in
+    Yojson.Safe.from_string reply
+  in
+  let ipc_stats = ipc {|{"action":"stats"}|} in
   List.iter
     (fun key -> assert (json_member key r <> `Null))
     ["server"; "process"; "lwt"; "traffic"; "recentErrors"; "domains"];
@@ -581,6 +592,17 @@ let () =
      is the review of both. The JSON keeps raw counts; only the text spells
      sizes for a person. *)
   let stable = substitute ~values:stable_values r in
+  print_endline "########## ipc stats ##########";
+  Printf.printf "ok: %s\n" (Yojson.Safe.to_string (json_member "ok" ipc_stats));
+  Printf.printf "same collection as /api/v1/stats: %b\n"
+    (match ipc_stats with
+      | `Assoc f ->
+          substitute ~values:stable_values (`Assoc (List.remove_assoc "ok" f))
+          = stable
+      | _ -> false);
+  List.iter
+    (fun line -> print_endline (Yojson.Safe.to_string (ipc line)))
+    ["not json"; {|{"action":"nope"}|}; "{}"];
   print_endline "########## /api/v1/stats ##########";
   print_endline (Yojson.Safe.pretty_to_string stable);
   print_endline "########## /stats ##########";
