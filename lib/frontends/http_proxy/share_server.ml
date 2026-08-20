@@ -53,8 +53,15 @@ let served_bytes = Metrics.counter ()
    domain. *)
 let read_slots_max = 16
 
-let read_slots =
-  Lwt_bounded.create ~name:"share reads" ~max:read_slots_max ~max_waiting:256 ()
+(* No [max_waiting]: a refusal here would raise once the response's status and
+   content-length are already on the wire, which a client reads as a corrupt
+   file rather than as backpressure. Waiting is the only answer this layer can
+   give honestly.
+
+   ponytail: the queue is then bounded only by how many responses are open at
+   once, which nothing caps — bound admission in [callback] if a proxy is ever
+   exposed to a load that reaches it. *)
+let read_slots = Lwt_bounded.create ~name:"share reads" ~max:read_slots_max ()
 
 (* Embedded from the files the share Lambda loads at runtime, so the table and
    the browser UI have one definition across both deployments. *)
