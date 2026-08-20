@@ -83,9 +83,12 @@ module type S = sig
 
   (** Delete staged bodies no staged manifest names — what a crash between
       staging a body and writing its manifest leaves behind — and prune the
-      empty directories left in the staged manifest tree. Part of
-      {!Replay.reconcile}: run at startup, never while writes may be staging, or
-      it can collect a body a write is about to use. *)
+      empty directories left in the staged manifest tree.
+
+      Once per machine, before anything serves the domain. A body is judged an
+      orphan by the absence of a manifest naming it, which is also what a body
+      being staged right now looks like, so a second process running this
+      collects bytes a live write is about to use. *)
   val reclaim_staged_orphans : unit -> unit Lwt.t
 
   (** Keep the chunk store under [C.max_cache]; never touches staged data. *)

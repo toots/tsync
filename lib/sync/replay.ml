@@ -148,9 +148,6 @@ module Make (C : Conf.S) (F : File_ops.S) = struct
       keys
 
   let reconcile () =
-    (* Before the replays: they are the first thing that can stage a body, and a
-       body created after this point may not yet be named by a manifest. *)
-    let* () = F.reclaim_staged_orphans () in
     let* records = W.list () in
     if records <> [] then
       Log.info "reconciling %d unfinished record(s)" (List.length records);

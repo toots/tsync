@@ -160,7 +160,7 @@ let () =
        (Printf.sprintf "rm -rf %s && mkdir -p %s %s %s" root store_dir cache_dir
           data_dir));
   Lwt_main.run
-    (let* () = Mf.init () in
+    (let* () = Mf.ensure_root () in
      let* () = build_fixture () in
 
      let* _ = show "file share: whole file" ~token:"aa" ~sub:"" () in

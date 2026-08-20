@@ -202,8 +202,16 @@ module Make (C : Conf.S) : sig
   (** Remove empty directories left in the staged manifest tree. *)
   val prune_staged_dirs : unit -> unit Lwt.t
 
-  (** Whether the mirror exists, i.e. this domain has a local cache. *)
+  (** Create the mirror root. Every process serving the domain needs this and
+      nothing more. *)
+  val ensure_root : unit -> unit Lwt.t
 
-  (** Create the mirror root and drop leftover temp files. *)
-  val init : unit -> unit Lwt.t
+  (** That, and drop the temp files a crash left behind.
+
+      Once per machine, before anything serves. A temp name embeds the pid that
+      made it, but the recogniser does not read it back and could not usefully:
+      what matters is whether some process is still writing, not which one. So a
+      second process running this unlinks the first one's temp file, and its
+      rename then fails ENOENT. *)
+  val reap_leftovers : unit -> unit Lwt.t
 end

@@ -183,7 +183,7 @@ let () =
        (Printf.sprintf "rm -rf %s && mkdir -p %s %s %s" root store_dir cache_dir
           data_dir));
   Lwt_main.run
-    (let* () = Mf.init () in
+    (let* () = Mf.ensure_root () in
      let* () = publish () in
      let* () = show "published" in
 
@@ -325,7 +325,7 @@ let () =
         in one cache file. Two things change: a write stages the whole group
         rather than the chunk it touches, and promotion writes that group out of
         the staged bodies instead of leaving it to be fetched. *)
-     let* () = Gm.init () in
+     let* () = Gm.ensure_root () in
      let* () = gpublish () in
      let* () = gshow "grouped: published" in
 
