@@ -682,6 +682,12 @@ let callback ~port ~tls routes _conn req body =
   let uri = Cohttp.Request.uri req in
   match share_request routes uri with
     | Some (handle, token, sub) ->
+        (* ponytail: matched before the gate, so how many share responses are
+           open at once is the public's to choose. What each one holds is bounded
+           — {!Share_server.read_slots} caps the blocks in flight — but the
+           responses themselves are not. Bound admission here if a proxy is ever
+           exposed to a load that reaches it; the memo at {!Share_server} and a
+           folder zip's member list are what run out first. *)
         bump "share";
         handle ~token ~sub ~query:(Uri.get_query_param uri)
           ~range:(Cohttp.Header.get (Cohttp.Request.headers req) "range")
