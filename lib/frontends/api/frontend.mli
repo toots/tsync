@@ -26,11 +26,19 @@ type topology = [ `One_process | `Process_per_binding ]
     fresh. *)
 type served = { binding : binding; domain : (module Domain_engine.Domain) }
 
+(** Which socket this frontend answers requests on, or [None] for one that
+    answers none. Whether a kind is per domain or shared across them is the
+    platform's answer rather than this one's — see
+    {!Runtime.domain_socket_path}, which returns one path per domain on Linux
+    and the same path for every domain on macOS. *)
+type socket = [ `Domain_socket | `Proxy_socket ]
+
 module type S = sig
   (** Whether every byte of [key] is on this machine, for [tsync ls]. *)
   val is_local : Conf.locality -> string -> bool
 
   val topology : topology
+  val listens : socket option
 
   (** Serve everything handed to this process. Blocks until shutdown. *)
   val start : served list -> unit

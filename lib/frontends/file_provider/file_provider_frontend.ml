@@ -158,5 +158,6 @@ let register () =
     (module struct
       let is_local = is_local
       let topology = `One_process
+      let listens = Some `Domain_socket
       let start = start
     end : Frontend.S)

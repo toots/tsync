@@ -360,24 +360,31 @@ let domain_targets () =
   match (load_config ()).Conf_parsing.domains with
     | [] -> failwith "no domains configured"
     | domains ->
-        let mounts =
-          List.map
-            (fun (d : Conf_parsing.domain) ->
-              ( d.Conf_parsing.name,
-                Runtime.domain_socket_path runtime_paths d.Conf_parsing.name ))
-            domains
-        in
-        (* Once for the listener, whatever it serves: it answers for all its
-           domains at once, and a second ask would only be merged away. *)
-        let has_proxy (d : Conf_parsing.domain) =
-          List.exists
-            (fun (f : Conf_parsing.frontend_config) ->
-              f.Conf_parsing.frontend_type = "http-proxy")
-            d.Conf_parsing.frontends
-        in
-        if List.exists has_proxy domains then
-          mounts @ [("http-proxy", Runtime.proxy_socket_path runtime_paths)]
-        else mounts
+        (* Asked of each configured frontend rather than assumed: a domain served
+           only by a listener has no socket of its own, and knocking on one
+           nothing binds reports a daemon down that was never up. Frontends
+           sharing a path answer the same one and collapse. *)
+        List.concat_map
+          (fun (d : Conf_parsing.domain) ->
+            List.filter_map
+              (fun (f : Conf_parsing.frontend_config) ->
+                match Frontend.find f.Conf_parsing.frontend_type with
+                  | None -> None
+                  | Some (module F : Frontend.S) -> (
+                      match F.listens with
+                        | None -> None
+                        | Some `Domain_socket ->
+                            Some
+                              ( d.Conf_parsing.name,
+                                Runtime.domain_socket_path runtime_paths
+                                  d.Conf_parsing.name )
+                        | Some `Proxy_socket ->
+                            Some
+                              ( f.Conf_parsing.frontend_type,
+                                Runtime.proxy_socket_path runtime_paths )))
+              d.Conf_parsing.frontends)
+          domains
+        |> List.sort_uniq compare
 
 let load_conf ?domain () = make_conf ?domain (load_config ())
 

@@ -6,11 +6,13 @@ type binding = {
 
 type topology = [ `One_process | `Process_per_binding ]
 type served = { binding : binding; domain : (module Domain_engine.Domain) }
+type socket = [ `Domain_socket | `Proxy_socket ]
 
 module type S = sig
   (* Whether every byte of [key] is on this machine, for `tsync ls`. *)
   val is_local : Conf.locality -> string -> bool
   val topology : topology
+  val listens : socket option
 
   (* Blocks until shutdown. *)
   val start : served list -> unit
