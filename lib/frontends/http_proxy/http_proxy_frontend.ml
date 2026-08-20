@@ -2,8 +2,10 @@ open Lwt.Syntax
 
 let implementation = "http-proxy"
 
-(* Nothing is locally cached from a proxy's point of view. *)
-let is_local (_ : Conf.locality) _key = false
+(* A share streams out of the domain's chunk cache and a proxy may be the
+   process keeping that domain's mirror, so what is here is the same question it
+   is anywhere else. *)
+let is_local = Manifest.is_local
 
 (* The login page for [/stats]. The report is server-rendered, so the page only
    signs a request and shows what comes back. *)
