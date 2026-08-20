@@ -199,7 +199,8 @@ end
 (* There is nothing to start. Serving a socket here would put a second way to
    reach a domain beside the commands, and the two would answer differently the
    moment one of them grew a feature — so `tsync start' on a domain configured
-   this way says so rather than sitting there. *)
+   this way says so rather than sitting there. The launcher refuses on the
+   topology before it forks, so this is only reached if that check is lost. *)
 let start (_ : Frontend.served list) =
   failwith
     "the android frontend is driven by commands, not by a daemon: see `tsync \
@@ -315,7 +316,7 @@ let register () =
   Frontend.register implementation ~cli_group:"android" ~commands
     (module struct
       let is_local = is_local
-      let topology = `One_process
+      let topology = `Not_a_daemon
       let listens = None
       let start = start
     end : Frontend.S)

@@ -39,6 +39,11 @@ let resolve name =
           (Printf.sprintf
              "frontend %s is configured but not compiled into this binary" name)
 
+(* The frontend's own wording, which knows what to point the user at instead. *)
+let refuse name =
+  let (module F : Frontend.S) = resolve name in
+  F.start []
+
 let run ?(on_leaf = fun ~name:_ -> ()) domains =
   let run_group (name, bindings) =
     let (module F : Frontend.S) = resolve name in
@@ -68,5 +73,14 @@ let run ?(on_leaf = fun ~name:_ -> ()) domains =
       | `One_process -> serve bindings
       | `Process_per_binding ->
           Frontend.run_forked (fun b -> serve [b]) bindings
+      | `Not_a_daemon -> refuse name
   in
-  Frontend.run_forked run_group (bindings_by_frontend domains)
+  let groups = bindings_by_frontend domains in
+  (* Before the first fork: a frontend that cannot be served under the daemon
+     says so while there are no siblings left running behind it. *)
+  List.iter
+    (fun (name, _) ->
+      let (module F : Frontend.S) = resolve name in
+      if F.topology = `Not_a_daemon then refuse name)
+    groups;
+  Frontend.run_forked run_group groups

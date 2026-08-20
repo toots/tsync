@@ -17,8 +17,10 @@ type binding = {
 (** How many processes a frontend needs. Declared, not enacted: the launcher
     does the forking, so one place decides what runs where.
     [`Process_per_binding] is for a frontend whose serving call blocks per
-    domain, as FUSE's mount does. *)
-type topology = [ `One_process | `Process_per_binding ]
+    domain, as FUSE's mount does; [`Not_a_daemon] for one driven by commands
+    rather than by [tsync start], which the launcher refuses before forking
+    anything else. *)
+type topology = [ `One_process | `Process_per_binding | `Not_a_daemon ]
 
 (** A binding with the domain wiring the launcher built for it. The lifecycle
     around that wiring is the launcher's, so there is nothing here to start or
