@@ -113,9 +113,10 @@ let settle_all ?(timeout = default_settle_timeout) () =
 
 module Make (J : JOB) = struct
   module Records = struct
-    type t = { dir : string; mutable seq : int }
+    type t = { dir : string; mutable seq : int; mutable dropped : int }
 
-    let create ~dir = { dir; seq = 0 }
+    let create ~dir = { dir; seq = 0; dropped = 0 }
+    let dropped t = t.dropped
     let path t id = Filename.concat t.dir id
 
     (* Fixed-width microseconds first, so the directory's lexicographic order is
@@ -187,6 +188,7 @@ module Make (J : JOB) = struct
                 | `Job job -> Lwt.return_some (id, job)
                 | `Gone -> Lwt.return_none
                 | `Unreadable ->
+                    t.dropped <- t.dropped + 1;
                     Log.err "durable queue: unreadable record %s, discarding" id;
                     let+ () = complete t id in
                     None
@@ -300,7 +302,9 @@ module Make (J : JOB) = struct
     {
       queued = Queue.length t.jobs;
       in_flight = active_count t;
-      degraded = t.degraded;
+      (* Whoever read the log did the discarding, which need not be the resume
+         below, so the count is asked for here rather than latched there. *)
+      degraded = t.degraded || Records.dropped t.log > 0;
       bytes;
     }
 
@@ -507,6 +511,13 @@ module Make (J : JOB) = struct
     let+ records =
       Records.list ~wanted:(fun id -> not (Hashtbl.mem t.loaded id)) t.log
     in
+    (* A record nothing can replay is a write this target owes and will never
+       make, which only a mirror puts back. *)
+    if Records.dropped t.log > 0 && not t.degraded then begin
+      t.degraded <- true;
+      Log.err "%s: %d unreadable record(s) dropped — it will need tsync mirror"
+        t.name (Records.dropped t.log)
+    end;
     List.iter
       (fun (id, job) ->
         (match t.topo with

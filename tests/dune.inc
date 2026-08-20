@@ -731,6 +731,14 @@
   (action
    (diff hash.expected hash.output))))
 
+(subdir unit/import_batching
+ (alias
+  (name default)
+  (deps import_batching.exe))
+ (rule
+  (alias runtest)
+  (action (run ./import_batching.exe))))
+
 (subdir unit/import_progress
  (alias
   (name default)
@@ -940,6 +948,14 @@
   (alias runtest)
   (action
    (diff zip_test.expected zip_test.output))))
+
+(subdir work/queue_degraded
+ (alias
+  (name default)
+  (deps queue_degraded.exe))
+ (rule
+  (alias runtest)
+  (action (run ./queue_degraded.exe))))
 
 (subdir work/queue_records
  (alias

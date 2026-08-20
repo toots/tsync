@@ -1,0 +1,24 @@
+(executable
+ (flags
+  (:standard
+   -open
+   Tsync_ops
+   -open
+   Tsync_object
+   -open
+   Tsync_conf
+   -open
+   Tsync_store
+   -open
+   Tsync_test_harness))
+ (name import_batching)
+ (libraries
+  tsync_test_harness
+  tsync_ops
+  tsync_object
+  tsync_conf
+  tsync_store
+  tsync_local_backend
+  lwt
+  lwt.unix
+  unix))
