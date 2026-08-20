@@ -1,8 +1,13 @@
 type domain = (string * Frontend.binding) list
 
-(* Do NOT touch Lwt here: any Lwt_unix/Lwt_preemptive call initializes the
-   shared notification eventfd, and a child inheriting it across the fork below
-   would have its worker wakeups delivered to the wrong process. *)
+(* Only {!recover} touches Lwt here, and only through an [Lwt_main.run] that
+   returns before the first fork. The hazard is a child inheriting the
+   notification eventfd and having its worker wakeups delivered to the parent;
+   [Lwt_unix.fork] reinitialises the notification system in the child, which is
+   why {!Frontend.run_forked} uses it.
+
+   Nothing else here may touch Lwt: what runs after the forks belongs to a leaf,
+   which starts its own loop. *)
 
 (* One binding per (domain × frontend), grouped by frontend. Each group is its
    own process (all but the last forked), so distinct frontends on one domain
@@ -44,6 +49,35 @@ let refuse name =
   let (module F : Frontend.S) = resolve name in
   F.start []
 
+(* What a crash left behind, collected while nothing is serving.
+
+   Both halves name a leftover by an absence — a temp file nobody has renamed
+   yet, a staged body no manifest names — which is what work in progress looks
+   like too. Called from a process that serves the domain, either one takes what
+   a sibling is in the middle of writing. Here there are no siblings: this
+   returns before the first fork.
+
+   Its own [Lwt_main.run], so no promise is still in flight when the forks
+   happen. *)
+let recover domains =
+  (* Any one of a domain's bindings will do: they carry the same conf. *)
+  let confs =
+    List.filter_map
+      (function [] -> None | (_, b) :: _ -> Some b.Frontend.conf)
+      domains
+  in
+  Lwt_main.run
+    (Lwt_list.iter_s
+       (fun conf ->
+         let module C = (val conf : Conf.S) in
+         let module E = Domain_engine.Make (C) in
+         Lwt.catch E.recover (fun exn ->
+             (* One domain's leftovers are not another's problem, and none of
+                them are worth refusing to start over. *)
+             Log.err "recovering %s: %s" C.domain_name (Printexc.to_string exn);
+             Lwt.return_unit))
+       confs)
+
 let run ?(on_leaf = fun ~name:_ -> ()) domains =
   let run_group (name, bindings) =
     let (module F : Frontend.S) = resolve name in
@@ -83,4 +117,5 @@ let run ?(on_leaf = fun ~name:_ -> ()) domains =
       let (module F : Frontend.S) = resolve name in
       if F.topology = `Not_a_daemon then refuse name)
     groups;
+  recover domains;
   Frontend.run_forked run_group groups

@@ -760,7 +760,9 @@ module Make (C : Conf.S) = struct
           let+ m = read key in
           match m with Some m -> Some (`Published m) | None -> None)
 
-  let init () =
-    let* () = Fs_util.mkdir_p (root ()) in
+  let ensure_root () = Fs_util.mkdir_p (root ())
+
+  let reap_leftovers () =
+    let* () = ensure_root () in
     clean_tmp (root ())
 end

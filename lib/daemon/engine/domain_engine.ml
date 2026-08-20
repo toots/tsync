@@ -38,6 +38,11 @@ module type S = sig
 
   val init : unit -> unit Lwt.t
 
+  (* Collect what a crash left behind. Once per machine, before anything serves
+     this domain: what it collects is named by an absence a live write also
+     produces. *)
+  val recover : unit -> unit Lwt.t
+
   val start_queue :
     ?on_upload_done:(key:string -> unit Lwt.t) -> unit -> unit Lwt.t
 
@@ -98,7 +103,13 @@ module Make (C : Conf.S) : S = struct
   (* The manifest tree, which a caller needs before it can resolve a key at all.
      Separate from {!start_queue} because a read-only command needs this and
      nothing else. *)
-  let init () = Mf.init ()
+  let init () = Mf.ensure_root ()
+
+  (* Apart from {!init}, which every process calls: both of these name a
+     leftover by an absence a live write also produces. *)
+  let recover () =
+    let* () = Mf.reap_leftovers () in
+    F.reclaim_staged_orphans ()
 
   (* Everything needed before a caller may stage or publish, and nothing that
      outlives the call: a one-shot command starts here and drains, where a

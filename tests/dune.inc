@@ -893,6 +893,14 @@
   (action
    (diff queue_claim_test.expected queue_claim_test.output))))
 
+(subdir unit/recover_scope
+ (alias
+  (name default)
+  (deps recover_scope_test.exe))
+ (rule
+  (alias runtest)
+  (action (run ./recover_scope_test.exe))))
+
 (subdir unit/staged_codec
  (alias
   (name default)

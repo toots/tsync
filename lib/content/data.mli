@@ -150,7 +150,10 @@ module Make (C : Conf.S) (R : Remote.S) : sig
   val staged_body_path : string -> string option Lwt.t
 
   (** Delete staged bodies no staged manifest names, and prune the empty
-      directories left in the staged manifest tree. Startup only: staging
-      creates a body before the manifest that names it. *)
+      directories left in the staged manifest tree.
+
+      Once per machine, before anything serves: staging creates a body before
+      the manifest that names it, so mid-session an unreferenced body is
+      indistinguishable from one a write is about to use. *)
   val reclaim_staged_orphans : unit -> unit Lwt.t
 end

@@ -9,8 +9,10 @@ module Make (C : Conf.S) (F : File_ops.S) : sig
       under the entry key it already has. Startup only: it replays ops and
       re-queues uploads, so it must not run while writes are staging.
 
-      Also sweeps staged bodies nothing references, and adopts staged data no
-      record names — a crash between staging and recording. *)
+      Also adopts staged data no record names — a crash between staging and
+      recording. Collecting staged bodies nothing references is
+      {!File_ops.S.reclaim_staged_orphans}, which may run once per machine
+      rather than once per process and so has a caller of its own. *)
   val reconcile : unit -> unit Lwt.t
 
   (** Apply every journal entry from another client since the applied mark, in
