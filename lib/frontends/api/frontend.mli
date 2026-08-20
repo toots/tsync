@@ -75,8 +75,16 @@ val entries : unit -> (string * string * command list) list
 
 (** {1 The process a frontend runs in}
 
-    A frontend takes over a process: it picks the event loop, sizes the blocking
-    thread pool, and forks one child per group of domains. *)
+    The launcher does this: it forks per frontend and per {!topology}, picks the
+    event loop and sizes the blocking pool, which is why it can size a leaf
+    knowing everything that shares it. Only {!size_blocking_pool} is a
+    frontend's, for one that learns a better figure at runtime.
+
+    These live here rather than beside the launcher because {!cap_blocking_pool}
+    and {!size_blocking_pool} share the size they last set; splitting them
+    across libraries would leave the narrowing silently reporting nothing. They
+    belong in a module of their own, which neither the registry nor a frontend
+    needs to depend on. *)
 
 (** Select the libev event loop and cap the blocking pool. Call from inside the
     leaf's own Lwt loop, after all forking: the first [Lwt_unix] touch creates
