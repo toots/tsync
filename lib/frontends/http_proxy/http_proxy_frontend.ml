@@ -562,9 +562,17 @@ let status_json ~port ~tls ~totals ~exact ~reload routes =
            ("tls", `Bool tls);
            ("serves", `List (List.map (fun r -> `String r.domain_name) routes));
            ("requests", counters_json ());
-           ("bytesRead", `Int (Metrics.total read_bytes));
+           (* Shares included, or a box serving only share links reports idle. *)
+           ( "bytesRead",
+             `Int
+               (Metrics.total read_bytes
+               + Metrics.total Share_server.served_bytes) );
            ("bytesWritten", `Int (Metrics.total written_bytes));
-           ("bytesReadPerSec", `Int (int_of_float (Metrics.rate read_bytes)));
+           ( "bytesReadPerSec",
+             `Int
+               (int_of_float
+                  (Metrics.rate read_bytes
+                  +. Metrics.rate Share_server.served_bytes)) );
            ( "bytesWrittenPerSec",
              `Int (int_of_float (Metrics.rate written_bytes)) );
          ]

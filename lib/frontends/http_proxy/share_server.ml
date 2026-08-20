@@ -40,6 +40,10 @@ let str name j =
 
 let block_size = 256 * 1024
 
+(* Counted here rather than by the frontend: a share body streams, so the bytes
+   leave long after the handler returned. *)
+let served_bytes = Metrics.counter ()
+
 (* Share routes carry no credential, so how many run at once is chosen by the
    public rather than by a client we configured. Each pull allocates a
    [block_size] buffer, so bounding the pull is what bounds bytes held here.
@@ -228,6 +232,7 @@ module Make (C : Conf.S) = struct
           let* got = D.pread ~id:key ~manifest buf ~offset:!pos in
           if got <= 0 then Lwt.return_none
           else (
+            Metrics.count served_bytes got;
             pos := Int64.add !pos (Int64.of_int got);
             left := Int64.sub !left (Int64.of_int got);
             Lwt.return_some (Bigstringaf.substring buf ~off:0 ~len:got)))
@@ -276,6 +281,7 @@ module Make (C : Conf.S) = struct
                 m.s_pos <- m.s_size;
                 Lwt.return_some "")
               else (
+                Metrics.count served_bytes got;
                 let s = Bigstringaf.substring buf ~off:0 ~len:got in
                 m.s_pos <- Int64.add m.s_pos (Int64.of_int got);
                 Zip_stream.feed z s;
