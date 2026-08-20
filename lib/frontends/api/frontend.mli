@@ -14,31 +14,17 @@ type binding = {
   mount_point : string;
 }
 
-(** How a frontend lets a user see a change some other client made.
-
-    Required rather than optional because a frontend with no answer looks like
-    one that has nothing to do: that is how the FUSE mount came to serve a file
-    under its name from before another client renamed it, unopenable, until the
-    mount was taken down.
-
-    A frontend picks the one that is true of it, not the one that is convenient.
-*)
-type freshness =
-  | Notify of (string -> unit)
-      (** Hand each changed key to the presentation layer as it happens, for a
-          layer that keeps its own state and has to be told. macOS File Provider
-          works this way. *)
-  | Revalidates
-      (** Nothing has to be pushed, because the layer asks again on every
-          access. A claim to earn: FUSE says this only because it mounts with
-          the kernel's caches disabled, which is what makes the kernel re-ask.
-      *)
-
 (** How many processes a frontend needs. Declared, not enacted: the launcher
     does the forking, so one place decides what runs where.
     [`Process_per_binding] is for a frontend whose serving call blocks per
     domain, as FUSE's mount does. *)
 type topology = [ `One_process | `Process_per_binding ]
+
+(** A binding with the domain wiring the launcher built for it. The lifecycle
+    around that wiring is the launcher's, so there is nothing here to start or
+    stop and no way to tell whether this process is the one keeping the domain
+    fresh. *)
+type served = { binding : binding; domain : (module Domain_engine.Domain) }
 
 module type S = sig
   (** Whether every byte of [key] is on this machine, for [tsync ls]. *)
@@ -46,8 +32,8 @@ module type S = sig
 
   val topology : topology
 
-  (** Serve every binding handed to this process. Blocks until shutdown. *)
-  val start : binding list -> unit
+  (** Serve everything handed to this process. Blocks until shutdown. *)
+  val start : served list -> unit
 end
 
 (** {1 Registry} *)

@@ -1,10 +1,48 @@
 open Lwt.Syntax
 
-(* The per-domain sync engine: upload queue, file ops, journal/IPC handler and
-   change poller. A frontend instantiates one [Make(C)] per domain and calls
-   [start] on its own Lwt loop, supplying only the callbacks that differ between
-   presentations. *)
-module Make (C : Conf.S) = struct
+(* How a frontend lets a user see a change another client made. Required rather
+   than optional because a frontend with no answer looks like one with nothing to
+   do: that is how the FUSE mount came to serve a file under its name from before
+   another client renamed it, unopenable, until the mount was taken down. *)
+type freshness =
+  | Notify of (string -> unit)
+    (* Hand each changed key to the presentation layer as it happens, for a
+         layer that keeps its own state and has to be told. *)
+  | Revalidates
+(* Nothing has to be pushed, because the layer asks again on every
+         access. *)
+
+(* What a frontend is given for one domain: its file operations, the request
+   handler built over them, and the background work that keeps it converging
+   with the store.
+
+   Whether this process is the one doing that work was decided before the
+   frontend was handed this, so [start] is called unconditionally and there is
+   nothing here to ask about. *)
+module type Domain = sig
+  module F : File_ops.S
+  module Ih : Ipc_handler.S
+
+  val start :
+    freshness:freshness ->
+    ?on_upload_done:(key:string -> unit Lwt.t) ->
+    unit ->
+    unit Lwt.t
+
+  val drain : unit -> unit Lwt.t
+  val stats_fields : unit -> (string * Yojson.Safe.t) list
+end
+
+module type S = sig
+  include Domain
+
+  val init : unit -> unit Lwt.t
+
+  val start_queue :
+    ?on_upload_done:(key:string -> unit Lwt.t) -> unit -> unit Lwt.t
+end
+
+module Make (C : Conf.S) : S = struct
   module Sq = Sync_queue.Make (C)
   module F = File.Make (C) (Sq)
   module Ih = Ipc_handler.Make (C) (F)
@@ -78,13 +116,11 @@ module Make (C : Conf.S) = struct
   (* [freshness] is required, not optional: a frontend that says nothing here
      leaves its users looking at a stale view, and an omitted argument is
      indistinguishable from a considered "nothing to do". *)
-  let start ~freshness ~on_upload_done () =
+  let start ~freshness ?(on_upload_done = fun ~key:_ -> Lwt.return_unit) () =
     let* () = start_queue ~on_upload_done () in
     Sp.start
       ~on_changed:
-        (match freshness with
-          | Frontend.Notify f -> f
-          | Frontend.Revalidates -> fun _ -> ())
+        (match freshness with Notify f -> f | Revalidates -> fun _ -> ())
       ();
     Lwt.async cursor_flusher;
     Lwt.async (fun () ->
@@ -116,4 +152,68 @@ module Make (C : Conf.S) = struct
       ("pendingUploads", `Int (Sq.pending ()));
       ("uploadsCompleted", `Int (Sq.completed_count ()));
     ]
+
+  let stats_fields () =
+    [
+      ("pendingUploads", `Int (Sq.pending ()));
+      ("uploadsCompleted", `Int (Sq.completed_count ()));
+    ]
 end
+
+(* Another process keeps this domain fresh; this one only presents it. *)
+module Passive (E : S) : Domain = struct
+  include E
+
+  let start ~freshness:_ ?on_upload_done:_ () = Lwt.return_unit
+end
+
+(* The process's loops, not a domain's: one Lwt loop however many domains are
+   served on it. [serve] calls [ready] once it is serving, which is what lets
+   [main_thread] — a presentation whose own loop must hold the main thread, as
+   FUSE's mount does — start against something already running. [after] runs on
+   the loop's thread once it has finished cleanly. *)
+(* An exception escaping [Lwt_main.run] does not stop the process: it leaves one
+   with no loop, in which every call blocks on a thread that is gone, and nothing
+   reports it until a stop is attempted and hangs — one of these sat silent for
+   47 minutes after an SSL read raised inside libev's dispatch, outside any
+   promise and so invisible to both [Lwt.catch] and {!Lwt.async_exception_hook}.
+
+   There is nothing to recover to, so the process ends at once and says why.
+   [Unix._exit], because at_exit handlers would drain through the loop that just
+   died, which is the wedge again. *)
+let loop_died exn =
+  Log.err "event loop stopped: %s\n%s" (Printexc.to_string exn)
+    (Printexc.get_backtrace ());
+  flush stdout;
+  flush stderr;
+  Unix._exit 1
+
+let run ?main_thread ?after serve =
+  let lock = Mutex.create () in
+  let cond = Condition.create () in
+  let ready = ref false in
+  let signal_ready () =
+    Mutex.lock lock;
+    ready := true;
+    Condition.broadcast cond;
+    Mutex.unlock lock
+  in
+  let wait_ready () =
+    Mutex.lock lock;
+    while not !ready do
+      Condition.wait cond lock
+    done;
+    Mutex.unlock lock
+  in
+  let body () =
+    match Lwt_main.run (serve ~ready:signal_ready) with
+      | () -> ( match after with Some f -> f () | None -> ())
+      | exception exn -> loop_died exn
+  in
+  match main_thread with
+    | None -> body ()
+    | Some main ->
+        let t = Thread.create body () in
+        wait_ready ();
+        main ();
+        Thread.join t

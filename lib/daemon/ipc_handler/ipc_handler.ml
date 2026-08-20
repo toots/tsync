@@ -1,6 +1,24 @@
 open Lwt.Syntax
 
-module Make (C : Conf.S) (F : File_ops.S) = struct
+module type S = sig
+  type hooks = {
+    path_to_key : string -> string;
+    evict : string -> unit Lwt.t;
+    restore : string -> unit Lwt.t;
+    changed : string -> unit;
+    full_resync : unit -> unit Lwt.t;
+    status_fields : unit -> (string * Yojson.Safe.t) list;
+    stats_fields : unit -> (string * Yojson.Safe.t) list;
+    on_stop : unit -> unit;
+  }
+
+  val handler :
+    hooks ->
+    string ->
+    (string * [ `Continue | `Stop | `Subscribe of string ]) Lwt.t
+end
+
+module Make (C : Conf.S) (F : File_ops.S) : S = struct
   module Fs = File_store.Make (C)
   module J = Journal.Make (C)
   module Diag = Diagnostics.Make (C)

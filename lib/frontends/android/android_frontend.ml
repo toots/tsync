@@ -200,7 +200,7 @@ end
    reach a domain beside the commands, and the two would answer differently the
    moment one of them grew a feature — so `tsync start' on a domain configured
    this way says so rather than sitting there. *)
-let start (_ : Frontend.binding list) =
+let start (_ : Frontend.served list) =
   failwith
     "the android frontend is driven by commands, not by a daemon: see `tsync \
      android --help'"

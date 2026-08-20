@@ -8,20 +8,17 @@ let is_local ({ Conf.domain_name; domain_prefix; _ } : Conf.locality) key =
         Sys.file_exists p && not (File_provider.is_dataless p)
 
 (* All domains share one IPC socket; the daemon routes by domain prefix. *)
-let start bindings =
-  let confs =
-    List.map (fun (b : Frontend.binding) -> b.Frontend.conf) bindings
-  in
+let start served =
   (* Each conf was handed the socket its domain is reachable at, and here that
      is one path however many domains there are -- so any of them names it. *)
   let socket_path =
-    match confs with
+    match served with
       | [] -> failwith "file_provider: no domains to serve"
-      | conf :: _ ->
-          let (module C : Conf.S) = conf in
+      | sv :: _ ->
+          let (module C : Conf.S) = sv.Frontend.binding.Frontend.conf in
           C.socket_path
   in
-  File_provider.start ~confs ~socket_path
+  File_provider.start ~served ~socket_path
 
 (* Reuses the [full_resync] IPC action, routed to the domain's runtime by the
    [domain] field. *)

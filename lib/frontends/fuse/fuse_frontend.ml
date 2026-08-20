@@ -9,7 +9,8 @@ let prepare_mount_point mount_point =
           (Filename.quote mount_point)));
   Fs_util.mkdir_p_sync mount_point
 
-let mount_binding (b : Frontend.binding) =
+let mount_binding (sv : Frontend.served) =
+  let b = sv.Frontend.binding in
   let module C = (val b.Frontend.conf : Conf.S) in
   (* Each domain is its own process; tag its log lines with the domain name. *)
   Log.set_prefix (Printf.sprintf "[%s] " C.domain_name);
@@ -20,7 +21,8 @@ let mount_binding (b : Frontend.binding) =
       (List.assoc_opt "allowOther" b.Frontend.options)
   in
   prepare_mount_point b.Frontend.mount_point;
-  let module R = Fuse_fs.Make (C) in
+  let module D = (val sv.Frontend.domain : Domain_engine.Domain) in
+  let module R = Fuse_fs.Make (C) (D) in
   R.mount ~allow_other b.Frontend.mount_point
 
 (* FUSE's mount blocks, so the launcher gives each domain its own process. *)
