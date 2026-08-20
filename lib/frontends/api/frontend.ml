@@ -4,9 +4,12 @@ type binding = {
   mount_point : string;
 }
 
+type topology = [ `One_process | `Process_per_binding ]
+
 module type S = sig
   (* Whether every byte of [key] is on this machine, for `tsync ls`. *)
   val is_local : Conf.locality -> string -> bool
+  val topology : topology
 
   (* Blocks until shutdown. *)
   val start : binding list -> unit

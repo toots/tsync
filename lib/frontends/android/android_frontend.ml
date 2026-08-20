@@ -315,5 +315,6 @@ let register () =
   Frontend.register implementation ~cli_group:"android" ~commands
     (module struct
       let is_local = is_local
+      let topology = `One_process
       let start = start
     end : Frontend.S)

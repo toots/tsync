@@ -34,11 +34,19 @@ type freshness =
           the kernel's caches disabled, which is what makes the kernel re-ask.
       *)
 
+(** How many processes a frontend needs. Declared, not enacted: the launcher
+    does the forking, so one place decides what runs where.
+    [`Process_per_binding] is for a frontend whose serving call blocks per
+    domain, as FUSE's mount does. *)
+type topology = [ `One_process | `Process_per_binding ]
+
 module type S = sig
   (** Whether every byte of [key] is on this machine, for [tsync ls]. *)
   val is_local : Conf.locality -> string -> bool
 
-  (** Serve every binding. Blocks until shutdown. *)
+  val topology : topology
+
+  (** Serve every binding handed to this process. Blocks until shutdown. *)
   val start : binding list -> unit
 end
 

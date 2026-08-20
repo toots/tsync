@@ -9,9 +9,6 @@ let is_local ({ Conf.domain_name; domain_prefix; _ } : Conf.locality) key =
 
 (* All domains share one IPC socket; the daemon routes by domain prefix. *)
 let start bindings =
-  (* Post-fork leaf process: safe to initialize Lwt now. *)
-  Frontend.cap_blocking_pool
-    ~concurrency:(Frontend.binding_concurrency bindings);
   let confs =
     List.map (fun (b : Frontend.binding) -> b.Frontend.conf) bindings
   in
@@ -163,5 +160,6 @@ let register () =
       ]
     (module struct
       let is_local = is_local
+      let topology = `One_process
       let start = start
     end : Frontend.S)

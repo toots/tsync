@@ -10,8 +10,6 @@ let prepare_mount_point mount_point =
   Fs_util.mkdir_p_sync mount_point
 
 let mount_binding (b : Frontend.binding) =
-  (* Post-fork leaf process: safe to initialize Lwt now. *)
-  Frontend.cap_blocking_pool ~concurrency:(Frontend.binding_concurrency [b]);
   let module C = (val b.Frontend.conf : Conf.S) in
   (* Each domain is its own process; tag its log lines with the domain name. *)
   Log.set_prefix (Printf.sprintf "[%s] " C.domain_name);
@@ -25,9 +23,9 @@ let mount_binding (b : Frontend.binding) =
   let module R = Fuse_fs.Make (C) in
   R.mount ~allow_other b.Frontend.mount_point
 
-(* FUSE's mount blocks, so each domain runs in its own child process; the last
-   runs here. *)
-let start bindings = Frontend.run_forked mount_binding bindings
+(* FUSE's mount blocks, so the launcher gives each domain its own process. *)
+let topology = `Process_per_binding
+let start bindings = List.iter mount_binding bindings
 
 let spec =
   Field_spec.
@@ -52,5 +50,6 @@ let register () =
   Frontend.register ~spec implementation
     (module struct
       let is_local = is_local
+      let topology = topology
       let start = start
     end : Frontend.S)
