@@ -1,3 +1,9 @@
+########## ipc stats ##########
+ok: true
+same collection as /api/v1/stats: true
+{"ok":false,"error":"invalid JSON"}
+{"ok":false,"error":"unknown action nope"}
+{"ok":false,"error":"no action"}
 ########## /api/v1/stats ##########
 {
   "server": {

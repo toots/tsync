@@ -360,11 +360,24 @@ let domain_targets () =
   match (load_config ()).Conf_parsing.domains with
     | [] -> failwith "no domains configured"
     | domains ->
-        List.map
-          (fun (d : Conf_parsing.domain) ->
-            ( d.Conf_parsing.name,
-              Runtime.domain_socket_path runtime_paths d.Conf_parsing.name ))
-          domains
+        let mounts =
+          List.map
+            (fun (d : Conf_parsing.domain) ->
+              ( d.Conf_parsing.name,
+                Runtime.domain_socket_path runtime_paths d.Conf_parsing.name ))
+            domains
+        in
+        (* Once for the listener, whatever it serves: it answers for all its
+           domains at once, and a second ask would only be merged away. *)
+        let has_proxy (d : Conf_parsing.domain) =
+          List.exists
+            (fun (f : Conf_parsing.frontend_config) ->
+              f.Conf_parsing.frontend_type = "http-proxy")
+            d.Conf_parsing.frontends
+        in
+        if List.exists has_proxy domains then
+          mounts @ [("http-proxy", Runtime.proxy_socket_path runtime_paths)]
+        else mounts
 
 let load_conf ?domain () = make_conf ?domain (load_config ())
 

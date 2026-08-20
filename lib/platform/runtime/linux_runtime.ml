@@ -28,6 +28,9 @@ let default_paths () =
 let domain_socket_path paths domain_name =
   Filename.concat paths.data_dir ("tsync-" ^ domain_name ^ ".sock")
 
+let proxy_socket_path paths =
+  Filename.concat paths.data_dir "tsync-http-proxy.sock"
+
 let restart_service () =
   Sys.command "systemctl --user restart tsync 2>/dev/null" = 0
 

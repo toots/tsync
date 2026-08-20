@@ -32,7 +32,9 @@
    -open
    Tsync_frontend_register
    -open
-   Tsync_diagnostics))
+   Tsync_diagnostics
+   -open
+   Tsync_runtime))
  (name tsync_http_proxy_frontend)
  (preprocess
   (pps ppx_blob))
@@ -58,6 +60,7 @@
   tsync-libs.conf
   tsync-libs.zip
   tsync-libs.log
+  tsync_runtime
   cohttp-lwt-unix
   bigstringaf
   conduit-lwt-unix
