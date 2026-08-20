@@ -582,7 +582,7 @@ let status_json ~port ~tls ~totals ~exact ~reload routes =
 (* [tsync status] reaches every frontend over its own socket and merges the
    answers by socket path, so this reports for the listener and its domains and
    nothing else. Same report the HTTP endpoints render. *)
-let ipc_handler ~port ~tls routes line =
+let ipc_handler ~port ~tls ~request_stop routes line =
   let reply fields =
     Lwt.return (Yojson.Safe.to_string (`Assoc fields), `Continue)
   in
@@ -604,6 +604,12 @@ let ipc_handler ~port ~tls routes line =
               in
               let fields = match report with `Assoc f -> f | _ -> [] in
               reply (("ok", `Bool true) :: fields)
+          | Some (`String "stop") ->
+              (* Answered before the listener winds down, so the caller hears
+                 that it was asked rather than losing the connection. *)
+              request_stop ();
+              Lwt.return
+                (Yojson.Safe.to_string (`Assoc [("ok", `Bool true)]), `Stop)
           | Some (`String a) ->
               reply
                 [
@@ -780,10 +786,9 @@ let start bindings =
     (List.length routes);
   Lwt_main.run
     (let open Lwt.Syntax in
-     (* No IPC socket, so [tsync stop] never reaches this frontend and a signal
-        is the only way it is asked to stop. It serves writes for proxy clients,
-        so the default action would drop what those still owe a backfill
-        target. *)
+     (* Reached by [tsync stop] over the socket below, and by a signal from a
+        supervisor. It serves writes for proxy clients, so the default action
+        would drop what those still owe a backfill target. *)
      let stop, wake = Lwt.wait () in
      let request_stop () =
        match Lwt.state stop with
@@ -835,7 +840,8 @@ let start bindings =
      let socket_path = Runtime.proxy_socket_path (Runtime.default_paths ()) in
      Log.debug "starting IPC server at %s" socket_path;
      Lwt.async (fun () ->
-         Ipc.serve ~path:socket_path (ipc_handler ~port ~tls routes));
+         Ipc.serve ~path:socket_path
+           (ipc_handler ~port ~tls ~request_stop routes));
      let* () =
        Cohttp_lwt_unix.Server.create ~stop ~mode
          (Cohttp_lwt_unix.Server.make ~callback:(callback ~port ~tls routes) ())

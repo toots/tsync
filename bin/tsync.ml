@@ -127,17 +127,10 @@ let start_cmd =
 
 let stop_cmd =
   let run () =
-    (* Frontends without an IPC socket (http-proxy) are not reached here; a
-       supervisor's SIGTERM stops that group. An absent or unconnectable socket
-       just means that part is not running. *)
-    let cfg = load_config () in
-    let sockets =
-      List.sort_uniq compare
-        (List.map
-           (fun (d : Conf_parsing.domain) ->
-             Runtime.domain_socket_path runtime_paths d.Conf_parsing.name)
-           cfg.Conf_parsing.domains)
-    in
+    (* The same sockets a report is gathered from, so a frontend that can be
+       asked about can be asked to stop. An absent or unconnectable one just
+       means that part is not running. *)
+    let sockets = List.sort_uniq compare (List.map snd (domain_targets ())) in
     let stopped = ref 0 in
     List.iter
       (fun socket_path ->
