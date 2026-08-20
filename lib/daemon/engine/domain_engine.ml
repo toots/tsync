@@ -207,7 +207,12 @@ let run ?main_thread ?after serve =
   in
   let body () =
     match Lwt_main.run (serve ~ready:signal_ready) with
-      | () -> ( match after with Some f -> f () | None -> ())
+      | () -> (
+          (* A [serve] that returned without ever saying it was ready would
+             otherwise leave the main thread waiting on a broadcast from a thread
+             that has exited: a hang with nothing logged. *)
+          signal_ready ();
+          match after with Some f -> f () | None -> ())
       | exception exn -> loop_died exn
   in
   match main_thread with
