@@ -27,7 +27,16 @@ type topology = [ `One_process | `Process_per_binding | `Not_a_daemon ]
     Every frontend gets the same thing. Keeping the domain converging with the
     store is the launcher's own, in its own process, so there is nothing here to
     ask about. *)
-type served = { binding : binding; domain : (module Domain_engine.Domain) }
+type served = {
+  binding : binding;
+  domain : (module Domain_engine.Domain);
+  peers : string list;
+      (** Sockets the domain's {i other} frontends answer on, for one that
+          reports on the domain as a whole. Filled by the launcher, which holds
+          the (domain × frontend) matrix; a frontend sees one binding and would
+          have to assume. Empty is an answer: no other frontend serves this
+          domain here. *)
+}
 
 (** Which socket this frontend answers requests on, or [None] for one that
     answers none. Whether a kind is per domain or shared across them is the

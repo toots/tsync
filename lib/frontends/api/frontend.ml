@@ -5,7 +5,13 @@ type binding = {
 }
 
 type topology = [ `One_process | `Process_per_binding | `Not_a_daemon ]
-type served = { binding : binding; domain : (module Domain_engine.Domain) }
+
+type served = {
+  binding : binding;
+  domain : (module Domain_engine.Domain);
+  peers : string list;
+}
+
 type socket = [ `Domain_socket | `Proxy_socket ]
 
 module type S = sig
