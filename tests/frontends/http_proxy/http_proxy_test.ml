@@ -361,13 +361,14 @@ let () =
   (* Taken here, beside [r], so nothing counted in between can explain a
      difference: what [tsync status] reads over IPC has to be the collection the
      HTTP endpoints render, or the two surfaces drift. *)
-  let ipc line =
-    let reply, _ =
-      Lwt_main.run
-        (Http_proxy_frontend.ipc_handler ~port:8443 ~tls:true status_routes line)
-    in
-    Yojson.Safe.from_string reply
+  let stop_asked = ref 0 in
+  let ipc_full line =
+    Lwt_main.run
+      (Http_proxy_frontend.ipc_handler ~port:8443 ~tls:true
+         ~request_stop:(fun () -> incr stop_asked)
+         status_routes line)
   in
+  let ipc line = Yojson.Safe.from_string (fst (ipc_full line)) in
   let ipc_stats = ipc {|{"action":"stats"}|} in
   List.iter
     (fun key -> assert (json_member key r <> `Null))
@@ -603,6 +604,11 @@ let () =
   List.iter
     (fun line -> print_endline (Yojson.Safe.to_string (ipc line)))
     ["not json"; {|{"action":"nope"}|}; "{}"];
+  (* Answered, then the connection closes: a caller must hear that the listener
+     was asked before it winds down. *)
+  let stop_reply, stop_ctl = ipc_full {|{"action":"stop"}|} in
+  Printf.printf "stop: %s closes=%b asked=%d\n" stop_reply (stop_ctl = `Stop)
+    !stop_asked;
   print_endline "########## /api/v1/stats ##########";
   print_endline (Yojson.Safe.pretty_to_string stable);
   print_endline "########## /stats ##########";
