@@ -51,6 +51,15 @@ let run ?(on_leaf = fun ~name:_ -> ()) domains =
     Log.debug "starting frontend %s (%d domains)" name (List.length bindings);
     (* After the fork, so each process is named for what it runs. *)
     on_leaf ~name;
-    F.start bindings
+    (* Sized here because only this side knows what else shares the leaf, and
+       after the fork because it is the first thing to touch Lwt. *)
+    let serve bs =
+      Frontend.cap_blocking_pool ~concurrency:(Frontend.binding_concurrency bs);
+      F.start bs
+    in
+    match F.topology with
+      | `One_process -> serve bindings
+      | `Process_per_binding ->
+          Frontend.run_forked (fun b -> serve [b]) bindings
   in
   Frontend.run_forked run_group (bindings_by_frontend domains)

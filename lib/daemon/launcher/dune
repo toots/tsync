@@ -8,11 +8,14 @@
    -open
    Tsync_conf
    -open
-   Tsync_log))
+   Tsync_log
+   -open
+   Tsync_lwt_unix))
  (name tsync_launcher)
  (public_name tsync-libs.launcher)
  (libraries
   tsync_frontend_register
   tsync-libs.conf_parsing
   tsync-libs.conf
-  tsync-libs.log))
+  tsync-libs.log
+  tsync-libs.lwt_unix))
