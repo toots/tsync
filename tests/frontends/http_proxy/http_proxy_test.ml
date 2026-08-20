@@ -237,9 +237,35 @@ let () =
     = Http_proxy_frontend.Bad);
 
   assert (pick "tsync/two/manifests/x" "one" = Some "two");
+  (* No route here serves /s/, so nothing on this listener reads the manifest
+     back and the signer's own store is where it belongs. *)
   assert (pick "tsync/shares/deadbeef" "two" = Some "two");
   assert (pick "tsync/shares/deadbeef" "nobody" = None);
   assert (pick "elsewhere/x" "one" = None);
+
+  (* Once a route does serve /s/, the manifest has to land in the store that will
+     be read for it: written to one store and served from another, the link
+     404s. So the share-enabled route answers whoever is asking... *)
+  let sharing =
+    [
+      { (route "one") with Http_proxy_frontend.serve_share = None };
+      {
+        (route "two") with
+        Http_proxy_frontend.serve_share =
+          Some (fun ~token:_ ~sub:_ ~query:_ ~range:_ -> assert false);
+      };
+    ]
+  in
+  let pick_sharing key signer =
+    Option.map
+      (fun r -> r.Http_proxy_frontend.secret)
+      (Http_proxy_frontend.route_for sharing ~key ~authed:(fun r ->
+           r.Http_proxy_frontend.secret = signer))
+  in
+  assert (pick_sharing "tsync/shares/deadbeef" "two" = Some "two");
+  (* ...and a caller holding only the other domain's secret is refused, rather
+     than publishing a link into a store /s/ will never look in. *)
+  assert (pick_sharing "tsync/shares/deadbeef" "one" = None);
 
   (* Specs are what [tsync config --edit] prompts from, so a field missing here is
      silently unconfigurable. [shares] is on the frontend only: the client asks

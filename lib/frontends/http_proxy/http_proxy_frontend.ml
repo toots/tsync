@@ -459,11 +459,23 @@ let exec route op ~body =
              (`Assoc [("verified", `Bool caps.Backend.verified)]))
     | Bad | Unknown -> respond ~status:`Bad_request "bad request"
 
-(* [shares_prefix] is domain-independent, so a share key has no domain to match
-   on: fall back to the route whose secret signed the request.
+(* Which route serves [/s/]. One predicate, used by both sides: a share manifest
+   written to one store and read from another is a link that 404s, and picking
+   the writer by "whose secret signed it" and the reader by "who serves shares"
+   is two rules that agree only by luck.
 
-   ponytail: the manifest then lands in that domain's store, which is what the
-   share server reads as long as the fronted domains share one bucket. *)
+   ponytail: the first share-enabled domain answers; probe each here if one
+   listener ever fronts several share stores. *)
+let share_route routes = List.find_opt (fun r -> r.serve_share <> None) routes
+
+(* [shares_prefix] is domain-independent, so a share key has no domain to match
+   on.
+
+   When this listener serves [/s/], the manifest goes to the store that will be
+   read for it, and a caller holding some other route's secret is refused rather
+   than writing a link that would 404. When it does not, nothing here reads the
+   manifest back -- the store's own share URL does -- so the route whose secret
+   signed the request is the right one. *)
 let route_for routes ~key ~authed =
   match
     List.find_opt (fun r -> String.starts_with ~prefix:r.domain_root key) routes
@@ -472,21 +484,20 @@ let route_for routes ~key ~authed =
     | None
       when List.exists
              (fun r -> String.starts_with ~prefix:r.shares_prefix key)
-             routes ->
-        List.find_opt authed routes
+             routes -> (
+        match share_route routes with
+          | Some r -> if authed r then Some r else None
+          | None -> List.find_opt authed routes)
     | None -> None
 
 (* Share links go to recipients holding no secret, so these routes carry no HMAC:
    the token is the only credential, and {!Share_server.load} confines it to the
-   shares prefix.
-
-   ponytail: the first share-enabled domain answers; probe each domain here if
-   one listener ever fronts several share stores. *)
+   shares prefix. *)
 let share_request routes uri =
   let path = Uri.path uri in
   if not (String.starts_with ~prefix:"/s/" path) then None
   else (
-    match List.find_opt (fun r -> r.serve_share <> None) routes with
+    match share_route routes with
       | None -> None
       | Some r ->
           let rest = String.sub path 3 (String.length path - 3) in
