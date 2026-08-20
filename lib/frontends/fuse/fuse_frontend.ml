@@ -25,9 +25,17 @@ let mount_binding (sv : Frontend.served) =
   let module R = Fuse_fs.Make (C) (D) in
   R.mount ~allow_other b.Frontend.mount_point
 
-(* FUSE's mount blocks, so the launcher gives each domain its own process. *)
+(* FUSE's mount blocks, so the launcher gives each domain its own process, and
+   hands this exactly one. Serving a second would mount it only once the first
+   came down, which is silence rather than an answer. *)
 let topology = `Process_per_binding
-let start bindings = List.iter mount_binding bindings
+
+let start = function
+  | [b] -> mount_binding b
+  | bindings ->
+      failwith
+        (Printf.sprintf "fuse: expected one domain per process, got %d"
+           (List.length bindings))
 
 let spec =
   Field_spec.
