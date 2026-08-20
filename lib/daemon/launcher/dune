@@ -1,0 +1,18 @@
+(library
+ (flags
+  (:standard
+   -open
+   Tsync_frontend_register
+   -open
+   Tsync_conf_parsing
+   -open
+   Tsync_conf
+   -open
+   Tsync_log))
+ (name tsync_launcher)
+ (public_name tsync-libs.launcher)
+ (libraries
+  tsync_frontend_register
+  tsync-libs.conf_parsing
+  tsync-libs.conf
+  tsync-libs.log))

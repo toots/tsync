@@ -42,6 +42,8 @@
    -open
    Tsync_frontend_register
    -open
+   Tsync_launcher
+   -open
    Tsync_frontend
    -open
    Tsync_device
@@ -62,6 +64,7 @@
   tsync-libs.object
   tsync-libs.naming
   tsync-libs.frontend_register
+  tsync-libs.launcher
   tsync-libs.chunk
   tsync-libs.backend_register
   tsync-libs.metrics
