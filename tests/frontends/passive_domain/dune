@@ -1,0 +1,23 @@
+(executable
+ (flags
+  (:standard
+   -open
+   Tsync_engine
+   -open
+   Tsync_naming
+   -open
+   Tsync_backend_register
+   -open
+   Tsync_conf
+   -open
+   Tsync_local_backend))
+ (name passive_domain)
+ (libraries
+  tsync-libs.engine
+  tsync-libs.naming
+  tsync-libs.conf
+  tsync_backend_register
+  tsync_local_backend
+  yojson
+  lwt
+  lwt.unix))
