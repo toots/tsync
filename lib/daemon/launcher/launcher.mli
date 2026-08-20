@@ -6,16 +6,11 @@
     for itself, because it sees one binding and this sees the whole (domain ×
     frontend) matrix. *)
 
-(** One domain as the launcher needs it. [mount_point] is only meaningful to a
-    frontend that mounts. *)
-type domain = {
-  frontends : Conf_parsing.frontend_config list;
-  conf : (module Conf.S);
-  mount_point : string;
-}
+(** One domain's frontends, in config order, each named by its type. The first
+    is the one that will keep the domain converging with the store. *)
+type domain = (string * Frontend.binding) list
 
-(** Build one binding per (domain × frontend), give each frontend its own
-    process, and serve until they stop.
+(** Give each frontend its own process and serve until they stop.
 
     [on_leaf] runs inside each forked process before its frontend starts, named
     for the frontend it is about to run. *)
