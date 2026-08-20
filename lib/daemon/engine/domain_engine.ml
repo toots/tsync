@@ -40,6 +40,11 @@ module type S = sig
 
   val start_queue :
     ?on_upload_done:(key:string -> unit Lwt.t) -> unit -> unit Lwt.t
+
+  (* The half every process serving the domain runs. {!Passive} is what a
+     process that is not keeping the domain fresh gets. *)
+  val start_local :
+    ?on_upload_done:(key:string -> unit Lwt.t) -> unit -> unit Lwt.t
 end
 
 module Make (C : Conf.S) : S = struct
@@ -103,7 +108,15 @@ module Make (C : Conf.S) : S = struct
      a crash is not left looking unsynced. The queue must be running first:
      recovery goes through it, for the journal entry and cursor bump an upload
      owes. *)
-  let start_queue ?(on_upload_done = fun ~key:_ -> Lwt.return_unit) () =
+  (* Every process serving this domain runs its own upload queue: the workers
+     are in-memory and each posts only what it was handed, which is why
+     {!Sync_queue} starts without [recover] and neither reads the other's log.
+     A process without one accepts writes it will never send.
+
+     What at most one may run is below — reconcile, the poller, the cursor and
+     the sweeps all touch the mirror, the bookmark and the cursor, which are
+     shared and unarbitrated. *)
+  let start_local ?(on_upload_done = fun ~key:_ -> Lwt.return_unit) () =
     let* () = init () in
     Sq.start
       ~upload:(fun ~key ~cancel -> F.upload ~cancel key)
@@ -111,6 +124,10 @@ module Make (C : Conf.S) : S = struct
       ~on_upload_done:(fun ~key ->
         let* () = on_upload_done ~key in
         F.enforce_chunk_cap ());
+    Lwt.return_unit
+
+  let start_queue ?(on_upload_done = fun ~key:_ -> Lwt.return_unit) () =
+    let* () = start_local ~on_upload_done () in
     Rp.reconcile ()
 
   (* [freshness] is required, not optional: a frontend that says nothing here
@@ -152,19 +169,13 @@ module Make (C : Conf.S) : S = struct
       ("pendingUploads", `Int (Sq.pending ()));
       ("uploadsCompleted", `Int (Sq.completed_count ()));
     ]
-
-  let stats_fields () =
-    [
-      ("pendingUploads", `Int (Sq.pending ()));
-      ("uploadsCompleted", `Int (Sq.completed_count ()));
-    ]
 end
 
 (* Another process keeps this domain fresh; this one only presents it. *)
 module Passive (E : S) : Domain = struct
   include E
 
-  let start ~freshness:_ ?on_upload_done:_ () = Lwt.return_unit
+  let start ~freshness:_ ?on_upload_done () = E.start_local ?on_upload_done ()
 end
 
 (* The process's loops, not a domain's: one Lwt loop however many domains are
