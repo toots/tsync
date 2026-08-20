@@ -14,6 +14,8 @@
    -open
    Tsync_ipc
    -open
+   Tsync_ipc_handler
+   -open
    Tsync_log
    -open
    Tsync_metrics
@@ -56,6 +58,7 @@
   tsync-libs.engine
   tsync-libs.http_proxy
   tsync-libs.ipc
+  tsync-libs.ipc_handler
   tsync-libs.diagnostics
   tsync-libs.metrics
   tsync-libs.chunk

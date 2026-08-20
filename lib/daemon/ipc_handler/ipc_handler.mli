@@ -5,6 +5,12 @@
     arrives as {!Make.hooks}, so the handler serves fuse, the FileProvider and
     the http proxy without knowing which it is talking for. *)
 
+(** A failure, in the shape every reply on this wire uses. Frontends that answer
+    IPC without going through {!Make} — the http proxy serves its own socket —
+    encode through this rather than spelling the fields again, so a client can
+    match on the code instead of the wording. *)
+val error_reply : Ipc_error.t -> string -> string
+
 (** Named so a domain's wiring can be handed to a frontend as one signature. *)
 module type S = sig
   type hooks = {
