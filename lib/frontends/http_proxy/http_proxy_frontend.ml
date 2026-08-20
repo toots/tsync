@@ -31,7 +31,10 @@ let default_max_concurrent = 16
    Sized off the limit: enough to absorb a burst, small enough that sustained
    overload is refused rather than accumulated. *)
 let gate : Lwt_bounded.t option ref = ref None
-let make_gate limit = Lwt_bounded.create ~max:limit ~max_waiting:(limit * 16) ()
+
+let make_gate limit =
+  Lwt_bounded.create ~name:"proxy objects" ~max:limit ~max_waiting:(limit * 16)
+    ()
 
 (* Published to clients so they hold their own excess. *)
 let effective_max_concurrent : int option ref = ref None
