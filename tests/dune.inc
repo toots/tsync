@@ -659,6 +659,14 @@
   (action
    (diff chunk_test.expected chunk_test.output))))
 
+(subdir unit/chunk_pools
+ (alias
+  (name default)
+  (deps chunk_pools.exe))
+ (rule
+  (alias runtest)
+  (action (run ./chunk_pools.exe))))
+
 (subdir unit/chunk_space
  (alias
   (name default)

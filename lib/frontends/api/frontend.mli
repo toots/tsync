@@ -22,10 +22,11 @@ type binding = {
     anything else. *)
 type topology = [ `One_process | `Process_per_binding | `Not_a_daemon ]
 
-(** A binding with the domain wiring the launcher built for it. The lifecycle
-    around that wiring is the launcher's, so there is nothing here to start or
-    stop and no way to tell whether this process is the one keeping the domain
-    fresh. *)
+(** A binding with the domain wiring the launcher built for it: file operations,
+    the request handler, and the queue that sends what this process accepts.
+    Every frontend gets the same thing. Keeping the domain converging with the
+    store is the launcher's own, in its own process, so there is nothing here to
+    ask about. *)
 type served = { binding : binding; domain : (module Domain_engine.Domain) }
 
 (** Which socket this frontend answers requests on, or [None] for one that
@@ -87,14 +88,8 @@ val entries : unit -> (string * string * command list) list
 
     The launcher does this: it forks per frontend and per {!topology}, picks the
     event loop and sizes the blocking pool, which is why it can size a leaf
-    knowing everything that shares it. Only {!size_blocking_pool} is a
-    frontend's, for one that learns a better figure at runtime.
-
-    These live here rather than beside the launcher because {!cap_blocking_pool}
-    and {!size_blocking_pool} share the size they last set; splitting them
-    across libraries would leave the narrowing silently reporting nothing. They
-    belong in a module of their own, which neither the registry nor a frontend
-    needs to depend on. *)
+    knowing everything that shares it — a frontend sees one binding and cannot
+    know what else the process runs. *)
 
 (** Select the libev event loop and cap the blocking pool. Call from inside the
     leaf's own Lwt loop, after all forking: the first [Lwt_unix] touch creates
@@ -115,12 +110,6 @@ val entries : unit -> (string * string * command list) list
     one, so a frontend that does not say sets a memory floor for the life of the
     process rather than a ceiling it might not reach. *)
 val cap_blocking_pool : concurrency:int -> unit
-
-(** Narrow that ceiling to what the storage absorbs, once something has asked
-    it. Threads past what the device takes are a queue in the wrong place; the
-    floor keeps a slow device from making the process unresponsive rather than
-    merely unhurried. *)
-val size_blocking_pool : concurrency:int -> unit
 
 (** What the domains in these bindings ask of the blocking pool, for
     {!cap_blocking_pool}. *)

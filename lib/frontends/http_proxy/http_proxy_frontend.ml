@@ -842,12 +842,6 @@ let start served =
           | None, Some _ -> "from the storage"
           | None, None -> "default");
       gate := Some (make_gate max_concurrent);
-      (* The gate holds callers at the door; this keeps the threads behind it from
-        outnumbering what the device takes. Narrowed only when the storage said
-        something: a purely network-backed domain keeps the generous default. *)
-        (match derived with
-        | Some n -> Frontend.size_blocking_pool ~concurrency:n
-        | None -> ());
       effective_max_concurrent := Some max_concurrent;
       let* () =
         Lwt_list.iter_s

@@ -48,6 +48,40 @@ end
 let max_known = ref 100_000
 let set_max_known n = max_known := n
 
+(* Keyed by the chunk prefix and not held in the functor: {!Make} is applied
+   once per domain and per role -- the uploader, diagnostics, export, import, the
+   share server -- and a per-application pool bounds each of those separately
+   while all of them queue on one device and one memory budget. A proxy serving
+   shares beside an engine held two of each and admitted twice what either said.
+
+   Same reasoning as {!Corruption}'s memo, which is keyed the same way. *)
+type pools = { chunk_slots : Lwt_bounded.t; downloads : Lwt_bounded.t }
+
+let pools : (string, pools) Hashtbl.t = Hashtbl.create 4
+
+let pools_for ~prefix ~max_chunk_buffers ~max_downloads =
+  match Hashtbl.find_opt pools prefix with
+    | Some p -> p
+    | None ->
+        (* Acquiring a slot is the real system-wide bound on concurrent chunk
+           work: a chunk read blocks until one frees, whatever file it belongs
+           to, so [max_chunk_buffers] times the chunk size is what the upload
+           path costs in memory however many files [max_uploads] admits.
+
+           Bound in sequence rather than in a record literal: {!Lwt_bounded}
+           reports pools in creation order, and a literal's field order is not
+           its evaluation order. *)
+        let chunk_slots =
+          Lwt_bounded.create ~name:"chunk buffers"
+            ~max:(max 1 max_chunk_buffers) ()
+        in
+        let downloads =
+          Lwt_bounded.create ~name:"downloads" ~max:max_downloads ()
+        in
+        let p = { chunk_slots; downloads } in
+        Hashtbl.replace pools prefix p;
+        p
+
 module Make_with_layout (C : Conf.S) (L : Layout.S) : S = struct
   (* [St] maps logical keys to backend keys through the layout scheme. *)
   module St = Store.Make (C) (L)
@@ -58,12 +92,11 @@ module Make_with_layout (C : Conf.S) (L : Layout.S) : S = struct
   module Space = Chunk_space.Make (C)
   module Corrupt = Corruption.Make (C)
 
-  (* Acquiring a slot is the real system-wide bound on concurrent chunk work: a
-     chunk read blocks until one frees, whatever file it belongs to, so
-     [max_chunk_buffers] times the chunk size is what the upload path costs in
-     memory however many files [max_uploads] admits. *)
-  let chunk_slots =
-    Lwt_bounded.create ~name:"chunk buffers" ~max:(max 1 C.max_chunk_buffers) ()
+  let pools =
+    pools_for ~prefix:C.chunk_prefix ~max_chunk_buffers:C.max_chunk_buffers
+      ~max_downloads:C.max_downloads
+
+  let chunk_slots = pools.chunk_slots
 
   (* Config, else what the domain's stores recommend (an http-proxy answers with
      the serving domain's own, so the setting need not live in two configs),
@@ -288,8 +321,7 @@ module Make_with_layout (C : Conf.S) (L : Layout.S) : S = struct
             | m -> Some m
             | exception _ -> None)
 
-  let chunk_download_pool =
-    Lwt_bounded.create ~name:"downloads" ~max:C.max_downloads ()
+  let chunk_download_pool = pools.downloads
 
   let get_chunk ~chunk_key =
     Lwt_bounded.use chunk_download_pool (fun () -> Space.get chunk_key)
