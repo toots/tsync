@@ -107,7 +107,10 @@ type route = {
           deferred targets internally, so this side never sees a role. *)
   serve_share : share_handler option;
       (** [None] when this domain has no shares. *)
-  socket_path : string;  (** the mount daemon's socket, if one runs here *)
+  peers : string list;
+      (** Where this domain's other frontends answer, from the launcher. Empty
+          when none does, which is what keeps a domain served only by this
+          listener from being reported as a daemon that is down. *)
   domain_name : string;
   self_frontend : Yojson.Safe.t;
       (** Per-domain settings only; shared process figures are reported once at
@@ -129,7 +132,7 @@ and share_handler =
   range:string option ->
   (Cohttp.Response.t * Cohttp_lwt.Body.t) Lwt.t
 
-let make_route bindings (b : Frontend.binding) =
+let make_route bindings ~peers (b : Frontend.binding) =
   let module C = (val b.Frontend.conf : Conf.S) in
   let secret =
     match inherited bindings b "secret" with
@@ -174,7 +177,7 @@ let make_route bindings (b : Frontend.binding) =
     chunk_size = C.chunk_size;
     store = C.store;
     serve_share;
-    socket_path = C.socket_path;
+    peers;
     domain_name = C.domain_name;
     self_frontend =
       `Assoc
@@ -550,9 +553,15 @@ let status_json ~port ~tls ~totals ~exact ~reload routes =
   let+ domains =
     Lwt_list.map_p
       (fun route ->
-        let* mount = fetch_mount ~socket_path:route.socket_path in
+        (* One round trip per frontend that answers, and none at all for a
+           domain this listener serves alone. *)
+        let* peers =
+          Lwt_list.map_p
+            (fun socket_path -> fetch_mount ~socket_path)
+            route.peers
+        in
         route.diagnose ~totals ~exact ~reload
-          ~frontends:[route.self_frontend; mount])
+          ~frontends:(route.self_frontend :: peers))
       routes
   in
   `Assoc
@@ -786,7 +795,12 @@ let start served =
           )
       | None -> None
   in
-  let routes = List.map (make_route bindings) bindings in
+  let routes =
+    List.map
+      (fun (sv : Frontend.served) ->
+        make_route bindings ~peers:sv.Frontend.peers sv.Frontend.binding)
+      served
+  in
   let mode =
     match (cert, key) with
       | Some c, Some k ->

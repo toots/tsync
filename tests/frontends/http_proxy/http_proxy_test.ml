@@ -204,7 +204,7 @@ let () =
           ~get_field:(fun _ -> Some (Filename.temp_dir "tsync-route-test" ""))
           ();
       serve_share = None;
-      socket_path = "/nonexistent/tsync.sock";
+      peers = [];
       domain_name = "one";
       self_frontend = `Assoc [];
       diagnose =
@@ -351,7 +351,11 @@ let () =
       mount_point = "";
     }
   in
-  let status_routes = [Http_proxy_frontend.make_route [binding] binding] in
+  (* No peers: this listener is the only frontend the domain has here, which is
+     what keeps the report from announcing a mount daemon that never ran. *)
+  let status_routes =
+    [Http_proxy_frontend.make_route [binding] ~peers:[] binding]
+  in
   let report ?(totals = false) ?(exact = false) ?(reload = false) () =
     Lwt_main.run
       (Http_proxy_frontend.status_json ~port:8443 ~tls:true ~totals ~exact
@@ -402,13 +406,10 @@ let () =
   let options = json_member "options" proxy_frontend in
   assert (json_member "secret" options = `String "***");
   assert (json_member "port" options = `String "8443");
-  (* Nothing listens on the socket, so the other frontend is reported as not
-     answering, named by the socket it was asked on. *)
-  let mount_frontend =
-    List.find (fun f -> json_member "type" f <> `String "http-proxy") frontends
-  in
-  assert (json_member "reachable" mount_frontend = `Bool false);
-  assert (json_member "socketPath" mount_frontend <> `Null);
+  (* This listener is the domain's only frontend here, so it is the only one
+     reported. Knocking on a socket nothing was configured to bind would announce
+     a daemon that is down as if it had ever been up. *)
+  assert (List.length frontends = 1);
   let backends =
     match json_member "backends" domain with `List l -> l | _ -> []
   in

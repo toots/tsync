@@ -9,21 +9,6 @@ type domain = (string * Frontend.binding) list
    Nothing else here may touch Lwt: what runs after the forks belongs to a leaf,
    which starts its own loop. *)
 
-(* One binding per (domain × frontend), grouped by frontend. Each group is its
-   own process, so distinct frontends on one domain run concurrently. *)
-let bindings_by_frontend domains =
-  let all = List.concat_map Fun.id domains in
-  let order =
-    List.fold_left
-      (fun acc (name, _) -> if List.mem name acc then acc else acc @ [name])
-      [] all
-  in
-  List.map
-    (fun name ->
-      ( name,
-        List.filter_map (fun (n, b) -> if n = name then Some b else None) all ))
-    order
-
 let resolve name =
   match Frontend.find name with
     | Some m -> m
@@ -66,22 +51,55 @@ let recover domains =
              Lwt.return_unit))
        confs)
 
-(* Where a domain's frontends answer, so what the poller applied can reach them.
-   A frontend that listens on nothing hears nothing, which is the right answer
-   for one driven by commands. *)
+(* Where one frontend answers, if it answers at all. [None] for one driven by
+   commands rather than by requests. *)
+let socket_of (name, b) =
+  let (module F : Frontend.S) = resolve name in
+  match F.listens with
+    | None -> None
+    | Some `Domain_socket ->
+        let module C = (val b.Frontend.conf : Conf.S) in
+        Some C.socket_path
+    | Some `Proxy_socket ->
+        Some (Runtime.proxy_socket_path (Runtime.default_paths ()))
+
+(* Where a domain's frontends answer, so what the poller applied can reach
+   them. *)
 let frontend_sockets domain =
-  List.filter_map
-    (fun (name, b) ->
-      let (module F : Frontend.S) = resolve name in
-      match F.listens with
-        | None -> None
-        | Some `Domain_socket ->
-            let module C = (val b.Frontend.conf : Conf.S) in
-            Some C.socket_path
-        | Some `Proxy_socket ->
-            Some (Runtime.proxy_socket_path (Runtime.default_paths ())))
-    domain
-  |> List.sort_uniq compare
+  List.sort_uniq compare (List.filter_map socket_of domain)
+
+(* The same list minus the named frontend's own, which is what a frontend
+   reporting on the whole domain needs and cannot work out for itself: it holds
+   one binding, so it would have to assume its siblings rather than be told. *)
+let peers_of domain name =
+  let mine =
+    List.filter_map
+      (fun (n, b) -> if n = name then socket_of (n, b) else None)
+      domain
+  in
+  List.filter (fun s -> not (List.mem s mine)) (frontend_sockets domain)
+
+(* One binding per (domain × frontend), grouped by frontend. Each group is its
+   own process, so distinct frontends on one domain run concurrently.
+
+   Each binding carries where its domain's other frontends answer: that needs the
+   whole matrix, which is here and nowhere below. *)
+let bindings_by_frontend domains =
+  let all =
+    List.concat_map
+      (fun d -> List.map (fun (name, b) -> (name, (b, peers_of d name))) d)
+      domains
+  in
+  let order =
+    List.fold_left
+      (fun acc (name, _) -> if List.mem name acc then acc else acc @ [name])
+      [] all
+  in
+  List.map
+    (fun name ->
+      ( name,
+        List.filter_map (fun (n, x) -> if n = name then Some x else None) all ))
+    order
 
 type engine = {
   name : string;
@@ -214,13 +232,17 @@ let run ?(on_leaf = fun ~name:_ -> ()) domains =
        after the fork because it is the first thing to touch Lwt. *)
     let serve items =
       Frontend.cap_blocking_pool
-        ~concurrency:(Frontend.binding_concurrency items);
+        ~concurrency:(Frontend.binding_concurrency (List.map fst items));
       F.start
         (List.map
-           (fun binding ->
+           (fun (binding, peers) ->
              let module C = (val binding.Frontend.conf : Conf.S) in
              let module E = Domain_engine.Make (C) in
-             { Frontend.binding; domain = (module E : Domain_engine.Domain) })
+             {
+               Frontend.binding;
+               domain = (module E : Domain_engine.Domain);
+               peers;
+             })
            items)
     in
     match F.topology with

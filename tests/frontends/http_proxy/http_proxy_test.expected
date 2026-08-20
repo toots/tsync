@@ -89,11 +89,6 @@ stop: {"ok":true} closes=true asked=1
           "readOnly": false,
           "shares": false,
           "options": { "port": "8443", "secret": "***" }
-        },
-        {
-          "reachable": false,
-          "socketPath": "/tmp/tsync-http-proxy-status-test/absent.sock",
-          "error": "Unix.Unix_error(Unix.ENOENT, \"connect\", \"\")"
         }
       ],
       "backends": [
@@ -168,8 +163,6 @@ Domain statusdom
     public shares    off
     option port      8443
     option secret    ***
-  Frontend (none answering)
-    NOT ANSWERING    /tmp/tsync-http-proxy-status-test/absent.sock: Unix.Unix_error(Unix.ENOENT, "connect", "")
   Backend disk (local, main)
     path             /tmp/tsync-http-proxy-status-test/store
     reachable        yes (1 ms)
@@ -269,8 +262,6 @@ Domain statusdom
     public shares    off
     option port      8443
     option secret    ***
-  Frontend (none answering)
-    NOT ANSWERING    /tmp/tsync-http-proxy-status-test/absent.sock: Unix.Unix_error(Unix.ENOENT, "connect", "")
   Backend disk (local, main)
     path             /tmp/tsync-http-proxy-status-test/store
     reachable        yes (1 ms)
@@ -324,8 +315,6 @@ Domain statusdom
     public shares    off
     option port      8443
     option secret    ***
-  Frontend (none answering)
-    NOT ANSWERING    /tmp/tsync-http-proxy-status-test/absent.sock: Unix.Unix_error(Unix.ENOENT, "connect", "")
   Backend disk (local, main)
     path             /tmp/tsync-http-proxy-status-test/store
     reachable        yes (1 ms)
