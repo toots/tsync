@@ -59,67 +59,23 @@ let start_cmd =
           (d, conf, mount_fn d))
         domains
     in
-    (* Do NOT touch Lwt here: any Lwt_unix/Lwt_preemptive call initializes the
-       shared notification eventfd, and a child inheriting it across the fork
-       below would have its worker wakeups delivered to the wrong process. Each
-       leaf caps its own blocking pool after forking, from inside its own loop
-       (see [Frontend.cap_blocking_pool]). *)
-    (* One [binding] per (domain × frontend), grouped by frontend. Each group is
-       its own process (all but the last forked), so distinct frontends on one
-       domain run concurrently. *)
-    let all_bindings =
-      List.concat_map
-        (fun (d, conf, mount_point) ->
-          List.map
-            (fun (f : Conf_parsing.frontend_config) ->
-              ( f.Conf_parsing.frontend_type,
-                { Frontend.conf; options = f.Conf_parsing.options; mount_point }
-              ))
-            d.Conf_parsing.frontends)
-        per_domain
-    in
-    let frontend_order =
-      List.fold_left
-        (fun acc (name, _) -> if List.mem name acc then acc else acc @ [name])
-        [] all_bindings
-    in
-    let groups =
-      List.map
-        (fun name ->
-          ( name,
-            List.filter_map
-              (fun (n, b) -> if n = name then Some b else None)
-              all_bindings ))
-        frontend_order
-    in
-    let run_group (name, bindings) =
-      let (module F : Frontend.S) =
-        match Frontend.find name with
-          | Some m -> m
-          | None ->
-              failwith
-                (Printf.sprintf
-                   "frontend %s is configured but not compiled into this binary"
-                   name)
-      in
-      Log.debug "starting frontend %s (%d domains)" name (List.length bindings);
-      (* Here rather than at startup: this runs once per frontend process, after
-         the fork. *)
-      trace_process ~name;
-      F.start bindings
-    in
-    Log.debug "cache root: %s" runtime_paths.Runtime.cache_root;
     (* Before the fork, so every frontend inherits it. launchd hands this daemon
        a 256 soft limit against an unlimited hard one, low enough that a burst of
        concurrent work fails accept with EMFILE. *)
-      (match Descriptors.current () with
+    (match Descriptors.current () with
       | Some before ->
           let after = Descriptors.raise_to ~target:8192 in
           if after > before then
             Log.debug "open file limit: %d (was %d)" after before
           else Log.debug "open file limit: %d" after
       | None -> ());
-    Frontend.run_forked run_group groups
+    Log.debug "cache root: %s" runtime_paths.Runtime.cache_root;
+    Launcher.run
+      ~on_leaf:(fun ~name -> trace_process ~name)
+      (List.map
+         (fun ((d : Conf_parsing.domain), conf, mount_point) ->
+           { Launcher.frontends = d.Conf_parsing.frontends; conf; mount_point })
+         per_domain)
   in
   Cmd.v
     (Cmd.info "start" ~doc:"Mount the filesystem (run under a service manager)")
