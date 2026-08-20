@@ -316,5 +316,6 @@ let register () =
     (module struct
       let is_local = is_local
       let topology = `One_process
+      let listens = None
       let start = start
     end : Frontend.S)

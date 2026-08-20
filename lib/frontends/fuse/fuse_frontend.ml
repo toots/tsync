@@ -61,5 +61,6 @@ let register () =
     (module struct
       let is_local = is_local
       let topology = topology
+      let listens = Some `Domain_socket
       let start = start
     end : Frontend.S)
