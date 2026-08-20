@@ -12,6 +12,11 @@ val domain_socket_path : paths -> string -> string
     one listener process serves every domain configured on it. *)
 val proxy_socket_path : paths -> string
 
+(** Where to reach the process converging every domain. One per machine: the
+    work is the domain's rather than any frontend's, and it runs beside them
+    rather than inside one. *)
+val sync_socket_path : paths -> string
+
 (** Restart the background service this platform installs, so it re-reads
     [config_path]. [false] when the service is not installed. *)
 val restart_service : unit -> bool

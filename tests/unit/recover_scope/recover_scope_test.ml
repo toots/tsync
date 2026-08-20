@@ -35,7 +35,9 @@ let plant_temp dir =
 (* A body under a uuid no staged manifest names: what staging looks like between
    creating the body and recording it. *)
 let plant_staged_body () =
-  let dir = Cache_layout.staged_whole_dir ~cache_root:C.cache_root C.domain_name in
+  let dir =
+    Cache_layout.staged_whole_dir ~cache_root:C.cache_root C.domain_name
+  in
   Fs_util.mkdir_p_sync dir;
   let path = Filename.concat dir "0123456789abcdef" in
   let oc = open_out path in

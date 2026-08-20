@@ -10,21 +10,9 @@ type domain = (string * Frontend.binding) list
    which starts its own loop. *)
 
 (* One binding per (domain × frontend), grouped by frontend. Each group is its
-   own process (all but the last forked), so distinct frontends on one domain
-   run concurrently.
-
-   The flag marks the one process that keeps each domain converging with the
-   store. At most one may: they share a cache root and a bookmark with no
-   arbitration between them, and the same client uuid, so neither could tell the
-   other's work from its own. It goes to the first frontend listed, by position —
-   naming the frontend type would hand it to both halves of a domain that listed
-   one type twice. *)
+   own process, so distinct frontends on one domain run concurrently. *)
 let bindings_by_frontend domains =
-  let all =
-    List.concat_map
-      (fun d -> List.mapi (fun i (name, b) -> (name, (b, i = 0))) d)
-      domains
-  in
+  let all = List.concat_map Fun.id domains in
   let order =
     List.fold_left
       (fun acc (name, _) -> if List.mem name acc then acc else acc @ [name])
@@ -78,6 +66,144 @@ let recover domains =
              Lwt.return_unit))
        confs)
 
+(* Where a domain's frontends answer, so what the poller applied can reach them.
+   A frontend that listens on nothing hears nothing, which is the right answer
+   for one driven by commands. *)
+let frontend_sockets domain =
+  List.filter_map
+    (fun (name, b) ->
+      let (module F : Frontend.S) = resolve name in
+      match F.listens with
+        | None -> None
+        | Some `Domain_socket ->
+            let module C = (val b.Frontend.conf : Conf.S) in
+            Some C.socket_path
+        | Some `Proxy_socket ->
+            Some (Runtime.proxy_socket_path (Runtime.default_paths ())))
+    domain
+  |> List.sort_uniq compare
+
+type engine = {
+  name : string;
+  sockets : string list;  (** where this domain's frontends answer *)
+  converging : (module Domain_engine.Converging);
+  diagnose :
+    totals:bool -> exact:bool -> reload:bool -> unit -> Yojson.Safe.t Lwt.t;
+}
+
+(* This process's section of `tsync status'.
+
+   The whole domain, not just this process's counters: the cache, the records
+   owed and the backends are the domain's, and this is the process holding them.
+   A frontend reports what only it knows -- its mount, its handles, its served
+   bytes -- under [frontends]. *)
+let report ~totals ~exact ~reload engines =
+  let open Lwt.Syntax in
+  let+ domains =
+    Lwt_list.map_s (fun e -> e.diagnose ~totals ~exact ~reload ()) engines
+  in
+  `Assoc
+    (Diagnostics.self_json ~extra:[("frontend", `String "sync")] ()
+    @ [("domains", `List domains)])
+
+(* Answered in the same vocabulary the mount daemon's socket uses, so a client
+   can match on the code rather than on the wording. *)
+let handler ~request_stop engines line =
+  let open Lwt.Syntax in
+  let fail code msg =
+    Lwt.return (Ipc_handler.error_reply code msg, `Continue)
+  in
+  match Yojson.Safe.from_string line with
+    | exception _ -> fail `Invalid "invalid JSON"
+    | `Assoc obj -> (
+        let arg =
+          match List.assoc_opt "arg" obj with Some (`String s) -> s | _ -> ""
+        in
+        let asked name = List.mem name (String.split_on_char ',' arg) in
+        match List.assoc_opt "action" obj with
+          | Some (`String "stats") ->
+              let exact = asked "exact" in
+              let totals = exact || asked "totals" in
+              let reload = totals && asked "reload" in
+              let* r = report ~totals ~exact ~reload engines in
+              let fields = match r with `Assoc f -> f | _ -> [] in
+              Lwt.return
+                ( Yojson.Safe.to_string (`Assoc (("ok", `Bool true) :: fields)),
+                  `Continue )
+          | Some (`String "stop") ->
+              (* Answered before winding down, so the caller hears that it was
+                 asked rather than losing the connection. *)
+              request_stop ();
+              Lwt.return
+                (Yojson.Safe.to_string (`Assoc [("ok", `Bool true)]), `Stop)
+          | Some (`String a) -> fail `Invalid ("unknown action: " ^ a)
+          | _ -> fail `Invalid "unknown action: ")
+    | _ -> fail `Internal "expected JSON object"
+
+(* The domains' background work, in the process that forked the frontends rather
+   than in one of them.
+
+   It is the domain's work, not a frontend's: it writes the mirror, the
+   applied-through bookmark and the staged tree, which every process serving the
+   domain shares and none of them arbitrate. Giving it to one of the frontends
+   made that one silently different from its peers, and picked which by config
+   order. Here nobody is picked, because there is nobody to pick. *)
+let converge domains =
+  let engines =
+    List.filter_map
+      (function
+        | [] -> None
+        | (_, b) :: _ as d ->
+            let module C = (val b.Frontend.conf : Conf.S) in
+            let module E = Domain_engine.Make (C) in
+            let module Cv = Domain_engine.Converge (E) in
+            let module Diag = Diagnostics.Make (C) in
+            Some
+              {
+                name = C.domain_name;
+                sockets = frontend_sockets d;
+                converging = (module Cv : Domain_engine.Converging);
+                diagnose =
+                  (fun ~totals ~exact ~reload () ->
+                    Diag.domain_json ~totals ~exact ~reload ());
+              })
+      domains
+  in
+  Domain_engine.run (fun ~ready ->
+      let open Lwt.Syntax in
+      let stop, wake = Lwt.wait () in
+      let request_stop () =
+        match Lwt.state stop with
+          | Lwt.Sleep -> Lwt.wakeup_later wake ()
+          | _ -> ()
+      in
+      List.iter
+        (fun s -> ignore (Lwt_unix.on_signal s (fun _ -> request_stop ())))
+        [Sys.sigterm; Sys.sigint];
+      let* () =
+        Lwt_list.iter_s
+          (fun e ->
+            let module Cv = (val e.converging : Domain_engine.Converging) in
+            Cv.start
+              ~on_changed:(Change_notice.send ~domain:e.name ~sockets:e.sockets)
+              ())
+          engines
+      in
+      let socket_path = Runtime.sync_socket_path (Runtime.default_paths ()) in
+      Log.debug "converging %d domain(s), answering at %s" (List.length engines)
+        socket_path;
+      Lwt.async (fun () ->
+          Ipc.serve ~path:socket_path (handler ~request_stop engines));
+      ready ();
+      let* () = stop in
+      Log.info "stopping, letting the domains catch up";
+      (try Unix.unlink socket_path with _ -> ());
+      Lwt_list.iter_s
+        (fun e ->
+          let module Cv = (val e.converging : Domain_engine.Converging) in
+          Cv.drain ())
+        engines)
+
 let run ?(on_leaf = fun ~name:_ -> ()) domains =
   let run_group (name, bindings) =
     let (module F : Frontend.S) = resolve name in
@@ -88,19 +214,13 @@ let run ?(on_leaf = fun ~name:_ -> ()) domains =
        after the fork because it is the first thing to touch Lwt. *)
     let serve items =
       Frontend.cap_blocking_pool
-        ~concurrency:(Frontend.binding_concurrency (List.map fst items));
+        ~concurrency:(Frontend.binding_concurrency items);
       F.start
         (List.map
-           (fun (binding, owns) ->
+           (fun binding ->
              let module C = (val binding.Frontend.conf : Conf.S) in
              let module E = Domain_engine.Make (C) in
-             let module P = Domain_engine.Passive (E) in
-             {
-               Frontend.binding;
-               domain =
-                 (if owns then (module E : Domain_engine.Domain)
-                  else (module P : Domain_engine.Domain));
-             })
+             { Frontend.binding; domain = (module E : Domain_engine.Domain) })
            items)
     in
     match F.topology with
@@ -118,4 +238,5 @@ let run ?(on_leaf = fun ~name:_ -> ()) domains =
       if F.topology = `Not_a_daemon then refuse name)
     groups;
   recover domains;
-  Frontend.run_forked run_group groups
+  let reap = Frontend.fork_each run_group groups in
+  Fun.protect ~finally:reap (fun () -> converge domains)

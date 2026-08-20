@@ -132,6 +132,11 @@ module Make (C : Conf.S) (D : Domain_engine.Domain) = struct
   let require_delivery delivered =
     if delivered > 0 then Lwt.return_unit else Lwt.fail No_subscriber
 
+  (* A hint, not a request: the journal carries the same news and the next
+     enumeration reads it, so nobody listening is not a failure. *)
+  let notify_changed ~subs key =
+    ignore (publish ~subs "changed" [("key", `String key)])
+
   let hooks ~subs =
     H.
       {
@@ -142,11 +147,9 @@ module Make (C : Conf.S) (D : Domain_engine.Domain) = struct
         restore =
           (fun key ->
             require_delivery (publish ~subs "restore" [("key", `String key)]));
-        (* Hints, not requests: the journal carries the same news and the next
-           enumeration reads it. [full_resync]'s token is on disk before this is
-           attempted, which is what makes that one durable. *)
-        changed =
-          (fun key -> ignore (publish ~subs "changed" [("key", `String key)]));
+        (* [full_resync]'s token is on disk before its event is attempted, which
+           is what makes that one durable where this is a hint. *)
+        changed = notify_changed ~subs;
         full_resync =
           (fun () ->
             stamp_resync_token ();
@@ -229,13 +232,8 @@ module Make (C : Conf.S) (D : Domain_engine.Domain) = struct
         (* Nothing to drop, the replica keeping the file and the daemon only the
            promoted chunks: upload state is part of the item's version, so a
            finished upload is just another change. *)
-        ignore (publish ~subs "changed" [("key", `String key)]);
+        notify_changed ~subs key;
         Lwt.return_unit)
-      ~freshness:
-        (* The extension keeps its own view of the tree, so it has to be told;
-           it will not ask again on its own. *)
-        (Domain_engine.Notify
-           (fun key -> ignore (publish ~subs "changed" [("key", `String key)])))
       ()
 end
 

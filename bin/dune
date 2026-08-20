@@ -64,7 +64,7 @@
   tsync-libs.object
   tsync-libs.naming
   tsync-libs.frontend_register
-  tsync-libs.launcher
+  tsync_launcher
   tsync-libs.chunk
   tsync-libs.backend_register
   tsync-libs.metrics

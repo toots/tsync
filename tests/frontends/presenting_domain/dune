@@ -10,11 +10,14 @@
    -open
    Tsync_conf
    -open
-   Tsync_local_backend))
- (name passive_domain)
+   Tsync_local_backend
+   -open
+   Tsync_store))
+ (name presenting_domain)
  (libraries
   tsync-libs.engine
   tsync-libs.naming
+  tsync-libs.store
   tsync-libs.conf
   tsync_backend_register
   tsync_local_backend

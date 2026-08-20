@@ -20,6 +20,7 @@ let domain_socket_path paths _domain_name =
 let proxy_socket_path paths =
   Filename.concat paths.data_dir "tsync-http-proxy.sock"
 
+let sync_socket_path paths = Filename.concat paths.data_dir "tsync-sync.sock"
 let app_bundle = "/Applications/TsyncApp.app"
 let daemon_label = "org.feverdreamtv.tsync.daemon"
 let sh fmt = Printf.ksprintf (fun cmd -> Sys.command cmd = 0) fmt
