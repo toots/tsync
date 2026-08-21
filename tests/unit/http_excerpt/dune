@@ -1,0 +1,5 @@
+(executable
+ (flags
+  (:standard -open Tsync_http_client))
+ (name http_excerpt)
+ (libraries tsync_http_client))

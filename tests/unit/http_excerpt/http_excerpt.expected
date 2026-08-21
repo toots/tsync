@@ -1,0 +1,21 @@
+=== pretty-printed JSON, as GCS answers a 429
+{ "error": { "code": 429, "message": "The rate of change requests to the object exceeds the limit.", "status": "RESOURCE_EXHAUSTED" } }
+
+=== an nginx error page
+<html> <head><title>502 Bad Gateway</title></head> <body> <center><h1>502 Bad Gateway</h1></center> <hr><center>nginx/1.24.0</center> </body> </html>
+
+=== one line, short enough to stand on its own
+InvalidAccessKeyId: the key is not on file
+
+=== a body longer than the limit, on one line
+xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx ...
+
+=== an XML error, as S3 answers
+<?xml version="1.0" encoding="UTF-8"?> <Error><Code>SlowDown</Code><Message>Please reduce your request rate.</Message></Error>
+
+=== empty
+(empty)
+
+=== whitespace only
+(empty)
+
