@@ -201,57 +201,37 @@ module Make (C : Conf.S) = struct
   let resync_to ?(on_start = fun ~name:_ ~key:_ -> ())
       ?(on_entry = fun ~name:_ ~key:_ ~size:_ ~outcome:_ -> ()) ?held src dst
       ~name entries =
-    (* A fixed set of workers taking the next entry each, rather than a promise
-       per entry: the listing is the domain's length, and fanning out over it
-       builds a closure and a pool queue cell for every object in it before the
-       first copy runs.
-
-       Taking the head and moving the cursor happens between binds, so no worker
-       can see the list part-way through another's turn. *)
     let remaining = ref entries in
-    let checked = ref 0 in
-    let next () =
-      match !remaining with
-        | [] -> None
-        | entry :: rest ->
-            remaining := rest;
-            incr checked;
-            Some entry
+    let checked = ref 0 and copied = ref 0 and copied_bytes = ref 0 in
+    let sync entry () =
+      let key = entry.Backend.key in
+      let size = entry.Backend.size in
+      let+ outcome =
+        sync_entry ~on_start:(fun () -> on_start ~name ~key) ?held src dst entry
+      in
+      match outcome with
+        | None -> on_entry ~name ~key ~size ~outcome:`Present
+        | Some (reason, bytes) ->
+            on_entry ~name ~key ~size ~outcome:(`Copied (reason, bytes));
+            incr copied;
+            copied_bytes := !copied_bytes + bytes
     in
-    let rec worker acc =
-      match next () with
-        | None -> Lwt.return acc
-        | Some entry ->
-            let key = entry.Backend.key in
-            let size = entry.Backend.size in
-            let* copied =
-              sync_entry
-                ~on_start:(fun () -> on_start ~name ~key)
-                ?held src dst entry
-            in
-            worker
-              (match copied with
-                | None ->
-                    on_entry ~name ~key ~size ~outcome:`Present;
-                    acc
-                | Some (reason, bytes) ->
-                    on_entry ~name ~key ~size ~outcome:(`Copied (reason, bytes));
-                    let n, total = acc in
-                    (n + 1, total + bytes))
+    (* A worker apiece and never more than there is work for, so the width is
+       the code's and not the listing's. Each takes a probe slot and then a copy
+       slot inside {!sync_entry}, one after the other, so nothing here holds a
+       slot across the acquisition of another. *)
+    let+ () =
+      Lwt_bounded.each
+        ~width:(min entries_in_flight (List.length entries))
+        (fun () ->
+          match !remaining with
+            | [] -> None
+            | entry :: rest ->
+                remaining := rest;
+                incr checked;
+                Some (sync entry))
     in
-    (* The code chose this length, not the listing: a worker apiece, never more
-       than there is work for. Each takes a probe slot and then a copy slot
-       inside {!sync_entry}, one after the other, so nothing here holds a slot
-       across the acquisition of another. *)
-    let+ folded =
-      Lwt_list.map_p
-        (fun _ -> worker (0, 0))
-        (List.init (min entries_in_flight (List.length entries)) Fun.id)
-    in
-    let copied, copied_bytes =
-      List.fold_left (fun (n, b) (dn, db) -> (n + dn, b + db)) (0, 0) folded
-    in
-    { name; checked = !checked; copied; copied_bytes }
+    { name; checked = !checked; copied = !copied; copied_bytes = !copied_bytes }
 
   (* Copies between the stores themselves rather than through {!Conf.store}: the
      point is to reach the ones the composite writes off the caller's path, or
