@@ -158,6 +158,11 @@ module Make (C : Conf.S) = struct
      that replica's readers until its backlog drains. *)
   let entry_ops = 2000
 
+  (* A count alone bounds nothing a reader can feel: an import of a few hundred
+     large files runs for minutes and never reaches the cap, so every peer sees
+     the run's folders and none of its files until it ends. *)
+  let entry_age = 10.
+
   let tally summary = function
     | Imported _ -> { summary with imported = summary.imported + 1 }
     | Skipped_exists -> { summary with skipped = summary.skipped + 1 }
@@ -174,8 +179,8 @@ module Make (C : Conf.S) = struct
     go [] (Filename.dirname rel)
 
   let run ?(only = []) ?(exclude = []) ?(force_rehash = false)
-      ?(entry_ops = entry_ops) ?(on_dir = fun ~rel:_ -> ())
-      ?(on_plan = fun ~files:_ ~bytes:_ -> ())
+      ?(entry_ops = entry_ops) ?(entry_age = entry_age)
+      ?(on_dir = fun ~rel:_ -> ()) ?(on_plan = fun ~files:_ ~bytes:_ -> ())
       ?(on_start = fun ~rel:_ ~size:_ -> ())
       ?(on_progress = fun ~bytes:_ ~sent:_ -> ()) ~src ~on_file () =
     let src =
@@ -242,6 +247,7 @@ module Make (C : Conf.S) = struct
     let* spool = Spool.create () in
     let spool = ref spool in
     let batched = ref 0 in
+    let published_at = ref (Unix.gettimeofday ()) in
     (* The spool is sealed to be read back, so what is published is replaced
        rather than reused. Every pass below adds in sequence: an op appended
        in parallel with this would land in a spool already sealed. *)
@@ -252,6 +258,7 @@ module Make (C : Conf.S) = struct
         let* fresh = Spool.create () in
         spool := fresh;
         batched := 0;
+        published_at := Unix.gettimeofday ();
         Lwt.finalize
           (fun () ->
             let* body = Spool.body full in
@@ -266,7 +273,11 @@ module Make (C : Conf.S) = struct
         (fun op ->
           let* () = Spool.add !spool [op] in
           incr batched;
-          if !batched >= entry_ops then publish () else Lwt.return_unit)
+          if
+            !batched >= entry_ops
+            || Unix.gettimeofday () -. !published_at >= entry_age
+          then publish ()
+          else Lwt.return_unit)
         ops
     in
     Lwt.finalize

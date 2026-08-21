@@ -33,7 +33,7 @@ let write rel =
   rel
 
 (* The published entries in the order a peer replays them. *)
-let entries () =
+let list_entries () =
   let* keys = Fs.list_journal_keys () in
   Lwt_list.filter_map_s
     (fun key ->
@@ -60,7 +60,7 @@ let () =
      let* (_ : Import.summary) =
        I.run ~entry_ops ~src ~on_file:(fun ~rel:_ _ -> ()) ()
      in
-     let* entries = entries () in
+     let* entries = list_entries () in
      let ops = List.concat_map snd entries in
      let puts = List.filter_map put_of ops in
      let mkdirs = List.filter_map mkdir_of ops in
@@ -112,9 +112,40 @@ let () =
        (last_mkdir < first_put);
 
      case "a reader is pointed at the whole run";
-     let+ cursor = Fs.fetch_cursor () in
+     let* cursor = Fs.fetch_cursor () in
      let last = fst (List.nth entries (List.length entries - 1)) in
      check "the cursor names the last entry published"
        (Option.map Journal.Entry_key.to_string cursor
        = Some (Journal.Entry_key.to_string last));
-     report ~expected:6 ())
+
+     case "a long run publishes before it ends";
+     (* [entry_ops] out of reach, so only the age bound can split this. *)
+     let src2 = Filename.concat root "src2" in
+     let files2 =
+       List.map
+         (fun rel ->
+           let path = Filename.concat src2 rel in
+           ignore
+             (Sys.command
+                (Printf.sprintf "mkdir -p %s" (Filename.dirname path)));
+           let oc = open_out_bin path in
+           output_string oc rel;
+           close_out oc;
+           rel)
+         ["g.txt"; "h.txt"; "i.txt"]
+     in
+     let before = List.length entries in
+     let* (_ : Import.summary) =
+       I.run ~entry_ops:max_int ~entry_age:0. ~src:src2
+         ~on_file:(fun ~rel:_ _ -> ())
+         ()
+     in
+     let+ all = list_entries () in
+     let added = List.length all - before in
+     check
+       (Printf.sprintf
+          "%d files under an unreachable op cap came out as %d entries"
+          (List.length files2) added)
+       (added > 1);
+
+     report ~expected:7 ())
