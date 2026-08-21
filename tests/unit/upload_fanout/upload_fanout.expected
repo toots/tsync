@@ -8,8 +8,12 @@ what is held does not grow with the length of the file: ok
 the keys read back as they were written: ok
 and the body they are in is not words the collector walks: ok
 
+=== the body a store is handed is the one a reader decodes
+under the name it records, byte for byte: ok
+and under any other name, which is an encoding again: ok
+
 === a deduplicated upload publishes the same body
 the two agree on the file's identity: ok
 and on every chunk key: ok
 
-7 check(s), 0 failure(s)
+9 check(s), 0 failure(s)

@@ -250,7 +250,7 @@ module Make_with_layout (C : Conf.S) (L : Layout.S) : S = struct
        write — deduplicated, or already known to this session — may hold a name
        only in a space a collection is about to discard. *)
     let* () = Space.promote_all ~count chunk_key in
-    let* () = St.put_manifest ~key ~data:(Chunk.to_string body) in
+    let* () = St.put_manifest ~key ~data:body in
     if !cancel then
       let* () =
         Lwt.catch

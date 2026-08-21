@@ -315,7 +315,7 @@ module Make_with_layout (C : Conf.S) (Sq : Sync_queue.S) (L : Layout.S) :
   let publish_manifest key (m : Manifest.t) =
     Log.info "publish_manifest %s: size=%Ld" key m.Manifest.size;
     let name = Key.leaf ~domain_prefix:C.domain_prefix key in
-    let* () = St.put_manifest ~key ~data:(Manifest.to_string ~name m) in
+    let* () = St.put_manifest ~key ~data:(Manifest.body ~name m) in
     let* ek = Fs.write_journal_entry [`Put (rel_key key, m.Manifest.size)] in
     Fs.bump_cursor ek
 
@@ -341,7 +341,7 @@ module Make_with_layout (C : Conf.S) (Sq : Sync_queue.S) (L : Layout.S) :
     let name = Key.leaf ~domain_prefix:C.domain_prefix key in
     let* m = read_manifest key in
     match m with
-      | Some man -> St.put_manifest ~key ~data:(Manifest.to_string ~name man)
+      | Some man -> St.put_manifest ~key ~data:(Manifest.body ~name man)
       | None -> Lwt.return_unit
 
   let rename_body ~src ~dst =
@@ -467,7 +467,12 @@ module Make_with_layout (C : Conf.S) (Sq : Sync_queue.S) (L : Layout.S) :
     match Manifest.of_string data with
       | m ->
           ignore (cancel_upload key);
-          let* () = St.put_manifest ~key ~data in
+          (* Restored under the name the snapshot recorded, which is the one
+             its body already carries. *)
+          let* () =
+            St.put_manifest ~key
+              ~data:(Manifest.body ~name:(Manifest.recorded_name m) m)
+          in
           let* () = write_manifest key m in
           (* Cached chunks are left alone: shared ones may still be wanted,
              missing ones fetch on demand. Staged edits, manifest and bodies
@@ -492,8 +497,7 @@ module Make_with_layout (C : Conf.S) (Sq : Sync_queue.S) (L : Layout.S) :
         let state =
           Manifest.make_symlink ~name ~target ~mtime:(Unix.gettimeofday ())
         in
-        let data = Manifest.to_string ~name state in
-        let* () = St.put_manifest ~key ~data in
+        let* () = St.put_manifest ~key ~data:(Manifest.body ~name state) in
         let* () = write_manifest key state in
         let* ek =
           Fs.write_journal_entry [`Put (rel_key key, state.Manifest.size)]
