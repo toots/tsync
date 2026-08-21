@@ -48,18 +48,102 @@ module Make (C : Conf.S) = struct
           let+ st = Fs_util.stat_opt_large (target_path ~src rel target) in
           match st with Some st -> st.Unix.LargeFile.st_size | None -> 0L)
 
-  (* An excluded directory is not descended into, and neither is a dir-symlink
-     whatever the policy: the caller handles those. [seen] guards against
-     cycles.
+  (* The tree an import will walk, spilled to disk and read back mapped rather
+     than held: a listing is the tree's length, and a million paths is a hundred
+     megabytes standing for the whole run before a byte is uploaded.
 
-     Entries carry the size their import will report, taken from the lstat the
-     walk already does: an import holds its whole listing, so this is a word
-     beside a path it is keeping anyway, and the alternative is stat'ing the
-     tree a second time to say how big it is. *)
-  let walk_source ~exclude src =
-    let globs = List.map Glob.of_pattern exclude in
+     Fields are length-prefixed rather than delimited because a file name is an
+     arbitrary byte string and may hold whatever separator a reader picked. *)
+  module Listing = struct
+    let dir = Filename.concat C.cache_root "import"
+
+    type 'a t = {
+      spool : Spool.t;
+      decode : Chunk.t -> int ref -> 'a;
+      mutable count : int;
+    }
+
+    let create ~name ~decode =
+      let+ spool = Spool.create ~dir ~name in
+      { spool; decode; count = 0 }
+
+    let str b s =
+      Buffer.add_int32_le b (Int32.of_int (String.length s));
+      Buffer.add_string b s
+
+    let add t fields =
+      let b = Buffer.create 128 in
+      List.iter (fun f -> f b) fields;
+      t.count <- t.count + 1;
+      Spool.append t.spool (Buffer.contents b)
+
+    let take body pos n =
+      let s = Chunk.sub body ~pos:!pos ~len:n in
+      pos := !pos + n;
+      s
+
+    let int body pos = Int32.to_int (String.get_int32_le (take body pos 4) 0)
+    let int64 body pos = String.get_int64_le (take body pos 8) 0
+
+    let string body pos =
+      let n = int body pos in
+      take body pos n
+
+    let count t = t.count
+
+    (* Sealed to be read, so nothing may be appended once this starts; the
+       mapping is dropped with the spool at the end of the run. *)
+    let iter t f =
+      let* body = Spool.seal t.spool in
+      let pos = ref 0 in
+      let rec go () =
+        if !pos >= Chunk.length body then Lwt.return_unit
+        else
+          let* () = f (t.decode body pos) in
+          go ()
+      in
+      go ()
+
+    let remove t = Spool.drop t.spool
+
+    (* A killed import leaves its spools behind with nothing else to reap them.
+    *)
+    let reap () = Spool.reap ~dir
+  end
+
+  type plan = {
+    dirs : string Listing.t;
+    files : (string * int64) Listing.t;
+    symlinks : (string * string * int64) Listing.t;
+    bytes : int64;
+  }
+
+  (* An excluded directory is not descended into, and neither is a dir-symlink
+     whatever the policy: the caller handles those. [seen] guards against cycles
+     and is the one thing here that grows with the tree, at an entry per
+     directory rather than per file.
+
+     Names are sorted with a directory's key carrying its separator, so entries
+     come out in the order a sort of every path would give: what orders two
+     paths is their first differing component, and ["a-b"] precedes ["a/x"] on
+     either reading. *)
+  let walk_source ~only ~exclude ~src plan =
+    let ex = List.map Glob.of_pattern exclude in
+    let on = List.map Glob.of_pattern only in
     let seen = Hashtbl.create 16 in
-    let rec walk rel acc =
+    let bytes = ref 0L in
+    (* Under [only] a folder marker belongs to an ancestor of a kept entry and
+       to nothing else, so the directories walked into are held here until one
+       turns up beneath them. *)
+    let pending = ref [] in
+    let flush () =
+      let held = List.rev !pending in
+      pending := [];
+      Lwt_list.iter_s
+        (fun rel -> Listing.add plan.dirs [(fun b -> Listing.str b rel)])
+        held
+    in
+    let rec walk rel ~selected =
       let dir = if rel = "" then src else Filename.concat src rel in
       let* names =
         Lwt.catch
@@ -69,32 +153,79 @@ module Make (C : Conf.S) = struct
               (Printexc.to_string exn);
             Lwt.return [])
       in
-      Lwt_list.fold_left_s
-        (fun (dirs, files, symlinks) name ->
-          let r = Key.join rel name in
-          if excluded globs r then Lwt.return (dirs, files, symlinks)
-          else (
-            let abs = Filename.concat src r in
-            let* kind = Fs_util.lstat_kind abs in
-            match kind with
-              | `Dir ->
-                  let realp = try Unix.realpath abs with _ -> abs in
-                  if Hashtbl.mem seen realp then
-                    Lwt.return (dirs, files, symlinks)
-                  else (
-                    Hashtbl.replace seen realp ();
-                    walk r (r :: dirs, files, symlinks))
-              | `File size -> Lwt.return (dirs, (r, size) :: files, symlinks)
-              | `Symlink target ->
-                  let+ bytes = symlink_bytes ~src r target in
-                  (dirs, files, (r, target, bytes) :: symlinks)
-              | `Missing -> Lwt.return (dirs, files, symlinks)))
-        acc names
+      let* entries =
+        Lwt_list.filter_map_s
+          (fun name ->
+            let r = Key.join rel name in
+            if excluded ex r then Lwt.return_none
+            else
+              let+ kind = Fs_util.lstat_kind (Filename.concat src r) in
+              match kind with
+                | `Missing -> None
+                | (`Dir | `File _ | `Symlink _) as kind ->
+                    let key = match kind with `Dir -> r ^ "/" | _ -> r in
+                    Some (key, r, kind))
+          names
+      in
+      let entries =
+        List.sort (fun (a, _, _) (b, _, _) -> compare a b) entries
+      in
+      Lwt_list.iter_s
+        (fun (_, r, kind) ->
+          let kept = only = [] || selected || excluded on r in
+          match kind with
+            | `Dir ->
+                let realp =
+                  try Unix.realpath (Filename.concat src r) with _ -> r
+                in
+                if Hashtbl.mem seen realp then Lwt.return_unit
+                else (
+                  Hashtbl.replace seen realp ();
+                  pending := r :: !pending;
+                  let* () = if only = [] then flush () else Lwt.return_unit in
+                  let* () = walk r ~selected:kept in
+                  (match !pending with
+                    | held :: rest when held = r -> pending := rest
+                    | _ -> ());
+                  Lwt.return_unit)
+            | `File size when kept ->
+                let* () = flush () in
+                bytes := Int64.add !bytes size;
+                Listing.add plan.files
+                  [
+                    (fun b -> Listing.str b r);
+                    (fun b -> Buffer.add_int64_le b size);
+                  ]
+            | `Symlink target when kept ->
+                let* () = flush () in
+                let* n = symlink_bytes ~src r target in
+                bytes := Int64.add !bytes n;
+                Listing.add plan.symlinks
+                  [
+                    (fun b -> Listing.str b r);
+                    (fun b -> Listing.str b target);
+                    (fun b -> Buffer.add_int64_le b n);
+                  ]
+            | `File _ | `Symlink _ -> Lwt.return_unit)
+        entries
     in
-    let+ dirs, files, symlinks = walk "" ([], [], []) in
-    ( List.sort compare dirs,
-      List.sort (fun (a, _) (b, _) -> compare a b) files,
-      List.sort (fun (a, _, _) (b, _, _) -> compare a b) symlinks )
+    let+ () = walk "" ~selected:false in
+    { plan with bytes = !bytes }
+
+  let plan_source ~only ~exclude ~src =
+    let* dirs = Listing.create ~name:"dirs" ~decode:Listing.string in
+    let* files =
+      Listing.create ~name:"files" ~decode:(fun body pos ->
+          let rel = Listing.string body pos in
+          (rel, Listing.int64 body pos))
+    in
+    let* symlinks =
+      Listing.create ~name:"symlinks" ~decode:(fun body pos ->
+          let rel = Listing.string body pos in
+          let target = Listing.string body pos in
+          (rel, target, Listing.int64 body pos))
+    in
+    walk_source ~only ~exclude ~src { dirs; files; symlinks; bytes = 0L }
 
   (* A key already in the domain (local sidecar or remote manifest) is never
      overwritten by an import. *)
@@ -142,14 +273,10 @@ module Make (C : Conf.S) = struct
      memory, where they and the string they encode grow with the tree rather
      than with what is in flight. *)
   module Spool = struct
-    let dir = Filename.concat C.cache_root "import"
-    let create () = Spool.create ~dir ~name:"journal"
+    let create () = Spool.create ~dir:Listing.dir ~name:"journal"
     let add t ops = Spool.append t (Journal.encode ops)
     let remove t = Spool.drop t
     let body t = Spool.seal t
-
-    (* A killed import leaves its spool behind with nothing else to reap it. *)
-    let reap () = Spool.reap ~dir
   end
 
   (* A deferred replica queues an entry behind the objects it names, so
@@ -169,14 +296,6 @@ module Make (C : Conf.S) = struct
         { summary with skipped_symlinks = summary.skipped_symlinks + 1 }
     | Failed _ -> { summary with failed = summary.failed + 1 }
 
-  (* Ancestor directory rels, root first ("a/b/c" → ["a"; "a/b"]). *)
-  let ancestors rel =
-    let rec go acc d =
-      if d = "." || d = "/" || d = "" then acc
-      else go (d :: acc) (Filename.dirname d)
-    in
-    go [] (Filename.dirname rel)
-
   let run ?(only = []) ?(exclude = []) ?(force_rehash = false)
       ?(entry_ops = entry_ops) ?(entry_age = entry_age)
       ?(on_dir = fun ~rel:_ -> ()) ?(on_plan = fun ~files:_ ~bytes:_ -> ())
@@ -189,45 +308,11 @@ module Make (C : Conf.S) = struct
       in
       try Unix.realpath p with _ -> p
     in
-    let* dirs, files, symlinks = walk_source ~exclude src in
-    (* [exclude] was applied during the walk, so this composes as
-       (all \ exclude) ∩ only. Empty [only] keeps everything. *)
-    let only_globs = List.map Glob.of_pattern only in
-    (* [only foo] selects everything under a matching directory, mirroring how
-       [exclude foo] prunes one. *)
-    let kept rel =
-      only = [] || excluded only_globs rel
-      || List.exists (excluded only_globs) (ancestors rel)
-    in
-    let files = List.filter (fun (rel, _) -> kept rel) files in
-    let symlinks = List.filter (fun (rel, _, _) -> kept rel) symlinks in
-    (* Under [only], markers are kept for ancestors of kept entries alone, so
-       non-matching branches leave no empty folders. *)
-    let dirs =
-      if only = [] then dirs
-      else (
-        let keep = Hashtbl.create 64 in
-        List.iter
-          (fun (rel, _) ->
-            List.iter (fun d -> Hashtbl.replace keep d ()) (ancestors rel))
-          files;
-        List.iter
-          (fun (rel, _, _) ->
-            List.iter (fun d -> Hashtbl.replace keep d ()) (ancestors rel))
-          symlinks;
-        List.filter (Hashtbl.mem keep) dirs)
-    in
-    let planned_bytes =
-      List.fold_left
-        (fun acc (_, size) -> Int64.add acc size)
-        (List.fold_left
-           (fun acc (_, _, bytes) -> Int64.add acc bytes)
-           0L symlinks)
-        files
-    in
+    let* () = Listing.reap () in
+    let* plan = plan_source ~only ~exclude ~src in
     on_plan
-      ~files:(List.length files + List.length symlinks)
-      ~bytes:planned_bytes;
+      ~files:(Listing.count plan.files + Listing.count plan.symlinks)
+      ~bytes:plan.bytes;
     (* Around every per-entry unit of work in both loops, which is what makes it
        the one place that knows what the import is on right now: [on_file] fires
        once an entry is done, and a large file spends its whole life between the
@@ -242,7 +327,6 @@ module Make (C : Conf.S) = struct
     let counts =
       ref { imported = 0; skipped = 0; skipped_symlinks = 0; failed = 0 }
     in
-    let* () = Spool.reap () in
     let* spool = Spool.create () in
     let spool = ref spool in
     let batched = ref 0 in
@@ -289,11 +373,10 @@ module Make (C : Conf.S) = struct
             | Skipped_exists | Skipped_symlink | Failed _ -> Lwt.return_unit
         in
         (* Every folder needs its own marker under the inode layout, files not
-           encoding their path. [dirs] is sorted, so parents precede children
-           and id resolution finds them. *)
-        let* dir_ids =
-          Lwt_list.map_s
-            (fun rel ->
+           encoding their path. The walk emits a parent before its children, so
+           id resolution finds them. *)
+        let* () =
+          Listing.iter plan.dirs (fun rel ->
               let key = C.domain_prefix ^ rel ^ "/" in
               let* () = Mf.create_dir key in
               let* () = St.put_folder_marker ~key in
@@ -304,29 +387,21 @@ module Make (C : Conf.S) = struct
                   ~domain_name:C.domain_name rel
               in
               on_dir ~rel;
-              Lwt.return (rel, id))
-            dirs
-        in
-        let mkdirs =
-          List.map (fun (d, id) -> `Mkdir (d ^ "/", Some id)) dir_ids
+              add [`Mkdir (rel ^ "/", Some id)])
         in
         (* A peer resolves a file's folder by the id its marker carries, so
            every mkdir is published before a put can name the folder. *)
-        let* () = if mkdirs = [] then Lwt.return_unit else add mkdirs in
         let* () = publish () in
         let* () =
-          Lwt_list.iter_s
-            (fun (rel, size) ->
+          Listing.iter plan.files (fun (rel, size) ->
               let* status =
                 guard rel ~size (fun () ->
                     import_file ~force_rehash ~on_progress ~src_root:src rel)
               in
               record ~rel status)
-            files
         in
         let* () =
-          Lwt_list.iter_s
-            (fun (rel, target, bytes) ->
+          Listing.iter plan.symlinks (fun (rel, target, bytes) ->
               let* status =
                 guard rel ~size:bytes (fun () ->
                     match C.symlink_policy with
@@ -344,7 +419,6 @@ module Make (C : Conf.S) = struct
                       | `Skip -> Lwt.return Skipped_symlink)
               in
               record ~rel status)
-            symlinks
         in
         let* () = publish () in
         (* No queue settles behind an import and [Backend.drain] does not
@@ -352,5 +426,9 @@ module Make (C : Conf.S) = struct
            no peer goes looking for. *)
         let+ () = Fs.flush_cursor () in
         !counts)
-      (fun () -> Spool.remove !spool)
+      (fun () ->
+        let* () = Listing.remove plan.dirs in
+        let* () = Listing.remove plan.files in
+        let* () = Listing.remove plan.symlinks in
+        Spool.remove !spool)
 end
