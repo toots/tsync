@@ -55,6 +55,10 @@ val in_flight : t -> int
     waiting on the bound rather than the work. *)
 val waiting : t -> int
 
+(** What [max] was admitted as, for a caller sizing its own workers to the bound
+    rather than restating the number beside it. *)
+val width : t -> int
+
 (** Every pool {!create}d with a [name], summed by name and in creation order:
     name, in flight, waiting, and what [max] was admitted as, so a report can
     say 4/4 rather than 4.
@@ -85,3 +89,16 @@ val iter_with : t -> ('a -> unit Lwt.t) -> 'a list -> unit Lwt.t
 
 (** {!map_with} keeping the results that are [Some], in input order. *)
 val filter_map_with : t -> ('a -> 'b option Lwt.t) -> 'a list -> 'b list Lwt.t
+
+(** [each ~width next] runs [width] workers, each taking the next job from
+    [next] and running it, until [next] answers [None]. The three above launch
+    every element at once and bound only the body, which costs a promise, a
+    closure and a queue cell per element before the first job runs — affordable
+    where the caller already holds the list, and not where the list is the
+    fan-out's own idea, since those outlive every buffer they queue for.
+
+    No slot is taken here, so a job is free to ask any pool — including the one
+    that sized [width] — for one; [next] is called between binds and must not
+    yield; and the first exception stops the workers taking new jobs and is
+    re-raised once those already running have finished. *)
+val each : width:int -> (unit -> (unit -> unit Lwt.t) option) -> unit Lwt.t

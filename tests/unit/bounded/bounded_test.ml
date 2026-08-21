@@ -86,8 +86,75 @@ let () =
 
      (* Without a queue limit nobody is ever refused, however deep it gets. *)
      let t = Lwt_bounded.create ~max:2 () in
-     let+ (_ : unit list) =
+     let* (_ : unit list) =
        Lwt_bounded.map_with t (fun _ -> Lwt.pause ()) (List.init 50 Fun.id)
      in
      check "an unbounded queue serves everyone" (Lwt_bounded.in_flight t = 0);
-     check "and leaves nothing queued" (Lwt_bounded.waiting t = 0))
+     check "and leaves nothing queued" (Lwt_bounded.waiting t = 0);
+
+     (* A pool says how wide it is, so a caller running its own workers takes
+        the number from the bound rather than restating it. *)
+     check "a pool reports what it admits"
+       (Lwt_bounded.width (Lwt_bounded.create ~max:7 ()) = 7);
+     check "and reports the clamp, not the nonsense it was given"
+       (Lwt_bounded.width (Lwt_bounded.create ~max:0 ()) = 1);
+
+     (* [each] is for a fan-out whose length is its own idea, so what is
+        asserted is the width alone: it holds no slot and keeps no results. *)
+     let running = ref 0 and widest = ref 0 and done_ = ref 0 in
+     let taken = ref 0 in
+     let next () =
+       if !taken >= 100 then None
+       else (
+         incr taken;
+         Some
+           (fun () ->
+             incr running;
+             if !running > !widest then widest := !running;
+             let* () = Lwt.pause () in
+             let+ () = Lwt.pause () in
+             decr running;
+             incr done_))
+     in
+     let* () = Lwt_bounded.each ~width:4 next in
+     check "never wider than the workers asked for" (!widest <= 4);
+     check "as wide as they were asked for" (!widest = 4);
+     check "every job ran" (!done_ = 100);
+
+     (* A source shorter than the workers must not leave one spinning. *)
+     let taken = ref 0 in
+     let* () =
+       Lwt_bounded.each ~width:8 (fun () ->
+           if !taken >= 3 then None
+           else (
+             incr taken;
+             Some (fun () -> Lwt.pause ())))
+     in
+     check "a drained source ends every worker" (!taken = 3);
+
+     (* Draining the rest after a failure would go on reading a file the
+        caller has already given up on. *)
+     let taken = ref 0 and ran = ref 0 in
+     let boom = Failure "boom" in
+     let+ raised =
+       Lwt.catch
+         (fun () ->
+           let+ () =
+             Lwt_bounded.each ~width:2 (fun () ->
+                 if !taken >= 50 then None
+                 else (
+                   incr taken;
+                   let i = !taken in
+                   Some
+                     (fun () ->
+                       incr ran;
+                       let* () = Lwt.pause () in
+                       if i = 3 then raise boom else Lwt.return_unit)))
+           in
+           None)
+         (fun exn -> Lwt.return_some exn)
+     in
+     check "the failure reaches the caller" (raised = Some boom);
+     check "and stops the workers taking more"
+       ~why:(fun () -> Printf.sprintf "%d taken, %d ran" !taken !ran)
+       (!taken < 50))
