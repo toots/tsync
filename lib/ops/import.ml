@@ -50,66 +50,8 @@ module Make (C : Conf.S) = struct
 
   (* The tree an import will walk, spilled to disk and read back mapped rather
      than held: a listing is the tree's length, and a million paths is a hundred
-     megabytes standing for the whole run before a byte is uploaded.
-
-     Fields are length-prefixed rather than delimited because a file name is an
-     arbitrary byte string and may hold whatever separator a reader picked. *)
-  module Listing = struct
-    let dir = Filename.concat C.cache_root "import"
-
-    type 'a t = {
-      spool : Spool.t;
-      decode : Chunk.t -> int ref -> 'a;
-      mutable count : int;
-    }
-
-    let create ~name ~decode =
-      let+ spool = Spool.create ~dir ~name in
-      { spool; decode; count = 0 }
-
-    let str b s =
-      Buffer.add_int32_le b (Int32.of_int (String.length s));
-      Buffer.add_string b s
-
-    let add t fields =
-      let b = Buffer.create 128 in
-      List.iter (fun f -> f b) fields;
-      t.count <- t.count + 1;
-      Spool.append t.spool (Buffer.contents b)
-
-    let take body pos n =
-      let s = Chunk.sub body ~pos:!pos ~len:n in
-      pos := !pos + n;
-      s
-
-    let int body pos = Int32.to_int (String.get_int32_le (take body pos 4) 0)
-    let int64 body pos = String.get_int64_le (take body pos 8) 0
-
-    let string body pos =
-      let n = int body pos in
-      take body pos n
-
-    let count t = t.count
-
-    (* Sealed to be read, so nothing may be appended once this starts; the
-       mapping is dropped with the spool at the end of the run. *)
-    let iter t f =
-      let* body = Spool.seal t.spool in
-      let pos = ref 0 in
-      let rec go () =
-        if !pos >= Chunk.length body then Lwt.return_unit
-        else
-          let* () = f (t.decode body pos) in
-          go ()
-      in
-      go ()
-
-    let remove t = Spool.drop t.spool
-
-    (* A killed import leaves its spools behind with nothing else to reap them.
-    *)
-    let reap () = Spool.reap ~dir
-  end
+     megabytes standing for the whole run before a byte is uploaded. *)
+  let spool_dir = Filename.concat C.cache_root "import"
 
   type plan = {
     dirs : string Listing.t;
@@ -192,10 +134,7 @@ module Make (C : Conf.S) = struct
                 let* () = flush () in
                 bytes := Int64.add !bytes size;
                 Listing.add plan.files
-                  [
-                    (fun b -> Listing.str b r);
-                    (fun b -> Buffer.add_int64_le b size);
-                  ]
+                  [(fun b -> Listing.str b r); (fun b -> Listing.int64 b size)]
             | `Symlink target when kept ->
                 let* () = flush () in
                 let* n = symlink_bytes ~src r target in
@@ -204,7 +143,7 @@ module Make (C : Conf.S) = struct
                   [
                     (fun b -> Listing.str b r);
                     (fun b -> Listing.str b target);
-                    (fun b -> Buffer.add_int64_le b n);
+                    (fun b -> Listing.int64 b n);
                   ]
             | `File _ | `Symlink _ -> Lwt.return_unit)
         entries
@@ -213,17 +152,19 @@ module Make (C : Conf.S) = struct
     { plan with bytes = !bytes }
 
   let plan_source ~only ~exclude ~src =
-    let* dirs = Listing.create ~name:"dirs" ~decode:Listing.string in
+    let* dirs =
+      Listing.create ~dir:spool_dir ~name:"dirs" ~decode:Listing.read_string
+    in
     let* files =
-      Listing.create ~name:"files" ~decode:(fun body pos ->
-          let rel = Listing.string body pos in
-          (rel, Listing.int64 body pos))
+      Listing.create ~dir:spool_dir ~name:"files" ~decode:(fun body pos ->
+          let rel = Listing.read_string body pos in
+          (rel, Listing.read_int64 body pos))
     in
     let* symlinks =
-      Listing.create ~name:"symlinks" ~decode:(fun body pos ->
-          let rel = Listing.string body pos in
-          let target = Listing.string body pos in
-          (rel, target, Listing.int64 body pos))
+      Listing.create ~dir:spool_dir ~name:"symlinks" ~decode:(fun body pos ->
+          let rel = Listing.read_string body pos in
+          let target = Listing.read_string body pos in
+          (rel, target, Listing.read_int64 body pos))
     in
     walk_source ~only ~exclude ~src { dirs; files; symlinks; bytes = 0L }
 
@@ -273,7 +214,7 @@ module Make (C : Conf.S) = struct
      memory, where they and the string they encode grow with the tree rather
      than with what is in flight. *)
   module Spool = struct
-    let create () = Spool.create ~dir:Listing.dir ~name:"journal"
+    let create () = Spool.create ~dir:spool_dir ~name:"journal"
     let add t ops = Spool.append t (Journal.encode ops)
     let remove t = Spool.drop t
     let body t = Spool.seal t
@@ -308,7 +249,7 @@ module Make (C : Conf.S) = struct
       in
       try Unix.realpath p with _ -> p
     in
-    let* () = Listing.reap () in
+    let* () = Listing.reap ~dir:spool_dir in
     let* plan = plan_source ~only ~exclude ~src in
     on_plan
       ~files:(Listing.count plan.files + Listing.count plan.symlinks)
@@ -427,8 +368,8 @@ module Make (C : Conf.S) = struct
         let+ () = Fs.flush_cursor () in
         !counts)
       (fun () ->
-        let* () = Listing.remove plan.dirs in
-        let* () = Listing.remove plan.files in
-        let* () = Listing.remove plan.symlinks in
+        let* () = Listing.drop plan.dirs in
+        let* () = Listing.drop plan.files in
+        let* () = Listing.drop plan.symlinks in
         Spool.remove !spool)
 end
