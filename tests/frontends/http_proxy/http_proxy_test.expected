@@ -7,53 +7,7 @@ same collection as /api/v1/stats: true
 stop: {"ok":true} closes=true asked=1
 ########## /api/v1/stats ##########
 {
-  "server": {
-    "hostname": "testhost",
-    "pid": 1234,
-    "startedAt": 1700000000.0,
-    "uptimeSeconds": 3600.0,
-    "frontend": "http-proxy",
-    "port": 8443,
-    "tls": true,
-    "serves": [ "statusdom" ],
-    "requests": { "inFlight": 0, "dataInFlight": 0, "dataWaiting": 0 },
-    "bytesRead": 0,
-    "bytesWritten": 2,
-    "bytesReadPerSec": 0,
-    "bytesWrittenPerSec": 0
-  },
-  "process": {
-    "cpuSeconds": 12.5,
-    "cpuPercentAvg": 0.3,
-    "rssBytes": 41943040,
-    "privateBytes": 39845888,
-    "swappedBytes": 0,
-    "heapBytes": 8388608,
-    "topHeapBytes": 12582912,
-    "minorCollections": 100,
-    "majorCollections": 10
-  },
-  "backend": { "retries": 0, "timeouts": 0, "failures": 0 },
-  "pools": [
-    { "name": "share reads", "inFlight": 0, "waiting": 0, "max": 16 },
-    { "name": "chunk buffers", "inFlight": 0, "waiting": 0, "max": 2 },
-    { "name": "downloads", "inFlight": 0, "waiting": 0, "max": 3 }
-  ],
-  "lwt": {
-    "readableFds": 2,
-    "writableFds": 0,
-    "timers": 0,
-    "poolSize": 1000
-  },
-  "traffic": {
-    "bytesUploaded": 4096,
-    "bytesDownloaded": 2048,
-    "uploadBytesPerSec": 0,
-    "downloadBytesPerSec": 0,
-    "chunksHashed": 0,
-    "hashesPerSec": 0
-  },
-  "recentErrors": [],
+  "host": "testhost",
   "domains": [
     {
       "name": "statusdom",
@@ -129,212 +83,178 @@ stop: {"ok":true} closes=true asked=1
         }
       ]
     }
-  ]
+  ],
+  "processes": [
+    {
+      "pid": 1234,
+      "startedAt": 1700000000.0,
+      "uptimeSeconds": 3600.0,
+      "frontend": "http-proxy",
+      "port": 8443,
+      "tls": true,
+      "serves": [ "statusdom" ],
+      "requests": { "inFlight": 0, "dataInFlight": 0, "dataWaiting": 0 },
+      "bytesRead": 0,
+      "bytesWritten": 2,
+      "bytesReadPerSec": 0,
+      "bytesWrittenPerSec": 0,
+      "cpuSeconds": 12.5,
+      "cpuPercentAvg": 0.3,
+      "rssBytes": 41943040,
+      "privateBytes": 39845888,
+      "swappedBytes": 0,
+      "heapBytes": 8388608,
+      "topHeapBytes": 12582912,
+      "minorCollections": 100,
+      "majorCollections": 10,
+      "traffic": {
+        "bytesUploaded": 4096,
+        "bytesDownloaded": 2048,
+        "uploadBytesPerSec": 0,
+        "downloadBytesPerSec": 0,
+        "chunksHashed": 0,
+        "hashesPerSec": 0
+      },
+      "pools": [
+        { "name": "share reads", "inFlight": 0, "waiting": 0, "max": 16 },
+        { "name": "chunk buffers", "inFlight": 0, "waiting": 0, "max": 2 },
+        { "name": "downloads", "inFlight": 0, "waiting": 0, "max": 3 }
+      ],
+      "lwt": {
+        "readableFds": 2,
+        "writableFds": 0,
+        "timers": 0,
+        "poolSize": 1000
+      },
+      "backend": { "retries": 0, "timeouts": 0, "failures": 0 }
+    }
+  ],
+  "jobs": [],
+  "warnings": []
 }
 ########## /stats ##########
-Frontend http-proxy on testhost (this process)
-  listener         port 8443, https
-  serving          1 domain: statusdom
-  process          pid 1234, up 1h 0m
-  cpu              12.5s (0.3% avg)
-  memory           40.0 MB rss, 8.0 MB heap (peak 12.0 MB)
-  gc               100 minor, 10 major
-  event loop       2 readable, 0 writable, 0 timers, pool 1000
-  traffic          up 4.0 KB (0 B/s), down 2.0 KB (0 B/s)
-  hashed           0 chunks (0/s)
-  slots            share reads 0/16, chunk buffers 0/2, downloads 0/3
-  served read      0 B (0 B/s)
-  served written   2 B (0 B/s)
-  requests         none served
+tsync on testhost — 1 domain, 1 process, up 1h 0m
 
 Domain statusdom
-  client name      test-client
-  read-only        no
-  versioning       off
-  symlinks         keep
-  chunk size       64.0 KB
-  cache chunk      64.0 KB
+  settings         versioning off, symlinks keep, chunk 64.0 KB, cache chunk 64.0 KB
   concurrency      2 uploads, 2 chunk buffers, 3 downloads
-  cache root       /tmp/tsync-http-proxy-status-test/cache
-  socket           /tmp/tsync-http-proxy-status-test/absent.sock
-  Cache
-    chunks           0 (0 B of unlimited)
-  Frontend http-proxy (shared listener, see above)
+  cache            0 chunks, 0 B of unlimited
+  client name      test-client
+  Frontend http-proxy   shared listener
     public shares    off
-    option port      8443
-    option secret    ***
-  Backend disk (local, main)
-    path             /tmp/tsync-http-proxy-status-test/store
+  Backend disk (local, main)  path /tmp/tsync-http-proxy-status-test/store
     reachable        yes (1 ms)
     journal          4 entries, 1 to apply
     corrupted        not checked — no verifier for this store
     disk             100.0 GB free of 460.4 GB (78% used)
-  Backend archive (http-proxy, backfill)
-    url              https://nas.example:8443
-    secret           ***
+  Backend archive (http-proxy, backfill)  url https://nas.example:8443
     UNREACHABLE      Backend.Backend_error("connection refused")
     journal          error: Backend.Backend_error("connection refused")
     corrupted        not checked — no verifier for this store
     behind           7 queued, 2 in flight — DEGRADED, run tsync mirror
+
+Processes
+  http-proxy  pid 1234    up 1h 0m     0.3% cpu    40.0 MB rss   statusdom
+    listening        port 8443, https
+    served           0 B read (0 B/s), 2 B written (0 B/s)
+    requests         none served
+    traffic          up 4.0 KB (0 B/s), down 2.0 KB (0 B/s)
 ########## /stats with a mount daemon ##########
-Frontend http-proxy on testhost (this process)
-  listener         port 8443, https
-  serving          1 domain: statusdom
-  process          pid 1234, up 1h 0m
-  cpu              12.5s (0.3% avg)
-  memory           40.0 MB rss, 8.0 MB heap (peak 12.0 MB)
-  gc               100 minor, 10 major
-  event loop       2 readable, 0 writable, 0 timers, pool 1000
-  traffic          up 4.0 KB (0 B/s), down 2.0 KB (0 B/s)
-  hashed           0 chunks (0/s)
-  slots            share reads 0/16, chunk buffers 0/2, downloads 0/3
-  served read      0 B (0 B/s)
-  served written   2 B (0 B/s)
-  requests         none served
+tsync on testhost — 1 domain, 1 process, up 1h 0m
 
 Domain statusdom
-  client name      test-client
-  read-only        no
-  versioning       off
-  symlinks         keep
-  chunk size       64.0 KB
-  cache chunk      64.0 KB
+  settings         versioning off, symlinks keep, chunk 64.0 KB, cache chunk 64.0 KB
   concurrency      2 uploads, 2 chunk buffers, 3 downloads
-  cache root       /tmp/tsync-http-proxy-status-test/cache
-  socket           /tmp/tsync-http-proxy-status-test/absent.sock
-  Cache
-    chunks           0 (0 B of unlimited)
-  Frontend http-proxy (shared listener, see above)
+  cache            0 chunks, 0 B of unlimited
+  client name      test-client
+  Frontend http-proxy   shared listener
     public shares    off
-    option port      8443
-  Frontend fuse
-    process          pid 18103, up 1h 0m, 35.5s cpu, 55.0 MB rss
+  Frontend fuse         pid 18103  /home/u/tsync/statusdom
     traffic          up 0 B (0 B/s), down 751.5 MB (1.0 MB/s)
-    read             2.0 GB (5.0 MB/s)
-    written          0 B (0 B/s)
+    served           2.0 GB read (5.0 MB/s), 0 B written (0 B/s)
     handles          3 open, 41 since start
-    mountPoint       /home/u/tsync/statusdom
-    stagedFiles      0
-    pendingUploads   2
-  Backend disk (local, main)
-    path             /tmp/tsync-http-proxy-status-test/store
+    in flight        2 uploads
+  Backend disk (local, main)  path /tmp/tsync-http-proxy-status-test/store
     reachable        yes (1 ms)
     journal          4 entries, 1 to apply
     corrupted        not checked — no verifier for this store
     disk             100.0 GB free of 460.4 GB (78% used)
-  Backend archive (http-proxy, backfill)
-    url              https://nas.example:8443
-    secret           ***
+  Backend archive (http-proxy, backfill)  url https://nas.example:8443
     UNREACHABLE      Backend.Backend_error("connection refused")
     journal          error: Backend.Backend_error("connection refused")
     corrupted        not checked — no verifier for this store
     behind           7 queued, 2 in flight — DEGRADED, run tsync mirror
+
+Processes
+  http-proxy  pid 1234    up 1h 0m     0.3% cpu    40.0 MB rss   statusdom
+    listening        port 8443, https
+    served           0 B read (0 B/s), 2 B written (0 B/s)
+    requests         none served
+    traffic          up 4.0 KB (0 B/s), down 2.0 KB (0 B/s)
 ########## /stats?totals=1 ##########
-Frontend http-proxy on testhost (this process)
-  listener         port 8443, https
-  serving          1 domain: statusdom
-  process          pid 1234, up 1h 0m
-  cpu              12.5s (0.3% avg)
-  memory           40.0 MB rss, 8.0 MB heap (peak 12.0 MB)
-  gc               100 minor, 10 major
-  event loop       2 readable, 0 writable, 0 timers, pool 1000
-  traffic          up 4.0 KB (0 B/s), down 2.0 KB (0 B/s)
-  hashed           0 chunks (0/s)
-  slots            share reads 0/16, chunk buffers 0/2, downloads 0/3
-  served read      0 B (0 B/s)
-  served written   2 B (0 B/s)
-  requests         2 stats, 2 unauthorized
+tsync on testhost — 1 domain, 1 process, up 1h 0m
 
 Domain statusdom
-  client name      test-client
-  read-only        no
-  versioning       off
-  symlinks         keep
-  chunk size       64.0 KB
-  cache chunk      64.0 KB
+  settings         versioning off, symlinks keep, chunk 64.0 KB, cache chunk 64.0 KB
   concurrency      2 uploads, 2 chunk buffers, 3 downloads
-  cache root       /tmp/tsync-http-proxy-status-test/cache
-  socket           /tmp/tsync-http-proxy-status-test/absent.sock
-  Cache
-    chunks           0 (0 B of unlimited)
-    manifests        0
-  Frontend http-proxy (shared listener, see above)
+  cache            0 chunks, 0 B of unlimited, 0 manifests
+  client name      test-client
+  Frontend http-proxy   shared listener
     public shares    off
-    option port      8443
-    option secret    ***
-  Backend disk (local, main)
-    path             /tmp/tsync-http-proxy-status-test/store
+  Backend disk (local, main)  path /tmp/tsync-http-proxy-status-test/store
     reachable        yes (1 ms)
     journal          4 entries, 1 to apply
     corrupted        not checked — no verifier for this store
     disk             100.0 GB free of 460.4 GB (78% used)
     holds            0 manifests, ~4096 chunks, ~20.0 KB, as of 0m 0s ago
-  Backend archive (http-proxy, backfill)
-    url              https://nas.example:8443
-    secret           ***
+  Backend archive (http-proxy, backfill)  url https://nas.example:8443
     UNREACHABLE      Backend.Backend_error("connection refused")
     journal          error: Backend.Backend_error("connection refused")
     corrupted        not checked — no verifier for this store
     behind           7 queued, 2 in flight — DEGRADED, run tsync mirror
     holds            could not count: Backend.Backend_error("connection refused")
 
-Recent warnings and errors (newest first)
-  22:13:20 warn  diagnostics: counting archive: Backend.Backend_error("connection refused")
-  22:13:20 warn  diagnostics: counting archive: Backend.Backend_error("connection refused")
-  22:13:20 warn  diagnostics: counting archive: Backend.Backend_error("connection refused")
+Processes
+  http-proxy  pid 1234    up 1h 0m     0.3% cpu    40.0 MB rss   statusdom
+    listening        port 8443, https
+    served           0 B read (0 B/s), 2 B written (0 B/s)
+    requests         2 stats, 2 unauthorized
+    traffic          up 4.0 KB (0 B/s), down 2.0 KB (0 B/s)
+
+Warnings (newest first)
+   ×3  22:13:20  warn  diagnostics: counting archive: Backend.Backend_error("connection refused")
 ########## /stats?totals=exact ##########
-Frontend http-proxy on testhost (this process)
-  listener         port 8443, https
-  serving          1 domain: statusdom
-  process          pid 1234, up 1h 0m
-  cpu              12.5s (0.3% avg)
-  memory           40.0 MB rss, 8.0 MB heap (peak 12.0 MB)
-  gc               100 minor, 10 major
-  event loop       2 readable, 0 writable, 0 timers, pool 1000
-  traffic          up 4.0 KB (0 B/s), down 2.0 KB (0 B/s)
-  hashed           0 chunks (0/s)
-  slots            share reads 0/16, chunk buffers 0/2, downloads 0/3
-  served read      0 B (0 B/s)
-  served written   2 B (0 B/s)
-  requests         2 stats, 2 unauthorized
+tsync on testhost — 1 domain, 1 process, up 1h 0m
 
 Domain statusdom
-  client name      test-client
-  read-only        no
-  versioning       off
-  symlinks         keep
-  chunk size       64.0 KB
-  cache chunk      64.0 KB
+  settings         versioning off, symlinks keep, chunk 64.0 KB, cache chunk 64.0 KB
   concurrency      2 uploads, 2 chunk buffers, 3 downloads
-  cache root       /tmp/tsync-http-proxy-status-test/cache
-  socket           /tmp/tsync-http-proxy-status-test/absent.sock
-  Cache
-    chunks           0 (0 B of unlimited)
-    manifests        0
-  Frontend http-proxy (shared listener, see above)
+  cache            0 chunks, 0 B of unlimited, 0 manifests
+  client name      test-client
+  Frontend http-proxy   shared listener
     public shares    off
-    option port      8443
-    option secret    ***
-  Backend disk (local, main)
-    path             /tmp/tsync-http-proxy-status-test/store
+  Backend disk (local, main)  path /tmp/tsync-http-proxy-status-test/store
     reachable        yes (1 ms)
     journal          4 entries, 1 to apply
     corrupted        not checked — no verifier for this store
     disk             100.0 GB free of 460.4 GB (78% used)
     holds            0 manifests, 4096 chunks, 20.0 KB, as of 0m 0s ago
-  Backend archive (http-proxy, backfill)
-    url              https://nas.example:8443
-    secret           ***
+  Backend archive (http-proxy, backfill)  url https://nas.example:8443
     UNREACHABLE      Backend.Backend_error("connection refused")
     journal          error: Backend.Backend_error("connection refused")
     corrupted        not checked — no verifier for this store
     behind           7 queued, 2 in flight — DEGRADED, run tsync mirror
     holds            could not count: Backend.Backend_error("connection refused")
 
-Recent warnings and errors (newest first)
-  22:13:20 warn  diagnostics: counting archive: Backend.Backend_error("connection refused")
-  22:13:20 warn  diagnostics: counting archive: Backend.Backend_error("connection refused")
-  22:13:20 warn  diagnostics: counting archive: Backend.Backend_error("connection refused")
+Processes
+  http-proxy  pid 1234    up 1h 0m     0.3% cpu    40.0 MB rss   statusdom
+    listening        port 8443, https
+    served           0 B read (0 B/s), 2 B written (0 B/s)
+    requests         2 stats, 2 unauthorized
+    traffic          up 4.0 KB (0 B/s), down 2.0 KB (0 B/s)
+
+Warnings (newest first)
+   ×3  22:13:20  warn  diagnostics: counting archive: Backend.Backend_error("connection refused")
 ########## store totals, state by state ##########
   not counted, not asked         (none reported)
   asked, nothing counted yet     counting=true

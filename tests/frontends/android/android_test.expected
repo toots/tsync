@@ -78,10 +78,9 @@
     {"ok":true,"items":[]}
 
 === the report answers with no daemon to ask
-  Frontend android on <host> (this process)
   Domain media
-  read-only        no
-  versioning       on
+  settings         versioning on, symlinks skip, chunk 8 B, cache chunk 8 B
+  concurrency      4 uploads, 4 chunk buffers, 8 downloads
 
 === every verb the frontend registers is driven above
   registered: create delete fetch list mkdir open read rename residency rmdir stat status write-whole

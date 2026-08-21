@@ -177,23 +177,21 @@ module Make (C : Conf.S) = struct
                   ("total", `Int total);
                 ])))
 
-  (* No daemon to describe, so this reports the domain alone. [Diagnostics.text]
-     is the one renderer, so a report from a phone reads like any other. *)
+  (* No daemon to describe, so this reports the domain alone: the same fold with
+     nobody to ask, so a report from a phone reads like any other. *)
   let status () =
     run ~staging:false (fun () ->
         let open Lwt.Syntax in
         let module D = Diagnostics.Make (C) in
         let+ json = D.domain_json () in
         print_endline
-          (Diagnostics.text
-             (Diagnostics.merge
-                [
-                  `Assoc
-                    (Diagnostics.self_json
-                       ~extra:[("frontend", `String implementation)]
-                       ()
-                    @ [("domains", `List [json])]);
-                ])))
+          (Status_report.text
+             (Status_report.of_answers
+                ~local:
+                  (Diagnostics.self_json
+                     ~extra:[("frontend", `String implementation)]
+                     ())
+                ~domains:[json] [])))
 end
 
 (* There is nothing to start. Serving a socket here would put a second way to

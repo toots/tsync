@@ -69,7 +69,7 @@ let backends_block text =
   String.concat "\n" (from_first lines)
 
 let show title json =
-  Printf.printf "=== %s\n%s\n" title (backends_block (Diagnostics.text json))
+  Printf.printf "=== %s\n%s\n" title (backends_block (Status_report.text json))
 
 let () =
   show "a store with a link, whose bytes and rates are its own"

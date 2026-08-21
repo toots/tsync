@@ -68,6 +68,7 @@ let json_member name j = Yojson.Safe.Util.member name j
 let stable_values =
   [
     ("hostname", `String "testhost");
+    ("host", `String "testhost");
     ("pid", `Int 1234);
     ("startedAt", `Float 1700000000.);
     ("uptimeSeconds", `Float 3600.);
@@ -89,8 +90,11 @@ let stable_values =
     ("uploadBytesPerSec", `Int 0);
     ("downloadBytesPerSec", `Int 0);
     ("hashesPerSec", `Int 0);
-    (* recentErrors entries: the message text is stable, the time is not. *)
+    (* recentErrors entries, and the warnings they fold into: the message text
+       is stable, the times are not. *)
     ("t", `Float 1700000000.);
+    ("firstAt", `Float 1700000000.);
+    ("lastAt", `Float 1700000000.);
     (* Whatever this machine happens to have free. *)
     ("availableBytes", `Int 107374182400);
     ("totalBytes", `Int 494384795648);
@@ -400,61 +404,24 @@ let () =
   in
   let ipc line = Yojson.Safe.from_string (fst (ipc_full line)) in
   let ipc_stats = ipc {|{"action":"stats"}|} in
-  List.iter
-    (fun key -> assert (json_member key r <> `Null))
-    ["server"; "process"; "lwt"; "traffic"; "recentErrors"; "domains"];
-  (* A shared listener's cpu and counters belong to every domain it serves, so
-     they are reported here rather than filed under one. *)
-  let server = json_member "server" r in
-  assert (json_member "frontend" server = `String "http-proxy");
-  assert (json_member "serves" server = `List [`String "statusdom"]);
-  assert (json_member "requests" server <> `Null);
+  (* What the report says is in the snapshot below; these bindings are for the
+     assertions after it, which are about what must not be in it. *)
   let domain =
     match json_member "domains" r with
       | `List [d] -> d
       | _ -> failwith "expected exactly one domain"
   in
-  assert (json_member "name" domain = `String "statusdom");
-  assert (json_member "clientName" domain = `String "test-client");
-  (* Config as this process resolved it, not as a file spells it. *)
-  assert (json_member "maxDownloads" domain = `Int 3);
-  (* The listener appears as one of the domain's frontends carrying this domain's
-     settings; the shared process figures are reported once, at the top. *)
-  let frontends =
-    match json_member "frontends" domain with `List l -> l | _ -> []
-  in
   let proxy_frontend =
-    List.find (fun f -> json_member "type" f = `String "http-proxy") frontends
+    match json_member "frontends" domain with
+      | `List l ->
+          List.find (fun f -> json_member "type" f = `String "http-proxy") l
+      | _ -> failwith "expected the listener among the domain's frontends"
   in
-  assert (json_member "shared" proxy_frontend = `Bool true);
-  (* The shared secret must not leave the process, even to an authorized caller:
-     a report gets pasted into bug threads. *)
-  let options = json_member "options" proxy_frontend in
-  assert (json_member "secret" options = `String "***");
-  assert (json_member "port" options = `String "8443");
-  (* This listener is the domain's only frontend here, so it is the only one
-     reported. Knocking on a socket nothing was configured to bind would announce
-     a daemon that is down as if it had ever been up. *)
-  assert (List.length frontends = 1);
-  let backends =
-    match json_member "backends" domain with `List l -> l | _ -> []
-  in
-  assert (List.length backends = 2);
   let by_name name =
-    List.find (fun b -> json_member "name" b = `String name) backends
+    match json_member "backends" domain with
+      | `List l -> List.find (fun b -> json_member "name" b = `String name) l
+      | _ -> failwith "expected the domain's backends"
   in
-  assert (json_member "role" (by_name "disk") = `String "main");
-  assert (json_member "reachable" (by_name "disk") = `Bool true);
-  (* Asserted, not just snapshotted: a wrong backlog looks like a stalled sync. *)
-  let journal = json_member "journal" (by_name "disk") in
-  assert (json_member "entries" journal = `Int 4);
-  assert (json_member "behind" journal = `Int 1);
-  let archive = by_name "archive" in
-  assert (json_member "reachable" archive = `Bool false);
-  assert (json_member "error" archive <> `Null);
-  let deferred = json_member "deferred" archive in
-  assert (json_member "queued" deferred = `Int 7);
-  assert (json_member "degraded" deferred = `Bool true);
 
   (* Counting is opt-in and never done while a request waits: the first ask
      starts a background walk and says so, a later one has the numbers, and the
@@ -639,11 +606,11 @@ let () =
   print_endline "########## /api/v1/stats ##########";
   print_endline (Yojson.Safe.pretty_to_string stable);
   print_endline "########## /stats ##########";
-  print_string (Diagnostics.text stable);
+  print_string (Status_report.text stable);
   (* The same report on a host that also mounts the domain. *)
   print_endline "########## /stats with a mount daemon ##########";
   print_string
-    (Diagnostics.text
+    (Status_report.text
        (substitute
           ~values:
             [
@@ -667,7 +634,7 @@ let () =
      estimate and count agree on the number and differ only in how they say they
      got it. *)
   let totals_text ~exact =
-    Diagnostics.text
+    Status_report.text
       (substitute ~values:stable_values (report ~totals:true ~exact ()))
   in
   print_endline "########## /stats?totals=1 ##########";

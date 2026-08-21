@@ -807,7 +807,8 @@ module Make (C : Conf.S) (F : File_ops.S) : S = struct
 
                          [arg] is a comma-separated set: [totals] reaches for the
                          store, [exact] counts every chunk instead of sampling
-                         shards, [reload] recomputes. *)
+                         shards, [reload] recomputes, and [frontend] asks for
+                         this frontend alone. *)
                         let flags =
                           String.split_on_char ',' (get_str obj "arg")
                         in
@@ -815,7 +816,11 @@ module Make (C : Conf.S) (F : File_ops.S) : S = struct
                         let exact = has "exact" in
                         let reload = has "reload" in
                         let totals = has "totals" in
+                        let frontend_only = has Status_report.frontend_only in
                         let* staged = F.staged_count () in
+                        (* What this frontend knows and nobody else does. The
+                         bounds it runs under are the domain's, reported
+                         there. *)
                         let queues =
                           [
                             ("reachable", `Bool true);
@@ -824,9 +829,6 @@ module Make (C : Conf.S) (F : File_ops.S) : S = struct
                             ("stagedFiles", `Int staged);
                             ( "downloadsCompleted",
                               `Int (F.downloads_completed_count ()) );
-                            ("maxUploads", `Int C.max_uploads);
-                            ("maxChunkBuffers", `Int C.max_chunk_buffers);
-                            ("maxDownloads", `Int C.max_downloads);
                             (* Usual cause of a mount gone quiet while its
                              backends answer fine. *)
                             ("metaLocked", `Bool (F.meta_locked ()));
@@ -847,9 +849,22 @@ module Make (C : Conf.S) (F : File_ops.S) : S = struct
                           :: List.remove_assoc "frontend" queues
                         in
                         let+ domain =
-                          Diag.domain_json ~totals ~exact ~reload
-                            ~frontends:[`Assoc queues]
-                            ()
+                          (* Under [frontend] the cache walk, the WAL read and a
+                             probe of every backend are somebody else's: the
+                             domain belongs to whoever converges it, and every
+                             process answering for it is that work done again
+                             for the same answer. *)
+                          if frontend_only then
+                            Lwt.return
+                              (`Assoc
+                                 [
+                                   ("name", `String C.domain_name);
+                                   ("frontends", `List [`Assoc queues]);
+                                 ])
+                          else
+                            Diag.domain_json ~totals ~exact ~reload
+                              ~frontends:[`Assoc queues]
+                              ()
                         in
                         ok_json
                           (Diagnostics.self_json

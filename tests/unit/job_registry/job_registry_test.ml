@@ -80,38 +80,7 @@ let () =
     (List.length (List.filter (fun p -> p = live_pid) (pids ())) = 1);
   kill_and_reap live_pid;
 
-  case "merging reports from one process answering for several domains";
-  let with_jobs jobs domain =
-    `Assoc
-      [
-        ("server", `Assoc [("pid", `Int 1)]);
-        ("domains", `List [`Assoc [("name", `String domain)]]);
-        ("jobs", `List jobs);
-      ]
-  in
-  let a = job_json ~kind:"import" 111 and b = job_json ~kind:"gc" 222 in
-  let merged = Diagnostics.merge [with_jobs [a] "one"; with_jobs [b] "two"] in
-  let job_pids j =
-    match Yojson.Safe.Util.member "jobs" j with
-      | `List l ->
-          List.map
-            (fun j ->
-              match Yojson.Safe.Util.member "pid" j with `Int p -> p | _ -> 0)
-            l
-      | _ -> []
-  in
-  check "jobs from every report survive the merge" (job_pids merged = [111; 222]);
-  check "and both domains do too"
-    (match Yojson.Safe.Util.member "domains" merged with
-      | `List l -> List.length l = 2
-      | _ -> false);
-  let shared = Diagnostics.merge [with_jobs [a] "one"; with_jobs [a] "two"] in
-  check "the same job reported twice is listed once" (job_pids shared = [111]);
-  let none = Diagnostics.merge [with_jobs [] "one"; with_jobs [] "two"] in
-  check "and no jobs is an empty list, not a missing key"
-    (Yojson.Safe.Util.member "jobs" none = `List []);
-
   (* Counted, so a suite that stopped exercising anything fails rather than
      passing quietly. What a reader is finally shown is tests/unit/job_render,
      a snapshot: a row is prose, and prose is reviewed whole. *)
-  report ~expected:10 ()
+  report ~expected:6 ()

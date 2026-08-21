@@ -229,51 +229,49 @@ let status_cmd =
     in
     (* Resolved once: [--watch] must not re-read the config per tick, and a
        config error should surface before the screen starts clearing. *)
-    let targets = domain_targets () in
-    (* A domain that is down must not cost the others their report, so a failure
-       here is a line on stderr and one report fewer. *)
-    let ask (name, socket_path) =
-      match ipc_action ~socket_path ~domain:name ?arg "stats" with
-        | obj -> Some (socket_path, `Assoc obj)
-        | exception Failure msg ->
-            Printf.eprintf "Error: %s: %s\n" name msg;
-            None
-        | exception _ ->
-            Printf.eprintf "%s: no daemon answering on %s\n" name socket_path;
-            None
+    let sync_socket = Runtime.sync_socket_path runtime_paths in
+    let targets =
+      List.filter (fun (_, s) -> s <> sync_socket) (domain_targets ())
     in
-    (* One report per answering process, not per domain: a daemon serving
-       several answers once per domain, and its pid, cpu and traffic are one set
-       of figures. The socket is that identity — Linux gives each domain its
-       own, macOS shares one. *)
-    let group answers =
-      let sockets =
-        List.fold_left
-          (fun acc (s, _) -> if List.mem s acc then acc else acc @ [s])
-          [] answers
-      in
-      List.map
-        (fun s ->
-          Diagnostics.merge
-            (List.filter_map
-               (fun (s', obj) -> if s' = s then Some obj else None)
-               answers))
-        sockets
+    (* The process converging the domains holds the whole picture and answers
+       with it. Asking every frontend instead costs each of them a probe of
+       every backend for the same figures, so that is what a machine without one
+       falls back to, not what it does. *)
+    let collect () =
+      let open Lwt.Syntax in
+      Lwt_main.run
+        (let* sync =
+           Status_report.ask ?arg ~frontend:"sync" ~domain:""
+             ~socket_path:sync_socket ()
+         in
+         (* The finished report, recognised by carrying one: a daemon too old to
+            assemble it answers for itself instead, and falls to the sweep
+            below with every other frontend. *)
+           match sync.Status_report.reply with
+           | `Assoc fields when List.mem_assoc "processes" fields ->
+               Lwt.return (`Assoc (List.remove_assoc "ok" fields))
+           | _ ->
+               (* One round trip per configured frontend, each under
+                  {!Status_report.ask}'s deadline: the width is the config's,
+                  not a caller's. *)
+               let+ answers =
+                 Lwt_list.map_p
+                   (fun (name, socket_path) ->
+                     Status_report.ask ?arg ~frontend:"" ~domain:name
+                       ~socket_path ())
+                   targets
+               in
+               Status_report.of_answers answers)
     in
     let show () =
-      List.iteri
-        (fun i report ->
-          if json then begin
-            let obj = match report with `Assoc obj -> obj | _ -> [] in
-            print_endline
-              (Yojson.Safe.to_string
-                 (`Assoc (("t", `Float (Unix.gettimeofday ())) :: obj)))
-          end
-          else begin
-            if i > 0 then print_newline ();
-            print_string (Diagnostics.text report)
-          end)
-        (group (List.filter_map ask targets))
+      let report = collect () in
+      if json then
+        print_endline
+          (Yojson.Safe.to_string
+             (`Assoc
+                (("t", `Float (Unix.gettimeofday ()))
+                :: (match report with `Assoc obj -> obj | _ -> []))))
+      else print_string (Status_report.text report)
     in
     match watch with
       | None -> show ()

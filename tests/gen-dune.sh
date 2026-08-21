@@ -27,7 +27,7 @@ env_for() {
     # These report timestamps in local time, which is what someone reading their
     # own server wants and what would otherwise make a snapshot depend on the
     # machine that recorded it.
-    frontends/http_proxy | frontends/share_server | unit/zip) echo "TZ=UTC" ;;
+    frontends/http_proxy | frontends/share_server | unit/status_report | unit/zip) echo "TZ=UTC" ;;
     *) echo "" ;;
   esac
 }

@@ -1,0 +1,247 @@
+########## the folded report ##########
+{
+  "host": "testhost",
+  "domains": [
+    {
+      "name": "alpha",
+      "clientName": "testhost",
+      "versioning": true,
+      "symlinks": "keep",
+      "domainReadOnly": false,
+      "chunkSize": null,
+      "cacheChunkSize": 16777216,
+      "maxCache": 1073741824,
+      "maxUploads": 4,
+      "maxChunkBuffers": 4,
+      "maxDownloads": 8,
+      "cache": { "chunks": 2, "bytes": 8192 },
+      "wal": { "pending": 0 },
+      "frontends": [
+        {
+          "type": "fuse",
+          "reachable": true,
+          "mountPoint": "/home/u/tsync/alpha",
+          "stagedFiles": 3,
+          "openHandles": 2,
+          "filesOpened": 41,
+          "pid": 4242,
+          "pid": 4242,
+          "uptimeSeconds": 3720.0,
+          "cpuSeconds": 12.5,
+          "rssBytes": 1048576,
+          "traffic": {
+            "bytesUploaded": 2048,
+            "bytesDownloaded": 4096,
+            "uploadBytesPerSec": 0,
+            "downloadBytesPerSec": 0,
+            "chunksHashed": 5
+          }
+        },
+        {
+          "type": "http-proxy",
+          "reachable": false,
+          "socketPath": "/run/tsync-alpha.sock",
+          "error": "connection refused"
+        }
+      ],
+      "backends": [
+        {
+          "name": "store",
+          "type": "local",
+          "role": "main",
+          "config": { "path": "/srv/tsync" },
+          "reachable": true,
+          "latencyMs": 1.0,
+          "journal": { "entries": 12, "behind": 0 },
+          "corrupted": { "checked": true, "chunks": 0 }
+        }
+      ]
+    },
+    {
+      "name": "beta",
+      "clientName": "testhost",
+      "versioning": true,
+      "symlinks": "keep",
+      "domainReadOnly": false,
+      "chunkSize": null,
+      "cacheChunkSize": 16777216,
+      "maxCache": 1073741824,
+      "maxUploads": 4,
+      "maxChunkBuffers": 4,
+      "maxDownloads": 8,
+      "cache": { "chunks": 2, "bytes": 8192 },
+      "wal": { "pending": 0 },
+      "frontends": [
+        {
+          "type": "fuse",
+          "reachable": true,
+          "mountPoint": "/home/u/tsync/beta",
+          "stagedFiles": 3,
+          "openHandles": 2,
+          "filesOpened": 41,
+          "pid": 4243,
+          "pid": 4243,
+          "uptimeSeconds": 3720.0,
+          "cpuSeconds": 12.5,
+          "rssBytes": 1048576,
+          "traffic": {
+            "bytesUploaded": 2048,
+            "bytesDownloaded": 4096,
+            "uploadBytesPerSec": 0,
+            "downloadBytesPerSec": 0,
+            "chunksHashed": 5
+          }
+        }
+      ],
+      "backends": [
+        {
+          "name": "store",
+          "type": "local",
+          "role": "main",
+          "config": { "path": "/srv/tsync" },
+          "reachable": true,
+          "latencyMs": 1.0,
+          "journal": { "entries": 12, "behind": 0 },
+          "corrupted": { "checked": true, "chunks": 0 }
+        }
+      ]
+    }
+  ],
+  "processes": [
+    {
+      "pid": 4200,
+      "uptimeSeconds": 3730.0,
+      "frontend": "sync",
+      "serves": [ "alpha", "beta" ],
+      "cpuPercentAvg": 2.1,
+      "rssBytes": 2097152
+    },
+    {
+      "pid": 4242,
+      "uptimeSeconds": 3720.0,
+      "frontend": "fuse",
+      "serves": [ "alpha" ],
+      "cpuSeconds": 12.5,
+      "cpuPercentAvg": 0.3,
+      "rssBytes": 1048576,
+      "heapBytes": 524288,
+      "traffic": {
+        "bytesUploaded": 2048,
+        "bytesDownloaded": 4096,
+        "uploadBytesPerSec": 0,
+        "downloadBytesPerSec": 0,
+        "chunksHashed": 5
+      }
+    },
+    {
+      "pid": 4243,
+      "uptimeSeconds": 3720.0,
+      "frontend": "fuse",
+      "serves": [ "beta" ],
+      "cpuSeconds": 12.5,
+      "cpuPercentAvg": 0.3,
+      "rssBytes": 1048576,
+      "heapBytes": 524288,
+      "traffic": {
+        "bytesUploaded": 2048,
+        "bytesDownloaded": 4096,
+        "uploadBytesPerSec": 0,
+        "downloadBytesPerSec": 0,
+        "chunksHashed": 5
+      }
+    }
+  ],
+  "jobs": [
+    {
+      "kind": "import",
+      "pid": 9001,
+      "state": "running",
+      "uptimeSeconds": 300.0,
+      "target": "/media/stage"
+    }
+  ],
+  "warnings": [
+    {
+      "level": "warn",
+      "message": "store put: HTTP 429; retrying",
+      "count": 3,
+      "firstAt": 1700000010.0,
+      "lastAt": 1700000030.0,
+      "sources": [
+        { "frontend": "sync", "pid": 4200, "count": 1 },
+        { "frontend": "fuse", "pid": 4242, "count": 2 }
+      ]
+    }
+  ]
+}
+########## as a reader sees it ##########
+tsync on testhost — 2 domains, 3 processes, up 1h 2m
+
+Domain alpha
+  settings         versioning on, symlinks keep, chunk 8.0 MB (default), cache chunk 16.0 MB
+  concurrency      4 uploads, 4 chunk buffers, 8 downloads
+  cache            2 chunks, 8.0 KB of unlimited
+  Frontend fuse         pid 4242  /home/u/tsync/alpha
+    traffic          up 2.0 KB (0 B/s), down 4.0 KB (0 B/s)
+    handles          2 open, 41 since start
+    in flight        3 staged
+  Frontend http-proxy
+    NOT ANSWERING    /run/tsync-alpha.sock: connection refused
+  Backend store (local, main)  path /srv/tsync
+    reachable        yes (1 ms)
+    journal          12 entries, 0 to apply
+
+Domain beta
+  settings         versioning on, symlinks keep, chunk 8.0 MB (default), cache chunk 16.0 MB
+  concurrency      4 uploads, 4 chunk buffers, 8 downloads
+  cache            2 chunks, 8.0 KB of unlimited
+  Frontend fuse         pid 4243  /home/u/tsync/beta
+    traffic          up 2.0 KB (0 B/s), down 4.0 KB (0 B/s)
+    handles          2 open, 41 since start
+    in flight        3 staged
+  Backend store (local, main)  path /srv/tsync
+    reachable        yes (1 ms)
+    journal          12 entries, 0 to apply
+
+Processes
+  sync        pid 4200    up 1h 2m     2.1% cpu     2.0 MB rss   alpha, beta
+  fuse        pid 4242    up 1h 2m     0.3% cpu     1.0 MB rss   alpha
+    traffic          up 2.0 KB (0 B/s), down 4.0 KB (0 B/s), 5 chunks hashed (0/s)
+  fuse        pid 4243    up 1h 2m     0.3% cpu     1.0 MB rss   beta
+    traffic          up 2.0 KB (0 B/s), down 4.0 KB (0 B/s), 5 chunks hashed (0/s)
+
+Jobs
+  import  pid 9001  running 5m 0s  /media/stage
+
+Warnings (newest first)
+   ×3  22:13:50  warn  store put: HTTP 429; retrying
+########## no converging process: the same fold over a sweep ##########
+tsync on testhost — 2 domains, 1 process, up 1h 2m
+
+Domain alpha
+  settings         versioning on, symlinks keep, chunk 8.0 MB (default), cache chunk 16.0 MB
+  concurrency      4 uploads, 4 chunk buffers, 8 downloads
+  cache            2 chunks, 8.0 KB of unlimited
+  Frontend fuse         pid 4242  /home/u/tsync/alpha
+    traffic          up 2.0 KB (0 B/s), down 4.0 KB (0 B/s)
+    handles          2 open, 41 since start
+    in flight        3 staged
+  Backend store (local, main)  path /srv/tsync
+    reachable        yes (1 ms)
+    journal          12 entries, 0 to apply
+
+Domain beta
+  settings         versioning on, symlinks keep, chunk 8.0 MB (default), cache chunk 16.0 MB
+  concurrency      4 uploads, 4 chunk buffers, 8 downloads
+  cache            2 chunks, 8.0 KB of unlimited
+  Frontend fuse         pid 4242  /home/u/tsync/beta
+    traffic          up 2.0 KB (0 B/s), down 4.0 KB (0 B/s)
+    handles          2 open, 41 since start
+    in flight        3 staged
+  Backend store (local, main)  path /srv/tsync
+    reachable        yes (1 ms)
+    journal          12 entries, 0 to apply
+
+Processes
+  fuse        pid 4242    up 1h 2m     0.3% cpu     1.0 MB rss   alpha, beta
+    traffic          up 2.0 KB (0 B/s), down 4.0 KB (0 B/s), 5 chunks hashed (0/s)

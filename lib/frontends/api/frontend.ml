@@ -100,6 +100,9 @@ let fork_each f items =
       (fun acc x ->
         let pid = Lwt_unix.fork () in
         if pid = 0 then (
+          (* The one place every forked process passes through, and exactly
+             once: its uptime is its own, not the parent's. *)
+          Diagnostics.restart ();
           f x;
           exit 0);
         pid :: acc)

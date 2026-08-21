@@ -1,5 +1,5 @@
 (executable
  (flags
   (:standard -open Tsync_diagnostics))
- (name stats_merge_test)
+ (name status_report_test)
  (libraries tsync_diagnostics yojson))

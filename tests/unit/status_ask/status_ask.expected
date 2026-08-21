@@ -1,0 +1,22 @@
+=== the request, as the daemon received it
+{ "action": "stats", "domain": "beta", "arg": "frontend" }
+
+=== the entry it contributes to beta
+{
+  "type": "fuse",
+  "stagedFiles": 9,
+  "pid": 18103,
+  "uptimeSeconds": 3600.0,
+  "cpuSeconds": 35.5,
+  "rssBytes": 57638912,
+  "traffic": { "bytesUploaded": 4096 }
+}
+
+=== a socket nothing is bound to
+{
+  "type": "fuse",
+  "reachable": false,
+  "socketPath": "<socket>",
+  "error": "<error>"
+}
+

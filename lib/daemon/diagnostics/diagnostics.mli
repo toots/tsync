@@ -1,10 +1,15 @@
-(** The status report: what this process is doing, and what each domain's
-    backends look like from here.
+(** What one process can say about itself and the domains it holds.
 
-    Assembled as JSON so a frontend can serve it and the CLI can print it, with
-    {!text} the one renderer — a report gets pasted into bug threads, so there
-    is exactly one layout to recognise. Every backend is probed under a
-    deadline: an unreachable store must make the report late, not absent. *)
+    Assembled as JSON so a frontend can serve it and the CLI can print it.
+    {!Status_report} is the other half — asking the processes beside this one
+    and folding the answers into the report a reader sees. Every backend is
+    probed under a deadline: an unreachable store must make the report late, not
+    absent. *)
+
+(** Start this process's clock again. For a forked child: the module-level stamp
+    {!self_json} reports was taken in the parent, so without this every frontend
+    the launcher forks reports the launcher's uptime. *)
+val restart : unit -> unit
 
 (** This process: uptime, CPU, GC and Lwt counters. [extra] is merged in for a
     caller with something to add — the http proxy reports its listener. *)
@@ -29,13 +34,3 @@ module Make (C : Conf.S) : sig
     unit ->
     Yojson.Safe.t Lwt.t
 end
-
-(** Fold reports from one process into a single report: the domains are
-    concatenated, the jobs concatenated and deduplicated by pid, everything else
-    taken from the first. For a caller that had to ask a multi-domain daemon
-    once per domain — where one process answers for several, each answer carries
-    that process's whole job table. *)
-val merge : Yojson.Safe.t list -> Yojson.Safe.t
-
-(** Render a report for a human. *)
-val text : Yojson.Safe.t -> string

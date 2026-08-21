@@ -937,19 +937,33 @@
   (action
    (diff staged_codec_test.expected staged_codec_test.output))))
 
-(subdir unit/stats_merge
+(subdir unit/status_ask
  (alias
   (name default)
-  (deps stats_merge_test.exe))
+  (deps status_ask.exe))
  (rule
   (alias runtest)
-  (target stats_merge_test.output)
+  (target status_ask.output)
   (action
-   (with-stdout-to stats_merge_test.output (ignore-stderr (run ./stats_merge_test.exe)))))
+   (with-stdout-to status_ask.output (ignore-stderr (run ./status_ask.exe)))))
  (rule
   (alias runtest)
   (action
-   (diff stats_merge_test.expected stats_merge_test.output))))
+   (diff status_ask.expected status_ask.output))))
+
+(subdir unit/status_report
+ (alias
+  (name default)
+  (deps status_report_test.exe))
+ (rule
+  (alias runtest)
+  (target status_report_test.output)
+  (action
+   (with-stdout-to status_report_test.output (ignore-stderr (setenv TZ UTC (run ./status_report_test.exe))))))
+ (rule
+  (alias runtest)
+  (action
+   (diff status_report_test.expected status_report_test.output))))
 
 (subdir unit/subs
  (alias
