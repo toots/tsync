@@ -2,6 +2,7 @@ open Lwt.Syntax
 
 module Make (C : Conf.S) (L : Layout.S) = struct
   module B = (val C.store : Backend.S)
+  module Bb = Backend.Batched (B)
 
   (* Publishing may bring the folder into existence; every other operation
      resolves what is already there and treats an unknown folder as absent. *)
@@ -100,6 +101,10 @@ module Make (C : Conf.S) (L : Layout.S) = struct
   let get_object ~bkey =
     let+ body = B.get ~key:bkey () in
     Chunk.to_string body
+
+  let get_objects ?slots ~entries () =
+    let+ answered = Bb.get_many ?slots ~entries () in
+    List.map (fun (key, body) -> (key, Option.map Chunk.to_string body)) answered
 
   let delete_raw ~bkey = B.delete ~key:bkey ()
   let put_raw ~bkey ~data = B.put ~key:bkey ~data:(Chunk.of_string data) ()
