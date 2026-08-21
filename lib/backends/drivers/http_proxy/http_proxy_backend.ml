@@ -83,7 +83,7 @@ let head_opt t ~key () =
         | Some s -> float_of_string s
         | None -> 0.
     in
-    Some { Backend.key; size; last_modified })
+    Some { Backend.key; size; last_modified; etag = None })
   else if code resp = 404 then None
   else raise (backend_error "head" (code resp) body)
 

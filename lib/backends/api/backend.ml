@@ -1,4 +1,16 @@
-type file_entry = { key : string; size : int; last_modified : float }
+type file_entry = {
+  key : string;
+  size : int;
+  last_modified : float;
+  etag : string option;
+      (** What the store calls this object's version, when it has a name for
+          one: an S3 or GCS listing carries it, a filesystem has none.
+
+          The only validator worth caching an object's body against. Size and
+          [last_modified] are not: S3 reports whole seconds, and a manifest
+          rewritten inside one to a body of the same length — same name, same
+          chunk count — is invisible in both. *)
+}
 
 exception Backend_error of string
 exception Cancelled

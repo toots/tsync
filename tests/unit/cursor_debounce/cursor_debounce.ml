@@ -44,7 +44,13 @@ module Counting : Backend.S = struct
   let head_opt ~key () =
     Lwt.return
       (Option.map
-         (fun d -> { Backend.key; size = Chunk.length d; last_modified = 0. })
+         (fun d ->
+           {
+             Backend.key;
+             size = Chunk.length d;
+             last_modified = 0.;
+             etag = None;
+           })
          (Hashtbl.find_opt objects key))
 
   let delete ~key () =
@@ -66,7 +72,13 @@ module Counting : Backend.S = struct
       (Hashtbl.fold
          (fun key d acc ->
            if String.starts_with ~prefix key then
-             { Backend.key; size = Chunk.length d; last_modified = 0. } :: acc
+             {
+               Backend.key;
+               size = Chunk.length d;
+               last_modified = 0.;
+               etag = None;
+             }
+             :: acc
            else acc)
          objects [])
 

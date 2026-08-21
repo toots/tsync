@@ -106,6 +106,7 @@ let entry_of_json name j =
     Backend.key = name;
     size = size_of j;
     last_modified = parse_rfc3339 (str_member "updated" j);
+    etag = (match str_member "etag" j with "" -> None | e -> Some e);
   }
 
 let put t ~key ~data () =

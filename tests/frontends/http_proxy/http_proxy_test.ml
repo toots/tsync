@@ -183,8 +183,8 @@ let () =
   (* file_entry JSON round-trips. *)
   let entries =
     [
-      { Backend.key = "a"; size = 3; last_modified = 1.5 };
-      { Backend.key = "b/c"; size = 0; last_modified = 0. };
+      { Backend.key = "a"; size = 3; last_modified = 1.5; etag = Some "v1" };
+      { Backend.key = "b/c"; size = 0; last_modified = 0.; etag = None };
     ]
   in
   assert (

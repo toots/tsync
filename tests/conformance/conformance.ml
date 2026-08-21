@@ -106,7 +106,7 @@ let suite name (module B : Backend.S) =
      does, and a driver that later grows one inherits the cases. *)
   let reading_many () =
     let module Bb = Backend.Batched (B) in
-    let entry k = Backend.{ key = k; size = 5; last_modified = 0. } in
+    let entry k = Backend.{ key = k; size = 5; last_modified = 0.; etag = None } in
     let asked = [entry (key "a"); entry (key "nope"); entry (key "b")] in
     let* answered = Bb.get_many ~entries:asked () in
     check "every key asked for is answered, in order"
