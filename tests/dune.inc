@@ -767,6 +767,20 @@
   (action
    (diff hash.expected hash.output))))
 
+(subdir unit/hashtbl_mmap
+ (alias
+  (name default)
+  (deps hashtbl_mmap_test.exe))
+ (rule
+  (alias runtest)
+  (target hashtbl_mmap_test.output)
+  (action
+   (with-stdout-to hashtbl_mmap_test.output (ignore-stderr (run ./hashtbl_mmap_test.exe)))))
+ (rule
+  (alias runtest)
+  (action
+   (diff hashtbl_mmap_test.expected hashtbl_mmap_test.output))))
+
 (subdir unit/http_excerpt
  (alias
   (name default)

@@ -1,0 +1,33 @@
+
+=== a binding goes in and comes back
+find_opt answers with what was bound: ok
+find answers the same: ok
+mem agrees: ok
+an absent key is absent: ok
+and find raises for it: ok
+length counts the bindings: ok
+
+=== replace overwrites rather than shadows
+the new value wins: ok
+and the table did not grow: ok
+
+=== a key is an arbitrary byte string
+every one of them reads back: ok
+and they did not collide with each other: ok
+
+=== the table grows past the hint it was created with
+length is what went in: ok
+every binding survived: ok
+and nothing that was never bound appears: ok
+
+=== iter and fold see each binding once
+iter visits every key: ok
+with the right value: ok
+fold counts the same: ok
+and sums what iter saw: ok
+
+=== the bindings are not words the collector walks
+a mapped table costs a fraction of the heap one: ok
+the heap one really did hold them: ok
+
+19 check(s), 0 failure(s)
