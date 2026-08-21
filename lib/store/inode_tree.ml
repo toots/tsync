@@ -9,28 +9,34 @@ open Lwt.Syntax
 
 type body = Dir of Folder.marker | File of Manifest.t
 type entry = { bkey : string; body : body }
+type unusable = [ `Unreadable of exn | `Unclassifiable of exn ]
+type on_unusable = [ `Fail | `Skip of string -> unusable -> unit ]
 
 module Make (C : Conf.S) = struct
   module St = Store.Make (C) (Layout.Inode.Make (C))
 
   let namespace_prefix folder_id = C.domain_prefix ^ folder_id ^ "/"
 
+  (* The domain's download budget, since a child is one object read like any
+     other. Module-level so the several walks of a domain share it rather than
+     each holding its own idea of the bound. *)
+  let default_slots =
+    lazy (Lwt_bounded.create ~name:"tree reads" ~max:C.max_downloads ())
+
   let classify data =
     match Folder.marker_of_string data with
-      | Some m -> Some (Dir m)
+      | Some m -> Ok (Dir m)
       | None -> (
           match Manifest.of_string data with
-            | m -> Some (File m)
-            | exception _ -> None)
+            | m -> Ok (File m)
+            | exception exn -> Error exn)
 
-  (* An object that is neither a marker nor a clean manifest is mid-write and is
-     skipped. [skip_errors] also skips a child that cannot be fetched, for a
-     caller preferring a partial tree; off by default, since a walk deciding what
-     to delete must not mistake a failed GET for an absent subtree.
-
-     ponytail: one GET per child. Fine for ordinary folders; a folder with
+  (* ponytail: one GET per child. Fine for ordinary folders; a folder with
      thousands of direct children pays that many round trips. *)
-  let children ?(skip_errors = false) ~folder_id () =
+  let children ?(on_unusable = `Fail) ?slots ~folder_id () =
+    let slots =
+      match slots with Some s -> s | None -> Lazy.force default_slots
+    in
     let* entries = St.list_namespace ~folder_id in
     (* An empty namespace lists as its own directory key — a zero-byte object on
        S3, a real directory on a filesystem, where the GET below fails outright.
@@ -40,24 +46,32 @@ module Make (C : Conf.S) = struct
         (fun (e : Backend.file_entry) -> not (Key.is_dir e.Backend.key))
         entries
     in
-    Lwt_list.filter_map_s
-      (fun (e : Backend.file_entry) ->
-        let fetch () =
-          let+ data = St.get_object ~bkey:e.Backend.key in
-          Option.map
-            (fun body -> { bkey = e.Backend.key; body })
-            (classify data)
-        in
-        if skip_errors then Lwt.catch fetch (fun _ -> Lwt.return_none)
-        else fetch ())
-      entries
+    let report bkey reason =
+      (match on_unusable with `Fail -> () | `Skip f -> f bkey reason);
+      None
+    in
+    let fetch (e : Backend.file_entry) =
+      let bkey = e.Backend.key in
+      let attempt () =
+        let+ data = St.get_object ~bkey in
+        match classify data with
+          | Ok body -> Some { bkey; body }
+          | Error exn -> report bkey (`Unclassifiable exn)
+      in
+      match on_unusable with
+        | `Fail -> attempt ()
+        | `Skip _ ->
+            Lwt.catch attempt (fun exn ->
+                Lwt.return (report bkey (`Unreadable exn)))
+    in
+    Lwt_bounded.filter_map_with slots fetch entries
 
   (* [f acc rel entry] sees each entry with the real relative path of the folder
      holding it. A folder is visited before it is descended into, so a caller
      collecting keys gets the marker too. *)
-  let fold_tree ?skip_errors ~folder_id ~rel f acc =
+  let fold_tree ?on_unusable ?slots ~folder_id ~rel f acc =
     let rec walk folder_id rel acc =
-      let* entries = children ?skip_errors ~folder_id () in
+      let* entries = children ?on_unusable ?slots ~folder_id () in
       Lwt_list.fold_left_s
         (fun acc entry ->
           let* acc = f acc rel entry in
