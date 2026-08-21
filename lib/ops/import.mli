@@ -47,14 +47,17 @@ module Make (C : Conf.S) : sig
       store already had the chunk, which is what separates what the run
       transferred from what it merely hashed.
 
-      [entry_ops] caps how many ops one published entry carries. Every mkdir is
-      published before the first put, so a peer resolves a folder by the id its
-      marker carries whichever entry the put arrives in. *)
+      [entry_ops] caps how many ops one published entry carries and [entry_age]
+      how long one may go unpublished, so a long run stays visible to peers as
+      it goes. Every mkdir is published before the first put, so a peer resolves
+      a folder by the id its marker carries whichever entry the put arrives in.
+  *)
   val run :
     ?only:string list ->
     ?exclude:string list ->
     ?force_rehash:bool ->
     ?entry_ops:int ->
+    ?entry_age:float ->
     ?on_dir:(rel:string -> unit) ->
     ?on_plan:(files:int -> bytes:int64 -> unit) ->
     ?on_start:(rel:string -> size:int64 -> unit) ->
