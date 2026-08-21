@@ -150,6 +150,51 @@ let rec make ~(mains : sub list)
     let head_opt ~key () =
       read "head_opt" (fun (module B : Backend.S) -> B.head_opt ~key ())
 
+    (* The first readable store answers in one request where it has one, and
+       whatever it did not hold goes back through [read], which is the one place
+       that tells a store which could not look from one that held nothing.
+
+       Those second asks are per key and sequential, which is what a miss costs:
+       the keys of a batch come from a listing of the very store being asked, so
+       a miss is the rare case and paying [read] for it keeps the archive
+       fallback that makes a miss trustworthy. *)
+    let get_many =
+      Some
+        (fun ~entries () ->
+          let* first =
+            match readable with
+              | [] -> Lwt.return []
+              | s :: _ ->
+                  let module B = (val s.backend : Backend.S) in
+                  let module Bb = Backend.Batched (B) in
+                  Lwt.catch
+                    (fun () -> Bb.get_many ~entries ())
+                    (fun exn ->
+                      Log.warn
+                        "domain store get_many: %s unavailable (%s); asking key \
+                         by key"
+                        s.name (Printexc.to_string exn);
+                      Lwt.return [])
+          in
+          let held = Hashtbl.create (List.length entries) in
+          List.iter
+            (fun (key, body) ->
+              match body with
+                | Some _ -> Hashtbl.replace held key body
+                | None -> ())
+            first;
+          Lwt_list.map_s
+            (fun (e : Backend.file_entry) ->
+              match Hashtbl.find_opt held e.Backend.key with
+                | Some body -> Lwt.return (e.Backend.key, body)
+                | None ->
+                    let+ body =
+                      read "get_many" (fun (module B : Backend.S) ->
+                          B.get_opt ~key:e.Backend.key ())
+                    in
+                    (e.Backend.key, body))
+            entries)
+
     let get ~key () =
       let* d = read "get" (fun (module B : Backend.S) -> B.get_opt ~key ()) in
       match d with

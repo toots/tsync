@@ -97,6 +97,40 @@ let suite name (module B : Backend.S) =
     check "max_keys caps the listing" (List.length capped <= 1);
     Lwt.return_unit
   in
+  (* The second bulk verb, and the one whose failure is silent: a key wrongly
+     answered absent writes a mirror missing that file, and nothing walks a copy
+     afterwards to notice.
+
+     Asked through {!Backend.Batched} rather than of the driver's own field, so
+     a store that declares no batch is held to the same answers as one that
+     does, and a driver that later grows one inherits the cases. *)
+  let reading_many () =
+    let module Bb = Backend.Batched (B) in
+    let entry k = Backend.{ key = k; size = 5; last_modified = 0. } in
+    let asked = [entry (key "a"); entry (key "nope"); entry (key "b")] in
+    let* answered = Bb.get_many ~entries:asked () in
+    check "every key asked for is answered, in order"
+      (List.map fst answered = List.map (fun e -> e.Backend.key) asked);
+    check "a present key carries its body"
+      (List.map (fun (_, b) -> Option.map Chunk.to_string b) answered
+      = [Some "alpha"; None; Some "alpha"]);
+    (* Past whatever the store takes per request, so a driver that pages is
+       exercised rather than trusted. *)
+    let bulk = List.init 300 (fun i -> key (Printf.sprintf "many-%03d" i)) in
+    let* () =
+      Lwt_list.iter_p
+        (fun k -> B.put ~key:k ~data:(Chunk.of_string k) ())
+        bulk
+    in
+    let* answered = Bb.get_many ~entries:(List.map entry bulk) () in
+    check "a list longer than one request is still answered whole"
+      (List.map fst answered = bulk
+      && List.for_all
+           (fun (k, b) -> Option.map Chunk.to_string b = Some k)
+           answered);
+    let* () = B.delete_multi bulk in
+    Lwt.return_unit
+  in
   (* A body the size the product actually moves. Every other one here fits in a
      single socket read, which is the one size at which framing, content-length
      and reassembly cannot be wrong.
@@ -275,6 +309,7 @@ let suite name (module B : Backend.S) =
   let* () = section "round trips, heads and copies" round_trip in
   let* () = section "copying" copying in
   let* () = section "listing" listing in
+  let* () = section "reading many at once" reading_many in
   let* () = section "a chunk-sized body" chunk_sized_body in
   let* () = section "racing claims" racing_claims in
   let* () = section "capabilities" capabilities in

@@ -75,6 +75,8 @@ module Counting : Backend.S = struct
   let discard ~chunk_prefix:_ ~run:_ ~name:_ ~keys:_ () =
     Lwt.return `Unsupported
 
+  let get_many = None
+
   let capabilities ~prefix:_ () = Lwt.return Backend.no_caps
 end
 

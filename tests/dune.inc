@@ -631,6 +631,14 @@
   (alias runtest)
   (action (run ./backend_traffic.exe))))
 
+(subdir unit/batched
+ (alias
+  (name default)
+  (deps batched_test.exe))
+ (rule
+  (alias runtest)
+  (action (run ./batched_test.exe))))
+
 (subdir unit/bounded
  (alias
   (name default)
