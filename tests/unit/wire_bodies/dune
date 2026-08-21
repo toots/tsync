@@ -1,0 +1,11 @@
+(executable
+ (flags
+  (:standard
+   -open
+   Tsync_chunk
+   -open
+   Tsync_http_proxy
+   -open
+   Tsync_test_harness))
+ (name wire_bodies_test)
+ (libraries tsync_test_harness tsync_http_proxy tsync_chunk))

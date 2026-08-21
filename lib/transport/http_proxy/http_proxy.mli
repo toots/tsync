@@ -49,4 +49,18 @@ module Wire : sig
   val entries_of_json : string -> Backend.file_entry list
 
   val entries_to_json : Backend.file_entry list -> string
+
+  (** A batch of bodies in the order the keys were asked for: a four-byte
+      big-endian length each, then that many bytes, with an all-ones length for
+      a key the store did not hold.
+
+      Framed rather than JSON because a body is bytes. The keys are left out
+      because the order is the contract, so a decoder holding the request's keys
+      catches a short or reordered answer, which a self-describing body would
+      let through as a set of absences. *)
+  val bodies_to_string : (string * Chunk.t option) list -> string
+
+  (** Raises [Failure] on a body that does not frame [keys] exactly. *)
+  val bodies_of_string :
+    keys:string list -> string -> (string * Chunk.t option) list
 end

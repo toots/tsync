@@ -1107,6 +1107,14 @@
   (action
    (diff walk_fanout.expected walk_fanout.output))))
 
+(subdir unit/wire_bodies
+ (alias
+  (name default)
+  (deps wire_bodies_test.exe))
+ (rule
+  (alias runtest)
+  (action (run ./wire_bodies_test.exe))))
+
 (subdir unit/zip
  (alias
   (name default)

@@ -71,4 +71,52 @@ module Wire = struct
     match Yojson.Safe.from_string s with
       | `List l -> List.map file_entry_of_json l
       | _ -> failwith "expected a JSON array of entries"
+
+  (* Distinct from an empty body, which is a real answer for a key holding no
+     bytes. *)
+  let absent = 0xFFFFFFFF
+
+  let add_be32 buf n =
+    let byte shift = Char.chr ((n lsr shift) land 0xff) in
+    Buffer.add_char buf (byte 24);
+    Buffer.add_char buf (byte 16);
+    Buffer.add_char buf (byte 8);
+    Buffer.add_char buf (byte 0)
+
+  let be32_at s pos =
+    (Char.code s.[pos] lsl 24)
+    lor (Char.code s.[pos + 1] lsl 16)
+    lor (Char.code s.[pos + 2] lsl 8)
+    lor Char.code s.[pos + 3]
+
+  let bodies_to_string answered =
+    let buf = Buffer.create 4096 in
+    List.iter
+      (fun (_, body) ->
+        match body with
+          | None -> add_be32 buf absent
+          | Some b ->
+              add_be32 buf (Chunk.length b);
+              Buffer.add_string buf (Chunk.to_string b))
+      answered;
+    Buffer.contents buf
+
+  let bodies_of_string ~keys s =
+    let len = String.length s in
+    let short () = failwith "get-multi: answer shorter than the keys asked for" in
+    let rec go pos = function
+      | [] ->
+          if pos <> len then
+            failwith "get-multi: answer longer than the keys asked for";
+          []
+      | key :: rest ->
+          if pos + 4 > len then short ();
+          let n = be32_at s pos in
+          if n = absent then (key, None) :: go (pos + 4) rest
+          else if pos + 4 + n > len then short ()
+          else
+            (key, Some (Chunk.of_string (String.sub s (pos + 4) n)))
+            :: go (pos + 4 + n) rest
+    in
+    go 0 keys
 end
