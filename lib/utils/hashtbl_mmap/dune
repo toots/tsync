@@ -1,0 +1,8 @@
+; A hash table held in a mapping rather than on the OCaml heap. Self-contained
+; on purpose -- unix and the stdlib, nothing of tsync's -- so it can be lifted
+; out and published.
+
+(library
+ (name tsync_hashtbl_mmap)
+ (public_name tsync-libs.hashtbl_mmap)
+ (libraries unix))
