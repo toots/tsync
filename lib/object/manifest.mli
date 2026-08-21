@@ -84,6 +84,11 @@ val recorded_name : t -> string
 *)
 val to_string : name:string -> t -> string
 
+(** {!to_string} as the bytes a store and a sidecar are both handed, which for a
+    manifest already recording [name] is the body it is made of rather than a
+    fresh encoding of it. *)
+val body : name:string -> t -> Chunk.t
+
 (** Where a chunk of a locally edited file has its bytes: a staged body and an
     offset within it. One body holds every staged member of a cache group, so
     the offset is what separates them. It is carried rather than derived because

@@ -111,6 +111,10 @@ let to_string ~name (m : t) =
     ~h1:m.h1 ~h2:m.h2 ~symlink:m.symlink
     ~keys:(List.init (Chunk_table.count m.chunks) (Chunk_table.key m.chunks))
 
+let body ~name m =
+  if recorded_name m = name then Chunk_table.bytes m.chunks
+  else Chunk.of_string (to_string ~name m)
+
 (* Encode then decode, so a [t] only ever exists as a decoded body and cannot
    fail to round-trip. *)
 let make ~name ~h1 ~h2 ~size ~chunk_size ~chunks ~mtime =
@@ -487,8 +491,11 @@ module Make (C : Conf.S) = struct
   let write key manifest =
     invalidate key;
     let* () = ensure_parent key in
-    Fs_util.atomic_write (path key)
-      (to_string ~name:(Key.leaf ~domain_prefix:C.domain_prefix key) manifest)
+    let bytes =
+      body ~name:(Key.leaf ~domain_prefix:C.domain_prefix key) manifest
+    in
+    Fs_util.atomic_write_at (path key) ~size:(Chunk.length bytes) (fun put ->
+        put ~offset:0 (Chunk.buffer bytes))
 
   let delete key =
     invalidate key;

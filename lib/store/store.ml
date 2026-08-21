@@ -7,7 +7,7 @@ module Make (C : Conf.S) (L : Layout.S) = struct
      resolves what is already there and treats an unknown folder as absent. *)
   let put_manifest ~key ~data =
     let* bk = L.ensure_manifest_key key in
-    B.put ~key:bk ~data:(Chunk.of_string data) ()
+    B.put ~key:bk ~data ()
 
   let get_manifest_opt ~key =
     let* bk = L.manifest_key key in

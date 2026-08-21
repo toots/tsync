@@ -4,6 +4,8 @@
    -open
    Tsync_content
    -open
+   Tsync_chunk
+   -open
    Tsync_object
    -open
    Tsync_naming
@@ -21,6 +23,7 @@
  (libraries
   tsync_test_harness
   tsync_content
+  tsync_chunk
   tsync_object
   tsync_naming
   tsync_lwt_unix

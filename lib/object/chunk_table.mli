@@ -91,3 +91,7 @@ val seal : builder -> h1:string -> h2:string -> Chunk.t
 
 (** A body a caller already holds as bytes, mapped or built. *)
 val of_chunk : Chunk.t -> t
+
+(** The body itself, which is a copy only where {!t} was decoded from a string.
+*)
+val bytes : t -> Chunk.t

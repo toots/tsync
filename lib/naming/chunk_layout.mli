@@ -40,8 +40,8 @@ val is_shard_name : string -> bool
     list it. *)
 
 (** The key a body belongs under. The one place this is composed — an uploader
-    publishes it through {!Manifest.key_of_body} and a check recomputes
-    it here, so the two cannot drift into naming the same bytes differently. *)
+    publishes it through {!Manifest.key_of_body} and a check recomputes it here,
+    so the two cannot drift into naming the same bytes differently. *)
 val key_of_body : Chunk.t -> string
 
 (** ["tsync/corrupted/<domain>/"]. Beside the domains rather than inside one,

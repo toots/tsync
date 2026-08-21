@@ -228,6 +228,9 @@ let seal b ~h1 ~h2 =
 
 let of_chunk c = of_source (Mapped (Chunk.buffer c))
 
+let bytes t =
+  match t.src with Mapped m -> Chunk.of_buffer m | Str s -> Chunk.of_string s
+
 let encode ~name ~size ~chunk_size ~mtime ~h1 ~h2 ~symlink ~keys =
   let b =
     builder ~name ~size ~chunk_size ~mtime ~symlink ~count:(List.length keys)

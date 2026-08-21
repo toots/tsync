@@ -133,8 +133,7 @@ module Make (C : Conf.S) = struct
       let* st = Lwt_unix_retry.lstat src_path in
       let name = Filename.basename rel in
       let state = Manifest.make_symlink ~name ~target ~mtime:st.Unix.st_mtime in
-      let data = Manifest.to_string ~name state in
-      let* () = St.put_manifest ~key ~data in
+      let* () = St.put_manifest ~key ~data:(Manifest.body ~name state) in
       let* () = Mf.write key state in
       Lwt.return (Imported state.Manifest.size))
 

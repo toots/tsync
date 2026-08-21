@@ -96,6 +96,17 @@ let () =
            (keys * 33))
        (held * 8 < keys * 33 / 4);
 
+     (* A store is handed the body rather than an encoding of it, so what it
+        takes and what a reader decodes have to be the same bytes. *)
+     case "the body a store is handed is the one a reader decodes";
+     let name = "big.bin" in
+     check "under the name it records, byte for byte"
+       (Chunk.to_string (Manifest.body ~name manifest)
+       = Manifest.to_string ~name manifest);
+     check "and under any other name, which is an encoding again"
+       (Chunk.to_string (Manifest.body ~name:"filed-as.bin" manifest)
+       = Manifest.to_string ~name:"filed-as.bin" manifest);
+
      (* A second upload of the same bytes takes the deduplicated path, which
         writes no chunk and so exercises the other branch of [put_chunk]. *)
      case "a deduplicated upload publishes the same body";
@@ -110,4 +121,4 @@ let () =
      check "and on every chunk key"
        (List.init chunks (Chunk_table.key again.Manifest.chunks)
        = List.init chunks (Chunk_table.key manifest.Manifest.chunks));
-     report ~expected:7 ())
+     report ~expected:9 ())
