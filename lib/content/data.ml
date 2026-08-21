@@ -10,9 +10,31 @@ open Lwt.Syntax
 let readahead_bytes = 4 * 1024 * 1024
 let max_readahead_groups = 8
 
+(* Keys the backend has already said it does not hold. A name probed but never
+   present — a shell looking for [.git] in every parent directory, once per
+   prompt — otherwise costs a round trip every time, a miss being the one answer
+   that leaves nothing behind to find.
+
+   Kept per domain rather than per functor application, so a frontend and an
+   engine in one process answer the same probe once between them. *)
+let max_absent = 4096
+
+type absences = { mutable mark : string; keys : (string, unit) Hashtbl.t }
+
+let absences : (string, absences) Hashtbl.t = Hashtbl.create 4
+
+let absences_for prefix =
+  match Hashtbl.find_opt absences prefix with
+    | Some a -> a
+    | None ->
+        let a = { mark = ""; keys = Hashtbl.create 64 } in
+        Hashtbl.replace absences prefix a;
+        a
+
 module Make (C : Conf.S) (R : Remote.S) = struct
   module Cc = Chunk_cache.Make (C) (R)
   module Mf = Manifest.Make (C)
+  module Fs = File_store.Make (C)
 
   (* Advisory: a lost or stale entry costs at most one un-prefetched read. *)
   let last_read_end : (string, int) Hashtbl.t = Hashtbl.create 64
@@ -297,11 +319,43 @@ module Make (C : Conf.S) (R : Remote.S) = struct
       in
       go start 0)
 
+  (* A key reaches the backend only by being published, this client learns that
+     by applying the journal, and applying it moves the mark: an absence taken
+     under one is good until it moves.
+
+     Checked on the way in and on the way out rather than cleared by whoever
+     changes the mirror, since a cache that stands on its own ground has no
+     invalidation for a caller to forget. *)
+  let live_absences () =
+    let mark =
+      match Fs.read_last_sync_key () with
+        | Some k -> Journal.Entry_key.to_string k
+        | None -> ""
+    in
+    let a = absences_for C.domain_prefix in
+    if mark <> a.mark then begin
+      Hashtbl.reset a.keys;
+      a.mark <- mark
+    end;
+    a.keys
+
   (* ponytail: one GET per uncached file; add a metadata cache if a cold
      full-directory enumeration gets slow. *)
   let resolved_manifest key =
     let* m = Mf.read key in
-    match m with Some _ -> Lwt.return m | None -> R.fetch_manifest ~key ()
+    match m with
+      | Some _ -> Lwt.return m
+      | None when Hashtbl.mem (live_absences ()) key -> Lwt.return_none
+      | None ->
+          let+ m = R.fetch_manifest ~key () in
+          if Option.is_none m then begin
+            let keys = live_absences () in
+            (* Reset past the cap rather than evicted one at a time, overflowing
+               costing only the round trips again. *)
+            if Hashtbl.length keys >= max_absent then Hashtbl.reset keys;
+            Hashtbl.replace keys key ()
+          end;
+          m
 
   (* A promotion can retire the staged bodies between resolving the key and
      reading them, so a miss is resolved again and read once more. The retry

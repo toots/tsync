@@ -171,6 +171,14 @@
   (action
    (diff writes_in_flight.expected writes_in_flight.output))))
 
+(subdir content/absent_probe
+ (alias
+  (name default)
+  (deps absent_probe.exe))
+ (rule
+  (alias runtest)
+  (action (run ./absent_probe.exe))))
+
 (subdir content/cache_cap
  (alias
   (name default)
