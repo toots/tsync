@@ -34,6 +34,22 @@ let publish p data =
 
 let body = String.init 8192 (fun i -> Char.chr (((i * 31) + 7) land 0xff))
 
+(* Whether the snapshot claims below hold at all is the filesystem's to say, so
+   ask it once rather than infer it from a case that failed. *)
+let clones =
+  let src = path "probe" in
+  write_file src "x";
+  let ok =
+    match try Device.clone ~src with _ -> None with
+      | Some fd ->
+          Unix.close fd;
+          true
+      | None -> false
+  in
+  Sys.remove src;
+  Printf.printf "clones: %b\n" ok;
+  ok
+
 let () =
   (* Round trips, and the empty chunk that an empty file still yields. *)
   check "of_string/to_string" (Chunk.to_string (Chunk.of_string body) = body);
@@ -84,6 +100,43 @@ let () =
   Bigstringaf.set (Chunk.buffer c) 0 'Z';
   check "write does not reach file" (read_file p = body);
 
+  (* 5. The clone is gone before [map_file] returns, so a directory tsync maps
+     from never accumulates them and a kill mid-clone leaves nothing to reap. *)
+  let p = path "no-litter" in
+  write_file p body;
+  ignore (Chunk.map_file ~path:p ~offset:0 ~len:(String.length body));
+  check "clone left behind"
+    (not (Array.exists Fs_util.is_temp_name (Sys.readdir root)));
+
+  (* 6. The mapping is of a different inode from the file, which is the whole of
+     what "frozen" means here and the only part of it this repository decides:
+     the rest is the filesystem refusing to let a write reach those blocks. *)
+  let p = path "snapshot" in
+  write_file p body;
+  let fd = Chunk.open_snapshot p in
+  let mapped = (Unix.fstat fd).Unix.st_ino in
+  Unix.close fd;
+  if clones then
+    check "snapshot is a separate inode" (mapped <> (Unix.stat p).Unix.st_ino)
+  else print_endline "skipped: this filesystem cannot clone";
+
+  (* 6b. Truncating the source under a mapping of it is [SIGBUS] on the page
+     past the new end, which is a dead daemon mid-import rather than a short
+     read, so the child surviving is the check. *)
+  let p = path "truncated" in
+  write_file p body;
+  let c = Chunk.map_file ~path:p ~offset:0 ~len:(String.length body) in
+  let survived =
+    match Unix.fork () with
+      | 0 ->
+          Unix.truncate p 0;
+          ignore (Sys.opaque_identity (Chunk.to_string c));
+          exit 0
+      | child -> snd (Unix.waitpid [] child) = Unix.WEXITED 0
+  in
+  if clones then check "survives truncation of the source" survived
+  else print_endline "skipped: this filesystem cannot clone";
+
   (* 7. Mapping at an offset, which is how a group member is addressed and which
      the stub has to align for us. *)
   let p = path "offset" in
@@ -122,6 +175,6 @@ let () =
   Lwt_main.run (Chunk.write_to ~path:p (Chunk.of_string body) ~offset:0);
   check "write_to" (read_file p = body);
 
-  Printf.printf "checks: %d\n" (checks ());
-  (* A suite that stopped running its cases would otherwise report a clean pass. *)
-  assert (checks () = 13)
+  (* Counted, so a case that stopped running takes the report with it, and
+     reported, so a failure is an exit code rather than a line in a log. *)
+  report ~expected:(if clones then 16 else 14) ()

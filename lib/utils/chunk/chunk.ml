@@ -20,10 +20,35 @@ let map_fd fd ~offset ~len =
       (Unix.map_file fd ~pos:(Int64.of_int offset) Bigarray.char
          Bigarray.c_layout false [| len |])
 
+(* Keyed by directory, because an import source and the cache need not be on the
+   same filesystem, and remembered so one that cannot clone costs a single
+   failed attempt rather than one per mapping. *)
+let clonable : (string, bool) Hashtbl.t = Hashtbl.create 8
+let warned_no_clone = ref false
+
+let snapshot path =
+  let dir = Filename.dirname path in
+  if Hashtbl.find_opt clonable dir = Some false then None
+  else (
+    let fd = try Device.clone ~src:path with Unix.Unix_error _ -> None in
+    Hashtbl.replace clonable dir (Option.is_some fd);
+    if Option.is_none fd && not !warned_no_clone then (
+      warned_no_clone := true;
+      Log.warn
+        "%s is on a filesystem that cannot clone: mappings there are of the \
+         file itself, and read whatever it holds when the pages are touched"
+        dir);
+    fd)
+
+let open_snapshot path =
+  match snapshot path with
+    | Some fd -> fd
+    | None -> Unix.openfile path [Unix.O_RDONLY] 0
+
 let map_file ~path ~offset ~len =
   if len = 0 then empty
   else (
-    let fd = Unix.openfile path [Unix.O_RDONLY] 0 in
+    let fd = open_snapshot path in
     Fun.protect
       ~finally:(fun () -> Unix.close fd)
       (fun () -> map_fd fd ~offset ~len))

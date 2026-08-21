@@ -26,24 +26,30 @@ val of_buffer : Local_io.buffer -> t
     accordingly. *)
 val create : int -> Local_io.buffer
 
-(** A [MAP_PRIVATE] mapping of [len] bytes at [offset] of [path].
+(** A read-only descriptor on the bytes [path] holds now, frozen: a
+    copy-on-write clone unlinked the instant it is open, so nothing written to
+    [path] afterwards reaches what is read through it, and nothing is left
+    behind if the process dies. The caller closes it, and several ranges of one
+    file want one of these rather than {!map_file} per range.
 
-    {b Only for a file published by rename and never rewritten in place.} Such a
-    file can be unlinked under the mapping — POSIX keeps the inode alive — and
-    replaced, the mapping then still serving the bytes it was made from. One
-    written in place instead reads as whatever it now holds, and one truncated
-    under the mapping is [SIGBUS], which is a dead process rather than a short
-    read. Cache group bodies and manifest sidecars qualify; staged bodies and a
-    user's own file during an import do not.
+    Best effort ({!Device.clone}), logged once per process where it falls
+    through: on a filesystem that cannot clone this is the file itself, and the
+    caller is back to needing a source nobody rewrites in place or truncates —
+    the latter being [SIGBUS] under a mapping, a dead process rather than a
+    short read. *)
+val open_snapshot : string -> Unix.file_descr
 
-    The descriptor is read-only, which is also what makes a short file an error
-    here: {!Unix.map_file} grows a file that cannot cover the mapping, and on a
-    read-only descriptor that write fails instead. *)
+(** A [MAP_PRIVATE] mapping of [len] bytes at [offset] of an {!open_snapshot} of
+    [path].
+
+    A short file is an error here rather than a silent grow: {!Unix.map_file}
+    extends a file that cannot cover the mapping, and the descriptor being
+    read-only is what turns that write into a failure. *)
 val map_file : path:string -> offset:int -> len:int -> t
 
-(** {!map_file} against a descriptor already open, which holds the inode the
-    mapping is of and spares an open per range. Read-only, and subject to the
-    same restriction. *)
+(** {!map_file} against a descriptor already open, which spares a clone and an
+    open per range. Read-only, and a snapshot only if the descriptor is one:
+    pass {!open_snapshot}'s, not a plain {!Unix.openfile}'s. *)
 val map_fd : Unix.file_descr -> offset:int -> len:int -> t
 
 val write_to : path:string -> t -> offset:int -> unit Lwt.t
