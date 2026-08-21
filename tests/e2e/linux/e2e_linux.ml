@@ -142,7 +142,42 @@ let () =
              let said = read_file out in
              if status <> 0 then failf "exited %d: %s" status said;
              if not (String.starts_with ~prefix:"Evicted:" said) then
-               failf "did not evict: %s" said));
+               failf "did not evict: %s" said);
+
+         (* The store's domain is served by the http-proxy and nothing else, so
+            it binds no socket of its own. A report filed with a frontend has
+            nowhere to go here; one filed with the process converging the
+            domains always has somewhere. *)
+         check "a command reports itself on a domain with no frontend socket"
+           (fun () ->
+             let out = Filename.concat root "job.out" in
+             let cli args =
+               let status =
+                 Sys.command
+                   (Printf.sprintf "HOME=%s %s %s >%s 2>&1"
+                      (Filename.quote store_home)
+                      (Filename.quote exe) args (Filename.quote out))
+               in
+               if status <> 0 then
+                 failf "%s exited %d: %s" args status (read_file out);
+               read_file out
+             in
+             ignore (cli "sync");
+             let report = Yojson.Safe.from_string (cli "status --json") in
+             let kinds =
+               match Yojson.Safe.Util.member "jobs" report with
+                 | `List l ->
+                     List.filter_map
+                       (fun j ->
+                         match Yojson.Safe.Util.member "kind" j with
+                           | `String k -> Some k
+                           | _ -> None)
+                       l
+                 | _ -> []
+             in
+             if not (List.mem "sync" kinds) then
+               failf "the sync run is not in the report: jobs = [%s]"
+                 (String.concat "; " kinds)));
 
      (* Last, because it takes the mount down. A reader holding a descriptor open
         must not keep the daemon from stopping: a clean unmount refuses while the

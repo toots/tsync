@@ -1052,7 +1052,7 @@ let gc_cmd =
           let s =
             run_lwt
               ~report:(fun () ->
-                report_job ?domain
+                report_job
                   (module C)
                   ~kind:(if abort then "gc --abort" else "gc")
                   ~current:(fun () ->
@@ -1125,7 +1125,7 @@ let sync_cmd =
     let code =
       run_lwt
         ~report:(fun () ->
-          report_job ?domain
+          report_job
             (module C)
             ~kind:(if full then "sync --full" else "sync")
             ~current:(fun () ->
@@ -1551,7 +1551,7 @@ let data_integrity_cmd =
     let code =
       run_lwt
         ~report:(fun () ->
-          report_job ?domain
+          report_job
             (module C)
             ~kind:
               (if do_verify then "data-integrity --verify"
@@ -1680,7 +1680,7 @@ let mirror_cmd =
     let code =
       run_lwt
         ~report:(fun () ->
-          report_job ?domain
+          report_job
             (module C)
             ~kind:
               (match (manifests_only, path) with
@@ -1833,7 +1833,7 @@ let import_cmd =
     let failures =
       run_lwt
         ~report:(fun () ->
-          report_job ?domain
+          report_job
             (module C)
             ~kind:"import" ~target:src
             ~current:(fun () -> !current)
@@ -1924,7 +1924,7 @@ let export_cmd =
     let code =
       run_lwt
         ~report:(fun () ->
-          report_job ?domain
+          report_job
             (module C)
             ~kind:"export" ~target:dst
             ~current:(fun () -> !current)
