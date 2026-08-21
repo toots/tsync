@@ -1147,6 +1147,7 @@ let sync_cmd =
          let module Sq = Sync_queue.Make (C) in
          let module F = File.Make (C) (Sq) in
          let module Rp = Replay.Make (C) (F) in
+         let module Tree = Inode_tree.Make (C) in
          Sq.start
            ~upload:(fun ~key ~cancel -> F.upload ~cancel key)
            ~on_upload_done:(fun ~key:_ -> Lwt.return_unit);
@@ -1154,85 +1155,52 @@ let sync_cmd =
          if !verbose then
            Log.info "syncing domain %s (client %s, uuid %s)" C.domain_name
              C.client_name my_uuid;
-         (* Walks the inode tree from the root, a folder marker giving a
-          subfolder's name+id plus the namespace to recurse into.
-
-          One [pool] is shared across the whole recursion, a per-namespace bound
-          multiplying with depth until it exhausts DNS / descriptors; a slot
-          covers only a fetch and its local write, so a deep tree cannot
-          deadlock. *)
+         (* Walks the inode tree through the module that owns the walk, so a
+            resync and [tsync mirror] classify a child the same way. *)
          let rebuild_mirror () =
-           let pool =
-             Lwt_pool.create (max 1 parallelism) (fun () -> Lwt.return_unit)
+           let slots =
+             Lwt_bounded.create ~name:"resync" ~max:(max 1 parallelism) ()
            in
-           let use f = Lwt_pool.use pool f in
-           let join rel name = if rel = "" then name else rel ^ "/" ^ name in
            let count = manifests and failed = failures in
-           (* Entries of one folder, bounded; the descent below is sequential.
-            Recursing inside the fan-out instead would keep every level live at
-            once, so the peak is the whole tree rather than one directory — and
-            a second bound here would deadlock against this one. *)
-           let entry_slots = Lwt_bounded.create ~max:(max 1 parallelism) () in
-           let rec walk folder_id rel =
-             current := Some (if rel = "" then "/" else rel);
-             let* entries = use (fun () -> St.list_namespace ~folder_id) in
-             let* children =
-               Lwt_bounded.filter_map_with entry_slots
-                 (fun (e : Backend.file_entry) ->
-                   Lwt.catch
-                     (fun () ->
-                       let* next =
-                         use (fun () ->
-                             let* data = St.get_object ~bkey:e.key in
-                             match Folder.marker_of_string data with
-                               | Some m ->
-                                   let child = join rel m.Folder.name in
-                                   let+ () =
-                                     Folder_ids.write ~cache_root:C.cache_root
-                                       ~domain_name:C.domain_name child m
-                                   in
-                                   Some (m.Folder.id, child)
-                               | None -> (
-                                   match Manifest.of_string data with
-                                     | man ->
-                                         incr count;
-                                         (* Read by backend key, which is hashed:
-                                        the body is what names it. *)
-                                         let leaf =
-                                           Manifest.recorded_name man
-                                         in
-                                         if !verbose then
-                                           Log.info "manifest %s"
-                                             (join rel leaf);
-                                         let+ () =
-                                           F.write_manifest
-                                             (C.domain_prefix ^ join rel leaf)
-                                             man
-                                         in
-                                         None
-                                     | exception parse_exn ->
-                                         (* Counted, so a store whose manifests all
-                                        fail to parse cannot resync
-                                        "successfully" writing nothing. *)
-                                         incr failed;
-                                         Log.warn
-                                           "resync %s: unreadable manifest: %s"
-                                           e.key
-                                           (match parse_exn with
-                                             | Chunk_table.Malformed m -> m
-                                             | ex -> Printexc.to_string ex);
-                                         Lwt.return_none))
-                       in
-                       Lwt.return next)
-                     (fun exn ->
-                       incr failed;
-                       Log.warn "resync %s: %s" e.key (Printexc.to_string exn);
-                       Lwt.return_none))
-                 entries
-             in
-             Lwt_list.iter_s (fun (id, child) -> walk id child) children
+           (* Counted, so a store whose manifests all fail to parse cannot
+              resync "successfully" writing nothing. *)
+           let unusable bkey reason =
+             incr failed;
+             Log.warn "resync %s: %s" bkey
+               (match reason with
+                 | `Unreadable exn -> Printexc.to_string exn
+                 | `Unclassifiable (Chunk_table.Malformed m) ->
+                     "unreadable manifest: " ^ m
+                 | `Unclassifiable exn ->
+                     "unreadable manifest: " ^ Printexc.to_string exn)
            in
-           let+ () = walk Folder.root_id "" in
+           let apply rel (entry : Inode_tree.entry) =
+             match entry.Inode_tree.body with
+               | Inode_tree.Dir m ->
+                   Folder_ids.write ~cache_root:C.cache_root
+                     ~domain_name:C.domain_name (Key.join rel m.Folder.name) m
+               | Inode_tree.File man ->
+                   incr count;
+                   (* Read by backend key, which is hashed: the body is what
+                      names it. *)
+                   let leaf = Manifest.recorded_name man in
+                   if !verbose then Log.info "manifest %s" (Key.join rel leaf);
+                   F.write_manifest (C.domain_prefix ^ Key.join rel leaf) man
+           in
+           let visit () rel entry =
+             current := Some (if rel = "" then "/" else rel);
+             Lwt.catch
+               (fun () -> apply rel entry)
+               (fun exn ->
+                 incr failed;
+                 Log.warn "resync %s: %s" entry.Inode_tree.bkey
+                   (Printexc.to_string exn);
+                 Lwt.return_unit)
+           in
+           let+ () =
+             Tree.fold_tree ~on_unusable:(`Skip unusable) ~slots
+               ~folder_id:Folder.root_id ~rel:"" visit ()
+           in
            (!count, !failed)
          in
          let full_resync reason =
