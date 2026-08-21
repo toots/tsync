@@ -20,10 +20,8 @@ install-deps:
 	opam install --deps-only -y ..
 
 install-opam:
-	# Named rather than `opam install ..', which installs every package in the
-	# tree: tsync-android would link the Android frontend into a desktop build.
-	# The cross build gets that package from dune, never from opam.
-	opam install ../opam/tsync-libs.opam ../opam/tsync.opam
+	cd ../opam && opam pin -ny .
+	opam install tsync
 
 install-system:
 	mkdir -p ~/.local/bin
