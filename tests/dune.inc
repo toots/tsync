@@ -877,6 +877,20 @@
   (alias runtest)
   (action (run ./layout.exe))))
 
+(subdir unit/listing
+ (alias
+  (name default)
+  (deps listing_test.exe))
+ (rule
+  (alias runtest)
+  (target listing_test.output)
+  (action
+   (with-stdout-to listing_test.output (ignore-stderr (run ./listing_test.exe)))))
+ (rule
+  (alias runtest)
+  (action
+   (diff listing_test.expected listing_test.output))))
+
 (subdir unit/manifest_memo
  (alias
   (name default)

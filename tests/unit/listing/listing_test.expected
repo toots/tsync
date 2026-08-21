@@ -1,0 +1,16 @@
+
+=== the total is known before the walk
+count is what went in: ok
+
+=== a record survives whatever its fields hold
+every record reads back exactly as it was written: ok
+
+=== the walk can happen again
+a second walk sees the same records, in the same order: ok
+and the count did not move: ok
+
+=== appending after the first walk is refused
+add raises once the spool is sealed: ok
+and nothing was counted for it: ok
+
+6 check(s), 0 failure(s)

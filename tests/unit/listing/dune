@@ -1,0 +1,5 @@
+(executable
+ (flags
+  (:standard -open Tsync_chunk -open Tsync_test_harness))
+ (name listing_test)
+ (libraries tsync_test_harness tsync_chunk lwt lwt.unix unix))
