@@ -409,7 +409,7 @@ let snapshot () =
 
         case "the report answers with no daemon to ask";
         (* Only the lines that do not describe this machine: the rest of the
-           report is cpu, memory and paths. *)
+           report is uptime, cpu, memory and paths. *)
         let report = invoke ["android"; "status"] in
         String.split_on_char '\n' report
         |> List.iter (fun l ->
@@ -418,12 +418,7 @@ let snapshot () =
                 (fun prefix ->
                   String.length l >= String.length prefix
                   && String.sub l 0 (String.length prefix) = prefix)
-                [
-                  "Frontend android";
-                  "Domain media";
-                  "  read-only";
-                  "  versioning";
-                ]
+                ["Domain media"; "  settings"; "  concurrency"]
             in
             if keep then line "%s" (scrub (String.trim l)));
 

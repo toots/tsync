@@ -378,9 +378,12 @@ let domain_targets () =
                               ( d.Conf_parsing.name,
                                 Runtime.domain_socket_path runtime_paths
                                   d.Conf_parsing.name )
+                        (* Named for the domain, not the listener: one process
+                           fronts several and routes on the name, so a report
+                           has to ask it once per domain to hear about each. *)
                         | Some `Proxy_socket ->
                             Some
-                              ( f.Conf_parsing.frontend_type,
+                              ( d.Conf_parsing.name,
                                 Runtime.proxy_socket_path runtime_paths )))
               d.Conf_parsing.frontends)
           domains

@@ -4,6 +4,8 @@
    -open
    Tsync_engine
    -open
+   Tsync_diagnostics
+   -open
    Tsync_log
    -open
    Tsync_conf
@@ -13,6 +15,7 @@
  (public_name tsync-libs.frontend_register)
  (libraries
   tsync-libs.engine
+  tsync_diagnostics
   tsync_field_spec
   tsync_conf
   tsync_log

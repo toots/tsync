@@ -22,6 +22,8 @@
    -open
    Tsync_backend_register
    -open
+   Tsync_ipc
+   -open
    Tsync_lwt_unix
    -open
    Tsync_conf))
@@ -38,6 +40,7 @@
   tsync_lwt_unix
   tsync_chunk
   tsync_backend_register
+  tsync_ipc
   tsync_metrics
   tsync_log
   yojson

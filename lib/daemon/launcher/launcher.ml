@@ -63,10 +63,23 @@ let socket_of (name, b) =
     | Some `Proxy_socket ->
         Some (Runtime.proxy_socket_path (Runtime.default_paths ()))
 
+(* Each of a domain's frontends and where it answers, deduplicated by socket:
+   frontends sharing a path answer the same one and collapse. The name travels
+   with it so a silent socket can be reported as the frontend that went quiet
+   rather than as an address. *)
+let frontends_of domain =
+  List.fold_left
+    (fun acc (name, b) ->
+      match socket_of (name, b) with
+        | None -> acc
+        | Some socket ->
+            if List.exists (fun (_, s) -> s = socket) acc then acc
+            else acc @ [(name, socket)])
+    [] domain
+
 (* Where a domain's frontends answer, so what the poller applied can reach
    them. *)
-let frontend_sockets domain =
-  List.sort_uniq compare (List.filter_map socket_of domain)
+let frontend_sockets domain = List.map snd (frontends_of domain)
 
 (* The same list minus the named frontend's own, which is what a frontend
    reporting on the whole domain needs and cannot work out for itself: it holds
@@ -103,26 +116,52 @@ let bindings_by_frontend domains =
 
 type engine = {
   name : string;
-  sockets : string list;  (** where this domain's frontends answer *)
+  frontends : (string * string) list;
+      (** each frontend of this domain and the socket it answers on *)
   converging : (module Domain_engine.Converging);
   diagnose :
     totals:bool -> exact:bool -> reload:bool -> unit -> Yojson.Safe.t Lwt.t;
 }
 
-(* This process's section of `tsync status'.
+(* The machine's `tsync status', assembled here because this is the process that
+   can.
 
-   The whole domain, not just this process's counters: the cache, the records
-   owed and the backends are the domain's, and this is the process holding them.
-   A frontend reports what only it knows -- its mount, its handles, its served
-   bytes -- under [frontends]. *)
+   The domain -- its cache, the records owed, its backends -- belongs to whoever
+   converges it, which is this process; a frontend asked for it would redo those
+   probes for an answer this one already has. What a frontend knows and nobody
+   else does is its own -- its mount, its handles, its queues -- and that is what
+   [frontend_only] asks each of them for.
+
+   Only a collector fans out. A frontend asked for its figures answers about
+   itself and asks nobody, or this would cost frontends x frontends round trips.
+
+   Both fan-outs are as wide as the config, not as the data, and every leaf is
+   under its own deadline -- {!Status_report.ask}'s for a socket, the probe
+   timeout for a store -- so neither needs a pool. *)
 let report ~totals ~exact ~reload engines =
   let open Lwt.Syntax in
-  let+ domains =
-    Lwt_list.map_s (fun e -> e.diagnose ~totals ~exact ~reload ()) engines
+  let* domains =
+    Lwt_list.map_p (fun e -> e.diagnose ~totals ~exact ~reload ()) engines
   in
-  `Assoc
-    (Diagnostics.self_json ~extra:[("frontend", `String "sync")] ()
-    @ [("domains", `List domains)])
+  let+ answers =
+    Lwt_list.map_p
+      (fun (domain, (frontend, socket_path)) ->
+        Status_report.ask ~arg:Status_report.frontend_only ~frontend ~domain
+          ~socket_path ())
+      (List.concat_map
+         (fun e -> List.map (fun f -> (e.name, f)) e.frontends)
+         engines)
+  in
+  Status_report.of_answers
+    ~local:
+      (Diagnostics.self_json
+         ~extra:
+           [
+             ("frontend", `String "sync");
+             ("serves", `List (List.map (fun e -> `String e.name) engines));
+           ]
+         ())
+    ~domains answers
 
 (* Answered in the same vocabulary the mount daemon's socket uses, so a client
    can match on the code rather than on the wording. *)
@@ -179,7 +218,7 @@ let converge domains =
             Some
               {
                 name = C.domain_name;
-                sockets = frontend_sockets d;
+                frontends = frontends_of d;
                 converging = (module Cv : Domain_engine.Converging);
                 diagnose =
                   (fun ~totals ~exact ~reload () ->
@@ -203,7 +242,9 @@ let converge domains =
           (fun e ->
             let module Cv = (val e.converging : Domain_engine.Converging) in
             Cv.start
-              ~on_changed:(Change_notice.send ~domain:e.name ~sockets:e.sockets)
+              ~on_changed:
+                (Change_notice.send ~domain:e.name
+                   ~sockets:(List.map snd e.frontends))
               ())
           engines
       in

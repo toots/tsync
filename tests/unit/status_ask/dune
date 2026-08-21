@@ -1,0 +1,5 @@
+(executable
+ (flags
+  (:standard -open Tsync_diagnostics -open Tsync_ipc))
+ (name status_ask)
+ (libraries tsync_diagnostics tsync_ipc yojson lwt lwt.unix unix))

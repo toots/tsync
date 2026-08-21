@@ -35,7 +35,11 @@ type served = {
           reports on the domain as a whole. Filled by the launcher, which holds
           the (domain × frontend) matrix; a frontend sees one binding and would
           have to assume. Empty is an answer: no other frontend serves this
-          domain here. *)
+          domain here.
+
+          Only the http-proxy reads it, and it stays because of that: its status
+          page has to be complete on its own, so it cannot get the picture from
+          the launcher the way [tsync status] does. *)
 }
 
 (** Which socket this frontend answers requests on, or [None] for one that

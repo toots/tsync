@@ -390,12 +390,13 @@ let setup_client (module C : Conf.S) root staging_prefix =
   in
   Sq.start
     ~upload:(fun ~key ~cancel -> F.upload ~cancel key)
-    (* Bumped here rather than dropped: the cursor is what a peer polls to decide
+      (* Bumped here rather than dropped: the cursor is what a peer polls to decide
        whether to read the journal at all, so a scenario whose uploads never move
        it exercises [Sync] against a gate that is always open. Synchronous, where
        a daemon batches on a timer, because a step must have finished when it
        returns. *)
-    ~on_cursor:(fun ~entry_key -> Lwt.async (fun () -> Fs.bump_cursor entry_key))
+    ~on_cursor:(fun ~entry_key ->
+      Lwt.async (fun () -> Fs.bump_cursor entry_key))
     ~on_upload_done:(fun ~key:_ ->
       (* Mirror the daemons: nudge cache-cap enforcement after each upload. *)
       F.enforce_chunk_cap ());
@@ -1737,7 +1738,7 @@ let run_stats_scenario ?versioning ({ name; steps } : scenario) =
        (Yojson.Safe.to_string (mem "metaWaiting" mount));
      (* The report renders for a person without raising on any of it. *)
      Printf.printf "  renders as text: %b\n"
-       (String.length (Diagnostics.text json) > 0);
+       (String.length (Status_report.text json) > 0);
      client.stop ());
   rm_rf root;
   print_newline ()

@@ -219,7 +219,7 @@ let mirroring =
   ]
 
 let show title json =
-  Printf.printf "=== %s\n%s\n" title (jobs_block (Diagnostics.text json))
+  Printf.printf "=== %s\n%s\n" title (jobs_block (Status_report.text json))
 
 let () =
   show "a running import, with the bytes it has behind and ahead of it"

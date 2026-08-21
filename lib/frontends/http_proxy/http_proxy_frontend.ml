@@ -511,96 +511,79 @@ let share_request routes uri =
           in
           Some (Option.get r.serve_share, token, sub))
 
-(* A domain's frontends are separate processes and {!Metrics} counts per process,
-   so a mount's traffic is invisible here and reporting only our own would call a
-   busy machine idle. Its transfer figures and process cost come across
-   attributed to it under the domain's [frontends], not added to ours. *)
-let fetch_mount ~socket_path =
-  let unreachable msg =
-    `Assoc
-      [
-        ("reachable", `Bool false);
-        ("socketPath", `String socket_path);
-        ("error", `String msg);
-      ]
-  in
-  Lwt.catch
-    (fun () ->
-      let request =
-        Yojson.Safe.to_string (`Assoc [("action", `String "stats")])
-      in
-      let+ resp = Ipc.send_lwt ~socket_path request in
-      let open Yojson.Safe.Util in
-      let json = Yojson.Safe.from_string resp in
-      let server = json |> member "server" in
-      let proc = json |> member "process" in
-      let carried =
-        List.filter
-          (fun (_, v) -> v <> `Null)
-          [
-            ("pid", server |> member "pid");
-            ("uptimeSeconds", server |> member "uptimeSeconds");
-            ("cpuSeconds", proc |> member "cpuSeconds");
-            ("rssBytes", proc |> member "rssBytes");
-            ("traffic", json |> member "traffic");
-          ]
-      in
-      match json |> member "domains" with
-        | `List (d :: _) -> (
-            match d |> member "frontends" with
-              | `List (`Assoc fields :: _) -> `Assoc (fields @ carried)
-              | _ -> unreachable "daemon reported no frontend")
-        | _ -> unreachable "daemon reported no domains")
-    (fun exn ->
-      Lwt.return
-        (unreachable
-           (match exn with
-             | Lwt_unix.Timeout -> "timed out"
-             | exn -> Printexc.to_string exn)))
-
 (* One listener serves every domain configured on it, so its cpu, bytes and
    request counts belong to no single domain and go in one labelled block at the
    top. *)
+let self_json ~port ~tls routes =
+  Diagnostics.self_json
+    ~extra:
+      [
+        ("frontend", `String implementation);
+        ("port", `Int port);
+        ("tls", `Bool tls);
+        ("serves", `List (List.map (fun r -> `String r.domain_name) routes));
+        ("requests", counters_json ());
+        (* Shares included, or a box serving only share links reports idle. *)
+        ( "bytesRead",
+          `Int
+            (Metrics.total read_bytes + Metrics.total Share_server.served_bytes)
+        );
+        ("bytesWritten", `Int (Metrics.total written_bytes));
+        ( "bytesReadPerSec",
+          `Int
+            (int_of_float
+               (Metrics.rate read_bytes
+               +. Metrics.rate Share_server.served_bytes)) );
+        ("bytesWrittenPerSec", `Int (int_of_float (Metrics.rate written_bytes)));
+      ]
+    ()
+
+(* This listener alone, asking nobody: what a collector wants from it, and the
+   answer that keeps the fan-out from squaring. A collector asks every frontend
+   of every domain; if this one answered by asking the mounts in turn, one
+   report would cost frontends × frontends round trips. *)
+let self_report ~port ~tls ~domain routes =
+  let mine =
+    match List.filter (fun r -> r.domain_name = domain) routes with
+      | [] -> routes
+      | rs -> rs
+  in
+  self_json ~port ~tls routes
+  @ [
+      ( "domains",
+        `List
+          (List.map
+             (fun r ->
+               `Assoc
+                 [
+                   ("name", `String r.domain_name);
+                   ("frontends", `List [r.self_frontend]);
+                 ])
+             mine) );
+    ]
+
 let status_json ~port ~tls ~totals ~exact ~reload routes =
-  let+ domains =
+  let* domains =
     Lwt_list.map_p
       (fun route ->
-        (* One round trip per frontend that answers, and none at all for a
-           domain this listener serves alone. *)
-        let* peers =
-          Lwt_list.map_p
-            (fun socket_path -> fetch_mount ~socket_path)
-            route.peers
-        in
-        route.diagnose ~totals ~exact ~reload
-          ~frontends:(route.self_frontend :: peers))
+        route.diagnose ~totals ~exact ~reload ~frontends:[route.self_frontend])
       routes
   in
-  `Assoc
-    (Diagnostics.self_json
-       ~extra:
-         [
-           ("frontend", `String implementation);
-           ("port", `Int port);
-           ("tls", `Bool tls);
-           ("serves", `List (List.map (fun r -> `String r.domain_name) routes));
-           ("requests", counters_json ());
-           (* Shares included, or a box serving only share links reports idle. *)
-           ( "bytesRead",
-             `Int
-               (Metrics.total read_bytes
-               + Metrics.total Share_server.served_bytes) );
-           ("bytesWritten", `Int (Metrics.total written_bytes));
-           ( "bytesReadPerSec",
-             `Int
-               (int_of_float
-                  (Metrics.rate read_bytes
-                  +. Metrics.rate Share_server.served_bytes)) );
-           ( "bytesWrittenPerSec",
-             `Int (int_of_float (Metrics.rate written_bytes)) );
-         ]
-       ()
-    @ [("domains", `List domains)])
+  (* One round trip per frontend that answers, and none at all for a domain this
+     listener serves alone. The peer list is the launcher's answer, not a guess:
+     a frontend holds one binding and cannot know its siblings.
+
+     As wide as the config -- domains times their frontends -- rather than as
+     wide as anything a caller sends, and every leaf is under
+     {!Status_report.ask}'s deadline, so no pool bounds it. *)
+  let+ answers =
+    Lwt_list.map_p
+      (fun (route, socket_path) ->
+        Status_report.ask ~arg:Status_report.frontend_only ~frontend:""
+          ~domain:route.domain_name ~socket_path ())
+      (List.concat_map (fun r -> List.map (fun s -> (r, s)) r.peers) routes)
+  in
+  Status_report.of_answers ~local:(self_json ~port ~tls routes) ~domains answers
 
 (* [tsync status] reaches every frontend over its own socket and merges the
    answers by socket path, so this reports for the listener and its domains and
@@ -622,6 +605,13 @@ let ipc_handler ~port ~tls ~request_stop routes line =
         in
         let asked name = List.mem name (String.split_on_char ',' arg) in
         match List.assoc_opt "action" obj with
+          | Some (`String "stats") when asked Status_report.frontend_only ->
+              let domain =
+                match List.assoc_opt "domain" obj with
+                  | Some (`String d) -> d
+                  | _ -> ""
+              in
+              reply (("ok", `Bool true) :: self_report ~port ~tls ~domain routes)
           | Some (`String "stats") ->
               let exact = asked "exact" in
               let totals = exact || asked "totals" in
@@ -671,7 +661,7 @@ let serve_status ~port ~tls ~json routes req body =
     else
       respond
         ~headers:[("content-type", "text/plain; charset=utf-8")]
-        (Diagnostics.text report)
+        (Status_report.text report)
   end
 
 (* What a client holding this secret may configure itself against. Unlike the
