@@ -64,12 +64,15 @@ jobs:
           echo "cohttp=$(git ls-remote https://github.com/toots/ocaml-cohttp.git bigstring-body | cut -f1)" >> "$GITHUB_OUTPUT"
           echo "memtrace=$(git ls-remote https://github.com/janestreet/memtrace.git master | cut -f1)" >> "$GITHUB_OUTPUT"
 
-      # Every job would otherwise compile a fresh OCaml switch.
+      # Every job would otherwise compile a fresh OCaml switch. Bump the epoch
+      # in both keys to discard every switch built before it: [restore-keys]
+      # falls back across fork revisions, so a switch can otherwise hold two
+      # packages of one monorepo from different commits.
       - uses: actions/cache@v4
         with:
           path: ~/.opam
-          key: opam-fedora44-${{ matrix.arch }}-${{ hashFiles('dune-project', 'opam/*.opam') }}-${{ steps.forks.outputs.fuse3 }}-${{ steps.forks.outputs.aws_s3 }}-${{ steps.forks.outputs.cohttp }}-${{ steps.forks.outputs.memtrace }}
-          restore-keys: opam-fedora44-${{ matrix.arch }}-
+          key: opam-v2-fedora44-${{ matrix.arch }}-${{ hashFiles('dune-project', 'opam/*.opam') }}-${{ steps.forks.outputs.fuse3 }}-${{ steps.forks.outputs.aws_s3 }}-${{ steps.forks.outputs.cohttp }}-${{ steps.forks.outputs.memtrace }}
+          restore-keys: opam-v2-fedora44-${{ matrix.arch }}-
 
       - name: Build
         run: ./linux/build.sh
