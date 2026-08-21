@@ -12,3 +12,11 @@ every slot came back: ok
 nothing is left queued: ok
 an unbounded queue serves everyone: ok
 and leaves nothing queued: ok
+a pool reports what it admits: ok
+and reports the clamp, not the nonsense it was given: ok
+never wider than the workers asked for: ok
+as wide as they were asked for: ok
+every job ran: ok
+a drained source ends every worker: ok
+the failure reaches the caller: ok
+and stops the workers taking more: ok

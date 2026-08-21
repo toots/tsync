@@ -32,6 +32,7 @@ let create ?max_waiting ?name ~max () =
 
 let in_flight t = t.held
 let waiting t = t.waiting
+let width t = t.limit
 
 (* Creation order, so one run's report can be read against another's. *)
 let totals () =
@@ -86,3 +87,31 @@ let use t f = use_or t ~busy:(fun () -> Lwt.fail Busy) f
 let map_with t f xs = Lwt_list.map_p (fun x -> use t (fun () -> f x)) xs
 let iter_with t f xs = Lwt_list.iter_p (fun x -> use t (fun () -> f x)) xs
 let filter_map_with t f xs = Lwt.map (List.filter_map Fun.id) (map_with t f xs)
+
+(* Taking a job and moving the source on happens between binds, so no worker
+   sees it part-way through another's turn.
+
+   A worker stops at the first failure rather than draining what is left, so a
+   cancelled upload does not go on reading a file it has already given up on. *)
+let each ~width next =
+  let stop = ref None in
+  let rec worker () =
+    if Option.is_some !stop then Lwt.return_unit
+    else (
+      match next () with
+        | None -> Lwt.return_unit
+        | Some job ->
+            Lwt.bind
+              (Lwt.catch
+                 (fun () -> Lwt.map (fun () -> None) (job ()))
+                 (fun exn -> Lwt.return_some exn))
+              (function
+                | None -> worker ()
+                | Some exn ->
+                    if Option.is_none !stop then stop := Some exn;
+                    Lwt.return_unit))
+  in
+  Lwt.bind
+    (Lwt.join (List.init (if width < 1 then 1 else width) (fun _ -> worker ())))
+    (fun () ->
+      match !stop with Some exn -> Lwt.fail exn | None -> Lwt.return_unit)
