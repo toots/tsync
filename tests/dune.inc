@@ -753,6 +753,20 @@
   (action
    (diff hash.expected hash.output))))
 
+(subdir unit/http_excerpt
+ (alias
+  (name default)
+  (deps http_excerpt.exe))
+ (rule
+  (alias runtest)
+  (target http_excerpt.output)
+  (action
+   (with-stdout-to http_excerpt.output (ignore-stderr (run ./http_excerpt.exe)))))
+ (rule
+  (alias runtest)
+  (action
+   (diff http_excerpt.expected http_excerpt.output))))
+
 (subdir unit/import_batching
  (alias
   (name default)

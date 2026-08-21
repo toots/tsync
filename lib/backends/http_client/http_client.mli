@@ -69,6 +69,7 @@ val is_transient_code : int -> bool
     classified by {!is_transient_code}. *)
 val backend_error : string -> int -> string -> exn
 
-(** One line of a response body, for a log. A failing proxy answers with a whole
-    HTML page. *)
+(** A bounded, single-line rendering of a response body, for a log. A failing
+    proxy answers with a whole HTML page and a store with pretty-printed JSON;
+    both come back as one line, cut with a trailing ellipsis. *)
 val excerpt : string -> string

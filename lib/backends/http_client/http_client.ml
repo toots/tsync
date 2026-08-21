@@ -39,18 +39,35 @@ let backend_error op code body =
 
 let code resp = Cohttp.Code.code_of_status (Cohttp.Response.status resp)
 let is_ok resp = code resp >= 200 && code resp < 300
+let excerpt_limit = 200
+
+(* Runs of whitespace to one space, so a body laid out over several lines reads
+   as one. *)
+let flatten s =
+  let b = Buffer.create (String.length s) in
+  String.iter
+    (fun c ->
+      match c with
+        | ' ' | '\n' | '\r' | '\t' ->
+            if Buffer.length b > 0 && Buffer.nth b (Buffer.length b - 1) <> ' '
+            then Buffer.add_char b ' '
+        | c -> Buffer.add_char b c)
+    s;
+  String.trim (Buffer.contents b)
 
 (* A proxy in front of a store answers failures with a full HTML page, and one
    stalled fetch can put thousands of lines of nginx markup in the log; the
-   status carries the meaning, one line of body only tells an upstream apart
-   from the store's own answer. *)
+   status carries the meaning, a fragment of body only tells an upstream apart
+   from the store's own answer.
+
+   Flattened rather than cut at the first line break, because a store's own
+   error is pretty-printed JSON opening on a lone brace: cutting there excerpts
+   the punctuation and drops the message. *)
 let excerpt body =
-  let body = String.trim body in
-  match String.index_opt body '\n' with
-    | _ when String.length body = 0 -> "(empty)"
-    | Some i when i < 200 -> String.sub body 0 i ^ " ..."
-    | _ when String.length body > 200 -> String.sub body 0 200 ^ " ..."
-    | _ -> body
+  let body = flatten body in
+  if body = "" then "(empty)"
+  else if String.length body <= excerpt_limit then body
+  else String.sub body 0 excerpt_limit ^ " ..."
 
 (* [headers] is a thunk because a caller may have to reach the network to build
    them — minting a bearer token — and that belongs inside the deadline below
@@ -66,8 +83,9 @@ let call t ~headers ~meth ?(body = Chunk.empty) uri =
     Lwt_unix.with_timeout t.timeout (fun () ->
         let* headers = headers () in
         let* resp, rbody =
-          Cache.call cache ~headers
-            (* [`Passthrough]: sent out of the chunk's own bytes rather than a
+          Cache.call cache
+            ~headers
+              (* [`Passthrough]: sent out of the chunk's own bytes rather than a
                copy, which is what a bigstring body is for. The retry below only
                reads them again. *)
             ~body:
