@@ -1063,6 +1063,14 @@
   (action
    (diff temp_names_test.expected temp_names_test.output))))
 
+(subdir unit/tree_children
+ (alias
+  (name default)
+  (deps tree_children_test.exe))
+ (rule
+  (alias runtest)
+  (action (run ./tree_children_test.exe))))
+
 (subdir unit/upload_fanout
  (alias
   (name default)
