@@ -250,6 +250,7 @@
   rescan-corrupted
   list-corrupted
   delete a.txt
+  drain
   expire all
   gc
   rescan-corrupted

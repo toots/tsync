@@ -1,0 +1,21 @@
+a bump on a quiet cursor publishes before it returns
+  writes: 1
+  cursor: 0000000000100-uuid
+
+a burst behind it collapses to one
+  writes for 60 bumps inside the interval: 0
+  writes once the timer has run: 1
+  cursor: 0000000000259-uuid
+
+an older key behind a newer one is already covered
+  writes: 1
+  cursor: 0000000000500-uuid
+
+a flush does not wait the interval out
+  writes: 1
+  returned inside the interval: true
+  writes with nothing pending: 0
+
+every application of the functor shares one debouncer
+  writes seen by a flush elsewhere: 1
+  cursor: 0000000000700-uuid

@@ -29,11 +29,6 @@ module type Converging = sig
   val stats_fields : unit -> (string * Yojson.Safe.t) list
 end
 
-(* How long an upload's cursor bump may wait to be collected with others.
-   Settable so a test observing the flush need not sleep it out. *)
-let cursor_flush_interval = ref 2.
-let set_cursor_flush_interval s = cursor_flush_interval := s
-
 module type S = sig
   include Domain
 
@@ -62,39 +57,6 @@ module Make (C : Conf.S) : S = struct
      bounded by how long that work may sit rather than by the store's growth. *)
   let housekeeping_interval = 60.
 
-  (* An upload owes a cursor bump once its journal entry lands, one per file on a
-     busy queue. The cursor only moves forward, so a batch collapses to its
-     newest: hold the pending value and publish on a timer rather than paying a
-     PUT per upload. Metadata ops bypass this — [File.with_journal] bumps
-     synchronously, since a peer waiting on a rename should not wait out the
-     interval. *)
-  let pending_cursor : Journal.Entry_key.t option ref = ref None
-
-  let set_pending_cursor ~entry_key =
-    match !pending_cursor with
-      | Some prev when Journal.Entry_key.compare prev entry_key >= 0 -> ()
-      | _ -> pending_cursor := Some entry_key
-
-  let flush_cursor () =
-    let ek = !pending_cursor in
-    pending_cursor := None;
-    match ek with
-      | None -> Lwt.return_unit
-      | Some ek ->
-          Lwt.catch
-            (fun () -> Fs.bump_cursor ek)
-            (fun exn ->
-              Log.err "bump_cursor: %s" (Printexc.to_string exn);
-              Lwt.return_unit)
-
-  let cursor_flusher () =
-    let rec loop () =
-      let* () = Lwt_unix.sleep !cursor_flush_interval in
-      let* () = flush_cursor () in
-      loop ()
-    in
-    loop ()
-
   (* The manifest tree, which a caller needs before it can resolve a key at all.
      Separate from {!start_queue} because a read-only command needs this and
      nothing else. *)
@@ -111,19 +73,16 @@ module Make (C : Conf.S) : S = struct
      {!Sync_queue} starts without [recover] and neither reads the other's log.
      A process without one accepts writes it will never send.
 
-     The cursor flusher belongs with the queue for the same reason. An upload
-     publishes its journal entry here and owes a bump; a peer polls the cursor to
-     decide whether to read the journal at all, so an entry whose bump never
-     lands is one no other client goes looking for. *)
+     The bumps those uploads owe are {!File_store}'s to coalesce and publish;
+     what this owes is the flush in {!drain}, so an entry uploaded here is one
+     a peer goes looking for rather than one it never hears about. *)
   let start ?(on_upload_done = fun ~key:_ -> Lwt.return_unit) () =
     let* () = init () in
     Sq.start
       ~upload:(fun ~key ~cancel -> F.upload ~cancel key)
-      ~on_cursor:set_pending_cursor
       ~on_upload_done:(fun ~key ->
         let* () = on_upload_done ~key in
         F.enforce_chunk_cap ());
-    Lwt.async cursor_flusher;
     Lwt.return_unit
 
   (* The queue must be running first: recovery goes through it, for the journal
@@ -156,7 +115,7 @@ module Make (C : Conf.S) : S = struct
      what it already uploaded. *)
   let drain () =
     let* () = Sq.drain () in
-    let* () = flush_cursor () in
+    let* () = Fs.flush_cursor () in
     Backend.drain ()
 
   let stats_fields () =

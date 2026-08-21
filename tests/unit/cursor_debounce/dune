@@ -1,0 +1,27 @@
+(executable
+ (flags
+  (:standard
+   -open
+   Tsync_object
+   -open
+   Tsync_conf
+   -open
+   Tsync_chunk
+   -open
+   Tsync_backend_register
+   -open
+   Tsync_store
+   -open
+   Tsync_test_harness))
+ (name cursor_debounce)
+ (libraries
+  tsync_test_harness
+  tsync_object
+  tsync_conf
+  tsync_chunk
+  tsync_backend_register
+  tsync_store
+  tsync_local_backend
+  lwt
+  lwt.unix
+  unix))

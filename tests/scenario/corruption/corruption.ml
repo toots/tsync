@@ -166,6 +166,7 @@ let () =
             RescanCorrupted;
             ListCorrupted;
             Delete "a.txt";
+            Drain;
             Expire "all";
             Gc;
             RescanCorrupted;

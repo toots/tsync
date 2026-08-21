@@ -21,6 +21,7 @@
   write foo.txt "gone soon"
   drain
   delete foo.txt
+  drain
   expire all
   expire all -> 1 version(s), 1 journal entr(ies)
 --- tree
