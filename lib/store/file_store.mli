@@ -33,14 +33,15 @@ module Make (C : Conf.S) : sig
       bump of a run is lost and peers never go looking for what it published. *)
   val bump_cursor : Journal.Entry_key.t -> unit Lwt.t
 
-  (** {!bump_cursor} that never publishes inline, for a caller that cannot
-      await one — the upload queue's hook is synchronous. *)
+  (** {!bump_cursor} that never publishes inline, for a caller that cannot await
+      one — the upload queue's hook is synchronous. *)
   val note_cursor : Journal.Entry_key.t -> unit
 
   (** Publish what is pending now rather than waiting the interval out. A no-op
       with nothing pending, and it swallows a backend failure: it runs from a
       timer and from drain, neither of which may die of one. *)
   val flush_cursor : unit -> unit Lwt.t
+
   val fetch_cursor : unit -> Journal.Entry_key.t option Lwt.t
 
   (** How far this client has applied the shared journal. [None] when it has
