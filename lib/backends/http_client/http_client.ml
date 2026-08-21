@@ -67,7 +67,11 @@ let call t ~headers ~meth ?(body = Chunk.empty) uri =
         let* headers = headers () in
         let* resp, rbody =
           Cache.call cache ~headers
-            ~body:(Cohttp_lwt.Body.of_bigstring (Chunk.buffer body))
+            (* [`Passthrough]: sent out of the chunk's own bytes rather than a
+               copy, which is what a bigstring body is for. The retry below only
+               reads them again. *)
+            ~body:
+              (Cohttp_lwt.Body.of_bigstring (`Passthrough (Chunk.buffer body)))
             meth uri
         in
         let+ rbody = Cohttp_lwt.Body.to_bigstring rbody in
