@@ -13,7 +13,7 @@ open Lwt.Syntax
 
 let chunk_size = 4096
 let cache_chunk_size = 2 * chunk_size
-let root = Filename.temp_dir "tsync-known-chunks" ""
+let root = Scratch.dir "known-chunks"
 let backend_root = Filename.concat root "backend"
 let failures = ref 0
 

@@ -9,7 +9,7 @@ let chunk_size = 8 * 1024 * 1024
 (* Two stored chunks per cache chunk, so the upload/dedup paths run against a
    grouped cache rather than the degenerate one-to-one case. *)
 let cache_chunk_size = 2 * chunk_size
-let root = Filename.temp_dir "tsync-upload" ""
+let root = Scratch.dir "upload"
 let backend_root = Filename.concat root "backend"
 
 module C = struct

@@ -10,7 +10,7 @@
 
 open Lwt.Syntax
 
-let dir = Filename.temp_dir "tsync-spool-reap" ""
+let dir = Scratch.dir "spool-reap"
 
 (* A pid that has certainly exited: forked, waited for, and never reused within
    this test. *)

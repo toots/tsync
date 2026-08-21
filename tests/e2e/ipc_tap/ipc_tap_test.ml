@@ -11,7 +11,7 @@
 
 open Check
 
-let root = Filename.temp_dir "tsync-tap" ""
+let root = Scratch.dir "tap"
 let socket_path = Filename.concat root "s.sock"
 
 (* Echoes each request line back prefixed: enough to tell a relayed answer from a

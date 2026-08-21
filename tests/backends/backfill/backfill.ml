@@ -9,7 +9,7 @@
 open Lwt.Syntax
 open Check
 
-let root = Filename.temp_dir "tsync-backfill" ""
+let root = Scratch.dir "backfill"
 let main_root = Filename.concat root "main"
 let target_root = Filename.concat root "target"
 let chunk_prefix = "tsync/d/chunks/"

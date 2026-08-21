@@ -10,7 +10,7 @@
 open Lwt.Syntax
 open Check
 
-let root = Filename.temp_dir "tsync-staged-fanout" ""
+let root = Scratch.dir "staged-fanout"
 let backend_root = Filename.concat root "backend"
 let csize = 64
 let buffers = 4

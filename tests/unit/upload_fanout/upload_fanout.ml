@@ -16,7 +16,7 @@
 open Lwt.Syntax
 open Check
 
-let root = Filename.temp_dir "tsync-upload-fanout" ""
+let root = Scratch.dir "upload-fanout"
 let chunk_size = 8
 let buffers = 2
 

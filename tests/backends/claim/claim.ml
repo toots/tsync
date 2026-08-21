@@ -12,7 +12,7 @@
 open Lwt.Syntax
 open Check
 
-let root = Filename.temp_dir "tsync-claim" ""
+let root = Scratch.dir "claim"
 
 let () =
   let (module B : Backend.S) =

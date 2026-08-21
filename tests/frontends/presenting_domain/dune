@@ -2,6 +2,8 @@
  (flags
   (:standard
    -open
+   Tsync_test_harness
+   -open
    Tsync_engine
    -open
    Tsync_naming
@@ -15,6 +17,7 @@
    Tsync_store))
  (name presenting_domain)
  (libraries
+  tsync_test_harness
   tsync-libs.engine
   tsync-libs.naming
   tsync-libs.store

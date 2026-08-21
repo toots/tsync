@@ -2,6 +2,8 @@
  (flags
   (:standard
    -open
+   Tsync_test_harness
+   -open
    Tsync_content
    -open
    Tsync_object
@@ -13,6 +15,7 @@
    Tsync_local_backend))
  (name known_chunks)
  (libraries
+  tsync_test_harness
   tsync_content
   tsync_object
   tsync_conf

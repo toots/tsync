@@ -18,7 +18,7 @@ end
 
 module Q = Durable_queue.Make (J)
 
-let dir = Filename.concat (Filename.temp_dir "tsync-queue-degraded" "") "log"
+let dir = Filename.concat (Scratch.dir "queue-degraded") "log"
 
 (* Written past {!Records.write}, which would encode a body that parses. *)
 let plant_unreadable id =

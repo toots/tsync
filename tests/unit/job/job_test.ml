@@ -13,7 +13,7 @@
 open Lwt.Syntax
 open Check
 
-let root = Filename.temp_dir "tsync-job-report" ""
+let root = Scratch.dir "job-report"
 
 (* Accepts, reads one line, answers as the daemon does, and keeps what it saw. *)
 let stub_server ~path ~seen =

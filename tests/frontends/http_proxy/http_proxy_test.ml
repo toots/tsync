@@ -205,7 +205,7 @@ let () =
          miss. *)
       store =
         Backend.make ~backend_type:"local"
-          ~get_field:(fun _ -> Some (Filename.temp_dir "tsync-route-test" ""))
+          ~get_field:(fun _ -> Some (Scratch.dir "route-test"))
           ();
       serve_share = None;
       peers = [];

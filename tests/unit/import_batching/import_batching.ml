@@ -10,7 +10,7 @@
 open Lwt.Syntax
 open Check
 
-let root = Filename.temp_dir "tsync-import-batching" ""
+let root = Scratch.dir "import-batching"
 let src = Filename.concat root "src"
 let main_dir = Filename.concat root "main"
 let entry_ops = 2

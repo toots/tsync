@@ -1,9 +1,10 @@
 (** A directory a test owns, and gives back.
 
-    Half the tree named a literal ["/tmp/tsync-<name>-test"], which two
-    concurrent runs share and fight over, and half called {!Filename.temp_dir},
-    which they do not. Both then reimplemented recursive create and delete that
-    {!Fs_util} already exports. *)
+    One way of naming a scratch directory for the whole tree: named after the
+    test and the process, so two concurrent runs never share one, and cleared on
+    the way in, so a run that left something behind does not decide the next
+    one. Recursive create and delete come from {!Fs_util} rather than from each
+    test. *)
 
 (** A fresh empty directory for a test called [name], removed and recreated if a
     previous run left one. Unique per process, so two runs of the same test do
