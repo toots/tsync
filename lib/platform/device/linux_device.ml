@@ -70,3 +70,27 @@ let max_concurrency path =
             int_of_string_opt
   in
   if depth > 0 then Some (requests_for ~queue_depth:depth) else None
+
+external ficlone : Unix.file_descr -> Unix.file_descr -> bool = "tsync_ficlone"
+
+(* [FICLONE] wants the destination open for writing where the mapping wants it
+   read-only, which is what the second open in [clone] is for. *)
+let ficlone_to dst ~src =
+  let src_fd = Unix.openfile src [Unix.O_RDONLY] 0 in
+  Fun.protect
+    ~finally:(fun () -> Unix.close src_fd)
+    (fun () ->
+      let dst_fd =
+        Unix.openfile dst [Unix.O_WRONLY; Unix.O_CREAT; Unix.O_EXCL] 0o600
+      in
+      Fun.protect
+        ~finally:(fun () -> Unix.close dst_fd)
+        (fun () -> ficlone dst_fd src_fd))
+
+let clone ~src =
+  let dst = Fs_util.temp_path src in
+  if ficlone_to dst ~src then Some (Fs_util.open_and_unlink dst)
+  else (
+    (* The empty file [ficlone_to] opened is not a clone of anything. *)
+    (try Unix.unlink dst with Unix.Unix_error _ -> ());
+    None)

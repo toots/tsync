@@ -32,6 +32,14 @@ let temp_path path =
   Filename.concat (Filename.dirname path)
     (Printf.sprintf "%s%d-%d.tmp" temp_prefix (Unix.getpid ()) !temp_seq)
 
+(* The descriptor keeps the inode alive without the name, so a caller that wants
+   the bytes and not the file pays nothing for a kill landing here. *)
+let open_and_unlink path =
+  let fd = Unix.openfile path [Unix.O_RDONLY] 0 in
+  Fun.protect
+    ~finally:(fun () -> try Unix.unlink path with Unix.Unix_error _ -> ())
+    (fun () -> fd)
+
 (* Whether a name is one of ours, for the mirror walkers that skip and reap
    them.
 

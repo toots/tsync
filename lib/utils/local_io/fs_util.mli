@@ -13,6 +13,11 @@ val mkdir_p_sync : ?perm:int -> string -> unit
 (** A scratch name in [path]'s directory, unique per process and per call. *)
 val temp_path : string -> string
 
+(** A read-only descriptor on [path], unlinked before this returns: the caller
+    gets the bytes without the name, and nothing is left behind if it dies
+    holding them. *)
+val open_and_unlink : string -> Unix.file_descr
+
 (** Whether a name was produced by {!temp_path}.
 
     Callers walk directories the user also writes to, so the only safe test is

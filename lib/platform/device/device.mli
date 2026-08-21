@@ -14,3 +14,15 @@
     the hardware reports. May cost a syscall or a subprocess: ask once per
     store, not per request. *)
 val max_concurrency : string -> int option
+
+(** A read-only descriptor on a copy-on-write clone of [src], already unlinked:
+    it duplicates references to the source's blocks rather than the blocks, so
+    it costs no space and no time proportional to the file, nothing written to
+    [src] afterwards reaches it, and no name is left for a kill to leak or a
+    directory walker to find.
+
+    [None] where the filesystem cannot clone — APFS and btrfs can, XFS can when
+    made with [reflink=1], ext4 and tmpfs cannot — which is the caller's cue to
+    read the file itself, whereas a directory that will not take the clone at
+    all raises [Unix_error]. The caller closes it. *)
+val clone : src:string -> Unix.file_descr option

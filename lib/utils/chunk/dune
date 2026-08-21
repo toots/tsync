@@ -1,6 +1,24 @@
 (library
  (flags
-  (:standard -open Tsync_local_io -open Tsync_lwt_unix -open Tsync_xxhash))
+  (:standard
+   -open
+   Tsync_local_io
+   -open
+   Tsync_lwt_unix
+   -open
+   Tsync_xxhash
+   -open
+   Tsync_device
+   -open
+   Tsync_log))
  (name tsync_chunk)
  (public_name tsync-libs.chunk)
- (libraries unix lwt lwt.unix bigstringaf tsync_local_io tsync_xxhash))
+ (libraries
+  unix
+  lwt
+  lwt.unix
+  bigstringaf
+  tsync_local_io
+  tsync_xxhash
+  tsync-libs.device
+  tsync-libs.log))

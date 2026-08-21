@@ -190,20 +190,16 @@ module Make_with_layout (C : Conf.S) (L : Layout.S) : S = struct
     in
     (entry, not known)
 
-  (* Mapped from the descriptor the upload holds, so the pages reach the store
-     without being copied into a buffer first and no rename swaps the inode out
-     from under the run.
-
-     An import takes its sources as settled: one that shrank past this chunk
-     cannot be mapped and aborts, and one truncated after the mapping is taken
-     is [SIGBUS]. *)
+  (* Mapped rather than read, so the pages reach the store without being copied
+     into a buffer first, and mapped from a snapshot, so what the user writes
+     next reaches neither these pages nor the ones still to come. *)
   let upload_chunk fd ~cancel ~on_progress ~file_size ~chunk_size index =
     if !cancel then raise Cancelled;
     let offset = index * chunk_size in
     let len = min chunk_size (file_size - offset) in
     with_slot (fun () ->
         let data =
-          try Chunk.map_fd (Lwt_unix.unix_file_descr fd) ~offset ~len
+          try Chunk.map_fd fd ~offset ~len
           with Unix.Unix_error _ -> raise Cancelled
         in
         let+ entry, sent = put_chunk ~index ~data in
@@ -248,7 +244,10 @@ module Make_with_layout (C : Conf.S) (L : Layout.S) : S = struct
 
      Sized from the descriptor the chunks are mapped through, so the length the
      chunking is laid out for and the bytes that reach the store come from one
-     file however the name is reused meanwhile. *)
+     file however the name is reused meanwhile.
+
+     [fd] is the source itself, kept alongside the snapshot only to be stat'd
+     for whether the file moved while this ran. *)
   let upload ~key ~src_path ~mtime ~chunk_size ?(cancel = ref false)
       ?(on_progress = fun ~bytes:_ ~sent:_ -> ()) () =
     let* fd = Lwt_unix_retry.openfile src_path [Unix.O_RDONLY] 0 in
@@ -256,28 +255,41 @@ module Make_with_layout (C : Conf.S) (L : Layout.S) : S = struct
       Lwt.finalize
         (fun () ->
           let* before = Lwt_unix_retry.LargeFile.fstat fd in
-          let file_size = Int64.to_int before.Unix.LargeFile.st_size in
-          Log.debug "upload %s: file_size=%d" key file_size;
-          let num_chunks =
-            if file_size = 0 then 1
-            else (file_size + chunk_size - 1) / chunk_size
-          in
-          (* Safe to launch every chunk's task up front: each blocks on
-             [chunk_slots] until one frees, so concurrency stays capped at
-             [max_chunk_buffers] however many chunks contend. *)
-          let* entries =
-            Lwt_list.map_p
-              (upload_chunk fd ~cancel ~on_progress ~file_size ~chunk_size)
-              (List.init num_chunks Fun.id)
-          in
-          (* A write landing mid-read leaves the chunks describing a file that
-             never existed, and the manifest is what would make that permanent. *)
-          let+ after = Lwt_unix_retry.LargeFile.fstat fd in
-          if
-            after.Unix.LargeFile.st_size <> before.Unix.LargeFile.st_size
-            || after.Unix.LargeFile.st_mtime <> before.Unix.LargeFile.st_mtime
-          then raise (Source_changed src_path);
-          (entries, file_size))
+          (* Frozen here, so a source truncated mid-upload is a manifest never
+             published rather than a SIGBUS on a page past its new end. *)
+          let snapshot = Chunk.open_snapshot src_path in
+          Lwt.finalize
+            (fun () ->
+              let file_size =
+                Int64.to_int
+                  (Unix.LargeFile.fstat snapshot).Unix.LargeFile.st_size
+              in
+              Log.debug "upload %s: file_size=%d" key file_size;
+              let num_chunks =
+                if file_size = 0 then 1
+                else (file_size + chunk_size - 1) / chunk_size
+              in
+              (* Safe to launch every chunk's task up front: each blocks on
+                 [chunk_slots] until one frees, so concurrency stays capped at
+                 [max_chunk_buffers] however many chunks contend. *)
+              let* entries =
+                Lwt_list.map_p
+                  (upload_chunk snapshot ~cancel ~on_progress ~file_size
+                     ~chunk_size)
+                  (List.init num_chunks Fun.id)
+              in
+              (* The snapshot makes the chunks agree with each other; this is
+                 what says they still describe the file the user has. *)
+              let+ after = Lwt_unix_retry.LargeFile.fstat fd in
+              if
+                after.Unix.LargeFile.st_size <> before.Unix.LargeFile.st_size
+                || after.Unix.LargeFile.st_mtime
+                   <> before.Unix.LargeFile.st_mtime
+              then raise (Source_changed src_path);
+              (entries, file_size))
+            (fun () ->
+              Unix.close snapshot;
+              Lwt.return_unit))
         (fun () -> Lwt_unix_retry.close fd)
     in
     publish ~key ~size:(Int64.of_int file_size) ~chunk_size ~mtime ~cancel

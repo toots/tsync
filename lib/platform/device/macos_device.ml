@@ -69,3 +69,11 @@ let max_concurrency path =
           (* Answered, but not about this. An external volume of unknown kind is
              the likelier one to be slow. *)
           | _ -> if external_ then Some 8 else None)
+
+external clonefile : src:string -> dst:string -> bool = "tsync_clonefile"
+
+(* [clonefile] creates the destination itself, so unlike the Linux side there is
+   nothing to open before it and nothing to unlink when it fails. *)
+let clone ~src =
+  let dst = Fs_util.temp_path src in
+  if clonefile ~src ~dst then Some (Fs_util.open_and_unlink dst) else None
