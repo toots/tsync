@@ -17,10 +17,11 @@ install-deps:
 	opam pin add -ny git+https://github.com/toots/aws-s3.git#tsync
 	opam pin add -ny git+https://github.com/toots/ocaml-cohttp.git#bigstring-body
 	opam pin add -ny git+https://github.com/janestreet/memtrace.git#master
-	opam install --deps-only -y ..
+	cd .. && opam pin -ny .
+	opam install --deps-only tsync tsync-s3 tsync-ssl
 
 install-opam:
-	cd ../opam && opam pin -ny .
+	cd .. && opam pin -ny .
 	opam install tsync
 
 install-system:
