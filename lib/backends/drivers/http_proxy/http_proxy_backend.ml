@@ -102,6 +102,24 @@ let delete_multi t keys =
   if not (is_ok resp) then
     raise (backend_error "delete_multi" (code resp) rbody)
 
+(* The one operation the proxy saves a round trip on: the peer holds the objects
+   and can answer a folder's worth in a single response, where an object store
+   would have to be asked key by key. *)
+let get_many t ~entries () =
+  let keys =
+    List.map (fun (e : Backend.file_entry) -> e.Backend.key) entries
+  in
+  let body =
+    Yojson.Safe.to_string (`List (List.map (fun k -> `String k) keys))
+  in
+  let uri = Uri.with_path t.base_uri "/get-multi" in
+  let+ resp, answer =
+    call_retry t ~meth:`POST ~body:(Chunk.of_string body) "get_many" uri
+  in
+  if is_ok resp then
+    Http_proxy.Wire.bodies_of_string ~keys (Chunk.to_string answer)
+  else raise (backend_error "get_many" (code resp) (Chunk.to_string answer))
+
 let copy t ~src_key ~dst_key () =
   let uri =
     Uri.with_query'
@@ -262,7 +280,7 @@ let make ~url ~secret : (module Backend.S) =
     let copy ~src_key ~dst_key () = copy t ~src_key ~dst_key ()
     let list_prefix ?max_keys ~prefix () = list_all t ?max_keys ~prefix ()
 
-    let get_many = None
+    let get_many = Some (fun ~entries () -> get_many t ~entries ())
 
     (* The peer owns that store and whatever checks it; asking it to start a
        sweep on our behalf is a decision for whoever administers it. *)

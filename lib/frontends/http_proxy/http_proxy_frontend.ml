@@ -204,6 +204,10 @@ type op =
           it afterwards. Distinct from {!Put} on the wire because the answer
           differs, not just the effect. *)
   | Delete of string
+  | Get_multi of string list
+      (** A folder's manifests in one answer. The only op that saves a round
+          trip rather than merely proxying one: the peer holds the objects,
+          where an object store would have to be asked key by key. *)
   | Delete_multi of string list
   | Copy of string * string
   | List_all of string * int option
@@ -242,6 +246,15 @@ let parse_op meth uri body =
           | None -> Bad)
     | `DELETE, p when is_obj p -> (
         match obj_key () with Some k -> Delete k | None -> Bad)
+    | `POST, "/get-multi" -> (
+        match
+          try Some (Yojson.Safe.from_string (Chunk.to_string body))
+          with _ -> None
+        with
+          | Some (`List l) ->
+              Get_multi
+                (List.filter_map (function `String x -> Some x | _ -> None) l)
+          | _ -> Bad)
     | `POST, "/delete-multi" -> (
         match
           try Some (Yojson.Safe.from_string (Chunk.to_string body))
@@ -274,7 +287,10 @@ let parse_op meth uri body =
 
 (* [Head] is metadata only; [Copy] is settled by the backend without the bytes
    passing through here. *)
-let data_kind = function Get _ -> `Get | Put _ -> `Put | _ -> `Meta
+let data_kind = function
+  | Get _ | Get_multi _ -> `Get
+  | Put _ -> `Put
+  | _ -> `Meta
 
 let op_name = function
   | Get _ -> "get"
@@ -282,6 +298,7 @@ let op_name = function
   | Put _ -> "put"
   | Put_if_absent _ -> "putIfAbsent"
   | Delete _ -> "delete"
+  | Get_multi _ -> "getMulti"
   | Delete_multi _ -> "deleteMulti"
   | Copy _ -> "copy"
   | List_all _ -> "list"
@@ -295,8 +312,8 @@ let op_name = function
 (* A request targets the route whose [domain_root] prefixes its key. *)
 let route_key = function
   | Get k | Head k | Put k | Put_if_absent k | Delete k -> Some k
-  | Delete_multi (k :: _) -> Some k
-  | Delete_multi [] -> None
+  | Delete_multi (k :: _) | Get_multi (k :: _) -> Some k
+  | Delete_multi [] | Get_multi [] -> None
   | Copy (src, _) -> Some src
   | List_all (p, _)
   | Share_url p
@@ -389,6 +406,21 @@ let exec route op ~body =
             B.delete ~key ()
           in
           respond ""
+    | Get_multi keys ->
+        let module B = (val route.store : Backend.S) in
+        let module Bb = Backend.Batched (B) in
+        (* Sizes the caller has and this end does not, so the answer is bounded
+           by the key count alone; the client packed the request to its own byte
+           budget before sending it. *)
+        let entries =
+          List.map
+            (fun key -> Backend.{ key; size = 0; last_modified = 0. })
+            keys
+        in
+        let* answered = Bb.get_many ~entries () in
+        let framed = Http_proxy.Wire.bodies_to_string answered in
+        Metrics.count read_bytes (String.length framed);
+        respond_chunk (Chunk.of_string framed)
     | Delete_multi keys ->
         if route.read_only then reject_ro ()
         else
