@@ -17,7 +17,7 @@ open Check
 
 let chunk_size = 4096
 let cache_chunk_size = 4 * chunk_size
-let root = Filename.temp_dir "tsync-pulling" ""
+let root = Scratch.dir "pulling"
 let backend_root = Filename.concat root "backend"
 
 (* [why] runs only on failure, so a passing run prints what the snapshot

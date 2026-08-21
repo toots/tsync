@@ -1381,7 +1381,7 @@ let run_scenario ?(versioning = false) ?(symlink_policy = `Keep)
   reset_ids ();
   Printf.printf "=== %s\n" name;
   List.iter (fun s -> Printf.printf "  %s\n" (render_step s)) steps;
-  let root = Filename.temp_dir "tsync-test" "" in
+  let root = Scratch.dir "test" in
   let backend_root = Filename.concat root "backend" in
   let backend2_root = Filename.concat root "backend2" in
   (* The secondary backend exists in every scenario (writes fan out to all
@@ -1495,7 +1495,7 @@ let run_two_client_scenario ?(versioning = false)
         (match s with A _ -> "A" | B _ -> "B")
         (render_step (match s with A s | B s -> s)))
     steps;
-  let root = Filename.temp_dir "tsync-test-2" "" in
+  let root = Scratch.dir "test-2" in
   let backend_root = Filename.concat root "backend" in
   let shared_members =
     [
@@ -1660,7 +1660,7 @@ let run_ipc_scenario ?versioning ({ name; steps } : scenario) =
   reset_ids ();
   Printf.printf "=== %s\n" name;
   List.iter (fun s -> Printf.printf "  %s\n" (render_step s)) steps;
-  let root = Filename.temp_dir "tsync-ipc" "" in
+  let root = Scratch.dir "ipc" in
   let module C =
     (val make_conf ?versioning ~client_name:"Test Client"
            ~backend_root:(Filename.concat root "backend")
@@ -1691,7 +1691,7 @@ let run_ipc_scenario ?versioning ({ name; steps } : scenario) =
 let run_stats_scenario ?versioning ({ name; steps } : scenario) =
   reset_ids ();
   Printf.printf "=== %s\n" name;
-  let root = Filename.temp_dir "tsync-stats-ipc" "" in
+  let root = Scratch.dir "stats-ipc" in
   let module C =
     (val make_conf ?versioning ~client_name:"Test Client"
            ~backend_root:(Filename.concat root "backend")
@@ -1755,7 +1755,7 @@ let run_ipc_changes_scenario ?versioning ({ name; steps } : scenario) =
   reset_ids ();
   Printf.printf "=== %s\n" name;
   List.iter (fun s -> Printf.printf "  A: %s\n" (render_step s)) steps;
-  let root = Filename.temp_dir "tsync-ipc2" "" in
+  let root = Scratch.dir "ipc2" in
   let backend_root = Filename.concat root "backend" in
   let module Ca =
     (val make_conf ?versioning ~client_name:"Client A" ~backend_root

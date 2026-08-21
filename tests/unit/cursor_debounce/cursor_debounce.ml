@@ -14,7 +14,7 @@
 open Lwt.Syntax
 
 let interval = 0.5
-let root = Filename.temp_dir "tsync-cursor-debounce" ""
+let root = Scratch.dir "cursor-debounce"
 
 (* Counts what reaches the store, which is the figure the rate limit is on. *)
 let puts = ref 0

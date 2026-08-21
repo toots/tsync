@@ -10,7 +10,7 @@
    client reads these field names, and a snapshot of the whole object is what
    notices one of them changing spelling or going missing. *)
 
-let root = Filename.temp_dir "tsync-android" ""
+let root = Scratch.dir "android"
 let home = Filename.concat root "home"
 let store = Filename.concat root "store"
 

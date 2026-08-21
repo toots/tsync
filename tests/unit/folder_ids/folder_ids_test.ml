@@ -8,7 +8,7 @@
 open Lwt.Syntax
 open Check
 
-let root = Filename.temp_dir "tsync-folder-ids" ""
+let root = Scratch.dir "folder-ids"
 let cache_root = Filename.concat root "cache"
 let domain_name = "testdom"
 let ensure rel = Folder_ids.ensure_id ~cache_root ~domain_name rel

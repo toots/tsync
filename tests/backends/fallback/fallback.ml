@@ -11,7 +11,7 @@
 open Lwt.Syntax
 open Check
 
-let root = Filename.temp_dir "tsync-fallback" ""
+let root = Scratch.dir "fallback"
 let main_root = Filename.concat root "main"
 let replica_root = Filename.concat root "replica"
 let archive_root = Filename.concat root "archive"

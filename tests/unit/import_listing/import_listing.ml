@@ -12,7 +12,7 @@
 open Lwt.Syntax
 open Check
 
-let root = Filename.temp_dir "tsync-import-listing" ""
+let root = Scratch.dir "import-listing"
 let src = Filename.concat root "src"
 let conf = Fixture.conf ~domain:"listing" ~root ()
 

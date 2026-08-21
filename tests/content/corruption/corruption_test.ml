@@ -10,7 +10,7 @@ open Check
 
 let chunk_size = 4096
 let cache_chunk_size = chunk_size
-let root = Filename.temp_dir "tsync-corruption" ""
+let root = Scratch.dir "corruption"
 let backend_root = Filename.concat root "backend"
 
 (* Exit status is the whole assertion for a test with no snapshot, so a run that

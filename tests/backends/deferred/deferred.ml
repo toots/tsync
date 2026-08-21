@@ -14,7 +14,7 @@
 open Lwt.Syntax
 open Check
 
-let root = Filename.temp_dir "tsync-deferred" ""
+let root = Scratch.dir "deferred"
 let main_root = Filename.concat root "main"
 let log_dir = Filename.concat root "pending"
 let chunk_prefix = "tsync/d/chunks/"

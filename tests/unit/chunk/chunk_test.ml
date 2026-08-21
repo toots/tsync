@@ -12,7 +12,7 @@
 
 open Check
 
-let root = Filename.temp_dir "tsync-chunk" ""
+let root = Scratch.dir "chunk"
 let path name = Filename.concat root name
 
 let write_file p data =

@@ -12,7 +12,7 @@
 open Lwt.Syntax
 open Check
 
-let root = Filename.temp_dir "tsync-fanout" ""
+let root = Scratch.dir "fanout"
 let csize = 64
 let slots = 4
 

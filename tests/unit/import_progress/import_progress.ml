@@ -16,7 +16,7 @@
 open Lwt.Syntax
 open Check
 
-let root = Filename.temp_dir "tsync-import-progress" ""
+let root = Scratch.dir "import-progress"
 let src = Filename.concat root "src"
 let main_dir = Filename.concat root "main"
 let chunk_size = 64

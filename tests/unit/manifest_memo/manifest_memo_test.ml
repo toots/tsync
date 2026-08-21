@@ -11,7 +11,7 @@
 open Lwt.Syntax
 open Check
 
-let root = Filename.temp_dir "tsync-manifest-memo" ""
+let root = Scratch.dir "manifest-memo"
 let domain = "testdom"
 
 module Store =

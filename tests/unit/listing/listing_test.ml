@@ -13,7 +13,7 @@
 open Lwt.Syntax
 open Check
 
-let dir = Filename.temp_dir "tsync-listing" ""
+let dir = Scratch.dir "listing"
 
 let entry =
   Listing.create ~dir ~name:"entries" ~decode:(fun body pos ->

@@ -9,7 +9,7 @@
 open Lwt.Syntax
 open Check
 
-let root = Filename.temp_dir "tsync-subs" ""
+let root = Scratch.dir "subs"
 let socket_path = Filename.concat root "tsync.sock"
 
 (* Answers "ping" and takes "subscribe <topic>" as the handover. *)

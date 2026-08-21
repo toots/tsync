@@ -16,7 +16,7 @@
 
 open Lwt.Syntax
 
-let root = Filename.temp_dir "tsync-presenting" ""
+let root = Scratch.dir "presenting"
 let backend_root = Filename.concat root "backend"
 let src = Filename.concat root "hello.txt"
 let body = "passive frontends still upload\n"

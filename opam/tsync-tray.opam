@@ -9,7 +9,7 @@ bug-reports: "https://github.com/toots/tsync/issues"
 # StatusNotifierItem, which is a freedesktop protocol.
 available: os = "linux"
 depends: [
-  "ocaml" {>= "5.1"}
+  "ocaml" {>= "4.14"}
   "dune" {>= "3.23"}
   # libdbus-1 is a header dependency at build time and a link one after; the
   # runtime .so.3 is already on every desktop, so only the -dev half is new.
