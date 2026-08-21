@@ -11,6 +11,13 @@ module Make (C : Conf.S) = struct
   module Space = Chunk_space.Make (C)
   module Tree = Inode_tree.Make (C)
 
+  (* What a destination holds, by key. A first resync of a shared bucket asks
+     this of half a million objects, which on the heap is a string and a bucket
+     apiece and is most of what a resync was ever holding. *)
+  module Held = Hashtbl_mmap.Make (Hashtbl_mmap.String) (Hashtbl_mmap.Int)
+
+  let spool_dir = Filename.concat C.cache_root "mirror"
+
   (* Bodies in memory: a copy holds a whole object, so this follows
      [max_chunk_buffers] rather than the file-level [max_uploads]. *)
   let copy_pool = Lwt_bounded.create ~name:"copy" ~max:C.max_chunk_buffers ()
@@ -35,12 +42,11 @@ module Make (C : Conf.S) = struct
       match held with
         | Some held ->
             on_start ();
-            Lwt.return (Hashtbl.find_opt held entry.key)
+            Lwt.return (Held.find_opt held entry.key)
         | None ->
-            (* Inside the slot, not before it: [Lwt_list.map_p] applies its
-               function to every element up front, so announcing there would
-               name the last entry of the listing within milliseconds and never
-               move again. *)
+            (* Inside the slot, so the announcement tracks the bound: made as
+               the entry is taken, it would name whatever the workers had
+               reached ahead of the round trips. *)
             Lwt_bounded.use probe_pool (fun () ->
                 on_start ();
                 let+ h = Dst.head_opt ~key:entry.key () in
@@ -75,41 +81,91 @@ module Make (C : Conf.S) = struct
         compare a.key b.key)
       entries
 
+  let decode_entry body pos =
+    let key = Listing.read_string body pos in
+    let size = Int64.to_int (Listing.read_int64 body pos) in
+    Backend.{ key; size; last_modified = 0. }
+
+  let record_entry (e : Backend.file_entry) =
+    [
+      (fun b -> Listing.str b e.Backend.key);
+      (fun b -> Listing.int64 b (Int64.of_int e.Backend.size));
+    ]
+
+  (* What the listing came to, summed as it was written: the figure a caller
+     plans against is wanted once, and the listing is on disk by the time
+     anything could ask it a second time. *)
+  let add_entry ~bytes listing (e : Backend.file_entry) =
+    if Fs_util.is_temp_key e.Backend.key then Lwt.return_unit
+    else (
+      bytes := Int64.add !bytes (Int64.of_int e.Backend.size);
+      Listing.add listing (record_entry e))
+
   (* The chunk store is shared across domains on one bucket, and mirroring all of
      it is deliberate: chunks are content-addressed, so extra copies only help
-     the other domains. *)
-  let namespace_entries ~manifests_only ~on_list (module Src : Backend.S) =
-    let prefixes =
-      if manifests_only then [("manifests", C.domain_prefix)]
+     the other domains.
+
+     That makes it the one prefix worth asking for a shard at a time: whole, it
+     is the bucket's object count in one list, which is what a resync used to
+     hold before it copied anything. *)
+  let list_into ~listing ~bytes ~on_list ~name (module Src : Backend.S) prefix =
+    on_list ~name:("listing " ^ name);
+    let* entries = Src.list_prefix ~prefix () in
+    Lwt_list.iter_s (add_entry ~bytes listing) entries
+
+  (* A shard's listing holds no body, so it queues with the round trips.
+
+     A batch at a time, and spilled before the next one is asked for: what a
+     fan-out over every shard would hold is each shard's answer until the last
+     of them arrives, which is the whole prefix again by another route. *)
+  let list_chunks_into ~listing ~bytes ~on_list (module Src : Backend.S) =
+    on_list ~name:"listing chunks";
+    let width = Lwt_bounded.width probe_pool in
+    let rec batch first =
+      if first >= Chunk_layout.shards then Lwt.return_unit
       else
-        [
-          ("manifests", C.domain_prefix);
-          ("chunks", C.chunk_prefix);
-          ("journal", C.journal_prefix);
-          ("versions", C.versions_prefix);
-        ]
+        let* per_shard =
+          Lwt_bounded.map_with probe_pool
+            (fun shard ->
+              Src.list_prefix ~prefix:(C.chunk_prefix ^ shard ^ "/") ())
+            (List.init
+               (min width (Chunk_layout.shards - first))
+               (fun k -> Chunk_layout.shard_name (first + k)))
+        in
+        let* () =
+          Lwt_list.iter_s
+            (fun entries -> Lwt_list.iter_s (add_entry ~bytes listing) entries)
+            per_shard
+        in
+        batch (first + width)
     in
-    let* per_prefix =
-      Lwt_list.map_s
-        (fun (name, prefix) ->
-          on_list ~name:("listing " ^ name);
-          Src.list_prefix ~prefix ())
-        prefixes
+    batch 0
+
+  let namespace_entries ~manifests_only ~on_list ~name src =
+    let (module Src : Backend.S) = src in
+    let* listing = Listing.create ~dir:spool_dir ~name ~decode:decode_entry in
+    let bytes = ref 0L in
+    let* () =
+      list_into ~listing ~bytes ~on_list ~name:"manifests" src C.domain_prefix
     in
-    let+ cursor =
-      if manifests_only then Lwt.return_none
-      else Src.head_opt ~key:C.cursor_key ()
+    let+ () =
+      if manifests_only then Lwt.return_unit
+      else
+        let* () = list_chunks_into ~listing ~bytes ~on_list src in
+        let* () =
+          list_into ~listing ~bytes ~on_list ~name:"journal" src
+            C.journal_prefix
+        in
+        let* () =
+          list_into ~listing ~bytes ~on_list ~name:"versions" src
+            C.versions_prefix
+        in
+        let* cursor = Src.head_opt ~key:C.cursor_key () in
+        match cursor with
+          | Some e -> add_entry ~bytes listing e
+          | None -> Lwt.return_unit
     in
-    (* A stray temp name is a write another client left in flight, or one an
-       older tsync copied here before its listings hid them. Either way it is
-       not an object this domain refers to, so it is not spread further. *)
-    let listed =
-      List.filter
-        (fun (e : Backend.file_entry) ->
-          not (Fs_util.is_temp_key e.Backend.key))
-        (List.concat per_prefix)
-    in
-    dedup_entries (listed @ match cursor with Some e -> [e] | None -> [])
+    (listing, !bytes)
 
   (* Where the source was enumerated by listing, the destination is too: a HEAD
      an object, against a namespace that answers a thousand keys a request, is
@@ -119,14 +175,20 @@ module Make (C : Conf.S) = struct
      source side already makes: a collection cannot be open while this runs, so
      what changes underneath is another client's write, and the next run copies
      it. *)
-  let destination_view ~manifests_only ~on_list dst =
-    let+ entries = namespace_entries ~manifests_only ~on_list dst in
-    let held = Hashtbl.create (List.length entries) in
-    List.iter
-      (fun (e : Backend.file_entry) ->
-        Hashtbl.replace held e.Backend.key e.Backend.size)
-      entries;
-    held
+  let destination_view ~manifests_only ~on_list ~name dst =
+    let* listing, _ =
+      namespace_entries ~manifests_only ~on_list ~name:("dst-" ^ name) dst
+    in
+    let held = Held.create (Listing.count listing) in
+    Lwt.finalize
+      (fun () ->
+        let+ () =
+          Listing.iter listing (fun (e : Backend.file_entry) ->
+              Held.replace held e.Backend.key e.Backend.size;
+              Lwt.return_unit)
+        in
+        held)
+      (fun () -> Listing.drop listing)
 
   (* [rel] itself and everything under it. *)
   let within ~rel path =
@@ -181,7 +243,7 @@ module Make (C : Conf.S) = struct
         (Printf.sprintf "sizing %d object%s on %s" (List.length keys)
            (if List.length keys = 1 then "" else "s")
            src_name);
-    let+ entries =
+    let* entries =
       Lwt_bounded.map_with probe_pool
         (fun key ->
           let+ head = Src.head_opt ~key () in
@@ -192,7 +254,14 @@ module Make (C : Conf.S) = struct
                   (Printf.sprintf "%s is missing from source %s" key src_name))
         keys
     in
-    dedup_entries entries
+    let* listing =
+      Listing.create ~dir:spool_dir ~name:"src" ~decode:decode_entry
+    in
+    let bytes = ref 0L in
+    let+ () =
+      Lwt_list.iter_s (add_entry ~bytes listing) (dedup_entries entries)
+    in
+    (listing, !bytes)
 
   (* One call per object examined rather than one per object copied: what a run
      has behind it is the objects it found in place as much as the ones it
@@ -200,8 +269,7 @@ module Make (C : Conf.S) = struct
      nearly done from one that has barely started. *)
   let resync_to ?(on_start = fun ~name:_ ~key:_ -> ())
       ?(on_entry = fun ~name:_ ~key:_ ~size:_ ~outcome:_ -> ()) ?held src dst
-      ~name entries =
-    let remaining = ref entries in
+      ~name listing =
     let checked = ref 0 and copied = ref 0 and copied_bytes = ref 0 in
     let sync entry () =
       let key = entry.Backend.key in
@@ -219,15 +287,18 @@ module Make (C : Conf.S) = struct
     (* A worker apiece and never more than there is work for, so the width is
        the code's and not the listing's. Each takes a probe slot and then a copy
        slot inside {!sync_entry}, one after the other, so nothing here holds a
-       slot across the acquisition of another. *)
+       slot across the acquisition of another.
+
+       The listing is read a record at a time out of its mapping, so the queue
+       the workers pull from is pages rather than a list of the keyspace. *)
+    let* cursor = Listing.read listing in
     let+ () =
       Lwt_bounded.each
-        ~width:(min entries_in_flight (List.length entries))
+        ~width:(min entries_in_flight (Listing.count listing))
         (fun () ->
-          match !remaining with
-            | [] -> None
-            | entry :: rest ->
-                remaining := rest;
+          match Listing.next cursor with
+            | None -> None
+            | Some entry ->
                 incr checked;
                 Some (sync entry))
     in
@@ -280,20 +351,19 @@ module Make (C : Conf.S) = struct
                  (Chunk_space.string_of_phase r.Chunk_space.phase)
                  (Unix.gettimeofday () -. r.Chunk_space.started))
     in
-    let* entries =
+    let* () = Listing.reap ~dir:spool_dir in
+    let* listing, bytes =
       match scope with
-        | `All -> namespace_entries ~manifests_only:false ~on_list src.backend
+        | `All ->
+            namespace_entries ~manifests_only:false ~on_list ~name:"src"
+              src.backend
         | `Manifests ->
-            namespace_entries ~manifests_only:true ~on_list src.backend
+            namespace_entries ~manifests_only:true ~on_list ~name:"src"
+              src.backend
         | `Path rel ->
             path_entries ~rel ~src_name:src.name ~on_list src.Backend.backend
     in
-    on_scan ~objects:(List.length entries)
-      ~bytes:
-        (List.fold_left
-           (fun acc (e : Backend.file_entry) ->
-             Int64.add acc (Int64.of_int e.Backend.size))
-           0L entries);
+    on_scan ~objects:(Listing.count listing) ~bytes;
     (* A path scope names its objects one at a time on the source too, so there
        is no listing to be symmetric with and the HEAD stays. *)
     let listed_scope =
@@ -302,21 +372,24 @@ module Make (C : Conf.S) = struct
         | `Manifests -> Some true
         | `Path _ -> None
     in
-    C.members
-    |> List.filter (fun (m : Backend.member) -> m.Backend.name <> src.name)
-    |> Lwt_list.map_s (fun (m : Backend.member) ->
-        let* held =
-          match listed_scope with
-            | None -> Lwt.return_none
-            | Some manifests_only ->
-                let+ held =
-                  destination_view ~manifests_only
-                    ~on_list:(fun ~name ->
-                      on_list ~name:(name ^ " on " ^ m.Backend.name))
-                    m.Backend.backend
-                in
-                Some held
-        in
-        resync_to ?on_start ?on_entry ?held src.Backend.backend
-          m.Backend.backend ~name:m.Backend.name entries)
+    Lwt.finalize
+      (fun () ->
+        C.members
+        |> List.filter (fun (m : Backend.member) -> m.Backend.name <> src.name)
+        |> Lwt_list.map_s (fun (m : Backend.member) ->
+            let* held =
+              match listed_scope with
+                | None -> Lwt.return_none
+                | Some manifests_only ->
+                    let+ held =
+                      destination_view ~manifests_only ~name:m.Backend.name
+                        ~on_list:(fun ~name ->
+                          on_list ~name:(name ^ " on " ^ m.Backend.name))
+                        m.Backend.backend
+                    in
+                    Some held
+            in
+            resync_to ?on_start ?on_entry ?held src.Backend.backend
+              m.Backend.backend ~name:m.Backend.name listing))
+      (fun () -> Listing.drop listing)
 end
