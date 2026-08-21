@@ -34,8 +34,9 @@ let publish p data =
 
 let body = String.init 8192 (fun i -> Char.chr (((i * 31) + 7) land 0xff))
 
-(* Whether the snapshot claims below hold at all is the filesystem's to say, so
-   ask it once rather than infer it from a case that failed. *)
+(* Whether a clone is available is the filesystem's to say, so ask it once and
+   assert against the answer: both claims below are then total, and the output
+   says the same thing on btrfs, on APFS and on the ext4 that CI runs. *)
 let clones =
   let src = path "probe" in
   write_file src "x";
@@ -47,7 +48,9 @@ let clones =
       | None -> false
   in
   Sys.remove src;
-  Printf.printf "clones: %b\n" ok;
+  (* Not stdout: the snapshot this file is diffed against must not vary by
+     filesystem. *)
+  Printf.eprintf "clones: %b\n" ok;
   ok
 
 let () =
@@ -116,9 +119,8 @@ let () =
   let fd = Chunk.open_snapshot p in
   let mapped = (Unix.fstat fd).Unix.st_ino in
   Unix.close fd;
-  if clones then
-    check "snapshot is a separate inode" (mapped <> (Unix.stat p).Unix.st_ino)
-  else print_endline "skipped: this filesystem cannot clone";
+  check "mapped inode differs from the file exactly where it can be cloned"
+    (mapped <> (Unix.stat p).Unix.st_ino = clones);
 
   (* 6b. Truncating the source under a mapping of it is [SIGBUS] on the page
      past the new end, which is a dead daemon mid-import rather than a short
@@ -134,8 +136,10 @@ let () =
           exit 0
       | child -> snd (Unix.waitpid [] child) = Unix.WEXITED 0
   in
-  if clones then check "survives truncation of the source" survived
-  else print_endline "skipped: this filesystem cannot clone";
+  (* Both directions matter: with a clone the child reads on, and without one
+     the [SIGBUS] this exists to prevent is asserted to still be real. *)
+  check "truncating the source is survivable exactly where it can be cloned"
+    (survived = clones);
 
   (* 7. Mapping at an offset, which is how a group member is addressed and which
      the stub has to align for us. *)
@@ -177,4 +181,4 @@ let () =
 
   (* Counted, so a case that stopped running takes the report with it, and
      reported, so a failure is an exit code rather than a line in a log. *)
-  report ~expected:(if clones then 16 else 14) ()
+  report ~expected:16 ()

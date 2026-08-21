@@ -7,8 +7,12 @@ survives republish: ok
 short file raises: ok
 short file not grown: ok
 write does not reach file: ok
+clone left behind: ok
+mapped inode differs from the file exactly where it can be cloned: ok
+truncating the source is survivable exactly where it can be cloned: ok
 unaligned offset: ok
 hash matches string: ok
 mapping is a small heap object: ok
 write_to: ok
-checks: 13
+
+16 check(s), 0 failure(s)
