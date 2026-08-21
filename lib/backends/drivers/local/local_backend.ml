@@ -75,6 +75,16 @@ let prune_marker_dirs marker_path =
    one. *)
 let walk_fanout = 64
 
+(* Workers, not slots: a promise per entry is the tree's size in promises, and
+   every level awaiting the one below keeps the whole tree's worth of them alive
+   at once -- half a million manifests came to a hundred megabytes of pending
+   promises, closures and queue cells before a single key was returned.
+
+   Nested, so what runs at once is their product, taken from the bound above
+   rather than spelled as a second number that has to be kept in step with it. *)
+let dir_workers = 8
+let entry_workers = max 1 (walk_fanout / dir_workers)
+
 (* A device error, a full disk or an exhausted descriptor table clears once the
    condition does; a permissions or read-only-mount problem needs someone to act
    before the same write can succeed. *)
@@ -267,12 +277,56 @@ let make ?(verify_writes = true) ~root () : (module Backend.S) =
 
     let list_prefix ?max_keys ~prefix () =
       let base = resolve prefix in
-      (* Entries are stat'd and subdirs recursed in parallel, so on high-latency
-         storage the walk costs a few round trips per level rather than one per
-         entry. *)
-      let rec walk path key_prefix =
+      let entries = ref [] in
+      let emit e = entries := e :: !entries in
+      (* Directories still to read, and the ones this level found. *)
+      let frontier = ref [(base, prefix)] in
+      let found = ref [] in
+      let guard f =
+        Lwt.catch f (function
+          | Unix.Unix_error (Unix.ENOENT, _, _) -> Lwt.return_unit
+          | Unix.Unix_error (Unix.ENOTDIR, _, _) ->
+              Lwt.catch
+                (fun () ->
+                  let+ st = Lwt_unix_retry.stat base in
+                  emit
+                    Backend.
+                      {
+                        key = prefix;
+                        size = st.Unix.st_size;
+                        last_modified = st.Unix.st_mtime;
+                      })
+                (fun _ -> Lwt.return_unit)
+          | exn -> Lwt.fail exn)
+      in
+      let entry path key_prefix name () =
+        let full_path = Filename.concat path name in
+        let full_key = key_prefix ^ name in
         Lwt.catch
           (fun () ->
+            (* The slot covers the stat alone, and the workers above hold none,
+               so nothing waits for this budget while holding it. *)
+            let+ st =
+              Lwt_bounded.use walk_slots (fun () ->
+                  Lwt_unix_retry.stat full_path)
+            in
+            match st.Unix.st_kind with
+              | Unix.S_REG ->
+                  emit
+                    Backend.
+                      {
+                        key = full_key;
+                        size = st.Unix.st_size;
+                        last_modified = st.Unix.st_mtime;
+                      }
+              | Unix.S_DIR -> found := (full_path, full_key ^ "/") :: !found
+              | _ -> ())
+          (function
+            | Unix.Unix_error (Unix.ENOENT, _, _) -> Lwt.return_unit
+            | exn -> Lwt.fail exn)
+      in
+      let visit (path, key_prefix) =
+        guard (fun () ->
             let* names = readdir_list path in
             (* A write in flight is not an object: {!write_file} stages under a
                name of its own and renames, so listing one hands out a key that
@@ -281,66 +335,44 @@ let make ?(verify_writes = true) ~root () : (module Backend.S) =
             let names =
               List.filter (fun n -> not (Fs_util.is_temp_name n)) names
             in
-            let+ nested =
-              Lwt_list.map_p
-                (fun entry ->
-                  let full_path = Filename.concat path entry in
-                  let full_key = key_prefix ^ entry in
-                  Lwt.catch
-                    (fun () ->
-                      (* The slot covers the stat only: held across the recursion
-                         below, a deep tree parks every slot in an outer level
-                         while inner levels wait for the same budget. *)
-                      let* st =
-                        Lwt_bounded.use walk_slots (fun () ->
-                            Lwt_unix_retry.stat full_path)
-                      in
-                      match st.Unix.st_kind with
-                        | Unix.S_REG ->
-                            Lwt.return
-                              [
-                                Backend.
-                                  {
-                                    key = full_key;
-                                    size = st.Unix.st_size;
-                                    last_modified = st.Unix.st_mtime;
-                                  };
-                              ]
-                        | Unix.S_DIR -> walk full_path (full_key ^ "/")
-                        | _ -> Lwt.return [])
-                    (function
-                      | Unix.Unix_error (Unix.ENOENT, _, _) -> Lwt.return []
-                      | exn -> Lwt.fail exn))
-                names
-            in
-            let entries = List.concat nested in
             (* Empty directories surface as their marker key, matching the
                zero-byte object S3 lists. *)
-            if names = [] && is_dir_key key_prefix then
-              [Backend.{ key = key_prefix; size = 0; last_modified = 0. }]
-            else entries)
-          (function
-            | Unix.Unix_error (Unix.ENOENT, _, _) -> Lwt.return_nil
-            | Unix.Unix_error (Unix.ENOTDIR, _, _) ->
-                Lwt.catch
-                  (fun () ->
-                    let+ st = Lwt_unix_retry.stat base in
-                    [
-                      Backend.
-                        {
-                          key = prefix;
-                          size = st.Unix.st_size;
-                          last_modified = st.Unix.st_mtime;
-                        };
-                    ])
-                  (fun _ -> Lwt.return_nil)
-            | exn -> Lwt.fail exn)
+            if names = [] then (
+              if is_dir_key key_prefix then
+                emit Backend.{ key = key_prefix; size = 0; last_modified = 0. };
+              Lwt.return_unit)
+            else (
+              let rest = ref names in
+              Lwt_bounded.each ~width:entry_workers (fun () ->
+                  match !rest with
+                    | [] -> None
+                    | name :: tl ->
+                        rest := tl;
+                        Some (entry path key_prefix name))))
       in
-      let+ entries = walk base prefix in
+      let rec levels () =
+        match !frontier with
+          | [] -> Lwt.return_unit
+          | dirs ->
+              frontier := [];
+              found := [];
+              let rest = ref dirs in
+              let* () =
+                Lwt_bounded.each ~width:dir_workers (fun () ->
+                    match !rest with
+                      | [] -> None
+                      | dir :: tl ->
+                          rest := tl;
+                          Some (fun () -> visit dir))
+              in
+              frontier := !found;
+              levels ()
+      in
+      let+ () = levels () in
       let entries =
         List.sort
           (fun a b -> String.compare a.Backend.key b.Backend.key)
-          entries
+          !entries
       in
       match max_keys with
         | Some n when List.length entries > n ->

@@ -1,0 +1,9 @@
+
+=== listing a tree does not cost a task per entry
+every planted object came back: ok
+the peak the walk reaches does not scale with the tree: ok
+
+=== and the entries it returns are the only thing held
+what survives the call is the listing and no more: ok
+
+3 check(s), 0 failure(s)

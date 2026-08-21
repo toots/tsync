@@ -1077,6 +1077,20 @@
   (action
    (diff upload_fanout.expected upload_fanout.output))))
 
+(subdir unit/walk_fanout
+ (alias
+  (name default)
+  (deps walk_fanout.exe))
+ (rule
+  (alias runtest)
+  (target walk_fanout.output)
+  (action
+   (with-stdout-to walk_fanout.output (ignore-stderr (run ./walk_fanout.exe)))))
+ (rule
+  (alias runtest)
+  (action
+   (diff walk_fanout.expected walk_fanout.output))))
+
 (subdir unit/zip
  (alias
   (name default)
