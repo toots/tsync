@@ -75,7 +75,7 @@ let settle () =
 let () =
   (* Short enough to observe inside [settle]. The default would have this
      reporting "not flushed yet" whether or not the flusher was ever started. *)
-  Domain_engine.set_cursor_flush_interval 0.05;
+  File_store.set_cursor_flush_interval 0.05;
   ignore
     (Sys.command
        (Printf.sprintf "rm -rf %s && mkdir -p %s %s" root root backend_root));

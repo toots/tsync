@@ -29,6 +29,7 @@ let scenarios : scenario list =
           Write { path = "foo.txt"; content = "gone soon" };
           Drain;
           Delete "foo.txt";
+          Drain;
           Expire "all";
         ];
     };

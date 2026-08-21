@@ -56,7 +56,6 @@ let () =
        ~upload:(fun ~key:_ ~cancel:_ ->
          incr uploaded;
          Lwt.return_unit)
-       ~on_cursor:(fun ~entry_key:_ -> ())
        ~on_upload_done:(fun ~key:_ -> Lwt.return_unit);
 
      Sq.set_paused true;

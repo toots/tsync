@@ -35,7 +35,6 @@ module type S = sig
 
   val start :
     upload:(key:string -> cancel:bool ref -> unit Lwt.t) ->
-    on_cursor:(entry_key:Journal.Entry_key.t -> unit) ->
     on_upload_done:(key:string -> unit Lwt.t) ->
     unit
 
@@ -67,9 +66,6 @@ module Make (C : Conf.S) : S = struct
 
   let upload_fn : (key:string -> cancel:bool ref -> unit Lwt.t) ref =
     ref (fun ~key:_ ~cancel:_ -> Lwt.return_unit)
-
-  let on_cursor_fn : (entry_key:Journal.Entry_key.t -> unit) ref =
-    ref (fun ~entry_key:_ -> ())
 
   let on_upload_done_fn : (key:string -> unit Lwt.t) ref =
     ref (fun ~key:_ -> Lwt.return_unit)
@@ -103,7 +99,11 @@ module Make (C : Conf.S) : S = struct
                     Fs.write_journal_entry ~entry_key r.Wal.ops
                   in
                   let* () = W.complete entry_key in
-                  !on_cursor_fn ~entry_key;
+                  (* The entry this queue just published owes a cursor bump,
+                     and nothing above knows an entry landed. Recorded rather
+                     than published: a busy queue owes one per file, and they
+                     collapse to the newest. *)
+                  Fs.note_cursor entry_key;
                   incr completed;
                   !on_upload_done_fn ~key)
             (function
@@ -140,9 +140,8 @@ module Make (C : Conf.S) : S = struct
   let set_paused b = Q.set_paused queue b
   let paused () = Q.paused queue
 
-  let start ~upload ~on_cursor ~on_upload_done =
+  let start ~upload ~on_upload_done =
     upload_fn := upload;
-    on_cursor_fn := on_cursor;
     on_upload_done_fn := on_upload_done;
     (* No recovery here: {!Replay} reads the records itself, decides what is
        still owed against the shared journal, and re-posts only that. *)

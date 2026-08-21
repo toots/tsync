@@ -681,6 +681,20 @@
   (action
    (diff chunk_space_test.expected chunk_space_test.output))))
 
+(subdir unit/cursor_debounce
+ (alias
+  (name default)
+  (deps cursor_debounce.exe))
+ (rule
+  (alias runtest)
+  (target cursor_debounce.output)
+  (action
+   (with-stdout-to cursor_debounce.output (ignore-stderr (run ./cursor_debounce.exe)))))
+ (rule
+  (alias runtest)
+  (action
+   (diff cursor_debounce.expected cursor_debounce.output))))
+
 (subdir unit/field_spec
  (alias
   (name default)

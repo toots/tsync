@@ -23,6 +23,7 @@
   write foo.txt "gone soon"
   drain
   delete foo.txt
+  drain
   expire all
   gc
   expire all -> 1 version(s), 1 journal entr(ies)
@@ -99,6 +100,7 @@
   write foo.txt "shared body"
   drain
   delete foo.txt
+  drain
   expire all
   gc (mark only)
   write bar.txt "shared body"

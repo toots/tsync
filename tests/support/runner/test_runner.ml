@@ -390,13 +390,6 @@ let setup_client (module C : Conf.S) root staging_prefix =
   in
   Sq.start
     ~upload:(fun ~key ~cancel -> F.upload ~cancel key)
-      (* Bumped here rather than dropped: the cursor is what a peer polls to decide
-       whether to read the journal at all, so a scenario whose uploads never move
-       it exercises [Sync] against a gate that is always open. Synchronous, where
-       a daemon batches on a timer, because a step must have finished when it
-       returns. *)
-    ~on_cursor:(fun ~entry_key ->
-      Lwt.async (fun () -> Fs.bump_cursor entry_key))
     ~on_upload_done:(fun ~key:_ ->
       (* Mirror the daemons: nudge cache-cap enforcement after each upload. *)
       F.enforce_chunk_cap ());
@@ -734,6 +727,11 @@ let setup_client (module C : Conf.S) root staging_prefix =
             wait ()
         in
         let* () = wait () in
+        (* A settled queue still owes the cursor its uploads' bumps, and the
+           cursor is what a peer polls to decide whether to read the journal at
+           all: a step that left it behind would exercise [Sync] against a gate
+           stuck shut. *)
+        let* () = Fs.flush_cursor () in
         (* Move past the current ms so the next journal entry key is distinct. *)
         Lwt_unix.sleep 0.002
     | Uploads state ->
@@ -962,7 +960,14 @@ let setup_client (module C : Conf.S) root staging_prefix =
     | ClearCache ->
         Cache_layout.clear ~cache_root:C.cache_root ~domain_name:C.domain_name
   in
-  let drain () = Sq.drain () in
+  (* The daemon's order: the queue settles, then the bumps its uploads owe are
+     published. A step must have moved the cursor by the time it returns, since
+     the cursor is what a peer polls to decide whether to read the journal at
+     all. *)
+  let drain () =
+    let* () = Sq.drain () in
+    Fs.flush_cursor ()
+  in
   let stop () = Lwt.return_unit in
   let get_str obj k =
     match List.assoc_opt k obj with Some (`String s) -> Some s | _ -> None

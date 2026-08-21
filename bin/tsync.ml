@@ -1149,7 +1149,6 @@ let sync_cmd =
          let module Rp = Replay.Make (C) (F) in
          Sq.start
            ~upload:(fun ~key ~cancel -> F.upload ~cancel key)
-           ~on_cursor:(fun ~entry_key:_ -> ())
            ~on_upload_done:(fun ~key:_ -> Lwt.return_unit);
          let my_uuid = J.client_uuid () in
          if !verbose then
@@ -1291,6 +1290,7 @@ let sync_cmd =
          phase := "draining uploads";
          if !verbose then Log.info "draining upload queue";
          let* () = Sq.drain () in
+         let* () = Fs.flush_cursor () in
          phase := "reading the journal";
          let last_sync_key = Fs.read_last_sync_key () in
          if !verbose then

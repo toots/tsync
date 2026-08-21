@@ -32,10 +32,12 @@ module type S = sig
 
   val start :
     upload:(key:string -> cancel:bool ref -> unit Lwt.t) ->
-    on_cursor:(entry_key:Journal.Entry_key.t -> unit) ->
     on_upload_done:(key:string -> unit Lwt.t) ->
     unit
 
+  (** Settles the queue. The cursor the drained uploads owe is
+      {!File_store.flush_cursor}'s to publish — see {!Domain_engine.drain} for
+      the order the two go in. *)
   val drain : unit -> unit Lwt.t
 end
 

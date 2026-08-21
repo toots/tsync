@@ -1,5 +1,10 @@
 (** The shared journal on the backend, and the local mark saying how far it has
     been read. The only module that turns an entry key into a backend key. *)
+
+(** How long a cursor bump may wait to be collected with others. Settable so a
+    test observing a flush need not sleep it out. *)
+val set_cursor_flush_interval : float -> unit
+
 module Make (C : Conf.S) : sig
   val rename_file : src_key:string -> dst_key:string -> unit Lwt.t
 
@@ -18,7 +23,24 @@ module Make (C : Conf.S) : sig
   val write_journal_entry_body :
     ?entry_key:Journal.Entry_key.t -> Chunk.t -> Journal.Entry_key.t Lwt.t
 
+  (** Point peers at [entry_key]. The cursor is one object name and a store
+      rate-limits writes to it, so bumps are coalesced: this publishes at once
+      when the cursor has been quiet and otherwise records the key and returns,
+      leaving a timer to publish the newest of the burst.
+
+      It may therefore return before the write lands. Every path that bumps must
+      be reachable by a {!flush_cursor} before the process exits, or the last
+      bump of a run is lost and peers never go looking for what it published. *)
   val bump_cursor : Journal.Entry_key.t -> unit Lwt.t
+
+  (** {!bump_cursor} that never publishes inline, for a caller that cannot
+      await one — the upload queue's hook is synchronous. *)
+  val note_cursor : Journal.Entry_key.t -> unit
+
+  (** Publish what is pending now rather than waiting the interval out. A no-op
+      with nothing pending, and it swallows a backend failure: it runs from a
+      timer and from drain, neither of which may die of one. *)
+  val flush_cursor : unit -> unit Lwt.t
   val fetch_cursor : unit -> Journal.Entry_key.t option Lwt.t
 
   (** How far this client has applied the shared journal. [None] when it has
