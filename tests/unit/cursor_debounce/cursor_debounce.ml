@@ -93,8 +93,7 @@ let ek ms =
 
 let published () =
   let+ cursor = Fs.fetch_cursor () in
-  Option.value ~default:"none"
-    (Option.map Journal.Entry_key.to_string cursor)
+  Option.value ~default:"none" (Option.map Journal.Entry_key.to_string cursor)
 
 let say fmt = Printf.printf fmt
 
