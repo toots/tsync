@@ -155,42 +155,82 @@ let len t i =
   if t.chunk_size <= 0 then 0
   else max 0 (min t.chunk_size (Int64.to_int t.size - (i * t.chunk_size)))
 
-let encode ~name ~size ~chunk_size ~mtime ~h1 ~h2 ~symlink ~keys =
+(* Written a byte at a time, the way it is read: the accessors above are the
+   only description of the layout, and a writer using wider primitives would be
+   a second one to keep in step. *)
+let put_bytes buf off s =
+  String.iteri (fun i c -> Bigarray.Array1.unsafe_set buf (off + i) c) s
+
+let put_int32 buf off v =
+  for i = 0 to 3 do
+    Bigarray.Array1.unsafe_set buf (off + i)
+      (Char.unsafe_chr ((v lsr (i * 8)) land 0xff))
+  done
+
+let put_int64 buf off v =
+  for i = 0 to 7 do
+    Bigarray.Array1.unsafe_set buf (off + i)
+      (Char.unsafe_chr
+         (Int64.to_int
+            (Int64.logand (Int64.shift_right_logical v (i * 8)) 0xFFL)))
+  done
+
+type builder = { buf : Local_io.buffer; b_keys_at : int; b_count : int }
+
+(* Zeroed rather than left as {!Chunk.create} hands it over, so a key never set
+   is a key of NUL bytes the store cannot hold rather than whatever the page
+   last held. *)
+let builder ~name ~size ~chunk_size ~mtime ~symlink ~count =
+  if count < 0 then
+    invalid_arg (Printf.sprintf "Chunk_table.builder: count %d" count);
   let link = Option.value symlink ~default:"" in
-  let count = List.length keys in
-  let b =
-    Buffer.create (header_bytes + String.length name + (count * key_bytes))
-  in
-  let i32 v =
-    let s = Bytes.create 4 in
-    Bytes.set_int32_le s 0 (Int32.of_int v);
-    Buffer.add_bytes b s
-  in
-  let i64 v =
-    let s = Bytes.create 8 in
-    Bytes.set_int64_le s 0 v;
-    Buffer.add_bytes b s
-  in
+  let keys_at = header_bytes + String.length name + String.length link in
+  let buf = Chunk.create (keys_at + (count * key_bytes)) in
+  Local_io.zero buf ~pos:0 ~len:(Bigarray.Array1.dim buf);
+  put_bytes buf 0 magic;
+  put_int64 buf 8 size;
+  put_int64 buf 16 (Int64.bits_of_float mtime);
+  put_int32 buf 24 chunk_size;
+  put_int32 buf 28 count;
+  put_int32 buf 32 (String.length name);
+  put_int32 buf 36 (String.length link);
+  put_bytes buf header_bytes name;
+  put_bytes buf (header_bytes + String.length name) link;
+  { buf; b_keys_at = keys_at; b_count = count }
+
+let key_offset b i =
+  if i < 0 || i >= b.b_count then
+    invalid_arg (Printf.sprintf "Chunk_table.builder: %d of %d" i b.b_count);
+  b.b_keys_at + (i * key_bytes)
+
+let set b i key =
+  let off = key_offset b i in
+  if String.length key <> key_bytes then
+    invalid_arg (Printf.sprintf "Chunk_table.set: chunk key %S" key);
+  put_bytes b.buf off key
+
+let get b i =
+  let off = key_offset b i in
+  String.init key_bytes (fun k -> Bigarray.Array1.unsafe_get b.buf (off + k))
+
+let builder_count b = b.b_count
+
+let seal b ~h1 ~h2 =
   let fixed_hex what s =
     if String.length s <> 16 then
-      invalid_arg (Printf.sprintf "Chunk_table.encode: %s is %S" what s);
-    Buffer.add_string b s
+      invalid_arg (Printf.sprintf "Chunk_table.seal: %s is %S" what s)
   in
-  Buffer.add_string b magic;
-  i64 size;
-  i64 (Int64.bits_of_float mtime);
-  i32 chunk_size;
-  i32 count;
-  i32 (String.length name);
-  i32 (String.length link);
   fixed_hex "h1" h1;
   fixed_hex "h2" h2;
-  Buffer.add_string b name;
-  Buffer.add_string b link;
-  List.iter
-    (fun k ->
-      if String.length k <> key_bytes then
-        invalid_arg (Printf.sprintf "Chunk_table.encode: chunk key %S" k);
-      Buffer.add_string b k)
-    keys;
-  Buffer.contents b
+  put_bytes b.buf 40 h1;
+  put_bytes b.buf 56 h2;
+  Chunk.of_buffer b.buf
+
+let of_chunk c = of_source (Mapped (Chunk.buffer c))
+
+let encode ~name ~size ~chunk_size ~mtime ~h1 ~h2 ~symlink ~keys =
+  let b =
+    builder ~name ~size ~chunk_size ~mtime ~symlink ~count:(List.length keys)
+  in
+  List.iteri (set b) keys;
+  Chunk.to_string (seal b ~h1 ~h2)

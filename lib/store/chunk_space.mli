@@ -72,7 +72,8 @@ module Make (C : Conf.S) : sig
       live chunk once, without keeping a set of what it has seen. *)
   val promote : string -> bool Lwt.t
 
-  (** {!promote} every chunk a manifest names. **Call this immediately before
+  (** {!promote} every chunk a manifest names, addressed rather than listed so a
+      terabyte's worth costs no strings. **Call this immediately before
       publishing that manifest**: it is what makes a run safe, and it is the
       only thing that does.
 
@@ -81,7 +82,7 @@ module Make (C : Conf.S) : sig
       check cannot: a chunk skipped by an uploader's session memo, a chunk
       written before the run opened and moved by the rename since, an upload
       still in flight when the run opened. *)
-  val promote_all : string list -> unit Lwt.t
+  val promote_all : count:int -> (int -> string) -> unit Lwt.t
 
   (** Whether the store holds this chunk. Falls through to the space on its way
       out so an uploader does not re-send a chunk that is merely waiting to be

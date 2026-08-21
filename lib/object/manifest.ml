@@ -47,14 +47,6 @@ let entry_of_key ~index ~size key =
         }
     | None -> invalid_arg ("Manifest.entry_of_key: " ^ key)
 
-(* Composed rather than hashed again, so the name an upload publishes and the
-   name a check recomputes are the same expression. Spelling the two digests at
-   the call site would let the writer and {!key_of_body} drift, and a chunk whose
-   body no longer hashes to its own key is exactly what a check cannot then
-   tell apart from corruption. *)
-let chunk_entry_of_body ~index data =
-  entry_of_key ~index ~size:(Chunk.length data) (key_of_body data)
-
 (* Derived from the file's {i own} chunk size, so a file uploaded under a
    different setting still groups correctly. *)
 
@@ -68,16 +60,32 @@ let group_at ~cache_chunk_size m i =
   Chunk_group.of_table ~table:m.chunks ~per:(per ~cache_chunk_size m) i
 
 (* Hashed over the ordered chunk digests, so a changed file's manifest rebuilds
-   from its chunk entries without re-reading untouched bytes. *)
-let digest_of_chunks chunks =
+   from its chunk entries without re-reading untouched bytes.
+
+   What one chunk contributes is spelled once below: an upload that addresses
+   its keys and a caller holding them as a list must reach the same digest for
+   the same file, and two spellings of this line is how that stops being true. *)
+let chunk_digest ~key ~size = Printf.sprintf "%s-%d;" key size
+
+let digest_fold feed =
   let s1 = Xxhash.create 0 and s2 = Xxhash.create 1 in
-  List.iter
-    (fun (c : chunk_entry) ->
-      let d = Printf.sprintf "%s-%s-%d;" c.h1 c.h2 c.size in
+  feed (fun d ->
       Xxhash.update s1 d;
-      Xxhash.update s2 d)
-    chunks;
+      Xxhash.update s2 d);
   (Xxhash.digest_hex s1, Xxhash.digest_hex s2)
+
+let digest_of_chunks chunks =
+  digest_fold (fun add ->
+      List.iter
+        (fun (c : chunk_entry) ->
+          add (chunk_digest ~key:(chunk_key c) ~size:c.size))
+        chunks)
+
+let digest_of_keys ~count ~key ~len =
+  digest_fold (fun add ->
+      for i = 0 to count - 1 do
+        add (chunk_digest ~key:(key i) ~size:(len i))
+      done)
 
 let of_table chunks =
   {
@@ -91,6 +99,7 @@ let of_table chunks =
   }
 
 let of_string s = of_table (Chunk_table.of_string s)
+let of_chunk c = of_table (Chunk_table.of_chunk c)
 
 (* Mapped: chunk keys cost no heap and the pages are reclaimable. *)
 let of_file path = of_table (Chunk_table.of_file path)

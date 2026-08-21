@@ -1021,6 +1021,20 @@
   (action
    (diff temp_names_test.expected temp_names_test.output))))
 
+(subdir unit/upload_fanout
+ (alias
+  (name default)
+  (deps upload_fanout.exe))
+ (rule
+  (alias runtest)
+  (target upload_fanout.output)
+  (action
+   (with-stdout-to upload_fanout.output (ignore-stderr (run ./upload_fanout.exe)))))
+ (rule
+  (alias runtest)
+  (action
+   (diff upload_fanout.expected upload_fanout.output))))
+
 (subdir unit/zip
  (alias
   (name default)
