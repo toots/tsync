@@ -34,11 +34,6 @@ val key_of_body : Chunk.t -> string
     [Invalid_argument] for a key that is not ["<h1>-<h2>"]. *)
 val entry_of_key : index:int -> size:int -> string -> chunk_entry
 
-(** What an uploader publishes for [data]: {!key_of_body} split into the halves
-    a manifest records. The one way to build an entry from bytes, so a stored
-    chunk is always named by the same expression a check holds it against. *)
-val chunk_entry_of_body : index:int -> Chunk.t -> chunk_entry
-
 (** {2 Grouping}
 
     How a manifest's stored chunks fall into cache chunks. Derived from the
@@ -54,6 +49,12 @@ val group_at : cache_chunk_size:int -> t -> int -> Chunk_group.t option
     file's manifest is rebuildable from its chunk entries alone. *)
 val digest_of_chunks : chunk_entry list -> string * string
 
+(** {!digest_of_chunks} over a body being built, which addresses its keys rather
+    than holding them: [len] answers what {!chunk_len} would, so the two agree
+    on the same file. *)
+val digest_of_keys :
+  count:int -> key:(int -> string) -> len:(int -> int) -> string * string
+
 val make :
   name:string ->
   h1:string ->
@@ -68,6 +69,10 @@ val make :
 val make_symlink : name:string -> target:string -> mtime:float -> t
 
 val of_string : string -> t
+
+(** A body a caller already holds as bytes, which is what {!Chunk_table.seal}
+    hands back. *)
+val of_chunk : Chunk.t -> t
 
 (** The name recorded in the body. Meaningful only where the location cannot
     yield one; a caller holding a key takes the name from the key. *)

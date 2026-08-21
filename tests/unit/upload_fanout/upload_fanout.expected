@@ -1,0 +1,15 @@
+
+=== an upload's tasks do not scale with the file
+the fixture really is many chunks: ok
+and the manifest records every one of them: ok
+what is held does not grow with the length of the file: ok
+
+=== a manifest body of many keys costs no OCaml heap
+the keys read back as they were written: ok
+and the body they are in is not words the collector walks: ok
+
+=== a deduplicated upload publishes the same body
+the two agree on the file's identity: ok
+and on every chunk key: ok
+
+7 check(s), 0 failure(s)

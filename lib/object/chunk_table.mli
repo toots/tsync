@@ -60,3 +60,34 @@ val encode :
   symlink:string option ->
   keys:string list ->
   string
+
+(** A body being filled a key at a time, for an upload whose chunks finish out
+    of order.
+
+    [count] is fixed at {!builder}, so every key has an address and none is held
+    anywhere but in the body itself — a terabyte's worth is 4 MB of buffer and
+    no OCaml heap at all. The two whole-file digests are a function of the keys
+    and so are stamped at {!seal}. *)
+type builder
+
+val builder :
+  name:string ->
+  size:int64 ->
+  chunk_size:int ->
+  mtime:float ->
+  symlink:string option ->
+  count:int ->
+  builder
+
+(** Chunk [i]'s key. Raises [Invalid_argument] for a key of the wrong width or
+    an index outside [0, count). *)
+val set : builder -> int -> string -> unit
+
+val get : builder -> int -> string
+val builder_count : builder -> int
+
+(** The finished body, which is the buffer itself and not a copy of it. *)
+val seal : builder -> h1:string -> h2:string -> Chunk.t
+
+(** A body a caller already holds as bytes, mapped or built. *)
+val of_chunk : Chunk.t -> t

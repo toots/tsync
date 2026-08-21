@@ -228,16 +228,18 @@ module Make (C : Conf.S) = struct
      the cases a check cannot: a chunk skipped by an uploader's own session memo
      (see [Remote.known_chunks]), a chunk written before the run opened and moved
      by the rename since, an upload still in flight when the run opened. *)
-  let promote_all chunk_keys =
+  let promote_all ~count chunk_key =
     let* run = read_run () in
     match run with
       | None -> Lwt.return_unit
       | Some _ ->
-          Lwt_list.iter_s
-            (fun ck ->
-              let+ (_ : bool) = promote ck in
-              ())
-            chunk_keys
+          let rec go i =
+            if i >= count then Lwt.return_unit
+            else
+              let* (_ : bool) = promote (chunk_key i) in
+              go (i + 1)
+          in
+          go 0
 
   (* The two lookups below are spelled out rather than shared through a
      combinator, because they differ in what "not there" is: an option for one, a

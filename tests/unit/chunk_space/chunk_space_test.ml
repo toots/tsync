@@ -160,7 +160,10 @@ let () =
      step "promoting one that is only in the surviving space is a no-op";
      let* (_ : bool) = Space.promote absent in
      step "promoting one that is in neither space is a no-op";
-     let* () = Space.promote_all [live; going; absent] in
+     let mixture = [| live; going; absent |] in
+     let* () =
+       Space.promote_all ~count:(Array.length mixture) (Array.get mixture)
+     in
      step "promote_all over a mixture moves what is left and leaves the rest";
 
      case "reading a body still works once the discarded space is gone";

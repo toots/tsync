@@ -130,6 +130,22 @@ module Make_with_layout (C : Conf.S) (L : Layout.S) : S = struct
   let with_slot f = Lwt_bounded.use chunk_slots f
   let with_chunk_buffer ~size f = with_slot (fun () -> f (Chunk.create size))
 
+  (* Workers as wide as the buffer pool, each taking the next index: a promise
+     apiece is a fan-out the file's size chooses, and a terabyte's worth of them
+     is allocated before the first chunk is read and outlives every buffer they
+     queue for.
+
+     The slot is taken inside [f], not here, so nothing holds one while asking
+     for one. *)
+  let each_chunk ~count f =
+    let next = ref 0 in
+    Lwt_bounded.each ~width:(Lwt_bounded.width chunk_slots) (fun () ->
+        if !next >= count then None
+        else (
+          let index = !next in
+          incr next;
+          Some (fun () -> f index)))
+
   (* Chunk keys known present on the domain's stores, this session only. Not
      pre-populated by listing the chunk prefix: that cost scales with the whole
      historical archive rather than the upload at hand.
@@ -156,10 +172,9 @@ module Make_with_layout (C : Conf.S) (L : Layout.S) : S = struct
 
   (* [data] must own its bytes: a store is free to keep sending after this
      returns, and the key is the hash of what was passed, not of what lands. *)
-  let put_chunk ~index ~data =
-    let entry = Manifest.chunk_entry_of_body ~index data in
+  let put_chunk ~data =
+    let ck_rel = Manifest.key_of_body data in
     Metrics.add_hashed 1;
-    let ck_rel = Manifest.chunk_key entry in
     let ck = chunk_backend_key ck_rel in
     let* known =
       (* Ahead of the session memo rather than behind it. A chunk this session
@@ -188,12 +203,12 @@ module Make_with_layout (C : Conf.S) (L : Layout.S) : S = struct
         Corrupt.forget ck_rel;
         remember_chunk ck_rel
     in
-    (entry, not known)
+    (ck_rel, not known)
 
   (* Mapped rather than read, so the pages reach the store without being copied
      into a buffer first, and mapped from a snapshot, so what the user writes
      next reaches neither these pages nor the ones still to come. *)
-  let upload_chunk fd ~cancel ~on_progress ~file_size ~chunk_size index =
+  let upload_chunk fd ~cancel ~on_progress ~file_size ~chunk_size ~table index =
     if !cancel then raise Cancelled;
     let offset = index * chunk_size in
     let len = min chunk_size (file_size - offset) in
@@ -202,32 +217,40 @@ module Make_with_layout (C : Conf.S) (L : Layout.S) : S = struct
           try Chunk.map_fd fd ~offset ~len
           with Unix.Unix_error _ -> raise Cancelled
         in
-        let+ entry, sent = put_chunk ~index ~data in
+        let+ ck_rel, sent = put_chunk ~data in
+        Chunk_table.set table index ck_rel;
         (* A deduplicated chunk is as done as a written one and cost no
            transfer, which is why the two are told apart rather than summed. *)
-        on_progress ~bytes:len ~sent;
-        entry)
+        on_progress ~bytes:len ~sent)
 
   (* A cancellation landing while the put is in flight unpublishes it again, or
      a ghost object survives under a name that may no longer exist locally.
 
      Chunks stay: they are content-addressed and the successor upload references
      them. *)
-  let publish ~key ~size ~chunk_size ~mtime ~cancel entries =
+  (* The key being published under is what names this file. *)
+  let chunk_table ~key ~size ~chunk_size ~mtime ~count =
+    Chunk_table.builder
+      ~name:(Key.leaf ~domain_prefix:C.domain_prefix key)
+      ~size ~chunk_size ~mtime ~symlink:None ~count
+
+  let publish ~key ~size ~chunk_size ~mtime ~cancel table =
     if !cancel then raise Cancelled;
-    let h1, h2 = Manifest.digest_of_chunks entries in
-    (* The key being published under is what names this file. *)
-    let name = Key.leaf ~domain_prefix:C.domain_prefix key in
-    let state =
-      Manifest.make ~name ~h1 ~h2 ~size ~chunk_size ~chunks:entries ~mtime
+    let count = Chunk_table.builder_count table in
+    let chunk_key = Chunk_table.get table in
+    let h1, h2 =
+      Manifest.digest_of_keys ~count ~key:chunk_key
+        ~len:(Manifest.chunk_len ~size ~chunk_size)
     in
+    let body = Chunk_table.seal table ~h1 ~h2 in
+    let state = Manifest.of_chunk body in
     let* () = if C.versioning then St.save_version ~key else Lwt.return_unit in
     Log.info "upload %s: publishing manifest, size=%Ld" key size;
     (* Before the manifest is visible, never after: a chunk this upload did not
        write — deduplicated, or already known to this session — may hold a name
        only in a space a collection is about to discard. *)
-    let* () = Space.promote_all (List.map Manifest.chunk_key entries) in
-    let* () = St.put_manifest ~key ~data:(Manifest.to_string ~name state) in
+    let* () = Space.promote_all ~count chunk_key in
+    let* () = St.put_manifest ~key ~data:(Chunk.to_string body) in
     if !cancel then
       let* () =
         Lwt.catch
@@ -251,7 +274,7 @@ module Make_with_layout (C : Conf.S) (L : Layout.S) : S = struct
   let upload ~key ~src_path ~mtime ~chunk_size ?(cancel = ref false)
       ?(on_progress = fun ~bytes:_ ~sent:_ -> ()) () =
     let* fd = Lwt_unix_retry.openfile src_path [Unix.O_RDONLY] 0 in
-    let* entries, file_size =
+    let* table, file_size =
       Lwt.finalize
         (fun () ->
           let* before = Lwt_unix_retry.LargeFile.fstat fd in
@@ -269,14 +292,14 @@ module Make_with_layout (C : Conf.S) (L : Layout.S) : S = struct
                 if file_size = 0 then 1
                 else (file_size + chunk_size - 1) / chunk_size
               in
-              (* Safe to launch every chunk's task up front: each blocks on
-                 [chunk_slots] until one frees, so concurrency stays capped at
-                 [max_chunk_buffers] however many chunks contend. *)
-              let* entries =
-                Lwt_list.map_p
+              let table =
+                chunk_table ~key ~size:(Int64.of_int file_size) ~chunk_size
+                  ~mtime ~count:num_chunks
+              in
+              let* () =
+                each_chunk ~count:num_chunks
                   (upload_chunk snapshot ~cancel ~on_progress ~file_size
-                     ~chunk_size)
-                  (List.init num_chunks Fun.id)
+                     ~chunk_size ~table)
               in
               (* The snapshot makes the chunks agree with each other; this is
                  what says they still describe the file the user has. *)
@@ -286,14 +309,13 @@ module Make_with_layout (C : Conf.S) (L : Layout.S) : S = struct
                 || after.Unix.LargeFile.st_mtime
                    <> before.Unix.LargeFile.st_mtime
               then raise (Source_changed src_path);
-              (entries, file_size))
+              (table, file_size))
             (fun () ->
               Unix.close snapshot;
               Lwt.return_unit))
         (fun () -> Lwt_unix_retry.close fd)
     in
-    publish ~key ~size:(Int64.of_int file_size) ~chunk_size ~mtime ~cancel
-      entries
+    publish ~key ~size:(Int64.of_int file_size) ~chunk_size ~mtime ~cancel table
 
   (* Fillers write into a pooled buffer, which is what holds this path to
      [max_chunk_buffers] chunks however wide the fan-out below runs.
@@ -306,21 +328,23 @@ module Make_with_layout (C : Conf.S) (L : Layout.S) : S = struct
          [ `Reuse of string | `Fill of Local_io.buffer -> unit Lwt.t ] Lwt.t)
       ?(cancel = ref false) () =
     let n = max 1 (Manifest.num_chunks_for size chunk_size) in
+    let table = chunk_table ~key ~size ~chunk_size ~mtime ~count:n in
     let one index =
       if !cancel then raise Cancelled;
       let len = Manifest.chunk_len ~size ~chunk_size index in
       let* src = source index in
       match src with
         | `Reuse chunk_key ->
-            Lwt.return (Manifest.entry_of_key ~index ~size:len chunk_key)
+            Chunk_table.set table index chunk_key;
+            Lwt.return_unit
         | `Fill fill ->
             with_chunk_buffer ~size:len (fun buf ->
                 let* () = fill buf in
-                let+ entry, _ = put_chunk ~index ~data:(Chunk.of_buffer buf) in
-                entry)
+                let+ ck_rel, _ = put_chunk ~data:(Chunk.of_buffer buf) in
+                Chunk_table.set table index ck_rel)
     in
-    let* entries = Lwt_list.map_p one (List.init n Fun.id) in
-    publish ~key ~size ~chunk_size ~mtime ~cancel entries
+    let* () = each_chunk ~count:n one in
+    publish ~key ~size ~chunk_size ~mtime ~cancel table
 
   let fetch_manifest ~key () =
     let+ body = St.get_manifest_opt ~key in
