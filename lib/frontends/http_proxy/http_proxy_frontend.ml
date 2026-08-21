@@ -312,10 +312,11 @@ let respond ?(status = `OK) ?(headers = []) body =
     ~body ()
 
 (* The bytes go out as they are, where {!respond} would put a chunk-sized string
-   on the heap first. *)
+   on the heap first. [`Passthrough] because the chunk was fetched for this
+   response alone and nothing writes to it again. *)
 let respond_chunk data =
   Cohttp_lwt_unix.Server.respond ~status:`OK
-    ~body:(Cohttp_lwt.Body.of_bigstring (Chunk.buffer data))
+    ~body:(Cohttp_lwt.Body.of_bigstring (`Passthrough (Chunk.buffer data)))
     ()
 
 let authed route req body =
