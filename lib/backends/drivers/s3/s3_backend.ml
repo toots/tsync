@@ -248,6 +248,9 @@ let make ?endpoint ?unsigned_payload ?share_url ~bucket ~region ~access_key_id
     let copy ~src_key ~dst_key () = copy t ~src_key ~dst_key ()
     let list_prefix ?max_keys ~prefix () = list_all t ?max_keys ~prefix ()
 
+    (* No multi-object GET in the API: {!Backend.Batched} fans these out. *)
+    let get_many = None
+
     let verify_all ~chunk_prefix () =
       let+ n =
         Verifier.queue

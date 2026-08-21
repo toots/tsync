@@ -104,6 +104,32 @@ module type S = sig
   val list_prefix :
     ?max_keys:int -> prefix:string -> unit -> file_entry list Lwt.t
 
+  (** A native multi-object read, or [None] from a store with none — which is
+      every store but http-proxy, S3 having no multi-object GET and the GCS
+      batch API carrying metadata only.
+
+      Declared rather than implemented, so a store without one says so and
+      {!Batched} supplies the fan-out. A driver spelling its own would be
+      choosing a width from inside a driver, which cannot see what else shares
+      the process, and four drivers would then have four of them.
+
+      Entries rather than bare keys as {!delete_multi} takes: a read has an
+      answer to hold, so whoever packs a request needs the sizes, and a caller
+      with a batch to make has just listed them.
+
+      What a store declaring one owes its callers:
+
+      - every key asked for is answered exactly once, in the order asked;
+      - an absent key is answered [None], not a failure;
+      - a list longer than the store takes per request is still answered whole;
+        the driver pages.
+      - a per-key failure is raised rather than answered [None]. This is
+        {!absent_code}'s lesson for reads: a caller told a key is absent writes
+        a mirror missing that file, and nothing walks it afterwards to notice. *)
+  val get_many :
+    (entries:file_entry list -> unit -> (string * Chunk.t option) list Lwt.t)
+    option
+
   (** Ask the store to check every chunk it holds against its own name and file
       what fails under {!Chunk_layout.corrupted_prefix}, answering how many
       units of work were queued rather than what they found.
@@ -148,6 +174,23 @@ module type S = sig
   (** What this store can tell a client about [prefix]'s domain. [prefix]
       identifies the domain, for backends that front several. *)
   val capabilities : prefix:string -> unit -> caps Lwt.t
+end
+
+(** [B]'s {!S.get_many} resolved: its own where it declared one, and [get_opt]
+    fanned out where it did not. Callers go through this and never see the
+    option, so the fallback is written once and no driver picks its own width.
+
+    Requests are packed to a key count and a byte budget, and asked for one at a
+    time, so what a call holds is one request's bodies rather than the whole
+    listing's. [slots] is the budget the reads come out of, and a caller that
+    has one — a domain's download bound, a resync's [--parallelism] — should
+    pass it rather than leave this to a default that cannot see the process. *)
+module Batched (B : S) : sig
+  val get_many :
+    ?slots:Lwt_bounded.t ->
+    entries:file_entry list ->
+    unit ->
+    (string * Chunk.t option) list Lwt.t
 end
 
 (** {1 Failure} *)

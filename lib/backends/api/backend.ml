@@ -130,6 +130,14 @@ module type S = sig
   val list_prefix :
     ?max_keys:int -> prefix:string -> unit -> file_entry list Lwt.t
 
+  (** A native multi-object read, or [None] from a store with none — which is
+      every store but http-proxy, S3 having no multi-object GET and the GCS
+      batch API carrying metadata only. Declared rather than implemented, so a
+      store without one says so and {!Batched} supplies the fan-out. *)
+  val get_many :
+    (entries:file_entry list -> unit -> (string * Chunk.t option) list Lwt.t)
+    option
+
   val verify_all :
     chunk_prefix:string -> unit -> [ `Queued of int | `Unsupported ] Lwt.t
 
@@ -145,6 +153,49 @@ module type S = sig
       its bytes. See {!caps}; [no_caps] is the honest answer for every store
       that only holds bytes. *)
   val capabilities : prefix:string -> unit -> caps Lwt.t
+end
+
+(* Runs a request may ask for at once. Both bounds are needed: the count is what
+   a request line carries, and the byte budget is what the answer costs in
+   memory, which a folder of large manifests reaches first. *)
+let max_batch_keys = 256
+let max_batch_bytes = 8 * 1024 * 1024
+
+let batches entries =
+  let rec go done_ run keys bytes = function
+    | [] -> List.rev (if run = [] then done_ else List.rev run :: done_)
+    | e :: tl ->
+        if run <> [] && (keys >= max_batch_keys || bytes + e.size > max_batch_bytes)
+        then go (List.rev run :: done_) [e] 1 e.size tl
+        else go done_ (e :: run) (keys + 1) (bytes + e.size) tl
+  in
+  go [] [] 0 0 entries
+
+(* Object reads a batch stands in for, for a caller with no budget of its own.
+   Module-level, since a pool built per call is not a bound. *)
+let batch_slots = lazy (Lwt_bounded.create ~name:"batch reads" ~max:32 ())
+
+module Batched (B : S) = struct
+  open Lwt.Syntax
+
+  let get_many ?slots ~entries () =
+    let slots =
+      match slots with Some s -> s | None -> Lazy.force batch_slots
+    in
+    let ask run =
+      match B.get_many with
+        | Some f -> Lwt_bounded.use slots (fun () -> f ~entries:run ())
+        | None ->
+            Lwt_bounded.map_with slots
+              (fun (e : file_entry) ->
+                let+ body = B.get_opt ~key:e.key () in
+                (e.key, body))
+              run
+    in
+    (* A run at a time, so what is held is one request's bodies rather than the
+       whole folder's twice over. *)
+    let+ answered = Lwt_list.map_s ask (batches entries) in
+    List.concat answered
 end
 
 type factory = (string -> string option) -> (module S)
@@ -268,6 +319,19 @@ let counted ~traffic m =
       let+ data = Inner.get_opt ~key () in
       Option.iter (fun d -> down (Chunk.length d)) data;
       data
+
+    (* The fan-out {!Batched} builds needs nothing here, going through the
+       [get_opt] above; a store's own batch crosses the link unseen otherwise. *)
+    let get_many =
+      Option.map
+        (fun f ~entries () ->
+          let+ answered = f ~entries () in
+          List.iter
+            (fun (_, body) ->
+              Option.iter (fun b -> down (Chunk.length b)) body)
+            answered;
+          answered)
+        Inner.get_many
   end : S)
 
 let make ?traffic ~backend_type ~get_field () =

@@ -88,6 +88,8 @@ let opinionated n : (module Backend.S) =
              ()
           : Backend.S)
 
+    let get_many = None
+
     let capabilities ~prefix:_ () =
       Lwt.return { Backend.no_caps with chunk_size = n }
   end)

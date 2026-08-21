@@ -25,6 +25,8 @@ module Uncollectable : Backend.S = struct
            ()
         : Backend.S)
 
+  let get_many = None
+
   let capabilities ~prefix:_ () = Lwt.return Backend.no_caps
 end
 

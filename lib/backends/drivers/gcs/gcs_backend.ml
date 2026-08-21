@@ -359,6 +359,10 @@ let make ?endpoint ?service_account_key ?share_url ~bucket () :
     let copy ~src_key ~dst_key () = copy t ~src_key ~dst_key ()
     let list_prefix ?max_keys ~prefix () = list_all t ?max_keys ~prefix ()
 
+    (* The batch API carries metadata, not bodies: {!Backend.Batched} fans
+       these out. *)
+    let get_many = None
+
     let verify_all ~chunk_prefix () =
       let+ n =
         Verifier.queue

@@ -10,7 +10,9 @@
    -open
    Tsync_field_spec
    -open
-   Tsync_metrics))
+   Tsync_metrics
+   -open
+   Tsync_lwt_unix))
  (name tsync_backend_register)
  (public_name tsync-libs.backend_register)
  (libraries
@@ -18,6 +20,7 @@
   tsync_metrics
   tsync_chunk
   tsync_local_io
+  tsync_lwt_unix
   tsync_log
   lwt
   lwt.unix))
