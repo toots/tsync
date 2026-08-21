@@ -909,6 +909,20 @@
   (alias runtest)
   (action (run ./recover_scope_test.exe))))
 
+(subdir unit/spool_reap
+ (alias
+  (name default)
+  (deps spool_reap_test.exe))
+ (rule
+  (alias runtest)
+  (target spool_reap_test.output)
+  (action
+   (with-stdout-to spool_reap_test.output (ignore-stderr (run ./spool_reap_test.exe)))))
+ (rule
+  (alias runtest)
+  (action
+   (diff spool_reap_test.expected spool_reap_test.output))))
+
 (subdir unit/staged_codec
  (alias
   (name default)

@@ -16,9 +16,17 @@
 
 open Check
 
+(* The owner is what a sweep reads to tell a live run's scratch file from a dead
+   run's, so it is pinned beside the recogniser it is derived from. *)
+let owner name =
+  match Fs_util.temp_owner name with
+    | Some pid -> string_of_int pid
+    | None -> "-"
+
 let show name =
-  Printf.printf "  %-34s %s\n" name
+  Printf.printf "  %-34s %-7s %s\n" name
     (if Fs_util.is_temp_name name then "ours" else "user's")
+    (owner name)
 
 let () =
   case "the names we generate";
@@ -39,8 +47,10 @@ let () =
   List.iter
     (fun p ->
       let name = Filename.basename (Fs_util.temp_path p) in
-      Printf.printf "  %-34s %s\n" (mask name)
-        (if Fs_util.is_temp_name name then "ours" else "user's"))
+      Printf.printf "  %-34s %-7s %s\n" (mask name)
+        (if Fs_util.is_temp_name name then "ours" else "user's")
+        (if Fs_util.temp_owner name = Some (Unix.getpid ()) then "<pid>"
+         else owner name))
     ["/a/b/file.txt"; "/a/b/other.mkv"];
 
   case "files a user might have";

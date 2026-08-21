@@ -1,0 +1,14 @@
+
+=== before the sweep
+  a dead run's spool
+  a user's file
+  this run's open spool
+
+=== after the sweep
+  a user's file
+  this run's open spool
+
+=== what became of each
+  this run's open spool    kept
+  a dead run's spool       reaped
+  a user's file            kept

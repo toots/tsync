@@ -53,6 +53,29 @@ let is_temp_name name =
 
 let is_temp_key key = is_temp_name (Filename.basename key)
 
+(* The pid {!temp_path} stamped into a name, so a sweep can tell a run's live
+   scratch file from one a killed run left behind. *)
+let temp_owner name =
+  if not (is_temp_name name) then None
+  else (
+    let rest =
+      String.sub name
+        (String.length temp_prefix)
+        (String.length name - String.length temp_prefix)
+    in
+    match String.index_opt rest '-' with
+      | None -> None
+      | Some i -> int_of_string_opt (String.sub rest 0 i))
+
+(* [ESRCH] is the answer that matters; [EPERM] means a process we may not signal
+   and is therefore alive. A reused pid reads as alive, so this retires a dead
+   process's leavings rather than proving a live one's. *)
+let pid_alive pid =
+  match Unix.kill pid 0 with
+    | () -> true
+    | exception Unix.Unix_error (Unix.EPERM, _, _) -> true
+    | exception _ -> false
+
 (* All or nothing: a [fill] failing part-way leaves no temp file to be counted
    against the cache or swept later. *)
 let with_temp_rename path fill =

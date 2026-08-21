@@ -30,6 +30,14 @@ val is_temp_name : string -> bool
     store's listing rather than a directory. *)
 val is_temp_key : string -> bool
 
+(** The pid that created a {!temp_path} name, or [None] for a name we did not
+    generate. What separates a live run's scratch file from a dead run's. *)
+val temp_owner : string -> int option
+
+(** Whether [pid] names a running process. A pid reused since it was recorded
+    reads as alive. *)
+val pid_alive : int -> bool
+
 (** [atomic_write path data] writes [data] to a uniquely named temp file in
     [path]'s directory, then renames it over [path]. Safe against concurrent
     writers of the same path, in this process or another. *)

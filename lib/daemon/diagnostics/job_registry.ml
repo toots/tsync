@@ -26,14 +26,9 @@ let keep_done = 300.
    and a second report from the same pid replaces the first. *)
 let table : (int, entry) Hashtbl.t = Hashtbl.create 4
 
-(* [ESRCH] is the answer that matters; [EPERM] means a process we may not signal
-   and is therefore alive. A pid reused between two reports keeps a stale row
-   until silence retires it, which is why liveness alone is not the test. *)
-let alive pid =
-  match Unix.kill pid 0 with
-    | () -> true
-    | exception Unix.Unix_error (Unix.EPERM, _, _) -> true
-    | exception _ -> false
+(* A pid reused between two reports keeps a stale row until silence retires it,
+   which is why liveness alone is not the test. *)
+let alive = Fs_util.pid_alive
 
 let expired now e =
   if e.finished then now -. e.seen > keep_done
