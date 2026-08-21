@@ -17,6 +17,10 @@ val buffer : t -> Local_io.buffer
 val of_string : string -> t
 val to_string : t -> string
 
+(** [len] bytes from [pos], for a caller reading one field of a body rather than
+    the whole of it. *)
+val sub : t -> pos:int -> len:int -> string
+
 (** Takes ownership of [buf]. Writing to it afterwards is writing to the chunk.
 *)
 val of_buffer : Local_io.buffer -> t

@@ -9,6 +9,7 @@ let create = Bigstringaf.create
 let length = Bigstringaf.length
 let of_string s = Bigstringaf.of_string s ~off:0 ~len:(String.length s)
 let to_string = Bigstringaf.to_string
+let sub t ~pos ~len = Bigstringaf.substring t ~off:pos ~len
 let hash_hex t seed = Xxhash.hash_bigstring_hex t seed
 
 (* Synchronous because [mmap] moves no data: the reads happen later, on the pages

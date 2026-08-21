@@ -1,0 +1,19 @@
+
+=== entries come out in the order a sort of every path gives
+every file was reported once: ok
+and in the order the whole tree sorts in: ok
+a folder is announced before the folders under it: ok
+
+=== a name is an arbitrary byte string
+a newline or a tab in a name survives the listing: ok
+and every one of them imported: ok
+
+=== what the walk holds does not grow with the tree
+the fixture really is many files: ok
+fewer live words when the first entry lands than the tree has files: ok
+
+=== only selects as the walk goes
+only what was selected is imported: ok
+and only the folders holding it get a marker: ok
+
+9 check(s), 0 failure(s)

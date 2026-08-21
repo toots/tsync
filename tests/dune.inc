@@ -789,6 +789,20 @@
   (alias runtest)
   (action (run ./import_batching.exe))))
 
+(subdir unit/import_listing
+ (alias
+  (name default)
+  (deps import_listing.exe))
+ (rule
+  (alias runtest)
+  (target import_listing.output)
+  (action
+   (with-stdout-to import_listing.output (ignore-stderr (run ./import_listing.exe)))))
+ (rule
+  (alias runtest)
+  (action
+   (diff import_listing.expected import_listing.output))))
+
 (subdir unit/import_progress
  (alias
   (name default)
