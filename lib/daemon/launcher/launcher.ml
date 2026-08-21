@@ -160,7 +160,8 @@ let report ~totals ~exact ~reload engines =
              ("frontend", `String "sync");
              ("serves", `List (List.map (fun e -> `String e.name) engines));
            ]
-         ())
+         ()
+      @ [("jobs", `List (Job_registry.live ()))])
     ~domains answers
 
 (* Answered in the same vocabulary the mount daemon's socket uses, so a client
@@ -187,6 +188,36 @@ let handler ~request_stop engines line =
               Lwt.return
                 ( Yojson.Safe.to_string (`Assoc (("ok", `Bool true) :: fields)),
                   `Continue )
+          (* A command running beside the daemons, describing itself. It
+             reports here rather than to a frontend because a domain need not
+             have one that listens -- one served only by the http-proxy has no
+             socket of its own -- while every frontend that does is a child of
+             this process.
+
+             Advisory, so it is acknowledged whatever the payload says: a report
+             is never worth failing a command over. *)
+          | Some (`String "report") ->
+              let num key =
+                match List.assoc_opt key obj with
+                  | Some (`Float f) -> f
+                  | Some (`Int n) -> float_of_int n
+                  | _ -> 0.
+              in
+              let str key =
+                match List.assoc_opt key obj with
+                  | Some (`String s) -> s
+                  | _ -> ""
+              in
+              Job_registry.record
+                ~pid:
+                  (match List.assoc_opt "pid" obj with
+                    | Some (`Int p) -> p
+                    | _ -> 0)
+                ~started:(num "startedAt") ~interval:(num "intervalSeconds")
+                ~finished:(str "state" <> "running")
+                (`Assoc (List.remove_assoc "action" obj));
+              Lwt.return
+                (Yojson.Safe.to_string (`Assoc [("ok", `Bool true)]), `Continue)
           | Some (`String "stop") ->
               (* Answered before winding down, so the caller hears that it was
                  asked rather than losing the connection. *)

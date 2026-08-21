@@ -287,12 +287,6 @@ let domain_target ?domain () =
 
 let domain_socket ?domain () = snd (domain_target ?domain ())
 
-(* Reporting must never decide whether a command runs, so a domain that cannot
-   be resolved here is silence in [tsync status] rather than a failure — the
-   command itself resolves one again and says so properly. *)
-let reporting_target ?domain () =
-  try domain_target ?domain () with _ -> ("", "")
-
 (* What the deferred targets still owe, summed: whether work is outstanding is
    the question, and which target holds it is answered by [tsync status]'s own
    per-backend listing. [None] where no target defers at all, so a domain
@@ -317,11 +311,17 @@ let deferred_totals members =
    which domain it belongs to, and what that domain's targets still owe. A
    command passes only what is its own.
 
+   It goes to the process converging the domains, which is the one place on the
+   machine that always answers: a domain need not have a frontend with a socket
+   of its own, and one served only by the http-proxy has none. Reporting must
+   never decide whether a command runs, so nothing listening is silence in
+   [tsync status] rather than a failure.
+
    [current] joins a phase to the thing within it, so six commands do not each
    pick a separator. *)
-let report_job ?domain ?target ?current ~kind (module C : Conf.S) ~counters () =
+let report_job ?target ?current ~kind (module C : Conf.S) ~counters () =
   Job.Report.start
-    ~socket_path:(snd (reporting_target ?domain ()))
+    ~socket_path:(Runtime.sync_socket_path runtime_paths)
     ~domain:C.domain_name ~kind ?target ?current
     ~deferred:(fun () -> deferred_totals C.members)
     ~counters ()
