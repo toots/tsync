@@ -39,14 +39,6 @@ jobs:
         with:
           ocaml-compiler: "5.4.1"
           dune-cache: true
-      - uses: actions/cache@v4
-        with:
-          # The switch lives in the workspace, so ~/.opam alone is not enough.
-          path: |
-            ~/.opam
-            _opam
-          # Bump when the package list below changes.
-          key: opam-android-v4
       - name: Register the cross repository
         run: |
           opam repository remove android --all >/dev/null 2>&1 || true
