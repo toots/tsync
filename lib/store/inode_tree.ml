@@ -18,10 +18,12 @@ module Make (C : Conf.S) = struct
   let namespace_prefix folder_id = C.domain_prefix ^ folder_id ^ "/"
 
   (* The domain's download budget, since a child is one object read like any
-     other. Module-level so the several walks of a domain share it rather than
-     each holding its own idea of the bound. *)
+     other, and shared so a resync, a mirror and a share server in one process
+     bound each other rather than each holding a budget of its own. *)
   let default_slots =
-    lazy (Lwt_bounded.create ~name:"tree reads" ~max:C.max_downloads ())
+    lazy
+      (Lwt_bounded.shared ~key:C.domain_prefix ~name:"tree reads"
+         ~max:C.max_downloads ())
 
   let classify data =
     match Folder.marker_of_string data with

@@ -48,6 +48,15 @@ exception Busy
     so a caller can turn a full queue into a refusal its client understands. *)
 val use_or : t -> busy:(unit -> 'a Lwt.t) -> (unit -> 'a Lwt.t) -> 'a Lwt.t
 
+(** A pool shared by everything under [key], created on the first ask.
+
+    A pool built inside a functor applied once per domain and per role is one
+    per application, which is a decoration rather than a bound: two of them
+    under one name admit twice what either says. Key by whatever names the
+    resource — a domain prefix, usually — and every application gets the one
+    pool. See {!totals} for what a process then reports. *)
+val shared : key:string -> name:string -> max:int -> unit -> t
+
 (** Jobs running right now. *)
 val in_flight : t -> int
 
