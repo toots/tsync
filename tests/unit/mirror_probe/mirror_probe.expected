@@ -5,3 +5,9 @@
   copied           100
   head_opt         0
   list_prefix      1
+
+=== a mirror over the whole store
+  chunks planted        12
+  all of them copied    true
+  head_opt              1
+  listed shard by shard true

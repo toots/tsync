@@ -40,7 +40,7 @@ let read_string body pos =
 let count t = t.count
 
 (* Sealed once and mapped once, so a caller walking it for each of several
-   destinations reads the same pages rather than reopening the file. *)
+   destinations reads the same pages every time. *)
 let body t =
   match t.body with
     | Some body -> Lwt.return body
@@ -49,14 +49,23 @@ let body t =
         t.body <- Some body;
         body
 
+type 'a cursor = {
+  body : Chunk.t;
+  pos : int ref;
+  read : Chunk.t -> int ref -> 'a;
+}
+
+let read t =
+  let+ body = body t in
+  { body; pos = ref 0; read = t.decode }
+
+let next c =
+  if !(c.pos) >= Chunk.length c.body then None else Some (c.read c.body c.pos)
+
 let iter t f =
-  let* body = body t in
-  let pos = ref 0 in
+  let* c = read t in
   let rec go () =
-    if !pos >= Chunk.length body then Lwt.return_unit
-    else
-      let* () = f (t.decode body pos) in
-      go ()
+    match next c with None -> Lwt.return_unit | Some r -> Lwt.bind (f r) go
   in
   go ()
 

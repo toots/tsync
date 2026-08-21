@@ -14,9 +14,9 @@ type 'a t
 val create :
   dir:string -> name:string -> decode:(Chunk.t -> int ref -> 'a) -> 'a t Lwt.t
 
-(** Append one record, each field written by one of [fields]. Raises once
-    {!iter} has been called: appending to a sealed spool is the one mistake the
-    mapping cannot survive. *)
+(** Append one record, each field written by one of [fields]. Raises once the
+    spool is sealed: {!Chunk.map_file} is sound for a file that stays as it was
+    mapped, and the seal is where that begins. *)
 val add : 'a t -> (Buffer.t -> unit) list -> unit Lwt.t
 
 (** Records appended so far, which is a total a caller can announce before it
@@ -27,6 +27,16 @@ val count : 'a t -> int
     spool, after which {!add} is an error and this may be called again — a
     caller with several destinations walks the same listing once for each. *)
 val iter : 'a t -> ('a -> unit Lwt.t) -> unit Lwt.t
+
+type 'a cursor
+
+(** A place in the listing, for a set of workers each taking the next record:
+    they pull, where {!iter} pushes. Seals as {!iter} does. *)
+val read : 'a t -> 'a cursor Lwt.t
+
+(** The next record, or [None] at the end. Reads straight out of the mapping, so
+    it holds between binds and can drive a worker loop. *)
+val next : 'a cursor -> 'a option
 
 val drop : 'a t -> unit Lwt.t
 

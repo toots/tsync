@@ -140,18 +140,17 @@ let () =
      in
      step "announced before the first object finished: %d of %d"
        announced_before_first_copy (List.length !started);
-     (* The listing itself is unavoidably live, at roughly fourteen words an
-        object; what must not be is a promise, a closure and a queue cell apiece,
-        which measured about a hundred and twenty-six more. The threshold sits
-        between the two. *)
+     (* The listing is on disk and read a record at a time, so what a run holds
+        per object is what the object in flight costs and nothing else: three
+        words, against a hundred and forty for a promise, a closure and a queue
+        cell apiece. The threshold is set just above what the shape achieves,
+        since a bound nothing can reach says nothing. *)
      let per_object = !live_at_first_copy / List.length !started in
-     step "live words held per object when the first one finished: %d"
-       per_object;
      check "what is held does not grow with the length of the listing"
        ~why:(fun () ->
          Printf.sprintf "%d words for %d objects, %d each" !live_at_first_copy
            (List.length !started) per_object)
-       (per_object < 50);
+       (per_object < 8);
      check "an object is announced when it is picked up, not when the list is"
        ~why:(fun () ->
          Printf.sprintf "%d of %d announced before any work finished"
