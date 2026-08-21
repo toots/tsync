@@ -22,6 +22,31 @@ module C =
 
 module Tree = Inode_tree.Make (C)
 
+(* One key that will not read, so the batch fails whole and the walk has to
+   decide what that costs its siblings. A wrapper rather than a chmod: the suite
+   must behave the same as root. *)
+let broken = ref ""
+
+module Flaky : Backend.S = struct
+  include Store
+
+  let refuse key = Lwt.fail (Backend.Backend_error ("cannot read " ^ key))
+  let get ~key () = if key = !broken then refuse key else Store.get ~key ()
+
+  let get_opt ~key () =
+    if key = !broken then refuse key else Store.get_opt ~key ()
+
+  let get_many = None
+end
+
+module Cf =
+  (val Fixture.conf ~domain:"testdom"
+         ~store:(module Flaky : Backend.S)
+         ~cache_root:root ~data_dir:root ~root ()
+      : Conf.S)
+
+module Tf = Inode_tree.Make (Cf)
+
 let ns id = C.domain_prefix ^ id ^ "/"
 let put id name body = Store.put ~key:(ns id ^ name) ~data:(Chunk.of_string body) ()
 
@@ -84,5 +109,34 @@ let () =
         write in flight either way. *)
      let* children = Tree.children ~folder_id:junk () in
      check "and `Fail skips it just the same" (List.length children = 1);
+
+     case "one object that will not read does not cost its siblings";
+     let flaky = Folder.new_id () in
+     let* () = put flaky "good" (manifest_body "good.txt") in
+     let* () = put flaky "other" (manifest_body "other.txt") in
+     let* () = put flaky "nope" (manifest_body "nope.txt") in
+     broken := ns flaky ^ "nope";
+     let seen = ref [] in
+     let* children =
+       Tf.children
+         ~on_unusable:(`Skip (fun bkey r -> seen := (bkey, r) :: !seen))
+         ~folder_id:flaky ()
+     in
+     check "the readable siblings still arrive" (List.length children = 2);
+     check "and only the unreadable one is reported"
+       (match !seen with
+         | [(bkey, `Unreadable _)] -> bkey = !broken
+         | _ -> false);
+     (* A walk deciding what to delete must not take a failed read for an
+        absent subtree. *)
+     let* refused =
+       Lwt.catch
+         (fun () ->
+           let+ _ = Tf.children ~folder_id:flaky () in
+           false)
+         (fun _ -> Lwt.return_true)
+     in
+     check "`Fail refuses the folder rather than shortening it" refused;
+     broken := "";
      Lwt.return_unit);
-  report ~expected:7 ()
+  report ~expected:10 ()

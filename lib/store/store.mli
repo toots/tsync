@@ -44,6 +44,17 @@ module Make (C : Conf.S) (L : Layout.S) : sig
 
   val list_namespace : folder_id:string -> Backend.file_entry list Lwt.t
   val get_object : bkey:string -> string Lwt.t
+
+  (** Bodies of several at once, in one request where the store has a way to
+      make one and a bounded fan-out where it has not. [None] for a key the
+      store no longer holds, a listing and the reads that follow it not being
+      one act. Sizes come from the listing that produced [entries], which is
+      what lets a request be packed to a byte budget. *)
+  val get_objects :
+    ?slots:Lwt_bounded.t ->
+    entries:Backend.file_entry list ->
+    unit ->
+    (string * string option) list Lwt.t
   val put_raw : bkey:string -> data:string -> unit Lwt.t
   val delete_raw : bkey:string -> unit Lwt.t
 end
