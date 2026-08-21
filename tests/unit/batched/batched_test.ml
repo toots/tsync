@@ -59,7 +59,8 @@ end
 module Bp = Backend.Batched (Plain)
 module Bn = Backend.Batched (Native)
 
-let entry ?(size = 1) key = Backend.{ key; size; last_modified = 0. }
+let entry ?(size = 1) key =
+  Backend.{ key; size; last_modified = 0.; etag = None }
 let rendered = List.map (fun (k, b) -> (k, Option.map Chunk.to_string b))
 
 let () =

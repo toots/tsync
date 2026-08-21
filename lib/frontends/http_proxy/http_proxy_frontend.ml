@@ -414,7 +414,8 @@ let exec route op ~body =
            budget before sending it. *)
         let entries =
           List.map
-            (fun key -> Backend.{ key; size = 0; last_modified = 0. })
+            (fun key ->
+              Backend.{ key; size = 0; last_modified = 0.; etag = None })
             keys
         in
         let* answered = Bb.get_many ~entries () in

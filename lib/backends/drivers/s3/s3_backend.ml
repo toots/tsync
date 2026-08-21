@@ -62,7 +62,12 @@ let unwrap op = function
 
 let entry_of c =
   Backend.
-    { key = c.S3.key; size = c.S3.size; last_modified = c.S3.last_modified }
+    {
+      key = c.S3.key;
+      size = c.S3.size;
+      last_modified = c.S3.last_modified;
+      etag = Some c.S3.etag;
+    }
 
 (* A chunk is handed to aws-s3 as it stands rather than copied into a string,
    so its bytes are read for as long as the request runs and must stay valid

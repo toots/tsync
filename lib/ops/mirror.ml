@@ -84,7 +84,7 @@ module Make (C : Conf.S) = struct
   let decode_entry body pos =
     let key = Listing.read_string body pos in
     let size = Int64.to_int (Listing.read_int64 body pos) in
-    Backend.{ key; size; last_modified = 0. }
+    Backend.{ key; size; last_modified = 0.; etag = None }
 
   let record_entry (e : Backend.file_entry) =
     [

@@ -48,13 +48,21 @@ module Wire = struct
   let decode_key s =
     Base64.decode ~alphabet:Base64.uri_safe_alphabet ~pad:false s
 
+  (* Passed through rather than dropped: a client behind a proxy caches bodies
+     against what the serving store calls their version, and this end is the
+     only one that has it. Omitted for a store that names no version, which is
+     not the same as an empty one. *)
   let file_entry_to_json (e : Backend.file_entry) =
     `Assoc
-      [
-        ("key", `String e.Backend.key);
-        ("size", `Int e.Backend.size);
-        ("lastModified", `Float e.Backend.last_modified);
-      ]
+      ([
+         ("key", `String e.Backend.key);
+         ("size", `Int e.Backend.size);
+         ("lastModified", `Float e.Backend.last_modified);
+       ]
+      @
+      match e.Backend.etag with
+        | Some etag -> [("etag", `String etag)]
+        | None -> [])
 
   let file_entry_of_json json =
     let open Yojson.Safe.Util in
@@ -62,6 +70,7 @@ module Wire = struct
       Backend.key = json |> member "key" |> to_string;
       size = json |> member "size" |> to_int;
       last_modified = json |> member "lastModified" |> to_number;
+      etag = (match json |> member "etag" with `String e -> Some e | _ -> None);
     }
 
   let entries_to_json entries =

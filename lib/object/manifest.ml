@@ -669,6 +669,7 @@ module Make (C : Conf.S) = struct
             key = C.domain_prefix ^ Key.join rel leaf;
             size = Int64.to_int st.s_size;
             last_modified = st.s_mtime;
+            etag = None;
           }
         :: acc)
       []
@@ -725,6 +726,7 @@ module Make (C : Conf.S) = struct
                           key = child_base ^ real_file_name name m;
                           size = Int64.to_int m.size;
                           last_modified = m.mtime;
+                          etag = None;
                         }
                       :: files,
                       dirs )
@@ -744,6 +746,7 @@ module Make (C : Conf.S) = struct
               key = C.domain_prefix ^ Key.join rel leaf;
               size = Int64.to_int m.size;
               last_modified = m.mtime;
+              etag = None;
             }
           :: acc)
         []
