@@ -34,5 +34,6 @@ val of_bodies : (Backend.file_entry * Chunk.t) list -> Chunk.t
 
 (** Whether writing [covered] of [total] children back is worth the round trip
     it costs. Decided here so no caller invents its own threshold, and [false]
-    for a folder with nothing worth holding. *)
+    for a folder with nothing worth holding — or with so much that holding it
+    costs more memory than the reads it saves. *)
 val worth_writing : covered:int -> total:int -> bool

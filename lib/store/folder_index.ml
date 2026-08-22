@@ -69,8 +69,15 @@ let of_chunk chunk =
   in
   go (String.length magic)
 
+(* Every body it covers is held on the heap twice over while it is built and
+   again while it is read, on top of the listing and the parsed manifests the
+   walk already holds. A folder past this is left to the reads it would have
+   cost: the cache is worth having only where it is smaller than the thing it
+   saves. *)
+let max_children = 10_000
+
 (* A folder whose children are mostly covered already is not worth rewriting for
    the few that are not: the write costs every body again, where the reads it
    saves are only the ones it does not have. *)
 let worth_writing ~covered ~total =
-  total > 1 && covered * 4 < total * 3
+  total > 1 && total <= max_children && covered * 4 < total * 3
