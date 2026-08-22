@@ -54,7 +54,7 @@ module Make (C : Conf.S) (F : Fetch) = struct
                    (Printf.sprintf "chunk %s: have %d bytes, manifest says %d"
                       (Chunk_group.member_key group i)
                       (Bigstring.length data) expected))
-            else put ~offset:(Chunk_group.offset group i) (data))
+            else put ~offset:(Chunk_group.offset group i) data)
           (Chunk_group.indices group))
 
   (* Bounds fetches that have started, not groups asked for: a fetch opens its

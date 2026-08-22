@@ -8,8 +8,7 @@ module Auth = struct
   (* Over the bytes where they lie: a chunk body is the largest thing signed
      here, and materialising one as a string to hash it would put the megabytes
      back on the heap that carrying it as a chunk keeps off. *)
-  let sha256_hex body =
-    Digestif.SHA256.(to_hex (digest_bigstring (body)))
+  let sha256_hex body = Digestif.SHA256.(to_hex (digest_bigstring body))
 
   (* Sign method + request-target + timestamp + a hash of the body, so a captured
      signature can't be replayed against a different request or body. *)
@@ -60,7 +59,7 @@ module Wire = struct
          ("lastModified", `Float e.Backend.last_modified);
        ]
       @
-      match e.Backend.etag with
+        match e.Backend.etag with
         | Some etag -> [("etag", `String etag)]
         | None -> [])
 
@@ -70,7 +69,8 @@ module Wire = struct
       Backend.key = json |> member "key" |> to_string;
       size = json |> member "size" |> to_int;
       last_modified = json |> member "lastModified" |> to_number;
-      etag = (match json |> member "etag" with `String e -> Some e | _ -> None);
+      etag =
+        (match json |> member "etag" with `String e -> Some e | _ -> None);
     }
 
   let entries_to_json entries =
@@ -112,7 +112,9 @@ module Wire = struct
 
   let bodies_of_string ~keys s =
     let len = String.length s in
-    let short () = failwith "get-multi: answer shorter than the keys asked for" in
+    let short () =
+      failwith "get-multi: answer shorter than the keys asked for"
+    in
     let rec go pos = function
       | [] ->
           if pos <> len then

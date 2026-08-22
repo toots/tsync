@@ -72,7 +72,9 @@ let cmd : unit Cmd.t =
                List.iter
                  (fun (e : Deleted.entry) ->
                    Printf.printf "%s  (deleted %s, %d version%s)\n"
-                     e.Deleted.path (human_ts e.Deleted.latest) e.Deleted.versions
+                     e.Deleted.path
+                     (human_ts e.Deleted.latest)
+                     e.Deleted.versions
                      (if e.Deleted.versions = 1 then "" else "s"))
                  deleted)
   in

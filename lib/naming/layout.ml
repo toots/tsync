@@ -79,7 +79,8 @@ module Inode = struct
                   (fun () ->
                     B.put_if_absent ~key
                       ~data:
-                        (Bigstring.of_string (Folder.marker_to_string candidate))
+                        (Bigstring.of_string
+                           (Folder.marker_to_string candidate))
                       ())
                   (fun exn ->
                     if not !warned_unarbitrated then begin

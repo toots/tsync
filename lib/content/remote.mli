@@ -98,8 +98,8 @@ module type S = sig
   (** {!fetch_manifest} saying which nothing it found. Only [`Absent] is an
       answer about the domain: [`Unresolved] is this client not knowing the
       key's folder yet, and [`Unreadable] a body caught mid-write. A caller that
-      remembers an answer may remember the first and must not remember the
-      other two, which change with nothing about the domain changing. *)
+      remembers an answer may remember the first and must not remember the other
+      two, which change with nothing about the domain changing. *)
   val fetch_manifest_state :
     key:string ->
     unit ->

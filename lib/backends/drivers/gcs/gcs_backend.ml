@@ -142,7 +142,8 @@ let put_if_absent t ~key ~data () =
   in
   if is_ok resp then Lwt.return data
   else if code resp = 412 then get t ~key ()
-  else raise (backend_error "put_if_absent" (code resp) (Bigstring.to_string body))
+  else
+    raise (backend_error "put_if_absent" (code resp) (Bigstring.to_string body))
 
 let head_opt t ~key () =
   let uri = Uri.of_string (obj_path t key) in

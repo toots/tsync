@@ -29,21 +29,19 @@ let () =
       | _ -> false);
 
   case "a mangled answer is refused, not misread";
-  raises "a truncated body"
-    (fun () ->
+  raises "a truncated body" (fun () ->
       Wire.bodies_of_string ~keys
         (String.sub framed 0 (String.length framed - 1)));
-  raises "fewer entries than keys"
-    (fun () -> Wire.bodies_of_string ~keys:(keys @ ["d"]) framed);
-  raises "more entries than keys"
-    (fun () -> Wire.bodies_of_string ~keys:["a"] framed);
-  raises "a length prefix cut in half"
-    (fun () -> Wire.bodies_of_string ~keys:["a"] "\x00\x00");
+  raises "fewer entries than keys" (fun () ->
+      Wire.bodies_of_string ~keys:(keys @ ["d"]) framed);
+  raises "more entries than keys" (fun () ->
+      Wire.bodies_of_string ~keys:["a"] framed);
+  raises "a length prefix cut in half" (fun () ->
+      Wire.bodies_of_string ~keys:["a"] "\x00\x00");
 
   case "a body larger than one socket read";
   let big = String.init 200_000 (fun i -> Char.chr (i * 31 land 0xff)) in
   let framed = Wire.bodies_to_string [("big", body big)] in
   check "comes back byte for byte"
-    (rendered (Wire.bodies_of_string ~keys:["big"] framed)
-    = [("big", Some big)]);
+    (rendered (Wire.bodies_of_string ~keys:["big"] framed) = [("big", Some big)]);
   report ~expected:7 ()

@@ -53,7 +53,9 @@ module Make (C : Conf.S) = struct
         match parse e.Backend.key with
           | Some (rel, ts) ->
               let ts = Int64.of_string ts in
-              let best = Option.value ~default:0L (Hashtbl.find_opt latest rel) in
+              let best =
+                Option.value ~default:0L (Hashtbl.find_opt latest rel)
+              in
               if Int64.compare ts best > 0 then Hashtbl.replace latest rel ts;
               Hashtbl.replace sample rel e.Backend.key;
               Hashtbl.replace count rel
@@ -67,8 +69,11 @@ module Make (C : Conf.S) = struct
         if alive then Lwt.return acc
         else
           let+ path = recorded_name (Hashtbl.find sample rel) rel in
-          { path; latest = ts;
-            versions = Option.value ~default:1 (Hashtbl.find_opt count rel) }
+          {
+            path;
+            latest = ts;
+            versions = Option.value ~default:1 (Hashtbl.find_opt count rel);
+          }
           :: acc)
       latest (Lwt.return [])
 end

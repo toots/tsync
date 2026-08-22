@@ -91,7 +91,8 @@ module type S = sig
       A claim is the only thing this is for — content is either
       content-addressed, in which case racing writers agree, or owned by one
       client. *)
-  val put_if_absent : key:string -> data:Bigstring.t -> unit -> Bigstring.t Lwt.t
+  val put_if_absent :
+    key:string -> data:Bigstring.t -> unit -> Bigstring.t Lwt.t
 
   val head_opt : key:string -> unit -> file_entry option Lwt.t
   val delete : key:string -> unit -> unit Lwt.t
@@ -137,9 +138,12 @@ module type S = sig
         the driver pages.
       - a per-key failure is raised rather than answered [None]. This is
         {!absent_code}'s lesson for reads: a caller told a key is absent writes
-        a mirror missing that file, and nothing walks it afterwards to notice. *)
+        a mirror missing that file, and nothing walks it afterwards to notice.
+  *)
   val get_many :
-    (entries:file_entry list -> unit -> (string * Bigstring.t option) list Lwt.t)
+    (entries:file_entry list ->
+    unit ->
+    (string * Bigstring.t option) list Lwt.t)
     option
 
   (** Ask the store to check every chunk it holds against its own name and file

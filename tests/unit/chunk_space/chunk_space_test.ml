@@ -26,7 +26,6 @@ module Uncollectable : Backend.S = struct
         : Backend.S)
 
   let get_many = None
-
   let capabilities ~prefix:_ () = Lwt.return Backend.no_caps
 end
 
@@ -98,7 +97,8 @@ let () =
      let* () =
        Store.put
          ~key:(from_prefix ^ Chunk_layout.relative_path going)
-         ~data:(Bigstring.of_string "going") ()
+         ~data:(Bigstring.of_string "going")
+         ()
      in
 
      case "idle: one space, and the other is never consulted";

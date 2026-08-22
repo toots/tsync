@@ -21,6 +21,7 @@ module Make (C : Conf.S) (L : Layout.S) : sig
       rememberable, one changing without the domain changing. *)
   val get_manifest_state :
     key:string -> [ `Body of string | `Absent | `Unresolved ] Lwt.t
+
   val head_manifest : key:string -> Backend.file_entry option Lwt.t
   val delete_manifest : key:string -> unit Lwt.t
 
@@ -63,6 +64,7 @@ module Make (C : Conf.S) (L : Layout.S) : sig
     entries:Backend.file_entry list ->
     unit ->
     (string * string option) list Lwt.t
+
   val put_raw : bkey:string -> data:string -> unit Lwt.t
   val delete_raw : bkey:string -> unit Lwt.t
 end

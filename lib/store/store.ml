@@ -110,7 +110,9 @@ module Make (C : Conf.S) (L : Layout.S) = struct
 
   let get_objects ?slots ~entries () =
     let+ answered = Bb.get_many ?slots ~entries () in
-    List.map (fun (key, body) -> (key, Option.map Bigstring.to_string body)) answered
+    List.map
+      (fun (key, body) -> (key, Option.map Bigstring.to_string body))
+      answered
 
   let delete_raw ~bkey = B.delete ~key:bkey ()
   let put_raw ~bkey ~data = B.put ~key:bkey ~data:(Bigstring.of_string data) ()

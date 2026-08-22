@@ -11,7 +11,6 @@ open Check
 let objects : (string, string) Hashtbl.t = Hashtbl.create 16
 let reads = ref 0
 let batches = ref 0
-
 let body key = Option.map Bigstring.of_string (Hashtbl.find_opt objects key)
 
 module Base = struct
@@ -52,7 +51,8 @@ module Native : Backend.S = struct
         incr batches;
         Lwt.return
           (List.map
-             (fun (e : Backend.file_entry) -> (e.Backend.key, body e.Backend.key))
+             (fun (e : Backend.file_entry) ->
+               (e.Backend.key, body e.Backend.key))
              entries))
 end
 
@@ -61,6 +61,7 @@ module Bn = Backend.Batched (Native)
 
 let entry ?(size = 1) key =
   Backend.{ key; size; last_modified = 0.; etag = None }
+
 let rendered = List.map (fun (k, b) -> (k, Option.map Bigstring.to_string b))
 
 let () =
@@ -77,8 +78,7 @@ let () =
      let* with_ = Bn.get_many ~entries:mixed () in
      check "the two paths agree" (rendered without = rendered with_);
      check "an absent key answers None"
-       (rendered with_
-       = [("a", Some "alpha"); ("b", None); ("c", Some "gamma")]);
+       (rendered with_ = [("a", Some "alpha"); ("b", None); ("c", Some "gamma")]);
      check "with no native batch, a key is a read" (cost_without = 3);
      check "with one, the whole run is a request" (!batches = 1 && !reads = 0);
 
@@ -88,7 +88,10 @@ let () =
      let* _ = Bn.get_many ~entries:many () in
      check "300 keys is two requests, not one" (!batches = 2);
      batches := 0;
-     let big = List.init 3 (fun i -> entry ~size:(4 * 1024 * 1024) ("b" ^ string_of_int i)) in
+     let big =
+       List.init 3 (fun i ->
+           entry ~size:(4 * 1024 * 1024) ("b" ^ string_of_int i))
+     in
      let* _ = Bn.get_many ~entries:big () in
      check "and so is 12 MB of bodies" (!batches = 2);
      Lwt.return_unit);

@@ -42,7 +42,8 @@ module Make (C : Conf.S) = struct
     ek
 
   let write_journal_entry ?entry_key ops =
-    write_journal_entry_body ?entry_key (Bigstring.of_string (Journal.encode ops))
+    write_journal_entry_body ?entry_key
+      (Bigstring.of_string (Journal.encode ops))
 
   let cursor_state () =
     match Hashtbl.find_opt cursor_states C.cursor_key with
@@ -145,7 +146,8 @@ module Make (C : Conf.S) = struct
 
   let fetch_cursor () =
     let+ body = B.get_opt ~key:C.cursor_key () in
-    Option.bind body (fun b -> Ek.of_string (String.trim (Bigstring.to_string b)))
+    Option.bind body (fun b ->
+        Ek.of_string (String.trim (Bigstring.to_string b)))
 
   let list_journal_keys ?start_after () =
     let+ all = B.list_prefix ~prefix:C.journal_prefix () in

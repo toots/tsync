@@ -226,10 +226,8 @@ let seal b ~h1 ~h2 =
   put_bytes b.buf 56 h2;
   b.buf
 
-let of_chunk c = of_source (Mapped (c))
-
-let bytes t =
-  match t.src with Mapped m -> m | Str s -> Bigstring.of_string s
+let of_chunk c = of_source (Mapped c)
+let bytes t = match t.src with Mapped m -> m | Str s -> Bigstring.of_string s
 
 let encode ~name ~size ~chunk_size ~mtime ~h1 ~h2 ~symlink ~keys =
   let b =

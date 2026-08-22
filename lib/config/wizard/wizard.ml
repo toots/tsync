@@ -7,7 +7,6 @@ module type ENV = sig
 end
 
 module Make (E : ENV) = struct
-
   (* Read a JSON value's field, tolerating non-objects and missing keys. *)
   let jfield json key =
     match json with `Assoc l -> List.assoc_opt key l | _ -> None
@@ -21,7 +20,8 @@ module Make (E : ENV) = struct
   let jint json key =
     match jfield json key with Some (`Int n) -> Some n | _ -> None
 
-  let jlist json key = match jfield json key with Some (`List l) -> l | _ -> []
+  let jlist json key =
+    match jfield json key with Some (`List l) -> l | _ -> []
 
   (* Update key in place (preserving position) or append it. *)
   let assoc_set l key v =
@@ -33,7 +33,8 @@ module Make (E : ENV) = struct
   type tf_store = {
     bucket : string;
     share_url : string;
-    fields : (string * string) list; (* backend-specific fields terraform fills *)
+    fields : (string * string) list;
+        (* backend-specific fields terraform fills *)
   }
 
   (* OpenTofu is a drop-in fork: same [-chdir], same [output -json]. Either one
@@ -136,7 +137,8 @@ module Make (E : ENV) = struct
   let read_password msg =
     Printf.printf "%s: %!" msg;
     let old_attr = Unix.tcgetattr Unix.stdin in
-    Unix.tcsetattr Unix.stdin Unix.TCSAFLUSH { old_attr with Unix.c_echo = false };
+    Unix.tcsetattr Unix.stdin Unix.TCSAFLUSH
+      { old_attr with Unix.c_echo = false };
     match read_line () with
       | s ->
           Unix.tcsetattr Unix.stdin Unix.TCSAFLUSH old_attr;
@@ -160,8 +162,8 @@ module Make (E : ENV) = struct
       (match on_error with
         | Some f -> f v
         | None ->
-            Printf.printf "%s  Unknown %s %S — choose one of: %s.\n%!" indent noun
-              v
+            Printf.printf "%s  Unknown %s %S — choose one of: %s.\n%!" indent
+              noun v
               (String.concat ", " choices));
       prompt_choice ~indent ?on_error ~noun label choices default
     end
@@ -199,7 +201,8 @@ module Make (E : ENV) = struct
   let role_help = function
     | `Main -> "writable source of truth; reads prefer it"
     | `Replica -> "complete copy: every write, read when no main is reachable"
-    | `Backfill -> "converging copy, filled lazily in the background, never read"
+    | `Backfill ->
+        "converging copy, filled lazily in the background, never read"
     | `Read_only -> "authoritative store read as a fallback, never written"
 
   let role_of l =
@@ -260,7 +263,8 @@ module Make (E : ENV) = struct
                 match int_of_string_opt (String.trim choice) with
                   | Some n when n >= 1 && n <= List.length entries ->
                       let k, s = List.nth entries (n - 1) in
-                      Printf.printf "  Pulled store %S (bucket=%s).\n" k s.bucket;
+                      Printf.printf "  Pulled store %S (bucket=%s).\n" k
+                        s.bucket;
                       Some s
                   | _ -> fail "invalid choice"))
 
@@ -311,7 +315,9 @@ module Make (E : ENV) = struct
                       Printf.printf "%s(must be a number)\n%!" indent;
                       again ()))
       | `String when s.secret -> (
-          let suffix = if current <> None then " (blank keeps current)" else "" in
+          let suffix =
+            if current <> None then " (blank keeps current)" else ""
+          in
           match read_password (label ^ suffix) with
             | "" -> blank ()
             | v -> Some (s.name, `String v))
@@ -343,13 +349,17 @@ module Make (E : ENV) = struct
       if List.mem "local" types then Some "local" else List.nth_opt types 0
     in
     let backend_type =
-      prompt_choice ~indent:"  " ~noun:"backend type" "Backend type" types default
+      prompt_choice ~indent:"  " ~noun:"backend type" "Backend type" types
+        default
     in
     let name = prompt "  Backend name" (Some backend_type) in
     (* Offer Terraform up front, then prompt only the fields it does not
        provide. *)
     let which =
-      match backend_type with "s3" -> Some `S3 | "gcs" -> Some `Gcs | _ -> None
+      match backend_type with
+        | "s3" -> Some `S3
+        | "gcs" -> Some `Gcs
+        | _ -> None
     in
     let synced =
       match which with
@@ -359,7 +369,9 @@ module Make (E : ENV) = struct
             terraform_store w
         | _ -> None
     in
-    let synced_skip = match synced with Some s -> store_fields s | None -> [] in
+    let synced_skip =
+      match synced with Some s -> store_fields s | None -> []
+    in
     let spec = Option.value ~default:[] (Backend.spec_for backend_type) in
     let fields =
       List.filter_map
@@ -407,7 +419,9 @@ module Make (E : ENV) = struct
       Printf.printf "%ss:\n" (String.capitalize_ascii noun);
       if !items = [] then Printf.printf "  (none)\n"
       else
-        List.iteri (fun i x -> Printf.printf "  %d. %s\n" (i + 1) (row x)) !items;
+        List.iteri
+          (fun i x -> Printf.printf "  %d. %s\n" (i + 1) (row x))
+          !items;
       if !status <> "" then Printf.printf "\n%s\n" !status;
       Printf.printf
         "\nEnter a %s number to edit, [a]dd, [r]emove N, or [d]one:\n> %!" noun;
@@ -435,7 +449,9 @@ module Make (E : ENV) = struct
                   match edit (List.nth !items (i - 1)) with
                     | Ok x ->
                         items :=
-                          List.mapi (fun j y -> if j = i - 1 then x else y) !items
+                          List.mapi
+                            (fun j y -> if j = i - 1 then x else y)
+                            !items
                     | Error msg -> status := msg)
               | _ -> status := Printf.sprintf "(unknown action %S)" n)
         | _ -> status := "(unknown action)"
@@ -545,12 +561,14 @@ module Make (E : ENV) = struct
                  | `Assoc l -> (
                      match
                        List.filter_map
-                         (fun (k, v) -> if k = "type" then None else opt_str k v)
+                         (fun (k, v) ->
+                           if k = "type" then None else opt_str k v)
                          l
                      with
                        | [] -> name
                        | opts ->
-                           Printf.sprintf "%s(%s)" name (String.concat "," opts))
+                           Printf.sprintf "%s(%s)" name (String.concat "," opts)
+                     )
                  | _ -> name)
              fs)
 
@@ -567,7 +585,9 @@ module Make (E : ENV) = struct
      one is compiled in, else whatever is — on Android that is the command-driven
      frontend, which is the only one there. *)
   let preferred_frontend types =
-    match List.find_opt (fun n -> List.mem n types) ["fuse"; "file_provider"] with
+    match
+      List.find_opt (fun n -> List.mem n types) ["fuse"; "file_provider"]
+    with
       | Some n -> Some n
       | None -> List.nth_opt types 0
 
@@ -710,7 +730,8 @@ module Make (E : ENV) = struct
               "Read-only mount (block all local writes)?";
           chunk_size :=
             prompt_size_opt ~unset:"default"
-              "Chunk size (smaller helps random access; larger favors throughput)"
+              "Chunk size (smaller helps random access; larger favors \
+               throughput)"
               !chunk_size;
           cache_chunk_size :=
             prompt_size_opt ~unset:"default"
@@ -757,7 +778,8 @@ module Make (E : ENV) = struct
                     prompt_bool ~default:!versioning "Enable versioning?"
               | "3" -> symlinks := prompt_symlinks !symlinks
               | "4" ->
-                  read_only := prompt_bool ~default:!read_only "Read-only mount?"
+                  read_only :=
+                    prompt_bool ~default:!read_only "Read-only mount?"
               | "5" ->
                   chunk_size :=
                     prompt_size_opt ~unset:"default" "Chunk size" !chunk_size
@@ -767,8 +789,8 @@ module Make (E : ENV) = struct
                       !cache_chunk_size
               | "7" ->
                   max_cache :=
-                    prompt_size_opt "Max local cache size (\"none\" = unlimited)"
-                      !max_cache
+                    prompt_size_opt
+                      "Max local cache size (\"none\" = unlimited)" !max_cache
               | "8" -> backends := edit_backends !backends
               | "9" -> frontends := edit_frontends !frontends
               | "d" | "" -> running := false
@@ -783,7 +805,9 @@ module Make (E : ENV) = struct
        ]
       (* Written as plain byte counts: the config is data. A hand-written "8M" is
          still accepted on the way in — see {!Conf_parsing.parse_size}. *)
-      @ (match !chunk_size with Some n -> [("chunkSize", `Int n)] | None -> [])
+      @ (match !chunk_size with
+        | Some n -> [("chunkSize", `Int n)]
+        | None -> [])
       @ (match !cache_chunk_size with
         | Some n -> [("cacheChunkSize", `Int n)]
         | None -> [])
@@ -909,7 +933,9 @@ module Make (E : ENV) = struct
                 | b :: _ -> Option.value (jstr b "type") ~default:"?"
                 | [] -> "none"
             in
-            let dflt = if default_domain = Some name then " [default]" else "" in
+            let dflt =
+              if default_domain = Some name then " [default]" else ""
+            in
             Printf.printf "%s %d. %s (%s)%s\n"
               (if i = !selected then ">" else " ")
               (i + 1) name btype dflt)
@@ -970,7 +996,8 @@ module Make (E : ENV) = struct
                     running := false;
                     saved := true
                   end
-              | "q" -> if prompt_bool "Quit without saving?" then running := false
+              | "q" ->
+                  if prompt_bool "Quit without saving?" then running := false
               | "" -> ()
               | other -> status := Printf.sprintf "(unknown action %S)" other)
     done;

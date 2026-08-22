@@ -6,10 +6,9 @@ let local_store ?(verify_writes = true) path =
 
 let conf ?(domain = "testdom") ?(client_name = "test") ?(versioning = false)
     ?store:store_override ?members:members_override ?(verify_writes = true)
-    ?(max_uploads = 1) ?max_chunk_buffers ?(max_downloads = 1)
-    ?(chunk_size = 8) ?(cache_chunk_size = 8) ?max_cache
-    ?(symlink_policy = `Keep) ?(read_only = false) ?(socket_path = "")
-    ?cache_root ?data_dir ~root () =
+    ?(max_uploads = 1) ?max_chunk_buffers ?(max_downloads = 1) ?(chunk_size = 8)
+    ?(cache_chunk_size = 8) ?max_cache ?(symlink_policy = `Keep)
+    ?(read_only = false) ?(socket_path = "") ?cache_root ?data_dir ~root () =
   let paths =
     {
       Runtime.cache_root =

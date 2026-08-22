@@ -9,6 +9,7 @@ let magic = "tsyncidx1"
 type t = (string, string * string) Hashtbl.t
 
 let empty : t = Hashtbl.create 1
+
 let find t ~key ~etag =
   match Hashtbl.find_opt t key with
     | Some (recorded, body) when recorded = etag -> Some body

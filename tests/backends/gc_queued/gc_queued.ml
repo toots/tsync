@@ -93,9 +93,15 @@ let () =
     ((* Chunks 1 and 3 are live; 2 is unreferenced and is what the collection
         reclaims. The replica holds all three, plus a marker accusing 2 — which
         must go with it, nothing else ever being able to clear one. *)
-     let* () = Main.put ~key:(key 1) ~data:(Bigstring.of_string "live-one") () in
-     let* () = Main.put ~key:(key 2) ~data:(Bigstring.of_string "orphaned") () in
-     let* () = Main.put ~key:(key 3) ~data:(Bigstring.of_string "live-two") () in
+     let* () =
+       Main.put ~key:(key 1) ~data:(Bigstring.of_string "live-one") ()
+     in
+     let* () =
+       Main.put ~key:(key 2) ~data:(Bigstring.of_string "orphaned") ()
+     in
+     let* () =
+       Main.put ~key:(key 3) ~data:(Bigstring.of_string "live-two") ()
+     in
      let manifest =
        let entry index k = Manifest.entry_of_key ~index ~size:8 k in
        Manifest.make ~name:"f" ~h1:(String.make 16 '0') ~h2:(String.make 16 '0')
@@ -108,8 +114,12 @@ let () =
          ~data:(Bigstring.of_string (Manifest.to_string ~name:"f" manifest))
          ()
      in
-     let* () = Disk.put ~key:(key 1) ~data:(Bigstring.of_string "live-one") () in
-     let* () = Disk.put ~key:(key 2) ~data:(Bigstring.of_string "orphaned") () in
+     let* () =
+       Disk.put ~key:(key 1) ~data:(Bigstring.of_string "live-one") ()
+     in
+     let* () =
+       Disk.put ~key:(key 2) ~data:(Bigstring.of_string "orphaned") ()
+     in
      let marker = Option.get (Chunk_layout.marker_key (key 2)) in
      let* () = Disk.put ~key:marker ~data:(Bigstring.of_string "{}") () in
 

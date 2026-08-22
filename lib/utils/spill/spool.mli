@@ -2,8 +2,8 @@
 
     A job too large to hold in memory spills to one of these and reads it back
     mapped. The order is not a detail that reads as a bug when got wrong:
-    {!Bigstring.map_file} is sound only for a file nothing rewrites in place, so the
-    channel is closed before the mapping is made, and a file still open for
+    {!Bigstring.map_file} is sound only for a file nothing rewrites in place, so
+    the channel is closed before the mapping is made, and a file still open for
     append is exactly what that rules out. *)
 
 type t

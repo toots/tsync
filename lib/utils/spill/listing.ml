@@ -60,7 +60,8 @@ let read t =
   { body; pos = ref 0; read = t.decode }
 
 let next c =
-  if !(c.pos) >= Bigstring.length c.body then None else Some (c.read c.body c.pos)
+  if !(c.pos) >= Bigstring.length c.body then None
+  else Some (c.read c.body c.pos)
 
 let iter t f =
   let* c = read t in
