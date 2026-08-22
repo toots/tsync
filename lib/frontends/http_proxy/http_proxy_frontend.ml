@@ -309,6 +309,25 @@ let op_name = function
   | Bad -> "badRequest"
   | Unknown -> "notFound"
 
+(* Every key a request names, for the check that they all belong to the one
+   route its signature was verified against. A bulk op is routed and authorised
+   by its first key ({!route_key}) and then run whole, so without this a client
+   holding one domain's secret reaches another's objects through a list whose
+   head is its own — the domains of a listener sharing a bucket and differing
+   only in prefix. *)
+let op_keys = function
+  | Delete_multi keys | Get_multi keys -> keys
+  | Copy (src, dst) -> [src; dst]
+  | Get k | Head k | Put k | Put_if_absent k | Delete k -> [k]
+  | List_all (p, _) | Share_url p | Chunk_size p | Max_concurrency p
+  | Verified p ->
+      [p]
+  | Bad | Unknown -> []
+
+let within route key =
+  String.starts_with ~prefix:route.domain_root key
+  || String.starts_with ~prefix:route.shares_prefix key
+
 (* A request targets the route whose [domain_root] prefixes its key. *)
 let route_key = function
   | Get k | Head k | Put k | Put_if_absent k | Delete k -> Some k
@@ -773,6 +792,16 @@ let callback ~port ~tls routes _conn req body =
                           if not (authed route req body) then begin
                             bump "unauthorized";
                             respond ~status:`Unauthorized "unauthorized"
+                          end
+                          else if
+                            not (List.for_all (within route) (op_keys op))
+                          then begin
+                            (* Refused rather than narrowed to the keys that do
+                               belong: a caller reaching outside the domain it
+                               signed for is not a caller to answer partly. *)
+                            bump "unauthorized";
+                            respond ~status:`Unauthorized
+                              "keys outside the domain this request is for"
                           end
                           else begin
                             bump (op_name op);
