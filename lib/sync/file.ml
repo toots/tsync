@@ -34,8 +34,8 @@ module Make_with_layout (C : Conf.S) (Sq : Sync_queue.S) (L : Layout.S) :
     Folder_ids.reparent ~cache_root:C.cache_root ~domain_name:C.domain_name
       (Key.chop_slash (rel_key key))
 
-  let read_manifest key : Manifest.t option Lwt.t = Mf.read key
-  let resolved_manifest = D.resolved_manifest
+  let published_here key : Manifest.t option Lwt.t = Mf.published key
+  let published = D.published
   let write_manifest key (state : Manifest.t) = Mf.write key state
   let delete_manifest key = Mf.delete key
   let upload ?cancel key = D.sync key ?cancel ()
@@ -84,7 +84,7 @@ module Make_with_layout (C : Conf.S) (Sq : Sync_queue.S) (L : Layout.S) :
       | Some { Unix.LargeFile.st_kind = Unix.S_DIR; _ } ->
           Lwt.return_some (dir_stat ())
       | Some _ | None -> (
-          let* m = Mf.resolve key in
+          let* m = Mf.current key in
           match m with
             | Some (`Staged (st, _)) ->
                 Lwt.return_some
@@ -106,7 +106,7 @@ module Make_with_layout (C : Conf.S) (Sq : Sync_queue.S) (L : Layout.S) :
       | None -> (
           (* No local sidecar (never cached, or after a full resync): resolve
              from the backend so stat reports the logical size, not ENOENT. *)
-          let+ m = resolved_manifest key in
+          let+ m = published key in
           match m with
             | Some m -> (
                 match Manifest.symlink m with
@@ -116,7 +116,7 @@ module Make_with_layout (C : Conf.S) (Sq : Sync_queue.S) (L : Layout.S) :
             | None -> None)
 
   let readlink key =
-    let+ m = resolved_manifest key in
+    let+ m = published key in
     match m with Some m -> Manifest.symlink m | None -> None
 
   (* The local mirror is the source of truth for names and structure; the
@@ -128,7 +128,7 @@ module Make_with_layout (C : Conf.S) (Sq : Sync_queue.S) (L : Layout.S) :
   let list_tree ~prefix = Mf.list_tree ~prefix ()
   let enforce_chunk_cap = D.enforce_chunk_cap
   let chunk_stats = D.chunk_stats
-  let resolve = Mf.resolve
+  let resolve = Mf.current
   let chunk_residency = D.chunk_residency
   let downloads_in_flight = D.downloads_in_flight
 
@@ -166,7 +166,7 @@ module Make_with_layout (C : Conf.S) (Sq : Sync_queue.S) (L : Layout.S) :
         (* How much there is to send. What has gone already is not tracked per
            file -- the chunk upload counts bytes process-wide -- so a row can say
            how big a file is but not how far along it is. *)
-        let+ resolved = Mf.resolve key in
+        let+ resolved = Mf.current key in
         let name, rel = describe key in
         let size =
           match resolved with
@@ -344,7 +344,7 @@ module Make_with_layout (C : Conf.S) (Sq : Sync_queue.S) (L : Layout.S) :
      whether the backend's needs it. *)
   let resync_manifest_name key =
     let name = Key.leaf ~domain_prefix:C.domain_prefix key in
-    let* m = read_manifest key in
+    let* m = published_here key in
     match m with
       | Some man -> St.put_manifest ~key ~data:(Manifest.body ~name man)
       | None -> Lwt.return_unit
@@ -365,7 +365,7 @@ module Make_with_layout (C : Conf.S) (Sq : Sync_queue.S) (L : Layout.S) :
     let* size =
       if is_dir then Lwt.return_none
       else
-        let+ resolved = Mf.resolve src in
+        let+ resolved = Mf.current src in
         match resolved with
           | Some (`Staged (st, _)) -> Some st.Staged_manifest.s_size
           | Some (`Published m) -> Some (Manifest.size m)
@@ -420,7 +420,7 @@ module Make_with_layout (C : Conf.S) (Sq : Sync_queue.S) (L : Layout.S) :
           in
           if is_dir || Option.is_some src_head then Lwt.fail exn
           else
-            let* m = Mf.resolve dst in
+            let* m = Mf.current dst in
             match m with
               | Some (`Staged _) ->
                   (* src never reached the backend: a rename before first

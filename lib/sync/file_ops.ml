@@ -30,12 +30,14 @@ module type S = sig
 
   val manifest_path : t -> string
   val rel_key : t -> string
-  val read_manifest : t -> Manifest.t option Lwt.t
 
-  (** {!read_manifest}, falling back to the backend manifest when there is no
-      local sidecar, so a backend-only file resolves to its logical size and
-      mtime rather than the manifest object's byte size. *)
-  val resolved_manifest : t -> Manifest.t option Lwt.t
+  (** What this machine has published for [t]. *)
+  val published_here : t -> Manifest.t option Lwt.t
+
+  (** {!published_here}, falling back to the store when there is no local
+      sidecar, so a file this client has never cached still resolves to its
+      logical size and mtime rather than the manifest object's byte size. *)
+  val published : t -> Manifest.t option Lwt.t
 
   val write_manifest : t -> Manifest.t -> unit Lwt.t
   val upload : ?cancel:bool ref -> t -> unit Lwt.t

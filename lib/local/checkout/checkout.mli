@@ -21,12 +21,16 @@ module Make (C : Conf.S) : sig
       directory test, since directories exist only in this tree. *)
   val path : string -> string
 
-  (** [key]'s manifest, parsed and cached. [None] when absent or unparseable. *)
-  val read : string -> Manifest.t option Lwt.t
+  (** What the store last published for [key], as this client last saw it:
+      parsed from the sidecar and memoised. [None] when absent or unparseable.
+
+      Says nothing about staged edits — {!current} is the question that weighs
+      those. *)
+  val published : string -> Manifest.t option Lwt.t
 
   (** Manifests held from earlier reads. A cached one keeps the mapping it was
       read through, so this counts live mappings rather than bytes, and it is
-      bounded. Exposed because that bound is invisible from {!read}, which
+      bounded. Exposed because that bound is invisible from {!published}, which
       answers the same whether it was served from the cache or the file. *)
   val memo_size : unit -> int
 
@@ -56,10 +60,15 @@ module Make (C : Conf.S) : sig
       published or only staged (unsorted). *)
   val walk : unit -> string list Lwt.t
 
-  (** [key]'s content, staged edits winning over what was last published, with
-      the published manifest alongside for inherited chunks. The single
-      resolution point: no caller decides this itself. *)
-  val resolve :
+  (** What the file is right now on this machine, staged edits winning over what
+      was last published, with the published manifest alongside for the chunks a
+      staged record inherits. This module owns that precedence; no caller
+      decides it.
+
+      Local only. A caller that must also reach the store for a key this client
+      has never cached wants {!Data.published}, layered over this — which is
+      what {!File_ops.stat} does. *)
+  val current :
     string ->
     [ `Staged of Staged_manifest.staged * Manifest.t option
     | `Published of Manifest.t ]

@@ -44,7 +44,7 @@ let chunk_count () =
   count (Cache_layout.chunks_dir ~cache_root:C.cache_root C.domain_name)
 
 let read_all () =
-  let* resolved = Mf.resolve key in
+  let* resolved = Mf.current key in
   let size =
     match resolved with
       | Some (`Staged (st, _)) -> Int64.to_int st.Staged_manifest.s_size
@@ -58,7 +58,7 @@ let read_all () =
     String.init n (Bigarray.Array1.get buf))
 
 let show label =
-  let* resolved = Mf.resolve key in
+  let* resolved = Mf.current key in
   let state =
     match resolved with
       | Some (`Staged (({ Staged_manifest.s_whole = Some _; _ } as st), _)) ->
@@ -145,7 +145,7 @@ let gwrite_at offset s =
   ()
 
 let gshow label =
-  let* resolved = Gm.resolve gkey in
+  let* resolved = Gm.current gkey in
   let state =
     match resolved with
       | Some (`Staged (st, _)) ->
@@ -242,7 +242,7 @@ let () =
      let* () = write_at 8 "01234567" in
      let* staged_before = Mfs.read key in
      let* () = D.sync key () in
-     let* published = Mf.read key in
+     let* published = Mf.published key in
      let* () =
        match (staged_before, published) with
          | Some (Staged_manifest.Owed st), Some m -> Mfs.commit key st m
@@ -279,7 +279,7 @@ let () =
      let* () = write_at 0 "ZZZZZZZZ" in
      let* staged_before = Mfs.read key in
      let* () = D.sync key () in
-     let* published = Mf.read key in
+     let* published = Mf.published key in
      let* () =
        match (staged_before, published) with
          | Some (Staged_manifest.Owed st), Some m -> Mfs.commit key st m

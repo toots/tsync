@@ -361,8 +361,8 @@ module Make (C : Conf.S) (R : Remote.S) = struct
 
   (* ponytail: one GET per uncached file; add a metadata cache if a cold
      full-directory enumeration gets slow. *)
-  let resolved_manifest key =
-    let* m = Mf.read key in
+  let published key =
+    let* m = Mf.published key in
     match m with
       | Some _ -> Lwt.return m
       | None when Hashtbl.mem (live_absences ()) key -> Lwt.return_none
@@ -392,7 +392,7 @@ module Make (C : Conf.S) (R : Remote.S) = struct
      body goes, the same shape as {!Chunk_cache.read_into} against the cap. *)
   let pread_key key buf ~offset =
     let attempt () =
-      let* resolved = Mf.resolve key in
+      let* resolved = Mf.current key in
       match resolved with
         | Some (`Staged (staged, base)) ->
             pread_staged ~id:key ~staged ~base buf ~offset
@@ -458,7 +458,7 @@ module Make (C : Conf.S) (R : Remote.S) = struct
       | Some st -> Lwt.return st
       | None -> (
           let* chunk_size = R.chunk_size () in
-          let+ published = Mf.read key in
+          let+ published = Mf.published key in
           let name = Key.leaf ~domain_prefix:C.domain_prefix key in
           match published with
             | Some m ->
@@ -644,7 +644,7 @@ module Make (C : Conf.S) (R : Remote.S) = struct
   let write_locked key buf ~offset =
     let len = Bigarray.Array1.dim buf in
     let* st = staged_for key in
-    let* base = Mf.read key in
+    let* base = Mf.published key in
     let cs = st.Staged_manifest.s_chunk_size in
     let start = Int64.to_int offset in
     let new_size =
@@ -703,7 +703,7 @@ module Make (C : Conf.S) (R : Remote.S) = struct
 
   let truncate_locked key size =
     let* st = staged_for key in
-    let* base = Mf.read key in
+    let* base = Mf.published key in
     let cs = st.Staged_manifest.s_chunk_size in
     let n = Chunks.count ~size ~chunk_size:cs in
     let old = st.Staged_manifest.s_slots in
@@ -906,7 +906,7 @@ module Make (C : Conf.S) (R : Remote.S) = struct
       | None -> upload_chunked ~key ~staged ?cancel ()
 
   and upload_chunked ~key ~(staged : Staged_manifest.staged) ?cancel () =
-    let* base = Mf.read key in
+    let* base = Mf.published key in
     let* state =
       R.upload_chunks ~key ~size:staged.Staged_manifest.s_size
         ~chunk_size:staged.Staged_manifest.s_chunk_size
@@ -1076,7 +1076,7 @@ module Make (C : Conf.S) (R : Remote.S) = struct
 
   (* Staged bodies count as present: they are the newest bytes there are. *)
   let chunk_residency key =
-    let* resolved = Mf.resolve key in
+    let* resolved = Mf.current key in
     match resolved with
       | None -> Lwt.return (0, 0)
       | Some (`Published m) ->
@@ -1183,7 +1183,7 @@ module Make (C : Conf.S) (R : Remote.S) = struct
      can size a progress bar; [None] is "nothing to materialize", distinct from
      the empty list a chunkless file gives. *)
   let fetch_plan key =
-    let* resolved = Mf.resolve key in
+    let* resolved = Mf.current key in
     match resolved with
       | Some (`Published m) -> Lwt.return_some (groups m)
       | Some (`Staged (st, base)) -> (
@@ -1208,7 +1208,7 @@ module Make (C : Conf.S) (R : Remote.S) = struct
             | None -> Lwt.return_none)
 
   let content_size key =
-    let+ resolved = Mf.resolve key in
+    let+ resolved = Mf.current key in
     match resolved with
       | Some (`Published m) -> Int64.to_int (Manifest.size m)
       | Some (`Staged (st, _)) -> Int64.to_int st.Staged_manifest.s_size
@@ -1259,7 +1259,7 @@ module Make (C : Conf.S) (R : Remote.S) = struct
     in
     let* () = go 0L in
     (* An export or handoff copy should carry the source file's mtime. *)
-    let* resolved = Mf.resolve key in
+    let* resolved = Mf.current key in
     match resolved with
       | Some (`Staged (st, _)) ->
           Lwt_unix_retry.utimes dst_path st.Staged_manifest.s_mtime
@@ -1287,7 +1287,7 @@ module Make (C : Conf.S) (R : Remote.S) = struct
   (* Unreference-blind: a chunk shared with another file goes too and is
      re-fetched on demand, which is what avoids refcounting. *)
   let forget_chunks key =
-    let* published = Mf.read key in
+    let* published = Mf.published key in
     match published with
       | Some m -> Lwt_list.iter_s (fun group -> Cc.forget ~group) (groups m)
       | None -> Lwt.return_unit

@@ -172,7 +172,7 @@ module Make (C : Conf.S) = struct
   (* A key already in the domain (local sidecar or remote manifest) is never
      overwritten by an import. *)
   let exists key =
-    let* sidecar = Mf.read key in
+    let* sidecar = Mf.published key in
     match sidecar with
       | Some _ -> Lwt.return_true
       | None ->

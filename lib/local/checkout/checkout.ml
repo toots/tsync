@@ -148,7 +148,7 @@ module Make (C : Conf.S) = struct
 
   let memo_size () = Hashtbl.length memo
 
-  let read key =
+  let published key =
     let p = path key in
     let* st = Fs_util.stat_opt p in
     match st with
@@ -323,14 +323,14 @@ module Make (C : Conf.S) = struct
     List.sort_uniq compare (published @ staged)
 
   (* The single resolution point: no caller decides this itself. *)
-  let resolve key =
+  let current key =
     let* st = Sm.read_edits key in
     match st with
       | Some st ->
-          let+ published = read key in
+          let+ published = published key in
           Some (`Staged (st, published))
       | None -> (
-          let+ m = read key in
+          let+ m = published key in
           match m with Some m -> Some (`Published m) | None -> None)
 
   let ensure_root () = Fs_util.mkdir_p (root ())

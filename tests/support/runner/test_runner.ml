@@ -449,7 +449,7 @@ let setup_client (module C : Conf.S) root staging_prefix =
      sidecar, then delete or overwrite the remote object behind the daemon's
      back. *)
   let remote_chunk_key path index =
-    let* m = F.read_manifest (key path) in
+    let* m = F.published_here (key path) in
     match m with
       | Some m ->
           Lwt.return
@@ -937,7 +937,7 @@ let setup_client (module C : Conf.S) root staging_prefix =
     | CrashBeforeCommit path ->
         let k = key path in
         let* () = F.upload k in
-        let* m = F.read_manifest k in
+        let* m = F.published_here k in
         let size = match m with Some m -> Manifest.size m | None -> 0L in
         let ek = J.entry_key () in
         let* () = W.record ek [`Put (F.rel_key k, size)] in

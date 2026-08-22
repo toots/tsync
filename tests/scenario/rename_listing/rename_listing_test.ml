@@ -76,7 +76,7 @@ let listing () =
    resolves to nothing is the shape of the failure: `ls` shows it, opening it
    does not. *)
 let resolves rel =
-  let+ m = Mf.read (key rel) in
+  let+ m = Mf.published (key rel) in
   Printf.printf "  %s resolves: %b\n" rel (m <> None)
 
 let () =

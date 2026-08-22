@@ -15,10 +15,20 @@ module Make (C : Conf.S) (R : Remote.S) : sig
     offset:int64 ->
     int Lwt.t
 
-  (** [key]'s published manifest: the local sidecar when there is one, else the
-      backend's — so a file that was never cached still reports its real logical
-      size and mtime rather than the manifest object's byte size. *)
-  val resolved_manifest : string -> Manifest.t option Lwt.t
+  (** [key]'s published manifest wherever it currently lives: the local sidecar
+      when there is one, else the store's — so a file that was never cached
+      still reports its real logical size and mtime rather than the manifest
+      object's byte size.
+
+      Owns the negative cache for keys the store says are absent, so a cold
+      listing does not pay a round trip per missing key on every pass. It is
+      bounded, and it invalidates itself against the sync journal's mark rather
+      than asking whoever changes the tree to remember to clear it.
+
+      Says nothing about staged edits: a staged key is by definition local, so a
+      caller wanting those asks {!Checkout.current} first. {!File_ops.stat} is
+      the composition of the two. *)
+  val published : string -> Manifest.t option Lwt.t
 
   (** {!pread} for a key of this domain, resolved through
       {!Manifest.Make.resolve}: staged edits, else what was published, else the

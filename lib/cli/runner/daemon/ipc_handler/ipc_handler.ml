@@ -206,7 +206,7 @@ module Make (C : Conf.S) (F : File_ops.S) : S = struct
                              ~mtime:st.Staged_manifest.s_mtime ~etag:""
                              ~is_uploaded:false ~symlink:None))
                 | Some (`Published _) | None -> (
-                    let* m = F.resolved_manifest key in
+                    let* m = F.published key in
                     match m with
                       | Some m ->
                           Lwt.return
@@ -229,7 +229,7 @@ module Make (C : Conf.S) (F : File_ops.S) : S = struct
   let file_entry_json ~container_id (e : Backend.file_entry) =
     Lwt_bounded.use resolve_pool @@ fun () ->
     let* naming = naming_fields ~container_id e.key in
-    let+ m = F.resolved_manifest e.key in
+    let+ m = F.published e.key in
     match m with
       | Some m ->
           `Assoc

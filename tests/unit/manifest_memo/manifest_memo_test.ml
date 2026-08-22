@@ -46,14 +46,14 @@ let write_sidecar i =
    cache, so only the read puts it back. *)
 let touch i =
   let* () = write_sidecar i in
-  let+ (_ : Manifest.t option) = Mf.read (key i) in
+  let+ (_ : Manifest.t option) = Mf.published (key i) in
   ()
 
 let () =
   Lwt_main.run
     (let* () = touch 0 in
      check "a read caches the manifest" (Mf.memo_size () = 1);
-     let* m = Mf.read (key 0) in
+     let* m = Mf.published (key 0) in
      check "and answers with it"
        (match m with Some m -> Manifest.size m = 5L | None -> false);
 
@@ -72,7 +72,7 @@ let () =
 
      (* Evicted, so served from the file again -- the manifest is the same
         either way, which is why the count is what gets asserted. *)
-     let* m = Mf.read (key 0) in
+     let* m = Mf.published (key 0) in
      check "an evicted key still reads"
        (match m with Some m -> Manifest.size m = 5L | None -> false);
 

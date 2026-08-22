@@ -62,7 +62,7 @@ let name_of ~key m =
 
 let report rel =
   let k = key rel in
-  let+ m = Mf.read k in
+  let+ m = Mf.published k in
   match m with
     | None -> step "%s: absent" rel
     | Some m ->

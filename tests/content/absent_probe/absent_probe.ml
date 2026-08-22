@@ -55,7 +55,7 @@ let publish name =
     ~data:(Bigstring.of_string body) ()
 
 let found name =
-  let+ m = D.resolved_manifest (key name) in
+  let+ m = D.published (key name) in
   Option.is_some m
 
 let () =

@@ -24,7 +24,7 @@ module Make (F : File_ops.S) = struct
           let* () =
             if truncating then F.truncate f 0L
             else if creating then
-              let* m = F.read_manifest f in
+              let* m = F.published_here f in
               match m with None -> F.create f | Some _ -> Lwt.return_unit
             else Lwt.return_unit
           in

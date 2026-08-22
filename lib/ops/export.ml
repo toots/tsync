@@ -17,7 +17,7 @@ module Make (C : Conf.S) = struct
     let key = C.domain_prefix ^ rel in
     let dst_path = Filename.concat dst rel in
     let* () = Fs_util.ensure_parent dst_path in
-    let* manifest = D.resolved_manifest key in
+    let* manifest = D.published key in
     match Option.map (fun m -> (m, Manifest.symlink m)) manifest with
       | Some (_, Some target) ->
           let* () = Fs_util.unlink_quiet dst_path in
