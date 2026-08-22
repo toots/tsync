@@ -399,6 +399,20 @@
   (action
    (diff share_server_test.expected share_server_test.output))))
 
+(subdir ops/resync
+ (alias
+  (name default)
+  (deps resync_test.exe))
+ (rule
+  (alias runtest)
+  (target resync_test.output)
+  (action
+   (with-stdout-to resync_test.output (ignore-stderr (run ./resync_test.exe)))))
+ (rule
+  (alias runtest)
+  (action
+   (diff resync_test.expected resync_test.output))))
+
 (subdir scenario/base
  (alias
   (name default)
