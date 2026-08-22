@@ -80,7 +80,13 @@ let cmd : unit Cmd.t =
             "Create or edit the configuration interactively instead of \
              printing it.")
   in
-  let run edit = if edit then Configure.run () else run () in
+  let module W =
+    Wizard.Make (struct
+      let config_path = runtime_paths.Runtime.config_path
+      let default_domain = read_default_domain
+    end)
+  in
+  let run edit = if edit then W.run () else run () in
   Cmd.v
     (Cmd.info "config"
        ~doc:
