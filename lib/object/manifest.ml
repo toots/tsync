@@ -19,12 +19,6 @@ type chunk_entry = { index : int; h1 : string; h2 : string; size : int }
 
 let chunk_key (entry : chunk_entry) = entry.h1 ^ "-" ^ entry.h2
 
-(* Content addressing means a chunk's key is a function of its bytes, so a body
-   can always be held against the name it arrived under. Composed where the
-   stores can reach it without depending on the shapes that reference a chunk:
-   the check runs inside a backend driver. *)
-let key_of_body = Chunks.key_of_body
-
 (* The reverse, for a chunk kept from a previous upload: the two digests are the
    key's halves. *)
 let entry_of_key ~index ~size key =

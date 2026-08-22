@@ -57,17 +57,21 @@ let peak = ref 0
 
 let source index =
   Lwt.return
-    (`Fill
-       (fun buf ->
-         incr live;
-         if !live > !peak then peak := !live;
-         let rec settle n =
-           if n = 0 then Lwt.return_unit
-           else Lwt.bind (Lwt.pause ()) (fun () -> settle (n - 1))
-         in
-         let+ () = settle 5 in
-         Bigarray.Array1.fill buf (Char.chr (index land 0x7f));
-         decr live))
+    (Chunk_store.Filled
+       {
+         len = csize;
+         fill =
+           (fun buf ->
+             incr live;
+             if !live > !peak then peak := !live;
+             let rec settle n =
+               if n = 0 then Lwt.return_unit
+               else Lwt.bind (Lwt.pause ()) (fun () -> settle (n - 1))
+             in
+             let+ () = settle 5 in
+             Bigarray.Array1.fill buf (Char.chr (index land 0x7f));
+             decr live);
+       })
 
 let () =
   Lwt_main.run

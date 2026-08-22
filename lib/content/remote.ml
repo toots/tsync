@@ -34,9 +34,7 @@ module type S = sig
     size:int64 ->
     chunk_size:int ->
     mtime:float ->
-    source:
-      (int ->
-      [ `Reuse of string | `Fill of Local_io.buffer -> unit Lwt.t ] Lwt.t) ->
+    source:(int -> Chunk_store.source Lwt.t) ->
     ?cancel:bool ref ->
     unit ->
     Manifest.t Lwt.t
@@ -132,11 +130,6 @@ module Make_with_layout (C : Conf.S) (L : Layout.S) : S = struct
      A chunk larger than the configured size — only reachable re-chunking a file
      whose manifest used a larger one — takes a single slot regardless, and so
      costs more than a slot is reckoned to. *)
-  let with_slot f = Lwt_bounded.use chunk_slots f
-
-  let with_chunk_buffer ~size f =
-    with_slot (fun () -> f (Bigstring.create size))
-
   (* Workers as wide as the buffer pool, each taking the next index: a promise
      apiece is a fan-out the file's size chooses, and a terabyte's worth of them
      is allocated before the first chunk is read and outlives every buffer they
@@ -153,42 +146,22 @@ module Make_with_layout (C : Conf.S) (L : Layout.S) : S = struct
           incr next;
           Some (fun () -> f index)))
 
-  (* Not pre-populated by listing the chunk prefix: that cost scales with the
-     whole historical archive rather than the upload at hand. *)
-  let dedup = Dedup.create ~max_known:(fun () -> !max_known) ()
-  let known_chunk_count () = Dedup.count dedup
+  module Chunks_store = Chunk_store.Make (struct
+    let put = B.put
+    let backend_key = Space.key
+    let fetch_body = Space.get
+    let corrupt = Corrupt.is_marked
+    let cleared = Corrupt.forget
+    let slots = chunk_slots
+    let downloads = pools.downloads
+    let max_known () = !max_known
 
-  (* Where a chunk is written; where it can be *read* is
-     {!Chunk_space.read_key}'s business, a collection in progress being the one
-     thing that makes the two differ. *)
-  let chunk_backend_key = Space.key
+    let present key =
+      let+ head = Space.head key in
+      Option.is_some head
+  end)
 
-  let chunk_exists ck_rel =
-    let+ head = Space.head ck_rel in
-    Option.is_some head
-
-  (* [data] must own its bytes: a store is free to keep sending after this
-     returns, and the key is the hash of what was passed, not of what lands. *)
-  let put_chunk ~data =
-    let ck_rel = Manifest.key_of_body data in
-    Metrics.add_hashed 1;
-    let ck = chunk_backend_key ck_rel in
-    let* known =
-      Dedup.known dedup ~corrupt:Corrupt.is_marked ~present:chunk_exists ck_rel
-    in
-    let+ () =
-      if known then (
-        Dedup.remember dedup ck_rel;
-        Lwt.return_unit)
-      else
-        let+ () = B.put ~key:ck ~data () in
-        (* The write is what clears the marker — the store re-verified the object
-           as it took it — so stop holding this key against the rest of the
-           session. *)
-        Corrupt.forget ck_rel;
-        Dedup.remember dedup ck_rel
-    in
-    (ck_rel, not known)
+  let known_chunk_count = Chunks_store.known_count
 
   (* Mapped rather than read, so the pages reach the store without being copied
      into a buffer first, and mapped from a snapshot, so what the user writes
@@ -199,16 +172,17 @@ module Make_with_layout (C : Conf.S) (L : Layout.S) : S = struct
     let len =
       Chunks.length_of ~size:(Int64.of_int file_size) ~chunk_size index
     in
-    with_slot (fun () ->
-        let data =
-          try Bigstring.map_fd fd ~offset ~len
-          with Unix.Unix_error _ -> raise Cancelled
-        in
-        let+ ck_rel, sent = put_chunk ~data in
-        Chunk_table.set table index ck_rel;
-        (* A deduplicated chunk is as done as a written one and cost no
-           transfer, which is why the two are told apart rather than summed. *)
-        on_progress ~bytes:len ~sent)
+    let+ ck_rel, sent =
+      Chunks_store.store
+        (Chunk_store.Mapped
+           (fun () ->
+             try Bigstring.map_fd fd ~offset ~len
+             with Unix.Unix_error _ -> raise Cancelled))
+    in
+    Chunk_table.set table index ck_rel;
+    (* A deduplicated chunk is as done as a written one and cost no transfer,
+       which is why the two are told apart rather than summed. *)
+    on_progress ~bytes:len ~sent
 
   (* A cancellation landing while the put is in flight unpublishes it again, or
      a ghost object survives under a name that may no longer exist locally.
@@ -311,25 +285,14 @@ module Make_with_layout (C : Conf.S) (L : Layout.S) : S = struct
      Deciding which case a chunk is must stay free of I/O, or every chunk's bytes
      land before anything queues for a buffer. *)
   let upload_chunks ~key ~size ~chunk_size ~mtime
-      ~(source :
-         int ->
-         [ `Reuse of string | `Fill of Local_io.buffer -> unit Lwt.t ] Lwt.t)
-      ?(cancel = ref false) () =
+      ~(source : int -> Chunk_store.source Lwt.t) ?(cancel = ref false) () =
     let n = max 1 (Chunks.count ~size ~chunk_size) in
     let table = chunk_table ~key ~size ~chunk_size ~mtime ~count:n in
     let one index =
       if !cancel then raise Cancelled;
-      let len = Chunks.length_of ~size ~chunk_size index in
       let* src = source index in
-      match src with
-        | `Reuse chunk_key ->
-            Chunk_table.set table index chunk_key;
-            Lwt.return_unit
-        | `Fill fill ->
-            with_chunk_buffer ~size:len (fun buf ->
-                let* () = fill buf in
-                let+ ck_rel, _ = put_chunk ~data:buf in
-                Chunk_table.set table index ck_rel)
+      let+ ck_rel, (_ : bool) = Chunks_store.store src in
+      Chunk_table.set table index ck_rel
     in
     let* () = each_chunk ~count:n one in
     publish ~key ~size ~chunk_size ~mtime ~cancel table
@@ -354,10 +317,7 @@ module Make_with_layout (C : Conf.S) (L : Layout.S) : S = struct
          reports ENOENT rather than garbage. *)
       | `Absent | `Unresolved | `Unreadable -> None
 
-  let chunk_download_pool = pools.downloads
-
-  let get_chunk ~chunk_key =
-    Lwt_bounded.use chunk_download_pool (fun () -> Space.get chunk_key)
+  let get_chunk ~chunk_key = Chunks_store.fetch chunk_key
 end
 
 (* The inode layout is what every path-keyed caller wants. *)

@@ -3,6 +3,16 @@
 ; question answerable.
 
 (library
+ (flags
+  (:standard
+   -open
+   Tsync_chunks
+   -open
+   Tsync_bigstring
+   -open
+   Tsync_lwt_unix
+   -open
+   Tsync_metrics))
  (name tsync_chunk_store)
  (public_name tsync-libs.chunk_store)
- (libraries lwt))
+ (libraries tsync_chunks tsync_bigstring tsync_lwt_unix tsync_metrics lwt))

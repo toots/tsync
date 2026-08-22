@@ -860,11 +860,17 @@ module Make (C : Conf.S) (R : Remote.S) = struct
   let staged_source ~(staged : Manifest.staged) ~base i =
     let cs = staged.Manifest.s_chunk_size in
     let len = Chunks.length_of ~size:staged.Manifest.s_size ~chunk_size:cs i in
+    (* A hole is still named and stored: it is bytes the file holds, and every
+       chunk of a published file has a key. *)
     let zeroes =
-      `Fill
-        (fun buf ->
-          Local_io.zero buf ~pos:0 ~len;
-          Lwt.return_unit)
+      Chunk_store.Filled
+        {
+          len;
+          fill =
+            (fun buf ->
+              Local_io.zero buf ~pos:0 ~len;
+              Lwt.return_unit);
+        }
     in
     let slots = staged.Manifest.s_slots in
     if i >= Array.length slots then Lwt.return zeroes
@@ -874,14 +880,15 @@ module Make (C : Conf.S) (R : Remote.S) = struct
         | Manifest.Inherit -> (
             match base with
               | Some m when i < Chunk_table.count m ->
-                  Lwt.return (`Reuse (Chunk_table.key m i))
+                  Lwt.return (Chunk_store.Stored (Chunk_table.key m i))
               | Some _ | None ->
                   Lwt.fail
                     (Backend.Backend_error
                        (Printf.sprintf "staged chunk %d inherits nothing" i)))
         | Manifest.Staged { uuid; offset } ->
             Lwt.return
-              (`Fill (fun buf -> fill_from_staged ~uuid ~offset ~len buf)))
+              (Chunk_store.Filled
+                 { len; fill = fill_from_staged ~uuid ~offset ~len }))
 
   let rec upload_staged ~key ~(staged : Manifest.staged) ?cancel () =
     match staged.Manifest.s_whole with
@@ -971,14 +978,11 @@ module Make (C : Conf.S) (R : Remote.S) = struct
       Cc.put_group ~group ~member:(fun i ->
           let* source = staged_source ~staged ~base:None i in
           match source with
-            | `Reuse _ -> assert false (* [local] ruled this out *)
-            | `Fill fill ->
+            | Chunk_store.Stored _ | Chunk_store.Mapped _ ->
+                assert false (* [local] ruled these out *)
+            | Chunk_store.Filled { len; fill } ->
                 (* Its own buffer rather than one of the upload path's slots:
                    this runs over a group's members, two at the defaults. *)
-                let len =
-                  Chunks.length_of ~size:staged.Manifest.s_size
-                    ~chunk_size:staged.Manifest.s_chunk_size i
-                in
                 let buf = Bigstring.create len in
                 let+ () = fill buf in
                 buf)
