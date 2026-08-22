@@ -1,34 +1,18 @@
-(** A chunk body: bytes outside the OCaml heap, either a private mapping of the
-    file that holds them or an anonymous off-heap buffer.
+(** Bytes outside the OCaml heap: {!Bigstringaf}, and the few things this
+    program needs of a file's bytes that it does not provide.
 
-    Chunk bodies are the largest thing this program moves (8 MiB by default) and
-    the one it never looks inside: they go from a descriptor to a socket and
+    The bodies a store moves are the largest thing here (8 MiB by default) and
+    the ones it never looks inside — they go from a descriptor to a socket and
     back. Held as OCaml strings they would be scanned and copied by a collector
-    that has nothing to gain from either. *)
+    with nothing to gain from either.
 
-type t
+    [t] is {!Bigstringaf.t} and says so, which is what lets a buffer cross
+    {!Local_io} without a conversion. *)
+include module type of Bigstringaf with type t = Bigstringaf.t
 
-val empty : t
-val length : t -> int
-
-(** The bytes themselves, for a caller that reads them. *)
-val buffer : t -> Local_io.buffer
-
+(** The whole of [s]. Shadows {!Bigstringaf.of_string}, which takes a range: a
+    caller handing over an entire string should not have to spell one. *)
 val of_string : string -> t
-val to_string : t -> string
-
-(** [len] bytes from [pos], for a caller reading one field of a body rather than
-    the whole of it. *)
-val sub : t -> pos:int -> len:int -> string
-
-(** Takes ownership of [buf]. Writing to it afterwards is writing to the chunk.
-*)
-val of_buffer : Local_io.buffer -> t
-
-(** Off-heap bytes to be filled and then handed to {!of_buffer}. Uninitialised,
-    and unlike a mapping the collector is told what one costs and reclaims it
-    accordingly. *)
-val create : int -> Local_io.buffer
 
 (** A read-only descriptor on the bytes [path] holds now, frozen: a
     copy-on-write clone unlinked the instant it is open, so nothing written to
@@ -57,7 +41,3 @@ val map_file : path:string -> offset:int -> len:int -> t
 val map_fd : Unix.file_descr -> offset:int -> len:int -> t
 
 val write_to : path:string -> t -> offset:int -> unit Lwt.t
-
-(** XXH3-64 of the whole chunk, as {!Xxhash.hash_hex} spells it. Here rather
-    than at the caller so that naming a body never needs it as a string. *)
-val hash_hex : t -> int -> string

@@ -78,7 +78,7 @@ let excerpt body =
    permanently failed, so only a new cache redials. It is replaced once per
    generation, so requests that raced into the same dead pool share the one
    redial. *)
-let call t ~headers ~meth ?(body = Chunk.empty) uri =
+let call t ~headers ~meth ?(body = Bigstring.empty) uri =
   let attempt cache =
     Lwt_unix.with_timeout t.timeout (fun () ->
         let* headers = headers () in
@@ -89,11 +89,11 @@ let call t ~headers ~meth ?(body = Chunk.empty) uri =
                copy, which is what a bigstring body is for. The retry below only
                reads them again. *)
             ~body:
-              (Cohttp_lwt.Body.of_bigstring (`Passthrough (Chunk.buffer body)))
+              (Cohttp_lwt.Body.of_bigstring (`Passthrough (body)))
             meth uri
         in
         let+ rbody = Cohttp_lwt.Body.to_bigstring rbody in
-        (resp, Chunk.of_buffer rbody))
+        (resp, rbody))
   in
   let used = t.cache in
   Lwt.catch
@@ -111,7 +111,7 @@ let call_retry t ~headers ~meth ?body op uri =
       let* resp, rbody = call t ~headers ~meth ?body uri in
       if is_transient_code (code resp) then
         Lwt.fail
-          (backend_error op (code resp) (excerpt (Chunk.to_string rbody)))
+          (backend_error op (code resp) (excerpt (Bigstring.to_string rbody)))
       else Lwt.return (resp, rbody))
 
 (* Only an object's own bytes are worth keeping off the heap; the JSON and XML
@@ -119,4 +119,4 @@ let call_retry t ~headers ~meth ?body op uri =
    parse anyway. *)
 let call_text t ~headers ~meth ?body op uri =
   let+ resp, rbody = call_retry t ~headers ~meth ?body op uri in
-  (resp, Chunk.to_string rbody)
+  (resp, Bigstring.to_string rbody)

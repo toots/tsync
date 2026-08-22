@@ -396,7 +396,7 @@ module Make (C : Conf.S) = struct
 
   let member_json ~totals ~exact ~reload (m : Backend.member) =
     let* probed, cursor = probe m.Backend.backend in
-    let cursor = Option.map Chunk.to_string cursor in
+    let cursor = Option.map Bigstring.to_string cursor in
     let* jrnl = journal ~cursor m.Backend.backend in
     let+ corrupt = corrupted m in
     (* Synchronous: reads the last sample and leaves any walk it started running

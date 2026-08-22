@@ -1,16 +1,9 @@
 open Lwt.Syntax
+include Bigstringaf
 
-type t = Bigstringaf.t
-
-let of_buffer buf = buf
-let buffer t = t
-let empty = Bigstringaf.empty
-let create = Bigstringaf.create
-let length = Bigstringaf.length
+(* Bigstringaf's takes a range; a caller with a whole string to hand over should
+   not have to spell one. *)
 let of_string s = Bigstringaf.of_string s ~off:0 ~len:(String.length s)
-let to_string = Bigstringaf.to_string
-let sub t ~pos ~len = Bigstringaf.substring t ~off:pos ~len
-let hash_hex t seed = Xxhash.hash_bigstring_hex t seed
 
 (* Synchronous because [mmap] moves no data: the reads happen later, on the pages
    actually touched. *)

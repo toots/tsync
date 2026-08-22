@@ -26,13 +26,13 @@ let () =
        Lwt_list.map_p
          (fun i ->
            B.put_if_absent ~key:"claimed"
-             ~data:(Chunk.of_string (Printf.sprintf "client%d" i))
+             ~data:(Bigstring.of_string (Printf.sprintf "client%d" i))
              ())
          [1; 2; 3; 4; 5]
      in
-     let answers = List.map Chunk.to_string answers in
+     let answers = List.map Bigstring.to_string answers in
      let* stored = B.get ~key:"claimed" () in
-     let stored = Chunk.to_string stored in
+     let stored = Bigstring.to_string stored in
      step "claimants: %d" (List.length answers);
      step "distinct answers: %d" (List.length (List.sort_uniq compare answers));
      step "every answer is what the store holds: %b"
@@ -40,31 +40,31 @@ let () =
 
      case "a later claim on a taken name";
      let* answer =
-       B.put_if_absent ~key:"claimed" ~data:(Chunk.of_string "latecomer") ()
+       B.put_if_absent ~key:"claimed" ~data:(Bigstring.of_string "latecomer") ()
      in
-     let answer = Chunk.to_string answer in
+     let answer = Bigstring.to_string answer in
      let* after = B.get ~key:"claimed" () in
-     let after = Chunk.to_string after in
+     let after = Bigstring.to_string after in
      step "answered with the holder rather than itself: %b"
        (answer = stored && answer <> "latecomer");
      step "the holder is untouched: %b" (after = stored);
 
      case "a free name";
      let* answer =
-       B.put_if_absent ~key:"free" ~data:(Chunk.of_string "mine") ()
+       B.put_if_absent ~key:"free" ~data:(Bigstring.of_string "mine") ()
      in
-     let answer = Chunk.to_string answer in
+     let answer = Bigstring.to_string answer in
      let* stored = B.get ~key:"free" () in
-     let stored = Chunk.to_string stored in
+     let stored = Bigstring.to_string stored in
      step "answered with its own body: %b" (answer = "mine");
      step "and that is what landed: %b" (stored = "mine");
 
      case "a name released, then claimed again";
      let* () = B.delete ~key:"free" () in
      let* answer =
-       B.put_if_absent ~key:"free" ~data:(Chunk.of_string "second") ()
+       B.put_if_absent ~key:"free" ~data:(Bigstring.of_string "second") ()
      in
-     step "the next claimant wins it: %b" (Chunk.to_string answer = "second");
+     step "the next claimant wins it: %b" (Bigstring.to_string answer = "second");
 
      (* A claim leaves nothing behind: the losers' bodies were written to their
         own temp files, and a leftover would eventually fill the store. *)

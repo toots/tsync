@@ -39,7 +39,7 @@ module type S = sig
 
   (** Fetch one chunk body from the domain's stores by its content key
       ([Manifest.chunk_key], without the domain's chunk prefix). *)
-  val get_chunk : chunk_key:string -> Chunk.t Lwt.t
+  val get_chunk : chunk_key:string -> Bigstring.t Lwt.t
 
   (** Chunk size for files this client creates: [Conf.S.chunk_size] when the
       config says, else what the domain's stores recommend — an http-proxy

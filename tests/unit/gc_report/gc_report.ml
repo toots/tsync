@@ -83,7 +83,7 @@ let note seen at = if at <> "" then seen.named <- at :: seen.named
 let put_chunk n =
   Main.put
     ~key:(chunk_prefix ^ Chunk_layout.relative_path (ck n))
-    ~data:(Chunk.of_string "a chunk!")
+    ~data:(Bigstring.of_string "a chunk!")
     ()
 
 let put_manifest n =
@@ -95,7 +95,7 @@ let put_manifest n =
   in
   Main.put
     ~key:(Printf.sprintf "%sfolder%02d/deadbeefdeadbeef" domain_prefix n)
-    ~data:(Chunk.of_string (Manifest.to_string ~name:"f" m))
+    ~data:(Bigstring.of_string (Manifest.to_string ~name:"f" m))
     ()
 
 (* [live] chunks a manifest names and [garbage] that nothing does, so the run

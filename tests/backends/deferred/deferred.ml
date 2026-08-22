@@ -201,7 +201,7 @@ let () =
      (* The chunk goes straight to the main, so the only writes this target sees
         come from the manifest job — the first fails, and the job has to survive
         it. *)
-     let* () = M.put ~key:c0 ~data:(Chunk.of_string "aaaa") () in
+     let* () = M.put ~key:c0 ~data:(Bigstring.of_string "aaaa") () in
      let t1_root = Filename.concat root "t1" in
      let target1, refused = flaky ~fails:1 ~root:t1_root in
      let l1, (module T1 : Deferred.S) =
@@ -211,7 +211,7 @@ let () =
      let stats1 = T1.stats in
      let* () =
        B1.put ~key:(manifest_key "one")
-         ~data:(Chunk.of_string (manifest ~name:"one" [c0]))
+         ~data:(Bigstring.of_string (manifest ~name:"one" [c0]))
          ()
      in
      step "put manifest one [c0]";
@@ -229,7 +229,7 @@ let () =
      let stats2 = T2.stats in
      let* () =
        B2.put ~key:(manifest_key "two")
-         ~data:(Chunk.of_string (manifest ~name:"two" [c0]))
+         ~data:(Bigstring.of_string (manifest ~name:"two" [c0]))
          ()
      in
      step "put manifest two [c0]";
@@ -246,10 +246,10 @@ let () =
          ~name:"offline" ()
      in
      let (module B3 : Backend.S) = l3 in
-     let* () = B3.put ~key:c2 ~data:(Chunk.of_string "bbbb") () in
+     let* () = B3.put ~key:c2 ~data:(Bigstring.of_string "bbbb") () in
      let* () =
        B3.put ~key:(manifest_key "three")
-         ~data:(Chunk.of_string (manifest ~name:"three" [c2]))
+         ~data:(Bigstring.of_string (manifest ~name:"three" [c2]))
          ()
      in
      let* () =
@@ -295,9 +295,9 @@ let () =
      let (module B5 : Backend.S) = l5 in
      let stats5 = T5.stats in
      let* () =
-       B5.put ~key:(journal_prefix ^ "e1") ~data:(Chunk.of_string "{}") ()
+       B5.put ~key:(journal_prefix ^ "e1") ~data:(Bigstring.of_string "{}") ()
      in
-     let* () = B5.put ~key:cursor_key ~data:(Chunk.of_string "e1") () in
+     let* () = B5.put ~key:cursor_key ~data:(Bigstring.of_string "e1") () in
      step "put journal entry, put cursor";
      let* () = settled ~name:"replica" stats5 in
      dump_target t5_root;

@@ -126,14 +126,14 @@ let merge_caps cs =
   { merged with verified = cs <> [] && List.for_all (fun c -> c.verified) cs }
 
 module type S = sig
-  val put : key:string -> data:Chunk.t -> unit -> unit Lwt.t
-  val get : key:string -> unit -> Chunk.t Lwt.t
+  val put : key:string -> data:Bigstring.t -> unit -> unit Lwt.t
+  val get : key:string -> unit -> Bigstring.t Lwt.t
 
   (** [None] when the key does not exist; other failures raise. Saves the HEAD
       round trip of [head_opt] + [get] when the body is wanted. *)
-  val get_opt : key:string -> unit -> Chunk.t option Lwt.t
+  val get_opt : key:string -> unit -> Bigstring.t option Lwt.t
 
-  val put_if_absent : key:string -> data:Chunk.t -> unit -> Chunk.t Lwt.t
+  val put_if_absent : key:string -> data:Bigstring.t -> unit -> Bigstring.t Lwt.t
   val head_opt : key:string -> unit -> file_entry option Lwt.t
   val delete : key:string -> unit -> unit Lwt.t
   val delete_multi : string list -> unit Lwt.t
@@ -147,7 +147,7 @@ module type S = sig
       batch API carrying metadata only. Declared rather than implemented, so a
       store without one says so and {!Batched} supplies the fan-out. *)
   val get_many :
-    (entries:file_entry list -> unit -> (string * Chunk.t option) list Lwt.t)
+    (entries:file_entry list -> unit -> (string * Bigstring.t option) list Lwt.t)
     option
 
   val verify_all :
@@ -311,25 +311,25 @@ let counted ~traffic m =
 
     let put ~key ~data () =
       let+ () = Inner.put ~key ~data () in
-      up (Chunk.length data)
+      up (Bigstring.length data)
 
     (* A loser gets the winning body back, which came down the link; the winner
        is handed its own [data] again, so physical identity tells them apart
        without comparing bodies that are equal by construction. *)
     let put_if_absent ~key ~data () =
       let+ held = Inner.put_if_absent ~key ~data () in
-      up (Chunk.length data);
-      if held != data then down (Chunk.length held);
+      up (Bigstring.length data);
+      if held != data then down (Bigstring.length held);
       held
 
     let get ~key () =
       let+ data = Inner.get ~key () in
-      down (Chunk.length data);
+      down (Bigstring.length data);
       data
 
     let get_opt ~key () =
       let+ data = Inner.get_opt ~key () in
-      Option.iter (fun d -> down (Chunk.length d)) data;
+      Option.iter (fun d -> down (Bigstring.length d)) data;
       data
 
     (* The fan-out {!Batched} builds needs nothing here, going through the
@@ -340,7 +340,7 @@ let counted ~traffic m =
           let+ answered = f ~entries () in
           List.iter
             (fun (_, body) ->
-              Option.iter (fun b -> down (Chunk.length b)) body)
+              Option.iter (fun b -> down (Bigstring.length b)) body)
             answered;
           answered)
         Inner.get_many

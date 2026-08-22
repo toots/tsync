@@ -67,12 +67,12 @@ module Make (C : Conf.S) = struct
              held only while a body exists. *)
           Lwt_bounded.use copy_pool (fun () ->
               if Key.is_dir entry.key then
-                let+ () = Dst.put ~key:entry.key ~data:Chunk.empty () in
+                let+ () = Dst.put ~key:entry.key ~data:Bigstring.empty () in
                 Some (reason, 0)
               else
                 let* data = Src.get ~key:entry.key () in
                 let+ () = Dst.put ~key:entry.key ~data () in
-                Some (reason, Chunk.length data))
+                Some (reason, Bigstring.length data))
 
   let dedup_entries entries =
     (* Listing order is backend-dependent. *)

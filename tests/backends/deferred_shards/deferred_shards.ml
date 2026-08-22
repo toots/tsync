@@ -109,13 +109,13 @@ let publish ~n ~shards ~per =
       (fun k ->
         Src.put
           ~key:(chunk_prefix ^ Chunk_layout.relative_path k)
-          ~data:(Chunk.of_string k) ())
+          ~data:(Bigstring.of_string k) ())
       keys
   in
   let body = String.concat " " keys in
   let key = Printf.sprintf "%sfile%04d" manifest_prefix n in
-  let* () = Src.put ~key ~data:(Chunk.of_string body) () in
-  T.accept (Deferred.Put { key; data = Chunk.of_string body })
+  let* () = Src.put ~key ~data:(Bigstring.of_string body) () in
+  T.accept (Deferred.Put { key; data = Bigstring.of_string body })
 
 let report title =
   Printf.printf "=== %s\n" title;
@@ -154,8 +154,8 @@ let () =
            in
            let body = String.concat " " keys in
            let key = Printf.sprintf "%sagain%04d" manifest_prefix n in
-           let* () = Src.put ~key ~data:(Chunk.of_string body) () in
-           T.accept (Deferred.Put { key; data = Chunk.of_string body }))
+           let* () = Src.put ~key ~data:(Bigstring.of_string body) () in
+           T.accept (Deferred.Put { key; data = Bigstring.of_string body }))
          (List.init manifests (fun i -> i))
      in
      let+ () = settled () in

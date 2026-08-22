@@ -113,7 +113,7 @@ let to_string ~name (m : t) =
 
 let body ~name m =
   if recorded_name m = name then Chunk_table.bytes m.chunks
-  else Chunk.of_string (to_string ~name m)
+  else Bigstring.of_string (to_string ~name m)
 
 (* Encode then decode, so a [t] only ever exists as a decoded body and cannot
    fail to round-trip. *)
@@ -494,8 +494,8 @@ module Make (C : Conf.S) = struct
     let bytes =
       body ~name:(Key.leaf ~domain_prefix:C.domain_prefix key) manifest
     in
-    Fs_util.atomic_write_at (path key) ~size:(Chunk.length bytes) (fun put ->
-        put ~offset:0 (Chunk.buffer bytes))
+    Fs_util.atomic_write_at (path key) ~size:(Bigstring.length bytes) (fun put ->
+        put ~offset:0 (bytes))
 
   let delete key =
     invalidate key;

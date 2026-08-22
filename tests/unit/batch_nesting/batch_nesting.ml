@@ -20,7 +20,7 @@ module Member : Backend.S = struct
   let get ~key:_ () = unsupported ()
 
   let get_opt ~key () =
-    Lwt.return (Option.map Chunk.of_string (Hashtbl.find_opt objects key))
+    Lwt.return (Option.map Bigstring.of_string (Hashtbl.find_opt objects key))
 
   let head_opt ~key:_ () = unsupported ()
   let delete ~key:_ () = unsupported ()
@@ -44,7 +44,7 @@ module Member : Backend.S = struct
           (List.map
              (fun (e : Backend.file_entry) ->
                ( e.Backend.key,
-                 Option.map Chunk.of_string
+                 Option.map Bigstring.of_string
                    (Hashtbl.find_opt objects e.Backend.key) ))
              entries))
 end
@@ -64,7 +64,7 @@ let () =
   let one () =
     let+ answered = Batched.get_many ~entries:[entry "a"] () in
     List.for_all
-      (fun (_, b) -> Option.map Chunk.to_string b = Some "alpha")
+      (fun (_, b) -> Option.map Bigstring.to_string b = Some "alpha")
       answered
   in
   let settled =

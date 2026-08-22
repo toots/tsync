@@ -10,7 +10,7 @@ module Make (C : Conf.S) (L : Layout.S) : sig
   (** Publish a manifest, bringing its folder into existence if needed. Every
       other operation here resolves what is already there and treats an unknown
       folder as absent. *)
-  val put_manifest : key:string -> data:Chunk.t -> unit Lwt.t
+  val put_manifest : key:string -> data:Bigstring.t -> unit Lwt.t
 
   val get_manifest_opt : key:string -> string option Lwt.t
 

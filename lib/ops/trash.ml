@@ -22,7 +22,7 @@ module Make (C : Conf.S) = struct
     Lwt_list.filter_map_s
       (fun (e : Backend.file_entry) ->
         let+ data = B.get ~key:e.Backend.key () in
-        Folder.trash_path_of_string (Chunk.to_string data))
+        Folder.trash_path_of_string (Bigstring.to_string data))
       markers
 
   let find path =
@@ -31,7 +31,7 @@ module Make (C : Conf.S) = struct
       Lwt_list.filter_map_s
         (fun (e : Backend.file_entry) ->
           let+ data = B.get ~key:e.Backend.key () in
-          let data = Chunk.to_string data in
+          let data = Bigstring.to_string data in
           match
             (Folder.trash_path_of_string data, Folder.marker_of_string data)
           with

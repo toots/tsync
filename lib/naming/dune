@@ -15,7 +15,7 @@
    -open
    Tsync_backend_register
    -open
-   Tsync_chunk
+   Tsync_bigstring
    -open
    Tsync_log
    -open
@@ -29,7 +29,7 @@
  (libraries
   tsync_conf
   tsync_backend_register
-  tsync_chunk
+  tsync_bigstring
   tsync_log
   tsync_local_io
   tsync_lwt_unix

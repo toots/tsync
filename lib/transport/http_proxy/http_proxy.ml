@@ -9,7 +9,7 @@ module Auth = struct
      here, and materialising one as a string to hash it would put the megabytes
      back on the heap that carrying it as a chunk keeps off. *)
   let sha256_hex body =
-    Digestif.SHA256.(to_hex (digest_bigstring (Chunk.buffer body)))
+    Digestif.SHA256.(to_hex (digest_bigstring (body)))
 
   (* Sign method + request-target + timestamp + a hash of the body, so a captured
      signature can't be replayed against a different request or body. *)
@@ -105,8 +105,8 @@ module Wire = struct
         match body with
           | None -> add_be32 buf absent
           | Some b ->
-              add_be32 buf (Chunk.length b);
-              Buffer.add_string buf (Chunk.to_string b))
+              add_be32 buf (Bigstring.length b);
+              Buffer.add_string buf (Bigstring.to_string b))
       answered;
     Buffer.contents buf
 
@@ -128,7 +128,7 @@ module Wire = struct
           if n = absent then (key, None) :: go (pos + 4) rest
           else if n < 0 || n > len - pos - 4 then short ()
           else
-            (key, Some (Chunk.of_string (String.sub s (pos + 4) n)))
+            (key, Some (Bigstring.of_string (String.sub s (pos + 4) n)))
             :: go (pos + 4 + n) rest
     in
     go 0 keys

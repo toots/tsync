@@ -4,7 +4,7 @@
    -open
    Tsync_ops
    -open
-   Tsync_chunk
+   Tsync_bigstring
    -open
    Tsync_naming
    -open
@@ -23,7 +23,7 @@
  (libraries
   tsync_test_harness
   tsync_ops
-  tsync_chunk
+  tsync_bigstring
   tsync_naming
   tsync_conf
   tsync_local_io

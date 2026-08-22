@@ -13,17 +13,17 @@ let readdir_list = Fs_util.readdir_list
 let write_file path data =
   let* () = Fs_util.ensure_parent path in
   let tmp = Fs_util.temp_path path in
-  let* () = Chunk.write_to ~path:tmp data ~offset:0 in
+  let* () = Bigstring.write_to ~path:tmp data ~offset:0 in
   Lwt_unix_retry.rename tmp path
 
-let write_string path data = write_file path (Chunk.of_string data)
+let write_string path data = write_file path (Bigstring.of_string data)
 
 (* Mapped, not read: a name here is only ever replaced by {!write_file}'s
    rename, so a mapping keeps serving the bytes it was made from however the
    name is reused afterwards, and a chunk body never lands on the heap. *)
 let read_file path =
   let+ st = Lwt_unix_retry.LargeFile.stat path in
-  Chunk.map_file ~path ~offset:0 ~len:(Int64.to_int st.Unix.LargeFile.st_size)
+  Bigstring.map_file ~path ~offset:0 ~len:(Int64.to_int st.Unix.LargeFile.st_size)
 
 (* [link] rather than [rename]: rename replaces silently, link fails with EEXIST
    when the destination is taken, which is the whole point.
@@ -33,7 +33,7 @@ let read_file path =
 let create_exclusive path data =
   let* () = Fs_util.ensure_parent path in
   let tmp = Fs_util.temp_path path in
-  let* () = Chunk.write_to ~path:tmp data ~offset:0 in
+  let* () = Bigstring.write_to ~path:tmp data ~offset:0 in
   Lwt.finalize
     (fun () ->
       Lwt.catch
@@ -172,7 +172,7 @@ let make ?(verify_writes = true) ~root () : (module Backend.S) =
                     (Corruption_marker.to_string
                        {
                          computed = Some computed;
-                         size = Some (Chunk.length stored);
+                         size = Some (Bigstring.length stored);
                          at = Some (Unix.gettimeofday ());
                          reason = None;
                        })))

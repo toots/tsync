@@ -118,7 +118,7 @@ let rec substitute ~values (j : Yojson.Safe.t) =
 
 let signed_request ~secret ~path =
   let headers =
-    Http_proxy.Auth.request_headers ~secret ~meth:"GET" ~path ~body:Chunk.empty
+    Http_proxy.Auth.request_headers ~secret ~meth:"GET" ~path ~body:Bigstring.empty
       ()
   in
   Cohttp.Request.make
@@ -135,7 +135,7 @@ let () =
   let secret = "s3cr3t"
   and meth = "GET"
   and path = "/o/abc"
-  and body = Chunk.of_string "hello" in
+  and body = Bigstring.of_string "hello" in
   (* A freshly-signed request verifies. *)
   let headers = Http_proxy.Auth.request_headers ~secret ~meth ~path ~body () in
   let ts = List.assoc Http_proxy.Auth.timestamp_header headers in
@@ -156,7 +156,7 @@ let () =
   assert (
     not
       (Http_proxy.Auth.verify ~secret ~meth ~path ~timestamp:ts ~signature:sig_
-         ~body:(Chunk.of_string "tampered")));
+         ~body:(Bigstring.of_string "tampered")));
   assert (
     not
       (Http_proxy.Auth.verify ~secret ~meth ~path ~timestamp:ts
@@ -228,7 +228,7 @@ let () =
   let chunk_size_op prefix =
     Http_proxy_frontend.parse_op `GET
       (Uri.of_string ("/chunk-size?prefix=" ^ prefix))
-      Chunk.empty
+      Bigstring.empty
   in
   assert (
     chunk_size_op "tsync/one/" = Http_proxy_frontend.Chunk_size "tsync/one/");
@@ -237,7 +237,7 @@ let () =
     = Some "tsync/one/");
   (* No prefix is a bad request, not a silent answer for some other domain. *)
   assert (
-    Http_proxy_frontend.parse_op `GET (Uri.of_string "/chunk-size") Chunk.empty
+    Http_proxy_frontend.parse_op `GET (Uri.of_string "/chunk-size") Bigstring.empty
     = Http_proxy_frontend.Bad);
 
   assert (pick "tsync/two/manifests/x" "one" = Some "two");
@@ -254,7 +254,7 @@ let () =
      bucket and differ only in prefix. *)
   let bulk path keys =
     Http_proxy_frontend.parse_op `POST (Uri.of_string path)
-      (Chunk.of_string
+      (Bigstring.of_string
          (Yojson.Safe.to_string (`List (List.map (fun k -> `String k) keys))))
   in
   let scoped op =
@@ -322,7 +322,7 @@ let () =
   let status op ~read_only =
     let r = { (route "one") with read_only } in
     let resp, _ =
-      Lwt_main.run (Http_proxy_frontend.exec r op ~body:(Chunk.of_string "x"))
+      Lwt_main.run (Http_proxy_frontend.exec r op ~body:(Bigstring.of_string "x"))
     in
     Cohttp.Code.code_of_status (Cohttp.Response.status resp)
   in
@@ -363,7 +363,7 @@ let () =
          let (module B : Backend.S) = C.store in
          B.put
            ~key:(C.chunk_prefix ^ Chunk_layout.relative_path key)
-           ~data:(Chunk.of_string "chunk") ())
+           ~data:(Bigstring.of_string "chunk") ())
        (List.init planted Fun.id));
 
   (* A journal with a cursor set, so "to apply" is counted against something.
@@ -388,7 +388,7 @@ let () =
          let (module B : Backend.S) = C.store in
          B.put
            ~key:(C.journal_prefix ^ Journal.Entry_key.relative_path entry)
-           ~data:(Chunk.of_string "{}") ())
+           ~data:(Bigstring.of_string "{}") ())
        [
          entry_key ("1785969965000-" ^ other);
          cursor_entry;
@@ -585,7 +585,7 @@ let () =
     let resp, _ =
       Lwt_main.run
         (Http_proxy_frontend.serve_status ~port:8443 ~tls:true ~json
-           status_routes req Chunk.empty)
+           status_routes req Bigstring.empty)
     in
     (status_code resp, content_type resp)
   in
@@ -675,7 +675,7 @@ let () =
   let domains req =
     let resp, body =
       Lwt_main.run
-        (Http_proxy_frontend.serve_domains status_routes req Chunk.empty)
+        (Http_proxy_frontend.serve_domains status_routes req Bigstring.empty)
     in
     (status_code resp, Lwt_main.run (Cohttp_lwt.Body.to_string body))
   in

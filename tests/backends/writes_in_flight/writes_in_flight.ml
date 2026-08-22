@@ -120,7 +120,7 @@ let keys_under dir =
 
 (* Named from its own body: a chunk read back under a name it does not hash to
    is filed as corrupt, which is a different test. *)
-let body = Chunk.of_string "chunk body"
+let body = Bigstring.of_string "chunk body"
 let chunk_key = chunk_prefix ^ shard ^ Chunk_layout.key_of_body body
 
 let () =
@@ -131,7 +131,7 @@ let () =
      let user_key =
        chunk_prefix ^ shard ^ ".syncthing.Big.Buck.Bunny.mkv.tmp"
      in
-     let* () = Local.put ~key:user_key ~data:(Chunk.of_string "in flight") () in
+     let* () = Local.put ~key:user_key ~data:(Bigstring.of_string "in flight") () in
      let* () = Fs_util.atomic_write staged_path "half a body" in
 
      case "what a listing of the shard yields";

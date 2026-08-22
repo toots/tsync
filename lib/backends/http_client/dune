@@ -1,9 +1,9 @@
 (library
  (flags
-  (:standard -open Tsync_chunk -open Tsync_backend_register))
+  (:standard -open Tsync_bigstring -open Tsync_backend_register))
  (name tsync_http_client)
  (libraries
-  tsync_chunk
+  tsync_bigstring
   tsync_backend_register
   cohttp-lwt-unix
   uri

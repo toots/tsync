@@ -90,7 +90,7 @@ let other = Folder.new_id ()
 let write_in folder_id name body =
   Store.put
     ~key:(C.domain_prefix ^ folder_id ^ "/" ^ name)
-    ~data:(Chunk.of_string body) ()
+    ~data:(Bigstring.of_string body) ()
 
 let write name body = write_in folder name body
 

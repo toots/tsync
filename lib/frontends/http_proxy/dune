@@ -26,7 +26,7 @@
    -open
    Tsync_http_proxy
    -open
-   Tsync_chunk
+   Tsync_bigstring
    -open
    Tsync_backend_register
    -open
@@ -61,7 +61,7 @@
   tsync-libs.ipc_handler
   tsync-libs.diagnostics
   tsync-libs.metrics
-  tsync-libs.chunk
+  tsync-libs.bigstring
   tsync-libs.backend_register
   tsync-libs.conf
   tsync-libs.zip

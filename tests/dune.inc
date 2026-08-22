@@ -687,6 +687,20 @@
   (action
    (diff batched_test.expected batched_test.output))))
 
+(subdir unit/bigstring
+ (alias
+  (name default)
+  (deps bigstring_test.exe))
+ (rule
+  (alias runtest)
+  (target bigstring_test.output)
+  (action
+   (with-stdout-to bigstring_test.output (ignore-stderr (run ./bigstring_test.exe)))))
+ (rule
+  (alias runtest)
+  (action
+   (diff bigstring_test.expected bigstring_test.output))))
+
 (subdir unit/bounded
  (alias
   (name default)
@@ -700,20 +714,6 @@
   (alias runtest)
   (action
    (diff bounded_test.expected bounded_test.output))))
-
-(subdir unit/chunk
- (alias
-  (name default)
-  (deps chunk_test.exe))
- (rule
-  (alias runtest)
-  (target chunk_test.output)
-  (action
-   (with-stdout-to chunk_test.output (ignore-stderr (run ./chunk_test.exe)))))
- (rule
-  (alias runtest)
-  (action
-   (diff chunk_test.expected chunk_test.output))))
 
 (subdir unit/chunk_pools
  (alias

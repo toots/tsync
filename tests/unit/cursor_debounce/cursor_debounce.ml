@@ -20,7 +20,7 @@ let root = Scratch.dir "cursor-debounce"
 let puts = ref 0
 
 module Counting : Backend.S = struct
-  let objects : (string, Chunk.t) Hashtbl.t = Hashtbl.create 8
+  let objects : (string, Bigstring.t) Hashtbl.t = Hashtbl.create 8
 
   let put ~key ~data () =
     incr puts;
@@ -47,7 +47,7 @@ module Counting : Backend.S = struct
          (fun d ->
            {
              Backend.key;
-             size = Chunk.length d;
+             size = Bigstring.length d;
              last_modified = 0.;
              etag = None;
            })
@@ -74,7 +74,7 @@ module Counting : Backend.S = struct
            if String.starts_with ~prefix key then
              {
                Backend.key;
-               size = Chunk.length d;
+               size = Bigstring.length d;
                last_modified = 0.;
                etag = None;
              }

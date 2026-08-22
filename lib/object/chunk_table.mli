@@ -87,11 +87,11 @@ val get : builder -> int -> string
 val builder_count : builder -> int
 
 (** The finished body, which is the buffer itself and not a copy of it. *)
-val seal : builder -> h1:string -> h2:string -> Chunk.t
+val seal : builder -> h1:string -> h2:string -> Bigstring.t
 
 (** A body a caller already holds as bytes, mapped or built. *)
-val of_chunk : Chunk.t -> t
+val of_chunk : Bigstring.t -> t
 
 (** The body itself, which is a copy only where {!t} was decoded from a string.
 *)
-val bytes : t -> Chunk.t
+val bytes : t -> Bigstring.t

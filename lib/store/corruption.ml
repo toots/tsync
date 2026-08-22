@@ -102,7 +102,7 @@ module Make (C : Conf.S) = struct
             (fun () ->
               let+ body = B.get_opt ~key:(key e.chunk_key) () in
               Option.map
-                (fun body -> Corruption_marker.of_string (Chunk.to_string body))
+                (fun body -> Corruption_marker.of_string (Bigstring.to_string body))
                 body)
             (fun _ -> Lwt.return_none)
 

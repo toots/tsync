@@ -33,7 +33,7 @@ let seal t =
               (Printf.sprintf "spool %s vanished before it was read" t.path)
         | exn -> Lwt.fail exn)
   in
-  Lwt.return (Chunk.map_file ~path:t.path ~offset:0 ~len:st.Unix.st_size)
+  Lwt.return (Bigstring.map_file ~path:t.path ~offset:0 ~len:st.Unix.st_size)
 
 let drop t =
   let* () = close_quiet t in

@@ -4,7 +4,7 @@
    -open
    Tsync_spill
    -open
-   Tsync_chunk
+   Tsync_bigstring
    -open
    Tsync_local_io
    -open
@@ -13,7 +13,7 @@
  (libraries
   tsync_test_harness
   tsync_spill
-  tsync_chunk
+  tsync_bigstring
   tsync_local_io
   lwt
   lwt.unix

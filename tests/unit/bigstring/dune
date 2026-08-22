@@ -2,7 +2,7 @@
  (flags
   (:standard
    -open
-   Tsync_chunk
+   Tsync_bigstring
    -open
    Tsync_xxhash
    -open
@@ -11,14 +11,14 @@
    Tsync_device
    -open
    Tsync_local_io))
- (name chunk_test)
+ (name bigstring_test)
  (libraries
   tsync_test_harness
   unix
   lwt
   lwt.unix
   bigstringaf
-  tsync_chunk
+  tsync_bigstring
   tsync_xxhash
   tsync-libs.device
   tsync-libs.local_io))

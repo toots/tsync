@@ -2,9 +2,9 @@ open Lwt.Syntax
 
 type 'a t = {
   spool : Spool.t;
-  decode : Chunk.t -> int ref -> 'a;
+  decode : Bigstring.t -> int ref -> 'a;
   mutable count : int;
-  mutable body : Chunk.t option;
+  mutable body : Bigstring.t option;
 }
 
 let create ~dir ~name ~decode =
@@ -26,7 +26,7 @@ let add t fields =
   Spool.append t.spool (Buffer.contents b)
 
 let take body pos n =
-  let s = Chunk.sub body ~pos:!pos ~len:n in
+  let s = Bigstring.substring body ~off:!pos ~len:n in
   pos := !pos + n;
   s
 
@@ -50,9 +50,9 @@ let body t =
         body
 
 type 'a cursor = {
-  body : Chunk.t;
+  body : Bigstring.t;
   pos : int ref;
-  read : Chunk.t -> int ref -> 'a;
+  read : Bigstring.t -> int ref -> 'a;
 }
 
 let read t =
@@ -60,7 +60,7 @@ let read t =
   { body; pos = ref 0; read = t.decode }
 
 let next c =
-  if !(c.pos) >= Chunk.length c.body then None else Some (c.read c.body c.pos)
+  if !(c.pos) >= Bigstring.length c.body then None else Some (c.read c.body c.pos)
 
 let iter t f =
   let* c = read t in
