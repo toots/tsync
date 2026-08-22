@@ -18,6 +18,8 @@
    -open
    Tsync_conf_parsing
    -open
+   Tsync_wizard
+   -open
    Tsync_log
    -open
    Tsync_local_io
@@ -73,6 +75,7 @@
   tsync-libs.metrics
   tsync-libs.job
   tsync-libs.conf_parsing
+  tsync_wizard
   tsync-libs.ipc
   tsync-libs.conf
   tsync_backend

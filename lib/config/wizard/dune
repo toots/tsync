@@ -1,0 +1,32 @@
+; The config editor. Its own library because it shares nothing with the rest of
+; the CLI — no domain, no store — and is the only thing here that prompts at a
+; terminal or shells out to terraform.
+
+(library
+ (flags
+  (:standard
+   -open
+   Tsync_field_spec
+   -open
+   Tsync_conf_parsing
+   -open
+   Tsync_backend_register
+   -open
+   Tsync_frontend_register
+   -open
+   Tsync_metrics
+   -open
+   Tsync_local_io
+   -open
+   Tsync_tls))
+ (name tsync_wizard)
+ (libraries
+  tsync_field_spec
+  tsync_conf_parsing
+  tsync_backend_register
+  tsync_frontend_register
+  tsync_metrics
+  tsync_local_io
+  tsync_tls
+  yojson
+  unix))
