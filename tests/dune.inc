@@ -645,6 +645,20 @@
   (alias runtest)
   (action (run ./backend_traffic.exe))))
 
+(subdir unit/batch_nesting
+ (alias
+  (name default)
+  (deps batch_nesting.exe))
+ (rule
+  (alias runtest)
+  (target batch_nesting.output)
+  (action
+   (with-stdout-to batch_nesting.output (ignore-stderr (run ./batch_nesting.exe)))))
+ (rule
+  (alias runtest)
+  (action
+   (diff batch_nesting.expected batch_nesting.output))))
+
 (subdir unit/batched
  (alias
   (name default)
