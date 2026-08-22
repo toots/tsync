@@ -762,7 +762,9 @@ module Make (C : Conf.S) = struct
       List.filter_map
         (fun (e : Backend.file_entry) ->
           let k = e.Backend.key in
-          if Key.is_dir k || Fs_util.is_temp_key k then None else Some k)
+          if Key.is_dir k || Fs_util.is_temp_key k || Folder.is_index_key k
+          then None
+          else Some k)
         entries
     in
     let* () =

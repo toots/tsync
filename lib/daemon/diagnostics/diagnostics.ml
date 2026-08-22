@@ -296,7 +296,15 @@ module Make (C : Conf.S) = struct
   let count_now ~name ~exact (module B : Backend.S) =
     Lwt.catch
       (fun () ->
-        let* manifests = B.list_prefix ~prefix:C.domain_prefix () in
+        let* listed = B.list_prefix ~prefix:C.domain_prefix () in
+        (* A folder's index is a cache of the manifests beside it, not one of
+           them. *)
+        let manifests =
+          List.filter
+            (fun (e : Backend.file_entry) ->
+              not (Folder.is_index_key e.Backend.key))
+            listed
+        in
         (* Manifests are keyed by folder id, not hashed, so nothing is evenly
            spread to sample: this count stays a full walk. It is also the smaller
            of the two, one object per file. *)

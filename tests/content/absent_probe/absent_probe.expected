@@ -1,0 +1,16 @@
+
+=== a name that is not there is asked about once
+the first probe misses: ok
+and it reached the backend: ok
+the second probe still misses: ok
+without asking again: ok
+
+=== a name that is there is unaffected
+it resolves: ok
+
+=== an absence is dropped once the journal moves
+not there yet: ok
+and is not seen while the mark stands: ok
+but is once the mark has moved: ok
+
+8 check(s), 0 failure(s)

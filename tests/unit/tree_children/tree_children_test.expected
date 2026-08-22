@@ -1,0 +1,20 @@
+
+=== an emptied namespace has no children
+the store still lists the namespace as a directory key: ok
+and it yields no children: ok
+
+=== children are classified by their body
+one manifest: ok
+one marker: ok
+
+=== an unusable body is reported, not raised
+the good child survives: ok
+the bad one is reported once: ok
+and `Fail skips it just the same: ok
+
+=== one object that will not read does not cost its siblings
+the readable siblings still arrive: ok
+and only the unreadable one is reported: ok
+`Fail refuses the folder rather than shortening it: ok
+
+10 check(s), 0 failure(s)

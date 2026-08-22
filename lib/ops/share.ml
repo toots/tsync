@@ -96,8 +96,16 @@ module Make (C : Conf.S) = struct
                         Lwt.fail
                           (Share_not_found (Printf.sprintf "not found: %s" rel))
                 in
+                (* Two, because one of them may be the folder's index, which
+                   is a cache of its children rather than one of them. *)
                 let* entries =
-                  R.list_prefix ~prefix:dir_prefix ~max_keys:1 ()
+                  R.list_prefix ~prefix:dir_prefix ~max_keys:2 ()
+                in
+                let entries =
+                  List.filter
+                    (fun (e : Backend.file_entry) ->
+                      not (Folder.is_index_key e.Backend.key))
+                    entries
                 in
                 if entries = [] then
                   Lwt.fail

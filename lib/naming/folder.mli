@@ -25,6 +25,16 @@ val new_id : unit -> string
     length and filesystem-safe whatever the real name is. *)
 val child_key : folder_id:string -> string -> string
 
+(** A folder's own cache of its children's bodies, filed inside the namespace it
+    describes: it is then listed alongside them, so finding it costs no round
+    trip of its own, and deleting the folder takes it too.
+
+    The [.tsync-] sentinel keeps it clear of a child key, which is always a pair
+    of hex hashes. *)
+val index_key : folder_id:string -> string
+
+val is_index_key : string -> bool
+
 type marker = { name : string; id : string }
 
 val marker_to_string : marker -> string

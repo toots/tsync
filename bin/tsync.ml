@@ -1198,8 +1198,10 @@ let sync_cmd =
                  Lwt.return_unit)
            in
            let+ () =
-             Tree.fold_tree ~on_unusable:(`Skip unusable) ~slots
-               ~folder_id:Folder.root_id ~rel:"" visit ()
+             (* The one walk that reads every folder whole and may write, so
+                it is the one that leaves each folder's index behind. *)
+             Tree.fold_tree ~on_unusable:(`Skip unusable) ~refresh_index:true
+               ~slots ~folder_id:Folder.root_id ~rel:"" visit ()
            in
            (!count, !failed)
          in

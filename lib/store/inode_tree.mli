@@ -31,12 +31,21 @@ module Make (C : Conf.S) : sig
 
   (** Direct children of [folder_id], [`Fail] by default.
 
-      Each child costs a fetch, so they are taken under [slots] — the domain's
-      download budget unless a caller passes a bound of its own, which is how
-      [tsync sync --full] honours [--parallelism]. A pool passed here must
-      outlive the call and must not be one the fold body asks again. *)
+      One listing, then whatever {!Folder_index} does not already hold, read in
+      one request where the store has a way to make one. [slots] bounds those
+      reads — the domain's download budget unless a caller passes a bound of its
+      own, which is how [tsync sync --full] honours [--parallelism]. A pool
+      passed here must outlive the call and must not be one the fold body asks
+      again.
+
+      [refresh_index] writes the folder's index back when enough of it was not
+      covered to pay for the round trip, and is for a caller that walks the tree
+      and may write: a read-only domain and a share being served must leave it
+      alone. Best effort either way — a read does not fail because its cache
+      could not be refreshed. *)
   val children :
     ?on_unusable:on_unusable ->
+    ?refresh_index:bool ->
     ?slots:Lwt_bounded.t ->
     folder_id:string ->
     unit ->
@@ -48,6 +57,7 @@ module Make (C : Conf.S) : sig
       into. *)
   val fold_tree :
     ?on_unusable:on_unusable ->
+    ?refresh_index:bool ->
     ?slots:Lwt_bounded.t ->
     folder_id:string ->
     rel:string ->

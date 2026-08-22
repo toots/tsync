@@ -15,6 +15,13 @@ let new_id = Id.short
 let hash_name name = Xxhash.hash_hex name 0 ^ "-" ^ Xxhash.hash_hex name 1
 let child_key ~folder_id name = folder_id ^ "/" ^ hash_name name
 
+(* A folder's own cache of its children's bodies, filed inside the namespace it
+   describes so it is listed with them and dies with them. The sentinel keeps it
+   clear of a child key, which is always a pair of hex hashes. *)
+let index_leaf = ".tsync-index"
+let index_key ~folder_id = folder_id ^ "/" ^ index_leaf
+let is_index_key key = Filename.basename key = index_leaf
+
 type marker = { name : string; id : string }
 
 let marker_to_string { name; id } =
