@@ -147,7 +147,7 @@ module Make (C : Conf.S) = struct
       | None -> fail `Not_found "not found"
       | Some body ->
           let j =
-            try Yojson.Safe.from_string (Chunk.to_string body)
+            try Yojson.Safe.from_string (Bigstring.to_string body)
             with _ -> fail `Bad_gateway "corrupt share manifest"
           in
           let expires =

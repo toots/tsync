@@ -12,10 +12,10 @@ type 'a t
 (** [decode] reads one record from the mapped body, advancing the cursor past
     exactly the bytes {!add} wrote for it. *)
 val create :
-  dir:string -> name:string -> decode:(Chunk.t -> int ref -> 'a) -> 'a t Lwt.t
+  dir:string -> name:string -> decode:(Bigstring.t -> int ref -> 'a) -> 'a t Lwt.t
 
 (** Append one record, each field written by one of [fields]. Raises once the
-    spool is sealed: {!Chunk.map_file} is sound for a file that stays as it was
+    spool is sealed: {!Bigstring.map_file} is sound for a file that stays as it was
     mapped, and the seal is where that begins. *)
 val add : 'a t -> (Buffer.t -> unit) list -> unit Lwt.t
 
@@ -47,5 +47,5 @@ val reap : dir:string -> unit Lwt.t
 val str : Buffer.t -> string -> unit
 
 val int64 : Buffer.t -> int64 -> unit
-val read_string : Chunk.t -> int ref -> string
-val read_int64 : Chunk.t -> int ref -> int64
+val read_string : Bigstring.t -> int ref -> string
+val read_int64 : Bigstring.t -> int ref -> int64

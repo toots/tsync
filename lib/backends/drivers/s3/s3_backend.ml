@@ -77,7 +77,7 @@ let put t ~key ~data () =
     with_retry "put" (fun () ->
         S3.put_bigstring ~credentials:t.credentials ~endpoint:t.endpoint
           ~bucket:t.bucket ~unsigned_payload:t.unsigned_payload ~key
-          ~data:(Chunk.buffer data) ())
+          ~data:(data) ())
   in
   ignore (unwrap "put" res)
 
@@ -96,7 +96,7 @@ let get t ~key () =
         S3.get_bigstring ~credentials:t.credentials ~endpoint:t.endpoint
           ~bucket:t.bucket ~key ())
   in
-  Chunk.of_buffer (unwrap "get" res)
+  (unwrap "get" res)
 
 (* [`If_none_match] is s3's own "only if this key is free": it decides, and
    answers 412 when it declines, so the object is never replaced and the loser
@@ -107,7 +107,7 @@ let put_if_absent t ~key ~data () =
     with_retry "put_if_absent" (fun () ->
         S3.put_bigstring ~credentials:t.credentials ~endpoint:t.endpoint
           ~bucket:t.bucket ~unsigned_payload:t.unsigned_payload
-          ~precondition:`If_none_match ~key ~data:(Chunk.buffer data) ())
+          ~precondition:`If_none_match ~key ~data:(data) ())
   in
   match res with
     | Ok _ -> Lwt.return data
@@ -123,7 +123,7 @@ let get_opt t ~key () =
           ~bucket:t.bucket ~key ())
   in
   match res with
-    | Ok body -> Some (Chunk.of_buffer body)
+    | Ok body -> Some (body)
     | Error S3.Not_found -> None
     | Error e ->
         Log.err "s3 get %s: %s" key (string_of_error e);

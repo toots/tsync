@@ -9,7 +9,7 @@ open Lwt.Syntax
 (* Narrower than [Remote.S] so the store has no cycle with it and can be driven
    by a stub in tests. *)
 module type Fetch = sig
-  val get_chunk : chunk_key:string -> Chunk.t Lwt.t
+  val get_chunk : chunk_key:string -> Bigstring.t Lwt.t
 end
 
 module Make (C : Conf.S) (F : Fetch) = struct
@@ -48,13 +48,13 @@ module Make (C : Conf.S) (F : Fetch) = struct
           (fun i ->
             let* data = body i in
             let expected = Chunk_group.size group i in
-            if Chunk.length data <> expected then
+            if Bigstring.length data <> expected then
               Lwt.fail
                 (Backend.Backend_error
                    (Printf.sprintf "chunk %s: have %d bytes, manifest says %d"
                       (Chunk_group.member_key group i)
-                      (Chunk.length data) expected))
-            else put ~offset:(Chunk_group.offset group i) (Chunk.buffer data))
+                      (Bigstring.length data) expected))
+            else put ~offset:(Chunk_group.offset group i) (data))
           (Chunk_group.indices group))
 
   (* Bounds fetches that have started, not groups asked for: a fetch opens its

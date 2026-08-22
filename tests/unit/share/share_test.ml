@@ -68,13 +68,13 @@ let () =
      (* File: put a (non-marker) manifest, share it. *)
      let* file_key = L.ensure_manifest_key (C.domain_prefix ^ "foo") in
      let* () =
-       B.put ~key:file_key ~data:(Chunk.of_string "{\"chunks\":[]}") ()
+       B.put ~key:file_key ~data:(Bigstring.of_string "{\"chunks\":[]}") ()
      in
      let* url = S.create ~token:"aa" ~expires:123 ~rel:"foo" () in
      let url = match url with Ok u -> u | Error e -> failwith e in
      assert (url = share_base ^ "/aa");
      let* body = B.get ~key:(shares_prefix ^ "aa") () in
-     let m = Yojson.Basic.from_string (Chunk.to_string body) in
+     let m = Yojson.Basic.from_string (Bigstring.to_string body) in
      assert (member "type" m = `String "file");
      assert (member "key" m = `String file_key);
      assert (member "filename" m = `String "foo");
@@ -83,13 +83,13 @@ let () =
      let* () =
        B.put
          ~key:(C.domain_prefix ^ Folder.root_id ^ "/x")
-         ~data:(Chunk.of_string "x") ()
+         ~data:(Bigstring.of_string "x") ()
      in
      let* url = S.create ~token:"bb" ~expires:123 ~rel:"" () in
      let url = match url with Ok u -> u | Error e -> failwith e in
      assert (url = share_base ^ "/bb");
      let* body = B.get ~key:(shares_prefix ^ "bb") () in
-     let m = Yojson.Basic.from_string (Chunk.to_string body) in
+     let m = Yojson.Basic.from_string (Bigstring.to_string body) in
      assert (member "type" m = `String "dir");
      assert (member "filename" m = `String "testdom.zip");
      assert (
@@ -134,7 +134,7 @@ let () =
   let (module Composite : Backend.S) = ReadOnlyDomain.store in
   (match
      Lwt_main.run
-       (Composite.put ~key:"tsync/shares/zz" ~data:(Chunk.of_string "x") ())
+       (Composite.put ~key:"tsync/shares/zz" ~data:(Bigstring.of_string "x") ())
    with
     | exception Backend.Not_writable -> ()
     | _ -> assert false);
@@ -179,7 +179,7 @@ let () =
      in
      let* () =
        Lwt_list.iter_s
-         (fun key -> B.put ~key ~data:(Chunk.of_string "1234") ())
+         (fun key -> B.put ~key ~data:(Bigstring.of_string "1234") ())
          cached
      in
      let* result = S.clear_cache () in

@@ -36,7 +36,7 @@
    -open
    Tsync_conf
    -open
-   Tsync_chunk
+   Tsync_bigstring
    -open
    Tsync_backend_register
    -open
@@ -72,7 +72,7 @@
   tsync-libs.naming
   tsync-libs.frontend_register
   tsync_launcher
-  tsync-libs.chunk
+  tsync-libs.bigstring
   tsync-libs.backend_register
   tsync-libs.metrics
   tsync-libs.job

@@ -255,7 +255,7 @@ let parse_op meth uri body =
         match obj_key () with Some k -> Delete k | None -> Bad)
     | `POST, "/get-multi" -> (
         match
-          try Some (Yojson.Safe.from_string (Chunk.to_string body))
+          try Some (Yojson.Safe.from_string (Bigstring.to_string body))
           with _ -> None
         with
           | Some (`List l) when List.length l <= max_keys_per_request ->
@@ -264,7 +264,7 @@ let parse_op meth uri body =
           | _ -> Bad)
     | `POST, "/delete-multi" -> (
         match
-          try Some (Yojson.Safe.from_string (Chunk.to_string body))
+          try Some (Yojson.Safe.from_string (Bigstring.to_string body))
           with _ -> None
         with
           | Some (`List l) when List.length l <= max_keys_per_request ->
@@ -359,7 +359,7 @@ let respond ?(status = `OK) ?(headers = []) body =
    response alone and nothing writes to it again. *)
 let respond_chunk data =
   Cohttp_lwt_unix.Server.respond ~status:`OK
-    ~body:(Cohttp_lwt.Body.of_bigstring (`Passthrough (Chunk.buffer data)))
+    ~body:(Cohttp_lwt.Body.of_bigstring (`Passthrough (data)))
     ()
 
 let authed route req body =
@@ -388,7 +388,7 @@ let exec route op ~body =
         let* data = B.get_opt ~key () in
         match data with
           | Some data ->
-              Metrics.count read_bytes (Chunk.length data);
+              Metrics.count read_bytes (Bigstring.length data);
               respond_chunk data
           | None -> respond ~status:`Not_found "")
     | Head key -> (
@@ -410,8 +410,8 @@ let exec route op ~body =
         else
           let module B = (val route.store : Backend.S) in
           let* held = B.put_if_absent ~key ~data:body () in
-          Metrics.count written_bytes (Chunk.length body);
-          Metrics.count read_bytes (Chunk.length held);
+          Metrics.count written_bytes (Bigstring.length body);
+          Metrics.count read_bytes (Bigstring.length held);
           (* The body that won, so the caller learns whether it was theirs
              without a second round trip. *)
           respond_chunk held
@@ -422,7 +422,7 @@ let exec route op ~body =
             let module B = (val route.store : Backend.S) in
             B.put ~key ~data:body ()
           in
-          Metrics.count written_bytes (Chunk.length body);
+          Metrics.count written_bytes (Bigstring.length body);
           respond ""
     | Delete key ->
         if not (writable key) then reject_ro ()
@@ -447,7 +447,7 @@ let exec route op ~body =
         let* answered = Bb.get_many ~entries () in
         let framed = Http_proxy.Wire.bodies_to_string answered in
         Metrics.count read_bytes (String.length framed);
-        respond_chunk (Chunk.of_string framed)
+        respond_chunk (Bigstring.of_string framed)
     | Delete_multi keys ->
         if route.read_only then reject_ro ()
         else
@@ -767,7 +767,7 @@ let callback ~port ~tls routes _conn req body =
           ~range:(Cohttp.Header.get (Cohttp.Request.headers req) "range")
     | None -> (
         let* body = Cohttp_lwt.Body.to_bigstring body in
-        let body = Chunk.of_buffer body in
+        let body = body in
         match (meth, Uri.path uri) with
           | `GET, ("/" | "/index.html") ->
               bump "page";

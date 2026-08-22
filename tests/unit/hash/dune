@@ -1,5 +1,5 @@
 (executable
  (flags
-  (:standard -open Tsync_chunk -open Tsync_xxhash -open Tsync_naming))
+  (:standard -open Tsync_bigstring -open Tsync_xxhash -open Tsync_naming))
  (name hash)
- (libraries tsync_chunk tsync_xxhash tsync_naming))
+ (libraries tsync_bigstring tsync_xxhash tsync_naming))

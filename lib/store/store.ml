@@ -18,7 +18,7 @@ module Make (C : Conf.S) (L : Layout.S) = struct
           let+ body = B.get_opt ~key:bk () in
           match body with
             | None -> `Absent
-            | Some body -> `Body (Chunk.to_string body))
+            | Some body -> `Body (Bigstring.to_string body))
 
   let get_manifest_opt ~key =
     let+ state = get_manifest_state ~key in
@@ -89,7 +89,7 @@ module Make (C : Conf.S) (L : Layout.S) = struct
 
   let get_version ~vkey =
     let+ body = B.get ~key:vkey () in
-    Chunk.to_string body
+    Bigstring.to_string body
 
   (* Records a directory under its parent's namespace so resync can rebuild the
      tree. No-op for layouts with no folder tree. *)
@@ -97,7 +97,7 @@ module Make (C : Conf.S) (L : Layout.S) = struct
     let* m = L.ensure_folder_marker key in
     match m with
       | None -> Lwt.return_unit
-      | Some (bkey, data) -> B.put ~key:bkey ~data:(Chunk.of_string data) ()
+      | Some (bkey, data) -> B.put ~key:bkey ~data:(Bigstring.of_string data) ()
 
   (* Direct children (file manifests and folder markers) of a folder namespace,
      and a raw object fetch — used by resync to walk the inode tree by id. *)
@@ -106,12 +106,12 @@ module Make (C : Conf.S) (L : Layout.S) = struct
 
   let get_object ~bkey =
     let+ body = B.get ~key:bkey () in
-    Chunk.to_string body
+    Bigstring.to_string body
 
   let get_objects ?slots ~entries () =
     let+ answered = Bb.get_many ?slots ~entries () in
-    List.map (fun (key, body) -> (key, Option.map Chunk.to_string body)) answered
+    List.map (fun (key, body) -> (key, Option.map Bigstring.to_string body)) answered
 
   let delete_raw ~bkey = B.delete ~key:bkey ()
-  let put_raw ~bkey ~data = B.put ~key:bkey ~data:(Chunk.of_string data) ()
+  let put_raw ~bkey ~data = B.put ~key:bkey ~data:(Bigstring.of_string data) ()
 end

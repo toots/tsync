@@ -85,7 +85,7 @@ let () =
          let* resp, body =
            Http_client.call client ~headers:no_headers ~meth:`GET uri
          in
-         if Http_client.is_ok resp && Chunk.to_string body = "ok" then
+         if Http_client.is_ok resp && Bigstring.to_string body = "ok" then
            incr answered;
          go (n - 1)
      in

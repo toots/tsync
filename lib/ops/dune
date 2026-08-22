@@ -25,7 +25,7 @@
    -open
    Tsync_glob
    -open
-   Tsync_chunk
+   Tsync_bigstring
    -open
    Tsync_spill
    -open
@@ -46,7 +46,7 @@
   tsync_local_io
   tsync_lwt_unix
   tsync_glob
-  tsync_chunk
+  tsync_bigstring
   tsync_spill
   tsync_hashtbl_mmap
   tsync_backend_register

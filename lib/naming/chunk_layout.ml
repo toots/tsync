@@ -31,7 +31,7 @@ let is_shard_name name =
 
 (* Here rather than beside the manifest that publishes it, so a store can hold a
    body against its own name without depending on the shapes that reference it. *)
-let key_of_body data = Chunk.hash_hex data 0 ^ "-" ^ Chunk.hash_hex data 1
+let key_of_body data = Xxhash.hash_bigstring_hex data 0 ^ "-" ^ Xxhash.hash_bigstring_hex data 1
 let chunks_seg = "/chunks/"
 
 (* Derived rather than spelled, so the store's own root lives in exactly one

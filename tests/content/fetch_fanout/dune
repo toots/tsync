@@ -2,7 +2,7 @@
  (flags
   (:standard
    -open
-   Tsync_chunk
+   Tsync_bigstring
    -open
    Tsync_backend_register
    -open
@@ -16,7 +16,7 @@
  (name fetch_fanout_test)
  (libraries
   tsync_test_harness
-  tsync_chunk
+  tsync_bigstring
   tsync_backend_register
   tsync_content
   tsync_object

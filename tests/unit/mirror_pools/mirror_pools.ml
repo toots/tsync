@@ -93,7 +93,7 @@ let () =
          (fun n ->
            Src.put
              ~key:(Printf.sprintf "%sfolder/%04d" domain_prefix n)
-             ~data:(Chunk.of_string (String.make (8 + n) 'x'))
+             ~data:(Bigstring.of_string (String.make (8 + n) 'x'))
              ())
          (List.init 2000 (fun i -> i))
      in

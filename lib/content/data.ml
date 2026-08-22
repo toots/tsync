@@ -961,9 +961,9 @@ module Make (C : Conf.S) (R : Remote.S) = struct
                   Manifest.chunk_len ~size:staged.Manifest.s_size
                     ~chunk_size:staged.Manifest.s_chunk_size i
                 in
-                let buf = Chunk.create len in
+                let buf = Bigstring.create len in
                 let+ () = fill buf in
-                Chunk.of_buffer buf)
+                buf)
     in
     (* An untouched group keeps its key, so whatever body we hold for it is
        still right. *)

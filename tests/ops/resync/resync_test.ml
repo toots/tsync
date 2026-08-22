@@ -45,7 +45,7 @@ module Fs = File_store.Make (C)
 let ns id = C.domain_prefix ^ id ^ "/"
 
 let put id name body =
-  Store.put ~key:(ns id ^ name) ~data:(Chunk.of_string body) ()
+  Store.put ~key:(ns id ^ name) ~data:(Bigstring.of_string body) ()
 
 let manifest_body name =
   Chunk_table.encode ~name ~size:0L ~chunk_size:4 ~mtime:0.

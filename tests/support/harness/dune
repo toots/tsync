@@ -24,7 +24,7 @@
   tsync_conf_parsing
   tsync_domain
   tsync_runtime
-  tsync_chunk
+  tsync_bigstring
   tsync_local_io
   lwt
   lwt.unix

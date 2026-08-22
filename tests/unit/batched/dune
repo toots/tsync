@@ -2,10 +2,10 @@
  (flags
   (:standard
    -open
-   Tsync_chunk
+   Tsync_bigstring
    -open
    Tsync_backend_register
    -open
    Tsync_test_harness))
  (name batched_test)
- (libraries tsync_test_harness tsync_backend_register tsync_chunk lwt lwt.unix))
+ (libraries tsync_test_harness tsync_backend_register tsync_bigstring lwt lwt.unix))

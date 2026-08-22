@@ -8,8 +8,8 @@
 open Check
 module Wire = Http_proxy.Wire
 
-let body s = Some (Chunk.of_string s)
-let rendered = List.map (fun (k, b) -> (k, Option.map Chunk.to_string b))
+let body s = Some (Bigstring.of_string s)
+let rendered = List.map (fun (k, b) -> (k, Option.map Bigstring.to_string b))
 
 let raises what f =
   match f () with
@@ -25,7 +25,7 @@ let () =
     (rendered (Wire.bodies_of_string ~keys framed) = rendered answered);
   check "an empty body is not an absent one"
     (match Wire.bodies_of_string ~keys framed with
-      | [_; (_, None); (_, Some e)] -> Chunk.length e = 0
+      | [_; (_, None); (_, Some e)] -> Bigstring.length e = 0
       | _ -> false);
 
   case "a mangled answer is refused, not misread";

@@ -51,7 +51,7 @@ let publish name =
   in
   Store.put
     ~key:(C.domain_prefix ^ Folder.child_key ~folder_id:Folder.root_id name)
-    ~data:(Chunk.of_string body) ()
+    ~data:(Bigstring.of_string body) ()
 
 let found name =
   let+ m = D.resolved_manifest (key name) in

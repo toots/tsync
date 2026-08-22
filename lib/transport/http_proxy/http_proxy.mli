@@ -18,7 +18,7 @@ module Auth : sig
     secret:string ->
     meth:string ->
     path:string ->
-    body:Chunk.t ->
+    body:Bigstring.t ->
     unit ->
     (string * string) list
 
@@ -34,7 +34,7 @@ module Auth : sig
     path:string ->
     timestamp:string ->
     signature:string ->
-    body:Chunk.t ->
+    body:Bigstring.t ->
     bool
 end
 
@@ -58,9 +58,9 @@ module Wire : sig
       because the order is the contract, so a decoder holding the request's keys
       catches a short or reordered answer, which a self-describing body would
       let through as a set of absences. *)
-  val bodies_to_string : (string * Chunk.t option) list -> string
+  val bodies_to_string : (string * Bigstring.t option) list -> string
 
   (** Raises [Failure] on a body that does not frame [keys] exactly. *)
   val bodies_of_string :
-    keys:string list -> string -> (string * Chunk.t option) list
+    keys:string list -> string -> (string * Bigstring.t option) list
 end

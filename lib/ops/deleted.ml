@@ -13,7 +13,7 @@ module Make (C : Conf.S) = struct
     Lwt.catch
       (fun () ->
         let+ data = B.get ~key () in
-        match Manifest.of_string (Chunk.to_string data) with
+        match Manifest.of_string (Bigstring.to_string data) with
           | m -> Manifest.recorded_name m
           | exception _ -> fallback)
       (fun _ -> Lwt.return fallback)

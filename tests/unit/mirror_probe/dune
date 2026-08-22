@@ -2,7 +2,7 @@
  (flags
   (:standard
    -open
-   Tsync_chunk
+   Tsync_bigstring
    -open
    Tsync_naming
    -open
@@ -20,7 +20,7 @@
  (name mirror_probe)
  (libraries
   tsync_test_harness
-  tsync_chunk
+  tsync_bigstring
   tsync_naming
   tsync_conf
   tsync_backend_register

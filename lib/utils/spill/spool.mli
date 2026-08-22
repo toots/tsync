@@ -2,7 +2,7 @@
 
     A job too large to hold in memory spills to one of these and reads it back
     mapped. The order is not a detail that reads as a bug when got wrong:
-    {!Chunk.map_file} is sound only for a file nothing rewrites in place, so the
+    {!Bigstring.map_file} is sound only for a file nothing rewrites in place, so the
     channel is closed before the mapping is made, and a file still open for
     append is exactly what that rules out. *)
 
@@ -19,7 +19,7 @@ val append : t -> string -> unit Lwt.t
 val append_file : t -> src:string -> unit Lwt.t
 
 (** Close the channel and map the whole finished file. *)
-val seal : t -> Chunk.t Lwt.t
+val seal : t -> Bigstring.t Lwt.t
 
 (** Close without mapping, for a spool whose bytes are read another way. *)
 val close : t -> unit Lwt.t

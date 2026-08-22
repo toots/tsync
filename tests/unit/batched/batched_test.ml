@@ -12,7 +12,7 @@ let objects : (string, string) Hashtbl.t = Hashtbl.create 16
 let reads = ref 0
 let batches = ref 0
 
-let body key = Option.map Chunk.of_string (Hashtbl.find_opt objects key)
+let body key = Option.map Bigstring.of_string (Hashtbl.find_opt objects key)
 
 module Base = struct
   let unsupported () = Lwt.fail (Backend.Backend_error "not part of this test")
@@ -61,7 +61,7 @@ module Bn = Backend.Batched (Native)
 
 let entry ?(size = 1) key =
   Backend.{ key; size; last_modified = 0.; etag = None }
-let rendered = List.map (fun (k, b) -> (k, Option.map Chunk.to_string b))
+let rendered = List.map (fun (k, b) -> (k, Option.map Bigstring.to_string b))
 
 let () =
   Hashtbl.replace objects "a" "alpha";

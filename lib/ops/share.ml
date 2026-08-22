@@ -60,7 +60,7 @@ module Make (C : Conf.S) = struct
           in
           let marker =
             Option.bind obj (fun obj ->
-                Folder.marker_of_string (Chunk.to_string obj))
+                Folder.marker_of_string (Bigstring.to_string obj))
           in
           match (file_key, obj, marker) with
             | Some file_key, Some _, None ->
@@ -131,7 +131,7 @@ module Make (C : Conf.S) = struct
         let manifest_key = shares_prefix ^ token in
         let* () =
           B.put ~key:manifest_key
-            ~data:(Chunk.of_string (Yojson.Basic.to_string manifest))
+            ~data:(Bigstring.of_string (Yojson.Basic.to_string manifest))
             ()
         in
         Lwt.return_ok (share_url ^ "/" ^ token))

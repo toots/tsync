@@ -22,7 +22,7 @@ module type S = sig
     unit ->
     Manifest.t Lwt.t
 
-  val get_chunk : chunk_key:string -> Chunk.t Lwt.t
+  val get_chunk : chunk_key:string -> Bigstring.t Lwt.t
 
   (** Chunk size for files this client creates; see the .mli. *)
   val chunk_size : unit -> int Lwt.t
@@ -133,7 +133,7 @@ module Make_with_layout (C : Conf.S) (L : Layout.S) : S = struct
      whose manifest used a larger one — takes a single slot regardless, and so
      costs more than a slot is reckoned to. *)
   let with_slot f = Lwt_bounded.use chunk_slots f
-  let with_chunk_buffer ~size f = with_slot (fun () -> f (Chunk.create size))
+  let with_chunk_buffer ~size f = with_slot (fun () -> f (Bigstring.create size))
 
   (* Workers as wide as the buffer pool, each taking the next index: a promise
      apiece is a fan-out the file's size chooses, and a terabyte's worth of them
@@ -219,7 +219,7 @@ module Make_with_layout (C : Conf.S) (L : Layout.S) : S = struct
     let len = min chunk_size (file_size - offset) in
     with_slot (fun () ->
         let data =
-          try Chunk.map_fd fd ~offset ~len
+          try Bigstring.map_fd fd ~offset ~len
           with Unix.Unix_error _ -> raise Cancelled
         in
         let+ ck_rel, sent = put_chunk ~data in
@@ -285,7 +285,7 @@ module Make_with_layout (C : Conf.S) (L : Layout.S) : S = struct
           let* before = Lwt_unix_retry.LargeFile.fstat fd in
           (* Frozen here, so a source truncated mid-upload is a manifest never
              published rather than a SIGBUS on a page past its new end. *)
-          let snapshot = Chunk.open_snapshot src_path in
+          let snapshot = Bigstring.open_snapshot src_path in
           Lwt.finalize
             (fun () ->
               let file_size =
@@ -345,7 +345,7 @@ module Make_with_layout (C : Conf.S) (L : Layout.S) : S = struct
         | `Fill fill ->
             with_chunk_buffer ~size:len (fun buf ->
                 let* () = fill buf in
-                let+ ck_rel, _ = put_chunk ~data:(Chunk.of_buffer buf) in
+                let+ ck_rel, _ = put_chunk ~data:(buf) in
                 Chunk_table.set table index ck_rel)
     in
     let* () = each_chunk ~count:n one in

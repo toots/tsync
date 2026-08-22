@@ -11,10 +11,10 @@
 open Lwt.Syntax
 open Check
 
-let body n = Chunk.of_string (String.make n 'x')
+let body n = Bigstring.of_string (String.make n 'x')
 
 module Memory () : Backend.S = struct
-  let objects : (string, Chunk.t) Hashtbl.t = Hashtbl.create 8
+  let objects : (string, Bigstring.t) Hashtbl.t = Hashtbl.create 8
 
   let put ~key ~data () =
     Hashtbl.replace objects key data;
@@ -42,7 +42,7 @@ module Memory () : Backend.S = struct
          (fun d ->
            {
              Backend.key;
-             size = Chunk.length d;
+             size = Bigstring.length d;
              last_modified = 0.;
              etag = None;
            })
@@ -69,7 +69,7 @@ module Memory () : Backend.S = struct
            if String.starts_with ~prefix key then
              {
                Backend.key;
-               size = Chunk.length d;
+               size = Bigstring.length d;
                last_modified = 0.;
                etag = None;
              }
