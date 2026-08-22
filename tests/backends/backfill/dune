@@ -2,6 +2,8 @@
  (flags
   (:standard
    -open
+   Tsync_chunk_keyspace
+   -open
    Tsync_chunks
    -open
    Tsync_object
@@ -21,6 +23,7 @@
    Tsync_test_harness))
  (name backfill)
  (libraries
+  tsync_chunk_keyspace
   tsync_chunks
   tsync_test_harness
   tsync_object

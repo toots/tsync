@@ -2,24 +2,24 @@
  (flags
   (:standard
    -open
+   Tsync_chunk_keyspace
+   -open
    Tsync_field_spec
    -open
    Tsync_log
    -open
    Tsync_bigstring
    -open
-   Tsync_backend_register
-   -open
-   Tsync_naming))
+   Tsync_backend_register))
  (name tsync_s3_backend)
  (private_modules s3_backend)
  (optional)
  (library_flags (-linkall))
  (libraries
+  tsync_chunk_keyspace
   tsync-libs.field_spec
   tsync-libs.bigstring
   tsync-libs.backend_register
-  tsync-libs.naming
   tsync-libs.log
   aws-s3-lwt
   lwt

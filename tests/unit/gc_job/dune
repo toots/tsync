@@ -1,5 +1,5 @@
 (executable
  (flags
-  (:standard -open Tsync_naming))
+  (:standard -open Tsync_chunk_keyspace -open Tsync_naming))
  (name gc_job)
- (libraries tsync_naming unix))
+ (libraries tsync_chunk_keyspace tsync_naming unix))

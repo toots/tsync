@@ -2,6 +2,8 @@
  (flags
   (:standard
    -open
+   Tsync_chunk_keyspace
+   -open
    Tsync_field_spec
    -open
    Tsync_log
@@ -10,18 +12,16 @@
    -open
    Tsync_backend_register
    -open
-   Tsync_naming
-   -open
    Tsync_http_client))
  (name tsync_gcs_backend)
  (private_modules gcs_auth)
  (library_flags (-linkall))
  (libraries
+  tsync_chunk_keyspace
   tsync-libs.field_spec
   tsync-libs.bigstring
   tsync-libs.backend_register
   tsync_http_client
-  tsync-libs.naming
   tsync-libs.log
   cohttp-lwt-unix
   uri

@@ -2,6 +2,8 @@
  (flags
   (:standard
    -open
+   Tsync_chunk_keyspace
+   -open
    Tsync_naming
    -open
    Tsync_log
@@ -18,6 +20,7 @@
  (name tsync_domain_store)
  (public_name tsync-libs.domain_store)
  (libraries
+  tsync_chunk_keyspace
   tsync_naming
   tsync_work
   tsync_bigstring

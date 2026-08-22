@@ -7,6 +7,8 @@
  (flags
   (:standard
    -open
+   Tsync_chunk_keyspace
+   -open
    Tsync_chunks
    -open
    Tsync_conf
@@ -39,6 +41,7 @@
  (name tsync_ops)
  (public_name tsync-libs.ops)
  (libraries
+  tsync_chunk_keyspace
   tsync_chunks
   tsync_conf
   tsync_naming

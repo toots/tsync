@@ -2,6 +2,8 @@
  (flags
   (:standard
    -open
+   Tsync_chunk_keyspace
+   -open
    Tsync_chunks
    -open
    Tsync_field_spec
@@ -14,19 +16,17 @@
    -open
    Tsync_backend_register
    -open
-   Tsync_naming
-   -open
    Tsync_log
    -open
    Tsync_device))
  (name tsync_local_backend)
  (library_flags (-linkall))
  (libraries
+  tsync_chunk_keyspace
   tsync_chunks
   tsync-libs.field_spec
   tsync-libs.bigstring
   tsync-libs.backend_register
-  tsync-libs.naming
   tsync-libs.log
   tsync_device
   tsync-libs.local_io

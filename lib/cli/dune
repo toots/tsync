@@ -6,6 +6,8 @@
  (flags
   (:standard
    -open
+   Tsync_chunk_keyspace
+   -open
    Tsync_field_spec
    -open
    Tsync_sync
@@ -63,6 +65,7 @@
    Tsync_lwt_unix))
  (name tsync_cli)
  (libraries
+  tsync_chunk_keyspace
   tsync-libs.lwt_unix
   tsync-libs.field_spec
   tsync-libs.sync

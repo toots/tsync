@@ -1,5 +1,18 @@
 (executable
  (flags
-  (:standard -open Tsync_object -open Tsync_naming -open Tsync_local_io))
+  (:standard
+   -open
+   Tsync_chunk_keyspace
+   -open
+   Tsync_object
+   -open
+   Tsync_naming
+   -open
+   Tsync_local_io))
  (name layout)
- (libraries tsync_object tsync_naming tsync_local_io unix))
+ (libraries
+  tsync_chunk_keyspace
+  tsync_object
+  tsync_naming
+  tsync_local_io
+  unix))
