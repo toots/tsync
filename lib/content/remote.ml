@@ -174,7 +174,7 @@ module Make_with_layout (C : Conf.S) (L : Layout.S) : S = struct
     Metrics.add_hashed 1;
     let ck = chunk_backend_key ck_rel in
     let* known =
-      Dedup.known dedup ~suspect:Corrupt.is_marked ~present:chunk_exists ck_rel
+      Dedup.known dedup ~corrupt:Corrupt.is_marked ~present:chunk_exists ck_rel
     in
     let+ () =
       if known then (

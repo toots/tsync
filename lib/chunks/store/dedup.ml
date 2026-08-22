@@ -11,8 +11,8 @@ let remember t key =
 
 let count t = Hashtbl.length t.known
 
-let known t ~suspect ~present key =
-  let* marked = suspect key in
+let known t ~corrupt ~present key =
+  let* marked = corrupt key in
   if marked then Lwt.return_false
   else if Hashtbl.mem t.known key then Lwt.return_true
   else present key

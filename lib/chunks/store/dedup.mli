@@ -23,9 +23,9 @@ val create : ?max_known:(unit -> int) -> unit -> t
 
 (** Whether [key] may be taken as already stored.
 
-    [suspect] says the store filed this key as not being what its name says;
-    such a key reads as absent whatever the memo or the store answer, and the
-    two are not consulted. That ordering is what closes the loop: a chunk this
+    [corrupt] says the store filed this key as not holding what its name says.
+    Such a key reads as absent whatever the memo or the store answer, and
+    neither is consulted. That ordering is what closes the loop: a chunk this
     session placed is in the memo, and a marker says exactly that what it placed
     is not what landed. Asking the store would not help either — a corrupt chunk
     is the right size and so present. Reporting it stored would leave the marker
@@ -33,10 +33,10 @@ val create : ?max_known:(unit -> int) -> unit -> t
     hand the bad bytes to every later file containing it.
 
     [present] asks the store, and is reached only for a key that is neither
-    suspect nor remembered. *)
+    corrupt nor remembered. *)
 val known :
   t ->
-  suspect:(string -> bool Lwt.t) ->
+  corrupt:(string -> bool Lwt.t) ->
   present:(string -> bool Lwt.t) ->
   string ->
   bool Lwt.t

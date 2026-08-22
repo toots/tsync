@@ -29,12 +29,12 @@ let probes () =
 
 let () =
   Lwt_main.run
-    (case "a suspect key is absent, and nothing else is consulted";
+    (case "a corrupt key is absent, and nothing else is consulted";
      let asked, record = probes () in
      let t = Dedup.create () in
      Dedup.remember t key;
      let* answer =
-       Dedup.known t ~suspect:(record "suspect" true)
+       Dedup.known t ~corrupt:(record "corrupt" true)
          ~present:(record "present" true) key
      in
      check "reported absent" (answer = false) ~why:(fun () ->
@@ -48,7 +48,7 @@ let () =
      let t = Dedup.create () in
      Dedup.remember t key;
      let* answer =
-       Dedup.known t ~suspect:(record "suspect" false)
+       Dedup.known t ~corrupt:(record "corrupt" false)
          ~present:(record "present" false) key
      in
      check "reported stored" (answer = true);
@@ -60,7 +60,7 @@ let () =
      let asked, record = probes () in
      let t = Dedup.create () in
      let* answer =
-       Dedup.known t ~suspect:(record "suspect" false)
+       Dedup.known t ~corrupt:(record "corrupt" false)
          ~present:(record "present" true) key
      in
      check "the store's answer is taken" (answer = true);
