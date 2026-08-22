@@ -43,54 +43,6 @@ module Make (C : Conf.S) (L : Layout.S) = struct
           let* () = B.copy ~src_key:src ~dst_key:dst () in
           B.delete ~key:src ()
 
-  (* [<versions>/<manifest-key-tail>/<ts>], so versions share the manifest's
-     identity — a stable folder id — and survive a folder rename. *)
-  let version_dir ~key =
-    let+ bk = L.manifest_key key in
-    Option.map
-      (fun bk ->
-        C.versions_prefix
-        ^ Key.strip_prefix ~domain_prefix:C.domain_prefix bk
-        ^ "/")
-      bk
-
-  (* Snapshot the current manifest object under a fresh timestamped version key,
-     when it exists on the backend. Best-effort: a lost snapshot must not wedge
-     the write it precedes. *)
-  let save_version ~key =
-    let* bk = L.manifest_key key in
-    match bk with
-      | None -> Lwt.return_unit
-      | Some bk -> (
-          let* head = B.head_opt ~key:bk () in
-          match head with
-            | None -> Lwt.return_unit
-            | Some _ -> (
-                let ts = Int64.of_float (Unix.gettimeofday () *. 1e9) in
-                let* dir = version_dir ~key in
-                match dir with
-                  | None -> Lwt.return_unit
-                  | Some dir ->
-                      Lwt.catch
-                        (fun () ->
-                          B.copy ~src_key:bk
-                            ~dst_key:(dir ^ Int64.to_string ts)
-                            ())
-                        (fun exn ->
-                          Log.warn "save_version %s: %s" key
-                            (Printexc.to_string exn);
-                          Lwt.return_unit)))
-
-  let list_versions ~key =
-    let* dir = version_dir ~key in
-    match dir with
-      | None -> Lwt.return_nil
-      | Some dir -> B.list_prefix ~prefix:dir ()
-
-  let get_version ~vkey =
-    let+ body = B.get ~key:vkey () in
-    Bigstring.to_string body
-
   (* Records a directory under its parent's namespace so resync can rebuild the
      tree. No-op for layouts with no folder tree. *)
   let put_folder_marker ~key =

@@ -38,12 +38,14 @@ let cmd : unit Cmd.t =
     run_lwt
       (let open Lwt.Syntax in
        let (module C : Conf.S) = load_conf ?domain () in
-       let module St = Store.Make (C) (Layout.Inode.Make (C)) in
+       let module L = Layout.Inode.Make (C) in
+       let module St = Store.Make (C) (L) in
+       let module Hs = History.Make (C) (L) in
        let module B = (val C.store : Backend.S) in
-       let parse = Versioning.parse ~versions_prefix:C.versions_prefix in
+       let parse = History.parse ~versions_prefix:C.versions_prefix in
        match path with
          | Some rel ->
-             let* dir = St.version_dir ~key:(C.domain_prefix ^ rel) in
+             let* dir = Hs.version_dir ~key:(C.domain_prefix ^ rel) in
              let+ entries =
                match dir with
                  | None -> Lwt.return_nil

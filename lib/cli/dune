@@ -6,6 +6,8 @@
  (flags
   (:standard
    -open
+   Tsync_history
+   -open
    Tsync_store
    -open
    Tsync_staged
@@ -71,6 +73,7 @@
    Tsync_lwt_unix))
  (name tsync_cli)
  (libraries
+  tsync_history
   tsync_store
   tsync_staged
   tsync_checkout

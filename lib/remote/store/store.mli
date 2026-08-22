@@ -29,19 +29,6 @@ module Make (C : Conf.S) (L : Layout.S) : sig
       has to be there already or there is nothing to move. *)
   val copy_manifest : src_key:string -> dst_key:string -> unit Lwt.t
 
-  (** [<versions_prefix>/<manifest key tail>/], so a file's versions share its
-      identity — a stable folder id — and survive a rename of any folder above
-      it. [None] when the key's folder is unknown. *)
-  val version_dir : key:string -> string option Lwt.t
-
-  (** Snapshot the current manifest object under a fresh timestamped version
-      key, when the backend has one. Best-effort: a lost snapshot must not wedge
-      the write it precedes. *)
-  val save_version : key:string -> unit Lwt.t
-
-  val list_versions : key:string -> Backend.file_entry list Lwt.t
-  val get_version : vkey:string -> string Lwt.t
-
   (** Record a directory under its parent's namespace, so a resync can rebuild
       the tree. A no-op for a layout with no folder tree. *)
   val put_folder_marker : key:string -> unit Lwt.t

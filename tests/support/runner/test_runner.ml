@@ -1165,7 +1165,7 @@ let dump_backend_at ~backend_root ~domain_prefix ~chunk_prefix ~journal_prefix
   let version_entries =
     List.filter_map
       (fun (e : Backend.file_entry) ->
-        match Versioning.parse ~versions_prefix e.key with
+        match History.parse ~versions_prefix e.key with
           | Some (rel, ts) -> Some (rel, Int64.of_string ts, e.key)
           | None -> None)
       entries
@@ -1306,7 +1306,7 @@ let dump_backend_at ~backend_root ~domain_prefix ~chunk_prefix ~journal_prefix
         Printf.printf "  cursor = %s\n"
           (entry_alias (String.trim (Bigstring.to_string data)))
       else if starts_with versions_prefix e.key then (
-        match Versioning.parse ~versions_prefix e.key with
+        match History.parse ~versions_prefix e.key with
           | Some (rel, _) ->
               let n =
                 Option.value ~default:0 (Hashtbl.find_opt version_alias e.key)

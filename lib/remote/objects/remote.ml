@@ -88,6 +88,7 @@ let pools_for ~prefix ~max_chunk_buffers ~max_downloads =
 module Make_with_layout (C : Conf.S) (L : Layout.S) : S = struct
   (* [St] maps logical keys to backend keys through the layout scheme. *)
   module St = Store.Make (C) (L)
+  module Hs = History.Make (C) (L)
   module B = (val C.store : Backend.S)
 
   (* Chunk writes go where they always went; only presence checks and reads have
@@ -205,7 +206,7 @@ module Make_with_layout (C : Conf.S) (L : Layout.S) : S = struct
     in
     let body = Chunk_table.seal table ~h1 ~h2 in
     let state = Manifest.of_chunk body in
-    let* () = if C.versioning then St.save_version ~key else Lwt.return_unit in
+    let* () = if C.versioning then Hs.save_version ~key else Lwt.return_unit in
     Log.info "upload %s: publishing manifest, size=%Ld" key size;
     (* Before the manifest is visible, never after: a chunk this upload did not
        write — deduplicated, or already known to this session — may hold a name

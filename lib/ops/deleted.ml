@@ -5,7 +5,7 @@ type entry = { path : string; latest : int64; versions : int }
 module Make (C : Conf.S) = struct
   module B = (val C.store : Backend.S)
 
-  let parse key = Versioning.parse ~versions_prefix:C.versions_prefix key
+  let parse key = History.parse ~versions_prefix:C.versions_prefix key
 
   (* Version keys are hashed, so the real name is read out of the body a version
      kept rather than derived from the key. *)

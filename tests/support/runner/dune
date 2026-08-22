@@ -2,6 +2,8 @@
  (flags
   (:standard
    -open
+   Tsync_history
+   -open
    Tsync_staged
    -open
    Tsync_checkout
@@ -45,6 +47,7 @@
    Tsync_ipc_handler))
  (name tsync_test_runner)
  (libraries
+  tsync_history
   tsync_staged
   tsync_checkout
   tsync_manifest

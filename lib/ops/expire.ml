@@ -26,7 +26,7 @@ module Make (C : Conf.S) = struct
     in
     go 0 keys
 
-  let parse = Versioning.parse ~versions_prefix:C.versions_prefix
+  let parse = History.parse ~versions_prefix:C.versions_prefix
 
   (* A folder's index is not one of its children, so no fold offers it, and it
      holds a copy of every manifest body in the folder: left behind, nothing

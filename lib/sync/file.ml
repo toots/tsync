@@ -22,6 +22,7 @@ module Make_with_layout (C : Conf.S) (Sq : Sync_queue.S) (L : Layout.S) :
   (* [St] takes logical (real-path) keys and maps them to backend keys through
      the layout scheme. [Mf] is the local mirror. *)
   module St = Store.Make (C) (L)
+  module Hs = History.Make (C) (L)
   module Mf = Checkout.Make (C)
   module Mfs = Staged_manifest.Make (C)
   module D = Data.Make (C) (R)
@@ -225,7 +226,7 @@ module Make_with_layout (C : Conf.S) (Sq : Sync_queue.S) (L : Layout.S) :
     W.complete ek
 
   let save_version key =
-    if C.versioning then St.save_version ~key else Lwt.return_unit
+    if C.versioning then Hs.save_version ~key else Lwt.return_unit
 
   let apply_delete key =
     let* () = save_version key in
@@ -445,7 +446,7 @@ module Make_with_layout (C : Conf.S) (Sq : Sync_queue.S) (L : Layout.S) :
   let latest_version entries =
     List.fold_left
       (fun acc (e : Backend.file_entry) ->
-        match Versioning.parse ~versions_prefix:C.versions_prefix e.key with
+        match History.parse ~versions_prefix:C.versions_prefix e.key with
           | None -> acc
           | Some (_, ts) -> (
               let n = Int64.of_string ts in
@@ -458,17 +459,17 @@ module Make_with_layout (C : Conf.S) (Sq : Sync_queue.S) (L : Layout.S) :
     let* src_key =
       match version with
         | Some ts -> (
-            let* dir = St.version_dir ~key in
+            let* dir = Hs.version_dir ~key in
             match dir with
               | Some dir -> Lwt.return (dir ^ ts)
               | None -> failwith ("no versions for " ^ rel_key key))
         | None -> (
-            let* entries = St.list_versions ~key in
+            let* entries = Hs.list_versions ~key in
             match latest_version entries with
               | Some (k, _) -> Lwt.return k
               | None -> failwith ("no versions for " ^ rel_key key))
     in
-    let* data = St.get_version ~vkey:src_key in
+    let* data = Hs.get_version ~vkey:src_key in
     match Manifest.of_string data with
       | m ->
           ignore (cancel_upload key);

@@ -1,0 +1,30 @@
+; What the store keeps of things the live tree stopped pointing at: a file's
+; earlier manifests. The key shape is built and taken apart here, in one place,
+; since the two must agree.
+
+(library
+ (flags
+  (:standard
+   -open
+   Tsync_conf
+   -open
+   Tsync_naming
+   -open
+   Tsync_store
+   -open
+   Tsync_bigstring
+   -open
+   Tsync_backend_register
+   -open
+   Tsync_log))
+ (name tsync_history)
+ (public_name tsync-libs.history)
+ (libraries
+  tsync_conf
+  tsync_naming
+  tsync_store
+  tsync_bigstring
+  tsync_backend_register
+  tsync_log
+  lwt
+  unix))
