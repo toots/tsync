@@ -101,10 +101,10 @@ let () =
      case "the body a store is handed is the one a reader decodes";
      let name = "big.bin" in
      check "under the name it records, byte for byte"
-       (Chunk.to_string (Manifest.body ~name manifest)
+       (Bigstring.to_string (Manifest.body ~name manifest)
        = Manifest.to_string ~name manifest);
      check "and under any other name, which is an encoding again"
-       (Chunk.to_string (Manifest.body ~name:"filed-as.bin" manifest)
+       (Bigstring.to_string (Manifest.body ~name:"filed-as.bin" manifest)
        = Manifest.to_string ~name:"filed-as.bin" manifest);
 
      (* A second upload of the same bytes takes the deduplicated path, which

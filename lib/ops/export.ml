@@ -37,7 +37,9 @@ module Make (C : Conf.S) = struct
   (* Errors are skipped rather than fatal: one unreadable object should cost its
      own file, not the whole export. *)
   let remote_rels () =
-    Tree.fold_tree ~skip_errors:true ~folder_id:Folder.root_id ~rel:""
+    Tree.fold_tree
+      ~on_unusable:(`Skip (fun _ _ -> ()))
+      ~folder_id:Folder.root_id ~rel:""
       (fun acc rel entry ->
         match entry.Inode_tree.body with
           (* Walked by backend key, which is hashed, so the body is the only

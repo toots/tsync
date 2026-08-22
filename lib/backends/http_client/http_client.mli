@@ -31,9 +31,9 @@ val call :
   t ->
   headers:(unit -> Cohttp.Header.t Lwt.t) ->
   meth:Cohttp.Code.meth ->
-  ?body:Chunk.t ->
+  ?body:Bigstring.t ->
   Uri.t ->
-  (Cohttp.Response.t * Chunk.t) Lwt.t
+  (Cohttp.Response.t * Bigstring.t) Lwt.t
 
 (** {!call} under {!Backend.with_retry}, raising on a transient status so the
     shared ladder retries it. Every other response comes back for the verb to
@@ -42,10 +42,10 @@ val call_retry :
   t ->
   headers:(unit -> Cohttp.Header.t Lwt.t) ->
   meth:Cohttp.Code.meth ->
-  ?body:Chunk.t ->
+  ?body:Bigstring.t ->
   string ->
   Uri.t ->
-  (Cohttp.Response.t * Chunk.t) Lwt.t
+  (Cohttp.Response.t * Bigstring.t) Lwt.t
 
 (** {!call_retry} reading the body as a string, for the verbs that answer with
     JSON or a sentence and have to parse it anyway. *)
@@ -53,7 +53,7 @@ val call_text :
   t ->
   headers:(unit -> Cohttp.Header.t Lwt.t) ->
   meth:Cohttp.Code.meth ->
-  ?body:Chunk.t ->
+  ?body:Bigstring.t ->
   string ->
   Uri.t ->
   (Cohttp.Response.t * string) Lwt.t

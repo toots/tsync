@@ -1,0 +1,20 @@
+
+=== a name that is not there is asked about once
+the first probe misses: ok
+and it reached the backend: ok
+the second probe still misses: ok
+without asking again: ok
+
+=== a name that is there is unaffected
+it resolves: ok
+
+=== an absence is dropped once the journal moves
+not there yet: ok
+and is not seen while the mark stands: ok
+but is once the mark has moved: ok
+
+=== a folder this client has not learned is not an absence
+a key under an unknown folder finds nothing: ok
+and is asked again once the folder is known: ok
+
+10 check(s), 0 failure(s)

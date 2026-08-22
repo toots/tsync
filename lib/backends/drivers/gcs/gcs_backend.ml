@@ -69,7 +69,7 @@ let call_retry t ~meth ?ctype ?(extra_headers = []) ?body op uri =
    verbs below carry a body small enough to read as a string, and one they have
    to parse anyway. *)
 let call_text t ~meth ?ctype ?(extra_headers = []) ?body op uri =
-  let body = Option.map Chunk.of_string body in
+  let body = Option.map Bigstring.of_string body in
   Http_client.call_text t.client
     ~headers:(headers t ~ctype ~extra_headers)
     ~meth ?body op uri
@@ -106,6 +106,7 @@ let entry_of_json name j =
     Backend.key = name;
     size = size_of j;
     last_modified = parse_rfc3339 (str_member "updated" j);
+    etag = (match str_member "etag" j with "" -> None | e -> Some e);
   }
 
 let put t ~key ~data () =
@@ -114,20 +115,20 @@ let put t ~key ~data () =
       (upload_uri t key)
   in
   if not (is_ok resp) then
-    raise (backend_error "put" (code resp) (Chunk.to_string body))
+    raise (backend_error "put" (code resp) (Bigstring.to_string body))
 
 let get t ~key () =
   let uri = Uri.of_string (obj_path t key ^ "?alt=media") in
   let+ resp, body = call_retry t ~meth:`GET "get" uri in
   if is_ok resp then body
-  else raise (backend_error "get" (code resp) (Chunk.to_string body))
+  else raise (backend_error "get" (code resp) (Bigstring.to_string body))
 
 let get_opt t ~key () =
   let uri = Uri.of_string (obj_path t key ^ "?alt=media") in
   let+ resp, body = call_retry t ~meth:`GET "get_opt" uri in
   if is_ok resp then Some body
   else if code resp = 404 then None
-  else raise (backend_error "get_opt" (code resp) (Chunk.to_string body))
+  else raise (backend_error "get_opt" (code resp) (Bigstring.to_string body))
 
 (* [ifGenerationMatch=0] means "only if this object does not exist", and the 412
    GCS answers when it already does is the claim being lost, not an error. *)
@@ -141,7 +142,8 @@ let put_if_absent t ~key ~data () =
   in
   if is_ok resp then Lwt.return data
   else if code resp = 412 then get t ~key ()
-  else raise (backend_error "put_if_absent" (code resp) (Chunk.to_string body))
+  else
+    raise (backend_error "put_if_absent" (code resp) (Bigstring.to_string body))
 
 let head_opt t ~key () =
   let uri = Uri.of_string (obj_path t key) in
@@ -347,7 +349,7 @@ let make ?endpoint ?service_account_key ?share_url ~bucket () :
   in
   (* The verifier's job bodies are JSON, and it is handed this rather than the
      module's [put] below, which speaks in chunks. *)
-  let put_text ~key ~data () = put t ~key ~data:(Chunk.of_string data) () in
+  let put_text ~key ~data () = put t ~key ~data:(Bigstring.of_string data) () in
   (module struct
     let put ~key ~data () = put t ~key ~data ()
     let put_if_absent ~key ~data () = put_if_absent t ~key ~data ()
@@ -358,6 +360,10 @@ let make ?endpoint ?service_account_key ?share_url ~bucket () :
     let delete_multi keys = delete_multi t keys
     let copy ~src_key ~dst_key () = copy t ~src_key ~dst_key ()
     let list_prefix ?max_keys ~prefix () = list_all t ?max_keys ~prefix ()
+
+    (* The batch API carries metadata, not bodies: {!Backend.Batched} fans
+       these out. *)
+    let get_many = None
 
     let verify_all ~chunk_prefix () =
       let+ n =

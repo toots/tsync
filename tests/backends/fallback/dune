@@ -2,7 +2,7 @@
  (flags
   (:standard
    -open
-   Tsync_chunk
+   Tsync_bigstring
    -open
    Tsync_backend_register
    -open
@@ -14,7 +14,7 @@
  (name fallback)
  (libraries
   tsync_test_harness
-  tsync_chunk
+  tsync_bigstring
   tsync_backend_register
   tsync_domain_store
   tsync_local_backend

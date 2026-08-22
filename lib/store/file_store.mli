@@ -21,7 +21,7 @@ module Make (C : Conf.S) : sig
       assembled it somewhere other than the heap: an import records one op per
       file, and their encoding is the largest string it would otherwise hold. *)
   val write_journal_entry_body :
-    ?entry_key:Journal.Entry_key.t -> Chunk.t -> Journal.Entry_key.t Lwt.t
+    ?entry_key:Journal.Entry_key.t -> Bigstring.t -> Journal.Entry_key.t Lwt.t
 
   (** Point peers at [entry_key]. The cursor is one object name and a store
       rate-limits writes to it, so bumps are coalesced: this publishes at once

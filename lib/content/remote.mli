@@ -39,7 +39,7 @@ module type S = sig
 
   (** Fetch one chunk body from the domain's stores by its content key
       ([Manifest.chunk_key], without the domain's chunk prefix). *)
-  val get_chunk : chunk_key:string -> Chunk.t Lwt.t
+  val get_chunk : chunk_key:string -> Bigstring.t Lwt.t
 
   (** Chunk size for files this client creates: [Conf.S.chunk_size] when the
       config says, else what the domain's stores recommend — an http-proxy
@@ -94,6 +94,16 @@ module type S = sig
   (** Fetch only the manifest for [key] from the primary backend. Returns [None]
       if the key does not exist or is not a manifest. *)
   val fetch_manifest : key:string -> unit -> Manifest.t option Lwt.t
+
+  (** {!fetch_manifest} saying which nothing it found. Only [`Absent] is an
+      answer about the domain: [`Unresolved] is this client not knowing the
+      key's folder yet, and [`Unreadable] a body caught mid-write. A caller that
+      remembers an answer may remember the first and must not remember the other
+      two, which change with nothing about the domain changing. *)
+  val fetch_manifest_state :
+    key:string ->
+    unit ->
+    [ `Found of Manifest.t | `Absent | `Unresolved | `Unreadable ] Lwt.t
 end
 
 (** Keys are mapped to backend keys through [L]. Callers holding real paths want

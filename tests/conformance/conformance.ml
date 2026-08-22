@@ -64,11 +64,12 @@ let suite name (module B : Backend.S) =
   let open Lwt.Syntax in
   let key s = run_prefix ^ s in
   let round_trip () =
-    let* () = B.put ~key:(key "a") ~data:(Chunk.of_string "alpha") () in
+    let* () = B.put ~key:(key "a") ~data:(Bigstring.of_string "alpha") () in
     let* got = B.get ~key:(key "a") () in
-    check "put then get returns what was written" (Chunk.to_string got = "alpha");
+    check "put then get returns what was written"
+      (Bigstring.to_string got = "alpha");
     let* got = B.get_opt ~key:(key "a") () in
-    check "get_opt finds it" (Option.map Chunk.to_string got = Some "alpha");
+    check "get_opt finds it" (Option.map Bigstring.to_string got = Some "alpha");
     let* missing = B.get_opt ~key:(key "nope") () in
     check "get_opt of an absent key is None" (missing = None);
     let* head = B.head_opt ~key:(key "a") () in
@@ -81,7 +82,7 @@ let suite name (module B : Backend.S) =
   let copying () =
     let* () = B.copy ~src_key:(key "a") ~dst_key:(key "b") () in
     let* got = B.get ~key:(key "b") () in
-    check "copy duplicates the body" (Chunk.to_string got = "alpha");
+    check "copy duplicates the body" (Bigstring.to_string got = "alpha");
     Lwt.return_unit
   in
   let listing () =
@@ -97,6 +98,42 @@ let suite name (module B : Backend.S) =
     check "max_keys caps the listing" (List.length capped <= 1);
     Lwt.return_unit
   in
+  (* The second bulk verb, and the one whose failure is silent: a key wrongly
+     answered absent writes a mirror missing that file, and nothing walks a copy
+     afterwards to notice.
+
+     Asked through {!Backend.Batched} rather than of the driver's own field, so
+     a store that declares no batch is held to the same answers as one that
+     does, and a driver that later grows one inherits the cases. *)
+  let reading_many () =
+    let module Bb = Backend.Batched (B) in
+    let entry k =
+      Backend.{ key = k; size = 5; last_modified = 0.; etag = None }
+    in
+    let asked = [entry (key "a"); entry (key "nope"); entry (key "b")] in
+    let* answered = Bb.get_many ~entries:asked () in
+    check "every key asked for is answered, in order"
+      (List.map fst answered = List.map (fun e -> e.Backend.key) asked);
+    check "a present key carries its body"
+      (List.map (fun (_, b) -> Option.map Bigstring.to_string b) answered
+      = [Some "alpha"; None; Some "alpha"]);
+    (* Past whatever the store takes per request, so a driver that pages is
+       exercised rather than trusted. *)
+    let bulk = List.init 300 (fun i -> key (Printf.sprintf "many-%03d" i)) in
+    let* () =
+      Lwt_list.iter_p
+        (fun k -> B.put ~key:k ~data:(Bigstring.of_string k) ())
+        bulk
+    in
+    let* answered = Bb.get_many ~entries:(List.map entry bulk) () in
+    check "a list longer than one request is still answered whole"
+      (List.map fst answered = bulk
+      && List.for_all
+           (fun (k, b) -> Option.map Bigstring.to_string b = Some k)
+           answered);
+    let* () = B.delete_multi bulk in
+    Lwt.return_unit
+  in
   (* A body the size the product actually moves. Every other one here fits in a
      single socket read, which is the one size at which framing, content-length
      and reassembly cannot be wrong.
@@ -106,28 +143,30 @@ let suite name (module B : Backend.S) =
   let chunk_sized_body () =
     let size = Conf.default_chunk_size in
     let body =
-      let buffer = Chunk.create size in
+      let buffer = Bigstring.create size in
       (* Position-dependent, so a slice arriving twice, out of order or not at
          all shows up; a constant fill survives all three. *)
       for i = 0 to size - 1 do
         Bigstringaf.unsafe_set buffer i (Char.chr (i * 31 land 0xff))
       done;
-      Chunk.of_buffer buffer
+      buffer
     in
-    let digest = Chunk.hash_hex body 0 in
+    let digest = Xxhash.hash_bigstring_hex body 0 in
     let big = key "big" in
     let* () = B.put ~key:big ~data:body () in
     let* got = B.get ~key:big () in
     check "a chunk-sized body comes back whole"
-      (Chunk.length got = size && Chunk.hash_hex got 0 = digest);
+      (Bigstring.length got = size && Xxhash.hash_bigstring_hex got 0 = digest);
     let* head = B.head_opt ~key:big () in
     check "head_opt reports a chunk-sized object's size"
       (match head with Some e -> e.Backend.size = size | None -> false);
     (* A refused claim answers with the holder's body, so a chunk-sized one
        comes back down the same path a get does. *)
-    let* held = B.put_if_absent ~key:big ~data:(Chunk.of_string "small") () in
+    let* held =
+      B.put_if_absent ~key:big ~data:(Bigstring.of_string "small") ()
+    in
     check "a refused claim answers with the chunk-sized holder"
-      (Chunk.length held = size && Chunk.hash_hex held 0 = digest);
+      (Bigstring.length held = size && Xxhash.hash_bigstring_hex held 0 = digest);
     let* () = B.delete ~key:big () in
     Lwt.return_unit
   in
@@ -138,28 +177,30 @@ let suite name (module B : Backend.S) =
       Lwt_list.map_p
         (fun i ->
           B.put_if_absent ~key:claim
-            ~data:(Chunk.of_string (Printf.sprintf "c%d" i))
+            ~data:(Bigstring.of_string (Printf.sprintf "c%d" i))
             ())
         [1; 2; 3; 4; 5]
     in
-    let answers = List.map Chunk.to_string answers in
+    let answers = List.map Bigstring.to_string answers in
     let* stored = B.get ~key:claim () in
-    let stored = Chunk.to_string stored in
+    let stored = Bigstring.to_string stored in
     check "five racing claims leave one body"
       (List.length (List.sort_uniq compare answers) = 1);
     check "every claimant is told what actually holds it"
       (List.for_all (fun a -> a = stored) answers);
-    let* late = B.put_if_absent ~key:claim ~data:(Chunk.of_string "late") () in
-    let late = Chunk.to_string late in
+    let* late =
+      B.put_if_absent ~key:claim ~data:(Bigstring.of_string "late") ()
+    in
+    let late = Bigstring.to_string late in
     check "a later claim is refused and told the holder"
       (late = stored && late <> "late");
     let* after = B.get ~key:claim () in
-    check "and the holder is untouched" (Chunk.to_string after = stored);
+    check "and the holder is untouched" (Bigstring.to_string after = stored);
     let* mine =
-      B.put_if_absent ~key:(key "free") ~data:(Chunk.of_string "mine") ()
+      B.put_if_absent ~key:(key "free") ~data:(Bigstring.of_string "mine") ()
     in
     check "an unclaimed name answers with its own body"
-      (Chunk.to_string mine = "mine");
+      (Bigstring.to_string mine = "mine");
     Lwt.return_unit
   in
   let capabilities () =
@@ -210,10 +251,10 @@ let suite name (module B : Backend.S) =
         Lwt.catch
           (fun () ->
             let* () =
-              B.put ~key:(key ("bulk/" ^ n)) ~data:(Chunk.of_string n) ()
+              B.put ~key:(key ("bulk/" ^ n)) ~data:(Bigstring.of_string n) ()
             in
             let+ got = B.get_opt ~key:(key ("bulk/" ^ n)) () in
-            let ok = Option.map Chunk.to_string got = Some n in
+            let ok = Option.map Bigstring.to_string got = Some n in
             check (Printf.sprintf "key %S round-trips" n) ok;
             ok)
           (fun exn ->
@@ -243,7 +284,7 @@ let suite name (module B : Backend.S) =
     let live = [key "bulk/first"; key "bulk/at-cap"; key "bulk/past-cap"] in
     let* () =
       Lwt_list.iter_s
-        (fun k -> B.put ~key:k ~data:(Chunk.of_string "x") ())
+        (fun k -> B.put ~key:k ~data:(Bigstring.of_string "x") ())
         live
     in
     (* Only the spellings the store actually accepted: a name it refused above is
@@ -275,6 +316,7 @@ let suite name (module B : Backend.S) =
   let* () = section "round trips, heads and copies" round_trip in
   let* () = section "copying" copying in
   let* () = section "listing" listing in
+  let* () = section "reading many at once" reading_many in
   let* () = section "a chunk-sized body" chunk_sized_body in
   let* () = section "racing claims" racing_claims in
   let* () = section "capabilities" capabilities in
@@ -341,7 +383,7 @@ let verify_suite name fields =
   let+ body = On.get_opt ~key () in
   check "the delete request is an object the store hands back" (body <> None);
   check "carrying exactly the keys it was given"
-    (Option.map (fun b -> Discard_job.decode (Chunk.to_string b)) body
+    (Option.map (fun b -> Discard_job.decode (Bigstring.to_string b)) body
     = Some doomed)
 
 (* The half a client cannot prove on its own: that something is listening.
@@ -374,7 +416,7 @@ let live_delete_suite name (module B : Backend.S) =
         (* A real chunk, named the way one is: the function refuses anything
            that is not shaped like a chunk key under the requesting domain, so a
            made-up name would test the refusal rather than the delete. *)
-        let body = Chunk.of_string "conformance: a chunk to be collected" in
+        let body = Bigstring.of_string "conformance: a chunk to be collected" in
         let key = Chunk_layout.key_of_body body in
         let shard = String.sub key 0 Chunk_layout.fanout in
         let doomed = chunk_prefix ^ shard ^ "/" ^ key in

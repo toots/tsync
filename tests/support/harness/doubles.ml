@@ -11,6 +11,7 @@ end) : Backend.S = struct
   let delete_multi _ = fail ()
   let copy ~src_key:_ ~dst_key:_ () = fail ()
   let list_prefix ?max_keys:_ ~prefix:_ () = fail ()
+  let get_many = None
   let verify_all ~chunk_prefix:_ () = Lwt.return `Unsupported
 
   let discard ~chunk_prefix:_ ~run:_ ~name:_ ~keys:_ () =
@@ -30,6 +31,7 @@ module Hung : Backend.S = struct
   let delete_multi _ = never ()
   let copy ~src_key:_ ~dst_key:_ () = never ()
   let list_prefix ?max_keys:_ ~prefix:_ () = never ()
+  let get_many = None
   let verify_all ~chunk_prefix:_ () = Lwt.return `Unsupported
 
   let discard ~chunk_prefix:_ ~run:_ ~name:_ ~keys:_ () =
@@ -49,6 +51,7 @@ module Refuses : Backend.S = struct
   let delete_multi _ = fail ()
   let copy ~src_key:_ ~dst_key:_ () = fail ()
   let list_prefix ?max_keys:_ ~prefix:_ () = Lwt.return_nil
+  let get_many = None
   let verify_all ~chunk_prefix:_ () = Lwt.return `Unsupported
 
   let discard ~chunk_prefix:_ ~run:_ ~name:_ ~keys:_ () =

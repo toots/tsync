@@ -11,10 +11,10 @@
 open Lwt.Syntax
 open Check
 
-let body n = Chunk.of_string (String.make n 'x')
+let body n = Bigstring.of_string (String.make n 'x')
 
 module Memory () : Backend.S = struct
-  let objects : (string, Chunk.t) Hashtbl.t = Hashtbl.create 8
+  let objects : (string, Bigstring.t) Hashtbl.t = Hashtbl.create 8
 
   let put ~key ~data () =
     Hashtbl.replace objects key data;
@@ -39,7 +39,13 @@ module Memory () : Backend.S = struct
   let head_opt ~key () =
     Lwt.return
       (Option.map
-         (fun d -> { Backend.key; size = Chunk.length d; last_modified = 0. })
+         (fun d ->
+           {
+             Backend.key;
+             size = Bigstring.length d;
+             last_modified = 0.;
+             etag = None;
+           })
          (Hashtbl.find_opt objects key))
 
   let delete ~key () =
@@ -61,7 +67,13 @@ module Memory () : Backend.S = struct
       (Hashtbl.fold
          (fun key d acc ->
            if String.starts_with ~prefix key then
-             { Backend.key; size = Chunk.length d; last_modified = 0. } :: acc
+             {
+               Backend.key;
+               size = Bigstring.length d;
+               last_modified = 0.;
+               etag = None;
+             }
+             :: acc
            else acc)
          objects [])
 
@@ -70,6 +82,7 @@ module Memory () : Backend.S = struct
   let discard ~chunk_prefix:_ ~run:_ ~name:_ ~keys:_ () =
     Lwt.return `Unsupported
 
+  let get_many = None
   let capabilities ~prefix:_ () = Lwt.return Backend.no_caps
 end
 

@@ -28,12 +28,23 @@ module Make (C : Conf.S) = struct
 
   let parse = Versioning.parse ~versions_prefix:C.versions_prefix
 
-  (* Errors propagate: a short list would leave part of the subtree undeleted
+  (* A folder's index is not one of its children, so no fold offers it, and it
+     holds a copy of every manifest body in the folder: left behind, nothing
+     else would ever reclaim it. Taken from the listing the walk already does,
+     so only one that was really written is named.
+
+     Errors propagate: a short list would leave part of the subtree undeleted
      while its parent marker goes. *)
   let collect_namespace folder_id acc =
-    Tree.fold_tree ~folder_id ~rel:""
-      (fun acc _rel entry -> Lwt.return (entry.Inode_tree.bkey :: acc))
-      acc
+    let indexes = ref [] in
+    let+ children =
+      Tree.fold_tree
+        ~on_index:(fun key -> indexes := key :: !indexes)
+        ~folder_id ~rel:""
+        (fun acc _rel entry -> Lwt.return (entry.Inode_tree.bkey :: acc))
+        acc
+    in
+    !indexes @ children
 
   (* One named folder whatever its age: {!expire} selects by cutoff, and that
      one cutoff governs versions and the journal too. *)
@@ -50,7 +61,7 @@ module Make (C : Conf.S) = struct
           if Key.is_dir e.Backend.key then Lwt.return_none
           else
             let+ data = B.get ~key:e.Backend.key () in
-            let data = Chunk.to_string data in
+            let data = Bigstring.to_string data in
             match
               (Folder.trash_path_of_string data, Folder.marker_of_string data)
             with
@@ -89,7 +100,7 @@ module Make (C : Conf.S) = struct
             Lwt.return acc
           else
             let* data = B.get ~key:e.key () in
-            match Folder.marker_of_string (Chunk.to_string data) with
+            match Folder.marker_of_string (Bigstring.to_string data) with
               | Some m ->
                   Log.debug "expire: reclaiming trashed folder %s" m.Folder.name;
                   let+ subtree = collect_namespace m.Folder.id [] in

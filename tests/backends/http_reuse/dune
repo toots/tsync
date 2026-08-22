@@ -2,7 +2,7 @@
  (flags
   (:standard
    -open
-   Tsync_chunk
+   Tsync_bigstring
    -open
    Tsync_http_client
    -open
@@ -10,7 +10,7 @@
  (name http_reuse)
  (libraries
   tsync_test_harness
-  tsync_chunk
+  tsync_bigstring
   tsync_http_client
   cohttp-lwt-unix
   uri

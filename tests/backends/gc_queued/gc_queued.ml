@@ -32,7 +32,7 @@ module Replica : Backend.S = struct
     let+ () =
       Disk.put
         ~key:(Chunk_layout.gc_job_key ~chunk_prefix ~run name)
-        ~data:(Chunk.of_string (Discard_job.encode keys))
+        ~data:(Bigstring.of_string (Discard_job.encode keys))
         ()
     in
     `Queued
@@ -77,7 +77,7 @@ let consume_requests (module B : Backend.S) =
         match body with
           | None -> Lwt.return_none
           | Some body ->
-              let keys = Discard_job.decode (Chunk.to_string body) in
+              let keys = Discard_job.decode (Bigstring.to_string body) in
               let* () =
                 B.delete_multi
                   (keys @ List.filter_map Chunk_layout.marker_key keys)
@@ -93,9 +93,15 @@ let () =
     ((* Chunks 1 and 3 are live; 2 is unreferenced and is what the collection
         reclaims. The replica holds all three, plus a marker accusing 2 — which
         must go with it, nothing else ever being able to clear one. *)
-     let* () = Main.put ~key:(key 1) ~data:(Chunk.of_string "live-one") () in
-     let* () = Main.put ~key:(key 2) ~data:(Chunk.of_string "orphaned") () in
-     let* () = Main.put ~key:(key 3) ~data:(Chunk.of_string "live-two") () in
+     let* () =
+       Main.put ~key:(key 1) ~data:(Bigstring.of_string "live-one") ()
+     in
+     let* () =
+       Main.put ~key:(key 2) ~data:(Bigstring.of_string "orphaned") ()
+     in
+     let* () =
+       Main.put ~key:(key 3) ~data:(Bigstring.of_string "live-two") ()
+     in
      let manifest =
        let entry index k = Manifest.entry_of_key ~index ~size:8 k in
        Manifest.make ~name:"f" ~h1:(String.make 16 '0') ~h2:(String.make 16 '0')
@@ -105,13 +111,17 @@ let () =
      in
      let* () =
        Main.put ~key:(domain_prefix ^ "f")
-         ~data:(Chunk.of_string (Manifest.to_string ~name:"f" manifest))
+         ~data:(Bigstring.of_string (Manifest.to_string ~name:"f" manifest))
          ()
      in
-     let* () = Disk.put ~key:(key 1) ~data:(Chunk.of_string "live-one") () in
-     let* () = Disk.put ~key:(key 2) ~data:(Chunk.of_string "orphaned") () in
+     let* () =
+       Disk.put ~key:(key 1) ~data:(Bigstring.of_string "live-one") ()
+     in
+     let* () =
+       Disk.put ~key:(key 2) ~data:(Bigstring.of_string "orphaned") ()
+     in
      let marker = Option.get (Chunk_layout.marker_key (key 2)) in
-     let* () = Disk.put ~key:marker ~data:(Chunk.of_string "{}") () in
+     let* () = Disk.put ~key:marker ~data:(Bigstring.of_string "{}") () in
 
      case "the collection returns without the copy having been touched";
      let* s = G.run () in
@@ -149,7 +159,7 @@ let () =
        (List.map (fun (n, _, _) -> n) stuck = ["replica"]);
      let* body = Disk.get_opt ~key:(List.hd jobs).Backend.key () in
      check "with the keys it named intact"
-       (Option.map (fun b -> Discard_job.decode (Chunk.to_string b)) body
+       (Option.map (fun b -> Discard_job.decode (Bigstring.to_string b)) body
        = Some [key 2]);
 
      case "once the function runs";

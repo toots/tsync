@@ -30,6 +30,16 @@ let create ?max_waiting ?name ~max () =
   (match name with None -> () | Some n -> named := !named @ [(n, t)]);
   t
 
+let shared_pools : (string, t) Hashtbl.t = Hashtbl.create 8
+
+let shared ~key ~name ~max () =
+  match Hashtbl.find_opt shared_pools key with
+    | Some t -> t
+    | None ->
+        let t = create ~name ~max () in
+        Hashtbl.replace shared_pools key t;
+        t
+
 let in_flight t = t.held
 let waiting t = t.waiting
 let width t = t.limit

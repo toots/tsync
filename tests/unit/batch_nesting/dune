@@ -1,0 +1,19 @@
+(executable
+ (flags
+  (:standard
+   -open
+   Tsync_test_harness
+   -open
+   Tsync_domain_store
+   -open
+   Tsync_bigstring
+   -open
+   Tsync_backend_register))
+ (name batch_nesting)
+ (libraries
+  tsync_test_harness
+  tsync_domain_store
+  tsync_bigstring
+  tsync_backend_register
+  lwt
+  lwt.unix))

@@ -1,4 +1,16 @@
-type file_entry = { key : string; size : int; last_modified : float }
+type file_entry = {
+  key : string;
+  size : int;
+  last_modified : float;
+  etag : string option;
+      (** What the store calls this object's version, when it has a name for
+          one: an S3 or GCS listing carries it, a filesystem has none.
+
+          The only validator worth caching an object's body against. Size and
+          [last_modified] are not: S3 reports whole seconds, and a manifest
+          rewritten inside one to a body of the same length — same name, same
+          chunk count — is invisible in both. *)
+}
 
 exception Backend_error of string
 exception Cancelled
@@ -114,14 +126,16 @@ let merge_caps cs =
   { merged with verified = cs <> [] && List.for_all (fun c -> c.verified) cs }
 
 module type S = sig
-  val put : key:string -> data:Chunk.t -> unit -> unit Lwt.t
-  val get : key:string -> unit -> Chunk.t Lwt.t
+  val put : key:string -> data:Bigstring.t -> unit -> unit Lwt.t
+  val get : key:string -> unit -> Bigstring.t Lwt.t
 
   (** [None] when the key does not exist; other failures raise. Saves the HEAD
       round trip of [head_opt] + [get] when the body is wanted. *)
-  val get_opt : key:string -> unit -> Chunk.t option Lwt.t
+  val get_opt : key:string -> unit -> Bigstring.t option Lwt.t
 
-  val put_if_absent : key:string -> data:Chunk.t -> unit -> Chunk.t Lwt.t
+  val put_if_absent :
+    key:string -> data:Bigstring.t -> unit -> Bigstring.t Lwt.t
+
   val head_opt : key:string -> unit -> file_entry option Lwt.t
   val delete : key:string -> unit -> unit Lwt.t
   val delete_multi : string list -> unit Lwt.t
@@ -129,6 +143,16 @@ module type S = sig
 
   val list_prefix :
     ?max_keys:int -> prefix:string -> unit -> file_entry list Lwt.t
+
+  (** A native multi-object read, or [None] from a store with none — which is
+      every store but http-proxy, S3 having no multi-object GET and the GCS
+      batch API carrying metadata only. Declared rather than implemented, so a
+      store without one says so and {!Batched} supplies the fan-out. *)
+  val get_many :
+    (entries:file_entry list ->
+    unit ->
+    (string * Bigstring.t option) list Lwt.t)
+    option
 
   val verify_all :
     chunk_prefix:string -> unit -> [ `Queued of int | `Unsupported ] Lwt.t
@@ -145,6 +169,51 @@ module type S = sig
       its bytes. See {!caps}; [no_caps] is the honest answer for every store
       that only holds bytes. *)
   val capabilities : prefix:string -> unit -> caps Lwt.t
+end
+
+(* Runs a request may ask for at once. Both bounds are needed: the count is what
+   a request line carries, and the byte budget is what the answer costs in
+   memory, which a folder of large manifests reaches first. *)
+let max_batch_keys = 256
+let max_batch_bytes = 8 * 1024 * 1024
+
+let batches entries =
+  let rec go done_ run keys bytes = function
+    | [] -> List.rev (if run = [] then done_ else List.rev run :: done_)
+    | e :: tl ->
+        if
+          run <> []
+          && (keys >= max_batch_keys || bytes + e.size > max_batch_bytes)
+        then go (List.rev run :: done_) [e] 1 e.size tl
+        else go done_ (e :: run) (keys + 1) (bytes + e.size) tl
+  in
+  go [] [] 0 0 entries
+
+(* Object reads a batch stands in for, for a caller with no budget of its own.
+   Module-level, since a pool built per call is not a bound. *)
+let batch_slots = lazy (Lwt_bounded.create ~name:"batch reads" ~max:32 ())
+
+module Batched (B : S) = struct
+  open Lwt.Syntax
+
+  let get_many ?slots ~entries () =
+    let slots =
+      match slots with Some s -> s | None -> Lazy.force batch_slots
+    in
+    let ask run =
+      match B.get_many with
+        | Some f -> Lwt_bounded.use slots (fun () -> f ~entries:run ())
+        | None ->
+            Lwt_bounded.map_with slots
+              (fun (e : file_entry) ->
+                let+ body = B.get_opt ~key:e.key () in
+                (e.key, body))
+              run
+    in
+    (* A run at a time, so what is held is one request's bodies rather than the
+       whole folder's twice over. *)
+    let+ answered = Lwt_list.map_s ask (batches entries) in
+    List.concat answered
 end
 
 type factory = (string -> string option) -> (module S)
@@ -248,26 +317,39 @@ let counted ~traffic m =
 
     let put ~key ~data () =
       let+ () = Inner.put ~key ~data () in
-      up (Chunk.length data)
+      up (Bigstring.length data)
 
     (* A loser gets the winning body back, which came down the link; the winner
        is handed its own [data] again, so physical identity tells them apart
        without comparing bodies that are equal by construction. *)
     let put_if_absent ~key ~data () =
       let+ held = Inner.put_if_absent ~key ~data () in
-      up (Chunk.length data);
-      if held != data then down (Chunk.length held);
+      up (Bigstring.length data);
+      if held != data then down (Bigstring.length held);
       held
 
     let get ~key () =
       let+ data = Inner.get ~key () in
-      down (Chunk.length data);
+      down (Bigstring.length data);
       data
 
     let get_opt ~key () =
       let+ data = Inner.get_opt ~key () in
-      Option.iter (fun d -> down (Chunk.length d)) data;
+      Option.iter (fun d -> down (Bigstring.length d)) data;
       data
+
+    (* The fan-out {!Batched} builds needs nothing here, going through the
+       [get_opt] above; a store's own batch crosses the link unseen otherwise. *)
+    let get_many =
+      Option.map
+        (fun f ~entries () ->
+          let+ answered = f ~entries () in
+          List.iter
+            (fun (_, body) ->
+              Option.iter (fun b -> down (Bigstring.length b)) body)
+            answered;
+          answered)
+        Inner.get_many
   end : S)
 
 let make ?traffic ~backend_type ~get_field () =

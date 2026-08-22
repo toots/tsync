@@ -1,0 +1,28 @@
+
+=== a client with no bookmark rebuilds
+nothing is recorded yet: ok
+  full(1 manifests, 0 failed, no bookmark (first run))
+it rebuilt: ok
+saying why: ok
+it found the manifest: ok
+and told the daemon once: ok
+
+=== a clean rebuild records how far it got
+the bookmark is set: ok
+
+=== a client already caught up applies the journal instead
+  incremental(0)
+it did not rebuild: ok
+and told the daemon nothing: ok
+
+=== --full rebuilds a client that had no need to
+  full(1 manifests, 0 failed, --full flag)
+it rebuilt: ok
+saying the caller asked: ok
+
+=== a walk that did not reach everything leaves the bookmark alone
+  full(1 manifests, 1 failed, --full flag)
+the failure is counted: ok
+and the bookmark did not move: ok
+
+12 check(s), 0 failure(s)

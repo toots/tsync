@@ -67,12 +67,12 @@ module Make (C : Conf.S) = struct
              held only while a body exists. *)
           Lwt_bounded.use copy_pool (fun () ->
               if Key.is_dir entry.key then
-                let+ () = Dst.put ~key:entry.key ~data:Chunk.empty () in
+                let+ () = Dst.put ~key:entry.key ~data:Bigstring.empty () in
                 Some (reason, 0)
               else
                 let* data = Src.get ~key:entry.key () in
                 let+ () = Dst.put ~key:entry.key ~data () in
-                Some (reason, Chunk.length data))
+                Some (reason, Bigstring.length data))
 
   let dedup_entries entries =
     (* Listing order is backend-dependent. *)
@@ -84,7 +84,7 @@ module Make (C : Conf.S) = struct
   let decode_entry body pos =
     let key = Listing.read_string body pos in
     let size = Int64.to_int (Listing.read_int64 body pos) in
-    Backend.{ key; size; last_modified = 0. }
+    Backend.{ key; size; last_modified = 0.; etag = None }
 
   let record_entry (e : Backend.file_entry) =
     [
@@ -96,7 +96,11 @@ module Make (C : Conf.S) = struct
      plans against is wanted once, and the listing is on disk by the time
      anything could ask it a second time. *)
   let add_entry ~bytes listing (e : Backend.file_entry) =
-    if Fs_util.is_temp_key e.Backend.key then Lwt.return_unit
+    (* A folder index records the versions the store that built it reported,
+       so a copy matches nothing where it lands; it is also a duplicate of every
+       manifest body in its folder, which would transfer the namespace twice. *)
+    if Fs_util.is_temp_key e.Backend.key || Folder.is_index_key e.Backend.key
+    then Lwt.return_unit
     else (
       bytes := Int64.add !bytes (Int64.of_int e.Backend.size);
       Listing.add listing (record_entry e))

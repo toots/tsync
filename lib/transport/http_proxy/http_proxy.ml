@@ -8,8 +8,7 @@ module Auth = struct
   (* Over the bytes where they lie: a chunk body is the largest thing signed
      here, and materialising one as a string to hash it would put the megabytes
      back on the heap that carrying it as a chunk keeps off. *)
-  let sha256_hex body =
-    Digestif.SHA256.(to_hex (digest_bigstring (Chunk.buffer body)))
+  let sha256_hex body = Digestif.SHA256.(to_hex (digest_bigstring body))
 
   (* Sign method + request-target + timestamp + a hash of the body, so a captured
      signature can't be replayed against a different request or body. *)
@@ -48,13 +47,21 @@ module Wire = struct
   let decode_key s =
     Base64.decode ~alphabet:Base64.uri_safe_alphabet ~pad:false s
 
+  (* Passed through rather than dropped: a client behind a proxy caches bodies
+     against what the serving store calls their version, and this end is the
+     only one that has it. Omitted for a store that names no version, which is
+     not the same as an empty one. *)
   let file_entry_to_json (e : Backend.file_entry) =
     `Assoc
-      [
-        ("key", `String e.Backend.key);
-        ("size", `Int e.Backend.size);
-        ("lastModified", `Float e.Backend.last_modified);
-      ]
+      ([
+         ("key", `String e.Backend.key);
+         ("size", `Int e.Backend.size);
+         ("lastModified", `Float e.Backend.last_modified);
+       ]
+      @
+        match e.Backend.etag with
+        | Some etag -> [("etag", `String etag)]
+        | None -> [])
 
   let file_entry_of_json json =
     let open Yojson.Safe.Util in
@@ -62,6 +69,8 @@ module Wire = struct
       Backend.key = json |> member "key" |> to_string;
       size = json |> member "size" |> to_int;
       last_modified = json |> member "lastModified" |> to_number;
+      etag =
+        (match json |> member "etag" with `String e -> Some e | _ -> None);
     }
 
   let entries_to_json entries =
@@ -71,4 +80,58 @@ module Wire = struct
     match Yojson.Safe.from_string s with
       | `List l -> List.map file_entry_of_json l
       | _ -> failwith "expected a JSON array of entries"
+
+  (* Distinct from an empty body, which is a real answer for a key holding no
+     bytes. *)
+  let absent = 0xFFFFFFFF
+
+  let add_be32 buf n =
+    let byte shift = Char.chr ((n lsr shift) land 0xff) in
+    Buffer.add_char buf (byte 24);
+    Buffer.add_char buf (byte 16);
+    Buffer.add_char buf (byte 8);
+    Buffer.add_char buf (byte 0)
+
+  let be32_at s pos =
+    (Char.code s.[pos] lsl 24)
+    lor (Char.code s.[pos + 1] lsl 16)
+    lor (Char.code s.[pos + 2] lsl 8)
+    lor Char.code s.[pos + 3]
+
+  let bodies_to_string answered =
+    let buf = Buffer.create 4096 in
+    List.iter
+      (fun (_, body) ->
+        match body with
+          | None -> add_be32 buf absent
+          | Some b ->
+              add_be32 buf (Bigstring.length b);
+              Buffer.add_string buf (Bigstring.to_string b))
+      answered;
+    Buffer.contents buf
+
+  let bodies_of_string ~keys s =
+    let len = String.length s in
+    let short () =
+      failwith "get-multi: answer shorter than the keys asked for"
+    in
+    let rec go pos = function
+      | [] ->
+          if pos <> len then
+            failwith "get-multi: answer longer than the keys asked for";
+          []
+      | key :: rest ->
+          if pos + 4 > len then short ();
+          let n = be32_at s pos in
+          (* Compared against what is left rather than added to [pos]: a
+             hostile length near [max_int] overflows the sum on a 32-bit build,
+             and the guard would then pass a negative one to [String.sub], which
+             raises [Invalid_argument] where this promises [Failure]. *)
+          if n = absent then (key, None) :: go (pos + 4) rest
+          else if n < 0 || n > len - pos - 4 then short ()
+          else
+            (key, Some (Bigstring.of_string (String.sub s (pos + 4) n)))
+            :: go (pos + 4 + n) rest
+    in
+    go 0 keys
 end

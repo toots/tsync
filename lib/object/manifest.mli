@@ -28,7 +28,7 @@ val chunk_key : chunk_entry -> string
 (** The key [data] belongs under, hashed from the bytes themselves. What a
     stored body is checked against when its size alone cannot say whether it is
     the right one. *)
-val key_of_body : Chunk.t -> string
+val key_of_body : Bigstring.t -> string
 
 (** The reverse, for a chunk kept from a previous upload. Raises
     [Invalid_argument] for a key that is not ["<h1>-<h2>"]. *)
@@ -72,7 +72,7 @@ val of_string : string -> t
 
 (** A body a caller already holds as bytes, which is what {!Chunk_table.seal}
     hands back. *)
-val of_chunk : Chunk.t -> t
+val of_chunk : Bigstring.t -> t
 
 (** The name recorded in the body. Meaningful only where the location cannot
     yield one; a caller holding a key takes the name from the key. *)
@@ -87,7 +87,7 @@ val to_string : name:string -> t -> string
 (** {!to_string} as the bytes a store and a sidecar are both handed, which for a
     manifest already recording [name] is the body it is made of rather than a
     fresh encoding of it. *)
-val body : name:string -> t -> Chunk.t
+val body : name:string -> t -> Bigstring.t
 
 (** Where a chunk of a locally edited file has its bytes: a staged body and an
     offset within it. One body holds every staged member of a cache group, so

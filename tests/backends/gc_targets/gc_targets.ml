@@ -118,9 +118,15 @@ let () =
   Lwt_main.run
     ((* Chunks 1 and 3 are live: one manifest names both. Chunk 2 is on the main
         and unreferenced, so the collection reclaims it. *)
-     let* () = Main.put ~key:(key 1) ~data:(Chunk.of_string "live-one") () in
-     let* () = Main.put ~key:(key 2) ~data:(Chunk.of_string "orphaned") () in
-     let* () = Main.put ~key:(key 3) ~data:(Chunk.of_string "live-two") () in
+     let* () =
+       Main.put ~key:(key 1) ~data:(Bigstring.of_string "live-one") ()
+     in
+     let* () =
+       Main.put ~key:(key 2) ~data:(Bigstring.of_string "orphaned") ()
+     in
+     let* () =
+       Main.put ~key:(key 3) ~data:(Bigstring.of_string "live-two") ()
+     in
      let manifest =
        let entry index k = Manifest.entry_of_key ~index ~size:8 k in
        (* A manifest's own digest is 16 hex like a chunk's; its value is not
@@ -132,22 +138,26 @@ let () =
      in
      let* () =
        Main.put ~key:(domain_prefix ^ "f")
-         ~data:(Chunk.of_string (Manifest.to_string ~name:"f" manifest))
+         ~data:(Bigstring.of_string (Manifest.to_string ~name:"f" manifest))
          ()
      in
      (* The replica holds chunk 2, which the collection is about to reclaim, and
         chunk 9, which the main has never had; it is short chunk 3, which the
         collection keeps. One of each case the closing phase can meet. *)
-     let* () = Replica.put ~key:(key 1) ~data:(Chunk.of_string "live-one") () in
-     let* () = Replica.put ~key:(key 2) ~data:(Chunk.of_string "orphaned") () in
      let* () =
-       Replica.put ~key:(key 9) ~data:(Chunk.of_string "never-was") ()
+       Replica.put ~key:(key 1) ~data:(Bigstring.of_string "live-one") ()
+     in
+     let* () =
+       Replica.put ~key:(key 2) ~data:(Bigstring.of_string "orphaned") ()
+     in
+     let* () =
+       Replica.put ~key:(key 9) ~data:(Bigstring.of_string "never-was") ()
      in
      (* The backfill target holds only the chunk the main never had, so it also
         pins that a delete naming keys this store does not have is not an error:
         every copy is sent the same list. *)
      let* () =
-       Backfill.put ~key:(key 9) ~data:(Chunk.of_string "never-was") ()
+       Backfill.put ~key:(key 9) ~data:(Bigstring.of_string "never-was") ()
      in
 
      case "before";
@@ -191,8 +201,12 @@ let () =
         asked what it holds, so naming this one would take out a chunk something
         references again. *)
      case "a chunk uploaded again mid-run is not deleted off the copies";
-     let* () = Main.put ~key:(key 4) ~data:(Chunk.of_string "orphan-4") () in
-     let* () = Replica.put ~key:(key 4) ~data:(Chunk.of_string "orphan-4") () in
+     let* () =
+       Main.put ~key:(key 4) ~data:(Bigstring.of_string "orphan-4") ()
+     in
+     let* () =
+       Replica.put ~key:(key 4) ~data:(Bigstring.of_string "orphan-4") ()
+     in
      let* s = G.start () in
      let rec until phase =
        if G.phase s = phase then Lwt.return_unit
@@ -204,7 +218,9 @@ let () =
      (* Marking is done and nothing referenced chunk 4, so it is sitting in the
         space on its way out. This is the writer, landing it in the space every
         write goes to. *)
-     let* () = Main.put ~key:(key 4) ~data:(Chunk.of_string "orphan-4") () in
+     let* () =
+       Main.put ~key:(key 4) ~data:(Bigstring.of_string "orphan-4") ()
+     in
      let rec drain () =
        let* outcome = G.step ~units:16 s in
        match outcome with `Done -> Lwt.return_unit | `More -> drain ()

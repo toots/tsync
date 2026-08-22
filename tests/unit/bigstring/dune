@@ -1,0 +1,24 @@
+(executable
+ (flags
+  (:standard
+   -open
+   Tsync_bigstring
+   -open
+   Tsync_xxhash
+   -open
+   Tsync_test_harness
+   -open
+   Tsync_device
+   -open
+   Tsync_local_io))
+ (name bigstring_test)
+ (libraries
+  tsync_test_harness
+  unix
+  lwt
+  lwt.unix
+  bigstringaf
+  tsync_bigstring
+  tsync_xxhash
+  tsync-libs.device
+  tsync-libs.local_io))

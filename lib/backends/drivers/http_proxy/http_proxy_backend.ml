@@ -30,12 +30,12 @@ let headers t ~meth ~uri ~body () =
           ~path:(Uri.path_and_query uri) ~body ()))
 
 (* Every proxied operation is idempotent, so retrying is safe. *)
-let call_retry t ~meth ?(body = Chunk.empty) op uri =
+let call_retry t ~meth ?(body = Bigstring.empty) op uri =
   Http_client.call_retry t.client
     ~headers:(headers t ~meth ~uri ~body)
     ~meth ~body op uri
 
-let call_text t ~meth ?(body = Chunk.empty) op uri =
+let call_text t ~meth ?(body = Bigstring.empty) op uri =
   Http_client.call_text t.client
     ~headers:(headers t ~meth ~uri ~body)
     ~meth ~body op uri
@@ -46,7 +46,7 @@ let obj_uri t key =
 let put t ~key ~data () =
   let+ resp, body = call_retry t ~meth:`PUT ~body:data "put" (obj_uri t key) in
   if not (is_ok resp) then
-    raise (backend_error "put" (code resp) (Chunk.to_string body))
+    raise (backend_error "put" (code resp) (Bigstring.to_string body))
 
 (* The serving side arbitrates, holding the store, and the reply body is
    whatever ended up at the key. A proxy too old to know the parameter would
@@ -56,18 +56,19 @@ let put_if_absent t ~key ~data () =
   let uri = Uri.add_query_param' (obj_uri t key) ("if_absent", "1") in
   let+ resp, body = call_retry t ~meth:`PUT ~body:data "put_if_absent" uri in
   if is_ok resp then body
-  else raise (backend_error "put_if_absent" (code resp) (Chunk.to_string body))
+  else
+    raise (backend_error "put_if_absent" (code resp) (Bigstring.to_string body))
 
 let get t ~key () =
   let+ resp, body = call_retry t ~meth:`GET "get" (obj_uri t key) in
   if is_ok resp then body
-  else raise (backend_error "get" (code resp) (Chunk.to_string body))
+  else raise (backend_error "get" (code resp) (Bigstring.to_string body))
 
 let get_opt t ~key () =
   let+ resp, body = call_retry t ~meth:`GET "get_opt" (obj_uri t key) in
   if is_ok resp then Some body
   else if code resp = 404 then None
-  else raise (backend_error "get_opt" (code resp) (Chunk.to_string body))
+  else raise (backend_error "get_opt" (code resp) (Bigstring.to_string body))
 
 let head_opt t ~key () =
   let+ resp, body = call_text t ~meth:`HEAD "head" (obj_uri t key) in
@@ -83,7 +84,7 @@ let head_opt t ~key () =
         | Some s -> float_of_string s
         | None -> 0.
     in
-    Some { Backend.key; size; last_modified })
+    Some { Backend.key; size; last_modified; etag = None })
   else if code resp = 404 then None
   else raise (backend_error "head" (code resp) body)
 
@@ -97,10 +98,26 @@ let delete_multi t keys =
   in
   let uri = Uri.with_path t.base_uri "/delete-multi" in
   let+ resp, rbody =
-    call_text t ~meth:`POST ~body:(Chunk.of_string body) "delete_multi" uri
+    call_text t ~meth:`POST ~body:(Bigstring.of_string body) "delete_multi" uri
   in
   if not (is_ok resp) then
     raise (backend_error "delete_multi" (code resp) rbody)
+
+(* The one operation the proxy saves a round trip on: the peer holds the objects
+   and can answer a folder's worth in a single response, where an object store
+   would have to be asked key by key. *)
+let get_many t ~entries () =
+  let keys = List.map (fun (e : Backend.file_entry) -> e.Backend.key) entries in
+  let body =
+    Yojson.Safe.to_string (`List (List.map (fun k -> `String k) keys))
+  in
+  let uri = Uri.with_path t.base_uri "/get-multi" in
+  let+ resp, answer =
+    call_retry t ~meth:`POST ~body:(Bigstring.of_string body) "get_many" uri
+  in
+  if is_ok resp then
+    Http_proxy.Wire.bodies_of_string ~keys (Bigstring.to_string answer)
+  else raise (backend_error "get_many" (code resp) (Bigstring.to_string answer))
 
 let copy t ~src_key ~dst_key () =
   let uri =
@@ -261,6 +278,7 @@ let make ~url ~secret : (module Backend.S) =
     let delete_multi keys = delete_multi t keys
     let copy ~src_key ~dst_key () = copy t ~src_key ~dst_key ()
     let list_prefix ?max_keys ~prefix () = list_all t ?max_keys ~prefix ()
+    let get_many = Some (fun ~entries () -> get_many t ~entries ())
 
     (* The peer owns that store and whatever checks it; asking it to start a
        sweep on our behalf is a decision for whoever administers it. *)

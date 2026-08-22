@@ -1,0 +1,16 @@
+; The lifecycle of a command that is not a daemon. Its own library rather than
+; part of one it would otherwise be linked with: the drain it owes belongs to
+; whoever runs an operation, not to whoever builds the domain it runs against.
+
+(library
+ (flags
+  (:standard -open Tsync_log -open Tsync_job -open Tsync_backend_register))
+ (name tsync_oneshot)
+ (libraries
+  tsync_log
+  tsync_job
+  tsync_backend_register
+  memtrace
+  unix
+  lwt
+  lwt.unix))

@@ -101,5 +101,5 @@ module Make (C : Conf.S) : sig
       through any of this.
 
       Raises the way a plain backend read does when the chunk is in no space. *)
-  val get : string -> Chunk.t Lwt.t
+  val get : string -> Bigstring.t Lwt.t
 end

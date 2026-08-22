@@ -79,7 +79,8 @@ module Inode = struct
                   (fun () ->
                     B.put_if_absent ~key
                       ~data:
-                        (Chunk.of_string (Folder.marker_to_string candidate))
+                        (Bigstring.of_string
+                           (Folder.marker_to_string candidate))
                       ())
                   (fun exn ->
                     if not !warned_unarbitrated then begin
@@ -92,11 +93,11 @@ module Inode = struct
                         C.domain_name (Printexc.to_string exn)
                     end;
                     Lwt.return
-                      (Chunk.of_string (Folder.marker_to_string candidate)))
+                      (Bigstring.of_string (Folder.marker_to_string candidate)))
               in
               let winner =
                 Option.value
-                  (Folder.marker_of_string (Chunk.to_string held))
+                  (Folder.marker_of_string (Bigstring.to_string held))
                   ~default:candidate
               in
               let+ () =

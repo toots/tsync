@@ -59,7 +59,7 @@ let outcome to_string p =
 let get (module B : Backend.S) key =
   outcome (Printf.sprintf "%S") (fun () ->
       let+ body = B.get_opt ~key () in
-      Option.map Chunk.to_string body)
+      Option.map Bigstring.to_string body)
 
 let head (module B : Backend.S) key =
   outcome
@@ -97,10 +97,14 @@ let () =
   Lwt_main.run
     (* Content each store has that the others do not. *)
     (let* () =
-       Rep.put ~key:(k "on-replica") ~data:(Chunk.of_string "from-replica") ()
+       Rep.put ~key:(k "on-replica")
+         ~data:(Bigstring.of_string "from-replica")
+         ()
      in
      let* () =
-       Arc.put ~key:(k "on-archive") ~data:(Chunk.of_string "from-archive") ()
+       Arc.put ~key:(k "on-archive")
+         ~data:(Bigstring.of_string "from-archive")
+         ()
      in
 
      case "one main, nothing behind it";
@@ -109,7 +113,7 @@ let () =
      in
      let (module Solo : Backend.S) = solo in
      let* () =
-       Solo.put ~key:(k "on-main") ~data:(Chunk.of_string "from-main") ()
+       Solo.put ~key:(k "on-main") ~data:(Bigstring.of_string "from-main") ()
      in
      step "put on-main";
      let* r = get solo (k "on-main") in
@@ -139,7 +143,9 @@ let () =
      let (module WithRep : Backend.S) = with_rep in
      (* The write waits for the main and nothing else: the replica is filled off
         this path. *)
-     let* () = WithRep.put ~key:(k "both") ~data:(Chunk.of_string "both") () in
+     let* () =
+       WithRep.put ~key:(k "both") ~data:(Bigstring.of_string "both") ()
+     in
      step "put both -> on main: %b, on replica: %b"
        (holds main_root (k "both"))
        (holds replica_root (k "both"));
@@ -167,7 +173,9 @@ let () =
        outcome
          (fun () -> "ok")
          (fun () ->
-           let+ () = DeadMain.put ~key:(k "w") ~data:(Chunk.of_string "x") () in
+           let+ () =
+             DeadMain.put ~key:(k "w") ~data:(Bigstring.of_string "x") ()
+           in
            Some ())
      in
      step "put w = %s" r;
@@ -186,7 +194,9 @@ let () =
      step "head on-archive = %s" r;
      let* r = get with_arc (k "nowhere") in
      step "get nowhere = %s" r;
-     let* () = WithArc.put ~key:(k "fresh") ~data:(Chunk.of_string "n") () in
+     let* () =
+       WithArc.put ~key:(k "fresh") ~data:(Bigstring.of_string "n") ()
+     in
      step "put fresh -> on main: %b, on archive: %b"
        (holds main_root (k "fresh"))
        (holds archive_root (k "fresh"));
@@ -237,7 +247,9 @@ let () =
        outcome
          (fun () -> "ok")
          (fun () ->
-           let+ () = Ro.put ~key:(k "nope") ~data:(Chunk.of_string "x") () in
+           let+ () =
+             Ro.put ~key:(k "nope") ~data:(Bigstring.of_string "x") ()
+           in
            Some ())
      in
      step "put nope = %s" r;

@@ -461,17 +461,17 @@ let setup_client (module C : Conf.S) root staging_prefix =
         B.delete ~key:ck ()
     | CorruptRemoteChunk { path; index } ->
         let* ck = remote_chunk_key path index in
-        B.put ~key:ck ~data:(Chunk.of_string "garbage") ()
+        B.put ~key:ck ~data:(Bigstring.of_string "garbage") ()
     (* Same length, different bytes: what a size comparison cannot see. *)
     | ScrambleRemoteChunk { path; index } ->
         let* ck = remote_chunk_key path index in
         let* data = B.get ~key:ck () in
         B.put ~key:ck
           ~data:
-            (Chunk.of_string
+            (Bigstring.of_string
                (String.map
                   (fun c -> Char.chr ((Char.code c + 1) land 0xff))
-                  (Chunk.to_string data)))
+                  (Bigstring.to_string data)))
           ()
     (* Straight at the file, where [ScrambleRemoteChunk] goes through the
        store's own [put] and is caught on the way in. This is what bit rot looks
@@ -1182,7 +1182,7 @@ let dump_backend_at ~backend_root ~domain_prefix ~chunk_prefix ~journal_prefix
                (String.length e.key > 0 && e.key.[String.length e.key - 1] = '/')
         then
           let+ data = B.get ~key:e.key () in
-          match Folder.marker_of_string (Chunk.to_string data) with
+          match Folder.marker_of_string (Bigstring.to_string data) with
             | Some m ->
                 let rel = rel_key e.key in
                 let parent =
@@ -1271,7 +1271,7 @@ let dump_backend_at ~backend_root ~domain_prefix ~chunk_prefix ~journal_prefix
            the phase name, so a change to how the marker is written shows up as
            "unreadable" in the diff rather than passing quietly. *)
         Printf.printf "  collecting: %s\n"
-          (match Yojson.Safe.from_string (Chunk.to_string data) with
+          (match Yojson.Safe.from_string (Bigstring.to_string data) with
             | `Assoc kvs -> (
                 match List.assoc_opt "phase" kvs with
                   | Some (`String p) -> p
@@ -1290,14 +1290,14 @@ let dump_backend_at ~backend_root ~domain_prefix ~chunk_prefix ~journal_prefix
         Lwt.return_unit)
       else if starts_with journal_prefix e.key then
         let+ data = B.get ~key:e.key () in
-        let ops = Journal.decode (Chunk.to_string data) in
+        let ops = Journal.decode (Bigstring.to_string data) in
         Printf.printf "  journal %s = %s\n"
           (entry_alias (Filename.basename e.key))
           (String.concat "; " (List.map render_op ops))
       else if e.key = cursor_key then
         let+ data = B.get ~key:e.key () in
         Printf.printf "  cursor = %s\n"
-          (entry_alias (String.trim (Chunk.to_string data)))
+          (entry_alias (String.trim (Bigstring.to_string data)))
       else if starts_with versions_prefix e.key then (
         match Versioning.parse ~versions_prefix e.key with
           | Some (rel, _) ->
@@ -1306,7 +1306,7 @@ let dump_backend_at ~backend_root ~domain_prefix ~chunk_prefix ~journal_prefix
               in
               let+ data = B.get ~key:e.key () in
               let name, desc =
-                match Manifest.of_string (Chunk.to_string data) with
+                match Manifest.of_string (Bigstring.to_string data) with
                   | m ->
                       ( Manifest.recorded_name m,
                         Printf.sprintf "manifest size=%Ld chunks=%d"
@@ -1326,7 +1326,7 @@ let dump_backend_at ~backend_root ~domain_prefix ~chunk_prefix ~journal_prefix
           Lwt.return_unit
         else
           let+ data = B.get ~key:e.key () in
-          match Folder.marker_of_string (Chunk.to_string data) with
+          match Folder.marker_of_string (Bigstring.to_string data) with
             | Some m ->
                 if starts_with (domain_prefix ^ Folder.trash_id ^ "/") e.key
                 then
@@ -1336,7 +1336,7 @@ let dump_backend_at ~backend_root ~domain_prefix ~chunk_prefix ~journal_prefix
                   Printf.printf "  folder %s [%s] -> %s\n" m.Folder.name
                     (alias_rel rel) (alias_id m.Folder.id)
             | None -> (
-                match Manifest.of_string (Chunk.to_string data) with
+                match Manifest.of_string (Bigstring.to_string data) with
                   | { symlink = Some target; _ } as m ->
                       Printf.printf "  symlink %s [%s] -> %s\n"
                         (Manifest.recorded_name m) (alias_rel rel) target

@@ -204,6 +204,10 @@ type op =
           it afterwards. Distinct from {!Put} on the wire because the answer
           differs, not just the effect. *)
   | Delete of string
+  | Get_multi of string list
+      (** A folder's manifests in one answer. The only op that saves a round
+          trip rather than merely proxying one: the peer holds the objects,
+          where an object store would have to be asked key by key. *)
   | Delete_multi of string list
   | Copy of string * string
   | List_all of string * int option
@@ -214,6 +218,13 @@ type op =
   | Bad
       (** One of ours but malformed: an undecodable key, a missing argument. *)
   | Unknown  (** not part of the API at all — a browser asking for a favicon *)
+
+(* Keys one bulk request may name. The client packs its own requests to a key
+   count and a byte budget, so this only bounds what a client that does not —
+   or one that means harm — can make this end hold: the bodies of a get-multi
+   are read, concatenated and framed before any of it is written out, and the
+   pool that gates a request counts requests rather than bytes. *)
+let max_keys_per_request = 1024
 
 let parse_op meth uri body =
   let path = Uri.path uri in
@@ -242,12 +253,21 @@ let parse_op meth uri body =
           | None -> Bad)
     | `DELETE, p when is_obj p -> (
         match obj_key () with Some k -> Delete k | None -> Bad)
-    | `POST, "/delete-multi" -> (
+    | `POST, "/get-multi" -> (
         match
-          try Some (Yojson.Safe.from_string (Chunk.to_string body))
+          try Some (Yojson.Safe.from_string (Bigstring.to_string body))
           with _ -> None
         with
-          | Some (`List l) ->
+          | Some (`List l) when List.length l <= max_keys_per_request ->
+              Get_multi
+                (List.filter_map (function `String x -> Some x | _ -> None) l)
+          | _ -> Bad)
+    | `POST, "/delete-multi" -> (
+        match
+          try Some (Yojson.Safe.from_string (Bigstring.to_string body))
+          with _ -> None
+        with
+          | Some (`List l) when List.length l <= max_keys_per_request ->
               Delete_multi
                 (List.filter_map (function `String x -> Some x | _ -> None) l)
           | _ -> Bad)
@@ -274,7 +294,10 @@ let parse_op meth uri body =
 
 (* [Head] is metadata only; [Copy] is settled by the backend without the bytes
    passing through here. *)
-let data_kind = function Get _ -> `Get | Put _ -> `Put | _ -> `Meta
+let data_kind = function
+  | Get _ | Get_multi _ -> `Get
+  | Put _ -> `Put
+  | _ -> `Meta
 
 let op_name = function
   | Get _ -> "get"
@@ -282,6 +305,7 @@ let op_name = function
   | Put _ -> "put"
   | Put_if_absent _ -> "putIfAbsent"
   | Delete _ -> "delete"
+  | Get_multi _ -> "getMulti"
   | Delete_multi _ -> "deleteMulti"
   | Copy _ -> "copy"
   | List_all _ -> "list"
@@ -292,11 +316,33 @@ let op_name = function
   | Bad -> "badRequest"
   | Unknown -> "notFound"
 
+(* Every key a request names, for the check that they all belong to the one
+   route its signature was verified against. A bulk op is routed and authorised
+   by its first key ({!route_key}) and then run whole, so without this a client
+   holding one domain's secret reaches another's objects through a list whose
+   head is its own — the domains of a listener sharing a bucket and differing
+   only in prefix. *)
+let op_keys = function
+  | Delete_multi keys | Get_multi keys -> keys
+  | Copy (src, dst) -> [src; dst]
+  | Get k | Head k | Put k | Put_if_absent k | Delete k -> [k]
+  | List_all (p, _)
+  | Share_url p
+  | Chunk_size p
+  | Max_concurrency p
+  | Verified p ->
+      [p]
+  | Bad | Unknown -> []
+
+let within route key =
+  String.starts_with ~prefix:route.domain_root key
+  || String.starts_with ~prefix:route.shares_prefix key
+
 (* A request targets the route whose [domain_root] prefixes its key. *)
 let route_key = function
   | Get k | Head k | Put k | Put_if_absent k | Delete k -> Some k
-  | Delete_multi (k :: _) -> Some k
-  | Delete_multi [] -> None
+  | Delete_multi (k :: _) | Get_multi (k :: _) -> Some k
+  | Delete_multi [] | Get_multi [] -> None
   | Copy (src, _) -> Some src
   | List_all (p, _)
   | Share_url p
@@ -316,7 +362,7 @@ let respond ?(status = `OK) ?(headers = []) body =
    response alone and nothing writes to it again. *)
 let respond_chunk data =
   Cohttp_lwt_unix.Server.respond ~status:`OK
-    ~body:(Cohttp_lwt.Body.of_bigstring (`Passthrough (Chunk.buffer data)))
+    ~body:(Cohttp_lwt.Body.of_bigstring (`Passthrough data))
     ()
 
 let authed route req body =
@@ -345,7 +391,7 @@ let exec route op ~body =
         let* data = B.get_opt ~key () in
         match data with
           | Some data ->
-              Metrics.count read_bytes (Chunk.length data);
+              Metrics.count read_bytes (Bigstring.length data);
               respond_chunk data
           | None -> respond ~status:`Not_found "")
     | Head key -> (
@@ -367,8 +413,8 @@ let exec route op ~body =
         else
           let module B = (val route.store : Backend.S) in
           let* held = B.put_if_absent ~key ~data:body () in
-          Metrics.count written_bytes (Chunk.length body);
-          Metrics.count read_bytes (Chunk.length held);
+          Metrics.count written_bytes (Bigstring.length body);
+          Metrics.count read_bytes (Bigstring.length held);
           (* The body that won, so the caller learns whether it was theirs
              without a second round trip. *)
           respond_chunk held
@@ -379,7 +425,7 @@ let exec route op ~body =
             let module B = (val route.store : Backend.S) in
             B.put ~key ~data:body ()
           in
-          Metrics.count written_bytes (Chunk.length body);
+          Metrics.count written_bytes (Bigstring.length body);
           respond ""
     | Delete key ->
         if not (writable key) then reject_ro ()
@@ -389,6 +435,22 @@ let exec route op ~body =
             B.delete ~key ()
           in
           respond ""
+    | Get_multi keys ->
+        let module B = (val route.store : Backend.S) in
+        let module Bb = Backend.Batched (B) in
+        (* Sizes the caller has and this end does not, so the answer is bounded
+           by the key count alone; the client packed the request to its own byte
+           budget before sending it. *)
+        let entries =
+          List.map
+            (fun key ->
+              Backend.{ key; size = 0; last_modified = 0.; etag = None })
+            keys
+        in
+        let* answered = Bb.get_many ~entries () in
+        let framed = Http_proxy.Wire.bodies_to_string answered in
+        Metrics.count read_bytes (String.length framed);
+        respond_chunk (Bigstring.of_string framed)
     | Delete_multi keys ->
         if route.read_only then reject_ro ()
         else
@@ -708,7 +770,7 @@ let callback ~port ~tls routes _conn req body =
           ~range:(Cohttp.Header.get (Cohttp.Request.headers req) "range")
     | None -> (
         let* body = Cohttp_lwt.Body.to_bigstring body in
-        let body = Chunk.of_buffer body in
+        let body = body in
         match (meth, Uri.path uri) with
           | `GET, ("/" | "/index.html") ->
               bump "page";
@@ -740,6 +802,15 @@ let callback ~port ~tls routes _conn req body =
                           if not (authed route req body) then begin
                             bump "unauthorized";
                             respond ~status:`Unauthorized "unauthorized"
+                          end
+                          else if not (List.for_all (within route) (op_keys op))
+                          then begin
+                            (* Refused rather than narrowed to the keys that do
+                               belong: a caller reaching outside the domain it
+                               signed for is not a caller to answer partly. *)
+                            bump "unauthorized";
+                            respond ~status:`Unauthorized
+                              "keys outside the domain this request is for"
                           end
                           else begin
                             bump (op_name op);

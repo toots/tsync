@@ -2,7 +2,9 @@
  (flags
   (:standard
    -open
-   Tsync_chunk
+   Tsync_xxhash
+   -open
+   Tsync_bigstring
    -open
    Tsync_backend_register
    -open
@@ -15,7 +17,8 @@
    Tsync_test_harness))
  (name conformance)
  (libraries
-  tsync_chunk
+  tsync_xxhash
+  tsync_bigstring
   tsync_conf
   tsync_backend_register
   tsync_backend

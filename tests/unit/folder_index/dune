@@ -1,0 +1,31 @@
+(executable
+ (flags
+  (:standard
+   -open
+   Tsync_test_harness
+   -open
+   Tsync_store
+   -open
+   Tsync_object
+   -open
+   Tsync_naming
+   -open
+   Tsync_bigstring
+   -open
+   Tsync_backend_register
+   -open
+   Tsync_conf
+   -open
+   Tsync_local_backend))
+ (name folder_index_test)
+ (libraries
+  tsync_test_harness
+  tsync_store
+  tsync_object
+  tsync_naming
+  tsync_bigstring
+  tsync_conf
+  tsync_backend_register
+  tsync_local_backend
+  lwt
+  lwt.unix))

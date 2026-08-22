@@ -13,17 +13,18 @@ let readdir_list = Fs_util.readdir_list
 let write_file path data =
   let* () = Fs_util.ensure_parent path in
   let tmp = Fs_util.temp_path path in
-  let* () = Chunk.write_to ~path:tmp data ~offset:0 in
+  let* () = Bigstring.write_to ~path:tmp data ~offset:0 in
   Lwt_unix_retry.rename tmp path
 
-let write_string path data = write_file path (Chunk.of_string data)
+let write_string path data = write_file path (Bigstring.of_string data)
 
 (* Mapped, not read: a name here is only ever replaced by {!write_file}'s
    rename, so a mapping keeps serving the bytes it was made from however the
    name is reused afterwards, and a chunk body never lands on the heap. *)
 let read_file path =
   let+ st = Lwt_unix_retry.LargeFile.stat path in
-  Chunk.map_file ~path ~offset:0 ~len:(Int64.to_int st.Unix.LargeFile.st_size)
+  Bigstring.map_file ~path ~offset:0
+    ~len:(Int64.to_int st.Unix.LargeFile.st_size)
 
 (* [link] rather than [rename]: rename replaces silently, link fails with EEXIST
    when the destination is taken, which is the whole point.
@@ -33,7 +34,7 @@ let read_file path =
 let create_exclusive path data =
   let* () = Fs_util.ensure_parent path in
   let tmp = Fs_util.temp_path path in
-  let* () = Chunk.write_to ~path:tmp data ~offset:0 in
+  let* () = Bigstring.write_to ~path:tmp data ~offset:0 in
   Lwt.finalize
     (fun () ->
       Lwt.catch
@@ -172,7 +173,7 @@ let make ?(verify_writes = true) ~root () : (module Backend.S) =
                     (Corruption_marker.to_string
                        {
                          computed = Some computed;
-                         size = Some (Chunk.length stored);
+                         size = Some (Bigstring.length stored);
                          at = Some (Unix.gettimeofday ());
                          reason = None;
                        })))
@@ -215,9 +216,18 @@ let make ?(verify_writes = true) ~root () : (module Backend.S) =
           let+ st = Lwt_unix_retry.stat (resolve key) in
           match st with
             | { Unix.st_kind = Unix.S_DIR; st_mtime; _ } ->
-                Some Backend.{ key; size = 0; last_modified = st_mtime }
+                Some
+                  Backend.
+                    { key; size = 0; last_modified = st_mtime; etag = None }
             | { Unix.st_size; st_mtime; _ } ->
-                Some Backend.{ key; size = st_size; last_modified = st_mtime })
+                Some
+                  Backend.
+                    {
+                      key;
+                      size = st_size;
+                      last_modified = st_mtime;
+                      etag = None;
+                    })
         (function
           | Unix.Unix_error (Unix.ENOENT, _, _) -> Lwt.return_none
           | exn -> Lwt.fail exn)
@@ -295,6 +305,7 @@ let make ?(verify_writes = true) ~root () : (module Backend.S) =
                         key = prefix;
                         size = st.Unix.st_size;
                         last_modified = st.Unix.st_mtime;
+                        etag = None;
                       })
                 (fun _ -> Lwt.return_unit)
           | exn -> Lwt.fail exn)
@@ -318,6 +329,7 @@ let make ?(verify_writes = true) ~root () : (module Backend.S) =
                         key = full_key;
                         size = st.Unix.st_size;
                         last_modified = st.Unix.st_mtime;
+                        etag = None;
                       }
               | Unix.S_DIR -> found := (full_path, full_key ^ "/") :: !found
               | _ -> ())
@@ -339,7 +351,14 @@ let make ?(verify_writes = true) ~root () : (module Backend.S) =
                zero-byte object S3 lists. *)
             if names = [] then (
               if is_dir_key key_prefix then
-                emit Backend.{ key = key_prefix; size = 0; last_modified = 0. };
+                emit
+                  Backend.
+                    {
+                      key = key_prefix;
+                      size = 0;
+                      last_modified = 0.;
+                      etag = None;
+                    };
               Lwt.return_unit)
             else (
               let rest = ref names in
@@ -386,6 +405,9 @@ let make ?(verify_writes = true) ~root () : (module Backend.S) =
     (* A filesystem has nothing on its side to wake. Every write is already
        checked as it lands ({!verify_written}), and [tsync gc --verify] is the
        sweep over what is already there. *)
+    (* A filesystem read is not a round trip: {!Backend.Batched} fans these
+       out. *)
+    let get_many = None
     let verify_all ~chunk_prefix:_ () = Lwt.return `Unsupported
 
     (* Nothing to wake here either, and a collection deleting on a filesystem is

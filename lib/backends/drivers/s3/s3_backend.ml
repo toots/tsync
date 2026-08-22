@@ -62,7 +62,12 @@ let unwrap op = function
 
 let entry_of c =
   Backend.
-    { key = c.S3.key; size = c.S3.size; last_modified = c.S3.last_modified }
+    {
+      key = c.S3.key;
+      size = c.S3.size;
+      last_modified = c.S3.last_modified;
+      etag = Some c.S3.etag;
+    }
 
 (* A chunk is handed to aws-s3 as it stands rather than copied into a string,
    so its bytes are read for as long as the request runs and must stay valid
@@ -71,8 +76,7 @@ let put t ~key ~data () =
   let+ res =
     with_retry "put" (fun () ->
         S3.put_bigstring ~credentials:t.credentials ~endpoint:t.endpoint
-          ~bucket:t.bucket ~unsigned_payload:t.unsigned_payload ~key
-          ~data:(Chunk.buffer data) ())
+          ~bucket:t.bucket ~unsigned_payload:t.unsigned_payload ~key ~data ())
   in
   ignore (unwrap "put" res)
 
@@ -91,7 +95,7 @@ let get t ~key () =
         S3.get_bigstring ~credentials:t.credentials ~endpoint:t.endpoint
           ~bucket:t.bucket ~key ())
   in
-  Chunk.of_buffer (unwrap "get" res)
+  unwrap "get" res
 
 (* [`If_none_match] is s3's own "only if this key is free": it decides, and
    answers 412 when it declines, so the object is never replaced and the loser
@@ -102,7 +106,7 @@ let put_if_absent t ~key ~data () =
     with_retry "put_if_absent" (fun () ->
         S3.put_bigstring ~credentials:t.credentials ~endpoint:t.endpoint
           ~bucket:t.bucket ~unsigned_payload:t.unsigned_payload
-          ~precondition:`If_none_match ~key ~data:(Chunk.buffer data) ())
+          ~precondition:`If_none_match ~key ~data ())
   in
   match res with
     | Ok _ -> Lwt.return data
@@ -118,7 +122,7 @@ let get_opt t ~key () =
           ~bucket:t.bucket ~key ())
   in
   match res with
-    | Ok body -> Some (Chunk.of_buffer body)
+    | Ok body -> Some body
     | Error S3.Not_found -> None
     | Error e ->
         Log.err "s3 get %s: %s" key (string_of_error e);
@@ -247,6 +251,9 @@ let make ?endpoint ?unsigned_payload ?share_url ~bucket ~region ~access_key_id
     let delete_multi keys = delete_multi t keys
     let copy ~src_key ~dst_key () = copy t ~src_key ~dst_key ()
     let list_prefix ?max_keys ~prefix () = list_all t ?max_keys ~prefix ()
+
+    (* No multi-object GET in the API: {!Backend.Batched} fans these out. *)
+    let get_many = None
 
     let verify_all ~chunk_prefix () =
       let+ n =

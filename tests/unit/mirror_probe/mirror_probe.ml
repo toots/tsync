@@ -87,7 +87,7 @@ end
 module M = Mirror.Make (C)
 
 let key n = Printf.sprintf "%sfolder/%04d" domain_prefix n
-let body n = Chunk.of_string (String.make (8 + n) 'x')
+let body n = Bigstring.of_string (String.make (8 + n) 'x')
 
 (* Enough shards touched that a listing of the whole prefix and a listing per
    shard cannot be confused for one another. *)

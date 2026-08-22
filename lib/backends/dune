@@ -1,7 +1,7 @@
 (library
  (name tsync_backend)
  (libraries
-  tsync-libs.chunk
+  tsync-libs.bigstring
   tsync-libs.backend_register
   tsync_local_backend
   tsync_http_proxy_backend

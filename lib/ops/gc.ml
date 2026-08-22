@@ -246,7 +246,7 @@ module Make (C : Conf.S) = struct
     if Key.is_dir key then Lwt.return []
     else
       let+ data = B.get ~key () in
-      let data = Chunk.to_string data in
+      let data = Bigstring.to_string data in
       match Folder.marker_of_string data with
         | Some _ -> []
         | None -> (
@@ -681,7 +681,7 @@ module Make (C : Conf.S) = struct
             s.chunks_corrupt <- s.chunks_corrupt + 1;
             M.put ~key:marker
               ~data:
-                (Chunk.of_string
+                (Bigstring.of_string
                    (Corruption_marker.to_string
                       {
                         computed;
@@ -716,7 +716,7 @@ module Make (C : Conf.S) = struct
                   Log.err "gc: chunk %s hashed to %s: filing %s" ck computed
                     marker;
                   file ~computed:(Some computed)
-                    ~size:(Some (Chunk.length body))
+                    ~size:(Some (Bigstring.length body))
                     ~reason:None)
             | `Unreadable why ->
                 s.chunks_unreadable <- s.chunks_unreadable + 1;
@@ -762,7 +762,7 @@ module Make (C : Conf.S) = struct
       List.filter_map
         (fun (e : Backend.file_entry) ->
           let k = e.Backend.key in
-          if Key.is_dir k || Fs_util.is_temp_key k then None else Some k)
+          if Folder.is_child_object k then Some k else None)
         entries
     in
     let* () =

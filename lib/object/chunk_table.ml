@@ -177,7 +177,7 @@ let put_int64 buf off v =
 
 type builder = { buf : Local_io.buffer; b_keys_at : int; b_count : int }
 
-(* Zeroed rather than left as {!Chunk.create} hands it over, so a key never set
+(* Zeroed rather than left as {!Bigstring.create} hands it over, so a key never set
    is a key of NUL bytes the store cannot hold rather than whatever the page
    last held. *)
 let builder ~name ~size ~chunk_size ~mtime ~symlink ~count =
@@ -185,7 +185,7 @@ let builder ~name ~size ~chunk_size ~mtime ~symlink ~count =
     invalid_arg (Printf.sprintf "Chunk_table.builder: count %d" count);
   let link = Option.value symlink ~default:"" in
   let keys_at = header_bytes + String.length name + String.length link in
-  let buf = Chunk.create (keys_at + (count * key_bytes)) in
+  let buf = Bigstring.create (keys_at + (count * key_bytes)) in
   Local_io.zero buf ~pos:0 ~len:(Bigarray.Array1.dim buf);
   put_bytes buf 0 magic;
   put_int64 buf 8 size;
@@ -224,16 +224,14 @@ let seal b ~h1 ~h2 =
   fixed_hex "h2" h2;
   put_bytes b.buf 40 h1;
   put_bytes b.buf 56 h2;
-  Chunk.of_buffer b.buf
+  b.buf
 
-let of_chunk c = of_source (Mapped (Chunk.buffer c))
-
-let bytes t =
-  match t.src with Mapped m -> Chunk.of_buffer m | Str s -> Chunk.of_string s
+let of_chunk c = of_source (Mapped c)
+let bytes t = match t.src with Mapped m -> m | Str s -> Bigstring.of_string s
 
 let encode ~name ~size ~chunk_size ~mtime ~h1 ~h2 ~symlink ~keys =
   let b =
     builder ~name ~size ~chunk_size ~mtime ~symlink ~count:(List.length keys)
   in
   List.iteri (set b) keys;
-  Chunk.to_string (seal b ~h1 ~h2)
+  Bigstring.to_string (seal b ~h1 ~h2)

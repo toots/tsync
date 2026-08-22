@@ -150,6 +150,63 @@ let rec make ~(mains : sub list)
     let head_opt ~key () =
       read "head_opt" (fun (module B : Backend.S) -> B.head_opt ~key ())
 
+    (* Declared only where the first readable store has a batch of its own, and
+       forwarding to it directly rather than through {!Backend.Batched}: the
+       caller asking already holds a slot for this read, and taking a second
+       from the same pool is how a fan-out deadlocks against itself. What it is
+       handed is already packed to one request.
+
+       Without one this stays [None], and the caller's own fan-out asks
+       [get_opt] per key, which walks the members exactly as a single read does.
+
+       Whatever the batch did not hold goes back through [read], the one place
+       that tells a store which could not look from one that held nothing. Those
+       asks are per key and sequential, which is what a miss costs: a batch's
+       keys come from a listing of the very store being asked, so a miss is the
+       rare case, and paying [read] for it keeps the archive fallback that makes
+       a miss trustworthy. *)
+    let get_many =
+      let native =
+        match readable with
+          | [] -> None
+          | s :: _ ->
+              let module B = (val s.backend : Backend.S) in
+              Option.map (fun f -> (s.name, f)) B.get_many
+      in
+      match native with
+        | None -> None
+        | Some (name, native) ->
+            Some
+              (fun ~entries () ->
+                let* first =
+                  Lwt.catch
+                    (fun () -> native ~entries ())
+                    (fun exn ->
+                      Log.warn
+                        "domain store get_many: %s unavailable (%s); asking \
+                         key by key"
+                        name (Printexc.to_string exn);
+                      Lwt.return [])
+                in
+                let held = Hashtbl.create (List.length entries) in
+                List.iter
+                  (fun (key, body) ->
+                    match body with
+                      | Some _ -> Hashtbl.replace held key body
+                      | None -> ())
+                  first;
+                Lwt_list.map_s
+                  (fun (e : Backend.file_entry) ->
+                    match Hashtbl.find_opt held e.Backend.key with
+                      | Some body -> Lwt.return (e.Backend.key, body)
+                      | None ->
+                          let+ body =
+                            read "get_many" (fun (module B : Backend.S) ->
+                                B.get_opt ~key:e.Backend.key ())
+                          in
+                          (e.Backend.key, body))
+                  entries)
+
     let get ~key () =
       let* d = read "get" (fun (module B : Backend.S) -> B.get_opt ~key ()) in
       match d with

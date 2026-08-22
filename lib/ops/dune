@@ -17,13 +17,17 @@
    -open
    Tsync_content
    -open
+   Tsync_sync
+   -open
    Tsync_local_io
    -open
    Tsync_lwt_unix
    -open
    Tsync_glob
    -open
-   Tsync_chunk
+   Tsync_bigstring
+   -open
+   Tsync_spill
    -open
    Tsync_hashtbl_mmap
    -open
@@ -38,10 +42,12 @@
   tsync_object
   tsync_store
   tsync_content
+  tsync_sync
   tsync_local_io
   tsync_lwt_unix
   tsync_glob
-  tsync_chunk
+  tsync_bigstring
+  tsync_spill
   tsync_hashtbl_mmap
   tsync_backend_register
   tsync_log

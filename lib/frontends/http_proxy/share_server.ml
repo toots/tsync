@@ -147,7 +147,7 @@ module Make (C : Conf.S) = struct
       | None -> fail `Not_found "not found"
       | Some body ->
           let j =
-            try Yojson.Safe.from_string (Chunk.to_string body)
+            try Yojson.Safe.from_string (Bigstring.to_string body)
             with _ -> fail `Bad_gateway "corrupt share manifest"
           in
           let expires =
@@ -169,7 +169,9 @@ module Make (C : Conf.S) = struct
      handing it straight back. *)
   let children ns =
     let folder_id = Filename.basename (Key.chop_slash ns) in
-    let+ entries = Tree.children ~skip_errors:true ~folder_id () in
+    let+ entries =
+      Tree.children ~on_unusable:(`Skip (fun _ _ -> ())) ~folder_id ()
+    in
     List.map
       (fun (e : Inode_tree.entry) ->
         match e.Inode_tree.body with

@@ -171,6 +171,20 @@
   (action
    (diff writes_in_flight.expected writes_in_flight.output))))
 
+(subdir content/absent_probe
+ (alias
+  (name default)
+  (deps absent_probe.exe))
+ (rule
+  (alias runtest)
+  (target absent_probe.output)
+  (action
+   (with-stdout-to absent_probe.output (ignore-stderr (run ./absent_probe.exe)))))
+ (rule
+  (alias runtest)
+  (action
+   (diff absent_probe.expected absent_probe.output))))
+
 (subdir content/cache_cap
  (alias
   (name default)
@@ -384,6 +398,20 @@
   (alias runtest)
   (action
    (diff share_server_test.expected share_server_test.output))))
+
+(subdir ops/resync
+ (alias
+  (name default)
+  (deps resync_test.exe))
+ (rule
+  (alias runtest)
+  (target resync_test.output)
+  (action
+   (with-stdout-to resync_test.output (ignore-stderr (run ./resync_test.exe)))))
+ (rule
+  (alias runtest)
+  (action
+   (diff resync_test.expected resync_test.output))))
 
 (subdir scenario/base
  (alias
@@ -631,6 +659,48 @@
   (alias runtest)
   (action (run ./backend_traffic.exe))))
 
+(subdir unit/batch_nesting
+ (alias
+  (name default)
+  (deps batch_nesting.exe))
+ (rule
+  (alias runtest)
+  (target batch_nesting.output)
+  (action
+   (with-stdout-to batch_nesting.output (ignore-stderr (run ./batch_nesting.exe)))))
+ (rule
+  (alias runtest)
+  (action
+   (diff batch_nesting.expected batch_nesting.output))))
+
+(subdir unit/batched
+ (alias
+  (name default)
+  (deps batched_test.exe))
+ (rule
+  (alias runtest)
+  (target batched_test.output)
+  (action
+   (with-stdout-to batched_test.output (ignore-stderr (run ./batched_test.exe)))))
+ (rule
+  (alias runtest)
+  (action
+   (diff batched_test.expected batched_test.output))))
+
+(subdir unit/bigstring
+ (alias
+  (name default)
+  (deps bigstring_test.exe))
+ (rule
+  (alias runtest)
+  (target bigstring_test.output)
+  (action
+   (with-stdout-to bigstring_test.output (ignore-stderr (run ./bigstring_test.exe)))))
+ (rule
+  (alias runtest)
+  (action
+   (diff bigstring_test.expected bigstring_test.output))))
+
 (subdir unit/bounded
  (alias
   (name default)
@@ -644,20 +714,6 @@
   (alias runtest)
   (action
    (diff bounded_test.expected bounded_test.output))))
-
-(subdir unit/chunk
- (alias
-  (name default)
-  (deps chunk_test.exe))
- (rule
-  (alias runtest)
-  (target chunk_test.output)
-  (action
-   (with-stdout-to chunk_test.output (ignore-stderr (run ./chunk_test.exe)))))
- (rule
-  (alias runtest)
-  (action
-   (diff chunk_test.expected chunk_test.output))))
 
 (subdir unit/chunk_pools
  (alias
@@ -722,6 +778,20 @@
   (alias runtest)
   (action
    (diff folder_ids_test.expected folder_ids_test.output))))
+
+(subdir unit/folder_index
+ (alias
+  (name default)
+  (deps folder_index_test.exe))
+ (rule
+  (alias runtest)
+  (target folder_index_test.output)
+  (action
+   (with-stdout-to folder_index_test.output (ignore-stderr (run ./folder_index_test.exe)))))
+ (rule
+  (alias runtest)
+  (action
+   (diff folder_index_test.expected folder_index_test.output))))
 
 (subdir unit/gc_job
  (alias
@@ -1063,6 +1133,20 @@
   (action
    (diff temp_names_test.expected temp_names_test.output))))
 
+(subdir unit/tree_children
+ (alias
+  (name default)
+  (deps tree_children_test.exe))
+ (rule
+  (alias runtest)
+  (target tree_children_test.output)
+  (action
+   (with-stdout-to tree_children_test.output (ignore-stderr (run ./tree_children_test.exe)))))
+ (rule
+  (alias runtest)
+  (action
+   (diff tree_children_test.expected tree_children_test.output))))
+
 (subdir unit/upload_fanout
  (alias
   (name default)
@@ -1090,6 +1174,20 @@
   (alias runtest)
   (action
    (diff walk_fanout.expected walk_fanout.output))))
+
+(subdir unit/wire_bodies
+ (alias
+  (name default)
+  (deps wire_bodies_test.exe))
+ (rule
+  (alias runtest)
+  (target wire_bodies_test.output)
+  (action
+   (with-stdout-to wire_bodies_test.output (ignore-stderr (run ./wire_bodies_test.exe)))))
+ (rule
+  (alias runtest)
+  (action
+   (diff wire_bodies_test.expected wire_bodies_test.output))))
 
 (subdir unit/zip
  (alias

@@ -1,0 +1,12 @@
+
+=== a declared batch changes the cost, not the answer
+the two paths agree: ok
+an absent key answers None: ok
+with no native batch, a key is a read: ok
+with one, the whole run is a request: ok
+
+=== a run is bounded by count and by bytes
+300 keys is two requests, not one: ok
+and so is 12 MB of bodies: ok
+
+6 check(s), 0 failure(s)
