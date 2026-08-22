@@ -86,5 +86,23 @@ let () =
      Fs.write_last_sync_key (J.entry_key ());
      let* now = found "later.txt" in
      check "but is once the mark has moved" now;
+
+     (* Only the store's own answer is worth remembering. Not knowing a key's
+        folder yet is a fact about this client, and nothing that fixes it moves
+        the mark, so remembering it was an ENOENT that never lifted. *)
+     case "a folder this client has not learned is not an absence";
+     let deep = "unknown-folder/inside.txt" in
+     let* gone = found deep in
+     check "a key under an unknown folder finds nothing" (not gone);
+     let* () =
+       (* What the folder's own marker being learned looks like, which is a
+          local write and moves no mark. *)
+       Folder_ids.write ~cache_root:C.cache_root ~domain_name:C.domain_name
+         "unknown-folder"
+         { Folder.name = "unknown-folder"; id = Folder.root_id }
+     in
+     let* () = publish "inside.txt" in
+     let* now = found deep in
+     check "and is asked again once the folder is known" now;
      Lwt.return_unit);
-  report ~expected:8 ()
+  report ~expected:10 ()

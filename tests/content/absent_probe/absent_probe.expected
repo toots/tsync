@@ -13,4 +13,8 @@ not there yet: ok
 and is not seen while the mark stands: ok
 but is once the mark has moved: ok
 
-8 check(s), 0 failure(s)
+=== a folder this client has not learned is not an absence
+a key under an unknown folder finds nothing: ok
+and is asked again once the folder is known: ok
+
+10 check(s), 0 failure(s)
