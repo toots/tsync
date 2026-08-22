@@ -10,11 +10,20 @@
    -open
    Tsync_backend_register
    -open
+   Tsync_conf_parsing
+   -open
+   Tsync_domain
+   -open
+   Tsync_runtime
+   -open
    Tsync_local_io))
  (name tsync_test_harness)
  (libraries
   tsync_conf
   tsync_backend_register
+  tsync_conf_parsing
+  tsync_domain
+  tsync_runtime
   tsync_chunk
   tsync_local_io
   lwt

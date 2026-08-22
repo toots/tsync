@@ -5,46 +5,64 @@ let local_store ?(verify_writes = true) path =
     ()
 
 let conf ?(domain = "testdom") ?(client_name = "test") ?(versioning = false)
-    ?store ?members ?(verify_writes = true) ?(max_uploads = 1)
-    ?max_chunk_buffers ?(max_downloads = 1) ?(chunk_size = 8)
-    ?(cache_chunk_size = 8) ?max_cache ?(symlink_policy = `Keep)
-    ?(read_only = false) ?(socket_path = "") ?cache_root ?data_dir ~root () =
-  let the_store =
-    match store with
-      | Some s -> s
-      | None -> local_store ~verify_writes (Filename.concat root "store")
+    ?store:store_override ?members:members_override ?(verify_writes = true)
+    ?(max_uploads = 1) ?max_chunk_buffers ?(max_downloads = 1)
+    ?(chunk_size = 8) ?(cache_chunk_size = 8) ?max_cache
+    ?(symlink_policy = `Keep) ?(read_only = false) ?(socket_path = "")
+    ?cache_root ?data_dir ~root () =
+  let paths =
+    {
+      Runtime.cache_root =
+        Option.value cache_root ~default:(Filename.concat root "cache");
+      data_dir = Option.value data_dir ~default:(Filename.concat root "data");
+      config_path = Filename.concat root "config.json";
+    }
   in
-  (module struct
-    let versioning = versioning
-    let client_name = client_name
-    let domain_name = domain
-    let domain_prefix = "tsync/" ^ domain ^ "/manifests/"
-    let chunk_prefix = "tsync/" ^ domain ^ "/chunks/"
-    let versions_prefix = "tsync/" ^ domain ^ "/versions/"
-    let journal_prefix = "tsync/" ^ domain ^ "/journal/"
-    let cursor_key = "tsync/" ^ domain ^ "/cursor"
-    let shares_prefix = "tsync/shares/"
-    let store = the_store
+  let cfg =
+    {
+      Conf_parsing.name = client_name;
+      tls = None;
+      max_uploads;
+      max_chunk_buffers = Option.value max_chunk_buffers ~default:max_uploads;
+      max_downloads;
+      domains =
+        [
+          {
+            Conf_parsing.name = domain;
+            backends =
+              [
+                {
+                  Conf_parsing.backend_type = "local";
+                  name = "local";
+                  role = `Main;
+                  fields =
+                    [
+                      ("path", Filename.concat root "store");
+                      ("verifyWrites", string_of_bool verify_writes);
+                    ];
+                };
+              ];
+            frontends = [{ Conf_parsing.frontend_type = "fuse"; options = [] }];
+            symlink_policy;
+            versioning;
+            read_only;
+            chunk_size = Some chunk_size;
+            cache_chunk_size = Some cache_chunk_size;
+            max_cache;
+          };
+        ];
+    }
+  in
+  let built = Domain.of_config ~domain ~socket_path ~paths cfg in
+  match (store_override, members_override) with
+    | None, None -> built
+    | _ ->
+        let module B = (val built : Conf.S) in
+        (* A double has no config to be parsed from, so it is grafted onto what
+           the assembly built rather than described to it. *)
+        (module struct
+          include B
 
-    let members =
-      match members with
-        | Some m -> m
-        | None -> [Backend.member ~name:"local" the_store]
-
-    let cache_root =
-      Option.value cache_root ~default:(Filename.concat root "cache")
-
-    let data_dir = Option.value data_dir ~default:(Filename.concat root "data")
-    let socket_path = socket_path
-    let max_uploads = max_uploads
-
-    (* As the real config does: only a host short on memory relative to its
-       chunk size sets this apart from [max_uploads]. *)
-    let max_chunk_buffers = Option.value max_chunk_buffers ~default:max_uploads
-    let max_downloads = max_downloads
-    let chunk_size = Some chunk_size
-    let cache_chunk_size = Some cache_chunk_size
-    let max_cache = max_cache
-    let symlink_policy = symlink_policy
-    let read_only = read_only
-  end : Conf.S)
+          let store = Option.value store_override ~default:B.store
+          let members = Option.value members_override ~default:B.members
+        end : Conf.S)

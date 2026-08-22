@@ -1,0 +1,34 @@
+; Where a configured role becomes behaviour. Above the stores it composes and
+; below everything that runs against one, so a test can build a real domain
+; without linking a daemon.
+
+(library
+ (flags
+  (:standard
+   -open
+   Tsync_conf
+   -open
+   Tsync_conf_parsing
+   -open
+   Tsync_backend_register
+   -open
+   Tsync_domain_store
+   -open
+   Tsync_object
+   -open
+   Tsync_store
+   -open
+   Tsync_field_spec
+   -open
+   Tsync_runtime))
+ (name tsync_domain)
+ (libraries
+  tsync_conf
+  tsync_conf_parsing
+  tsync_backend_register
+  tsync_domain_store
+  tsync_object
+  tsync_store
+  tsync_field_spec
+  tsync_runtime
+  unix))
