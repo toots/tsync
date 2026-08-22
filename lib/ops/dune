@@ -27,6 +27,8 @@
    -open
    Tsync_chunk
    -open
+   Tsync_spill
+   -open
    Tsync_hashtbl_mmap
    -open
    Tsync_backend_register
@@ -45,6 +47,7 @@
   tsync_lwt_unix
   tsync_glob
   tsync_chunk
+  tsync_spill
   tsync_hashtbl_mmap
   tsync_backend_register
   tsync_log

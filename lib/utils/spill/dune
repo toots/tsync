@@ -1,0 +1,15 @@
+; Work too large to hold: it goes to a temp file and comes back mapped. Listing
+; is that same idea one layer up, for a sequence of records rather than bytes.
+
+(library
+ (flags
+  (:standard -open Tsync_local_io -open Tsync_lwt_unix -open Tsync_chunk))
+ (name tsync_spill)
+ (public_name tsync-libs.spill)
+ (libraries
+  unix
+  lwt
+  lwt.unix
+  tsync_local_io
+  tsync_lwt_unix
+  tsync-libs.chunk))
