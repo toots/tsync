@@ -347,7 +347,7 @@ module Make (C : Conf.S) (R : Remote.S) = struct
     match m with
       | Some _ -> Lwt.return m
       | None when Hashtbl.mem (live_absences ()) key -> Lwt.return_none
-      | None ->
+      | None -> (
           (* Read before the fetch: an entry applied while it was in flight
              would otherwise be recorded under the mark that apply moved to, and
              so survive the very thing that invalidates it. *)
@@ -365,7 +365,7 @@ module Make (C : Conf.S) (R : Remote.S) = struct
                 if Hashtbl.length keys >= max_absent then Hashtbl.reset keys;
                 Hashtbl.replace keys key ()
             | `Found _ | `Absent | `Unresolved | `Unreadable -> ());
-          (match state with `Found m -> Some m | _ -> None)
+          match state with `Found m -> Some m | _ -> None)
 
   (* A promotion can retire the staged bodies between resolving the key and
      reading them, so a miss is resolved again and read once more. The retry

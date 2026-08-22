@@ -18,7 +18,6 @@ let mount_point_of = Conf_parsing.mount_point_of
 let frontend_names = Daemons.frontend_names
 let resolve_frontend = Daemons.frontend_for
 
-
 let domain_arg =
   Arg.(
     value
@@ -47,7 +46,6 @@ let domain_socket_for_path path =
   Daemons.socket_for_path ~paths:runtime_paths (load_config ()) path
 
 let domain_targets () = Daemons.all ~paths:runtime_paths (load_config ())
-
 
 (* What the deferred targets still owe, summed: whether work is outstanding is
    the question, and which target holds it is answered by [tsync status]'s own
@@ -89,9 +87,7 @@ let report_job ?target ?current ~kind (module C : Conf.S) ~counters () =
     ~counters ()
 
 let doing phase detail = phase ^ " · " ^ detail
-
 let human_bytes = Metrics.human_bytes
-
 
 let human_ts ts_ns =
   let secs = Int64.to_float (Int64.div ts_ns 1_000_000_000L) in
@@ -99,7 +95,6 @@ let human_ts ts_ns =
   Printf.sprintf "%04d-%02d-%02d %02d:%02d:%02d" (tm.Unix.tm_year + 1900)
     (tm.Unix.tm_mon + 1) tm.Unix.tm_mday tm.Unix.tm_hour tm.Unix.tm_min
     tm.Unix.tm_sec
-
 
 let parse_duration s =
   let n = String.length s in
@@ -114,4 +109,5 @@ let parse_duration s =
       | Some k, 'm' when k > 0 -> float_of_int (k * 60)
       | Some k, 's' when k > 0 -> float_of_int k
       | _ -> fail ())
+
 let run_lwt = Oneshot.run

@@ -39,8 +39,9 @@ module Make (C : Conf.S) = struct
     let apply rel (entry : Inode_tree.entry) =
       match entry.Inode_tree.body with
         | Inode_tree.Dir m ->
-            Folder_ids.write ~cache_root:C.cache_root
-              ~domain_name:C.domain_name (Key.join rel m.Folder.name) m
+            Folder_ids.write ~cache_root:C.cache_root ~domain_name:C.domain_name
+              (Key.join rel m.Folder.name)
+              m
         | Inode_tree.File man ->
             incr count;
             (* Read by backend key, which is hashed: the body is what names
@@ -99,9 +100,8 @@ module Make (C : Conf.S) = struct
 
   let bookmark () = Fs.read_last_sync_key ()
 
-  let run ?(full = false) ?(progress = no_progress)
-      ?(on_manifest = fun _ -> ()) ?(on_decision = fun _ _ _ -> ())
-      ~parallelism ~notify () =
+  let run ?(full = false) ?(progress = no_progress) ?(on_manifest = fun _ -> ())
+      ?(on_decision = fun _ _ _ -> ()) ~parallelism ~notify () =
     (* Every process serving this domain runs its own upload queue, so recovery
        has one to go through for the journal entry and cursor bump an upload
        owes — the same start {!Domain_engine} does for a daemon. *)

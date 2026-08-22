@@ -1,7 +1,7 @@
 (** Which frontend serves a domain, and where the daemon serving it answers.
 
-    The resolution half of what {!Launcher} enacts: both need the whole
-    (domain × frontend) matrix, which a frontend cannot see and a command has no
+    The resolution half of what {!Launcher} enacts: both need the whole (domain
+    × frontend) matrix, which a frontend cannot see and a command has no
     business re-deriving. Nothing here starts anything.
 
     {!frontend_for} takes the [frontend] override when given — it must be one
@@ -19,8 +19,7 @@ val frontend_names : Conf_parsing.domain -> string list
     saying it does not know the file rather than a connection to nothing.
 
     A relative path is resolved against the working directory. *)
-val socket_for_path :
-  paths:Runtime.paths -> Conf_parsing.t -> string -> string
+val socket_for_path : paths:Runtime.paths -> Conf_parsing.t -> string -> string
 
 (** Every domain on this machine paired with the socket its daemon answers on,
     for a command that reports rather than acts. Asked of each configured

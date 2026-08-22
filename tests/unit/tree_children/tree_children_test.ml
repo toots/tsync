@@ -48,7 +48,9 @@ module Cf =
 module Tf = Inode_tree.Make (Cf)
 
 let ns id = C.domain_prefix ^ id ^ "/"
-let put id name body = Store.put ~key:(ns id ^ name) ~data:(Bigstring.of_string body) ()
+
+let put id name body =
+  Store.put ~key:(ns id ^ name) ~data:(Bigstring.of_string body) ()
 
 let manifest_body name =
   Chunk_table.encode ~name ~size:0L ~chunk_size:4 ~mtime:0.
@@ -83,7 +85,8 @@ let () =
      let* () = put mixed "a" (manifest_body "a.txt") in
      let* () =
        put mixed "b"
-         (Folder.marker_to_string { Folder.name = "sub"; id = Folder.new_id () })
+         (Folder.marker_to_string
+            { Folder.name = "sub"; id = Folder.new_id () })
      in
      let* children = Tree.children ~folder_id:mixed () in
      check "one manifest" (List.length (List.filter is_file children) = 1);

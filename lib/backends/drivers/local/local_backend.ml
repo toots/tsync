@@ -23,7 +23,8 @@ let write_string path data = write_file path (Bigstring.of_string data)
    name is reused afterwards, and a chunk body never lands on the heap. *)
 let read_file path =
   let+ st = Lwt_unix_retry.LargeFile.stat path in
-  Bigstring.map_file ~path ~offset:0 ~len:(Int64.to_int st.Unix.LargeFile.st_size)
+  Bigstring.map_file ~path ~offset:0
+    ~len:(Int64.to_int st.Unix.LargeFile.st_size)
 
 (* [link] rather than [rename]: rename replaces silently, link fails with EEXIST
    when the destination is taken, which is the whole point.
@@ -352,7 +353,12 @@ let make ?(verify_writes = true) ~root () : (module Backend.S) =
               if is_dir_key key_prefix then
                 emit
                   Backend.
-                    { key = key_prefix; size = 0; last_modified = 0.; etag = None };
+                    {
+                      key = key_prefix;
+                      size = 0;
+                      last_modified = 0.;
+                      etag = None;
+                    };
               Lwt.return_unit)
             else (
               let rest = ref names in
@@ -402,7 +408,6 @@ let make ?(verify_writes = true) ~root () : (module Backend.S) =
     (* A filesystem read is not a round trip: {!Backend.Batched} fans these
        out. *)
     let get_many = None
-
     let verify_all ~chunk_prefix:_ () = Lwt.return `Unsupported
 
     (* Nothing to wake here either, and a collection deleting on a filesystem is

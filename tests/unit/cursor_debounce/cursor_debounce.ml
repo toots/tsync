@@ -88,7 +88,6 @@ module Counting : Backend.S = struct
     Lwt.return `Unsupported
 
   let get_many = None
-
   let capabilities ~prefix:_ () = Lwt.return Backend.no_caps
 end
 

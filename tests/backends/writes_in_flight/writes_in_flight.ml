@@ -131,7 +131,9 @@ let () =
      let user_key =
        chunk_prefix ^ shard ^ ".syncthing.Big.Buck.Bunny.mkv.tmp"
      in
-     let* () = Local.put ~key:user_key ~data:(Bigstring.of_string "in flight") () in
+     let* () =
+       Local.put ~key:user_key ~data:(Bigstring.of_string "in flight") ()
+     in
      let* () = Fs_util.atomic_write staged_path "half a body" in
 
      case "what a listing of the shard yields";

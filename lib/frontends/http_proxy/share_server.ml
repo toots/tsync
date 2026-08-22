@@ -169,7 +169,9 @@ module Make (C : Conf.S) = struct
      handing it straight back. *)
   let children ns =
     let folder_id = Filename.basename (Key.chop_slash ns) in
-    let+ entries = Tree.children ~on_unusable:(`Skip (fun _ _ -> ())) ~folder_id () in
+    let+ entries =
+      Tree.children ~on_unusable:(`Skip (fun _ _ -> ())) ~folder_id ()
+    in
     List.map
       (fun (e : Inode_tree.entry) ->
         match e.Inode_tree.body with

@@ -71,9 +71,10 @@ let () =
     Lwt_main.run
       (Lwt.pick
          [
-           (let+ answers = Lwt_list.map_p (fun _ -> one ()) (List.init callers Fun.id) in
-            if List.for_all Fun.id answers then `All_answered
-            else `Wrong_body);
+           (let+ answers =
+              Lwt_list.map_p (fun _ -> one ()) (List.init callers Fun.id)
+            in
+            if List.for_all Fun.id answers then `All_answered else `Wrong_body);
            (let+ () = Lwt_unix.sleep 10. in
             `Wedged);
          ])

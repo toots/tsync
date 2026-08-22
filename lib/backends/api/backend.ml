@@ -133,7 +133,9 @@ module type S = sig
       round trip of [head_opt] + [get] when the body is wanted. *)
   val get_opt : key:string -> unit -> Bigstring.t option Lwt.t
 
-  val put_if_absent : key:string -> data:Bigstring.t -> unit -> Bigstring.t Lwt.t
+  val put_if_absent :
+    key:string -> data:Bigstring.t -> unit -> Bigstring.t Lwt.t
+
   val head_opt : key:string -> unit -> file_entry option Lwt.t
   val delete : key:string -> unit -> unit Lwt.t
   val delete_multi : string list -> unit Lwt.t
@@ -147,7 +149,9 @@ module type S = sig
       batch API carrying metadata only. Declared rather than implemented, so a
       store without one says so and {!Batched} supplies the fan-out. *)
   val get_many :
-    (entries:file_entry list -> unit -> (string * Bigstring.t option) list Lwt.t)
+    (entries:file_entry list ->
+    unit ->
+    (string * Bigstring.t option) list Lwt.t)
     option
 
   val verify_all :
@@ -177,7 +181,9 @@ let batches entries =
   let rec go done_ run keys bytes = function
     | [] -> List.rev (if run = [] then done_ else List.rev run :: done_)
     | e :: tl ->
-        if run <> [] && (keys >= max_batch_keys || bytes + e.size > max_batch_bytes)
+        if
+          run <> []
+          && (keys >= max_batch_keys || bytes + e.size > max_batch_bytes)
         then go (List.rev run :: done_) [e] 1 e.size tl
         else go done_ (e :: run) (keys + 1) (bytes + e.size) tl
   in

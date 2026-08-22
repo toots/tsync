@@ -66,7 +66,8 @@ let suite name (module B : Backend.S) =
   let round_trip () =
     let* () = B.put ~key:(key "a") ~data:(Bigstring.of_string "alpha") () in
     let* got = B.get ~key:(key "a") () in
-    check "put then get returns what was written" (Bigstring.to_string got = "alpha");
+    check "put then get returns what was written"
+      (Bigstring.to_string got = "alpha");
     let* got = B.get_opt ~key:(key "a") () in
     check "get_opt finds it" (Option.map Bigstring.to_string got = Some "alpha");
     let* missing = B.get_opt ~key:(key "nope") () in
@@ -106,7 +107,9 @@ let suite name (module B : Backend.S) =
      does, and a driver that later grows one inherits the cases. *)
   let reading_many () =
     let module Bb = Backend.Batched (B) in
-    let entry k = Backend.{ key = k; size = 5; last_modified = 0.; etag = None } in
+    let entry k =
+      Backend.{ key = k; size = 5; last_modified = 0.; etag = None }
+    in
     let asked = [entry (key "a"); entry (key "nope"); entry (key "b")] in
     let* answered = Bb.get_many ~entries:asked () in
     check "every key asked for is answered, in order"
@@ -159,7 +162,9 @@ let suite name (module B : Backend.S) =
       (match head with Some e -> e.Backend.size = size | None -> false);
     (* A refused claim answers with the holder's body, so a chunk-sized one
        comes back down the same path a get does. *)
-    let* held = B.put_if_absent ~key:big ~data:(Bigstring.of_string "small") () in
+    let* held =
+      B.put_if_absent ~key:big ~data:(Bigstring.of_string "small") ()
+    in
     check "a refused claim answers with the chunk-sized holder"
       (Bigstring.length held = size && Xxhash.hash_bigstring_hex held 0 = digest);
     let* () = B.delete ~key:big () in
@@ -183,7 +188,9 @@ let suite name (module B : Backend.S) =
       (List.length (List.sort_uniq compare answers) = 1);
     check "every claimant is told what actually holds it"
       (List.for_all (fun a -> a = stored) answers);
-    let* late = B.put_if_absent ~key:claim ~data:(Bigstring.of_string "late") () in
+    let* late =
+      B.put_if_absent ~key:claim ~data:(Bigstring.of_string "late") ()
+    in
     let late = Bigstring.to_string late in
     check "a later claim is refused and told the holder"
       (late = stored && late <> "late");

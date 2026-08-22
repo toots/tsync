@@ -12,11 +12,14 @@ type 'a t
 (** [decode] reads one record from the mapped body, advancing the cursor past
     exactly the bytes {!add} wrote for it. *)
 val create :
-  dir:string -> name:string -> decode:(Bigstring.t -> int ref -> 'a) -> 'a t Lwt.t
+  dir:string ->
+  name:string ->
+  decode:(Bigstring.t -> int ref -> 'a) ->
+  'a t Lwt.t
 
 (** Append one record, each field written by one of [fields]. Raises once the
-    spool is sealed: {!Bigstring.map_file} is sound for a file that stays as it was
-    mapped, and the seal is where that begins. *)
+    spool is sealed: {!Bigstring.map_file} is sound for a file that stays as it
+    was mapped, and the seal is where that begins. *)
 val add : 'a t -> (Buffer.t -> unit) list -> unit Lwt.t
 
 (** Records appended so far, which is a total a caller can announce before it

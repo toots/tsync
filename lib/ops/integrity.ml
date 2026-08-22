@@ -38,7 +38,7 @@ module Make (C : Conf.S) = struct
         on_done ~store ~found;
         Lwt.return_unit
       end
-      else
+      else (
         let stalled = if left = last then stalled + 1 else 0 in
         if stalled >= stall_after then begin
           on_stalled ~store;
@@ -46,7 +46,7 @@ module Make (C : Conf.S) = struct
         end
         else
           let* () = Lwt_unix.sleep poll_interval in
-          loop stalled left
+          loop stalled left)
     in
     loop 0 (-1)
 

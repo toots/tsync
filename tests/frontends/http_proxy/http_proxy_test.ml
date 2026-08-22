@@ -118,8 +118,8 @@ let rec substitute ~values (j : Yojson.Safe.t) =
 
 let signed_request ~secret ~path =
   let headers =
-    Http_proxy.Auth.request_headers ~secret ~meth:"GET" ~path ~body:Bigstring.empty
-      ()
+    Http_proxy.Auth.request_headers ~secret ~meth:"GET" ~path
+      ~body:Bigstring.empty ()
   in
   Cohttp.Request.make
     ~headers:(Cohttp.Header.of_list headers)
@@ -237,7 +237,9 @@ let () =
     = Some "tsync/one/");
   (* No prefix is a bad request, not a silent answer for some other domain. *)
   assert (
-    Http_proxy_frontend.parse_op `GET (Uri.of_string "/chunk-size") Bigstring.empty
+    Http_proxy_frontend.parse_op `GET
+      (Uri.of_string "/chunk-size")
+      Bigstring.empty
     = Http_proxy_frontend.Bad);
 
   assert (pick "tsync/two/manifests/x" "one" = Some "two");
@@ -266,8 +268,7 @@ let () =
   assert (scoped (bulk "/get-multi" [mine; "tsync/one/manifests/b"]));
   (* Routed to "one" by its head, which is what makes the tail worth checking. *)
   assert (
-    Http_proxy_frontend.route_key (bulk "/get-multi" [mine; theirs])
-    = Some mine);
+    Http_proxy_frontend.route_key (bulk "/get-multi" [mine; theirs]) = Some mine);
   assert (not (scoped (bulk "/get-multi" [mine; theirs])));
   (* The same shape on the write side, which predates the batch. *)
   assert (not (scoped (bulk "/delete-multi" [mine; theirs])));
@@ -322,7 +323,8 @@ let () =
   let status op ~read_only =
     let r = { (route "one") with read_only } in
     let resp, _ =
-      Lwt_main.run (Http_proxy_frontend.exec r op ~body:(Bigstring.of_string "x"))
+      Lwt_main.run
+        (Http_proxy_frontend.exec r op ~body:(Bigstring.of_string "x"))
     in
     Cohttp.Code.code_of_status (Cohttp.Response.status resp)
   in
@@ -363,7 +365,8 @@ let () =
          let (module B : Backend.S) = C.store in
          B.put
            ~key:(C.chunk_prefix ^ Chunk_layout.relative_path key)
-           ~data:(Bigstring.of_string "chunk") ())
+           ~data:(Bigstring.of_string "chunk")
+           ())
        (List.init planted Fun.id));
 
   (* A journal with a cursor set, so "to apply" is counted against something.

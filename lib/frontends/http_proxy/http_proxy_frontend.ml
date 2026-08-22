@@ -326,7 +326,10 @@ let op_keys = function
   | Delete_multi keys | Get_multi keys -> keys
   | Copy (src, dst) -> [src; dst]
   | Get k | Head k | Put k | Put_if_absent k | Delete k -> [k]
-  | List_all (p, _) | Share_url p | Chunk_size p | Max_concurrency p
+  | List_all (p, _)
+  | Share_url p
+  | Chunk_size p
+  | Max_concurrency p
   | Verified p ->
       [p]
   | Bad | Unknown -> []
@@ -359,7 +362,7 @@ let respond ?(status = `OK) ?(headers = []) body =
    response alone and nothing writes to it again. *)
 let respond_chunk data =
   Cohttp_lwt_unix.Server.respond ~status:`OK
-    ~body:(Cohttp_lwt.Body.of_bigstring (`Passthrough (data)))
+    ~body:(Cohttp_lwt.Body.of_bigstring (`Passthrough data))
     ()
 
 let authed route req body =
@@ -800,8 +803,7 @@ let callback ~port ~tls routes _conn req body =
                             bump "unauthorized";
                             respond ~status:`Unauthorized "unauthorized"
                           end
-                          else if
-                            not (List.for_all (within route) (op_keys op))
+                          else if not (List.for_all (within route) (op_keys op))
                           then begin
                             (* Refused rather than narrowed to the keys that do
                                belong: a caller reaching outside the domain it

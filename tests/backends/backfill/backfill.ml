@@ -169,7 +169,8 @@ let () =
      case "a symlink names no chunks";
      let* () =
        B.put ~key:(manifest_key "link")
-         ~data:(Bigstring.of_string (manifest ~symlink:"../one" ~name:"link" []))
+         ~data:
+           (Bigstring.of_string (manifest ~symlink:"../one" ~name:"link" []))
          ()
      in
      step "put manifest link -> ../one";

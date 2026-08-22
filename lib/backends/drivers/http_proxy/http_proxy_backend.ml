@@ -56,7 +56,8 @@ let put_if_absent t ~key ~data () =
   let uri = Uri.add_query_param' (obj_uri t key) ("if_absent", "1") in
   let+ resp, body = call_retry t ~meth:`PUT ~body:data "put_if_absent" uri in
   if is_ok resp then body
-  else raise (backend_error "put_if_absent" (code resp) (Bigstring.to_string body))
+  else
+    raise (backend_error "put_if_absent" (code resp) (Bigstring.to_string body))
 
 let get t ~key () =
   let+ resp, body = call_retry t ~meth:`GET "get" (obj_uri t key) in
@@ -106,9 +107,7 @@ let delete_multi t keys =
    and can answer a folder's worth in a single response, where an object store
    would have to be asked key by key. *)
 let get_many t ~entries () =
-  let keys =
-    List.map (fun (e : Backend.file_entry) -> e.Backend.key) entries
-  in
+  let keys = List.map (fun (e : Backend.file_entry) -> e.Backend.key) entries in
   let body =
     Yojson.Safe.to_string (`List (List.map (fun k -> `String k) keys))
   in
@@ -279,7 +278,6 @@ let make ~url ~secret : (module Backend.S) =
     let delete_multi keys = delete_multi t keys
     let copy ~src_key ~dst_key () = copy t ~src_key ~dst_key ()
     let list_prefix ?max_keys ~prefix () = list_all t ?max_keys ~prefix ()
-
     let get_many = Some (fun ~entries () -> get_many t ~entries ())
 
     (* The peer owns that store and whatever checks it; asking it to start a

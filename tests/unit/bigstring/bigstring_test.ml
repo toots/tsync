@@ -55,15 +55,19 @@ let clones =
 
 let () =
   (* Round trips, and the empty chunk that an empty file still yields. *)
-  check "of_string/to_string" (Bigstring.to_string (Bigstring.of_string body) = body);
-  check "length" (Bigstring.length (Bigstring.of_string body) = String.length body);
+  check "of_string/to_string"
+    (Bigstring.to_string (Bigstring.of_string body) = body);
+  check "length"
+    (Bigstring.length (Bigstring.of_string body) = String.length body);
   check "empty"
-    (Bigstring.length Bigstring.empty = 0 && Bigstring.to_string Bigstring.empty = "");
+    (Bigstring.length Bigstring.empty = 0
+    && Bigstring.to_string Bigstring.empty = "");
   (* A zero-length mapping is [addr = NULL] in the stub, so it is special-cased
      rather than mapped. *)
   let p = path "empty" in
   write_file p "";
-  check "map empty" (Bigstring.length (Bigstring.map_file ~path:p ~offset:0 ~len:0) = 0);
+  check "map empty"
+    (Bigstring.length (Bigstring.map_file ~path:p ~offset:0 ~len:0) = 0);
 
   (* 1. A mapping outlives the name it was made from. This is what lets the cache
      cap delete a body under a reader. *)
@@ -100,7 +104,7 @@ let () =
   let p = path "private" in
   write_file p body;
   let c = Bigstring.map_file ~path:p ~offset:0 ~len:(String.length body) in
-  Bigstringaf.set (c) 0 'Z';
+  Bigstringaf.set c 0 'Z';
   check "write does not reach file" (read_file p = body);
 
   (* 5. The clone is gone before [map_file] returns, so a directory tsync maps
@@ -154,7 +158,8 @@ let () =
   let c = Bigstring.map_file ~path:p ~offset:0 ~len:(String.length body) in
   check "hash matches string"
     (Xxhash.hash_bigstring_hex c 0 = Xxhash.hash_hex body 0
-    && Xxhash.hash_bigstring_hex (Bigstring.of_string body) 1 = Xxhash.hash_hex body 1);
+    && Xxhash.hash_bigstring_hex (Bigstring.of_string body) 1
+       = Xxhash.hash_hex body 1);
 
   (* 10. [create] registers its size with the collector where a mapping does not:
      the stub allocates a mapped bigarray with a declared cost of zero. The
@@ -170,7 +175,8 @@ let () =
   let p = path "accounted" in
   write_file p (String.make (4 * 1024 * 1024) 'a');
   let mapped =
-    extra (fun () -> Bigstring.map_file ~path:p ~offset:0 ~len:(4 * 1024 * 1024))
+    extra (fun () ->
+        Bigstring.map_file ~path:p ~offset:0 ~len:(4 * 1024 * 1024))
   in
   check "mapping is a small heap object" (mapped < 1000.);
 

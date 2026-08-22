@@ -87,7 +87,9 @@ let () =
      let scrambled =
        String.map (fun c -> Char.chr (Char.code c lxor 0xff)) body
      in
-     let* () = B.put ~key:backend_key ~data:(Bigstring.of_string scrambled) () in
+     let* () =
+       B.put ~key:backend_key ~data:(Bigstring.of_string scrambled) ()
+     in
      (* The store found it on the way in; nothing here had to look. *)
      Corrupt.invalidate ();
      let* marks = listed () in

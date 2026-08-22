@@ -133,7 +133,9 @@ module Make_with_layout (C : Conf.S) (L : Layout.S) : S = struct
      whose manifest used a larger one — takes a single slot regardless, and so
      costs more than a slot is reckoned to. *)
   let with_slot f = Lwt_bounded.use chunk_slots f
-  let with_chunk_buffer ~size f = with_slot (fun () -> f (Bigstring.create size))
+
+  let with_chunk_buffer ~size f =
+    with_slot (fun () -> f (Bigstring.create size))
 
   (* Workers as wide as the buffer pool, each taking the next index: a promise
      apiece is a fan-out the file's size chooses, and a terabyte's worth of them
@@ -345,7 +347,7 @@ module Make_with_layout (C : Conf.S) (L : Layout.S) : S = struct
         | `Fill fill ->
             with_chunk_buffer ~size:len (fun buf ->
                 let* () = fill buf in
-                let+ ck_rel, _ = put_chunk ~data:(buf) in
+                let+ ck_rel, _ = put_chunk ~data:buf in
                 Chunk_table.set table index ck_rel)
     in
     let* () = each_chunk ~count:n one in

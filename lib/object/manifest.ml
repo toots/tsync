@@ -494,8 +494,8 @@ module Make (C : Conf.S) = struct
     let bytes =
       body ~name:(Key.leaf ~domain_prefix:C.domain_prefix key) manifest
     in
-    Fs_util.atomic_write_at (path key) ~size:(Bigstring.length bytes) (fun put ->
-        put ~offset:0 (bytes))
+    Fs_util.atomic_write_at (path key) ~size:(Bigstring.length bytes)
+      (fun put -> put ~offset:0 bytes)
 
   let delete key =
     invalidate key;

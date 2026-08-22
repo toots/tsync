@@ -203,7 +203,6 @@ let target ?domain ~paths cfg =
 
 let socket ?domain ~paths cfg = snd (target ?domain ~paths cfg)
 
-
 (* [--source] says where to read from, so only reads move: a write still goes
    through the domain's own path and reaches the deferred targets behind it.
    Raises [Failure] when nothing has that name. *)
