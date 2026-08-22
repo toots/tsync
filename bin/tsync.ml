@@ -71,7 +71,7 @@ let start_cmd =
       | None -> ());
     Log.debug "cache root: %s" runtime_paths.Runtime.cache_root;
     Launcher.run
-      ~on_leaf:(fun ~name -> trace_process ~name)
+      ~on_leaf:(fun ~name -> Oneshot.trace_process ~name)
       (List.map
          (fun ((d : Conf_parsing.domain), conf, mount_point) ->
            List.map

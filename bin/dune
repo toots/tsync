@@ -38,6 +38,8 @@
    -open
    Tsync_domain
    -open
+   Tsync_oneshot
+   -open
    Tsync_backend
    -open
    Tsync_diagnostics
@@ -78,6 +80,7 @@
   tsync-libs.diagnostics
   tsync-libs.domain_store
   tsync_domain
+  tsync_oneshot
   tsync-libs.local_io
   tsync-libs.log
   tsync_runtime
