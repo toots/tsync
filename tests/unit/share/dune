@@ -2,6 +2,8 @@
  (flags
   (:standard
    -open
+   Tsync_store
+   -open
    Tsync_ops
    -open
    Tsync_naming
@@ -17,6 +19,7 @@
    Tsync_domain_store))
  (name share_test)
  (libraries
+  tsync_store
   tsync_ops
   tsync_naming
   tsync_conf

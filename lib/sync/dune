@@ -7,6 +7,8 @@
  (flags
   (:standard
    -open
+   Tsync_remote
+   -open
    Tsync_staged
    -open
    Tsync_checkout
@@ -35,6 +37,7 @@
  (name tsync_sync)
  (public_name tsync-libs.sync)
  (libraries
+  tsync_remote
   tsync_staged
   tsync_checkout
   tsync_manifest

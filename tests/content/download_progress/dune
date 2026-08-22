@@ -2,6 +2,8 @@
  (flags
   (:standard
    -open
+   Tsync_remote
+   -open
    Tsync_manifest
    -open
    Tsync_content
@@ -15,6 +17,7 @@
    Tsync_test_harness))
  (name download_progress_test)
  (libraries
+  tsync_remote
   tsync_manifest
   tsync_test_harness
   tsync_content

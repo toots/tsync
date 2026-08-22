@@ -2,6 +2,10 @@
  (flags
   (:standard
    -open
+   Tsync_remote
+   -open
+   Tsync_store
+   -open
    Tsync_staged
    -open
    Tsync_checkout
@@ -25,6 +29,8 @@
    Tsync_metrics))
  (name share_server_test)
  (libraries
+  tsync_remote
+  tsync_store
   tsync_staged
   tsync_checkout
   tsync_content

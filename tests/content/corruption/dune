@@ -2,6 +2,8 @@
  (flags
   (:standard
    -open
+   Tsync_remote
+   -open
    Tsync_manifest
    -open
    Tsync_chunk_keyspace
@@ -25,6 +27,7 @@
    Tsync_test_harness))
  (name corruption_test)
  (libraries
+  tsync_remote
   tsync_manifest
   tsync_chunk_keyspace
   tsync_chunks

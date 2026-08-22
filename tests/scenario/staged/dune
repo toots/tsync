@@ -2,6 +2,8 @@
  (flags
   (:standard
    -open
+   Tsync_remote
+   -open
    Tsync_staged
    -open
    Tsync_checkout
@@ -25,6 +27,7 @@
    Tsync_test_harness))
  (name staged_test)
  (libraries
+  tsync_remote
   tsync_staged
   tsync_checkout
   tsync_manifest

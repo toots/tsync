@@ -2,6 +2,10 @@
  (flags
   (:standard
    -open
+   Tsync_remote
+   -open
+   Tsync_store
+   -open
    Tsync_content
    -open
    Tsync_naming
@@ -17,6 +21,8 @@
    Tsync_test_harness))
  (name chunk_pools)
  (libraries
+  tsync_remote
+  tsync_store
   tsync_test_harness
   tsync_content
   tsync_naming

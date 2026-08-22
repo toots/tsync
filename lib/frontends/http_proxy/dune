@@ -2,6 +2,10 @@
  (flags
   (:standard
    -open
+   Tsync_remote
+   -open
+   Tsync_store
+   -open
    Tsync_checkout
    -open
    Tsync_manifest
@@ -50,6 +54,8 @@
   %{project_root}/lambda/mime.json
   stats.html)
  (libraries
+  tsync_remote
+  tsync_store
   tsync_checkout
   tsync_manifest
   tsync-libs.field_spec
