@@ -1,5 +1,5 @@
 open Cmdliner
-open Cli
+open Common
 
 let cmd : unit Cmd.t =
   let budget_arg =

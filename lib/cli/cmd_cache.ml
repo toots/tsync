@@ -1,5 +1,5 @@
 open Cmdliner
-open Cli
+open Common
 
 (* Residency, both directions. Evicting and fetching are the same operation
    over the same paths with the wire verb swapped, and naming them apart put

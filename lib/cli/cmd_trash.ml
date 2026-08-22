@@ -1,5 +1,5 @@
 open Cmdliner
-open Cli
+open Common
 
 (* An empty trash lists as its own directory key, which holds no marker and
    cannot be fetched on a filesystem store. Dropped here rather than in each

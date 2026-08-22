@@ -1,5 +1,5 @@
 open Cmdliner
-open Cli
+open Common
 
 (* The service manager already keeps and rotates the log, so this hands the
    terminal to the reader it provides rather than shipping lines over IPC. Only
