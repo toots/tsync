@@ -49,31 +49,6 @@ let resolve_frontend ?frontend (d : Conf_parsing.domain) : (module Frontend.S) =
           (Printf.sprintf
              "frontend %s is configured but not compiled into this binary" name)
 
-(* Raises Failure with the daemon's error message when ok=false.
-
-   [socket_path] is required rather than defaulted: a socket belongs to a
-   domain, and which domain a command means is the caller's to decide. Resolve
-   one with {!domain_socket} or {!domain_socket_for_path}. *)
-let ipc_request ~socket_path fields =
-  let request = Yojson.Safe.to_string (`Assoc fields) in
-  match Yojson.Safe.from_string (Ipc.send ~socket_path request) with
-    | `Assoc obj when List.assoc_opt "ok" obj = Some (`Bool true) -> obj
-    | `Assoc obj ->
-        let msg =
-          match List.assoc_opt "error" obj with
-            | Some (`String s) -> s
-            | _ -> "unexpected response"
-        in
-        failwith msg
-    | _ -> failwith "unexpected response"
-
-let ipc_action ~socket_path ?path ?arg ?domain action =
-  ipc_request ~socket_path
-    ([("action", `String action)]
-    @ (match path with Some p -> [("path", `String p)] | None -> [])
-    @ (match domain with Some d -> [("domain", `String d)] | None -> [])
-    @ match arg with Some a -> [("arg", `String a)] | None -> [])
-
 let make_backend ~traffic (bc : Conf_parsing.backend_config) =
   Backend.make ~traffic ~backend_type:bc.backend_type
     ~get_field:(fun k -> List.assoc_opt k bc.fields)
@@ -275,7 +250,7 @@ let load_config () = Conf_parsing.load runtime_paths.Runtime.config_path
    configured domain.
 
    Every command talking to a running daemon goes through this or
-   {!domain_socket_for_path}, which is why {!ipc_request} requires its socket
+   {!domain_socket_for_path}, which is why {!Ipc.request} requires its socket
    rather than defaulting one: there is nothing to fall through to. *)
 let domain_target ?domain () =
   let domain =

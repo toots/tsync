@@ -3,4 +3,4 @@
   (:standard -open Tsync_log))
  (name tsync_ipc)
  (public_name tsync-libs.ipc)
- (libraries tsync_log unix lwt lwt.unix))
+ (libraries tsync_log yojson unix lwt lwt.unix))
