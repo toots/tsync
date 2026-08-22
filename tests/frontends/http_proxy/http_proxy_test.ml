@@ -247,6 +247,31 @@ let () =
   assert (pick "tsync/shares/deadbeef" "nobody" = None);
   assert (pick "elsewhere/x" "one" = None);
 
+  (* A bulk op is routed and authorised by its first key and then run whole, so
+     every key past the first is held against the route that first one chose.
+     Without that, a client holding one domain's secret reads another's objects
+     through a list whose head is its own — two domains on one listener share a
+     bucket and differ only in prefix. *)
+  let bulk path keys =
+    Http_proxy_frontend.parse_op `POST (Uri.of_string path)
+      (Chunk.of_string
+         (Yojson.Safe.to_string (`List (List.map (fun k -> `String k) keys))))
+  in
+  let scoped op =
+    List.for_all
+      (Http_proxy_frontend.within (route "one"))
+      (Http_proxy_frontend.op_keys op)
+  in
+  let mine = "tsync/one/manifests/a" and theirs = "tsync/two/manifests/b" in
+  assert (scoped (bulk "/get-multi" [mine; "tsync/one/manifests/b"]));
+  (* Routed to "one" by its head, which is what makes the tail worth checking. *)
+  assert (
+    Http_proxy_frontend.route_key (bulk "/get-multi" [mine; theirs])
+    = Some mine);
+  assert (not (scoped (bulk "/get-multi" [mine; theirs])));
+  (* The same shape on the write side, which predates the batch. *)
+  assert (not (scoped (bulk "/delete-multi" [mine; theirs])));
+
   (* Once a route does serve /s/, the manifest has to land in the store that will
      be read for it: written to one store and served from another, the link
      404s. So the share-enabled route answers whoever is asking... *)
