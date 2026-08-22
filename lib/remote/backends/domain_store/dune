@@ -2,7 +2,7 @@
  (flags
   (:standard
    -open
-   Tsync_chunk_keyspace
+   Tsync_chunks
    -open
    Tsync_naming
    -open
@@ -20,7 +20,7 @@
  (name tsync_domain_store)
  (public_name tsync-libs.domain_store)
  (libraries
-  tsync_chunk_keyspace
+  tsync_chunks
   tsync_naming
   tsync_work
   tsync_bigstring

@@ -2,7 +2,7 @@
  (flags
   (:standard
    -open
-   Tsync_chunk_keyspace
+   Tsync_chunks
    -open
    Tsync_store
    -open
@@ -19,7 +19,7 @@
    Tsync_test_harness))
  (name chunk_space_test)
  (libraries
-  tsync_chunk_keyspace
+  tsync_chunks
   tsync_test_harness
   tsync_store
   tsync_naming

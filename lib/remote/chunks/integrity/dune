@@ -1,0 +1,11 @@
+; The objects a store keeps about a chunk it was asked to check or drop: the
+; requests themselves, and the markers recording what they found. Below the
+; drivers, because a driver places a chunk and an object store writes the
+; requests.
+
+(library
+ (flags
+  (:standard -open Tsync_chunks -open Tsync_bigstring -open Tsync_lwt_unix))
+ (name tsync_chunk_integrity)
+ (public_name tsync-libs.chunk_integrity)
+ (libraries tsync_chunks tsync_bigstring tsync_lwt_unix yojson lwt))

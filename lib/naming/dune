@@ -11,8 +11,6 @@
  (flags
   (:standard
    -open
-   Tsync_chunk_keyspace
-   -open
    Tsync_chunks
    -open
    Tsync_conf
@@ -31,7 +29,6 @@
  (name tsync_naming)
  (public_name tsync-libs.naming)
  (libraries
-  tsync_chunk_keyspace
   tsync_chunks
   tsync_conf
   tsync_backend_register

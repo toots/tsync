@@ -2,7 +2,7 @@
  (flags
   (:standard
    -open
-   Tsync_chunk_keyspace
+   Tsync_chunk_integrity
    -open
    Tsync_field_spec
    -open
@@ -16,7 +16,7 @@
  (optional)
  (library_flags (-linkall))
  (libraries
-  tsync_chunk_keyspace
+  tsync_chunk_integrity
   tsync-libs.field_spec
   tsync-libs.bigstring
   tsync-libs.backend_register

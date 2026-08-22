@@ -2,7 +2,7 @@
  (flags
   (:standard
    -open
-   Tsync_chunk_keyspace
+   Tsync_chunk_integrity
    -open
    Tsync_chunks
    -open
@@ -21,7 +21,7 @@
    Tsync_test_harness))
  (name conformance)
  (libraries
-  tsync_chunk_keyspace
+  tsync_chunk_integrity
   tsync_chunks
   tsync_xxhash
   tsync_bigstring

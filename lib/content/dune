@@ -19,8 +19,6 @@
    -open
    Tsync_journal
    -open
-   Tsync_chunk_keyspace
-   -open
    Tsync_conf
    -open
    Tsync_naming
@@ -53,7 +51,6 @@
   tsync_checkout
   tsync_manifest
   tsync_journal
-  tsync_chunk_keyspace
   tsync_conf
   tsync_naming
   tsync_chunks

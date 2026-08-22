@@ -2,8 +2,6 @@
  (flags
   (:standard
    -open
-   Tsync_chunk_keyspace
-   -open
    Tsync_log
    -open
    Tsync_bigstring
@@ -18,7 +16,6 @@
  (name tsync_backend_register)
  (public_name tsync-libs.backend_register)
  (libraries
-  tsync_chunk_keyspace
   tsync_field_spec
   tsync_metrics
   tsync_bigstring

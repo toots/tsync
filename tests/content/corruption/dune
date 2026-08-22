@@ -2,11 +2,11 @@
  (flags
   (:standard
    -open
+   Tsync_chunk_integrity
+   -open
    Tsync_remote
    -open
    Tsync_manifest
-   -open
-   Tsync_chunk_keyspace
    -open
    Tsync_chunks
    -open
@@ -27,9 +27,9 @@
    Tsync_test_harness))
  (name corruption_test)
  (libraries
+  tsync_chunk_integrity
   tsync_remote
   tsync_manifest
-  tsync_chunk_keyspace
   tsync_chunks
   tsync_test_harness
   tsync_conf

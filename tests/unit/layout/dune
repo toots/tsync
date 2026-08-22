@@ -2,17 +2,20 @@
  (flags
   (:standard
    -open
-   Tsync_journal
+   Tsync_chunk_integrity
    -open
-   Tsync_chunk_keyspace
+   Tsync_chunks
+   -open
+   Tsync_journal
    -open
    Tsync_naming
    -open
    Tsync_local_io))
  (name layout)
  (libraries
+  tsync_chunk_integrity
+  tsync_chunks
   tsync_journal
-  tsync_chunk_keyspace
   tsync_naming
   tsync_local_io
   unix))

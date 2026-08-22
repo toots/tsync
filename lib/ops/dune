@@ -7,6 +7,8 @@
  (flags
   (:standard
    -open
+   Tsync_chunk_integrity
+   -open
    Tsync_history
    -open
    Tsync_remote
@@ -18,8 +20,6 @@
    Tsync_manifest
    -open
    Tsync_journal
-   -open
-   Tsync_chunk_keyspace
    -open
    Tsync_chunks
    -open
@@ -51,13 +51,13 @@
  (name tsync_ops)
  (public_name tsync-libs.ops)
  (libraries
+  tsync_chunk_integrity
   tsync_history
   tsync_remote
   tsync_staged
   tsync_checkout
   tsync_manifest
   tsync_journal
-  tsync_chunk_keyspace
   tsync_chunks
   tsync_conf
   tsync_naming

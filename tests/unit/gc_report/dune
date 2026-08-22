@@ -2,9 +2,9 @@
  (flags
   (:standard
    -open
-   Tsync_manifest
+   Tsync_chunks
    -open
-   Tsync_chunk_keyspace
+   Tsync_manifest
    -open
    Tsync_ops
    -open
@@ -23,8 +23,8 @@
    Tsync_test_harness))
  (name gc_report)
  (libraries
+  tsync_chunks
   tsync_manifest
-  tsync_chunk_keyspace
   tsync_test_harness
   tsync_ops
   tsync_naming

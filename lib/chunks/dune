@@ -1,9 +1,0 @@
-; What a file's content is: slices named by their own bytes, and how a file maps
-; onto them. Pure, so the core can be reasoned about without a store or a domain.
-
-(library
- (flags
-  (:standard -open Tsync_bigstring -open Tsync_xxhash -open Tsync_local_io))
- (name tsync_chunks)
- (public_name tsync-libs.chunks)
- (libraries tsync_bigstring tsync_xxhash tsync_local_io unix))

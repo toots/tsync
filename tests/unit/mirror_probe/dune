@@ -2,9 +2,9 @@
  (flags
   (:standard
    -open
-   Tsync_checkout
+   Tsync_chunks
    -open
-   Tsync_chunk_keyspace
+   Tsync_checkout
    -open
    Tsync_bigstring
    -open
@@ -23,8 +23,8 @@
    Tsync_test_harness))
  (name mirror_probe)
  (libraries
+  tsync_chunks
   tsync_checkout
-  tsync_chunk_keyspace
   tsync_test_harness
   tsync_bigstring
   tsync_naming
