@@ -28,3 +28,9 @@ and so still has no index the next time
   child reads:        2
   index writes:       0
 
+a domain with two stores a read could land on
+  children read back: 3
+  index reads:        0
+  child reads:        3
+  index writes:       0
+

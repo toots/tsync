@@ -25,6 +25,22 @@ module Make (C : Conf.S) = struct
       (Lwt_bounded.shared ~key:C.domain_prefix ~name:"tree reads"
          ~max:C.max_downloads ())
 
+  (* An index pairs a body with the version the listing gave it, so both have to
+     come from the same store. A domain's stores are presented as one, and a
+     read falls through to the next where the listing does not: with more than
+     one place a read can land, a body answered by the second store would be
+     recorded under the first's version and served in its place ever after.
+
+     Read as well as written under this, so a domain that gains a second
+     readable store stops trusting what it wrote while it had one. *)
+  let one_source =
+    lazy
+      (List.length
+         (List.filter
+            (fun (m : Backend.member) -> m.Backend.readable)
+            C.members)
+      = 1)
+
   let classify data =
     match Folder.marker_of_string data with
       | Some m -> Ok (Dir m)
@@ -36,8 +52,13 @@ module Make (C : Conf.S) = struct
   (* The index is listed with the children it describes, so having it costs no
      round trip to discover. An unreadable one is one we do not have. *)
   let read_index ~slots listed =
-    if not (List.exists (fun (e : Backend.file_entry) ->
-                Folder.is_index_key e.Backend.key) listed)
+    if
+      (not (Lazy.force one_source))
+      || not
+           (List.exists
+              (fun (e : Backend.file_entry) ->
+                Folder.is_index_key e.Backend.key)
+              listed)
     then Lwt.return Folder_index.empty
     else
       Lwt.catch
@@ -66,32 +87,33 @@ module Make (C : Conf.S) = struct
      read must not fail because its cache could not be refreshed, and a caller
      serving a read-only domain simply never asks. *)
   let write_index ~folder_id ~index ~entries ~body_of =
-    let indexable =
-      List.filter
-        (fun (e : Backend.file_entry) -> e.Backend.etag <> None)
-        entries
-    in
-    let covered =
-      List.length (List.filter (fun e -> cached index e <> None) indexable)
-    in
-    if
-      not
-        (Folder_index.worth_writing ~covered ~total:(List.length indexable))
-    then Lwt.return_unit
-    else
-      let bodies =
-        List.filter_map
-          (fun e -> Option.map (fun b -> (e, Chunk.of_string b)) (body_of e))
-          indexable
+    if not (Lazy.force one_source) then Lwt.return_unit
+    else (
+      let indexable =
+        List.filter
+          (fun (e : Backend.file_entry) -> e.Backend.etag <> None)
+          entries
       in
-      Lwt.catch
-        (fun () ->
-          St.put_raw
-            ~bkey:(C.domain_prefix ^ Folder.index_key ~folder_id)
-            ~data:(Chunk.to_string (Folder_index.of_bodies bodies)))
-        (fun exn ->
-          Log.warn "folder index %s: %s" folder_id (Printexc.to_string exn);
-          Lwt.return_unit)
+      let covered =
+        List.length (List.filter (fun e -> cached index e <> None) indexable)
+      in
+      if
+        not (Folder_index.worth_writing ~covered ~total:(List.length indexable))
+      then Lwt.return_unit
+      else (
+        let bodies =
+          List.filter_map
+            (fun e -> Option.map (fun b -> (e, Chunk.of_string b)) (body_of e))
+            indexable
+        in
+        Lwt.catch
+          (fun () ->
+            St.put_raw
+              ~bkey:(C.domain_prefix ^ Folder.index_key ~folder_id)
+              ~data:(Chunk.to_string (Folder_index.of_bodies bodies)))
+          (fun exn ->
+            Log.warn "folder index %s: %s" folder_id (Printexc.to_string exn);
+            Lwt.return_unit)))
 
   let children ?(on_unusable = `Fail) ?(refresh_index = false) ?slots ~folder_id
       () =
@@ -124,8 +146,10 @@ module Make (C : Conf.S) = struct
                 | Some data -> data
                 | None -> None)
       in
-      let+ () = if refresh_index then write_index ~folder_id ~index ~entries ~body_of
-        else Lwt.return_unit in
+      let+ () =
+        if refresh_index then write_index ~folder_id ~index ~entries ~body_of
+        else Lwt.return_unit
+      in
       List.map
         (fun (e : Backend.file_entry) ->
           let bkey = e.Backend.key in
@@ -170,11 +194,11 @@ module Make (C : Conf.S) = struct
           (* An unclassifiable body is a write in flight and is skipped; a read
              that failed is not, and a walk deciding what to delete must not
              take one for an absent subtree. *)
-          match
-            List.find_map
-              (function _, Error (`Unreadable exn) -> Some exn | _ -> None)
-              outcomes
-          with
+            match
+              List.find_map
+                (function _, Error (`Unreadable exn) -> Some exn | _ -> None)
+                outcomes
+            with
             | Some exn -> Lwt.fail exn
             | None -> Lwt.return kept)
       | `Skip f ->
