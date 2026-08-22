@@ -99,14 +99,9 @@ module Make (C : Conf.S) = struct
       match slots with Some s -> s | None -> Lazy.force default_slots
     in
     let* listed = St.list_namespace ~folder_id in
-    (* An empty namespace lists as its own directory key — a zero-byte object on
-       S3, a real directory on a filesystem, where the read below fails
-       outright. It is not a child on either. *)
     let entries =
       List.filter
-        (fun (e : Backend.file_entry) ->
-          (not (Key.is_dir e.Backend.key))
-          && not (Folder.is_index_key e.Backend.key))
+        (fun (e : Backend.file_entry) -> Folder.is_child_object e.Backend.key)
         listed
     in
     (* A key listed and then gone: the listing and the reads that follow it are

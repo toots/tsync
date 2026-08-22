@@ -35,6 +35,16 @@ val index_key : folder_id:string -> string
 
 val is_index_key : string -> bool
 
+(** Whether a key a namespace listing offered is one of the folder's children.
+
+    Three things it can offer that are not: the directory key an empty namespace
+    lists as, a local write in flight under its staging name, and the folder's
+    own {!index_key}. None of them reads as a manifest or a marker, and a caller
+    that fetches one gets a failure or a body it cannot classify — which for a
+    resync is a child it could not read, and for a collection is a run that
+    stops with nothing discarded. *)
+val is_child_object : string -> bool
+
 type marker = { name : string; id : string }
 
 val marker_to_string : marker -> string

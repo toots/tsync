@@ -297,12 +297,10 @@ module Make (C : Conf.S) = struct
     Lwt.catch
       (fun () ->
         let* listed = B.list_prefix ~prefix:C.domain_prefix () in
-        (* A folder's index is a cache of the manifests beside it, not one of
-           them. *)
         let manifests =
           List.filter
             (fun (e : Backend.file_entry) ->
-              not (Folder.is_index_key e.Backend.key))
+              Folder.is_child_object e.Backend.key)
             listed
         in
         (* Manifests are keyed by folder id, not hashed, so nothing is evenly

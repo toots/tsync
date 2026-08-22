@@ -22,6 +22,17 @@ let index_leaf = ".tsync-index"
 let index_key ~folder_id = folder_id ^ "/" ^ index_leaf
 let is_index_key key = Filename.basename key = index_leaf
 
+(* What a listing of a namespace offers that is actually one of the folder's
+   children. An empty namespace lists as its own directory key, a local write in
+   flight lists under a staging name, and the index is a cache of the children
+   rather than one of them: none of the three reads as a manifest, and each
+   caller deciding that for itself is how three of them came to decide it
+   differently. *)
+let is_child_object key =
+  (not (Key.is_dir key))
+  && (not (Fs_util.is_temp_key key))
+  && not (is_index_key key)
+
 type marker = { name : string; id : string }
 
 let marker_to_string { name; id } =
