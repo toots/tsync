@@ -153,20 +153,10 @@ module Make_with_layout (C : Conf.S) (L : Layout.S) : S = struct
           incr next;
           Some (fun () -> f index)))
 
-  (* Chunk keys known present on the domain's stores, this session only. Not
-     pre-populated by listing the chunk prefix: that cost scales with the whole
-     historical archive rather than the upload at hand.
-
-     Capped the same crude way {!Deferred} caps its own: a session is a command,
-     and one that runs for days over a terabyte holds an entry per distinct
-     chunk with nothing to evict it. Overflowing costs a HEAD per chunk again,
-     which is what the memo was saving. *)
-  let known_chunks : (string, unit) Hashtbl.t = Hashtbl.create 4096
-  let known_chunk_count () = Hashtbl.length known_chunks
-
-  let remember_chunk ck_rel =
-    if Hashtbl.length known_chunks >= !max_known then Hashtbl.reset known_chunks;
-    Hashtbl.replace known_chunks ck_rel ()
+  (* Not pre-populated by listing the chunk prefix: that cost scales with the
+     whole historical archive rather than the upload at hand. *)
+  let dedup = Dedup.create ~max_known:(fun () -> !max_known) ()
+  let known_chunk_count () = Dedup.count dedup
 
   (* Where a chunk is written; where it can be *read* is
      {!Chunk_space.read_key}'s business, a collection in progress being the one
@@ -184,23 +174,11 @@ module Make_with_layout (C : Conf.S) (L : Layout.S) : S = struct
     Metrics.add_hashed 1;
     let ck = chunk_backend_key ck_rel in
     let* known =
-      (* Ahead of the session memo rather than behind it. A chunk this session
-         uploaded is already in [known_chunks], and a marker says exactly that
-         what it uploaded is not what landed; asking the store instead would not
-         help either, a corrupt chunk being the right size and so present.
-
-         This is what closes the loop. Skipping the write would leave the marker
-         standing with nothing to clear it, and — because dedup is what makes a
-         chunk shared — would hand the bad bytes to every later file that
-         contains it. *)
-      let* marked = Corrupt.is_marked ck_rel in
-      if marked then Lwt.return_false
-      else if Hashtbl.mem known_chunks ck_rel then Lwt.return_true
-      else chunk_exists ck_rel
+      Dedup.known dedup ~suspect:Corrupt.is_marked ~present:chunk_exists ck_rel
     in
     let+ () =
       if known then (
-        remember_chunk ck_rel;
+        Dedup.remember dedup ck_rel;
         Lwt.return_unit)
       else
         let+ () = B.put ~key:ck ~data () in
@@ -208,7 +186,7 @@ module Make_with_layout (C : Conf.S) (L : Layout.S) : S = struct
            as it took it — so stop holding this key against the rest of the
            session. *)
         Corrupt.forget ck_rel;
-        remember_chunk ck_rel
+        Dedup.remember dedup ck_rel
     in
     (ck_rel, not known)
 

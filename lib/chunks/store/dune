@@ -1,0 +1,8 @@
+; Keeping chunks in a store: naming bytes, and not sending what is already
+; there. Scoped under chunks because a chunk's name is what makes either
+; question answerable.
+
+(library
+ (name tsync_chunk_store)
+ (public_name tsync-libs.chunk_store)
+ (libraries lwt))

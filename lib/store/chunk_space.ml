@@ -226,7 +226,7 @@ module Make (C : Conf.S) = struct
 
      Tying survival to the publish rather than to how each chunk was found covers
      the cases a check cannot: a chunk skipped by an uploader's own session memo
-     (see [Remote.known_chunks]), a chunk written before the run opened and moved
+     (see {!Dedup}), a chunk written before the run opened and moved
      by the rename since, an upload still in flight when the run opened. *)
   let promote_all ~count chunk_key =
     let* run = read_run () in

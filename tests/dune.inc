@@ -751,6 +751,14 @@
   (action
    (diff cursor_debounce.expected cursor_debounce.output))))
 
+(subdir unit/dedup
+ (alias
+  (name default)
+  (deps dedup_test.exe))
+ (rule
+  (alias runtest)
+  (action (run ./dedup_test.exe))))
+
 (subdir unit/field_spec
  (alias
   (name default)
