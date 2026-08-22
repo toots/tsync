@@ -42,10 +42,16 @@ module Make (C : Conf.S) : sig
       covered to pay for the round trip, and is for a caller that walks the tree
       and may write: a read-only domain and a share being served must leave it
       alone. Best effort either way — a read does not fail because its cache
-      could not be refreshed. *)
+      could not be refreshed.
+
+      [on_index] is told the folder's index key where the listing offered one.
+      It is not a child and no fold sees it, but it is an object in the
+      namespace holding a copy of every manifest body in it, so a caller
+      deleting the folder needs it named or nothing ever reclaims it. *)
   val children :
     ?on_unusable:on_unusable ->
     ?refresh_index:bool ->
+    ?on_index:(string -> unit) ->
     ?slots:Lwt_bounded.t ->
     folder_id:string ->
     unit ->
@@ -58,6 +64,7 @@ module Make (C : Conf.S) : sig
   val fold_tree :
     ?on_unusable:on_unusable ->
     ?refresh_index:bool ->
+    ?on_index:(string -> unit) ->
     ?slots:Lwt_bounded.t ->
     folder_id:string ->
     rel:string ->

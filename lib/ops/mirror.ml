@@ -96,7 +96,11 @@ module Make (C : Conf.S) = struct
      plans against is wanted once, and the listing is on disk by the time
      anything could ask it a second time. *)
   let add_entry ~bytes listing (e : Backend.file_entry) =
-    if Fs_util.is_temp_key e.Backend.key then Lwt.return_unit
+    (* A folder index records the versions the store that built it reported,
+       so a copy matches nothing where it lands; it is also a duplicate of every
+       manifest body in its folder, which would transfer the namespace twice. *)
+    if Fs_util.is_temp_key e.Backend.key || Folder.is_index_key e.Backend.key
+    then Lwt.return_unit
     else (
       bytes := Int64.add !bytes (Int64.of_int e.Backend.size);
       Listing.add listing (record_entry e))
