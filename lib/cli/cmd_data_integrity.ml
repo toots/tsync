@@ -1,5 +1,5 @@
 open Cmdliner
-open Cli
+open Common
 
 (* One command for the three things anyone does about a chunk that is not what
    its name says: ask for a check, read what was found, put it right.

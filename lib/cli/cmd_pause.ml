@@ -1,5 +1,5 @@
 open Cmdliner
-open Cli
+open Common
 
 (* Uploads only: a download runs because something is blocked waiting for it. *)
 let pause_cmd ~verb ~arg ~done_ ~doc =

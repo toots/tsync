@@ -1,5 +1,5 @@
 open Cmdliner
-open Cli
+open Common
 
 (* What this binary is and where it keeps things, as against [tsync config],
    which is what the operator asked of it. Neither answers the other's question

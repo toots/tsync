@@ -1,5 +1,5 @@
 open Cmdliner
-open Cli
+open Common
 
 (* "<N>d" / "<N>h" -> seconds *)
 let cmd : unit Cmd.t =

@@ -1,5 +1,5 @@
 open Cmdliner
-open Cli
+open Common
 
 (* Each registered frontend surfaces its commands as `tsync <cli_group> <verb>`,
    the binary owning [--domain] parsing and checking the frontend is configured
