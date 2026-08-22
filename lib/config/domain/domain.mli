@@ -34,6 +34,8 @@ val reading_from : string -> (module Conf.S) -> (module Conf.S)
 val target :
   ?domain:string -> paths:Runtime.paths -> Conf_parsing.t -> string * string
 
+val socket : ?domain:string -> paths:Runtime.paths -> Conf_parsing.t -> string
+
 (** The domain to use when a command names none. [None] when nothing is
     recorded, or when the name recorded is not a configured domain — dropping a
     domain from the config must not break every command that omits [--domain].

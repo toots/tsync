@@ -15,39 +15,8 @@ let verbose_arg =
 
 let runtime_paths = Runtime.default_paths ()
 let mount_point_of = Conf_parsing.mount_point_of
-
-(* The [frontend] override if given (it must be one the domain lists), else the
-   domain's first. Resolved at call time, not module-init, so frontend
-   registration — a link-order side effect — has already happened. *)
-let frontend_names (d : Conf_parsing.domain) =
-  List.map
-    (fun (f : Conf_parsing.frontend_config) -> f.Conf_parsing.frontend_type)
-    d.Conf_parsing.frontends
-
-let resolve_frontend ?frontend (d : Conf_parsing.domain) : (module Frontend.S) =
-  let names = frontend_names d in
-  let name =
-    match frontend with
-      | Some name ->
-          if List.mem name names then name
-          else
-            failwith
-              (Printf.sprintf
-                 "frontend %s not configured for domain %s (configured: %s)"
-                 name d.Conf_parsing.name (String.concat ", " names))
-      | None -> (
-          match names with
-            | n :: _ -> n
-            | [] ->
-                failwith ("domain " ^ d.Conf_parsing.name ^ " has no frontends")
-          )
-  in
-  match Frontend.find name with
-    | Some m -> m
-    | None ->
-        failwith
-          (Printf.sprintf
-             "frontend %s is configured but not compiled into this binary" name)
+let frontend_names = Daemons.frontend_names
+let resolve_frontend = Daemons.frontend_for
 
 
 let domain_arg =
@@ -73,6 +42,11 @@ let domain_target ?domain () =
   Domain.target ?domain ~paths:runtime_paths (load_config ())
 
 let domain_socket ?domain () = snd (domain_target ?domain ())
+
+let domain_socket_for_path path =
+  Daemons.socket_for_path ~paths:runtime_paths (load_config ()) path
+
+let domain_targets () = Daemons.all ~paths:runtime_paths (load_config ())
 
 
 (* What the deferred targets still owe, summed: whether work is outstanding is
@@ -115,70 +89,6 @@ let report_job ?target ?current ~kind (module C : Conf.S) ~counters () =
     ~counters ()
 
 let doing phase detail = phase ^ " · " ^ detail
-
-(* A path names its own domain by sitting under that domain's mount, which is
-   how the macOS router resolves one as well. A path under none of them falls
-   back to the default domain, so the answer is a daemon saying it does not know
-   the file rather than a connection to nothing. *)
-let domain_socket_for_path path =
-  let path =
-    if Filename.is_relative path then Filename.concat (Sys.getcwd ()) path
-    else path
-  in
-  let under mount =
-    let mount = if mount = "/" then "" else mount in
-    String.starts_with ~prefix:(mount ^ "/") path || path = mount
-  in
-  match
-    List.find_opt
-      (fun d -> under (Conf_parsing.mount_point_of d))
-      (load_config ()).Conf_parsing.domains
-  with
-    | Some d -> Runtime.domain_socket_path runtime_paths d.Conf_parsing.name
-    | None | (exception _) -> domain_socket ()
-
-(* For a command that reports rather than acts: every configured domain, never
-   one. The default domain, and [--domain] with it, say which domain a command
-   acts on; a report answers for the machine, and narrowing it would leave the
-   rest of what runs here unaccounted for.
-
-   Each domain keeps its own name even where the socket is shared, since that is
-   what the macOS daemon routes on. *)
-let domain_targets () =
-  match (load_config ()).Conf_parsing.domains with
-    | [] -> failwith "no domains configured"
-    | domains ->
-        (* Asked of each configured frontend rather than assumed: a domain served
-           only by a listener has no socket of its own, and knocking on one
-           nothing binds reports a daemon down that was never up. Frontends
-           sharing a path answer the same one and collapse. *)
-        List.concat_map
-          (fun (d : Conf_parsing.domain) ->
-            List.filter_map
-              (fun (f : Conf_parsing.frontend_config) ->
-                match Frontend.find f.Conf_parsing.frontend_type with
-                  | None -> None
-                  | Some (module F : Frontend.S) -> (
-                      match F.listens with
-                        | None -> None
-                        | Some `Domain_socket ->
-                            Some
-                              ( d.Conf_parsing.name,
-                                Runtime.domain_socket_path runtime_paths
-                                  d.Conf_parsing.name )
-                        (* Named for the domain, not the listener: one process
-                           fronts several and routes on the name, so a report
-                           has to ask it once per domain to hear about each. *)
-                        | Some `Proxy_socket ->
-                            Some
-                              ( d.Conf_parsing.name,
-                                Runtime.proxy_socket_path runtime_paths )))
-              d.Conf_parsing.frontends)
-          domains
-        (* The process converging every domain, which presents none of them and
-           so is named for the work rather than for a domain or a frontend. *)
-        @ [("sync", Runtime.sync_socket_path runtime_paths)]
-        |> List.sort_uniq compare
 
 
 (* MEMTRACE names a directory, one file per process inside it: a daemon's

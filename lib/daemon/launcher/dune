@@ -4,6 +4,10 @@
    -open
    Tsync_frontend_register
    -open
+   Tsync_conf_parsing
+   -open
+   Tsync_domain
+   -open
    Tsync_engine
    -open
    Tsync_conf
@@ -22,6 +26,8 @@
  (name tsync_launcher)
  (libraries
   tsync_frontend_register
+  tsync-libs.conf_parsing
+  tsync_domain
   tsync-libs.engine
   tsync-libs.conf
   tsync-libs.log

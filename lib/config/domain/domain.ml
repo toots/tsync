@@ -201,6 +201,8 @@ let target ?domain ~paths cfg =
   let name = d.Conf_parsing.name in
   (name, Runtime.domain_socket_path paths name)
 
+let socket ?domain ~paths cfg = snd (target ?domain ~paths cfg)
+
 
 (* [--source] says where to read from, so only reads move: a write still goes
    through the domain's own path and reaches the deferred targets behind it.
