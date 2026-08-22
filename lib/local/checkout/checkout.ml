@@ -324,7 +324,7 @@ module Make (C : Conf.S) = struct
 
   (* The single resolution point: no caller decides this itself. *)
   let resolve key =
-    let* st = Sm.read key in
+    let* st = Sm.read_edits key in
     match st with
       | Some st ->
           let+ published = read key in

@@ -450,7 +450,7 @@ module Make (C : Conf.S) (R : Remote.S) = struct
   (* A whole body is split into chunks first: only chunks can be addressed by a
      partial write. *)
   let rec staged_for key =
-    let* st = Mfs.read key in
+    let* st = Mfs.read_edits key in
     match st with
       | Some ({ Staged_manifest.s_whole = Some uuid; _ } as st) ->
           let* () = split_whole key st uuid in
@@ -475,7 +475,6 @@ module Make (C : Conf.S) (R : Remote.S) = struct
                          ~chunk_size:(Manifest.chunk_size m))
                       Staged_manifest.Inherit;
                   s_whole = None;
-                  s_published = None;
                 }
             | None ->
                 {
@@ -485,7 +484,6 @@ module Make (C : Conf.S) (R : Remote.S) = struct
                   s_chunk_size = chunk_size;
                   s_slots = [||];
                   s_whole = None;
-                  s_published = None;
                 })
 
   and split_whole key (st : Staged_manifest.staged) uuid =
@@ -526,21 +524,15 @@ module Make (C : Conf.S) (R : Remote.S) = struct
         Staged_manifest.s_slots = slots;
         s_chunk_size = cs;
         s_whole = None;
-        s_published = None;
       }
     in
     let* () = Mfs.write key st in
     Sb.whole_forget ~uuid
 
-  (* [s_published] is the manifest an upload published for the bytes it hashed,
-     so changing those bytes retires it: leaving it set promotes a description of
-     what the file used to hold. *)
+  (* Writing the result of this back is what retires a finished upload: the
+     record it published describes bytes that just changed. *)
   let mutated (st : Staged_manifest.staged) =
-    {
-      st with
-      Staged_manifest.s_mtime = Unix.gettimeofday ();
-      s_published = None;
-    }
+    { st with Staged_manifest.s_mtime = Unix.gettimeofday () }
 
   let grow_slots slots n =
     let old = Array.length slots in
@@ -769,7 +761,7 @@ module Make (C : Conf.S) (R : Remote.S) = struct
   let truncate key size = with_key key (fun () -> truncate_locked key size)
 
   let discard_staged_locked key =
-    let* st = Mfs.read key in
+    let* st = Mfs.read_edits key in
     let* () =
       match st with Some st -> discard_bodies st | None -> Lwt.return_unit
     in
@@ -810,7 +802,7 @@ module Make (C : Conf.S) (R : Remote.S) = struct
   let discard_staged key = with_key key (fun () -> discard_staged_locked key)
 
   let create_locked key =
-    let* st = Mfs.read key in
+    let* st = Mfs.read_edits key in
     let* () =
       match st with Some st -> discard_bodies st | None -> Lwt.return_unit
     in
@@ -824,7 +816,6 @@ module Make (C : Conf.S) (R : Remote.S) = struct
         s_chunk_size = chunk_size;
         s_slots = [||];
         s_whole = None;
-        s_published = None;
       }
 
   let create key = with_key key (fun () -> create_locked key)
@@ -925,12 +916,8 @@ module Make (C : Conf.S) (R : Remote.S) = struct
     in
     commit key staged state
 
-  (* Written before anything local moves: a crash before this re-uploads
-     identical bytes, after it only local moves are left to replay. *)
   and commit key (staged : Staged_manifest.staged) published =
-    let+ () =
-      Mfs.write key { staged with Staged_manifest.s_published = Some published }
-    in
+    let+ () = Mfs.commit key staged published in
     published
 
   (* Every step is idempotent, so a crash anywhere replays.
@@ -1030,10 +1017,9 @@ module Make (C : Conf.S) (R : Remote.S) = struct
      upload that owes. *)
   let promote_pending key =
     with_key key (fun () ->
-        let* staged = Mfs.read key in
-        match staged with
-          | Some ({ Staged_manifest.s_published = Some published; _ } as staged)
-            ->
+        let* state = Mfs.read key in
+        match state with
+          | Some (Staged_manifest.Committed (staged, published)) ->
               promote key staged published
           | _ ->
               Log.debug "sync %s: superseded before promotion" key;
@@ -1042,11 +1028,11 @@ module Make (C : Conf.S) (R : Remote.S) = struct
   (* A staged manifest already carrying a published one was interrupted
      mid-promotion: finish it without re-uploading. *)
   let sync key ?cancel () =
-    let* staged = Mfs.read key in
-    match staged with
+    let* state = Mfs.read key in
+    match state with
       | None -> Lwt.return_unit
-      | Some { Staged_manifest.s_published = Some _; _ } -> promote_pending key
-      | Some staged ->
+      | Some (Staged_manifest.Committed _) -> promote_pending key
+      | Some (Staged_manifest.Owed staged) ->
           let* (_ : Manifest.t) = upload_staged ~key ~staged ?cancel () in
           promote_pending key
 
@@ -1060,7 +1046,7 @@ module Make (C : Conf.S) (R : Remote.S) = struct
   (* Adopts [src_path] by rename: no copy, no chunking pass; the upload reads it
      directly. *)
   let stage_whole_locked key ~src_path =
-    let* st = Mfs.read key in
+    let* st = Mfs.read_edits key in
     let* () =
       match st with Some st -> discard_bodies st | None -> Lwt.return_unit
     in
@@ -1076,14 +1062,13 @@ module Make (C : Conf.S) (R : Remote.S) = struct
         s_chunk_size = chunk_size;
         s_slots = [||];
         s_whole = Some uuid;
-        s_published = None;
       }
 
   let stage_whole key ~src_path =
     with_key key (fun () -> stage_whole_locked key ~src_path)
 
   let staged_body_path key =
-    let+ st = Mfs.read key in
+    let+ st = Mfs.read_edits key in
     match st with
       | Some { Staged_manifest.s_whole = Some uuid; _ } ->
           Some (Sb.whole_path uuid)

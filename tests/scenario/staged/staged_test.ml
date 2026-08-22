@@ -245,8 +245,7 @@ let () =
      let* published = Mf.read key in
      let* () =
        match (staged_before, published) with
-         | Some st, Some m ->
-             Mfs.write key { st with Staged_manifest.s_published = Some m }
+         | Some (Staged_manifest.Owed st), Some m -> Mfs.commit key st m
          | _ -> Lwt.return_unit
      in
      let uploaded_before = Metrics.uploaded () in
@@ -264,7 +263,7 @@ let () =
      let* () = D.sync key () in
      let* () =
        match staged_before with
-         | Some st -> Mfs.write key st
+         | Some st -> Mfs.write key (Staged_manifest.edits st)
          | None -> Lwt.return_unit
      in
      let uploaded_before = Metrics.uploaded () in
@@ -283,8 +282,7 @@ let () =
      let* published = Mf.read key in
      let* () =
        match (staged_before, published) with
-         | Some st, Some m ->
-             Mfs.write key { st with Staged_manifest.s_published = Some m }
+         | Some (Staged_manifest.Owed st), Some m -> Mfs.commit key st m
          | _ -> Lwt.return_unit
      in
      let* () = write_at 0 "YYYYYYYY" in

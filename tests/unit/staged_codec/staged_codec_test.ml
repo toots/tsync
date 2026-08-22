@@ -59,7 +59,6 @@ let staged =
         Staged_manifest.Staged { uuid = "aaaa"; offset = 16 };
       |];
     s_whole = None;
-    s_published = None;
   }
 
 let sidecar () =
@@ -92,7 +91,7 @@ let patch f =
         close_out oc
 
 let show label =
-  let+ st = Mfs.read key in
+  let+ st = Mfs.read_edits key in
   match st with
     | None -> Printf.printf "%s: no staged manifest\n" label
     | Some st ->

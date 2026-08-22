@@ -34,9 +34,14 @@ type staged = {
       (** A whole file handed over by a frontend: its bytes are one file rather
           than per-chunk bodies, [s_slots] is empty, and the upload needs no
           chunking pass. *)
-  s_published : t option;
 }
 
+(* Which half of the lifecycle the sidecar is in. A mutation can only produce
+   [Owed]: the manifest an upload published is not a field of the record it
+   would have to clear, so no write can carry a stale one past itself. *)
+type state = Owed of staged | Committed of staged * t
+
+let edits = function Owed st | Committed (st, _) -> st
 let new_uuid = Id.short
 
 let slot_to_json = function
@@ -80,7 +85,8 @@ let staged_of_version json =
         failwith (Printf.sprintf "staged manifest version %d" v)
     | _ -> ()
 
-let staged_to_string (st : staged) =
+let staged_to_string state =
+  let st = edits state in
   Yojson.Basic.to_string
     (`Assoc
        ([
@@ -98,11 +104,11 @@ let staged_to_string (st : staged) =
                  `List (Array.to_list (Array.map slot_to_json st.s_slots)) );
              ])
        @
-         match st.s_published with
-         | None -> []
+         match state with
+         | Owed _ -> []
          (* The published body is binary; base64 keeps it inside this JSON rather
             than in a second file that would have to move atomically with it. *)
-         | Some m ->
+         | Committed (_, m) ->
              [
                ( "published",
                  (* Same file, so the same name: this is the published body of
@@ -137,8 +143,9 @@ let staged_of_string body =
         | `List l -> Array.of_list (List.map slot_of_json l)
         | _ -> [||]);
     s_whole = whole;
-    s_published = published;
   }
+  |> fun st ->
+  match published with None -> Owed st | Some m -> Committed (st, m)
 
 open Lwt.Syntax
 
@@ -176,15 +183,29 @@ module Make (C : Conf.S) = struct
                 in
                 Lwt.return_none)
 
-  (* Stamped from the key, as {!write} is: this name is what a listing shows
-     before an upload lands. *)
-  let write key (st : staged) =
-    let p = path key in
-    let* () = Fs_util.ensure_parent p in
-    Fs_util.atomic_write p
-      (staged_to_string
-         { st with s_name = Key.leaf ~domain_prefix:C.domain_prefix key })
+  (* For callers that want what the file holds, not which half of the lifecycle
+     its sidecar is in. *)
+  let read_edits key = Lwt.map (Option.map edits) (read key)
 
+  (* Stamped from the key: this name is what a listing shows before an upload
+     lands. *)
+  let put key state =
+    let p = path key in
+    let name = Key.leaf ~domain_prefix:C.domain_prefix key in
+    let state =
+      match state with
+        | Owed st -> Owed { st with s_name = name }
+        | Committed (st, m) -> Committed ({ st with s_name = name }, m)
+    in
+    let* () = Fs_util.ensure_parent p in
+    Fs_util.atomic_write p (staged_to_string state)
+
+  let write key (st : staged) = put key (Owed st)
+
+  (* The record the upload started from, now carrying what it published. Written
+     before anything local moves, so a crash after it leaves only local work to
+     replay. *)
+  let commit key (st : staged) published = put key (Committed (st, published))
   let delete key = Fs_util.unlink_quiet (path key)
 
   let rename ~src_key ~dst_key =
@@ -200,7 +221,7 @@ module Make (C : Conf.S) = struct
         | None -> Lwt.return_unit
         | Some body -> (
             match staged_of_string body with
-              | st -> write dst_key st
+              | state -> put dst_key state
               | exception _ -> Lwt.return_unit))
 
   (* Walks on-disk names: a staged manifest records its leaf name, but tree
@@ -228,7 +249,7 @@ module Make (C : Conf.S) = struct
               let+ body = Fs_util.read_file_opt path in
               match body with
                 | Some body -> (
-                    match staged_of_string body with
+                    match staged_of_string body |> edits with
                       | st ->
                           let leaf =
                             if Name_escape.is_escaped name then st.s_name

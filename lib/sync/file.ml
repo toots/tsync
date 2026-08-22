@@ -233,7 +233,7 @@ module Make_with_layout (C : Conf.S) (Sq : Sync_queue.S) (L : Layout.S) :
     clear_local key
 
   let queue_put key =
-    let* staged = Mfs.read key in
+    let* staged = Mfs.read_edits key in
     match staged with
       | None ->
           Log.debug "queue_put %s: nothing staged, skipping" key;

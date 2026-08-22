@@ -37,8 +37,19 @@ type staged = {
       (** A whole file handed over by a frontend: one file rather than per-chunk
           bodies, [s_slots] empty. The upload reads it directly, so adopting one
           costs a rename, not a copy. *)
-  s_published : Manifest.t option;
 }
+
+(** Which half of the lifecycle a sidecar is in: an upload is owed, or one has
+    published and only the local promotion remains.
+
+    What an upload published is not a field of {!staged}, so a mutation has
+    nothing to clear. {!Make.write} takes the edits alone and can only produce
+    [Owed]; only {!Make.commit} produces [Committed]. That is what stops a write
+    from carrying a finished upload's record past the bytes it described. *)
+type state = Owed of staged | Committed of staged * Manifest.t
+
+(** The edits either way, for callers that do not care which half. *)
+val edits : state -> staged
 
 (** A fresh staged-body id. *)
 val new_uuid : unit -> string
@@ -46,9 +57,9 @@ val new_uuid : unit -> string
 (** The staged record as it is kept on disk. Versioned: a body written by a
     newer build raises rather than being read as something it is not, since what
     it describes is the only copy of unsynced work. *)
-val staged_to_string : staged -> string
+val staged_to_string : state -> string
 
-val staged_of_string : string -> staged
+val staged_of_string : string -> state
 
 (** Where the sidecar for [key] sits, for the synchronous CLI paths that hold no
     functor instance. *)
@@ -69,11 +80,20 @@ module Make (C : Conf.S) : sig
   (** [None] when nothing is staged. A sidecar that cannot be decoded is moved
       aside rather than dropped: it is unsynced user data, and the next start
       must not trip over it again. *)
-  val read : string -> staged option Lwt.t
+  val read : string -> state option Lwt.t
+
+  (** {!read}, keeping only what the file holds. For the callers — the read
+      path, the listings — that have no business with the lifecycle. *)
+  val read_edits : string -> staged option Lwt.t
 
   (** The leaf name is stamped from [key], as the published tree does, so a
       listing shows the right name before an upload lands. *)
   val write : string -> staged -> unit Lwt.t
+
+  (** Record what an upload published for the edits it hashed. Written before
+      anything local moves, so a crash after it leaves only local work to
+      replay, and the next start finishes the promotion without re-uploading. *)
+  val commit : string -> staged -> Manifest.t -> unit Lwt.t
 
   val delete : string -> unit Lwt.t
   val rename : src_key:string -> dst_key:string -> unit Lwt.t

@@ -58,7 +58,6 @@ let staged ~name =
       s_chunk_size = 8;
       s_slots = [||];
       s_whole = None;
-      s_published = None;
     }
 
 (* What the directory shows, which is the thing that was wrong. *)

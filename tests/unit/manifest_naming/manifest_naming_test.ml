@@ -128,11 +128,10 @@ let () =
            s_chunk_size = 64;
            s_slots = [||];
            s_whole = None;
-           s_published = None;
          }
      in
      let* () = Mfs.write (key "s/one.txt") staged in
-     let* st = Mfs.read (key "s/one.txt") in
+     let* st = Mfs.read_edits (key "s/one.txt") in
      step "s/one.txt staged name=%S"
        (match st with
          | Some st -> st.Staged_manifest.s_name
@@ -140,7 +139,7 @@ let () =
      let* () =
        Mfs.rename ~src_key:(key "s/one.txt") ~dst_key:(key "s/two.txt")
      in
-     let+ st = Mfs.read (key "s/two.txt") in
+     let+ st = Mfs.read_edits (key "s/two.txt") in
      step "s/two.txt staged name=%S"
        (match st with
          | Some st -> st.Staged_manifest.s_name
