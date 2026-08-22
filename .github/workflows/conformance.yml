@@ -13,11 +13,9 @@ name: conformance
 # GITHUB_RUN_ID is shared by every job of a run — a second job here would sweep
 # the first one's objects out from under it.
 
+# Manual only: running this per push and pull request dominates the CI
+# object-store spend, and what it asks about changes rarely.
 on:
-  push:
-    branches: [main]
-  pull_request:
-  merge_group:
   workflow_dispatch:
 
 concurrency:
