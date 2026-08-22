@@ -42,6 +42,11 @@ module type S = sig
     Manifest.t Lwt.t
 
   val fetch_manifest : key:string -> unit -> Manifest.t option Lwt.t
+
+  val fetch_manifest_state :
+    key:string ->
+    unit ->
+    [ `Found of Manifest.t | `Absent | `Unresolved | `Unreadable ] Lwt.t
 end
 
 (* Settable so a test can reach the cap without uploading a terabyte. *)
@@ -346,16 +351,25 @@ module Make_with_layout (C : Conf.S) (L : Layout.S) : S = struct
     let* () = each_chunk ~count:n one in
     publish ~key ~size ~chunk_size ~mtime ~cancel table
 
+  let fetch_manifest_state ~key () =
+    let+ state = St.get_manifest_state ~key in
+    match state with
+      | `Unresolved -> `Unresolved
+      | `Absent -> `Absent
+      | `Body body -> (
+          match Manifest.of_string body with
+            | m -> `Found m
+            (* Read again rather than remembered: a body that will not parse is
+               a write in flight, which is a moment rather than an answer. *)
+            | exception _ -> `Unreadable)
+
   let fetch_manifest ~key () =
-    let+ body = St.get_manifest_opt ~key in
-    match body with
-      | None -> None
-      | Some body -> (
-          (* An unparseable manifest is treated as absent, so stat reports ENOENT
-             rather than garbage metadata. *)
-            match Manifest.of_string body with
-            | m -> Some m
-            | exception _ -> None)
+    let+ state = fetch_manifest_state ~key () in
+    match state with
+      | `Found m -> Some m
+      (* Absent, unresolved and unparseable all read as no metadata, so stat
+         reports ENOENT rather than garbage. *)
+      | `Absent | `Unresolved | `Unreadable -> None
 
   let chunk_download_pool = pools.downloads
 

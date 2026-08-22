@@ -10,13 +10,19 @@ module Make (C : Conf.S) (L : Layout.S) = struct
     let* bk = L.ensure_manifest_key key in
     B.put ~key:bk ~data ()
 
-  let get_manifest_opt ~key =
+  let get_manifest_state ~key =
     let* bk = L.manifest_key key in
     match bk with
-      | None -> Lwt.return_none
-      | Some bk ->
+      | None -> Lwt.return `Unresolved
+      | Some bk -> (
           let+ body = B.get_opt ~key:bk () in
-          Option.map Chunk.to_string body
+          match body with
+            | None -> `Absent
+            | Some body -> `Body (Chunk.to_string body))
+
+  let get_manifest_opt ~key =
+    let+ state = get_manifest_state ~key in
+    match state with `Body body -> Some body | `Absent | `Unresolved -> None
 
   let head_manifest ~key =
     let* bk = L.manifest_key key in

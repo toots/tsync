@@ -326,12 +326,13 @@ module Make (C : Conf.S) (R : Remote.S) = struct
      Checked on the way in and on the way out rather than cleared by whoever
      changes the mirror, since a cache that stands on its own ground has no
      invalidation for a caller to forget. *)
+  let applied_mark () =
+    match Fs.read_last_sync_key () with
+      | Some k -> Journal.Entry_key.to_string k
+      | None -> ""
+
   let live_absences () =
-    let mark =
-      match Fs.read_last_sync_key () with
-        | Some k -> Journal.Entry_key.to_string k
-        | None -> ""
-    in
+    let mark = applied_mark () in
     let a = absences_for C.domain_prefix in
     if mark <> a.mark then begin
       Hashtbl.reset a.keys;
@@ -347,15 +348,24 @@ module Make (C : Conf.S) (R : Remote.S) = struct
       | Some _ -> Lwt.return m
       | None when Hashtbl.mem (live_absences ()) key -> Lwt.return_none
       | None ->
-          let+ m = R.fetch_manifest ~key () in
-          if Option.is_none m then begin
-            let keys = live_absences () in
-            (* Reset past the cap rather than evicted one at a time, overflowing
-               costing only the round trips again. *)
-            if Hashtbl.length keys >= max_absent then Hashtbl.reset keys;
-            Hashtbl.replace keys key ()
-          end;
-          m
+          (* Read before the fetch: an entry applied while it was in flight
+             would otherwise be recorded under the mark that apply moved to, and
+             so survive the very thing that invalidates it. *)
+          let before = applied_mark () in
+          let+ state = R.fetch_manifest_state ~key () in
+          (* Only the store's own answer is remembered. Not knowing the key's
+             folder yet, and a body caught mid-write, are facts about this
+             client that change with nothing about the domain changing — and
+             nothing that fixes either of them moves the mark. *)
+          (match state with
+            | `Absent when before = applied_mark () ->
+                let keys = live_absences () in
+                (* Reset past the cap rather than evicted one at a time,
+                   overflowing costing only the round trips again. *)
+                if Hashtbl.length keys >= max_absent then Hashtbl.reset keys;
+                Hashtbl.replace keys key ()
+            | `Found _ | `Absent | `Unresolved | `Unreadable -> ());
+          (match state with `Found m -> Some m | _ -> None)
 
   (* A promotion can retire the staged bodies between resolving the key and
      reading them, so a miss is resolved again and read once more. The retry
