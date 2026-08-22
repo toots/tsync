@@ -17,6 +17,8 @@
    -open
    Tsync_content
    -open
+   Tsync_sync
+   -open
    Tsync_local_io
    -open
    Tsync_lwt_unix
@@ -38,6 +40,7 @@
   tsync_object
   tsync_store
   tsync_content
+  tsync_sync
   tsync_local_io
   tsync_lwt_unix
   tsync_glob

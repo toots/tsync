@@ -1116,12 +1116,34 @@ let sync_cmd =
       let conf = load_conf ?domain () in
       match source with Some name -> reading_from name conf | None -> conf
     in
+    let module R = Resync.Make (C) in
     let phase = ref "starting" and current = ref None in
     let manifests = ref 0 and failures = ref 0 in
     (* An incremental pass counts no manifests, and a fixed set of counters
        would print zeroes reading as "nothing happened" rather than as "this
        pass does not count that". *)
     let rebuilding = ref false in
+    let progress =
+      {
+        Resync.on_phase =
+          (fun p ->
+            phase := p;
+            if p = "clearing the cache" then rebuilding := true;
+            if p = "draining uploads" && !verbose then
+              Log.info "draining upload queue");
+        on_current = (fun c -> current := c);
+      }
+    in
+    let notify () =
+      try
+        if !verbose then Log.info "notifying daemon of completed resync";
+        ignore
+          (Ipc.action ~socket_path:C.socket_path ~domain:C.domain_name
+             "full_resync")
+      with
+        | Failure msg -> Printf.eprintf "Warning: full_resync: %s\n" msg
+        | _ -> ()
+    in
     let code =
       run_lwt
         ~report:(fun () ->
@@ -1140,151 +1162,48 @@ let sync_cmd =
               else [])
             ())
         (let open Lwt.Syntax in
-         let module J = Journal.Make (C) in
-         let module W = Wal.Make (C) in
-         let module Fs = File_store.Make (C) in
-         let module St = Store.Make (C) (Layout.Inode.Make (C)) in
-         let module Sq = Sync_queue.Make (C) in
-         let module F = File.Make (C) (Sq) in
-         let module Rp = Replay.Make (C) (F) in
-         let module Tree = Inode_tree.Make (C) in
-         Sq.start
-           ~upload:(fun ~key ~cancel -> F.upload ~cancel key)
-           ~on_upload_done:(fun ~key:_ -> Lwt.return_unit);
-         let my_uuid = J.client_uuid () in
          if !verbose then
            Log.info "syncing domain %s (client %s, uuid %s)" C.domain_name
-             C.client_name my_uuid;
-         (* Walks the inode tree through the module that owns the walk, so a
-            resync and [tsync mirror] classify a child the same way. *)
-         let rebuild_mirror () =
-           let slots =
-             Lwt_bounded.create ~name:"resync" ~max:(max 1 parallelism) ()
-           in
-           let count = manifests and failed = failures in
-           (* Counted, so a store whose manifests all fail to parse cannot
-              resync "successfully" writing nothing. *)
-           let unusable bkey reason =
-             incr failed;
-             Log.warn "resync %s: %s" bkey
-               (match reason with
-                 | `Unreadable exn -> Printexc.to_string exn
-                 | `Unclassifiable (Chunk_table.Malformed m) ->
-                     "unreadable manifest: " ^ m
-                 | `Unclassifiable exn ->
-                     "unreadable manifest: " ^ Printexc.to_string exn)
-           in
-           let apply rel (entry : Inode_tree.entry) =
-             match entry.Inode_tree.body with
-               | Inode_tree.Dir m ->
-                   Folder_ids.write ~cache_root:C.cache_root
-                     ~domain_name:C.domain_name (Key.join rel m.Folder.name) m
-               | Inode_tree.File man ->
-                   incr count;
-                   (* Read by backend key, which is hashed: the body is what
-                      names it. *)
-                   let leaf = Manifest.recorded_name man in
-                   if !verbose then Log.info "manifest %s" (Key.join rel leaf);
-                   F.write_manifest (C.domain_prefix ^ Key.join rel leaf) man
-           in
-           let visit () rel entry =
-             current := Some (if rel = "" then "/" else rel);
-             Lwt.catch
-               (fun () -> apply rel entry)
-               (fun exn ->
-                 incr failed;
-                 Log.warn "resync %s: %s" entry.Inode_tree.bkey
-                   (Printexc.to_string exn);
-                 Lwt.return_unit)
-           in
-           let+ () =
-             (* The one walk that reads every folder whole and may write, so
-                it is the one that leaves each folder's index behind. *)
-             Tree.fold_tree ~on_unusable:(`Skip unusable)
-               ~refresh_index:(not C.read_only) ~slots
-               ~folder_id:Folder.root_id ~rel:"" visit ()
-           in
-           (!count, !failed)
+             C.client_name (R.client_uuid ());
+         let on_decision last all_keys reason =
+           if !verbose then begin
+             Log.info "last sync bookmark: %s"
+               (match last with
+                 | None -> "none (first run)"
+                 | Some k -> Journal.Entry_key.to_string k);
+             Log.info "journal: %d entr%s" (List.length all_keys)
+               (if List.length all_keys = 1 then "y" else "ies");
+             Option.iter (Log.info "full resync: %s") reason
+           end
          in
-         let full_resync reason =
-           rebuilding := true;
-           phase := "clearing the cache";
-           if !verbose then Log.info "full resync: %s" reason;
-           (* Notify the daemon only once the rebuild is complete, or it re-reads
-            an empty mirror mid-rebuild. Unsynced edits are kept: nothing else
-            holds those bytes. *)
-           let* () =
-             Cache_layout.clear ~cache_root:C.cache_root
-               ~domain_name:C.domain_name
-           in
-           phase := "rebuilding";
-           let* n, failed = rebuild_mirror () in
-           current := None;
-           phase := "notifying the daemon";
-           (* Only a rebuild that reached everything may say so. Recording the
-            mark after a partial walk moves the cursor past folders that were
-            never fetched, and nothing revisits them: their files arrive later
-            as journal puts, into directories no id names. *)
-           if failed = 0 then Fs.write_last_sync_key (J.entry_key ());
-           (try
-              if !verbose then Log.info "notifying daemon of completed resync";
-              ignore
-                (Ipc.action ~socket_path:C.socket_path ~domain:C.domain_name
-                   "full_resync")
-            with
-             | Failure msg -> Printf.eprintf "Warning: full_resync: %s\n" msg
-             | _ -> ());
-           Printf.printf "full resync: %d manifest%s downloaded%s\n" n
-             (if n = 1 then "" else "s")
-             (if failed > 0 then
-                Printf.sprintf
-                  " (%d failed — re-run 'tsync sync --full' to complete)" failed
-              else "");
-           Lwt.return (if failed > 0 then 1 else 0)
+         let on_manifest rel =
+           incr manifests;
+           if !verbose then Log.info "manifest %s" rel
          in
-         (* One pass of the same engine the daemon polls with, so the two cannot
-          drift apart. *)
-         let incremental () =
-           phase := "applying other clients' entries";
-           (* A one-shot command: no mount of ours is running to refresh. *)
-           let+ n = Rp.apply_foreign ~on_changed:(fun _ -> ()) () in
-           (match Fs.read_last_sync_key () with
-             | Some k when !verbose ->
-                 Log.info "applied through %s" (Journal.Entry_key.to_string k)
-             | _ -> ());
-           Printf.printf "%d journal entr%s from other clients\n" n
-             (if n = 1 then "y" else "ies");
-           0
+         let+ outcome =
+           R.run ~full ~progress ~on_manifest ~on_decision ~parallelism ~notify
+             ()
          in
-         phase := "replaying local records";
-         let* () = Rp.reconcile () in
-         phase := "draining uploads";
-         if !verbose then Log.info "draining upload queue";
-         let* () = Sq.drain () in
-         let* () = Fs.flush_cursor () in
-         phase := "reading the journal";
-         let last_sync_key = Fs.read_last_sync_key () in
-         if !verbose then
-           Log.info "last sync bookmark: %s"
-             (match last_sync_key with
-               | None -> "none (first run)"
-               | Some k -> Journal.Entry_key.to_string k);
-         let* all_keys = Fs.list_journal_keys () in
-         if !verbose then
-           Log.info "journal: %d entr%s" (List.length all_keys)
-             (if List.length all_keys = 1 then "y" else "ies");
-         let resync_reason =
-           match last_sync_key with
-             | _ when full -> Some "--full flag"
-             | None -> Some "no bookmark (first run)"
-             | Some last ->
-                 if Journal.Entry_key.cannot_bridge last all_keys then
-                   Some "bookmark older than oldest journal entry"
-                 else None
-         in
-         match resync_reason with
-           | Some reason -> full_resync reason
-           | None -> incremental ())
+         match outcome with
+           | Resync.Full { manifests = n; failed; reason = _ } ->
+               failures := failed;
+               Printf.printf "full resync: %d manifest%s downloaded%s\n" n
+                 (if n = 1 then "" else "s")
+                 (if failed > 0 then
+                    Printf.sprintf
+                      " (%d failed — re-run 'tsync sync --full' to complete)"
+                      failed
+                  else "");
+               if failed > 0 then 1 else 0
+           | Resync.Incremental { applied } ->
+               (match R.bookmark () with
+                 | Some k when !verbose ->
+                     Log.info "applied through %s"
+                       (Journal.Entry_key.to_string k)
+                 | _ -> ());
+               Printf.printf "%d journal entr%s from other clients\n" applied
+                 (if applied = 1 then "y" else "ies");
+               0)
     in
     (* Outside {!run_lwt}: exiting from inside its promise would skip the
        deferred drain it exists for, and a resync that failed part way is
