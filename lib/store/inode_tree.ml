@@ -66,12 +66,13 @@ module Make (C : Conf.S) = struct
           let indexed =
             List.filter
               (fun (e : Backend.file_entry) ->
-                Folder.is_index_key e.Backend.key)
+                Folder.is_index_key e.Backend.key
+                && e.Backend.size <= Folder_index.max_bytes)
               listed
           in
           let+ answered = St.get_objects ~slots ~entries:indexed () in
           match answered with
-            | [(_, Some body)] -> Folder_index.of_chunk (Chunk.of_string body)
+            | [(_, Some body)] -> Folder_index.of_string body
             | _ -> Folder_index.empty)
         (fun _ -> Lwt.return Folder_index.empty)
 
@@ -103,24 +104,28 @@ module Make (C : Conf.S) = struct
       else (
         let bodies =
           List.filter_map
-            (fun e -> Option.map (fun b -> (e, Chunk.of_string b)) (body_of e))
+            (fun e -> Option.map (fun b -> (e, b)) (body_of e))
             indexable
         in
         Lwt.catch
           (fun () ->
             St.put_raw
               ~bkey:(C.domain_prefix ^ Folder.index_key ~folder_id)
-              ~data:(Chunk.to_string (Folder_index.of_bodies bodies)))
+              ~data:(Folder_index.of_bodies bodies))
           (fun exn ->
             Log.warn "folder index %s: %s" folder_id (Printexc.to_string exn);
             Lwt.return_unit)))
 
-  let children ?(on_unusable = `Fail) ?(refresh_index = false) ?slots ~folder_id
-      () =
+  let children ?(on_unusable = `Fail) ?(refresh_index = false)
+      ?(on_index = fun _ -> ()) ?slots ~folder_id () =
     let slots =
       match slots with Some s -> s | None -> Lazy.force default_slots
     in
     let* listed = St.list_namespace ~folder_id in
+    List.iter
+      (fun (e : Backend.file_entry) ->
+        if Folder.is_index_key e.Backend.key then on_index e.Backend.key)
+      listed;
     let entries =
       List.filter
         (fun (e : Backend.file_entry) -> Folder.is_child_object e.Backend.key)
@@ -140,7 +145,7 @@ module Make (C : Conf.S) = struct
       List.iter (fun (bkey, data) -> Hashtbl.replace fetched bkey data) answered;
       let body_of (e : Backend.file_entry) =
         match cached index e with
-          | Some body -> Some (Chunk.to_string body)
+          | Some body -> Some body
           | None -> (
               match Hashtbl.find_opt fetched e.Backend.key with
                 | Some data -> data
@@ -210,10 +215,11 @@ module Make (C : Conf.S) = struct
   (* [f acc rel entry] sees each entry with the real relative path of the folder
      holding it. A folder is visited before it is descended into, so a caller
      collecting keys gets the marker too. *)
-  let fold_tree ?on_unusable ?refresh_index ?slots ~folder_id ~rel f acc =
+  let fold_tree ?on_unusable ?refresh_index ?on_index ?slots ~folder_id ~rel f
+      acc =
     let rec walk folder_id rel acc =
       let* entries =
-        children ?on_unusable ?refresh_index ?slots ~folder_id ()
+        children ?on_unusable ?refresh_index ?on_index ?slots ~folder_id ()
       in
       Lwt_list.fold_left_s
         (fun acc entry ->

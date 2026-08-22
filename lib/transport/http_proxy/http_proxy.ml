@@ -121,8 +121,12 @@ module Wire = struct
       | key :: rest ->
           if pos + 4 > len then short ();
           let n = be32_at s pos in
+          (* Compared against what is left rather than added to [pos]: a
+             hostile length near [max_int] overflows the sum on a 32-bit build,
+             and the guard would then pass a negative one to [String.sub], which
+             raises [Invalid_argument] where this promises [Failure]. *)
           if n = absent then (key, None) :: go (pos + 4) rest
-          else if pos + 4 + n > len then short ()
+          else if n < 0 || n > len - pos - 4 then short ()
           else
             (key, Some (Chunk.of_string (String.sub s (pos + 4) n)))
             :: go (pos + 4 + n) rest

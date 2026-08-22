@@ -1200,8 +1200,9 @@ let sync_cmd =
            let+ () =
              (* The one walk that reads every folder whole and may write, so
                 it is the one that leaves each folder's index behind. *)
-             Tree.fold_tree ~on_unusable:(`Skip unusable) ~refresh_index:true
-               ~slots ~folder_id:Folder.root_id ~rel:"" visit ()
+             Tree.fold_tree ~on_unusable:(`Skip unusable)
+               ~refresh_index:(not C.read_only) ~slots
+               ~folder_id:Folder.root_id ~rel:"" visit ()
            in
            (!count, !failed)
          in

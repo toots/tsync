@@ -219,6 +219,13 @@ type op =
       (** One of ours but malformed: an undecodable key, a missing argument. *)
   | Unknown  (** not part of the API at all — a browser asking for a favicon *)
 
+(* Keys one bulk request may name. The client packs its own requests to a key
+   count and a byte budget, so this only bounds what a client that does not —
+   or one that means harm — can make this end hold: the bodies of a get-multi
+   are read, concatenated and framed before any of it is written out, and the
+   pool that gates a request counts requests rather than bytes. *)
+let max_keys_per_request = 1024
+
 let parse_op meth uri body =
   let path = Uri.path uri in
   let obj_key () =
@@ -251,7 +258,7 @@ let parse_op meth uri body =
           try Some (Yojson.Safe.from_string (Chunk.to_string body))
           with _ -> None
         with
-          | Some (`List l) ->
+          | Some (`List l) when List.length l <= max_keys_per_request ->
               Get_multi
                 (List.filter_map (function `String x -> Some x | _ -> None) l)
           | _ -> Bad)
@@ -260,7 +267,7 @@ let parse_op meth uri body =
           try Some (Yojson.Safe.from_string (Chunk.to_string body))
           with _ -> None
         with
-          | Some (`List l) ->
+          | Some (`List l) when List.length l <= max_keys_per_request ->
               Delete_multi
                 (List.filter_map (function `String x -> Some x | _ -> None) l)
           | _ -> Bad)

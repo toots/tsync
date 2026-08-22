@@ -427,6 +427,12 @@ let reading_from name (module C : Conf.S) : (module Conf.S) =
         let get_opt = Src.get_opt
         let head_opt = Src.head_opt
         let list_prefix = Src.list_prefix
+
+        (* Taken from [Src] rather than left as the composite's, which would
+           read bodies through the whole domain while the listings came from
+           this one store. [None] where [Src] has no batch of its own, so the
+           fan-out asks the [get_opt] above. *)
+        let get_many = Src.get_many
       end : Backend.S)
   end : Conf.S)
 
