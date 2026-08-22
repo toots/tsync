@@ -38,18 +38,6 @@ let entry_of_key ~index ~size key =
         }
     | None -> invalid_arg ("Manifest.entry_of_key: " ^ key)
 
-(* Derived from the file's {i own} chunk size, so a file uploaded under a
-   different setting still groups correctly. *)
-
-let per ~cache_chunk_size (m : t) =
-  Chunk_group.per_group ~chunk_size:(chunk_size m) ~cache_chunk_size
-
-let groups ~cache_chunk_size m =
-  Chunk_group.all ~table:m ~per:(per ~cache_chunk_size m)
-
-let group_at ~cache_chunk_size m i =
-  Chunk_group.of_table ~table:m ~per:(per ~cache_chunk_size m) i
-
 (* Hashed over the ordered chunk digests, so a changed file's manifest rebuilds
    from its chunk entries without re-reading untouched bytes.
 
@@ -287,7 +275,10 @@ let is_local
             Sys.file_exists
               (Cache_layout.chunk_path ~cache_root ~domain_name
                  (Chunk_group.key g)))
-          (groups ~cache_chunk_size m)
+          (Chunk_group.all ~table:m
+             ~per:
+               (Conf.chunks_per_group ~chunk_size:(chunk_size m)
+                  ~cache_chunk_size))
     | exception _ -> false
 
 (* Records an escaped directory's real name so readdir can recover it. *)
@@ -388,17 +379,6 @@ let rec clean_tmp dir =
 (* The store, per domain: manifests keyed by logical key and nothing else. *)
 module Make (C : Conf.S) = struct
   let root () = dir ~cache_root:C.cache_root C.domain_name
-
-  (* The domain's cache chunk size applied once, so no caller carries it. *)
-
-  let cache_chunk_size = Conf.cache_chunk_size (module C)
-  let per = per ~cache_chunk_size
-  let groups = groups ~cache_chunk_size
-  let group_at = group_at ~cache_chunk_size
-
-  (* For the staged path: no base means nothing to inherit. *)
-  let group_at_opt base i =
-    match base with None -> None | Some m -> group_at m i
 
   let path key =
     sidecar_path ~cache_root:C.cache_root ~domain_name:C.domain_name

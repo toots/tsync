@@ -149,6 +149,19 @@ module Make (C : Conf.S) (R : Remote.S) = struct
 
   let cache_chunk_size = Conf.cache_chunk_size (module C)
 
+  (* From the file's own chunk size, so one uploaded under a different setting
+     still groups the way its own body says. *)
+  let per_of m =
+    Conf.chunks_per_group ~chunk_size:(Manifest.chunk_size m) ~cache_chunk_size
+
+  let groups m = Chunk_group.all ~table:m ~per:(per_of m)
+
+  (* The staged path inherits from a published manifest that may not exist. *)
+  let group_at_opt base i =
+    match base with
+      | None -> None
+      | Some m -> Chunk_group.of_table ~table:m ~per:(per_of m) i
+
   (* Reuses [cached] while [i] stays in the same group, so a sequential read
      rebuilds one group per boundary crossing rather than one per chunk. *)
   let group_at ~table ~per ~cached i =
@@ -215,7 +228,7 @@ module Make (C : Conf.S) (R : Remote.S) = struct
     let n = Chunk_table.count table in
     if total <= 0 || cs <= 0 || n = 0 then Lwt.return 0
     else (
-      let per = Mf.per manifest in
+      let per = per_of manifest in
       let rec go pos done_ cached =
         if done_ >= total then Lwt.return done_
         else (
@@ -301,7 +314,7 @@ module Make (C : Conf.S) (R : Remote.S) = struct
                     Bigarray.Array1.fill slice '\000';
                     Lwt.return take
                 | Manifest.Inherit -> (
-                    match Mf.group_at_opt base i with
+                    match group_at_opt base i with
                       | Some group ->
                           let+ served =
                             Cc.read_into ~group ~index:i slice ~chunk_off
@@ -476,7 +489,7 @@ module Make (C : Conf.S) (R : Remote.S) = struct
     let n = Chunks.count ~size:st.Manifest.s_size ~chunk_size:cs in
     let slots = Array.make n Manifest.Zero in
     let buf = Bigarray.Array1.create Bigarray.char Bigarray.c_layout cs in
-    let per = Chunk_group.per_group ~chunk_size:cs ~cache_chunk_size in
+    let per = Conf.chunks_per_group ~chunk_size:cs ~cache_chunk_size in
     let st_for_layout = { st with Manifest.s_chunk_size = cs } in
     let rec chunk i body offset =
       if i >= n then Lwt.return_unit
@@ -557,7 +570,7 @@ module Make (C : Conf.S) (R : Remote.S) = struct
   let ensure_group_body ~base ~(st : Manifest.staged) ~covers i =
     let slots = st.Manifest.s_slots in
     let per =
-      Chunk_group.per_group ~chunk_size:st.Manifest.s_chunk_size
+      Conf.chunks_per_group ~chunk_size:st.Manifest.s_chunk_size
         ~cache_chunk_size
     in
     let n = Array.length slots in
@@ -602,7 +615,7 @@ module Make (C : Conf.S) (R : Remote.S) = struct
                           ~src_off:b.Manifest.offset ~dst:uuid ~dst_off:offset
                           ~len
                     | Manifest.Inherit -> (
-                        match Mf.group_at_opt base j with
+                        match group_at_opt base j with
                           | Some group ->
                               Cc.stage_copy_chunk ~group ~index:j ~uuid ~offset
                           (* Nothing published to inherit: a hole, and the body
@@ -984,7 +997,7 @@ module Make (C : Conf.S) (R : Remote.S) = struct
                   in
                   if linked then Lwt.return_unit else write_group group
               | None -> write_group group))
-        (Mf.groups published)
+        (groups published)
     in
     let* () = Mf.write key published in
     let* () = Mf.delete_staged key in
@@ -1065,7 +1078,7 @@ module Make (C : Conf.S) (R : Remote.S) = struct
               (fun acc group ->
                 let+ here = Cc.exists group in
                 if here then acc + Chunk_group.member_count group else acc)
-              0 (Mf.groups m)
+              0 (groups m)
           in
           (present, total)
       | Some (`Staged (({ Manifest.s_whole = Some _; _ } as st), _)) ->
@@ -1083,7 +1096,7 @@ module Make (C : Conf.S) (R : Remote.S) = struct
                 match slots.(i) with
                   | Manifest.Staged _ | Manifest.Zero -> Lwt.return (acc + 1)
                   | Manifest.Inherit -> (
-                      match Mf.group_at_opt base i with
+                      match group_at_opt base i with
                         | Some group ->
                             let+ here = Cc.exists group in
                             if here then acc + 1 else acc
@@ -1163,7 +1176,7 @@ module Make (C : Conf.S) (R : Remote.S) = struct
   let fetch_plan key =
     let* resolved = Mf.resolve key in
     match resolved with
-      | Some (`Published m) -> Lwt.return_some (Mf.groups m)
+      | Some (`Published m) -> Lwt.return_some (groups m)
       | Some (`Staged (st, base)) -> (
           match base with
             | None -> Lwt.return_none
@@ -1176,13 +1189,13 @@ module Make (C : Conf.S) (R : Remote.S) = struct
                   (List.filter
                      (fun g ->
                        List.exists still_inherited (Chunk_group.indices g))
-                     (Mf.groups m)))
+                     (groups m)))
       | None -> (
           let* state = R.fetch_manifest ~key () in
           match state with
             | Some m ->
                 let* () = Mf.write key m in
-                Lwt.return_some (Mf.groups m)
+                Lwt.return_some (groups m)
             | None -> Lwt.return_none)
 
   let content_size key =
@@ -1266,6 +1279,6 @@ module Make (C : Conf.S) (R : Remote.S) = struct
   let forget_chunks key =
     let* published = Mf.read key in
     match published with
-      | Some m -> Lwt_list.iter_s (fun group -> Cc.forget ~group) (Mf.groups m)
+      | Some m -> Lwt_list.iter_s (fun group -> Cc.forget ~group) (groups m)
       | None -> Lwt.return_unit
 end

@@ -404,7 +404,13 @@ let setup_client (module C : Conf.S) root staging_prefix =
     let group =
       match resolved with
         | Some (`Published m) -> (
-            match Mf.group_at m index with
+            match
+              Chunk_group.of_table ~table:m
+                ~per:
+                  (Conf.chunks_per_group ~chunk_size:(Manifest.chunk_size m)
+                     ~cache_chunk_size:(Conf.cache_chunk_size (module C)))
+                index
+            with
               | Some g -> g
               | None -> failwith "no such chunk")
         | _ -> failwith "no published manifest"

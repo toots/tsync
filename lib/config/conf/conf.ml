@@ -90,8 +90,17 @@ module type S = sig
   val read_only : bool
 end
 
+(* Chunks per cache file: the [n >= 1] minimising
+   [|n * chunk_size - cache_chunk_size|], round-half-up so a tie takes the
+   larger run. Answered from the file's own chunk size, so one uploaded under a
+   different setting still groups the way its own body says. *)
+
 (** The domain's effective cache chunk size: config value or built-in default.
     One spelling, so no caller picks a different default by accident. *)
+let chunks_per_group ~chunk_size ~cache_chunk_size =
+  if chunk_size <= 0 then 1
+  else max 1 ((cache_chunk_size + (chunk_size / 2)) / chunk_size)
+
 let cache_chunk_size (module C : S) =
   Option.value C.cache_chunk_size ~default:default_cache_chunk_size
 

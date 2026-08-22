@@ -30,17 +30,6 @@ val key_of_body : Bigstring.t -> string
     [Invalid_argument] for a key that is not ["<h1>-<h2>"]. *)
 val entry_of_key : index:int -> size:int -> string -> chunk_entry
 
-(** {2 Grouping}
-
-    How a manifest's stored chunks fall into cache chunks. Derived from the
-    file's {i own} [chunk_size] and the domain's cache chunk size, so a file
-    uploaded under a different setting still groups correctly. {!Make} binds the
-    domain's size for callers inside a functor. *)
-
-val per : cache_chunk_size:int -> t -> int
-val groups : cache_chunk_size:int -> t -> Chunk_group.t list
-val group_at : cache_chunk_size:int -> t -> int -> Chunk_group.t option
-
 (** Whole-file [h1]/[h2] as a hash over the ordered chunk digests, so a changed
     file's manifest is rebuildable from its chunk entries alone. *)
 val digest_of_chunks : chunk_entry list -> string * string
@@ -130,18 +119,6 @@ val is_local : Conf.locality -> string -> bool
     is walked, and the parsed-sidecar cache. Callers name logical keys only — no
     cache paths, no domain prefixes, no raw bodies. *)
 module Make (C : Conf.S) : sig
-  (** {2 Grouping}
-
-      {!Manifest.per} and friends with the domain's cache chunk size applied. *)
-
-  val per : t -> int
-  val groups : t -> Chunk_group.t list
-  val group_at : t -> int -> Chunk_group.t option
-
-  (** For the staged path, whose inherited chunks come from a published manifest
-      that may not exist: no base means nothing to inherit. *)
-  val group_at_opt : t option -> int -> Chunk_group.t option
-
   (** On-disk path of [key]'s sidecar. Its inode doubles as the existence and
       directory test, since directories exist only in this tree. *)
   val path : string -> string

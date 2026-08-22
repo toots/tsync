@@ -1,15 +1,11 @@
-(** Cache chunks: a run of consecutive stored chunks, cached as a single file.
+(** A run of consecutive chunks, addressed together.
 
-    Stored chunk size is network granularity (smaller: less egress when a file
-    changes); cache chunk size is disk granularity (larger: fewer opens, less
-    latency). This is the seam — above it callers speak in stored chunk indices,
-    below it {!Chunk_cache} stores one file per group. *)
+    How many go in a run is [per], which the caller supplies: it is disk
+    granularity set against network granularity, and only the cache keeping one
+    file per run has an opinion — see {!Chunk_cache.per_group}. Everything here
+    is a function of the table and that number. *)
 
 type t
-
-(** Stored chunks per cache chunk: the [n >= 1] minimizing
-    [|n * chunk_size - cache_chunk_size|]. A tie takes the larger group. *)
-val per_group : chunk_size:int -> cache_chunk_size:int -> int
 
 (** [None] only when [i] is out of range: {!Chunk_table} rejects a body whose
     length disagrees with its header, so every index below its count has a key.

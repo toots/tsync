@@ -14,11 +14,6 @@ type t = {
   first : int;  (** stored index of [members.(0)] *)
 }
 
-(* Round-half-up, so a tie takes the larger group. *)
-let per_group ~chunk_size ~cache_chunk_size =
-  if chunk_size <= 0 then 1
-  else max 1 ((cache_chunk_size + (chunk_size / 2)) / chunk_size)
-
 (* Hashed over the member keys, not "<first>-<last>": two groups can share their
    first and last chunk and differ in between (any run of identical chunks does
    it), and aliasing them onto one cache file serves the wrong bytes. *)
