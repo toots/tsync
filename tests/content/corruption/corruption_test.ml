@@ -101,7 +101,7 @@ let () =
      check "the marker records what it hashed to instead"
        (match detail with
          | Some { Corruption_marker.computed = Some c; _ } ->
-             c = Chunk_layout.key_of_body (Bigstring.of_string scrambled)
+             c = Chunks.key_of_body (Bigstring.of_string scrambled)
              && c <> chunk_key
          | _ -> false);
 
@@ -114,7 +114,7 @@ let () =
      check "a marked chunk is re-uploaded, not deduped"
        ~why:(fun () ->
          Printf.sprintf "stored body hashes to %s"
-           (Chunk_layout.key_of_body (Bigstring.of_string stored)))
+           (Chunks.key_of_body (Bigstring.of_string stored)))
        (stored = body);
 
      let* marks = listed () in

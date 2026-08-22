@@ -32,7 +32,7 @@ let chunk_key (entry : chunk_entry) = entry.h1 ^ "-" ^ entry.h2
    can always be held against the name it arrived under. Composed where the
    stores can reach it without depending on the shapes that reference a chunk:
    the check runs inside a backend driver. *)
-let key_of_body = Chunk_layout.key_of_body
+let key_of_body = Chunks.key_of_body
 
 (* The reverse, for a chunk kept from a previous upload: the two digests are the
    key's halves. *)
@@ -164,14 +164,7 @@ type staged = {
   s_published : t option;
 }
 
-let num_chunks_for size chunk_size =
-  let s = Int64.to_int size in
-  if s <= 0 then 0 else (s + chunk_size - 1) / chunk_size
-
 (* Bytes chunk [i] holds in a file of [size] at [chunk_size]. *)
-let chunk_len ~size ~chunk_size i =
-  max 0 (min chunk_size (Int64.to_int size - (i * chunk_size)))
-
 let new_uuid = Id.short
 
 let slot_to_json = function

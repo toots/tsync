@@ -151,9 +151,7 @@ let key t i =
 
 (* Derived, not stored: every chunk is [chunk_size] except the last, so a
    per-chunk length would be 12 bytes each restating two header fields. *)
-let len t i =
-  if t.chunk_size <= 0 then 0
-  else max 0 (min t.chunk_size (Int64.to_int t.size - (i * t.chunk_size)))
+let len t i = Chunks.length_of ~size:t.size ~chunk_size:t.chunk_size i
 
 (* Written a byte at a time, the way it is read: the accessors above are the
    only description of the layout, and a writer using wider primitives would be

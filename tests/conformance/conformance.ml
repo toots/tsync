@@ -417,7 +417,7 @@ let live_delete_suite name (module B : Backend.S) =
            that is not shaped like a chunk key under the requesting domain, so a
            made-up name would test the refusal rather than the delete. *)
         let body = Bigstring.of_string "conformance: a chunk to be collected" in
-        let key = Chunk_layout.key_of_body body in
+        let key = Chunks.key_of_body body in
         let shard = String.sub key 0 Chunk_layout.fanout in
         let doomed = chunk_prefix ^ shard ^ "/" ^ key in
         let* () = B.put ~key:doomed ~data:body () in

@@ -11,6 +11,8 @@
  (flags
   (:standard
    -open
+   Tsync_chunks
+   -open
    Tsync_conf
    -open
    Tsync_backend_register
@@ -27,6 +29,7 @@
  (name tsync_naming)
  (public_name tsync-libs.naming)
  (libraries
+  tsync_chunks
   tsync_conf
   tsync_backend_register
   tsync_bigstring

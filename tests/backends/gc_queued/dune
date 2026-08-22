@@ -2,6 +2,8 @@
  (flags
   (:standard
    -open
+   Tsync_chunks
+   -open
    Tsync_ops
    -open
    Tsync_store
@@ -21,6 +23,7 @@
    Tsync_test_harness))
  (name gc_queued)
  (libraries
+  tsync_chunks
   tsync_test_harness
   tsync_ops
   tsync_store

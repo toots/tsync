@@ -13,6 +13,8 @@
    -open
    Tsync_object
    -open
+   Tsync_chunks
+   -open
    Tsync_store
    -open
    Tsync_local_io
@@ -34,6 +36,7 @@
   tsync_conf
   tsync_naming
   tsync_object
+  tsync_chunks
   tsync_store
   tsync_local_io
   tsync_lwt_unix

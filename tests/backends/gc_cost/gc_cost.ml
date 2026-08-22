@@ -154,7 +154,7 @@ let count_chunks entries =
   List.length
     (List.filter
        (fun (e : Backend.file_entry) ->
-         Chunk_layout.is_chunk_key (Filename.basename e.Backend.key))
+         Chunks.is_chunk_key (Filename.basename e.Backend.key))
        entries)
 
 let count_strays entries = List.length entries - count_chunks entries

@@ -50,8 +50,8 @@ val group_at : cache_chunk_size:int -> t -> int -> Chunk_group.t option
 val digest_of_chunks : chunk_entry list -> string * string
 
 (** {!digest_of_chunks} over a body being built, which addresses its keys rather
-    than holding them: [len] answers what {!chunk_len} would, so the two agree
-    on the same file. *)
+    than holding them: [len] answers what {!Chunks.length_of} would, so the two
+    agree on the same file. *)
 val digest_of_keys :
   count:int -> key:(int -> string) -> len:(int -> int) -> string * string
 
@@ -121,12 +121,6 @@ type staged = {
           costs a rename, not a copy. *)
   s_published : t option;
 }
-
-(** Chunk count of a file of [size] at [chunk_size]; 0 for an empty file. *)
-val num_chunks_for : int64 -> int -> int
-
-(** Bytes chunk [i] holds in a file of [size] at [chunk_size]. *)
-val chunk_len : size:int64 -> chunk_size:int -> int -> int
 
 (** A fresh staged-body id. *)
 val new_uuid : unit -> string

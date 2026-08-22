@@ -318,8 +318,7 @@ module Make (C : Conf.S) = struct
       List.filter_map
         (fun (e : Backend.file_entry) ->
           let name = Filename.basename e.Backend.key in
-          if Chunk_layout.is_chunk_key name then Some (name, e.Backend.size)
-          else None)
+          if Chunks.is_chunk_key name then Some (name, e.Backend.size) else None)
         going
     in
     if candidates = [] then Lwt.return ([], 0)
@@ -706,7 +705,7 @@ module Make (C : Conf.S) = struct
           match outcome with
             | `Body body ->
                 s.chunks_verified <- s.chunks_verified + 1;
-                let computed = Chunk_layout.key_of_body body in
+                let computed = Chunks.key_of_body body in
                 if computed = ck then (
                   (* Clears a marker whose chunk has since been put right; the
                      store's own delete prunes the shard it empties. *)
@@ -950,7 +949,7 @@ module Make (C : Conf.S) = struct
         (* Counted, not filtered: the rename takes the whole directory and
            picking anything else out would cost the per-file work this exists to
            avoid, but what is not a chunk must not be reported as one. *)
-        Some (List.length (List.filter Chunk_layout.is_chunk_key names)))
+        Some (List.length (List.filter Chunks.is_chunk_key names)))
       (function
         (* The surviving space already has this shard: move the chunks instead. *)
         | Unix.Unix_error
@@ -967,7 +966,7 @@ module Make (C : Conf.S) = struct
 
   let read_dir dir =
     let+ names = Fs_util.readdir_list_quiet dir in
-    List.filter Chunk_layout.is_chunk_key names
+    List.filter Chunks.is_chunk_key names
 
   let move_into ~src_dir ~dst_dir names =
     Lwt_list.iter_s

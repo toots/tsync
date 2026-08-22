@@ -152,7 +152,7 @@ let make ?(verify_writes = true) ~root () : (module Backend.S) =
                        reason = Some why;
                      })
             | `Body stored ->
-                let computed = Chunk_layout.key_of_body stored in
+                let computed = Chunks.key_of_body stored in
                 if computed = Filename.basename key then
                   (* The unlink happens either way, so asking whether it
                      removed anything is free — and only then is there a

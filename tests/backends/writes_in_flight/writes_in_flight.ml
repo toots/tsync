@@ -121,7 +121,7 @@ let keys_under dir =
 (* Named from its own body: a chunk read back under a name it does not hash to
    is filed as corrupt, which is a different test. *)
 let body = Bigstring.of_string "chunk body"
-let chunk_key = chunk_prefix ^ shard ^ Chunk_layout.key_of_body body
+let chunk_key = chunk_prefix ^ shard ^ Chunks.key_of_body body
 
 let () =
   Lwt_main.run

@@ -57,7 +57,7 @@ module type S = sig
   (** Upload a file whose bytes the caller supplies per chunk, then publish its
       manifest. [source index] is either [`Reuse key] — an unchanged chunk,
       neither read nor sent, kept under the key it already has — or [`Fill f],
-      where [f buf] writes the chunk's bytes into the first [Manifest.chunk_len]
+      where [f buf] writes the chunk's bytes into the first [Chunks.length_of]
       of [buf]. An empty file still yields one empty chunk. [cancel] aborts at
       the next chunk boundary with {!Cancelled}, unpublishing the manifest if it
       already went.

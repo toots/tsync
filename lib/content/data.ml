@@ -219,7 +219,7 @@ module Make (C : Conf.S) (R : Remote.S) = struct
       let rec go pos done_ cached =
         if done_ >= total then Lwt.return done_
         else (
-          let i = pos / cs in
+          let i = Chunks.index_of ~chunk_size:cs pos in
           if i >= n then Lwt.return done_
           else (
             let chunk_off = pos mod cs in
@@ -242,7 +242,9 @@ module Make (C : Conf.S) (R : Remote.S) = struct
                   else go (pos + got) (done_ + got) cached))
       in
       let* got = go start 0 None in
-      let last = min (n - 1) ((start + max 0 (got - 1)) / cs) in
+      let last =
+        min (n - 1) (Chunks.index_of ~chunk_size:cs (start + max 0 (got - 1)))
+      in
       if Hashtbl.find_opt last_read_end id = Some start then
         read_ahead ~id ~size:(Int64.to_int size) ~table ~per ~chunk_size:cs
           ~last;
@@ -274,7 +276,7 @@ module Make (C : Conf.S) (R : Remote.S) = struct
       let rec go pos done_ =
         if done_ >= total then Lwt.return done_
         else (
-          let i = pos / cs in
+          let i = Chunks.index_of ~chunk_size:cs pos in
           if i >= n then Lwt.return done_
           else (
             let chunk_off = pos mod cs in
@@ -419,7 +421,7 @@ module Make (C : Conf.S) (R : Remote.S) = struct
      for the published group these bytes become. *)
   let group_layout ~(st : Manifest.staged) ~first ~last =
     let len j =
-      Manifest.chunk_len ~size:st.Manifest.s_size
+      Chunks.length_of ~size:st.Manifest.s_size
         ~chunk_size:st.Manifest.s_chunk_size j
     in
     let rec go j offset acc =
@@ -452,8 +454,8 @@ module Make (C : Conf.S) (R : Remote.S) = struct
                   s_chunk_size = m.Manifest.chunk_size;
                   s_slots =
                     Array.make
-                      (Manifest.num_chunks_for m.Manifest.size
-                         m.Manifest.chunk_size)
+                      (Chunks.count ~size:m.Manifest.size
+                         ~chunk_size:m.Manifest.chunk_size)
                       Manifest.Inherit;
                   s_whole = None;
                   s_published = None;
@@ -471,7 +473,7 @@ module Make (C : Conf.S) (R : Remote.S) = struct
 
   and split_whole key (st : Manifest.staged) uuid =
     let* cs = R.chunk_size () in
-    let n = Manifest.num_chunks_for st.Manifest.s_size cs in
+    let n = Chunks.count ~size:st.Manifest.s_size ~chunk_size:cs in
     let slots = Array.make n Manifest.Zero in
     let buf = Bigarray.Array1.create Bigarray.char Bigarray.c_layout cs in
     let per = Chunk_group.per_group ~chunk_size:cs ~cache_chunk_size in
@@ -488,12 +490,11 @@ module Make (C : Conf.S) (R : Remote.S) = struct
             (body, 0))
           else Lwt.return (body, offset)
         in
-        let len =
-          Manifest.chunk_len ~size:st.Manifest.s_size ~chunk_size:cs i
-        in
+        let len = Chunks.length_of ~size:st.Manifest.s_size ~chunk_size:cs i in
         let slice = Bigarray.Array1.sub buf 0 len in
         let* (_ : int) =
-          Cc.whole_read_into ~uuid slice ~offset:(Int64.of_int (i * cs))
+          Cc.whole_read_into ~uuid slice
+            ~offset:(Int64.of_int (Chunks.offset_of ~chunk_size:cs i))
         in
         let* (_ : int) = Cc.stage_write ~uuid:body slice ~offset in
         slots.(i) <- Manifest.Staged { uuid = body; offset };
@@ -633,31 +634,37 @@ module Make (C : Conf.S) (R : Remote.S) = struct
       Int64.of_int (max (Int64.to_int st.Manifest.s_size) (start + len))
     in
     let slots =
-      grow_slots st.Manifest.s_slots (Manifest.num_chunks_for new_size cs)
+      grow_slots st.Manifest.s_slots
+        (Chunks.count ~size:new_size ~chunk_size:cs)
     in
     let st = { st with Manifest.s_slots = slots; s_size = new_size } in
-    let first = start / cs in
-    let last = if len = 0 then first else (start + len - 1) / cs in
+    let first = Chunks.index_of ~chunk_size:cs start in
+    let last =
+      if len = 0 then first else Chunks.index_of ~chunk_size:cs (start + len - 1)
+    in
     (* Asked of every member of a group, not just the chunk being written, so
        overwriting a whole file costs no reads. *)
     let covers j =
-      let chunk_start = j * cs in
+      let chunk_start = Chunks.offset_of ~chunk_size:cs j in
       start <= chunk_start
       && start + len
-         >= chunk_start + Manifest.chunk_len ~size:new_size ~chunk_size:cs j
+         >= chunk_start + Chunks.length_of ~size:new_size ~chunk_size:cs j
     in
     let rec go i =
       if i > last then Lwt.return_unit
       else (
         let chunk_off = if i = first then start mod cs else 0 in
         let take =
-          min (cs - chunk_off) (len - ((i * cs) + chunk_off - start))
+          min (cs - chunk_off)
+            (len - (Chunks.offset_of ~chunk_size:cs i + chunk_off - start))
         in
         let* () = ensure_group_body ~base ~st ~covers i in
         let* () =
           match st.Manifest.s_slots.(i) with
             | Manifest.Staged { uuid; offset = body_off } ->
-                let src_off = (i * cs) + chunk_off - start in
+                let src_off =
+                  Chunks.offset_of ~chunk_size:cs i + chunk_off - start
+                in
                 let slice = Bigarray.Array1.sub buf src_off take in
                 let+ (_ : int) =
                   Cc.stage_write ~uuid slice ~offset:(body_off + chunk_off)
@@ -681,7 +688,7 @@ module Make (C : Conf.S) (R : Remote.S) = struct
     let* st = staged_for key in
     let* base = Mf.read key in
     let cs = st.Manifest.s_chunk_size in
-    let n = Manifest.num_chunks_for size cs in
+    let n = Chunks.count ~size ~chunk_size:cs in
     let old = st.Manifest.s_slots in
     let slots = grow_slots (Array.sub old 0 (min n (Array.length old))) n in
     (* By difference, not per dropped slot: the members of a group share one
@@ -698,7 +705,7 @@ module Make (C : Conf.S) (R : Remote.S) = struct
       let i = n - 1 in
       if i < 0 then Lwt.return_unit
       else (
-        let len = Manifest.chunk_len ~size ~chunk_size:cs i in
+        let len = Chunks.length_of ~size ~chunk_size:cs i in
         match slots.(i) with
           | Manifest.Staged { uuid; offset } ->
               Cc.stage_resize ~uuid ~len:(offset + len)
@@ -707,7 +714,7 @@ module Make (C : Conf.S) (R : Remote.S) = struct
               let inherited_len =
                 match base with
                   | Some m ->
-                      Manifest.chunk_len ~size:m.Manifest.size
+                      Chunks.length_of ~size:m.Manifest.size
                         ~chunk_size:m.Manifest.chunk_size i
                   | None -> 0
               in
@@ -839,9 +846,7 @@ module Make (C : Conf.S) (R : Remote.S) = struct
      them. *)
   let staged_source ~(staged : Manifest.staged) ~base i =
     let cs = staged.Manifest.s_chunk_size in
-    let len =
-      Manifest.chunk_len ~size:staged.Manifest.s_size ~chunk_size:cs i
-    in
+    let len = Chunks.length_of ~size:staged.Manifest.s_size ~chunk_size:cs i in
     let zeroes =
       `Fill
         (fun buf ->
@@ -958,7 +963,7 @@ module Make (C : Conf.S) (R : Remote.S) = struct
                 (* Its own buffer rather than one of the upload path's slots:
                    this runs over a group's members, two at the defaults. *)
                 let len =
-                  Manifest.chunk_len ~size:staged.Manifest.s_size
+                  Chunks.length_of ~size:staged.Manifest.s_size
                     ~chunk_size:staged.Manifest.s_chunk_size i
                 in
                 let buf = Bigstring.create len in
@@ -1065,7 +1070,8 @@ module Make (C : Conf.S) (R : Remote.S) = struct
           (present, total)
       | Some (`Staged (({ Manifest.s_whole = Some _; _ } as st), _)) ->
           let n =
-            Manifest.num_chunks_for st.Manifest.s_size st.Manifest.s_chunk_size
+            Chunks.count ~size:st.Manifest.s_size
+              ~chunk_size:st.Manifest.s_chunk_size
           in
           Lwt.return (n, n)
       | Some (`Staged (st, base)) ->

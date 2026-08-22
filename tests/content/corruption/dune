@@ -2,6 +2,8 @@
  (flags
   (:standard
    -open
+   Tsync_chunks
+   -open
    Tsync_conf
    -open
    Tsync_naming
@@ -21,6 +23,7 @@
    Tsync_test_harness))
  (name corruption_test)
  (libraries
+  tsync_chunks
   tsync_test_harness
   tsync_conf
   tsync_naming

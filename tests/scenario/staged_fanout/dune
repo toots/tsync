@@ -2,6 +2,8 @@
  (flags
   (:standard
    -open
+   Tsync_chunks
+   -open
    Tsync_content
    -open
    Tsync_object
@@ -15,6 +17,7 @@
    Tsync_test_harness))
  (name staged_fanout_test)
  (libraries
+  tsync_chunks
   tsync_test_harness
   tsync_content
   tsync_object

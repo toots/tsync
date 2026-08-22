@@ -217,8 +217,10 @@ module Make_with_layout (C : Conf.S) (L : Layout.S) : S = struct
      next reaches neither these pages nor the ones still to come. *)
   let upload_chunk fd ~cancel ~on_progress ~file_size ~chunk_size ~table index =
     if !cancel then raise Cancelled;
-    let offset = index * chunk_size in
-    let len = min chunk_size (file_size - offset) in
+    let offset = Chunks.offset_of ~chunk_size index in
+    let len =
+      Chunks.length_of ~size:(Int64.of_int file_size) ~chunk_size index
+    in
     with_slot (fun () ->
         let data =
           try Bigstring.map_fd fd ~offset ~len
@@ -247,7 +249,7 @@ module Make_with_layout (C : Conf.S) (L : Layout.S) : S = struct
     let chunk_key = Chunk_table.get table in
     let h1, h2 =
       Manifest.digest_of_keys ~count ~key:chunk_key
-        ~len:(Manifest.chunk_len ~size ~chunk_size)
+        ~len:(Chunks.length_of ~size ~chunk_size)
     in
     let body = Chunk_table.seal table ~h1 ~h2 in
     let state = Manifest.of_chunk body in
@@ -295,9 +297,10 @@ module Make_with_layout (C : Conf.S) (L : Layout.S) : S = struct
                   (Unix.LargeFile.fstat snapshot).Unix.LargeFile.st_size
               in
               Log.debug "upload %s: file_size=%d" key file_size;
+              (* An empty file is one chunk of no bytes, where covering zero
+                 bytes takes none. *)
               let num_chunks =
-                if file_size = 0 then 1
-                else (file_size + chunk_size - 1) / chunk_size
+                max 1 (Chunks.count ~size:(Int64.of_int file_size) ~chunk_size)
               in
               let table =
                 chunk_table ~key ~size:(Int64.of_int file_size) ~chunk_size
@@ -334,11 +337,11 @@ module Make_with_layout (C : Conf.S) (L : Layout.S) : S = struct
          int ->
          [ `Reuse of string | `Fill of Local_io.buffer -> unit Lwt.t ] Lwt.t)
       ?(cancel = ref false) () =
-    let n = max 1 (Manifest.num_chunks_for size chunk_size) in
+    let n = max 1 (Chunks.count ~size ~chunk_size) in
     let table = chunk_table ~key ~size ~chunk_size ~mtime ~count:n in
     let one index =
       if !cancel then raise Cancelled;
-      let len = Manifest.chunk_len ~size ~chunk_size index in
+      let len = Chunks.length_of ~size ~chunk_size index in
       let* src = source index in
       match src with
         | `Reuse chunk_key ->

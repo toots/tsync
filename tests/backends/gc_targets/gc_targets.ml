@@ -98,7 +98,7 @@ let chunks_of (module B : Backend.S) =
   List.filter_map
     (fun (e : Backend.file_entry) ->
       let name = Filename.basename e.Backend.key in
-      if Chunk_layout.is_chunk_key name then Some name else None)
+      if Chunks.is_chunk_key name then Some name else None)
     entries
   |> List.sort String.compare
 

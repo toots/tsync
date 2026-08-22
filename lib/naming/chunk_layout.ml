@@ -13,26 +13,11 @@ let shard_of key =
 
 let relative_path key = Filename.concat (shard_of key) key
 
-(* Both are asked while walking a directory, where the answer decides whether
-   something gets copied or deleted, so both state what the name is rather than
-   what it is not -- see {!Xxhash.is_hex}. *)
-let is_chunk_key name =
-  match String.index_opt name '-' with
-    | Some i when i = Xxhash.hex_length ->
-        Xxhash.is_hex (String.sub name 0 i)
-        && Xxhash.is_hex (String.sub name (i + 1) (String.length name - i - 1))
-    | _ -> false
-
 let is_shard_name name =
   String.length name = fanout
   && String.for_all
        (fun c -> (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f'))
        name
-
-(* Here rather than beside the manifest that publishes it, so a store can hold a
-   body against its own name without depending on the shapes that reference it. *)
-let key_of_body data =
-  Xxhash.hash_bigstring_hex data 0 ^ "-" ^ Xxhash.hash_bigstring_hex data 1
 
 let chunks_seg = "/chunks/"
 
@@ -121,7 +106,7 @@ let marker_key key =
           | Some j, Some k
             when k + 1 < String.length root
                  && is_shard_name (String.sub rest 0 j)
-                 && is_chunk_key
+                 && Chunks.is_chunk_key
                       (String.sub rest (j + 1) (String.length rest - j - 1)) ->
               Some
                 (String.sub root 0 (k + 1)
@@ -156,7 +141,7 @@ let is_marker_key key =
                   | Some k ->
                       is_shard_name
                         (String.sub head (k + 1) (String.length head - k - 1))
-                      && is_chunk_key leaf
+                      && Chunks.is_chunk_key leaf
                   | None -> false))
 
 let chunk_key_of_marker = Filename.basename

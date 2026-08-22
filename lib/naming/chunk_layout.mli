@@ -24,12 +24,6 @@ val shard_of : string -> string
     from a listing entry. A key shorter than {!fanout} lands under ["_"]. *)
 val relative_path : string -> string
 
-(** Whether a name found in a shard is a chunk, and whether a name found in the
-    chunk root is a shard. Both decide whether something met while walking is
-    copied or deleted, so both say what the name {i is} — see {!Xxhash.is_hex}.
-*)
-val is_chunk_key : string -> bool
-
 val is_shard_name : string -> bool
 
 (** {1 Holding a body against its own name}
@@ -38,11 +32,6 @@ val is_shard_name : string -> bool
     object it takes without being told anything: the name is the expected
     answer. What fails is filed under {!corrupted_prefix}, where any client can
     list it. *)
-
-(** The key a body belongs under. The one place this is composed — an uploader
-    publishes it through {!Manifest.key_of_body} and a check recomputes it here,
-    so the two cannot drift into naming the same bytes differently. *)
-val key_of_body : Bigstring.t -> string
 
 (** ["tsync/corrupted/<domain>/"]. Beside the domains rather than inside one,
     with the domain as its first segment, so one literal prefix covers every

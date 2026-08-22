@@ -2,6 +2,8 @@
  (flags
   (:standard
    -open
+   Tsync_chunks
+   -open
    Tsync_field_spec
    -open
    Tsync_lwt_unix
@@ -20,6 +22,7 @@
  (name tsync_local_backend)
  (library_flags (-linkall))
  (libraries
+  tsync_chunks
   tsync-libs.field_spec
   tsync-libs.bigstring
   tsync-libs.backend_register

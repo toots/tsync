@@ -7,6 +7,8 @@
  (flags
   (:standard
    -open
+   Tsync_chunks
+   -open
    Tsync_conf
    -open
    Tsync_naming
@@ -25,6 +27,7 @@
  (name tsync_object)
  (public_name tsync-libs.object)
  (libraries
+  tsync_chunks
   tsync_conf
   tsync_naming
   tsync_local_io

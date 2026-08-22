@@ -31,8 +31,7 @@ module Make (C : Conf.S) = struct
       (fun () ->
         let+ body = B.get_opt ~key:(Space.key chunk_key) () in
         match body with
-          | Some body when Chunk_layout.key_of_body body = chunk_key ->
-              Some body
+          | Some body when Chunks.key_of_body body = chunk_key -> Some body
           | _ -> None)
       (fun _ -> Lwt.return_none)
 

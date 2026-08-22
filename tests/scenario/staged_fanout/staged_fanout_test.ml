@@ -83,6 +83,6 @@ let () =
      check "live bodies do not scale with the file" (!peak <= buffers);
      check "but the upload is not serialised either" (!peak > 1);
      check "every chunk still lands"
-       (Manifest.num_chunks_for state.Manifest.size csize = chunks);
+       (Chunks.count ~size:state.Manifest.size ~chunk_size:csize = chunks);
      Lwt.return_unit);
   ignore (Sys.command (Printf.sprintf "rm -rf %s" (Filename.quote root)))
