@@ -1293,7 +1293,7 @@ let data_integrity_cmd =
         | [] -> ""
         | names ->
             Printf.sprintf ", and nothing checked %s" (String.concat ", " names));
-    Lwt.return (if n > 0 || silent <> [] then 1 else 0)
+    Lwt.return (if Integrity.unhealthy r then 1 else 0)
   in
   (* What the sweep is doing, from outside it. The requests delete themselves as
      each shard finishes, so counting what is left is the progress bar — and
@@ -1302,92 +1302,60 @@ let data_integrity_cmd =
 
      Both are plain listings of prefixes the client already reads. Nothing here
      talks to a function. *)
-  let follow (module C : Conf.S) (m : Backend.member) =
-    let open Lwt.Syntax in
-    let (module B : Backend.S) = m.Backend.backend in
-    let jobs = Chunk_layout.verify_jobs_prefix ~chunk_prefix:C.chunk_prefix in
-    let corrupted =
-      Chunk_layout.corrupted_prefix ~chunk_prefix:C.chunk_prefix
-    in
-    let count prefix =
-      Lwt.catch
-        (fun () ->
-          let+ es = B.list_prefix ~prefix () in
-          List.length es)
-        (fun _ -> Lwt.return 0)
-    in
-    let rec loop stalled last =
-      let* left = count jobs in
-      let* found = count corrupted in
-      Hashtbl.replace per_store m.Backend.name (left, found);
-      current := Some (doing m.Backend.name "waiting on the bucket");
-      if left = 0 then (
-        Printf.eprintf "%s: done — %d corrupt chunk(s)\n%!" m.Backend.name found;
-        Lwt.return_unit)
-      else (
+  let watchers =
+    let on_progress ~store ~left ~found =
+      Hashtbl.replace per_store store (left, found);
+      current := Some (doing store "waiting on the bucket");
+      if left > 0 then
         Printf.eprintf "%s: %d shard request(s) left, %d corrupt so far\n%!"
-          m.Backend.name left found;
-        (* A store whose requests are not draining is not a store that is slow:
-           nothing is consuming them, which is what an undeployed or misfiltered
-           notification looks like from here. Said out loud rather than waited
-           on forever. *)
-        let stalled = if left = last then stalled + 1 else 0 in
-        if stalled >= 5 then (
-          Printf.eprintf
-            "%s: nothing has been picked up in a while — check the bucket's \
-             notification and the function's logs\n\
-             %!"
-            m.Backend.name;
-          Lwt.return_unit)
-        else
-          let* () = Lwt_unix.sleep 3. in
-          loop stalled left)
+          store left found
     in
-    loop 0 (-1)
+    let on_done ~store ~found =
+      Printf.eprintf "%s: done — %d corrupt chunk(s)\n%!" store found
+    in
+    let on_stalled ~store =
+      Printf.eprintf
+        "%s: nothing has been picked up in a while — check the bucket's \
+         notification and the function's logs\n\
+         %!"
+        store
+    in
+    (on_progress, on_done, on_stalled)
   in
   (* Fails rather than reporting a check that did not happen: a store with
      nothing on its side to run one says so, and saying "queued" anyway would be
      the same lie as printing zero for a store nobody looks at. *)
   let verify (module C : Conf.S) =
     let open Lwt.Syntax in
-    let* answers =
-      Lwt_list.map_s
-        (fun (m : Backend.member) ->
-          let (module B : Backend.S) = m.Backend.backend in
-          let+ a = B.verify_all ~chunk_prefix:C.chunk_prefix () in
-          (m.Backend.name, a))
-        C.members
-    in
-    let queued =
-      List.filter_map
-        (function name, `Queued n -> Some (name, n) | _, `Unsupported -> None)
+    let module I = Integrity.Make (C) in
+    let on_progress, on_done, on_stalled = watchers in
+    let on_answers answers =
+      List.iter
+        (fun (a : Integrity.answer) ->
+          match a.Integrity.queued with
+            | Some n ->
+                Printf.eprintf "%s: queued %d shard request(s)\n%!"
+                  a.Integrity.store n
+            | None -> ())
+        answers;
+      List.iter
+        (fun (a : Integrity.answer) ->
+          match a.Integrity.queued with
+            | None ->
+                Printf.eprintf
+                  "%s: cannot check itself — no verifier runs on that store\n"
+                  a.Integrity.store
+            | Some _ -> ())
         answers
     in
-    List.iter
-      (fun (name, n) ->
-        Printf.eprintf "%s: queued %d shard request(s)\n%!" name n)
-      queued;
-    List.iter
-      (function
-        | name, `Unsupported ->
-            Printf.eprintf
-              "%s: cannot check itself — no verifier runs on that store\n" name
-        | _, `Queued _ -> ())
-      answers;
-    if queued = [] then (
-      Printf.eprintf
-        "Nothing was asked to check anything. A local store is swept by tsync \
-         gc --verify instead.\n";
-      Lwt.return 1)
-    else
-      let+ () =
-        Lwt_list.iter_p
-          (fun (m : Backend.member) ->
-            if List.mem_assoc m.Backend.name queued then follow (module C) m
-            else Lwt.return_unit)
-          C.members
-      in
-      0
+    let+ outcome = I.verify ~on_answers ~on_progress ~on_done ~on_stalled () in
+    match outcome with
+      | `Nothing_queued ->
+          Printf.eprintf
+            "Nothing was asked to check anything. A local store is swept by \
+             tsync gc --verify instead.\n";
+          1
+      | `Watched -> 0
   in
   let repair (module C : Conf.S) source dry_run verbose =
     let open Lwt.Syntax in
