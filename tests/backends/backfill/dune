@@ -2,6 +2,8 @@
  (flags
   (:standard
    -open
+   Tsync_chunks
+   -open
    Tsync_object
    -open
    Tsync_naming
@@ -19,6 +21,7 @@
    Tsync_test_harness))
  (name backfill)
  (libraries
+  tsync_chunks
   tsync_test_harness
   tsync_object
   tsync_naming

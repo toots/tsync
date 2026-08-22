@@ -88,10 +88,13 @@ module Make_with_layout (C : Conf.S) (Sq : Sync_queue.S) (L : Layout.S) :
             | Some (`Staged (st, _)) ->
                 Lwt.return_some
                   (file_stat st.Manifest.s_size st.Manifest.s_mtime)
-            | Some (`Published { Manifest.symlink = Some target; mtime; _ }) ->
-                Lwt.return_some (symlink_stat target mtime)
-            | Some (`Published m) ->
-                Lwt.return_some (file_stat m.Manifest.size m.Manifest.mtime)
+            | Some (`Published m) -> (
+                match Manifest.symlink m with
+                  | Some target ->
+                      Lwt.return_some (symlink_stat target (Manifest.mtime m))
+                  | None ->
+                      Lwt.return_some
+                        (file_stat (Manifest.size m) (Manifest.mtime m)))
             | None -> Lwt.return_none)
 
   let stat key =
@@ -103,16 +106,16 @@ module Make_with_layout (C : Conf.S) (Sq : Sync_queue.S) (L : Layout.S) :
              from the backend so stat reports the logical size, not ENOENT. *)
           let+ m = resolved_manifest key in
           match m with
-            | Some { Manifest.symlink = Some target; mtime; _ } ->
-                Some (symlink_stat target mtime)
-            | Some m -> Some (file_stat m.Manifest.size m.Manifest.mtime)
+            | Some m -> (
+                match Manifest.symlink m with
+                  | Some target -> Some (symlink_stat target (Manifest.mtime m))
+                  | None ->
+                      Some (file_stat (Manifest.size m) (Manifest.mtime m)))
             | None -> None)
 
   let readlink key =
     let+ m = resolved_manifest key in
-    match m with
-      | Some { Manifest.symlink = Some _ as target; _ } -> target
-      | _ -> None
+    match m with Some m -> Manifest.symlink m | None -> None
 
   (* The local mirror is the source of truth for names and structure; the
      backend holds only hashed keys. Directory mtimes are not tracked. *)
@@ -166,7 +169,7 @@ module Make_with_layout (C : Conf.S) (Sq : Sync_queue.S) (L : Layout.S) :
         let size =
           match resolved with
             | Some (`Staged (st, _)) -> Some st.Manifest.s_size
-            | Some (`Published m) -> Some m.Manifest.size
+            | Some (`Published m) -> Some (Manifest.size m)
             | None -> None
         in
         { File_ops.name; rel; body; size })
@@ -313,10 +316,10 @@ module Make_with_layout (C : Conf.S) (Sq : Sync_queue.S) (L : Layout.S) :
   (* For a file whose chunks are already on the backend: only the manifest key
      and journal entry are missing. *)
   let publish_manifest key (m : Manifest.t) =
-    Log.info "publish_manifest %s: size=%Ld" key m.Manifest.size;
+    Log.info "publish_manifest %s: size=%Ld" key (Manifest.size m);
     let name = Key.leaf ~domain_prefix:C.domain_prefix key in
     let* () = St.put_manifest ~key ~data:(Manifest.body ~name m) in
-    let* ek = Fs.write_journal_entry [`Put (rel_key key, m.Manifest.size)] in
+    let* ek = Fs.write_journal_entry [`Put (rel_key key, Manifest.size m)] in
     Fs.bump_cursor ek
 
   let conflict_name rel =
@@ -363,7 +366,7 @@ module Make_with_layout (C : Conf.S) (Sq : Sync_queue.S) (L : Layout.S) :
         let+ resolved = Mf.resolve src in
         match resolved with
           | Some (`Staged (st, _)) -> Some st.Manifest.s_size
-          | Some (`Published m) -> Some m.Manifest.size
+          | Some (`Published m) -> Some (Manifest.size m)
           | None -> None
     in
     let* () = rename_local ~src ~dst in
@@ -479,7 +482,7 @@ module Make_with_layout (C : Conf.S) (Sq : Sync_queue.S) (L : Layout.S) :
              both, are what revert discards. *)
           let* () = D.discard_staged key in
           let* ek =
-            Fs.write_journal_entry [`Put (rel_key key, m.Manifest.size)]
+            Fs.write_journal_entry [`Put (rel_key key, Manifest.size m)]
           in
           Fs.bump_cursor ek
 
@@ -500,7 +503,7 @@ module Make_with_layout (C : Conf.S) (Sq : Sync_queue.S) (L : Layout.S) :
         let* () = St.put_manifest ~key ~data:(Manifest.body ~name state) in
         let* () = write_manifest key state in
         let* ek =
-          Fs.write_journal_entry [`Put (rel_key key, state.Manifest.size)]
+          Fs.write_journal_entry [`Put (rel_key key, Manifest.size state)]
         in
         Fs.bump_cursor ek)
 

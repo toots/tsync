@@ -213,10 +213,10 @@ module Make (C : Conf.S) (F : File_ops.S) : S = struct
                             (ok_json
                                (naming
                                @ file_fields
-                                   ~size:(Int64.to_int m.Manifest.size)
-                                   ~mtime:m.Manifest.mtime ~etag:m.Manifest.h1
-                                   ~is_uploaded:true ~symlink:m.Manifest.symlink
-                               ))
+                                   ~size:(Int64.to_int (Manifest.size m))
+                                   ~mtime:(Manifest.mtime m)
+                                   ~etag:(Manifest.h1 m) ~is_uploaded:true
+                                   ~symlink:(Manifest.symlink m)))
                       | None -> not_found key)))
 
   (* Bounds concurrent per-file manifest resolutions during enumeration. *)
@@ -235,9 +235,9 @@ module Make (C : Conf.S) (F : File_ops.S) : S = struct
           `Assoc
             (naming
             @ file_fields
-                ~size:(Int64.to_int m.Manifest.size)
-                ~mtime:m.Manifest.mtime ~etag:m.Manifest.h1 ~is_uploaded:true
-                ~symlink:m.Manifest.symlink)
+                ~size:(Int64.to_int (Manifest.size m))
+                ~mtime:(Manifest.mtime m) ~etag:(Manifest.h1 m)
+                ~is_uploaded:true ~symlink:(Manifest.symlink m))
       | _ ->
           `Assoc
             (naming
@@ -571,8 +571,8 @@ module Make (C : Conf.S) (F : File_ops.S) : S = struct
           (* Already uploaded and promoted. *)
           ok_json
             [
-              ("size", `Int (Int64.to_int m.Manifest.size));
-              ("mtime", `Float m.Manifest.mtime);
+              ("size", `Int (Int64.to_int (Manifest.size m)));
+              ("mtime", `Float (Manifest.mtime m));
             ]
       | None -> ok_json []
 

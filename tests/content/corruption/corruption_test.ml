@@ -73,7 +73,7 @@ let listed () =
 let () =
   Lwt_main.run
     (let* manifest = upload "a.bin" body in
-     let chunk_key = Chunk_table.key manifest.Manifest.chunks 0 in
+     let chunk_key = Chunk_table.key manifest 0 in
      let backend_key = C.chunk_prefix ^ Chunk_layout.relative_path chunk_key in
 
      let* marks = listed () in

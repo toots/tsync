@@ -1,24 +1,20 @@
-(** A published file's metadata. Header fields are lifted out of the body;
-    [chunks] is the body itself ({!Chunk_table}), mapped for a sidecar, so chunk
-    keys cost no heap until one is asked for.
+(** A published file's metadata, which is the body it was decoded from: the
+    header fields are answered by reading it rather than copied out beside it,
+    so a 32 GB file's 31,230 chunk keys are never materialized to answer what
+    the file is called.
 
-    No [name]: a name belongs to where a manifest is filed, and the body carries
+    No name: a name belongs to where a manifest is filed, and the body carries
     one only because some locations cannot yield it — a backend key is
     [<folder-id>/<hash>], an escaped cache leaf is [.tsync-esc-<hash>], and both
-    are one-way.
+    are one-way. *)
+type t = Chunk_table.t
 
-    [private], so the record cannot be built or functionally updated from
-    outside: a name reaches disk only through a writer that stamps it from the
-    key. *)
-type t = private {
-  size : int64;
-  chunk_size : int;
-  chunks : Chunk_table.t;
-  h1 : string;
-  h2 : string;
-  mtime : float;
-  symlink : string option;
-}
+val size : t -> int64
+val chunk_size : t -> int
+val mtime : t -> float
+val h1 : t -> string
+val h2 : t -> string
+val symlink : t -> string option
 
 (** What an upload produces per chunk. Read paths go through {!Chunk_table}. *)
 type chunk_entry = { index : int; h1 : string; h2 : string; size : int }

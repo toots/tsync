@@ -193,7 +193,7 @@ module Make (C : Conf.S) = struct
           ()
       in
       let+ () = Mf.write key state in
-      Imported state.Manifest.size)
+      Imported (Manifest.size state))
 
   (* No cache entry: a symlink has no file data. *)
   let import_symlink ~force_rehash ~src_root rel target =
@@ -207,7 +207,7 @@ module Make (C : Conf.S) = struct
       let state = Manifest.make_symlink ~name ~target ~mtime:st.Unix.st_mtime in
       let* () = St.put_manifest ~key ~data:(Manifest.body ~name state) in
       let* () = Mf.write key state in
-      Lwt.return (Imported state.Manifest.size))
+      Lwt.return (Imported (Manifest.size state)))
 
   (* A journal entry is one JSON object per line, so an import records its ops
      where they are already in that form. Spooled to disk rather than held in

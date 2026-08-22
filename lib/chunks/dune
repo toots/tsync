@@ -3,7 +3,7 @@
 
 (library
  (flags
-  (:standard -open Tsync_bigstring -open Tsync_xxhash))
+  (:standard -open Tsync_bigstring -open Tsync_xxhash -open Tsync_local_io))
  (name tsync_chunks)
  (public_name tsync-libs.chunks)
- (libraries tsync_bigstring tsync_xxhash))
+ (libraries tsync_bigstring tsync_xxhash tsync_local_io unix))

@@ -447,8 +447,7 @@ let setup_client (module C : Conf.S) root staging_prefix =
       | Some m ->
           Lwt.return
             (C.chunk_prefix
-            ^ Chunk_layout.relative_path
-                (Chunk_table.key m.Manifest.chunks index))
+            ^ Chunk_layout.relative_path (Chunk_table.key m index))
       | _ -> failwith ("no clean sidecar for " ^ path)
   in
   (* The member, not just its module: damaging a file behind the store's back
@@ -648,8 +647,8 @@ let setup_client (module C : Conf.S) root staging_prefix =
                              | Manifest.Zero -> "Z")
                            st.Manifest.s_slots)))
             | Some (`Published m) ->
-                Printf.sprintf "published size=%Ld chunks=%d" m.Manifest.size
-                  (Chunk_table.count m.Manifest.chunks)
+                Printf.sprintf "published size=%Ld chunks=%d" (Manifest.size m)
+                  (Chunk_table.count m)
             | None -> "no manifest"
         in
         let* local, total = F.chunk_residency k in
@@ -931,7 +930,7 @@ let setup_client (module C : Conf.S) root staging_prefix =
         let k = key path in
         let* () = F.upload k in
         let* m = F.read_manifest k in
-        let size = match m with Some m -> m.Manifest.size | None -> 0L in
+        let size = match m with Some m -> Manifest.size m | None -> 0L in
         let ek = J.entry_key () in
         let* () = W.record ek [`Put (F.rel_key k, size)] in
         W.advance ek Wal.Executed
@@ -1310,8 +1309,7 @@ let dump_backend_at ~backend_root ~domain_prefix ~chunk_prefix ~journal_prefix
                   | m ->
                       ( Manifest.recorded_name m,
                         Printf.sprintf "manifest size=%Ld chunks=%d"
-                          m.Manifest.size
-                          (Chunk_table.count m.Manifest.chunks) )
+                          (Manifest.size m) (Chunk_table.count m) )
                   | exception _ -> (rel, "raw")
               in
               Printf.printf "  version %s [%s]#%d = %s\n" name rel n desc
@@ -1336,19 +1334,19 @@ let dump_backend_at ~backend_root ~domain_prefix ~chunk_prefix ~journal_prefix
                   Printf.printf "  folder %s [%s] -> %s\n" m.Folder.name
                     (alias_rel rel) (alias_id m.Folder.id)
             | None -> (
-                match Manifest.of_string (Bigstring.to_string data) with
-                  | { symlink = Some target; _ } as m ->
+                let m = Manifest.of_string (Bigstring.to_string data) in
+                match Manifest.symlink m with
+                  | Some target ->
                       Printf.printf "  symlink %s [%s] -> %s\n"
                         (Manifest.recorded_name m) (alias_rel rel) target
-                  | m ->
+                  | None ->
                       Printf.printf
                         "  file %s [%s] = manifest size=%Ld chunks=%d h1=%s \
                          h2=%s\n"
                         (Manifest.recorded_name m) (alias_rel rel)
-                        m.Manifest.size
-                        (Chunk_table.count m.Manifest.chunks)
-                        m.Manifest.h1 m.Manifest.h2;
-                      let table = m.Manifest.chunks in
+                        (Manifest.size m) (Chunk_table.count m) (Manifest.h1 m)
+                        (Manifest.h2 m);
+                      let table = m in
                       for i = 0 to Chunk_table.count table - 1 do
                         Printf.printf "    chunk#%d %s size=%d\n" i
                           (Chunk_table.key table i) (Chunk_table.len table i)

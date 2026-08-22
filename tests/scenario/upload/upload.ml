@@ -162,8 +162,8 @@ let () =
      let src = Filename.concat root "big.bin" in
      write_file src data;
      let* m = upload (C.domain_prefix ^ "big.bin") src in
-     assert (Chunk_table.count m.Manifest.chunks = 3);
-     assert (m.Manifest.size = Int64.of_int size);
+     assert (Chunk_table.count m = 3);
+     assert (Manifest.size m = Int64.of_int size);
      let* () = round_trip (C.domain_prefix ^ "big.bin") src data in
 
      (* Fetching the manifest of a file with no local sidecar yields the logical
@@ -171,7 +171,7 @@ let () =
         list_dir fall back to for a never-cached file. *)
      let* rm = R.fetch_manifest ~key:(C.domain_prefix ^ "big.bin") () in
      (match rm with
-       | Some m -> assert (m.Manifest.size = Int64.of_int size)
+       | Some m -> assert (Manifest.size m = Int64.of_int size)
        | _ -> assert false);
 
      (* Dedup: identical content under a new key adds no chunk objects. *)
@@ -189,14 +189,14 @@ let () =
      let dsrc = Filename.concat root "dup.bin" in
      write_file dsrc dup;
      let* dm = upload (C.domain_prefix ^ "dup.bin") dsrc in
-     assert (Chunk_table.count dm.Manifest.chunks = 3);
+     assert (Chunk_table.count dm = 3);
      let* () = round_trip (C.domain_prefix ^ "dup.bin") dsrc dup in
 
      (* 0-byte file: one empty chunk, round-trips to empty. *)
      let empty = Filename.concat root "empty.bin" in
      write_file empty "";
      let* em = upload (C.domain_prefix ^ "empty.bin") empty in
-     assert (Chunk_table.count em.Manifest.chunks = 1);
+     assert (Chunk_table.count em = 1);
      let* () = round_trip (C.domain_prefix ^ "empty.bin") empty "" in
 
      (* Configured wins outright: nothing is asked of the backend. *)

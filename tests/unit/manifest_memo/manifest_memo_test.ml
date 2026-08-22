@@ -54,7 +54,7 @@ let () =
      check "a read caches the manifest" (Mf.memo_size () = 1);
      let* m = Mf.read (key 0) in
      check "and answers with it"
-       (match m with Some m -> m.Manifest.size = 5L | None -> false);
+       (match m with Some m -> Manifest.size m = 5L | None -> false);
 
      let rec go i =
        if i > 1200 then Lwt.return_unit
@@ -73,7 +73,7 @@ let () =
         either way, which is why the count is what gets asserted. *)
      let* m = Mf.read (key 0) in
      check "an evicted key still reads"
-       (match m with Some m -> m.Manifest.size = 5L | None -> false);
+       (match m with Some m -> Manifest.size m = 5L | None -> false);
 
      report ();
      Lwt.return_unit)

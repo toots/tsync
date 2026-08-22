@@ -252,7 +252,7 @@ module Make (C : Conf.S) = struct
         | None -> (
             match Manifest.of_string data with
               | m ->
-                  let t = m.Manifest.chunks in
+                  let t = m in
                   List.init (Chunk_table.count t) (Chunk_table.key t)
               | exception e ->
                   failwith

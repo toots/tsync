@@ -62,7 +62,7 @@ let () =
        ~why:(fun () -> Printf.sprintf "%d chunks landed" !landed)
        (!landed = chunks);
      check "and the manifest records every one of them"
-       (Chunk_table.count manifest.Manifest.chunks = chunks);
+       (Chunk_table.count manifest = chunks);
      let per_chunk = !live_at_first_chunk / chunks in
      check "what is held does not grow with the length of the file"
        ~why:(fun () ->
@@ -116,9 +116,9 @@ let () =
          ~src_path:source ~mtime:0. ~chunk_size ()
      in
      check "the two agree on the file's identity"
-       (again.Manifest.h1 = manifest.Manifest.h1
-       && again.Manifest.h2 = manifest.Manifest.h2);
+       (Manifest.h1 again = Manifest.h1 manifest
+       && Manifest.h2 again = Manifest.h2 manifest);
      check "and on every chunk key"
-       (List.init chunks (Chunk_table.key again.Manifest.chunks)
-       = List.init chunks (Chunk_table.key manifest.Manifest.chunks));
+       (List.init chunks (Chunk_table.key again)
+       = List.init chunks (Chunk_table.key manifest));
      report ~expected:9 ())

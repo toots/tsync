@@ -205,13 +205,13 @@ module Make (C : Conf.S) (R : Remote.S) = struct
   (* [id] names the file for the read-ahead heuristic and for {!pulling}, which
      is how a byte fetched here is attributed to the file someone is reading. *)
   let pread ~id ~(manifest : Manifest.t) buf ~offset =
-    let cs = manifest.Manifest.chunk_size in
-    let size = manifest.Manifest.size in
+    let cs = Manifest.chunk_size manifest in
+    let size = Manifest.size manifest in
     let want = Bigarray.Array1.dim buf in
     let start = Int64.to_int offset in
     let avail = Int64.to_int (Int64.sub size offset) in
     let total = min want (max 0 avail) in
-    let table = manifest.Manifest.chunks in
+    let table = manifest in
     let n = Chunk_table.count table in
     if total <= 0 || cs <= 0 || n = 0 then Lwt.return 0
     else (
@@ -449,13 +449,13 @@ module Make (C : Conf.S) (R : Remote.S) = struct
                   (* The key names this file; the published body names whatever
                      it was filed as. *)
                   Manifest.s_name = name;
-                  s_size = m.Manifest.size;
+                  s_size = Manifest.size m;
                   s_mtime = Unix.gettimeofday ();
-                  s_chunk_size = m.Manifest.chunk_size;
+                  s_chunk_size = Manifest.chunk_size m;
                   s_slots =
                     Array.make
-                      (Chunks.count ~size:m.Manifest.size
-                         ~chunk_size:m.Manifest.chunk_size)
+                      (Chunks.count ~size:(Manifest.size m)
+                         ~chunk_size:(Manifest.chunk_size m))
                       Manifest.Inherit;
                   s_whole = None;
                   s_published = None;
@@ -714,8 +714,8 @@ module Make (C : Conf.S) (R : Remote.S) = struct
               let inherited_len =
                 match base with
                   | Some m ->
-                      Chunks.length_of ~size:m.Manifest.size
-                        ~chunk_size:m.Manifest.chunk_size i
+                      Chunks.length_of ~size:(Manifest.size m)
+                        ~chunk_size:(Manifest.chunk_size m) i
                   | None -> 0
               in
               if inherited_len = len then Lwt.return_unit
@@ -860,8 +860,8 @@ module Make (C : Conf.S) (R : Remote.S) = struct
         | Manifest.Zero -> Lwt.return zeroes
         | Manifest.Inherit -> (
             match base with
-              | Some m when i < Chunk_table.count m.Manifest.chunks ->
-                  Lwt.return (`Reuse (Chunk_table.key m.Manifest.chunks i))
+              | Some m when i < Chunk_table.count m ->
+                  Lwt.return (`Reuse (Chunk_table.key m i))
               | Some _ | None ->
                   Lwt.fail
                     (Backend.Backend_error
@@ -1059,7 +1059,7 @@ module Make (C : Conf.S) (R : Remote.S) = struct
     match resolved with
       | None -> Lwt.return (0, 0)
       | Some (`Published m) ->
-          let total = Chunk_table.count m.Manifest.chunks in
+          let total = Chunk_table.count m in
           let+ present =
             Lwt_list.fold_left_s
               (fun acc group ->
@@ -1188,7 +1188,7 @@ module Make (C : Conf.S) (R : Remote.S) = struct
   let content_size key =
     let+ resolved = Mf.resolve key in
     match resolved with
-      | Some (`Published m) -> Int64.to_int m.Manifest.size
+      | Some (`Published m) -> Int64.to_int (Manifest.size m)
       | Some (`Staged (st, _)) -> Int64.to_int st.Manifest.s_size
       | None -> 0
 
@@ -1242,7 +1242,7 @@ module Make (C : Conf.S) (R : Remote.S) = struct
       | Some (`Staged (st, _)) ->
           Lwt_unix_retry.utimes dst_path st.Manifest.s_mtime st.Manifest.s_mtime
       | Some (`Published m) ->
-          Lwt_unix_retry.utimes dst_path m.Manifest.mtime m.Manifest.mtime
+          Lwt_unix_retry.utimes dst_path (Manifest.mtime m) (Manifest.mtime m)
       | None -> Lwt.return_unit
 
   (* ponytail: no progress span — a range is bounded by construction and its

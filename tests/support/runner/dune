@@ -2,6 +2,8 @@
  (flags
   (:standard
    -open
+   Tsync_chunks
+   -open
    Tsync_test_harness
    -open
    Tsync_ops
@@ -35,6 +37,7 @@
    Tsync_ipc_handler))
  (name tsync_test_runner)
  (libraries
+  tsync_chunks
   tsync_test_harness
   tsync_ops
   tsync_store

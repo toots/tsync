@@ -17,12 +17,12 @@ module Make (C : Conf.S) = struct
     let dst_path = Filename.concat dst rel in
     let* () = Fs_util.ensure_parent dst_path in
     let* manifest = D.resolved_manifest key in
-    match manifest with
-      | Some { symlink = Some target; _ } ->
+    match Option.map (fun m -> (m, Manifest.symlink m)) manifest with
+      | Some (_, Some target) ->
           let* () = Fs_util.unlink_quiet dst_path in
           let+ () = Lwt_unix_retry.symlink target dst_path in
           Exported_symlink
-      | Some _ ->
+      | Some (_, None) ->
           let+ () = D.assemble_to key ~dst_path in
           Exported
       | None ->

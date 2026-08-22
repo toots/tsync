@@ -3,8 +3,23 @@
 
 (executable
  (flags
-  (:standard -open Tsync_runtime -open Tsync_e2e -open Tsync_object))
+  (:standard
+   -open
+   Tsync_chunks
+   -open
+   Tsync_runtime
+   -open
+   Tsync_e2e
+   -open
+   Tsync_object))
  (name stress)
  (enabled_if
   (= %{system} linux))
- (libraries tsync_e2e tsync_runtime tsync_object yojson unix threads.posix))
+ (libraries
+  tsync_chunks
+  tsync_e2e
+  tsync_runtime
+  tsync_object
+  yojson
+  unix
+  threads.posix))

@@ -18,7 +18,10 @@ let root = "/tmp/tsync-rename-listing-test"
 let store_dir = root ^ "/store"
 let cache_dir = root ^ "/cache"
 let data_dir = root ^ "/data"
-let mtime = 315532800. (* 1980-01-01 UTC, so nothing drifts *)
+
+(* 1980-01-01 UTC, so nothing drifts. Not [mtime]: the record literals below
+   open Manifest, where that name is the accessor. *)
+let fixed_mtime = 315532800.
 
 module C =
   (val Fixture.conf ~max_uploads:2 ~max_downloads:2
@@ -43,14 +46,14 @@ let published ~name =
             size = 4;
           };
       ]
-    ~mtime
+    ~mtime:fixed_mtime
 
 let staged ~name =
   Manifest.
     {
       s_name = name;
       s_size = 4L;
-      s_mtime = mtime;
+      s_mtime = fixed_mtime;
       s_chunk_size = 8;
       s_slots = [||];
       s_whole = None;

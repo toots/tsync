@@ -47,7 +47,7 @@ let read_all () =
   let size =
     match resolved with
       | Some (`Staged (st, _)) -> Int64.to_int st.Manifest.s_size
-      | Some (`Published m) -> Int64.to_int m.Manifest.size
+      | Some (`Published m) -> Int64.to_int (Manifest.size m)
       | None -> 0
   in
   if size = 0 then Lwt.return ""
@@ -73,8 +73,8 @@ let show label =
                        | Manifest.Zero -> "Z")
                      st.Manifest.s_slots)))
       | Some (`Published m) ->
-          Printf.sprintf "published size=%2Ld chunks=%d" m.Manifest.size
-            (Chunk_table.count m.Manifest.chunks)
+          Printf.sprintf "published size=%2Ld chunks=%d" (Manifest.size m)
+            (Chunk_table.count m)
       | None -> "absent"
   in
   let+ content = read_all () in
@@ -157,14 +157,14 @@ let gshow label =
                        | Manifest.Zero -> "Z")
                      st.Manifest.s_slots)))
       | Some (`Published m) ->
-          Printf.sprintf "published size=%2Ld chunks=%d" m.Manifest.size
-            (Chunk_table.count m.Manifest.chunks)
+          Printf.sprintf "published size=%2Ld chunks=%d" (Manifest.size m)
+            (Chunk_table.count m)
       | None -> "absent"
   in
   let size =
     match resolved with
       | Some (`Staged (st, _)) -> Int64.to_int st.Manifest.s_size
-      | Some (`Published m) -> Int64.to_int m.Manifest.size
+      | Some (`Published m) -> Int64.to_int (Manifest.size m)
       | None -> 0
   in
   let+ content =

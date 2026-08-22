@@ -203,7 +203,7 @@ module Make (C : Conf.S) = struct
   let holds ~rel path = String.starts_with ~prefix:(path ^ "/") rel
 
   let chunk_keys (m : Manifest.t) =
-    let table = m.Manifest.chunks in
+    let table = m in
     List.init (Chunk_table.count table) (fun i ->
         Space.key (Chunk_table.key table i))
 

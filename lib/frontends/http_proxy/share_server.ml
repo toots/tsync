@@ -190,8 +190,8 @@ module Make (C : Conf.S) = struct
                 name = Manifest.recorded_name m;
                 key = e.Inode_tree.bkey;
                 is_dir = false;
-                size = m.Manifest.size;
-                mtime = m.Manifest.mtime;
+                size = Manifest.size m;
+                mtime = Manifest.mtime m;
               })
       entries
 
@@ -422,14 +422,14 @@ module Make (C : Conf.S) = struct
   let file_target (share : share) =
     let* m = manifest_of share.key in
     match m with
-      | Some m when m.Manifest.symlink = None -> Lwt.return m
+      | Some m when Manifest.symlink m = None -> Lwt.return m
       | Some _ -> fail `Bad_request "cannot serve a symlink directly"
       | None -> fail `Not_found "file not found"
 
   let download (share : share) ~range =
     if share.typ = "file" then
       let* manifest = file_target share in
-      serve_bytes ~manifest ~key:share.key ~size:manifest.Manifest.size
+      serve_bytes ~manifest ~key:share.key ~size:(Manifest.size manifest)
         ~name:(Manifest.recorded_name manifest)
         ~inline:false ~range
     else (

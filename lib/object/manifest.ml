@@ -1,27 +1,18 @@
-(* A published file's metadata: size, mtime and the ordered keys of the chunks
-   holding its bytes.
+(* A published file's metadata is the body it was decoded from: the header
+   fields are answered by reading it rather than copied out beside it, and the
+   chunk keys are never materialized to answer what the file is called. *)
+type t = Chunk_table.t
 
-   Header fields are lifted into this record; the chunks stay in the
-   {!Chunk_table} mapping, so a 32 GB file's 31,230 keys are never materialized
-   to answer "what is this file called?". *)
-
-(* A name belongs to where a manifest is filed, so it is not a field here. The
-   body carries one only for the locations that cannot express it: a backend key
-   is [<folder-id>/<hash>] and an escaped cache leaf is [.tsync-esc-<hash>],
-   both one-way. *)
-type t = {
-  size : int64;
-  chunk_size : int;
-  chunks : Chunk_table.t;
-  h1 : string;
-  h2 : string;
-  mtime : float;
-  symlink : string option;
-}
+let size = Chunk_table.size
+let chunk_size = Chunk_table.chunk_size
+let h1 = Chunk_table.h1
+let h2 = Chunk_table.h2
+let mtime = Chunk_table.mtime
+let symlink = Chunk_table.symlink
 
 (* Only the location can say whether this is worth consulting, so a caller
    holding a key uses the key instead. *)
-let recorded_name m = Chunk_table.name m.chunks
+let recorded_name = Chunk_table.name
 
 (* What an upload produces per chunk. Read paths go through the table. *)
 type chunk_entry = { index : int; h1 : string; h2 : string; size : int }
@@ -51,13 +42,13 @@ let entry_of_key ~index ~size key =
    different setting still groups correctly. *)
 
 let per ~cache_chunk_size (m : t) =
-  Chunk_group.per_group ~chunk_size:m.chunk_size ~cache_chunk_size
+  Chunk_group.per_group ~chunk_size:(chunk_size m) ~cache_chunk_size
 
 let groups ~cache_chunk_size m =
-  Chunk_group.all ~table:m.chunks ~per:(per ~cache_chunk_size m)
+  Chunk_group.all ~table:m ~per:(per ~cache_chunk_size m)
 
 let group_at ~cache_chunk_size m i =
-  Chunk_group.of_table ~table:m.chunks ~per:(per ~cache_chunk_size m) i
+  Chunk_group.of_table ~table:m ~per:(per ~cache_chunk_size m) i
 
 (* Hashed over the ordered chunk digests, so a changed file's manifest rebuilds
    from its chunk entries without re-reading untouched bytes.
@@ -87,17 +78,7 @@ let digest_of_keys ~count ~key ~len =
         add (chunk_digest ~key:(key i) ~size:(len i))
       done)
 
-let of_table chunks =
-  {
-    size = Chunk_table.size chunks;
-    chunk_size = Chunk_table.chunk_size chunks;
-    chunks;
-    h1 = Chunk_table.h1 chunks;
-    h2 = Chunk_table.h2 chunks;
-    mtime = Chunk_table.mtime chunks;
-    symlink = Chunk_table.symlink chunks;
-  }
-
+let of_table chunks = chunks
 let of_string s = of_table (Chunk_table.of_string s)
 let of_chunk c = of_table (Chunk_table.of_chunk c)
 
@@ -107,12 +88,12 @@ let of_file path = of_table (Chunk_table.of_file path)
 (* Encoding needs a name, so every caller states one; a version snapshot and a
    trashed marker are the only ones passing anything but the key's own leaf. *)
 let to_string ~name (m : t) =
-  Chunk_table.encode ~name ~size:m.size ~chunk_size:m.chunk_size ~mtime:m.mtime
-    ~h1:m.h1 ~h2:m.h2 ~symlink:m.symlink
-    ~keys:(List.init (Chunk_table.count m.chunks) (Chunk_table.key m.chunks))
+  Chunk_table.encode ~name ~size:(size m) ~chunk_size:(chunk_size m)
+    ~mtime:(mtime m) ~h1:(h1 m) ~h2:(h2 m) ~symlink:(symlink m)
+    ~keys:(List.init (Chunk_table.count m) (Chunk_table.key m))
 
 let body ~name m =
-  if recorded_name m = name then Chunk_table.bytes m.chunks
+  if recorded_name m = name then Chunk_table.bytes m
   else Bigstring.of_string (to_string ~name m)
 
 (* Encode then decode, so a [t] only ever exists as a decoded body and cannot
@@ -717,8 +698,8 @@ module Make (C : Conf.S) = struct
                     ( Backend.
                         {
                           key = child_base ^ real_file_name name m;
-                          size = Int64.to_int m.size;
-                          last_modified = m.mtime;
+                          size = Int64.to_int (size m);
+                          last_modified = mtime m;
                           etag = None;
                         }
                       :: files,
@@ -737,8 +718,8 @@ module Make (C : Conf.S) = struct
           Backend.
             {
               key = C.domain_prefix ^ Key.join rel leaf;
-              size = Int64.to_int m.size;
-              last_modified = m.mtime;
+              size = Int64.to_int (size m);
+              last_modified = mtime m;
               etag = None;
             }
           :: acc)
