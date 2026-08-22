@@ -62,6 +62,23 @@ module C =
 
 module Tree = Inode_tree.Make (C)
 
+(* The same store, described as two a read could land on. A body answered by
+   the second would carry the first's version into the index, so a domain like
+   this holds none. *)
+module Two =
+  (val Fixture.conf ~domain:"testdom"
+         ~store:(module Store : Backend.S)
+         ~members:
+           [
+             Backend.member ~name:"one" (module Store : Backend.S);
+             Backend.member ~name:"two" ~role:"replica"
+               (module Store : Backend.S);
+           ]
+         ~cache_root:root ~data_dir:root ~root ()
+      : Conf.S)
+
+module Tree_two = Inode_tree.Make (Two)
+
 let folder = Folder.new_id ()
 
 let manifest name =
@@ -118,4 +135,11 @@ let () =
      reset ();
      let* children = Tree.children ~folder_id:other () in
      report "and so still has no index the next time" children;
+
+     (* [folder] has an index by now, and this domain must not touch it. *)
+     reset ();
+     let* children =
+       Tree_two.children ~refresh_index:true ~folder_id:folder ()
+     in
+     report "a domain with two stores a read could land on" children;
      Lwt.return_unit)
