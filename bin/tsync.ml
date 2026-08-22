@@ -420,42 +420,13 @@ let ls_cmd =
                    name e.size)
          items;
        if show_deleted then begin
-         (* Versioned paths in this directory with no live manifest. *)
+         let module D = Deleted.Make (C) in
          let reldir =
            Key.chop_slash
              (Key.strip_prefix ~domain_prefix:C.domain_prefix prefix)
          in
-         let seen = Hashtbl.create 16 in
-         (* Versions of files in this directory share its folder id. *)
-         let* fid =
-           Folder_ids.ensure_id ~cache_root:C.cache_root
-             ~domain_name:C.domain_name reldir
-         in
-         let* entries =
-           B.list_prefix ~prefix:(C.versions_prefix ^ fid ^ "/") ()
-         in
-         Lwt_list.iter_s
-           (fun (e : Backend.file_entry) ->
-             (* Version keys are hashed: the real path is in the body. *)
-               match
-                 Versioning.parse ~versions_prefix:C.versions_prefix e.key
-               with
-               | Some (hrel, _) when not (Hashtbl.mem seen hrel) -> (
-                   Hashtbl.add seen hrel ();
-                   let* data = B.get ~key:e.key () in
-                   match Manifest.of_string (Chunk.to_string data) with
-                     | m ->
-                         (* A missing live manifest means the file was deleted;
-                            the leaf name comes from the version body. *)
-                         let+ head =
-                           B.head_opt ~key:(C.domain_prefix ^ hrel) ()
-                         in
-                         if head = None then
-                           Printf.printf "deleted  %s\n"
-                             (Manifest.recorded_name m)
-                     | exception _ -> Lwt.return_unit)
-               | _ -> Lwt.return_unit)
-           entries
+         let+ names = D.in_folder reldir in
+         List.iter (Printf.printf "deleted  %s\n") names
        end
        else Lwt.return_unit)
   in
@@ -533,63 +504,17 @@ let versions_cmd =
                    Printf.printf "%Ld  %s  %d bytes\n" ts (human_ts ts) size)
                  versions
          | None ->
-             (* [sample] keeps one version key per file, so a deleted file's
-                real path can be read out of its version body. *)
-             let latest = Hashtbl.create 64
-             and count = Hashtbl.create 64
-             and sample = Hashtbl.create 64 in
-             let* entries = B.list_prefix ~prefix:C.versions_prefix () in
-             List.iter
-               (fun (e : Backend.file_entry) ->
-                 match parse e.key with
-                   | Some (rel, ts) ->
-                       let ts = Int64.of_string ts in
-                       let best =
-                         Option.value ~default:0L (Hashtbl.find_opt latest rel)
-                       in
-                       if Int64.compare ts best > 0 then
-                         Hashtbl.replace latest rel ts;
-                       Hashtbl.replace sample rel e.key;
-                       Hashtbl.replace count rel
-                         (1
-                         + Option.value ~default:0 (Hashtbl.find_opt count rel)
-                         )
-                   | None -> ())
-               entries;
-             let real_path hrel =
-               Lwt.catch
-                 (fun () ->
-                   let+ data = B.get ~key:(Hashtbl.find sample hrel) () in
-                   let data = Chunk.to_string data in
-                   match Manifest.of_string data with
-                     | m -> Manifest.recorded_name m
-                     | exception _ -> hrel)
-                 (fun _ -> Lwt.return hrel)
-             in
-             let* deleted =
-               Hashtbl.fold
-                 (fun rel ts acc ->
-                   let* acc = acc in
-                   let* head = B.head_opt ~key:(C.domain_prefix ^ rel) () in
-                   if head = None then
-                     let+ path = real_path rel in
-                     ( path,
-                       ts,
-                       Option.value ~default:1 (Hashtbl.find_opt count rel) )
-                     :: acc
-                   else Lwt.return acc)
-                 latest (Lwt.return [])
-             in
+             let module D = Deleted.Make (C) in
+             let+ deleted = D.in_domain () in
              let deleted = List.sort compare deleted in
              if deleted = [] then print_endline "No deleted files"
              else
                List.iter
-                 (fun (rel, ts, n) ->
-                   Printf.printf "%s  (deleted %s, %d version%s)\n" rel
-                     (human_ts ts) n
-                     (if n = 1 then "" else "s"))
-                 deleted;
-             Lwt.return_unit)
+                 (fun (e : Deleted.entry) ->
+                   Printf.printf "%s  (deleted %s, %d version%s)\n"
+                     e.Deleted.path (human_ts e.Deleted.latest) e.Deleted.versions
+                     (if e.Deleted.versions = 1 then "" else "s"))
+                 deleted)
   in
   let run path domain do_revert version =
     match (path, do_revert) with
