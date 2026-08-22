@@ -607,68 +607,39 @@ let versions_cmd =
 (* An empty trash lists as its own directory key, which holds no marker and
    cannot be fetched on a filesystem store. Dropped here rather than in each
    reader: every one of them goes on to [get] what this returns. *)
-let trash_markers (module B : Backend.S) domain_prefix =
-  let open Lwt.Syntax in
-  let+ entries =
-    B.list_prefix ~prefix:(domain_prefix ^ Folder.trash_id ^ "/") ()
-  in
-  List.filter
-    (fun (e : Backend.file_entry) -> not (Key.is_dir e.Backend.key))
-    entries
-
 let trash_list domain =
   run_lwt
     (let open Lwt.Syntax in
      let (module C : Conf.S) = load_conf ?domain () in
-     let module B = (val C.store : Backend.S) in
-     let* markers = trash_markers (module B) C.domain_prefix in
-     Lwt_list.iter_s
-       (fun (e : Backend.file_entry) ->
-         let+ data = B.get ~key:e.key () in
-         let data = Chunk.to_string data in
-         match Folder.trash_path_of_string data with
-           | Some p -> Printf.printf "%s\n" p
-           | None -> ())
-       markers)
+     let module T = Trash.Make (C) in
+     let+ paths = T.list () in
+     List.iter (Printf.printf "%s\n") paths)
 
 let trash_restore path domain =
-  run_lwt
-    (let open Lwt.Syntax in
-     let (module C : Conf.S) = load_conf ?domain () in
-     let module L = Layout.Inode.Make (C) in
-     let module St = Store.Make (C) (L) in
-     let module B = (val C.store : Backend.S) in
-     let* markers = trash_markers (module B) C.domain_prefix in
-     let* found =
-       Lwt_list.filter_map_s
-         (fun (e : Backend.file_entry) ->
-           let+ data = B.get ~key:e.key () in
-           let data = Chunk.to_string data in
-           match
-             (Folder.trash_path_of_string data, Folder.marker_of_string data)
-           with
-             | Some p, Some m when p = path -> Some (e.key, m)
-             | _ -> None)
-         markers
-     in
-     match found with
-       | [] ->
-           Printf.eprintf "not in trash: %s\n" path;
-           Lwt.return_unit
-       | (trash_key, m) :: _ ->
-           (* O(1): the subtree is untouched. The local mirror copy is rebuilt
-                by a later full sync. *)
-           let* new_key = L.folder_marker_key (C.domain_prefix ^ path) in
-           let new_key = Option.get new_key in
-           let marker =
-             Folder.marker_to_string
-               { Folder.name = m.Folder.name; id = m.Folder.id }
-           in
-           let* () = St.put_raw ~bkey:new_key ~data:marker in
-           let* () = St.delete_raw ~bkey:trash_key in
-           Printf.printf
-             "restored %s — run 'tsync sync' to rebuild it locally\n" path;
-           Lwt.return_unit)
+  let code =
+    run_lwt
+      (let open Lwt.Syntax in
+       let (module C : Conf.S) = load_conf ?domain () in
+       let module T = Trash.Make (C) in
+       let+ outcome = T.restore path in
+       match outcome with
+         | Trash.Restored ->
+             Printf.printf
+               "restored %s — run 'tsync sync' to rebuild it locally\n" path;
+             0
+         | Trash.Not_in_trash ->
+             Printf.eprintf "not in trash: %s\n" path;
+             0
+         | Trash.Parent_unknown ->
+             Printf.eprintf
+               "cannot restore %s: this client has no record of the folder it \
+                belongs under — run 'tsync sync' first\n"
+               path;
+             1)
+  in
+  (* Outside {!run_lwt}: exiting from inside its promise would skip the
+     deferred drain it exists for. *)
+  if code <> 0 then exit code
 
 let trash_cmd =
   let path_arg =
