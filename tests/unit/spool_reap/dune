@@ -1,5 +1,20 @@
 (executable
  (flags
-  (:standard -open Tsync_chunk -open Tsync_local_io -open Tsync_test_harness))
+  (:standard
+   -open
+   Tsync_spill
+   -open
+   Tsync_chunk
+   -open
+   Tsync_local_io
+   -open
+   Tsync_test_harness))
  (name spool_reap_test)
- (libraries tsync_test_harness tsync_chunk tsync_local_io lwt lwt.unix unix))
+ (libraries
+  tsync_test_harness
+  tsync_spill
+  tsync_chunk
+  tsync_local_io
+  lwt
+  lwt.unix
+  unix))
