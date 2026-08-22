@@ -68,6 +68,12 @@ module type S = sig
   val stats : unit -> stats
 end
 
+(* Per store by construction, whatever a target is for: a folder index records
+   the versions the store that built it reported, so a copy of one matches
+   nothing on the store it lands on and is only bytes. Each store builds its own
+   the first time a walk reads the folder. *)
+let never_carried key = Folder.is_index_key key
+
 (* Past this, a chunk PUT is dropped rather than held in memory: the manifest job
    fetches it later. *)
 let max_chunks_in_flight = 32
@@ -247,7 +253,9 @@ let make ?(resume = false) ?chunk_from_prefix ~name ~backend ~source
     (* Nothing reads the journal or cursor from a target reads never reach, so
        carrying them would be dead weight. {!Readable} says otherwise. *)
     let skip key =
-      String.starts_with ~prefix:journal_prefix key || key = cursor_key
+      never_carried key
+      || String.starts_with ~prefix:journal_prefix key
+      || key = cursor_key
 
     let stats () =
       let s = Q.stats queue in
@@ -271,5 +279,5 @@ module Readable (D : S) : S = struct
   include D
 
   let readable = Some D.backend
-  let skip _ = false
+  let skip = never_carried
 end

@@ -1,0 +1,15 @@
+
+=== a batch survives the round trip
+keys, order and bodies come back: ok
+an empty body is not an absent one: ok
+
+=== a mangled answer is refused, not misread
+a truncated body: ok
+fewer entries than keys: ok
+more entries than keys: ok
+a length prefix cut in half: ok
+
+=== a body larger than one socket read
+comes back byte for byte: ok
+
+7 check(s), 0 failure(s)

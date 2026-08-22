@@ -177,7 +177,13 @@
   (deps absent_probe.exe))
  (rule
   (alias runtest)
-  (action (run ./absent_probe.exe))))
+  (target absent_probe.output)
+  (action
+   (with-stdout-to absent_probe.output (ignore-stderr (run ./absent_probe.exe)))))
+ (rule
+  (alias runtest)
+  (action
+   (diff absent_probe.expected absent_probe.output))))
 
 (subdir content/cache_cap
  (alias
@@ -645,7 +651,13 @@
   (deps batched_test.exe))
  (rule
   (alias runtest)
-  (action (run ./batched_test.exe))))
+  (target batched_test.output)
+  (action
+   (with-stdout-to batched_test.output (ignore-stderr (run ./batched_test.exe)))))
+ (rule
+  (alias runtest)
+  (action
+   (diff batched_test.expected batched_test.output))))
 
 (subdir unit/bounded
  (alias
@@ -738,6 +750,20 @@
   (alias runtest)
   (action
    (diff folder_ids_test.expected folder_ids_test.output))))
+
+(subdir unit/folder_index
+ (alias
+  (name default)
+  (deps folder_index_test.exe))
+ (rule
+  (alias runtest)
+  (target folder_index_test.output)
+  (action
+   (with-stdout-to folder_index_test.output (ignore-stderr (run ./folder_index_test.exe)))))
+ (rule
+  (alias runtest)
+  (action
+   (diff folder_index_test.expected folder_index_test.output))))
 
 (subdir unit/gc_job
  (alias
@@ -1085,7 +1111,13 @@
   (deps tree_children_test.exe))
  (rule
   (alias runtest)
-  (action (run ./tree_children_test.exe))))
+  (target tree_children_test.output)
+  (action
+   (with-stdout-to tree_children_test.output (ignore-stderr (run ./tree_children_test.exe)))))
+ (rule
+  (alias runtest)
+  (action
+   (diff tree_children_test.expected tree_children_test.output))))
 
 (subdir unit/upload_fanout
  (alias
@@ -1121,7 +1153,13 @@
   (deps wire_bodies_test.exe))
  (rule
   (alias runtest)
-  (action (run ./wire_bodies_test.exe))))
+  (target wire_bodies_test.output)
+  (action
+   (with-stdout-to wire_bodies_test.output (ignore-stderr (run ./wire_bodies_test.exe)))))
+ (rule
+  (alias runtest)
+  (action
+   (diff wire_bodies_test.expected wire_bodies_test.output))))
 
 (subdir unit/zip
  (alias

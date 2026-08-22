@@ -1,0 +1,30 @@
+a folder with no index yet
+  children read back: 3
+  index reads:        0
+  child reads:        3
+  index writes:       1
+
+the same folder, now indexed
+  children read back: 3
+  index reads:        1
+  child reads:        0
+  index writes:       0
+
+after one child is rewritten
+  children read back: 3
+  index reads:        1
+  child reads:        1
+  index writes:       1
+
+a folder read by someone who may not write
+  children read back: 2
+  index reads:        0
+  child reads:        2
+  index writes:       0
+
+and so still has no index the next time
+  children read back: 2
+  index reads:        0
+  child reads:        2
+  index writes:       0
+

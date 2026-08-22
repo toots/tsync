@@ -33,7 +33,68 @@ module Make (C : Conf.S) = struct
             | m -> Ok (File m)
             | exception exn -> Error exn)
 
-  let children ?(on_unusable = `Fail) ?slots ~folder_id () =
+  (* The index is listed with the children it describes, so having it costs no
+     round trip to discover. An unreadable one is one we do not have. *)
+  let read_index ~slots listed =
+    if not (List.exists (fun (e : Backend.file_entry) ->
+                Folder.is_index_key e.Backend.key) listed)
+    then Lwt.return Folder_index.empty
+    else
+      Lwt.catch
+        (fun () ->
+          let indexed =
+            List.filter
+              (fun (e : Backend.file_entry) ->
+                Folder.is_index_key e.Backend.key)
+              listed
+          in
+          let+ answered = St.get_objects ~slots ~entries:indexed () in
+          match answered with
+            | [(_, Some body)] -> Folder_index.of_chunk (Chunk.of_string body)
+            | _ -> Folder_index.empty)
+        (fun _ -> Lwt.return Folder_index.empty)
+
+  (* Held against the version the listing reports now, so an entry the index
+     covers is one the store still has the same body for. *)
+  let cached index (e : Backend.file_entry) =
+    match e.Backend.etag with
+      | None -> None
+      | Some etag -> Folder_index.find index ~key:e.Backend.key ~etag
+
+  (* Written by whoever has just read the whole folder anyway, and only when
+     enough of it was not covered to pay for the round trip. Best effort: a
+     read must not fail because its cache could not be refreshed, and a caller
+     serving a read-only domain simply never asks. *)
+  let write_index ~folder_id ~index ~entries ~body_of =
+    let indexable =
+      List.filter
+        (fun (e : Backend.file_entry) -> e.Backend.etag <> None)
+        entries
+    in
+    let covered =
+      List.length (List.filter (fun e -> cached index e <> None) indexable)
+    in
+    if
+      not
+        (Folder_index.worth_writing ~covered ~total:(List.length indexable))
+    then Lwt.return_unit
+    else
+      let bodies =
+        List.filter_map
+          (fun e -> Option.map (fun b -> (e, Chunk.of_string b)) (body_of e))
+          indexable
+      in
+      Lwt.catch
+        (fun () ->
+          St.put_raw
+            ~bkey:(C.domain_prefix ^ Folder.index_key ~folder_id)
+            ~data:(Chunk.to_string (Folder_index.of_bodies bodies)))
+        (fun exn ->
+          Log.warn "folder index %s: %s" folder_id (Printexc.to_string exn);
+          Lwt.return_unit)
+
+  let children ?(on_unusable = `Fail) ?(refresh_index = false) ?slots ~folder_id
+      () =
     let slots =
       match slots with Some s -> s | None -> Lazy.force default_slots
     in
@@ -43,7 +104,9 @@ module Make (C : Conf.S) = struct
        outright. It is not a child on either. *)
     let entries =
       List.filter
-        (fun (e : Backend.file_entry) -> not (Key.is_dir e.Backend.key))
+        (fun (e : Backend.file_entry) ->
+          (not (Key.is_dir e.Backend.key))
+          && not (Folder.is_index_key e.Backend.key))
         listed
     in
     (* A key listed and then gone: the listing and the reads that follow it are
@@ -53,13 +116,28 @@ module Make (C : Conf.S) = struct
       Backend.failed ~kind:Backend.Permanent ~op:"get" ("not found: " ^ bkey)
     in
     let in_one_batch () =
-      let+ answered = St.get_objects ~slots ~entries () in
+      let* index = read_index ~slots listed in
+      let wanted = List.filter (fun e -> cached index e = None) entries in
+      let* answered = St.get_objects ~slots ~entries:wanted () in
+      let fetched = Hashtbl.create (List.length answered) in
+      List.iter (fun (bkey, data) -> Hashtbl.replace fetched bkey data) answered;
+      let body_of (e : Backend.file_entry) =
+        match cached index e with
+          | Some body -> Some (Chunk.to_string body)
+          | None -> (
+              match Hashtbl.find_opt fetched e.Backend.key with
+                | Some data -> data
+                | None -> None)
+      in
+      let+ () = if refresh_index then write_index ~folder_id ~index ~entries ~body_of
+        else Lwt.return_unit in
       List.map
-        (fun (bkey, data) ->
-          match data with
+        (fun (e : Backend.file_entry) ->
+          let bkey = e.Backend.key in
+          match body_of e with
             | Some data -> (bkey, Ok data)
             | None -> (bkey, Error (vanished bkey)))
-        answered
+        entries
     in
     (* A batch is all or nothing, so one object that cannot be read would cost
        every sibling it was asked for alongside. Only a caller that wanted the
@@ -113,9 +191,11 @@ module Make (C : Conf.S) = struct
   (* [f acc rel entry] sees each entry with the real relative path of the folder
      holding it. A folder is visited before it is descended into, so a caller
      collecting keys gets the marker too. *)
-  let fold_tree ?on_unusable ?slots ~folder_id ~rel f acc =
+  let fold_tree ?on_unusable ?refresh_index ?slots ~folder_id ~rel f acc =
     let rec walk folder_id rel acc =
-      let* entries = children ?on_unusable ?slots ~folder_id () in
+      let* entries =
+        children ?on_unusable ?refresh_index ?slots ~folder_id ()
+      in
       Lwt_list.fold_left_s
         (fun acc entry ->
           let* acc = f acc rel entry in
