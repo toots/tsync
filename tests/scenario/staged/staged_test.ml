@@ -25,6 +25,7 @@ module C =
 
 module R = Remote.Make (C)
 module Mf = Checkout.Make (C)
+module Mfs = Staged_manifest.Make (C)
 module D = Data.Make (C) (R)
 
 let key = C.domain_prefix ^ "file.txt"
@@ -46,7 +47,7 @@ let read_all () =
   let* resolved = Mf.resolve key in
   let size =
     match resolved with
-      | Some (`Staged (st, _)) -> Int64.to_int st.Checkout.s_size
+      | Some (`Staged (st, _)) -> Int64.to_int st.Staged_manifest.s_size
       | Some (`Published m) -> Int64.to_int (Manifest.size m)
       | None -> 0
   in
@@ -60,18 +61,18 @@ let show label =
   let* resolved = Mf.resolve key in
   let state =
     match resolved with
-      | Some (`Staged (({ Checkout.s_whole = Some _; _ } as st), _)) ->
-          Printf.sprintf "staged size=%2Ld whole" st.Checkout.s_size
+      | Some (`Staged (({ Staged_manifest.s_whole = Some _; _ } as st), _)) ->
+          Printf.sprintf "staged size=%2Ld whole" st.Staged_manifest.s_size
       | Some (`Staged (st, _)) ->
-          Printf.sprintf "staged size=%2Ld slots=[%s]" st.Checkout.s_size
+          Printf.sprintf "staged size=%2Ld slots=[%s]" st.Staged_manifest.s_size
             (String.concat ""
                (Array.to_list
                   (Array.map
                      (function
-                       | Checkout.Staged _ -> "S"
-                       | Checkout.Inherit -> "I"
-                       | Checkout.Zero -> "Z")
-                     st.Checkout.s_slots)))
+                       | Staged_manifest.Staged _ -> "S"
+                       | Staged_manifest.Inherit -> "I"
+                       | Staged_manifest.Zero -> "Z")
+                     st.Staged_manifest.s_slots)))
       | Some (`Published m) ->
           Printf.sprintf "published size=%2Ld chunks=%d" (Manifest.size m)
             (Chunk_table.count m)
@@ -110,6 +111,7 @@ end
 
 module GR = Remote.Make (CG)
 module Gm = Checkout.Make (CG)
+module Gms = Staged_manifest.Make (CG)
 module GD = Data.Make (CG) (GR)
 
 let gkey = CG.domain_prefix ^ "file.txt"
@@ -147,15 +149,15 @@ let gshow label =
   let state =
     match resolved with
       | Some (`Staged (st, _)) ->
-          Printf.sprintf "staged size=%2Ld slots=[%s]" st.Checkout.s_size
+          Printf.sprintf "staged size=%2Ld slots=[%s]" st.Staged_manifest.s_size
             (String.concat ""
                (Array.to_list
                   (Array.map
                      (function
-                       | Checkout.Staged _ -> "S"
-                       | Checkout.Inherit -> "I"
-                       | Checkout.Zero -> "Z")
-                     st.Checkout.s_slots)))
+                       | Staged_manifest.Staged _ -> "S"
+                       | Staged_manifest.Inherit -> "I"
+                       | Staged_manifest.Zero -> "Z")
+                     st.Staged_manifest.s_slots)))
       | Some (`Published m) ->
           Printf.sprintf "published size=%2Ld chunks=%d" (Manifest.size m)
             (Chunk_table.count m)
@@ -163,7 +165,7 @@ let gshow label =
   in
   let size =
     match resolved with
-      | Some (`Staged (st, _)) -> Int64.to_int st.Checkout.s_size
+      | Some (`Staged (st, _)) -> Int64.to_int st.Staged_manifest.s_size
       | Some (`Published m) -> Int64.to_int (Manifest.size m)
       | None -> 0
   in
@@ -238,13 +240,13 @@ let () =
         without re-uploading: stage an edit, sync it, then put the staged
         manifest back with its published record and sync again. *)
      let* () = write_at 8 "01234567" in
-     let* staged_before = Mf.read_staged key in
+     let* staged_before = Mfs.read key in
      let* () = D.sync key () in
      let* published = Mf.read key in
      let* () =
        match (staged_before, published) with
          | Some st, Some m ->
-             Mf.write_staged key { st with Checkout.s_published = Some m }
+             Mfs.write key { st with Staged_manifest.s_published = Some m }
          | _ -> Lwt.return_unit
      in
      let uploaded_before = Metrics.uploaded () in
@@ -258,11 +260,11 @@ let () =
         landed, so the upload runs again. Every chunk hashes as before, so the
         HEADs skip and no bytes go out twice. *)
      let* () = write_at 16 "89ABCDEF" in
-     let* staged_before = Mf.read_staged key in
+     let* staged_before = Mfs.read key in
      let* () = D.sync key () in
      let* () =
        match staged_before with
-         | Some st -> Mf.write_staged key st
+         | Some st -> Mfs.write key st
          | None -> Lwt.return_unit
      in
      let uploaded_before = Metrics.uploaded () in
@@ -276,13 +278,13 @@ let () =
         was written for, so the record cannot stand: promoting it would publish
         a manifest describing what the file held before the write. *)
      let* () = write_at 0 "ZZZZZZZZ" in
-     let* staged_before = Mf.read_staged key in
+     let* staged_before = Mfs.read key in
      let* () = D.sync key () in
      let* published = Mf.read key in
      let* () =
        match (staged_before, published) with
          | Some st, Some m ->
-             Mf.write_staged key { st with Checkout.s_published = Some m }
+             Mfs.write key { st with Staged_manifest.s_published = Some m }
          | _ -> Lwt.return_unit
      in
      let* () = write_at 0 "YYYYYYYY" in

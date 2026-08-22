@@ -60,6 +60,9 @@ val atomic_write_at :
 (** [copy_file ~src ~dst] copies [src] over [dst], creating or truncating it. *)
 val copy_file : src:string -> dst:string -> unit Lwt.t
 
+(** The whole file as a string, [None] if it cannot be read. *)
+val read_file_opt : string -> string option Lwt.t
+
 (** Directory entries of [path], excluding ["."] and [".."]. *)
 val readdir_list : string -> string list Lwt.t
 

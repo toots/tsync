@@ -2,6 +2,8 @@
  (flags
   (:standard
    -open
+   Tsync_staged
+   -open
    Tsync_checkout
    -open
    Tsync_manifest
@@ -34,6 +36,7 @@
  (name tsync_ipc_handler)
  (public_name tsync-libs.ipc_handler)
  (libraries
+  tsync_staged
   tsync_checkout
   tsync_manifest
   tsync_journal

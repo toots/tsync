@@ -1,6 +1,6 @@
 open Lwt.Syntax
 
-let marker_name = ".tsync-dir"
+let marker_name = Name_escape.folder_marker
 
 let dir_of ~cache_root ~domain_name rel =
   let base = Cache_layout.manifests_dir ~cache_root domain_name in
@@ -114,8 +114,7 @@ let rebuild ~cache_root ~domain_name =
     let* names = Fs_util.readdir_list dir in
     Lwt_list.iter_s
       (fun name ->
-        if name = marker_name || name = Name_escape.dir_marker then
-          Lwt.return_unit
+        if Name_escape.is_internal name then Lwt.return_unit
         else (
           let path = Filename.concat dir name in
           let* is_dir = Fs_util.is_directory path in

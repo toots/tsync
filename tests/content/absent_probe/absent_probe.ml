@@ -39,6 +39,7 @@ module C =
 module R = Remote.Make (C)
 module D = Data.Make (C) (R)
 module Mf = Checkout.Make (C)
+module Mfs = Staged_manifest.Make (C)
 module Fs = File_store.Make (C)
 module J = Journal.Make (C)
 

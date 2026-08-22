@@ -2,6 +2,8 @@
  (flags
   (:standard
    -open
+   Tsync_staged
+   -open
    Tsync_checkout
    -open
    Tsync_journal
@@ -25,6 +27,7 @@
    Tsync_local_backend))
  (name absent_probe)
  (libraries
+  tsync_staged
   tsync_checkout
   tsync_journal
   tsync_chunks

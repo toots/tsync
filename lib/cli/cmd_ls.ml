@@ -57,6 +57,7 @@ let cmd : unit Cmd.t =
                dp ^ rel
        in
        let module Mf = Checkout.Make (C) in
+       let module Mfs = Staged_manifest.Make (C) in
        let module B = (val C.store : Backend.S) in
        let* files, subdirs = Mf.list_children ~prefix () in
        let file_name (e : Backend.file_entry) =

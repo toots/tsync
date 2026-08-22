@@ -30,6 +30,7 @@ module C =
       : Conf.S)
 
 module Mf = Checkout.Make (C)
+module Mfs = Staged_manifest.Make (C)
 
 let key rel = C.domain_prefix ^ rel
 
@@ -49,7 +50,7 @@ let published ~name =
     ~mtime:fixed_mtime
 
 let staged ~name =
-  Checkout.
+  Staged_manifest.
     {
       s_name = name;
       s_size = 4L;
@@ -92,11 +93,9 @@ let () =
      let* () = resolves "a.tmp" in
 
      case "a staged file, renamed before its upload lands";
-     let* () = Mf.write_staged (key "b.tmp") (staged ~name:"b.tmp") in
+     let* () = Mfs.write (key "b.tmp") (staged ~name:"b.tmp") in
      let* () = listing () in
-     let* () =
-       Mf.rename_staged ~src_key:(key "b.tmp") ~dst_key:(key "b.final")
-     in
+     let* () = Mfs.rename ~src_key:(key "b.tmp") ~dst_key:(key "b.final") in
      Printf.printf "  -- renamed b.tmp -> b.final\n";
      let+ () = listing () in
      ());

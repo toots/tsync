@@ -7,6 +7,7 @@ module Make (C : Conf.S) = struct
   module R = Remote.Make (C)
   module Tree = Inode_tree.Make (C)
   module Mf = Checkout.Make (C)
+  module Mfs = Staged_manifest.Make (C)
   module D = Data.Make (C) (R)
 
   (* Assembling through the read path covers unsynced staged edits, a partially
@@ -28,7 +29,7 @@ module Make (C : Conf.S) = struct
       | None ->
           (* A staged file has no published manifest yet, but its content is
              local and readable. *)
-          let* staged = Mf.staged_exists key in
+          let* staged = Mfs.exists key in
           if not staged then Lwt.return Missing_data
           else
             let+ () = D.assemble_to key ~dst_path in

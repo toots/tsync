@@ -5,7 +5,7 @@
     (the cache cap deletes them), so every read treats a miss as ordinary and
     fetches again. That is the whole of what this store holds: everything here
     is re-fetchable, which is what lets {!Make.enforce_cap} delete by age alone.
-    Unpublished bytes live in {!Staged}, out of its reach.
+    Unpublished bytes live in {!Staged_body}, out of its reach.
 
     Bodies are shared: two files whose chunks group identically are one file on
     disk and one download. *)

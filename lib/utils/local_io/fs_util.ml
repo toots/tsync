@@ -167,6 +167,13 @@ let copy_file ~src ~dst =
         (fun () -> Lwt_unix_retry.close dst_fd))
     (fun () -> Lwt_unix_retry.close src_fd)
 
+let read_file_opt path =
+  Lwt.catch
+    (fun () ->
+      let+ s = Lwt_unix_retry.with_file ~mode:Lwt_io.Input path Lwt_io.read in
+      Some s)
+    (fun _ -> Lwt.return_none)
+
 let readdir_list path =
   (* files_of_directory returns a stream, so the whole materialisation is wrapped:
      a signal interrupting opendir or readdir retries from the start. *)

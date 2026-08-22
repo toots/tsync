@@ -23,6 +23,7 @@ module Make_with_layout (C : Conf.S) (Sq : Sync_queue.S) (L : Layout.S) :
      the layout scheme. [Mf] is the local mirror. *)
   module St = Store.Make (C) (L)
   module Mf = Checkout.Make (C)
+  module Mfs = Staged_manifest.Make (C)
   module D = Data.Make (C) (R)
 
   let manifest_path key = Mf.path key
@@ -87,7 +88,8 @@ module Make_with_layout (C : Conf.S) (Sq : Sync_queue.S) (L : Layout.S) :
           match m with
             | Some (`Staged (st, _)) ->
                 Lwt.return_some
-                  (file_stat st.Checkout.s_size st.Checkout.s_mtime)
+                  (file_stat st.Staged_manifest.s_size
+                     st.Staged_manifest.s_mtime)
             | Some (`Published m) -> (
                 match Manifest.symlink m with
                   | Some target ->
@@ -131,7 +133,7 @@ module Make_with_layout (C : Conf.S) (Sq : Sync_queue.S) (L : Layout.S) :
   let downloads_in_flight = D.downloads_in_flight
 
   let staged_count () =
-    let+ keys = Mf.list_staged () in
+    let+ keys = Mfs.list () in
     List.length keys
 
   let downloads_completed_count = D.downloads_completed_count
@@ -168,7 +170,7 @@ module Make_with_layout (C : Conf.S) (Sq : Sync_queue.S) (L : Layout.S) :
         let name, rel = describe key in
         let size =
           match resolved with
-            | Some (`Staged (st, _)) -> Some st.Checkout.s_size
+            | Some (`Staged (st, _)) -> Some st.Staged_manifest.s_size
             | Some (`Published m) -> Some (Manifest.size m)
             | None -> None
         in
@@ -204,7 +206,7 @@ module Make_with_layout (C : Conf.S) (Sq : Sync_queue.S) (L : Layout.S) :
     D.truncate key size
 
   let rename_local ~src ~dst =
-    let* () = Mf.rename_staged ~src_key:src ~dst_key:dst in
+    let* () = Mfs.rename ~src_key:src ~dst_key:dst in
     Mf.rename ~src_key:src ~dst_key:dst
 
   let with_journal key ops s3_op =
@@ -231,7 +233,7 @@ module Make_with_layout (C : Conf.S) (Sq : Sync_queue.S) (L : Layout.S) :
     clear_local key
 
   let queue_put key =
-    let* staged = Mf.read_staged key in
+    let* staged = Mfs.read key in
     match staged with
       | None ->
           Log.debug "queue_put %s: nothing staged, skipping" key;
@@ -242,7 +244,7 @@ module Make_with_layout (C : Conf.S) (Sq : Sync_queue.S) (L : Layout.S) :
              owed. *)
           Sq.post ~entry_key:(J.entry_key ())
             {
-              Wal.ops = [`Put (rel_key key, st.Checkout.s_size)];
+              Wal.ops = [`Put (rel_key key, st.Staged_manifest.s_size)];
               state = Wal.Prepared;
               attempts = 0;
               last_error = None;
@@ -251,7 +253,7 @@ module Make_with_layout (C : Conf.S) (Sq : Sync_queue.S) (L : Layout.S) :
   (* The record already exists and already names this work; posting under its
      key is what keeps one unit of work to one key across a restart. *)
   let resume_put key ~entry_key ~record =
-    let* staged = Mf.staged_exists key in
+    let* staged = Mfs.exists key in
     if not staged then Lwt.return_false
     else
       let+ () = Sq.post ~entry_key record in
@@ -260,7 +262,7 @@ module Make_with_layout (C : Conf.S) (Sq : Sync_queue.S) (L : Layout.S) :
   let reclaim_staged_orphans = D.reclaim_staged_orphans
 
   let close key =
-    let* staged = Mf.staged_exists key in
+    let* staged = Mfs.exists key in
     if staged then queue_put key else Lwt.return_unit
 
   let delete key =
@@ -365,7 +367,7 @@ module Make_with_layout (C : Conf.S) (Sq : Sync_queue.S) (L : Layout.S) :
       else
         let+ resolved = Mf.resolve src in
         match resolved with
-          | Some (`Staged (st, _)) -> Some st.Checkout.s_size
+          | Some (`Staged (st, _)) -> Some st.Staged_manifest.s_size
           | Some (`Published m) -> Some (Manifest.size m)
           | None -> None
     in
@@ -378,7 +380,7 @@ module Make_with_layout (C : Conf.S) (Sq : Sync_queue.S) (L : Layout.S) :
         Some id
       else Lwt.return_none
     in
-    let* dst_staged = Mf.staged_exists dst in
+    let* dst_staged = Mfs.exists dst in
     if src_was_uploading && dst_staged then queue_put dst
     else
       let* () = if not is_dir then save_version src else Lwt.return_unit in
@@ -560,7 +562,7 @@ module Make_with_layout (C : Conf.S) (Sq : Sync_queue.S) (L : Layout.S) :
   (* A foreign op must never clobber unsynced local edits. The staged manifest
      is that flag and survives a restart. *)
   let unless_staged key f =
-    let* staged = Mf.staged_exists key in
+    let* staged = Mfs.exists key in
     if staged then Lwt.return_unit else f ()
 
   (* Failures propagate: the sync poller must not advance its high-water mark

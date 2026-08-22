@@ -30,6 +30,7 @@ module C =
       : Conf.S)
 
 module Mf = Checkout.Make (C)
+module Mfs = Staged_manifest.Make (C)
 
 let key rel = C.domain_prefix ^ rel
 
@@ -119,7 +120,7 @@ let () =
 
      case "staged, then renamed";
      let staged =
-       Checkout.
+       Staged_manifest.
          {
            s_name = "whatever";
            s_size = 0L;
@@ -130,14 +131,18 @@ let () =
            s_published = None;
          }
      in
-     let* () = Mf.write_staged (key "s/one.txt") staged in
-     let* st = Mf.read_staged (key "s/one.txt") in
+     let* () = Mfs.write (key "s/one.txt") staged in
+     let* st = Mfs.read (key "s/one.txt") in
      step "s/one.txt staged name=%S"
-       (match st with Some st -> st.Checkout.s_name | None -> "<absent>");
+       (match st with
+         | Some st -> st.Staged_manifest.s_name
+         | None -> "<absent>");
      let* () =
-       Mf.rename_staged ~src_key:(key "s/one.txt") ~dst_key:(key "s/two.txt")
+       Mfs.rename ~src_key:(key "s/one.txt") ~dst_key:(key "s/two.txt")
      in
-     let+ st = Mf.read_staged (key "s/two.txt") in
+     let+ st = Mfs.read (key "s/two.txt") in
      step "s/two.txt staged name=%S"
-       (match st with Some st -> st.Checkout.s_name | None -> "<absent>"));
+       (match st with
+         | Some st -> st.Staged_manifest.s_name
+         | None -> "<absent>"));
   Lwt_main.run (Fs_util.rm_rf root)

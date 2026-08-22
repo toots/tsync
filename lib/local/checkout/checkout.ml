@@ -1,140 +1,5 @@
 open Manifest
 
-(* [s_size] is authoritative rather than derived from a file length, so a
-   truncate either way is a metadata write plus at most one boundary fixup.
-
-   A staged manifest on disk means an upload is owed; once [s_published] is set
-   it is instead the commit record of a promotion to replay. *)
-
-(** Where a chunk's bytes are within [staged/chunks/<uuid>]. One body holds
-    every staged member of a cache group, so the offset is what separates them
-    and is carried rather than derived: it is fixed when the bytes are written,
-    while the group size it would be derived from is configuration and can
-    change between runs. *)
-type body = { uuid : string; offset : int }
-
-type slot =
-  | Staged of body
-  | Inherit  (** the published manifest's entry at this index *)
-  | Zero  (** never written; reads as zeros *)
-
-type staged = {
-  s_name : string;
-  s_size : int64;
-  s_mtime : float;
-  s_chunk_size : int;
-  s_slots : slot array;
-  s_whole : string option;
-      (** A whole file handed over by a frontend: its bytes are one file rather
-          than per-chunk bodies, [s_slots] is empty, and the upload needs no
-          chunking pass. *)
-  s_published : t option;
-}
-
-(* Bytes chunk [i] holds in a file of [size] at [chunk_size]. *)
-let new_uuid = Id.short
-
-let slot_to_json = function
-  (* The offset is omitted when zero, which is every slot of an ungrouped file
-     and every first member of a group. *)
-  | Staged { uuid; offset } ->
-      `Assoc
-        (("u", `String uuid)
-        :: (if offset = 0 then [] else [("o", `Int offset)]))
-  | Inherit -> `Assoc []
-  | Zero -> `Assoc [("z", `Bool true)]
-
-let slot_of_json j =
-  let open Yojson.Basic.Util in
-  match j |> member "u" with
-    | `String uuid ->
-        let offset = match j |> member "o" with `Int o -> o | _ -> 0 in
-        Staged { uuid; offset }
-    | _ -> ( match j |> member "z" with `Bool true -> Zero | _ -> Inherit)
-
-let slot_body = function Staged b -> Some b | Inherit | Zero -> None
-
-(* Deduplicated, since a group's members share one. *)
-let body_uuids slots =
-  Array.fold_left
-    (fun acc slot ->
-      match slot_body slot with
-        | Some { uuid; _ } when not (List.mem uuid acc) -> uuid :: acc
-        | _ -> acc)
-    [] slots
-  |> List.sort compare
-
-(* Read as well as written, so a sidecar from a newer build is set aside rather
-   than decoded into something it does not mean. *)
-let staged_version = 2
-
-let staged_of_version json =
-  let open Yojson.Basic.Util in
-  match json |> member "v" with
-    | `Int v when v > staged_version ->
-        failwith (Printf.sprintf "staged manifest version %d" v)
-    | _ -> ()
-
-let staged_to_string (st : staged) =
-  Yojson.Basic.to_string
-    (`Assoc
-       ([
-          ("v", `Int staged_version);
-          ("name", `String st.s_name);
-          ("size", `Int (Int64.to_int st.s_size));
-          ("mtime", `Float st.s_mtime);
-          ("chunkSize", `Int st.s_chunk_size);
-        ]
-       @ (match st.s_whole with
-         | Some uuid -> [("whole", `String uuid)]
-         | None ->
-             [
-               ( "slots",
-                 `List (Array.to_list (Array.map slot_to_json st.s_slots)) );
-             ])
-       @
-         match st.s_published with
-         | None -> []
-         (* The published body is binary; base64 keeps it inside this JSON rather
-            than in a second file that would have to move atomically with it. *)
-         | Some m ->
-             [
-               ( "published",
-                 (* Same file, so the same name: this is the published body of
-                    the very record carrying it. *)
-                 `String (Base64.encode_string (to_string ~name:st.s_name m)) );
-             ]))
-
-let staged_of_string body =
-  let open Yojson.Basic.Util in
-  let json = Yojson.Basic.from_string body in
-  staged_of_version json;
-  let published =
-    match json |> member "published" with
-      | `String b64 -> (
-          match of_string (Base64.decode_exn b64) with
-            | m -> Some m
-            | exception _ -> None)
-      | _ -> None
-  in
-  let whole =
-    match json |> member "whole" with `String u -> Some u | _ -> None
-  in
-  {
-    s_name = json |> member "name" |> to_string;
-    s_size = json |> member "size" |> to_int |> Int64.of_int;
-    s_mtime = json |> member "mtime" |> to_float;
-    s_chunk_size =
-      (try json |> member "chunkSize" |> to_int
-       with _ -> Conf.default_chunk_size);
-    s_slots =
-      (match json |> member "slots" with
-        | `List l -> Array.of_list (List.map slot_of_json l)
-        | _ -> [||]);
-    s_whole = whole;
-    s_published = published;
-  }
-
 (* The tree mirrors real paths: directories are real directories, and a name the
    filesystem cannot hold verbatim becomes an escaped handle plus a marker file
    carrying the real one. *)
@@ -149,11 +14,6 @@ let sidecar_path ~cache_root ~domain_name ~domain_prefix key =
     (dir ~cache_root domain_name)
     (Name_escape.encode_key (Key.strip_prefix ~domain_prefix key))
 
-let staged_sidecar_path ~cache_root ~domain_name ~domain_prefix key =
-  Filename.concat
-    (Cache_layout.staged_manifests_dir ~cache_root domain_name)
-    (Name_escape.encode_key (Key.strip_prefix ~domain_prefix key))
-
 (* Synchronous, for the CLI listing (plain non-Lwt code).
 
    ponytail: a bool, so a partly cached file reads as remote. Return the chunk
@@ -162,7 +22,7 @@ let is_local
     ({ Conf.cache_root; domain_name; domain_prefix; cache_chunk_size } :
       Conf.locality) key =
   Sys.file_exists
-    (staged_sidecar_path ~cache_root ~domain_name ~domain_prefix key)
+    (Staged_manifest.sidecar_path ~cache_root ~domain_name ~domain_prefix key)
   ||
     match
       of_file (sidecar_path ~cache_root ~domain_name ~domain_prefix key)
@@ -179,21 +39,6 @@ let is_local
                   ~cache_chunk_size))
     | exception _ -> false
 
-(* Records an escaped directory's real name so readdir can recover it. *)
-let write_marker path name =
-  let* exists = Lwt_unix_retry.file_exists path in
-  if exists then Lwt.return_unit else Fs_util.atomic_write path name
-
-let read_marker path =
-  Lwt.catch
-    (fun () -> Lwt_unix_retry.with_file ~mode:Lwt_io.Input path Lwt_io.read)
-    (fun _ -> Lwt.return "")
-
-let real_dir_name dir_path name =
-  if Name_escape.is_escaped name then
-    read_marker (Filename.concat dir_path Name_escape.dir_marker)
-  else Lwt.return name
-
 (* A name marker goes inside each escaped component. *)
 let ensure_dirs root rel =
   let components =
@@ -208,25 +53,14 @@ let ensure_dirs root rel =
         let* () = Fs_util.mkdir_p dir in
         let* () =
           if Name_escape.is_escaped enc then
-            write_marker (Filename.concat dir Name_escape.dir_marker) c
+            Name_escape.write_marker
+              (Filename.concat dir Name_escape.dir_marker)
+              c
           else Lwt.return_unit
         in
         go dir rest
   in
   go root components
-
-(* Entries the mirror keeps for itself. *)
-let is_internal name =
-  Fs_util.is_temp_name name
-  || name = Name_escape.dir_marker
-  || name = Folder_ids.marker_name
-
-let read_body path =
-  Lwt.catch
-    (fun () ->
-      let+ s = Lwt_unix_retry.with_file ~mode:Lwt_io.Input path Lwt_io.read in
-      Some s)
-    (fun _ -> Lwt.return_none)
 
 (* Mapped, not read: a listing wants name, size and mtime, and never touches the
    chunk keys. *)
@@ -243,12 +77,12 @@ let fold_files ~start ~rel f acc =
     let* names = Fs_util.readdir_list dir in
     Lwt_list.fold_left_s
       (fun acc name ->
-        if is_internal name then Lwt.return acc
+        if Name_escape.is_internal name then Lwt.return acc
         else (
           let path = Filename.concat dir name in
           let* is_dir = Fs_util.is_directory path in
           if is_dir then
-            let* real = real_dir_name path name in
+            let* real = Name_escape.real_dir_name path name in
             walk path (Key.join rel real) acc
           else
             let+ m = read_clean path in
@@ -276,6 +110,8 @@ let rec clean_tmp dir =
 
 (* The store, per domain: manifests keyed by logical key and nothing else. *)
 module Make (C : Conf.S) = struct
+  module Sm = Staged_manifest.Make (C)
+
   let root () = dir ~cache_root:C.cache_root C.domain_name
 
   let path key =
@@ -391,141 +227,6 @@ module Make (C : Conf.S) = struct
   let create_dir key = ensure_dirs (root ()) (rel_of key)
   let delete_dir key = Fs_util.rm_rf (path key)
 
-  (* The staged tree is keyed like the mirror, so a staged manifest and its
-     published sidecar sit at matching paths. *)
-
-  let staged_root () =
-    Cache_layout.staged_manifests_dir ~cache_root:C.cache_root C.domain_name
-
-  let staged_path key =
-    Filename.concat (staged_root ()) (Name_escape.encode_key (rel_of key))
-
-  let staged_exists key = Lwt_unix_retry.file_exists (staged_path key)
-
-  let read_staged key =
-    let p = staged_path key in
-    let* body = read_body p in
-    match body with
-      | None -> Lwt.return_none
-      | Some body -> (
-          match staged_of_string body with
-            | st -> Lwt.return_some st
-            | exception exn ->
-                (* Unsynced user data: set aside rather than dropped, so the next
-                   start does not trip over it again. *)
-                Log.err "staged manifest %s unreadable (%s); moving aside" key
-                  (Printexc.to_string exn);
-                let* () =
-                  Lwt.catch
-                    (fun () -> Lwt_unix_retry.rename p (p ^ ".bad"))
-                    (fun _ -> Lwt.return_unit)
-                in
-                Lwt.return_none)
-
-  (* Stamped from the key, as {!write} is: this name is what a listing shows
-     before an upload lands. *)
-  let write_staged key (st : staged) =
-    let p = staged_path key in
-    let* () = Fs_util.ensure_parent p in
-    Fs_util.atomic_write p
-      (staged_to_string
-         { st with s_name = Key.leaf ~domain_prefix:C.domain_prefix key })
-
-  let delete_staged key = Fs_util.unlink_quiet (staged_path key)
-
-  let rename_staged ~src_key ~dst_key =
-    let src = staged_path src_key in
-    let* exists = Lwt_unix_retry.file_exists src in
-    if not exists then Lwt.return_unit
-    else (
-      let dst = staged_path dst_key in
-      let* () = Fs_util.ensure_parent dst in
-      let* () = Lwt_unix_retry.rename src dst in
-      let* body = read_body dst in
-      match body with
-        | None -> Lwt.return_unit
-        | Some body -> (
-            match staged_of_string body with
-              | st -> write_staged dst_key st
-              | exception _ -> Lwt.return_unit))
-
-  (* Walks on-disk names: a staged manifest records its leaf name, but tree
-     position is what identifies the file. *)
-  let fold_staged ~rel_dir ~deep f acc =
-    let start =
-      if rel_dir = "" then staged_root ()
-      else Filename.concat (staged_root ()) (Name_escape.encode_key rel_dir)
-    in
-    let rec walk dir rel acc =
-      let* names = Fs_util.readdir_list dir in
-      Lwt_list.fold_left_s
-        (fun acc name ->
-          if is_internal name || Filename.check_suffix name ".bad" then
-            Lwt.return acc
-          else (
-            let path = Filename.concat dir name in
-            let* is_dir = Fs_util.is_directory path in
-            if is_dir then
-              if not deep then Lwt.return acc
-              else
-                let* real = real_dir_name path name in
-                walk path (Key.join rel real) acc
-            else
-              let+ body = read_body path in
-              match body with
-                | Some body -> (
-                    match staged_of_string body with
-                      | st ->
-                          let leaf =
-                            if Name_escape.is_escaped name then st.s_name
-                            else name
-                          in
-                          f acc rel leaf st
-                      | exception _ -> acc)
-                | None -> acc))
-        acc names
-    in
-    let* ok = Fs_util.is_directory start in
-    if ok then walk start rel_dir acc else Lwt.return acc
-
-  (* Logical keys owing an upload. *)
-  let list_staged () =
-    fold_staged ~rel_dir:"" ~deep:true
-      (fun acc rel leaf (_ : staged) ->
-        (C.domain_prefix ^ Key.join rel leaf) :: acc)
-      []
-
-  (* Every staged body reachable from a manifest: what a sweep of the body trees
-     must keep. *)
-  let staged_uuids () =
-    fold_staged ~rel_dir:"" ~deep:true
-      (fun acc _ _ st ->
-        let acc =
-          match st.s_whole with Some uuid -> uuid :: acc | None -> acc
-        in
-        List.rev_append (body_uuids st.s_slots) acc)
-      []
-
-  (* Cutoff 0 deletes no file, only prunes what is left empty. *)
-  let prune_staged_dirs () =
-    let+ (_ : bool) = Fs_util.reap_older_than ~cutoff:0. (staged_root ()) in
-    ()
-
-  (* A locally created file has no published sidecar, so the mirror alone would
-     not list it; for one that does, the staged size and mtime are current. *)
-  let staged_entries ~rel_dir ~deep =
-    fold_staged ~rel_dir ~deep
-      (fun acc rel leaf st ->
-        Backend.
-          {
-            key = C.domain_prefix ^ Key.join rel leaf;
-            size = Int64.to_int st.s_size;
-            last_modified = st.s_mtime;
-            etag = None;
-          }
-        :: acc)
-      []
-
   (* Staged entries win for the same key.
      ponytail: quadratic in (staged × published); staged files are the handful
      currently being written, so make it a table only if that stops being true. *)
@@ -554,7 +255,7 @@ module Make (C : Conf.S) = struct
 
   let list_children ~prefix () =
     let rel, dir = dir_of_prefix prefix in
-    let* staged = staged_entries ~rel_dir:rel ~deep:false in
+    let* staged = Sm.entries ~rel_dir:rel ~deep:false in
     let child_base =
       if rel = "" then C.domain_prefix else C.domain_prefix ^ rel ^ "/"
     in
@@ -562,12 +263,12 @@ module Make (C : Conf.S) = struct
     let+ files, dirs =
       Lwt_list.fold_left_s
         (fun (files, dirs) name ->
-          if is_internal name then Lwt.return (files, dirs)
+          if Name_escape.is_internal name then Lwt.return (files, dirs)
           else (
             let path = Filename.concat dir name in
             let* is_dir = Fs_util.is_directory path in
             if is_dir then
-              let+ real = real_dir_name path name in
+              let+ real = Name_escape.real_dir_name path name in
               (files, real :: dirs)
             else
               let+ m = read_clean path in
@@ -603,7 +304,7 @@ module Make (C : Conf.S) = struct
           :: acc)
         []
     in
-    let+ staged = staged_entries ~rel_dir:rel ~deep:true in
+    let+ staged = Sm.entries ~rel_dir:rel ~deep:true in
     merge_entries published staged
 
   (* Published or only staged, unsorted. *)
@@ -614,15 +315,16 @@ module Make (C : Conf.S) = struct
         []
     in
     let+ staged =
-      fold_staged ~rel_dir:"" ~deep:true
-        (fun acc rel leaf (_ : staged) -> Key.join rel leaf :: acc)
+      Sm.fold ~rel_dir:"" ~deep:true
+        (fun acc rel leaf (_ : Staged_manifest.staged) ->
+          Key.join rel leaf :: acc)
         []
     in
     List.sort_uniq compare (published @ staged)
 
   (* The single resolution point: no caller decides this itself. *)
   let resolve key =
-    let* st = read_staged key in
+    let* st = Sm.read key in
     match st with
       | Some st ->
           let+ published = read key in

@@ -92,7 +92,7 @@ module C : Conf.S = struct
 end
 
 module Cc = Chunk_cache.Make (C) (Fetch)
-module Sb = Staged.Make (C) (Cc)
+module Sb = Staged_body.Make (C) (Cc)
 
 (* Same store, seen through a capped config: the cap is the only difference. *)
 module Capped20 =

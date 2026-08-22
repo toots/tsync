@@ -6,6 +6,7 @@ module Make (C : Conf.S) (F : File_ops.S) = struct
   module J = Journal.Make (C)
   module W = Wal.Make (C)
   module Mf = Checkout.Make (C)
+  module Mfs = Staged_manifest.Make (C)
 
   let full_key rel = C.domain_prefix ^ rel
 
@@ -133,7 +134,7 @@ module Make (C : Conf.S) (F : File_ops.S) = struct
      recording the intent. Adopted under a new record, which is correct here
      precisely because no key exists for it yet. *)
   let adopt_unrecorded ~recorded =
-    let* keys = Mf.list_staged () in
+    let* keys = Mfs.list () in
     Lwt_list.iter_s
       (fun key ->
         if List.mem (F.rel_key key) recorded then Lwt.return_unit

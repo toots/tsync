@@ -41,21 +41,22 @@ module C : Conf.S = struct
 end
 
 module Mf = Checkout.Make (C)
+module Mfs = Staged_manifest.Make (C)
 
 let key = C.domain_prefix ^ "file.txt"
 
 let staged =
   {
-    Checkout.s_name = "file.txt";
+    Staged_manifest.s_name = "file.txt";
     s_size = 24L;
     s_mtime = 315532800.;
     s_chunk_size = 8;
     (* Three chunks of one 24-byte group: one body, three offsets. *)
     s_slots =
       [|
-        Checkout.Staged { uuid = "aaaa"; offset = 0 };
-        Checkout.Staged { uuid = "aaaa"; offset = 8 };
-        Checkout.Staged { uuid = "aaaa"; offset = 16 };
+        Staged_manifest.Staged { uuid = "aaaa"; offset = 0 };
+        Staged_manifest.Staged { uuid = "aaaa"; offset = 8 };
+        Staged_manifest.Staged { uuid = "aaaa"; offset = 16 };
       |];
     s_whole = None;
     s_published = None;
@@ -91,21 +92,22 @@ let patch f =
         close_out oc
 
 let show label =
-  let+ st = Mf.read_staged key in
+  let+ st = Mfs.read key in
   match st with
     | None -> Printf.printf "%s: no staged manifest\n" label
     | Some st ->
         let slot = function
-          | Checkout.Staged { uuid; offset } ->
+          | Staged_manifest.Staged { uuid; offset } ->
               Printf.sprintf "%s@%d" uuid offset
-          | Checkout.Inherit -> "inherit"
-          | Checkout.Zero -> "zero"
+          | Staged_manifest.Inherit -> "inherit"
+          | Staged_manifest.Zero -> "zero"
         in
         Printf.printf "%s: %s\n" label
           (String.concat " "
-             (Array.to_list (Array.map slot st.Checkout.s_slots)));
+             (Array.to_list (Array.map slot st.Staged_manifest.s_slots)));
         Printf.printf "%s: bodies %s\n" label
-          (String.concat "," (Checkout.body_uuids st.Checkout.s_slots))
+          (String.concat ","
+             (Staged_manifest.body_uuids st.Staged_manifest.s_slots))
 
 let replace ~sub ~by s =
   let n = String.length sub in
@@ -119,7 +121,7 @@ let replace ~sub ~by s =
 
 let main () =
   let* (_ : Unix.process_status) = Lwt_unix.system ("rm -rf " ^ root) in
-  let* () = Mf.write_staged key staged in
+  let* () = Mfs.write key staged in
   let* () = show "written and read back" in
 
   (* A sidecar from before offsets existed: no "o", and a body of its own per

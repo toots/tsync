@@ -6,6 +6,8 @@
  (flags
   (:standard
    -open
+   Tsync_staged
+   -open
    Tsync_checkout
    -open
    Tsync_journal
@@ -67,6 +69,7 @@
    Tsync_lwt_unix))
  (name tsync_cli)
  (libraries
+  tsync_staged
   tsync_checkout
   tsync_journal
   tsync_chunk_keyspace

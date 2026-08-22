@@ -50,6 +50,7 @@ end
 
 module R = Remote.Make (C)
 module Mf = Checkout.Make (C)
+module Mfs = Staged_manifest.Make (C)
 module Sh = Share_server.Make (C)
 
 let backend () = C.store

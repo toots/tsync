@@ -2,6 +2,8 @@
  (flags
   (:standard
    -open
+   Tsync_staged
+   -open
    Tsync_checkout
    -open
    Tsync_manifest
@@ -17,6 +19,7 @@
    Tsync_local_io))
  (name staged_codec_test)
  (libraries
+  tsync_staged
   tsync_checkout
   tsync_manifest
   tsync_naming

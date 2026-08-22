@@ -128,7 +128,7 @@ module Make (C : Conf.S) = struct
           | Some published ->
               let size =
                 match published with
-                  | `Staged (st, _) -> Int64.to_int st.Checkout.s_size
+                  | `Staged (st, _) -> Int64.to_int st.Staged_manifest.s_size
                   | `Published m -> Int64.to_int (Manifest.size m)
               in
               let* () = reply [("size", `Int size)] in

@@ -2,6 +2,10 @@
  (flags
   (:standard
    -open
+   Tsync_staged
+   -open
+   Tsync_chunk_cache
+   -open
    Tsync_chunks
    -open
    Tsync_content
@@ -19,6 +23,8 @@
    Tsync_test_harness))
  (name chunk_cache_test)
  (libraries
+  tsync_staged
+  tsync_chunk_cache
   tsync_chunks
   tsync_test_harness
   tsync_content

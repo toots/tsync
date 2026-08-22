@@ -1,13 +1,10 @@
-; This client's working copy of the domain: each published manifest filed under
-; the file's real path, and on top of it the staged tree of what this client has
-; changed and not published. Rebuildable from the store, apart from that staged
-; half, which is the only copy there is.
+; What this client has changed and not published: the manifest sidecars and the
+; bytes they point at. The only copy there is, so a resync leaves this tree
+; alone while it rebuilds the rest of the checkout.
 
 (library
  (flags
   (:standard
-   -open
-   Tsync_staged
    -open
    Tsync_conf
    -open
@@ -16,6 +13,8 @@
    Tsync_manifest
    -open
    Tsync_chunks
+   -open
+   Tsync_chunk_cache
    -open
    Tsync_local_io
    -open
@@ -26,18 +25,19 @@
    Tsync_bigstring
    -open
    Tsync_log))
- (name tsync_checkout)
- (public_name tsync-libs.checkout)
+ (name tsync_staged)
+ (public_name tsync-libs.staged)
  (libraries
-  tsync_staged
   tsync_conf
   tsync_naming
   tsync_manifest
   tsync_chunks
+  tsync_chunk_cache
   tsync_local_io
   tsync_lwt_unix
   tsync_backend_register
   tsync_bigstring
+  tsync_log
   yojson
   unix
   lwt

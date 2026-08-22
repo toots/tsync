@@ -2,6 +2,8 @@
  (flags
   (:standard
    -open
+   Tsync_chunk_cache
+   -open
    Tsync_chunks
    -open
    Tsync_bigstring
@@ -15,6 +17,7 @@
    Tsync_test_harness))
  (name fetch_fanout_test)
  (libraries
+  tsync_chunk_cache
   tsync_chunks
   tsync_test_harness
   tsync_bigstring

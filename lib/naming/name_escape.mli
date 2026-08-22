@@ -23,3 +23,20 @@ val encode_component : string -> string
 
 (** {!encode_component} over every component of a relative path. *)
 val encode_key : string -> string
+
+(** Name of the local-only file inside a folder holding its id. *)
+val folder_marker : string
+
+(** Whether a directory entry is bookkeeping rather than a user's file: a
+    partial write, a {!dir_marker}, or a {!folder_marker}. *)
+val is_internal : string -> bool
+
+(** Record [name] as an escaped directory's real name, unless already recorded.
+*)
+val write_marker : string -> string -> unit Lwt.t
+
+(** The real name recorded for a directory, [""] when there is none. *)
+val read_marker : string -> string Lwt.t
+
+(** [name] itself, or the real name its marker records when it is escaped. *)
+val real_dir_name : string -> string -> string Lwt.t

@@ -100,7 +100,8 @@ module type S = sig
   (** [t]'s content: staged edits if any, else what was published. *)
   val resolve :
     t ->
-    [ `Staged of Checkout.staged * Manifest.t option | `Published of Manifest.t ]
+    [ `Staged of Staged_manifest.staged * Manifest.t option
+    | `Published of Manifest.t ]
     option
     Lwt.t
 

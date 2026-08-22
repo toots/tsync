@@ -28,6 +28,7 @@ module C =
       : Conf.S)
 
 module Mf = Checkout.Make (C)
+module Mfs = Staged_manifest.Make (C)
 
 let key i = C.domain_prefix ^ Printf.sprintf "f%05d.txt" i
 

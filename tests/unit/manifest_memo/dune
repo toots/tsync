@@ -2,6 +2,8 @@
  (flags
   (:standard
    -open
+   Tsync_staged
+   -open
    Tsync_checkout
    -open
    Tsync_manifest
@@ -21,6 +23,7 @@
    Tsync_test_harness))
  (name manifest_memo_test)
  (libraries
+  tsync_staged
   tsync_checkout
   tsync_manifest
   tsync_chunks
