@@ -98,7 +98,7 @@ let stop_cmd =
     let stopped = ref 0 in
     List.iter
       (fun socket_path ->
-        match ipc_action ~socket_path "stop" with
+        match Ipc.action ~socket_path "stop" with
           | _ -> incr stopped
           | exception Unix.Unix_error ((Unix.ECONNREFUSED | Unix.ENOENT), _, _)
             ->
@@ -154,7 +154,7 @@ let pause_cmd ~verb ~arg ~done_ ~doc =
     try
       let name, socket_path = domain_target ?domain () in
       let (_ : (string * Yojson.Safe.t) list) =
-        ipc_action ~socket_path ~domain:name ~arg "pause"
+        Ipc.action ~socket_path ~domain:name ~arg "pause"
       in
       Printf.printf "Uploads %s for '%s'\n" done_ name
     with e ->
@@ -317,7 +317,7 @@ let cache_cmd =
     in
     List.iter
       (fun path ->
-        match ipc_action ~socket_path:(socket_path path) ~path verb with
+        match Ipc.action ~socket_path:(socket_path path) ~path verb with
           | _ -> Printf.printf "%s: %s\n" done_ path
           | exception Failure msg -> Printf.eprintf "Error: %s\n" msg)
       paths
@@ -499,7 +499,7 @@ let versions_cmd =
         | Some _ -> domain_socket ?domain ()
         | None -> domain_socket_for_path path
     in
-    match ipc_action ~socket_path ~path ?arg:version "revert" with
+    match Ipc.action ~socket_path ~path ?arg:version "revert" with
       | _ -> Printf.printf "Reverted: %s\n" path
       | exception Failure msg -> Printf.eprintf "Error: %s\n" msg
   in
@@ -1229,7 +1229,7 @@ let sync_cmd =
            (try
               if !verbose then Log.info "notifying daemon of completed resync";
               ignore
-                (ipc_action ~socket_path:C.socket_path ~domain:C.domain_name
+                (Ipc.action ~socket_path:C.socket_path ~domain:C.domain_name
                    "full_resync")
             with
              | Failure msg -> Printf.eprintf "Warning: full_resync: %s\n" msg
