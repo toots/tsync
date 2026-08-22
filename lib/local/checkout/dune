@@ -1,0 +1,42 @@
+; This client's working copy of the domain: each published manifest filed under
+; the file's real path, and on top of it the staged tree of what this client has
+; changed and not published. Rebuildable from the store, apart from that staged
+; half, which is the only copy there is.
+
+(library
+ (flags
+  (:standard
+   -open
+   Tsync_conf
+   -open
+   Tsync_naming
+   -open
+   Tsync_manifest
+   -open
+   Tsync_chunks
+   -open
+   Tsync_local_io
+   -open
+   Tsync_lwt_unix
+   -open
+   Tsync_backend_register
+   -open
+   Tsync_bigstring
+   -open
+   Tsync_log))
+ (name tsync_checkout)
+ (public_name tsync-libs.checkout)
+ (libraries
+  tsync_conf
+  tsync_naming
+  tsync_manifest
+  tsync_chunks
+  tsync_local_io
+  tsync_lwt_unix
+  tsync_backend_register
+  tsync_bigstring
+  yojson
+  unix
+  lwt
+  base64
+  lwt.unix))

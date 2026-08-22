@@ -2,9 +2,9 @@
  (flags
   (:standard
    -open
-   Tsync_content
+   Tsync_checkout
    -open
-   Tsync_object
+   Tsync_content
    -open
    Tsync_naming
    -open
@@ -23,8 +23,8 @@
    Tsync_metrics))
  (name share_server_test)
  (libraries
+  tsync_checkout
   tsync_content
-  tsync_object
   tsync_naming
   tsync_bigstring
   tsync_backend_register

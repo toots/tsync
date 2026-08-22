@@ -2,7 +2,7 @@
  (flags
   (:standard
    -open
-   Tsync_object
+   Tsync_journal
    -open
    Tsync_conf
    -open
@@ -15,8 +15,8 @@
    Tsync_test_harness))
  (name cursor_debounce)
  (libraries
+  tsync_journal
   tsync_test_harness
-  tsync_object
   tsync_conf
   tsync_bigstring
   tsync_backend_register

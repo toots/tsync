@@ -7,13 +7,17 @@
  (flags
   (:standard
    -open
+   Tsync_checkout
+   -open
+   Tsync_manifest
+   -open
+   Tsync_journal
+   -open
    Tsync_chunk_keyspace
    -open
    Tsync_conf
    -open
    Tsync_naming
-   -open
-   Tsync_object
    -open
    Tsync_chunks
    -open
@@ -37,10 +41,12 @@
  (name tsync_content)
  (public_name tsync-libs.content)
  (libraries
+  tsync_checkout
+  tsync_manifest
+  tsync_journal
   tsync_chunk_keyspace
   tsync_conf
   tsync_naming
-  tsync_object
   tsync_chunks
   tsync_chunk_store
   tsync_store

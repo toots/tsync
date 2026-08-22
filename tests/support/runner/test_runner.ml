@@ -359,7 +359,7 @@ type client = {
 let setup_client (module C : Conf.S) root staging_prefix =
   let module Sq = Sync_queue.Make (C) in
   let module F = File.Make (C) (Sq) in
-  let module Mf = Manifest.Make (C) in
+  let module Mf = Checkout.Make (C) in
   let module H = Ipc_handler.Make (C) (F) in
   let module Rp = Replay.Make (C) (F) in
   let module Sp = Sync_poller.Make (C) (F) in
@@ -643,15 +643,15 @@ let setup_client (module C : Conf.S) root staging_prefix =
             | Some (`Staged (st, _)) ->
                 (* S = written locally, I = still inherited from the published
                    manifest, Z = a hole from a grow (zeros, no disk). *)
-                Printf.sprintf "staged size=%Ld slots=[%s]" st.Manifest.s_size
+                Printf.sprintf "staged size=%Ld slots=[%s]" st.Checkout.s_size
                   (String.concat ""
                      (Array.to_list
                         (Array.map
                            (function
-                             | Manifest.Staged _ -> "S"
-                             | Manifest.Inherit -> "I"
-                             | Manifest.Zero -> "Z")
-                           st.Manifest.s_slots)))
+                             | Checkout.Staged _ -> "S"
+                             | Checkout.Inherit -> "I"
+                             | Checkout.Zero -> "Z")
+                           st.Checkout.s_slots)))
             | Some (`Published m) ->
                 Printf.sprintf "published size=%Ld chunks=%d" (Manifest.size m)
                   (Chunk_table.count m)

@@ -2,9 +2,9 @@
  (flags
   (:standard
    -open
-   Tsync_content
+   Tsync_checkout
    -open
-   Tsync_object
+   Tsync_content
    -open
    Tsync_naming
    -open
@@ -17,8 +17,8 @@
    Tsync_local_backend))
  (name promote_race)
  (libraries
+  tsync_checkout
   tsync_content
-  tsync_object
   tsync_naming
   tsync_conf
   tsync_backend_register

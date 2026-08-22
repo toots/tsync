@@ -2,7 +2,9 @@
  (flags
   (:standard
    -open
-   Tsync_object
+   Tsync_checkout
+   -open
+   Tsync_manifest
    -open
    Tsync_conf
    -open
@@ -20,7 +22,8 @@
  (name tsync_android_frontend)
  (public_name tsync-android)
  (libraries
-  tsync-libs.object
+  tsync_checkout
+  tsync_manifest
   tsync-libs.conf
   tsync-libs.sync
   tsync-libs.engine

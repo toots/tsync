@@ -40,22 +40,22 @@ module C : Conf.S = struct
   let read_only = false
 end
 
-module Mf = Manifest.Make (C)
+module Mf = Checkout.Make (C)
 
 let key = C.domain_prefix ^ "file.txt"
 
 let staged =
   {
-    Manifest.s_name = "file.txt";
+    Checkout.s_name = "file.txt";
     s_size = 24L;
     s_mtime = 315532800.;
     s_chunk_size = 8;
     (* Three chunks of one 24-byte group: one body, three offsets. *)
     s_slots =
       [|
-        Manifest.Staged { uuid = "aaaa"; offset = 0 };
-        Manifest.Staged { uuid = "aaaa"; offset = 8 };
-        Manifest.Staged { uuid = "aaaa"; offset = 16 };
+        Checkout.Staged { uuid = "aaaa"; offset = 0 };
+        Checkout.Staged { uuid = "aaaa"; offset = 8 };
+        Checkout.Staged { uuid = "aaaa"; offset = 16 };
       |];
     s_whole = None;
     s_published = None;
@@ -96,16 +96,16 @@ let show label =
     | None -> Printf.printf "%s: no staged manifest\n" label
     | Some st ->
         let slot = function
-          | Manifest.Staged { uuid; offset } ->
+          | Checkout.Staged { uuid; offset } ->
               Printf.sprintf "%s@%d" uuid offset
-          | Manifest.Inherit -> "inherit"
-          | Manifest.Zero -> "zero"
+          | Checkout.Inherit -> "inherit"
+          | Checkout.Zero -> "zero"
         in
         Printf.printf "%s: %s\n" label
           (String.concat " "
-             (Array.to_list (Array.map slot st.Manifest.s_slots)));
+             (Array.to_list (Array.map slot st.Checkout.s_slots)));
         Printf.printf "%s: bodies %s\n" label
-          (String.concat "," (Manifest.body_uuids st.Manifest.s_slots))
+          (String.concat "," (Checkout.body_uuids st.Checkout.s_slots))
 
 let replace ~sub ~by s =
   let n = String.length sub in

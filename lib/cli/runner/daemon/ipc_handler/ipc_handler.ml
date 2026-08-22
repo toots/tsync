@@ -202,8 +202,8 @@ module Make (C : Conf.S) (F : File_ops.S) : S = struct
                       (ok_json
                          (naming
                          @ file_fields
-                             ~size:(Int64.to_int st.Manifest.s_size)
-                             ~mtime:st.Manifest.s_mtime ~etag:""
+                             ~size:(Int64.to_int st.Checkout.s_size)
+                             ~mtime:st.Checkout.s_mtime ~etag:""
                              ~is_uploaded:false ~symlink:None))
                 | Some (`Published _) | None -> (
                     let* m = F.resolved_manifest key in
@@ -564,8 +564,8 @@ module Make (C : Conf.S) (F : File_ops.S) : S = struct
       | Some (`Staged (st, _)) ->
           ok_json
             [
-              ("size", `Int (Int64.to_int st.Manifest.s_size));
-              ("mtime", `Float st.Manifest.s_mtime);
+              ("size", `Int (Int64.to_int st.Checkout.s_size));
+              ("mtime", `Float st.Checkout.s_mtime);
             ]
       | Some (`Published m) ->
           (* Already uploaded and promoted. *)

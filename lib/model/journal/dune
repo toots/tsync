@@ -1,0 +1,18 @@
+; What one change to a domain looks like, and the name that follows it from a
+; client's own record through the published entry to the cursor a peer compares
+; against. Shared: this client writes them and reads other clients'.
+
+(library
+ (flags
+  (:standard
+   -open
+   Tsync_conf
+   -open
+   Tsync_naming
+   -open
+   Tsync_local_io
+   -open
+   Tsync_log))
+ (name tsync_journal)
+ (public_name tsync-libs.journal)
+ (libraries tsync_conf tsync_naming tsync_local_io yojson unix lwt.unix))

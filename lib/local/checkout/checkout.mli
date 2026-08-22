@@ -1,73 +1,10 @@
-(** A published file's metadata, which is the body it was decoded from: the
-    header fields are answered by reading it rather than copied out beside it,
-    so a 32 GB file's 31,230 chunk keys are never materialized to answer what
-    the file is called.
+(** This client's working copy of the domain.
 
-    No name: a name belongs to where a manifest is filed, and the body carries
-    one only because some locations cannot yield it — a backend key is
-    [<folder-id>/<hash>], an escaped cache leaf is [.tsync-esc-<hash>], and both
-    are one-way. *)
-type t = Chunk_table.t
-
-val size : t -> int64
-val chunk_size : t -> int
-val mtime : t -> float
-val h1 : t -> string
-val h2 : t -> string
-val symlink : t -> string option
-
-(** What an upload produces per chunk. Read paths go through {!Chunk_table}. *)
-type chunk_entry = { index : int; h1 : string; h2 : string; size : int }
-
-val chunk_key : chunk_entry -> string
-
-(** The reverse, for a chunk kept from a previous upload. Raises
-    [Invalid_argument] for a key that is not ["<h1>-<h2>"]. *)
-val entry_of_key : index:int -> size:int -> string -> chunk_entry
-
-(** Whole-file [h1]/[h2] as a hash over the ordered chunk digests, so a changed
-    file's manifest is rebuildable from its chunk entries alone. *)
-val digest_of_chunks : chunk_entry list -> string * string
-
-(** {!digest_of_chunks} over a body being built, which addresses its keys rather
-    than holding them: [len] answers what {!Chunks.length_of} would, so the two
-    agree on the same file. *)
-val digest_of_keys :
-  count:int -> key:(int -> string) -> len:(int -> int) -> string * string
-
-val make :
-  name:string ->
-  h1:string ->
-  h2:string ->
-  size:int64 ->
-  chunk_size:int ->
-  chunks:chunk_entry list ->
-  mtime:float ->
-  t
-
-(** A chunkless manifest representing a symlink to [target]. *)
-val make_symlink : name:string -> target:string -> mtime:float -> t
-
-val of_string : string -> t
-
-(** A body a caller already holds as bytes, which is what {!Chunk_table.seal}
-    hands back. *)
-val of_chunk : Bigstring.t -> t
-
-(** The name recorded in the body. Meaningful only where the location cannot
-    yield one; a caller holding a key takes the name from the key. *)
-val recorded_name : t -> string
-
-(** Encoding needs a name, so every caller states which one; the two that file a
-    manifest under a key that does not describe it — a version snapshot, a
-    trashed marker — are then the only ones passing other than the key's leaf.
-*)
-val to_string : name:string -> t -> string
-
-(** {!to_string} as the bytes a store and a sidecar are both handed, which for a
-    manifest already recording [name] is the body it is made of rather than a
-    fresh encoding of it. *)
-val body : name:string -> t -> Bigstring.t
+    Each published manifest filed under the file's real path, so the tree can be
+    walked without the store, and on top of it what this client has changed and
+    not published. A projection apart from that staged half:
+    {!Cache_layout.clear} drops everything here and a resync rebuilds it, which
+    is why the staged part is the one thing it keeps. *)
 
 (** Where a chunk of a locally edited file has its bytes: a staged body and an
     offset within it. One body holds every staged member of a cache group, so
@@ -99,11 +36,18 @@ type staged = {
       (** A whole file handed over by a frontend: one file rather than per-chunk
           bodies, [s_slots] empty. The upload reads it directly, so adopting one
           costs a rename, not a copy. *)
-  s_published : t option;
+  s_published : Manifest.t option;
 }
 
 (** A fresh staged-body id. *)
 val new_uuid : unit -> string
+
+(** The staged record as it is kept on disk. Versioned: a body written by a
+    newer build raises rather than being read as something it is not, since what
+    it describes is the only copy of unsynced work. *)
+val staged_to_string : staged -> string
+
+val staged_of_string : string -> staged
 
 (** True when [key] has unsynced edits, or the chunk store holds every cache
     chunk its sidecar's chunks group into. Synchronous, for the CLI listing;
@@ -119,7 +63,7 @@ module Make (C : Conf.S) : sig
   val path : string -> string
 
   (** [key]'s manifest, parsed and cached. [None] when absent or unparseable. *)
-  val read : string -> t option Lwt.t
+  val read : string -> Manifest.t option Lwt.t
 
   (** Manifests held from earlier reads. A cached one keeps the mapping it was
       read through, so this counts live mappings rather than bytes, and it is
@@ -129,7 +73,7 @@ module Make (C : Conf.S) : sig
 
   (** Writes [t] under [key], recording the name [key] encodes. A caller cannot
       file a manifest under one name and have it record another. *)
-  val write : string -> t -> unit Lwt.t
+  val write : string -> Manifest.t -> unit Lwt.t
 
   val delete : string -> unit Lwt.t
   val rename : src_key:string -> dst_key:string -> unit Lwt.t
@@ -157,7 +101,9 @@ module Make (C : Conf.S) : sig
       the published manifest alongside for inherited chunks. The single
       resolution point: no caller decides this itself. *)
   val resolve :
-    string -> [ `Staged of staged * t option | `Published of t ] option Lwt.t
+    string ->
+    [ `Staged of staged * Manifest.t option | `Published of Manifest.t ] option
+    Lwt.t
 
   val read_staged : string -> staged option Lwt.t
   val write_staged : string -> staged -> unit Lwt.t

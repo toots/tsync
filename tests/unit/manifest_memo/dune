@@ -2,9 +2,11 @@
  (flags
   (:standard
    -open
-   Tsync_chunks
+   Tsync_checkout
    -open
-   Tsync_object
+   Tsync_manifest
+   -open
+   Tsync_chunks
    -open
    Tsync_naming
    -open
@@ -19,9 +21,10 @@
    Tsync_test_harness))
  (name manifest_memo_test)
  (libraries
+  tsync_checkout
+  tsync_manifest
   tsync_chunks
   tsync_test_harness
-  tsync_object
   tsync_naming
   tsync_conf
   tsync_backend_register

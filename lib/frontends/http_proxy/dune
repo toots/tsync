@@ -2,13 +2,15 @@
  (flags
   (:standard
    -open
+   Tsync_checkout
+   -open
+   Tsync_manifest
+   -open
    Tsync_field_spec
    -open
    Tsync_content
    -open
    Tsync_store
-   -open
-   Tsync_object
    -open
    Tsync_naming
    -open
@@ -48,10 +50,11 @@
   %{project_root}/lambda/mime.json
   stats.html)
  (libraries
+  tsync_checkout
+  tsync_manifest
   tsync-libs.field_spec
   tsync-libs.content
   tsync-libs.store
-  tsync-libs.object
   tsync-libs.naming
   tsync-libs.lwt_unix
   tsync-libs.frontend_register

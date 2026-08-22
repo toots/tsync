@@ -2,11 +2,13 @@
  (flags
   (:standard
    -open
+   Tsync_checkout
+   -open
+   Tsync_manifest
+   -open
    Tsync_chunks
    -open
    Tsync_content
-   -open
-   Tsync_object
    -open
    Tsync_naming
    -open
@@ -21,10 +23,11 @@
    Tsync_test_harness))
  (name staged_test)
  (libraries
+  tsync_checkout
+  tsync_manifest
   tsync_chunks
   tsync_test_harness
   tsync_content
-  tsync_object
   tsync_naming
   tsync_conf
   tsync_backend_register

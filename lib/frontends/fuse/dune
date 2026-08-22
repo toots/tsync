@@ -2,6 +2,10 @@
  (flags
   (:standard
    -open
+   Tsync_checkout
+   -open
+   Tsync_manifest
+   -open
    Tsync_field_spec
    -open
    Tsync_sync
@@ -9,8 +13,6 @@
    Tsync_store
    -open
    Tsync_naming
-   -open
-   Tsync_object
    -open
    Tsync_ipc
    -open
@@ -35,11 +37,12 @@
  (private_modules fuse_fs hidden_ops internal_ops path_ops)
  (optional)
  (libraries
+  tsync_checkout
+  tsync_manifest
   tsync-libs.field_spec
   tsync-libs.sync
   tsync-libs.store
   tsync-libs.naming
-  tsync-libs.object
   tsync-libs.backend_register
   tsync-libs.frontend_register
   tsync-libs.log

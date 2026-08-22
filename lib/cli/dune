@@ -6,6 +6,10 @@
  (flags
   (:standard
    -open
+   Tsync_checkout
+   -open
+   Tsync_journal
+   -open
    Tsync_chunk_keyspace
    -open
    Tsync_field_spec
@@ -15,8 +19,6 @@
    Tsync_ops
    -open
    Tsync_store
-   -open
-   Tsync_object
    -open
    Tsync_naming
    -open
@@ -65,13 +67,14 @@
    Tsync_lwt_unix))
  (name tsync_cli)
  (libraries
+  tsync_checkout
+  tsync_journal
   tsync_chunk_keyspace
   tsync-libs.lwt_unix
   tsync-libs.field_spec
   tsync-libs.sync
   tsync-libs.ops
   tsync-libs.store
-  tsync-libs.object
   tsync-libs.naming
   tsync-libs.frontend_register
   tsync_launcher

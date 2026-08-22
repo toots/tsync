@@ -27,7 +27,7 @@ module C =
          ~cache_root:root ~data_dir:root ~root ()
       : Conf.S)
 
-module Mf = Manifest.Make (C)
+module Mf = Checkout.Make (C)
 
 let key i = C.domain_prefix ^ Printf.sprintf "f%05d.txt" i
 

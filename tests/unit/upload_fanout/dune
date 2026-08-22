@@ -2,13 +2,13 @@
  (flags
   (:standard
    -open
+   Tsync_manifest
+   -open
    Tsync_chunks
    -open
    Tsync_content
    -open
    Tsync_bigstring
-   -open
-   Tsync_object
    -open
    Tsync_naming
    -open
@@ -23,11 +23,11 @@
    Tsync_test_harness))
  (name upload_fanout)
  (libraries
+  tsync_manifest
   tsync_chunks
   tsync_test_harness
   tsync_content
   tsync_bigstring
-  tsync_object
   tsync_naming
   tsync_lwt_unix
   tsync_conf

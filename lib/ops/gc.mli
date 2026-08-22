@@ -34,7 +34,7 @@
     {!Make.outstanding}, which is the only thing that will ever say so.
 
     What this does {i not} do is fill a copy that has fallen behind, or find
-    chunks a copy holds that the main never had. That is {!Mirror.resync} —
+    chunks a copy holds that the main never had. That is {!Checkout.resync} —
     [tsync mirror] — and asking for it here meant walking every shard there
     could be on every target, whatever the store held.
 
@@ -239,7 +239,7 @@ module Make (C : Conf.S) : sig
   (** Delete requests a copy has not consumed: its name, how many, and how long
       the oldest has been sitting there. Anything here is a copy holding chunks
       nothing references — the keys are already gone from the main, so no later
-      collection meets them again and only {!Mirror.resync} would find them.
+      collection meets them again and only {!Checkout.resync} would find them.
 
       Outlives the run that queued them, so a caller reporting this must do so
       whether or not {!status} found one open. *)

@@ -7,13 +7,15 @@
  (flags
   (:standard
    -open
+   Tsync_manifest
+   -open
+   Tsync_journal
+   -open
    Tsync_chunk_keyspace
    -open
    Tsync_conf
    -open
    Tsync_naming
-   -open
-   Tsync_object
    -open
    Tsync_bigstring
    -open
@@ -27,10 +29,11 @@
  (name tsync_store)
  (public_name tsync-libs.store)
  (libraries
+  tsync_manifest
+  tsync_journal
   tsync_chunk_keyspace
   tsync_conf
   tsync_naming
-  tsync_object
   tsync_bigstring
   tsync_backend_register
   tsync_local_io

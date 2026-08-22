@@ -41,7 +41,7 @@ module C : Conf.S = struct
 end
 
 module R = Remote.Make (C)
-module Mf = Manifest.Make (C)
+module Mf = Checkout.Make (C)
 module D = Data.Make (C) (R)
 
 let key = C.domain_prefix ^ "file.txt"

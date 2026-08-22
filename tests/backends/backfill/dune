@@ -6,8 +6,6 @@
    -open
    Tsync_chunks
    -open
-   Tsync_object
-   -open
    Tsync_naming
    -open
    Tsync_local_io
@@ -26,7 +24,6 @@
   tsync_chunk_keyspace
   tsync_chunks
   tsync_test_harness
-  tsync_object
   tsync_naming
   tsync_bigstring
   tsync_backend_register

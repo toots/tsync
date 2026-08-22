@@ -1,5 +1,5 @@
 let implementation = "fuse"
-let is_local = Manifest.is_local
+let is_local = Checkout.is_local
 
 (* Clear a stale mount left by a previous crash, then (re)create the mount point. *)
 let prepare_mount_point mount_point =

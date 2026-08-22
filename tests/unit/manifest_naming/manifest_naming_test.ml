@@ -29,7 +29,7 @@ module C =
          ~cache_root:root ~data_dir:root ~root ()
       : Conf.S)
 
-module Mf = Manifest.Make (C)
+module Mf = Checkout.Make (C)
 
 let key rel = C.domain_prefix ^ rel
 
@@ -119,7 +119,7 @@ let () =
 
      case "staged, then renamed";
      let staged =
-       Manifest.
+       Checkout.
          {
            s_name = "whatever";
            s_size = 0L;
@@ -133,11 +133,11 @@ let () =
      let* () = Mf.write_staged (key "s/one.txt") staged in
      let* st = Mf.read_staged (key "s/one.txt") in
      step "s/one.txt staged name=%S"
-       (match st with Some st -> st.Manifest.s_name | None -> "<absent>");
+       (match st with Some st -> st.Checkout.s_name | None -> "<absent>");
      let* () =
        Mf.rename_staged ~src_key:(key "s/one.txt") ~dst_key:(key "s/two.txt")
      in
      let+ st = Mf.read_staged (key "s/two.txt") in
      step "s/two.txt staged name=%S"
-       (match st with Some st -> st.Manifest.s_name | None -> "<absent>"));
+       (match st with Some st -> st.Checkout.s_name | None -> "<absent>"));
   Lwt_main.run (Fs_util.rm_rf root)

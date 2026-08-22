@@ -2,6 +2,8 @@
  (flags
   (:standard
    -open
+   Tsync_manifest
+   -open
    Tsync_chunk_keyspace
    -open
    Tsync_chunks
@@ -9,8 +11,6 @@
    Tsync_ops
    -open
    Tsync_store
-   -open
-   Tsync_object
    -open
    Tsync_naming
    -open
@@ -25,12 +25,12 @@
    Tsync_test_harness))
  (name gc_queued)
  (libraries
+  tsync_manifest
   tsync_chunk_keyspace
   tsync_chunks
   tsync_test_harness
   tsync_ops
   tsync_store
-  tsync_object
   tsync_naming
   tsync_conf
   tsync_bigstring

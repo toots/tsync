@@ -10,8 +10,6 @@
    -open
    Tsync_content
    -open
-   Tsync_object
-   -open
    Tsync_conf
    -open
    Tsync_test_harness))
@@ -22,7 +20,6 @@
   tsync_bigstring
   tsync_backend_register
   tsync_content
-  tsync_object
   tsync_conf
   lwt
   lwt.unix

@@ -12,7 +12,7 @@
    committing a whole staged body through [write-whole]. *)
 
 let implementation = "android"
-let is_local = Manifest.is_local
+let is_local = Checkout.is_local
 
 (* Through the daemon's own request handler rather than a second implementation
    of it: [ref]/[parentRef] naming, the staged-versus-published rules and the
@@ -128,7 +128,7 @@ module Make (C : Conf.S) = struct
           | Some published ->
               let size =
                 match published with
-                  | `Staged (st, _) -> Int64.to_int st.Manifest.s_size
+                  | `Staged (st, _) -> Int64.to_int st.Checkout.s_size
                   | `Published m -> Int64.to_int (Manifest.size m)
               in
               let* () = reply [("size", `Int size)] in

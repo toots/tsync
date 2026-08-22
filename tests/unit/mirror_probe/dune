@@ -2,6 +2,8 @@
  (flags
   (:standard
    -open
+   Tsync_checkout
+   -open
    Tsync_chunk_keyspace
    -open
    Tsync_bigstring
@@ -21,6 +23,7 @@
    Tsync_test_harness))
  (name mirror_probe)
  (libraries
+  tsync_checkout
   tsync_chunk_keyspace
   tsync_test_harness
   tsync_bigstring

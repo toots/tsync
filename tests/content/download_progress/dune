@@ -2,9 +2,9 @@
  (flags
   (:standard
    -open
-   Tsync_content
+   Tsync_manifest
    -open
-   Tsync_object
+   Tsync_content
    -open
    Tsync_backend_register
    -open
@@ -15,9 +15,9 @@
    Tsync_test_harness))
  (name download_progress_test)
  (libraries
+  tsync_manifest
   tsync_test_harness
   tsync_content
-  tsync_object
   tsync_conf
   tsync_backend_register
   tsync_local_backend

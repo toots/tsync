@@ -2,13 +2,17 @@
  (flags
   (:standard
    -open
+   Tsync_checkout
+   -open
+   Tsync_manifest
+   -open
+   Tsync_journal
+   -open
    Tsync_ops
    -open
    Tsync_sync
    -open
    Tsync_store
-   -open
-   Tsync_object
    -open
    Tsync_naming
    -open
@@ -30,10 +34,12 @@
  (name tsync_ipc_handler)
  (public_name tsync-libs.ipc_handler)
  (libraries
+  tsync_checkout
+  tsync_manifest
+  tsync_journal
   tsync_ops
   tsync_sync
   tsync_store
-  tsync_object
   tsync_naming
   tsync_backend_register
   tsync_local_io

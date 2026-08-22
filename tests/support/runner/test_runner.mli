@@ -165,7 +165,7 @@ type step =
       (** Apply a backend-damage step (delete/corrupt chunk, delete manifest) to
           the secondary backend instead of the primary. *)
   | ResyncRemote
-      (** Run [Mirror.resync] from the primary to the other backends, printing
+      (** Run [Checkout.resync] from the primary to the other backends, printing
           the copied keys and a per-destination summary. Bytes are omitted:
           manifest objects embed mtimes, so their sizes are not deterministic.
       *)

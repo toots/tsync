@@ -22,7 +22,7 @@ module Make_with_layout (C : Conf.S) (Sq : Sync_queue.S) (L : Layout.S) :
   (* [St] takes logical (real-path) keys and maps them to backend keys through
      the layout scheme. [Mf] is the local mirror. *)
   module St = Store.Make (C) (L)
-  module Mf = Manifest.Make (C)
+  module Mf = Checkout.Make (C)
   module D = Data.Make (C) (R)
 
   let manifest_path key = Mf.path key
@@ -87,7 +87,7 @@ module Make_with_layout (C : Conf.S) (Sq : Sync_queue.S) (L : Layout.S) :
           match m with
             | Some (`Staged (st, _)) ->
                 Lwt.return_some
-                  (file_stat st.Manifest.s_size st.Manifest.s_mtime)
+                  (file_stat st.Checkout.s_size st.Checkout.s_mtime)
             | Some (`Published m) -> (
                 match Manifest.symlink m with
                   | Some target ->
@@ -168,7 +168,7 @@ module Make_with_layout (C : Conf.S) (Sq : Sync_queue.S) (L : Layout.S) :
         let name, rel = describe key in
         let size =
           match resolved with
-            | Some (`Staged (st, _)) -> Some st.Manifest.s_size
+            | Some (`Staged (st, _)) -> Some st.Checkout.s_size
             | Some (`Published m) -> Some (Manifest.size m)
             | None -> None
         in
@@ -242,7 +242,7 @@ module Make_with_layout (C : Conf.S) (Sq : Sync_queue.S) (L : Layout.S) :
              owed. *)
           Sq.post ~entry_key:(J.entry_key ())
             {
-              Wal.ops = [`Put (rel_key key, st.Manifest.s_size)];
+              Wal.ops = [`Put (rel_key key, st.Checkout.s_size)];
               state = Wal.Prepared;
               attempts = 0;
               last_error = None;
@@ -365,7 +365,7 @@ module Make_with_layout (C : Conf.S) (Sq : Sync_queue.S) (L : Layout.S) :
       else
         let+ resolved = Mf.resolve src in
         match resolved with
-          | Some (`Staged (st, _)) -> Some st.Manifest.s_size
+          | Some (`Staged (st, _)) -> Some st.Checkout.s_size
           | Some (`Published m) -> Some (Manifest.size m)
           | None -> None
     in

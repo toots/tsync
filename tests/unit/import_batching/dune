@@ -2,9 +2,9 @@
  (flags
   (:standard
    -open
-   Tsync_ops
+   Tsync_journal
    -open
-   Tsync_object
+   Tsync_ops
    -open
    Tsync_conf
    -open
@@ -13,9 +13,9 @@
    Tsync_test_harness))
  (name import_batching)
  (libraries
+  tsync_journal
   tsync_test_harness
   tsync_ops
-  tsync_object
   tsync_conf
   tsync_store
   tsync_local_backend

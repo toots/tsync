@@ -4,8 +4,6 @@
    -open
    Tsync_ops
    -open
-   Tsync_object
-   -open
    Tsync_naming
    -open
    Tsync_lwt_unix
@@ -21,7 +19,6 @@
  (libraries
   tsync_test_harness
   tsync_ops
-  tsync_object
   tsync_naming
   tsync_lwt_unix
   tsync_conf

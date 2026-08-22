@@ -8,8 +8,6 @@
    -open
    Tsync_store
    -open
-   Tsync_object
-   -open
    Tsync_naming
    -open
    Tsync_bigstring
@@ -24,7 +22,6 @@
   tsync_chunks
   tsync_test_harness
   tsync_store
-  tsync_object
   tsync_naming
   tsync_bigstring
   tsync_conf

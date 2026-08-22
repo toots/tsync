@@ -1,0 +1,24 @@
+; What a file is: its size, its mtime, and the ordered names of the chunks
+; holding its bytes. The record and its codec, shared by the store that
+; publishes one and the cache that mirrors it.
+
+(library
+ (flags
+  (:standard
+   -open
+   Tsync_chunks
+   -open
+   Tsync_bigstring
+   -open
+   Tsync_xxhash
+   -open
+   Tsync_conf))
+ (name tsync_manifest)
+ (public_name tsync-libs.manifest)
+ (libraries
+  tsync_chunks
+  tsync_bigstring
+  tsync_xxhash
+  tsync_conf
+  base64
+  yojson))

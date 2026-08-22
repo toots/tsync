@@ -7,11 +7,15 @@
  (flags
   (:standard
    -open
+   Tsync_checkout
+   -open
+   Tsync_manifest
+   -open
+   Tsync_journal
+   -open
    Tsync_conf
    -open
    Tsync_naming
-   -open
-   Tsync_object
    -open
    Tsync_store
    -open
@@ -29,10 +33,12 @@
  (name tsync_sync)
  (public_name tsync-libs.sync)
  (libraries
+  tsync_checkout
+  tsync_manifest
+  tsync_journal
   tsync_work
   tsync_conf
   tsync_naming
-  tsync_object
   tsync_store
   tsync_content
   tsync_local_io

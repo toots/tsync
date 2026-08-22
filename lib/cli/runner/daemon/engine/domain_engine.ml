@@ -49,7 +49,7 @@ module Make (C : Conf.S) : S = struct
   module Ih = Ipc_handler.Make (C) (F)
   module Sp = Sync_poller.Make (C) (F)
   module Rp = Replay.Make (C) (F)
-  module Mf = Manifest.Make (C)
+  module Mf = Checkout.Make (C)
   module Fs = File_store.Make (C)
 
   (* Also nudged after each upload, but downloads grow the store too. The same

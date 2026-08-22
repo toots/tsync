@@ -2,13 +2,13 @@
  (flags
   (:standard
    -open
+   Tsync_journal
+   -open
    Tsync_chunks
    -open
    Tsync_ops
    -open
    Tsync_store
-   -open
-   Tsync_object
    -open
    Tsync_naming
    -open
@@ -25,11 +25,11 @@
    Tsync_test_harness))
  (name resync_test)
  (libraries
+  tsync_journal
   tsync_chunks
   tsync_test_harness
   tsync_ops
   tsync_store
-  tsync_object
   tsync_naming
   tsync_conf
   tsync_bigstring

@@ -2,13 +2,13 @@
  (flags
   (:standard
    -open
+   Tsync_journal
+   -open
    Tsync_chunk_keyspace
    -open
    Tsync_field_spec
    -open
    Tsync_store
-   -open
-   Tsync_object
    -open
    Tsync_naming
    -open
@@ -37,11 +37,11 @@
    Tsync_test_harness))
  (name http_proxy_test)
  (libraries
+  tsync_journal
   tsync_chunk_keyspace
   tsync_test_harness
   tsync_field_spec
   tsync_store
-  tsync_object
   tsync_naming
   tsync_http_proxy_frontend
   tsync_http_proxy

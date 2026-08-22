@@ -2,6 +2,8 @@
  (flags
   (:standard
    -open
+   Tsync_journal
+   -open
    Tsync_chunk_keyspace
    -open
    Tsync_sync
@@ -9,8 +11,6 @@
    Tsync_content
    -open
    Tsync_store
-   -open
-   Tsync_object
    -open
    Tsync_naming
    -open
@@ -32,11 +32,11 @@
  (name tsync_diagnostics)
  (public_name tsync-libs.diagnostics)
  (libraries
+  tsync_journal
   tsync_chunk_keyspace
   tsync_sync
   tsync_content
   tsync_store
-  tsync_object
   tsync_naming
   tsync_local_io
   tsync_conf

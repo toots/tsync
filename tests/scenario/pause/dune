@@ -2,9 +2,9 @@
  (flags
   (:standard
    -open
-   Tsync_sync
+   Tsync_journal
    -open
-   Tsync_object
+   Tsync_sync
    -open
    Tsync_local_io
    -open
@@ -17,9 +17,9 @@
    Tsync_test_harness))
  (name pause_test)
  (libraries
+  tsync_journal
   tsync_test_harness
   tsync_sync
-  tsync_object
   tsync_conf
   tsync_backend_register
   tsync_local_backend

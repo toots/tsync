@@ -9,7 +9,7 @@ let default_cache_chunk_size = 16 * 1024 * 1024
 
 (** What it takes to answer "is every byte of this key on this machine?": the
     cache tree to look in and the sizes saying which files to look for. Its own
-    record because the callers ({!Manifest.is_local} and every frontend) run
+    record because the callers ({!Checkout.is_local} and every frontend) run
     outside a functor, in plain non-Lwt CLI code. *)
 type locality = {
   cache_root : string;

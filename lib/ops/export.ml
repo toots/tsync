@@ -6,7 +6,7 @@ type summary = { exported : int; missing : int }
 module Make (C : Conf.S) = struct
   module R = Remote.Make (C)
   module Tree = Inode_tree.Make (C)
-  module Mf = Manifest.Make (C)
+  module Mf = Checkout.Make (C)
   module D = Data.Make (C) (R)
 
   (* Assembling through the read path covers unsynced staged edits, a partially

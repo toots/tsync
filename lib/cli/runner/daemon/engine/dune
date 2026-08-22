@@ -2,11 +2,11 @@
  (flags
   (:standard
    -open
+   Tsync_checkout
+   -open
    Tsync_sync
    -open
    Tsync_store
-   -open
-   Tsync_object
    -open
    Tsync_log
    -open
@@ -20,9 +20,9 @@
  (name tsync_engine)
  (public_name tsync-libs.engine)
  (libraries
+  tsync_checkout
   tsync_sync
   tsync_store
-  tsync_object
   tsync_backend_register
   tsync_conf
   tsync_ipc_handler

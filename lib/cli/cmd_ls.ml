@@ -56,7 +56,7 @@ let cmd : unit Cmd.t =
                in
                dp ^ rel
        in
-       let module Mf = Manifest.Make (C) in
+       let module Mf = Checkout.Make (C) in
        let module B = (val C.store : Backend.S) in
        let* files, subdirs = Mf.list_children ~prefix () in
        let file_name (e : Backend.file_entry) =

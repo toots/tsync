@@ -2,6 +2,12 @@
  (flags
   (:standard
    -open
+   Tsync_checkout
+   -open
+   Tsync_manifest
+   -open
+   Tsync_journal
+   -open
    Tsync_chunk_keyspace
    -open
    Tsync_chunks
@@ -13,8 +19,6 @@
    Tsync_store
    -open
    Tsync_sync
-   -open
-   Tsync_object
    -open
    Tsync_naming
    -open
@@ -39,13 +43,15 @@
    Tsync_ipc_handler))
  (name tsync_test_runner)
  (libraries
+  tsync_checkout
+  tsync_manifest
+  tsync_journal
   tsync_chunk_keyspace
   tsync_chunks
   tsync_test_harness
   tsync_ops
   tsync_store
   tsync_sync
-  tsync_object
   tsync_naming
   tsync_lwt_unix
   tsync_local_io

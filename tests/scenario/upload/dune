@@ -2,13 +2,13 @@
  (flags
   (:standard
    -open
+   Tsync_manifest
+   -open
    Tsync_chunks
    -open
    Tsync_test_harness
    -open
    Tsync_content
-   -open
-   Tsync_object
    -open
    Tsync_backend_register
    -open
@@ -17,10 +17,10 @@
    Tsync_local_backend))
  (name upload)
  (libraries
+  tsync_manifest
   tsync_chunks
   tsync_test_harness
   tsync_content
-  tsync_object
   tsync_conf
   tsync_backend_register
   tsync_local_backend))

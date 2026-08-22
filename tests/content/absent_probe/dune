@@ -2,6 +2,10 @@
  (flags
   (:standard
    -open
+   Tsync_checkout
+   -open
+   Tsync_journal
+   -open
    Tsync_chunks
    -open
    Tsync_test_harness
@@ -9,8 +13,6 @@
    Tsync_content
    -open
    Tsync_store
-   -open
-   Tsync_object
    -open
    Tsync_naming
    -open
@@ -23,11 +25,12 @@
    Tsync_local_backend))
  (name absent_probe)
  (libraries
+  tsync_checkout
+  tsync_journal
   tsync_chunks
   tsync_test_harness
   tsync_content
   tsync_store
-  tsync_object
   tsync_naming
   tsync_bigstring
   tsync_conf

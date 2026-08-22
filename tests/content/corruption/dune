@@ -2,6 +2,8 @@
  (flags
   (:standard
    -open
+   Tsync_manifest
+   -open
    Tsync_chunk_keyspace
    -open
    Tsync_chunks
@@ -9,8 +11,6 @@
    Tsync_conf
    -open
    Tsync_naming
-   -open
-   Tsync_object
    -open
    Tsync_store
    -open
@@ -25,12 +25,12 @@
    Tsync_test_harness))
  (name corruption_test)
  (libraries
+  tsync_manifest
   tsync_chunk_keyspace
   tsync_chunks
   tsync_test_harness
   tsync_conf
   tsync_naming
-  tsync_object
   tsync_store
   tsync_content
   tsync_bigstring

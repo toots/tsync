@@ -6,8 +6,6 @@
    -open
    Tsync_content
    -open
-   Tsync_object
-   -open
    Tsync_naming
    -open
    Tsync_xxhash
@@ -24,7 +22,6 @@
   tsync_chunks
   tsync_test_harness
   tsync_content
-  tsync_object
   tsync_naming
   tsync_xxhash
   tsync_conf

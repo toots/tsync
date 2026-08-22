@@ -24,7 +24,7 @@ module C =
       : Conf.S)
 
 module R = Remote.Make (C)
-module Mf = Manifest.Make (C)
+module Mf = Checkout.Make (C)
 module D = Data.Make (C) (R)
 
 let key = C.domain_prefix ^ "file.txt"
@@ -46,7 +46,7 @@ let read_all () =
   let* resolved = Mf.resolve key in
   let size =
     match resolved with
-      | Some (`Staged (st, _)) -> Int64.to_int st.Manifest.s_size
+      | Some (`Staged (st, _)) -> Int64.to_int st.Checkout.s_size
       | Some (`Published m) -> Int64.to_int (Manifest.size m)
       | None -> 0
   in
@@ -60,18 +60,18 @@ let show label =
   let* resolved = Mf.resolve key in
   let state =
     match resolved with
-      | Some (`Staged (({ Manifest.s_whole = Some _; _ } as st), _)) ->
-          Printf.sprintf "staged size=%2Ld whole" st.Manifest.s_size
+      | Some (`Staged (({ Checkout.s_whole = Some _; _ } as st), _)) ->
+          Printf.sprintf "staged size=%2Ld whole" st.Checkout.s_size
       | Some (`Staged (st, _)) ->
-          Printf.sprintf "staged size=%2Ld slots=[%s]" st.Manifest.s_size
+          Printf.sprintf "staged size=%2Ld slots=[%s]" st.Checkout.s_size
             (String.concat ""
                (Array.to_list
                   (Array.map
                      (function
-                       | Manifest.Staged _ -> "S"
-                       | Manifest.Inherit -> "I"
-                       | Manifest.Zero -> "Z")
-                     st.Manifest.s_slots)))
+                       | Checkout.Staged _ -> "S"
+                       | Checkout.Inherit -> "I"
+                       | Checkout.Zero -> "Z")
+                     st.Checkout.s_slots)))
       | Some (`Published m) ->
           Printf.sprintf "published size=%2Ld chunks=%d" (Manifest.size m)
             (Chunk_table.count m)
@@ -109,7 +109,7 @@ module CG : Conf.S = struct
 end
 
 module GR = Remote.Make (CG)
-module Gm = Manifest.Make (CG)
+module Gm = Checkout.Make (CG)
 module GD = Data.Make (CG) (GR)
 
 let gkey = CG.domain_prefix ^ "file.txt"
@@ -147,15 +147,15 @@ let gshow label =
   let state =
     match resolved with
       | Some (`Staged (st, _)) ->
-          Printf.sprintf "staged size=%2Ld slots=[%s]" st.Manifest.s_size
+          Printf.sprintf "staged size=%2Ld slots=[%s]" st.Checkout.s_size
             (String.concat ""
                (Array.to_list
                   (Array.map
                      (function
-                       | Manifest.Staged _ -> "S"
-                       | Manifest.Inherit -> "I"
-                       | Manifest.Zero -> "Z")
-                     st.Manifest.s_slots)))
+                       | Checkout.Staged _ -> "S"
+                       | Checkout.Inherit -> "I"
+                       | Checkout.Zero -> "Z")
+                     st.Checkout.s_slots)))
       | Some (`Published m) ->
           Printf.sprintf "published size=%2Ld chunks=%d" (Manifest.size m)
             (Chunk_table.count m)
@@ -163,7 +163,7 @@ let gshow label =
   in
   let size =
     match resolved with
-      | Some (`Staged (st, _)) -> Int64.to_int st.Manifest.s_size
+      | Some (`Staged (st, _)) -> Int64.to_int st.Checkout.s_size
       | Some (`Published m) -> Int64.to_int (Manifest.size m)
       | None -> 0
   in
@@ -244,7 +244,7 @@ let () =
      let* () =
        match (staged_before, published) with
          | Some st, Some m ->
-             Mf.write_staged key { st with Manifest.s_published = Some m }
+             Mf.write_staged key { st with Checkout.s_published = Some m }
          | _ -> Lwt.return_unit
      in
      let uploaded_before = Metrics.uploaded () in
@@ -282,7 +282,7 @@ let () =
      let* () =
        match (staged_before, published) with
          | Some st, Some m ->
-             Mf.write_staged key { st with Manifest.s_published = Some m }
+             Mf.write_staged key { st with Checkout.s_published = Some m }
          | _ -> Lwt.return_unit
      in
      let* () = write_at 0 "YYYYYYYY" in

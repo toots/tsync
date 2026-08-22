@@ -29,7 +29,7 @@ module C =
          ~root ()
       : Conf.S)
 
-module Mf = Manifest.Make (C)
+module Mf = Checkout.Make (C)
 
 let key rel = C.domain_prefix ^ rel
 
@@ -49,7 +49,7 @@ let published ~name =
     ~mtime:fixed_mtime
 
 let staged ~name =
-  Manifest.
+  Checkout.
     {
       s_name = name;
       s_size = 4L;
