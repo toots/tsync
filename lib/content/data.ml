@@ -33,6 +33,7 @@ let absences_for prefix =
 
 module Make (C : Conf.S) (R : Remote.S) = struct
   module Cc = Chunk_cache.Make (C) (R)
+  module Sb = Staged.Make (C) (Cc)
   module Mf = Checkout.Make (C)
   module Fs = File_store.Make (C)
 
@@ -245,10 +246,10 @@ module Make (C : Conf.S) (R : Remote.S) = struct
               | Some (_, group) as cached ->
                   let slice = Bigarray.Array1.sub buf done_ take in
                   let* served = Cc.read_into ~group ~index:i slice ~chunk_off in
-                  let got = served.Cc.bytes in
+                  let got = served.Chunk_cache.bytes in
                   (* The group's size, not the slice's: what came down the wire
                      is the whole group, however little of it this read wanted. *)
-                  if served.Cc.from_backend then
+                  if served.Chunk_cache.from_backend then
                     credit_pull id ~size:(Int64.to_int size)
                       (Chunk_group.bytes group);
                   if got <= 0 then Lwt.return done_
@@ -272,7 +273,7 @@ module Make (C : Conf.S) (R : Remote.S) = struct
           let total = min want (max 0 avail) in
           if total <= 0 then Lwt.return 0
           else
-            Cc.whole_read_into ~uuid (Bigarray.Array1.sub buf 0 total) ~offset
+            Sb.whole_read_into ~uuid (Bigarray.Array1.sub buf 0 total) ~offset
       | None -> pread_chunked ~id ~staged ~base buf ~offset
 
   and pread_chunked ~id ~(staged : Checkout.staged) ~base buf ~offset =
@@ -299,8 +300,7 @@ module Make (C : Conf.S) (R : Remote.S) = struct
               match slots.(i) with
                 | Checkout.Staged { uuid; offset = body_off } ->
                     let* got =
-                      Cc.stage_read_into ~uuid slice
-                        ~offset:(body_off + chunk_off)
+                      Sb.read_into ~uuid slice ~offset:(body_off + chunk_off)
                     in
                     (* A staged body is only as long as the writes that reached
                        it: past its end is a hole, reading as zeros. *)
@@ -319,11 +319,11 @@ module Make (C : Conf.S) (R : Remote.S) = struct
                           let+ served =
                             Cc.read_into ~group ~index:i slice ~chunk_off
                           in
-                          if served.Cc.from_backend then
+                          if served.Chunk_cache.from_backend then
                             credit_pull id
                               ~size:(Int64.to_int staged.Checkout.s_size)
                               (Chunk_group.bytes group);
-                          served.Cc.bytes
+                          served.Chunk_cache.bytes
                       | None ->
                           Lwt.fail
                             (Backend.Backend_error
@@ -499,17 +499,17 @@ module Make (C : Conf.S) (R : Remote.S) = struct
             let body = Checkout.new_uuid () in
             let last = min (n - 1) (i + per - 1) in
             let _, body_len = group_layout ~st:st_for_layout ~first:i ~last in
-            let+ () = Cc.stage_ensure ~uuid:body ~len:body_len in
+            let+ () = Sb.ensure ~uuid:body ~len:body_len in
             (body, 0))
           else Lwt.return (body, offset)
         in
         let len = Chunks.length_of ~size:st.Checkout.s_size ~chunk_size:cs i in
         let slice = Bigarray.Array1.sub buf 0 len in
         let* (_ : int) =
-          Cc.whole_read_into ~uuid slice
+          Sb.whole_read_into ~uuid slice
             ~offset:(Int64.of_int (Chunks.offset_of ~chunk_size:cs i))
         in
-        let* (_ : int) = Cc.stage_write ~uuid:body slice ~offset in
+        let* (_ : int) = Sb.write ~uuid:body slice ~offset in
         slots.(i) <- Checkout.Staged { uuid = body; offset };
         chunk (i + 1) body (offset + len)
     in
@@ -524,7 +524,7 @@ module Make (C : Conf.S) (R : Remote.S) = struct
       }
     in
     let* () = Mf.write_staged key st in
-    Cc.whole_forget ~uuid
+    Sb.whole_forget ~uuid
 
   (* [s_published] is the manifest an upload published for the bytes it hashed,
      so changing those bytes retires it: leaving it set promotes a description of
@@ -587,7 +587,7 @@ module Make (C : Conf.S) (R : Remote.S) = struct
     in
     match shared with
       | Some uuid ->
-          let+ () = Cc.stage_ensure ~uuid ~len:body_len in
+          let+ () = Sb.ensure ~uuid ~len:body_len in
           (* Every hole in the group becomes part of the body, covered by this
              write or not: the body is sparse there, which is the same bytes a
              hole reads as, and a member left behind is one the write is about
@@ -601,7 +601,7 @@ module Make (C : Conf.S) (R : Remote.S) = struct
       | None ->
           let uuid = Checkout.new_uuid () in
           let stale = Checkout.body_uuids slots in
-          let* () = Cc.stage_ensure ~uuid ~len:body_len in
+          let* () = Sb.ensure ~uuid ~len:body_len in
           let* () =
             Lwt_list.iter_s
               (fun (j, offset, len) ->
@@ -611,13 +611,12 @@ module Make (C : Conf.S) (R : Remote.S) = struct
                 else (
                   match slots.(j) with
                     | Checkout.Staged b ->
-                        Cc.stage_copy ~src:b.Checkout.uuid
-                          ~src_off:b.Checkout.offset ~dst:uuid ~dst_off:offset
-                          ~len
+                        Sb.copy ~src:b.Checkout.uuid ~src_off:b.Checkout.offset
+                          ~dst:uuid ~dst_off:offset ~len
                     | Checkout.Inherit -> (
                         match group_at_opt base j with
                           | Some group ->
-                              Cc.stage_copy_chunk ~group ~index:j ~uuid ~offset
+                              Sb.copy_chunk ~group ~index:j ~uuid ~offset
                           (* Nothing published to inherit: a hole, and the body
                              is already sparse there. *)
                           | None -> Lwt.return_unit)
@@ -631,8 +630,7 @@ module Make (C : Conf.S) (R : Remote.S) = struct
           let live = Checkout.body_uuids slots in
           Lwt_list.iter_s
             (fun old ->
-              if List.mem old live then Lwt.return_unit
-              else Cc.stage_forget ~uuid:old)
+              if List.mem old live then Lwt.return_unit else Sb.forget ~uuid:old)
             stale
 
   (* Bytes land before the staged manifest: a crash in between leaves an
@@ -680,7 +678,7 @@ module Make (C : Conf.S) (R : Remote.S) = struct
                 in
                 let slice = Bigarray.Array1.sub buf src_off take in
                 let+ (_ : int) =
-                  Cc.stage_write ~uuid slice ~offset:(body_off + chunk_off)
+                  Sb.write ~uuid slice ~offset:(body_off + chunk_off)
                 in
                 ()
             | Checkout.Inherit | Checkout.Zero ->
@@ -710,7 +708,7 @@ module Make (C : Conf.S) (R : Remote.S) = struct
       let kept = Checkout.body_uuids slots in
       Lwt_list.iter_s
         (fun uuid ->
-          if List.mem uuid kept then Lwt.return_unit else Cc.stage_forget ~uuid)
+          if List.mem uuid kept then Lwt.return_unit else Sb.forget ~uuid)
         (Checkout.body_uuids old)
     in
     let st = { st with Checkout.s_slots = slots; s_size = size } in
@@ -721,7 +719,7 @@ module Make (C : Conf.S) (R : Remote.S) = struct
         let len = Chunks.length_of ~size ~chunk_size:cs i in
         match slots.(i) with
           | Checkout.Staged { uuid; offset } ->
-              Cc.stage_resize ~uuid ~len:(offset + len)
+              Sb.resize ~uuid ~len:(offset + len)
           | Checkout.Zero -> Lwt.return_unit
           | Checkout.Inherit -> (
               let inherited_len =
@@ -738,7 +736,7 @@ module Make (C : Conf.S) (R : Remote.S) = struct
                 in
                 match slots.(i) with
                   | Checkout.Staged { uuid; offset } ->
-                      Cc.stage_resize ~uuid ~len:(offset + len)
+                      Sb.resize ~uuid ~len:(offset + len)
                   | Checkout.Inherit | Checkout.Zero -> Lwt.return_unit))
     in
     Mf.write_staged key (mutated st)
@@ -746,11 +744,11 @@ module Make (C : Conf.S) (R : Remote.S) = struct
   let discard_bodies (st : Checkout.staged) =
     let* () =
       Lwt_list.iter_s
-        (fun uuid -> Cc.stage_forget ~uuid)
+        (fun uuid -> Sb.forget ~uuid)
         (Checkout.body_uuids st.Checkout.s_slots)
     in
     match st.Checkout.s_whole with
-      | Some uuid -> Cc.whole_forget ~uuid
+      | Some uuid -> Sb.whole_forget ~uuid
       | None -> Lwt.return_unit
 
   let truncate key size = with_key key (fun () -> truncate_locked key size)
@@ -825,9 +823,7 @@ module Make (C : Conf.S) (R : Remote.S) = struct
     let* fd =
       Lwt.catch
         (fun () ->
-          let+ fd =
-            Lwt_unix_retry.openfile (Cc.staged_path uuid) [Unix.O_RDONLY] 0
-          in
+          let+ fd = Lwt_unix_retry.openfile (Sb.path uuid) [Unix.O_RDONLY] 0 in
           Some fd)
         (fun _ -> Lwt.return_none)
     in
@@ -895,7 +891,7 @@ module Make (C : Conf.S) (R : Remote.S) = struct
       | Some uuid ->
           let* chunk_size = R.chunk_size () in
           let* state =
-            R.upload ~key ~src_path:(Cc.whole_path uuid)
+            R.upload ~key ~src_path:(Sb.whole_path uuid)
               ~mtime:staged.Checkout.s_mtime ~chunk_size ?cancel ()
           in
           commit key staged state
@@ -933,7 +929,7 @@ module Make (C : Conf.S) (R : Remote.S) = struct
              again would double the disk cost of every edit. *)
           let* () = Mf.write key published in
           let* () = Mf.delete_staged key in
-          Cc.whole_forget ~uuid
+          Sb.whole_forget ~uuid
       | None -> promote_chunked key staged published
 
   and promote_chunked key (staged : Checkout.staged) (published : Manifest.t) =
@@ -997,7 +993,7 @@ module Make (C : Conf.S) (R : Remote.S) = struct
             match single_body group with
               | Some uuid ->
                   let* linked =
-                    Cc.stage_link_group ~uuid ~len:(staged_len group) ~group
+                    Sb.link_group ~uuid ~len:(staged_len group) ~group
                   in
                   if linked then Lwt.return_unit else write_group group
               | None -> write_group group))
@@ -1049,7 +1045,7 @@ module Make (C : Conf.S) (R : Remote.S) = struct
     let* stat = Lwt_unix_retry.LargeFile.stat src_path in
     let* chunk_size = R.chunk_size () in
     let uuid = Checkout.new_uuid () in
-    let* () = Cc.adopt_whole ~src:src_path ~uuid in
+    let* () = Sb.adopt_whole ~src:src_path ~uuid in
     Mf.write_staged key
       {
         Checkout.s_name = Key.leaf ~domain_prefix:C.domain_prefix key;
@@ -1067,7 +1063,7 @@ module Make (C : Conf.S) (R : Remote.S) = struct
   let staged_body_path key =
     let+ st = Mf.read_staged key in
     match st with
-      | Some { Checkout.s_whole = Some uuid; _ } -> Some (Cc.whole_path uuid)
+      | Some { Checkout.s_whole = Some uuid; _ } -> Some (Sb.whole_path uuid)
       | _ -> None
 
   (* Staged bodies count as present: they are the newest bytes there are. *)

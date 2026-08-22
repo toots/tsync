@@ -28,3 +28,4 @@ publishing it again          linked=true
 a length that disagrees      linked=false
 read after the staged name goes body="BBBB"             gets=3 backend=false
 and its short last member    body="CC"               gets=3 backend=false
+cap=0 over a staged body     staged=true cache chunks=0

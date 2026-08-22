@@ -12,14 +12,16 @@ module type Fetch = sig
   val get_chunk : chunk_key:string -> Bigstring.t Lwt.t
 end
 
+(* What a read cost. Hoisted out of [Make]: it describes a read, not one
+   store's state, and the staged half names it too. *)
+type served = { bytes : int; from_backend : bool }
+
 module Make (C : Conf.S) (F : Fetch) = struct
   let path group =
     Cache_layout.chunk_path ~cache_root:C.cache_root ~domain_name:C.domain_name
       (Chunk_group.key group)
 
   let exists group = Lwt_unix_retry.file_exists (path group)
-
-  type served = { bytes : int; from_backend : bool }
 
   (* Keyed by content, so two readers of one group share a fetch whether or not
      they are reading the same file.
@@ -198,93 +200,24 @@ module Make (C : Conf.S) (F : Fetch) = struct
 
   let forget ~group = Fs_util.unlink_quiet (path group)
 
-  let staged_path uuid =
-    Filename.concat
-      (Cache_layout.staged_chunks_dir ~cache_root:C.cache_root C.domain_name)
-      uuid
+  (* Adopt [src] as this group's body by giving the same bytes a second name.
+     The cache owns where a group body lives, so the staged half hands over the
+     file rather than the destination.
 
-  (* Sparse, so the part of a group nobody has written costs no disk. *)
-  let stage_len ~uuid =
-    Lwt.catch
-      (fun () ->
-        let+ st = Lwt_unix_retry.LargeFile.stat (staged_path uuid) in
-        Some (Int64.to_int st.Unix.LargeFile.st_size))
-      (fun _ -> Lwt.return_none)
-
-  let stage_ensure ~uuid ~len =
-    let p = staged_path uuid in
-    let* () = Fs_util.ensure_parent p in
-    let* have = stage_len ~uuid in
-    match have with
-      | Some n when n >= len -> Lwt.return_unit
-      | _ ->
-          let* fd =
-            Lwt_unix_retry.openfile p [Unix.O_WRONLY; Unix.O_CREAT] 0o644
-          in
-          Lwt.finalize
-            (fun () -> Lwt_unix_retry.LargeFile.ftruncate fd (Int64.of_int len))
-            (fun () -> Lwt_unix_retry.close fd)
-
-  let stage_resize ~uuid ~len =
-    let* fd =
-      Lwt_unix_retry.openfile (staged_path uuid) [Unix.O_WRONLY] 0o644
-    in
-    Lwt.finalize
-      (fun () -> Lwt_unix_retry.LargeFile.ftruncate fd (Int64.of_int len))
-      (fun () -> Lwt_unix_retry.close fd)
-
-  let stage_write ~uuid buf ~offset =
-    Local_io.write (staged_path uuid) buf ~offset:(Int64.of_int offset)
-
-  let stage_read_into ~uuid buf ~offset =
-    Local_io.read (staged_path uuid) buf ~offset:(Int64.of_int offset)
-
-  (* For a write not replacing all of a published chunk. The copy is the price of
-     immutable content-addressed chunks. *)
-  let stage_copy_chunk ~group ~index ~uuid ~offset =
-    let* () = ensure ~group () in
-    let len = Chunk_group.size group index in
-    let buf = Bigarray.Array1.create Bigarray.char Bigarray.c_layout len in
-    let* n =
-      Local_io.read (path group) buf
-        ~offset:(Int64.of_int (Chunk_group.offset group index))
-    in
-    let+ (_ : int) = stage_write ~uuid (Bigarray.Array1.sub buf 0 n) ~offset in
-    ()
-
-  (* Regrouping: the same bytes under a body that holds the whole group. *)
-  let stage_copy ~src ~src_off ~dst ~dst_off ~len =
-    let buf = Bigarray.Array1.create Bigarray.char Bigarray.c_layout len in
-    let* n = stage_read_into ~uuid:src buf ~offset:src_off in
-    let+ (_ : int) =
-      stage_write ~uuid:dst (Bigarray.Array1.sub buf 0 n) ~offset:dst_off
-    in
-    ()
-
-  let stage_forget ~uuid = Fs_util.unlink_quiet (staged_path uuid)
-
-  (* Not every cache root can hold a second name for one inode -- some Android
+     Not every cache root can hold a second name for one inode -- some Android
      storage goes through a shim that cannot -- and the answer is the same for
      every group once it is known, so it is asked once and remembered. Errors
      that are per-inode or transient leave it unanswered. *)
   let links_supported = ref None
 
-  let stage_link_group ~uuid ~len ~group =
-    (* The copy path fails a member whose length disagrees with the manifest
-       ({!write_group}); the link path publishes the body whole, so the same
-       disagreement has to stop it here or it reaches the store under a name
-       derived from bytes it does not hold. *)
-    if len <> Chunk_group.bytes group then Lwt.return_false
-    else if !links_supported = Some false then Lwt.return_false
+  let link_in ~src ~group =
+    if !links_supported = Some false then Lwt.return_false
     else (
       let dst = path group in
       Lwt.catch
         (fun () ->
-          (* Inside the guard: a promotion replayed after the body was dropped
-             finds nothing to resize, and writing the group is the answer. *)
-          let* () = stage_resize ~uuid ~len in
           let* () = Fs_util.ensure_parent dst in
-          let* () = Lwt_unix_retry.link (staged_path uuid) dst in
+          let* () = Lwt_unix_retry.link src dst in
           let now = Unix.gettimeofday () in
           (* Dated now, or the cap reads a freshly published group as being as
              old as the write that staged it. *)
@@ -307,32 +240,6 @@ module Make (C : Conf.S) (F : Fetch) = struct
               links_supported := Some false;
               Lwt.return_false
           | _ -> Lwt.return_false))
-
-  (* A frontend handing back a complete file (as the FileProvider extension
-     always does) gets it adopted as-is: one file, no chunk split. *)
-
-  let whole_path uuid =
-    Filename.concat
-      (Cache_layout.staged_whole_dir ~cache_root:C.cache_root C.domain_name)
-      uuid
-
-  (* A rename on one filesystem, which is the point of this path; a copy across
-     two. *)
-  let adopt_whole ~src ~uuid =
-    let dst = whole_path uuid in
-    let* () = Fs_util.ensure_parent dst in
-    Lwt.catch
-      (fun () -> Lwt_unix_retry.rename src dst)
-      (function
-        | Unix.Unix_error (Unix.EXDEV, _, _) ->
-            let* () = Fs_util.copy_file ~src ~dst in
-            Fs_util.unlink_quiet src
-        | exn -> Lwt.fail exn)
-
-  let whole_read_into ~uuid buf ~offset =
-    Local_io.read (whole_path uuid) buf ~offset
-
-  let whole_forget ~uuid = Fs_util.unlink_quiet (whole_path uuid)
 
   (* The cap may delete a group between the fetch and the read, or mid-read, so a
      miss or short read is retried once against a freshly fetched body. A second

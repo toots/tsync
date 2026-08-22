@@ -92,6 +92,7 @@ module C : Conf.S = struct
 end
 
 module Cc = Chunk_cache.Make (C) (Fetch)
+module Sb = Staged.Make (C) (Cc)
 
 (* Same store, seen through a capped config: the cap is the only difference. *)
 module Capped20 =
@@ -167,7 +168,8 @@ let read_member g index =
   let want = Chunk_group.size g index in
   let buf = Bigarray.Array1.create Bigarray.char Bigarray.c_layout want in
   let+ served = Cc.read_into ~group:g ~index buf ~chunk_off:0 in
-  (String.init served.Cc.bytes (Bigarray.Array1.get buf), served.Cc.from_backend)
+  ( String.init served.Chunk_cache.bytes (Bigarray.Array1.get buf),
+    served.Chunk_cache.from_backend )
 
 let show_body label g index =
   let+ body, from_backend = read_member g index in
@@ -236,7 +238,7 @@ let () =
        let buf = Bigarray.Array1.create Bigarray.char Bigarray.c_layout 2 in
        let+ served = Cc.read_into ~group:trio ~index:1 buf ~chunk_off:2 in
        Printf.printf "%-28s body=%S\n" "trio member 1 at +2"
-         (String.init served.Cc.bytes (Bigarray.Array1.get buf))
+         (String.init served.Chunk_cache.bytes (Bigarray.Array1.get buf))
      in
 
      (* Content-addressed like any chunk: the same three chunks in another file
@@ -253,7 +255,7 @@ let () =
              build ~per:1 ~chunk_size:4 ~size:4 [key_of "never uploaded"] 0
            in
            let buf = Bigarray.Array1.create Bigarray.char Bigarray.c_layout 4 in
-           let+ (_ : Cc.served) =
+           let+ (_ : Chunk_cache.served) =
              Cc.read_into ~group:missing ~index:0 buf ~chunk_off:0
            in
            Printf.printf "%-28s no error\n" "missing chunk")
@@ -290,7 +292,7 @@ let () =
         staged one goes and the cache keeps the body afterwards. *)
      let uuid = "stagedbody000001" in
      let bytes = Chunk_group.bytes trio in
-     let* () = Cc.stage_ensure ~uuid ~len:bytes in
+     let* () = Sb.ensure ~uuid ~len:bytes in
      let* () =
        Lwt_list.iter_s
          (fun (i, body) ->
@@ -299,25 +301,33 @@ let () =
                (Array.init (String.length body) (String.get body))
            in
            let+ (_ : int) =
-             Cc.stage_write ~uuid buf ~offset:(Chunk_group.offset trio i)
+             Sb.write ~uuid buf ~offset:(Chunk_group.offset trio i)
            in
            ())
          [(0, "AAAA"); (1, "BBBB"); (2, "CC")]
      in
-     let* linked = Cc.stage_link_group ~uuid ~len:bytes ~group:trio in
-     let staged = Cc.staged_path uuid in
+     let* linked = Sb.link_group ~uuid ~len:bytes ~group:trio in
+     let staged = Sb.path uuid in
      let same_inode () =
        (Unix.stat staged).Unix.st_ino = (Unix.stat (path trio)).Unix.st_ino
      in
      Printf.printf "%-28s linked=%b one body=%b names=%d\n" "publish by link"
        linked (same_inode ()) (Unix.stat (path trio)).Unix.st_nlink;
-     let* again = Cc.stage_link_group ~uuid ~len:bytes ~group:trio in
+     let* again = Sb.link_group ~uuid ~len:bytes ~group:trio in
      Printf.printf "%-28s linked=%b\n" "publishing it again" again;
-     let* disagreeing =
-       Cc.stage_link_group ~uuid ~len:(bytes + 1) ~group:trio
-     in
+     let* disagreeing = Sb.link_group ~uuid ~len:(bytes + 1) ~group:trio in
      Printf.printf "%-28s linked=%b\n" "a length that disagrees" disagreeing;
-     let* () = Cc.stage_forget ~uuid in
+     let* () = Sb.forget ~uuid in
      let* () = show_body "read after the staged name goes" trio 1 in
-     let+ () = show_body "and its short last member" trio 2 in
-     ())
+     let* () = show_body "and its short last member" trio 2 in
+
+     (* Nothing tells the cap to spare unsynced bytes: they are in a tree it
+        does not sweep, so a cap of zero cannot reach them. *)
+     let unpublished = "stagedbody000002" in
+     let* () = Sb.ensure ~uuid:unpublished ~len:4 in
+     let* () = Capped0.enforce_cap () in
+     let+ chunks, _ = Cc.stats () in
+     Printf.printf "%-28s staged=%b cache chunks=%d\n"
+       "cap=0 over a staged body"
+       (Sys.file_exists (Sb.path unpublished))
+       chunks)
