@@ -56,7 +56,6 @@
    -open
    Tsync_lwt_unix))
  (name tsync)
- (modules cli configure tsync)
  (public_name tsync)
  (package tsync)
  (libraries

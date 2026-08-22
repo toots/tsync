@@ -89,4 +89,29 @@ let report_job ?target ?current ~kind (module C : Conf.S) ~counters () =
     ~counters ()
 
 let doing phase detail = phase ^ " · " ^ detail
+
+let human_bytes = Metrics.human_bytes
+
+
+let human_ts ts_ns =
+  let secs = Int64.to_float (Int64.div ts_ns 1_000_000_000L) in
+  let tm = Unix.localtime secs in
+  Printf.sprintf "%04d-%02d-%02d %02d:%02d:%02d" (tm.Unix.tm_year + 1900)
+    (tm.Unix.tm_mon + 1) tm.Unix.tm_mday tm.Unix.tm_hour tm.Unix.tm_min
+    tm.Unix.tm_sec
+
+
+let parse_duration s =
+  let n = String.length s in
+  let fail () =
+    failwith ("invalid duration (use <N>d, <N>h, <N>m or <N>s): " ^ s)
+  in
+  if n < 2 then fail ()
+  else (
+    match (int_of_string_opt (String.sub s 0 (n - 1)), s.[n - 1]) with
+      | Some k, 'd' when k > 0 -> float_of_int (k * 86400)
+      | Some k, 'h' when k > 0 -> float_of_int (k * 3600)
+      | Some k, 'm' when k > 0 -> float_of_int (k * 60)
+      | Some k, 's' when k > 0 -> float_of_int k
+      | _ -> fail ())
 let run_lwt = Oneshot.run
