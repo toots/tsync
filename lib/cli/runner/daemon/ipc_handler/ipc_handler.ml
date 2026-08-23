@@ -246,23 +246,31 @@ module Make (C : Conf.S) (F : File_ops.S) : S = struct
   (* A listing carries rendered keys; one this domain cannot read describes no
      file it could report on. *)
   let file_entry_json ~container_id (e : Backend.file_entry) =
-    Lwt_bounded.use resolve_pool @@ fun () ->
-    let key = Option.value (Lk.of_string e.key) ~default:Lk.root in
-    let* naming = naming_fields ~container_id key in
-    let+ m = F.published key in
-    match m with
-      | Some m ->
-          `Assoc
-            (naming
-            @ file_fields
-                ~size:(Int64.to_int (Manifest.size m))
-                ~mtime:(Manifest.mtime m) ~etag:(Manifest.h1 m)
-                ~is_uploaded:true ~symlink:(Manifest.symlink m))
-      | _ ->
-          `Assoc
-            (naming
-            @ file_fields ~size:e.size ~mtime:e.last_modified ~etag:""
-                ~is_uploaded:true ~symlink:None)
+    match Lk.of_string e.key with
+      | None -> Lwt.return_none
+      | Some key -> (
+          (* The slot is taken for the resolution, not for deciding there is
+             none to do: the list is as long as the folder, and only the GETs
+             need bounding. *)
+          Lwt_bounded.use resolve_pool
+          @@ fun () ->
+          let* naming = naming_fields ~container_id key in
+          let+ m = F.published key in
+          match m with
+            | Some m ->
+                Some
+                  (`Assoc
+                     (naming
+                     @ file_fields
+                         ~size:(Int64.to_int (Manifest.size m))
+                         ~mtime:(Manifest.mtime m) ~etag:(Manifest.h1 m)
+                         ~is_uploaded:true ~symlink:(Manifest.symlink m)))
+            | _ ->
+                Some
+                  (`Assoc
+                     (naming
+                     @ file_fields ~size:e.size ~mtime:e.last_modified ~etag:""
+                         ~is_uploaded:true ~symlink:None)))
 
   (* An item under a folder this client holds no id for cannot be named to a
      caller, and both listings answer with what they could name. How many they
@@ -292,7 +300,7 @@ module Make (C : Conf.S) (F : File_ops.S) : S = struct
              cold enumeration O(files) round trips. [resolve_pool] bounds the
              fan-out; map_p preserves order. *)
           let* files_json =
-            Lwt_list.map_p (file_entry_json ~container_id) files
+            Lwt_list.filter_map_p (file_entry_json ~container_id) files
           in
           let+ dirs_json =
             Lwt_list.map_s
@@ -318,14 +326,14 @@ module Make (C : Conf.S) (F : File_ops.S) : S = struct
     let by_parent = Hashtbl.create 16 in
     List.iter
       (fun (e : Backend.file_entry) ->
-        let parent =
-          Key.parent
-            (Option.value
-               (Option.map Logical_key.path (Lk.of_string e.key))
-               ~default:"")
-        in
-        Hashtbl.replace by_parent parent
-          (e :: Option.value (Hashtbl.find_opt by_parent parent) ~default:[]))
+        match Lk.of_string e.key with
+          | None -> ()
+          | Some key ->
+              let parent = Key.parent (Logical_key.path key) in
+              Hashtbl.replace by_parent parent
+                (e
+                :: Option.value (Hashtbl.find_opt by_parent parent) ~default:[]
+                ))
       files;
     let+ groups =
       Lwt_list.map_s
@@ -337,7 +345,7 @@ module Make (C : Conf.S) (F : File_ops.S) : S = struct
             | None -> Lwt.return (`Unnamed (List.length entries))
             | Some container_id ->
                 let+ json =
-                  Lwt_list.map_p
+                  Lwt_list.filter_map_p
                     (file_entry_json ~container_id)
                     (List.rev entries)
                 in
