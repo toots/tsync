@@ -1,0 +1,7 @@
+; What an item in a domain is called: the name a user gave it, and whether it
+; names a file or a folder. Shared vocabulary — a frontend, the daemon and the
+; journal all speak these, and none of them spells the prefix or the separator.
+
+(library
+ (name tsync_logical_key)
+ (public_name tsync-libs.logical_key))

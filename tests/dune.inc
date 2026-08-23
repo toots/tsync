@@ -969,6 +969,20 @@
   (action
    (diff listing_test.expected listing_test.output))))
 
+(subdir unit/logical_key
+ (alias
+  (name default)
+  (deps logical_key_test.exe))
+ (rule
+  (alias runtest)
+  (target logical_key_test.output)
+  (action
+   (with-stdout-to logical_key_test.output (ignore-stderr (run ./logical_key_test.exe)))))
+ (rule
+  (alias runtest)
+  (action
+   (diff logical_key_test.expected logical_key_test.output))))
+
 (subdir unit/manifest_memo
  (alias
   (name default)

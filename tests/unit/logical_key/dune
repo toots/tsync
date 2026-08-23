@@ -1,0 +1,5 @@
+(executable
+ (flags
+  (:standard -open Tsync_logical_key))
+ (name logical_key_test)
+ (libraries tsync_logical_key))
