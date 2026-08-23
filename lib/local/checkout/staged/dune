@@ -6,6 +6,8 @@
  (flags
   (:standard
    -open
+   Tsync_id
+   -open
    Tsync_conf
    -open
    Tsync_naming
@@ -28,6 +30,7 @@
  (name tsync_staged)
  (public_name tsync-libs.staged)
  (libraries
+  tsync_id
   tsync_conf
   tsync_naming
   tsync_manifest

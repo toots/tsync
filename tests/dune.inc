@@ -1127,6 +1127,20 @@
   (action
    (diff status_report_test.expected status_report_test.output))))
 
+(subdir unit/stored_key
+ (alias
+  (name default)
+  (deps stored_key_test.exe))
+ (rule
+  (alias runtest)
+  (target stored_key_test.output)
+  (action
+   (with-stdout-to stored_key_test.output (ignore-stderr (run ./stored_key_test.exe)))))
+ (rule
+  (alias runtest)
+  (action
+   (diff stored_key_test.expected stored_key_test.output))))
+
 (subdir unit/subs
  (alias
   (name default)

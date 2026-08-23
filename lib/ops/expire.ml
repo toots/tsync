@@ -50,7 +50,7 @@ module Make (C : Conf.S) = struct
      one cutoff governs versions and the journal too. *)
   let purge_trashed ?(on_delete = fun ~name:_ ~deleted:_ -> ()) ~path () =
     let* trash =
-      B.list_prefix ~prefix:(C.domain_prefix ^ Folder.trash_id ^ "/") ()
+      B.list_prefix ~prefix:(C.domain_prefix ^ Stored_key.trash_id ^ "/") ()
     in
     let* found =
       Lwt_list.filter_map_s
@@ -88,7 +88,7 @@ module Make (C : Conf.S) = struct
        counts as a reference by the time versions are partitioned. *)
     on_list ~name:"trash";
     let* trash =
-      B.list_prefix ~prefix:(C.domain_prefix ^ Folder.trash_id ^ "/") ()
+      B.list_prefix ~prefix:(C.domain_prefix ^ Stored_key.trash_id ^ "/") ()
     in
     on_scan ~name:"trash" ~objects:(List.length trash);
     let* trash_keys =

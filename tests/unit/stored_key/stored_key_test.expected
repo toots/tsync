@@ -1,0 +1,18 @@
+=== the ids that anchor the tree
+root                       .tsync-root
+trash                      .tsync-trash
+a minted id's shape        16 hex characters
+two mints differ           true
+
+=== where a child is filed
+img.jpg                    9f3a1c0428b6d5e7/066843ea47b80079-e0e3d2bb9b72c14d
+the same name again        true
+a name needing escaping    9f3a1c0428b6d5e7/ff2a8d6eb31954ba-877a72bdda4dcd61
+under another folder       0000/066843ea47b80079-e0e3d2bb9b72c14d
+the folder's index         9f3a1c0428b6d5e7/.tsync-index
+
+=== what a listing offers
+a child                    index=false child=true
+the index                  index=true  child=false
+the namespace itself       index=false child=false
+a write in flight          index=false child=false

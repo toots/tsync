@@ -14,7 +14,7 @@ let () =
 
   (* One item, one name, or the system believes in two containers. *)
   check "the root id normalises to the root"
-    (Item_ref.parse ("d:" ^ Folder.root_id) = `Root);
+    (Item_ref.parse ("d:" ^ Stored_key.root_id) = `Root);
 
   (* A leaf name cannot contain "/" but may contain anything else, including the
      characters the scheme itself uses. *)

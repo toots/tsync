@@ -6,10 +6,9 @@
     them spells the prefix or the separator that carries the two apart on the
     wire.
 
-    Distinct from the key an object is filed under on a backend, which is
-    derived from folder ids and a hashed leaf and is {!Layout}'s to produce. A
-    value of this type is never one of those, which is the point of it being a
-    type. *)
+    A store files the same item under a different name, which is
+    {!Stored_key}'s. A value of this type is never one of those, which is the
+    point of it being a type. *)
 
 type t
 

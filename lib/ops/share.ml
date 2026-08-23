@@ -104,7 +104,7 @@ module Make (C : Conf.S) = struct
                 let entries =
                   List.filter
                     (fun (e : Backend.file_entry) ->
-                      Folder.is_child_object e.Backend.key)
+                      Stored_key.is_child_object e.Backend.key)
                     entries
                 in
                 if entries = [] then

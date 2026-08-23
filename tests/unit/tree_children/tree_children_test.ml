@@ -67,7 +67,7 @@ let is_dir = function
 let () =
   Lwt_main.run
     (case "an emptied namespace has no children";
-     let emptied = Folder.new_id () in
+     let emptied = Stored_key.new_id () in
      let* () = put emptied "gone" (manifest_body "gone.txt") in
      let* () = Store.delete ~key:(ns emptied ^ "gone") () in
      let* listed = Store.list_prefix ~prefix:(ns emptied) () in
@@ -81,19 +81,19 @@ let () =
      check "and it yields no children" (children = []);
 
      case "children are classified by their body";
-     let mixed = Folder.new_id () in
+     let mixed = Stored_key.new_id () in
      let* () = put mixed "a" (manifest_body "a.txt") in
      let* () =
        put mixed "b"
          (Folder.marker_to_string
-            { Folder.name = "sub"; id = Folder.new_id () })
+            { Folder.name = "sub"; id = Stored_key.new_id () })
      in
      let* children = Tree.children ~folder_id:mixed () in
      check "one manifest" (List.length (List.filter is_file children) = 1);
      check "one marker" (List.length (List.filter is_dir children) = 1);
 
      case "an unusable body is reported, not raised";
-     let junk = Folder.new_id () in
+     let junk = Stored_key.new_id () in
      let* () = put junk "a" (manifest_body "a.txt") in
      let* () = put junk "bad" "neither a marker nor a manifest" in
      let seen = ref [] in
@@ -114,7 +114,7 @@ let () =
      check "and `Fail skips it just the same" (List.length children = 1);
 
      case "one object that will not read does not cost its siblings";
-     let flaky = Folder.new_id () in
+     let flaky = Stored_key.new_id () in
      let* () = put flaky "good" (manifest_body "good.txt") in
      let* () = put flaky "other" (manifest_body "other.txt") in
      let* () = put flaky "nope" (manifest_body "nope.txt") in

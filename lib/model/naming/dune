@@ -1,7 +1,10 @@
-; What an item in a domain is called: the name a user gave it, and whether it
-; names a file or a folder. Shared vocabulary — a frontend, the daemon and the
-; journal all speak these, and none of them spells the prefix or the separator.
+; What an item in a domain is called, and how it is mapped to a stored key.
+; Shared vocabulary — a frontend, the daemon and the journal all speak the
+; first, and the store's own naming is derived from it here.
 
 (library
+ (flags
+  (:standard -open Tsync_local_io -open Tsync_xxhash -open Tsync_id))
  (name tsync_logical_key)
- (public_name tsync-libs.logical_key))
+ (public_name tsync-libs.logical_key)
+ (libraries tsync_local_io tsync_xxhash tsync_id))

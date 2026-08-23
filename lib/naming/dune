@@ -11,6 +11,10 @@
  (flags
   (:standard
    -open
+   Tsync_logical_key
+   -open
+   Tsync_id
+   -open
    Tsync_chunks
    -open
    Tsync_conf
@@ -29,6 +33,8 @@
  (name tsync_naming)
  (public_name tsync-libs.naming)
  (libraries
+  tsync_logical_key
+  tsync_id
   tsync_chunks
   tsync_conf
   tsync_backend_register

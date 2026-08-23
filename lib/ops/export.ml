@@ -40,7 +40,7 @@ module Make (C : Conf.S) = struct
   let remote_rels () =
     Tree.fold_tree
       ~on_unusable:(`Skip (fun _ _ -> ()))
-      ~folder_id:Folder.root_id ~rel:""
+      ~folder_id:Stored_key.root_id ~rel:""
       (fun acc rel entry ->
         match entry.Inode_tree.body with
           (* Walked by backend key, which is hashed, so the body is the only

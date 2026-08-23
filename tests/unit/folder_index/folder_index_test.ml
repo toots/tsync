@@ -36,12 +36,12 @@ module Store : Backend.S = struct
     Hashtbl.replace versions key (string_of_int n)
 
   let put ~key ~data () =
-    if Folder.is_index_key key then incr index_writes;
+    if Stored_key.is_index_key key then incr index_writes;
     bump key;
     Disk.put ~key ~data ()
 
   let get_opt ~key () =
-    if Folder.is_index_key key then incr index_reads else incr child_reads;
+    if Stored_key.is_index_key key then incr index_reads else incr child_reads;
     Disk.get_opt ~key ()
 
   let list_prefix ?max_keys ~prefix () =
@@ -79,13 +79,13 @@ module Two =
 
 module Tree_two = Inode_tree.Make (Two)
 
-let folder = Folder.new_id ()
+let folder = Stored_key.new_id ()
 
 let manifest name =
   Manifest.encode ~name ~size:0L ~chunk_size:4 ~mtime:0.
     ~h1:(String.make 16 'a') ~h2:(String.make 16 'b') ~symlink:None ~keys:[]
 
-let other = Folder.new_id ()
+let other = Stored_key.new_id ()
 
 let write_in folder_id name body =
   Store.put

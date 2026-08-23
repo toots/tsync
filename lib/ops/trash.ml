@@ -11,7 +11,7 @@ module Make (C : Conf.S) = struct
      it. *)
   let markers () =
     let+ entries =
-      B.list_prefix ~prefix:(C.domain_prefix ^ Folder.trash_id ^ "/") ()
+      B.list_prefix ~prefix:(C.domain_prefix ^ Stored_key.trash_id ^ "/") ()
     in
     List.filter
       (fun (e : Backend.file_entry) -> not (Key.is_dir e.Backend.key))

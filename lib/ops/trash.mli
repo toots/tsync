@@ -1,6 +1,6 @@
 (** Folders that were deleted, and putting one back.
 
-    A removed folder's marker is moved under {!Folder.trash_id}, unreachable
+    A removed folder's marker is moved under {!Stored_key.trash_id}, unreachable
     from the root, so its subtree leaves listings and resync without anything
     being copied or deleted. Restoring is the same move in reverse and costs one
     object write either way, whatever the subtree holds.

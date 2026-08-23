@@ -51,7 +51,8 @@ let publish name =
       ~h1:(String.make 16 'a') ~h2:(String.make 16 'b') ~symlink:None ~keys:[]
   in
   Store.put
-    ~key:(C.domain_prefix ^ Folder.child_key ~folder_id:Folder.root_id name)
+    ~key:
+      (C.domain_prefix ^ Stored_key.child_key ~folder_id:Stored_key.root_id name)
     ~data:(Bigstring.of_string body) ()
 
 let found name =
@@ -100,7 +101,7 @@ let () =
           local write and moves no mark. *)
        Folder_ids.write ~cache_root:C.cache_root ~domain_name:C.domain_name
          "unknown-folder"
-         { Folder.name = "unknown-folder"; id = Folder.root_id }
+         { Folder.name = "unknown-folder"; id = Stored_key.root_id }
      in
      let* () = publish "inside.txt" in
      let* now = found deep in

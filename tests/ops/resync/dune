@@ -2,6 +2,8 @@
  (flags
   (:standard
    -open
+   Tsync_logical_key
+   -open
    Tsync_manifest
    -open
    Tsync_journal
@@ -27,6 +29,7 @@
    Tsync_test_harness))
  (name resync_test)
  (libraries
+  tsync_logical_key
   tsync_manifest
   tsync_journal
   tsync_chunks

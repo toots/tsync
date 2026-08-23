@@ -57,7 +57,7 @@ module Make (C : Conf.S) = struct
       || not
            (List.exists
               (fun (e : Backend.file_entry) ->
-                Folder.is_index_key e.Backend.key)
+                Stored_key.is_index_key e.Backend.key)
               listed)
     then Lwt.return Folder_index.empty
     else
@@ -66,7 +66,7 @@ module Make (C : Conf.S) = struct
           let indexed =
             List.filter
               (fun (e : Backend.file_entry) ->
-                Folder.is_index_key e.Backend.key
+                Stored_key.is_index_key e.Backend.key
                 && e.Backend.size <= Folder_index.max_bytes)
               listed
           in
@@ -110,7 +110,7 @@ module Make (C : Conf.S) = struct
         Lwt.catch
           (fun () ->
             St.put_raw
-              ~bkey:(C.domain_prefix ^ Folder.index_key ~folder_id)
+              ~bkey:(C.domain_prefix ^ Stored_key.index_key ~folder_id)
               ~data:(Folder_index.of_bodies bodies))
           (fun exn ->
             Log.warn "folder index %s: %s" folder_id (Printexc.to_string exn);
@@ -124,11 +124,12 @@ module Make (C : Conf.S) = struct
     let* listed = St.list_namespace ~folder_id in
     List.iter
       (fun (e : Backend.file_entry) ->
-        if Folder.is_index_key e.Backend.key then on_index e.Backend.key)
+        if Stored_key.is_index_key e.Backend.key then on_index e.Backend.key)
       listed;
     let entries =
       List.filter
-        (fun (e : Backend.file_entry) -> Folder.is_child_object e.Backend.key)
+        (fun (e : Backend.file_entry) ->
+          Stored_key.is_child_object e.Backend.key)
         listed
     in
     (* A key listed and then gone: the listing and the reads that follow it are

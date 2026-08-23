@@ -98,7 +98,7 @@ module Make (C : Conf.S) (F : File_ops.S) : S = struct
     let body = Key.chop_slash rel in
     let name = if body = "" then C.domain_name else Filename.basename body in
     let parent =
-      if container_id = Folder.root_id then `Root else `Dir container_id
+      if container_id = Stored_key.root_id then `Root else `Dir container_id
     in
     let+ self =
       if body = "" then Lwt.return_some `Root
@@ -122,7 +122,7 @@ module Make (C : Conf.S) (F : File_ops.S) : S = struct
           ]
 
   let lookup_folder rel =
-    if rel = "" then Lwt.return_some Folder.root_id
+    if rel = "" then Lwt.return_some Stored_key.root_id
     else
       Folder_ids.lookup_id ~cache_root:C.cache_root ~domain_name:C.domain_name
         rel
@@ -182,7 +182,7 @@ module Make (C : Conf.S) (F : File_ops.S) : S = struct
       not_found key
     else
       let* container = parent_folder_id key in
-      let container_id = Option.value container ~default:Folder.root_id in
+      let container_id = Option.value container ~default:Stored_key.root_id in
       let* naming = naming_fields ~container_id key in
       if naming = [] then not_found key
       else (
@@ -355,7 +355,9 @@ module Make (C : Conf.S) (F : File_ops.S) : S = struct
 
   let parent_ref ~lookup rel =
     let+ pid = lookup (Key.parent rel) in
-    Option.map (fun pid -> if pid = Folder.root_id then `Root else `Dir pid) pid
+    Option.map
+      (fun pid -> if pid = Stored_key.root_id then `Root else `Dir pid)
+      pid
 
   let named self parent rel =
     match (self, parent) with

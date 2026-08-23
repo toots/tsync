@@ -301,7 +301,7 @@ module Make_with_layout (C : Conf.S) (Sq : Sync_queue.S) (L : Layout.S) :
             | Some bkey -> St.delete_raw ~bkey
         in
         let trash_key =
-          C.domain_prefix ^ Folder.trash_id ^ "/" ^ Folder.new_id ()
+          C.domain_prefix ^ Stored_key.trash_id ^ "/" ^ Stored_key.new_id ()
         in
         let marker =
           Folder.trash_marker_to_string ~name:(Filename.basename rel) ~id:fid

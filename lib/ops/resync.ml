@@ -64,7 +64,7 @@ module Make (C : Conf.S) = struct
       (* The one walk that reads every folder whole and may write, so it is the
          one that leaves each folder's index behind. *)
       Tree.fold_tree ~on_unusable:(`Skip unusable)
-        ~refresh_index:(not C.read_only) ~slots ~folder_id:Folder.root_id
+        ~refresh_index:(not C.read_only) ~slots ~folder_id:Stored_key.root_id
         ~rel:"" visit ()
     in
     (!count, !failed)

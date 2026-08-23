@@ -2,6 +2,8 @@
  (flags
   (:standard
    -open
+   Tsync_logical_key
+   -open
    Tsync_manifest
    -open
    Tsync_chunks
@@ -23,6 +25,7 @@
    Tsync_test_harness))
  (name tree_children_test)
  (libraries
+  tsync_logical_key
   tsync_manifest
   tsync_chunks
   tsync_test_harness

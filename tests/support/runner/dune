@@ -2,6 +2,8 @@
  (flags
   (:standard
    -open
+   Tsync_logical_key
+   -open
    Tsync_history
    -open
    Tsync_staged
@@ -45,6 +47,7 @@
    Tsync_ipc_handler))
  (name tsync_test_runner)
  (libraries
+  tsync_logical_key
   tsync_history
   tsync_staged
   tsync_checkout

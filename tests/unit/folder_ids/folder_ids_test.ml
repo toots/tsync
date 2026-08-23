@@ -38,7 +38,7 @@ let main () =
   let* got_a = rel_of (Option.get a) in
   check "an ancestor resolves too" (got_a = Some "a");
 
-  let* root_rel = rel_of Folder.root_id in
+  let* root_rel = rel_of Stored_key.root_id in
   check "the root resolves to the domain root" (root_rel = Some "");
   let* missing = rel_of "0000000000000000" in
   check "an unknown id resolves to nothing" (missing = None);

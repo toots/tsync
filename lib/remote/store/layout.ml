@@ -46,7 +46,7 @@ module Inode = struct
     let rel_of = Key.strip_prefix ~domain_prefix:C.domain_prefix
 
     let child_key ~folder_id leaf =
-      C.domain_prefix ^ Folder.child_key ~folder_id leaf
+      C.domain_prefix ^ Stored_key.child_key ~folder_id leaf
 
     (* A store that cannot arbitrate falls back to minting locally, said once
        because it is a real weakening: two clients creating one directory can
@@ -61,7 +61,7 @@ module Inode = struct
 
        Still local-first: a folder already resolved costs no round trip. *)
     let rec ensure_id rel =
-      if rel = "" then Lwt.return Folder.root_id
+      if rel = "" then Lwt.return Stored_key.root_id
       else
         let* known = lookup_id rel in
         match known with
@@ -71,7 +71,7 @@ module Inode = struct
               (* The parent is claimed first, so the key this claim names is
                  already the agreed one. *)
               let* pid = ensure_id (Key.parent rel) in
-              let candidate = { Folder.name; id = Folder.new_id () } in
+              let candidate = { Folder.name; id = Stored_key.new_id () } in
               let key = child_key ~folder_id:pid name in
               let module B = (val C.store : Backend.S) in
               let* held =

@@ -82,7 +82,7 @@ let () =
 
      let* () =
        B.put
-         ~key:(C.domain_prefix ^ Folder.root_id ^ "/x")
+         ~key:(C.domain_prefix ^ Stored_key.root_id ^ "/x")
          ~data:(Bigstring.of_string "x") ()
      in
      let* url = S.create ~token:"bb" ~expires:123 ~rel:"" () in
@@ -93,7 +93,8 @@ let () =
      assert (member "type" m = `String "dir");
      assert (member "filename" m = `String "testdom.zip");
      assert (
-       member "dirPrefix" m = `String (C.domain_prefix ^ Folder.root_id ^ "/"));
+       member "dirPrefix" m
+       = `String (C.domain_prefix ^ Stored_key.root_id ^ "/"));
      Lwt.return_unit);
 
   let module NoShare : Backend.S = struct

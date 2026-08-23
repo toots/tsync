@@ -61,7 +61,7 @@ let build_backends ~paths ~resume (d : Conf_parsing.domain) :
         ~chunk_keys
         ~journal_prefix:(Conf_parsing.journal_prefix d)
         ~cursor_key:(Conf_parsing.cursor_key d)
-        ~excluded:Folder.is_index_key ~reads_reach:(bc.role = `Replica)
+        ~excluded:Stored_key.is_index_key ~reads_reach:(bc.role = `Replica)
         ~root:(deferred_root ~paths d) ()
     in
     Hashtbl.replace built bc.name built_target;

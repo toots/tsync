@@ -7,6 +7,10 @@
  (flags
   (:standard
    -open
+   Tsync_logical_key
+   -open
+   Tsync_id
+   -open
    Tsync_chunk_integrity
    -open
    Tsync_history
@@ -51,6 +55,8 @@
  (name tsync_ops)
  (public_name tsync-libs.ops)
  (libraries
+  tsync_logical_key
+  tsync_id
   tsync_chunk_integrity
   tsync_history
   tsync_remote

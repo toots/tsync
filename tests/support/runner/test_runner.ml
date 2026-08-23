@@ -241,7 +241,7 @@ let reset_folder_aliases () =
 (* [root_id] and [trash_id] are constants, not minted ids: they are already
    stable and saying so is the point of printing them. *)
 let alias_id id =
-  if id = Folder.root_id || id = Folder.trash_id then id
+  if id = Stored_key.root_id || id = Stored_key.trash_id then id
   else (
     match Hashtbl.find_opt folder_alias id with
       | Some a -> a
@@ -1209,8 +1209,8 @@ let dump_backend_at ~backend_root ~domain_prefix ~chunk_prefix ~journal_prefix
           number_under id))
       (List.sort compare (List.filter (fun (p, _, _) -> p = parent) markers))
   in
-  number_under Folder.root_id;
-  number_under Folder.trash_id;
+  number_under Stored_key.root_id;
+  number_under Stored_key.trash_id;
   (* Anything the walk did not reach — a marker whose parent is gone — still
      needs a stable name, taken in name order. *)
   List.iter
@@ -1336,7 +1336,7 @@ let dump_backend_at ~backend_root ~domain_prefix ~chunk_prefix ~journal_prefix
           let+ data = B.get ~key:e.key () in
           match Folder.marker_of_string (Bigstring.to_string data) with
             | Some m ->
-                if starts_with (domain_prefix ^ Folder.trash_id ^ "/") e.key
+                if starts_with (domain_prefix ^ Stored_key.trash_id ^ "/") e.key
                 then
                   Printf.printf "  trash %s -> %s\n" m.Folder.name
                     (alias_id m.Folder.id)
@@ -1379,7 +1379,7 @@ let dump_backend_at ~backend_root ~domain_prefix ~chunk_prefix ~journal_prefix
         Lwt.return_unit))
     entries
 
-(* Seed the RNG so [Folder.new_id] is deterministic within a scenario: folder ids
+(* Seed the RNG so [Stored_key.new_id] is deterministic within a scenario: folder ids
    are then stable across runs, which keeps both the backend-key ordering and the
    snapshots reproducible (and makes the real ids readable in the dump). Each
    scenario re-seeds so it stays independent of the ones before it. *)

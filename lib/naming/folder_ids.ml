@@ -84,14 +84,14 @@ let rec write ~cache_root ~domain_name rel (m : Folder.marker) =
 
 (* Mints and persists a marker, so this is for the write paths only. *)
 and ensure_id ~cache_root ~domain_name rel =
-  if rel = "" then Lwt.return Folder.root_id
+  if rel = "" then Lwt.return Stored_key.root_id
   else
     let* existing = read ~cache_root ~domain_name rel in
     match existing with
       | Some m -> Lwt.return m.Folder.id
       | None ->
           let m =
-            { Folder.name = Filename.basename rel; id = Folder.new_id () }
+            { Folder.name = Filename.basename rel; id = Stored_key.new_id () }
           in
           let+ () = write ~cache_root ~domain_name rel m in
           m.Folder.id
@@ -99,7 +99,7 @@ and ensure_id ~cache_root ~domain_name rel =
 (* What a read must use: minting here would persist a marker that re-creates the
    local directory, which is how a deleted folder comes back from a stat. *)
 let lookup_id ~cache_root ~domain_name rel =
-  if rel = "" then Lwt.return_some Folder.root_id
+  if rel = "" then Lwt.return_some Stored_key.root_id
   else
     let+ existing = read ~cache_root ~domain_name rel in
     Option.map (fun m -> m.Folder.id) existing
@@ -147,7 +147,7 @@ let rebuild ~cache_root ~domain_name =
   in
   let* () =
     Lwt.catch
-      (fun () -> walk base ~parent_id:(Some Folder.root_id))
+      (fun () -> walk base ~parent_id:(Some Stored_key.root_id))
       (fun _ -> Lwt.return_unit)
   in
   (* A stale entry gives no wrong answer, a resolved path being verified against
@@ -178,7 +178,7 @@ let max_depth = 256
 let climb ~cache_root ~domain_name id =
   let rec go id names depth =
     if depth > max_depth then Lwt.return_none
-    else if id = Folder.root_id then
+    else if id = Stored_key.root_id then
       Lwt.return_some (List.fold_left Key.join "" names)
     else
       let* entry = read_entry ~cache_root ~domain_name id in
@@ -192,7 +192,7 @@ let climb ~cache_root ~domain_name id =
    stale entry costs an answer rather than naming some other folder, and a failed
    check is the signal to rebuild and ask once more. *)
 let rel_of_id ~cache_root ~domain_name id =
-  if id = Folder.root_id then Lwt.return_some ""
+  if id = Stored_key.root_id then Lwt.return_some ""
   else (
     let verified rel =
       let+ actual = lookup_id ~cache_root ~domain_name rel in

@@ -7,6 +7,8 @@
  (flags
   (:standard
    -open
+   Tsync_logical_key
+   -open
    Tsync_chunk_integrity
    -open
    Tsync_chunks
@@ -31,6 +33,7 @@
  (name tsync_store)
  (public_name tsync-libs.store)
  (libraries
+  tsync_logical_key
   tsync_chunk_integrity
   tsync_chunks
   tsync_manifest

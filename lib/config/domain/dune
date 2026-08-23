@@ -6,6 +6,8 @@
  (flags
   (:standard
    -open
+   Tsync_logical_key
+   -open
    Tsync_naming
    -open
    Tsync_manifest
@@ -27,6 +29,7 @@
    Tsync_runtime))
  (name tsync_domain)
  (libraries
+  tsync_logical_key
   tsync_naming
   tsync_manifest
   tsync_chunks

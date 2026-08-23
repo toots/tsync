@@ -300,7 +300,7 @@ module Make (C : Conf.S) = struct
         let manifests =
           List.filter
             (fun (e : Backend.file_entry) ->
-              Folder.is_child_object e.Backend.key)
+              Stored_key.is_child_object e.Backend.key)
             listed
         in
         (* Manifests are keyed by folder id, not hashed, so nothing is evenly

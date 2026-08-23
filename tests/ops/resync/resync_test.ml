@@ -66,7 +66,7 @@ let describe = function
 let () =
   Lwt_main.run
     (case "a client with no bookmark rebuilds";
-     let* () = put Folder.root_id "a" (manifest_body "a.txt") in
+     let* () = put Stored_key.root_id "a" (manifest_body "a.txt") in
      (* An empty journal cannot carry a reader to now whatever the bookmark
         says, so one published entry is what makes an incremental pass
         reachable at all. *)
@@ -113,8 +113,8 @@ let () =
 
      case "a walk that did not reach everything leaves the bookmark alone";
      let before = Fs.read_last_sync_key () in
-     let* () = put Folder.root_id "b" (manifest_body "b.txt") in
-     broken := ns Folder.root_id ^ "b";
+     let* () = put Stored_key.root_id "b" (manifest_body "b.txt") in
+     broken := ns Stored_key.root_id ^ "b";
      let* outcome = run ~full:true () in
      step "%s" (describe outcome);
      check "the failure is counted"

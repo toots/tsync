@@ -2,6 +2,8 @@
  (flags
   (:standard
    -open
+   Tsync_logical_key
+   -open
    Tsync_naming
    -open
    Tsync_local_io
@@ -11,6 +13,7 @@
    Tsync_test_harness))
  (name folder_ids_test)
  (libraries
+  tsync_logical_key
   tsync_test_harness
   tsync_naming
   tsync_lwt_unix

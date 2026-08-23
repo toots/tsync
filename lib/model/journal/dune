@@ -6,6 +6,8 @@
  (flags
   (:standard
    -open
+   Tsync_id
+   -open
    Tsync_conf
    -open
    Tsync_naming
@@ -15,4 +17,11 @@
    Tsync_log))
  (name tsync_journal)
  (public_name tsync-libs.journal)
- (libraries tsync_conf tsync_naming tsync_local_io yojson unix lwt.unix))
+ (libraries
+  tsync_id
+  tsync_conf
+  tsync_naming
+  tsync_local_io
+  yojson
+  unix
+  lwt.unix))

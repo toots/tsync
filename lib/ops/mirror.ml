@@ -100,7 +100,8 @@ module Make (C : Conf.S) = struct
     (* A folder index records the versions the store that built it reported,
        so a copy matches nothing where it lands; it is also a duplicate of every
        manifest body in its folder, which would transfer the namespace twice. *)
-    if Fs_util.is_temp_key e.Backend.key || Folder.is_index_key e.Backend.key
+    if
+      Fs_util.is_temp_key e.Backend.key || Stored_key.is_index_key e.Backend.key
     then Lwt.return_unit
     else (
       bytes := Int64.add !bytes (Int64.of_int e.Backend.size);
@@ -234,7 +235,7 @@ module Make (C : Conf.S) = struct
                 else Lwt.return acc)
         acc entries
     in
-    let+ keys = walk Folder.root_id "" [] in
+    let+ keys = walk Stored_key.root_id "" [] in
     List.sort_uniq compare keys
 
   (* This command copies a full backend onto a partial one, so an object the

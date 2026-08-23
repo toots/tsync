@@ -85,7 +85,9 @@ let build_fixture () =
   let (module B : Backend.S) = backend () in
   let* () =
     B.put
-      ~key:(C.domain_prefix ^ Folder.child_key ~folder_id:Folder.root_id "sub")
+      ~key:
+        (C.domain_prefix
+        ^ Stored_key.child_key ~folder_id:Stored_key.root_id "sub")
       ~data:
         (Bigstring.of_string
            (Folder.marker_to_string { Folder.name = "sub"; id = "subid" }))
@@ -117,7 +119,7 @@ let build_fixture () =
            ("expires", `Int expires);
            ("type", `String "dir");
            ("chunkPrefix", `String C.chunk_prefix);
-           ("dirPrefix", `String (C.domain_prefix ^ Folder.root_id ^ "/"));
+           ("dirPrefix", `String (C.domain_prefix ^ Stored_key.root_id ^ "/"));
            ("filename", `String "testdom.zip");
          ])
   in

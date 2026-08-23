@@ -23,7 +23,7 @@ let parse s =
   if s = root_form then `Root
   else if has_prefix dir_prefix s then (
     let id = drop_prefix dir_prefix s in
-    if id = Folder.root_id then `Root else `Dir id)
+    if id = Stored_key.root_id then `Root else `Dir id)
   else if has_prefix file_prefix s then (
     let rest = drop_prefix file_prefix s in
     (* Neither a leaf name nor a folder id can contain "/", so the first one

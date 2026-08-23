@@ -754,7 +754,7 @@ module Make (C : Conf.S) = struct
       List.filter_map
         (fun (e : Backend.file_entry) ->
           let k = e.Backend.key in
-          if Folder.is_child_object k then Some k else None)
+          if Stored_key.is_child_object k then Some k else None)
         entries
     in
     let* () =
