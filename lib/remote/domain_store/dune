@@ -1,3 +1,7 @@
+; One write fanned across the backends a domain is configured with, and a
+; durable record of what an unreachable one still owes. Policy over drivers
+; rather than a driver, which is why it sits here and not in lib/backends.
+
 (library
  (flags
   (:standard

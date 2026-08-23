@@ -1,3 +1,7 @@
+; Every storage driver this build can talk to, linked together so a config can
+; name one. A backend sees lib/model and lib/utils and nothing else in the tree:
+; it knows how bytes are stored and found, never what the domain does with them.
+
 (library
  (name tsync_backend)
  (libraries
