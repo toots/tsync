@@ -80,11 +80,33 @@ module Make (C : Conf.S) (F : File_ops.S) : S = struct
      resolved here and nowhere else. *)
 
   module Ir = Item_ref.Make (C)
+  module Lk = Logical_key.Make (C)
+
+  let rel_of_id id =
+    Folder_ids.rel_of_id ~cache_root:C.cache_root ~domain_name:C.domain_name id
+
+  (* [None] when nothing is there any more, which is the point of naming a
+     directory by id: a caller is told it is gone rather than handed a path
+     resolving to whatever now sits there. Resolves only what this client
+     already records and mints nothing. *)
+  let resolve : Item_ref.t -> string option Lwt.t = function
+    | `Root -> Lwt.return_some (Logical_key.to_string Lk.root)
+    | `Dir id ->
+        let+ rel = rel_of_id id in
+        Option.map (fun rel -> Logical_key.to_string (Lk.dir rel)) rel
+    | `File (id, name) ->
+        let+ rel = rel_of_id id in
+        Option.map
+          (fun rel ->
+            Logical_key.to_string (Logical_key.file_in (Lk.dir rel) name))
+          rel
+    | `Logical_key k -> Lwt.return_some (Logical_key.to_string k)
+    | `Bad _ -> Lwt.return_none
 
   let target obj =
     match List.assoc_opt "ref" obj with
-      | Some (`String s) -> Item_ref.parse s
-      | _ -> `Key (get_str obj "path")
+      | Some (`String s) -> Ir.parse s
+      | _ -> Ir.parse (get_str obj "path")
 
   (* Reference, container reference and leaf name: enough to describe an item to
      a caller that does not know the key layout.
@@ -649,7 +671,7 @@ module Make (C : Conf.S) (F : File_ops.S) : S = struct
              which is an answer, not a failure. *)
           let with_target_ref f =
             let t = target obj in
-            let* key = Ir.resolve t in
+            let* key = resolve t in
             match key with
               | None -> not_found (Item_ref.to_string t)
               | Some key -> f t key
@@ -663,7 +685,7 @@ module Make (C : Conf.S) (F : File_ops.S) : S = struct
                   let name = get_str obj "name" in
                   if name = "" then fail `Invalid "\"name\" is required"
                   else
-                    let* parent = Ir.resolve (Item_ref.parse s) in
+                    let* parent = resolve (Ir.parse s) in
                     match parent with
                       | None -> not_found s
                       | Some parent -> f (parent ^ name))
@@ -720,10 +742,10 @@ module Make (C : Conf.S) (F : File_ops.S) : S = struct
                            destination. *)
                         let src_ref =
                           match List.assoc_opt "ref" obj with
-                            | Some (`String s) -> Item_ref.parse s
-                            | _ -> `Key (get_str obj "src")
+                            | Some (`String s) -> Ir.parse s
+                            | _ -> Ir.parse (get_str obj "src")
                         in
-                        let* src = Ir.resolve src_ref in
+                        let* src = resolve src_ref in
                         match src with
                           | None -> not_found (Item_ref.to_string src_ref)
                           | Some src ->
