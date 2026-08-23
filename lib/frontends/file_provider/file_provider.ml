@@ -78,7 +78,7 @@ module Make (C : Conf.S) (D : Domain_engine.Domain) = struct
                     | Some r -> r
                     | None -> if path = "/" then "" else path))
     in
-    Logical_key.to_string (Lk.file rel)
+    Lk.file rel
 
   (* Nothing journals a change made straight in the bucket, so no delta can
      bridge an anchor issued beforehand and every enumerator must re-list. The
@@ -137,7 +137,7 @@ module Make (C : Conf.S) (D : Domain_engine.Domain) = struct
   let hooks ~subs =
     H.
       {
-        path_to_key;
+        path_to_key = (fun p -> Some (path_to_key p));
         evict =
           (fun key ->
             require_delivery (publish ~subs "evict" [("key", `String key)]));

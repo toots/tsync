@@ -54,6 +54,7 @@ module C = struct
   let read_only = false
 end
 
+module Lk = Logical_key.Make (C)
 module R = Remote.Make (C)
 
 (* Distinct bytes per chunk, so every chunk is its own key and dedup does not
@@ -71,8 +72,9 @@ let upload name ~chunks =
   write_file path ~chunks;
   let* st = Lwt_unix.stat path in
   let+ (_ : Manifest.t) =
-    R.upload ~key:(C.domain_prefix ^ name) ~src_path:path
-      ~mtime:st.Unix.st_mtime ~chunk_size ()
+    R.upload
+      ~key:(Logical_key.to_string (Lk.file name))
+      ~src_path:path ~mtime:st.Unix.st_mtime ~chunk_size ()
   in
   ()
 

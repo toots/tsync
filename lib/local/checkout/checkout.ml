@@ -116,10 +116,11 @@ module Make (C : Conf.S) = struct
   let root () = dir ~cache_root:C.cache_root C.domain_name
 
   let path key =
-    sidecar_path ~cache_root:C.cache_root ~domain_name:C.domain_name
-      ~domain_prefix:C.domain_prefix key
+    Filename.concat
+      (dir ~cache_root:C.cache_root C.domain_name)
+      (Name_escape.encode_key (Logical_key.path key))
 
-  let rel_of = Key.strip_prefix ~domain_prefix:C.domain_prefix
+  let rel_of = Logical_key.path
 
   (* Sidecars are replaced by rename, so a fresh inode (or changed size/mtime)
      invalidates the entry — including a write by another tsync process, which
@@ -138,9 +139,10 @@ module Make (C : Conf.S) = struct
   let memo_capacity = 1024
   let memo : (string, memo_entry) Hashtbl.t = Hashtbl.create 256
   let memo_order : string Queue.t = Queue.create ()
-  let invalidate key = Hashtbl.remove memo key
+  let invalidate key = Hashtbl.remove memo (Logical_key.to_string key)
 
   let memoize key entry =
+    let key = Logical_key.to_string key in
     Hashtbl.replace memo key entry;
     Queue.add key memo_order;
     while Queue.length memo_order > memo_capacity do
@@ -160,7 +162,7 @@ module Make (C : Conf.S) = struct
           let ino = st.Unix.st_ino
           and size = st.Unix.st_size
           and mtime = st.Unix.st_mtime in
-          match Hashtbl.find_opt memo key with
+          match Hashtbl.find_opt memo (Logical_key.to_string key) with
             | Some e when e.ino = ino && e.size = size && e.mtime = mtime ->
                 Lwt.return_some e.manifest
             | _ -> (
@@ -180,9 +182,7 @@ module Make (C : Conf.S) = struct
   let write key manifest =
     invalidate key;
     let* () = ensure_parent key in
-    let bytes =
-      body ~name:(Key.leaf ~domain_prefix:C.domain_prefix key) manifest
-    in
+    let bytes = body ~name:(Logical_key.leaf key) manifest in
     Fs_util.atomic_write_at (path key) ~size:(Bigstring.length bytes)
       (fun put -> put ~offset:0 bytes)
 

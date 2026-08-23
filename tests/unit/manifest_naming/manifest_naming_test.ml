@@ -29,10 +29,11 @@ module C =
          ~cache_root:root ~data_dir:root ~root ()
       : Conf.S)
 
+module Lk = Logical_key.Make (C)
 module Mf = Checkout.Make (C)
 module Mfs = Staged_manifest.Make (C)
 
-let key rel = C.domain_prefix ^ rel
+let key rel = Lk.file @@ rel
 
 (* Digests are fixed-width hex; the values are arbitrary but must be well
    formed or the encoder rejects them. *)
@@ -57,7 +58,7 @@ let body ~name =
    consult the body only for an escaped on-disk leaf, which is the one case a
    path cannot express. *)
 let name_of ~key m =
-  let leaf = Key.leaf ~domain_prefix:C.domain_prefix key in
+  let leaf = Logical_key.leaf key in
   if Name_escape.is_escaped leaf then Manifest.recorded_name m else leaf
 
 let report rel =
@@ -72,7 +73,7 @@ let report rel =
 (* Directory names as a listing shows them, which is where an escaped name is
    resolved back through its marker. *)
 let list_dirs () =
-  let+ _files, dirs = Mf.list_children ~prefix:C.domain_prefix () in
+  let+ _files, dirs = Mf.list_children ~prefix:Lk.root () in
   String.concat ", " (List.sort compare dirs)
 
 let () =

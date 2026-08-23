@@ -48,6 +48,7 @@ module C : Conf.S = struct
   let read_only = false
 end
 
+module Lk = Logical_key.Make (C)
 module R = Remote.Make (C)
 module Mf = Checkout.Make (C)
 module Mfs = Staged_manifest.Make (C)
@@ -64,11 +65,15 @@ let write_local path content =
 let upload rel content =
   let src = Filename.concat data_dir (Filename.basename rel) in
   write_local src content;
-  let key = C.domain_prefix ^ rel in
+  let key = Lk.file @@ rel in
   let* chunk_size = R.chunk_size () in
-  let* _ = R.upload ~key ~src_path:src ~mtime ~chunk_size () in
+  let* _ =
+    R.upload
+      ~key:(Logical_key.to_string key)
+      ~src_path:src ~mtime ~chunk_size ()
+  in
   let module L = Layout.Inode.Make (C) in
-  L.ensure_manifest_key key
+  L.ensure_manifest_key (Logical_key.to_string key)
 
 let hello_body = "hello world, this spans several chunks\n"
 let inner_body = "inner file contents\n"

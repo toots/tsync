@@ -126,13 +126,13 @@
   A: drain
   B: sync
 --- tree A
-  d sub/
+  d sub
   f sub/a.txt size=6 cached=0/1 uploaded=true etag=7546f608548f4d0d
 --- content A
   sub/a.txt = "nested"
 --- pending A
 --- tree B
-  d sub/
+  d sub
   f sub/a.txt size=6 cached=0/1 uploaded=true etag=7546f608548f4d0d
 --- content B
   sub/a.txt = "nested"
@@ -140,7 +140,7 @@
 --- backend
   chunk fa87ee5fc199e332-c7156c4359a54f81 size=6
   cursor = <entry-2>
-  journal <entry-1> = mkdir sub/
+  journal <entry-1> = mkdir sub
   journal <entry-2> = put sub/a.txt 6
   folder sub [.tsync-root/4f7b4244079f8bf6-67a7ed7af26470c3] -> <folder-1>
   file a.txt [<folder-1>/f01e5cbbc09d4fc4-9a0fcd66f030de75] = manifest size=6 chunks=1 h1=7546f608548f4d0d h2=aaeab951ddf2968e
@@ -166,10 +166,10 @@
 --- backend
   chunk fa87ee5fc199e332-c7156c4359a54f81 size=6
   cursor = <entry-4>
-  journal <entry-1> = mkdir sub/
+  journal <entry-1> = mkdir sub
   journal <entry-2> = put sub/a.txt 6
   journal <entry-3> = delete sub/a.txt
-  journal <entry-4> = rmdir sub/
+  journal <entry-4> = rmdir sub
   trash sub -> <folder-1>
 
 === foreign_rmdir_after_repeated_mkdir
@@ -196,12 +196,12 @@
 --- backend
   chunk fa87ee5fc199e332-c7156c4359a54f81 size=6
   cursor = <entry-6>
-  journal <entry-1> = mkdir sub/
+  journal <entry-1> = mkdir sub
   journal <entry-2> = put sub/a.txt 6
-  journal <entry-3> = mkdir sub/
-  journal <entry-4> = mkdir sub/
+  journal <entry-3> = mkdir sub
+  journal <entry-4> = mkdir sub
   journal <entry-5> = delete sub/a.txt
-  journal <entry-6> = rmdir sub/
+  journal <entry-6> = rmdir sub
   trash sub -> <folder-1>
 
 === concurrent_mkdir_then_write
@@ -216,7 +216,7 @@
   A: drain
   B: drain
 --- tree A
-  d sub/
+  d sub
   f sub/from-a.txt size=1 cached=0/1 uploaded=true etag=15da855801af627d
   f sub/from-b.txt size=1 cached=0/1 uploaded=true etag=6c25cc3db3ce7928
 --- content A
@@ -224,7 +224,7 @@
   sub/from-b.txt = "b"
 --- pending A
 --- tree B
-  d sub/
+  d sub
   f sub/from-a.txt size=1 cached=0/1 uploaded=true etag=15da855801af627d
   f sub/from-b.txt size=1 cached=0/1 uploaded=true etag=6c25cc3db3ce7928
 --- content B
@@ -235,8 +235,8 @@
   chunk 575a0b1c44d8843f-99009138a3452320 size=1
   chunk e6c632b61e964e1f-d2f6d0996f37a720 size=1
   cursor = <entry-4>
-  journal <entry-1> = mkdir sub/
-  journal <entry-2> = mkdir sub/
+  journal <entry-1> = mkdir sub
+  journal <entry-2> = mkdir sub
   journal <entry-3> = put sub/from-a.txt 1
   journal <entry-4> = put sub/from-b.txt 1
   folder sub [.tsync-root/4f7b4244079f8bf6-67a7ed7af26470c3] -> <folder-1>
@@ -263,9 +263,9 @@
 --- pending B
 --- backend
   cursor = <entry-3>
-  journal <entry-1> = mkdir sub/
-  journal <entry-2> = mkdir sub/
-  journal <entry-3> = rmdir sub/
+  journal <entry-1> = mkdir sub
+  journal <entry-2> = mkdir sub
+  journal <entry-3> = rmdir sub
   trash sub -> <folder-1>
 
 === concurrent_create
@@ -484,7 +484,7 @@
   A: drain
   B: sync
 --- tree A
-  d sub/
+  d sub
   f sub/first.txt size=3 cached=0/1 uploaded=true etag=927288390658e64d
   f sub/second.txt size=3 cached=0/1 uploaded=true etag=f7cd621f4f189919
 --- content A
@@ -492,7 +492,7 @@
   sub/second.txt = "two"
 --- pending A
 --- tree B
-  d sub/
+  d sub
   f sub/first.txt size=3 cached=0/1 uploaded=true etag=927288390658e64d
   f sub/second.txt size=3 cached=0/1 uploaded=true etag=f7cd621f4f189919
 --- content B
@@ -503,7 +503,7 @@
   chunk 6c0560bdcb29998b-8f653076428650aa size=3
   chunk 911faba7321fe1a0-a3cf92cbf55153da size=3
   cursor = <entry-3>
-  journal <entry-1> = mkdir sub/
+  journal <entry-1> = mkdir sub
   journal <entry-2> = put sub/first.txt 3
   journal <entry-3> = put sub/second.txt 3
   folder sub [.tsync-root/4f7b4244079f8bf6-67a7ed7af26470c3] -> <folder-1>

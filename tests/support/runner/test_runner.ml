@@ -357,6 +357,7 @@ type client = {
 (* The real IPC handler, driven directly without a socket: every daemon service
    and the handler run on the one Lwt loop [run_scenario] spins up. *)
 let setup_client (module C : Conf.S) root staging_prefix =
+  let module Lk = Logical_key.Make (C) in
   let module Sq = Sync_queue.Make (C) in
   let module F = File.Make (C) (Sq) in
   let module Mf = Checkout.Make (C) in
@@ -368,7 +369,13 @@ let setup_client (module C : Conf.S) root staging_prefix =
   let module J = Journal.Make (C) in
   let module W = Wal.Make (C) in
   let module L = Layout.Inode.Make (C) in
-  let key p = C.domain_prefix ^ p in
+  (* A scenario names an item the way a client would, so a trailing separator
+     is part of what it asked for. *)
+  let key p =
+    match Lk.of_string (C.domain_prefix ^ p) with
+      | Some k -> k
+      | None -> Lk.file p
+  in
   let strip_root p =
     if String.length p > 0 && p.[0] = '/' then
       String.sub p 1 (String.length p - 1)
@@ -377,7 +384,7 @@ let setup_client (module C : Conf.S) root staging_prefix =
   let hooks =
     H.
       {
-        path_to_key = (fun p -> key (strip_root p));
+        path_to_key = (fun p -> Some (key (strip_root p)));
         evict = F.evict;
         restore = F.ensure_cached;
         changed = (fun _ -> ());
@@ -390,7 +397,10 @@ let setup_client (module C : Conf.S) root staging_prefix =
       }
   in
   Sq.start
-    ~upload:(fun ~key ~cancel -> F.upload ~cancel key)
+    ~upload:(fun ~key ~cancel ->
+      match Lk.of_string key with
+        | Some key -> F.upload ~cancel key
+        | None -> Lwt.return_unit)
     ~on_upload_done:(fun ~key:_ ->
       (* Mirror the daemons: nudge cache-cap enforcement after each upload. *)
       F.enforce_chunk_cap ());
@@ -500,7 +510,7 @@ let setup_client (module C : Conf.S) root staging_prefix =
         close_out oc;
         Lwt.return_unit
     | DeleteRemoteManifest p -> (
-        let* bk = L.manifest_key (key p) in
+        let* bk = L.manifest_key (Logical_key.to_string (key p)) in
         match bk with
           | None -> failwith ("no backend key for " ^ p)
           | Some bk -> B.delete ~key:bk ())
@@ -537,18 +547,24 @@ let setup_client (module C : Conf.S) root staging_prefix =
             (Printf.sprintf "staging-%s%d" staging_prefix !staging_seq)
         in
         write_file staging content;
-        must_action ~staging "write" (key path)
+        must_action ~staging "write" (Logical_key.to_string (key path))
     | Symlink { path; target } ->
         (* Print a rejection instead of failing: symlink creation is expected
            to be refused when the domain policy is not [`Keep]. *)
-        let+ obj = action ~target "symlink" (key path) in
+        let+ obj =
+          action ~target "symlink" (Logical_key.to_string (key path))
+        in
         if not (response_ok obj) then
           Printf.printf "  symlink %s: rejected (%s)\n" path
             (response_error obj)
-    | Mkdir p -> must_action "mkdir" (key p ^ "/")
-    | Rmdir p -> must_action "rmdir" (key p ^ "/")
-    | Rename { src; dst } -> must_action ~src:(key src) "rename" (key dst)
-    | Delete p -> must_action "delete" (key p)
+    | Mkdir p -> must_action "mkdir" (Logical_key.to_string (Lk.dir p))
+    | Rmdir p -> must_action "rmdir" (Logical_key.to_string (Lk.dir p))
+    | Rename { src; dst } ->
+        must_action
+          ~src:(Logical_key.to_string (key src))
+          "rename"
+          (Logical_key.to_string (key dst))
+    | Delete p -> must_action "delete" (Logical_key.to_string (key p))
     | Evict p -> must_action "evict" ("/" ^ p)
     | EnforceCache -> F.enforce_chunk_cap ()
     | Restore p -> must_action "restore" ("/" ^ p)
@@ -596,14 +612,14 @@ let setup_client (module C : Conf.S) root staging_prefix =
         Lwt.return_unit
     | Truncate { path; size } -> F.truncate (key path) (Int64.of_int size)
     | Stat p ->
-        let+ obj = action "stat" (key p) in
+        let+ obj = action "stat" (Logical_key.to_string (key p)) in
         if response_ok obj then
           Printf.printf "  stat %s: %s\n" p
             (Yojson.Safe.to_string (`Assoc (List.remove_assoc "mtime" obj)))
         else Printf.printf "  stat %s: %s\n" p (response_error obj)
     | ShowNames p ->
         (* The entry names a readdir serves for this directory. *)
-        let prefix = if p = "" then C.domain_prefix else key p ^ "/" in
+        let prefix = Lk.dir p in
         let+ files, dirs = F.list_children ~prefix in
         let names =
           List.map
@@ -998,11 +1014,15 @@ let setup_client (module C : Conf.S) root staging_prefix =
       let* obj = action "list_dir" prefix in
       must obj;
       let dirs, entries = split_items obj in
-      let entries = List.map F.rel_key entries in
+      let entries =
+        List.filter_map
+          (fun e -> Option.map Logical_key.path (Lk.of_string e))
+          entries
+      in
       let* () =
         Lwt_list.iter_s
           (fun rel ->
-            let* st = action "stat" (key rel) in
+            let* st = action "stat" (Logical_key.to_string (key rel)) in
             let uploaded = List.assoc_opt "isUploaded" st = Some (`Bool true) in
             let etag = Option.value ~default:"" (get_str st "etag") in
             let size =
@@ -1016,8 +1036,11 @@ let setup_client (module C : Conf.S) root staging_prefix =
       in
       Lwt_list.iter_s
         (fun d ->
-          (* [dirs] are full keys ending in "/". *)
-          Printf.printf "  d %s\n" (F.rel_key d);
+          (* [dirs] are full keys naming folders. *)
+          Printf.printf "  d %s\n"
+            (Option.value
+               (Option.map Logical_key.path (Lk.of_string d))
+               ~default:d);
           walk d)
         (List.sort compare dirs)
     in
@@ -1052,7 +1075,7 @@ let setup_client (module C : Conf.S) root staging_prefix =
   let dump_contents files =
     Lwt_list.iter_s
       (fun rel ->
-        let* st = action "stat" (key rel) in
+        let* st = action "stat" (Logical_key.to_string (key rel)) in
         match get_str st "symlinkTarget" with
           | Some target ->
               Printf.printf "  %s -> %s\n" rel target;

@@ -26,7 +26,7 @@ type downloading = {
 }
 
 module type S = sig
-  type t = string
+  type t = Logical_key.t
 
   val manifest_path : t -> string
   val rel_key : t -> string
@@ -72,11 +72,10 @@ module type S = sig
   (** Served from the local manifest mirror: file entries and subdirectory
       names. Directory mtimes are not tracked locally, hence [None]. *)
   val list_children :
-    prefix:string ->
-    (Backend.file_entry list * (string * float option) list) Lwt.t
+    prefix:t -> (Backend.file_entry list * (string * float option) list) Lwt.t
 
   (** Recursive file listing under [prefix], served from the local mirror. *)
-  val list_tree : prefix:string -> Backend.file_entry list Lwt.t
+  val list_tree : prefix:t -> Backend.file_entry list Lwt.t
 
   (** A handle closed: queue the file for upload if it has staged edits. The
       staged manifest, not an open count, records what is owed, and it survives

@@ -367,13 +367,16 @@ module Make (C : Conf.S) (R : Remote.S) = struct
     let* m = Mf.published key in
     match m with
       | Some _ -> Lwt.return m
-      | None when Hashtbl.mem (live_absences ()) key -> Lwt.return_none
+      | None when Hashtbl.mem (live_absences ()) (Logical_key.to_string key) ->
+          Lwt.return_none
       | None -> (
           (* Read before the fetch: an entry applied while it was in flight
              would otherwise be recorded under the mark that apply moved to, and
              so survive the very thing that invalidates it. *)
           let before = applied_mark () in
-          let+ state = R.fetch_manifest_state ~key () in
+          let+ state =
+            R.fetch_manifest_state ~key:(Logical_key.to_string key) ()
+          in
           (* Only the store's own answer is remembered. Not knowing the key's
              folder yet, and a body caught mid-write, are facts about this
              client that change with nothing about the domain changing — and
@@ -384,7 +387,7 @@ module Make (C : Conf.S) (R : Remote.S) = struct
                 (* Reset past the cap rather than evicted one at a time,
                    overflowing costing only the round trips again. *)
                 if Hashtbl.length keys >= max_absent then Hashtbl.reset keys;
-                Hashtbl.replace keys key ()
+                Hashtbl.replace keys (Logical_key.to_string key) ()
             | `Found _ | `Absent | `Unresolved | `Unreadable -> ());
           match state with `Found m -> Some m | _ -> None)
 
@@ -397,12 +400,16 @@ module Make (C : Conf.S) (R : Remote.S) = struct
       let* resolved = Mf.current key in
       match resolved with
         | Some (`Staged (staged, base)) ->
-            pread_staged ~id:key ~staged ~base buf ~offset
-        | Some (`Published m) -> pread ~id:key ~manifest:m buf ~offset
+            pread_staged
+              ~id:(Logical_key.to_string key)
+              ~staged ~base buf ~offset
+        | Some (`Published m) ->
+            pread ~id:(Logical_key.to_string key) ~manifest:m buf ~offset
         | None -> (
-            let* state = R.fetch_manifest ~key () in
+            let* state = R.fetch_manifest ~key:(Logical_key.to_string key) () in
             match state with
-              | Some m -> pread ~id:key ~manifest:m buf ~offset
+              | Some m ->
+                  pread ~id:(Logical_key.to_string key) ~manifest:m buf ~offset
               | None -> Lwt.return 0)
     in
     Lwt.catch attempt (function
@@ -418,6 +425,7 @@ module Make (C : Conf.S) (R : Remote.S) = struct
   let key_locks : (string, Lwt_mutex.t * int ref) Hashtbl.t = Hashtbl.create 16
 
   let with_key key f =
+    let key = Logical_key.to_string key in
     let entry =
       match Hashtbl.find_opt key_locks key with
         | Some entry -> entry
@@ -461,7 +469,7 @@ module Make (C : Conf.S) (R : Remote.S) = struct
       | None -> (
           let* chunk_size = R.chunk_size () in
           let+ published = Mf.published key in
-          let name = Key.leaf ~domain_prefix:C.domain_prefix key in
+          let name = Logical_key.leaf key in
           match published with
             | Some m ->
                 {
@@ -808,7 +816,7 @@ module Make (C : Conf.S) (R : Remote.S) = struct
     let* () =
       match st with Some st -> discard_bodies st | None -> Lwt.return_unit
     in
-    let name = Key.leaf ~domain_prefix:C.domain_prefix key in
+    let name = Logical_key.leaf key in
     let* chunk_size = R.chunk_size () in
     Mfs.write key
       {
@@ -901,7 +909,9 @@ module Make (C : Conf.S) (R : Remote.S) = struct
       | Some uuid ->
           let* chunk_size = R.chunk_size () in
           let* state =
-            R.upload ~key ~src_path:(Sb.whole_path uuid)
+            R.upload
+              ~key:(Logical_key.to_string key)
+              ~src_path:(Sb.whole_path uuid)
               ~mtime:staged.Staged_manifest.s_mtime ~chunk_size ?cancel ()
           in
           commit key staged state
@@ -910,7 +920,9 @@ module Make (C : Conf.S) (R : Remote.S) = struct
   and upload_chunked ~key ~(staged : Staged_manifest.staged) ?cancel () =
     let* base = Mf.published key in
     let* state =
-      R.upload_chunks ~key ~size:staged.Staged_manifest.s_size
+      R.upload_chunks
+        ~key:(Logical_key.to_string key)
+        ~size:staged.Staged_manifest.s_size
         ~chunk_size:staged.Staged_manifest.s_chunk_size
         ~mtime:staged.Staged_manifest.s_mtime
         ~source:(staged_source ~staged ~base)
@@ -1024,7 +1036,8 @@ module Make (C : Conf.S) (R : Remote.S) = struct
           | Some (Staged_manifest.Committed (staged, published)) ->
               promote key staged published
           | _ ->
-              Log.debug "sync %s: superseded before promotion" key;
+              Log.debug "sync %s: superseded before promotion"
+                (Logical_key.to_string key);
               Lwt.return_unit)
 
   (* A staged manifest already carrying a published one was interrupted
@@ -1058,7 +1071,7 @@ module Make (C : Conf.S) (R : Remote.S) = struct
     let* () = Sb.adopt_whole ~src:src_path ~uuid in
     Mfs.write key
       {
-        Staged_manifest.s_name = Key.leaf ~domain_prefix:C.domain_prefix key;
+        Staged_manifest.s_name = Logical_key.leaf key;
         s_size = stat.Unix.LargeFile.st_size;
         s_mtime = stat.Unix.LargeFile.st_mtime;
         s_chunk_size = chunk_size;
@@ -1126,7 +1139,9 @@ module Make (C : Conf.S) (R : Remote.S) = struct
   let active : (string, span) Hashtbl.t = Hashtbl.create 8
 
   let download_progress key =
-    Option.map (fun s -> (s.fetched, s.total)) (Hashtbl.find_opt active key)
+    Option.map
+      (fun s -> (s.fetched, s.total))
+      (Hashtbl.find_opt active (Logical_key.to_string key))
 
   (* Clamped: a group already on disk is credited in full, so a re-fetch would
      otherwise push the bar past its end. *)
@@ -1136,6 +1151,7 @@ module Make (C : Conf.S) (R : Remote.S) = struct
       | None -> ()
 
   let with_span key ~total f =
+    let key = Logical_key.to_string key in
     (match Hashtbl.find_opt active key with
       | Some s -> s.holders <- s.holders + 1
       | None -> Hashtbl.replace active key { fetched = 0; total; holders = 1 });
@@ -1161,6 +1177,7 @@ module Make (C : Conf.S) (R : Remote.S) = struct
      a listener registry, since {!Chunk_cache.ensure} hands a second caller the
      in-flight promise without its callback. *)
   let fetch_groups key groups =
+    let key = Logical_key.to_string key in
     (* What is owed the network, not the size of the file: a partly cached file
        finishes sooner, and an ETA is against what is left to come down. *)
     let owed = groups_bytes groups in
@@ -1202,7 +1219,7 @@ module Make (C : Conf.S) (R : Remote.S) = struct
                        List.exists still_inherited (Manifest.Group.indices g))
                      (groups m)))
       | None -> (
-          let* state = R.fetch_manifest ~key () in
+          let* state = R.fetch_manifest ~key:(Logical_key.to_string key) () in
           match state with
             | Some m ->
                 let* () = Mf.write key m in
@@ -1256,7 +1273,7 @@ module Make (C : Conf.S) (R : Remote.S) = struct
         let* (_ : int) =
           Local_io.write dst_path (Bigarray.Array1.sub buf 0 n) ~offset
         in
-        credit key n;
+        credit (Logical_key.to_string key) n;
         go (Int64.add offset (Int64.of_int n))
     in
     let* () = go 0L in

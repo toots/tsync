@@ -2,6 +2,8 @@
  (flags
   (:standard
    -open
+   Tsync_logical_key
+   -open
    Tsync_remote
    -open
    Tsync_manifest
@@ -25,6 +27,7 @@
    Tsync_test_harness))
  (name upload_fanout)
  (libraries
+  tsync_logical_key
   tsync_remote
   tsync_manifest
   tsync_chunks

@@ -49,6 +49,8 @@ module C : Conf.S = struct
   let read_only = false
 end
 
+module Lk = Logical_key.Make (C)
+
 let shares_prefix = "tsync/shares/"
 
 module L = Layout.Inode.Make (C)
@@ -66,7 +68,9 @@ let () =
   Lwt_main.run
     (let open Lwt.Syntax in
      (* File: put a (non-marker) manifest, share it. *)
-     let* file_key = L.ensure_manifest_key (C.domain_prefix ^ "foo") in
+     let* file_key =
+       L.ensure_manifest_key (Logical_key.to_string (Lk.file "foo"))
+     in
      let* () =
        B.put ~key:file_key ~data:(Bigstring.of_string "{\"chunks\":[]}") ()
      in

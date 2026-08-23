@@ -8,8 +8,7 @@ module Make (C : Conf.S) = struct
     let local_path path =
       Filename.concat
         (Cache_layout.scratch_dir ~cache_root:C.cache_root C.domain_name)
-        (Name_escape.encode_key
-           (Key.strip_prefix ~domain_prefix:C.domain_prefix (fuse_to_key path)))
+        (Name_escape.encode_key (Logical_key.path (fuse_to_key path)))
     in
     {
       mknod =

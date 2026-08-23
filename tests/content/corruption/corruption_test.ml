@@ -48,6 +48,7 @@ module C = struct
   let read_only = false
 end
 
+module Lk = Logical_key.Make (C)
 module R = Remote.Make (C)
 module Corrupt = Corruption.Make (C)
 module B = (val C.store : Backend.S)
@@ -61,10 +62,12 @@ let write_file path contents =
 let body = String.init chunk_size (fun i -> Char.chr (i * 7 mod 251))
 
 let upload name contents =
-  let key = C.domain_prefix ^ name in
+  let key = Lk.file @@ name in
   let src = Filename.concat root name in
   write_file src contents;
-  R.upload ~key ~src_path:src ~mtime:0. ~chunk_size ()
+  R.upload
+    ~key:(Logical_key.to_string key)
+    ~src_path:src ~mtime:0. ~chunk_size ()
 
 let listed () =
   let+ report = Corrupt.list () in

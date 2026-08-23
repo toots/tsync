@@ -36,6 +36,7 @@ module C =
          ~cache_root:root ~data_dir:root ~root ()
       : Conf.S)
 
+module Lk = Logical_key.Make (C)
 module R = Remote.Make (C)
 module D = Data.Make (C) (R)
 module Mf = Checkout.Make (C)
@@ -43,7 +44,7 @@ module Mfs = Staged_manifest.Make (C)
 module Fs = File_store.Make (C)
 module J = Journal.Make (C)
 
-let key name = C.domain_prefix ^ name
+let key name = Lk.file @@ name
 
 let publish name =
   let body =

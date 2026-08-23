@@ -48,7 +48,7 @@ module Make (C : Conf.S) = struct
         let base_json = [("v", `Int 1); ("expires", `Int expires)] in
         let* manifest =
           let* file_key =
-            L.manifest_key (Logical_key.to_string (Lk.of_rel rel))
+            L.manifest_key (Logical_key.to_string (Lk.file rel))
           in
           (* A file manifest and a folder marker occupy the same key within a
              parent namespace, so classification is by body: otherwise a folder

@@ -44,6 +44,7 @@ module type S = sig
 end
 
 module Make (C : Conf.S) : S = struct
+  module Lk = Logical_key.Make (C)
   module Sq = Sync_queue.Make (C)
   module F = File.Make (C) (Sq)
   module Ih = Ipc_handler.Make (C) (F)
@@ -80,7 +81,12 @@ module Make (C : Conf.S) : S = struct
   let start ?(on_upload_done = fun ~key:_ -> Lwt.return_unit) () =
     let* () = init () in
     Sq.start
-      ~upload:(fun ~key ~cancel -> F.upload ~cancel key)
+      ~upload:(fun ~key ~cancel ->
+        (* The queue holds rendered keys; one this domain cannot read names no
+           file it could upload. *)
+          match Lk.of_string key with
+          | Some key -> F.upload ~cancel key
+          | None -> Lwt.return_unit)
       ~on_upload_done:(fun ~key ->
         let* () = on_upload_done ~key in
         F.enforce_chunk_cap ());

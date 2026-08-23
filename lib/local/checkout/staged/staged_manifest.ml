@@ -157,7 +157,7 @@ let sidecar_path ~cache_root ~domain_name ~domain_prefix key =
 module Make (C : Conf.S) = struct
   module Lk = Logical_key.Make (C)
 
-  let rel_of = Key.strip_prefix ~domain_prefix:C.domain_prefix
+  let rel_of = Logical_key.path
 
   let root () =
     Cache_layout.staged_manifests_dir ~cache_root:C.cache_root C.domain_name
@@ -176,7 +176,8 @@ module Make (C : Conf.S) = struct
             | exception exn ->
                 (* Unsynced user data: set aside rather than dropped, so the next
                    start does not trip over it again. *)
-                Log.err "staged manifest %s unreadable (%s); moving aside" key
+                Log.err "staged manifest %s unreadable (%s); moving aside"
+                  (Logical_key.to_string key)
                   (Printexc.to_string exn);
                 let* () =
                   Lwt.catch
@@ -193,7 +194,7 @@ module Make (C : Conf.S) = struct
      lands. *)
   let put key state =
     let p = path key in
-    let name = Key.leaf ~domain_prefix:C.domain_prefix key in
+    let name = Logical_key.leaf key in
     let state =
       match state with
         | Owed st -> Owed { st with s_name = name }
@@ -268,8 +269,7 @@ module Make (C : Conf.S) = struct
   (* Logical keys owing an upload. *)
   let list () =
     fold ~rel_dir:"" ~deep:true
-      (fun acc rel leaf (_ : staged) ->
-        Logical_key.to_string (Lk.file (Key.join rel leaf)) :: acc)
+      (fun acc rel leaf (_ : staged) -> Lk.file (Key.join rel leaf) :: acc)
       []
 
   (* Every staged body reachable from a manifest: what a sweep of the body trees

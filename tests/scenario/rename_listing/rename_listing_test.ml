@@ -29,10 +29,11 @@ module C =
          ~root ()
       : Conf.S)
 
+module Lk = Logical_key.Make (C)
 module Mf = Checkout.Make (C)
 module Mfs = Staged_manifest.Make (C)
 
-let key rel = C.domain_prefix ^ rel
+let key rel = Lk.file @@ rel
 
 let published ~name =
   Manifest_fixture.make ~name ~h1:"1111111111111111" ~h2:"2222222222222222"
@@ -62,7 +63,7 @@ let staged ~name =
 
 (* What the directory shows, which is the thing that was wrong. *)
 let listing () =
-  let+ files, dirs = Mf.list_children ~prefix:C.domain_prefix () in
+  let+ files, dirs = Mf.list_children ~prefix:Lk.root () in
   let names =
     List.map
       (fun (e : Backend.file_entry) ->

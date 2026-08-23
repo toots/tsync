@@ -13,10 +13,10 @@ let error_reply code msg =
 
 module type S = sig
   type hooks = {
-    path_to_key : string -> string;
-    evict : string -> unit Lwt.t;
-    restore : string -> unit Lwt.t;
-    changed : string -> unit;
+    path_to_key : string -> Logical_key.t option;
+    evict : Logical_key.t -> unit Lwt.t;
+    restore : Logical_key.t -> unit Lwt.t;
+    changed : Logical_key.t -> unit;
     full_resync : unit -> unit Lwt.t;
     status_fields : unit -> (string * Yojson.Safe.t) list;
     stats_fields : unit -> (string * Yojson.Safe.t) list;
@@ -35,10 +35,10 @@ module Make (C : Conf.S) (F : File_ops.S) : S = struct
   module Diag = Diagnostics.Make (C)
 
   type hooks = {
-    path_to_key : string -> string;
-    evict : string -> unit Lwt.t;
-    restore : string -> unit Lwt.t;
-    changed : string -> unit;
+    path_to_key : string -> Logical_key.t option;
+    evict : Logical_key.t -> unit Lwt.t;
+    restore : Logical_key.t -> unit Lwt.t;
+    changed : Logical_key.t -> unit;
     full_resync : unit -> unit Lwt.t;
     status_fields : unit -> (string * Yojson.Safe.t) list;
     stats_fields : unit -> (string * Yojson.Safe.t) list;
@@ -89,18 +89,15 @@ module Make (C : Conf.S) (F : File_ops.S) : S = struct
      directory by id: a caller is told it is gone rather than handed a path
      resolving to whatever now sits there. Resolves only what this client
      already records and mints nothing. *)
-  let resolve : Item_ref.t -> string option Lwt.t = function
-    | `Root -> Lwt.return_some (Logical_key.to_string Lk.root)
+  let resolve : Item_ref.t -> Logical_key.t option Lwt.t = function
+    | `Root -> Lwt.return_some Lk.root
     | `Dir id ->
         let+ rel = rel_of_id id in
-        Option.map (fun rel -> Logical_key.to_string (Lk.dir rel)) rel
+        Option.map (fun rel -> Lk.dir rel) rel
     | `File (id, name) ->
         let+ rel = rel_of_id id in
-        Option.map
-          (fun rel ->
-            Logical_key.to_string (Logical_key.file_in (Lk.dir rel) name))
-          rel
-    | `Logical_key k -> Lwt.return_some (Logical_key.to_string k)
+        Option.map (fun rel -> Logical_key.file_in (Lk.dir rel) name) rel
+    | `Logical_key k -> Lwt.return_some k
     | `Bad _ -> Lwt.return_none
 
   let target obj =
@@ -116,15 +113,14 @@ module Make (C : Conf.S) (F : File_ops.S) : S = struct
   let ref_str r = `String (Item_ref.to_string r)
 
   let naming_fields ~container_id key =
-    let rel = Key.strip_prefix ~domain_prefix:C.domain_prefix key in
-    let body = Key.chop_slash rel in
-    let name = if body = "" then C.domain_name else Filename.basename body in
+    let body = Logical_key.path key in
+    let name = if body = "" then C.domain_name else Logical_key.leaf key in
     let parent =
       if container_id = Stored_key.root_id then `Root else `Dir container_id
     in
     let+ self =
       if body = "" then Lwt.return_some `Root
-      else if Key.is_dir rel then
+      else if Logical_key.kind key = `Dir then
         let+ id =
           Folder_ids.lookup_id ~cache_root:C.cache_root
             ~domain_name:C.domain_name body
@@ -140,7 +136,7 @@ module Make (C : Conf.S) (F : File_ops.S) : S = struct
             ("parentRef", ref_str parent);
             ("name", `String name);
             (* For the callers that speak in paths: the CLI, the test harness. *)
-            ("key", `String key);
+            ("key", `String (Logical_key.to_string key));
           ]
 
   let lookup_folder rel =
@@ -149,8 +145,7 @@ module Make (C : Conf.S) (F : File_ops.S) : S = struct
       Folder_ids.lookup_id ~cache_root:C.cache_root ~domain_name:C.domain_name
         rel
 
-  let rel_body key =
-    Key.chop_slash (Key.strip_prefix ~domain_prefix:C.domain_prefix key)
+  let rel_body = Logical_key.path
 
   (* For a directory key: the id of the folder [key] is. *)
   let own_folder_id key = lookup_folder (rel_body key)
@@ -201,18 +196,18 @@ module Make (C : Conf.S) (F : File_ops.S) : S = struct
         | _ -> false
     in
     if (expect = `File && is_dir) || (expect = `Dir && not is_dir) then
-      not_found key
+      not_found (Logical_key.to_string key)
     else
       let* container = parent_folder_id key in
       let container_id = Option.value container ~default:Stored_key.root_id in
       let* naming = naming_fields ~container_id key in
-      if naming = [] then not_found key
+      if naming = [] then not_found (Logical_key.to_string key)
       else (
         match mst with
           | Some { Unix.LargeFile.st_kind = Unix.S_DIR; _ } -> (
               let* own = own_folder_id key in
               match own with
-                | None -> not_found key
+                | None -> not_found (Logical_key.to_string key)
                 | Some id -> Lwt.return (ok_json (naming @ dir_fields id)))
           | _ -> (
               (* The staged manifest is authoritative for size and mtime until
@@ -239,7 +234,7 @@ module Make (C : Conf.S) (F : File_ops.S) : S = struct
                                    ~mtime:(Manifest.mtime m)
                                    ~etag:(Manifest.h1 m) ~is_uploaded:true
                                    ~symlink:(Manifest.symlink m)))
-                      | None -> not_found key)))
+                      | None -> not_found (Logical_key.to_string key))))
 
   (* Bounds concurrent per-file manifest resolutions during enumeration. *)
   let resolve_pool = Lwt_bounded.create ~max:C.max_downloads ()
@@ -248,10 +243,13 @@ module Make (C : Conf.S) (F : File_ops.S) : S = struct
      manifest, not the file. Resolving gives the logical size/mtime and h1 as the
      etag — the identity stat returns. A dirty file has no clean hash: fall back
      to the backend metadata with an empty etag. *)
+  (* A listing carries rendered keys; one this domain cannot read describes no
+     file it could report on. *)
   let file_entry_json ~container_id (e : Backend.file_entry) =
     Lwt_bounded.use resolve_pool @@ fun () ->
-    let* naming = naming_fields ~container_id e.key in
-    let+ m = F.published e.key in
+    let key = Option.value (Lk.of_string e.key) ~default:Lk.root in
+    let* naming = naming_fields ~container_id key in
+    let+ m = F.published key in
     match m with
       | Some m ->
           `Assoc
@@ -287,7 +285,7 @@ module Make (C : Conf.S) (F : File_ops.S) : S = struct
   let handle_list_dir prefix =
     let* container = own_folder_id prefix in
     match container with
-      | None -> not_found prefix
+      | None -> not_found (Logical_key.to_string prefix)
       | Some container_id ->
           let* files, dirs = F.list_children ~prefix in
           (* Uncached entries each cost a GET, so sequential resolution makes a
@@ -299,7 +297,7 @@ module Make (C : Conf.S) (F : File_ops.S) : S = struct
           let+ dirs_json =
             Lwt_list.map_s
               (fun (d, _mtime) ->
-                let key = prefix ^ d ^ "/" in
+                let key = Logical_key.dir_in prefix d in
                 let* naming = naming_fields ~container_id key in
                 let+ id = own_folder_id key in
                 match (naming, id) with
@@ -311,7 +309,7 @@ module Make (C : Conf.S) (F : File_ops.S) : S = struct
           let unnamed = List.length dirs_json - List.length named in
           ok_json
             (("items", `List (named @ files_json))
-            :: unnamed_field prefix unnamed)
+            :: unnamed_field (Logical_key.to_string prefix) unnamed)
 
   (* Grouped by containing folder, so each folder id resolves once, not per
      file. *)
@@ -320,7 +318,12 @@ module Make (C : Conf.S) (F : File_ops.S) : S = struct
     let by_parent = Hashtbl.create 16 in
     List.iter
       (fun (e : Backend.file_entry) ->
-        let parent = Key.parent (rel_body e.key) in
+        let parent =
+          Key.parent
+            (Option.value
+               (Option.map Logical_key.path (Lk.of_string e.key))
+               ~default:"")
+        in
         Hashtbl.replace by_parent parent
           (e :: Option.value (Hashtbl.find_opt by_parent parent) ~default:[]))
       files;
@@ -347,13 +350,14 @@ module Make (C : Conf.S) (F : File_ops.S) : S = struct
         (fun n g -> match g with `Unnamed k -> n + k | `Named _ -> n)
         0 groups
     in
-    ok_json (("items", `List named) :: unnamed_field prefix unnamed)
+    ok_json
+      (("items", `List named)
+      :: unnamed_field (Logical_key.to_string prefix) unnamed)
 
   (* Journal keys are relative to the domain prefix; the FileProvider uses full
      keys as item identifiers, with directories ending in "/". *)
   let full_key ?(dir = false) rel =
-    let k = Logical_key.to_string (Lk.of_rel rel) in
-    if dir then Key.ensure_slash k else k
+    Logical_key.to_string (if dir then Lk.dir rel else Lk.file rel)
 
   let dir_id_field = function None -> [] | Some id -> [("id", `String id)]
 
@@ -605,9 +609,7 @@ module Make (C : Conf.S) (F : File_ops.S) : S = struct
     ok_json []
 
   let handle_rename src_key dst_key =
-    let+ () =
-      F.rename ~src:(Key.chop_slash src_key) ~dst:(Key.chop_slash dst_key)
-    in
+    let+ () = F.rename ~src:src_key ~dst:dst_key in
     ok_json []
 
   let handle_mkdir key =
@@ -622,6 +624,13 @@ module Make (C : Conf.S) (F : File_ops.S) : S = struct
     let+ () = F.rmdir key in
     ok_json []
 
+  (* A frontend names these by a path in whatever space it serves, so what it
+     resolves to is its own to say. *)
+  let with_frontend_path hooks path f =
+    match hooks.path_to_key path with
+      | Some key -> f key
+      | None -> not_found path
+
   let handle_revert hooks key version =
     let version = if version = "" then None else Some version in
     let+ () = F.revert ?version key in
@@ -633,9 +642,7 @@ module Make (C : Conf.S) (F : File_ops.S) : S = struct
   (* Recovers the domain-relative path the share core expects from a full
      storage key. *)
   let handle_share key =
-    let rel =
-      Key.chop_slash (Key.strip_prefix ~domain_prefix:C.domain_prefix key)
-    in
+    let rel = Logical_key.path key in
     let expires = int_of_float (Unix.time ()) + (7 * 86400) in
     let+ result = Sh.create ~expires ~rel () in
     match result with
@@ -688,8 +695,11 @@ module Make (C : Conf.S) (F : File_ops.S) : S = struct
                     let* parent = resolve (Ir.parse s) in
                     match parent with
                       | None -> not_found s
-                      | Some parent -> f (parent ^ name))
-              | _ -> f path
+                      | Some parent -> f (Logical_key.file_in parent name))
+              | _ -> (
+                  match Lk.of_string path with
+                    | Some key -> f key
+                    | None -> not_found path)
           in
           let* resp =
             Lwt.catch
@@ -753,7 +763,7 @@ module Make (C : Conf.S) (F : File_ops.S) : S = struct
                                   handle_rename src dst))
                     | "mkdir" ->
                         with_destination (fun key ->
-                            handle_mkdir (Key.ensure_slash key))
+                            handle_mkdir (Lk.dir (Logical_key.path key)))
                     | "symlink" ->
                         with_destination (fun key ->
                             handle_symlink key (get_str obj "target"))
@@ -762,14 +772,16 @@ module Make (C : Conf.S) (F : File_ops.S) : S = struct
                     (* From the CLI, which speaks in typed filesystem paths and
                        knows nothing about ids. *)
                     | "evict" ->
-                        let+ () = hooks.evict (hooks.path_to_key path) in
-                        ok_json []
+                        with_frontend_path hooks path (fun key ->
+                            let+ () = hooks.evict key in
+                            ok_json [])
                     | "restore" ->
-                        let+ () = hooks.restore (hooks.path_to_key path) in
-                        ok_json []
+                        with_frontend_path hooks path (fun key ->
+                            let+ () = hooks.restore key in
+                            ok_json [])
                     | "revert" ->
-                        handle_revert hooks (hooks.path_to_key path)
-                          (get_str obj "arg")
+                        with_frontend_path hooks path (fun key ->
+                            handle_revert hooks key (get_str obj "arg"))
                     | "full_resync" ->
                         let+ () = hooks.full_resync () in
                         ok_json []
@@ -921,7 +933,8 @@ module Make (C : Conf.S) (F : File_ops.S) : S = struct
                           (match List.assoc_opt "keys" obj with
                             | Some (`List l) ->
                                 List.filter_map
-                                  (function `String k -> Some k | _ -> None)
+                                  (function
+                                    | `String k -> Lk.of_string k | _ -> None)
                                   l
                             | _ -> []);
                         Lwt.return (ok_json [])

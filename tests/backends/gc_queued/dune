@@ -2,6 +2,8 @@
  (flags
   (:standard
    -open
+   Tsync_logical_key
+   -open
    Tsync_chunk_integrity
    -open
    Tsync_manifest
@@ -25,6 +27,7 @@
    Tsync_test_harness))
  (name gc_queued)
  (libraries
+  tsync_logical_key
   tsync_chunk_integrity
   tsync_manifest
   tsync_chunks

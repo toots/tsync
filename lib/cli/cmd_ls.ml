@@ -33,10 +33,10 @@ let cmd : unit Cmd.t =
        let mount_point =
          mount_point_of (Conf_parsing.pick_domain ?domain cfg)
        in
+       let module Lk = Logical_key.Make (C) in
        let prefix =
-         let dp = C.domain_prefix in
          match path with
-           | None -> dp
+           | None -> Lk.root
            | Some p ->
                (* Accepts a domain-relative path or an absolute one under the
                   mount point. *)
@@ -50,18 +50,16 @@ let cmd : unit Cmd.t =
                      (String.length p - String.length mp)
                  else p
                in
-               let rel =
-                 if rel = "" || rel.[String.length rel - 1] = '/' then rel
-                 else rel ^ "/"
-               in
-               dp ^ rel
+               Lk.dir rel
        in
        let module Mf = Checkout.Make (C) in
        let module Mfs = Staged_manifest.Make (C) in
        let module B = (val C.store : Backend.S) in
        let* files, subdirs = Mf.list_children ~prefix () in
        let file_name (e : Backend.file_entry) =
-         Key.strip_prefix ~domain_prefix:C.domain_prefix e.key
+         match Lk.of_string e.key with
+           | Some k -> Logical_key.path k
+           | None -> e.key
        in
        let items =
          List.map (fun d -> (d, `Dir d)) subdirs
@@ -86,10 +84,7 @@ let cmd : unit Cmd.t =
          items;
        if show_deleted then begin
          let module D = Deleted.Make (C) in
-         let reldir =
-           Key.chop_slash
-             (Key.strip_prefix ~domain_prefix:C.domain_prefix prefix)
-         in
+         let reldir = Key.chop_slash (Logical_key.path prefix) in
          let+ names = D.in_folder reldir in
          List.iter (Printf.printf "deleted  %s\n") names
        end

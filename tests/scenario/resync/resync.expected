@@ -126,7 +126,7 @@
   resync backend #2: 3 checked, 1 copied
 --- tree
   f outside.bin size=12 cached=0/1 uploaded=true etag=b500d7bf771db830
-  d keep/
+  d keep
   f keep/inside.bin size=8 cached=0/1 uploaded=true etag=269ee2e0bf23feba
 --- content
   outside.bin = "not this one"
@@ -136,7 +136,7 @@
   chunk 78bdd50ffdb89f28-110ae84095eebccf size=12
   cursor = <entry-3>
   journal <entry-1> = put outside.bin 12
-  journal <entry-2> = mkdir keep/
+  journal <entry-2> = mkdir keep
   journal <entry-3> = put keep/inside.bin 8
   folder keep [.tsync-root/5af16eb25f0f29f5-46117405e5f6bd85] -> <folder-1>
   file outside.bin [.tsync-root/b01e15e64c256ab6-1f96600a8f673bd5] = manifest size=12 chunks=1 h1=b500d7bf771db830 h2=c49c64b6f769cf41
@@ -147,7 +147,7 @@
   chunk 3165358206e16abf-241df034ca91c411 size=8
   cursor = <entry-3>
   journal <entry-1> = put outside.bin 12
-  journal <entry-2> = mkdir keep/
+  journal <entry-2> = mkdir keep
   journal <entry-3> = put keep/inside.bin 8
   folder keep [.tsync-root/5af16eb25f0f29f5-46117405e5f6bd85] -> <folder-1>
   file outside.bin [.tsync-root/b01e15e64c256ab6-1f96600a8f673bd5] = manifest size=12 chunks=1 h1=b500d7bf771db830 h2=c49c64b6f769cf41
@@ -167,7 +167,7 @@
   resync backend #2: 9 checked, 2 copied
 --- tree
   f ok.bin size=4 cached=0/1 uploaded=true etag=4adfcb2ace61a6a1
-  d sub/
+  d sub
   f sub/nested.bin size=6 cached=0/1 uploaded=true etag=7546f608548f4d0d
 --- content
   ok.bin = "fine"
@@ -177,7 +177,7 @@
   chunk fa87ee5fc199e332-c7156c4359a54f81 size=6
   cursor = <entry-3>
   journal <entry-1> = put ok.bin 4
-  journal <entry-2> = mkdir sub/
+  journal <entry-2> = mkdir sub
   journal <entry-3> = put sub/nested.bin 6
   file ok.bin [.tsync-root/4675454c5194c6a7-5f00ae60e6d18820] = manifest size=4 chunks=1 h1=4adfcb2ace61a6a1 h2=5872029ca96b3c51
     chunk#0 002783db772ad77d-0760f49141bb4bb5 size=4
@@ -189,7 +189,7 @@
   chunk fa87ee5fc199e332-c7156c4359a54f81 size=6
   cursor = <entry-3>
   journal <entry-1> = put ok.bin 4
-  journal <entry-2> = mkdir sub/
+  journal <entry-2> = mkdir sub
   journal <entry-3> = put sub/nested.bin 6
   file ok.bin [.tsync-root/4675454c5194c6a7-5f00ae60e6d18820] = manifest size=4 chunks=1 h1=4adfcb2ace61a6a1 h2=5872029ca96b3c51
     chunk#0 002783db772ad77d-0760f49141bb4bb5 size=4

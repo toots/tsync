@@ -51,6 +51,8 @@ module C = struct
   let read_only = false
 end
 
+module Lk = Logical_key.Make (C)
+
 (* Held as the narrow view a frontend gets, so anything the convergence half
    provides is out of reach here rather than merely unused. *)
 module P : Domain_engine.Domain = Domain_engine.Make (C)
@@ -82,7 +84,7 @@ let () =
   write_local src body;
   Lwt_main.run
     (let* () = P.start () in
-     let key = C.domain_prefix ^ "hello.txt" in
+     let key = Lk.file @@ "hello.txt" in
      let* () = P.F.create key in
      let* () = P.F.write_whole key ~src_path:src in
      let* () = P.F.close key in
@@ -94,7 +96,7 @@ let () =
      (* The bytes themselves, not just the counter: a queue that reported a file
         finished without the store holding it would read the same above. *)
      let module L = Layout.Inode.Make (C) in
-     let* bkey = L.ensure_manifest_key key in
+     let* bkey = L.ensure_manifest_key (Logical_key.to_string key) in
      let module B = (val C.store : Backend.S) in
      let* head = B.head_opt ~key:bkey () in
      Printf.printf "manifest in the store: %b\n" (head <> None);

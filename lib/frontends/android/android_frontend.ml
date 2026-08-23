@@ -31,6 +31,7 @@ let int_arg verb what s =
     | None -> usage verb (Printf.sprintf "%s must be a number, got %S" what s)
 
 module Make (C : Conf.S) = struct
+  module Lk = Logical_key.Make (C)
   module E = Domain_engine.Make (C)
   module F = E.F
   module Ih = E.Ih
@@ -40,7 +41,7 @@ module Make (C : Conf.S) = struct
       {
         (* The client addresses files by storage key, not by a path in some
            mount it can see, so evict/restore/revert arrive already resolved. *)
-        path_to_key = Fun.id;
+        path_to_key = Lk.of_string;
         (* ponytail: single key only. FUSE walks a directory subtree here
            (fuse_fs.ml:184) because a user can point at a folder in Finder;
            lift that if a client ever offers the same gesture. *)
@@ -99,83 +100,101 @@ module Make (C : Conf.S) = struct
      A request is "OFFSET LENGTH" on a line. Each answer is a JSON line carrying
      the count, then that many bytes, so a caller frames on the count rather
      than looking for a delimiter in binary. *)
-  let session key =
-    run ~staging:false (fun () ->
-        let open Lwt.Syntax in
-        let reply fields =
-          let* () =
-            Lwt_io.write_line Lwt_io.stdout
-              (Yojson.Safe.to_string (`Assoc (("ok", `Bool true) :: fields)))
-          in
-          Lwt_io.flush Lwt_io.stdout
-        in
-        let refuse code msg =
-          let* () =
-            Lwt_io.write_line Lwt_io.stdout
-              (Yojson.Safe.to_string
-                 (`Assoc
-                    [
-                      ("ok", `Bool false);
-                      ("code", `String code);
-                      ("error", `String msg);
-                    ]))
-          in
-          Lwt_io.flush Lwt_io.stdout
-        in
-        let* resolved = F.resolve key in
-        match resolved with
-          | None -> refuse "not_found" ("not found: " ^ key)
-          | Some published ->
-              let size =
-                match published with
-                  | `Staged (st, _) -> Int64.to_int st.Staged_manifest.s_size
-                  | `Published m -> Int64.to_int (Manifest.size m)
+  (* The argument is a storage key as the client spells it; one this domain
+     cannot read names nothing here. *)
+  let session raw =
+    match Lk.of_string raw with
+      | None ->
+          prerr_endline ("not this domain's key: " ^ raw);
+          exit 1
+      | Some key ->
+          run ~staging:false (fun () ->
+              let open Lwt.Syntax in
+              let reply fields =
+                let* () =
+                  Lwt_io.write_line Lwt_io.stdout
+                    (Yojson.Safe.to_string
+                       (`Assoc (("ok", `Bool true) :: fields)))
+                in
+                Lwt_io.flush Lwt_io.stdout
               in
-              let* () = reply [("size", `Int size)] in
-              let rec serve () =
-                let* line = Lwt_io.read_line_opt Lwt_io.stdin in
-                match line with
-                  (* The caller is gone; so is any reason to be here. *)
-                  | None -> Lwt.return_unit
-                  | Some line -> (
-                      match
-                        List.filter_map int_of_string_opt
-                          (String.split_on_char ' ' (String.trim line))
-                      with
-                        | [offset; length] when offset >= 0 && length > 0 ->
-                            let buf = Bigstringaf.create length in
-                            let* n =
-                              F.read key buf ~offset:(Int64.of_int offset)
-                            in
-                            let* () = reply [("length", `Int n)] in
-                            let* () =
-                              Lwt_io.write Lwt_io.stdout
-                                (Bigstringaf.substring buf ~off:0 ~len:n)
-                            in
-                            let* () = Lwt_io.flush Lwt_io.stdout in
-                            serve ()
-                        | _ ->
-                            let* () =
-                              refuse "invalid" "expected \"OFFSET LENGTH\""
-                            in
-                            serve ())
+              let refuse code msg =
+                let* () =
+                  Lwt_io.write_line Lwt_io.stdout
+                    (Yojson.Safe.to_string
+                       (`Assoc
+                          [
+                            ("ok", `Bool false);
+                            ("code", `String code);
+                            ("error", `String msg);
+                          ]))
+                in
+                Lwt_io.flush Lwt_io.stdout
               in
-              serve ())
+              let* resolved = F.resolve key in
+              match resolved with
+                | None ->
+                    refuse "not_found"
+                      ("not found: " ^ Logical_key.to_string key)
+                | Some published ->
+                    let size =
+                      match published with
+                        | `Staged (st, _) ->
+                            Int64.to_int st.Staged_manifest.s_size
+                        | `Published m -> Int64.to_int (Manifest.size m)
+                    in
+                    let* () = reply [("size", `Int size)] in
+                    let rec serve () =
+                      let* line = Lwt_io.read_line_opt Lwt_io.stdin in
+                      match line with
+                        (* The caller is gone; so is any reason to be here. *)
+                        | None -> Lwt.return_unit
+                        | Some line -> (
+                            match
+                              List.filter_map int_of_string_opt
+                                (String.split_on_char ' ' (String.trim line))
+                            with
+                              | [offset; length] when offset >= 0 && length > 0
+                                ->
+                                  let buf = Bigstringaf.create length in
+                                  let* n =
+                                    F.read key buf ~offset:(Int64.of_int offset)
+                                  in
+                                  let* () = reply [("length", `Int n)] in
+                                  let* () =
+                                    Lwt_io.write Lwt_io.stdout
+                                      (Bigstringaf.substring buf ~off:0 ~len:n)
+                                  in
+                                  let* () = Lwt_io.flush Lwt_io.stdout in
+                                  serve ()
+                              | _ ->
+                                  let* () =
+                                    refuse "invalid"
+                                      "expected \"OFFSET LENGTH\""
+                                  in
+                                  serve ())
+                    in
+                    serve ())
 
   (* What of [key] is already on this device, for a caller deciding whether to
      assemble the whole thing rather than page through it. *)
-  let residency key =
-    run ~staging:false (fun () ->
-        let open Lwt.Syntax in
-        let+ cached, total = F.chunk_residency key in
-        print_endline
-          (Yojson.Safe.to_string
-             (`Assoc
-                [
-                  ("ok", `Bool true);
-                  ("cached", `Int cached);
-                  ("total", `Int total);
-                ])))
+  let residency raw =
+    match Lk.of_string raw with
+      | None ->
+          prerr_endline ("not this domain's key: " ^ raw);
+          exit 1
+      | Some key ->
+          run ~staging:false (fun () ->
+              let open Lwt.Syntax in
+              let+ cached, total = F.chunk_residency key in
+              print_endline
+                (Yojson.Safe.to_string
+                   (`Assoc
+                      [
+                        ("ok", `Bool true);
+                        ("cached", `Int cached);
+                        ("total", `Int total);
+                      ])))
 
   (* No daemon to describe, so this reports the domain alone: the same fold with
      nobody to ask, so a report from a phone reads like any other. *)

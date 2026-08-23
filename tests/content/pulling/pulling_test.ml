@@ -53,6 +53,7 @@ module C = struct
   let read_only = false
 end
 
+module Lk = Logical_key.Make (C)
 module R = Remote.Make (C)
 module D = Data.Make (C) (R)
 
@@ -71,11 +72,13 @@ let size = 40 * chunk_size
 (* A fixture that has to come down: uploading leaves every group local, so what
    is published is forgotten again before anyone looks at a pull. *)
 let publish ~salt name =
-  let key = C.domain_prefix ^ name in
+  let key = Lk.file @@ name in
   let src = Filename.concat root name in
   write_file src (distinct ~salt size);
   let* (_ : Manifest.t) =
-    R.upload ~key ~src_path:src ~mtime:0. ~chunk_size ()
+    R.upload
+      ~key:(Logical_key.to_string key)
+      ~src_path:src ~mtime:0. ~chunk_size ()
   in
   let+ () = D.forget_chunks key in
   key
@@ -89,6 +92,7 @@ let read_at key ~offset =
   D.pread_key key buf ~offset:(Int64.of_int offset)
 
 let row_for key =
+  let key = Logical_key.to_string key in
   List.find_opt (fun (p : D.pulling) -> p.D.key = key) (D.pulling_now ())
 
 (* Prunes every row, so what comes next is measured against an empty table. *)

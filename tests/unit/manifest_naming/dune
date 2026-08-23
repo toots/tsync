@@ -2,6 +2,8 @@
  (flags
   (:standard
    -open
+   Tsync_logical_key
+   -open
    Tsync_staged
    -open
    Tsync_checkout
@@ -21,6 +23,7 @@
    Tsync_test_harness))
  (name manifest_naming_test)
  (libraries
+  tsync_logical_key
   tsync_staged
   tsync_checkout
   tsync_manifest

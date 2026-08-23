@@ -15,7 +15,7 @@ module Make (C : Conf.S) = struct
      cached file and a never-cached one alike. Only symlinks are special, having
      no content. *)
   let export_file ~dst rel =
-    let key = Logical_key.to_string (Lk.of_rel rel) in
+    let key = Lk.file rel in
     let dst_path = Filename.concat dst rel in
     let* () = Fs_util.ensure_parent dst_path in
     let* manifest = D.published key in

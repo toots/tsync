@@ -47,7 +47,7 @@ let cmd : unit Cmd.t =
        match path with
          | Some rel ->
              let* dir =
-               Hs.version_dir ~key:(Logical_key.to_string (Lk.of_rel rel))
+               Hs.version_dir ~key:(Logical_key.to_string (Lk.file rel))
              in
              let+ entries =
                match dir with

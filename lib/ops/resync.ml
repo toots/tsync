@@ -49,9 +49,7 @@ module Make (C : Conf.S) = struct
                it. *)
             let leaf = Manifest.recorded_name man in
             on_manifest (Key.join rel leaf);
-            F.write_manifest
-              (Logical_key.to_string (Lk.file (Key.join rel leaf)))
-              man
+            F.write_manifest (Lk.file (Key.join rel leaf)) man
     in
     let visit () rel entry =
       progress.on_current (Some (if rel = "" then "/" else rel));
@@ -109,7 +107,12 @@ module Make (C : Conf.S) = struct
        has one to go through for the journal entry and cursor bump an upload
        owes — the same start {!Domain_engine} does for a daemon. *)
     Sq.start
-      ~upload:(fun ~key ~cancel -> F.upload ~cancel key)
+      ~upload:(fun ~key ~cancel ->
+        (* The queue holds rendered keys; one this domain cannot read names no
+           file it could upload. *)
+          match Lk.of_string key with
+          | Some key -> F.upload ~cancel key
+          | None -> Lwt.return_unit)
       ~on_upload_done:(fun ~key:_ -> Lwt.return_unit);
     progress.on_phase "replaying local records";
     let* () = Rp.reconcile () in

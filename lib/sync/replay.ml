@@ -9,7 +9,7 @@ module Make (C : Conf.S) (F : File_ops.S) = struct
   module Mf = Checkout.Make (C)
   module Mfs = Staged_manifest.Make (C)
 
-  let full_key rel = Logical_key.to_string (Lk.of_rel rel)
+  let full_key rel = Lk.file rel
 
   (* The key an op names, for the last-writer-wins check. A rename touches two. *)
   let op_keys = function
@@ -56,9 +56,9 @@ module Make (C : Conf.S) (F : File_ops.S) = struct
           | `Put _ ->
               (* Handled by [resume_put], which needs the record's own key. *)
               Lwt.return_unit
-          | `Delete rel -> F.apply_delete (full_key rel)
-          | `Mkdir (rel, _) -> F.mkdir (full_key rel)
-          | `Rmdir (rel, _) -> F.rmdir (full_key rel)
+          | `Delete rel -> F.apply_delete (Lk.file rel)
+          | `Mkdir (rel, _) -> F.mkdir (Lk.dir rel)
+          | `Rmdir (rel, _) -> F.rmdir (Lk.dir rel)
           | `Rename { Journal.dst; src; _ } ->
               F.rename ~src:(full_key src) ~dst:(full_key dst))
       (fun exn ->
@@ -140,11 +140,13 @@ module Make (C : Conf.S) (F : File_ops.S) = struct
       (fun key ->
         if List.mem (F.rel_key key) recorded then Lwt.return_unit
         else begin
-          Log.info "adopting staged upload for %s" key;
+          Log.info "adopting staged upload for %s" (Logical_key.to_string key);
           Lwt.catch
             (fun () -> F.queue_put key)
             (fun exn ->
-              Log.err "staged upload %s failed: %s" key (Printexc.to_string exn);
+              Log.err "staged upload %s failed: %s"
+                (Logical_key.to_string key)
+                (Printexc.to_string exn);
               Lwt.return_unit)
         end)
       keys
@@ -179,7 +181,11 @@ module Make (C : Conf.S) (F : File_ops.S) = struct
                 | None -> Lwt.return_unit
                 | Some ops ->
                     let* () = F.apply_foreign_ops ops in
-                    List.iter (fun op -> on_changed (full_key (op_key op))) ops;
+                    List.iter
+                      (fun op ->
+                        on_changed
+                          (Logical_key.to_string (full_key (op_key op))))
+                      ops;
                     incr applied;
                     Lwt.return_unit
           in

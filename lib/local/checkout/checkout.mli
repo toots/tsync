@@ -19,14 +19,14 @@ val is_local : Conf.locality -> string -> bool
 module Make (C : Conf.S) : sig
   (** On-disk path of [key]'s sidecar. Its inode doubles as the existence and
       directory test, since directories exist only in this tree. *)
-  val path : string -> string
+  val path : Logical_key.t -> string
 
   (** What the store last published for [key], as this client last saw it:
       parsed from the sidecar and memoised. [None] when absent or unparseable.
 
       Says nothing about staged edits — {!current} is the question that weighs
       those. *)
-  val published : string -> Manifest.t option Lwt.t
+  val published : Logical_key.t -> Manifest.t option Lwt.t
 
   (** Manifests held from earlier reads. A cached one keeps the mapping it was
       read through, so this counts live mappings rather than bytes, and it is
@@ -36,12 +36,12 @@ module Make (C : Conf.S) : sig
 
   (** Writes [t] under [key], recording the name [key] encodes. A caller cannot
       file a manifest under one name and have it record another. *)
-  val write : string -> Manifest.t -> unit Lwt.t
+  val write : Logical_key.t -> Manifest.t -> unit Lwt.t
 
-  val delete : string -> unit Lwt.t
-  val rename : src_key:string -> dst_key:string -> unit Lwt.t
-  val create_dir : string -> unit Lwt.t
-  val delete_dir : string -> unit Lwt.t
+  val delete : Logical_key.t -> unit Lwt.t
+  val rename : src_key:Logical_key.t -> dst_key:Logical_key.t -> unit Lwt.t
+  val create_dir : Logical_key.t -> unit Lwt.t
+  val delete_dir : Logical_key.t -> unit Lwt.t
 
   (** Immediate children of [prefix]: file entries (logical keys, size, mtime)
       and real subdirectory names, serving both readdir and frontend
@@ -51,10 +51,12 @@ module Make (C : Conf.S) : sig
       staged file's own size and mtime win — it is listed even when nothing of
       it has been published. *)
   val list_children :
-    prefix:string -> unit -> (Backend.file_entry list * string list) Lwt.t
+    prefix:Logical_key.t ->
+    unit ->
+    (Backend.file_entry list * string list) Lwt.t
 
   (** Every file entry under [prefix], recursively. *)
-  val list_tree : prefix:string -> unit -> Backend.file_entry list Lwt.t
+  val list_tree : prefix:Logical_key.t -> unit -> Backend.file_entry list Lwt.t
 
   (** Domain-relative real path of every file the domain holds locally,
       published or only staged (unsorted). *)
@@ -69,7 +71,7 @@ module Make (C : Conf.S) : sig
       has never cached wants {!Data.published}, layered over this — which is
       what {!File_ops.stat} does. *)
   val current :
-    string ->
+    Logical_key.t ->
     [ `Staged of Staged_manifest.staged * Manifest.t option
     | `Published of Manifest.t ]
     option

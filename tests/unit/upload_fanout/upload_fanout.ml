@@ -29,6 +29,7 @@ let conf =
     ~max_chunk_buffers:buffers ()
 
 module C = (val conf : Conf.S)
+module Lk = Logical_key.Make (C)
 module R = Remote.Make (C)
 
 (* Seeded so no two chunks share content: a file of one repeated byte
@@ -49,7 +50,7 @@ let () =
      let baseline = (Stdlib.Gc.stat ()).Stdlib.Gc.live_words in
      let* manifest =
        R.upload
-         ~key:(C.domain_prefix ^ "big.bin")
+         ~key:(Logical_key.to_string (Lk.file "big.bin"))
          ~src_path:source ~mtime:0. ~chunk_size
          ~on_progress:(fun ~bytes:_ ~sent:_ ->
            incr landed;
@@ -112,7 +113,7 @@ let () =
      case "a deduplicated upload publishes the same body";
      let+ again =
        R.upload
-         ~key:(C.domain_prefix ^ "copy.bin")
+         ~key:(Logical_key.to_string (Lk.file "copy.bin"))
          ~src_path:source ~mtime:0. ~chunk_size ()
      in
      check "the two agree on the file's identity"

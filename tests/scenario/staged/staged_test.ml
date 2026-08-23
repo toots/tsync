@@ -23,12 +23,13 @@ module C =
          ~root ()
       : Conf.S)
 
+module Lk = Logical_key.Make (C)
 module R = Remote.Make (C)
 module Mf = Checkout.Make (C)
 module Mfs = Staged_manifest.Make (C)
 module D = Data.Make (C) (R)
 
-let key = C.domain_prefix ^ "file.txt"
+let key = Lk.file @@ "file.txt"
 let body = "abcdefghijklmnopqrstuvwx" (* 24 bytes = 3 chunks *)
 
 let chunk_count () =
@@ -88,7 +89,11 @@ let publish () =
   output_string oc body;
   close_out oc;
   let* chunk_size = R.chunk_size () in
-  let* state = R.upload ~key ~src_path:src ~mtime ~chunk_size () in
+  let* state =
+    R.upload
+      ~key:(Logical_key.to_string key)
+      ~src_path:src ~mtime ~chunk_size ()
+  in
   Mf.write key state
 
 let write_at offset s =
@@ -109,12 +114,13 @@ module CG : Conf.S = struct
   let cache_chunk_size = Some 24
 end
 
+module LkG = Logical_key.Make (CG)
 module GR = Remote.Make (CG)
 module Gm = Checkout.Make (CG)
 module Gms = Staged_manifest.Make (CG)
 module GD = Data.Make (CG) (GR)
 
-let gkey = CG.domain_prefix ^ "file.txt"
+let gkey = LkG.file "file.txt"
 
 let gchunk_count () =
   let rec count dir =
@@ -134,7 +140,11 @@ let gpublish () =
   output_string oc body;
   close_out oc;
   let* chunk_size = GR.chunk_size () in
-  let* state = GR.upload ~key:gkey ~src_path:src ~mtime ~chunk_size () in
+  let* state =
+    GR.upload
+      ~key:(Logical_key.to_string gkey)
+      ~src_path:src ~mtime ~chunk_size ()
+  in
   Gm.write gkey state
 
 let gwrite_at offset s =

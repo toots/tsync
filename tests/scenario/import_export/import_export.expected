@@ -11,9 +11,9 @@
   import: 3 imported, 0 skipped, 0 symlinks skipped
 --- tree
   f a.txt size=5 cached=0/1 uploaded=true etag=b52128e828cdaed2
-  d sub/
+  d sub
   f sub/b.txt size=5 cached=0/1 uploaded=true etag=e1480ef14771a79c
-  d sub/deep/
+  d sub/deep
   f sub/deep/c.txt size=7 cached=0/1 uploaded=true etag=bbc6cdab7bb675ad
 --- content
   a.txt = "alpha"
@@ -149,7 +149,7 @@
   exported-file sub/b.txt = "bravo"
 --- tree
   f a.txt size=5 cached=1/1 uploaded=true etag=b52128e828cdaed2
-  d sub/
+  d sub
   f sub/b.txt size=5 cached=1/1 uploaded=true etag=e1480ef14771a79c
 --- content
   a.txt = "alpha"
@@ -178,7 +178,7 @@
   import: 2 imported, 0 skipped, 0 symlinks skipped
 --- tree
   f a.txt size=5 cached=0/1 uploaded=true etag=b52128e828cdaed2
-  d sub/
+  d sub
   f sub/c.txt size=7 cached=0/1 uploaded=true etag=bbc6cdab7bb675ad
 --- content
   a.txt = "alpha"
@@ -269,8 +269,8 @@
   imported non-empty/file.txt (5 bytes)
   import: 1 imported, 0 skipped, 0 symlinks skipped
 --- tree
-  d empty-dir/
-  d non-empty/
+  d empty-dir
+  d non-empty
   f non-empty/file.txt size=5 cached=0/1 uploaded=true etag=650e58ac64da6e0a
 --- content
   non-empty/file.txt = "hello"
@@ -301,7 +301,7 @@
   exported-file dir:with:colons/nested.txt = "nested"
 --- tree
   f colon:file.txt size=6 cached=1/1 uploaded=true etag=4cf325a5de628a63
-  d dir:with:colons/
+  d dir:with:colons
   f dir:with:colons/nested.txt size=6 cached=1/1 uploaded=true etag=7546f608548f4d0d
 --- content
   colon:file.txt = "colons"
@@ -330,7 +330,7 @@
   import: 2 imported, 0 skipped, 0 symlinks skipped
 --- tree
   f a.txt size=5 cached=0/1 uploaded=true etag=b52128e828cdaed2
-  d sub/
+  d sub
   f sub/c.txt size=7 cached=0/1 uploaded=true etag=bbc6cdab7bb675ad
 --- content
   a.txt = "alpha"
@@ -358,9 +358,9 @@
   imported keep/deep/b.txt (5 bytes)
   import: 2 imported, 0 skipped, 0 symlinks skipped
 --- tree
-  d keep/
+  d keep
   f keep/a.txt size=5 cached=0/1 uploaded=true etag=b52128e828cdaed2
-  d keep/deep/
+  d keep/deep
   f keep/deep/b.txt size=5 cached=0/1 uploaded=true etag=e1480ef14771a79c
 --- content
   keep/a.txt = "alpha"
@@ -387,7 +387,7 @@
   imported keep/a.txt (5 bytes)
   import: 1 imported, 0 skipped, 0 symlinks skipped
 --- tree
-  d keep/
+  d keep
   f keep/a.txt size=5 cached=0/1 uploaded=true etag=b52128e828cdaed2
 --- content
   keep/a.txt = "alpha"
@@ -412,7 +412,7 @@
   import: 2 imported, 0 skipped, 0 symlinks skipped
 --- tree
   f a.txt size=5 cached=0/1 uploaded=true etag=b52128e828cdaed2
-  d src/
+  d src
   f src/main.ml size=4 cached=0/1 uploaded=true etag=2dbdbf9f5a560e06
 --- content
   a.txt = "alpha"

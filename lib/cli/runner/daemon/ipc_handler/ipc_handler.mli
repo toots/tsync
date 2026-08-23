@@ -14,10 +14,10 @@ val error_reply : Ipc_error.t -> string -> string
 (** Named so a domain's wiring can be handed to a frontend as one signature. *)
 module type S = sig
   type hooks = {
-    path_to_key : string -> string;
-    evict : string -> unit Lwt.t;
-    restore : string -> unit Lwt.t;
-    changed : string -> unit;
+    path_to_key : string -> Logical_key.t option;
+    evict : Logical_key.t -> unit Lwt.t;
+    restore : Logical_key.t -> unit Lwt.t;
+    changed : Logical_key.t -> unit;
     full_resync : unit -> unit Lwt.t;
     status_fields : unit -> (string * Yojson.Safe.t) list;
     stats_fields : unit -> (string * Yojson.Safe.t) list;

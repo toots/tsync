@@ -40,10 +40,11 @@ module C : Conf.S = struct
   let read_only = false
 end
 
+module Lk = Logical_key.Make (C)
 module Mf = Checkout.Make (C)
 module Mfs = Staged_manifest.Make (C)
 
-let key = C.domain_prefix ^ "file.txt"
+let key = Lk.file @@ "file.txt"
 
 let staged =
   {

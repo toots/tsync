@@ -28,12 +28,12 @@ module Make (C : Conf.S) (R : Remote.S) : sig
       Says nothing about staged edits: a staged key is by definition local, so a
       caller wanting those asks {!Checkout.current} first. {!File_ops.stat} is
       the composition of the two. *)
-  val published : string -> Manifest.t option Lwt.t
+  val published : Logical_key.t -> Manifest.t option Lwt.t
 
   (** {!pread} for a key of this domain, resolved through
       {!Manifest.Make.resolve}: staged edits, else what was published, else the
       backend's manifest. *)
-  val pread_key : string -> Local_io.buffer -> offset:int64 -> int Lwt.t
+  val pread_key : Logical_key.t -> Local_io.buffer -> offset:int64 -> int Lwt.t
 
   (** {2 Writes}
 
@@ -44,14 +44,14 @@ module Make (C : Conf.S) (R : Remote.S) : sig
   (** Write [buf] at [offset], growing the file as needed. Returns the byte
       count. A write covering only part of an inherited chunk copies that chunk
       into a staged body first: content-addressed chunks are immutable. *)
-  val write : string -> Local_io.buffer -> offset:int64 -> int Lwt.t
+  val write : Logical_key.t -> Local_io.buffer -> offset:int64 -> int Lwt.t
 
   (** Resize: drop whole chunks past the end and resize the boundary chunk. A
       grow is pure metadata — the new chunks are holes reading as zeros. *)
-  val truncate : string -> int64 -> unit Lwt.t
+  val truncate : Logical_key.t -> int64 -> unit Lwt.t
 
   (** Reset [key] to an empty staged file, dropping any staged bodies. *)
-  val create : string -> unit Lwt.t
+  val create : Logical_key.t -> unit Lwt.t
 
   (** Upload [key]'s staged edits and promote them. A staged body already holds
       its group's bytes in the group's layout, so promotion gives it the group's
@@ -70,7 +70,7 @@ module Make (C : Conf.S) (R : Remote.S) : sig
       re-uploads identical bytes, one after replays only local moves. A write
       arriving in between retires that record, and the promotion is abandoned
       rather than publishing bytes the file no longer holds. *)
-  val sync : string -> ?cancel:bool ref -> unit -> unit Lwt.t
+  val sync : Logical_key.t -> ?cancel:bool ref -> unit -> unit Lwt.t
 
   (** {2 Chunk store housekeeping}
 
@@ -92,31 +92,31 @@ module Make (C : Conf.S) (R : Remote.S) : sig
 
   (** Stage a whole file handed over by a frontend as [key]'s new content,
       replacing anything staged before it. *)
-  val stage_whole : string -> src_path:string -> unit Lwt.t
+  val stage_whole : Logical_key.t -> src_path:string -> unit Lwt.t
 
   (** [(chunks present locally, chunks total)] for [key]; [(0, 0)] when it has
       no manifest at all. Staged bodies count as present. *)
-  val chunk_residency : string -> (int * int) Lwt.t
+  val chunk_residency : Logical_key.t -> (int * int) Lwt.t
 
   (** Fetch every chunk [key] needs, so reads are served locally afterwards.
       Writes the sidecar first for a file that has no local metadata yet. *)
-  val ensure_local : string -> unit Lwt.t
+  val ensure_local : Logical_key.t -> unit Lwt.t
 
   (** Write [key]'s whole content to [dst_path] (mtime included) through the
       normal read path — for a caller that needs a real file: an export, or the
       copy handed to a frontend. *)
-  val assemble_to : string -> dst_path:string -> unit Lwt.t
+  val assemble_to : Logical_key.t -> dst_path:string -> unit Lwt.t
 
   (** Writes that range of [key] into [dst_path] at the same offset, leaving the
       rest sparse, and returns the byte count — short only at end of file. Only
       the chunks the range covers are fetched, so a large file is served a piece
       at a time. [dst_path] is created even for a range past the end. *)
   val fetch_range :
-    string -> dst_path:string -> offset:int -> length:int -> int Lwt.t
+    Logical_key.t -> dst_path:string -> offset:int -> length:int -> int Lwt.t
 
   (** [Some (bytes_done, bytes_total)] while [key] is being pulled in whole;
       [None] otherwise. *)
-  val download_progress : string -> (int * int) option
+  val download_progress : Logical_key.t -> (int * int) option
 
   (** One file being read whose chunks are coming off a backend right now.
       [bytes] is what this read has pulled, not what the file holds; [size] is
@@ -150,14 +150,14 @@ module Make (C : Conf.S) (R : Remote.S) : sig
 
   (** Drop [key]'s cached chunks; they re-fetch on demand. Unreference-blind: a
       chunk shared with another file goes too. Staged bodies are untouched. *)
-  val forget_chunks : string -> unit Lwt.t
+  val forget_chunks : Logical_key.t -> unit Lwt.t
 
   (** Drop [key]'s staged manifest and the bodies it names. *)
-  val discard_staged : string -> unit Lwt.t
+  val discard_staged : Logical_key.t -> unit Lwt.t
 
   (** Where a whole staged body sits on disk, for a reader that wants the bytes
       an upload is sending. [None] once chunked, or for an unstaged key. *)
-  val staged_body_path : string -> string option Lwt.t
+  val staged_body_path : Logical_key.t -> string option Lwt.t
 
   (** Delete staged bodies no staged manifest names, and prune the empty
       directories left in the staged manifest tree.

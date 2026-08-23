@@ -74,29 +74,29 @@ module Make (C : Conf.S) : sig
   (** The staged tree's root. *)
   val root : unit -> string
 
-  val path : string -> string
-  val exists : string -> bool Lwt.t
+  val path : Logical_key.t -> string
+  val exists : Logical_key.t -> bool Lwt.t
 
   (** [None] when nothing is staged. A sidecar that cannot be decoded is moved
       aside rather than dropped: it is unsynced user data, and the next start
       must not trip over it again. *)
-  val read : string -> state option Lwt.t
+  val read : Logical_key.t -> state option Lwt.t
 
   (** {!read}, keeping only what the file holds. For the callers — the read
       path, the listings — that have no business with the lifecycle. *)
-  val read_edits : string -> staged option Lwt.t
+  val read_edits : Logical_key.t -> staged option Lwt.t
 
   (** The leaf name is stamped from [key], as the published tree does, so a
       listing shows the right name before an upload lands. *)
-  val write : string -> staged -> unit Lwt.t
+  val write : Logical_key.t -> staged -> unit Lwt.t
 
   (** Record what an upload published for the edits it hashed. Written before
       anything local moves, so a crash after it leaves only local work to
       replay, and the next start finishes the promotion without re-uploading. *)
-  val commit : string -> staged -> Manifest.t -> unit Lwt.t
+  val commit : Logical_key.t -> staged -> Manifest.t -> unit Lwt.t
 
-  val delete : string -> unit Lwt.t
-  val rename : src_key:string -> dst_key:string -> unit Lwt.t
+  val delete : Logical_key.t -> unit Lwt.t
+  val rename : src_key:Logical_key.t -> dst_key:Logical_key.t -> unit Lwt.t
 
   (** Fold over the sidecars under [rel_dir], by on-disk position: a sidecar
       records its leaf name, but where it sits is what identifies the file. *)
@@ -108,7 +108,7 @@ module Make (C : Conf.S) : sig
     'a Lwt.t
 
   (** Logical keys of every file owing an upload. *)
-  val list : unit -> string list Lwt.t
+  val list : unit -> Logical_key.t list Lwt.t
 
   (** Uuids of every staged body some sidecar names: what a sweep of the body
       trees must keep. *)

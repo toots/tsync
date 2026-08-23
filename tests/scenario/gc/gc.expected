@@ -49,7 +49,7 @@
 --- content
 --- backend
   cursor = <entry-1>
-  journal <entry-1> = rmdir d/
+  journal <entry-1> = rmdir d
 
 === nothing expired: every chunk kept
   write foo.txt "one"

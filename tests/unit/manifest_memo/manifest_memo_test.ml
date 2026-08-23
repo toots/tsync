@@ -27,10 +27,11 @@ module C =
          ~cache_root:root ~data_dir:root ~root ()
       : Conf.S)
 
+module Lk = Logical_key.Make (C)
 module Mf = Checkout.Make (C)
 module Mfs = Staged_manifest.Make (C)
 
-let key i = C.domain_prefix ^ Printf.sprintf "f%05d.txt" i
+let key i = Lk.file @@ Printf.sprintf "f%05d.txt" i
 
 let write_sidecar i =
   let name = Printf.sprintf "f%05d.txt" i in

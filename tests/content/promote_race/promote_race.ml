@@ -40,12 +40,13 @@ module C : Conf.S = struct
   let read_only = false
 end
 
+module Lk = Logical_key.Make (C)
 module R = Remote.Make (C)
 module Mf = Checkout.Make (C)
 module Mfs = Staged_manifest.Make (C)
 module D = Data.Make (C) (R)
 
-let key = C.domain_prefix ^ "file.txt"
+let key = Lk.file @@ "file.txt"
 
 (* Long enough that a promotion is several groups of work, so a reader has
    somewhere to land. *)
@@ -110,7 +111,7 @@ let reader_loop ~expect ~stop =
    visible -- every write lays down one letter, so a body holding both was
    assembled from two of them. *)
 let write_during_promote round =
-  let key = Printf.sprintf "%sraced-%d.txt" C.domain_prefix round in
+  let key = Lk.file (Printf.sprintf "raced-%d.txt" round) in
   let size = 512 in
   let fill c = String.make size c in
   let* () = write_all key (fill 'A') in

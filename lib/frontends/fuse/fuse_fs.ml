@@ -22,11 +22,8 @@ module Make (C : Conf.S) (D : Domain_engine.Domain) = struct
      is how the exception used to be lost. *)
   module Lk = Logical_key.Make (C)
 
-  let fuse_to_key path =
-    Logical_key.to_string (if path = "/" then Lk.root else Lk.file path)
-
-  let fuse_to_dir_prefix path =
-    Logical_key.to_string (if path = "/" then Lk.root else Lk.dir path)
+  let fuse_to_key path = if path = "/" then Lk.root else Lk.file path
+  let fuse_to_dir_prefix path = if path = "/" then Lk.root else Lk.dir path
 
   (* The FUSE kernel creates .fuse_hidden* files when renaming a file with open
      descriptors. Kernel-internal: never mirror to the backend. *)
@@ -204,7 +201,7 @@ module Make (C : Conf.S) (D : Domain_engine.Domain) = struct
 
   (* Directories exist only in the manifest mirror. *)
   let is_dir_key key =
-    Key.is_dir key
+    Logical_key.kind key = `Dir
     ||
     let mp = F.manifest_path key in
     Sys.file_exists mp && Sys.is_directory mp
@@ -214,12 +211,15 @@ module Make (C : Conf.S) (D : Domain_engine.Domain) = struct
   let on_subtree what f key =
     if not (is_dir_key key) then f key
     else (
-      let prefix = Key.ensure_slash key in
+      let prefix = Lk.dir (Logical_key.path key) in
       let* files = F.list_tree ~prefix in
       Lwt_list.iter_s
         (fun (e : Backend.file_entry) ->
           Lwt.catch
-            (fun () -> f e.key)
+            (fun () ->
+              match Lk.of_string e.key with
+                | Some k -> f k
+                | None -> Lwt.return_unit)
             (fun exn ->
               Log.err "%s %s: %s" what e.key (Printexc.to_string exn);
               Lwt.return_unit))
@@ -261,12 +261,9 @@ module Make (C : Conf.S) (D : Domain_engine.Domain) = struct
      attribute and entry timeouts, but that does not stop the kernel answering a
      lookup from a dentry it already holds, so a name another client renamed away
      stays resolvable in a directory already open. *)
+  (* The path this mount shows for a key. *)
   let invalidate key =
-    (* Backend key to the path this mount shows. A key outside the domain is not
-       ours to invalidate. *)
-    let rel =
-      Key.chop_slash (Key.strip_prefix ~domain_prefix:C.domain_prefix key)
-    in
+    let rel = Logical_key.path key in
     (* Never from inside an operation on this path: the kernel waits on the
        request, and the invalidation waits on the kernel. Every caller is on the
        event loop, which is not a FUSE thread. *)
@@ -280,7 +277,7 @@ module Make (C : Conf.S) (D : Domain_engine.Domain) = struct
   let ipc_hooks mount_point =
     Ih.
       {
-        path_to_key = key_of_path mount_point;
+        path_to_key = (fun p -> Some (key_of_path mount_point p));
         evict = evict_key;
         restore = restore_key;
         changed = invalidate;

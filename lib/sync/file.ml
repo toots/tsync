@@ -8,7 +8,7 @@ module Make_with_layout (C : Conf.S) (Sq : Sync_queue.S) (L : Layout.S) :
   module Fs = File_store.Make (C)
   module R = Remote.Make_with_layout (C) (L)
 
-  type t = string
+  type t = Logical_key.t
 
   (* Metadata mutations (delete/mkdir/rmdir/rename/revert, foreign-op
      application) are serialized; reads, downloads and uploads stay concurrent.
@@ -18,7 +18,7 @@ module Make_with_layout (C : Conf.S) (Sq : Sync_queue.S) (L : Layout.S) :
   let with_meta f = Lwt_mutex.with_lock meta_mutex f
   let meta_locked () = Lwt_mutex.is_locked meta_mutex
   let meta_waiters () = not (Lwt_mutex.is_empty meta_mutex)
-  let rel_key = Key.strip_prefix ~domain_prefix:C.domain_prefix
+  let rel_key = Logical_key.path
 
   (* [St] takes logical (real-path) keys and maps them to backend keys through
      the layout scheme. [Mf] is the local mirror. *)
@@ -34,7 +34,7 @@ module Make_with_layout (C : Conf.S) (Sq : Sync_queue.S) (L : Layout.S) :
      becomes unreachable by id. *)
   let reparent_dir key =
     Folder_ids.reparent ~cache_root:C.cache_root ~domain_name:C.domain_name
-      (Key.chop_slash (rel_key key))
+      (rel_key key)
 
   let published_here key : Manifest.t option Lwt.t = Mf.published key
   let published = D.published
@@ -155,28 +155,38 @@ module Make_with_layout (C : Conf.S) (Sq : Sync_queue.S) (L : Layout.S) :
   let create key = D.create key
   let write_whole key ~src_path = D.stage_whole key ~src_path
   let read key (buf : File_ops.buffer) ~offset = D.pread_key key buf ~offset
-  let cancel_upload key = Sq.cancel_put key
+  let cancel_upload key = Sq.cancel_put (Logical_key.to_string key)
   let uploads_pending = Sq.pending
 
   (* What to call a row, and where the file sits under the domain root. *)
-  let describe key = (Filename.basename key, Key.chop_slash (rel_key key))
+  (* The queue and the pull tracker hold rendered keys, so this takes one back
+     apart; a key from either is this domain's by construction. *)
+  let describe key =
+    match Lk.of_string key with
+      | Some k -> (Logical_key.leaf k, rel_key k)
+      | None -> (Filename.basename key, key)
 
   let uploads_in_flight () =
-    Lwt_list.map_s
-      (fun key ->
-        let* body = D.staged_body_path key in
-        (* How much there is to send. What has gone already is not tracked per
+    Lwt_list.filter_map_s
+      (fun raw ->
+        (* The queue holds rendered keys; one this domain cannot read names no
+           file it could report on. *)
+          match Lk.of_string raw with
+          | None -> Lwt.return_none
+          | Some key ->
+              let* body = D.staged_body_path key in
+              (* How much there is to send. What has gone already is not tracked per
            file -- the chunk upload counts bytes process-wide -- so a row can say
            how big a file is but not how far along it is. *)
-        let+ resolved = Mf.current key in
-        let name, rel = describe key in
-        let size =
-          match resolved with
-            | Some (`Staged (st, _)) -> Some st.Staged_manifest.s_size
-            | Some (`Published m) -> Some (Manifest.size m)
-            | None -> None
-        in
-        { File_ops.name; rel; body; size })
+              let+ resolved = Mf.current key in
+              let name, rel = (Logical_key.leaf key, rel_key key) in
+              let size =
+                match resolved with
+                  | Some (`Staged (st, _)) -> Some st.Staged_manifest.s_size
+                  | Some (`Published m) -> Some (Manifest.size m)
+                  | None -> None
+              in
+              Some { File_ops.name; rel; body; size })
       (Sq.uploading ())
 
   let downloading_now () =
@@ -227,18 +237,20 @@ module Make_with_layout (C : Conf.S) (Sq : Sync_queue.S) (L : Layout.S) :
     W.complete ek
 
   let save_version key =
-    if C.versioning then Hs.save_version ~key else Lwt.return_unit
+    if C.versioning then Hs.save_version ~key:(Logical_key.to_string key)
+    else Lwt.return_unit
 
   let apply_delete key =
     let* () = save_version key in
-    let* () = St.delete_manifest ~key in
+    let* () = St.delete_manifest ~key:(Logical_key.to_string key) in
     clear_local key
 
   let queue_put key =
     let* staged = Mfs.read_edits key in
     match staged with
       | None ->
-          Log.debug "queue_put %s: nothing staged, skipping" key;
+          Log.debug "queue_put %s: nothing staged, skipping"
+            (Logical_key.to_string key);
           Lwt.return_unit
       | Some st ->
           (* One write: the queue records the job before it returns, which is
@@ -276,26 +288,26 @@ module Make_with_layout (C : Conf.S) (Sq : Sync_queue.S) (L : Layout.S) :
      [None] at the domain root, or for a parent this client never recorded;
      callers must skip rather than substitute a key, since the domain prefix is
      itself a real object. *)
-  let folder_marker_bkey = L.folder_marker_key
+  let folder_marker_bkey key = L.folder_marker_key (Logical_key.to_string key)
 
   let mkdir key =
     with_meta (fun () ->
         let* () = Mf.create_dir key in
         (* Minted here, not in [put_folder_marker], so the same id reaches the
            journal entry a peer will read. *)
-        let* fid = L.ensure_folder_id key in
+        let* fid = L.ensure_folder_id (Logical_key.to_string key) in
         with_journal key
           [`Mkdir (rel_key key, Some fid)]
-          (fun () -> St.put_folder_marker ~key))
+          (fun () -> St.put_folder_marker ~key:(Logical_key.to_string key)))
 
   (* O(1) delete: move the parent marker into the trash namespace. The subtree
      stays on the backend for undo, dropped later by [expire] and its chunks
      reclaimed by [gc]. *)
   let rmdir key =
     with_meta (fun () ->
-        let rel = Key.chop_slash (rel_key key) in
+        let rel = rel_key key in
         let* old_marker = folder_marker_bkey key in
-        let* fid = L.ensure_folder_id key in
+        let* fid = L.ensure_folder_id (Logical_key.to_string key) in
         let delete_old_marker () =
           match old_marker with
             | None -> Lwt.return_unit
@@ -320,9 +332,15 @@ module Make_with_layout (C : Conf.S) (Sq : Sync_queue.S) (L : Layout.S) :
   (* For a file whose chunks are already on the backend: only the manifest key
      and journal entry are missing. *)
   let publish_manifest key (m : Manifest.t) =
-    Log.info "publish_manifest %s: size=%Ld" key (Manifest.size m);
-    let name = Key.leaf ~domain_prefix:C.domain_prefix key in
-    let* () = St.put_manifest ~key ~data:(Manifest.body ~name m) in
+    Log.info "publish_manifest %s: size=%Ld"
+      (Logical_key.to_string key)
+      (Manifest.size m);
+    let name = Logical_key.leaf key in
+    let* () =
+      St.put_manifest
+        ~key:(Logical_key.to_string key)
+        ~data:(Manifest.body ~name m)
+    in
     let* ek = Fs.write_journal_entry [`Put (rel_key key, Manifest.size m)] in
     Fs.bump_cursor ek
 
@@ -345,10 +363,13 @@ module Make_with_layout (C : Conf.S) (Sq : Sync_queue.S) (L : Layout.S) :
      already stamped by the time this runs, so its body cannot be used to detect
      whether the backend's needs it. *)
   let resync_manifest_name key =
-    let name = Key.leaf ~domain_prefix:C.domain_prefix key in
+    let name = Logical_key.leaf key in
     let* m = published_here key in
     match m with
-      | Some man -> St.put_manifest ~key ~data:(Manifest.body ~name man)
+      | Some man ->
+          St.put_manifest
+            ~key:(Logical_key.to_string key)
+            ~data:(Manifest.body ~name man)
       | None -> Lwt.return_unit
 
   let rename_body ~src ~dst =
@@ -359,8 +380,11 @@ module Make_with_layout (C : Conf.S) (Sq : Sync_queue.S) (L : Layout.S) :
         | Some { Unix.LargeFile.st_kind = Unix.S_DIR; _ } -> true
         | _ -> false
     in
-    let src = if is_dir then src ^ "/" else src in
-    let dst = if is_dir then dst ^ "/" else dst in
+    (* What it is is discovered here, from the tree, so the keys are renamed
+       into folders once it is known. *)
+    let as_dir k = if is_dir then Lk.dir (Logical_key.path k) else k in
+    let src = as_dir src in
+    let dst = as_dir dst in
     let src_was_uploading = cancel_upload src in
     ignore (cancel_upload dst);
     (* Staged size wins: it is what a peer will fetch next. *)
@@ -378,7 +402,7 @@ module Make_with_layout (C : Conf.S) (Sq : Sync_queue.S) (L : Layout.S) :
     (* Read after the move, where the folder now is. *)
     let* dir_id =
       if is_dir then
-        let+ id = L.ensure_folder_id dst in
+        let+ id = L.ensure_folder_id (Logical_key.to_string dst) in
         Some id
       else Lwt.return_none
     in
@@ -406,8 +430,11 @@ module Make_with_layout (C : Conf.S) (Sq : Sync_queue.S) (L : Layout.S) :
                       | None -> Lwt.return_unit
                       | Some bkey -> St.delete_raw ~bkey
                   in
-                  St.put_folder_marker ~key:dst
-                else Fs.rename_file ~src_key:src ~dst_key:dst)
+                  St.put_folder_marker ~key:(Logical_key.to_string dst)
+                else
+                  Fs.rename_file
+                    ~src_key:(Logical_key.to_string src)
+                    ~dst_key:(Logical_key.to_string dst))
           in
           if is_dir then Lwt.return_unit else resync_manifest_name dst)
         (fun exn ->
@@ -417,7 +444,7 @@ module Make_with_layout (C : Conf.S) (Sq : Sync_queue.S) (L : Layout.S) :
           let* src_head =
             if is_dir then Lwt.return_some ()
             else
-              let+ h = Fs.head_manifest_opt ~key:src in
+              let+ h = Fs.head_manifest_opt ~key:(Logical_key.to_string src) in
               Option.map (fun _ -> ()) h
           in
           if is_dir || Option.is_some src_head then Lwt.fail exn
@@ -433,10 +460,7 @@ module Make_with_layout (C : Conf.S) (Sq : Sync_queue.S) (L : Layout.S) :
               | Some (`Published m) ->
                   (* src was uploaded and has since vanished remotely: keep both
                      sides under a conflict-marked name. *)
-                  let conflict =
-                    Logical_key.to_string
-                      (Lk.file (conflict_name (rel_key dst)))
-                  in
+                  let conflict = Lk.file (conflict_name (rel_key dst)) in
                   let* () = rename_local ~src:dst ~dst:conflict in
                   publish_manifest conflict m
               | None -> Lwt.fail exn)
@@ -461,12 +485,12 @@ module Make_with_layout (C : Conf.S) (Sq : Sync_queue.S) (L : Layout.S) :
     let* src_key =
       match version with
         | Some ts -> (
-            let* dir = Hs.version_dir ~key in
+            let* dir = Hs.version_dir ~key:(Logical_key.to_string key) in
             match dir with
               | Some dir -> Lwt.return (dir ^ ts)
               | None -> failwith ("no versions for " ^ rel_key key))
         | None -> (
-            let* entries = Hs.list_versions ~key in
+            let* entries = Hs.list_versions ~key:(Logical_key.to_string key) in
             match latest_version entries with
               | Some (k, _) -> Lwt.return k
               | None -> failwith ("no versions for " ^ rel_key key))
@@ -478,7 +502,8 @@ module Make_with_layout (C : Conf.S) (Sq : Sync_queue.S) (L : Layout.S) :
           (* Restored under the name the snapshot recorded, which is the one
              its body already carries. *)
           let* () =
-            St.put_manifest ~key
+            St.put_manifest
+              ~key:(Logical_key.to_string key)
               ~data:(Manifest.body ~name:(Manifest.recorded_name m) m)
           in
           let* () = write_manifest key m in
@@ -499,13 +524,19 @@ module Make_with_layout (C : Conf.S) (Sq : Sync_queue.S) (L : Layout.S) :
   let symlink ~target key =
     (match C.symlink_policy with
       | `Keep -> ()
-      | `Follow | `Skip -> raise (Unix.Unix_error (Unix.EPERM, "symlink", key)));
+      | `Follow | `Skip ->
+          raise
+            (Unix.Unix_error (Unix.EPERM, "symlink", Logical_key.to_string key)));
     with_meta (fun () ->
-        let name = Key.leaf ~domain_prefix:C.domain_prefix key in
+        let name = Logical_key.leaf key in
         let state =
           Manifest.make_symlink ~name ~target ~mtime:(Unix.gettimeofday ())
         in
-        let* () = St.put_manifest ~key ~data:(Manifest.body ~name state) in
+        let* () =
+          St.put_manifest
+            ~key:(Logical_key.to_string key)
+            ~data:(Manifest.body ~name state)
+        in
         let* () = write_manifest key state in
         let* ek =
           Fs.write_journal_entry [`Put (rel_key key, Manifest.size state)]
@@ -518,9 +549,7 @@ module Make_with_layout (C : Conf.S) (Sq : Sync_queue.S) (L : Layout.S) :
     let rel = Key.chop_slash rel in
     if rel = "" then Lwt.return_unit
     else
-      let* marker_key =
-        folder_marker_bkey (Logical_key.to_string (Lk.dir rel))
-      in
+      let* marker_key = folder_marker_bkey (Lk.dir rel) in
       match marker_key with
         | None -> Lwt.return_unit
         | Some marker_key ->
@@ -575,19 +604,19 @@ module Make_with_layout (C : Conf.S) (Sq : Sync_queue.S) (L : Layout.S) :
   let apply_one op =
     match op with
       | `Put (rel, _) ->
-          let key = Logical_key.to_string (Lk.of_rel rel) in
+          let key = Lk.file rel in
           unless_staged key (fun () ->
               ignore (cancel_upload key);
               (* Before the fetch, not after: the manifest's own key is built
                  from the parent folder's id, so a missing one does not fail
                  loudly here — it resolves to no key and the put is skipped. *)
               let* () = adopt_ancestor_ids rel in
-              let* m = R.fetch_manifest ~key () in
+              let* m = R.fetch_manifest ~key:(Logical_key.to_string key) () in
               match m with
                 | None -> Lwt.return_unit
                 | Some state -> write_manifest key state)
       | `Delete rel ->
-          let key = Logical_key.to_string (Lk.of_rel rel) in
+          let key = Lk.file rel in
           unless_staged key (fun () ->
               ignore (cancel_upload key);
               clear_local key)
@@ -595,13 +624,13 @@ module Make_with_layout (C : Conf.S) (Sq : Sync_queue.S) (L : Layout.S) :
          settles which id wins. The op carries it for readers naming a folder
          the mirror no longer has. *)
       | `Mkdir (rel, _) ->
-          let* () = Mf.create_dir (Logical_key.to_string (Lk.dir rel)) in
+          let* () = Mf.create_dir (Lk.dir rel) in
           let* () = adopt_ancestor_ids rel in
           adopt_folder_id rel
-      | `Rmdir (rel, _) -> Mf.delete_dir (Logical_key.to_string (Lk.dir rel))
+      | `Rmdir (rel, _) -> Mf.delete_dir (Lk.dir rel)
       | `Rename { Journal.src; dst; is_dir = true; _ } ->
-          let src_key = Logical_key.to_string (Lk.of_rel src) in
-          let dst_key = Logical_key.to_string (Lk.of_rel dst) in
+          let src_key = Lk.dir src in
+          let dst_key = Lk.dir dst in
           let* exists = Lwt_unix_retry.file_exists (manifest_path src_key) in
           if exists then
             unless_staged src_key (fun () ->
@@ -610,8 +639,8 @@ module Make_with_layout (C : Conf.S) (Sq : Sync_queue.S) (L : Layout.S) :
                 reparent_dir dst_key)
           else Lwt.return_unit
       | `Rename { Journal.src; dst; is_dir = false; _ } ->
-          let src_key = Logical_key.to_string (Lk.of_rel src) in
-          let dst_key = Logical_key.to_string (Lk.of_rel dst) in
+          let src_key = Lk.file src in
+          let dst_key = Lk.file dst in
           let* exists = Lwt_unix_retry.file_exists (manifest_path src_key) in
           if exists then
             unless_staged src_key (fun () ->
@@ -621,7 +650,9 @@ module Make_with_layout (C : Conf.S) (Sq : Sync_queue.S) (L : Layout.S) :
             unless_staged dst_key (fun () ->
                 (* No local src (e.g. we renamed it ourselves and published the
                    result): adopt dst's remote state. *)
-                let* m = R.fetch_manifest ~key:dst_key () in
+                let* m =
+                  R.fetch_manifest ~key:(Logical_key.to_string dst_key) ()
+                in
                 match m with
                   | Some state -> write_manifest dst_key state
                   | _ -> Lwt.return_unit)

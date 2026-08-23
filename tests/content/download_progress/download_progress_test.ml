@@ -59,6 +59,7 @@ module C = struct
   let read_only = false
 end
 
+module Lk = Logical_key.Make (C)
 module R = Remote.Make (C)
 module D = Data.Make (C) (R)
 
@@ -135,13 +136,15 @@ let shape samples =
 
 let () =
   Lwt_main.run
-    (let key = C.domain_prefix ^ "movie.bin" in
+    (let key = Lk.file @@ "movie.bin" in
      let size = 40 * chunk_size in
      let data = distinct size in
      let src = Filename.concat root "movie.bin" in
      write_file src data;
      let* (_ : Manifest.t) =
-       R.upload ~key ~src_path:src ~mtime:0. ~chunk_size ()
+       R.upload
+         ~key:(Logical_key.to_string key)
+         ~src_path:src ~mtime:0. ~chunk_size ()
      in
 
      let* () = D.forget_chunks key in
@@ -195,7 +198,7 @@ let () =
          | (d, total) :: _ -> d > total - size
          | [] -> false);
 
-     let staged_key = C.domain_prefix ^ "staged.bin" in
+     let staged_key = Lk.file @@ "staged.bin" in
      let staged_src = Filename.concat root "staged.bin" in
      write_file staged_src data;
      let* () = D.stage_whole staged_key ~src_path:staged_src in

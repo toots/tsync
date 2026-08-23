@@ -56,7 +56,7 @@ module Make (C : Conf.S) : S = struct
 
   let key_of (r : Wal.record) =
     match r.Wal.ops with
-      | op :: _ -> Logical_key.to_string (Lk.of_rel (op_key op))
+      | op :: _ -> Logical_key.to_string (Lk.file (op_key op))
       | [] -> ""
 
   (* Only a [`Put] carries bytes; the other ops are metadata the backend answers

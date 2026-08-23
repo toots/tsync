@@ -2,6 +2,8 @@
  (flags
   (:standard
    -open
+   Tsync_logical_key
+   -open
    Tsync_remote
    -open
    Tsync_staged
@@ -21,6 +23,7 @@
    Tsync_local_backend))
  (name promote_race)
  (libraries
+  tsync_logical_key
   tsync_remote
   tsync_staged
   tsync_checkout
