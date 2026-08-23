@@ -21,14 +21,12 @@
     {1 Two roles, one behavior}
 
     A target that is read from and one that is not differ in exactly one thing,
-    which is why there is one module here and a three-line {!Readable} rather
-    than two implementations:
+    which is why [reads_reach] is a flag rather than two implementations:
 
-    - a [backfill] target is {!make} as it stands: never read from, and with no
-      use for the journal or cursor, since nothing reads those from it either;
-    - a [replica] is {!Readable} applied to one: a full second copy, read when
-      no main is reachable, and carrying the journal and cursor a peer reading
-      it needs.
+    - a [backfill] target never is: no use for the journal or cursor, since
+      nothing reads those from it either;
+    - a [replica] is: a full second copy, read when no main is reachable, and
+      carrying the journal and cursor a peer reading it needs.
 
     So promotion of a resynced backfill is which functor its config spells,
     rather than a different code path. *)
@@ -89,7 +87,15 @@ end
     [chunk_from_prefix] is where the source keeps chunks it has not finished
     collecting — see {!Chunk_space} — and a read falls through to it, though
     what is written to the target is always the ordinary chunk key. Omit it for
-    a source that is never collected. *)
+    a source that is never collected.
+
+    [excluded] names the keys no target carries, whatever it is for. The caller
+    decides which those are: this knows only that some keys describe the store
+    that wrote them, so a copy would match nothing where it lands.
+
+    [reads_reach] is whether reads may fall through to this target. One they
+    reach carries the journal and cursor too, a peer reading it needing both;
+    one they never reach has no use for either. *)
 val make :
   ?resume:bool ->
   ?chunk_from_prefix:string ->
@@ -100,6 +106,8 @@ val make :
   chunk_keys:(string -> string list) ->
   journal_prefix:string ->
   cursor_key:string ->
+  excluded:(string -> bool) ->
+  reads_reach:bool ->
   root:string ->
   unit ->
   (module S)
@@ -107,7 +115,3 @@ val make :
 (** Give up this process's claim on a target's log, so another may take what it
     left owed without waiting for this one to exit. *)
 val release : root:string -> name:string -> unit
-
-(** A target reads are allowed to fall through to, and which therefore also
-    carries the journal and cursor a peer reading it needs. *)
-module Readable (D : S) : S

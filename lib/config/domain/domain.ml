@@ -50,7 +50,7 @@ let build_backends ~paths ~resume (d : Conf_parsing.domain) :
      role. *)
   let built : (string, (module Deferred.S)) Hashtbl.t = Hashtbl.create 4 in
   let target ((bc : Conf_parsing.backend_config), backend) ~source =
-    let plain =
+    let built_target =
       Deferred.make ~resume ~name:bc.name ~backend ~source
         ~chunk_prefix:(Conf_parsing.chunk_prefix d)
         ~chunk_from_prefix:
@@ -61,14 +61,8 @@ let build_backends ~paths ~resume (d : Conf_parsing.domain) :
         ~chunk_keys
         ~journal_prefix:(Conf_parsing.journal_prefix d)
         ~cursor_key:(Conf_parsing.cursor_key d)
+        ~excluded:Folder.is_index_key ~reads_reach:(bc.role = `Replica)
         ~root:(deferred_root ~paths d) ()
-    in
-    let built_target =
-      match bc.role with
-        | `Replica ->
-            let module R = Deferred.Readable ((val plain : Deferred.S)) in
-            (module R : Deferred.S)
-        | _ -> plain
     in
     Hashtbl.replace built bc.name built_target;
     built_target

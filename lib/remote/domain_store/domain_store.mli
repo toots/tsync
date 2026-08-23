@@ -24,8 +24,8 @@ type sub = { name : string; backend : (module Backend.S) }
     {!Deferred.make} — supplied here rather than by the caller, since only this
     module knows which members are authoritative.
 
-    Whether the resulting target is readable is the caller's to say, by applying
-    {!Deferred.Readable} or not. *)
+    Whether reads may reach the resulting target is the caller's to say, through
+    {!Deferred.make}'s [reads_reach]. *)
 val make :
   mains:sub list ->
   targets:(source:(module Backend.S) -> (module Deferred.S)) list ->

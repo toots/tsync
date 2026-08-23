@@ -64,7 +64,9 @@ let target =
     ~backend:(module Dst)
     ~source:(module Src)
     ~chunk_prefix ~chunk_keys ~journal_prefix:"tsync/testdom/journal/"
-    ~cursor_key:"tsync/testdom/cursor" ~root:log_dir ()
+    ~cursor_key:"tsync/testdom/cursor"
+    ~excluded:(fun _ -> false)
+    ~reads_reach:true ~root:log_dir ()
 
 module T = (val target : Deferred.S)
 

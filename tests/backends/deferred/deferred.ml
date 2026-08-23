@@ -143,19 +143,20 @@ let switchable ~up ~root : (module Backend.S) =
       Real.delete ~key ()
   end)
 
-(* {!Deferred.Readable}, as a replica is: reads may reach it, so it carries the
-   journal and cursor a peer reading it needs. The composite and the target both
+(* A target reads reach, as a replica is: it carries the journal and cursor a
+   peer reading it needs. The composite and the target both
    come back, since the target is what says how far behind it is. *)
 let target_for ?resume ~inners ~target ~name () =
   let built = ref None in
   let spec ~source =
-    let plain =
+    let t =
       Deferred.make ?resume ~name ~backend:target ~source ~chunk_prefix
-        ~chunk_keys ~journal_prefix ~cursor_key ~root:log_dir ()
+        ~chunk_keys ~journal_prefix ~cursor_key
+        ~excluded:(fun _ -> false)
+        ~reads_reach:true ~root:log_dir ()
     in
-    let module R = Deferred.Readable ((val plain : Deferred.S)) in
-    built := Some (module R : Deferred.S);
-    (module R : Deferred.S)
+    built := Some t;
+    t
   in
   let composite =
     Domain_store.make

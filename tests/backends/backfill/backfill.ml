@@ -90,6 +90,8 @@ let wrap ~inners ~target ~name =
     let d =
       Deferred.make ~name ~backend:target ~source ~chunk_prefix ~chunk_keys
         ~journal_prefix ~cursor_key
+        ~excluded:(fun _ -> false)
+        ~reads_reach:false
         ~root:(Filename.concat root "pending")
         ()
     in

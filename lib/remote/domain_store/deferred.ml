@@ -68,12 +68,6 @@ module type S = sig
   val stats : unit -> stats
 end
 
-(* Per store by construction, whatever a target is for: a folder index records
-   the versions the store that built it reported, so a copy of one matches
-   nothing on the store it lands on and is only bytes. Each store builds its own
-   the first time a walk reads the folder. *)
-let never_carried key = Folder.is_index_key key
-
 (* Past this, a chunk PUT is dropped rather than held in memory: the manifest job
    fetches it later. *)
 let max_chunks_in_flight = 32
@@ -102,7 +96,8 @@ let release ~root ~name = Durable_queue.release (log_dir ~root ~name)
 
 let make ?(resume = false) ?chunk_from_prefix ~name ~backend ~source
     ~chunk_prefix ~(chunk_keys : string -> string list) ~journal_prefix
-    ~cursor_key ~root () : (module S) =
+    ~cursor_key ~(excluded : string -> bool) ~reads_reach ~root () : (module S)
+    =
   let (module Target : Backend.S) = backend in
   let (module Source : Backend.S) = source in
   (* Chunk keys the target is known to hold, so a copy of an already-filled
@@ -248,14 +243,15 @@ let make ?(resume = false) ?chunk_from_prefix ~name ~backend ~source
   (module struct
     let name = name
     let backend = backend
-    let readable = None
+    let readable = if reads_reach then Some backend else None
 
     (* Nothing reads the journal or cursor from a target reads never reach, so
-       carrying them would be dead weight. {!Readable} says otherwise. *)
+       carrying them would be dead weight; a replica carries them because a peer
+       reading it needs them. *)
     let skip key =
-      never_carried key
-      || String.starts_with ~prefix:journal_prefix key
-      || key = cursor_key
+      excluded key
+      || (not reads_reach)
+         && (String.starts_with ~prefix:journal_prefix key || key = cursor_key)
 
     let stats () =
       let s = Q.stats queue in
@@ -274,10 +270,3 @@ let make ?(resume = false) ?chunk_from_prefix ~name ~backend ~source
       | Delete key -> Q.post queue (Job_delete key)
       | Delete_multi keys -> Q.post queue (Job_delete_multi keys)
   end)
-
-module Readable (D : S) : S = struct
-  include D
-
-  let readable = Some D.backend
-  let skip = never_carried
-end

@@ -8,8 +8,6 @@
    -open
    Tsync_chunks
    -open
-   Tsync_naming
-   -open
    Tsync_log
    -open
    Tsync_lwt_unix
@@ -25,7 +23,6 @@
  (public_name tsync-libs.domain_store)
  (libraries
   tsync_chunks
-  tsync_naming
   tsync_work
   tsync_bigstring
   tsync_backend_register
