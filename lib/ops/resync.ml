@@ -12,6 +12,7 @@ type progress = {
 let no_progress = { on_phase = (fun _ -> ()); on_current = (fun _ -> ()) }
 
 module Make (C : Conf.S) = struct
+  module Lk = Logical_key.Make (C)
   module J = Journal.Make (C)
   module Fs = File_store.Make (C)
   module Sq = Sync_queue.Make (C)
@@ -48,7 +49,9 @@ module Make (C : Conf.S) = struct
                it. *)
             let leaf = Manifest.recorded_name man in
             on_manifest (Key.join rel leaf);
-            F.write_manifest (C.domain_prefix ^ Key.join rel leaf) man
+            F.write_manifest
+              (Logical_key.to_string (Lk.file (Key.join rel leaf)))
+              man
     in
     let visit () rel entry =
       progress.on_current (Some (if rel = "" then "/" else rel));

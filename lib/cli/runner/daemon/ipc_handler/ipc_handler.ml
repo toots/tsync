@@ -352,7 +352,7 @@ module Make (C : Conf.S) (F : File_ops.S) : S = struct
   (* Journal keys are relative to the domain prefix; the FileProvider uses full
      keys as item identifiers, with directories ending in "/". *)
   let full_key ?(dir = false) rel =
-    let k = C.domain_prefix ^ rel in
+    let k = Logical_key.to_string (Lk.of_rel rel) in
     if dir then Key.ensure_slash k else k
 
   let dir_id_field = function None -> [] | Some id -> [("id", `String id)]

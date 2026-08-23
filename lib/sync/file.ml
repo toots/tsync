@@ -2,6 +2,7 @@ open Lwt.Syntax
 
 module Make_with_layout (C : Conf.S) (Sq : Sync_queue.S) (L : Layout.S) :
   File_ops.S = struct
+  module Lk = Logical_key.Make (C)
   module J = Journal.Make (C)
   module W = Wal.Make (C)
   module Fs = File_store.Make (C)
@@ -433,7 +434,8 @@ module Make_with_layout (C : Conf.S) (Sq : Sync_queue.S) (L : Layout.S) :
                   (* src was uploaded and has since vanished remotely: keep both
                      sides under a conflict-marked name. *)
                   let conflict =
-                    C.domain_prefix ^ conflict_name (rel_key dst)
+                    Logical_key.to_string
+                      (Lk.file (conflict_name (rel_key dst)))
                   in
                   let* () = rename_local ~src:dst ~dst:conflict in
                   publish_manifest conflict m
@@ -516,7 +518,9 @@ module Make_with_layout (C : Conf.S) (Sq : Sync_queue.S) (L : Layout.S) :
     let rel = Key.chop_slash rel in
     if rel = "" then Lwt.return_unit
     else
-      let* marker_key = folder_marker_bkey (C.domain_prefix ^ rel) in
+      let* marker_key =
+        folder_marker_bkey (Logical_key.to_string (Lk.dir rel))
+      in
       match marker_key with
         | None -> Lwt.return_unit
         | Some marker_key ->
@@ -571,7 +575,7 @@ module Make_with_layout (C : Conf.S) (Sq : Sync_queue.S) (L : Layout.S) :
   let apply_one op =
     match op with
       | `Put (rel, _) ->
-          let key = C.domain_prefix ^ rel in
+          let key = Logical_key.to_string (Lk.of_rel rel) in
           unless_staged key (fun () ->
               ignore (cancel_upload key);
               (* Before the fetch, not after: the manifest's own key is built
@@ -583,7 +587,7 @@ module Make_with_layout (C : Conf.S) (Sq : Sync_queue.S) (L : Layout.S) :
                 | None -> Lwt.return_unit
                 | Some state -> write_manifest key state)
       | `Delete rel ->
-          let key = C.domain_prefix ^ rel in
+          let key = Logical_key.to_string (Lk.of_rel rel) in
           unless_staged key (fun () ->
               ignore (cancel_upload key);
               clear_local key)
@@ -591,13 +595,13 @@ module Make_with_layout (C : Conf.S) (Sq : Sync_queue.S) (L : Layout.S) :
          settles which id wins. The op carries it for readers naming a folder
          the mirror no longer has. *)
       | `Mkdir (rel, _) ->
-          let* () = Mf.create_dir (C.domain_prefix ^ rel) in
+          let* () = Mf.create_dir (Logical_key.to_string (Lk.dir rel)) in
           let* () = adopt_ancestor_ids rel in
           adopt_folder_id rel
-      | `Rmdir (rel, _) -> Mf.delete_dir (C.domain_prefix ^ rel)
+      | `Rmdir (rel, _) -> Mf.delete_dir (Logical_key.to_string (Lk.dir rel))
       | `Rename { Journal.src; dst; is_dir = true; _ } ->
-          let src_key = C.domain_prefix ^ src in
-          let dst_key = C.domain_prefix ^ dst in
+          let src_key = Logical_key.to_string (Lk.of_rel src) in
+          let dst_key = Logical_key.to_string (Lk.of_rel dst) in
           let* exists = Lwt_unix_retry.file_exists (manifest_path src_key) in
           if exists then
             unless_staged src_key (fun () ->
@@ -606,8 +610,8 @@ module Make_with_layout (C : Conf.S) (Sq : Sync_queue.S) (L : Layout.S) :
                 reparent_dir dst_key)
           else Lwt.return_unit
       | `Rename { Journal.src; dst; is_dir = false; _ } ->
-          let src_key = C.domain_prefix ^ src in
-          let dst_key = C.domain_prefix ^ dst in
+          let src_key = Logical_key.to_string (Lk.of_rel src) in
+          let dst_key = Logical_key.to_string (Lk.of_rel dst) in
           let* exists = Lwt_unix_retry.file_exists (manifest_path src_key) in
           if exists then
             unless_staged src_key (fun () ->

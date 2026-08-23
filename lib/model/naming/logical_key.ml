@@ -71,6 +71,11 @@ module Make (D : Domain) = struct
   let dir rel = { prefix = D.domain_prefix; path = trim rel; kind = Dir }
   let root = { prefix = D.domain_prefix; path = ""; kind = Dir }
 
+  let of_rel rel =
+    if rel = "" then root
+    else if String.ends_with ~suffix:"/" rel then dir rel
+    else file rel
+
   let of_string s =
     if not (String.starts_with ~prefix:D.domain_prefix s) then None
     else (

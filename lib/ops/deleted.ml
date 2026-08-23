@@ -3,6 +3,7 @@ open Lwt.Syntax
 type entry = { path : string; latest : int64; versions : int }
 
 module Make (C : Conf.S) = struct
+  module Lk = Logical_key.Make (C)
   module B = (val C.store : Backend.S)
 
   let parse key = History.parse ~versions_prefix:C.versions_prefix key
@@ -19,7 +20,7 @@ module Make (C : Conf.S) = struct
       (fun _ -> Lwt.return fallback)
 
   let live hrel =
-    let+ head = B.head_opt ~key:(C.domain_prefix ^ hrel) () in
+    let+ head = B.head_opt ~key:(Logical_key.to_string (Lk.file hrel)) () in
     head <> None
 
   let in_folder rel =

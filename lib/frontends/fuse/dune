@@ -2,6 +2,8 @@
  (flags
   (:standard
    -open
+   Tsync_logical_key
+   -open
    Tsync_checkout
    -open
    Tsync_manifest
@@ -37,6 +39,7 @@
  (private_modules fuse_fs hidden_ops internal_ops path_ops)
  (optional)
  (libraries
+  tsync_logical_key
   tsync_checkout
   tsync_manifest
   tsync-libs.field_spec

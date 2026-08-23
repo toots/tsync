@@ -41,11 +41,14 @@ let cmd : unit Cmd.t =
        let module L = Layout.Inode.Make (C) in
        let module St = Store.Make (C) (L) in
        let module Hs = History.Make (C) (L) in
+       let module Lk = Logical_key.Make (C) in
        let module B = (val C.store : Backend.S) in
        let parse = History.parse ~versions_prefix:C.versions_prefix in
        match path with
          | Some rel ->
-             let* dir = Hs.version_dir ~key:(C.domain_prefix ^ rel) in
+             let* dir =
+               Hs.version_dir ~key:(Logical_key.to_string (Lk.of_rel rel))
+             in
              let+ entries =
                match dir with
                  | None -> Lwt.return_nil

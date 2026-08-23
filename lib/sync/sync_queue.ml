@@ -42,6 +42,7 @@ module type S = sig
 end
 
 module Make (C : Conf.S) : S = struct
+  module Lk = Logical_key.Make (C)
   module Fs = File_store.Make (C)
   module W = Wal.Make (C)
   module Q = Wal.Q
@@ -54,7 +55,9 @@ module Make (C : Conf.S) : S = struct
     | `Rename { Journal.dst; _ } -> dst
 
   let key_of (r : Wal.record) =
-    match r.Wal.ops with op :: _ -> C.domain_prefix ^ op_key op | [] -> ""
+    match r.Wal.ops with
+      | op :: _ -> Logical_key.to_string (Lk.of_rel (op_key op))
+      | [] -> ""
 
   (* Only a [`Put] carries bytes; the other ops are metadata the backend answers
      in one round trip. *)

@@ -2,6 +2,8 @@
  (flags
   (:standard
    -open
+   Tsync_logical_key
+   -open
    Tsync_sync
    -open
    Tsync_naming
@@ -44,6 +46,7 @@
    -framework
    Foundation))
  (libraries
+  tsync_logical_key
   tsync-libs.menu
   tsync-libs.sync
   tsync-libs.naming

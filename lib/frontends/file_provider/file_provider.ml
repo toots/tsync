@@ -26,6 +26,7 @@ let domain_dir ~domain_name =
         |> Option.map (Filename.concat root)
 
 module Make (C : Conf.S) (D : Domain_engine.Domain) = struct
+  module Lk = Logical_key.Make (C)
   module F = D.F
   module H = D.Ih
 
@@ -75,13 +76,9 @@ module Make (C : Conf.S) (D : Domain_engine.Domain) = struct
               | None -> (
                   match strip_cloud_storage ~own_only:false path with
                     | Some r -> r
-                    | None ->
-                        if path = "/" then ""
-                        else if path.[0] = '/' then
-                          String.sub path 1 (String.length path - 1)
-                        else path))
+                    | None -> if path = "/" then "" else path))
     in
-    C.domain_prefix ^ rel
+    Logical_key.to_string (Lk.file rel)
 
   (* Nothing journals a change made straight in the bucket, so no delta can
      bridge an anchor issued beforehand and every enumerator must re-list. The

@@ -62,6 +62,10 @@ module Make (D : Domain) : sig
   (** The domain root, which is a folder. *)
   val root : t
 
+  (** From a domain-relative path whose trailing separator says whether it names
+      a folder, which is how a journal entry records one. *)
+  val of_rel : string -> t
+
   (** From a spelling produced by {!to_string}, [None] for one belonging to
       another domain or to no domain at all. For what arrives over a socket or
       out of a record on disk. *)

@@ -155,6 +155,8 @@ let sidecar_path ~cache_root ~domain_name ~domain_prefix key =
     (Name_escape.encode_key (Key.strip_prefix ~domain_prefix key))
 
 module Make (C : Conf.S) = struct
+  module Lk = Logical_key.Make (C)
+
   let rel_of = Key.strip_prefix ~domain_prefix:C.domain_prefix
 
   let root () =
@@ -267,7 +269,7 @@ module Make (C : Conf.S) = struct
   let list () =
     fold ~rel_dir:"" ~deep:true
       (fun acc rel leaf (_ : staged) ->
-        (C.domain_prefix ^ Key.join rel leaf) :: acc)
+        Logical_key.to_string (Lk.file (Key.join rel leaf)) :: acc)
       []
 
   (* Every staged body reachable from a manifest: what a sweep of the body trees
@@ -293,7 +295,7 @@ module Make (C : Conf.S) = struct
       (fun acc rel leaf st ->
         Backend.
           {
-            key = C.domain_prefix ^ Key.join rel leaf;
+            key = Logical_key.to_string (Lk.file (Key.join rel leaf));
             size = Int64.to_int st.s_size;
             last_modified = st.s_mtime;
             etag = None;

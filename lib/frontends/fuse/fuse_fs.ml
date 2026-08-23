@@ -20,13 +20,13 @@ module Make (C : Conf.S) (D : Domain_engine.Domain) = struct
      Nothing is reported from there: the binding records what a handler raised
      and answers EIO, and formatting a message on a thread that has just failed
      is how the exception used to be lost. *)
-  let fuse_to_key path =
-    let rel =
-      if path = "/" then "" else String.sub path 1 (String.length path - 1)
-    in
-    C.domain_prefix ^ rel
+  module Lk = Logical_key.Make (C)
 
-  let fuse_to_dir_prefix path = Key.ensure_slash (fuse_to_key path)
+  let fuse_to_key path =
+    Logical_key.to_string (if path = "/" then Lk.root else Lk.file path)
+
+  let fuse_to_dir_prefix path =
+    Logical_key.to_string (if path = "/" then Lk.root else Lk.dir path)
 
   (* The FUSE kernel creates .fuse_hidden* files when renaming a file with open
      descriptors. Kernel-internal: never mirror to the backend. *)

@@ -110,6 +110,7 @@ let rec clean_tmp dir =
 
 (* The store, per domain: manifests keyed by logical key and nothing else. *)
 module Make (C : Conf.S) = struct
+  module Lk = Logical_key.Make (C)
   module Sm = Staged_manifest.Make (C)
 
   let root () = dir ~cache_root:C.cache_root C.domain_name
@@ -256,9 +257,7 @@ module Make (C : Conf.S) = struct
   let list_children ~prefix () =
     let rel, dir = dir_of_prefix prefix in
     let* staged = Sm.entries ~rel_dir:rel ~deep:false in
-    let child_base =
-      if rel = "" then C.domain_prefix else C.domain_prefix ^ rel ^ "/"
-    in
+    let child_base = Logical_key.to_string (Lk.dir rel) in
     let* names = readdir_opt dir in
     let+ files, dirs =
       Lwt_list.fold_left_s
@@ -296,7 +295,7 @@ module Make (C : Conf.S) = struct
         (fun acc rel leaf m ->
           Backend.
             {
-              key = C.domain_prefix ^ Key.join rel leaf;
+              key = Logical_key.to_string (Lk.file (Key.join rel leaf));
               size = Int64.to_int (size m);
               last_modified = mtime m;
               etag = None;

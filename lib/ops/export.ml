@@ -4,6 +4,7 @@ type status = Exported | Exported_symlink | Missing_data
 type summary = { exported : int; missing : int }
 
 module Make (C : Conf.S) = struct
+  module Lk = Logical_key.Make (C)
   module R = Remote.Make (C)
   module Tree = Inode_tree.Make (C)
   module Mf = Checkout.Make (C)
@@ -14,7 +15,7 @@ module Make (C : Conf.S) = struct
      cached file and a never-cached one alike. Only symlinks are special, having
      no content. *)
   let export_file ~dst rel =
-    let key = C.domain_prefix ^ rel in
+    let key = Logical_key.to_string (Lk.of_rel rel) in
     let dst_path = Filename.concat dst rel in
     let* () = Fs_util.ensure_parent dst_path in
     let* manifest = D.published key in

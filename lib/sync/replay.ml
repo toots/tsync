@@ -2,13 +2,14 @@ open Lwt.Syntax
 module Ek = Journal.Entry_key
 
 module Make (C : Conf.S) (F : File_ops.S) = struct
+  module Lk = Logical_key.Make (C)
   module Fs = File_store.Make (C)
   module J = Journal.Make (C)
   module W = Wal.Make (C)
   module Mf = Checkout.Make (C)
   module Mfs = Staged_manifest.Make (C)
 
-  let full_key rel = C.domain_prefix ^ rel
+  let full_key rel = Logical_key.to_string (Lk.of_rel rel)
 
   (* The key an op names, for the last-writer-wins check. A rename touches two. *)
   let op_keys = function

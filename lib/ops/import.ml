@@ -14,6 +14,7 @@ type summary = {
 }
 
 module Make (C : Conf.S) = struct
+  module Lk = Logical_key.Make (C)
   module R = Remote.Make (C)
   module Fs = File_store.Make (C)
   module St = Store.Make (C) (Layout.Inode.Make (C))
@@ -180,7 +181,7 @@ module Make (C : Conf.S) = struct
           Option.is_some head
 
   let import_file ~force_rehash ~on_progress ~src_root rel =
-    let key = C.domain_prefix ^ rel in
+    let key = Logical_key.to_string (Lk.of_rel rel) in
     let* skip = if force_rehash then Lwt.return_false else exists key in
     if skip then Lwt.return Skipped_exists
     else (
@@ -198,7 +199,7 @@ module Make (C : Conf.S) = struct
 
   (* No cache entry: a symlink has no file data. *)
   let import_symlink ~force_rehash ~src_root rel target =
-    let key = C.domain_prefix ^ rel in
+    let key = Logical_key.to_string (Lk.of_rel rel) in
     let* skip = if force_rehash then Lwt.return_false else exists key in
     if skip then Lwt.return Skipped_exists
     else (
@@ -319,7 +320,7 @@ module Make (C : Conf.S) = struct
            id resolution finds them. *)
         let* () =
           Listing.iter plan.dirs (fun rel ->
-              let key = C.domain_prefix ^ rel ^ "/" in
+              let key = Logical_key.to_string (Lk.dir rel) in
               let* () = Mf.create_dir key in
               let* () = St.put_folder_marker ~key in
               (* Minted by the marker above; read back so the journal entry

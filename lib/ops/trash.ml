@@ -3,6 +3,7 @@ open Lwt.Syntax
 type outcome = Restored | Not_in_trash | Parent_unknown
 
 module Make (C : Conf.S) = struct
+  module Lk = Logical_key.Make (C)
   module L = Layout.Inode.Make (C)
   module St = Store.Make (C) (L)
   module B = (val C.store : Backend.S)
@@ -49,7 +50,9 @@ module Make (C : Conf.S) = struct
           (* Where it goes back is filed under its parent's namespace, so a
              client that has never resolved the parent has no key to write and
              must sync before it can put anything back. *)
-          let* new_key = L.folder_marker_key (C.domain_prefix ^ path) in
+          let* new_key =
+            L.folder_marker_key (Logical_key.to_string (Lk.of_rel path))
+          in
           match new_key with
             | None -> Lwt.return Parent_unknown
             | Some new_key ->
