@@ -36,6 +36,7 @@ let empty =
   }
 
 module Make (C : Conf.S) = struct
+  module L = Chunk_layout.Make (C)
   module Space = Chunk_space.Make (C)
   module B = (val C.store : Backend.S)
 
@@ -95,7 +96,7 @@ module Make (C : Conf.S) = struct
     else prefix
 
   let to_dir root = Filename.concat root (dir_of_prefix C.chunk_prefix)
-  let from_dir root = Filename.concat root (dir_of_prefix Space.from_prefix)
+  let from_dir root = Filename.concat root (dir_of_prefix L.from_prefix)
 
   (* Keys per delete against a copy. 1000 is what s3 and gcs both cap a bulk
      delete at; an http-proxy posts the whole list and its ceiling is the peer's
@@ -308,7 +309,7 @@ module Make (C : Conf.S) = struct
      the store's size. *)
   let orphans_in_shard ~main:(module M : Backend.S) ~slots shard =
     let prefix = C.chunk_prefix ^ shard ^ "/" in
-    let* going = M.list_prefix ~prefix:(Space.from_prefix ^ shard ^ "/") () in
+    let* going = M.list_prefix ~prefix:(L.from_prefix ^ shard ^ "/") () in
     (* Only chunks: a write left in flight is discarded with the old space, but
        it was never a chunk — counting it would overstate what the collection
        recovered, and naming it in a delete would take out another client's
@@ -434,11 +435,7 @@ module Make (C : Conf.S) = struct
     Lwt_list.filter_map_s
       (fun (m : Backend.member) ->
         let (module T : Backend.S) = m.Backend.backend in
-        let+ entries =
-          T.list_prefix
-            ~prefix:(Chunk_layout.gc_jobs_prefix ~chunk_prefix:C.chunk_prefix)
-            ()
-        in
+        let+ entries = T.list_prefix ~prefix:L.gc_jobs_prefix () in
         let jobs =
           List.filter
             (fun (e : Backend.file_entry) ->
@@ -468,11 +465,7 @@ module Make (C : Conf.S) = struct
     Lwt_list.map_s
       (fun (m : Backend.member) ->
         let (module T : Backend.S) = m.Backend.backend in
-        let* entries =
-          T.list_prefix
-            ~prefix:(Chunk_layout.gc_jobs_prefix ~chunk_prefix:C.chunk_prefix)
-            ()
-        in
+        let* entries = T.list_prefix ~prefix:L.gc_jobs_prefix () in
         let jobs =
           List.filter
             (fun (e : Backend.file_entry) ->
@@ -672,7 +665,7 @@ module Make (C : Conf.S) = struct
        else's good one, and a write fans out, filing every healthy copy as
        corrupt alongside the bad one. *)
     let (module M : Backend.S) = s.main in
-    let backend_key = Space.key ck in
+    let backend_key = L.key ck in
     match Chunk_layout.marker_key backend_key with
       | None -> Lwt.return_unit
       | Some marker -> (

@@ -340,7 +340,10 @@ let verify_suite name fields =
   let open Lwt.Syntax in
   group (Printf.sprintf "%s: whole-store verification requests" name);
   let chunk_prefix = run_prefix ^ "chunks/" in
-  let jobs = Chunk_layout.verify_jobs_prefix ~chunk_prefix in
+  let module L = Chunk_layout.Make (struct
+    let chunk_prefix = chunk_prefix
+  end) in
+  let jobs = L.verify_jobs_prefix in
   let (module On : Backend.S) = backend_of name fields in
   let* caps = On.capabilities ~prefix:chunk_prefix () in
   check "an object store reports that its chunks are checked"
@@ -377,9 +380,7 @@ let verify_suite name fields =
     On.discard ~chunk_prefix ~run:"0001755300000000" ~name:"abb" ~keys:doomed ()
   in
   check "an object store takes a delete request" (answer = `Queued);
-  let key =
-    Chunk_layout.gc_job_key ~chunk_prefix ~run:"0001755300000000" "abb"
-  in
+  let key = L.gc_job_key ~run:"0001755300000000" "abb" in
   let+ body = On.get_opt ~key () in
   check "the delete request is an object the store hands back" (body <> None);
   check "carrying exactly the keys it was given"
@@ -468,10 +469,13 @@ let sweep (module B : Backend.S) =
       (fun _ -> Lwt.return_unit)
   in
   let chunk_prefix = run_prefix ^ "chunks/" in
+  let module L = Chunk_layout.Make (struct
+    let chunk_prefix = chunk_prefix
+  end) in
   let* () = clear run_prefix in
-  let* () = clear (Chunk_layout.verify_jobs_prefix ~chunk_prefix) in
-  let* () = clear (Chunk_layout.gc_jobs_prefix ~chunk_prefix) in
-  clear (Chunk_layout.corrupted_prefix ~chunk_prefix)
+  let* () = clear L.verify_jobs_prefix in
+  let* () = clear L.gc_jobs_prefix in
+  clear L.corrupted_prefix
 
 let () =
   let linked = Backend.types () in

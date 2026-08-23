@@ -49,24 +49,6 @@ let domain_of ~chunk_prefix =
     | Some i -> String.sub root (i + 1) (String.length root - i - 1)
     | None -> root
 
-let corrupted_prefix ~chunk_prefix =
-  corrupted_root ~chunk_prefix ^ domain_of ~chunk_prefix ^ "/"
-
-let verify_jobs_prefix ~chunk_prefix =
-  verify_jobs_root ~chunk_prefix ^ domain_of ~chunk_prefix ^ "/"
-
-let verify_job_key ~chunk_prefix shard =
-  verify_jobs_prefix ~chunk_prefix ^ shard
-
-let gc_jobs_prefix ~chunk_prefix =
-  gc_jobs_root ~chunk_prefix ^ domain_of ~chunk_prefix ^ "/"
-
-(* The collection is in the name, not only the cursor: a later collection
-   reaching the same shard would otherwise overwrite a request an earlier one
-   left unconsumed, losing both its keys and the evidence that it stuck. *)
-let gc_job_key ~chunk_prefix ~run name =
-  gc_jobs_prefix ~chunk_prefix ^ run ^ "/" ^ name
-
 (* Milliseconds, because a whole collection can begin and end inside one
    second. *)
 let gc_run_name started = Printf.sprintf "%013.0f" (started *. 1000.)
@@ -145,3 +127,28 @@ let is_marker_key key =
                   | None -> false))
 
 let chunk_key_of_marker = Filename.basename
+
+module type Store = sig
+  val chunk_prefix : string
+end
+
+module Make (S : Store) = struct
+  let chunk_prefix = S.chunk_prefix
+  let domain = domain_of ~chunk_prefix
+  let domain_root = Filename.chop_suffix chunk_prefix "chunks/"
+  let corrupted_prefix = corrupted_root ~chunk_prefix ^ domain ^ "/"
+  let verify_jobs_prefix = verify_jobs_root ~chunk_prefix ^ domain ^ "/"
+  let verify_job_key shard = verify_jobs_prefix ^ shard
+  let gc_jobs_prefix = gc_jobs_root ~chunk_prefix ^ domain ^ "/"
+
+  (* The collection is in the name, not only the cursor: a later collection
+     reaching the same shard would otherwise overwrite a request an earlier one
+     left unconsumed, losing both its keys and the evidence that it stuck. *)
+  let gc_job_key ~run name = gc_jobs_prefix ^ run ^ "/" ^ name
+  let key chunk_key = chunk_prefix ^ relative_path chunk_key
+
+  (* Siblings of the chunk root, since opening a collection renames that root
+     itself away. *)
+  let from_prefix = domain_root ^ "chunks.from/"
+  let from_key chunk_key = from_prefix ^ relative_path chunk_key
+end

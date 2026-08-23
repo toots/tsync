@@ -30,25 +30,16 @@ type run = { phase : phase; started : float; cursor : string }
 
 val string_of_phase : phase -> string
 
-(** Where the space on its way out lives, and where a run records itself: both
-    siblings of [chunk_prefix], since opening a run renames the chunk root
-    itself away.
+(** Where a run records itself: a sibling of [chunk_prefix], since opening a run
+    renames the chunk root itself away. Outside the functor because a caller may
+    need it before there is a {!Conf.S} to apply one to.
 
-    Outside the functor because {!Deferred} is built before there is a {!Conf.S}
-    to apply one to, and it needs the from-space prefix as well. *)
-val from_prefix : chunk_prefix:string -> string
-
+    Where the space on its way out lives is {!Chunk_layout.Make.from_prefix}. *)
 val marker_key : chunk_prefix:string -> string
 
 module Make (C : Conf.S) : sig
-  (** The chunk root a run renames away, and where the run records itself. Both
-      sit beside {!Conf.S.chunk_prefix}. *)
-  val from_prefix : string
-
+  (** Where this domain's run records itself. *)
   val marker_key : string
-
-  (** The backend key for a chunk key, in the surviving space. *)
-  val key : string -> string
 
   (** The run in progress, or [None] when the store is idle. Costs one read; a
       marker that will not parse logs and reads as idle. *)

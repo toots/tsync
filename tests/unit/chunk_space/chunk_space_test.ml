@@ -13,7 +13,12 @@ open Check
 let root = "/tmp/tsync-chunk-space-test"
 let store_dir = root ^ "/store"
 let chunk_prefix = "tsync/testdom/chunks/"
-let from_prefix = Chunk_space.from_prefix ~chunk_prefix
+
+module L = Chunk_layout.Make (struct
+  let chunk_prefix = chunk_prefix
+end)
+
+let from_prefix = L.from_prefix
 let marker_key = Chunk_space.marker_key ~chunk_prefix
 
 (* An object store's stand-in: a local backend that says it cannot collect, which
@@ -92,7 +97,7 @@ let () =
      (* [live] in the surviving space, [going] only in the space on its way out —
         the state a half-marked collection is in. *)
      let* () =
-       Store.put ~key:(Space.key live) ~data:(Bigstring.of_string "live") ()
+       Store.put ~key:(L.key live) ~data:(Bigstring.of_string "live") ()
      in
      let* () =
        Store.put
@@ -135,9 +140,9 @@ let () =
 
      case "promoting";
      let* (_ : bool) = Space.promote going in
-     let* still = Store.head_opt ~key:(Space.key going) () in
+     let* still = Store.head_opt ~key:(L.key going) () in
      step "promote gives it a name in the surviving space: %b" (still <> None);
-     let* body = Store.get ~key:(Space.key going) () in
+     let* body = Store.get ~key:(L.key going) () in
      step "and the same bytes: %S" (Bigstring.to_string body);
      (* The load-bearing property of the whole scheme: the chunk is *moved*, not
         copied. It is what leaves the space on its way out holding the garbage and

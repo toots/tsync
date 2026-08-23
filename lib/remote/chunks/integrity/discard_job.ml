@@ -9,6 +9,7 @@ let decode body =
   List.filter (fun l -> l <> "") (String.split_on_char '\n' body)
 
 let queue ~put ~chunk_prefix ~run ~name ~keys () =
-  put
-    ~key:(Chunk_layout.gc_job_key ~chunk_prefix ~run name)
-    ~data:(encode keys) ()
+  let module L = Chunk_layout.Make (struct
+    let chunk_prefix = chunk_prefix
+  end) in
+  put ~key:(L.gc_job_key ~run name) ~data:(encode keys) ()

@@ -1256,7 +1256,10 @@ let dump_backend_at ~backend_root ~domain_prefix ~chunk_prefix ~journal_prefix
      mid-collection is meant to say which space each chunk is in. The lock beside
      the marker is not shown: it is an empty file whose only content is who holds
      it, and that is never this. *)
-  let from_prefix = Chunk_space.from_prefix ~chunk_prefix in
+  let module L = Chunk_layout.Make (struct
+    let chunk_prefix = chunk_prefix
+  end) in
+  let from_prefix = L.from_prefix in
   let gc_marker = Chunk_space.marker_key ~chunk_prefix in
   (* Folder ids are deterministic (the RNG is seeded per scenario), so the dump
      prints them raw: a reviewer can trace [file <id>/<hash>] back to the

@@ -33,40 +33,8 @@ val is_shard_name : string -> bool
     answer. What fails is filed under {!corrupted_prefix}, where any client can
     list it. *)
 
-(** ["tsync/corrupted/<domain>/"]. Beside the domains rather than inside one,
-    with the domain as its first segment, so one literal prefix covers every
-    domain. *)
-val corrupted_prefix : chunk_prefix:string -> string
-
-(** Where a domain's shard-check requests are filed, beside the domains like
-    {!corrupted_prefix} so nothing walking chunks meets one. *)
-val verify_jobs_prefix : chunk_prefix:string -> string
-
-(** The request to check one shard. The bucket is the queue: a client writes one
-    of these per shard, the store's own object-created notification carries it
-    to the function that checks chunks, and the function deletes it when that
-    shard is done. *)
-val verify_job_key : chunk_prefix:string -> string -> string
-
-(** Where a domain's discard requests are filed, beside {!verify_jobs_prefix}
-    and for the same reason. *)
-val gc_jobs_prefix : chunk_prefix:string -> string
-
-(** The request to drop one batch of chunks. Like {!verify_job_key} the bucket
-    is the queue, but the body carries the keys: a copy has no from-space of its
-    own to be pointed at, so the request has to say which ones.
-
-    Named by collection and then by cursor, so a repeated flush overwrites its
-    own request while a later collection reaching the same shard cannot
-    overwrite one an earlier collection left unconsumed. *)
-val gc_job_key : chunk_prefix:string -> run:string -> string -> string
-
 (** What a collection calls itself in {!gc_job_key}, from its start time. *)
 val gc_run_name : float -> string
-
-(** The domain a chunk prefix belongs to: its second path segment, so
-    ["tsync/<domain>/chunks/"] yields [<domain>]. *)
-val domain_of : chunk_prefix:string -> string
 
 (** The shard a request names — either kind — and [None] for anything else found
     under the prefix, which on a filesystem store means the directory it filed
@@ -92,3 +60,37 @@ val is_marker_key : string -> bool
 
 (** The chunk a marker names. *)
 val chunk_key_of_marker : string -> string
+
+(** What a chunk store's keys hang off. {!Conf.S} satisfies it, and a caller
+    built before there is one — {!Deferred} — passes the prefix alone. *)
+module type Store = sig
+  val chunk_prefix : string
+end
+
+module Make (S : Store) : sig
+  (** The backend key for a chunk key, in the space every writer uses. *)
+  val key : string -> string
+
+  (** Where a collection puts the space on its way out, and a chunk's key within
+      it. Siblings of the chunk root, since opening a run renames that root
+      itself away. *)
+  val from_prefix : string
+
+  val from_key : string -> string
+
+  (** Where this domain's corruption markers are filed. *)
+  val corrupted_prefix : string
+
+  (** Where a request asking the store to check its chunks is filed, and the key
+      of the one naming [shard]. *)
+  val verify_jobs_prefix : string
+
+  val verify_job_key : string -> string
+
+  (** The same for a request asking it to drop chunks. The run is in the key,
+      not only the cursor: a later collection reaching the same shard would
+      otherwise overwrite a request an earlier one left unconsumed. *)
+  val gc_jobs_prefix : string
+
+  val gc_job_key : run:string -> string -> string
+end

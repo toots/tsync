@@ -19,6 +19,9 @@ let fanout = 32
 (* Not batched: both stores have a bulk delete and neither has a bulk put, so
    this is one round trip per shard, [fanout] of them at a time. *)
 let queue ?(on_progress = fun ~done_:_ ~total:_ -> ()) ~put ~chunk_prefix () =
+  let module L = Chunk_layout.Make (struct
+    let chunk_prefix = chunk_prefix
+  end) in
   let slots = Lwt_bounded.create ~max:fanout () in
   let shards = List.init Chunk_layout.shards Chunk_layout.shard_name in
   let total = List.length shards in
@@ -27,11 +30,7 @@ let queue ?(on_progress = fun ~done_:_ ~total:_ -> ()) ~put ~chunk_prefix () =
     Lwt_list.iter_p
       (fun shard ->
         Lwt_bounded.use slots (fun () ->
-            let+ () =
-              put
-                ~key:(Chunk_layout.verify_job_key ~chunk_prefix shard)
-                ~data:"" ()
-            in
+            let+ () = put ~key:(L.verify_job_key shard) ~data:"" () in
             incr done_;
             on_progress ~done_:!done_ ~total))
       shards

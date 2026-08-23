@@ -9,6 +9,7 @@ type dest_stats = {
 
 module Make (C : Conf.S) = struct
   module Space = Chunk_space.Make (C)
+  module L = Chunk_layout.Make (C)
   module Tree = Inode_tree.Make (C)
 
   (* What a destination holds, by key. A first resync of a shared bucket asks
@@ -205,7 +206,7 @@ module Make (C : Conf.S) = struct
   let chunk_keys (m : Manifest.t) =
     let table = m in
     List.init (Chunk_table.count table) (fun i ->
-        Space.key (Chunk_table.key table i))
+        L.key (Chunk_table.key table i))
 
   (* Only the folders [rel] runs through or lives in are descended into, so
      scoping to one folder costs its own subtree rather than the whole tree. A

@@ -14,12 +14,12 @@ let unhealthy (r : Corruption.report) =
   || r.Corruption.unreachable <> []
 
 module Make (C : Conf.S) = struct
+  module L = Chunk_layout.Make (C)
+
   let follow ~on_progress ~on_done ~on_stalled (m : Backend.member) =
     let (module B : Backend.S) = m.Backend.backend in
-    let jobs = Chunk_layout.verify_jobs_prefix ~chunk_prefix:C.chunk_prefix in
-    let corrupted =
-      Chunk_layout.corrupted_prefix ~chunk_prefix:C.chunk_prefix
-    in
+    let jobs = L.verify_jobs_prefix in
+    let corrupted = L.corrupted_prefix in
     (* A listing that fails counts as nothing found rather than ending the
        watch: the store is being asked about work it may not have started. *)
     let count prefix =

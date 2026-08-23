@@ -94,6 +94,7 @@ module Make_with_layout (C : Conf.S) (L : Layout.S) : S = struct
   (* Chunk writes go where they always went; only presence checks and reads have
      to know that a collection may be in progress ({!Chunk_space}). *)
   module Space = Chunk_space.Make (C)
+  module L = Chunk_layout.Make (C)
   module Corrupt = Corruption.Make (C)
 
   let pools =
@@ -149,7 +150,7 @@ module Make_with_layout (C : Conf.S) (L : Layout.S) : S = struct
 
   module Chunks_store = Chunk_store.Make (struct
     let put = B.put
-    let backend_key = Space.key
+    let backend_key = L.key
     let fetch_body = Space.get
     let corrupt = Corrupt.is_marked
     let cleared = Corrupt.forget

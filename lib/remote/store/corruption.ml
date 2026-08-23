@@ -33,7 +33,9 @@ let memo_for prefix =
         m
 
 module Make (C : Conf.S) = struct
-  let prefix = Chunk_layout.corrupted_prefix ~chunk_prefix:C.chunk_prefix
+  module L = Chunk_layout.Make (C)
+
+  let prefix = L.corrupted_prefix
   let key chunk_key = prefix ^ Chunk_layout.relative_path chunk_key
 
   (* Unbounded for {!list}, which is feeding a repair rather than a report. *)

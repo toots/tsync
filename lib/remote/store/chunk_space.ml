@@ -57,17 +57,14 @@ let of_string data =
 
    Outside the functor because {!Deferred} is built before there is a {!Conf.S}
    to apply one to, and it needs the from-space prefix too. *)
-let domain_root ~chunk_prefix = Filename.chop_suffix chunk_prefix "chunks/"
-let from_prefix ~chunk_prefix = domain_root ~chunk_prefix ^ "chunks.from/"
-let marker_key ~chunk_prefix = domain_root ~chunk_prefix ^ "gc-run"
+let marker_key ~chunk_prefix =
+  Filename.chop_suffix chunk_prefix "chunks/" ^ "gc-run"
 
 module Make (C : Conf.S) = struct
   module B = (val C.store : Backend.S)
+  module L = Chunk_layout.Make (C)
 
-  let from_prefix = from_prefix ~chunk_prefix:C.chunk_prefix
   let marker_key = marker_key ~chunk_prefix:C.chunk_prefix
-  let key chunk_key = C.chunk_prefix ^ Chunk_layout.relative_path chunk_key
-  let from_key chunk_key = from_prefix ^ Chunk_layout.relative_path chunk_key
 
   (* The main is where both spaces are: a run renames a directory and links
      within it, so only the store holding the chunks can be mid-run. *)
@@ -167,7 +164,8 @@ module Make (C : Conf.S) = struct
      in the direction where being wrong would matter — see {!missed}. *)
   let candidates chunk_key =
     let+ running = probably_running () in
-    if running then [key chunk_key; from_key chunk_key] else [key chunk_key]
+    if running then [L.key chunk_key; L.from_key chunk_key]
+    else [L.key chunk_key]
 
   (* One more place to look once every candidate has missed. A store the cache
      called idle has only been asked about one space and the cache may be behind
@@ -182,7 +180,7 @@ module Make (C : Conf.S) = struct
     if running then Lwt.return_none
     else
       let+ opened = refresh_order () in
-      if opened then Some (from_key chunk_key) else None
+      if opened then Some (L.from_key chunk_key) else None
 
   (* A move, not a copy: what stays behind in the space on its way out is then
      the garbage itself, which is what lets a collection delete by name instead
@@ -205,8 +203,8 @@ module Make (C : Conf.S) = struct
     match local_root () with
       | None -> Lwt.return_false
       | Some root ->
-          let src = Filename.concat root (from_key chunk_key)
-          and dst = Filename.concat root (key chunk_key) in
+          let src = Filename.concat root (L.from_key chunk_key)
+          and dst = Filename.concat root (L.key chunk_key) in
           let rec attempt ~parent_made =
             Lwt.catch
               (fun () ->
@@ -256,7 +254,7 @@ module Make (C : Conf.S) = struct
   let head chunk_key =
     let* capable = is_capable () in
     match (capable, main ()) with
-      | false, _ | _, None -> B.head_opt ~key:(key chunk_key) ()
+      | false, _ | _, None -> B.head_opt ~key:(L.key chunk_key) ()
       | true, Some (module M : Backend.S) ->
           let* keys = candidates chunk_key in
           let rec first = function
@@ -269,8 +267,8 @@ module Make (C : Conf.S) = struct
                         | Some _ -> Lwt.return found
                         (* A replica may hold a chunk the main has lost, which is
                            the composite's job. *)
-                        | None -> B.head_opt ~key:(key chunk_key) ())
-                  | None -> B.head_opt ~key:(key chunk_key) ())
+                        | None -> B.head_opt ~key:(L.key chunk_key) ())
+                  | None -> B.head_opt ~key:(L.key chunk_key) ())
             | k :: rest ->
                 let* found = M.head_opt ~key:k () in
                 if found <> None then Lwt.return found else first rest
@@ -285,11 +283,11 @@ module Make (C : Conf.S) = struct
   let get chunk_key =
     let* capable = is_capable () in
     match (capable, main ()) with
-      | false, _ | _, None -> B.get ~key:(key chunk_key) ()
+      | false, _ | _, None -> B.get ~key:(L.key chunk_key) ()
       | true, Some (module M : Backend.S) ->
           let* keys = candidates chunk_key in
           let rec first = function
-            | [] -> B.get ~key:(key chunk_key) ()
+            | [] -> B.get ~key:(L.key chunk_key) ()
             | k :: rest -> (
                 let* found = M.get_opt ~key:k () in
                 match found with

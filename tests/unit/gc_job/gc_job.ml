@@ -25,16 +25,17 @@ let runs = [1755300000.; 1755300000.5]
 let () =
   List.iter
     (fun domain ->
-      let cp = chunk_prefix domain in
-      Printf.printf "prefix|%s|%s\n" domain
-        (Chunk_layout.gc_jobs_prefix ~chunk_prefix:cp);
+      let module L = Chunk_layout.Make (struct
+        let chunk_prefix = chunk_prefix domain
+      end) in
+      Printf.printf "prefix|%s|%s\n" domain L.gc_jobs_prefix;
       List.iter
         (fun started ->
           let run = Chunk_layout.gc_run_name started in
           List.iter
             (fun shard ->
               Printf.printf "job|%s|%s|%s|%s\n" domain run shard
-                (Chunk_layout.gc_job_key ~chunk_prefix:cp ~run shard))
+                (L.gc_job_key ~run shard))
             ["000"; "abb"; "fff"])
         runs)
     domains;
@@ -60,10 +61,10 @@ let () =
   (* A request is never mistaken for a chunk on this side either. *)
   List.iter
     (fun domain ->
-      let key =
-        Chunk_layout.gc_job_key ~chunk_prefix:(chunk_prefix domain)
-          ~run:"1755300000000" "abb"
-      in
+      let module L = Chunk_layout.Make (struct
+        let chunk_prefix = chunk_prefix domain
+      end) in
+      let key = L.gc_job_key ~run:"1755300000000" "abb" in
       assert (Chunk_layout.marker_key key = None);
       assert (Chunk_layout.shard_of_job key = Some "abb"))
     domains;

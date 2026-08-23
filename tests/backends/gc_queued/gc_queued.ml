@@ -16,8 +16,13 @@ let root = Scratch.dir "gc-queued"
 let main_dir = Filename.concat root "main"
 let replica_dir = Filename.concat root "replica"
 let chunk_prefix = "tsync/testdom/chunks/"
+
+module L = Chunk_layout.Make (struct
+  let chunk_prefix = chunk_prefix
+end)
+
 let domain_prefix = "tsync/testdom/manifests/"
-let jobs_prefix = Chunk_layout.gc_jobs_prefix ~chunk_prefix
+let jobs_prefix = L.gc_jobs_prefix
 
 module Main = (val Fixture.local_store ~verify_writes:false main_dir)
 module Disk = (val Fixture.local_store ~verify_writes:false replica_dir)
@@ -30,8 +35,7 @@ module Replica : Backend.S = struct
 
   let discard ~chunk_prefix ~run ~name ~keys () =
     let+ () =
-      Disk.put
-        ~key:(Chunk_layout.gc_job_key ~chunk_prefix ~run name)
+      Disk.put ~key:(L.gc_job_key ~run name)
         ~data:(Bigstring.of_string (Discard_job.encode keys))
         ()
     in

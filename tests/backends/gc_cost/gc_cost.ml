@@ -23,6 +23,11 @@ let root = "/tmp/tsync-gc-cost-test"
 let main_dir = root ^ "/main"
 let replica_dir = root ^ "/replica"
 let chunk_prefix = "tsync/testdom/chunks/"
+
+module L = Chunk_layout.Make (struct
+  let chunk_prefix = chunk_prefix
+end)
+
 let domain_prefix = "tsync/testdom/manifests/"
 let marker_key = Chunk_space.marker_key ~chunk_prefix
 
@@ -54,8 +59,7 @@ module Count
      asking whether any delete request is still sitting there is one round trip
      a run, not one a shard, and conflating the two would hide either. *)
   let list_prefix ?max_keys ~prefix () =
-    if prefix = Chunk_layout.gc_jobs_prefix ~chunk_prefix then
-      T.t.jobs <- T.t.jobs + 1
+    if prefix = L.gc_jobs_prefix then T.t.jobs <- T.t.jobs + 1
     else T.t.lists <- T.t.lists + 1;
     B.list_prefix ?max_keys ~prefix ()
 
@@ -296,8 +300,7 @@ let () =
         them across. Both filters show up in the one number: without them the count
         below doubles. *)
      let from_dir =
-       Filename.concat main_dir
-         (Filename.chop_suffix (Chunk_space.from_prefix ~chunk_prefix) "/")
+       Filename.concat main_dir (Filename.chop_suffix L.from_prefix "/")
      in
      let* strays =
        let+ shards = Fs_util.readdir_list from_dir in

@@ -25,11 +25,12 @@ let describe ~chunk_key ~store = function
 module Make (C : Conf.S) = struct
   module Cor = Corruption.Make (C)
   module Space = Chunk_space.Make (C)
+  module L = Chunk_layout.Make (C)
 
   let good_body (module B : Backend.S) chunk_key =
     Lwt.catch
       (fun () ->
-        let+ body = B.get_opt ~key:(Space.key chunk_key) () in
+        let+ body = B.get_opt ~key:(L.key chunk_key) () in
         match body with
           | Some body when Chunks.key_of_body body = chunk_key -> Some body
           | _ -> None)
@@ -67,7 +68,7 @@ module Make (C : Conf.S) = struct
           let (module Dst : Backend.S) = m.Backend.backend in
           let write body =
             if dry_run then Lwt.return_unit
-            else Dst.put ~key:(Space.key chunk_key) ~data:body ()
+            else Dst.put ~key:(L.key chunk_key) ~data:body ()
           in
           (* Its own copy first: see {!Cleared}. *)
           let* mine = good_body m.Backend.backend chunk_key in

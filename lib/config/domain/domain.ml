@@ -54,7 +54,10 @@ let build_backends ~paths ~resume (d : Conf_parsing.domain) :
       Deferred.make ~resume ~name:bc.name ~backend ~source
         ~chunk_prefix:(Conf_parsing.chunk_prefix d)
         ~chunk_from_prefix:
-          (Chunk_space.from_prefix ~chunk_prefix:(Conf_parsing.chunk_prefix d))
+          (let module L = Chunk_layout.Make (struct
+             let chunk_prefix = Conf_parsing.chunk_prefix d
+           end) in
+          L.from_prefix)
         ~chunk_keys
         ~journal_prefix:(Conf_parsing.journal_prefix d)
         ~cursor_key:(Conf_parsing.cursor_key d)
