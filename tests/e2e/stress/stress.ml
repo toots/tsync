@@ -16,7 +16,7 @@
    Everything random comes from one seed, printed on every run. A failure that
    cannot be replayed is a failure nobody can act on.
 
-   Manifests are read with {!Chunk_table} and stores with {!Backend}, never with
+   Manifests are read with {!Manifest} and stores with {!Backend}, never with
    a second implementation of either: a checker that parses the format its own
    way drifts from the product and starts issuing confident wrong verdicts, and
    one that lists a bucket with another client is not testing this one. *)
@@ -273,8 +273,8 @@ let tree mount =
 
 (* Every chunk a manifest names, read with the product's own parser. *)
 let manifest_chunks path =
-  match Chunk_table.of_string (read_file path) with
-    | t -> Some (List.init (Chunk_table.count t) (Chunk_table.key t))
+  match Manifest.of_string (read_file path) with
+    | t -> Some (List.init (Manifest.count t) (Manifest.key t))
     | exception _ -> None
 
 let check_store ~store =

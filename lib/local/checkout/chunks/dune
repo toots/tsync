@@ -7,6 +7,8 @@
  (flags
   (:standard
    -open
+   Tsync_manifest
+   -open
    Tsync_conf
    -open
    Tsync_naming
@@ -25,6 +27,7 @@
  (name tsync_chunk_cache)
  (public_name tsync-libs.chunk_cache)
  (libraries
+  tsync_manifest
   tsync_conf
   tsync_naming
   tsync_chunks

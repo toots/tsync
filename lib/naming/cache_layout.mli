@@ -5,10 +5,10 @@
                                                   (+ .tsync-dir/.tsync-name markers)
     <cache_root>/<domain>/scratch/<real path>     .fuse_hidden* scratch files
     <cache_root>/<domain>/chunks/<xxx>/<key>      cache-chunk store, one file
-                                                  per {!Chunk_group}
+                                                  per {!Manifest.Group}
     <cache_root>/<domain>/staged/manifests/<path> staged manifests (unsynced edits)
     <cache_root>/<domain>/staged/chunks/<uuid>    staged bodies, one per
-                                                  {!Chunk_group} in that
+                                                  {!Manifest.Group} in that
                                                   group's own byte layout
     <cache_root>/<domain>/staged/whole/<uuid>     whole files from a frontend
     <cache_root>/<domain>/folders/<folder id>     {parent,name}: the folder tree

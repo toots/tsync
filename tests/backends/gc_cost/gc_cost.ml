@@ -180,9 +180,9 @@ let () =
                ()
            in
            let m =
-             Manifest.make ~name:"f" ~h1:(String.make 16 '0')
+             Manifest_fixture.make ~name:"f" ~h1:(String.make 16 '0')
                ~h2:(String.make 16 '0') ~size:8L ~chunk_size:8
-               ~chunks:[Manifest.entry_of_key ~index:0 ~size:8 (ck n)]
+               ~chunks:[Manifest_fixture.entry_of_key ~index:0 ~size:8 (ck n)]
                ~mtime:0.
            in
            Main.put
@@ -418,13 +418,14 @@ let () =
                chunks
            in
            let m =
-             Manifest.make ~name:"f" ~h1:(String.make 16 '0')
+             Manifest_fixture.make ~name:"f" ~h1:(String.make 16 '0')
                ~h2:(String.make 16 '0')
                ~size:(Int64.of_int (8 * wide))
                ~chunk_size:8
                ~chunks:
                  (List.mapi
-                    (fun i k -> Manifest.entry_of_key ~index:i ~size:8 k)
+                    (fun i k ->
+                      Manifest_fixture.entry_of_key ~index:i ~size:8 k)
                     chunks)
                ~mtime:0.
            in

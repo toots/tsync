@@ -48,13 +48,13 @@ let label key =
 
 let manifest ~name chunks =
   let keys = List.map Filename.basename chunks in
-  Chunk_table.encode ~name
+  Manifest.encode ~name
     ~size:(Int64.of_int (List.length keys * 4))
     ~chunk_size:4 ~mtime:0. ~h1:(hex 0) ~h2:(hex 1) ~symlink:None ~keys
 
 let chunk_keys data =
-  match Chunk_table.of_string data with
-    | t -> List.init (Chunk_table.count t) (Chunk_table.key t)
+  match Manifest.of_string data with
+    | t -> List.init (Manifest.count t) (Manifest.key t)
     | exception _ -> []
 
 let keys_under dir =

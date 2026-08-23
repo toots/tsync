@@ -116,13 +116,13 @@ module Capped0 =
 (* Chunk lengths derive from the header, so file size and chunk size set
    them. *)
 let table ~chunk_size ~size keys =
-  Chunk_table.of_string
-    (Chunk_table.encode ~name:"t" ~size:(Int64.of_int size) ~chunk_size
-       ~mtime:0. ~h1:(String.make 16 '0') ~h2:(String.make 16 '0') ~symlink:None
-       ~keys)
+  Manifest.of_string
+    (Manifest.encode ~name:"t" ~size:(Int64.of_int size) ~chunk_size ~mtime:0.
+       ~h1:(String.make 16 '0') ~h2:(String.make 16 '0') ~symlink:None ~keys)
 
 let build ~per ~chunk_size ~size keys i =
-  Option.get (Chunk_group.of_table ~table:(table ~chunk_size ~size keys) ~per i)
+  Option.get
+    (Manifest.Group.of_table ~table:(table ~chunk_size ~size keys) ~per i)
 
 (* What a domain whose cache chunk size equals its stored chunk size gets. *)
 let solo ck =
@@ -137,12 +137,12 @@ let k5 = fst (List.nth bodies 4)
 
 (* One cache file over three backend chunks: 4 + 4 + 2, the last one short. *)
 let trio_table = table ~chunk_size:4 ~size:10 [k3; k4; k5]
-let trio = Option.get (Chunk_group.of_table ~table:trio_table ~per:3 0)
+let trio = Option.get (Manifest.Group.of_table ~table:trio_table ~per:3 0)
 
 (* The store's own rule; never recomputed here. *)
 let path g =
   Cache_layout.chunk_path ~cache_root:C.cache_root ~domain_name:C.domain_name
-    (Chunk_group.key g)
+    (Manifest.Group.key g)
 
 (* Cache-root-relative so the snapshot does not carry a temp path. *)
 let rel path =
@@ -154,7 +154,7 @@ let rel path =
 
 (* The group's member keys, in index order. *)
 let members g =
-  List.init (Chunk_group.member_count g) (Chunk_group.member_key g)
+  List.init (Manifest.Group.member_count g) (Manifest.Group.member_key g)
 
 let gets_for g = List.fold_left (fun acc ck -> acc + count ck) 0 (members g)
 
@@ -165,7 +165,7 @@ let show label g =
 
 (* As the read path does: into a buffer, by index. *)
 let read_member g index =
-  let want = Chunk_group.size g index in
+  let want = Manifest.Group.size g index in
   let buf = Bigarray.Array1.create Bigarray.char Bigarray.c_layout want in
   let+ served = Cc.read_into ~group:g ~index buf ~chunk_off:0 in
   ( String.init served.Chunk_cache.bytes (Bigarray.Array1.get buf),
@@ -218,20 +218,20 @@ let () =
         at 1. *)
      Printf.printf "%-28s peak_concurrent_gets=%d of %d\n"
        "trio fetch concurrency" !peak_in_fetch
-       (Chunk_group.member_count trio);
+       (Manifest.Group.member_count trio);
      Printf.printf "%-28s %s\n" "layout" (rel (path trio));
      Printf.printf "%-28s bytes=%d members=%d\n" "trio body"
-       (Chunk_group.bytes trio)
-       (Chunk_group.member_count trio);
+       (Manifest.Group.bytes trio)
+       (Manifest.Group.member_count trio);
 
      (* The other members came down with it: reading them costs nothing more,
         and each lands at its own offset inside the one file. *)
      let* () = show_body "trio member 1 (cached)" trio 1 in
      let* () = show_body "trio member 2 (cached)" trio 2 in
      Printf.printf "%-28s off0=%d off1=%d off2=%d\n" "trio offsets"
-       (Chunk_group.offset trio 0)
-       (Chunk_group.offset trio 1)
-       (Chunk_group.offset trio 2);
+       (Manifest.Group.offset trio 0)
+       (Manifest.Group.offset trio 1)
+       (Manifest.Group.offset trio 2);
 
      (* A partial read inside a member is still addressed by member offset. *)
      let* () =
@@ -245,7 +245,7 @@ let () =
         are the same cache file, already here. *)
      let same = build ~per:3 ~chunk_size:4 ~size:10 [k3; k4; k5] 2 in
      Printf.printf "%-28s same_key=%b\n" "trio in another file"
-       (Chunk_group.key same = Chunk_group.key trio);
+       (Manifest.Group.key same = Manifest.Group.key trio);
 
      (* A backend failure surfaces rather than caching an empty body. *)
      let* () =
@@ -291,7 +291,7 @@ let () =
         second name rather than a second copy, so both are readable until the
         staged one goes and the cache keeps the body afterwards. *)
      let uuid = "stagedbody000001" in
-     let bytes = Chunk_group.bytes trio in
+     let bytes = Manifest.Group.bytes trio in
      let* () = Sb.ensure ~uuid ~len:bytes in
      let* () =
        Lwt_list.iter_s
@@ -301,7 +301,7 @@ let () =
                (Array.init (String.length body) (String.get body))
            in
            let+ (_ : int) =
-             Sb.write ~uuid buf ~offset:(Chunk_group.offset trio i)
+             Sb.write ~uuid buf ~offset:(Manifest.Group.offset trio i)
            in
            ())
          [(0, "AAAA"); (1, "BBBB"); (2, "CC")]

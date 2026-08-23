@@ -1,4 +1,4 @@
-(** The local cache-chunk store: {!Chunk_group} bodies named by their content
+(** The local cache-chunk store: {!Manifest.Group} bodies named by their content
     key.
 
     A group is present iff its file exists, and any group may vanish at any time
@@ -22,29 +22,30 @@ type served = { bytes : int; from_backend : bool }
 
 module Make (C : Conf.S) (F : Fetch) : sig
   (** Whether this group's body is local. *)
-  val exists : Chunk_group.t -> bool Lwt.t
+  val exists : Manifest.Group.t -> bool Lwt.t
 
   (** Put the body on disk unless already there, atomically. Concurrent callers
       for one group await a single fetch. [force:true] re-fetches regardless,
       for a body believed corrupt. *)
-  val ensure : ?force:bool -> group:Chunk_group.t -> unit -> unit Lwt.t
+  val ensure : ?force:bool -> group:Manifest.Group.t -> unit -> unit Lwt.t
 
   (** {!ensure}, answering whether the body had to come from a backend. A caller
       joining an in-flight fetch gets [true] as well: it waited on the network
       just as the caller that started the fetch did. *)
-  val ensure_fetched : ?force:bool -> group:Chunk_group.t -> unit -> bool Lwt.t
+  val ensure_fetched :
+    ?force:bool -> group:Manifest.Group.t -> unit -> bool Lwt.t
 
   (** Write a group from bytes the caller already holds, one member at a time —
       the tail of a promotion, where every member is a local staged body. No-op
       when the body is already here. *)
   val put_group :
-    group:Chunk_group.t -> member:(int -> Bigstring.t Lwt.t) -> unit Lwt.t
+    group:Manifest.Group.t -> member:(int -> Bigstring.t Lwt.t) -> unit Lwt.t
 
   (** Fill [buf] from stored chunk [index], starting [chunk_off] bytes into that
       chunk and fetching the group if absent. A body that vanishes (or is
       truncated) under the read is fetched again and the read retried once. *)
   val read_into :
-    group:Chunk_group.t ->
+    group:Manifest.Group.t ->
     index:int ->
     Local_io.buffer ->
     chunk_off:int ->
@@ -60,10 +61,10 @@ module Make (C : Conf.S) (F : Fetch) : sig
 
       The caller owns [src] and must have sized it to the group's layout already
       — {!Staged.link_group} is that caller. *)
-  val link_in : src:string -> group:Chunk_group.t -> bool Lwt.t
+  val link_in : src:string -> group:Manifest.Group.t -> bool Lwt.t
 
   (** Drop one group body. It is re-fetched on the next read. *)
-  val forget : group:Chunk_group.t -> unit Lwt.t
+  val forget : group:Manifest.Group.t -> unit Lwt.t
 
   (** Number of downloads currently in flight. *)
   val in_flight : unit -> int

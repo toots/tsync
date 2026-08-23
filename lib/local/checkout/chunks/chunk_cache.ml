@@ -1,4 +1,4 @@
-(* The local cache-chunk store: {!Chunk_group} bodies named by a content key
+(* The local cache-chunk store: {!Manifest.Group} bodies named by a content key
    derived from the stored chunks they hold.
 
    A group is present iff its file exists and may be deleted at any moment, so
@@ -19,7 +19,7 @@ type served = { bytes : int; from_backend : bool }
 module Make (C : Conf.S) (F : Fetch) = struct
   let path group =
     Cache_layout.chunk_path ~cache_root:C.cache_root ~domain_name:C.domain_name
-      (Chunk_group.key group)
+      (Manifest.Group.key group)
 
   let exists group = Lwt_unix_retry.file_exists (path group)
 
@@ -45,19 +45,19 @@ module Make (C : Conf.S) (F : Fetch) = struct
     let p = path group in
     let* () = Fs_util.ensure_parent p in
     (* Atomic, so presence alone proves a complete body. *)
-    Fs_util.atomic_write_at p ~size:(Chunk_group.bytes group) (fun put ->
+    Fs_util.atomic_write_at p ~size:(Manifest.Group.bytes group) (fun put ->
         Lwt_list.iter_p
           (fun i ->
             let* data = body i in
-            let expected = Chunk_group.size group i in
+            let expected = Manifest.Group.size group i in
             if Bigstring.length data <> expected then
               Lwt.fail
                 (Backend.Backend_error
                    (Printf.sprintf "chunk %s: have %d bytes, manifest says %d"
-                      (Chunk_group.member_key group i)
+                      (Manifest.Group.member_key group i)
                       (Bigstring.length data) expected))
-            else put ~offset:(Chunk_group.offset group i) data)
-          (Chunk_group.indices group))
+            else put ~offset:(Manifest.Group.offset group i) data)
+          (Manifest.Group.indices group))
 
   (* Bounds fetches that have started, not groups asked for: a fetch opens its
      destination before waiting for a download slot, so without this every
@@ -71,12 +71,12 @@ module Make (C : Conf.S) (F : Fetch) = struct
   let fetch group =
     Lwt_bounded.use slots (fun () ->
         write_group group (fun i ->
-            F.get_chunk ~chunk_key:(Chunk_group.member_key group i)))
+            F.get_chunk ~chunk_key:(Manifest.Group.member_key group i)))
 
   (* Concurrent callers await the same fetch; [force] re-fetches a body believed
      corrupt. Answers whether the body had to come from a backend. *)
   let ensure_fetched ?(force = false) ~group () =
-    let key = Chunk_group.key group in
+    let key = Manifest.Group.key group in
     match Hashtbl.find_opt fetching key with
       | Some entry ->
           let+ () = entry.done_ in
@@ -246,7 +246,7 @@ module Make (C : Conf.S) (F : Fetch) = struct
      failure is real and raised. *)
   let read_into ~group ~index buf ~chunk_off =
     let want = Bigarray.Array1.dim buf in
-    let offset = Int64.of_int (Chunk_group.offset group index + chunk_off) in
+    let offset = Int64.of_int (Manifest.Group.offset group index + chunk_off) in
     let attempt () = Local_io.read (path group) buf ~offset in
     (* A refetch went to a backend by construction, whatever the first [ensure]
        answered. *)

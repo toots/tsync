@@ -2,6 +2,8 @@
  (flags
   (:standard
    -open
+   Tsync_manifest
+   -open
    Tsync_chunks
    -open
    Tsync_test_harness
@@ -19,6 +21,7 @@
    Tsync_local_backend))
  (name folder_index_test)
  (libraries
+  tsync_manifest
   tsync_chunks
   tsync_test_harness
   tsync_store

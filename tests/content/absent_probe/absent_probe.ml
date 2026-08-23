@@ -47,7 +47,7 @@ let key name = C.domain_prefix ^ name
 
 let publish name =
   let body =
-    Chunk_table.encode ~name ~size:0L ~chunk_size:4 ~mtime:0.
+    Manifest.encode ~name ~size:0L ~chunk_size:4 ~mtime:0.
       ~h1:(String.make 16 'a') ~h2:(String.make 16 'b') ~symlink:None ~keys:[]
   in
   Store.put

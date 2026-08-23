@@ -80,12 +80,12 @@ let open_cache_files () =
    equals its chunk size — the shape that fans out most. *)
 let group_of i =
   let key = Printf.sprintf "%016x-%016x" i (i * 7 land 0xffffffff) in
-  Chunk_group.of_table
+  Manifest.Group.of_table
     ~table:
-      (Chunk_table.of_string
-         (Chunk_table.encode ~name:"f" ~size:(Int64.of_int csize)
-            ~chunk_size:csize ~mtime:0. ~h1:(String.make 16 '0')
-            ~h2:(String.make 16 '0') ~symlink:None ~keys:[key]))
+      (Manifest.of_string
+         (Manifest.encode ~name:"f" ~size:(Int64.of_int csize) ~chunk_size:csize
+            ~mtime:0. ~h1:(String.make 16 '0') ~h2:(String.make 16 '0')
+            ~symlink:None ~keys:[key]))
     ~per:1 0
 
 let () =

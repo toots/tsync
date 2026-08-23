@@ -181,7 +181,7 @@ module Make_with_layout (C : Conf.S) (L : Layout.S) : S = struct
              try Bigstring.map_fd fd ~offset ~len
              with Unix.Unix_error _ -> raise Cancelled))
     in
-    Chunk_table.set table index ck_rel;
+    Manifest.set table index ck_rel;
     (* A deduplicated chunk is as done as a written one and cost no transfer,
        which is why the two are told apart rather than summed. *)
     on_progress ~bytes:len ~sent
@@ -193,19 +193,19 @@ module Make_with_layout (C : Conf.S) (L : Layout.S) : S = struct
      them. *)
   (* The key being published under is what names this file. *)
   let chunk_table ~key ~size ~chunk_size ~mtime ~count =
-    Chunk_table.builder
+    Manifest.builder
       ~name:(Key.leaf ~domain_prefix:C.domain_prefix key)
       ~size ~chunk_size ~mtime ~symlink:None ~count
 
   let publish ~key ~size ~chunk_size ~mtime ~cancel table =
     if !cancel then raise Cancelled;
-    let count = Chunk_table.builder_count table in
-    let chunk_key = Chunk_table.get table in
+    let count = Manifest.builder_count table in
+    let chunk_key = Manifest.get table in
     let h1, h2 =
       Manifest.digest_of_keys ~count ~key:chunk_key
         ~len:(Chunks.length_of ~size ~chunk_size)
     in
-    let body = Chunk_table.seal table ~h1 ~h2 in
+    let body = Manifest.seal table ~h1 ~h2 in
     let state = Manifest.of_chunk body in
     let* () = if C.versioning then Hs.save_version ~key else Lwt.return_unit in
     Log.info "upload %s: publishing manifest, size=%Ld" key size;
@@ -294,7 +294,7 @@ module Make_with_layout (C : Conf.S) (L : Layout.S) : S = struct
       if !cancel then raise Cancelled;
       let* src = source index in
       let+ ck_rel, (_ : bool) = Chunks_store.store src in
-      Chunk_table.set table index ck_rel
+      Manifest.set table index ck_rel
     in
     let* () = each_chunk ~count:n one in
     publish ~key ~size ~chunk_size ~mtime ~cancel table

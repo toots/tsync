@@ -88,9 +88,9 @@ let put_chunk n =
 
 let put_manifest n =
   let m =
-    Manifest.make ~name:"f" ~h1:(String.make 16 '0') ~h2:(String.make 16 '0')
-      ~size:8L ~chunk_size:8
-      ~chunks:[Manifest.entry_of_key ~index:0 ~size:8 (ck n)]
+    Manifest_fixture.make ~name:"f" ~h1:(String.make 16 '0')
+      ~h2:(String.make 16 '0') ~size:8L ~chunk_size:8
+      ~chunks:[Manifest_fixture.entry_of_key ~index:0 ~size:8 (ck n)]
       ~mtime:0.
   in
   Main.put

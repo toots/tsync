@@ -32,8 +32,8 @@ let is_local
           (fun g ->
             Sys.file_exists
               (Cache_layout.chunk_path ~cache_root ~domain_name
-                 (Chunk_group.key g)))
-          (Chunk_group.all ~table:m
+                 (Manifest.Group.key g)))
+          (Manifest.Group.all ~table:m
              ~per:
                (Conf.chunks_per_group ~chunk_size:(chunk_size m)
                   ~cache_chunk_size))

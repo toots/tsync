@@ -406,7 +406,7 @@ let setup_client (module C : Conf.S) root staging_prefix =
       match resolved with
         | Some (`Published m) -> (
             match
-              Chunk_group.of_table ~table:m
+              Manifest.Group.of_table ~table:m
                 ~per:
                   (Conf.chunks_per_group ~chunk_size:(Manifest.chunk_size m)
                      ~cache_chunk_size:(Conf.cache_chunk_size (module C)))
@@ -417,7 +417,7 @@ let setup_client (module C : Conf.S) root staging_prefix =
         | _ -> failwith "no published manifest"
     in
     Cache_layout.chunk_path ~cache_root:C.cache_root ~domain_name:C.domain_name
-      (Chunk_group.key group)
+      (Manifest.Group.key group)
   in
   let request fields =
     let line = Yojson.Safe.to_string (`Assoc fields) in
@@ -453,8 +453,7 @@ let setup_client (module C : Conf.S) root staging_prefix =
     match m with
       | Some m ->
           Lwt.return
-            (C.chunk_prefix
-            ^ Chunk_layout.relative_path (Chunk_table.key m index))
+            (C.chunk_prefix ^ Chunk_layout.relative_path (Manifest.key m index))
       | _ -> failwith ("no clean sidecar for " ^ path)
   in
   (* The member, not just its module: damaging a file behind the store's back
@@ -656,7 +655,7 @@ let setup_client (module C : Conf.S) root staging_prefix =
                            st.Staged_manifest.s_slots)))
             | Some (`Published m) ->
                 Printf.sprintf "published size=%Ld chunks=%d" (Manifest.size m)
-                  (Chunk_table.count m)
+                  (Manifest.count m)
             | None -> "no manifest"
         in
         let* local, total = F.chunk_residency k in
@@ -1320,7 +1319,7 @@ let dump_backend_at ~backend_root ~domain_prefix ~chunk_prefix ~journal_prefix
                   | m ->
                       ( Manifest.recorded_name m,
                         Printf.sprintf "manifest size=%Ld chunks=%d"
-                          (Manifest.size m) (Chunk_table.count m) )
+                          (Manifest.size m) (Manifest.count m) )
                   | exception _ -> (rel, "raw")
               in
               Printf.printf "  version %s [%s]#%d = %s\n" name rel n desc
@@ -1355,12 +1354,15 @@ let dump_backend_at ~backend_root ~domain_prefix ~chunk_prefix ~journal_prefix
                         "  file %s [%s] = manifest size=%Ld chunks=%d h1=%s \
                          h2=%s\n"
                         (Manifest.recorded_name m) (alias_rel rel)
-                        (Manifest.size m) (Chunk_table.count m) (Manifest.h1 m)
+                        (Manifest.size m) (Manifest.count m) (Manifest.h1 m)
                         (Manifest.h2 m);
                       let table = m in
-                      for i = 0 to Chunk_table.count table - 1 do
+                      for i = 0 to Manifest.count table - 1 do
                         Printf.printf "    chunk#%d %s size=%d\n" i
-                          (Chunk_table.key table i) (Chunk_table.len table i)
+                          (Manifest.key table i)
+                          (Chunks.length_of ~size:(Manifest.size table)
+                             ~chunk_size:(Manifest.chunk_size table)
+                             i)
                       done
                   | exception _ ->
                       Printf.printf "  file %s = raw size=%d\n" (alias_rel rel)

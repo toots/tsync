@@ -205,8 +205,7 @@ module Make (C : Conf.S) = struct
 
   let chunk_keys (m : Manifest.t) =
     let table = m in
-    List.init (Chunk_table.count table) (fun i ->
-        L.key (Chunk_table.key table i))
+    List.init (Manifest.count table) (fun i -> L.key (Manifest.key table i))
 
   (* Only the folders [rel] runs through or lives in are descended into, so
      scoping to one folder costs its own subtree rather than the whole tree. A

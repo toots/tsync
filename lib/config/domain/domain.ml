@@ -6,8 +6,8 @@ let make_backend ~traffic (bc : Conf_parsing.backend_config) =
 (* Empty for a body that is not a manifest: a folder marker, a trash marker, a
    share. *)
 let chunk_keys data =
-  match Chunk_table.of_string data with
-    | t -> List.init (Chunk_table.count t) (Chunk_table.key t)
+  match Manifest.of_string data with
+    | t -> List.init (Manifest.count t) (Manifest.key t)
     | exception _ -> []
 
 (* Where the deferred targets keep what they still owe. Per domain, since the

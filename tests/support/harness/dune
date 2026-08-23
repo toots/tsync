@@ -6,6 +6,8 @@
  (flags
   (:standard
    -open
+   Tsync_manifest
+   -open
    Tsync_conf
    -open
    Tsync_backend_register
@@ -19,6 +21,7 @@
    Tsync_local_io))
  (name tsync_test_harness)
  (libraries
+  tsync_manifest
   tsync_conf
   tsync_backend_register
   tsync_conf_parsing

@@ -107,9 +107,9 @@ let () =
        Main.put ~key:(key 3) ~data:(Bigstring.of_string "live-two") ()
      in
      let manifest =
-       let entry index k = Manifest.entry_of_key ~index ~size:8 k in
-       Manifest.make ~name:"f" ~h1:(String.make 16 '0') ~h2:(String.make 16 '0')
-         ~size:16L ~chunk_size:8
+       let entry index k = Manifest_fixture.entry_of_key ~index ~size:8 k in
+       Manifest_fixture.make ~name:"f" ~h1:(String.make 16 '0')
+         ~h2:(String.make 16 '0') ~size:16L ~chunk_size:8
          ~chunks:[entry 0 (ck 1); entry 1 (ck 3)]
          ~mtime:0.
      in

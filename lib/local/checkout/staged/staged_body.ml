@@ -10,13 +10,13 @@ open Lwt.Syntax
    overwriting part of, and hand a finished body over to be published. *)
 module type Cache = sig
   val read_into :
-    group:Chunk_group.t ->
+    group:Manifest.Group.t ->
     index:int ->
     Local_io.buffer ->
     chunk_off:int ->
     Chunk_cache.served Lwt.t
 
-  val link_in : src:string -> group:Chunk_group.t -> bool Lwt.t
+  val link_in : src:string -> group:Manifest.Group.t -> bool Lwt.t
 end
 
 module Make (C : Conf.S) (Cache : Cache) = struct
@@ -73,7 +73,7 @@ module Make (C : Conf.S) (Cache : Cache) = struct
   (* For a write not replacing all of a published chunk. The copy is the price of
      immutable content-addressed chunks. *)
   let copy_chunk ~group ~index ~uuid ~offset =
-    let len = Chunk_group.size group index in
+    let len = Manifest.Group.size group index in
     let buf = Bigarray.Array1.create Bigarray.char Bigarray.c_layout len in
     let* served = Cache.read_into ~group ~index buf ~chunk_off:0 in
     let+ (_ : int) =
@@ -89,7 +89,7 @@ module Make (C : Conf.S) (Cache : Cache) = struct
      same disagreement has to stop it here or it reaches the store under a name
      derived from bytes it does not hold. *)
   let link_group ~uuid ~len ~group =
-    if len <> Chunk_group.bytes group then Lwt.return_false
+    if len <> Manifest.Group.bytes group then Lwt.return_false
     else
       Lwt.catch
         (fun () ->

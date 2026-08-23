@@ -62,7 +62,7 @@ let () =
        ~why:(fun () -> Printf.sprintf "%d chunks landed" !landed)
        (!landed = chunks);
      check "and the manifest records every one of them"
-       (Chunk_table.count manifest = chunks);
+       (Manifest.count manifest = chunks);
      let per_chunk = !live_at_first_chunk / chunks in
      check "what is held does not grow with the length of the file"
        ~why:(fun () ->
@@ -79,17 +79,17 @@ let () =
      let before = (Stdlib.Gc.stat ()).Stdlib.Gc.live_words in
      let table =
        let b =
-         Chunk_table.builder ~name:"big.bin" ~size:1_000_000L ~chunk_size
-           ~mtime:0. ~symlink:None ~count:keys
+         Manifest.builder ~name:"big.bin" ~size:1_000_000L ~chunk_size ~mtime:0.
+           ~symlink:None ~count:keys
        in
        for i = 0 to keys - 1 do
-         Chunk_table.set b i (digest i ^ "-" ^ digest (i + 1))
+         Manifest.set b i (digest i ^ "-" ^ digest (i + 1))
        done;
-       Chunk_table.of_chunk (Chunk_table.seal b ~h1:(digest 0) ~h2:(digest 1))
+       Manifest.of_chunk (Manifest.seal b ~h1:(digest 0) ~h2:(digest 1))
      in
      let held = (Stdlib.Gc.stat ()).Stdlib.Gc.live_words - before in
      check "the keys read back as they were written"
-       (Chunk_table.key table 7 = digest 7 ^ "-" ^ digest 8);
+       (Manifest.key table 7 = digest 7 ^ "-" ^ digest 8);
      check "and the body they are in is not words the collector walks"
        ~why:(fun () ->
          Printf.sprintf "%d words held for %d keys, %d bytes of body" held keys
@@ -119,6 +119,6 @@ let () =
        (Manifest.h1 again = Manifest.h1 manifest
        && Manifest.h2 again = Manifest.h2 manifest);
      check "and on every chunk key"
-       (List.init chunks (Chunk_table.key again)
-       = List.init chunks (Chunk_table.key manifest));
+       (List.init chunks (Manifest.key again)
+       = List.init chunks (Manifest.key manifest));
      report ~expected:9 ())

@@ -75,7 +75,7 @@ let show label =
                      st.Staged_manifest.s_slots)))
       | Some (`Published m) ->
           Printf.sprintf "published size=%2Ld chunks=%d" (Manifest.size m)
-            (Chunk_table.count m)
+            (Manifest.count m)
       | None -> "absent"
   in
   let+ content = read_all () in
@@ -160,7 +160,7 @@ let gshow label =
                      st.Staged_manifest.s_slots)))
       | Some (`Published m) ->
           Printf.sprintf "published size=%2Ld chunks=%d" (Manifest.size m)
-            (Chunk_table.count m)
+            (Manifest.count m)
       | None -> "absent"
   in
   let size =

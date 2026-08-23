@@ -128,11 +128,11 @@ let () =
        Main.put ~key:(key 3) ~data:(Bigstring.of_string "live-two") ()
      in
      let manifest =
-       let entry index k = Manifest.entry_of_key ~index ~size:8 k in
+       let entry index k = Manifest_fixture.entry_of_key ~index ~size:8 k in
        (* A manifest's own digest is 16 hex like a chunk's; its value is not
           examined here, only that the manifest parses and names its chunks. *)
-       Manifest.make ~name:"f" ~h1:(String.make 16 '0') ~h2:(String.make 16 '0')
-         ~size:16L ~chunk_size:8
+       Manifest_fixture.make ~name:"f" ~h1:(String.make 16 '0')
+         ~h2:(String.make 16 '0') ~size:16L ~chunk_size:8
          ~chunks:[entry 0 (ck 1); entry 1 (ck 3)]
          ~mtime:0.
      in

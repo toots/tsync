@@ -37,8 +37,8 @@ let key rel = C.domain_prefix ^ rel
 (* Digests are fixed-width hex; the values are arbitrary but must be well
    formed or the encoder rejects them. *)
 let body ~name =
-  Manifest.make ~name ~h1:"1111111111111111" ~h2:"2222222222222222" ~size:4L
-    ~chunk_size:64
+  Manifest_fixture.make ~name ~h1:"1111111111111111" ~h2:"2222222222222222"
+    ~size:4L ~chunk_size:64
     ~chunks:
       [
         Manifest.

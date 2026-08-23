@@ -36,7 +36,7 @@ let write_sidecar i =
   let name = Printf.sprintf "f%05d.txt" i in
   let m =
     Manifest.of_string
-      (Chunk_table.encode ~name ~size:5L ~chunk_size:4 ~mtime:0.
+      (Manifest.encode ~name ~size:5L ~chunk_size:4 ~mtime:0.
          ~h1:(String.make 16 'a') ~h2:(String.make 16 'b') ~symlink:None
          ~keys:[])
   in

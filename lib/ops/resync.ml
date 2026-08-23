@@ -31,7 +31,7 @@ module Make (C : Conf.S) = struct
       Log.warn "resync %s: %s" bkey
         (match reason with
           | `Unreadable exn -> Printexc.to_string exn
-          | `Unclassifiable (Chunk_table.Malformed m) ->
+          | `Unclassifiable (Manifest.Malformed m) ->
               "unreadable manifest: " ^ m
           | `Unclassifiable exn ->
               "unreadable manifest: " ^ Printexc.to_string exn)

@@ -48,7 +48,7 @@ let put id name body =
   Store.put ~key:(ns id ^ name) ~data:(Bigstring.of_string body) ()
 
 let manifest_body name =
-  Chunk_table.encode ~name ~size:0L ~chunk_size:4 ~mtime:0.
+  Manifest.encode ~name ~size:0L ~chunk_size:4 ~mtime:0.
     ~h1:(String.make 16 'a') ~h2:(String.make 16 'b') ~symlink:None ~keys:[]
 
 (* Nothing listens, so a notify that fired is recorded rather than sent. *)

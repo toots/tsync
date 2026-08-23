@@ -45,13 +45,13 @@ let label key =
 (* A symlink is a chunkless manifest, which the chunk step must tolerate. *)
 let manifest ?symlink ~name chunks =
   let keys = List.map Filename.basename chunks in
-  Chunk_table.encode ~name
+  Manifest.encode ~name
     ~size:(Int64.of_int (List.length keys * 4))
     ~chunk_size:4 ~mtime:0. ~h1:(hex 0) ~h2:(hex 1) ~symlink ~keys
 
 let chunk_keys data =
-  match Chunk_table.of_string data with
-    | t -> List.init (Chunk_table.count t) (Chunk_table.key t)
+  match Manifest.of_string data with
+    | t -> List.init (Manifest.count t) (Manifest.key t)
     | exception _ -> []
 
 let keys_under root =

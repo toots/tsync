@@ -82,7 +82,7 @@ module Tree_two = Inode_tree.Make (Two)
 let folder = Folder.new_id ()
 
 let manifest name =
-  Chunk_table.encode ~name ~size:0L ~chunk_size:4 ~mtime:0.
+  Manifest.encode ~name ~size:0L ~chunk_size:4 ~mtime:0.
     ~h1:(String.make 16 'a') ~h2:(String.make 16 'b') ~symlink:None ~keys:[]
 
 let other = Folder.new_id ()

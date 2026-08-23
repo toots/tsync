@@ -2,6 +2,8 @@
  (flags
   (:standard
    -open
+   Tsync_manifest
+   -open
    Tsync_journal
    -open
    Tsync_chunks
@@ -25,6 +27,7 @@
    Tsync_test_harness))
  (name resync_test)
  (libraries
+  tsync_manifest
   tsync_journal
   tsync_chunks
   tsync_test_harness

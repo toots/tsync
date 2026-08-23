@@ -35,8 +35,8 @@ module Mfs = Staged_manifest.Make (C)
 let key rel = C.domain_prefix ^ rel
 
 let published ~name =
-  Manifest.make ~name ~h1:"1111111111111111" ~h2:"2222222222222222" ~size:4L
-    ~chunk_size:8
+  Manifest_fixture.make ~name ~h1:"1111111111111111" ~h2:"2222222222222222"
+    ~size:4L ~chunk_size:8
     ~chunks:
       [
         Manifest.

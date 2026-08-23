@@ -2,6 +2,8 @@
  (flags
   (:standard
    -open
+   Tsync_manifest
+   -open
    Tsync_remote
    -open
    Tsync_staged
@@ -29,6 +31,7 @@
    Tsync_local_backend))
  (name absent_probe)
  (libraries
+  tsync_manifest
   tsync_remote
   tsync_staged
   tsync_checkout

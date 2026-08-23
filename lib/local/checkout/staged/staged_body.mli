@@ -7,7 +7,7 @@
     spare.
 
     A chunk being written has no content key yet, its bytes still changing, so
-    it lives under a uuid. One body holds a whole {!Chunk_group}, laid out as
+    it lives under a uuid. One body holds a whole {!Manifest.Group}, laid out as
     the group will be, so publishing it is {!Make.link_group} rather than a
     copy. Its members are told apart by the offset each slot carries. *)
 
@@ -15,13 +15,13 @@
     overwriting part of, and take a finished body to publish. *)
 module type Cache = sig
   val read_into :
-    group:Chunk_group.t ->
+    group:Manifest.Group.t ->
     index:int ->
     Local_io.buffer ->
     chunk_off:int ->
     Chunk_cache.served Lwt.t
 
-  val link_in : src:string -> group:Chunk_group.t -> bool Lwt.t
+  val link_in : src:string -> group:Manifest.Group.t -> bool Lwt.t
 end
 
 module Make (C : Conf.S) (Cache : Cache) : sig
@@ -42,7 +42,11 @@ module Make (C : Conf.S) (Cache : Cache) : sig
   (** Copy a published chunk's bytes out of its group into [offset] of a staged
       body, for a write that does not replace all of them. *)
   val copy_chunk :
-    group:Chunk_group.t -> index:int -> uuid:string -> offset:int -> unit Lwt.t
+    group:Manifest.Group.t ->
+    index:int ->
+    uuid:string ->
+    offset:int ->
+    unit Lwt.t
 
   (** Move [len] bytes between staged bodies, for regrouping. *)
   val copy :
@@ -65,7 +69,8 @@ module Make (C : Conf.S) (Cache : Cache) : sig
       match the group's own or the two disagree about the layout and nothing is
       published. The body is resized to it first, which supplies zeros for a
       member never written and cuts anything past the last one. *)
-  val link_group : uuid:string -> len:int -> group:Chunk_group.t -> bool Lwt.t
+  val link_group :
+    uuid:string -> len:int -> group:Manifest.Group.t -> bool Lwt.t
 
   (** {2 Whole bodies}
 

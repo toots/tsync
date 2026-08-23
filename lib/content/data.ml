@@ -156,21 +156,22 @@ module Make (C : Conf.S) (R : Remote.S) = struct
   let per_of m =
     Conf.chunks_per_group ~chunk_size:(Manifest.chunk_size m) ~cache_chunk_size
 
-  let groups m = Chunk_group.all ~table:m ~per:(per_of m)
+  let groups m = Manifest.Group.all ~table:m ~per:(per_of m)
 
   (* The staged path inherits from a published manifest that may not exist. *)
   let group_at_opt base i =
     match base with
       | None -> None
-      | Some m -> Chunk_group.of_table ~table:m ~per:(per_of m) i
+      | Some m -> Manifest.Group.of_table ~table:m ~per:(per_of m) i
 
   (* Reuses [cached] while [i] stays in the same group, so a sequential read
      rebuilds one group per boundary crossing rather than one per chunk. *)
   let group_at ~table ~per ~cached i =
-    let gi = Chunk_group.index_of ~per i in
+    let gi = Manifest.Group.index_of ~per i in
     match cached with
       | Some (j, g) when j = gi -> Some (gi, g)
-      | _ -> Option.map (fun g -> (gi, g)) (Chunk_group.of_table ~table ~per i)
+      | _ ->
+          Option.map (fun g -> (gi, g)) (Manifest.Group.of_table ~table ~per i)
 
   (* Credits {!pulls} as a foreground read does: prefetch is what pulls the bytes
      during sequential streaming, so leaving it out would empty the display
@@ -184,12 +185,12 @@ module Make (C : Conf.S) (R : Remote.S) = struct
   let max_readahead_loops = 4
 
   let read_ahead ~id ~size ~table ~per ~chunk_size ~last =
-    let n = Chunk_table.count table in
+    let n = Manifest.count table in
     let window =
       min max_readahead_groups
         (max 1 (readahead_bytes / max 1 (per * max 1 chunk_size)))
     in
-    let first = (Chunk_group.index_of ~per last + 1) * per in
+    let first = (Manifest.Group.index_of ~per last + 1) * per in
     let hi = min (n - 1) (first + (window * per) - 1) in
     if first <= hi && !readahead_in_flight < max_readahead_loops then (
       incr readahead_in_flight;
@@ -202,11 +203,12 @@ module Make (C : Conf.S) (R : Remote.S) = struct
                     if i > hi then Lwt.return_unit
                     else
                       let* () =
-                        match Chunk_group.of_table ~table ~per i with
+                        match Manifest.Group.of_table ~table ~per i with
                           | Some group ->
                               let+ fetched = Cc.ensure_fetched ~group () in
                               if fetched then
-                                credit_pull id ~size (Chunk_group.bytes group)
+                                credit_pull id ~size
+                                  (Manifest.Group.bytes group)
                           | None -> Lwt.return_unit
                       in
                       go (i + per)
@@ -227,7 +229,7 @@ module Make (C : Conf.S) (R : Remote.S) = struct
     let avail = Int64.to_int (Int64.sub size offset) in
     let total = min want (max 0 avail) in
     let table = manifest in
-    let n = Chunk_table.count table in
+    let n = Manifest.count table in
     if total <= 0 || cs <= 0 || n = 0 then Lwt.return 0
     else (
       let per = per_of manifest in
@@ -252,7 +254,7 @@ module Make (C : Conf.S) (R : Remote.S) = struct
                      is the whole group, however little of it this read wanted. *)
                   if served.Chunk_cache.from_backend then
                     credit_pull id ~size:(Int64.to_int size)
-                      (Chunk_group.bytes group);
+                      (Manifest.Group.bytes group);
                   if got <= 0 then Lwt.return done_
                   else go (pos + got) (done_ + got) cached))
       in
@@ -326,7 +328,7 @@ module Make (C : Conf.S) (R : Remote.S) = struct
                           if served.Chunk_cache.from_backend then
                             credit_pull id
                               ~size:(Int64.to_int staged.Staged_manifest.s_size)
-                              (Chunk_group.bytes group);
+                              (Manifest.Group.bytes group);
                           served.Chunk_cache.bytes
                       | None ->
                           Lwt.fail
@@ -434,7 +436,7 @@ module Make (C : Conf.S) (R : Remote.S) = struct
         Lwt.return_unit)
 
   (* Where each member of a group sits in the body that holds it: the running
-     sum of the lengths before it, which is what {!Chunk_group.offset} computes
+     sum of the lengths before it, which is what {!Manifest.Group.offset} computes
      for the published group these bytes become. *)
   let group_layout ~(st : Staged_manifest.staged) ~first ~last =
     let len j =
@@ -497,7 +499,7 @@ module Make (C : Conf.S) (R : Remote.S) = struct
       if i >= n then Lwt.return_unit
       else
         let* body, offset =
-          if Chunk_group.index_of ~per i * per = i then (
+          if Manifest.Group.index_of ~per i * per = i then (
             let body = Staged_manifest.new_uuid () in
             let last = min (n - 1) (i + per - 1) in
             let _, body_len = group_layout ~st:st_for_layout ~first:i ~last in
@@ -578,7 +580,7 @@ module Make (C : Conf.S) (R : Remote.S) = struct
         ~cache_chunk_size
     in
     let n = Array.length slots in
-    let first = Chunk_group.index_of ~per i * per in
+    let first = Manifest.Group.index_of ~per i * per in
     let last = min (n - 1) (first + per - 1) in
     let members, body_len = group_layout ~st ~first ~last in
 
@@ -883,8 +885,8 @@ module Make (C : Conf.S) (R : Remote.S) = struct
         | Staged_manifest.Zero -> Lwt.return zeroes
         | Staged_manifest.Inherit -> (
             match base with
-              | Some m when i < Chunk_table.count m ->
-                  Lwt.return (Chunk_store.Stored (Chunk_table.key m i))
+              | Some m when i < Manifest.count m ->
+                  Lwt.return (Chunk_store.Stored (Manifest.key m i))
               | Some _ | None ->
                   Lwt.fail
                     (Backend.Backend_error
@@ -948,7 +950,7 @@ module Make (C : Conf.S) (R : Remote.S) = struct
       List.exists
         (fun i ->
           match slot_at i with Staged_manifest.Staged _ -> true | _ -> false)
-        (Chunk_group.indices group)
+        (Manifest.Group.indices group)
     in
     (* [stage_group] stages a group whole, so a touched group has every member
        on disk; anything else would come from the old, invalidated group key. *)
@@ -958,14 +960,14 @@ module Make (C : Conf.S) (R : Remote.S) = struct
           match slot_at i with
             | Staged_manifest.Staged _ | Staged_manifest.Zero -> true
             | Staged_manifest.Inherit -> false)
-        (Chunk_group.indices group)
+        (Manifest.Group.indices group)
     in
     (* Anything else -- a body per chunk from an older sidecar, or a group the
        cache size no longer matches -- has to be written out. *)
     (* The staged record's own account of the group's length, which the link
        refuses unless it matches the published group's. *)
     let staged_len group =
-      let indices = Chunk_group.indices group in
+      let indices = Manifest.Group.indices group in
       match indices with
         | [] -> 0
         | first :: _ ->
@@ -975,8 +977,8 @@ module Make (C : Conf.S) (R : Remote.S) = struct
     let single_body group =
       shared_body ~slot_at
         (List.map
-           (fun i -> (i, Chunk_group.offset group i))
-           (Chunk_group.indices group))
+           (fun i -> (i, Manifest.Group.offset group i))
+           (Manifest.Group.indices group))
     in
     let write_group group =
       Cc.put_group ~group ~member:(fun i ->
@@ -1080,12 +1082,12 @@ module Make (C : Conf.S) (R : Remote.S) = struct
     match resolved with
       | None -> Lwt.return (0, 0)
       | Some (`Published m) ->
-          let total = Chunk_table.count m in
+          let total = Manifest.count m in
           let+ present =
             Lwt_list.fold_left_s
               (fun acc group ->
                 let+ here = Cc.exists group in
-                if here then acc + Chunk_group.member_count group else acc)
+                if here then acc + Manifest.Group.member_count group else acc)
               0 (groups m)
           in
           (present, total)
@@ -1145,7 +1147,7 @@ module Make (C : Conf.S) (R : Remote.S) = struct
         Lwt.return_unit)
 
   let groups_bytes groups =
-    List.fold_left (fun acc g -> acc + Chunk_group.bytes g) 0 groups
+    List.fold_left (fun acc g -> acc + Manifest.Group.bytes g) 0 groups
 
   (* Wide enough to keep {!Chunk_cache}'s own download bound saturated, and no
      wider: a whole-file materialization is one element per group, so a 250 GB
@@ -1165,7 +1167,7 @@ module Make (C : Conf.S) (R : Remote.S) = struct
     Lwt_bounded.iter_with group_slots
       (fun group ->
         let+ fetched = Cc.ensure_fetched ~group () in
-        let bytes = Chunk_group.bytes group in
+        let bytes = Manifest.Group.bytes group in
         (* The bar counts every group: one already on disk is progress toward a
            materialized file. The tray row counts only what crossed the wire, or
            a part-cached file credits its local groups at once and reads as a
@@ -1197,7 +1199,7 @@ module Make (C : Conf.S) (R : Remote.S) = struct
                 Lwt.return_some
                   (List.filter
                      (fun g ->
-                       List.exists still_inherited (Chunk_group.indices g))
+                       List.exists still_inherited (Manifest.Group.indices g))
                      (groups m)))
       | None -> (
           let* state = R.fetch_manifest ~key () in
