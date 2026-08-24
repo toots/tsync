@@ -27,6 +27,10 @@ val index_key : folder_id:string -> string
 
 val is_index_key : string -> bool
 
+(** An object written under a staging name, which a rename will replace with the
+    real one. Reserved names all share the [.tsync-] sentinel. *)
+val is_temp_key : string -> bool
+
 (** What a listing of a namespace offers that is actually one of the folder's
     children. An empty namespace lists as its own directory key, a write in
     flight lists under a staging name, and the index caches the children rather

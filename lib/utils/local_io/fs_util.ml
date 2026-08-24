@@ -51,8 +51,6 @@ let is_temp_name name =
   String.starts_with ~prefix:temp_prefix name
   && Filename.check_suffix name ".tmp"
 
-let is_temp_key key = is_temp_name (Filename.basename key)
-
 (* The pid {!temp_path} stamped into a name, so a sweep can tell a run's live
    scratch file from one a killed run left behind. *)
 let temp_owner name =

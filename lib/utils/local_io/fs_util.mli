@@ -26,10 +26,6 @@ val open_and_unlink : string -> Unix.file_descr
     hide and delete. *)
 val is_temp_name : string -> bool
 
-(** {!is_temp_name} of a backend key's last component, for the callers walking a
-    store's listing rather than a directory. *)
-val is_temp_key : string -> bool
-
 (** The pid that created a {!temp_path} name, or [None] for a name we did not
     generate. What separates a live run's scratch file from a dead run's. *)
 val temp_owner : string -> int option

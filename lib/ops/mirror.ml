@@ -101,7 +101,8 @@ module Make (C : Conf.S) = struct
        so a copy matches nothing where it lands; it is also a duplicate of every
        manifest body in its folder, which would transfer the namespace twice. *)
     if
-      Fs_util.is_temp_key e.Backend.key || Stored_key.is_index_key e.Backend.key
+      Stored_key.is_temp_key e.Backend.key
+      || Stored_key.is_index_key e.Backend.key
     then Lwt.return_unit
     else (
       bytes := Int64.add !bytes (Int64.of_int e.Backend.size);
