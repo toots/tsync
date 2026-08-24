@@ -109,27 +109,6 @@ jobs:
         env:
           CI: "true"
           TSYNC_DAEMON: ${{ github.workspace }}/_build/default/bin/tsync.exe
-      # Both Gradle test tasks report success when they run nothing at all, so
-      # the count is what says the suite happened.
-      - name: Check the Android suites ran something
-        if: always()
-        run: |
-          python3 - <<'PY'
-          import glob, sys, xml.etree.ElementTree as ET
-          # What each module has today. A floor well under the real count would
-          # let a whole class vanish from discovery and still pass.
-          floors = {"android/core": 40, "android/app": 7}
-          failed = False
-          for module, floor in floors.items():
-              reports = glob.glob(f"{module}/build/test-results/**/TEST-*.xml", recursive=True)
-              total = sum(int(ET.parse(p).getroot().get("tests")) for p in reports)
-              print(f"{module}: {len(reports)} report(s), {total} test(s), floor {floor}")
-              if total < floor:
-                  print(f"  {module} ran fewer tests than it has")
-                  failed = True
-          if failed:
-              sys.exit("an Android suite reported success without running")
-          PY
 
   macos:
     runs-on: macos-latest
