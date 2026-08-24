@@ -6,8 +6,6 @@
    -open
    Tsync_checkout
    -open
-   Tsync_manifest
-   -open
    Tsync_field_spec
    -open
    Tsync_sync
@@ -37,7 +35,6 @@
  (libraries
   tsync_logical_key
   tsync_checkout
-  tsync_manifest
   tsync-libs.field_spec
   tsync-libs.sync
   tsync-libs.naming
