@@ -51,6 +51,10 @@ type step =
   | Stat of string
       (** Query a path through the IPC [stat] action. A query leaves nothing
           behind: an absent path answers "not found" and stays absent. *)
+  | ShowLocal of string
+      (** The [local]/[cloud] column [tsync ls] prints, which is
+          {!Checkout.is_local}: whether every cache chunk this file's chunks
+          group into is held locally. *)
   | CreateUnder of { parent : string; name : string }
       (** Create through [parentRef] rather than a whole path, the way a
           reference-speaking client does. [parent] is passed to the daemon
@@ -171,6 +175,7 @@ let rec render_step = function
   | ShowStaged -> "staged"
   | ShowNames p -> "names " ^ if p = "" then "/" else p
   | Stat p -> "stat " ^ p
+  | ShowLocal p -> "local? " ^ p
   | CreateUnder { parent; name } -> "create " ^ name ^ " under " ^ parent
   | Mark -> "mark"
   | Expire s -> "expire " ^ s
@@ -610,6 +615,12 @@ let setup_client (module C : Conf.S) root staging_prefix =
         let* (_ : int) = F.write (key path) buf ~offset:(Int64.of_int offset) in
         Lwt.return_unit
     | Truncate { path; size } -> F.truncate (key path) (Int64.of_int size)
+    | ShowLocal p ->
+        Lwt.return
+          (Printf.printf "  local? %s = %s\n" p
+             (if Checkout.is_local (Conf.locality (module C)) (key p) then
+                "local"
+              else "cloud"))
     | CreateUnder { parent; name } ->
         let+ obj =
           request

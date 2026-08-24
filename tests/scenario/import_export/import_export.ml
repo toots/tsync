@@ -43,6 +43,10 @@ let () =
             Write { path = "evicted.bin"; content = "remote only" };
             Drain;
             Evict "evicted.bin";
+            (* Writing a file and uploading it does not cache its chunks:
+               the column answers for what is held, not for what was sent. *)
+            ShowLocal "cached.bin";
+            ShowLocal "evicted.bin";
             ExportDir;
           ];
       };
@@ -64,7 +68,11 @@ let () =
             LocalWrite { path = "sub/b.txt"; content = "bravo" };
             Import { only = []; exclude = []; force_rehash = false };
             Drain;
+            (* An import uploads without caching, so the bytes are remote until
+               the export assembles them and fills the cache. *)
+            ShowLocal "a.txt";
             ExportDir;
+            ShowLocal "a.txt";
           ];
       };
       {

@@ -90,7 +90,11 @@
   write evicted.bin "remote only"
   drain
   evict evicted.bin
+  local? cached.bin
+  local? evicted.bin
   export-dir
+  local? cached.bin = cloud
+  local? evicted.bin = cloud
   export cached.bin (assembled)
   export evicted.bin (assembled)
   export: 2 exported, 0 missing
@@ -137,16 +141,20 @@
   local-write sub/b.txt "bravo"
   import
   drain
+  local? a.txt
   export-dir
+  local? a.txt
   mkdir sub
   imported a.txt (5 bytes)
   imported sub/b.txt (5 bytes)
   import: 2 imported, 0 skipped, 0 symlinks skipped
+  local? a.txt = cloud
   export a.txt (assembled)
   export sub/b.txt (assembled)
   export: 2 exported, 0 missing
   exported-file a.txt = "alpha"
   exported-file sub/b.txt = "bravo"
+  local? a.txt = local
 --- tree
   f a.txt size=5 cached=1/1 uploaded=true etag=b52128e828cdaed2
   d sub
