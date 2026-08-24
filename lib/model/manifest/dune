@@ -18,6 +18,7 @@
  (name tsync_manifest)
  (public_name tsync-libs.manifest)
  (libraries
+  unix
   tsync_local_io
   tsync_chunks
   tsync_bigstring

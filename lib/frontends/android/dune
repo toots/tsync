@@ -26,6 +26,7 @@
  (name tsync_android_frontend)
  (public_name tsync-android)
  (libraries
+  bigstringaf
   tsync_logical_key
   tsync_staged
   tsync_checkout

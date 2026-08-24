@@ -33,6 +33,7 @@
  (name tsync_checkout)
  (public_name tsync-libs.checkout)
  (libraries
+  tsync-libs.log
   tsync_filename
   tsync_logical_key
   tsync_staged

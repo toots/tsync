@@ -31,6 +31,8 @@
    Tsync_metrics))
  (name share_server_test)
  (libraries
+  cohttp-lwt
+  cohttp
   tsync_logical_key
   tsync_remote
   tsync_store

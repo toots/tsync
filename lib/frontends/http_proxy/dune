@@ -56,6 +56,9 @@
   %{project_root}/lambda/mime.json
   stats.html)
  (libraries
+  cohttp-lwt
+  unix
+  cohttp
   tsync_logical_key
   tsync_remote
   tsync_store

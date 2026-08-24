@@ -19,6 +19,7 @@
    Tsync_local_io))
  (name conf_test)
  (libraries
+  unix
   tsync_conf_parsing
   tsync_metrics
   tsync-libs.conf

@@ -19,6 +19,7 @@
    Tsync_test_harness))
  (name pulling_test)
  (libraries
+  unix
   tsync_logical_key
   tsync_remote
   tsync_manifest

@@ -21,6 +21,7 @@
  (private_modules http_proxy_backend)
  (library_flags (-linkall))
  (libraries
+  cohttp
   tsync-libs.logical_key
   tsync_retry
   tsync-libs.field_spec

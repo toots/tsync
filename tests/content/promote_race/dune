@@ -23,6 +23,7 @@
    Tsync_local_backend))
  (name promote_race)
  (libraries
+  unix
   tsync_logical_key
   tsync_remote
   tsync_staged

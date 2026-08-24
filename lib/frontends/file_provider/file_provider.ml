@@ -134,7 +134,7 @@ module Make (C : Conf.S) (D : Domain_engine.Domain) = struct
           (* Under the cache root, so the link QuickLook needs lands on the same
              filesystem as the body it points at. *)
           let scratch = Filename.concat C.cache_root "previews" in
-          let+ picture = Preview.of_file ~scratch ~name path in
+          let+ picture = Preview.of_file ~scratch ~name staged in
           match picture with
             | Some picture ->
                 ok_json [("data", `String (Base64.encode_string picture))]

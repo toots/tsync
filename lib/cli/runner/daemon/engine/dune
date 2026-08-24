@@ -24,6 +24,9 @@
  (name tsync_engine)
  (public_name tsync-libs.engine)
  (libraries
+  unix
+  lwt.unix
+  yojson
   tsync_logical_key
   tsync_staged
   tsync_checkout

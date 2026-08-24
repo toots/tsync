@@ -2,6 +2,8 @@
 (name tsync)
 (license MIT)
 
+(implicit_transitive_deps false)
+
 ; The opam files under opam/ are written by hand, not generated from these
 ; stanzas: tsync depends on one of two TLS backend packages and dune has no
 ; syntax for an opam alternative. What is left here is only what dune itself

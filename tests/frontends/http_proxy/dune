@@ -39,6 +39,8 @@
    Tsync_test_harness))
  (name http_proxy_test)
  (libraries
+  cohttp-lwt
+  unix
   tsync-libs.logical_key
   tsync_chunks
   tsync_journal

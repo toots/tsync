@@ -21,6 +21,8 @@
    Tsync_local_backend))
  (name upload)
  (libraries
+  lwt.unix
+  lwt
   tsync_logical_key
   tsync_remote
   tsync_manifest

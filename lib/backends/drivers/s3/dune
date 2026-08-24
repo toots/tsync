@@ -20,6 +20,7 @@
  (optional)
  (library_flags (-linkall))
  (libraries
+  aws-s3
   tsync-libs.logical_key
   tsync_retry
   tsync_chunk_integrity

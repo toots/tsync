@@ -18,6 +18,7 @@
  (name tsync_journal)
  (public_name tsync-libs.journal)
  (libraries
+  tsync-libs.log
   tsync_id
   tsync_conf
   tsync_naming

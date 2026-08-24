@@ -25,6 +25,8 @@
    Tsync_diagnostics))
  (name tsync_launcher)
  (libraries
+  unix
+  lwt.unix
   tsync_frontend_register
   tsync-libs.conf_parsing
   tsync_domain

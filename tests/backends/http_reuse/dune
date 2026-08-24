@@ -11,6 +11,8 @@
    Tsync_test_harness))
  (name http_reuse)
  (libraries
+  cohttp-lwt
+  cohttp
   tsync_test_harness
   tsync_bigstring
   tsync_http_client

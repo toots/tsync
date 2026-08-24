@@ -19,6 +19,9 @@
    Tsync_local_backend))
  (name known_chunks)
  (libraries
+  unix
+  lwt.unix
+  lwt
   tsync_logical_key
   tsync_remote
   tsync_manifest
