@@ -295,31 +295,40 @@
 === import special characters in filenames
   local-write colon:file.txt "colons"
   local-write dir:with:colons/nested.txt "nested"
+  local-write .tsync-dir "mine"
   import
   drain
   export-dir
   mkdir dir:with:colons
+  imported .tsync-dir (4 bytes)
   imported colon:file.txt (6 bytes)
   imported dir:with:colons/nested.txt (6 bytes)
-  import: 2 imported, 0 skipped, 0 symlinks skipped
+  import: 3 imported, 0 skipped, 0 symlinks skipped
+  export .tsync-dir (assembled)
   export colon:file.txt (assembled)
   export dir:with:colons/nested.txt (assembled)
-  export: 2 exported, 0 missing
+  export: 3 exported, 0 missing
+  exported-file .tsync-dir = "mine"
   exported-file colon:file.txt = "colons"
   exported-file dir:with:colons/nested.txt = "nested"
 --- tree
+  f .tsync-dir size=4 cached=1/1 uploaded=true etag=85df471f7bba8615
   f colon:file.txt size=6 cached=1/1 uploaded=true etag=4cf325a5de628a63
   d dir:with:colons
   f dir:with:colons/nested.txt size=6 cached=1/1 uploaded=true etag=7546f608548f4d0d
 --- content
+  .tsync-dir = "mine"
   colon:file.txt = "colons"
   dir:with:colons/nested.txt = "nested"
 --- backend
+  chunk 6bceea5f3c7fe0a6-faf00891f8013689 size=4
   chunk db0542846c644ccb-0fb666185e4e7838 size=6
   chunk fa87ee5fc199e332-c7156c4359a54f81 size=6
   cursor = <entry-2>
   journal <entry-1> = mkdir dir:with:colons
-  journal <entry-2> = put colon:file.txt 6; put dir:with:colons/nested.txt 6
+  journal <entry-2> = put .tsync-dir 4; put colon:file.txt 6; put dir:with:colons/nested.txt 6
+  file .tsync-dir [.tsync-root/13d482239fde66cd-0c699ae8fa1733c7] = manifest size=4 chunks=1 h1=85df471f7bba8615 h2=342eaa68ba60cbfa
+    chunk#0 6bceea5f3c7fe0a6-faf00891f8013689 size=4
   folder dir:with:colons [.tsync-root/3f3b95d2203adb7f-d7685fc7f1ce469e] -> <folder-1>
   file colon:file.txt [.tsync-root/d823794102600864-13817dc0f4720073] = manifest size=6 chunks=1 h1=4cf325a5de628a63 h2=7e1d3199e7e20415
     chunk#0 db0542846c644ccb-0fb666185e4e7838 size=6

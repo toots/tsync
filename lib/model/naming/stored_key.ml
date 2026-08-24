@@ -37,7 +37,7 @@ let portable_char = function
 
 let storable leaf =
   String.length leaf <= name_max
-  && (not (is_escaped leaf))
+  && (not (reserved leaf))
   && String.for_all portable_char leaf
 
 let escape leaf =

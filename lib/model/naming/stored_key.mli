@@ -40,8 +40,11 @@ val is_temp_key : string -> bool
     A store that files an item under its real path — this client's manifest
     mirror — has to hand each component to a filesystem, and a filesystem will
     not hold every name a user can type. A component too long, carrying a
-    character some filesystem refuses, or reading as one of this store's own
-    names is replaced by a fixed-length handle.
+    character some filesystem refuses, or {!reserved} is replaced by a
+    fixed-length handle.
+
+    Reserved covers every name a store keeps for itself, so a file a user called
+    [.tsync-dir] is stored as a handle rather than read back as a marker.
 
     A handle is lossy, so the real name is recovered elsewhere: for a file from
     its manifest body, for a directory from a marker beside it. *)

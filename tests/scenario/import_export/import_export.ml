@@ -133,6 +133,9 @@ let () =
             LocalWrite { path = "colon:file.txt"; content = "colons" };
             LocalWrite
               { path = "dir:with:colons/nested.txt"; content = "nested" };
+            (* A name this store keeps for itself, chosen by a user: it has to
+               come back as a file rather than be read as our own bookkeeping. *)
+            LocalWrite { path = ".tsync-dir"; content = "mine" };
             Import { only = []; exclude = []; force_rehash = false };
             Drain;
             ExportDir;
