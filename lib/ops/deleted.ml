@@ -25,11 +25,11 @@ module Make (C : Conf.S) = struct
     let+ head = B.head_opt ~key:(C.domain_prefix ^ hrel) () in
     head <> None
 
-  let in_folder rel =
+  let in_folder key =
     (* Versions of the files in a folder share the folder's id. *)
     let* fid =
       Folder_ids.ensure_id ~cache_root:C.cache_root ~domain_name:C.domain_name
-        rel
+        key
     in
     let* entries = B.list_prefix ~prefix:(C.versions_prefix ^ fid ^ "/") () in
     let seen = Hashtbl.create 16 in

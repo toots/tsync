@@ -17,7 +17,7 @@ val marker_name : string
 (** The folder's id, minting and persisting one when it has no marker yet. For
     the write paths, which may bring a folder into existence. *)
 val ensure_id :
-  cache_root:string -> domain_name:string -> string -> string Lwt.t
+  cache_root:string -> domain_name:string -> Logical_key.t -> string Lwt.t
 
 (** The folder's id if this client already records one, [None] otherwise.
 
@@ -25,26 +25,34 @@ val ensure_id :
     the local directory, which is how a deleted folder comes back from a stat.
 *)
 val lookup_id :
-  cache_root:string -> domain_name:string -> string -> string option Lwt.t
+  cache_root:string ->
+  domain_name:string ->
+  Logical_key.t ->
+  string option Lwt.t
 
 (** Write a folder's marker, and the reverse entry that makes {!rel_of_id}
     answerable. *)
 val write :
   cache_root:string ->
   domain_name:string ->
-  string ->
+  Logical_key.t ->
   Folder.marker ->
   unit Lwt.t
 
 (** The domain-relative path of a folder id, or [None] when nothing records it.
     A miss rebuilds the reverse index once and retries before answering. *)
-val rel_of_id :
-  cache_root:string -> domain_name:string -> string -> string option Lwt.t
+val key_of_id :
+  cache_root:string ->
+  domain_name:string ->
+  root:Logical_key.t ->
+  string ->
+  Logical_key.t option Lwt.t
 
 (** Restate a folder's marker after it moved, taking the name from the new path.
     Every path that moves a directory locally owes this call, or the folder
     becomes unreachable by id. *)
-val reparent : cache_root:string -> domain_name:string -> string -> unit Lwt.t
+val reparent :
+  cache_root:string -> domain_name:string -> Logical_key.t -> unit Lwt.t
 
 (** Restate the whole reverse index from the markers, which are the truth. *)
 val rebuild : cache_root:string -> domain_name:string -> unit Lwt.t

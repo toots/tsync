@@ -41,7 +41,7 @@ module Make (C : Conf.S) = struct
       match entry.Inode_tree.body with
         | Inode_tree.Dir m ->
             Folder_ids.write ~cache_root:C.cache_root ~domain_name:C.domain_name
-              (Logical_key.path (Logical_key.dir_in key m.Folder.name))
+              (Logical_key.dir_in key m.Folder.name)
               m
         | Inode_tree.File man ->
             incr count;

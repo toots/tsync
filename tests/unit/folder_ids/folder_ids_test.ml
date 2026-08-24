@@ -11,10 +11,19 @@ open Check
 let root = Scratch.dir "folder-ids"
 let cache_root = Filename.concat root "cache"
 let domain_name = "testdom"
-let ensure rel = Folder_ids.ensure_id ~cache_root ~domain_name rel
-let lookup rel = Folder_ids.lookup_id ~cache_root ~domain_name rel
-let rel_of id = Folder_ids.rel_of_id ~cache_root ~domain_name id
-let reparent rel = Folder_ids.reparent ~cache_root ~domain_name rel
+
+module Lk = Logical_key.Make (struct
+  let domain_prefix = "tsync/testdom/manifests/"
+end)
+
+let ensure rel = Folder_ids.ensure_id ~cache_root ~domain_name (Lk.dir rel)
+let lookup rel = Folder_ids.lookup_id ~cache_root ~domain_name (Lk.dir rel)
+
+let rel_of id =
+  let+ key = Folder_ids.key_of_id ~cache_root ~domain_name ~root:Lk.root id in
+  Option.map Logical_key.path key
+
+let reparent rel = Folder_ids.reparent ~cache_root ~domain_name (Lk.dir rel)
 let rebuild () = Folder_ids.rebuild ~cache_root ~domain_name
 
 let mirror rel =

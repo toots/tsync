@@ -327,7 +327,7 @@ module Make (C : Conf.S) = struct
                  carries the id a peer resolves the folder by. *)
               let* id =
                 Folder_ids.ensure_id ~cache_root:C.cache_root
-                  ~domain_name:C.domain_name rel
+                  ~domain_name:C.domain_name (Lk.dir rel)
               in
               on_dir ~rel;
               add [`Mkdir (rel, Some id)])

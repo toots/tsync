@@ -2,19 +2,22 @@ open Lwt.Syntax
 
 let marker_name = Name_escape.folder_marker
 
-let dir_of ~cache_root ~domain_name rel =
+(* Keyed by the folder itself: where its marker sits, what it is called and
+   which folder holds it are all questions the key answers. *)
+let dir_of ~cache_root ~domain_name key =
   let base = Cache_layout.manifests_dir ~cache_root domain_name in
+  let rel = Logical_key.path key in
   if rel = "" then base else Filename.concat base (Name_escape.encode_key rel)
 
-let marker_path ~cache_root ~domain_name rel =
-  Filename.concat (dir_of ~cache_root ~domain_name rel) marker_name
+let marker_path ~cache_root ~domain_name key =
+  Filename.concat (dir_of ~cache_root ~domain_name key) marker_name
 
-let read ~cache_root ~domain_name rel =
+let read ~cache_root ~domain_name key =
   Lwt.catch
     (fun () ->
       let+ s =
         Lwt_unix_retry.with_file ~mode:Lwt_io.Input
-          (marker_path ~cache_root ~domain_name rel)
+          (marker_path ~cache_root ~domain_name key)
           Lwt_io.read
       in
       Folder.marker_of_string s)
@@ -71,37 +74,37 @@ let write_entry ~cache_root ~domain_name ~id entry =
 (* The name comes from where the folder actually sits, not from the marker being
    written: a marker that travelled with a renamed directory still carries the old
    leaf, and the index has to spell the path back out. *)
-let rec write ~cache_root ~domain_name rel (m : Folder.marker) =
-  let dir = dir_of ~cache_root ~domain_name rel in
+let rec write ~cache_root ~domain_name key (m : Folder.marker) =
+  let dir = dir_of ~cache_root ~domain_name key in
   let* () = Fs_util.mkdir_p dir in
   let path = Filename.concat dir marker_name in
   let* () = Fs_util.atomic_write path (Folder.marker_to_string m) in
-  if rel = "" then Lwt.return_unit
+  if Logical_key.is_root key then Lwt.return_unit
   else
-    let* parent = ensure_id ~cache_root ~domain_name (Key.parent rel) in
+    let* parent = ensure_id ~cache_root ~domain_name (Logical_key.parent key) in
     write_entry ~cache_root ~domain_name ~id:m.Folder.id
-      { parent; name = Filename.basename rel }
+      { parent; name = Logical_key.leaf key }
 
 (* Mints and persists a marker, so this is for the write paths only. *)
-and ensure_id ~cache_root ~domain_name rel =
-  if rel = "" then Lwt.return Stored_key.root_id
+and ensure_id ~cache_root ~domain_name key =
+  if Logical_key.is_root key then Lwt.return Stored_key.root_id
   else
-    let* existing = read ~cache_root ~domain_name rel in
+    let* existing = read ~cache_root ~domain_name key in
     match existing with
       | Some m -> Lwt.return m.Folder.id
       | None ->
           let m =
-            { Folder.name = Filename.basename rel; id = Stored_key.new_id () }
+            { Folder.name = Logical_key.leaf key; id = Stored_key.new_id () }
           in
-          let+ () = write ~cache_root ~domain_name rel m in
+          let+ () = write ~cache_root ~domain_name key m in
           m.Folder.id
 
 (* What a read must use: minting here would persist a marker that re-creates the
    local directory, which is how a deleted folder comes back from a stat. *)
-let lookup_id ~cache_root ~domain_name rel =
-  if rel = "" then Lwt.return_some Stored_key.root_id
+let lookup_id ~cache_root ~domain_name key =
+  if Logical_key.is_root key then Lwt.return_some Stored_key.root_id
   else
-    let+ existing = read ~cache_root ~domain_name rel in
+    let+ existing = read ~cache_root ~domain_name key in
     Option.map (fun m -> m.Folder.id) existing
 
 (* The markers are the truth; this restates them the other way round. The mirror
@@ -178,8 +181,7 @@ let max_depth = 256
 let climb ~cache_root ~domain_name id =
   let rec go id names depth =
     if depth > max_depth then Lwt.return_none
-    else if id = Stored_key.root_id then
-      Lwt.return_some (String.concat "/" names)
+    else if id = Stored_key.root_id then Lwt.return_some names
     else
       let* entry = read_entry ~cache_root ~domain_name id in
       match entry with
@@ -191,16 +193,18 @@ let climb ~cache_root ~domain_name id =
 (* The climbed path is checked against the markers before it is believed, so a
    stale entry costs an answer rather than naming some other folder, and a failed
    check is the signal to rebuild and ask once more. *)
-let rel_of_id ~cache_root ~domain_name id =
-  if id = Stored_key.root_id then Lwt.return_some ""
+let key_of_id ~cache_root ~domain_name ~root id =
+  if id = Stored_key.root_id then Lwt.return_some root
   else (
-    let verified rel =
-      let+ actual = lookup_id ~cache_root ~domain_name rel in
-      if actual = Some id then Some rel else None
+    let verified key =
+      let+ actual = lookup_id ~cache_root ~domain_name key in
+      if actual = Some id then Some key else None
     in
     let attempt () =
       let* candidate = climb ~cache_root ~domain_name id in
-      match candidate with None -> Lwt.return_none | Some rel -> verified rel
+      match candidate with
+        | None -> Lwt.return_none
+        | Some names -> verified (List.fold_left Logical_key.dir_in root names)
     in
     let* first = attempt () in
     match first with
@@ -216,12 +220,12 @@ let rel_of_id ~cache_root ~domain_name id =
 
 (* A marker travels with its directory and so still spells the old leaf after a
    rename; {!rebuild} reads it, so the new name is written back. *)
-let reparent ~cache_root ~domain_name rel =
-  if rel = "" then Lwt.return_unit
+let reparent ~cache_root ~domain_name key =
+  if Logical_key.is_root key then Lwt.return_unit
   else
-    let* marker = read ~cache_root ~domain_name rel in
+    let* marker = read ~cache_root ~domain_name key in
     match marker with
       | None -> Lwt.return_unit
       | Some m ->
-          write ~cache_root ~domain_name rel
-            { m with Folder.name = Filename.basename rel }
+          write ~cache_root ~domain_name key
+            { m with Folder.name = Logical_key.leaf key }

@@ -81,8 +81,7 @@ let cmd : unit Cmd.t =
          items;
        if show_deleted then begin
          let module D = Deleted.Make (C) in
-         let reldir = Logical_key.path prefix in
-         let+ names = D.in_folder reldir in
+         let+ names = D.in_folder prefix in
          List.iter (Printf.printf "deleted  %s\n") names
        end
        else Lwt.return_unit)

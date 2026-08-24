@@ -77,7 +77,8 @@ let inner_body = "inner file contents\n"
 let build_fixture () =
   (* Pin the subfolder id: [Folder_ids.ensure_id] would mint a random one. *)
   let* () =
-    Folder_ids.write ~cache_root:C.cache_root ~domain_name:C.domain_name "sub"
+    Folder_ids.write ~cache_root:C.cache_root ~domain_name:C.domain_name
+      (Lk.dir "sub")
       { Folder.name = "sub"; id = "subid" }
   in
   let* hello_key = upload "hello.txt" hello_body in

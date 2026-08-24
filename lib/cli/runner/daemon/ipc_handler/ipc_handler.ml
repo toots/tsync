@@ -86,8 +86,9 @@ module Make (C : Conf.S) (F : File_ops.S) : S = struct
   module Ir = Item_ref.Make (C)
   module Lk = Logical_key.Make (C)
 
-  let rel_of_id id =
-    Folder_ids.rel_of_id ~cache_root:C.cache_root ~domain_name:C.domain_name id
+  let key_of_id id =
+    Folder_ids.key_of_id ~cache_root:C.cache_root ~domain_name:C.domain_name
+      ~root:Lk.root id
 
   (* [None] when nothing is there any more, which is the point of naming a
      directory by id: a caller is told it is gone rather than handed a path
@@ -95,12 +96,10 @@ module Make (C : Conf.S) (F : File_ops.S) : S = struct
      already records and mints nothing. *)
   let resolve : Item_ref.t -> Logical_key.t option Lwt.t = function
     | `Root -> Lwt.return_some Lk.root
-    | `Dir id ->
-        let+ rel = rel_of_id id in
-        Option.map (fun rel -> Lk.dir rel) rel
+    | `Dir id -> key_of_id id
     | `File (id, name) ->
-        let+ rel = rel_of_id id in
-        Option.map (fun rel -> Logical_key.file_in (Lk.dir rel) name) rel
+        let+ dir = key_of_id id in
+        Option.map (fun dir -> Logical_key.file_in dir name) dir
     | `Logical_key k -> Lwt.return_some k
     | `Bad _ -> Lwt.return_none
 
@@ -124,7 +123,7 @@ module Make (C : Conf.S) (F : File_ops.S) : S = struct
     else if Logical_key.kind key = `Dir then
       let+ id =
         Folder_ids.lookup_id ~cache_root:C.cache_root ~domain_name:C.domain_name
-          body
+          key
       in
       Option.map (fun id -> `Dir id) id
     else Lwt.return_some (`File (container_id, Logical_key.leaf key))
@@ -145,19 +144,19 @@ module Make (C : Conf.S) (F : File_ops.S) : S = struct
             ("name", `String name);
           ]
 
-  let lookup_folder rel =
-    if rel = "" then Lwt.return_some Stored_key.root_id
+  let lookup_folder key =
+    if Logical_key.is_root key then Lwt.return_some Stored_key.root_id
     else
       Folder_ids.lookup_id ~cache_root:C.cache_root ~domain_name:C.domain_name
-        rel
+        key
 
   let rel_body = Logical_key.path
 
   (* For a directory key: the id of the folder [key] is. *)
-  let own_folder_id key = lookup_folder (rel_body key)
+  let own_folder_id key = lookup_folder key
 
   (* The id of the folder [key] sits in. *)
-  let parent_folder_id key = lookup_folder (rel_body (Logical_key.parent key))
+  let parent_folder_id key = lookup_folder (Logical_key.parent key)
 
   (* How a subscriber names an item, for a frontend pushing it news about one.
      Resolves the folder itself, having no listing to share one with. *)
@@ -298,8 +297,12 @@ module Make (C : Conf.S) (F : File_ops.S) : S = struct
     end
 
   (* One list, each entry tagged by kind: files and directories differ in what
-     describes them, not in how they are named. *)
+     describes them, not in how they are named.
+
+     The prefix is read as a folder whatever the caller spelled it as, a
+     path-speaking client having no way to mark one. *)
   let handle_list_dir prefix =
+    let prefix = Lk.dir (Logical_key.path prefix) in
     let* container = own_folder_id prefix in
     match container with
       | None -> not_found (Logical_key.to_string prefix)
@@ -331,11 +334,12 @@ module Make (C : Conf.S) (F : File_ops.S) : S = struct
   (* Grouped by containing folder, so each folder id resolves once, not per
      file. *)
   let handle_list_all prefix =
+    let prefix = Lk.dir (Logical_key.path prefix) in
     let* files = F.list_tree ~prefix in
     let by_parent = Hashtbl.create 16 in
     List.iter
       (fun (entry : Checkout.listed) ->
-        let parent = Logical_key.path (Logical_key.parent entry.key) in
+        let parent = Logical_key.parent entry.key in
         Hashtbl.replace by_parent parent
           (entry :: Option.value (Hashtbl.find_opt by_parent parent) ~default:[]))
       files;
@@ -375,31 +379,31 @@ module Make (C : Conf.S) (F : File_ops.S) : S = struct
      the op ({!Journal.op}). [None] while the parent is not yet in this client's
      mirror — the window between a foreign entry being published and the poller
      applying it. *)
-  let file_ref ~lookup rel =
-    let+ pid = lookup (Key.parent rel) in
-    Option.map (fun pid -> `File (pid, Filename.basename rel)) pid
+  let file_ref ~lookup key =
+    let+ pid = lookup (Logical_key.parent key) in
+    Option.map (fun pid -> `File (pid, Logical_key.leaf key)) pid
 
-  let dir_ref ~lookup rel = function
+  let dir_ref ~lookup key = function
     | Some id -> Lwt.return_some (`Dir id)
     | None ->
         (* An entry from before ids were carried. *)
-        let+ id = lookup rel in
+        let+ id = lookup key in
         Option.map (fun id -> `Dir id) id
 
-  let parent_ref ~lookup rel =
-    let+ pid = lookup (Key.parent rel) in
+  let parent_ref ~lookup key =
+    let+ pid = lookup (Logical_key.parent key) in
     Option.map
       (fun pid -> if pid = Stored_key.root_id then `Root else `Dir pid)
       pid
 
-  let named self parent rel =
+  let named self parent key =
     match (self, parent) with
       | Some self, Some parent ->
           Some
             [
               ("ref", ref_str self);
               ("parentRef", ref_str parent);
-              ("name", `String (Filename.basename rel));
+              ("name", `String (Logical_key.leaf key));
             ]
       | _ -> None
 
@@ -411,23 +415,27 @@ module Make (C : Conf.S) (F : File_ops.S) : S = struct
       | Some naming -> Some (`Assoc (fields @ naming))
     in
     match op with
-      | `Put (key, size) ->
+      | `Put (rel, size) ->
+          let key = Lk.file rel in
           let* self = file_ref key in
           let+ parent = parent_ref key in
           with_naming
             [("op", `String "put"); ("size", `Int (Int64.to_int size))]
             (named self parent key)
-      | `Delete key ->
+      | `Delete rel ->
+          let key = Lk.file rel in
           let* self = file_ref key in
           let+ parent = parent_ref key in
           with_naming [("op", `String "delete")] (named self parent key)
-      | `Mkdir (key, id) ->
+      | `Mkdir (rel, id) ->
+          let key = Lk.dir rel in
           let* self = dir_ref key id in
           let+ parent = parent_ref key in
           with_naming
             ([("op", `String "mkdir")] @ dir_id_field id)
             (named self parent key)
-      | `Rmdir (key, id) ->
+      | `Rmdir (rel, id) ->
+          let key = Lk.dir rel in
           let* self = dir_ref key id in
           let+ parent = parent_ref key in
           with_naming
@@ -437,6 +445,8 @@ module Make (C : Conf.S) (F : File_ops.S) : S = struct
           (* A directory keeps its id across a move, which is what marks the two
              paths as one folder. A file's reference changes, so name both
              ends. *)
+          let as_key rel = if is_dir then Lk.dir rel else Lk.file rel in
+          let dst = as_key dst and src = as_key src in
           let* self = if is_dir then dir_ref dst id else file_ref dst in
           let* parent = parent_ref dst in
           let+ src_self = if is_dir then Lwt.return self else file_ref src in
@@ -508,10 +518,10 @@ module Make (C : Conf.S) (F : File_ops.S) : S = struct
          it can still be named. Otherwise every foreign "mkdir then write"
          reports a gap. *)
       let learned : (string, string) Hashtbl.t = Hashtbl.create 8 in
-      let lookup rel =
-        match Hashtbl.find_opt learned rel with
+      let lookup key =
+        match Hashtbl.find_opt learned (Logical_key.path key) with
           | Some id -> Lwt.return_some id
-          | None -> lookup_folder rel
+          | None -> lookup_folder key
       in
       let note = function
         | `Mkdir (rel, Some id) -> Hashtbl.replace learned rel id

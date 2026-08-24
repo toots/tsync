@@ -16,7 +16,7 @@ module Make (C : Conf.S) : sig
   (** Deleted files directly under the folder at domain-relative [rel], by name.
       Mints a folder id if this client has none, since a listing of somewhere
       that does not resolve is empty rather than wrong. *)
-  val in_folder : string -> string list Lwt.t
+  val in_folder : Logical_key.t -> string list Lwt.t
 
   (** Every deleted file in the domain, unordered — one listing of the whole
       versions prefix, then one existence check per distinct file. *)

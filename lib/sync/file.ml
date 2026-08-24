@@ -33,8 +33,7 @@ module Make_with_layout (C : Conf.S) (Sq : Sync_queue.S) (L : Layout.S) :
   (* Every path that moves a directory locally owes this call, or the folder
      becomes unreachable by id. *)
   let reparent_dir key =
-    Folder_ids.reparent ~cache_root:C.cache_root ~domain_name:C.domain_name
-      (rel_key key)
+    Folder_ids.reparent ~cache_root:C.cache_root ~domain_name:C.domain_name key
 
   let published_here key : Manifest.t option Lwt.t = Mf.published key
   let published = D.published
@@ -536,7 +535,7 @@ module Make_with_layout (C : Conf.S) (Sq : Sync_queue.S) (L : Layout.S) :
                 match Folder.marker_of_string data with
                   | Some m ->
                       Folder_ids.write ~cache_root:C.cache_root
-                        ~domain_name:C.domain_name rel
+                        ~domain_name:C.domain_name (Lk.dir rel)
                         {
                           Folder.name = Filename.basename rel;
                           id = m.Folder.id;
@@ -554,10 +553,10 @@ module Make_with_layout (C : Conf.S) (Sq : Sync_queue.S) (L : Layout.S) :
      it, and adoption only — the marker is the store's, and minting one here
      would fork the namespace the other clients already agree on. *)
   let adopt_ancestor_ids rel =
-    let rec ancestors acc rel =
-      match Key.parent rel with
-        | "" -> acc
-        | parent -> ancestors (parent :: acc) parent
+    let rec ancestors acc key =
+      let parent = Logical_key.parent key in
+      if Logical_key.is_root parent then acc
+      else ancestors (parent :: acc) parent
     in
     Lwt_list.iter_s
       (fun dir ->
@@ -567,8 +566,8 @@ module Make_with_layout (C : Conf.S) (Sq : Sync_queue.S) (L : Layout.S) :
         in
         match known with
           | Some _ -> Lwt.return_unit
-          | None -> adopt_folder_id dir)
-      (ancestors [] rel)
+          | None -> adopt_folder_id (Logical_key.path dir))
+      (ancestors [] (Lk.dir rel))
 
   (* A foreign op must never clobber unsynced local edits. The staged manifest
      is that flag and survives a restart. *)

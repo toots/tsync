@@ -88,7 +88,7 @@ module Make (C : Conf.S) = struct
                     | Some m -> Lwt.return_some m.Folder.id
                     | None ->
                         Folder_ids.lookup_id ~cache_root:C.cache_root
-                          ~domain_name:C.domain_name rel
+                          ~domain_name:C.domain_name (Lk.dir rel)
                 in
                 let* dir_prefix =
                   match dir_id with

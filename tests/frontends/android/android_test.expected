@@ -3,7 +3,7 @@
   mkdir tsync/media/manifests/photos/
     {"ok":true}
   list tsync/media/manifests/
-    {"ok":false,"code":"invalid","error":"Invalid_argument(\"Logical_key: \\\"\\\" names a file, not a folder\")"}
+    {"ok":true,"items":[{"ref":"d:<id1>","parentRef":"root","name":"photos","kind":"dir","size":0,"mtime":0.0,"etag":"<id1>","isUploaded":true}]}
 
 === a whole body is adopted by rename
   write-whole tsync/media/manifests/photos/big.txt <root>/staged.bin

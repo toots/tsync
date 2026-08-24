@@ -167,14 +167,15 @@ module Make (C : Conf.S) = struct
   (* A directory keeps its real name in a marker beside it, for the same reason
      a manifest keeps one in its body: an escaped on-disk name is a hash. *)
   let refresh_dir_marker key =
-    let rel = rel_of key in
-    let leaf = if rel = "" then "" else Filename.basename rel in
+    let leaf = Logical_key.leaf key in
     if
-      rel = ""
+      leaf = ""
       || not (Name_escape.is_escaped (Name_escape.encode_component leaf))
     then Lwt.return_unit
     else (
-      let dir = Filename.concat (root ()) (Name_escape.encode_key rel) in
+      let dir =
+        Filename.concat (root ()) (Name_escape.encode_key (rel_of key))
+      in
       Fs_util.atomic_write (Filename.concat dir Name_escape.dir_marker) leaf)
 
   (* Moving is half of a rename: whatever records the name — a manifest's body

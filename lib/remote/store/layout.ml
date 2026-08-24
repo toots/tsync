@@ -39,9 +39,9 @@ module Inode = struct
   module Make (C : Conf.S) : S = struct
     open Lwt.Syntax
 
-    let lookup_id rel =
+    let lookup_id key =
       Folder_ids.lookup_id ~cache_root:C.cache_root ~domain_name:C.domain_name
-        rel
+        key
 
     let rel_of = Logical_key.path
 
@@ -60,24 +60,24 @@ module Inode = struct
        client puts its children under the id the store accepted.
 
        Still local-first: a folder already resolved costs no round trip. *)
-    let rec ensure_id rel =
-      if rel = "" then Lwt.return Stored_key.root_id
+    let rec ensure_id key =
+      if Logical_key.is_root key then Lwt.return Stored_key.root_id
       else
-        let* known = lookup_id rel in
+        let* known = lookup_id key in
         match known with
           | Some id -> Lwt.return id
           | None ->
-              let name = Filename.basename rel in
+              let name = Logical_key.leaf key in
               (* The parent is claimed first, so the key this claim names is
                  already the agreed one. *)
-              let* pid = ensure_id (Key.parent rel) in
+              let* pid = ensure_id (Logical_key.parent key) in
               let candidate = { Folder.name; id = Stored_key.new_id () } in
-              let key = child_key ~folder_id:pid name in
+              let bkey = child_key ~folder_id:pid name in
               let module B = (val C.store : Backend.S) in
               let* held =
                 Lwt.catch
                   (fun () ->
-                    B.put_if_absent ~key
+                    B.put_if_absent ~key:bkey
                       ~data:
                         (Bigstring.of_string
                            (Folder.marker_to_string candidate))
@@ -102,48 +102,44 @@ module Inode = struct
               in
               let+ () =
                 Folder_ids.write ~cache_root:C.cache_root
-                  ~domain_name:C.domain_name rel winner
+                  ~domain_name:C.domain_name key winner
               in
               winner.Folder.id
 
     (* A folder is not filed as a manifest — it is named by its marker under the
        parent's namespace — so this resolves a file either way. *)
     let ensure_manifest_key key =
-      let rel = rel_of key in
-      let+ pid = ensure_id (Key.parent rel) in
-      child_key ~folder_id:pid (Filename.basename rel)
+      let+ pid = ensure_id (Logical_key.parent key) in
+      child_key ~folder_id:pid (Logical_key.leaf key)
 
     (* Same mapping, resolving only what is already known. *)
     let manifest_key key =
-      let rel = rel_of key in
-      let+ pid = lookup_id (Key.parent rel) in
+      let+ pid = lookup_id (Logical_key.parent key) in
       Option.map
-        (fun pid -> child_key ~folder_id:pid (Filename.basename rel))
+        (fun pid -> child_key ~folder_id:pid (Logical_key.leaf key))
         pid
 
-    let ensure_folder_id key = ensure_id (rel_of key)
+    let ensure_folder_id key = ensure_id key
 
     let folder_marker_key key =
-      let rel = rel_of key in
-      if rel = "" then Lwt.return_none
+      if Logical_key.is_root key then Lwt.return_none
       else
-        let+ pid = lookup_id (Key.parent rel) in
+        let+ pid = lookup_id (Logical_key.parent key) in
         Option.map
-          (fun pid -> child_key ~folder_id:pid (Filename.basename rel))
+          (fun pid -> child_key ~folder_id:pid (Logical_key.leaf key))
           pid
 
     (* Both ids are minted if missing: the folder's own because the marker is
        what gives it one, the parent's because a marker must be filed under a
        namespace even on a client that has not learned the parent. *)
     let ensure_folder_marker key =
-      let rel = rel_of key in
-      if rel = "" then Lwt.return_none
+      if Logical_key.is_root key then Lwt.return_none
       else
-        let* pid = ensure_id (Key.parent rel) in
-        let+ id = ensure_id rel in
+        let* pid = ensure_id (Logical_key.parent key) in
+        let+ id = ensure_id key in
         Some
-          ( child_key ~folder_id:pid (Filename.basename rel),
-            Folder.marker_to_string { Folder.name = Filename.basename rel; id }
+          ( child_key ~folder_id:pid (Logical_key.leaf key),
+            Folder.marker_to_string { Folder.name = Logical_key.leaf key; id }
           )
   end
 end
