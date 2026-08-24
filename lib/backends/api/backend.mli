@@ -232,18 +232,6 @@ val absent_code : string -> bool
     from a queue. *)
 val classify : exn -> Retry.kind
 
-(** The one retry loop for a single request, jittered so a fleet that failed
-    together does not return together. A driver decides only what {!classify}
-    means for it; the curve, the cap and the log line are shared, so two stores
-    cannot drift into retrying differently. {!Retry.Cancelled} is never retried.
-*)
-val with_retry :
-  ?max_attempts:int ->
-  name:string ->
-  op:string ->
-  (unit -> 'a Lwt.t) ->
-  'a Lwt.t
-
 (** {1 Settling background work} *)
 
 (** A composite finishing work in the background registers here, so a process

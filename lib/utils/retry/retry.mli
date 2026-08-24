@@ -37,3 +37,15 @@ val reason : exn -> string
     One formula, so the several things that wait out a transient failure differ
     only in how patient they are, not in shape. *)
 val backoff : base:float -> cap:float -> int -> float
+
+(** The one retry loop for a single request, jittered so a fleet that failed
+    together does not return together. A caller decides only what [classify]
+    means for it; the curve, the cap and the log line are shared, so two of them
+    cannot drift into retrying differently. {!Cancelled} is never retried. *)
+val with_retry :
+  ?max_attempts:int ->
+  classify:(exn -> kind) ->
+  name:string ->
+  op:string ->
+  (unit -> 'a Lwt.t) ->
+  'a Lwt.t

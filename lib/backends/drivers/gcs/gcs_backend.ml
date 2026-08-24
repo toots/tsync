@@ -18,7 +18,7 @@ type t = {
 
 let code = Http_client.code
 let is_ok = Http_client.is_ok
-let backend_error = Http_client.backend_error
+let failed = Http_client.failed
 
 (* An object name is a single path segment, so [/] and other reserved characters
    must be percent-encoded; the escaped form survives
@@ -115,20 +115,20 @@ let put t ~key ~data () =
       (upload_uri t key)
   in
   if not (is_ok resp) then
-    raise (backend_error "put" (code resp) (Bigstring.to_string body))
+    raise (failed "put" (code resp) (Bigstring.to_string body))
 
 let get t ~key () =
   let uri = Uri.of_string (obj_path t key ^ "?alt=media") in
   let+ resp, body = call_retry t ~meth:`GET "get" uri in
   if is_ok resp then body
-  else raise (backend_error "get" (code resp) (Bigstring.to_string body))
+  else raise (failed "get" (code resp) (Bigstring.to_string body))
 
 let get_opt t ~key () =
   let uri = Uri.of_string (obj_path t key ^ "?alt=media") in
   let+ resp, body = call_retry t ~meth:`GET "get_opt" uri in
   if is_ok resp then Some body
   else if code resp = 404 then None
-  else raise (backend_error "get_opt" (code resp) (Bigstring.to_string body))
+  else raise (failed "get_opt" (code resp) (Bigstring.to_string body))
 
 (* [ifGenerationMatch=0] means "only if this object does not exist", and the 412
    GCS answers when it already does is the claim being lost, not an error. *)
@@ -142,21 +142,20 @@ let put_if_absent t ~key ~data () =
   in
   if is_ok resp then Lwt.return data
   else if code resp = 412 then get t ~key ()
-  else
-    raise (backend_error "put_if_absent" (code resp) (Bigstring.to_string body))
+  else raise (failed "put_if_absent" (code resp) (Bigstring.to_string body))
 
 let head_opt t ~key () =
   let uri = Uri.of_string (obj_path t key) in
   let+ resp, body = call_text t ~meth:`GET "head" uri in
   if is_ok resp then Some (entry_of_json key (Yojson.Safe.from_string body))
   else if code resp = 404 then None
-  else raise (backend_error "head" (code resp) body)
+  else raise (failed "head" (code resp) body)
 
 let delete t ~key () =
   let uri = Uri.of_string (obj_path t key) in
   let+ resp, body = call_text t ~meth:`DELETE "delete" uri in
   if is_ok resp || code resp = 404 then ()
-  else raise (backend_error "delete" (code resp) body)
+  else raise (failed "delete" (code resp) body)
 
 (* Bulk delete is the one verb that leaves the JSON API, which has no equivalent:
    the XML API takes 1000 objects in a request, against 1000 requests to do the
@@ -243,8 +242,7 @@ let delete_multi t keys =
               [("Content-MD5", Base64.encode_string (Digest.string request))]
             ~body:request "delete_multi" (delete_uri t)
         in
-        if not (is_ok resp) then
-          raise (backend_error "delete_multi" (code resp) body);
+        if not (is_ok resp) then raise (failed "delete_multi" (code resp) body);
         (* A 2xx says the request was understood, not that every object went:
            what failed comes back per key in the body, and reading it is the
            difference between a delete that worked and one that was merely
@@ -315,7 +313,7 @@ let list_all t ?max_keys ~prefix () =
     else (
       let uri = list_uri t ?max_keys ~prefix ~page_token () in
       let* resp, body = call_text t ~meth:`GET "ls" uri in
-      if not (is_ok resp) then Lwt.fail (backend_error "ls" (code resp) body)
+      if not (is_ok resp) then Lwt.fail (failed "ls" (code resp) body)
       else begin
         let items, next = parse_list body in
         let acc = items :: acc in
@@ -340,7 +338,9 @@ let make ?endpoint ?service_account_key ?share_url ~bucket () :
   let auth = Option.map Auth.of_service_account_json service_account_key in
   let t =
     {
-      client = Http_client.create ~name:"gcs" ~timeout:request_timeout ();
+      client =
+        Http_client.create ~name:"gcs" ~timeout:request_timeout
+          ~classify:Backend.classify ();
       bucket;
       base;
       auth;

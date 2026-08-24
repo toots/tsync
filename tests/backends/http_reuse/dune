@@ -6,12 +6,15 @@
    -open
    Tsync_http_client
    -open
+   Tsync_retry
+   -open
    Tsync_test_harness))
  (name http_reuse)
  (libraries
   tsync_test_harness
   tsync_bigstring
   tsync_http_client
+  tsync_retry
   cohttp-lwt-unix
   uri
   lwt

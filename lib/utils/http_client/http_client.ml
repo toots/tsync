@@ -22,15 +22,22 @@ let keep_idle_ns = 60_000_000_000L
    become the narrower limit. *)
 let max_parallel = 32
 
-type t = { name : string; timeout : float; mutable cache : Cache.t }
+type t = {
+  name : string;
+  timeout : float;
+  classify : exn -> Retry.kind;
+  mutable cache : Cache.t;
+}
 
 let new_cache () = Cache.create ~keep:keep_idle_ns ~parallel:max_parallel ()
-let create ~name ~timeout () = { name; timeout; cache = new_cache () }
+
+let create ~name ~timeout ~classify () =
+  { name; timeout; classify; cache = new_cache () }
 
 (* 5xx and 429 clear on their own; every other 4xx is the store's answer. *)
 let is_transient_code c = c >= 500 || c = 429
 
-let backend_error op code body =
+let failed op code body =
   Retry.failed
     ~kind:(if is_transient_code code then Retry.Transient else Retry.Permanent)
     ~op
@@ -105,11 +112,10 @@ let call t ~headers ~meth ?(body = Bigstring.empty) uri =
 (* Raises on a transient status so the shared loop retries it; every other
    response comes back for the verb to interpret, 404 included. *)
 let call_retry t ~headers ~meth ?body op uri =
-  Backend.with_retry ~name:t.name ~op (fun () ->
+  Retry.with_retry ~classify:t.classify ~name:t.name ~op (fun () ->
       let* resp, rbody = call t ~headers ~meth ?body uri in
       if is_transient_code (code resp) then
-        Lwt.fail
-          (backend_error op (code resp) (excerpt (Bigstring.to_string rbody)))
+        Lwt.fail (failed op (code resp) (excerpt (Bigstring.to_string rbody)))
       else Lwt.return (resp, rbody))
 
 (* Only an object's own bytes are worth keeping off the heap; the JSON and XML

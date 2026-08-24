@@ -36,33 +36,6 @@ let () =
     | Backend_error msg -> Some (Printf.sprintf "Backend.Backend_error(%S)" msg)
     | _ -> None)
 
-let default_attempts = 8
-
-(* Bound to {!classify} here because a driver passing one per call would
-   eventually pass none, and retry a failure the store already called
-   permanent. *)
-let with_retry ?(max_attempts = default_attempts) ~name ~op f =
-  let rec go attempt =
-    Lwt.catch f (function
-      | Retry.Cancelled as exn -> Lwt.fail exn
-      | exn when attempt < max_attempts && classify exn = Retry.Transient ->
-          let delay =
-            Retry.backoff ~base:0.5 ~cap:20. attempt *. (0.5 +. Random.float 1.0)
-          in
-          (* Timeouts are counted apart from the retries they are part of: a
-             link that answers slowly and one that stops answering are the same
-             number of retries and very different problems. *)
-          Metrics.add_retry 1;
-          if exn = Lwt_unix.Timeout then Metrics.add_timeout 1;
-          Log.warn "%s %s: %s; retrying (%d/%d) in %.1fs" name op
-            (Retry.reason exn) attempt max_attempts delay;
-          Lwt.bind (Lwt_unix.sleep delay) (fun () -> go (attempt + 1))
-      | exn ->
-          Metrics.add_failure 1;
-          Lwt.fail exn)
-  in
-  go 1
-
 type caps = {
   share_url : string option;
   chunk_size : int option;

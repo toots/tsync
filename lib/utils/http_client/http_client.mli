@@ -1,4 +1,5 @@
-(** A pooled HTTP client, shared by the drivers that speak HTTP.
+(** A pooled HTTP client, shared by whatever speaks HTTP over a link worth
+    keeping open.
 
     Connections are kept and reused per endpoint. A driver that opens one per
     request pays three round trips where one would do and leaves a socket in
@@ -11,15 +12,16 @@
 
 type t
 
-(** [create ~name ~timeout ()] holds a pool of its own. [name] is what a retry
-    names in the log; [timeout] is the deadline for one request, including
-    building its headers.
+(** Holds a pool of its own. [name] is what a retry names in the log; [classify]
+    decides what {!call_retry} waits out, taken here rather than per request so
+    a caller cannot end up passing none.
 
-    That deadline is a stall detector rather than a latency budget: a pooled
+    [timeout] is a stall detector rather than a latency budget: a pooled
     connection whose peer went away without a FIN leaves its request pending
     forever, and a retry loop only ever sees failures, never stalls. Callers
-    choose it, since what counts as stalled differs by store. *)
-val create : name:string -> timeout:float -> unit -> t
+    choose it, since what counts as stalled differs by peer. *)
+val create :
+  name:string -> timeout:float -> classify:(exn -> Retry.kind) -> unit -> t
 
 (** One request through the pool, redialling once if the pooled connection
     turned out to be unusable.
@@ -35,7 +37,7 @@ val call :
   Uri.t ->
   (Cohttp.Response.t * Bigstring.t) Lwt.t
 
-(** {!call} under {!Backend.with_retry}, raising on a transient status so the
+(** {!call} under {!Retry.with_retry}, raising on a transient status so the
     shared ladder retries it. Every other response comes back for the verb to
     interpret, 404 included. *)
 val call_retry :
@@ -67,7 +69,7 @@ val is_transient_code : int -> bool
 
 (** A {!Retry.Failed} carrying the status and a bounded excerpt of the body,
     classified by {!is_transient_code}. *)
-val backend_error : string -> int -> string -> exn
+val failed : string -> int -> string -> exn
 
 (** A bounded, single-line rendering of a response body, for a log. A failing
     proxy answers with a whole HTML page and a store with pretty-printed JSON;

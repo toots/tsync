@@ -23,7 +23,8 @@ let () =
 let count_attempts ~max_attempts exn =
   let attempts = ref 0 in
   let run () =
-    Backend.with_retry ~max_attempts ~name:"test" ~op:"put" (fun () ->
+    Retry.with_retry ~classify:Backend.classify ~max_attempts ~name:"test"
+      ~op:"put" (fun () ->
         incr attempts;
         Lwt.fail exn)
   in

@@ -17,7 +17,7 @@ type t = {
 
 let code = Http_client.code
 let is_ok = Http_client.is_ok
-let backend_error = Http_client.backend_error
+let failed = Http_client.failed
 
 (* Signs method + request-target + body with the shared secret; TLS is
    conduit's, per the global [Tls_conf]. Nothing here reaches the network, but
@@ -46,7 +46,7 @@ let obj_uri t key =
 let put t ~key ~data () =
   let+ resp, body = call_retry t ~meth:`PUT ~body:data "put" (obj_uri t key) in
   if not (is_ok resp) then
-    raise (backend_error "put" (code resp) (Bigstring.to_string body))
+    raise (failed "put" (code resp) (Bigstring.to_string body))
 
 (* The serving side arbitrates, holding the store, and the reply body is
    whatever ended up at the key. A proxy too old to know the parameter would
@@ -56,19 +56,18 @@ let put_if_absent t ~key ~data () =
   let uri = Uri.add_query_param' (obj_uri t key) ("if_absent", "1") in
   let+ resp, body = call_retry t ~meth:`PUT ~body:data "put_if_absent" uri in
   if is_ok resp then body
-  else
-    raise (backend_error "put_if_absent" (code resp) (Bigstring.to_string body))
+  else raise (failed "put_if_absent" (code resp) (Bigstring.to_string body))
 
 let get t ~key () =
   let+ resp, body = call_retry t ~meth:`GET "get" (obj_uri t key) in
   if is_ok resp then body
-  else raise (backend_error "get" (code resp) (Bigstring.to_string body))
+  else raise (failed "get" (code resp) (Bigstring.to_string body))
 
 let get_opt t ~key () =
   let+ resp, body = call_retry t ~meth:`GET "get_opt" (obj_uri t key) in
   if is_ok resp then Some body
   else if code resp = 404 then None
-  else raise (backend_error "get_opt" (code resp) (Bigstring.to_string body))
+  else raise (failed "get_opt" (code resp) (Bigstring.to_string body))
 
 let head_opt t ~key () =
   let+ resp, body = call_text t ~meth:`HEAD "head" (obj_uri t key) in
@@ -87,11 +86,11 @@ let head_opt t ~key () =
     Some
       { Backend.key = Stored_key.listed key; size; last_modified; etag = None })
   else if code resp = 404 then None
-  else raise (backend_error "head" (code resp) body)
+  else raise (failed "head" (code resp) body)
 
 let delete t ~key () =
   let+ resp, body = call_text t ~meth:`DELETE "delete" (obj_uri t key) in
-  if not (is_ok resp) then raise (backend_error "delete" (code resp) body)
+  if not (is_ok resp) then raise (failed "delete" (code resp) body)
 
 let delete_multi t keys =
   let body =
@@ -102,8 +101,7 @@ let delete_multi t keys =
   let+ resp, rbody =
     call_text t ~meth:`POST ~body:(Bigstring.of_string body) "delete_multi" uri
   in
-  if not (is_ok resp) then
-    raise (backend_error "delete_multi" (code resp) rbody)
+  if not (is_ok resp) then raise (failed "delete_multi" (code resp) rbody)
 
 (* The one operation the proxy saves a round trip on: the peer holds the objects
    and can answer a folder's worth in a single response, where an object store
@@ -120,7 +118,7 @@ let get_many t ~entries () =
   in
   if is_ok resp then
     Http_proxy.Wire.bodies_of_string ~keys (Bigstring.to_string answer)
-  else raise (backend_error "get_many" (code resp) (Bigstring.to_string answer))
+  else raise (failed "get_many" (code resp) (Bigstring.to_string answer))
 
 let copy t ~src_key ~dst_key () =
   let uri =
@@ -129,7 +127,7 @@ let copy t ~src_key ~dst_key () =
       [("src", src_key); ("dst", dst_key)]
   in
   let+ resp, body = call_text t ~meth:`POST "copy" uri in
-  if not (is_ok resp) then raise (backend_error "copy" (code resp) body)
+  if not (is_ok resp) then raise (failed "copy" (code resp) body)
 
 let list_all t ?max_keys ~prefix () =
   let query =
@@ -142,7 +140,7 @@ let list_all t ?max_keys ~prefix () =
   let uri = Uri.with_query' (Uri.with_path t.base_uri "/list") query in
   let+ resp, body = call_text t ~meth:`GET "list_all" uri in
   if is_ok resp then Http_proxy.Wire.entries_of_json body
-  else raise (backend_error "list_all" (code resp) body)
+  else raise (failed "list_all" (code resp) body)
 
 (* The proxy answers yes/no only: behind TLS termination it does not reliably
    know its own public URL, while [base_uri] is exactly the URL this client
@@ -166,7 +164,7 @@ let query_share_url t ~prefix =
                 Some (Uri.to_string (Uri.with_path t.base_uri "/s"))
             | _ -> None))
   else if code resp = 404 then None
-  else raise (backend_error "share_url" (code resp) body)
+  else raise (failed "share_url" (code resp) body)
 
 (* The serving domain's own [chunkSize], so a client behind the proxy writes new
    files at the size the domain uses instead of the two configs having to agree.
@@ -186,7 +184,7 @@ let query_chunk_size t ~prefix =
             | `Int n when n > 0 -> Some n
             | _ -> None))
   else if code resp = 404 then None
-  else raise (backend_error "chunk_size" (code resp) body)
+  else raise (failed "chunk_size" (code resp) body)
 
 (* What the serving proxy will run at once, so a client holds its own excess
    rather than parking it in the server's accept queue. Asked rather than
@@ -207,7 +205,7 @@ let query_max_concurrency t ~prefix =
             | `Int n when n > 0 -> Some n
             | _ -> None))
   else if code resp = 404 then None
-  else raise (backend_error "max_concurrency" (code resp) body)
+  else raise (failed "max_concurrency" (code resp) body)
 
 (* 404 reads as [false], which is the honest answer twice over: a proxy too old
    to have this endpoint is one whose store nothing was checking when it was
@@ -226,7 +224,7 @@ let query_verified t ~prefix =
             | `Bool b -> b
             | _ -> false))
   else if code resp = 404 then false
-  else raise (backend_error "verified" (code resp) body)
+  else raise (failed "verified" (code resp) body)
 
 (* Fixed for the life of the process — a peer changing any of these restarts to
    do it, dropping these connections anyway — so the promise is memoized and
@@ -267,7 +265,9 @@ let make ~url ~secret : (module Backend.S) =
     {
       base_uri = Uri.of_string url;
       secret;
-      client = Http_client.create ~name:"http-proxy" ~timeout:request_timeout ();
+      client =
+        Http_client.create ~name:"http-proxy" ~timeout:request_timeout
+          ~classify:Backend.classify ();
       caps_cache = None;
     }
   in
