@@ -30,6 +30,15 @@ val lookup_id :
   Logical_key.t ->
   string option Lwt.t
 
+(** The reference an item answers to, [None] for a folder this client cannot
+    resolve. The inverse of what {!key_of_id} does for the daemon: a caller
+    holding a path names the item before it asks anything over a socket. *)
+val ref_of_key :
+  cache_root:string ->
+  domain_name:string ->
+  Logical_key.t ->
+  Item_ref.t option Lwt.t
+
 (** Write a folder's marker, and the reverse entry that makes {!rel_of_id}
     answerable. *)
 val write :

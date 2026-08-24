@@ -23,7 +23,7 @@ val request :
     daemon serving exactly one. *)
 val action :
   socket_path:string ->
-  ?path:string ->
+  ?item:Item_ref.t ->
   ?arg:string ->
   ?domain:string ->
   string ->

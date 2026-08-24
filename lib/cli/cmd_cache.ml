@@ -19,16 +19,17 @@ let cmd : unit Cmd.t =
           ~doc:"Download these files or directories into the cache.")
   in
   let act ~verb ~done_ ~domain paths =
-    let socket_path path =
-      match domain with
-        | Some _ -> domain_socket ?domain ()
-        | None -> domain_socket_for_path path
-    in
     List.iter
       (fun path ->
-        match Ipc.action ~socket_path:(socket_path path) ~path verb with
-          | _ -> Printf.printf "%s: %s\n" done_ path
-          | exception Failure msg -> Printf.eprintf "Error: %s\n" msg)
+        match item_for_path ?domain path with
+          | Error msg -> Printf.eprintf "Error: %s\n" msg
+          | Ok (domain, item) -> (
+              match
+                Ipc.action ~socket_path:(domain_socket ~domain ()) ~domain ~item
+                  verb
+              with
+                | _ -> Printf.printf "%s: %s\n" done_ path
+                | exception Failure msg -> Printf.eprintf "Error: %s\n" msg))
       paths
   in
   let run paths domain evict fetch =

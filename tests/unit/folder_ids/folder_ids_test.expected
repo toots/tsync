@@ -1,6 +1,10 @@
 a minted folder resolves back to its path: ok
 ancestors are minted too: ok
 an ancestor resolves too: ok
+a folder is named by its own id: ok
+a file is named by its folder and its leaf: ok
+the domain root names itself: ok
+a file under an unresolved folder has no name: ok
 the root resolves to the domain root: ok
 an unknown id resolves to nothing: ok
 a renamed folder keeps its id: ok

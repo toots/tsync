@@ -13,7 +13,6 @@ let error_reply code msg =
 
 module type S = sig
   type hooks = {
-    path_to_key : string -> Logical_key.t option;
     evict : Logical_key.t -> unit Lwt.t;
     restore : Logical_key.t -> unit Lwt.t;
     changed : Logical_key.t -> unit;
@@ -41,7 +40,6 @@ module Make (C : Conf.S) (F : File_ops.S) : S = struct
   module Diag = Diagnostics.Make (C)
 
   type hooks = {
-    path_to_key : string -> Logical_key.t option;
     evict : Logical_key.t -> unit Lwt.t;
     restore : Logical_key.t -> unit Lwt.t;
     changed : Logical_key.t -> unit;
@@ -111,7 +109,7 @@ module Make (C : Conf.S) (F : File_ops.S) : S = struct
   let target obj =
     match List.assoc_opt "ref" obj with
       | Some (`String s) -> Ir.parse s
-      | _ -> Ir.parse (get_str obj "path")
+      | _ -> `Bad ""
 
   (* Reference, container reference and leaf name: enough to describe an item to
      a caller that does not know the key layout.
@@ -635,13 +633,6 @@ module Make (C : Conf.S) (F : File_ops.S) : S = struct
     let+ () = F.rmdir key in
     ok_json []
 
-  (* A frontend names these by a path in whatever space it serves, so what it
-     resolves to is its own to say. *)
-  let with_frontend_path hooks path f =
-    match hooks.path_to_key path with
-      | Some key -> f key
-      | None -> not_found path
-
   let handle_revert hooks key version =
     let version = if version = "" then None else Some version in
     let+ () = F.revert ?version key in
@@ -684,19 +675,18 @@ module Make (C : Conf.S) (F : File_ops.S) : S = struct
           Lwt.return (error_code_json `Invalid "invalid JSON", `Continue)
       | `Assoc obj ->
           let action = get_str obj "action" in
-          let path = get_str obj "path" in
           (* [None] means the reference points at something no longer there,
              which is an answer, not a failure. *)
           let with_target_ref f =
-            let t = target obj in
-            let* key = resolve t in
-            match key with
-              | None -> not_found (Item_ref.to_string t)
-              | Some key -> f t key
+            match target obj with
+              | `Bad "" -> fail `Invalid "\"ref\" is required"
+              | t -> (
+                  let* key = resolve t in
+                  match key with
+                    | None -> not_found (Item_ref.to_string t)
+                    | Some key -> f t key)
           in
           let with_target f = with_target_ref (fun _ key -> f key) in
-          (* A container plus a leaf name. Key-speaking callers pass the whole
-             key as "path". *)
           (* The folder and the leaf, not a key: which kind is being made is the
              action's to say, and only it knows. *)
           let with_destination f =
@@ -764,11 +754,7 @@ module Make (C : Conf.S) (F : File_ops.S) : S = struct
                     | "rename" -> (
                         (* Source is named as anywhere else; the target is a
                            destination. *)
-                        let src_ref =
-                          match List.assoc_opt "ref" obj with
-                            | Some (`String s) -> Ir.parse s
-                            | _ -> Ir.parse (get_str obj "src")
-                        in
+                        let src_ref = target obj in
                         let* src = resolve src_ref in
                         match src with
                           | None -> not_found (Item_ref.to_string src_ref)
@@ -788,18 +774,16 @@ module Make (C : Conf.S) (F : File_ops.S) : S = struct
                             handle_symlink key (get_str obj "target"))
                     | "rmdir" -> with_target handle_rmdir
                     | "share" -> with_target handle_share
-                    (* From the CLI, which speaks in typed filesystem paths and
-                       knows nothing about ids. *)
                     | "evict" ->
-                        with_frontend_path hooks path (fun key ->
+                        with_target (fun key ->
                             let+ () = hooks.evict key in
                             ok_json [])
                     | "restore" ->
-                        with_frontend_path hooks path (fun key ->
+                        with_target (fun key ->
                             let+ () = hooks.restore key in
                             ok_json [])
                     | "revert" ->
-                        with_frontend_path hooks path (fun key ->
+                        with_target (fun key ->
                             handle_revert hooks key (get_str obj "arg"))
                     | "full_resync" ->
                         let+ () = hooks.full_resync () in

@@ -24,6 +24,13 @@ let rel_of id =
   Option.map Logical_key.path key
 
 let reparent rel = Folder_ids.reparent ~cache_root ~domain_name (Lk.dir rel)
+
+(* Named the way a caller holding a path does it, which is without knowing
+   whether the path is a folder: the key is built as a file either way. *)
+let item rel =
+  let+ r = Folder_ids.ref_of_key ~cache_root ~domain_name (Lk.file rel) in
+  Option.map Item_ref.to_string r
+
 let rebuild () = Folder_ids.rebuild ~cache_root ~domain_name
 
 let mirror rel =
@@ -46,6 +53,19 @@ let main () =
   check "ancestors are minted too" (a <> None && b <> None);
   let* got_a = rel_of (Option.get a) in
   check "an ancestor resolves too" (got_a = Some "a");
+
+  (* The other direction, for a caller that has a path and needs the name the
+     daemon knows: a folder answers to its own id, a file to its parent's and
+     its leaf, and neither asks what kind it is first. *)
+  let* dir_ref = item "a/b" in
+  check "a folder is named by its own id" (dir_ref = Option.map (( ^ ) "d:") b);
+  let* file_ref = item "a/b/note.txt" in
+  check "a file is named by its folder and its leaf"
+    (file_ref = Option.map (fun id -> "f:" ^ id ^ "/note.txt") b);
+  let* root_ref = item "" in
+  check "the domain root names itself" (root_ref = Some "root");
+  let* stranded = item "nowhere/at/all" in
+  check "a file under an unresolved folder has no name" (stranded = None);
 
   let* root_rel = rel_of Stored_key.root_id in
   check "the root resolves to the domain root" (root_rel = Some "");

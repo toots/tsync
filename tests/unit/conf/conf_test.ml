@@ -182,5 +182,26 @@ let () =
   (* Zero would deadlock the pool, so it falls back rather than being taken. *)
   assert (buffers {|"maxUploads": 16, "maxChunkBuffers": 0,|} = 16);
 
+  (* Where a domain shows up in the filesystem, which is what turns a path a
+     user typed into a domain and a path within it. The configured mount comes
+     first, so it wins over the data dir every domain shares. *)
+  let mounted at =
+    Printf.sprintf
+      {|{"domains": [{"name": "d", "symlinks": "keep", "versioning": false,
+                      "frontends": [{"type": "fuse", "mountPoint": "%s"}],
+                      "backends": [{"type": "s3", "name": "s",
+                                    "role": "main"}]}]}|}
+      at
+  in
+  let roots at =
+    Conf_parsing.roots_of ~data_dir:"/var/tsync"
+      (List.hd (load (mounted at)).Conf_parsing.domains)
+  in
+  assert (List.hd (roots "/mnt/d") = "/mnt/d");
+  assert (List.mem "/var/tsync" (roots "/mnt/d"));
+  (* Unset, the mount is the default one rather than absent, or a path under it
+     would name no domain. *)
+  assert (List.hd (roots "") = Filename.concat (Sys.getenv "HOME") "tsync/d");
+
   Unix.putenv "TSYNC_CONFIG_JSON" "";
   print_endline "conf_test ok"

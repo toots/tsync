@@ -104,6 +104,23 @@ let lookup_id ~cache_root ~domain_name key =
     let+ existing = read ~cache_root ~domain_name key in
     Option.map (fun m -> m.Folder.id) existing
 
+(* Only a directory has a marker, so finding one is what says the key names a
+   folder rather than a file — no stat, and no caller left to guess the kind.
+
+   The empty path is the domain root whichever kind it was built as, which is
+   what lets a caller holding a path build the key without deciding first. *)
+let ref_of_key ~cache_root ~domain_name key =
+  if Logical_key.path key = "" then Lwt.return_some `Root
+  else
+    let* own = lookup_id ~cache_root ~domain_name key in
+    match own with
+      | Some id -> Lwt.return_some (`Dir id)
+      | None ->
+          let+ parent =
+            lookup_id ~cache_root ~domain_name (Logical_key.parent key)
+          in
+          Option.map (fun id -> `File (id, Logical_key.leaf key)) parent
+
 (* The markers are the truth; this restates them the other way round. The mirror
    is written by other processes too ([tsync import], [tsync sync --full]), so no
    care at the mutation sites would make an in-process view sufficient. *)

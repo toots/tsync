@@ -383,15 +383,9 @@ let setup_client (module C : Conf.S) root staging_prefix =
   (* A scenario says which it means with a trailing separator, the way it would
      write one in a shell. Nothing on the wire reads that; it is read here. *)
   let key p = if String.ends_with ~suffix:"/" p then Lk.dir p else Lk.file p in
-  let strip_root p =
-    if String.length p > 0 && p.[0] = '/' then
-      String.sub p 1 (String.length p - 1)
-    else p
-  in
   let hooks =
     H.
       {
-        path_to_key = (fun p -> Some (key (strip_root p)));
         evict = F.evict;
         restore = F.ensure_cached;
         changed = (fun _ -> ());
@@ -444,14 +438,13 @@ let setup_client (module C : Conf.S) root staging_prefix =
   let response_error obj =
     match List.assoc_opt "error" obj with Some (`String s) -> s | _ -> "?"
   in
-  let action ?src ?staging ?arg ?target act path =
+  (* Actions about the domain rather than an item in it. *)
+  let action ?arg act =
     request
-      ([("action", `String act); ("path", `String path)]
-      @ (match src with Some s -> [("src", `String s)] | None -> [])
-      @ (match arg with Some s -> [("arg", `String s)] | None -> [])
-      @ (match target with Some s -> [("target", `String s)] | None -> [])
-      @ match staging with Some s -> [("staging", `String s)] | None -> [])
+      (("action", `String act)
+      :: (match arg with Some s -> [("arg", `String s)] | None -> []))
   in
+
   (* A scenario names an item by path, and the daemon is told by reference: this
      side holds the mirror, so it is the side that resolves one. *)
   let ref_of key =
@@ -509,10 +502,6 @@ let setup_client (module C : Conf.S) root staging_prefix =
   in
   let must obj =
     if not (response_ok obj) then failwith ("IPC error: " ^ response_error obj)
-  in
-  let must_action ?src ?staging ?arg ?target act path =
-    let+ obj = action ?src ?staging ?arg ?target act path in
-    must obj
   in
   (* Backend damage for integrity scenarios: resolve a chunk key from the local
      sidecar, then delete or overwrite the remote object behind the daemon's
@@ -621,13 +610,15 @@ let setup_client (module C : Conf.S) root staging_prefix =
     | Rmdir p -> must_by_ref "rmdir" (Lk.dir p)
     | Rename { src; dst } ->
         let* src_ref = ref_of (key src) in
-        must_make ~extra:[("src", `String src_ref)] "rename" (key dst)
+        must_make ~extra:[("ref", `String src_ref)] "rename" (key dst)
     | Delete p -> must_by_ref "delete" (key p)
-    | Evict p -> must_action "evict" ("/" ^ p)
+    | Evict p -> must_by_ref "evict" (key p)
     | EnforceCache -> F.enforce_chunk_cap ()
-    | Restore p -> must_action "restore" ("/" ^ p)
+    | Restore p -> must_by_ref "restore" (key p)
     | RevertVersion { path; version } ->
-        must_action ?arg:version "revert" ("/" ^ path)
+        must_by_ref
+          ?extra:(Option.map (fun v -> [("arg", `String v)]) version)
+          "revert" (key path)
     | Close p -> F.close (key p)
     | ReadRange { path; offset; len } ->
         let buf = Bigarray.Array1.create Bigarray.char Bigarray.c_layout len in
@@ -1217,17 +1208,17 @@ let setup_client (module C : Conf.S) root staging_prefix =
     Lwt.return_unit
   in
   let cursor () =
-    let+ obj = action "cursor" "" in
+    let+ obj = action "cursor" in
     Option.value ~default:"" (get_str obj "cursor")
   in
   let dump_changes ~label ~anchor =
-    let* obj = action ~arg:anchor "changes_since" "" in
+    let* obj = action ~arg:anchor "changes_since" in
     must obj;
     print_ipc (Printf.sprintf "changes_since %s" label) obj;
     Lwt.return_unit
   in
   let stats () =
-    let+ obj = action "stats" "" in
+    let+ obj = action "stats" in
     must obj;
     obj
   in

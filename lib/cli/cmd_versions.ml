@@ -22,17 +22,18 @@ let cmd : unit Cmd.t =
             "With $(b,--revert): the version timestamp to restore (default: \
              most recent).")
   in
-  (* The path names its own domain by sitting under that domain's mount, so
-     [--domain] is only consulted when it was given. *)
+  (* The path names its own domain by sitting under one of that domain's roots,
+     so [--domain] is only consulted when it was given. *)
   let revert path version domain =
-    let socket_path =
-      match domain with
-        | Some _ -> domain_socket ?domain ()
-        | None -> domain_socket_for_path path
-    in
-    match Ipc.action ~socket_path ~path ?arg:version "revert" with
-      | _ -> Printf.printf "Reverted: %s\n" path
-      | exception Failure msg -> Printf.eprintf "Error: %s\n" msg
+    match item_for_path ?domain path with
+      | Error msg -> Printf.eprintf "Error: %s\n" msg
+      | Ok (domain, item) -> (
+          match
+            Ipc.action ~socket_path:(domain_socket ~domain ()) ~domain ~item
+              ?arg:version "revert"
+          with
+            | _ -> Printf.printf "Reverted: %s\n" path
+            | exception Failure msg -> Printf.eprintf "Error: %s\n" msg)
   in
   let list path domain =
     run_lwt

@@ -31,25 +31,37 @@ let frontend_for ?frontend (d : Conf_parsing.domain) : (module Frontend.S) =
           (Printf.sprintf
              "frontend %s is configured but not compiled into this binary" name)
 
-(* A path names its own domain by sitting under that domain's mount, which is
-   how the macOS router resolves one as well. A path under none of them falls
-   back to the default domain, so the answer is a daemon saying it does not know
-   the file rather than a connection to nothing. *)
-let socket_for_path ~paths cfg path =
+(* A path names its own domain by sitting under one of that domain's roots.
+   [domain] restricts the search to one, for a caller that was told which. *)
+let domain_for_path ?domain ~paths cfg path =
   let path =
     if Filename.is_relative path then Filename.concat (Sys.getcwd ()) path
     else path
   in
-  let under mount =
-    let mount = if mount = "/" then "" else mount in
-    String.starts_with ~prefix:(mount ^ "/") path || path = mount
+  let rel root =
+    let root = if root = "/" then "" else root in
+    if path = root then Some ""
+    else if String.starts_with ~prefix:(root ^ "/") path then
+      Some
+        (String.sub path
+           (String.length root + 1)
+           (String.length path - String.length root - 1))
+    else None
   in
-  match
-    List.find_opt
-      (fun d -> under (Conf_parsing.mount_point_of d))
-      cfg.Conf_parsing.domains
-  with
-    | Some d -> Runtime.domain_socket_path paths d.Conf_parsing.name
+  let under d =
+    List.find_map rel (Conf_parsing.roots_of ~data_dir:paths.Runtime.data_dir d)
+  in
+  cfg.Conf_parsing.domains
+  |> List.filter (fun (d : Conf_parsing.domain) ->
+      match domain with Some n -> d.Conf_parsing.name = n | None -> true)
+  |> List.find_map (fun d -> Option.map (fun r -> (d, r)) (under d))
+
+(* A path under no domain's root falls back to the default domain, so the answer
+   is a daemon saying it does not know the file rather than a connection to
+   nothing. *)
+let socket_for_path ~paths cfg path =
+  match domain_for_path ~paths cfg path with
+    | Some (d, _) -> Runtime.domain_socket_path paths d.Conf_parsing.name
     | None | (exception _) -> Domain.socket ~paths cfg
 
 (* For a command that reports rather than acts: every configured domain, never

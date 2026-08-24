@@ -123,6 +123,15 @@ val cursor_key : domain -> Stored_key.t
 val shares_prefix : domain -> string
 
 (** Where fuse mounts [d]: its ["mountPoint"] frontend option, else
-    [~/tsync/<domain>]. Also the root that commands accepting an absolute path
-    under the mount resolve against. *)
+    [~/tsync/<domain>]. *)
 val mount_point_of : domain -> string
+
+(** The CloudStorage folder fileproviderd made for this domain, [None] until it
+    has. Found by looking: the name is the app's and the domain's, mangled the
+    way that daemon decides. *)
+val cloud_storage_dir : domain_name:string -> string option
+
+(** Every root a file of [d] may be named under, in the order they are tried.
+    What turns a path a user typed into a domain and a path within it, so a
+    caller can name the item before it asks anything of the daemon. *)
+val roots_of : data_dir:string -> domain -> string list

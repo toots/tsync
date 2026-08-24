@@ -1,84 +1,13 @@
 external is_dataless : string -> bool = "caml_is_dataless"
 
-(* fileproviderd names the domain's folder "<app name>-<domain displayName>"
-   after dropping characters it will not put in a path ("Jellyfin Media" becomes
-   "TsyncApp-JellyfinMedia"). The rule is undocumented, so compare on letters and
-   digits alone. *)
-
-let alnum s =
-  String.to_seq (String.lowercase_ascii s)
-  |> Seq.filter (fun c -> (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9'))
-  |> String.of_seq
-
-let cloud_storage_root () =
-  Filename.concat (Sys.getenv "HOME") "Library/CloudStorage"
-
-let is_domain_dir ~domain_name dir = alnum dir = alnum ("TsyncApp" ^ domain_name)
-
 (* [None] until the domain is registered and fileproviderd has created its
    folder, which also tells a caller there is nothing local to look at. *)
-let domain_dir ~domain_name =
-  let root = cloud_storage_root () in
-  match Sys.readdir root with
-    | exception _ -> None
-    | dirs ->
-        Array.find_opt (is_domain_dir ~domain_name) dirs
-        |> Option.map (Filename.concat root)
+let domain_dir = Conf_parsing.cloud_storage_dir
 
 module Make (C : Conf.S) (D : Domain_engine.Domain) = struct
   module Lk = Logical_key.Make (C)
   module F = D.F
   module H = D.Ih
-
-  let expand_home path =
-    if String.length path >= 2 && path.[0] = '~' && path.[1] = '/' then
-      Sys.getenv "HOME" ^ String.sub path 1 (String.length path - 1)
-    else path
-
-  let strip_prefix prefix s =
-    let n = String.length prefix in
-    if String.length s >= n && String.sub s 0 n = prefix then (
-      let rest = String.sub s n (String.length s - n) in
-      Some
-        (if String.length rest > 0 && rest.[0] = '/' then
-           String.sub rest 1 (String.length rest - 1)
-         else rest))
-    else None
-
-  let dir_is_own_domain = is_domain_dir ~domain_name:C.domain_name
-
-  (* [own_only] restricts the match to this domain's folder. *)
-  let strip_cloud_storage ~own_only path =
-    let cloud_root = cloud_storage_root () in
-    let found = ref None in
-    (try
-       Array.iter
-         (fun d ->
-           if !found = None && ((not own_only) || dir_is_own_domain d) then
-             found := strip_prefix (Filename.concat cloud_root d) path)
-         (Sys.readdir cloud_root)
-     with _ -> ());
-    !found
-
-  (* The multi-domain router uses this to direct path-based requests
-     (evict/restore/revert) to the right domain. *)
-  let claims_path path =
-    Option.is_some (strip_cloud_storage ~own_only:true (expand_home path))
-
-  let path_to_key path =
-    let path = expand_home path in
-    let rel =
-      match strip_prefix C.data_dir path with
-        | Some r -> r
-        | None -> (
-            match strip_cloud_storage ~own_only:true path with
-              | Some r -> r
-              | None -> (
-                  match strip_cloud_storage ~own_only:false path with
-                    | Some r -> r
-                    | None -> if path = "/" then "" else path))
-    in
-    Lk.file rel
 
   (* Nothing journals a change made straight in the bucket, so no delta can
      bridge an anchor issued beforehand and every enumerator must re-list. The
@@ -148,7 +77,6 @@ module Make (C : Conf.S) (D : Domain_engine.Domain) = struct
   let hooks ~subs =
     H.
       {
-        path_to_key = (fun p -> Some (path_to_key p));
         evict = (fun key -> act ~subs "evict" key);
         restore = (fun key -> act ~subs "restore" key);
         (* [full_resync]'s token is on disk before its event is attempted, which
@@ -183,13 +111,14 @@ module Make (C : Conf.S) (D : Domain_engine.Domain) = struct
   let ok_json fields =
     Yojson.Safe.to_string (`Assoc (("ok", `Bool true) :: fields))
 
-  let handle_preview path =
+  let handle_preview staged =
     let* uploads = F.uploads_in_flight () in
     (* Only a body an upload is holding right now, so a caller cannot name a
        path of its own choosing. *)
       match
         List.find_opt
-          (fun ({ File_ops.body; _ } : File_ops.in_flight) -> body = Some path)
+          (fun ({ File_ops.body; _ } : File_ops.in_flight) ->
+            body = Some staged)
           uploads
       with
       | None ->
@@ -219,12 +148,12 @@ module Make (C : Conf.S) (D : Domain_engine.Domain) = struct
       match Yojson.Safe.from_string line with
         | `Assoc obj when List.assoc_opt "action" obj = Some (`String "preview")
           ->
-            let path =
-              match List.assoc_opt "path" obj with
+            let body =
+              match List.assoc_opt "body" obj with
                 | Some (`String s) -> s
                 | _ -> ""
             in
-            let+ resp = handle_preview path in
+            let+ resp = handle_preview body in
             (resp, `Continue)
         | _ | (exception _) -> core line
 
@@ -242,9 +171,7 @@ module Make (C : Conf.S) (D : Domain_engine.Domain) = struct
 end
 
 type domain_runtime = {
-  prefix : string;
   name : string;
-  claims_path : string -> bool;
   handler :
     string -> (string * [ `Continue | `Stop | `Subscribe of string ]) Lwt.t;
   drain : unit -> unit Lwt.t;
@@ -274,9 +201,7 @@ let start ~served ~socket_path =
             let* () = R.init ~subs () in
             Lwt.return
               {
-                prefix = C.domain_prefix;
                 name = C.domain_name;
-                claims_path = R.claims_path;
                 handler = R.handler ~subs;
                 drain = R.drain;
               })
@@ -336,30 +261,14 @@ let start ~served ~socket_path =
                   | _ -> ""
               in
               let action = get_str "action" in
-              let path = get_str "path" in
               let domain = get_str "domain" in
               if action = "menu" then menu_reply domain_runtimes
               else if action = "menu_stats" then
                 menu_stats_reply domain_runtimes
               else (
                 let runtime_opt =
-                  if domain <> "" then
-                    List.find_opt (fun r -> r.name = domain) domain_runtimes
-                  else (
-                    match action with
-                      | "evict" | "restore" | "revert" ->
-                          (* A filesystem path, not a storage key: resolve it to the
-                          domain whose CloudStorage folder contains it. *)
-                          List.find_opt
-                            (fun r -> r.claims_path path)
-                            domain_runtimes
-                      | _ ->
-                          List.find_opt
-                            (fun r ->
-                              let n = String.length r.prefix in
-                              String.length path >= n
-                              && String.sub path 0 n = r.prefix)
-                            domain_runtimes)
+                  if domain = "" then None
+                  else List.find_opt (fun r -> r.name = domain) domain_runtimes
                 in
                 (* A reference carries no domain and folder ids are unique only
                 within one, so guessing would resolve a request against a store

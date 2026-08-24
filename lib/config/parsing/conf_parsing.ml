@@ -318,3 +318,36 @@ let mount_point_of (d : domain) =
   match opt with
     | Some p when p <> "" -> p
     | _ -> Filename.concat (Sys.getenv "HOME") ("tsync/" ^ d.name)
+
+(* fileproviderd names the domain's folder "<app name>-<domain displayName>"
+   after dropping characters it will not put in a path ("Jellyfin Media" becomes
+   "TsyncApp-JellyfinMedia"). The rule is undocumented, so it is found by
+   looking, comparing on letters and digits alone. *)
+let alnum s =
+  String.to_seq (String.lowercase_ascii s)
+  |> Seq.filter (fun c -> (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9'))
+  |> String.of_seq
+
+let cloud_storage_root () =
+  Filename.concat (Sys.getenv "HOME") "Library/CloudStorage"
+
+let is_domain_dir ~domain_name dir = alnum dir = alnum ("TsyncApp" ^ domain_name)
+
+let cloud_storage_dir ~domain_name =
+  let root = cloud_storage_root () in
+  match Sys.readdir root with
+    | exception _ -> None
+    | dirs ->
+        Array.find_opt (is_domain_dir ~domain_name) dirs
+        |> Option.map (Filename.concat root)
+
+(* Every root a caller may name a file of this domain under, in the order they
+   are tried. The data dir is last and is not per domain, so a path under it
+   answers to the first domain configured — where the two before it name one. *)
+let roots_of ~data_dir (d : domain) =
+  List.filter_map Fun.id
+    [
+      Some (mount_point_of d);
+      cloud_storage_dir ~domain_name:d.name;
+      Some data_dir;
+    ]

@@ -33,10 +33,12 @@ let request ~socket_path fields =
         failwith msg
     | _ -> failwith "unexpected response"
 
-let action ~socket_path ?path ?arg ?domain action =
+let action ~socket_path ?item ?arg ?domain action =
   request ~socket_path
     ([("action", `String action)]
-    @ (match path with Some p -> [("path", `String p)] | None -> [])
+    @ (match item with
+      | Some r -> [("ref", `String (Item_ref.to_string r))]
+      | None -> [])
     @ (match domain with Some d -> [("domain", `String d)] | None -> [])
     @ match arg with Some a -> [("arg", `String a)] | None -> [])
 

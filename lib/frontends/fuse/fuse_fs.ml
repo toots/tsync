@@ -276,7 +276,6 @@ module Make (C : Conf.S) (D : Domain_engine.Domain) = struct
   let ipc_hooks mount_point =
     Ih.
       {
-        path_to_key = (fun p -> Some (key_of_path mount_point p));
         evict = evict_key;
         restore = restore_key;
         changed = invalidate;

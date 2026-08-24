@@ -41,7 +41,6 @@ module Make (C : Conf.S) = struct
       {
         (* The client addresses files by storage key, not by a path in some
            mount it can see, so evict/restore/revert arrive already resolved. *)
-        path_to_key = (fun p -> Option.map Lk.file (Lk.rel_of_string p));
         (* ponytail: single key only. FUSE walks a directory subtree here
            (fuse_fs.ml:184) because a user can point at a folder in Finder;
            lift that if a client ever offers the same gesture. *)
@@ -329,7 +328,7 @@ let commands =
               R.answer ~staging:true
                 (request "rename"
                    [
-                     ("src", `String src);
+                     ("ref", `String src);
                      ("parentRef", `String parent);
                      ("name", `String name);
                    ])

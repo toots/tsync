@@ -12,6 +12,8 @@
    -open
    Tsync_conf
    -open
+   Tsync_conf_parsing
+   -open
    Tsync_ipc_handler
    -open
    Tsync_engine
@@ -46,6 +48,7 @@
    -framework
    Foundation))
  (libraries
+  tsync-libs.conf_parsing
   tsync_logical_key
   tsync-libs.menu
   tsync-libs.sync
