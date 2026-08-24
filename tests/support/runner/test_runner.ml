@@ -397,10 +397,7 @@ let setup_client (module C : Conf.S) root staging_prefix =
       }
   in
   Sq.start
-    ~upload:(fun ~key ~cancel ->
-      match Lk.of_string key with
-        | Some key -> F.upload ~cancel key
-        | None -> Lwt.return_unit)
+    ~upload:(fun ~key ~cancel -> F.upload ~cancel key)
     ~on_upload_done:(fun ~key:_ ->
       (* Mirror the daemons: nudge cache-cap enforcement after each upload. *)
       F.enforce_chunk_cap ());

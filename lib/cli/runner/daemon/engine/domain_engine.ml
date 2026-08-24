@@ -10,7 +10,9 @@ module type Domain = sig
   module F : File_ops.S
   module Ih : Ipc_handler.S
 
-  val start : ?on_upload_done:(key:string -> unit Lwt.t) -> unit -> unit Lwt.t
+  val start :
+    ?on_upload_done:(key:Logical_key.t -> unit Lwt.t) -> unit -> unit Lwt.t
+
   val drain : unit -> unit Lwt.t
   val stats_fields : unit -> (string * Yojson.Safe.t) list
 end
@@ -38,7 +40,7 @@ module type S = sig
   (* Presenting, plus the records this client left behind. For a one-shot
      command, which is alone and so owes both. *)
   val start_queue :
-    ?on_upload_done:(key:string -> unit Lwt.t) -> unit -> unit Lwt.t
+    ?on_upload_done:(key:Logical_key.t -> unit Lwt.t) -> unit -> unit Lwt.t
 
   val converge : on_changed:(string -> unit) -> unit -> unit Lwt.t
 end
@@ -81,12 +83,7 @@ module Make (C : Conf.S) : S = struct
   let start ?(on_upload_done = fun ~key:_ -> Lwt.return_unit) () =
     let* () = init () in
     Sq.start
-      ~upload:(fun ~key ~cancel ->
-        (* The queue holds rendered keys; one this domain cannot read names no
-           file it could upload. *)
-          match Lk.of_string key with
-          | Some key -> F.upload ~cancel key
-          | None -> Lwt.return_unit)
+      ~upload:(fun ~key ~cancel -> F.upload ~cancel key)
       ~on_upload_done:(fun ~key ->
         let* () = on_upload_done ~key in
         F.enforce_chunk_cap ());

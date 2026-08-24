@@ -281,10 +281,10 @@ module Make (J : JOB) = struct
       | Ordered -> t.workers - t.parked
       | Keyed k -> Hashtbl.length k.active
 
-  let in_flight_keys t =
+  let in_flight t =
     match t.topo with
       | Ordered -> []
-      | Keyed k -> Hashtbl.fold (fun key _ acc -> key :: acc) k.active []
+      | Keyed k -> Hashtbl.fold (fun _ e acc -> e.job :: acc) k.active []
 
   let owed t =
     match t.topo with

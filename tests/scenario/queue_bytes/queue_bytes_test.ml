@@ -38,6 +38,11 @@ let settle () =
    as the test needs them to. *)
 let gate, open_gate = Lwt.wait ()
 
+(* A second gate, so the folder rename can be held in flight after the files
+   have drained and the report can be read for what the queue calls it. *)
+let dir_gate, open_dir_gate = Lwt.wait ()
+let renaming = ref false
+
 let post n size =
   let name = Printf.sprintf "f%d.txt" n in
   Sq.post ~entry_key:(J.entry_key ())
@@ -53,14 +58,37 @@ let post n size =
 let report label =
   Printf.printf "%-22s pending=%d uploading=[%s] bytes=%Ld\n" label
     (Sq.pending ())
-    (String.concat " " (List.sort compare (Sq.uploading ())))
+    (String.concat " "
+       (List.sort compare (List.map Logical_key.to_string (Sq.uploading ()))))
     (Sq.pending_bytes ())
+
+(* A folder rename, so the report can be read for the trailing separator: the
+   op says the key names a directory and the queue has to say so too, or the
+   entry it publishes is one a peer replays as a file. *)
+let post_dir_rename () =
+  Sq.post ~entry_key:(J.entry_key ())
+    {
+      Wal.ops =
+        [
+          `Rename
+            {
+              Journal.dst = "photos";
+              src = "pics";
+              size = None;
+              is_dir = true;
+              id = Some "folder-id";
+            };
+        ];
+      state = Wal.Prepared;
+      attempts = 0;
+      last_error = None;
+    }
 
 let () =
   Lwt_main.run
     (let* () = Fs_util.rm_rf root in
      Sq.start
-       ~upload:(fun ~key:_ ~cancel:_ -> gate)
+       ~upload:(fun ~key:_ ~cancel:_ -> if !renaming then dir_gate else gate)
        ~on_upload_done:(fun ~key:_ -> Lwt.return_unit);
 
      report "empty";
@@ -75,6 +103,12 @@ let () =
      Lwt.wakeup_later open_gate ();
      let* () = settle () in
      report "gate open";
+
+     renaming := true;
+     let* () = post_dir_rename () in
+     let* () = settle () in
+     report "folder in flight";
+     Lwt.wakeup_later open_dir_gate ();
 
      let* () = Sq.drain () in
      report "after drain";

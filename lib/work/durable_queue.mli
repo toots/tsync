@@ -184,7 +184,10 @@ module Make (J : JOB) : sig
   val stats : t -> stats
 
   (** Keys running right now, as opposed to merely queued. *)
-  val in_flight_keys : t -> string list
+  (** The jobs a worker is running right now. The jobs themselves, not their
+      keys: a caller wanting the key derives it the way it was derived to post
+      them, rather than taking a rendered one back apart. *)
+  val in_flight : t -> J.t list
 
   (** Distinct keys still owed, running or queued. *)
   val owed : t -> int

@@ -13,8 +13,8 @@ module type S = sig
   (** Files with an active or queued upload. *)
   val pending : unit -> int
 
-  (** Keys of the files a worker is uploading right now. *)
-  val uploading : unit -> string list
+  (** The files a worker is uploading right now. *)
+  val uploading : unit -> Logical_key.t list
 
   (** Bytes still owed: everything queued plus everything in flight. Counted
       whole per file, so a file half sent still counts for its full size. *)
@@ -31,8 +31,8 @@ module type S = sig
   val paused : unit -> bool
 
   val start :
-    upload:(key:string -> cancel:bool ref -> unit Lwt.t) ->
-    on_upload_done:(key:string -> unit Lwt.t) ->
+    upload:(key:Logical_key.t -> cancel:bool ref -> unit Lwt.t) ->
+    on_upload_done:(key:Logical_key.t -> unit Lwt.t) ->
     unit
 
   (** Settles the queue. The cursor the drained uploads owe is
