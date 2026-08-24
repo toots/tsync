@@ -69,13 +69,14 @@ module type S = sig
       if the key is absent or is a regular file. *)
   val readlink : t -> string option Lwt.t
 
-  (** Served from the local manifest mirror: file entries and subdirectory
-      names. Directory mtimes are not tracked locally, hence [None]. *)
+  (** Served from the local manifest mirror: what it holds for each item, and
+      subdirectory names. Directory mtimes are not tracked locally, hence
+      [None]. *)
   val list_children :
-    prefix:t -> (Backend.file_entry list * (string * float option) list) Lwt.t
+    prefix:t -> (Checkout.listed list * (string * float option) list) Lwt.t
 
   (** Recursive file listing under [prefix], served from the local mirror. *)
-  val list_tree : prefix:t -> Backend.file_entry list Lwt.t
+  val list_tree : prefix:t -> Checkout.listed list Lwt.t
 
   (** A handle closed: queue the file for upload if it has staged edits. The
       staged manifest, not an open count, records what is owed, and it survives

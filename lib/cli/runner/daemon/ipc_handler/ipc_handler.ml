@@ -243,34 +243,29 @@ module Make (C : Conf.S) (F : File_ops.S) : S = struct
      manifest, not the file. Resolving gives the logical size/mtime and h1 as the
      etag — the identity stat returns. A dirty file has no clean hash: fall back
      to the backend metadata with an empty etag. *)
-  (* A listing carries rendered keys; one this domain cannot read describes no
-     file it could report on. *)
-  let file_entry_json ~container_id (e : Backend.file_entry) =
-    match Lk.of_string e.key with
-      | None -> Lwt.return_none
-      | Some key -> (
-          (* The slot is taken for the resolution, not for deciding there is
-             none to do: the list is as long as the folder, and only the GETs
-             need bounding. *)
-          Lwt_bounded.use resolve_pool
-          @@ fun () ->
-          let* naming = naming_fields ~container_id key in
-          let+ m = F.published key in
-          match m with
-            | Some m ->
-                Some
-                  (`Assoc
-                     (naming
-                     @ file_fields
-                         ~size:(Int64.to_int (Manifest.size m))
-                         ~mtime:(Manifest.mtime m) ~etag:(Manifest.h1 m)
-                         ~is_uploaded:true ~symlink:(Manifest.symlink m)))
-            | _ ->
-                Some
-                  (`Assoc
-                     (naming
-                     @ file_fields ~size:e.size ~mtime:e.last_modified ~etag:""
-                         ~is_uploaded:true ~symlink:None)))
+  let file_entry_json ~container_id (e : Checkout.listed) =
+    let key = e.key in
+    (* The slot is taken for the resolution, not for deciding there is none to
+       do: the list is as long as the folder, and only the GETs need
+       bounding. *)
+    Lwt_bounded.use resolve_pool @@ fun () ->
+    let* naming = naming_fields ~container_id key in
+    let+ m = F.published key in
+    match m with
+      | Some m ->
+          Some
+            (`Assoc
+               (naming
+               @ file_fields
+                   ~size:(Int64.to_int (Manifest.size m))
+                   ~mtime:(Manifest.mtime m) ~etag:(Manifest.h1 m)
+                   ~is_uploaded:true ~symlink:(Manifest.symlink m)))
+      | _ ->
+          Some
+            (`Assoc
+               (naming
+               @ file_fields ~size:e.size ~mtime:e.mtime ~etag:""
+                   ~is_uploaded:true ~symlink:None))
 
   (* An item under a folder this client holds no id for cannot be named to a
      caller, and both listings answer with what they could name. How many they
@@ -325,15 +320,10 @@ module Make (C : Conf.S) (F : File_ops.S) : S = struct
     let* files = F.list_tree ~prefix in
     let by_parent = Hashtbl.create 16 in
     List.iter
-      (fun (e : Backend.file_entry) ->
-        match Lk.of_string e.key with
-          | None -> ()
-          | Some key ->
-              let parent = Key.parent (Logical_key.path key) in
-              Hashtbl.replace by_parent parent
-                (e
-                :: Option.value (Hashtbl.find_opt by_parent parent) ~default:[]
-                ))
+      (fun (entry : Checkout.listed) ->
+        let parent = Key.parent (Logical_key.path entry.key) in
+        Hashtbl.replace by_parent parent
+          (entry :: Option.value (Hashtbl.find_opt by_parent parent) ~default:[]))
       files;
     let+ groups =
       Lwt_list.map_s
@@ -937,12 +927,21 @@ module Make (C : Conf.S) (F : File_ops.S) : S = struct
                        mirror already says so, and what this buys is only that
                        the frontend looks again. *)
                     | "changed" ->
+                        (* A key the sender names and this domain cannot read
+                           means the two disagree about the namespace, which is
+                           worth hearing about rather than a shorter list. *)
+                        let named k =
+                          match Lk.of_string k with
+                            | Some key -> Some key
+                            | None ->
+                                Log.warn "changed: not this domain's key %s" k;
+                                None
+                        in
                         List.iter hooks.changed
                           (match List.assoc_opt "keys" obj with
                             | Some (`List l) ->
                                 List.filter_map
-                                  (function
-                                    | `String k -> Lk.of_string k | _ -> None)
+                                  (function `String k -> named k | _ -> None)
                                   l
                             | _ -> []);
                         Lwt.return (ok_json [])

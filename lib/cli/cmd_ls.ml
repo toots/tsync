@@ -56,14 +56,11 @@ let cmd : unit Cmd.t =
        let module Mfs = Staged_manifest.Make (C) in
        let module B = (val C.store : Backend.S) in
        let* files, subdirs = Mf.list_children ~prefix () in
-       let file_name (e : Backend.file_entry) =
-         match Lk.of_string e.key with
-           | Some k -> Logical_key.path k
-           | None -> e.key
-       in
        let items =
          List.map (fun d -> (d, `Dir d)) subdirs
-         @ List.map (fun e -> (file_name e, `File e)) files
+         @ List.map
+             (fun (e : Checkout.listed) -> (Logical_key.path e.key, `File e))
+             files
        in
        let items =
          List.sort
@@ -76,8 +73,12 @@ let cmd : unit Cmd.t =
          (fun (name, item) ->
            match item with
              | `Dir _ -> Printf.printf "dir    %s/\n" name
-             | `File (e : Backend.file_entry) ->
-                 let cached = F.is_local (Conf.locality (module C)) e.key in
+             | `File (e : Checkout.listed) ->
+                 let cached =
+                   F.is_local
+                     (Conf.locality (module C))
+                     (Logical_key.to_string e.key)
+                 in
                  Printf.printf "%s  %s  %d bytes\n"
                    (if cached then "local" else "cloud")
                    name e.size)

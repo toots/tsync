@@ -117,8 +117,10 @@ module Make (C : Conf.S) : sig
   (** Remove empty directories left in the tree. *)
   val prune_dirs : unit -> unit Lwt.t
 
-  (** Staged files as listing entries. A locally created file has no published
-      sidecar, so the published tree alone would not list it; for one that does,
-      the staged size and mtime are the current ones. *)
-  val entries : rel_dir:string -> deep:bool -> Backend.file_entry list Lwt.t
+  (** The staged files under [rel_dir], each with what is staged for it. A
+      locally created file has no published sidecar, so the published tree alone
+      would not list it; for one that does, the staged size and mtime are the
+      current ones. *)
+  val entries :
+    rel_dir:string -> deep:bool -> (Logical_key.t * staged) list Lwt.t
 end

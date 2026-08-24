@@ -619,9 +619,7 @@ let setup_client (module C : Conf.S) root staging_prefix =
         let prefix = Lk.dir p in
         let+ files, dirs = F.list_children ~prefix in
         let names =
-          List.map
-            (fun (e : Backend.file_entry) -> Filename.basename e.Backend.key)
-            files
+          List.map (fun (e : Checkout.listed) -> Logical_key.leaf e.key) files
           @ List.map (fun (d, _) -> d ^ "/") dirs
         in
         Printf.printf "  names %s = [%s]\n"

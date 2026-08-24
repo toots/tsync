@@ -6,6 +6,8 @@ open Manifest
 
 open Lwt.Syntax
 
+type listed = { key : Logical_key.t; size : int; mtime : float }
+
 let dir ~cache_root domain_name =
   Cache_layout.manifests_dir ~cache_root domain_name
 
@@ -231,13 +233,23 @@ module Make (C : Conf.S) = struct
   (* Staged entries win for the same key.
      ponytail: quadratic in (staged × published); staged files are the handful
      currently being written, so make it a table only if that stops being true. *)
+  let staged_listed ~rel_dir ~deep =
+    let+ staged = Sm.entries ~rel_dir ~deep in
+    List.map
+      (fun (key, (st : Staged_manifest.staged)) ->
+        {
+          key;
+          size = Int64.to_int st.Staged_manifest.s_size;
+          mtime = st.Staged_manifest.s_mtime;
+        })
+      staged
+
+  (* Staged wins: what is owed is what a reader will get next. *)
   let merge_entries published staged =
-    let keys =
-      List.map (fun (e : Backend.file_entry) -> e.Backend.key) staged
-    in
     staged
     @ List.filter
-        (fun (e : Backend.file_entry) -> not (List.mem e.Backend.key keys))
+        (fun p ->
+          not (List.exists (fun s -> Logical_key.equal s.key p.key) staged))
         published
 
   (* Either tree may be missing: the published one right after a full resync
@@ -256,8 +268,8 @@ module Make (C : Conf.S) = struct
 
   let list_children ~prefix () =
     let rel, dir = dir_of_prefix prefix in
-    let* staged = Sm.entries ~rel_dir:rel ~deep:false in
-    let child_base = Logical_key.to_string (Lk.dir rel) in
+    let* staged = staged_listed ~rel_dir:rel ~deep:false in
+    let child_dir = Lk.dir rel in
     let* names = readdir_opt dir in
     let+ files, dirs =
       Lwt_list.fold_left_s
@@ -273,13 +285,12 @@ module Make (C : Conf.S) = struct
               let+ m = read_clean path in
               match m with
                 | Some m ->
-                    ( Backend.
-                        {
-                          key = child_base ^ real_file_name name m;
-                          size = Int64.to_int (size m);
-                          last_modified = mtime m;
-                          etag = None;
-                        }
+                    ( {
+                        key =
+                          Logical_key.file_in child_dir (real_file_name name m);
+                        size = Int64.to_int (size m);
+                        mtime = mtime m;
+                      }
                       :: files,
                       dirs )
                 | None -> (files, dirs)))
@@ -293,17 +304,15 @@ module Make (C : Conf.S) = struct
     let* published =
       fold_files ~start ~rel
         (fun acc rel leaf m ->
-          Backend.
-            {
-              key = Logical_key.to_string (Lk.file (Key.join rel leaf));
-              size = Int64.to_int (size m);
-              last_modified = mtime m;
-              etag = None;
-            }
+          {
+            key = Lk.file (Key.join rel leaf);
+            size = Int64.to_int (size m);
+            mtime = mtime m;
+          }
           :: acc)
         []
     in
-    let+ staged = Sm.entries ~rel_dir:rel ~deep:true in
+    let+ staged = staged_listed ~rel_dir:rel ~deep:true in
     merge_entries published staged
 
   (* Published or only staged, unsorted. *)

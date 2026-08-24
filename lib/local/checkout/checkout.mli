@@ -8,6 +8,15 @@
     store of its own. This module is where the two are put together: it owns the
     published tree, and the overlay is the only thing that consults both. *)
 
+(** What the mirror knows is in a folder: the domain's name for an item, and the
+    size and mtime held for it.
+
+    Not a {!Backend.file_entry}: a store's listing answers with the key an
+    object is filed under and its identity for the bytes, neither of which a
+    mirror of names has — its keys are hashed, and it is asked what a folder
+    contains, not what a bucket does. *)
+type listed = { key : Logical_key.t; size : int; mtime : float }
+
 (** True when [key] has unsynced edits, or the chunk store holds every cache
     chunk its sidecar's chunks group into. Synchronous, for the CLI listing;
     [false] for a partly cached file. *)
@@ -51,12 +60,10 @@ module Make (C : Conf.S) : sig
       staged file's own size and mtime win — it is listed even when nothing of
       it has been published. *)
   val list_children :
-    prefix:Logical_key.t ->
-    unit ->
-    (Backend.file_entry list * string list) Lwt.t
+    prefix:Logical_key.t -> unit -> (listed list * string list) Lwt.t
 
   (** Every file entry under [prefix], recursively. *)
-  val list_tree : prefix:Logical_key.t -> unit -> Backend.file_entry list Lwt.t
+  val list_tree : prefix:Logical_key.t -> unit -> listed list Lwt.t
 
   (** Domain-relative real path of every file the domain holds locally,
       published or only staged (unsorted). *)

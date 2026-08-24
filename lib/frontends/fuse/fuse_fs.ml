@@ -214,14 +214,13 @@ module Make (C : Conf.S) (D : Domain_engine.Domain) = struct
       let prefix = Lk.dir (Logical_key.path key) in
       let* files = F.list_tree ~prefix in
       Lwt_list.iter_s
-        (fun (e : Backend.file_entry) ->
+        (fun (e : Checkout.listed) ->
           Lwt.catch
-            (fun () ->
-              match Lk.of_string e.key with
-                | Some k -> f k
-                | None -> Lwt.return_unit)
+            (fun () -> f e.key)
             (fun exn ->
-              Log.err "%s %s: %s" what e.key (Printexc.to_string exn);
+              Log.err "%s %s: %s" what
+                (Logical_key.to_string e.key)
+                (Printexc.to_string exn);
               Lwt.return_unit))
         files)
 
@@ -347,8 +346,7 @@ module Make (C : Conf.S) (D : Domain_engine.Domain) = struct
               in
               let names =
                 List.map
-                  (fun (e : Backend.file_entry) ->
-                    Filename.basename e.Backend.key)
+                  (fun (e : Checkout.listed) -> Logical_key.leaf e.key)
                   files
                 @ List.map fst dirs
               in

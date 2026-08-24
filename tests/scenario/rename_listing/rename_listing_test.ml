@@ -65,10 +65,7 @@ let staged ~name =
 let listing () =
   let+ files, dirs = Mf.list_children ~prefix:Lk.root () in
   let names =
-    List.map
-      (fun (e : Backend.file_entry) ->
-        Key.leaf ~domain_prefix:C.domain_prefix e.Backend.key)
-      files
+    List.map (fun (e : Checkout.listed) -> Logical_key.leaf e.key) files
   in
   List.iter (Printf.printf "  dir  %s\n") (List.sort compare dirs);
   List.iter (Printf.printf "  file %s\n") (List.sort compare names)

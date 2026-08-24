@@ -292,14 +292,6 @@ module Make (C : Conf.S) = struct
      not list it; for one that does, the staged size and mtime are current. *)
   let entries ~rel_dir ~deep =
     fold ~rel_dir ~deep
-      (fun acc rel leaf st ->
-        Backend.
-          {
-            key = Logical_key.to_string (Lk.file (Key.join rel leaf));
-            size = Int64.to_int st.s_size;
-            last_modified = st.s_mtime;
-            etag = None;
-          }
-        :: acc)
+      (fun acc rel leaf st -> (Lk.file (Key.join rel leaf), st) :: acc)
       []
 end
