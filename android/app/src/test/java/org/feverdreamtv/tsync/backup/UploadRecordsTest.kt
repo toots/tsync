@@ -86,9 +86,21 @@ class UploadRecordsTest {
     }
 
     @Test
-    fun `remembered folders come back and do not duplicate`() {
-        records.rememberDirs(setOf("a/", "b/"))
-        records.rememberDirs(setOf("b/", "c/"))
-        assertEquals(setOf("a/", "b/", "c/"), records.knownDirs())
+    fun `remembered folders come back by the path each holds`() {
+        records.rememberDirs(mapOf("a" to "d:1", "b" to "d:2"))
+        records.rememberDirs(mapOf("b" to "d:2", "c" to "d:3"))
+        assertEquals(
+            mapOf("a" to "d:1", "b" to "d:2", "c" to "d:3"),
+            records.knownDirs()
+        )
+    }
+
+    /** A folder keeps its reference across a rename, but a path can be given to
+     *  a folder that was made again: the newer reference is the live one. */
+    @Test
+    fun `a path remembered twice keeps the newer reference`() {
+        records.rememberDirs(mapOf("a" to "d:1"))
+        records.rememberDirs(mapOf("a" to "d:9"))
+        assertEquals(mapOf("a" to "d:9"), records.knownDirs())
     }
 }
