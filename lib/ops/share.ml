@@ -165,7 +165,7 @@ module Make (C : Conf.S) = struct
               (* A filesystem backend lists the directories holding the cache,
                  and they outlive their contents: counting them would report a
                  delete that took nothing and never settle. *)
-              (not (Key.is_dir e.key))
+              (not (Stored_key.is_dir_key e.key))
               && (String.starts_with ~prefix:cache_prefix e.key
                  || is_loose_artifact e.key))
             entries

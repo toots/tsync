@@ -57,7 +57,7 @@ module Make (C : Conf.S) = struct
       match size_there with
         | None -> Some `Missing
         | Some size ->
-            if Key.is_dir entry.key then None
+            if Stored_key.is_dir_key entry.key then None
             else if size <> entry.size then Some `Wrong_size
             else None
     in
@@ -67,7 +67,7 @@ module Make (C : Conf.S) = struct
           (* Taken here rather than around the whole entry, so the body budget is
              held only while a body exists. *)
           Lwt_bounded.use copy_pool (fun () ->
-              if Key.is_dir entry.key then
+              if Stored_key.is_dir_key entry.key then
                 let+ () = Dst.put ~key:entry.key ~data:Bigstring.empty () in
                 Some (reason, 0)
               else
@@ -100,10 +100,7 @@ module Make (C : Conf.S) = struct
     (* A folder index records the versions the store that built it reported,
        so a copy matches nothing where it lands; it is also a duplicate of every
        manifest body in its folder, which would transfer the namespace twice. *)
-    if
-      Stored_key.is_temp_key e.Backend.key
-      || Stored_key.is_index_key e.Backend.key
-    then Lwt.return_unit
+    if Stored_key.is_internal e.Backend.key then Lwt.return_unit
     else (
       bytes := Int64.add !bytes (Int64.of_int e.Backend.size);
       Listing.add listing (record_entry e))

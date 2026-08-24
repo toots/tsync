@@ -31,7 +31,7 @@ module Make (C : Conf.S) (L : Layout.S) = struct
     Option.map
       (fun bk ->
         C.versions_prefix
-        ^ Key.strip_prefix ~domain_prefix:C.domain_prefix bk
+        ^ Stored_key.strip_domain ~domain_prefix:C.domain_prefix bk
         ^ "/")
       bk
 

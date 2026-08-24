@@ -58,7 +58,7 @@ module Make (C : Conf.S) = struct
           (* As in {!expire}: an empty trash lists as its own directory key,
              which holds no marker and cannot be fetched on a filesystem
              store. *)
-          if Key.is_dir e.Backend.key then Lwt.return_none
+          if Stored_key.is_dir_key e.Backend.key then Lwt.return_none
           else
             let+ data = B.get ~key:e.Backend.key () in
             let data = Bigstring.to_string data in
@@ -96,8 +96,10 @@ module Make (C : Conf.S) = struct
         (fun acc (e : Backend.file_entry) ->
           (* An empty trash lists as its own directory key, which holds no
              marker and cannot be fetched on a filesystem store. *)
-          if Key.is_dir e.Backend.key || e.Backend.last_modified >= cutoff then
-            Lwt.return acc
+          if
+            Stored_key.is_dir_key e.Backend.key
+            || e.Backend.last_modified >= cutoff
+          then Lwt.return acc
           else
             let* data = B.get ~key:e.key () in
             match Folder.marker_of_string (Bigstring.to_string data) with

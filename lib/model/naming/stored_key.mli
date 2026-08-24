@@ -31,9 +31,28 @@ val is_index_key : string -> bool
     real one. Reserved names all share the [.tsync-] sentinel. *)
 val is_temp_key : string -> bool
 
+(** A namespace listed as itself, which every store does for a folder: it names
+    no object, so a reader wanting bodies passes over it and a copy writes an
+    empty one to keep the folder. *)
+val is_dir_key : string -> bool
+
+(** The folder a namespace key names, which is the id {!child_key} filed its
+    children under. *)
+val folder_id_of : string -> string
+
+(** A key with the domain root taken off, for a caller re-rooting it elsewhere —
+    a version of a manifest is the manifest's own key under another prefix, so
+    the two share the folder id a rename does not touch. Unchanged for a key
+    that does not carry the prefix. *)
+val strip_domain : domain_prefix:string -> string -> string
+
+(** The store's own bookkeeping rather than anything a domain named — a write in
+    flight under a staging name, or a folder's index of its children. Nothing
+    outside this store should be given one. *)
+val is_internal : string -> bool
+
 (** What a listing of a namespace offers that is actually one of the folder's
-    children. An empty namespace lists as its own directory key, a write in
-    flight lists under a staging name, and the index caches the children rather
-    than being one: none reads as a manifest, and each caller deciding that for
-    itself is how three of them came to decide it differently. *)
+    children: neither the namespace itself nor the store's bookkeeping. A copy
+    of a namespace asks {!is_internal} instead, the directory key being part of
+    what it has to carry. *)
 val is_child_object : string -> bool

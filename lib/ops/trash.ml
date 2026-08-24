@@ -15,7 +15,8 @@ module Make (C : Conf.S) = struct
       B.list_prefix ~prefix:(C.domain_prefix ^ Stored_key.trash_id ^ "/") ()
     in
     List.filter
-      (fun (e : Backend.file_entry) -> not (Key.is_dir e.Backend.key))
+      (fun (e : Backend.file_entry) ->
+        not (Stored_key.is_dir_key e.Backend.key))
       entries
 
   let list () =

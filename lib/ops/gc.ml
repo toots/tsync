@@ -244,7 +244,7 @@ module Make (C : Conf.S) = struct
      raises rather than reporting "references nothing", which would let the run
      discard the file's chunks. *)
   let referenced_chunks key =
-    if Key.is_dir key then Lwt.return []
+    if Stored_key.is_dir_key key then Lwt.return []
     else
       let+ data = B.get ~key () in
       let data = Bigstring.to_string data in

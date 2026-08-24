@@ -196,7 +196,7 @@ let () =
        List.sort compare
          (List.filter_map
             (fun (e : Backend.file_entry) ->
-              if Key.is_dir e.key then None else Some e.key)
+              if Stored_key.is_dir_key e.key then None else Some e.key)
             left)
      in
      (* The tokens published above, and nothing else. *)

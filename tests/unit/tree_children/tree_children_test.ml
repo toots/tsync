@@ -75,7 +75,7 @@ let () =
         store stopped listing one would prove nothing. *)
      check "the store still lists the namespace as a directory key"
        (List.exists
-          (fun (e : Backend.file_entry) -> Key.is_dir e.Backend.key)
+          (fun (e : Backend.file_entry) -> Stored_key.is_dir_key e.Backend.key)
           listed);
      let* children = Tree.children ~folder_id:emptied () in
      check "and it yields no children" (children = []);

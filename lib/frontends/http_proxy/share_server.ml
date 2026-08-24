@@ -174,7 +174,7 @@ module Make (C : Conf.S) = struct
   (* A subdirectory's [key] is its own namespace, so [resolve] descends by
      handing it straight back. *)
   let children ns =
-    let folder_id = Filename.basename (Key.chop_slash ns) in
+    let folder_id = Stored_key.folder_id_of ns in
     let+ entries =
       Tree.children ~on_unusable:(`Skip (fun _ _ -> ())) ~folder_id ()
     in
