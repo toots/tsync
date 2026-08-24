@@ -13,35 +13,18 @@ type file_entry = {
 }
 
 exception Backend_error of string
-exception Cancelled
 exception Not_writable
-
-type kind = Transient | Permanent
-
-exception Failed of { kind : kind; op : string; detail : string }
-
-let failed ~kind ~op detail = Failed { kind; op; detail }
-
-let string_of_kind = function
-  | Transient -> "transient"
-  | Permanent -> "permanent"
 
 (* Both spellings, from both stores, in one list: a driver deciding this for
    itself is how two of them came to disagree about what a bulk delete reporting
    a missing key means. *)
 let absent_code = function "NoSuchKey" | "NotFound" -> true | _ -> false
 
+(* The two a store answers for itself: a missing chunk or a truncated body is a
+   considered answer, not a hiccup. Everything else is {!Retry}'s to judge. *)
 let classify = function
-  | Failed { kind; _ } -> kind
-  | Not_writable -> Permanent
-  (* A store's considered answer — a missing chunk, a truncated body — not a
-     hiccup. *)
-  | Backend_error _ -> Permanent
-  | _ -> Transient
-
-let reason = function
-  | Failed { detail; _ } -> detail
-  | exn -> Printexc.to_string exn
+  | Not_writable | Backend_error _ -> Retry.Permanent
+  | exn -> Retry.classify exn
 
 (* These reach users verbatim through [Printexc.to_string], whose default
    printer spells an exception with its full module path — the internal library
@@ -50,32 +33,29 @@ let () =
   Printexc.register_printer (function
     | Not_writable ->
         Some "no writable backend: every backend in this domain is \"readOnly\""
-    | Failed { kind; op; detail } ->
-        Some (Printf.sprintf "%s: %s (%s)" op detail (string_of_kind kind))
     | Backend_error msg -> Some (Printf.sprintf "Backend.Backend_error(%S)" msg)
-    | Cancelled -> Some "Backend.Cancelled"
     | _ -> None)
 
 let default_attempts = 8
 
-let backoff ~base ~cap attempt =
-  Float.min cap (base *. (2. ** float_of_int (min 10 (attempt - 1))))
-
+(* Bound to {!classify} here because a driver passing one per call would
+   eventually pass none, and retry a failure the store already called
+   permanent. *)
 let with_retry ?(max_attempts = default_attempts) ~name ~op f =
   let rec go attempt =
     Lwt.catch f (function
-      | Cancelled as exn -> Lwt.fail exn
-      | exn when attempt < max_attempts && classify exn = Transient ->
+      | Retry.Cancelled as exn -> Lwt.fail exn
+      | exn when attempt < max_attempts && classify exn = Retry.Transient ->
           let delay =
-            backoff ~base:0.5 ~cap:20. attempt *. (0.5 +. Random.float 1.0)
+            Retry.backoff ~base:0.5 ~cap:20. attempt *. (0.5 +. Random.float 1.0)
           in
           (* Timeouts are counted apart from the retries they are part of: a
              link that answers slowly and one that stops answering are the same
              number of retries and very different problems. *)
           Metrics.add_retry 1;
           if exn = Lwt_unix.Timeout then Metrics.add_timeout 1;
-          Log.warn "%s %s: %s; retrying (%d/%d) in %.1fs" name op (reason exn)
-            attempt max_attempts delay;
+          Log.warn "%s %s: %s; retrying (%d/%d) in %.1fs" name op
+            (Retry.reason exn) attempt max_attempts delay;
           Lwt.bind (Lwt_unix.sleep delay) (fun () -> go (attempt + 1))
       | exn ->
           Metrics.add_failure 1;

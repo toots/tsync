@@ -76,7 +76,7 @@ module Make (C : Conf.S) = struct
                 | `Unverified -> `Unverified m.Backend.name
                 | `Entries es -> `Entries es)
             (fun exn ->
-              Lwt.return (`Unreachable (m.Backend.name, Backend.reason exn))))
+              Lwt.return (`Unreachable (m.Backend.name, Retry.reason exn))))
         C.members
     in
     List.fold_left

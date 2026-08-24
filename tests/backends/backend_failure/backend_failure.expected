@@ -9,5 +9,5 @@ unix error                   transient
 with_retry (max 3)
 transient                    3 attempt(s), raised HTTP 503
 permanent                    1 attempt(s), raised forbidden
-cancelled                    1 attempt(s), raised Backend.Cancelled
+cancelled                    1 attempt(s), raised Retry.Cancelled
 unknown exception            3 attempt(s), raised Failure("something new")

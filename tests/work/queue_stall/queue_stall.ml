@@ -34,7 +34,7 @@ let stalls () =
     (Log.recent ())
 
 let queue ~name ~dir ~run =
-  Q.ordered ~name
+  Q.ordered ~name ~classify:Retry.classify
     ~log:(Q.Records.create ~dir:(Filename.concat root dir))
     ~poison:Durable_queue.Drop ~run ()
 

@@ -6,7 +6,7 @@ type record = {
   ops : Journal.op list;
   state : state;
   attempts : int;
-  last_error : (Backend.kind * string) option;
+  last_error : (Retry.kind * string) option;
 }
 
 let string_of_state = function
@@ -23,8 +23,8 @@ let state_of_string = function
   | _ -> Intent
 
 let kind_of_string = function
-  | "permanent" -> Backend.Permanent
-  | _ -> Backend.Transient
+  | "permanent" -> Retry.Permanent
+  | _ -> Retry.Transient
 
 let to_json r =
   `Assoc
@@ -41,7 +41,7 @@ let to_json r =
             ( "lastError",
               `Assoc
                 [
-                  ("kind", `String (Backend.string_of_kind kind));
+                  ("kind", `String (Retry.string_of_kind kind));
                   ("detail", `String detail);
                 ] );
           ])

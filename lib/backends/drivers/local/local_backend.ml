@@ -94,12 +94,12 @@ let of_errno ~op key e =
     match e with
       | Unix.EIO | Unix.ENOSPC | Unix.EMFILE | Unix.ENFILE | Unix.EAGAIN
       | Unix.EINTR | Unix.EBUSY ->
-          Backend.Transient
-      | _ -> Backend.Permanent
+          Retry.Transient
+      | _ -> Retry.Permanent
   in
   (* The store's name is in [op]: a domain has several backends, and which one
      failed is the first thing a report needs. *)
-  Backend.failed ~kind ~op:("local " ^ op) (key ^ ": " ^ Unix.error_message e)
+  Retry.failed ~kind ~op:("local " ^ op) (key ^ ": " ^ Unix.error_message e)
 
 let make ?(verify_writes = true) ~root () : (module Backend.S) =
   let walk_slots = Lwt_bounded.create ~max:walk_fanout () in

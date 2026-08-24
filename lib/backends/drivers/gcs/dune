@@ -2,6 +2,8 @@
  (flags
   (:standard
    -open
+   Tsync_retry
+   -open
    Tsync_chunk_integrity
    -open
    Tsync_field_spec
@@ -17,6 +19,7 @@
  (private_modules gcs_auth)
  (library_flags (-linkall))
  (libraries
+  tsync_retry
   tsync_chunk_integrity
   tsync-libs.field_spec
   tsync-libs.bigstring

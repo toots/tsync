@@ -10,8 +10,8 @@
 
     Work owed is kept on disk ({!Durable_queue}), so an offline target catches
     up when the link returns rather than needing a resync. A job is retried for
-    as long as the failure is {!Backend.Transient} and dropped on a permanent
-    one, which marks the target degraded — the one state needing
+    as long as the failure is {!Retry.Transient} and dropped on a permanent one,
+    which marks the target degraded — the one state needing
     [tsync mirror --source <main>] rather than patience.
 
     A queued job names a key and carries no body, the worker re-reading from the

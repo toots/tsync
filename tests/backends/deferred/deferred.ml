@@ -101,8 +101,7 @@ let flaky ~fails ~root : (module Backend.S) * (unit -> int) =
         if !left > 0 then begin
           decr left;
           incr refused;
-          Lwt.fail
-            (Backend.failed ~kind:Backend.Transient ~op:"put" "link is down")
+          Lwt.fail (Retry.failed ~kind:Retry.Transient ~op:"put" "link is down")
         end
         else Real.put ~key ~data ()
     end),
@@ -124,7 +123,7 @@ let switchable ~up ~root : (module Backend.S) =
 
     let check op =
       if !up then Lwt.return_unit
-      else Lwt.fail (Backend.failed ~kind:Backend.Transient ~op "link is down")
+      else Lwt.fail (Retry.failed ~kind:Retry.Transient ~op "link is down")
 
     let put ~key ~data () =
       let* () = check "put" in

@@ -217,8 +217,7 @@ let rec make ~(mains : sub list)
            same way as a 404 from one store. *)
         | None ->
             Lwt.fail
-              (Backend.failed ~kind:Backend.Permanent ~op:"get"
-                 ("not found: " ^ key))
+              (Retry.failed ~kind:Retry.Permanent ~op:"get" ("not found: " ^ key))
 
     (* An empty listing is a real answer, so only an unreachable store moves on.
        Listings are never merged: one store's view wins. *)

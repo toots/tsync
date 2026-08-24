@@ -199,7 +199,7 @@ let make ?(resume = false) ?chunk_from_prefix ~name ~backend ~source
         (* A permanent failure is dropped: the same request would be refused
            again, and every later rename would queue behind it forever. The
            target is degraded from then on and needs tsync mirror. *)
-      ~poison:Durable_queue.Drop ~run ()
+      ~classify:Backend.classify ~poison:Durable_queue.Drop ~run ()
   in
   Q.start ~recover:resume queue;
   (* Chunk pushes are not owed — a manifest job fetches whatever is missing — but

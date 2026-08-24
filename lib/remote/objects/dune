@@ -6,6 +6,8 @@
  (flags
   (:standard
    -open
+   Tsync_retry
+   -open
    Tsync_logical_key
    -open
    Tsync_history
@@ -46,6 +48,7 @@
  (name tsync_remote)
  (public_name tsync-libs.remote)
  (libraries
+  tsync_retry
   tsync_logical_key
   tsync_history
   tsync_staged

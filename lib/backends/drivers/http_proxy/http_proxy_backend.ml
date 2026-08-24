@@ -1,6 +1,6 @@
 open Lwt.Syntax
 
-exception Cancelled = Backend.Cancelled
+exception Cancelled = Retry.Cancelled
 
 (* A stall detector, not a latency budget: a pooled connection whose peer went
    away without a FIN leaves its request pending forever, and [call_retry] only

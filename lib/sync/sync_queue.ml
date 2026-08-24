@@ -112,7 +112,7 @@ module Make (C : Conf.S) : S = struct
             (function
               (* Superseded, or the staged bytes are gone: nothing is owed any
                  more, so the record goes rather than being retried. *)
-              | Backend.Cancelled | Unix.Unix_error (Unix.ENOENT, _, _) ->
+              | Retry.Cancelled | Unix.Unix_error (Unix.ENOENT, _, _) ->
                   abandon ()
               | exn ->
                   (* The record is never dropped on a real failure, or the file
@@ -120,7 +120,7 @@ module Make (C : Conf.S) : S = struct
                      upload is owed. *)
                   let* () =
                     W.note_failure entry_key (Backend.classify exn)
-                      (Backend.reason exn)
+                      (Retry.reason exn)
                   in
                   Lwt.fail exn)
 
@@ -128,7 +128,8 @@ module Make (C : Conf.S) : S = struct
      reports as stuck, so a permanent failure has to leave it behind. *)
   let queue =
     Q.keyed ~workers:(max 1 C.max_uploads) ~weight:size_of ~name:"upload"
-      ~log:W.log ~key:key_of ~poison:Durable_queue.Stop ~run ()
+      ~log:W.log ~key:key_of ~classify:Backend.classify
+      ~poison:Durable_queue.Stop ~run ()
 
   (* [Prepared]: whatever staged data the caller read is what this names, so the
      upload is owed from here on. *)

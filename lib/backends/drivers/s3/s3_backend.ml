@@ -1,7 +1,7 @@
 open Lwt.Syntax
 module S3 = Aws_s3_lwt.S3
 
-exception Cancelled = Backend.Cancelled
+exception Cancelled = Retry.Cancelled
 
 type t = {
   bucket : string;
@@ -41,8 +41,8 @@ let is_transient = function
   | S3.Redirect _ | S3.Unknown _ | S3.Forbidden | S3.Not_found -> false
 
 let failed op e =
-  Backend.failed
-    ~kind:(if is_transient e then Backend.Transient else Backend.Permanent)
+  Retry.failed
+    ~kind:(if is_transient e then Retry.Transient else Retry.Permanent)
     ~op (string_of_error e)
 
 (* Raises on a transient error so the shared loop retries it; every other
@@ -185,7 +185,7 @@ let delete_multi t keys =
           | [] -> ()
           | first :: _ as refused ->
               raise
-                (Backend.failed ~kind:Backend.Transient ~op:"delete_multi"
+                (Retry.failed ~kind:Retry.Transient ~op:"delete_multi"
                    (Printf.sprintf
                       "%d of %d object(s) not deleted; first was %s: %s (%s)"
                       (List.length refused) (List.length here)

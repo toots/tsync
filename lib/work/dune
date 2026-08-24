@@ -2,19 +2,19 @@
  (flags
   (:standard
    -open
+   Tsync_retry
+   -open
    Tsync_metrics
    -open
    Tsync_log
    -open
    Tsync_local_io
    -open
-   Tsync_lwt_unix
-   -open
-   Tsync_backend_register))
+   Tsync_lwt_unix))
  (name tsync_work)
  (public_name tsync-libs.work)
  (libraries
-  tsync_backend_register
+  tsync_retry
   tsync_metrics
   tsync_local_io
   tsync_log

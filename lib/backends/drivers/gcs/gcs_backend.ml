@@ -5,7 +5,7 @@
 open Lwt.Syntax
 module Auth = Gcs_auth
 
-exception Cancelled = Backend.Cancelled
+exception Cancelled = Retry.Cancelled
 
 type t = {
   client : Http_client.t;
@@ -262,7 +262,7 @@ let delete_multi t keys =
           | [] -> ()
           | (code_, key) :: _ as failed ->
               raise
-                (Backend.failed ~kind:Backend.Transient ~op:"delete_multi"
+                (Retry.failed ~kind:Retry.Transient ~op:"delete_multi"
                    (Printf.sprintf
                       "%d of %d object(s) not deleted; first was %s: %s"
                       (List.length failed) (List.length here) key code_)));

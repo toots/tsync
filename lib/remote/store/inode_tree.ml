@@ -136,7 +136,7 @@ module Make (C : Conf.S) = struct
        not one act, and to a walk that is a child it could not read rather than
        one that was never there. *)
     let vanished bkey =
-      Backend.failed ~kind:Backend.Permanent ~op:"get" ("not found: " ^ bkey)
+      Retry.failed ~kind:Retry.Permanent ~op:"get" ("not found: " ^ bkey)
     in
     let in_one_batch () =
       let* index = read_index ~slots listed in

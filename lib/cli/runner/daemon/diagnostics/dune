@@ -2,6 +2,8 @@
  (flags
   (:standard
    -open
+   Tsync_retry
+   -open
    Tsync_logical_key
    -open
    Tsync_chunks
@@ -36,6 +38,7 @@
  (name tsync_diagnostics)
  (public_name tsync-libs.diagnostics)
  (libraries
+  tsync_retry
   tsync_logical_key
   tsync_chunks
   tsync_remote

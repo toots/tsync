@@ -2,6 +2,8 @@
  (flags
   (:standard
    -open
+   Tsync_retry
+   -open
    Tsync_field_spec
    -open
    Tsync_log
@@ -17,6 +19,7 @@
  (private_modules http_proxy_backend)
  (library_flags (-linkall))
  (libraries
+  tsync_retry
   tsync-libs.field_spec
   tsync-libs.bigstring
   tsync-libs.backend_register

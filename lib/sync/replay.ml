@@ -129,7 +129,7 @@ module Make (C : Conf.S) (F : File_ops.S) = struct
         (* Left in place: a record that could not be reconciled is tried again
            next start, and stats reports it in the meantime. *)
         Log.err "reconcile %s: %s" (Ek.to_string key) (Printexc.to_string exn);
-        W.note_failure key (Backend.classify exn) (Backend.reason exn))
+        W.note_failure key (Backend.classify exn) (Retry.reason exn))
 
   (* Staged data no record names: a crash between staging the content and
      recording the intent. Adopted under a new record, which is correct here

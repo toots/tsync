@@ -1,0 +1,9 @@
+; The abstract logic shared by everything that retries, mostly over a network:
+; what a failure is, whether it will clear, and how long to wait.
+
+(library
+ (flags
+  (:standard -open Tsync_log -open Tsync_metrics -open Tsync_lwt_unix))
+ (name tsync_retry)
+ (public_name tsync-libs.retry)
+ (libraries tsync_log tsync_metrics tsync_lwt_unix lwt lwt.unix))

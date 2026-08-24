@@ -1,6 +1,6 @@
 open Lwt.Syntax
 
-exception Cancelled = Backend.Cancelled
+exception Cancelled = Retry.Cancelled
 
 (* Raised when the file an upload is reading moves under it, so its chunks would
    describe bytes the file never held together. *)

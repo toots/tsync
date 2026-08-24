@@ -4,6 +4,8 @@
    -open
    Tsync_log
    -open
+   Tsync_retry
+   -open
    Tsync_bigstring
    -open
    Tsync_local_io
@@ -16,6 +18,7 @@
  (name tsync_backend_register)
  (public_name tsync-libs.backend_register)
  (libraries
+  tsync_retry
   tsync_field_spec
   tsync_metrics
   tsync_bigstring

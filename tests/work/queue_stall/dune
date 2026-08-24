@@ -2,6 +2,8 @@
  (flags
   (:standard
    -open
+   Tsync_retry
+   -open
    Tsync_work
    -open
    Tsync_log
@@ -11,6 +13,7 @@
    Tsync_test_harness))
  (name queue_stall)
  (libraries
+  tsync_retry
   tsync_test_harness
   tsync_work
   tsync_log

@@ -12,7 +12,12 @@
       reconciles or reports on what is outstanding.
     - {!Make.t} — a worker draining that log, either {!Make.ordered} or
       {!Make.keyed}; both share the log, the backoff, the poison policy and the
-      drain, and differ only in what the work is. *)
+      drain, and differ only in what the work is.
+
+    A queue runs whatever [run] it was handed and so cannot tell a failure that
+    will clear from one that will not: [classify] is how the creator, who does
+    know, says. Waiting out a permanent failure never ends, and poisoning a
+    transient one loses work that would have landed. *)
 
 (** What to do with a job whose failure will not clear.
 
@@ -122,6 +127,7 @@ module Make (J : JOB) : sig
     ?max_queued:int ->
     name:string ->
     log:Records.t ->
+    classify:(exn -> Retry.kind) ->
     poison:poison ->
     run:(J.t -> unit Lwt.t) ->
     unit ->
@@ -142,6 +148,7 @@ module Make (J : JOB) : sig
     name:string ->
     log:Records.t ->
     key:(J.t -> string) ->
+    classify:(exn -> Retry.kind) ->
     poison:poison ->
     run:(id:string -> J.t -> cancel:bool ref -> unit Lwt.t) ->
     unit ->

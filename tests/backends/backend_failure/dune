@@ -1,5 +1,5 @@
 (executable
  (flags
-  (:standard -open Tsync_backend_register))
+  (:standard -open Tsync_retry -open Tsync_backend_register))
  (name backend_failure)
- (libraries tsync_backend_register lwt lwt.unix))
+ (libraries tsync_retry tsync_backend_register lwt lwt.unix))

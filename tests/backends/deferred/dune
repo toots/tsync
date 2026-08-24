@@ -2,6 +2,8 @@
  (flags
   (:standard
    -open
+   Tsync_retry
+   -open
    Tsync_manifest
    -open
    Tsync_chunks
@@ -21,6 +23,7 @@
    Tsync_test_harness))
  (name deferred)
  (libraries
+  tsync_retry
   tsync_manifest
   tsync_chunks
   tsync_test_harness

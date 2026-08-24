@@ -31,7 +31,7 @@ type record = {
   ops : Journal.op list;
   state : state;
   attempts : int;
-  last_error : (Backend.kind * string) option;
+  last_error : (Retry.kind * string) option;
       (** Why it last failed, so a stuck record can say so instead of being
           counted. *)
 }
@@ -56,7 +56,7 @@ module Make (C : Conf.S) : sig
 
   (** Count the attempt and remember why. Does not change the state: a failure
       leaves the work where it was. *)
-  val note_failure : Journal.Entry_key.t -> Backend.kind -> string -> unit Lwt.t
+  val note_failure : Journal.Entry_key.t -> Retry.kind -> string -> unit Lwt.t
 
   (** The work is done or abandoned; drop the record. *)
   val complete : Journal.Entry_key.t -> unit Lwt.t

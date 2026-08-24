@@ -529,7 +529,7 @@ module Make (C : Conf.S) = struct
         in
         let stuck =
           List.filter_map (fun (_, r) -> r.Wal.last_error) records
-          |> List.filter (fun (kind, _) -> kind = Backend.Permanent)
+          |> List.filter (fun (kind, _) -> kind = Retry.Permanent)
         in
         `Assoc
           [

@@ -211,30 +211,14 @@ end
 
 (** {1 Failure} *)
 
+(** A store's considered answer that the object is not there or not as recorded,
+    as opposed to the link failing. Always {!Retry.Permanent}. *)
 exception Backend_error of string
-exception Cancelled
 
 (** Its own exception rather than a {!Backend_error} carrying a sentence,
     because callers act on it: a frontend turns it into a read-only error for
     the user, and matching on prose breaks the day the sentence is reworded. *)
 exception Not_writable
-
-(** Whether a failure is worth trying again, decided by the store that produced
-    it — one vocabulary, rather than each backend having its own notion of
-    "transient" and each caller having to recognise it. A 503, a dropped socket
-    and a full disk clear on their own; a 403, a bad key and a read-only domain
-    do not, and retrying those only delays the report. *)
-type kind = Transient | Permanent
-
-exception Failed of { kind : kind; op : string; detail : string }
-
-val failed : kind:kind -> op:string -> string -> exn
-
-(** [Transient] for anything unrecognised: a failure mode nobody classified is
-    retried rather than silently abandoning the work. *)
-val classify : exn -> kind
-
-val string_of_kind : kind -> string
 
 (** Whether a per-key error code from a bulk delete means the object was already
     gone, which is a success. Here rather than in each driver because s3 and gcs
@@ -243,20 +227,16 @@ val string_of_kind : kind -> string
     delete that did not happen. *)
 val absent_code : string -> bool
 
-(** What to put in a log line. {!Printexc.to_string} would repeat the operation
-    name the caller has already printed. *)
-val reason : exn -> string
+(** {!Retry.classify} plus the two exceptions a store raises for itself. This is
+    the classifier every caller of backend work wants, including one running it
+    from a queue. *)
+val classify : exn -> Retry.kind
 
-(** How long to wait before attempt [n] (1-based): [base] doubling to [cap].
-
-    One formula, so the several things that wait out a transient failure differ
-    only in how patient they are, not in shape. *)
-val backoff : base:float -> cap:float -> int -> float
-
-(** The one retry loop for a single request. A backend decides only what
-    [Transient] means for it; the curve, the cap and the log line are shared, so
-    two stores cannot drift into retrying differently. {!Cancelled} is never
-    retried. *)
+(** The one retry loop for a single request, jittered so a fleet that failed
+    together does not return together. A driver decides only what {!classify}
+    means for it; the curve, the cap and the log line are shared, so two stores
+    cannot drift into retrying differently. {!Retry.Cancelled} is never retried.
+*)
 val with_retry :
   ?max_attempts:int ->
   name:string ->

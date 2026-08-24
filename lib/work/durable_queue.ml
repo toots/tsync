@@ -230,6 +230,9 @@ module Make (J : JOB) = struct
     topo : topology;
     workers : int;
     run : id:string -> J.t -> cancel:bool ref -> unit Lwt.t;
+    (* Beside [run] because it is the same knowledge: whoever supplies the work
+       is the only one who can say which of its failures will clear. *)
+    classify : exn -> Retry.kind;
     jobs : entry Queue.t;
     (* Record ids this process holds in memory, so reading the log again adds
        only what nothing here is already going to run. *)
@@ -258,6 +261,7 @@ module Make (J : JOB) = struct
       topo = Ordered;
       workers = 1;
       run = (fun ~id:_ _ ~cancel:_ -> Lwt.return_unit);
+      classify = Retry.classify;
       jobs = Queue.create ();
       loaded = Hashtbl.create 64;
       wake = Lwt_condition.create ();
@@ -410,13 +414,12 @@ module Make (J : JOB) = struct
     t.degraded <- true;
     match t.poison with
       | Drop ->
-          Log.err "%s: %s (dropped; run tsync mirror)" t.name
-            (Backend.reason exn);
+          Log.err "%s: %s (dropped; run tsync mirror)" t.name (Retry.reason exn);
           complete t e.id
       | Stop ->
           (* The record stays: it names work still owed, and something outside
              the queue is expected to report or repair it. *)
-          Log.err "%s: %s (not retrying)" t.name (Backend.reason exn);
+          Log.err "%s: %s (not retrying)" t.name (Retry.reason exn);
           Lwt.return_unit
 
   (* An ordered queue keeps a failing job at the head, so what follows cannot
@@ -461,7 +464,7 @@ module Make (J : JOB) = struct
                  is then a no-op. *)
               let+ () = complete t e.id in
               false
-          | `Failed exn when Backend.classify exn = Backend.Transient ->
+          | `Failed exn when t.classify exn = Retry.Transient ->
               (* Counted the same as a backend's own ladder: retries a queue
                  absorbs are still the link struggling, and a report that showed
                  only one of the two would understate it. *)
@@ -470,9 +473,9 @@ module Make (J : JOB) = struct
               let n = note_failure t e in
               (* The shared curve, with a cap measured against an outage rather
                  than a request: a queue has nobody waiting. *)
-              let delay = Backend.backoff ~base:0.5 ~cap:300. n in
+              let delay = Retry.backoff ~base:0.5 ~cap:300. n in
               Log.warn "%s: %s; retrying in %.1fs (%d)" t.name
-                (Backend.reason exn) delay n;
+                (Retry.reason exn) delay n;
               (* Before the sleep, so a drain waiting on this queue learns the
                  target is down now rather than a backoff later. *)
               announce t;
@@ -581,7 +584,7 @@ module Make (J : JOB) = struct
 
   let paused t = !(t.paused)
 
-  let make ~name ~log ~poison ~max_queued ~topo ~workers ~run =
+  let make ~name ~log ~poison ~max_queued ~topo ~workers ~classify ~run =
     let t =
       {
         (base name) with
@@ -590,6 +593,7 @@ module Make (J : JOB) = struct
         max_queued;
         topo;
         workers;
+        classify;
         run;
         paused = ref false;
         stopping = ref false;
@@ -598,13 +602,14 @@ module Make (J : JOB) = struct
     register_settle (fun () -> settle t);
     t
 
-  let ordered ?(max_queued = default_max_queued) ~name ~log ~poison ~run () =
-    make ~name ~log ~poison ~max_queued ~topo:Ordered ~workers:1
+  let ordered ?(max_queued = default_max_queued) ~name ~log ~classify ~poison
+      ~run () =
+    make ~name ~log ~poison ~max_queued ~topo:Ordered ~workers:1 ~classify
       ~run:(fun ~id:_ job ~cancel:_ -> run job)
 
   let keyed ?(max_queued = default_max_queued) ?(workers = 1)
-      ?(weight = fun _ -> 0L) ~name ~log ~key ~poison ~run () =
-    make ~name ~log ~poison ~max_queued
+      ?(weight = fun _ -> 0L) ~name ~log ~key ~classify ~poison ~run () =
+    make ~name ~log ~poison ~max_queued ~classify
       ~topo:
         (Keyed
            { key; weight; slots = Hashtbl.create 64; active = Hashtbl.create 8 })

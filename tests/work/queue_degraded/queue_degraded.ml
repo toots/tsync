@@ -39,7 +39,8 @@ let () =
      case "a queue that resumed over one is degraded";
      let ran = ref [] in
      let q =
-       Q.ordered ~name:"degraded" ~log ~poison:Durable_queue.Drop
+       Q.ordered ~name:"degraded" ~classify:Retry.classify ~log
+         ~poison:Durable_queue.Drop
          ~run:(fun job ->
            ran := job :: !ran;
            Lwt.return_unit)

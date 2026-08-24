@@ -65,7 +65,7 @@ val is_ok : Cohttp.Response.t -> bool
     into retrying different things. *)
 val is_transient_code : int -> bool
 
-(** A {!Backend.Failed} carrying the status and a bounded excerpt of the body,
+(** A {!Retry.Failed} carrying the status and a bounded excerpt of the body,
     classified by {!is_transient_code}. *)
 val backend_error : string -> int -> string -> exn
 

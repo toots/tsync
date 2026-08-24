@@ -693,7 +693,7 @@ module Make (C : Conf.S) = struct
                       (* Promoted, then gone before the read. Whatever removed
                          it, the manifest still names it. *)
                       `Unreadable "vanished between promote and read")
-              (fun exn -> Lwt.return (`Unreadable (Backend.reason exn)))
+              (fun exn -> Lwt.return (`Unreadable (Retry.reason exn)))
           in
           match outcome with
             | `Body body ->

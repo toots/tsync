@@ -45,7 +45,8 @@ let held_marker dir = Filename.concat dir ".held"
 let hold dir =
   let log = Q.Records.create ~dir in
   let q =
-    Q.ordered ~name:"holder" ~log ~poison:Durable_queue.Drop
+    Q.ordered ~name:"holder" ~classify:Retry.classify ~log
+      ~poison:Durable_queue.Drop
       ~run:(fun _ -> Lwt.return_unit)
       ()
   in
@@ -79,7 +80,8 @@ let run ~dir ~kill_child () =
   check "the holder announced its claim" announced;
   let log = Q.Records.create ~dir in
   let q =
-    Q.ordered ~name:"taker" ~log ~poison:Durable_queue.Drop
+    Q.ordered ~name:"taker" ~classify:Retry.classify ~log
+      ~poison:Durable_queue.Drop
       ~run:(fun job ->
         ran := !ran @ [job];
         if !holding then gate else Lwt.return_unit)

@@ -1,5 +1,5 @@
 (executable
  (flags
-  (:standard -open Tsync_work -open Tsync_test_harness))
+  (:standard -open Tsync_retry -open Tsync_work -open Tsync_test_harness))
  (name queue_claim_test)
- (libraries tsync_test_harness tsync_work lwt lwt.unix unix))
+ (libraries tsync_retry tsync_test_harness tsync_work lwt lwt.unix unix))
