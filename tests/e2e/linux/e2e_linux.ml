@@ -144,6 +144,35 @@ let () =
              if not (String.starts_with ~prefix:"Evicted:" said) then
                failf "did not evict: %s" said);
 
+         (* What the mount answers statfs with. This domain is backed by the
+            http-proxy, so no local disk bounds a write and the figure has only
+            to be large enough that nothing sizing one against it refuses. A
+            bounded figure here would mean some store was counted that cannot
+            say what room it has. *)
+         check "a mount no local store bounds reports room to write" (fun () ->
+             let out = Filename.concat root "df.out" in
+             let status =
+               Sys.command
+                 (Printf.sprintf "df -k %s >%s 2>&1" (Filename.quote mount)
+                    (Filename.quote out))
+             in
+             let said = read_file out in
+             if status <> 0 then failf "df exited %d: %s" status said;
+             (* [1 lsl 50] blocks of 4k, in df's 1k units. *)
+             let unbounded = Int64.of_string "1099511627776" in
+             let blocks =
+               match String.split_on_char '\n' said with
+                 | _ :: row :: _ -> (
+                     match
+                       List.filter (( <> ) "") (String.split_on_char ' ' row)
+                     with
+                       | _ :: total :: _ -> Int64.of_string total
+                       | _ -> failf "df said: %s" said)
+                 | _ -> failf "df said: %s" said
+             in
+             if Int64.compare blocks unbounded <> 0 then
+               failf "expected %Ld blocks, got %Ld: %s" unbounded blocks said);
+
          (* The store's domain is served by the http-proxy and nothing else, so
             it binds no socket of its own. A report filed with a frontend has
             nowhere to go here; one filed with the process converging the

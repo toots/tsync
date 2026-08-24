@@ -9,7 +9,6 @@ exception With_backtrace of exn * Printexc.raw_backtrace
 module Make (C : Conf.S) (D : Domain_engine.Domain) = struct
   module F = D.F
   module Ih = D.Ih
-  module Fs = File_store.Make (C)
   module H = Hidden_ops.Make (C)
   module I = Internal_ops.Make (F)
 
@@ -236,25 +235,16 @@ module Make (C : Conf.S) (D : Domain_engine.Domain) = struct
      enough that nothing sizing a write against it ever refuses. *)
   let unlimited_bytes = Int64.shift_left 1L 50
 
-  (* A write has to land on every store that keeps the domain, so the room left
-     is the least of theirs, and only a local store can say. The figures come as
-     a set from one store rather than a per-field minimum, so that total, free
-     and available stay describing the same disk. *)
   let store_capacity () =
-    let bounded m =
-      if m.Backend.role = "readOnly" then None
-      else Option.bind m.Backend.local_path Fs_util.disk_space
-    in
-    let tighter a b = if b.Fs_util.avail < a.Fs_util.avail then b else a in
-    match List.filter_map bounded C.members with
-      | [] ->
+    match Conf.capacity C.members with
+      | Some space -> space
+      | None ->
           Fs_util.
             {
               avail = unlimited_bytes;
               free = unlimited_bytes;
               total = unlimited_bytes;
             }
-      | first :: rest -> List.fold_left tighter first rest
 
   (* This mount has to be told a key changed: [cache_opts] turns off the
      attribute and entry timeouts, but that does not stop the kernel answering a

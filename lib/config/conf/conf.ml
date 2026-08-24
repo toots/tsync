@@ -109,3 +109,17 @@ let locality (module C : S) =
     domain_name = C.domain_name;
     cache_chunk_size = cache_chunk_size (module C);
   }
+
+(* A write has to land on every store that keeps the domain, so the room left is
+   the least of theirs, and only a local store can say. The figures come as a
+   set from one store rather than a per-field minimum, so that total, free and
+   available stay describing the same disk. *)
+let capacity members =
+  let bounded (m : Backend.member) =
+    if m.Backend.role = "readOnly" then None
+    else Option.bind m.Backend.local_path Fs_util.disk_space
+  in
+  let tighter a b = if b.Fs_util.avail < a.Fs_util.avail then b else a in
+  match List.filter_map bounded members with
+    | [] -> None
+    | first :: rest -> Some (List.fold_left tighter first rest)

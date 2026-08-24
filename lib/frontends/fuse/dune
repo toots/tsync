@@ -12,8 +12,6 @@
    -open
    Tsync_sync
    -open
-   Tsync_store
-   -open
    Tsync_naming
    -open
    Tsync_ipc
@@ -32,8 +30,6 @@
    -open
    Tsync_frontend_register
    -open
-   Tsync_backend_register
-   -open
    Tsync_log))
  (name tsync_fuse_frontend)
  (private_modules fuse_fs hidden_ops internal_ops path_ops)
@@ -44,9 +40,7 @@
   tsync_manifest
   tsync-libs.field_spec
   tsync-libs.sync
-  tsync-libs.store
   tsync-libs.naming
-  tsync-libs.backend_register
   tsync-libs.frontend_register
   tsync-libs.log
   tsync-libs.conf

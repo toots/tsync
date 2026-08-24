@@ -203,5 +203,28 @@ let () =
      would name no domain. *)
   assert (List.hd (roots "") = Filename.concat (Sys.getenv "HOME") "tsync/d");
 
+  (* The room a write has. Only a store on a disk can say, so a domain of
+     stores that cannot answers nothing rather than a number, and a caller says
+     for itself what to report then. *)
+  let store ?local_path ?(role = "main") name =
+    Backend.member ~name ~role ?local_path
+      (Backend.make ~backend_type:"local"
+         ~get_field:(fun _ -> Some (Filename.get_temp_dir_name ()))
+         ())
+  in
+  assert (Conf.capacity [] = None);
+  assert (Conf.capacity [store "remote"] = None);
+  let here = Filename.get_temp_dir_name () in
+  assert (Conf.capacity [store ~local_path:here "disk"] <> None);
+  (* A store never written to does not bound a write. *)
+  assert (Conf.capacity [store ~local_path:here ~role:"readOnly" "cold"] = None);
+  (* The tightest of them, and one store's figures rather than a per-field
+     minimum. *)
+    (match
+       Conf.capacity [store ~local_path:here "a"; store ~local_path:here "b"]
+     with
+    | Some { Fs_util.avail; total; _ } -> assert (avail <= total)
+    | None -> assert false);
+
   Unix.putenv "TSYNC_CONFIG_JSON" "";
   print_endline "conf_test ok"
