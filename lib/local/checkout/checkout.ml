@@ -70,28 +70,6 @@ let read_clean path =
 let real_file_name name m =
   if Name_escape.is_escaped name then recorded_name m else name
 
-let fold_files ~start ~rel f acc =
-  let rec walk dir rel acc =
-    let* names = Fs_util.readdir_list dir in
-    Lwt_list.fold_left_s
-      (fun acc name ->
-        if Name_escape.is_internal name then Lwt.return acc
-        else (
-          let path = Filename.concat dir name in
-          let* is_dir = Fs_util.is_directory path in
-          if is_dir then
-            let* real = Name_escape.real_dir_name path name in
-            walk path (Key.join rel real) acc
-          else
-            let+ m = read_clean path in
-            match m with
-              | Some m -> f acc rel (real_file_name name m) m
-              | None -> acc))
-      acc names
-  in
-  let* ok = Fs_util.is_directory start in
-  if ok then walk start rel acc else Lwt.return acc
-
 let rec clean_tmp dir =
   let* is_dir = Fs_util.is_directory dir in
   if not is_dir then Lwt.return_unit
@@ -171,9 +149,7 @@ module Make (C : Conf.S) = struct
                   | exception _ -> Lwt.return_none))
 
   let ensure_parent key =
-    let rel = rel_of key in
-    let reldir = Key.parent rel in
-    ensure_dirs (root ()) reldir
+    ensure_dirs (root ()) (rel_of (Logical_key.parent key))
 
   (* Sole writer of a manifest body in the cache, and it stamps the name from
      the key, so a mirror manifest always records the name it is filed under. *)
@@ -295,17 +271,37 @@ module Make (C : Conf.S) = struct
     (merge_entries files staged, dirs)
 
   (* Backend keys are hashed, so only the mirror can answer this. *)
+  (* Inside the functor because it hands back the key each file is filed under,
+     which needs the domain the walk belongs to. *)
+  let fold_files ~start ~key f acc =
+    let rec walk dir key acc =
+      let* names = Fs_util.readdir_list dir in
+      Lwt_list.fold_left_s
+        (fun acc name ->
+          if Name_escape.is_internal name then Lwt.return acc
+          else (
+            let path = Filename.concat dir name in
+            let* is_dir = Fs_util.is_directory path in
+            if is_dir then
+              let* real = Name_escape.real_dir_name path name in
+              walk path (Logical_key.dir_in key real) acc
+            else
+              let+ m = read_clean path in
+              match m with
+                | Some m ->
+                    f acc (Logical_key.file_in key (real_file_name name m)) m
+                | None -> acc))
+        acc names
+    in
+    let* ok = Fs_util.is_directory start in
+    if ok then walk start key acc else Lwt.return acc
+
   let list_tree ~prefix () =
     let rel, start = dir_of_prefix prefix in
     let* published =
-      fold_files ~start ~rel
-        (fun acc rel leaf m ->
-          {
-            key = Lk.file (Key.join rel leaf);
-            size = Int64.to_int (size m);
-            mtime = mtime m;
-          }
-          :: acc)
+      fold_files ~start ~key:(Lk.dir rel)
+        (fun acc key m ->
+          { key; size = Int64.to_int (size m); mtime = mtime m } :: acc)
         []
     in
     let+ staged = staged_listed ~rel_dir:rel ~deep:true in
@@ -314,14 +310,14 @@ module Make (C : Conf.S) = struct
   (* Published or only staged, unsorted. *)
   let walk () =
     let* published =
-      fold_files ~start:(root ()) ~rel:""
-        (fun acc rel leaf (_ : t) -> Key.join rel leaf :: acc)
+      fold_files ~start:(root ()) ~key:Lk.root
+        (fun acc key (_ : t) -> Logical_key.path key :: acc)
         []
     in
     let+ staged =
       Sm.fold ~rel_dir:"" ~deep:true
-        (fun acc rel leaf (_ : Staged_manifest.staged) ->
-          Key.join rel leaf :: acc)
+        (fun acc key (_ : Staged_manifest.staged) ->
+          Logical_key.path key :: acc)
         []
     in
     List.sort_uniq compare (published @ staged)

@@ -334,9 +334,8 @@ module Make_with_layout (C : Conf.S) (Sq : Sync_queue.S) (L : Layout.S) :
     let* ek = Fs.write_journal_entry [`Put (rel_key key, Manifest.size m)] in
     Fs.bump_cursor ek
 
-  let conflict_name rel =
-    let base = Filename.basename rel in
-    let dir = Key.parent rel in
+  let conflict_key key =
+    let base = Logical_key.leaf key in
     let name, ext =
       match String.rindex_opt base '.' with
         | None -> (base, "")
@@ -346,7 +345,7 @@ module Make_with_layout (C : Conf.S) (Sq : Sync_queue.S) (L : Layout.S) :
     let base =
       Printf.sprintf "%s (conflicted copy from %s)%s" name C.client_name ext
     in
-    Key.join dir base
+    Logical_key.file_in (Logical_key.parent key) base
 
   (* Moving an object on the backend does not rewrite its body, so the copy at
      the new key still records the old leaf. Unconditional: the mirror is
@@ -444,7 +443,7 @@ module Make_with_layout (C : Conf.S) (Sq : Sync_queue.S) (L : Layout.S) :
               | Some (`Published m) ->
                   (* src was uploaded and has since vanished remotely: keep both
                      sides under a conflict-marked name. *)
-                  let conflict = Lk.file (conflict_name (rel_key dst)) in
+                  let conflict = conflict_key dst in
                   let* () = rename_local ~src:dst ~dst:conflict in
                   publish_manifest conflict m
               | None -> Lwt.fail exn)

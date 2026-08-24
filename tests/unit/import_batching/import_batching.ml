@@ -83,7 +83,7 @@ let () =
      check "and every folder it created is too"
        ~why:(fun () -> String.concat ", " (List.sort compare mkdirs))
        (List.sort compare mkdirs
-       = List.sort compare ["keep/"; "keep/deep/"; "other/"]);
+       = List.sort compare ["keep"; "keep/deep"; "other"]);
 
      case "a folder is named before anything is put in it";
      let first_put =

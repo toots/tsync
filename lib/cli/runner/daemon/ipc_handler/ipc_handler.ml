@@ -157,7 +157,7 @@ module Make (C : Conf.S) (F : File_ops.S) : S = struct
   let own_folder_id key = lookup_folder (rel_body key)
 
   (* The id of the folder [key] sits in. *)
-  let parent_folder_id key = lookup_folder (Key.parent (rel_body key))
+  let parent_folder_id key = lookup_folder (rel_body (Logical_key.parent key))
 
   (* How a subscriber names an item, for a frontend pushing it news about one.
      Resolves the folder itself, having no listing to share one with. *)
@@ -335,7 +335,7 @@ module Make (C : Conf.S) (F : File_ops.S) : S = struct
     let by_parent = Hashtbl.create 16 in
     List.iter
       (fun (entry : Checkout.listed) ->
-        let parent = Key.parent (Logical_key.path entry.key) in
+        let parent = Logical_key.path (Logical_key.parent entry.key) in
         Hashtbl.replace by_parent parent
           (entry :: Option.value (Hashtbl.find_opt by_parent parent) ~default:[]))
       files;

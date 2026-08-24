@@ -67,8 +67,8 @@ module Make (C : Conf.S) : sig
     ?on_index:(string -> unit) ->
     ?slots:Lwt_bounded.t ->
     folder_id:string ->
-    rel:string ->
-    ('a -> string -> entry -> 'a Lwt.t) ->
+    key:Logical_key.t ->
+    ('a -> Logical_key.t -> entry -> 'a Lwt.t) ->
     'a ->
     'a Lwt.t
 end

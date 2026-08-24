@@ -8,6 +8,7 @@ type dest_stats = {
 }
 
 module Make (C : Conf.S) = struct
+  module Lk = Logical_key.Make (C)
   module Space = Chunk_space.Make (C)
   module L = Chunk_layout.Make (C)
   module Tree = Inode_tree.Make (C)
@@ -221,19 +222,23 @@ module Make (C : Conf.S) = struct
         (fun acc (entry : Inode_tree.entry) ->
           match entry.Inode_tree.body with
             | Inode_tree.Dir m ->
-                let path = Key.join here m.Folder.name in
+                let child = Logical_key.dir_in here m.Folder.name in
+                let path = Logical_key.path child in
                 if within ~rel path then
-                  walk m.Folder.id path (entry.Inode_tree.bkey :: acc)
-                else if holds ~rel path then walk m.Folder.id path acc
+                  walk m.Folder.id child (entry.Inode_tree.bkey :: acc)
+                else if holds ~rel path then walk m.Folder.id child acc
                 else Lwt.return acc
             | Inode_tree.File m ->
-                let path = Key.join here (Manifest.recorded_name m) in
+                let path =
+                  Logical_key.path
+                    (Logical_key.file_in here (Manifest.recorded_name m))
+                in
                 if within ~rel path then
                   Lwt.return (chunk_keys m @ (entry.Inode_tree.bkey :: acc))
                 else Lwt.return acc)
         acc entries
     in
-    let+ keys = walk Stored_key.root_id "" [] in
+    let+ keys = walk Stored_key.root_id Lk.root [] in
     List.sort_uniq compare keys
 
   (* This command copies a full backend onto a partial one, so an object the

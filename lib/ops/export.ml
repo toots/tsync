@@ -41,13 +41,16 @@ module Make (C : Conf.S) = struct
   let remote_rels () =
     Tree.fold_tree
       ~on_unusable:(`Skip (fun _ _ -> ()))
-      ~folder_id:Stored_key.root_id ~rel:""
-      (fun acc rel entry ->
+      ~folder_id:Stored_key.root_id ~key:Lk.root
+      (fun acc key entry ->
         match entry.Inode_tree.body with
           (* Walked by backend key, which is hashed, so the body is the only
              thing that knows the name. *)
           | Inode_tree.File m ->
-              Lwt.return (Key.join rel (Manifest.recorded_name m) :: acc)
+              Lwt.return
+                (Logical_key.path
+                   (Logical_key.file_in key (Manifest.recorded_name m))
+                :: acc)
           | Inode_tree.Dir _ -> Lwt.return acc)
       []
 

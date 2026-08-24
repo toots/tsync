@@ -99,7 +99,7 @@ module Make (C : Conf.S) : sig
   val fold :
     rel_dir:string ->
     deep:bool ->
-    ('a -> string -> string -> staged -> 'a) ->
+    ('a -> Logical_key.t -> staged -> 'a) ->
     'a ->
     'a Lwt.t
 

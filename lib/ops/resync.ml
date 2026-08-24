@@ -37,24 +37,25 @@ module Make (C : Conf.S) = struct
           | `Unclassifiable exn ->
               "unreadable manifest: " ^ Printexc.to_string exn)
     in
-    let apply rel (entry : Inode_tree.entry) =
+    let apply key (entry : Inode_tree.entry) =
       match entry.Inode_tree.body with
         | Inode_tree.Dir m ->
             Folder_ids.write ~cache_root:C.cache_root ~domain_name:C.domain_name
-              (Key.join rel m.Folder.name)
+              (Logical_key.path (Logical_key.dir_in key m.Folder.name))
               m
         | Inode_tree.File man ->
             incr count;
             (* Read by backend key, which is hashed: the body is what names
                it. *)
-            let leaf = Manifest.recorded_name man in
-            on_manifest (Key.join rel leaf);
-            F.write_manifest (Lk.file (Key.join rel leaf)) man
+            let file = Logical_key.file_in key (Manifest.recorded_name man) in
+            on_manifest (Logical_key.path file);
+            F.write_manifest file man
     in
-    let visit () rel entry =
+    let visit () key entry =
+      let rel = Logical_key.path key in
       progress.on_current (Some (if rel = "" then "/" else rel));
       Lwt.catch
-        (fun () -> apply rel entry)
+        (fun () -> apply key entry)
         (fun exn ->
           incr failed;
           Log.warn "resync %s: %s" entry.Inode_tree.bkey
@@ -66,7 +67,7 @@ module Make (C : Conf.S) = struct
          one that leaves each folder's index behind. *)
       Tree.fold_tree ~on_unusable:(`Skip unusable)
         ~refresh_index:(not C.read_only) ~slots ~folder_id:Stored_key.root_id
-        ~rel:"" visit ()
+        ~key:Lk.root visit ()
     in
     (!count, !failed)
 

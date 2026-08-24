@@ -100,7 +100,7 @@ module Make (C : Conf.S) = struct
       let* entries =
         Lwt_list.filter_map_s
           (fun name ->
-            let r = Key.join rel name in
+            let r = Logical_key.path (Logical_key.file_in (Lk.dir rel) name) in
             if excluded ex r then Lwt.return_none
             else
               let+ kind = Fs_util.lstat_kind (Filename.concat src r) in
@@ -330,7 +330,7 @@ module Make (C : Conf.S) = struct
                   ~domain_name:C.domain_name rel
               in
               on_dir ~rel;
-              add [`Mkdir (rel ^ "/", Some id)])
+              add [`Mkdir (rel, Some id)])
         in
         (* A peer resolves a file's folder by the id its marker carries, so
            every mkdir is published before a put can name the folder. *)

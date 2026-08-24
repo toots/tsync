@@ -1027,7 +1027,12 @@ let setup_client (module C : Conf.S) root staging_prefix =
       let* obj = action "list_dir" item_ref in
       must obj;
       let dirs, entries = split_items obj in
-      let entries = List.map (fun (name, _) -> Key.join rel name) entries in
+      let entries =
+        List.map
+          (fun (name, _) ->
+            Logical_key.path (Logical_key.file_in (Lk.dir rel) name))
+          entries
+      in
       let* () =
         Lwt_list.iter_s
           (fun rel ->
@@ -1045,7 +1050,7 @@ let setup_client (module C : Conf.S) root staging_prefix =
       in
       Lwt_list.iter_s
         (fun (name, item_ref) ->
-          let rel = Key.join rel name in
+          let rel = Logical_key.path (Logical_key.dir_in (Lk.dir rel) name) in
           Printf.printf "  d %s\n" rel;
           walk ~rel item_ref)
         (List.sort compare dirs)

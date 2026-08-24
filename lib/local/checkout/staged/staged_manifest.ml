@@ -234,7 +234,7 @@ module Make (C : Conf.S) = struct
       if rel_dir = "" then root ()
       else Filename.concat (root ()) (Name_escape.encode_key rel_dir)
     in
-    let rec walk dir rel acc =
+    let rec walk dir key acc =
       let* names = Fs_util.readdir_list dir in
       Lwt_list.fold_left_s
         (fun acc name ->
@@ -247,7 +247,7 @@ module Make (C : Conf.S) = struct
               if not deep then Lwt.return acc
               else
                 let* real = Name_escape.real_dir_name path name in
-                walk path (Key.join rel real) acc
+                walk path (Logical_key.dir_in key real) acc
             else
               let+ body = Fs_util.read_file_opt path in
               match body with
@@ -258,25 +258,23 @@ module Make (C : Conf.S) = struct
                             if Name_escape.is_escaped name then st.s_name
                             else name
                           in
-                          f acc rel leaf st
+                          f acc (Logical_key.file_in key leaf) st
                       | exception _ -> acc)
                 | None -> acc))
         acc names
     in
     let* ok = Fs_util.is_directory start in
-    if ok then walk start rel_dir acc else Lwt.return acc
+    if ok then walk start (Lk.dir rel_dir) acc else Lwt.return acc
 
   (* Logical keys owing an upload. *)
   let list () =
-    fold ~rel_dir:"" ~deep:true
-      (fun acc rel leaf (_ : staged) -> Lk.file (Key.join rel leaf) :: acc)
-      []
+    fold ~rel_dir:"" ~deep:true (fun acc key (_ : staged) -> key :: acc) []
 
   (* Every staged body reachable from a manifest: what a sweep of the body trees
      must keep. *)
   let uuids () =
     fold ~rel_dir:"" ~deep:true
-      (fun acc _ _ st ->
+      (fun acc _ st ->
         let acc =
           match st.s_whole with Some uuid -> uuid :: acc | None -> acc
         in
@@ -291,7 +289,5 @@ module Make (C : Conf.S) = struct
   (* A locally created file has no published sidecar, so the mirror alone would
      not list it; for one that does, the staged size and mtime are current. *)
   let entries ~rel_dir ~deep =
-    fold ~rel_dir ~deep
-      (fun acc rel leaf st -> (Lk.file (Key.join rel leaf), st) :: acc)
-      []
+    fold ~rel_dir ~deep (fun acc key st -> (key, st) :: acc) []
 end

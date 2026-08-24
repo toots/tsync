@@ -213,22 +213,23 @@ module Make (C : Conf.S) = struct
             outcomes;
           Lwt.return kept
 
-  (* [f acc rel entry] sees each entry with the real relative path of the folder
-     holding it. A folder is visited before it is descended into, so a caller
-     collecting keys gets the marker too. *)
-  let fold_tree ?on_unusable ?refresh_index ?on_index ?slots ~folder_id ~rel f
+  (* [f acc key entry] sees each entry with the key of the folder holding it. A
+     folder is visited before it is descended into, so a caller collecting keys
+     gets the marker too. *)
+  let fold_tree ?on_unusable ?refresh_index ?on_index ?slots ~folder_id ~key f
       acc =
-    let rec walk folder_id rel acc =
+    let rec walk folder_id key acc =
       let* entries =
         children ?on_unusable ?refresh_index ?on_index ?slots ~folder_id ()
       in
       Lwt_list.fold_left_s
         (fun acc entry ->
-          let* acc = f acc rel entry in
+          let* acc = f acc key entry in
           match entry.body with
-            | Dir m -> walk m.Folder.id (Key.join rel m.Folder.name) acc
+            | Dir m ->
+                walk m.Folder.id (Logical_key.dir_in key m.Folder.name) acc
             | File _ -> Lwt.return acc)
         acc entries
     in
-    walk folder_id rel acc
+    walk folder_id key acc
 end

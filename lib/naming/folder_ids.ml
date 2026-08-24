@@ -179,7 +179,7 @@ let climb ~cache_root ~domain_name id =
   let rec go id names depth =
     if depth > max_depth then Lwt.return_none
     else if id = Stored_key.root_id then
-      Lwt.return_some (List.fold_left Key.join "" names)
+      Lwt.return_some (String.concat "/" names)
     else
       let* entry = read_entry ~cache_root ~domain_name id in
       match entry with

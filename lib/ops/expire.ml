@@ -3,6 +3,7 @@ open Lwt.Syntax
 type stats = { versions_deleted : int; journal_deleted : int }
 
 module Make (C : Conf.S) = struct
+  module Lk = Logical_key.Make (C)
   module Fs = File_store.Make (C)
   module Tree = Inode_tree.Make (C)
   module B = (val C.store : Backend.S)
@@ -40,8 +41,8 @@ module Make (C : Conf.S) = struct
     let+ children =
       Tree.fold_tree
         ~on_index:(fun key -> indexes := key :: !indexes)
-        ~folder_id ~rel:""
-        (fun acc _rel entry -> Lwt.return (entry.Inode_tree.bkey :: acc))
+        ~folder_id ~key:Lk.root
+        (fun acc _key entry -> Lwt.return (entry.Inode_tree.bkey :: acc))
         acc
     in
     !indexes @ children
