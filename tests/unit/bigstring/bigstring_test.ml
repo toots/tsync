@@ -113,7 +113,7 @@ let () =
   write_file p body;
   ignore (Bigstring.map_file ~path:p ~offset:0 ~len:(String.length body));
   check "clone left behind"
-    (not (Array.exists Fs_util.is_temp_name (Sys.readdir root)));
+    (not (Array.exists Filename.is_temp_name (Sys.readdir root)));
 
   (* 6. The mapping is of a different inode from the file, which is the whole of
      what "frozen" means here and the only part of it this repository decides:

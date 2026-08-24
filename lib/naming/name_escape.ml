@@ -30,7 +30,7 @@ let encode_key rel =
 let folder_marker = ".tsync-dir"
 
 let is_internal name =
-  Fs_util.is_temp_name name || name = dir_marker || name = folder_marker
+  Filename.is_temp_name name || name = dir_marker || name = folder_marker
 
 (* Records an escaped directory's real name so readdir can recover it. *)
 let write_marker path name =

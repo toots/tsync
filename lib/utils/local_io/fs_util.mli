@@ -10,25 +10,10 @@ val ensure_parent : string -> unit Lwt.t
     the CLI, the config writer. *)
 val mkdir_p_sync : ?perm:int -> string -> unit
 
-(** A scratch name in [path]'s directory, unique per process and per call. *)
-val temp_path : string -> string
-
 (** A read-only descriptor on [path], unlinked before this returns: the caller
     gets the bytes without the name, and nothing is left behind if it dies
     holding them. *)
 val open_and_unlink : string -> Unix.file_descr
-
-(** Whether a name was produced by {!temp_path}.
-
-    Callers walk directories the user also writes to, so the only safe test is
-    the one matching what {!temp_path} generates: a wider test — the ".tmp"
-    suffix, say — matches a Syncthing download in flight, which the walkers both
-    hide and delete. *)
-val is_temp_name : string -> bool
-
-(** The pid that created a {!temp_path} name, or [None] for a name we did not
-    generate. What separates a live run's scratch file from a dead run's. *)
-val temp_owner : string -> int option
 
 (** Whether [pid] names a running process. A pid reused since it was recorded
     reads as alive. *)

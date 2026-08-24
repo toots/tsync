@@ -6,13 +6,13 @@ let readdir_list = Fs_util.readdir_list
 (* Each write stages to its own temp file and renames it into place, so
    overlapping writes of one key never expose a partial file.
 
-   The name comes from {!Fs_util.temp_path} rather than being spelled here so
-   that {!Fs_util.is_temp_name} recognises it: the collector parses every name
+   The name comes from {!Filename.temp_path} rather than being spelled here so
+   that {!Filename.is_temp_name} recognises it: the collector parses every name
    in a namespace, and a write in flight it cannot identify stops the whole
    collection. *)
 let write_file path data =
   let* () = Fs_util.ensure_parent path in
-  let tmp = Fs_util.temp_path path in
+  let tmp = Filename.temp_path path in
   let* () = Bigstring.write_to ~path:tmp data ~offset:0 in
   Lwt_unix_retry.rename tmp path
 
@@ -33,7 +33,7 @@ let read_file path =
    instant it appears. *)
 let create_exclusive path data =
   let* () = Fs_util.ensure_parent path in
-  let tmp = Fs_util.temp_path path in
+  let tmp = Filename.temp_path path in
   let* () = Bigstring.write_to ~path:tmp data ~offset:0 in
   Lwt.finalize
     (fun () ->
@@ -345,7 +345,7 @@ let make ?(verify_writes = true) ~root () : (module Backend.S) =
                is gone by the time anybody asks for it, and a mirror copies the
                half-written body to every other backend under that name. *)
             let names =
-              List.filter (fun n -> not (Fs_util.is_temp_name n)) names
+              List.filter (fun n -> not (Filename.is_temp_name n)) names
             in
             (* Empty directories surface as their marker key, matching the
                zero-byte object S3 lists. *)

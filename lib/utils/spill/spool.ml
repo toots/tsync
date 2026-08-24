@@ -4,7 +4,7 @@ type t = { path : string; out : Lwt_io.output_channel }
 
 let create ~dir ~name =
   let* () = Fs_util.mkdir_p dir in
-  let path = Fs_util.temp_path (Filename.concat dir name) in
+  let path = Filename.temp_path (Filename.concat dir name) in
   let+ out = Lwt_io.open_file ~mode:Lwt_io.Output path in
   { path; out }
 
@@ -45,7 +45,7 @@ let reap ~dir =
   let* names = Fs_util.readdir_list_quiet dir in
   Lwt_list.iter_s
     (fun name ->
-      match Fs_util.temp_owner name with
+      match Filename.temp_owner name with
         | Some pid when not (Fs_util.pid_alive pid) ->
             Fs_util.unlink_quiet (Filename.concat dir name)
         | _ -> Lwt.return_unit)

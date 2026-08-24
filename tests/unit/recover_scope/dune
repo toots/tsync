@@ -2,6 +2,8 @@
  (flags
   (:standard
    -open
+   Tsync_filename
+   -open
    Tsync_engine
    -open
    Tsync_naming
@@ -17,6 +19,7 @@
    Tsync_test_harness))
  (name recover_scope_test)
  (libraries
+  tsync_filename
   tsync_test_harness
   tsync-libs.engine
   tsync_naming

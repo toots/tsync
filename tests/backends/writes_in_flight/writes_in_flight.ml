@@ -29,7 +29,7 @@ module Dst =
 
 (* The staged file is planted on disk rather than caught mid-write: what is
    under test is the listing, and a real race would not reproduce. *)
-let staged_name = Filename.basename (Fs_util.temp_path "x")
+let staged_name = Filename.basename (Filename.temp_path "x")
 let staged_path = String.concat "/" [src_dir; chunk_prefix ^ shard; staged_name]
 let staged_key = chunk_prefix ^ shard ^ staged_name
 
@@ -92,7 +92,7 @@ module M = Mirror.Make (C)
 
 let mask key =
   let name = Filename.basename key in
-  if Fs_util.is_temp_name name then
+  if Filename.is_temp_name name then
     Filename.concat (Filename.dirname key) ".tsync-tmp-<staged>.tmp"
   else key
 
@@ -176,7 +176,7 @@ let () =
      check "so the replica holds nothing staged"
        (not
           (List.exists
-             (fun k -> Fs_util.is_temp_name (Filename.basename k))
+             (fun k -> Filename.is_temp_name (Filename.basename k))
              (keys_under dst_dir)));
      check "and the accounts agree"
        ~why:(fun () ->

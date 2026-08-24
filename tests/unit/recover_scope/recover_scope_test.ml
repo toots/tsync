@@ -21,7 +21,7 @@ let conf =
 module C = (val conf : Conf.S)
 module E = Domain_engine.Make (C)
 
-(* Named by [Fs_util.temp_path], so the recogniser and this agree by
+(* Named by [Filename.temp_path], so the recogniser and this agree by
    construction rather than by a spelling copied here. A foreign pid, because
    that is the case that matters: the sweep cannot tell it from a live one. *)
 let plant_temp dir =

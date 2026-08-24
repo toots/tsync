@@ -21,17 +21,6 @@ let rec mkdir_p_sync ?(perm = 0o755) path =
     try Unix.mkdir path perm with Unix.Unix_error (Unix.EEXIST, _, _) -> ()
   end
 
-(* The temp is named uniquely per process and per call rather than [path ^
-   ".tmp"]: two writers of one path would otherwise share a temp file and the
-   loser's rename would fail ENOENT. *)
-let temp_prefix = ".tsync-tmp-"
-let temp_seq = ref 0
-
-let temp_path path =
-  incr temp_seq;
-  Filename.concat (Filename.dirname path)
-    (Printf.sprintf "%s%d-%d.tmp" temp_prefix (Unix.getpid ()) !temp_seq)
-
 (* The descriptor keeps the inode alive without the name, so a caller that wants
    the bytes and not the file pays nothing for a kill landing here. *)
 let open_and_unlink path =
@@ -39,31 +28,6 @@ let open_and_unlink path =
   Fun.protect
     ~finally:(fun () -> try Unix.unlink path with Unix.Unix_error _ -> ())
     (fun () -> fd)
-
-(* Whether a name is one of ours, for the mirror walkers that skip and reap
-   them.
-
-   Next to [temp_path] because it is the same fact stated backwards, and stated
-   apart they drift: as a ".tmp" suffix test in another module it matched user
-   files too, and the walkers hid and deleted them, so a Syncthing folder
-   downloading ".syncthing.<name>.tmp" re-fetched the same gigabytes forever. *)
-let is_temp_name name =
-  String.starts_with ~prefix:temp_prefix name
-  && Filename.check_suffix name ".tmp"
-
-(* The pid {!temp_path} stamped into a name, so a sweep can tell a run's live
-   scratch file from one a killed run left behind. *)
-let temp_owner name =
-  if not (is_temp_name name) then None
-  else (
-    let rest =
-      String.sub name
-        (String.length temp_prefix)
-        (String.length name - String.length temp_prefix)
-    in
-    match String.index_opt rest '-' with
-      | None -> None
-      | Some i -> int_of_string_opt (String.sub rest 0 i))
 
 (* [ESRCH] is the answer that matters; [EPERM] means a process we may not signal
    and is therefore alive. A reused pid reads as alive, so this retires a dead
@@ -77,7 +41,7 @@ let pid_alive pid =
 (* All or nothing: a [fill] failing part-way leaves no temp file to be counted
    against the cache or swept later. *)
 let with_temp_rename path fill =
-  let tmp = temp_path path in
+  let tmp = Filename.temp_path path in
   Lwt.catch
     (fun () ->
       let* () = fill tmp in

@@ -35,5 +35,5 @@ let () =
       ("a child", Stored_key.child_key ~folder_id:fid "img.jpg");
       ("the index", Stored_key.index_key ~folder_id:fid);
       ("the namespace itself", fid ^ "/");
-      ("a write in flight", Fs_util.temp_path (fid ^ "/abcd"));
+      ("a write in flight", Filename.temp_path (fid ^ "/abcd"));
     ]

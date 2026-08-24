@@ -2,6 +2,8 @@
  (flags
   (:standard
    -open
+   Tsync_filename
+   -open
    Tsync_bigstring
    -open
    Tsync_xxhash
@@ -13,6 +15,7 @@
    Tsync_local_io))
  (name bigstring_test)
  (libraries
+  tsync_filename
   tsync_test_harness
   unix
   lwt

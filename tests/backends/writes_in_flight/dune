@@ -2,6 +2,8 @@
  (flags
   (:standard
    -open
+   Tsync_filename
+   -open
    Tsync_checkout
    -open
    Tsync_chunks
@@ -25,6 +27,7 @@
    Tsync_test_harness))
  (name writes_in_flight)
  (libraries
+  tsync_filename
   tsync_checkout
   tsync_chunks
   tsync_test_harness

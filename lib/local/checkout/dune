@@ -7,6 +7,8 @@
  (flags
   (:standard
    -open
+   Tsync_filename
+   -open
    Tsync_logical_key
    -open
    Tsync_staged
@@ -31,6 +33,7 @@
  (name tsync_checkout)
  (public_name tsync-libs.checkout)
  (libraries
+  tsync_filename
   tsync_logical_key
   tsync_staged
   tsync_conf

@@ -88,7 +88,7 @@ let ficlone_to dst ~src =
         (fun () -> ficlone dst_fd src_fd))
 
 let clone ~src =
-  let dst = Fs_util.temp_path src in
+  let dst = Filename.temp_path src in
   if ficlone_to dst ~src then Some (Fs_util.open_and_unlink dst)
   else (
     (* The empty file [ficlone_to] opened is not a clone of anything. *)

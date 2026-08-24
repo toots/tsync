@@ -104,7 +104,7 @@ let rec clean_tmp dir =
         let path = Filename.concat dir name in
         let* is_dir = Fs_util.is_directory path in
         if is_dir then clean_tmp path
-        else if Fs_util.is_temp_name name then Fs_util.unlink_quiet path
+        else if Filename.is_temp_name name then Fs_util.unlink_quiet path
         else Lwt.return_unit)
       names
 

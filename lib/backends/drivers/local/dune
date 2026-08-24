@@ -2,6 +2,8 @@
  (flags
   (:standard
    -open
+   Tsync_filename
+   -open
    Tsync_chunk_integrity
    -open
    Tsync_chunks
@@ -22,6 +24,7 @@
  (name tsync_local_backend)
  (library_flags (-linkall))
  (libraries
+  tsync_filename
   tsync_chunk_integrity
   tsync_chunks
   tsync-libs.field_spec

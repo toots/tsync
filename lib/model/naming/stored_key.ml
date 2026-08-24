@@ -9,7 +9,7 @@ let child_key ~folder_id name = folder_id ^ "/" ^ hash_name name
 let index_leaf = ".tsync-index"
 let index_key ~folder_id = folder_id ^ "/" ^ index_leaf
 let is_index_key key = Filename.basename key = index_leaf
-let is_temp_key key = Fs_util.is_temp_name (Filename.basename key)
+let is_temp_key key = Filename.is_temp_name (Filename.basename key)
 
 let is_child_object key =
   (not (String.ends_with ~suffix:"/" key))

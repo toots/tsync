@@ -1,9 +1,9 @@
 (library
  (flags
-  (:standard -open Tsync_lwt_unix))
+  (:standard -open Tsync_filename -open Tsync_lwt_unix))
  (name tsync_local_io)
  (public_name tsync-libs.local_io)
  (foreign_stubs
   (language c)
   (names statvfs_stubs positioned_stubs))
- (libraries unix lwt lwt.unix bigstringaf tsync_lwt_unix))
+ (libraries tsync_filename unix lwt lwt.unix bigstringaf tsync_lwt_unix))
