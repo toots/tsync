@@ -72,9 +72,8 @@ let upload name ~chunks =
   write_file path ~chunks;
   let* st = Lwt_unix.stat path in
   let+ (_ : Manifest.t) =
-    R.upload
-      ~key:(Logical_key.to_string (Lk.file name))
-      ~src_path:path ~mtime:st.Unix.st_mtime ~chunk_size ()
+    R.upload ~key:(Lk.file name) ~src_path:path ~mtime:st.Unix.st_mtime
+      ~chunk_size ()
   in
   ()
 

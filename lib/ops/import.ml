@@ -177,7 +177,7 @@ module Make (C : Conf.S) = struct
     match sidecar with
       | Some _ -> Lwt.return_true
       | None ->
-          let+ head = Fs.head_manifest_opt ~key:(Logical_key.to_string key) in
+          let+ head = Fs.head_manifest_opt ~key in
           Option.is_some head
 
   let import_file ~force_rehash ~on_progress ~src_root rel =
@@ -189,9 +189,7 @@ module Make (C : Conf.S) = struct
       let* st = Lwt_unix_retry.stat src_path in
       let* chunk_size = R.chunk_size () in
       let* state =
-        R.upload
-          ~key:(Logical_key.to_string key)
-          ~src_path ~mtime:st.Unix.st_mtime ~chunk_size
+        R.upload ~key ~src_path ~mtime:st.Unix.st_mtime ~chunk_size
           ~on_progress:(fun ~bytes ~sent ->
             on_progress ~bytes:(Int64.of_int bytes) ~sent)
           ()
@@ -209,11 +207,7 @@ module Make (C : Conf.S) = struct
       let* st = Lwt_unix_retry.lstat src_path in
       let name = Filename.basename rel in
       let state = Manifest.make_symlink ~name ~target ~mtime:st.Unix.st_mtime in
-      let* () =
-        St.put_manifest
-          ~key:(Logical_key.to_string key)
-          ~data:(Manifest.body ~name state)
-      in
+      let* () = St.put_manifest ~key ~data:(Manifest.body ~name state) in
       let* () = Mf.write key state in
       Lwt.return (Imported (Manifest.size state)))
 
@@ -328,7 +322,7 @@ module Make (C : Conf.S) = struct
           Listing.iter plan.dirs (fun rel ->
               let key = Lk.dir rel in
               let* () = Mf.create_dir key in
-              let* () = St.put_folder_marker ~key:(Logical_key.to_string key) in
+              let* () = St.put_folder_marker ~key in
               (* Minted by the marker above; read back so the journal entry
                  carries the id a peer resolves the folder by. *)
               let* id =

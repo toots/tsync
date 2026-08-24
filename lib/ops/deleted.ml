@@ -19,8 +19,10 @@ module Make (C : Conf.S) = struct
           | exception _ -> fallback)
       (fun _ -> Lwt.return fallback)
 
+  (* [hrel] is a version's grouping key — a folder id and a leaf hash — so this
+     is a backend key, not a path. *)
   let live hrel =
-    let+ head = B.head_opt ~key:(Logical_key.to_string (Lk.file hrel)) () in
+    let+ head = B.head_opt ~key:(C.domain_prefix ^ hrel) () in
     head <> None
 
   let in_folder rel =

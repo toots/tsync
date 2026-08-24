@@ -89,11 +89,7 @@ let publish () =
   output_string oc body;
   close_out oc;
   let* chunk_size = R.chunk_size () in
-  let* state =
-    R.upload
-      ~key:(Logical_key.to_string key)
-      ~src_path:src ~mtime ~chunk_size ()
-  in
+  let* state = R.upload ~key ~src_path:src ~mtime ~chunk_size () in
   Mf.write key state
 
 let write_at offset s =
@@ -140,11 +136,7 @@ let gpublish () =
   output_string oc body;
   close_out oc;
   let* chunk_size = GR.chunk_size () in
-  let* state =
-    GR.upload
-      ~key:(Logical_key.to_string gkey)
-      ~src_path:src ~mtime ~chunk_size ()
-  in
+  let* state = GR.upload ~key:gkey ~src_path:src ~mtime ~chunk_size () in
   Gm.write gkey state
 
 let gwrite_at offset s =

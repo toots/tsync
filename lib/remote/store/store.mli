@@ -10,9 +10,9 @@ module Make (C : Conf.S) (L : Layout.S) : sig
   (** Publish a manifest, bringing its folder into existence if needed. Every
       other operation here resolves what is already there and treats an unknown
       folder as absent. *)
-  val put_manifest : key:string -> data:Bigstring.t -> unit Lwt.t
+  val put_manifest : key:Logical_key.t -> data:Bigstring.t -> unit Lwt.t
 
-  val get_manifest_opt : key:string -> string option Lwt.t
+  val get_manifest_opt : key:Logical_key.t -> string option Lwt.t
 
   (** {!get_manifest_opt} saying which nothing it found: [`Absent] is the
       store's answer about the domain, while [`Unresolved] is this client not
@@ -20,18 +20,19 @@ module Make (C : Conf.S) (L : Layout.S) : sig
       For a caller that remembers an answer — the two are not equally
       rememberable, one changing without the domain changing. *)
   val get_manifest_state :
-    key:string -> [ `Body of string | `Absent | `Unresolved ] Lwt.t
+    key:Logical_key.t -> [ `Body of string | `Absent | `Unresolved ] Lwt.t
 
-  val head_manifest : key:string -> Backend.file_entry option Lwt.t
-  val delete_manifest : key:string -> unit Lwt.t
+  val head_manifest : key:Logical_key.t -> Backend.file_entry option Lwt.t
+  val delete_manifest : key:Logical_key.t -> unit Lwt.t
 
   (** Move a manifest. The destination may be brought into existence; the source
       has to be there already or there is nothing to move. *)
-  val copy_manifest : src_key:string -> dst_key:string -> unit Lwt.t
+  val copy_manifest :
+    src_key:Logical_key.t -> dst_key:Logical_key.t -> unit Lwt.t
 
   (** Record a directory under its parent's namespace, so a resync can rebuild
       the tree. A no-op for a layout with no folder tree. *)
-  val put_folder_marker : key:string -> unit Lwt.t
+  val put_folder_marker : key:Logical_key.t -> unit Lwt.t
 
   (** {2 By backend key}
 

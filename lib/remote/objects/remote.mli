@@ -28,7 +28,7 @@ module type S = sig
       it runs while the chunk holds its buffer slot, so it must return at once.
       {!upload_chunks} reports nothing. *)
   val upload :
-    key:string ->
+    key:Logical_key.t ->
     src_path:string ->
     mtime:float ->
     chunk_size:int ->
@@ -80,7 +80,7 @@ module type S = sig
       [tsync data-integrity --repair] takes the bytes from another store, which
       has some to work with. *)
   val upload_chunks :
-    key:string ->
+    key:Logical_key.t ->
     size:int64 ->
     chunk_size:int ->
     mtime:float ->
@@ -91,7 +91,7 @@ module type S = sig
 
   (** Fetch only the manifest for [key] from the primary backend. Returns [None]
       if the key does not exist or is not a manifest. *)
-  val fetch_manifest : key:string -> unit -> Manifest.t option Lwt.t
+  val fetch_manifest : key:Logical_key.t -> unit -> Manifest.t option Lwt.t
 
   (** {!fetch_manifest} saying which nothing it found. Only [`Absent] is an
       answer about the domain: [`Unresolved] is this client not knowing the
@@ -99,7 +99,7 @@ module type S = sig
       remembers an answer may remember the first and must not remember the other
       two, which change with nothing about the domain changing. *)
   val fetch_manifest_state :
-    key:string ->
+    key:Logical_key.t ->
     unit ->
     [ `Found of Manifest.t | `Absent | `Unresolved | `Unreadable ] Lwt.t
 end

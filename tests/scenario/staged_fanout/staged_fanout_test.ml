@@ -46,6 +46,7 @@ module C = struct
   let read_only = false
 end
 
+module Lk = Logical_key.Make (C)
 module R = Remote.Make (C)
 
 (* A body is live from the moment [source] is asked for it until the upload of
@@ -76,7 +77,7 @@ let source index =
 let () =
   Lwt_main.run
     (let* state =
-       R.upload_chunks ~key:"staged.bin"
+       R.upload_chunks ~key:(Lk.file "staged.bin")
          ~size:(Int64.of_int (chunks * csize))
          ~chunk_size:csize ~mtime:0. ~source ()
      in

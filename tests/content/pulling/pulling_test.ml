@@ -76,9 +76,7 @@ let publish ~salt name =
   let src = Filename.concat root name in
   write_file src (distinct ~salt size);
   let* (_ : Manifest.t) =
-    R.upload
-      ~key:(Logical_key.to_string key)
-      ~src_path:src ~mtime:0. ~chunk_size ()
+    R.upload ~key ~src_path:src ~mtime:0. ~chunk_size ()
   in
   let+ () = D.forget_chunks key in
   key

@@ -12,14 +12,14 @@ module Make (C : Conf.S) (L : Layout.S) : sig
   (** [<versions_prefix>/<manifest key tail>/], so a file's versions share the
       identity its manifest has. [None] for a key whose folder this client
       cannot resolve. *)
-  val version_dir : key:string -> string option Lwt.t
+  val version_dir : key:Logical_key.t -> string option Lwt.t
 
   (** Snapshot the current manifest object under a fresh timestamped version
       key, when the backend has one. Best-effort: a lost snapshot must not wedge
       the write it precedes. *)
-  val save_version : key:string -> unit Lwt.t
+  val save_version : key:Logical_key.t -> unit Lwt.t
 
-  val list_versions : key:string -> Backend.file_entry list Lwt.t
+  val list_versions : key:Logical_key.t -> Backend.file_entry list Lwt.t
   val get_version : vkey:string -> string Lwt.t
 
   (** {!parse} against this domain's prefix. *)

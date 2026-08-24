@@ -65,9 +65,7 @@ let upload name contents =
   let key = Lk.file @@ name in
   let src = Filename.concat root name in
   write_file src contents;
-  R.upload
-    ~key:(Logical_key.to_string key)
-    ~src_path:src ~mtime:0. ~chunk_size ()
+  R.upload ~key ~src_path:src ~mtime:0. ~chunk_size ()
 
 let listed () =
   let+ report = Corrupt.list () in

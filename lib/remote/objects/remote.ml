@@ -13,7 +13,7 @@ let () =
 
 module type S = sig
   val upload :
-    key:string ->
+    key:Logical_key.t ->
     src_path:string ->
     mtime:float ->
     chunk_size:int ->
@@ -30,7 +30,7 @@ module type S = sig
   val known_chunk_count : unit -> int
 
   val upload_chunks :
-    key:string ->
+    key:Logical_key.t ->
     size:int64 ->
     chunk_size:int ->
     mtime:float ->
@@ -39,10 +39,10 @@ module type S = sig
     unit ->
     Manifest.t Lwt.t
 
-  val fetch_manifest : key:string -> unit -> Manifest.t option Lwt.t
+  val fetch_manifest : key:Logical_key.t -> unit -> Manifest.t option Lwt.t
 
   val fetch_manifest_state :
-    key:string ->
+    key:Logical_key.t ->
     unit ->
     [ `Found of Manifest.t | `Absent | `Unresolved | `Unreadable ] Lwt.t
 end
@@ -193,9 +193,8 @@ module Make_with_layout (C : Conf.S) (L : Layout.S) : S = struct
      them. *)
   (* The key being published under is what names this file. *)
   let chunk_table ~key ~size ~chunk_size ~mtime ~count =
-    Manifest.builder
-      ~name:(Key.leaf ~domain_prefix:C.domain_prefix key)
-      ~size ~chunk_size ~mtime ~symlink:None ~count
+    Manifest.builder ~name:(Logical_key.leaf key) ~size ~chunk_size ~mtime
+      ~symlink:None ~count
 
   let publish ~key ~size ~chunk_size ~mtime ~cancel table =
     if !cancel then raise Cancelled;
@@ -208,7 +207,9 @@ module Make_with_layout (C : Conf.S) (L : Layout.S) : S = struct
     let body = Manifest.seal table ~h1 ~h2 in
     let state = Manifest.of_chunk body in
     let* () = if C.versioning then Hs.save_version ~key else Lwt.return_unit in
-    Log.info "upload %s: publishing manifest, size=%Ld" key size;
+    Log.info "upload %s: publishing manifest, size=%Ld"
+      (Logical_key.to_string key)
+      size;
     (* Before the manifest is visible, never after: a chunk this upload did not
        write — deduplicated, or already known to this session — may hold a name
        only in a space a collection is about to discard. *)
@@ -219,7 +220,8 @@ module Make_with_layout (C : Conf.S) (L : Layout.S) : S = struct
         Lwt.catch
           (fun () -> St.delete_manifest ~key)
           (fun exn ->
-            Log.err "upload %s: cancelled-manifest cleanup failed: %s" key
+            Log.err "upload %s: cancelled-manifest cleanup failed: %s"
+              (Logical_key.to_string key)
               (Printexc.to_string exn);
             Lwt.return_unit)
       in
@@ -250,7 +252,9 @@ module Make_with_layout (C : Conf.S) (L : Layout.S) : S = struct
                 Int64.to_int
                   (Unix.LargeFile.fstat snapshot).Unix.LargeFile.st_size
               in
-              Log.debug "upload %s: file_size=%d" key file_size;
+              Log.debug "upload %s: file_size=%d"
+                (Logical_key.to_string key)
+                file_size;
               (* An empty file is one chunk of no bytes, where covering zero
                  bytes takes none. *)
               let num_chunks =

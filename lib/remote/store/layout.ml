@@ -8,28 +8,28 @@ module type S = sig
 
       The plain name is the one that changes nothing, so a call site that has
       not thought about it gets the harmless behaviour. *)
-  val manifest_key : string -> string option Lwt.t
+  val manifest_key : Logical_key.t -> string option Lwt.t
 
   (** {!manifest_key}, minting and persisting any missing folder id. Only for a
       caller entitled to bring a folder into existence: the marker a mint
       persists re-creates the local directory the key names. *)
-  val ensure_manifest_key : string -> string Lwt.t
+  val ensure_manifest_key : Logical_key.t -> string Lwt.t
 
   (** For a directory's logical key: the backend key of its folder marker (under
       the parent's namespace) and the marker's JSON body, or [None] for layouts
       with no folder tree. Mints the folder's own id — this is what records a
       directory's existence, and what lets resync rebuild the structure. *)
-  val ensure_folder_marker : string -> (string * string) option Lwt.t
+  val ensure_folder_marker : Logical_key.t -> (string * string) option Lwt.t
 
   (** Just the marker's backend key, minting nothing: a caller moving or
       removing a marker does so once the local directory is gone, and an
       unresolvable id names a marker that cannot exist. *)
-  val folder_marker_key : string -> string option Lwt.t
+  val folder_marker_key : Logical_key.t -> string option Lwt.t
 
   (** The id naming a directory's own namespace, minted if this client has none.
       For callers moving a folder around (rmdir into the trash), which need it
       without the marker body {!ensure_folder_marker} builds. *)
-  val ensure_folder_id : string -> string Lwt.t
+  val ensure_folder_id : Logical_key.t -> string Lwt.t
 end
 
 (* [manifests/<parent_folder_id>/<hash(leaf)>], the parent id resolved from the
@@ -43,7 +43,7 @@ module Inode = struct
       Folder_ids.lookup_id ~cache_root:C.cache_root ~domain_name:C.domain_name
         rel
 
-    let rel_of = Key.strip_prefix ~domain_prefix:C.domain_prefix
+    let rel_of = Logical_key.path
 
     let child_key ~folder_id leaf =
       C.domain_prefix ^ Stored_key.child_key ~folder_id leaf
@@ -158,11 +158,11 @@ end
    keys and no path (share serving walks the folder tree by id) can reuse the
    path-keyed read machinery. Read-only: there is no folder tree to record. *)
 module Identity : S = struct
-  let manifest_key key = Lwt.return_some key
-  let ensure_manifest_key key = Lwt.return key
+  let manifest_key key = Lwt.return_some (Logical_key.to_string key)
+  let ensure_manifest_key key = Lwt.return (Logical_key.to_string key)
   let ensure_folder_marker _ = Lwt.return_none
   let folder_marker_key _ = Lwt.return_none
 
   (* The key already names the namespace; there is no path to resolve. *)
-  let ensure_folder_id key = Lwt.return (Filename.basename (Key.chop_slash key))
+  let ensure_folder_id key = Lwt.return (Logical_key.leaf key)
 end

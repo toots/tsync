@@ -58,7 +58,8 @@ module Make (C : Conf.S) (L : Layout.S) = struct
                             ~dst_key:(dir ^ Int64.to_string ts)
                             ())
                         (fun exn ->
-                          Log.warn "save_version %s: %s" key
+                          Log.warn "save_version %s: %s"
+                            (Logical_key.to_string key)
                             (Printexc.to_string exn);
                           Lwt.return_unit)))
 

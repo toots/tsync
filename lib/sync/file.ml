@@ -237,12 +237,11 @@ module Make_with_layout (C : Conf.S) (Sq : Sync_queue.S) (L : Layout.S) :
     W.complete ek
 
   let save_version key =
-    if C.versioning then Hs.save_version ~key:(Logical_key.to_string key)
-    else Lwt.return_unit
+    if C.versioning then Hs.save_version ~key else Lwt.return_unit
 
   let apply_delete key =
     let* () = save_version key in
-    let* () = St.delete_manifest ~key:(Logical_key.to_string key) in
+    let* () = St.delete_manifest ~key in
     clear_local key
 
   let queue_put key =
@@ -288,17 +287,17 @@ module Make_with_layout (C : Conf.S) (Sq : Sync_queue.S) (L : Layout.S) :
      [None] at the domain root, or for a parent this client never recorded;
      callers must skip rather than substitute a key, since the domain prefix is
      itself a real object. *)
-  let folder_marker_bkey key = L.folder_marker_key (Logical_key.to_string key)
+  let folder_marker_bkey key = L.folder_marker_key key
 
   let mkdir key =
     with_meta (fun () ->
         let* () = Mf.create_dir key in
         (* Minted here, not in [put_folder_marker], so the same id reaches the
            journal entry a peer will read. *)
-        let* fid = L.ensure_folder_id (Logical_key.to_string key) in
+        let* fid = L.ensure_folder_id key in
         with_journal key
           [`Mkdir (rel_key key, Some fid)]
-          (fun () -> St.put_folder_marker ~key:(Logical_key.to_string key)))
+          (fun () -> St.put_folder_marker ~key))
 
   (* O(1) delete: move the parent marker into the trash namespace. The subtree
      stays on the backend for undo, dropped later by [expire] and its chunks
@@ -307,7 +306,7 @@ module Make_with_layout (C : Conf.S) (Sq : Sync_queue.S) (L : Layout.S) :
     with_meta (fun () ->
         let rel = rel_key key in
         let* old_marker = folder_marker_bkey key in
-        let* fid = L.ensure_folder_id (Logical_key.to_string key) in
+        let* fid = L.ensure_folder_id key in
         let delete_old_marker () =
           match old_marker with
             | None -> Lwt.return_unit
@@ -336,11 +335,7 @@ module Make_with_layout (C : Conf.S) (Sq : Sync_queue.S) (L : Layout.S) :
       (Logical_key.to_string key)
       (Manifest.size m);
     let name = Logical_key.leaf key in
-    let* () =
-      St.put_manifest
-        ~key:(Logical_key.to_string key)
-        ~data:(Manifest.body ~name m)
-    in
+    let* () = St.put_manifest ~key ~data:(Manifest.body ~name m) in
     let* ek = Fs.write_journal_entry [`Put (rel_key key, Manifest.size m)] in
     Fs.bump_cursor ek
 
@@ -366,10 +361,7 @@ module Make_with_layout (C : Conf.S) (Sq : Sync_queue.S) (L : Layout.S) :
     let name = Logical_key.leaf key in
     let* m = published_here key in
     match m with
-      | Some man ->
-          St.put_manifest
-            ~key:(Logical_key.to_string key)
-            ~data:(Manifest.body ~name man)
+      | Some man -> St.put_manifest ~key ~data:(Manifest.body ~name man)
       | None -> Lwt.return_unit
 
   let rename_body ~src ~dst =
@@ -402,7 +394,7 @@ module Make_with_layout (C : Conf.S) (Sq : Sync_queue.S) (L : Layout.S) :
     (* Read after the move, where the folder now is. *)
     let* dir_id =
       if is_dir then
-        let+ id = L.ensure_folder_id (Logical_key.to_string dst) in
+        let+ id = L.ensure_folder_id dst in
         Some id
       else Lwt.return_none
     in
@@ -430,11 +422,8 @@ module Make_with_layout (C : Conf.S) (Sq : Sync_queue.S) (L : Layout.S) :
                       | None -> Lwt.return_unit
                       | Some bkey -> St.delete_raw ~bkey
                   in
-                  St.put_folder_marker ~key:(Logical_key.to_string dst)
-                else
-                  Fs.rename_file
-                    ~src_key:(Logical_key.to_string src)
-                    ~dst_key:(Logical_key.to_string dst))
+                  St.put_folder_marker ~key:dst
+                else Fs.rename_file ~src_key:src ~dst_key:dst)
           in
           if is_dir then Lwt.return_unit else resync_manifest_name dst)
         (fun exn ->
@@ -444,7 +433,7 @@ module Make_with_layout (C : Conf.S) (Sq : Sync_queue.S) (L : Layout.S) :
           let* src_head =
             if is_dir then Lwt.return_some ()
             else
-              let+ h = Fs.head_manifest_opt ~key:(Logical_key.to_string src) in
+              let+ h = Fs.head_manifest_opt ~key:src in
               Option.map (fun _ -> ()) h
           in
           if is_dir || Option.is_some src_head then Lwt.fail exn
@@ -485,12 +474,12 @@ module Make_with_layout (C : Conf.S) (Sq : Sync_queue.S) (L : Layout.S) :
     let* src_key =
       match version with
         | Some ts -> (
-            let* dir = Hs.version_dir ~key:(Logical_key.to_string key) in
+            let* dir = Hs.version_dir ~key in
             match dir with
               | Some dir -> Lwt.return (dir ^ ts)
               | None -> failwith ("no versions for " ^ rel_key key))
         | None -> (
-            let* entries = Hs.list_versions ~key:(Logical_key.to_string key) in
+            let* entries = Hs.list_versions ~key in
             match latest_version entries with
               | Some (k, _) -> Lwt.return k
               | None -> failwith ("no versions for " ^ rel_key key))
@@ -502,8 +491,7 @@ module Make_with_layout (C : Conf.S) (Sq : Sync_queue.S) (L : Layout.S) :
           (* Restored under the name the snapshot recorded, which is the one
              its body already carries. *)
           let* () =
-            St.put_manifest
-              ~key:(Logical_key.to_string key)
+            St.put_manifest ~key
               ~data:(Manifest.body ~name:(Manifest.recorded_name m) m)
           in
           let* () = write_manifest key m in
@@ -532,11 +520,7 @@ module Make_with_layout (C : Conf.S) (Sq : Sync_queue.S) (L : Layout.S) :
         let state =
           Manifest.make_symlink ~name ~target ~mtime:(Unix.gettimeofday ())
         in
-        let* () =
-          St.put_manifest
-            ~key:(Logical_key.to_string key)
-            ~data:(Manifest.body ~name state)
-        in
+        let* () = St.put_manifest ~key ~data:(Manifest.body ~name state) in
         let* () = write_manifest key state in
         let* ek =
           Fs.write_journal_entry [`Put (rel_key key, Manifest.size state)]
@@ -611,7 +595,7 @@ module Make_with_layout (C : Conf.S) (Sq : Sync_queue.S) (L : Layout.S) :
                  from the parent folder's id, so a missing one does not fail
                  loudly here — it resolves to no key and the put is skipped. *)
               let* () = adopt_ancestor_ids rel in
-              let* m = R.fetch_manifest ~key:(Logical_key.to_string key) () in
+              let* m = R.fetch_manifest ~key () in
               match m with
                 | None -> Lwt.return_unit
                 | Some state -> write_manifest key state)
@@ -650,9 +634,7 @@ module Make_with_layout (C : Conf.S) (Sq : Sync_queue.S) (L : Layout.S) :
             unless_staged dst_key (fun () ->
                 (* No local src (e.g. we renamed it ourselves and published the
                    result): adopt dst's remote state. *)
-                let* m =
-                  R.fetch_manifest ~key:(Logical_key.to_string dst_key) ()
-                in
+                let* m = R.fetch_manifest ~key:dst_key () in
                 match m with
                   | Some state -> write_manifest dst_key state
                   | _ -> Lwt.return_unit)

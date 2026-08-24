@@ -46,9 +46,7 @@ let cmd : unit Cmd.t =
        let parse = History.parse ~versions_prefix:C.versions_prefix in
        match path with
          | Some rel ->
-             let* dir =
-               Hs.version_dir ~key:(Logical_key.to_string (Lk.file rel))
-             in
+             let* dir = Hs.version_dir ~key:(Lk.file rel) in
              let+ entries =
                match dir with
                  | None -> Lwt.return_nil

@@ -6,6 +6,8 @@
  (flags
   (:standard
    -open
+   Tsync_logical_key
+   -open
    Tsync_conf
    -open
    Tsync_naming
@@ -20,6 +22,7 @@
  (name tsync_history)
  (public_name tsync-libs.history)
  (libraries
+  tsync_logical_key
   tsync_conf
   tsync_naming
   tsync_store

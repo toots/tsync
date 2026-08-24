@@ -50,9 +50,7 @@ module Make (C : Conf.S) = struct
           (* Where it goes back is filed under its parent's namespace, so a
              client that has never resolved the parent has no key to write and
              must sync before it can put anything back. *)
-          let* new_key =
-            L.folder_marker_key (Logical_key.to_string (Lk.dir path))
-          in
+          let* new_key = L.folder_marker_key (Lk.dir path) in
           match new_key with
             | None -> Lwt.return Parent_unknown
             | Some new_key ->

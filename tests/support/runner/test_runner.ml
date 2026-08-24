@@ -510,7 +510,7 @@ let setup_client (module C : Conf.S) root staging_prefix =
         close_out oc;
         Lwt.return_unit
     | DeleteRemoteManifest p -> (
-        let* bk = L.manifest_key (Logical_key.to_string (key p)) in
+        let* bk = L.manifest_key (key p) in
         match bk with
           | None -> failwith ("no backend key for " ^ p)
           | Some bk -> B.delete ~key:bk ())

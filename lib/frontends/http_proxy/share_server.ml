@@ -103,6 +103,7 @@ let preview_kinds_json =
   `Assoc (List.map (fun (e, m) -> (e, `String (preview_kind m))) mime_table)
 
 module Make (C : Conf.S) = struct
+  module Lk = Logical_key.Make (C)
   module R = Remote.Make_with_layout (C) (Layout.Identity)
   module D = Data.Make (C) (R)
 
@@ -120,7 +121,12 @@ module Make (C : Conf.S) = struct
     match Hashtbl.find_opt manifests key with
       | Some m -> Lwt.return_some m
       | None -> (
-          let* state = R.fetch_manifest ~key () in
+          (* Identity layout: the logical key's spelling is the backend key. *)
+          let* state =
+            match Lk.of_string key with
+              | Some k -> R.fetch_manifest ~key:k ()
+              | None -> Lwt.return_none
+          in
           match state with
             | Some m ->
                 if Hashtbl.length manifests >= max_memoized_manifests then

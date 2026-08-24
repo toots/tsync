@@ -49,9 +49,7 @@ let () =
      let landed = ref 0 in
      let baseline = (Stdlib.Gc.stat ()).Stdlib.Gc.live_words in
      let* manifest =
-       R.upload
-         ~key:(Logical_key.to_string (Lk.file "big.bin"))
-         ~src_path:source ~mtime:0. ~chunk_size
+       R.upload ~key:(Lk.file "big.bin") ~src_path:source ~mtime:0. ~chunk_size
          ~on_progress:(fun ~bytes:_ ~sent:_ ->
            incr landed;
            if !live_at_first_chunk = 0 then
@@ -112,9 +110,8 @@ let () =
         writes no chunk and so exercises the other branch of [put_chunk]. *)
      case "a deduplicated upload publishes the same body";
      let+ again =
-       R.upload
-         ~key:(Logical_key.to_string (Lk.file "copy.bin"))
-         ~src_path:source ~mtime:0. ~chunk_size ()
+       R.upload ~key:(Lk.file "copy.bin") ~src_path:source ~mtime:0. ~chunk_size
+         ()
      in
      check "the two agree on the file's identity"
        (Manifest.h1 again = Manifest.h1 manifest

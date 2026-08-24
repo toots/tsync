@@ -143,10 +143,7 @@ let count_chunks () =
          not (String.length k > 0 && k.[String.length k - 1] = '/'))
        entries)
 
-let upload key path =
-  R.upload
-    ~key:(Logical_key.to_string key)
-    ~src_path:path ~mtime:0. ~chunk_size ()
+let upload key path = R.upload ~key ~src_path:path ~mtime:0. ~chunk_size ()
 
 let () =
   (* Round-trip through the read path: the manifest is fetched, every chunk is
@@ -173,9 +170,7 @@ let () =
      (* Fetching the manifest of a file with no local sidecar yields the logical
         size, not the manifest object's own byte size. This is what stat and
         list_dir fall back to for a never-cached file. *)
-     let* rm =
-       R.fetch_manifest ~key:(Logical_key.to_string (Lk.file "big.bin")) ()
-     in
+     let* rm = R.fetch_manifest ~key:(Lk.file "big.bin") () in
      (match rm with
        | Some m -> assert (Manifest.size m = Int64.of_int size)
        | _ -> assert false);
@@ -226,9 +221,7 @@ let () =
        Lwt.catch
          (fun () ->
            let+ (_ : Manifest.t) =
-             Rm.upload
-               ~key:(Logical_key.to_string mkey)
-               ~src_path:moving_src ~mtime:0. ~chunk_size ()
+             Rm.upload ~key:mkey ~src_path:moving_src ~mtime:0. ~chunk_size ()
            in
            "published")
          (function
@@ -236,7 +229,7 @@ let () =
            | exn -> Lwt.fail exn)
      in
      assert (outcome = "rejected");
-     let* published = Rm.fetch_manifest ~key:(Logical_key.to_string mkey) () in
+     let* published = Rm.fetch_manifest ~key:mkey () in
      assert (published = None);
 
      print_endline "ok";

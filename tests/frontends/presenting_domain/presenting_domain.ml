@@ -96,7 +96,7 @@ let () =
      (* The bytes themselves, not just the counter: a queue that reported a file
         finished without the store holding it would read the same above. *)
      let module L = Layout.Inode.Make (C) in
-     let* bkey = L.ensure_manifest_key (Logical_key.to_string key) in
+     let* bkey = L.ensure_manifest_key key in
      let module B = (val C.store : Backend.S) in
      let* head = B.head_opt ~key:bkey () in
      Printf.printf "manifest in the store: %b\n" (head <> None);

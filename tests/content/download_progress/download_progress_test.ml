@@ -142,9 +142,7 @@ let () =
      let src = Filename.concat root "movie.bin" in
      write_file src data;
      let* (_ : Manifest.t) =
-       R.upload
-         ~key:(Logical_key.to_string key)
-         ~src_path:src ~mtime:0. ~chunk_size ()
+       R.upload ~key ~src_path:src ~mtime:0. ~chunk_size ()
      in
 
      let* () = D.forget_chunks key in

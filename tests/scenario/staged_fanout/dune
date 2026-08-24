@@ -2,6 +2,8 @@
  (flags
   (:standard
    -open
+   Tsync_logical_key
+   -open
    Tsync_remote
    -open
    Tsync_manifest
@@ -21,6 +23,7 @@
    Tsync_test_harness))
  (name staged_fanout_test)
  (libraries
+  tsync_logical_key
   tsync_remote
   tsync_manifest
   tsync_chunk_store

@@ -47,9 +47,7 @@ module Make (C : Conf.S) = struct
            copy. *)
         let base_json = [("v", `Int 1); ("expires", `Int expires)] in
         let* manifest =
-          let* file_key =
-            L.manifest_key (Logical_key.to_string (Lk.file rel))
-          in
+          let* file_key = L.manifest_key (Lk.file rel) in
           (* A file manifest and a folder marker occupy the same key within a
              parent namespace, so classification is by body: otherwise a folder
              is shared as a chunkless file and the Lambda chokes.

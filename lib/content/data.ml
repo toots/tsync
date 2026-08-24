@@ -374,9 +374,7 @@ module Make (C : Conf.S) (R : Remote.S) = struct
              would otherwise be recorded under the mark that apply moved to, and
              so survive the very thing that invalidates it. *)
           let before = applied_mark () in
-          let+ state =
-            R.fetch_manifest_state ~key:(Logical_key.to_string key) ()
-          in
+          let+ state = R.fetch_manifest_state ~key () in
           (* Only the store's own answer is remembered. Not knowing the key's
              folder yet, and a body caught mid-write, are facts about this
              client that change with nothing about the domain changing — and
@@ -406,7 +404,7 @@ module Make (C : Conf.S) (R : Remote.S) = struct
         | Some (`Published m) ->
             pread ~id:(Logical_key.to_string key) ~manifest:m buf ~offset
         | None -> (
-            let* state = R.fetch_manifest ~key:(Logical_key.to_string key) () in
+            let* state = R.fetch_manifest ~key () in
             match state with
               | Some m ->
                   pread ~id:(Logical_key.to_string key) ~manifest:m buf ~offset
@@ -909,9 +907,7 @@ module Make (C : Conf.S) (R : Remote.S) = struct
       | Some uuid ->
           let* chunk_size = R.chunk_size () in
           let* state =
-            R.upload
-              ~key:(Logical_key.to_string key)
-              ~src_path:(Sb.whole_path uuid)
+            R.upload ~key ~src_path:(Sb.whole_path uuid)
               ~mtime:staged.Staged_manifest.s_mtime ~chunk_size ?cancel ()
           in
           commit key staged state
@@ -920,9 +916,7 @@ module Make (C : Conf.S) (R : Remote.S) = struct
   and upload_chunked ~key ~(staged : Staged_manifest.staged) ?cancel () =
     let* base = Mf.published key in
     let* state =
-      R.upload_chunks
-        ~key:(Logical_key.to_string key)
-        ~size:staged.Staged_manifest.s_size
+      R.upload_chunks ~key ~size:staged.Staged_manifest.s_size
         ~chunk_size:staged.Staged_manifest.s_chunk_size
         ~mtime:staged.Staged_manifest.s_mtime
         ~source:(staged_source ~staged ~base)
@@ -1219,7 +1213,7 @@ module Make (C : Conf.S) (R : Remote.S) = struct
                        List.exists still_inherited (Manifest.Group.indices g))
                      (groups m)))
       | None -> (
-          let* state = R.fetch_manifest ~key:(Logical_key.to_string key) () in
+          let* state = R.fetch_manifest ~key () in
           match state with
             | Some m ->
                 let* () = Mf.write key m in

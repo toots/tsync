@@ -68,9 +68,7 @@ let () =
   Lwt_main.run
     (let open Lwt.Syntax in
      (* File: put a (non-marker) manifest, share it. *)
-     let* file_key =
-       L.ensure_manifest_key (Logical_key.to_string (Lk.file "foo"))
-     in
+     let* file_key = L.ensure_manifest_key (Lk.file "foo") in
      let* () =
        B.put ~key:file_key ~data:(Bigstring.of_string "{\"chunks\":[]}") ()
      in

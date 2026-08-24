@@ -2,6 +2,8 @@
  (flags
   (:standard
    -open
+   Tsync_logical_key
+   -open
    Tsync_remote
    -open
    Tsync_store
@@ -54,6 +56,7 @@
   %{project_root}/lambda/mime.json
   stats.html)
  (libraries
+  tsync_logical_key
   tsync_remote
   tsync_store
   tsync_checkout
