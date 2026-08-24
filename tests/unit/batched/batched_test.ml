@@ -40,6 +40,7 @@ module Plain : Backend.S = struct
   include Base
 
   let get_many = None
+  let local_path = None
 end
 
 module Native : Backend.S = struct
@@ -54,6 +55,8 @@ module Native : Backend.S = struct
              (fun (e : Backend.file_entry) ->
                (e.Backend.key, body e.Backend.key))
              entries))
+
+  let local_path = None
 end
 
 module Bp = Backend.Batched (Plain)

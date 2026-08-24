@@ -91,6 +91,7 @@ module Counting : Backend.S = struct
 
   let get_many = None
   let capabilities ~prefix:_ () = Lwt.return Backend.no_caps
+  let local_path = None
 end
 
 module C =

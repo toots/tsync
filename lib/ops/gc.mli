@@ -16,9 +16,10 @@
     {!Chunk_space.promote_all} before publishing a manifest, which
     {!Remote.publish} does.
 
-    {b Where it runs.} Only on a main that answers {!Backend.caps.gc}, a
-    directory rename within the store being the whole of what this rests on; an
-    s3, gcs or http-proxy main is refused rather than half-served.
+    {b Where it runs.} Only on a main that keeps its objects here
+    ({!Backend.S.local_path}), a directory rename within the store being the
+    whole of what this rests on; an s3, gcs or http-proxy main is refused rather
+    than half-served.
 
     {b The copies.} Replicas and backfill targets are never renamed. Closing
     deletes off each of them the same keys it discards here, batched by key

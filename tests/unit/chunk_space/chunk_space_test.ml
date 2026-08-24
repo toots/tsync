@@ -119,7 +119,7 @@ let () =
 
      case "a store that cannot collect never grows a second lookup";
      let* head = Frozen_space.head going in
-     step "head(in the discarded space) = %b  <- caps.gc = false" (head <> None);
+     step "head(in the discarded space) = %b  <- no local_path" (head <> None);
 
      case "collecting: found in either space";
      (* The lookups above have just cached "idle", and the cache holds for

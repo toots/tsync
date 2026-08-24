@@ -439,9 +439,12 @@ let make ?(verify_writes = true) ~root () : (module Backend.S) =
         {
           Backend.no_caps with
           max_concurrency = Lazy.force concurrency;
-          gc = true;
           verified = verify_writes;
         }
+
+    (* Objects are files at [root/<key>] ({!resolve}), so a caller may work on
+       the tree as one. *)
+    let local_path = Some root
   end)
 
 let spec =

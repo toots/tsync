@@ -47,6 +47,8 @@ module Member : Backend.S = struct
                  Option.map Bigstring.of_string
                    (Hashtbl.find_opt objects e.Backend.key) ))
              entries))
+
+  let local_path = None
 end
 
 module Store =

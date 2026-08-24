@@ -18,6 +18,7 @@ end) : Backend.S = struct
     Lwt.return `Unsupported
 
   let capabilities ~prefix:_ () = Lwt.return Backend.no_caps
+  let local_path = None
 end
 
 module Hung : Backend.S = struct
@@ -38,6 +39,7 @@ module Hung : Backend.S = struct
     Lwt.return `Unsupported
 
   let capabilities ~prefix:_ () = Lwt.return Backend.no_caps
+  let local_path = None
 end
 
 module Refuses : Backend.S = struct
@@ -58,4 +60,5 @@ module Refuses : Backend.S = struct
     Lwt.return `Unsupported
 
   let capabilities ~prefix:_ () = Lwt.return Backend.no_caps
+  let local_path = None
 end

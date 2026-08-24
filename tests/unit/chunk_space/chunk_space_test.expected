@@ -5,7 +5,7 @@
   get(live) = "live"
 
 === a store that cannot collect never grows a second lookup
-  head(in the discarded space) = false  <- caps.gc = false
+  head(in the discarded space) = false  <- no local_path
 
 === collecting: found in either space
   head(surviving) = true

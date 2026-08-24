@@ -241,21 +241,11 @@ let capabilities t ~prefix () =
           and* chunk_size = query_chunk_size t ~prefix
           and* max_concurrency = query_max_concurrency t ~prefix
           and* verified = query_verified t ~prefix in
-          (* [gc] is not asked over the wire: collecting chunks needs a link and
-             a rename in the store itself, which is the serving side's business
-             and not something a proxy client can do on its behalf.
-
-             [verified] is asked, because unlike collecting it is a fact about
-             the bytes rather than about machinery, and the markers it describes
-             are ones we go on to list through this same peer. *)
+          (* [verified] is asked over the wire because it is a fact about the
+             bytes rather than about machinery, and the markers it describes are
+             ones we go on to list through this same peer. *)
           Lwt.return
-            {
-              Backend.share_url;
-              chunk_size;
-              max_concurrency;
-              gc = false;
-              verified;
-            }
+            { Backend.share_url; chunk_size; max_concurrency; verified }
         in
         t.caps_cache <- Some p;
         p
@@ -299,6 +289,9 @@ let make ~url ~secret : (module Backend.S) =
       Lwt.return `Unsupported
 
     let capabilities ~prefix () = capabilities t ~prefix ()
+
+    (* The peer's files are the peer's, whatever it keeps them on. *)
+    let local_path = None
   end)
 
 let spec =

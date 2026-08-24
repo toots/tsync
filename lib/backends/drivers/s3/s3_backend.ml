@@ -294,6 +294,8 @@ let make ?endpoint ?unsigned_payload ?share_url ~bucket ~region ~access_key_id
     let capabilities ~prefix:_ () =
       Lwt.return
         { Backend.no_caps with share_url = t.share_url; verified = true }
+
+    let local_path = None
   end)
 
 let spec =

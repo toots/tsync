@@ -404,6 +404,8 @@ let make ?endpoint ?service_account_key ?share_url ~bucket () :
     let capabilities ~prefix:_ () =
       Lwt.return
         { Backend.no_caps with share_url = t.share_url; verified = true }
+
+    let local_path = None
   end)
 
 let spec =

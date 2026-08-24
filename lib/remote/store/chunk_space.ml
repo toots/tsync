@@ -83,31 +83,15 @@ module Make (C : Conf.S) = struct
 
   (* Promotion is a rename between two directories of one filesystem, so it
      needs the path rather than the store: the same reason {!Gc} opens and closes
-     a run through [Lwt_unix] on [local_path] instead of through a backend. A
-     main without one cannot be mid-run — {!Gc} refuses to start there. *)
+     a run through [Lwt_unix] on it instead of through a backend.
+
+     Also what says a run is possible at all, which keeps a store that will never
+     be collected — s3, gcs, a proxy — on the single-lookup path below: no second
+     key, no marker. *)
   let local_root () =
     match Lazy.force main_backend with
       | Some m -> m.Backend.local_path
       | None -> None
-
-  (* Whether the main can be mid-run at all, memoized so concurrent lookups share
-     one probe. This is what keeps a store that will never be collected — s3,
-     gcs, a proxy — on the single-lookup path: no second key, no marker. *)
-  let capable = ref None
-
-  let is_capable () =
-    match !capable with
-      | Some p -> p
-      | None ->
-          let p =
-            match main () with
-              | None -> Lwt.return_false
-              | Some (module M : Backend.S) ->
-                  let+ caps = M.capabilities ~prefix:C.domain_prefix () in
-                  caps.Backend.gc
-          in
-          capable := Some p;
-          p
 
   (* The marker describes one store's own state, so it goes to the main directly:
      through the composite every write would fan out to each replica and backfill
@@ -258,10 +242,9 @@ module Make (C : Conf.S) = struct
      {!promote_all} at publish time is what a chunk's survival hangs on, and one
      mechanism for that is easier to be sure of than two. *)
   let head chunk_key =
-    let* capable = is_capable () in
-    match (capable, main ()) with
-      | false, _ | _, None -> B.head_opt ~key:(L.key chunk_key) ()
-      | true, Some (module M : Backend.S) ->
+    match (local_root (), main ()) with
+      | None, _ | _, None -> B.head_opt ~key:(L.key chunk_key) ()
+      | Some _, Some (module M : Backend.S) ->
           let* keys = candidates chunk_key in
           let rec first = function
             | [] -> (
@@ -287,10 +270,9 @@ module Make (C : Conf.S) = struct
      The last attempt is a [get], not a [get_opt], so a chunk that is simply gone
      is reported in the store's own words. *)
   let get chunk_key =
-    let* capable = is_capable () in
-    match (capable, main ()) with
-      | false, _ | _, None -> B.get ~key:(L.key chunk_key) ()
-      | true, Some (module M : Backend.S) ->
+    match (local_root (), main ()) with
+      | None, _ | _, None -> B.get ~key:(L.key chunk_key) ()
+      | Some _, Some (module M : Backend.S) ->
           let* keys = candidates chunk_key in
           let rec first = function
             | [] -> B.get ~key:(L.key chunk_key) ()

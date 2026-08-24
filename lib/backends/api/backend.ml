@@ -40,7 +40,6 @@ type caps = {
   share_url : string option;
   chunk_size : int option;
   max_concurrency : int option;
-  gc : bool;
   verified : bool;
 }
 
@@ -49,7 +48,6 @@ let no_caps =
     share_url = None;
     chunk_size = None;
     max_concurrency = None;
-    gc = false;
     verified = false;
   }
 
@@ -67,15 +65,13 @@ let merge_caps cs =
           share_url = first acc.share_url c.share_url;
           chunk_size = first acc.chunk_size c.chunk_size;
           max_concurrency = lowest acc.max_concurrency c.max_concurrency;
-          gc = acc.gc || c.gc;
           verified = acc.verified;
         })
       no_caps cs
   in
-  (* Every store, where {!caps.gc} takes any: gc describes machinery one store
-     either has or does not, while this is a claim about the domain's bytes, and
-     one unchecked store is enough to make "no corruption found" mean "nothing
-     looked". Empty is nobody's claim, so it is not one either. *)
+  (* Every store: this is a claim about the domain's bytes, and one unchecked
+     store is enough to make "no corruption found" mean "nothing looked". Empty
+     is nobody's claim, so it is not one either. *)
   { merged with verified = cs <> [] && List.for_all (fun c -> c.verified) cs }
 
 module type S = sig
@@ -122,6 +118,8 @@ module type S = sig
       its bytes. See {!caps}; [no_caps] is the honest answer for every store
       that only holds bytes. *)
   val capabilities : prefix:string -> unit -> caps Lwt.t
+
+  val local_path : string option
 end
 
 (* Runs a request may ask for at once. Both bounds are needed: the count is what
@@ -183,12 +181,6 @@ type traffic = { uploaded : Metrics.counter; downloaded : Metrics.counter }
 let new_traffic () =
   { uploaded = Metrics.counter (); downloaded = Metrics.counter () }
 
-(* A local store is a filesystem, so nothing it reads or writes crossed a link.
-   Asked here by both the wrapper that counts and the caller that decides
-   whether a store has a figure worth reporting, so the two cannot drift into
-   disagreeing about which stores have traffic. *)
-let counts_traffic ~backend_type = backend_type <> "local"
-
 type role = [ `Main | `Replica | `Backfill | `ReadOnly ]
 
 type member = {
@@ -207,7 +199,7 @@ type member = {
       (** Replica and backfill: chunk forwards in flight. *)
   traffic : traffic option;
       (** What crossed the link to this store, for the stores that have a link:
-          absent for a [local] one, which {!counts_traffic} excludes. *)
+          absent for a store that is a tree here, having no link. *)
   degraded : (unit -> bool) option;
       (** Replica and backfill: writes were dropped, [tsync mirror] is needed —
           unlike a target merely being behind, patience will not fix this. *)
@@ -305,13 +297,20 @@ let counted ~traffic m =
             answered;
           answered)
         Inner.get_many
+
+    let local_path = Inner.local_path
   end : S)
 
 let make ?traffic ~backend_type ~get_field () =
   match Hashtbl.find_opt registry backend_type with
     | Some { factory; _ } ->
         let store = factory get_field in
-        if not (counts_traffic ~backend_type) then store
+        let module St = (val store : S) in
+        (* A store that is a tree here read nothing over a link, so there is no
+           traffic to count. Derived from the store rather than asked of its
+           type, so the wrapper that counts and the report that prints cannot
+           disagree about which stores have a figure. *)
+        if St.local_path <> None then store
         else
           counted
             ~traffic:(match traffic with Some t -> t | None -> new_traffic ())

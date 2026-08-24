@@ -42,15 +42,6 @@ type caps = {
           so a frontend taking work from many clients holds requests instead of
           handing them all to storage. A local store answers from the device
           under it; an http-proxy asks its peer. *)
-  gc : bool;
-      (** Whether this store can collect its own unreferenced chunks, which
-          takes renaming a directory and renaming within it — see {!Chunk_space}
-          — that a filesystem has and an object store does not. Nothing beyond
-          [rename] is asked of it: a store with no hard links to give collects
-          the same way.
-
-          Asked of a domain's main directly rather than of the composite: it
-          describes one store's machinery, not the domain's. *)
   verified : bool;
       (** Whether every chunk this store takes is held against its own name
           ({!Corruption}): a [local] store as it writes unless that was turned
@@ -65,10 +56,10 @@ val no_caps : caps
 
 (** One store's answer out of several. First opinion wins for the preferences;
     the lowest wins for {!caps.max_concurrency}, since a limit that ignores the
-    slowest participant is not a limit; any wins for {!caps.gc}; every one must
-    agree for {!caps.verified}, one unchecked store being enough to make the
-    domain's clean bill of health worth nothing. Defined once so two composites
-    cannot drift into merging differently. *)
+    slowest participant is not a limit; every one must agree for
+    {!caps.verified}, one unchecked store being enough to make the domain's
+    clean bill of health worth nothing. Defined once so two composites cannot
+    drift into merging differently. *)
 val merge_caps : caps list -> caps
 
 module type S = sig
@@ -190,6 +181,16 @@ module type S = sig
   (** What this store can tell a client about [prefix]'s domain. [prefix]
       identifies the domain, for backends that front several. *)
   val capabilities : prefix:string -> unit -> caps Lwt.t
+
+  (** The directory this store keeps its objects in, where the object for a key
+      is the file at that path under it. [None] for a store to be reached only
+      through the operations above.
+
+      What it grants is the filesystem: a caller may read, rename and remove
+      within the tree. Nothing here says what anyone does with that — a
+      collection renames the chunk root aside and renames chunks back
+      ({!Chunk_space}), and a report only wants a path to measure. *)
+  val local_path : string option
 end
 
 (** [B]'s {!S.get_many} resolved: its own where it declared one, and [get_opt]
@@ -258,13 +259,6 @@ val drain : unit -> unit Lwt.t
 type traffic = { uploaded : Metrics.counter; downloaded : Metrics.counter }
 
 val new_traffic : unit -> traffic
-
-(** Whether bytes to a store of this type cross a link, and so are counted. A
-    [local] store is a filesystem and answers [false]; every remote driver
-    answers [true]. Shared by {!make} and by whoever builds a {!member}, so the
-    wrapper that counts and the report that prints cannot disagree about which
-    stores have a figure. *)
-val counts_traffic : backend_type:string -> bool
 
 (** What a store is for. The same spelling the config uses, so a configured role
     reaches a member without being taken apart and put back together. *)

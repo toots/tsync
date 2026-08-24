@@ -109,13 +109,15 @@ let build_backends ~paths ~resume (d : Conf_parsing.domain) :
           ?in_flight:(stat (fun s -> s.Deferred.in_flight))
           ?degraded:(stat (fun s -> s.Deferred.degraded))
           ?traffic:
-            (if Backend.counts_traffic ~backend_type:bc.backend_type then
-               Hashtbl.find_opt traffic bc.name
-             else None)
-            (* Only a local store sits on a filesystem we can measure. *)
+            (let module B = (val backend : Backend.S) in
+            if B.local_path = None then Hashtbl.find_opt traffic bc.name
+            else None)
+            (* Both of these are the store's own, not config's to work out from
+               its type: where it keeps its files, and so whether anything it
+               moved crossed a link. *)
           ?local_path:
-            (if bc.backend_type = "local" then List.assoc_opt "path" bc.fields
-             else None)
+            (let module B = (val backend : Backend.S) in
+            B.local_path)
           backend)
       leaves
   in

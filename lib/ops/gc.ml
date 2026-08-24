@@ -62,7 +62,7 @@ module Make (C : Conf.S) = struct
     !fired
 
   (* Opening and closing a run are a rename and an [rm -rf] within the main's own
-     directory, which is exactly what {!Backend.caps.gc} claims. *)
+     directory, which is what having a {!Backend.S.local_path} grants. *)
   let collector () =
     let main =
       List.find_opt
@@ -76,10 +76,11 @@ module Make (C : Conf.S) = struct
                (Printf.sprintf "%s has no main store to collect." C.domain_name))
       | Some m -> (
           let (module M : Backend.S) = m.Backend.backend in
-          let* caps = M.capabilities ~prefix:C.domain_prefix () in
-          match (caps.Backend.gc, m.Backend.local_path) with
-            | true, Some root -> Lwt.return ((module M : Backend.S), root)
-            | _ ->
+          (* A collection is renames within the store's own tree, so it needs a
+             store that is one. *)
+            match M.local_path with
+            | Some root -> Lwt.return ((module M : Backend.S), root)
+            | None ->
                 Lwt.fail
                   (Unsupported
                      (Printf.sprintf

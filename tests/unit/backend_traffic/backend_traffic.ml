@@ -5,8 +5,8 @@
    move them by nothing, a local store must move them by nothing, and a write
    reaching three stores must move them three times.
 
-   The store here is in memory and registered under a type that is not "local",
-   which is what puts it on the counted side of {!Backend.make}. *)
+   The store here is in memory and keeps no files of its own, which is what puts
+   it on the counted side of {!Backend.make}. *)
 
 open Lwt.Syntax
 open Check
@@ -86,6 +86,7 @@ module Memory () : Backend.S = struct
 
   let get_many = None
   let capabilities ~prefix:_ () = Lwt.return Backend.no_caps
+  let local_path = None
 end
 
 let () =
@@ -247,9 +248,16 @@ let () =
        ~down:0 r;
 
      case "which stores have a link to count";
-     check "a local store is a filesystem"
-       (not (Backend.counts_traffic ~backend_type:"local"));
-     check "a remote one is not" (Backend.counts_traffic ~backend_type:"memory");
+     let disk =
+       Backend.make ~backend_type:"local"
+         ~get_field:(fun k ->
+           if k = "path" then Some (Filename.get_temp_dir_name ()) else None)
+         ()
+     in
+     let module Disk = (val disk : Backend.S) in
+     check "a store keeping its files here has no link" (Disk.local_path <> None);
+     let module Far = Memory () in
+     check "one reached over a link does" (Far.local_path = None);
 
      report ~expected:20 ();
      Lwt.return_unit)
