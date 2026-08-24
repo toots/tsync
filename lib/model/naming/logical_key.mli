@@ -12,8 +12,9 @@
 
 type t
 
-(** The wire and store spelling, and the only place a directory's trailing
-    separator is written. *)
+(** The wire and store spelling. It says what the item is called and not what
+    kind it is: a caller that needs the kind reads {!kind}, and one reading a
+    key off the wire is told which by the request it arrived in. *)
 val to_string : t -> string
 
 (** The domain-relative path, without a directory's trailing separator, and [""]
@@ -38,11 +39,6 @@ val parent : t -> t
 val file_in : t -> string -> t
 
 val dir_in : t -> string -> t
-
-(** What a listing asks a store for. Raises [Invalid_argument] on a file, there
-    being no such thing as the contents of one. *)
-val as_prefix : t -> string
-
 val equal : t -> t -> bool
 val compare : t -> t -> int
 
@@ -62,8 +58,9 @@ module Make (D : Domain) : sig
   (** The domain root, which is a folder. *)
   val root : t
 
-  (** From a spelling produced by {!to_string}, [None] for one belonging to
-      another domain or to no domain at all. For what arrives over a socket or
-      out of a record on disk. *)
-  val of_string : string -> t option
+  (** The domain-relative path a rendered key names, [None] for one belonging to
+      another domain or to no domain at all. A path, not a key: the spelling
+      carries no kind, so the caller says {!file} or {!dir} from what it is
+      doing. *)
+  val rel_of_string : string -> string option
 end

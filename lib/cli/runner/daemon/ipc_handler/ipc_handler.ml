@@ -23,6 +23,10 @@ module type S = sig
     on_stop : unit -> unit;
   }
 
+  (** How a subscriber names [key], for a frontend telling one to act on an
+      item. [None] for a key whose folder this client cannot resolve. *)
+  val item_ref : Logical_key.t -> string option Lwt.t
+
   val handler :
     hooks ->
     string ->
@@ -112,22 +116,26 @@ module Make (C : Conf.S) (F : File_ops.S) : S = struct
      parent's — shared across a listing, so it resolves once, not per entry. *)
   let ref_str r = `String (Item_ref.to_string r)
 
+  (* The reference an item answers to. [container_id] is passed in because a
+     listing resolves the folder once and reuses it for every file under it. *)
+  let self_ref ~container_id key =
+    let body = Logical_key.path key in
+    if body = "" then Lwt.return_some `Root
+    else if Logical_key.kind key = `Dir then
+      let+ id =
+        Folder_ids.lookup_id ~cache_root:C.cache_root ~domain_name:C.domain_name
+          body
+      in
+      Option.map (fun id -> `Dir id) id
+    else Lwt.return_some (`File (container_id, Logical_key.leaf key))
+
   let naming_fields ~container_id key =
     let body = Logical_key.path key in
     let name = if body = "" then C.domain_name else Logical_key.leaf key in
     let parent =
       if container_id = Stored_key.root_id then `Root else `Dir container_id
     in
-    let+ self =
-      if body = "" then Lwt.return_some `Root
-      else if Logical_key.kind key = `Dir then
-        let+ id =
-          Folder_ids.lookup_id ~cache_root:C.cache_root
-            ~domain_name:C.domain_name body
-        in
-        Option.map (fun id -> `Dir id) id
-      else Lwt.return_some (`File (container_id, name))
-    in
+    let+ self = self_ref ~container_id key in
     match self with
       | None -> []
       | Some self ->
@@ -135,8 +143,6 @@ module Make (C : Conf.S) (F : File_ops.S) : S = struct
             ("ref", ref_str self);
             ("parentRef", ref_str parent);
             ("name", `String name);
-            (* For the callers that speak in paths: the CLI, the test harness. *)
-            ("key", `String (Logical_key.to_string key));
           ]
 
   let lookup_folder rel =
@@ -152,6 +158,14 @@ module Make (C : Conf.S) (F : File_ops.S) : S = struct
 
   (* The id of the folder [key] sits in. *)
   let parent_folder_id key = lookup_folder (Key.parent (rel_body key))
+
+  (* How a subscriber names an item, for a frontend pushing it news about one.
+     Resolves the folder itself, having no listing to share one with. *)
+  let item_ref key =
+    let* container = parent_folder_id key in
+    let container_id = Option.value container ~default:Stored_key.root_id in
+    let+ self = self_ref ~container_id key in
+    Option.map Item_ref.to_string self
 
   (* One manifest resolution (sidecar, else a single GET) yields size, mtime,
      etag and upload state; F.stat plus a separate etag lookup would fetch the
@@ -180,9 +194,9 @@ module Make (C : Conf.S) (F : File_ops.S) : S = struct
     ]
     @ match symlink with None -> [] | Some t -> [("symlinkTarget", `String t)]
 
-  (* File and directory references resolve to keys differing only by a trailing
-     slash, so a directory would otherwise answer to both — and the caller builds
-     its children's keys from whichever it recorded. One item, one reference. *)
+  (* A reference says which kind it names, and {!handle_stat} checks that against
+     the tree: a [f:] reference must not answer for a folder. A bare key says
+     nothing, so it is held to neither. *)
   let expected_kind = function
     | `File _ -> `File
     | `Dir _ | `Root -> `Dir
@@ -352,11 +366,6 @@ module Make (C : Conf.S) (F : File_ops.S) : S = struct
       (("items", `List named)
       :: unnamed_field (Logical_key.to_string prefix) unnamed)
 
-  (* Journal keys are relative to the domain prefix; the FileProvider uses full
-     keys as item identifiers, with directories ending in "/". *)
-  let full_key ?(dir = false) rel =
-    Logical_key.to_string (if dir then Lk.dir rel else Lk.file rel)
-
   let dir_id_field = function None -> [] | Some id -> [("id", `String id)]
 
   (* An op must name its item the way everything else does, since a reader
@@ -406,35 +415,23 @@ module Make (C : Conf.S) (F : File_ops.S) : S = struct
           let* self = file_ref key in
           let+ parent = parent_ref key in
           with_naming
-            [
-              ("op", `String "put");
-              ("key", `String (full_key key));
-              ("size", `Int (Int64.to_int size));
-            ]
+            [("op", `String "put"); ("size", `Int (Int64.to_int size))]
             (named self parent key)
       | `Delete key ->
           let* self = file_ref key in
           let+ parent = parent_ref key in
-          with_naming
-            [("op", `String "delete"); ("key", `String (full_key key))]
-            (named self parent key)
+          with_naming [("op", `String "delete")] (named self parent key)
       | `Mkdir (key, id) ->
           let* self = dir_ref key id in
           let+ parent = parent_ref key in
           with_naming
-            ([
-               ("op", `String "mkdir"); ("key", `String (full_key ~dir:true key));
-             ]
-            @ dir_id_field id)
+            ([("op", `String "mkdir")] @ dir_id_field id)
             (named self parent key)
       | `Rmdir (key, id) ->
           let* self = dir_ref key id in
           let+ parent = parent_ref key in
           with_naming
-            ([
-               ("op", `String "rmdir"); ("key", `String (full_key ~dir:true key));
-             ]
-            @ dir_id_field id)
+            ([("op", `String "rmdir")] @ dir_id_field id)
             (named self parent key)
       | `Rename { Journal.dst; src; is_dir; id; _ } -> (
           (* A directory keeps its id across a move, which is what marks the two
@@ -444,12 +441,7 @@ module Make (C : Conf.S) (F : File_ops.S) : S = struct
           let* parent = parent_ref dst in
           let+ src_self = if is_dir then Lwt.return self else file_ref src in
           let fields =
-            [
-              ("op", `String "rename");
-              ("key", `String (full_key ~dir:is_dir dst));
-              ("src", `String (full_key ~dir:is_dir src));
-              ("is_dir", `Bool is_dir);
-            ]
+            [("op", `String "rename"); ("is_dir", `Bool is_dir)]
             @ dir_id_field id
           in
           match (named self parent dst, src_self) with
@@ -693,9 +685,17 @@ module Make (C : Conf.S) (F : File_ops.S) : S = struct
                     let* parent = resolve (Ir.parse s) in
                     match parent with
                       | None -> not_found s
-                      | Some parent -> f (Logical_key.file_in parent name))
+                      | Some parent ->
+                          (* A parent names a folder because it is one, however
+                             it was spelled: reading that off the reference is
+                             how a caller got an exception for a missing
+                             separator. *)
+                          f
+                            (Logical_key.file_in
+                               (Lk.dir (Logical_key.path parent))
+                               name))
               | _ -> (
-                  match Lk.of_string path with
+                  match Option.map Lk.file (Lk.rel_of_string path) with
                     | Some key -> f key
                     | None -> not_found path)
           in
@@ -931,7 +931,7 @@ module Make (C : Conf.S) (F : File_ops.S) : S = struct
                            means the two disagree about the namespace, which is
                            worth hearing about rather than a shorter list. *)
                         let named k =
-                          match Lk.of_string k with
+                          match Option.map Lk.file (Lk.rel_of_string k) with
                             | Some key -> Some key
                             | None ->
                                 Log.warn "changed: not this domain's key %s" k;

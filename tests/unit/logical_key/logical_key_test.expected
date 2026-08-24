@@ -1,6 +1,6 @@
 === how an item is spelled
 a file                 "tsync/home/manifests/photos/trip/img.jpg"   leaf=img.jpg   file
-a folder               "tsync/home/manifests/photos/trip/"          leaf=trip      dir
+a folder               "tsync/home/manifests/photos/trip"           leaf=trip      dir
 the root               "tsync/home/manifests/"                      leaf=          dir
 a top-level file       "tsync/home/manifests/notes.txt"             leaf=notes.txt file
 
@@ -10,25 +10,23 @@ a folder               "photos/trip"
 the root               ""
 
 === what an item sits in
-a file                 "tsync/home/manifests/photos/trip/"
-a folder               "tsync/home/manifests/photos/"
+a file                 "tsync/home/manifests/photos/trip"
+a folder               "tsync/home/manifests/photos"
 a top-level file       "tsync/home/manifests/"
 the root               "tsync/home/manifests/"
 
 === descending
 into a folder          "tsync/home/manifests/photos/trip/img.jpg"
 from the root          "tsync/home/manifests/notes.txt"
-a folder in a folder   "tsync/home/manifests/photos/trip/raw/"
+a folder in a folder   "tsync/home/manifests/photos/trip/raw"
 
 === what a folder offers and a file does not
-list a folder          "tsync/home/manifests/photos/trip/"
-list a file            refused
 descend into a file    refused
 
 === back from the wire
-"tsync/home/manifests/photos/trip/img.jpg"     file "photos/trip/img.jpg"
-"tsync/home/manifests/photos/trip/"            dir "photos/trip"
-"tsync/home/manifests/"                        dir ""
+"tsync/home/manifests/photos/trip/img.jpg"     "photos/trip/img.jpg"
+"tsync/home/manifests/photos/trip/"            "photos/trip"
+"tsync/home/manifests/"                        ""
 "tsync/work/manifests/img.jpg"                 not this domain's
 "img.jpg"                                      not this domain's
 

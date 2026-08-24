@@ -106,26 +106,20 @@ module Inode = struct
               in
               winner.Folder.id
 
+    (* A folder is not filed as a manifest — it is named by its marker under the
+       parent's namespace — so this resolves a file either way. *)
     let ensure_manifest_key key =
       let rel = rel_of key in
-      if Key.is_dir rel then
-        let+ id = ensure_id (Key.chop_slash rel) in
-        C.domain_prefix ^ id ^ "/"
-      else
-        let+ pid = ensure_id (Key.parent rel) in
-        child_key ~folder_id:pid (Filename.basename rel)
+      let+ pid = ensure_id (Key.parent rel) in
+      child_key ~folder_id:pid (Filename.basename rel)
 
     (* Same mapping, resolving only what is already known. *)
     let manifest_key key =
       let rel = rel_of key in
-      if Key.is_dir rel then
-        let+ id = lookup_id (Key.chop_slash rel) in
-        Option.map (fun id -> C.domain_prefix ^ id ^ "/") id
-      else
-        let+ pid = lookup_id (Key.parent rel) in
-        Option.map
-          (fun pid -> child_key ~folder_id:pid (Filename.basename rel))
-          pid
+      let+ pid = lookup_id (Key.parent rel) in
+      Option.map
+        (fun pid -> child_key ~folder_id:pid (Filename.basename rel))
+        pid
 
     let ensure_folder_id key = ensure_id (Key.chop_slash (rel_of key))
 

@@ -24,6 +24,10 @@ module type S = sig
     on_stop : unit -> unit;
   }
 
+  (** How a subscriber names [key], for a frontend telling one to act on an
+      item. [None] for a key whose folder this client cannot resolve. *)
+  val item_ref : Logical_key.t -> string option Lwt.t
+
   (** Answer one request. [`Subscribe] hands the connection over to the event
       stream instead of replying further; [`Stop] asks the caller to shut down.
   *)

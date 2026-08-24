@@ -219,9 +219,9 @@
   names /
   stat no-such-file.txt: not found: tsync/test/manifests/no-such-file.txt
   names / = []
-  stat no-such-dir/: not found: tsync/test/manifests/no-such-dir/
+  stat no-such-dir/: not found: tsync/test/manifests/no-such-dir
   names / = []
-  stat sub/: not found: tsync/test/manifests/sub/
+  stat sub/: not found: tsync/test/manifests/sub
   names / = []
 --- tree
 --- content

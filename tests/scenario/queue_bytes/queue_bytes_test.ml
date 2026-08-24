@@ -53,18 +53,23 @@ let post n size =
       last_error = None;
     }
 
-(* Sorted: [uploading] reports a set, and the workers' order within it is not
+(* Each name carries what the queue calls it, file or folder: the kind is what a
+   peer replays the entry as, and the spelling no longer says which. Sorted,
+   because [uploading] reports a set and the workers' order within it is not
    something to pin down. *)
+let describe k =
+  Printf.sprintf "%s(%s)" (Logical_key.to_string k)
+    (match Logical_key.kind k with `File -> "file" | `Dir -> "dir")
+
 let report label =
   Printf.printf "%-22s pending=%d uploading=[%s] bytes=%Ld\n" label
     (Sq.pending ())
     (String.concat " "
-       (List.sort compare (List.map Logical_key.to_string (Sq.uploading ()))))
+       (List.sort compare (List.map describe (Sq.uploading ()))))
     (Sq.pending_bytes ())
 
-(* A folder rename, so the report can be read for the trailing separator: the
-   op says the key names a directory and the queue has to say so too, or the
-   entry it publishes is one a peer replays as a file. *)
+(* A folder rename: the op says the key names a directory and the queue has to
+   say so too, or the entry it publishes is one a peer replays as a file. *)
 let post_dir_rename () =
   Sq.post ~entry_key:(J.entry_key ())
     {

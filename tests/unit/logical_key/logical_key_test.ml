@@ -55,10 +55,6 @@ let () =
     (Logical_key.to_string (Logical_key.dir_in trip "raw"));
 
   print_endline "\n=== what a folder offers and a file does not";
-  attempt "list a folder" (fun () ->
-      Printf.sprintf "%S" (Logical_key.as_prefix trip));
-  attempt "list a file" (fun () ->
-      Printf.sprintf "%S" (Logical_key.as_prefix img));
   attempt "descend into a file" (fun () ->
       Printf.sprintf "%S" (Logical_key.to_string (Logical_key.file_in img "x")));
 
@@ -66,8 +62,8 @@ let () =
   List.iter
     (fun s ->
       Printf.printf "%-46s %s\n" (Printf.sprintf "%S" s)
-        (match K.of_string s with
-          | Some k -> Printf.sprintf "%s %S" (kind k) (Logical_key.path k)
+        (match K.rel_of_string s with
+          | Some rel -> Printf.sprintf "%S" rel
           | None -> "not this domain's"))
     [
       "tsync/home/manifests/photos/trip/img.jpg";

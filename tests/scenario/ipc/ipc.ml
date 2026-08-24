@@ -98,6 +98,23 @@ let changes_scenarios : scenario list =
 
 (* The daemon reporting on itself: what [tsync status] renders and what the
    http-proxy serves over /stats. *)
+(* A parent reference spelled as a bare key. It names the folder without saying
+   it is one, which is the whole of what a reference adds, so the file has to
+   land in it either way. *)
+let parent_ref_scenarios : scenario list =
+  [
+    {
+      name = "create under a parent named by key";
+      steps =
+        [
+          Mkdir "sub";
+          Drain;
+          CreateUnder
+            { parent = "tsync/test/manifests/sub"; name = "bykey.txt" };
+        ];
+    };
+  ]
+
 let stats_scenarios : scenario list =
   [
     {
@@ -113,6 +130,8 @@ let stats_scenarios : scenario list =
 let () =
   print_endline "########## LISTING ##########";
   run_ipc listing_scenarios;
+  print_endline "########## PARENT REFS ##########";
+  run_ipc parent_ref_scenarios;
   print_endline "########## CHANGES ##########";
   run_ipc_changes changes_scenarios;
   print_endline "########## STATS ##########";

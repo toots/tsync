@@ -162,7 +162,7 @@ module Make_with_layout (C : Conf.S) (Sq : Sync_queue.S) (L : Layout.S) :
   (* The queue and the pull tracker hold rendered keys, so this takes one back
      apart; a key from either is this domain's by construction. *)
   let describe key =
-    match Lk.of_string key with
+    match Option.map Lk.file (Lk.rel_of_string key) with
       | Some k -> (Logical_key.leaf k, rel_key k)
       | None -> (Filename.basename key, key)
 

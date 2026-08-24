@@ -129,21 +129,28 @@ module Make (C : Conf.S) (D : Domain_engine.Domain) = struct
   let require_delivery delivered =
     if delivered > 0 then Lwt.return_unit else Lwt.fail No_subscriber
 
+  (* Named by reference: the subscriber addresses items to the system that way
+     and has no way to act on a storage key. *)
+  let act ~subs name key =
+    let open Lwt.Syntax in
+    let* r = H.item_ref key in
+    match r with
+      | None -> Lwt.fail No_subscriber
+      | Some r -> require_delivery (publish ~subs name [("ref", `String r)])
+
   (* A hint, not a request: the journal carries the same news and the next
      enumeration reads it, so nobody listening is not a failure. *)
-  let notify_changed ~subs key =
-    ignore (publish ~subs "changed" [("key", `String key)])
+  (* No item named: a subscriber answers this by re-reading the working set, so
+     saying which one changed would be a field nobody acts on. *)
+  let notify_changed ~subs (_ : Logical_key.t) =
+    ignore (publish ~subs "changed" [])
 
   let hooks ~subs =
     H.
       {
         path_to_key = (fun p -> Some (path_to_key p));
-        evict =
-          (fun key ->
-            require_delivery (publish ~subs "evict" [("key", `String key)]));
-        restore =
-          (fun key ->
-            require_delivery (publish ~subs "restore" [("key", `String key)]));
+        evict = (fun key -> act ~subs "evict" key);
+        restore = (fun key -> act ~subs "restore" key);
         (* [full_resync]'s token is on disk before its event is attempted, which
            is what makes that one durable where this is a hint. *)
         changed = notify_changed ~subs;

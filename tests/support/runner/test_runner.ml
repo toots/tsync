@@ -51,6 +51,11 @@ type step =
   | Stat of string
       (** Query a path through the IPC [stat] action. A query leaves nothing
           behind: an absent path answers "not found" and stays absent. *)
+  | CreateUnder of { parent : string; name : string }
+      (** Create through [parentRef] rather than a whole path, the way a
+          reference-speaking client does. [parent] is passed to the daemon
+          verbatim, so a scenario can spell it as a reference or as a bare key
+          and see what each is answered. *)
   | Mark  (** record the current time, as an [Expire "mark"] cutoff *)
   | Expire of string
       (** Cutoff selector: "all" (now), "none" (epoch), or "mark". *)
@@ -166,6 +171,7 @@ let rec render_step = function
   | ShowStaged -> "staged"
   | ShowNames p -> "names " ^ if p = "" then "/" else p
   | Stat p -> "stat " ^ p
+  | CreateUnder { parent; name } -> "create " ^ name ^ " under " ^ parent
   | Mark -> "mark"
   | Expire s -> "expire " ^ s
   | PurgeTrashed p -> "trash --purge " ^ p
@@ -304,7 +310,7 @@ let print_gc (s : Gc.stats) =
    deterministic and shown as-is. *)
 let ipc_entry_key = function
   | `Assoc kvs -> (
-      match List.assoc_opt "key" kvs with Some (`String s) -> s | _ -> "")
+      match List.assoc_opt "ref" kvs with Some (`String s) -> s | _ -> "")
   | _ -> ""
 
 let rec normalize_ipc (j : Yojson.Safe.t) : Yojson.Safe.t =
@@ -369,13 +375,9 @@ let setup_client (module C : Conf.S) root staging_prefix =
   let module J = Journal.Make (C) in
   let module W = Wal.Make (C) in
   let module L = Layout.Inode.Make (C) in
-  (* A scenario names an item the way a client would, so a trailing separator
-     is part of what it asked for. *)
-  let key p =
-    match Lk.of_string (C.domain_prefix ^ p) with
-      | Some k -> k
-      | None -> Lk.file p
-  in
+  (* A scenario says which it means with a trailing separator, the way it would
+     write one in a shell. Nothing on the wire reads that; it is read here. *)
+  let key p = if String.ends_with ~suffix:"/" p then Lk.dir p else Lk.file p in
   let strip_root p =
     if String.length p > 0 && p.[0] = '/' then
       String.sub p 1 (String.length p - 1)
@@ -608,6 +610,17 @@ let setup_client (module C : Conf.S) root staging_prefix =
         let* (_ : int) = F.write (key path) buf ~offset:(Int64.of_int offset) in
         Lwt.return_unit
     | Truncate { path; size } -> F.truncate (key path) (Int64.of_int size)
+    | CreateUnder { parent; name } ->
+        let+ obj =
+          request
+            [
+              ("action", `String "create");
+              ("parentRef", `String parent);
+              ("name", `String name);
+            ]
+        in
+        Printf.printf "  create %s under %s: %s\n" name parent
+          (if response_ok obj then "ok" else response_error obj)
     | Stat p ->
         let+ obj = action "stat" (Logical_key.to_string (key p)) in
         if response_ok obj then
@@ -994,26 +1007,27 @@ let setup_client (module C : Conf.S) root staging_prefix =
     let items =
       match List.assoc_opt "items" obj with Some (`List l) -> l | _ -> []
     in
+    (* By reference and leaf name, which is all a listing offers: the path is
+       accumulated on the way down. *)
     List.partition_map
       (function
         | `Assoc f ->
-            let key = Option.value ~default:"" (get_str f "key") in
-            if get_str f "kind" = Some "dir" then Either.Left key
-            else Either.Right key
-        | _ -> Either.Right "")
+            let named =
+              ( Option.value ~default:"" (get_str f "name"),
+                Option.value ~default:"" (get_str f "ref") )
+            in
+            if get_str f "kind" = Some "dir" then Either.Left named
+            else Either.Right named
+        | _ -> Either.Right ("", ""))
       items
   in
   let dump_tree () =
     let files = ref [] in
-    let rec walk prefix =
-      let* obj = action "list_dir" prefix in
+    let rec walk ~rel item_ref =
+      let* obj = action "list_dir" item_ref in
       must obj;
       let dirs, entries = split_items obj in
-      let entries =
-        List.filter_map
-          (fun e -> Option.map Logical_key.path (Lk.of_string e))
-          entries
-      in
+      let entries = List.map (fun (name, _) -> Key.join rel name) entries in
       let* () =
         Lwt_list.iter_s
           (fun rel ->
@@ -1030,16 +1044,13 @@ let setup_client (module C : Conf.S) root staging_prefix =
           (List.sort compare entries)
       in
       Lwt_list.iter_s
-        (fun d ->
-          (* [dirs] are full keys naming folders. *)
-          Printf.printf "  d %s\n"
-            (Option.value
-               (Option.map Logical_key.path (Lk.of_string d))
-               ~default:d);
-          walk d)
+        (fun (name, item_ref) ->
+          let rel = Key.join rel name in
+          Printf.printf "  d %s\n" rel;
+          walk ~rel item_ref)
         (List.sort compare dirs)
     in
-    let+ () = walk C.domain_prefix in
+    let+ () = walk ~rel:"" "root" in
     List.rev !files
   in
   (* Whole-file content through the read path itself — the same one FUSE and the
@@ -1106,11 +1117,9 @@ let setup_client (module C : Conf.S) root staging_prefix =
       pending
   in
   (* Recursive list_dir (per directory) then the flat list_all working-set view —
-     the actual IPC responses, normalized. *)
-  (* Walked by reference rather than by key: that is how the File Provider asks,
-     and it is the only way the id-to-path resolution behind it gets exercised.
-     [dump_tree] still walks by key, so both ways of naming an item stay
-     covered. *)
+     the actual IPC responses, normalized. Walked by reference, which is how a
+     listing names what it holds and the only way the id-to-path resolution
+     behind it gets exercised. *)
   let by_ref act r = request [("action", `String act); ("ref", `String r)] in
   let dir_refs obj =
     let items =

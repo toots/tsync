@@ -123,7 +123,7 @@ module Make (C : Conf.S) = struct
       | None -> (
           (* Identity layout: the logical key's spelling is the backend key. *)
           let* state =
-            match Lk.of_string key with
+            match Option.map Lk.file (Lk.rel_of_string key) with
               | Some k -> R.fetch_manifest ~key:k ()
               | None -> Lwt.return_none
           in

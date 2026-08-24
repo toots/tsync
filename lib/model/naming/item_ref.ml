@@ -42,5 +42,8 @@ module Make (D : Logical_key.Domain) = struct
             let id = String.sub rest 0 i in
             let name = String.sub rest (i + 1) (String.length rest - i - 1) in
             if id = "" || name = "" then `Bad s else `File (id, name))
-    else (match K.of_string s with Some k -> `Logical_key k | None -> `Bad s)
+    else (
+      match K.rel_of_string s with
+        | Some rel -> `Logical_key (K.file rel)
+        | None -> `Bad s)
 end

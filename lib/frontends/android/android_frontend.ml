@@ -41,7 +41,7 @@ module Make (C : Conf.S) = struct
       {
         (* The client addresses files by storage key, not by a path in some
            mount it can see, so evict/restore/revert arrive already resolved. *)
-        path_to_key = Lk.of_string;
+        path_to_key = (fun p -> Option.map Lk.file (Lk.rel_of_string p));
         (* ponytail: single key only. FUSE walks a directory subtree here
            (fuse_fs.ml:184) because a user can point at a folder in Finder;
            lift that if a client ever offers the same gesture. *)
@@ -103,7 +103,7 @@ module Make (C : Conf.S) = struct
   (* The argument is a storage key as the client spells it; one this domain
      cannot read names nothing here. *)
   let session raw =
-    match Lk.of_string raw with
+    match Option.map Lk.file (Lk.rel_of_string raw) with
       | None ->
           prerr_endline ("not this domain's key: " ^ raw);
           exit 1
@@ -179,7 +179,7 @@ module Make (C : Conf.S) = struct
   (* What of [key] is already on this device, for a caller deciding whether to
      assemble the whole thing rather than page through it. *)
   let residency raw =
-    match Lk.of_string raw with
+    match Option.map Lk.file (Lk.rel_of_string raw) with
       | None ->
           prerr_endline ("not this domain's key: " ^ raw);
           exit 1

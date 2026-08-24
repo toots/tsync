@@ -56,6 +56,7 @@ type step =
           domain root), subdirectories with a trailing slash. A file with only
           staged edits must appear; internal markers must not. *)
   | Stat of string
+  | CreateUnder of { parent : string; name : string }
       (** Query a path through the IPC [stat] action. A query changes nothing: a
           stat of something absent says so and leaves no trace. *)
   | Mark

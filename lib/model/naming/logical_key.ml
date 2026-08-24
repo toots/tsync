@@ -2,16 +2,12 @@
    [to_string] needs no domain and two keys built from different domains cannot
    be mistaken for each other.
 
-   [path] holds no trailing separator whatever the kind: that separator is the
-   wire spelling of [Dir] and is written in exactly one place below. *)
+   Nothing in the rendering says which kind this is: that is what the field is
+   for, and a second spelling of it is one that can disagree. *)
 type kind = File | Dir
 type t = { prefix : string; path : string; kind : kind }
 
-let to_string t =
-  match t.kind with
-    | File -> t.prefix ^ t.path
-    | Dir -> if t.path = "" then t.prefix else t.prefix ^ t.path ^ "/"
-
+let to_string t = t.prefix ^ t.path
 let path t = t.path
 let leaf t = if t.path = "" then "" else Filename.basename t.path
 let kind t = match t.kind with File -> `File | Dir -> `Dir
@@ -32,14 +28,6 @@ let inside t name kind =
 
 let file_in t name = inside t name File
 let dir_in t name = inside t name Dir
-
-let as_prefix t =
-  match t.kind with
-    | Dir -> to_string t
-    | File ->
-        invalid_arg
-          (Printf.sprintf "Logical_key: %S names a file, not a folder" t.path)
-
 let equal a b = a.prefix = b.prefix && a.path = b.path && a.kind = b.kind
 
 let compare a b =
@@ -71,12 +59,9 @@ module Make (D : Domain) = struct
   let dir rel = { prefix = D.domain_prefix; path = trim rel; kind = Dir }
   let root = { prefix = D.domain_prefix; path = ""; kind = Dir }
 
-  let of_string s =
+  let rel_of_string s =
     if not (String.starts_with ~prefix:D.domain_prefix s) then None
     else (
       let n = String.length D.domain_prefix in
-      let rest = String.sub s n (String.length s - n) in
-      if rest = "" then Some root
-      else if String.ends_with ~suffix:"/" rest then Some (dir rest)
-      else Some (file rest))
+      Some (trim (String.sub s n (String.length s - n))))
 end

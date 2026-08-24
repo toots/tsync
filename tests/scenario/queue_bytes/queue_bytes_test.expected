@@ -1,5 +1,5 @@
 empty                  pending=0 uploading=[] bytes=0
-4 posted               pending=4 uploading=[tsync/testdom/manifests/f1.txt tsync/testdom/manifests/f2.txt] bytes=1000
+4 posted               pending=4 uploading=[tsync/testdom/manifests/f1.txt(file) tsync/testdom/manifests/f2.txt(file)] bytes=1000
 gate open              pending=0 uploading=[] bytes=0
-folder in flight       pending=1 uploading=[tsync/testdom/manifests/photos/] bytes=0
+folder in flight       pending=1 uploading=[tsync/testdom/manifests/photos(dir)] bytes=0
 after drain            pending=0 uploading=[] bytes=0
