@@ -61,10 +61,10 @@ module C : Conf.S = struct
 
   let members =
     [
-      Backend.member ~role:"main" ~backend_type:"local" ~local_path:src_dir
+      Backend.member ~role:`Main ~backend_type:"local" ~local_path:src_dir
         ~name:"source"
         (module Stale);
-      Backend.member ~role:"replica" ~backend_type:"local" ~local_path:dst_dir
+      Backend.member ~role:`Replica ~backend_type:"local" ~local_path:dst_dir
         ~name:"copy"
         (module Dst);
     ]

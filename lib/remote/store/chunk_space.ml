@@ -73,7 +73,7 @@ module Make (C : Conf.S) = struct
   let main_backend =
     lazy
       (List.find_opt
-         (fun (m : Backend.member) -> m.Backend.role = "main")
+         (fun (m : Backend.member) -> m.Backend.role = `Main)
          C.members)
 
   let main () =

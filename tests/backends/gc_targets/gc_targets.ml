@@ -55,13 +55,13 @@ module C : Conf.S = struct
 
   let members =
     [
-      Backend.member ~role:"main" ~backend_type:"local" ~local_path:main_dir
+      Backend.member ~role:`Main ~backend_type:"local" ~local_path:main_dir
         ~name:"main"
         (module Main);
-      Backend.member ~role:"replica" ~backend_type:"local"
+      Backend.member ~role:`Replica ~backend_type:"local"
         ~local_path:replica_dir ~name:"replica"
         (module Replica);
-      Backend.member ~role:"backfill" ~backend_type:"local"
+      Backend.member ~role:`Backfill ~backend_type:"local"
         ~local_path:backfill_dir ~name:"backfill"
         (module Backfill);
     ]

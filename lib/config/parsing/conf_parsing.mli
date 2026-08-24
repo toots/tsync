@@ -7,7 +7,7 @@
     - [`Backfill] — the same copy, never read from, and starting empty: it
       covers what is written from then on. Content only: no journal, no cursor,
       since nothing reads those from a store nothing reads.
-    - [`Read_only] — an authoritative store consulted when the source of truth
+    - [`ReadOnly] — an authoritative store consulted when the source of truth
       misses or is unreachable, and never written.
 
     A replica and a backfill target are one thing, {!Deferred}, differing only
@@ -16,12 +16,12 @@
     Both are filled behind the write rather than in it, so a failover read is
     behind by whatever the target still owes — work kept on disk and resumed
     after a restart. *)
-type role = [ `Main | `Replica | `Backfill | `Read_only ]
+type role = [ `Main | `Replica | `Backfill | `ReadOnly ]
 
 (** Every role, in the order worth presenting to a user. *)
 val roles : role list
 
-(** The spelling used in the config JSON, e.g. [`Read_only] is ["readOnly"]. *)
+(** The spelling used in the config JSON, e.g. [`ReadOnly] is ["readOnly"]. *)
 val role_name : role -> string
 
 val role_of_string : string -> role option
@@ -51,8 +51,8 @@ type domain = {
   versioning : bool;
   read_only : bool;
       (** The domain's [readOnly] flag, forced on when every backend is
-          [`Read_only]: such a domain cannot accept a write, so the mount says
-          so up front. *)
+          [`ReadOnly]: such a domain cannot accept a write, so the mount says so
+          up front. *)
   chunk_size : int option;
       (** Chunk size (bytes) for newly uploaded files. [None] when the config
           does not say; resolving that is {!Conf.S.chunk_size}'s business. *)

@@ -1,4 +1,4 @@
-type role = [ `Main | `Replica | `Backfill | `Read_only ]
+type role = [ `Main | `Replica | `Backfill | `ReadOnly ]
 
 type backend_config = {
   backend_type : string;
@@ -33,13 +33,13 @@ type t = {
   domains : domain list;
 }
 
-let roles : role list = [`Main; `Replica; `Backfill; `Read_only]
+let roles : role list = [`Main; `Replica; `Backfill; `ReadOnly]
 
 let role_name : role -> string = function
   | `Main -> "main"
   | `Replica -> "replica"
   | `Backfill -> "backfill"
-  | `Read_only -> "readOnly"
+  | `ReadOnly -> "readOnly"
 
 let role_of_string s = List.find_opt (fun r -> role_name r = s) roles
 let default_max_uploads = 4
@@ -128,7 +128,7 @@ let order_backends backends =
     match b.role with
       | `Main -> 0
       | `Replica -> 1
-      | `Read_only -> 2
+      | `ReadOnly -> 2
       | `Backfill -> 3
   in
   List.stable_sort (fun a b -> compare (rank a) (rank b)) backends
@@ -198,7 +198,7 @@ let validate_roles name backends =
       fail
         "a backend has \"role\": \"backfill\" but none has \"main\" — there is \
          nothing to fill it from";
-    if count `Read_only = 0 then
+    if count `ReadOnly = 0 then
       fail
         "needs at least one backend with \"role\": \"main\" (writable) or \
          \"readOnly\" (a read-only domain); nothing here can answer a read"
@@ -227,7 +227,7 @@ let parse_domain json =
        attempt. *)
     read_only =
       (match json |> member "readOnly" with `Bool b -> b | _ -> false)
-      || not (List.exists (fun b -> b.role <> `Read_only) backends);
+      || not (List.exists (fun b -> b.role <> `ReadOnly) backends);
     chunk_size = parse_size_field json "chunkSize";
     cache_chunk_size = parse_size_field json "cacheChunkSize";
     max_cache =

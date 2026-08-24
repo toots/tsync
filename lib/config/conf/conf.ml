@@ -116,7 +116,7 @@ let locality (module C : S) =
    available stay describing the same disk. *)
 let capacity members =
   let bounded (m : Backend.member) =
-    if m.Backend.role = "readOnly" then None
+    if m.Backend.role = `ReadOnly then None
     else Option.bind m.Backend.local_path Fs_util.disk_space
   in
   let tighter a b = if b.Fs_util.avail < a.Fs_util.avail then b else a in

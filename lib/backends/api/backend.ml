@@ -189,9 +189,11 @@ let new_traffic () =
    disagreeing about which stores have traffic. *)
 let counts_traffic ~backend_type = backend_type <> "local"
 
+type role = [ `Main | `Replica | `Backfill | `ReadOnly ]
+
 type member = {
   name : string;
-  role : string;  (** main | replica | backfill | readOnly *)
+  role : role;
   readable : bool;
   backend_type : string;  (** local | s3 | gcs | http-proxy *)
   config : (string * string) list;
@@ -214,7 +216,7 @@ type member = {
           room is left. Absent for stores whose capacity is not ours to know. *)
 }
 
-let member ?(role = "main") ?(readable = true) ?(backend_type = "local")
+let member ?(role = `Main) ?(readable = true) ?(backend_type = "local")
     ?(config = []) ?local_path ?pending ?in_flight ?degraded ?traffic ~name
     backend =
   {

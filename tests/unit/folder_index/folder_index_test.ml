@@ -76,7 +76,7 @@ module Two =
          ~members:
            [
              Backend.member ~name:"one" (module Store : Backend.S);
-             Backend.member ~name:"two" ~role:"replica"
+             Backend.member ~name:"two" ~role:`Replica
                (module Store : Backend.S);
            ]
          ~cache_root:root ~data_dir:root ~root ()

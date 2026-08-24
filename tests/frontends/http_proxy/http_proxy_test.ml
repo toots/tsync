@@ -32,7 +32,7 @@ module C : Conf.S = struct
           (* A real path, so the capacity line is exercised — its numbers are
              whatever this machine has, hence pinned in the snapshot. *)
         ~local_path:(status_root ^ "/store") store;
-      Backend.member ~name:"archive" ~role:"backfill" ~readable:false
+      Backend.member ~name:"archive" ~role:`Backfill ~readable:false
         ~backend_type:"http-proxy"
           (* A remote store, so the report has to say where it points — and the
              secret must not be what it says. *)

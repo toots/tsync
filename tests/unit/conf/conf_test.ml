@@ -22,7 +22,7 @@ let () =
     = ["b"; "c"; "a"]);
   (* Read-only sits ahead of backfill, behind the writable ones. *)
   assert (
-    ids [bc ~role:`Backfill "s3" "a"; bc ~role:`Read_only "s3" "b"; bc "s3" "c"]
+    ids [bc ~role:`Backfill "s3" "a"; bc ~role:`ReadOnly "s3" "b"; bc "s3" "c"]
     = ["c"; "b"; "a"]);
   (* Within a role, config order is kept. *)
   assert (ids [bc "s3" "a"; bc "s3" "b"; bc "local" "c"] = ["a"; "b"; "c"]);
@@ -206,7 +206,7 @@ let () =
   (* The room a write has. Only a store on a disk can say, so a domain of
      stores that cannot answers nothing rather than a number, and a caller says
      for itself what to report then. *)
-  let store ?local_path ?(role = "main") name =
+  let store ?local_path ?(role = `Main) name =
     Backend.member ~name ~role ?local_path
       (Backend.make ~backend_type:"local"
          ~get_field:(fun _ -> Some (Filename.get_temp_dir_name ()))
@@ -217,7 +217,7 @@ let () =
   let here = Filename.get_temp_dir_name () in
   assert (Conf.capacity [store ~local_path:here "disk"] <> None);
   (* A store never written to does not bound a write. *)
-  assert (Conf.capacity [store ~local_path:here ~role:"readOnly" "cold"] = None);
+  assert (Conf.capacity [store ~local_path:here ~role:`ReadOnly "cold"] = None);
   (* The tightest of them, and one store's figures rather than a per-field
      minimum. *)
     (match

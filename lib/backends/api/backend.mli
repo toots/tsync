@@ -266,9 +266,13 @@ val new_traffic : unit -> traffic
     stores have a figure. *)
 val counts_traffic : backend_type:string -> bool
 
+(** What a store is for. The same spelling the config uses, so a configured role
+    reaches a member without being taken apart and put back together. *)
+type role = [ `Main | `Replica | `Backfill | `ReadOnly ]
+
 type member = {
   name : string;
-  role : string;  (** main | replica | backfill | readOnly *)
+  role : role;
   readable : bool;
       (** Whether reads reach this store. False only for a backfill target, and
           that one bit is also what says a share link must not point into it,
@@ -298,7 +302,7 @@ type member = {
     main, reads reach it, no deferred target behind it and nothing to report
     beyond its name. That is what a domain with one configured store has. *)
 val member :
-  ?role:string ->
+  ?role:role ->
   ?readable:bool ->
   ?backend_type:string ->
   ?config:(string * string) list ->

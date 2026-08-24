@@ -47,10 +47,10 @@ module C =
          ~store:(module Main)
          ~members:
            [
-             Backend.member ~role:"main" ~backend_type:"local"
+             Backend.member ~role:`Main ~backend_type:"local"
                ~local_path:main_dir ~name:"main"
                (module Main);
-             Backend.member ~role:"replica" ~backend_type:"s3" ~name:"replica"
+             Backend.member ~role:`Replica ~backend_type:"s3" ~name:"replica"
                (module Replica);
            ]
          ())

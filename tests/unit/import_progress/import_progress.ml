@@ -38,7 +38,7 @@ module C : Conf.S = struct
 
   let members =
     [
-      Backend.member ~role:"main" ~backend_type:"local" ~local_path:main_dir
+      Backend.member ~role:`Main ~backend_type:"local" ~local_path:main_dir
         ~name:"main"
         (module Main);
     ]

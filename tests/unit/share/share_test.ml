@@ -136,7 +136,7 @@ let () =
           [{ Domain_store.name = "archive"; backend = (module Shareable) }]
 
     let members =
-      [Backend.member ~name:"archive" ~role:"readOnly" (module Shareable)]
+      [Backend.member ~name:"archive" ~role:`ReadOnly (module Shareable)]
   end in
   let module S3 = Share.Make (ReadOnlyDomain) in
   (* The composite really does refuse writes: without that, this proves nothing. *)
@@ -161,7 +161,7 @@ let () =
     let members =
       [
         Backend.member ~name:"local" (module NoShare);
-        Backend.member ~name:"gcs" ~role:"backfill" ~readable:false
+        Backend.member ~name:"gcs" ~role:`Backfill ~readable:false
           (module Shareable);
       ]
   end in

@@ -203,7 +203,7 @@ module Make (E : ENV) = struct
     | `Replica -> "complete copy: every write, read when no main is reachable"
     | `Backfill ->
         "converging copy, filled lazily in the background, never read"
-    | `Read_only -> "authoritative store read as a fallback, never written"
+    | `ReadOnly -> "authoritative store read as a fallback, never written"
 
   let role_of l =
     match List.assoc_opt "role" l with

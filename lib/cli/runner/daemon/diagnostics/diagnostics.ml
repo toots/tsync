@@ -446,7 +446,7 @@ module Make (C : Conf.S) = struct
     `Assoc
       (("name", `String m.Backend.name)
        :: ("type", `String m.backend_type)
-       :: ("role", `String m.role)
+       :: ("role", `String (Conf_parsing.role_name m.role))
        :: ( "config",
             `Assoc (List.map (fun (k, v) -> (k, `String v)) m.Backend.config) )
        :: probed

@@ -66,7 +66,7 @@ module Make (C : Conf.S) = struct
   let collector () =
     let main =
       List.find_opt
-        (fun (m : Backend.member) -> m.Backend.role = "main")
+        (fun (m : Backend.member) -> m.Backend.role = `Main)
         C.members
     in
     match main with
@@ -111,7 +111,7 @@ module Make (C : Conf.S) = struct
   let deferred_members () =
     List.filter
       (fun (m : Backend.member) ->
-        m.Backend.role = "replica" || m.Backend.role = "backfill")
+        m.Backend.role = `Replica || m.Backend.role = `Backfill)
       C.members
 
   (* Two processes stepping one run lose chunks: both resume from the same

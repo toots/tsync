@@ -73,7 +73,7 @@ let build_backends ~paths ~resume (d : Conf_parsing.domain) :
     Domain_store.make
       ~mains:(List.map sub (of_roles [`Main]))
       ~targets:(List.map target (of_roles [`Replica; `Backfill]))
-      ~archives:(List.map sub (of_roles [`Read_only]))
+      ~archives:(List.map sub (of_roles [`ReadOnly]))
   in
   (* The only place holding each store's name, role and module at once. A store
      with no target behind it is a main or an archive, both of which reads
@@ -86,8 +86,7 @@ let build_backends ~paths ~resume (d : Conf_parsing.domain) :
             (fun (module D : Deferred.S) () -> f (D.stats ()))
             (Hashtbl.find_opt built bc.name)
         in
-        Backend.member ~name:bc.name
-          ~role:(Conf_parsing.role_name bc.role)
+        Backend.member ~name:bc.name ~role:bc.role
           ~readable:
             (match Hashtbl.find_opt built bc.name with
               | Some (module D : Deferred.S) -> D.readable <> None

@@ -34,10 +34,13 @@
    -open
    Tsync_lwt_unix
    -open
-   Tsync_conf))
+   Tsync_conf
+   -open
+   Tsync_conf_parsing))
  (name tsync_diagnostics)
  (public_name tsync-libs.diagnostics)
  (libraries
+  tsync-libs.conf_parsing
   tsync_retry
   tsync_logical_key
   tsync_chunks

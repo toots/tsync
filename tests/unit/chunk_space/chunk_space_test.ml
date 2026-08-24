@@ -50,7 +50,7 @@ module Conf_of (B : Backend.S) : Conf.S = struct
      own tree, so it is the path and not the module that does it. {!Gc} refuses to
      open a run on a main without one, which is what keeps the two in step. *)
   let members =
-    [Backend.member ~role:"main" ~name:"local" ~local_path:store_dir store]
+    [Backend.member ~role:`Main ~name:"local" ~local_path:store_dir store]
 
   let cache_root = root ^ "/cache"
   let data_dir = root ^ "/data"
