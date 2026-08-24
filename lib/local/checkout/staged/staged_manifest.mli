@@ -64,11 +64,7 @@ val staged_of_string : string -> state
 (** Where the sidecar for [key] sits, for the synchronous CLI paths that hold no
     functor instance. *)
 val sidecar_path :
-  cache_root:string ->
-  domain_name:string ->
-  domain_prefix:string ->
-  string ->
-  string
+  cache_root:string -> domain_name:string -> Logical_key.t -> string
 
 module Make (C : Conf.S) : sig
   (** The staged tree's root. *)

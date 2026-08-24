@@ -11,24 +11,20 @@ type listed = { key : Logical_key.t; size : int; mtime : float }
 let dir ~cache_root domain_name =
   Cache_layout.manifests_dir ~cache_root domain_name
 
-let sidecar_path ~cache_root ~domain_name ~domain_prefix key =
+let sidecar_path ~cache_root ~domain_name key =
   Filename.concat
     (dir ~cache_root domain_name)
-    (Name_escape.encode_key (Key.strip_prefix ~domain_prefix key))
+    (Name_escape.encode_key (Logical_key.path key))
 
 (* Synchronous, for the CLI listing (plain non-Lwt code).
 
    ponytail: a bool, so a partly cached file reads as remote. Return the chunk
    counts here if `tsync ls` should distinguish "partial n/m". *)
 let is_local
-    ({ Conf.cache_root; domain_name; domain_prefix; cache_chunk_size } :
-      Conf.locality) key =
-  Sys.file_exists
-    (Staged_manifest.sidecar_path ~cache_root ~domain_name ~domain_prefix key)
+    ({ Conf.cache_root; domain_name; cache_chunk_size } : Conf.locality) key =
+  Sys.file_exists (Staged_manifest.sidecar_path ~cache_root ~domain_name key)
   ||
-    match
-      of_file (sidecar_path ~cache_root ~domain_name ~domain_prefix key)
-    with
+    match of_file (sidecar_path ~cache_root ~domain_name key) with
     | m ->
         List.for_all
           (fun g ->

@@ -20,7 +20,7 @@ type listed = { key : Logical_key.t; size : int; mtime : float }
 (** True when [key] has unsynced edits, or the chunk store holds every cache
     chunk its sidecar's chunks group into. Synchronous, for the CLI listing;
     [false] for a partly cached file. *)
-val is_local : Conf.locality -> string -> bool
+val is_local : Conf.locality -> Logical_key.t -> bool
 
 (** The local manifest mirror for one domain: where manifests live, how the tree
     is walked, and the parsed-sidecar cache. Callers name logical keys only — no

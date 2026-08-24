@@ -149,10 +149,10 @@ let staged_of_string body =
 
 open Lwt.Syntax
 
-let sidecar_path ~cache_root ~domain_name ~domain_prefix key =
+let sidecar_path ~cache_root ~domain_name key =
   Filename.concat
     (Cache_layout.staged_manifests_dir ~cache_root domain_name)
-    (Name_escape.encode_key (Key.strip_prefix ~domain_prefix key))
+    (Name_escape.encode_key (Logical_key.path key))
 
 module Make (C : Conf.S) = struct
   module Lk = Logical_key.Make (C)

@@ -1,10 +1,10 @@
 let implementation = "file_provider"
 
-let is_local ({ Conf.domain_name; domain_prefix; _ } : Conf.locality) key =
+let is_local ({ Conf.domain_name; _ } : Conf.locality) key =
   match File_provider.domain_dir ~domain_name with
     | None -> false
     | Some dir ->
-        let p = Filename.concat dir (Key.strip_prefix ~domain_prefix key) in
+        let p = Filename.concat dir (Logical_key.path key) in
         Sys.file_exists p && not (File_provider.is_dataless p)
 
 (* All domains share one IPC socket; the daemon routes by domain prefix. *)

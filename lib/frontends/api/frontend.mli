@@ -51,7 +51,7 @@ type socket = [ `Domain_socket | `Proxy_socket ]
 
 module type S = sig
   (** Whether every byte of [key] is on this machine, for [tsync ls]. *)
-  val is_local : Conf.locality -> string -> bool
+  val is_local : Conf.locality -> Logical_key.t -> bool
 
   val topology : topology
   val listens : socket option

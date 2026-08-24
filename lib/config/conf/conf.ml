@@ -14,7 +14,6 @@ let default_cache_chunk_size = 16 * 1024 * 1024
 type locality = {
   cache_root : string;
   domain_name : string;
-  domain_prefix : string;
   cache_chunk_size : int;
 }
 
@@ -108,6 +107,5 @@ let locality (module C : S) =
   {
     cache_root = C.cache_root;
     domain_name = C.domain_name;
-    domain_prefix = C.domain_prefix;
     cache_chunk_size = cache_chunk_size (module C);
   }

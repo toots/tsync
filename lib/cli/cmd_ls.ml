@@ -74,11 +74,7 @@ let cmd : unit Cmd.t =
            match item with
              | `Dir _ -> Printf.printf "dir    %s/\n" name
              | `File (e : Checkout.listed) ->
-                 let cached =
-                   F.is_local
-                     (Conf.locality (module C))
-                     (Logical_key.to_string e.key)
-                 in
+                 let cached = F.is_local (Conf.locality (module C)) e.key in
                  Printf.printf "%s  %s  %d bytes\n"
                    (if cached then "local" else "cloud")
                    name e.size)
