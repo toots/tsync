@@ -525,7 +525,6 @@ module Make_with_layout (C : Conf.S) (Sq : Sync_queue.S) (L : Layout.S) :
   (* Adopt the id from the backend marker: resolving the folder locally would
      mint a different one and split the namespace in two. *)
   let adopt_folder_id rel =
-    let rel = Key.chop_slash rel in
     if rel = "" then Lwt.return_unit
     else
       let* marker_key = folder_marker_bkey (Lk.dir rel) in

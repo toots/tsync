@@ -6,19 +6,10 @@
     carry the prefix is returned unchanged. *)
 val strip_prefix : domain_prefix:string -> string -> string
 
-(** [key]'s leaf name: the last component of its real path, with a directory
-    key's trailing ["/"] dropped.
-
-    This is what a manifest filed under [key] is called, and the only name a
-    writer may record for it: a name derived independently at each writer is a
-    name that can disagree with itself. *)
-val leaf : domain_prefix:string -> string -> string
-
 (** Whether [key] names a directory, i.e. ends in ["/"]. *)
 val is_dir : string -> bool
 
 val chop_slash : string -> string
-val ensure_slash : string -> string
 
 (** Parent of a relative path, with the root spelled [""] rather than
     {!Filename.dirname}'s ["."]. *)

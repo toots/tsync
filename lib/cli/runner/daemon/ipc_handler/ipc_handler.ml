@@ -513,12 +513,10 @@ module Make (C : Conf.S) (F : File_ops.S) : S = struct
           | Some id -> Lwt.return_some id
           | None -> lookup_folder rel
       in
-      (* Directory ops carry a trailing slash; lookups do not. *)
       let note = function
-        | `Mkdir (rel, Some id) ->
-            Hashtbl.replace learned (Key.chop_slash rel) id
+        | `Mkdir (rel, Some id) -> Hashtbl.replace learned rel id
         | `Rename { Journal.dst; is_dir = true; id = Some id; _ } ->
-            Hashtbl.replace learned (Key.chop_slash dst) id
+            Hashtbl.replace learned dst id
         | _ -> ()
       in
       let+ described =

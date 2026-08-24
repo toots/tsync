@@ -121,10 +121,10 @@ module Inode = struct
         (fun pid -> child_key ~folder_id:pid (Filename.basename rel))
         pid
 
-    let ensure_folder_id key = ensure_id (Key.chop_slash (rel_of key))
+    let ensure_folder_id key = ensure_id (rel_of key)
 
     let folder_marker_key key =
-      let rel = Key.chop_slash (rel_of key) in
+      let rel = rel_of key in
       if rel = "" then Lwt.return_none
       else
         let+ pid = lookup_id (Key.parent rel) in
@@ -136,7 +136,7 @@ module Inode = struct
        what gives it one, the parent's because a marker must be filed under a
        namespace even on a client that has not learned the parent. *)
     let ensure_folder_marker key =
-      let rel = Key.chop_slash (rel_of key) in
+      let rel = rel_of key in
       if rel = "" then Lwt.return_none
       else
         let* pid = ensure_id (Key.parent rel) in
