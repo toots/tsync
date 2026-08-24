@@ -31,8 +31,28 @@ val staged_manifests_dir : cache_root:string -> string -> string
 val staged_chunks_dir : cache_root:string -> string -> string
 val staged_whole_dir : cache_root:string -> string -> string
 
+(** Where the trees that mirror real paths keep an item. Each component is
+    handed to a filesystem, so {!Stored_key.escape} is applied here and no
+    caller spells it; the domain root is the tree itself. *)
+val manifest_path :
+  cache_root:string -> domain_name:string -> Logical_key.t -> string
+
+val staged_manifest_path :
+  cache_root:string -> domain_name:string -> Logical_key.t -> string
+
+val scratch_path :
+  cache_root:string -> domain_name:string -> Logical_key.t -> string
+
 (** A cache chunk's path, sharded by {!Chunk_layout} like the backend store. *)
 val chunk_path : cache_root:string -> domain_name:string -> string -> string
+
+(** Record what a directory stored under a handle is really called, unless it is
+    already recorded. Both trees that mirror real paths keep these. *)
+val record_dir_name : string -> string -> unit Lwt.t
+
+(** [real_dir_name dir_path name] is [name] itself, or what the marker in
+    [dir_path] records when [name] is a handle. *)
+val real_dir_name : string -> string -> string Lwt.t
 
 (** Drop everything rebuildable, for a resync that restates the domain from the
     backend. Staged edits are kept: nothing else holds those bytes. *)

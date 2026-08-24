@@ -11,10 +11,7 @@ type listed = { key : Logical_key.t; size : int; mtime : float }
 let dir ~cache_root domain_name =
   Cache_layout.manifests_dir ~cache_root domain_name
 
-let sidecar_path ~cache_root ~domain_name key =
-  Filename.concat
-    (dir ~cache_root domain_name)
-    (Name_escape.encode_key (Logical_key.path key))
+let sidecar_path = Cache_layout.manifest_path
 
 (* Synchronous, for the CLI listing (plain non-Lwt code).
 
@@ -46,13 +43,13 @@ let ensure_dirs root rel =
   let rec go dir = function
     | [] -> Lwt.return_unit
     | c :: rest ->
-        let enc = Name_escape.encode_component c in
+        let enc = Stored_key.escape c in
         let dir = Filename.concat dir enc in
         let* () = Fs_util.mkdir_p dir in
         let* () =
-          if Name_escape.is_escaped enc then
-            Name_escape.write_marker
-              (Filename.concat dir Name_escape.dir_marker)
+          if Stored_key.is_escaped enc then
+            Cache_layout.record_dir_name
+              (Filename.concat dir Stored_key.dir_name_leaf)
               c
           else Lwt.return_unit
         in
@@ -68,7 +65,7 @@ let read_clean path =
 (* Escaped names are resolved through their markers, so the [rel] a walk hands
    out is always real-path shaped. *)
 let real_file_name name m =
-  if Name_escape.is_escaped name then recorded_name m else name
+  if Stored_key.is_escaped name then recorded_name m else name
 
 let rec clean_tmp dir =
   let* is_dir = Fs_util.is_directory dir in
@@ -92,9 +89,8 @@ module Make (C : Conf.S) = struct
   let root () = dir ~cache_root:C.cache_root C.domain_name
 
   let path key =
-    Filename.concat
-      (dir ~cache_root:C.cache_root C.domain_name)
-      (Name_escape.encode_key (Logical_key.path key))
+    Cache_layout.manifest_path ~cache_root:C.cache_root
+      ~domain_name:C.domain_name key
 
   let rel_of = Logical_key.path
 
@@ -168,15 +164,12 @@ module Make (C : Conf.S) = struct
      a manifest keeps one in its body: an escaped on-disk name is a hash. *)
   let refresh_dir_marker key =
     let leaf = Logical_key.leaf key in
-    if
-      leaf = ""
-      || not (Name_escape.is_escaped (Name_escape.encode_component leaf))
-    then Lwt.return_unit
-    else (
-      let dir =
-        Filename.concat (root ()) (Name_escape.encode_key (rel_of key))
-      in
-      Fs_util.atomic_write (Filename.concat dir Name_escape.dir_marker) leaf)
+    if leaf = "" || not (Stored_key.is_escaped (Stored_key.escape leaf)) then
+      Lwt.return_unit
+    else
+      Fs_util.atomic_write
+        (Filename.concat (path key) Stored_key.dir_name_leaf)
+        leaf
 
   (* Moving is half of a rename: whatever records the name — a manifest's body
      for a file, the marker beside it for a directory — has to be brought to the
@@ -231,13 +224,7 @@ module Make (C : Conf.S) = struct
     let* is_dir = Fs_util.is_directory dir in
     if is_dir then Fs_util.readdir_list dir else Lwt.return_nil
 
-  let dir_of_prefix prefix =
-    let rel = rel_of prefix in
-    let p =
-      if rel = "" then root ()
-      else Filename.concat (root ()) (Name_escape.encode_key rel)
-    in
-    (rel, p)
+  let dir_of_prefix prefix = (rel_of prefix, path prefix)
 
   let list_children ~prefix () =
     let rel, dir = dir_of_prefix prefix in
@@ -247,12 +234,12 @@ module Make (C : Conf.S) = struct
     let+ files, dirs =
       Lwt_list.fold_left_s
         (fun (files, dirs) name ->
-          if Name_escape.is_internal name then Lwt.return (files, dirs)
+          if Stored_key.is_internal name then Lwt.return (files, dirs)
           else (
             let path = Filename.concat dir name in
             let* is_dir = Fs_util.is_directory path in
             if is_dir then
-              let+ real = Name_escape.real_dir_name path name in
+              let+ real = Cache_layout.real_dir_name path name in
               (files, real :: dirs)
             else
               let+ m = read_clean path in
@@ -279,12 +266,12 @@ module Make (C : Conf.S) = struct
       let* names = Fs_util.readdir_list dir in
       Lwt_list.fold_left_s
         (fun acc name ->
-          if Name_escape.is_internal name then Lwt.return acc
+          if Stored_key.is_internal name then Lwt.return acc
           else (
             let path = Filename.concat dir name in
             let* is_dir = Fs_util.is_directory path in
             if is_dir then
-              let* real = Name_escape.real_dir_name path name in
+              let* real = Cache_layout.real_dir_name path name in
               walk path (Logical_key.dir_in key real) acc
             else
               let+ m = read_clean path in

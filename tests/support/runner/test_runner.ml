@@ -1014,7 +1014,7 @@ let setup_client (module C : Conf.S) root staging_prefix =
             (Filename.concat
                (Cache_layout.manifests_dir ~cache_root:C.cache_root
                   C.domain_name)
-               (Name_escape.encode_key rel))
+               (Stored_key.escape_path rel))
             Folder_ids.marker_name
         in
         Lwt.catch

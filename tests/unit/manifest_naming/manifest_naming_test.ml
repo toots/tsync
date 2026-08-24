@@ -59,7 +59,7 @@ let body ~name =
    path cannot express. *)
 let name_of ~key m =
   let leaf = Logical_key.leaf key in
-  if Name_escape.is_escaped leaf then Manifest.recorded_name m else leaf
+  if Stored_key.is_escaped leaf then Manifest.recorded_name m else leaf
 
 let report rel =
   let k = key rel in
@@ -99,7 +99,7 @@ let () =
      let* () = Mf.write (key odd) (body ~name:"ignored") in
      let* () = report odd in
      let escaped_on_disk =
-       Name_escape.is_escaped (Filename.basename (Mf.path (key odd)))
+       Stored_key.is_escaped (Filename.basename (Mf.path (key odd)))
      in
      step "on-disk leaf is escaped: %b" escaped_on_disk;
 

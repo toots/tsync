@@ -29,7 +29,7 @@ let rebuild () = Folder_ids.rebuild ~cache_root ~domain_name
 let mirror rel =
   Filename.concat
     (Cache_layout.manifests_dir ~cache_root domain_name)
-    (Name_escape.encode_key rel)
+    (Stored_key.escape_path rel)
 
 let index_file id =
   Filename.concat (Cache_layout.folders_dir ~cache_root domain_name) id

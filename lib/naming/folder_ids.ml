@@ -1,13 +1,10 @@
 open Lwt.Syntax
 
-let marker_name = Name_escape.folder_marker
+let marker_name = Stored_key.folder_marker_leaf
 
 (* Keyed by the folder itself: where its marker sits, what it is called and
    which folder holds it are all questions the key answers. *)
-let dir_of ~cache_root ~domain_name key =
-  let base = Cache_layout.manifests_dir ~cache_root domain_name in
-  let rel = Logical_key.path key in
-  if rel = "" then base else Filename.concat base (Name_escape.encode_key rel)
+let dir_of = Cache_layout.manifest_path
 
 let marker_path ~cache_root ~domain_name key =
   Filename.concat (dir_of ~cache_root ~domain_name key) marker_name
@@ -117,7 +114,7 @@ let rebuild ~cache_root ~domain_name =
     let* names = Fs_util.readdir_list_quiet dir in
     Lwt_list.iter_s
       (fun name ->
-        if Name_escape.is_internal name then Lwt.return_unit
+        if Stored_key.is_internal name then Lwt.return_unit
         else (
           let path = Filename.concat dir name in
           let* is_dir = Fs_util.is_directory path in

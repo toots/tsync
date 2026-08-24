@@ -6,9 +6,8 @@ open Lwt.Syntax
 module Make (C : Conf.S) = struct
   let make ~fuse_to_key : Path_ops.t =
     let local_path path =
-      Filename.concat
-        (Cache_layout.scratch_dir ~cache_root:C.cache_root C.domain_name)
-        (Name_escape.encode_key (Logical_key.path (fuse_to_key path)))
+      Cache_layout.scratch_path ~cache_root:C.cache_root
+        ~domain_name:C.domain_name (fuse_to_key path)
     in
     {
       mknod =

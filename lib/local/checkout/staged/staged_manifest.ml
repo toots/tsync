@@ -149,10 +149,7 @@ let staged_of_string body =
 
 open Lwt.Syntax
 
-let sidecar_path ~cache_root ~domain_name key =
-  Filename.concat
-    (Cache_layout.staged_manifests_dir ~cache_root domain_name)
-    (Name_escape.encode_key (Logical_key.path key))
+let sidecar_path = Cache_layout.staged_manifest_path
 
 module Make (C : Conf.S) = struct
   module Lk = Logical_key.Make (C)
@@ -162,7 +159,10 @@ module Make (C : Conf.S) = struct
   let root () =
     Cache_layout.staged_manifests_dir ~cache_root:C.cache_root C.domain_name
 
-  let path key = Filename.concat (root ()) (Name_escape.encode_key (rel_of key))
+  let path key =
+    Cache_layout.staged_manifest_path ~cache_root:C.cache_root
+      ~domain_name:C.domain_name key
+
   let exists key = Lwt_unix_retry.file_exists (path key)
 
   let read key =
@@ -230,15 +230,12 @@ module Make (C : Conf.S) = struct
   (* Walks on-disk names: a staged manifest records its leaf name, but tree
      position is what identifies the file. *)
   let fold ~rel_dir ~deep f acc =
-    let start =
-      if rel_dir = "" then root ()
-      else Filename.concat (root ()) (Name_escape.encode_key rel_dir)
-    in
+    let start = path (Lk.dir rel_dir) in
     let rec walk dir key acc =
       let* names = Fs_util.readdir_list dir in
       Lwt_list.fold_left_s
         (fun acc name ->
-          if Name_escape.is_internal name || Filename.check_suffix name ".bad"
+          if Stored_key.is_internal name || Filename.check_suffix name ".bad"
           then Lwt.return acc
           else (
             let path = Filename.concat dir name in
@@ -246,7 +243,7 @@ module Make (C : Conf.S) = struct
             if is_dir then
               if not deep then Lwt.return acc
               else
-                let* real = Name_escape.real_dir_name path name in
+                let* real = Cache_layout.real_dir_name path name in
                 walk path (Logical_key.dir_in key real) acc
             else
               let+ body = Fs_util.read_file_opt path in
@@ -255,7 +252,7 @@ module Make (C : Conf.S) = struct
                     match staged_of_string body |> edits with
                       | st ->
                           let leaf =
-                            if Name_escape.is_escaped name then st.s_name
+                            if Stored_key.is_escaped name then st.s_name
                             else name
                           in
                           f acc (Logical_key.file_in key leaf) st
