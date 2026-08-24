@@ -27,7 +27,9 @@ let fixed_mtime = 1_400_000_000.
    Keys.root on the Kotlin side. A bare domain name would take a lenient path
    that strips no prefix and answers about a different key. *)
 let domain_root = "tsync/media/manifests/"
-let photos = domain_root ^ "photos/"
+
+(* Spelled only to be refused: the daemon names items by reference. *)
+let photos_key = domain_root ^ "photos/"
 
 let binary =
   (* The generated rule depends on it (deps_for in tests/gen-dune.sh), so it is
@@ -250,6 +252,28 @@ let sort_items reply =
     | _ | (exception _) -> reply
 
 (* A verb answering in JSON: the call, then the whole reply. *)
+(* A client learns a folder's reference by listing its parent, ids being minted
+   by the daemon: the same walk the picker does. *)
+let child_ref parent name =
+  let items =
+    match Yojson.Safe.from_string (invoke ["android"; "list"; parent]) with
+      | `Assoc fields -> (
+          match List.assoc_opt "items" fields with
+            | Some (`List l) -> l
+            | _ -> [])
+      | _ -> []
+  in
+  let named = function
+    | `Assoc e -> List.assoc_opt "name" e = Some (`String name)
+    | _ -> false
+  in
+  match List.find_opt named items with
+    | Some (`Assoc e) -> (
+        match List.assoc_opt "ref" e with
+          | Some (`String r) -> r
+          | _ -> failwith ("no ref for " ^ name))
+    | _ -> failwith ("no child " ^ name ^ " under " ^ parent)
+
 let json args =
   line "%s" (scrub (String.concat " " (List.tl args)));
   let reply = String.trim (invoke args) in
@@ -336,14 +360,20 @@ let snapshot () =
              chunk_size chunk_size store);
 
         case "a directory is made, then seen";
-        ignore (json ["android"; "mkdir"; photos]);
-        ignore (json ["android"; "list"; domain_root]);
+        ignore (json ["android"; "mkdir"; "root"; "photos"]);
+        ignore (json ["android"; "list"; "root"]);
+        let photos = child_ref "root" "photos" in
+        (* The reference a folder answers to has to be the one its children give
+           as their parent. *)
+        ignore (json ["android"; "stat"; photos]);
+        ignore (json ["android"; "stat"; "root"]);
 
         case "a whole body is adopted by rename";
         let staging = staged fixture in
-        ignore (json ["android"; "write-whole"; photos ^ "big.txt"; staging]);
+        ignore (json ["android"; "write-whole"; photos; "big.txt"; staging]);
         line "staging file still there: %b" (Sys.file_exists staging);
-        ignore (json ["android"; "stat"; photos ^ "big.txt"]);
+        let big = child_ref photos "big.txt" in
+        ignore (json ["android"; "stat"; big]);
 
         case "ranges, each served by its own process, reassemble the file";
         (* Nothing is held between calls, so three processes writing a range
@@ -351,61 +381,56 @@ let snapshot () =
         let dest = Filename.concat root "ranges.bin" in
         List.iter
           (fun offset ->
-            ranged
-              ["android"; "read"; photos ^ "big.txt"]
-              ~dest ~offset ~length:8)
+            ranged ["android"; "read"; big] ~dest ~offset ~length:8)
           [0; 8; 16];
         line "reassembled = %S" (read_file dest);
-        ranged
-          ["android"; "read"; photos ^ "big.txt"]
+        ranged ["android"; "read"; big]
           ~dest:(Filename.concat root "mid.bin")
           ~offset:4 ~length:12;
 
         case "a read past the content is short, never padded";
-        ranged
-          ["android"; "read"; photos ^ "big.txt"]
+        ranged ["android"; "read"; big]
           ~dest:(Filename.concat root "tail.bin")
           ~offset:16 ~length:64;
-        ranged
-          ["android"; "read"; photos ^ "big.txt"]
+        ranged ["android"; "read"; big]
           ~dest:(Filename.concat root "past.bin")
           ~offset:99 ~length:8;
 
-        case "a key that is not there is a coded refusal";
-        ignore (json ["android"; "stat"; photos ^ "nope.txt"]);
-        ignore (json ["android"; "list"; domain_root ^ "nowhere/"]);
+        case "a reference that is not there is a coded refusal";
+        ignore (json ["android"; "stat"; "f:.tsync-root/nope.txt"]);
+        ignore (json ["android"; "list"; "d:nowhere"]);
+        (* A storage key is no reference at all, whatever it names. *)
+        ignore (json ["android"; "stat"; photos_key]);
 
         case "a created file is empty until something is written to it";
-        ignore (json ["android"; "create"; photos ^ "new.txt"]);
-        ignore (json ["android"; "stat"; photos ^ "new.txt"]);
+        ignore (json ["android"; "create"; photos; "new.txt"]);
+        let fresh = child_ref photos "new.txt" in
+        ignore (json ["android"; "stat"; fresh]);
 
         case "the whole content, assembled into a file for editing in place";
         let dest = Filename.concat root "fetched.bin" in
-        ignore (json ["android"; "fetch"; photos ^ "big.txt"; dest]);
+        ignore (json ["android"; "fetch"; big; dest]);
         line "fetched = %S" (read_file dest);
 
         case "what of the file is on this device";
-        ignore (json ["android"; "residency"; photos ^ "big.txt"]);
+        ignore (json ["android"; "residency"; big]);
 
         case "one process serves every range of an open file";
         (* The reason it exists: reads in one process are sequential to
            lib/content/data.ml, which is what lets it fetch ahead of them. *)
-        let served =
-          session_ranges (photos ^ "big.txt") [(0, 8); (8, 8); (16, 8); (99, 8)]
-        in
+        let served = session_ranges big [(0, 8); (8, 8); (16, 8); (99, 8)] in
         List.iter
           (fun (o, l, body) ->
             line "range %d+%d -> %d %S" o l (String.length body) body)
           served;
 
         case "the namespace verbs move and remove";
-        ignore
-          (json ["android"; "rename"; photos ^ "big.txt"; photos ^ "moved.txt"]);
+        ignore (json ["android"; "rename"; big; photos; "moved.txt"]);
         ignore (json ["android"; "list"; photos]);
-        ignore (json ["android"; "delete"; photos ^ "moved.txt"]);
-        ignore (json ["android"; "delete"; photos ^ "new.txt"]);
+        ignore (json ["android"; "delete"; child_ref photos "moved.txt"]);
+        ignore (json ["android"; "delete"; fresh]);
         ignore (json ["android"; "rmdir"; photos]);
-        ignore (json ["android"; "list"; domain_root]);
+        ignore (json ["android"; "list"; "root"]);
 
         case "the report answers with no daemon to ask";
         (* Only the lines that do not describe this machine: the rest of the

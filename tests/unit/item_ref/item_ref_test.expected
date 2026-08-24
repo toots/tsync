@@ -4,8 +4,8 @@ a file is named by parent and leaf: ok
 the root id normalises to the root: ok
 only the first slash separates: ok
 a colon in a name is just a character: ok
-this domain's key names an item by key: ok
-another domain's key is not an item here: ok
+a storage key is not a reference: ok
+another domain's key is no better: ok
 a file form with no leaf is bad: ok
 a file form with an empty leaf is bad: ok
 a file form with no parent is bad: ok

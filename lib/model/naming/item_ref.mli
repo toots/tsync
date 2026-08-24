@@ -13,14 +13,14 @@
     the item it names needs the map from ids to paths and belongs to whoever
     holds it. *)
 
-(** The wire forms are ["root"], ["d:<folder id>"], ["f:<folder id>/<leaf>"],
-    and this domain's own spelling of a logical key. Anything else is {!(`Bad)}:
-    a reference naming another domain is not one this daemon can answer. *)
+(** The wire forms are ["root"], ["d:<folder id>"] and ["f:<folder id>/<leaf>"],
+    each of which says which kind it names. Anything else is {!(`Bad)}, a
+    storage key included: a key carries no kind, so accepting one would mean
+    guessing, and whoever holds a key holds the mirror that answers it. *)
 type t =
   [ `Root
   | `Dir of string
   | `File of string * string  (** parent folder id, leaf name *)
-  | `Logical_key of Logical_key.t
   | `Bad of string  (** unparseable; see {!Make.parse} *) ]
 
 val to_string : t -> string

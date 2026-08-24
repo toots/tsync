@@ -23,7 +23,7 @@ class UploadRecords(context: Context) :
 
     companion object {
         private const val NAME = "camera-backup.db"
-        private const val VERSION = 1
+        private const val VERSION = 2
     }
 
     override fun onCreate(db: SQLiteDatabase) {
@@ -46,10 +46,15 @@ class UploadRecords(context: Context) :
         // dead row's name replaces it rather than doubling the entry.
         db.execSQL("CREATE UNIQUE INDEX media_path ON media(relative_path)")
         db.execSQL("CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)")
-        db.execSQL("CREATE TABLE dirs (key TEXT PRIMARY KEY)")
+        db.execSQL("CREATE TABLE dirs (path TEXT PRIMARY KEY, ref TEXT NOT NULL)")
     }
 
-    override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) = Unit
+    /** Only the folder cache is dropped: what a sweep has uploaded is real
+     *  state, and losing it would send every photo a second time. */
+    override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
+        db.execSQL("DROP TABLE IF EXISTS dirs")
+        db.execSQL("CREATE TABLE dirs (path TEXT PRIMARY KEY, ref TEXT NOT NULL)")
+    }
 
     // ── Records ──────────────────────────────────────────────────────────────
 
@@ -133,23 +138,28 @@ class UploadRecords(context: Context) :
 
     // ── Folders already created in the domain ────────────────────────────────
 
-    fun knownDirs(): MutableSet<String> {
-        val keys = mutableSetOf<String>()
-        readableDatabase.query("dirs", arrayOf("key"), null, null, null, null, null).use {
-            while (it.moveToNext()) keys.add(it.getString(0))
+    /** Folder references already resolved, by the relative path each holds.
+     *  A reference outlives a rename of the folder, so this stays true. */
+    fun knownDirs(): MutableMap<String, String> {
+        val refs = mutableMapOf<String, String>()
+        readableDatabase.query("dirs", arrayOf("path", "ref"), null, null, null, null, null).use {
+            while (it.moveToNext()) refs[it.getString(0)] = it.getString(1)
         }
-        return keys
+        return refs
     }
 
-    fun rememberDirs(keys: Set<String>) {
+    fun rememberDirs(refs: Map<String, String>) {
         val database = writableDatabase
         database.beginTransaction()
         try {
-            keys.forEach { key ->
+            refs.forEach { (path, ref) ->
                 database.insertWithOnConflict(
                     "dirs", null,
-                    ContentValues().apply { put("key", key) },
-                    SQLiteDatabase.CONFLICT_IGNORE
+                    ContentValues().apply {
+                        put("path", path)
+                        put("ref", ref)
+                    },
+                    SQLiteDatabase.CONFLICT_REPLACE
                 )
             }
             database.setTransactionSuccessful()

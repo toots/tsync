@@ -93,16 +93,16 @@ class ReadSession private constructor(
         private val slots = Semaphore(MAX_SESSIONS)
 
         /** Null when no slot is free or the file would not open. */
-        fun open(context: Context, key: String): ReadSession? {
+        fun open(context: Context, ref: String): ReadSession? {
             if (!slots.tryAcquire()) return null
             var process: Process? = null
             return try {
-                process = Tsync.spawn(context, Cli.open(key))
+                process = Tsync.spawn(context, Cli.open(ref))
                 val input = BufferedInputStream(process.inputStream)
                 val header = readHeader(input) ?: throw Cli.Error("no size line")
                 ReadSession(process, input, process.outputStream, Cli.reply(header).getLong("size"))
             } catch (failure: Exception) {
-                Log.w(TAG, "session $key: ${failure.message}")
+                Log.w(TAG, "session $ref: ${failure.message}")
                 runCatching { process?.destroy() }
                 slots.release()
                 null

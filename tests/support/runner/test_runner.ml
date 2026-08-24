@@ -452,6 +452,61 @@ let setup_client (module C : Conf.S) root staging_prefix =
       @ (match target with Some s -> [("target", `String s)] | None -> [])
       @ match staging with Some s -> [("staging", `String s)] | None -> [])
   in
+  (* A scenario names an item by path, and the daemon is told by reference: this
+     side holds the mirror, so it is the side that resolves one. *)
+  let ref_of key =
+    let+ r = H.item_ref key in
+    Option.value r ~default:(Logical_key.to_string key)
+  in
+  let by_ref ?extra act key =
+    let* r = ref_of key in
+    request
+      ([("action", `String act); ("ref", `String r)]
+      @ Option.value extra ~default:[])
+  in
+  let must_by_ref ?extra act key =
+    let+ obj = by_ref ?extra act key in
+    if not (response_ok obj) then failwith ("IPC error: " ^ response_error obj)
+  in
+  (* A client makes the folders it puts things in; a scenario names a nested
+     path and expects them to be there, so this is where they get made. *)
+  let rec ensure_dir key =
+    if Logical_key.is_root key then ref_of key
+    else
+      let* known = H.item_ref key in
+      match known with
+        | Some r -> Lwt.return r
+        | None ->
+            let* parent = ensure_dir (Logical_key.parent key) in
+            let* (_ : (string * Yojson.Safe.t) list) =
+              request
+                [
+                  ("action", `String "mkdir");
+                  ("parentRef", `String parent);
+                  ("name", `String (Logical_key.leaf key));
+                ]
+            in
+            ref_of key
+  in
+
+  (* Made under a folder, by the name it is to have. *)
+  let make ?extra act key =
+    let* parent = ensure_dir (Logical_key.parent key) in
+    let+ obj =
+      request
+        ([
+           ("action", `String act);
+           ("parentRef", `String parent);
+           ("name", `String (Logical_key.leaf key));
+         ]
+        @ Option.value extra ~default:[])
+    in
+    obj
+  in
+  let must_make ?extra act key =
+    let+ obj = make ?extra act key in
+    if not (response_ok obj) then failwith ("IPC error: " ^ response_error obj)
+  in
   let must obj =
     if not (response_ok obj) then failwith ("IPC error: " ^ response_error obj)
   in
@@ -551,24 +606,22 @@ let setup_client (module C : Conf.S) root staging_prefix =
             (Printf.sprintf "staging-%s%d" staging_prefix !staging_seq)
         in
         write_file staging content;
-        must_action ~staging "write" (Logical_key.to_string (key path))
+        must_make ~extra:[("staging", `String staging)] "write" (key path)
     | Symlink { path; target } ->
         (* Print a rejection instead of failing: symlink creation is expected
            to be refused when the domain policy is not [`Keep]. *)
         let+ obj =
-          action ~target "symlink" (Logical_key.to_string (key path))
+          make ~extra:[("target", `String target)] "symlink" (key path)
         in
         if not (response_ok obj) then
           Printf.printf "  symlink %s: rejected (%s)\n" path
             (response_error obj)
-    | Mkdir p -> must_action "mkdir" (Logical_key.to_string (Lk.dir p))
-    | Rmdir p -> must_action "rmdir" (Logical_key.to_string (Lk.dir p))
+    | Mkdir p -> must_make "mkdir" (Lk.dir p)
+    | Rmdir p -> must_by_ref "rmdir" (Lk.dir p)
     | Rename { src; dst } ->
-        must_action
-          ~src:(Logical_key.to_string (key src))
-          "rename"
-          (Logical_key.to_string (key dst))
-    | Delete p -> must_action "delete" (Logical_key.to_string (key p))
+        let* src_ref = ref_of (key src) in
+        must_make ~extra:[("src", `String src_ref)] "rename" (key dst)
+    | Delete p -> must_by_ref "delete" (key p)
     | Evict p -> must_action "evict" ("/" ^ p)
     | EnforceCache -> F.enforce_chunk_cap ()
     | Restore p -> must_action "restore" ("/" ^ p)
@@ -633,7 +686,7 @@ let setup_client (module C : Conf.S) root staging_prefix =
         Printf.printf "  create %s under %s: %s\n" name parent
           (if response_ok obj then "ok" else response_error obj)
     | Stat p ->
-        let+ obj = action "stat" (Logical_key.to_string (key p)) in
+        let+ obj = by_ref "stat" (key p) in
         if response_ok obj then
           Printf.printf "  stat %s: %s\n" p
             (Yojson.Safe.to_string (`Assoc (List.remove_assoc "mtime" obj)))
@@ -1035,7 +1088,9 @@ let setup_client (module C : Conf.S) root staging_prefix =
   let dump_tree () =
     let files = ref [] in
     let rec walk ~rel item_ref =
-      let* obj = action "list_dir" item_ref in
+      let* obj =
+        request [("action", `String "list_dir"); ("ref", `String item_ref)]
+      in
       must obj;
       let dirs, entries = split_items obj in
       let entries =
@@ -1047,7 +1102,7 @@ let setup_client (module C : Conf.S) root staging_prefix =
       let* () =
         Lwt_list.iter_s
           (fun rel ->
-            let* st = action "stat" (Logical_key.to_string (key rel)) in
+            let* st = by_ref "stat" (key rel) in
             let uploaded = List.assoc_opt "isUploaded" st = Some (`Bool true) in
             let etag = Option.value ~default:"" (get_str st "etag") in
             let size =
@@ -1097,7 +1152,7 @@ let setup_client (module C : Conf.S) root staging_prefix =
   let dump_contents files =
     Lwt_list.iter_s
       (fun rel ->
-        let* st = action "stat" (Logical_key.to_string (key rel)) in
+        let* st = by_ref "stat" (key rel) in
         match get_str st "symlinkTarget" with
           | Some target ->
               Printf.printf "  %s -> %s\n" rel target;

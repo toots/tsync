@@ -1,32 +1,19 @@
 package org.feverdreamtv.tsync
 
 /**
- * Storage keys, as the daemon spells them.
+ * Leaf names, as the daemon will file them.
  *
- * A key is what the SAF layer calls a documentId, and directories carry a
- * trailing slash — see lib/daemon/ipc_handler/ipc_handler.ml.
+ * Items are named by reference and folder ids are the daemon's to mint, so
+ * nothing here composes a path: what a client supplies is the leaf a new item
+ * is to be called.
  */
 object Keys {
-    /** tsync/<domain>/manifests/ — see Conf.domain_prefix. */
-    fun root(domain: String): String = "tsync/$domain/manifests/"
+    /** The folder id the daemon reserves for a domain's root — see
+     *  Stored_key.root_id. */
+    const val ROOT_FOLDER_ID = ".tsync-root"
 
     /**
-     * The directory keys between [root] and [key], outermost first, excluding
-     * both.
-     *
-     * The domain root is not a folder anyone creates.
-     */
-    fun ancestors(root: String, key: String): List<String> {
-        require(key.startsWith(root)) { "$key is not under $root" }
-        val segments = key.removePrefix(root).trimEnd('/').split('/')
-        if (segments.size < 2) return emptyList()
-        return segments.dropLast(1).runningFold(root) { parent, segment ->
-            parent + segment + "/"
-        }.drop(1)
-    }
-
-    /**
-     * Makes a leaf safe to concatenate into a key.
+     * Makes a leaf safe to file under.
      *
      * Display names come from the camera roll and from other apps, keys are
      * '/'-delimited the whole way down, and a trailing space or dot names a

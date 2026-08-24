@@ -22,10 +22,12 @@ import java.util.UUID
 /**
  * Exposes a tsync domain through the Storage Access Framework.
  *
- * documentId *is* the tsync storage key, verbatim and opaque — the same
- * identity the macOS File Provider uses, so it is stable across restarts with
- * no mapping table. Directories carry a trailing slash, matching
- * lib/daemon/ipc_handler/ipc_handler.ml.
+ * documentId *is* the daemon's reference for an item — "root", "d:<folder id>"
+ * or "f:<folder id>/<leaf>".
+ *
+ * A folder's id is minted once and a rename does not touch it, so a documentId
+ * survives the folder moving. The reference also says which kind it names,
+ * which a caller has to know before it can ask anything.
  */
 class TsyncProvider : DocumentsProvider() {
 
@@ -34,7 +36,7 @@ class TsyncProvider : DocumentsProvider() {
     private val domain: String
         get() = Config.load(context!!)?.domain ?: "media"
 
-    private val rootDocumentId get() = Keys.root(domain)
+    private val rootDocumentId get() = Cli.ROOT
 
     private lateinit var callbackThread: HandlerThread
     private lateinit var callbackHandler: Handler
@@ -79,16 +81,15 @@ class TsyncProvider : DocumentsProvider() {
             // Synthesised, not stat'ed: on a fresh install the local manifest
             // mirror does not exist yet and stat would answer "not found",
             // which the picker renders as a dead root.
-            addDirectory(cursor, documentId)
-        } else if (documentId.endsWith("/")) {
-            addDirectory(cursor, documentId)
+            addDirectory(cursor, documentId, "tsync")
         } else {
+            // The name is the daemon's to give: a reference spells a folder id,
+            // not what anyone called it.
             val response = Tsync.json(context!!, Cli.stat(documentId))
-            addFile(
-                cursor, documentId,
-                response.optLong("size"),
-                (response.optDouble("mtime") * 1000).toLong()
-            )
+            val name = response.getString("name")
+            val modified = (response.optDouble("mtime") * 1000).toLong()
+            if (Cli.isDir(documentId)) addDirectory(cursor, documentId, name, modified)
+            else addFile(cursor, documentId, name, response.optLong("size"), modified)
         }
         return cursor
     }
@@ -101,16 +102,16 @@ class TsyncProvider : DocumentsProvider() {
         val cursor = MatrixCursor(projection ?: defaultDocumentColumns)
         try {
             val response = Tsync.json(context!!, Cli.list(parentDocumentId))
-            // One list, each entry tagged by kind. The reply also names each
-            // item by reference, but documentId is the key here, so `key` is
-            // what this reads.
+            // One list, each entry tagged by kind and naming itself by the
+            // reference a caller addresses it with.
             val items = response.getJSONArray("items")
             for (i in 0 until items.length()) {
                 val entry = items.getJSONObject(i)
-                val key = entry.getString("key")
+                val ref = entry.getString("ref")
+                val name = entry.getString("name")
                 val modified = (entry.optDouble("mtime", 0.0) * 1000).toLong()
-                if (entry.getString("kind") == "dir") addDirectory(cursor, key, modified)
-                else addFile(cursor, key, entry.optLong("size"), modified)
+                if (entry.getString("kind") == "dir") addDirectory(cursor, ref, name, modified)
+                else addFile(cursor, ref, name, entry.optLong("size"), modified)
             }
         } catch (e: Exception) {
             // A banner in the picker beats an empty folder that looks like truth.
@@ -123,8 +124,13 @@ class TsyncProvider : DocumentsProvider() {
         return cursor
     }
 
-    override fun isChildDocument(parentDocumentId: String, documentId: String): Boolean =
-        documentId.startsWith(parentDocumentId)
+    /** A file names the folder holding it, so the question is whether that is
+     *  this folder. */
+    override fun isChildDocument(parentDocumentId: String, documentId: String): Boolean {
+        val parentId =
+            Cli.folderId(parentDocumentId, Keys.ROOT_FOLDER_ID) ?: return false
+        return Cli.isChildOf(documentId, parentId)
+    }
 
     // ── Opening ──────────────────────────────────────────────────────────────
 
@@ -227,8 +233,15 @@ class TsyncProvider : DocumentsProvider() {
                 Log.w(TAG, "write $documentId aborted: $error")
                 staging.delete()
             } else {
-                runCatching { Ingest.commit(context!!, documentId, staging) }
-                    .onFailure { Log.w(TAG, "write $documentId: ${it.message}") }
+                // The folder and leaf, which the item names rather than the
+                // reference: what is written is where it already is.
+                runCatching {
+                    val stat = Tsync.json(context!!, Cli.stat(documentId))
+                    Ingest.commit(
+                        context!!, stat.getString("parentRef"),
+                        stat.getString("name"), staging
+                    )
+                }.onFailure { Log.w(TAG, "write $documentId: ${it.message}") }
             }
         }
     }
@@ -241,35 +254,60 @@ class TsyncProvider : DocumentsProvider() {
         displayName: String
     ): String {
         val isDirectory = mimeType == Document.MIME_TYPE_DIR
-        val documentId = parentDocumentId + displayName + if (isDirectory) "/" else ""
-        Tsync.json(context!!, if (isDirectory) Cli.mkdir(documentId) else Cli.create(documentId))
-        return documentId
+        val name = Keys.sanitizeLeaf(displayName)
+        Tsync.json(
+            context!!,
+            if (isDirectory) Cli.mkdir(parentDocumentId, name)
+            else Cli.create(parentDocumentId, name)
+        )
+        // The daemon mints a folder's id, so what it is called is asked for
+        // rather than composed here.
+        return childRef(parentDocumentId, name)
+    }
+
+    /** The reference a freshly made child answers to. */
+    private fun childRef(parent: String, name: String): String {
+        val items = Tsync.json(context!!, Cli.list(parent)).getJSONArray("items")
+        for (i in 0 until items.length()) {
+            val entry = items.getJSONObject(i)
+            if (entry.getString("name") == name) return entry.getString("ref")
+        }
+        throw IllegalStateException("no child $name under $parent")
     }
 
     override fun deleteDocument(documentId: String) {
         Tsync.json(
             context!!,
-            if (documentId.endsWith("/")) Cli.rmdir(documentId) else Cli.delete(documentId)
+            if (Cli.isDir(documentId)) Cli.rmdir(documentId) else Cli.delete(documentId)
         )
     }
 
+    /** A folder keeps its id across the move, so its documentId is unchanged
+     *  and the system's grants beneath it stay good; a file's names its leaf,
+     *  so that one moves with it. */
     override fun renameDocument(documentId: String, displayName: String): String {
-        val parent = documentId.trimEnd('/').substringBeforeLast('/', "") + "/"
-        val renamed = parent + displayName + if (documentId.endsWith("/")) "/" else ""
-        Tsync.json(context!!, Cli.rename(documentId, renamed))
-        return renamed
+        val parent = parentOf(documentId)
+        val name = Keys.sanitizeLeaf(displayName)
+        Tsync.json(context!!, Cli.rename(documentId, parent, name))
+        return if (Cli.isDir(documentId)) documentId else childRef(parent, name)
     }
+
+    /** The folder a reference sits in, which a file's own reference names. */
+    private fun parentOf(documentId: String): String =
+        Tsync.json(context!!, Cli.stat(documentId)).getString("parentRef")
 
     // ── Row helpers ──────────────────────────────────────────────────────────
 
-    private fun displayName(documentId: String) =
-        documentId.trimEnd('/').substringAfterLast('/')
-
-    private fun addDirectory(cursor: MatrixCursor, documentId: String, modified: Long = 0) {
+    private fun addDirectory(
+        cursor: MatrixCursor,
+        documentId: String,
+        name: String,
+        modified: Long = 0
+    ) {
         cursor.newRow()
             .add(Document.COLUMN_DOCUMENT_ID, documentId)
             .add(Document.COLUMN_DISPLAY_NAME,
-                if (documentId == rootDocumentId) "tsync" else displayName(documentId))
+                if (documentId == rootDocumentId) "tsync" else name)
             .add(Document.COLUMN_MIME_TYPE, Document.MIME_TYPE_DIR)
             .add(Document.COLUMN_FLAGS,
                 Document.FLAG_DIR_SUPPORTS_CREATE or Document.FLAG_SUPPORTS_DELETE or
@@ -277,11 +315,17 @@ class TsyncProvider : DocumentsProvider() {
             .add(Document.COLUMN_LAST_MODIFIED, modified.takeIf { it > 0 })
     }
 
-    private fun addFile(cursor: MatrixCursor, documentId: String, size: Long, modified: Long) {
+    private fun addFile(
+        cursor: MatrixCursor,
+        documentId: String,
+        name: String,
+        size: Long,
+        modified: Long
+    ) {
         cursor.newRow()
             .add(Document.COLUMN_DOCUMENT_ID, documentId)
-            .add(Document.COLUMN_DISPLAY_NAME, displayName(documentId))
-            .add(Document.COLUMN_MIME_TYPE, mimeType(documentId))
+            .add(Document.COLUMN_DISPLAY_NAME, name)
+            .add(Document.COLUMN_MIME_TYPE, mimeType(name))
             .add(Document.COLUMN_FLAGS,
                 Document.FLAG_SUPPORTS_WRITE or Document.FLAG_SUPPORTS_DELETE or
                     Document.FLAG_SUPPORTS_RENAME)
@@ -289,8 +333,8 @@ class TsyncProvider : DocumentsProvider() {
             .add(Document.COLUMN_LAST_MODIFIED, modified.takeIf { it > 0 })
     }
 
-    private fun mimeType(documentId: String): String {
-        val extension = documentId.substringAfterLast('.', "").lowercase()
+    private fun mimeType(name: String): String {
+        val extension = name.substringAfterLast('.', "").lowercase()
         return MimeTypeMap.getSingleton().getMimeTypeFromExtension(extension)
             ?: "application/octet-stream"
     }

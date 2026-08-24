@@ -35,13 +35,19 @@ object Ingest {
      * The call returns once the upload has drained, so it is also what paces a
      * sweep: there is no queue to hand work to and ask about later.
      */
-    fun commit(context: Context, key: String, staging: File, modified: Long? = null) {
+    fun commit(
+        context: Context,
+        parent: String,
+        name: String,
+        staging: File,
+        modified: Long? = null
+    ) {
         // The rename into the chunk store is immediate, so bytes still only in
         // page cache when the power goes would be published as the whole file.
         FileOutputStream(staging, true).use { it.fd.sync() }
         if (modified != null) staging.setLastModified(modified)
         try {
-            Tsync.json(context, Cli.writeWhole(key, staging.absolutePath))
+            Tsync.json(context, Cli.writeWhole(parent, name, staging.absolutePath))
         } catch (failure: Exception) {
             staging.delete()
             throw failure
@@ -49,28 +55,52 @@ object Ingest {
     }
 
     /**
-     * Creates every ancestor folder of [key] that has no id yet, outermost
-     * first, recording them in [known].
+     * The folder [relativePath]'s file belongs in, making any part of the chain
+     * that is not there yet and answering with its reference.
      *
-     * An upload mints a missing id as a side effect but writes no Mkdir journal
-     * entry, leaving list answering not_found and the file naming the domain
-     * root as its parent (ipc_handler.ml handle_list_dir, handle_stat).
+     * A folder is named by an id the daemon mints at mkdir, so there is nothing
+     * to write into until it exists. [known] carries what earlier calls
+     * resolved, keyed by the relative path each folder holds.
      */
-    fun ensureDirs(context: Context, root: String, key: String, known: MutableSet<String>) {
-        for (directory in Keys.ancestors(root, key)) {
-            if (directory in known) continue
-            if (!exists(context, directory)) Tsync.json(context, Cli.mkdir(directory))
-            known.add(directory)
+    fun folderFor(
+        context: Context,
+        relativePath: String,
+        known: MutableMap<String, String>
+    ): String {
+        var parent = Cli.ROOT
+        var sofar = ""
+        for (segment in relativePath.split('/').dropLast(1)) {
+            if (segment.isEmpty()) continue
+            sofar = if (sofar.isEmpty()) segment else "$sofar/$segment"
+            val cached = known[sofar]
+            if (cached != null) {
+                parent = cached
+                continue
+            }
+            val existing = childRef(context, parent, segment)
+            val ref =
+                if (existing != null) existing
+                else {
+                    Tsync.json(context, Cli.mkdir(parent, segment))
+                    childRef(context, parent, segment)
+                        ?: throw IllegalStateException("could not create $sofar")
+                }
+            known[sofar] = ref
+            parent = ref
         }
+        return parent
     }
 
-    /** A directory no folder id is held for reads as absent. */
-    private fun exists(context: Context, key: String): Boolean =
+    /** The reference a folder's child answers to, or null if it has none. */
+    private fun childRef(context: Context, parent: String, name: String): String? =
         try {
-            Tsync.json(context, Cli.stat(key))
-            true
+            val items = Tsync.json(context, Cli.list(parent)).getJSONArray("items")
+            (0 until items.length())
+                .map { items.getJSONObject(it) }
+                .firstOrNull { it.getString("name") == name }
+                ?.getString("ref")
         } catch (absent: Cli.Error) {
-            false
+            null
         }
 
     /**

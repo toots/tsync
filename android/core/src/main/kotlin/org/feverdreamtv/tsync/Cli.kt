@@ -10,44 +10,74 @@ import org.json.JSONObject
  * two sides agreeing on it by having the same strings written out in OCaml and
  * in Kotlin.
  *
- * A key is passed verbatim as one argument. The verbs take positional arguments
- * rather than flags because the binary parses neither: it hands whatever
- * followed the verb to the frontend that owns it.
+ * An item is named by reference — "root", "d:<folder id>" or
+ * "f:<folder id>/<leaf>" — each of which says which kind it names. What is
+ * being made says its own kind too, and so names a parent and a leaf.
+ *
+ * The verbs take positional arguments rather than flags because the binary
+ * parses neither: it hands whatever followed the verb to the frontend that owns
+ * it.
  */
 object Cli {
 
     class Error(message: String) : Exception(message)
 
-    fun stat(key: String) = listOf("android", "stat", key)
+    /** The daemon's name for a domain's root folder. Every other reference is
+     *  learned from a listing, folder ids being the daemon's to mint. */
+    const val ROOT = "root"
 
-    fun list(key: String) = listOf("android", "list", key)
+    /** Whether a reference names a folder, which its own tag says. */
+    fun isDir(ref: String) = ref == ROOT || ref.startsWith(DIR)
 
-    fun read(key: String, dest: String, offset: Long, length: Int) =
-        listOf("android", "read", key, dest, offset.toString(), length.toString())
+    /** The folder a container reference names, or null if it names a file.
+     *  [rootFolderId] is what the daemon reserves for a domain's root. */
+    fun folderId(ref: String, rootFolderId: String): String? = when {
+        ref == ROOT -> rootFolderId
+        ref.startsWith(DIR) -> ref.removePrefix(DIR)
+        else -> null
+    }
+
+    /** Whether [ref] is a child of the folder [folderId] names. */
+    fun isChildOf(ref: String, folderId: String) =
+        ref.startsWith("$FILE$folderId/") || ref == "$DIR$folderId"
+
+    private const val DIR = "d:"
+    private const val FILE = "f:"
+
+    fun stat(ref: String) = listOf("android", "stat", ref)
+
+    fun list(ref: String) = listOf("android", "list", ref)
+
+    fun read(ref: String, dest: String, offset: Long, length: Int) =
+        listOf("android", "read", ref, dest, offset.toString(), length.toString())
 
     /** How many of the file's chunks are on this device, against how many
      *  there are. */
-    fun residency(key: String) = listOf("android", "residency", key)
+    fun residency(ref: String) = listOf("android", "residency", ref)
 
     /** Serves ranges until stdin closes; see ReadSession. */
-    fun open(key: String) = listOf("android", "open", key)
+    fun open(ref: String) = listOf("android", "open", ref)
 
     /** The whole content into [dest], for editing in place. */
-    fun fetch(key: String, dest: String) = listOf("android", "fetch", key, dest)
+    fun fetch(ref: String, dest: String) = listOf("android", "fetch", ref, dest)
 
     /** The binary adopts [staging] by rename, so it is gone on success. */
-    fun writeWhole(key: String, staging: String) =
-        listOf("android", "write-whole", key, staging)
+    fun writeWhole(parent: String, name: String, staging: String) =
+        listOf("android", "write-whole", parent, name, staging)
 
-    fun create(key: String) = listOf("android", "create", key)
+    fun create(parent: String, name: String) =
+        listOf("android", "create", parent, name)
 
-    fun mkdir(key: String) = listOf("android", "mkdir", key)
+    fun mkdir(parent: String, name: String) =
+        listOf("android", "mkdir", parent, name)
 
-    fun delete(key: String) = listOf("android", "delete", key)
+    fun delete(ref: String) = listOf("android", "delete", ref)
 
-    fun rmdir(key: String) = listOf("android", "rmdir", key)
+    fun rmdir(ref: String) = listOf("android", "rmdir", ref)
 
-    fun rename(from: String, to: String) = listOf("android", "rename", from, to)
+    /** A move names where it lands the way a creation does. */
+    fun rename(ref: String, parent: String, name: String) =
+        listOf("android", "rename", ref, parent, name)
 
     fun status() = listOf("android", "status")
 

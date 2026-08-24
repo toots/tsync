@@ -114,7 +114,7 @@ let rebuild ~cache_root ~domain_name =
   let base = Cache_layout.manifests_dir ~cache_root domain_name in
   let seen = Hashtbl.create 64 in
   let rec walk dir ~parent_id =
-    let* names = Fs_util.readdir_list dir in
+    let* names = Fs_util.readdir_list_quiet dir in
     Lwt_list.iter_s
       (fun name ->
         if Name_escape.is_internal name then Lwt.return_unit
@@ -154,9 +154,10 @@ let rebuild ~cache_root ~domain_name =
       (fun _ -> Lwt.return_unit)
   in
   (* A stale entry gives no wrong answer, a resolved path being verified against
-     the markers, but leaving them grows the directory forever. *)
+     the markers, but leaving them grows the directory forever. Neither tree
+     exists on a domain nobody has written to, which reads as empty. *)
   let dir = Cache_layout.folders_dir ~cache_root domain_name in
-  let* ids = Fs_util.readdir_list dir in
+  let* ids = Fs_util.readdir_list_quiet dir in
   Lwt_list.iter_s
     (fun id ->
       if Hashtbl.mem seen id then Lwt.return_unit

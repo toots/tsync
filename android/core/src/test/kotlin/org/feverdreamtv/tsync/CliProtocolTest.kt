@@ -147,7 +147,26 @@ class CliProtocolTest {
 
     private fun send(args: List<String>): JSONObject = Cli.reply(String(raw(args).second))
 
-    private val root_ get() = Keys.root(domain)
+    /** The daemon names items by reference, and mints folder ids itself, so a
+     *  client learns one by listing the folder that holds it. */
+    private fun childRef(parent: String, name: String): String {
+        val items = send(Cli.list(parent)).getJSONArray("items")
+        for (i in 0 until items.length()) {
+            val entry = items.getJSONObject(i)
+            if (entry.getString("name") == name) return entry.getString("ref")
+        }
+        throw AssertionError("no child $name under $parent")
+    }
+
+    /** Creates each folder in turn, answering with the innermost reference. */
+    private fun mkdirs(vararg names: String): String {
+        var parent = Cli.ROOT
+        for (name in names) {
+            send(Cli.mkdir(parent, name))
+            parent = childRef(parent, name)
+        }
+        return parent
+    }
 
     private fun staged(contents: ByteArray): File {
         val file = File(root, "staged-" + UUID.randomUUID())
@@ -159,37 +178,35 @@ class CliProtocolTest {
 
     @Test
     fun `a fresh domain lists nothing`() {
-        assertEquals(0, send(Cli.list(root_)).getJSONArray("items").length())
+        assertEquals(0, send(Cli.list(Cli.ROOT)).getJSONArray("items").length())
     }
 
     /**
-     * The reason camera backup creates its date folders rather than letting the
-     * upload mint their ids: the upload does mint them locally, but writes no
-     * Mkdir entry, so a peer replaying the journal gets the file and no folder
-     * to hang it under.
+     * Why camera backup creates its date folders before writing into them: a
+     * folder is named by an id the daemon mints at mkdir, so there is nothing
+     * to name until it exists.
      */
     @Test
-    fun `a write into an uncreated folder journals no folder`() {
-        val key = root_ + "Camera Uploads/2026/shot.jpg"
-        send(Cli.writeWhole(key, staged("hello".toByteArray()).absolutePath))
+    fun `a write needs the folder it goes in to exist`() {
+        val refused = runCatching {
+            send(Cli.writeWhole("d:never-minted", "shot.jpg",
+                staged("hello".toByteArray()).absolutePath))
+        }
+        assertTrue("a folder nobody made is nothing to write into",
+            refused.exceptionOrNull() is Cli.Error)
 
         val entries = File(root, "store").walkTopDown()
             .filter { it.isFile && it.path.contains("/journal/") }
             .map { it.readText() }
             .toList()
-        assertEquals(1, entries.size)
-        assertTrue("expected a put, got ${entries[0]}", entries[0].contains("\"op\":\"put\""))
-        assertFalse("an upload should mint no Mkdir entry", entries[0].contains("mkdir"))
+        assertTrue("a refused write journals nothing, got $entries", entries.isEmpty())
     }
 
     @Test
     fun `mkdir then write puts the file in the folder with the right size and parent`() {
-        val folder = root_ + "Camera Uploads/"
-        val year = folder + "2026/"
-        val key = year + "shot.jpg"
-        send(Cli.mkdir(folder))
-        send(Cli.mkdir(year))
-        send(Cli.writeWhole(key, staged("hello".toByteArray()).absolutePath))
+        val year = mkdirs("Camera Uploads", "2026")
+        send(Cli.writeWhole(year, "shot.jpg", staged("hello".toByteArray()).absolutePath))
+        val key = childRef(year, "shot.jpg")
 
         val stat = send(Cli.stat(key))
         assertEquals(5, stat.getInt("size"))
@@ -197,6 +214,7 @@ class CliProtocolTest {
 
         val parent = send(Cli.stat(year))
         assertEquals(parent.getString("ref"), stat.getString("parentRef"))
+        assertTrue("a folder answers to a folder reference", Cli.isDir(year))
 
         val items = send(Cli.list(year)).getJSONArray("items")
         assertEquals(1, items.length())
@@ -207,9 +225,9 @@ class CliProtocolTest {
      *  delete the content just taken over. */
     @Test
     fun `write consumes the staging file`() {
-        val key = root_ + "adopted.txt"
+        val name = "adopted.txt"
         val staging = staged("hello".toByteArray())
-        send(Cli.writeWhole(key, staging.absolutePath))
+        send(Cli.writeWhole(Cli.ROOT, name, staging.absolutePath))
         assertFalse("it should have been renamed away", staging.exists())
     }
 
@@ -217,11 +235,12 @@ class CliProtocolTest {
      *  modification time. */
     @Test
     fun `the staged file's modification time becomes the file's`() {
-        val key = root_ + "dated.txt"
+        val name = "dated.txt"
         val staging = staged("hello".toByteArray())
         val captured = 1_400_000_000_000L
         staging.setLastModified(captured)
-        send(Cli.writeWhole(key, staging.absolutePath))
+        send(Cli.writeWhole(Cli.ROOT, name, staging.absolutePath))
+        val key = childRef(Cli.ROOT, name)
 
         assertEquals(captured / 1000.0, send(Cli.stat(key)).getDouble("mtime"), 2.0)
     }
@@ -230,14 +249,14 @@ class CliProtocolTest {
      *  sweep paces on now that there is no queue to ask about. */
     @Test
     fun `a write has published by the time the call returns`() {
-        val key = root_ + "drained.txt"
-        send(Cli.writeWhole(key, staged("hello".toByteArray()).absolutePath))
-        assertTrue(send(Cli.stat(key)).getBoolean("isUploaded"))
+        val name = "drained.txt"
+        send(Cli.writeWhole(Cli.ROOT, name, staged("hello".toByteArray()).absolutePath))
+        assertTrue(send(Cli.stat(childRef(Cli.ROOT, name))).getBoolean("isUploaded"))
     }
 
     @Test
-    fun `stat on a missing key fails rather than hanging`() {
-        val missing = runCatching { send(Cli.stat(root_ + "nothing.txt")) }
+    fun `stat on a missing reference fails rather than hanging`() {
+        val missing = runCatching { send(Cli.stat("f:.tsync-root/nothing.txt")) }
         assertTrue(missing.isFailure)
         assertTrue(missing.exceptionOrNull() is Cli.Error)
     }
@@ -246,9 +265,9 @@ class CliProtocolTest {
      *  before a write briefly publishes an empty file at the key. */
     @Test
     fun `create alone leaves the key empty`() {
-        val key = root_ + "created.txt"
-        send(Cli.create(key))
-        assertEquals(0, send(Cli.stat(key)).getInt("size"))
+        val name = "created.txt"
+        send(Cli.create(Cli.ROOT, name))
+        assertEquals(0, send(Cli.stat(childRef(Cli.ROOT, name))).getInt("size"))
     }
 
     /** Once anything is in it. A domain nobody has written to has no folder
@@ -256,26 +275,27 @@ class CliProtocolTest {
      *  rather than stat'ing for it. */
     @Test
     fun `the root of a domain is addressable`() {
-        send(Cli.mkdir(root_ + "sub/"))
-        val stat = send(Cli.stat(root_))
+        send(Cli.mkdir(Cli.ROOT, "sub"))
+        val stat = send(Cli.stat(Cli.ROOT))
         assertEquals(domain, stat.getString("name"))
         assertNotEquals("", stat.getString("ref"))
     }
 
     @Test
     fun `a file written twice keeps the newer content`() {
-        val key = root_ + "twice.txt"
-        send(Cli.writeWhole(key, staged("one".toByteArray()).absolutePath))
-        send(Cli.writeWhole(key, staged("three!".toByteArray()).absolutePath))
-        assertEquals(6, send(Cli.stat(key)).getInt("size"))
+        val name = "twice.txt"
+        send(Cli.writeWhole(Cli.ROOT, name, staged("one".toByteArray()).absolutePath))
+        send(Cli.writeWhole(Cli.ROOT, name, staged("three!".toByteArray()).absolutePath))
+        assertEquals(6, send(Cli.stat(childRef(Cli.ROOT, name))).getInt("size"))
     }
 
     /** The range lands at its own offset, so ranges written into one file
      *  reassemble it however they are ordered. */
     @Test
     fun `ranges written into one file reassemble it`() {
-        val key = root_ + "bytes.txt"
-        send(Cli.writeWhole(key, staged("0123456789".toByteArray()).absolutePath))
+        val name = "bytes.txt"
+        send(Cli.writeWhole(Cli.ROOT, name, staged("0123456789".toByteArray()).absolutePath))
+        val key = childRef(Cli.ROOT, name)
         val dest = File(root, "ranges")
         send(Cli.read(key, dest.absolutePath, 5, 5))
         send(Cli.read(key, dest.absolutePath, 0, 5))
@@ -285,8 +305,9 @@ class CliProtocolTest {
     /** Short at end of file, never padded. */
     @Test
     fun `a read past the end is short`() {
-        val key = root_ + "short.txt"
-        send(Cli.writeWhole(key, staged("0123456789".toByteArray()).absolutePath))
+        val name = "short.txt"
+        send(Cli.writeWhole(Cli.ROOT, name, staged("0123456789".toByteArray()).absolutePath))
+        val key = childRef(Cli.ROOT, name)
         val dest = File(root, "short")
         assertEquals(2, send(Cli.read(key, dest.absolutePath, 8, 64)).getInt("length"))
         assertEquals(0, send(Cli.read(key, dest.absolutePath, 99, 8)).getInt("length"))
@@ -296,8 +317,9 @@ class CliProtocolTest {
      *  assembling the whole file would cost a download. */
     @Test
     fun `residency counts the chunks on this device`() {
-        val key = root_ + "resident.txt"
-        send(Cli.writeWhole(key, staged("0123456789".toByteArray()).absolutePath))
+        val name = "resident.txt"
+        send(Cli.writeWhole(Cli.ROOT, name, staged("0123456789".toByteArray()).absolutePath))
+        val key = childRef(Cli.ROOT, name)
         val before = send(Cli.residency(key))
         assertTrue(before.getInt("total") > 0)
         send(Cli.read(key, File(root, "warm").absolutePath, 0, 10))
@@ -316,8 +338,9 @@ class CliProtocolTest {
      */
     @Test
     fun `one process serves every range of an open file`() {
-        val key = root_ + "session.txt"
-        send(Cli.writeWhole(key, staged("0123456789".toByteArray()).absolutePath))
+        val name = "session.txt"
+        send(Cli.writeWhole(Cli.ROOT, name, staged("0123456789".toByteArray()).absolutePath))
+        val key = childRef(Cli.ROOT, name)
 
         val process = launcher(Cli.open(key))
             .apply { redirectError(ProcessBuilder.Redirect.DISCARD) }
@@ -358,8 +381,9 @@ class CliProtocolTest {
     /** Editing in place starts from the current contents. */
     @Test
     fun `fetch assembles the whole content into a file`() {
-        val key = root_ + "whole.txt"
-        send(Cli.writeWhole(key, staged("0123456789".toByteArray()).absolutePath))
+        val name = "whole.txt"
+        send(Cli.writeWhole(Cli.ROOT, name, staged("0123456789".toByteArray()).absolutePath))
+        val key = childRef(Cli.ROOT, name)
         val dest = File(root, "fetched")
         send(Cli.fetch(key, dest.absolutePath))
         assertEquals("0123456789", dest.readText())

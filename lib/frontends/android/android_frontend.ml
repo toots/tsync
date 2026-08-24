@@ -103,9 +103,9 @@ module Make (C : Conf.S) = struct
   (* The argument is a storage key as the client spells it; one this domain
      cannot read names nothing here. *)
   let session raw =
-    match Option.map Lk.file (Lk.rel_of_string raw) with
+    match Lwt_main.run (Ih.key_of_ref raw) with
       | None ->
-          prerr_endline ("not this domain's key: " ^ raw);
+          prerr_endline ("not an item this domain can name: " ^ raw);
           exit 1
       | Some key ->
           run ~staging:false (fun () ->
@@ -179,9 +179,9 @@ module Make (C : Conf.S) = struct
   (* What of [key] is already on this device, for a caller deciding whether to
      assemble the whole thing rather than page through it. *)
   let residency raw =
-    match Option.map Lk.file (Lk.rel_of_string raw) with
+    match Lwt_main.run (Ih.key_of_ref raw) with
       | None ->
-          prerr_endline ("not this domain's key: " ^ raw);
+          prerr_endline ("not an item this domain can name: " ^ raw);
           exit 1
       | Some key ->
           run ~staging:false (fun () ->
@@ -229,100 +229,111 @@ let command verb doc run = { Frontend.verb; doc; run }
 
 let commands =
   [
-    command "stat" "Describe one item, named by storage key."
+    command "stat" "Describe one item, named by reference."
       (fun (module C : Conf.S) args ->
         let module R = Make (C) in
         match args with
-          | [key] ->
-              R.answer ~staging:false (request "stat" [("path", `String key)])
-          | _ -> usage "stat" "KEY");
-    command "list" "List the children of one directory key."
+          | [r] -> R.answer ~staging:false (request "stat" [("ref", `String r)])
+          | _ -> usage "stat" "REF");
+    command "list" "List the children of one directory reference."
       (fun (module C : Conf.S) args ->
         let module R = Make (C) in
         match args with
-          | [key] ->
-              R.answer ~staging:false
-                (request "list_dir" [("path", `String key)])
-          | _ -> usage "list" "KEY");
+          | [r] ->
+              R.answer ~staging:false (request "list_dir" [("ref", `String r)])
+          | _ -> usage "list" "REF");
     command "read"
       "Write LENGTH bytes of KEY from OFFSET into DEST at that same offset, \
        leaving the rest of DEST sparse." (fun (module C : Conf.S) args ->
         let module R = Make (C) in
         match args with
-          | [key; dest; offset; length] ->
+          | [r; dest; offset; length] ->
               R.answer ~staging:false
                 (request "fetch_range"
                    [
-                     ("path", `String key);
+                     ("ref", `String r);
                      ("dest", `String dest);
                      ("offset", `Int (int_arg "read" "OFFSET" offset));
                      ("length", `Int (int_arg "read" "LENGTH" length));
                    ])
-          | _ -> usage "read" "KEY DEST OFFSET LENGTH");
+          | _ -> usage "read" "REF DEST OFFSET LENGTH");
     command "open"
-      "Serve ranges of KEY until stdin closes: a size line, then one JSON \
+      "Serve ranges of REF until stdin closes: a size line, then one JSON \
        length line and that many bytes per \"OFFSET LENGTH\" request."
       (fun (module C : Conf.S) args ->
         let module R = Make (C) in
-        match args with [key] -> R.session key | _ -> usage "open" "KEY");
-    command "residency" "Report how many of KEY's chunks are on this device."
+        match args with [r] -> R.session r | _ -> usage "open" "REF");
+    command "residency" "Report how many of REF's chunks are on this device."
       (fun (module C : Conf.S) args ->
         let module R = Make (C) in
-        match args with
-          | [key] -> R.residency key
-          | _ -> usage "residency" "KEY");
+        match args with [r] -> R.residency r | _ -> usage "residency" "REF");
     command "fetch"
-      "Assemble the whole content of KEY into DEST, fetching what is missing."
+      "Assemble the whole content of REF into DEST, fetching what is missing."
       (fun (module C : Conf.S) args ->
         let module R = Make (C) in
         match args with
-          | [key; dest] ->
+          | [r; dest] ->
               R.answer ~staging:false
                 (request "ensure_cached"
-                   [("path", `String key); ("dest", `String dest)])
-          | _ -> usage "fetch" "KEY DEST");
+                   [("ref", `String r); ("dest", `String dest)])
+          | _ -> usage "fetch" "REF DEST");
     command "write-whole"
-      "Make STAGING the whole content of KEY. The file is adopted by rename, \
-       so it is gone on success." (fun (module C : Conf.S) args ->
-        let module R = Make (C) in
-        match args with
-          | [key; staging] ->
-              R.answer ~staging:true
-                (request "write"
-                   [("path", `String key); ("staging", `String staging)])
-          | _ -> usage "write-whole" "KEY STAGING");
-    command "create" "Create an empty file at KEY."
+      "Make STAGING the whole content of NAME under PARENT. The file is \
+       adopted by rename, so it is gone on success."
       (fun (module C : Conf.S) args ->
         let module R = Make (C) in
         match args with
-          | [key] ->
-              R.answer ~staging:true (request "create" [("path", `String key)])
-          | _ -> usage "create" "KEY");
-    command "mkdir" "Create the directory KEY." (fun (module C : Conf.S) args ->
+          | [parent; name; staging] ->
+              R.answer ~staging:true
+                (request "write"
+                   [
+                     ("parentRef", `String parent);
+                     ("name", `String name);
+                     ("staging", `String staging);
+                   ])
+          | _ -> usage "write-whole" "PARENT NAME STAGING");
+    command "create" "Create an empty file NAME under PARENT."
+      (fun (module C : Conf.S) args ->
         let module R = Make (C) in
         match args with
-          | [key] ->
-              R.answer ~staging:true (request "mkdir" [("path", `String key)])
-          | _ -> usage "mkdir" "KEY");
+          | [parent; name] ->
+              R.answer ~staging:true
+                (request "create"
+                   [("parentRef", `String parent); ("name", `String name)])
+          | _ -> usage "create" "PARENT NAME");
+    command "mkdir" "Create the directory NAME under PARENT."
+      (fun (module C : Conf.S) args ->
+        let module R = Make (C) in
+        match args with
+          | [parent; name] ->
+              R.answer ~staging:true
+                (request "mkdir"
+                   [("parentRef", `String parent); ("name", `String name)])
+          | _ -> usage "mkdir" "PARENT NAME");
     command "delete" "Delete the file KEY." (fun (module C : Conf.S) args ->
         let module R = Make (C) in
         match args with
-          | [key] ->
-              R.answer ~staging:true (request "delete" [("path", `String key)])
-          | _ -> usage "delete" "KEY");
+          | [r] ->
+              R.answer ~staging:true (request "delete" [("ref", `String r)])
+          | _ -> usage "delete" "REF");
     command "rmdir" "Remove the directory KEY." (fun (module C : Conf.S) args ->
         let module R = Make (C) in
         match args with
-          | [key] ->
-              R.answer ~staging:true (request "rmdir" [("path", `String key)])
-          | _ -> usage "rmdir" "KEY");
-    command "rename" "Rename SRC to DST." (fun (module C : Conf.S) args ->
+          | [r] -> R.answer ~staging:true (request "rmdir" [("ref", `String r)])
+          | _ -> usage "rmdir" "REF");
+    command "rename" "Move SRC under PARENT, naming it NAME."
+      (fun (module C : Conf.S) args ->
         let module R = Make (C) in
         match args with
-          | [src; dst] ->
+          | [src; parent; name] ->
               R.answer ~staging:true
-                (request "rename" [("src", `String src); ("path", `String dst)])
-          | _ -> usage "rename" "SRC DST");
+                (request "rename"
+                   [
+                     ("src", `String src);
+                     ("parentRef", `String parent);
+                     ("name", `String name);
+                   ])
+          | _ -> usage "rename" "SRC PARENT NAME");
     command "status" "Report this domain: cache, backlog and backends."
       (fun (module C : Conf.S) args ->
         let module R = Make (C) in

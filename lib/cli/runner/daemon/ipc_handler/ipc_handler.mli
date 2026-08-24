@@ -24,8 +24,14 @@ module type S = sig
     on_stop : unit -> unit;
   }
 
-  (** How a subscriber names [key], for a frontend telling one to act on an
-      item. [None] for a key whose folder this client cannot resolve. *)
+  (** The item [s] names, [None] for a reference this client cannot resolve or
+      does not recognise. For a frontend command answering from the mirror
+      rather than through a request. *)
+  val key_of_ref : string -> Logical_key.t option Lwt.t
+
+  (** The reference naming what [key] names, for a caller that holds a key and
+      must say so to the daemon. The kind is read from the mirror, a key not
+      carrying one. [None] for a key whose folder this client cannot resolve. *)
   val item_ref : Logical_key.t -> string option Lwt.t
 
   (** Answer one request. [`Subscribe] hands the connection over to the event

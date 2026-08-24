@@ -2,7 +2,6 @@ type t =
   [ `Root
   | `Dir of string
   | `File of string * string  (** parent folder id, leaf name *)
-  | `Logical_key of Logical_key.t
   | `Bad of string ]
 
 let dir_prefix = "d:"
@@ -19,7 +18,6 @@ let to_string = function
   | `Root -> root_form
   | `Dir id -> dir_prefix ^ id
   | `File (id, name) -> file_prefix ^ id ^ "/" ^ name
-  | `Logical_key k -> Logical_key.to_string k
   | `Bad s -> s
 
 (* Total: an unparseable reference is a value, so the caller answers with an
@@ -42,8 +40,5 @@ module Make (D : Logical_key.Domain) = struct
             let id = String.sub rest 0 i in
             let name = String.sub rest (i + 1) (String.length rest - i - 1) in
             if id = "" || name = "" then `Bad s else `File (id, name))
-    else (
-      match K.rel_of_string s with
-        | Some rel -> `Logical_key (K.file rel)
-        | None -> `Bad s)
+    else `Bad s
 end

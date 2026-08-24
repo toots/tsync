@@ -36,15 +36,15 @@
   list_all root -> {"ok":true,"items":[{"ref":"f:.tsync-root/x.txt","parentRef":"root","name":"x.txt","kind":"file","size":10,"mtime":"<mtime>","etag":"83aa3fc9fadd8e79","isUploaded":true},{"ref":"f:.tsync-root/y.txt","parentRef":"root","name":"y.txt","kind":"file","size":10,"mtime":"<mtime>","etag":"83aa3fc9fadd8e79","isUploaded":true}]}
 
 ########## PARENT REFS ##########
-=== create under a parent named by key
+=== create under a parent named by key is refused
   mkdir sub
   drain
   create bykey.txt under tsync/test/manifests/sub
-  create bykey.txt under tsync/test/manifests/sub: ok
+  create bykey.txt under tsync/test/manifests/sub: not found: tsync/test/manifests/sub
 --- listing
   list_dir root -> {"ok":true,"items":[{"ref":"d:<folder-1>","parentRef":"root","name":"sub","kind":"dir","size":0,"mtime":"<zero>","etag":"<folder-1>","isUploaded":true}]}
-  list_dir d:<folder-1> -> {"ok":true,"items":[{"ref":"f:<folder-1>/bykey.txt","parentRef":"d:<folder-1>","name":"bykey.txt","kind":"file","size":0,"mtime":"<mtime>","etag":"","isUploaded":true}]}
-  list_all root -> {"ok":true,"items":[{"ref":"f:<folder-1>/bykey.txt","parentRef":"d:<folder-1>","name":"bykey.txt","kind":"file","size":0,"mtime":"<mtime>","etag":"","isUploaded":true}]}
+  list_dir d:<folder-1> -> {"ok":true,"items":[]}
+  list_all root -> {"ok":true,"items":[]}
 
 ########## CHANGES ##########
 === foreign put

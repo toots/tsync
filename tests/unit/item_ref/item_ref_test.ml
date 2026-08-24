@@ -31,9 +31,11 @@ let () =
   check "a colon in a name is just a character"
     (Ir.parse "f:9f3a/od:d.txt" = `File ("9f3a", "od:d.txt"));
 
-  check "this domain's key names an item by key"
-    (Ir.parse "tsync/dom/manifests/a.txt" = `Logical_key (Lk.file "a.txt"));
-  check "another domain's key is not an item here"
+  (* A key says what an item is called and not which kind it is, so it is no
+     reference at all: whoever holds one holds the mirror that answers that. *)
+  check "a storage key is not a reference"
+    (Ir.parse "tsync/dom/manifests/a.txt" = `Bad "tsync/dom/manifests/a.txt");
+  check "another domain's key is no better"
     (Ir.parse "tsync/other/manifests/a.txt" = `Bad "tsync/other/manifests/a.txt");
 
   (* Malformed: answered, never raised. *)

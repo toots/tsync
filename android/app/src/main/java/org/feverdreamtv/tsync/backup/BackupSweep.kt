@@ -55,7 +55,6 @@ class BackupSweep(
 
     fun execute(cancelled: Cancelled): Outcome {
         val domain = Config.load(context)?.domain ?: return Outcome(0, 0, 0, more = false)
-        val root = Keys.root(domain)
         val knownDirs = records.knownDirs()
 
         var uploaded = 0
@@ -117,7 +116,7 @@ class BackupSweep(
                         }
 
                         is BackupAction.Upload -> {
-                            val outcome = upload(context, root, action, knownDirs, collection, volume)
+                            val outcome = upload(context, action, knownDirs, collection, volume)
                             if (outcome) {
                                 uploaded++
                                 stagedBytes += action.row.sizeBytes
@@ -142,14 +141,12 @@ class BackupSweep(
 
     private fun upload(
         context: Context,
-        root: String,
         action: BackupAction.Upload,
-        knownDirs: MutableSet<String>,
+        knownDirs: MutableMap<String, String>,
         collection: MediaScan.Collection,
         volume: String
     ): Boolean {
         val row = action.row
-        val key = root + action.relativePath
         val staging = Ingest.newStaging(context)
         return try {
             // The staging file is a name that nothing has created yet, and
@@ -158,10 +155,10 @@ class BackupSweep(
             if (staging.parentFile.usableSpace < row.sizeBytes * FREE_SPACE_FACTOR) {
                 throw IllegalStateException("not enough free space for ${row.displayName}")
             }
-            // The folder has to exist before the file lands in it: an upload
-            // mints a folder id but writes no Mkdir entry, leaving the tree
-            // unlistable (ipc_handler.ml handle_list_dir).
-            Ingest.ensureDirs(context, root, key, knownDirs)
+            // The folder has to exist before the file lands in it: a folder is
+            // named by an id minted at mkdir, so there is nothing to write into
+            // until it is there.
+            val folder = Ingest.folderFor(context, action.relativePath, knownDirs)
 
             val uri = MediaScan.originalUri(MediaScan.contentUri(collection, row.mediaId))
             val copied = copy(uri, staging)
@@ -171,7 +168,10 @@ class BackupSweep(
                 )
             }
 
-            Ingest.commit(context, key, staging, modified = row.captureMillis)
+            Ingest.commit(
+                context, folder, action.relativePath.substringAfterLast('/'),
+                staging, modified = row.captureMillis
+            )
             records.put(
                 UploadRecord(
                     row.mediaId, action.relativePath, row.sizeBytes,

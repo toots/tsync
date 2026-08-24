@@ -98,13 +98,13 @@ let changes_scenarios : scenario list =
 
 (* The daemon reporting on itself: what [tsync status] renders and what the
    http-proxy serves over /stats. *)
-(* A parent reference spelled as a bare key. It names the folder without saying
-   it is one, which is the whole of what a reference adds, so the file has to
-   land in it either way. *)
+(* A parent spelled as a storage key, which names the folder without saying it
+   is one. The daemon names items by reference and answers this as it answers
+   anything it cannot name, rather than guessing a kind. *)
 let parent_ref_scenarios : scenario list =
   [
     {
-      name = "create under a parent named by key";
+      name = "create under a parent named by key is refused";
       steps =
         [
           Mkdir "sub";

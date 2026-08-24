@@ -5,35 +5,9 @@ import org.junit.Test
 
 class KeysTest {
 
-    private val root = Keys.root("photos")
-
     @Test
-    fun `the root is the domain prefix the daemon uses`() {
-        assertEquals("tsync/photos/manifests/", root)
-    }
-
-    @Test
-    fun `ancestors are outermost first and exclude the root and the file`() {
-        assertEquals(
-            listOf(
-                "tsync/photos/manifests/Camera Uploads/",
-                "tsync/photos/manifests/Camera Uploads/2026/"
-            ),
-            Keys.ancestors(root, root + "Camera Uploads/2026/shot.jpg")
-        )
-    }
-
-    @Test
-    fun `a file at the root has no ancestors to create`() {
-        assertEquals(emptyList<String>(), Keys.ancestors(root, root + "shot.jpg"))
-    }
-
-    @Test
-    fun `a directory key excludes itself`() {
-        assertEquals(
-            listOf("tsync/photos/manifests/Camera Uploads/"),
-            Keys.ancestors(root, root + "Camera Uploads/2026/")
-        )
+    fun `the root folder id is the one the daemon reserves`() {
+        assertEquals(".tsync-root", Keys.ROOT_FOLDER_ID)
     }
 
     @Test

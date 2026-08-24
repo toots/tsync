@@ -25,6 +25,8 @@ module type S = sig
 
   (** How a subscriber names [key], for a frontend telling one to act on an
       item. [None] for a key whose folder this client cannot resolve. *)
+  val key_of_ref : string -> Logical_key.t option Lwt.t
+
   val item_ref : Logical_key.t -> string option Lwt.t
 
   val handler :
@@ -100,8 +102,11 @@ module Make (C : Conf.S) (F : File_ops.S) : S = struct
     | `File (id, name) ->
         let+ dir = key_of_id id in
         Option.map (fun dir -> Logical_key.file_in dir name) dir
-    | `Logical_key k -> Lwt.return_some k
     | `Bad _ -> Lwt.return_none
+
+  (* The item a reference names, for a frontend command that works from the
+     mirror rather than through a request. *)
+  let key_of_ref s = resolve (Ir.parse s)
 
   let target obj =
     match List.assoc_opt "ref" obj with
@@ -158,9 +163,21 @@ module Make (C : Conf.S) (F : File_ops.S) : S = struct
   (* The id of the folder [key] sits in. *)
   let parent_folder_id key = lookup_folder (Logical_key.parent key)
 
-  (* How a subscriber names an item, for a frontend pushing it news about one.
-     Resolves the folder itself, having no listing to share one with. *)
+  (* The reference for an item a caller holds a key for. The kind comes from the
+     mirror rather than from how the key was spelled: a key says what an item is
+     called and not which kind it is, and whoever holds one holds the tree that
+     answers that. Resolves the folder itself, having no listing to share one
+     with. *)
   let item_ref key =
+    let* mst = Fs_util.stat_opt_large (F.manifest_path key) in
+    let key =
+      let rel = Logical_key.path key in
+      match mst with
+        | Some { Unix.LargeFile.st_kind = Unix.S_DIR; _ } -> Lk.dir rel
+        | Some _ -> Lk.file rel
+        (* Nothing on disk to correct it by, so what the caller said stands. *)
+        | None -> key
+    in
     let* container = parent_folder_id key in
     let container_id = Option.value container ~default:Stored_key.root_id in
     let+ self = self_ref ~container_id key in
@@ -193,13 +210,12 @@ module Make (C : Conf.S) (F : File_ops.S) : S = struct
     ]
     @ match symlink with None -> [] | Some t -> [("symlinkTarget", `String t)]
 
-  (* A reference says which kind it names, and {!handle_stat} checks that against
-     the tree: a [f:] reference must not answer for a folder. A bare key says
-     nothing, so it is held to neither. *)
+  (* Every reference says which kind it names, and {!handle_stat} holds it to
+     that against the tree: a [f:] reference must not answer for a folder. *)
   let expected_kind = function
     | `File _ -> `File
     | `Dir _ | `Root -> `Dir
-    | _ -> `Any
+    | `Bad _ -> `Any
 
   let handle_stat ?(expect = `Any) key =
     let* mst = Fs_util.stat_opt_large (F.manifest_path key) in
@@ -299,10 +315,8 @@ module Make (C : Conf.S) (F : File_ops.S) : S = struct
   (* One list, each entry tagged by kind: files and directories differ in what
      describes them, not in how they are named.
 
-     The prefix is read as a folder whatever the caller spelled it as, a
-     path-speaking client having no way to mark one. *)
+     A reference names a folder or it does not reach here. *)
   let handle_list_dir prefix =
-    let prefix = Lk.dir (Logical_key.path prefix) in
     let* container = own_folder_id prefix in
     match container with
       | None -> not_found (Logical_key.to_string prefix)
@@ -334,7 +348,6 @@ module Make (C : Conf.S) (F : File_ops.S) : S = struct
   (* Grouped by containing folder, so each folder id resolves once, not per
      file. *)
   let handle_list_all prefix =
-    let prefix = Lk.dir (Logical_key.path prefix) in
     let* files = F.list_tree ~prefix in
     let by_parent = Hashtbl.create 16 in
     List.iter
@@ -684,6 +697,8 @@ module Make (C : Conf.S) (F : File_ops.S) : S = struct
           let with_target f = with_target_ref (fun _ key -> f key) in
           (* A container plus a leaf name. Key-speaking callers pass the whole
              key as "path". *)
+          (* The folder and the leaf, not a key: which kind is being made is the
+             action's to say, and only it knows. *)
           let with_destination f =
             match List.assoc_opt "parentRef" obj with
               | Some (`String s) -> (
@@ -693,19 +708,12 @@ module Make (C : Conf.S) (F : File_ops.S) : S = struct
                     let* parent = resolve (Ir.parse s) in
                     match parent with
                       | None -> not_found s
-                      | Some parent ->
-                          (* A parent names a folder because it is one, however
-                             it was spelled: reading that off the reference is
-                             how a caller got an exception for a missing
-                             separator. *)
-                          f
-                            (Logical_key.file_in
-                               (Lk.dir (Logical_key.path parent))
-                               name))
-              | _ -> (
-                  match Option.map Lk.file (Lk.rel_of_string path) with
-                    | Some key -> f key
-                    | None -> not_found path)
+                      | Some parent -> f parent name)
+              | _ -> fail `Invalid "\"parentRef\" and \"name\" are required"
+          in
+          let with_file_destination f =
+            with_destination (fun parent name ->
+                f (Logical_key.file_in parent name))
           in
           let* resp =
             Lwt.catch
@@ -748,9 +756,9 @@ module Make (C : Conf.S) (F : File_ops.S) : S = struct
                           | dst_path, Some offset, Some length ->
                               with_target
                                 (handle_fetch_range ~dst_path ~offset ~length))
-                    | "create" -> with_destination handle_create
+                    | "create" -> with_file_destination handle_create
                     | "write" ->
-                        with_destination (fun key ->
+                        with_file_destination (fun key ->
                             handle_write key (get_str obj "staging"))
                     | "delete" -> with_target handle_delete
                     | "rename" -> (
@@ -765,13 +773,18 @@ module Make (C : Conf.S) (F : File_ops.S) : S = struct
                         match src with
                           | None -> not_found (Item_ref.to_string src_ref)
                           | Some src ->
-                              with_destination (fun dst ->
-                                  handle_rename src dst))
+                              (* A rename keeps the kind it moves: a folder
+                                 stays one, and its id travels with it. *)
+                              with_destination (fun parent name ->
+                                  handle_rename src
+                                    (if Logical_key.kind src = `Dir then
+                                       Logical_key.dir_in parent name
+                                     else Logical_key.file_in parent name)))
                     | "mkdir" ->
-                        with_destination (fun key ->
-                            handle_mkdir (Lk.dir (Logical_key.path key)))
+                        with_destination (fun parent name ->
+                            handle_mkdir (Logical_key.dir_in parent name))
                     | "symlink" ->
-                        with_destination (fun key ->
+                        with_file_destination (fun key ->
                             handle_symlink key (get_str obj "target"))
                     | "rmdir" -> with_target handle_rmdir
                     | "share" -> with_target handle_share
