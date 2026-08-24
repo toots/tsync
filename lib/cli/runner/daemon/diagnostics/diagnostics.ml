@@ -119,6 +119,7 @@ let self_json ?(extra = []) () =
 
 module Make (C : Conf.S) = struct
   module R = Remote.Make_with_layout (C) (Layout.Identity)
+  module L = Chunk_layout.Make (C)
   module D = Data.Make (C) (R)
   module Fs = File_store.Make (C)
   module Space = Chunk_space.Make (C)
@@ -279,9 +280,7 @@ module Make (C : Conf.S) = struct
       let+ sampled =
         Lwt_list.map_p
           (fun i ->
-            let prefix =
-              C.chunk_prefix ^ Chunk_layout.shard_name (i * step) ^ "/"
-            in
+            let prefix = L.shard_prefix (Chunk_layout.shard_name (i * step)) in
             let+ entries = B.list_prefix ~prefix () in
             chunk_entries entries)
           (List.init sampled_shards Fun.id)

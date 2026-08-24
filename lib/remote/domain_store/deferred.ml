@@ -100,6 +100,9 @@ let make ?(resume = false) ?chunk_from_prefix ~name ~backend ~source
     =
   let (module Target : Backend.S) = backend in
   let (module Source : Backend.S) = source in
+  let module L = Chunk_layout.Make (struct
+    let chunk_prefix = chunk_prefix
+  end) in
   (* Chunk keys the target is known to hold, so a copy of an already-filled
      file costs nothing per chunk. *)
   let ensured : (string, unit) Hashtbl.t = Hashtbl.create 1024 in
@@ -142,9 +145,7 @@ let make ?(resume = false) ?chunk_from_prefix ~name ~backend ~source
   let learn_shard shard =
     if Hashtbl.mem known_shards shard then Lwt.return_unit
     else
-      let+ entries =
-        Target.list_prefix ~prefix:(chunk_prefix ^ shard ^ "/") ()
-      in
+      let+ entries = Target.list_prefix ~prefix:(L.shard_prefix shard) () in
       forget_if_full ();
       List.iter
         (fun (e : Backend.file_entry) ->
@@ -153,8 +154,7 @@ let make ?(resume = false) ?chunk_from_prefix ~name ~backend ~source
       Hashtbl.replace known_shards shard ()
   in
   let ensure_chunk chunk_key =
-    let relative = Chunk_layout.relative_path chunk_key in
-    let key = chunk_prefix ^ relative in
+    let key = L.key chunk_key in
     if Hashtbl.mem ensured key then Lwt.return_unit
     else
       let* () = learn_shard (Chunk_layout.shard_of chunk_key) in

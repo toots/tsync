@@ -142,7 +142,9 @@ module Make (C : Conf.S) = struct
     let* () =
       List.sort_uniq compare (List.map snd expired)
       |> List.filter (fun rel -> not (List.mem rel survivor_rels))
-      |> List.map (fun rel -> C.versions_prefix ^ rel ^ "/")
+      |> List.map (fun grouping ->
+          Stored_key.to_string
+            (History.versions_of ~versions_prefix:C.versions_prefix ~grouping))
       |> delete_all ~name:"version directories" ~on_delete
     in
     (* Age is the only safe criterion for the journal: the cursor says what was

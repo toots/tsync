@@ -51,6 +51,11 @@ val under : t -> string -> t
 (** Where deleted folders' markers are filed, in the manifests space. *)
 val trash_namespace : prefix:string -> t
 
+(** A share, filed by its token alone: that is what keeps the link short, and
+    what makes a hex token unable to address anything outside the share
+    space. *)
+val share_key : prefix:string -> string -> t
+
 (** Where a folder's child of this name is filed. *)
 val child_key : prefix:string -> folder_id:string -> string -> t
 

@@ -20,6 +20,7 @@ let listed key = key
 let namespace ~prefix ~folder_id = in_space ~prefix (folder_id ^ "/")
 let under key name = key ^ name
 let trash_namespace ~prefix = namespace ~prefix ~folder_id:trash_id
+let share_key ~prefix token = in_space ~prefix token
 
 let child_key ~prefix ~folder_id name =
   in_space ~prefix (folder_id ^ "/" ^ hash_name name)

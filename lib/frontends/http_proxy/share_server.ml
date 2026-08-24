@@ -144,11 +144,15 @@ module Make (C : Conf.S) = struct
          (function '0' .. '9' | 'a' .. 'f' -> true | _ -> false)
          s
 
-  (* The token is the manifest's random id and the key is rebuilt under our own
-     prefix, so a hex-only token cannot address anything outside it. *)
   let load token =
     if not (is_hex token) then fail `Bad_request "bad token";
-    let* body = B.get_opt ~key:(C.shares_prefix ^ token) () in
+    let* body =
+      B.get_opt
+        ~key:
+          (Stored_key.to_string
+             (Stored_key.share_key ~prefix:C.shares_prefix token))
+        ()
+    in
     match body with
       | None -> fail `Not_found "not found"
       | Some body ->

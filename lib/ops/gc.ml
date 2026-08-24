@@ -308,8 +308,8 @@ module Make (C : Conf.S) = struct
      from-space. Nothing here holds more than a shard's worth of them, whatever
      the store's size. *)
   let orphans_in_shard ~main:(module M : Backend.S) ~slots shard =
-    let prefix = C.chunk_prefix ^ shard ^ "/" in
-    let* going = M.list_prefix ~prefix:(L.from_prefix ^ shard ^ "/") () in
+    let prefix = L.shard_prefix shard in
+    let* going = M.list_prefix ~prefix:(L.from_shard_prefix shard) () in
     (* Only chunks: a write left in flight is discarded with the old space, but
        it was never a chunk — counting it would overstate what the collection
        recovered, and naming it in a delete would take out another client's

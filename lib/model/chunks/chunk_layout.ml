@@ -146,9 +146,11 @@ module Make (S : Store) = struct
      left unconsumed, losing both its keys and the evidence that it stuck. *)
   let gc_job_key ~run name = gc_jobs_prefix ^ run ^ "/" ^ name
   let key chunk_key = chunk_prefix ^ relative_path chunk_key
+  let shard_prefix shard = chunk_prefix ^ shard ^ "/"
 
   (* Siblings of the chunk root, since opening a collection renames that root
      itself away. *)
   let from_prefix = domain_root ^ "chunks.from/"
   let from_key chunk_key = from_prefix ^ relative_path chunk_key
+  let from_shard_prefix shard = from_prefix ^ shard ^ "/"
 end

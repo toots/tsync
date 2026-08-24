@@ -131,8 +131,7 @@ module Make (C : Conf.S) = struct
       else
         let* per_shard =
           Lwt_bounded.map_with probe_pool
-            (fun shard ->
-              Src.list_prefix ~prefix:(C.chunk_prefix ^ shard ^ "/") ())
+            (fun shard -> Src.list_prefix ~prefix:(L.shard_prefix shard) ())
             (List.init
                (min width (Chunk_layout.shards - first))
                (fun k -> Chunk_layout.shard_name (first + k)))

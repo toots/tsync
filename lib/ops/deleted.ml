@@ -19,10 +19,14 @@ module Make (C : Conf.S) = struct
           | exception _ -> fallback)
       (fun _ -> Lwt.return fallback)
 
-  (* [hrel] is a version's grouping key — a folder id and a leaf hash — so this
-     is a backend key, not a path. *)
-  let live hrel =
-    let+ head = B.head_opt ~key:(C.domain_prefix ^ hrel) () in
+  let live grouping =
+    let+ head =
+      B.head_opt
+        ~key:
+          (Stored_key.to_string
+             (History.manifest_of ~domain_prefix:C.domain_prefix ~grouping))
+        ()
+    in
     head <> None
 
   let in_folder key =
@@ -31,7 +35,14 @@ module Make (C : Conf.S) = struct
       Folder_ids.ensure_id ~cache_root:C.cache_root ~domain_name:C.domain_name
         key
     in
-    let* entries = B.list_prefix ~prefix:(C.versions_prefix ^ fid ^ "/") () in
+    let* entries =
+      B.list_prefix
+        ~prefix:
+          (Stored_key.to_string
+             (History.folder_versions ~versions_prefix:C.versions_prefix
+                ~folder_id:fid))
+        ()
+    in
     let seen = Hashtbl.create 16 in
     Lwt_list.filter_map_s
       (fun (e : Backend.file_entry) ->

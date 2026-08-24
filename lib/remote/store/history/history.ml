@@ -21,17 +21,27 @@ let parse ~versions_prefix key =
               String.sub rest (i + 1) (String.length rest - i - 1) )
       | _ -> None)
 
+(* A grouping key is the manifest's own key with the domain root taken off, so
+   versions share the manifest's identity — a stable folder id — and survive a
+   folder rename. These and {!parse} are that one fact read each way. *)
+let versions_of ~versions_prefix ~grouping =
+  Stored_key.in_space ~prefix:versions_prefix (grouping ^ "/")
+
+let manifest_of ~domain_prefix ~grouping =
+  Stored_key.in_space ~prefix:domain_prefix grouping
+
+let folder_versions ~versions_prefix ~folder_id =
+  Stored_key.namespace ~prefix:versions_prefix ~folder_id
+
 module Make (C : Conf.S) (L : Layout.S) = struct
   module B = (val C.store : Backend.S)
 
-  (* [<versions>/<manifest-key-tail>/<ts>], so versions share the manifest's
-     identity — a stable folder id — and survive a folder rename. *)
   let version_dir ~key =
     let+ bk = L.manifest_key key in
     Option.map
       (fun bk ->
-        Stored_key.in_space ~prefix:C.versions_prefix
-          (Stored_key.path_in ~prefix:C.domain_prefix bk ^ "/"))
+        versions_of ~versions_prefix:C.versions_prefix
+          ~grouping:(Stored_key.path_in ~prefix:C.domain_prefix bk))
       bk
 
   (* Snapshot the current manifest object under a fresh timestamped version key,

@@ -130,13 +130,13 @@ module Make (C : Conf.S) = struct
                            ("filename", `String (base ^ ".zip"));
                          ])))
         in
-        (* The token is the manifest's id and the server rebuilds the key as
-           SHARES_PREFIX + token, keeping the URL short. A caller-supplied id
-           gives a stable link. *)
+        (* A caller-supplied id gives a stable link. *)
         let token = Option.value token ~default:(Id.token 16) in
-        let manifest_key = shares_prefix ^ token in
         let* () =
-          B.put ~key:manifest_key
+          B.put
+            ~key:
+              (Stored_key.to_string
+                 (Stored_key.share_key ~prefix:shares_prefix token))
             ~data:(Bigstring.of_string (Yojson.Basic.to_string manifest))
             ()
         in
@@ -153,8 +153,8 @@ module Make (C : Conf.S) = struct
   let cache_prefix = shares_prefix ^ "cache/"
 
   (* An assembled artifact filed before the cache subtree existed: a [.data]
-     sibling of the manifests. A share manifest is [shares_prefix ^ token] and a
-     token is hex, so no published object can end that way. *)
+     sibling of the manifests. A token is hex, so no published object can end
+     that way. *)
   let is_loose_artifact key =
     (not (String.starts_with ~prefix:cache_prefix key))
     && Filename.extension key = ".data"

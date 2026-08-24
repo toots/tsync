@@ -71,12 +71,17 @@ module Make (S : Store) : sig
   (** The backend key for a chunk key, in the space every writer uses. *)
   val key : string -> string
 
+  (** Everything under one shard, which is how a reader learns what a shard
+      holds without asking about each chunk in it. *)
+  val shard_prefix : string -> string
+
   (** Where a collection puts the space on its way out, and a chunk's key within
       it. Siblings of the chunk root, since opening a run renames that root
       itself away. *)
   val from_prefix : string
 
   val from_key : string -> string
+  val from_shard_prefix : string -> string
 
   (** Where this domain's corruption markers are filed. *)
   val corrupted_prefix : string

@@ -8,6 +8,17 @@
     key and timestamp, and must agree with what {!Make.version_dir} builds. *)
 val parse : versions_prefix:string -> string -> (string * string) option
 
+(** The other direction of {!parse}: the directory holding a grouping key's
+    versions, and the manifest that key belongs to. For a caller walking the
+    versions space, which meets keys before it knows what they are versions of.
+*)
+val versions_of : versions_prefix:string -> grouping:string -> Stored_key.t
+
+val manifest_of : domain_prefix:string -> grouping:string -> Stored_key.t
+
+(** Every version of every file in one folder, which share its id. *)
+val folder_versions : versions_prefix:string -> folder_id:string -> Stored_key.t
+
 module Make (C : Conf.S) (L : Layout.S) : sig
   (** [<versions_prefix>/<manifest key tail>/], so a file's versions share the
       identity its manifest has. [None] for a key whose folder this client
