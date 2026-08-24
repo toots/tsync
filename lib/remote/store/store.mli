@@ -40,7 +40,7 @@ module Make (C : Conf.S) (L : Layout.S) : sig
       so these take one directly rather than going through the layout. *)
 
   val list_namespace : folder_id:string -> Backend.file_entry list Lwt.t
-  val get_object : bkey:string -> string Lwt.t
+  val get_object : bkey:Stored_key.t -> string Lwt.t
 
   (** Bodies of several at once, in one request where the store has a way to
       make one and a bounded fan-out where it has not. [None] for a key the
@@ -53,6 +53,6 @@ module Make (C : Conf.S) (L : Layout.S) : sig
     unit ->
     (string * string option) list Lwt.t
 
-  val put_raw : bkey:string -> data:string -> unit Lwt.t
-  val delete_raw : bkey:string -> unit Lwt.t
+  val put_raw : bkey:Stored_key.t -> data:string -> unit Lwt.t
+  val delete_raw : bkey:Stored_key.t -> unit Lwt.t
 end

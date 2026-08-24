@@ -4,18 +4,20 @@ module Make (C : Conf.S) (L : Layout.S) = struct
   module B = (val C.store : Backend.S)
   module Bb = Backend.Batched (B)
 
+  let str = Stored_key.to_string
+
   (* Publishing may bring the folder into existence; every other operation
      resolves what is already there and treats an unknown folder as absent. *)
   let put_manifest ~key ~data =
     let* bk = L.ensure_manifest_key key in
-    B.put ~key:bk ~data ()
+    B.put ~key:(str bk) ~data ()
 
   let get_manifest_state ~key =
     let* bk = L.manifest_key key in
     match bk with
       | None -> Lwt.return `Unresolved
       | Some bk -> (
-          let+ body = B.get_opt ~key:bk () in
+          let+ body = B.get_opt ~key:(str bk) () in
           match body with
             | None -> `Absent
             | Some body -> `Body (Bigstring.to_string body))
@@ -26,11 +28,15 @@ module Make (C : Conf.S) (L : Layout.S) = struct
 
   let head_manifest ~key =
     let* bk = L.manifest_key key in
-    match bk with None -> Lwt.return_none | Some bk -> B.head_opt ~key:bk ()
+    match bk with
+      | None -> Lwt.return_none
+      | Some bk -> B.head_opt ~key:(str bk) ()
 
   let delete_manifest ~key =
     let* bk = L.manifest_key key in
-    match bk with None -> Lwt.return_unit | Some bk -> B.delete ~key:bk ()
+    match bk with
+      | None -> Lwt.return_unit
+      | Some bk -> B.delete ~key:(str bk) ()
 
   (* The destination may be brought into existence; the source has to be there
      already or there is nothing to move. *)
@@ -40,8 +46,8 @@ module Make (C : Conf.S) (L : Layout.S) = struct
       | None -> Lwt.return_unit
       | Some src ->
           let* dst = L.ensure_manifest_key dst_key in
-          let* () = B.copy ~src_key:src ~dst_key:dst () in
-          B.delete ~key:src ()
+          let* () = B.copy ~src_key:(str src) ~dst_key:(str dst) () in
+          B.delete ~key:(str src) ()
 
   (* Records a directory under its parent's namespace so resync can rebuild the
      tree. No-op for layouts with no folder tree. *)
@@ -49,15 +55,18 @@ module Make (C : Conf.S) (L : Layout.S) = struct
     let* m = L.ensure_folder_marker key in
     match m with
       | None -> Lwt.return_unit
-      | Some (bkey, data) -> B.put ~key:bkey ~data:(Bigstring.of_string data) ()
+      | Some (bkey, data) ->
+          B.put ~key:(str bkey) ~data:(Bigstring.of_string data) ()
 
   (* Direct children (file manifests and folder markers) of a folder namespace,
      and a raw object fetch — used by resync to walk the inode tree by id. *)
   let list_namespace ~folder_id =
-    B.list_prefix ~prefix:(C.domain_prefix ^ folder_id ^ "/") ()
+    B.list_prefix
+      ~prefix:(str (Stored_key.namespace ~prefix:C.domain_prefix ~folder_id))
+      ()
 
   let get_object ~bkey =
-    let+ body = B.get ~key:bkey () in
+    let+ body = B.get ~key:(str bkey) () in
     Bigstring.to_string body
 
   let get_objects ?slots ~entries () =
@@ -66,6 +75,8 @@ module Make (C : Conf.S) (L : Layout.S) = struct
       (fun (key, body) -> (key, Option.map Bigstring.to_string body))
       answered
 
-  let delete_raw ~bkey = B.delete ~key:bkey ()
-  let put_raw ~bkey ~data = B.put ~key:bkey ~data:(Bigstring.of_string data) ()
+  let delete_raw ~bkey = B.delete ~key:(str bkey) ()
+
+  let put_raw ~bkey ~data =
+    B.put ~key:(str bkey) ~data:(Bigstring.of_string data) ()
 end

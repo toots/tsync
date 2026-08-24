@@ -307,7 +307,9 @@ module Make_with_layout (C : Conf.S) (Sq : Sync_queue.S) (L : Layout.S) :
             | Some bkey -> St.delete_raw ~bkey
         in
         let trash_key =
-          C.domain_prefix ^ Stored_key.trash_id ^ "/" ^ Stored_key.new_id ()
+          Stored_key.under
+            (Stored_key.trash_namespace ~prefix:C.domain_prefix)
+            (Stored_key.new_id ())
         in
         let marker =
           Folder.trash_marker_to_string ~name:(Filename.basename rel) ~id:fid
@@ -460,7 +462,7 @@ module Make_with_layout (C : Conf.S) (Sq : Sync_queue.S) (L : Layout.S) :
               let n = Int64.of_string ts in
               match acc with
                 | Some (_, best) when Int64.compare best n >= 0 -> acc
-                | _ -> Some (e.key, n)))
+                | _ -> Some (Stored_key.listed e.key, n)))
       None entries
 
   let revert_body ?version key =
@@ -469,7 +471,7 @@ module Make_with_layout (C : Conf.S) (Sq : Sync_queue.S) (L : Layout.S) :
         | Some ts -> (
             let* dir = Hs.version_dir ~key in
             match dir with
-              | Some dir -> Lwt.return (dir ^ ts)
+              | Some dir -> Lwt.return (Stored_key.under dir ts)
               | None -> failwith ("no versions for " ^ rel_key key))
         | None -> (
             let* entries = Hs.list_versions ~key in

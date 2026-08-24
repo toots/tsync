@@ -50,7 +50,8 @@ let cmd : unit Cmd.t =
              let+ entries =
                match dir with
                  | None -> Lwt.return_nil
-                 | Some dir -> B.list_prefix ~prefix:dir ()
+                 | Some dir ->
+                     B.list_prefix ~prefix:(Stored_key.to_string dir) ()
              in
              let versions =
                entries

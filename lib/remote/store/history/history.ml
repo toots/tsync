@@ -30,9 +30,8 @@ module Make (C : Conf.S) (L : Layout.S) = struct
     let+ bk = L.manifest_key key in
     Option.map
       (fun bk ->
-        C.versions_prefix
-        ^ Stored_key.strip_domain ~domain_prefix:C.domain_prefix bk
-        ^ "/")
+        Stored_key.in_space ~prefix:C.versions_prefix
+          (Stored_key.path_in ~prefix:C.domain_prefix bk ^ "/"))
       bk
 
   (* Snapshot the current manifest object under a fresh timestamped version key,
@@ -43,7 +42,7 @@ module Make (C : Conf.S) (L : Layout.S) = struct
     match bk with
       | None -> Lwt.return_unit
       | Some bk -> (
-          let* head = B.head_opt ~key:bk () in
+          let* head = B.head_opt ~key:(Stored_key.to_string bk) () in
           match head with
             | None -> Lwt.return_unit
             | Some _ -> (
@@ -54,8 +53,10 @@ module Make (C : Conf.S) (L : Layout.S) = struct
                   | Some dir ->
                       Lwt.catch
                         (fun () ->
-                          B.copy ~src_key:bk
-                            ~dst_key:(dir ^ Int64.to_string ts)
+                          B.copy ~src_key:(Stored_key.to_string bk)
+                            ~dst_key:
+                              (Stored_key.to_string
+                                 (Stored_key.under dir (Int64.to_string ts)))
                             ())
                         (fun exn ->
                           Log.warn "save_version %s: %s"
@@ -67,10 +68,10 @@ module Make (C : Conf.S) (L : Layout.S) = struct
     let* dir = version_dir ~key in
     match dir with
       | None -> Lwt.return_nil
-      | Some dir -> B.list_prefix ~prefix:dir ()
+      | Some dir -> B.list_prefix ~prefix:(Stored_key.to_string dir) ()
 
   let get_version ~vkey =
-    let+ body = B.get ~key:vkey () in
+    let+ body = B.get ~key:(Stored_key.to_string vkey) () in
     Bigstring.to_string body
 
   (* The other direction of the key {!version_dir} builds. *)

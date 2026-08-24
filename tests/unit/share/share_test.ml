@@ -70,7 +70,10 @@ let () =
      (* File: put a (non-marker) manifest, share it. *)
      let* file_key = L.ensure_manifest_key (Lk.file "foo") in
      let* () =
-       B.put ~key:file_key ~data:(Bigstring.of_string "{\"chunks\":[]}") ()
+       B.put
+         ~key:(Stored_key.to_string file_key)
+         ~data:(Bigstring.of_string "{\"chunks\":[]}")
+         ()
      in
      let* url = S.create ~token:"aa" ~expires:123 ~rel:"foo" () in
      let url = match url with Ok u -> u | Error e -> failwith e in
@@ -78,7 +81,7 @@ let () =
      let* body = B.get ~key:(shares_prefix ^ "aa") () in
      let m = Yojson.Basic.from_string (Bigstring.to_string body) in
      assert (member "type" m = `String "file");
-     assert (member "key" m = `String file_key);
+     assert (member "key" m = `String (Stored_key.to_string file_key));
      assert (member "filename" m = `String "foo");
      assert (member "expires" m = `Int 123);
 

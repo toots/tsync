@@ -572,7 +572,7 @@ let setup_client (module C : Conf.S) root staging_prefix =
         let* bk = L.manifest_key (key p) in
         match bk with
           | None -> failwith ("no backend key for " ^ p)
-          | Some bk -> B.delete ~key:bk ())
+          | Some bk -> B.delete ~key:(Stored_key.to_string bk) ())
     | s -> failwith ("not a backend-damage step: " ^ render_step s)
   in
   let mkdir_p d =
@@ -1434,7 +1434,11 @@ let dump_backend_at ~backend_root ~domain_prefix ~chunk_prefix ~journal_prefix
           let+ data = B.get ~key:e.key () in
           match Folder.marker_of_string (Bigstring.to_string data) with
             | Some m ->
-                if starts_with (domain_prefix ^ Stored_key.trash_id ^ "/") e.key
+                if
+                  starts_with
+                    (Stored_key.to_string
+                       (Stored_key.trash_namespace ~prefix:domain_prefix))
+                    e.key
                 then
                   Printf.printf "  trash %s -> %s\n" m.Folder.name
                     (alias_id m.Folder.id)

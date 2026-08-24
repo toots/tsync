@@ -56,7 +56,8 @@ module Make (C : Conf.S) = struct
              absent object. *)
           let* obj =
             match file_key with
-              | Some file_key when rel <> "" -> R.get_opt ~key:file_key ()
+              | Some file_key when rel <> "" ->
+                  R.get_opt ~key:(Stored_key.to_string file_key) ()
               | _ -> Lwt.return_none
           in
           let marker =
@@ -71,7 +72,7 @@ module Make (C : Conf.S) = struct
                      (base_json
                      @ [
                          ("type", `String "file");
-                         ("key", `String file_key);
+                         ("key", `String (Stored_key.to_string file_key));
                          ("chunkPrefix", `String C.chunk_prefix);
                          ("filename", `String (Filename.basename rel));
                        ]))
@@ -92,7 +93,11 @@ module Make (C : Conf.S) = struct
                 in
                 let* dir_prefix =
                   match dir_id with
-                    | Some id -> Lwt.return (C.domain_prefix ^ id ^ "/")
+                    | Some id ->
+                        Lwt.return
+                          (Stored_key.to_string
+                             (Stored_key.namespace ~prefix:C.domain_prefix
+                                ~folder_id:id))
                     | None ->
                         Lwt.fail
                           (Share_not_found (Printf.sprintf "not found: %s" rel))

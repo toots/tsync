@@ -88,8 +88,9 @@ let build_fixture () =
   let* () =
     B.put
       ~key:
-        (C.domain_prefix
-        ^ Stored_key.child_key ~folder_id:Stored_key.root_id "sub")
+        (Stored_key.to_string
+           (Stored_key.child_key ~prefix:C.domain_prefix
+              ~folder_id:Stored_key.root_id "sub"))
       ~data:
         (Bigstring.of_string
            (Folder.marker_to_string { Folder.name = "sub"; id = "subid" }))
@@ -108,7 +109,7 @@ let build_fixture () =
            ("v", `Int 1);
            ("expires", `Int expires);
            ("type", `String "file");
-           ("key", `String hello_key);
+           ("key", `String (Stored_key.to_string hello_key));
            ("chunkPrefix", `String C.chunk_prefix);
            ("filename", `String "hello.txt");
          ])
@@ -131,7 +132,7 @@ let build_fixture () =
          ("v", `Int 1);
          ("expires", `Int 1);
          ("type", `String "file");
-         ("key", `String hello_key);
+         ("key", `String (Stored_key.to_string hello_key));
          ("filename", `String "hello.txt");
        ])
 

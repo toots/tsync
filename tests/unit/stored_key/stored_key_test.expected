@@ -10,6 +10,7 @@ the same name again        true
 a name needing escaping    9f3a1c0428b6d5e7/ff2a8d6eb31954ba-877a72bdda4dcd61
 under another folder       0000/066843ea47b80079-e0e3d2bb9b72c14d
 the folder's index         9f3a1c0428b6d5e7/.tsync-index
+the same child, in a space tsync/photos/manifests/9f3a1c0428b6d5e7/066843ea47b80079-e0e3d2bb9b72c14d
 
 === what a listing offers
 a child                    index=false child=true

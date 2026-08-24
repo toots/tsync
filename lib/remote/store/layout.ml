@@ -8,23 +8,24 @@ module type S = sig
 
       The plain name is the one that changes nothing, so a call site that has
       not thought about it gets the harmless behaviour. *)
-  val manifest_key : Logical_key.t -> string option Lwt.t
+  val manifest_key : Logical_key.t -> Stored_key.t option Lwt.t
 
   (** {!manifest_key}, minting and persisting any missing folder id. Only for a
       caller entitled to bring a folder into existence: the marker a mint
       persists re-creates the local directory the key names. *)
-  val ensure_manifest_key : Logical_key.t -> string Lwt.t
+  val ensure_manifest_key : Logical_key.t -> Stored_key.t Lwt.t
 
   (** For a directory's logical key: the backend key of its folder marker (under
       the parent's namespace) and the marker's JSON body, or [None] for layouts
       with no folder tree. Mints the folder's own id — this is what records a
       directory's existence, and what lets resync rebuild the structure. *)
-  val ensure_folder_marker : Logical_key.t -> (string * string) option Lwt.t
+  val ensure_folder_marker :
+    Logical_key.t -> (Stored_key.t * string) option Lwt.t
 
   (** Just the marker's backend key, minting nothing: a caller moving or
       removing a marker does so once the local directory is gone, and an
       unresolvable id names a marker that cannot exist. *)
-  val folder_marker_key : Logical_key.t -> string option Lwt.t
+  val folder_marker_key : Logical_key.t -> Stored_key.t option Lwt.t
 
   (** The id naming a directory's own namespace, minted if this client has none.
       For callers moving a folder around (rmdir into the trash), which need it
@@ -46,7 +47,7 @@ module Inode = struct
     let rel_of = Logical_key.path
 
     let child_key ~folder_id leaf =
-      C.domain_prefix ^ Stored_key.child_key ~folder_id leaf
+      Stored_key.child_key ~prefix:C.domain_prefix ~folder_id leaf
 
     (* A store that cannot arbitrate falls back to minting locally, said once
        because it is a real weakening: two clients creating one directory can
@@ -77,7 +78,8 @@ module Inode = struct
               let* held =
                 Lwt.catch
                   (fun () ->
-                    B.put_if_absent ~key:bkey
+                    B.put_if_absent
+                      ~key:(Stored_key.to_string bkey)
                       ~data:
                         (Bigstring.of_string
                            (Folder.marker_to_string candidate))
@@ -148,8 +150,13 @@ end
    keys and no path (share serving walks the folder tree by id) can reuse the
    path-keyed read machinery. Read-only: there is no folder tree to record. *)
 module Identity : S = struct
-  let manifest_key key = Lwt.return_some (Logical_key.to_string key)
-  let ensure_manifest_key key = Lwt.return (Logical_key.to_string key)
+  (* This layout's space is the logical spelling itself, so a key is a path
+     under no prefix at all. *)
+  let of_logical key =
+    Stored_key.in_space ~prefix:"" (Logical_key.to_string key)
+
+  let manifest_key key = Lwt.return_some (of_logical key)
+  let ensure_manifest_key key = Lwt.return (of_logical key)
   let ensure_folder_marker _ = Lwt.return_none
   let folder_marker_key _ = Lwt.return_none
 

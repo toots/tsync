@@ -15,7 +15,9 @@ type on_unusable = [ `Fail | `Skip of string -> unusable -> unit ]
 module Make (C : Conf.S) = struct
   module St = Store.Make (C) (Layout.Inode.Make (C))
 
-  let namespace_prefix folder_id = C.domain_prefix ^ folder_id ^ "/"
+  let namespace_prefix folder_id =
+    Stored_key.to_string
+      (Stored_key.namespace ~prefix:C.domain_prefix ~folder_id)
 
   (* The domain's download budget, since a child is one object read like any
      other, and shared so a resync, a mirror and a share server in one process
@@ -110,7 +112,7 @@ module Make (C : Conf.S) = struct
         Lwt.catch
           (fun () ->
             St.put_raw
-              ~bkey:(C.domain_prefix ^ Stored_key.index_key ~folder_id)
+              ~bkey:(Stored_key.index_key ~prefix:C.domain_prefix ~folder_id)
               ~data:(Folder_index.of_bodies bodies))
           (fun exn ->
             Log.warn "folder index %s: %s" folder_id (Printexc.to_string exn);
@@ -173,7 +175,7 @@ module Make (C : Conf.S) = struct
           let bkey = e.Backend.key in
           Lwt.catch
             (fun () ->
-              let+ data = St.get_object ~bkey in
+              let+ data = St.get_object ~bkey:(Stored_key.listed bkey) in
               (bkey, Ok data))
             (fun exn -> Lwt.return (bkey, Error exn)))
         entries

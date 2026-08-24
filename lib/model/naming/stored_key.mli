@@ -22,12 +22,41 @@ val trash_id : string
 (** Minted at mkdir. *)
 val new_id : unit -> string
 
+(** {1 The name itself}
+
+    A store keeps several spaces — manifests, chunks, versions, journal, shares
+    — and a key is a path within one of them. Both halves are given together, so
+    a path that could be filed anywhere never exists on its own.
+
+    There is no [of_string]: a key is here because a namer built it, or because
+    a store said it has one. *)
+
+type t
+
+val to_string : t -> string
+
+(** A path within the space [prefix] names, for that space's owner. *)
+val in_space : prefix:string -> string -> t
+
+(** A key a store reported, taken at its word. *)
+val listed : string -> t
+
+(** Where a folder files its children, which is also what a listing of the
+    folder walks. *)
+val namespace : prefix:string -> folder_id:string -> t
+
+(** A name inside a key that already spells a namespace. *)
+val under : t -> string -> t
+
+(** Where deleted folders' markers are filed, in the manifests space. *)
+val trash_namespace : prefix:string -> t
+
 (** Where a folder's child of this name is filed. *)
-val child_key : folder_id:string -> string -> string
+val child_key : prefix:string -> folder_id:string -> string -> t
 
 (** A folder's cache of its children's bodies, filed inside the namespace it
     describes so it is listed with them and dies with them. *)
-val index_key : folder_id:string -> string
+val index_key : prefix:string -> folder_id:string -> t
 
 val is_index_key : string -> bool
 
@@ -73,11 +102,11 @@ val is_dir_key : string -> bool
     children under. *)
 val folder_id_of : string -> string
 
-(** A key with the domain root taken off, for a caller re-rooting it elsewhere —
-    a version of a manifest is the manifest's own key under another prefix, so
-    the two share the folder id a rename does not touch. Unchanged for a key
-    that does not carry the prefix. *)
-val strip_domain : domain_prefix:string -> string -> string
+(** The inverse of {!in_space}: the path this key has within the space, for a
+    caller re-rooting it elsewhere — a version of a manifest is the manifest's
+    own key under another prefix, so the two share the folder id a rename does
+    not touch. Unchanged for a key that is not in that space. *)
+val path_in : prefix:string -> t -> string
 
 (** The store's own bookkeeping rather than anything a domain named — a write in
     flight, a folder's index of its children, a mirror's markers. Nothing

@@ -12,7 +12,11 @@ module Make (C : Conf.S) = struct
      it. *)
   let markers () =
     let+ entries =
-      B.list_prefix ~prefix:(C.domain_prefix ^ Stored_key.trash_id ^ "/") ()
+      B.list_prefix
+        ~prefix:
+          (Stored_key.to_string
+             (Stored_key.trash_namespace ~prefix:C.domain_prefix))
+        ()
     in
     List.filter
       (fun (e : Backend.file_entry) ->
@@ -37,7 +41,8 @@ module Make (C : Conf.S) = struct
           match
             (Folder.trash_path_of_string data, Folder.marker_of_string data)
           with
-            | Some p, Some m when p = path -> Some (e.Backend.key, m)
+            | Some p, Some m when p = path ->
+                Some (Stored_key.listed e.Backend.key, m)
             | _ -> None)
         markers
     in
