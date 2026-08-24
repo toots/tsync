@@ -32,10 +32,10 @@
     rather than a different code path. *)
 
 type op =
-  | Put of { key : string; data : Bigstring.t }
-  | Copy of { src_key : string; dst_key : string }
-  | Delete of string
-  | Delete_multi of string list
+  | Put of { key : Stored_key.t; data : Bigstring.t }
+  | Copy of { src_key : Stored_key.t; dst_key : Stored_key.t }
+  | Delete of Stored_key.t
+  | Delete_multi of Stored_key.t list
 
 (** How far behind: jobs waiting, chunk pushes in flight, and whether work was
     dropped or the log overflowed. *)
@@ -52,7 +52,7 @@ module type S = sig
   val accept : op -> unit Lwt.t
 
   (** Keys this target has no use for, and which are never forwarded to it. *)
-  val skip : string -> bool
+  val skip : Stored_key.t -> bool
 
   (** The store, when a read may fall through to this target; [None] when it is
       write-only. Also what decides whether a share link may be served from it:
@@ -105,8 +105,8 @@ val make :
   chunk_prefix:string ->
   chunk_keys:(string -> string list) ->
   journal_prefix:string ->
-  cursor_key:string ->
-  excluded:(string -> bool) ->
+  cursor_key:Stored_key.t ->
+  excluded:(Stored_key.t -> bool) ->
   reads_reach:bool ->
   root:string ->
   unit ->

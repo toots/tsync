@@ -181,7 +181,8 @@ module Make (C : Conf.S) = struct
         let last = Fs.read_last_sync_key () in
         let keys =
           List.filter_map
-            (fun (e : Backend.file_entry) -> Journal.Entry_key.of_string e.key)
+            (fun (e : Backend.file_entry) ->
+              Journal.Entry_key.of_string (Stored_key.to_string e.key))
             entries
         in
         let behind =
@@ -260,7 +261,7 @@ module Make (C : Conf.S) = struct
   let chunk_entries entries =
     List.filter
       (fun (e : Backend.file_entry) ->
-        let k = e.Backend.key in
+        let k = Stored_key.to_string e.Backend.key in
         String.length k > 0 && k.[String.length k - 1] <> '/')
       entries
 

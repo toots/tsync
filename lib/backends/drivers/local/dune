@@ -2,6 +2,8 @@
  (flags
   (:standard
    -open
+   Tsync_logical_key
+   -open
    Tsync_retry
    -open
    Tsync_filename
@@ -26,6 +28,7 @@
  (name tsync_local_backend)
  (library_flags (-linkall))
  (libraries
+  tsync-libs.logical_key
   tsync_retry
   tsync_filename
   tsync_chunk_integrity

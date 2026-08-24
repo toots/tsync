@@ -522,7 +522,8 @@ let setup_client (module C : Conf.S) root staging_prefix =
     match m with
       | Some m ->
           Lwt.return
-            (C.chunk_prefix ^ Chunk_layout.relative_path (Manifest.key m index))
+            (Stored_key.in_space ~prefix:C.chunk_prefix
+               (Chunk_layout.relative_path (Manifest.key m index)))
       | _ -> failwith ("no clean sidecar for " ^ path)
   in
   (* The member, not just its module: damaging a file behind the store's back
@@ -558,7 +559,7 @@ let setup_client (module C : Conf.S) root staging_prefix =
             | Some root -> root
             | None -> failwith "scramble-backend-file: not a local store"
         in
-        let p = Filename.concat root ck in
+        let p = Filename.concat root (Stored_key.to_string ck) in
         let ic = open_in_bin p in
         let len = in_channel_length ic in
         let body = really_input_string ic len in
@@ -572,7 +573,7 @@ let setup_client (module C : Conf.S) root staging_prefix =
         let* bk = L.manifest_key (key p) in
         match bk with
           | None -> failwith ("no backend key for " ^ p)
-          | Some bk -> B.delete ~key:(Stored_key.to_string bk) ())
+          | Some bk -> B.delete ~key:bk ())
     | s -> failwith ("not a backend-damage step: " ^ render_step s)
   in
   let mkdir_p d =
@@ -1281,14 +1282,15 @@ let dump_backend_at ~backend_root ~domain_prefix ~chunk_prefix ~journal_prefix
     Lwt_list.filter_map_s
       (fun (e : Backend.file_entry) ->
         if
-          starts_with domain_prefix e.key
+          starts_with domain_prefix (Stored_key.to_string e.key)
           && not
-               (String.length e.key > 0 && e.key.[String.length e.key - 1] = '/')
+               (let k = Stored_key.to_string e.key in
+                String.length k > 0 && k.[String.length k - 1] = '/')
         then
           let+ data = B.get ~key:e.key () in
           match Folder.marker_of_string (Bigstring.to_string data) with
             | Some m ->
-                let rel = rel_key e.key in
+                let rel = rel_key (Stored_key.to_string e.key) in
                 let parent =
                   match String.index_opt rel '/' with
                     | Some i -> String.sub rel 0 i
@@ -1318,7 +1320,9 @@ let dump_backend_at ~backend_root ~domain_prefix ~chunk_prefix ~journal_prefix
   let entries =
     List.stable_sort
       (fun (a : Backend.file_entry) (b : Backend.file_entry) ->
-        compare (sort_key a.key) (sort_key b.key))
+        compare
+          (sort_key (Stored_key.to_string a.key))
+          (sort_key (Stored_key.to_string b.key)))
       entries
   in
   (* A rel key under a folder namespace leads with that folder's id. *)
@@ -1334,7 +1338,8 @@ let dump_backend_at ~backend_root ~domain_prefix ~chunk_prefix ~journal_prefix
   let journal_names =
     List.filter_map
       (fun (e : Backend.file_entry) ->
-        if starts_with journal_prefix e.key then Some (Filename.basename e.key)
+        let k = Stored_key.to_string e.key in
+        if starts_with journal_prefix k then Some (Filename.basename k)
         else None)
       entries
     |> List.sort compare
@@ -1363,17 +1368,18 @@ let dump_backend_at ~backend_root ~domain_prefix ~chunk_prefix ~journal_prefix
      [folder … -> <id>] marker that named it. *)
   Lwt_list.iter_s
     (fun (e : Backend.file_entry) ->
+      let k = Stored_key.to_string e.Backend.key in
       (* Internal prefixes have no meaningful directories; ignore the empty-dir
          markers the local backend surfaces where S3 would list nothing. *)
       if
-        is_marker e.key
-        && (starts_with chunk_prefix e.key
-           || starts_with versions_prefix e.key
-           || starts_with journal_prefix e.key)
+        is_marker k
+        && (starts_with chunk_prefix k
+           || starts_with versions_prefix k
+           || starts_with journal_prefix k)
       then Lwt.return_unit
-      else if e.key = gc_marker ^ ".lock" then Lwt.return_unit
-      else if e.key = gc_marker then
-        let+ data = B.get ~key:e.key () in
+      else if k = Stored_key.to_string gc_marker ^ ".lock" then Lwt.return_unit
+      else if e.Backend.key = gc_marker then
+        let+ data = B.get ~key:e.Backend.key () in
         (* The marker's phase, read straight from its body. The snapshot pins
            the phase name, so a change to how the marker is written shows up as
            "unreadable" in the diff rather than passing quietly. *)
@@ -1384,34 +1390,35 @@ let dump_backend_at ~backend_root ~domain_prefix ~chunk_prefix ~journal_prefix
                   | Some (`String p) -> p
                   | _ -> "unreadable")
             | _ | (exception _) -> "unreadable")
-      else if starts_with from_prefix e.key then
-        if is_marker e.key then Lwt.return_unit
+      else if starts_with from_prefix k then
+        if is_marker k then Lwt.return_unit
         else (
-          Printf.printf "  chunk(going) %s size=%d\n" (Filename.basename e.key)
+          Printf.printf "  chunk(going) %s size=%d\n" (Filename.basename k)
             e.size;
           Lwt.return_unit)
-      else if starts_with chunk_prefix e.key then (
+      else if starts_with chunk_prefix k then (
         (* The key, without the shard directory holding it: what a chunk is
            named matters here, where it lives is {!Chunk_layout}'s business. *)
-        Printf.printf "  chunk %s size=%d\n" (Filename.basename e.key) e.size;
+        Printf.printf "  chunk %s size=%d\n" (Filename.basename k) e.size;
         Lwt.return_unit)
-      else if starts_with journal_prefix e.key then
-        let+ data = B.get ~key:e.key () in
+      else if starts_with journal_prefix k then
+        let+ data = B.get ~key:e.Backend.key () in
         let ops = Journal.decode (Bigstring.to_string data) in
         Printf.printf "  journal %s = %s\n"
-          (entry_alias (Filename.basename e.key))
+          (entry_alias (Filename.basename k))
           (String.concat "; " (List.map render_op ops))
-      else if e.key = cursor_key then
-        let+ data = B.get ~key:e.key () in
+      else if e.Backend.key = cursor_key then
+        let+ data = B.get ~key:e.Backend.key () in
         Printf.printf "  cursor = %s\n"
           (entry_alias (String.trim (Bigstring.to_string data)))
-      else if starts_with versions_prefix e.key then (
-        match History.parse ~versions_prefix e.key with
+      else if starts_with versions_prefix k then (
+        match History.parse ~versions_prefix e.Backend.key with
           | Some (rel, _) ->
               let n =
-                Option.value ~default:0 (Hashtbl.find_opt version_alias e.key)
+                Option.value ~default:0
+                  (Hashtbl.find_opt version_alias e.Backend.key)
               in
-              let+ data = B.get ~key:e.key () in
+              let+ data = B.get ~key:e.Backend.key () in
               let name, desc =
                 match Manifest.of_string (Bigstring.to_string data) with
                   | m ->
@@ -1422,23 +1429,23 @@ let dump_backend_at ~backend_root ~domain_prefix ~chunk_prefix ~journal_prefix
               in
               Printf.printf "  version %s [%s]#%d = %s\n" name rel n desc
           | None ->
-              Printf.printf "  other %s size=%d\n" e.key e.size;
+              Printf.printf "  other %s size=%d\n" k e.size;
               Lwt.return_unit)
-      else if starts_with domain_prefix e.key then (
-        let rel = rel_key e.key in
-        if String.length e.key > 0 && e.key.[String.length e.key - 1] = '/' then
+      else if starts_with domain_prefix k then (
+        let rel = rel_key k in
+        if String.length k > 0 && k.[String.length k - 1] = '/' then
           (* Empty-namespace directories are a local-backend artifact (S3 has no
              such object); skip them. *)
           Lwt.return_unit
         else
-          let+ data = B.get ~key:e.key () in
+          let+ data = B.get ~key:e.Backend.key () in
           match Folder.marker_of_string (Bigstring.to_string data) with
             | Some m ->
                 if
                   starts_with
                     (Stored_key.to_string
                        (Stored_key.trash_namespace ~prefix:domain_prefix))
-                    e.key
+                    k
                 then
                   Printf.printf "  trash %s -> %s\n" m.Folder.name
                     (alias_id m.Folder.id)
@@ -1469,15 +1476,15 @@ let dump_backend_at ~backend_root ~domain_prefix ~chunk_prefix ~journal_prefix
                   | exception _ ->
                       Printf.printf "  file %s = raw size=%d\n" (alias_rel rel)
                         e.size))
-      else if Chunk_layout.is_marker_key e.key then (
+      else if Chunk_layout.is_marker_key e.Backend.key then (
         (* The chunk it accuses, not the marker's own path, and never its size:
            the body carries the moment it was found, whose float renders to a
            different width from one run to the next. *)
         Printf.printf "  corrupted %s\n"
-          (Chunk_layout.chunk_key_of_marker e.key);
+          (Chunk_layout.chunk_key_of_marker e.Backend.key);
         Lwt.return_unit)
       else (
-        Printf.printf "  other %s size=%d\n" e.key e.size;
+        Printf.printf "  other %s size=%d\n" k e.size;
         Lwt.return_unit))
     entries
 
@@ -1513,7 +1520,7 @@ let run_scenario ?(versioning = false) ?(symlink_policy = `Keep)
     let chunk_prefix = "tsync/test/chunks/"
     let versions_prefix = "tsync/test/versions/"
     let journal_prefix = "tsync/test/journal/"
-    let cursor_key = "tsync/test/cursor"
+    let cursor_key = Stored_key.in_space ~prefix:"tsync/test/" "cursor"
     let shares_prefix = "tsync/shares/"
 
     (* Two mains, so a write fans out over both and [ResyncRemote] has a second
@@ -1628,7 +1635,7 @@ let run_two_client_scenario ?(versioning = false)
     let chunk_prefix = "tsync/test/chunks/"
     let versions_prefix = "tsync/test/versions/"
     let journal_prefix = "tsync/test/journal/"
-    let cursor_key = "tsync/test/cursor"
+    let cursor_key = Stored_key.in_space ~prefix:"tsync/test/" "cursor"
     let shares_prefix = "tsync/shares/"
     let members = shared_members
     let store = (List.hd members).Backend.backend
@@ -1657,7 +1664,7 @@ let run_two_client_scenario ?(versioning = false)
     let chunk_prefix = "tsync/test/chunks/"
     let versions_prefix = "tsync/test/versions/"
     let journal_prefix = "tsync/test/journal/"
-    let cursor_key = "tsync/test/cursor"
+    let cursor_key = Stored_key.in_space ~prefix:"tsync/test/" "cursor"
     let shares_prefix = "tsync/shares/"
     let members = shared_members
     let store = (List.hd members).Backend.backend
@@ -1732,7 +1739,7 @@ let make_conf ?(versioning = false) ~client_name ~backend_root ~cache_root
     let chunk_prefix = "tsync/test/chunks/"
     let versions_prefix = "tsync/test/versions/"
     let journal_prefix = "tsync/test/journal/"
-    let cursor_key = "tsync/test/cursor"
+    let cursor_key = Stored_key.in_space ~prefix:"tsync/test/" "cursor"
     let shares_prefix = "tsync/shares/"
 
     let store =

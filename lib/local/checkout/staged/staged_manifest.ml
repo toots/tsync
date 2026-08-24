@@ -235,7 +235,7 @@ module Make (C : Conf.S) = struct
       let* names = Fs_util.readdir_list dir in
       Lwt_list.fold_left_s
         (fun acc name ->
-          if Stored_key.is_internal name || Filename.check_suffix name ".bad"
+          if Stored_key.internal_leaf name || Filename.check_suffix name ".bad"
           then Lwt.return acc
           else (
             let path = Filename.concat dir name in

@@ -62,7 +62,7 @@ let run_prefix =
 
 let suite name (module B : Backend.S) =
   let open Lwt.Syntax in
-  let key s = run_prefix ^ s in
+  let key s = Stored_key.in_space ~prefix:run_prefix s in
   let round_trip () =
     let* () = B.put ~key:(key "a") ~data:(Bigstring.of_string "alpha") () in
     let* got = B.get ~key:(key "a") () in
@@ -122,14 +122,16 @@ let suite name (module B : Backend.S) =
     let bulk = List.init 300 (fun i -> key (Printf.sprintf "many-%03d" i)) in
     let* () =
       Lwt_list.iter_p
-        (fun k -> B.put ~key:k ~data:(Bigstring.of_string k) ())
+        (fun k ->
+          B.put ~key:k ~data:(Bigstring.of_string (Stored_key.to_string k)) ())
         bulk
     in
     let* answered = Bb.get_many ~entries:(List.map entry bulk) () in
     check "a list longer than one request is still answered whole"
       (List.map fst answered = bulk
       && List.for_all
-           (fun (k, b) -> Option.map Bigstring.to_string b = Some k)
+           (fun (k, b) ->
+             Option.map Bigstring.to_string b = Some (Stored_key.to_string k))
            answered);
     let* () = B.delete_multi bulk in
     Lwt.return_unit
@@ -365,7 +367,7 @@ let verify_suite name fields =
   check "and each names a shard"
     (List.for_all
        (fun (e : Backend.file_entry) ->
-         Chunk_layout.shard_of_job e.Backend.key <> None)
+         Chunk_layout.shard_of_job (Stored_key.to_string e.Backend.key) <> None)
        queued);
   (* A collection's deletes go the same way, and the request carrying the keys
      is what stands in for the delete having happened — so that it lands, and
@@ -374,7 +376,10 @@ let verify_suite name fields =
      An object store always takes one: the function that consumes them comes
      with the bucket, as the one that checks chunks does. *)
   let doomed =
-    [chunk_prefix ^ "abb/" ^ String.make 16 'a' ^ "-" ^ String.make 16 'b']
+    [
+      Stored_key.in_space ~prefix:chunk_prefix
+        ("abb/" ^ String.make 16 'a' ^ "-" ^ String.make 16 'b');
+    ]
   in
   let* answer =
     On.discard ~chunk_prefix ~run:"0001755300000000" ~name:"abb" ~keys:doomed ()
@@ -420,7 +425,9 @@ let live_delete_suite name (module B : Backend.S) =
         let body = Bigstring.of_string "conformance: a chunk to be collected" in
         let key = Chunks.key_of_body body in
         let shard = String.sub key 0 Chunk_layout.fanout in
-        let doomed = chunk_prefix ^ shard ^ "/" ^ key in
+        let doomed =
+          Stored_key.in_space ~prefix:chunk_prefix (shard ^ "/" ^ key)
+        in
         let* () = B.put ~key:doomed ~data:body () in
         let* here = B.head_opt ~key:doomed () in
         check "the chunk to be collected is there to begin with" (here <> None);

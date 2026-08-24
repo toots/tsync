@@ -33,7 +33,7 @@ module C : Conf.S = struct
   let chunk_prefix = "tsync/testdom/chunks/"
   let versions_prefix = "tsync/testdom/versions/"
   let journal_prefix = "tsync/testdom/journal/"
-  let cursor_key = "tsync/testdom/cursor"
+  let cursor_key = Stored_key.in_space ~prefix:"tsync/testdom/" "cursor"
   let shares_prefix = "tsync/shares/"
 
   let members =
@@ -92,7 +92,9 @@ let () =
        Lwt_list.iter_s
          (fun n ->
            Src.put
-             ~key:(Printf.sprintf "%sfolder/%04d" domain_prefix n)
+             ~key:
+               (Stored_key.in_space ~prefix:domain_prefix
+                  (Printf.sprintf "folder/%04d" n))
              ~data:(Bigstring.of_string (String.make (8 + n) 'x'))
              ())
          (List.init 2000 (fun i -> i))

@@ -28,7 +28,8 @@ let () =
   in
   let items, next = Gcs_backend.parse_list body in
   check "parse_list count" (List.length items = 2);
-  check "parse_list first key" ((List.hd items).Backend.key = "a/x");
+  check "parse_list first key"
+    (Stored_key.to_string (List.hd items).Backend.key = "a/x");
   check "parse_list string size" ((List.hd items).Backend.size = 11);
   check "parse_list next token" (next = Some "tok42");
   let _, next = Gcs_backend.parse_list {|{"items":[]}|} in

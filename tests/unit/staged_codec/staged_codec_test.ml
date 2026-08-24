@@ -18,7 +18,7 @@ module C : Conf.S = struct
   let chunk_prefix = "tsync/codecdom/chunks/"
   let versions_prefix = "tsync/codecdom/versions/"
   let journal_prefix = "tsync/codecdom/journal/"
-  let cursor_key = "tsync/codecdom/cursor"
+  let cursor_key = Stored_key.in_space ~prefix:"tsync/codecdom/" "cursor"
   let shares_prefix = "tsync/shares/"
 
   let store =

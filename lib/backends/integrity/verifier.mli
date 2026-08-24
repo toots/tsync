@@ -19,7 +19,7 @@
     than appearing to hang. *)
 val queue :
   ?on_progress:(done_:int -> total:int -> unit) ->
-  put:(key:string -> data:string -> unit -> unit Lwt.t) ->
+  put:(key:Stored_key.t -> data:string -> unit -> unit Lwt.t) ->
   chunk_prefix:string ->
   unit ->
   int Lwt.t

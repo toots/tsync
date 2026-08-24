@@ -51,7 +51,7 @@ module Make (C : Conf.S) (L : Layout.S) : sig
     ?slots:Lwt_bounded.t ->
     entries:Backend.file_entry list ->
     unit ->
-    (string * string option) list Lwt.t
+    (Stored_key.t * string option) list Lwt.t
 
   val put_raw : bkey:Stored_key.t -> data:string -> unit Lwt.t
   val delete_raw : bkey:Stored_key.t -> unit Lwt.t

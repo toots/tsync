@@ -2,6 +2,8 @@
  (flags
   (:standard
    -open
+   Tsync_logical_key
+   -open
    Tsync_chunks
    -open
    Tsync_manifest
@@ -23,6 +25,7 @@
    Tsync_test_harness))
  (name gc_report)
  (libraries
+  tsync-libs.logical_key
   tsync_chunks
   tsync_manifest
   tsync_test_harness

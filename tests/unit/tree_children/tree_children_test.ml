@@ -25,12 +25,14 @@ module Tree = Inode_tree.Make (C)
 (* One key that will not read, so the batch fails whole and the walk has to
    decide what that costs its siblings. A wrapper rather than a chmod: the suite
    must behave the same as root. *)
-let broken = ref ""
+let broken = ref (Stored_key.listed "")
 
 module Flaky : Backend.S = struct
   include Store
 
-  let refuse key = Lwt.fail (Backend.Backend_error ("cannot read " ^ key))
+  let refuse key =
+    Lwt.fail (Backend.Backend_error ("cannot read " ^ Stored_key.to_string key))
+
   let get ~key () = if key = !broken then refuse key else Store.get ~key ()
 
   let get_opt ~key () =
@@ -50,7 +52,9 @@ module Tf = Inode_tree.Make (Cf)
 let ns id = C.domain_prefix ^ id ^ "/"
 
 let put id name body =
-  Store.put ~key:(ns id ^ name) ~data:(Bigstring.of_string body) ()
+  Store.put
+    ~key:(Stored_key.in_space ~prefix:(ns id) name)
+    ~data:(Bigstring.of_string body) ()
 
 let manifest_body name =
   Manifest.encode ~name ~size:0L ~chunk_size:4 ~mtime:0.
@@ -69,7 +73,9 @@ let () =
     (case "an emptied namespace has no children";
      let emptied = Stored_key.new_id () in
      let* () = put emptied "gone" (manifest_body "gone.txt") in
-     let* () = Store.delete ~key:(ns emptied ^ "gone") () in
+     let* () =
+       Store.delete ~key:(Stored_key.in_space ~prefix:(ns emptied) "gone") ()
+     in
      let* listed = Store.list_prefix ~prefix:(ns emptied) () in
      (* The directory key is what the walk used to choke on, so a run where the
         store stopped listing one would prove nothing. *)
@@ -105,7 +111,8 @@ let () =
      check "the good child survives" (List.length children = 1);
      check "the bad one is reported once"
        (match !seen with
-         | [(bkey, `Unclassifiable _)] -> bkey = ns junk ^ "bad"
+         | [(bkey, `Unclassifiable _)] ->
+             bkey = Stored_key.in_space ~prefix:(ns junk) "bad"
          | _ -> false);
 
      (* [`Fail] is about a fetch that failed; a body that will not parse is a
@@ -118,7 +125,7 @@ let () =
      let* () = put flaky "good" (manifest_body "good.txt") in
      let* () = put flaky "other" (manifest_body "other.txt") in
      let* () = put flaky "nope" (manifest_body "nope.txt") in
-     broken := ns flaky ^ "nope";
+     broken := Stored_key.in_space ~prefix:(ns flaky) "nope";
      let seen = ref [] in
      let* children =
        Tf.children
@@ -140,6 +147,6 @@ let () =
          (fun _ -> Lwt.return_true)
      in
      check "`Fail refuses the folder rather than shortening it" refused;
-     broken := "";
+     broken := Stored_key.listed "";
      Lwt.return_unit);
   report ~expected:10 ()

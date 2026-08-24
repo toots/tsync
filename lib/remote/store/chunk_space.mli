@@ -35,11 +35,11 @@ val string_of_phase : phase -> string
     need it before there is a {!Conf.S} to apply one to.
 
     Where the space on its way out lives is {!Chunk_layout.Make.from_prefix}. *)
-val marker_key : chunk_prefix:string -> string
+val marker_key : chunk_prefix:string -> Stored_key.t
 
 module Make (C : Conf.S) : sig
   (** Where this domain's run records itself. *)
-  val marker_key : string
+  val marker_key : Stored_key.t
 
   (** The run in progress, or [None] when the store is idle. Costs one read; a
       marker that will not parse logs and reads as idle. *)

@@ -58,7 +58,9 @@ let of_string data =
    Outside the functor because {!Deferred} is built before there is a {!Conf.S}
    to apply one to, and it needs the from-space prefix too. *)
 let marker_key ~chunk_prefix =
-  Filename.chop_suffix chunk_prefix "chunks/" ^ "gc-run"
+  Stored_key.in_space
+    ~prefix:(Filename.chop_suffix chunk_prefix "chunks/")
+    "gc-run"
 
 module Make (C : Conf.S) = struct
   module B = (val C.store : Backend.S)
@@ -126,7 +128,8 @@ module Make (C : Conf.S) = struct
                 (* Written by [put], so it is either absent or whole: garbage
                    here means someone else put it there. *)
                 Log.warn "chunk space: unreadable run marker %s; treating %s"
-                  marker_key "the store as idle";
+                  (Stored_key.to_string marker_key)
+                  "the store as idle";
                 Lwt.return_none)
 
   let write_run run =
@@ -203,8 +206,11 @@ module Make (C : Conf.S) = struct
     match local_root () with
       | None -> Lwt.return_false
       | Some root ->
-          let src = Filename.concat root (L.from_key chunk_key)
-          and dst = Filename.concat root (L.key chunk_key) in
+          let src =
+            Filename.concat root (Stored_key.to_string (L.from_key chunk_key))
+          and dst =
+            Filename.concat root (Stored_key.to_string (L.key chunk_key))
+          in
           let rec attempt ~parent_made =
             Lwt.catch
               (fun () ->

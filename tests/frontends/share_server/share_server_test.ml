@@ -25,7 +25,7 @@ module C : Conf.S = struct
   let chunk_prefix = "tsync/testdom/chunks/"
   let versions_prefix = "tsync/testdom/versions/"
   let journal_prefix = "tsync/testdom/journal/"
-  let cursor_key = "tsync/testdom/cursor"
+  let cursor_key = Stored_key.in_space ~prefix:"tsync/testdom/" "cursor"
   let shares_prefix = "tsync/shares/"
 
   let store =
@@ -88,9 +88,8 @@ let build_fixture () =
   let* () =
     B.put
       ~key:
-        (Stored_key.to_string
-           (Stored_key.child_key ~prefix:C.domain_prefix
-              ~folder_id:Stored_key.root_id "sub"))
+        (Stored_key.child_key ~prefix:C.domain_prefix
+           ~folder_id:Stored_key.root_id "sub")
       ~data:
         (Bigstring.of_string
            (Folder.marker_to_string { Folder.name = "sub"; id = "subid" }))
@@ -98,7 +97,8 @@ let build_fixture () =
   in
   (* Share manifests, written the way [tsync share] writes them. *)
   let share token json =
-    B.put ~key:(C.shares_prefix ^ token)
+    B.put
+      ~key:(Stored_key.in_space ~prefix:C.shares_prefix token)
       ~data:(Bigstring.of_string (Yojson.Safe.to_string json))
       ()
   in

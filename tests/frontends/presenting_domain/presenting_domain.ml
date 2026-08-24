@@ -29,7 +29,7 @@ module C = struct
   let chunk_prefix = "tsync/test/chunks/"
   let versions_prefix = "tsync/test/versions/"
   let journal_prefix = "tsync/test/journal/"
-  let cursor_key = "tsync/test/cursor"
+  let cursor_key = Stored_key.in_space ~prefix:"tsync/test/" "cursor"
   let shares_prefix = "tsync/shares/"
 
   let store =
@@ -98,7 +98,7 @@ let () =
      let module L = Layout.Inode.Make (C) in
      let* bkey = L.ensure_manifest_key key in
      let module B = (val C.store : Backend.S) in
-     let* head = B.head_opt ~key:(Stored_key.to_string bkey) () in
+     let* head = B.head_opt ~key:bkey () in
      Printf.printf "manifest in the store: %b\n" (head <> None);
      (* What a peer polls. The upload published a journal entry, and an entry
         the cursor does not point past is one no other client reads. *)

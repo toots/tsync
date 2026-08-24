@@ -2,6 +2,8 @@
  (flags
   (:standard
    -open
+   Tsync_logical_key
+   -open
    Tsync_chunks
    -open
    Tsync_checkout
@@ -23,6 +25,7 @@
    Tsync_test_harness))
  (name mirror_probe)
  (libraries
+  tsync-libs.logical_key
   tsync_chunks
   tsync_checkout
   tsync_test_harness

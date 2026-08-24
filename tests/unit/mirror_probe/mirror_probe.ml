@@ -52,7 +52,7 @@ module C : Conf.S = struct
   let chunk_prefix = "tsync/testdom/chunks/"
   let versions_prefix = "tsync/testdom/versions/"
   let journal_prefix = "tsync/testdom/journal/"
-  let cursor_key = "tsync/testdom/cursor"
+  let cursor_key = Stored_key.in_space ~prefix:"tsync/testdom/" "cursor"
   let shares_prefix = "tsync/shares/"
 
   let members =
@@ -86,7 +86,9 @@ end
 
 module M = Mirror.Make (C)
 
-let key n = Printf.sprintf "%sfolder/%04d" domain_prefix n
+let key n =
+  Stored_key.in_space ~prefix:domain_prefix (Printf.sprintf "folder/%04d" n)
+
 let body n = Bigstring.of_string (String.make (8 + n) 'x')
 
 (* Enough shards touched that a listing of the whole prefix and a listing per
@@ -94,7 +96,8 @@ let body n = Bigstring.of_string (String.make (8 + n) 'x')
 let chunk_shards = ["000"; "001"; "fff"]
 
 let chunk_key shard n =
-  Printf.sprintf "%s%s/%s0000000000000-%016x" C.chunk_prefix shard shard n
+  Stored_key.in_space ~prefix:C.chunk_prefix
+    (Printf.sprintf "%s/%s0000000000000-%016x" shard shard n)
 
 let () =
   ignore (Sys.command (Printf.sprintf "rm -rf %s" root));

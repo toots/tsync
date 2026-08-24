@@ -2,6 +2,8 @@
  (flags
   (:standard
    -open
+   Tsync_logical_key
+   -open
    Tsync_ops
    -open
    Tsync_conf
@@ -15,6 +17,7 @@
    Tsync_test_harness))
  (name import_progress)
  (libraries
+  tsync-libs.logical_key
   tsync_test_harness
   tsync_ops
   tsync_conf

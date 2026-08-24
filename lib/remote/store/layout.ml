@@ -78,8 +78,7 @@ module Inode = struct
               let* held =
                 Lwt.catch
                   (fun () ->
-                    B.put_if_absent
-                      ~key:(Stored_key.to_string bkey)
+                    B.put_if_absent ~key:bkey
                       ~data:
                         (Bigstring.of_string
                            (Folder.marker_to_string candidate))

@@ -6,7 +6,7 @@
     presents {!S} over a domain's several. *)
 
 type file_entry = {
-  key : string;
+  key : Stored_key.t;
   size : int;
   last_modified : float;
   etag : string option;
@@ -72,12 +72,12 @@ val no_caps : caps
 val merge_caps : caps list -> caps
 
 module type S = sig
-  val put : key:string -> data:Bigstring.t -> unit -> unit Lwt.t
-  val get : key:string -> unit -> Bigstring.t Lwt.t
+  val put : key:Stored_key.t -> data:Bigstring.t -> unit -> unit Lwt.t
+  val get : key:Stored_key.t -> unit -> Bigstring.t Lwt.t
 
   (** [None] when the key does not exist; other failures raise. Saves the HEAD
       round trip of [head_opt] + [get] when the body is wanted. *)
-  val get_opt : key:string -> unit -> Bigstring.t option Lwt.t
+  val get_opt : key:Stored_key.t -> unit -> Bigstring.t option Lwt.t
 
   (** Write [data] at [key] only if nothing is there, answering with whatever is
       there afterwards — [data] itself when this call won, the other writer's
@@ -92,10 +92,10 @@ module type S = sig
       content-addressed, in which case racing writers agree, or owned by one
       client. *)
   val put_if_absent :
-    key:string -> data:Bigstring.t -> unit -> Bigstring.t Lwt.t
+    key:Stored_key.t -> data:Bigstring.t -> unit -> Bigstring.t Lwt.t
 
-  val head_opt : key:string -> unit -> file_entry option Lwt.t
-  val delete : key:string -> unit -> unit Lwt.t
+  val head_opt : key:Stored_key.t -> unit -> file_entry option Lwt.t
+  val delete : key:Stored_key.t -> unit -> unit Lwt.t
 
   (** Delete every key, or raise. Two things callers depend on and every driver
       owes them:
@@ -110,9 +110,9 @@ module type S = sig
       with a [200] carrying a per-key failure list. A driver that reads only the
       status reports success over keys that are still there — and nothing walks
       a copy afterwards to notice. See {!absent_code}. *)
-  val delete_multi : string list -> unit Lwt.t
+  val delete_multi : Stored_key.t list -> unit Lwt.t
 
-  val copy : src_key:string -> dst_key:string -> unit -> unit Lwt.t
+  val copy : src_key:Stored_key.t -> dst_key:Stored_key.t -> unit -> unit Lwt.t
 
   val list_prefix :
     ?max_keys:int -> prefix:string -> unit -> file_entry list Lwt.t
@@ -143,7 +143,7 @@ module type S = sig
   val get_many :
     (entries:file_entry list ->
     unit ->
-    (string * Bigstring.t option) list Lwt.t)
+    (Stored_key.t * Bigstring.t option) list Lwt.t)
     option
 
   (** Ask the store to check every chunk it holds against its own name and file
@@ -183,7 +183,7 @@ module type S = sig
     chunk_prefix:string ->
     run:string ->
     name:string ->
-    keys:string list ->
+    keys:Stored_key.t list ->
     unit ->
     [ `Queued | `Unsupported ] Lwt.t
 
@@ -206,7 +206,7 @@ module Batched (B : S) : sig
     ?slots:Lwt_bounded.t ->
     entries:file_entry list ->
     unit ->
-    (string * Bigstring.t option) list Lwt.t
+    (Stored_key.t * Bigstring.t option) list Lwt.t
 end
 
 (** {1 Failure} *)

@@ -15,6 +15,7 @@ let index_leaf = sentinel ^ "index"
 type t = string
 
 let to_string key = key
+let compare = String.compare
 let in_space ~prefix path = prefix ^ path
 let listed key = key
 let namespace ~prefix ~folder_id = in_space ~prefix (folder_id ^ "/")
@@ -28,9 +29,8 @@ let child_key ~prefix ~folder_id name =
 let index_key ~prefix ~folder_id =
   in_space ~prefix (folder_id ^ "/" ^ index_leaf)
 
-let is_index_key key = Filename.basename key = index_leaf
-let is_temp_key key = Filename.is_temp_name (Filename.basename key)
-let is_dir_key key = String.ends_with ~suffix:"/" key
+let is_index_key key = Filename.basename (to_string key) = index_leaf
+let is_dir_key key = String.ends_with ~suffix:"/" (to_string key)
 
 (* A mirror files an item under its real path, so each component is stored as
    itself where it can be and hashed where it cannot: too long for the
@@ -67,8 +67,11 @@ let dir_name_leaf = sentinel ^ "name"
 let folder_marker_leaf = sentinel ^ "dir"
 
 let folder_id_of ns =
+  let path = to_string ns in
   Filename.basename
-    (if is_dir_key ns then String.sub ns 0 (String.length ns - 1) else ns)
+    (if is_dir_key ns then String.sub path 0 (String.length path - 1) else path)
+
+let is_in ~prefix key = String.starts_with ~prefix key
 
 let path_in ~prefix key =
   if String.starts_with ~prefix key then
@@ -79,8 +82,6 @@ let path_in ~prefix key =
 (* Reserved wherever it is read, a temp name being one of these too. A handle
    carries the sentinel and is not one of these: it is a name someone chose,
    spelled so a filesystem will hold it. *)
-let is_internal key =
-  let leaf = Filename.basename key in
-  reserved leaf && not (is_escaped leaf)
-
+let internal_leaf leaf = reserved leaf && not (is_escaped leaf)
+let is_internal key = internal_leaf (Filename.basename (to_string key))
 let is_child_object key = (not (is_dir_key key)) && not (is_internal key)

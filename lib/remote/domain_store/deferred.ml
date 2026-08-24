@@ -1,19 +1,19 @@
 open Lwt.Syntax
 
 type op =
-  | Put of { key : string; data : Bigstring.t }
-  | Copy of { src_key : string; dst_key : string }
-  | Delete of string
-  | Delete_multi of string list
+  | Put of { key : Stored_key.t; data : Bigstring.t }
+  | Copy of { src_key : Stored_key.t; dst_key : Stored_key.t }
+  | Delete of Stored_key.t
+  | Delete_multi of Stored_key.t list
 
 type stats = { queued : int; in_flight : int; degraded : bool }
 
 (* What a target still owes. Bodyless on purpose: see the .mli. *)
 type job =
-  | Job_put of string
-  | Job_copy of string * string
-  | Job_delete of string
-  | Job_delete_multi of string list
+  | Job_put of Stored_key.t
+  | Job_copy of Stored_key.t * Stored_key.t
+  | Job_delete of Stored_key.t
+  | Job_delete_multi of Stored_key.t list
 
 module Q = Durable_queue.Make (struct
   type t = job
@@ -21,21 +21,33 @@ module Q = Durable_queue.Make (struct
   let to_string job =
     Yojson.Basic.to_string
       (match job with
-        | Job_put key -> `Assoc [("op", `String "put"); ("key", `String key)]
+        | Job_put key ->
+            `Assoc
+              [
+                ("op", `String "put");
+                ("key", `String (Stored_key.to_string key));
+              ]
         | Job_copy (src, dst) ->
             `Assoc
               [
                 ("op", `String "copy");
-                ("src", `String src);
-                ("dst", `String dst);
+                ("src", `String (Stored_key.to_string src));
+                ("dst", `String (Stored_key.to_string dst));
               ]
         | Job_delete key ->
-            `Assoc [("op", `String "delete"); ("key", `String key)]
+            `Assoc
+              [
+                ("op", `String "delete");
+                ("key", `String (Stored_key.to_string key));
+              ]
         | Job_delete_multi keys ->
             `Assoc
               [
                 ("op", `String "delete_multi");
-                ("keys", `List (List.map (fun k -> `String k) keys));
+                ( "keys",
+                  `List
+                    (List.map (fun k -> `String (Stored_key.to_string k)) keys)
+                );
               ])
 
   let of_string body =
@@ -44,17 +56,24 @@ module Q = Durable_queue.Make (struct
       | exception _ -> None
       | json -> (
           match json |> member "op" |> to_string with
-            | "put" -> Some (Job_put (json |> member "key" |> to_string))
+            | "put" ->
+                Some
+                  (Job_put
+                     (Stored_key.listed (json |> member "key" |> to_string)))
             | "copy" ->
                 Some
                   (Job_copy
-                     ( json |> member "src" |> to_string,
-                       json |> member "dst" |> to_string ))
-            | "delete" -> Some (Job_delete (json |> member "key" |> to_string))
+                     ( Stored_key.listed (json |> member "src" |> to_string),
+                       Stored_key.listed (json |> member "dst" |> to_string) ))
+            | "delete" ->
+                Some
+                  (Job_delete
+                     (Stored_key.listed (json |> member "key" |> to_string)))
             | "delete_multi" ->
                 Some
                   (Job_delete_multi
-                     (json |> member "keys" |> to_list |> List.map to_string))
+                     (json |> member "keys" |> to_list
+                     |> List.map (fun k -> Stored_key.listed (to_string k))))
             | _ -> None
             | exception _ -> None)
 end)
@@ -63,7 +82,7 @@ module type S = sig
   val name : string
   val backend : (module Backend.S)
   val accept : op -> unit Lwt.t
-  val skip : string -> bool
+  val skip : Stored_key.t -> bool
   val readable : (module Backend.S) option
   val stats : unit -> stats
 end
@@ -96,8 +115,8 @@ let release ~root ~name = Durable_queue.release (log_dir ~root ~name)
 
 let make ?(resume = false) ?chunk_from_prefix ~name ~backend ~source
     ~chunk_prefix ~(chunk_keys : string -> string list) ~journal_prefix
-    ~cursor_key ~(excluded : string -> bool) ~reads_reach ~root () : (module S)
-    =
+    ~cursor_key ~(excluded : Stored_key.t -> bool) ~reads_reach ~root () :
+    (module S) =
   let (module Target : Backend.S) = backend in
   let (module Source : Backend.S) = source in
   let module L = Chunk_layout.Make (struct
@@ -105,7 +124,7 @@ let make ?(resume = false) ?chunk_from_prefix ~name ~backend ~source
   end) in
   (* Chunk keys the target is known to hold, so a copy of an already-filled
      file costs nothing per chunk. *)
-  let ensured : (string, unit) Hashtbl.t = Hashtbl.create 1024 in
+  let ensured : (Stored_key.t, unit) Hashtbl.t = Hashtbl.create 1024 in
 
   (* Shards whose listing has been folded into [ensured]. A manifest's chunks
      hash across as many shards as it has members, so this pays off across jobs
@@ -138,7 +157,11 @@ let make ?(resume = false) ?chunk_from_prefix ~name ~backend ~source
       | Some data, _ -> Lwt.return data
       | None, None -> Source.get ~key ()
       | None, Some prefix ->
-          Source.get ~key:(prefix ^ Chunk_layout.relative_path chunk_key) ()
+          Source.get
+            ~key:
+              (Stored_key.in_space ~prefix
+                 (Chunk_layout.relative_path chunk_key))
+            ()
   in
   (* A shard listing reaches the same keys a HEAD under that prefix does: a
      chunk still in the from-space of an open collection is under neither. *)
@@ -231,8 +254,8 @@ let make ?(resume = false) ?chunk_from_prefix ~name ~backend ~source
                   let+ () = Target.put ~key ~data () in
                   remember key)
                 (fun exn ->
-                  Log.warn "deferred %s chunk %s: %s" name key
-                    (Printexc.to_string exn);
+                  Log.warn "deferred %s chunk %s: %s" name
+                    (Stored_key.to_string key) (Printexc.to_string exn);
                   Lwt.return_unit))
             (fun () ->
               decr chunks_in_flight;
@@ -251,7 +274,7 @@ let make ?(resume = false) ?chunk_from_prefix ~name ~backend ~source
     let skip key =
       excluded key
       || (not reads_reach)
-         && (String.starts_with ~prefix:journal_prefix key || key = cursor_key)
+         && (Stored_key.is_in ~prefix:journal_prefix key || key = cursor_key)
 
     let stats () =
       let s = Q.stats queue in
@@ -262,7 +285,7 @@ let make ?(resume = false) ?chunk_from_prefix ~name ~backend ~source
       }
 
     let accept = function
-      | Put { key; data } when String.starts_with ~prefix:chunk_prefix key ->
+      | Put { key; data } when Stored_key.is_in ~prefix:chunk_prefix key ->
           forward_chunk key data;
           Lwt.return_unit
       | Put { key; _ } -> Q.post queue (Job_put key)

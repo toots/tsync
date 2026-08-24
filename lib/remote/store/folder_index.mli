@@ -23,7 +23,7 @@ val empty : t
 
 (** The body recorded for [key] under version [etag], if that is the version
     this holds. *)
-val find : t -> key:string -> etag:string -> string option
+val find : t -> key:Stored_key.t -> etag:string -> string option
 
 (** What a reader will pull down. {!worth_writing} governs only what this build
     writes; an index left by another client, or by a build whose bound differed,

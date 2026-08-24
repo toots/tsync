@@ -17,16 +17,16 @@
     collection go on to discard the main's own copy: the request outliving the
     collector is the whole of what that ordering rests on. *)
 val queue :
-  put:(key:string -> data:string -> unit -> unit Lwt.t) ->
+  put:(key:Stored_key.t -> data:string -> unit -> unit Lwt.t) ->
   chunk_prefix:string ->
   run:string ->
   name:string ->
-  keys:string list ->
+  keys:Stored_key.t list ->
   unit ->
   unit Lwt.t
 
 (** The body, shared so the two stores that write one, and whatever reads one
     back, cannot spell it differently. *)
-val encode : string list -> string
+val encode : Stored_key.t list -> string
 
-val decode : string -> string list
+val decode : string -> Stored_key.t list

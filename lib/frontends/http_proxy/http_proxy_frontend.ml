@@ -196,20 +196,20 @@ let make_route bindings ~peers (b : Frontend.binding) =
   }
 
 type op =
-  | Get of string
-  | Head of string
-  | Put of string
-  | Put_if_absent of string
+  | Get of Stored_key.t
+  | Head of Stored_key.t
+  | Put of Stored_key.t
+  | Put_if_absent of Stored_key.t
       (** A claim: write only if the key is free, and answer with whatever holds
           it afterwards. Distinct from {!Put} on the wire because the answer
           differs, not just the effect. *)
-  | Delete of string
-  | Get_multi of string list
+  | Delete of Stored_key.t
+  | Get_multi of Stored_key.t list
       (** A folder's manifests in one answer. The only op that saves a round
           trip rather than merely proxying one: the peer holds the objects,
           where an object store would have to be asked key by key. *)
-  | Delete_multi of string list
-  | Copy of string * string
+  | Delete_multi of Stored_key.t list
+  | Copy of Stored_key.t * Stored_key.t
   | List_all of string * int option
   | Share_url of string
   | Chunk_size of string
@@ -232,7 +232,7 @@ let parse_op meth uri body =
     match
       Http_proxy.Wire.decode_key (String.sub path 3 (String.length path - 3))
     with
-      | Ok k -> Some k
+      | Ok k -> Some (Stored_key.listed k)
       | Error _ -> None
   in
   let q name = Uri.get_query_param uri name in
@@ -260,7 +260,10 @@ let parse_op meth uri body =
         with
           | Some (`List l) when List.length l <= max_keys_per_request ->
               Get_multi
-                (List.filter_map (function `String x -> Some x | _ -> None) l)
+                (List.filter_map
+                   (function
+                     | `String x -> Some (Stored_key.listed x) | _ -> None)
+                   l)
           | _ -> Bad)
     | `POST, "/delete-multi" -> (
         match
@@ -269,11 +272,15 @@ let parse_op meth uri body =
         with
           | Some (`List l) when List.length l <= max_keys_per_request ->
               Delete_multi
-                (List.filter_map (function `String x -> Some x | _ -> None) l)
+                (List.filter_map
+                   (function
+                     | `String x -> Some (Stored_key.listed x) | _ -> None)
+                   l)
           | _ -> Bad)
     | `POST, "/copy" -> (
         match (q "src", q "dst") with
-          | Some src, Some dst -> Copy (src, dst)
+          | Some src, Some dst ->
+              Copy (Stored_key.listed src, Stored_key.listed dst)
           | _ -> Bad)
     | `GET, "/list" -> (
         match (q "mode", q "prefix") with
@@ -323,9 +330,10 @@ let op_name = function
    head is its own — the domains of a listener sharing a bucket and differing
    only in prefix. *)
 let op_keys = function
-  | Delete_multi keys | Get_multi keys -> keys
-  | Copy (src, dst) -> [src; dst]
-  | Get k | Head k | Put k | Put_if_absent k | Delete k -> [k]
+  | Delete_multi keys | Get_multi keys -> List.map Stored_key.to_string keys
+  | Copy (src, dst) -> List.map Stored_key.to_string [src; dst]
+  | Get k | Head k | Put k | Put_if_absent k | Delete k ->
+      [Stored_key.to_string k]
   | List_all (p, _)
   | Share_url p
   | Chunk_size p
@@ -334,16 +342,18 @@ let op_keys = function
       [p]
   | Bad | Unknown -> []
 
-let within route key =
-  String.starts_with ~prefix:route.domain_root key
-  || String.starts_with ~prefix:route.shares_prefix key
+(* A name, not a key: an op may target a region rather than an object. *)
+let within route name =
+  String.starts_with ~prefix:route.domain_root name
+  || String.starts_with ~prefix:route.shares_prefix name
 
 (* A request targets the route whose [domain_root] prefixes its key. *)
 let route_key = function
-  | Get k | Head k | Put k | Put_if_absent k | Delete k -> Some k
-  | Delete_multi (k :: _) | Get_multi (k :: _) -> Some k
+  | Get k | Head k | Put k | Put_if_absent k | Delete k ->
+      Some (Stored_key.to_string k)
+  | Delete_multi (k :: _) | Get_multi (k :: _) -> Some (Stored_key.to_string k)
   | Delete_multi [] | Get_multi [] -> None
-  | Copy (src, _) -> Some src
+  | Copy (src, _) -> Some (Stored_key.to_string src)
   | List_all (p, _)
   | Share_url p
   | Chunk_size p
@@ -383,7 +393,7 @@ let exec route op ~body =
   (* Share manifests live outside every domain root, so publishing or revoking a
      link changes no domain content. *)
   let writable key =
-    (not route.read_only) || String.starts_with ~prefix:route.shares_prefix key
+    (not route.read_only) || Stored_key.is_in ~prefix:route.shares_prefix key
   in
   match op with
     | Get key -> (

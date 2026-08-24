@@ -5,7 +5,20 @@
 
 (library
  (flags
-  (:standard -open Tsync_bigstring -open Tsync_xxhash -open Tsync_local_io))
+  (:standard
+   -open
+   Tsync_bigstring
+   -open
+   Tsync_xxhash
+   -open
+   Tsync_local_io
+   -open
+   Tsync_logical_key))
  (name tsync_chunks)
  (public_name tsync-libs.chunks)
- (libraries tsync_bigstring tsync_xxhash tsync_local_io unix))
+ (libraries
+  tsync-libs.logical_key
+  tsync_bigstring
+  tsync_xxhash
+  tsync_local_io
+  unix))

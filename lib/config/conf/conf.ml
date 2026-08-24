@@ -25,7 +25,7 @@ module type S = sig
   val chunk_prefix : string
   val versions_prefix : string
   val journal_prefix : string
-  val cursor_key : string
+  val cursor_key : Stored_key.t
   val shares_prefix : string
 
   (** The domain's stores as one: reads walk them in order, a write lands on the

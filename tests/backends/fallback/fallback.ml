@@ -15,7 +15,7 @@ let root = Scratch.dir "fallback"
 let main_root = Filename.concat root "main"
 let replica_root = Filename.concat root "replica"
 let archive_root = Filename.concat root "archive"
-let k name = "tsync/d/manifests/" ^ name
+let k name = Stored_key.in_space ~prefix:"tsync/d/manifests/" name
 
 module Down = Doubles.Down (struct
   let why = "down"
@@ -71,12 +71,15 @@ let listing (module B : Backend.S) prefix =
     (fun l ->
       match List.map (fun (e : Backend.file_entry) -> e.key) l with
         | [] -> "(empty)"
-        | ks -> String.concat " " (List.sort compare ks))
+        | ks ->
+            String.concat " "
+              (List.sort compare (List.map Stored_key.to_string ks)))
     (fun () ->
       let+ l = B.list_prefix ~prefix () in
       Some l)
 
-let holds root key = Sys.file_exists (Filename.concat root key)
+let holds root key =
+  Sys.file_exists (Filename.concat root (Stored_key.to_string key))
 
 let () =
   let main =

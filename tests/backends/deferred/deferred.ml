@@ -19,32 +19,34 @@ let main_root = Filename.concat root "main"
 let log_dir = Filename.concat root "pending"
 let chunk_prefix = "tsync/d/chunks/"
 let journal_prefix = "tsync/d/journal/"
-let cursor_key = "tsync/d/cursor"
+let cursor_key = Stored_key.in_space ~prefix:"tsync/d/" "cursor"
 let manifest_prefix = "tsync/d/manifests/"
 let labels : (string * string) list ref = ref []
 let hex n = Printf.sprintf "%016x" n
 
 let chunk n =
   let key =
-    chunk_prefix ^ Chunk_layout.relative_path (hex n ^ "-" ^ hex (n + 1))
+    Stored_key.in_space ~prefix:chunk_prefix
+      (Chunk_layout.relative_path (hex n ^ "-" ^ hex (n + 1)))
   in
-  labels := (key, Printf.sprintf "c%d" n) :: !labels;
+  labels := (Stored_key.to_string key, Printf.sprintf "c%d" n) :: !labels;
   key
 
-let manifest_key name = manifest_prefix ^ name
+let manifest_key name = Stored_key.in_space ~prefix:manifest_prefix name
 
 let label key =
-  match List.assoc_opt key !labels with
+  let text = Stored_key.to_string key in
+  match List.assoc_opt text !labels with
     | Some l -> "chunk " ^ l
     | None ->
         if key = cursor_key then "cursor"
-        else if String.starts_with ~prefix:journal_prefix key then "journal"
-        else if String.starts_with ~prefix:manifest_prefix key then
+        else if String.starts_with ~prefix:journal_prefix text then "journal"
+        else if String.starts_with ~prefix:manifest_prefix text then
           "manifest "
-          ^ String.sub key
+          ^ String.sub text
               (String.length manifest_prefix)
-              (String.length key - String.length manifest_prefix)
-        else key
+              (String.length text - String.length manifest_prefix)
+        else text
 
 let manifest ~name chunks =
   let keys = List.map Filename.basename chunks in
@@ -78,7 +80,10 @@ let dump_target target_root =
   print_endline "--- target";
   match keys_under target_root with
     | [] -> print_endline "  (empty)"
-    | ks -> List.iter (fun k -> Printf.printf "  %s\n" (label k)) ks
+    | ks ->
+        List.iter
+          (fun k -> Printf.printf "  %s\n" (label (Stored_key.listed k)))
+          ks
 
 (* Jobs still owed, as they sit on disk. *)
 let owed name = List.length (keys_under (Filename.concat log_dir name))
@@ -211,7 +216,9 @@ let () =
      let stats1 = T1.stats in
      let* () =
        B1.put ~key:(manifest_key "one")
-         ~data:(Bigstring.of_string (manifest ~name:"one" [c0]))
+         ~data:
+           (Bigstring.of_string
+              (manifest ~name:"one" [Stored_key.to_string c0]))
          ()
      in
      step "put manifest one [c0]";
@@ -229,7 +236,9 @@ let () =
      let stats2 = T2.stats in
      let* () =
        B2.put ~key:(manifest_key "two")
-         ~data:(Bigstring.of_string (manifest ~name:"two" [c0]))
+         ~data:
+           (Bigstring.of_string
+              (manifest ~name:"two" [Stored_key.to_string c0]))
          ()
      in
      step "put manifest two [c0]";
@@ -249,7 +258,9 @@ let () =
      let* () = B3.put ~key:c2 ~data:(Bigstring.of_string "bbbb") () in
      let* () =
        B3.put ~key:(manifest_key "three")
-         ~data:(Bigstring.of_string (manifest ~name:"three" [c2]))
+         ~data:
+           (Bigstring.of_string
+              (manifest ~name:"three" [Stored_key.to_string c2]))
          ()
      in
      let* () =
@@ -295,7 +306,9 @@ let () =
      let (module B5 : Backend.S) = l5 in
      let stats5 = T5.stats in
      let* () =
-       B5.put ~key:(journal_prefix ^ "e1") ~data:(Bigstring.of_string "{}") ()
+       B5.put
+         ~key:(Stored_key.in_space ~prefix:journal_prefix "e1")
+         ~data:(Bigstring.of_string "{}") ()
      in
      let* () = B5.put ~key:cursor_key ~data:(Bigstring.of_string "e1") () in
      step "put journal entry, put cursor";

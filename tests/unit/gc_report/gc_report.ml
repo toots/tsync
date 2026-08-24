@@ -32,7 +32,7 @@ module C : Conf.S = struct
   let chunk_prefix = chunk_prefix
   let versions_prefix = "tsync/testdom/versions/"
   let journal_prefix = "tsync/testdom/journal/"
-  let cursor_key = "tsync/testdom/cursor"
+  let cursor_key = Stored_key.in_space ~prefix:"tsync/testdom/" "cursor"
   let shares_prefix = "tsync/shares/"
 
   let members =
@@ -82,7 +82,9 @@ let note seen at = if at <> "" then seen.named <- at :: seen.named
 
 let put_chunk n =
   Main.put
-    ~key:(chunk_prefix ^ Chunk_layout.relative_path (ck n))
+    ~key:
+      (Stored_key.in_space ~prefix:chunk_prefix
+         (Chunk_layout.relative_path (ck n)))
     ~data:(Bigstring.of_string "a chunk!")
     ()
 
@@ -94,7 +96,9 @@ let put_manifest n =
       ~mtime:0.
   in
   Main.put
-    ~key:(Printf.sprintf "%sfolder%02d/deadbeefdeadbeef" domain_prefix n)
+    ~key:
+      (Stored_key.in_space ~prefix:domain_prefix
+         (Printf.sprintf "folder%02d/deadbeefdeadbeef" n))
     ~data:(Bigstring.of_string (Manifest.to_string ~name:"f" m))
     ()
 

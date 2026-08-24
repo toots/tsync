@@ -75,6 +75,7 @@ let rfind_seg s seg =
    — which is filed under the hash of its own file name and so is spelled exactly
    like a chunk key. Membership is the prefix, never the shape of the name. *)
 let marker_key key =
+  let key = Stored_key.to_string key in
   match rfind_seg key chunks_seg with
     | None -> None
     | Some i -> (
@@ -91,16 +92,17 @@ let marker_key key =
                  && Chunks.is_chunk_key
                       (String.sub rest (j + 1) (String.length rest - j - 1)) ->
               Some
-                (String.sub root 0 (k + 1)
-                ^ "corrupted/"
-                ^ String.sub root (k + 1) (String.length root - k - 1)
-                ^ "/" ^ rest)
+                (Stored_key.in_space
+                   ~prefix:(String.sub root 0 (k + 1) ^ "corrupted/")
+                   (String.sub root (k + 1) (String.length root - k - 1)
+                   ^ "/" ^ rest))
           | _ -> None)
 
 (* True for exactly what {!marker_key} produces. A directory is not a marker — a
    filesystem store makes one to hold markers and lists it back — so the whole
    shape is asked for, not the prefix. *)
 let is_marker_key key =
+  let key = Stored_key.to_string key in
   match String.index_opt key '/' with
     | None -> false
     | Some r ->
@@ -126,7 +128,7 @@ let is_marker_key key =
                       && Chunks.is_chunk_key leaf
                   | None -> false))
 
-let chunk_key_of_marker = Filename.basename
+let chunk_key_of_marker key = Filename.basename (Stored_key.to_string key)
 
 module type Store = sig
   val chunk_prefix : string
@@ -137,20 +139,34 @@ module Make (S : Store) = struct
   let domain = domain_of ~chunk_prefix
   let domain_root = Filename.chop_suffix chunk_prefix "chunks/"
   let corrupted_prefix = corrupted_root ~chunk_prefix ^ domain ^ "/"
+
+  let corrupted_key chunk_key =
+    Stored_key.in_space ~prefix:corrupted_prefix (relative_path chunk_key)
+
   let verify_jobs_prefix = verify_jobs_root ~chunk_prefix ^ domain ^ "/"
-  let verify_job_key shard = verify_jobs_prefix ^ shard
+
+  let verify_job_key shard =
+    Stored_key.in_space ~prefix:verify_jobs_prefix shard
+
   let gc_jobs_prefix = gc_jobs_root ~chunk_prefix ^ domain ^ "/"
 
   (* The collection is in the name, not only the cursor: a later collection
      reaching the same shard would otherwise overwrite a request an earlier one
      left unconsumed, losing both its keys and the evidence that it stuck. *)
-  let gc_job_key ~run name = gc_jobs_prefix ^ run ^ "/" ^ name
-  let key chunk_key = chunk_prefix ^ relative_path chunk_key
+  let gc_job_key ~run name =
+    Stored_key.in_space ~prefix:gc_jobs_prefix (run ^ "/" ^ name)
+
+  let key chunk_key =
+    Stored_key.in_space ~prefix:chunk_prefix (relative_path chunk_key)
+
   let shard_prefix shard = chunk_prefix ^ shard ^ "/"
 
   (* Siblings of the chunk root, since opening a collection renames that root
      itself away. *)
   let from_prefix = domain_root ^ "chunks.from/"
-  let from_key chunk_key = from_prefix ^ relative_path chunk_key
+
+  let from_key chunk_key =
+    Stored_key.in_space ~prefix:from_prefix (relative_path chunk_key)
+
   let from_shard_prefix shard = from_prefix ^ shard ^ "/"
 end

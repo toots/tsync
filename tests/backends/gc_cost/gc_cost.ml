@@ -111,7 +111,7 @@ module C : Conf.S = struct
   let chunk_prefix = chunk_prefix
   let versions_prefix = "tsync/testdom/versions/"
   let journal_prefix = "tsync/testdom/journal/"
-  let cursor_key = "tsync/testdom/cursor"
+  let cursor_key = Stored_key.in_space ~prefix:"tsync/testdom/" "cursor"
   let shares_prefix = "tsync/shares/"
 
   let members =
@@ -158,7 +158,8 @@ let count_chunks entries =
   List.length
     (List.filter
        (fun (e : Backend.file_entry) ->
-         Chunks.is_chunk_key (Filename.basename e.Backend.key))
+         Chunks.is_chunk_key
+           (Filename.basename (Stored_key.to_string e.Backend.key)))
        entries)
 
 let count_strays entries = List.length entries - count_chunks entries
@@ -175,7 +176,9 @@ let () =
          (fun n ->
            let* () =
              Main.put
-               ~key:(chunk_prefix ^ Chunk_layout.relative_path (ck n))
+               ~key:
+                 (Stored_key.in_space ~prefix:chunk_prefix
+                    (Chunk_layout.relative_path (ck n)))
                ~data:(Bigstring.of_string "a chunk!")
                ()
            in
@@ -187,7 +190,8 @@ let () =
            in
            Main.put
              ~key:
-               (Printf.sprintf "%sfolder%02d/deadbeefdeadbeef" domain_prefix n)
+               (Stored_key.in_space ~prefix:domain_prefix
+                  (Printf.sprintf "folder%02d/deadbeefdeadbeef" n))
              ~data:(Bigstring.of_string (Manifest.to_string ~name:"f" m))
              ())
          (List.init folders (fun i -> i + 1))
@@ -382,7 +386,11 @@ let () =
        Lwt_list.filter_s
          (fun k ->
            let+ h =
-             Main.head_opt ~key:(chunk_prefix ^ Chunk_layout.relative_path k) ()
+             Main.head_opt
+               ~key:
+                 (Stored_key.in_space ~prefix:chunk_prefix
+                    (Chunk_layout.relative_path k))
+               ()
            in
            h <> None)
          orphans
@@ -412,7 +420,9 @@ let () =
              Lwt_list.iter_s
                (fun k ->
                  Main.put
-                   ~key:(chunk_prefix ^ Chunk_layout.relative_path k)
+                   ~key:
+                     (Stored_key.in_space ~prefix:chunk_prefix
+                        (Chunk_layout.relative_path k))
                    ~data:(Bigstring.of_string "a chunk!")
                    ())
                chunks
@@ -430,7 +440,9 @@ let () =
                ~mtime:0.
            in
            Main.put
-             ~key:(Printf.sprintf "%swide/%016x" domain_prefix f)
+             ~key:
+               (Stored_key.in_space ~prefix:domain_prefix
+                  (Printf.sprintf "wide/%016x" f))
              ~data:(Bigstring.of_string (Manifest.to_string ~name:"f" m))
              ())
          (List.init wide (fun i -> i))

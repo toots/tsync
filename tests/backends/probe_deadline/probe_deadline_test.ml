@@ -25,7 +25,7 @@ module C : Conf.S = struct
   let chunk_prefix = "tsync/wedgedom/chunks/"
   let versions_prefix = "tsync/wedgedom/versions/"
   let journal_prefix = "tsync/wedgedom/journal/"
-  let cursor_key = "tsync/wedgedom/cursor"
+  let cursor_key = Stored_key.in_space ~prefix:"tsync/wedgedom/" "cursor"
   let shares_prefix = "tsync/shares/"
 
   let store =

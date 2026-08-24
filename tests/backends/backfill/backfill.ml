@@ -14,7 +14,7 @@ let main_root = Filename.concat root "main"
 let target_root = Filename.concat root "target"
 let chunk_prefix = "tsync/d/chunks/"
 let journal_prefix = "tsync/d/journal/"
-let cursor_key = "tsync/d/cursor"
+let cursor_key = Stored_key.in_space ~prefix:"tsync/d/" "cursor"
 let manifest_prefix = "tsync/d/manifests/"
 let labels : (string * string) list ref = ref []
 let hex n = Printf.sprintf "%016x" n
@@ -22,25 +22,27 @@ let hex n = Printf.sprintf "%016x" n
 (* A chunk key is ["<16 hex>-<16 hex>"]; only distinctness matters. *)
 let chunk n =
   let key =
-    chunk_prefix ^ Chunk_layout.relative_path (hex n ^ "-" ^ hex (n + 1))
+    Stored_key.in_space ~prefix:chunk_prefix
+      (Chunk_layout.relative_path (hex n ^ "-" ^ hex (n + 1)))
   in
-  labels := (key, Printf.sprintf "c%d" n) :: !labels;
+  labels := (Stored_key.to_string key, Printf.sprintf "c%d" n) :: !labels;
   key
 
-let manifest_key name = manifest_prefix ^ name
+let manifest_key name = Stored_key.in_space ~prefix:manifest_prefix name
 
 let label key =
-  match List.assoc_opt key !labels with
+  let text = Stored_key.to_string key in
+  match List.assoc_opt text !labels with
     | Some l -> "chunk " ^ l
     | None ->
         if key = cursor_key then "cursor"
-        else if String.starts_with ~prefix:journal_prefix key then "journal"
-        else if String.starts_with ~prefix:manifest_prefix key then
+        else if String.starts_with ~prefix:journal_prefix text then "journal"
+        else if String.starts_with ~prefix:manifest_prefix text then
           "manifest "
-          ^ String.sub key
+          ^ String.sub text
               (String.length manifest_prefix)
-              (String.length key - String.length manifest_prefix)
-        else key
+              (String.length text - String.length manifest_prefix)
+        else text
 
 (* A symlink is a chunkless manifest, which the chunk step must tolerate. *)
 let manifest ?symlink ~name chunks =
@@ -75,7 +77,10 @@ let dump_target () =
   print_endline "--- target";
   match keys_under target_root with
     | [] -> print_endline "  (empty)"
-    | ks -> List.iter (fun k -> Printf.printf "  %s\n" (label k)) ks
+    | ks ->
+        List.iter
+          (fun k -> Printf.printf "  %s\n" (label (Stored_key.listed k)))
+          ks
 
 module Down = Doubles.Down (struct
   let why = "down"
@@ -136,13 +141,19 @@ let () =
     step "drain"
   in
   Lwt_main.run
-    (let c0 = chunk 0 and c2 = chunk 2 and c4 = chunk 4 in
+    (let c0 = Stored_key.to_string (chunk 0)
+     and c2 = Stored_key.to_string (chunk 2)
+     and c4 = Stored_key.to_string (chunk 4) in
      let c6 = chunk 6 and c8 = chunk 8 in
 
      case "chunks written through the wrapper, then the manifest naming them";
-     let* () = B.put ~key:c0 ~data:(Bigstring.of_string "aaaa") () in
+     let* () =
+       B.put ~key:(Stored_key.listed c0) ~data:(Bigstring.of_string "aaaa") ()
+     in
      step "put chunk c0";
-     let* () = B.put ~key:c2 ~data:(Bigstring.of_string "bbbb") () in
+     let* () =
+       B.put ~key:(Stored_key.listed c2) ~data:(Bigstring.of_string "bbbb") ()
+     in
      step "put chunk c2";
      let* () =
        B.put ~key:(manifest_key "one")
@@ -157,7 +168,9 @@ let () =
      (* [Remote.chunk_exists] skips a chunk PUT when the source of truth already
         has it, so a copied file reaches the wrapper as a manifest alone. The
         manifest step must fetch c4 itself. *)
-     let* () = M.put ~key:c4 ~data:(Bigstring.of_string "cccc") () in
+     let* () =
+       M.put ~key:(Stored_key.listed c4) ~data:(Bigstring.of_string "cccc") ()
+     in
      step "put chunk c4 straight to main, bypassing the wrapper";
      let* () =
        B.put ~key:(manifest_key "copy")
@@ -193,7 +206,9 @@ let () =
      (* Rebuilt from the authoritative copy of the destination rather than lost. *)
      let* () =
        M.put ~key:(manifest_key "orphan")
-         ~data:(Bigstring.of_string (manifest ~name:"orphan" [c6]))
+         ~data:
+           (Bigstring.of_string
+              (manifest ~name:"orphan" [Stored_key.to_string c6]))
          ()
      in
      let* () = M.put ~key:c6 ~data:(Bigstring.of_string "dddd") () in
@@ -208,7 +223,9 @@ let () =
 
      case "sync bookkeeping is not a target's business";
      let* () =
-       B.put ~key:(journal_prefix ^ "e1") ~data:(Bigstring.of_string "{}") ()
+       B.put
+         ~key:(Stored_key.in_space ~prefix:journal_prefix "e1")
+         ~data:(Bigstring.of_string "{}") ()
      in
      step "put journal entry";
      let* () = B.put ~key:cursor_key ~data:(Bigstring.of_string "e1") () in
@@ -218,17 +235,20 @@ let () =
      step "journal on main: %b, on target: %b"
        (on main_root (journal_prefix ^ "e1"))
        (on target_root (journal_prefix ^ "e1"));
-     step "cursor on main: %b, on target: %b" (on main_root cursor_key)
-       (on target_root cursor_key);
+     let cursor = Stored_key.to_string cursor_key in
+     step "cursor on main: %b, on target: %b" (on main_root cursor)
+       (on target_root cursor);
      dump_target ();
 
      case "a deleted chunk is pushed again when it is written again";
      (* The dedup memo must not outlive the object it remembers. *)
-     let* () = B.delete ~key:c0 () in
+     let* () = B.delete ~key:(Stored_key.listed c0) () in
      step "delete chunk c0";
      let* () = drain () in
      dump_target ();
-     let* () = B.put ~key:c0 ~data:(Bigstring.of_string "aaaa") () in
+     let* () =
+       B.put ~key:(Stored_key.listed c0) ~data:(Bigstring.of_string "aaaa") ()
+     in
      step "put chunk c0 again";
      let* () = drain () in
      dump_target ();
@@ -254,7 +274,9 @@ let () =
      let* () = D.put ~key:c8 ~data:(Bigstring.of_string "eeee") () in
      let* () =
        D.put ~key:(manifest_key "safe")
-         ~data:(Bigstring.of_string (manifest ~name:"safe" [c8]))
+         ~data:
+           (Bigstring.of_string
+              (manifest ~name:"safe" [Stored_key.to_string c8]))
          ()
      in
      let* () =
@@ -269,7 +291,7 @@ let () =
      step "chunk c8 on main: %b" (h <> None);
 
      case "reads never consult a target";
-     let* d = B.get ~key:c2 () in
+     let* d = B.get ~key:(Stored_key.listed c2) () in
      step "get chunk c2 = %S" (Bigstring.to_string d);
      let* none = B.get_opt ~key:(chunk 98) () in
      step "get_opt an absent chunk = %s"

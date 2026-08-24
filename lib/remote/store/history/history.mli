@@ -6,7 +6,7 @@
     under a key nothing live resolves. The key is built and taken apart here,
     which is the point of the module: {!parse} splits one back into its grouping
     key and timestamp, and must agree with what {!Make.version_dir} builds. *)
-val parse : versions_prefix:string -> string -> (string * string) option
+val parse : versions_prefix:string -> Stored_key.t -> (string * string) option
 
 (** The other direction of {!parse}: the directory holding a grouping key's
     versions, and the manifest that key belongs to. For a caller walking the
@@ -34,5 +34,5 @@ module Make (C : Conf.S) (L : Layout.S) : sig
   val get_version : vkey:Stored_key.t -> string Lwt.t
 
   (** {!parse} against this domain's prefix. *)
-  val parse : string -> (string * string) option
+  val parse : Stored_key.t -> (string * string) option
 end

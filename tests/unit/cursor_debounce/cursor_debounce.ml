@@ -20,7 +20,7 @@ let root = Scratch.dir "cursor-debounce"
 let puts = ref 0
 
 module Counting : Backend.S = struct
-  let objects : (string, Bigstring.t) Hashtbl.t = Hashtbl.create 8
+  let objects : (Stored_key.t, Bigstring.t) Hashtbl.t = Hashtbl.create 8
 
   let put ~key ~data () =
     incr puts;
@@ -39,7 +39,9 @@ module Counting : Backend.S = struct
   let get ~key () =
     match Hashtbl.find_opt objects key with
       | Some d -> Lwt.return d
-      | None -> Lwt.fail (Backend.Backend_error ("no such key: " ^ key))
+      | None ->
+          Lwt.fail
+            (Backend.Backend_error ("no such key: " ^ Stored_key.to_string key))
 
   let head_opt ~key () =
     Lwt.return
@@ -71,7 +73,7 @@ module Counting : Backend.S = struct
     Lwt.return
       (Hashtbl.fold
          (fun key d acc ->
-           if String.starts_with ~prefix key then
+           if Stored_key.is_in ~prefix key then
              {
                Backend.key;
                size = Bigstring.length d;

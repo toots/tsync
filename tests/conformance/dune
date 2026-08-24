@@ -2,6 +2,8 @@
  (flags
   (:standard
    -open
+   Tsync_logical_key
+   -open
    Tsync_chunk_integrity
    -open
    Tsync_chunks
@@ -21,6 +23,7 @@
    Tsync_test_harness))
  (name conformance)
  (libraries
+  tsync-libs.logical_key
   tsync_chunk_integrity
   tsync_chunks
   tsync_xxhash

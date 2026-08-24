@@ -25,13 +25,14 @@ let () =
      let* answers =
        Lwt_list.map_p
          (fun i ->
-           B.put_if_absent ~key:"claimed"
+           B.put_if_absent
+             ~key:(Stored_key.listed "claimed")
              ~data:(Bigstring.of_string (Printf.sprintf "client%d" i))
              ())
          [1; 2; 3; 4; 5]
      in
      let answers = List.map Bigstring.to_string answers in
-     let* stored = B.get ~key:"claimed" () in
+     let* stored = B.get ~key:(Stored_key.listed "claimed") () in
      let stored = Bigstring.to_string stored in
      step "claimants: %d" (List.length answers);
      step "distinct answers: %d" (List.length (List.sort_uniq compare answers));
@@ -40,10 +41,13 @@ let () =
 
      case "a later claim on a taken name";
      let* answer =
-       B.put_if_absent ~key:"claimed" ~data:(Bigstring.of_string "latecomer") ()
+       B.put_if_absent
+         ~key:(Stored_key.listed "claimed")
+         ~data:(Bigstring.of_string "latecomer")
+         ()
      in
      let answer = Bigstring.to_string answer in
-     let* after = B.get ~key:"claimed" () in
+     let* after = B.get ~key:(Stored_key.listed "claimed") () in
      let after = Bigstring.to_string after in
      step "answered with the holder rather than itself: %b"
        (answer = stored && answer <> "latecomer");
@@ -51,18 +55,22 @@ let () =
 
      case "a free name";
      let* answer =
-       B.put_if_absent ~key:"free" ~data:(Bigstring.of_string "mine") ()
+       B.put_if_absent ~key:(Stored_key.listed "free")
+         ~data:(Bigstring.of_string "mine")
+         ()
      in
      let answer = Bigstring.to_string answer in
-     let* stored = B.get ~key:"free" () in
+     let* stored = B.get ~key:(Stored_key.listed "free") () in
      let stored = Bigstring.to_string stored in
      step "answered with its own body: %b" (answer = "mine");
      step "and that is what landed: %b" (stored = "mine");
 
      case "a name released, then claimed again";
-     let* () = B.delete ~key:"free" () in
+     let* () = B.delete ~key:(Stored_key.listed "free") () in
      let* answer =
-       B.put_if_absent ~key:"free" ~data:(Bigstring.of_string "second") ()
+       B.put_if_absent ~key:(Stored_key.listed "free")
+         ~data:(Bigstring.of_string "second")
+         ()
      in
      step "the next claimant wins it: %b" (Bigstring.to_string answer = "second");
 
@@ -74,8 +82,7 @@ let () =
        (List.length
           (List.filter
              (fun (e : Backend.file_entry) ->
-               not
-                 (String.length e.key > 0
-                 && e.key.[String.length e.key - 1] = '/'))
+               let k = Stored_key.to_string e.key in
+               not (String.length k > 0 && k.[String.length k - 1] = '/'))
              entries)));
   Lwt_main.run (Fs_util.rm_rf root)

@@ -50,16 +50,16 @@ val shard_of_job : string -> string option
     spelling the ["/chunks/"] segment this matches. That is what stops a marker
     earning one of its own — the same non-recursion the bucket notification's
     prefix filter buys in the cloud, kept here so the two cannot disagree. *)
-val marker_key : string -> string option
+val marker_key : Stored_key.t -> Stored_key.t option
 
 (** Whether [key] is one of {!marker_key}'s answers. False for the directories a
     filesystem store creates to hold markers and lists back, which is why this
     asks for the whole shape rather than for the prefix: an empty shard is not a
     corrupt chunk, and it has no chunk key to name. *)
-val is_marker_key : string -> bool
+val is_marker_key : Stored_key.t -> bool
 
 (** The chunk a marker names. *)
-val chunk_key_of_marker : string -> string
+val chunk_key_of_marker : Stored_key.t -> string
 
 (** What a chunk store's keys hang off. {!Conf.S} satisfies it, and a caller
     built before there is one — {!Deferred} — passes the prefix alone. *)
@@ -69,7 +69,7 @@ end
 
 module Make (S : Store) : sig
   (** The backend key for a chunk key, in the space every writer uses. *)
-  val key : string -> string
+  val key : string -> Stored_key.t
 
   (** Everything under one shard, which is how a reader learns what a shard
       holds without asking about each chunk in it. *)
@@ -80,22 +80,25 @@ module Make (S : Store) : sig
       itself away. *)
   val from_prefix : string
 
-  val from_key : string -> string
+  val from_key : string -> Stored_key.t
   val from_shard_prefix : string -> string
 
-  (** Where this domain's corruption markers are filed. *)
+  (** Where this domain's corruption markers are filed, and the marker for one
+      chunk. *)
   val corrupted_prefix : string
+
+  val corrupted_key : string -> Stored_key.t
 
   (** Where a request asking the store to check its chunks is filed, and the key
       of the one naming [shard]. *)
   val verify_jobs_prefix : string
 
-  val verify_job_key : string -> string
+  val verify_job_key : string -> Stored_key.t
 
   (** The same for a request asking it to drop chunks. The run is in the key,
       not only the cursor: a later collection reaching the same shard would
       otherwise overwrite a request an earlier one left unconsumed. *)
   val gc_jobs_prefix : string
 
-  val gc_job_key : run:string -> string -> string
+  val gc_job_key : run:string -> string -> Stored_key.t
 end

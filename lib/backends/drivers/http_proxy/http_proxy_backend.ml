@@ -84,7 +84,8 @@ let head_opt t ~key () =
         | Some s -> float_of_string s
         | None -> 0.
     in
-    Some { Backend.key; size; last_modified; etag = None })
+    Some
+      { Backend.key = Stored_key.listed key; size; last_modified; etag = None })
   else if code resp = 404 then None
   else raise (backend_error "head" (code resp) body)
 
@@ -94,7 +95,8 @@ let delete t ~key () =
 
 let delete_multi t keys =
   let body =
-    Yojson.Safe.to_string (`List (List.map (fun k -> `String k) keys))
+    Yojson.Safe.to_string
+      (`List (List.map (fun k -> `String (Stored_key.to_string k)) keys))
   in
   let uri = Uri.with_path t.base_uri "/delete-multi" in
   let+ resp, rbody =
@@ -109,7 +111,8 @@ let delete_multi t keys =
 let get_many t ~entries () =
   let keys = List.map (fun (e : Backend.file_entry) -> e.Backend.key) entries in
   let body =
-    Yojson.Safe.to_string (`List (List.map (fun k -> `String k) keys))
+    Yojson.Safe.to_string
+      (`List (List.map (fun k -> `String (Stored_key.to_string k)) keys))
   in
   let uri = Uri.with_path t.base_uri "/get-multi" in
   let+ resp, answer =
@@ -268,15 +271,21 @@ let make ~url ~secret : (module Backend.S) =
       caps_cache = None;
     }
   in
+  (* Every key the store is asked about is rendered here, this module being the
+     one place the driver is reached through. *)
+  let str = Stored_key.to_string in
   (module struct
-    let put ~key ~data () = put t ~key ~data ()
-    let put_if_absent ~key ~data () = put_if_absent t ~key ~data ()
-    let get ~key () = get t ~key ()
-    let get_opt ~key () = get_opt t ~key ()
-    let head_opt ~key () = head_opt t ~key ()
-    let delete ~key () = delete t ~key ()
+    let put ~key ~data () = put t ~key:(str key) ~data ()
+    let put_if_absent ~key ~data () = put_if_absent t ~key:(str key) ~data ()
+    let get ~key () = get t ~key:(str key) ()
+    let get_opt ~key () = get_opt t ~key:(str key) ()
+    let head_opt ~key () = head_opt t ~key:(str key) ()
+    let delete ~key () = delete t ~key:(str key) ()
     let delete_multi keys = delete_multi t keys
-    let copy ~src_key ~dst_key () = copy t ~src_key ~dst_key ()
+
+    let copy ~src_key ~dst_key () =
+      copy t ~src_key:(str src_key) ~dst_key:(str dst_key) ()
+
     let list_prefix ?max_keys ~prefix () = list_all t ?max_keys ~prefix ()
     let get_many = Some (fun ~entries () -> get_many t ~entries ())
 

@@ -2,6 +2,8 @@
  (flags
   (:standard
    -open
+   Tsync_logical_key
+   -open
    Tsync_bigstring
    -open
    Tsync_backend_register
@@ -13,6 +15,7 @@
    Tsync_test_harness))
  (name claim)
  (libraries
+  tsync-libs.logical_key
   tsync_test_harness
   tsync_bigstring
   tsync_backend_register

@@ -2,6 +2,8 @@
  (flags
   (:standard
    -open
+   Tsync_logical_key
+   -open
    Tsync_test_harness
    -open
    Tsync_domain_store
@@ -11,6 +13,7 @@
    Tsync_backend_register))
  (name batch_nesting)
  (libraries
+  tsync-libs.logical_key
   tsync_test_harness
   tsync_domain_store
   tsync_bigstring

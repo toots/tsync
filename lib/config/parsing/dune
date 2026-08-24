@@ -1,4 +1,6 @@
 (library
+ (flags
+  (:standard -open Tsync_logical_key))
  (name tsync_conf_parsing)
  (public_name tsync-libs.conf_parsing)
- (libraries unix yojson))
+ (libraries tsync-libs.logical_key unix yojson))

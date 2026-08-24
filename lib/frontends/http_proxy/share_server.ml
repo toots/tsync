@@ -11,13 +11,14 @@ open Lwt.Syntax
 type share = {
   typ : string;  (** "file" | "dir" *)
   filename : string;
-  key : string;  (** file shares: the file's backend manifest key *)
-  dir_prefix : string;  (** dir shares: the folder's namespace prefix *)
+  key : Stored_key.t;  (** file shares: the file's backend manifest key *)
+  dir_prefix : Stored_key.t;  (** dir shares: the folder's namespace prefix *)
 }
 
 type child = {
   name : string;
-  key : string;  (** subdirectory: its namespace prefix; file: manifest key *)
+  key : Stored_key.t;
+      (** subdirectory: its namespace prefix; file: manifest key *)
   is_dir : bool;
   size : int64;
   mtime : float;
@@ -25,7 +26,7 @@ type child = {
 
 (* The member currently being streamed into a zip. *)
 type streaming = {
-  s_key : string;
+  s_key : Stored_key.t;
   s_manifest : Manifest.t;
   mutable s_pos : int64;
   s_size : int64;
@@ -118,6 +119,7 @@ module Make (C : Conf.S) = struct
   let max_memoized_manifests = 256
 
   let manifest_of key =
+    let key = Stored_key.to_string key in
     match Hashtbl.find_opt manifests key with
       | Some m -> Lwt.return_some m
       | None -> (
@@ -147,11 +149,7 @@ module Make (C : Conf.S) = struct
   let load token =
     if not (is_hex token) then fail `Bad_request "bad token";
     let* body =
-      B.get_opt
-        ~key:
-          (Stored_key.to_string
-             (Stored_key.share_key ~prefix:C.shares_prefix token))
-        ()
+      B.get_opt ~key:(Stored_key.share_key ~prefix:C.shares_prefix token) ()
     in
     match body with
       | None -> fail `Not_found "not found"
@@ -171,8 +169,8 @@ module Make (C : Conf.S) = struct
             {
               typ = str "type" j;
               filename = str "filename" j;
-              key = str "key" j;
-              dir_prefix = str "dirPrefix" j;
+              key = Stored_key.listed (str "key" j);
+              dir_prefix = Stored_key.listed (str "dirPrefix" j);
             }
 
   (* A subdirectory's [key] is its own namespace, so [resolve] descends by
@@ -239,16 +237,17 @@ module Make (C : Conf.S) = struct
 
   (* One block at a time: each fetches only the chunks it covers. *)
   let byte_stream ~manifest key ~offset ~len =
+    let id = Stored_key.to_string key in
     let pos = ref offset and left = ref len in
     Lwt_stream.from (fun () ->
-        logged key @@ fun () ->
+        logged id @@ fun () ->
         if Int64.compare !left 0L <= 0 then Lwt.return_none
         else
           (* Slot before the buffer, not after. *)
           Lwt_bounded.use read_slots @@ fun () ->
           let n = Int64.to_int (min (Int64.of_int block_size) !left) in
           let buf = Bigarray.Array1.create Bigarray.char Bigarray.c_layout n in
-          let* got = D.pread ~id:key ~manifest buf ~offset:!pos in
+          let* got = D.pread ~id ~manifest buf ~offset:!pos in
           if got <= 0 then Lwt.return_none
           else (
             Metrics.count served_bytes got;
@@ -293,7 +292,9 @@ module Make (C : Conf.S) = struct
                 Bigarray.Array1.create Bigarray.char Bigarray.c_layout n
               in
               let* got =
-                D.pread ~id:m.s_key ~manifest:m.s_manifest buf ~offset:m.s_pos
+                D.pread
+                  ~id:(Stored_key.to_string m.s_key)
+                  ~manifest:m.s_manifest buf ~offset:m.s_pos
               in
               if got <= 0 then (
                 (* Truncated relative to its manifest; close the member here. *)
@@ -326,7 +327,8 @@ module Make (C : Conf.S) = struct
                       | None ->
                           (* Vanished or replaced mid-archive: skip the member
                              rather than abort the download. *)
-                          Log.err "share: no manifest for %s" c.key;
+                          Log.err "share: no manifest for %s"
+                            (Stored_key.to_string c.key);
                           Lwt.return_some ""
                       | Some manifest ->
                           cur :=

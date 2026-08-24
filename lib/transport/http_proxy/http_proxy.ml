@@ -54,7 +54,7 @@ module Wire = struct
   let file_entry_to_json (e : Backend.file_entry) =
     `Assoc
       ([
-         ("key", `String e.Backend.key);
+         ("key", `String (Stored_key.to_string e.Backend.key));
          ("size", `Int e.Backend.size);
          ("lastModified", `Float e.Backend.last_modified);
        ]
@@ -66,7 +66,7 @@ module Wire = struct
   let file_entry_of_json json =
     let open Yojson.Safe.Util in
     {
-      Backend.key = json |> member "key" |> to_string;
+      Backend.key = Stored_key.listed (json |> member "key" |> to_string);
       size = json |> member "size" |> to_int;
       last_modified = json |> member "lastModified" |> to_number;
       etag =

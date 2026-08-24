@@ -14,7 +14,7 @@ open Check
 let body n = Bigstring.of_string (String.make n 'x')
 
 module Memory () : Backend.S = struct
-  let objects : (string, Bigstring.t) Hashtbl.t = Hashtbl.create 8
+  let objects : (Stored_key.t, Bigstring.t) Hashtbl.t = Hashtbl.create 8
 
   let put ~key ~data () =
     Hashtbl.replace objects key data;
@@ -34,7 +34,9 @@ module Memory () : Backend.S = struct
   let get ~key () =
     match Hashtbl.find_opt objects key with
       | Some d -> Lwt.return d
-      | None -> Lwt.fail (Backend.Backend_error ("no such key: " ^ key))
+      | None ->
+          Lwt.fail
+            (Backend.Backend_error ("no such key: " ^ Stored_key.to_string key))
 
   let head_opt ~key () =
     Lwt.return
@@ -66,7 +68,7 @@ module Memory () : Backend.S = struct
     Lwt.return
       (Hashtbl.fold
          (fun key d acc ->
-           if String.starts_with ~prefix key then
+           if Stored_key.is_in ~prefix key then
              {
                Backend.key;
                size = Bigstring.length d;
@@ -134,43 +136,64 @@ let () =
      in
 
      case "a body crossing a link is counted, once, for its own length";
-     let* r = moved (fun () -> R.put ~key:"k" ~data:(body 100) ()) in
+     let* r =
+       moved (fun () -> R.put ~key:(Stored_key.listed "k") ~data:(body 100) ())
+     in
      expect "put counts its body up" ~up:100 ~down:0 r;
-     let* r = moved (fun () -> Lwt.map ignore (R.get ~key:"k" ())) in
+     let* r =
+       moved (fun () -> Lwt.map ignore (R.get ~key:(Stored_key.listed "k") ()))
+     in
      expect "get counts its body down" ~up:0 ~down:100 r;
-     let* r = moved (fun () -> Lwt.map ignore (R.get_opt ~key:"k" ())) in
+     let* r =
+       moved (fun () ->
+           Lwt.map ignore (R.get_opt ~key:(Stored_key.listed "k") ()))
+     in
      expect "get_opt counts a body it found" ~up:0 ~down:100 r;
-     let* r = moved (fun () -> Lwt.map ignore (R.get_opt ~key:"absent" ())) in
+     let* r =
+       moved (fun () ->
+           Lwt.map ignore (R.get_opt ~key:(Stored_key.listed "absent") ()))
+     in
      expect "get_opt counts nothing when there is nothing" ~up:0 ~down:0 r;
 
      case "a verb with no body moves nothing";
-     let* r = moved (fun () -> Lwt.map ignore (R.head_opt ~key:"k" ())) in
+     let* r =
+       moved (fun () ->
+           Lwt.map ignore (R.head_opt ~key:(Stored_key.listed "k") ()))
+     in
      expect "head_opt" ~up:0 ~down:0 r;
      (* A listing carries every object's size, so summing it here would report
         the whole namespace as traffic on a call that fetched no bytes. *)
      let* r = moved (fun () -> Lwt.map ignore (R.list_prefix ~prefix:"" ())) in
      expect "list_prefix" ~up:0 ~down:0 r;
-     let* r = moved (fun () -> R.delete ~key:"gone" ()) in
+     let* r = moved (fun () -> R.delete ~key:(Stored_key.listed "gone") ()) in
      expect "delete" ~up:0 ~down:0 r;
-     let* r = moved (fun () -> R.delete_multi ["a"; "b"]) in
+     let* r =
+       moved (fun () -> R.delete_multi (List.map Stored_key.listed ["a"; "b"]))
+     in
      expect "delete_multi" ~up:0 ~down:0 r;
 
      case "put_if_absent, whose loser is handed a body down the link";
      let* r =
        moved (fun () ->
-           Lwt.map ignore (R.put_if_absent ~key:"race" ~data:(body 40) ()))
+           Lwt.map ignore
+             (R.put_if_absent ~key:(Stored_key.listed "race") ~data:(body 40) ()))
      in
      expect "winning sends and receives nothing back" ~up:40 ~down:0 r;
      let* r =
        moved (fun () ->
-           Lwt.map ignore (R.put_if_absent ~key:"race" ~data:(body 40) ()))
+           Lwt.map ignore
+             (R.put_if_absent ~key:(Stored_key.listed "race") ~data:(body 40) ()))
      in
      expect "losing sends, and takes the winner's body" ~up:40 ~down:40 r;
 
      case "a local store is a filesystem, not a link";
-     let* r = moved (fun () -> L.put ~key:"k" ~data:(body 100) ()) in
+     let* r =
+       moved (fun () -> L.put ~key:(Stored_key.listed "k") ~data:(body 100) ())
+     in
      expect "local put" ~up:0 ~down:0 r;
-     let* r = moved (fun () -> Lwt.map ignore (L.get ~key:"k" ())) in
+     let* r =
+       moved (fun () -> Lwt.map ignore (L.get ~key:(Stored_key.listed "k") ()))
+     in
      expect "local get" ~up:0 ~down:0 r;
 
      case "a write reaching two stores is counted twice";
@@ -183,26 +206,43 @@ let () =
            ]
          ~targets:[] ~archives:[]
      in
-     let* r = moved (fun () -> Composite.put ~key:"fan" ~data:(body 70) ()) in
+     let* r =
+       moved (fun () ->
+           Composite.put ~key:(Stored_key.listed "fan") ~data:(body 70) ())
+     in
      expect "twice the bytes reach a link, so twice is the count" ~up:140
        ~down:0 r;
      (* A read stops at the first store that answers, so it is one body however
         many could have supplied it. *)
-     let* r = moved (fun () -> Lwt.map ignore (Composite.get ~key:"fan" ())) in
+     let* r =
+       moved (fun () ->
+           Lwt.map ignore (Composite.get ~key:(Stored_key.listed "fan") ()))
+     in
      expect "a read is counted once" ~up:0 ~down:70 r;
 
      case "a store counts its own bytes as well as the process's";
      let (module One : Backend.S), t1 = remote_counted () in
      let (module Two : Backend.S), t2 = remote_counted () in
-     let* r = moved_on t1 (fun () -> One.put ~key:"a" ~data:(body 25) ()) in
+     let* r =
+       moved_on t1 (fun () ->
+           One.put ~key:(Stored_key.listed "a") ~data:(body 25) ())
+     in
      expect "a put reaches the store's own counter" ~up:25 ~down:0 r;
-     let* r = moved_on t1 (fun () -> Lwt.map ignore (One.get ~key:"a" ())) in
+     let* r =
+       moved_on t1 (fun () ->
+           Lwt.map ignore (One.get ~key:(Stored_key.listed "a") ()))
+     in
      expect "so does a get" ~up:0 ~down:25 r;
      (* The figure exists to say which link the bytes crossed, so a second store
         seeing the first's traffic would be the whole point missed. *)
-     let* r = moved_on t2 (fun () -> One.put ~key:"b" ~data:(body 60) ()) in
+     let* r =
+       moved_on t2 (fun () ->
+           One.put ~key:(Stored_key.listed "b") ~data:(body 60) ())
+     in
      expect "one store's bytes are not another's" ~up:0 ~down:0 r;
-     let* r = moved (fun () -> Two.put ~key:"b" ~data:(body 60) ()) in
+     let* r =
+       moved (fun () -> Two.put ~key:(Stored_key.listed "b") ~data:(body 60) ())
+     in
      expect "and the process-wide count still takes every store's" ~up:60
        ~down:0 r;
 

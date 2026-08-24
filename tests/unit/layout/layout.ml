@@ -72,40 +72,50 @@ let () =
         let chunk_prefix = "tsync/" ^ d ^ "/chunks/"
       end) in
       check ("marker for " ^ d)
-        (Chunk_layout.marker_key (chunk d)
+        (Option.map Stored_key.to_string
+           (Chunk_layout.marker_key (Stored_key.listed (chunk d)))
         = Some ("tsync/corrupted/" ^ d ^ "/" ^ String.sub ck 0 3 ^ "/" ^ ck));
       check
         ("corrupted prefix for " ^ d)
         (L.corrupted_prefix = "tsync/corrupted/" ^ d ^ "/");
       check ("job key for " ^ d)
-        (L.verify_job_key "abc" = "tsync/verify-jobs/" ^ d ^ "/abc"))
+        (Stored_key.to_string (L.verify_job_key "abc")
+        = "tsync/verify-jobs/" ^ d ^ "/abc"))
     ["dom"; "Jellyfin Media"];
-  let marker = Option.get (Chunk_layout.marker_key (chunk "Jellyfin Media")) in
+  let marker =
+    Option.get
+      (Chunk_layout.marker_key (Stored_key.listed (chunk "Jellyfin Media")))
+  in
   check "a marker is one" (Chunk_layout.is_marker_key marker);
   check "and names its chunk" (Chunk_layout.chunk_key_of_marker marker = ck);
   (* The non-recursion guard, in code rather than only in a filter. *)
   check "a marker earns none of its own" (Chunk_layout.marker_key marker = None);
   check "nor does the space a collection empties"
     (Chunk_layout.marker_key
-       ("tsync/d/chunks.from/" ^ String.sub ck 0 3 ^ "/" ^ ck)
+       (Stored_key.in_space ~prefix:"tsync/d/chunks.from/"
+          (String.sub ck 0 3 ^ "/" ^ ck))
     = None);
   (* A manifest is filed under the hash of its own name, so it is spelled
      exactly like a chunk key: membership is the prefix, never the shape. *)
   check "nor a manifest"
     (Chunk_layout.marker_key
-       ("tsync/d/manifests/" ^ String.sub ck 0 3 ^ "/" ^ ck)
+       (Stored_key.in_space ~prefix:"tsync/d/manifests/"
+          (String.sub ck 0 3 ^ "/" ^ ck))
     = None);
   (* A marker under an empty domain would sit at a prefix nothing lists, every
      reader building that prefix from a domain name; both sides refuse it. *)
   check "an empty domain is not a chunk key's home"
-    (Chunk_layout.marker_key ("tsync//chunks/" ^ String.sub ck 0 3 ^ "/" ^ ck)
+    (Chunk_layout.marker_key
+       (Stored_key.listed ("tsync//chunks/" ^ String.sub ck 0 3 ^ "/" ^ ck))
     = None);
   check "a shard directory is not a marker"
-    (not (Chunk_layout.is_marker_key "tsync/corrupted/dom/abc/"));
+    (not
+       (Chunk_layout.is_marker_key
+          (Stored_key.listed "tsync/corrupted/dom/abc/")));
   (* The keys a delete request is filed under are pinned against the Python that
      parses them in {!tests/unit/gc_job}; here only the body, whose two spellings
      never meet on real input — OCaml writes it and the function reads it. *)
-  let keys = [chunk "dom"; chunk "Jellyfin Media"] in
+  let keys = List.map Stored_key.listed [chunk "dom"; chunk "Jellyfin Media"] in
   check "a request body round trips"
     (Discard_job.decode (Discard_job.encode keys) = keys);
   check "and an empty one carries nothing"

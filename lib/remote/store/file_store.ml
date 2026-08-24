@@ -34,7 +34,8 @@ module Make (C : Conf.S) = struct
 
   (* The one place an entry key becomes a backend key. Concatenating the prefix
      onto a bare entry key skips the month directory and silently misses. *)
-  let journal_key entry_key = C.journal_prefix ^ Ek.relative_path entry_key
+  let journal_key entry_key =
+    Stored_key.in_space ~prefix:C.journal_prefix (Ek.relative_path entry_key)
 
   let write_journal_entry_body ?entry_key body =
     let ek = match entry_key with Some k -> k | None -> J.entry_key () in
@@ -46,7 +47,9 @@ module Make (C : Conf.S) = struct
       (Bigstring.of_string (Journal.encode ops))
 
   let cursor_state () =
-    match Hashtbl.find_opt cursor_states C.cursor_key with
+    match
+      Hashtbl.find_opt cursor_states (Stored_key.to_string C.cursor_key)
+    with
       | Some s -> s
       | None ->
           let s =
@@ -57,7 +60,7 @@ module Make (C : Conf.S) = struct
               publish_lock = Lwt_mutex.create ();
             }
           in
-          Hashtbl.replace cursor_states C.cursor_key s;
+          Hashtbl.replace cursor_states (Stored_key.to_string C.cursor_key) s;
           s
 
   (* Serialized: a timer flush and a drain flush landing together would be two
@@ -155,7 +158,7 @@ module Make (C : Conf.S) = struct
       (fun (e : Backend.file_entry) ->
         (* Entries sit in month directories ({!Ek.relative_path}); [of_string]
            takes the last segment. *)
-          match Ek.of_string e.key with
+          match Ek.of_string (Stored_key.to_string e.key) with
           | Some ek
             when match start_after with
                    | Some sa -> Ek.compare ek sa > 0

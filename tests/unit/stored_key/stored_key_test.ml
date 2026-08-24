@@ -3,14 +3,12 @@
    becoming unreachable. *)
 
 let show label s = Printf.printf "%-26s %s\n" label s
+let show_key label k = show label (Stored_key.to_string k)
 
-(* Rendered without a space so what is shown is the path a folder files its
-   children under, which is what a change to the hash would move. *)
-let child ~folder_id name =
-  Stored_key.to_string (Stored_key.child_key ~prefix:"" ~folder_id name)
-
-let index ~folder_id =
-  Stored_key.to_string (Stored_key.index_key ~prefix:"" ~folder_id)
+(* Built without a space, so what is shown is the path a folder files its
+   children under rather than any one store's spelling of it. *)
+let child ~folder_id name = Stored_key.child_key ~prefix:"" ~folder_id name
+let index ~folder_id = Stored_key.index_key ~prefix:"" ~folder_id
 
 let () =
   let fid = "9f3a1c0428b6d5e7" in
@@ -23,17 +21,16 @@ let () =
     (string_of_bool (Stored_key.new_id () <> Stored_key.new_id ()));
 
   print_endline "\n=== where a child is filed";
-  show "img.jpg" (child ~folder_id:fid "img.jpg");
+  show_key "img.jpg" (child ~folder_id:fid "img.jpg");
   show "the same name again"
     (string_of_bool
        (child ~folder_id:fid "img.jpg" = child ~folder_id:fid "img.jpg"));
-  show "a name needing escaping" (child ~folder_id:fid "a b/c.txt");
-  show "under another folder" (child ~folder_id:"0000" "img.jpg");
-  show "the folder's index" (index ~folder_id:fid);
-  show "the same child, in a space"
-    (Stored_key.to_string
-       (Stored_key.child_key ~prefix:"tsync/photos/manifests/" ~folder_id:fid
-          "img.jpg"));
+  show_key "a name needing escaping" (child ~folder_id:fid "a b/c.txt");
+  show_key "under another folder" (child ~folder_id:"0000" "img.jpg");
+  show_key "the folder's index" (index ~folder_id:fid);
+  show_key "the same child, in a space"
+    (Stored_key.child_key ~prefix:"tsync/photos/manifests/" ~folder_id:fid
+       "img.jpg");
 
   print_endline "\n=== what a listing offers";
   List.iter
@@ -44,6 +41,7 @@ let () =
     [
       ("a child", child ~folder_id:fid "img.jpg");
       ("the index", index ~folder_id:fid);
-      ("the namespace itself", fid ^ "/");
-      ("a write in flight", Filename.temp_path (fid ^ "/abcd"));
+      ("the namespace itself", Stored_key.namespace ~prefix:"" ~folder_id:fid);
+      ( "a write in flight",
+        Stored_key.listed (Filename.temp_path (fid ^ "/abcd")) );
     ]

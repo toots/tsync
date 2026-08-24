@@ -18,7 +18,11 @@ let raises what f =
 
 let () =
   case "a batch survives the round trip";
-  let answered = [("a", body "alpha"); ("b", None); ("c", body "")] in
+  let answered =
+    List.map
+      (fun (k, b) -> (Stored_key.listed k, b))
+      [("a", body "alpha"); ("b", None); ("c", body "")]
+  in
   let keys = List.map fst answered in
   let framed = Wire.bodies_to_string answered in
   check "keys, order and bodies come back"
@@ -33,15 +37,16 @@ let () =
       Wire.bodies_of_string ~keys
         (String.sub framed 0 (String.length framed - 1)));
   raises "fewer entries than keys" (fun () ->
-      Wire.bodies_of_string ~keys:(keys @ ["d"]) framed);
+      Wire.bodies_of_string ~keys:(keys @ [Stored_key.listed "d"]) framed);
   raises "more entries than keys" (fun () ->
-      Wire.bodies_of_string ~keys:["a"] framed);
+      Wire.bodies_of_string ~keys:[Stored_key.listed "a"] framed);
   raises "a length prefix cut in half" (fun () ->
-      Wire.bodies_of_string ~keys:["a"] "\x00\x00");
+      Wire.bodies_of_string ~keys:[Stored_key.listed "a"] "\x00\x00");
 
   case "a body larger than one socket read";
   let big = String.init 200_000 (fun i -> Char.chr (i * 31 land 0xff)) in
-  let framed = Wire.bodies_to_string [("big", body big)] in
+  let framed = Wire.bodies_to_string [(Stored_key.listed "big", body big)] in
   check "comes back byte for byte"
-    (rendered (Wire.bodies_of_string ~keys:["big"] framed) = [("big", Some big)]);
+    (rendered (Wire.bodies_of_string ~keys:[Stored_key.listed "big"] framed)
+    = [(Stored_key.listed "big", Some big)]);
   report ~expected:7 ()

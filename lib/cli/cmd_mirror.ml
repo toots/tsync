@@ -108,11 +108,12 @@ let cmd : unit Cmd.t =
            in
            let on_start ~name ~key =
              incr checked;
-             current := Some (doing name key)
+             current := Some (doing name (Stored_key.to_string key))
            in
            (* As each object lands rather than as a list at the end: the list
               was the whole keyspace of a first resync, held to print it. *)
            let on_entry ~name ~key ~size ~outcome =
+             let key = Stored_key.to_string key in
              let size = Int64.of_int size in
              match outcome with
                | `Present -> Job.Progress.settle ~bytes:size ~sent:0L `Skipped

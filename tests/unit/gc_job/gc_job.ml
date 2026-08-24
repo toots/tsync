@@ -35,7 +35,7 @@ let () =
           List.iter
             (fun shard ->
               Printf.printf "job|%s|%s|%s|%s\n" domain run shard
-                (L.gc_job_key ~run shard))
+                (Stored_key.to_string (L.gc_job_key ~run shard)))
             ["000"; "abb"; "fff"])
         runs)
     domains;
@@ -66,6 +66,6 @@ let () =
       end) in
       let key = L.gc_job_key ~run:"1755300000000" "abb" in
       assert (Chunk_layout.marker_key key = None);
-      assert (Chunk_layout.shard_of_job key = Some "abb"))
+      assert (Chunk_layout.shard_of_job (Stored_key.to_string key) = Some "abb"))
     domains;
   print_endline "ok"

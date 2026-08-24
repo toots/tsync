@@ -2,6 +2,8 @@
  (flags
   (:standard
    -open
+   Tsync_logical_key
+   -open
    Tsync_retry
    -open
    Tsync_chunk_integrity
@@ -18,6 +20,7 @@
  (optional)
  (library_flags (-linkall))
  (libraries
+  tsync-libs.logical_key
   tsync_retry
   tsync_chunk_integrity
   tsync-libs.field_spec

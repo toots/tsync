@@ -22,9 +22,7 @@ module Make (C : Conf.S) = struct
   let live grouping =
     let+ head =
       B.head_opt
-        ~key:
-          (Stored_key.to_string
-             (History.manifest_of ~domain_prefix:C.domain_prefix ~grouping))
+        ~key:(History.manifest_of ~domain_prefix:C.domain_prefix ~grouping)
         ()
     in
     head <> None

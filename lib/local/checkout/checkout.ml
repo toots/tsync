@@ -234,7 +234,7 @@ module Make (C : Conf.S) = struct
     let+ files, dirs =
       Lwt_list.fold_left_s
         (fun (files, dirs) name ->
-          if Stored_key.is_internal name then Lwt.return (files, dirs)
+          if Stored_key.internal_leaf name then Lwt.return (files, dirs)
           else (
             let path = Filename.concat dir name in
             let* is_dir = Fs_util.is_directory path in
@@ -266,7 +266,7 @@ module Make (C : Conf.S) = struct
       let* names = Fs_util.readdir_list dir in
       Lwt_list.fold_left_s
         (fun acc name ->
-          if Stored_key.is_internal name then Lwt.return acc
+          if Stored_key.internal_leaf name then Lwt.return acc
           else (
             let path = Filename.concat dir name in
             let* is_dir = Fs_util.is_directory path in

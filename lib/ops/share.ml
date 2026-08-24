@@ -56,8 +56,7 @@ module Make (C : Conf.S) = struct
              absent object. *)
           let* obj =
             match file_key with
-              | Some file_key when rel <> "" ->
-                  R.get_opt ~key:(Stored_key.to_string file_key) ()
+              | Some file_key when rel <> "" -> R.get_opt ~key:file_key ()
               | _ -> Lwt.return_none
           in
           let marker =
@@ -134,9 +133,7 @@ module Make (C : Conf.S) = struct
         let token = Option.value token ~default:(Id.token 16) in
         let* () =
           B.put
-            ~key:
-              (Stored_key.to_string
-                 (Stored_key.share_key ~prefix:shares_prefix token))
+            ~key:(Stored_key.share_key ~prefix:shares_prefix token)
             ~data:(Bigstring.of_string (Yojson.Basic.to_string manifest))
             ()
         in
@@ -156,8 +153,8 @@ module Make (C : Conf.S) = struct
      sibling of the manifests. A token is hex, so no published object can end
      that way. *)
   let is_loose_artifact key =
-    (not (String.starts_with ~prefix:cache_prefix key))
-    && Filename.extension key = ".data"
+    (not (Stored_key.is_in ~prefix:cache_prefix key))
+    && Filename.extension (Stored_key.to_string key) = ".data"
 
   let clear_cache () =
     Lwt.catch
@@ -171,7 +168,7 @@ module Make (C : Conf.S) = struct
                  and they outlive their contents: counting them would report a
                  delete that took nothing and never settle. *)
               (not (Stored_key.is_dir_key e.key))
-              && (String.starts_with ~prefix:cache_prefix e.key
+              && (Stored_key.is_in ~prefix:cache_prefix e.key
                  || is_loose_artifact e.key))
             entries
         in

@@ -2,6 +2,8 @@
  (flags
   (:standard
    -open
+   Tsync_logical_key
+   -open
    Tsync_journal
    -open
    Tsync_conf
@@ -15,6 +17,7 @@
    Tsync_test_harness))
  (name cursor_debounce)
  (libraries
+  tsync-libs.logical_key
   tsync_journal
   tsync_test_harness
   tsync_conf

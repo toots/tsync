@@ -2,6 +2,8 @@
  (flags
   (:standard
    -open
+   Tsync_logical_key
+   -open
    Tsync_retry
    -open
    Tsync_field_spec
@@ -19,6 +21,7 @@
  (private_modules http_proxy_backend)
  (library_flags (-linkall))
  (libraries
+  tsync-libs.logical_key
   tsync_retry
   tsync-libs.field_spec
   tsync-libs.bigstring

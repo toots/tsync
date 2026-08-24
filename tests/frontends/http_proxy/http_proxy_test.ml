@@ -12,7 +12,7 @@ module C : Conf.S = struct
   let chunk_prefix = "tsync/statusdom/chunks/"
   let versions_prefix = "tsync/statusdom/versions/"
   let journal_prefix = "tsync/statusdom/journal/"
-  let cursor_key = "tsync/statusdom/cursor"
+  let cursor_key = Stored_key.in_space ~prefix:"tsync/statusdom/" "cursor"
   let shares_prefix = "tsync/shares/"
 
   let store =
@@ -183,8 +183,18 @@ let () =
   (* file_entry JSON round-trips. *)
   let entries =
     [
-      { Backend.key = "a"; size = 3; last_modified = 1.5; etag = Some "v1" };
-      { Backend.key = "b/c"; size = 0; last_modified = 0.; etag = None };
+      {
+        Backend.key = Stored_key.listed "a";
+        size = 3;
+        last_modified = 1.5;
+        etag = Some "v1";
+      };
+      {
+        Backend.key = Stored_key.listed "b/c";
+        size = 0;
+        last_modified = 0.;
+        etag = None;
+      };
     ]
   in
   assert (
@@ -328,14 +338,15 @@ let () =
     in
     Cohttp.Code.code_of_status (Cohttp.Response.status resp)
   in
-  let key = "tsync/one/manifests/x" in
+  let key = Stored_key.listed "tsync/one/manifests/x" in
   List.iter
     (fun op -> assert (status op ~read_only:true = 403))
     [
       Http_proxy_frontend.Put key;
       Http_proxy_frontend.Delete key;
       Http_proxy_frontend.Delete_multi [key];
-      Http_proxy_frontend.Copy (key, key ^ "2");
+      Http_proxy_frontend.Copy
+        (key, Stored_key.listed (Stored_key.to_string key ^ "2"));
     ];
   (* Reads are unaffected: absent key, not forbidden. *)
   assert (status (Http_proxy_frontend.Get key) ~read_only:true = 404);
@@ -344,7 +355,7 @@ let () =
 
   (* Sharing keeps working on a read-only domain: a share manifest lives outside
      the domain root and publishing one changes no content. Revoking likewise. *)
-  let share_key = "tsync/shares/deadbeef" in
+  let share_key = Stored_key.listed "tsync/shares/deadbeef" in
   assert (status (Http_proxy_frontend.Put share_key) ~read_only:true = 200);
   assert (status (Http_proxy_frontend.Delete share_key) ~read_only:true = 200);
 
@@ -364,7 +375,9 @@ let () =
          in
          let (module B : Backend.S) = C.store in
          B.put
-           ~key:(C.chunk_prefix ^ Chunk_layout.relative_path key)
+           ~key:
+             (Stored_key.in_space ~prefix:C.chunk_prefix
+                (Chunk_layout.relative_path key))
            ~data:(Bigstring.of_string "chunk")
            ())
        (List.init planted Fun.id));
@@ -390,7 +403,9 @@ let () =
        (fun entry ->
          let (module B : Backend.S) = C.store in
          B.put
-           ~key:(C.journal_prefix ^ Journal.Entry_key.relative_path entry)
+           ~key:
+             (Stored_key.in_space ~prefix:C.journal_prefix
+                (Journal.Entry_key.relative_path entry))
            ~data:(Bigstring.of_string "{}") ())
        [
          entry_key ("1785969965000-" ^ other);

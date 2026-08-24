@@ -26,7 +26,7 @@ module C = struct
   let chunk_prefix = "tsync/test/chunks/"
   let versions_prefix = "tsync/test/versions/"
   let journal_prefix = "tsync/test/journal/"
-  let cursor_key = "tsync/test/cursor"
+  let cursor_key = Stored_key.in_space ~prefix:"tsync/test/" "cursor"
   let shares_prefix = "tsync/shares/"
 
   let store =
@@ -75,7 +75,10 @@ let () =
   Lwt_main.run
     (let* manifest = upload "a.bin" body in
      let chunk_key = Manifest.key manifest 0 in
-     let backend_key = C.chunk_prefix ^ Chunk_layout.relative_path chunk_key in
+     let backend_key =
+       Stored_key.in_space ~prefix:C.chunk_prefix
+         (Chunk_layout.relative_path chunk_key)
+     in
 
      let* marks = listed () in
      check "a good upload is marked by nothing" (marks = []);

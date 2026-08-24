@@ -2,6 +2,8 @@
  (flags
   (:standard
    -open
+   Tsync_logical_key
+   -open
    Tsync_manifest
    -open
    Tsync_chunk_cache
@@ -19,6 +21,7 @@
    Tsync_test_harness))
  (name fetch_fanout_test)
  (libraries
+  tsync-libs.logical_key
   tsync_manifest
   tsync_chunk_cache
   tsync_chunks

@@ -36,7 +36,7 @@ module Make (C : Conf.S) = struct
   module L = Chunk_layout.Make (C)
 
   let prefix = L.corrupted_prefix
-  let key chunk_key = prefix ^ Chunk_layout.relative_path chunk_key
+  let key = L.corrupted_key
 
   (* Unbounded for {!list}, which is feeding a repair rather than a report. *)
   let entries_on ?max_keys ~store (module B : Backend.S) =

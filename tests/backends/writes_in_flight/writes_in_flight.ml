@@ -31,7 +31,7 @@ module Dst =
    under test is the listing, and a real race would not reproduce. *)
 let staged_name = Filename.basename (Filename.temp_path "x")
 let staged_path = String.concat "/" [src_dir; chunk_prefix ^ shard; staged_name]
-let staged_key = chunk_prefix ^ shard ^ staged_name
+let staged_key = Stored_key.in_space ~prefix:chunk_prefix (shard ^ staged_name)
 
 (* A store that hands out the staged name anyway: an older tsync copied one here
    before its listings hid them, and that copy is now an object like any other.
@@ -42,7 +42,7 @@ module Stale = struct
 
   let list_prefix ?max_keys ~prefix () =
     let* entries = Local.list_prefix ?max_keys ~prefix () in
-    if String.starts_with ~prefix staged_key then
+    if Stored_key.is_in ~prefix staged_key then
       let+ head = Local.head_opt ~key:staged_key () in
       match head with Some e -> entries @ [e] | None -> entries
     else Lwt.return entries
@@ -56,7 +56,7 @@ module C : Conf.S = struct
   let chunk_prefix = chunk_prefix
   let versions_prefix = "tsync/d/versions/"
   let journal_prefix = "tsync/d/journal/"
-  let cursor_key = "tsync/d/cursor"
+  let cursor_key = Stored_key.in_space ~prefix:"tsync/d/" "cursor"
   let shares_prefix = "tsync/shares/"
 
   let members =
@@ -121,7 +121,9 @@ let keys_under dir =
 (* Named from its own body: a chunk read back under a name it does not hash to
    is filed as corrupt, which is a different test. *)
 let body = Bigstring.of_string "chunk body"
-let chunk_key = chunk_prefix ^ shard ^ Chunks.key_of_body body
+
+let chunk_key =
+  Stored_key.in_space ~prefix:chunk_prefix (shard ^ Chunks.key_of_body body)
 
 let () =
   Lwt_main.run
@@ -129,7 +131,8 @@ let () =
      (* A user's own file whose name merely ends in ".tmp": it is an object, and
         hiding it would be the mirror deciding what a user may store. *)
      let user_key =
-       chunk_prefix ^ shard ^ ".syncthing.Big.Buck.Bunny.mkv.tmp"
+       Stored_key.in_space ~prefix:chunk_prefix
+         (shard ^ ".syncthing.Big.Buck.Bunny.mkv.tmp")
      in
      let* () =
        Local.put ~key:user_key ~data:(Bigstring.of_string "in flight") ()
@@ -142,7 +145,8 @@ let () =
        List.sort compare
          (List.map (fun (e : Backend.file_entry) -> e.Backend.key) listed)
      in
-     show "listed" (List.map Filename.basename listed);
+     show "listed"
+       (List.map (fun k -> Filename.basename (Stored_key.to_string k)) listed);
      check "the object is there" (List.mem chunk_key listed);
      check "the write in flight is not" (not (List.mem staged_key listed));
      check "and a user's own \".tmp\" still is" (List.mem user_key listed);
@@ -169,7 +173,11 @@ let () =
              | `Present -> ())
          ()
      in
-     show "copied" (List.sort compare (List.map Filename.basename !copied));
+     show "copied"
+       (List.sort compare
+          (List.map
+             (fun k -> Filename.basename (Stored_key.to_string k))
+             !copied));
      show "on the replica" (List.map mask (keys_under dst_dir));
      check "the object was copied" (List.mem chunk_key !copied);
      check "the write in flight was not" (not (List.mem staged_key !copied));

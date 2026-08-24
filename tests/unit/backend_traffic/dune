@@ -2,6 +2,8 @@
  (flags
   (:standard
    -open
+   Tsync_logical_key
+   -open
    Tsync_metrics
    -open
    Tsync_bigstring
@@ -15,6 +17,7 @@
    Tsync_test_harness))
  (name backend_traffic)
  (libraries
+  tsync-libs.logical_key
   tsync_test_harness
   tsync_metrics
   tsync_bigstring

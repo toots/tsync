@@ -2,6 +2,8 @@
  (flags
   (:standard
    -open
+   Tsync_logical_key
+   -open
    Tsync_chunks
    -open
    Tsync_journal
@@ -37,6 +39,7 @@
    Tsync_test_harness))
  (name http_proxy_test)
  (libraries
+  tsync-libs.logical_key
   tsync_chunks
   tsync_journal
   tsync_test_harness

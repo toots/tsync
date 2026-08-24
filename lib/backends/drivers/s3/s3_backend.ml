@@ -63,7 +63,7 @@ let unwrap op = function
 let entry_of c =
   Backend.
     {
-      key = c.S3.key;
+      key = Stored_key.listed c.S3.key;
       size = c.S3.size;
       last_modified = c.S3.last_modified;
       etag = Some c.S3.etag;
@@ -240,16 +240,24 @@ let make ?endpoint ?unsigned_payload ?share_url ~bucket ~region ~access_key_id
     make_t ?endpoint ?unsigned_payload ?share_url ~bucket ~region ~access_key_id
       ~secret_access_key ()
   in
-  let put_text ~key ~data () = put_text t ~key ~data () in
+  let put_text ~key ~data () =
+    put_text t ~key:(Stored_key.to_string key) ~data ()
+  in
+  (* Every key the store is asked about is rendered here, this module being the
+     one place the driver is reached through. *)
+  let str = Stored_key.to_string in
   (module struct
-    let put ~key ~data () = put t ~key ~data ()
-    let put_if_absent ~key ~data () = put_if_absent t ~key ~data ()
-    let get ~key () = get t ~key ()
-    let get_opt ~key () = get_opt t ~key ()
-    let head_opt ~key () = head_opt t ~key ()
-    let delete ~key () = delete t ~key ()
-    let delete_multi keys = delete_multi t keys
-    let copy ~src_key ~dst_key () = copy t ~src_key ~dst_key ()
+    let put ~key ~data () = put t ~key:(str key) ~data ()
+    let put_if_absent ~key ~data () = put_if_absent t ~key:(str key) ~data ()
+    let get ~key () = get t ~key:(str key) ()
+    let get_opt ~key () = get_opt t ~key:(str key) ()
+    let head_opt ~key () = head_opt t ~key:(str key) ()
+    let delete ~key () = delete t ~key:(str key) ()
+    let delete_multi keys = delete_multi t (List.map str keys)
+
+    let copy ~src_key ~dst_key () =
+      copy t ~src_key:(str src_key) ~dst_key:(str dst_key) ()
+
     let list_prefix ?max_keys ~prefix () = list_all t ?max_keys ~prefix ()
 
     (* No multi-object GET in the API: {!Backend.Batched} fans these out. *)

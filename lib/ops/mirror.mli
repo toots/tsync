@@ -60,10 +60,10 @@ module Make (C : Conf.S) : sig
     ?scope:[ `All | `Manifests | `Path of string ] ->
     ?on_scan:(objects:int -> bytes:int64 -> unit) ->
     ?on_list:(name:string -> unit) ->
-    ?on_start:(name:string -> key:string -> unit) ->
+    ?on_start:(name:string -> key:Stored_key.t -> unit) ->
     ?on_entry:
       (name:string ->
-      key:string ->
+      key:Stored_key.t ->
       size:int ->
       outcome:[ `Copied of [ `Missing | `Wrong_size ] * int | `Present ] ->
       unit) ->

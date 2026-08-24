@@ -53,9 +53,8 @@ let publish name =
   in
   Store.put
     ~key:
-      (Stored_key.to_string
-         (Stored_key.child_key ~prefix:C.domain_prefix
-            ~folder_id:Stored_key.root_id name))
+      (Stored_key.child_key ~prefix:C.domain_prefix
+         ~folder_id:Stored_key.root_id name)
     ~data:(Bigstring.of_string body) ()
 
 let found name =

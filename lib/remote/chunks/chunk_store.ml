@@ -1,8 +1,8 @@
 open Lwt.Syntax
 
 module type DEPS = sig
-  val put : key:string -> data:Bigstring.t -> unit -> unit Lwt.t
-  val backend_key : string -> string
+  val put : key:Stored_key.t -> data:Bigstring.t -> unit -> unit Lwt.t
+  val backend_key : string -> Stored_key.t
   val present : string -> bool Lwt.t
   val fetch_body : string -> Bigstring.t Lwt.t
   val corrupt : string -> bool Lwt.t

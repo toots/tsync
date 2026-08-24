@@ -32,7 +32,7 @@ module C : Conf.S = struct
   let chunk_prefix = "tsync/testdom/chunks/"
   let versions_prefix = "tsync/testdom/versions/"
   let journal_prefix = "tsync/testdom/journal/"
-  let cursor_key = "tsync/testdom/cursor"
+  let cursor_key = Stored_key.in_space ~prefix:"tsync/testdom/" "cursor"
   let shares_prefix = "tsync/shares/"
   let store = (module Shareable : Backend.S)
   let members = [Backend.member ~name:"local" store]
@@ -70,15 +70,14 @@ let () =
      (* File: put a (non-marker) manifest, share it. *)
      let* file_key = L.ensure_manifest_key (Lk.file "foo") in
      let* () =
-       B.put
-         ~key:(Stored_key.to_string file_key)
-         ~data:(Bigstring.of_string "{\"chunks\":[]}")
-         ()
+       B.put ~key:file_key ~data:(Bigstring.of_string "{\"chunks\":[]}") ()
      in
      let* url = S.create ~token:"aa" ~expires:123 ~rel:"foo" () in
      let url = match url with Ok u -> u | Error e -> failwith e in
      assert (url = share_base ^ "/aa");
-     let* body = B.get ~key:(shares_prefix ^ "aa") () in
+     let* body =
+       B.get ~key:(Stored_key.in_space ~prefix:shares_prefix "aa") ()
+     in
      let m = Yojson.Basic.from_string (Bigstring.to_string body) in
      assert (member "type" m = `String "file");
      assert (member "key" m = `String (Stored_key.to_string file_key));
@@ -87,13 +86,17 @@ let () =
 
      let* () =
        B.put
-         ~key:(C.domain_prefix ^ Stored_key.root_id ^ "/x")
+         ~key:
+           (Stored_key.in_space ~prefix:C.domain_prefix
+              (Stored_key.root_id ^ "/x"))
          ~data:(Bigstring.of_string "x") ()
      in
      let* url = S.create ~token:"bb" ~expires:123 ~rel:"" () in
      let url = match url with Ok u -> u | Error e -> failwith e in
      assert (url = share_base ^ "/bb");
-     let* body = B.get ~key:(shares_prefix ^ "bb") () in
+     let* body =
+       B.get ~key:(Stored_key.in_space ~prefix:shares_prefix "bb") ()
+     in
      let m = Yojson.Basic.from_string (Bigstring.to_string body) in
      assert (member "type" m = `String "dir");
      assert (member "filename" m = `String "testdom.zip");
@@ -140,7 +143,9 @@ let () =
   let (module Composite : Backend.S) = ReadOnlyDomain.store in
   (match
      Lwt_main.run
-       (Composite.put ~key:"tsync/shares/zz" ~data:(Bigstring.of_string "x") ())
+       (Composite.put
+          ~key:(Stored_key.listed "tsync/shares/zz")
+          ~data:(Bigstring.of_string "x") ())
    with
     | exception Backend.Not_writable -> ()
     | _ -> assert false);
@@ -185,7 +190,10 @@ let () =
      in
      let* () =
        Lwt_list.iter_s
-         (fun key -> B.put ~key ~data:(Bigstring.of_string "1234") ())
+         (fun key ->
+           B.put ~key:(Stored_key.listed key)
+             ~data:(Bigstring.of_string "1234")
+             ())
          cached
      in
      let* result = S.clear_cache () in
@@ -204,7 +212,10 @@ let () =
      in
      (* The tokens published above, and nothing else. *)
      assert (
-       left = List.map (fun t -> shares_prefix ^ t) ["aa"; "bb"; "cc"; "dd"]);
+       left
+       = List.map
+           (fun t -> Stored_key.in_space ~prefix:shares_prefix t)
+           ["aa"; "bb"; "cc"; "dd"]);
      (* Idempotent: a second pass has nothing to take. *)
      let+ again = S.clear_cache () in
      assert (again = Ok (0, 0)));

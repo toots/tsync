@@ -29,7 +29,8 @@ module Make (C : Conf.S) = struct
        "successfully" writing nothing. *)
     let unusable bkey reason =
       incr failed;
-      Log.warn "resync %s: %s" bkey
+      Log.warn "resync %s: %s"
+        (Stored_key.to_string bkey)
         (match reason with
           | `Unreadable exn -> Printexc.to_string exn
           | `Unclassifiable (Manifest.Malformed m) ->
@@ -58,7 +59,8 @@ module Make (C : Conf.S) = struct
         (fun () -> apply key entry)
         (fun exn ->
           incr failed;
-          Log.warn "resync %s: %s" entry.Inode_tree.bkey
+          Log.warn "resync %s: %s"
+            (Stored_key.to_string entry.Inode_tree.bkey)
             (Printexc.to_string exn);
           Lwt.return_unit)
     in

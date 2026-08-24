@@ -2,6 +2,8 @@
  (flags
   (:standard
    -open
+   Tsync_logical_key
+   -open
    Tsync_filename
    -open
    Tsync_checkout
@@ -27,6 +29,7 @@
    Tsync_test_harness))
  (name writes_in_flight)
  (libraries
+  tsync-libs.logical_key
   tsync_filename
   tsync_checkout
   tsync_chunks

@@ -296,7 +296,7 @@ let domain_prefix d = domain_root d ^ "manifests/"
 let chunk_prefix d = domain_root d ^ "chunks/"
 let versions_prefix d = domain_root d ^ "versions/"
 let journal_prefix d = domain_root d ^ "journal/"
-let cursor_key d = domain_root d ^ "cursor"
+let cursor_key d = Stored_key.in_space ~prefix:(domain_root d) "cursor"
 
 (* Shares sit at one fixed root rather than per domain, so the share service's
    IAM and lifecycle target a constant prefix. A share manifest is token-addressed

@@ -20,7 +20,7 @@ module C : Conf.S = struct
   let chunk_prefix = "tsync/racedom/chunks/"
   let versions_prefix = "tsync/racedom/versions/"
   let journal_prefix = "tsync/racedom/journal/"
-  let cursor_key = "tsync/racedom/cursor"
+  let cursor_key = Stored_key.in_space ~prefix:"tsync/racedom/" "cursor"
   let shares_prefix = "tsync/shares/"
 
   let store =

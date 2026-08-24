@@ -19,12 +19,14 @@ module Store =
 (* One key that will not read, so a walk has something to fail on and the
    bookmark rule has something to decide about. A wrapper rather than a chmod:
    the suite must behave the same as root. *)
-let broken = ref ""
+let broken = ref (Stored_key.listed "")
 
 module Flaky : Backend.S = struct
   include Store
 
-  let refuse key = Lwt.fail (Backend.Backend_error ("cannot read " ^ key))
+  let refuse key =
+    Lwt.fail (Backend.Backend_error ("cannot read " ^ Stored_key.to_string key))
+
   let get ~key () = if key = !broken then refuse key else Store.get ~key ()
 
   let get_opt ~key () =
@@ -46,7 +48,9 @@ module Lk = Logical_key.Make (C)
 let ns id = C.domain_prefix ^ id ^ "/"
 
 let put id name body =
-  Store.put ~key:(ns id ^ name) ~data:(Bigstring.of_string body) ()
+  Store.put
+    ~key:(Stored_key.in_space ~prefix:(ns id) name)
+    ~data:(Bigstring.of_string body) ()
 
 let manifest_body name =
   Manifest.encode ~name ~size:0L ~chunk_size:4 ~mtime:0.
@@ -115,7 +119,7 @@ let () =
      case "a walk that did not reach everything leaves the bookmark alone";
      let before = Fs.read_last_sync_key () in
      let* () = put Stored_key.root_id "b" (manifest_body "b.txt") in
-     broken := ns Stored_key.root_id ^ "b";
+     broken := Stored_key.in_space ~prefix:(ns Stored_key.root_id) "b";
      let* outcome = run ~full:true () in
      step "%s" (describe outcome);
      check "the failure is counted"

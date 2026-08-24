@@ -2,6 +2,8 @@
  (flags
   (:standard
    -open
+   Tsync_logical_key
+   -open
    Tsync_chunks
    -open
    Tsync_bigstring
@@ -17,6 +19,7 @@
    Tsync_test_harness))
  (name deferred_shards)
  (libraries
+  tsync-libs.logical_key
   tsync_chunks
   tsync_test_harness
   tsync_bigstring

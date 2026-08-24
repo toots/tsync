@@ -11,7 +11,7 @@
 
 open Lwt.Syntax
 
-let objects : (string, string) Hashtbl.t = Hashtbl.create 8
+let objects : (Stored_key.t, string) Hashtbl.t = Hashtbl.create 8
 
 module Member : Backend.S = struct
   let unsupported () = Lwt.fail (Backend.Backend_error "not part of this test")
@@ -59,10 +59,12 @@ module Batched = Backend.Batched (Store)
 let entry key = Backend.{ key; size = 1; last_modified = 0.; etag = None }
 
 let () =
-  Hashtbl.replace objects "a" "alpha";
+  Hashtbl.replace objects (Stored_key.listed "a") "alpha";
   let callers = 64 in
   let one () =
-    let+ answered = Batched.get_many ~entries:[entry "a"] () in
+    let+ answered =
+      Batched.get_many ~entries:[entry (Stored_key.listed "a")] ()
+    in
     List.for_all
       (fun (_, b) -> Option.map Bigstring.to_string b = Some "alpha")
       answered

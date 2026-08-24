@@ -11,7 +11,7 @@ type t = (string, string * string) Hashtbl.t
 let empty : t = Hashtbl.create 1
 
 let find t ~key ~etag =
-  match Hashtbl.find_opt t key with
+  match Hashtbl.find_opt t (Stored_key.to_string key) with
     | Some (recorded, body) when recorded = etag -> Some body
     | _ -> None
 
@@ -34,7 +34,7 @@ let of_bodies entries =
       match e.Backend.etag with
         | None -> ()
         | Some etag ->
-            add_field buf e.Backend.key;
+            add_field buf (Stored_key.to_string e.Backend.key);
             add_field buf etag;
             add_field buf body)
     entries;

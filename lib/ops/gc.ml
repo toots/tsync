@@ -125,7 +125,8 @@ module Make (C : Conf.S) = struct
 
      ponytail: the lock is on the main's own filesystem, so two hosts sharing a
      main over a network filesystem could still both step one run. *)
-  let lock_path root = Filename.concat root (Space.marker_key ^ ".lock")
+  let lock_path root =
+    Filename.concat root (Stored_key.to_string Space.marker_key ^ ".lock")
 
   let describe_open_run () =
     let+ run = Space.read_run () in
@@ -260,7 +261,7 @@ module Make (C : Conf.S) = struct
                     (Printf.sprintf
                        "cannot read manifest %s (%s); aborting the collection \
                         with nothing discarded"
-                       key (Printexc.to_string e)))
+                       (Stored_key.to_string key) (Printexc.to_string e)))
 
   (* Read from the directories rather than assumed to be all
      {!Chunk_layout.shards} of them: a store holding a handful of chunks occupies
@@ -318,7 +319,7 @@ module Make (C : Conf.S) = struct
     let candidates =
       List.filter_map
         (fun (e : Backend.file_entry) ->
-          let name = Filename.basename e.Backend.key in
+          let name = Filename.basename (Stored_key.to_string e.Backend.key) in
           if Chunks.is_chunk_key name then Some (name, e.Backend.size) else None)
         going
     in
@@ -327,7 +328,7 @@ module Make (C : Conf.S) = struct
       let+ doomed =
         Lwt_bounded.filter_map_with slots
           (fun (name, size) ->
-            let key = prefix ^ name in
+            let key = Stored_key.in_space ~prefix name in
             let+ surviving = M.head_opt ~key () in
             match surviving with Some _ -> None | None -> Some (key, size))
           candidates
@@ -439,7 +440,8 @@ module Make (C : Conf.S) = struct
         let jobs =
           List.filter
             (fun (e : Backend.file_entry) ->
-              Chunk_layout.shard_of_job e.Backend.key <> None)
+              Chunk_layout.shard_of_job (Stored_key.to_string e.Backend.key)
+              <> None)
             entries
         in
         if jobs = [] then None
@@ -469,7 +471,8 @@ module Make (C : Conf.S) = struct
         let jobs =
           List.filter
             (fun (e : Backend.file_entry) ->
-              Chunk_layout.shard_of_job e.Backend.key <> None)
+              Chunk_layout.shard_of_job (Stored_key.to_string e.Backend.key)
+              <> None)
             entries
         in
         let+ n =
@@ -706,20 +709,21 @@ module Make (C : Conf.S) = struct
                   M.delete ~key:marker ())
                 else (
                   Log.err "gc: chunk %s hashed to %s: filing %s" ck computed
-                    marker;
+                    (Stored_key.to_string marker);
                   file ~computed:(Some computed)
                     ~size:(Some (Bigstring.length body))
                     ~reason:None)
             | `Unreadable why ->
                 s.chunks_unreadable <- s.chunks_unreadable + 1;
                 Log.err "gc: chunk %s could not be read (%s): filing %s" ck why
-                  marker;
+                  (Stored_key.to_string marker);
                 file ~computed:None ~size:None ~reason:(Some why))
 
   let mark_root s key =
     let* chunks = referenced_chunks key in
     (* Before the work, so [-v] names the file while it is on it. *)
-    Log.debug "gc: marking %s (%d chunk(s))" key (List.length chunks);
+    Log.debug "gc: marking %s (%d chunk(s))" (Stored_key.to_string key)
+      (List.length chunks);
     let* () =
       Lwt_list.iter_p
         (fun ck ->

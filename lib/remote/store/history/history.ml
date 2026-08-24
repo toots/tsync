@@ -10,6 +10,7 @@ open Lwt.Syntax
 (* [rel] is a folder-id/leaf-hash pair, used only as an opaque grouping key; the
    timestamp orders versions. *)
 let parse ~versions_prefix key =
+  let key = Stored_key.to_string key in
   let n = String.length versions_prefix in
   if String.length key <= n || String.sub key 0 n <> versions_prefix then None
   else (
@@ -52,7 +53,7 @@ module Make (C : Conf.S) (L : Layout.S) = struct
     match bk with
       | None -> Lwt.return_unit
       | Some bk -> (
-          let* head = B.head_opt ~key:(Stored_key.to_string bk) () in
+          let* head = B.head_opt ~key:bk () in
           match head with
             | None -> Lwt.return_unit
             | Some _ -> (
@@ -63,10 +64,8 @@ module Make (C : Conf.S) (L : Layout.S) = struct
                   | Some dir ->
                       Lwt.catch
                         (fun () ->
-                          B.copy ~src_key:(Stored_key.to_string bk)
-                            ~dst_key:
-                              (Stored_key.to_string
-                                 (Stored_key.under dir (Int64.to_string ts)))
+                          B.copy ~src_key:bk
+                            ~dst_key:(Stored_key.under dir (Int64.to_string ts))
                             ())
                         (fun exn ->
                           Log.warn "save_version %s: %s"
@@ -81,7 +80,7 @@ module Make (C : Conf.S) (L : Layout.S) = struct
       | Some dir -> B.list_prefix ~prefix:(Stored_key.to_string dir) ()
 
   let get_version ~vkey =
-    let+ body = B.get ~key:(Stored_key.to_string vkey) () in
+    let+ body = B.get ~key:vkey () in
     Bigstring.to_string body
 
   (* The other direction of the key {!version_dir} builds. *)

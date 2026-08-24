@@ -2,6 +2,8 @@
  (flags
   (:standard
    -open
+   Tsync_logical_key
+   -open
    Tsync_bigstring
    -open
    Tsync_backend_register
@@ -9,6 +11,7 @@
    Tsync_test_harness))
  (name batched_test)
  (libraries
+  tsync-libs.logical_key
   tsync_test_harness
   tsync_backend_register
   tsync_bigstring

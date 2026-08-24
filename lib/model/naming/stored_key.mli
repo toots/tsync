@@ -7,10 +7,6 @@
 
     Which id a {!Logical_key.t} belongs to is not answerable here: it needs the
     map from paths to ids, and stays {!Layout}'s. *)
-(** Whether a leaf is one a store keeps for itself. Every such name shares one
-    prefix, so no store enumerates them and none can answer this differently. *)
-val reserved : string -> bool
-
 val root_id : string
 
 (** Where a deleted folder's marker moves: unreachable from the root, so the
@@ -34,6 +30,7 @@ val new_id : unit -> string
 type t
 
 val to_string : t -> string
+val compare : t -> t -> int
 
 (** A path within the space [prefix] names, for that space's owner. *)
 val in_space : prefix:string -> string -> t
@@ -52,8 +49,8 @@ val under : t -> string -> t
 val trash_namespace : prefix:string -> t
 
 (** A share, filed by its token alone: that is what keeps the link short, and
-    what makes a hex token unable to address anything outside the share
-    space. *)
+    what makes a hex token unable to address anything outside the share space.
+*)
 val share_key : prefix:string -> string -> t
 
 (** Where a folder's child of this name is filed. *)
@@ -63,11 +60,7 @@ val child_key : prefix:string -> folder_id:string -> string -> t
     describes so it is listed with them and dies with them. *)
 val index_key : prefix:string -> folder_id:string -> t
 
-val is_index_key : string -> bool
-
-(** An object written under a staging name, which a rename will replace with the
-    real one. *)
-val is_temp_key : string -> bool
+val is_index_key : t -> bool
 
 (** {1 A mirror's spelling}
 
@@ -83,7 +76,8 @@ val is_temp_key : string -> bool
     A handle is lossy, so the real name is recovered elsewhere: for a file from
     its manifest body, for a directory from a marker beside it. *)
 
-(** One component, as itself where it can be stored and hashed where it cannot. *)
+(** One component, as itself where it can be stored and hashed where it cannot.
+*)
 val escape : string -> string
 
 (** {!escape} over every component of a relative path. *)
@@ -101,11 +95,14 @@ val folder_marker_leaf : string
 (** A namespace listed as itself, which every store does for a folder: it names
     no object, so a reader wanting bodies passes over it and a copy writes an
     empty one to keep the folder. *)
-val is_dir_key : string -> bool
+val is_dir_key : t -> bool
 
 (** The folder a namespace key names, which is the id {!child_key} filed its
     children under. *)
-val folder_id_of : string -> string
+val folder_id_of : t -> string
+
+(** Whether this key is in the space [prefix] names. *)
+val is_in : prefix:string -> t -> bool
 
 (** The inverse of {!in_space}: the path this key has within the space, for a
     caller re-rooting it elsewhere — a version of a manifest is the manifest's
@@ -113,13 +110,16 @@ val folder_id_of : string -> string
     not touch. Unchanged for a key that is not in that space. *)
 val path_in : prefix:string -> t -> string
 
-(** The store's own bookkeeping rather than anything a domain named — a write in
-    flight, a folder's index of its children, a mirror's markers. Nothing
-    outside this store should be given one. *)
-val is_internal : string -> bool
+(** A component a store keeps for itself rather than anything a domain named — a
+    write in flight, a folder's index of its children, a mirror's markers. A
+    mirror asks this of a filename, having no key to ask about. *)
+val internal_leaf : string -> bool
+
+(** A key whose leaf is one. Nothing outside this store should be given one. *)
+val is_internal : t -> bool
 
 (** What a listing of a namespace offers that is actually one of the folder's
     children: neither the namespace itself nor the store's bookkeeping. A copy
     of a namespace asks {!is_internal} instead, the directory key being part of
     what it has to carry. *)
-val is_child_object : string -> bool
+val is_child_object : t -> bool

@@ -45,7 +45,7 @@ module C : Conf.S = struct
   let chunk_prefix = chunk_prefix
   let versions_prefix = "tsync/testdom/versions/"
   let journal_prefix = "tsync/testdom/journal/"
-  let cursor_key = "tsync/testdom/cursor"
+  let cursor_key = Stored_key.in_space ~prefix:"tsync/testdom/" "cursor"
   let shares_prefix = "tsync/shares/"
 
   (* Reads and writes go to the main alone: this test is about what {!Gc} does to
@@ -86,7 +86,10 @@ module G = Gc.Make (C)
    instead would put every chunk in shard 000 and the shard cases would not be
    cases. *)
 let ck n = Printf.sprintf "%03x%013x-%016x" n n n
-let key n = chunk_prefix ^ Chunk_layout.relative_path (ck n)
+
+let key n =
+  Stored_key.in_space ~prefix:chunk_prefix (Chunk_layout.relative_path (ck n))
+
 let label n = Printf.sprintf "%03x" n
 
 (* By what a chunk is named, the same question {!Gc} asks of a listing before it
@@ -97,7 +100,7 @@ let chunks_of (module B : Backend.S) =
   let+ entries = B.list_prefix ~prefix:chunk_prefix () in
   List.filter_map
     (fun (e : Backend.file_entry) ->
-      let name = Filename.basename e.Backend.key in
+      let name = Filename.basename (Stored_key.to_string e.Backend.key) in
       if Chunks.is_chunk_key name then Some name else None)
     entries
   |> List.sort String.compare
@@ -137,7 +140,8 @@ let () =
          ~mtime:0.
      in
      let* () =
-       Main.put ~key:(domain_prefix ^ "f")
+       Main.put
+         ~key:(Stored_key.in_space ~prefix:domain_prefix "f")
          ~data:(Bigstring.of_string (Manifest.to_string ~name:"f" manifest))
          ()
      in

@@ -103,7 +103,7 @@ let size_of j =
 
 let entry_of_json name j =
   {
-    Backend.key = name;
+    Backend.key = Stored_key.listed name;
     size = size_of j;
     last_modified = parse_rfc3339 (str_member "updated" j);
     etag = (match str_member "etag" j with "" -> None | e -> Some e);
@@ -349,16 +349,24 @@ let make ?endpoint ?service_account_key ?share_url ~bucket () :
   in
   (* The verifier's job bodies are JSON, and it is handed this rather than the
      module's [put] below, which speaks in chunks. *)
-  let put_text ~key ~data () = put t ~key ~data:(Bigstring.of_string data) () in
+  let put_text ~key ~data () =
+    put t ~key:(Stored_key.to_string key) ~data:(Bigstring.of_string data) ()
+  in
+  (* Every key the store is asked about is rendered here, this module being the
+     one place the driver is reached through. *)
+  let str = Stored_key.to_string in
   (module struct
-    let put ~key ~data () = put t ~key ~data ()
-    let put_if_absent ~key ~data () = put_if_absent t ~key ~data ()
-    let get ~key () = get t ~key ()
-    let get_opt ~key () = get_opt t ~key ()
-    let head_opt ~key () = head_opt t ~key ()
-    let delete ~key () = delete t ~key ()
-    let delete_multi keys = delete_multi t keys
-    let copy ~src_key ~dst_key () = copy t ~src_key ~dst_key ()
+    let put ~key ~data () = put t ~key:(str key) ~data ()
+    let put_if_absent ~key ~data () = put_if_absent t ~key:(str key) ~data ()
+    let get ~key () = get t ~key:(str key) ()
+    let get_opt ~key () = get_opt t ~key:(str key) ()
+    let head_opt ~key () = head_opt t ~key:(str key) ()
+    let delete ~key () = delete t ~key:(str key) ()
+    let delete_multi keys = delete_multi t (List.map str keys)
+
+    let copy ~src_key ~dst_key () =
+      copy t ~src_key:(str src_key) ~dst_key:(str dst_key) ()
+
     let list_prefix ?max_keys ~prefix () = list_all t ?max_keys ~prefix ()
 
     (* The batch API carries metadata, not bodies: {!Backend.Batched} fans

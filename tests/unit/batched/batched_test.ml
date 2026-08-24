@@ -8,7 +8,7 @@
 open Lwt.Syntax
 open Check
 
-let objects : (string, string) Hashtbl.t = Hashtbl.create 16
+let objects : (Stored_key.t, string) Hashtbl.t = Hashtbl.create 16
 let reads = ref 0
 let batches = ref 0
 let body key = Option.map Bigstring.of_string (Hashtbl.find_opt objects key)
@@ -62,12 +62,20 @@ module Bn = Backend.Batched (Native)
 let entry ?(size = 1) key =
   Backend.{ key; size; last_modified = 0.; etag = None }
 
-let rendered = List.map (fun (k, b) -> (k, Option.map Bigstring.to_string b))
+let rendered =
+  List.map (fun (k, b) ->
+      (Stored_key.to_string k, Option.map Bigstring.to_string b))
 
 let () =
-  Hashtbl.replace objects "a" "alpha";
-  Hashtbl.replace objects "c" "gamma";
-  let mixed = [entry "a"; entry "b"; entry "c"] in
+  Hashtbl.replace objects (Stored_key.listed "a") "alpha";
+  Hashtbl.replace objects (Stored_key.listed "c") "gamma";
+  let mixed =
+    [
+      entry (Stored_key.listed "a");
+      entry (Stored_key.listed "b");
+      entry (Stored_key.listed "c");
+    ]
+  in
   Lwt_main.run
     (case "a declared batch changes the cost, not the answer";
      reads := 0;
@@ -84,13 +92,17 @@ let () =
 
      case "a run is bounded by count and by bytes";
      batches := 0;
-     let many = List.init 300 (fun i -> entry (string_of_int i)) in
+     let many =
+       List.init 300 (fun i -> entry (Stored_key.listed (string_of_int i)))
+     in
      let* _ = Bn.get_many ~entries:many () in
      check "300 keys is two requests, not one" (!batches = 2);
      batches := 0;
      let big =
        List.init 3 (fun i ->
-           entry ~size:(4 * 1024 * 1024) ("b" ^ string_of_int i))
+           entry
+             ~size:(4 * 1024 * 1024)
+             (Stored_key.listed ("b" ^ string_of_int i)))
      in
      let* _ = Bn.get_many ~entries:big () in
      check "and so is 12 MB of bodies" (!batches = 2);

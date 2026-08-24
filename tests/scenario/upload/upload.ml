@@ -20,7 +20,7 @@ module C = struct
   let chunk_prefix = "tsync/test/chunks/"
   let versions_prefix = "tsync/test/versions/"
   let journal_prefix = "tsync/test/journal/"
-  let cursor_key = "tsync/test/cursor"
+  let cursor_key = Stored_key.in_space ~prefix:"tsync/test/" "cursor"
   let shares_prefix = "tsync/shares/"
 
   let store =
@@ -140,6 +140,7 @@ let count_chunks () =
     (List.filter
        (fun (e : Backend.file_entry) ->
          let k = e.key in
+         let k = Stored_key.to_string k in
          not (String.length k > 0 && k.[String.length k - 1] = '/'))
        entries)
 

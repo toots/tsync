@@ -42,7 +42,7 @@ module Conf_of (B : Backend.S) : Conf.S = struct
   let chunk_prefix = chunk_prefix
   let versions_prefix = "tsync/testdom/versions/"
   let journal_prefix = "tsync/testdom/journal/"
-  let cursor_key = "tsync/testdom/cursor"
+  let cursor_key = Stored_key.in_space ~prefix:"tsync/testdom/" "cursor"
   let shares_prefix = "tsync/shares/"
   let store = (module B : Backend.S)
 
@@ -101,7 +101,9 @@ let () =
      in
      let* () =
        Store.put
-         ~key:(from_prefix ^ Chunk_layout.relative_path going)
+         ~key:
+           (Stored_key.in_space ~prefix:from_prefix
+              (Chunk_layout.relative_path going))
          ~data:(Bigstring.of_string "going")
          ()
      in
@@ -180,5 +182,5 @@ let () =
      step "get(promoted) = %S" (Bigstring.to_string body);
      let* run = Space.read_run () in
      step "run marker cleared: %b" (run = None);
-     step "marker key = %s" marker_key;
+     step "marker key = %s" (Stored_key.to_string marker_key);
      Lwt.return_unit)

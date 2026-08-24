@@ -8,16 +8,15 @@
 open Lwt.Syntax
 
 type body = Dir of Folder.marker | File of Manifest.t
-type entry = { bkey : string; body : body }
+type entry = { bkey : Stored_key.t; body : body }
 type unusable = [ `Unreadable of exn | `Unclassifiable of exn ]
-type on_unusable = [ `Fail | `Skip of string -> unusable -> unit ]
+type on_unusable = [ `Fail | `Skip of Stored_key.t -> unusable -> unit ]
 
 module Make (C : Conf.S) = struct
   module St = Store.Make (C) (Layout.Inode.Make (C))
 
   let namespace_prefix folder_id =
-    Stored_key.to_string
-      (Stored_key.namespace ~prefix:C.domain_prefix ~folder_id)
+    Stored_key.namespace ~prefix:C.domain_prefix ~folder_id
 
   (* The domain's download budget, since a child is one object read like any
      other, and shared so a resync, a mirror and a share server in one process
@@ -138,7 +137,8 @@ module Make (C : Conf.S) = struct
        not one act, and to a walk that is a child it could not read rather than
        one that was never there. *)
     let vanished bkey =
-      Retry.failed ~kind:Retry.Permanent ~op:"get" ("not found: " ^ bkey)
+      Retry.failed ~kind:Retry.Permanent ~op:"get"
+        ("not found: " ^ Stored_key.to_string bkey)
     in
     let in_one_batch () =
       let* index = read_index ~slots listed in
@@ -175,7 +175,7 @@ module Make (C : Conf.S) = struct
           let bkey = e.Backend.key in
           Lwt.catch
             (fun () ->
-              let+ data = St.get_object ~bkey:(Stored_key.listed bkey) in
+              let+ data = St.get_object ~bkey in
               (bkey, Ok data))
             (fun exn -> Lwt.return (bkey, Error exn)))
         entries

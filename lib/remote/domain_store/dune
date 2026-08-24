@@ -6,6 +6,8 @@
  (flags
   (:standard
    -open
+   Tsync_logical_key
+   -open
    Tsync_retry
    -open
    Tsync_chunks
@@ -24,6 +26,7 @@
  (name tsync_domain_store)
  (public_name tsync-libs.domain_store)
  (libraries
+  tsync-libs.logical_key
   tsync_retry
   tsync_chunks
   tsync_work

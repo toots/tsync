@@ -7,7 +7,7 @@
     and classifies them. *)
 
 type body = Dir of Folder.marker | File of Manifest.t
-type entry = { bkey : string; body : body }
+type entry = { bkey : Stored_key.t; body : body }
 
 (** Why a child yielded no {!entry}: it could not be fetched, or its body is
     neither a marker nor a clean manifest, which is what a write in flight looks
@@ -23,11 +23,11 @@ type unusable = [ `Unreadable of exn | `Unclassifiable of exn ]
     skip means: a resync that parsed nothing has to say so rather than claiming
     success, while a listing that only renders what it found does not care. An
     unclassifiable body is skipped under both, being mid-write. *)
-type on_unusable = [ `Fail | `Skip of string -> unusable -> unit ]
+type on_unusable = [ `Fail | `Skip of Stored_key.t -> unusable -> unit ]
 
 module Make (C : Conf.S) : sig
   (** The backend prefix a folder's children live under. *)
-  val namespace_prefix : string -> string
+  val namespace_prefix : string -> Stored_key.t
 
   (** Direct children of [folder_id], [`Fail] by default.
 
@@ -51,7 +51,7 @@ module Make (C : Conf.S) : sig
   val children :
     ?on_unusable:on_unusable ->
     ?refresh_index:bool ->
-    ?on_index:(string -> unit) ->
+    ?on_index:(Stored_key.t -> unit) ->
     ?slots:Lwt_bounded.t ->
     folder_id:string ->
     unit ->
@@ -64,7 +64,7 @@ module Make (C : Conf.S) : sig
   val fold_tree :
     ?on_unusable:on_unusable ->
     ?refresh_index:bool ->
-    ?on_index:(string -> unit) ->
+    ?on_index:(Stored_key.t -> unit) ->
     ?slots:Lwt_bounded.t ->
     folder_id:string ->
     key:Logical_key.t ->

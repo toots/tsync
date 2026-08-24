@@ -124,6 +124,8 @@ let make ?(verify_writes = true) ~root () : (module Backend.S) =
      events are at-least-once and unordered, here we are the writer and the
      rename has already happened. *)
   let verify_written key =
+    let leaf = Filename.basename (Stored_key.to_string key) in
+    let at k = resolve (Stored_key.to_string k) in
     match Chunk_layout.marker_key key with
       | None -> Lwt.return_unit
       | Some marker -> (
@@ -135,15 +137,16 @@ let make ?(verify_writes = true) ~root () : (module Backend.S) =
                an upload error, and lose the record. *)
             Lwt.catch
               (fun () ->
-                let+ body = read_file (resolve key) in
+                let+ body = read_file (at key) in
                 `Body body)
               (fun exn -> Lwt.return (`Unreadable (Printexc.to_string exn)))
           in
           match stored with
             | `Unreadable why ->
-                Log.err "chunk %s could not be read back (%s): filing %s"
-                  (Filename.basename key) why marker;
-                write_string (resolve marker)
+                Log.err "chunk %s could not be read back (%s): filing %s" leaf
+                  why
+                  (Stored_key.to_string marker);
+                write_string (at marker)
                   (Corruption_marker.to_string
                      {
                        computed = None;
@@ -153,23 +156,23 @@ let make ?(verify_writes = true) ~root () : (module Backend.S) =
                      })
             | `Body stored ->
                 let computed = Chunks.key_of_body stored in
-                if computed = Filename.basename key then
+                if computed = leaf then
                   (* The unlink happens either way, so asking whether it
                      removed anything is free — and only then is there a
                      directory worth pruning. *)
                   let* cleared =
                     Lwt.catch
                       (fun () ->
-                        let+ () = Lwt_unix_retry.unlink (resolve marker) in
+                        let+ () = Lwt_unix_retry.unlink (at marker) in
                         true)
                       (fun _ -> Lwt.return_false)
                   in
-                  if cleared then prune_marker_dirs (resolve marker)
+                  if cleared then prune_marker_dirs (at marker)
                   else Lwt.return_unit
                 else (
-                  Log.err "chunk %s hashed to %s: filing %s"
-                    (Filename.basename key) computed marker;
-                  write_string (resolve marker)
+                  Log.err "chunk %s hashed to %s: filing %s" leaf computed
+                    (Stored_key.to_string marker);
+                  write_string (at marker)
                     (Corruption_marker.to_string
                        {
                          computed = Some computed;
@@ -180,12 +183,14 @@ let make ?(verify_writes = true) ~root () : (module Backend.S) =
   in
   (module struct
     let put ~key ~data () =
-      if is_dir_key key then mkdir_p (resolve key)
+      let path = resolve (Stored_key.to_string key) in
+      if Stored_key.is_dir_key key then mkdir_p path
       else
-        let* () = write_file (resolve key) data in
+        let* () = write_file path data in
         if verify_writes then verify_written key else Lwt.return_unit
 
     let put_if_absent ~key ~data () =
+      let key = Stored_key.to_string key in
       Lwt.catch
         (fun () -> create_exclusive (resolve key) data)
         (function
@@ -194,6 +199,7 @@ let make ?(verify_writes = true) ~root () : (module Backend.S) =
           | exn -> Lwt.fail exn)
 
     let get ~key () =
+      let key = Stored_key.to_string key in
       Lwt.catch
         (fun () -> read_file (resolve key))
         (function
@@ -201,6 +207,7 @@ let make ?(verify_writes = true) ~root () : (module Backend.S) =
           | exn -> Lwt.fail exn)
 
     let get_opt ~key () =
+      let key = Stored_key.to_string key in
       Lwt.catch
         (fun () ->
           let+ data = read_file (resolve key) in
@@ -211,9 +218,10 @@ let make ?(verify_writes = true) ~root () : (module Backend.S) =
           | exn -> Lwt.fail exn)
 
     let head_opt ~key () =
+      let path = resolve (Stored_key.to_string key) in
       Lwt.catch
         (fun () ->
-          let+ st = Lwt_unix_retry.stat (resolve key) in
+          let+ st = Lwt_unix_retry.stat path in
           match st with
             | { Unix.st_kind = Unix.S_DIR; st_mtime; _ } ->
                 Some
@@ -233,10 +241,11 @@ let make ?(verify_writes = true) ~root () : (module Backend.S) =
           | exn -> Lwt.fail exn)
 
     let delete ~key () =
-      let* () = Fs_util.rm_rf (resolve key) in
+      let path = resolve (Stored_key.to_string key) in
+      let* () = Fs_util.rm_rf path in
       (* A collection deletes a chunk's marker along with the chunk ({!Gc}), and
          that is the other way a shard empties. *)
-      if Chunk_layout.is_marker_key key then prune_marker_dirs (resolve key)
+      if Chunk_layout.is_marker_key key then prune_marker_dirs path
       else Lwt.return_unit
 
     let delete_multi keys = Lwt_list.iter_s (fun key -> delete ~key ()) keys
@@ -257,6 +266,8 @@ let make ?(verify_writes = true) ~root () : (module Backend.S) =
        paths that copy in bulk that stat is a third to a half of the whole
        cost. *)
     let copy ~src_key ~dst_key () =
+      let src_key = Stored_key.to_string src_key
+      and dst_key = Stored_key.to_string dst_key in
       if is_dir_key src_key then mkdir_p (resolve dst_key)
       else (
         let src = resolve src_key and dst = resolve dst_key in
@@ -302,7 +313,7 @@ let make ?(verify_writes = true) ~root () : (module Backend.S) =
                   emit
                     Backend.
                       {
-                        key = prefix;
+                        key = Stored_key.listed prefix;
                         size = st.Unix.st_size;
                         last_modified = st.Unix.st_mtime;
                         etag = None;
@@ -326,7 +337,7 @@ let make ?(verify_writes = true) ~root () : (module Backend.S) =
                   emit
                     Backend.
                       {
-                        key = full_key;
+                        key = Stored_key.listed full_key;
                         size = st.Unix.st_size;
                         last_modified = st.Unix.st_mtime;
                         etag = None;
@@ -354,7 +365,7 @@ let make ?(verify_writes = true) ~root () : (module Backend.S) =
                 emit
                   Backend.
                     {
-                      key = key_prefix;
+                      key = Stored_key.listed key_prefix;
                       size = 0;
                       last_modified = 0.;
                       etag = None;
@@ -390,7 +401,7 @@ let make ?(verify_writes = true) ~root () : (module Backend.S) =
       let+ () = levels () in
       let entries =
         List.sort
-          (fun a b -> String.compare a.Backend.key b.Backend.key)
+          (fun a b -> Stored_key.compare a.Backend.key b.Backend.key)
           !entries
       in
       match max_keys with

@@ -114,7 +114,7 @@ let rebuild ~cache_root ~domain_name =
     let* names = Fs_util.readdir_list_quiet dir in
     Lwt_list.iter_s
       (fun name ->
-        if Stored_key.is_internal name then Lwt.return_unit
+        if Stored_key.internal_leaf name then Lwt.return_unit
         else (
           let path = Filename.concat dir name in
           let* is_dir = Fs_util.is_directory path in

@@ -12,7 +12,15 @@
    -open
    Tsync_lwt_unix
    -open
-   Tsync_metrics))
+   Tsync_metrics
+   -open
+   Tsync_logical_key))
  (name tsync_chunk_store)
  (public_name tsync-libs.chunk_store)
- (libraries tsync_chunks tsync_bigstring tsync_lwt_unix tsync_metrics lwt))
+ (libraries
+  tsync-libs.logical_key
+  tsync_chunks
+  tsync_bigstring
+  tsync_lwt_unix
+  tsync_metrics
+  lwt))

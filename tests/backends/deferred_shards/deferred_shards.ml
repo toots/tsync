@@ -51,7 +51,7 @@ module Dst : Backend.S = struct
     Real.list_prefix ?max_keys ~prefix ()
 
   let put ~key ~data () =
-    if String.starts_with ~prefix:chunk_prefix key then incr puts;
+    if Stored_key.is_in ~prefix:chunk_prefix key then incr puts;
     Real.put ~key ~data ()
 end
 
@@ -64,7 +64,7 @@ let target =
     ~backend:(module Dst)
     ~source:(module Src)
     ~chunk_prefix ~chunk_keys ~journal_prefix:"tsync/testdom/journal/"
-    ~cursor_key:"tsync/testdom/cursor"
+    ~cursor_key:(Stored_key.in_space ~prefix:"tsync/testdom/" "cursor")
     ~excluded:(fun _ -> false)
     ~reads_reach:true ~root:log_dir ()
 
@@ -110,12 +110,16 @@ let publish ~n ~shards ~per =
     Lwt_list.iter_s
       (fun k ->
         Src.put
-          ~key:(chunk_prefix ^ Chunk_layout.relative_path k)
+          ~key:
+            (Stored_key.in_space ~prefix:chunk_prefix
+               (Chunk_layout.relative_path k))
           ~data:(Bigstring.of_string k) ())
       keys
   in
   let body = String.concat " " keys in
-  let key = Printf.sprintf "%sfile%04d" manifest_prefix n in
+  let key =
+    Stored_key.in_space ~prefix:manifest_prefix (Printf.sprintf "file%04d" n)
+  in
   let* () = Src.put ~key ~data:(Bigstring.of_string body) () in
   T.accept (Deferred.Put { key; data = Bigstring.of_string body })
 
@@ -155,7 +159,10 @@ let () =
                    ((n * per) + i))
            in
            let body = String.concat " " keys in
-           let key = Printf.sprintf "%sagain%04d" manifest_prefix n in
+           let key =
+             Stored_key.in_space ~prefix:manifest_prefix
+               (Printf.sprintf "again%04d" n)
+           in
            let* () = Src.put ~key ~data:(Bigstring.of_string body) () in
            T.accept (Deferred.Put { key; data = Bigstring.of_string body }))
          (List.init manifests (fun i -> i))

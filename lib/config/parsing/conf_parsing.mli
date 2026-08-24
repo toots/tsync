@@ -119,7 +119,7 @@ val domain_prefix : domain -> string
 val chunk_prefix : domain -> string
 val versions_prefix : domain -> string
 val journal_prefix : domain -> string
-val cursor_key : domain -> string
+val cursor_key : domain -> Stored_key.t
 val shares_prefix : domain -> string
 
 (** Where fuse mounts [d]: its ["mountPoint"] frontend option, else

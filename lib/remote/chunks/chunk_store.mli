@@ -28,10 +28,10 @@ type source =
     the only thing asked of a store is whether it holds a key, and answering
     less keeps the backend's vocabulary out of this one. *)
 module type DEPS = sig
-  val put : key:string -> data:Bigstring.t -> unit -> unit Lwt.t
+  val put : key:Stored_key.t -> data:Bigstring.t -> unit -> unit Lwt.t
 
   (** Where a chunk key is written. *)
-  val backend_key : string -> string
+  val backend_key : string -> Stored_key.t
 
   (** Whether the store holds it, wherever a collection may have left it. *)
   val present : string -> bool Lwt.t

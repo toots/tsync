@@ -462,7 +462,7 @@ module Make_with_layout (C : Conf.S) (Sq : Sync_queue.S) (L : Layout.S) :
               let n = Int64.of_string ts in
               match acc with
                 | Some (_, best) when Int64.compare best n >= 0 -> acc
-                | _ -> Some (Stored_key.listed e.key, n)))
+                | _ -> Some (e.key, n)))
       None entries
 
   let revert_body ?version key =

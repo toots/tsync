@@ -2,6 +2,8 @@
  (flags
   (:standard
    -open
+   Tsync_logical_key
+   -open
    Tsync_manifest
    -open
    Tsync_staged
@@ -25,6 +27,7 @@
    Tsync_test_harness))
  (name chunk_cache_test)
  (libraries
+  tsync-libs.logical_key
   tsync_manifest
   tsync_staged
   tsync_chunk_cache

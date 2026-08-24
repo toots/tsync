@@ -58,13 +58,15 @@ module C =
 module G = Gc.Make (C)
 
 let ck n = Printf.sprintf "%03x%013x-%016x" n n n
-let key n = chunk_prefix ^ Chunk_layout.relative_path (ck n)
+
+let key n =
+  Stored_key.in_space ~prefix:chunk_prefix (Chunk_layout.relative_path (ck n))
 
 let chunks_of (module B : Backend.S) =
   let+ entries = B.list_prefix ~prefix:chunk_prefix () in
   List.filter_map
     (fun (e : Backend.file_entry) ->
-      let name = Filename.basename e.Backend.key in
+      let name = Filename.basename (Stored_key.to_string e.Backend.key) in
       if Chunks.is_chunk_key name then Some name else None)
     entries
   |> List.sort String.compare
@@ -114,7 +116,8 @@ let () =
          ~mtime:0.
      in
      let* () =
-       Main.put ~key:(domain_prefix ^ "f")
+       Main.put
+         ~key:(Stored_key.in_space ~prefix:domain_prefix "f")
          ~data:(Bigstring.of_string (Manifest.to_string ~name:"f" manifest))
          ()
      in

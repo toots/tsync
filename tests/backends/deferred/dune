@@ -2,6 +2,8 @@
  (flags
   (:standard
    -open
+   Tsync_logical_key
+   -open
    Tsync_retry
    -open
    Tsync_manifest
@@ -23,6 +25,7 @@
    Tsync_test_harness))
  (name deferred)
  (libraries
+  tsync-libs.logical_key
   tsync_retry
   tsync_manifest
   tsync_chunks

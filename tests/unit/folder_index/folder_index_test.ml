@@ -28,6 +28,7 @@ module Store : Backend.S = struct
   include Disk
 
   let bump key =
+    let key = Stored_key.to_string key in
     let n =
       match Hashtbl.find_opt versions key with
         | Some v -> 1 + int_of_string v
@@ -48,7 +49,11 @@ module Store : Backend.S = struct
     let+ entries = Disk.list_prefix ?max_keys ~prefix () in
     List.map
       (fun (e : Backend.file_entry) ->
-        { e with Backend.etag = Hashtbl.find_opt versions e.Backend.key })
+        {
+          e with
+          Backend.etag =
+            Hashtbl.find_opt versions (Stored_key.to_string e.Backend.key);
+        })
       entries
 
   let get_many = None
@@ -89,7 +94,7 @@ let other = Stored_key.new_id ()
 
 let write_in folder_id name body =
   Store.put
-    ~key:(C.domain_prefix ^ folder_id ^ "/" ^ name)
+    ~key:(Stored_key.in_space ~prefix:C.domain_prefix (folder_id ^ "/" ^ name))
     ~data:(Bigstring.of_string body) ()
 
 let write name body = write_in folder name body

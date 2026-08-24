@@ -44,7 +44,7 @@ module Make (C : Conf.S) = struct
       match held with
         | Some held ->
             on_start ();
-            Lwt.return (Held.find_opt held entry.key)
+            Lwt.return (Held.find_opt held (Stored_key.to_string entry.key))
         | None ->
             (* Inside the slot, so the announcement tracks the bound: made as
                the entry is taken, it would name whatever the workers had
@@ -84,13 +84,13 @@ module Make (C : Conf.S) = struct
       entries
 
   let decode_entry body pos =
-    let key = Listing.read_string body pos in
+    let key = Stored_key.listed (Listing.read_string body pos) in
     let size = Int64.to_int (Listing.read_int64 body pos) in
     Backend.{ key; size; last_modified = 0.; etag = None }
 
   let record_entry (e : Backend.file_entry) =
     [
-      (fun b -> Listing.str b e.Backend.key);
+      (fun b -> Listing.str b (Stored_key.to_string e.Backend.key));
       (fun b -> Listing.int64 b (Int64.of_int e.Backend.size));
     ]
 
@@ -188,7 +188,9 @@ module Make (C : Conf.S) = struct
       (fun () ->
         let+ () =
           Listing.iter listing (fun (e : Backend.file_entry) ->
-              Held.replace held e.Backend.key e.Backend.size;
+              Held.replace held
+                (Stored_key.to_string e.Backend.key)
+                e.Backend.size;
               Lwt.return_unit)
         in
         held)
@@ -258,7 +260,8 @@ module Make (C : Conf.S) = struct
             | Some e -> e
             | None ->
                 failwith
-                  (Printf.sprintf "%s is missing from source %s" key src_name))
+                  (Printf.sprintf "%s is missing from source %s"
+                     (Stored_key.to_string key) src_name))
         keys
     in
     let* listing =
