@@ -57,6 +57,8 @@ module Lock = struct
 
   let mutex = Lwt_mutex.create
   let with_lock = Lwt_mutex.with_lock
+  let is_locked = Lwt_mutex.is_locked
+  let has_waiters m = not (Lwt_mutex.is_empty m)
   let condition = Lwt_condition.create
   let wait c = Lwt_condition.wait c
   let signal c = Lwt_condition.signal c ()

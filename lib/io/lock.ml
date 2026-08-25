@@ -16,6 +16,13 @@ module type S = sig
   (** Run [f] with the mutex held, releasing it however [f] ends. *)
   val with_lock : mutex -> (unit -> 'a io) -> 'a io
 
+  (** Whether the mutex is held, and whether anyone is queued behind it. True of
+      the moment they are asked and of nothing after it: a caller acting on
+      either has already raced. For reporting where a process is spending its
+      time, which is the only thing that wants them. *)
+  val is_locked : mutex -> bool
+
+  val has_waiters : mutex -> bool
   val condition : unit -> condition
 
   (** Wait until someone {!signal}s or {!broadcast}s. Nothing is carried: a

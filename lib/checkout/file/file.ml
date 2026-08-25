@@ -23,10 +23,10 @@ module Make_with_layout (C : Conf.S) (L : Layout.S) = struct
      application) are serialized; reads, downloads and uploads stay concurrent.
      ponytail: one global metadata lock; switch to per-key locks only if
      unrelated metadata ops measurably contend. *)
-  let meta_mutex = Lwt_mutex.create ()
-  let with_meta f = Lwt_mutex.with_lock meta_mutex f
-  let meta_locked () = Lwt_mutex.is_locked meta_mutex
-  let meta_waiters () = not (Lwt_mutex.is_empty meta_mutex)
+  let meta_mutex = Io_lwt.Lock.mutex ()
+  let with_meta f = Io_lwt.Lock.with_lock meta_mutex f
+  let meta_locked () = Io_lwt.Lock.is_locked meta_mutex
+  let meta_waiters () = Io_lwt.Lock.has_waiters meta_mutex
   let rel_key = Logical_key.path
 
   (* [St] takes logical (real-path) keys and maps them to backend keys through

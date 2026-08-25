@@ -420,7 +420,8 @@ module Make (C : Conf.S) (R : Remote.S) = struct
 
      Reads stay outside it: verifying a large file holds the key for as long as
      the read takes, which is exactly the caller a promotion must not wait for. *)
-  let key_locks : (string, Lwt_mutex.t * int ref) Hashtbl.t = Hashtbl.create 16
+  let key_locks : (string, Io_lwt.Lock.mutex * int ref) Hashtbl.t =
+    Hashtbl.create 16
 
   let with_key key f =
     let key = Logical_key.to_string key in
@@ -428,14 +429,14 @@ module Make (C : Conf.S) (R : Remote.S) = struct
       match Hashtbl.find_opt key_locks key with
         | Some entry -> entry
         | None ->
-            let entry = (Lwt_mutex.create (), ref 0) in
+            let entry = (Io_lwt.Lock.mutex (), ref 0) in
             Hashtbl.replace key_locks key entry;
             entry
     in
     let mutex, holders = entry in
     incr holders;
     Lwt.finalize
-      (fun () -> Lwt_mutex.with_lock mutex f)
+      (fun () -> Io_lwt.Lock.with_lock mutex f)
       (fun () ->
         decr holders;
         if !holders = 0 then Hashtbl.remove key_locks key;
