@@ -20,10 +20,6 @@ module Make (C : Conf.S) (L : Layout.S) = struct
             | None -> `Absent
             | Some body -> `Body (Bigstring.to_string body))
 
-  let get_manifest_opt ~key =
-    let+ state = get_manifest_state ~key in
-    match state with `Body body -> Some body | `Absent | `Unresolved -> None
-
   let head_manifest ~key =
     let* bk = L.manifest_key key in
     match bk with None -> Lwt.return_none | Some bk -> B.head_opt ~key:bk ()

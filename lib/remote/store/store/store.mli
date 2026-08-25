@@ -12,8 +12,6 @@ module Make (C : Conf.S) (L : Layout.S) : sig
       folder as absent. *)
   val put_manifest : key:Logical_key.t -> data:Bigstring.t -> unit Lwt.t
 
-  val get_manifest_opt : key:Logical_key.t -> string option Lwt.t
-
   (** {!get_manifest_opt} saying which nothing it found: [`Absent] is the
       store's answer about the domain, while [`Unresolved] is this client not
       knowing the key's folder yet and says nothing about what the store holds.
