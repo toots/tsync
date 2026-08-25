@@ -18,7 +18,7 @@ let trace_process ~name =
    and a deferred target fills in the background, so without this a short-lived
    command exits leaving copies for the daemon it may not be running alongside.
 
-   [report] is a thunk calling {!Job.Report.start}, run here so a long command
+   [report] is a thunk calling {!Job_report_lwt.start}, run here so a long command
    reports for as long as it runs — the drain included, which is work a caller
    would otherwise see as a command that had finished. *)
 let run ?report p =
@@ -39,9 +39,9 @@ let run ?report p =
        Lwt.catch
          (fun () -> p)
          (fun exn ->
-           let* () = Job.Report.finish ~error:(Printexc.to_string exn) () in
+           let* () = Job_report_lwt.finish ~error:(Printexc.to_string exn) () in
            Lwt.fail exn)
      in
      let* () = Backend.drain () in
-     let+ () = Job.Report.finish () in
+     let+ () = Job_report_lwt.finish () in
      r)

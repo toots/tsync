@@ -41,15 +41,15 @@ let listing ~mine ~theirs =
 let () =
   Lwt_main.run
     (let dead = dead_pid () in
-     let* mine = Spool.create ~dir ~name:"journal" in
-     let mine = Filename.basename (Spool.path mine) in
+     let* mine = Spool_lwt.create ~dir ~name:"journal" in
+     let mine = Filename.basename (Spool_lwt.path mine) in
      let theirs = plant (Printf.sprintf ".tsync-tmp-%d-1.tmp" dead) in
      let user = plant ".syncthing.Big.Buck.Bunny.mkv.tmp" in
 
      Printf.printf "\n=== before the sweep\n";
      List.iter (Printf.printf "  %s\n") (listing ~mine ~theirs);
 
-     let+ () = Spool.reap ~dir in
+     let+ () = Spool_lwt.reap ~dir in
      Printf.printf "\n=== after the sweep\n";
      List.iter (Printf.printf "  %s\n") (listing ~mine ~theirs);
 

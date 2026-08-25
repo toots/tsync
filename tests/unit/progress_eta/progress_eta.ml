@@ -12,7 +12,7 @@
 open Check
 
 let progress key =
-  match Job.Progress.json () with
+  match Job_progress.json () with
     | [("progress", `Assoc fields)] -> (
         match List.assoc_opt key fields with None -> `Null | Some v -> v)
     | _ -> `Null
@@ -25,7 +25,7 @@ let present key = progress key <> `Null
 let () =
   (* A mirror of a thousand bytes' worth of objects. *)
   let planned_at = Unix.gettimeofday () in
-  Job.Progress.plan ~basis:`Handled ~bytes:1000L;
+  Job_progress.plan ~basis:`Handled ~bytes:1000L;
 
   case "before anything is examined";
   check "a run with nothing behind it has no estimate to give"
@@ -40,7 +40,7 @@ let () =
   case "four hundred bytes' worth found already in place";
   (* The mirror case: nothing was transferred, and the run is still 40% of the
      way through what it set out to do. *)
-  Job.Progress.settle ~bytes:400L ~sent:0L `Skipped;
+  Job_progress.settle ~bytes:400L ~sent:0L `Skipped;
   (* Read before the clock, so the elapsed compared against is never the
      shorter of the two. *)
   let eta = num "etaSeconds" in
@@ -61,7 +61,7 @@ let () =
     (num "bytesHandled" = 400. && num "bytesSkipped" = 400.);
 
   case "the rest of it copied";
-  Job.Progress.settle ~bytes:600L ~sent:600L `Done;
+  Job_progress.settle ~bytes:600L ~sent:600L `Done;
   check "what moved and what the run got through are separate figures"
     (num "bytesSent" = 600. && num "bytesHandled" = 1000.);
   check "and a run with nothing left estimates nothing"

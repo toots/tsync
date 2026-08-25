@@ -47,6 +47,8 @@
    -open
    Tsync_spill
    -open
+   Tsync_spill_lwt
+   -open
    Tsync_hashtbl_mmap
    -open
    Tsync_backend_register
@@ -75,6 +77,7 @@
   tsync_glob
   tsync_bigstring
   tsync_spill
+  tsync_spill_lwt
   tsync_hashtbl_mmap
   tsync_backend_register
   tsync_log

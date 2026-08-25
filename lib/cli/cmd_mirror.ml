@@ -101,7 +101,7 @@ let cmd : unit Cmd.t =
                 mostly they hold it: an estimate against what it happened to
                 copy would answer with hours of transfer for a run that has
                 minutes of checking left. *)
-             Job.Progress.plan ~basis:`Handled
+             Job_progress.plan ~basis:`Handled
                ~bytes:(Int64.mul bytes (Int64.of_int destinations));
              vprintf "scanned %s: %d object%s to check" src objects
                (if objects = 1 then "" else "s")
@@ -116,9 +116,9 @@ let cmd : unit Cmd.t =
              let key = Stored_key.to_string key in
              let size = Int64.of_int size in
              match outcome with
-               | `Present -> Job.Progress.settle ~bytes:size ~sent:0L `Skipped
+               | `Present -> Job_progress.settle ~bytes:size ~sent:0L `Skipped
                | `Copied (reason, bytes) ->
-                   Job.Progress.settle ~bytes:size ~sent:(Int64.of_int bytes)
+                   Job_progress.settle ~bytes:size ~sent:(Int64.of_int bytes)
                      `Done;
                    incr copied;
                    let why =

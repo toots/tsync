@@ -141,7 +141,7 @@ let deferred_totals members =
    [current] joins a phase to the thing within it, so six commands do not each
    pick a separator. *)
 let report_job ?target ?current ~kind (module C : Conf.S) ~counters () =
-  Job.Report.start
+  Job_report_lwt.start
     ~socket_path:(Runtime.sync_socket_path runtime_paths)
     ~domain:C.domain_name ~kind ?target ?current
     ~deferred:(fun () -> deferred_totals C.members)

@@ -1,0 +1,18 @@
+; A summary pushed to a daemon on a timer, so something other than the
+; command's own stdout can answer for it. Where it is pushed is a parameter:
+; the timer, the payload and the swallowing of every failure are not.
+
+(library
+ (flags
+  (:standard
+   -open
+   Tsync_log
+   -open
+   Tsync_metrics
+   -open
+   Tsync_job_progress
+   -open
+   Tsync_io))
+ (name tsync_job_report)
+ (public_name tsync-libs.job_report)
+ (libraries tsync_log tsync_metrics tsync_job_progress tsync_io yojson unix))

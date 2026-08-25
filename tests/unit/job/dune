@@ -1,5 +1,21 @@
 (executable
  (flags
-  (:standard -open Tsync_job -open Tsync_test_harness))
+  (:standard
+   -open
+   Tsync_job_progress
+   -open
+   Tsync_job_report
+   -open
+   Tsync_job_report_lwt
+   -open
+   Tsync_test_harness))
  (name job_test)
- (libraries tsync_test_harness tsync_job yojson unix lwt lwt.unix))
+ (libraries
+  tsync_test_harness
+  tsync_job_progress
+  tsync_job_report
+  tsync_job_report_lwt
+  yojson
+  unix
+  lwt
+  lwt.unix))

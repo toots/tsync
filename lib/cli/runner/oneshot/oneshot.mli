@@ -7,7 +7,7 @@
     it — which is why the drain is here rather than left to each caller to
     remember.
 
-    [report] is a thunk calling [Job.Report.start], run inside the loop so a
+    [report] is a thunk calling [Job_report_lwt.start], run inside the loop so a
     long command reports for as long as it runs, the drain included; that is
     work a caller would otherwise see as a command which had already finished. A
     command that raised still reports, its process being about to go with

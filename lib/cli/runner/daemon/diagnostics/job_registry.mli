@@ -1,6 +1,6 @@
 (** Commands running beside the daemon, as they last described themselves.
 
-    A one-shot command pushes a report on a timer (see [Job.Report]); this keeps
+    A one-shot command pushes a report on a timer (see [Job_report]); this keeps
     the latest one per process so [tsync status] can list what is running.
     Advisory: a job that never reports is absent rather than missing, and a row
     is dropped once its process is gone or has stopped reporting.

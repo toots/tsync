@@ -37,35 +37,35 @@ let stub_server ~path ~seen =
 let () =
   Lwt_main.run
     ((* No listener at all: the path does not exist. *)
-     Job.Report.start ~interval:0.1
+     Job_report_lwt.start ~interval:0.1
        ~socket_path:(Filename.concat root "absent.sock")
        ~domain:"d" ~kind:"import"
        ~counters:(fun () -> [("files", 3)])
        ();
      let* () = Lwt_unix.sleep 0.45 in
      check "reporting to a socket nobody is listening on does not raise" true;
-     let* () = Job.Report.finish () in
+     let* () = Job_report_lwt.finish () in
      check "and finishing against it does not raise either" true;
 
      (* A listener that answers, so the payload can be inspected. *)
      let path = Filename.concat root "live.sock" in
      let seen = ref [] in
      let* () = stub_server ~path ~seen in
-     Job.Report.start ~socket_path:path ~domain:"d" ~kind:"import" ~interval:0.1
-       ~target:"/media/files/stage"
+     Job_report_lwt.start ~socket_path:path ~domain:"d" ~kind:"import"
+       ~interval:0.1 ~target:"/media/files/stage"
        ~current:(fun () -> Some "big.mov")
        ~deferred:(fun () -> Some (207, 3, false))
        ~counters:(fun () -> [("files", 30433); ("failed", 0)])
        ();
      (* A run whose plan is 1000 bytes: one entry of 400 already in the domain,
         one of 600 half sent. *)
-     Job.Progress.plan ~basis:`Sent ~bytes:1000L;
-     Job.Progress.start_entry ~size:400L;
-     Job.Progress.finish_entry `Skipped;
-     Job.Progress.start_entry ~size:600L;
-     Job.Progress.advance ~bytes:300L ~sent:true;
+     Job_progress.plan ~basis:`Sent ~bytes:1000L;
+     Job_progress.start_entry ~size:400L;
+     Job_progress.finish_entry `Skipped;
+     Job_progress.start_entry ~size:600L;
+     Job_progress.advance ~bytes:300L ~sent:true;
      let* () = Lwt_unix.sleep 0.45 in
-     let* () = Job.Report.finish () in
+     let* () = Job_report_lwt.finish () in
      check "a listening daemon receives reports" (!seen <> []);
 
      let last = List.hd (List.rev !seen) in

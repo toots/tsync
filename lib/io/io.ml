@@ -31,6 +31,11 @@ module type S = sig
 
   val wakeup_later : 'a u -> 'a -> unit
 
+  (** Run [f] without waiting for it. Nothing is returned to fail through, so a
+      task that raises is the implementation's to deal with and typically fatal:
+      whatever is passed here must not let an exception out. *)
+  val async : (unit -> unit t) -> unit
+
   (** These three run their arguments at once rather than in turn, which no
       amount of {!bind} expresses. *)
   val join : unit t list -> unit t

@@ -84,14 +84,14 @@ module Make (C : Conf.S) = struct
       entries
 
   let decode_entry body pos =
-    let key = Stored_key.listed (Listing.read_string body pos) in
-    let size = Int64.to_int (Listing.read_int64 body pos) in
+    let key = Stored_key.listed (Listing_lwt.read_string body pos) in
+    let size = Int64.to_int (Listing_lwt.read_int64 body pos) in
     Backend.{ key; size; last_modified = 0.; etag = None }
 
   let record_entry (e : Backend.file_entry) =
     [
-      (fun b -> Listing.str b (Stored_key.to_string e.Backend.key));
-      (fun b -> Listing.int64 b (Int64.of_int e.Backend.size));
+      (fun b -> Listing_lwt.str b (Stored_key.to_string e.Backend.key));
+      (fun b -> Listing_lwt.int64 b (Int64.of_int e.Backend.size));
     ]
 
   (* What the listing came to, summed as it was written: the figure a caller
@@ -104,7 +104,7 @@ module Make (C : Conf.S) = struct
     if Stored_key.is_internal e.Backend.key then Lwt.return_unit
     else (
       bytes := Int64.add !bytes (Int64.of_int e.Backend.size);
-      Listing.add listing (record_entry e))
+      Listing_lwt.add listing (record_entry e))
 
   (* The chunk store is shared across domains on one bucket, and mirroring all of
      it is deliberate: chunks are content-addressed, so extra copies only help
@@ -147,7 +147,9 @@ module Make (C : Conf.S) = struct
 
   let namespace_entries ~manifests_only ~on_list ~name src =
     let (module Src : Backend.S) = src in
-    let* listing = Listing.create ~dir:spool_dir ~name ~decode:decode_entry in
+    let* listing =
+      Listing_lwt.create ~dir:spool_dir ~name ~decode:decode_entry
+    in
     let bytes = ref 0L in
     let* () =
       list_into ~listing ~bytes ~on_list ~name:"manifests" src C.domain_prefix
@@ -183,18 +185,18 @@ module Make (C : Conf.S) = struct
     let* listing, _ =
       namespace_entries ~manifests_only ~on_list ~name:("dst-" ^ name) dst
     in
-    let held = Held.create (Listing.count listing) in
+    let held = Held.create (Listing_lwt.count listing) in
     Lwt.finalize
       (fun () ->
         let+ () =
-          Listing.iter listing (fun (e : Backend.file_entry) ->
+          Listing_lwt.iter listing (fun (e : Backend.file_entry) ->
               Held.replace held
                 (Stored_key.to_string e.Backend.key)
                 e.Backend.size;
               Lwt.return_unit)
         in
         held)
-      (fun () -> Listing.drop listing)
+      (fun () -> Listing_lwt.drop listing)
 
   (* [rel] itself and everything under it. *)
   let within ~rel path =
@@ -265,7 +267,7 @@ module Make (C : Conf.S) = struct
         keys
     in
     let* listing =
-      Listing.create ~dir:spool_dir ~name:"src" ~decode:decode_entry
+      Listing_lwt.create ~dir:spool_dir ~name:"src" ~decode:decode_entry
     in
     let bytes = ref 0L in
     let+ () =
@@ -301,12 +303,12 @@ module Make (C : Conf.S) = struct
 
        The listing is read a record at a time out of its mapping, so the queue
        the workers pull from is pages rather than a list of the keyspace. *)
-    let* cursor = Listing.read listing in
+    let* cursor = Listing_lwt.read listing in
     let+ () =
       Io_lwt.Bounded.each
-        ~width:(min entries_in_flight (Listing.count listing))
+        ~width:(min entries_in_flight (Listing_lwt.count listing))
         (fun () ->
-          match Listing.next cursor with
+          match Listing_lwt.next cursor with
             | None -> None
             | Some entry ->
                 incr checked;
@@ -361,7 +363,7 @@ module Make (C : Conf.S) = struct
                  (Chunk_space.string_of_phase r.Chunk_space.phase)
                  (Unix.gettimeofday () -. r.Chunk_space.started))
     in
-    let* () = Listing.reap ~dir:spool_dir in
+    let* () = Listing_lwt.reap ~dir:spool_dir in
     let* listing, bytes =
       match scope with
         | `All ->
@@ -373,7 +375,7 @@ module Make (C : Conf.S) = struct
         | `Path rel ->
             path_entries ~rel ~src_name:src.name ~on_list src.Backend.backend
     in
-    on_scan ~objects:(Listing.count listing) ~bytes;
+    on_scan ~objects:(Listing_lwt.count listing) ~bytes;
     (* A path scope names its objects one at a time on the source too, so there
        is no listing to be symmetric with and the HEAD stays. *)
     let listed_scope =
@@ -401,5 +403,5 @@ module Make (C : Conf.S) = struct
             in
             resync_to ?on_start ?on_entry ?held src.Backend.backend
               m.Backend.backend ~name:m.Backend.name listing))
-      (fun () -> Listing.drop listing)
+      (fun () -> Listing_lwt.drop listing)
 end

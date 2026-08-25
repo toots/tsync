@@ -40,7 +40,11 @@
    -open
    Tsync_metrics
    -open
-   Tsync_job
+   Tsync_job_progress
+   -open
+   Tsync_job_report
+   -open
+   Tsync_job_report_lwt
    -open
    Tsync_tls
    -open
@@ -89,7 +93,9 @@
   tsync-libs.bigstring
   tsync-libs.backend_register
   tsync-libs.metrics
-  tsync-libs.job
+  tsync-libs.job_progress
+  tsync-libs.job_report
+  tsync-libs.job_report_lwt
   tsync-libs.conf_parsing
   tsync_wizard
   tsync-libs.ipc

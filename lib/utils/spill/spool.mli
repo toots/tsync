@@ -6,26 +6,59 @@
     the channel is closed before the mapping is made, and a file still open for
     append is exactly what that rules out. *)
 
-type t
+(** The buffered writer nothing here can supply: a channel is state, and the
+    stream-to-stream copy behind {!Make.append_file} is not a sequence of reads
+    and writes this could spell for itself. *)
+module type APPEND = sig
+  type 'a io
+  type t
 
-(** An empty temp file under [dir], which is created; [name] only makes the path
-    readable. *)
-val create : dir:string -> name:string -> t Lwt.t
+  val open_out : string -> t io
+  val write : t -> string -> unit io
 
-val path : t -> string
-val append : t -> string -> unit Lwt.t
+  (** Append the whole of [src], which must already be flushed. *)
+  val write_file : t -> src:string -> unit io
 
-(** Append the whole contents of [src], which must already be flushed. *)
-val append_file : t -> src:string -> unit Lwt.t
+  val close : t -> unit io
+end
 
-(** Close the channel and map the whole finished file. *)
-val seal : t -> Bigstring.t Lwt.t
+(** The four calls a spool makes of a filesystem, spelled as {!Fs} spells them
+    so that one can be handed over as it stands. *)
+module type FILES = sig
+  type 'a io
 
-(** Close without mapping, for a spool whose bytes are read another way. *)
-val close : t -> unit Lwt.t
+  val mkdir_p : string -> unit io
+  val unlink_quiet : string -> unit io
+  val readdir_list_quiet : string -> string list io
+  val stat_opt : string -> Unix.stats option io
+end
 
-(** Close and unlink, swallowing a channel already closed. *)
-val drop : t -> unit Lwt.t
+module Make
+    (Io : Io.S)
+    (Files : FILES with type 'a io := 'a Io.t)
+    (Append : APPEND with type 'a io := 'a Io.t) : sig
+  type t
 
-(** Unlink the spools a killed run left under [dir], one level only. *)
-val reap : dir:string -> unit Lwt.t
+  (** An empty temp file under [dir], which is created; [name] only makes the
+      path readable. *)
+  val create : dir:string -> name:string -> t Io.t
+
+  val path : t -> string
+  val append : t -> string -> unit Io.t
+
+  (** Append the whole contents of [src], which must already be flushed. *)
+  val append_file : t -> src:string -> unit Io.t
+
+  (** Close the channel and map the whole finished file. Fails naming the spool
+      if it is no longer there to be stat'd. *)
+  val seal : t -> Bigstring.t Io.t
+
+  (** Close without mapping, for a spool whose bytes are read another way. *)
+  val close : t -> unit Io.t
+
+  (** Close and unlink, swallowing a channel already closed. *)
+  val drop : t -> unit Io.t
+
+  (** Unlink the spools a killed run left under [dir], one level only. *)
+  val reap : dir:string -> unit Io.t
+end

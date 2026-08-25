@@ -73,28 +73,28 @@ let cmd : unit Cmd.t =
                planned := files;
                (* An import is transfer-bound: what is left is uploads, and the
                   rate that predicts them is the one they ran at. *)
-               Job.Progress.plan ~basis:`Sent ~bytes)
+               Job_progress.plan ~basis:`Sent ~bytes)
              ~on_start:(fun ~rel ~size ->
                current := Some rel;
-               Job.Progress.start_entry ~size)
+               Job_progress.start_entry ~size)
              ~on_progress:(fun ~bytes ~sent ->
-               Job.Progress.advance ~bytes ~sent)
+               Job_progress.advance ~bytes ~sent)
              ~on_file:(fun ~rel status ->
                match status with
                  | Import.Imported size ->
-                     Job.Progress.finish_entry (`Done size);
+                     Job_progress.finish_entry (`Done size);
                      incr imported;
                      Printf.printf "imported %s (%Ld bytes)\n%!" rel size
                  | Import.Skipped_exists ->
-                     Job.Progress.finish_entry `Skipped;
+                     Job_progress.finish_entry `Skipped;
                      incr skipped;
                      Printf.printf "skip     %s (already in domain)\n%!" rel
                  | Import.Skipped_symlink ->
-                     Job.Progress.finish_entry `Skipped;
+                     Job_progress.finish_entry `Skipped;
                      incr symlinks;
                      Printf.printf "skip     %s (symlink)\n%!" rel
                  | Import.Failed msg ->
-                     Job.Progress.finish_entry `Failed;
+                     Job_progress.finish_entry `Failed;
                      incr failed;
                      Printf.printf "failed   %s: %s\n%!" rel msg)
              ()

@@ -13,6 +13,7 @@ module Core = struct
   let fail = Lwt.fail
   let wait = Lwt.wait
   let wakeup_later = Lwt.wakeup_later
+  let async = Lwt.async
   let join = Lwt.join
   let map_p = Lwt_list.map_p
   let iter_p = Lwt_list.iter_p

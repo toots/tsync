@@ -16,17 +16,17 @@ open Check
 let dir = Scratch.dir "listing"
 
 let entry =
-  Listing.create ~dir ~name:"entries" ~decode:(fun body pos ->
-      let key = Listing.read_string body pos in
-      let name = Listing.read_string body pos in
-      (key, name, Listing.read_int64 body pos))
+  Listing_lwt.create ~dir ~name:"entries" ~decode:(fun body pos ->
+      let key = Listing_lwt.read_string body pos in
+      let name = Listing_lwt.read_string body pos in
+      (key, name, Listing_lwt.read_int64 body pos))
 
 let write t (key, name, size) =
-  Listing.add t
+  Listing_lwt.add t
     [
-      (fun b -> Listing.str b key);
-      (fun b -> Listing.str b name);
-      (fun b -> Listing.int64 b size);
+      (fun b -> Listing_lwt.str b key);
+      (fun b -> Listing_lwt.str b name);
+      (fun b -> Listing_lwt.int64 b size);
     ]
 
 let planted =
@@ -44,12 +44,12 @@ let () =
      let* () = Lwt_list.iter_s (write t) planted in
 
      case "the total is known before the walk";
-     check "count is what went in" (Listing.count t = List.length planted);
+     check "count is what went in" (Listing_lwt.count t = List.length planted);
 
      case "a record survives whatever its fields hold";
      let first = ref [] in
      let* () =
-       Listing.iter t (fun r ->
+       Listing_lwt.iter t (fun r ->
            first := r :: !first;
            Lwt.return_unit)
      in
@@ -66,13 +66,14 @@ let () =
      case "the walk can happen again";
      let second = ref [] in
      let* () =
-       Listing.iter t (fun r ->
+       Listing_lwt.iter t (fun r ->
            second := r :: !second;
            Lwt.return_unit)
      in
      check "a second walk sees the same records, in the same order"
        (List.rev !second = planted);
-     check "and the count did not move" (Listing.count t = List.length planted);
+     check "and the count did not move"
+       (Listing_lwt.count t = List.length planted);
 
      (* Appending to a sealed spool is the one mistake the mapping cannot
         survive, so it is refused rather than left to fault a reader. *)
@@ -87,7 +88,7 @@ let () =
      in
      check "add raises once the spool is sealed" refused;
      check "and nothing was counted for it"
-       (Listing.count t = List.length planted);
+       (Listing_lwt.count t = List.length planted);
 
-     let+ () = Listing.drop t in
+     let+ () = Listing_lwt.drop t in
      report ~expected:6 ())

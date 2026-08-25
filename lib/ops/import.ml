@@ -56,9 +56,9 @@ module Make (C : Conf.S) = struct
   let spool_dir = Filename.concat C.cache_root "import"
 
   type plan = {
-    dirs : string Listing.t;
-    files : (string * int64) Listing.t;
-    symlinks : (string * string * int64) Listing.t;
+    dirs : string Listing_lwt.t;
+    files : (string * int64) Listing_lwt.t;
+    symlinks : (string * string * int64) Listing_lwt.t;
     bytes : int64;
   }
 
@@ -84,7 +84,8 @@ module Make (C : Conf.S) = struct
       let held = List.rev !pending in
       pending := [];
       Lwt_list.iter_s
-        (fun rel -> Listing.add plan.dirs [(fun b -> Listing.str b rel)])
+        (fun rel ->
+          Listing_lwt.add plan.dirs [(fun b -> Listing_lwt.str b rel)])
         held
     in
     let rec walk rel ~selected =
@@ -135,17 +136,20 @@ module Make (C : Conf.S) = struct
             | `File size when kept ->
                 let* () = flush () in
                 bytes := Int64.add !bytes size;
-                Listing.add plan.files
-                  [(fun b -> Listing.str b r); (fun b -> Listing.int64 b size)]
+                Listing_lwt.add plan.files
+                  [
+                    (fun b -> Listing_lwt.str b r);
+                    (fun b -> Listing_lwt.int64 b size);
+                  ]
             | `Symlink target when kept ->
                 let* () = flush () in
                 let* n = symlink_bytes ~src r target in
                 bytes := Int64.add !bytes n;
-                Listing.add plan.symlinks
+                Listing_lwt.add plan.symlinks
                   [
-                    (fun b -> Listing.str b r);
-                    (fun b -> Listing.str b target);
-                    (fun b -> Listing.int64 b n);
+                    (fun b -> Listing_lwt.str b r);
+                    (fun b -> Listing_lwt.str b target);
+                    (fun b -> Listing_lwt.int64 b n);
                   ]
             | `File _ | `Symlink _ -> Lwt.return_unit)
         entries
@@ -155,18 +159,20 @@ module Make (C : Conf.S) = struct
 
   let plan_source ~only ~exclude ~src =
     let* dirs =
-      Listing.create ~dir:spool_dir ~name:"dirs" ~decode:Listing.read_string
+      Listing_lwt.create ~dir:spool_dir ~name:"dirs"
+        ~decode:Listing_lwt.read_string
     in
     let* files =
-      Listing.create ~dir:spool_dir ~name:"files" ~decode:(fun body pos ->
-          let rel = Listing.read_string body pos in
-          (rel, Listing.read_int64 body pos))
+      Listing_lwt.create ~dir:spool_dir ~name:"files" ~decode:(fun body pos ->
+          let rel = Listing_lwt.read_string body pos in
+          (rel, Listing_lwt.read_int64 body pos))
     in
     let* symlinks =
-      Listing.create ~dir:spool_dir ~name:"symlinks" ~decode:(fun body pos ->
-          let rel = Listing.read_string body pos in
-          let target = Listing.read_string body pos in
-          (rel, target, Listing.read_int64 body pos))
+      Listing_lwt.create ~dir:spool_dir ~name:"symlinks"
+        ~decode:(fun body pos ->
+          let rel = Listing_lwt.read_string body pos in
+          let target = Listing_lwt.read_string body pos in
+          (rel, target, Listing_lwt.read_int64 body pos))
     in
     walk_source ~only ~exclude ~src { dirs; files; symlinks; bytes = 0L }
 
@@ -216,10 +222,10 @@ module Make (C : Conf.S) = struct
      memory, where they and the string they encode grow with the tree rather
      than with what is in flight. *)
   module Spool = struct
-    let create () = Spool.create ~dir:spool_dir ~name:"journal"
-    let add t ops = Spool.append t (Journal.encode ops)
-    let remove t = Spool.drop t
-    let body t = Spool.seal t
+    let create () = Spool_lwt.create ~dir:spool_dir ~name:"journal"
+    let add t ops = Spool_lwt.append t (Journal.encode ops)
+    let remove t = Spool_lwt.drop t
+    let body t = Spool_lwt.seal t
   end
 
   (* A deferred replica queues an entry behind the objects it names, so
@@ -251,10 +257,10 @@ module Make (C : Conf.S) = struct
       in
       try Unix.realpath p with _ -> p
     in
-    let* () = Listing.reap ~dir:spool_dir in
+    let* () = Listing_lwt.reap ~dir:spool_dir in
     let* plan = plan_source ~only ~exclude ~src in
     on_plan
-      ~files:(Listing.count plan.files + Listing.count plan.symlinks)
+      ~files:(Listing_lwt.count plan.files + Listing_lwt.count plan.symlinks)
       ~bytes:plan.bytes;
     (* Around every per-entry unit of work in both loops, which is what makes it
        the one place that knows what the import is on right now: [on_file] fires
@@ -319,7 +325,7 @@ module Make (C : Conf.S) = struct
            encoding their path. The walk emits a parent before its children, so
            id resolution finds them. *)
         let* () =
-          Listing.iter plan.dirs (fun rel ->
+          Listing_lwt.iter plan.dirs (fun rel ->
               let key = Lk.dir rel in
               let* () = Mf.create_dir key in
               let* () = St.put_folder_marker ~key in
@@ -336,7 +342,7 @@ module Make (C : Conf.S) = struct
            every mkdir is published before a put can name the folder. *)
         let* () = publish () in
         let* () =
-          Listing.iter plan.files (fun (rel, size) ->
+          Listing_lwt.iter plan.files (fun (rel, size) ->
               let* status =
                 guard rel ~size (fun () ->
                     import_file ~force_rehash ~on_progress ~src_root:src rel)
@@ -344,7 +350,7 @@ module Make (C : Conf.S) = struct
               record ~rel status)
         in
         let* () =
-          Listing.iter plan.symlinks (fun (rel, target, bytes) ->
+          Listing_lwt.iter plan.symlinks (fun (rel, target, bytes) ->
               let* status =
                 guard rel ~size:bytes (fun () ->
                     match C.symlink_policy with
@@ -370,8 +376,8 @@ module Make (C : Conf.S) = struct
         let+ () = Fs.flush_cursor () in
         !counts)
       (fun () ->
-        let* () = Listing.drop plan.dirs in
-        let* () = Listing.drop plan.files in
-        let* () = Listing.drop plan.symlinks in
+        let* () = Listing_lwt.drop plan.dirs in
+        let* () = Listing_lwt.drop plan.files in
+        let* () = Listing_lwt.drop plan.symlinks in
         Spool.remove !spool)
 end

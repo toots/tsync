@@ -4,11 +4,20 @@
 
 (library
  (flags
-  (:standard -open Tsync_log -open Tsync_job -open Tsync_backend_register))
+  (:standard
+   -open
+   Tsync_log
+   -open
+   Tsync_job_report
+   -open
+   Tsync_job_report_lwt
+   -open
+   Tsync_backend_register))
  (name tsync_oneshot)
  (libraries
   tsync_log
-  tsync_job
+  tsync_job_report
+  tsync_job_report_lwt
   tsync_backend_register
   memtrace
   unix
