@@ -8,8 +8,6 @@
    -open
    Tsync_field_spec
    -open
-   Tsync_sync
-   -open
    Tsync_naming
    -open
    Tsync_ipc
@@ -34,7 +32,6 @@
   tsync_logical_key
   tsync_checkout
   tsync-libs.field_spec
-  tsync-libs.sync
   tsync-libs.naming
   tsync-libs.frontend_register
   tsync-libs.log
