@@ -40,26 +40,34 @@ module Make (C : Conf.S) = struct
   module Space = Chunk_space.Make (C)
   module B = (val C.store : Backend.S)
 
-  let pace = Pace.create ()
-
   (* How long the closing phase may go without recording where it got to. Longer
      than the reporting interval, a checkpoint costing a delete against every
      copy rather than a line of output, and short enough that what a crash
      repeats is seconds of scanning. *)
   let checkpoint_interval = 5.
 
-  (* Answers whether it fired, so other once-a-second work can hang off the same
-     clock.
+  (* A step here can run for minutes — a namespace listing, a shard sweep, a
+     million-chunk copy — so what it says it is doing is rationed to what a
+     progress line is for. Answers whether it fired, so other once-a-second work
+     can hang off the same clock.
 
      [key] gives a phase its own: on one clock, a phase whose first item lands
      inside another's interval reports nothing until a second has gone by, and
      one shorter than the interval reports nothing at all. *)
-  let throttled ?force ~key f =
-    let fired = ref false in
-    Pace.fire pace ~key ?force (fun () ->
-        fired := true;
-        f ());
-    !fired
+  let report_interval = 1.
+  let reported : (string, float) Hashtbl.t = Hashtbl.create 4
+
+  let throttled ?(force = false) ~key f =
+    let now = Unix.gettimeofday () in
+    let last =
+      Option.value (Hashtbl.find_opt reported key) ~default:neg_infinity
+    in
+    if (not force) && now -. last < report_interval then false
+    else begin
+      Hashtbl.replace reported key now;
+      f ();
+      true
+    end
 
   (* Opening and closing a run are a rename and an [rm -rf] within the main's own
      directory, which is what having a {!Backend.S.local_path} grants. *)
