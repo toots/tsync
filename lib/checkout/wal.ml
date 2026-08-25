@@ -98,16 +98,35 @@ module Q = Durable_queue_lwt.Make (Job)
 (* The records of a domain are one thing however many places name them: this
    functor is applied wherever the log is read or written, and a second
    [Records.t] over the same directory would keep its own id counter. *)
-module Owed_q = Owed.Make (Io_lwt.Lock)
+(* A hand-off between a file operation, which writes a record, and whoever
+   sends the bytes, which is a worker pool with a width of its own. It holds
+   what it is told: a condition alone drops a signal sent while nobody is
+   waiting, and here that would be work nobody comes back for. *)
+module Owed = struct
+  type 'a t = { waiting : Io_lwt.Lock.condition; held : 'a Queue.t }
 
-let logs : (string, Q.Records.t * (Ek.t * record) Owed_q.t) Hashtbl.t =
+  let create () = { waiting = Io_lwt.Lock.condition (); held = Queue.create () }
+
+  let signal t x =
+    Queue.add x t.held;
+    Io_lwt.Lock.broadcast t.waiting
+
+  let rec next t =
+    match Queue.take_opt t.held with
+      | Some x -> Lwt.return x
+      | None -> Lwt.bind (Io_lwt.Lock.wait t.waiting) (fun () -> next t)
+
+  let pending t = Queue.length t.held
+end
+
+let logs : (string, Q.Records.t * (Ek.t * record) Owed.t) Hashtbl.t =
   Hashtbl.create 4
 
 let log_for dir =
   match Hashtbl.find_opt logs dir with
     | Some both -> both
     | None ->
-        let both = (Q.Records.create ~dir, Owed_q.create ()) in
+        let both = (Q.Records.create ~dir, Owed.create ()) in
         Hashtbl.replace logs dir both;
         both
 

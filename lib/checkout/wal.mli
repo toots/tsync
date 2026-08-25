@@ -44,8 +44,24 @@ module Q : module type of Durable_queue_lwt.Make (struct
 end)
 
 (** The hand-off a file operation uses to tell whoever sends the bytes that a
-    record is written and owed. *)
-module Owed_q : module type of Owed.Make (Io_lwt.Lock)
+    record is written and owed. Generic in what it carries: a hand-off has no
+    business knowing. *)
+module Owed : sig
+  type 'a t
+
+  val create : unit -> 'a t
+
+  (** Hand one over. Never blocks, and never drops what it is told: something
+      signalled while nobody waits is delivered to whoever waits next. *)
+  val signal : 'a t -> 'a -> unit
+
+  (** The next one, waiting until there is one, in the order they were
+      signalled. *)
+  val next : 'a t -> 'a Lwt.t
+
+  (** How many are waiting to be taken up. *)
+  val pending : 'a t -> int
+end
 
 module Make (C : Conf.S) : sig
   (** This domain's records. Shared with {!Sync_queue}, which drains the ones
@@ -57,7 +73,7 @@ module Make (C : Conf.S) : sig
 
   (** The records written here and not yet taken up by whoever sends them. One
       per domain, for the same reason the log is. *)
-  val owed : (Journal.Entry_key.t * record) Owed_q.t
+  val owed : (Journal.Entry_key.t * record) Owed.t
 
   (** Write the intent. The caller mints the key and keeps it: every later call
       names the same unit of work. *)

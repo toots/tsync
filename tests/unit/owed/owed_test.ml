@@ -9,7 +9,7 @@
 
 open Lwt.Syntax
 open Check
-module O = Owed.Make (Io_lwt.Lock)
+module O = Wal.Owed
 
 (* What Wal hands over: the record, under the key it was written with. *)
 
