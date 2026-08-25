@@ -9,7 +9,7 @@ type dest_stats = {
 
 module Make (C : Conf.S) = struct
   module Lk = Logical_key.Make (C)
-  module Space = Chunk_space.Make (C)
+  module Collection = Collection.Make (C)
   module L = Chunk_layout.Make (C)
   module Tree = Inode_tree.Make (C)
 
@@ -350,7 +350,7 @@ module Make (C : Conf.S) = struct
        been marked so far, so listing it would copy a partial chunk set to every
        target and call it a resync. *)
     let* () =
-      let* run = Space.read_run () in
+      let* run = Collection.read_run () in
       match (run, scope) with
         | None, _ | Some _, `Manifests -> Lwt.return_unit
         | Some r, (`All | `Path _) ->
@@ -360,8 +360,8 @@ module Make (C : Conf.S) = struct
                   are only partly under the usual prefix. Let tsync gc finish, \
                   or stop it with tsync gc --abort, then resync."
                  C.domain_name
-                 (Chunk_space.string_of_phase r.Chunk_space.phase)
-                 (Unix.gettimeofday () -. r.Chunk_space.started))
+                 (Collection.string_of_phase r.Collection.phase)
+                 (Unix.gettimeofday () -. r.Collection.started))
     in
     let* () = Listing_lwt.reap ~dir:spool_dir in
     let* listing, bytes =

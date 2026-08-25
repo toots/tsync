@@ -85,9 +85,9 @@ end
     records and drains its own.
 
     [chunk_from_prefix] is where the source keeps chunks it has not finished
-    collecting — see {!Chunk_space} — and a read falls through to it, though
-    what is written to the target is always the ordinary chunk key. Omit it for
-    a source that is never collected.
+    collecting — see {!Collection} — and a read falls through to it, though what
+    is written to the target is always the ordinary chunk key. Omit it for a
+    source that is never collected.
 
     [excluded] names the keys no target carries, whatever it is for. The caller
     decides which those are: this knows only that some keys describe the store

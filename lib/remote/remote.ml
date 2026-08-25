@@ -92,8 +92,8 @@ module Make_with_layout (C : Conf.S) (L : Layout.S) : S = struct
   module B = (val C.store : Backend.S)
 
   (* Chunk writes go where they always went; only presence checks and reads have
-     to know that a collection may be in progress ({!Chunk_space}). *)
-  module Space = Chunk_space.Make (C)
+     to know that a collection may be in progress ({!Collection}). *)
+  module Collection = Collection.Make (C)
   module L = Chunk_layout.Make (C)
   module Corrupt = Corruption.Make (C)
 
@@ -151,7 +151,7 @@ module Make_with_layout (C : Conf.S) (L : Layout.S) : S = struct
   module Chunks_store = Chunk_store.Make (struct
     let put = B.put
     let backend_key = L.key
-    let fetch_body = Space.get
+    let fetch_body = Collection.get
     let corrupt = Corrupt.is_marked
     let cleared = Corrupt.forget
     let slots = chunk_slots
@@ -159,7 +159,7 @@ module Make_with_layout (C : Conf.S) (L : Layout.S) : S = struct
     let max_known () = !max_known
 
     let present key =
-      let+ head = Space.head key in
+      let+ head = Collection.head key in
       Option.is_some head
   end)
 
@@ -213,7 +213,7 @@ module Make_with_layout (C : Conf.S) (L : Layout.S) : S = struct
     (* Before the manifest is visible, never after: a chunk this upload did not
        write — deduplicated, or already known to this session — may hold a name
        only in a space a collection is about to discard. *)
-    let* () = Space.promote_all ~count chunk_key in
+    let* () = Collection.promote_all ~count chunk_key in
     let* () = St.put_manifest ~key ~data:body in
     if !cancel then
       let* () =

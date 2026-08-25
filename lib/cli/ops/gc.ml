@@ -37,7 +37,7 @@ let empty =
 
 module Make (C : Conf.S) = struct
   module L = Chunk_layout.Make (C)
-  module Space = Chunk_space.Make (C)
+  module Collection = Collection.Make (C)
   module B = (val C.store : Backend.S)
 
   (* How long the closing phase may go without recording where it got to. Longer
@@ -135,16 +135,16 @@ module Make (C : Conf.S) = struct
      ponytail: the lock is on the main's own filesystem, so two hosts sharing a
      main over a network filesystem could still both step one run. *)
   let lock_path root =
-    Filename.concat root (Stored_key.to_string Space.marker_key ^ ".lock")
+    Filename.concat root (Stored_key.to_string Collection.marker_key ^ ".lock")
 
   let describe_open_run () =
-    let+ run = Space.read_run () in
+    let+ run = Collection.read_run () in
     match run with
       | None -> ""
       | Some r ->
           Printf.sprintf " (%s, started %.0fs ago)"
-            (Chunk_space.string_of_phase r.Chunk_space.phase)
-            (Unix.gettimeofday () -. r.Chunk_space.started)
+            (Collection.string_of_phase r.Collection.phase)
+            (Unix.gettimeofday () -. r.Collection.started)
 
   (* A record lock merges with one the same process already holds rather than
      reporting contention, so this process needs its own answer: two sessions
@@ -304,7 +304,7 @@ module Make (C : Conf.S) = struct
      uploaded again by a writer that never saw the outgoing copy. On the main
      that is harmless — the new name survives the discard — but deleting the key
      off a replica would take out a live chunk. Asked after the outgoing listing,
-     so a {!Chunk_space.promote_all} landing between the two is seen rather than
+     so a {!Collection.Make.promote_all} landing between the two is seen rather than
      missed.
 
      By name rather than by listing the surviving shard, because the two are
@@ -424,7 +424,7 @@ module Make (C : Conf.S) = struct
       bytes_reclaimed = s.bytes_reclaimed;
     }
 
-  let status () = Space.read_run ()
+  let status () = Collection.read_run ()
 
   (* How old a request is, which is the whole of what the report says beyond a
      count: minutes while it could still be in flight, hours once it plainly is
@@ -502,18 +502,18 @@ module Make (C : Conf.S) = struct
       (deferred_members ())
 
   let save s phase cursor =
-    Space.write_run { Chunk_space.phase; started = s.started; cursor }
+    Collection.write_run { Collection.phase; started = s.started; cursor }
 
   let start ?concurrency ?delete_batch ?(keep = false) ?(verify = false) () =
     let* main, root = collector () in
     (* Under the lock before the marker is read, so the decision to open or resume
        is made by one process. *)
     let* lock = take_lock root in
-    let* existing = Space.read_run () in
+    let* existing = Collection.read_run () in
     let started, phase, cursor =
       match existing with
-        | None -> (Unix.gettimeofday (), Chunk_space.Opening, "")
-        | Some r -> (r.Chunk_space.started, r.phase, r.cursor)
+        | None -> (Unix.gettimeofday (), Collection.Opening, "")
+        | Some r -> (r.Collection.started, r.phase, r.cursor)
     in
     (* I/O bound, so a batch wants concurrent syscalls rather than cores: the
        device's own answer by default, and 1 makes a run as unobtrusive as it
@@ -579,7 +579,7 @@ module Make (C : Conf.S) = struct
       (* Abandoning first, and its override before any phase it overrides: a
          guard placed after the constructors it is meant to take precedence over
          never fires for them. *)
-      | Chunk_space.Abandoning ->
+      | Collection.Abandoning ->
           let* shards = from_shards root in
           let pending =
             List.filter (fun s -> String.compare s cursor > 0) shards
@@ -600,9 +600,9 @@ module Make (C : Conf.S) = struct
              %d shard(s)"
             C.domain_name (List.length shards);
           let s = fresh (Keep shards) (List.length shards) in
-          let+ () = save s Chunk_space.Abandoning "" in
+          let+ () = save s Collection.Abandoning "" in
           s
-      | Chunk_space.Closing ->
+      | Collection.Closing ->
           let* shards = live_shards root in
           let pending =
             List.filter (fun s -> String.compare s cursor > 0) shards
@@ -612,11 +612,11 @@ module Make (C : Conf.S) = struct
       (* Once a collection has been called off it stays called off: coming back
          to an [Abandoning] run continues abandoning rather than quietly resuming
          a collection whoever stopped it did not want. *)
-      | Chunk_space.Opening | Chunk_space.Marking ->
+      | Collection.Opening | Collection.Marking ->
           if existing = None then
             Log.info "gc: opening a collection of %s" C.domain_name;
           let s = fresh (Mark []) 0 in
-          let* () = save s Chunk_space.Opening "" in
+          let* () = save s Collection.Opening "" in
           let* () = open_space root in
           (* Enumerated before the phase is recorded as [Marking], so a
                [--status] during it does not claim to be marking while it is still
@@ -625,7 +625,7 @@ module Make (C : Conf.S) = struct
           let pending =
             List.filter (fun n -> String.compare n cursor > 0) found
           in
-          let* () = save s Chunk_space.Marking cursor in
+          let* () = save s Collection.Marking cursor in
           Log.info "gc: %d namespace(s) to mark" (List.length pending);
           s.work <- Mark pending;
           s.total <- List.length pending;
@@ -662,7 +662,7 @@ module Make (C : Conf.S) = struct
              s.total s.chunks_reclaimed;
            s.on_close ~shards:s.done_ ~reclaimed:s.chunks_reclaimed ~at:s.at))
 
-  (* Called only where [Space.promote] answered [true], which is what makes this
+  (* Called only where [Collection.promote] answered [true], which is what makes this
      once per chunk: opening renamed the whole root aside, so a live chunk is
      moved back exactly once however many manifests name it.
 
@@ -737,7 +737,7 @@ module Make (C : Conf.S) = struct
       Lwt_list.iter_p
         (fun ck ->
           Io_lwt.Bounded.use s.item_slots (fun () ->
-              let* moved = Space.promote ck in
+              let* moved = Collection.promote ck in
               s.chunks_promoted <- s.chunks_promoted + 1;
               report_mark s;
               if s.verify && moved then verify_promoted s ck
@@ -864,7 +864,7 @@ module Make (C : Conf.S) = struct
     s.chunks_reclaimed <- s.chunks_reclaimed + reclaimed;
     s.bytes_reclaimed <- s.bytes_reclaimed + bytes;
     s.done_ <- s.done_ + List.length shards;
-    let* () = save s Chunk_space.Closing (last_of shards) in
+    let* () = save s Collection.Closing (last_of shards) in
     report_close s;
     Lwt.return_unit
 
@@ -1072,7 +1072,7 @@ module Make (C : Conf.S) = struct
        after the last shard, which reads exactly like a hang. *)
     let* () = discard_shard s shard in
     s.done_ <- s.done_ + 1;
-    let* () = save s Chunk_space.Abandoning shard in
+    let* () = save s Collection.Abandoning shard in
     report_keep s;
     Lwt.return_unit
 
@@ -1081,7 +1081,7 @@ module Make (C : Conf.S) = struct
   let begin_closing s =
     report_mark ~force:true s;
     let* shards = live_shards s.root in
-    let* () = save s Chunk_space.Closing "" in
+    let* () = save s Collection.Closing "" in
     (* The copies are named here rather than counted per flush: every one of them
        is sent the same list, so a per-copy total would be the same number said
        several times. *)
@@ -1102,7 +1102,7 @@ module Make (C : Conf.S) = struct
      most likely to have swallowed, and a caller left holding the second-to-last
      figures reports a different run from the one the summary describes. *)
   let finish s =
-    let+ () = Space.clear_run () in
+    let+ () = Collection.clear_run () in
     s.finished <- true;
     (match s.work with
       | Keep _ -> report_keep ~force:true s
@@ -1149,7 +1149,7 @@ module Make (C : Conf.S) = struct
             s.work <- Keep leftover;
             s.total <- List.length leftover;
             s.done_ <- 0;
-            let+ () = save s Chunk_space.Abandoning "" in
+            let+ () = save s Collection.Abandoning "" in
             `More
           end
           else
@@ -1180,7 +1180,7 @@ module Make (C : Conf.S) = struct
           let rec go = function
             | ns :: more when not (s.out_of_time ()) ->
                 let* () = mark_one s ns in
-                let* () = save s Chunk_space.Marking ns in
+                let* () = save s Collection.Marking ns in
                 go more
             | remaining -> Lwt.return remaining
           in
@@ -1245,7 +1245,7 @@ module Make (C : Conf.S) = struct
      shard cursor, the budget, the pause, the bounded concurrency and the
      progress all come along, and so does the lock. *)
   let abort ?budget ?units ?pause ?concurrency ?on_open ?on_mark ?on_close () =
-    let* open_ = Space.read_run () in
+    let* open_ = Collection.read_run () in
     match open_ with
       | None -> Lwt.return empty
       | Some _ ->

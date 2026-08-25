@@ -14,6 +14,8 @@
    -open
    Tsync_store
    -open
+   Tsync_collection
+   -open
    Tsync_staged
    -open
    Tsync_checkout
@@ -79,6 +81,7 @@
   tsync_chunk_integrity
   tsync_history
   tsync_store
+  tsync_collection
   tsync_staged
   tsync_checkout
   tsync_journal

@@ -28,6 +28,8 @@
    -open
    Tsync_store
    -open
+   Tsync_collection
+   -open
    Tsync_io_lwt
    -open
    Tsync_xxhash
@@ -53,6 +55,7 @@
   tsync_chunks
   tsync_chunk_store
   tsync_store
+  tsync_collection
   tsync_io_lwt
   tsync_xxhash
   tsync_metrics

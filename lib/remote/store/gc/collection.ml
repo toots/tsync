@@ -51,22 +51,18 @@ let of_string data =
     | _ -> None
     | exception _ -> None
 
-(* [chunk_prefix] is "<domain root>/chunks/", and both of these are its siblings
-   rather than its children: what opens a run is renaming the chunk root itself
-   out of the way, so nothing that has to survive that can live inside it.
-
-   Outside the functor because {!Deferred} is built before there is a {!Conf.S}
-   to apply one to, and it needs the from-space prefix too. *)
-let marker_key ~chunk_prefix =
-  Stored_key.in_space
-    ~prefix:(Filename.chop_suffix chunk_prefix "chunks/")
-    "gc-run"
-
 module Make (C : Conf.S) = struct
+  (* Re-exported so a caller binding [Collection] to this can still name the
+     record it reads back. *)
+  type nonrec phase = phase = Opening | Marking | Abandoning | Closing
+  type nonrec run = run = { phase : phase; started : float; cursor : string }
+
+  let string_of_phase = string_of_phase
+
   module B = (val C.store : Backend.S)
   module L = Chunk_layout.Make (C)
 
-  let marker_key = marker_key ~chunk_prefix:C.chunk_prefix
+  let marker_key = Chunk_layout.gc_marker_key ~chunk_prefix:C.chunk_prefix
 
   (* The main is where both spaces are: a run renames a directory and links
      within it, so only the store holding the chunks can be mid-run. *)
@@ -100,40 +96,21 @@ module Make (C : Conf.S) = struct
   let marker_store () =
     match main () with Some b -> b | None -> (module B : Backend.S)
 
-  let read_run () =
-    let (module Mk : Backend.S) = marker_store () in
-    let* data = Mk.get_opt ~key:marker_key () in
-    match data with
-      | None -> Lwt.return_none
-      | Some data -> (
-          match of_string (Bigstring.to_string data) with
-            | Some run -> Lwt.return_some run
-            | None ->
-                (* Written by [put], so it is either absent or whole: garbage
-                   here means someone else put it there. *)
-                Log.warn "chunk space: unreadable run marker %s; treating %s"
-                  (Stored_key.to_string marker_key)
-                  "the store as idle";
-                Lwt.return_none)
-
-  let write_run run =
-    let (module Mk : Backend.S) = marker_store () in
-    Mk.put ~key:marker_key ~data:(Bigstring.of_string (to_string run)) ()
-
-  let clear_run () =
-    let (module Mk : Backend.S) = marker_store () in
-    Mk.delete ~key:marker_key ()
-
   (* Whether a run is open, cached: reading the marker per chunk lookup would cost
      more than the lookup it saves. *)
   let order_ttl = 5.
   let order_checked = ref neg_infinity
   let running = ref false
 
+  (* The marker's presence, not its contents: which space a chunk may be in does
+     not depend on what a run is doing, and a marker that will not parse is a
+     run all the same — reading it as an idle store would take the second
+     lookup away exactly when it is needed. *)
   let refresh_order () =
-    let+ run = read_run () in
+    let (module Mk : Backend.S) = marker_store () in
+    let+ found = Mk.head_opt ~key:marker_key () in
     order_checked := Unix.gettimeofday ();
-    running := run <> None;
+    running := found <> None;
     !running
 
   let probably_running () =
@@ -168,6 +145,85 @@ module Make (C : Conf.S) = struct
     else
       let+ opened = refresh_order () in
       if opened then Some (L.from_key chunk_key) else None
+
+  (* The two lookups below are spelled out rather than shared through a
+     combinator, because they differ in what "not there" is: an option for one, a
+     raised failure for the other.
+
+     Both ask the main's spaces first and the composite only once those have
+     missed: routing a miss through the composite would walk past the main to a
+     replica, which during a run is nearly every read — an object-store request
+     per chunk, for as long as the run lasts. *)
+
+  (* Deliberately does not promote what it finds in the space on its way out:
+     {!promote_all} at publish time is what a chunk's survival hangs on, and one
+     mechanism for that is easier to be sure of than two. *)
+  let head chunk_key =
+    match (local_root (), main ()) with
+      | None, _ | _, None -> B.head_opt ~key:(L.key chunk_key) ()
+      | Some _, Some (module M : Backend.S) ->
+          let* keys = candidates chunk_key in
+          let rec first = function
+            | [] -> (
+                let* extra = missed chunk_key in
+                match extra with
+                  | Some k -> (
+                      let* found = M.head_opt ~key:k () in
+                      match found with
+                        | Some _ -> Lwt.return found
+                        (* A replica may hold a chunk the main has lost, which is
+                           the composite's job. *)
+                        | None -> B.head_opt ~key:(L.key chunk_key) ())
+                  | None -> B.head_opt ~key:(L.key chunk_key) ())
+            | k :: rest ->
+                let* found = M.head_opt ~key:k () in
+                if found <> None then Lwt.return found else first rest
+          in
+          first keys
+
+  (* Reading does not promote: it says nothing about whether anything still
+     references the chunk, and whatever does is a root the mark reaches anyway.
+
+     The last attempt is a [get], not a [get_opt], so a chunk that is simply gone
+     is reported in the store's own words. *)
+  let get chunk_key =
+    match (local_root (), main ()) with
+      | None, _ | _, None -> B.get ~key:(L.key chunk_key) ()
+      | Some _, Some (module M : Backend.S) ->
+          let* keys = candidates chunk_key in
+          let rec first = function
+            | [] -> B.get ~key:(L.key chunk_key) ()
+            | k :: rest -> (
+                let* found = M.get_opt ~key:k () in
+                match found with
+                  | Some data -> Lwt.return data
+                  | None -> first rest)
+          in
+          first keys
+
+  let read_run () =
+    let (module Mk : Backend.S) = marker_store () in
+    let* data = Mk.get_opt ~key:marker_key () in
+    match data with
+      | None -> Lwt.return_none
+      | Some data -> (
+          match of_string (Bigstring.to_string data) with
+            | Some run -> Lwt.return_some run
+            | None ->
+                (* Written by [put], so it is either absent or whole: garbage
+                   here means someone else put it there. *)
+                Log.warn "chunk space: unreadable run marker %s; treating %s"
+                  (Stored_key.to_string marker_key)
+                  "the store as idle";
+                Lwt.return_none)
+
+  let write_run run =
+    let (module Mk : Backend.S) = marker_store () in
+    Mk.put ~key:marker_key ~data:(Bigstring.of_string (to_string run)) ()
+
+  let clear_run () =
+    let (module Mk : Backend.S) = marker_store () in
+    Mk.delete ~key:marker_key ()
 
   (* A move, not a copy: what stays behind in the space on its way out is then
      the garbage itself, which is what lets a collection delete by name instead
@@ -228,59 +284,4 @@ module Make (C : Conf.S) = struct
               go (i + 1)
           in
           go 0
-
-  (* The two lookups below are spelled out rather than shared through a
-     combinator, because they differ in what "not there" is: an option for one, a
-     raised failure for the other.
-
-     Both ask the main's spaces first and the composite only once those have
-     missed: routing a miss through the composite would walk past the main to a
-     replica, which during a run is nearly every read — an object-store request
-     per chunk, for as long as the run lasts. *)
-
-  (* Deliberately does not promote what it finds in the space on its way out:
-     {!promote_all} at publish time is what a chunk's survival hangs on, and one
-     mechanism for that is easier to be sure of than two. *)
-  let head chunk_key =
-    match (local_root (), main ()) with
-      | None, _ | _, None -> B.head_opt ~key:(L.key chunk_key) ()
-      | Some _, Some (module M : Backend.S) ->
-          let* keys = candidates chunk_key in
-          let rec first = function
-            | [] -> (
-                let* extra = missed chunk_key in
-                match extra with
-                  | Some k -> (
-                      let* found = M.head_opt ~key:k () in
-                      match found with
-                        | Some _ -> Lwt.return found
-                        (* A replica may hold a chunk the main has lost, which is
-                           the composite's job. *)
-                        | None -> B.head_opt ~key:(L.key chunk_key) ())
-                  | None -> B.head_opt ~key:(L.key chunk_key) ())
-            | k :: rest ->
-                let* found = M.head_opt ~key:k () in
-                if found <> None then Lwt.return found else first rest
-          in
-          first keys
-
-  (* Reading does not promote: it says nothing about whether anything still
-     references the chunk, and whatever does is a root the mark reaches anyway.
-
-     The last attempt is a [get], not a [get_opt], so a chunk that is simply gone
-     is reported in the store's own words. *)
-  let get chunk_key =
-    match (local_root (), main ()) with
-      | None, _ | _, None -> B.get ~key:(L.key chunk_key) ()
-      | Some _, Some (module M : Backend.S) ->
-          let* keys = candidates chunk_key in
-          let rec first = function
-            | [] -> B.get ~key:(L.key chunk_key) ()
-            | k :: rest -> (
-                let* found = M.get_opt ~key:k () in
-                match found with
-                  | Some data -> Lwt.return data
-                  | None -> first rest)
-          in
-          first keys
 end

@@ -41,6 +41,8 @@
    -open
    Tsync_store
    -open
+   Tsync_collection
+   -open
    Tsync_content
    -open
    Tsync_sync
@@ -80,6 +82,7 @@
   tsync_folder_ids
   tsync_cache_layout
   tsync_store
+  tsync_collection
   tsync_content
   tsync_sync
   tsync_io_lwt

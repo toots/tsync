@@ -19,7 +19,7 @@ module L = Chunk_layout.Make (struct
 end)
 
 let from_prefix = L.from_prefix
-let marker_key = Chunk_space.marker_key ~chunk_prefix
+let marker_key = Chunk_layout.gc_marker_key ~chunk_prefix
 
 (* An object store's stand-in: a local backend that says it cannot collect, which
    is what every non-filesystem driver answers. *)
@@ -72,9 +72,9 @@ module Collectable =
             ()
          : Backend.S))
 
-module Space = Chunk_space.Make (Collectable)
+module Space = Collection.Make (Collectable)
 module Frozen = Conf_of (Uncollectable)
-module Frozen_space = Chunk_space.Make (Frozen)
+module Frozen_space = Collection.Make (Frozen)
 
 (* A chunk key is "<h1>-<h2>", 16 hex each. Every one of these lands in shard
    [000], which is what this file wants: it is about the two spaces, and keeping
@@ -128,8 +128,7 @@ let () =
         re-reads the marker before reporting a miss, and therefore that the cache
         can only ever cost an extra stat, never an answer. *)
      let* () =
-       Space.write_run
-         { Chunk_space.phase = Marking; started = 0.; cursor = "" }
+       Space.write_run { Collection.phase = Marking; started = 0.; cursor = "" }
      in
      let* head = Space.head live in
      step "head(surviving) = %b" (head <> None);

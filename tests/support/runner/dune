@@ -26,6 +26,8 @@
    -open
    Tsync_store
    -open
+   Tsync_collection
+   -open
    Tsync_sync
    -open
    Tsync_folder_ids
@@ -63,6 +65,7 @@
   tsync_test_harness
   tsync_ops
   tsync_store
+  tsync_collection
   tsync_sync
   tsync_folder_ids
   tsync_cache_layout

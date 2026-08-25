@@ -29,7 +29,7 @@ module L = Chunk_layout.Make (struct
 end)
 
 let domain_prefix = "tsync/testdom/manifests/"
-let marker_key = Chunk_space.marker_key ~chunk_prefix
+let marker_key = Chunk_layout.gc_marker_key ~chunk_prefix
 
 type tally = {
   mutable lists : int;
@@ -147,7 +147,7 @@ module C : Conf.S = struct
 end
 
 module G = Gc.Make (C)
-module Space = Chunk_space.Make (C)
+module Collection = Collection.Make (C)
 
 let ck n = Printf.sprintf "%03x%013x-%016x" n n n
 let folders = 12
@@ -463,8 +463,8 @@ let () =
      let* s = G.start () in
      let* () = G.release s in
      let* () =
-       Space.write_run
-         { Chunk_space.phase = Abandoning; started = 0.; cursor = "fff" }
+       Collection.write_run
+         { Collection.phase = Abandoning; started = 0.; cursor = "fff" }
      in
      let* swept = G.abort () in
      step "kept while sweeping: %d chunk(s)" swept.Gc.chunks_promoted;

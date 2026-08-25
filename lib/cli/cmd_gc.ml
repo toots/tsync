@@ -166,8 +166,8 @@ let cmd : unit Cmd.t =
         | Some r ->
             Printf.printf "Collection of %s open: %s, %.0fs so far.\n"
               C.domain_name
-              (Chunk_space.string_of_phase r.Chunk_space.phase)
-              (Unix.gettimeofday () -. r.Chunk_space.started));
+              (Collection.string_of_phase r.Collection.phase)
+              (Unix.gettimeofday () -. r.Collection.started));
       (* Printed whether or not one is open: a request outlives the collection
          that queued it, and a copy sitting on one is the case this exists to
          show. *)
@@ -194,9 +194,9 @@ let cmd : unit Cmd.t =
          collection run under screen and teed to a file is the case that wants
          it, and the one where stderr is not a terminal. *)
       let watching = Unix.isatty Unix.stderr in
-      (* Spelled as {!Chunk_space.string_of_phase} does, so a phase named here
+      (* Spelled as {!Collection.string_of_phase} does, so a phase named here
          and one read off an open run are the same word. *)
-      let phase = ref (Chunk_space.string_of_phase Chunk_space.Opening) in
+      let phase = ref (Collection.string_of_phase Collection.Opening) in
       let at_ = ref "" in
       let marked = ref [] and closed = ref [] in
       let emit ending line =
@@ -206,7 +206,7 @@ let cmd : unit Cmd.t =
       let header fmt = Printf.ksprintf (emit "\n") fmt in
       let progress fmt = Printf.ksprintf (emit "\r") fmt in
       let on_open () =
-        phase := Chunk_space.string_of_phase Chunk_space.Opening;
+        phase := Collection.string_of_phase Collection.Opening;
         header "%s %s..."
           (if abort then "Abandoning the collection of" else "Collecting")
           C.domain_name
@@ -216,8 +216,8 @@ let cmd : unit Cmd.t =
          rather than one with a field that means nothing in half the runs. *)
       let on_mark ~namespaces ~total ~roots ~promoted ~at =
         phase :=
-          Chunk_space.string_of_phase
-            (if abort then Chunk_space.Abandoning else Chunk_space.Marking);
+          Collection.string_of_phase
+            (if abort then Collection.Abandoning else Collection.Marking);
         at_ := at;
         marked :=
           if abort then
@@ -239,7 +239,7 @@ let cmd : unit Cmd.t =
       (* Added to rather than replacing what marking counted: a job whose set of
          counters changes halfway through reads as one that lost them. *)
       let on_close ~shards ~reclaimed ~at =
-        phase := Chunk_space.string_of_phase Chunk_space.Closing;
+        phase := Collection.string_of_phase Collection.Closing;
         at_ := at;
         closed := [("closed", shards); ("reclaimed", reclaimed)];
         progress "  closed %d shard(s), %d chunk(s) reclaimed" shards reclaimed

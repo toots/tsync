@@ -20,6 +20,8 @@
    -open
    Tsync_store
    -open
+   Tsync_collection
+   -open
    Tsync_cache_layout
    -open
    Tsync_log
@@ -52,6 +54,7 @@
   tsync_sync
   tsync_content
   tsync_store
+  tsync_collection
   tsync_cache_layout
   tsync_io
   tsync_io_lwt

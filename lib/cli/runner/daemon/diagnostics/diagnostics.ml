@@ -122,7 +122,7 @@ module Make (C : Conf.S) = struct
   module L = Chunk_layout.Make (C)
   module D = Data.Make (C) (R)
   module Fs = File_store.Make (C)
-  module Space = Chunk_space.Make (C)
+  module Collection = Collection.Make (C)
   module J = Journal.Make (C)
   module W = Wal.Make (C)
   module Cor = Corruption.Make (C)
@@ -309,7 +309,7 @@ module Make (C : Conf.S) = struct
         let* chunks = count_chunks ~exact (module B) in
         (* Mid-collection the chunk prefix holds only what has been marked so
            far, so these figures are reported as a floor rather than a count. *)
-        let+ run = Space.read_run () in
+        let+ run = Collection.read_run () in
         let collecting =
           match run with
             | None -> []
@@ -318,7 +318,7 @@ module Make (C : Conf.S) = struct
                   ( "chunksPartial",
                     `String
                       (Printf.sprintf "collection in progress (%s)"
-                         (Chunk_space.string_of_phase r.Chunk_space.phase)) );
+                         (Collection.string_of_phase r.Collection.phase)) );
                 ]
         in
         `Assoc

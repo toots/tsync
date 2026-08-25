@@ -49,6 +49,13 @@ let domain_of ~chunk_prefix =
     | Some i -> String.sub root (i + 1) (String.length root - i - 1)
     | None -> root
 
+(* A sibling of the chunk root rather than a child: opening a run renames that
+   root out of the way, so nothing that has to survive it can live inside. *)
+let gc_marker_key ~chunk_prefix =
+  Stored_key.in_space
+    ~prefix:(Filename.chop_suffix chunk_prefix "chunks/")
+    "gc-run"
+
 (* Milliseconds, because a whole collection can begin and end inside one
    second. *)
 let gc_run_name started = Printf.sprintf "%013.0f" (started *. 1000.)

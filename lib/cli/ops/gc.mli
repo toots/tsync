@@ -13,7 +13,7 @@
 
     Writes need no cooperation: a client that has never heard of a run still
     writes to the space that survives. The one thing a writer must do is
-    {!Chunk_space.promote_all} before publishing a manifest, which
+    {!Collection.Make.promote_all} before publishing a manifest, which
     {!Remote.publish} does.
 
     {b Where it runs.} Only on a main that keeps its objects here
@@ -235,7 +235,7 @@ module Make (C : Conf.S) : sig
 
   (** The run in progress, for a caller that wants to report one rather than
       continue it. *)
-  val status : unit -> Chunk_space.run option Lwt.t
+  val status : unit -> Collection.run option Lwt.t
 
   (** Delete requests a copy has not consumed: its name, how many, and how long
       the oldest has been sitting there. Anything here is a copy holding chunks

@@ -33,6 +33,13 @@ val is_shard_name : string -> bool
     answer. What fails is filed under {!corrupted_prefix}, where any client can
     list it. *)
 
+(** Where a run records itself: a sibling of [chunk_prefix], since opening a run
+    renames the chunk root itself away. A plain function because a caller may
+    need it before there is a domain to ask.
+
+    Where the space on its way out lives is {!Make.from_prefix}. *)
+val gc_marker_key : chunk_prefix:string -> Stored_key.t
+
 (** What a collection calls itself in {!gc_job_key}, from its start time. *)
 val gc_run_name : float -> string
 

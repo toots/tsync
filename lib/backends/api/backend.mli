@@ -189,7 +189,7 @@ module type S = sig
       What it grants is the filesystem: a caller may read, rename and remove
       within the tree. Nothing here says what anyone does with that — a
       collection renames the chunk root aside and renames chunks back
-      ({!Chunk_space}), and a report only wants a path to measure. *)
+      ({!Collection}), and a report only wants a path to measure. *)
   val local_path : string option
 end
 

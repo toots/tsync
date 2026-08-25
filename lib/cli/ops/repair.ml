@@ -24,7 +24,6 @@ let describe ~chunk_key ~store = function
 
 module Make (C : Conf.S) = struct
   module Cor = Corruption.Make (C)
-  module Space = Chunk_space.Make (C)
   module L = Chunk_layout.Make (C)
 
   let good_body (module B : Backend.S) chunk_key =

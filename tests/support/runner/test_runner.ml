@@ -1350,7 +1350,7 @@ let dump_backend_at ~backend_root ~domain_prefix ~chunk_prefix ~journal_prefix
     let chunk_prefix = chunk_prefix
   end) in
   let from_prefix = L.from_prefix in
-  let gc_marker = Chunk_space.marker_key ~chunk_prefix in
+  let gc_marker = Chunk_layout.gc_marker_key ~chunk_prefix in
   (* Folder ids are deterministic (the RNG is seeded per scenario), so the dump
      prints them raw: a reviewer can trace [file <id>/<hash>] back to the
      [folder … -> <id>] marker that named it. *)

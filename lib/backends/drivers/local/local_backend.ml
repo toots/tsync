@@ -253,7 +253,7 @@ let make ?(verify_writes = true) ~root () : (module Backend.S) =
     (* A hard link when the filesystem allows one, so copying within a store
        costs a directory entry instead of the body, and the body only where there
        are no links to be had. Nothing on the collection path depends on which:
-       {!Chunk_space} moves chunks rather than copying them, precisely so a
+       {!Collection} moves chunks rather than copying them, precisely so a
        filesystem without links does not turn a collection into a rewrite of the
        whole live set.
 

@@ -270,7 +270,7 @@ let rec make ~(mains : sub list)
       Backend.merge_caps answers
 
     (* Several stores, so no one tree: a caller working on files reaches for the
-       member it means ({!Chunk_space} takes the main's) rather than the fan-out
+       member it means ({!Collection} takes the main's) rather than the fan-out
        over all of them. *)
     let local_path = None
   end)

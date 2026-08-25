@@ -1,0 +1,34 @@
+; Collecting a store's chunks: the record of a run, the moves it makes, and the
+; lookups that find a chunk while both spaces exist. Everything a collection
+; does to a store, so that nothing above has to know one is under way.
+
+(library
+ (flags
+  (:standard
+   -open
+   Tsync_conf
+   -open
+   Tsync_logical_key
+   -open
+   Tsync_chunks
+   -open
+   Tsync_io_lwt
+   -open
+   Tsync_log
+   -open
+   Tsync_bigstring
+   -open
+   Tsync_backend_register))
+ (name tsync_collection)
+ (public_name tsync-libs.collection)
+ (libraries
+  tsync_conf
+  tsync_logical_key
+  tsync_chunks
+  tsync_io_lwt
+  tsync_log
+  tsync_bigstring
+  tsync_backend_register
+  yojson
+  unix
+  lwt))
