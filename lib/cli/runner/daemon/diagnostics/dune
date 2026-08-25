@@ -26,6 +26,8 @@
    -open
    Tsync_metrics
    -open
+   Tsync_metrics_lwt
+   -open
    Tsync_io_lwt
    -open
    Tsync_bigstring
@@ -58,6 +60,7 @@
   tsync_backend_register
   tsync_ipc
   tsync_metrics
+  tsync_metrics_lwt
   tsync_log
   yojson
   unix

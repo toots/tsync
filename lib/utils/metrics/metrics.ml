@@ -2,7 +2,7 @@
    points, so they are data volume rather than metadata. Each counter keeps a
    cumulative total and a ring of one-second buckets for a rolling rate.
 
-   Touched only from the Lwt event-loop thread, so no locking. *)
+   Unlocked: every caller runs on the one thread that drives the program. *)
 
 let window = 10 (* seconds in the rolling-rate window *)
 
@@ -121,23 +121,6 @@ let gc_stats () =
    and the difference between the two is the difference between a leak and an
    allocator that has not given anything back. *)
 let live_bytes () = bytes_of_words (Gc.stat ()).Gc.live_words
-
-(* The event loop's load. A server that stopped answering while its CPU is idle
-   shows up here as watched descriptors that never drain. *)
-type lwt = {
-  readable_fds : int;
-  writable_fds : int;
-  timers : int;
-  pool_size : int;
-}
-
-let lwt_stats () =
-  {
-    readable_fds = Lwt_engine.readable_count ();
-    writable_fds = Lwt_engine.writable_count ();
-    timers = Lwt_engine.timer_count ();
-    pool_size = Lwt_unix.pool_size ();
-  }
 
 (* Here rather than in the CLI, so every report spells a size the same way. *)
 let human_bytes n =

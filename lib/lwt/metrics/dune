@@ -1,0 +1,7 @@
+; What the event loop itself is carrying, which is the one figure in
+; tsync-libs.metrics that had to ask a scheduler.
+
+(library
+ (name tsync_metrics_lwt)
+ (public_name tsync-libs.metrics_lwt)
+ (libraries lwt.unix))

@@ -3,7 +3,7 @@
 
 (library
  (flags
-  (:standard -open Tsync_log -open Tsync_io))
+  (:standard -open Tsync_log -open Tsync_metrics -open Tsync_io))
  (name tsync_retry)
  (public_name tsync-libs.retry)
- (libraries tsync_log tsync_io))
+ (libraries tsync_log tsync_metrics tsync_io))

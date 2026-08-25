@@ -38,15 +38,6 @@ val reason : exn -> string
     only in how patient they are, not in shape. *)
 val backoff : base:float -> cap:float -> int -> float
 
-(** What a retry loop reports as it goes. A parameter because counting is the
-    process's business and not this rule's: the same loop serves a caller that
-    keeps no counters at all. *)
-module type METRICS = sig
-  val add_retry : int -> unit
-  val add_timeout : int -> unit
-  val add_failure : int -> unit
-end
-
 (** The one retry loop for a single request, jittered so a fleet that failed
     together does not return together. A caller decides only what [classify]
     means for it; the curve, the cap and the log line are shared, so two of them
@@ -63,7 +54,5 @@ module type LOOP = sig
     'a io
 end
 
-module Make
-    (Io : Io.S)
-    (Clock : Clock.S with type 'a io := 'a Io.t)
-    (Metrics : METRICS) : LOOP with type 'a io := 'a Io.t
+module Make (Io : Io.S) (Clock : Clock.S with type 'a io := 'a Io.t) :
+  LOOP with type 'a io := 'a Io.t

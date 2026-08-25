@@ -1,8 +1,8 @@
 (** A counter keeping both a lifetime total and a rolling per-second rate over a
     short window. The built-in transfer counters below are these; anything else
     wanting a throughput figure (the fuse frontend's read/write volume, for one)
-    makes its own rather than reimplementing the ring. Touched only from the Lwt
-    event-loop thread, so no locking. *)
+    makes its own rather than reimplementing the ring. Unlocked: every caller
+    runs on the one thread that drives the program. *)
 type counter
 
 val counter : unit -> counter
@@ -85,17 +85,6 @@ val gc_stats : unit -> gc
     rather than "how much is held". Walks the heap, so sample it on a slow cycle
     rather than beside {!gc_stats}. *)
 val live_bytes : unit -> int
-
-(** The Lwt event loop's load: descriptors watched, timers pending, and the
-    blocking-syscall pool ceiling. *)
-type lwt = {
-  readable_fds : int;
-  writable_fds : int;
-  timers : int;
-  pool_size : int;
-}
-
-val lwt_stats : unit -> lwt
 
 (** A byte count as a person reads it ([1.5 GB]). Shared so every report spells
     a size the same way. *)

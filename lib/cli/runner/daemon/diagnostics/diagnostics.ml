@@ -39,7 +39,7 @@ let self_json ?(extra = []) () =
   let uptime = Unix.gettimeofday () -. !started_at in
   let cpu = Metrics.cpu_seconds () in
   let gc = Metrics.gc_stats () in
-  let lwt = Metrics.lwt_stats () in
+  let lwt = Metrics_lwt.stats () in
   let mem = Metrics.mem_stats () in
   [
     ( "server",
@@ -89,10 +89,10 @@ let self_json ?(extra = []) () =
     ( "lwt",
       `Assoc
         [
-          ("readableFds", `Int lwt.Metrics.readable_fds);
-          ("writableFds", `Int lwt.Metrics.writable_fds);
-          ("timers", `Int lwt.Metrics.timers);
-          ("poolSize", `Int lwt.Metrics.pool_size);
+          ("readableFds", `Int lwt.Metrics_lwt.readable_fds);
+          ("writableFds", `Int lwt.Metrics_lwt.writable_fds);
+          ("timers", `Int lwt.Metrics_lwt.timers);
+          ("poolSize", `Int lwt.Metrics_lwt.pool_size);
         ] );
     ( "traffic",
       `Assoc
