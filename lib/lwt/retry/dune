@@ -1,0 +1,10 @@
+; The retry loop of tsync-libs.retry, bound to Lwt and to the process counters.
+; Apart from it so that the vocabulary every caller shares -- what a failure is,
+; whether it will clear -- links neither.
+
+(library
+ (flags
+  (:standard -open Tsync_retry -open Tsync_io_lwt -open Tsync_metrics))
+ (name tsync_retry_lwt)
+ (public_name tsync-libs.retry_lwt)
+ (libraries tsync_retry tsync_io_lwt tsync_metrics lwt))

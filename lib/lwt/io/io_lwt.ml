@@ -44,6 +44,11 @@ module Syscalls = struct
   module LargeFile = Lwt_unix.LargeFile
 end
 
+module Clock = struct
+  let sleep = Lwt_unix.sleep
+  let is_timeout exn = exn = Lwt_unix.Timeout
+end
+
 module Bounded = Bounded.Make (Core)
 module Retry = Retry.Make (Core) (Syscalls)
 

@@ -112,7 +112,7 @@ let call t ~headers ~meth ?(body = Bigstring.empty) uri =
 (* Raises on a transient status so the shared loop retries it; every other
    response comes back for the verb to interpret, 404 included. *)
 let call_retry t ~headers ~meth ?body op uri =
-  Retry.with_retry ~classify:t.classify ~name:t.name ~op (fun () ->
+  Retry_lwt.with_retry ~classify:t.classify ~name:t.name ~op (fun () ->
       let* resp, rbody = call t ~headers ~meth ?body uri in
       if is_transient_code (code resp) then
         Lwt.fail (failed op (code resp) (excerpt (Bigstring.to_string rbody)))

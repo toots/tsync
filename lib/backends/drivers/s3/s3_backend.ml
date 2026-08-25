@@ -48,7 +48,7 @@ let failed op e =
 (* Raises on a transient error so the shared loop retries it; every other
    outcome, [Not_found] included, comes back for the verb to interpret. *)
 let with_retry op f =
-  Retry.with_retry ~classify:Backend.classify ~name:"s3" ~op (fun () ->
+  Retry_lwt.with_retry ~classify:Backend.classify ~name:"s3" ~op (fun () ->
       let* res = f () in
       match res with
         | Error e when is_transient e -> Lwt.fail (failed op e)

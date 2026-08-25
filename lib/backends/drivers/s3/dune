@@ -6,6 +6,8 @@
    -open
    Tsync_retry
    -open
+   Tsync_retry_lwt
+   -open
    Tsync_chunk_integrity
    -open
    Tsync_field_spec
@@ -23,6 +25,7 @@
   aws-s3
   tsync-libs.logical_key
   tsync_retry
+  tsync_retry_lwt
   tsync_chunk_integrity
   tsync-libs.field_spec
   tsync-libs.bigstring

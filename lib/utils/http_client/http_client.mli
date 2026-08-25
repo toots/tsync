@@ -37,7 +37,7 @@ val call :
   Uri.t ->
   (Cohttp.Response.t * Bigstring.t) Lwt.t
 
-(** {!call} under {!Retry.with_retry}, raising on a transient status so the
+(** {!call} under {!Retry_lwt.with_retry}, raising on a transient status so the
     shared ladder retries it. Every other response comes back for the verb to
     interpret, 404 included. *)
 val call_retry :
