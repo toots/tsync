@@ -1,4 +1,3 @@
-open Lwt.Syntax
 include Bigstringaf
 
 (* Bigstringaf's takes a range; a caller with a whole string to hand over should
@@ -47,12 +46,21 @@ let map_file ~path ~offset ~len =
       ~finally:(fun () -> Unix.close fd)
       (fun () -> map_fd fd ~offset ~len))
 
-(* An empty body still has to make the name appear, and a write that moves no
-   bytes creates nothing. *)
-let write_to ~path t ~offset =
-  if length t = 0 then
-    let* fd = Io_lwt.Retry.openfile path [Unix.O_WRONLY; Unix.O_CREAT] 0o644 in
-    Io_lwt.Retry.close fd
-  else
-    let+ (_ : int) = Io_lwt.Fs.write path t ~offset:(Int64.of_int offset) in
-    ()
+(** Putting bytes where a name can find them again, which is the one thing here
+    that has to wait. *)
+module type WRITER = sig
+  type 'a io
+
+  (** Make [path] exist, moving no bytes. *)
+  val touch : string -> unit io
+
+  val write : string -> t -> offset:int64 -> unit io
+end
+
+module Make (Io : Io.S) (Writer : WRITER with type 'a io := 'a Io.t) = struct
+  (* An empty body still has to make the name appear, and a write that moves no
+     bytes creates nothing. *)
+  let write_to ~path t ~offset =
+    if length t = 0 then Writer.touch path
+    else Writer.write path t ~offset:(Int64.of_int offset)
+end

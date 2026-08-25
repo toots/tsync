@@ -6,6 +6,8 @@
    -open
    Tsync_bigstring
    -open
+   Tsync_bigstring_lwt
+   -open
    Tsync_xxhash
    -open
    Tsync_test_harness
@@ -22,6 +24,7 @@
   lwt.unix
   bigstringaf
   tsync_bigstring
+  tsync_bigstring_lwt
   tsync_xxhash
   tsync-libs.device
   tsync_io_lwt))

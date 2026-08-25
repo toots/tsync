@@ -182,7 +182,8 @@ let () =
 
   (* 12. Written back and read again. *)
   let p = path "written" in
-  Lwt_main.run (Bigstring.write_to ~path:p (Bigstring.of_string body) ~offset:0);
+  Lwt_main.run
+    (Bigstring_lwt.write_to ~path:p (Bigstring.of_string body) ~offset:0);
   check "write_to" (read_file p = body);
 
   (* Counted, so a case that stopped running takes the report with it, and

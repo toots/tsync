@@ -6,8 +6,8 @@
     back. Held as OCaml strings they would be scanned and copied by a collector
     with nothing to gain from either.
 
-    [t] is {!Bigstringaf.t} and says so, which is what lets a buffer cross
-    {!Io_lwt.Fs} without a conversion. *)
+    [t] is {!Bigstringaf.t} and says so, which is what lets a buffer cross a
+    filesystem without a conversion. *)
 include module type of Bigstringaf with type t = Bigstringaf.t
 
 (** The whole of [s]. Shadows {!Bigstringaf.of_string}, which takes a range: a
@@ -40,4 +40,19 @@ val map_file : path:string -> offset:int -> len:int -> t
     pass {!open_snapshot}'s, not a plain {!Unix.openfile}'s. *)
 val map_fd : Unix.file_descr -> offset:int -> len:int -> t
 
-val write_to : path:string -> t -> offset:int -> unit Lwt.t
+(** Putting bytes where a name can find them again, which is the one thing here
+    that has to wait. *)
+module type WRITER = sig
+  type 'a io
+
+  (** Make [path] exist, moving no bytes. *)
+  val touch : string -> unit io
+
+  val write : string -> t -> offset:int64 -> unit io
+end
+
+module Make (Io : Io.S) (Writer : WRITER with type 'a io := 'a Io.t) : sig
+  (** [write_to ~path t ~offset] puts [t] into [path] at [offset]. An empty [t]
+      still makes [path] appear. *)
+  val write_to : path:string -> t -> offset:int -> unit Io.t
+end

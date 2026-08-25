@@ -1,0 +1,9 @@
+; The one thing a buffer needs a scheduler for. Apart from tsync-libs.bigstring
+; so that the sixty-odd stanzas wanting bytes off the heap do not link one.
+
+(library
+ (flags
+  (:standard -open Tsync_bigstring -open Tsync_io_lwt))
+ (name tsync_bigstring_lwt)
+ (public_name tsync-libs.bigstring_lwt)
+ (libraries tsync_bigstring tsync_io_lwt unix lwt))

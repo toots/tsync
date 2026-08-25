@@ -76,4 +76,4 @@ external clonefile : src:string -> dst:string -> bool = "tsync_clonefile"
    nothing to open before it and nothing to unlink when it fails. *)
 let clone ~src =
   let dst = Filename.temp_path src in
-  if clonefile ~src ~dst then Some (Io_lwt.Fs.open_and_unlink dst) else None
+  if clonefile ~src ~dst then Some (Tsync_io.Fs.open_and_unlink dst) else None

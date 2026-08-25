@@ -1,13 +1,6 @@
 (library
  (flags
-  (:standard -open Tsync_io_lwt -open Tsync_device -open Tsync_log))
+  (:standard -open Tsync_io -open Tsync_device -open Tsync_log))
  (name tsync_bigstring)
  (public_name tsync-libs.bigstring)
- (libraries
-  unix
-  lwt
-  lwt.unix
-  bigstringaf
-  tsync_io_lwt
-  tsync-libs.device
-  tsync-libs.log))
+ (libraries unix bigstringaf tsync_io tsync-libs.device tsync-libs.log))

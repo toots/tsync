@@ -13,7 +13,7 @@ let readdir_list = Io_lwt.Fs.readdir_list
 let write_file path data =
   let* () = Io_lwt.Fs.ensure_parent path in
   let tmp = Filename.temp_path path in
-  let* () = Bigstring.write_to ~path:tmp data ~offset:0 in
+  let* () = Bigstring_lwt.write_to ~path:tmp data ~offset:0 in
   Io_lwt.Retry.rename tmp path
 
 let write_string path data = write_file path (Bigstring.of_string data)
@@ -34,7 +34,7 @@ let read_file path =
 let create_exclusive path data =
   let* () = Io_lwt.Fs.ensure_parent path in
   let tmp = Filename.temp_path path in
-  let* () = Bigstring.write_to ~path:tmp data ~offset:0 in
+  let* () = Bigstring_lwt.write_to ~path:tmp data ~offset:0 in
   Lwt.finalize
     (fun () ->
       Lwt.catch
