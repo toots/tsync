@@ -130,8 +130,8 @@ module Make (J : JOB) = struct
         t.seq (Unix.getpid ())
 
     let write t ~id job =
-      let* () = Fs_util.mkdir_p t.dir in
-      Fs_util.atomic_write (path t id) (J.to_string job)
+      let* () = Io_lwt.Fs.mkdir_p t.dir in
+      Io_lwt.Fs.atomic_write (path t id) (J.to_string job)
 
     (* A record that is simply gone was completed between the directory being
        read and this opening it, which is ordinary on a queue that is working; a
@@ -158,7 +158,7 @@ module Make (J : JOB) = struct
       let* r = read t id in
       match r with `Job r -> write t ~id (f r) | _ -> Lwt.return_unit
 
-    let complete t id = Fs_util.unlink_quiet (path t id)
+    let complete t id = Io_lwt.Fs.unlink_quiet (path t id)
 
     (* A record id leads with its timestamp; anything else is somebody's temp
        file, possibly a live one in another process, and is not ours to read or
@@ -173,7 +173,7 @@ module Make (J : JOB) = struct
       let* exists = Io_lwt.Retry.file_exists t.dir in
       if not exists then Lwt.return_nil
       else
-        let* names = Fs_util.readdir_list t.dir in
+        let* names = Io_lwt.Fs.readdir_list t.dir in
         let names =
           List.sort compare
             (List.filter

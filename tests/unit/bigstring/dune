@@ -12,7 +12,7 @@
    -open
    Tsync_device
    -open
-   Tsync_local_io))
+   Tsync_io_lwt))
  (name bigstring_test)
  (libraries
   tsync_filename
@@ -24,4 +24,4 @@
   tsync_bigstring
   tsync_xxhash
   tsync-libs.device
-  tsync-libs.local_io))
+  tsync_io_lwt))

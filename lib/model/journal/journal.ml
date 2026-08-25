@@ -33,7 +33,7 @@ let get_client_uuid ~share_dir =
             String.trim s)
           else (
             let uuid = Id.token 16 in
-            Fs_util.mkdir_p_sync ~perm:0o700 share_dir;
+            Io_lwt.Fs.mkdir_p_sync ~perm:0o700 share_dir;
             let oc = open_out uuid_file in
             output_string oc uuid;
             close_out oc;

@@ -382,9 +382,9 @@ module Make (C : Conf.S) = struct
 
   (* One syscall, so unlike the counts above this is always reported. *)
   let disk_json (m : Backend.member) =
-    match Option.bind m.Backend.local_path Fs_util.disk_space with
+    match Option.bind m.Backend.local_path Io_lwt.Fs.disk_space with
       | None -> []
-      | Some { Fs_util.avail; total; _ } ->
+      | Some { Io_lwt.Fs.avail; total; _ } ->
           [
             ( "disk",
               `Assoc
@@ -484,12 +484,12 @@ module Make (C : Conf.S) = struct
   (* Markers excluded. A full tree walk, so only under [?totals]. *)
   let rec count_mirror dir =
     let* names =
-      Lwt.catch (fun () -> Fs_util.readdir_list dir) (fun _ -> Lwt.return_nil)
+      Lwt.catch (fun () -> Io_lwt.Fs.readdir_list dir) (fun _ -> Lwt.return_nil)
     in
     Lwt_list.fold_left_s
       (fun acc name ->
         let path = Filename.concat dir name in
-        let* is_dir = Fs_util.is_directory path in
+        let* is_dir = Io_lwt.Fs.is_directory path in
         if is_dir then
           let+ n = count_mirror path in
           acc + n

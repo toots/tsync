@@ -47,8 +47,52 @@ end
 module Bounded = Bounded.Make (Core)
 module Retry = Retry.Make (Core) (Syscalls)
 
-(* A channel rather than a descriptor, so it stays with the library whose
-   channels they are. *)
-let with_file ?buffer ?flags ?perm ~mode path f =
-  Retry.retry_eintr (fun () ->
-      Lwt_io.with_file ?buffer ?flags ?perm ~mode path f)
+module Fs_primitives = struct
+  let read_file_opt path =
+    Lwt.catch
+      (fun () ->
+        Lwt.map Option.some
+          (Retry.retry_eintr (fun () ->
+               Lwt_io.with_file ~mode:Lwt_io.Input path Lwt_io.read)))
+      (fun _ -> Lwt.return_none)
+
+  let write_file path data =
+    Retry.retry_eintr (fun () ->
+        Lwt_io.with_file ~mode:Lwt_io.Output path (fun oc ->
+            Lwt_io.write oc data))
+
+  (* A stream, so the whole materialisation is wrapped: a signal interrupting
+     opendir or readdir retries from the start. *)
+  let readdir_list path =
+    Retry.retry_eintr (fun () ->
+        Lwt.map
+          (List.filter (fun name -> name <> "." && name <> ".."))
+          (Lwt_stream.to_list (Lwt_unix.files_of_directory path)))
+
+  let bread = Lwt_bytes.read
+  let bwrite = Lwt_bytes.write
+
+  external unix_pread :
+    Unix.file_descr -> Bigstringaf.t -> int -> int -> int -> int
+    = "caml_tsync_pread_bytecode" "caml_tsync_pread"
+
+  external unix_pwrite :
+    Unix.file_descr -> Bigstringaf.t -> int -> int -> int -> int
+    = "caml_tsync_pwrite_bytecode" "caml_tsync_pwrite"
+
+  (* Already resolved: the stub blocks, and no caller has yet wanted a
+     scheduling point here. *)
+  let positioned op fd buf ~file_offset pos len =
+    Lwt.return (op (Lwt_unix.unix_file_descr fd) buf file_offset pos len)
+
+  let pread fd buf ~file_offset pos len =
+    positioned unix_pread fd buf ~file_offset pos len
+
+  let pwrite fd buf ~file_offset pos len =
+    positioned unix_pwrite fd buf ~file_offset pos len
+end
+
+module Fs = struct
+  include Tsync_io.Fs
+  include Tsync_io.Fs.Make (Core) (Syscalls) (Fs_primitives)
+end

@@ -32,7 +32,7 @@ let cmd : unit Cmd.t =
           exit 1
       | Some _ ->
           let file = default_domain_file () in
-          Fs_util.mkdir_p_sync (Filename.dirname file);
+          Io_lwt.Fs.mkdir_p_sync (Filename.dirname file);
           let oc = open_out file in
           output_string oc (name ^ "\n");
           close_out oc;

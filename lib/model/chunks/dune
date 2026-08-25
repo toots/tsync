@@ -11,7 +11,7 @@
    -open
    Tsync_xxhash
    -open
-   Tsync_local_io
+   Tsync_io_lwt
    -open
    Tsync_logical_key))
  (name tsync_chunks)
@@ -20,5 +20,5 @@
   tsync-libs.logical_key
   tsync_bigstring
   tsync_xxhash
-  tsync_local_io
+  tsync_io_lwt
   unix))

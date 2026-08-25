@@ -117,9 +117,9 @@ let locality (module C : S) =
 let capacity members =
   let bounded (m : Backend.member) =
     if m.Backend.role = `ReadOnly then None
-    else Option.bind m.Backend.local_path Fs_util.disk_space
+    else Option.bind m.Backend.local_path Io_lwt.Fs.disk_space
   in
-  let tighter a b = if b.Fs_util.avail < a.Fs_util.avail then b else a in
+  let tighter a b = if b.Io_lwt.Fs.avail < a.Io_lwt.Fs.avail then b else a in
   match List.filter_map bounded members with
     | [] -> None
     | first :: rest -> Some (List.fold_left tighter first rest)

@@ -785,16 +785,16 @@ module Make (C : Conf.S) (R : Remote.S) = struct
     let live = Hashtbl.create (List.length uuids) in
     List.iter (fun uuid -> Hashtbl.replace live uuid ()) uuids;
     let sweep dir =
-      let* exists = Fs_util.is_directory dir in
+      let* exists = Io_lwt.Fs.is_directory dir in
       if not exists then Lwt.return_unit
       else
-        let* names = Fs_util.readdir_list dir in
+        let* names = Io_lwt.Fs.readdir_list dir in
         Lwt_list.iter_s
           (fun name ->
             if Hashtbl.mem live name then Lwt.return_unit
             else (
               Log.info "reclaiming orphaned staged body %s" name;
-              Fs_util.unlink_quiet (Filename.concat dir name)))
+              Io_lwt.Fs.unlink_quiet (Filename.concat dir name)))
           names
     in
     let* () =
@@ -843,7 +843,7 @@ module Make (C : Conf.S) (R : Remote.S) = struct
     in
     match fd with
       | None ->
-          Local_io.zero buf ~pos:0 ~len;
+          Io_lwt.Fs.zero buf ~pos:0 ~len;
           Lwt.return_unit
       | Some fd ->
           Lwt.finalize
@@ -852,12 +852,12 @@ module Make (C : Conf.S) (R : Remote.S) = struct
                 if pos >= len then Lwt.return_unit
                 else
                   let* n =
-                    Local_io.pread fd buf ~file_offset:(offset + pos) pos
+                    Io_lwt.Fs.pread fd buf ~file_offset:(offset + pos) pos
                       (len - pos)
                   in
                   (* Short of [len]: the rest of the chunk is a hole. *)
                   if n = 0 then (
-                    Local_io.zero buf ~pos ~len:(len - pos);
+                    Io_lwt.Fs.zero buf ~pos ~len:(len - pos);
                     Lwt.return_unit)
                   else loop (pos + n)
               in
@@ -880,7 +880,7 @@ module Make (C : Conf.S) (R : Remote.S) = struct
           len;
           fill =
             (fun buf ->
-              Local_io.zero buf ~pos:0 ~len;
+              Io_lwt.Fs.zero buf ~pos:0 ~len;
               Lwt.return_unit);
         }
     in
@@ -1239,7 +1239,7 @@ module Make (C : Conf.S) (R : Remote.S) = struct
   (* Goes through the ordinary read path, so staged edits, inherited chunks and
      holes all come out right and the chunk store is populated on the way. *)
   let assemble_to key ~dst_path =
-    let* () = Fs_util.ensure_parent dst_path in
+    let* () = Io_lwt.Fs.ensure_parent dst_path in
     let* plan = fetch_plan key in
     let* size = content_size key in
     let to_fetch = match plan with None -> 0 | Some gs -> groups_bytes gs in
@@ -1265,7 +1265,7 @@ module Make (C : Conf.S) (R : Remote.S) = struct
       if n <= 0 then Lwt.return_unit
       else
         let* (_ : int) =
-          Local_io.write dst_path (Bigarray.Array1.sub buf 0 n) ~offset
+          Io_lwt.Fs.write dst_path (Bigarray.Array1.sub buf 0 n) ~offset
         in
         credit (Logical_key.to_string key) n;
         go (Int64.add offset (Int64.of_int n))
@@ -1284,7 +1284,7 @@ module Make (C : Conf.S) (R : Remote.S) = struct
   (* ponytail: no progress span — a range is bounded by construction and its
      caller knows how many bytes it asked for. *)
   let fetch_range key ~dst_path ~offset ~length =
-    let* () = Fs_util.ensure_parent dst_path in
+    let* () = Io_lwt.Fs.ensure_parent dst_path in
     let* fd =
       Io_lwt.Retry.openfile dst_path [Unix.O_WRONLY; Unix.O_CREAT] 0o644
     in
@@ -1293,7 +1293,7 @@ module Make (C : Conf.S) (R : Remote.S) = struct
     let offset = Int64.of_int offset in
     let* n = pread_key key buf ~offset in
     let+ (_ : int) =
-      Local_io.write dst_path (Bigarray.Array1.sub buf 0 n) ~offset
+      Io_lwt.Fs.write dst_path (Bigarray.Array1.sub buf 0 n) ~offset
     in
     n
 

@@ -39,13 +39,13 @@ let ensure_dirs root rel =
   let components =
     String.split_on_char '/' rel |> List.filter (fun c -> c <> "")
   in
-  let* () = Fs_util.mkdir_p root in
+  let* () = Io_lwt.Fs.mkdir_p root in
   let rec go dir = function
     | [] -> Lwt.return_unit
     | c :: rest ->
         let enc = Stored_key.escape c in
         let dir = Filename.concat dir enc in
-        let* () = Fs_util.mkdir_p dir in
+        let* () = Io_lwt.Fs.mkdir_p dir in
         let* () =
           if Stored_key.is_escaped enc then
             Cache_layout.record_dir_name
@@ -68,16 +68,16 @@ let real_file_name name m =
   if Stored_key.is_escaped name then recorded_name m else name
 
 let rec clean_tmp dir =
-  let* is_dir = Fs_util.is_directory dir in
+  let* is_dir = Io_lwt.Fs.is_directory dir in
   if not is_dir then Lwt.return_unit
   else
-    let* names = Fs_util.readdir_list dir in
+    let* names = Io_lwt.Fs.readdir_list dir in
     Lwt_list.iter_s
       (fun name ->
         let path = Filename.concat dir name in
-        let* is_dir = Fs_util.is_directory path in
+        let* is_dir = Io_lwt.Fs.is_directory path in
         if is_dir then clean_tmp path
-        else if Filename.is_temp_name name then Fs_util.unlink_quiet path
+        else if Filename.is_temp_name name then Io_lwt.Fs.unlink_quiet path
         else Lwt.return_unit)
       names
 
@@ -125,7 +125,7 @@ module Make (C : Conf.S) = struct
 
   let published key =
     let p = path key in
-    let* st = Fs_util.stat_opt p in
+    let* st = Io_lwt.Fs.stat_opt p in
     match st with
       | None ->
           invalidate key;
@@ -153,12 +153,12 @@ module Make (C : Conf.S) = struct
     invalidate key;
     let* () = ensure_parent key in
     let bytes = body ~name:(Logical_key.leaf key) manifest in
-    Fs_util.atomic_write_at (path key) ~size:(Bigstring.length bytes)
+    Io_lwt.Fs.atomic_write_at (path key) ~size:(Bigstring.length bytes)
       (fun put -> put ~offset:0 bytes)
 
   let delete key =
     invalidate key;
-    Fs_util.unlink_quiet (path key)
+    Io_lwt.Fs.unlink_quiet (path key)
 
   (* A directory keeps its real name in a marker beside it, for the same reason
      a manifest keeps one in its body: an escaped on-disk name is a hash. *)
@@ -167,7 +167,7 @@ module Make (C : Conf.S) = struct
     if leaf = "" || not (Stored_key.is_escaped (Stored_key.escape leaf)) then
       Lwt.return_unit
     else
-      Fs_util.atomic_write
+      Io_lwt.Fs.atomic_write
         (Filename.concat (path key) Stored_key.dir_name_leaf)
         leaf
 
@@ -185,7 +185,7 @@ module Make (C : Conf.S) = struct
       let dst = path dst_key in
       let* () = ensure_parent dst_key in
       let* () = Io_lwt.Retry.rename src dst in
-      let* is_dir = Fs_util.is_directory dst in
+      let* is_dir = Io_lwt.Fs.is_directory dst in
       if is_dir then refresh_dir_marker dst_key
       else (
         match of_file dst with
@@ -194,7 +194,7 @@ module Make (C : Conf.S) = struct
 
   (* The mirror is the directory structure: directories exist only here. *)
   let create_dir key = ensure_dirs (root ()) (rel_of key)
-  let delete_dir key = Fs_util.rm_rf (path key)
+  let delete_dir key = Io_lwt.Fs.rm_rf (path key)
 
   (* Staged entries win for the same key.
      ponytail: quadratic in (staged × published); staged files are the handful
@@ -221,8 +221,8 @@ module Make (C : Conf.S) = struct
   (* Either tree may be missing: the published one right after a full resync
      clears it, the staged one whenever nothing is being written. *)
   let readdir_opt dir =
-    let* is_dir = Fs_util.is_directory dir in
-    if is_dir then Fs_util.readdir_list dir else Lwt.return_nil
+    let* is_dir = Io_lwt.Fs.is_directory dir in
+    if is_dir then Io_lwt.Fs.readdir_list dir else Lwt.return_nil
 
   let dir_of_prefix prefix = (rel_of prefix, path prefix)
 
@@ -237,7 +237,7 @@ module Make (C : Conf.S) = struct
           if Stored_key.internal_leaf name then Lwt.return (files, dirs)
           else (
             let path = Filename.concat dir name in
-            let* is_dir = Fs_util.is_directory path in
+            let* is_dir = Io_lwt.Fs.is_directory path in
             if is_dir then
               let+ real = Cache_layout.real_dir_name path name in
               (files, real :: dirs)
@@ -263,13 +263,13 @@ module Make (C : Conf.S) = struct
      which needs the domain the walk belongs to. *)
   let fold_files ~start ~key f acc =
     let rec walk dir key acc =
-      let* names = Fs_util.readdir_list dir in
+      let* names = Io_lwt.Fs.readdir_list dir in
       Lwt_list.fold_left_s
         (fun acc name ->
           if Stored_key.internal_leaf name then Lwt.return acc
           else (
             let path = Filename.concat dir name in
-            let* is_dir = Fs_util.is_directory path in
+            let* is_dir = Io_lwt.Fs.is_directory path in
             if is_dir then
               let* real = Cache_layout.real_dir_name path name in
               walk path (Logical_key.dir_in key real) acc
@@ -281,7 +281,7 @@ module Make (C : Conf.S) = struct
                 | None -> acc))
         acc names
     in
-    let* ok = Fs_util.is_directory start in
+    let* ok = Io_lwt.Fs.is_directory start in
     if ok then walk start key acc else Lwt.return acc
 
   let list_tree ~prefix () =
@@ -321,7 +321,7 @@ module Make (C : Conf.S) = struct
           let+ m = published key in
           match m with Some m -> Some (`Published m) | None -> None)
 
-  let ensure_root () = Fs_util.mkdir_p (root ())
+  let ensure_root () = Io_lwt.Fs.mkdir_p (root ())
 
   let reap_leftovers () =
     let* () = ensure_root () in

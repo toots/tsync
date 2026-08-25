@@ -27,8 +27,6 @@
    -open
    Tsync_log
    -open
-   Tsync_local_io
-   -open
    Tsync_io_lwt
    -open
    Tsync_xxhash))
@@ -43,7 +41,6 @@
   tsync_backend_register
   tsync_bigstring
   tsync_log
-  tsync_local_io
   tsync_io_lwt
   tsync_xxhash
   yojson

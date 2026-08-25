@@ -307,7 +307,7 @@ let () =
        Filename.concat main_dir (Filename.chop_suffix L.from_prefix "/")
      in
      let* strays =
-       let+ shards = Fs_util.readdir_list from_dir in
+       let+ shards = Io_lwt.Fs.readdir_list from_dir in
        List.length shards
      in
      ignore

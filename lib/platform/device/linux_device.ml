@@ -89,7 +89,7 @@ let ficlone_to dst ~src =
 
 let clone ~src =
   let dst = Filename.temp_path src in
-  if ficlone_to dst ~src then Some (Fs_util.open_and_unlink dst)
+  if ficlone_to dst ~src then Some (Io_lwt.Fs.open_and_unlink dst)
   else (
     (* The empty file [ficlone_to] opened is not a clone of anything. *)
     (try Unix.unlink dst with Unix.Unix_error _ -> ());

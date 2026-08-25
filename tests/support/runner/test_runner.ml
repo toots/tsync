@@ -635,7 +635,7 @@ let setup_client (module C : Conf.S) root staging_prefix =
            not mistaken for daemon state. The system hands the extension a fresh
            path per range; one reused path shows the same thing here. *)
         let dst = Filename.concat (Filename.dirname C.cache_root) "range.out" in
-        let* () = Fs_util.unlink_quiet dst in
+        let* () = Io_lwt.Fs.unlink_quiet dst in
         let* n = F.fetch_range (key path) ~dst_path:dst ~offset ~length:len in
         let served =
           let ic = open_in_bin dst in
@@ -950,12 +950,12 @@ let setup_client (module C : Conf.S) root staging_prefix =
         (* Dump the exported tree so snapshots pin the actual bytes written. *)
         let rec dump rel =
           let dir = if rel = "" then dst else Filename.concat dst rel in
-          let* names = Fs_util.readdir_list dir in
+          let* names = Io_lwt.Fs.readdir_list dir in
           Lwt_list.iter_s
             (fun name ->
               let r = if rel = "" then name else rel ^ "/" ^ name in
               let abs = Filename.concat dst r in
-              let* kind = Fs_util.lstat_kind abs in
+              let* kind = Io_lwt.Fs.lstat_kind abs in
               match kind with
                 | `Dir -> dump r
                 | `Symlink target ->

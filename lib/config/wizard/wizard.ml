@@ -817,7 +817,7 @@ module Make (E : ENV) = struct
   (* Serialize globals + domains to [path] with 0600 perms. *)
   let write_config ~path ~client_name ~max_uploads ~max_chunk_buffers
       ~max_downloads ~tls ~domains =
-    Fs_util.mkdir_p_sync (Filename.dirname path);
+    Io_lwt.Fs.mkdir_p_sync (Filename.dirname path);
     let json =
       `Assoc
         ([

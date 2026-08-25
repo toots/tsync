@@ -26,8 +26,6 @@
    -open
    Tsync_ops
    -open
-   Tsync_store
-   -open
    Tsync_naming
    -open
    Tsync_ipc
@@ -38,7 +36,7 @@
    -open
    Tsync_log
    -open
-   Tsync_local_io
+   Tsync_io_lwt
    -open
    Tsync_metrics
    -open
@@ -70,9 +68,7 @@
    -open
    Tsync_device
    -open
-   Tsync_runtime
-   -open
-   Tsync_io_lwt))
+   Tsync_runtime))
  (name tsync_cli)
  (libraries
   tsync_logical_key
@@ -82,7 +78,7 @@
   tsync_staged
   tsync_checkout
   tsync_journal
-  tsync-libs.io_lwt
+  tsync_io_lwt
   tsync-libs.field_spec
   tsync-libs.sync
   tsync-libs.ops
@@ -103,7 +99,6 @@
   tsync-libs.domain_store
   tsync_domain
   tsync_oneshot
-  tsync-libs.local_io
   tsync-libs.log
   tsync_runtime
   tsync_device

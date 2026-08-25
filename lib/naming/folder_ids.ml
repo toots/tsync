@@ -10,15 +10,8 @@ let marker_path ~cache_root ~domain_name key =
   Filename.concat (dir_of ~cache_root ~domain_name key) marker_name
 
 let read ~cache_root ~domain_name key =
-  Lwt.catch
-    (fun () ->
-      let+ s =
-        Io_lwt.with_file ~mode:Lwt_io.Input
-          (marker_path ~cache_root ~domain_name key)
-          Lwt_io.read
-      in
-      Folder.marker_of_string s)
-    (fun _ -> Lwt.return_none)
+  let+ s = Io_lwt.Fs.read_file_opt (marker_path ~cache_root ~domain_name key) in
+  Option.bind s Folder.marker_of_string
 
 let index_path ~cache_root ~domain_name id =
   Filename.concat (Cache_layout.folders_dir ~cache_root domain_name) id
@@ -40,15 +33,8 @@ let entry_of_string data =
     | _ | (exception _) -> None
 
 let read_entry ~cache_root ~domain_name id =
-  Lwt.catch
-    (fun () ->
-      let+ s =
-        Io_lwt.with_file ~mode:Lwt_io.Input
-          (index_path ~cache_root ~domain_name id)
-          Lwt_io.read
-      in
-      entry_of_string s)
-    (fun _ -> Lwt.return_none)
+  let+ s = Io_lwt.Fs.read_file_opt (index_path ~cache_root ~domain_name id) in
+  Option.bind s entry_of_string
 
 (* Ids no folder has any more, so the repeated lookups fileproviderd makes for a
    deleted folder do not each cost a walk. Ids are random and minted once, so
@@ -65,17 +51,17 @@ let absent_key ~cache_root ~domain_name id =
 let write_entry ~cache_root ~domain_name ~id entry =
   Hashtbl.remove absent (absent_key ~cache_root ~domain_name id);
   let path = index_path ~cache_root ~domain_name id in
-  let* () = Fs_util.ensure_parent path in
-  Fs_util.atomic_write path (entry_to_string entry)
+  let* () = Io_lwt.Fs.ensure_parent path in
+  Io_lwt.Fs.atomic_write path (entry_to_string entry)
 
 (* The name comes from where the folder actually sits, not from the marker being
    written: a marker that travelled with a renamed directory still carries the old
    leaf, and the index has to spell the path back out. *)
 let rec write ~cache_root ~domain_name key (m : Folder.marker) =
   let dir = dir_of ~cache_root ~domain_name key in
-  let* () = Fs_util.mkdir_p dir in
+  let* () = Io_lwt.Fs.mkdir_p dir in
   let path = Filename.concat dir marker_name in
-  let* () = Fs_util.atomic_write path (Folder.marker_to_string m) in
+  let* () = Io_lwt.Fs.atomic_write path (Folder.marker_to_string m) in
   if Logical_key.is_root key then Lwt.return_unit
   else
     let* parent = ensure_id ~cache_root ~domain_name (Logical_key.parent key) in
@@ -128,25 +114,20 @@ let rebuild ~cache_root ~domain_name =
   let base = Cache_layout.manifests_dir ~cache_root domain_name in
   let seen = Hashtbl.create 64 in
   let rec walk dir ~parent_id =
-    let* names = Fs_util.readdir_list_quiet dir in
+    let* names = Io_lwt.Fs.readdir_list_quiet dir in
     Lwt_list.iter_s
       (fun name ->
         if Stored_key.internal_leaf name then Lwt.return_unit
         else (
           let path = Filename.concat dir name in
-          let* is_dir = Fs_util.is_directory path in
+          let* is_dir = Io_lwt.Fs.is_directory path in
           if not is_dir then Lwt.return_unit
           else
             let* marker =
-              Lwt.catch
-                (fun () ->
-                  let+ s =
-                    Io_lwt.with_file ~mode:Lwt_io.Input
-                      (Filename.concat path marker_name)
-                      Lwt_io.read
-                  in
-                  Folder.marker_of_string s)
-                (fun _ -> Lwt.return_none)
+              let+ s =
+                Io_lwt.Fs.read_file_opt (Filename.concat path marker_name)
+              in
+              Option.bind s Folder.marker_of_string
             in
             match (marker, parent_id) with
               (* No marker means no id, and filing children under the nearest
@@ -171,11 +152,11 @@ let rebuild ~cache_root ~domain_name =
      the markers, but leaving them grows the directory forever. Neither tree
      exists on a domain nobody has written to, which reads as empty. *)
   let dir = Cache_layout.folders_dir ~cache_root domain_name in
-  let* ids = Fs_util.readdir_list_quiet dir in
+  let* ids = Io_lwt.Fs.readdir_list_quiet dir in
   Lwt_list.iter_s
     (fun id ->
       if Hashtbl.mem seen id then Lwt.return_unit
-      else Fs_util.unlink_quiet (Filename.concat dir id))
+      else Io_lwt.Fs.unlink_quiet (Filename.concat dir id))
     ids
 
 (* One walk at a time per domain; concurrent lookups join the one in flight. *)

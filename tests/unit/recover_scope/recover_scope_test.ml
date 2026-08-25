@@ -25,7 +25,7 @@ module E = Domain_engine.Make (C)
    construction rather than by a spelling copied here. A foreign pid, because
    that is the case that matters: the sweep cannot tell it from a live one. *)
 let plant_temp dir =
-  Fs_util.mkdir_p_sync dir;
+  Io_lwt.Fs.mkdir_p_sync dir;
   let path = Filename.concat dir ".tsync-tmp-999999-1.tmp" in
   let oc = open_out path in
   output_string oc "half-written";
@@ -38,7 +38,7 @@ let plant_staged_body () =
   let dir =
     Cache_layout.staged_whole_dir ~cache_root:C.cache_root C.domain_name
   in
-  Fs_util.mkdir_p_sync dir;
+  Io_lwt.Fs.mkdir_p_sync dir;
   let path = Filename.concat dir "0123456789abcdef" in
   let oc = open_out path in
   output_string oc "bytes a write is about to use";

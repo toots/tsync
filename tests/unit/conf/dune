@@ -16,7 +16,7 @@
    -open
    Tsync_backend_register
    -open
-   Tsync_local_io))
+   Tsync_io_lwt))
  (name conf_test)
  (libraries
   unix
@@ -25,4 +25,4 @@
   tsync-libs.conf
   tsync-libs.backend_register
   tsync_local_backend
-  tsync-libs.local_io))
+  tsync_io_lwt))

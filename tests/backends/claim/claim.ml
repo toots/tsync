@@ -85,4 +85,4 @@ let () =
                let k = Stored_key.to_string e.key in
                not (String.length k > 0 && k.[String.length k - 1] = '/'))
              entries)));
-  Lwt_main.run (Fs_util.rm_rf root)
+  Lwt_main.run (Io_lwt.Fs.rm_rf root)

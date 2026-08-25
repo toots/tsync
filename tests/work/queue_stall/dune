@@ -8,7 +8,7 @@
    -open
    Tsync_log
    -open
-   Tsync_local_io
+   Tsync_io_lwt
    -open
    Tsync_test_harness))
  (name queue_stall)
@@ -17,7 +17,7 @@
   tsync_test_harness
   tsync_work
   tsync_log
-  tsync_local_io
+  tsync_io_lwt
   lwt
   lwt.unix
   unix))

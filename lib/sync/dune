@@ -31,8 +31,6 @@
    -open
    Tsync_content
    -open
-   Tsync_local_io
-   -open
    Tsync_io_lwt
    -open
    Tsync_backend_register
@@ -56,7 +54,6 @@
   tsync_naming
   tsync_store
   tsync_content
-  tsync_local_io
   tsync_io_lwt
   tsync_backend_register
   tsync_log

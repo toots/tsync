@@ -43,7 +43,7 @@
   tsync_bigstring
   tsync_backend_register
   tsync_http_proxy_frontend
-  tsync-libs.io_lwt
+  tsync_io_lwt
   tsync-libs.metrics
   tsync_local_backend
   tsync_conf

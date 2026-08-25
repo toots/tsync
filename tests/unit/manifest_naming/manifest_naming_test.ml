@@ -145,4 +145,4 @@ let () =
        (match st with
          | Some st -> st.Staged_manifest.s_name
          | None -> "<absent>"));
-  Lwt_main.run (Fs_util.rm_rf root)
+  Lwt_main.run (Io_lwt.Fs.rm_rf root)

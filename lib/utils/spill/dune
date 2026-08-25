@@ -3,15 +3,7 @@
 
 (library
  (flags
-  (:standard
-   -open
-   Tsync_filename
-   -open
-   Tsync_local_io
-   -open
-   Tsync_io_lwt
-   -open
-   Tsync_bigstring))
+  (:standard -open Tsync_filename -open Tsync_io_lwt -open Tsync_bigstring))
  (name tsync_spill)
  (public_name tsync-libs.spill)
  (libraries
@@ -19,6 +11,6 @@
   unix
   lwt
   lwt.unix
-  tsync_local_io
+  tsync_io
   tsync_io_lwt
   tsync-libs.bigstring))

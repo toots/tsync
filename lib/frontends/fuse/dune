@@ -18,8 +18,6 @@
    -open
    Tsync_io_lwt
    -open
-   Tsync_local_io
-   -open
    Tsync_conf
    -open
    Tsync_ipc_handler
@@ -44,9 +42,8 @@
   tsync-libs.engine
   tsync-libs.ipc
   tsync-libs.metrics
-  tsync-libs.local_io
+  tsync_io_lwt
   tsync-libs.ipc_handler
-  tsync-libs.io_lwt
   fuse3
   unix
   lwt

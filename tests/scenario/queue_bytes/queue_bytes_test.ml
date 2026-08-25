@@ -91,7 +91,7 @@ let post_dir_rename () =
 
 let () =
   Lwt_main.run
-    (let* () = Fs_util.rm_rf root in
+    (let* () = Io_lwt.Fs.rm_rf root in
      Sq.start
        ~upload:(fun ~key:_ ~cancel:_ -> if !renaming then dir_gate else gate)
        ~on_upload_done:(fun ~key:_ -> Lwt.return_unit);

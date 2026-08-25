@@ -5,4 +5,9 @@
 (library
  (name tsync_io)
  (public_name tsync-libs.io)
- (libraries unix))
+ (flags
+  (:standard -open Tsync_filename))
+ (foreign_stubs
+  (language c)
+  (names statvfs_stubs))
+ (libraries tsync_filename unix bigstringaf))

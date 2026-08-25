@@ -10,11 +10,11 @@
   (= %{system} linux))
  (modules linux_device)
  (flags
-  (:standard -open Tsync_filename -open Tsync_local_io))
+  (:standard -open Tsync_filename -open Tsync_io_lwt))
  (foreign_stubs
   (language c)
   (names linux_clone_stubs))
- (libraries unix tsync-libs.filename tsync-libs.local_io))
+ (libraries unix tsync-libs.filename tsync_io_lwt))
 
 (library
  (name tsync_macos_device)
@@ -23,11 +23,11 @@
   (= %{system} macosx))
  (modules macos_device)
  (flags
-  (:standard -open Tsync_filename -open Tsync_local_io))
+  (:standard -open Tsync_filename -open Tsync_io_lwt))
  (foreign_stubs
   (language c)
   (names macos_clone_stubs))
- (libraries unix tsync-libs.filename tsync-libs.local_io))
+ (libraries unix tsync-libs.filename tsync_io_lwt))
 
 ; [descriptors] is not per-OS: getrlimit/setrlimit are POSIX and identical on
 ; both targets, and the per-process ceiling is discovered by asking rather than

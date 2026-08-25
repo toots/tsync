@@ -28,7 +28,7 @@ let table : (int, entry) Hashtbl.t = Hashtbl.create 4
 
 (* A pid reused between two reports keeps a stale row until silence retires it,
    which is why liveness alone is not the test. *)
-let alive = Fs_util.pid_alive
+let alive = Io_lwt.Fs.pid_alive
 
 let expired now e =
   if e.finished then now -. e.seen > keep_done

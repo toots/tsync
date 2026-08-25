@@ -4,14 +4,8 @@
    -open
    Tsync_filename
    -open
-   Tsync_local_io
+   Tsync_io_lwt
    -open
    Tsync_test_harness))
  (name temp_names_test)
- (libraries
-  tsync_filename
-  tsync_test_harness
-  tsync_local_io
-  lwt
-  lwt.unix
-  unix))
+ (libraries tsync_filename tsync_test_harness tsync_io_lwt lwt lwt.unix unix))

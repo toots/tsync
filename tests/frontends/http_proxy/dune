@@ -14,7 +14,7 @@
    -open
    Tsync_naming
    -open
-   Tsync_local_io
+   Tsync_io_lwt
    -open
    Tsync_http_proxy
    -open
@@ -58,7 +58,7 @@
   tsync_frontend
   tsync_diagnostics
   tsync_conf
-  tsync_local_io
+  tsync_io_lwt
   cohttp
   yojson
   lwt

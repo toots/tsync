@@ -17,12 +17,12 @@ let dir name =
       (Printf.sprintf "tsync-%s-%d" name (Unix.getpid ()))
   in
   rm_rf path;
-  Fs_util.mkdir_p_sync path;
+  Io_lwt.Fs.mkdir_p_sync path;
   path
 
 let sub root name =
   let path = Filename.concat root name in
-  Fs_util.mkdir_p_sync path;
+  Io_lwt.Fs.mkdir_p_sync path;
   path
 
 let cleanup = rm_rf

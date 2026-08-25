@@ -6,7 +6,7 @@
  (flags
   (:standard
    -open
-   Tsync_local_io
+   Tsync_io_lwt
    -open
    Tsync_chunks
    -open
@@ -19,7 +19,7 @@
  (public_name tsync-libs.manifest)
  (libraries
   unix
-  tsync_local_io
+  tsync_io_lwt
   tsync_chunks
   tsync_bigstring
   tsync_xxhash

@@ -31,8 +31,6 @@
    -open
    Tsync_store
    -open
-   Tsync_local_io
-   -open
    Tsync_io_lwt
    -open
    Tsync_xxhash
@@ -59,7 +57,6 @@
   tsync_chunks
   tsync_chunk_store
   tsync_store
-  tsync_local_io
   tsync_io_lwt
   tsync_xxhash
   tsync_metrics

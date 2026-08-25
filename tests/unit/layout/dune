@@ -12,7 +12,7 @@
    -open
    Tsync_naming
    -open
-   Tsync_local_io))
+   Tsync_io_lwt))
  (name layout)
  (libraries
   tsync-libs.logical_key
@@ -20,5 +20,5 @@
   tsync_chunks
   tsync_journal
   tsync_naming
-  tsync_local_io
+  tsync_io_lwt
   unix))

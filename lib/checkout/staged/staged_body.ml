@@ -12,7 +12,7 @@ module type Cache = sig
   val read_into :
     group:Manifest.Group.t ->
     index:int ->
-    Local_io.buffer ->
+    Io_lwt.Fs.buffer ->
     chunk_off:int ->
     Chunk_cache.served Lwt.t
 
@@ -35,7 +35,7 @@ module Make (C : Conf.S) (Cache : Cache) = struct
 
   let ensure ~uuid ~len =
     let p = path uuid in
-    let* () = Fs_util.ensure_parent p in
+    let* () = Io_lwt.Fs.ensure_parent p in
     let* have = len_of ~uuid in
     match have with
       | Some n when n >= len -> Lwt.return_unit
@@ -54,10 +54,10 @@ module Make (C : Conf.S) (Cache : Cache) = struct
       (fun () -> Io_lwt.Retry.close fd)
 
   let write ~uuid buf ~offset =
-    Local_io.write (path uuid) buf ~offset:(Int64.of_int offset)
+    Io_lwt.Fs.write (path uuid) buf ~offset:(Int64.of_int offset)
 
   let read_into ~uuid buf ~offset =
-    Local_io.read (path uuid) buf ~offset:(Int64.of_int offset)
+    Io_lwt.Fs.read (path uuid) buf ~offset:(Int64.of_int offset)
 
   (* Regrouping: the same bytes under a body that holds the whole group. *)
   let copy ~src ~src_off ~dst ~dst_off ~len =
@@ -68,7 +68,7 @@ module Make (C : Conf.S) (Cache : Cache) = struct
     in
     ()
 
-  let forget ~uuid = Fs_util.unlink_quiet (path uuid)
+  let forget ~uuid = Io_lwt.Fs.unlink_quiet (path uuid)
 
   (* For a write not replacing all of a published chunk. The copy is the price of
      immutable content-addressed chunks. *)
@@ -111,17 +111,17 @@ module Make (C : Conf.S) (Cache : Cache) = struct
      two. *)
   let adopt_whole ~src ~uuid =
     let dst = whole_path uuid in
-    let* () = Fs_util.ensure_parent dst in
+    let* () = Io_lwt.Fs.ensure_parent dst in
     Lwt.catch
       (fun () -> Io_lwt.Retry.rename src dst)
       (function
         | Unix.Unix_error (Unix.EXDEV, _, _) ->
-            let* () = Fs_util.copy_file ~src ~dst in
-            Fs_util.unlink_quiet src
+            let* () = Io_lwt.Fs.copy_file ~src ~dst in
+            Io_lwt.Fs.unlink_quiet src
         | exn -> Lwt.fail exn)
 
   let whole_read_into ~uuid buf ~offset =
-    Local_io.read (whole_path uuid) buf ~offset
+    Io_lwt.Fs.read (whole_path uuid) buf ~offset
 
-  let whole_forget ~uuid = Fs_util.unlink_quiet (whole_path uuid)
+  let whole_forget ~uuid = Io_lwt.Fs.unlink_quiet (whole_path uuid)
 end

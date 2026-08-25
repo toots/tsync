@@ -18,7 +18,7 @@
    -open
    Tsync_runtime
    -open
-   Tsync_local_io))
+   Tsync_io_lwt))
  (name tsync_test_harness)
  (libraries
   tsync_manifest
@@ -28,7 +28,8 @@
   tsync_domain
   tsync_runtime
   tsync_bigstring
-  tsync_local_io
+  tsync_io
+  tsync_io_lwt
   lwt
   lwt.unix
   unix))

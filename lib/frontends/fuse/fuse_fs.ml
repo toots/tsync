@@ -239,7 +239,7 @@ module Make (C : Conf.S) (D : Domain_engine.Domain) = struct
     match Conf.capacity C.members with
       | Some space -> space
       | None ->
-          Fs_util.
+          Io_lwt.Fs.
             {
               avail = unlimited_bytes;
               free = unlimited_bytes;
@@ -416,7 +416,7 @@ module Make (C : Conf.S) (D : Domain_engine.Domain) = struct
         (fun _path ->
           let bsize = 4096L in
           let blocks bytes = Int64.div bytes bsize in
-          let { Fs_util.avail; free; total } = store_capacity () in
+          let { Io_lwt.Fs.avail; free; total } = store_capacity () in
           Unix_util.
             {
               f_bsize = bsize;

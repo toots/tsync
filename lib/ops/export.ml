@@ -17,11 +17,11 @@ module Make (C : Conf.S) = struct
   let export_file ~dst rel =
     let key = Lk.file rel in
     let dst_path = Filename.concat dst rel in
-    let* () = Fs_util.ensure_parent dst_path in
+    let* () = Io_lwt.Fs.ensure_parent dst_path in
     let* manifest = D.published key in
     match Option.map (fun m -> (m, Manifest.symlink m)) manifest with
       | Some (_, Some target) ->
-          let* () = Fs_util.unlink_quiet dst_path in
+          let* () = Io_lwt.Fs.unlink_quiet dst_path in
           let+ () = Io_lwt.Retry.symlink target dst_path in
           Exported_symlink
       | Some (_, None) ->
@@ -60,7 +60,7 @@ module Make (C : Conf.S) = struct
     let* local_rels = Mf.walk () in
     let files = List.sort_uniq compare (remote_rels @ local_rels) in
     on_plan ~files:(List.length files);
-    let* () = Fs_util.mkdir_p dst in
+    let* () = Io_lwt.Fs.mkdir_p dst in
     let+ statuses =
       Lwt_list.map_s
         (fun rel ->

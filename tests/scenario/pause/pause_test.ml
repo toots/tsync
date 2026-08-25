@@ -51,7 +51,7 @@ let report label =
 
 let () =
   Lwt_main.run
-    (let* () = Fs_util.rm_rf root in
+    (let* () = Io_lwt.Fs.rm_rf root in
      Sq.start
        ~upload:(fun ~key:_ ~cancel:_ ->
          incr uploaded;

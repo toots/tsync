@@ -8,13 +8,11 @@
    -open
    Tsync_bigstring
    -open
-   Tsync_local_io
+   Tsync_io_lwt
    -open
    Tsync_field_spec
    -open
    Tsync_metrics
-   -open
-   Tsync_io_lwt
    -open
    Tsync_logical_key))
  (name tsync_backend_register)
@@ -25,7 +23,6 @@
   tsync_field_spec
   tsync_metrics
   tsync_bigstring
-  tsync_local_io
   tsync_io_lwt
   tsync_log
   lwt

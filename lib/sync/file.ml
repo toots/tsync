@@ -80,7 +80,7 @@ module Make_with_layout (C : Conf.S) (Sq : Sync_queue.S) (L : Layout.S) :
 
   (* Directories exist only in the manifest mirror. *)
   let stat key =
-    let* mst = Fs_util.stat_opt_large (manifest_path key) in
+    let* mst = Io_lwt.Fs.stat_opt_large (manifest_path key) in
     match mst with
       | Some { Unix.LargeFile.st_kind = Unix.S_DIR; _ } ->
           Lwt.return_some (dir_stat ())
@@ -361,7 +361,7 @@ module Make_with_layout (C : Conf.S) (Sq : Sync_queue.S) (L : Layout.S) :
 
   let rename_body ~src ~dst =
     let mp = manifest_path src in
-    let* mst = Fs_util.stat_opt_large mp in
+    let* mst = Io_lwt.Fs.stat_opt_large mp in
     let is_dir =
       match mst with
         | Some { Unix.LargeFile.st_kind = Unix.S_DIR; _ } -> true

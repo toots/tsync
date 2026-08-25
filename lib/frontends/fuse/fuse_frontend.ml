@@ -7,7 +7,7 @@ let prepare_mount_point mount_point =
     (Sys.command
        (Printf.sprintf "fusermount3 -uz %s 2>/dev/null"
           (Filename.quote mount_point)));
-  Fs_util.mkdir_p_sync mount_point
+  Io_lwt.Fs.mkdir_p_sync mount_point
 
 let mount_binding (sv : Frontend.served) =
   let b = sv.Frontend.binding in

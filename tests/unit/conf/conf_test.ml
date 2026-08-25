@@ -223,7 +223,7 @@ let () =
     (match
        Conf.capacity [store ~local_path:here "a"; store ~local_path:here "b"]
      with
-    | Some { Fs_util.avail; total; _ } -> assert (avail <= total)
+    | Some { Io_lwt.Fs.avail; total; _ } -> assert (avail <= total)
     | None -> assert false);
 
   Unix.putenv "TSYNC_CONFIG_JSON" "";

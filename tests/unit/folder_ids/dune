@@ -6,8 +6,6 @@
    -open
    Tsync_naming
    -open
-   Tsync_local_io
-   -open
    Tsync_io_lwt
    -open
    Tsync_test_harness))
@@ -17,7 +15,6 @@
   tsync_test_harness
   tsync_naming
   tsync_io_lwt
-  tsync_local_io
   lwt
   lwt.unix
   unix))

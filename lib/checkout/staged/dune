@@ -20,8 +20,6 @@
    -open
    Tsync_chunk_cache
    -open
-   Tsync_local_io
-   -open
    Tsync_io_lwt
    -open
    Tsync_backend_register
@@ -39,7 +37,6 @@
   tsync_manifest
   tsync_chunks
   tsync_chunk_cache
-  tsync_local_io
   tsync_io_lwt
   tsync_backend_register
   tsync_bigstring

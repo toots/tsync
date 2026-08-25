@@ -68,7 +68,7 @@
   tsync-libs.content
   tsync-libs.store
   tsync-libs.naming
-  tsync-libs.io_lwt
+  tsync_io_lwt
   tsync-libs.frontend_register
   tsync-libs.engine
   tsync-libs.http_proxy

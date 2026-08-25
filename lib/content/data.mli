@@ -11,7 +11,7 @@ module Make (C : Conf.S) (R : Remote.S) : sig
   val pread :
     id:string ->
     manifest:Manifest.t ->
-    Local_io.buffer ->
+    Io_lwt.Fs.buffer ->
     offset:int64 ->
     int Lwt.t
 
@@ -33,7 +33,7 @@ module Make (C : Conf.S) (R : Remote.S) : sig
   (** {!pread} for a key of this domain, resolved through
       {!Manifest.Make.resolve}: staged edits, else what was published, else the
       backend's manifest. *)
-  val pread_key : Logical_key.t -> Local_io.buffer -> offset:int64 -> int Lwt.t
+  val pread_key : Logical_key.t -> Io_lwt.Fs.buffer -> offset:int64 -> int Lwt.t
 
   (** {2 Writes}
 
@@ -44,7 +44,7 @@ module Make (C : Conf.S) (R : Remote.S) : sig
   (** Write [buf] at [offset], growing the file as needed. Returns the byte
       count. A write covering only part of an inherited chunk copies that chunk
       into a staged body first: content-addressed chunks are immutable. *)
-  val write : Logical_key.t -> Local_io.buffer -> offset:int64 -> int Lwt.t
+  val write : Logical_key.t -> Io_lwt.Fs.buffer -> offset:int64 -> int Lwt.t
 
   (** Resize: drop whole chunks past the end and resize the boundary chunk. A
       grow is pure metadata — the new chunks are holes reading as zeros. *)

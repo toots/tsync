@@ -47,7 +47,7 @@ module Make (C : Conf.S) = struct
       | `Follow -> (
           (* [stat], not [lstat]: a link to a link is followed by the upload
              too, and a broken chain is imported as nothing. *)
-          let+ st = Fs_util.stat_opt_large (target_path ~src rel target) in
+          let+ st = Io_lwt.Fs.stat_opt_large (target_path ~src rel target) in
           match st with Some st -> st.Unix.LargeFile.st_size | None -> 0L)
 
   (* The tree an import will walk, spilled to disk and read back mapped rather
@@ -91,7 +91,7 @@ module Make (C : Conf.S) = struct
       let dir = if rel = "" then src else Filename.concat src rel in
       let* names =
         Lwt.catch
-          (fun () -> Fs_util.readdir_list dir)
+          (fun () -> Io_lwt.Fs.readdir_list dir)
           (fun exn ->
             Log.warn "import: cannot read directory %s: %s" dir
               (Printexc.to_string exn);
@@ -103,7 +103,7 @@ module Make (C : Conf.S) = struct
             let r = Logical_key.path (Logical_key.file_in (Lk.dir rel) name) in
             if excluded ex r then Lwt.return_none
             else
-              let+ kind = Fs_util.lstat_kind (Filename.concat src r) in
+              let+ kind = Io_lwt.Fs.lstat_kind (Filename.concat src r) in
               match kind with
                 | `Missing -> None
                 | (`Dir | `File _ | `Symlink _) as kind ->
@@ -352,7 +352,7 @@ module Make (C : Conf.S) = struct
                           import_symlink ~force_rehash ~src_root:src rel target
                       | `Follow -> (
                           let* kind =
-                            Fs_util.lstat_kind (target_path ~src rel target)
+                            Io_lwt.Fs.lstat_kind (target_path ~src rel target)
                           in
                           match kind with
                             | `Missing -> Lwt.return Skipped_symlink

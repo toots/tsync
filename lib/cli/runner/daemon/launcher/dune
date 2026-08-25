@@ -33,7 +33,7 @@
   tsync-libs.engine
   tsync-libs.conf
   tsync-libs.log
-  tsync-libs.io_lwt
+  tsync_io_lwt
   tsync-libs.ipc
   tsync-libs.ipc_handler
   tsync-libs.diagnostics

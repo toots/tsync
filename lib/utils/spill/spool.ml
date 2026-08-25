@@ -3,7 +3,7 @@ open Lwt.Syntax
 type t = { path : string; out : Lwt_io.output_channel }
 
 let create ~dir ~name =
-  let* () = Fs_util.mkdir_p dir in
+  let* () = Io_lwt.Fs.mkdir_p dir in
   let path = Filename.temp_path (Filename.concat dir name) in
   let+ out = Lwt_io.open_file ~mode:Lwt_io.Output path in
   { path; out }
@@ -37,16 +37,16 @@ let seal t =
 
 let drop t =
   let* () = close_quiet t in
-  Fs_util.unlink_quiet t.path
+  Io_lwt.Fs.unlink_quiet t.path
 
 (* Only what a dead process left: a concurrent run's spool is live, and deleting
    it takes its ops with it and crashes it at seal. *)
 let reap ~dir =
-  let* names = Fs_util.readdir_list_quiet dir in
+  let* names = Io_lwt.Fs.readdir_list_quiet dir in
   Lwt_list.iter_s
     (fun name ->
       match Filename.temp_owner name with
-        | Some pid when not (Fs_util.pid_alive pid) ->
-            Fs_util.unlink_quiet (Filename.concat dir name)
+        | Some pid when not (Io_lwt.Fs.pid_alive pid) ->
+            Io_lwt.Fs.unlink_quiet (Filename.concat dir name)
         | _ -> Lwt.return_unit)
     names

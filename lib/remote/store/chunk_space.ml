@@ -202,7 +202,7 @@ module Make (C : Conf.S) = struct
                 true)
               (function
                 | Unix.Unix_error (Unix.ENOENT, _, _) when not parent_made ->
-                    let* () = Fs_util.ensure_parent dst in
+                    let* () = Io_lwt.Fs.ensure_parent dst in
                     attempt ~parent_made:true
                 | Unix.Unix_error (Unix.ENOENT, _, _) -> Lwt.return_false
                 | exn -> Lwt.fail exn)

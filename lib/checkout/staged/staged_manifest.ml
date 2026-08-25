@@ -167,7 +167,7 @@ module Make (C : Conf.S) = struct
 
   let read key =
     let p = path key in
-    let* body = Fs_util.read_file_opt p in
+    let* body = Io_lwt.Fs.read_file_opt p in
     match body with
       | None -> Lwt.return_none
       | Some body -> (
@@ -200,8 +200,8 @@ module Make (C : Conf.S) = struct
         | Owed st -> Owed { st with s_name = name }
         | Committed (st, m) -> Committed ({ st with s_name = name }, m)
     in
-    let* () = Fs_util.ensure_parent p in
-    Fs_util.atomic_write p (staged_to_string state)
+    let* () = Io_lwt.Fs.ensure_parent p in
+    Io_lwt.Fs.atomic_write p (staged_to_string state)
 
   let write key (st : staged) = put key (Owed st)
 
@@ -209,7 +209,7 @@ module Make (C : Conf.S) = struct
      before anything local moves, so a crash after it leaves only local work to
      replay. *)
   let commit key (st : staged) published = put key (Committed (st, published))
-  let delete key = Fs_util.unlink_quiet (path key)
+  let delete key = Io_lwt.Fs.unlink_quiet (path key)
 
   let rename ~src_key ~dst_key =
     let src = path src_key in
@@ -217,9 +217,9 @@ module Make (C : Conf.S) = struct
     if not exists then Lwt.return_unit
     else (
       let dst = path dst_key in
-      let* () = Fs_util.ensure_parent dst in
+      let* () = Io_lwt.Fs.ensure_parent dst in
       let* () = Io_lwt.Retry.rename src dst in
-      let* body = Fs_util.read_file_opt dst in
+      let* body = Io_lwt.Fs.read_file_opt dst in
       match body with
         | None -> Lwt.return_unit
         | Some body -> (
@@ -232,21 +232,21 @@ module Make (C : Conf.S) = struct
   let fold ~rel_dir ~deep f acc =
     let start = path (Lk.dir rel_dir) in
     let rec walk dir key acc =
-      let* names = Fs_util.readdir_list dir in
+      let* names = Io_lwt.Fs.readdir_list dir in
       Lwt_list.fold_left_s
         (fun acc name ->
           if Stored_key.internal_leaf name || Filename.check_suffix name ".bad"
           then Lwt.return acc
           else (
             let path = Filename.concat dir name in
-            let* is_dir = Fs_util.is_directory path in
+            let* is_dir = Io_lwt.Fs.is_directory path in
             if is_dir then
               if not deep then Lwt.return acc
               else
                 let* real = Cache_layout.real_dir_name path name in
                 walk path (Logical_key.dir_in key real) acc
             else
-              let+ body = Fs_util.read_file_opt path in
+              let+ body = Io_lwt.Fs.read_file_opt path in
               match body with
                 | Some body -> (
                     match staged_of_string body |> edits with
@@ -260,7 +260,7 @@ module Make (C : Conf.S) = struct
                 | None -> acc))
         acc names
     in
-    let* ok = Fs_util.is_directory start in
+    let* ok = Io_lwt.Fs.is_directory start in
     if ok then walk start (Lk.dir rel_dir) acc else Lwt.return acc
 
   (* Logical keys owing an upload. *)
@@ -280,7 +280,7 @@ module Make (C : Conf.S) = struct
 
   (* Cutoff 0 deletes no file, only prunes what is left empty. *)
   let prune_dirs () =
-    let+ (_ : bool) = Fs_util.reap_older_than ~cutoff:0. (root ()) in
+    let+ (_ : bool) = Io_lwt.Fs.reap_older_than ~cutoff:0. (root ()) in
     ()
 
   (* A locally created file has no published sidecar, so the mirror alone would

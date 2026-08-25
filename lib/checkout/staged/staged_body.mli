@@ -17,7 +17,7 @@ module type Cache = sig
   val read_into :
     group:Manifest.Group.t ->
     index:int ->
-    Local_io.buffer ->
+    Io_lwt.Fs.buffer ->
     chunk_off:int ->
     Chunk_cache.served Lwt.t
 
@@ -36,8 +36,8 @@ module Make (C : Conf.S) (Cache : Cache) : sig
   (** Set the length exactly. *)
   val resize : uuid:string -> len:int -> unit Lwt.t
 
-  val write : uuid:string -> Local_io.buffer -> offset:int -> int Lwt.t
-  val read_into : uuid:string -> Local_io.buffer -> offset:int -> int Lwt.t
+  val write : uuid:string -> Io_lwt.Fs.buffer -> offset:int -> int Lwt.t
+  val read_into : uuid:string -> Io_lwt.Fs.buffer -> offset:int -> int Lwt.t
 
   (** Copy a published chunk's bytes out of its group into [offset] of a staged
       body, for a write that does not replace all of them. *)
@@ -85,7 +85,7 @@ module Make (C : Conf.S) (Cache : Cache) : sig
   val adopt_whole : src:string -> uuid:string -> unit Lwt.t
 
   val whole_read_into :
-    uuid:string -> Local_io.buffer -> offset:int64 -> int Lwt.t
+    uuid:string -> Io_lwt.Fs.buffer -> offset:int64 -> int Lwt.t
 
   val whole_forget : uuid:string -> unit Lwt.t
 end

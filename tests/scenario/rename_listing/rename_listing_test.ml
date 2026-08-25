@@ -79,7 +79,7 @@ let resolves rel =
 
 let () =
   Lwt_main.run
-    (let* () = Fs_util.rm_rf root in
+    (let* () = Io_lwt.Fs.rm_rf root in
      case "a published file, renamed";
      let* () = Mf.write (key "a.tmp") (published ~name:"a.tmp") in
      let* () = listing () in
@@ -96,4 +96,4 @@ let () =
      Printf.printf "  -- renamed b.tmp -> b.final\n";
      let+ () = listing () in
      ());
-  Lwt_main.run (Fs_util.rm_rf root)
+  Lwt_main.run (Io_lwt.Fs.rm_rf root)

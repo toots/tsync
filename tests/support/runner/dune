@@ -28,8 +28,6 @@
    -open
    Tsync_conf_parsing
    -open
-   Tsync_local_io
-   -open
    Tsync_io_lwt
    -open
    Tsync_bigstring
@@ -60,7 +58,6 @@
   tsync_sync
   tsync_naming
   tsync_io_lwt
-  tsync_local_io
   tsync_conf
   tsync_bigstring
   tsync_backend_register

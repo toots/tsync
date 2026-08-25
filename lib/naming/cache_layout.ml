@@ -53,20 +53,21 @@ let chunk_path ~cache_root ~domain_name chunk_key =
 let record_dir_name path name =
   let open Lwt.Syntax in
   let* exists = Io_lwt.Retry.file_exists path in
-  if exists then Lwt.return_unit else Fs_util.atomic_write path name
+  if exists then Lwt.return_unit else Io_lwt.Fs.atomic_write path name
 
 let real_dir_name dir_path name =
   let open Lwt.Syntax in
   if Stored_key.is_escaped name then
     let+ body =
-      Fs_util.read_file_opt (Filename.concat dir_path Stored_key.dir_name_leaf)
+      Io_lwt.Fs.read_file_opt
+        (Filename.concat dir_path Stored_key.dir_name_leaf)
     in
     Option.value body ~default:""
   else Lwt.return name
 
 let clear ~cache_root ~domain_name =
   let open Lwt.Syntax in
-  let* () = Fs_util.rm_rf (manifests_dir ~cache_root domain_name) in
-  let* () = Fs_util.rm_rf (scratch_dir ~cache_root domain_name) in
-  let* () = Fs_util.rm_rf (folders_dir ~cache_root domain_name) in
-  Fs_util.rm_rf (chunks_dir ~cache_root domain_name)
+  let* () = Io_lwt.Fs.rm_rf (manifests_dir ~cache_root domain_name) in
+  let* () = Io_lwt.Fs.rm_rf (scratch_dir ~cache_root domain_name) in
+  let* () = Io_lwt.Fs.rm_rf (folders_dir ~cache_root domain_name) in
+  Io_lwt.Fs.rm_rf (chunks_dir ~cache_root domain_name)

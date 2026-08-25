@@ -7,7 +7,7 @@
     with nothing to gain from either.
 
     [t] is {!Bigstringaf.t} and says so, which is what lets a buffer cross
-    {!Local_io} without a conversion. *)
+    {!Io_lwt.Fs} without a conversion. *)
 include module type of Bigstringaf with type t = Bigstringaf.t
 
 (** The whole of [s]. Shadows {!Bigstringaf.of_string}, which takes a range: a

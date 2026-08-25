@@ -6,7 +6,7 @@
    for one.
 
    {b The mapping relies on the write discipline.} Sidecars are only replaced by
-   rename ({!Fs_util.atomic_write}), never rewritten in place, so a mapping keeps
+   rename ({!Io_lwt.Fs.atomic_write}), never rewritten in place, so a mapping keeps
    its inode and truncating one in place would fault every reader mapping it.
 
    Layout (little-endian, offsets in bytes):
@@ -173,7 +173,7 @@ let put_int64 buf off v =
             (Int64.logand (Int64.shift_right_logical v (i * 8)) 0xFFL)))
   done
 
-type builder = { buf : Local_io.buffer; b_keys_at : int; b_count : int }
+type builder = { buf : Io_lwt.Fs.buffer; b_keys_at : int; b_count : int }
 
 (* Zeroed rather than left as {!Bigstring.create} hands it over, so a key never set
    is a key of NUL bytes the store cannot hold rather than whatever the page
@@ -184,7 +184,7 @@ let builder ~name ~size ~chunk_size ~mtime ~symlink ~count =
   let link = Option.value symlink ~default:"" in
   let keys_at = header_bytes + String.length name + String.length link in
   let buf = Bigstring.create (keys_at + (count * key_bytes)) in
-  Local_io.zero buf ~pos:0 ~len:(Bigarray.Array1.dim buf);
+  Io_lwt.Fs.zero buf ~pos:0 ~len:(Bigarray.Array1.dim buf);
   put_bytes buf 0 magic;
   put_int64 buf 8 size;
   put_int64 buf 16 (Int64.bits_of_float mtime);

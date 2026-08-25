@@ -12,7 +12,7 @@ module Make (C : Conf.S) = struct
     {
       mknod =
         (fun path _mode ->
-          let* () = Fs_util.ensure_parent (local_path path) in
+          let* () = Io_lwt.Fs.ensure_parent (local_path path) in
           Lwt_io.with_file ~mode:Lwt_io.Output (local_path path) (fun _ ->
               Lwt.return_unit));
       fopen =
@@ -20,12 +20,13 @@ module Make (C : Conf.S) = struct
           Lwt.return
             Fuse.{ default_file_info_update with fi_update_direct_io = true });
       read =
-        (fun path buf offset _fi -> Local_io.read (local_path path) buf ~offset);
+        (fun path buf offset _fi ->
+          Io_lwt.Fs.read (local_path path) buf ~offset);
       write =
         (fun path buf offset _fi ->
-          Local_io.write (local_path path) buf ~offset);
+          Io_lwt.Fs.write (local_path path) buf ~offset);
       release = (fun _path _fi -> Lwt.return_unit);
-      unlink = (fun path -> Fs_util.unlink_quiet (local_path path));
+      unlink = (fun path -> Io_lwt.Fs.unlink_quiet (local_path path));
       rename =
         (fun src dst _flags ->
           Lwt.catch

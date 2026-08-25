@@ -8,17 +8,14 @@
    -open
    Tsync_log
    -open
-   Tsync_local_io
-   -open
    Tsync_io_lwt))
  (name tsync_work)
  (public_name tsync-libs.work)
  (libraries
   tsync_retry
   tsync_metrics
-  tsync_local_io
-  tsync_log
   tsync_io_lwt
+  tsync_log
   lwt
   lwt.unix
   unix))

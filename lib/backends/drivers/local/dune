@@ -16,8 +16,6 @@
    -open
    Tsync_io_lwt
    -open
-   Tsync_local_io
-   -open
    Tsync_bigstring
    -open
    Tsync_backend_register
@@ -38,8 +36,7 @@
   tsync-libs.backend_register
   tsync-libs.log
   tsync_device
-  tsync-libs.local_io
-  tsync-libs.io_lwt
+  tsync_io_lwt
   unix
   lwt
   lwt.unix))

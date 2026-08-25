@@ -38,14 +38,14 @@ module Make (C : Conf.S) (F : Fetch) = struct
      members are produced concurrently and land in any order: a cold group costs
      about one round trip whatever [cache_chunk_size] is.
 
-     {!Fs_util.atomic_write_at} requires every byte covered exactly once, which
+     {!Io_lwt.Fs.atomic_write_at} requires every byte covered exactly once, which
      the length check enforces: a member disagreeing with the manifest fails the
      write rather than reaching a caller as file content. *)
   let write_group group body =
     let p = path group in
-    let* () = Fs_util.ensure_parent p in
+    let* () = Io_lwt.Fs.ensure_parent p in
     (* Atomic, so presence alone proves a complete body. *)
-    Fs_util.atomic_write_at p ~size:(Manifest.Group.bytes group) (fun put ->
+    Io_lwt.Fs.atomic_write_at p ~size:(Manifest.Group.bytes group) (fun put ->
         Lwt_list.iter_p
           (fun i ->
             let* data = body i in
@@ -145,12 +145,12 @@ module Make (C : Conf.S) (F : Fetch) = struct
   (* (path, bytes, mtime) per chunk body. Stat'd in parallel: one at a time is a
      round trip each, milliseconds against seconds on a few thousand chunks. *)
   let entries () =
-    let* dirs = Fs_util.readdir_list (root ()) in
+    let* dirs = Io_lwt.Fs.readdir_list (root ()) in
     let+ per_dir =
       Io_lwt.Bounded.map_with dir_slots
         (fun dir ->
           let dir = Filename.concat (root ()) dir in
-          let* names = Fs_util.readdir_list dir in
+          let* names = Io_lwt.Fs.readdir_list dir in
           Io_lwt.Bounded.filter_map_with metadata_slots
             (fun name ->
               let path = Filename.concat dir name in
@@ -193,12 +193,12 @@ module Make (C : Conf.S) (F : Fetch) = struct
               | (path, bytes, _) :: rest ->
                   Log.debug "chunk cache: dropping %s (%d bytes)"
                     (Filename.basename path) bytes;
-                  let* () = Fs_util.unlink_quiet path in
+                  let* () = Io_lwt.Fs.unlink_quiet path in
                   go (total - bytes) rest
             in
             go total coldest)
 
-  let forget ~group = Fs_util.unlink_quiet (path group)
+  let forget ~group = Io_lwt.Fs.unlink_quiet (path group)
 
   (* Adopt [src] as this group's body by giving the same bytes a second name.
      The cache owns where a group body lives, so the staged half hands over the
@@ -216,7 +216,7 @@ module Make (C : Conf.S) (F : Fetch) = struct
       let dst = path group in
       Lwt.catch
         (fun () ->
-          let* () = Fs_util.ensure_parent dst in
+          let* () = Io_lwt.Fs.ensure_parent dst in
           let* () = Io_lwt.Retry.link src dst in
           let now = Unix.gettimeofday () in
           (* Dated now, or the cap reads a freshly published group as being as
@@ -247,7 +247,7 @@ module Make (C : Conf.S) (F : Fetch) = struct
   let read_into ~group ~index buf ~chunk_off =
     let want = Bigarray.Array1.dim buf in
     let offset = Int64.of_int (Manifest.Group.offset group index + chunk_off) in
-    let attempt () = Local_io.read (path group) buf ~offset in
+    let attempt () = Io_lwt.Fs.read (path group) buf ~offset in
     (* A refetch went to a backend by construction, whatever the first [ensure]
        answered. *)
     let refetch () =

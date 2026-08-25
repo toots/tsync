@@ -165,7 +165,7 @@ module Make (C : Conf.S) = struct
       Lwt.fail exn
     else (
       let path = lock_path root in
-      let* () = Fs_util.ensure_parent path in
+      let* () = Io_lwt.Fs.ensure_parent path in
       let* fd = Lwt_unix.openfile path [Unix.O_RDWR; Unix.O_CREAT] 0o644 in
       Lwt.catch
         (fun () ->
@@ -225,7 +225,7 @@ module Make (C : Conf.S) = struct
      read is missed and needs no catching, whatever writes it promoting its own
      chunks when it publishes. *)
   let namespaces root =
-    let read dir = Fs_util.readdir_list_quiet (Filename.concat root dir) in
+    let read dir = Io_lwt.Fs.readdir_list_quiet (Filename.concat root dir) in
     let* manifests = read (dir_of_prefix C.domain_prefix) in
     let+ versions = read (dir_of_prefix C.versions_prefix) in
     List.map (encode `Manifests) manifests
@@ -247,7 +247,7 @@ module Make (C : Conf.S) = struct
         | `Manifests -> C.domain_prefix)
       ^ id
     in
-    let+ kind = Fs_util.lstat_kind (Filename.concat root base) in
+    let+ kind = Io_lwt.Fs.lstat_kind (Filename.concat root base) in
     match kind with `Dir -> base ^ "/" | _ -> base
 
   (* Directory and folder markers reference nothing. An unexpected parse failure
@@ -281,7 +281,7 @@ module Make (C : Conf.S) = struct
      keys to delete rather than asked what it holds, which is what keeps that
      true of the whole collection and not just of this. *)
   let shards_in dir =
-    let+ names = Fs_util.readdir_list_quiet dir in
+    let+ names = Io_lwt.Fs.readdir_list_quiet dir in
     List.filter Chunk_layout.is_shard_name names
 
   (* Abandoning visits the space on its way out; closing visits both, since a shard
@@ -784,7 +784,7 @@ module Make (C : Conf.S) = struct
   let last_of batch =
     List.fold_left (fun acc k -> if k > acc then k else acc) "" batch
 
-  (* Not {!Fs_util.rm_rf}, which lstats every name before unlinking it and walks
+  (* Not {!Io_lwt.Fs.rm_rf}, which lstats every name before unlinking it and walks
      strictly one at a time: for a shard of six hundred chunks that is twelve
      hundred sequential syscalls to learn nothing, the entries of a shard being
      files.
@@ -794,12 +794,12 @@ module Make (C : Conf.S) = struct
      across whole. *)
   let discard_shard s shard =
     let dir = Filename.concat (from_dir s.root) shard in
-    let* names = Fs_util.readdir_list_quiet dir in
+    let* names = Io_lwt.Fs.readdir_list_quiet dir in
     let* () =
       Lwt_list.iter_p
         (fun n ->
           Io_lwt.Bounded.use s.item_slots (fun () ->
-              Fs_util.unlink_quiet (Filename.concat dir n)))
+              Io_lwt.Fs.unlink_quiet (Filename.concat dir n)))
         names
     in
     Lwt.catch
@@ -949,8 +949,8 @@ module Make (C : Conf.S) = struct
       (fun () ->
         (* Counted before it moves: a carried shard keeps everything in it and
            would otherwise contribute nothing to the total. *)
-        let* names = Fs_util.readdir_list src in
-        let* () = Fs_util.ensure_parent dst in
+        let* names = Io_lwt.Fs.readdir_list src in
+        let* () = Io_lwt.Fs.ensure_parent dst in
         let+ () = Io_lwt.Retry.rename src dst in
         (* Counted, not filtered: the rename takes the whole directory and
            picking anything else out would cost the per-file work this exists to
@@ -971,7 +971,7 @@ module Make (C : Conf.S) = struct
       Filename.concat (to_dir s.root) shard )
 
   let read_dir dir =
-    let+ names = Fs_util.readdir_list_quiet dir in
+    let+ names = Io_lwt.Fs.readdir_list_quiet dir in
     List.filter Chunks.is_chunk_key names
 
   let move_into ~src_dir ~dst_dir names =
@@ -1013,7 +1013,7 @@ module Make (C : Conf.S) = struct
       Lwt_list.iter_s
         (fun n ->
           if Hashtbl.mem below n then
-            Fs_util.unlink_quiet (Filename.concat dst_dir n)
+            Io_lwt.Fs.unlink_quiet (Filename.concat dst_dir n)
           else move_into ~src_dir:dst_dir ~dst_dir:src_dir [n])
         here
     in
@@ -1032,7 +1032,7 @@ module Make (C : Conf.S) = struct
     let+ () =
       if missing = [] then Lwt.return_unit
       else
-        let* () = Fs_util.mkdir_p dst_dir in
+        let* () = Io_lwt.Fs.mkdir_p dst_dir in
         Lwt_list.iter_p
           (fun n ->
             Io_lwt.Bounded.use s.item_slots (fun () ->
@@ -1111,7 +1111,7 @@ module Make (C : Conf.S) = struct
       s.bytes_reclaimed
 
   (* Everything left of the old root is empty shards and the root itself. *)
-  let discard_from_space s = Fs_util.rm_rf (from_dir s.root)
+  let discard_from_space s = Io_lwt.Fs.rm_rf (from_dir s.root)
 
   (* Stops at a unit boundary when the caller's time is up and hands back what
      was not reached; each unit saves its own cursor. *)

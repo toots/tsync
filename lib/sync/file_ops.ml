@@ -2,7 +2,7 @@
    upload queue's replay and the change poller are written against it, so a test
    can drive them with a stub instead of a whole domain. *)
 
-type buffer = Local_io.buffer
+type buffer = Io_lwt.Fs.buffer
 
 (** A file the upload queue is working on right now. [rel] names it from the
     domain root, the way its reader sees it; [body] is where its bytes are on

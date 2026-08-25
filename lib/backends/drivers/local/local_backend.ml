@@ -1,7 +1,7 @@
 open Lwt.Syntax
 
-let mkdir_p = Fs_util.mkdir_p
-let readdir_list = Fs_util.readdir_list
+let mkdir_p = Io_lwt.Fs.mkdir_p
+let readdir_list = Io_lwt.Fs.readdir_list
 
 (* Each write stages to its own temp file and renames it into place, so
    overlapping writes of one key never expose a partial file.
@@ -11,7 +11,7 @@ let readdir_list = Fs_util.readdir_list
    in a namespace, and a write in flight it cannot identify stops the whole
    collection. *)
 let write_file path data =
-  let* () = Fs_util.ensure_parent path in
+  let* () = Io_lwt.Fs.ensure_parent path in
   let tmp = Filename.temp_path path in
   let* () = Bigstring.write_to ~path:tmp data ~offset:0 in
   Io_lwt.Retry.rename tmp path
@@ -32,7 +32,7 @@ let read_file path =
    The temp file is written first, so the claim that wins is complete the
    instant it appears. *)
 let create_exclusive path data =
-  let* () = Fs_util.ensure_parent path in
+  let* () = Io_lwt.Fs.ensure_parent path in
   let tmp = Filename.temp_path path in
   let* () = Bigstring.write_to ~path:tmp data ~offset:0 in
   Lwt.finalize
@@ -44,7 +44,7 @@ let create_exclusive path data =
         (function
           | Unix.Unix_error (Unix.EEXIST, _, _) -> read_file path
           | exn -> Lwt.fail exn))
-    (fun () -> Fs_util.unlink_quiet tmp)
+    (fun () -> Io_lwt.Fs.unlink_quiet tmp)
 
 (* A marker's shard directory exists only to hold markers, so an emptied one is
    residue — and residue that shows up in a listing of the prefix as an entry
@@ -242,7 +242,7 @@ let make ?(verify_writes = true) ~root () : (module Backend.S) =
 
     let delete ~key () =
       let path = resolve (Stored_key.to_string key) in
-      let* () = Fs_util.rm_rf path in
+      let* () = Io_lwt.Fs.rm_rf path in
       (* A collection deletes a chunk's marker along with the chunk ({!Gc}), and
          that is the other way a shard empties. *)
       if Chunk_layout.is_marker_key key then prune_marker_dirs path
@@ -273,7 +273,7 @@ let make ?(verify_writes = true) ~root () : (module Backend.S) =
         let src = resolve src_key and dst = resolve dst_key in
         let body () =
           let* data = read_file src in
-          let* () = Fs_util.ensure_parent dst in
+          let* () = Io_lwt.Fs.ensure_parent dst in
           write_file dst data
         in
         let rec attempt ~parent_made =
@@ -285,7 +285,7 @@ let make ?(verify_writes = true) ~root () : (module Backend.S) =
                  One retry tells them apart, and the second failure is the
                  source's. *)
               | Unix.Unix_error (Unix.ENOENT, _, _) when not parent_made ->
-                  let* () = Fs_util.ensure_parent dst in
+                  let* () = Io_lwt.Fs.ensure_parent dst in
                   attempt ~parent_made:true
               (* Different device, link count exhausted, or a filesystem that has
                  no links to give. *)

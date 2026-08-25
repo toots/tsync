@@ -47,7 +47,7 @@ module Make (C : Conf.S) (F : Fetch) : sig
   val read_into :
     group:Manifest.Group.t ->
     index:int ->
-    Local_io.buffer ->
+    Io_lwt.Fs.buffer ->
     chunk_off:int ->
     served Lwt.t
 

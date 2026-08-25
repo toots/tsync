@@ -167,7 +167,7 @@ module Make (C : Conf.S) (F : File_ops.S) : S = struct
      answers that. Resolves the folder itself, having no listing to share one
      with. *)
   let item_ref key =
-    let* mst = Fs_util.stat_opt_large (F.manifest_path key) in
+    let* mst = Io_lwt.Fs.stat_opt_large (F.manifest_path key) in
     let key =
       let rel = Logical_key.path key in
       match mst with
@@ -216,7 +216,7 @@ module Make (C : Conf.S) (F : File_ops.S) : S = struct
     | `Bad _ -> `Any
 
   let handle_stat ?(expect = `Any) key =
-    let* mst = Fs_util.stat_opt_large (F.manifest_path key) in
+    let* mst = Io_lwt.Fs.stat_opt_large (F.manifest_path key) in
     let is_dir =
       match mst with
         | Some { Unix.LargeFile.st_kind = Unix.S_DIR; _ } -> true

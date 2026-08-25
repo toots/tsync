@@ -361,7 +361,7 @@ let () =
 
   (* The store directory has to exist for its filesystem to be measurable — a
      capacity of "unknown" is what an absent path correctly reports. *)
-  Lwt_main.run (Fs_util.mkdir_p (status_root ^ "/store"));
+  Lwt_main.run (Io_lwt.Fs.mkdir_p (status_root ^ "/store"));
 
   (* A chunk in every shard: the estimate scales one shard's worth by the shard
      count, so a uniformly filled store is where estimate and truth must agree

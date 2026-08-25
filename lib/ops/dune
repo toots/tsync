@@ -39,8 +39,6 @@
    -open
    Tsync_sync
    -open
-   Tsync_local_io
-   -open
    Tsync_io_lwt
    -open
    Tsync_glob
@@ -73,7 +71,6 @@
   tsync_store
   tsync_content
   tsync_sync
-  tsync_local_io
   tsync_io_lwt
   tsync_glob
   tsync_bigstring

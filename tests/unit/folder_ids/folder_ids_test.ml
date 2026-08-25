@@ -79,7 +79,7 @@ let main () =
   let* still = lookup "a/moved" in
   check "the renamed folder is the same folder" (still = b);
 
-  let* () = Fs_util.rm_rf (mirror "a/moved") in
+  let* () = Io_lwt.Fs.rm_rf (mirror "a/moved") in
   let* gone = rel_of deep in
   check "a deleted folder resolves to nothing" (gone = None);
   let* gone_parent = rel_of (Option.get b) in
@@ -87,7 +87,7 @@ let main () =
 
   let* other = ensure "elsewhere" in
   let* () =
-    Fs_util.atomic_write (index_file other)
+    Io_lwt.Fs.atomic_write (index_file other)
       "{\"parent\":\".tsync-root\",\"name\":\"a\"}"
   in
   let* wrong = rel_of other in
@@ -96,12 +96,14 @@ let main () =
   check "a corrupted entry does not resolve to another folder"
     (wrong = Some "elsewhere");
 
-  let* () = Fs_util.rm_rf (Cache_layout.folders_dir ~cache_root domain_name) in
+  let* () =
+    Io_lwt.Fs.rm_rf (Cache_layout.folders_dir ~cache_root domain_name)
+  in
   let* healed = rel_of other in
   check "a lost index is rebuilt on demand" (healed = Some "elsewhere");
 
   let* stale = ensure "temporary" in
-  let* () = Fs_util.rm_rf (mirror "temporary") in
+  let* () = Io_lwt.Fs.rm_rf (mirror "temporary") in
   let* () = rebuild () in
   let* exists = Io_lwt.Retry.file_exists (index_file stale) in
   check "rebuild prunes entries for departed folders" (not exists);
@@ -111,7 +113,9 @@ let main () =
      name has to come from the marker. *)
   let odd = "awkward:name" in
   let* odd_id = ensure odd in
-  let* () = Fs_util.rm_rf (Cache_layout.folders_dir ~cache_root domain_name) in
+  let* () =
+    Io_lwt.Fs.rm_rf (Cache_layout.folders_dir ~cache_root domain_name)
+  in
   let* got_odd = rel_of odd_id in
   check "a rebuilt index recovers an escaped name" (got_odd = Some odd);
 

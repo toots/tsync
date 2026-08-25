@@ -137,7 +137,7 @@ let () =
      let* () =
        Local.put ~key:user_key ~data:(Bigstring.of_string "in flight") ()
      in
-     let* () = Fs_util.atomic_write staged_path "half a body" in
+     let* () = Io_lwt.Fs.atomic_write staged_path "half a body" in
 
      case "what a listing of the shard yields";
      let* listed = Local.list_prefix ~prefix:(chunk_prefix ^ shard) () in

@@ -26,15 +26,13 @@
    -open
    Tsync_metrics
    -open
-   Tsync_local_io
+   Tsync_io_lwt
    -open
    Tsync_bigstring
    -open
    Tsync_backend_register
    -open
    Tsync_ipc
-   -open
-   Tsync_io_lwt
    -open
    Tsync_conf
    -open
@@ -53,9 +51,9 @@
   tsync_content
   tsync_store
   tsync_naming
-  tsync_local_io
-  tsync_conf
+  tsync_io
   tsync_io_lwt
+  tsync_conf
   tsync_bigstring
   tsync_backend_register
   tsync_ipc
