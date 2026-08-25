@@ -46,6 +46,7 @@ end
 
 module Clock = struct
   let sleep = Lwt_unix.sleep
+  let with_timeout = Lwt_unix.with_timeout
   let is_timeout exn = exn = Lwt_unix.Timeout
 end
 

@@ -1,0 +1,27 @@
+; Cohttp's pooled Unix net, as the sockets tsync-libs.http_client asks for.
+; Apart from it so that reading a response links neither an HTTP implementation
+; nor a scheduler.
+
+(library
+ (flags
+  (:standard
+   -open
+   Tsync_http_client
+   -open
+   Tsync_io_lwt
+   -open
+   Tsync_retry_lwt
+   -open
+   Tsync_bigstring))
+ (name tsync_http_client_lwt)
+ (public_name tsync-libs.http_client_lwt)
+ (libraries
+  tsync_http_client
+  tsync_io_lwt
+  tsync_retry_lwt
+  tsync_bigstring
+  cohttp
+  cohttp-lwt
+  cohttp-lwt-unix
+  uri
+  lwt))

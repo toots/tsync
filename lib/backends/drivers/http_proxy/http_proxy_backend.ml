@@ -11,13 +11,13 @@ let request_timeout = 300.
 type t = {
   base_uri : Uri.t;
   secret : string;
-  client : Http_client.t;
+  client : Http_client_lwt.t;
   mutable caps_cache : Backend.caps Lwt.t option;
 }
 
-let code = Http_client.code
-let is_ok = Http_client.is_ok
-let failed = Http_client.failed
+let code = Http_client_lwt.code
+let is_ok = Http_client_lwt.is_ok
+let failed = Http_client_lwt.failed
 
 (* Signs method + request-target + body with the shared secret; TLS is
    conduit's, per the global [Tls_conf]. Nothing here reaches the network, but
@@ -31,12 +31,12 @@ let headers t ~meth ~uri ~body () =
 
 (* Every proxied operation is idempotent, so retrying is safe. *)
 let call_retry t ~meth ?(body = Bigstring.empty) op uri =
-  Http_client.call_retry t.client
+  Http_client_lwt.call_retry t.client
     ~headers:(headers t ~meth ~uri ~body)
     ~meth ~body op uri
 
 let call_text t ~meth ?(body = Bigstring.empty) op uri =
-  Http_client.call_text t.client
+  Http_client_lwt.call_text t.client
     ~headers:(headers t ~meth ~uri ~body)
     ~meth ~body op uri
 
@@ -256,7 +256,7 @@ let make ~url ~secret : (module Backend.S) =
       base_uri = Uri.of_string url;
       secret;
       client =
-        Http_client.create ~name:"http-proxy" ~timeout:request_timeout
+        Http_client_lwt.create ~name:"http-proxy" ~timeout:request_timeout
           ~classify:Backend.classify ();
       caps_cache = None;
     }

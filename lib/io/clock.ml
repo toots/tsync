@@ -9,6 +9,11 @@ module type S = sig
 
   val sleep : float -> unit io
 
+  (** [with_timeout seconds f] runs [f], failing with the scheduler's own
+      timeout if it has not finished by then. Racing one against the other is
+      what {!Io.S} cannot express. *)
+  val with_timeout : float -> (unit -> 'a io) -> 'a io
+
   (** Whether [exn] is the scheduler's own timeout rather than a failure of the
       work. Only the scheduler that raises it can say. *)
   val is_timeout : exn -> bool

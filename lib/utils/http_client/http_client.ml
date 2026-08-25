@@ -5,35 +5,6 @@
    would do, caps throughput at a few dozen a second, and leaves thousands of
    sockets in TIME_WAIT. *)
 
-open Lwt.Syntax
-
-(* Cohttp already applies both of these over its Unix net; deriving them again
-   here would be a second spelling of the same two lines. *)
-module Connection = Cohttp_lwt_unix.Connection
-module Cache = Cohttp_lwt_unix.Connection_cache
-
-(* Long enough to span the gaps between the bursts a sync or a demand-paged read
-   arrives in, short enough not to hold sockets open indefinitely. *)
-let keep_idle_ns = 60_000_000_000L
-
-(* Sockets to one endpoint, which is not what any {!Lwt_bounded} pool stands
-   for — those bound bodies in memory and round trips in flight. The caller's
-   own parallelism is what bounds work; this only has to be wide enough not to
-   become the narrower limit. *)
-let max_parallel = 32
-
-type t = {
-  name : string;
-  timeout : float;
-  classify : exn -> Retry.kind;
-  mutable cache : Cache.t;
-}
-
-let new_cache () = Cache.create ~keep:keep_idle_ns ~parallel:max_parallel ()
-
-let create ~name ~timeout ~classify () =
-  { name; timeout; classify; cache = new_cache () }
-
 (* 5xx and 429 clear on their own; every other 4xx is the store's answer. *)
 let is_transient_code c = c >= 500 || c = 429
 
@@ -75,52 +46,96 @@ let excerpt body =
   else if String.length body <= excerpt_limit then body
   else String.sub body 0 excerpt_limit ^ " ..."
 
-(* [headers] is a thunk because a caller may have to reach the network to build
-   them — minting a bearer token — and that belongs inside the deadline below
-   rather than before it.
+(** The sockets themselves: a pool per endpoint, and one request through it.
 
-   [Connection.Retry] means the pooled connection was unusable and the request
-   never left, and one torn down by the timeout stays in the cache's table as
-   permanently failed, so only a new cache redials. It is replaced once per
-   generation, so requests that raced into the same dead pool share the one
-   redial. *)
-let call t ~headers ~meth ?(body = Bigstring.empty) uri =
-  let attempt cache =
-    Lwt_unix.with_timeout t.timeout (fun () ->
-        let* headers = headers () in
-        let* resp, rbody =
-          Cache.call cache
-            ~headers
-              (* [`Passthrough]: sent out of the chunk's own bytes rather than a
-               copy, which is what a bigstring body is for. The retry below only
-               reads them again. *)
-            ~body:(Cohttp_lwt.Body.of_bigstring (`Passthrough body))
-            meth uri
-        in
-        let+ rbody = Cohttp_lwt.Body.to_bigstring rbody in
-        (resp, rbody))
-  in
-  let used = t.cache in
-  Lwt.catch
-    (fun () -> attempt used)
-    (function
-      | Connection.Retry ->
-          if t.cache == used then t.cache <- new_cache ();
-          attempt t.cache
-      | exn -> Lwt.fail exn)
+    Bodies cross as bigstrings rather than in whatever an implementation moves
+    them in, so the whole of that vocabulary — and the copy a conversion would
+    make — stays on this side. *)
+module type POOL = sig
+  type 'a io
+  type t
 
-(* Raises on a transient status so the shared loop retries it; every other
-   response comes back for the verb to interpret, 404 included. *)
-let call_retry t ~headers ~meth ?body op uri =
-  Retry_lwt.with_retry ~classify:t.classify ~name:t.name ~op (fun () ->
-      let* resp, rbody = call t ~headers ~meth ?body uri in
-      if is_transient_code (code resp) then
-        Lwt.fail (failed op (code resp) (excerpt (Bigstring.to_string rbody)))
-      else Lwt.return (resp, rbody))
+  (** The pooled connection was unusable and the request never left. *)
+  exception Redial
 
-(* Only an object's own bytes are worth keeping off the heap; the JSON and XML
-   verbs carry a body small enough to read as a string, and one they have to
-   parse anyway. *)
-let call_text t ~headers ~meth ?body op uri =
-  let+ resp, rbody = call_retry t ~headers ~meth ?body op uri in
-  (resp, Bigstring.to_string rbody)
+  val create : keep:int64 -> parallel:int -> unit -> t
+
+  val call :
+    t ->
+    headers:Cohttp.Header.t ->
+    body:Bigstring.t ->
+    Cohttp.Code.meth ->
+    Uri.t ->
+    (Cohttp.Response.t * Bigstring.t) io
+end
+
+module Make
+    (Io : Io.S)
+    (Clock : Clock.S with type 'a io := 'a Io.t)
+    (Loop : Retry.LOOP with type 'a io := 'a Io.t)
+    (Pool : POOL with type 'a io := 'a Io.t) =
+struct
+  let ( let* ) = Io.bind
+  let ( let+ ) x f = Io.map f x
+
+  (* Long enough to span the gaps between the bursts a sync or a demand-paged read
+     arrives in, short enough not to hold sockets open indefinitely. *)
+  let keep_idle_ns = 60_000_000_000L
+
+  (* Sockets to one endpoint, which is not what any {!Bounded} pool stands
+     for — those bound bodies in memory and round trips in flight. The caller's
+     own parallelism is what bounds work; this only has to be wide enough not to
+     become the narrower limit. *)
+  let max_parallel = 32
+
+  type t = {
+    name : string;
+    timeout : float;
+    classify : exn -> Retry.kind;
+    mutable cache : Pool.t;
+  }
+
+  let new_cache () = Pool.create ~keep:keep_idle_ns ~parallel:max_parallel ()
+
+  let create ~name ~timeout ~classify () =
+    { name; timeout; classify; cache = new_cache () }
+
+  (* [headers] is a thunk because a caller may have to reach the network to
+     build them — minting a bearer token — and that belongs inside the deadline
+     below rather than before it.
+
+     A connection torn down by the timeout stays in the pool's table as
+     permanently failed, so only a new pool redials. It is replaced once per
+     generation, so requests that raced into the same dead pool share the one
+     redial. *)
+  let call t ~headers ~meth ?(body = Bigstring.empty) uri =
+    let attempt cache =
+      Clock.with_timeout t.timeout (fun () ->
+          let* headers = headers () in
+          Pool.call cache ~headers ~body meth uri)
+    in
+    let used = t.cache in
+    Io.catch
+      (fun () -> attempt used)
+      (function
+        | Pool.Redial ->
+            if t.cache == used then t.cache <- new_cache ();
+            attempt t.cache
+        | exn -> Io.fail exn)
+
+  (* Raises on a transient status so the shared loop retries it; every other
+     response comes back for the verb to interpret, 404 included. *)
+  let call_retry t ~headers ~meth ?body op uri =
+    Loop.with_retry ~classify:t.classify ~name:t.name ~op (fun () ->
+        let* resp, rbody = call t ~headers ~meth ?body uri in
+        if is_transient_code (code resp) then
+          Io.fail (failed op (code resp) (excerpt (Bigstring.to_string rbody)))
+        else Io.return (resp, rbody))
+
+  (* Only an object's own bytes are worth keeping off the heap; the JSON and XML
+     verbs carry a body small enough to read as a string, and one they have to
+     parse anyway. *)
+  let call_text t ~headers ~meth ?body op uri =
+    let+ resp, rbody = call_retry t ~headers ~meth ?body op uri in
+    (resp, Bigstring.to_string rbody)
+end

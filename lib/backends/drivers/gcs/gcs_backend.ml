@@ -8,7 +8,7 @@ module Auth = Gcs_auth
 exception Cancelled = Retry.Cancelled
 
 type t = {
-  client : Http_client.t;
+  client : Http_client_lwt.t;
   bucket : string;
   base : string; (* scheme + host, no trailing slash *)
   auth : Auth.t option;
@@ -16,9 +16,9 @@ type t = {
   share_url : string option;
 }
 
-let code = Http_client.code
-let is_ok = Http_client.is_ok
-let failed = Http_client.failed
+let code = Http_client_lwt.code
+let is_ok = Http_client_lwt.is_ok
+let failed = Http_client_lwt.failed
 
 (* An object name is a single path segment, so [/] and other reserved characters
    must be percent-encoded; the escaped form survives
@@ -61,7 +61,7 @@ let headers t ~ctype ~extra_headers () =
       | None -> auth_header)
 
 let call_retry t ~meth ?ctype ?(extra_headers = []) ?body op uri =
-  Http_client.call_retry t.client
+  Http_client_lwt.call_retry t.client
     ~headers:(headers t ~ctype ~extra_headers)
     ~meth ?body op uri
 
@@ -70,7 +70,7 @@ let call_retry t ~meth ?ctype ?(extra_headers = []) ?body op uri =
    to parse anyway. *)
 let call_text t ~meth ?ctype ?(extra_headers = []) ?body op uri =
   let body = Option.map Bigstring.of_string body in
-  Http_client.call_text t.client
+  Http_client_lwt.call_text t.client
     ~headers:(headers t ~ctype ~extra_headers)
     ~meth ?body op uri
 
@@ -339,7 +339,7 @@ let make ?endpoint ?service_account_key ?share_url ~bucket () :
   let t =
     {
       client =
-        Http_client.create ~name:"gcs" ~timeout:request_timeout
+        Http_client_lwt.create ~name:"gcs" ~timeout:request_timeout
           ~classify:Backend.classify ();
       bucket;
       base;

@@ -47,20 +47,23 @@ module type METRICS = sig
   val add_failure : int -> unit
 end
 
-module Make
-    (Io : Io.S)
-    (Clock : Clock.S with type 'a io := 'a Io.t)
-    (Metrics : METRICS) : sig
-  (** The one retry loop for a single request, jittered so a fleet that failed
-      together does not return together. A caller decides only what [classify]
-      means for it; the curve, the cap and the log line are shared, so two of
-      them cannot drift into retrying differently. {!Cancelled} is never
-      retried. *)
+(** The one retry loop for a single request, jittered so a fleet that failed
+    together does not return together. A caller decides only what [classify]
+    means for it; the curve, the cap and the log line are shared, so two of them
+    cannot drift into retrying differently. {!Cancelled} is never retried. *)
+module type LOOP = sig
+  type 'a io
+
   val with_retry :
     ?max_attempts:int ->
     classify:(exn -> kind) ->
     name:string ->
     op:string ->
-    (unit -> 'a Io.t) ->
-    'a Io.t
+    (unit -> 'a io) ->
+    'a io
 end
+
+module Make
+    (Io : Io.S)
+    (Clock : Clock.S with type 'a io := 'a Io.t)
+    (Metrics : METRICS) : LOOP with type 'a io := 'a Io.t

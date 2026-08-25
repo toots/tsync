@@ -78,16 +78,17 @@ let () =
 
      case "the pooled client";
      let client =
-       Http_client.create ~name:"test" ~timeout:10. ~classify:Retry.classify ()
+       Http_client_lwt.create ~name:"test" ~timeout:10. ~classify:Retry.classify
+         ()
      in
      let answered = ref 0 in
      let rec go n =
        if n = 0 then Lwt.return_unit
        else
          let* resp, body =
-           Http_client.call client ~headers:no_headers ~meth:`GET uri
+           Http_client_lwt.call client ~headers:no_headers ~meth:`GET uri
          in
-         if Http_client.is_ok resp && Bigstring.to_string body = "ok" then
+         if Http_client_lwt.is_ok resp && Bigstring.to_string body = "ok" then
            incr answered;
          go (n - 1)
      in

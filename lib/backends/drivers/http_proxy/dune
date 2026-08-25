@@ -16,7 +16,9 @@
    -open
    Tsync_backend_register
    -open
-   Tsync_http_client))
+   Tsync_http_client
+   -open
+   Tsync_http_client_lwt))
  (name tsync_http_proxy_backend)
  (private_modules http_proxy_backend)
  (library_flags (-linkall))
@@ -28,6 +30,7 @@
   tsync-libs.bigstring
   tsync-libs.backend_register
   tsync_http_client
+  tsync_http_client_lwt
   tsync-libs.http_proxy
   tsync-libs.log
   cohttp-lwt-unix
