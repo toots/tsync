@@ -52,8 +52,12 @@ module Make (C : Conf.S) : sig
   val log : Q.Records.t
 
   (** Write the intent. The caller mints the key and keeps it: every later call
-      names the same unit of work. *)
-  val record : Journal.Entry_key.t -> Journal.op list -> unit Lwt.t
+      names the same unit of work.
+
+      [state] is [Prepared] for work whose staged data the caller has already
+      read, which is what says the upload is owed from here on. *)
+  val record :
+    ?state:state -> Journal.Entry_key.t -> Journal.op list -> unit Lwt.t
 
   val advance : Journal.Entry_key.t -> state -> unit Lwt.t
 

@@ -1,0 +1,15 @@
+
+=== signalled before anyone waits
+is held: ok
+and delivered to whoever waits next: ok
+and taken off: ok
+
+=== two signalled before either is taken
+both are held: ok
+in the order they were signalled: ok
+
+=== waiting first
+does not finish while nothing is owed: ok
+and finishes when one arrives: ok
+
+7 check(s), 0 failure(s)

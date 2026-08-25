@@ -1041,6 +1041,20 @@
   (action
    (diff mirror_probe.expected mirror_probe.output))))
 
+(subdir unit/owed
+ (alias
+  (name default)
+  (deps owed_test.exe))
+ (rule
+  (alias runtest)
+  (target owed_test.output)
+  (action
+   (with-stdout-to owed_test.output (ignore-stderr (run ./owed_test.exe)))))
+ (rule
+  (alias runtest)
+  (action
+   (diff owed_test.expected owed_test.output))))
+
 (subdir unit/progress_eta
  (alias
   (name default)

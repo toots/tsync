@@ -23,6 +23,8 @@
    -open
    Tsync_durable_queue_lwt
    -open
+   Tsync_io
+   -open
    Tsync_retry
    -open
    Tsync_chunks
@@ -46,6 +48,7 @@
   tsync_manifest
   tsync_journal
   tsync_durable_queue_lwt
+  tsync_io
   tsync_retry
   tsync_chunks
   tsync_io_lwt

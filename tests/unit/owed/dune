@@ -1,0 +1,20 @@
+(executable
+ (flags
+  (:standard
+   -open
+   Tsync_checkout
+   -open
+   Tsync_journal
+   -open
+   Tsync_io_lwt
+   -open
+   Tsync_test_harness))
+ (name owed_test)
+ (libraries
+  tsync_checkout
+  tsync_journal
+  tsync_test_harness
+  tsync_io_lwt
+  lwt
+  lwt.unix
+  unix))

@@ -125,9 +125,9 @@ module Make (C : Conf.S) = struct
      record's id rather than something minted per queue. *)
   let id = Ek.to_string
 
-  let record key ops =
+  let record ?(state = Intent) key ops =
     Q.Records.write log ~id:(id key)
-      { ops; state = Intent; attempts = 0; last_error = None }
+      { ops; state; attempts = 0; last_error = None }
 
   let advance key state =
     Q.Records.update log (id key) (fun r -> { r with state })
