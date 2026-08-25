@@ -34,7 +34,7 @@ module type S = sig
     (string * [ `Continue | `Stop | `Subscribe of string ]) Lwt.t
 end
 
-module Make (C : Conf.S) (F : File_ops.S) : S = struct
+module Make (C : Conf.S) (F : File_ops.S) (Sq : Sync_queue.S) : S = struct
   module Fs = File_store.Make (C)
   module J = Journal.Make (C)
   module Diag = Diagnostics.Make (C)
@@ -799,8 +799,8 @@ module Make (C : Conf.S) (F : File_ops.S) : S = struct
                         ok_json
                           (("domain", `String C.domain_name)
                           :: ("running", `Bool true)
-                          :: ("paused", `Bool (F.uploads_paused ()))
-                          :: ("pendingUploads", `Int (F.uploads_pending ()))
+                          :: ("paused", `Bool (Sq.paused ()))
+                          :: ("pendingUploads", `Int (Sq.pending ()))
                           :: ( "pendingDownloads",
                                `Int (F.downloads_in_flight ()) )
                           :: ( "uploading",
@@ -827,8 +827,7 @@ module Make (C : Conf.S) (F : File_ops.S) : S = struct
                                     uploading) )
                           :: ("downloading", `List (downloading_json ()))
                           :: ( "pendingBytes",
-                               `Int (Int64.to_int (F.uploads_pending_bytes ()))
-                             )
+                               `Int (Int64.to_int (Sq.pending_bytes ())) )
                              (* Process-wide, not per domain: one uplink is
                                   what an ETA is against. *)
                           :: ("bytesUploaded", `Int (Metrics.uploaded ()))
@@ -836,7 +835,7 @@ module Make (C : Conf.S) (F : File_ops.S) : S = struct
                                `Float (Metrics.upload_rate ()) )
                           :: hooks.status_fields ())
                     | "pause" ->
-                        F.set_uploads_paused (get_str obj "arg" <> "off");
+                        Sq.set_paused (get_str obj "arg" <> "off");
                         Lwt.return (ok_json [])
                     | "stats" ->
                         (* This daemon reports itself twice: at the top as the

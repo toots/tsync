@@ -47,9 +47,9 @@ end
 
 module Make (C : Conf.S) : S = struct
   module Lk = Logical_key.Make (C)
-  module Sq = Sync_queue.Make (C)
-  module F = File.Make (C) (Sq)
-  module Ih = Ipc_handler.Make (C) (F)
+  module F = File.Make (C)
+  module Sq = Sync_queue.Make (C) (F)
+  module Ih = Ipc_handler.Make (C) (F) (Sq)
   module Sp = Sync_poller.Make (C) (F)
   module Rp = Replay.Make (C) (F)
   module Mf = Checkout.Make (C)
@@ -82,9 +82,7 @@ module Make (C : Conf.S) : S = struct
      a peer goes looking for rather than one it never hears about. *)
   let start ?(on_upload_done = fun ~key:_ -> Lwt.return_unit) () =
     let* () = init () in
-    Sq.start
-      ~upload:(fun ~key ~cancel -> F.upload ~cancel key)
-      ~on_upload_done:(fun ~key ->
+    Sq.start ~on_upload_done:(fun ~key ->
         let* () = on_upload_done ~key in
         F.enforce_chunk_cap ());
     Lwt.return_unit

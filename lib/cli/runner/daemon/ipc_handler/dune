@@ -8,6 +8,8 @@
    -open
    Tsync_checkout
    -open
+   Tsync_sync
+   -open
    Tsync_manifest
    -open
    Tsync_journal
@@ -37,6 +39,7 @@
   tsync_logical_key
   tsync_staged
   tsync_checkout
+  tsync_sync
   tsync_manifest
   tsync_journal
   tsync_ops

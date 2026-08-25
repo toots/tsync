@@ -51,16 +51,18 @@ module Owed : sig
 
   val create : unit -> 'a t
 
-  (** Hand one over. Never blocks, and never drops what it is told: something
-      signalled while nobody waits is delivered to whoever waits next. *)
-  val signal : 'a t -> 'a -> unit
+  (** Hand one over, answering once it has been taken up. Nothing is dropped if
+      no one is consuming: the record is already written, so the work is owed
+      whether or not anything is draining yet. *)
+  val signal : 'a t -> 'a -> unit Lwt.t
 
-  (** The next one, waiting until there is one, in the order they were
-      signalled. *)
-  val next : 'a t -> 'a Lwt.t
+  (** Take them from now on, displacing whoever was. One consumer at a time: a
+      second queue over one domain's records must not find the first still
+      taking them. *)
+  val consume : 'a t -> ('a -> unit Lwt.t) -> unit
 
-  (** How many are waiting to be taken up. *)
-  val pending : 'a t -> int
+  (** Stop consuming. What is signalled afterwards is written and left. *)
+  val idle : 'a t -> unit
 end
 
 module Make (C : Conf.S) : sig

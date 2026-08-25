@@ -2,15 +2,6 @@ open Lwt.Syntax
 module Ek = Journal.Entry_key
 
 module type S = sig
-  (** Record the work and queue it. Returns once the record is durable, not once
-      the upload has landed. [entry_key] names the record and goes on to name
-      the journal entry the upload publishes; the file is read from the record's
-      ops, so there is nowhere for the two to disagree about which one this is.
-
-      The whole record is the caller's to supply, so re-queueing one carries
-      forward what it has already been through. *)
-  val post : entry_key:Journal.Entry_key.t -> Wal.record -> unit Lwt.t
-
   val cancel_put : string -> bool
 
   (** Files with an active or queued upload. *)
@@ -32,52 +23,20 @@ module type S = sig
   val set_paused : bool -> unit
 
   val paused : unit -> bool
-
-  val start :
-    upload:(key:Logical_key.t -> cancel:bool ref -> unit Lwt.t) ->
-    on_upload_done:(key:Logical_key.t -> unit Lwt.t) ->
-    unit
-
+  val start : on_upload_done:(key:Logical_key.t -> unit Lwt.t) -> unit
   val drain : unit -> unit Lwt.t
 end
 
-module Make (C : Conf.S) : S = struct
+module Make (C : Conf.S) (F : File.Owing) : S = struct
   module Lk = Logical_key.Make (C)
   module Fs = File_store.Make (C)
   module W = Wal.Make (C)
   module Q = Wal.Q
 
-  (* The file a record is about, and what it will cost to send. Both derived
-     from the ops rather than carried alongside them, so the two cannot disagree
-     about which file a record names.
-
-     The op says whether it names a folder, so the key it yields does too: a
-     directory rename read back as a file publishes an entry a peer replays as
-     one. *)
-  let op_key = function
-    | `Put (k, _) | `Delete k -> Lk.file k
-    | `Mkdir (k, _) | `Rmdir (k, _) -> Lk.dir k
-    | `Rename { Journal.dst; is_dir; _ } ->
-        if is_dir then Lk.dir dst else Lk.file dst
-
-  let key_of (r : Wal.record) =
-    match r.Wal.ops with op :: _ -> Some (op_key op) | [] -> None
-
   (* The queue's own slot identity, not a name: one string per file so a second
      write to it takes the first one's place. *)
   let slot_of r =
-    match key_of r with Some k -> Logical_key.to_string k | None -> ""
-
-  (* Only a [`Put] carries bytes; the other ops are metadata the backend answers
-     in one round trip. *)
-  let size_of (r : Wal.record) =
-    List.fold_left
-      (fun total op ->
-        match op with `Put (_, size) -> Int64.add total size | _ -> total)
-      0L r.Wal.ops
-
-  let upload_fn : (key:Logical_key.t -> cancel:bool ref -> unit Lwt.t) ref =
-    ref (fun ~key:_ ~cancel:_ -> Lwt.return_unit)
+    match F.record_key r with Some k -> Logical_key.to_string k | None -> ""
 
   let on_upload_done_fn : (key:Logical_key.t -> unit Lwt.t) ref =
     ref (fun ~key:_ -> Lwt.return_unit)
@@ -93,7 +52,7 @@ module Make (C : Conf.S) : S = struct
       | None -> Lwt.return_unit
       | Some entry_key -> (
           let abandon () = W.complete entry_key in
-          match key_of r with
+          match F.record_key r with
             (* No op, so no file and nothing to publish; the record would
                otherwise become an entry naming nothing. *)
             | None ->
@@ -105,7 +64,7 @@ module Make (C : Conf.S) : S = struct
                   (fun () ->
                     if !cancel then abandon ()
                     else
-                      let* () = !upload_fn ~key ~cancel in
+                      let* () = F.upload ~cancel key in
                       if !cancel then abandon ()
                       else
                         (* Executed, then published, then the record goes: a crash in
@@ -143,7 +102,7 @@ module Make (C : Conf.S) : S = struct
   (* [Stop], not [Drop]: the record is what {!Replay} reconciles and what stats
      reports as stuck, so a permanent failure has to leave it behind. *)
   let queue =
-    Q.keyed ~workers:(max 1 C.max_uploads) ~weight:size_of ~name:"upload"
+    Q.keyed ~workers:(max 1 C.max_uploads) ~weight:F.record_size ~name:"upload"
       ~log:W.log ~key:slot_of ~classify:Backend.classify
       ~poison:Durable_queue_lwt.Stop ~run ()
 
@@ -155,16 +114,24 @@ module Make (C : Conf.S) : S = struct
 
   let cancel_put key = Q.cancel queue key
   let pending () = Q.owed queue
-  let uploading () = List.filter_map key_of (Q.in_flight queue)
+  let uploading () = List.filter_map F.record_key (Q.in_flight queue)
   let pending_bytes () = (Q.stats queue).Durable_queue_lwt.bytes
   let set_paused b = Q.set_paused queue b
   let paused () = Q.paused queue
 
-  let start ~upload ~on_upload_done =
-    upload_fn := upload;
+  let start ~on_upload_done =
     on_upload_done_fn := on_upload_done;
+    F.set_in_flight uploading;
+    F.set_canceller (fun key -> cancel_put (Logical_key.to_string key));
+    (* Records a file operation wrote and handed over. Taking one up is all this
+       does with it -- the write already happened, in the caller's own path,
+       which is what makes a crash there leave something saying the work is
+       owed -- and it happens there too, so a close returns with the upload
+       queued and whatever follows can cancel it. *)
+    Wal.Owed.consume W.owed (fun (entry_key, r) ->
+        Q.adopt queue ~id:(Ek.to_string entry_key) r);
     (* No recovery here: {!Replay} reads the records itself, decides what is
-       still owed against the shared journal, and re-posts only that. *)
+       still owed against the shared journal, and re-writes only that. *)
     Q.start queue
 
   let drain () = Q.stop queue

@@ -119,9 +119,6 @@ module type S = sig
   (** Whole-file materializations completed since the daemon started. *)
   val downloads_completed_count : unit -> int
 
-  (** Files with an active or queued upload. *)
-  val uploads_pending : unit -> int
-
   (** The files being uploaded right now. *)
   val uploads_in_flight : unit -> in_flight list Lwt.t
 
@@ -130,15 +127,6 @@ module type S = sig
       materialization. Synchronous because the table behind it is mutated by
       reads on this same loop. *)
   val downloading_now : unit -> downloading list
-
-  (** Bytes still owed by the upload queue. *)
-  val uploads_pending_bytes : unit -> int64
-
-  (** Whether uploads are parked. Queued work is kept while paused, and a
-      restart resumes. *)
-  val uploads_paused : unit -> bool
-
-  val set_uploads_paused : bool -> unit
 
   (** Whether the metadata lock is held, and whether anything is queued behind
       it. Held with waiters is the usual cause of a mount that has stopped
@@ -162,7 +150,12 @@ module type S = sig
 
   val read : t -> buffer -> offset:int64 -> int Lwt.t
   val write : t -> buffer -> offset:int64 -> int Lwt.t
+
+  (** Stop an upload of [t] that is under way. [false] when none was. Not only
+      for a caller that asks: a write to a file being sent stops the send, or a
+      manifest is published for content torn out from under it. *)
   val cancel_upload : t -> bool
+
   val truncate : t -> int64 -> unit Lwt.t
   val apply_delete : t -> unit Lwt.t
 

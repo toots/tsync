@@ -1,13 +1,4 @@
 module type S = sig
-  (** Record the work and queue it. Returns once the record is durable, not once
-      the upload has landed. [entry_key] names the record and goes on to name
-      the journal entry the upload publishes; the file is read from the record's
-      ops, so there is nowhere for the two to disagree about which one this is.
-
-      The whole record is the caller's to supply, so re-queueing one carries
-      forward what it has already been through. *)
-  val post : entry_key:Journal.Entry_key.t -> Wal.record -> unit Lwt.t
-
   val cancel_put : string -> bool
 
   (** Files with an active or queued upload. *)
@@ -30,10 +21,10 @@ module type S = sig
 
   val paused : unit -> bool
 
-  val start :
-    upload:(key:Logical_key.t -> cancel:bool ref -> unit Lwt.t) ->
-    on_upload_done:(key:Logical_key.t -> unit Lwt.t) ->
-    unit
+  (** Start the workers and begin taking up records as they are handed over.
+      What is uploaded and how to cancel one come from the file operations this
+      is built on, so only the completion callback is passed. *)
+  val start : on_upload_done:(key:Logical_key.t -> unit Lwt.t) -> unit
 
   (** Settles the queue. The cursor the drained uploads owe is
       {!File_store.flush_cursor}'s to publish — see {!Domain_engine.drain} for
@@ -41,4 +32,8 @@ module type S = sig
   val drain : unit -> unit Lwt.t
 end
 
-module Make (C : Conf.S) : S
+(** The sending half of a domain: it takes up the records the file operations
+    write and hand over, and drains them to the store on a pool of its own. The
+    records are not its own — they are written before it hears of them, which is
+    what makes a crash leave something saying the work is owed. *)
+module Make (C : Conf.S) (F : File.Owing) : S

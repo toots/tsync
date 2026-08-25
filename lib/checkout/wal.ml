@@ -102,21 +102,20 @@ module Q = Durable_queue_lwt.Make (Job)
    sends the bytes, which is a worker pool with a width of its own. It holds
    what it is told: a condition alone drops a signal sent while nobody is
    waiting, and here that would be work nobody comes back for. *)
+(* A hand-off between a file operation, which writes a record, and whoever
+   sends the bytes, which is a worker pool with a width of its own.
+
+   The taker is installed rather than waited on. A file operation must not stall
+   where nothing is draining -- the record is already written, so the work
+   survives either way -- and it must not return before the work is taken up,
+   or a delete arriving straight after a close finds no upload to cancel. *)
 module Owed = struct
-  type 'a t = { waiting : Io_lwt.Lock.condition; held : 'a Queue.t }
+  type 'a t = { mutable take : 'a -> unit Lwt.t }
 
-  let create () = { waiting = Io_lwt.Lock.condition (); held = Queue.create () }
-
-  let signal t x =
-    Queue.add x t.held;
-    Io_lwt.Lock.broadcast t.waiting
-
-  let rec next t =
-    match Queue.take_opt t.held with
-      | Some x -> Lwt.return x
-      | None -> Lwt.bind (Io_lwt.Lock.wait t.waiting) (fun () -> next t)
-
-  let pending t = Queue.length t.held
+  let create () = { take = (fun _ -> Lwt.return_unit) }
+  let consume t take = t.take <- take
+  let idle t = t.take <- (fun _ -> Lwt.return_unit)
+  let signal t x = t.take x
 end
 
 let logs : (string, Q.Records.t * (Ek.t * record) Owed.t) Hashtbl.t =

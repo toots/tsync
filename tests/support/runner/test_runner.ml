@@ -369,11 +369,11 @@ type client = {
    and the handler run on the one Lwt loop [run_scenario] spins up. *)
 let setup_client (module C : Conf.S) root staging_prefix =
   let module Lk = Logical_key.Make (C) in
-  let module Sq = Sync_queue.Make (C) in
-  let module F = File.Make (C) (Sq) in
+  let module F = File.Make (C) in
+  let module Sq = Sync_queue.Make (C) (F) in
   let module Mf = Checkout.Make (C) in
   let module Mfs = Staged_manifest.Make (C) in
-  let module H = Ipc_handler.Make (C) (F) in
+  let module H = Ipc_handler.Make (C) (F) (Sq) in
   let module Rp = Replay.Make (C) (F) in
   let module Sp = Sync_poller.Make (C) (F) in
   let module Fs = File_store.Make (C) in
@@ -397,9 +397,7 @@ let setup_client (module C : Conf.S) root staging_prefix =
         on_stop = (fun () -> ());
       }
   in
-  Sq.start
-    ~upload:(fun ~key ~cancel -> F.upload ~cancel key)
-    ~on_upload_done:(fun ~key:_ ->
+  Sq.start ~on_upload_done:(fun ~key:_ ->
       (* Mirror the daemons: nudge cache-cap enforcement after each upload. *)
       F.enforce_chunk_cap ());
   let staging_seq = ref 0 in

@@ -12,10 +12,23 @@ module C =
          ~root ()
       : Conf.S)
 
-module Sq = Sync_queue.Make (C)
+module F = File.Make (C)
 module J = Journal.Make (C)
+module W = Wal.Make (C)
 
 let uploaded = ref 0
+
+(* The file operations, with sending stubbed: what varies here is the
+   queue's behaviour, not what an upload does. *)
+module Sent = struct
+  include F
+
+  let upload ?cancel:_ _ =
+    incr uploaded;
+    Lwt.return_unit
+end
+
+module Sq = Sync_queue.Make (C) (Sent)
 
 (* Waits for the queue to stop moving rather than for a length of time: on a
    loaded CI runner 0.2s elapsed before the worker had dequeued, and the report
@@ -35,9 +48,17 @@ let settle () =
   in
   go ~stable:0 ~last:(-1, false) ~polls:0
 
+(* What a file operation does: the record is written, and then handed to
+   whoever sends it. *)
+
+let owe r =
+  let entry_key = J.entry_key () in
+  let* () = W.write entry_key r in
+  Wal.Owed.signal W.owed (entry_key, r)
+
 let post n =
   let name = Printf.sprintf "f%d.txt" n in
-  Sq.post ~entry_key:(J.entry_key ())
+  owe
     {
       Wal.ops = [`Put (name, 0L)];
       state = Wal.Prepared;
@@ -52,11 +73,7 @@ let report label =
 let () =
   Lwt_main.run
     (let* () = Io_lwt.Fs.rm_rf root in
-     Sq.start
-       ~upload:(fun ~key:_ ~cancel:_ ->
-         incr uploaded;
-         Lwt.return_unit)
-       ~on_upload_done:(fun ~key:_ -> Lwt.return_unit);
+     Sq.start ~on_upload_done:(fun ~key:_ -> Lwt.return_unit);
 
      Sq.set_paused true;
      let* () = post 1 in

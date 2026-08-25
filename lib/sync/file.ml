@@ -1,7 +1,16 @@
 open Lwt.Syntax
 
-module Make_with_layout (C : Conf.S) (Sq : Sync_queue.S) (L : Layout.S) :
-  File_ops.S = struct
+(* What the sending pool needs of the file operations, and what it tells them
+   in return. *)
+module type Owing = sig
+  val record_key : Wal.record -> Logical_key.t option
+  val record_size : Wal.record -> int64
+  val upload : ?cancel:bool ref -> Logical_key.t -> unit Lwt.t
+  val set_in_flight : (unit -> Logical_key.t list) -> unit
+  val set_canceller : (Logical_key.t -> bool) -> unit
+end
+
+module Make_with_layout (C : Conf.S) (L : Layout.S) = struct
   module Lk = Logical_key.Make (C)
   module J = Journal.Make (C)
   module W = Wal.Make (C)
@@ -28,6 +37,39 @@ module Make_with_layout (C : Conf.S) (Sq : Sync_queue.S) (L : Layout.S) :
   module Mfs = Staged_manifest.Make (C)
   module D = Data.Make (C) (R)
 
+  (* The file a record is about, and what it will cost to send. Both derived
+     from the ops rather than carried alongside them, so the two cannot disagree
+     about which file a record names.
+
+     The op says whether it names a folder, so the key it yields does too: a
+     directory rename read back as a file publishes an entry a peer replays as
+     one. *)
+  let op_key = function
+    | `Put (k, _) | `Delete k -> Lk.file k
+    | `Mkdir (k, _) | `Rmdir (k, _) -> Lk.dir k
+    | `Rename { Journal.dst; is_dir; _ } ->
+        if is_dir then Lk.dir dst else Lk.file dst
+
+  let record_key (r : Wal.record) =
+    match r.Wal.ops with op :: _ -> Some (op_key op) | [] -> None
+
+  (* Only a [`Put] carries bytes; the other ops are metadata the backend answers
+     in one round trip. *)
+  let record_size (r : Wal.record) =
+    List.fold_left
+      (fun total op ->
+        match op with `Put (_, size) -> Int64.add total size | _ -> total)
+      0L r.Wal.ops
+
+  (* Which files are being sent right now, and how to stop one, are the sending
+     pool's to know; this is where it says so. Cancelling is not only reported:
+     a write to a file being sent must stop the send, or it publishes a manifest
+     for content torn out from under it. *)
+  let in_flight_keys : (unit -> Logical_key.t list) ref = ref (fun () -> [])
+  let cancel_send : (Logical_key.t -> bool) ref = ref (fun _ -> false)
+  let set_in_flight f = in_flight_keys := f
+  let set_canceller f = cancel_send := f
+  let cancel_upload key = !cancel_send key
   let manifest_path key = Mf.path key
 
   (* Every path that moves a directory locally owes this call, or the folder
@@ -154,8 +196,6 @@ module Make_with_layout (C : Conf.S) (Sq : Sync_queue.S) (L : Layout.S) :
   let create key = D.create key
   let write_whole key ~src_path = D.stage_whole key ~src_path
   let read key (buf : File_ops.buffer) ~offset = D.pread_key key buf ~offset
-  let cancel_upload key = Sq.cancel_put (Logical_key.to_string key)
-  let uploads_pending = Sq.pending
 
   (* What to call a row, and where the file sits under the domain root. *)
   (* The queue and the pull tracker hold rendered keys, so this takes one back
@@ -181,7 +221,7 @@ module Make_with_layout (C : Conf.S) (Sq : Sync_queue.S) (L : Layout.S) :
             | None -> None
         in
         Some { File_ops.name; rel; body; size })
-      (Sq.uploading ())
+      (!in_flight_keys ())
 
   let downloading_now () =
     List.map
@@ -196,10 +236,6 @@ module Make_with_layout (C : Conf.S) (Sq : Sync_queue.S) (L : Layout.S) :
           d_rate = p.D.rate;
         })
       (D.pulling_now ())
-
-  let uploads_pending_bytes = Sq.pending_bytes
-  let uploads_paused = Sq.paused
-  let set_uploads_paused = Sq.set_paused
 
   let write key (buf : File_ops.buffer) ~offset =
     (* An in-flight upload is reading the bodies we are about to mutate: cancel
@@ -246,24 +282,29 @@ module Make_with_layout (C : Conf.S) (Sq : Sync_queue.S) (L : Layout.S) :
             (Logical_key.to_string key);
           Lwt.return_unit
       | Some st ->
-          (* One write: the queue records the job before it returns, which is
-             what makes a crash here leave something saying the upload is
-             owed. *)
-          Sq.post ~entry_key:(J.entry_key ())
+          (* Recorded before this returns, which is what makes a crash here
+             leave something saying the upload is owed; handing it over only
+             says who should get to it first. *)
+          let entry_key = J.entry_key () in
+          let record =
             {
               Wal.ops = [`Put (rel_key key, st.Staged_manifest.s_size)];
               state = Wal.Prepared;
               attempts = 0;
               last_error = None;
             }
+          in
+          let* () = W.write entry_key record in
+          Wal.Owed.signal W.owed (entry_key, record)
 
-  (* The record already exists and already names this work; posting under its
-     key is what keeps one unit of work to one key across a restart. *)
+  (* The record already exists and already names this work; writing it under
+     its own key is what keeps one unit of work to one key across a restart. *)
   let resume_put key ~entry_key ~record =
     let* staged = Mfs.exists key in
     if not staged then Lwt.return_false
     else
-      let+ () = Sq.post ~entry_key record in
+      let* () = W.write entry_key record in
+      let+ () = Wal.Owed.signal W.owed (entry_key, record) in
       true
 
   let reclaim_staged_orphans = D.reclaim_staged_orphans
@@ -637,5 +678,4 @@ module Make_with_layout (C : Conf.S) (Sq : Sync_queue.S) (L : Layout.S) :
     with_meta (fun () -> Lwt_list.iter_s apply_one ops)
 end
 
-module Make (C : Conf.S) (Sq : Sync_queue.S) =
-  Make_with_layout (C) (Sq) (Layout.Inode.Make (C))
+module Make (C : Conf.S) = Make_with_layout (C) (Layout.Inode.Make (C))

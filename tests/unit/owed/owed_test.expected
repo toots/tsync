@@ -1,15 +1,15 @@
 
-=== signalled before anyone waits
-is held: ok
-and delivered to whoever waits next: ok
-and taken off: ok
+=== with nobody consuming
+a signal is not refused: ok
 
-=== two signalled before either is taken
-both are held: ok
-in the order they were signalled: ok
+=== once a consumer is installed
+it is handed over: ok
+and by the time the signal returns: ok
 
-=== waiting first
-does not finish while nothing is owed: ok
-and finishes when one arrives: ok
+=== a second consumer
+displaces the first: ok
 
-7 check(s), 0 failure(s)
+=== going idle
+leaves what follows written and untaken: ok
+
+5 check(s), 0 failure(s)

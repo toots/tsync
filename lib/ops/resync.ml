@@ -15,8 +15,8 @@ module Make (C : Conf.S) = struct
   module Lk = Logical_key.Make (C)
   module J = Journal.Make (C)
   module Fs = File_store.Make (C)
-  module Sq = Sync_queue.Make (C)
-  module F = File.Make (C) (Sq)
+  module F = File.Make (C)
+  module Sq = Sync_queue.Make (C) (F)
   module Rp = Replay.Make (C) (F)
   module Tree = Inode_tree.Make (C)
 
@@ -111,9 +111,7 @@ module Make (C : Conf.S) = struct
     (* Every process serving this domain runs its own upload queue, so recovery
        has one to go through for the journal entry and cursor bump an upload
        owes — the same start {!Domain_engine} does for a daemon. *)
-    Sq.start
-      ~upload:(fun ~key ~cancel -> F.upload ~cancel key)
-      ~on_upload_done:(fun ~key:_ -> Lwt.return_unit);
+    Sq.start ~on_upload_done:(fun ~key:_ -> Lwt.return_unit);
     progress.on_phase "replaying local records";
     let* () = Rp.reconcile () in
     progress.on_phase "draining uploads";

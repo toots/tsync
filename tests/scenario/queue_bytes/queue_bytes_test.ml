@@ -13,8 +13,23 @@ module C =
          ~root ()
       : Conf.S)
 
-module Sq = Sync_queue.Make (C)
+module F = File.Make (C)
 module J = Journal.Make (C)
+module W = Wal.Make (C)
+
+let gate, open_gate = Lwt.wait ()
+let dir_gate, open_dir_gate = Lwt.wait ()
+let renaming = ref false
+
+(* The file operations, with sending stubbed: what varies here is the
+   queue's behaviour, not what an upload does. *)
+module Sent = struct
+  include F
+
+  let upload ?cancel:_ _ = if !renaming then dir_gate else gate
+end
+
+module Sq = Sync_queue.Make (C) (Sent)
 
 (* Waits for the queue to stop moving rather than for a length of time: on a
    loaded CI runner 0.2s elapsed before the worker had dequeued, and the report
@@ -36,16 +51,21 @@ let settle () =
 
 (* Every upload parks here, so the two a worker holds stay in flight for as long
    as the test needs them to. *)
-let gate, open_gate = Lwt.wait ()
 
 (* A second gate, so the folder rename can be held in flight after the files
    have drained and the report can be read for what the queue calls it. *)
-let dir_gate, open_dir_gate = Lwt.wait ()
-let renaming = ref false
+
+(* What a file operation does: the record is written, and then handed to
+   whoever sends it. *)
+
+let owe r =
+  let entry_key = J.entry_key () in
+  let* () = W.write entry_key r in
+  Wal.Owed.signal W.owed (entry_key, r)
 
 let post n size =
   let name = Printf.sprintf "f%d.txt" n in
-  Sq.post ~entry_key:(J.entry_key ())
+  owe
     {
       Wal.ops = [`Put (name, Int64.of_int size)];
       state = Wal.Prepared;
@@ -71,7 +91,7 @@ let report label =
 (* A folder rename: the op says the key names a directory and the queue has to
    say so too, or the entry it publishes is one a peer replays as a file. *)
 let post_dir_rename () =
-  Sq.post ~entry_key:(J.entry_key ())
+  owe
     {
       Wal.ops =
         [
@@ -92,9 +112,7 @@ let post_dir_rename () =
 let () =
   Lwt_main.run
     (let* () = Io_lwt.Fs.rm_rf root in
-     Sq.start
-       ~upload:(fun ~key:_ ~cancel:_ -> if !renaming then dir_gate else gate)
-       ~on_upload_done:(fun ~key:_ -> Lwt.return_unit);
+     Sq.start ~on_upload_done:(fun ~key:_ -> Lwt.return_unit);
 
      report "empty";
 
