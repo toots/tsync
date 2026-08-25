@@ -98,15 +98,18 @@ module Q = Durable_queue_lwt.Make (Job)
 (* The records of a domain are one thing however many places name them: this
    functor is applied wherever the log is read or written, and a second
    [Records.t] over the same directory would keep its own id counter. *)
-let logs : (string, Q.Records.t) Hashtbl.t = Hashtbl.create 4
+module Owed_q = Owed.Make (Io_lwt.Lock)
+
+let logs : (string, Q.Records.t * (Ek.t * record) Owed_q.t) Hashtbl.t =
+  Hashtbl.create 4
 
 let log_for dir =
   match Hashtbl.find_opt logs dir with
-    | Some log -> log
+    | Some both -> both
     | None ->
-        let log = Q.Records.create ~dir in
-        Hashtbl.replace logs dir log;
-        log
+        let both = (Q.Records.create ~dir, Owed_q.create ()) in
+        Hashtbl.replace logs dir both;
+        both
 
 module Make (C : Conf.S) = struct
   module J = Journal.Make (C)
@@ -114,7 +117,7 @@ module Make (C : Conf.S) = struct
   (* One directory per domain: the ops carry domain-relative keys, so a shared
      store would let one domain's replay run another's entries against the wrong
      backend. *)
-  let log =
+  let log, owed =
     log_for
       (Filename.concat
          (Filename.concat C.data_dir "journal-pending")
@@ -124,10 +127,10 @@ module Make (C : Conf.S) = struct
      backend journal, and in the cursor a peer compares against — so it is the
      record's id rather than something minted per queue. *)
   let id = Ek.to_string
+  let write key r = Q.Records.write log ~id:(id key) r
 
-  let record ?(state = Intent) key ops =
-    Q.Records.write log ~id:(id key)
-      { ops; state; attempts = 0; last_error = None }
+  let record key ops =
+    write key { ops; state = Intent; attempts = 0; last_error = None }
 
   let advance key state =
     Q.Records.update log (id key) (fun r -> { r with state })

@@ -11,6 +11,8 @@ open Lwt.Syntax
 open Check
 module O = Owed.Make (Io_lwt.Lock)
 
+(* What Wal hands over: the record, under the key it was written with. *)
+
 let key n =
   match Journal.Entry_key.of_string n with
     | Some k -> k
@@ -32,15 +34,15 @@ let () =
     (let t = O.create () in
 
      case "signalled before anyone waits";
-     O.signal t (key "0000000000001-aaaa") (record "a.txt");
+     O.signal t (key "0000000000001-aaaa", record "a.txt");
      check "is held" (O.pending t = 1);
      let* _, r = O.next t in
      check "and delivered to whoever waits next" (rel_of r = "a.txt");
      check "and taken off" (O.pending t = 0);
 
      case "two signalled before either is taken";
-     O.signal t (key "0000000000002-aaaa") (record "b.txt");
-     O.signal t (key "0000000000003-aaaa") (record "c.txt");
+     O.signal t (key "0000000000002-aaaa", record "b.txt");
+     O.signal t (key "0000000000003-aaaa", record "c.txt");
      check "both are held" (O.pending t = 2);
      let* _, first = O.next t in
      let* _, second = O.next t in
@@ -50,7 +52,7 @@ let () =
      case "waiting first";
      let waited = O.next t in
      check "does not finish while nothing is owed" (Lwt.state waited = Lwt.Sleep);
-     O.signal t (key "0000000000004-aaaa") (record "d.txt");
+     O.signal t (key "0000000000004-aaaa", record "d.txt");
      let+ _, r = waited in
      check "and finishes when one arrives" (rel_of r = "d.txt");
      report ~expected:7 ())
