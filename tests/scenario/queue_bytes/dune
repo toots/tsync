@@ -2,7 +2,7 @@
  (flags
   (:standard
    -open
-   Tsync_checkout
+   Tsync_wal
    -open
    Tsync_logical_key
    -open
@@ -21,7 +21,7 @@
    Tsync_test_harness))
  (name queue_bytes_test)
  (libraries
-  tsync_checkout
+  tsync_wal
   tsync_logical_key
   tsync_journal
   tsync_test_harness

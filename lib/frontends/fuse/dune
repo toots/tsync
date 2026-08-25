@@ -6,6 +6,8 @@
    -open
    Tsync_checkout
    -open
+   Tsync_file_ops
+   -open
    Tsync_field_spec
    -open
    Tsync_naming
@@ -31,6 +33,7 @@
  (libraries
   tsync_logical_key
   tsync_checkout
+  tsync_file_ops
   tsync-libs.field_spec
   tsync-libs.naming
   tsync-libs.frontend_register

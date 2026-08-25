@@ -4,8 +4,6 @@
    -open
    Tsync_logical_key
    -open
-   Tsync_checkout
-   -open
    Tsync_ops
    -open
    Tsync_bigstring
@@ -24,7 +22,6 @@
  (name mirror_pools)
  (libraries
   tsync-libs.logical_key
-  tsync_checkout
   tsync_test_harness
   tsync_ops
   tsync_bigstring

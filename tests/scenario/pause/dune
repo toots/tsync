@@ -2,7 +2,7 @@
  (flags
   (:standard
    -open
-   Tsync_checkout
+   Tsync_wal
    -open
    Tsync_journal
    -open
@@ -19,7 +19,7 @@
    Tsync_test_harness))
  (name pause_test)
  (libraries
-  tsync_checkout
+  tsync_wal
   tsync_journal
   tsync_test_harness
   tsync_sync

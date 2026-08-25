@@ -6,8 +6,6 @@
    -open
    Tsync_filename
    -open
-   Tsync_checkout
-   -open
    Tsync_chunks
    -open
    Tsync_ops
@@ -31,7 +29,6 @@
  (libraries
   tsync-libs.logical_key
   tsync_filename
-  tsync_checkout
   tsync_chunks
   tsync_test_harness
   tsync_ops

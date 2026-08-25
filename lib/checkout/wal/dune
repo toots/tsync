@@ -1,0 +1,34 @@
+; This client's intent log: a record written before the work it names is done,
+; and the hand-off telling whoever performs it that there is one.
+
+(library
+ (flags
+  (:standard
+   -open
+   Tsync_logical_key
+   -open
+   Tsync_conf
+   -open
+   Tsync_journal
+   -open
+   Tsync_durable_queue_lwt
+   -open
+   Tsync_io
+   -open
+   Tsync_retry
+   -open
+   Tsync_io_lwt))
+ (name tsync_wal)
+ (public_name tsync-libs.wal)
+ (libraries
+  tsync_logical_key
+  tsync_conf
+  tsync_journal
+  tsync_durable_queue_lwt
+  tsync_io
+  tsync_retry
+  tsync_io_lwt
+  yojson
+  unix
+  lwt
+  lwt.unix))

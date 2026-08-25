@@ -2,7 +2,7 @@
  (flags
   (:standard
    -open
-   Tsync_checkout
+   Tsync_wal
    -open
    Tsync_retry
    -open
@@ -42,7 +42,7 @@
  (name tsync_diagnostics)
  (public_name tsync-libs.diagnostics)
  (libraries
-  tsync_checkout
+  tsync_wal
   tsync-libs.conf_parsing
   tsync_retry
   tsync_logical_key
