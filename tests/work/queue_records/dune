@@ -2,7 +2,7 @@
  (flags
   (:standard
    -open
-   Tsync_work
+   Tsync_durable_queue_lwt
    -open
    Tsync_log
    -open
@@ -12,7 +12,7 @@
  (name queue_records)
  (libraries
   tsync_test_harness
-  tsync_work
+  tsync_durable_queue_lwt
   tsync_log
   tsync_io_lwt
   lwt

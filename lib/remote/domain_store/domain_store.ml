@@ -2,7 +2,7 @@ open Lwt.Syntax
 
 type sub = { name : string; backend : (module Backend.S) }
 
-let drain () = Durable_queue.settle_all ()
+let drain () = Durable_queue_lwt.settle_all ()
 
 (* {!drain} already covers every queue in the process, so the hook is worth
    registering once however many domains {!make} is called for. *)

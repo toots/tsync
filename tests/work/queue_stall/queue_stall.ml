@@ -13,7 +13,7 @@ open Check
 
 let root = Scratch.dir "queue-stall"
 
-module Q = Durable_queue.Make (struct
+module Q = Durable_queue_lwt.Make (struct
   type t = string
 
   let to_string s = s
@@ -36,10 +36,10 @@ let stalls () =
 let queue ~name ~dir ~run =
   Q.ordered ~name ~classify:Retry.classify
     ~log:(Q.Records.create ~dir:(Filename.concat root dir))
-    ~poison:Durable_queue.Drop ~run ()
+    ~poison:Durable_queue_lwt.Drop ~run ()
 
 let () =
-  Durable_queue.set_stall_warning_interval 0.2;
+  Durable_queue_lwt.set_stall_warning_interval 0.2;
   Lwt_main.run
     (let before = List.length (stalls ()) in
 
@@ -51,7 +51,8 @@ let () =
      let* () = Q.post done_q "b" in
      let* () = Lwt_unix.sleep 0.7 in
      check "a queue that drains says nothing" (List.length (stalls ()) = before);
-     check "and it really did drain" ((Q.stats done_q).Durable_queue.queued = 0);
+     check "and it really did drain"
+       ((Q.stats done_q).Durable_queue_lwt.queued = 0);
 
      (* A job that never finishes, which is what a request with no reply and no
         timeout looks like from here. *)
@@ -65,7 +66,7 @@ let () =
      check "a queue holding jobs with nothing finishing warns"
        (List.length (stalls ()) > before);
      check "and still reports them as merely queued"
-       ((Q.stats stuck_q).Durable_queue.queued > 0);
+       ((Q.stats stuck_q).Durable_queue_lwt.queued > 0);
 
      report ();
      Lwt.return_unit)

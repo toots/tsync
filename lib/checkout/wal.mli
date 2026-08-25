@@ -10,10 +10,10 @@
     domain with 295 orphans reported as a single opaque number.
 
     A record is also the durable job {!Sync_queue} drains, so it is a
-    {!Durable_queue.JOB} and the log below is a {!Durable_queue.Make.Records}. A
-    metadata operation happens synchronously here rather than through the queue,
-    but writes to the same log, so one reconcile and one report see everything
-    this client owes. *)
+    {!Durable_queue_lwt.JOB} and the log below is a
+    {!Durable_queue_lwt.Make.Records}. A metadata operation happens
+    synchronously here rather than through the queue, but writes to the same
+    log, so one reconcile and one report see everything this client owes. *)
 
 (** There is no "committed" state: the record is deleted the moment the entry is
     published, and a crash in that window leaves [Executed], which reconcile
@@ -36,7 +36,7 @@ type record = {
           counted. *)
 }
 
-module Q : module type of Durable_queue.Make (struct
+module Q : module type of Durable_queue_lwt.Make (struct
   type t = record
 
   let to_string _ = assert false

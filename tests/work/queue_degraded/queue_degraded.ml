@@ -16,7 +16,7 @@ module J = struct
   let of_string s = if s = "" then None else Some s
 end
 
-module Q = Durable_queue.Make (J)
+module Q = Durable_queue_lwt.Make (J)
 
 let dir = Filename.concat (Scratch.dir "queue-degraded") "log"
 
@@ -40,18 +40,18 @@ let () =
      let ran = ref [] in
      let q =
        Q.ordered ~name:"degraded" ~classify:Retry.classify ~log
-         ~poison:Durable_queue.Drop
+         ~poison:Durable_queue_lwt.Drop
          ~run:(fun job ->
            ran := job :: !ran;
            Lwt.return_unit)
          ()
      in
      Q.start ~recover:true q;
-     let* () = Durable_queue.settle_all ~timeout:5. () in
+     let* () = Durable_queue_lwt.settle_all ~timeout:5. () in
      check "the jobs it could read still ran"
        ~why:(fun () -> String.concat ", " !ran)
        (List.sort compare !ran = ["keep-me"; "keep-me-too"]);
      check "and the queue says a mirror is needed"
-       (Q.stats q).Durable_queue.degraded;
+       (Q.stats q).Durable_queue_lwt.degraded;
      report ~expected:3 ();
      Lwt.return_unit)

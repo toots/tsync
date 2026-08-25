@@ -18,7 +18,7 @@ open Lwt.Syntax
 
 let root = Scratch.dir "queue-records"
 
-module Q = Durable_queue.Make (struct
+module Q = Durable_queue_lwt.Make (struct
   type t = string
 
   let to_string s = s

@@ -10,6 +10,13 @@ module Fs_primitives :
   Fs.PRIMITIVES with type 'a io := 'a Lwt.t and type fd := Lwt_unix.file_descr
 
 module Clock : Clock.S with type 'a io := 'a Lwt.t
+
+module Lock :
+  Lock.S
+    with type 'a io := 'a Lwt.t
+     and type mutex = Lwt_mutex.t
+     and type condition = unit Lwt_condition.t
+
 module Bounded : module type of Tsync_io.Bounded.Make (Core)
 module Retry : module type of Tsync_io.Retry.Make (Core) (Syscalls)
 

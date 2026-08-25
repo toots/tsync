@@ -16,7 +16,7 @@ module J = struct
   let of_string s = Some s
 end
 
-module Q = Durable_queue.Make (J)
+module Q = Durable_queue_lwt.Make (J)
 
 (* The snapshot carries the verdict, so everything that decides one is a line on
    stdout: a status the rule reads instead would fail the run before the diff,
@@ -46,7 +46,7 @@ let hold dir =
   let log = Q.Records.create ~dir in
   let q =
     Q.ordered ~name:"holder" ~classify:Retry.classify ~log
-      ~poison:Durable_queue.Drop
+      ~poison:Durable_queue_lwt.Drop
       ~run:(fun _ -> Lwt.return_unit)
       ()
   in
@@ -81,33 +81,33 @@ let run ~dir ~kill_child () =
   let log = Q.Records.create ~dir in
   let q =
     Q.ordered ~name:"taker" ~classify:Retry.classify ~log
-      ~poison:Durable_queue.Drop
+      ~poison:Durable_queue_lwt.Drop
       ~run:(fun job ->
         ran := !ran @ [job];
         if !holding then gate else Lwt.return_unit)
       ()
   in
   Q.start ~recover:true q;
-  let* () = Durable_queue.settle_all ~timeout:2. () in
+  let* () = Durable_queue_lwt.settle_all ~timeout:2. () in
   check "a claimed log is left to the process that claimed it" (!ran = []);
   let* records = Q.Records.list log in
   check "and the records are still there to be taken"
     (List.length records = List.length planted);
   kill_child ();
-  let* () = Durable_queue.rescan_all () in
-  let* () = Durable_queue.settle_all ~timeout:5. () in
+  let* () = Durable_queue_lwt.rescan_all () in
+  let* () = Durable_queue_lwt.settle_all ~timeout:5. () in
   check "an unclaimed log is taken over" (!ran = planted);
   let* records = Q.Records.list log in
   check "a job that ran leaves no record" (records = []);
   holding := true;
   ran := [];
   let* () = plant dir ~first:4 held in
-  let* () = Durable_queue.rescan_all () in
+  let* () = Durable_queue_lwt.rescan_all () in
   let* started = await (fun () -> !ran = [List.hd held]) in
   check "a held job keeps its record" started;
-  let* () = Durable_queue.rescan_all () in
+  let* () = Durable_queue_lwt.rescan_all () in
   Lwt.wakeup open_gate ();
-  let* () = Durable_queue.settle_all ~timeout:5. () in
+  let* () = Durable_queue_lwt.settle_all ~timeout:5. () in
   check "reading the log while it is being worked runs nothing twice"
     (!ran = held);
   let+ records = Q.Records.list log in

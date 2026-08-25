@@ -15,7 +15,7 @@ type job =
   | Job_delete of Stored_key.t
   | Job_delete_multi of Stored_key.t list
 
-module Q = Durable_queue.Make (struct
+module Q = Durable_queue_lwt.Make (struct
   type t = job
 
   let to_string job =
@@ -111,7 +111,7 @@ let escape name =
   Buffer.contents buf
 
 let log_dir ~root ~name = Filename.concat root (escape name)
-let release ~root ~name = Durable_queue.release (log_dir ~root ~name)
+let release ~root ~name = Durable_queue_lwt.release (log_dir ~root ~name)
 
 let make ?(resume = false) ?chunk_from_prefix ~name ~backend ~source
     ~chunk_prefix ~(chunk_keys : string -> string list) ~journal_prefix
@@ -222,7 +222,7 @@ let make ?(resume = false) ?chunk_from_prefix ~name ~backend ~source
         (* A permanent failure is dropped: the same request would be refused
            again, and every later rename would queue behind it forever. The
            target is degraded from then on and needs tsync mirror. *)
-      ~classify:Backend.classify ~poison:Durable_queue.Drop ~run ()
+      ~classify:Backend.classify ~poison:Durable_queue_lwt.Drop ~run ()
   in
   Q.start ~recover:resume queue;
   (* Chunk pushes are not owed — a manifest job fetches whatever is missing — but
@@ -234,7 +234,7 @@ let make ?(resume = false) ?chunk_from_prefix ~name ~backend ~source
       let* () = Lwt_condition.wait quiet in
       chunks_quiet ()
   in
-  Durable_queue.register_settle chunks_quiet;
+  Durable_queue_lwt.register_settle chunks_quiet;
   (* Best-effort and unrecorded: correctness rests entirely on the manifest job's
      chunk check, so dropping one only costs that job a fetch.
 
@@ -279,9 +279,9 @@ let make ?(resume = false) ?chunk_from_prefix ~name ~backend ~source
     let stats () =
       let s = Q.stats queue in
       {
-        queued = s.Durable_queue.queued;
+        queued = s.Durable_queue_lwt.queued;
         in_flight = !chunks_in_flight;
-        degraded = s.Durable_queue.degraded;
+        degraded = s.Durable_queue_lwt.degraded;
       }
 
     let accept = function

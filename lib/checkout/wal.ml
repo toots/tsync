@@ -84,7 +84,7 @@ let of_body body =
     | exception _ -> legacy ()
 
 (* The record is the durable job the upload queue drains, so it is a
-   {!Durable_queue.JOB} rather than a format this module reads and writes
+   {!Durable_queue_lwt.JOB} rather than a format this module reads and writes
    itself. *)
 module Job = struct
   type t = record
@@ -93,7 +93,7 @@ module Job = struct
   let of_string body = Some (of_body body)
 end
 
-module Q = Durable_queue.Make (Job)
+module Q = Durable_queue_lwt.Make (Job)
 
 module Make (C : Conf.S) = struct
   module J = Journal.Make (C)

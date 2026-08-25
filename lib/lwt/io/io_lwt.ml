@@ -51,6 +51,18 @@ module Clock = struct
   let is_timeout exn = exn = Lwt_unix.Timeout
 end
 
+module Lock = struct
+  type mutex = Lwt_mutex.t
+  type condition = unit Lwt_condition.t
+
+  let mutex = Lwt_mutex.create
+  let with_lock = Lwt_mutex.with_lock
+  let condition = Lwt_condition.create
+  let wait c = Lwt_condition.wait c
+  let signal c = Lwt_condition.signal c ()
+  let broadcast c = Lwt_condition.broadcast c ()
+end
+
 module Bounded = Bounded.Make (Core)
 module Retry = Retry.Make (Core) (Syscalls)
 

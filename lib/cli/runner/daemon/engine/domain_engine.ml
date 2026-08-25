@@ -107,7 +107,7 @@ module Make (C : Conf.S) : S = struct
         let rec loop () =
           let* () = Lwt_unix.sleep housekeeping_interval in
           let* () = sweep "chunk cap sweep" F.enforce_chunk_cap in
-          let* () = sweep "deferred rescan" Durable_queue.rescan_all in
+          let* () = sweep "deferred rescan" Durable_queue_lwt.rescan_all in
           loop ()
         in
         loop ());

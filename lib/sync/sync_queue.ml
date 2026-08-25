@@ -145,7 +145,7 @@ module Make (C : Conf.S) : S = struct
   let queue =
     Q.keyed ~workers:(max 1 C.max_uploads) ~weight:size_of ~name:"upload"
       ~log:W.log ~key:slot_of ~classify:Backend.classify
-      ~poison:Durable_queue.Stop ~run ()
+      ~poison:Durable_queue_lwt.Stop ~run ()
 
   (* [Prepared]: whatever staged data the caller read is what this names, so the
      upload is owed from here on. *)
@@ -156,7 +156,7 @@ module Make (C : Conf.S) : S = struct
   let cancel_put key = Q.cancel queue key
   let pending () = Q.owed queue
   let uploading () = List.filter_map key_of (Q.in_flight queue)
-  let pending_bytes () = (Q.stats queue).Durable_queue.bytes
+  let pending_bytes () = (Q.stats queue).Durable_queue_lwt.bytes
   let set_paused b = Q.set_paused queue b
   let paused () = Q.paused queue
 

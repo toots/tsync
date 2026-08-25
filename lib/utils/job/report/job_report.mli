@@ -15,17 +15,17 @@
     retries and {!Job_progress} are process-wide and gathered here, so a command
     threads nothing through for those. Every closure is sampled on the reporting
     thread and must not block. *)
-(** Where a report goes. One line to a socket, answering whatever comes back;
-    a caller of {!Make} with no daemon to talk to supplies its own. *)
 module type SEND = sig
   type 'a io
 
+  (** One line to a socket, answering whatever comes back. A caller of {!Make}
+      with no daemon to talk to supplies its own. *)
   val send : socket_path:string -> string -> string io
 end
 
-(** Pool saturation, which is process-wide and so gathered here rather than
-    threaded through by every command. *)
 module type POOLS = sig
+  (** Every named pool as [(name, in_flight, waiting, width)]. Process-wide, and
+      so gathered here rather than threaded through by every command. *)
   val totals : unit -> (string * int * int * int) list
 end
 

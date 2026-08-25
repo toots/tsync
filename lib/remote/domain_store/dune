@@ -20,14 +20,14 @@
    -open
    Tsync_backend_register
    -open
-   Tsync_work))
+   Tsync_durable_queue_lwt))
  (name tsync_domain_store)
  (public_name tsync-libs.domain_store)
  (libraries
   tsync-libs.logical_key
   tsync_retry
   tsync_chunks
-  tsync_work
+  tsync_durable_queue_lwt
   tsync_bigstring
   tsync_backend_register
   tsync_io_lwt

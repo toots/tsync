@@ -37,7 +37,7 @@
    -open
    Tsync_log
    -open
-   Tsync_work))
+   Tsync_durable_queue_lwt))
  (name tsync_sync)
  (public_name tsync-libs.sync)
  (libraries
@@ -49,7 +49,7 @@
   tsync_checkout
   tsync_manifest
   tsync_journal
-  tsync_work
+  tsync_durable_queue_lwt
   tsync_conf
   tsync_naming
   tsync_store

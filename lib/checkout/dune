@@ -21,7 +21,7 @@
    -open
    Tsync_journal
    -open
-   Tsync_work
+   Tsync_durable_queue_lwt
    -open
    Tsync_retry
    -open
@@ -45,7 +45,7 @@
   tsync_naming
   tsync_manifest
   tsync_journal
-  tsync_work
+  tsync_durable_queue_lwt
   tsync_retry
   tsync_chunks
   tsync_io_lwt
