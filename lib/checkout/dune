@@ -19,6 +19,12 @@
    -open
    Tsync_manifest
    -open
+   Tsync_journal
+   -open
+   Tsync_work
+   -open
+   Tsync_retry
+   -open
    Tsync_chunks
    -open
    Tsync_local_io
@@ -40,6 +46,9 @@
   tsync_conf
   tsync_naming
   tsync_manifest
+  tsync_journal
+  tsync_work
+  tsync_retry
   tsync_chunks
   tsync_local_io
   tsync_lwt_unix

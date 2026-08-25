@@ -60,7 +60,6 @@
   tsync_lwt_unix
   tsync_backend_register
   tsync_log
-  yojson
   unix
   lwt
   lwt.unix))
