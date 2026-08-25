@@ -72,12 +72,6 @@ module Make_with_layout (C : Conf.S) (L : Layout.S) = struct
   let set_canceller f = cancel_send := f
   let cancel_upload key = !cancel_send key
   let manifest_path key = Mf.path key
-
-  (* Every path that moves a directory locally owes this call, or the folder
-     becomes unreachable by id. *)
-  let reparent_dir key =
-    Folder_ids.reparent ~cache_root:C.cache_root ~domain_name:C.domain_name key
-
   let published_here key : Manifest.t option Lwt.t = Mf.published key
   let published = D.published
   let write_manifest key (state : Manifest.t) = Mf.write key state
@@ -426,7 +420,6 @@ module Make_with_layout (C : Conf.S) (L : Layout.S) = struct
           | None -> None
     in
     let* () = rename_local ~src ~dst in
-    let* () = if is_dir then reparent_dir dst else Lwt.return_unit in
     (* Read after the move, where the folder now is. *)
     let* dir_id =
       if is_dir then
@@ -654,8 +647,7 @@ module Make_with_layout (C : Conf.S) (L : Layout.S) = struct
           if exists then
             unless_staged src_key (fun () ->
                 let* () = adopt_ancestor_ids dst in
-                let* () = rename_local ~src:src_key ~dst:dst_key in
-                reparent_dir dst_key)
+                rename_local ~src:src_key ~dst:dst_key)
           else Lwt.return_unit
       | `Rename { Journal.src; dst; is_dir = false; _ } ->
           let src_key = Lk.file src in

@@ -78,9 +78,10 @@ module Make (C : Conf.S) = struct
         leaf
 
   (* Moving is half of a rename: whatever records the name — a manifest's body
-     for a file, the marker beside it for a directory — has to be brought to the
-     destination's, and both are done here so no caller need know which it
-     moved. *)
+     for a file, and for a directory both the marker beside it and the folder's
+     own — has to be brought to the destination's, and all of it is done here so
+     no caller need know which it moved, nor remember that a folder unreparented
+     is a folder unreachable by id. *)
   let rename ~src_key ~dst_key =
     Mf.forget src_key;
     Mf.forget dst_key;
@@ -92,7 +93,10 @@ module Make (C : Conf.S) = struct
       let* () = Mf.ensure_parent dst_key in
       let* () = Io_lwt.Retry.rename src dst in
       let* is_dir = Io_lwt.Fs.is_directory dst in
-      if is_dir then refresh_dir_marker dst_key
+      if is_dir then
+        let* () = refresh_dir_marker dst_key in
+        Folder_ids.reparent ~cache_root:C.cache_root ~domain_name:C.domain_name
+          dst_key
       else (
         match of_file dst with
           | m -> Mf.write dst_key m
