@@ -1,0 +1,26 @@
+; Which folder is which, both ways round: the marker beside each folder in the
+; mirror naming its id, and the index under the cache root that answers the
+; other direction, rebuilt from the markers whenever it disagrees.
+
+(library
+ (flags
+  (:standard
+   -open
+   Tsync_filename
+   -open
+   Tsync_logical_key
+   -open
+   Tsync_cache_layout
+   -open
+   Tsync_io_lwt))
+ (name tsync_folder_ids)
+ (public_name tsync-libs.folder_ids)
+ (libraries
+  tsync_filename
+  tsync_logical_key
+  tsync_cache_layout
+  tsync_io_lwt
+  yojson
+  unix
+  lwt
+  lwt.unix))

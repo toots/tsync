@@ -10,7 +10,7 @@
    -open
    Tsync_field_spec
    -open
-   Tsync_naming
+   Tsync_cache_layout
    -open
    Tsync_ipc
    -open
@@ -32,10 +32,10 @@
  (optional)
  (libraries
   tsync_logical_key
+  tsync_cache_layout
   tsync_checkout
   tsync_file_ops
   tsync-libs.field_spec
-  tsync-libs.naming
   tsync-libs.frontend_register
   tsync-libs.log
   tsync-libs.conf

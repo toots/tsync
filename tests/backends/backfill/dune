@@ -8,8 +8,6 @@
    -open
    Tsync_chunks
    -open
-   Tsync_naming
-   -open
    Tsync_io_lwt
    -open
    Tsync_bigstring
@@ -27,7 +25,6 @@
   tsync_manifest
   tsync_chunks
   tsync_test_harness
-  tsync_naming
   tsync_bigstring
   tsync_backend_register
   tsync_io_lwt

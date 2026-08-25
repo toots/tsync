@@ -20,7 +20,7 @@
    -open
    Tsync_store
    -open
-   Tsync_naming
+   Tsync_cache_layout
    -open
    Tsync_log
    -open
@@ -52,7 +52,7 @@
   tsync_sync
   tsync_content
   tsync_store
-  tsync_naming
+  tsync_cache_layout
   tsync_io
   tsync_io_lwt
   tsync_conf

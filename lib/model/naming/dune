@@ -7,4 +7,4 @@
   (:standard -open Tsync_filename -open Tsync_xxhash -open Tsync_id))
  (name tsync_logical_key)
  (public_name tsync-libs.logical_key)
- (libraries tsync_filename tsync_xxhash tsync_id))
+ (libraries tsync_filename tsync_xxhash tsync_id yojson))

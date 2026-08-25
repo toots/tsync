@@ -33,8 +33,6 @@
    -open
    Tsync_conf
    -open
-   Tsync_naming
-   -open
    Tsync_store
    -open
    Tsync_content
@@ -63,7 +61,6 @@
   tsync_journal
   tsync_durable_queue_lwt
   tsync_conf
-  tsync_naming
   tsync_store
   tsync_content
   tsync_io_lwt

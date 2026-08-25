@@ -14,7 +14,7 @@
    -open
    Tsync_content
    -open
-   Tsync_naming
+   Tsync_cache_layout
    -open
    Tsync_xxhash
    -open
@@ -35,7 +35,7 @@
   tsync_chunks
   tsync_test_harness
   tsync_content
-  tsync_naming
+  tsync_cache_layout
   tsync_xxhash
   tsync_conf
   tsync_bigstring

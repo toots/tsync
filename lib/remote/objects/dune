@@ -22,8 +22,6 @@
    -open
    Tsync_conf
    -open
-   Tsync_naming
-   -open
    Tsync_chunks
    -open
    Tsync_chunk_store
@@ -52,7 +50,6 @@
   tsync_manifest
   tsync_journal
   tsync_conf
-  tsync_naming
   tsync_chunks
   tsync_chunk_store
   tsync_store

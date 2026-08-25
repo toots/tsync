@@ -22,7 +22,7 @@
    -open
    Tsync_store
    -open
-   Tsync_naming
+   Tsync_folder_ids
    -open
    Tsync_bigstring
    -open
@@ -43,7 +43,7 @@
   tsync_test_harness
   tsync_content
   tsync_store
-  tsync_naming
+  tsync_folder_ids
   tsync_bigstring
   tsync_conf
   tsync_backend_register

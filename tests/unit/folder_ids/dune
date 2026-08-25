@@ -4,7 +4,9 @@
    -open
    Tsync_logical_key
    -open
-   Tsync_naming
+   Tsync_folder_ids
+   -open
+   Tsync_cache_layout
    -open
    Tsync_io_lwt
    -open
@@ -13,7 +15,8 @@
  (libraries
   tsync_logical_key
   tsync_test_harness
-  tsync_naming
+  tsync_folder_ids
+  tsync_cache_layout
   tsync_io_lwt
   lwt
   lwt.unix

@@ -15,7 +15,7 @@
    -open
    Tsync_conf
    -open
-   Tsync_naming
+   Tsync_cache_layout
    -open
    Tsync_manifest
    -open
@@ -46,7 +46,7 @@
   tsync_logical_key
   tsync_staged
   tsync_conf
-  tsync_naming
+  tsync_cache_layout
   tsync_manifest
   tsync_manifests
   tsync_journal

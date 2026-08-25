@@ -8,7 +8,7 @@
    -open
    Tsync_manifest
    -open
-   Tsync_naming
+   Tsync_cache_layout
    -open
    Tsync_conf
    -open
@@ -22,7 +22,7 @@
   tsync_logical_key
   tsync_staged
   tsync_manifest
-  tsync_naming
+  tsync_cache_layout
   tsync_conf
   tsync_backend_register
   tsync_local_backend

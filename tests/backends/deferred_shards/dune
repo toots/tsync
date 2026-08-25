@@ -8,8 +8,6 @@
    -open
    Tsync_bigstring
    -open
-   Tsync_naming
-   -open
    Tsync_backend_register
    -open
    Tsync_domain_store
@@ -23,7 +21,6 @@
   tsync_chunks
   tsync_test_harness
   tsync_bigstring
-  tsync_naming
   tsync_backend_register
   tsync_domain_store
   tsync_local_backend

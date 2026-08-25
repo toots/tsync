@@ -8,8 +8,6 @@
    -open
    Tsync_ops
    -open
-   Tsync_naming
-   -open
    Tsync_bigstring
    -open
    Tsync_backend_register
@@ -24,7 +22,6 @@
   tsync_logical_key
   tsync_store
   tsync_ops
-  tsync_naming
   tsync_conf
   tsync_bigstring
   tsync_backend_register

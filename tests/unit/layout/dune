@@ -10,8 +10,6 @@
    -open
    Tsync_journal
    -open
-   Tsync_naming
-   -open
    Tsync_io_lwt))
  (name layout)
  (libraries
@@ -19,6 +17,5 @@
   tsync_chunk_integrity
   tsync_chunks
   tsync_journal
-  tsync_naming
   tsync_io_lwt
   unix))

@@ -14,7 +14,9 @@
    -open
    Tsync_content
    -open
-   Tsync_naming
+   Tsync_folder_ids
+   -open
+   Tsync_cache_layout
    -open
    Tsync_conf
    -open
@@ -39,7 +41,8 @@
   tsync_staged
   tsync_checkout
   tsync_content
-  tsync_naming
+  tsync_folder_ids
+  tsync_cache_layout
   tsync_bigstring
   tsync_backend_register
   tsync_http_proxy_frontend

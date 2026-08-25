@@ -19,11 +19,10 @@
     under [chunks/] and [staged/] is keyed by content or an opaque id. *)
 
 val manifests_dir : cache_root:string -> string -> string
-val scratch_dir : cache_root:string -> string -> string
 
 (** The [.tsync-dir] markers say what id a path has; this tree says where an id
     lives, which is what an item identifier asks. Rebuildable from the markers
-    at any time — see {!Folder_ids.rebuild}. *)
+    at any time by whoever keeps both. *)
 val folders_dir : cache_root:string -> string -> string
 
 val chunks_dir : cache_root:string -> string -> string

@@ -6,10 +6,11 @@ let sub ~cache_root domain_name name =
 let manifests_dir ~cache_root domain_name =
   sub ~cache_root domain_name "manifests"
 
+(* Not exported: the two things under it are what a caller wants. *)
 let scratch_dir ~cache_root domain_name = sub ~cache_root domain_name "scratch"
 
 (* The [.tsync-dir] markers say what id a path has; this says where an id lives,
-   and is rebuildable from them — see {!Folder_ids.rebuild}. *)
+   and is rebuildable from them by whoever keeps both. *)
 let folders_dir ~cache_root domain_name = sub ~cache_root domain_name "folders"
 let chunks_dir ~cache_root domain_name = sub ~cache_root domain_name "chunks"
 

@@ -27,7 +27,7 @@
    -open
    Tsync_conf
    -open
-   Tsync_naming
+   Tsync_folder_ids
    -open
    Tsync_store
    -open
@@ -52,7 +52,7 @@
   tsync_manifest
   tsync_journal
   tsync_conf
-  tsync_naming
+  tsync_folder_ids
   tsync_store
   tsync_content
   tsync_io_lwt

@@ -12,8 +12,6 @@
    -open
    Tsync_bigstring
    -open
-   Tsync_naming
-   -open
    Tsync_conf
    -open
    Tsync_io_lwt
@@ -33,7 +31,6 @@
   tsync_test_harness
   tsync_ops
   tsync_bigstring
-  tsync_naming
   tsync_conf
   tsync_io_lwt
   tsync_backend_register

@@ -23,7 +23,7 @@
    -open
    Tsync_conf
    -open
-   Tsync_naming
+   Tsync_cache_layout
    -open
    Tsync_chunks
    -open
@@ -53,7 +53,7 @@
   tsync_manifest
   tsync_journal
   tsync_conf
-  tsync_naming
+  tsync_cache_layout
   tsync_chunks
   tsync_chunk_store
   tsync_store

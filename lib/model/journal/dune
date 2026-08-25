@@ -10,8 +10,6 @@
    -open
    Tsync_conf
    -open
-   Tsync_naming
-   -open
    Tsync_io_lwt
    -open
    Tsync_log))
@@ -21,7 +19,6 @@
   tsync-libs.log
   tsync_id
   tsync_conf
-  tsync_naming
   tsync_io
   tsync_io_lwt
   yojson

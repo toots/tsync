@@ -10,8 +10,6 @@
    -open
    Tsync_content
    -open
-   Tsync_naming
-   -open
    Tsync_metrics
    -open
    Tsync_backend_register
@@ -26,7 +24,6 @@
   tsync_remote
   tsync_staged
   tsync_content
-  tsync_naming
   tsync_conf
   tsync_backend_register
   tsync_local_backend

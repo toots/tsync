@@ -28,7 +28,9 @@
    -open
    Tsync_sync
    -open
-   Tsync_naming
+   Tsync_folder_ids
+   -open
+   Tsync_cache_layout
    -open
    Tsync_conf_parsing
    -open
@@ -62,7 +64,8 @@
   tsync_ops
   tsync_store
   tsync_sync
-  tsync_naming
+  tsync_folder_ids
+  tsync_cache_layout
   tsync_io_lwt
   tsync_conf
   tsync_bigstring

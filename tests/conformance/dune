@@ -16,8 +16,6 @@
    -open
    Tsync_backend
    -open
-   Tsync_naming
-   -open
    Tsync_conf
    -open
    Tsync_test_harness))
@@ -31,7 +29,6 @@
   tsync_conf
   tsync_backend_register
   tsync_backend
-  tsync_naming
   tsync_test_harness
   bigstringaf
   lwt

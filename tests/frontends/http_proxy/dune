@@ -12,8 +12,6 @@
    -open
    Tsync_store
    -open
-   Tsync_naming
-   -open
    Tsync_io_lwt
    -open
    Tsync_http_proxy
@@ -47,7 +45,6 @@
   tsync_test_harness
   tsync_field_spec
   tsync_store
-  tsync_naming
   tsync_http_proxy_frontend
   tsync_http_proxy
   tsync_bigstring

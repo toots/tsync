@@ -6,7 +6,7 @@
    -open
    Tsync_file_ops
    -open
-   Tsync_naming
+   Tsync_folder_ids
    -open
    Tsync_ipc
    -open
@@ -52,7 +52,7 @@
   tsync_logical_key
   tsync-libs.menu
   tsync_file_ops
-  tsync-libs.naming
+  tsync_folder_ids
   tsync-libs.conf
   tsync-libs.ipc
   tsync-libs.engine

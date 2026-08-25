@@ -20,7 +20,7 @@
    -open
    Tsync_store
    -open
-   Tsync_naming
+   Tsync_folder_ids
    -open
    Tsync_ipc
    -open
@@ -47,7 +47,7 @@
   tsync_journal
   tsync_ops
   tsync_store
-  tsync_naming
+  tsync_folder_ids
   tsync_backend_register
   tsync_io_lwt
   tsync_conf
