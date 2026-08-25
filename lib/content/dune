@@ -15,7 +15,7 @@
    -open
    Tsync_chunk_cache
    -open
-   Tsync_checkout
+   Tsync_manifests
    -open
    Tsync_manifest
    -open
@@ -49,7 +49,7 @@
   tsync_remote
   tsync_staged
   tsync_chunk_cache
-  tsync_checkout
+  tsync_manifests
   tsync_manifest
   tsync_journal
   tsync_conf

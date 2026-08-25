@@ -1,0 +1,34 @@
+; One file's manifest: what the store published for it, what this client staged
+; over that, and the writing of either. The tree they sit in is tsync_checkout,
+; which is built on this.
+
+(library
+ (flags
+  (:standard
+   -open
+   Tsync_logical_key
+   -open
+   Tsync_staged
+   -open
+   Tsync_conf
+   -open
+   Tsync_naming
+   -open
+   Tsync_manifest
+   -open
+   Tsync_bigstring
+   -open
+   Tsync_io_lwt))
+ (name tsync_manifests)
+ (public_name tsync-libs.manifests)
+ (libraries
+  tsync_logical_key
+  tsync_staged
+  tsync_conf
+  tsync_naming
+  tsync_manifest
+  tsync_bigstring
+  tsync_io_lwt
+  unix
+  lwt
+  lwt.unix))

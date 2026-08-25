@@ -1,0 +1,12 @@
+
+=== written through one application
+is read through another: ok
+
+=== written again
+the other does not serve what it read before: ok
+
+=== the memo
+is one table, not two: ok
+and a second domain keeps its own: ok
+
+4 check(s), 0 failure(s)

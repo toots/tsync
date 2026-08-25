@@ -30,7 +30,8 @@ module C =
       : Conf.S)
 
 module Lk = Logical_key.Make (C)
-module Mf = Checkout.Make (C)
+module Mf = Manifests.Make (C)
+module Ck = Checkout.Make (C)
 module Mfs = Staged_manifest.Make (C)
 
 let key rel = Lk.file @@ rel
@@ -63,7 +64,7 @@ let staged ~name =
 
 (* What the directory shows, which is the thing that was wrong. *)
 let listing () =
-  let+ files, dirs = Mf.list_children ~prefix:Lk.root () in
+  let+ files, dirs = Ck.list_children ~prefix:Lk.root () in
   let names =
     List.map (fun (e : Checkout.listed) -> Logical_key.leaf e.key) files
   in
@@ -83,7 +84,7 @@ let () =
      case "a published file, renamed";
      let* () = Mf.write (key "a.tmp") (published ~name:"a.tmp") in
      let* () = listing () in
-     let* () = Mf.rename ~src_key:(key "a.tmp") ~dst_key:(key "a.final") in
+     let* () = Ck.rename ~src_key:(key "a.tmp") ~dst_key:(key "a.final") in
      Printf.printf "  -- renamed a.tmp -> a.final\n";
      let* () = listing () in
      let* () = resolves "a.final" in

@@ -25,7 +25,8 @@ module C =
 
 module Lk = Logical_key.Make (C)
 module R = Remote.Make (C)
-module Mf = Checkout.Make (C)
+module Mf = Manifests.Make (C)
+module Ck = Checkout.Make (C)
 module Mfs = Staged_manifest.Make (C)
 module D = Data.Make (C) (R)
 
@@ -112,7 +113,8 @@ end
 
 module LkG = Logical_key.Make (CG)
 module GR = Remote.Make (CG)
-module Gm = Checkout.Make (CG)
+module Gm = Manifests.Make (CG)
+module Gck = Checkout.Make (CG)
 module Gms = Staged_manifest.Make (CG)
 module GD = Data.Make (CG) (GR)
 
@@ -187,7 +189,7 @@ let () =
        (Printf.sprintf "rm -rf %s && mkdir -p %s %s %s" root store_dir cache_dir
           data_dir));
   Lwt_main.run
-    (let* () = Mf.ensure_root () in
+    (let* () = Ck.ensure_root () in
      let* () = publish () in
      let* () = show "published" in
 
@@ -327,7 +329,7 @@ let () =
         in one cache file. Two things change: a write stages the whole group
         rather than the chunk it touches, and promotion writes that group out of
         the staged bodies instead of leaving it to be fetched. *)
-     let* () = Gm.ensure_root () in
+     let* () = Gck.ensure_root () in
      let* () = gpublish () in
      let* () = gshow "grouped: published" in
 

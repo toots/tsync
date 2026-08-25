@@ -19,6 +19,8 @@
    -open
    Tsync_checkout
    -open
+   Tsync_manifests
+   -open
    Tsync_manifest
    -open
    Tsync_journal
@@ -47,6 +49,7 @@
   tsync_remote
   tsync_staged
   tsync_checkout
+  tsync_manifests
   tsync_manifest
   tsync_journal
   tsync_durable_queue_lwt

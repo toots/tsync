@@ -33,7 +33,8 @@ module Make_with_layout (C : Conf.S) (L : Layout.S) = struct
      the layout scheme. [Mf] is the local mirror. *)
   module St = Store.Make (C) (L)
   module Hs = History.Make (C) (L)
-  module Mf = Checkout.Make (C)
+  module Mf = Manifests.Make (C)
+  module Ck = Checkout.Make (C)
   module Mfs = Staged_manifest.Make (C)
   module D = Data.Make (C) (R)
 
@@ -165,10 +166,10 @@ module Make_with_layout (C : Conf.S) (L : Layout.S) = struct
   (* The local mirror is the source of truth for names and structure; the
      backend holds only hashed keys. Directory mtimes are not tracked. *)
   let list_children ~prefix =
-    let+ files, dirs = Mf.list_children ~prefix () in
+    let+ files, dirs = Ck.list_children ~prefix () in
     (files, List.map (fun d -> (d, (None : float option))) dirs)
 
-  let list_tree ~prefix = Mf.list_tree ~prefix ()
+  let list_tree ~prefix = Ck.list_tree ~prefix ()
   let enforce_chunk_cap = D.enforce_chunk_cap
   let chunk_stats = D.chunk_stats
   let resolve = Mf.current
@@ -249,7 +250,7 @@ module Make_with_layout (C : Conf.S) (L : Layout.S) = struct
 
   let rename_local ~src ~dst =
     let* () = Mfs.rename ~src_key:src ~dst_key:dst in
-    Mf.rename ~src_key:src ~dst_key:dst
+    Ck.rename ~src_key:src ~dst_key:dst
 
   let with_journal key ops s3_op =
     let ek = J.entry_key () in
@@ -326,7 +327,7 @@ module Make_with_layout (C : Conf.S) (L : Layout.S) = struct
 
   let mkdir key =
     with_meta (fun () ->
-        let* () = Mf.create_dir key in
+        let* () = Ck.create_dir key in
         (* Minted here, not in [put_folder_marker], so the same id reaches the
            journal entry a peer will read. *)
         let* fid = L.ensure_folder_id key in
@@ -363,7 +364,7 @@ module Make_with_layout (C : Conf.S) (L : Layout.S) = struct
               let* () = St.put_raw ~bkey:trash_key ~data:marker in
               delete_old_marker ())
         in
-        Mf.delete_dir key)
+        Ck.delete_dir key)
 
   (* For a file whose chunks are already on the backend: only the manifest key
      and journal entry are missing. *)
@@ -643,10 +644,10 @@ module Make_with_layout (C : Conf.S) (L : Layout.S) = struct
          settles which id wins. The op carries it for readers naming a folder
          the mirror no longer has. *)
       | `Mkdir (rel, _) ->
-          let* () = Mf.create_dir (Lk.dir rel) in
+          let* () = Ck.create_dir (Lk.dir rel) in
           let* () = adopt_ancestor_ids rel in
           adopt_folder_id rel
-      | `Rmdir (rel, _) -> Mf.delete_dir (Lk.dir rel)
+      | `Rmdir (rel, _) -> Ck.delete_dir (Lk.dir rel)
       | `Rename { Journal.src; dst; is_dir = true; _ } ->
           let src_key = Lk.dir src in
           let dst_key = Lk.dir dst in

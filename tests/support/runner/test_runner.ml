@@ -371,7 +371,6 @@ let setup_client (module C : Conf.S) root staging_prefix =
   let module Lk = Logical_key.Make (C) in
   let module F = File.Make (C) in
   let module Sq = Sync_queue.Make (C) (F) in
-  let module Mf = Checkout.Make (C) in
   let module Mfs = Staged_manifest.Make (C) in
   let module H = Ipc_handler.Make (C) (F) (Sq) in
   let module Rp = Replay.Make (C) (F) in

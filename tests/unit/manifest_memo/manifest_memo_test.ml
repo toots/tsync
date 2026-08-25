@@ -28,7 +28,7 @@ module C =
       : Conf.S)
 
 module Lk = Logical_key.Make (C)
-module Mf = Checkout.Make (C)
+module Mf = Manifests.Make (C)
 module Mfs = Staged_manifest.Make (C)
 
 let key i = Lk.file @@ Printf.sprintf "f%05d.txt" i

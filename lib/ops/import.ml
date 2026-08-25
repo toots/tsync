@@ -18,7 +18,8 @@ module Make (C : Conf.S) = struct
   module R = Remote.Make (C)
   module Fs = File_store.Make (C)
   module St = Store.Make (C) (Layout.Inode.Make (C))
-  module Mf = Checkout.Make (C)
+  module Mf = Manifests.Make (C)
+  module Ck = Checkout.Make (C)
   module Mfs = Staged_manifest.Make (C)
 
   (* [rel] is excluded when any glob matches either the full relative path or
@@ -327,7 +328,7 @@ module Make (C : Conf.S) = struct
         let* () =
           Listing_lwt.iter plan.dirs (fun rel ->
               let key = Lk.dir rel in
-              let* () = Mf.create_dir key in
+              let* () = Ck.create_dir key in
               let* () = St.put_folder_marker ~key in
               (* Minted by the marker above; read back so the journal entry
                  carries the id a peer resolves the folder by. *)

@@ -41,7 +41,6 @@ module C : Conf.S = struct
 end
 
 module Lk = Logical_key.Make (C)
-module Mf = Checkout.Make (C)
 module Mfs = Staged_manifest.Make (C)
 
 let key = Lk.file @@ "file.txt"

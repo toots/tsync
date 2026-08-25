@@ -6,7 +6,6 @@ module Make (C : Conf.S) (F : File_ops.S) = struct
   module Fs = File_store.Make (C)
   module J = Journal.Make (C)
   module W = Wal.Make (C)
-  module Mf = Checkout.Make (C)
   module Mfs = Staged_manifest.Make (C)
 
   let full_key rel = Lk.file rel

@@ -26,28 +26,6 @@ val is_local : Conf.locality -> Logical_key.t -> bool
     is walked, and the parsed-sidecar cache. Callers name logical keys only — no
     cache paths, no domain prefixes, no raw bodies. *)
 module Make (C : Conf.S) : sig
-  (** On-disk path of [key]'s sidecar. Its inode doubles as the existence and
-      directory test, since directories exist only in this tree. *)
-  val path : Logical_key.t -> string
-
-  (** What the store last published for [key], as this client last saw it:
-      parsed from the sidecar and memoised. [None] when absent or unparseable.
-
-      Says nothing about staged edits — {!current} is the question that weighs
-      those. *)
-  val published : Logical_key.t -> Manifest.t option Lwt.t
-
-  (** Manifests held from earlier reads. A cached one keeps the mapping it was
-      read through, so this counts live mappings rather than bytes, and it is
-      bounded. Exposed because that bound is invisible from {!published}, which
-      answers the same whether it was served from the cache or the file. *)
-  val memo_size : unit -> int
-
-  (** Writes [t] under [key], recording the name [key] encodes. A caller cannot
-      file a manifest under one name and have it record another. *)
-  val write : Logical_key.t -> Manifest.t -> unit Lwt.t
-
-  val delete : Logical_key.t -> unit Lwt.t
   val rename : src_key:Logical_key.t -> dst_key:Logical_key.t -> unit Lwt.t
   val create_dir : Logical_key.t -> unit Lwt.t
   val delete_dir : Logical_key.t -> unit Lwt.t
@@ -68,21 +46,6 @@ module Make (C : Conf.S) : sig
   (** Domain-relative real path of every file the domain holds locally,
       published or only staged (unsorted). *)
   val walk : unit -> string list Lwt.t
-
-  (** What the file is right now on this machine, staged edits winning over what
-      was last published, with the published manifest alongside for the chunks a
-      staged record inherits. This module owns that precedence; no caller
-      decides it.
-
-      Local only. A caller that must also reach the store for a key this client
-      has never cached wants {!Data.published}, layered over this — which is
-      what {!File_ops.stat} does. *)
-  val current :
-    Logical_key.t ->
-    [ `Staged of Staged_manifest.staged * Manifest.t option
-    | `Published of Manifest.t ]
-    option
-    Lwt.t
 
   (** Create the checkout root. Every process serving the domain needs this and
       nothing more. *)

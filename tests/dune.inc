@@ -1005,6 +1005,20 @@
   (action
    (diff manifest_naming_test.expected manifest_naming_test.output))))
 
+(subdir unit/manifests_memo
+ (alias
+  (name default)
+  (deps manifests_memo_test.exe))
+ (rule
+  (alias runtest)
+  (target manifests_memo_test.output)
+  (action
+   (with-stdout-to manifests_memo_test.output (ignore-stderr (run ./manifests_memo_test.exe)))))
+ (rule
+  (alias runtest)
+  (action
+   (diff manifests_memo_test.expected manifests_memo_test.output))))
+
 (subdir unit/menu
  (alias
   (name default)

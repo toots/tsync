@@ -16,8 +16,6 @@
    -open
    Tsync_chunk_cache
    -open
-   Tsync_checkout
-   -open
    Tsync_manifest
    -open
    Tsync_journal
@@ -51,7 +49,6 @@
   tsync_history
   tsync_staged
   tsync_chunk_cache
-  tsync_checkout
   tsync_manifest
   tsync_journal
   tsync_conf

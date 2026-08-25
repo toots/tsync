@@ -8,6 +8,8 @@
    -open
    Tsync_checkout
    -open
+   Tsync_manifests
+   -open
    Tsync_manifest
    -open
    Tsync_chunks
@@ -28,6 +30,7 @@
   tsync_logical_key
   tsync_staged
   tsync_checkout
+  tsync_manifests
   tsync_manifest
   tsync_chunks
   tsync_test_harness

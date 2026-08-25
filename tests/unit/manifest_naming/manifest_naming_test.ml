@@ -30,7 +30,8 @@ module C =
       : Conf.S)
 
 module Lk = Logical_key.Make (C)
-module Mf = Checkout.Make (C)
+module Mf = Manifests.Make (C)
+module Ck = Checkout.Make (C)
 module Mfs = Staged_manifest.Make (C)
 
 let key rel = Lk.file @@ rel
@@ -73,7 +74,7 @@ let report rel =
 (* Directory names as a listing shows them, which is where an escaped name is
    resolved back through its marker. *)
 let list_dirs () =
-  let+ _files, dirs = Mf.list_children ~prefix:Lk.root () in
+  let+ _files, dirs = Ck.list_children ~prefix:Lk.root () in
   String.concat ", " (List.sort compare dirs)
 
 let () =
@@ -88,7 +89,7 @@ let () =
      case "renamed";
      (* The case that was broken: the body travels with the file, so anything
         reading the body alone would still answer [b.txt]. *)
-     let* () = Mf.rename ~src_key:(key "a/b.txt") ~dst_key:(key "a/c.txt") in
+     let* () = Ck.rename ~src_key:(key "a/b.txt") ~dst_key:(key "a/c.txt") in
      let* () = report "a/c.txt" in
      let* () = report "a/b.txt" in
 
@@ -104,7 +105,7 @@ let () =
      step "on-disk leaf is escaped: %b" escaped_on_disk;
 
      case "renamed to an ordinary name";
-     let* () = Mf.rename ~src_key:(key odd) ~dst_key:(key "plain.txt") in
+     let* () = Ck.rename ~src_key:(key odd) ~dst_key:(key "plain.txt") in
      let* () = report "plain.txt" in
 
      case "a directory whose name the filesystem cannot hold";
@@ -112,10 +113,10 @@ let () =
         the same reason a manifest keeps one in its body: the escaped on-disk
         name is a hash. Renaming has to move the marker's contents too, or the
         directory goes on presenting its previous name. *)
-     let* () = Mf.create_dir (key "di:r/") in
+     let* () = Ck.create_dir (key "di:r/") in
      let* dirs = list_dirs () in
      step "before: %s" dirs;
-     let* () = Mf.rename ~src_key:(key "di:r/") ~dst_key:(key "ot:her/") in
+     let* () = Ck.rename ~src_key:(key "di:r/") ~dst_key:(key "ot:her/") in
      let* dirs = list_dirs () in
      step "after renaming di:r -> ot:her: %s" dirs;
 
