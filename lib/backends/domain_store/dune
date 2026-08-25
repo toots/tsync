@@ -1,6 +1,7 @@
 ; One write fanned across the backends a domain is configured with, and a
-; durable record of what an unreachable one still owes. Policy over drivers
-; rather than a driver, which is why it sits here and not in lib/backends.
+; durable record of what an unreachable one still owes. Composed from drivers
+; and presented as one, so it knows how bytes are stored and never what the
+; domain does with them.
 
 (library
  (flags
