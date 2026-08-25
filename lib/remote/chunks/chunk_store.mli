@@ -10,20 +10,6 @@
     It asks nothing about where a chunk is kept beyond what {!DEPS} supplies, so
     a collection moving the keyspace underneath it is invisible here. *)
 
-(** Where a chunk's bytes come from, decided before any of them are read: a
-    caller choosing between these must not do I/O to choose, or every chunk's
-    bytes land before anything queues for a buffer. *)
-type source =
-  | Stored of string
-      (** Named already, from a manifest this upload inherits. Nothing to hash,
-          nothing to send. *)
-  | Mapped of (unit -> Bigstring.t)
-      (** Bytes produced in place, so the pages reach the store without being
-          copied into a buffer first. Run inside the bound, a mapping costing
-          memory as a buffer does. *)
-  | Filled of { len : int; fill : Bigstring.t -> unit Lwt.t }
-      (** Bytes written into a buffer this supplies. *)
-
 (** What the store needs of the domain below it. Presence rather than an entry:
     the only thing asked of a store is whether it holds a key, and answering
     less keeps the backend's vocabulary out of this one. *)
@@ -58,7 +44,7 @@ module Make (_ : DEPS) : sig
   (** The chunk's name, and whether this call is what sent it — a deduplicated
       chunk is as done as a written one and cost no transfer, which is why the
       two are told apart rather than summed. *)
-  val store : source -> (string * bool) Lwt.t
+  val store : unit Lwt.t Chunk_source.t -> (string * bool) Lwt.t
 
   val fetch : string -> Bigstring.t Lwt.t
 

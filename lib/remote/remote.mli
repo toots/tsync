@@ -84,7 +84,7 @@ module type S = sig
     size:int64 ->
     chunk_size:int ->
     mtime:float ->
-    source:(int -> Chunk_store.source Lwt.t) ->
+    source:(int -> unit Lwt.t Chunk_source.t Lwt.t) ->
     ?cancel:bool ref ->
     unit ->
     Manifest.t Lwt.t

@@ -12,11 +12,6 @@ module type DEPS = sig
   val max_known : unit -> int
 end
 
-type source =
-  | Stored of string
-  | Mapped of (unit -> Bigstring.t)
-  | Filled of { len : int; fill : Bigstring.t -> unit Lwt.t }
-
 module Make (D : DEPS) = struct
   (* Not pre-populated by listing the chunk prefix: that cost scales with the
      whole historical archive rather than the upload at hand. *)
@@ -41,7 +36,7 @@ module Make (D : DEPS) = struct
     (key, not known)
 
   let store = function
-    | Stored key -> Lwt.return (key, false)
+    | Chunk_source.Stored key -> Lwt.return (key, false)
     | Mapped bytes -> Io_lwt.Bounded.use D.slots (fun () -> put (bytes ()))
     | Filled { len; fill } ->
         Io_lwt.Bounded.use D.slots (fun () ->

@@ -58,7 +58,7 @@ let peak = ref 0
 
 let source index =
   Lwt.return
-    (Chunk_store.Filled
+    (Chunk_source.Filled
        {
          len = csize;
          fill =

@@ -34,7 +34,7 @@ module type S = sig
     size:int64 ->
     chunk_size:int ->
     mtime:float ->
-    source:(int -> Chunk_store.source Lwt.t) ->
+    source:(int -> unit Lwt.t Chunk_source.t Lwt.t) ->
     ?cancel:bool ref ->
     unit ->
     Manifest.t Lwt.t
@@ -176,7 +176,7 @@ module Make_with_layout (C : Conf.S) (L : Layout.S) : S = struct
     in
     let+ ck_rel, sent =
       Chunks_store.store
-        (Chunk_store.Mapped
+        (Chunk_source.Mapped
            (fun () ->
              try Bigstring.map_fd fd ~offset ~len
              with Unix.Unix_error _ -> raise Cancelled))
@@ -291,7 +291,8 @@ module Make_with_layout (C : Conf.S) (L : Layout.S) : S = struct
      Deciding which case a chunk is must stay free of I/O, or every chunk's bytes
      land before anything queues for a buffer. *)
   let upload_chunks ~key ~size ~chunk_size ~mtime
-      ~(source : int -> Chunk_store.source Lwt.t) ?(cancel = ref false) () =
+      ~(source : int -> unit Lwt.t Chunk_source.t Lwt.t) ?(cancel = ref false)
+      () =
     let n = max 1 (Chunks.count ~size ~chunk_size) in
     let table = chunk_table ~key ~size ~chunk_size ~mtime ~count:n in
     let one index =

@@ -8,8 +8,6 @@
    -open
    Tsync_manifest
    -open
-   Tsync_chunk_store
-   -open
    Tsync_chunks
    -open
    Tsync_content
@@ -26,7 +24,6 @@
   tsync_logical_key
   tsync_remote
   tsync_manifest
-  tsync_chunk_store
   tsync_chunks
   tsync_test_harness
   tsync_content

@@ -875,7 +875,7 @@ module Make (C : Conf.S) (R : Remote.S) = struct
     (* A hole is still named and stored: it is bytes the file holds, and every
        chunk of a published file has a key. *)
     let zeroes =
-      Chunk_store.Filled
+      Chunk_source.Filled
         {
           len;
           fill =
@@ -892,14 +892,14 @@ module Make (C : Conf.S) (R : Remote.S) = struct
         | Staged_manifest.Inherit -> (
             match base with
               | Some m when i < Manifest.count m ->
-                  Lwt.return (Chunk_store.Stored (Manifest.key m i))
+                  Lwt.return (Chunk_source.Stored (Manifest.key m i))
               | Some _ | None ->
                   Lwt.fail
                     (Backend.Backend_error
                        (Printf.sprintf "staged chunk %d inherits nothing" i)))
         | Staged_manifest.Staged { uuid; offset } ->
             Lwt.return
-              (Chunk_store.Filled
+              (Chunk_source.Filled
                  { len; fill = fill_from_staged ~uuid ~offset ~len }))
 
   let rec upload_staged ~key ~(staged : Staged_manifest.staged) ?cancel () =
@@ -990,9 +990,9 @@ module Make (C : Conf.S) (R : Remote.S) = struct
       Cc.put_group ~group ~member:(fun i ->
           let* source = staged_source ~staged ~base:None i in
           match source with
-            | Chunk_store.Stored _ | Chunk_store.Mapped _ ->
+            | Chunk_source.Stored _ | Chunk_source.Mapped _ ->
                 assert false (* [local] ruled these out *)
-            | Chunk_store.Filled { len; fill } ->
+            | Chunk_source.Filled { len; fill } ->
                 (* Its own buffer rather than one of the upload path's slots:
                    this runs over a group's members, two at the defaults. *)
                 let buf = Bigstring.create len in
