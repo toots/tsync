@@ -1,0 +1,37 @@
+; The shared journal every client appends to, and how far this one has read it:
+; entries by key, the cursor naming the last published, and the local mark
+; saying where a resync would pick up.
+
+(library
+ (flags
+  (:standard
+   -open
+   Tsync_logical_key
+   -open
+   Tsync_journal
+   -open
+   Tsync_conf
+   -open
+   Tsync_layout
+   -open
+   Tsync_store
+   -open
+   Tsync_bigstring
+   -open
+   Tsync_backend_register
+   -open
+   Tsync_log))
+ (name tsync_file_store)
+ (public_name tsync-libs.file_store)
+ (libraries
+  tsync_logical_key
+  tsync_journal
+  tsync_conf
+  tsync_layout
+  tsync_store
+  tsync_bigstring
+  tsync_backend_register
+  tsync_log
+  lwt
+  unix
+  lwt.unix))

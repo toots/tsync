@@ -4,7 +4,9 @@
    -open
    Tsync_logical_key
    -open
-   Tsync_store
+   Tsync_layout
+   -open
+   Tsync_file_store
    -open
    Tsync_test_harness
    -open
@@ -20,7 +22,8 @@
  (name presenting_domain)
  (libraries
   tsync_logical_key
-  tsync_store
+  tsync_layout
+  tsync_file_store
   tsync_test_harness
   tsync-libs.engine
   tsync-libs.store

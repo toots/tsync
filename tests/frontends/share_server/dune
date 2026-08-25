@@ -6,7 +6,7 @@
    -open
    Tsync_remote
    -open
-   Tsync_store
+   Tsync_layout
    -open
    Tsync_staged
    -open
@@ -37,7 +37,7 @@
   cohttp
   tsync_logical_key
   tsync_remote
-  tsync_store
+  tsync_layout
   tsync_staged
   tsync_checkout
   tsync_content

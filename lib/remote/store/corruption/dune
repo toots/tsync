@@ -1,0 +1,29 @@
+; Which of a store's chunks were not what their names say: the markers a driver
+; leaves, listed back for a report or a repair.
+
+(library
+ (flags
+  (:standard
+   -open
+   Tsync_chunk_integrity
+   -open
+   Tsync_chunks
+   -open
+   Tsync_retry
+   -open
+   Tsync_conf
+   -open
+   Tsync_bigstring
+   -open
+   Tsync_backend_register))
+ (name tsync_corruption)
+ (public_name tsync-libs.corruption)
+ (libraries
+  tsync_chunk_integrity
+  tsync_chunks
+  tsync_retry
+  tsync_conf
+  tsync_bigstring
+  tsync_backend_register
+  lwt
+  unix))

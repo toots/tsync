@@ -14,7 +14,7 @@
    -open
    Tsync_conf
    -open
-   Tsync_store
+   Tsync_corruption
    -open
    Tsync_content
    -open
@@ -34,7 +34,7 @@
   tsync_chunks
   tsync_test_harness
   tsync_conf
-  tsync_store
+  tsync_corruption
   tsync_content
   tsync_bigstring
   tsync_backend_register

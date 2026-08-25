@@ -24,7 +24,11 @@
    -open
    Tsync_ops
    -open
-   Tsync_store
+   Tsync_layout
+   -open
+   Tsync_file_store
+   -open
+   Tsync_corruption
    -open
    Tsync_collection
    -open
@@ -64,7 +68,9 @@
   tsync_chunks
   tsync_test_harness
   tsync_ops
-  tsync_store
+  tsync_layout
+  tsync_file_store
+  tsync_corruption
   tsync_collection
   tsync_sync
   tsync_folder_ids

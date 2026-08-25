@@ -6,7 +6,9 @@
    -open
    Tsync_remote
    -open
-   Tsync_store
+   Tsync_layout
+   -open
+   Tsync_inode_tree
    -open
    Tsync_checkout
    -open
@@ -59,7 +61,8 @@
   cohttp
   tsync_logical_key
   tsync_remote
-  tsync_store
+  tsync_layout
+  tsync_inode_tree
   tsync_checkout
   tsync_manifest
   tsync-libs.field_spec

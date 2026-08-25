@@ -39,7 +39,15 @@
    -open
    Tsync_cache_layout
    -open
+   Tsync_layout
+   -open
    Tsync_store
+   -open
+   Tsync_file_store
+   -open
+   Tsync_inode_tree
+   -open
+   Tsync_corruption
    -open
    Tsync_collection
    -open
@@ -81,7 +89,11 @@
   tsync_conf
   tsync_folder_ids
   tsync_cache_layout
+  tsync_layout
   tsync_store
+  tsync_file_store
+  tsync_inode_tree
+  tsync_corruption
   tsync_collection
   tsync_content
   tsync_sync

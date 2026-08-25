@@ -18,7 +18,7 @@
    -open
    Tsync_ops
    -open
-   Tsync_store
+   Tsync_file_store
    -open
    Tsync_folder_ids
    -open
@@ -46,7 +46,7 @@
   tsync_manifest
   tsync_journal
   tsync_ops
-  tsync_store
+  tsync_file_store
   tsync_folder_ids
   tsync_backend_register
   tsync_io_lwt

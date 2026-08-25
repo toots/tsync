@@ -18,7 +18,11 @@
    -open
    Tsync_content
    -open
-   Tsync_store
+   Tsync_layout
+   -open
+   Tsync_file_store
+   -open
+   Tsync_corruption
    -open
    Tsync_collection
    -open
@@ -53,7 +57,9 @@
   tsync_journal
   tsync_sync
   tsync_content
-  tsync_store
+  tsync_layout
+  tsync_file_store
+  tsync_corruption
   tsync_collection
   tsync_cache_layout
   tsync_io

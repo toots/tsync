@@ -8,7 +8,7 @@
    -open
    Tsync_conf
    -open
-   Tsync_store
+   Tsync_file_store
    -open
    Tsync_test_harness))
  (name import_batching)
@@ -17,7 +17,7 @@
   tsync_test_harness
   tsync_ops
   tsync_conf
-  tsync_store
+  tsync_file_store
   tsync_local_backend
   lwt
   lwt.unix

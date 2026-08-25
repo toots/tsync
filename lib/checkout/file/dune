@@ -29,7 +29,11 @@
    -open
    Tsync_folder_ids
    -open
+   Tsync_layout
+   -open
    Tsync_store
+   -open
+   Tsync_file_store
    -open
    Tsync_content
    -open
@@ -53,7 +57,9 @@
   tsync_journal
   tsync_conf
   tsync_folder_ids
+  tsync_layout
   tsync_store
+  tsync_file_store
   tsync_content
   tsync_io_lwt
   tsync_backend_register

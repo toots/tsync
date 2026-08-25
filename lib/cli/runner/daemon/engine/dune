@@ -14,7 +14,7 @@
    -open
    Tsync_sync
    -open
-   Tsync_store
+   Tsync_file_store
    -open
    Tsync_log
    -open
@@ -37,7 +37,7 @@
   tsync_file_ops
   tsync_file
   tsync_sync
-  tsync_store
+  tsync_file_store
   tsync_backend_register
   tsync_conf
   tsync_ipc_handler

@@ -12,7 +12,7 @@
    -open
    Tsync_backend_register
    -open
-   Tsync_store
+   Tsync_file_store
    -open
    Tsync_test_harness))
  (name cursor_debounce)
@@ -23,7 +23,7 @@
   tsync_conf
   tsync_bigstring
   tsync_backend_register
-  tsync_store
+  tsync_file_store
   tsync_local_backend
   lwt
   lwt.unix

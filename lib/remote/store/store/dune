@@ -1,6 +1,5 @@
-; What the store keeps of things the live tree stopped pointing at: a file's
-; earlier manifests. The key shape is built and taken apart here, in one place,
-; since the two must agree.
+; A domain's manifests on the backend: written, read, moved and deleted under
+; whatever key the layout gives them.
 
 (library
  (flags
@@ -16,15 +15,15 @@
    -open
    Tsync_backend_register
    -open
-   Tsync_log))
- (name tsync_history)
- (public_name tsync-libs.history)
+   Tsync_io_lwt))
+ (name tsync_store)
+ (public_name tsync-libs.store)
  (libraries
   tsync_logical_key
   tsync_conf
   tsync_layout
   tsync_bigstring
   tsync_backend_register
-  tsync_log
+  tsync_io_lwt
   lwt
   unix))

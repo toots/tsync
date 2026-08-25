@@ -1,0 +1,38 @@
+; Reading the backend's folder tree: from a folder's id to its children, and the
+; index beside each folder that spares a listing.
+
+(library
+ (flags
+  (:standard
+   -open
+   Tsync_logical_key
+   -open
+   Tsync_manifest
+   -open
+   Tsync_retry
+   -open
+   Tsync_conf
+   -open
+   Tsync_layout
+   -open
+   Tsync_store
+   -open
+   Tsync_backend_register
+   -open
+   Tsync_io_lwt
+   -open
+   Tsync_log))
+ (name tsync_inode_tree)
+ (public_name tsync-libs.inode_tree)
+ (libraries
+  tsync_logical_key
+  tsync_manifest
+  tsync_retry
+  tsync_conf
+  tsync_layout
+  tsync_store
+  tsync_backend_register
+  tsync_io_lwt
+  tsync_log
+  lwt
+  unix))

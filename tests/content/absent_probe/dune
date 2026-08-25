@@ -22,6 +22,8 @@
    -open
    Tsync_store
    -open
+   Tsync_file_store
+   -open
    Tsync_folder_ids
    -open
    Tsync_bigstring
@@ -43,6 +45,7 @@
   tsync_test_harness
   tsync_content
   tsync_store
+  tsync_file_store
   tsync_folder_ids
   tsync_bigstring
   tsync_conf

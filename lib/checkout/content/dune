@@ -27,7 +27,7 @@
    -open
    Tsync_chunks
    -open
-   Tsync_store
+   Tsync_file_store
    -open
    Tsync_io_lwt
    -open
@@ -53,7 +53,7 @@
   tsync_conf
   tsync_cache_layout
   tsync_chunks
-  tsync_store
+  tsync_file_store
   tsync_io_lwt
   tsync_xxhash
   tsync_metrics

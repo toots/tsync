@@ -33,7 +33,7 @@
    -open
    Tsync_conf
    -open
-   Tsync_store
+   Tsync_file_store
    -open
    Tsync_content
    -open
@@ -61,7 +61,7 @@
   tsync_journal
   tsync_durable_queue_lwt
   tsync_conf
-  tsync_store
+  tsync_file_store
   tsync_content
   tsync_io_lwt
   tsync_backend_register

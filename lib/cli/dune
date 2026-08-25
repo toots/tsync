@@ -12,7 +12,13 @@
    -open
    Tsync_history
    -open
+   Tsync_layout
+   -open
    Tsync_store
+   -open
+   Tsync_file_store
+   -open
+   Tsync_corruption
    -open
    Tsync_collection
    -open
@@ -80,7 +86,10 @@
   tsync_logical_key
   tsync_chunk_integrity
   tsync_history
+  tsync_layout
   tsync_store
+  tsync_file_store
+  tsync_corruption
   tsync_collection
   tsync_staged
   tsync_checkout
