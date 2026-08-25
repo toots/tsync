@@ -23,6 +23,8 @@
    -open
    Tsync_checkout
    -open
+   Tsync_file
+   -open
    Tsync_manifests
    -open
    Tsync_manifest
@@ -67,6 +69,7 @@
   tsync_remote
   tsync_staged
   tsync_checkout
+  tsync_file
   tsync_manifests
   tsync_manifest
   tsync_journal

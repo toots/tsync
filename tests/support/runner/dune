@@ -10,6 +10,8 @@
    -open
    Tsync_checkout
    -open
+   Tsync_file
+   -open
    Tsync_wal
    -open
    Tsync_manifest
@@ -51,6 +53,7 @@
   tsync_history
   tsync_staged
   tsync_checkout
+  tsync_file
   tsync_wal
   tsync_manifest
   tsync_journal

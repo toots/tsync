@@ -1,13 +1,9 @@
-; A mutation, recorded so it survives a crash and replayed until every peer
-; agrees: this client's intent log, the upload queue that drains it, the shared
-; journal read back in both directions, and the per-domain file operations a
-; frontend actually calls.
+; The domain file operations over the manifest mirror, the staged tree and the
+; chunk store: what a frontend calls, and the implementation of tsync-libs.file_ops.
 
 (library
  (flags
   (:standard
-   -open
-   Tsync_retry
    -open
    Tsync_logical_key
    -open
@@ -19,13 +15,11 @@
    -open
    Tsync_checkout
    -open
+   Tsync_manifests
+   -open
    Tsync_file_ops
    -open
-   Tsync_file
-   -open
    Tsync_wal
-   -open
-   Tsync_manifests
    -open
    Tsync_manifest
    -open
@@ -43,25 +37,20 @@
    -open
    Tsync_backend_register
    -open
-   Tsync_log
-   -open
-   Tsync_durable_queue_lwt))
- (name tsync_sync)
- (public_name tsync-libs.sync)
+   Tsync_log))
+ (name tsync_file)
+ (public_name tsync-libs.file)
  (libraries
-  tsync_retry
   tsync_logical_key
   tsync_history
   tsync_remote
   tsync_staged
   tsync_checkout
-  tsync_file_ops
-  tsync_file
-  tsync_wal
   tsync_manifests
+  tsync_file_ops
+  tsync_wal
   tsync_manifest
   tsync_journal
-  tsync_durable_queue_lwt
   tsync_conf
   tsync_naming
   tsync_store

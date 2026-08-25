@@ -10,6 +10,8 @@
    -open
    Tsync_sync
    -open
+   Tsync_file
+   -open
    Tsync_io_lwt
    -open
    Tsync_backend_register
@@ -26,6 +28,7 @@
   tsync_journal
   tsync_test_harness
   tsync_sync
+  tsync_file
   tsync_conf
   tsync_backend_register
   tsync_local_backend
