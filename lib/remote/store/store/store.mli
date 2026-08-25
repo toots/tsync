@@ -12,11 +12,11 @@ module Make (C : Conf.S) (L : Layout.S) : sig
       folder as absent. *)
   val put_manifest : key:Logical_key.t -> data:Bigstring.t -> unit Lwt.t
 
-  (** {!get_manifest_opt} saying which nothing it found: [`Absent] is the
-      store's answer about the domain, while [`Unresolved] is this client not
-      knowing the key's folder yet and says nothing about what the store holds.
-      For a caller that remembers an answer — the two are not equally
-      rememberable, one changing without the domain changing. *)
+  (** A manifest, or which nothing it found: [`Absent] is the store's answer
+      about the domain, while [`Unresolved] is this client not knowing the key's
+      folder yet and says nothing about what the store holds. For a caller that
+      remembers an answer — the two are not equally rememberable, one changing
+      without the domain changing. *)
   val get_manifest_state :
     key:Logical_key.t -> [ `Body of string | `Absent | `Unresolved ] Lwt.t
 

@@ -6,8 +6,6 @@
    -open
    Tsync_logical_key
    -open
-   Tsync_store
-   -open
    Tsync_test_harness))
  (name item_ref_test)
- (libraries tsync_logical_key tsync_test_harness tsync_store))
+ (libraries tsync_logical_key tsync_test_harness))

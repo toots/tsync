@@ -10,8 +10,6 @@
    -open
    Tsync_ops
    -open
-   Tsync_store
-   -open
    Tsync_collection
    -open
    Tsync_bigstring
@@ -34,7 +32,6 @@
   tsync_chunks
   tsync_test_harness
   tsync_ops
-  tsync_store
   tsync_collection
   tsync_conf
   tsync_bigstring
