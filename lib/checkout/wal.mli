@@ -45,7 +45,10 @@ end)
 
 module Make (C : Conf.S) : sig
   (** This domain's records. Shared with {!Sync_queue}, which drains the ones
-      that name an upload. *)
+      that name an upload.
+
+      One value per domain however many times this functor is applied: a second
+      log over the same directory would keep an id counter of its own. *)
   val log : Q.Records.t
 
   (** Write the intent. The caller mints the key and keeps it: every later call

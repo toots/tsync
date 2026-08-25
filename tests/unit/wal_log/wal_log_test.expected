@@ -1,0 +1,8 @@
+
+=== one domain
+two applications share one record log: ok
+
+=== two domains
+a second domain gets its own: ok
+
+2 check(s), 0 failure(s)

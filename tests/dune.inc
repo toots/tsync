@@ -1197,6 +1197,20 @@
   (action
    (diff upload_fanout.expected upload_fanout.output))))
 
+(subdir unit/wal_log
+ (alias
+  (name default)
+  (deps wal_log_test.exe))
+ (rule
+  (alias runtest)
+  (target wal_log_test.output)
+  (action
+   (with-stdout-to wal_log_test.output (ignore-stderr (run ./wal_log_test.exe)))))
+ (rule
+  (alias runtest)
+  (action
+   (diff wal_log_test.expected wal_log_test.output))))
+
 (subdir unit/walk_fanout
  (alias
   (name default)

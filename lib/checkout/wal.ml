@@ -95,6 +95,19 @@ end
 
 module Q = Durable_queue_lwt.Make (Job)
 
+(* The records of a domain are one thing however many places name them: this
+   functor is applied wherever the log is read or written, and a second
+   [Records.t] over the same directory would keep its own id counter. *)
+let logs : (string, Q.Records.t) Hashtbl.t = Hashtbl.create 4
+
+let log_for dir =
+  match Hashtbl.find_opt logs dir with
+    | Some log -> log
+    | None ->
+        let log = Q.Records.create ~dir in
+        Hashtbl.replace logs dir log;
+        log
+
 module Make (C : Conf.S) = struct
   module J = Journal.Make (C)
 
@@ -102,11 +115,10 @@ module Make (C : Conf.S) = struct
      store would let one domain's replay run another's entries against the wrong
      backend. *)
   let log =
-    Q.Records.create
-      ~dir:
-        (Filename.concat
-           (Filename.concat C.data_dir "journal-pending")
-           C.domain_name)
+    log_for
+      (Filename.concat
+         (Filename.concat C.data_dir "journal-pending")
+         C.domain_name)
 
   (* An entry key names one unit of work for its whole life — here, in the
      backend journal, and in the cursor a peer compares against — so it is the
