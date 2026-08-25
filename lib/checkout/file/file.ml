@@ -262,10 +262,9 @@ module Make_with_layout (C : Conf.S) (L : Layout.S) = struct
           let* () = W.complete ek in
           Lwt.fail exn)
     in
-    let* () = W.advance ek Wal.Executed in
-    let* (_ : Journal.Entry_key.t) = Fs.write_journal_entry ~entry_key:ek ops in
-    let* () = Fs.bump_cursor ek in
-    W.complete ek
+    W.discharge
+      ~publish:(fun ek ops -> Fs.write_journal_entry ~entry_key:ek ops)
+      ~cursor:Fs.bump_cursor ek ops
 
   let save_version key =
     if C.versioning then Hs.save_version ~key else Lwt.return_unit

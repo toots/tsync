@@ -88,6 +88,23 @@ module Make (C : Conf.S) : sig
 
   val advance : Journal.Entry_key.t -> state -> unit Lwt.t
 
+  (** Carry a record through to done, the work it names having happened:
+      [Executed], then the entry published, then the cursor moved, then the
+      record dropped. A crash in any of those windows leaves a record reconcile
+      can finish from what the backend says.
+
+      [publish] and [cursor] are the store's, and the caller's to choose: one
+      discharging a single operation in its own path moves the cursor there and
+      then, while one draining a queue records it and lets a busy run collapse
+      them. *)
+  val discharge :
+    publish:
+      (Journal.Entry_key.t -> Journal.op list -> Journal.Entry_key.t Lwt.t) ->
+    cursor:(Journal.Entry_key.t -> unit Lwt.t) ->
+    Journal.Entry_key.t ->
+    Journal.op list ->
+    unit Lwt.t
+
   (** Count the attempt and remember why. Does not change the state: a failure
       leaves the work where it was. *)
   val note_failure : Journal.Entry_key.t -> Retry.kind -> string -> unit Lwt.t

@@ -72,16 +72,17 @@ module Make (C : Conf.S) (F : File.Owing) : S = struct
                      the backend says. Dropping the record first would leave the
                      bytes uploaded, no entry for peers to read, and nothing
                      saying anything was owed. *)
-                        let* () = W.advance entry_key Wal.Executed in
-                        let* (_ : Ek.t) =
-                          Fs.write_journal_entry ~entry_key r.Wal.ops
+                        (* Recorded rather than published: a busy queue owes
+                     a cursor move per file, and they collapse to the newest. *)
+                        let* () =
+                          W.discharge
+                            ~publish:(fun ek ops ->
+                              Fs.write_journal_entry ~entry_key:ek ops)
+                            ~cursor:(fun ek ->
+                              Fs.note_cursor ek;
+                              Lwt.return_unit)
+                            entry_key r.Wal.ops
                         in
-                        let* () = W.complete entry_key in
-                        (* The entry this queue just published owes a cursor bump,
-                     and nothing above knows an entry landed. Recorded rather
-                     than published: a busy queue owes one per file, and they
-                     collapse to the newest. *)
-                        Fs.note_cursor entry_key;
                         incr completed;
                         !on_upload_done_fn ~key)
                   (function

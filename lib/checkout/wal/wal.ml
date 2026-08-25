@@ -1,3 +1,4 @@
+open Lwt.Syntax
 module Ek = Journal.Entry_key
 
 type state = Intent | Prepared | Executed
@@ -158,6 +159,20 @@ module Make (C : Conf.S) = struct
         { r with attempts = r.attempts + 1; last_error = Some (kind, detail) })
 
   let complete key = Q.Records.complete log (id key)
+
+  (* Executed, then published, then peers told to look, then the record goes: a
+     crash in any of those windows leaves a record reconcile can finish from
+     what the backend says. Dropping the record first would leave the work done,
+     no entry for peers to read, and nothing saying anything was owed.
+
+     Where the entry goes and how the cursor moves are the store's, not this
+     log's: a caller that publishes on a timer passes a different [cursor] from
+     one discharging a single operation in its own path. *)
+  let discharge ~publish ~cursor key ops =
+    let* () = advance key Executed in
+    let* (_ : Journal.Entry_key.t) = publish key ops in
+    let* () = cursor key in
+    complete key
 
   (* Ours alone: another client's records are its own to reconcile, and the
      directory is per domain rather than per client. *)
