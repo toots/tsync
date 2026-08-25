@@ -1,0 +1,14 @@
+
+=== a record already written
+is queued: ok
+
+=== offered a second time
+is not queued twice: ok
+
+=== a second record
+is queued beside it: ok
+
+=== the log
+holds exactly what was written: ok
+
+4 check(s), 0 failure(s)

@@ -361,10 +361,28 @@ struct
       | Some e -> Io.async (fun () -> complete t e.id)
       | None -> ()
 
-    (* The job is on disk before the caller is told the write is done. Recorded in
-       the caller's path rather than in the background, since a job only queued in
-       memory is one a crash loses without anything left saying it was owed. *)
-    let post ?id t job =
+    (* Taking the slot and queueing, which is all {!adopt} is and all {!post}
+       adds to its write. *)
+    let take t ~id job =
+      Hashtbl.replace t.loaded id ();
+      let e = { id; job } in
+      match t.topo with
+        | Ordered -> enqueue t e
+        | Keyed k -> (
+            let key = k.key job in
+            match Hashtbl.find_opt k.slots key with
+              | None ->
+                  Hashtbl.add k.slots key
+                    { cancel = ref false; pending = None; failures = 0 };
+                  enqueue t e
+              | Some slot ->
+                  (* Whatever is running is about to be superseded, so stop it
+                     rather than paying for bytes nobody will publish. *)
+                  slot.cancel := true;
+                  forget_pending t slot.pending;
+                  slot.pending <- Some e)
+
+    let full t =
       if Queue.length t.jobs >= t.max_queued then begin
         if not t.degraded then begin
           t.degraded <- true;
@@ -372,31 +390,32 @@ struct
             "%s: %d jobs queued, dropping writes — it will need tsync mirror"
             t.name t.max_queued
         end;
-        Io.return ()
+        true
       end
+      else false
+
+    (* The job is on disk before the caller is told the write is done. Recorded in
+       the caller's path rather than in the background, since a job only queued in
+       memory is one a crash loses without anything left saying it was owed. *)
+    let post ?id t job =
+      if full t then Io.return ()
       else
         Lock.with_lock t.recording (fun () ->
             let id =
               match id with Some id -> id | None -> Records.mint_id t.log
             in
             let+ () = Records.write t.log ~id job in
-            Hashtbl.replace t.loaded id ();
-            let e = { id; job } in
-            match t.topo with
-              | Ordered -> enqueue t e
-              | Keyed k -> (
-                  let key = k.key job in
-                  match Hashtbl.find_opt k.slots key with
-                    | None ->
-                        Hashtbl.add k.slots key
-                          { cancel = ref false; pending = None; failures = 0 };
-                        enqueue t e
-                    | Some slot ->
-                        (* Whatever is running is about to be superseded, so stop
-                           it rather than paying for bytes nobody will publish. *)
-                        slot.cancel := true;
-                        forget_pending t slot.pending;
-                        slot.pending <- Some e))
+            take t ~id job)
+
+    (* A job already on disk, for a caller that wrote it: the record is theirs
+       and this only takes it up. Under the same lock as {!post}, and idempotent
+       on [id], so a record signalled twice is queued once. *)
+    let adopt t ~id job =
+      if full t then Io.return ()
+      else
+        Lock.with_lock t.recording (fun () ->
+            if Hashtbl.mem t.loaded id then Io.return ()
+            else Io.return (take t ~id job))
 
     let cancel t key =
       match t.topo with

@@ -183,6 +183,11 @@ module Make
         run — that is the point. *)
     val post : ?id:string -> t -> J.t -> unit Io.t
 
+    (** Take up a job already written to the log, for a caller that owns the
+        durable half itself: {!post} is this plus the write. Idempotent on [id],
+        so a record offered twice is queued once. *)
+    val adopt : t -> id:string -> J.t -> unit Io.t
+
     (** Run the workers.
 
         [recover] reads the log first, and again on every {!rescan_all}, so work

@@ -1253,6 +1253,20 @@
   (action
    (diff zip_test.expected zip_test.output))))
 
+(subdir work/queue_adopt
+ (alias
+  (name default)
+  (deps queue_adopt.exe))
+ (rule
+  (alias runtest)
+  (target queue_adopt.output)
+  (action
+   (with-stdout-to queue_adopt.output (ignore-stderr (run ./queue_adopt.exe)))))
+ (rule
+  (alias runtest)
+  (action
+   (diff queue_adopt.expected queue_adopt.output))))
+
 (subdir work/queue_degraded
  (alias
   (name default)
