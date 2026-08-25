@@ -8,14 +8,14 @@
    -open
    Tsync_ipc
    -open
-   Tsync_lwt_unix))
+   Tsync_io_lwt))
  (name tsync_job)
  (public_name tsync-libs.job)
  (libraries
   tsync_log
   tsync_metrics
   tsync_ipc
-  tsync_lwt_unix
+  tsync_io_lwt
   yojson
   unix
   lwt

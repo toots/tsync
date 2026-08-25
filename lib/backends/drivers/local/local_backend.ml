@@ -14,7 +14,7 @@ let write_file path data =
   let* () = Fs_util.ensure_parent path in
   let tmp = Filename.temp_path path in
   let* () = Bigstring.write_to ~path:tmp data ~offset:0 in
-  Lwt_unix_retry.rename tmp path
+  Io_lwt.Retry.rename tmp path
 
 let write_string path data = write_file path (Bigstring.of_string data)
 
@@ -22,7 +22,7 @@ let write_string path data = write_file path (Bigstring.of_string data)
    rename, so a mapping keeps serving the bytes it was made from however the
    name is reused afterwards, and a chunk body never lands on the heap. *)
 let read_file path =
-  let+ st = Lwt_unix_retry.LargeFile.stat path in
+  let+ st = Io_lwt.Retry.LargeFile.stat path in
   Bigstring.map_file ~path ~offset:0
     ~len:(Int64.to_int st.Unix.LargeFile.st_size)
 
@@ -39,7 +39,7 @@ let create_exclusive path data =
     (fun () ->
       Lwt.catch
         (fun () ->
-          let+ () = Lwt_unix_retry.link tmp path in
+          let+ () = Io_lwt.Retry.link tmp path in
           data)
         (function
           | Unix.Unix_error (Unix.EEXIST, _, _) -> read_file path
@@ -55,7 +55,7 @@ let create_exclusive path data =
    and a shard still holding one refuses to go. *)
 let prune_marker_dirs marker_path =
   let rmdir path =
-    Lwt.catch (fun () -> Lwt_unix_retry.rmdir path) (fun _ -> Lwt.return_unit)
+    Lwt.catch (fun () -> Io_lwt.Retry.rmdir path) (fun _ -> Lwt.return_unit)
   in
   (* Up as far as the namespace root: a marker sits at
      [corrupted/<domain>/<shard>/<key>], so three levels exist only to hold it.
@@ -102,7 +102,7 @@ let of_errno ~op key e =
   Retry.failed ~kind ~op:("local " ^ op) (key ^ ": " ^ Unix.error_message e)
 
 let make ?(verify_writes = true) ~root () : (module Backend.S) =
-  let walk_slots = Lwt_bounded.create ~max:walk_fanout () in
+  let walk_slots = Io_lwt.Bounded.create ~max:walk_fanout () in
   let resolve key = if key = "" then root else Filename.concat root key in
   (* Keys with a trailing slash are directory markers: S3 stores them as
      zero-byte objects, here they map to actual directories. *)
@@ -163,7 +163,7 @@ let make ?(verify_writes = true) ~root () : (module Backend.S) =
                   let* cleared =
                     Lwt.catch
                       (fun () ->
-                        let+ () = Lwt_unix_retry.unlink (at marker) in
+                        let+ () = Io_lwt.Retry.unlink (at marker) in
                         true)
                       (fun _ -> Lwt.return_false)
                   in
@@ -221,7 +221,7 @@ let make ?(verify_writes = true) ~root () : (module Backend.S) =
       let path = resolve (Stored_key.to_string key) in
       Lwt.catch
         (fun () ->
-          let+ st = Lwt_unix_retry.stat path in
+          let+ st = Io_lwt.Retry.stat path in
           match st with
             | { Unix.st_kind = Unix.S_DIR; st_mtime; _ } ->
                 Some
@@ -278,7 +278,7 @@ let make ?(verify_writes = true) ~root () : (module Backend.S) =
         in
         let rec attempt ~parent_made =
           Lwt.catch
-            (fun () -> Lwt_unix_retry.link src dst)
+            (fun () -> Io_lwt.Retry.link src dst)
             (function
               | Unix.Unix_error (Unix.EEXIST, _, _) -> Lwt.return_unit
               (* Either the source is gone or the destination has nowhere to be.
@@ -309,7 +309,7 @@ let make ?(verify_writes = true) ~root () : (module Backend.S) =
           | Unix.Unix_error (Unix.ENOTDIR, _, _) ->
               Lwt.catch
                 (fun () ->
-                  let+ st = Lwt_unix_retry.stat base in
+                  let+ st = Io_lwt.Retry.stat base in
                   emit
                     Backend.
                       {
@@ -329,8 +329,8 @@ let make ?(verify_writes = true) ~root () : (module Backend.S) =
             (* The slot covers the stat alone, and the workers above hold none,
                so nothing waits for this budget while holding it. *)
             let+ st =
-              Lwt_bounded.use walk_slots (fun () ->
-                  Lwt_unix_retry.stat full_path)
+              Io_lwt.Bounded.use walk_slots (fun () ->
+                  Io_lwt.Retry.stat full_path)
             in
             match st.Unix.st_kind with
               | Unix.S_REG ->
@@ -373,7 +373,7 @@ let make ?(verify_writes = true) ~root () : (module Backend.S) =
               Lwt.return_unit)
             else (
               let rest = ref names in
-              Lwt_bounded.each ~width:entry_workers (fun () ->
+              Io_lwt.Bounded.each ~width:entry_workers (fun () ->
                   match !rest with
                     | [] -> None
                     | name :: tl ->
@@ -388,7 +388,7 @@ let make ?(verify_writes = true) ~root () : (module Backend.S) =
               found := [];
               let rest = ref dirs in
               let* () =
-                Lwt_bounded.each ~width:dir_workers (fun () ->
+                Io_lwt.Bounded.each ~width:dir_workers (fun () ->
                     match !rest with
                       | [] -> None
                       | dir :: tl ->

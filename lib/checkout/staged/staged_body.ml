@@ -29,7 +29,7 @@ module Make (C : Conf.S) (Cache : Cache) = struct
   let len_of ~uuid =
     Lwt.catch
       (fun () ->
-        let+ st = Lwt_unix_retry.LargeFile.stat (path uuid) in
+        let+ st = Io_lwt.Retry.LargeFile.stat (path uuid) in
         Some (Int64.to_int st.Unix.LargeFile.st_size))
       (fun _ -> Lwt.return_none)
 
@@ -41,17 +41,17 @@ module Make (C : Conf.S) (Cache : Cache) = struct
       | Some n when n >= len -> Lwt.return_unit
       | _ ->
           let* fd =
-            Lwt_unix_retry.openfile p [Unix.O_WRONLY; Unix.O_CREAT] 0o644
+            Io_lwt.Retry.openfile p [Unix.O_WRONLY; Unix.O_CREAT] 0o644
           in
           Lwt.finalize
-            (fun () -> Lwt_unix_retry.LargeFile.ftruncate fd (Int64.of_int len))
-            (fun () -> Lwt_unix_retry.close fd)
+            (fun () -> Io_lwt.Retry.LargeFile.ftruncate fd (Int64.of_int len))
+            (fun () -> Io_lwt.Retry.close fd)
 
   let resize ~uuid ~len =
-    let* fd = Lwt_unix_retry.openfile (path uuid) [Unix.O_WRONLY] 0o644 in
+    let* fd = Io_lwt.Retry.openfile (path uuid) [Unix.O_WRONLY] 0o644 in
     Lwt.finalize
-      (fun () -> Lwt_unix_retry.LargeFile.ftruncate fd (Int64.of_int len))
-      (fun () -> Lwt_unix_retry.close fd)
+      (fun () -> Io_lwt.Retry.LargeFile.ftruncate fd (Int64.of_int len))
+      (fun () -> Io_lwt.Retry.close fd)
 
   let write ~uuid buf ~offset =
     Local_io.write (path uuid) buf ~offset:(Int64.of_int offset)
@@ -113,7 +113,7 @@ module Make (C : Conf.S) (Cache : Cache) = struct
     let dst = whole_path uuid in
     let* () = Fs_util.ensure_parent dst in
     Lwt.catch
-      (fun () -> Lwt_unix_retry.rename src dst)
+      (fun () -> Io_lwt.Retry.rename src dst)
       (function
         | Unix.Unix_error (Unix.EXDEV, _, _) ->
             let* () = Fs_util.copy_file ~src ~dst in

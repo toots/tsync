@@ -1,0 +1,9 @@
+; Lwt, bound to the signatures in tsync_io. Apart from them so that what depends
+; on a signature does not link a scheduler.
+
+(library
+ (name tsync_io_lwt)
+ (public_name tsync-libs.io_lwt)
+ (flags
+  (:standard -open Tsync_io))
+ (libraries tsync_io unix lwt lwt.unix))

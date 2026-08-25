@@ -23,7 +23,9 @@ module Make (C : Conf.S) = struct
   (* Walks the inode tree through the module that owns the walk, so a resync and
      [tsync mirror] classify a child the same way. *)
   let rebuild_mirror ~parallelism ~progress ~on_manifest () =
-    let slots = Lwt_bounded.create ~name:"resync" ~max:(max 1 parallelism) () in
+    let slots =
+      Io_lwt.Bounded.create ~name:"resync" ~max:(max 1 parallelism) ()
+    in
     let count = ref 0 and failed = ref 0 in
     (* Counted, so a store whose manifests all fail to parse cannot resync
        "successfully" writing nothing. *)

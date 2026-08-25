@@ -58,7 +58,7 @@ let set_max_known n = max_known := n
    shares beside an engine held two of each and admitted twice what either said.
 
    Same reasoning as {!Corruption}'s memo, which is keyed the same way. *)
-type pools = { chunk_slots : Lwt_bounded.t; downloads : Lwt_bounded.t }
+type pools = { chunk_slots : Io_lwt.Bounded.t; downloads : Io_lwt.Bounded.t }
 
 let pools : (string, pools) Hashtbl.t = Hashtbl.create 4
 
@@ -75,11 +75,11 @@ let pools_for ~prefix ~max_chunk_buffers ~max_downloads =
            reports pools in creation order, and a literal's field order is not
            its evaluation order. *)
         let chunk_slots =
-          Lwt_bounded.create ~name:"chunk buffers"
+          Io_lwt.Bounded.create ~name:"chunk buffers"
             ~max:(max 1 max_chunk_buffers) ()
         in
         let downloads =
-          Lwt_bounded.create ~name:"downloads" ~max:max_downloads ()
+          Io_lwt.Bounded.create ~name:"downloads" ~max:max_downloads ()
         in
         let p = { chunk_slots; downloads } in
         Hashtbl.replace pools prefix p;
@@ -141,7 +141,7 @@ module Make_with_layout (C : Conf.S) (L : Layout.S) : S = struct
      for one. *)
   let each_chunk ~count f =
     let next = ref 0 in
-    Lwt_bounded.each ~width:(Lwt_bounded.width chunk_slots) (fun () ->
+    Io_lwt.Bounded.each ~width:(Io_lwt.Bounded.width chunk_slots) (fun () ->
         if !next >= count then None
         else (
           let index = !next in
@@ -238,11 +238,11 @@ module Make_with_layout (C : Conf.S) (L : Layout.S) : S = struct
      for whether the file moved while this ran. *)
   let upload ~key ~src_path ~mtime ~chunk_size ?(cancel = ref false)
       ?(on_progress = fun ~bytes:_ ~sent:_ -> ()) () =
-    let* fd = Lwt_unix_retry.openfile src_path [Unix.O_RDONLY] 0 in
+    let* fd = Io_lwt.Retry.openfile src_path [Unix.O_RDONLY] 0 in
     let* table, file_size =
       Lwt.finalize
         (fun () ->
-          let* before = Lwt_unix_retry.LargeFile.fstat fd in
+          let* before = Io_lwt.Retry.LargeFile.fstat fd in
           (* Frozen here, so a source truncated mid-upload is a manifest never
              published rather than a SIGBUS on a page past its new end. *)
           let snapshot = Bigstring.open_snapshot src_path in
@@ -271,7 +271,7 @@ module Make_with_layout (C : Conf.S) (L : Layout.S) : S = struct
               in
               (* The snapshot makes the chunks agree with each other; this is
                  what says they still describe the file the user has. *)
-              let+ after = Lwt_unix_retry.LargeFile.fstat fd in
+              let+ after = Io_lwt.Retry.LargeFile.fstat fd in
               if
                 after.Unix.LargeFile.st_size <> before.Unix.LargeFile.st_size
                 || after.Unix.LargeFile.st_mtime
@@ -281,7 +281,7 @@ module Make_with_layout (C : Conf.S) (L : Layout.S) : S = struct
             (fun () ->
               Unix.close snapshot;
               Lwt.return_unit))
-        (fun () -> Lwt_unix_retry.close fd)
+        (fun () -> Io_lwt.Retry.close fd)
     in
     publish ~key ~size:(Int64.of_int file_size) ~chunk_size ~mtime ~cancel table
 

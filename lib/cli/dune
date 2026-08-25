@@ -72,7 +72,7 @@
    -open
    Tsync_runtime
    -open
-   Tsync_lwt_unix))
+   Tsync_io_lwt))
  (name tsync_cli)
  (libraries
   tsync_logical_key
@@ -82,7 +82,7 @@
   tsync_staged
   tsync_checkout
   tsync_journal
-  tsync-libs.lwt_unix
+  tsync-libs.io_lwt
   tsync-libs.field_spec
   tsync-libs.sync
   tsync-libs.ops

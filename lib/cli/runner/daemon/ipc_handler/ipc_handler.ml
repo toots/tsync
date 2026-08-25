@@ -264,7 +264,7 @@ module Make (C : Conf.S) (F : File_ops.S) : S = struct
                       | None -> not_found (Logical_key.to_string key))))
 
   (* Bounds concurrent per-file manifest resolutions during enumeration. *)
-  let resolve_pool = Lwt_bounded.create ~max:C.max_downloads ()
+  let resolve_pool = Io_lwt.Bounded.create ~max:C.max_downloads ()
 
   (* Listed objects are manifests, so their backend size/mtime describe the
      manifest, not the file. Resolving gives the logical size/mtime and h1 as the
@@ -275,7 +275,7 @@ module Make (C : Conf.S) (F : File_ops.S) : S = struct
     (* The slot is taken for the resolution, not for deciding there is none to
        do: the list is as long as the folder, and only the GETs need
        bounding. *)
-    Lwt_bounded.use resolve_pool @@ fun () ->
+    Io_lwt.Bounded.use resolve_pool @@ fun () ->
     let* naming = naming_fields ~container_id key in
     let+ m = F.published key in
     match m with

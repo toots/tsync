@@ -21,7 +21,7 @@ module Make (C : Conf.S) (F : File_ops.S) = struct
   (* Bounded rather than [iter_p]: recovery can face a journal of any size, and
      a promise per entry up front is both memory and a request storm. Module
      scope, so two overlapping recoveries share the one bound. *)
-  let journal_reads = Lwt_bounded.create ~max:32 ()
+  let journal_reads = Io_lwt.Bounded.create ~max:32 ()
 
   (* Keys another client has touched since [entry_key]: our ops for those lose,
      because the other client's change is newer than the one we never finished
@@ -31,7 +31,7 @@ module Make (C : Conf.S) (F : File_ops.S) = struct
     let* newer = Fs.list_journal_keys ~start_after:entry_key () in
     let touched = Hashtbl.create 16 in
     let+ () =
-      Lwt_bounded.iter_with journal_reads
+      Io_lwt.Bounded.iter_with journal_reads
         (fun ek ->
           if Ek.client_uuid ek = my_uuid then Lwt.return_unit
           else

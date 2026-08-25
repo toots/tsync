@@ -48,7 +48,7 @@ module Make (C : Conf.S) (L : Layout.S) : sig
       one act. Sizes come from the listing that produced [entries], which is
       what lets a request be packed to a byte budget. *)
   val get_objects :
-    ?slots:Lwt_bounded.t ->
+    ?slots:Io_lwt.Bounded.t ->
     entries:Backend.file_entry list ->
     unit ->
     (Stored_key.t * string option) list Lwt.t

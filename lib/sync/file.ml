@@ -609,7 +609,7 @@ module Make_with_layout (C : Conf.S) (Sq : Sync_queue.S) (L : Layout.S) :
       | `Rename { Journal.src; dst; is_dir = true; _ } ->
           let src_key = Lk.dir src in
           let dst_key = Lk.dir dst in
-          let* exists = Lwt_unix_retry.file_exists (manifest_path src_key) in
+          let* exists = Io_lwt.Retry.file_exists (manifest_path src_key) in
           if exists then
             unless_staged src_key (fun () ->
                 let* () = adopt_ancestor_ids dst in
@@ -619,7 +619,7 @@ module Make_with_layout (C : Conf.S) (Sq : Sync_queue.S) (L : Layout.S) :
       | `Rename { Journal.src; dst; is_dir = false; _ } ->
           let src_key = Lk.file src in
           let dst_key = Lk.file dst in
-          let* exists = Lwt_unix_retry.file_exists (manifest_path src_key) in
+          let* exists = Io_lwt.Retry.file_exists (manifest_path src_key) in
           if exists then
             unless_staged src_key (fun () ->
                 let* () = adopt_ancestor_ids dst in

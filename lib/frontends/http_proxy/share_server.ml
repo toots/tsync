@@ -62,7 +62,8 @@ let read_slots_max = 16
    ponytail: the queue is then bounded only by how many responses are open at
    once, which nothing caps — bound admission in [callback] if a proxy is ever
    exposed to a load that reaches it. *)
-let read_slots = Lwt_bounded.create ~name:"share reads" ~max:read_slots_max ()
+let read_slots =
+  Io_lwt.Bounded.create ~name:"share reads" ~max:read_slots_max ()
 
 (* Embedded from the files the share Lambda loads at runtime, so the table and
    the browser UI have one definition across both deployments. *)
@@ -244,7 +245,7 @@ module Make (C : Conf.S) = struct
         if Int64.compare !left 0L <= 0 then Lwt.return_none
         else
           (* Slot before the buffer, not after. *)
-          Lwt_bounded.use read_slots @@ fun () ->
+          Io_lwt.Bounded.use read_slots @@ fun () ->
           let n = Int64.to_int (min (Int64.of_int block_size) !left) in
           let buf = Bigarray.Array1.create Bigarray.char Bigarray.c_layout n in
           let* got = D.pread ~id ~manifest buf ~offset:!pos in
@@ -283,7 +284,7 @@ module Make (C : Conf.S) = struct
         match !cur with
           | Some m when Int64.compare m.s_pos m.s_size < 0 ->
               (* Slot before the buffer, not after. *)
-              Lwt_bounded.use read_slots @@ fun () ->
+              Io_lwt.Bounded.use read_slots @@ fun () ->
               let n =
                 Int64.to_int
                   (min (Int64.of_int block_size) (Int64.sub m.s_size m.s_pos))

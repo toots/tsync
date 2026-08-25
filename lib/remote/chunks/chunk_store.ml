@@ -7,8 +7,8 @@ module type DEPS = sig
   val fetch_body : string -> Bigstring.t Lwt.t
   val corrupt : string -> bool Lwt.t
   val cleared : string -> unit
-  val slots : Lwt_bounded.t
-  val downloads : Lwt_bounded.t
+  val slots : Io_lwt.Bounded.t
+  val downloads : Io_lwt.Bounded.t
   val max_known : unit -> int
 end
 
@@ -42,12 +42,12 @@ module Make (D : DEPS) = struct
 
   let store = function
     | Stored key -> Lwt.return (key, false)
-    | Mapped bytes -> Lwt_bounded.use D.slots (fun () -> put (bytes ()))
+    | Mapped bytes -> Io_lwt.Bounded.use D.slots (fun () -> put (bytes ()))
     | Filled { len; fill } ->
-        Lwt_bounded.use D.slots (fun () ->
+        Io_lwt.Bounded.use D.slots (fun () ->
             let buf = Bigstring.create len in
             let* () = fill buf in
             put buf)
 
-  let fetch key = Lwt_bounded.use D.downloads (fun () -> D.fetch_body key)
+  let fetch key = Io_lwt.Bounded.use D.downloads (fun () -> D.fetch_body key)
 end

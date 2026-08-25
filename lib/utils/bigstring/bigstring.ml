@@ -51,10 +51,8 @@ let map_file ~path ~offset ~len =
    bytes creates nothing. *)
 let write_to ~path t ~offset =
   if length t = 0 then
-    let* fd =
-      Lwt_unix_retry.openfile path [Unix.O_WRONLY; Unix.O_CREAT] 0o644
-    in
-    Lwt_unix_retry.close fd
+    let* fd = Io_lwt.Retry.openfile path [Unix.O_WRONLY; Unix.O_CREAT] 0o644 in
+    Io_lwt.Retry.close fd
   else
     let+ (_ : int) = Local_io.write path t ~offset:(Int64.of_int offset) in
     ()

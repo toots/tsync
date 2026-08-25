@@ -22,13 +22,13 @@ module Make (C : Conf.S) = struct
 
   (* Bodies in memory: a copy holds a whole object, so this follows
      [max_chunk_buffers] rather than the file-level [max_uploads]. *)
-  let copy_pool = Lwt_bounded.create ~name:"copy" ~max:C.max_chunk_buffers ()
+  let copy_pool = Io_lwt.Bounded.create ~name:"copy" ~max:C.max_chunk_buffers ()
 
   (* Round trips, which hold no body and so are not the same number: sizing a
      subtree is one HEAD an object and would otherwise queue behind a bound that
      stands for memory it does not use. *)
   let probe_max = max 8 (4 * C.max_chunk_buffers)
-  let probe_pool = Lwt_bounded.create ~name:"probe" ~max:probe_max ()
+  let probe_pool = Io_lwt.Bounded.create ~name:"probe" ~max:probe_max ()
 
   (* Objects a destination has in hand at once. A multiple of the wider bound,
      so both pools stay fed and [waiting] still means something, and a constant
@@ -49,7 +49,7 @@ module Make (C : Conf.S) = struct
             (* Inside the slot, so the announcement tracks the bound: made as
                the entry is taken, it would name whatever the workers had
                reached ahead of the round trips. *)
-            Lwt_bounded.use probe_pool (fun () ->
+            Io_lwt.Bounded.use probe_pool (fun () ->
                 on_start ();
                 let+ h = Dst.head_opt ~key:entry.key () in
                 Option.map (fun (h : Backend.file_entry) -> h.Backend.size) h)
@@ -67,7 +67,7 @@ module Make (C : Conf.S) = struct
       | Some reason ->
           (* Taken here rather than around the whole entry, so the body budget is
              held only while a body exists. *)
-          Lwt_bounded.use copy_pool (fun () ->
+          Io_lwt.Bounded.use copy_pool (fun () ->
               if Stored_key.is_dir_key entry.key then
                 let+ () = Dst.put ~key:entry.key ~data:Bigstring.empty () in
                 Some (reason, 0)
@@ -125,12 +125,12 @@ module Make (C : Conf.S) = struct
      of them arrives, which is the whole prefix again by another route. *)
   let list_chunks_into ~listing ~bytes ~on_list (module Src : Backend.S) =
     on_list ~name:"listing chunks";
-    let width = Lwt_bounded.width probe_pool in
+    let width = Io_lwt.Bounded.width probe_pool in
     let rec batch first =
       if first >= Chunk_layout.shards then Lwt.return_unit
       else
         let* per_shard =
-          Lwt_bounded.map_with probe_pool
+          Io_lwt.Bounded.map_with probe_pool
             (fun shard -> Src.list_prefix ~prefix:(L.shard_prefix shard) ())
             (List.init
                (min width (Chunk_layout.shards - first))
@@ -253,7 +253,7 @@ module Make (C : Conf.S) = struct
            (if List.length keys = 1 then "" else "s")
            src_name);
     let* entries =
-      Lwt_bounded.map_with probe_pool
+      Io_lwt.Bounded.map_with probe_pool
         (fun key ->
           let+ head = Src.head_opt ~key () in
           match head with
@@ -303,7 +303,7 @@ module Make (C : Conf.S) = struct
        the workers pull from is pages rather than a list of the keyspace. *)
     let* cursor = Listing.read listing in
     let+ () =
-      Lwt_bounded.each
+      Io_lwt.Bounded.each
         ~width:(min entries_in_flight (Listing.count listing))
         (fun () ->
           match Listing.next cursor with

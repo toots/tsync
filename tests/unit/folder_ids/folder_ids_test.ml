@@ -103,7 +103,7 @@ let main () =
   let* stale = ensure "temporary" in
   let* () = Fs_util.rm_rf (mirror "temporary") in
   let* () = rebuild () in
-  let* exists = Lwt_unix_retry.file_exists (index_file stale) in
+  let* exists = Io_lwt.Retry.file_exists (index_file stale) in
   check "rebuild prunes entries for departed folders" (not exists);
 
   (* Escaped names survive the round trip: the on-disk directory name is a hash

@@ -1,0 +1,8 @@
+; Waiting, and what has to be true of whatever does it. Each module here is a
+; functor over that alone, so the one below that binds it to a scheduler is the
+; only place a scheduler is named.
+
+(library
+ (name tsync_io)
+ (public_name tsync-libs.io)
+ (libraries unix))

@@ -13,7 +13,7 @@ let read ~cache_root ~domain_name key =
   Lwt.catch
     (fun () ->
       let+ s =
-        Lwt_unix_retry.with_file ~mode:Lwt_io.Input
+        Io_lwt.with_file ~mode:Lwt_io.Input
           (marker_path ~cache_root ~domain_name key)
           Lwt_io.read
       in
@@ -43,7 +43,7 @@ let read_entry ~cache_root ~domain_name id =
   Lwt.catch
     (fun () ->
       let+ s =
-        Lwt_unix_retry.with_file ~mode:Lwt_io.Input
+        Io_lwt.with_file ~mode:Lwt_io.Input
           (index_path ~cache_root ~domain_name id)
           Lwt_io.read
       in
@@ -141,7 +141,7 @@ let rebuild ~cache_root ~domain_name =
               Lwt.catch
                 (fun () ->
                   let+ s =
-                    Lwt_unix_retry.with_file ~mode:Lwt_io.Input
+                    Io_lwt.with_file ~mode:Lwt_io.Input
                       (Filename.concat path marker_name)
                       Lwt_io.read
                   in

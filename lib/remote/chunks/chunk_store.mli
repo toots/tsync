@@ -48,9 +48,9 @@ module type DEPS = sig
 
   (** Bytes in flight, and reads in flight. Held here rather than per caller so
       one device and one memory budget bound every route in. *)
-  val slots : Lwt_bounded.t
+  val slots : Io_lwt.Bounded.t
 
-  val downloads : Lwt_bounded.t
+  val downloads : Io_lwt.Bounded.t
   val max_known : unit -> int
 end
 

@@ -21,7 +21,7 @@ module Make (C : Conf.S) (F : Fetch) = struct
     Cache_layout.chunk_path ~cache_root:C.cache_root ~domain_name:C.domain_name
       (Manifest.Group.key group)
 
-  let exists group = Lwt_unix_retry.file_exists (path group)
+  let exists group = Io_lwt.Retry.file_exists (path group)
 
   (* Keyed by content, so two readers of one group share a fetch whether or not
      they are reading the same file.
@@ -66,10 +66,10 @@ module Make (C : Conf.S) (F : Fetch) = struct
      a 256 descriptor limit.
 
      Bounded here rather than at the callers so every route in gets it. *)
-  let slots = Lwt_bounded.create ~max:C.max_downloads ()
+  let slots = Io_lwt.Bounded.create ~max:C.max_downloads ()
 
   let fetch group =
-    Lwt_bounded.use slots (fun () ->
+    Io_lwt.Bounded.use slots (fun () ->
         write_group group (fun i ->
             F.get_chunk ~chunk_key:(Manifest.Group.member_key group i)))
 
@@ -133,30 +133,30 @@ module Make (C : Conf.S) (F : Fetch) = struct
      Held around a stat only, the directory holding it being {!dir_slots}'s to
      bound: one pool across both levels deadlocks, every slot held by a
      directory whose entries are waiting for one. *)
-  let metadata_slots = Lwt_bounded.create ~max:64 ()
+  let metadata_slots = Io_lwt.Bounded.create ~max:64 ()
 
   (* The shard directories, which is a caller-sized fan-out of its own: the
      cache is split {!Chunk_layout.shards} ways, and [readdir_list] holds an
      open directory and its whole name list. Its own pool rather than
      [metadata_slots], which the entries inside each directory take from —
      nesting one pool inside itself deadlocks. *)
-  let dir_slots = Lwt_bounded.create ~max:16 ()
+  let dir_slots = Io_lwt.Bounded.create ~max:16 ()
 
   (* (path, bytes, mtime) per chunk body. Stat'd in parallel: one at a time is a
      round trip each, milliseconds against seconds on a few thousand chunks. *)
   let entries () =
     let* dirs = Fs_util.readdir_list (root ()) in
     let+ per_dir =
-      Lwt_bounded.map_with dir_slots
+      Io_lwt.Bounded.map_with dir_slots
         (fun dir ->
           let dir = Filename.concat (root ()) dir in
           let* names = Fs_util.readdir_list dir in
-          Lwt_bounded.filter_map_with metadata_slots
+          Io_lwt.Bounded.filter_map_with metadata_slots
             (fun name ->
               let path = Filename.concat dir name in
               Lwt.catch
                 (fun () ->
-                  let+ st = Lwt_unix_retry.stat path in
+                  let+ st = Io_lwt.Retry.stat path in
                   Some (path, st.Unix.st_size, st.Unix.st_mtime))
                 (fun _ -> Lwt.return_none))
             names)
@@ -217,7 +217,7 @@ module Make (C : Conf.S) (F : Fetch) = struct
       Lwt.catch
         (fun () ->
           let* () = Fs_util.ensure_parent dst in
-          let* () = Lwt_unix_retry.link src dst in
+          let* () = Io_lwt.Retry.link src dst in
           let now = Unix.gettimeofday () in
           (* Dated now, or the cap reads a freshly published group as being as
              old as the write that staged it. *)

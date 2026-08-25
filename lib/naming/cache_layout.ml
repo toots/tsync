@@ -52,7 +52,7 @@ let chunk_path ~cache_root ~domain_name chunk_key =
    manifest body carries the name. *)
 let record_dir_name path name =
   let open Lwt.Syntax in
-  let* exists = Lwt_unix_retry.file_exists path in
+  let* exists = Io_lwt.Retry.file_exists path in
   if exists then Lwt.return_unit else Fs_util.atomic_write path name
 
 let real_dir_name dir_path name =

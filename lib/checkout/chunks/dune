@@ -17,7 +17,7 @@
    -open
    Tsync_local_io
    -open
-   Tsync_lwt_unix
+   Tsync_io_lwt
    -open
    Tsync_backend_register
    -open
@@ -32,7 +32,7 @@
   tsync_naming
   tsync_chunks
   tsync_local_io
-  tsync_lwt_unix
+  tsync_io_lwt
   tsync_backend_register
   tsync_bigstring
   tsync_log

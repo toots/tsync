@@ -34,7 +34,7 @@ let pools_json () =
              ("waiting", `Int waiting);
              ("max", `Int limit);
            ])
-       (Lwt_bounded.totals ()))
+       (Io_lwt.Bounded.totals ()))
 
 let payload t ~state ~extra =
   let m = Metrics.mem_stats () in

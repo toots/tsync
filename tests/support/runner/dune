@@ -30,7 +30,7 @@
    -open
    Tsync_local_io
    -open
-   Tsync_lwt_unix
+   Tsync_io_lwt
    -open
    Tsync_bigstring
    -open
@@ -59,7 +59,7 @@
   tsync_store
   tsync_sync
   tsync_naming
-  tsync_lwt_unix
+  tsync_io_lwt
   tsync_local_io
   tsync_conf
   tsync_bigstring

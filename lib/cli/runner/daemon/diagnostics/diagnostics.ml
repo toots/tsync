@@ -85,7 +85,7 @@ let self_json ?(extra = []) () =
                  ("waiting", `Int waiting);
                  ("max", `Int limit);
                ])
-           (Lwt_bounded.totals ())) );
+           (Io_lwt.Bounded.totals ())) );
     ( "lwt",
       `Assoc
         [

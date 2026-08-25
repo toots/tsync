@@ -170,7 +170,7 @@ module Make (J : JOB) = struct
        record it holds, which on a large backlog is tens of thousands of opens
        that end in the caller discarding all of them. *)
     let list ?(wanted = fun _ -> true) t =
-      let* exists = Lwt_unix_retry.file_exists t.dir in
+      let* exists = Io_lwt.Retry.file_exists t.dir in
       if not exists then Lwt.return_nil
       else
         let* names = Fs_util.readdir_list t.dir in

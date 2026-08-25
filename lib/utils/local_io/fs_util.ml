@@ -1,12 +1,12 @@
 open Lwt.Syntax
 
 let rec mkdir_p path =
-  let* exists = Lwt_unix_retry.file_exists path in
+  let* exists = Io_lwt.Retry.file_exists path in
   if exists then Lwt.return_unit
   else
     let* () = mkdir_p (Filename.dirname path) in
     Lwt.catch
-      (fun () -> Lwt_unix_retry.mkdir path 0o755)
+      (fun () -> Io_lwt.Retry.mkdir path 0o755)
       (function
         | Unix.Unix_error (Unix.EEXIST, _, _) -> Lwt.return_unit
         | exn -> Lwt.fail exn)
@@ -45,18 +45,16 @@ let with_temp_rename path fill =
   Lwt.catch
     (fun () ->
       let* () = fill tmp in
-      Lwt_unix_retry.rename tmp path)
+      Io_lwt.Retry.rename tmp path)
     (fun exn ->
       let* () =
-        Lwt.catch
-          (fun () -> Lwt_unix_retry.unlink tmp)
-          (fun _ -> Lwt.return_unit)
+        Lwt.catch (fun () -> Io_lwt.Retry.unlink tmp) (fun _ -> Lwt.return_unit)
       in
       Lwt.fail exn)
 
 let write_then_rename path write =
   with_temp_rename path (fun tmp ->
-      Lwt_unix_retry.with_file ~mode:Lwt_io.Output tmp write)
+      Io_lwt.with_file ~mode:Lwt_io.Output tmp write)
 
 let atomic_write path data =
   write_then_rename path (fun oc -> Lwt_io.write oc data)
@@ -67,7 +65,7 @@ let atomic_write path data =
 let atomic_write_at path ~size write =
   with_temp_rename path (fun tmp ->
       let* fd =
-        Lwt_unix_retry.openfile tmp
+        Io_lwt.Retry.openfile tmp
           [Unix.O_WRONLY; Unix.O_CREAT; Unix.O_TRUNC]
           0o644
       in
@@ -75,7 +73,7 @@ let atomic_write_at path ~size write =
         (fun () ->
           (* Allocated before any piece is produced, so a full disk fails before
              the bytes are paid for. *)
-          let* () = Lwt_unix_retry.LargeFile.ftruncate fd (Int64.of_int size) in
+          let* () = Io_lwt.Retry.LargeFile.ftruncate fd (Int64.of_int size) in
           let put ~offset data =
             let total = Bigstringaf.length data in
             let rec go written =
@@ -95,14 +93,14 @@ let atomic_write_at path ~size write =
             go 0
           in
           write put)
-        (fun () -> Lwt_unix_retry.close fd))
+        (fun () -> Io_lwt.Retry.close fd))
 
 let copy_file ~src ~dst =
-  let* src_fd = Lwt_unix_retry.openfile src [Unix.O_RDONLY] 0 in
+  let* src_fd = Io_lwt.Retry.openfile src [Unix.O_RDONLY] 0 in
   Lwt.finalize
     (fun () ->
       let* dst_fd =
-        Lwt_unix_retry.openfile dst
+        Io_lwt.Retry.openfile dst
           [Unix.O_WRONLY; Unix.O_CREAT; Unix.O_TRUNC]
           0o644
       in
@@ -111,7 +109,7 @@ let copy_file ~src ~dst =
           let buffer = Bytes.create (1 lsl 20) in
           let rec copy () =
             let* bytes_read =
-              Lwt_unix_retry.read src_fd buffer 0 (Bytes.length buffer)
+              Io_lwt.Retry.read src_fd buffer 0 (Bytes.length buffer)
             in
             if bytes_read = 0 then Lwt.return_unit
             else (
@@ -119,27 +117,27 @@ let copy_file ~src ~dst =
                 if pos >= bytes_read then copy ()
                 else
                   let* written =
-                    Lwt_unix_retry.write dst_fd buffer pos (bytes_read - pos)
+                    Io_lwt.Retry.write dst_fd buffer pos (bytes_read - pos)
                   in
                   write_all (pos + written)
               in
               write_all 0)
           in
           copy ())
-        (fun () -> Lwt_unix_retry.close dst_fd))
-    (fun () -> Lwt_unix_retry.close src_fd)
+        (fun () -> Io_lwt.Retry.close dst_fd))
+    (fun () -> Io_lwt.Retry.close src_fd)
 
 let read_file_opt path =
   Lwt.catch
     (fun () ->
-      let+ s = Lwt_unix_retry.with_file ~mode:Lwt_io.Input path Lwt_io.read in
+      let+ s = Io_lwt.with_file ~mode:Lwt_io.Input path Lwt_io.read in
       Some s)
     (fun _ -> Lwt.return_none)
 
 let readdir_list path =
   (* files_of_directory returns a stream, so the whole materialisation is wrapped:
      a signal interrupting opendir or readdir retries from the start. *)
-  Lwt_unix_retry.retry_eintr (fun () ->
+  Io_lwt.Retry.retry_eintr (fun () ->
       let+ names = Lwt_stream.to_list (Lwt_unix.files_of_directory path) in
       List.filter (fun name -> name <> "." && name <> "..") names)
 
@@ -154,7 +152,7 @@ let readdir_list_quiet path =
 let is_directory path =
   Lwt.catch
     (fun () ->
-      let+ st = Lwt_unix_retry.stat path in
+      let+ st = Io_lwt.Retry.stat path in
       st.Unix.st_kind = Unix.S_DIR)
     (fun _ -> Lwt.return_false)
 
@@ -163,14 +161,14 @@ let is_directory path =
 let stat_opt path =
   Lwt.catch
     (fun () ->
-      let+ st = Lwt_unix_retry.stat path in
+      let+ st = Io_lwt.Retry.stat path in
       Some st)
     (fun _ -> Lwt.return_none)
 
 let stat_opt_large path =
   Lwt.catch
     (fun () ->
-      let+ st = Lwt_unix_retry.LargeFile.stat path in
+      let+ st = Io_lwt.Retry.LargeFile.stat path in
       Some st)
     (fun _ -> Lwt.return_none)
 
@@ -180,11 +178,11 @@ let stat_opt_large path =
 let lstat_kind path =
   Lwt.catch
     (fun () ->
-      let* st = Lwt_unix_retry.LargeFile.lstat path in
+      let* st = Io_lwt.Retry.LargeFile.lstat path in
       match st.Unix.LargeFile.st_kind with
         | Unix.S_DIR -> Lwt.return `Dir
         | Unix.S_LNK ->
-            let+ target = Lwt_unix_retry.readlink path in
+            let+ target = Io_lwt.Retry.readlink path in
             `Symlink target
         | _ -> Lwt.return (`File st.Unix.LargeFile.st_size))
     (fun _ -> Lwt.return `Missing)
@@ -194,7 +192,7 @@ let lstat_kind path =
 let rec rm_rf path =
   Lwt.catch
     (fun () ->
-      let* st = Lwt_unix_retry.lstat path in
+      let* st = Io_lwt.Retry.lstat path in
       match st.Unix.st_kind with
         | Unix.S_DIR ->
             let* names = readdir_list path in
@@ -202,12 +200,12 @@ let rec rm_rf path =
               Lwt_list.iter_s (fun n -> rm_rf (Filename.concat path n)) names
             in
             Lwt.catch
-              (fun () -> Lwt_unix_retry.rmdir path)
+              (fun () -> Io_lwt.Retry.rmdir path)
               (function
                 | Unix.Unix_error _ -> Lwt.return_unit | e -> Lwt.fail e)
         | _ ->
             Lwt.catch
-              (fun () -> Lwt_unix_retry.unlink path)
+              (fun () -> Io_lwt.Retry.unlink path)
               (function
                 | Unix.Unix_error _ -> Lwt.return_unit | e -> Lwt.fail e))
     (function
@@ -221,7 +219,7 @@ let quiet f =
 
 (* Already gone is the outcome the caller wanted, and every cache and scratch
    path is re-derivable, so no unlink here is worth failing over. *)
-let unlink_quiet path = quiet (fun () -> Lwt_unix_retry.unlink path)
+let unlink_quiet path = quiet (fun () -> Io_lwt.Retry.unlink path)
 
 (* [true] when [dir] holds nothing afterwards. Best-effort: a missing path or
    failed unlink is ignored, and a file appearing mid-walk is seen by the next
@@ -239,20 +237,20 @@ let rec reap_older_than ~cutoff dir =
           if is_dir then
             let* empty = reap_older_than ~cutoff child in
             if empty then
-              let+ () = quiet (fun () -> Lwt_unix_retry.rmdir child) in
+              let+ () = quiet (fun () -> Io_lwt.Retry.rmdir child) in
               kept
             else Lwt.return (kept + 1)
           else
             let* mtime =
               Lwt.catch
                 (fun () ->
-                  let+ st = Lwt_unix_retry.stat child in
+                  let+ st = Io_lwt.Retry.stat child in
                   Some st.Unix.st_mtime)
                 (fun _ -> Lwt.return_none)
             in
             match mtime with
               | Some m when m < cutoff ->
-                  let+ () = quiet (fun () -> Lwt_unix_retry.unlink child) in
+                  let+ () = quiet (fun () -> Io_lwt.Retry.unlink child) in
                   kept
               | _ -> Lwt.return (kept + 1))
         0 names

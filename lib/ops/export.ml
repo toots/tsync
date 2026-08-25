@@ -22,7 +22,7 @@ module Make (C : Conf.S) = struct
     match Option.map (fun m -> (m, Manifest.symlink m)) manifest with
       | Some (_, Some target) ->
           let* () = Fs_util.unlink_quiet dst_path in
-          let+ () = Lwt_unix_retry.symlink target dst_path in
+          let+ () = Io_lwt.Retry.symlink target dst_path in
           Exported_symlink
       | Some (_, None) ->
           let+ () = D.assemble_to key ~dst_path in

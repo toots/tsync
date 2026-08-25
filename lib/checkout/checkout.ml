@@ -179,12 +179,12 @@ module Make (C : Conf.S) = struct
     invalidate src_key;
     invalidate dst_key;
     let src = path src_key in
-    let* exists = Lwt_unix_retry.file_exists src in
+    let* exists = Io_lwt.Retry.file_exists src in
     if not exists then Lwt.return_unit
     else (
       let dst = path dst_key in
       let* () = ensure_parent dst_key in
-      let* () = Lwt_unix_retry.rename src dst in
+      let* () = Io_lwt.Retry.rename src dst in
       let* is_dir = Fs_util.is_directory dst in
       if is_dir then refresh_dir_marker dst_key
       else (

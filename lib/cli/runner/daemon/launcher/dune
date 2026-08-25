@@ -14,7 +14,7 @@
    -open
    Tsync_log
    -open
-   Tsync_lwt_unix
+   Tsync_io_lwt
    -open
    Tsync_ipc
    -open
@@ -33,7 +33,7 @@
   tsync-libs.engine
   tsync-libs.conf
   tsync-libs.log
-  tsync-libs.lwt_unix
+  tsync-libs.io_lwt
   tsync-libs.ipc
   tsync-libs.ipc_handler
   tsync-libs.diagnostics

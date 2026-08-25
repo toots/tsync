@@ -29,15 +29,15 @@ module Make (C : Conf.S) = struct
       rename =
         (fun src dst _flags ->
           Lwt.catch
-            (fun () -> Lwt_unix_retry.rename (local_path src) (local_path dst))
+            (fun () -> Io_lwt.Retry.rename (local_path src) (local_path dst))
             (function
               | Unix.Unix_error (Unix.ENOENT, _, _) -> Lwt.return_unit
               | e -> Lwt.fail e));
       truncate =
         (fun path size _fi ->
           let lp = local_path path in
-          let* fd = Lwt_unix_retry.openfile lp [Unix.O_WRONLY] 0o644 in
-          let* () = Lwt_unix_retry.LargeFile.ftruncate fd size in
-          Lwt_unix_retry.close fd);
+          let* fd = Io_lwt.Retry.openfile lp [Unix.O_WRONLY] 0o644 in
+          let* () = Io_lwt.Retry.LargeFile.ftruncate fd size in
+          Io_lwt.Retry.close fd);
     }
 end

@@ -7,7 +7,7 @@
    as many multiples of the configured figure as it happens to have callers. A
    proxy serving shares beside a domain engine is two.
 
-   {!Lwt_bounded.totals} sums by name, so what says whether the pools were
+   {!Io_lwt.Bounded.totals} sums by name, so what says whether the pools were
    shared or merely counted together is the [max] it reports. *)
 
 open Check
@@ -25,7 +25,7 @@ module C = (val conf : Conf.S)
 
 let max_of name =
   match
-    List.find_opt (fun (n, _, _, _) -> n = name) (Lwt_bounded.totals ())
+    List.find_opt (fun (n, _, _, _) -> n = name) (Io_lwt.Bounded.totals ())
   with
     | Some (_, _, _, m) -> m
     | None -> 0

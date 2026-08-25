@@ -6,10 +6,10 @@ let rw op lp flags buf ~offset =
   let size = Bigarray.Array1.dim buf in
   if size = 0 then Lwt.return 0
   else
-    let* fd = Lwt_unix_retry.openfile lp flags 0o644 in
+    let* fd = Io_lwt.Retry.openfile lp flags 0o644 in
     Lwt.finalize
       (fun () ->
-        let* _ = Lwt_unix_retry.LargeFile.lseek fd offset Unix.SEEK_SET in
+        let* _ = Io_lwt.Retry.LargeFile.lseek fd offset Unix.SEEK_SET in
         let rec loop pos =
           if pos >= size then Lwt.return pos
           else
@@ -17,7 +17,7 @@ let rw op lp flags buf ~offset =
             if n = 0 then Lwt.return pos else loop (pos + n)
         in
         loop 0)
-      (fun () -> Lwt_unix_retry.close fd)
+      (fun () -> Io_lwt.Retry.close fd)
 
 let zero buf ~pos ~len =
   Bigarray.Array1.fill (Bigarray.Array1.sub buf pos len) '\000'

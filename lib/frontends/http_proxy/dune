@@ -30,7 +30,7 @@
    -open
    Tsync_zip
    -open
-   Tsync_lwt_unix
+   Tsync_io_lwt
    -open
    Tsync_http_proxy
    -open
@@ -68,7 +68,7 @@
   tsync-libs.content
   tsync-libs.store
   tsync-libs.naming
-  tsync-libs.lwt_unix
+  tsync-libs.io_lwt
   tsync-libs.frontend_register
   tsync-libs.engine
   tsync-libs.http_proxy

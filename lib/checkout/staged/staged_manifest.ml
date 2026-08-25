@@ -163,7 +163,7 @@ module Make (C : Conf.S) = struct
     Cache_layout.staged_manifest_path ~cache_root:C.cache_root
       ~domain_name:C.domain_name key
 
-  let exists key = Lwt_unix_retry.file_exists (path key)
+  let exists key = Io_lwt.Retry.file_exists (path key)
 
   let read key =
     let p = path key in
@@ -181,7 +181,7 @@ module Make (C : Conf.S) = struct
                   (Printexc.to_string exn);
                 let* () =
                   Lwt.catch
-                    (fun () -> Lwt_unix_retry.rename p (p ^ ".bad"))
+                    (fun () -> Io_lwt.Retry.rename p (p ^ ".bad"))
                     (fun _ -> Lwt.return_unit)
                 in
                 Lwt.return_none)
@@ -213,12 +213,12 @@ module Make (C : Conf.S) = struct
 
   let rename ~src_key ~dst_key =
     let src = path src_key in
-    let* exists = Lwt_unix_retry.file_exists src in
+    let* exists = Io_lwt.Retry.file_exists src in
     if not exists then Lwt.return_unit
     else (
       let dst = path dst_key in
       let* () = Fs_util.ensure_parent dst in
-      let* () = Lwt_unix_retry.rename src dst in
+      let* () = Io_lwt.Retry.rename src dst in
       let* body = Fs_util.read_file_opt dst in
       match body with
         | None -> Lwt.return_unit

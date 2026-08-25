@@ -68,7 +68,7 @@ end
 module M = Mirror.Make (C)
 
 let pool name =
-  List.find_opt (fun (n, _, _, _) -> n = name) (Lwt_bounded.totals ())
+  List.find_opt (fun (n, _, _, _) -> n = name) (Io_lwt.Bounded.totals ())
 
 let () =
   ignore

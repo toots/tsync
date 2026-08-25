@@ -52,7 +52,7 @@ module Make (C : Conf.S) : sig
     ?on_unusable:on_unusable ->
     ?refresh_index:bool ->
     ?on_index:(Stored_key.t -> unit) ->
-    ?slots:Lwt_bounded.t ->
+    ?slots:Io_lwt.Bounded.t ->
     folder_id:string ->
     unit ->
     entry list Lwt.t
@@ -65,7 +65,7 @@ module Make (C : Conf.S) : sig
     ?on_unusable:on_unusable ->
     ?refresh_index:bool ->
     ?on_index:(Stored_key.t -> unit) ->
-    ?slots:Lwt_bounded.t ->
+    ?slots:Io_lwt.Bounded.t ->
     folder_id:string ->
     key:Logical_key.t ->
     ('a -> Logical_key.t -> entry -> 'a Lwt.t) ->

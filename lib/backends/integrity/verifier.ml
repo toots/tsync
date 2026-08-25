@@ -22,14 +22,14 @@ let queue ?(on_progress = fun ~done_:_ ~total:_ -> ()) ~put ~chunk_prefix () =
   let module L = Chunk_layout.Make (struct
     let chunk_prefix = chunk_prefix
   end) in
-  let slots = Lwt_bounded.create ~max:fanout () in
+  let slots = Io_lwt.Bounded.create ~max:fanout () in
   let shards = List.init Chunk_layout.shards Chunk_layout.shard_name in
   let total = List.length shards in
   let done_ = ref 0 in
   let+ () =
     Lwt_list.iter_p
       (fun shard ->
-        Lwt_bounded.use slots (fun () ->
+        Io_lwt.Bounded.use slots (fun () ->
             let+ () = put ~key:(L.verify_job_key shard) ~data:"" () in
             incr done_;
             on_progress ~done_:!done_ ~total))

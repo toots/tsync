@@ -197,11 +197,11 @@ module Make (C : Conf.S) = struct
      surviving space appears when something lands in it. *)
   let open_space root =
     let src = to_dir root and dst = from_dir root in
-    let* exists = Lwt_unix_retry.file_exists dst in
+    let* exists = Io_lwt.Retry.file_exists dst in
     if exists then Lwt.return_unit (* a previous attempt got this far *)
     else
       Lwt.catch
-        (fun () -> Lwt_unix_retry.rename src dst)
+        (fun () -> Io_lwt.Retry.rename src dst)
         (function
           | Unix.Unix_error (Unix.ENOENT, _, _) -> Lwt.return_unit
           | exn -> Lwt.fail exn)
@@ -335,7 +335,7 @@ module Make (C : Conf.S) = struct
     if candidates = [] then Lwt.return ([], 0)
     else
       let+ doomed =
-        Lwt_bounded.filter_map_with slots
+        Io_lwt.Bounded.filter_map_with slots
           (fun (name, size) ->
             let key = Stored_key.in_space ~prefix name in
             let+ surviving = M.head_opt ~key () in
@@ -362,8 +362,8 @@ module Make (C : Conf.S) = struct
        waiting for an inner one — the trap [Local_backend]'s walk bound
        documents, and one this has fallen into more than once by naming pools
        after the phase that happened to use them. *)
-    unit_slots : Lwt_bounded.t;
-    item_slots : Lwt_bounded.t;
+    unit_slots : Io_lwt.Bounded.t;
+    item_slots : Io_lwt.Bounded.t;
     delete_batch : int;
     verify : bool;
     (* Consulted between units so a long batch cannot overshoot a caller's time
@@ -536,8 +536,8 @@ module Make (C : Conf.S) = struct
         targets = deferred_members ();
         verify;
         lock;
-        unit_slots = Lwt_bounded.create ~max:max_slots ();
-        item_slots = Lwt_bounded.create ~max:max_slots ();
+        unit_slots = Io_lwt.Bounded.create ~max:max_slots ();
+        item_slots = Io_lwt.Bounded.create ~max:max_slots ();
         (* Clamped, not trusted: a batch of zero never flushes on count and the
            phase would hold every doomed key until the last shard. *)
         delete_batch =
@@ -736,7 +736,7 @@ module Make (C : Conf.S) = struct
     let* () =
       Lwt_list.iter_p
         (fun ck ->
-          Lwt_bounded.use s.item_slots (fun () ->
+          Io_lwt.Bounded.use s.item_slots (fun () ->
               let* moved = Space.promote ck in
               s.chunks_promoted <- s.chunks_promoted + 1;
               report_mark s;
@@ -772,7 +772,7 @@ module Make (C : Conf.S) = struct
     in
     let* () =
       Lwt_list.iter_p
-        (fun k -> Lwt_bounded.use s.unit_slots (fun () -> mark_root s k))
+        (fun k -> Io_lwt.Bounded.use s.unit_slots (fun () -> mark_root s k))
         keys
     in
     s.done_ <- s.done_ + 1;
@@ -798,12 +798,12 @@ module Make (C : Conf.S) = struct
     let* () =
       Lwt_list.iter_p
         (fun n ->
-          Lwt_bounded.use s.item_slots (fun () ->
+          Io_lwt.Bounded.use s.item_slots (fun () ->
               Fs_util.unlink_quiet (Filename.concat dir n)))
         names
     in
     Lwt.catch
-      (fun () -> Lwt_unix_retry.rmdir dir)
+      (fun () -> Io_lwt.Retry.rmdir dir)
       (function Unix.Unix_error _ -> Lwt.return_unit | e -> Lwt.fail e)
 
   (* Deleted off the copies before the main discards them. Crashing in between
@@ -951,7 +951,7 @@ module Make (C : Conf.S) = struct
            would otherwise contribute nothing to the total. *)
         let* names = Fs_util.readdir_list src in
         let* () = Fs_util.ensure_parent dst in
-        let+ () = Lwt_unix_retry.rename src dst in
+        let+ () = Io_lwt.Retry.rename src dst in
         (* Counted, not filtered: the rename takes the whole directory and
            picking anything else out would cost the per-file work this exists to
            avoid, but what is not a chunk must not be reported as one. *)
@@ -979,7 +979,7 @@ module Make (C : Conf.S) = struct
       (fun n ->
         Lwt.catch
           (fun () ->
-            Lwt_unix_retry.rename
+            Io_lwt.Retry.rename
               (Filename.concat src_dir n)
               (Filename.concat dst_dir n))
           (function
@@ -1035,7 +1035,7 @@ module Make (C : Conf.S) = struct
         let* () = Fs_util.mkdir_p dst_dir in
         Lwt_list.iter_p
           (fun n ->
-            Lwt_bounded.use s.item_slots (fun () ->
+            Io_lwt.Bounded.use s.item_slots (fun () ->
                 move_into ~src_dir ~dst_dir [n]))
           missing
     in

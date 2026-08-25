@@ -26,7 +26,7 @@
    -open
    Tsync_metrics
    -open
-   Tsync_lwt_unix
+   Tsync_io_lwt
    -open
    Tsync_local_io
    -open
@@ -54,7 +54,7 @@
   tsync_metrics
   tsync_diagnostics
   tsync_log
-  tsync_lwt_unix
+  tsync_io_lwt
   yojson
   unix
   lwt

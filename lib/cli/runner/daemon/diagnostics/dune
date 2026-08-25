@@ -34,7 +34,7 @@
    -open
    Tsync_ipc
    -open
-   Tsync_lwt_unix
+   Tsync_io_lwt
    -open
    Tsync_conf
    -open
@@ -55,7 +55,7 @@
   tsync_naming
   tsync_local_io
   tsync_conf
-  tsync_lwt_unix
+  tsync_io_lwt
   tsync_bigstring
   tsync_backend_register
   tsync_ipc

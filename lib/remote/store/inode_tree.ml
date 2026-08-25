@@ -23,7 +23,7 @@ module Make (C : Conf.S) = struct
      bound each other rather than each holding a budget of its own. *)
   let default_slots =
     lazy
-      (Lwt_bounded.shared ~key:C.domain_prefix ~name:"tree reads"
+      (Io_lwt.Bounded.shared ~key:C.domain_prefix ~name:"tree reads"
          ~max:C.max_downloads ())
 
   (* An index pairs a body with the version the listing gave it, so both have to
@@ -170,7 +170,7 @@ module Make (C : Conf.S) = struct
        every sibling it was asked for alongside. Only a caller that wanted the
        rest pays this second pass. *)
     let key_by_key () =
-      Lwt_bounded.map_with slots
+      Io_lwt.Bounded.map_with slots
         (fun (e : Backend.file_entry) ->
           let bkey = e.Backend.key in
           Lwt.catch

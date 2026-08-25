@@ -204,7 +204,7 @@ end
     pass it rather than leave this to a default that cannot see the process. *)
 module Batched (B : S) : sig
   val get_many :
-    ?slots:Lwt_bounded.t ->
+    ?slots:Io_lwt.Bounded.t ->
     entries:file_entry list ->
     unit ->
     (Stored_key.t * Bigstring.t option) list Lwt.t

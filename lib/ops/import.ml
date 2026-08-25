@@ -186,7 +186,7 @@ module Make (C : Conf.S) = struct
     if skip then Lwt.return Skipped_exists
     else (
       let src_path = Filename.concat src_root rel in
-      let* st = Lwt_unix_retry.stat src_path in
+      let* st = Io_lwt.Retry.stat src_path in
       let* chunk_size = R.chunk_size () in
       let* state =
         R.upload ~key ~src_path ~mtime:st.Unix.st_mtime ~chunk_size
@@ -204,7 +204,7 @@ module Make (C : Conf.S) = struct
     if skip then Lwt.return Skipped_exists
     else (
       let src_path = Filename.concat src_root rel in
-      let* st = Lwt_unix_retry.lstat src_path in
+      let* st = Io_lwt.Retry.lstat src_path in
       let name = Filename.basename rel in
       let state = Manifest.make_symlink ~name ~target ~mtime:st.Unix.st_mtime in
       let* () = St.put_manifest ~key ~data:(Manifest.body ~name state) in

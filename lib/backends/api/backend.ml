@@ -142,7 +142,7 @@ let batches entries =
 
 (* Object reads a batch stands in for, for a caller with no budget of its own.
    Module-level, since a pool built per call is not a bound. *)
-let batch_slots = lazy (Lwt_bounded.create ~name:"batch reads" ~max:32 ())
+let batch_slots = lazy (Io_lwt.Bounded.create ~name:"batch reads" ~max:32 ())
 
 module Batched (B : S) = struct
   open Lwt.Syntax
@@ -153,9 +153,9 @@ module Batched (B : S) = struct
     in
     let ask run =
       match B.get_many with
-        | Some f -> Lwt_bounded.use slots (fun () -> f ~entries:run ())
+        | Some f -> Io_lwt.Bounded.use slots (fun () -> f ~entries:run ())
         | None ->
-            Lwt_bounded.map_with slots
+            Io_lwt.Bounded.map_with slots
               (fun (e : file_entry) ->
                 let+ body = B.get_opt ~key:e.key () in
                 (e.key, body))

@@ -243,7 +243,7 @@ let () =
      let held, release = Lwt.wait () in
      let occupied =
        List.init Share_server.read_slots_max (fun _ ->
-           Lwt_bounded.use Share_server.read_slots (fun () -> held))
+           Io_lwt.Bounded.use Share_server.read_slots (fun () -> held))
      in
      let* _, body =
        Sh.handle ~token:"aa" ~sub:"" ~query:(fun _ -> None) ~range:None
@@ -259,7 +259,7 @@ let () =
      (* Queued on the bound, not merely unfinished: without the slot the read
         would run straight through and nothing would be waiting here. *)
      Printf.printf "queued on the read bound: %b\n"
-       (Lwt_bounded.waiting Share_server.read_slots > 0);
+       (Io_lwt.Bounded.waiting Share_server.read_slots > 0);
      Lwt.wakeup_later release ();
      let* s = download in
      let* () = Lwt.join occupied in

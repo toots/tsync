@@ -29,7 +29,7 @@
    -open
    Tsync_local_io
    -open
-   Tsync_lwt_unix
+   Tsync_io_lwt
    -open
    Tsync_xxhash))
  (name tsync_naming)
@@ -44,7 +44,7 @@
   tsync_bigstring
   tsync_log
   tsync_local_io
-  tsync_lwt_unix
+  tsync_io_lwt
   tsync_xxhash
   yojson
   unix

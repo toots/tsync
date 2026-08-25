@@ -9,7 +9,7 @@
    -open
    Tsync_local_io
    -open
-   Tsync_lwt_unix
+   Tsync_io_lwt
    -open
    Tsync_bigstring))
  (name tsync_spill)
@@ -20,5 +20,5 @@
   lwt
   lwt.unix
   tsync_local_io
-  tsync_lwt_unix
+  tsync_io_lwt
   tsync-libs.bigstring))

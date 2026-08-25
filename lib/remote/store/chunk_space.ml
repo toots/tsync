@@ -198,7 +198,7 @@ module Make (C : Conf.S) = struct
           let rec attempt ~parent_made =
             Lwt.catch
               (fun () ->
-                let+ () = Lwt_unix_retry.rename src dst in
+                let+ () = Io_lwt.Retry.rename src dst in
                 true)
               (function
                 | Unix.Unix_error (Unix.ENOENT, _, _) when not parent_made ->

@@ -32,18 +32,18 @@ let default_max_concurrent = 16
 
    Sized off the limit: enough to absorb a burst, small enough that sustained
    overload is refused rather than accumulated. *)
-let gate : Lwt_bounded.t option ref = ref None
+let gate : Io_lwt.Bounded.t option ref = ref None
 
 let make_gate limit =
-  Lwt_bounded.create ~name:"proxy objects" ~max:limit ~max_waiting:(limit * 16)
-    ()
+  Io_lwt.Bounded.create ~name:"proxy objects" ~max:limit
+    ~max_waiting:(limit * 16) ()
 
 (* Published to clients so they hold their own excess. *)
 let effective_max_concurrent : int option ref = ref None
 
 let bounded op ~busy run =
   match (!gate, op) with
-    | Some g, (`Get | `Put) -> Lwt_bounded.use_or g ~busy run
+    | Some g, (`Get | `Put) -> Io_lwt.Bounded.use_or g ~busy run
     | _ -> run ()
 
 let bump name =
@@ -59,7 +59,7 @@ let written_bytes = Metrics.counter ()
 let counters_json () =
   let held, waiting =
     match !gate with
-      | Some g -> (Lwt_bounded.in_flight g, Lwt_bounded.waiting g)
+      | Some g -> (Io_lwt.Bounded.in_flight g, Io_lwt.Bounded.waiting g)
       | None -> (0, 0)
   in
   `Assoc

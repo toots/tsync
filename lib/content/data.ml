@@ -837,7 +837,7 @@ module Make (C : Conf.S) (R : Remote.S) = struct
     let* fd =
       Lwt.catch
         (fun () ->
-          let+ fd = Lwt_unix_retry.openfile (Sb.path uuid) [Unix.O_RDONLY] 0 in
+          let+ fd = Io_lwt.Retry.openfile (Sb.path uuid) [Unix.O_RDONLY] 0 in
           Some fd)
         (fun _ -> Lwt.return_none)
     in
@@ -862,7 +862,7 @@ module Make (C : Conf.S) (R : Remote.S) = struct
                   else loop (pos + n)
               in
               loop 0)
-            (fun () -> Lwt_unix_retry.close fd)
+            (fun () -> Io_lwt.Retry.close fd)
 
   (* Deciding which source a chunk has must stay I/O-free: the reads happen
      inside the fillers, once {!Remote.upload_chunks} has a buffer to hand
@@ -1059,7 +1059,7 @@ module Make (C : Conf.S) (R : Remote.S) = struct
     let* () =
       match st with Some st -> discard_bodies st | None -> Lwt.return_unit
     in
-    let* stat = Lwt_unix_retry.LargeFile.stat src_path in
+    let* stat = Io_lwt.Retry.LargeFile.stat src_path in
     let* chunk_size = R.chunk_size () in
     let uuid = Staged_manifest.new_uuid () in
     let* () = Sb.adopt_whole ~src:src_path ~uuid in
@@ -1164,7 +1164,7 @@ module Make (C : Conf.S) (R : Remote.S) = struct
      archive is sixteen thousand of them and each does a stat and a table insert
      before it ever queues for a download slot. Its own pool, the one inside
      [ensure_fetched] being what the work then waits on. *)
-  let group_slots = Lwt_bounded.create ~max:(4 * max 1 C.max_downloads) ()
+  let group_slots = Io_lwt.Bounded.create ~max:(4 * max 1 C.max_downloads) ()
 
   (* ponytail: credit is per group — 16 MB at the defaults, so a file smaller
      than one group only moves when it finishes; doing it per stored chunk needs
@@ -1175,7 +1175,7 @@ module Make (C : Conf.S) (R : Remote.S) = struct
     (* What is owed the network, not the size of the file: a partly cached file
        finishes sooner, and an ETA is against what is left to come down. *)
     let owed = groups_bytes groups in
-    Lwt_bounded.iter_with group_slots
+    Io_lwt.Bounded.iter_with group_slots
       (fun group ->
         let+ fetched = Cc.ensure_fetched ~group () in
         let bytes = Manifest.Group.bytes group in
@@ -1255,11 +1255,11 @@ module Make (C : Conf.S) (R : Remote.S) = struct
       Bigarray.Array1.create Bigarray.char Bigarray.c_layout cache_chunk_size
     in
     let* fd =
-      Lwt_unix_retry.openfile dst_path
+      Io_lwt.Retry.openfile dst_path
         [Unix.O_WRONLY; Unix.O_CREAT; Unix.O_TRUNC]
         0o644
     in
-    let* () = Lwt_unix_retry.close fd in
+    let* () = Io_lwt.Retry.close fd in
     let rec go offset =
       let* n = pread_key key buf ~offset in
       if n <= 0 then Lwt.return_unit
@@ -1275,10 +1275,10 @@ module Make (C : Conf.S) (R : Remote.S) = struct
     let* resolved = Mf.current key in
     match resolved with
       | Some (`Staged (st, _)) ->
-          Lwt_unix_retry.utimes dst_path st.Staged_manifest.s_mtime
+          Io_lwt.Retry.utimes dst_path st.Staged_manifest.s_mtime
             st.Staged_manifest.s_mtime
       | Some (`Published m) ->
-          Lwt_unix_retry.utimes dst_path (Manifest.mtime m) (Manifest.mtime m)
+          Io_lwt.Retry.utimes dst_path (Manifest.mtime m) (Manifest.mtime m)
       | None -> Lwt.return_unit
 
   (* ponytail: no progress span — a range is bounded by construction and its
@@ -1286,9 +1286,9 @@ module Make (C : Conf.S) (R : Remote.S) = struct
   let fetch_range key ~dst_path ~offset ~length =
     let* () = Fs_util.ensure_parent dst_path in
     let* fd =
-      Lwt_unix_retry.openfile dst_path [Unix.O_WRONLY; Unix.O_CREAT] 0o644
+      Io_lwt.Retry.openfile dst_path [Unix.O_WRONLY; Unix.O_CREAT] 0o644
     in
-    let* () = Lwt_unix_retry.close fd in
+    let* () = Io_lwt.Retry.close fd in
     let buf = Bigarray.Array1.create Bigarray.char Bigarray.c_layout length in
     let offset = Int64.of_int offset in
     let* n = pread_key key buf ~offset in
